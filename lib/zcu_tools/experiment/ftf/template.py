@@ -357,8 +357,7 @@ def _mux_channel_contents(
                 pulse
                 for pulse in event.pulses
                 if not addressed
-                or pfb_channel(soccfg, channel, pulse.frequency_ghz * 1000)
-                in addressed
+                or pfb_channel(soccfg, channel, pulse.frequency_ghz * 1000) in addressed
             )
             row.append(replace(event, pulses=pulses))
         selected.append(tuple(row))

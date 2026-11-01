@@ -2,16 +2,15 @@
 
 import logging
 from pathlib import Path
-
-import yaml
-from zcu_tools.program import build_soccfg
 from shlex import quote
 
+import yaml
 from pydantic import TypeAdapter
 from zcu_tools.experiment.single_fluxonium import single_fluxonium
 from zcu_tools.format_version import YamlMap
 from zcu_tools.gui.app.measure.startup_context import StartupContext
 from zcu_tools.gui.session.aliases import AliasRow
+from zcu_tools.program import build_soccfg
 from zcu_tools.resources.entry import DestinationExistsError, load_entry_template
 
 
@@ -57,7 +56,9 @@ def startup(ctx: StartupContext) -> None:
         _seed_entry(ctx)
 
     ctx.progress("Building offline single-fluxonium resources")
-    soccfg = build_soccfg(yaml.safe_load(Path(__file__).with_name("profile.yaml").read_text()))
+    soccfg = build_soccfg(
+        yaml.safe_load(Path(__file__).with_name("profile.yaml").read_text())
+    )
     environment = single_fluxonium(settings_path, soccfg=soccfg)
     transferred: set[str] = set()
 

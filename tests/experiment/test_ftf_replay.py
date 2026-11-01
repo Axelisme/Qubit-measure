@@ -1,6 +1,5 @@
 """Author-opted persistent round replay through acquisition and detached inputs."""
 
-from tests.program._profiles import profile_soccfg
 from dataclasses import replace
 from pathlib import Path
 
@@ -15,6 +14,7 @@ from zcu_tools.program.v2.simulation import IntegratedRound, SimulationClock
 from zcu_tools.resources.ftf import parse_ftf
 from zcu_tools.resources.simulation_replay import read_replay, replay_paths
 
+from tests.program._profiles import profile_soccfg
 from tests.program._timeline import compile_modules
 from tests.resources._ftf_data import ftf_document
 
@@ -27,7 +27,8 @@ def test_replay_retains_round_raw_after_source_release(tmp_path: Path, mode):
 
     source = FTFSource(
         settings().with_telemetry(enabled=False),
-        DeviceManager(), soccfg=profile_soccfg("ftf"),
+        DeviceManager(),
+        soccfg=profile_soccfg("ftf"),
         acquisition=FTFAcquisitionOptions(private_replay=tmp_path / "archive"),
     )
     acquire = request(mode)
@@ -95,7 +96,8 @@ def test_replay_freezes_drifted_settings_and_identity_without_clock(
     archive = tmp_path / "archive"
     source = FTFSource(
         configuration,
-        DeviceManager(), soccfg=profile_soccfg("ftf"),
+        DeviceManager(),
+        soccfg=profile_soccfg("ftf"),
         acquisition=FTFAcquisitionOptions(
             clock=SimulationClock(monotonic=lambda: now[0]),
             truth_log=tmp_path / "truth.jsonl",
@@ -174,7 +176,8 @@ def test_replay_rejects_archive_from_obsolete_numeric_backend(
 
     archive = tmp_path / "current"
     env = ftf(
-        parse_ftf(ftf_document()), soccfg=profile_soccfg("ftf"),
+        parse_ftf(ftf_document()),
+        soccfg=profile_soccfg("ftf"),
         acquisition=FTFAcquisitionOptions(private_replay=archive),
     )
     try:
@@ -226,7 +229,8 @@ def test_replay_recomputes_statistics_without_numeric_records(tmp_path: Path) ->
 
     source = FTFSource(
         settings(),
-        DeviceManager(), soccfg=profile_soccfg("ftf"),
+        DeviceManager(),
+        soccfg=profile_soccfg("ftf"),
         acquisition=FTFAcquisitionOptions(private_replay=tmp_path / "archive"),
     )
     try:

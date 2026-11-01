@@ -1,6 +1,5 @@
 """Plan-local immutable envelope sharing through the numeric planning seam."""
 
-from tests.program._profiles import profile_soccfg
 from dataclasses import replace
 
 import numpy as np
@@ -10,6 +9,7 @@ from zcu_tools.experiment.ftf import plan_template
 
 from tests.core._simulation import TIME_BASE, ticks
 from tests.experiment._ftf_templates import settings, snapshot, template
+from tests.program._profiles import profile_soccfg
 
 pytestmark = pytest.mark.sim
 
@@ -27,7 +27,13 @@ def test_plan_reuses_specs_without_changing_samples_or_candidate_indices():
         for event in base.events[:-1]
     )
     inputs = replace(base, events=(*controls, base.events[-1]))
-    plan = plan_template(settings(), snapshot(), inputs, soccfg=profile_soccfg("ftf"), time_base=TIME_BASE)
+    plan = plan_template(
+        settings(),
+        snapshot(),
+        inputs,
+        soccfg=profile_soccfg("ftf"),
+        time_base=TIME_BASE,
+    )
     tracks = plan.batch.tracks
     for event, track in zip(controls, tracks, strict=True):
         np.testing.assert_array_equal(track.envelope_index, event.envelope_index)
@@ -62,7 +68,13 @@ def test_plan_reuses_specs_without_changing_samples_or_candidate_indices():
     with pytest.raises(ValueError, match="read-only"):
         tracks[0].envelopes[0].samples[0] = 9
     # Reusing the same input in another plan does not create resident reuse.
-    later = plan_template(settings(), snapshot(), inputs, soccfg=profile_soccfg("ftf"), time_base=TIME_BASE)
+    later = plan_template(
+        settings(),
+        snapshot(),
+        inputs,
+        soccfg=profile_soccfg("ftf"),
+        time_base=TIME_BASE,
+    )
     assert later.batch.tracks[0].envelopes[0] is not tracks[0].envelopes[0]
     np.testing.assert_array_equal(
         later.batch.tracks[0].envelopes[0].samples, tracks[0].envelopes[0].samples

@@ -1,6 +1,5 @@
 """Persisted mux settings drive the real program-to-FTF acquisition path."""
 
-from tests.program._profiles import profile_soccfg
 import numpy as np
 import pytest
 from zcu_tools.cfg_model import MuxReadoutTone
@@ -11,6 +10,7 @@ from zcu_tools.resources.ftf import parse_ftf
 from zcu_tools.resources.ftf.schema import MuxReadoutSource
 
 from tests.experiment._ftf_templates import settings
+from tests.program._profiles import profile_soccfg
 from tests.program._timeline import compile_modules
 from tests.resources._ftf_data import mux_document
 

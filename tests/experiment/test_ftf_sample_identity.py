@@ -1,6 +1,5 @@
 """FTF playback preserves valid one-sample envelopes in template playback."""
 
-from tests.program._profiles import profile_soccfg
 import numpy as np
 import pytest
 from zcu_tools.core.simulation import (
@@ -14,6 +13,7 @@ from zcu_tools.experiment.ftf import plan_template
 from zcu_tools.resources.ftf import parse_ftf
 
 from tests.core._simulation import TIME_BASE, single_point_template, tick_tuple, ticks
+from tests.program._profiles import profile_soccfg
 from tests.resources._ftf_data import ftf_document
 
 pytestmark = pytest.mark.sim
@@ -48,7 +48,8 @@ def test_single_signed_complex_sample_keeps_full_plateau_and_identity():
             PointTimeline(
                 (), (pulse, readout), (window,), ticks(0.010), time_base=TIME_BASE
             )
-        ), soccfg=profile_soccfg("ftf"),
+        ),
+        soccfg=profile_soccfg("ftf"),
         time_base=TIME_BASE,
     )
     track = point.batch.tracks[0]

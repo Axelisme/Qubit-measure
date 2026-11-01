@@ -1,6 +1,5 @@
 """Receiver PSD conversion and public rounded ADC noise, independent of truth."""
 
-from tests.program._profiles import profile_soccfg
 import numpy as np
 import pytest
 from zcu_tools.core.simulation import (
@@ -14,6 +13,7 @@ from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.resources.ftf import parse_ftf
 
 from tests.core._simulation import TIME_BASE, single_point_template, tick_tuple, ticks
+from tests.program._profiles import profile_soccfg
 from tests.program._timeline import compile_modules
 from tests.resources._ftf_data import ftf_document
 
@@ -64,7 +64,8 @@ def test_execution_grid_converts_spectral_density_to_sample_covariance() -> None
     plan = plan_template(
         settings,
         EnvironmentSnapshot("ftf-v2", "test", (("bias", 0.2),)),
-        single_point_template(timeline), soccfg=profile_soccfg("ftf"),
+        single_point_template(timeline),
+        soccfg=profile_soccfg("ftf"),
         time_base=TIME_BASE,
     )
     np.testing.assert_allclose(
@@ -121,7 +122,8 @@ def test_public_integrated_thermal_mixture_matches_conditional_field_mean() -> N
         plan = plan_template(
             settings,
             env.soc.binding.rounds[0].snapshot,
-            request.templates[0], soccfg=profile_soccfg("ftf"),
+            request.templates[0],
+            soccfg=profile_soccfg("ftf"),
             time_base=request.time_base,
         )
         readout_event = plan.readouts[0].batch.events[0][0]

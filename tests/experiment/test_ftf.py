@@ -1,6 +1,5 @@
 """Public FTF composition and acquisition, without GUI truth or lab recipes."""
 
-from tests.program._profiles import profile_soccfg
 import numpy as np
 import pytest
 from zcu_tools.core.simulation import (
@@ -15,6 +14,7 @@ from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.resources.ftf import parse_ftf
 
 from tests.core._simulation import TIME_BASE, single_point_template, tick_tuple, ticks
+from tests.program._profiles import profile_soccfg
 from tests.program._timeline import compile_modules
 from tests.resources._ftf_data import ftf_document
 
@@ -45,7 +45,9 @@ def test_template_composition_units_signed_drive_and_dc_readout() -> None:
     template = single_point_template(
         PointTimeline((), events, (window,), ticks(2.5), time_base=TIME_BASE)
     )
-    plan = plan_template(settings, snapshot, template, soccfg=profile_soccfg("ftf"), time_base=TIME_BASE)
+    plan = plan_template(
+        settings, snapshot, template, soccfg=profile_soccfg("ftf"), time_base=TIME_BASE
+    )
     np.testing.assert_array_equal(plan.batch.end_ns, [2000.0])
     readout_event = plan.readouts[0].batch.events[0][0]
     pulse = readout_event.pulses[0]
@@ -126,7 +128,8 @@ def test_common_carrier_origin_survives_pulse_start_quantization(
             snapshot,
             single_point_template(
                 PointTimeline((), events, (window,), ticks(0.14), time_base=TIME_BASE)
-            ), soccfg=profile_soccfg("ftf"),
+            ),
+            soccfg=profile_soccfg("ftf"),
             time_base=TIME_BASE,
         )
         first, second = plan.batch.tracks

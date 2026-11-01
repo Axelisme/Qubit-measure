@@ -1,6 +1,5 @@
 """Exact preparation streams with source-scoped immutable envelope reuse."""
 
-from tests.program._profiles import profile_soccfg
 from collections import OrderedDict
 from collections.abc import Sequence
 from dataclasses import dataclass, fields, replace
@@ -24,6 +23,7 @@ from tests.experiment._ftf_templates import (
     settings,
     snapshot,
 )
+from tests.program._profiles import profile_soccfg
 
 
 def test_envelope_encoding_is_a_fixed_size_content_fingerprint():
@@ -175,8 +175,15 @@ class RecordingEngine(Engine):
 @pytest.mark.sim
 def test_execute_keeps_signals_and_densities_exact_across_fingerprint_reuse(change):
     engine, reference_engine = RecordingEngine(), RecordingEngine()
-    source = FTFSource(settings(), DeviceManager(), soccfg=profile_soccfg("ftf"), engine=engine)
-    reference = FTFSource(settings(), DeviceManager(), soccfg=profile_soccfg("ftf"), engine=reference_engine)
+    source = FTFSource(
+        settings(), DeviceManager(), soccfg=profile_soccfg("ftf"), engine=engine
+    )
+    reference = FTFSource(
+        settings(),
+        DeviceManager(),
+        soccfg=profile_soccfg("ftf"),
+        engine=reference_engine,
+    )
     reference.envelope_encoder.max_bytes = 0
     reference.preparation_cache.max_bytes = 0
     try:
@@ -305,9 +312,19 @@ def test_changed_envelope_and_borrowed_arrays_change_key_without_stale_reuse():
 @pytest.mark.parametrize("change", ["snapshot", "settings", "engine"])
 @pytest.mark.sim
 def test_generation_still_invalidates_preparation_and_keeps_output_exact(change):
-    source = FTFSource(settings(), DeviceManager(), soccfg=profile_soccfg("ftf"), engine=RecordingEngine())
+    source = FTFSource(
+        settings(),
+        DeviceManager(),
+        soccfg=profile_soccfg("ftf"),
+        engine=RecordingEngine(),
+    )
     reference_engine = RecordingEngine()
-    reference = FTFSource(settings(), DeviceManager(), soccfg=profile_soccfg("ftf"), engine=reference_engine)
+    reference = FTFSource(
+        settings(),
+        DeviceManager(),
+        soccfg=profile_soccfg("ftf"),
+        engine=reference_engine,
+    )
     reference.envelope_encoder.max_bytes = 0
     reference.preparation_cache.max_bytes = 0
     old_engine = source.engine

@@ -1,6 +1,5 @@
 """Request-clock interpretation at public physical planning/acquisition seams."""
 
-from tests.program._profiles import profile_soccfg
 from dataclasses import replace
 
 import numpy as np
@@ -12,6 +11,7 @@ from zcu_tools.experiment.single_fluxonium.runtime import (
 from zcu_tools.program.v2.simulation.compiled import build_compiled_request
 
 from tests.core._simulation import TIME_BASE
+from tests.program._profiles import profile_soccfg
 from tests.program.v2.simulation._compiled_support import clock_invariance_program
 
 from ._inputs import settings, template

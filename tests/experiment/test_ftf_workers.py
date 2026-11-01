@@ -1,6 +1,5 @@
 """Worker selection and numerical parity at public FTF composition/acquire seams."""
 
-from tests.program._profiles import profile_soccfg
 import numpy as np
 import pytest
 from qick.asm_v2 import QickSweep1D
@@ -11,6 +10,7 @@ from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.resources.ftf import parse_ftf
 from zcu_tools.simulate.evolution import Engine
 
+from tests.program._profiles import profile_soccfg
 from tests.program._timeline import compile_modules
 from tests.resources._ftf_data import ftf_document
 
@@ -30,7 +30,11 @@ def test_ftf_workers_reach_engine_and_preserve_small_acquire(monkeypatch):
     results = []
     for workers in (None, 2):
         try:
-            env = ftf(settings, soccfg=profile_soccfg("ftf")) if workers is None else ftf(settings, soccfg=profile_soccfg("ftf"), workers=workers)
+            env = (
+                ftf(settings, soccfg=profile_soccfg("ftf"))
+                if workers is None
+                else ftf(settings, soccfg=profile_soccfg("ftf"), workers=workers)
+            )
         except TypeError as error:
             pytest.fail(f"ftf must accept and forward keyword workers: {error}")
         try:

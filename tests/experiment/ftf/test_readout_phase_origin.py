@@ -1,6 +1,5 @@
 """Common-origin FTF carriers retain their IQ phase across readout delays."""
 
-from tests.program._profiles import load_mux_soccfg
 from dataclasses import replace
 
 import numpy as np
@@ -15,6 +14,7 @@ from zcu_tools.simulate.adc import ConditionalReadout, ReadoutModel, Receiver
 
 from tests.core._simulation import TIME_BASE, tick_array, ticks
 from tests.experiment._ftf_templates import settings, snapshot, template
+from tests.program._profiles import load_mux_soccfg
 
 pytestmark = pytest.mark.sim
 
@@ -75,7 +75,8 @@ def isolated_carrier_plan(
     return plan_template(
         settings(),
         snapshot(),
-        replace(base, events=pulses, readouts=windows), soccfg=load_mux_soccfg(3, 3, gen_ch=1, ro_chs=(1, 2)),
+        replace(base, events=pulses, readouts=windows),
+        soccfg=load_mux_soccfg(3, 3, gen_ch=1, ro_chs=(1, 2)),
         readout=config,
         time_base=TIME_BASE,
     )

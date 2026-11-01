@@ -1,6 +1,5 @@
 """Source-owned noiseless preparations, fresh per-acquire streams and bounded reuse."""
 
-from tests.program._profiles import profile_soccfg
 from contextlib import ExitStack
 from dataclasses import replace
 
@@ -18,6 +17,7 @@ from tests.experiment._ftf_templates import (
     snapshot,
     template,
 )
+from tests.program._profiles import profile_soccfg
 from tests.program._timeline import compile_modules
 
 pytestmark = pytest.mark.sim
@@ -442,7 +442,12 @@ def test_preparation_hits_reemit_accuracy_warning_and_keep_numeric_identity():
             return result
 
     kernels = tuple(ExceedingIdle() if k.name == "t4" else k for k in REGISTRY)
-    source = FTFSource(settings(), DeviceManager(), soccfg=profile_soccfg("ftf"), engine=Engine(1, kernels=kernels))
+    source = FTFSource(
+        settings(),
+        DeviceManager(),
+        soccfg=profile_soccfg("ftf"),
+        engine=Engine(1, kernels=kernels),
+    )
     try:
         with pytest.warns(RuntimeWarning, match="segment accuracy check exceeded"):
             draw(source)

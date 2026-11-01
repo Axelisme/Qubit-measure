@@ -1,6 +1,5 @@
 """Acquisition-frozen FTF loss streams through public source and binding seams."""
 
-from tests.program._profiles import profile_soccfg
 import json
 from contextlib import contextmanager
 from dataclasses import replace
@@ -25,6 +24,7 @@ from tests.experiment._ftf_templates import (
     snapshot,
     template,
 )
+from tests.program._profiles import profile_soccfg
 
 pytestmark = pytest.mark.sim
 
@@ -45,7 +45,8 @@ def test_projective_rounds_keep_acquisition_effective_losses_and_facts(tmp_path)
     template, readout = herald_template()
     source = FTFSource(
         configuration,
-        DeviceManager(), soccfg=profile_soccfg("ftf"),
+        DeviceManager(),
+        soccfg=profile_soccfg("ftf"),
         readout=readout,
         acquisition=FTFAcquisitionOptions(
             clock=SimulationClock(monotonic=lambda: now[0]),
@@ -91,7 +92,8 @@ def drift_settings(*, sigma: float = 0.3):
 def source_at(configuration, now, truth):
     source = FTFSource(
         configuration,
-        DeviceManager(), soccfg=profile_soccfg("ftf"),
+        DeviceManager(),
+        soccfg=profile_soccfg("ftf"),
         acquisition=FTFAcquisitionOptions(
             clock=SimulationClock(monotonic=lambda: now[0]), truth_log=truth
         ),
@@ -275,7 +277,8 @@ def test_builder_admission_and_rounds_share_one_physical_clock(tmp_path: Path):
     clock = SimulationClock(monotonic=lambda: now[0])
     truth = tmp_path / "truth.jsonl"
     env = ftf(
-        drift_settings(), soccfg=profile_soccfg("ftf"),
+        drift_settings(),
+        soccfg=profile_soccfg("ftf"),
         time_scale=0,
         acquisition=FTFAcquisitionOptions(clock=clock, truth_log=truth),
     )

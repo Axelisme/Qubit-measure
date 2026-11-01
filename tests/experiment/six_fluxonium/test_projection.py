@@ -4,7 +4,6 @@ Terminal-only numeric pins retire when the versioned ADC/RNG contract changes.
 The reference was captured before projective routing and multi-ADC preparation.
 """
 
-from tests.program._profiles import profile_soccfg
 from collections.abc import Generator
 from dataclasses import replace
 from hashlib import sha256
@@ -34,6 +33,7 @@ from zcu_tools.program.v2.simulation import IntegratedRound
 from zcu_tools.resources.six_fluxonium import parse_six_fluxonium
 
 from tests.core._simulation import TIME_BASE, single_point_template, tick_tuple, ticks
+from tests.program._profiles import profile_soccfg
 from tests.resources._six_fluxonium_data import six_document
 
 pytestmark = pytest.mark.sim

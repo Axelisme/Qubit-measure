@@ -1,6 +1,5 @@
 """FTF environment pacing and its opt-out leave public acquisition unchanged."""
 
-from tests.program._profiles import profile_soccfg
 import time
 
 import numpy as np
@@ -11,6 +10,7 @@ from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.simulation import SimulationClock
 from zcu_tools.resources.ftf import parse_ftf
 
+from tests.program._profiles import profile_soccfg
 from tests.program._timeline import compile_modules
 from tests.program.v2.simulation.support import raw_of
 from tests.resources._ftf_data import ftf_document
@@ -34,7 +34,8 @@ def test_default_paces_every_round_and_builder_zero_preserves_bitwise_results(
     # The synthetic settings omit pacing; the builder supplies physical time.
     settings = parse_ftf(ftf_document())
     env = ftf(
-        settings, soccfg=profile_soccfg("ftf"),
+        settings,
+        soccfg=profile_soccfg("ftf"),
         acquisition=FTFAcquisitionOptions(
             clock=SimulationClock(monotonic=lambda: now[0])
         ),
@@ -59,7 +60,8 @@ def test_default_paces_every_round_and_builder_zero_preserves_bitwise_results(
         expected_raw = raw_of(program)
         assert waits == pytest.approx([2.08e-6, 2.08e-6], abs=10e-9)
         unpaced = ftf(
-            settings, soccfg=profile_soccfg("ftf"),
+            settings,
+            soccfg=profile_soccfg("ftf"),
             time_scale=0,
             acquisition=FTFAcquisitionOptions(
                 clock=SimulationClock(monotonic=lambda: now[0])

@@ -8,8 +8,8 @@ from pathlib import Path
 from uuid import uuid4
 
 import numpy as np
-from qick import QickConfig
 from numpy.typing import NDArray
+from qick import QickConfig
 
 from zcu_tools.core.simulation import (
     AcquireRequest,

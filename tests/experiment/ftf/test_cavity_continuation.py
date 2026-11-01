@@ -1,6 +1,5 @@
 """Acquire composition advances density and cavity memory at the public seam."""
 
-from tests.program._profiles import profile_soccfg
 from dataclasses import replace
 
 import numpy as np
@@ -26,6 +25,7 @@ from tests.experiment._ftf_templates import (
     snapshot,
     template,
 )
+from tests.program._profiles import profile_soccfg
 
 pytestmark = pytest.mark.sim
 
@@ -49,7 +49,10 @@ class ObservingEngine(Engine):
 def test_acquire_continues_each_point_span_density_field_and_common_origin(shaped):
     engine = ObservingEngine()
     source = FTFSource(
-        settings().with_telemetry(enabled=False), DeviceManager(), soccfg=profile_soccfg("ftf"), engine=engine
+        settings().with_telemetry(enabled=False),
+        DeviceManager(),
+        soccfg=profile_soccfg("ftf"),
+        engine=engine,
     )
     base = template(tones=1)
     earlier = replace(
@@ -64,7 +67,8 @@ def test_acquire_continues_each_point_span_density_field_and_common_origin(shape
         plan = plan_template(
             source.settings,
             snapshot(),
-            driven, soccfg=profile_soccfg("ftf"),
+            driven,
+            soccfg=profile_soccfg("ftf"),
             facts=source.model_facts(snapshot()),
             time_base=TIME_BASE,
         )
@@ -201,13 +205,20 @@ def test_projection_outcomes_carry_their_own_cavity_memory_into_the_next_span():
             )
         }
     )
-    source = FTFSource(numeric, DeviceManager(), soccfg=profile_soccfg("ftf"), readout=readout, engine=engine)
+    source = FTFSource(
+        numeric,
+        DeviceManager(),
+        soccfg=profile_soccfg("ftf"),
+        readout=readout,
+        engine=engine,
+    )
     try:
         facts = source.model_facts(snapshot())
         plan = plan_template(
             numeric,
             snapshot(),
-            driven, soccfg=profile_soccfg("ftf"),
+            driven,
+            soccfg=profile_soccfg("ftf"),
             readout=readout,
             facts=facts,
             time_base=TIME_BASE,
@@ -258,7 +269,10 @@ def test_projection_outcomes_carry_their_own_cavity_memory_into_the_next_span():
 def test_mixed_acquire_keeps_undriven_templates_on_the_single_evolve_path():
     engine = ObservingEngine()
     source = FTFSource(
-        settings().with_telemetry(enabled=False), DeviceManager(), soccfg=profile_soccfg("ftf"), engine=engine
+        settings().with_telemetry(enabled=False),
+        DeviceManager(),
+        soccfg=profile_soccfg("ftf"),
+        engine=engine,
     )
     base = template()
     earlier = replace(
@@ -295,7 +309,10 @@ def test_mixed_acquire_keeps_undriven_templates_on_the_single_evolve_path():
 def test_no_cavity_acquire_keeps_single_evolve_without_continuation():
     engine = ObservingEngine()
     source = FTFSource(
-        settings().with_telemetry(enabled=False), DeviceManager(), soccfg=profile_soccfg("ftf"), engine=engine
+        settings().with_telemetry(enabled=False),
+        DeviceManager(),
+        soccfg=profile_soccfg("ftf"),
+        engine=engine,
     )
     try:
         acquire = request()

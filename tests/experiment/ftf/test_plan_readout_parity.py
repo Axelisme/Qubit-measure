@@ -1,6 +1,5 @@
 """FTF terminal-only sampling parity against explicit pre-projective inputs."""
 
-from tests.program._profiles import profile_soccfg
 from dataclasses import replace
 
 import numpy as np
@@ -11,6 +10,7 @@ from zcu_tools.simulate import adc
 
 from tests.core._simulation import TIME_BASE, ticks
 from tests.experiment._ftf_templates import settings, snapshot, template
+from tests.program._profiles import profile_soccfg
 
 pytestmark = pytest.mark.sim
 
@@ -31,7 +31,8 @@ def test_terminal_only_plan_preserves_raw_statistics_and_decimated_values() -> N
         plan_template(
             settings(),
             snapshot(),
-            replace(base, readouts=(window,)), soccfg=profile_soccfg("ftf"),
+            replace(base, readouts=(window,)),
+            soccfg=profile_soccfg("ftf"),
             time_base=TIME_BASE,
         )
         .readouts[0]

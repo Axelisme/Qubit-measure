@@ -1,6 +1,5 @@
 """Author-configured mux planning and FTF joint shots, independent of YAML shape."""
 
-from tests.program._profiles import profile_soccfg
 from collections.abc import Sequence
 from dataclasses import replace
 
@@ -33,6 +32,7 @@ from tests.experiment._ftf_templates import (
     snapshot,
     template,
 )
+from tests.program._profiles import profile_soccfg
 
 pytestmark = pytest.mark.sim
 
@@ -92,7 +92,8 @@ def test_planner_applies_optional_background_to_every_receiver(path):
     plan = ftf_module.plan_template(
         settings(),
         snapshot(),
-        template() if path == "pulse" else mux_template(), soccfg=profile_soccfg("ftf"),
+        template() if path == "pulse" else mux_template(),
+        soccfg=profile_soccfg("ftf"),
         readout=config,
         time_base=TIME_BASE,
     )
@@ -109,7 +110,9 @@ def test_mux_channel_passband_uses_supplied_adc_clock():
     import yaml
     from zcu_tools.program import build_soccfg
 
-    with (Path(__file__).parents[2] / "program" / "profiles" / "ftf.yaml").open() as stream:
+    with (
+        Path(__file__).parents[2] / "program" / "profiles" / "ftf.yaml"
+    ).open() as stream:
         profile = yaml.safe_load(stream)
     # Doubling the ADC clock widens its PFB channel: these carriers now share it.
     profile["readouts"][0]["fs_mult"] = 20
@@ -124,7 +127,9 @@ def test_mux_channel_passband_uses_supplied_adc_clock():
         readout=configuration(),
         time_base=TIME_BASE,
     )
-    assert tuple(p.frequency_ghz for p in plan.readouts[0].batch.events[0][0].pulses) == (
+    assert tuple(
+        p.frequency_ghz for p in plan.readouts[0].batch.events[0][0].pulses
+    ) == (
         6.0,
         6.009601,
     )
@@ -134,7 +139,8 @@ def test_mux_planning_selects_each_adc_channel_and_keeps_independent_grid():
     plan = ftf_module.plan_template(
         settings(),
         snapshot(),
-        mux_template(), soccfg=profile_soccfg("ftf"),
+        mux_template(),
+        soccfg=profile_soccfg("ftf"),
         readout=configuration(),
         time_base=TIME_BASE,
     )
@@ -177,7 +183,8 @@ def test_mux_channel_passband_keeps_only_in_channel_carriers(
     plan = ftf_module.plan_template(
         settings(),
         snapshot(),
-        replace(base, events=(carrier, companion), readouts=(window,)), soccfg=profile_soccfg("ftf"),
+        replace(base, events=(carrier, companion), readouts=(window,)),
+        soccfg=profile_soccfg("ftf"),
         readout=configuration(),
         time_base=TIME_BASE,
     )
@@ -210,14 +217,23 @@ def test_mux_empty_channel_builds_and_acquires_receiver_noise(mode, tones):
     )
     numeric = settings()
     plan = ftf_module.plan_template(
-        numeric, snapshot(), empty, soccfg=profile_soccfg("ftf"), readout=config, time_base=TIME_BASE
+        numeric,
+        snapshot(),
+        empty,
+        soccfg=profile_soccfg("ftf"),
+        readout=config,
+        time_base=TIME_BASE,
     )
     assert plan.readouts[1].batch.events[0][0].pulses == ()
     assert len(plan.readouts[1].batch.events[0][0].grids) == 1
 
     def acquire(content):
         source = ftf_module.FTFSource(
-            numeric, DeviceManager(), soccfg=profile_soccfg("ftf"), engine=MixedEngine(), readout=config
+            numeric,
+            DeviceManager(),
+            soccfg=profile_soccfg("ftf"),
+            engine=MixedEngine(),
+            readout=config,
         )
         acquire_request = replace(request(mode), reps=6000, templates=(content,))
         try:
@@ -255,7 +271,12 @@ def test_mux_empty_channel_builds_and_acquires_receiver_noise(mode, tones):
 def test_mux_retunes_independently_between_logical_events():
     base, config = herald_template()
     plan = ftf_module.plan_template(
-        settings(), snapshot(), base, soccfg=profile_soccfg("ftf"), readout=config, time_base=TIME_BASE
+        settings(),
+        snapshot(),
+        base,
+        soccfg=profile_soccfg("ftf"),
+        readout=config,
+        time_base=TIME_BASE,
     )
     for events in plan.readouts[0].batch.events:
         assert [tuple(p.frequency_ghz for p in event.pulses) for event in events] == [
@@ -282,7 +303,8 @@ def test_mux_rejects_grids_in_different_channels_within_one_event():
         ftf_module.plan_template(
             settings(),
             snapshot(),
-            replace(base, readouts=(retuned,)), soccfg=profile_soccfg("ftf"),
+            replace(base, readouts=(retuned,)),
+            soccfg=profile_soccfg("ftf"),
             readout=configuration(),
             time_base=TIME_BASE,
         )
@@ -295,7 +317,8 @@ def test_mux_planner_rejects_unbound_receiver_and_different_pulse_start():
         ftf_module.plan_template(
             settings(),
             snapshot(),
-            replace(base, readouts=(unbound,)), soccfg=profile_soccfg("ftf"),
+            replace(base, readouts=(unbound,)),
+            soccfg=profile_soccfg("ftf"),
             readout=configuration(),
             time_base=TIME_BASE,
         )
@@ -306,7 +329,8 @@ def test_mux_planner_rejects_unbound_receiver_and_different_pulse_start():
         ftf_module.plan_template(
             settings(),
             snapshot(),
-            replace(base, events=(base.events[0], delayed)), soccfg=profile_soccfg("ftf"),
+            replace(base, events=(base.events[0], delayed)),
+            soccfg=profile_soccfg("ftf"),
             readout=configuration(),
             time_base=TIME_BASE,
         )
@@ -322,7 +346,12 @@ def test_one_program_cannot_mix_pulse_and_mux_readout_generators():
     )
     with pytest.raises(ValueError, match=r"readout generators.*0.*1"):
         ftf_module.plan_template(
-            settings(), snapshot(), mixed, soccfg=profile_soccfg("ftf"), readout=configuration(), time_base=TIME_BASE
+            settings(),
+            snapshot(),
+            mixed,
+            soccfg=profile_soccfg("ftf"),
+            readout=configuration(),
+            time_base=TIME_BASE,
         )
 
 
@@ -343,7 +372,12 @@ def test_open_acquire_rejects_both_readout_generators_across_the_whole_request(
             ),
         )
     )
-    source = ftf_module.FTFSource(settings(), DeviceManager(), soccfg=profile_soccfg("ftf"), readout=configuration())
+    source = ftf_module.FTFSource(
+        settings(),
+        DeviceManager(),
+        soccfg=profile_soccfg("ftf"),
+        readout=configuration(),
+    )
     try:
         with pytest.raises(ValueError, match=r"readout generators.*0.*1"):
             source.open_acquire(replace(request(), templates=templates))
@@ -407,7 +441,11 @@ def test_mux_ftf_channels_share_physical_shots_and_initial_mixture(mode, jumping
     window = content.readouts[0]
     content = replace(content, readouts=(window, replace(window, channel=1)))
     source = ftf_module.FTFSource(
-        numeric, DeviceManager(), soccfg=profile_soccfg("ftf"), engine=MixedEngine(), readout=config
+        numeric,
+        DeviceManager(),
+        soccfg=profile_soccfg("ftf"),
+        engine=MixedEngine(),
+        readout=config,
     )
     acquire = replace(request(mode), reps=128, templates=(content,))
     try:
@@ -422,7 +460,12 @@ def test_mux_ftf_channels_share_physical_shots_and_initial_mixture(mode, jumping
         assert channel_order == (4, 1)
         np.testing.assert_array_equal(first, second)
         plan = ftf_module.plan_template(
-            numeric, snapshot(), content, soccfg=profile_soccfg("ftf"), readout=config, time_base=TIME_BASE
+            numeric,
+            snapshot(),
+            content,
+            soccfg=profile_soccfg("ftf"),
+            readout=config,
+            time_base=TIME_BASE,
         )
         batch = plan.readouts[0].batch
         if jumping:

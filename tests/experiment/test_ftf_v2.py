@@ -1,6 +1,5 @@
 """V2 channel derivation, live DC and charge-drive acquisition seam."""
 
-from tests.program._profiles import load_soccfg
 import numpy as np
 import pytest
 from zcu_tools.device.fake import FakeDevice
@@ -10,6 +9,7 @@ from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.resources.ftf import parse_ftf
 
+from tests.program._profiles import load_soccfg
 from tests.program._timeline import compile_modules
 from tests.resources._ftf_data import ftf_document
 

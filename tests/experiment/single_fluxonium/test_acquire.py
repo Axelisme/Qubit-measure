@@ -4,7 +4,6 @@ Small retained spaces isolate composition. Production-sized cost is measured by
 an author probe, not by weakening the environment defaults in these tests.
 """
 
-from tests.program._profiles import profile_soccfg
 from dataclasses import replace
 from pathlib import Path
 
@@ -41,6 +40,7 @@ from zcu_tools.resources.single_fluxonium import parse_single_fluxonium
 from zcu_tools.simulate.evolution import Engine
 
 from tests.core._simulation import TIME_BASE, tick_array, tick_tuple
+from tests.program._profiles import profile_soccfg
 from tests.program._timeline import compile_modules
 
 from ._inputs import settings, slot
@@ -305,7 +305,9 @@ def test_onetone_mean_matches_causal_scalar_cavity_solution():
 def test_round_replay_and_raw_outlive_source(tmp_path: Path, mode):
     from zcu_tools.experiment.single_fluxonium import replay
 
-    env = single_fluxonium(physical_settings(), soccfg=profile_soccfg("single_fluxonium"))
+    env = single_fluxonium(
+        physical_settings(), soccfg=profile_soccfg("single_fluxonium")
+    )
     source = SingleFluxoniumSource(physical_settings(), env.devices)
     try:
         source.private_replay = tmp_path / "archive"
@@ -435,7 +437,10 @@ def test_overlapping_named_drives_acquire_and_respond_to_each_calibration():
                 "real": 0.0,
                 "imag": 0.0,
             }
-        env = single_fluxonium(parse_single_fluxonium(configured), soccfg=profile_soccfg("single_fluxonium"))
+        env = single_fluxonium(
+            parse_single_fluxonium(configured),
+            soccfg=profile_soccfg("single_fluxonium"),
+        )
         try:
             first = PulseCfg(
                 ch=1,
@@ -489,7 +494,9 @@ def test_overlapping_named_drives_acquire_and_respond_to_each_calibration():
 
 
 def test_program_acquire_raw_decimated_and_live_round_refresh():
-    env = single_fluxonium(physical_settings(), soccfg=profile_soccfg("single_fluxonium"))
+    env = single_fluxonium(
+        physical_settings(), soccfg=profile_soccfg("single_fluxonium")
+    )
     try:
         readout = PulseReadoutCfg(
             gen_ch=0,
@@ -628,7 +635,9 @@ def test_changed_settings_refresh_snapshot_identity_and_replay_inputs(tmp_path: 
 
 
 def test_builder_backend_cleanup_rejects_later_work_but_leaves_drivers_owned():
-    env = single_fluxonium(physical_settings(), soccfg=profile_soccfg("single_fluxonium"))
+    env = single_fluxonium(
+        physical_settings(), soccfg=profile_soccfg("single_fluxonium")
+    )
     driver = env.create_device("FakeDevice", physical_settings().dc_bias.source.name)
     try:
         try:
@@ -720,7 +729,9 @@ def test_fixed_seed_native_acquire_preserves_flux_controls(case, expected):
         values["flux_line"]["distortion_terms"] = [{"amplitude": 0.3, "tau_ns": 12.0}]
     elif case == "tail":
         values["flux_line"]["tau_ns"] = 20.0
-    env = single_fluxonium(parse_single_fluxonium(values), soccfg=profile_soccfg("single_fluxonium"))
+    env = single_fluxonium(
+        parse_single_fluxonium(values), soccfg=profile_soccfg("single_fluxonium")
+    )
     try:
         microwave = PulseCfg(
             ch=1,
@@ -773,7 +784,9 @@ def test_fixed_seed_native_acquire_preserves_flux_controls(case, expected):
 
 
 def test_source_rejects_nonterminal_cavity_pulses_before_evolution():
-    env = single_fluxonium(physical_settings(), soccfg=profile_soccfg("single_fluxonium"))
+    env = single_fluxonium(
+        physical_settings(), soccfg=profile_soccfg("single_fluxonium")
+    )
     source = SingleFluxoniumSource(physical_settings(), env.devices)
     try:
         request = request_for(source, reps=1)
@@ -843,7 +856,9 @@ def test_new_acquire_rechecks_charge_admission_before_reusing_numeric_preparatio
 
 
 def test_source_rejects_invalidated_session_and_refreshes_mutated_controls():
-    env = single_fluxonium(physical_settings(), soccfg=profile_soccfg("single_fluxonium"))
+    env = single_fluxonium(
+        physical_settings(), soccfg=profile_soccfg("single_fluxonium")
+    )
     source = SingleFluxoniumSource(physical_settings(), env.devices)
     try:
         request = request_for(source, "rabi", reps=100_000)

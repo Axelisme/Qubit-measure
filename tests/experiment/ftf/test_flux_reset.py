@@ -4,7 +4,6 @@ These two-state checks validate existing flux wiring, not basis convergence or
 nonadiabatic accuracy for a physical device. No production behavior is added.
 """
 
-from tests.program._profiles import profile_soccfg
 import numpy as np
 import pytest
 from numpy.typing import NDArray
@@ -22,6 +21,7 @@ from zcu_tools.simulate.evolution import Engine
 
 from tests.core._simulation import TIME_BASE, single_point_template, ticks
 from tests.experiment._ftf_templates import snapshot
+from tests.program._profiles import profile_soccfg
 from tests.resources._ftf_data import ftf_document
 
 pytestmark = pytest.mark.sim
@@ -116,7 +116,8 @@ def evolve_reset(
     plan = plan_template(
         settings,
         snapshot(),
-        reset_template(hold_ns, sudden=sudden), soccfg=profile_soccfg("ftf"),
+        reset_template(hold_ns, sudden=sudden),
+        soccfg=profile_soccfg("ftf"),
         facts=facts,
         time_base=TIME_BASE,
     )
@@ -173,7 +174,8 @@ def test_delayed_cosine_reset_retains_constant_park_relaxation(delay_ns: float) 
     plan = plan_template(
         settings,
         snapshot(),
-        reset_template(hold_ns, settling_ns=8.0), soccfg=profile_soccfg("ftf"),
+        reset_template(hold_ns, settling_ns=8.0),
+        soccfg=profile_soccfg("ftf"),
         facts=facts,
         time_base=TIME_BASE,
     )

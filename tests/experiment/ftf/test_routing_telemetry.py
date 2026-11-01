@@ -1,6 +1,5 @@
 """One bounded, best-effort routing record per admitted FTF acquisition."""
 
-from tests.program._profiles import profile_soccfg
 import json
 import os
 import warnings
@@ -14,6 +13,7 @@ from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 
 from tests.experiment._ftf_templates import settings
+from tests.program._profiles import profile_soccfg
 from tests.program._timeline import compile_modules
 
 
@@ -22,7 +22,8 @@ def test_acquire_writes_one_line_for_all_rounds_and_opt_out_is_bitwise(tmp_path:
     directory = tmp_path / "enabled"
     try:
         observed = ftf(
-            settings().with_telemetry(enabled=True, directory=directory), soccfg=profile_soccfg("ftf"),
+            settings().with_telemetry(enabled=True, directory=directory),
+            soccfg=profile_soccfg("ftf"),
             time_scale=0,
         )
     except AttributeError as error:
@@ -31,7 +32,8 @@ def test_acquire_writes_one_line_for_all_rounds_and_opt_out_is_bitwise(tmp_path:
         ) from error
     plain_directory = tmp_path / "disabled"
     plain = ftf(
-        settings().with_telemetry(enabled=False, directory=plain_directory), soccfg=profile_soccfg("ftf"),
+        settings().with_telemetry(enabled=False, directory=plain_directory),
+        soccfg=profile_soccfg("ftf"),
         time_scale=0,
     )
     try:

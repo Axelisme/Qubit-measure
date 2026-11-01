@@ -1,6 +1,5 @@
 """Startup preparation is observable and does not consume acquisition identity."""
 
-from tests.program._profiles import profile_soccfg
 from concurrent.futures import ThreadPoolExecutor
 from threading import Event, Thread
 
@@ -12,6 +11,7 @@ from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.resources.ftf import parse_ftf
 
+from tests.program._profiles import profile_soccfg
 from tests.program._timeline import compile_modules
 from tests.resources._ftf_data import ftf_document
 
@@ -154,7 +154,9 @@ def test_worker_start_failure_is_terminal_and_allows_on_demand(monkeypatch):
         patch.setattr(tqdm, "monitor_interval", 0)
         patch.setattr(Thread, "start", unavailable_thread)
         try:
-            env = ftf(parse_ftf(ftf_document()), soccfg=profile_soccfg("ftf"), warmup=warmup)
+            env = ftf(
+                parse_ftf(ftf_document()), soccfg=profile_soccfg("ftf"), warmup=warmup
+            )
         except RuntimeError as error:
             pytest.fail(
                 f"worker startup failure must allow on-demand acquisition: {error}"
@@ -178,7 +180,11 @@ def test_worker_start_failure_is_terminal_and_allows_on_demand(monkeypatch):
 def test_warmup_does_not_change_rng_or_live_bias():
     cls = warmup_type()
     settings = parse_ftf(ftf_document())
-    prepared = ftf(settings, soccfg=profile_soccfg("ftf"), warmup=cls((("synthetic", lambda: None),)))
+    prepared = ftf(
+        settings,
+        soccfg=profile_soccfg("ftf"),
+        warmup=cls((("synthetic", lambda: None),)),
+    )
     plain = ftf(settings, soccfg=profile_soccfg("ftf"))
     try:
         prepared.wait_ready()

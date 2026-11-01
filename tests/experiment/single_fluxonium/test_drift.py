@@ -1,6 +1,5 @@
 """Log-loss drift contracts with supplied times and independent RNG streams."""
 
-from tests.program._profiles import profile_soccfg
 import json
 from contextlib import contextmanager
 from dataclasses import replace
@@ -29,6 +28,7 @@ from zcu_tools.resources.single_fluxonium import (
 )
 
 from tests.core._simulation import TIME_BASE, tick_tuple
+from tests.program._profiles import profile_soccfg
 from tests.program._timeline import compile_modules
 
 from ._inputs import settings, template
@@ -83,7 +83,8 @@ def request_for(binding: SimulationBinding, sequence: int):
 @contextmanager
 def environment(config, root: Path, clock: SimulationClock, *, archive: bool = False):
     env = single_fluxonium(
-        config, soccfg=profile_soccfg("single_fluxonium"),
+        config,
+        soccfg=profile_soccfg("single_fluxonium"),
         clock=clock,
         truth_log=root / "truth.jsonl",
         private_replay=root / "replay" if archive else None,

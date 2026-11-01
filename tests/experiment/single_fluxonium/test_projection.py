@@ -1,6 +1,5 @@
 """Projective reads preserve shot histories through the program/source contract."""
 
-from tests.program._profiles import profile_soccfg
 from collections.abc import Generator
 from dataclasses import replace
 
@@ -21,6 +20,7 @@ from zcu_tools.program.v2.simulation import IntegratedRound
 from zcu_tools.resources.single_fluxonium import parse_single_fluxonium
 from zcu_tools.simulate import adc
 
+from tests.program._profiles import profile_soccfg
 from tests.program._timeline import compile_modules
 
 from ._inputs import settings
