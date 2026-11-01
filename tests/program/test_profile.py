@@ -59,6 +59,37 @@ def test_shared_adc_requires_identical_rf_settings(profile, field, value):
         program.build_soccfg(profile)
 
 
+@pytest.mark.parametrize("profile", ["wiring"], indirect=True)
+@pytest.mark.parametrize("left,right", [(None, None), (None, 1), (1, None), (1, 1)])
+@pytest.mark.parametrize("users", ["generators", "readouts", "cross_kind"])
+def test_ambiguous_wave_port_reports_the_later_user(profile, left, right, users):
+    gen, readout = profile["generators"][0], profile["readouts"][0]
+    if users == "generators":
+        readout["tproc_ctrl"] = None
+        gen["tmux_ch"] = left
+        profile["generators"].append({**gen, "dac": "31", "tmux_ch": right})
+        path = r"generators\.1\.tproc_ch"
+    elif users == "readouts":
+        gen["tproc_ch"] = 19
+        readout["tmux_ch"] = left
+        profile["readouts"][1].update(tproc_ctrl=readout["tproc_ctrl"], tmux_ch=right)
+        path = r"readouts\.1\.tproc_ctrl"
+    else:
+        gen["tmux_ch"], readout["tmux_ch"] = left, right
+        path = r"readouts\.0\.tproc_ctrl"
+    with pytest.raises(ValueError, match=path):
+        program.build_soccfg(profile)
+
+
+@pytest.mark.parametrize("profile", ["wiring"], indirect=True)
+def test_three_wave_users_can_share_a_port_with_distinct_tmux(profile):
+    profile["readouts"][1].update(
+        tproc_ctrl=profile["generators"][0]["tproc_ch"], tmux_ch=2
+    )
+    cfg = program.build_soccfg(profile)
+    assert [cfg["gens"][0]["tmux_ch"], *[r["tmux_ch"] for r in cfg["readouts"]]] == [0, 1, 2]
+
+
 @pytest.mark.parametrize("profile", ["derivation"], indirect=True)
 def test_independent_channel_clocks_are_derived(profile):
     # This dedicated YAML is the worked example, not an ordinary board profile.
