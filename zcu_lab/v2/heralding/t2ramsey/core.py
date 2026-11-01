@@ -1,5 +1,6 @@
 """Single-qubit Ramsey fringes with ground-herald post-selection."""
 
+from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Annotated, ClassVar
@@ -7,6 +8,7 @@ from typing import Annotated, ClassVar
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import Field
+from zcu_tools.analysis.fitting import FitQuality, compute_fit_quality, fit_decay, fit_decay_fringe
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
     Experiment,
@@ -15,6 +17,7 @@ from zcu_tools.experiment import (
     VariableAxisSpec,
     VariableSpec,
     VariableZSpec,
+    config,
 )
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
@@ -34,16 +37,11 @@ from zcu_tools.program.v2 import (
     split_sums,
 )
 from zcu_tools.program.v2.modules import PulseReadout
+from zcu_tools.utils.process import rotate2real
 
 from zcu_lab.v2.support import live_line
 from zcu_lab.v2.twotone.time_domain.detune import actual_detune
-from zcu_lab.v2.twotone.time_domain.t2ramsey.core import (
-    T2RamseyAnalysis,
-    T2RamseyAnalyzeOptions,
-    T2RamseyExp,
-    T2RamseyResult,
-    t2ramsey_signal2real,
-)
+from zcu_lab.v2.twotone.time_domain.t2ramsey.core import T2RamseyAnalyzeOptions
 
 
 @dataclass(frozen=True)
@@ -58,6 +56,25 @@ class HeraldingT2RamseyResult:
     times: NDArray[np.float64]
     sums: NDArray[np.float64]
     true_activate_detune: float | None = None
+
+
+@dataclass(frozen=True)
+class HeraldingT2RamseyAnalysis:
+    """Herald-g conditional Ramsey fit and model-independent diagnostics.
+
+    t2r is the Ramsey decay time in us; t2r_err is its standard error in us.
+    detune is the observed fringe frequency in MHz, including the applied
+    phase ramp; detune_err is its standard error in MHz. Both are zero for
+    decay-only fits. These four numeric fields are never None.
+    fit_quality maps "fit" to dimensionless residual and relative-error
+    diagnostics, or is None when diagnostics were not supplied.
+    """
+
+    t2r: float
+    t2r_err: float
+    detune: float
+    detune_err: float
+    fit_quality: Mapping[str, FitQuality] | None = None
 
 
 class HeraldingT2RamseyCfg(ConfigBase):
@@ -178,7 +195,7 @@ class HeraldingT2RamseyExp(Experiment[HeraldingT2RamseyResult, HeraldingT2Ramsey
         @context.plots.on_plot_thread
         def update(data):
             return viewer.set(
-                lengths, t2ramsey_signal2real(split_sums(data)[1][..., 0])
+                lengths, rotate2real(split_sums(data)[1][..., 0]).real
             )
 
         fig.show()
@@ -219,7 +236,7 @@ class HeraldingT2RamseyExp(Experiment[HeraldingT2RamseyResult, HeraldingT2Ramsey
                     stop_condition=snr_checker(
                         buffer.at(),
                         cfg.earlystop_snr,
-                        lambda data: t2ramsey_signal2real(split_sums(data)[1][..., 0]),
+                        lambda data: rotate2real(split_sums(data)[1][..., 0]).real,
                     ),
                 ),
             )
@@ -234,18 +251,92 @@ class HeraldingT2RamseyExp(Experiment[HeraldingT2RamseyResult, HeraldingT2Ramsey
         options: T2RamseyAnalyzeOptions,
         *,
         plots: Plots,
-    ) -> T2RamseyAnalysis:
-        """Discard nonfinite delay/IQ before the ordinary Ramsey projection/fit.
+    ) -> HeraldingT2RamseyAnalysis:
+        """Fit herald-g conditional Ramsey IQ after discarding nonfinite samples.
 
-        Options select decay/fringe and free/fixed phase exactly as in ordinary
-        Ramsey. Pass fraction is diagnostic, not a fit weight. The existing
-        owner reports insufficient data or unusable fits. Saved cfg is unused.
+        Rotate onto the real signal axis. options.fit_fringe selects a decaying
+        fringe instead of a pure decay. options.fit_phase frees the fringe
+        phase; otherwise the signal nearest zero delay selects 0 or 180 degrees.
+        Draw data and fit, and return lifetime/error in us, observed fringe
+        frequency/error in MHz (both zero for decay), and fit quality.
+        Pass fractions are not fit weights. Saved cfg is unused; insufficient
+        data raises in the fitting tool.
         """
         result = source.result
+        fit_fringe = options.fit_fringe
+        fit_phase = options.fit_phase
+
         signals = split_sums(result.sums)[1][..., 0]
         finite = np.isfinite(result.times) & np.isfinite(signals)
-        fit_source = RunRecord(
-            cfg=None,
-            result=T2RamseyResult(result.times[finite], signals[finite]),
+        lengths, signals = result.times[finite], signals[finite]
+
+        real_signals = rotate2real(signals).real
+
+        # Choose whether to fit oscillations as well as their decay envelope.
+        if fit_fringe:
+            fixedparams: list[float | None] | None = None
+            if not fit_phase:
+                zero_signal = real_signals[np.argmin(np.abs(lengths))]
+                if zero_signal > 0.5 * (np.max(real_signals) + np.min(real_signals)):
+                    init_phase = 0.0
+                else:
+                    init_phase = 180.0
+                fixedparams = [None, None, None, init_phase, None]
+            fit = fit_decay_fringe(lengths, real_signals, fixedparams=fixedparams)
+            t2r, t2rerr, detune, detune_err, y_fit, pOpt, pCov = (
+                fit.decay_time,
+                fit.decay_time_err,
+                fit.freq,
+                fit.freq_err,
+                fit.curve,
+                fit.params,
+                fit.cov,
+            )
+        else:
+            fit = fit_decay(lengths, real_signals)
+            t2r, t2rerr, y_fit, pOpt, pCov = (
+                fit.decay_time,
+                fit.decay_time_err,
+                fit.curve,
+                fit.params,
+                fit.cov,
+            )
+            detune = 0.0
+            detune_err = 0.0
+
+        names = (
+            ("y0", "yscale", "freq", "phase", "decay_time")
+            if fit_fringe
+            else ("y0", "yscale", "decay_time")
         )
-        return T2RamseyExp().analyze(fit_source, options, plots=plots)
+        quality = compute_fit_quality(
+            real_signals,
+            y_fit,
+            {name: float(value) for name, value in zip(names, pOpt, strict=True)},
+            pCov,
+        )
+
+        fig, ax = plots.subplots(num="fit", figsize=config.figsize)
+
+        ax.plot(lengths, real_signals, label="meas", ls="-", marker="o", markersize=3)
+        ax.plot(lengths, y_fit, label="fit")
+        t2r_str = f"{t2r:.2f}us ± {t2rerr:.2f}us"
+        if fit_fringe:
+            detune_str = f"{detune:.2f}MHz ± {detune_err * 1e3:.2f}kHz"
+            ax.set_title(f"T2 fringe = {t2r_str}, detune = {detune_str}", fontsize=15)
+        else:
+            ax.set_title(f"T2 decay = {t2r_str}", fontsize=15)
+        ax.set_xlabel("Delay Time (us)")
+        ax.set_ylabel("Signal Real (a.u.)")
+        ax.legend()
+        ax.grid(True)
+
+        fig.tight_layout()
+
+        return HeraldingT2RamseyAnalysis(
+            t2r=float(t2r),
+            t2r_err=float(t2rerr),
+            detune=float(detune),
+            detune_err=float(detune_err),
+            fit_quality={"fit": quality},
+        )

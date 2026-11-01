@@ -28,7 +28,12 @@ from zcu_lab.v2.twotone.time_domain.t2echo.core import (
 )
 from zcu_lab.v2.twotone.time_domain.t2echo.gui import DEFINITION as T2_ECHO
 
-from .core import HeraldingT2EchoCfg, HeraldingT2EchoExp, HeraldingT2EchoResult
+from .core import (
+    HeraldingT2EchoAnalysis,
+    HeraldingT2EchoCfg,
+    HeraldingT2EchoExp,
+    HeraldingT2EchoResult,
+)
 from .form import HeraldingT2EchoInput, make_form
 
 logger = logging.getLogger(__name__)
@@ -41,8 +46,8 @@ HeraldingT2EchoRunResult: TypeAlias = RunRecord[
 
 def analyze(
     req: AnalyzeRequest[HeraldingT2EchoRunResult, T2EchoAnalyzeOptions], *, plots: Plots
-) -> T2EchoAnalysis:
-    """Fit finite selected time/IQ with the ordinary Echo analysis owner."""
+) -> HeraldingT2EchoAnalysis:
+    """Fit herald-g conditional IQ after discarding nonfinite samples."""
     return HeraldingT2EchoExp().analyze(
         req.run_result,
         req.analyze_params,
@@ -51,7 +56,7 @@ def analyze(
 
 
 def writeback(
-    req: WritebackRequest[HeraldingT2EchoRunResult, T2EchoAnalysis],
+    req: WritebackRequest[HeraldingT2EchoRunResult, HeraldingT2EchoAnalysis],
 ) -> Sequence[WritebackItem]:
     """Reuse ordinary writeback rules and captured Run facts, labeled Heralded.
 
@@ -73,8 +78,16 @@ def writeback(
         ),
         metadata=source.metadata,
     )
+    analysis = req.analyze_result
+    ordinary_analysis = T2EchoAnalysis(
+        t2e=analysis.t2e,
+        t2e_err=analysis.t2e_err,
+        detune=analysis.detune,
+        detune_err=analysis.detune_err,
+        fit_quality=analysis.fit_quality,
+    )
     items = T2_ECHO.get_writeback_items(
-        WritebackRequest(ordinary, req.analyze_result, req.ctx)
+        WritebackRequest(ordinary, ordinary_analysis, req.ctx)
     )
     return [replace(item, description=f"Heralded {item.description}") for item in items]
 

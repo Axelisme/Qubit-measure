@@ -1,11 +1,14 @@
 """Single-qubit T1 with host-side ground-herald post-selection."""
 
+from collections.abc import Mapping
 from copy import deepcopy
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import Annotated, ClassVar, Literal
 
 import numpy as np
 from numpy.typing import NDArray
+from zcu_tools.analysis.fitting import FitQuality, compute_fit_quality, fit_decay, fit_dual_decay
+from zcu_tools.analysis.fitting import expfunc
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
     Experiment,
@@ -34,14 +37,10 @@ from zcu_tools.program.v2 import (
     split_sums,
 )
 from zcu_tools.program.v2.modules import PulseReadout
+from zcu_tools.utils.process import rotate2real
 
 from zcu_lab.v2.support import live_line
-from zcu_lab.v2.twotone.time_domain.t1.core import (
-    T1Analysis,
-    T1AnalyzeOptions,
-    T1Exp,
-    T1Result,
-)
+from zcu_lab.v2.twotone.time_domain.t1.core import T1AnalyzeOptions
 
 
 @dataclass(frozen=True)
@@ -54,6 +53,24 @@ class HeraldingT1Result:
 
     times: NDArray[np.float64]
     sums: NDArray[np.float64]
+
+
+@dataclass(frozen=True)
+class HeraldingT1Analysis:
+    """Herald-g conditional T1 fit and model-independent diagnostics.
+
+    t1 is the primary decay time in us; t1_err is its standard error in us.
+    Neither is None. t1b is the second decay time in us and t1b_err its
+    standard error in us; both are None for a single-exponential fit.
+    fit_quality maps "fit" to dimensionless residual and relative-error
+    diagnostics, or is None when diagnostics were not supplied.
+    """
+
+    t1: float
+    t1_err: float
+    t1b: float | None = None
+    t1b_err: float | None = None
+    fit_quality: Mapping[str, FitQuality] | None = None
 
 
 class HeraldingT1Cfg(ConfigBase):
@@ -222,18 +239,78 @@ class HeraldingT1Exp(Experiment[HeraldingT1Result, HeraldingT1Cfg]):
         options: T1AnalyzeOptions,
         *,
         plots: Plots,
-    ) -> T1Analysis:
-        """Fit accepted-shot IQ with the existing single/dual-exponential T1 fit.
+    ) -> HeraldingT1Analysis:
+        """Fit herald-g conditional IQ with one or two exponential decays.
 
-        Skip leading points on the original grid, then discard nonfinite times
-        and IQ before PCA rotation or fitting. Pass fraction is a diagnostic,
-        not an additional fit weight. Insufficient finite data fails in the T1
-        analysis owner. Saved cfg is not needed for analysis.
+        Skip options.skip points on the original grid, discard nonfinite times
+        and IQ, then rotate onto the real signal axis. options.dual_exp selects
+        two decays instead of one. Draw the data and fit, and return lifetimes
+        and standard errors in us with model-independent fit quality.
+        Pass fractions are not fit weights. Saved cfg is unused; insufficient
+        finite data raises in the fitting tool.
         """
         times = source.result.times[options.skip :]
         signals = split_sums(source.result.sums)[1][..., 0][options.skip :]
         finite = np.isfinite(times) & np.isfinite(signals)
-        fit_source = RunRecord(
-            cfg=None, result=T1Result(times=times[finite], signals=signals[finite])
+        xs, signals = times[finite], signals[finite]
+
+        real_signals = rotate2real(signals).real
+
+        if options.dual_exp:
+            fit = fit_dual_decay(xs, real_signals)
+            t1, t1err, t1b, t1berr, y_fit, pOpt, pCov = (
+                fit.decay_time1,
+                fit.decay_time1_err,
+                fit.decay_time2,
+                fit.decay_time2_err,
+                fit.curve,
+                fit.params,
+                fit.cov,
+            )
+            names = ("y0", "yscale1", "decay_time1", "yscale2", "decay_time2")
+        else:
+            fit = fit_decay(xs, real_signals)
+            t1, t1err, y_fit, pOpt, pCov = (
+                fit.decay_time,
+                fit.decay_time_err,
+                fit.curve,
+                fit.params,
+                fit.cov,
+            )
+            names = ("y0", "yscale", "decay_time")
+            t1b = 0.0
+            t1berr = 0.0
+        quality = compute_fit_quality(
+            real_signals,
+            y_fit,
+            {name: float(value) for name, value in zip(names, pOpt, strict=True)},
+            pCov,
         )
-        return T1Exp().analyze(fit_source, replace(options, skip=0), plots=plots)
+
+        fig, ax = plots.subplots(num="fit")
+
+        ax.plot(xs, real_signals, label="data", ls="-", marker="o", markersize=5)
+        ax.plot(xs, y_fit, label="fit", c="orange", zorder=1)
+
+        t1_str = f"{t1:.2f}us ± {t1err:.2f}us"
+        if options.dual_exp:
+            t1b_str = f"{t1b:.2f}us ± {t1berr:.2f}us"
+            ax.plot(xs, expfunc(xs, *pOpt[:3]), linestyle="--", label="t1b fit")
+            title = f"$T_1$ = {t1_str}, " + r"$T_{1b}$ = " + f"{t1b_str}"
+        else:
+            title = f"$T_1$ = {t1_str}"
+        ax.set_title(title, fontsize=14)
+        ax.set_xlabel("Delay Time (us)", fontsize=14)
+        ax.set_ylabel("Signal (a.u.)", fontsize=14)
+        ax.legend(loc="upper right")
+        ax.grid(True)
+
+        fig.tight_layout()
+
+        return HeraldingT1Analysis(
+            t1=float(t1),
+            t1_err=float(t1err),
+            t1b=float(t1b) if options.dual_exp else None,
+            t1b_err=float(t1berr) if options.dual_exp else None,
+            fit_quality={"fit": quality},
+        )
