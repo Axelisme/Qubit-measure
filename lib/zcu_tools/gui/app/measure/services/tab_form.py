@@ -604,7 +604,6 @@ class TabFormResource:
             form = self._make_form(FormContext(sources.env.parameters))
             if isinstance(form, FormFactoryFailure):
                 raise form.error
-            form.select_sources(sources.env)
             current = self._state.input
             form.seed_sources = self._form.seed_sources
             form.seed_metadata = self._form.seed_metadata

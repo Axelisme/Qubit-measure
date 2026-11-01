@@ -86,12 +86,10 @@ class Slot:
     dotted paths to initial literal, Expr, Slot, Hidden(value), or typed
     model-list seeds validated against the original Spec. Hidden
     supplies a validated literal and hides that inline field. When the slot
-    is unset, dangling or its alias is unbound, ``fallback`` selects a Template
-    instead, including that Template's own seeds and seed metadata. A resolved
-    Slot ignores the fallback. Without fallback, forms leave input absent:
+    is unset, dangling or its alias is unbound, forms leave input absent:
     required core fields are Invalid; nullable core fields with a None default
     remain disabled and Valid. Set is initialization-only and applies only to
-    Slot copies, not to the fallback.
+    Slot copies.
 
     Construction detaches mappings and rejects an empty path with ValueError.
     TemplateDef expansion changes only path placeholders, not Form options or
@@ -99,17 +97,12 @@ class Slot:
     Slot.copy/set with TypeError. Bound unset/dangling sources keep nested
     structural defaults; unbound aliases stay linked empty. Each consumer owns
     source lookup and schema compatibility failures; an incompatible captured
-    family still raises instead of selecting the fallback.
-
-    ADR-0073 records the 2026-10-30 ruling: the user chose “9A” (Slot fallback
-    with Template-owned metadata) and confirmed “Q9A” to replace the earlier
-    requirement for explicit if/else source selection.
+    family raises ValueError in Forms.
     """
 
     path: str
     copy: bool = False
     set: Mapping[str, TemplateSeed] = field(default_factory=dict)
-    fallback: Template | None = field(default=None, kw_only=True)
 
     def __post_init__(self) -> None:
         if not self.path.strip():
