@@ -243,11 +243,24 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
         result = source.result
         metrics = [readout_metrics(sums) for sums in result.sums]
         arrays = {
-            name: np.array([getattr(point, name) for point in metrics], dtype=np.float64)
+            name: np.array(
+                [getattr(point, name) for point in metrics], dtype=np.float64
+            )
             for name in (
-                "snr", "f_sep", "thermal_population", "retention_on", "retention_off",
-                "qnd_on", "qnd_off", "flip_up_on", "flip_up_off", "flip_down_on",
-                "flip_down_off", "pi_miss_on", "pi_miss_off", "retention_from_covariance",
+                "snr",
+                "f_sep",
+                "thermal_population",
+                "retention_on",
+                "retention_off",
+                "qnd_on",
+                "qnd_off",
+                "flip_up_on",
+                "flip_up_off",
+                "flip_down_on",
+                "flip_down_off",
+                "pi_miss_on",
+                "pi_miss_off",
+                "retention_from_covariance",
             )
         }
         f_sep, qnd = arrays["f_sep"], arrays["qnd_on"]
@@ -264,11 +277,28 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
         fig, axes = plots.subplots(3, 3, num="metrics", figsize=(14, 11))
         for ax, name, label in zip(
             axes.flat,
-            ("snr", "f_sep", "thermal_population", "retention", "qnd", "flip_up",
-             "flip_down", "pi_miss", "retention_from_covariance"),
-            ("SNR", "Gaussian separation fidelity", "Thermal population p",
-             "Retention S", "QND Q", "Upward flip probability", "Downward flip probability",
-             "Middle pi miss fraction f", "Covariance retention (R1 on)"),
+            (
+                "snr",
+                "f_sep",
+                "thermal_population",
+                "retention",
+                "qnd",
+                "flip_up",
+                "flip_down",
+                "pi_miss",
+                "retention_from_covariance",
+            ),
+            (
+                "SNR",
+                "Gaussian separation fidelity",
+                "Thermal population p",
+                "Retention S",
+                "QND Q",
+                "Upward flip probability",
+                "Downward flip probability",
+                "Middle pi miss fraction f",
+                "Covariance retention (R1 on)",
+            ),
             strict=True,
         ):
             if name + "_on" in arrays:
@@ -282,7 +312,9 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
         fig.tight_layout()
 
         _, ax = plots.subplots(num="pareto", figsize=(7, 5))
-        points = ax.scatter(f_sep[valid], qnd[valid], c=result.gains[valid], label="Gains")
+        points = ax.scatter(
+            f_sep[valid], qnd[valid], c=result.gains[valid], label="Gains"
+        )
         ax.figure.colorbar(points, ax=ax, label="Gain (a.u.)")
         ax.plot(f_sep[indices], qnd[indices], "r.-", label="Pareto frontier")
         for index in np.flatnonzero(valid):

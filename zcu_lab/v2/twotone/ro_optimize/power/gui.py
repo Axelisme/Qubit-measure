@@ -21,10 +21,10 @@ from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2.support.measure.writeback_helpers import readout_dpm_writeback_items
 from zcu_lab.v2.twotone.ro_optimize.power.core import (
-    PowerQndAnalysis,
     PowerAnalyzeOptions,
     PowerCfg,
     PowerExp,
+    PowerQndAnalysis,
     PowerResult,
 )
 from zcu_lab.v2.twotone.ro_optimize.power.form import make_form
@@ -36,7 +36,9 @@ RoOptPowerRunResult: TypeAlias = RunRecord[PowerCfg, PowerResult]
 class RoOptPowerAnalyzeParams:
     """Leave gain empty to inspect curves without proposing any writeback."""
 
-    gain: Annotated[float | None, ParamMeta(label="Selected gain (a.u.)", decimals=4)] = None
+    gain: Annotated[
+        float | None, ParamMeta(label="Selected gain (a.u.)", decimals=4)
+    ] = None
 
 
 def _RoOptPower_analyze(
