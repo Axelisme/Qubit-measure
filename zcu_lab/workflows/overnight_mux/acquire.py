@@ -182,8 +182,9 @@ def run_mux_t2echo(
     after its longest pulse. The final x90 phase ramps with each tone's MHz
     detune. Return requested total delays (P,), averaged complex IQ (K,P),
     original tone indices, actual detunes and source frequencies (K,).
-    context supplies hardware and live plots. Cancellation keeps acquired
-    averages and NaN gaps. Acquisition and program errors propagate.
+    context supplies hardware and live plots; retry counts transient retries.
+    Cancellation keeps acquired averages and NaN gaps. Inputs remain unchanged;
+    acquisition and program errors propagate.
     """
     # 1. Keep participant order while selecting from the complete tone list.
     cfg = deepcopy(cfg)
