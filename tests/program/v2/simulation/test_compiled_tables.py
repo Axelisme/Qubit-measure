@@ -72,7 +72,7 @@ def module_program(modules, *, sweep=(), reps=2, body=None, data_registers=16):
 
 def test_shared_readout_cfg_keeps_each_semantic_source():
     cfg = receiver()
-    # ADC length is 31/307.2 us = 43.4 tProc cycles; generator ends at 43.
+    # ADC and generator durations stay on their own quantized clock grids.
     prog, env = module_program(
         [cfg.build("herald"), Delay("adc_gap", 1 / TPROC_MHZ), cfg.build("terminal")]
     )

@@ -152,9 +152,8 @@ def test_readout_trigger_quantization_does_not_extend_generator_end(
 
     prog = _program([readout], body, initialize)
     result = shots(prog)
-    # Scalar triggers ceil both .559104 and .473088 to 1. Author
-    # sweeps start at native round(.559104/.473088), then step by one.
-    # ADC length is18.2 cycles; generator is11.2 cycles plus post.
+    # Scalar triggers ceil; authored sweeps retain native start/step rounding.
+    # The generator plus post sets the named end; ADC duration affects only shell.
     steps = [0, 1, 2] if swept_trigger else [0]
     trigger_start = (
         int(prog.us2cycles(offset))
@@ -259,8 +258,8 @@ def test_runtime_origin_keeps_fractional_event_tail_until_post_is_added(
         prog.emit(owner)
 
     result = shots(_program([owner], body, initialize))
-    # Generator tail is43.68 for pulse,22.4 for readout, never the ADC tail.
-    # Native post sweep starts at zero and adds0/2/4 cycles.
+    # Keep the fractional generator tail through post addition, never the ADC tail.
+    # Native post sweep increments retain their authored tProc grid.
     base = (
         40
         + PRE
@@ -310,9 +309,7 @@ def test_affine_waveform_and_post_sweeps_ceil_complete_end(swept_post):
         prog.emit(pulse)
 
     prog = _program([pulse], body, lambda prog: prog.add_loop("scan", 3))
-    # Registered lengths39,64,89 generator clocks =>43.68,71.68,99.68.
-    # Start ceils to5. Scalar post is .21504; native swept post starts0.
-    # Both produce ceil(5+43.68+post)=49 at the first point.
+    # Ceil the pre-delay separately, then aggregate each registered length and post.
     posts = (
         [0, 2, 4] if swept_post else [Fraction("0.0005") * Fraction(str(TPROC_MHZ))] * 3
     )
@@ -340,7 +337,7 @@ def test_scalar_static_cross_grid_ceil_applies_noise_tolerance(post_ticks, extra
         "precise", _pulse_cfg(length=length, pre=0, post=post_ticks / TPROC_MHZ)
     )
     prog = _program([pulse], lambda p: p.emit(pulse))
-    # Exact 28-tick playback plus post: only the tail outside tolerance adds a tick.
+    # Exact integer-grid playback: only the post outside tolerance adds a tick.
     assert [s.body_end_cycle - s.start_cycle for s in shots(prog)] == [end] * 2
 
 
@@ -514,7 +511,7 @@ def test_selected_waveform_with_native_length_sweep_tracks_selected_end():
         prog.emit(tail)
 
     prog = _program([selector, playback, tail], body, initialize)
-    # Candidate-specific fabric lengths use W=287, never longest-candidate padding.
+    # Convert each candidate-specific fabric length, never the longest candidate.
     assert [waves(shot) for shot in shots(prog)] == [
         [0, ceil(runtime_cycles(prog.soccfg, n))] for n in (39, 77, 115, 40, 78, 116)
     ] * 2
@@ -536,8 +533,7 @@ def test_nonaffine_sweep_ceil_uses_exact_registered_playback_at_each_point():
         prog.emit(tail)
 
     prog = _program([pulse, tail], body, lambda prog: prog.add_loop("scan", 3))
-    # QICK resolves 39,77,115 generator clocks. At clock ratio28/25,
-    # W=287 gives ceil(n*287/256)=44,87,129, not affine44,87,130.
+    # Convert each native registered length before ceil, not an affine end fit.
     assert prog.get_pulse_param("drive", "total_length", as_array=True) * GEN_MHZ == (
         pytest.approx(native_sweep(prog.soccfg, 0.101, 0.301, 3, gen_ch=0))
     )
@@ -578,8 +574,7 @@ def test_nonaffine_post_and_repeated_emissions_keep_exact_same_channel_spacing(
         prog.emit(pulse)
 
     prog = _program([pulse], body, lambda prog: prog.add_loop("scan", 3))
-    # W=287 gives tails43.72265625/86.32421875/128.92578125.
-    # Scalar post .086016 crosses 129; native swept post truncates to zero.
+    # Scalar post stays fractional; authored post sweeps use native truncated steps.
     posts = (
         native_sweep(prog.soccfg, 0.0002, 0.0002 + 0.1 / TPROC_MHZ, 3)
         if swept_post
@@ -627,8 +622,7 @@ def test_multi_axis_nonaffine_sweep_reenters_nested_repeat_at_the_same_point():
             prog.delay_by_timeline()
 
     prog = _program([pulse], body, initialize)
-    # Generator grids39/40/41,77/78/79,115/116/117 at ratio28/25.
-    # Each native sweep point executes four k=8 local bodies, not four
+    # Each Cartesian native sweep point executes four k=8 local bodies, not four
     # advances of a shared sequential dmem cursor.
     ends = [
         ceil(runtime_cycles(prog.soccfg, n + fine))
@@ -687,8 +681,7 @@ def test_readout_post_follows_generator_without_waiting_for_adc(length, swept_po
         )
         for post in posts
     ]
-    # Generator starts5 and lasts22.4/86.24 cycles. Add scalar post.21504
-    # or native swept post0 once: ceil28/92, with swept steps2.
+    # Add the selected scalar/native swept post to generator playback once.
     assert [waves(shot) for shot in result] == [
         [0, PRE, point_end] for point_end in ends
     ] * 2
@@ -729,7 +722,7 @@ def test_nonaffine_reference_debit_and_runtime_max_use_selected_point_not_paddin
 
     prog = _program([pulse, tail, loader], body, lambda prog: prog.add_loop("scan", 3))
     result = shots(prog)
-    # max(0,44/87/129-50) versus max(0,60/20/100-50) is10/37/79.
+    # Debit both branches by the same reference advance before pointwise max.
     ends = [
         max(50, other, ceil(runtime_cycles(prog.soccfg, n)))
         for n, other in zip((39, 77, 115), (60, 20, 100), strict=True)
@@ -756,7 +749,7 @@ def test_nonaffine_boundary_does_not_certify_a_negative_same_channel_offset():
         prog.emit(pulse)
         prog.pulse(0, "drive", t=-1 / TPROC_MHZ, timeline="default")
 
-    # At the first point,28-1 starts before actual playback ends at28.
+    # The negative one-cycle offset starts before the first playback ends.
     with pytest.raises(ValueError, match="channel 0 pulse overlap"):
         _program([pulse], body, lambda prog: prog.add_loop("scan", 3))
 
@@ -817,8 +810,7 @@ def test_readout_length_sweep_adds_post_to_generator_without_adc_padding():
 
     prog = _program([readout, tail], body, lambda prog: prog.add_loop("scan", 3))
     result = shots(prog)
-    # Generator k=8 tails44.84375/87.4453125/130.046875 plus post.086016
-    # ceil to45/88/131, even where ADC61 samples last85.4 cycles.
+    # The generator's k=8 end plus post owns placement, without ADC padding.
     ends = [
         ceil(
             runtime_cycles(prog.soccfg, n)
@@ -855,8 +847,8 @@ def test_nonaffine_composite_aggregate_and_dependent_placement(kind):
         [reset], lambda prog: prog.emit(reset), lambda prog: prog.add_loop("scan", 3)
     )
     result = shots(prog)
-    # Cavity k=8 tails plus .086016 =>44/87/130. Static qubit stays87.
-    # Pi2 starts at the cavity boundary and adds ceil(22.4+.086016)=23.
+    # The cavity uses k=8 while the qubit stays static. Pi/2 starts only after
+    # the cavity's generator-plus-post boundary, then contributes its own end.
     post = Fraction("0.0002") * Fraction(str(TPROC_MHZ))
     cavity_ends = [ceil(runtime_cycles(prog.soccfg, n) + post) for n in (39, 77, 115)]
     qubit_end = tproc_ceil(

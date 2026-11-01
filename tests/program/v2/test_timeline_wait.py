@@ -219,7 +219,7 @@ def test_two_sweep_reference_debits_keep_each_axis_correlated():
             self.delay(QickSweep1D("advance_axis", 10 / TPROC_MHZ, 30 / TPROC_MHZ))
 
     prog = Program(load_soccfg(0, 1), initial_delay=0, relax_delay=1)
-    # Each ADC ends 70 cycles after origin; body closes ten cycles later.
+    # The authored body advance consumes each ADC tail at every Cartesian point.
     expected_body = [origin + 80 for origin in (40, 60, 50) for _ in range(3)]
     result = shots(prog)
     assert [s.body_end_cycle - s.start_cycle for s in result] == expected_body
@@ -761,7 +761,7 @@ def test_crossing_body_maximum_retains_positive_adc_remainder():
             self.emit(right)
             self.timeline_inc("left_cycles")
             self.trigger(ros=[0], width=1 / TPROC_MHZ, timeline="default")
-            # Author advances to40 cycles after origin, leaving a30-cycle ADC tail.
+            # Advance 40 authored cycles after origin; the ADC may still have a tail.
             self.timeline_inc(39 / TPROC_MHZ)
             self.timeline_inc("right_cycles", timeline="other")
 
@@ -805,8 +805,8 @@ class WaitRecipe:
     """Reproducible public program inputs; all delays/tails are tProc cycles.
 
     sweep_steps has one step per three-point axis. counts and branch_delays
-    share axis0's index. pulse_samples holds the two native DAC lengths at
-    384 MHz; adc_samples is the ADC length at 307.2 MHz. read_at selects the
+    share axis0's index. pulse_samples holds the two native DAC lengths in
+    fabric cycles; adc_samples uses ADC output-clock cycles. read_at selects the
     trigger's position; tail subtracts from its timeline end, not its ADC end.
     fixed_count and counts give the fixed and table-selected Repeat counts.
     """
@@ -1021,7 +1021,7 @@ def test_mixed_schedules_shell_wait_matches_every_legal_point(recipe: WaitRecipe
 
 
 class SweptLengthWaitProgram(TimelineProgramV2):
-    """Sweep ten consecutive DAC lengths, starting at samples (384 MHz clocks).
+    """Sweep ten consecutive DAC lengths, starting at samples fabric cycles.
 
     post_tenths adds tenths of one tProc cycle after the pulse. relax_cycles
     bounds allowed shell slack. A 100-sample ADC starts at the pulse origin.
@@ -1064,7 +1064,7 @@ def fractional_length_cases(seed: int) -> list[tuple[int, int]]:
     """Pick six shallow sweeps whose ten points cross fractional ceil steps.
 
     No Branch or Repeat consumes data registers here, leaving space for the
-    fixed-point aggregate conversion at the 384/430.08 MHz clock seam.
+    fixed-point aggregate conversion between generator and tProc clock grids.
     """
     rng = random.Random(seed)
     return [(samples, rng.randint(1, 9)) for samples in rng.sample(range(20, 60), 6)]

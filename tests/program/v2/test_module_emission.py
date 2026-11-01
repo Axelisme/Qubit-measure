@@ -147,7 +147,7 @@ def test_reused_scalar_pulse_has_independent_tags_and_common_end(timeline, delay
 @pytest.mark.parametrize("swept", [False, True])
 def test_joined_emissions_preserve_parallel_origins_and_event_end(swept):
     a = _pulse("a")
-    # 25 generator clocks per step is exactly28 tProc cycles.
+    # The authored generator-grid step remains affine across this sweep.
     b = _pulse(
         "b",
         ch=1,

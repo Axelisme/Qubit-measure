@@ -1280,7 +1280,7 @@ def test_native_register_advance_consumes_wait_bound_before_restoring_placement(
         prog.pulse(1, "p1", timeline="external")
 
     (shot,) = _shots(_program(body, initialize))
-    # Actual ref45 plus runtime native tail95 reaches140, then count adds3.
+    # Consume the remaining physical native tail, then add the actual count.
     assert _waves(shot) == [0, 0, SHORT_END + 9, 2 * (SHORT_END + 9), LONG_END + 3]
     assert (shot.body_end_cycle, shot.end_cycle) == (LONG_END + 3 + PULSE_END,) * 2
 
@@ -1657,7 +1657,7 @@ def test_nested_native_sweep_can_cross_timestamp_floor_without_losing_managed_gu
             prog.delay_by_timeline()
 
     shots = _shots(_program(body, initialize))
-    # Inner iterations advance20/30/40; managed start is ref +30, length28.
+    # Inner authored advances precede the managed start at reference plus 30.
     expected = [
         [
             outer * (2 * advance + 30 + PULSE_END) + offset
