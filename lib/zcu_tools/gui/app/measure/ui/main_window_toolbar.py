@@ -88,7 +88,7 @@ class MainWindowToolbar:
         for action in (self._predictor_action, self._results_action):
             # Hidden menu actions lose their shortcuts, so keep a window shortcut.
             shortcut = QShortcut(action.shortcut(), parent)
-            self._scope.connect(shortcut.activated, action.trigger)
+            self._scope.connect(shortcut.activated, lambda a=action: a.trigger())
             self._scope.add_cleanup(lambda s=shortcut: s.setEnabled(False))
             button = QPushButton(action.text())
             button.setToolTip(f"{action.text()} ({action.shortcut().toString()})")
