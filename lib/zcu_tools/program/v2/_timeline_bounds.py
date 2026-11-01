@@ -76,8 +76,7 @@ class ProducerBounds:
         self.selection_writers: dict[
             str, list[tuple[TableSelection, tuple[Macro, ...]]]
         ] = {}
-        self.selected: dict[str, list[TableSelection]] = {}
-        self.selection_at_position: dict[str, TableSelection] = {}
+        self.selected: dict[str, TableSelection] = {}
         self.signed_sources: set[str] = set()
         self.author_writes: set[str] = set()
         self.framework_sources: set[str] = set()
@@ -96,14 +95,17 @@ class ProducerBounds:
         """Activate table-relation auditing for actual playback and its capture.
 
         General constant producers remain legal elsewhere. For these two
-        registers only, every translated write must belong to a consumed mapping.
+        registers only, every translated write must belong to this mapping.
         The captured index binds lookup, playback and finisher at execution.
         """
         for name in (selection.register, selection.selector):
             self.source(prog, name)
-            if self.selection_at_position.get(name) is not selection:
-                raise ValueError(f"{name}: selected playback table relation was overwritten")
-            self.selected.setdefault(name, []).append(selection)
+            previous = self.selected.get(name)
+            if previous is not None and previous.table is not selection.table:
+                raise ValueError(
+                    f"{name}: conflicting selected playback table relation"
+                )
+            self.selected[name] = selection
 
     def observe(self, macro: Macro) -> None:
         """Register the bounds and write identity of a native constant producer."""
@@ -323,13 +325,13 @@ class ProducerBounds:
     def _audit_selection(self, name: str, origin: Macro | None, address: int) -> None:
         if name not in self.selected:
             return
+        expected = self.selected[name]
         valid = any(
             relation.table is expected.table
             and relation.selector == expected.selector
             and relation.register == expected.register
             and any(origin is writer for writer in writers)
             for relation, writers in self.selection_writers.get(name, ())
-            for expected in self.selected[name]
         )
         if not valid:
             raise ValueError(

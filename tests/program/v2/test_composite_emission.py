@@ -1079,7 +1079,9 @@ def test_repeated_computed_playback_preserves_selected_ends_within_register_budg
     )
     builder.add_loop("index", 2)
     choices = [
-        _pulse_cfg(cycles / 384).model_copy(update={"post_delay": 1 / 430.08})
+        _pulse_cfg(cycles / 384).model_copy(
+            update={"pre_delay": 0, "post_delay": 1 / 430.08}
+        )
         for cycles in (39, 89)
     ]
     pulses = [
