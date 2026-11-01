@@ -173,9 +173,12 @@ def _summary(
     directory: Path | None = None,
 ) -> None:
     if kind not in plots:
-        plots.subplots(kind, nrows=2)
+        plots.subplots(nrows=2, num=kind)
 
-    def draw(figure: Figure) -> None:
+    figure = plots[kind]
+
+    @plots.on_plot_thread
+    def draw(_payload: None) -> tuple[Figure]:
         figure.set_layout_engine("constrained")
         axis = figure.axes[0]
         axis.clear()
@@ -195,7 +198,10 @@ def _summary(
         axis.set(xlabel="flux setpoint", ylabel=f"{kind} (us)")
         axis.xaxis.set_major_locator(MaxNLocator(nbins=4))
 
-    plots.draw(kind, draw)
+        return (figure,)
+
+    draw(None)
+    figure.show()
     if directory is not None:
         plots.save(kind, directory / f"{kind}-decay.png", figsize=(6.4, 9.6))
 
