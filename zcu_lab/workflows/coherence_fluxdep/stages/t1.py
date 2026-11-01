@@ -6,6 +6,7 @@ from typing import Literal
 
 import numpy as np
 from matplotlib.figure import Figure
+from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from zcu_tools.experiment.scope import Scope
 from zcu_tools.experiment.v2.utils.t1_sampling import t1_delay_axis
@@ -168,6 +169,8 @@ def _plot(plots: Plots) -> AttachedLine:
         figure.axes[1].remove()
         ax = figure.add_subplot(2, 1, 2)
         ax.set(xlabel="Time (us)", ylabel="Signal (raw I)")
+        ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+        ax.grid()
         line = live_line(ax)
         return (figure,)
 

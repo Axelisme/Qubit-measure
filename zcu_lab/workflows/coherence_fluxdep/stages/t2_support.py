@@ -5,6 +5,7 @@ from dataclasses import dataclass
 
 import numpy as np
 from matplotlib.figure import Figure
+from matplotlib.ticker import MaxNLocator
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import SweepCfg
 
@@ -86,6 +87,8 @@ def decay_plot(plots: Plots, kind: str) -> AttachedLine:
         figure.axes[1].remove()
         ax = figure.add_subplot(2, 1, 2)
         ax.set(xlabel="Time (us)", ylabel="Signal (raw I)")
+        ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+        ax.grid()
         line = live_line(ax)
         return (figure,)
 
