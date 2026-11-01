@@ -1,6 +1,6 @@
 # `gui.app.measure.remote`
 
-**Last updated:** 2026-11-01，operation facts 與 RunRecord metadata，wire 137／GUI 170
+**Last updated:** 2026-11-01，point reload 程序連回 MCP owner
 
 **讀者：** framework-dev。量測 GUI 的 RPC 方法、控制權與來源投影契約。
 
@@ -361,32 +361,12 @@ Save or other reads. Directory discovery errors still fail the request.
 
 ## Installed-file reload and guarded writes
 
-`entry.info.files` lists the active parameters, library and aliases absolute
-paths and their installed SHA-256 revisions, in that order. An opened entry
-always returns three files, using global without a point or the selected point
-set. Only a closed entry returns an empty list. There is no scope field.
-The same missing-file rules apply at both levels. Inspect still edits entry
-files while a point is active, and the single watcher observes both sets.
-Those inactive entry files are not listed; agents switch to global before
-editing global files. `context.reload` accepts any installed owner path. Read this base before
-editing a file. Edit that path, then call `context.reload` with its path and the
-previously installed `expected_revision`, not the edited disk hash. Supply the
-key explicitly. Use null when the library or aliases base has no file.
-A global or point set with no library remains usable. Its library is empty, its revision
-is null and its path still names the expected absolute file. Reads create nothing.
-
-```json
-{"method": "context.reload", "params": {"path": "/project/results/entry/points/base/aliases.yaml", "expected_revision": null}}
-```
-
-The owner validates and installs the candidate and returns
-`{document, path, revision}`. Active changes publish source facts; an inactive
-entry reload updates only its installed state and Inspect observation. It never rewrites or repairs the edited
-file. Invalid paths or contents return `invalid_params` with the path and
-reason. A stale installed base returns `precondition_failed` with
-`reason=revision_mismatch`. A non-holder receives the existing `not_holder`
-rejection before domain effects. Failures preserve the installed state.
-Existing tabs keep their fixed captures until an explicit Refresh or Reset.
+For active file discovery, holder checks, `context.reload`, installed revisions
+and reload failures, follow [Point file read/write](../../../../mcp/measure/README.md#point-檔案讀寫).
+Invalid paths or contents return `invalid_params` with the path and reason.
+A stale installed base returns `precondition_failed` with `reason=revision_mismatch`.
+A non-holder receives the existing `not_holder` rejection before domain effects.
+The guarded owner-write contracts below are separate from the reload procedure.
 
 `context.set_parameter`, `context.aliases_set`, `context.ml_edit` and
 `context.ml_create_from_role` accept optional `expected_revision`.

@@ -27,32 +27,8 @@ Component 的 [版本與備份語意](../docs/parameter-upgrades.md) 與一次�
 
 CLI 以 `python -m migrations.migrate_storage` 執行。同來源、同宣告可直接重跑，中斷補缺，完成後逐項重驗；`--resume` 仍可使用。相同目的以 typed `skipped` 列出且不重寫，不同目的以 `MigrationInputError.differences` 定位並 exit 2，不改目的、manifest 或原報告。YAML／JSON 按 owner typed 語意比較並保留 unknown raw，binary／JSONL 按已驗 SHA256。操作授權、dry-run、pending 與 resume 步驟見 [operator CLI 指南](../docs/storage-migration.md)，框架邊界見 [storage migration README](storage_migration/README.md)。具體 mapping 在 `storage_mapping.py`，固定 native declarations 在 `migration_experiments.py`，兩者都只為遷移存在，跟本目錄一起保留或刪除。`lib` 與 `zcu_lab` 都不 import 本目錄。
 
-`--result-root` 指定舊來源根目錄，`--entry-result-root` 指定新 entry 根目錄。兩者可同為 `<checkout>/result`，但新 entry 不得與本次來源樹互相包含。以下只做 dry-run，不建立備份或寫入目的地：
-
-```bash
-uv run --directory <checkout> --no-sync -- python -m migrations.migrate_storage \
-  --repo-root <checkout> \
-  --result-root <checkout>/result --database-root <checkout>/Database \
-  --entry-result-root <checkout>/result \
-  --source-chip <chip> --source-qubit <qubit> --name <new-entry-name> \
-  --part all --qubit-kind qubit/fluxonium \
-  --backup-parent <external-backup-parent> --dry-run
-```
-
-正式執行前，依遷移說明書核對報告與備份位置。預設備份累積在 checkout 平行的 `<checkout-name>-backup/`，保留 `result/<chip>/<qubit>/` 與 `Database/<chip>/<qubit>/`。共用根可以已存在。本次鏡像先核對完整來源，相同檔案略過，缺項補完，不同內容或額外項目停止且不覆寫。初始化 ownership 固定 identity 與生成值，備份、entry 初始化與正式 publication 中斷都可直接用原指令重跑，不認領無工具紀錄的 entry。逐檔 hash 清單與自動日期報告在 `migration-records/<chip>/<qubit>/`，不寫入來源鏡像。兩部分與安全清理完成後，entry 的 `records/` 另存日期報告。來源缺席時仍以已驗 backup／manifest 重驗；相同 baseline 來源放回時先核全部目的，成功略過且保留放回的來源，不再刪除。`--qubit-kind` 須符合來源元件，不由工具推論。
-
-需要操作者宣告單位或 CSV 欄位時，在首次 dry-run 與正式執行明填：
-
-```text
---assume-flux-unit mA --assume-jpa-flux-unit V
---sample-value-column "calibrated mA" --sample-source-unit mA
-```
-
-這批舊 CSV 使用上述欄名與單位。其他資料請按來源證據填寫，不從欄名猜單位。
-
-`--assume-flux-unit` 只補缺少的 global/predictor 單位證據，報告標「假設單位」，不改明示值，也不換算 component 數字。Global 磁通取同檔、根 meta_info、params 根的 `flux_unit`，之後才用假設。JPA 只取同檔或根 meta_info 的 `jpa_flux_unit`，之後才用獨立的 `--assume-jpa-flux-unit A|V`。未提供這個選項就保持 pending，不借 global 假設。Point 本檔單位可覆寫繼承單位，同組未覆寫的 setup 數字與 metadata 會清除。`local_flux_unit` 只照抄，不影響 global 數值。Owner 不接受的單位或同層明示衝突使該組 pending。Predictor 仍只採 params 根與 fit 的單位證據。
-
-樣本單位獨立由 `--sample-source-unit` 宣告。缺 legacy CSV 宣告或資料非法時，報告按列定位 pending。合法列轉進唯一 qubit 的 `records/components/<component>.jsonl`。V2 CSV 自帶 `dev_value/dev_unit`，不需要 legacy 宣告。Resume 沿用首次提供的四個選項，不能中途改單位或欄位。兩種假設都不能修補非法或衝突的明示單位。API 與 CLI 在任何寫入前拒絕不合法的假設輸入。
+Operator 的路徑、授權、dry-run、備份與重跑程序見 [storage migration CLI 指南](../docs/storage-migration.md#確認路徑與授權)，欄位與單位宣告見 [先執行 dry-run](../docs/storage-migration.md#先執行-dry-run)。
+磁通與樣本的來源優先序、pending 與覆寫規則由 [storage mapping](storage_migration/README.md#meta-欄位對照) 和 [samples mapping](storage_migration/README.md#samples-mapping) 擁有。
 
 根 `module_cfg.yaml` 寫成 setup 的 `library.yaml`，entry 與 point 參數直接產出 `parameters.yaml`。Exps 外的 `image/` 保留完整來源相對路徑，發布到 `result/<entry>/figures/`。其他未支援 result 檔與 `autofluxdep_runs/**` 保留在新 result entry 的相對位置，exps 附屬未知檔放到對應 point。Database 未支援檔保留 entry 相對位置，所有 Labber 原檔則統一放 `Database/<entry>/Labber/<來源相對路徑>`，不依 native 轉換成功與否分流。成功者另產 native，失敗者仍列 pending。CSV 有無法轉換的列時，合法列照常寫入樣本表，另將完整原文保存在 `result/<entry>/samples.csv`。`params.json` 不在新 entry 留副本，原文由完整備份保存。
 

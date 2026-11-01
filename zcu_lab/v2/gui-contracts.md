@@ -1,6 +1,6 @@
 # Measure GUI contracts
 
-**Last updated:** 2026-10-25
+**Last updated:** 2026-11-01
 
 **讀者：** lab-author、framework-dev、agent。查閱 concrete adapter 的來源、分析、writeback 與 capability 契約。
 
@@ -196,7 +196,7 @@ Figures-only 分析回 None，具名圖與空摘要照常保留，不提出 writ
 1. 單一實驗的初值政策留在其 `form.py`；其他設定、文字與流程 policy 留在 authoritative adapter file。
 2. helper 確實出現第二個 caller，且有清楚 mechanics seam 或符合上述共用初值政策邊界時，才移入 `support/measure/`。
 3. 不以 forwarding wrapper 隱藏單行邏輯；不讓 `support` 解讀 registry key 或實驗順序。
-4. 新增 adapter 時同步加入 `../definitions.py` 與 operator guide。實驗定義以直接 review、表單 Open 與 recipe 路徑 smoke 驗證，共享 Load seam 涵蓋合成成功與不支援失敗，不寫 lab 專屬 pytest，也不建立 `tests/zcu_lab/`。Framework owner 用最小合成 adapter 驗證公開契約，不 import `zcu_lab`；刪掉本套件後整套 pytest 仍須通過，包含 slow。
+4. 新增 adapter 時同步加入 `../definitions.py` 與 operator guide；測試邊界與驗收方式遵循 [ADR-0072](../../docs/adr/0072-module-boundaries.md#分層)。
 
 單一實驗的 range centre/span/fallback 直接寫在其 `form.py`。已定案且多個 Form 共用的初值來源、有效性與首次值，可由上述具名 domain helper 擁有。
 writeback target/description/role 仍直接寫在 authoritative adapter；共用 writeback helper 只提供不含這些具體值的 parameterized mechanics。

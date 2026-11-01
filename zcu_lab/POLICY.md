@@ -2,7 +2,7 @@
 
 **讀者：** lab-author、agent。逐條核對 zcu_lab 的程式碼規則、檢查方式與契約來源。
 
-**Last updated:** 2026-10-31
+**Last updated:** 2026-11-01
 
 修改 `zcu_lab` 時逐條核對本頁。每條列出檢查方式與來源，細節以連結的文件為準。
 新增 component、實驗與 recipe 的步驟見 [tutorial](tutorial/README.md)。
@@ -21,7 +21,7 @@ Recipe 函式本體直接列出開 tab、選 module、逐欄 set、逐筆套 ove
 可省略欄位用 KEEP，明填 null 原樣交 owner，分析 updates 也只濾 KEEP。Read 與寫入都用 dotted string。
 Run 子層取消返回 partial。根取消在下一個 await raise 普通 ScriptCancelled；進行中的 Run 先 drain 並保留 facts。Run 留在 try 外，根取消該 await 時 partial 留 tab，不新增 Save finalizer。已進入 try 的流程仍以既有 finally 同步 Save，作者不寫取消分支。
 Analyze／Ask await 回具名值，不以 None 表示根取消。Analyze 例外交給作者，包含 fitting 例外；作者決定是否捕捉，未捕捉就使 recipe failed。只有子層分析取消且無結果的路徑以 AnalysisResult.result=None、status="failed" 與 reason 表示。每次 Analyze 後先檢查 result，取消而無結果時不 Ask、不接受 writeback、不跑相依 Post。
-所有 lab async def 只 await env／tab／session 呼叫或有 lab 定義的 async helper，helpers 本身同樣受檢查。明列 asyncio.*、create_task、gather、wait_for、TaskGroup 的直接呼叫即使不 await 也拒絕，其他 async with／async for 不另禁。Quality gate 執行 AST 檢查，不追蹤 assignment aliases、動態分派或包裝，不是 type checker。
+Lab async 函式的 await 與序列執行限制遵循 [ADR-0075](../docs/adr/0075-agent-interface-layers.md#async-協作與控制命令)。
 來源：[recipe 操作流程](v2/experiment-authoring.md#2-在-recipe-函式本體寫出操作流程)。
 
 ## 3. Docstring 先說量測與結果
@@ -68,9 +68,7 @@ Docstring 沿用量測與元件的名稱，遇到單位、座標或資料形狀�
 
 ## 10. 實驗定義不寫個別 pytest
 
-Adapter、workflow、recipe 與實驗共用 helper 不新增個別 pytest，框架測試用最小合成材料驗證公開契約。
-檢查：審閱變更未為 lab 定義新增測試或逐一走訪 lab registry，實驗載入與表單錯誤由 GUI 回報。
-來源：[使用者實驗的測試](v2/experiment-authoring.md#使用者實驗的測試)。
+Lab 定義的測試邊界與驗收方式遵循 [ADR-0072](../docs/adr/0072-module-boundaries.md#分層)。
 
 ## 11. Startup 腳本與 entry-template 各自獨立
 
