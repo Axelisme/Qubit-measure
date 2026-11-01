@@ -352,7 +352,8 @@ def test_mixed_scale_columns_compare_and_warn_only_for_corruption(
         bad_column is None
     )
     warnings = [
-        record for record in caplog.records
+        record
+        for record in caplog.records
         if record.name == "zcu_tools.experiment.probe" and record.levelname == "WARNING"
     ]
     assert len(warnings) == (0 if bad_column is None else 1)
@@ -364,7 +365,8 @@ def test_mixed_scale_columns_compare_and_warn_only_for_corruption(
 
 
 def test_probe_roundtrips_mixed_scale_grouped_columns(
-    mixed_scale_spec: GroupedAxesSpec[_ColumnResult, SavingCfg], tmp_path: Path,
+    mixed_scale_spec: GroupedAxesSpec[_ColumnResult, SavingCfg],
+    tmp_path: Path,
 ):
     class MixedScaleExperiment(Experiment[_ColumnResult, SavingCfg]):
         AXES_SPEC = mixed_scale_spec
@@ -373,8 +375,11 @@ def test_probe_roundtrips_mixed_scale_grouped_columns(
             return _ColumnResult(np.full((2, 3), 0.122))
 
         def analyze(
-            self, source: RunRecord[SavingCfg, _ColumnResult], options: Any,
-            *, plots: Plots,
+            self,
+            source: RunRecord[SavingCfg, _ColumnResult],
+            options: Any,
+            *,
+            plots: Plots,
         ) -> float:
             return float(source.result.params.sum())
 
@@ -393,17 +398,24 @@ def test_probe_roundtrips_mixed_scale_grouped_columns(
 @pytest.mark.parametrize("index_axis", [-1, 0])
 def test_mixed_scale_identity_column_remains_exact_and_reports_all_bad_columns(
     mixed_scale_spec: GroupedAxesSpec[_ColumnResult, SavingCfg],
-    caplog: pytest.LogCaptureFixture, index_axis: int,
+    caplog: pytest.LogCaptureFixture,
+    index_axis: int,
 ):
-    spec = replace(mixed_scale_spec, variables=tuple(
-        replace(variable, z=replace(variable.z, index_axis=index_axis))
-        for variable in mixed_scale_spec.variables
-    ))
+    spec = replace(
+        mixed_scale_spec,
+        variables=tuple(
+            replace(variable, z=replace(variable.z, index_axis=index_axis))
+            for variable in mixed_scale_spec.variables
+        ),
+    )
     original = _ColumnResult(np.ones((3, 3)))
     restored = _ColumnResult(np.full((3, 3), 1 + 3 * np.finfo(float).eps))
     assert compare_roundtrip(original, restored, spec=spec) is False
-    warnings = [record.message for record in caplog.records
-                if record.name == "zcu_tools.experiment.probe"]
+    warnings = [
+        record.message
+        for record in caplog.records
+        if record.name == "zcu_tools.experiment.probe"
+    ]
     assert len(warnings) == 3
     for column, message in enumerate(warnings):
         assert f"index_axis={index_axis}" in message
@@ -417,7 +429,8 @@ def test_mixed_scale_identity_column_remains_exact_and_reports_all_bad_columns(
 
 @pytest.mark.parametrize("reverse", [False, True])
 def test_mixed_scale_overlapping_declarations_must_all_match(
-    mixed_scale_spec: GroupedAxesSpec[_ColumnResult, SavingCfg], reverse: bool,
+    mixed_scale_spec: GroupedAxesSpec[_ColumnResult, SavingCfg],
+    reverse: bool,
 ):
     scaled = mixed_scale_spec.variables[0]
     exact = replace(scaled, variable="exact", z=replace(scaled.z, index=None, scale=1))

@@ -149,7 +149,9 @@ def _compare_field(
     if before.shape != after.shape:
         logger.warning(
             "Roundtrip field=%s index_axis=None index=None: shape %s != %s",
-            name, before.shape, after.shape,
+            name,
+            before.shape,
+            after.shape,
         )
         return False
     covered = np.zeros(before.shape, dtype=bool)
@@ -164,7 +166,10 @@ def _compare_field(
         if difference is not None:
             logger.warning(
                 "Roundtrip field=%s index_axis=%s index=%s: %s",
-                name, index_axis, index, difference,
+                name,
+                index_axis,
+                index,
+                difference,
             )
             equal = False
     if not np.all(covered):
@@ -172,7 +177,8 @@ def _compare_field(
         if difference is not None:
             logger.warning(
                 "Roundtrip field=%s index_axis=None index=None (undeclared): %s",
-                name, difference,
+                name,
+                difference,
             )
             equal = False
     return equal
@@ -242,7 +248,9 @@ def compare_roundtrip(
             (
                 declaration.scale,
                 declaration.index if isinstance(declaration, VariableZSpec) else None,
-                declaration.index_axis if isinstance(declaration, VariableZSpec) else -1,
+                declaration.index_axis
+                if isinstance(declaration, VariableZSpec)
+                else -1,
             )
             for declaration in declarations
             if declaration.field_name == item.name
