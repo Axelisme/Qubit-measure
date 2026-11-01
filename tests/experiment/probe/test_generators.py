@@ -1,5 +1,7 @@
 """Recover known parameters from generated arrays using public family fitters."""
 
+from dataclasses import replace
+
 import numpy as np
 import pytest
 from numpy.testing import assert_allclose
@@ -96,6 +98,28 @@ def test_resonator_recovers_complex_resonance(coupling_quality: float | None):
     assert fit["edelay"] == pytest.approx(0.02, abs=1e-5)
     assert fit["bg_amp_slope"] == pytest.approx(0.002, abs=1e-5)
     assert fit["bg_phase_curvature"] == pytest.approx(0.0001, abs=1e-6)
+
+
+@pytest.mark.parametrize(
+    "field, coupling_quality",
+    [
+        ("frequency", None),
+        ("frequency", 1100.0),
+        ("loaded_quality", None),
+        ("loaded_quality", 1100.0),
+        ("coupling_quality", 1100.0),
+    ],
+)
+@pytest.mark.parametrize("invalid", [np.nan, np.inf, -np.inf, 0.0, -1.0])
+def test_resonator_rejects_nonfinite_or_nonpositive_frequency_and_quality(
+    field: str, coupling_quality: float | None, invalid: float
+):
+    truth = generators.ResonatorParameters(
+        6000.0, 700.0, coupling_quality, 0.1, 1.7 + 0.3j, 0.02, 0.002, 0.0001
+    )
+    truth = replace(truth, **{field: invalid})
+    with pytest.raises(ValueError, match=field):
+        generators.generate_resonator(np.array([5990.0, 6000.0, 6010.0]), truth, 0.0, 17)
 
 
 def test_qubit_frequency_recovers_dip_center_and_linewidth():
