@@ -124,6 +124,24 @@ class _Profile(_Settings):
     mux: list[_Mux]
 
 
+def _validate_wave_ports(profile: _Profile) -> None:
+    users = [
+        (f"generators.{index}.tproc_ch", channel.tproc_ch, channel.tmux_ch)
+        for index, channel in enumerate(profile.generators)
+    ]
+    users.extend(
+        (f"readouts.{index}.tproc_ctrl", channel.tproc_ctrl, channel.tmux_ch)
+        for index, channel in enumerate(profile.readouts)
+        if channel.tproc_ctrl is not None
+    )
+    ports: dict[int, set[int | None]] = {}
+    for path, port, selector in users:
+        selectors = ports.setdefault(port, set())
+        if selectors and (selector is None or None in selectors or selector in selectors):
+            raise ValueError(f"{path}: shared wave-output port requires distinct tmux_ch")
+        selectors.add(selector)
+
+
 def _generators(
     profile: _Profile,
 ) -> tuple[list[dict[str, object]], dict[str, dict[str, object]]]:
@@ -262,6 +280,7 @@ def build_soccfg(profile: Mapping[str, object]) -> QickConfig:
     or environment state are read. Input and output share no mutable values.
     """
     settings = _Profile.model_validate(profile)
+    _validate_wave_ports(settings)
     gens, dacs = _generators(settings)
     readouts, adcs = _readouts(settings)
     _apply_mux(settings, gens, readouts)
