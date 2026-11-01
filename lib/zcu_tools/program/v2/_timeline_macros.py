@@ -873,11 +873,13 @@ class ModuleEmission(TimedMacro):
         try:
             pending: dict[str, list[EventEnd | SelectedEventEnd]] = {}
             self.finishers = []
-            readout = any(isinstance(macro, ReadoutEmission) for macro in self.macros)
+            readout = False
             for macro in self.macros:
                 source = (
                     macro.source if isinstance(macro, PreparedTimelineMacro) else macro
                 )
+                if isinstance(source, ReadoutEmission):
+                    readout = True
                 if isinstance(
                     source,
                     (
