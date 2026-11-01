@@ -1,6 +1,6 @@
 """Starting values captured from the selected qubit and resonator."""
 
-from zcu_tools.cfg_model import Range, Slot, Template
+from zcu_tools.cfg_model import Range, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
 from zcu_lab.v2.support.measure.ctx_helpers import source, t1_initial_time

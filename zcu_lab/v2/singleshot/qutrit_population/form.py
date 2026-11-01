@@ -1,6 +1,6 @@
 """Captured calibration sources for the three reference preparations."""
 
-from zcu_tools.cfg_model import Hidden, Slot, Template
+from zcu_tools.cfg_model import Hidden, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
 from zcu_lab.v2.support.measure.ctx_helpers import source, t1_initial_time

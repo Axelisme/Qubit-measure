@@ -1,6 +1,6 @@
 """Starting values for singleshot/ac_stark; sources are captured at Open/Reset."""
 
-from zcu_tools.cfg_model import Expr, Hidden, Range, Slot, Template
+from zcu_tools.cfg_model import Expr, Hidden, Range, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
 from zcu_lab.v2.singleshot.ac_stark.core import AcStarkCfg
