@@ -54,7 +54,40 @@ def sample_iq_shots(
     shots: int,
     seed: int,
 ) -> NDArray[np.complex128]:
-    """Draw raw IQ from two centers using each row's excited-state population."""
+    """Draw raw complex128 IQ with shape (len(excited_population), shots).
+
+    excited_population is a finite 1D array of probabilities in [0, 1], one per
+    row; it may be empty. Each shot independently selects e_center with that
+    row's probability, otherwise g_center. Both centers must be finite complex
+    IQ coordinates. width is the finite, nonnegative Gaussian standard
+    deviation in each quadrature, in the centers' IQ units. Independent
+    N(0, width**2) noise is added to I and Q, without a grid or truncation.
+    shots is a nonnegative integer, not bool; zero returns zero columns.
+
+    seed initializes a local NumPy RNG without changing global random state.
+    Invalid population, centers, width or shots raise ValueError. NumPy seed
+    and sampling errors propagate unchanged. No inputs are modified.
+    Use populations [0, 1] for GE, [p, 1-p] for symmetric preparation errors,
+    or a population curve for a sweep.
+
+    Example sampling pure ground and excited preparations:
+        >>> iq = sample_iq_shots(np.array([0.0, 1.0]), g_center=-1+0j,
+        ...                      e_center=1+0j, width=0.2, shots=1000, seed=17)
+        >>> iq.shape
+        (2, 1000)
+    """
+    if (
+        excited_population.ndim != 1
+        or not np.all(np.isfinite(excited_population))
+        or np.any((excited_population < 0) | (excited_population > 1))
+    ):
+        raise ValueError("excited_population must be finite, 1D and in [0, 1]")
+    if not np.isfinite(g_center) or not np.isfinite(e_center):
+        raise ValueError("g_center and e_center must be finite")
+    if not np.isfinite(width) or width < 0:
+        raise ValueError("width must be finite and nonnegative")
+    if isinstance(shots, bool) or not isinstance(shots, (int, np.integer)) or shots < 0:
+        raise ValueError("shots must be a nonnegative integer, not bool")
     rng = np.random.default_rng(seed)
     excited = rng.random((len(excited_population), shots)) < excited_population[:, None]
     centers = np.where(excited, np.complex128(e_center), np.complex128(g_center))
