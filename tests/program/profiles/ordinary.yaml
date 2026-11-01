@@ -16,7 +16,7 @@ tprocs:
     start_pin: none
     stop_pin: none
 generators:
-  - count: 2
+  - &generators0
     type: axis_signal_gen_v6
     fs_mult: 50
     fs_div: 1
@@ -32,8 +32,15 @@ generators:
     has_mixer: false
     maxv: 32766
     maxv_scale: 1.0
+    dac: '00'
+    tproc_ch: 0
+    tmux_ch: null
+  - <<: *generators0
+    dac: '01'
+    tproc_ch: 1
+    tmux_ch: null
 readouts:
-  - count: 1
+  - &readouts0
     type: axis_readout_v2
     ro_type: axis_readout_v2
     fs_mult: 10
@@ -49,9 +56,15 @@ readouts:
     has_weights: false
     has_outsel: true
     iq_offset: 0.0
+    coupling: AC
+    adc: '00'
+    tproc_ctrl: 2
+    tmux_ch: null
     trigger_type: dport
     trigger_port: 0
-    coupling: AC
+    trigger_bit: 0
+    tproc_ch: 0
+    b_phase: null
 rf:
   dac_power: VOP
   clk_groups: []

@@ -41,24 +41,19 @@ def test_explicit_wiring_and_optional_connections_reach_qick(profile):
 
 
 @pytest.mark.parametrize("profile", ["derivation"], indirect=True)
-def test_independent_clocks_and_channel_groups_are_derived(profile):
+def test_independent_channel_clocks_are_derived(profile):
     # This dedicated YAML is the worked example, not an ordinary board profile.
     profile["mux"] = []
     gen = profile["generators"][0]
     other = deepcopy(gen)
-    other.update(count=1, fs_mult=18)
+    other.update(dac="35", tproc_ch=9, fs_mult=18)
     profile["generators"].append(other)
-    profile["readouts"][0]["count"] = 2
     cfg = program.build_soccfg(profile)
     assert [g["f_dds"] for g in cfg["gens"]] == [400.0, 400.0, 600.0]
     assert [g["f_fabric"] for g in cfg["gens"]] == [200.0, 200.0, 300.0]
     assert cfg["gens"][0]["fs"] == 800.0
     assert cfg["gens"][0]["fdds_div"] == 6
     assert cfg["rf"]["dacs"]["00"]["f_fabric"] == 100.0
-    assert cfg["gens"][2]["dac"] == "02"
-    assert cfg["gens"][2]["tproc_ch"] == 2
-    assert [r["tproc_ctrl"] for r in cfg["readouts"]] == [3, 4]
-    assert [r["trigger_bit"] for r in cfg["readouts"]] == [0, 1]
     assert cfg["readouts"][1]["fs"] == 900.0
     assert cfg["readouts"][1]["f_dds"] == 300.0
     assert cfg["readouts"][1]["f_output"] == 60.0
@@ -70,7 +65,7 @@ def test_independent_clocks_and_channel_groups_are_derived(profile):
 def test_mux_clocks_follow_refclk_and_channelization(profile):
     # 200*12/3/8 = 100 MHz; 200*9/2/3/(64/2) = 9.375 MHz.
     # RF fabric precedes PFB output and uses 900/(3*8) = 37.5 MHz.
-    profile["readouts"][0]["samps_per_clk"] = 8
+    profile["readouts"][4]["samps_per_clk"] = 8
     cfg = program.build_soccfg(profile)
     assert cfg["gens"][1]["f_dds"] == 100.0
     assert cfg["gens"][1]["fdds_div"] == 24
@@ -117,7 +112,7 @@ def test_invalid_clock_divider_reports_path(profile, invalid):
 @pytest.mark.parametrize("channels", [[], [1, 1], "outside_profile", [-1], [True]])
 def test_invalid_mux_routes_report_path(profile, channels):
     if channels == "outside_profile":
-        channels = [sum(group["count"] for group in profile["readouts"])]
+        channels = [len(profile["readouts"])]
     profile["mux"][0]["ro_chs"] = channels
     with pytest.raises(ValueError, match=r"mux\.0\.ro_chs"):
         program.build_soccfg(profile)
@@ -133,7 +128,7 @@ def test_pfb_channelization_requires_an_integer_clock_divider(profile, channels)
 
 @pytest.mark.parametrize("profile", ["mux"], indirect=True)
 def test_mux_generator_outside_profile_reports_path(profile):
-    profile["mux"][0]["gen_ch"] = sum(group["count"] for group in profile["generators"])
+    profile["mux"][0]["gen_ch"] = len(profile["generators"])
     with pytest.raises(ValueError, match=r"mux\.0\.gen_ch"):
         program.build_soccfg(profile)
 
