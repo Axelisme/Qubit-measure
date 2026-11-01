@@ -203,13 +203,6 @@ class MuxT1Cfg(ConfigBase):
         int,
         FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
     ] = 1
-    acquire_retry: Annotated[
-        int,
-        FieldMeta(
-            label="Acquire retry",
-            description="Retries after a transient acquisition failure.",
-        ),
-    ] = Field(default=0, ge=0)
     earlystop_snr: Annotated[
         float | None,
         FieldMeta(
@@ -365,7 +358,6 @@ class MuxT1Exp(Experiment[MuxT1Result, MuxT1Cfg]):
                 rounds=cfg.rounds,
                 options=RunOptions(
                     converter=partial(averaged_mux_signal, prog, readout_module),
-                    retry=cfg.acquire_retry,
                     stop_condition=mux_snr_checker(
                         signals, cfg.earlystop_snr, tone_axis=1
                     ),
@@ -442,7 +434,6 @@ class MuxT1Exp(Experiment[MuxT1Result, MuxT1Cfg]):
                 rounds=cfg.rounds,
                 options=RunOptions(
                     converter=partial(averaged_mux_signal, prog, readout_module),
-                    retry=cfg.acquire_retry,
                     stop_condition=mux_snr_checker(
                         signals, cfg.earlystop_snr, tone_axis=1
                     ),

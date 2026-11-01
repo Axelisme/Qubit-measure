@@ -13,7 +13,7 @@ from numpy.typing import NDArray
 from zcu_tools.experiment.v2.utils import estimate_snr
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2.twotone.freq.core import qubfreq_signal2real
+from zcu_lab.workflows.common.calibration_acquire import qubfreq_signal2real
 from zcu_lab.workflows.common.calibration_analysis import FrequencyFit
 
 

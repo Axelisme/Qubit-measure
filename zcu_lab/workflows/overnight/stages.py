@@ -1,6 +1,7 @@
 """Build overnight experiments from fixed pulses, settings and lifetime guesses."""
 
 from dataclasses import dataclass
+from functools import partial
 from typing import Literal
 
 import numpy as np
@@ -19,6 +20,7 @@ from zcu_lab.workflows.common.analysis import (
 from zcu_lab.workflows.common.calibration_results import StageStatus
 from zcu_lab.workflows.common.gain import GainClamp, clamp_gain
 from zcu_lab.workflows.common.gates import Gate, gate
+from zcu_lab.workflows.common.lifetime_acquire import run_t1, run_t2echo
 from zcu_lab.workflows.common.lifetime_models import (
     LifetimeModelRecord,
     show_lifetime_comparison,
@@ -203,7 +205,6 @@ async def measure_t1(
         sampling=settings.sampling,
         reps=settings.reps,
         rounds=settings.rounds,
-        acquire_retry=settings.acquire_retry,
         earlystop_snr=settings.earlystop_snr,
         relax_delay=max(settings.relax_min_us, settings.relax_factor * guess_us),
         pi_pulse=pulses.pi,
@@ -213,7 +214,7 @@ async def measure_t1(
     acquisition = await acquire_saved(
         scope,
         env,
-        T1Exp().run,
+        partial(run_t1, retry=settings.acquire_retry),
         cfg,
         name="T1",
         output=NativeOutput(filename="t1.h5", spec=T1Exp.AXES_SPEC),
@@ -269,7 +270,6 @@ async def measure_echo(
     cfg = T2EchoCfg(
         reps=settings.reps,
         rounds=settings.rounds,
-        acquire_retry=settings.acquire_retry,
         earlystop_snr=settings.earlystop_snr,
         relax_delay=timing.relax_delay_us,
         pi_pulse=pulses.pi,
@@ -282,7 +282,7 @@ async def measure_echo(
     acquisition = await acquire_saved(
         scope,
         env,
-        T2EchoExp().run,
+        partial(run_t2echo, retry=settings.acquire_retry),
         cfg,
         name="Echo",
         output=NativeOutput(filename="t2echo.h5", spec=T2EchoExp.AXES_SPEC),

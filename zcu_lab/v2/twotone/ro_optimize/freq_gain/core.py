@@ -61,13 +61,6 @@ class FreqGainCfg(ConfigBase):
         int,
         FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
     ] = 1
-    acquire_retry: Annotated[
-        int,
-        FieldMeta(
-            label="Acquire retry",
-            description="Retries after a transient acquisition failure.",
-        ),
-    ] = Field(default=0, ge=0)
     relax_delay: Annotated[
         float,
         FieldMeta(
@@ -190,7 +183,6 @@ class FreqGainExp(Experiment[FreqGainResult, FreqGainCfg]):
                 soc,
                 rounds=cfg.rounds,
                 options=RunOptions(
-                    retry=cfg.acquire_retry,
                     converter=lambda _raw: snr_as_signal(
                         [tracker],
                         ge_axis=1,

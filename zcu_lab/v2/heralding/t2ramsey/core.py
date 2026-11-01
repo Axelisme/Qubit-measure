@@ -97,13 +97,6 @@ class HeraldingT2RamseyCfg(ConfigBase):
         int,
         FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
     ] = 1
-    acquire_retry: Annotated[
-        int,
-        FieldMeta(
-            label="Acquire retry",
-            description="Retries after a transient acquisition failure.",
-        ),
-    ] = Field(default=0, ge=0)
     earlystop_snr: Annotated[
         float | None,
         FieldMeta(
@@ -235,7 +228,6 @@ class HeraldingT2RamseyExp(Experiment[HeraldingT2RamseyResult, HeraldingT2Ramsey
                 processor=shot_sums(prog, [Classify("herald"), IQ("signal")]),
                 options=RunOptions(
                     converter=np.copy,
-                    retry=cfg.acquire_retry,
                     stop_condition=snr_checker(
                         buffer.at(),
                         cfg.earlystop_snr,

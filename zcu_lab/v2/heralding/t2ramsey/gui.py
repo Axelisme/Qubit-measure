@@ -111,7 +111,6 @@ def _run(
     cfg = HeraldingT2RamseyCfg(
         reps=inp.reps,
         rounds=inp.rounds,
-        acquire_retry=inp.acquire_retry,
         earlystop_snr=inp.earlystop_snr,
         relax_delay=inp.relax_delay,
         reset=inp.reset,

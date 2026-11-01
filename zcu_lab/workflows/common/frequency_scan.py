@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import replace
+from functools import partial
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -12,13 +13,12 @@ from zcu_tools.experiment.scope import Scope
 from zcu_tools.experiment.workflows import Failed
 from zcu_tools.program.v2.modules import PulseCfg
 
-from zcu_lab.v2.twotone.freq.analysis import FreqAnalyzeOptions
 from zcu_lab.v2.twotone.freq.core import (
     FreqCfg,
     FreqExp,
     FreqResult,
-    qubfreq_signal2real,
 )
+from zcu_lab.workflows.common.calibration_acquire import qubfreq_signal2real, run_freq
 from zcu_lab.workflows.common.calibration_analysis import (
     FrequencyFit,
     analyze_qubit_freq,
@@ -131,7 +131,7 @@ async def acquire_frequency_scan(
     outcome = await acquire_saved(
         scope,
         env,
-        FreqExp().run,
+        partial(run_freq, retry=settings.qf_acquire_retry),
         cfg,
         name="frequency",
         output=NativeOutput(filename=scan.file, spec=FreqExp.AXES_SPEC),
@@ -195,13 +195,8 @@ def fit_frequency_scan(
         ), Failed("Selected peak is truncated")
     fit = analyze_qubit_freq(
         result,
-        FreqAnalyzeOptions(
-            expected_center_mhz=expected_center_mhz,
-            min_prominence=tun.peak_min_prominence,
-            min_distance_mhz=tun.peak_min_distance_mhz,
-            min_snr=tun.peak_min_snr,
-            min_width_samples=tun.peak_min_width_samples,
-        ),
+        tun,
+        expected_center_mhz=expected_center_mhz,
         peaks=peaks,
         isolate_peaks=scan.stage != "single",
     )

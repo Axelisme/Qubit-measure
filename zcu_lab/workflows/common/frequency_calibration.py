@@ -59,7 +59,6 @@ def _frequency_cfg(
     return FreqCfg(
         reps=tun.qf_reps,
         rounds=tun.qf_rounds,
-        acquire_retry=tun.qf_acquire_retry,
         earlystop_snr=tun.qf_earlystop_snr,
         relax_delay=1.0,
         qub_pulse=drive,

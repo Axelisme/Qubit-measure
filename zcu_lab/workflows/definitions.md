@@ -136,7 +136,7 @@ Coherence 與 MIST 共用的 calibrate_point（`common/point_calibration.py`）�
 校準的 unexpected exception 不回傳 aggregate。例如 frequency 成功後 Rabi 內部 bug，finally 保存的 point 不含 frequency 結果，但 frequency 已存的 h5 仍在磁碟，run 失敗。
 主迴圈用 try/finally，在 finally 同步 iteration.commit(point_record) 一次，正常、continue 與例外都經過同一提交位置。
 每個 operation 只呼叫一次，停止後不自動重試。
-子層取消後 core 回傳就交付 Completed。作者先保存 raw，再檢查 facts.stopped，保留原有拒絕原因，不進擬合或接受。
+子層取消後 workflow 取數 helper 回傳就交付 Completed。作者先保存 raw，再檢查 facts.stopped，保留原有拒絕原因，不進擬合或接受。
 量測間若 iteration.cancelled，補 status="skipped" 再 continue，只跳過目前點。Helper 以 return 退出該點。
 根 Stop 在 async operation 或 Ask raise ScriptCancelled。Finally 提交已有成果，不改 status，例外繼續向上傳播。
 分析 helper 對非有限 measured IQ 回 Failed(reason)，不填值或 mask。Native fitter 的具名 AnalysisFailed 與訊息恰為 `array must not contain infs or NaNs` 的 scipy ValueError 也轉 Failed。Caller 記 status=failed 並保留 raw 檔名。
@@ -159,7 +159,7 @@ T1 relax 為 `max(relax_min_us, relax_factor*t1_guess_us)`。
 Echo relax 為 `max(relax_min_us, relax_factor*T1估計)`，優先使用同一輪剛接受的 T1，未接受時用 `t1_guess_us`，不沿用前輪 fit。
 `relax_min_us` 預設 1 µs，允許 0。兩個 delay grid 仍由 `sweep_factor` 乘各自 guess 決定，fit 不改 pulse、readout 或後續輪次的 guess。
 Point 的 `echo_relax_delay_us` 記 Echo cfg 實際使用的等待時間，`echo_t1_source` 記 `accepted_t1` 或 `guess`。尚未建立 Echo cfg 時兩欄為 None。
-Tunables 的 `sampling` 預設 linear，控制 T1 的線性 delay sweep。設 decay 時，native T1 在同一 start/stop 視窗內把 delay 集中在衰減段，Echo 不變。
+Tunables 的 `sampling` 預設 linear，控制 T1 的線性 delay sweep。設 decay 時，workflow T1 helper 在同一 start/stop 視窗內把 delay 集中在衰減段，Echo 不變。
 它不呼校準，不讀 context，也不因 Coherence 合併增加 calibration。
 每個 Completed member 先保存 raw，partial 不擬合並記原有原因。預期 fit failure 記 reason 且 lifetime/error 為 None。
 目前 iteration 未取消時才開始另一 member。取消的 pair 留 status="skipped" 與已取得欄位，再進下一點。
@@ -175,12 +175,13 @@ Stop 保留既有 commits。要接續量測，開新 run 並從 saved_run 初始
 沒有自動保存或從 run 目錄重開趨勢圖。保存責任見 ADR-0062。
 
 `overnight_mux` 保留 overnight 的有限 pair、開始間隔、不追趕排程、取消與 finally commit。
-每輪先用 `MuxT1Exp` 同時量所有 participants，再用 `MuxT2EchoExp` 同時量 Echo。它不設定 flux，也不校準。
+每輪先用 `overnight_mux.acquire.run_mux_t1` 同時量所有 participants，再用同模組的 `run_mux_t2echo` 同時量 Echo。
+兩者自己組 program，保存沿用 `MuxT1Exp.AXES_SPEC`／`MuxT2EchoExp.AXES_SPEC`。Workflow 不設定 flux，也不校準。
 Echo 的共用 relax 取同一輪 participants 已接受 T1 的最大值乘 `relax_factor`，沒有接受值時用 `t1_guess_us`。兩個 member 套用相同的 `relax_min_us` 下限，來源與實際等待時間保存在 point 的同名欄位。
 Plan 保存完整 mux readout 順序、participants 原始索引、每個 tone 的已校準 x180 與獨立 x90、可省略的共用 reset，以及歷史 snapshot。
 Mux tunables 與 overnight 的欄位及意義相同。`sampling` 預設 linear，只控制 T1 的取樣分布，所有 participants 共用同一條 delay grid。
-設 `sampling=decay` 時使用 native mux T1 的非均勻 cycle table，Echo 仍為線性。兩個 guess 請分別填最長的 T1 與 Echo。
-Native mux 分析逐 tone 擬合，再各自套 overnight 的 relative-error 與 normalized-residual 門檻。
+設 `sampling=decay` 時使用 workflow mux T1 helper 的非均勻 cycle table，Echo 仍為線性。兩個 guess 請分別填最長的 T1 與 Echo。
+`overnight_mux.analysis` 直接呼叫 `zcu_tools.analysis` 的 fit 工具逐 participant 擬合，再各自套 overnight 的 relative-error 與 normalized-residual 門檻。
 Overnight 與 mux 沿用 Coherence 的雙模型診斷，分別保存在 point 與每個 qubit 的 `t1_models/t2_models`。
 T1 的副模型為雙指數，零 detune Echo 的副模型為零中心高斯；圖上兩條曲線都標示。`max_model_window_factor` 只控制診斷 discarded，不改接受值、Echo relax 或趨勢圖。
 每輪保存兩個 native 檔名、排程與實際 UTC 開始時間、status，以及每個 participant 的名稱、T1/Echo 接受值、誤差與原因。
@@ -220,7 +221,10 @@ Schedule acquisition 的 retry 與 data-driven early stop 只寫日誌，不在�
 
 作者用 zip(plan.fluxes, env.iterations()) 取得每點的 Scope，第一次用 iteration.dir 才建 absolute 保存目錄。
 目錄是 data root 下的 iteration-000001，nested child 再按 label 與 sequence 鏡射。Commit 序號另按提交順序增加。
-Workflow 在 run_core(iteration, core.run, cfg) 返回 Completed 後呼既有 exact-path native writer，fit 拒絕仍保存 raw。
+Workflow 以 `run_core(iteration, acquire, cfg)` 呼叫自己組 program 的同步取數函式。
+返回 Completed 後呼既有 exact-path native writer，fit 拒絕仍保存 raw。
+Retry 從 workflow settings 以 `functools.partial` 綁入 acquire。
+Cfg／Result 型別與存檔用的 `<Exp>.AXES_SPEC` 沿用 core，workflow 不實例化 core Exp。
 Point 引用是相對該目錄的 filename，不保證檔案完整或仍存在。Stop 可能留下未提交檔案。
 Writer 收 `Completed[RunRecord]`，從 value 取得 cfg/result，從 facts 取得 acquisition 時間，從 record.metadata 保留 device snapshot。
 Caller 顯式傳入 completion、`env.identity` 與歷史 `RunSnapshot`。Saver 合併既有 `RunMetadata` 到 record.metadata，保留裝置快照與作者欄位，不捕捉新事實。
@@ -272,9 +276,9 @@ Latest-wins 由 record table owner 決定，重匯出更新整列，僅 append �
 
 `common.devices.set_flux` 讀 live typed cfg，重用 check_flux_unit，再以 model_copy 只改 value，await 完整 setup。
 Fake 明填 native；YOKO 明填 A 或 V。Plan／表單不推測、換算單位或預驗 connected membership。
-每次 run_core 在 core callback 前 capture connected drivers，寫入 RunRecord.metadata["device_snapshot"]。Native saver 保留該快照，不因 alias 修改或 Save 刷新 snapshot。
+每次 run_core 在 workflow acquire 前 capture connected drivers，寫入 RunRecord.metadata["device_snapshot"]。Native saver 保留該快照，不因 alias 修改或 Save 刷新 snapshot。
 
-核心只透過當次 RunContext.plots 更新 native typed handles；buffer callback 只送座標與複數資料。
+取數 helper 只透過當次 RunContext.plots 更新 native typed handles；buffer callback 只送座標與複數資料。
 每次 Scope.call 使用同 host 的獨立 operation Plots，完成後 finish。新 attempt release 並替換舊 operation，workflow 趨勢圖留在 env.plots。
 Coherence 與 MIST 的 workflow 校準圖為 `calibration/qubit_freq`、`calibration/len_rabi`、`calibration/readout`。
 Frequency 圖上方畫 accepted f01 對 flux，下方畫 flux × detune heatmap 與目前 trace/fit。Detune 相對各點掃描中心。

@@ -8,6 +8,7 @@ import numpy as np
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
+from pydantic import Field
 from pydantic.dataclasses import dataclass as pydantic_dataclass
 from zcu_tools.analysis.fitting.multi_decay import fit_dual_transition_rates
 from zcu_tools.analysis.singleshot import correct_populations
@@ -16,6 +17,7 @@ from zcu_tools.datafile import DataVariable
 from zcu_tools.experiment import AxesSpec, Experiment
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
+from zcu_tools.experiment.v2.runtime import RunOptions
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.experiment.v2.utils.t1_sampling import (
@@ -166,6 +168,13 @@ class T1WithToneSweepCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
+    acquire_retry: Annotated[
+        int,
+        FieldMeta(
+            label="Acquire retry",
+            description="Retries after a transient acquisition failure.",
+        ),
+    ] = Field(default=0, ge=0)
 
 
 @pydantic_dataclass(frozen=True, config={"arbitrary_types_allowed": True})
@@ -342,6 +351,7 @@ class T1WithToneSweepExp(Experiment[T1WithToneSweepResult, T1WithToneSweepCfg]):
                 step.run_acquire_summed(
                     program,
                     soc,
+                    options=RunOptions(retry=cfg.acquire_retry),
                     processor=shot_sums(program, [axis]),
                     rounds=cfg.rounds,
                 )

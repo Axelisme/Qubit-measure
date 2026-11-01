@@ -8,7 +8,8 @@ from typing import TYPE_CHECKING
 import numpy as np
 from zcu_tools.experiment.v2.utils.snr import estimate_snr
 
-from zcu_lab.v2.twotone.freq.core import FreqResult, qubfreq_signal2real
+from zcu_lab.v2.twotone.freq.core import FreqResult
+from zcu_lab.workflows.common.calibration_acquire import qubfreq_signal2real
 from zcu_lab.workflows.common.calibration_analysis import FrequencyFit
 from zcu_lab.workflows.common.calibration_results import (
     FrequencyDiagnostics,

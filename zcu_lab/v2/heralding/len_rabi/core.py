@@ -96,13 +96,6 @@ class HeraldingLenRabiCfg(ConfigBase):
         int,
         FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
     ] = 1
-    acquire_retry: Annotated[
-        int,
-        FieldMeta(
-            label="Acquire retry",
-            description="Retries after a transient acquisition failure.",
-        ),
-    ] = Field(default=0, ge=0)
     earlystop_snr: Annotated[
         float | None,
         FieldMeta(
@@ -242,9 +235,7 @@ class HeraldingLenRabiExp(Experiment[HeraldingLenRabiResult, HeraldingLenRabiCfg
                 context.soc,
                 rounds=cfg.rounds,
                 processor=shot_sums(prog, [Classify("herald"), IQ("signal")]),
-                options=RunOptions(
-                    converter=np.copy, retry=cfg.acquire_retry, stop_condition=check_snr
-                ),
+                options=RunOptions(converter=np.copy, stop_condition=check_snr),
             )
         return HeraldingLenRabiResult(lengths, buffer.array)
 
@@ -305,9 +296,7 @@ class HeraldingLenRabiExp(Experiment[HeraldingLenRabiResult, HeraldingLenRabiCfg
                             processor=shot_sums(
                                 prog, [Classify("herald"), IQ("signal")]
                             ),
-                            options=RunOptions(
-                                converter=np.copy, retry=cfg.acquire_retry
-                            ),
+                            options=RunOptions(converter=np.copy),
                         )
                     finally:
                         segments = acquisition_buffer.array

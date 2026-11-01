@@ -7,6 +7,7 @@ from typing import Annotated, ClassVar, Literal
 import numpy as np
 from matplotlib.ticker import MaxNLocator, ScalarFormatter
 from numpy.typing import NDArray
+from pydantic import Field
 from zcu_tools.cfg_model import ConfigBase, DeviceName, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment
 from zcu_tools.experiment.context import RunContext
@@ -73,7 +74,13 @@ class FreqFluxCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-    fail_retry: int = 0
+    acquire_retry: Annotated[
+        int,
+        FieldMeta(
+            label="Acquire retry",
+            description="Retries after a transient acquisition failure.",
+        ),
+    ] = Field(default=0, ge=0)
 
 
 class FreqFluxExp(Experiment[FreqFluxResult, FreqFluxCfg]):
@@ -87,7 +94,7 @@ class FreqFluxExp(Experiment[FreqFluxResult, FreqFluxCfg]):
         result_type=FreqFluxResult,
         cfg_type=FreqFluxCfg,
         tag="twotone/flux_dep/freq",
-        cfg_schema_version="3.0",
+        cfg_schema_version="3.1",
     )
 
     def run(
@@ -102,7 +109,7 @@ class FreqFluxExp(Experiment[FreqFluxResult, FreqFluxCfg]):
         sweep the qubit probe frequency on the FPGA, then read out. Return
         mean complex IQ on the (flux, frequency) grid; no line is selected.
         ``flux_dev`` must name a context device accepting ``flux_unit``;
-        values are passed in that unit without conversion. ``fail_retry``
+        values are passed in that unit without conversion. ``acquire_retry``
         controls acquisition retries at each flux point.
         """
         # Prepare the device-value axis and the probe's hardware frequency grid.
@@ -177,7 +184,7 @@ class FreqFluxExp(Experiment[FreqFluxResult, FreqFluxCfg]):
                 step.run_acquire(
                     prog,
                     soc,
-                    options=RunOptions(retry=cfg.fail_retry),
+                    options=RunOptions(retry=cfg.acquire_retry),
                     rounds=cfg.rounds,
                 )
 
