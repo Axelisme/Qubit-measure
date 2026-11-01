@@ -17,8 +17,12 @@ from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg, CosineWavefo
 from zcu_tools.program.v2.timeline import TimelineProgramV2
 
 from tests.program._profiles import GEN_MHZ, TPROC_MHZ, load_soccfg
-from tests.program._timing_expectations import generator_duration, native_sweep, readout_duration, tproc_ceil
-
+from tests.program._timing_expectations import (
+    generator_duration,
+    native_sweep,
+    readout_duration,
+    tproc_ceil,
+)
 from tests.program.v2.timing_support import shots as _shots
 from tests.program.v2.timing_support import waves as _waves
 
@@ -26,7 +30,9 @@ PROFILE = load_soccfg(3, 1)
 PULSE_END = tproc_ceil(PROFILE, generator_duration(PROFILE, 0.1))
 READ_PRE = tproc_ceil(PROFILE, 0.05)
 READ_TRIGGER = tproc_ceil(PROFILE, 0.1)
-READ_END = READ_PRE + tproc_ceil(PROFILE, generator_duration(PROFILE, 0.3, 1) + Fraction('0.02'))
+READ_END = READ_PRE + tproc_ceil(
+    PROFILE, generator_duration(PROFILE, 0.3, 1) + Fraction("0.02")
+)
 READ_SHELL = round(READ_TRIGGER + readout_duration(PROFILE, 0.4) * TPROC_MHZ)
 
 
@@ -108,14 +114,15 @@ def test_shared_pulse_definitions_deduplicate_in_each_program():
 
 @pytest.mark.parametrize("timeline", [None, "drive"])
 @pytest.mark.parametrize(
-    "delays", [(0, 0), (0.01, 0.02)],
+    "delays",
+    [(0, 0), (0.01, 0.02)],
 )
-def test_reused_scalar_pulse_has_independent_tags_and_common_end(
-    timeline, delays
-):
+def test_reused_scalar_pulse_has_independent_tags_and_common_end(timeline, delays):
     pre_delay, post_delay = delays
     pre = tproc_ceil(PROFILE, pre_delay)
-    end = pre + tproc_ceil(PROFILE, generator_duration(PROFILE, 0.1) + Fraction(str(post_delay)))
+    end = pre + tproc_ceil(
+        PROFILE, generator_duration(PROFILE, 0.1) + Fraction(str(post_delay))
+    )
     events = [pre, end + pre]
     duration = 2 * end
     pulse = _pulse(pre_delay=pre_delay, post_delay=post_delay)
@@ -160,8 +167,15 @@ def test_joined_emissions_preserve_parallel_origins_and_event_end(swept):
         prog.emit(tail)
 
     shots = _shots(_program([a, b, tail], body, initialize))
-    lengths = native_sweep(PROFILE, 77 / GEN_MHZ, 127 / GEN_MHZ, 3, gen_ch=1) if swept else [int(PROFILE.us2cycles(0.2, gen_ch=1))]
-    branch_ends = [max(PULSE_END, tproc_ceil(PROFILE, generator_duration(PROFILE, n / GEN_MHZ, 1))) for n in lengths]
+    lengths = (
+        native_sweep(PROFILE, 77 / GEN_MHZ, 127 / GEN_MHZ, 3, gen_ch=1)
+        if swept
+        else [int(PROFILE.us2cycles(0.2, gen_ch=1))]
+    )
+    branch_ends = [
+        max(PULSE_END, tproc_ceil(PROFILE, generator_duration(PROFILE, n / GEN_MHZ, 1)))
+        for n in lengths
+    ]
     expected = [[0, 0, end] for end in branch_ends]
     assert [_waves(s) for s in shots] == expected * 2
     ends = [end + PULSE_END for end in branch_ends]
@@ -199,7 +213,9 @@ def test_default_emit_only_moves_end_until_sync(delay_by_timeline):
         prog.pulse(0, pulse.pulse_name(prog))
 
     shots = _shots(_program([pulse], body))
-    assert [_waves(s) for s in shots] == [[0, PULSE_END if delay_by_timeline else 0]] * 2
+    assert [_waves(s) for s in shots] == [
+        [0, PULSE_END if delay_by_timeline else 0]
+    ] * 2
     assert [s.body_end_cycle - s.start_cycle for s in shots] == [PULSE_END] * 2
 
 
@@ -287,7 +303,10 @@ def test_t1_including_readout_uses_event_end_at_each_scan_point(
     assert [
         [(e.cycle - s.start_cycle, e.value) for e in s.events if e.kind == "data"]
         for s in shots
-    ] == [[(offset + READ_TRIGGER, 1), (offset + READ_TRIGGER + 10, 0)] for offset in offsets] * 2
+    ] == [
+        [(offset + READ_TRIGGER, 1), (offset + READ_TRIGGER + 10, 0)]
+        for offset in offsets
+    ] * 2
     assert [s.body_end_cycle - s.start_cycle for s in shots] == [
         offset + READ_END for offset in offsets
     ] * 2
@@ -326,19 +345,27 @@ def test_wrong_pulse_time_is_detected_by_independent_timing_expectation():
 
 
 @pytest.mark.parametrize(
-    "kind", ["pulse", "two_pulse", "bath"],
+    "kind",
+    ["pulse", "two_pulse", "bath"],
 )
 @pytest.mark.parametrize("timeline", [None, "reset"])
 def test_reset_composite_keeps_internal_overlap(kind, timeline):
     pre = tproc_ceil(PROFILE, 0.02)
-    cavity_end = pre + tproc_ceil(PROFILE, generator_duration(PROFILE, 0.2) + Fraction('0.01'))
-    qubit_end = pre + tproc_ceil(PROFILE, generator_duration(PROFILE, 0.1, 1) + Fraction('0.01'))
-    pi2_end = pre + tproc_ceil(PROFILE, generator_duration(PROFILE, 0.05, 1) + Fraction('0.01'))
-    reset_waves = [pre] if kind == 'pulse' else [pre, pre]
-    length = cavity_end if kind == 'pulse' else max(cavity_end, qubit_end)
-    if kind == 'bath':
+    cavity_end = pre + tproc_ceil(
+        PROFILE, generator_duration(PROFILE, 0.2) + Fraction("0.01")
+    )
+    qubit_end = pre + tproc_ceil(
+        PROFILE, generator_duration(PROFILE, 0.1, 1) + Fraction("0.01")
+    )
+    pi2_end = pre + tproc_ceil(
+        PROFILE, generator_duration(PROFILE, 0.05, 1) + Fraction("0.01")
+    )
+    reset_waves = [pre] if kind == "pulse" else [pre, pre]
+    length = cavity_end if kind == "pulse" else max(cavity_end, qubit_end)
+    if kind == "bath":
         reset_waves += [cavity_end + pre]
         length = max(qubit_end, cavity_end + pi2_end)
+
     def cfg(ch, duration):
         return PulseCfg(
             ch=ch,
@@ -373,8 +400,12 @@ def test_reset_composite_keeps_internal_overlap(kind, timeline):
     assert [_waves(s) for s in shots] == [
         [10 + t for t in reset_waves] + [length + 10, length + 10 + READ_PRE]
     ] * 2
-    assert [s.body_end_cycle - s.start_cycle for s in shots] == [length + 10 + READ_END] * 2
-    assert [s.end_cycle - s.start_cycle for s in shots] == [length + 10 + READ_SHELL] * 2
+    assert [s.body_end_cycle - s.start_cycle for s in shots] == [
+        length + 10 + READ_END
+    ] * 2
+    assert [s.end_cycle - s.start_cycle for s in shots] == [
+        length + 10 + READ_SHELL
+    ] * 2
     assert [
         [e.cycle - s.start_cycle for e in s.events if e.kind == "data"] for s in shots
     ] == [[length + 10 + READ_TRIGGER, length + 20 + READ_TRIGGER]] * 2
@@ -474,14 +505,16 @@ def test_delay_auto_owner_rejects_every_explicit_timeline_at_entry(timeline, wai
     _program([auto], body, _prepare_registers)
 
 
-@pytest.mark.parametrize(
-    "wait", [0.2, QickSweep1D("scan", 0.2, 0.4)]
-)
-def test_delay_auto_owner_is_native_reference_advance_not_timeline_duration(
-    wait
-):
-    waits = native_sweep(PROFILE, 0.2, 0.4, 3) if isinstance(wait, QickParam) else [int(PROFILE.us2cycles(wait))]
-    expected = [round(generator_duration(PROFILE, 0.1) * TPROC_MHZ) + value for value in waits]
+@pytest.mark.parametrize("wait", [0.2, QickSweep1D("scan", 0.2, 0.4)])
+def test_delay_auto_owner_is_native_reference_advance_not_timeline_duration(wait):
+    waits = (
+        native_sweep(PROFILE, 0.2, 0.4, 3)
+        if isinstance(wait, QickParam)
+        else [int(PROFILE.us2cycles(wait))]
+    )
+    expected = [
+        round(generator_duration(PROFILE, 0.1) * TPROC_MHZ) + value for value in waits
+    ]
     pulse = _pulse()
     auto = DelayAuto("auto", wait)
 
@@ -642,7 +675,12 @@ def test_runtime_guard_accepts_swept_end_equal_to_static_at_last_point(timeline)
         if timeline != "default":
             prog.fork("default", into=timeline)
         prog.timeline_inc(
-            QickSweep1D("scan", 60 / TPROC_MHZ, round(generator_duration(PROFILE, 0.2) * TPROC_MHZ) / TPROC_MHZ), timeline=timeline
+            QickSweep1D(
+                "scan",
+                60 / TPROC_MHZ,
+                round(generator_duration(PROFILE, 0.2) * TPROC_MHZ) / TPROC_MHZ,
+            ),
+            timeline=timeline,
         )
         prog.pulse(0, pulse.pulse_name(prog))
         prog.delay_reg_auto("wait_cycles")
@@ -669,7 +707,9 @@ def test_swept_sync_leaves_zero_end_for_subsequent_runtime_guard():
         prog.emit(auto)
 
     shots = _shots(_program([auto], body, initialize))
-    assert [s.body_end_cycle - s.start_cycle for s in shots] == [t + 100 for t in native_sweep(PROFILE, 0.2, 0.8, 4)] * 2
+    assert [s.body_end_cycle - s.start_cycle for s in shots] == [
+        t + 100 for t in native_sweep(PROFILE, 0.2, 0.8, 4)
+    ] * 2
 
 
 def test_emit_cannot_overlap_same_channel_via_another_fork():

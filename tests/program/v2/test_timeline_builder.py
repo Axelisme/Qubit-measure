@@ -28,7 +28,13 @@ from zcu_tools.program.v2.simulation.compiled import build_compiled_request
 from zcu_tools.program.v2.utils import readout_freq_words
 
 from tests.program._profiles import GEN_MHZ, TPROC_MHZ, load_mux_soccfg, load_soccfg
-from tests.program._timing_expectations import generator_duration, native_sweep, readout_duration, runtime_cycles, tproc_ceil
+from tests.program._timing_expectations import (
+    generator_duration,
+    native_sweep,
+    readout_duration,
+    runtime_cycles,
+    tproc_ceil,
+)
 from tests.program.v2.simulation.time_observations import time_us
 from tests.program.v2.timing_support import recompile, shots, waves
 
@@ -61,10 +67,16 @@ def test_register_repeat_table_selector_is_ready_for_same_iteration_playback(
 
     # Zero-count points must not inherit the previous shot's selected waveform.
     durations = [generator_duration(prog.soccfg, t, 1) for t in (0.04, 0.08)]
-    ends = [ceil(runtime_cycles(prog.soccfg, int(prog.us2cycles(t, gen_ch=1)), 1)) for t in (0.04, 0.08)]
+    ends = [
+        ceil(runtime_cycles(prog.soccfg, int(prog.us2cycles(t, gen_ch=1)), 1))
+        for t in (0.04, 0.08)
+    ]
     result = shots(prog)
     assert [waves(shot) for shot in result] == [[], [0, ends[0]]] * 2
-    assert [shot.body_end_cycle - shot.start_cycle for shot in result] == [0, sum(ends)] * 2
+    assert [shot.body_end_cycle - shot.start_cycle for shot in result] == [
+        0,
+        sum(ends),
+    ] * 2
 
     env = white_noise(load_soccfg(n_gens=2), std_adc=0, routes=((1, 0),), seed=None)
     try:
@@ -599,11 +611,16 @@ def test_readout_families_finish_at_generator_plus_post_before_late_adc(family):
     builder.emit(_pulse("next_drive"))
     prog = builder.build()
     result = shots(prog)
-    generator_end = 3 + tproc_ceil(soccfg, generator_duration(soccfg, 0.125) + Fraction(5) / Fraction(str(tproc_mhz)))
+    generator_end = 3 + tproc_ceil(
+        soccfg,
+        generator_duration(soccfg, 0.125) + Fraction(5) / Fraction(str(tproc_mhz)),
+    )
     trigger = tproc_ceil(soccfg, 0.5)
     # The late ADC trigger never extends the readout's named end.
     assert [waves(shot) for shot in result] == (
-        [[3, generator_end]] if family == "mux" else [[0, 3, generator_end]] * len(result)
+        [[3, generator_end]]
+        if family == "mux"
+        else [[0, 3, generator_end]] * len(result)
     )
     assert all(
         [
@@ -1241,10 +1258,19 @@ def test_parallel_swept_groups_fit_native_registers_and_keep_pointwise_timing(
     prog = builder.build()
     lengths = native_sweep(mock_soccfg, 71 / GEN_MHZ, 639 / GEN_MHZ, 9, gen_ch=0)
     # k=8 rounds the fractional post upward to its representable subcycle grid.
-    post = Fraction(ceil(Fraction('4.3') * 256), 256)
-    drive_ends = [ceil(runtime_cycles(mock_soccfg, n) + post) + extra_post_cycles for n in lengths]
-    fixed_end = tproc_ceil(mock_soccfg, generator_duration(mock_soccfg, 77 / GEN_MHZ) + Fraction('4.3') / Fraction(str(TPROC_MHZ)))
-    expected_waves = [[0, 0, fixed_end, fixed_end, fixed_end + end, fixed_end + end] for end in drive_ends]
+    post = Fraction(ceil(Fraction("4.3") * 256), 256)
+    drive_ends = [
+        ceil(runtime_cycles(mock_soccfg, n) + post) + extra_post_cycles for n in lengths
+    ]
+    fixed_end = tproc_ceil(
+        mock_soccfg,
+        generator_duration(mock_soccfg, 77 / GEN_MHZ)
+        + Fraction("4.3") / Fraction(str(TPROC_MHZ)),
+    )
+    expected_waves = [
+        [0, 0, fixed_end, fixed_end, fixed_end + end, fixed_end + end]
+        for end in drive_ends
+    ]
     expected_ends = [2 * fixed_end + end for end in drive_ends]
     for _ in range(2):
         scheduled = shots(prog)
@@ -1501,7 +1527,9 @@ def test_branch_case_timeline_forks_parent_and_merges_selected_or_aligned_end(
     assert names == ["scan[1]"]
     case_end = 30 + tproc_ceil(mock_soccfg, generator_duration(mock_soccfg, 0.1, 1))
     assert [waves(shot) for shot in shots(prog)] == (
-        [[case_end], [30, case_end], [case_end]] if align_timeline else [[10], [30, case_end], [10]]
+        [[case_end], [30, case_end], [case_end]]
+        if align_timeline
+        else [[10], [30, case_end], [10]]
     )
 
 

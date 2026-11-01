@@ -88,7 +88,11 @@ def test_complementary_fabric_pulses_keep_pointwise_ceil_differences():
     forward = native_sweep(prog.soccfg, 1, 9, 9, gen_ch=0)
     backward = native_sweep(prog.soccfg, 9, 1, 9, gen_ch=0)
     expected = [
-        [0, ceil(runtime_cycles(prog.soccfg, a)), ceil(runtime_cycles(prog.soccfg, a)) + ceil(runtime_cycles(prog.soccfg, b))]
+        [
+            0,
+            ceil(runtime_cycles(prog.soccfg, a)),
+            ceil(runtime_cycles(prog.soccfg, a)) + ceil(runtime_cycles(prog.soccfg, b)),
+        ]
         for a, b in zip(forward, backward, strict=True)
     ]
     assert [waves(s) for s in shots(prog)] == expected * 2

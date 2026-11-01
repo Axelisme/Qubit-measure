@@ -294,9 +294,7 @@ def test_runtime_origin_keeps_fractional_event_tail_until_post_is_added(
                 if event.kind == "data"
             ]
             for shot in result
-        ] == [[(40 + PRE, 1), (40 + PRE + 10, 0)]] * (
-            2 * len(ends)
-        )
+        ] == [[(40 + PRE, 1), (40 + PRE + 10, 0)]] * (2 * len(ends))
 
 
 @pytest.mark.parametrize("swept_post", [False, True])

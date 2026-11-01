@@ -6,14 +6,17 @@ from zcu_tools.program.v2 import ir
 from zcu_tools.program.v2.timeline import TimelineProgramV2
 
 from tests.program._profiles import RO_MHZ, TPROC_MHZ, load_soccfg
-from tests.program._timing_expectations import generator_duration, readout_duration, tproc_ceil
+from tests.program._timing_expectations import (
+    generator_duration,
+    readout_duration,
+    tproc_ceil,
+)
 
 from .timing_support import shots as _shots
 
 PROFILE = load_soccfg(2, 1)
 PULSE_END = tproc_ceil(PROFILE, generator_duration(PROFILE, 0.1))
 ADC_TOUCH = tproc_ceil(PROFILE, readout_duration(PROFILE, 100 / RO_MHZ))
-
 
 
 def _program(body, initialize=None):
@@ -50,16 +53,13 @@ def _shot(prog):
     ).shots[0]
 
 
-@pytest.mark.parametrize(
-    "gens,ros", [(True, False), (False, True), (True, True)]
-)
-def test_native_auto_keeps_channel_selection_and_decrements_all_ends(
-    gens, ros
-):
+@pytest.mark.parametrize("gens,ros", [(True, False), (False, True), (True, True)])
+def test_native_auto_keeps_channel_selection_and_decrements_all_ends(gens, ros):
     advance = max(
         round(generator_duration(PROFILE, 0.1) * TPROC_MHZ) if gens else 0,
         round(readout_duration(PROFILE, 0.4) * TPROC_MHZ) if ros else 0,
     )
+
     def body(prog):
         prog.fork("default", into="other")
         prog.timeline_inc(200 / TPROC_MHZ)
@@ -118,6 +118,7 @@ def test_timeline_config_advances_to_its_instant_not_adc_window_or_length(
 @pytest.mark.parametrize("delay", [20, 60])
 def test_timeline_pulse_auto_chooses_later_channel_or_end(delay):
     expected = max(delay, PULSE_END)
+
     def body(prog):
         prog.pulse(0, "pulse")
         prog.timeline_inc(delay / TPROC_MHZ)
@@ -482,7 +483,11 @@ def test_adc_windows_allow_touching_edges_and_shot_still_waits(placement):
 
     prog = _program(body, initialize)
     result = _shots(prog)
-    expected = {"static": [0, ADC_TOUCH], "sweep": [0, ADC_TOUCH + 40], "runtime": [0, ADC_TOUCH + 1]}
+    expected = {
+        "static": [0, ADC_TOUCH],
+        "sweep": [0, ADC_TOUCH + 40],
+        "runtime": [0, ADC_TOUCH + 1],
+    }
     starts = [
         [
             e.cycle - shot.start_cycle

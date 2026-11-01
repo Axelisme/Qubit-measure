@@ -774,7 +774,9 @@ def test_fixed_repeat_rebases_long_external_pulse_and_reuses_parent_and_local_na
     assert [_waves(s) for s in shots] == [
         [0, advance, advance + PULSE_END + 7, LONG_END, advance + 2 * (PULSE_END + 7)]
     ] * 4
-    assert [s.body_end_cycle - s.start_cycle for s in shots] == [LONG_END + PULSE_END] * 4
+    assert [s.body_end_cycle - s.start_cycle for s in shots] == [
+        LONG_END + PULSE_END
+    ] * 4
     assert [s.end_cycle - s.start_cycle for s in shots] == [LONG_END + PULSE_END] * 4
     prog.compile()
     assert _shots(prog) == shots
@@ -1349,8 +1351,7 @@ def test_register_count_updates_and_resets_across_scan_and_shots():
     prog = _program(body, initialize, reps=2)
     shots = _shots(prog)
     assert [_waves(s) for s in shots] == [
-        [i * (SHORT_END + 9) for i in range(count)] + [100]
-        for count in (1, 2, 3)
+        [i * (SHORT_END + 9) for i in range(count)] + [100] for count in (1, 2, 3)
     ] * 2
     assert [s.body_end_cycle - s.start_cycle for s in shots] == [100 + PULSE_END] * 6
     assert [s.end_cycle - s.start_cycle for s in shots] == [100 + PULSE_END] * 6
@@ -1481,7 +1482,11 @@ def test_repeat_rejects_managed_pulse_overlap_across_backedge(
                 prog.timeline_inc(PULSE_END / TPROC_MHZ)
             prog.pulse(0, "p0", timeline="default")
             prog.append_macro(
-                Pulse(ch=0, name="p0", t=(2 * PULSE_END if native_prefix else PULSE_END) / TPROC_MHZ)
+                Pulse(
+                    ch=0,
+                    name="p0",
+                    t=(2 * PULSE_END if native_prefix else PULSE_END) / TPROC_MHZ,
+                )
             )
             prog.delay_by_timeline()
 
@@ -1519,7 +1524,9 @@ def test_repeat_without_backedge_allows_native_tail_after_managed_pulse(count, h
 
     (shot,) = _shots(_program(body, initialize))
     assert _waves(shot) == ([] if count == 0 else [0, PULSE_END])
-    assert (shot.body_end_cycle, shot.end_cycle) == ((0, 0) if count == 0 else (PULSE_END, 2 * PULSE_END))
+    assert (shot.body_end_cycle, shot.end_cycle) == (
+        (0, 0) if count == 0 else (PULSE_END, 2 * PULSE_END)
+    )
 
 
 @pytest.mark.parametrize("register", [False, True])
@@ -1559,7 +1566,11 @@ def test_nested_register_range_preserves_legal_interior_counts(actual):
             prog.delay_by_timeline()
 
     (shot,) = _shots(_program(body, initialize))
-    expected = [t for i in range(2 * actual) for t in (2 * PULSE_END * i, (2 * i + 1) * PULSE_END)]
+    expected = [
+        t
+        for i in range(2 * actual)
+        for t in (2 * PULSE_END * i, (2 * i + 1) * PULSE_END)
+    ]
     assert _waves(shot) == expected
     assert (shot.body_end_cycle, shot.end_cycle) == (4 * PULSE_END * actual,) * 2
 
@@ -1581,13 +1592,21 @@ def test_repeat_guard_proves_swept_native_prefix_at_every_scan_point(register, s
                 range_hint=(1, 3) if register else None,
             ):
                 prog.append_macro(Pulse(ch=0, name="p0", t=0))
-                prog.timeline_inc(QickSweep1D("scan", PULSE_END / TPROC_MHZ, (PULSE_END + 10) / TPROC_MHZ))
+                prog.timeline_inc(
+                    QickSweep1D(
+                        "scan", PULSE_END / TPROC_MHZ, (PULSE_END + 10) / TPROC_MHZ
+                    )
+                )
                 prog.pulse(0, "p0", timeline="default")
                 prog.append_macro(
                     Pulse(
                         ch=0,
                         name="p0",
-                        t=QickSweep1D("scan", 2 * PULSE_END / TPROC_MHZ, (2 * PULSE_END + 10) / TPROC_MHZ),
+                        t=QickSweep1D(
+                            "scan",
+                            2 * PULSE_END / TPROC_MHZ,
+                            (2 * PULSE_END + 10) / TPROC_MHZ,
+                        ),
                     )
                 )
                 if safe:
@@ -1600,7 +1619,14 @@ def test_repeat_guard_proves_swept_native_prefix_at_every_scan_point(register, s
             _program(body, initialize)
         return
     shots = _shots(_program(body, initialize))
-    expected = [[i * (3 * PULSE_END + offset) + delta for i in range(4) for delta in (0, PULSE_END + offset, 2 * PULSE_END + offset)] for offset in (0, 5, 10)]
+    expected = [
+        [
+            i * (3 * PULSE_END + offset) + delta
+            for i in range(4)
+            for delta in (0, PULSE_END + offset, 2 * PULSE_END + offset)
+        ]
+        for offset in (0, 5, 10)
+    ]
     ends = [4 * (3 * PULSE_END + offset) for offset in (0, 5, 10)]
     assert [_waves(s) for s in shots] == expected
     assert [s.body_end_cycle - s.start_cycle for s in shots] == ends
@@ -1632,7 +1658,14 @@ def test_nested_native_sweep_can_cross_timestamp_floor_without_losing_managed_gu
 
     shots = _shots(_program(body, initialize))
     # Inner iterations advance20/30/40; managed start is ref +30, length28.
-    expected = [[outer * (2 * advance + 30 + PULSE_END) + offset for outer in range(2) for offset in (0, advance, 2 * advance + 30)] for advance in (20, 30, 40)]
+    expected = [
+        [
+            outer * (2 * advance + 30 + PULSE_END) + offset
+            for outer in range(2)
+            for offset in (0, advance, 2 * advance + 30)
+        ]
+        for advance in (20, 30, 40)
+    ]
     ends = [2 * (2 * advance + 30 + PULSE_END) for advance in (20, 30, 40)]
     assert [_waves(s) for s in shots] == expected
     assert [s.body_end_cycle - s.start_cycle for s in shots] == ends
@@ -1649,7 +1682,9 @@ def test_repeat_guard_observes_native_pulse_entrypoints(native):
                 prog.append_macro(Pulse(ch=0, name="p0", t=PULSE_END / TPROC_MHZ))
             elif native == "runtime-words":
                 prog.append_macro(
-                    PulseFromRegs(ch=0, name="p0", gain_reg="count", t=PULSE_END / TPROC_MHZ)
+                    PulseFromRegs(
+                        ch=0, name="p0", gain_reg="count", t=PULSE_END / TPROC_MHZ
+                    )
                 )
             else:
                 prog.append_macro(Pulse(ch=0, name="p0", t="auto"))

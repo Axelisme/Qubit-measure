@@ -73,8 +73,12 @@ def test_parallel_pulses_retain_envelopes_phase_and_separate_adc_duration(wavefo
     receiver = next(event for event in events if event.gen_ch == 0)
     origin_cycles = tproc_ceil(env.soccfg, 0.5)
     receiver_cycles = origin_cycles + tproc_ceil(env.soccfg, 0.1)
-    assert time_us(request.time_base, drive.start_ticks) == pytest.approx(origin_cycles / TPROC_MHZ)
-    assert time_us(request.time_base, receiver.start_ticks) == pytest.approx(receiver_cycles / TPROC_MHZ)
+    assert time_us(request.time_base, drive.start_ticks) == pytest.approx(
+        origin_cycles / TPROC_MHZ
+    )
+    assert time_us(request.time_base, receiver.start_ticks) == pytest.approx(
+        receiver_cycles / TPROC_MHZ
+    )
     drive_end = max(
         time_us(request.time_base, e.start_ticks)
         + time_us(request.time_base, e.duration_ticks)
@@ -84,7 +88,9 @@ def test_parallel_pulses_retain_envelopes_phase_and_separate_adc_duration(wavefo
     assert drive_end - time_us(request.time_base, drive.start_ticks) == pytest.approx(
         float(generator_duration(env.soccfg, 0.25, 1)),
         # Flat-top's split ramps can trim a fabric cycle at each segment boundary.
-        abs=2 / env.soccfg['gens'][1]['f_fabric'] if waveform.style == 'flat_top' else 1e-9
+        abs=2 / env.soccfg["gens"][1]["f_fabric"]
+        if waveform.style == "flat_top"
+        else 1e-9,
     )
     assert drive.gain == pytest.approx(-0.4, abs=1 / GEN_MAXV)
     assert drive.phase_deg == pytest.approx(37, abs=1e-5)

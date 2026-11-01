@@ -29,8 +29,13 @@ from zcu_tools.program.v2.timeline import TimelineProgramV2
 from zcu_tools.program.v2.utils import readout_freq_words
 
 from tests.program._profiles import GEN_MHZ, TPROC_MHZ, load_soccfg
-from tests.program._timing_expectations import generator_duration, native_sweep, readout_duration, runtime_cycles, tproc_ceil
-
+from tests.program._timing_expectations import (
+    generator_duration,
+    native_sweep,
+    readout_duration,
+    runtime_cycles,
+    tproc_ceil,
+)
 from tests.program.v2._mux_support import mux_soccfg, native_mux
 from tests.program.v2.timing_support import recompile, shots, waves
 
@@ -80,9 +85,14 @@ def test_mux_end_follows_generator_plus_one_post_and_shot_waits_for_adcs(length)
     result = shots(prog)
     profile = prog.soccfg
     pre = tproc_ceil(profile, 0.01)
-    spacing = pre + tproc_ceil(profile, generator_duration(profile, length) + Fraction('0.0005'))
-    adc_tail = max(Fraction(0), pre + readout_duration(profile, 0.1, 4) * Fraction(str(TPROC_MHZ)) - spacing)
-    relaxation = round(adc_tail + Fraction('0.02') * Fraction(str(TPROC_MHZ)))
+    spacing = pre + tproc_ceil(
+        profile, generator_duration(profile, length) + Fraction("0.0005")
+    )
+    adc_tail = max(
+        Fraction(0),
+        pre + readout_duration(profile, 0.1, 4) * Fraction(str(TPROC_MHZ)) - spacing,
+    )
+    relaxation = round(adc_tail + Fraction("0.02") * Fraction(str(TPROC_MHZ)))
     assert [waves(shot) for shot in result] == [[pre, spacing + pre]] * 2
     assert [shot.body_end_cycle - shot.start_cycle for shot in result] == [
         2 * spacing
@@ -134,7 +144,9 @@ def test_table_readout_uses_loop_hook_and_wraps_paired_words_without_padding():
         lambda p: p.add_loop("frequency", 3),
     )
     result = shots(prog)
-    end = PRE + tproc_ceil(prog.soccfg, generator_duration(prog.soccfg, 0.101) + Fraction('0.0005'))
+    end = PRE + tproc_ceil(
+        prog.soccfg, generator_duration(prog.soccfg, 0.101) + Fraction("0.0005")
+    )
     assert [waves(shot) for shot in result] == [[0, PRE]] * 6
     assert [shot.body_end_cycle - shot.start_cycle for shot in result] == [end] * 6
     assert [shot.end_cycle - shot.start_cycle for shot in result] == [end + RELAX] * 6
@@ -196,7 +208,10 @@ def test_integer_candidate_selection_uses_only_author_waveform_table():
     )
     result = shots(prog)
     assert [waves(s) for s in result] == [[0]] * 4
-    assert [s.body_end_cycle - s.start_cycle for s in result] == [tproc_ceil(prog.soccfg, generator_duration(prog.soccfg, n / GEN_MHZ)) for n in (25, 50)] * 2
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [
+        tproc_ceil(prog.soccfg, generator_duration(prog.soccfg, n / GEN_MHZ))
+        for n in (25, 50)
+    ] * 2
     memory = prog.compile_datamem()
     # Only the author-declared two waveform addresses occupy data memory.
     assert memory is not None and len(memory) == 2
@@ -220,11 +235,24 @@ def test_computed_pulse_end_follows_selected_waveform_without_maximum_padding():
         body,
         lambda p: p.add_loop("selector", 2),
     )
-    spacings = [PRE + ceil(runtime_cycles(prog.soccfg, n) + Fraction('0.0005') * Fraction(str(TPROC_MHZ))) for n in (39, 89)]
+    spacings = [
+        PRE
+        + ceil(
+            runtime_cycles(prog.soccfg, n)
+            + Fraction("0.0005") * Fraction(str(TPROC_MHZ))
+        )
+        for n in (39, 89)
+    ]
     result = shots(prog)
-    assert [waves(shot) for shot in result] == [[PRE, PRE + spacing] for spacing in spacings] * 2
-    assert [shot.body_end_cycle - shot.start_cycle for shot in result] == [2 * spacing for spacing in spacings] * 2
-    assert [shot.end_cycle - shot.start_cycle for shot in result] == [2 * spacing + RELAX for spacing in spacings] * 2
+    assert [waves(shot) for shot in result] == [
+        [PRE, PRE + spacing] for spacing in spacings
+    ] * 2
+    assert [shot.body_end_cycle - shot.start_cycle for shot in result] == [
+        2 * spacing for spacing in spacings
+    ] * 2
+    assert [shot.end_cycle - shot.start_cycle for shot in result] == [
+        2 * spacing + RELAX for spacing in spacings
+    ] * 2
     prog.compile()
     assert shots(prog) == result
 
@@ -240,10 +268,19 @@ def test_computed_pulse_uses_selected_fractional_post_not_first_or_maximum():
         lambda p: p.add_loop("selector", 2),
     )
     result = shots(prog)
-    ends = [PRE + ceil(runtime_cycles(prog.soccfg, 39) + Fraction(str(post)) * Fraction(str(TPROC_MHZ))) for post in (0.0005, 0.001)]
+    ends = [
+        PRE
+        + ceil(
+            runtime_cycles(prog.soccfg, 39)
+            + Fraction(str(post)) * Fraction(str(TPROC_MHZ))
+        )
+        for post in (0.0005, 0.001)
+    ]
     assert [waves(shot) for shot in result] == [[PRE]] * 4
     assert [shot.body_end_cycle - shot.start_cycle for shot in result] == ends * 2
-    assert [shot.end_cycle - shot.start_cycle for shot in result] == [end + RELAX for end in ends] * 2
+    assert [shot.end_cycle - shot.start_cycle for shot in result] == [
+        end + RELAX for end in ends
+    ] * 2
 
 
 def test_table_length_uses_actual_playback_end_and_counts_pre_post_once():
@@ -265,10 +302,23 @@ def test_table_length_uses_actual_playback_end_and_counts_pre_post_once():
         lambda p: p.add_loop("index", 3),
     )
     result = shots(prog)
-    spacings = [PRE + ceil(runtime_cycles(prog.soccfg, n) + Fraction('0.0005') * Fraction(str(TPROC_MHZ))) for n in (39, 64, 89)]
-    assert [waves(shot) for shot in result] == [[PRE, PRE + spacing] for spacing in spacings] * 2
-    assert [shot.body_end_cycle - shot.start_cycle for shot in result] == [2 * spacing for spacing in spacings] * 2
-    assert [shot.end_cycle - shot.start_cycle for shot in result] == [2 * spacing + RELAX for spacing in spacings] * 2
+    spacings = [
+        PRE
+        + ceil(
+            runtime_cycles(prog.soccfg, n)
+            + Fraction("0.0005") * Fraction(str(TPROC_MHZ))
+        )
+        for n in (39, 64, 89)
+    ]
+    assert [waves(shot) for shot in result] == [
+        [PRE, PRE + spacing] for spacing in spacings
+    ] * 2
+    assert [shot.body_end_cycle - shot.start_cycle for shot in result] == [
+        2 * spacing for spacing in spacings
+    ] * 2
+    assert [shot.end_cycle - shot.start_cycle for shot in result] == [
+        2 * spacing + RELAX for spacing in spacings
+    ] * 2
     prog.compile()
     assert shots(prog) == result
 
@@ -336,10 +386,23 @@ def test_selected_branch_paths_inside_repeat_use_actual_ends(kind):
 
     prog = _program(load_soccfg(1, 0), [pulse], body, initialize)
     result = shots(prog)
-    spacings = [PRE + ceil(runtime_cycles(prog.soccfg, n) + Fraction('0.0005') * Fraction(str(TPROC_MHZ))) for n in (39, 89)]
-    assert [waves(s) for s in result] == [[PRE, PRE + spacing] for spacing in spacings] * 2
-    assert [s.body_end_cycle - s.start_cycle for s in result] == [2 * spacing for spacing in spacings] * 2
-    assert [s.end_cycle - s.start_cycle for s in result] == [2 * spacing + RELAX for spacing in spacings] * 2
+    spacings = [
+        PRE
+        + ceil(
+            runtime_cycles(prog.soccfg, n)
+            + Fraction("0.0005") * Fraction(str(TPROC_MHZ))
+        )
+        for n in (39, 89)
+    ]
+    assert [waves(s) for s in result] == [
+        [PRE, PRE + spacing] for spacing in spacings
+    ] * 2
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [
+        2 * spacing for spacing in spacings
+    ] * 2
+    assert [s.end_cycle - s.start_cycle for s in result] == [
+        2 * spacing + RELAX for spacing in spacings
+    ] * 2
 
 
 @pytest.mark.parametrize("kind", ["computed", "table"])
@@ -429,7 +492,9 @@ def test_selected_negative_post_rounds_signed_offset_without_clamping_origin(
     prog = _program(load_soccfg(1, 0), [pulse], body, initialize)
     result = shots(prog)
     assert [waves(s) for s in result] == [[100 + PRE]] * 4
-    assert [s.body_end_cycle - s.start_cycle for s in result] == [100 + PRE + ceil(runtime_cycles(prog.soccfg, n) - 60) for n in (39, 64)] * 2
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [
+        100 + PRE + ceil(runtime_cycles(prog.soccfg, n) - 60) for n in (39, 64)
+    ] * 2
 
 
 @pytest.mark.parametrize("kind", ["computed", "table"])
@@ -456,9 +521,14 @@ def test_selected_negative_post_retains_physical_channel_end(kind, wait):
     else:
         prog = _program(load_soccfg(1, 0), [pulse, following], body, initialize)
         physical_end = 100 + PRE + ceil(runtime_cycles(prog.soccfg, 39))
-        following_end = PRE + tproc_ceil(prog.soccfg, generator_duration(prog.soccfg, 39 / GEN_MHZ) + Fraction('0.0005'))
+        following_end = PRE + tproc_ceil(
+            prog.soccfg,
+            generator_duration(prog.soccfg, 39 / GEN_MHZ) + Fraction("0.0005"),
+        )
         assert [waves(s) for s in shots(prog)] == [[100 + PRE, physical_end + PRE]] * 4
-        assert [s.body_end_cycle - s.start_cycle for s in shots(prog)] == [physical_end + following_end] * 4
+        assert [s.body_end_cycle - s.start_cycle for s in shots(prog)] == [
+            physical_end + following_end
+        ] * 4
 
 
 @pytest.mark.parametrize("kind", ["computed", "table"])
@@ -480,9 +550,15 @@ def test_selected_negative_post_native_auto_alignment_uses_exact_physical_end(ki
     prog = _program(load_soccfg(1, 0), [pulse, following], body, initialize)
     result = shots(prog)
     physical_ends = [100 + PRE + ceil(runtime_cycles(prog.soccfg, n)) for n in (39, 64)]
-    following_end = PRE + tproc_ceil(prog.soccfg, generator_duration(prog.soccfg, 39 / GEN_MHZ) + Fraction('0.0005'))
-    assert [waves(s) for s in result] == [[100 + PRE, end + PRE] for end in physical_ends] * 2
-    assert [s.body_end_cycle - s.start_cycle for s in result] == [end + following_end for end in physical_ends] * 2
+    following_end = PRE + tproc_ceil(
+        prog.soccfg, generator_duration(prog.soccfg, 39 / GEN_MHZ) + Fraction("0.0005")
+    )
+    assert [waves(s) for s in result] == [
+        [100 + PRE, end + PRE] for end in physical_ends
+    ] * 2
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [
+        end + following_end for end in physical_ends
+    ] * 2
 
 
 @pytest.mark.parametrize("kind", ["computed", "table"])
@@ -514,10 +590,19 @@ def test_selected_negative_post_direct_advances_recover_only_proven_physical_bou
     else:
         prog = _program(load_soccfg(1, 0), [pulse, following], body, initialize)
         result = shots(prog)
-        physical_ends = [100 + PRE + ceil(runtime_cycles(prog.soccfg, n)) for n in (39, 64)]
-        following_end = tproc_ceil(prog.soccfg, generator_duration(prog.soccfg, 39 / GEN_MHZ) + Fraction('0.0005'))
-        assert [waves(s) for s in result] == [[100 + PRE, end] for end in physical_ends] * 2
-        assert [s.body_end_cycle - s.start_cycle for s in result] == [end + following_end for end in physical_ends] * 2
+        physical_ends = [
+            100 + PRE + ceil(runtime_cycles(prog.soccfg, n)) for n in (39, 64)
+        ]
+        following_end = tproc_ceil(
+            prog.soccfg,
+            generator_duration(prog.soccfg, 39 / GEN_MHZ) + Fraction("0.0005"),
+        )
+        assert [waves(s) for s in result] == [
+            [100 + PRE, end] for end in physical_ends
+        ] * 2
+        assert [s.body_end_cycle - s.start_cycle for s in result] == [
+            end + following_end for end in physical_ends
+        ] * 2
 
 
 @pytest.mark.parametrize("kind", ["computed", "table"])
@@ -606,10 +691,17 @@ def test_deferred_coverage_through_runtime_maximum_does_not_pad_short_selection(
 
     prog = _program(load_soccfg(1, 0), [pulse, following], body, initialize)
     result = shots(prog)
-    starts = [max(100, 100 + PRE + ceil(runtime_cycles(prog.soccfg, n) - 60)) + 60 for n in (39, 64)]
-    following_end = tproc_ceil(prog.soccfg, generator_duration(prog.soccfg, 39 / GEN_MHZ) + Fraction('0.0005'))
+    starts = [
+        max(100, 100 + PRE + ceil(runtime_cycles(prog.soccfg, n) - 60)) + 60
+        for n in (39, 64)
+    ]
+    following_end = tproc_ceil(
+        prog.soccfg, generator_duration(prog.soccfg, 39 / GEN_MHZ) + Fraction("0.0005")
+    )
     assert [waves(s) for s in result] == [[100 + PRE, start] for start in starts] * 2
-    assert [s.body_end_cycle - s.start_cycle for s in result] == [start + following_end for start in starts] * 2
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [
+        start + following_end for start in starts
+    ] * 2
 
 
 @pytest.mark.parametrize("following_ch", [0, 1])
@@ -662,10 +754,19 @@ def test_equal_runtime_maximum_preserves_both_physical_boundaries(
         for _ in range(2):
             result = shots(prog)
             # Equal aggregates retain both channels' physical coverage.
-            physical_ends = [100 + PRE + ceil(runtime_cycles(prog.soccfg, n)) for n in (39, 64)]
-            following_end = tproc_ceil(prog.soccfg, generator_duration(prog.soccfg, 39 / GEN_MHZ) + Fraction('0.0005'))
-            assert [waves(s) for s in result] == [[100 + PRE, 100 + PRE, end] for end in physical_ends] * 2
-            assert [s.body_end_cycle - s.start_cycle for s in result] == [end + following_end for end in physical_ends] * 2
+            physical_ends = [
+                100 + PRE + ceil(runtime_cycles(prog.soccfg, n)) for n in (39, 64)
+            ]
+            following_end = tproc_ceil(
+                prog.soccfg,
+                generator_duration(prog.soccfg, 39 / GEN_MHZ) + Fraction("0.0005"),
+            )
+            assert [waves(s) for s in result] == [
+                [100 + PRE, 100 + PRE, end] for end in physical_ends
+            ] * 2
+            assert [s.body_end_cycle - s.start_cycle for s in result] == [
+                end + following_end for end in physical_ends
+            ] * 2
             recompile(prog)
 
 
@@ -688,9 +789,15 @@ def test_deferred_coverage_repeat_backedge_and_next_shot_reload_selection(kind):
 
     prog = _program(load_soccfg(1, 0), [pulse], body, initialize)
     result = shots(prog)
-    iteration_ends = [100 + PRE + ceil(runtime_cycles(prog.soccfg, n)) for n in (39, 64)]
-    assert [waves(s) for s in result] == [[100 + PRE, end + 100 + PRE] for end in iteration_ends] * 2
-    assert [s.body_end_cycle - s.start_cycle for s in result] == [2 * end for end in iteration_ends] * 2
+    iteration_ends = [
+        100 + PRE + ceil(runtime_cycles(prog.soccfg, n)) for n in (39, 64)
+    ]
+    assert [waves(s) for s in result] == [
+        [100 + PRE, end + 100 + PRE] for end in iteration_ends
+    ] * 2
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [
+        2 * end for end in iteration_ends
+    ] * 2
     prog.compile()
     assert shots(prog) == result
 
@@ -734,10 +841,24 @@ def test_flat_selected_runtime_origin_repeat_backedge_and_shot_reset(kind):
 
     prog = _program(load_soccfg(1, 0), [pulse], body, initialize)
     result = shots(prog)
-    spacings = [PRE + ceil(runtime_cycles(prog.soccfg, n) + Fraction('0.0005') * Fraction(str(TPROC_MHZ))) for n in (55, 105)]
-    assert [waves(s) for s in result] == [[7 + PRE + i * spacing for i in range(3) for _ in range(3)] for spacing in spacings] * 2
-    assert [s.body_end_cycle - s.start_cycle for s in result] == [7 + 3 * spacing for spacing in spacings] * 2
-    assert [s.end_cycle - s.start_cycle for s in result] == [7 + 3 * spacing + RELAX for spacing in spacings] * 2
+    spacings = [
+        PRE
+        + ceil(
+            runtime_cycles(prog.soccfg, n)
+            + Fraction("0.0005") * Fraction(str(TPROC_MHZ))
+        )
+        for n in (55, 105)
+    ]
+    assert [waves(s) for s in result] == [
+        [7 + PRE + i * spacing for i in range(3) for _ in range(3)]
+        for spacing in spacings
+    ] * 2
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [
+        7 + 3 * spacing for spacing in spacings
+    ] * 2
+    assert [s.end_cycle - s.start_cycle for s in result] == [
+        7 + 3 * spacing + RELAX for spacing in spacings
+    ] * 2
     prog.compile()
     assert shots(prog) == result
 
@@ -770,10 +891,20 @@ def test_selected_parallel_join_keeps_crossing_pointwise_ends_and_runtime_origin
 
     prog = _program(load_soccfg(2, 0), [left, right], body, initialize)
     result = shots(prog)
-    maxima = [7 + PRE + ceil(runtime_cycles(prog.soccfg, max(a, b)) + Fraction('0.0005') * Fraction(str(TPROC_MHZ))) for a, b in ((39, 89), (64, 64), (89, 39))]
+    maxima = [
+        7
+        + PRE
+        + ceil(
+            runtime_cycles(prog.soccfg, max(a, b))
+            + Fraction("0.0005") * Fraction(str(TPROC_MHZ))
+        )
+        for a, b in ((39, 89), (64, 64), (89, 39))
+    ]
     assert [waves(s) for s in result] == [[7 + PRE, 7 + PRE]] * 6
     assert [s.body_end_cycle - s.start_cycle for s in result] == maxima * 2
-    assert [s.end_cycle - s.start_cycle for s in result] == [end + RELAX for end in maxima] * 2
+    assert [s.end_cycle - s.start_cycle for s in result] == [
+        end + RELAX for end in maxima
+    ] * 2
 
 
 @pytest.mark.parametrize("constant_second", [False, True])
@@ -803,11 +934,21 @@ def test_arbitrary_selected_posts_keep_independent_native_sweep_grid(constant_se
     prog = _program(load_soccfg(1, 0), [pulse], body, initialize)
     result = shots(prog)
     first_posts = native_sweep(prog.soccfg, 0.0005, 0.0015, 3)
-    second_posts = [Fraction('0.0015') * Fraction(str(TPROC_MHZ))] * 3 if constant_second else native_sweep(prog.soccfg, 0.0015, 0.0005, 3)
-    first_ends = [PRE + ceil(runtime_cycles(prog.soccfg, 39) + post) for post in first_posts]
-    second_ends = [PRE + ceil(runtime_cycles(prog.soccfg, 39) + post) for post in second_posts]
+    second_posts = (
+        [Fraction("0.0015") * Fraction(str(TPROC_MHZ))] * 3
+        if constant_second
+        else native_sweep(prog.soccfg, 0.0015, 0.0005, 3)
+    )
+    first_ends = [
+        PRE + ceil(runtime_cycles(prog.soccfg, 39) + post) for post in first_posts
+    ]
+    second_ends = [
+        PRE + ceil(runtime_cycles(prog.soccfg, 39) + post) for post in second_posts
+    ]
     assert [waves(s) for s in result] == [[PRE, PRE + end] for end in first_ends] * 2
-    assert [s.body_end_cycle - s.start_cycle for s in result] == [a + b for a, b in zip(first_ends, second_ends, strict=True)] * 2
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [
+        a + b for a, b in zip(first_ends, second_ends, strict=True)
+    ] * 2
 
 
 class _OverwriteSelected(Macro):
@@ -1018,9 +1159,18 @@ def test_flat_top_actual_segment_address_producers_are_preserved_or_reject_overw
     # Candidate order and public declared wmem resources supply the expected
     # addresses. The observer never prepares or repairs a segment address.
     assert actual == prog.expected_segments * 2
-    assert [waves(shot) for shot in result] == [[(PRE if managed else int(prog.us2cycles(0.01)))] * 3] * 4
+    assert [waves(shot) for shot in result] == [
+        [(PRE if managed else int(prog.us2cycles(0.01)))] * 3
+    ] * 4
     if managed:
-        assert [s.body_end_cycle - s.start_cycle for s in result] == [PRE + ceil(runtime_cycles(prog.soccfg, n) + Fraction('0.0005') * Fraction(str(TPROC_MHZ))) for n in (55, 105)] * 2
+        assert [s.body_end_cycle - s.start_cycle for s in result] == [
+            PRE
+            + ceil(
+                runtime_cycles(prog.soccfg, n)
+                + Fraction("0.0005") * Fraction(str(TPROC_MHZ))
+            )
+            for n in (55, 105)
+        ] * 2
     lengths = []
     for row in actual:
         assert all(address is not None for address in row)
@@ -1211,7 +1361,9 @@ def test_selected_playback_preserves_deferred_capture_across_empty_branch(declar
 
     result = shots(_selection_flow_program(body))
     assert [waves(shot) for shot in result] == [[0]] * 4
-    assert [s.body_end_cycle - s.start_cycle for s in result] == [ceil(runtime_cycles(PROFILE, 39))] * 4
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [
+        ceil(runtime_cycles(PROFILE, 39))
+    ] * 4
 
 
 def test_selected_playback_uses_entry_relation_in_sibling_branch_case():
@@ -1226,7 +1378,9 @@ def test_selected_playback_uses_entry_relation_in_sibling_branch_case():
 
     result = shots(_selection_flow_program(body))
     assert [waves(shot) for shot in result] == [[0]] * 4
-    assert [s.body_end_cycle - s.start_cycle for s in result] == [ceil(runtime_cycles(PROFILE, n)) for n in (89, 39)] * 2
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [
+        ceil(runtime_cycles(PROFILE, n)) for n in (89, 39)
+    ] * 2
 
 
 def _selection_program(selection: Module) -> TimelineProgramV2:
@@ -1254,7 +1408,13 @@ def test_selected_playback_rejects_in_range_writes_without_table_relation(change
 def test_selected_playback_captures_index_before_later_in_range_change(change):
     prog = _selected_length_with_change(change)
     # The first length remains39 despite the author changing index to1.
-    assert [s.body_end_cycle - s.start_cycle for s in shots(prog)] == [PRE + ceil(runtime_cycles(prog.soccfg, 39) + Fraction('0.0005') * Fraction(str(TPROC_MHZ)))] * 2
+    assert [s.body_end_cycle - s.start_cycle for s in shots(prog)] == [
+        PRE
+        + ceil(
+            runtime_cycles(prog.soccfg, 39)
+            + Fraction("0.0005") * Fraction(str(TPROC_MHZ))
+        )
+    ] * 2
 
 
 def test_repeated_computed_playback_preserves_selected_ends_within_register_budget():
@@ -1277,9 +1437,15 @@ def test_repeated_computed_playback_preserves_selected_ends_within_register_budg
     prog = builder.build()
     result = shots(prog)
     spacings = [ceil(runtime_cycles(prog.soccfg, n) + 1) for n in (39, 89)]
-    assert [waves(s) for s in result] == [[spacing * i for i in range(11)] for spacing in spacings] * 2
-    assert [s.body_end_cycle - s.start_cycle for s in result] == [11 * spacing for spacing in spacings] * 2
-    assert [s.end_cycle - s.start_cycle for s in result] == [11 * spacing for spacing in spacings] * 2
+    assert [waves(s) for s in result] == [
+        [spacing * i for i in range(11)] for spacing in spacings
+    ] * 2
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [
+        11 * spacing for spacing in spacings
+    ] * 2
+    assert [s.end_cycle - s.start_cycle for s in result] == [
+        11 * spacing for spacing in spacings
+    ] * 2
 
 
 def test_distinct_computed_selections_keep_captured_join_and_coverage_debt():
@@ -1330,11 +1496,22 @@ def test_distinct_computed_selections_keep_captured_join_and_coverage_debt():
         lambda p: p.add_loop("index", 2),
     )
     result = shots(prog)
-    joins = [max(ceil(runtime_cycles(prog.soccfg, a)), ceil(runtime_cycles(prog.soccfg, b, 1))) for a, b in ((39, 60), (89, 20))]
-    ends = [join + ceil(runtime_cycles(prog.soccfg, n)) for join, n in zip(joins, (89, 39), strict=True)]
+    joins = [
+        max(
+            ceil(runtime_cycles(prog.soccfg, a)),
+            ceil(runtime_cycles(prog.soccfg, b, 1)),
+        )
+        for a, b in ((39, 60), (89, 20))
+    ]
+    ends = [
+        join + ceil(runtime_cycles(prog.soccfg, n))
+        for join, n in zip(joins, (89, 39), strict=True)
+    ]
     assert [waves(s) for s in result] == [[0, 0, join] for join in joins] * 2
     assert [s.body_end_cycle - s.start_cycle for s in result] == ends * 2
-    assert [s.end_cycle - s.start_cycle for s in result] == [end + RELAX for end in ends] * 2
+    assert [s.end_cycle - s.start_cycle for s in result] == [
+        end + RELAX for end in ends
+    ] * 2
 
 
 @pytest.mark.parametrize("count", [None, 2])
