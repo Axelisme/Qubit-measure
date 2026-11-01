@@ -61,21 +61,11 @@ def make_form(ctx: FormContext) -> Form[T2RamseyInput]:
         T2RamseyInput,
         tree={
             "reset": Slot("$qubit.module.reset"),
-            "pi2_pulse": Slot("$qubit.module.x90")
-            if ctx.has("$qubit.module.x90")
-            else Template("pi2_pulse", bindings={"qubit": "$qubit"}),
-            "readout": Slot("$resonator.module.readout")
-            if ctx.has("$resonator.module.readout")
-            else Template("readout", bindings={"resonator": "$resonator"}),
+            "pi2_pulse": Slot("$qubit.module.x90", fallback=Template("pi2_pulse", bindings={"qubit": "$qubit"})),
+            "readout": Slot("$resonator.module.readout", fallback=Template("readout", bindings={"resonator": "$resonator"}, seed_metadata=pulse_readout_seed_metadata(gain=0.1))),
             "delay": Range(0.0, "1.5 * $qubit.t2r", expts=101),
             "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),
             "reps": 1000,
             "rounds": 10,
         },
-    ).with_seed_metadata(
-        (
-            {}
-            if ctx.has("$resonator.module.readout")
-            else pulse_readout_seed_metadata(gain=0.1)
-        )
     )

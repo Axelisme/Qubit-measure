@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Annotated, ClassVar
 
 import numpy as np
+from matplotlib.ticker import MaxNLocator, ScalarFormatter
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter
 from zcu_tools.analysis.fitting import (
@@ -28,7 +29,7 @@ from zcu_tools.program.v2 import (
     TimelineBuilder,
 )
 
-from zcu_lab.v2.support import live_heatmap_with_line
+from zcu_lab.v2.support import live_heatmap, live_line
 
 from .core import t1_signal2real
 
@@ -114,12 +115,39 @@ class ScanT1WithToneExp(Experiment[ScanT1WithToneResult, ScanT1WithToneCfg]):
             {"soccfg": soccfg, "gen_ch": cfg.test_pulse.ch},
         )
 
-        viewer = live_heatmap_with_line(
-            context.plots, "measurement", "gain", "Time (us)", line_axis=1, num_lines=5
-        )
+        fig, _ = context.plots.subplots(1, 2, num='measurement')
+        heat_ax, line_ax = fig.axes
+        heat_ax.set(xlabel='gain', ylabel='Time (us)')
+        line_ax.set_xlabel('Time (us)')
+        formatter = ScalarFormatter(useMathText=True)
+        formatter.set_powerlimits((-2, 2))
+        heat_ax.xaxis.set_major_formatter(formatter)
+        heat_ax.yaxis.set_major_formatter(formatter)
+        heatmap = live_heatmap(heat_ax, uniform=True)
+        line_ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+        line_ax.grid()
+        lines = live_line(line_ax, num_lines=5)
+        for artist in line_ax.lines[:-1]:
+            artist.set(marker="None", alpha=0.3, color="red")
+        line_ax.lines[-1].set(label="current line", marker=".", color="C0")
+        line_ax.legend()
+        
+        @context.plots.on_plot_thread
+        def update(data):
+            real = t1_signal2real(data)
+            valid = np.flatnonzero(~np.all(np.isnan(real), axis=1))
+            current = int(valid[-1]) if valid.size else -1
+            history = np.full((5, len(lengths)), np.nan)
+            for offset in range(min(5, current + 1)):
+                history[-offset - 1] = real[current - offset]
+            artists = heatmap.set(gains, lengths, real)
+            artists = (*artists, *lines.set(lengths, history))
+            return artists
+        
+        fig.show()
         signals_buffer = SignalBuffer(
             (len(gains), len(lengths)),
-            on_update=lambda data: viewer.update(gains, lengths, t1_signal2real(data)),
+            on_update=update,
         )
 
         # 2. Scan gains on the host; sweep tone duration inside each program.
@@ -197,7 +225,7 @@ class ScanT1WithToneExp(Experiment[ScanT1WithToneResult, ScanT1WithToneCfg]):
         t1s = t1s[valid_idxs]
         t1errs = t1errs[valid_idxs]
 
-        fig, _ = plots.subplots("fit", nrows=2, ncols=1, sharex=True)
+        fig, _ = plots.subplots(num="fit", nrows=2, ncols=1, sharex=True)
         ax1, ax2 = fig.axes
 
         fig.suptitle("T1 while readout")

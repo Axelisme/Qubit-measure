@@ -3,9 +3,11 @@ from __future__ import annotations
 from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
+from pydantic.dataclasses import dataclass as validated_dataclass
 from typing import Annotated, ClassVar
 
 import numpy as np
+from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field
 from zcu_tools.analysis.fitting import FitQuality, compute_fit_quality, fit_rabi
@@ -37,7 +39,7 @@ class LenRabiResult:
     signals: NDArray[np.complex128]
 
 
-@dataclass(frozen=True)
+@validated_dataclass(frozen=True)
 class LenRabiAnalyzeOptions:
     decay: Annotated[bool, FieldMeta(label="Fit decay envelope")] = True
     fit_phase: Annotated[bool, FieldMeta(label="Fit phase offset")] = False
@@ -148,10 +150,21 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
     def _run_for_flat(
         self, cfg: LenRabiCfg, lengths: NDArray[np.float64], *, context: RunContext
     ) -> LenRabiResult:
-        viewer = live_line(context.plots, "measurement", "Length (us)", "Signal")
+        fig, ax = context.plots.subplots(num='measurement')
+        ax.set(xlabel='Length (us)', ylabel='Signal')
+        ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+        ax.grid()
+        viewer = live_line(ax)
+        
+        @context.plots.on_plot_thread
+        def update(data):
+            artists = viewer.set(lengths, rabi_signal2real(data))
+            return artists
+        
+        fig.show()
         signals = SignalBuffer(
             (len(lengths),),
-            on_update=lambda data: viewer.update(lengths, rabi_signal2real(data)),
+            on_update=update,
         )
         with Schedule(signals, scope=context.scope) as sched:
             builder = TimelineBuilder(
@@ -189,12 +202,21 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
             mean[mask] = np.nanmean(signals[:, mask], axis=0)
             return mean
 
-        viewer = live_line(context.plots, "measurement", "Length (us)", "Signal")
+        fig, ax = context.plots.subplots(num='measurement')
+        ax.set(xlabel='Length (us)', ylabel='Signal')
+        ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+        ax.grid()
+        viewer = live_line(ax)
+        
+        @context.plots.on_plot_thread
+        def update(data):
+            artists = viewer.set(lengths, rabi_signal2real(average_round(data)))
+            return artists
+        
+        fig.show()
         signals = SignalBuffer(
             (cfg.rounds, len(lengths)),
-            on_update=lambda data: viewer.update(
-                lengths, rabi_signal2real(average_round(data))
-            ),
+            on_update=update,
         )
         check_snr = snr_checker(
             signals.at(),
@@ -285,7 +307,7 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
         )
 
         # 3. Show the oscillation and the fitted calibration lengths.
-        fig, ax = plots.subplots("fit", figsize=config.figsize)
+        fig, ax = plots.subplots(num="fit", figsize=config.figsize)
 
         ax.plot(lens, real_signals, label="meas", ls="-", marker="o", markersize=3)
         ax.plot(lens, y_fit, label="fit")

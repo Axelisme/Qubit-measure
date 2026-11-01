@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
+from pydantic.dataclasses import dataclass as validated_dataclass
 from typing import Annotated, ClassVar
 
 import numpy as np
+from matplotlib.ticker import MaxNLocator
 from matplotlib import rcParams
 from matplotlib.axes import Axes
 from numpy.typing import NDArray
@@ -30,9 +32,8 @@ from zcu_lab.v2.support import live_line
 
 @dataclass(frozen=True)
 class AllXY_Result:
-    """AllXY gate-pair indices and mean complex IQ, both shaped (21,)."""
+    """Mean complex IQ for the fixed 21 AllXY gate pairs, shaped (21,)."""
 
-    gate_idxs: NDArray[np.int64]
     signals: NDArray[np.complex128]
 
 
@@ -165,7 +166,7 @@ class AllXYCfg(ConfigBase):
     ] = 1.0
 
 
-@dataclass(frozen=True)
+@validated_dataclass(frozen=True)
 class AllXYAnalyzeOptions:
     fit_ge: Annotated[bool, FieldMeta(label="Fit g/e levels")] = False
 
@@ -200,7 +201,8 @@ class AllXY_Exp(Experiment[AllXY_Result, AllXYCfg]):
     AXES_SPEC: ClassVar[AxesSpec[AllXY_Result, AllXYCfg]] = AxesSpec(
         axes=(
             AxesSpec.Axis(
-                "gate_idxs", label="Gate Pair Index", unit="", dtype=np.int64
+                values=tuple(range(len(ALLXY_SEQUENCE))),
+                label="Gate Pair Index", unit="", dtype=np.int64
             ),
         ),
         z=AxesSpec.Z("signals", label="Signal", unit="a.u."),
@@ -223,19 +225,22 @@ class AllXY_Exp(Experiment[AllXY_Result, AllXYCfg]):
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
 
-        viewer = live_line(
-            context.plots,
-            "measurement",
-            "Gate",
-            "Signal",
-            configure_axes=_configure_allxy_axes,
-        )
+        fig, ax = context.plots.subplots(num='measurement')
+        ax.set(xlabel='Gate', ylabel='Signal')
+        ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+        ax.grid()
+        viewer = live_line(ax)
+        _configure_allxy_axes(ax)
+        
+        @context.plots.on_plot_thread
+        def update(data):
+            artists = viewer.set(np.arange(len(ALLXY_SEQUENCE), dtype=np.float64), allxy_signal2real(data))
+            return artists
+        
+        fig.show()
         signals_buffer = SignalBuffer(
             (len(ALLXY_SEQUENCE),),
-            on_update=lambda data: viewer.update(
-                np.arange(len(ALLXY_SEQUENCE), dtype=np.float64),
-                allxy_signal2real(data),
-            ),
+            on_update=update,
         )
         with Schedule(signals_buffer, scope=context.scope) as sched:
             # Derive Y rotations from X calibrations and retain an identity time slot.
@@ -285,7 +290,6 @@ class AllXY_Exp(Experiment[AllXY_Result, AllXYCfg]):
             sched.run_acquire(prog, soc, rounds=cfg.rounds)
 
         return AllXY_Result(
-            gate_idxs=np.arange(len(ALLXY_SEQUENCE), dtype=np.int64),
             signals=signals_buffer.array,
         )
 
@@ -379,7 +383,7 @@ class AllXY_Exp(Experiment[AllXY_Result, AllXYCfg]):
 
         # Compare the measured staircase with the fitted low-order model.
 
-        fig, ax = plots.subplots("fit", figsize=config.figsize)
+        fig, ax = plots.subplots(num="fit", figsize=config.figsize)
         ax.plot(real_signals, marker="o", linestyle="None", label="Measured Signals")
         ax.plot(
             predict_signals,

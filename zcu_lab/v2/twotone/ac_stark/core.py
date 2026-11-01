@@ -2,9 +2,12 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
+from pydantic.dataclasses import dataclass as validated_dataclass
+from pydantic import Field
 from typing import Annotated, ClassVar
 
 import numpy as np
+from matplotlib.ticker import MaxNLocator
 from matplotlib.image import NonUniformImage
 from numpy.typing import NDArray
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
@@ -29,7 +32,7 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.process import rotate2real
 
-from zcu_lab.v2.support import live_heatmap_with_line
+from zcu_lab.v2.support import live_heatmap, live_line
 from zcu_lab.v2.support.resonance import get_resonance_freq
 
 
@@ -42,11 +45,13 @@ class AcStarkResult:
     signals: NDArray[np.complex128]
 
 
-@dataclass(frozen=True)
+@validated_dataclass(frozen=True)
 class AcStarkAnalyzeOptions:
+    """Dispersive chi/kappa in MHz; degree 1 or 2; optional exclusive gain cutoff."""
+
     chi: float
     kappa: float
-    deg: int = 1
+    deg: Annotated[int, Field(ge=1, le=2)] = 1
     cutoff: float | None = None
 
 
@@ -157,23 +162,38 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
             nonlocal current_snr
             current_snr = snr
 
-        viewer = live_heatmap_with_line(
-            context.plots,
-            "measurement",
-            "Stark Pulse Gain (a.u.)",
-            "Frequency (MHz)",
-            line_axis=1,
-            num_lines=2,
-            uniform=False,
-        )
+        fig, _ = context.plots.subplots(1, 2, num='measurement')
+        heat_ax, line_ax = fig.axes
+        heat_ax.set(xlabel='Stark Pulse Gain (a.u.)', ylabel='Frequency (MHz)')
+        line_ax.set_xlabel('Frequency (MHz)')
+        heatmap = live_heatmap(heat_ax, uniform=False)
+        line_ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+        line_ax.grid()
+        lines = live_line(line_ax, num_lines=2)
+        for artist in line_ax.lines[:-1]:
+            artist.set(marker="None", alpha=0.3, color="red")
+        line_ax.lines[-1].set(label="current line", marker=".", color="C0")
+        line_ax.legend()
+        
+        @context.plots.on_plot_thread
+        def update(data):
+            real = acstark_signal2real(data)
+            valid = np.flatnonzero(~np.all(np.isnan(real), axis=1))
+            current = int(valid[-1]) if valid.size else -1
+            history = np.full((2, len(freqs)), np.nan)
+            for offset in range(min(2, current + 1)):
+                history[-offset - 1] = real[current - offset]
+            artists = heatmap.set(gains, freqs, real)
+            artists = (*artists, *lines.set(freqs, history))
+            title = f'snr = {current_snr:.1f}' if current_snr else None
+            if title is not None:
+                return (*artists, heat_ax.set_title(title))
+            return artists
+        
+        fig.show()
         signals_buffer = SignalBuffer(
             (len(gains), len(freqs)),
-            on_update=lambda data: viewer.update(
-                gains,
-                freqs,
-                acstark_signal2real(data),
-                title=f"snr = {current_snr:.1f}" if current_snr else None,
-            ),
+            on_update=update,
         )
 
         # Acquire one frequency trace per Stark gain, retaining its SNR early stop.
@@ -254,11 +274,9 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
         if deg == 1:
             b, c = np.polyfit(s_gains2, s_freqs, 1)
             y_fit = b * x2_fit + c
-        elif deg == 2:
+        else:
             a, b, c = np.polyfit(s_gains2, s_freqs, 2)
             y_fit = a * x2_fit**2 + b * x2_fit + c
-        else:
-            raise ValueError(f"Degree {deg} is not supported.")
 
         # Convert the linear Stark slope to photons using the supplied chi/kappa.
         eta = kappa**2 / (kappa**2 + chi**2)
@@ -267,7 +285,7 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
         # plot the data and the fitted polynomial
         avg_n = ac_coeff * gains2
 
-        fig, ax1 = plots.subplots("fit", figsize=config.figsize)
+        fig, ax1 = plots.subplots(num="fit", figsize=config.figsize)
 
         # Use NonUniformImage for better visualization with gain^2 as x-axis
         im = NonUniformImage(ax1, cmap="viridis", interpolation="nearest")

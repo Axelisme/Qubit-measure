@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Annotated, ClassVar, Self
 
 import numpy as np
+from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field, model_validator
 from zcu_tools.analysis.fitting import fit_decay
@@ -129,14 +130,22 @@ class RB_Exp(Experiment[RB_Result, RBCfg]):
             dtype=np.int64,
         )
 
-        viewer = live_line(context.plots, "measurement", "Depth", "Signal")
+        fig, ax = context.plots.subplots(num='measurement')
+        ax.set(xlabel='Depth', ylabel='Signal')
+        ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+        ax.grid()
+        viewer = live_line(ax)
+        
+        @context.plots.on_plot_thread
+        def update(data):
+            artists = viewer.set(depths.astype(np.float64), rb_signal2real(data))
+            return artists
+        
+        fig.show()
 
         signals_buffer = SignalBuffer(
             (len(entropys), len(depths)),
-            on_update=lambda data: viewer.update(
-                depths.astype(np.float64),
-                rb_signal2real(data),
-            ),
+            on_update=update,
         )
         with Schedule(signals_buffer, scope=context.scope) as sched:
             for _, step in sched.scan("seed", entropys.tolist()):
@@ -274,7 +283,7 @@ class RB_Exp(Experiment[RB_Result, RBCfg]):
         fidelity = 1.0 - epc
         fidelity_err = epc_err
 
-        fig, ax = plots.subplots("fit", figsize=config.figsize)
+        fig, ax = plots.subplots(num="fit", figsize=config.figsize)
 
         for si in range(signals2D.shape[0]):
             per_seed = rotate2real(signals2D[si]).real

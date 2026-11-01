@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
+from pydantic.dataclasses import dataclass as validated_dataclass
 from typing import Annotated, ClassVar, Literal
 
 import numpy as np
+from matplotlib.ticker import ScalarFormatter
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter1d
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
@@ -85,7 +87,7 @@ class ZigZagScanCfg(ConfigBase):
     ] = 1.0
 
 
-@dataclass(frozen=True)
+@validated_dataclass(frozen=True)
 class ZigZagScanAnalyzeOptions:
     find_range: tuple[float | None, float | None] = (None, None)
 
@@ -167,14 +169,24 @@ class ZigZagScanExp(Experiment[ZigZagScanResult, ZigZagScanCfg]):
             )
 
         # 2. Track mean IQ on the count-by-parameter grid.
-        viewer = live_heatmap(context.plots, "measurement", "Times", x_info["name"])
+        fig, ax = context.plots.subplots(num='measurement')
+        ax.set(xlabel='Times', ylabel=x_info['name'])
+        formatter = ScalarFormatter(useMathText=True)
+        formatter.set_powerlimits((-2, 2))
+        ax.xaxis.set_major_formatter(formatter)
+        ax.yaxis.set_major_formatter(formatter)
+        heatmap = live_heatmap(ax, uniform=True)
+        
+        @context.plots.on_plot_thread
+        def update(data):
+            real = zigzag_signal2real(data)
+            artists = heatmap.set(times.astype(np.float64), values, real)
+            return artists
+        
+        fig.show()
         signals_buffer = SignalBuffer(
             (len(times), len(values)),
-            on_update=lambda data: viewer.update(
-                times.astype(np.float64),
-                values,
-                zigzag_signal2real(data),
-            ),
+            on_update=update,
         )
         with Schedule(signals_buffer, scope=context.scope) as sched:
             builder = TimelineBuilder(
@@ -255,7 +267,7 @@ class ZigZagScanExp(Experiment[ZigZagScanResult, ZigZagScanCfg]):
             loss[values > find_range[1]] = np.nan
         min_value = values[np.nanargmin(loss)]
 
-        fig, _ = plots.subplots("fit", nrows=2, ncols=1, sharex=True)
+        fig, _ = plots.subplots(num="fit", nrows=2, ncols=1, sharex=True)
         ax1, ax2 = fig.axes
 
         dx = (values[1] - values[0]) * 0.5

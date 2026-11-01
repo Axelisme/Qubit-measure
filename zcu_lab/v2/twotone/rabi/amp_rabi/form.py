@@ -24,19 +24,11 @@ def make_form(ctx: FormContext) -> Form[AmpRabiCfg]:
         tree={
             "reset": Slot("$qubit.module.reset"),
             "qub_pulse": pulse,
-            "readout": Slot("$resonator.module.readout")
-            if ctx.has("$resonator.module.readout")
-            else Template("readout", bindings={"resonator": "$resonator"}),
+            "readout": Slot("$resonator.module.readout", fallback=Template("readout", bindings={"resonator": "$resonator"}, seed_metadata=pulse_readout_seed_metadata(gain=0.1))),
             "init_pulse": None,
             "gain": Range(-0.3, 1.0, expts=51),
             "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),
             "reps": 1000,
             "rounds": 10,
         },
-    ).with_seed_metadata(
-        (
-            {}
-            if ctx.has("$resonator.module.readout")
-            else pulse_readout_seed_metadata(gain=0.1)
-        )
     )

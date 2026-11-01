@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Annotated, ClassVar, Literal
 
 import numpy as np
+from matplotlib.ticker import MaxNLocator
 import zcu_tools.analysis.fitting as ft
 from numpy.typing import NDArray
 from pydantic import Field
@@ -139,16 +140,22 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
 
     def _run_linear(self, cfg: T1Cfg, *, context: RunContext) -> T1Result:
         lengths = sweep2array(cfg.delay, "time", {"soccfg": context.soccfg})
-        viewer = live_line(
-            context.plots,
-            "measurement",
-            "Time (us)",
-            "Amplitude",
-            title="T1 relaxation",
-        )
+        fig, ax = context.plots.subplots(num='measurement')
+        ax.set(xlabel='Time (us)', ylabel='Amplitude')
+        ax.set_title('T1 relaxation')
+        ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+        ax.grid()
+        viewer = live_line(ax)
+        
+        @context.plots.on_plot_thread
+        def update(data):
+            artists = viewer.set(lengths, t1_signal2real(data))
+            return artists
+        
+        fig.show()
         signals = SignalBuffer(
             (len(lengths),),
-            on_update=lambda data: viewer.update(lengths, t1_signal2real(data)),
+            on_update=update,
         )
         with Schedule(signals, scope=context.scope) as sched:
             builder = TimelineBuilder(
@@ -178,10 +185,21 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
     def _run_decay(self, cfg: T1Cfg, *, context: RunContext) -> T1Result:
         table = materialize_nonuniform_t1_delays(cfg.delay, soccfg=context.soccfg)
         lengths = table.times_us
-        viewer = live_line(context.plots, "measurement", "Time (us)", "Amplitude")
+        fig, ax = context.plots.subplots(num='measurement')
+        ax.set(xlabel='Time (us)', ylabel='Amplitude')
+        ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+        ax.grid()
+        viewer = live_line(ax)
+        
+        @context.plots.on_plot_thread
+        def update(data):
+            artists = viewer.set(lengths, t1_signal2real(data))
+            return artists
+        
+        fig.show()
         signals = SignalBuffer(
             (len(lengths),),
-            on_update=lambda data: viewer.update(lengths, t1_signal2real(data)),
+            on_update=update,
         )
         with Schedule(signals, scope=context.scope) as sched:
             builder = TimelineBuilder(
@@ -260,7 +278,7 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
             pCov,
         )
 
-        fig, ax = plots.subplots("fit")
+        fig, ax = plots.subplots(num="fit")
 
         ax.plot(xs, real_signals, label="data", ls="-", marker="o", markersize=5)
         ax.plot(xs, y_fit, label="fit", c="orange", zorder=1)

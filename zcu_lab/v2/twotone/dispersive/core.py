@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from pydantic.dataclasses import dataclass as validated_dataclass
 from typing import Annotated, Any, ClassVar
 
 import numpy as np
+from matplotlib.ticker import MaxNLocator
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from matplotlib.patches import Circle
@@ -39,13 +41,12 @@ from zcu_lab.v2.support import live_line
 class DispersiveResult:
     """Readout frequencies in MHz and mean IQ shaped (2, Nfreq).
 
-    ``ge`` labels branches 0/1 without/with the qubit preparation pulse;
+    The fixed branch axis labels 0/1 without/with the qubit preparation pulse;
     these labels do not certify pure ground/excited populations.
     """
 
     freqs: NDArray[np.float64]
     signals: NDArray[np.complex128]
-    ge: NDArray[np.int64] = field(default_factory=lambda: np.array([0, 1]))
 
 
 def dispersive_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -76,7 +77,7 @@ class DispersiveCfg(ConfigBase):
     ] = 1.0
 
 
-@dataclass(frozen=True)
+@validated_dataclass(frozen=True)
 class DispersiveAnalyzeOptions:
     """Choose whether both resonance fits allow an amplitude-background slope."""
 
@@ -139,7 +140,7 @@ class DispersiveExp(Experiment[DispersiveResult, DispersiveCfg]):
     AXES_SPEC: ClassVar[AxesSpec[DispersiveResult, DispersiveCfg]] = AxesSpec(
         axes=(
             AxesSpec.Axis("freqs", label="Frequency", unit="Hz", scale=1e6),
-            AxesSpec.Axis("ge", label="Amplitude", unit="None", dtype=np.int64),
+            AxesSpec.Axis(values=(0, 1), label="Amplitude", unit="None", dtype=np.int64),
         ),
         z=AxesSpec.Z("signals", label="Signal", unit="a.u."),
         result_type=DispersiveResult,
@@ -173,12 +174,21 @@ class DispersiveExp(Experiment[DispersiveResult, DispersiveCfg]):
             {"soccfg": soccfg, "gen_ch": cfg.qub_pulse.ch},
         )
 
-        viewer = live_line(
-            context.plots, "measurement", "Frequency (MHz)", "Amplitude", num_lines=2
-        )
+        fig, ax = context.plots.subplots(num='measurement')
+        ax.set(xlabel='Frequency (MHz)', ylabel='Amplitude')
+        ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+        ax.grid()
+        viewer = live_line(ax, num_lines=2)
+        
+        @context.plots.on_plot_thread
+        def update(data):
+            artists = viewer.set(freqs, dispersive_signal2real(data))
+            return artists
+        
+        fig.show()
         signals_buffer = SignalBuffer(
             (2, len(freqs)),
-            on_update=lambda data: viewer.update(freqs, dispersive_signal2real(data)),
+            on_update=update,
         )
 
         # Sweep readout frequency for both preparations in the same FPGA program.

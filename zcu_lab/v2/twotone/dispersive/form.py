@@ -14,16 +14,12 @@ def make_form(ctx: FormContext) -> Form[DispersiveCfg]:
         tree={
             "reset": Slot("$qubit.module.reset"),
             "init_pulse": Hidden(),
-            "qub_pulse": Slot("$qubit.module.x180")
-            if ctx.has("$qubit.module.x180")
-            else Template("pi_pulse", bindings={"qubit": "$qubit"}),
-            "readout": Slot("$resonator.module.readout", set={"freq": Hidden(0.0)})
-            if ctx.has("$resonator.module.readout")
-            else Template(
+            "qub_pulse": Slot("$qubit.module.x180", fallback=Template("pi_pulse", bindings={"qubit": "$qubit"})),
+            "readout": Slot("$resonator.module.readout", set={"freq": Hidden(0.0)}, fallback=Template(
                 "readout",
                 bindings={"resonator": "$resonator"},
                 set={"freq": Hidden(0.0)},
-            ),
+            )),
             "freq": Range.around(
                 "$resonator.freq", "1.5 * $resonator.kappa", expts=301
             ),

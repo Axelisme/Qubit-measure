@@ -14,15 +14,9 @@ def make_form(ctx: FormContext) -> Form[IRBCfg]:
         IRBCfg,
         tree={
             "reset": Slot("$qubit.module.reset"),
-            "X90_pulse": Slot("$qubit.module.x90")
-            if ctx.has("$qubit.module.x90")
-            else Template("pi2_pulse", bindings={"qubit": "$qubit"}),
-            "X180_pulse": Slot("$qubit.module.x180")
-            if ctx.has("$qubit.module.x180")
-            else Template("pi_pulse", bindings={"qubit": "$qubit"}),
-            "readout": Slot("$resonator.module.readout")
-            if ctx.has("$resonator.module.readout")
-            else Template("readout", bindings={"resonator": "$resonator"}),
+            "X90_pulse": Slot("$qubit.module.x90", fallback=Template("pi2_pulse", bindings={"qubit": "$qubit"})),
+            "X180_pulse": Slot("$qubit.module.x180", fallback=Template("pi_pulse", bindings={"qubit": "$qubit"})),
+            "readout": Slot("$resonator.module.readout", fallback=Template("readout", bindings={"resonator": "$resonator"})),
             "I_pulse": Hidden(),
             "depth": LogPoints(max=128, points=9),
             "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),

@@ -173,13 +173,11 @@ class StirapExp(Experiment[StirapResult, StirapCfg]):
             VariableSpec(
                 "counts",
                 (
-                    VariableAxisSpec.generated_arange("State", "None"),
-                    VariableAxisSpec("Scan x (see cfg)", "None", field_name="x_values"),
-                    VariableAxisSpec(
-                        "Stokes detuning (MHz)", "None", field_name="y_values"
-                    ),
+                    VariableAxisSpec.generated_arange(label="State", unit="None"),
+                    VariableAxisSpec(label="Scan x (see cfg)", unit="None", field_name="x_values"),
+                    VariableAxisSpec(label="Stokes detuning (MHz)", unit="None", field_name="y_values"),
                 ),
-                VariableZSpec("counts", "Shot count", "None", dtype=np.float64),
+                VariableZSpec("counts", label="Shot count", unit="None", dtype=np.float64),
             ),
         ),
         result_type=StirapResult,
@@ -261,9 +259,10 @@ class StirapExp(Experiment[StirapResult, StirapCfg]):
                         ),
                     )
         result = StirapResult(xs, ys, buffer.array)
-        context.plots.subplots("measurement", layout="constrained")
+        figure, _ = context.plots.subplots(num="measurement", layout="constrained")
 
-        def draw(figure):
+        @context.plots.on_plot_thread
+        def draw(_data):
             ax = figure.axes[0]
             fractions = result.counts / result.counts.sum(axis=-1, keepdims=True)
             if scan.kind == "detuning":
@@ -276,8 +275,10 @@ class StirapExp(Experiment[StirapResult, StirapCfg]):
                 ax.set(xlabel=x_label, ylabel="Preparation-label fraction")
                 ax.legend()
             ax.set_title("STIRAP acquired fractions (not fidelity)")
+            return (figure,)
 
-        context.plots.draw("measurement", draw)
+        draw(None)
+        figure.show()
         return result
 
     def analyze(
@@ -309,15 +310,16 @@ class StirapExp(Experiment[StirapResult, StirapCfg]):
         raw = counts / counts.sum(axis=-1, keepdims=True)
         result = analyze_centroid3_populations(raw, calibration)
         detuning = cfg.scan.kind == "detuning"
-        plots.subplots(
-            "fit",
+        figure, _ = plots.subplots(
+            num="fit",
             nrows=2 if detuning else 1,
             ncols=3 if detuning else 2,
             figsize=(11, 7) if detuning else (10, 5),
             layout="constrained",
         )
 
-        def populations(figure):
+        @plots.on_plot_thread
+        def populations(_data):
             for row, (values, title) in enumerate(
                 (
                     (result.raw_populations, "Raw g/e/f fractions"),
@@ -359,6 +361,8 @@ class StirapExp(Experiment[StirapResult, StirapCfg]):
             figure.suptitle(
                 f"Saved readout: condition={result.condition_number:.4g}, minimum singular value={result.minimum_singular_value:.4g}\nPreparation-label estimates, not fidelity"
             )
+            return (figure,)
 
-        plots.draw("fit", populations)
+        populations(None)
+        figure.show()
         return result

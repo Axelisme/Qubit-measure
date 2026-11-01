@@ -71,25 +71,13 @@ def make_form(ctx: FormContext) -> Form[CPMGInput]:
         CPMGInput,
         tree={
             "reset": Slot("$qubit.module.reset"),
-            "pi_pulse": Slot("$qubit.module.x180")
-            if ctx.has("$qubit.module.x180")
-            else Template("pi_pulse", bindings={"qubit": "$qubit"}),
-            "pi2_pulse": Slot("$qubit.module.x90")
-            if ctx.has("$qubit.module.x90")
-            else Template("pi2_pulse", bindings={"qubit": "$qubit"}),
-            "readout": Slot("$resonator.module.readout")
-            if ctx.has("$resonator.module.readout")
-            else Template("readout", bindings={"resonator": "$resonator"}),
+            "pi_pulse": Slot("$qubit.module.x180", fallback=Template("pi_pulse", bindings={"qubit": "$qubit"})),
+            "pi2_pulse": Slot("$qubit.module.x90", fallback=Template("pi2_pulse", bindings={"qubit": "$qubit"})),
+            "readout": Slot("$resonator.module.readout", fallback=Template("readout", bindings={"resonator": "$resonator"}, seed_metadata=pulse_readout_seed_metadata(gain=0.1))),
             "count": LogPoints(max=16, points=5, include_zero=False),
             "detune_ratio": 0.1,
             "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),
             "reps": 1000,
             "rounds": 10,
         },
-    ).with_seed_metadata(
-        (
-            {}
-            if ctx.has("$resonator.module.readout")
-            else pulse_readout_seed_metadata(gain=0.1)
-        )
     )

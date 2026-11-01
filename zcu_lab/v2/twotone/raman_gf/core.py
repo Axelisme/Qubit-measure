@@ -170,16 +170,16 @@ class RamanGFExp(Experiment[RamanGFResult, RamanGFCfg]):
             VariableSpec(
                 "counts",
                 (
-                    VariableAxisSpec.generated_arange("State", "None"),
-                    VariableAxisSpec.generated_arange("Point", "None"),
+                    VariableAxisSpec.generated_arange(label="State", unit="None"),
+                    VariableAxisSpec.generated_arange(label="Point", unit="None"),
                 ),
-                VariableZSpec("counts", "Shot count", "None", dtype=np.float64),
+                VariableZSpec("counts", label="Shot count", unit="None", dtype=np.float64),
             ),
             *(
                 VariableSpec(
                     name,
-                    (VariableAxisSpec.generated_arange("Point", "None"),),
-                    VariableZSpec(field, label, unit, dtype=np.float64),
+                    (VariableAxisSpec.generated_arange(label="Point", unit="None"),),
+                    VariableZSpec(field, label=label, unit=unit, dtype=np.float64),
                 )
                 for name, field, label, unit in (
                     ("detuning", "detunings", "Two-photon detuning", "MHz"),
@@ -244,9 +244,10 @@ class RamanGFExp(Experiment[RamanGFResult, RamanGFCfg]):
             areas=point_gains**2 * integral,
             gains=point_gains,
         )
-        context.plots.subplots("measurement", layout="constrained")
+        figure, _ = context.plots.subplots(num="measurement", layout="constrained")
 
-        def draw(figure):
+        @context.plots.on_plot_thread
+        def draw(_data):
             ax = figure.axes[0]
             fractions = result.counts / result.counts.sum(axis=-1, keepdims=True)
             for label, state in enumerate(("g", "e", "f")):
@@ -261,8 +262,10 @@ class RamanGFExp(Experiment[RamanGFResult, RamanGFCfg]):
                 ylabel="Preparation-label fraction",
             )
             ax.legend()
+            return (figure,)
 
-        context.plots.draw("measurement", draw)
+        draw(None)
+        figure.show()
         return result
 
     def analyze(
@@ -295,15 +298,16 @@ class RamanGFExp(Experiment[RamanGFResult, RamanGFCfg]):
         raw = counts / counts.sum(axis=-1, keepdims=True)
         result = analyze_centroid3_populations(raw, calibration)
         grid = cfg.scan_mode == "frequency_area"
-        plots.subplots(
-            "fit",
+        figure, _ = plots.subplots(
+            num="fit",
             nrows=2 if grid else 1,
             ncols=3 if grid else 2,
             figsize=(11, 7) if grid else (10, 5),
             layout="constrained",
         )
 
-        def populations(figure):
+        @plots.on_plot_thread
+        def populations(_data):
             for row, (values, title) in enumerate(
                 (
                     (result.raw_populations, "Raw g/e/f fractions"),
@@ -350,6 +354,8 @@ class RamanGFExp(Experiment[RamanGFResult, RamanGFCfg]):
             figure.suptitle(
                 f"Saved readout: condition={result.condition_number:.4g}, minimum singular value={result.minimum_singular_value:.4g}\nPreparation-label estimates, not fidelity"
             )
+            return (figure,)
 
-        plots.draw("fit", populations)
+        populations(None)
+        figure.show()
         return result

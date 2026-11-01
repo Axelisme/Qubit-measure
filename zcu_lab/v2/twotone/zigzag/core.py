@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Annotated, ClassVar, Literal
 
 import numpy as np
+from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
@@ -91,13 +92,21 @@ class ZigZagExp(Experiment[ZigZagResult, ZigZagCfg]):
 
         times = np.arange(0, cfg.n_times + 1)
 
-        viewer = live_line(context.plots, "measurement", "Times", "Signal")
+        fig, ax = context.plots.subplots(num='measurement')
+        ax.set(xlabel='Times', ylabel='Signal')
+        ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+        ax.grid()
+        viewer = live_line(ax)
+        
+        @context.plots.on_plot_thread
+        def update(data):
+            artists = viewer.set(times.astype(np.float64), zigzag_signal2real(data))
+            return artists
+        
+        fig.show()
         signals_buffer = SignalBuffer(
             (len(times),),
-            on_update=lambda data: viewer.update(
-                times.astype(np.float64),
-                zigzag_signal2real(data),
-            ),
+            on_update=update,
         )
         with Schedule(signals_buffer, scope=context.scope) as sched:
             repeat_pulse = getattr(cfg, cfg.repeat_on)

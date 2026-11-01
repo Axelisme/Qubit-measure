@@ -24,9 +24,7 @@ def make_form(ctx: FormContext) -> Form[FreqFluxCfg]:
                 bindings={"qubit": "$qubit"},
                 set={"freq": Hidden(0.0)},
             ),
-            "readout": Slot("$resonator.module.readout")
-            if ctx.has("$resonator.module.readout")
-            else Template("readout", bindings={"resonator": "$resonator"}),
+            "readout": Slot("$resonator.module.readout", fallback=Template("readout", bindings={"resonator": "$resonator"}, seed_metadata=pulse_readout_seed_metadata(gain=0.1))),
             "freq": Range(None, None, expts=1001),
             "flux": Range(None, None, expts=101),
             "relax_delay": 1.0,
@@ -34,18 +32,4 @@ def make_form(ctx: FormContext) -> Form[FreqFluxCfg]:
             "rounds": 10,
             "fail_retry": Hidden(),
         },
-    ).with_seed_metadata(
-        {
-            **(
-                {}
-                if ctx.has("$resonator.module.readout")
-                else pulse_readout_seed_metadata(gain=0.1)
-            ),
-            **{
-                ("qub_pulse", "module", "gain"): FieldMeta(
-                    description="未校準的起始值，來源：固定常數。qub_probe Template gain 0.1 a.u. within [-1, 1]; operator confirmation required",
-                    calibration="uncalibrated",
-                )
-            },
-        }
-    )
+    ).with_seed_metadata({**{('qub_pulse', 'module', 'gain'): FieldMeta(description='未校準的起始值，來源：固定常數。qub_probe Template gain 0.1 a.u. within [-1, 1]; operator confirmation required', calibration='uncalibrated')}})
