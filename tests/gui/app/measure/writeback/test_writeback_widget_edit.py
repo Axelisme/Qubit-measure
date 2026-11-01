@@ -417,19 +417,19 @@ def test_invalid_shared_module_can_cancel_reopen_repair_and_retire(
     _assert_shared_preview_unavailable(editor)
     assert editor.text_input(object_name="form.input.gain").text == "missing.value"
     assert not editor.observe("Save").enabled
-    editor.enter_text(object_name="form.input.gain", value="0.3")
+    editor.enter_text(object_name="form.input.gain", value="0.375")
     editor.screenshot(evidence / "06-repaired.png")
     _assert_shared_preview_unavailable(editor)
     assert editor.observe("Save").enabled
     editor.click("Save")
     driver.screenshot(evidence / "07-saved.png")
     assert not driver.dialogs()
-    assert "0.3" in driver.observe(object_name="writebackProposed").tooltip
+    assert "0.375" in driver.observe(object_name="writebackProposed").tooltip
     driver.click("Edit")
     editor = ComponentDriver(_find_open_dialog("Edit module —"))
     editor.resize_window(700, 700)
     editor.screenshot(evidence / "08-reopened-saved.png")
-    assert editor.text_input(object_name="form.input.gain").text == "0.3"
+    assert editor.text_input(object_name="form.input.gain").text == "0.375"
     # Public owner teardown is not a user gesture; observe its effect via the driver.
     widget.detach()
     driver.screenshot(evidence / "09-detached.png")

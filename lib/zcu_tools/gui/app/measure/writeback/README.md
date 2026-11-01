@@ -46,8 +46,8 @@ name. Only successful Save closes the dialog; refusals stay inline for correctio
 Invalid local input disables Save. An invalid shared draft can still be opened
 and repaired. While the shared draft is invalid, Writes to library and Changes
 from library show unavailable, even after the local copy becomes valid. Saving
-the valid copy restores the ledger preview. The ledger updates from the shared draft when the
-dialog finishes, not while the copy is being edited. Apply Selected remains the
+the valid copy restores the ledger preview. The ledger updates from the shared
+draft when the dialog finishes, not while the copy is being edited. Apply Selected remains the
 library write boundary. No destroyed closure owns form cleanup.
 
 ## Initial selection and notes
