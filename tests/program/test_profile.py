@@ -91,6 +91,29 @@ def test_three_wave_users_can_share_a_port_with_distinct_tmux(profile):
 
 
 @pytest.mark.parametrize("profile", ["derivation"], indirect=True)
+def test_mux_rejects_a_readout_with_tproc_control(profile):
+    ch = profile["mux"][0]["ro_chs"][0]
+    profile["readouts"][ch]["tproc_ctrl"] = 19
+    with pytest.raises(ValueError, match=r"mux\.0\.ro_chs"):
+        program.build_soccfg(profile)
+
+
+@pytest.mark.parametrize("profile", ["derivation"], indirect=True)
+def test_mux_preserves_explicit_trigger_wiring_and_readout_phase_bits(profile):
+    channels = profile["mux"][0]["ro_chs"]
+    for port, ch in enumerate(channels):
+        profile["readouts"][ch].update(trigger_type="tport", trigger_port=11 + port,
+                                        trigger_bit=9 + port, b_phase=16 + port)
+    cfg = program.build_soccfg(profile)
+    for port, ch in enumerate(channels):
+        output = cfg["readouts"][ch]
+        assert output["pfb_port"] == port
+        for field in ("trigger_type", "trigger_port", "trigger_bit", "b_phase"):
+            assert output[field] == profile["readouts"][ch][field]
+        assert "tproc_ctrl" not in output
+
+
+@pytest.mark.parametrize("profile", ["derivation"], indirect=True)
 def test_independent_channel_clocks_are_derived(profile):
     # This dedicated YAML is the worked example, not an ordinary board profile.
     profile["mux"] = []
