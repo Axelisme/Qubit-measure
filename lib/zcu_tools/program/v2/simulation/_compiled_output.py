@@ -17,7 +17,7 @@ from zcu_tools.core.simulation import (
 )
 
 from ..base import MyProgramV2
-from ..ir.io_instructions import DportWriteInst, PortWriteInst
+from ..ir.io_instructions import DportWriteInst, PortWriteInst, TrigInst
 from ..ir.operands import Register, SrcKeyword
 from ..utils import generator_frequencies_from_words, readout_frequencies_from_words
 from ._compiled_state import BoolArray, IntArray, Machine
@@ -412,21 +412,30 @@ class Outputs:
         if not conf & 8 and envelope.values[-1] != 0:
             raise ValueError("stdysel=last has nonzero final DAC envelope sample")
 
-    def trigger(self, machine: Machine, inst: DportWriteInst) -> None:
-        """Record ADC rising trigger effects, preserving declaration/read order."""
-        port, data = machine.value(inst.dst), machine.value(inst.data)
+    def trigger(self, machine: Machine, inst: DportWriteInst | TrigInst) -> None:
+        """Record dport masks or tport sets; clears do not create ADC reads."""
+        port = machine.value(inst.dst)
         if np.any(port != port[0]):
             raise ValueError("lane-dependent trigger port")
+        if isinstance(inst, TrigInst) and inst.src == "clr":
+            return
         timestamp = machine.ref + machine.value(
             inst.time if inst.time is not None else Register("s14")
         )
         start = self._ticks(timestamp - self.origin, self.prog.tproccfg["f_time"])
         for ch in self.prog.ro_chs:
             cfg = self.prog.soccfg["readouts"][ch]
-            active = (data & (1 << int(cfg["trigger_bit"]))) != 0
-            if int(cfg["trigger_port"]) != int(port[0]) or not np.any(active):
+            if int(cfg["trigger_port"]) != int(port[0]):
                 continue
-            active &= machine.active
+            if isinstance(inst, DportWriteInst):
+                if cfg["trigger_type"] != "dport":
+                    continue
+                data = machine.value(inst.data)
+                active = machine.active & ((data & (1 << int(cfg["trigger_bit"]))) != 0)
+            else:
+                if cfg["trigger_type"] != "tport":
+                    continue
+                active = machine.active.copy()
             if not np.any(active):
                 continue
             indexes = self.read_count[ch]

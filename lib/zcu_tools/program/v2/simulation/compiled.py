@@ -36,6 +36,7 @@ from ..ir.io_instructions import (
     DmemWriteInst,
     DportWriteInst,
     PortWriteInst,
+    TrigInst,
     WmemWriteInst,
 )
 from ..ir.operands import ImmValue, Register, SrcKeyword
@@ -90,6 +91,8 @@ def _execute(record: DecodedInstruction, machine: Machine, outputs: Outputs) -> 
     elif isinstance(inst, DportWriteInst):
         outputs.trigger(machine, inst)
         machine.port_effects(inst)
+    elif isinstance(inst, TrigInst):
+        outputs.trigger(machine, inst)
     elif not isinstance(inst, WaitInst) or record.body:
         raise ValueError("unsupported instruction effect")
 
