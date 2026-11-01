@@ -137,7 +137,7 @@ def test_receiver_schema_names_invalid_optional_background_fields(background, fi
                 "ro_ch": 0,
                 "gain": 1.0,
                 "noise_psd_adc2_ns": ((0.0, 0.0), (0.0, 0.0)),
-                "background": background,
+                "background": {"ripple_period_mhz": 1000.0, "pivot_ghz": 0.0, **background},
             }
         )
     assert error.value.errors()[0]["loc"] == (
