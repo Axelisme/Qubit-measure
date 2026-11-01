@@ -5,6 +5,7 @@ import sys
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Literal
 from uuid import uuid4
 
 from qick import QickConfig
@@ -105,7 +106,7 @@ def white_noise(
     seed: int | None = None,
     n_gens: int = 2,
     n_readouts: int = 1,
-    routes: tuple[tuple[int, int], ...] | None = None,
+    routes: tuple[tuple[int, int], ...] | Literal["all"] | None = None,
 ) -> SimulationEnvironment:
     """Build an explicit noise environment using the fixed offline QICK profile.
 
@@ -130,6 +131,10 @@ def white_noise(
         source.snapshot, execute, backend_version="white_noise-v2", seed=seed
     )
     wiring = tuple((ch, ch) for ch in range(n_readouts)) if routes is None else routes
+    if routes == "all":
+        wiring = tuple(
+            (gen, adc) for gen in range(n_gens) for adc in range(n_readouts)
+        )
     soc = SimulationSoc(soccfg, binding, routes=wiring)
     return SimulationEnvironment(
         soc, soccfg, DeviceManager(), "white_noise: independent Gaussian ADC samples"
