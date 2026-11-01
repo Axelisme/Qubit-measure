@@ -1,6 +1,6 @@
 """STIRAP scan controls with operator-supplied spectroscopy carriers."""
 
-from zcu_tools.cfg_model import Slot, Template
+from zcu_tools.cfg_model import Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
 from zcu_lab.v2.support.measure.ctx_helpers import source, t1_initial_time
