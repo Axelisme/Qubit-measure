@@ -6,6 +6,8 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field
 from qick import QickConfig
 
+from .wave_ports import wave_port_conflicts
+
 _PositiveInt = Annotated[int, Field(gt=0)]
 _Count = Annotated[int, Field(ge=0)]
 _PositiveFloat = Annotated[float, Field(gt=0, allow_inf_nan=False)]
@@ -137,9 +139,7 @@ def _validate_wave_ports(profile: _Profile) -> None:
     ports: dict[int, set[int | None]] = {}
     for path, port, selector in users:
         selectors = ports.setdefault(port, set())
-        if selectors and (
-            selector is None or None in selectors or selector in selectors
-        ):
+        if wave_port_conflicts(selector, selectors):
             raise ValueError(
                 f"{path}: shared wave-output port requires distinct tmux_ch"
             )

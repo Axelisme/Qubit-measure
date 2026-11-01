@@ -1,6 +1,6 @@
 # `zcu_tools.program` — QICK integration
 
-**Last updated:** 2026-11-02，逐 channel 接線與共用 port 檢查
+**Last updated:** 2026-11-02，逐 channel 接線與共用 wave-port 規則
 
 **讀者：** framework-dev。QICK 整合、程式建構與 acquisition 依賴速查。
 
@@ -78,6 +78,9 @@ The builder checks converter and wave-port consistency before returning:
   distinct non-null selectors. Mixing null and non-null selectors is invalid.
 
 A conflict raises `ValueError` at the later user's dotted field path.
+`program.wave_ports` owns the sharing rule. The profile builder applies it to
+all board channels; compiled simulation applies it only to declared channels
+and retains its instruction-level diagnostic.
 
 
 ## Native acquisition

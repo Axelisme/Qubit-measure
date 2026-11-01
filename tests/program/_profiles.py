@@ -2,6 +2,7 @@
 
 from copy import deepcopy
 from pathlib import Path
+from typing import Any
 
 import yaml
 from qick import QickConfig
@@ -14,14 +15,10 @@ def profile_soccfg(name: str) -> QickConfig:
         return build_soccfg(yaml.safe_load(stream))
 
 
-def load_soccfg(n_gens: int | None = None, n_readouts: int | None = None) -> QickConfig:
-    """Load ordinary capabilities with optional generator/readout counts."""
-    with (Path(__file__).parent / "profiles" / "ordinary.yaml").open() as stream:
-        profile = yaml.safe_load(stream)
+def _expand_channels(profile: dict[str, Any], n_gens: int, n_readouts: int) -> None:
+    """Replace channels with detached copies wired in sequential fixture order."""
     gen = profile["generators"][0]
     readout = profile["readouts"][0]
-    n_gens = len(profile["generators"]) if n_gens is None else n_gens
-    n_readouts = len(profile["readouts"]) if n_readouts is None else n_readouts
     profile["generators"] = [
         {**deepcopy(gen), "dac": f"{ch:02d}", "tproc_ch": ch} for ch in range(n_gens)
     ]
@@ -35,6 +32,17 @@ def load_soccfg(n_gens: int | None = None, n_readouts: int | None = None) -> Qic
         }
         for ch in range(n_readouts)
     ]
+
+
+def load_soccfg(n_gens: int | None = None, n_readouts: int | None = None) -> QickConfig:
+    """Load ordinary capabilities with optional generator/readout counts."""
+    with (Path(__file__).parent / "profiles" / "ordinary.yaml").open() as stream:
+        profile = yaml.safe_load(stream)
+    _expand_channels(
+        profile,
+        len(profile["generators"]) if n_gens is None else n_gens,
+        len(profile["readouts"]) if n_readouts is None else n_readouts,
+    )
     return build_soccfg(profile)
 
 
@@ -53,23 +61,9 @@ def load_mux_soccfg(
     """Load test mux capabilities with caller-selected channel counts and wiring."""
     with (Path(__file__).parent / "profiles" / "mux.yaml").open() as stream:
         profile = yaml.safe_load(stream)
-    gen = profile["generators"][0]
-    readout = profile["readouts"][0]
     mux = profile["mux"][0]
     b_phase = profile["readouts"][mux["ro_chs"][0]]["b_phase"]
-    profile["generators"] = [
-        {**deepcopy(gen), "dac": f"{ch:02d}", "tproc_ch": ch} for ch in range(n_gens)
-    ]
-    profile["readouts"] = [
-        {
-            **deepcopy(readout),
-            "adc": f"{ch:02d}",
-            "tproc_ctrl": n_gens + ch,
-            "tproc_ch": ch,
-            "trigger_bit": ch,
-        }
-        for ch in range(n_readouts)
-    ]
+    _expand_channels(profile, n_gens, n_readouts)
     for port, ch in enumerate(ro_chs):
         profile["readouts"][ch].update(
             tproc_ctrl=None, trigger_bit=port, b_phase=b_phase

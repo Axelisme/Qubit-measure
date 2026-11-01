@@ -16,6 +16,7 @@ from zcu_tools.core.simulation import (
     TimelineTemplate,
 )
 
+from ...wave_ports import wave_port_conflicts
 from ..base import MyProgramV2
 from ..ir.io_instructions import DportWriteInst, PortWriteInst, TrigInst
 from ..ir.operands import Register, SrcKeyword
@@ -135,9 +136,9 @@ class Outputs:
 
     def _port(self, port: int, tmux_ch: int | None, kind: str, ch: int) -> None:
         key = (port, tmux_ch)
-        if key in self.ports or any(
-            used_port == port and (used_tmux is None or tmux_ch is None)
-            for used_port, used_tmux in self.ports
+        if wave_port_conflicts(
+            tmux_ch,
+            (used_tmux for used_port, used_tmux in self.ports if used_port == port),
         ):
             raise ValueError(
                 f"PortWriteInst WPORT_WR at preopt setup: ambiguous wave output port {port}, tmux_ch={tmux_ch}"
