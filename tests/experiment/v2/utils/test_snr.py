@@ -86,7 +86,7 @@ def _readout_tracker(
     return tracker
 
 
-@pytest.mark.parametrize("sweep_shape", [(), (3,), (2, 3)])
+@pytest.mark.parametrize("sweep_shape", [(), (1,), (3,), (1, 3), (2, 3)])
 @pytest.mark.parametrize("skew_penalty", [0.0, 0.5])
 @pytest.mark.parametrize("use_default_axis", [False, True])
 def test_snr_as_signal_returns_only_sweep_axes(
@@ -101,6 +101,7 @@ def test_snr_as_signal_returns_only_sweep_axes(
         out = snr_as_signal([tracker], ge_axis=1, skew_penalty=skew_penalty)
 
     assert out.shape == sweep_shape
+    assert out.dtype == np.dtype(np.float64)
     expected = separations / np.sqrt(5.0 / 3.0)
     expected /= 1.0 + skew_penalty * np.log(0.5) ** 2
     np.testing.assert_allclose(out, expected)
@@ -121,6 +122,8 @@ def test_snr_as_signal_returns_only_sweep_axes(
         ((2, 2), 1, "readout"),
         ((1, 2), 0, "ge_axis"),
         ((1, 2), -3, "ge_axis"),
+        ((1, 2), -1, "ge_axis"),
+        ((1, 2), 3, "ge_axis"),
         ((1, 3), 1, "state"),
     ],
 )
