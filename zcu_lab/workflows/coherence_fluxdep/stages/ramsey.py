@@ -170,6 +170,7 @@ async def measure_ramsey(
             file=acquisition.file,
             gain_clamped=gain_clamped,
         )
+
     @env.plots.on_plot_thread
     def update_raw(data: tuple[NDArray[np.float64], NDArray[np.float64]]):
         return plot.set(*data)

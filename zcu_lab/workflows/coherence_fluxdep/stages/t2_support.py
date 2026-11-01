@@ -95,6 +95,7 @@ def decay_plot(plots: Plots, kind: str) -> AttachedLine:
         raise RuntimeError("Decay plot handle was not initialized")
     return line
 
+
 def draw_decay_fit(
     plots: Plots,
     kind: str,

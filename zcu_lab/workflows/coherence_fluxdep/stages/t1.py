@@ -5,8 +5,8 @@ from dataclasses import dataclass
 from typing import Literal
 
 import numpy as np
-from numpy.typing import NDArray
 from matplotlib.figure import Figure
+from numpy.typing import NDArray
 from zcu_tools.experiment.scope import Scope
 from zcu_tools.experiment.v2.utils.t1_sampling import t1_delay_axis
 from zcu_tools.experiment.workflows import Failed
@@ -177,6 +177,7 @@ def _plot(plots: Plots) -> AttachedLine:
         raise RuntimeError("Decay plot handle was not initialized")
     return line
 
+
 def _draw_fit(
     plots: Plots, fit: DecayFit, comparison: LifetimeComparison, reason: str | None
 ) -> None:
@@ -243,6 +244,7 @@ async def measure_t1(
             file=acquisition.file,
             gain_clamped=gain_clamped,
         )
+
     @env.plots.on_plot_thread
     def update_raw(data: tuple[NDArray[np.float64], NDArray[np.float64]]):
         return plot.set(*data)
