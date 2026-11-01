@@ -126,42 +126,22 @@ def test_classified_sums_keep_boundary_rules_and_detached_cfg(
     np.testing.assert_array_equal(iq, original)
 
 
-@pytest.mark.parametrize("timeline", [False, True])
+@pytest.mark.parametrize("timeline", [True])
 @pytest.mark.parametrize("mux", [False, True])
 def test_labels_resolve_adc_trigger_order_and_repeated_emissions(timeline, mux):
     cfg = mux_soccfg() if mux else v2.make_mock_soccfg()
     ro = native_mux((4, 1)).build("readout") if mux else readout()
-    if timeline:
+    class Program(v2.TimelineProgramV2):
+        def _initialize(self, cfg):
+            self.declare(ro)
 
-        class Program(v2.TimelineProgramV2):
-            def _initialize(self, cfg):
-                self.declare(ro)
+        def _body(self, cfg):
+            self.emit(ro, tag="prefix")
+            self.emit(ro, tag="herald")
+            self.emit(ro, tag="signal")
 
-            def _body(self, cfg):
-                self.emit(ro, tag="prefix")
-                self.emit(ro, tag="herald")
-                self.emit(ro, tag="signal")
-
-        prog = Program(cfg, reps=2)
-        names = ["herald", "signal"]
-    else:
-
-        class Reads(Module):
-            name = "reads"
-
-            def init(self, prog):
-                ro.init(prog)
-
-            def run(self, prog, t: float | QickParam = 0.0):
-                channels = [4, 1] if mux else [0]
-                assert t == 0.0
-                prog.trigger(channels, t=0)
-                ro.run(prog, t=2.0)
-                prog.trigger(channels, t=4)
-                return t + 6.0
-
-        prog = compile_modules(cfg, [Reads()], reps=2)
-        names = ["readout", "readout"]
+    prog = Program(cfg, reps=2)
+    names = ["herald", "signal"]
     axes = [v2.IQ(name, tone=1 if mux else None) for name in names]
     iq = {
         ch: np.array(
@@ -181,7 +161,7 @@ def test_labels_resolve_adc_trigger_order_and_repeated_emissions(timeline, mux):
     np.testing.assert_array_equal(result, expected)
 
 
-@pytest.mark.parametrize("timeline", [False, True])
+@pytest.mark.parametrize("timeline", [True])
 def test_empty_axes_fail_when_constructing_processor(timeline):
     prog = (
         v2.TimelineProgramV2(v2.make_mock_soccfg())
@@ -217,56 +197,41 @@ def test_declared_reads_must_match_actual_triggers():
         v2.shot_sums(prog, [v2.IQ("readout")])
 
 
-@pytest.mark.parametrize("timeline", [False, True])
+@pytest.mark.parametrize("timeline", [True])
 @pytest.mark.parametrize("control", ["Repeat", "Branch"])
 @pytest.mark.parametrize("inside", [False, True])
 def test_any_control_flow_trigger_on_selected_adc_is_rejected(
     timeline, control, inside
 ):
     ro = readout()
-    if timeline:
+    class Program(v2.TimelineProgramV2):
+        def _initialize(self, cfg):
+            self.declare(ro)
+            self.add_loop("choice", 2)
 
-        class Program(v2.TimelineProgramV2):
-            def _initialize(self, cfg):
-                self.declare(ro)
-                self.add_loop("choice", 2)
-
-            def _body(self, cfg):
-                if not inside:
-                    self.emit(ro, tag="selected")
-                if control == "Repeat":
+        def _body(self, cfg):
+            if not inside:
+                self.emit(ro, tag="selected")
+            if control == "Repeat":
+                self.delay_by_timeline()
+                with self.repeat("repeat_scope", 2):
+                    if inside:
+                        self.emit(ro, tag="selected")
+                    else:
+                        self.trigger([0], t=0, timeline="default")
                     self.delay_by_timeline()
-                    with self.repeat("repeat_scope", 2):
+            else:
+                with self.branch(by="choice", align_timeline=True) as branch:
+                    with branch.case(0):
                         if inside:
                             self.emit(ro, tag="selected")
                         else:
-                            self.trigger([0], t=0, timeline="default")
-                        self.delay_by_timeline()
-                else:
-                    with self.branch(by="choice", align_timeline=True) as branch:
-                        with branch.case(0):
-                            if inside:
-                                self.emit(ro, tag="selected")
-                            else:
-                                self.trigger([0], t=0)
-                        with branch.case(1):
-                            pass
+                            self.trigger([0], t=0)
+                    with branch.case(1):
+                        pass
 
-        prog = Program(v2.make_mock_soccfg())
-        label = "selected"
-    else:
-        target = ro if inside else readout("other")
-        scope = (
-            Repeat("repeat_scope", 2).add_content(target)
-            if control == "Repeat"
-            else Branch("choice", target, None)
-        )
-        prog = compile_modules(
-            v2.make_mock_soccfg(),
-            [scope] if inside else [ro, scope],
-            sweep=[("choice", 2)],
-        )
-        label = "readout"
+    prog = Program(v2.make_mock_soccfg())
+    label = "selected"
     with pytest.raises(ValueError, match=rf"ADC 0.*{control}"):
         v2.shot_sums(prog, [v2.IQ(label)])
 
@@ -313,33 +278,19 @@ def test_split_sums_returns_counts_and_nan_means_without_warnings():
         v2.split_sums(np.array(1.0))
 
 
-@pytest.mark.parametrize("timeline", [False, True])
+@pytest.mark.parametrize("timeline", [True])
 @pytest.mark.parametrize("collision", [False, True])
 def test_missing_and_ambiguous_labels_list_available_labels(timeline, collision):
     ro = readout()
-    if timeline:
+    class Program(v2.TimelineProgramV2):
+        def _initialize(self, cfg):
+            self.declare(ro)
 
-        class Program(v2.TimelineProgramV2):
-            def _initialize(self, cfg):
-                self.declare(ro)
+        def _body(self, cfg):
+            self.emit(ro, tag="readout" if collision else None)
+            self.emit(ro)
 
-            def _body(self, cfg):
-                self.emit(ro, tag="readout" if collision else None)
-                self.emit(ro)
-
-        prog = Program(v2.make_mock_soccfg())
-    else:
-
-        class Reads(Module):
-            name = "reads"
-
-            def init(self, prog):
-                ro.init(prog)
-
-            def run(self, prog, t=0.0):
-                return ro.run(prog, ro.run(prog, t))
-
-        prog = compile_modules(v2.make_mock_soccfg(), [Reads()])
+    prog = Program(v2.make_mock_soccfg())
     label = "readout" if collision else "missing"
     with pytest.raises(ValueError, match=rf"{label}.*available labels.*readout"):
         v2.shot_sums(prog, [v2.IQ(label)])

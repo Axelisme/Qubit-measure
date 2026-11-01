@@ -14,11 +14,7 @@ from zcu_tools.program.v2.ir.operands import (
     SrcKeyword,
 )
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
-from zcu_tools.program.v2.modules.dmem import (
-    LoadValue,
-    LoadWord,
-    ScanWith,
-)
+from zcu_tools.program.v2.modules.dmem import LoadValue, LoadWord
 
 
 @pytest.mark.parametrize("invalid_call", [LoadValue], ids=["LoadValue"])

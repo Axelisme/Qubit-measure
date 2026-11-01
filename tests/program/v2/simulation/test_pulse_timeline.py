@@ -6,7 +6,7 @@ import math
 import numpy as np
 import pytest
 from zcu_tools.experiment.simulation import white_noise
-from zcu_tools.program.v2.modules.delay import Delay, Join, SoftDelay
+from zcu_tools.program.v2.modules.delay import Delay, SoftDelay
 from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import (

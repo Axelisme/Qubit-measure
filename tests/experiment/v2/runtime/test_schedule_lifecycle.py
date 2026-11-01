@@ -76,7 +76,7 @@ def test_schedule_operations_require_context():
     )
 
     try:
-        sched.prog_builder("soc", "soccfg", marker="x")
+        sched.run_acquire(object(), "soc")
     except RuntimeError as exc:
         assert "with Schedule" in str(exc)
     else:

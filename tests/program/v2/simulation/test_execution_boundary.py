@@ -7,7 +7,7 @@ import pytest
 from qick.asm_v2 import AsmInst, QickParam
 from zcu_tools.core.simulation import ChannelSignals, RoundSignals
 from zcu_tools.experiment.simulation import white_noise
-from zcu_tools.program.v2.modules.delay import Join, SoftDelay
+from zcu_tools.program.v2.modules.delay import SoftDelay
 from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
@@ -22,14 +22,24 @@ def test_offline_board_declares_mock_identity():
 
 
 class RawProgram(TimelineProgramV2):
-    """Emit a supported raw NOP after the Module body."""
+    """Emit a supported raw NOP after the native module body."""
+
+    def __init__(self, soccfg, modules):
+        self.modules = modules
+        super().__init__(soccfg)
+
+    def _initialize(self, cfg):
+        for module in self.modules:
+            self.declare(module)
 
     def _body(self, cfg):
-        super()._body(cfg)
+        for module in self.modules:
+            self.emit(module)
+        self.delay_by_timeline()
         self.asm_inst({"CMD": "NOP"})
 
 
-class RawMakeProgram(TimelineProgramV2):
+class RawMakeProgram(RawProgram):
     """Hardware compilation hook adding instructions outside the Modules."""
 
     def make_program(self):
@@ -37,7 +47,7 @@ class RawMakeProgram(TimelineProgramV2):
         self.asm_inst({"CMD": "NOP"})
 
 
-class RawCleanupProgram(TimelineProgramV2):
+class RawCleanupProgram(RawProgram):
     """Hardware cleanup hook adding instructions outside the Modules."""
 
     def _cleanup(self, cfg):

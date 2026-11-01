@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 import numpy as np
 from zcu_tools.experiment.scope import Scope
+from zcu_tools.experiment.v2.runtime import RunOptions
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 
 from tests.experiment.v2.runtime._flow_cfg import make_flow_cfg as _cfg
@@ -27,16 +28,8 @@ def test_schedule_scan_targets_buffer_step_without_mutating_env():
         for value, step in sched.scan("value", [10.0, 20.0, 30.0]):
             assert step.value == value
             assert isinstance(step.index, int)
-            # tolerated: FlowCfg stores value as an undeclared Pydantic extra.
-            setattr(step.cfg, "value", value)  # noqa: B010
-            step.prog_builder(
-                "soc",
-                "soccfg",
-                program_cls=FakeScalarProgram,
-                value=step.cfg.value,
-            ).add(FakeModule("readout")).build_and_acquire(
-                raw2signal_fn=identity_array,
-            )
+            program = FakeScalarProgram("soccfg", value=value, modules=[], sweep=None)
+            step.run_acquire(program, "soc", options=RunOptions(converter=identity_array))
 
         assert sched.env == {}
 
@@ -51,16 +44,8 @@ def test_schedule_repeat_targets_step_buffer_without_mutating_env():
             assert step.index == index
             assert step.value == index
             assert step.path == (index,)
-            # tolerated: FlowCfg stores value as an undeclared Pydantic extra.
-            setattr(step.cfg, "value", index)  # noqa: B010
-            step.prog_builder(
-                "soc",
-                "soccfg",
-                program_cls=FakeScalarProgram,
-                value=step.cfg.value,
-            ).add(FakeModule("readout")).build_and_acquire(
-                raw2signal_fn=identity_array,
-            )
+            program = FakeScalarProgram("soccfg", value=index, modules=[], sweep=None)
+            step.run_acquire(program, "soc", options=RunOptions(converter=identity_array))
 
     assert np.allclose(signals_buffer.array, [0.0, 1.0, 2.0])
 
@@ -82,16 +67,11 @@ def test_schedule_nested_repeat_scan_targets_inner_step_buffer():
         for repeat_index, repeat_step in sched.repeat("round", 2):
             for length_value, step in repeat_step.scan("length", [10.0, 20.0, 30.0]):
                 assert step.path == (repeat_index, step.index)
-                # tolerated: FlowCfg stores value as an undeclared Pydantic extra.
-                setattr(step.cfg, "value", repeat_index * 100.0 + length_value)  # noqa: B010
-                step.prog_builder(
-                    "soc",
-                    "soccfg",
-                    program_cls=FakeScalarProgram,
-                    value=step.cfg.value,
-                ).add(FakeModule("readout")).build_and_acquire(
-                    raw2signal_fn=identity_array,
+                program = FakeScalarProgram(
+                    "soccfg", value=repeat_index * 100.0 + length_value,
+                    modules=[], sweep=None,
                 )
+                step.run_acquire(program, "soc", options=RunOptions(converter=identity_array))
 
     assert np.allclose(
         signals_buffer.array,

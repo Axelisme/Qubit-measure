@@ -10,7 +10,6 @@ from numpy.typing import NDArray
 from pydantic import TypeAdapter
 from zcu_tools.program.v2.modules import ModuleCfg, ModuleCfgFactory, readout
 from zcu_tools.program.v2.modules.base import Module
-from zcu_tools.program.v2.modules.control import Repeat
 
 from tests.program.v2._mux_support import (
     AcquisitionSoc,
@@ -90,26 +89,6 @@ def test_real_compile_and_acquire_all_tones(channels):
     assert [r["pfb_port"] for r in soc.pfb_configs[0][1]] == list(channels)
 
 
-@pytest.mark.parametrize("updates", [dict(length=0.537), dict(ro_length=1.337)])
-def test_blocking_covers_rounded_generator_and_adc_windows(updates):
-    cfg = native_mux(**updates)
-    module = cfg.build("mux")
-    prog = RecordingProgram(mux_soccfg(), [module])
-    # Scheduled scalar starts round to tProc ticks, hardware windows to their clocks.
-    tclk = prog.soccfg["tprocs"][0]["f_time"]
-
-    def ceil_t(t):
-        return np.ceil(t * tclk) / tclk
-
-    gen_duration = prog.cycles2us(prog.us2cycles(cfg.length, gen_ch=0), gen_ch=0)
-    adc_duration = prog.cycles2us(prog.us2cycles(cfg.ro_length, ro_ch=4), ro_ch=4)
-    expected = max(
-        ceil_t(ceil_t(cfg.pre_delay) + gen_duration + ceil_t(cfg.post_delay)),
-        ceil_t(ceil_t(cfg.trig_offset) + adc_duration),
-    )
-    assert module.total_length(prog) == pytest.approx(expected)
-    assert module.run(prog, 2.0) == pytest.approx(2.0 + expected)
-    assert module.allow_rerun()
 
 
 @pytest.mark.parametrize(
@@ -416,26 +395,5 @@ class RouteReuse(Module):
         return t
 
 
-@pytest.mark.parametrize("route", ["gen", "readout"])
-@pytest.mark.parametrize("nested", [False, True])
-def test_later_module_cannot_overwrite_mux_routes(route, nested):
-    module = native_mux().build("mux")
-    first = Repeat("repeat", 2).add_content(module) if nested else module
-    channel = 0 if route == "gen" else 4
-    with pytest.raises(ValueError, match=f"mux.*{route}.*route.*{channel}"):
-        RecordingProgram(mux_soccfg(), [first, RouteReuse(route)])
 
 
-@pytest.mark.parametrize("collision", ["gen", "readout"])
-def test_routes_cannot_be_silently_redeclared(collision):
-    first = native_mux((4,)).build("first")
-    second_cfg = native_mux((1,) if collision == "gen" else (4,))
-    if collision == "readout":
-        soccfg = mux_soccfg()
-        soccfg["gens"][1].update(soccfg["gens"][0])
-        soccfg["gens"][1]["tproc_ch"] = 1
-        second_cfg.gen_ch = 1
-    else:
-        soccfg = mux_soccfg()
-    with pytest.raises(ValueError, match="second"):
-        RecordingProgram(soccfg, [first, second_cfg.build("second")])

@@ -1,3 +1,4 @@
+from zcu_tools.experiment.v2.runtime import RunOptions
 """Operation outcomes, cooperative cancellation and author-owned persistence."""
 
 from collections.abc import Callable, Iterator
@@ -168,11 +169,7 @@ def test_nested_scope_completion_preserves_outcome_and_next_operation_is_clean(
         with Schedule( SignalBuffer(1), scope=ctx.scope) as schedule:
             assert schedule.stop is not ctx.scope.stop, "Schedule must own a child"
             if failed:
-                schedule.prog_builder("soc", "soccfg").run_program(
-                    Program(),
-                    raw2signal_fn=lambda raw: raw,
-                    options=AcquireOptions(retry=1),
-                )
+                schedule.run_acquire(Program(), "soc" , options=AcquireOptions(retry=1), options=RunOptions(converter=lambda raw: raw))
             else:
                 schedule.set_stop()
             assert not ctx.scope.stop.is_set()
@@ -401,10 +398,8 @@ def test_program_failures_keep_their_classification_and_do_not_repeat_build_or_c
     def operation(ctx: CallContext) -> int:
         buffer = SignalBuffer((1,))
         with Schedule( buffer, scope=ctx.scope) as schedule:
-            builder = schedule.prog_builder("soc", "soccfg", program_cls=Program)
-            builder.add(SoftDelay("wait", 0.0)).build_and_acquire(
-                raw2signal_fn=convert, options=AcquireOptions(retry=1)
-            )
+            program = Program("soccfg")
+            schedule.run_acquire(program, "soc", options=RunOptions(converter=convert, retry=1))
         return 99
 
     observed = start_call(rig, operation)
@@ -444,11 +439,8 @@ def test_program_stop_keeps_partial_delivery_without_failed_outcome(
     def operation(ctx: CallContext) -> int:
         buffer = SignalBuffer((1,))
         with Schedule( buffer, scope=ctx.scope) as schedule:
-            builder = schedule.prog_builder("soc", "soccfg")
-            if mode == "integrated":
-                builder.run_program(Program(), raw2signal_fn=lambda raw: raw)
-            else:
-                builder.run_program_decimated(Program(), raw2signal_fn=lambda raw: raw)
+            acquire = schedule.run_acquire if mode == "integrated" else schedule.run_acquire_decimated
+            acquire(Program(), "soc", options=RunOptions(converter=lambda raw: raw))
         return 99
 
     observed = start_call(rig, operation)

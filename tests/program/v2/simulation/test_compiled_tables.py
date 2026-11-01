@@ -4,10 +4,8 @@ from tests.program._timeline import compile_modules
 import pytest
 from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
-from zcu_tools.program.v2.modules import LoadValue, LoadWord, ScanWith
+from zcu_tools.program.v2.modules import LoadValue, LoadWord
 from zcu_tools.program.v2.modules.computed_pulse import ComputedPulse
-from zcu_tools.program.v2.modules.control import Branch, Repeat
-from zcu_tools.program.v2.modules.delay import Join
 from zcu_tools.program.v2.modules.pulse import Pulse, PulseCfg, TableLengthPulse
 from zcu_tools.program.v2.modules.readout import (
     PulseReadout,
@@ -210,20 +208,6 @@ def test_table_readout_exec_after_updates_and_wrap_survive_outer_reps(native):
     assert request(prog, env).materialize_point(0) == result.materialize_point(0)
 
 
-@pytest.mark.parametrize("native", [False, True])
-def test_scanwith_uses_local_counter_to_select_each_candidate(native):
-    choice = ComputedPulse(
-        "choice",
-        val_reg="selected",
-        pulses=[drive(gain=0.1), drive(gain=0.2), drive(gain=0.3)],
-    )
-    scan = ScanWith("local", [2, 0, 1], val_reg="selected").add_content(choice)
-    prog, env = module_program([scan, receiver().build("readout")], native=native)
-    result = request(prog, env)
-    events = result.materialize_point(0).events
-    assert [e.gain for e in events[:3]] == pytest.approx([0.3, 0.1, 0.2], abs=1e-4)
-    assert result.point_dims == ()
-    assert [e.iterations[0][1] for e in events[:3]] == [0, 1, 2]
 
 
 @pytest.mark.parametrize("native", [False, True])
@@ -278,51 +262,8 @@ def test_legacy_branch_dispatch_table_and_repeat_preserve_selected_sources():
     ]
 
 
-def test_legacy_branch_uses_loaded_selector_not_acquisition_lane_order():
-    loader = LoadValue("selector", [2, 0, 1], "scan", "selected")
-    choice = Branch(
-        "choice",
-        drive(gain=0.1).build("first"),
-        drive(gain=0.2).build("second"),
-        drive(gain=0.3).build("third"),
-        compare_by="selected",
-    )
-    prog, env = module_program(
-        [loader, choice, receiver().build("readout")],
-        native=False,
-        sweep=(("scan", 3),),
-    )
-    result = request(prog, env)
-    assert [result.materialize_point(i).events[0].source for i in range(3)] == [
-        "third",
-        "first",
-        "second",
-    ]
-    assert [
-        result.materialize_point(i).events[0].gain for i in range(3)
-    ] == pytest.approx([0.3, 0.1, 0.2], abs=1e-4)
 
 
-@pytest.mark.parametrize(
-    ("kind", "count"), [("single", 1), ("parallel", 2), ("bath", 3)]
-)
-def test_legacy_reset_compiled_events_keep_wrapper_owner(kind, count):
-    cavity, qubit = drive(ch=1), drive(ch=2)
-    if kind == "single":
-        reset = PulseResetCfg(pulse_cfg=cavity)
-    elif kind == "parallel":
-        reset = TwoPulseResetCfg(pulse1_cfg=cavity, pulse2_cfg=qubit)
-    else:
-        reset = BathResetCfg(
-            cavity_tone_cfg=cavity, qubit_tone_cfg=qubit, pi2_cfg=drive(ch=1)
-        )
-    prog, env = module_program(
-        [reset.build("authored_reset"), receiver().build("readout")], native=False
-    )
-    events = request(prog, env).materialize_point(0).events
-    assert [event.source for event in events] == ["authored_reset"] * count + [
-        "readout"
-    ]
 
 
 @pytest.mark.parametrize("kind", ["single", "parallel", "bath"])

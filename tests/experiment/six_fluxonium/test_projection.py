@@ -28,7 +28,6 @@ from zcu_tools.experiment.simulation import SimulationEnvironment
 from zcu_tools.experiment.six_fluxonium import six_fluxonium
 from zcu_tools.experiment.six_fluxonium.routing import route_request
 from zcu_tools.experiment.six_fluxonium.runtime import SixFluxoniumSource
-from zcu_tools.program.v2.modules.control import Repeat
 from zcu_tools.program.v2.modules.delay import SoftDelay
 from zcu_tools.program.v2.modules.readout import MuxReadoutCfg
 from zcu_tools.program.v2.simulation import IntegratedRound

@@ -12,7 +12,7 @@ from collections.abc import Mapping
 
 import pytest
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
-from zcu_tools.program.v2.modular import BaseCustomProgramV2, TimelineProgramV2
+from zcu_tools.program.v2 import TimelineProgramV2
 from zcu_tools.program.v2.modules import Delay, SoftDelay
 from zcu_tools.program.v2.sweep import SweepCfg
 
@@ -62,11 +62,6 @@ def test_empty_program_compiles():
     assert prog.binprog is not None
 
 
-def test_base_custom_program_requires_make_modules():
-    soccfg = make_mock_soccfg()
-
-    caught = pytest.raises(TypeError, BaseCustomProgramV2, soccfg)
-    assert caught.match("abstract")
 
 
 def test_binprog_has_pmem():

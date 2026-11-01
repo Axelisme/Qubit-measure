@@ -1,3 +1,4 @@
+from zcu_tools.experiment.v2.runtime import RunOptions
 """Real Notebook run/save caller over fake acquisition and production storage."""
 
 from collections.abc import Generator, Mapping
@@ -188,9 +189,7 @@ def test_producer_failure_preserves_previous_notebook_record_and_evidence() -> N
                 if context is None:
                     raise ValueError("RunContext required")
                 with Schedule( SignalBuffer((3,)), scope=context.scope) as sched:
-                    sched.prog_builder(context.soc, context.soccfg).run_program(
-                        Program()
-                    )
+                    sched.run_acquire(Program(), context.soc)
             return super().run(config, context=context)
 
     core = Core()

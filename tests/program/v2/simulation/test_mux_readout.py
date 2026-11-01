@@ -4,7 +4,6 @@ from tests.program._timeline import compile_modules
 import numpy as np
 import pytest
 from zcu_tools.experiment.simulation import white_noise
-from zcu_tools.program.v2.modules.control import Repeat
 
 from tests.program.v2._mux_support import mux_soccfg, native_mux
 from tests.program.v2.simulation.time_observations import time_us, times_us

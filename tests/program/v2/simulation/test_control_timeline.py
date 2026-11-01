@@ -11,9 +11,8 @@ from qick.asm_v2 import QickParam
 from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.program.v2.modules.base import Module
 from zcu_tools.program.v2.modules.computed_pulse import ComputedPulse
-from zcu_tools.program.v2.modules.control import Branch, Repeat
-from zcu_tools.program.v2.modules.delay import DelayAuto, Join
-from zcu_tools.program.v2.modules.dmem import LoadValue, LoadWord, ScanWith
+from zcu_tools.program.v2.modules.delay import DelayAuto
+from zcu_tools.program.v2.modules.dmem import LoadValue, LoadWord
 from zcu_tools.program.v2.modules.pulse import PulseCfg, TableLengthPulse
 from zcu_tools.program.v2.modules.readout import (
     PulseReadout,

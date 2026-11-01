@@ -11,7 +11,6 @@ from zcu_tools.cfg_model import MuxReadoutTone
 from zcu_tools.core.simulation import RoundSignals, SamplingIdentity
 from zcu_tools.device import DeviceManager
 from zcu_tools.experiment.ftf import FTFSource, ftf, plan_template
-from zcu_tools.program.v2.modules.control import Repeat
 from zcu_tools.program.v2.modules.delay import Delay
 from zcu_tools.program.v2.modules.readout import MuxReadoutCfg
 from zcu_tools.program.v2.simulation import IntegratedRound

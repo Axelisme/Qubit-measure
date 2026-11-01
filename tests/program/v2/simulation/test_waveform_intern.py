@@ -5,7 +5,6 @@ import numpy as np
 import pytest
 from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.program.v2.modules.computed_pulse import ComputedPulse
-from zcu_tools.program.v2.modules.control import Repeat
 from zcu_tools.program.v2.modules.dmem import LoadValue
 from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg

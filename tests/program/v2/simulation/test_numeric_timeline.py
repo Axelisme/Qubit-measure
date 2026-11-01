@@ -6,8 +6,7 @@ import pytest
 from qick.asm_v2 import QickParam
 from zcu_tools.core.simulation import ChannelSignals, RoundSignals
 from zcu_tools.experiment.simulation import white_noise
-from zcu_tools.program.v2.modules.control import Branch
-from zcu_tools.program.v2.modules.delay import DelayAuto, Join, SoftDelay
+from zcu_tools.program.v2.modules.delay import DelayAuto, SoftDelay
 from zcu_tools.program.v2.modules.dmem import LoadValue, LoadWord
 from zcu_tools.program.v2.modules.pulse import Pulse
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg

@@ -1,5 +1,5 @@
 import pytest
-from zcu_tools.program.v2.modules.delay import Delay, DelayAuto, Join, SoftDelay
+from zcu_tools.program.v2.modules.delay import Delay, DelayAuto, SoftDelay
 from zcu_tools.program.v2.modules.pulse import Pulse
 
 

@@ -1,3 +1,4 @@
+from zcu_tools.experiment.v2.runtime import RunOptions
 """Synthetic acquisition at real Schedule/program interruption seams."""
 
 import signal
@@ -102,19 +103,14 @@ class InterruptedCore(SavingCore):
         buffer = SignalBuffer(3)
         with Schedule( buffer, scope=context.scope) as sched:
             if self.mode == "program-round":
-                sched.prog_builder(context.soc, context.soccfg).run_program(
-                    RoundInterruptedProgram(), rounds=2, raw2signal_fn=identity_signal
-                )
+                sched.run_acquire(RoundInterruptedProgram(), context.soc , rounds=2, options=RunOptions(converter=identity_signal))
             else:
                 for index, step in sched.scan("point", range(3)):
                     if self.mode == "software" and index == 1:
                         signal.raise_signal(signal.SIGINT)
                         break
                     if self.mode == "program":
-                        step.prog_builder(context.soc, context.soccfg).run_program(
-                            PartialProgram(float(index + 1), interrupt=index == 1),
-                            raw2signal_fn=identity_signal,
-                        )
+                        step.run_acquire(PartialProgram(float(index + 1), interrupt=index == 1), context.soc , options=RunOptions(converter=identity_signal))
                     else:
                         buffer[step].set(np.array(index + 1, dtype=np.complex128))
         return SavingResult(

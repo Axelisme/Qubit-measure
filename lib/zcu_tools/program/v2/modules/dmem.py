@@ -16,7 +16,6 @@ from .._timeline_bounds import CycleBounds
 from ..macro.dmem import DmemLookup
 from ..macro.table import DeclaredTable, TableSelection
 from .base import Module, ModuleGroup
-from .control import Repeat
 
 logger = logging.getLogger(__name__)
 

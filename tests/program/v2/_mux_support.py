@@ -78,12 +78,20 @@ class RecordingProgram(TimelineProgramV2):
         self.pulse_definitions = []
         self.gen_declarations = []
         self.adc_declarations = []
-        super().__init__(
-            soccfg,
-            modules=modules,
-            **kwargs,
-            reps=2,
-        )
+        self.modules = modules
+        self.sweep = kwargs.pop("sweep", ())
+        super().__init__(soccfg, **kwargs, reps=2)
+
+    def _initialize(self, cfg):
+        for name, count in self.sweep:
+            self.add_loop(name, count)
+        for module in self.modules:
+            self.declare(module)
+
+    def _body(self, cfg):
+        for module in self.modules:
+            self.emit(module)
+        self.delay_by_timeline()
 
     def declare_gen(self, *args, **kwargs):
         self.gen_declarations.append(kwargs.copy())

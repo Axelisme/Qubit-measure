@@ -53,7 +53,7 @@ class RawProgram:
         return self.acquire(soc, **kwargs)
 
 
-@pytest.mark.parametrize("entry", ["schedule", "builder"])
+@pytest.mark.parametrize("entry", ["schedule"])
 @pytest.mark.parametrize("mode", ["integrated", "decimated", "summed"])
 @pytest.mark.parametrize("retry", [0, 2])
 @pytest.mark.parametrize("cancel_on_failure", [False, True])
@@ -97,39 +97,20 @@ def test_producer_failure_propagates_same_exception_after_explicit_retries(
     sched = Schedule( buffer, scope=root)
 
     def acquire() -> None:
-        if entry == "schedule":
-            options = RunOptions[list[NDArray[np.float64]]](
-                retry=retry, converter=lambda raw: raw[0].dot([1, 1j]).reshape(1)
-            )
-            if mode == "integrated":
-                sched.run_acquire(program, object(), options=options)
-            elif mode == "decimated":
-                sched.run_acquire_decimated(program, object(), options=options)
-            else:
-                sched.run_acquire_summed(
-                    program,
-                    object(),
-                    processor=lambda _iq: np.ones((1,)),
-                    options=RunOptions(retry=retry),
-                )
+        options = RunOptions[list[NDArray[np.float64]]](
+            retry=retry, converter=lambda raw: raw[0].dot([1, 1j]).reshape(1)
+        )
+        if mode == "integrated":
+            sched.run_acquire(program, object(), options=options)
+        elif mode == "decimated":
+            sched.run_acquire_decimated(program, object(), options=options)
         else:
-            builder = sched.prog_builder(object(), object())
-            acquire_options = AcquireOptions(retry=retry)
-            if mode == "integrated":
-                builder.run_program(program, options=acquire_options)
-            elif mode == "decimated":
-                builder.run_program_decimated(
-                    program,
-                    raw2signal_fn=lambda raw: raw[0].dot([1, 1j]).reshape(1),
-                    options=acquire_options,
-                )
-            else:
-                builder.run_program_summed(
-                    program,
-                    processor=lambda _iq: np.ones((1,)),
-                    sums2signal_fn=lambda raw: raw,
-                    options=acquire_options,
-                )
+            sched.run_acquire_summed(
+                program,
+                object(),
+                processor=lambda _iq: np.ones((1,)),
+                options=RunOptions(retry=retry),
+            )
 
     with pytest.raises(RuntimeError, match="producer failed") as caught, sched:
         acquire()
@@ -139,7 +120,7 @@ def test_producer_failure_propagates_same_exception_after_explicit_retries(
         np.testing.assert_array_equal(buffer.array, [3 + 4j])
 
 
-@pytest.mark.parametrize("entry", ["schedule", "builder"])
+@pytest.mark.parametrize("entry", ["schedule"])
 @pytest.mark.parametrize(
     ("mode", "reads"),
     [("integrated", (1, 2)), ("integrated", (2,)), ("decimated", (1, 1))],
@@ -156,28 +137,17 @@ def test_ambiguous_raw_requires_explicit_converter(
         return sum((adc.sum(axis=0) for adc in payload), np.zeros((2, 2))).dot([1, 1j])
 
     with Schedule( buffer, scope=Scope("run")) as schedule:
-        if entry == "schedule":
-            run = (
-                schedule.run_acquire
-                if mode == "integrated"
-                else schedule.run_acquire_decimated
-            )
-            acquire = partial(
-                run,
-                program,
-                "soc",
-                options=RunOptions(converter=convert if explicit_converter else None),
-            )
-        else:
-            builder = schedule.prog_builder("soc", "soccfg")
-            run = (
-                builder.run_program
-                if mode == "integrated"
-                else builder.run_program_decimated
-            )
-            acquire = partial(
-                run, program, raw2signal_fn=convert if explicit_converter else None
-            )
+        run = (
+            schedule.run_acquire
+            if mode == "integrated"
+            else schedule.run_acquire_decimated
+        )
+        acquire = partial(
+            run,
+            program,
+            "soc",
+            options=RunOptions(converter=convert if explicit_converter else None),
+        )
         if explicit_converter:
             np.testing.assert_array_equal(acquire(), np.full(2, sum(reads) * (1 + 1j)))
         else:
