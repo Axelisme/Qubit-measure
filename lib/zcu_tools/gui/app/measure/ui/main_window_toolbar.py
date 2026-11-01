@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from qtpy.QtCore import QEvent, QObject
-from qtpy.QtGui import QAction, QKeySequence
+from qtpy.QtGui import QAction, QKeySequence, QShortcut
 from qtpy.QtWidgets import (
     QHBoxLayout,
     QMenu,
@@ -86,6 +86,10 @@ class MainWindowToolbar:
         self._build_more_menu()
         self._promoted: list[tuple[QPushButton, QAction]] = []
         for action in (self._predictor_action, self._results_action):
+            # Hidden menu actions lose their shortcuts, so keep a window shortcut.
+            shortcut = QShortcut(action.shortcut(), parent)
+            self._scope.connect(shortcut.activated, action.trigger)
+            self._scope.add_cleanup(lambda s=shortcut: s.setEnabled(False))
             button = QPushButton(action.text())
             button.setToolTip(f"{action.text()} ({action.shortcut().toString()})")
             button.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
@@ -195,8 +199,6 @@ class MainWindowToolbar:
         )
         self._predictor_action.setShortcut(QKeySequence("Ctrl+P"))
         self._results_action.setShortcut(QKeySequence("Ctrl+R"))
-        self._parent.addAction(self._predictor_action)
-        self._parent.addAction(self._results_action)
 
     def _add_more_action(
         self, label: str, name: str, callback: Callable[[], None]
