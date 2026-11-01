@@ -339,7 +339,9 @@ def fitting_ge_and_plot(
                 excited_covariance,
             ),
         }
-        identifiable_length_ratio = options.length_ratio
+        identifiable_length_ratio = _identifiable_length_ratio(
+            length_ratio, fit_quality["joint"], options
+        )
         rotated_g_center = _estimate_rotated_center(Ig, Qg, sg, s)
         rotated_e_center = _estimate_rotated_center(Ie, Qe, se, s)
 
@@ -445,6 +447,18 @@ def fitting_ge_and_plot(
             fit_quality=fit_quality,
         ),
     )
+
+
+def _identifiable_length_ratio(
+    fitted_ratio: float, joint_quality: FitQuality, options: GEFitOptions
+) -> float | None:
+    """Preserve fixed ratios; require relative standard error at most one otherwise."""
+    if options.length_ratio is not None:
+        return options.length_ratio
+    relative_error = joint_quality.relative_parameter_errors["length_ratio"]
+    if relative_error is None or relative_error > 1.0:
+        return None
+    return fitted_ratio
 
 
 def _estimate_rotated_center(
