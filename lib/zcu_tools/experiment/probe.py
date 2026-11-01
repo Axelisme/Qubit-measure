@@ -31,7 +31,7 @@ from .acquisition import (
     capture_software_provenance,
     new_run_id,
 )
-from .axes_spec import AxesSpec, GroupedAxesSpec
+from .axes_spec import AxesSpec, GroupedAxesSpec, VariableZSpec
 from .base import Experiment
 from .context import RunContext
 from .metadata import RunMetadata, RunSnapshot
@@ -121,38 +121,61 @@ def _scaled_component_equal(before: np.ndarray, after: np.ndarray) -> bool:
     return bool(np.all((left == right) | (relative <= 2 * np.finfo(before.dtype).eps)))
 
 
-def _scaled_fields(
-    spec: AxesSpec[_Result, _Cfg] | GroupedAxesSpec[_Result, _Cfg],
-) -> set[str]:
-    """Select Result fields whose declared scale permits relative comparison."""
-    declarations = (
-        (*spec.axes, spec.z)
-        if isinstance(spec, AxesSpec)
-        else tuple(
-            declaration
-            for variable in spec.variables
-            for declaration in (*variable.axes, variable.z)
+def _comparison_difference(
+    before: np.ndarray, after: np.ndarray, *, scale: float
+) -> str | None:
+    """Describe a slice mismatch, or return None under its declared scale."""
+    if before.shape != after.shape:
+        return f"shape {before.shape} != {after.shape}"
+    if before.dtype != after.dtype:
+        return f"dtype {before.dtype} != {after.dtype}"
+    if np.isfinite(scale) and scale not in (0, 1) and before.dtype.kind in "fc":
+        equal = _scaled_component_equal(np.real(before), np.real(after))
+        if before.dtype.kind == "c":
+            equal &= _scaled_component_equal(np.imag(before), np.imag(after))
+    else:
+        equal = np.array_equal(before, after, equal_nan=before.dtype.kind in "fc")
+    return None if equal else "values differ"
+
+
+def _compare_field(
+    name: str,
+    before: np.ndarray,
+    after: np.ndarray,
+    comparisons: list[tuple[float, int | None, int]],
+) -> bool:
+    """Check each declared region and the exact, undeclared remainder."""
+    logger = logging.getLogger(__name__)
+    if before.shape != after.shape:
+        logger.warning(
+            "Roundtrip field=%s index_axis=None index=None: shape %s != %s",
+            name, before.shape, after.shape,
         )
-    )
-    scales_by_field: dict[str, set[float]] = {}
-    for declaration in declarations:
-        if declaration.field_name is not None:
-            scales_by_field.setdefault(declaration.field_name, set()).add(
-                declaration.scale
+        return False
+    covered = np.zeros(before.shape, dtype=bool)
+    equal = True
+    for scale, index, index_axis in comparisons:
+        selection: list[slice | int] = [slice(None)] * before.ndim
+        if index is not None:
+            selection[index_axis] = index
+        region = tuple(selection)
+        covered[region] = True
+        difference = _comparison_difference(before[region], after[region], scale=scale)
+        if difference is not None:
+            logger.warning(
+                "Roundtrip field=%s index_axis=%s index=%s: %s",
+                name, index_axis, index, difference,
             )
-    if isinstance(spec, GroupedAxesSpec):
-        for name, scales in scales_by_field.items():
-            if len(scales) > 1:
-                raise ValueError(
-                    f"Conflicting scales for Result field {name!r}: {sorted(scales)}"
-                )
-    return {
-        declaration.field_name
-        for declaration in declarations
-        if declaration.field_name is not None
-        and np.isfinite(declaration.scale)
-        and declaration.scale not in (0, 1)
-    }
+            equal = False
+    if not np.all(covered):
+        difference = _comparison_difference(before[~covered], after[~covered], scale=1)
+        if difference is not None:
+            logger.warning(
+                "Roundtrip field=%s index_axis=None index=None (undeclared): %s",
+                name, difference,
+            )
+            equal = False
+    return equal
 
 
 def compare_roundtrip(
@@ -182,8 +205,13 @@ def compare_roundtrip(
     hence relative error <= 2*u + u**2 < 2*eps. This assumes no additional
     lossy dtype conversion. Underflow, overflow and invalid scales do not have
     this guarantee; they receive no enlarged tolerance or repaired values.
-    Conflicting scales for one Result field across grouped declarations raise
-    ValueError naming the field and scales, even when both Results are identical.
+    Grouped declarations compare each selected index on its index_axis with
+    its own scale. Overlapping regions must satisfy every declaration; unselected
+    regions remain exact. Return a bool without changing ProbeReport's schema.
+    Log each mismatching slice at WARNING through this module's logger, naming
+    field, index_axis, index and the shape, dtype or value difference. Matching
+    slices produce no warning. Continue comparing other slices after a mismatch.
+    A whole-field shape mismatch is logged with index_axis=None and index=None.
     Other persistence validation and I/O remain the caller's responsibility.
     """
     if (
@@ -199,22 +227,34 @@ def compare_roundtrip(
         item.name for item in fields(restored)
     }:
         raise TypeError("Roundtrip Results must have the same fields")
-    scaled_fields = _scaled_fields(spec)
+    declarations = (
+        (*spec.axes, spec.z)
+        if isinstance(spec, AxesSpec)
+        else tuple(
+            declaration
+            for variable in spec.variables
+            for declaration in (*variable.axes, variable.z)
+        )
+    )
+    equal = True
     for item in fields(original):
-        before = np.asarray(getattr(original, item.name))
-        after = np.asarray(getattr(restored, item.name))
-        if before.shape != after.shape or before.dtype != after.dtype:
-            return False
-        if item.name in scaled_fields and before.dtype.kind in "fc":
-            if not _scaled_component_equal(np.real(before), np.real(after)):
-                return False
-            if before.dtype.kind == "c" and not _scaled_component_equal(
-                np.imag(before), np.imag(after)
-            ):
-                return False
-        elif not np.array_equal(before, after, equal_nan=before.dtype.kind in "fc"):
-            return False
-    return True
+        comparisons = [
+            (
+                declaration.scale,
+                declaration.index if isinstance(declaration, VariableZSpec) else None,
+                declaration.index_axis if isinstance(declaration, VariableZSpec) else -1,
+            )
+            for declaration in declarations
+            if declaration.field_name == item.name
+        ]
+        field_equal = _compare_field(
+            item.name,
+            np.asarray(getattr(original, item.name)),
+            np.asarray(getattr(restored, item.name)),
+            comparisons,
+        )
+        equal &= field_equal
+    return equal
 
 
 def _acquire(
