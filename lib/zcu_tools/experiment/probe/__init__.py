@@ -39,6 +39,8 @@ from ..records import RunRecord
 from ..scope import Scope
 from ..simulation import SimulationEnvironment, white_noise
 from ..single_fluxonium import single_fluxonium
+from .analysis import AnalysisStageResult as AnalysisStageResult
+from .analysis import analysis_stage as analysis_stage
 
 _Cfg = TypeVar("_Cfg", bound=ConfigBase)
 _Result = TypeVar("_Result")
