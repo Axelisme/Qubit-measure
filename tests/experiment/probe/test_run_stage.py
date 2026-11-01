@@ -2,6 +2,7 @@
 
 from io import BytesIO
 from pathlib import Path
+from typing import Any
 
 import matplotlib
 import numpy as np
@@ -9,7 +10,9 @@ import pytest
 from matplotlib import image as mpl_image
 from zcu_tools.experiment import probe
 from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.simulation import SimulationEnvironment, white_noise
+from zcu_tools.plotting.plots import Plots
 
 from tests.experiment._probe_support import ProbeExperiment
 from tests.experiment._saving_support import SavingCfg, SavingResult
@@ -41,6 +44,15 @@ def test_run_returns_record_and_in_memory_live_png_without_save_or_analysis(
             )
             return result
 
+        def analyze(
+            self,
+            source: RunRecord[SavingCfg, SavingResult],
+            options: Any,
+            *,
+            plots: Plots,
+        ) -> dict[str, object]:
+            raise AssertionError("run_stage must not analyze")
+
     cfg = SavingCfg(gain=2)
     monkeypatch.chdir(tmp_path)
     with matplotlib.rc_context({"savefig.bbox": "tight"}):
@@ -70,15 +82,16 @@ def test_run_rejects_result_shape_that_disagrees_with_axes(
         probe.run_stage(WrongShape(), SavingCfg(), environment)
 
 
-@pytest.mark.parametrize("field", ["frequency", "signal"])
+@pytest.mark.parametrize("field, dtype", [("frequency", "float32"), ("signal", "complex64")])
 def test_run_rejects_result_dtype_that_disagrees_with_axes(
     environment: SimulationEnvironment,
     field: str,
+    dtype: str,
 ):
     class WrongDtype(ProbeExperiment):
         def run(self, config: SavingCfg, *, context: RunContext) -> SavingResult:
             result = super().run(config, context=context)
-            setattr(result, field, getattr(result, field).astype("float32"))
+            setattr(result, field, getattr(result, field).astype(dtype))
             return result
 
     with pytest.raises(ValueError, match=rf"{field}.*dtype|dtype.*{field}"):
