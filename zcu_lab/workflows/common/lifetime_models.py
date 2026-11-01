@@ -147,13 +147,15 @@ def _secondary(
         model, values, errors, free = "dual", (t, tb), (err, errb), 5
         fixed = ()
     elif primary.model == "exponential_fringe":
-        t, err, _, _, fitted, (params, covariance) = fit_gauss_decay_fringe(
+        fit = fit_gauss_decay_fringe(
             times,
             observed,
             fixedparams=(None, None, None, primary.fixed_phase, None)
             if primary.fixed_phase is not None
             else None,
         )
+        t, err = fit.decay_time, fit.decay_time_err
+        fitted, params, covariance = fit.curve, fit.params, fit.cov
         names = ("y0", "yscale", "freq", "phase", "decay_time")
         model, values, errors, free = (
             "gaussian_fringe",
@@ -185,9 +187,11 @@ def gaussian_comparison(
     times sigma, so the envelope is baseline + A*exp(-(t/T)**2). Numeric fit
     failures propagate to the comparison caller; no acceptance occurs.
     """
-    t, err, fitted, (params, covariance) = fit_gauss_decay(
+    fit = fit_gauss_decay(
         times, observed, fixedparams=(None, None, 0.0, None)
     )
+    t, err = fit.decay_time, fit.decay_time_err
+    fitted, params, covariance = fit.curve, fit.params, fit.cov
     quality = compute_fit_quality(
         observed,
         fitted,
