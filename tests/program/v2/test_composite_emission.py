@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 from qick import QickConfig
 from qick.asm_v2 import AsmInst, Macro, QickSweep1D, WriteReg
+from zcu_tools.program.v2 import TimelineBuilder
 from zcu_tools.program.v2._timeline_bounds import CycleBounds
 from zcu_tools.program.v2._timeline_selected import PlaybackChoice, SelectedPlayback
 from zcu_tools.program.v2.macro.pluse_reg import PulseByReg
@@ -1070,6 +1071,34 @@ def test_selected_playback_captures_index_before_later_in_range_change(change):
     prog = _selected_length_with_change(change)
     # The first length remains39 despite the author changing index to1.
     assert [s.body_end_cycle - s.start_cycle for s in shots(prog)] == [49] * 2
+
+
+def test_repeated_computed_playback_preserves_selected_ends_within_register_budget():
+    builder = TimelineBuilder(
+        make_mock_soccfg(1, 0), reps=2, initial_delay=0, relax_delay=0
+    )
+    builder.add_loop("index", 2)
+    choices = [
+        _pulse_cfg(cycles / 384).model_copy(update={"post_delay": 1 / 430.08})
+        for cycles in (39, 89)
+    ]
+    pulses = [
+        ComputedPulse(f"selected_{index}", val_reg="index", pulses=choices)
+        for index in range(5)
+    ]
+    with builder.repeat("twice", 2):
+        for pulse in pulses:
+            builder.emit(pulse)
+    builder.emit(pulses[0])
+    result = shots(builder.build())
+    # ceil(39*1.12+1)=45; ceil(89*1.12+1)=101. Each of eleven
+    # emissions must consume its own selected end, including the repeat backedge.
+    assert [waves(s) for s in result] == [
+        [45 * i for i in range(11)],
+        [101 * i for i in range(11)],
+    ] * 2
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [495, 1111] * 2
+    assert [s.end_cycle - s.start_cycle for s in result] == [495, 1111] * 2
 
 
 @pytest.mark.parametrize("count", [None, 2])
