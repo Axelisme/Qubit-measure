@@ -5,6 +5,7 @@ from typing import ClassVar
 
 import numpy as np
 from numpy.typing import NDArray
+from matplotlib.lines import Line2D
 from zcu_tools.experiment import (
     Experiment,
     GroupedAxesSpec,
@@ -53,7 +54,7 @@ class IdleZZHeraldedResult:
     """
 
     dc_values: NDArray[np.float64]
-    spectator_states: NDArray[np.int64]
+    
     delays: NDArray[np.float64]
     sums: NDArray[np.float64]
 
@@ -79,12 +80,7 @@ class IdleZZHeraldedAnalysis:
 def restore_result(data: GroupedLoadData[IdleZZHeraldedCfg]) -> IdleZZHeraldedResult:
     """Restore 81-class sums; old raw-IQ files missing sums raise ValueError."""
     sums = data.variable("sums")
-    return IdleZZHeraldedResult(
-        sums.axes[6].astype(np.float64),
-        sums.axes[5].astype(np.int64),
-        sums.axes[4].astype(np.float64),
-        sums.z.astype(np.float64),
-    )
+    return IdleZZHeraldedResult(sums.axes[6].astype(np.float64), sums.axes[4].astype(np.float64), sums.z.astype(np.float64))
 
 
 class IdleZZHeraldedExp(Experiment[IdleZZHeraldedResult, IdleZZHeraldedCfg]):
@@ -96,20 +92,20 @@ class IdleZZHeraldedExp(Experiment[IdleZZHeraldedResult, IdleZZHeraldedCfg]):
                 VariableSpec(
                     variable="sums",
                     axes=(
-                        VariableAxisSpec.generated_arange("terminal_f2", ""),
-                        VariableAxisSpec.generated_arange("terminal_f1", ""),
-                        VariableAxisSpec.generated_arange("herald_f2", ""),
-                        VariableAxisSpec.generated_arange("herald_f1", ""),
-                        VariableAxisSpec("Delay", "s", field_name="delays", scale=1e-6),
+                        VariableAxisSpec.generated_arange(label="terminal_f2", unit=""),
+                        VariableAxisSpec.generated_arange(label="terminal_f1", unit=""),
+                        VariableAxisSpec.generated_arange(label="herald_f2", unit=""),
+                        VariableAxisSpec.generated_arange(label="herald_f1", unit=""),
+                        VariableAxisSpec(label="Delay", unit="s", field_name="delays", scale=1e-6),
                         VariableAxisSpec(
-                            "Spectator state (0=I, 1=Xπ)",
-                            "",
-                            field_name="spectator_states",
+                            label="Spectator state (0=I, 1=Xπ)",
+                            unit="",
+                            values=(0, 1),
                             dtype=np.int64,
                         ),
                         VariableAxisSpec(
-                            "DC source value (inactive if disabled)",
-                            "a.u.",
+                            label="DC source value (inactive if disabled)",
+                            unit="a.u.",
                             field_name="dc_values",
                         ),
                     ),
@@ -145,18 +141,16 @@ class IdleZZHeraldedExp(Experiment[IdleZZHeraldedResult, IdleZZHeraldedCfg]):
             if config.dc_device is None
             else sweep2array(config.dc_values)
         )
-        viewer = live_line(
-            context.plots,
-            "measurement",
-            "Delay (us)",
-            "Target ⟨σ⟩ (gg, −ee; actual spectator g/e)",
-            num_lines=len(dc_values) * 4,
-        )
+        fig, ax = context.plots.subplots(num="measurement")
+        ax.set(xlabel="Delay (us)", ylabel="Target ⟨σ⟩ (gg, −ee; actual spectator g/e)")
+        viewer = live_line(ax, num_lines=len(dc_values) * 4)
+        fig.show()
 
-        def update_view(sums: NDArray[np.float64]) -> None:
+        @context.plots.on_plot_thread
+        def update_view(sums: NDArray[np.float64]) -> tuple[Line2D, ...]:
             gg = sigma(terminal_counts(sums, ("g", "g")), config.target)
             ee = -sigma(terminal_counts(sums, ("e", "e")), config.target)[:, ::-1]
-            viewer.update(delays, np.stack((gg, ee), axis=1).reshape(-1, len(delays)))
+            return viewer.set(delays, np.stack((gg, ee), axis=1).reshape(-1, len(delays)))
 
         buffer = SignalBuffer(
             (len(dc_values), 2, len(delays), 3, 3, 3, 3),
@@ -219,9 +213,7 @@ class IdleZZHeraldedExp(Experiment[IdleZZHeraldedResult, IdleZZHeraldedCfg]):
                     rounds=config.rounds,
                     options=RunOptions(),
                 )
-        return IdleZZHeraldedResult(
-            dc_values, np.arange(2, dtype=np.int64), delays, buffer.array
-        )
+        return IdleZZHeraldedResult(dc_values, delays, buffer.array)
 
     def analyze(
         self,
@@ -245,7 +237,7 @@ class IdleZZHeraldedExp(Experiment[IdleZZHeraldedResult, IdleZZHeraldedCfg]):
         )
         validate_axes(
             result.dc_values,
-            result.spectator_states,
+            np.arange(2, dtype=np.int64),
             result.delays,
             result.sums,
             dc_values,
@@ -269,7 +261,7 @@ class IdleZZHeraldedExp(Experiment[IdleZZHeraldedResult, IdleZZHeraldedCfg]):
             else f"{cfg.dc_device} ({cfg.dc_unit})"
         )
         for dc_index, dc_value in enumerate(dc_values):
-            fig, ax = plots.subplots(f"ramsey_{dc_index}", figsize=(10, 7))
+            fig, ax = plots.subplots(num=f"ramsey_{dc_index}", figsize=(10, 7))
             reasons = []
             for state in range(2):
                 for label, fits, sign in (("gg", gg_fits, 1), ("ee", ee_fits, -1)):
@@ -308,7 +300,7 @@ class IdleZZHeraldedExp(Experiment[IdleZZHeraldedResult, IdleZZHeraldedCfg]):
             ax.legend()
             ax.grid(True)
             fig.tight_layout()
-        fig, ax = plots.subplots("zeta", figsize=(8, 5))
+        fig, ax = plots.subplots(num="zeta", figsize=(8, 5))
         for index, (value, error) in enumerate(
             zip(terminal.zeta_mhz, terminal.zeta_error_mhz, strict=True)
         ):
@@ -335,7 +327,7 @@ class IdleZZHeraldedExp(Experiment[IdleZZHeraldedResult, IdleZZHeraldedCfg]):
         ]
         for dc_index, dc_value in enumerate(dc_values):
             for state in range(2):
-                fig, ax = plots.subplots(f"herald_{dc_index}_{state}", figsize=(9, 5))
+                fig, ax = plots.subplots(num=f"herald_{dc_index}_{state}", figsize=(9, 5))
                 for outcome, label in enumerate(labels):
                     ax.plot(
                         result.delays,

@@ -7,6 +7,7 @@ from typing import Annotated, ClassVar, Self
 
 import numpy as np
 from numpy.typing import NDArray
+from matplotlib.lines import Line2D
 from pydantic import Field, model_validator
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
@@ -168,9 +169,9 @@ class CZAmplitudeExp(Experiment[CZAmplitudeResult, CZAmplitudeCfg]):
                 VariableSpec(
                     variable="sums",
                     axes=(
-                        VariableAxisSpec.generated_arange("terminal_f2", ""),
-                        VariableAxisSpec.generated_arange("terminal_f1", ""),
-                        VariableAxisSpec("Common gain scale", "", field_name="scales"),
+                        VariableAxisSpec.generated_arange(label="terminal_f2", unit=""),
+                        VariableAxisSpec.generated_arange(label="terminal_f1", unit=""),
+                        VariableAxisSpec(label="Common gain scale", unit="", field_name="scales"),
                     ),
                     z=VariableZSpec(
                         field_name="sums",
@@ -197,11 +198,15 @@ class CZAmplitudeExp(Experiment[CZAmplitudeResult, CZAmplitudeCfg]):
         """
         validate_classifiers(config.readout, config.roles)
         scales = sweep2array(config.scales)
-        viewer = live_line(context.plots, "measurement", "Common gain scale", "P(g,g)")
+        fig, ax = context.plots.subplots(num="measurement")
+        ax.set(xlabel="Common gain scale", ylabel="P(g,g)")
+        viewer = live_line(ax)
+        fig.show()
 
-        def update_view(sums: NDArray[np.float64]) -> None:
+        @context.plots.on_plot_thread
+        def update_view(sums: NDArray[np.float64]) -> tuple[Line2D, ...]:
             counts = sums
-            viewer.update(scales, joint_probabilities(counts)[..., 0, 0])
+            return viewer.set(scales, joint_probabilities(counts)[..., 0, 0])
 
         buffer = SignalBuffer(
             (len(scales), 3, 3), dtype=np.float64, on_update=update_view
@@ -276,7 +281,7 @@ class CZAmplitudeExp(Experiment[CZAmplitudeResult, CZAmplitudeCfg]):
             expected_shots=cfg.reps * cfg.rounds,
         )
 
-        _, ax = plots.subplots("joint_return", figsize=(10, 5), layout="constrained")
+        _, ax = plots.subplots(num="joint_return", figsize=(10, 5), layout="constrained")
         for index, label in enumerate(OUTCOME_LABELS):
             ax.plot(
                 result.scales,

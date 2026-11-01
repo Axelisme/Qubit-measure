@@ -7,6 +7,7 @@ from typing import Annotated, ClassVar, Literal, Self
 
 import numpy as np
 from numpy.typing import NDArray
+from matplotlib.lines import Line2D
 from pydantic import Field, model_validator
 from zcu_tools.cfg_model import ConfigBase, DeviceName, FieldMeta
 from zcu_tools.experiment import (
@@ -132,13 +133,13 @@ class SpectroscopyResult:
     """Raw float64 sums (DC,2,2,frequency,3,3), terminal F1/F2 g/e/other.
 
     DC coordinates are device-native, or [0] when inactive. Frequencies are MHz.
-    prepared_f1/prepared_f2 are [0,1] (g/e), F1 outer. Unmeasured points
+    Preparation axes are fixed [0,1] (g/e), F1 outer. Unmeasured points
     remain NaN; completed acquisition rounds survive cancellation.
     """
 
     dc_values: NDArray[np.float64]
-    prepared_f1: NDArray[np.int64]
-    prepared_f2: NDArray[np.int64]
+    
+    
     frequencies: NDArray[np.float64]
     sums: NDArray[np.float64]
 
@@ -146,13 +147,7 @@ class SpectroscopyResult:
 def restore_result(data: GroupedLoadData[SpectroscopyCfg]) -> SpectroscopyResult:
     """Restore summed counts; old per-shot IQ files lack sums and are rejected."""
     sums = data.variable("sums")
-    return SpectroscopyResult(
-        dc_values=sums.axes[5],
-        prepared_f1=sums.axes[4].astype(np.int64),
-        prepared_f2=sums.axes[3].astype(np.int64),
-        frequencies=sums.axes[2],
-        sums=sums.z.astype(np.float64),
-    )
+    return SpectroscopyResult(dc_values=sums.axes[5], frequencies=sums.axes[2], sums=sums.z.astype(np.float64))
 
 
 class SpectroscopyExp(Experiment[SpectroscopyResult, SpectroscopyCfg]):
@@ -164,20 +159,20 @@ class SpectroscopyExp(Experiment[SpectroscopyResult, SpectroscopyCfg]):
                 VariableSpec(
                     variable="sums",
                     axes=(
-                        VariableAxisSpec.generated_arange("terminal_f2", ""),
-                        VariableAxisSpec.generated_arange("terminal_f1", ""),
+                        VariableAxisSpec.generated_arange(label="terminal_f2", unit=""),
+                        VariableAxisSpec.generated_arange(label="terminal_f1", unit=""),
                         VariableAxisSpec(
-                            "Probe frequency", "Hz", field_name="frequencies", scale=1e6
+                            label="Probe frequency", unit="Hz", field_name="frequencies", scale=1e6
                         ),
                         VariableAxisSpec(
-                            "Prepared F2", "", field_name="prepared_f2", dtype=np.int64
+                            label="Prepared F2", unit="", values=(0, 1), dtype=np.int64
                         ),
                         VariableAxisSpec(
-                            "Prepared F1", "", field_name="prepared_f1", dtype=np.int64
+                            label="Prepared F1", unit="", values=(0, 1), dtype=np.int64
                         ),
                         VariableAxisSpec(
-                            "DC source value (inactive if dc_device=null)",
-                            "a.u.",
+                            label="DC source value (inactive if dc_device=null)",
+                            unit="a.u.",
                             field_name="dc_values",
                         ),
                     ),
@@ -213,27 +208,25 @@ class SpectroscopyExp(Experiment[SpectroscopyResult, SpectroscopyCfg]):
             if config.dc_device is None
             else sweep2array(config.dc_values)
         )
-        viewers = {
-            (d, f1, f2): live_line(
-                context.plots,
-                f"measurement_dc_{d}_prep_{f1}_{f2}",
-                "Common probe frequency (MHz)",
-                "P_e (F1 line 1, F2 line 2)",
-                title=f"Nominal preparation ({f1},{f2}) · DC {dc:g}",
-                num_lines=2,
-            )
-            for d, dc in enumerate(dc_values)
-            for f1 in range(2)
-            for f2 in range(2)
-        }
+        viewers = {}
+        for d, dc in enumerate(dc_values):
+            for f1 in range(2):
+                for f2 in range(2):
+                    fig, ax = context.plots.subplots(num=f"measurement_dc_{d}_prep_{f1}_{f2}")
+                    ax.set(xlabel="Common probe frequency (MHz)", ylabel="P_e (F1 line 1, F2 line 2)", title=f"Nominal preparation ({f1},{f2}) · DC {dc:g}")
+                    viewers[d, f1, f2] = live_line(ax, num_lines=2)
+                    fig.show()
 
-        def update_view(sums: NDArray[np.float64]) -> None:
+        @context.plots.on_plot_thread
+        def update_view(sums: NDArray[np.float64]) -> tuple[Line2D, ...]:
             f1_pe = marginal_probabilities(sums, "f1")[..., 1]
             f2_pe = marginal_probabilities(sums, "f2")[..., 1]
+            artists: list[Line2D] = []
             for (d, f1, f2), viewer in viewers.items():
-                viewer.update(
+                artists.extend(viewer.set(
                     frequencies, np.stack((f1_pe[d, f1, f2], f2_pe[d, f1, f2]))
-                )
+                ))
+            return tuple(artists)
 
         buffer = SignalBuffer(
             (len(dc_values), 2, 2, len(frequencies), 3, 3),
@@ -308,13 +301,7 @@ class SpectroscopyExp(Experiment[SpectroscopyResult, SpectroscopyCfg]):
                     rounds=config.rounds,
                     options=RunOptions(),
                 )
-        return SpectroscopyResult(
-            dc_values,
-            np.arange(2, dtype=np.int64),
-            np.arange(2, dtype=np.int64),
-            frequencies,
-            buffer.array,
-        )
+        return SpectroscopyResult(dc_values, frequencies, buffer.array)
 
     def analyze(
         self,
@@ -333,8 +320,6 @@ class SpectroscopyExp(Experiment[SpectroscopyResult, SpectroscopyCfg]):
         frequencies = sweep2array(cfg.frequency)
         if (
             not np.array_equal(data.dc_values, dc)
-            or not np.array_equal(data.prepared_f1, np.arange(2))
-            or not np.array_equal(data.prepared_f2, np.arange(2))
             or data.frequencies.shape != frequencies.shape
             or not np.allclose(
                 data.frequencies, frequencies, rtol=8 * np.finfo(float).eps, atol=0
@@ -349,7 +334,7 @@ class SpectroscopyExp(Experiment[SpectroscopyResult, SpectroscopyCfg]):
         )
         for target, role in enumerate(("F1", "F2")):
             fig, _ = plots.subplots(
-                f"spectra_{role.lower()}",
+                num=f"spectra_{role.lower()}",
                 nrows=2,
                 ncols=2,
                 figsize=(11, 7),
@@ -376,7 +361,7 @@ class SpectroscopyExp(Experiment[SpectroscopyResult, SpectroscopyCfg]):
                 ax.legend(fontsize="small")
             if cfg.dc_device is not None:
                 fig, _ = plots.subplots(
-                    f"map_{role.lower()}",
+                    num=f"map_{role.lower()}",
                     nrows=2,
                     ncols=2,
                     figsize=(11, 7),
@@ -400,7 +385,7 @@ class SpectroscopyExp(Experiment[SpectroscopyResult, SpectroscopyCfg]):
                         ylabel=f"{cfg.dc_device} ({cfg.dc_unit})",
                     )
         fig, _ = plots.subplots(
-            "shots",
+            num="shots",
             nrows=2,
             ncols=2,
             figsize=(11, 7),

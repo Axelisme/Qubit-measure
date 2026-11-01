@@ -8,6 +8,7 @@ from typing import Annotated, ClassVar, Self
 
 import numpy as np
 from numpy.typing import NDArray
+from matplotlib.lines import Line2D
 from pydantic import Field, model_validator
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
@@ -132,13 +133,13 @@ class LocalZCfg(ConfigBase):
 class LocalZResult:
     """Summed counts with target × quadrature × n leading axes.
 
-    targets=[0,1] denote F1/F2; quadratures=[0,1] denote X/Y.
+    Fixed targets [0,1] denote F1/F2; quadratures [0,1] denote X/Y.
     sums is float64 with terminal F1/F2 g/e/other class axes, each length 3.
     Rounds add without averaging. Unmeasured points remain NaN.
     """
 
-    targets: NDArray[np.int64]
-    quadratures: NDArray[np.int64]
+    
+    
     gate_counts: NDArray[np.int64]
     sums: NDArray[np.float64]
 
@@ -146,12 +147,7 @@ class LocalZResult:
 def restore_result(data: GroupedLoadData[LocalZCfg]) -> LocalZResult:
     """Restore classified sums; old per-shot IQ files without sums are rejected."""
     sums = data.variable("sums")
-    return LocalZResult(
-        targets=sums.axes[4].astype(np.int64),
-        quadratures=sums.axes[3].astype(np.int64),
-        gate_counts=sums.axes[2].astype(np.int64),
-        sums=sums.z.astype(np.float64),
-    )
+    return LocalZResult(gate_counts=sums.axes[2].astype(np.int64), sums=sums.z.astype(np.float64))
 
 
 class LocalZExp(Experiment[LocalZResult, LocalZCfg]):
@@ -162,19 +158,19 @@ class LocalZExp(Experiment[LocalZResult, LocalZCfg]):
             VariableSpec(
                 variable="sums",
                 axes=(
-                    VariableAxisSpec.generated_arange("terminal_f2", ""),
-                    VariableAxisSpec.generated_arange("terminal_f1", ""),
+                    VariableAxisSpec.generated_arange(label="terminal_f2", unit=""),
+                    VariableAxisSpec.generated_arange(label="terminal_f1", unit=""),
                     VariableAxisSpec(
-                        "CZ gate count", "", field_name="gate_counts", dtype=np.int64
+                        label="CZ gate count", unit="", field_name="gate_counts", dtype=np.int64
                     ),
                     VariableAxisSpec(
-                        "Projection X or Y",
-                        "",
-                        field_name="quadratures",
+                        label="Projection X or Y",
+                        unit="",
+                        values=(0, 1),
                         dtype=np.int64,
                     ),
                     VariableAxisSpec(
-                        "Target F1 or F2", "", field_name="targets", dtype=np.int64
+                        label="Target F1 or F2", unit="", values=(0, 1), dtype=np.int64
                     ),
                 ),
                 z=VariableZSpec(
@@ -199,14 +195,16 @@ class LocalZExp(Experiment[LocalZResult, LocalZCfg]):
         cfg stays unchanged; completed rounds survive cancellation.
         """
         validate_classifiers(config.readout, config.roles)
-        viewer = live_line(
-            context.plots, "measurement", "CZ gate count", "Target sigma", num_lines=4
-        )
+        fig, ax = context.plots.subplots(num="measurement")
+        ax.set(xlabel="CZ gate count", ylabel="Target sigma")
+        viewer = live_line(ax, num_lines=4)
+        fig.show()
 
-        def update_view(sums: NDArray[np.float64]) -> None:
+        @context.plots.on_plot_thread
+        def update_view(sums: NDArray[np.float64]) -> tuple[Line2D, ...]:
             counts = np.moveaxis(sums, 0, 2)
             values = np.stack((sigma(counts[0], "f1"), sigma(counts[1], "f2")))
-            viewer.update(np.array(config.gate_counts), values.reshape(4, -1))
+            return viewer.set(np.array(config.gate_counts), values.reshape(4, -1))
 
         buffer = SignalBuffer(
             (len(config.gate_counts), 2, 2, 3, 3),
@@ -284,12 +282,7 @@ class LocalZExp(Experiment[LocalZResult, LocalZCfg]):
                     options=RunOptions(),
                 )
         buffer.trigger_update(flush=True)
-        return LocalZResult(
-            np.arange(2, dtype=np.int64),
-            np.arange(2, dtype=np.int64),
-            np.array(config.gate_counts, dtype=np.int64),
-            np.moveaxis(buffer.array, 0, 2),
-        )
+        return LocalZResult(np.array(config.gate_counts, dtype=np.int64), np.moveaxis(buffer.array, 0, 2))
 
     def analyze(
         self,
@@ -304,8 +297,6 @@ class LocalZExp(Experiment[LocalZResult, LocalZCfg]):
         if cfg is None:
             raise ValueError("Phase analysis requires saved source cfg")
         for actual, expected in (
-            (data.targets, np.arange(2)),
-            (data.quadratures, np.arange(2)),
             (data.gate_counts, np.array(cfg.gate_counts)),
         ):
             if not np.array_equal(actual, expected):
@@ -354,7 +345,7 @@ class LocalZExp(Experiment[LocalZResult, LocalZCfg]):
         )
 
         fig, _ = plots.subplots(
-            "phase", nrows=3, ncols=1, figsize=(10, 9), layout="constrained"
+            num="phase", nrows=3, ncols=1, figsize=(10, 9), layout="constrained"
         )
         fig.suptitle("Both targets · independent classified X/Y acquisitions")
         for t, role in enumerate((cfg.roles.f1, cfg.roles.f2)):
@@ -408,7 +399,7 @@ class LocalZExp(Experiment[LocalZResult, LocalZCfg]):
             ax.set_xlim(answer.gate_counts[0], answer.gate_counts[-1])
             if ax.get_legend_handles_labels()[0]:
                 ax.legend()
-        fig, axes = plots.subplots("quadratures", figsize=(10, 5))
+        fig, axes = plots.subplots(num="quadratures", figsize=(10, 5))
         for t in range(2):
             for q, projection in enumerate(("X", "Y")):
                 axes.plot(

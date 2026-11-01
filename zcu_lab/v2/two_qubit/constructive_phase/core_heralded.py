@@ -5,6 +5,7 @@ from typing import ClassVar
 
 import numpy as np
 from numpy.typing import NDArray
+from matplotlib.lines import Line2D
 from zcu_tools.experiment import (
     Experiment,
     GroupedAxesSpec,
@@ -80,16 +81,16 @@ class ConstructivePhaseHeraldedExp(
             VariableSpec(
                 variable="sums",
                 axes=(
-                    VariableAxisSpec.generated_arange("terminal_f2", ""),
-                    VariableAxisSpec.generated_arange("terminal_f1", ""),
-                    VariableAxisSpec.generated_arange("herald_f2", ""),
-                    VariableAxisSpec.generated_arange("herald_f1", ""),
+                    VariableAxisSpec.generated_arange(label="terminal_f2", unit=""),
+                    VariableAxisSpec.generated_arange(label="terminal_f1", unit=""),
+                    VariableAxisSpec.generated_arange(label="herald_f2", unit=""),
+                    VariableAxisSpec.generated_arange(label="herald_f1", unit=""),
                     VariableAxisSpec(
-                        "Drive duration", "s", field_name="durations", scale=1e-6
+                        label="Drive duration", unit="s", field_name="durations", scale=1e-6
                     ),
                     VariableAxisSpec(
-                        "F2 relative to F1 phase",
-                        "deg",
+                        label="F2 relative to F1 phase",
+                        unit="deg",
                         field_name="coordinates",
                         scale=1.0,
                     ),
@@ -131,18 +132,16 @@ class ConstructivePhaseHeraldedExp(
         validate_classifiers(config.readout, config.roles)
         coordinates = sweep2array(config.relative_phase)
         durations = sweep2array(config.duration)
-        viewer = live_line(
-            context.plots,
-            "measurement",
-            "Drive duration (us)",
-            "Terminal P00 | herald (g,g)",
-            num_lines=len(coordinates),
-        )
+        fig, ax = context.plots.subplots(num="measurement")
+        ax.set(xlabel="Drive duration (us)", ylabel="Terminal P00 | herald (g,g)")
+        viewer = live_line(ax, num_lines=len(coordinates))
+        fig.show()
 
-        def update_view(sums: NDArray[np.float64]) -> None:
+        @context.plots.on_plot_thread
+        def update_view(sums: NDArray[np.float64]) -> tuple[Line2D, ...]:
             ordered = sums
             counts = terminal_counts(ordered, ("g", "g"))
-            viewer.update(durations, joint_probabilities(counts)[..., 0, 0])
+            return viewer.set(durations, joint_probabilities(counts)[..., 0, 0])
 
         class_shape = (3, 3, 3, 3)
         shape = (len(coordinates), len(durations), *class_shape)
@@ -213,18 +212,16 @@ class ConstructivePhaseHeraldedExp(
         validate_classifiers(config.readout, config.roles)
         coordinates = sweep2array(config.relative_phase)
         durations = sweep2array(config.duration)
-        viewer = live_line(
-            context.plots,
-            "measurement",
-            "Drive duration (us)",
-            "Terminal P00 | herald (g,g)",
-            num_lines=len(coordinates),
-        )
+        fig, ax = context.plots.subplots(num="measurement")
+        ax.set(xlabel="Drive duration (us)", ylabel="Terminal P00 | herald (g,g)")
+        viewer = live_line(ax, num_lines=len(coordinates))
+        fig.show()
 
-        def update_view(sums: NDArray[np.float64]) -> None:
+        @context.plots.on_plot_thread
+        def update_view(sums: NDArray[np.float64]) -> tuple[Line2D, ...]:
             ordered = sums.swapaxes(0, 1)
             counts = terminal_counts(ordered, ("g", "g"))
-            viewer.update(durations, joint_probabilities(counts)[..., 0, 0])
+            return viewer.set(durations, joint_probabilities(counts)[..., 0, 0])
 
         class_shape = (3, 3, 3, 3)
         shape = (len(durations), len(coordinates), *class_shape)
@@ -329,7 +326,7 @@ class ConstructivePhaseHeraldedExp(
             totals,
             herald_probabilities(result.sums),
         )
-        fig, ax = plots.subplots("interference", figsize=(9, 6), layout="constrained")
+        fig, ax = plots.subplots(num="interference", figsize=(9, 6), layout="constrained")
         image = ax.pcolormesh(
             result.durations,
             result.coordinates,
@@ -348,7 +345,7 @@ class ConstructivePhaseHeraldedExp(
             f"({a},{b})" for a in ("g", "e", "other") for b in ("g", "e", "other")
         )
         fig, _ = plots.subplots(
-            "return",
+            num="return",
             nrows=3,
             ncols=3,
             figsize=(13, 10),
@@ -372,7 +369,7 @@ class ConstructivePhaseHeraldedExp(
             )
         herald_matrix = herald_probabilities(result.sums)
         fig, _ = plots.subplots(
-            "herald",
+            num="herald",
             nrows=3,
             ncols=3,
             figsize=(13, 10),
@@ -400,7 +397,7 @@ class ConstructivePhaseHeraldedExp(
             1.0
             - joint_probabilities(terminal_counts(result.sums, ("e", "e")))[..., 1, 1]
         )
-        fig, ax = plots.subplots("ee_control", figsize=(9, 6), layout="constrained")
+        fig, ax = plots.subplots(num="ee_control", figsize=(9, 6), layout="constrained")
         image = ax.pcolormesh(
             durations, coordinates, ee_not_returned, shading="nearest", vmin=0, vmax=1
         )
@@ -412,7 +409,7 @@ class ConstructivePhaseHeraldedExp(
         )
         analysis = analyze_constructive_phase(coordinates, durations, answer)
         rates = analysis.rates
-        _, ax = plots.subplots("rabi_rate", figsize=(10, 6), layout="constrained")
+        _, ax = plots.subplots(num="rabi_rate", figsize=(10, 6), layout="constrained")
         ax.errorbar(
             coordinates,
             [rate.rate if rate.rate is not None else np.nan for rate in rates],
@@ -440,7 +437,7 @@ class ConstructivePhaseHeraldedExp(
             ylabel="Rabi rate (MHz)",
             title="Undamped cosine model · rates below 1/duration span excluded",
         )
-        _, ax = plots.subplots("rabi_traces", figsize=(10, 6), layout="constrained")
+        _, ax = plots.subplots(num="rabi_traces", figsize=(10, 6), layout="constrained")
         for coordinate, rate in zip(coordinates, rates, strict=True):
             if rate.fitted is not None:
                 ax.plot(durations, rate.fitted, label=f"{coordinate:g}")
@@ -454,7 +451,7 @@ class ConstructivePhaseHeraldedExp(
         if analysis.interference is not None:
             phases, squared, dense, curve, maximum_phase = analysis.interference
             _, ax = plots.subplots(
-                "constructive_phase", figsize=(9, 6), layout="constrained"
+                num="constructive_phase", figsize=(9, 6), layout="constrained"
             )
             ax.plot(phases, squared, "o", label="Identifiable duration-slice rates²")
             ax.plot(dense, curve, label="A + B cosφ + C sinφ")

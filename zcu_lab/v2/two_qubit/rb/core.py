@@ -7,6 +7,7 @@ from typing import Annotated, ClassVar, Self
 
 import numpy as np
 from numpy.typing import NDArray
+from matplotlib.lines import Line2D
 from pydantic import Field, model_validator
 from zcu_tools.analysis.failure import AnalysisFailed
 from zcu_tools.analysis.fitting import compute_fit_quality
@@ -158,14 +159,14 @@ class RBResult:
     """Float64 class counts with axes (depth,seed,arm,round,F1,F2).
 
     depths counts random Cliffords; seeds retains exact random.Random identities.
-    arms=[0,1] means reference/CZ-interleaved. rounds=[0..rounds-1] is a host
+    The fixed arm axis [0,1] means reference/CZ-interleaved. rounds=[0..rounds-1] is a host
     acquisition axis. sums ends in (3,3), ordered g/e/other on each role.
     Counts are unnormalized; a wholly unacquired round stays NaN.
     """
 
     depths: NDArray[np.int64]
     seeds: NDArray[np.int64]
-    arms: NDArray[np.int64]
+    
     rounds: NDArray[np.int64]
     sums: NDArray[np.float64]
 
@@ -173,13 +174,7 @@ class RBResult:
 def restore_result(data: GroupedLoadData[RBCfg]) -> RBResult:
     """Restore counts; old per-shot IQ files fail because sums is missing."""
     sums = data.variable("sums")
-    return RBResult(
-        depths=sums.axes[5].astype(np.int64),
-        seeds=sums.axes[4].astype(np.int64),
-        arms=sums.axes[3].astype(np.int64),
-        rounds=sums.axes[2].astype(np.int64),
-        sums=sums.z.astype(np.float64),
-    )
+    return RBResult(depths=sums.axes[5].astype(np.int64), seeds=sums.axes[4].astype(np.int64), rounds=sums.axes[2].astype(np.int64), sums=sums.z.astype(np.float64))
 
 
 class RBExp(Experiment[RBResult, RBCfg]):
@@ -191,13 +186,13 @@ class RBExp(Experiment[RBResult, RBCfg]):
             VariableSpec(
                 variable="sums",
                 axes=(
-                    VariableAxisSpec.generated_arange("terminal_f2", ""),
-                    VariableAxisSpec.generated_arange("terminal_f1", ""),
-                    VariableAxisSpec("Round", "", field_name="rounds", dtype=np.int64),
-                    VariableAxisSpec("Arm", "", field_name="arms", dtype=np.int64),
-                    VariableAxisSpec("Seed", "", field_name="seeds", dtype=np.int64),
+                    VariableAxisSpec.generated_arange(label="terminal_f2", unit=""),
+                    VariableAxisSpec.generated_arange(label="terminal_f1", unit=""),
+                    VariableAxisSpec(label="Round", unit="", field_name="rounds", dtype=np.int64),
+                    VariableAxisSpec(label="Arm", unit="", values=(0, 1), dtype=np.int64),
+                    VariableAxisSpec(label="Seed", unit="", field_name="seeds", dtype=np.int64),
                     VariableAxisSpec(
-                        "Clifford depth", "", field_name="depths", dtype=np.int64
+                        label="Clifford depth", unit="", field_name="depths", dtype=np.int64
                     ),
                 ),
                 z=VariableZSpec(
@@ -222,17 +217,15 @@ class RBExp(Experiment[RBResult, RBCfg]):
         Return fixed raw count slots; cfg and saved sequence identities are unchanged.
         """
         validate_classifiers(config.readout, config.roles)
-        viewer = live_line(
-            context.plots,
-            "measurement",
-            "Random Clifford depth",
-            "Joint00 survival",
-            num_lines=2,
-        )
+        fig, ax = context.plots.subplots(num="measurement")
+        ax.set(xlabel="Random Clifford depth", ylabel="Joint00 survival")
+        viewer = live_line(ax, num_lines=2)
+        fig.show()
 
-        def update_view(sums: NDArray[np.float64]) -> None:
+        @context.plots.on_plot_thread
+        def update_view(sums: NDArray[np.float64]) -> tuple[Line2D, ...]:
             totals = np.nansum(sums, axis=(1, 3))
-            viewer.update(
+            return viewer.set(
                 np.array(config.depths), joint_probabilities(totals)[..., 0, 0].T
             )
 
@@ -324,13 +317,7 @@ class RBExp(Experiment[RBResult, RBCfg]):
                                 options=RunOptions(),
                             )
         buffer.trigger_update(flush=True)
-        return RBResult(
-            np.array(config.depths, dtype=np.int64),
-            np.array(config.seeds, dtype=np.int64),
-            np.arange(2, dtype=np.int64),
-            np.arange(config.rounds, dtype=np.int64),
-            buffer.array,
-        )
+        return RBResult(np.array(config.depths, dtype=np.int64), np.array(config.seeds, dtype=np.int64), np.arange(config.rounds, dtype=np.int64), buffer.array)
 
     def analyze(
         self,
@@ -359,7 +346,7 @@ class RBExp(Experiment[RBResult, RBCfg]):
             reason = "RB analysis requires saved cfg; current Form is not a substitute"
         else:
             validate_axes(
-                (data.depths, data.seeds, data.arms, data.rounds),
+                (data.depths, data.seeds, np.arange(2, dtype=np.int64), data.rounds),
                 (cfg.depths, cfg.seeds, [0, 1], np.arange(cfg.rounds)),
             )
             if data.sums.shape != (*shape, 3, 3):
@@ -398,7 +385,7 @@ class RBExp(Experiment[RBResult, RBCfg]):
         answer = RBAnalysis(
             survival, acquired, means, curves, estimate, quality, reason
         )
-        fig, ax = plots.subplots("fit", figsize=(9, 6))
+        fig, ax = plots.subplots(num="fit", figsize=(9, 6))
         for arm, label in enumerate(("Reference", "CZ interleaved")):
             (line,) = ax.plot(data.depths, answer.mean_survival[arm], "o", label=label)
             if answer.estimate is not None:

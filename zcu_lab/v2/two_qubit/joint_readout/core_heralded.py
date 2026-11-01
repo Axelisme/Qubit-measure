@@ -7,6 +7,7 @@ from typing import Annotated, ClassVar, Self
 
 import numpy as np
 from numpy.typing import NDArray
+from matplotlib.lines import Line2D
 from pydantic import Field, model_validator
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
@@ -107,8 +108,8 @@ class JointReadoutHeraldedResult:
     The RunContext still reports cancellation or acquisition failure.
     """
 
-    prepared_f1: NDArray[np.int64]
-    prepared_f2: NDArray[np.int64]
+    
+    
     sums: NDArray[np.float64]
 
 
@@ -147,11 +148,7 @@ def restore_result(
             "Heralded joint readout requires two preparation axes "
             "and sums (2,2,3,3,3,3)"
         )
-    return JointReadoutHeraldedResult(
-        prepared_f1=sums.axes[5].astype(np.int64),
-        prepared_f2=sums.axes[4].astype(np.int64),
-        sums=sums.z.astype(np.float64),
-    )
+    return JointReadoutHeraldedResult(sums=sums.z.astype(np.float64))
 
 
 class JointReadoutHeraldedExp(
@@ -166,20 +163,20 @@ class JointReadoutHeraldedExp(
             VariableSpec(
                 variable="sums",
                 axes=(
-                    VariableAxisSpec.generated_arange("terminal_f2", ""),
-                    VariableAxisSpec.generated_arange("terminal_f1", ""),
-                    VariableAxisSpec.generated_arange("herald_f2", ""),
-                    VariableAxisSpec.generated_arange("herald_f1", ""),
+                    VariableAxisSpec.generated_arange(label="terminal_f2", unit=""),
+                    VariableAxisSpec.generated_arange(label="terminal_f1", unit=""),
+                    VariableAxisSpec.generated_arange(label="herald_f2", unit=""),
+                    VariableAxisSpec.generated_arange(label="herald_f1", unit=""),
                     VariableAxisSpec(
-                        "Prepared F2 (0=g, 1=e)",
-                        "",
-                        field_name="prepared_f2",
+                        label="Prepared F2 (0=g, 1=e)",
+                        unit="",
+                        values=(0, 1),
                         dtype=np.int64,
                     ),
                     VariableAxisSpec(
-                        "Prepared F1 (0=g, 1=e)",
-                        "",
-                        field_name="prepared_f1",
+                        label="Prepared F1 (0=g, 1=e)",
+                        unit="",
+                        values=(0, 1),
                         dtype=np.int64,
                     ),
                 ),
@@ -208,15 +205,14 @@ class JointReadoutHeraldedExp(
         """
 
         validate_classifiers(config.readout, config.roles)
-        viewer = live_line(
-            context.plots,
-            "measurement",
-            "Nominal preparation (gg, ge, eg, ee)",
-            "Terminal P(g,g) | herald (g,g)",
-        )
+        fig, ax = context.plots.subplots(num="measurement")
+        ax.set(xlabel="Nominal preparation (gg, ge, eg, ee)", ylabel="Terminal P(g,g) | herald (g,g)")
+        viewer = live_line(ax)
+        fig.show()
 
-        def update_view(sums: NDArray[np.float64]) -> None:
-            viewer.update(
+        @context.plots.on_plot_thread
+        def update_view(sums: NDArray[np.float64]) -> tuple[Line2D, ...]:
+            return viewer.set(
                 np.arange(4, dtype=np.float64),
                 joint_probabilities(terminal_counts(sums, ("g", "g")))[
                     ..., 0, 0
@@ -272,11 +268,7 @@ class JointReadoutHeraldedExp(
                 rounds=config.rounds,
                 options=RunOptions(),
             )
-        return JointReadoutHeraldedResult(
-            prepared_f1=np.arange(2, dtype=np.int64),
-            prepared_f2=np.arange(2, dtype=np.int64),
-            sums=buffer.array,
-        )
+        return JointReadoutHeraldedResult(sums=buffer.array)
 
     def analyze(
         self,
@@ -295,13 +287,10 @@ class JointReadoutHeraldedExp(
         del options
         result = source.result
         if (
-            not np.array_equal(result.prepared_f1, np.arange(2))
-            or not np.array_equal(result.prepared_f2, np.arange(2))
-            or result.sums.shape != (2, 2, 3, 3, 3, 3)
+            result.sums.shape != (2, 2, 3, 3, 3, 3)
         ):
             raise ValueError(
-                "Heralded joint readout requires prepared_f1/prepared_f2 [0,1] "
-                "and sums (2,2,3,3,3,3)"
+                "Heralded joint readout requires sums (2,2,3,3,3,3)"
             )
 
         # Herald ee starts with both qubits excited. The same I/Xπ preparation
@@ -319,7 +308,7 @@ class JointReadoutHeraldedExp(
         herald_matrix = herald_probabilities(result.sums).reshape(4, 3, 3)
         acquired_shots = result.sums.sum(axis=(-4, -3, -2, -1)).reshape(4)
 
-        fig, _axes = plots.subplots("matrix", ncols=3, figsize=(24, 6))
+        fig, _axes = plots.subplots(num="matrix", ncols=3, figsize=(24, 6))
         axes = fig.axes
         for group, (ax, title) in enumerate(
             zip(
@@ -367,7 +356,7 @@ class JointReadoutHeraldedExp(
             fig.colorbar(image, ax=ax, label="Row-normalized probability")
         fig.tight_layout()
 
-        fig, ax = plots.subplots("herald", figsize=(12, 5))
+        fig, ax = plots.subplots(num="herald", figsize=(12, 5))
         image = ax.imshow(
             np.ma.masked_invalid(herald_matrix.reshape(4, 9)),
             vmin=0,

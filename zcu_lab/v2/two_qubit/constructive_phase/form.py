@@ -25,9 +25,7 @@ def scan_form(ctx: FormContext, cfg_type: type[T_Cfg]) -> Form[T_Cfg]:
     for role in ("f1", "f2"):
         slot = f"$coupler.module.cz_{role}"
         drive[role] = (
-            Slot(slot, copy=True)
-            if ctx.has(slot)
-            else Template(
+            Slot(slot, copy=True, fallback=Template(
                 "pulse:blank",
                 set={
                     "ch": Expr(f"${role}.wiring.ch"),
@@ -37,12 +35,10 @@ def scan_form(ctx: FormContext, cfg_type: type[T_Cfg]) -> Form[T_Cfg]:
                     "waveform.style": "cosine",
                     "waveform.length": None,
                 },
-            )
+            ))
         )
     readout = (
-        Slot("$mux.module.readout")
-        if ctx.has("$mux.module.readout")
-        else Template("readout/mux:blank")
+        Slot("$mux.module.readout", fallback=Template("readout/mux:blank"))
     )
     return Form(
         cfg_type,

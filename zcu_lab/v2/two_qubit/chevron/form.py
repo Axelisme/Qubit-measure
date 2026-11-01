@@ -29,9 +29,7 @@ def scan_form(ctx: FormContext, cfg_type: type[T_Cfg]) -> Form[T_Cfg]:
         slot = f"$coupler.module.cz_{role}"
         drive[role] = (
             # Run replaces both line frequencies with the common scan coordinate.
-            Slot(slot, copy=True, set={"freq": Hidden(0.0)})
-            if ctx.has(slot)
-            else Template(
+            Slot(slot, copy=True, set={"freq": Hidden(0.0)}, fallback=Template(
                 "pulse:blank",
                 set={
                     "ch": Expr(f"${role}.wiring.ch"),
@@ -41,7 +39,7 @@ def scan_form(ctx: FormContext, cfg_type: type[T_Cfg]) -> Form[T_Cfg]:
                     "waveform.style": "cosine",
                     "waveform.length": None,
                 },
-            )
+            ))
         )
     readout = mux_readout_initial(ctx)
     return Form(

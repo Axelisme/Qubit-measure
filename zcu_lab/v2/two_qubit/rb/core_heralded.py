@@ -6,6 +6,7 @@ from typing import ClassVar
 import numpy as np
 from matplotlib.axes import Axes
 from numpy.typing import NDArray
+from matplotlib.lines import Line2D
 from zcu_tools.analysis.fitting import FitQuality, compute_fit_quality
 from zcu_tools.analysis.fitting.shared import SharedFitResult
 from zcu_tools.experiment import (
@@ -67,7 +68,7 @@ class RBHeraldedResult:
 
     depths: NDArray[np.int64]
     seeds: NDArray[np.int64]
-    arms: NDArray[np.int64]
+    
     rounds: NDArray[np.int64]
     sums: NDArray[np.float64]
 
@@ -103,13 +104,7 @@ class RBHeraldedAnalysis:
 def restore_result(data: GroupedLoadData[RBHeraldedCfg]) -> RBHeraldedResult:
     """Restore all 81 class counts; old per-shot IQ files fail without sums."""
     sums = data.variable("sums")
-    return RBHeraldedResult(
-        depths=sums.axes[7].astype(np.int64),
-        seeds=sums.axes[6].astype(np.int64),
-        arms=sums.axes[5].astype(np.int64),
-        rounds=sums.axes[4].astype(np.int64),
-        sums=sums.z.astype(np.float64),
-    )
+    return RBHeraldedResult(depths=sums.axes[7].astype(np.int64), seeds=sums.axes[6].astype(np.int64), rounds=sums.axes[4].astype(np.int64), sums=sums.z.astype(np.float64))
 
 
 class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
@@ -122,19 +117,19 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
                 VariableSpec(
                     variable="sums",
                     axes=(
-                        VariableAxisSpec.generated_arange("terminal_f2", ""),
-                        VariableAxisSpec.generated_arange("terminal_f1", ""),
-                        VariableAxisSpec.generated_arange("herald_f2", ""),
-                        VariableAxisSpec.generated_arange("herald_f1", ""),
+                        VariableAxisSpec.generated_arange(label="terminal_f2", unit=""),
+                        VariableAxisSpec.generated_arange(label="terminal_f1", unit=""),
+                        VariableAxisSpec.generated_arange(label="herald_f2", unit=""),
+                        VariableAxisSpec.generated_arange(label="herald_f1", unit=""),
                         VariableAxisSpec(
-                            "Round", "", field_name="rounds", dtype=np.int64
+                            label="Round", unit="", field_name="rounds", dtype=np.int64
                         ),
-                        VariableAxisSpec("Arm", "", field_name="arms", dtype=np.int64),
+                        VariableAxisSpec(label="Arm", unit="", values=(0, 1), dtype=np.int64),
                         VariableAxisSpec(
-                            "Seed", "", field_name="seeds", dtype=np.int64
+                            label="Seed", unit="", field_name="seeds", dtype=np.int64
                         ),
                         VariableAxisSpec(
-                            "Clifford depth", "", field_name="depths", dtype=np.int64
+                            label="Clifford depth", unit="", field_name="depths", dtype=np.int64
                         ),
                     ),
                     z=VariableZSpec(
@@ -161,22 +156,20 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
         carries only stop requests and reason text.
         """
         validate_classifiers(config.readout, config.roles)
-        viewer = live_line(
-            context.plots,
-            "measurement",
-            "Random Clifford depth",
-            "Return to herald state",
-            num_lines=4,
-        )
+        fig, ax = context.plots.subplots(num="measurement")
+        ax.set(xlabel="Random Clifford depth", ylabel="Return to herald state")
+        viewer = live_line(ax, num_lines=4)
+        fig.show()
 
-        def update_view(sums: NDArray[np.float64]) -> None:
+        @context.plots.on_plot_thread
+        def update_view(sums: NDArray[np.float64]) -> tuple[Line2D, ...]:
             curves = []
             for cell, counts in enumerate(
                 (terminal_counts(sums, ("g", "g")), terminal_counts(sums, ("e", "e")))
             ):
                 totals = np.nansum(counts, axis=(1, 3))
                 curves.extend(joint_probabilities(totals)[..., cell, cell].T)
-            viewer.update(np.array(config.depths), np.array(curves))
+            return viewer.set(np.array(config.depths), np.array(curves))
 
         buffer = SignalBuffer(
             (len(config.depths), len(config.seeds), 2, config.rounds, 3, 3, 3, 3),
@@ -269,13 +262,7 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
                                 options=RunOptions(),
                             )
         buffer.trigger_update(flush=True)
-        return RBHeraldedResult(
-            np.array(config.depths, dtype=np.int64),
-            np.array(config.seeds, dtype=np.int64),
-            np.arange(2, dtype=np.int64),
-            np.arange(config.rounds, dtype=np.int64),
-            buffer.array,
-        )
+        return RBHeraldedResult(np.array(config.depths, dtype=np.int64), np.array(config.seeds, dtype=np.int64), np.arange(config.rounds, dtype=np.int64), buffer.array)
 
     def analyze(
         self,
@@ -309,7 +296,7 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
             reason = "RB analysis requires saved cfg; current Form is not a substitute"
         else:
             validate_axes(
-                (data.depths, data.seeds, data.arms, data.rounds),
+                (data.depths, data.seeds, np.arange(2, dtype=np.int64), data.rounds),
                 (cfg.depths, cfg.seeds, [0, 1], np.arange(cfg.rounds)),
             )
             for herald, counts in enumerate(
@@ -365,7 +352,7 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
         matrix = herald_probabilities(data.sums)
         aggregate = herald_probabilities(np.nansum(data.sums, axis=(1, 3)))
         for herald, label in enumerate(("gg", "ee")):
-            fig, ax = plots.subplots(f"fit_{label}", figsize=(9, 6))
+            fig, ax = plots.subplots(num=f"fit_{label}", figsize=(9, 6))
             _draw_return_survival(
                 ax,
                 data.depths,
@@ -381,7 +368,7 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
             )
             fig.tight_layout()
         for arm, label in enumerate(("Reference", "CZ interleaved")):
-            fig, ax = plots.subplots(f"herald_{arm}", figsize=(10, 6))
+            fig, ax = plots.subplots(num=f"herald_{arm}", figsize=(10, 6))
             _draw_herald_fractions(ax, data.depths, aggregate[:, arm])
             ax.set_title(f"{label}: (g,g) is pass fraction, not purity")
             fig.tight_layout()

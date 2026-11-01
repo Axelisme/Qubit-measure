@@ -5,6 +5,7 @@ from typing import ClassVar
 
 import numpy as np
 from numpy.typing import NDArray
+from matplotlib.lines import Line2D
 from zcu_tools.experiment import (
     Experiment,
     GroupedAxesSpec,
@@ -47,13 +48,13 @@ class SpectroscopyHeraldedResult:
     """Raw float64 sums (DC,2,2,frequency,3,3,3,3), never proportions.
 
     Class axes are herald F1/F2 then terminal F1/F2, each g/e/other.
-    prepared_f1/prepared_f2 are [0,1] (g/e), F1 outer. DC is [0] when inactive;
+    Preparation axes are fixed [0,1] (g/e), F1 outer. DC is [0] when inactive;
     frequency is MHz. Missing points remain NaN.
     """
 
     dc_values: NDArray[np.float64]
-    prepared_f1: NDArray[np.int64]
-    prepared_f2: NDArray[np.int64]
+    
+    
     frequencies: NDArray[np.float64]
     sums: NDArray[np.float64]
 
@@ -79,13 +80,7 @@ def restore_result(
 ) -> SpectroscopyHeraldedResult:
     """Restore all 81 counts; old per-shot IQ files lack sums and are rejected."""
     sums = data.variable("sums")
-    return SpectroscopyHeraldedResult(
-        dc_values=sums.axes[7],
-        prepared_f1=sums.axes[6].astype(np.int64),
-        prepared_f2=sums.axes[5].astype(np.int64),
-        frequencies=sums.axes[4],
-        sums=sums.z.astype(np.float64),
-    )
+    return SpectroscopyHeraldedResult(dc_values=sums.axes[7], frequencies=sums.axes[4], sums=sums.z.astype(np.float64))
 
 
 class SpectroscopyHeraldedExp(
@@ -100,22 +95,22 @@ class SpectroscopyHeraldedExp(
             VariableSpec(
                 variable="sums",
                 axes=(
-                    VariableAxisSpec.generated_arange("terminal_f2", ""),
-                    VariableAxisSpec.generated_arange("terminal_f1", ""),
-                    VariableAxisSpec.generated_arange("herald_f2", ""),
-                    VariableAxisSpec.generated_arange("herald_f1", ""),
+                    VariableAxisSpec.generated_arange(label="terminal_f2", unit=""),
+                    VariableAxisSpec.generated_arange(label="terminal_f1", unit=""),
+                    VariableAxisSpec.generated_arange(label="herald_f2", unit=""),
+                    VariableAxisSpec.generated_arange(label="herald_f1", unit=""),
                     VariableAxisSpec(
-                        "Probe frequency", "Hz", field_name="frequencies", scale=1e6
+                        label="Probe frequency", unit="Hz", field_name="frequencies", scale=1e6
                     ),
                     VariableAxisSpec(
-                        "Prepared F2", "", field_name="prepared_f2", dtype=np.int64
+                        label="Prepared F2", unit="", values=(0, 1), dtype=np.int64
                     ),
                     VariableAxisSpec(
-                        "Prepared F1", "", field_name="prepared_f1", dtype=np.int64
+                        label="Prepared F1", unit="", values=(0, 1), dtype=np.int64
                     ),
                     VariableAxisSpec(
-                        "DC source value (inactive if dc_device=null)",
-                        "a.u.",
+                        label="DC source value (inactive if dc_device=null)",
+                        unit="a.u.",
                         field_name="dc_values",
                     ),
                 ),
@@ -150,29 +145,26 @@ class SpectroscopyHeraldedExp(
             if config.dc_device is None
             else sweep2array(config.dc_values)
         )
-        viewers = {
-            (d, f1, f2): live_line(
-                context.plots,
-                f"measurement_dc_{d}_actual_{f1}_{f2}",
-                "Common probe frequency (MHz)",
-                "P_e (gg F1/F2, ee F1/F2)",
-                title=f"Actual initial state ({f1},{f2}) before probe · DC {dc:g}",
-                num_lines=4,
-            )
-            for d, dc in enumerate(dc_values)
-            for f1 in range(2)
-            for f2 in range(2)
-        }
+        viewers = {}
+        for d, dc in enumerate(dc_values):
+            for f1 in range(2):
+                for f2 in range(2):
+                    fig, ax = context.plots.subplots(num=f"measurement_dc_{d}_actual_{f1}_{f2}")
+                    ax.set(xlabel="Common probe frequency (MHz)", ylabel="P_e (gg F1/F2, ee F1/F2)", title=f"Actual initial state ({f1},{f2}) before probe · DC {dc:g}")
+                    viewers[d, f1, f2] = live_line(ax, num_lines=4)
+                    fig.show()
 
-        def update_view(sums: NDArray[np.float64]) -> None:
+        @context.plots.on_plot_thread
+        def update_view(sums: NDArray[np.float64]) -> tuple[Line2D, ...]:
             gg = terminal_counts(sums, ("g", "g"))
             ee = terminal_counts(sums, ("e", "e"))
             gg_f1 = marginal_probabilities(gg, "f1")[..., 1]
             gg_f2 = marginal_probabilities(gg, "f2")[..., 1]
             ee_f1 = marginal_probabilities(ee, "f1")[..., 1]
             ee_f2 = marginal_probabilities(ee, "f2")[..., 1]
+            artists: list[Line2D] = []
             for (d, f1, f2), viewer in viewers.items():
-                viewer.update(
+                artists.extend(viewer.set(
                     frequencies,
                     np.stack(
                         (
@@ -182,7 +174,8 @@ class SpectroscopyHeraldedExp(
                             ee_f2[d, 1 - f1, 1 - f2],
                         )
                     ),
-                )
+                ))
+            return tuple(artists)
 
         buffer = SignalBuffer(
             (len(dc_values), 2, 2, len(frequencies), 3, 3, 3, 3),
@@ -260,13 +253,7 @@ class SpectroscopyHeraldedExp(
                     rounds=config.rounds,
                     options=RunOptions(),
                 )
-        return SpectroscopyHeraldedResult(
-            dc_values,
-            np.arange(2, dtype=np.int64),
-            np.arange(2, dtype=np.int64),
-            frequencies,
-            buffer.array,
-        )
+        return SpectroscopyHeraldedResult(dc_values, frequencies, buffer.array)
 
     def analyze(
         self,
@@ -288,8 +275,6 @@ class SpectroscopyHeraldedExp(
         frequencies = sweep2array(cfg.frequency)
         if (
             not np.array_equal(data.dc_values, dc)
-            or not np.array_equal(data.prepared_f1, np.arange(2))
-            or not np.array_equal(data.prepared_f2, np.arange(2))
             or data.frequencies.shape != frequencies.shape
             or not np.allclose(
                 data.frequencies, frequencies, rtol=8 * np.finfo(float).eps, atol=0
@@ -315,7 +300,7 @@ class SpectroscopyHeraldedExp(
         for d, value in enumerate(dc):
             for target, role in enumerate(("F1", "F2")):
                 fig, _ = plots.subplots(
-                    f"spectra_dc_{d}_{role.lower()}",
+                    num=f"spectra_dc_{d}_{role.lower()}",
                     nrows=2,
                     ncols=2,
                     figsize=(11, 7),
@@ -347,7 +332,7 @@ class SpectroscopyHeraldedExp(
                     )
                     ax.legend(fontsize="small")
         fig, _ = plots.subplots(
-            "shots",
+            num="shots",
             nrows=len(dc),
             ncols=4,
             figsize=(16, 3 * len(dc)),
@@ -377,7 +362,7 @@ class SpectroscopyHeraldedExp(
                 ax.legend(fontsize="small")
         herald = herald_probabilities(data.sums)
         fig, _ = plots.subplots(
-            "herald",
+            num="herald",
             nrows=len(dc),
             ncols=4,
             figsize=(16, 3 * len(dc)),
