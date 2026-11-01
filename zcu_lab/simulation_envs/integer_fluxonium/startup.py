@@ -13,6 +13,8 @@ from zcu_tools.program import build_soccfg
 from zcu_tools.resources.entry import DestinationExistsError, load_entry_template
 from zcu_tools.simulators.single_fluxonium.environment import single_fluxonium
 
+PROFILE_PATH = Path(__file__).resolve().parents[1] / "profiles" / "qick_216_v2.yaml"
+
 
 def startup(ctx: StartupContext) -> None:
     """Open integer-fluxonium-demo/initial and install mock SoC and DC driver.
@@ -56,9 +58,7 @@ def startup(ctx: StartupContext) -> None:
         _seed_entry(ctx)
 
     ctx.progress("Building offline integer-fluxonium resources")
-    soccfg = build_soccfg(
-        yaml.safe_load(Path(__file__).with_name("profile.yaml").read_text())
-    )
+    soccfg = build_soccfg(yaml.safe_load(PROFILE_PATH.read_text()))
     environment = single_fluxonium(settings_path, soccfg=soccfg)
     transferred: set[str] = set()
 
