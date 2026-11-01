@@ -360,7 +360,7 @@ def module_ui(module_widget, tmp_path, request):
 
 
 @pytest.fixture
-def invalid_shared_module_ui(module_widget, module_ui):
+def invalid_shared_module_ui(module_widget, module_ui, qapp):
     """Seed ordinary invalid remote input through the public Form owner seam."""
     ctrl, widget, tab_id, pane = module_widget
     form = ctrl.writeback_control.get_writeback_item_form_for_pane(tab_id, pane, "ml-1")
@@ -368,6 +368,8 @@ def invalid_shared_module_ui(module_widget, module_ui):
     snapshot = ctrl.tab_control.get_tab_snapshot(tab_id).analysis
     assert snapshot is not None
     widget.refresh_module_validity(snapshot.writeback_items)
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    qapp.processEvents()
     return module_ui
 
 
