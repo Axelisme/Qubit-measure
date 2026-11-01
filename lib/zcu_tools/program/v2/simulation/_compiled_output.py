@@ -92,13 +92,14 @@ class Outputs:
         self.pool = pool
         self.time_base = time_base
         self.envelopes: dict[tuple[int, int, int], PulseEnvelope] = {}
-        self.ports: dict[int, tuple[str, int]] = {}
+        self.ports: dict[tuple[int, int | None], tuple[str, int]] = {}
         for ch in prog.gen_chs:
-            self._port(int(prog.soccfg["gens"][ch]["tproc_ch"]), "gen", ch)
+            cfg = prog.soccfg["gens"][ch]
+            self._port(int(cfg["tproc_ch"]), cfg.get("tmux_ch"), "gen", ch)
         for ch in prog.ro_chs:
             ctrl = prog.soccfg["readouts"][ch].get("tproc_ctrl")
             if ctrl is not None:
-                self._port(int(ctrl), "ro", ch)
+                self._port(int(ctrl), prog.soccfg["readouts"][ch].get("tmux_ch"), "ro", ch)
         self.iterations: tuple[tuple[str, int], ...] = ()
         self.loop_positions: dict[str, int] = {}
         self.events: dict[tuple[int, int, tuple[tuple[str, int], ...]], EventSlot] = {}
@@ -130,12 +131,16 @@ class Outputs:
         self.time_base.validate_ticks(duration)
         return duration
 
-    def _port(self, port: int, kind: str, ch: int) -> None:
-        if port in self.ports:
+    def _port(self, port: int, tmux_ch: int | None, kind: str, ch: int) -> None:
+        key = (port, tmux_ch)
+        if key in self.ports or any(
+            used_port == port and (used_tmux is None or tmux_ch is None)
+            for used_port, used_tmux in self.ports
+        ):
             raise ValueError(
-                f"PortWriteInst WPORT_WR at preopt setup: ambiguous wave output port {port}"
+                f"PortWriteInst WPORT_WR at preopt setup: ambiguous wave output port {port}, tmux_ch={tmux_ch}"
             )
-        self.ports[port] = (kind, ch)
+        self.ports[key] = (kind, ch)
 
     def begin(self, machine: Machine, points: IntArray) -> None:
         """Start the current shot lanes at their actual reference-time origin."""
@@ -163,7 +168,6 @@ class Outputs:
         port = machine.value(inst.dst)
         if np.any(port != port[0]):
             raise ValueError("lane-dependent wave output port")
-        kind, ch = self.ports[int(port[0])]
         if inst.src == SrcKeyword.WMEM:
             words = machine.wave(inst.addr)
         elif inst.src == SrcKeyword.REG or (
@@ -174,6 +178,18 @@ class Outputs:
             )
         else:
             raise ValueError("unsupported wave port source")
+        port_number = int(port[0])
+        key = (port_number, None)
+        if key not in self.ports:
+            tmux = (words[machine.active, 5] >> 8) & 0xFF
+            if np.any(tmux != tmux[0]):
+                raise ValueError("lane-dependent tmux channel")
+            key = (port_number, int(tmux[0]))
+            if key not in self.ports:
+                raise ValueError(
+                    f"unregistered wave output port {port_number}, tmux_ch={key[1]}"
+                )
+        kind, ch = self.ports[key]
         timestamp = machine.ref + machine.value(
             inst.time if inst.time is not None else Register("s14")
         )
