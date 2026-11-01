@@ -30,6 +30,9 @@
 每條 timeline 保存相對 reference 的結尾，`default` 不是 reference。
 帶 timeline 的 pulse／trigger 在結尾加 t 發射。Readout 的作者結尾只含 generator waveform 與 pre/post delay，ADC 視窗留在 ADC channel，shot 收尾仍等待全部 ADC。
 未帶 timeline 且未進範圍的原生輸出保留 QICK 行為。
+`pulse_by_reg` 與 `pulse_from_length_reg` 選到 timeline 時，須提供配對的 `selection` metadata。
+同 generator 的 pulse 重疊不能靠另一條 timeline 豁免。帶 timeline 的後一個 trigger 必須證明不與同 ADC 前一視窗重疊，否則在 build 時報錯。
+原生 `t=None` 無法定位 ADC 起點，會使後一個同 ADC timeline trigger 無法證明不重疊。此未知標記不捏造 shot 收尾的 runtime 結尾。
 Builder 原生布林控制選項只接受 keyword，其餘參數沿用同名 program 方法。
 
 Case 與 Repeat 只可使用母結構允許的 timeline 及局部 fork，局部名字離開後失效。
@@ -47,7 +50,7 @@ Timeline module 不自動保護 route，明確呼叫 `protect_readout_routes` �
 [runtime 範圍證明](../../../../docs/adr/0083-program-macros-and-timelines.md#runtime-end-與範圍證明)、
 [branch／repeat 邊界](../../../../docs/adr/0083-program-macros-and-timelines.md#forkjoin-與-repeat-邊界) 與
 [收尾 WAIT／slack](../../../../docs/adr/0083-program-macros-and-timelines.md#收尾-wait-與-slack-護欄)。
-公開方法的參數與錯誤契約另見 [builder.py](builder.py) 與 [timeline](timeline/)。
+公開方法的參數與錯誤契約另見 [builder.py](builder.py) 與 [timeline.py](timeline.py)。
 
 Register 次數不能與 Repeat counter 的 `name` 相同。省略 count hint 只略過 generator 回邊的同 channel overlap 證明。
 ADC 回邊仍須證明下一圈不早於前一視窗結尾，重疊或無法證明時 raise ValueError。
