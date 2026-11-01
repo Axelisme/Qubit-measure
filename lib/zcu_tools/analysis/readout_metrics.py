@@ -36,7 +36,7 @@ class ReadoutMetrics:
     0 and 4. On values use calibration branches 2 and 6. Each pi_miss additionally
     requires nonzero shots in its middle-pi branches (1/5 off, 3/7 on) and a
     nonzero corresponding retention. Missing branches affect only dependent
-    fields. Nonfinite required moments propagate NaN.
+    fields. NaN required moments propagate through the formulas.
     """
 
     snr: float = nan
@@ -97,6 +97,8 @@ def readout_metrics(sums: NDArray[np.float64]) -> ReadoutMetrics:
     including negative excess variance v when separation squared stays positive.
     No leakage correction or automatic parameter selection is performed.
     """
+    if sums.shape != (8, 3, 3, 3, 3):
+        raise ValueError(f"sums must have shape (8, 3, 3, 3, 3), got {sums.shape}")
     counts = sums[:, 0, 0, 0, 0]
     if counts[2] == 0 or counts[6] == 0:
         return ReadoutMetrics()
