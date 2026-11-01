@@ -37,7 +37,7 @@ Analyze produces a metric grid and an F_sep versus QND scatter plot. The grid sh
 
 - SNR, Gaussian separation fidelity F_sep and thermal population p from R1-on calibration.
 - Retention S, QND Q, upward and downward flip probabilities, and middle-pi miss fraction f, each with a solid R1-on curve and dashed R1-off curve.
-- Covariance retention from the R1-on calibration branches as a model check.
+- Covariance retention from the R1-on calibration branches as a model check. This curve and the three shared calibration curves have the legend R1 on; they do not have an R1-off estimate.
 
 All metrics are dimensionless. Analysis leaves estimates outside the physical range unclipped. Missing shots or degenerate moments give NaN for the affected metrics. The R1-off curves use the R1-on calibration because a zero-gain R1 has no state separation.
 
@@ -47,6 +47,6 @@ The scatter colors and labels each point by gain. Its red Pareto frontier retain
 
 ## Choosing and saving a gain
 
-Leave `Selected gain (a.u.)` empty to inspect plots without any writeback. Enter a finite gain within `[-1, 1]` and Analyze again to propose that human-selected value. The adapter proposes `$qubit.ext.best_ro_gain`, the resonator readout module and its readout slot through the usual captured-source writeback path. Review the proposals before applying them. The chosen value is not snapped to a sweep point.
+Leave `Selected gain (a.u.)` empty to inspect plots without any writeback. Enter a finite gain within `[-1, 1]` and Analyze again to propose that human-selected value. The adapter proposes `$qubit.ext.best_ro_gain`. When the captured best readout frequency and length are also available, it proposes the resonator DPM readout module and its readout slot through the existing writeback path. Missing cfg or calibration coordinates omit the module proposal. Review the proposals before applying them. The chosen value is not snapped to a sweep point.
 
 The GUI experiment key remains `twotone/ro_optimize/power`. Native QND files use tag `twotone/ro_optimize/power_qnd` and cfg schema `1.0`. Load rejects the old SNR-only power tag. Those files lack paired moments and cannot be converted to QND metrics. Keep them for historical analysis with the matching older software.
