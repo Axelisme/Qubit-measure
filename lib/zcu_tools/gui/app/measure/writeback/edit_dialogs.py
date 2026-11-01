@@ -378,6 +378,11 @@ class _ModuleDialog(_EditDialog):
         self._error.setObjectName("writebackEditError")
         self.foregrounds.set(self._error, error_colour)
         layout.addWidget(self._error)
+        self._add_actions(layout)
+        self.scope.connect(self._name.textChanged, self._refresh_errors)
+        self.scope.connect(editor.errors_changed, self._refresh_errors)
+
+    def _add_actions(self, layout: QVBoxLayout) -> None:
         buttons = QHBoxLayout()
         buttons.addStretch(1)
         cancel = QPushButton("Cancel")
@@ -390,8 +395,6 @@ class _ModuleDialog(_EditDialog):
         self.scope.connect(self._save_button.clicked, self._commit)
         buttons.addWidget(self._save_button)
         layout.addLayout(buttons)
-        self.scope.connect(self._name.textChanged, self._refresh_errors)
-        self.scope.connect(editor.errors_changed, self._refresh_errors)
 
     def detach(self) -> None:
         """Reject the local copy when its ledger retires."""

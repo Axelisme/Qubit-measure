@@ -8,11 +8,8 @@ from unittest.mock import MagicMock
 
 import pytest
 from qtpy.QtCore import QCoreApplication, QEvent
-from qtpy.QtGui import QAction
 from qtpy.QtWidgets import (
     QApplication,
-    QCheckBox,
-    QComboBox,
     QDialog,
     QLabel,
     QLineEdit,
@@ -30,8 +27,6 @@ from zcu_tools.gui.app.measure.writeback import ParameterWriteback, WritebackVal
 from zcu_tools.gui.app.measure.writeback.widget import WritebackWidget
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import ExpectedError
-from zcu_tools.gui.form import FormErrors
-from zcu_tools.gui.form_adapter import module_form
 from zcu_tools.gui.session.context_types import (
     CommandOrigin,
     EntryRequest,
@@ -344,12 +339,6 @@ def _module_dialog(widget: WritebackWidget) -> QDialog:
 def _input(dialog: QDialog, path: str) -> QLineEdit:
     control = dialog.findChild(QLineEdit, f"form.input.{path}")
     assert control is not None, f"missing public Form input {path}"
-    return control
-
-
-def _apply(widget: WritebackWidget) -> QPushButton:
-    control = widget.findChild(QPushButton, "writebackApply")
-    assert control is not None
     return control
 
 
