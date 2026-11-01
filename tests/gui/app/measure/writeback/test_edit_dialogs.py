@@ -305,6 +305,73 @@ def test_module_cancel_discards_content_and_name(module_editor, module_driver, f
     assert messages == []
 
 
+def test_module_save_installs_content_then_name(module_editor, module_driver):
+    _, _, item, ctrl, form, _, _ = module_editor
+    driver, ledger, evidence = module_driver
+    driver.enter_text(object_name="form.input.freq", value="6002.0")
+    driver.screenshot(evidence / "save/01-frequency.png")
+    driver.enter_text(object_name="writebackApplyAs", value="tuned")
+    driver.screenshot(evidence / "save/02-name.png")
+    assert form.spec().freq == 6001.0
+    assert item.target_name == "pulse"
+
+    def retarget(*args, **kwargs):
+        assert form.spec().freq == 6002.0
+        item.target_name = kwargs["target_name"]
+
+    ctrl.writeback_control.set_writeback_item_for_pane.side_effect = retarget
+    driver.click("Save")
+    ledger.screenshot(evidence / "save/03-saved.png")
+    assert not ledger.dialogs()
+    assert form.spec().freq == 6002.0
+    assert item.target_name == "tuned"
+
+
+@pytest.mark.parametrize("invalid", ["abc", "nan"])
+def test_module_invalid_copy_disables_save(module_editor, module_driver, invalid):
+    _, _, _, _, form, _, _ = module_editor
+    driver, _, evidence = module_driver
+    driver.enter_text(object_name="form.input.freq", value=invalid)
+    driver.screenshot(evidence / f"invalid-{invalid}/01-error.png")
+    assert not driver.observe("Save").enabled
+    assert "freq:" in driver.observe(object_name="writebackEditError").text
+    assert form.spec().freq == 6001.0
+    driver.enter_text(object_name="form.input.freq", value="6002.0")
+    driver.screenshot(evidence / f"invalid-{invalid}/02-repaired.png")
+    assert driver.observe("Save").enabled
+
+
+@pytest.mark.parametrize("refusal", ["admission", "input"])
+def test_module_install_refusal_keeps_original_draft(
+    module_editor, module_driver, monkeypatch, refusal
+):
+    from zcu_tools.gui.expected_error import FailedPreconditionError
+    from zcu_tools.gui.form import FormInputRejected
+
+    _, _, item, ctrl, form, _, _ = module_editor
+    driver, ledger, evidence = module_driver
+    driver.enter_text(object_name="form.input.freq", value="6002.0")
+    driver.screenshot(evidence / f"refusal-{refusal}/01-frequency.png")
+    driver.enter_text(object_name="writebackApplyAs", value="tuned")
+    driver.screenshot(evidence / f"refusal-{refusal}/02-name.png")
+    if refusal == "admission":
+        ctrl.writeback_control.get_writeback_item_form_for_pane.side_effect = (
+            FailedPreconditionError("Tab is busy")
+        )
+    else:
+        def reject_input(*args):
+            raise FormInputRejected("Input rejected")
+
+        monkeypatch.setattr(form.state, "install_input", reject_input)
+    driver.click("Save")
+    driver.screenshot(evidence / f"refusal-{refusal}/03-refused.png")
+    assert ledger.dialogs()
+    assert driver.observe(object_name="writebackEditError").text
+    assert form.spec().freq == 6001.0
+    assert item.target_name == "pulse"
+    ctrl.writeback_control.set_writeback_item_for_pane.assert_not_called()
+
+
 def test_missing_library_entry_counts_only_proposed_leaves():
     from zcu_tools.gui.app.measure.writeback import edit_dialogs
 
