@@ -1,229 +1,83 @@
-"""Offline probe contracts through public orchestration and in-process entry."""
+"""Native roundtrip and scaled-field comparison contracts."""
 
-import json
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any
 
-import matplotlib
 import numpy as np
 import pytest
-from matplotlib import image as mpl_image
-from matplotlib import pyplot as plt
 from numpy.typing import NDArray
 from zcu_tools.experiment import (
     AxesSpec,
     Axis,
-    Experiment,
     GroupedAxesSpec,
     VariableAxisSpec,
     VariableSpec,
     VariableZSpec,
     ZSpec,
-    native_persistence,
 )
-from zcu_tools.experiment.context import RunContext
-from zcu_tools.experiment.probe import compare_roundtrip, main, probe
+from zcu_tools.experiment.probe import compare_roundtrip, save_stage
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.experiment.simulation import white_noise
-from zcu_tools.plotting.plots import Plots
 
-from tests.experiment._probe_support import ProbeExperiment
+from tests._native_support import native_metadata
 from tests.experiment._saving_support import SavingCfg, SavingCore, SavingResult
 
 
-@pytest.fixture(autouse=True)
-def restore_rc_params():
-    with matplotlib.rc_context():
-        yield
+def test_save_accepts_single_scale_native_roundoff(tmp_path: Path):
+    spec = replace(
+        SavingCore.AXES_SPEC,
+        axes=(Axis("frequency", "coordinate", "s", scale=1e-6),),
+    )
+    record = RunRecord(
+        SavingCfg(),
+        SavingResult(
+            frequency=np.array([0.122, 0.244, 0.366]),
+            signal=np.array([1 + 2j, 3 - 4j, 5 + 6j]),
+        ),
+        native_metadata(spec.tag).model_dump(mode="json"),
+    )
+    outcome = save_stage(record, spec, tmp_path)
+    assert outcome.roundtrip_equal is True
+    assert outcome.cfg_issue is None
+    assert outcome.record.result.frequency.shape == record.result.frequency.shape
+    assert outcome.record.result.frequency.dtype == record.result.frequency.dtype
+    assert outcome.record.result.signal.shape == record.result.signal.shape
+    assert outcome.record.result.signal.dtype == record.result.signal.dtype
 
 
-def test_probe_applies_style_before_run_and_preserves_native_overrides(tmp_path: Path):
-    observed: list[float | str] = []
-
-    class StyledExperiment(ProbeExperiment):
-        def run(self, config: SavingCfg, *, context: RunContext) -> SavingResult:
-            _, axes = context.plots.subplots("style-default")
-            observed.append(axes.xaxis.label.get_fontsize())
-            axes.set_xlabel("Frequency", fontsize=23)
-            assert axes.xaxis.label.get_fontsize() == 23
-            return super().run(config, context=context)
-
-        def analyze(
-            self,
-            source: RunRecord[SavingCfg, SavingResult],
-            options: Any,
-            *,
-            plots: Plots,
-        ) -> dict[str, object]:
-            _, axes = plots.subplots("style-default")
-            observed.append(axes.xaxis.label.get_fontsize())
-            with plt.style.context({"axes.labelsize": 31}):
-                _, custom = plots.subplots("style-override")
-                assert custom.xaxis.label.get_fontsize() == 31
-            return super().analyze(source, options, plots=plots)
-
-    environment = white_noise(seed=17)
-    try:
-        with matplotlib.rc_context({"axes.labelsize": 37}):
-            report = probe(StyledExperiment(), SavingCfg(), environment, tmp_path)
-            assert report.failed_stage is None
-            assert report.exception is None
-            assert len(observed) == 2
-            assert all(size != 37 for size in observed)
-    finally:
-        environment.devices.close_all_devices()
-
-
-def test_probe_roundtrips_result_and_exports_live_and_analysis_pngs(tmp_path: Path):
-    environment = white_noise(seed=17)
-    try:
-        report = probe(ProbeExperiment(), SavingCfg(gain=2), environment, tmp_path)
-        assert report.failed_stage is None
-        assert report.exception is None
-        assert report.environment == environment.description
-        assert report.fields["frequency"].shape == (3,)
-        assert report.fields["frequency"].dtype == "float64"
-        assert report.fields["signal"].shape == (3,)
-        assert report.fields["signal"].dtype == "complex128"
-        assert report.restored_fields == report.fields
-        assert report.roundtrip_equal is True
-        assert report.analysis_summary is not None
-        assert "'gain': 2.0" in report.analysis_summary
-        assert report.native_path.is_file()
-        assert len(report.png_paths) == 2
-        assert {path.name for path in report.png_paths} == {
-            "live-signal%2Ftrace.png",
-            "analysis-fit.png",
-        }
-        assert all(
-            path.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
-            for path in report.png_paths
-        )
-        assert all(
-            report.timings[stage] >= 0
-            for stage in ("run", "save", "restore", "analyze")
-        )
-    finally:
-        environment.devices.close_all_devices()
-
-
-@pytest.mark.parametrize(
-    "live_size, analysis_size, expected_pixels",
-    [
-        ((6.4, 4.8), (6.4, 4.8), [(480, 640), (480, 640)]),
-        ((9.0, 3.0), (12.0, 5.0), [(300, 900), (500, 1200)]),
-    ],
-    ids=["default", "nondefault"],
-)
-def test_probe_exports_current_figure_sizes(
-    tmp_path: Path,
-    live_size: tuple[float, float],
-    analysis_size: tuple[float, float],
-    expected_pixels: list[tuple[int, int]],
-):
-    class SizedExperiment(ProbeExperiment):
-        def run(self, config: SavingCfg, *, context: RunContext) -> SavingResult:
-            result = super().run(config, context=context)
-            context.plots.draw(
-                "signal/trace", lambda figure: figure.set_size_inches(*live_size)
-            )
-            return result
-
-        def analyze(
-            self,
-            source: RunRecord[SavingCfg, SavingResult],
-            options: Any,
-            *,
-            plots: Plots,
-        ) -> dict[str, object]:
-            summary = super().analyze(source, options, plots=plots)
-            plots["fit"].set_size_inches(*analysis_size)
-            return summary
-
-    environment = white_noise(seed=17)
-    try:
-        report = probe(SizedExperiment(), SavingCfg(), environment, tmp_path)
-        assert report.failed_stage is None
-        assert report.exception is None
-        assert report.roundtrip_equal is True
-        assert [mpl_image.imread(path).shape[:2] for path in report.png_paths] == (
-            expected_pixels
-        )
-    finally:
-        environment.devices.close_all_devices()
-
-
-def test_probe_accepts_single_scale_native_roundoff(tmp_path: Path):
-    class ScaledExperiment(ProbeExperiment):
-        AXES_SPEC = replace(
-            SavingCore.AXES_SPEC,
-            axes=(Axis("frequency", "coordinate", "s", scale=1e-6),),
-        )
-
-        def run(self, config: SavingCfg, *, context: RunContext) -> SavingResult:
-            return SavingResult(
-                frequency=np.array([0.122, 0.244, 0.366]),
-                signal=np.array([1 + 2j, 3 - 4j, 5 + 6j]),
-            )
-
-    environment = white_noise(seed=17)
-    try:
-        report = probe(ScaledExperiment(), SavingCfg(), environment, tmp_path)
-        assert report.failed_stage is None
-        assert report.exception is None
-        assert report.restored_fields == report.fields
-        assert report.roundtrip_equal is True
-    finally:
-        environment.devices.close_all_devices()
-
-
-def test_probe_reports_grouped_scale_native_roundoff_as_equal(tmp_path: Path):
-    class GroupedScaledExperiment(Experiment[SavingResult, SavingCfg]):
-        AXES_SPEC = GroupedAxesSpec(
-            variables=(
-                VariableSpec(
-                    "response",
-                    axes=(
-                        VariableAxisSpec("coordinate", "s", "frequency", scale=1e-6),
-                    ),
-                    z=VariableZSpec("signal", "signal", "V", dtype=np.complex128),
+def test_save_reports_grouped_scale_native_roundoff_as_equal(tmp_path: Path):
+    spec = GroupedAxesSpec(
+        variables=(
+            VariableSpec(
+                "response",
+                axes=(
+                    VariableAxisSpec("coordinate", "s", "frequency", scale=1e-6),
                 ),
+                z=VariableZSpec("signal", "signal", "V", dtype=np.complex128),
             ),
-            result_type=SavingResult,
-            cfg_type=SavingCfg,
-            tag="test/grouped_probe",
-            result_builder=lambda data: SavingResult(
-                frequency=data.variable("response").axes[0],
-                signal=data.variable("response").z,
-            ),
-        )
-
-        def run(self, config: SavingCfg, *, context: RunContext) -> SavingResult:
-            return SavingResult(
-                frequency=np.array([0.122, 0.244, 0.366]),
-                signal=np.array([1 + 2j, 3 - 4j, 5 + 6j]),
-            )
-
-        def analyze(
-            self,
-            source: RunRecord[SavingCfg, SavingResult],
-            options: Any,
-            *,
-            plots: Plots,
-        ) -> float:
-            return float(source.result.frequency[-1])
-
-    environment = white_noise(seed=17)
-    try:
-        report = probe(GroupedScaledExperiment(), SavingCfg(), environment, tmp_path)
-        assert report.failed_stage is None
-        assert report.exception is None
-        assert report.restored_fields == report.fields
-        assert report.roundtrip_equal is True
-        assert report.analysis_summary is not None
-    finally:
-        environment.devices.close_all_devices()
+        ),
+        result_type=SavingResult,
+        cfg_type=SavingCfg,
+        tag="test/grouped_probe",
+        result_builder=lambda data: SavingResult(
+            frequency=data.variable("response").axes[0],
+            signal=data.variable("response").z,
+        ),
+    )
+    record = RunRecord(
+        SavingCfg(),
+        SavingResult(
+            frequency=np.array([0.122, 0.244, 0.366]),
+            signal=np.array([1 + 2j, 3 - 4j, 5 + 6j]),
+        ),
+        native_metadata(spec.tag).model_dump(mode="json"),
+    )
+    outcome = save_stage(record, spec, tmp_path)
+    assert outcome.roundtrip_equal is True
+    assert outcome.cfg_issue is None
+    assert outcome.record.result.frequency.shape == record.result.frequency.shape
+    assert outcome.record.result.frequency.dtype == record.result.frequency.dtype
+    assert outcome.record.result.signal.shape == record.result.signal.shape
+    assert outcome.record.result.signal.dtype == record.result.signal.dtype
 
 
 @dataclass
@@ -531,117 +385,3 @@ def test_complex_infinity_does_not_hide_finite_component_changes(
     original = replace(comparison_result, signal=np.array([complex(np.inf, 1)]))
     restored = replace(original, signal=np.array([signal]))
     assert compare_roundtrip(original, restored, spec=comparison_spec) is expected
-
-
-@pytest.mark.parametrize("fail_analysis", [False, True], ids=["success", "failure"])
-def test_probe_isolates_nested_caller_options_even_when_analysis_fails(
-    tmp_path: Path, fail_analysis: bool
-):
-    error = RuntimeError("analysis failed after mutating options")
-
-    class MutatingExperiment(ProbeExperiment):
-        def analyze(
-            self,
-            source: RunRecord[SavingCfg, SavingResult],
-            options: Any,
-            *,
-            plots: Plots,
-        ) -> dict[str, object]:
-            options["window"]["samples"].append(7)
-            if fail_analysis:
-                raise error
-            return {"sample_count": len(options["window"]["samples"])}
-
-    options = {"window": {"samples": [2, 4]}}
-    environment = white_noise(seed=17)
-    try:
-        report = probe(
-            MutatingExperiment(), SavingCfg(), environment, tmp_path, options=options
-        )
-        if fail_analysis:
-            assert report.failed_stage == "analyze"
-            assert report.exception is error
-            assert report.analysis_summary is None
-        else:
-            assert report.failed_stage is None
-            assert report.exception is None
-            assert report.analysis_summary == "{'sample_count': 3}"
-        assert options == {"window": {"samples": [2, 4]}}
-    finally:
-        environment.devices.close_all_devices()
-
-
-@pytest.mark.parametrize("cfg_format", ["json", "yaml"])
-def test_main_validates_cfg_and_produces_probe_report_in_process(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str], cfg_format: str
-):
-    cfg = tmp_path / f"cfg.{cfg_format}"
-    cfg.write_text('{"gain": 3}' if cfg_format == "json" else "gain: 3\n")
-    options = tmp_path / "options.json"
-    options.write_text('{"window": 7}')
-    report = main(
-        [
-            "tests.experiment._probe_support:ProbeExperiment",
-            "--cfg",
-            str(cfg),
-            "--environment",
-            "white_noise",
-            "--seed",
-            "17",
-            "--output-dir",
-            str(tmp_path / "output"),
-            "--options",
-            str(options),
-        ]
-    )
-    assert report.failed_stage is None
-    assert report.roundtrip_equal is True
-    assert report.fields["signal"].shape == (3,)
-    assert report.analysis_summary is not None
-    assert "'gain': 3.0" in report.analysis_summary
-    assert "'window': 7" in report.analysis_summary
-    assert len(report.png_paths) == 2
-    output = json.loads(capsys.readouterr().out)
-    assert output["fields"]["signal"]["shape"] == [3]
-    assert output["exception"] is None
-
-
-@pytest.mark.parametrize("stage", ["run", "save", "restore", "analyze"])
-def test_probe_reports_failed_stage_and_retains_original_exception(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stage: str
-):
-    error = RuntimeError(f"injected {stage} failure")
-
-    class FailingExperiment(ProbeExperiment):
-        def run(self, config: SavingCfg, *, context: RunContext) -> SavingResult:
-            if stage == "run":
-                raise error
-            return super().run(config, context=context)
-
-        def analyze(
-            self,
-            source: RunRecord[SavingCfg, SavingResult],
-            options: Any,
-            *,
-            plots: Plots,
-        ) -> dict[str, object]:
-            if stage == "analyze":
-                raise error
-            return super().analyze(source, options, plots=plots)
-
-    def fail(*_args: object, **_kwargs: object) -> Any:
-        raise error
-
-    if stage in ("save", "restore"):
-        monkeypatch.setattr(native_persistence, f"{stage}_run", fail)
-    environment = white_noise(seed=17)
-    try:
-        report = probe(FailingExperiment(), SavingCfg(), environment, tmp_path)
-        assert report.failed_stage == stage
-        assert report.exception is error
-        assert report.timings[stage] >= 0
-        assert report.analysis_summary is None
-        if stage != "run":
-            assert any(path.name.startswith("live-") for path in report.png_paths)
-    finally:
-        environment.devices.close_all_devices()

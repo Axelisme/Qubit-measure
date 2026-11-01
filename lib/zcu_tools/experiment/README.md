@@ -1,6 +1,6 @@
 # `zcu_tools.experiment` — 實驗層
 
-**Last updated:** 2026-11-01（operation 能力與 core helper）
+**Last updated:** 2026-11-01，獨立離線驗收階段與模型產生器
 
 **讀者：** framework-dev。實驗介面、Run 資料、持久化映射與裝置操作邊界。
 
@@ -114,24 +114,43 @@ decimated outputs.
 
 ## Offline experiment probe
 
-`probe.probe(experiment, cfg, environment, output_dir, *, options=None)` 用 caller
-建立的 `SimulationEnvironment` 執行公開 run、native save、restore 與 analyze。
-每次建立新的 Scope 與 headless Plots，以 Agg canvas 保存 live／analysis PNG，不建立 Qt application。
-建立 Plots 前以 `matplotlib.style.use` 套用[共用樣式](../plotting/README.md#預設外觀)，
-不切換 backend 或登記 pyplot figure。實驗內的原生 Matplotlib 參數與 `style.context` 可覆寫外觀。
-Caller 仍負責環境的 backend 與 devices 清理，probe 不更改 seed 或接線。
-`ProbeReport` 保留 Result 欄位的 shape／dtype、讀回比較、分析摘要、PNG 路徑與階段秒數。
+`probe` 是 Python 工具庫。Caller 在 task scratch 寫 Python 檔，用實驗自己的 Cfg／Result
+型別組物件，先過 Pyright 與 Ruff，再依需要呼叫以下階段。
+操作與看圖驗收見 [tests](../../../tests/README.md#實驗定義)，
+腳本片段與命令見 [lab 驗收說明](../../../zcu_lab/README.md#實驗定義的離線驗收)。
+
+| API | 輸入與效果 | 回傳 |
+| --- | --- | --- |
+| `probe.run_stage(experiment, cfg, environment)` | 借用 caller 的 SimulationEnvironment 執行公開 run，驗 Result shape／dtype 與 AXES_SPEC，更新 live 圖。不存檔或分析。 | RunStageResult 的 record、elapsed_seconds 與 pngs。 |
+| `probe.save_stage(record, spec, directory)` | 寫 directory/data.h5，再 native restore 並逐欄比較。不執行 run 或 analyze。 | SaveStageResult 的還原 record、native_path、roundtrip_equal 與 cfg_issue。 |
+| `probe.analysis_stage(experiment, record, options)` | 對明確來源呼叫公開 analyze。不執行 run 或存檔。 | AnalysisStageResult 的 analysis 與 pngs，analysis 保留實際回傳物件。 |
+
+Save 與 analysis 可直接接 caller 構造的 RunRecord，無須先呼叫 run。
+分析 options 沿用 experiment.analyze 的簽名，caller 明填。各階段傳出原始例外。
+Save 比較不符時回 `roundtrip_equal=False`；I/O 或 restore 失敗仍拋錯。
+`cfg_issue` 是 native restore 的 cfg 診斷，cfg 無法還原時 record.cfg 為 None。
+
+Run 與 analysis 的 `pngs` 是 `dict[str, bytes]`，階段不寫圖片或建立暫存目錄。
+Key 是 `live-`／`analysis-` 加 URL-escaped 圖名與 `.png`。
+兩者使用 Agg canvas、NonPresentingHost、figure 目前尺寸與 100 dpi。
+Caller 自行保存 bytes 並逐張看圖。建立 Plots 前套用[共用樣式](../plotting/README.md#預設外觀)，
+實驗的原生 Matplotlib 參數與 style context 可覆寫外觀。
+Caller 負責環境 backend 與 devices 的清理，階段不更改 seed 或接線。
+
+`probe.generators` 提供 decay、decay fringe、rabi、Lorentzian、resonator、qubit frequency、
+singleshot GE、singleshot rabi、anticrossing 與 multi decay 陣列產生器。
+各函式重用 fitting owner 的公共模型，座標、真值參數、雜訊與 seed 由 caller 明填，沒有預設值。
+用實驗自己的 Result 型別包裝陣列，再組 RunRecord 交給 save 或 analysis。
+GE 與 singleshot rabi 回 raw complex IQ，不回 histogram。
+Anticrossing 回兩支曲線，multi decay 回 g／e／o population；形狀、係數與 rate 定義見各函式 docstring。
+工具與框架測試不 import `zcu_lab`，測試用最小合成實驗。
+
 `probe.compare_roundtrip(original, restored, *, spec)` 也可比較 caller 已還原的 Result。
 Shape 與 dtype 必須相同。AxesSpec 與 GroupedAxesSpec 各組宣告中，scale≠1 且比例有限非零的浮點 Result 欄位，容許每個實數／虛數分量相對誤差 ≤2·eps，absolute tolerance 為0。
 eps 取實際實數分量 dtype 的 machine epsilon，不隨 scale 大小改變。此上界涵蓋以同一 scale 各乘、除一次的正常有限值捨入，不放寬 underflow 或 overflow。
 固定或自動產生的軸沒有 Result 欄位，不加入縮放欄位映射。
 NaN 分量位置與 infinity 符號必須相同，其他欄位及整數陣列保持 exact 比較。
 同一 Result 欄位在分組宣告使用不同 scale 時，compare_roundtrip 拋出 ValueError，訊息列出欄位與各 scale。
-階段失敗時回傳原始 exception 與 failed_stage，並記錄 traceback；成功前已產生的檔案保留。
-
-`probe.main(argv)` 載入 caller 指定的可信任 `module:class`，依 AXES_SPEC 的 cfg 型別驗證 YAML／JSON，
-建立並清理 white_noise 或 single_fluxonium 環境。它印出 JSON 並回傳同型報告。
-`python -m zcu_tools.experiment.probe --help` 列出參數；module shell 以 exit status 區分成功與階段失敗。
 
 ## 實驗介面與資料
 

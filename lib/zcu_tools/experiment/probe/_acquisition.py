@@ -1,4 +1,4 @@
-"""Shared acquisition boundary for the independent and legacy offline probes."""
+"""Acquisition boundary for the independent offline run stage."""
 
 from datetime import datetime, timezone
 from typing import TypeVar

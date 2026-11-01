@@ -2,7 +2,7 @@
 
 **讀者：** lab-author、framework-dev、agent。撰寫實驗 core，查閱 records、資料形狀、執行與保存慣例。
 
-**Last updated:** 2026-10-31
+**Last updated:** 2026-11-01
 
 使用者入口見 [tutorial](../tutorial/README.md)。
 
@@ -380,6 +380,12 @@ NonPresenting host 直接執行且不開視窗。
 
 框架 owner 用測試自己定義的最小合成 workflow／adapter 驗證公開 seam 與對外契約，不 import `zcu_lab`。刪掉 `zcu_lab/` 後整套 pytest 仍須通過，包含 slow。實驗共用 helper 留在本套件，不因可抽成 helper 就新增 pytest；框架共用機制依責任放在 lib，由該 owner 的合成材料測試驗證。
 
+實驗定義改動依 [離線驗收說明](../README.md#實驗定義的離線驗收)，在 task scratch 寫 Python probe 檔。
+用實驗自己的 Cfg／Result 型別建立物件，先過 Pyright 與 Ruff，再按需要分別呼叫
+`run_stage`、`save_stage`、`analysis_stage`。不用 Form 自動組 cfg，不增加一次跑完的 wrapper。
+Run 與 analysis 回 PNG bytes，由腳本保存，agent 逐張看圖並記錄判讀。
+Save 寫 `directory/data.h5`，回傳還原 record、比較結果與 cfg 診斷。
+分析可直接使用已知模型產生器填入 Result 的 RunRecord，不要求先執行實驗。
 案例歸屬、fixture 與搬遷規則見 [tests README](../../tests/README.md)。
 
 ---
