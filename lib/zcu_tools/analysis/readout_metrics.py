@@ -72,7 +72,7 @@ def _transition_metrics(
         (1 + retention) / 2,
         (1 - retention + asymmetry) / 2,
         (1 - retention - asymmetry) / 2,
-        (retention + middle_retention) / (2 * retention),
+        (retention + middle_retention) / (2 * retention) if retention != 0 else nan,
     )
 
 
@@ -98,6 +98,9 @@ def readout_metrics(sums: NDArray[np.float64]) -> ReadoutMetrics:
     No leakage correction or automatic parameter selection is performed.
     """
     counts = sums[:, 0, 0, 0, 0]
+    if counts[2] == 0 or counts[6] == 0:
+        return ReadoutMetrics()
+    counts = np.where(counts == 0, np.nan, counts)
     first = sums[:, 1:, 0, 0, 0] / counts[:, None]
     second = sums[:, 0, 0, 1:, 0] / counts[:, None]
     covariance = sums[:, 1:, 1:, 0, 0] / counts[:, None, None]
@@ -106,12 +109,17 @@ def readout_metrics(sums: NDArray[np.float64]) -> ReadoutMetrics:
 
     difference = first[6] - first[2]
     contrast = float(np.linalg.norm(difference))
+    if not contrast > 0:
+        return ReadoutMetrics()
     direction = difference / contrast
     perpendicular = np.array([-direction[1], direction[0]])
     noise_variance = float(perpendicular @ shared_covariance @ perpendicular)
     excess_variance = float(direction @ shared_covariance @ direction) - noise_variance
-    separation = sqrt(contrast**2 + 4 * excess_variance)
-    snr = separation / sqrt(noise_variance)
+    separation_squared = contrast**2 + 4 * excess_variance
+    if not separation_squared > 0:
+        return ReadoutMetrics()
+    separation = sqrt(separation_squared)
+    snr = separation / sqrt(noise_variance) if noise_variance > 0 else nan
     population = (1 - contrast / separation) / 2
     ground = float(first[2] @ direction) - separation * population
 
@@ -135,5 +143,7 @@ def readout_metrics(sums: NDArray[np.float64]) -> ReadoutMetrics:
         flip_down_off=off[3],
         pi_miss_on=on[4],
         pi_miss_off=off[4],
-        retention_from_covariance=projected_cross / excess_variance,
+        retention_from_covariance=(
+            projected_cross / excess_variance if excess_variance != 0 else nan
+        ),
     )
