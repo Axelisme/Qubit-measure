@@ -239,9 +239,12 @@ class TestReadoutIntegration:
     @pytest.mark.parametrize("runtime", [False, True])
     def test_same_named_readouts_keep_program_owned_templates(self, runtime):
         cfg = _readout_cfg()
+
         def readout_module(gain):
             return PulseReadout(
-                "r1", cfg, gain=gain,
+                "r1",
+                cfg,
+                gain=gain,
                 gain_val="gain_word" if runtime else None,
                 ro_freq_val="ro_freq_word" if runtime else None,
             )

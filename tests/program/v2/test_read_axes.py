@@ -2,6 +2,7 @@
 
 import numpy as np
 import pytest
+from qick.asm_v2 import QickSweep1D
 from zcu_tools.cfg_model import Centroid3Classifier, CircleClassifier, LinearClassifier
 from zcu_tools.program import v2
 from zcu_tools.program.v2.modules import ConstWaveformCfg, Pulse, PulseReadout
@@ -118,10 +119,13 @@ def test_classified_sums_keep_boundary_rules_and_detached_cfg(
     np.testing.assert_array_equal(iq, original)
 
 
-def test_branch_cases_share_read_labels_with_zero_gain_first_read():
+@pytest.mark.parametrize("swept", [False, True])
+def test_branch_cases_share_read_labels_with_zero_gain_first_read(swept):
     r1_on = readout("r1")
+    if swept:
+        r1_on = PulseReadout("r1", r1_on.cfg, gain=QickSweep1D("gain", 0.1, 0.2))
     r1_off = PulseReadout("r1", r1_on.cfg, gain=0.0)
-    r2 = readout("r2")
+    r2 = PulseReadout("r2", r1_on.cfg)
     drive = Pulse(
         "drive",
         Pulse.Cfg(
@@ -133,6 +137,8 @@ def test_branch_cases_share_read_labels_with_zero_gain_first_read():
         ),
     )
     builder = v2.TimelineBuilder(v2.make_mock_soccfg(), reps=2)
+    if swept:
+        builder.add_loop("gain", 2)
     builder.add_loop("branch", 8)
     with builder.branch(by="branch", align_timeline=True) as cases:
         for index in range(8):
@@ -147,9 +153,10 @@ def test_branch_cases_share_read_labels_with_zero_gain_first_read():
     prog = builder.build()
     prog.set_reads_per_shot(2)
     process = v2.shot_sums(prog, [v2.IQ("r1"), v2.IQ("r1"), v2.IQ("r2"), v2.IQ("r2")])
-    iq = np.tile(np.array([[[[2.0, 3.0], [5.0, 7.0]]]]), (8, 2, 1, 1))
+    points = 16 if swept else 8
+    iq = np.tile(np.array([[[[2.0, 3.0], [5.0, 7.0]]]]), (points, 2, 1, 1))
     result = process({0: iq})
-    assert result.shape == (8, 3, 3, 3, 3)
+    assert result.shape == (points, 3, 3, 3, 3)
     np.testing.assert_array_equal(result[:, 0, 0, 0, 0], 2)
     np.testing.assert_array_equal(result[:, 1, 1, 0, 0], 8)
     np.testing.assert_array_equal(result[:, 0, 0, 2, 2], 98)
@@ -163,8 +170,9 @@ def test_branch_cases_share_read_labels_with_zero_gain_first_read():
         for shot in shots(prog)
     ]
     assert all(len(times) == 2 for times in starts)
-    for off in (0, 1, 4, 5):
-        assert starts[off] == starts[off + 2]
+    for group in range(points // 8):
+        for off in (0, 1, 4, 5):
+            assert starts[8 * group + off] == starts[8 * group + off + 2]
     assert prog.ro_chs[0]["trigs"] == 2
 
 
