@@ -133,7 +133,9 @@ NaN 分量位置與 infinity 符號必須相同，其他欄位及整數陣列保
 階段失敗時回傳原始 exception 與 failed_stage，並記錄 traceback；成功前已產生的檔案保留。
 
 `probe.main(argv)` 載入 caller 指定的可信任 `module:class`，依 AXES_SPEC 的 cfg 型別驗證 YAML／JSON，
-建立並清理 white_noise 或 single_fluxonium 環境。它印出 JSON 並回傳同型報告。
+建立並清理 white_noise 或 single_fluxonium 環境。兩者必填獨立板子 `--profile`；
+white_noise 另必填 `--std-adc`、`--seed`，接線固定為每個 generator 配每個 ADC。
+它印出 JSON 並回傳同型報告。
 `python -m zcu_tools.experiment.probe --help` 列出參數；module shell 以 exit status 區分成功與階段失敗。
 
 ## 實驗介面與資料

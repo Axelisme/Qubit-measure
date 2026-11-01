@@ -23,6 +23,7 @@ from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.datafile import load
 from zcu_tools.plotting import DEFAULT_STYLE
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
+from zcu_tools.program import build_soccfg
 from zcu_tools.resources.yaml import load_yaml
 
 from . import native_persistence
@@ -332,14 +333,6 @@ def probe(
     return report
 
 
-def _route(value: str) -> tuple[int, int]:
-    try:
-        gen, adc = value.split(":")
-        return int(gen), int(adc)
-    except ValueError as error:
-        raise argparse.ArgumentTypeError("route must be GEN:ADC integers") from error
-
-
 def _json_default(value: Any) -> Any:
     if is_dataclass(value) and not isinstance(value, type):
         return {item.name: getattr(value, item.name) for item in fields(value)}
@@ -354,13 +347,14 @@ def main(argv: Sequence[str] | None = None) -> ProbeReport:
     """Probe a trusted module:class and print its report as JSON to stdout.
 
     The class must be a zero-argument Experiment with AXES_SPEC. Required flags:
-    --cfg YAML_OR_JSON, --environment white_noise|single_fluxonium and
-    --output-dir DIRECTORY. --options YAML_OR_JSON is validated by the class's
+    --cfg YAML_OR_JSON, --environment white_noise|single_fluxonium,
+    --profile BOARD_YAML and --output-dir DIRECTORY. --options YAML_OR_JSON is validated by the class's
     Options type when declared, otherwise passed as decoded data. Omitted options
     construct Options() when declared, otherwise pass None.
 
-    White-noise flags are --std-adc, --seed, --n-gens, --n-readouts and repeatable
-    --route GEN:ADC. Single-fluxonium requires --environment-config YAML.
+    White noise requires --std-adc and --seed and wires every generator to every
+    ADC. Single-fluxonium requires --environment-config YAML. The caller's board
+    profile is separate from physical model settings in either environment.
     This entry owns and closes its created environment, but creates no GUI.
     Return the same ProbeReport as probe, including stage failures. Argparse
     errors raise SystemExit; import, cfg/options validation and environment
@@ -375,12 +369,12 @@ def main(argv: Sequence[str] | None = None) -> ProbeReport:
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--options", type=Path)
     parser.add_argument("--environment-config", type=Path)
-    parser.add_argument("--std-adc", type=float, default=1.0)
+    parser.add_argument("--profile", type=Path, required=True)
+    parser.add_argument("--std-adc", type=float)
     parser.add_argument("--seed", type=int)
-    parser.add_argument("--n-gens", type=int, default=2)
-    parser.add_argument("--n-readouts", type=int, default=1)
-    parser.add_argument("--route", type=_route, action="append")
     args = parser.parse_args(argv)
+    if args.environment == "white_noise" and (args.std_adc is None or args.seed is None):
+        parser.error("white_noise requires --std-adc and --seed")
     if args.environment == "single_fluxonium" and args.environment_config is None:
         parser.error("single_fluxonium requires --environment-config")
     module, separator, name = args.experiment.partition(":")
@@ -406,16 +400,12 @@ def main(argv: Sequence[str] | None = None) -> ProbeReport:
         )
     else:
         options = None if options_type is None else options_type()
+    profile = TypeAdapter(dict[str, object]).validate_python(load_yaml(args.profile))
+    soccfg = build_soccfg(profile)
     environment = (
-        white_noise(
-            std_adc=args.std_adc,
-            seed=args.seed,
-            n_gens=args.n_gens,
-            n_readouts=args.n_readouts,
-            routes=None if args.route is None else tuple(args.route),
-        )
+        white_noise(soccfg, std_adc=args.std_adc, seed=args.seed, routes="all")
         if args.environment == "white_noise"
-        else single_fluxonium(args.environment_config)
+        else single_fluxonium(args.environment_config, soccfg=soccfg)
     )
     try:
         report = probe(experiment, cfg, environment, args.output_dir, options=options)

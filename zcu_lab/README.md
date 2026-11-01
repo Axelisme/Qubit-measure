@@ -110,7 +110,8 @@ Predictor 使用 entry 的 `predictors/*.json` 或手動參數，不從實驗室
 先將 `<task-id>` 換成既有任務名稱，並在該任務的 scratch 準備 `cfg.yaml`。
 此例選用 `FreqExp`，cfg 必須是它的完整 core Cfg，不是 GUI Form 輸入或尚未解析的 library 引用。
 改測其他實驗時，替換可信任的 `module:class`，該類別須可無參數建立且提供 `AXES_SPEC`。
-依 cfg 實際 generator／ADC 通道調整 `--n-gens`、`--n-readouts` 與每條 `--route GEN:ADC`，不要照抄接線。
+用 `--profile` 指定獨立板子 YAML，依 cfg 實際 generator／ADC 通道調整其 channel 數與型別。
+White noise 必填 `--std-adc`、`--seed`，接線固定為每個 generator 配每個 ADC。
 
 ```bash
 repo="$(git rev-parse --show-toplevel)"
@@ -125,7 +126,7 @@ env -u QT_QPA_PLATFORMTHEME QT_QPA_PLATFORM=offscreen MPLBACKEND=Agg \
   zcu_lab.v2.onetone.freq.core:FreqExp \
   --cfg "$scratch/cfg.yaml" \
   --environment white_noise --std-adc 1.0 --seed 7 \
-  --n-gens 2 --n-readouts 1 --route 0:0 \
+  --profile "$repo/zcu_lab/simulation_envs/white_noise/profile.yaml" \
   --output-dir "$scratch/output" \
   > "$scratch/report.json" 2> "$scratch/probe.log"
 status=$?
@@ -134,7 +135,7 @@ printf '%s\n' "$status" > "$scratch/exit-status.txt"
 
 `--cfg` 接受 YAML 或 JSON，入口依實驗的 cfg 型別驗證。要指定分析選項時，加入 `--options "$scratch/options.yaml"`，也可使用 JSON。
 入口依類別宣告的 `Options` 型別驗證選項，未宣告時傳入解碼資料。省略選項時，有 `Options` 就建立 `Options()`，否則傳 `None`。
-需要物理模擬時，把 white-noise 的環境與接線參數換成 `--environment single_fluxonium --environment-config "$scratch/environment.yaml"`。
+需要物理模擬時，把 white-noise 參數換成 `--environment single_fluxonium --environment-config "$scratch/environment.yaml"`，並以 `--profile` 指定相符的板子 YAML。
 設定檔格式見 [single_fluxonium](../lib/zcu_tools/experiment/single_fluxonium/README.md)。
 
 入口不建立 GUI，會自行關閉它建立的環境。改用 Python 的 `probe()` 時，由 caller 在 `finally` 清理 backend 與 devices，包含失敗路徑。
