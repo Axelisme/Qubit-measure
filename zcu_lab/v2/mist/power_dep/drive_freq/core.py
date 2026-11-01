@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Annotated, ClassVar
 
 import numpy as np
+from matplotlib.ticker import ScalarFormatter
 from numpy.typing import NDArray
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment, config
@@ -113,6 +114,10 @@ class DriveFreqExp(Experiment[DriveFreqResult, DriveFreqCfg]):
 
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Pulse frequency (MHz)", ylabel="Pulse gain (a.u.)")
+        formatter = ScalarFormatter(useMathText=True)
+        formatter.set_powerlimits((-2, 2))
+        ax.xaxis.set_major_formatter(formatter)
+        ax.yaxis.set_major_formatter(formatter)
         viewer = live_heatmap(ax)
 
         @context.plots.on_plot_thread

@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Annotated, ClassVar
 
 import numpy as np
+from matplotlib.ticker import ScalarFormatter
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter1d
 from zcu_tools.analysis.fitting import fit_decay
@@ -106,6 +107,10 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
         # Keep the relaxation traces grouped by flux gain.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Flux Pulse Gain (a.u.)", ylabel="Time (us)")
+        formatter = ScalarFormatter(useMathText=True)
+        formatter.set_powerlimits((-2, 2))
+        ax.xaxis.set_major_formatter(formatter)
+        ax.yaxis.set_major_formatter(formatter)
         viewer = live_heatmap(ax)
 
         @context.plots.on_plot_thread

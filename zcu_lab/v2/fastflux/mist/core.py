@@ -5,6 +5,7 @@ from typing import Annotated, ClassVar
 
 import numpy as np
 from matplotlib.image import NonUniformImage
+from matplotlib.ticker import ScalarFormatter
 from numpy.typing import NDArray
 from pydantic.dataclasses import dataclass as pydantic_dataclass
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
@@ -117,6 +118,10 @@ class MistExp(Experiment[MistResult, MistCfg]):
         # Display the averaged response without classifying individual shots.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Flux Pulse Gain (a.u.)", ylabel="Mist Pulse Gain (a.u.)")
+        formatter = ScalarFormatter(useMathText=True)
+        formatter.set_powerlimits((-2, 2))
+        ax.xaxis.set_major_formatter(formatter)
+        ax.yaxis.set_major_formatter(formatter)
         viewer = live_heatmap(ax)
 
         @context.plots.on_plot_thread

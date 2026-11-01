@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Annotated, ClassVar
 
 import numpy as np
+from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field
 from pydantic.dataclasses import dataclass as pydantic_dataclass
@@ -113,6 +114,8 @@ class PowerDepExp(Experiment[PowerDepResult, PowerDepCfg]):
 
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Pulse gain", ylabel="MIST")
+        ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+        ax.grid(False)
         viewer = live_line(ax)
 
         @context.plots.on_plot_thread

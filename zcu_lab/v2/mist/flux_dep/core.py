@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Annotated, ClassVar, Literal, Self
 
 import numpy as np
+from matplotlib.ticker import MaxNLocator, ScalarFormatter
 from numpy.typing import NDArray
 from pydantic import model_validator
 from pydantic.dataclasses import dataclass as pydantic_dataclass
@@ -152,11 +153,18 @@ class FluxDepExp(Experiment[FluxDepResult, FluxDepCfg]):
             title="MIST over FLux",
         )
         line_ax.set(xlabel="Readout power (a.u.)", title="MIST over FLux")
+        formatter = ScalarFormatter(useMathText=True)
+        formatter.set_powerlimits((-2, 2))
+        heat_ax.xaxis.set_major_formatter(formatter)
+        heat_ax.yaxis.set_major_formatter(formatter)
+        line_ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+        line_ax.grid(False)
         heatmap = live_heatmap(heat_ax)
         lines = live_line(line_ax, num_lines=5)
         for artist in line_ax.lines[:-1]:
             artist.set(marker="None", alpha=0.3, color="red")
-        line_ax.lines[-1].set(label="current line", marker=".", color="C0")
+        line_ax.lines[-1].set(label="current line", marker=".", alpha=1.0, color="C0")
+        line_ax.legend()
 
         @context.plots.on_plot_thread
         def update(data):
