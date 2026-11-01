@@ -99,25 +99,37 @@ def drive_ratios(
     decay = coherence_decay(model)
     one = np.zeros(len(params))
     two = np.zeros(len(params))
-    for i in range(len(energies)):
-        for j in range(i + 1, len(energies)):
-            gap = energies[j] - energies[i]
-            gamma = decay[i, j]
-            width2 = gamma**2 + inverse_time**2
-            strength = 2 * gain * max(abs(plus[i, j]), abs(minus[i, j]))
-            one = np.maximum(one, strength / np.sqrt((frequency - gap) ** 2 + width2))
-            amplitude = np.zeros(len(params))
-            for k in range(len(energies)):
-                amplitude += (
-                    gain**2
-                    * max(abs(plus[i, k] * plus[k, j]), abs(minus[i, k] * minus[k, j]))
-                    / np.maximum(
-                        abs(energies[k] - energies[i] - frequency), inverse_time
-                    )
-                )
-            two = np.maximum(
-                two, amplitude / np.sqrt((2 * frequency - gap) ** 2 + width2)
-            )
+    i, j = np.triu_indices(len(energies), 1)
+    gap = (energies[j] - energies[i])[:, None]
+    width2 = decay[i, j, None] ** 2 + inverse_time**2
+    # Scalar complex products/abs retain rounding that vector ufuncs can change.
+    strengths = np.fromiter(
+        (max(abs(a), abs(b)) for a, b in zip(plus[i, j], minus[i, j], strict=True)),
+        dtype=np.float64,
+        count=len(i),
+    )
+    strength = 2 * gain * strengths[:, None]
+    one_ratios = strength / np.sqrt((frequency - gap) ** 2 + width2)
+    amplitude = np.zeros((len(i), len(params)))
+    for k in range(len(energies)):
+        paths = np.fromiter(
+            (
+                max(abs(plus[a, k] * plus[k, b]), abs(minus[a, k] * minus[k, b]))
+                for a, b in zip(i, j, strict=True)
+            ),
+            dtype=np.float64,
+            count=len(i),
+        )
+        amplitude += (
+            gain**2
+            * paths[:, None]
+            / np.maximum(abs(energies[k] - energies[i, None] - frequency), inverse_time)
+        )
+    two_ratios = amplitude / np.sqrt((2 * frequency - gap) ** 2 + width2)
+    # triu_indices follows the original i/j order; keep each maximum in order.
+    for one_ratio, two_ratio in zip(one_ratios, two_ratios, strict=True):
+        one = np.maximum(one, one_ratio)
+        two = np.maximum(two, two_ratio)
     return one, two
 
 
