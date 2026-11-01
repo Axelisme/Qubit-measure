@@ -524,3 +524,65 @@ def test_complex_infinity_does_not_hide_finite_component_changes(
     original = replace(comparison_result, signal=np.array([complex(np.inf, 1)]))
     restored = replace(original, signal=np.array([signal]))
     assert compare_roundtrip(original, restored, spec=comparison_spec) is expected
+
+
+@dataclass
+class _RunOnlyScalarResult:
+    """Coordinate and signal arrays plus a scalar estimate only run produces."""
+
+    coordinate: NDArray[np.float64]
+    estimate: float | None
+    signal: NDArray[np.complex128]
+
+
+@pytest.fixture
+def run_only_scalar_spec() -> AxesSpec[_RunOnlyScalarResult, SavingCfg]:
+    return AxesSpec(
+        axes=(Axis("coordinate", "coordinate", "s"),),
+        z=ZSpec("signal", "signal", "V"),
+        result_type=_RunOnlyScalarResult,
+        cfg_type=SavingCfg,
+        tag="test/run_only_scalar",
+    )
+
+
+def test_scalar_field_restored_as_none_reports_dtype_and_keeps_comparing(
+    run_only_scalar_spec: AxesSpec[_RunOnlyScalarResult, SavingCfg],
+    caplog: pytest.LogCaptureFixture,
+):
+    original = _RunOnlyScalarResult(
+        coordinate=np.array([1.0, 2.0]),
+        estimate=0.5,
+        signal=np.array([1 + 2j, 3 - 4j]),
+    )
+    restored = replace(original, estimate=None, signal=np.array([1 + 2j, 5 - 4j]))
+    assert compare_roundtrip(original, restored, spec=run_only_scalar_spec) is False
+    warnings = [
+        record.message
+        for record in caplog.records
+        if record.name == "zcu_tools.experiment.probe" and record.levelname == "WARNING"
+    ]
+    assert len(warnings) == 2
+    estimate_warning, signal_warning = warnings
+    assert "field=estimate" in estimate_warning
+    assert "dtype float64 != object" in estimate_warning
+    assert "field=signal" in signal_warning
+    assert "value" in signal_warning.lower()
+
+
+def test_scalar_field_none_on_both_sides_is_equal(
+    run_only_scalar_spec: AxesSpec[_RunOnlyScalarResult, SavingCfg],
+    caplog: pytest.LogCaptureFixture,
+):
+    original = _RunOnlyScalarResult(
+        coordinate=np.array([1.0, 2.0]),
+        estimate=None,
+        signal=np.array([1 + 2j, 3 - 4j]),
+    )
+    restored = replace(original, signal=original.signal.copy())
+    assert compare_roundtrip(original, restored, spec=run_only_scalar_spec) is True
+    assert not [
+        record
+        for record in caplog.records
+        if record.name == "zcu_tools.experiment.probe"
+    ]
