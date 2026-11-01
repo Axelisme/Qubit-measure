@@ -358,6 +358,45 @@ def test_native_fractional_trigger_retains_qick_outputs_and_waits_actual_adc():
     assert wait["TIME"] == "@140"
 
 
+@pytest.mark.parametrize("control", ["flat", "branch", "repeat"])
+def test_unlocatable_native_adc_window_rejects_later_named_trigger(control):
+    def initialize(prog):
+        prog.add_loop("scan", 2)
+
+    def body(prog):
+        prog.write_reg("s_out_time", 0)
+        prog.trigger([0], t=None)
+        if control == "branch":
+            with prog.branch(by="scan", align_timeline=False) as cases, cases.case(0):
+                prog.timeline_inc(200 / 430.08)
+                prog.trigger([0])
+        elif control == "repeat":
+            with prog.repeat("reads", 2):
+                prog.timeline_inc(200 / 430.08)
+                prog.trigger([0])
+        else:
+            prog.timeline_inc(200 / 430.08)
+            prog.trigger([0], timeline="default")
+
+    with pytest.raises(ValueError, match=r"channel 0.*cannot locate previous native trigger.*cycles unknown"): 
+        _program(body, initialize)
+
+
+def test_known_native_adc_window_replaces_unlocatable_predecessor():
+    def initialize(prog):
+        prog.declare_readout(0, length=100 / 307.2)
+
+    def body(prog):
+        prog.write_reg("s_out_time", 0)
+        prog.trigger([0], t=None)
+        prog.trigger([0], t=0)
+        prog.timeline_inc(140 / 430.08)
+        prog.trigger([0], timeline="default")
+
+    prog = _program(body, initialize)
+    assert [e.cycle for e in _shot(prog).events if e.kind == "data" and e.value] == [0, 0, 140]
+
+
 def test_native_adc_tail_is_checked_before_a_named_trigger():
     def body(prog):
         prog.trigger([0], t=0)
