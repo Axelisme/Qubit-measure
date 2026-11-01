@@ -1,8 +1,11 @@
 """Readout QND metrics recover a two-state shot model through the public seam."""
 
+from dataclasses import astuple, fields
+
 import numpy as np
 import pytest
 from numpy.typing import NDArray
+from zcu_tools.analysis.readout_metrics import readout_metrics
 
 
 @pytest.fixture(scope="module")
@@ -40,8 +43,6 @@ def model_sums() -> NDArray[np.float64]:
 def test_recovers_shared_calibration_and_distinct_on_off_dynamics(
     model_sums: NDArray[np.float64],
 ) -> None:
-    from zcu_tools.analysis.readout_metrics import readout_metrics
-
     before = model_sums.copy()
     result = readout_metrics(model_sums)
 
@@ -60,3 +61,49 @@ def test_recovers_shared_calibration_and_distinct_on_off_dynamics(
     assert result.pi_miss_off == pytest.approx(0.035, abs=0.015)
     assert result.retention_from_covariance == pytest.approx(0.71, abs=0.02)
     np.testing.assert_array_equal(model_sums, before)
+
+
+def test_empty_point_has_no_metrics() -> None:
+    result = readout_metrics(np.zeros((8, 3, 3, 3, 3), dtype=np.float64))
+    assert np.all(np.isnan(astuple(result)))
+
+
+@pytest.mark.parametrize("branch", range(8))
+def test_empty_branch_only_invalidates_dependent_metrics(
+    model_sums: NDArray[np.float64], branch: int
+) -> None:
+    baseline = readout_metrics(model_sums)
+    sums = model_sums.copy()
+    sums[branch] = 0
+
+    result = readout_metrics(sums)
+
+    for field in fields(result):
+        if branch in (2, 6):
+            missing = True
+        elif branch in (0, 4):
+            missing = field.name.endswith("_off")
+        elif branch in (1, 5):
+            missing = field.name == "pi_miss_off"
+        else:
+            missing = field.name == "pi_miss_on"
+        actual = getattr(result, field.name)
+        if missing:
+            assert np.isnan(actual), field.name
+        else:
+            assert actual == getattr(baseline, field.name), field.name
+
+
+@pytest.mark.parametrize("contrast", [1.0, 2.0])
+def test_nonpositive_inferred_separation_has_no_metrics(contrast: float) -> None:
+    # Valid moments of two point masses separated in I with transverse variance 1.
+    # Their Delta squared is negative for contrast 1 and zero for contrast 2.
+    sums = np.zeros((8, 3, 3, 3, 3), dtype=np.float64)
+    sums[:, 0, 0, 0, 0] = 1
+    sums[:, 2, 2, 0, 0] = 1
+    sums[6, 1, 0, 0, 0] = contrast
+    sums[6, 1, 1, 0, 0] = contrast**2
+
+    result = readout_metrics(sums)
+
+    assert np.all(np.isnan(astuple(result)))
