@@ -30,6 +30,40 @@ def test_averaged_collection_preserves_read_axes_tones_and_nan_after_module_reus
         native_mux().build("mux").collect_iq(prog, acquired)
 
 
+@pytest.mark.parametrize("emitted", [False, True])
+def test_collection_requires_identity_emitted_in_nested_control(emitted, monkeypatch):
+    module = native_mux().build("mux")
+    builder = TimelineBuilder(mux_soccfg())
+    builder.add_loop("choice", 2)
+    builder.declare(module)
+    with builder.branch(by="choice", align_timeline=True) as cases:
+        with cases.case(0):
+            pass
+        with cases.case(1), builder.repeat("reads", 2):
+            if emitted:
+                builder.emit(module)
+    prog = builder.build()
+    acquired = [np.array([[[2.0, 3.0], [5.0, 7.0]]])] * 2
+    raw = [
+        np.full((1, 2, 1, 2), 11 * channel["length"], dtype=np.int64)
+        for channel in prog.ro_chs.values()
+    ]
+    monkeypatch.setattr(prog, "get_raw", lambda: raw)
+    if not emitted:
+        with pytest.raises(ValueError, match="no compiled readout emission"):
+            module.collect_iq(prog, acquired)
+        with pytest.raises(ValueError, match="no compiled readout emission"):
+            module.collect_raw_iq(prog)
+    else:
+        np.testing.assert_array_equal(
+            module.collect_iq(prog, acquired),
+            [[[2, 3], [2, 3]], [[5, 7], [5, 7]]],
+        )
+        np.testing.assert_array_equal(
+            module.collect_raw_iq(prog), np.full((1, 2, 1, 2, 2), 11)
+        )
+
+
 def test_raw_collection_keeps_shots_reads_tones_and_offsets(monkeypatch):
     module = native_mux().build("mux")
     builder = TimelineBuilder(mux_soccfg(), reps=3)
