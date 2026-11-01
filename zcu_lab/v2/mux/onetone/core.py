@@ -28,7 +28,6 @@ from zcu_lab.v2.support.mux import averaged_mux_signal
 from zcu_lab.v2.support.resonator import (
     ResonanceFit,
     ResonanceOptions,
-    finite_real,
     fit_resonance,
 )
 

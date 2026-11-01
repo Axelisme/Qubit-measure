@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Annotated, ClassVar
 
 import numpy as np
@@ -30,7 +30,6 @@ from zcu_tools.program.v2 import (
     shot_sums,
 )
 from zcu_tools.program.v2.modules.readout import (
-    PulseReadoutCfg,
     require_circle_classifiers,
 )
 from zcu_tools.utils.process import minus_background
