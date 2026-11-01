@@ -30,7 +30,9 @@ class PartialProgram:
         self,
         soc: object,
         *,
-        round_hook: Callable[[int, list[NDArray[np.float64]], CancelFlagProtocol], object],
+        round_hook: Callable[
+            [int, list[NDArray[np.float64]], CancelFlagProtocol], object
+        ],
         cancel_flag: CancelFlagProtocol,
         progress: bool = False,
         **kwargs: object,
@@ -56,13 +58,19 @@ class RoundInterruptedProgram:
         self,
         soc: object,
         *,
-        round_hook: Callable[[int, list[NDArray[np.float64]], CancelFlagProtocol], object],
+        round_hook: Callable[
+            [int, list[NDArray[np.float64]], CancelFlagProtocol], object
+        ],
         cancel_flag: CancelFlagProtocol,
         progress: bool = False,
         **kwargs: object,
     ) -> list[NDArray[np.float64]]:
         """Deliver partial data through the hook, then request stop and return."""
-        partial = [np.array([[[1.0, 0.0], [np.nan, np.nan], [np.nan, np.nan]]], dtype=np.float64)]
+        partial = [
+            np.array(
+                [[[1.0, 0.0], [np.nan, np.nan], [np.nan, np.nan]]], dtype=np.float64
+            )
+        ]
         round_hook(1, partial, cancel_flag)
         signal.raise_signal(signal.SIGINT)
         return partial

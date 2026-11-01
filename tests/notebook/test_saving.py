@@ -174,10 +174,14 @@ def test_producer_failure_preserves_previous_notebook_record_and_evidence() -> N
     cause = RuntimeError("producer failed")
 
     class Program:
-        def acquire(self, *_args: object, **_kwargs: object) -> list[NDArray[np.float64]]:
+        def acquire(
+            self, *_args: object, **_kwargs: object
+        ) -> list[NDArray[np.float64]]:
             raise cause
 
-        def acquire_decimated(self, *_args: object, **_kwargs: object) -> list[NDArray[np.float64]]:
+        def acquire_decimated(
+            self, *_args: object, **_kwargs: object
+        ) -> list[NDArray[np.float64]]:
             raise NotImplementedError
 
     class Core(SavingCore):

@@ -161,7 +161,9 @@ def test_nested_scope_completion_preserves_outcome_and_next_operation_is_clean(
     cause = OSError("readout disconnected")
 
     class Program:
-        def acquire(self, *_args: object, **_kwargs: object) -> list[NDArray[np.float64]]:
+        def acquire(
+            self, *_args: object, **_kwargs: object
+        ) -> list[NDArray[np.float64]]:
             attempts.append(1)
             raise cause
 
@@ -174,7 +176,9 @@ def test_nested_scope_completion_preserves_outcome_and_next_operation_is_clean(
                 schedule.run_acquire(
                     Program(),
                     "soc",
-                    options=RunOptions(retry=1, converter=lambda raw: raw[0][0].dot([1, 1j])),
+                    options=RunOptions(
+                        retry=1, converter=lambda raw: raw[0][0].dot([1, 1j])
+                    ),
                 )
             else:
                 schedule.set_stop()
@@ -384,7 +388,9 @@ def test_program_failures_keep_their_classification_and_do_not_repeat_build_or_c
             if source == "build":
                 raise OSError("build failed")
 
-        def acquire(self, *_args: object, **_kwargs: object) -> list[NDArray[np.float64]]:
+        def acquire(
+            self, *_args: object, **_kwargs: object
+        ) -> list[NDArray[np.float64]]:
             attempts.append("acquire")
             if source == "acquire":
                 raise OSError("acquire failed")
@@ -433,7 +439,9 @@ def test_program_stop_keeps_partial_delivery_without_failed_outcome(
     mode: str,
 ) -> None:
     class Program:
-        def acquire(self, *_args: object, **_kwargs: object) -> list[NDArray[np.float64]]:
+        def acquire(
+            self, *_args: object, **_kwargs: object
+        ) -> list[NDArray[np.float64]]:
             rig.engine.cancel("run", scope="iteration")
             if first_round_stop:
                 raise StoppedPartialAcquireError("stopped before first completed round")
@@ -452,7 +460,11 @@ def test_program_stop_keeps_partial_delivery_without_failed_outcome(
                 if mode == "integrated"
                 else schedule.run_acquire_decimated
             )
-            acquire(Program(), "soc", options=RunOptions(converter=lambda raw: raw[0][0].dot([1, 1j])))
+            acquire(
+                Program(),
+                "soc",
+                options=RunOptions(converter=lambda raw: raw[0][0].dot([1, 1j])),
+            )
         return 99
 
     observed = start_call(rig, operation)

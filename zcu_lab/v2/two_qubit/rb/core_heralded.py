@@ -237,10 +237,8 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
                                     timeline=f"gate_{index}_cz_f2_time",
                                 )
                                 builder.join(
-                                    
-                                        f"gate_{index}_cz_f1_time",
-                                        f"gate_{index}_cz_f2_time",
-                                    ,
+                                    f"gate_{index}_cz_f1_time",
+                                    f"gate_{index}_cz_f2_time",
                                     into="default",
                                 )
                                 frames[0] = (

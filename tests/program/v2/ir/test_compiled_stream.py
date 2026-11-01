@@ -45,8 +45,6 @@ def _program(path: str) -> tuple[MyProgramV2, Callable[[], None]]:
     return native, update_native
 
 
-
-
 def _invalidate_binary(prog: AbsQickProgram) -> None:
     # The QICK base owns the nullable public compile cache.
     prog.binprog = None
@@ -216,8 +214,6 @@ def test_timeline_native_loop_annotations_keep_waveform_and_register_sweeps():
     original = UnmarkedNativeSweep(make_mock_soccfg(), reps=2)
     assert prog.prog_list == original.prog_list
     np.testing.assert_equal(prog.binprog, original.binprog)
-
-
 
 
 def test_native_pulse_sources_use_call_ordinals_and_rebuild_stably():

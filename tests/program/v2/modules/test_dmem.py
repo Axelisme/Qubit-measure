@@ -107,8 +107,6 @@ def test_compiled_lookup_recovers_every_slot_with_hardware_shift_width(
     assert [_execute_lookup_body(program, i) for i in range(len(values))] == values
 
 
-
-
 def test_negative_values_rejected():
     with pytest.raises(ValueError, match=r"\[0,"):
         LoadValue("x", [1, -1, 2], idx_reg="i", val_reg="v")

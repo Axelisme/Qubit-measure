@@ -40,7 +40,9 @@ def test_planned_time_window_preserves_span_and_compiled_coordinates(
         ),
     )
     prog = compile_modules(soccfg, [pulse], sweep=[("length", planned)])
-    compiled = prog.get_pulse_param(pulse.pulse_name(prog), "total_length", as_array=True)
+    compiled = prog.get_pulse_param(
+        pulse.pulse_name(prog), "total_length", as_array=True
+    )
     expected = (
         (193 - 2 * np.arange(87)) if reverse else (20 + 2 * np.arange(87))
     ) * cycle
