@@ -19,7 +19,7 @@ from zcu_tools.program.v2.utils import readout_freq_words
 from zcu_tools.simulators.six_fluxonium.config import parse_six_fluxonium
 from zcu_tools.simulators.six_fluxonium.environment import six_fluxonium
 
-from tests.program._profiles import profile_soccfg
+from tests.program._profiles import load_mux_soccfg, profile_soccfg
 from tests.program._timeline import compile_modules
 from tests.program.v2.simulation.support import request_of
 from tests.simulators.six_fluxonium.config._data import six_document
@@ -29,11 +29,11 @@ FREQUENCIES = np.array([6800, 6925, 7050, 7175, 7300, 7425])
 
 
 @contextmanager
-def environment(document=None):
+def environment(document=None, *, soccfg=None):
     try:
         env = six_fluxonium(
             parse_six_fluxonium(six_document() if document is None else document),
-            soccfg=profile_soccfg("six_fluxonium"),
+            soccfg=profile_soccfg("six_fluxonium") if soccfg is None else soccfg,
         )
     except (NotImplementedError, ValueError) as error:
         pytest.fail(
@@ -199,6 +199,57 @@ def test_decimated_channels_keep_declared_order_and_companion_sums():
                 atol=(values.shape[-2] + 1) / 2,
                 rtol=0,
             )
+
+
+def wired_program(env, settings, kind, *, driven):
+    qubit = settings.qubits.Q3
+    drive = PulseCfg(
+        ch=qubit.drive_line.gen_ch, nqz=1, freq=580,
+        gain=0.2 if driven else 0.0, waveform=ConstWaveformCfg(length=0.064),
+    )
+    if kind == "mux":
+        readout = MuxReadoutCfg(
+            gen_ch=settings.mux_gen_ch, nqz=1, mixer_freq=7100,
+            length=0.064, ro_length=0.026,
+            tones=[MuxReadoutTone(ro_ch=qubit.readout.adc.ro_ch, freq=7050, gain=0.05)],
+        )
+    else:
+        readout = PulseReadoutCfg(
+            gen_ch=settings.pulse_gen_ch, ro_ch=settings.pulse_ro_ch,
+            nqz=1, freq=7050, gain=0.05,
+            waveform=ConstWaveformCfg(length=0.064), ro_length=0.026,
+        )
+    return compile_modules(
+        env.soccfg, modules=[drive.build("drive"), readout.build("readout")], reps=8,
+    )
+
+
+@pytest.mark.parametrize("kind", ["mux", "pulse"])
+def test_caller_wiring_preserves_driven_cavity_and_receiver_acquisition(kind):
+    document = six_document()
+    for qubit in document["qubits"].values():
+        qubit["dc_bias"]["offset"] = -0.35 * qubit["dc_bias"]["period"]
+        qubit["readout"]["resonator"]["charge_coefficient_ghz"] = 0.03
+    document["qubits"]["Q3"]["readout"]["adc"]["gain"] = 20000
+    settings = parse_six_fluxonium(document)
+    with environment(document) as env:
+        idle = wired_program(env, settings, kind, driven=False).acquire(env.soc, progress=False)
+        expected = wired_program(env, settings, kind, driven=True).acquire(env.soc, progress=False)
+    assert idle is not None and expected is not None
+    assert np.linalg.norm(expected[0] - idle[0]) > 0.1
+
+    channels = (5, 2, 7, 1, 4, 0)
+    document.update(mux_gen_ch=7, pulse_gen_ch=14, pulse_ro_ch=3)
+    for index, qubit in enumerate(document["qubits"].values()):
+        qubit["drive_line"]["gen_ch"] = index + 8
+        qubit["readout"]["drive"]["gen_ch"] = 7
+        qubit["readout"]["adc"]["ro_ch"] = channels[index]
+    remapped = parse_six_fluxonium(document)
+    board = load_mux_soccfg(15, 8, gen_ch=7, ro_chs=channels)
+    with environment(document, soccfg=board) as env:
+        actual = wired_program(env, remapped, kind, driven=True).acquire(env.soc, progress=False)
+    assert actual is not None
+    np.testing.assert_allclose(actual[0], expected[0], rtol=0, atol=1e-8)
 
 
 def test_drive_affects_only_its_own_cavity():
