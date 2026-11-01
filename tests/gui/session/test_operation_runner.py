@@ -405,7 +405,7 @@ def test_terminal_callback_exception_settles_failed_and_releases(caplog):
     settled = handles.poll(token)
     assert settled is not None
     assert settled.status == "failed"
-    assert settled.error == "terminal boom"
+    assert settled.error == "RuntimeError('terminal boom')"
     assert progress.discard_calls == [token]
     assert gate.release_calls == [token]
     assert "operation terminal callback failed" in caplog.text
@@ -738,7 +738,7 @@ def test_continuation_terminal_callback_failure_settles_once() -> None:
     bg.deliver_result()
     assert handles.known_outcome(token) == OperationOutcome(
         "failed",
-        "continuation callback failed",
+        "ValueError('continuation callback failed')",
     )
     assert gate.release_calls == progress.discard_calls == [token]
 

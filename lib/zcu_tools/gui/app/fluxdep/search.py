@@ -202,7 +202,11 @@ class FluxDepSearchOwner:
                 outcome = self._handles.known_outcome(activity.token)
                 if outcome is not None:
                     with self._bus.origin(self._handles.event_origin(activity.token)):
-                        self._finish_activity(activity.token, outcome)
+                        self._finish_activity(
+                            activity.token,
+                            outcome,
+                            display_error="operation failed to start",
+                        )
             raise
 
     def cancel(self, token: int) -> None:
@@ -267,18 +271,21 @@ class FluxDepSearchOwner:
         activity = self._current
         if activity is None or activity.status != "pending":
             raise RuntimeError("search delivery has no pending owner")
+        display_error = None
         try:
             if isinstance(bg.error, SearchCancelled):
                 outcome = OperationOutcome("cancelled")
             elif bg.error is not None:
                 logger.error("search worker failed", exc_info=bg.error)
-                outcome = OperationOutcome("failed", str(bg.error))
+                outcome = OperationOutcome.from_exception(bg.error)
+                display_error = str(bg.error)
             elif self._closing:
                 outcome = OperationOutcome("cancelled")
             elif any(
                 self._state.version.get(key) != version for key, version in dependencies
             ):
-                outcome = OperationOutcome("failed", "search inputs changed")
+                display_error = "search inputs changed"
+                outcome = OperationOutcome("failed", display_error)
             else:
                 result: DatabaseSearchResult = bg.result
                 self._publish_result(result, inputs)
@@ -287,9 +294,10 @@ class FluxDepSearchOwner:
         except Exception as exc:
             # Isolate domain commit failures while still releasing admission.
             logger.exception("search result publication failed")
-            outcome = OperationOutcome("failed", str(exc))
+            outcome = OperationOutcome.from_exception(exc)
+            display_error = str(exc)
         settle(outcome)
-        self._finish_activity(activity.token, outcome)
+        self._finish_activity(activity.token, outcome, display_error=display_error)
 
     def _assert_owner(self) -> None:
         self._state.assert_owner_thread()
@@ -301,11 +309,14 @@ class FluxDepSearchOwner:
         with self._bus.origin(self._handles.event_origin(token)):
             self._bus.emit(SearchChangedPayload(token=token, status="pending"))
 
-    def _finish_activity(self, token: int, outcome: OperationOutcome) -> None:
-        self._current = SearchActivity(token, outcome.status, outcome.error)
+    def _finish_activity(
+        self, token: int, outcome: OperationOutcome, *, display_error: str | None
+    ) -> None:
+        """Publish terminal activity with UI text independent of the handle diagnostic."""
+        self._current = SearchActivity(token, outcome.status, display_error)
         self._busy = False
         self._bus.emit(
             SearchChangedPayload(
-                token=token, status=outcome.status, error=outcome.error
+                token=token, status=outcome.status, error=display_error
             )
         )

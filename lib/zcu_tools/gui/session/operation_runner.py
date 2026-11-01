@@ -245,7 +245,7 @@ class OperationRunner:
                 yield lease
             except BaseException as exc:
                 if not lease.settled:
-                    lease.settle(OperationOutcome("failed", str(exc)))
+                    lease.settle(OperationOutcome.from_exception(exc))
                 raise
             else:
                 if not lease.settled:
@@ -277,7 +277,7 @@ class OperationRunner:
             factory = self._register_resources(spec, token, origin)
         except BaseException as exc:
             with self._bus.origin(operation_origin):
-                settle(OperationOutcome("failed", str(exc)))
+                settle(OperationOutcome.from_exception(exc))
             raise
         return OperationLease(token, operation_origin, settle, self._bus, factory)
 
@@ -327,9 +327,9 @@ class OperationRunner:
                     BgResult(ok=False, result=NO_RESULT, error=e),
                 ),
             )
-        except Exception:
+        except Exception as exc:
             # Startup failed synchronously: unwind every resource opened above.
-            settle(OperationOutcome("failed", "operation failed to start"))
+            settle(OperationOutcome.from_exception(exc))
             raise
 
         return token
@@ -434,7 +434,7 @@ class OperationRunner:
                 on_terminal(bg, settle)
             except Exception as exc:
                 logger.exception("operation terminal callback failed")
-                settle(OperationOutcome("failed", str(exc)))
+                settle(OperationOutcome.from_exception(exc))
 
     def _make_settle(self, spec: OperationSpec, token: int) -> SettleFn:
         """Build the call-once settle closure for this operation.

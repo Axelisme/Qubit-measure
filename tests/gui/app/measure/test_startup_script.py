@@ -213,9 +213,8 @@ def test_partial_failure_reports_script_line_and_retains_callbacks(
     )
     outcome = ctrl.operation_control.await_operation(token, 0).outcome
     assert outcome is not None and outcome.status == "failed"
-    assert outcome.error is not None
-    assert str(path) in outcome.error and "line 13" in outcome.error
-    assert "script failure" in outcome.error
+    assert outcome.error == "ValueError('script failure')"
+    assert str(path) in caplog.text and "line 13" in caplog.text
     assert ctrl.tab_control.has_tab(probe.tab)
     behavior.close(assembly)
     behavior.close(assembly)

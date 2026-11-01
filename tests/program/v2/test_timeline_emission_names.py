@@ -16,14 +16,6 @@ class LoweringModule(Module):
         self.action = action
 
     @override
-    def init(self, prog):
-        raise NotImplementedError("Native-only synthetic module")
-
-    @override
-    def run(self, prog, t=0.0):
-        raise NotImplementedError("Native-only synthetic module")
-
-    @override
     def declare(self, prog):
         pass
 

@@ -66,7 +66,7 @@ def test_core_keyboard_interrupt_fails_run_without_record_and_releases_ownership
         outcome = handles.poll(token)
         assert outcome is not None
         assert outcome.status == "failed"
-        assert outcome.error == str(error)
+        assert outcome.error == "KeyboardInterrupt('synthetic core interrupted')"
         assert not state.is_tab_busy(tab_id)
         assert gate.snapshot() == ()
         assert progress.bars_for_owner(tab_id) == ()

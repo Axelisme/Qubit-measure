@@ -256,6 +256,30 @@ def test_control_flow_on_other_adc_preserves_selected_read_sums(control):
     np.testing.assert_array_equal(result, [[1, 4, 5]])
 
 
+@pytest.mark.parametrize("inner", ["Repeat", "Branch"])
+def test_nested_control_rejects_trigger_with_innermost_scope(inner):
+    ro = readout()
+    builder = v2.TimelineBuilder(v2.make_mock_soccfg())
+    builder.add_loop("choice", 2)
+    builder.emit(ro, tag="selected")
+    if inner == "Repeat":
+        with builder.branch(by="choice", align_timeline=True) as cases:
+            with cases.case(0):
+                pass
+            with cases.case(1), builder.repeat("reads", 2):
+                builder.emit(ro)
+    else:
+        with (
+            builder.repeat("reads", 2),
+            builder.branch(by="choice", align_timeline=True) as cases,
+            cases.case(1),
+        ):
+            builder.emit(ro)
+    prog = builder.build()
+    with pytest.raises(ValueError, match=rf"ADC 0.*{inner}"):
+        v2.shot_sums(prog, [v2.IQ("selected")])
+
+
 def test_split_sums_returns_counts_and_nan_means_without_warnings():
     sums = np.array(
         [[[2, 6, -4], [0, 0, 0]], [[1, -3, 7], [np.nan, np.nan, np.nan]]],

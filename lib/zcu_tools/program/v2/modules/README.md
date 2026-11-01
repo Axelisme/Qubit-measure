@@ -1,6 +1,6 @@
 # program/v2/modules — semantic program modules
 
-**Last updated:** 2026-11-01，generator-only readout completion 與 ADC overlap guards
+**Last updated:** 2026-11-01，generator-only readout completion、ADC overlap guards 與靜態 readout observation
 
 **讀者：** lab-author、framework-dev、agent。語意 program modules 的宣告、發射與 owner 邊界速查。
 
@@ -260,9 +260,8 @@ Centroid3 的第三類是 f，不是 circle 的 other。需要 Other 的 consume
 
 - `TableLengthPulse` owns the arbitrary pulse-length hardware sweep for `const`
   and `flat_top`. Native declaration keeps one template and a generator-length
-  table. Native playback resolves the actual selected waveform end, adds pre/post
-  once and ceils the aggregate once. Only legacy init/run uses a separate total
-  tProcessor duration table.
+  table. Playback resolves the actual selected waveform end, adds pre/post
+  once and ceils the aggregate once. It does not store tProcessor durations.
 - A const pulse patches the template's single `w4` length field. A flat-top pulse
   reuses its fixed ramp entries and patches only the middle flat segment; its
   segment WPORT writes remain contiguous.
@@ -270,14 +269,11 @@ Centroid3 的第三類是 f，不是 circle 的 other。需要 Other 的 consume
   build. Points below the generator's three-cycle minimum also fail fast. Runtime
   duration alignment places readout immediately after the selected pulse instead
   of padding every point to the maximum length.
-- Legacy `Join` accepts one `TableLengthPulse` per parallel branch, with independent
-  generators, a shared index register and equal table sizes. It emits all drives
-  at one origin and loads one per-point maximum duration table for a common wait.
-  The selected lengths, including pre/post delays, determine when readout starts;
-  crossing length ranges do not cause sweep-wide padding. Mixed scalar/table
-  branches and table-pulse sequences fail before build. Standalone table pulses
-  retain their own wait. Hardware and semantic simulation use the same rounded
-  duration tables.
+- Parallel sequences fork from a common origin and emit on their own timelines.
+  Program `join` takes the pointwise maximum of their ends, including each
+  selected waveform and its pre/post delays. Scalar and table-backed sequences
+  use the same timeline mechanism, without a maximum-duration table.
+  Join only merges ends; `delay_by_timeline()` advances the reference when needed.
 
 Native `ComputedPulse` selects each candidate waveform together with its own
 post-delay. Fractional playback ends and selected posts stay separate until the

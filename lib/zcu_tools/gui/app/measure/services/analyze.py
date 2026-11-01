@@ -287,7 +287,7 @@ class AnalyzeService(StagedAnalyzeService):
                         "interactive result construction failed: tab_id=%r", tab_id
                     )
                     self._state.set_tab_analyzing(tab_id, analyzing=False)
-                    self._release(tab_id, OperationOutcome("failed", str(exc)))
+                    self._release(tab_id, OperationOutcome.from_exception(exc))
                     self._bus.emit(
                         TabInteractionChangedPayload(
                             tab_id=tab_id,
@@ -382,7 +382,7 @@ class AnalyzeService(StagedAnalyzeService):
                     "interactive record plot cleanup failed: tab_id=%r", tab_id
                 )
             self._state.set_tab_analyzing(tab_id, analyzing=False)
-            self._release(tab_id, OperationOutcome("failed", str(exc)))
+            self._release(tab_id, OperationOutcome.from_exception(exc))
             self._bus.emit(
                 TabInteractionChangedPayload(
                     tab_id=tab_id,

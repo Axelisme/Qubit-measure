@@ -195,7 +195,7 @@ class RunService:
             logger.exception("Acquired ledger append failed: tab_id=%r", op.tab_id)
             # Publication succeeded; keep its result and view resources for Save.
             self._clear_running(op.tab_id)
-            settle(OperationOutcome("failed", str(error)))
+            settle(OperationOutcome.from_exception(error))
             self._bus.emit(
                 RunFinishedPayload(
                     tab_id=op.tab_id,
@@ -267,7 +267,7 @@ class RunService:
         pane.stop_requested = op.stop_requested.is_set()
         self._discard_plots(op, "Failed")
         self._clear_running(op.tab_id)
-        settle(OperationOutcome("failed", str(error)))
+        settle(OperationOutcome.from_exception(error))
         self._bus.emit(
             RunFinishedPayload(
                 tab_id=op.tab_id,

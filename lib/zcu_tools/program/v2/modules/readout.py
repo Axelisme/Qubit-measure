@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Annotated, Literal, TypeAlias, TypedDict, Unpa
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import BeforeValidator
-from qick.asm_v2 import Macro, QickParam
+from qick.asm_v2 import QickParam
 
 from zcu_tools.cfg_model import (
     Centroid3Classifier,
@@ -795,31 +795,14 @@ class MuxReadout(AbsReadout):
         return np.stack(selected, axis=-2)
 
     def _validate_collection_program(self, prog: TimelineProgramV2) -> None:
-        from .._timeline_macros import (
-            ModuleEmission,
-            PreparedTimelineMacro,
-            TimelineBranch,
-            TimeProducer,
-        )
+        # Import at collection time: the program observer also depends on modules.
+        from ..readout_observation import observe_readouts
 
-        def emitted(macros: Sequence[Macro]) -> bool:
-            for macro in macros:
-                source = (
-                    macro.source if isinstance(macro, PreparedTimelineMacro) else macro
-                )
-                if isinstance(source, ReadoutEmission) and source.owner is self:
-                    return True
-                if isinstance(source, (ModuleEmission, TimeProducer)) and emitted(
-                    source.macros
-                ):
-                    return True
-                if isinstance(source, TimelineBranch) and any(
-                    emitted(case) for case in source.cases
-                ):
-                    return True
-            return False
-
-        if not emitted(prog.macro_list):
+        if not any(
+            isinstance(observation.source, ReadoutEmission)
+            and observation.source.owner is self
+            for observation in observe_readouts(prog)
+        ):
             raise ValueError(
                 f"{self.name}: module has no compiled readout emission on this program"
             )

@@ -92,7 +92,11 @@ class StartupService:
             if result.error is not None:
                 error = _describe_failure(path, result.error)
                 logger.error(error, exc_info=result.error)
-            settle(OperationOutcome("finished" if error is None else "failed", error))
+            settle(
+                OperationOutcome.from_exception(result.error)
+                if result.error is not None
+                else OperationOutcome("finished")
+            )
             message = (
                 f"Startup failed: {path.name}"
                 if error
