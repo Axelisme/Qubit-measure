@@ -155,9 +155,9 @@ def run_t2echo(cfg: T2EchoCfg, *, context: RunContext, retry: int) -> T2EchoResu
     half delay, then pi/2 and readout. cfg supplies the pulses and total
     delay sweep in us. detune in MHz ramps the final pi/2 phase with total
     delay to add fringes; it does not change the drive frequency.
-    Return hardware-rounded total delays and mean complex IQ. analyze
-    extracts T2echo from the decay or fringe envelope. context supplies acquisition
-    and plots; retry is the workflow's transient retry count. cfg is unchanged.
+    Return hardware-rounded total delays, mean complex IQ and the realized
+    phase-ramp frequency in MHz. context supplies acquisition and plots;
+    retry is the workflow's transient retry count. cfg is unchanged.
     """
     # 1. Round both half-delays and report the realized phase-ramp frequency.
     cfg = deepcopy(cfg)

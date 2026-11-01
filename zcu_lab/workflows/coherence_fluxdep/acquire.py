@@ -104,11 +104,9 @@ def run_ge(cfg: GE_Cfg, *, context: RunContext) -> GE_Result:
     """Collect probe-off/on IQ clouds for ground/excited readout calibration.
 
     Each shot applies optional reset and init, omits or applies the probe
-    pulse, then reads out. Return complex IQ shaped (2, cfg.shots), shot
-    indices, and prepared_states=[0, 1] denoting probe off/on, not guaranteed
-    pure ground/excited states. Primary analysis maps these rows to physical
-    G/E using its initial_state option; post-analysis derives the radius
-    and confusion matrix from that fit.
+    pulse, then reads out. Return complex IQ shaped (2, cfg.shots) and shot
+    indices. Rows denote probe off/on, not guaranteed pure ground/excited
+    states. Physical G/E assignment belongs to the caller's analysis.
 
     Use one round and cfg.shots reps on a copied cfg. Raw-shot conversion
     requires exactly one readout channel. context supplies acquisition and plots;
