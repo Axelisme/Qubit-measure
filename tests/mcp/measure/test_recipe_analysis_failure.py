@@ -2,13 +2,19 @@
 
 from pathlib import Path
 
+import pytest
+
 from zcu_tools.mcp.measure.recipe_api import RecipeSession, recipe
 
 from ._script_recipe_support import Fit, Inputs, Report, SyntheticGui, start
 from ._support import make_client
 
 
-def test_unhandled_analysis_failure_ends_recipe(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "diagnostic",
+    ["fit did not converge", "ValueError()", "ValueError('no result')"],
+)
+def test_unhandled_analysis_failure_ends_recipe(tmp_path: Path, diagnostic: str) -> None:
     gui = SyntheticGui()
     observed: list[tuple[str, object, str | None]] = []
 
@@ -17,7 +23,7 @@ def test_unhandled_analysis_failure_ends_recipe(tmp_path: Path) -> None:
             return {
                 "reason": "completed",
                 "status": "failed",
-                "error": "fit did not converge",
+                "error": diagnostic,
             }
         return gui.respond(method, params)
 
@@ -38,6 +44,6 @@ def test_unhandled_analysis_failure_ends_recipe(tmp_path: Path) -> None:
         assert snapshot.status == "failed"
         assert observed == []
         assert snapshot.error is not None
-        assert snapshot.error.message == "fit did not converge"
+        assert snapshot.error.message == diagnostic
     finally:
         client.context.session.close()

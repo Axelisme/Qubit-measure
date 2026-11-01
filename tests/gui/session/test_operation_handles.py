@@ -47,6 +47,13 @@ class OperationHandles(_OperationHandles):
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.parametrize("message", [None, ""])
+def test_failed_outcome_requires_message(message: str | None) -> None:
+    """Reject a missing diagnostic when constructing a failed operation result."""
+    with pytest.raises(ValueError, match="failed operation requires a non-empty error message"):
+        OperationOutcome("failed", message)
+
+
 def test_create_mints_unique_increasing_tokens() -> None:
     handles = OperationHandles()
     assert handles.create() == 1

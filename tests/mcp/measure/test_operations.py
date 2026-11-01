@@ -449,6 +449,19 @@ def test_wait_delivers_cancelled_stop_reason(
     assert result == expected
 
 
+@pytest.mark.parametrize("error", [None, {}, {"reason": "failed"}, {"reason": "failed", "message": ""}])
+def test_wait_rejects_failed_reply_without_message(tmp_path: Path, error: object) -> None:
+    """Reject malformed native failures at the operation wait wire boundary."""
+    client = make_client(tmp_path)
+    op = discover_operation(client, 32)
+    client.transport.replies["operation.await"] = {
+        "ok": True,
+        "result": {"reason": "completed", "status": "failed", "error": error},
+    }
+    with pytest.raises(ValueError, match="failed operation requires a non-empty error message"):
+        client.call("wait", {"op": op})
+
+
 def test_wait_reports_failed_outcome_as_data_and_unknown_as_error(
     tmp_path: Path,
 ) -> None:
