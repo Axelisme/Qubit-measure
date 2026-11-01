@@ -8,7 +8,7 @@ Native wire views retain opaque payloads and extra keys without domain conversio
 from collections.abc import Callable
 from copy import deepcopy
 from functools import partial
-from typing import Any, Literal, NotRequired, TypedDict
+from typing import Any, Literal, NotRequired, Required, TypedDict
 
 from zcu_tools.gui.app.measure.remote.guide_types import AdapterGuideView
 from zcu_tools.mcp.core.reply import ToolReply
@@ -133,8 +133,8 @@ class NativeSetupOperationError(TypedDict, total=False):
     """Native code or null, when supplied."""
     reason: str | None
     """Native reason or null, when supplied."""
-    message: str
-    """Native diagnostic text."""
+    message: Required[str]
+    """Non-empty native diagnostic text, required for a failed operation."""
     request_rejected: bool
     """Native admission fact; false does not prove no side effects."""
 

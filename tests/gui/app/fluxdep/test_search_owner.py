@@ -148,6 +148,8 @@ def test_active_switch_does_not_stale_and_terminal_cannot_reenter(search_case):
 @pytest.mark.parametrize("closing", [False, True])
 def test_cancel_and_close_follow_worker_terminal(search_case, terminal, closing):
     ctrl, bg, _owner, _progress, result = search_case
+    facts: list[SearchChangedPayload] = []
+    ctrl.bus.subscribe(SearchChangedPayload, facts.append)
     token = ctrl.search.start()
     ctrl.search.cancel(token)
     assert ctrl.search.outcome(token) is None
@@ -161,7 +163,9 @@ def test_cancel_and_close_follow_worker_terminal(search_case, terminal, closing)
     elif terminal == "failed":
         bg.fail(ValueError("bad database"))
         expected = "failed"
-        assert ctrl.search.outcome(token).error == "bad database"
+        assert ctrl.search.outcome(token).error == "ValueError('bad database')"
+        assert ctrl.search.current.error == "bad database"
+        assert facts[-1].error == "bad database"
     else:
         bg.deliver(result)
         expected = "cancelled" if closing else "finished"
