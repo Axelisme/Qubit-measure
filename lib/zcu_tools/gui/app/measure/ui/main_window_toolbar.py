@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from qtpy.QtCore import QEvent, QObject
-from qtpy.QtGui import QAction
+from qtpy.QtGui import QAction, QKeySequence
 from qtpy.QtWidgets import (
     QHBoxLayout,
     QMenu,
@@ -87,6 +87,7 @@ class MainWindowToolbar:
         self._promoted: list[tuple[QPushButton, QAction]] = []
         for action in (self._predictor_action, self._results_action):
             button = QPushButton(action.text())
+            button.setToolTip(f"{action.text()} ({action.shortcut().toString()})")
             button.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
             self._scope.connect(
                 button.clicked, lambda _checked=False, a=action: a.trigger()
@@ -192,6 +193,10 @@ class MainWindowToolbar:
         self._results_action = self._add_more_action(
             "Results browser…", "results", self._host.open_results_browser
         )
+        self._predictor_action.setShortcut(QKeySequence("Ctrl+P"))
+        self._results_action.setShortcut(QKeySequence("Ctrl+R"))
+        self._parent.addAction(self._predictor_action)
+        self._parent.addAction(self._results_action)
 
     def _add_more_action(
         self, label: str, name: str, callback: Callable[[], None]
