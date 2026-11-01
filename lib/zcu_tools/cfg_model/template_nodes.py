@@ -81,7 +81,8 @@ class Slot:
     """Request a library module slot/root, such as ``$resonator.module.readout``.
 
     ``path`` is an authored slot or library root, optionally containing component
-    placeholders. Forms resolve it at Reset to a direct key. ``copy=False`` keeps
+    placeholders. Forms resolve it from the fixed capture when building fresh
+    input on Open or Reset. ``copy=False`` keeps
     a reference; ``copy=True`` copies the module inline. ``set`` maps relative
     dotted paths to initial literal, Expr, Slot, Hidden(value), or typed
     model-list seeds validated against the original Spec. Hidden

@@ -426,7 +426,7 @@ def test_optional_module_keeps_available_initial_selection(
 def test_template_in_tree_merges_metadata_with_explicit_path_priority(
     override: bool,
 ) -> None:
-    metadata = {
+    metadata: dict[tuple[str | int, ...], FieldMeta] = {
         ("probe", "module", "gain"): FieldMeta(
             description="Template starting gain", calibration="uncalibrated"
         ),
