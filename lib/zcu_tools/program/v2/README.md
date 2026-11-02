@@ -1,6 +1,6 @@
 # program/v2
 
-**Last updated:** 2026-11-02，查表掃描、時間 getter 與 WMEM 分析
+**Last updated:** 2026-11-02，查表掃描、ADC native tail 與 WMEM 分析
 
 **讀者：** lab-author、framework-dev、agent。查找 V2 program 公開 API、型別契約與編譯規則的 owner。
 
@@ -153,6 +153,8 @@ Branch readout 的 `set_reads_per_shot` 順序、逐路徑設定比對、Repeat 
 `delay`、`delay_auto`／`DelayAuto(t=...)`、`timeline_inc`、pulse `t`、`pre_delay`、`post_delay`
 與 `trig_offset` 可用查表時間。編譯器以 `TableRawParam` 初始化時間 register，再於所屬 loop 結尾載入下一點。
 查表 length 保留 generator cycle 格點。Native auto follower 使用 QICK nearest 轉出的 channel 結尾，timeline finish 仍用 ceil。
+編譯器保留查表 timeline end 的原始 `TableParam`，供後續 ADC channel end 沿用逐點純量的 QICK nearest 轉換。
+非查表 register origin 仍使用 runtime ceil。Branch、fork 與 module 還原的 end 保留原來源，新寫入的非查表 end 不沿用舊表。
 
 Runtime 跨格點 generator 長度使用 k=8 上界定點換算。
 Compiler 選 canonical signed-digit 項數最少的 W，平手取較小 W。

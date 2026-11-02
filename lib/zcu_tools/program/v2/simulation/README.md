@@ -1,6 +1,6 @@
 # Explicit acquisition environments
 
-**Last updated:** 2026-11-02，查表掃描與 native shot-tail maximum 驗證
+**Last updated:** 2026-11-02，查表掃描與逐點 native timing
 
 **讀者：** framework-dev。模擬 acquisition 的 request、round 與 raw source 契約。
 

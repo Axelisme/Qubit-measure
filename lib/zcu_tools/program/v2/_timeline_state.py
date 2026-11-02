@@ -1,7 +1,6 @@
 """Relative timeline state, native channel tails and repeat scope bookkeeping."""
 
 import warnings
-from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING
 
@@ -9,7 +8,6 @@ from qick.asm_v2 import QickParam, WriteReg
 
 from ._timeline_axis import CycleAxis, CycleProducer, TimeVariable
 from ._timeline_expression import (
-    TimeAbs,
     TimeExpression,
     add_time,
     choose_time,
@@ -44,7 +42,6 @@ from ._timeline_runtime import (
 )
 from .macro.table import TableSelection
 from .macro.write_reg import WriteRegOp
-from .modules.util import get_fclk
 from .table_param import TableParam
 
 if TYPE_CHECKING:
@@ -613,98 +610,6 @@ class TimelineBook:
             return end
         pair = self.table_ends.get(id(end))
         return None if pair is None else pair[1]
-
-    def _table_values(
-        self, values: Sequence[Time | TimeExpression]
-    ) -> tuple[TableParam, list[float | TableParam]] | None:
-        """Resolve only source-backed tables and static operands on one loop."""
-        known: list[float | TableParam] = []
-        for value in values:
-            table = (
-                self.table_source(value)
-                if not isinstance(value, (TimeVariable, TimeAbs))
-                else None
-            )
-            if table is not None:
-                # Runtime operands already hold QICK's nearest integer cycles.
-                known.append(
-                    self.math.prog.us2cycles(table) / get_fclk(self.math.prog)
-                    if isinstance(value, RuntimeEnd)
-                    else table
-                )
-            elif isinstance(value, RuntimeEnd):
-                if value.minimum is None or value.minimum != value.maximum:
-                    return None
-                known.append(value.minimum / get_fclk(self.math.prog))
-            elif isinstance(value, QickParam):
-                if value.is_sweep():
-                    return None
-                known.append(value.start)
-            elif isinstance(value, (float, int)):
-                known.append(value)
-            else:
-                return None
-        tables = [value for value in known if isinstance(value, TableParam)]
-        if not tables or any(table.loop != tables[0].loop for table in tables):
-            return None
-        return tables[0], known
-
-    def table_sum(
-        self, left: Time, right: Time, *, subtract: bool = False
-    ) -> TableParam | None:
-        """Carry table plus/minus static time without promoting runtime recipes."""
-        resolved = self._table_values((left, right))
-        if resolved is None:
-            return None
-        table, values = resolved
-        if sum(isinstance(value, TableParam) for value in values) != 1:
-            return None
-        a, b = values
-        return TableParam(
-            table.loop,
-            [
-                (a.values[i] if isinstance(a, TableParam) else a)
-                + (-1 if subtract else 1)
-                * (b.values[i] if isinstance(b, TableParam) else b)
-                for i in range(len(table.values))
-            ],
-        )
-
-    def table_choice(
-        self,
-        values: Sequence[Time | TimeExpression],
-        *,
-        maximum: bool = True,
-        selector: str | None = None,
-    ) -> TableParam | None:
-        """Retain a table/static max, min or same-loop branch selection.
-
-        This only accompanies the existing choice; it emits no instructions
-        and cannot reconstruct an unrelated runtime/register source.
-        """
-        resolved = self._table_values(values)
-        if resolved is None:
-            return None
-        table, known = resolved
-        if selector is not None and (
-            selector != table.loop or len(known) != len(table.values)
-        ):
-            return None
-        points = [
-            [
-                value.values[i] if isinstance(value, TableParam) else value
-                for value in known
-            ]
-            for i in range(len(table.values))
-        ]
-        choose = max if maximum else min
-        return TableParam(
-            table.loop,
-            [
-                row[i] if selector is not None else choose(row)
-                for i, row in enumerate(points)
-            ],
-        )
 
     def set_end(self, name: str, end: Time) -> None:
         self.math.check_end(end)

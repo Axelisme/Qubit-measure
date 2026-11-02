@@ -1494,7 +1494,7 @@ class TimelineBranch(Macro):
             operand = tail.cycles(value)
             tail.operations.append(WriteReg(dst=merged.register, src=operand.register))
         return self.book.remember_table(
-            merged, self.book.table_choice(values, selector=self.by)
+            merged, self.result_math.table_choice(values, selector=self.by)
         )
 
     def _merge_native(
