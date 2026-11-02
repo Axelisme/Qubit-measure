@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 from numpy.typing import NDArray
 
+from zcu_tools.analysis.failure import AnalysisFailed
 from zcu_tools.analysis.herald_transfer import selfcal_transfer
 
 
@@ -107,3 +108,29 @@ def test_rejects_unsupported_state_counts(two_state_sums: NDArray[np.float64], n
 def test_rejects_wrong_moment_shape(shape: tuple[int, ...]) -> None:
     with pytest.raises(ValueError, match="shape"):
         selfcal_transfer(np.zeros(shape))
+
+
+@pytest.mark.parametrize("case", ["single", "two_as_three", "collinear", "empty", "nan", "zero"])
+def test_unidentifiable_data_fails_instead_of_returning_transfer(
+    two_state_sums: NDArray[np.float64], case: str
+) -> None:
+    n_states = 2
+    if case == "single":
+        sums = exact_sums(np.array([1+2j]), 0.3, np.array([1.0]), np.ones((4, 1, 1)))
+    elif case == "two_as_three":
+        sums, n_states = two_state_sums, 3
+    elif case == "collinear":
+        n_states = 3
+        sums = exact_sums(
+            np.array([1+2j, 2+4j, 3+6j]), 0.3, np.array([0.6, 0.3, 0.1]),
+            np.array([np.eye(3), [[0.6, 0.3, 0.1], [0.2, 0.5, 0.3], [0.1, 0.4, 0.5]]])
+        )
+    elif case == "empty":
+        sums = np.empty((0, 6, 6))
+    elif case == "nan":
+        sums = np.full((4, 6, 6), np.nan)
+    else:
+        sums = np.zeros((4, 6, 6))
+
+    with pytest.raises(AnalysisFailed, match="identif|points|centers"):
+        selfcal_transfer(sums, n_states)
