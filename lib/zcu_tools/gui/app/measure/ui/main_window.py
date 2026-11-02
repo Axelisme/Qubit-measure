@@ -56,6 +56,7 @@ from zcu_tools.gui.widgets.file_dialog import nearest_existing
 from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 from zcu_tools.resources.entry import RoleResolutionError
 
+from .diagnostic_notice import DiagnosticNotice
 from .exp_tab_widget import ExpTabWidget, TabActions
 from .main_dialog_registry import MainDialogRegistry
 from .main_window_activity import activity_marker_presentation
@@ -204,6 +205,9 @@ class MainWindow(QMainWindow):
         # --- entry / point status bar ---
         main_layout.addLayout(self._build_context_bar())
 
+        self._diagnostic_notice = DiagnosticNotice(self)
+        main_layout.addWidget(self._diagnostic_notice)
+
         # --- tab widget ---
         self._tabs = self._build_experiment_tabs()
         # While no experiment tab is open, the area tells the user the next step.
@@ -263,6 +267,7 @@ class MainWindow(QMainWindow):
         if self._control_disposed:
             return
         self._workflow_tabs.dispose()
+        self._diagnostic_notice.dispose()
         if self._results_browser is not None:
             self._results_browser.close()
         self._dispose_control()
@@ -745,10 +750,20 @@ class MainWindow(QMainWindow):
         return self._ctrl.get_left_panel_width()
 
     def notify_diagnostic(self, severity: str, title: str, message: str) -> None:
-        """DiagnosticSink impl (ADR-0068): render a Controller diagnostic the Qt
-        way — error shows a non-modal report, info goes to the status bar."""
+        """Render a diagnostic on the Qt owner thread (ADR-0068).
+
+        Error severity uses an eight-second summary and full error log when the
+        Remote holder is online, otherwise a manual non-modal report. Empty
+        titles become Error. Other severities show message in the status bar.
+        """
         if severity == "error":
-            self.show_error_dialog(title or "Error", message)
+            status = self._ctrl.control_identity.status()
+            title = title or "Error"
+            if status.holder.startswith("rpc:") and status.online:
+                logger.error("%s\n%s", title, message)
+                self._diagnostic_notice.present(title, message)
+            else:
+                self.show_error_dialog(title, message)
         else:
             self.show_status_message(message)
 
