@@ -173,11 +173,9 @@ def test_time_tables_match_reencodable_linear_actual_points(consumer):
     linear, linear_env = time_program(values, linear=True, consumer=consumer)
     parameter = QickSweep1D("point", values[0], values[-1])
     linear.us2cycles(parameter)
-    actual = (
-        parameter.get_rounded({"point": len(values)})
-        .to_array({"point": len(values)})
-        .tolist()
-    )
+    actual = np.asarray(
+        parameter.get_rounded({"point": len(values)}).to_array({"point": len(values)})
+    ).tolist()
     scalar_shots = []
     for point, value in enumerate(actual):
         scalar, scalar_env = time_program(value, consumer=consumer)
