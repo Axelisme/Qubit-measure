@@ -73,8 +73,10 @@ def align_end(
 
     cycles = value * get_fclk(prog)
     if isinstance(cycles, TableParam):
-        return TableParam(
-            cycles.loop, [ceil_tick(v) / get_fclk(prog) for v in cycles.values]
+        return prog._timeline_book.math.cycles(
+            TableParam(
+                cycles.loop, [ceil_tick(v) / get_fclk(prog) for v in cycles.values]
+            )
         )
     if not isinstance(cycles, QickParam) or not cycles.is_sweep():
         scalar = cycles.start if isinstance(cycles, QickParam) else cycles
@@ -129,7 +131,10 @@ def step_time(prog, value: float | QickParam) -> float | QickParam:
     if isinstance(value, TableParam):
         raw = prog.us2cycles(value)
         raw.to_steps(prog.loop_dict)
-        return value.get_rounded(prog.loop_dict)
+        return TableParam(
+            value.loop,
+            [ceil_tick(v * get_fclk(prog)) / get_fclk(prog) for v in value.values],
+        )
     if not isinstance(value, QickParam):
         return value
     missing = value.spans.keys() - prog.loop_dict.keys()
