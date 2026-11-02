@@ -33,6 +33,7 @@ def time_program(value, *, table=False, consumer="delay"):
             ro_length=0.1,
             pre_delay=value if consumer == "pre_delay" else 0.0,
             post_delay=value if consumer == "post_delay" else 0.0,
+            trig_offset=value if consumer == "trig_offset" else 0.0,
         ).build("readout")
     )
     builder.delay_by_timeline()
@@ -56,7 +57,7 @@ def scheduled_shots(prog):
 
 
 @pytest.mark.parametrize(
-    "consumer", ["delay", "timeline_inc", "pre_delay", "post_delay"]
+    "consumer", ["delay", "timeline_inc", "pre_delay", "post_delay", "trig_offset"]
 )
 def test_time_table_matches_scalar_at_every_point_and_rep(consumer):
     values = [0.0213, 0.0107, 0.0354]
