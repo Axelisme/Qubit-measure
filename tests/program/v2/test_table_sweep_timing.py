@@ -16,6 +16,7 @@ from zcu_tools.program.v2.modules.waveform import (
 )
 
 from tests.program._profiles import load_soccfg
+from tests.program.v2.wave_observations import analyze, relative_shot
 
 Field = Literal["freq", "phase", "gain", "length", "delay", "readout_freq"]
 Mode = Literal["scalar", "linear", "table"]
@@ -109,33 +110,6 @@ def compile_scan(
     prog = builder.build()
     pulse = receiver.pulse if field == "readout_freq" else drive
     return prog, pulse.pulse_name(prog)
-
-
-def analyze(prog: TimelineProgramV2) -> ir.TimingAnalysis:
-    """Observe optimized linked assembly using owner-produced layout and memories."""
-    return ir.analyze_timing(
-        ir.CompiledTimingInput(
-            prog.prog_list,
-            prog.labels,
-            prog.timing_layout,
-            dmem=prog.compile_datamem(),
-            wmem=ir.compiled_wmem(prog),
-        )
-    )
-
-
-def relative_shot(shot: ir.ShotTiming) -> ir.ShotTiming:
-    """Discard only linked addresses and the accumulated preceding-shot reference."""
-    return replace(
-        shot,
-        start_cycle=0,
-        body_end_cycle=shot.body_end_cycle - shot.start_cycle,
-        end_cycle=shot.end_cycle - shot.start_cycle,
-        events=tuple(
-            replace(event, address=0, cycle=event.cycle - shot.start_cycle)
-            for event in shot.events
-        ),
-    )
 
 
 def assert_scalar_oracle(

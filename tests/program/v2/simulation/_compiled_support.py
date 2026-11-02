@@ -3,11 +3,11 @@
 import numpy as np
 from qick import QickConfig
 from zcu_tools.experiment.simulation import white_noise
-from zcu_tools.program.v2 import ir
 from zcu_tools.program.v2.simulation.compiled import build_compiled_request
 from zcu_tools.program.v2.timeline import TimelineProgramV2
 
 from tests.program._profiles import load_soccfg
+from tests.program.v2.wave_observations import analyze
 
 
 def program(
@@ -109,15 +109,7 @@ def clock_invariance_program(
 
 def scheduled_shots(prog):
     """Return per-shot event kinds, relative cycles and unsigned wave words."""
-    analysis = ir.analyze_timing(
-        ir.CompiledTimingInput(
-            prog.prog_list,
-            prog.labels,
-            prog.timing_layout,
-            dmem=prog.compile_datamem(),
-            wmem=ir.compiled_wmem(prog),
-        )
-    )
+    analysis = analyze(prog)
     return [
         tuple((e.kind, e.cycle - shot.start_cycle, e.wave_words) for e in shot.events)
         for shot in analysis.shots

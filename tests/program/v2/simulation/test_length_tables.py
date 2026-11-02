@@ -18,6 +18,7 @@ from zcu_tools.program.v2.modules.waveform import (
 
 from tests.program._profiles import load_soccfg
 from tests.program.v2.simulation._compiled_support import request, scheduled_shots
+from tests.program.v2.wave_observations import analyze, assert_scalar_shots
 
 RAMP_LENGTH_US = 0.04
 
@@ -249,8 +250,8 @@ def test_consecutive_native_auto_followers_match_scalar_timestamps(
             auto=True,
             followers=followers,
         )
-        expected_shots.append(scheduled_shots(scalar)[index if branch else 0])
-    assert scheduled_shots(prog) == expected_shots * (4 if outer else 2)
+        expected_shots.append(analyze(scalar).shots[index if branch else 0])
+    assert_scalar_shots(analyze(prog), expected_shots * (4 if outer else 2))
 
 
 @pytest.mark.parametrize("flat", [False, True])
