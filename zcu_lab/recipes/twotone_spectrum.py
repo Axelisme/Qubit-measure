@@ -65,10 +65,6 @@ class TwotoneSpectrumInputs(RecipeInputs):
         KEEP,
         description="Model type. Analysis only; omitted keeps value, null passes to owner.",
     )
-    plot_fit: bool | None | Keep = Field(
-        KEEP,
-        description="Plot fit. Analysis only; omitted keeps value, null passes to owner.",
-    )
 
 
 class TwotoneSpectrumReport(RecipeReport):
@@ -102,7 +98,8 @@ async def twotone_spectrum(
     linewidth. Ask before applying it, then save raw data and analysis.
 
     points → expts sets the sweep sample count.
-    Analysis controls: model_type, plot_fit. Omission retains each analysis value; null is passed to its owner.
+    model_type selects the lor/sinc fit. The fitted curve is always shown.
+    Omission retains the analysis value; null is passed to its owner.
     Missing Form values stop before acquisition; completed Run data is saved even if analysis fails.
     """
     tab = session.open_tab(
@@ -135,10 +132,7 @@ async def twotone_spectrum(
         analysis = await tab.analyze(
             "primary",
             result=TwotoneSpectrumSummary,
-            updates={
-                "model_type": inputs.model_type,
-                "plot_fit": inputs.plot_fit,
-            },
+            updates={"model_type": inputs.model_type},
         )
         if analysis.result is None:
             return TwotoneSpectrumReport(
