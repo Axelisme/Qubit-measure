@@ -26,8 +26,8 @@ def write_independent_labber_file(
     layout so the grouped reader can identify each variable. Mark finalized only
     after every log succeeds. Invalid rank/name, an empty first axis in rank
     three, or a slice identity colliding with an input variable raises ValueError
-    before opening;
-    I/O errors propagate and may leave a partial file. No intermediate file.
+    before opening. I/O errors propagate and may leave a partial file.
+    No intermediate file.
     """
     logs: list[tuple[str, LabberPayload, str]] = []
     for name, payload in payloads.items():

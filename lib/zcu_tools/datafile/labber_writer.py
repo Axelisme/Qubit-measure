@@ -36,8 +36,8 @@ def write_labber(
     "<destination stem> - <variable> <first axis name>=<coordinate>". Readers
     return the slices separately, without reassembling the original array.
     An empty first axis in rank three, slice identities colliding with input
-    variable names, and ranks above three raise ValueError before file creation. Rank-1/2 identities and log labels
-    stay unchanged. This uses Labber-only helpers, not a temporary native file.
+    variable names, and ranks above three raise ValueError before file creation.
+    Rank-1/2 identities and log labels stay unchanged. This uses Labber-only helpers, not a temporary native file.
     Existing paths raise FileExistsError. Bad arrays, grids, labels or unsupported
     layouts raise ValueError. I/O errors propagate and may leave a partial file.
     """
