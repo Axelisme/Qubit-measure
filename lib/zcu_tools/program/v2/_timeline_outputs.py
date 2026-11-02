@@ -18,6 +18,7 @@ from ._timeline_runtime import (
 )
 from ._timeline_state import TimelineBook
 from .modules.util import get_fclk
+from .table_param import TableParam
 
 
 def _static_ticks(prog, value: float | QickParam) -> int | None:
@@ -135,6 +136,8 @@ class TimelinePlacedPulse(TimelineObservedPulse):
         previous = self.book.channel_end(prog, self.ch, generator=True)
         if self.relative_t == "auto":
             end = self.book.math.maximum(end, previous)
+        if isinstance(self.relative_t, TableParam):
+            end = self.book.math.cycles(end)
         if isinstance(end, RuntimeEnd):
             scheduled = self.book.math.add(
                 end,
@@ -170,9 +173,12 @@ class TimelinePlacedPulse(TimelineObservedPulse):
                 if self.relative_t == "auto"
                 else placement_time(prog, self.relative_t)
             )
+            length = prog.pulses[self.name].get_length()
+            if isinstance(length, QickParam) and not length.is_sweep():
+                length = length.start
             self.event_end = EventEnd(
                 end,
-                offset + prog.pulses[self.name].get_length(),
+                offset + length,
                 (finish,),
                 _pulse_static_cycles(prog, self.ch, self.name, offset),
                 self.native_length(prog),
