@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 from collections.abc import Iterator
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
@@ -418,6 +419,18 @@ def member_gallery(qapp) -> Iterator[ComponentDriver]:
         QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
 
 
+@dataclass(frozen=True)
+class _RasterObservation:
+    """One member raster in window coordinates, with its four visible perimeter edges."""
+
+    stage_key: str
+    member_index: int
+    stage_bounds: QRect
+    member_bounds: QRect
+    raster_bounds: QRect
+    edges: list[bool]
+
+
 def test_gallery_member_rasters_fit_after_resize(
     member_gallery: ComponentDriver, tmp_path: Path
 ) -> None:
@@ -426,7 +439,7 @@ def test_gallery_member_rasters_fit_after_resize(
     evidence = Path(os.environ.get("GALLERY_MEMBER_EVIDENCE_DIR", str(tmp_path)))
     colours = ("#c02020", "#208020", "#2020c0", "#a020a0", "#208080", "#a06020")
     measurements = {}
-    all_rows: list[tuple[str, int, QRect, QRect, QRect, list[bool]]] = []
+    all_rows: list[_RasterObservation] = []
     for step, width in (("01-wide", 1000), ("02-narrow", 360), ("03-wide-again", 1000)):
         driver.resize_window(width, 1000)
         png = driver.screenshot(evidence / f"member-{step}.png")
@@ -435,7 +448,7 @@ def test_gallery_member_rasters_fit_after_resize(
         assert window.bounds is not None
         origin_x, origin_y, _, _ = window.bounds
         widgets = driver.visible().widgets
-        rows: list[tuple[str, int, QRect, QRect, QRect, list[bool]]] = []
+        rows: list[_RasterObservation] = []
         for stage_index, key in enumerate(("run", "analysis", "post")):
             stage = _visible_card_bounds(driver, key)
             members = sorted(
@@ -468,26 +481,37 @@ def test_gallery_member_rasters_fit_after_resize(
                         (x1 - 1, (y0 + y1) // 2),
                     )
                 ]
-                rows.append((key, index, stage, member, raster, edges))
+                rows.append(
+                    _RasterObservation(
+                        stage_key=key,
+                        member_index=index,
+                        stage_bounds=stage,
+                        member_bounds=member,
+                        raster_bounds=raster,
+                        edges=edges,
+                    )
+                )
         measurements[step] = [
             {
-                "stage": key,
-                "member": index,
-                "stage_bounds": stage.getRect(),
-                "member_bounds": member.getRect(),
-                "raster_bounds": raster.getRect(),
-                "edges": edges,
+                "stage": row.stage_key,
+                "member": row.member_index,
+                "stage_bounds": row.stage_bounds.getRect(),
+                "member_bounds": row.member_bounds.getRect(),
+                "raster_bounds": row.raster_bounds.getRect(),
+                "edges": row.edges,
             }
-            for key, index, stage, member, raster, edges in rows
+            for row in rows
         ]
         (evidence / "dimensions.json").write_text(json.dumps(measurements, indent=2))
         all_rows.extend(rows)
-    for key, index, stage, member, raster, edges in all_rows:
-        detail = (key, index, raster.getRect())
-        assert member.contains(raster), detail
-        assert stage.contains(raster), detail
-        assert all(edges), f"Raster perimeter is clipped: {detail}, edges={edges}"
-        assert abs(raster.width() * 3 - raster.height() * 4) <= 4, detail
+    for row in all_rows:
+        detail = (row.stage_key, row.member_index, row.raster_bounds.getRect())
+        assert row.member_bounds.contains(row.raster_bounds), detail
+        assert row.stage_bounds.contains(row.raster_bounds), detail
+        assert all(row.edges), f"Raster perimeter is clipped: {detail}, edges={row.edges}"
+        assert (
+            abs(row.raster_bounds.width() * 3 - row.raster_bounds.height() * 4) <= 4
+        ), detail
 
 
 def test_gallery_narrow_single_column_three_cards(qapp):

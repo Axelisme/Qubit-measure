@@ -157,7 +157,7 @@ def _record_summary(item: RecordWriteback, *, compact: bool) -> str:
         else:
             text = json.dumps(value, ensure_ascii=False)
         fields.append(f"{key}={text}")
-    return ", ".join(fields)
+    return " ".join(", ".join(fields).splitlines())
 
 
 class _MiddleElidedLabel(QLabel):
