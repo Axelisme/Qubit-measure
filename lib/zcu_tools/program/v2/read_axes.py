@@ -18,7 +18,7 @@ from .timeline import TimelineProgramV2
 
 @dataclass(frozen=True)
 class IQ:
-    """An unclassified read axis with vector (1, I, Q).
+    """An unclassified read axis with vector (1, I, Q, I², IQ, Q²).
 
     read names one logical compiled readout, present once on each Branch path.
     tone is None for PulseReadout or a zero-based MuxReadout cfg tone position.
@@ -55,7 +55,8 @@ def shot_sums(
     """Resolve compiled read labels and return a per-point shot-sum processor.
 
     prog is a compiled TimelineProgramV2. axes lists vectors
-    in output-axis order; repeat a read for second moments. Empty axes raise
+    in output-axis order. IQ includes all moments through second order; repeated
+    reads form outer products of those features. Empty axes raise
     ValueError before read-label resolution or acquisition. Timeline labels are
     emit tags, or module names when untagged.
     Each label must identify one emission on every feasible Branch path.
@@ -99,7 +100,17 @@ def shot_sums(
         for ch, index, classify in resolved:
             values = iq[ch][:, :, index]
             vector = (
-                np.concatenate([np.ones((*values.shape[:-1], 1)), values], axis=-1)
+                np.stack(
+                    [
+                        np.ones(values.shape[:-1]),
+                        values[..., 0],
+                        values[..., 1],
+                        values[..., 0] ** 2,
+                        values[..., 0] * values[..., 1],
+                        values[..., 1] ** 2,
+                    ],
+                    axis=-1,
+                )
                 if classify is None
                 else classify(values)
             )
