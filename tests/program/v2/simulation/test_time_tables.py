@@ -3,10 +3,11 @@
 from dataclasses import replace
 
 import pytest
-
 from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.program.v2 import TimelineBuilder, ir
+from zcu_tools.program.v2.modules.base import Module
 from zcu_tools.program.v2.modules.delay import DelayAuto
+from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 
@@ -14,8 +15,23 @@ from tests.program._profiles import load_soccfg
 from tests.program.v2.simulation._compiled_support import request
 
 
+class PulseAtTime(Module):
+    def __init__(self, value, timeline):
+        self.value = value
+        self.timeline = timeline
+        self.pulse = PulseCfg(
+            ch=1, nqz=1, freq=80, gain=0.2, waveform=ConstWaveformCfg(length=0.1)
+        ).build("drive")
+
+    def declare(self, prog):
+        self.pulse.declare(prog)
+
+    def lower(self, prog, *, timeline, tag):
+        prog.pulse(1, self.pulse.pulse_name(prog), t=self.value, timeline=self.timeline)
+
+
 def time_program(value, *, table=False, consumer="delay"):
-    env = white_noise(load_soccfg(1, 1), std_adc=0, routes=((0, 0),), seed=None)
+    env = white_noise(load_soccfg(2, 1), std_adc=0, routes=((0, 0),), seed=None)
     builder = TimelineBuilder(env.soccfg, reps=2, initial_delay=0, relax_delay=0.1)
     if table:
         value = builder.add_table_sweep("point", value)
@@ -35,6 +51,8 @@ def time_program(value, *, table=False, consumer="delay"):
         post_delay=value if consumer == "post_delay" else 0.0,
         trig_offset=value if consumer == "trig_offset" else 0.0,
     ).build("readout")
+    if consumer in ("pulse_t", "native_t"):
+        builder.emit(PulseAtTime(value, "default" if consumer == "pulse_t" else None))
     builder.emit(receiver)
     if consumer == "delay_auto":
         builder.delay_auto(value)
@@ -72,6 +90,8 @@ def scheduled_shots(prog):
         "pre_delay",
         "post_delay",
         "trig_offset",
+        "pulse_t",
+        "native_t",
     ],
 )
 def test_time_table_matches_scalar_at_every_point_and_rep(consumer):
