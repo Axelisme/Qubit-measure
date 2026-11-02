@@ -7,7 +7,6 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import numpy as np
-from pydantic import BaseModel
 from zcu_tools.analysis.fluxdep.line_state import FluxPickInputs, FluxPickState
 from zcu_tools.cfg_model import validate_device_name
 from zcu_tools.core.element import ElementIdentity
@@ -77,16 +76,6 @@ class MuxFluxPickParams:
             "description": "Initial integer-flux DC value; None uses Run capture"
         },
     )
-
-
-class MuxFluxPickSummary(BaseModel):
-    """Picked native DC half/integer/period values and captured original tone/Q identity."""
-
-    tone: int
-    qubit: str
-    flx_half: float | None
-    flx_int: float | None
-    flx_period: float | None
 
 
 @dataclass
@@ -194,11 +183,10 @@ def get_writeback_items(
     """Propose only this analysis's Q calibration using the Run capture.
 
     Missing capture or cfg yields no proposals. Identity mismatches raise
-    instead of guessing a target. Both scan types propose only the selected
-    signed period in qubit.flux.period, qubit.flux.offset and a raw-fit record. Global
-    uses the actual cfg.flux_dev name, not a reserved coil alias. Simultaneous
-    local scans still calibrate each participant using other Run-start biases.
-    Conversion and record evidence use only Run parameters and device snapshot.
+    instead of guessing a target. Propose the selected signed period in
+    qubit.flux.period, qubit.flux.offset and a raw-fit record, using the actual
+    cfg.flux_dev name. Conversion and record evidence use only Run parameters
+    and the device snapshot.
     """
     cfg, picked = req.run_result.cfg, req.analyze_result
     if cfg is None:

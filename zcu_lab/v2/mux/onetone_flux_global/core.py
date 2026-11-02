@@ -10,7 +10,7 @@ from typing import Annotated, ClassVar, Literal
 import numpy as np
 from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
-from pydantic import Field, StrictInt, model_validator
+from pydantic import Field, StrictInt, field_validator, model_validator
 from zcu_tools.cfg_model import ConfigBase, DeviceName, FieldMeta
 from zcu_tools.experiment import Experiment
 from zcu_tools.experiment.axes_spec import GroupedAxesSpec
@@ -86,18 +86,27 @@ class OnetoneFluxGlobalCfg(ConfigBase):
         ),
     ] = 1.0
 
+    @field_validator("df")
+    @classmethod
+    def validate_finite_df(cls, value: SweepCfg) -> SweepCfg:
+        """Reject nonfinite nominal offsets before any DC write."""
+        if not all(np.isfinite(v) for v in (value.start, value.stop, value.step)):
+            raise ValueError("df start, stop and step must be finite MHz values")
+        return value
+
     @model_validator(mode="after")
     def validate_scan(self) -> OnetoneFluxGlobalCfg:
         """Reject mismatched identities, invalid indices and nonfinite scans."""
         names = [tone.name for tone in self.tones]
-        if len(names) != len(self.readout.tones):
+        if len(names) != len(self.readout.tones) or len(set(names)) != len(names):
             raise ValueError(
                 "tones must name every original readout position exactly once"
             )
         validate_participants(names, self.participants)
-        for name, sweep in (("flux", self.flux), ("df", self.df)):
-            if not all(np.isfinite(v) for v in (sweep.start, sweep.stop, sweep.step)):
-                raise ValueError(f"{name} coordinates must be finite")
+        if not all(
+            np.isfinite(v) for v in (self.flux.start, self.flux.stop, self.flux.step)
+        ):
+            raise ValueError("flux coordinates must be finite")
         return self
 
 
