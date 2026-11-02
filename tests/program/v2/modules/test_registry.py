@@ -1,4 +1,5 @@
 from qick.asm_v2 import QickParam
+from zcu_tools.program.v2 import TableParam
 from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.registry import PulseRegistry
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
@@ -41,6 +42,23 @@ def test_calc_name_stable_with_qickparam():
     cfg1 = _make_cfg(freq=QickParam(start=5000.0, spans={"s": 1.0}))
     cfg2 = _make_cfg(freq=QickParam(start=5000.0, spans={"s": 1.0}))
     assert reg.calc_name(cfg1) == reg.calc_name(cfg2)
+
+
+def test_registry_shares_table_contents_but_separates_loop_and_point_values():
+    registry = PulseRegistry()
+    first = _make_cfg(freq=TableParam("point", [80, 90, 85]))
+    same = _make_cfg(freq=TableParam("point", [80, 90, 85]))
+    other_values = _make_cfg(freq=TableParam("point", [80, 90, 86]))
+    other_loop = _make_cfg(freq=TableParam("other", [80, 90, 85]))
+    assert registry.calc_name(first) == registry.calc_name(same)
+    assert (
+        len({registry.calc_name(cfg) for cfg in (first, other_values, other_loop)}) == 3
+    )
+    assert registry.register("first", first)
+    assert not registry.register("same", same)
+    assert registry.register("values", other_values)
+    assert registry.register("loop", other_loop)
+    assert registry.count == 3
 
 
 def test_runtime_adc_channel_is_part_of_registry_identity():

@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 from qick.asm_v2 import QickParam, QickSweep1D
 from zcu_tools.experiment.simulation import white_noise
-from zcu_tools.program.v2 import SweepCfg, TableParam, TimelineBuilder, ir
+from zcu_tools.program.v2 import SweepCfg, TableParam, TimelineBuilder
 from zcu_tools.program.v2.modules.pulse import Pulse, PulseCfg
 from zcu_tools.program.v2.modules.readout import PulseReadout, PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import (
@@ -17,6 +17,7 @@ from zcu_tools.program.v2.modules.waveform import (
 
 from tests.program._profiles import load_soccfg
 from tests.program.v2.simulation._compiled_support import request
+from tests.program.v2.wave_observations import executed_words
 
 
 def field_program(
@@ -111,22 +112,6 @@ def field_program(
     builder.delay_by_timeline()
     prog = builder.build()
     return prog, env, pulse.pulse_name(prog)
-
-
-def executed_words(prog):
-    analysis = ir.analyze_timing(
-        ir.CompiledTimingInput(
-            prog.prog_list,
-            prog.labels,
-            prog.timing_layout,
-            dmem=prog.compile_datamem(),
-            wmem=ir.compiled_wmem(prog),
-        )
-    )
-    return [
-        tuple(e.wave_words for e in shot.events if e.wave_words is not None)
-        for shot in analysis.shots
-    ]
 
 
 def assert_scalar_points(prog, env, values, field, **options):
