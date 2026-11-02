@@ -178,7 +178,7 @@ Native cfg uses schema 5.0. Loading a schema-4 file keeps its data and metadata
 but leaves cfg unavailable; no cfg conversion is attempted. The data can still
 be plotted, but identity-dependent picking needs the saved full cfg.
 
-Labber export currently does not support this three-dimensional independent
-grid. Save reports that output as failed while native data and other successful
-outputs remain saved. Inspect each output status before treating a Save as
-complete. Load the native `data.h5` for analysis and writeback.
+Labber export splits this tone-major three-dimensional independent grid along
+the first axis into one two-dimensional log per tone, with all logs in the same
+Labber file. Inspect each output status before treating a Save as complete.
+Keep the native `data.h5` for the complete dataset, analysis and writeback.
