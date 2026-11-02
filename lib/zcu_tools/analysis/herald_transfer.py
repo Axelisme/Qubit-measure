@@ -39,6 +39,8 @@ def selfcal_transfer(
     """Infer shared readout calibration and transfer from (N, 6, 6) IQ sums."""
     if n_states not in (2, 3):
         raise ValueError("n_states must be 2 or 3")
+    if sums.ndim != 3 or sums.shape[1:] != (6, 6):
+        raise ValueError("sums must have shape (N, 6, 6)")
     measured = np.isfinite(sums).all(axis=(1, 2)) & (sums[:, 0, 0] > 0)
     valid_sums = sums[measured]
     counts = valid_sums[:, 0, 0]
@@ -115,7 +117,7 @@ def _fit_centers(
                 candidates.append(center)
             if len(candidates) == n_states:
                 break
-        centers = np.array(candidates)
+        centers = np.array(candidates, dtype=np.complex128)
         score = float(np.sum((_lift(centers, float(variance)) @ projector)**2))
         if score < best_score:
             best_score = score
