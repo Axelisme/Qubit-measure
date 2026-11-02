@@ -1,6 +1,6 @@
 # IR architecture guide
 
-**Last updated:** 2026-11-01，s14 output offsets and scheduling windows
+**Last updated:** 2026-11-02，查表 loop metadata 與可選 WMEM 分析
 
 **讀者：** framework-dev。QICK ASM V2 的 IR 分層、分析與 lowering 契約。
 
@@ -66,11 +66,33 @@ Its `sweeps` dict has `registers` and `waves` maps. Registers use canonical
 addresses; waves use zero-based WMEM word addresses and field indexes 0..5
 (freq, phase, env, gain, length, conf). Each field contains integer `start` and
 per-loop-iteration `step` words from resolved QICK definitions. Inner IR loops
-emit empty maps. Native `tables` maps WMEM word/field indexes to DMEM word
-offsets for declared deterministic hooks. The tables contain rotated exec-after
-values: point zero retains initial WMEM, later points read offset + index - 1,
-and the last table word restores the initial field. The waveform macro owns
-target resolution. Loop producers collect only the resolved numeric definitions.
+emit empty maps. Native table sweeps add these two maps to `LOOP_START.info`:
+
+```python
+{
+    "tables": {wave_address: {field_index: dmem_offset}},
+    "register_tables": {register_address: {"offset": dmem_offset, "values": words}},
+}
+```
+
+`wave_address` is a zero-based WMEM word address. `field_index` uses the same
+0..5 order as `sweeps.waves`. `register_address` is a canonical register address,
+such as `r3`. `words` holds the ordered signed int32 register values, with length `n`.
+All `dmem_offset` values are zero-based word offsets into rotated DMEM tables.
+Point zero uses initial WMEM/register values. Point index `i > 0` reads
+`dmem_offset + i - 1`. The closing shell updates every table owned by that loop
+on every iteration, even when a branch did not play the waveform.
+Its final update restores the first value before the next outer iteration.
+Multiple tables on one loop
+advance independently; waveform and register tables use the same rotation.
+
+`AdditionalMacroMixin._init_declarations` initializes `loop_wave_tables` and
+`loop_register_tables` and resets both on each declaration rebuild during compile.
+`MarkedOpenLoop` discovers `TableRawParam` waveform fields and allocates their
+rotated tables. `MarkedCloseLoop` discovers table-register initializers after body
+preprocessing, allocates their tables and emits both kinds of closing-shell load.
+The loop markers copy these resolved definitions rather than infer them from ASM.
+
 `LOOP_BODY_START` follows native counter initialization; `LOOP_BODY_END` precedes
 native sweep updates/backedge; `LOOP_END` follows the complete closing shell.
 The compiler snapshots the full logical stream, then gives the optimizer a new
@@ -117,9 +139,35 @@ and follows known register jumps without modifying assembly or memory.
 Missing data, malformed words, unknown/out-of-range addresses, writes and read
 side effects raise errors; memory is never implicitly zero-filled.
 
+Pass `wmem=compiled_wmem(prog)` to attach hardware words to wave events:
+
+```python
+from zcu_tools.program.v2.ir import CompiledTimingInput, analyze_timing, compiled_wmem
+
+analysis = analyze_timing(CompiledTimingInput(
+    prog.prog_list, prog.labels, prog.timing_layout,
+    dmem=prog.compile_datamem(), wmem=compiled_wmem(prog),
+))
+```
+
+The example uses a successfully compiled `TimelineProgramV2` named `prog`.
+`compiled_wmem` returns a detached mapping from zero-based waveform addresses to
+six unsigned words in freq, phase, env, gain, length, conf order, with widths
+32/32/24/32/32/16 bits. Swept fields use their initial compiled values.
+The caller may also supply a mapping with that shape. An empty mapping supplies
+no waveforms; an executed access to a missing address raises `ValueError`.
+`compiled_wmem` raises `ValueError` if no compiled binary is available.
+
+With initial WMEM, analysis tracks `r_wave <- wmem`, individual wave-register
+writes and plain `WMEM_WR` on an analysis-owned copy. Each wave event's
+`wave_words` contains the six words output by `WPORT_WR`, from WMEM or `r_wave`.
+Analysis does not decode those words into physical units or change the inputs.
+Without `wmem`, WMEM loads leave wave-register values unknown and event
+`wave_words` is `None`. Unknown wave data raises if it affects time or control.
+Omitting WMEM does not provide zero-filled waveforms.
+
 Known register arithmetic, sweep updates/resets, literal/register event times
-and known loop branches are evaluated from assembly. Waveform contents are not
-modeled; unknown wave data propagates until it affects time or control.
+and known loop branches are evaluated from assembly.
 Unsupported instructions, unknown timing/control values and inconsistent layouts
 raise errors instead of returning partial or guessed timing. Native Resync reads
 hardware s_usr_time/s11 and raises an error naming that source. The analysis

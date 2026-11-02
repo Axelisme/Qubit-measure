@@ -20,7 +20,7 @@ from .device_name import (
 )
 from .field_meta import FieldMeta, get_field_meta
 from .form_nodes import FormNode, Hidden, LogPoints, Range
-from .gain import Gain, GainParam, validate_gain
+from .gain import Gain, validate_gain
 from .inputs import CfgInputMap, CfgInputValue
 from .materialization import (
     ModuleCfgFactory,
@@ -87,7 +87,6 @@ __all__ = [
     "LinearClassifier",
     "ReadoutClassifier",
     "Gain",
-    "GainParam",
     "validate_gain",
     "Expr",
     "Slot",

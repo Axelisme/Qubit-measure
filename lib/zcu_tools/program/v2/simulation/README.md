@@ -1,6 +1,6 @@
 # Explicit acquisition environments
 
-**Last updated:** 2026-11-02，tmux wave 分派與 tport trigger
+**Last updated:** 2026-11-02，查表掃描與逐點 native timing
 
 **讀者：** framework-dev。模擬 acquisition 的 request、round 與 raw source 契約。
 
@@ -73,17 +73,24 @@ reads `prog.compiled_stream` and returns detached numeric slots without calling 
 Its optional `charge_requirements` keyword preserves caller requirements in the
 request for environment-owned physical validation, without inferring drive roles.
 It predecodes the snapshot once and evaluates scan points as independent array
-lanes. `LOOP_START` provides resolved register/wave start and step words, plus
-rotated DMEM table hooks. The builder checks these definitions against the
-compiled initial words and loop shells; missing keys or inconsistent metadata
-raise before request construction. Reps remain request metadata and are not
-executed. Marked shot-local loops iterate across lanes with `index < n` masks,
+lanes. `LOOP_START` provides resolved register/wave start and step words.
+Its `tables` map associates WMEM word addresses and field indexes with rotated
+DMEM offsets. Its `register_tables` map associates canonical register addresses
+with `offset` and ordered integer `values`. The builder applies each point's
+wave fields and time-register values from these definitions.
+The metadata shape is owned by the [IR snapshot contract](../ir/README.md#pre-optimization-compile-snapshot).
+The builder checks the definitions against the compiled initial words and loop
+shells; missing keys or inconsistent metadata raise before request construction.
+Reps remain request metadata and are not executed. Marked shot-local loops iterate across lanes with `index < n` masks,
 including zero and register-driven counts, without expanding the instruction stream.
 A static live-in guard rejects registers or memory that a shot reads before
 initialization and also writes across points/reps, even for equal-valued or
 unobserved updates. Reading the outer reps counter in the shot is also an
 unsupported live-in; sweep indices and shot-local counters remain supported.
 Prologue-only constants and shot-local initialization remain supported.
+Declared table registers are supported live-ins when their initial values and
+closing-shell loads match `register_tables`; arbitrary cross-shot writes remain
+unsupported.
 The builder also rejects unresolved readout routes. An ADC without a wired
 generator route receives an explicit missing-route diagnostic with read and time.
 Content after the terminal self-jump is rejected, including unreachable NOPs;
@@ -271,7 +278,7 @@ loop, case and source context.
 
 Supported controls are Pulse, PulseReadout, MuxReadout, Delay, SoftDelay, DelayAuto,
 LoadValue, LoadWord, native repeat/branch, ComputedPulse, TableLengthPulse,
-TablePulseReadout and the existing reset wrappers. Parallel sequences use native
+and the existing reset wrappers. Parallel sequences use native
 fork/join and preserve compiled emission order. Their register effects follow the
 same shot-local and live-in rules as other instructions. Reset wrappers emit
 actual pulses only; they do not reset a quantum state. LoadValue compression
@@ -321,10 +328,18 @@ without conversion.
 
 ComputedPulse and TableLengthPulse follow the selected compiled waveform and
 timestamp effects. The frontend does not pad a selected event to the longest
-candidate. TablePulseReadout first plays its initial
-compiled template; only its named loop's exec-after hook prepares the next words.
-The last update restores table entry zero for the next outer repetition. Register
-and template state belongs to one frontend preparation, never to another acquire.
+candidate. `add_table_sweep(name, values)` uses the same top-level axes as
+`add_sweep(name, spec)`, with per-point wave fields or time-register values instead
+of linear increments. Multiple tables on one loop keep their independent values.
+The named loop's closing shell prepares the next values after every iteration,
+including shots that do not play that waveform.
+The last update restores table entry zero for the next outer loop or repetition.
+Each point follows the corresponding scalar program's hardware words.
+Linear/table parity additionally requires exact scalar re-encoding of the linear
+sweep's actual floats. Truncating fields such as gain can differ by one least unit
+on re-encoding; see [program table sweeps](../README.md#查表掃描).
+Register and template state belongs to one frontend preparation and is not shared
+with another acquire.
 The binding retains detached immutable DAC envelopes in a 32 MiB LRU pool across
 acquisitions. Every preparation checks current DAC content, normalization, clocks
 and flat-top duration; names and program identities are not cross-acquire keys.

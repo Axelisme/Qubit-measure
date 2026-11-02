@@ -42,6 +42,7 @@ from ._timeline_runtime import (
 )
 from .macro.table import TableSelection
 from .macro.write_reg import WriteRegOp
+from .table_param import TableParam
 
 if TYPE_CHECKING:
     from .timeline import TimelineProgramV2
@@ -407,6 +408,10 @@ class TimelineBook:
 
     def __init__(self):
         self.ends: dict[str, Time] = {"default": 0.0}
+        # RuntimeEnd compares by value, but provenance belongs to this exact end.
+        # Keep the end alive with its table so its id cannot be reused. A new
+        # non-table end has no entry; saved immutable ends retain their source.
+        self.table_ends: dict[int, tuple[RuntimeEnd, TableParam]] = {}
         self.shell_wait_bound: int | None = None
         self.cycle_axes: dict[str, CycleAxis] = {}
         # Native length sweeps are immutable program parameters. Share their
@@ -592,6 +597,30 @@ class TimelineBook:
                 )
             )
         self.source_expressions[macro.dst] = expression
+
+    def remember_table(self, end: RuntimeEnd, table: TableParam | None) -> RuntimeEnd:
+        """Associate this exact end with a TableParam of per-point times in us.
+
+        table is the original cycles() input or an exact table/static result.
+        None leaves the association unchanged. Return the same end object;
+        this does not change registers, expressions or scheduled times.
+        """
+        if table is not None:
+            self.table_ends[id(end)] = (end, table)
+        return end
+
+    def table_source(self, end: Time) -> TableParam | None:
+        """Return the original per-point us table for this exact end, or None.
+
+        A TableParam input returns itself. A RuntimeEnd returns only its
+        recorded identity association, without rounding its source values.
+        A new end with no association returns None, even if its register or
+        expression equals a previously recorded end.
+        """
+        if isinstance(end, TableParam):
+            return end
+        pair = self.table_ends.get(id(end))
+        return None if pair is None else pair[1]
 
     def set_end(self, name: str, end: Time) -> None:
         self.math.check_end(end)

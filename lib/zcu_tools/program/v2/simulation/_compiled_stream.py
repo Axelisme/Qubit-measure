@@ -113,9 +113,31 @@ def _loop_definitions(inst: MetaInst) -> None:
         raise ValueError(f"missing loop definition key {exc}") from exc
 
 
+def _register_table_definitions(inst: MetaInst) -> None:
+    """Validate native register addresses, signed words and rotated DMEM offsets."""
+    registers = inst.info.get("register_tables", {})
+    if not isinstance(registers, dict):
+        raise ValueError("invalid register table definitions")
+    for name, definition in registers.items():
+        if not isinstance(name, str) or not isinstance(definition, dict):
+            raise ValueError("invalid register table address/definition")
+        values, offset = definition["values"], definition["offset"]
+        if not isinstance(offset, int) or offset < 0:
+            raise ValueError("invalid register table DMEM offset")
+        if (
+            not isinstance(values, (list, tuple))
+            or len(values) != inst.info["n"]
+            or not all(
+                isinstance(word, int) and -(2**31) <= word < 2**31 for word in values
+            )
+        ):
+            raise ValueError("invalid register table integer words")
+
+
 def _table_definitions(inst: MetaInst) -> None:
     if inst.info.get("native") is not True:
         return
+    _register_table_definitions(inst)
     tables = inst.info["tables"]
     if not isinstance(tables, dict):
         raise ValueError("invalid table definitions")

@@ -300,6 +300,7 @@ def guard_live_in(
         marker = records[loop.start].instruction
         if isinstance(marker, MetaInst):
             swept.update(marker.info["sweeps"]["registers"])
+            swept.update(marker.info.get("register_tables", {}))
     constants: dict[str, _AddressValue] = {
         name: int(value[0])
         for name, value in seed.registers.items()

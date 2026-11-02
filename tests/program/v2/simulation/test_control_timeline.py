@@ -19,7 +19,6 @@ from zcu_tools.program.v2.modules.pulse import PulseCfg, TableLengthPulse
 from zcu_tools.program.v2.modules.readout import (
     PulseReadout,
     PulseReadoutCfg,
-    TablePulseReadout,
 )
 from zcu_tools.program.v2.modules.reset import (
     BathResetCfg,
@@ -278,23 +277,6 @@ def test_loadword_uint32_frequency_and_signed_gain_are_decoded_only_by_readout()
             for p in range(int(np.prod(request.point_dims)))
         )
     ] == pytest.approx([100, 200], abs=1e-4)
-
-
-def test_table_readout_wrap_conflicting_with_initial_template_is_rejected():
-    env = white_noise(load_soccfg(), std_adc=0, seed=None, routes=((0, 0),))
-    gen, adc = readout_freq_words(
-        env.soccfg, [200, 300], gen_ch=0, ro_ch=0, mixer_freq=None, nqz=1
-    )
-    # The compiled template starts at cfg.freq=100. The last hook restores table[0]=200.
-    readout = TablePulseReadout(
-        "readout", receiver(), idx_reg="axis", freq_words=gen, ro_freq_words=adc
-    )
-    prog = compile_modules(env.soccfg, modules=[readout], sweep=[("axis", 2)], reps=1)
-    with pytest.raises(
-        ValueError, match=r"MetaInst.*preopt.*axis.*table wrap disagrees"
-    ):
-        prog.acquire(env.soc, progress=False)
-    assert not env.soc.binding.rounds
 
 
 @pytest.mark.parametrize(

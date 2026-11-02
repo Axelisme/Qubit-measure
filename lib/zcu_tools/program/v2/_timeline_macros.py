@@ -63,6 +63,7 @@ from .macro.structure import MarkedCloseLoop, MarkedOpenLoop
 from .macro.table import TableSelection
 from .modules.base import Module
 from .modules.util import get_fclk
+from .table_param import TableParam
 
 
 class TimelineFork(Macro):
@@ -162,6 +163,9 @@ class TimelineRuntimeAdvance(Macro):
             not isinstance(end, RuntimeEnd) and _bounds(end)[1] <= 1e-12
             for end in remaining
         ):
+            # No tracked end needs bounds for an arbitrary author register.
+            # Certified sources, including table init, still require validation.
+            self.book.math.source(self.source.time_reg, author=True)
             self.book.decrement(advance)
             return
         runtime = self.book.math.source(self.source.time_reg)
@@ -186,6 +190,7 @@ class TimelineBoundary(Macro):
         super().preprocess(prog)
         if self.section == "reset":
             self.book.ends = {"default": 0.0}
+            self.book.table_ends.clear()
             self.book.cycle_axes.clear()
             self.book.source_expressions.clear()
             self.book.branch_provenance.clear()
@@ -254,7 +259,9 @@ class TimelineAdvance(TimedMacro):
         else:
             duration = (
                 step_time(prog, self.duration)
-                if self.aligned or isinstance(self.duration, QickParam)
+                if self.aligned
+                or isinstance(self.duration, QickParam)
+                and not isinstance(self.duration, TableParam)
                 else self.duration
             )
         previous = self.book.end(self.timeline)
@@ -357,6 +364,8 @@ class TimelineAdvance(TimedMacro):
             if isinstance(value, RuntimeEnd):
                 registers.append(value)
             else:
+                if isinstance(value, QickParam) and not value.is_sweep():
+                    value = value.start
                 fractional += value
         static_cycles = event.static_cycles
         if static_cycles is None and isinstance(event.offset, (float, int)):
@@ -393,7 +402,9 @@ class TimelineAdvance(TimedMacro):
             for previous in event.rounded:
                 if isinstance(previous, RuntimeEnd):
                     covers.extend(previous.covers)
-            result = replace(result, covers=tuple(covers))
+            result = self.book.remember_table(
+                replace(result, covers=tuple(covers)), self.book.table_source(result)
+            )
         return result
 
     def list_time_params(self) -> list[str]:
@@ -402,7 +413,7 @@ class TimelineAdvance(TimedMacro):
     def get_time_param(self, name: str) -> QickParam:
         if name != "t":
             raise RuntimeError("timeline advances expose only the t parameter")
-        if isinstance(self.resolved_time, RuntimeEnd):
+        if isinstance(self.resolved_time, (RuntimeEnd, TableParam)):
             return self.book.math.time_parameter(self.resolved_time)
         return (
             self.resolved_time
@@ -971,19 +982,44 @@ class NativeTimelineDelay(TimedMacro):
         super().__init__(tag=getattr(source, "tag", None))
         self.book = book
         self.source = source
+        self.actual_time: RuntimeEnd | None = None
 
     def preprocess(self, prog) -> None:
         auto = self.book.channel_maximum(
             prog, gens=self.source.gens, ros=self.source.ros
         )
+        if isinstance(self.source.t, TableParam) and not isinstance(auto, RuntimeEnd):
+            maximum = prog.get_max_timestamp(gens=self.source.gens, ros=self.source.ros)
+            if isinstance(maximum, QickParam) and not maximum.is_sweep():
+                maximum = maximum.start
+            original = self.source.t
+            self.source.t = original + maximum
+            self.source.auto = False
+            try:
+                self.source.preprocess(prog)
+            finally:
+                self.source.t = original
+                self.source.auto = True
+            return
         if not isinstance(auto, RuntimeEnd):
             self.source.preprocess(prog)
             return
-        actual = self.book.math.add(auto, step_time(prog, self.source.t))
+        actual = self.book.math.add(
+            auto,
+            self.source.t
+            if isinstance(self.source.t, TableParam)
+            else step_time(prog, self.source.t),
+        )
+        self.actual_time = actual
+        original = self.source.t
+        if isinstance(original, TableParam):
+            # QICK only allocates metadata here; the real operand is actual.
+            self.source.t = 0.0
         self.book.native_only = True
         try:
             self.source.preprocess(prog)
         finally:
+            self.source.t = original
             self.book.native_only = False
         self.source.t_regs["t"] = self.book.math.cycles(actual).register
         self.book.decrement(actual)
@@ -992,6 +1028,8 @@ class NativeTimelineDelay(TimedMacro):
         self.source.translate(prog)
 
     def get_time_param(self, name: str) -> QickParam:
+        if name == "t" and self.actual_time is not None:
+            return self.book.math.time_parameter(self.actual_time)
         return self.source.get_time_param(name)
 
     def list_time_params(self) -> list[str]:
@@ -1068,7 +1106,10 @@ class PreparedTimelineMacro(TimedMacro):
     def get_time_param(self, name: str) -> QickParam:
         if not isinstance(self.source, TimedMacro):
             raise RuntimeError("this operation has no time parameters")
-        return self.source.get_time_param(name)
+        value = self.source.get_time_param(name)
+        return (
+            self.math.time_parameter(value) if isinstance(value, TableParam) else value
+        )
 
 
 class FixedRepeatLoop(MarkedOpenLoop):
@@ -1452,7 +1493,9 @@ class TimelineBranch(Macro):
         for tail, value in zip(self.tails, values, strict=True):
             operand = tail.cycles(value)
             tail.operations.append(WriteReg(dst=merged.register, src=operand.register))
-        return merged
+        return self.book.remember_table(
+            merged, self.result_math.table_choice(values, selector=self.by)
+        )
 
     def _merge_native(
         self,
@@ -1490,7 +1533,10 @@ class TimelineBranch(Macro):
                     self.result_math.covers(result[name], snapshot[ch])
                     for snapshot, result in zip(snapshots, results, strict=True)
                 ):
-                    self.book.ends[name] = replace(end, covers=(*end.covers, value))
+                    self.book.ends[name] = self.book.remember_table(
+                        replace(end, covers=(*end.covers, value)),
+                        self.book.table_source(end),
+                    )
             self.book.native_timestamp(
                 prog,
                 value,

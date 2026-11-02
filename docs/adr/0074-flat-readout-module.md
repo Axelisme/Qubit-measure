@@ -213,9 +213,10 @@ Pulse readout 在 module 起點送出 readout configuration，在 `trig_offset` 
 
 ### 高階頻率與低階 words 分開
 
-`TablePulseReadout` 保留成對的 generator／ADC frequency words。
-`freq_val`、`ro_freq_val`、`freq_words` 與 `ro_freq_words` 是 runtime register／table 契約，
-不是持久 cfg 的兩個頻率。兩種 words 表示同一語意頻率，由各硬體的 mixer／downconversion 規則編碼。
+`PulseReadout` 接收一個高階 `freq`，查表掃描以 `TableParam` 傳入。
+QICK 原生轉換逐點產生配對的 generator／ADC frequency words，再由原生 loop 收尾更新。
+`freq_val` 與 `ro_freq_val` 是 runtime register 契約，不是持久 cfg 的兩個頻率。
+兩種 words 表示同一語意頻率，由各硬體的 mixer／downconversion 規則編碼。
 模擬的 accumulated、raw 與 decimated 路徑使用同一份平鋪 readout plan，數值單位與物理模型不變。
 
 ### 表單與持久資料
