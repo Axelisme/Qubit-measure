@@ -8,16 +8,13 @@ from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import Adapter, Analysis, AnalyzeRequest
 from zcu_tools.plotting.plots import Plots
 
-from .analysis import SpectroscopyAnalysis
 from .core import SpectroscopyCfg, SpectroscopyExp, SpectroscopyResult
 from .form import make_form
 
 SpectroscopyRun: TypeAlias = RunRecord[SpectroscopyCfg, SpectroscopyResult]
 
 
-def _analyze(
-    req: AnalyzeRequest[SpectroscopyRun, None], *, plots: Plots
-) -> SpectroscopyAnalysis:
+def _analyze(req: AnalyzeRequest[SpectroscopyRun, None], *, plots: Plots) -> None:
     """Use saved cfg/counts; never read current parameters or propose peaks."""
     return SpectroscopyExp().analyze(req.run_result, None, plots=plots)
 

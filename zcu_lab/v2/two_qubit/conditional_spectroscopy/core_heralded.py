@@ -32,7 +32,7 @@ from .._sums import (
     terminal_counts,
     validate_classifiers,
 )
-from .analysis import SpectroscopyAnalysis, summarize_spectra
+from .analysis import summarize_spectra
 from .core import SpectroscopyCfg
 
 
@@ -57,22 +57,6 @@ class SpectroscopyHeraldedResult:
 
     frequencies: NDArray[np.float64]
     sums: NDArray[np.float64]
-
-
-@dataclass(frozen=True)
-class SpectroscopyHeraldedAnalysis:
-    """gg/ee contain P_e, all-shot totals and completeness on nominal axes.
-
-    Plotting aligns the two paths by actual preparation before the probe:
-    nominal (f1,f2) for gg, (1-f1,1-f2) for ee. Neither path is fitted.
-    herald_matrix is (DC,2,2,frequency,3,3); pass_fraction is its gg cell,
-    not ground-state purity. Zero selected counts give NaN P_e.
-    """
-
-    gg: SpectroscopyAnalysis
-    ee: SpectroscopyAnalysis
-    herald_matrix: NDArray[np.float64]
-    pass_fraction: NDArray[np.float64]
 
 
 def restore_result(
@@ -276,7 +260,7 @@ class SpectroscopyHeraldedExp(
         options: None,
         *,
         plots: Plots,
-    ) -> SpectroscopyHeraldedAnalysis:
+    ) -> None:
         """Overlay gg/ee spectra by actual initial state and show herald/shot totals.
 
         All completed rounds enter these diagnostics, including partial scans.
@@ -409,4 +393,3 @@ class SpectroscopyHeraldedExp(
                     yticklabels=outcomes,
                 )
                 fig.colorbar(image, ax=ax, label="Herald probability")
-        return SpectroscopyHeraldedAnalysis(gg, ee, herald, herald[..., 0, 0])

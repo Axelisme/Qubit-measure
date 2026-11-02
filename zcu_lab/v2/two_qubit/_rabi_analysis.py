@@ -47,14 +47,6 @@ class RabiRate:
     quality: FitQuality | None
 
 
-@dataclass(frozen=True)
-class RabiAnalysis:
-    """Same-shot joint return data and one duration-slice fit per coordinate."""
-
-    return_data: ReturnData
-    rates: tuple[RabiRate, ...]
-
-
 def fit_duration_rates(
     durations: NDArray[np.float64], answer: ReturnData
 ) -> tuple[RabiRate, ...]:

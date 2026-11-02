@@ -12,6 +12,9 @@ Choose lowercase target f1/f2, positive unique gate_counts, default [1,2,3], wit
 
 ## Counts and plots
 
+Analyze returns only `frequency_mhz` and `frequency_reason`. Per-frequency phases,
+slopes, crossings, counts and herald fractions stay inside analysis for plotting.
+
 Saved sums is float64 `(2,2,Nn,Nf,3,3,3,3)`. Leading scan axes follow the ordinary experiment. The final four axes are herald F1, herald F2, terminal F1, terminal F2, each ordered g/e/other. All 81 classes persist as raw accumulated counts. Rounds accumulate at acquisition. There is no host round axis or per-shot IQ storage.
 
 Analysis uses both herald (g,g) and (e,e). In the ee group, target sigma reverses sign and nominal spectator I/Xπ means actual spectator e/g. Analysis reverses both sigma signs and reorders ee to actual g/e before fitting. It keeps separate amplitudes and phase offsets for each herald group while sharing the per-gate slope for each actual spectator and frequency. The model is X=A_h cos(n·slope+φ_h), Y=A_h sin(n·slope+φ_h), without quadrature DC.
