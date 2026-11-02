@@ -31,11 +31,12 @@ edits and captures sources again.
   required endpoints blank. Missing other device values contribute zero.
   Unselected lines are validated but never written.
 - `settle` is the wait in seconds after all DC writes at each flux point.
-- `modules` contains the optional common reset and full mux readout.
-- `frequency` contains only frequency-scan inputs.
-  Each `frequency.tones[i].freq` has drive-frequency Start/Stop in MHz.
-  `frequency.expts` is the shared hardware point count. The frequency tone picker retains all original names;
-  top-level participants supplies the Run selection. All selected drives sweep together in one hardware loop.
+- `reset` is the optional common reset; `readout` contains the full mux readout.
+- Each `tones[i]` contains its drive pulse, `freq.start/stop` in MHz, local
+  `flux_dev`, and `flux.start/stop` in native DC units.
+  `expts` is the shared hardware frequency point count. The single tone picker
+  retains all original names; `participants` supplies the Run selection.
+  All selected drives sweep together in one hardware loop.
 
 Readout references the captured group readout slot when present. Without a
 slot, generator and ADCs come from group wiring, mixer from group
@@ -82,7 +83,7 @@ and reasons without rolling back edits. Analysis null goes to the picker owner.
 ## Typed cfg and form paths
 
 Python cfg and saved cfg share a flat layout. There is no `spectrum` wrapper.
-Set `participants: list[int]`, full `tones`, and `modules` at top level.
+Set `participants: list[int]`, full `tones`, `reset` and `readout` at top level.
 Open/Reset fills selected tones' drive and per-tone sweep defaults and sets
 these fields to None on other tones. The nullable fields remain editable.
 Open/Reset captures the Aliases row `participants`, for example `[Q3, Q1]`,
@@ -99,17 +100,18 @@ uniqueness is checked only for selected tones.
 `reset` is optional; `readout` is the complete numeric mux
 readout. In the form, module selectors expose inline fields below
 `readout.module`; this selector wrapper is not part of Python cfg.
-`frequency.tones[i]` contains the fixed name, numeric drive pulse and `freq.start/stop` in absolute MHz. `frequency.expts` is the shared positive hardware count.
-`tones[i]` contains its fixed name, `flux_dev`, and `flux.start/stop` in native DC units. `flux_expts` is their shared positive count.
+`tones[i]` contains its fixed name, numeric drive pulse, `freq.start/stop` in
+absolute MHz, `flux_dev`, and `flux.start/stop` in native DC units.
+`expts` is the shared positive hardware frequency count.
+`flux_expts` is the shared positive zipped DC count.
 `flux_unit` is `A`, `V` or `native`; no conversion occurs.
 `reps` and `rounds` are positive counts. `initial_delay` and `relax_delay`
 are finite nonnegative microseconds. `settle` is finite nonnegative seconds.
-Every SweepCfg supplies `start`, `stop`, positive `expts` and
-`step = (stop-start)/(expts-1)`; a single point requires equal bounds and zero
-step. Form/recipe range editors use `n` for that point count and derive step.
+Per-tone ranges supply finite `start` and `stop`; the shared counts determine
+their point grids. A single-point DC scan requires equal bounds.
 
-The form orders participants, tone identities, modules, frequency/DC scans,
-averaging, then timing. Source descriptions distinguish captured settings,
+The form orders reset, readout, tones, outer `flux_expts`, inner `expts`,
+participants, flux unit, settle, averaging, then timing. Source descriptions distinguish captured settings,
 derived candidates and missing required values. Generated candidates are
 marked uncalibrated; a stored value alone is not evidence of calibration.
 All full-list entries must validate even when not selected for acquisition.
@@ -119,7 +121,7 @@ and required-field errors before Run.
 ## Run and Stop
 
 Run sets only selected local sources at each flux point, waits for settle, then runs
-the existing mux twotone spectrum. Each `flux_i` figure shows absolute MHz
+its own reset, simultaneous drives and mux readout sequence. Each `flux_i` figure shows absolute MHz
 against that tone's DC coordinate. Sources retain their final written settings.
 Run does not restore bias automatically.
 
@@ -171,6 +173,10 @@ Native data keeps original tone indices, native DC coordinates per tone,
 absolute MHz frequency coordinates per tone, and complex IQ shaped
 `(participants, flux points, frequency points)`. Frequencies use Hz on disk and
 MHz after loading. Stop gaps remain NaN after native round-trip.
+
+Native cfg uses schema 5.0. Loading a schema-4 file keeps its data and metadata
+but leaves cfg unavailable; no cfg conversion is attempted. The data can still
+be plotted, but identity-dependent picking needs the saved full cfg.
 
 Labber export currently does not support this three-dimensional independent
 grid. Save reports that output as failed while native data and other successful
