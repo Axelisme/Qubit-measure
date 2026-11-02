@@ -92,6 +92,22 @@ class TimelineObservedPulse(Pulse):
             if self.source.t == "auto"
             else self.source.t
         )
+        if isinstance(t, TableParam):
+            start = self.book.math.cycles(t)
+            self.runtime_start = start
+            self.source.t = self.book.math.preprocess_time(start)
+            self.source.preprocess(prog)
+            self.source.t_regs["t"] = start.register
+            finish = self.book.math.add(
+                start,
+                align_end(
+                    prog, prog.pulses[self.name].get_length(), self.native_length(prog)
+                ),
+            )
+            self.book.runtime_gens[self.ch] = finish
+            self.book.record_native(prog, self.ch, finish, generator=True)
+            self.record(prog, t)
+            return
         self.source.preprocess(prog)
         if self.source.t != "auto":
             self.book.runtime_gens.pop(self.ch, None)
