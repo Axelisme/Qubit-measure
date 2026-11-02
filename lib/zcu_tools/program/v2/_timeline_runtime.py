@@ -331,6 +331,13 @@ def native_event_expression(prog, value: "Time") -> TimeExpression:
     ticks = value * get_fclk(prog)
     if not isinstance(ticks, QickParam):
         return TimeVariable(ceil_tick(ticks))
+    if isinstance(ticks, TableParam):
+        return lookup_expression(
+            prog,
+            f"event:{ticks.loop}",
+            tuple(ceil_tick(v) for v in ticks.values),
+            ticks.loop,
+        )
     axes = {name: prog.loop_dict[name] for name in ticks.spans}
     if len(axes) > 1:
         line = TimeVariable(Fraction(str(ticks.start)))
