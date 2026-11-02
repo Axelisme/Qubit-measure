@@ -1,6 +1,6 @@
 # zcu_tools.analysis.fitting
 
-**Last updated:** 2026-11-01
+**Last updated:** 2026-11-02
 
 **讀者：** lab-author。擬合模型、數值輸入、結果與失敗契約速查。
 
@@ -138,8 +138,8 @@ FitParameters 的正常 optimizer 輸出為 ndarray，還原固定參數後為 l
 這個分類涵蓋共用 fit_func，以及委派它的 exponential、cosine／damped cosine、
 Gaussian、Lorentzian、sinc、multi-decay 與 resonance phase fitting。
 例如 GUI 的 mux T1 analyze 經 fit_decay／fitexp 進這條路徑。
-Shared／singleshot 的 iminuit diagnostics、
-resonance joint-refinement 自己的 fallback 不在這次分類內，不能視為所有 backend 已統一。
+Shared／singleshot 的 iminuit diagnostics 與 resonance joint-refinement 的 ValueError
+不在 AnalysisFailed 分類內，不能視為所有 backend 已統一。
 
 Lorentzian family fitting 以 median baseline 判斷初始 peak/dip 方向，避免
 qubit-frequency peak 或 dip 靠近掃描邊界時被左右端點平均誤判成反向寬曲線。
@@ -176,9 +176,15 @@ joint fit 的 delay 初值，避免無背景圓形假設的局部搜尋將初值
 joint refinement 中調整，不變成固定參數。Plot 的 IQ/circle/phase 使用移除 delay 與已啟用
 background 後的 corrected domain。`a0` 是 fitted `f_r` 處的 complex scale；
 `g` 不改變 phase，`c` 在 `f_r` 的 phase 與一階 slope 均為零。
-Optimizer 的 non-finite、active-bound 或失敗結果會 warning 並回退 sequential result。
+Hanger 與 transmission 的 joint-refinement 遇到 optimizer 例外、失敗、non-finite 或
+active-bound 結果時 raise `ValueError`，不回退 sequential result。訊息保留模型名稱與失敗原因；
+未收斂時包含 backend message 與 nfev，貼界時包含 optimizer 座標的參數名稱、值與上下界。
 Magnitude plot 只在啟用 amplitude background fitting 時顯示 envelope 與 `g`。
 Phase curvature 也只在啟用時顯示 `c`；停用時 `c` 為固定零值。
+
+Hanger 的 joint initializer 若得到 Ql≤1，改由 circle phase 對實際 frequency 的最大斜率
+估計正線寬與 Ql，並用同一 normalized circle radius 重算 Qc。這個修正不改動兩個
+background option 都關閉時的 sequential 公開路徑。
 
 Resonance rational initializer 是 internal helper，不是 public fitting facade，也不估
 absolute electrical-delay branch。Caller 先用 route-scoped delay contract 移除 delay；
