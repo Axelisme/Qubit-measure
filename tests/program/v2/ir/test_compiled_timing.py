@@ -615,6 +615,25 @@ def test_layout_reports_unusable_boundary_metadata(metadata, message):
         ir.TimingLayout.from_metadata(metadata)
 
 
+def test_compiled_wmem_attaches_scalar_wave_words_without_mutating_inputs():
+    prog = ScalarProgram(load_soccfg(), reps=2, initial_delay=0, relax_delay=0)
+    layout = ir.TimingLayout.from_metadata(prog.meta_infos, (ir.TimingLoop("reps", 2),))
+    expected = tuple(
+        int(prog.waves[prog.wave2idx["p"]][name])
+        for name in ("freq", "phase", "env", "gain", "length", "conf")
+    )
+    wmem = ir.compiled_wmem(prog)
+    before = deepcopy((prog.prog_list, prog.labels, wmem))
+    compiled = ir.CompiledTimingInput(prog.prog_list, prog.labels, layout, wmem=wmem)
+    result = ir.analyze_timing(compiled)
+    assert [[event.wave_words for event in shot.events] for shot in result.shots] == [
+        [expected, expected],
+        [expected, expected],
+    ]
+    assert (prog.prog_list, prog.labels, wmem) == before
+    assert ir.analyze_timing(compiled) == result
+
+
 def test_native_waveform_sweep_updates_do_not_require_waveform_contents():
     class GainSweepProgram(ScalarProgram):
         def _initialize(self, cfg):
