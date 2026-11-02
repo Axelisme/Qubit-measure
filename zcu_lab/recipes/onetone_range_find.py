@@ -34,9 +34,9 @@ class OnetoneRangeFindInputs(RecipeInputs):
         ge=2,
         description="Required frequency sample count; use at least 11 points for dip analysis.",
     )
-    resonators: list[str] | None | Keep = Field(
-        KEEP,
-        description="Picker labels, not cfg; omit keeps names, [] finds unnamed dips, null passes to analysis owner.",
+    resonators: list[str] = Field(
+        min_length=1,
+        description="Required nonempty picker labels set dip count, not cfg. Use temporary names for unidentified dips.",
     )
     min_separation: (
         Annotated[float, Field(strict=True, gt=0, allow_inf_nan=False)] | None | Keep
@@ -58,7 +58,11 @@ class OnetoneRangeFindReport(RecipeReport):
     """Frequency-ordered dip estimates and identity/writeback limitations."""
 
     resonators: list[ResonatorDipSummary] = Field(
-        description="Each dip's optional name (null during discovery), absolute MHz frequency and background-relative depth in a.u."
+        description="Each dip's optional name (null when unassigned), absolute MHz frequency and background-relative depth in a.u."
+    )
+    prominence_factor: float | None = Field(
+        default=None,
+        description="Actual prominence noise multiplier; null when analysis did not complete.",
     )
     identity_diagnostic: str | None = Field(
         default=None,
@@ -79,10 +83,10 @@ async def onetone_range_find(
 ) -> OnetoneRangeFindReport:
     """Run, await interactive Done, ask_writeback, accept selections, then Save.
 
-    freq and n are required. freq supplies absolute MHz bounds and n sets
-    freq.expts, the shared acquisition sample count. Omitted resonators
-    retains the analysis names; an empty list discovers unnamed dips. Supplied
-    names seed frequency-order pairing in Analyze, not cfg. The agent must
+    freq, n and nonempty resonators are required. freq supplies absolute MHz
+    bounds and n sets freq.expts, the shared acquisition sample count. Names
+    set the expected dip count and seed frequency-order pairing in Analyze,
+    not cfg. Use temporary names for unidentified dips. The agent must
     inspect or adjust the picker through tab_interact and send done before this
     recipe asks about writeback. Final assignments may use any frequency order.
     A supplied min_separation is finite positive MHz and changes only analysis.
@@ -116,9 +120,7 @@ async def onetone_range_find(
             result=RangeFindSummary,
             interactive=True,
             updates={
-                "resonators": inputs.resonators
-                if inputs.resonators is None or isinstance(inputs.resonators, Keep)
-                else json.dumps(inputs.resonators),
+                "resonators": json.dumps(inputs.resonators),
                 "min_separation": inputs.min_separation,
             },
         )
@@ -132,6 +134,7 @@ async def onetone_range_find(
             applied = bool(receipt.items)
         return OnetoneRangeFindReport(
             resonators=list(fit.result.dips),
+            prominence_factor=fit.result.prominence_factor,
             identity_diagnostic=fit.result.identity_diagnostic,
             writeback_diagnostic=fit.result.diagnostic,
             writeback_applied=applied,
