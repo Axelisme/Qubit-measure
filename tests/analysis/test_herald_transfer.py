@@ -95,3 +95,9 @@ def test_unmeasured_points_do_not_enter_calibration(two_state_sums: NDArray[np.f
     assert np.isnan(result.transition_matrices[3]).all()
     assert np.isnan(result.joint_probabilities[3]).all()
     assert np.isnan(result.change_probability[3])
+
+
+@pytest.mark.parametrize("n_states", [0, 1, 4])
+def test_rejects_unsupported_state_counts(two_state_sums: NDArray[np.float64], n_states: int) -> None:
+    with pytest.raises(ValueError, match="n_states"):
+        selfcal_transfer(two_state_sums, n_states)
