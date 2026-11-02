@@ -18,10 +18,8 @@ from zcu_tools.program.v2 import (
     PulseReadout,
     Reset,
     SweepCfg,
-    TablePulseReadout,
     TimelineBuilder,
 )
-from zcu_tools.program.v2.utils import readout_freq_words
 
 from zcu_lab.v2.onetone._shared import (
     FreqResult as FreqResult,
@@ -206,17 +204,6 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         else:
             raise ValueError(f"Invalid sampling_mode: {cfg.sampling_mode}")
 
-        if cfg.sampling_mode == "linear":
-            return self._run_linear(cfg, freqs, context=context)
-        return self._run_homophasal(cfg, freqs, context=context)
-
-    def _run_linear(
-        self,
-        cfg: FreqCfg,
-        freqs: NDArray[np.float64],
-        *,
-        context: RunContext,
-    ) -> FreqResult:
         signals = spectrum_buffer(freqs, plots=context.plots)
         with Schedule(signals, scope=context.scope) as sched:
             builder = TimelineBuilder(
@@ -224,49 +211,14 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
                 reps=cfg.reps,
                 relax_delay=cfg.relax_delay,
             )
-            freq = builder.add_sweep("freq", cfg.freq)
+            freq = (
+                builder.add_sweep("freq", cfg.freq)
+                if cfg.sampling_mode == "linear"
+                else builder.add_table_sweep("freq", freqs.tolist())
+            )
             if cfg.reset is not None:
                 builder.emit(Reset("reset", cfg.reset))
             builder.emit(PulseReadout("readout", cfg.readout, freq=freq))
-            sched.run_acquire(builder.build(), context.soc, rounds=cfg.rounds)
-        return FreqResult(freqs=freqs, signals=signals.array)
-
-    def _run_homophasal(
-        self,
-        cfg: FreqCfg,
-        freqs: NDArray[np.float64],
-        *,
-        context: RunContext,
-    ) -> FreqResult:
-        signals = spectrum_buffer(freqs, plots=context.plots)
-        readout_cfg = cfg.readout.with_updates(freq=float(freqs[0]))
-        freq_words, ro_freq_words = readout_freq_words(
-            context.soccfg,
-            freqs,
-            gen_ch=readout_cfg.gen_ch,
-            ro_ch=readout_cfg.ro_ch,
-            mixer_freq=readout_cfg.mixer_freq,
-            nqz=readout_cfg.nqz,
-        )
-        with Schedule(signals, scope=context.scope) as sched:
-            builder = TimelineBuilder(
-                context.soccfg,
-                reps=cfg.reps,
-                relax_delay=cfg.relax_delay,
-            )
-            builder.add_loop("freq", len(freqs))
-            if cfg.reset is not None:
-                builder.emit(Reset("reset", cfg.reset))
-            # DDS table updates wrap for the next rep, preserving phase timing.
-            builder.emit(
-                TablePulseReadout(
-                    "readout",
-                    readout_cfg,
-                    idx_reg="freq",
-                    freq_words=freq_words,
-                    ro_freq_words=ro_freq_words,
-                ),
-            )
             sched.run_acquire(builder.build(), context.soc, rounds=cfg.rounds)
         return FreqResult(freqs=freqs, signals=signals.array)
 

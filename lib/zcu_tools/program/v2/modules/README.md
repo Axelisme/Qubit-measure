@@ -1,6 +1,6 @@
 # program/v2/modules — semantic program modules
 
-**Last updated:** 2026-11-02，Reset requires a reset cfg
+**Last updated:** 2026-11-02，onetone 非均勻頻率改用原生查表掃描
 
 **讀者：** lab-author、framework-dev、agent。語意 program modules 的宣告、發射與 owner 邊界速查。
 
@@ -18,7 +18,7 @@ Each module supplies resource declaration and native lowering.
 
 ## 原生寫法
 
-Pulse、Delay、SoftDelay、DelayAuto、PulseReadout、Reset 系列、LoadValue、LoadWord、ComputedPulse、TableLengthPulse、TablePulseReadout 與 MuxReadout 提供原生 lowering。
+Pulse、Delay、SoftDelay、DelayAuto、PulseReadout、Reset 系列、LoadValue、LoadWord、ComputedPulse、TableLengthPulse 與 MuxReadout 提供原生 lowering。
 每次 `emit` 建立一個 `timeline.ModuleEmission`，保存該次原生指令與 tag。
 Module 不是 QICK Macro，不能直接交給 `append_macro`。
 同一宣告物件可重複發射，也可宣告進不同的原生 program 或 builder。
@@ -27,7 +27,7 @@ Module 不是 QICK Macro，不能直接交給 `append_macro`。
 `Pulse.pulse_name(prog)` 回傳指定 program 的 pulse 名稱，供原生 QICK 呼叫使用。
 Tag 屬於每次 emit，不存於 module constructor。
 
-Pulse、PulseReadout、TablePulseReadout 與 MuxReadout 以 generator waveform 的實際結尾加一次 post-delay，再向上取整到 tProc cycle。
+Pulse、PulseReadout 與 MuxReadout 以 generator waveform 的實際結尾加一次 post-delay，再向上取整到 tProc cycle。
 Readout 的 ADC 視窗只更新各 ADC channel 的尾端，不延長作者 timeline。
 後一個 trigger 帶 timeline 時，同 ADC 視窗重疊或無法證明不重疊會在編譯期報錯。純原生 trigger 保留 QICK 行為。
 原生 scalar／sweep trigger 以實際量化起點留下 ADC 尾端證據，供重疊檢查與 shell WAIT 使用。
@@ -200,8 +200,7 @@ pulse template. Same-named readouts can therefore coexist without sharing mutabl
 configuration templates. `readout.adc_name(prog)` returns that program's ADC
 config name after declaration, like `pulse.pulse_name(prog)` for a generator pulse.
 The first template uses its base name; later allocations append a numeric suffix.
-`TablePulseReadout` uses the same accessor for its ADC word updates. Ordinary
-Pulse content-hash sharing is unchanged.
+Ordinary Pulse content-hash sharing is unchanged.
 `PulseReadoutCfg.nominal_duration_us()` returns
 `pre_delay + waveform.length + post_delay` without clock rounding or program
 initialization. It excludes ADC timing and does not replace runtime scheduling.
@@ -255,11 +254,11 @@ Centroid3 的第三類是 f，不是 circle 的 other。需要 Other 的 consume
   selected fields in `r_wave`, and sends that register bundle directly to the
   hardware port. The runtime path does not write and immediately re-read wmem;
   the template remains unchanged for the next sweep point.
-- `TablePulseReadout` is the program-side arbitrary-frequency sweep path. It owns
-  paired generator/readout uint32 tables, plays the current point through QICK's
-  ordinary wmem-backed `PulseReadout`, and uses the sweep loop's exec-after hook
-  to prepare the next point. Its dedicated templates prevent a table update from
-  mutating a pulse shared through `PulseRegistry`; the rotated tables restore the
+- For arbitrary semantic frequencies, pass the result of
+  `builder.add_table_sweep("freq", freqs)` to `PulseReadout(..., freq=freq)`.
+  QICK converts each value into paired generator/readout words. Native loop
+  closing loads the next point from rotated dmem tables after every shot,
+  including shots that do not play the readout. The final update restores the
   first point before the next outer repetition.
 
 ## Runtime Pulse Length

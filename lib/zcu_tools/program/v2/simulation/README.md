@@ -1,6 +1,6 @@
 # Explicit acquisition environments
 
-**Last updated:** 2026-11-02，tmux wave 分派與 tport trigger
+**Last updated:** 2026-11-02，onetone 非均勻頻率改用原生查表掃描
 
 **讀者：** framework-dev。模擬 acquisition 的 request、round 與 raw source 契約。
 
@@ -271,7 +271,7 @@ loop, case and source context.
 
 Supported controls are Pulse, PulseReadout, MuxReadout, Delay, SoftDelay, DelayAuto,
 LoadValue, LoadWord, native repeat/branch, ComputedPulse, TableLengthPulse,
-TablePulseReadout and the existing reset wrappers. Parallel sequences use native
+and the existing reset wrappers. Parallel sequences use native
 fork/join and preserve compiled emission order. Their register effects follow the
 same shot-local and live-in rules as other instructions. Reset wrappers emit
 actual pulses only; they do not reset a quantum state. LoadValue compression
@@ -321,8 +321,9 @@ without conversion.
 
 ComputedPulse and TableLengthPulse follow the selected compiled waveform and
 timestamp effects. The frontend does not pad a selected event to the longest
-candidate. TablePulseReadout first plays its initial
-compiled template; only its named loop's exec-after hook prepares the next words.
+candidate. Native table sweeps apply each point's compiled waveform words.
+Their named loop's closing shell prepares the next words after every shot,
+including shots that do not play that waveform.
 The last update restores table entry zero for the next outer repetition. Register
 and template state belongs to one frontend preparation, never to another acquire.
 The binding retains detached immutable DAC envelopes in a 32 MiB LRU pool across
