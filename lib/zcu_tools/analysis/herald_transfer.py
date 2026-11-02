@@ -37,12 +37,14 @@ def selfcal_transfer(
     previous: TransferResult | None = None,
 ) -> TransferResult:
     """Infer shared readout calibration and transfer from (N, 6, 6) IQ sums."""
-    counts = sums[:, 0, 0]
-    pooled = sums.sum(axis=0)[:, 0] / counts.sum()
+    measured = np.isfinite(sums).all(axis=(1, 2)) & (sums[:, 0, 0] > 0)
+    valid_sums = sums[measured]
+    counts = valid_sums[:, 0, 0]
+    pooled = valid_sums.sum(axis=0)[:, 0] / counts.sum()
     mean = complex(pooled[1], pooled[2])
     scale = float(np.sqrt(pooled[3] + pooled[5] - abs(mean) ** 2))
     transform = _coordinate_transform(mean, scale)
-    moments = transform @ (sums / counts[:, None, None]) @ transform.T
+    moments = transform @ (valid_sums / counts[:, None, None]) @ transform.T
     stack = np.concatenate([moments, moments.transpose(0, 2, 1)], axis=0)
     vectors, singular_values, _ = np.linalg.svd(
         stack.transpose(1, 0, 2).reshape(6, -1), full_matrices=False
@@ -55,10 +57,16 @@ def selfcal_transfer(
     populations = rows.mean(axis=0)
     order = np.argsort(-populations)
     joint = joint[:, order][:, :, order]
+    all_joint = np.full((len(sums), n_states, n_states), np.nan)
+    all_transition = np.full_like(all_joint, np.nan)
+    all_change = np.full(len(sums), np.nan)
+    all_joint[measured] = joint
+    all_transition[measured] = joint / rows[:, order, None]
+    all_change[measured] = 1 - np.trace(joint, axis1=1, axis2=2)
     return TransferResult(
-        joint_probabilities=joint,
-        transition_matrices=joint / rows[:, order, None],
-        change_probability=1 - np.trace(joint, axis1=1, axis2=2),
+        joint_probabilities=all_joint,
+        transition_matrices=all_transition,
+        change_probability=all_change,
         populations=populations[order],
         centers=centers[order] * scale + mean,
         sigma=float(np.sqrt(variance) * scale),
