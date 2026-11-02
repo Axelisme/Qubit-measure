@@ -185,6 +185,7 @@ def make_flux_form[
 
 def mux_flux_initial_values(
     env: FormEnv,
+    defaults: dict[str, JsonValue],
     *,
     names: tuple[str, ...],
     participants: tuple[int | str, ...],
@@ -192,6 +193,8 @@ def mux_flux_initial_values(
 ) -> dict[str, JsonValue]:
     """Seed mux DC identities, units and actual ranges from the fixed Form env.
 
+    defaults is the fresh declared raw input; update its DC fields in place
+    and return the complete initial input.
     names is the full captured Q order; participants contains original selected
     indices. Local scans use each Q's flux_dev and leave nonparticipant
     sweeps disabled. Global scans use $mux.flux_dev and the union of Q
@@ -227,16 +230,20 @@ def mux_flux_initial_values(
                     else None,
                 }
             )
-        return {"tones": tones, "flux_unit": unit}
+        defaults.update({"tones": tones, "flux_unit": unit})
+        return defaults
     start, stop = global_flux_interval(
         [None if seed.points is None else seed.points.integer for seed in seeds],
         [None if seed.points is None else seed.points.half for seed in seeds],
     )
-    return {
-        "flux_dev": group.flux_dev,
-        "flux_unit": unit,
-        "flux": {"kind": "linrange", "start": start, "stop": stop, "n": 101},
-    }
+    defaults.update(
+        {
+            "flux_dev": group.flux_dev,
+            "flux_unit": unit,
+            "flux": {"kind": "linrange", "start": start, "stop": stop, "n": 101},
+        }
+    )
+    return defaults
 
 
 def global_flux_interval(
