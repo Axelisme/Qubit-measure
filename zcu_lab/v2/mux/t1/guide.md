@@ -90,7 +90,8 @@ Skip removes leading points before finite-IQ filtering.
 Choose the single- or dual-exponential model and inspect quality and uncertainty.
 T1 and errors are in us.
 Each tone returns its index, fit values and quality as an analysis summary.
-Delay coordinates, measured values and fitted curves are used only for plots.
+Analysis plots retain the delay coordinates, measured values and fitted curves.
+The returned summary does not include these arrays.
 
 ## Writeback
 
