@@ -4,7 +4,7 @@ from functools import partial
 
 from pydantic import JsonValue
 from zcu_tools.cfg_model import Expr, FieldMeta, FormNode, Hidden, Range, Slot, Template
-from zcu_tools.gui.form import FormEnv
+from zcu_tools.gui.form import FormEnv, FormWritePath
 from zcu_tools.gui.form_adapter import FixedElements, Form, FormContext
 
 from zcu_lab.v2.support.measure.flux_defaults import captured_flux_seed
@@ -50,7 +50,7 @@ def make_form(ctx: FormContext) -> Form[TwotoneFluxGlobalCfg]:
         }
         for name in names
     ]
-    metadata = {
+    metadata: dict[FormWritePath, FieldMeta] = {
         ("readout",): FieldMeta(
             description="Captured $mux.module.readout slot, or readout/mux:blank from group wiring; confirm calibration"
         ),
