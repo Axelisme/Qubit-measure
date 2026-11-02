@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 from qick.asm_v2 import QickParam, QickSweep1D
 from zcu_tools.experiment.simulation import white_noise
-from zcu_tools.program.v2 import SweepCfg, TimelineBuilder, ir
+from zcu_tools.program.v2 import SweepCfg, TableParam, TimelineBuilder, ir
 from zcu_tools.program.v2.modules.pulse import Pulse, PulseCfg
 from zcu_tools.program.v2.modules.readout import PulseReadout, PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import (
@@ -29,7 +29,7 @@ def field_program(
     mixer=None,
     outer=False,
     branch=False,
-    mixed=False,
+    extra: dict[str, float | QickParam] | None = None,
 ):
     soccfg = load_soccfg(2, 1)
     soccfg["gens"][0]["has_mixer"] = mixer is not None
@@ -57,8 +57,8 @@ def field_program(
         "gain": 0.2,
     }
     knobs[field] = parameter
-    if mixed:
-        knobs["gain"] = QickSweep1D("point", 0.1, 0.3)
+    if extra:
+        knobs.update(extra)
     waveform = (
         FlatTopWaveformCfg(
             length=0.2,
@@ -202,3 +202,86 @@ def test_wave_tables_match_scalar_words_and_actual_linear_points(
             point
         ) == linear_request.materialize_point(point)
     assert executed_words(table) == executed_words(linear)
+
+
+@pytest.mark.parametrize("branch", [False, True])
+def test_nested_table_wrap_and_unplayed_branches_advance_every_point(branch):
+    values = [83.125, 76.75, 91.5]
+    prog, env, _ = field_program(
+        "freq", values, mode="table", outer=True, branch=branch
+    )
+    observed = request(prog, env)
+    expected_words = []
+    for point, value in enumerate(values):
+        scalar, scalar_env, _ = field_program("freq", value)
+        expected = request(scalar, scalar_env).materialize_point(0)
+        words = executed_words(scalar)[0]
+        if branch and point != 2:
+            expected = replace(expected, events=expected.events[1:])
+            words = words[1:]
+        for outer in range(2):
+            assert (
+                replace(
+                    observed.materialize_point(outer * len(values) + point),
+                    coordinates=(),
+                )
+                == expected
+            )
+        expected_words.append(words)
+    # Real linked execution covers both sweep wrap and outer/reps restoration.
+    assert executed_words(prog) == expected_words * 4
+
+
+@pytest.mark.parametrize("flat", [False, True])
+def test_same_wave_table_and_linear_fields_keep_both_updates_and_resets(flat):
+    values = [83.125, 76.75, 91.5]
+    prog, env, name = field_program(
+        "freq",
+        values,
+        mode="table",
+        flat=flat,
+        extra={"gain": QickSweep1D("point", 0.0, 0.5)},
+    )
+    actual_gains = np.asarray(
+        prog.get_pulse_param(name, "gain", as_array=True)
+    ).flatten()
+    observed = request(prog, env)
+    expected_words = []
+    for point, (freq, gain) in enumerate(zip(values, actual_gains, strict=True)):
+        scalar, scalar_env, _ = field_program(
+            "freq", freq, flat=flat, extra={"gain": float(gain)}
+        )
+        assert replace(observed.materialize_point(point), coordinates=()) == request(
+            scalar, scalar_env
+        ).materialize_point(0)
+        expected_words.append(executed_words(scalar)[0])
+    assert executed_words(prog) == expected_words * 2
+
+
+def test_independent_freq_phase_gain_tables_share_one_loop():
+    frequencies = [83.125, 76.75, 91.5]
+    phases = [10.5, -30.25, 80.75]
+    gains = [0.2, -0.1, 0.3]
+    prog, env, _ = field_program(
+        "freq",
+        frequencies,
+        mode="table",
+        flat=True,
+        extra={
+            "phase": TableParam("point", phases),
+            "gain": TableParam("point", gains),
+        },
+    )
+    observed = request(prog, env)
+    expected_words = []
+    for point, (freq, phase, gain) in enumerate(
+        zip(frequencies, phases, gains, strict=True)
+    ):
+        scalar, scalar_env, _ = field_program(
+            "freq", freq, flat=True, extra={"phase": phase, "gain": gain}
+        )
+        assert replace(observed.materialize_point(point), coordinates=()) == request(
+            scalar, scalar_env
+        ).materialize_point(0)
+        expected_words.append(executed_words(scalar)[0])
+    assert executed_words(prog) == expected_words * 2
