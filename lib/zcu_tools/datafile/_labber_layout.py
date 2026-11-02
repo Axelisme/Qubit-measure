@@ -24,7 +24,8 @@ def write_independent_labber_file(
     The first log occupies root; others occupy Log_2, Log_3, etc.
     Retain the marker-qualified grouped-v1 wire
     layout so the grouped reader can identify each variable. Mark finalized only
-    after every log succeeds. Invalid rank/name raises ValueError before opening;
+    after every log succeeds. Invalid rank/name or a slice identity colliding
+    with an input variable raises ValueError before opening;
     I/O errors propagate and may leave a partial file. No intermediate file.
     """
     logs: list[tuple[str, LabberPayload, str]] = []
@@ -39,6 +40,8 @@ def write_independent_labber_file(
             outer = payload.axes[-1]
             for index, coordinate in enumerate(outer.values):
                 identity = f"{name}_{index}"
+                if identity in payloads:
+                    raise ValueError(f"duplicate data variable {identity!r}")
                 sliced = LabberPayload(
                     (payload.data.name, payload.data.unit, values[index]),
                     payload.axes[:-1],
