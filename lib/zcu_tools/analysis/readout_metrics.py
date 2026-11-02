@@ -79,9 +79,9 @@ def _transition_metrics(
 def readout_metrics(sums: NDArray[np.float64]) -> ReadoutMetrics:
     """Estimate separation, thermal population and on/off QND at one scan point.
 
-    sums is float64 with shape (8, 3, 3, 3, 3), in common arbitrary ADC units.
-    Each branch stores the shot-summed outer product of (1, I1, Q1) twice,
-    then (1, I2, Q2) twice. Thus sums[:, 0, 0, 0, 0] contains shot counts.
+    sums is float64 with shape (8, 6, 6), in common arbitrary ADC units.
+    Each branch stores the shot-summed outer product of R1 and R2 features,
+    each ordered (1, I, Q, I², IQ, Q²). sums[:, 0, 0] contains shot counts.
     Branch index is prepare_pi*4 + r1_on*2 + middle_pi (each flag is 0 or 1).
     Invalid shape raises ValueError. The input is not modified; no I/O occurs.
 
@@ -97,15 +97,15 @@ def readout_metrics(sums: NDArray[np.float64]) -> ReadoutMetrics:
     including negative excess variance v when separation squared stays positive.
     No leakage correction or automatic parameter selection is performed.
     """
-    if sums.shape != (8, 3, 3, 3, 3):
-        raise ValueError(f"sums must have shape (8, 3, 3, 3, 3), got {sums.shape}")
-    counts = sums[:, 0, 0, 0, 0]
+    if sums.shape != (8, 6, 6):
+        raise ValueError(f"sums must have shape (8, 6, 6), got {sums.shape}")
+    counts = sums[:, 0, 0]
     if counts[2] == 0 or counts[6] == 0:
         return ReadoutMetrics()
     counts = np.where(counts == 0, np.nan, counts)
-    first = sums[:, 1:, 0, 0, 0] / counts[:, None]
-    second = sums[:, 0, 0, 1:, 0] / counts[:, None]
-    covariance = sums[:, 1:, 1:, 0, 0] / counts[:, None, None]
+    first = sums[:, 1:3, 0] / counts[:, None]
+    second = sums[:, 0, 1:3] / counts[:, None]
+    covariance = sums[:, [[3, 4], [4, 5]], 0] / counts[:, None, None]
     covariance = covariance - first[:, :, None] * first[:, None, :]
     shared_covariance = (covariance[2] + covariance[6]) / 2
 
@@ -128,7 +128,7 @@ def readout_metrics(sums: NDArray[np.float64]) -> ReadoutMetrics:
     projected = second @ direction
     on = _transition_metrics(projected, 2, contrast, separation, ground)
     off = _transition_metrics(projected, 0, contrast, separation, ground)
-    cross = sums[:, 1:, 0, 1:, 0] / counts[:, None, None]
+    cross = sums[:, 1:3, 1:3] / counts[:, None, None]
     cross = cross - first[:, :, None] * second[:, None, :]
     projected_cross = float(direction @ ((cross[2] + cross[6]) / 2) @ direction)
     return ReadoutMetrics(
