@@ -12,7 +12,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 from qtpy.QtWidgets import QApplication
-from zcu_tools.analysis.dips import DipFinderOptions
+from zcu_tools.gui.app.measure.range_find_plugin import RangeFindParameters
 
 from tests.gui._user_input import ComponentDriver
 from tests.gui.app.measure._range_find_adapter import SpectrumData, range_application
@@ -120,44 +120,48 @@ def test_operator_can_read_picker_and_zoom_then_home(
         assert ui.plots().axes[0].xlim == pytest.approx(original.xlim)
 
 
-@pytest.mark.parametrize(("width", "height"), [(1275, 1539), (1100, 700)])
-def test_operator_keeps_all_candidates_readable(
-    qapp: QApplication, tmp_path: Path, width: int, height: int
+@pytest.mark.parametrize("components", [("dip1",), ("west", "east")])
+def test_operator_can_return_to_automatic_factor(
+    qapp: QApplication, tmp_path: Path, components: tuple[str, ...]
 ):
-    with range_application(
-        tmp_path, qapp, data=_wide_spectrum(), components=("R1", "Resonator right")
-    ) as app:
+    with range_application(tmp_path, qapp, components=components) as app:
         ui = ComponentDriver(app.window)
-        shots = _shots(tmp_path, f"legend-{width}x{height}")
-        ui.resize_window(width, height)
+        shots = _shots(tmp_path, f"automatic-{len(components)}")
+        ui.resize_window(1600, 950)
         ui.select_tab("Analysis")
         ui.click("Analyze")
-        ui.enter_text(value="0", object_name="rangeFind.max_dips")
-        ui.screenshot(shots / "01-all-candidates.png")
-        assert (
-            ui.observe(object_name="rangeFind.status").text
-            == "Selected: 20 / candidates: 20"
+        count = ui.observe(object_name="rangeFind.expected_dips")
+        assert count.kind == "QLabel" and count.text == str(len(components))
+        assert ui.observe(object_name="rangeFind.status").text.startswith(
+            f"Selected: {len(components)} /"
         )
-        assert ui.legends().texts == (
-            "Measured magnitude",
-            "Candidates",
-            "R1 @ 7080 MHz",
-            "Resonator right @ 7190 MHz",
+        assert ui.observe(object_name="rangeFind.prominence_factor").text == ""
+        initial_factor = ui.observe(object_name="rangeFind.actual_factor").text
+        assert float(initial_factor) >= 0
+        ui.screenshot(shots / "01-automatic.png")
+        ui.enter_text(value="100000000", object_name="rangeFind.prominence_factor")
+        assert ui.observe(object_name="rangeFind.status").text.startswith(
+            "Selected: 0 /"
         )
-        assert ui.plots().axes[0].annotations == ("R1", "Resonator right")
-        ui.select_combo("7080 MHz", object_name="rangeFind.selection")
-        ui.select_combo("Unassigned", object_name="rangeFind.component")
-        ui.screenshot(shots / "02-unassigned.png")
-        assert ui.legends().texts == (
-            "Measured magnitude",
-            "Candidates",
-            "Resonator right @ 7190 MHz",
+        assert float(ui.observe(object_name="rangeFind.actual_factor").text) == 1e8
+        ui.screenshot(shots / "02-numeric.png")
+        ui.enter_text(value="", object_name="rangeFind.prominence_factor")
+        assert ui.observe(object_name="rangeFind.actual_factor").text == initial_factor
+        assert ui.observe(object_name="rangeFind.status").text.startswith(
+            f"Selected: {len(components)} /"
         )
-        assert ui.plots().axes[0].annotations == ("Resonator right",)
-        assert ui.observe(object_name="rangeFind.component").caption_fits
+        ui.screenshot(shots / "03-clear-to-automatic.png")
+        ui.enter_text(value="24", object_name="rangeFind.max_fwhm")
+        assert ui.observe(object_name="rangeFind.prominence_factor").text == ""
+        assert ui.observe(object_name="rangeFind.status").text.startswith(
+            f"Selected: {len(components)} /"
+        )
+        ui.screenshot(shots / "04-recompute.png")
+        ui.click("Cancel")
+        ui.screenshot(shots / "05-cancelled.png")
 
 
-def test_operator_recomputes_all_five_controls(
+def test_operator_recomputes_all_four_controls(
     range_ui: ComponentDriver, tmp_path: Path
 ):
     ui = range_ui
@@ -168,8 +172,6 @@ def test_operator_recomputes_all_five_controls(
     _edit(ui, shots / "04-prominence-reset.png", "prominence_factor", "5", 2)
     _edit(ui, shots / "05-spacing.png", "min_separation", "60", 1)
     _edit(ui, shots / "06-spacing-reset.png", "min_separation", "1", 2)
-    _edit(ui, shots / "07-count.png", "max_dips", "1", 1)
-    _edit(ui, shots / "08-count-reset.png", "max_dips", "2", 2)
     _edit(ui, shots / "09-width.png", "max_fwhm", "0.5", 0)
     assert ui.legends().texts == ("Measured magnitude",)
     _edit(ui, shots / "10-width-reset.png", "max_fwhm", "25", 2)
@@ -216,13 +218,13 @@ def test_operator_clicks_to_add_remove_and_assigns_out_of_order(
 def test_done_preserves_precise_controls_and_manual_selection(
     qapp: QApplication, tmp_path: Path, name: str, value: float
 ):
-    options = replace(DipFinderOptions(max_dips=2), **{name: value})
-    with range_application(tmp_path, qapp, options=options) as app:
+    parameters = replace(RangeFindParameters(), **{name: value})
+    with range_application(tmp_path, qapp, parameters=parameters) as app:
         ui = ComponentDriver(app.window)
         shots = _shots(tmp_path, f"precision-{name}")
         _start(ui, shots)
         displayed_value = ui.observe(object_name=f"rangeFind.{name}").text
-        assert ui.observe(object_name="rangeFind.max_dips").text == "2"
+        assert ui.observe(object_name="rangeFind.expected_dips").text == "2"
         ui.click("Remove selected dip")
         assert "west" not in " ".join(ui.legends().texts)
         ui.screenshot(shots / "02-remove.png")
