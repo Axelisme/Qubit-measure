@@ -268,6 +268,43 @@ def test_adc_nonoverlap_uses_correlated_table_points_not_independent_extrema():
     assert all(t[0] + duration <= t[1] for t in triggers)
 
 
+def runtime_auto_program(extra, *, table_extra=False):
+    env = white_noise(load_soccfg(1, 1), std_adc=0, routes=((0, 0),), seed=None)
+    builder = TimelineBuilder(env.soccfg, reps=2, initial_delay=0, relax_delay=0.1)
+    placement = builder.add_table_sweep("point", [0.0213, 0.0107, 0.0354])
+    if table_extra:
+        extra = TableParam("point", extra)
+    receiver = PulseReadoutCfg(
+        gen_ch=0,
+        ro_ch=0,
+        nqz=1,
+        freq=100,
+        gain=0.1,
+        waveform=ConstWaveformCfg(length=0.1),
+        ro_length=0.1,
+    ).build("receiver")
+    builder.timeline_inc(placement)
+    builder.emit(receiver)
+    builder.delay_auto(extra)
+    builder.emit(receiver)
+    builder.delay_by_timeline()
+    return builder.build(), env
+
+
+def test_table_auto_extra_after_runtime_placement_matches_scalar_extra():
+    values = [0.0123, 0.0245, 0.0333]
+    prog, env = runtime_auto_program(values, table_extra=True)
+    observed = request(prog, env)
+    expected_shots = []
+    for point, value in enumerate(values):
+        scalar, scalar_env = runtime_auto_program(value)
+        assert observed.materialize_point(point) == request(
+            scalar, scalar_env
+        ).materialize_point(point)
+        expected_shots.append(scheduled_shots(scalar)[point])
+    assert scheduled_shots(prog) == expected_shots * 2
+
+
 @pytest.mark.parametrize("consumer", ["register", "register_inc"])
 def test_register_time_table_rejects_negative_noninitial_point(consumer):
     with pytest.raises(ValueError, match="nonnegative"):
