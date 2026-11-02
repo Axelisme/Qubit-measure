@@ -182,6 +182,24 @@ def test_independent_slice_identity_collision_raises_before_creation(
     assert not path.exists()
 
 
+def test_independent_empty_outer_axis_raises_before_creation(tmp_path: Path) -> None:
+    axes = (
+        datafile.Axis("Sensor", "", np.array([], dtype=float)),
+        datafile.Axis("bias", "V", np.array([0.0, 0.1])),
+        datafile.Axis("frequency", "Hz", np.array([1e9, 2e9])),
+    )
+    container = datafile.Container(
+        {"signal": datafile.Variable(np.empty((0, 2, 2)), axes, "V")},
+        {},
+        {},
+        _container().attrs,
+    )
+    path = tmp_path / "empty_outer_axis.hdf5"
+    with pytest.raises(ValueError, match="empty.*first axis|first axis.*empty"):
+        datafile.write_labber(path, container, grouped_layout="independent")
+    assert not path.exists()
+
+
 def test_independent_rank_four_raises_before_creation(tmp_path: Path) -> None:
     axes = tuple(datafile.Axis(name, "", np.arange(2)) for name in ("a", "b", "c", "d"))
     container = datafile.Container(
