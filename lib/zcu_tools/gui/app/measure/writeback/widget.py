@@ -142,17 +142,22 @@ def _full_value(value: Any) -> str:
 
 
 def _record_summary(item: RecordWriteback, *, compact: bool) -> str:
-    """List every record field without truncating strings or nested JSON."""
+    """Summarize fields on one line, or return the complete indented JSON."""
+    if not compact:
+        return json.dumps(item.record, ensure_ascii=False, indent=2)
     fields: list[str] = []
     for key, value in item.record.items():
+        if isinstance(value, (dict, list)):
+            fields.append(f"{key}{{{len(value)}}}")
+            continue
         if isinstance(value, str):
             text = value
         elif _is_number(value):
-            text = _compact_value(value) if compact else _full_value(value)
+            text = _compact_value(value)
         else:
             text = json.dumps(value, ensure_ascii=False)
         fields.append(f"{key}={text}")
-    return "\n".join(fields)
+    return ", ".join(fields)
 
 
 class _MiddleElidedLabel(QLabel):
@@ -185,9 +190,11 @@ class _MiddleElidedLabel(QLabel):
 
 
 def _value_label(item: WritebackItem, text: str) -> QLabel:
-    """Return a mouse-selectable label: middle-elided for a scalar parameter, else plain."""
+    """Return a selectable label, middle-elided for records and scalar parameters."""
     label: QLabel
-    if isinstance(item, ParameterWriteback) and is_scalar_value(item.proposed_value):
+    if isinstance(item, RecordWriteback) or (
+        isinstance(item, ParameterWriteback) and is_scalar_value(item.proposed_value)
+    ):
         label = _MiddleElidedLabel(text)
     else:
         label = QLabel(text)
@@ -623,7 +630,7 @@ class WritebackWidget(QWidget):
         proposed_label.setSizePolicy(
             QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred
         )
-        proposed_label.setWordWrap(isinstance(item, RecordWriteback))
+        proposed_label.setWordWrap(False)
         if isinstance(item, RecordWriteback):
             proposed_label.setTextFormat(Qt.TextFormat.PlainText)
         table = None
