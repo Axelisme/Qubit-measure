@@ -160,6 +160,40 @@ def test_independent_rank_three_exports_first_axis_as_named_2d_logs(
         ]
 
 
+@pytest.mark.parametrize("collision_first", [False, True])
+def test_independent_slice_identity_collision_raises_before_creation(
+    tmp_path: Path, collision_first: bool
+) -> None:
+    original = _container()
+    cube = datafile.Variable(
+        np.ones((2, 2, 2)),
+        (datafile.Axis("Sensor", "", np.array([4, 8])), *original.vars["first"].axes),
+        "V",
+    )
+    items = [("signal", cube), ("signal_0", original.vars["first"])]
+    if collision_first:
+        items.reverse()
+    container = datafile.Container(dict(items), {}, {}, original.attrs)
+    path = tmp_path / "collision.hdf5"
+    with pytest.raises(ValueError, match="duplicate.*signal_0|collision.*signal_0"):
+        datafile.write_labber(path, container, grouped_layout="independent")
+    assert not path.exists()
+
+
+def test_independent_rank_four_raises_before_creation(tmp_path: Path) -> None:
+    axes = tuple(datafile.Axis(name, "", np.arange(2)) for name in ("a", "b", "c", "d"))
+    container = datafile.Container(
+        {"signal": datafile.Variable(np.ones((2, 2, 2, 2)), axes, "V")},
+        {},
+        {},
+        _container().attrs,
+    )
+    path = tmp_path / "rank_four.hdf5"
+    with pytest.raises(ValueError, match="rank"):
+        datafile.write_labber(path, container, grouped_layout="independent")
+    assert not path.exists()
+
+
 def test_common_grid_failure_does_not_affect_native_save(tmp_path: Path) -> None:
     container = _container(independent=True)
     with pytest.raises(ValueError, match="common"):
