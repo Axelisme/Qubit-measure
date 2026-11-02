@@ -63,6 +63,7 @@ from .macro.structure import MarkedCloseLoop, MarkedOpenLoop
 from .macro.table import TableSelection
 from .modules.base import Module
 from .modules.util import get_fclk
+from .table_param import TableParam
 
 
 class TimelineFork(Macro):
@@ -254,7 +255,9 @@ class TimelineAdvance(TimedMacro):
         else:
             duration = (
                 step_time(prog, self.duration)
-                if self.aligned or isinstance(self.duration, QickParam)
+                if self.aligned
+                or isinstance(self.duration, QickParam)
+                and not isinstance(self.duration, TableParam)
                 else self.duration
             )
         previous = self.book.end(self.timeline)
@@ -357,6 +360,8 @@ class TimelineAdvance(TimedMacro):
             if isinstance(value, RuntimeEnd):
                 registers.append(value)
             else:
+                if isinstance(value, QickParam) and not value.is_sweep():
+                    value = value.start
                 fractional += value
         static_cycles = event.static_cycles
         if static_cycles is None and isinstance(event.offset, (float, int)):
