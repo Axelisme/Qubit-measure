@@ -146,7 +146,7 @@ class PulseReadoutCfg(_PulseReadoutFields[WaveformCfg], AbsReadoutCfg):
     """Materialized readout; waveform is an expanded, validated WaveformCfg."""
 
     def set_param(self, name: str, value: float | QickParam) -> None:
-        """Set freq (MHz), gain, length or ro_length (us); otherwise raise ValueError.
+        """Set freq (MHz), gain, phase (deg), length or ro_length (us); otherwise raise ValueError.
 
         freq supplies both generator and ADC. Waveform length restrictions apply.
         """

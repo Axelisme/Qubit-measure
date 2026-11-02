@@ -109,8 +109,10 @@ class MarkedOpenLoop(OpenLoop):
 class MarkedCloseLoop(CloseLoop):
     """Close the current QICK loop, retaining sweep updates and counter resets.
 
-    All native loop records carry native=True. BODY_END precedes QICK sweep
-    updates and the backedge; END follows the complete native closing shell.
+    All native loop records carry native=True. BODY_END precedes table loads,
+    QICK sweep updates and the backedge; END follows the complete closing shell.
+    Tables advance even when no branch played the wave. Their rotated final
+    row restores the first word before the next outer iteration.
     """
 
     def translate(self, prog) -> None:

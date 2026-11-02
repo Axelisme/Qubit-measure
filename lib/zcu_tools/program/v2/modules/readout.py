@@ -259,8 +259,8 @@ class PulseReadoutOverrides(TypedDict, total=False):
     freq is shared generator/ADC carrier MHz, gain normalized generator
     amplitude, phase generator angle in degrees, length waveform duration us
     and ro_length ADC window us.
-    Each accepts a scalar or QICK sweep. Waveform length restrictions and
-    QICK ADC-window sweep compile limitations remain unchanged.
+    Each accepts a scalar or QICK sweep. Waveform length restrictions apply.
+    TableParam ro_length is unsupported; other ADC-window sweeps follow QICK.
     """
 
     freq: float | QickParam | None

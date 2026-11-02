@@ -113,7 +113,9 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
     Constructor follows MyProgramV2: reps, initial_delay, relax_delay. Native
     operations retain QICK timing. Named outputs update their relative ends;
     delay_by_timeline and body completion move reference time.
-    Each compile resets ends.
+    Each compile resets ends. loop_wave_tables is compiler-owned metadata rebuilt
+    per compile: loop name -> WMEM address -> field index (0..5) -> rotated
+    DMEM word offset, shared by native opening and closing macros.
     All instructions share the existing IR and acquisition implementations.
     get_time_param returns actual scalar/affine times. Runtime-only and
     non-affine timeline times raise RuntimeError, including as_array=True.
