@@ -138,7 +138,9 @@ class HeraldingT2RamseyExp(Experiment[HeraldingT2RamseyResult, HeraldingT2Ramsey
             VariableSpec(
                 variable="sums",
                 axes=(
-                    VariableAxisSpec(label="components", unit="", values=tuple(range(6))),
+                    VariableAxisSpec(
+                        label="components", unit="", values=tuple(range(6))
+                    ),
                     VariableAxisSpec.generated_arange(label="herald_states", unit=""),
                     VariableAxisSpec(
                         label="Time", unit="s", field_name="times", scale=1e-6

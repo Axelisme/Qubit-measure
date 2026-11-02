@@ -555,7 +555,9 @@ def test_single_tone_mux_iq_resolves_implicit_and_explicit_tone():
     }
     implicit = v2.shot_sums(prog, [v2.IQ("readout")])(iq)
     explicit = v2.shot_sums(prog, [v2.IQ("readout", 0)])(iq)
-    np.testing.assert_array_equal(implicit, [[2, 6, 8, 20, 26, 34], [2, 0, 0, 2, -4, 8]])
+    np.testing.assert_array_equal(
+        implicit, [[2, 6, 8, 20, 26, 34], [2, 0, 0, 2, -4, 8]]
+    )
     np.testing.assert_array_equal(implicit, explicit)
 
 

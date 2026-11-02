@@ -106,8 +106,12 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
             VariableSpec(
                 variable="sums",
                 axes=(
-                    VariableAxisSpec(label="R2 features", unit="", values=tuple(range(6))),
-                    VariableAxisSpec(label="R1 features", unit="", values=tuple(range(6))),
+                    VariableAxisSpec(
+                        label="R2 features", unit="", values=tuple(range(6))
+                    ),
+                    VariableAxisSpec(
+                        label="R1 features", unit="", values=tuple(range(6))
+                    ),
                     VariableAxisSpec(label="Branch", unit="", values=tuple(range(8))),
                     VariableAxisSpec(label="Gain", unit="a.u.", field_name="gains"),
                 ),
@@ -159,9 +163,7 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
             return viewer.set(gains, contrast)
 
         fig.show()
-        buffer = SignalBuffer(
-            (len(gains), 8, 6, 6), dtype=np.float64, on_update=update
-        )
+        buffer = SignalBuffer((len(gains), 8, 6, 6), dtype=np.float64, on_update=update)
         with Schedule(buffer, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 context.soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay

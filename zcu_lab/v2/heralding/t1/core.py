@@ -109,7 +109,9 @@ class HeraldingT1Exp(Experiment[HeraldingT1Result, HeraldingT1Cfg]):
                 VariableSpec(
                     variable="sums",
                     axes=(
-                        VariableAxisSpec(label="components", unit="", values=tuple(range(6))),
+                        VariableAxisSpec(
+                            label="components", unit="", values=tuple(range(6))
+                        ),
                         VariableAxisSpec.generated_arange(
                             label="herald_states", unit=""
                         ),

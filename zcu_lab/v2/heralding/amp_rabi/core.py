@@ -116,7 +116,9 @@ class HeraldingAmpRabiExp(Experiment[HeraldingAmpRabiResult, HeraldingAmpRabiCfg
             VariableSpec(
                 variable="sums",
                 axes=(
-                    VariableAxisSpec(label="components", unit="", values=tuple(range(6))),
+                    VariableAxisSpec(
+                        label="components", unit="", values=tuple(range(6))
+                    ),
                     VariableAxisSpec.generated_arange(label="herald_states", unit=""),
                     VariableAxisSpec(label="Gain", unit="", field_name="amps"),
                 ),

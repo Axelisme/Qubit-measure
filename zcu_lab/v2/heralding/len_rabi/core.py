@@ -141,7 +141,9 @@ class HeraldingLenRabiExp(Experiment[HeraldingLenRabiResult, HeraldingLenRabiCfg
             VariableSpec(
                 variable="sums",
                 axes=(
-                    VariableAxisSpec(label="components", unit="", values=tuple(range(6))),
+                    VariableAxisSpec(
+                        label="components", unit="", values=tuple(range(6))
+                    ),
                     VariableAxisSpec.generated_arange(label="herald_states", unit=""),
                     VariableAxisSpec(
                         label="Length", unit="s", field_name="lengths", scale=1e-6
