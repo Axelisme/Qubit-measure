@@ -6,6 +6,8 @@ import numpy as np
 from numpy.typing import NDArray
 from scipy.optimize import least_squares
 
+from zcu_tools.analysis.failure import AnalysisFailed
+
 
 @dataclass(frozen=True)
 class TransferResult:
@@ -42,17 +44,15 @@ def selfcal_transfer(
     if sums.ndim != 3 or sums.shape[1:] != (6, 6):
         raise ValueError("sums must have shape (N, 6, 6)")
     measured = np.isfinite(sums).all(axis=(1, 2)) & (sums[:, 0, 0] > 0)
-    valid_sums = sums[measured]
-    counts = valid_sums[:, 0, 0]
-    pooled = valid_sums.sum(axis=0)[:, 0] / counts.sum()
-    mean = complex(pooled[1], pooled[2])
-    scale = float(np.sqrt(pooled[3] + pooled[5] - abs(mean) ** 2))
-    transform = _coordinate_transform(mean, scale)
-    moments = transform @ (valid_sums / counts[:, None, None]) @ transform.T
+    if not measured.any():
+        raise AnalysisFailed("No measured points for readout identification")
+    moments, mean, scale = _normalized_moments(sums[measured])
     stack = np.concatenate([moments, moments.transpose(0, 2, 1)], axis=0)
     vectors, singular_values, _ = np.linalg.svd(
         stack.transpose(1, 0, 2).reshape(6, -1), full_matrices=False
     )
+    if singular_values[n_states - 1] <= max(1e-8 * singular_values[0], 3 * singular_values[n_states]):
+        raise AnalysisFailed("Requested states are not identifiable above the singular-value noise floor")
     projector = np.eye(6) - vectors[:, :n_states] @ vectors[:, :n_states].T
     centers, variance = _fit_centers(projector, n_states)
     inverse = np.linalg.pinv(_lift(centers, variance).T)
@@ -76,6 +76,21 @@ def selfcal_transfer(
         sigma=float(np.sqrt(variance) * scale),
         singular_values=singular_values[: n_states + 1] / singular_values[0],
     )
+
+
+def _normalized_moments(
+    sums: NDArray[np.float64],
+) -> tuple[NDArray[np.float64], complex, float]:
+    """Normalize both readouts using shot-weighted pooled herald statistics."""
+    counts = sums[:, 0, 0]
+    pooled = sums.sum(axis=0)[:, 0] / counts.sum()
+    mean = complex(pooled[1], pooled[2])
+    variance = float(pooled[3] + pooled[5] - abs(mean) ** 2)
+    if variance <= 0:
+        raise AnalysisFailed("Readout centers are not identifiable without herald variance")
+    scale = float(np.sqrt(variance))
+    transform = _coordinate_transform(mean, scale)
+    return transform @ (sums / counts[:, None, None]) @ transform.T, mean, scale
 
 
 def _coordinate_transform(mean: complex, scale: float) -> NDArray[np.float64]:
@@ -130,4 +145,24 @@ def _fit_centers(
     lower = np.r_[np.full(2 * n_states, -np.inf), 0.0]
     upper = np.r_[np.full(2 * n_states, np.inf), 0.5]
     fit = least_squares(residual, initial, bounds=(lower, upper), gtol=1e-12, ftol=1e-12, xtol=1e-12)
-    return fit.x[:-1:2] + 1j * fit.x[1:-1:2], float(fit.x[-1])
+    centers = fit.x[:-1:2] + 1j * fit.x[1:-1:2]
+    variance = float(fit.x[-1])
+    lifted = _lift(centers, variance)
+    relative_error = np.linalg.norm(lifted @ projector, axis=1) / np.linalg.norm(lifted, axis=1)
+    if not fit.success or np.max(relative_error) > 0.05:
+        raise AnalysisFailed("Readout identification lift residual did not converge")
+    _require_distinct_centers(centers)
+    return centers, variance
+
+
+def _require_distinct_centers(centers: NDArray[np.complex128]) -> None:
+    """Reject coincident centers and the unidentifiable collinear three-state case."""
+    separations = np.abs(centers[:, None] - centers[None, :])
+    distances = separations[np.triu_indices(len(centers), k=1)]
+    if np.min(distances) <= 1e-3 * max(1.0, float(np.max(distances))):
+        raise AnalysisFailed("Could not identify distinct readout centers")
+    if len(centers) == 3:
+        first, second = centers[1:] - centers[0]
+        area = abs((first.conjugate() * second).imag)
+        if area <= 1e-3 * abs(first) * abs(second):
+            raise AnalysisFailed("Three collinear readout centers are not identifiable")
