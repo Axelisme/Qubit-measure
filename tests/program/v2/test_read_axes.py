@@ -438,7 +438,10 @@ def test_nested_branch_and_repeat_still_reject_repeated_adc_trigger(inner):
 
 def test_split_sums_returns_counts_and_nan_means_without_warnings():
     sums = np.array(
-        [[[2, 6, -4], [0, 0, 0]], [[1, -3, 7], [np.nan, np.nan, np.nan]]],
+        [
+            [[2, 6, -4, 20, -12, 8], [0, 0, 0, 0, 0, 0]],
+            [[1, -3, 7, 9, -21, 49], [np.nan] * 6],
+        ],
         dtype=np.float64,
     )
     with np.errstate(all="raise"):
@@ -448,9 +451,10 @@ def test_split_sums_returns_counts_and_nan_means_without_warnings():
         means, [[3 - 2j, complex(np.nan, np.nan)], [-3 + 7j, complex(np.nan, np.nan)]]
     )
     assert means.dtype == np.complex128
-    with pytest.raises(ValueError, match="3.*2"):
-        v2.split_sums(np.zeros((4, 2), dtype=np.float64))
-    with pytest.raises(ValueError, match="3.*\\(\\)"):
+    for length in (2, 3, 5, 7):
+        with pytest.raises(ValueError, match=f"6.*{length}"):
+            v2.split_sums(np.zeros((4, length), dtype=np.float64))
+    with pytest.raises(ValueError, match="6.*\\(\\)"):
         v2.split_sums(np.array(1.0))
 
 
