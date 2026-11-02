@@ -31,6 +31,6 @@ Apply 只在操作員確認後寫回 `$qubit.t1`。
 
 ## Save 與載回
 
-Save 將 `sums` 寫入 native `data.h5`，形狀是 (Nt, classes, 3)，linear 的 classes 為 2，circle 與 centroid3 為 3。後兩軸是 herald_states（依存檔 classifier 順序）與 components（count、ΣI、ΣQ）。時間在檔案中使用 seconds，載回 Result 時恢復 us。通過比例只在分析或即時呈現時以 g 計數除以總計數，不另存變數。舊格式缺少 `sums` 時明確報錯。Cfg 保存這次 readout 的 classifier。用本實驗載回資料後可重新 Analyze，不需要目前的 classifier。
+Save 將 `sums` 寫入 native `data.h5`，形狀是 (Nt, classes, 6)，linear 的 classes 為 2，circle 與 centroid3 為 3。後兩軸是 herald_states（依存檔 classifier 順序）與 components（count、ΣI、ΣQ、ΣI²、ΣIQ、ΣQ²）。時間在檔案中使用 seconds，載回 Result 時恢復 us。通過比例只在分析或即時呈現時以 g 計數除以總計數，不另存變數。舊格式缺少 `sums` 時明確報錯。Cfg 保存這次 readout 的 classifier。用本實驗載回資料後可重新 Analyze，不需要目前的 classifier。
 
 Pass fraction 是 classifier 接受的 shot 比例，不是 ground-state purity 或 reset fidelity。FTF joint-state IQ cluster 不能當作單 qubit g/e 校準；離線走通流程也不代表物理校準完成。

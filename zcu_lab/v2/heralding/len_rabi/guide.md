@@ -42,7 +42,7 @@ Review the captured destination and each proposal before Apply Selected. Run and
 
 ## Save and load
 
-Save All preserves `sums` with shape (Nl, classes, 3), acquisition cfg including classifier, metadata and completed analysis. The class count is 2 for linear and 3 for circle or centroid3. The final axes are herald_states in the saved classifier's order and components (count/sum I/sum Q). Old files without `sums` fail with a missing-variable error. Native Load Data restores sums and the original cfg; it does not read a current classifier to replace the saved one. Analyze again on the loaded record to inspect the same finite data. Loading a saved result does not refill the current input Form.
+Save All preserves `sums` with shape (Nl, classes, 6), acquisition cfg including classifier, metadata and completed analysis. The class count is 2 for linear and 3 for circle or centroid3. The final axes are herald_states in the saved classifier's order and components (count/ΣI/ΣQ/ΣI²/ΣIQ/ΣQ²). Old files without `sums` fail with a missing-variable error. Native Load Data restores sums and the original cfg; it does not read a current classifier to replace the saved one. Analyze again on the loaded record to inspect the same finite data. Loading a saved result does not refill the current input Form.
 
 ## MCP recipe
 

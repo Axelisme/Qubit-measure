@@ -46,10 +46,10 @@ from zcu_lab.v2.twotone.rabi.len_rabi.core import LenRabiAnalyzeOptions
 
 @dataclass(frozen=True)
 class HeraldingLenRabiResult:
-    """lengths is the sweep grid (us); sums has shape (points, classes, 3).
+    """lengths is the sweep grid (us); sums has shape (points, classes, 6).
 
     Herald states follow the saved classifier's state_names order and length.
-    Components are count/sum I/sum Q.
+    Components are count/ΣI/ΣQ/ΣI²/ΣIQ/ΣQ².
     Unmeasured sums are NaN. Conditional means at zero count are NaN.
     """
 
@@ -141,7 +141,7 @@ class HeraldingLenRabiExp(Experiment[HeraldingLenRabiResult, HeraldingLenRabiCfg
             VariableSpec(
                 variable="sums",
                 axes=(
-                    VariableAxisSpec.generated_arange(label="components", unit=""),
+                    VariableAxisSpec(label="components", unit="", values=tuple(range(6))),
                     VariableAxisSpec.generated_arange(label="herald_states", unit=""),
                     VariableAxisSpec(
                         label="Length", unit="s", field_name="lengths", scale=1e-6
@@ -161,12 +161,12 @@ class HeraldingLenRabiExp(Experiment[HeraldingLenRabiResult, HeraldingLenRabiCfg
     def run(
         self, cfg: HeraldingLenRabiCfg, *, context: RunContext
     ) -> HeraldingLenRabiResult:
-        """Acquire (Nl, classes, 3) shot sums versus drive length in us.
+        """Acquire (Nl, classes, 6) shot sums versus drive length in us.
 
         Sequence: optional reset, herald, optional init, drive, signal readout.
         Readouts share cfg.readout and its classifier.
         Herald states follow classifier state_names.
-        Components are count/sum I/sum Q.
+        Components are count/ΣI/ΣQ/ΣI²/ΣIQ/ΣQ².
         Const/flat-top use a hardware sweep. Other editable waveforms use a
         round-major host scan with cached programs; arb is rejected.
         Both hardware rounds and host segments add their sums directly.
@@ -209,7 +209,7 @@ class HeraldingLenRabiExp(Experiment[HeraldingLenRabiResult, HeraldingLenRabiCfg
 
         fig.show()
         buffer = SignalBuffer(
-            (len(lengths), num_states, 3),
+            (len(lengths), num_states, 6),
             dtype=np.float64,
             on_update=update,
         )
@@ -259,7 +259,7 @@ class HeraldingLenRabiExp(Experiment[HeraldingLenRabiResult, HeraldingLenRabiCfg
 
         fig.show()
         buffer = SignalBuffer(
-            (len(lengths), num_states, 3),
+            (len(lengths), num_states, 6),
             dtype=np.float64,
             on_update=update,
         )
@@ -270,7 +270,7 @@ class HeraldingLenRabiExp(Experiment[HeraldingLenRabiResult, HeraldingLenRabiCfg
         )
 
         acquisition_buffer = SignalBuffer(
-            (cfg.rounds, len(lengths), num_states, 3), dtype=np.float64
+            (cfg.rounds, len(lengths), num_states, 6), dtype=np.float64
         )
         with Schedule(acquisition_buffer, scope=context.scope) as sched:
             programs: dict[float, TimelineProgramV2] = {}

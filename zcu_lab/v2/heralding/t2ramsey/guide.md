@@ -43,7 +43,7 @@ Analyze 回傳 `HeraldingT2RamseyAnalysis`：
 
 ## Save、Load 與 MCP
 
-Save 將 `sums` 寫入 native `data.h5`，形狀為 (Nt, classes, 3)，linear 的 classes 為 2，circle 與 centroid3 為 3，後兩軸為 herald_states（依存檔 classifier 順序）與 components（count、ΣI、ΣQ）。通過比例只在分析或即時呈現時以 g 計數除以總計數，不另存變數。舊格式缺少 `sums` 時明確報錯。檔案時間使用 seconds，載回恢復 us。Cfg 保存此次 readout classifier。Load 不用目前表單或 classifier 替換歷史資料。
+Save 將 `sums` 寫入 native `data.h5`，形狀為 (Nt, classes, 6)，linear 的 classes 為 2，circle 與 centroid3 為 3，後兩軸為 herald_states（依存檔 classifier 順序）與 components（count、ΣI、ΣQ、ΣI²、ΣIQ、ΣQ²）。通過比例只在分析或即時呈現時以 g 計數除以總計數，不另存變數。舊格式缺少 `sums` 時明確報錯。檔案時間使用 seconds，載回恢復 us。Cfg 保存此次 readout classifier。Load 不用目前表單或 classifier 替換歷史資料。
 
 Load 後可再 Analyze。與普通 Ramsey 一樣，native load 不恢復 run-only realized detune，因此不提出 frequency 修正；t2r 與符合來源條件的 record 提案仍可用。
 

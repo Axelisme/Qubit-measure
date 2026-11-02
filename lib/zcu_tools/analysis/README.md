@@ -63,8 +63,8 @@ centers／radius／confusion matrix 有限時才提出校準。
 ## Readout QND 指標
 
 `readout_metrics.readout_metrics(sums)` 分析單一 gain 點的
-`(8, 3, 3, 3, 3)` shot sums，回傳 frozen `ReadoutMetrics`。
-四個 moment 軸依序是 R1、R1、R2、R2 的 `(1, I, Q)`。
+`(8, 6, 6)` shot sums，回傳 frozen `ReadoutMetrics`。
+兩個 feature 軸依序是 R1、R2 的 `(1, I, Q, I², IQ, Q²)`。
 Branch index 是 `prepare_pi*4 + r1_on*2 + middle_pi`。
 
 SNR、Gaussian 分離保真度與熱布居共用 R1 開、中間 I 的兩製備校準。

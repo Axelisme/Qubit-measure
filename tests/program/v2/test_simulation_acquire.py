@@ -97,7 +97,7 @@ def test_builder_program_acquires_and_sums_tagged_readouts():
             rounds=2,
             progress=False,
         )
-        expected = np.zeros((2, 3, 3))
+        expected = np.zeros((2, 6, 6))
         expected[:, 0, 0] = 6
         np.testing.assert_array_equal(result, expected)
         request = env.soc.binding.last_request
@@ -405,9 +405,15 @@ def test_mid_round_stop_discards_chunks_and_preserves_completed_rounds(cancel_ro
 def assert_conditional_sums(value, completed):
     """Check counts and weighted IQ, including the completed zero-count point."""
     expected = (
-        [[[1, 2, -2], [2, 180, -180]], [[0, 0, 0], [3, 270, -270]]]
+        [
+            [[1, 2, -2, 4, -4, 4], [2, 180, -180, 16200, -16200, 16200]],
+            [[0, 0, 0, 0, 0, 0], [3, 270, -270, 24300, -24300, 24300]],
+        ]
         if completed == 1
-        else [[[3, 24, -24], [3, 270, -270]], [[0, 0, 0], [6, 540, -540]]]
+        else [
+            [[3, 24, -24, 264, -264, 264], [3, 270, -270, 24300, -24300, 24300]],
+            [[0, 0, 0, 0, 0, 0], [6, 540, -540, 48600, -48600, 48600]],
+        ]
     )
     np.testing.assert_array_equal(value, expected)
     with np.errstate(all="raise"):

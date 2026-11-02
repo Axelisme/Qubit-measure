@@ -29,7 +29,7 @@ Pass fraction is the herald-g count divided by the total class count at each gai
 
 The classified fraction is not an independent measurement of ground purity. It depends on classifier errors and on whether calibration and acquisition use matching IQ coordinates.
 
-Save All writes native `sums` with shape (Ngain, classes, 3) and cfg, including the classifier. The class count is 2 for linear and 3 for circle or centroid3. The final axes are herald_states in the saved classifier's order and components (count/sum I/sum Q). Old files without `sums` fail with a missing-variable error. Load Data restores the saved grid and classifier rather than rebuilding them from the current Form. Analyze can run again on the loaded record. Review each save output's status; successful native saving does not imply every export format succeeded.
+Save All writes native `sums` with shape (Ngain, classes, 6) and cfg, including the classifier. The class count is 2 for linear and 3 for circle or centroid3. The final axes are herald_states in the saved classifier's order and components (count/ΣI/ΣQ/ΣI²/ΣIQ/ΣQ²). Old files without `sums` fail with a missing-variable error. Load Data restores the saved grid and classifier rather than rebuilding them from the current Form. Analyze can run again on the loaded record. Review each save output's status; successful native saving does not imply every export format succeeded.
 
 ## Review writeback
 

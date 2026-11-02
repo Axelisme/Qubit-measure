@@ -48,10 +48,10 @@ from zcu_lab.v2.twotone.time_domain.t1.core import T1AnalyzeOptions
 
 @dataclass(frozen=True)
 class HeraldingT1Result:
-    """times is the sweep grid (us); sums has shape (points, classes, 3).
+    """times is the sweep grid (us); sums has shape (points, classes, 6).
 
     Herald states follow the saved classifier's state_names order and length.
-    Components are count/sum I/sum Q.
+    Components are count/ΣI/ΣQ/ΣI²/ΣIQ/ΣQ².
     Unmeasured sums are NaN. Conditional means at zero count are NaN.
     """
 
@@ -109,7 +109,7 @@ class HeraldingT1Exp(Experiment[HeraldingT1Result, HeraldingT1Cfg]):
                 VariableSpec(
                     variable="sums",
                     axes=(
-                        VariableAxisSpec.generated_arange(label="components", unit=""),
+                        VariableAxisSpec(label="components", unit="", values=tuple(range(6))),
                         VariableAxisSpec.generated_arange(
                             label="herald_states", unit=""
                         ),
@@ -131,10 +131,10 @@ class HeraldingT1Exp(Experiment[HeraldingT1Result, HeraldingT1Cfg]):
     )
 
     def run(self, cfg: HeraldingT1Cfg, *, context: RunContext) -> HeraldingT1Result:
-        """Acquire (Nt, classes, 3) shot sums versus delay in us.
+        """Acquire (Nt, classes, 6) shot sums versus delay in us.
 
         Herald states follow classifier state_names.
-        Components are count/sum I/sum Q.
+        Components are count/ΣI/ΣQ/ΣI²/ΣIQ/ΣQ².
         Both readouts share cfg.readout and its classifier.
         Host post-selection adds no active reset. Rounds add sums without
         normalization. Live and analyze use the herald-g conditional IQ.
@@ -165,7 +165,7 @@ class HeraldingT1Exp(Experiment[HeraldingT1Result, HeraldingT1Cfg]):
 
         fig.show()
         buffer = SignalBuffer(
-            (len(lengths), num_states, 3),
+            (len(lengths), num_states, 6),
             dtype=np.float64,
             on_update=update,
         )
@@ -205,7 +205,7 @@ class HeraldingT1Exp(Experiment[HeraldingT1Result, HeraldingT1Cfg]):
 
         fig.show()
         buffer = SignalBuffer(
-            (len(lengths), num_states, 3),
+            (len(lengths), num_states, 6),
             dtype=np.float64,
             on_update=update,
         )

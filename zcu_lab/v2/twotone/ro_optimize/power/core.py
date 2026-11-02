@@ -40,10 +40,10 @@ from zcu_lab.v2.support import live_line
 class PowerResult:
     """gains: quantized readout gain (Ngain,) in normalized a.u. within [-1, 1].
 
-    sums: float64 (Ngain, 8, 3, 3, 3, 3), without round normalization.
-        Branch = prepare_pi*4 + r1_on*2 + middle_pi. Moment axes are
-        IQ(r1), IQ(r1), IQ(r2), IQ(r2), each ordered (1, I, Q).
-        sums[..., 0, 0, 0, 0] is the shot count; unmeasured sums are NaN.
+    sums: float64 (Ngain, 8, 6, 6), without round normalization.
+        Branch = prepare_pi*4 + r1_on*2 + middle_pi. Feature axes are
+        IQ(r1), IQ(r2), each ordered (1, I, Q, I², IQ, Q²).
+        sums[..., 0, 0] is the shot count; unmeasured sums are NaN.
     """
 
     gains: NDArray[np.float64]
@@ -92,7 +92,7 @@ def restore_result(data: GroupedLoadData[PowerCfg]) -> PowerResult:
     """Restore paired IQ sums and the gain axis from the QND native record."""
     variable = data.variable("sums")
     return PowerResult(
-        gains=variable.axes[5].astype(np.float64),
+        gains=variable.axes[3].astype(np.float64),
         sums=variable.z.astype(np.float64),
     )
 
@@ -106,10 +106,8 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
             VariableSpec(
                 variable="sums",
                 axes=(
-                    VariableAxisSpec(label="R2 second", unit="", values=(0, 1, 2)),
-                    VariableAxisSpec(label="R2 first", unit="", values=(0, 1, 2)),
-                    VariableAxisSpec(label="R1 second", unit="", values=(0, 1, 2)),
-                    VariableAxisSpec(label="R1 first", unit="", values=(0, 1, 2)),
+                    VariableAxisSpec(label="R2 features", unit="", values=tuple(range(6))),
+                    VariableAxisSpec(label="R1 features", unit="", values=tuple(range(6))),
                     VariableAxisSpec(label="Branch", unit="", values=tuple(range(8))),
                     VariableAxisSpec(label="Gain", unit="a.u.", field_name="gains"),
                 ),
@@ -132,7 +130,7 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
         context: RunContext,
         acquire_kwargs: dict[str, Any] | None = None,
     ) -> PowerResult:
-        """Acquire paired-readout sums (Ngain, 8, 3, 3, 3, 3) versus gain.
+        """Acquire paired-readout sums (Ngain, 8, 6, 6) versus gain.
 
         Each branch resets optionally, prepares I/pi, emits R1 on/zero-gain,
         waits cfg.wait us, applies middle I/pi, then emits R2. R1 off retains
@@ -154,15 +152,15 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
 
         @context.plots.on_plot_thread
         def update(sums):
-            counts = sums[:, :, 0, 0, 0, 0]
+            counts = sums[:, :, 0, 0]
             counts = np.where(counts == 0, np.nan, counts)
-            means = sums[:, :, 1:, 0, 0, 0] / counts[..., None]
+            means = sums[:, :, 1:3, 0] / counts[..., None]
             contrast = np.linalg.norm(means[:, 6] - means[:, 2], axis=-1)
             return viewer.set(gains, contrast)
 
         fig.show()
         buffer = SignalBuffer(
-            (len(gains), 8, 3, 3, 3, 3), dtype=np.float64, on_update=update
+            (len(gains), 8, 6, 6), dtype=np.float64, on_update=update
         )
         with Schedule(buffer, scope=context.scope) as sched:
             builder = TimelineBuilder(
@@ -188,7 +186,7 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
                         builder.emit(r2)
             prog = builder.build()
             prog.set_reads_per_shot(2)
-            processor = shot_sums(prog, [IQ("r1"), IQ("r1"), IQ("r2"), IQ("r2")])
+            processor = shot_sums(prog, [IQ("r1"), IQ("r2")])
             sched.run_acquire_summed(
                 prog,
                 context.soc,

@@ -31,7 +31,7 @@ All eight branches have the same reset, preparation, R1, wait, middle and R2 pos
 
 The live plot shows the magnitude of the R1 mean-IQ difference between preparation pi and I, using branches 6 and 2. It is a contrast in arbitrary ADC units, not SNR or fidelity.
 
-The Result stores `gains` in a.u. and float64 `sums` shaped `(Ngain, 8, 3, 3, 3, 3)`. The four moment axes are R1, R1, R2, R2, each ordered as `1, I, Q`. The all-zero moment entry counts shots. Reps and completed rounds add to these sums without normalization. Native files store these sums, not raw shots or only the plotted contrast.
+The Result stores `gains` in a.u. and float64 `sums` shaped `(Ngain, 8, 6, 6)`. The two feature axes are R1 and R2, each ordered as `1, I, Q, I², IQ, Q²`. The all-zero moment entry counts shots. Reps and completed rounds add to these sums without normalization. Native files store these sums, not raw shots or only the plotted contrast.
 
 ## Reading the analysis
 

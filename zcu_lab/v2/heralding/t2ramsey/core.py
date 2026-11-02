@@ -50,10 +50,10 @@ from zcu_lab.v2.twotone.time_domain.t2ramsey.core import T2RamseyAnalyzeOptions
 
 @dataclass(frozen=True)
 class HeraldingT2RamseyResult:
-    """times is the sweep grid (us); sums has shape (points, classes, 3).
+    """times is the sweep grid (us); sums has shape (points, classes, 6).
 
     Herald states follow the saved classifier's state_names order and length.
-    Components are count/sum I/sum Q.
+    Components are count/ΣI/ΣQ/ΣI²/ΣIQ/ΣQ².
     Unmeasured sums are NaN. Conditional means at zero count are NaN.
     true_activate_detune is run-only MHz metadata, None after native load.
     """
@@ -138,7 +138,7 @@ class HeraldingT2RamseyExp(Experiment[HeraldingT2RamseyResult, HeraldingT2Ramsey
             VariableSpec(
                 variable="sums",
                 axes=(
-                    VariableAxisSpec.generated_arange(label="components", unit=""),
+                    VariableAxisSpec(label="components", unit="", values=tuple(range(6))),
                     VariableAxisSpec.generated_arange(label="herald_states", unit=""),
                     VariableAxisSpec(
                         label="Time", unit="s", field_name="times", scale=1e-6
@@ -159,12 +159,12 @@ class HeraldingT2RamseyExp(Experiment[HeraldingT2RamseyResult, HeraldingT2Ramsey
     def run(
         self, cfg: HeraldingT2RamseyCfg, *, context: RunContext
     ) -> HeraldingT2RamseyResult:
-        """Acquire (Nt, classes, 3) shot sums versus free-evolution delay in us.
+        """Acquire (Nt, classes, 6) shot sums versus free-evolution delay in us.
 
         Optional reset precedes herald, pi/2, delay, phase-shifted pi/2, signal.
         Readouts share cfg.readout and its classifier.
         Herald states follow classifier state_names.
-        Components are count/sum I/sum Q.
+        Components are count/ΣI/ΣQ/ΣI²/ΣIQ/ΣQ².
         Rounds add sums. Live and analyze select herald-g conditional IQ.
         Zero-count means are NaN; unmeasured sums remain NaN.
         detune in MHz ramps the final pulse phase, not the drive frequency.
@@ -197,7 +197,7 @@ class HeraldingT2RamseyExp(Experiment[HeraldingT2RamseyResult, HeraldingT2Ramsey
 
         fig.show()
         buffer = SignalBuffer(
-            (len(lengths), num_states, 3),
+            (len(lengths), num_states, 6),
             dtype=np.float64,
             on_update=update,
         )

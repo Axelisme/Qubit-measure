@@ -43,10 +43,10 @@ from zcu_lab.v2.twotone.rabi.amp_rabi.core import AmpRabiAnalyzeOptions
 
 @dataclass(frozen=True)
 class HeraldingAmpRabiResult:
-    """amps is the sweep grid (native gain); sums has shape (points, classes, 3).
+    """amps is the sweep grid (native gain); sums has shape (points, classes, 6).
 
     Herald states follow the saved classifier's state_names order and length.
-    Components are count/sum I/sum Q.
+    Components are count/ΣI/ΣQ/ΣI²/ΣIQ/ΣQ².
     Unmeasured sums are NaN. Conditional means at zero count are NaN.
     """
 
@@ -116,7 +116,7 @@ class HeraldingAmpRabiExp(Experiment[HeraldingAmpRabiResult, HeraldingAmpRabiCfg
             VariableSpec(
                 variable="sums",
                 axes=(
-                    VariableAxisSpec.generated_arange(label="components", unit=""),
+                    VariableAxisSpec(label="components", unit="", values=tuple(range(6))),
                     VariableAxisSpec.generated_arange(label="herald_states", unit=""),
                     VariableAxisSpec(label="Gain", unit="", field_name="amps"),
                 ),
@@ -134,12 +134,12 @@ class HeraldingAmpRabiExp(Experiment[HeraldingAmpRabiResult, HeraldingAmpRabiCfg
     def run(
         self, cfg: HeraldingAmpRabiCfg, *, context: RunContext
     ) -> HeraldingAmpRabiResult:
-        """Acquire (Ngain, classes, 3) shot sums versus hardware-quantized gain.
+        """Acquire (Ngain, classes, 6) shot sums versus hardware-quantized gain.
 
         After optional reset, herald, apply optional init and fixed-duration
         gain-swept drive, then read signal. Both readouts share cfg.readout and
         its classifier. Herald states follow classifier state_names; components are
-        count/sum I/sum Q. Rounds add sums. Live and analyze use herald-g
+        count/ΣI/ΣQ/ΣI²/ΣIQ/ΣQ². Rounds add sums. Live and analyze use herald-g
         conditional IQ; zero-count means are NaN. Unmeasured sums remain NaN.
         cfg is not mutated. Pulse duration uses us, gain uses native units.
         Heralding itself adds no active reset.
@@ -162,7 +162,7 @@ class HeraldingAmpRabiExp(Experiment[HeraldingAmpRabiResult, HeraldingAmpRabiCfg
 
         fig.show()
         buffer = SignalBuffer(
-            (len(gains), num_states, 3),
+            (len(gains), num_states, 6),
             dtype=np.float64,
             on_update=update,
         )

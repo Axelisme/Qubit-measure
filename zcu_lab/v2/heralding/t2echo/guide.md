@@ -36,6 +36,6 @@ Analyze 回傳 `HeraldingT2EchoAnalysis`：
 
 ## Save 與 Load
 
-Save 在 native `data.h5` 保存 `sums`，形狀為 (Nt, classes, 3)，linear 的 classes 為 2，circle 與 centroid3 為 3，後兩軸為 herald_states（依存檔 classifier 順序）與 components（count、ΣI、ΣQ）。通過比例只在分析或即時呈現時從計數計算，不儲存。舊格式缺少 `sums` 時明確報錯。檔案時間使用 seconds，Result 載回為 us。Cfg 保留本次 pulses、detune 與 readout classifier。從本實驗 Load 後可再 Analyze，不用目前表單的 classifier 或 aliases 補歷史設定。
+Save 在 native `data.h5` 保存 `sums`，形狀為 (Nt, classes, 6)，linear 的 classes 為 2，circle 與 centroid3 為 3，後兩軸為 herald_states（依存檔 classifier 順序）與 components（count、ΣI、ΣQ、ΣI²、ΣIQ、ΣQ²）。通過比例只在分析或即時呈現時從計數計算，不儲存。舊格式缺少 `sums` 時明確報錯。檔案時間使用 seconds，Result 載回為 us。Cfg 保留本次 pulses、detune 與 readout classifier。從本實驗 Load 後可再 Analyze，不用目前表單的 classifier 或 aliases 補歷史設定。
 
 通過比例是 classifier 接受的 shot 比例，不是獨立的 ground purity、reset fidelity 或 gate fidelity。Herald readout 本身可能改變狀態。離線的有限溫度與 Markov bath 模型不能認證低頻噪聲 refocusing，流程走通也不代表硬體 T2e 已校準。
