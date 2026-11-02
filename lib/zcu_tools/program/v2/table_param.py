@@ -1,6 +1,7 @@
 """Pointwise QICK conversion for nonuniform top-level sweeps."""
 
 from collections.abc import Sequence
+from fractions import Fraction
 
 import numpy as np
 from numpy.typing import NDArray
@@ -153,6 +154,37 @@ class TableRawParam(QickRawParam):
         self.loop = loop
         self.values = tuple(values)
         super().__init__(par=par, start=self.values[0], spans={}, quantize=quantize)
+
+    def __copy__(self) -> "TableRawParam":
+        copied = TableRawParam(self.loop, self.values, self.par, self.quantize)
+        copied.steps = None if self.steps is None else self.steps.copy()
+        copied.scale = self.scale
+        copied.offset = self.offset
+        return copied
+
+    def __imul__(self, factor: int | Fraction) -> "TableRawParam":
+        if not isinstance(factor, (int, Fraction)):
+            raise TypeError("raw tables can only be multiplied by int or Fraction")
+        if isinstance(factor, Fraction) and any(
+            v % factor.denominator for v in self.values
+        ):
+            raise ValueError("Fraction must divide every raw table point evenly")
+        self.values = tuple(int(v * factor) for v in self.values)
+        self.start = self.values[0]
+        self.scale *= factor
+        self.offset *= factor
+        return self
+
+    def __iadd__(self, offset: int) -> "TableRawParam":
+        if not isinstance(offset, int):
+            raise TypeError("raw table offsets must be integers")
+        self.values = tuple(v + offset for v in self.values)
+        self.start = self.values[0]
+        self.offset += offset
+        return self
+
+    def __truediv__(self, divisor: float) -> TableParam:
+        return TableParam(self.loop, [v / divisor for v in self.values])
 
     def minval(self) -> int:
         """Return the smallest raw word across all points."""
