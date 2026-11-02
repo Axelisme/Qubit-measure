@@ -53,20 +53,6 @@ def amplitude_form(ctx: FormContext, cfg_type: type[T_Cfg]) -> Form[T_Cfg]:
     readout = mux_readout_initial(ctx)
     return Form(
         cfg_type,
-        # Show captured roles first and keep acquisition settings after the amplitude scan.
-        field_order=(
-            "roles",
-            "reset",
-            "x180_f1",
-            "x180_f2",
-            "readout",
-            "drive",
-            "scales",
-            "reps",
-            "rounds",
-            "relax_delay",
-            "initial_delay",
-        ),
         tree={
             "reps": 1000,
             "rounds": 10,
@@ -76,7 +62,7 @@ def amplitude_form(ctx: FormContext, cfg_type: type[T_Cfg]) -> Form[T_Cfg]:
             "x180_f1": Slot("$f1.module.x180", copy=True),
             "x180_f2": Slot("$f2.module.x180", copy=True),
             "readout": readout,
-            "scales": Range(None, None, expts=101),
+            "scale": Range(None, None, expts=101),
         },
     )
 

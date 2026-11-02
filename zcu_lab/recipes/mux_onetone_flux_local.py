@@ -1,6 +1,6 @@
 """Onetone spectroscopy across zipped local DC lines, with one native picker per Q.
 
-Recipe n → frequency.df Expts; flux_n → flux_expts.
+Recipe n → df Expts; flux_n → flux_expts.
 """
 
 from pydantic import Field
@@ -16,7 +16,7 @@ from zcu_tools.mcp.measure.recipe_contracts import (
     RecipeNeedsParameters,
 )
 
-from zcu_lab.v2.support.measure.mux_flux_adapter import MuxFluxPickSummary
+from zcu_lab.v2.support.measure.mux_results import MuxFluxPickSummary
 
 from .mux_flux_helpers import (
     MuxFluxReport,
@@ -65,12 +65,12 @@ async def mux_onetone_flux_local(
     )
     tab.set("participants", inputs.participants)
     if isinstance(inputs.df, ToneRangeInputs):
-        tab.set("frequency.df.start", inputs.df.start)
-        tab.set("frequency.df.stop", inputs.df.stop)
+        tab.set("df.start", inputs.df.start)
+        tab.set("df.stop", inputs.df.stop)
     elif inputs.df is None:
-        tab.set("frequency.df.start", None)
-        tab.set("frequency.df.stop", None)
-    tab.set("frequency.df.n", inputs.n)
+        tab.set("df.start", None)
+        tab.set("df.stop", None)
+    tab.set("df.n", inputs.n)
     if not isinstance(inputs.flux_sweeps, Keep):
         input_tones = tab.read("tones").value
         if not isinstance(input_tones, list):

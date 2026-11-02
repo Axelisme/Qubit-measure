@@ -60,7 +60,9 @@ judge：裁定結果前，依 `<repo>/measure_knowledge/README.md`〈選擇查�
 
 裁定記為 `accept`、`redo`、`reroute` 或 `ask`，定義見 Round。依據須連到本輪證據、judge 條目及有效 policy。缺少適用條目時，保留證據缺口，必要時求助。
 
-完成條件：round 已寫觀察、物理圖像、知識依據、裁定與下一輪。接手者能辨認接受了什麼，或還缺什麼。
+每個 round 裁定後，用 `tab_close` 關閉本 round 開的、保存完整且下一輪不再比較或重分析的 agent tab。仍需比較或重分析的 tab 保留，並在 round 記錄原因。保存與授權條件見 [Tab 清理](../run-measure-gui/references/tab-strategy.md#使用者的-tab-與清理)。
+
+完成條件：round 已寫觀察、物理圖像、知識依據、裁定與下一輪。符合清理條件的 tab 已關閉，需保留的 tab 已在 round 記明原因。接手者能辨認接受了什麼，或還缺什麼。
 
 ## 6. 更新地圖或求助
 

@@ -54,8 +54,8 @@ class FreqPowerCfg(ConfigBase):
     init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init Pulse")] = None
     probe_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Probe Pulse")]
     readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
-    freq: Annotated[SweepCfg, FieldMeta(label="Probe freq", unit="MHz")]
     gain: Annotated[SweepCfg, FieldMeta(label="Probe gain", unit="a.u.")]
+    freq: Annotated[SweepCfg, FieldMeta(label="Probe freq", unit="MHz")]
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
     ] = 1

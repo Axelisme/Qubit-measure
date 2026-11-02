@@ -7,7 +7,6 @@ from typing import Annotated, ClassVar, Self
 
 import numpy as np
 from matplotlib.lines import Line2D
-from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field, model_validator
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
@@ -25,8 +24,6 @@ from zcu_tools.experiment.v2.runtime import RunOptions, Schedule, SignalBuffer
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import Classify, Pulse, Reset, TimelineBuilder, shot_sums
 from zcu_tools.program.v2.modules import MuxReadout
-
-from zcu_lab.v2.support import live_line
 
 from .._readout import JointRoles
 from .._sums import (
@@ -54,12 +51,6 @@ class JointReadoutHeraldedCfg(ConfigBase):
     terminal reuse one mux object; readout post_delay is the wait after herald.
     """
 
-    reps: Annotated[int, FieldMeta(label="Reps")] = Field(default=1, gt=0)
-    rounds: Annotated[int, FieldMeta(label="Rounds")] = Field(default=1, gt=0)
-    initial_delay: Annotated[float, FieldMeta(label="Initial delay", unit="us")] = 1.0
-    relax_delay: Annotated[
-        float, FieldMeta(label="Relax delay", unit="us", decimals=3)
-    ] = 1.0
     reset: Annotated[
         Reset.Cfg | None,
         FieldMeta(
@@ -88,6 +79,12 @@ class JointReadoutHeraldedCfg(ConfigBase):
         ),
     ]
     roles: JointRoles
+    reps: Annotated[int, FieldMeta(label="Reps")] = Field(default=1, gt=0)
+    rounds: Annotated[int, FieldMeta(label="Rounds")] = Field(default=1, gt=0)
+    initial_delay: Annotated[float, FieldMeta(label="Initial delay", unit="us")] = 1.0
+    relax_delay: Annotated[
+        float, FieldMeta(label="Relax delay", unit="us", decimals=3)
+    ] = 1.0
 
     @model_validator(mode="after")
     def validate_pair(self) -> Self:
@@ -206,22 +203,26 @@ class JointReadoutHeraldedExp(
         validate_classifiers(config.readout, config.roles)
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(
-            xlabel="Nominal preparation (gg, ge, eg, ee)",
+            xlabel="Nominal preparation",
             ylabel="Terminal P(g,g) | herald (g,g)",
+            xticks=range(4),
+            xticklabels=["gg", "ge", "eg", "ee"],
         )
-        viewer = live_line(ax)
-        ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+        (line,) = ax.plot([], [], marker="o", linestyle="none")
         ax.grid(False)
         fig.show()
 
         @context.plots.on_plot_thread
         def update_view(sums: NDArray[np.float64]) -> tuple[Line2D, ...]:
-            return viewer.set(
+            line.set_data(
                 np.arange(4, dtype=np.float64),
                 joint_probabilities(terminal_counts(sums, ("g", "g")))[
                     ..., 0, 0
                 ].reshape(4),
             )
+            ax.relim()
+            ax.autoscale_view()
+            return (line,)
 
         buffer = SignalBuffer(
             (2, 2, 3, 3, 3, 3), dtype=np.float64, on_update=update_view
@@ -308,17 +309,27 @@ class JointReadoutHeraldedExp(
         herald_matrix = herald_probabilities(result.sums).reshape(4, 3, 3)
         acquired_shots = result.sums.sum(axis=(-4, -3, -2, -1)).reshape(4)
 
-        fig, _axes = plots.subplots(num="matrix", ncols=3, figsize=(24, 6))
+        # The GUI saves a fixed 4:3 canvas. Stack the three four-row matrices
+        # and reserve a separate column so colorbars never steal matrix space.
+        fig, _axes = plots.subplots(
+            num="matrix",
+            nrows=3,
+            ncols=2,
+            gridspec_kw={"width_ratios": [1, 0.025]},
+            layout="constrained",
+        )
         axes = fig.axes
-        for group, (ax, title) in enumerate(
+        for group, (ax, colorbar_ax, title) in enumerate(
             zip(
-                axes,
+                axes[::2],
+                axes[1::2],
                 ("Herald (g,g)", "Herald (e,e)", "Combined counts"),
                 strict=True,
             )
         ):
             image = ax.imshow(
                 np.ma.masked_invalid(matrices[group]),
+                aspect="auto",
                 vmin=0,
                 vmax=1,
                 cmap="Blues",
@@ -326,15 +337,20 @@ class JointReadoutHeraldedExp(
             for row in range(4):
                 for col in range(9):
                     value = matrices[group, row, col]
-                    label = (
-                        f"{value:.3f}\nn={counts[group].reshape(4, 9)[row, col]:g}"
-                        if np.isfinite(value)
-                        else "No shots"
+                    label = f"{value:.3f}" if np.isfinite(value) else "—"
+                    ax.text(
+                        col,
+                        row,
+                        label,
+                        ha="center",
+                        va="center",
+                        fontsize=10,
+                        color="white" if value > 0.5 else "black",
                     )
-                    ax.text(col, row, label, ha="center", va="center", fontsize=7)
+            ax.grid(False)
             ax.set_xticks(
                 range(9),
-                OUTCOME_LABELS,
+                OUTCOME_LABELS if group == 2 else [""] * 9,
                 rotation=45,
                 ha="right",
                 rotation_mode="anchor",
@@ -349,16 +365,22 @@ class JointReadoutHeraldedExp(
                         strict=True,
                     )
                 ],
-                xlabel="Observed terminal class (F1, F2)",
-                ylabel="Actual preparation; selected shots",
+                xlabel="Observed terminal class (F1, F2)" if group == 2 else "",
+                ylabel="Actual preparation" if group == 1 else "",
                 title=title,
             )
-            fig.colorbar(image, ax=ax, label="Row-normalized probability")
-        fig.tight_layout()
+            fig.colorbar(image, cax=colorbar_ax, label="Probability")
 
-        fig, ax = plots.subplots(num="herald", figsize=(12, 5))
+        fig, _axes = plots.subplots(
+            num="herald",
+            ncols=2,
+            gridspec_kw={"width_ratios": [1, 0.025]},
+            layout="constrained",
+        )
+        ax, colorbar_ax = fig.axes
         image = ax.imshow(
             np.ma.masked_invalid(herald_matrix.reshape(4, 9)),
+            aspect="auto",
             vmin=0,
             vmax=1,
             cmap="Blues",
@@ -377,10 +399,17 @@ class JointReadoutHeraldedExp(
             ],
             xlabel="Herald class (F1, F2)",
             ylabel="Nominal preparation; acquired shots",
-            title="Herald distribution; (g,g) is pass fraction, not ground-state purity",
+            title="Herald distribution\n(g,g) is pass fraction, not ground-state purity",
         )
-        fig.colorbar(image, ax=ax, label="Herald probability")
-        fig.tight_layout()
+        ax.grid(False)
+        ax.set_xticks(
+            range(9),
+            OUTCOME_LABELS,
+            rotation=45,
+            ha="right",
+            rotation_mode="anchor",
+        )
+        fig.colorbar(image, cax=colorbar_ax, label="Herald probability")
         return JointReadoutHeraldedAnalysis(
             gg_counts=gg.reshape(4, 9),
             gg_matrix=matrices[0],
