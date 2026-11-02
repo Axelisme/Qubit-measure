@@ -2,6 +2,7 @@
 
 import operator
 from collections.abc import Callable
+from typing import Any
 
 import numpy as np
 import pytest
@@ -41,7 +42,7 @@ def test_table_conversion_rounds_each_point_like_qick(
 )
 @pytest.mark.parametrize("reverse", [False, True])
 def test_scalar_arithmetic_preserves_loop_and_rejects_sweep_mixing(
-    operation: Callable, reverse: bool
+    operation: Callable[..., Any], reverse: bool
 ) -> None:
     values = [2.0, -4.0, 8.0, 2.0]
     table = v2.TableParam("point", values)
