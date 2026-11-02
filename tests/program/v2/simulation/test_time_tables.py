@@ -43,7 +43,7 @@ def scheduled_shots(prog):
         )
     )
     return [
-        tuple((e.kind, e.t_cycles, e.wave_words) for e in shot.events)
+        tuple((e.kind, e.cycle, e.wave_words) for e in shot.events)
         for shot in analysis.shots
     ]
 
