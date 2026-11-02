@@ -49,7 +49,7 @@ def length_program(
     cfg_length=False,
     outer=False,
     branch=False,
-    played=True,
+    point_count=1,
     auto=False,
 ):
     env = white_noise(load_soccfg(2, 1), std_adc=0, routes=((0, 0),), seed=None)
@@ -68,6 +68,8 @@ def length_program(
                 step=(value[-1] - value[0]) / (len(value) - 1),
             ),
         )
+    if mode == "scalar" and branch:
+        builder.add_loop("point", point_count)
     waveform = (
         FlatTopWaveformCfg(
             length=value if cfg_length else 0.2,
@@ -99,7 +101,7 @@ def length_program(
     if branch:
         with builder.branch(by="point", align_timeline=True) as cases, cases.case(2):
             builder.emit(module)
-    elif played:
+    else:
         builder.emit(module)
     if auto:
         builder.emit(AutoFollower(0 if consumer == "readout" else 1))
@@ -107,7 +109,7 @@ def length_program(
         builder.emit(receiver.build("readout"))
     builder.delay_by_timeline()
     prog = builder.build()
-    return prog, env, pulse.pulse_name(prog) if played or branch else ""
+    return prog, env, pulse.pulse_name(prog)
 
 
 def scheduled_shots(prog):
@@ -179,9 +181,12 @@ def test_length_wrap_and_unplayed_branch_keep_auto_follower_at_actual_end(flat, 
     expected_shots = []
     for index, value in enumerate(values):
         scalar, scalar_env, _ = length_program(
-            value, flat=flat, played=not branch or index == 2, auto=True
+            value, flat=flat, branch=branch, point_count=len(values), auto=True
         )
-        expected = request(scalar, scalar_env).materialize_point(0)
+        scalar_index = index if branch else 0
+        expected = replace(
+            request(scalar, scalar_env).materialize_point(scalar_index), coordinates=()
+        )
         for outer in range(2):
             assert (
                 replace(
@@ -190,7 +195,7 @@ def test_length_wrap_and_unplayed_branch_keep_auto_follower_at_actual_end(flat, 
                 )
                 == expected
             )
-        expected_shots.append(scheduled_shots(scalar)[0])
+        expected_shots.append(scheduled_shots(scalar)[scalar_index])
     assert scheduled_shots(prog) == expected_shots * 4
 
 
