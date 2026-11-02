@@ -7,6 +7,7 @@ import numpy as np
 import pytest
 from qick.asm_v2 import QickParam, QickSweep1D
 from zcu_tools.program.v2 import SweepCfg, TimelineBuilder, TimelineProgramV2, ir
+from zcu_tools.program.v2.modules import LoadValue
 from zcu_tools.program.v2.modules.pulse import Pulse, PulseCfg
 from zcu_tools.program.v2.modules.readout import PulseReadout, PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import (
@@ -16,7 +17,11 @@ from zcu_tools.program.v2.modules.waveform import (
 )
 
 from tests.program._profiles import load_soccfg
-from tests.program.v2.wave_observations import analyze, relative_shot
+from tests.program.v2.wave_observations import (
+    analyze,
+    assert_scalar_shots,
+    relative_shot,
+)
 
 Field = Literal["freq", "phase", "gain", "length", "delay", "readout_freq"]
 Mode = Literal["scalar", "linear", "table"]
@@ -110,6 +115,49 @@ def compile_scan(
     prog = builder.build()
     pulse = receiver.pulse if field == "readout_freq" else drive
     return prog, pulse.pulse_name(prog)
+
+
+def compile_adc_origin(value, *, table: bool, fork: bool) -> TimelineProgramV2:
+    """Keep a table fork while overwriting its parent with a LoadValue origin."""
+    builder = TimelineBuilder(
+        load_soccfg(1, 1), reps=2, initial_delay=0, relax_delay=0.1
+    )
+    if table:
+        value = builder.add_table_sweep("point", value)
+    else:
+        builder.add_loop("point", POINTS)
+    receiver = PulseReadoutCfg(
+        gen_ch=0,
+        ro_ch=0,
+        nqz=1,
+        freq=100,
+        gain=0.1,
+        waveform=ConstWaveformCfg(length=0.1),
+        ro_length=0.1,
+    ).build("readout")
+    builder.timeline_inc(value)
+    if fork:
+        builder.fork("default", into="saved")
+    builder.emit(LoadValue("origins", [100, 160, 120], "point", "origin_cycles"))
+    builder.timeline_inc("origin_cycles")
+    if fork:
+        builder.emit(receiver, timeline="saved")
+    builder.emit(receiver)
+    builder.delay_by_timeline()
+    return builder.build()
+
+
+@pytest.mark.parametrize("fork", [False, True])
+def test_table_origin_fork_and_runtime_overwrite_preserve_adc_tail_rules(fork):
+    values = [0.0213, 0.0107, 0.0354]
+    observed = compile_adc_origin(values, table=True, fork=fork)
+    expected = [
+        analyze(compile_adc_origin(value, table=False, fork=fork)).shots[index]
+        for index, value in enumerate(values)
+    ]
+    # Both sides keep the same LoadValue/register origin. Only the authored
+    # table changes to one scalar point, including the independently saved fork.
+    assert_scalar_shots(analyze(observed), expected * 2)
 
 
 def assert_scalar_oracle(
