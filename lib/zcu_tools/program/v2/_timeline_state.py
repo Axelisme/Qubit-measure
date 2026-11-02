@@ -27,7 +27,7 @@ from ._timeline_expression import (
     unbounded_time,
 )
 from ._timeline_guard import PulseGuard as _PulseGuard
-from ._timeline_guard import bounds, get_fclk
+from ._timeline_guard import bounds
 from ._timeline_runtime import (
     RuntimeEnd,
     RuntimeMath,
@@ -44,6 +44,7 @@ from ._timeline_runtime import (
 )
 from .macro.table import TableSelection
 from .macro.write_reg import WriteRegOp
+from .modules.util import get_fclk
 from .table_param import TableParam
 
 if TYPE_CHECKING:
