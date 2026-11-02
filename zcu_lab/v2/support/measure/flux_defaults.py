@@ -100,12 +100,12 @@ def flux_bounds(
 
 
 def qubit_flux_initial_values(
-    env: FormEnv, _defaults: dict[str, JsonValue], *, margin: float = 0.1
+    env: FormEnv, defaults: dict[str, JsonValue], *, margin: float = 0.1
 ) -> dict[str, JsonValue]:
     """Seed the selected $qubit DC device/unit and 101-point actual flux range.
 
-    env supplies the fixed capture. _defaults is the detached declared raw input;
-    it is unused because each returned root is built from the capture.
+    env supplies the fixed capture. defaults is the fresh declared raw input;
+    update its DC fields in place and return the complete initial input.
     The default device remains $qubit.flux_dev. margin expands the range by
     the given fraction of half/integer separation. Missing calibration leaves
     required endpoints blank. Invalid names, nonmember devices, source faults
@@ -113,8 +113,11 @@ def qubit_flux_initial_values(
     """
     qubit = captured_qubit(env, "$qubit")
     seed = captured_flux_seed(env, "$qubit", qubit.flux_dev)
-    return {
-        "flux_dev": seed.device,
-        "flux_unit": seed.unit,
-        "flux": flux_scan_seed(seed.points, margin),
-    }
+    defaults.update(
+        {
+            "flux_dev": seed.device,
+            "flux_unit": seed.unit,
+            "flux": flux_scan_seed(seed.points, margin),
+        }
+    )
+    return defaults

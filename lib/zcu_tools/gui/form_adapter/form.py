@@ -56,19 +56,19 @@ class Form[C: ConfigBase]:
     Hidden() requires a core default; unknown keys fail with ValueError at creation.
     model is a generated FormModel class, used only through the public form API.
     initial_values optionally takes (env, defaults), where env is the fixed
-    FormEnv and defaults is a deep copy of model.defaults(env), before expression
-    evaluation. It returns root field input values (JSON in this Form's public
-    input schema, not native cfgs or FormNodes). It may patch nested defaults
-    and return selected roots; edits to omitted roots do not affect input.
-    default_input builds declared defaults once, calls the factory once and overlays each
-    returned root field in full, copying borrowed values. Omitted fields keep
-    declared defaults. Unknown root fields raise ValueError. The factory must
+    FormEnv and defaults is the fresh dict from model.defaults(env), before
+    expression evaluation. It returns the complete initial input (JSON in this
+    Form's public input schema, not native cfgs or FormNodes). It may modify
+    defaults in place and return it, or return a new tree.
+    default_input builds declared defaults once, calls the factory once and
+    deep-copies its complete return value without merging declared defaults.
+    Unknown root fields raise ValueError. The factory must
     not mutate or refresh the env; its source errors propagate. Returned values
     use the normal seed, expression, source and fixed-element admission paths;
     invalid field values remain invalid input, not numeric fallbacks. It cannot
     change field shape, requiredness, hidden policy or generated declarations.
-    For example, Form(Cfg, {}, initial_values=lambda env, defaults: {"count": 5}) seeds
-    a declared count field without replacing other defaults.
+    For example, Form(Cfg, {}, initial_values=lambda env, defaults: {**defaults, "count": 5})
+    seeds a declared count field while retaining the other defaults.
     default_input resolves names once against the supplied captured FormEnv;
     hosts use the same env until Reset. The host calls bind_templates with its
     template catalog before resolving Template nodes. Slot copies
@@ -191,10 +191,11 @@ class Form[C: ConfigBase]:
         """Build fresh input from captured env; required unresolved names stay absent.
 
         No sources are refreshed or mutated. initial_values, when supplied,
-        receives this same env and a deep copy of declared raw defaults once,
-        before expression evaluation. Only returned root fields replace defaults
-        in full; mutations to omitted roots do not affect this or later input.
-        Declared defaults are built once per call, even with a factory.
+        receives this same env and the freshly built declared raw defaults dict
+        once, before expression evaluation. It may mutate and return that dict
+        or return a new complete tree. Its return value is deep-copied and used
+        in full, without merging declared defaults. Declared defaults are built
+        once per call, even with a factory.
         Source and default factory failures propagate. Unknown factory fields
         raise ValueError; ordinary invalid values remain errors in FormState.
         The shared core evaluates expression defaults once into direct
@@ -202,10 +203,10 @@ class Form[C: ConfigBase]:
         """
         raw = self.model.defaults(env)
         if self._initial_values is not None:
-            values = self._initial_values(env, deepcopy(raw))
+            values = self._initial_values(env, raw)
             if unknown := values.keys() - self.model.model_fields.keys():
                 raise ValueError(f"Unknown initial-value fields: {sorted(unknown)}")
-            raw.update(deepcopy(dict(values)))
+            raw = deepcopy(dict(values))
         input = self.model.default_input(env, defaults=raw)
         self.seed_sources = MappingProxyType(
             capture_seed_sources(raw, input.data, self._section.seed_origins())

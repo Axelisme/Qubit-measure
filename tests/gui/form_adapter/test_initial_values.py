@@ -88,7 +88,9 @@ class Tones(ConfigBase):
 
 
 @pytest.mark.parametrize("new_tree", [False, True])
-def test_factory_adopts_complete_return_and_isolates_fresh_inputs(new_tree: bool) -> None:
+def test_factory_adopts_complete_return_and_isolates_fresh_inputs(
+    new_tree: bool,
+) -> None:
     class GroupedScan(Scan):
         tones: list[Tone]
         participants: list[int] = [0]
