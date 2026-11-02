@@ -147,7 +147,7 @@ def test_time_table_matches_scalar_at_every_point_and_rep(consumer, outer):
     ],
 )
 def test_time_tables_match_reencodable_linear_actual_points(consumer):
-    values = [0.0, 0.03125, 0.0625]
+    values = [0.015625, 0.03125, 0.046875]
     linear, linear_env = time_program(values, linear=True, consumer=consumer)
     parameter = QickSweep1D("point", values[0], values[-1])
     linear.us2cycles(parameter)
