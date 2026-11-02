@@ -117,9 +117,10 @@ def scheduled_shots(prog):
         "native_t",
     ],
 )
-def test_time_table_matches_scalar_at_every_point_and_rep(consumer):
+@pytest.mark.parametrize("outer", [False, True])
+def test_time_table_matches_scalar_at_every_point_and_rep(consumer, outer):
     values = [0.0213, 0.0107, 0.0354]
-    prog, env = time_program(values, table=True, consumer=consumer)
+    prog, env = time_program(values, table=True, outer=outer, consumer=consumer)
     observed = request(prog, env)
     expected_shots = []
     for point, value in enumerate(values):
@@ -128,7 +129,49 @@ def test_time_table_matches_scalar_at_every_point_and_rep(consumer):
             scalar, scalar_env
         ).materialize_point(0)
         expected_shots.append(scheduled_shots(scalar)[0])
-    assert scheduled_shots(prog) == expected_shots * 2
+    assert scheduled_shots(prog) == expected_shots * (4 if outer else 2)
+
+
+@pytest.mark.parametrize(
+    "consumer",
+    [
+        "delay",
+        "delay_auto",
+        "DelayAuto",
+        "timeline_inc",
+        "pre_delay",
+        "post_delay",
+        "trig_offset",
+        "pulse_t",
+        "native_t",
+    ],
+)
+def test_time_tables_match_reencodable_linear_actual_points(consumer):
+    values = [0.0, 0.03125, 0.0625]
+    linear, linear_env = time_program(values, linear=True, consumer=consumer)
+    parameter = QickSweep1D("point", values[0], values[-1])
+    linear.us2cycles(parameter)
+    actual = (
+        parameter.get_rounded({"point": len(values)})
+        .to_array({"point": len(values)})
+        .tolist()
+    )
+    scalar_shots = []
+    for point, value in enumerate(actual):
+        scalar, scalar_env = time_program(value, consumer=consumer)
+        scalar_shots.append(scheduled_shots(scalar)[0])
+        assert replace(
+            request(linear, linear_env).materialize_point(point), coordinates=()
+        ) == request(scalar, scalar_env).materialize_point(0)
+    # Prerequisite: each actual physical point must compile back to the exact
+    # linear output words and cycles before it serves as a table parity oracle.
+    assert scheduled_shots(linear) == scalar_shots * 2
+    table, table_env = time_program(actual, table=True, consumer=consumer)
+    assert scheduled_shots(table) == scheduled_shots(linear)
+    for point in range(len(actual)):
+        assert request(table, table_env).materialize_point(point) == request(
+            linear, linear_env
+        ).materialize_point(point)
 
 
 @pytest.mark.parametrize("consumer", ["delay", "timeline_inc", "native_t", "pulse_t"])
