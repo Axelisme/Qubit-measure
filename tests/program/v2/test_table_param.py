@@ -9,7 +9,7 @@ from typing import Any
 import numpy as np
 import pytest
 from qick import QickConfig
-from qick.asm_v2 import QickParam, QickProgramV2, TimedMacro, Waveform
+from qick.asm_v2 import QickParam, QickProgramV2, QickRawParam, TimedMacro, Waveform
 from qick.helpers import to_int
 from zcu_tools.program import v2
 
@@ -98,8 +98,10 @@ def test_raw_manager_transforms_preserve_all_points_and_rounding() -> None:
     assert uneven.values == (4, 3)
 
 
+@pytest.mark.parametrize("storage", ["wave", "register"])
 def test_qick_waveform_and_close_loop_leave_table_words_unstepped(
     mock_soccfg: QickConfig,
+    storage: str,
 ) -> None:
     scale = mock_soccfg.us2cycles(1.0)
     raw = v2.TableParam("point", [0.15, 0.31, 0.22]).to_int(scale, parname="length")
@@ -110,7 +112,12 @@ def test_qick_waveform_and_close_loop_leave_table_words_unstepped(
     programs = []
     for candidate in [wave, scalar_wave]:
         prog = QickProgramV2(mock_soccfg)
-        prog.add_raw_pulse("test", [candidate])
+        if storage == "wave":
+            prog.add_raw_pulse("test", [candidate])
+        else:
+            init = raw if candidate is wave else QickRawParam("length", raw.start, {})
+            init.to_steps({"point": 3})
+            prog.add_reg(name="lookup", init=init)
         prog.open_loop(3, name="point")
         prog.close_loop()
         prog.end()

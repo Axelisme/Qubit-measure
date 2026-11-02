@@ -205,6 +205,10 @@ class TableRawParam(QickRawParam):
         super().__init__(par=par, start=self.values[0], spans={}, quantize=quantize)
         self.steps: dict[str, dict[str, int]] | None = None
 
+    def is_sweep(self) -> bool:
+        """Return True so QICK allocates a swept register, never a literal."""
+        return True
+
     def to_steps(self, loops: dict[str, int]) -> None:
         """Validate the owning loop and point count; produce no linear steps.
 
