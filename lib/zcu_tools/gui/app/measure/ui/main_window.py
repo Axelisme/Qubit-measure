@@ -205,7 +205,9 @@ class MainWindow(QMainWindow):
         # --- entry / point status bar ---
         main_layout.addLayout(self._build_context_bar())
 
-        self._diagnostic_notice = DiagnosticNotice(self)
+        self._diagnostic_notice = DiagnosticNotice(
+            self, dialog_presenter=self._dialog_presenter
+        )
         main_layout.addWidget(self._diagnostic_notice)
 
         # --- tab widget ---
