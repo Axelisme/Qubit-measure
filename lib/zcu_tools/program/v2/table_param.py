@@ -188,6 +188,7 @@ class TableRawParam(QickRawParam):
         self.loop = loop
         self.values = tuple(values)
         super().__init__(par=par, start=self.values[0], spans={}, quantize=quantize)
+        self.steps: dict[str, dict[str, int]] | None = None
 
     def to_steps(self, loops: dict[str, int]) -> None:
         """Validate the owning loop and point count; produce no linear steps.
