@@ -31,12 +31,11 @@ edits and captures sources again.
   Missing selected calibration leaves both endpoints blank; invalid contributors raise an error.
   Changing participants later does not recompute these starting values.
 - `settle` is the wait in seconds after all DC writes at each flux point.
-- `modules` contains the optional common reset and full mux readout.
-- `frequency` contains only frequency-scan inputs.
-  `frequency.df` supplies a common nominal MHz offset for every selected
-  readout tone. Each offset uses the existing host-side onetone run because
-  the mux firmware cannot sweep tone frequencies in hardware. Inner
-  `participants` supplies the original tone selection.
+- `reset` and `readout` contain the optional common reset and full mux readout.
+- `tones` is one fixed identity list in original readout order, with no drive.
+- `df` supplies a common nominal MHz offset for every selected readout tone.
+  Each offset uses the existing host-side onetone run because the mux firmware
+  cannot sweep tone frequencies in hardware.
 
 Readout uses the mux onetone ringup-copy policy. A captured slot retains its
 mixer and ADC window; five ringup times are added to trigger coverage. Without
@@ -84,7 +83,8 @@ and reasons without rolling back edits. Analysis null goes to the picker owner.
 ## Typed cfg and form paths
 
 Python cfg and saved cfg share a flat layout. There is no `spectrum` wrapper.
-Set `participants: list[int]`, full `tones`, and `modules` at top level.
+Set `reset`, full `readout`, full `tones`, `df` and `participants: list[int]`
+at top level.
 Open/Reset captures the Aliases row `participants`, for example `[Q3, Q1]`,
 and maps it against the captured `$mux.qubits` order to original indices `[2, 0]`.
 Alias list elements may use `$` links. A missing, unbound or empty row selects all
@@ -94,12 +94,11 @@ Changing aliases requires Reset or reopening; ordinary participant edits keep to
 
 Editing participants preserves the fixed tone identities and the shared
 frequency and DC sweep values. Readout identity remains required for every tone.
-All readout identities and local flux_dev names stay required. Local driver
-uniqueness is checked only for selected tones.
+All readout identities stay required, including inactive tones.
 `reset` is optional; `readout` is the complete numeric mux
 readout. In the form, module selectors expose inline fields below
 `readout.module`; this selector wrapper is not part of Python cfg.
-`frequency.df` is a SweepCfg of common nominal MHz offsets.
+`df` is a SweepCfg of common nominal MHz offsets.
 `tones[i]` contains only its fixed name. `flux_dev` names the coil; `flux` is a SweepCfg in native DC units.
 `flux_unit` is `A`, `V` or `native`; no conversion occurs.
 `reps` and `rounds` are positive counts. `initial_delay` and `relax_delay`
@@ -108,8 +107,9 @@ Every SweepCfg supplies `start`, `stop`, positive `expts` and
 `step = (stop-start)/(expts-1)`; a single point requires equal bounds and zero
 step. Form/recipe range editors use `n` for that point count and derive step.
 
-The form orders participants, tone identities, modules, frequency/DC scans,
-averaging, then timing. Source descriptions distinguish captured settings,
+The form orders reset, readout, tone identities, flux device and sweep,
+frequency offset sweep, participants, flux unit, settling, then reps, rounds,
+initial delay and relaxation delay. Source descriptions distinguish captured settings,
 derived candidates and missing required values. Generated candidates are
 marked uncalibrated; a stored value alone is not evidence of calibration.
 All full-list entries must validate even when not selected for acquisition.
@@ -171,6 +171,10 @@ Native data keeps original tone indices, native DC coordinates per tone,
 absolute MHz frequency coordinates per tone, and complex IQ shaped
 `(participants, flux points, frequency points)`. Frequencies use Hz on disk and
 MHz after loading. Stop gaps remain NaN after native round-trip.
+
+Cfg schema 5.0 stores the independent flat cfg with top-level `df`. Loading
+schema 4.0 keeps the data and plots available but does not restore its cfg.
+The load reports a cfg schema mismatch. No automatic cfg conversion occurs.
 
 Labber export currently does not support this three-dimensional independent
 grid. Save reports that output as failed while native data and other successful
