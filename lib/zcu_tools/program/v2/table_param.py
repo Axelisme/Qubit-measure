@@ -1,6 +1,6 @@
 """Pointwise QICK conversion for nonuniform top-level sweeps."""
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from fractions import Fraction
 from math import isfinite
 from typing import Never, override
@@ -28,6 +28,8 @@ class TableParam(QickParam):
             raise ValueError(f"TableParam loop {loop!r} values must be finite")
         self._raw: TableRawParam | None = None
         self._raw_scale: float = 1.0
+        self._derived: TableParam | None = None
+        self._inverse: Callable[[TableParam], TableParam] | None = None
 
     def __getattr__(self, name: str) -> Never:
         if name in {"start", "spans", "raw_param", "derived_param"}:
@@ -41,7 +43,16 @@ class TableParam(QickParam):
         return repr(self)
 
     def __copy__(self) -> "TableParam":
-        return TableParam(self.loop, self.values)
+        return self._derive(self.values, lambda rounded: rounded)
+
+    def _derive(
+        self, values: Sequence[float], inverse: Callable[["TableParam"], "TableParam"]
+    ) -> "TableParam":
+        # Like QICK, keep the latest conversion path so a copied pulse parameter
+        # can recover quantization applied after manager arithmetic.
+        self._derived = TableParam(self.loop, values)
+        self._inverse = inverse
+        return self._derived
 
     def is_sweep(self) -> bool:
         """Return True, even for a constant or single-point table."""
@@ -58,33 +69,33 @@ class TableParam(QickParam):
 
     def __add__(self, other: object) -> "TableParam":
         scalar = self._scalar(other)
-        return TableParam(self.loop, [v + scalar for v in self.values])
+        return self._derive([v + scalar for v in self.values], lambda x: x - scalar)
 
     def __radd__(self, other: object) -> "TableParam":
         return self + other
 
     def __sub__(self, other: object) -> "TableParam":
         scalar = self._scalar(other)
-        return TableParam(self.loop, [v - scalar for v in self.values])
+        return self._derive([v - scalar for v in self.values], lambda x: x + scalar)
 
     def __rsub__(self, other: object) -> "TableParam":
         scalar = self._scalar(other)
-        return TableParam(self.loop, [scalar - v for v in self.values])
+        return self._derive([scalar - v for v in self.values], lambda x: scalar - x)
 
     def __mul__(self, other: object) -> "TableParam":
         scalar = self._scalar(other)
-        return TableParam(self.loop, [v * scalar for v in self.values])
+        return self._derive([v * scalar for v in self.values], lambda x: x / scalar)
 
     def __rmul__(self, other: object) -> "TableParam":
         return self * other
 
     def __truediv__(self, other: object) -> "TableParam":
         scalar = self._scalar(other)
-        return TableParam(self.loop, [v / scalar for v in self.values])
+        return self._derive([v / scalar for v in self.values], lambda x: x * scalar)
 
     def __rtruediv__(self, other: object) -> "TableParam":
         scalar = self._scalar(other)
-        return TableParam(self.loop, [scalar / v for v in self.values])
+        return self._derive([scalar / v for v in self.values], lambda x: scalar / x)
 
     def __neg__(self) -> "TableParam":
         return self * -1
@@ -159,7 +170,11 @@ class TableParam(QickParam):
         loop_counts supplies the declared loop sizes, as in QICK get_rounded.
         """
         if self._raw is None:
-            raise RuntimeError("to_int has not been called on this TableParam")
+            if self._derived is not None and self._inverse is not None:
+                return self._inverse(self._derived.get_rounded(loop_counts))
+            raise RuntimeError(
+                "to_int has not been called on this TableParam or its descendants"
+            )
         raw = self._raw
         if loop_counts is not None and raw.steps is None:
             raw.to_steps(loop_counts)
