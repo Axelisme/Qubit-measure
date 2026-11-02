@@ -363,17 +363,20 @@ def _validate_native_sweeps(
             ) from exc
 
 
-def _timing_writes(records: Sequence[DecodedInstruction]) -> set[str]:
-    """Identify tail scratch writes consumed by the shot's reference advance."""
+def _timing_writes(
+    records: Sequence[DecodedInstruction],
+) -> dict[int, frozenset[str]]:
+    """Map reaching tail write positions to registers feeding reference advance."""
     needed: set[str] = set()
-    timing: set[str] = set()
+    timing: dict[int, frozenset[str]] = {}
     for record in reversed(records):
         inst = record.instruction
         if isinstance(inst, TimeInst) and inst.r1 is not None:
             needed.update(inst.r1.regs())
         elif isinstance(inst, RegWriteInst) and set(inst.reg_write) & needed:
-            timing.update(inst.reg_write)
-            needed -= set(inst.reg_write)
+            timing[record.position] = inst.reg_write
+            if inst.if_cond is None:
+                needed -= set(inst.reg_write)
             needed.update(inst.reg_read)
     return timing
 
@@ -409,7 +412,7 @@ def _check_table_wrap(info: dict[str, Any], seed: Machine) -> None:
 
 
 def _timing_maximum_tests(
-    records: Sequence[DecodedInstruction], timing: set[str]
+    records: Sequence[DecodedInstruction], timing: dict[int, frozenset[str]]
 ) -> set[int]:
     """Recognize TEST/copy/if(S)-copy maxima consumed by a reference advance.
 
@@ -431,7 +434,7 @@ def _timing_maximum_tests(
             and test.op.op == AluOp.SUB
             and isinstance(test.op.rhs, Register)
             and isinstance(initial, RegWriteInst)
-            and initial.dst.canonical_name in timing
+            and selected_record.position in timing
         ):
             continue
         if initial == RegWriteInst(
@@ -481,7 +484,10 @@ def _validate_hooks(
             memory_writes = {
                 name for name in actual.writes if name.startswith(("DMEM[", "WMEM["))
             }
-            registers = actual.writes - memory_writes - {"s12", "s15"} - timing
+            timing_registers = {reg for writes in timing.values() for reg in writes}
+            registers = (
+                actual.writes - memory_writes - {"s12", "s15"} - timing_registers
+            )
             if memory_writes or registers & live or registers:
                 raise ValueError(
                     f"{loop.name} shell writes undeclared/cross-shot state: {sorted(actual.writes)}"
@@ -688,6 +694,7 @@ def _finish_shell(
         for address in _loop_info(records, loop)["tables"]
     }
     timing = _timing_writes(records[end + 1 : tail_end])
+    timing_registers = {reg for writes in timing.values() for reg in writes}
     for record in records[end + 1 : tail_end]:
         inst = record.instruction
         if table_addresses and isinstance(
@@ -697,7 +704,7 @@ def _finish_shell(
                 continue
             if isinstance(
                 inst, DmemReadInst
-            ) or inst.dst.canonical_name not in timing | {"s12", "s15"}:
+            ) or inst.dst.canonical_name not in timing_registers | {"s12", "s15"}:
                 continue
         _located_execute(record, machine, outputs)
     outputs.validate_fifo(machine)
