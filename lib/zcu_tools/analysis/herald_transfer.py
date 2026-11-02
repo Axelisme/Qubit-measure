@@ -37,6 +37,8 @@ def selfcal_transfer(
     previous: TransferResult | None = None,
 ) -> TransferResult:
     """Infer shared readout calibration and transfer from (N, 6, 6) IQ sums."""
+    if n_states not in (2, 3):
+        raise ValueError("n_states must be 2 or 3")
     measured = np.isfinite(sums).all(axis=(1, 2)) & (sums[:, 0, 0] > 0)
     valid_sums = sums[measured]
     counts = valid_sums[:, 0, 0]
