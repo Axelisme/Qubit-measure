@@ -22,7 +22,7 @@ from zcu_tools.cfg_model import MuxReadoutCfg as CoreMuxReadoutCfg
 from zcu_tools.utils.shot_classification import classify_shots, nearest_centroid3
 
 from ..macro.readout import ReadoutEmission
-from ..table_param import TableRawParam
+from ..table_param import TableParam, TableRawParam
 from .base import AbsModuleCfg, Module, apply_cfg_overrides
 from .pulse import Pulse, PulseCfg
 from .waveform import WaveformCfg, resolve_waveform_ref
@@ -339,12 +339,17 @@ class PulseReadout(AbsReadout):
         and downconversion sign. Unspecified registers use cfg scalar/sweep values.
         freq (MHz), gain (normalized), phase (degrees), length and ro_length (us) override the
         copied cfg via set_param. None keeps cfg; unsupported waveform length
-        sweeps raise ValueError. init must precede run. Invalid QICK settings
+        sweeps raise ValueError. TableParam ro_length raises NotImplementedError.
+        init must precede run. Invalid QICK settings
         fail during initialization. Unknown keys or nonnumeric overrides raise TypeError.
         """
         self.name = name
         self.cfg = deepcopy(cfg)
         apply_cfg_overrides(self.cfg, overrides, PulseReadoutOverrides.__annotations__)
+        if isinstance(self.cfg.ro_length, TableParam):
+            raise NotImplementedError(
+                "ro_length does not support TableParam ADC windows"
+            )
         self.gain_val = gain_val
         self.freq_val = freq_val
         self.ro_freq_val = ro_freq_val
