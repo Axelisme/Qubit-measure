@@ -1,6 +1,6 @@
 # `zcu_tools.notebook`
 
-**Last updated:** 2026-11-01，RunRecord metadata JSON
+**Last updated:** 2026-11-02，RunRecord metadata JSON
 
 **讀者：** lab-author。Notebook 實驗入口、互動分析與支援模組導覽。
 
@@ -67,9 +67,12 @@ if metadata.device_snapshot is not None:
     frame = record_flux_frame(captured_flux, devices)
     saved.accept(records={qubit: {
         "t1_us": t1_us, "flux_frame": frame, "devices": devices,
+        "experiment": metadata.experiment,
     }})
 ```
 
+上例保存完整 `devices` 快照與頂層 `experiment`，不組巢狀 `run`。
+`SavedRun.accept` 的信封提供同次來源的 `run_id`，record 不另存一份。舊 record 不轉換。
 這兩個 helper 是 lab 的選用慣例，框架不 import lab，也不解讀 `flux_frame`。
 `record_flux_frame` 複製 `{offset, period}`。Offset 以 Φ0 表示，各 signed period 使用該儀器原生單位／Φ0。
 有 period 但同次 snapshot 缺值的儀器不貢獻，period 保留；明寫無效或 bool 值以 `ValueError` 指名 device。

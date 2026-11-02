@@ -385,8 +385,9 @@ T1、T2Echo、T2Ramsey、TwoTone frequency 與對應的四個 mux adapter 共用
   Mux 依原始 tone index 找到 participant qubit，各自保存自己的 frame，不使用 mux group 或另一顆 qubit 的校準。
   `{offset: null, period: {}}` 表示尚未校準，不代表缺少 parameter capture。
 - 分析純量沿原有名稱與單位，例如 `freq_mhz`、`t1_us`、`t2e_us`、`t2r_us` 與對應誤差。
-- `run` 包含來源 `run_id` 與 `experiment`，兩者都取自同一次 RunMetadata。
-  Append owner 另補 `component`、`run_id`、`point`、`at` 與 accepted event 的 `source` 信封。
+- 頂層 `experiment` 取自同一次 RunMetadata，不再組巢狀 `run`。
+  Append owner 的信封提供同一次 RunMetadata 的 `run_id`，record 不另存重複身分。
+  Owner 另補 `component`、`point`、`at` 與 accepted event 的 `source`。舊 record 不轉換。
 
 Adapter 的儀器值只讀 `req.run_result.metadata`，frame 只讀同次 Run 的固定 parameter capture。
 不查目前 alias、目前 point 或 live 裝置。接受 proposal 時不重讀 frame，量測後改校準不改舊 Run 的 record。

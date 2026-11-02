@@ -273,7 +273,7 @@ def fluxdep_writeback_items[C: ConfigBase, R, A: FluxPickResult](
                 "period": fitted.period,
                 "devices": {name: deepcopy(info) for name, info in devices.items()},
                 "flux_frame": frame,
-                "run": {"run_id": metadata.run_id, "experiment": metadata.experiment},
+                "experiment": metadata.experiment,
             },
             element=element,
         ),
