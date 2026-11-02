@@ -19,8 +19,10 @@ edits and captures sources again.
 
 ## Form
 
-- `participants` selects original tone indices in acquisition order. The tone picker only
-  selects which full-list position to edit.
+- `reset` is the optional common reset. `readout` contains the full mux readout.
+- `tones` is one full-list editor. Each `tones[i]` contains its fixed name,
+  drive pulse and `freq.start/stop` bounds in absolute MHz. The tone picker
+  selects which original position to edit, not which tones to measure.
 - `flux_dev` starts from the captured group `flux_dev`.
 - `flux` is one native-unit sweep shared by all participants, initially 101 points.
   Open/Reset starts with all Qs selected. It projects each Q's `{offset, period}`
@@ -30,12 +32,13 @@ edits and captures sources again.
   It takes the union of expanded actual half-to-integer intervals.
   Missing selected calibration leaves both endpoints blank; invalid contributors raise an error.
   Changing participants later does not recompute these starting values.
-- `settle` is the wait in seconds after all DC writes at each flux point.
-- `modules` contains the optional common reset and full mux readout.
-- `frequency` contains only frequency-scan inputs.
-  Each `frequency.tones[i].freq` has drive-frequency Start/Stop in MHz.
-  `frequency.expts` is the shared hardware point count. The frequency tone picker retains all original names;
-  top-level participants supplies the Run selection. All selected drives sweep together in one hardware loop.
+- `expts` is the shared hardware frequency point count. All selected drives
+  sweep together in one hardware loop inside each flux point.
+- `participants` selects original tone indices in acquisition and result order.
+- `flux_unit` must match the connected coil's native unit.
+- `settle` is the wait in seconds after each coil write.
+- `reps`, `rounds`, `initial_delay` and `relax_delay` control acquisition counts
+  and timing after the scan fields.
 
 Readout references the captured group readout slot when present. Without a
 slot, generator and ADCs come from group wiring, mixer from group
@@ -82,7 +85,7 @@ and reasons without rolling back edits. Analysis null goes to the picker owner.
 ## Typed cfg and form paths
 
 Python cfg and saved cfg share a flat layout. There is no `spectrum` wrapper.
-Set `participants: list[int]`, full `tones`, and `modules` at top level.
+Set `reset`, `readout`, full `tones` and `participants: list[int]` at top level.
 Open/Reset fills selected tones' drive and per-tone sweep defaults and sets
 these fields to None on other tones. The nullable fields remain editable.
 Open/Reset captures the Aliases row `participants`, for example `[Q3, Q1]`,
@@ -94,13 +97,13 @@ Changing aliases requires Reset or reopening; ordinary participant edits keep to
 
 Editing participants preserves every tone value. Fill any newly selected tone's
 missing settings at the indicated tone path. Removing a tone keeps its values.
-All readout identities and local flux_dev names stay required. Local driver
-uniqueness is checked only for selected tones.
+All readout identities stay required, including unselected positions.
 `reset` is optional; `readout` is the complete numeric mux
 readout. In the form, module selectors expose inline fields below
 `readout.module`; this selector wrapper is not part of Python cfg.
-`frequency.tones[i]` contains the fixed name, numeric drive pulse and `freq.start/stop` in absolute MHz. `frequency.expts` is the shared positive hardware count.
-`tones[i]` contains only its fixed name. `flux_dev` names the coil; `flux` is a SweepCfg in native DC units.
+`tones[i]` contains the fixed name, numeric drive pulse and `freq.start/stop`
+in absolute MHz. `expts` is the shared positive hardware frequency count.
+`flux_dev` names the coil; `flux` is a SweepCfg in native DC units.
 `flux_unit` is `A`, `V` or `native`; no conversion occurs.
 `reps` and `rounds` are positive counts. `initial_delay` and `relax_delay`
 are finite nonnegative microseconds. `settle` is finite nonnegative seconds.
@@ -108,8 +111,9 @@ Every SweepCfg supplies `start`, `stop`, positive `expts` and
 `step = (stop-start)/(expts-1)`; a single point requires equal bounds and zero
 step. Form/recipe range editors use `n` for that point count and derive step.
 
-The form orders participants, tone identities, modules, frequency/DC scans,
-averaging, then timing. Source descriptions distinguish captured settings,
+The form follows the cfg declaration order: reset, readout, tones, flux_dev,
+flux, expts, participants, flux_unit, settle, reps, rounds, initial_delay,
+relax_delay. Source descriptions distinguish captured settings,
 derived candidates and missing required values. Generated candidates are
 marked uncalibrated; a stored value alone is not evidence of calibration.
 All full-list entries must validate even when not selected for acquisition.
@@ -171,6 +175,11 @@ Native data keeps original tone indices, native DC coordinates per tone,
 absolute MHz frequency coordinates per tone, and complex IQ shaped
 `(participants, flux points, frequency points)`. Frequencies use Hz on disk and
 MHz after loading. Stop gaps remain NaN after native round-trip.
+
+The cfg schema is 5.0 because drive-frequency settings now live in the single
+`tones` list and `expts` is top-level. Schema 4.0 files still load their data
+and plots, but their cfg is not restored into the new Form. No cfg migration
+is applied.
 
 Labber export currently does not support this three-dimensional independent
 grid. Save reports that output as failed while native data and other successful
