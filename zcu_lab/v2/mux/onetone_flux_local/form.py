@@ -64,8 +64,9 @@ def make_form(ctx: FormContext) -> Form[OnetoneFluxLocalCfg]:
                 f"Actual half/integer from captured {name}.flux on its flux_dev, accounting for other device biases; native device unit"
             )
 
-    def initial_values(env: FormEnv) -> dict[str, JsonValue]:
-        defaults = form.model.defaults(env)
+    def initial_values(
+        env: FormEnv, defaults: dict[str, JsonValue]
+    ) -> dict[str, JsonValue]:
         tones = defaults["tones"]
         if not isinstance(tones, list):
             raise TypeError("local tones defaults must be a list")
@@ -84,9 +85,10 @@ def make_form(ctx: FormContext) -> Form[OnetoneFluxLocalCfg]:
             tone["flux"] = (
                 {"start": start, "stop": stop} if index in participants else None
             )
-        return {"tones": tones, "flux_unit": next(iter(units)) if units else None}
+        defaults["flux_unit"] = next(iter(units)) if units else None
+        return defaults
 
-    form = Form(
+    return Form(
         OnetoneFluxLocalCfg,
         tree={
             "reset": Slot("$mux.module.reset"),
@@ -107,4 +109,3 @@ def make_form(ctx: FormContext) -> Form[OnetoneFluxLocalCfg]:
             READOUT_ELEMENTS,
         ),
     ).with_seed_metadata(metadata)
-    return form
