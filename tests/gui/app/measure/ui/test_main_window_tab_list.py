@@ -56,7 +56,7 @@ def tab_list(qapp: QApplication) -> Iterator[QTabWidget]:
     tabs = QTabWidget()
     configure_tab_bar(tabs)
     scope = LifetimeScope(tabs)
-    scope.connect(tabs.tabCloseRequested, tabs.removeTab)
+    scope.connect(tabs.tabCloseRequested, lambda index: tabs.removeTab(index))
     tabs.resize(1200, 250)
     try:
         yield tabs
