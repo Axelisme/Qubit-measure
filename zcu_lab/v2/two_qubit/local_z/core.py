@@ -408,4 +408,4 @@ class LocalZExp(Experiment[LocalZResult, LocalZCfg]):
         axes.set(xlabel="CZ gate count", ylabel="Target sigma")
         axes.legend()
 
-        return LocalZAnalysis(tuple(summarize_fit(fit) for fit in fits))
+        return LocalZAnalysis((summarize_fit(fits[0]), summarize_fit(fits[1])))
