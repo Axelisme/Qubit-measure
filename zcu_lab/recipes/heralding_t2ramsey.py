@@ -87,10 +87,13 @@ async def heralding_t2ramsey(
     """Measure Ramsey fringes and their decay during free qubit evolution.
 
     Store per-class shot sums; compute herald-g conditional IQ for fitting.
-    Readout must include a GE Post circle classifier with calibrated radius.
+    Readout accepts circle, linear or centroid3. Herald states are g/e/other
+    for circle (other is rejection), g/e for linear (no rejection), and g/e/f
+    for centroid3 (f is not other). Circle requires a calibrated GE Post radius.
+    Only shots classified as herald-g contribute to signal IQ and fitting.
     After optional reset and ground-herald readout, apply pi/2, wait the swept delay, then apply a
     phase-shifted pi/2 pulse and read out, averaging only accepted shots.
-    Readout requires a GE Post circle classifier with radius. Per-class shot sums are
+    Per-class shot sums follow the classifier order and are
     saved on the delay grid. Pass fraction is computed from counts, not saved. Analyze before fitting the decay
     to estimate Ramsey T2; fringe fitting also estimates detuning. Ask before
     applying the proposed calibration; skipping writes nothing. Analysis keeps

@@ -43,9 +43,10 @@ from zcu_lab.v2.twotone.rabi.amp_rabi.core import AmpRabiAnalyzeOptions
 
 @dataclass(frozen=True)
 class HeraldingAmpRabiResult:
-    """amps is the sweep grid (native gain); sums has shape (points, 3, 3).
+    """amps is the sweep grid (native gain); sums has shape (points, classes, 3).
 
-    Herald states are g/e/other; components are count/sum I/sum Q.
+    Herald states follow the saved classifier's state_names order and length.
+    Components are count/sum I/sum Q.
     Unmeasured sums are NaN. Conditional means at zero count are NaN.
     """
 
@@ -103,8 +104,8 @@ def restore_result(
 class HeraldingAmpRabiExp(Experiment[HeraldingAmpRabiResult, HeraldingAmpRabiCfg]):
     """Herald ground, sweep drive gain, and store per-class count/IQ sums.
 
-    Store all herald classes, g/e/other. Live plots and fits use only the
-    herald-g conditional mean IQ.
+    Store all herald classes in classifier state_names order.
+    Live plots and fits use only the herald-g conditional mean IQ.
     """
 
     Options: ClassVar[type[AmpRabiAnalyzeOptions]] = AmpRabiAnalyzeOptions
@@ -133,20 +134,19 @@ class HeraldingAmpRabiExp(Experiment[HeraldingAmpRabiResult, HeraldingAmpRabiCfg
     def run(
         self, cfg: HeraldingAmpRabiCfg, *, context: RunContext
     ) -> HeraldingAmpRabiResult:
-        """Acquire (Ngain, 3, 3) shot sums versus hardware-quantized gain.
+        """Acquire (Ngain, classes, 3) shot sums versus hardware-quantized gain.
 
         After optional reset, herald, apply optional init and fixed-duration
         gain-swept drive, then read signal. Both readouts share cfg.readout and
-        its GE Post circle classifier. Classes are g/e/other; components are
+        its classifier. Herald states follow classifier state_names; components are
         count/sum I/sum Q. Rounds add sums. Live and analyze use herald-g
         conditional IQ; zero-count means are NaN. Unmeasured sums remain NaN.
         cfg is not mutated. Pulse duration uses us, gain uses native units.
         Heralding itself adds no active reset.
         """
-        if cfg.readout.classifier is None or cfg.readout.classifier.mode != "circle":
-            raise ValueError(
-                "Heralding requires a circle classifier with g/e/other; run GE Post"
-            )
+        if cfg.readout.classifier is None:
+            raise ValueError("Heralding requires a readout classifier")
+        num_states = len(cfg.readout.classifier.state_names)
         cfg = deepcopy(cfg)
         soccfg = context.soccfg
         gains = sweep2array(
@@ -162,7 +162,7 @@ class HeraldingAmpRabiExp(Experiment[HeraldingAmpRabiResult, HeraldingAmpRabiCfg
 
         fig.show()
         buffer = SignalBuffer(
-            (len(gains), 3, 3),
+            (len(gains), num_states, 3),
             dtype=np.float64,
             on_update=update,
         )

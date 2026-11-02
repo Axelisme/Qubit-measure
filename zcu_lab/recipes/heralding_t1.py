@@ -82,8 +82,11 @@ async def heralding_t1(
     """Measure T1 from the decay of the qubit's excited-state population.
 
     Store per-class shot sums; compute herald-g conditional IQ for fitting.
-    Readout must include a GE Post circle classifier with calibrated radius.
-    Herald using the saved GE Post circle classifier, apply a calibrated pi
+    Readout accepts circle, linear or centroid3. Herald states are g/e/other
+    for circle (other is rejection), g/e for linear (no rejection), and g/e/f
+    for centroid3 (f is not other). Circle requires a calibrated GE Post radius.
+    Only shots classified as herald-g contribute to signal IQ and fitting.
+    Herald using the saved readout classifier, apply a calibrated pi
     pulse, wait the swept delay, then average only accepted signal shots.
     No active reset or joint herald is performed. Fit finite IQ to estimate the relaxation
     time, and ask before applying the proposed T1; skipping writes nothing.

@@ -6,7 +6,7 @@
 
 Use `heralding/amp_rabi` after calibrating the qubit frequency and pulse readout at the intended operating point. Bind `qubit` and its `resonator`, then Open or Reset the tab to capture those sources. Later alias or library edits do not change an existing Run source.
 
-Readout must be a pulse readout with a GE Post circle classifier: ground/excited centers and a positive radius in the same integrated-IQ coordinates as this readout. Linear and centroid3 classifiers are not supported. Missing calibration stops Run. Changing readout frequency, gain, duration, ADC window or receiver settings can invalidate the classifier; review or recalibrate it before proceeding.
+Readout must contain a calibrated circle, linear or centroid3 classifier in the same normalized ADC IQ coordinates and integration window. Circle needs g/e centers and a positive GE Post radius; its herald_states are g/e/other, with other the rejection region. Linear uses g/e without rejection. Centroid3 uses g/e/f; f is not other. Only shots classified as herald-g contribute to live IQ and fitting. Missing calibration stops Run. Changing readout frequency, gain, duration, ADC window or receiver settings can invalidate the classifier; review or recalibrate it before proceeding.
 
 Choose the Rabi pulse frequency, waveform and fixed duration. A prior pi amplitude is not required. Set Gain start/stop and Expts to cover visible oscillations within your approved drive limits. Confirm Reps, Rounds and Relax delay. The suggested form values are editable starting values, not hardware-safety approval.
 
@@ -29,7 +29,7 @@ Pass fraction is the herald-g count divided by the total class count at each gai
 
 The classified fraction is not an independent measurement of ground purity. It depends on classifier errors and on whether calibration and acquisition use matching IQ coordinates.
 
-Save All writes native `sums` with shape (Ngain, 3, 3) and cfg, including the classifier. The final axes are herald_states (g/e/other) and components (count/sum I/sum Q). Old files without `sums` fail with a missing-variable error. Load Data restores the saved grid and classifier rather than rebuilding them from the current Form. Analyze can run again on the loaded record. Review each save output's status; successful native saving does not imply every export format succeeded.
+Save All writes native `sums` with shape (Ngain, classes, 3) and cfg, including the classifier. The class count is 2 for linear and 3 for circle or centroid3. The final axes are herald_states in the saved classifier's order and components (count/sum I/sum Q). Old files without `sums` fail with a missing-variable error. Load Data restores the saved grid and classifier rather than rebuilding them from the current Form. Analyze can run again on the loaded record. Review each save output's status; successful native saving does not imply every export format succeeded.
 
 ## Review writeback
 
