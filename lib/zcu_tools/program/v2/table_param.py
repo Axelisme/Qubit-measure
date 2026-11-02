@@ -127,7 +127,7 @@ class TableParam:
         if self._raw is None:
             raise RuntimeError("to_int has not been called on this TableParam")
         raw = self._raw
-        if loop_counts is not None:
+        if loop_counts is not None and raw.steps is None:
             raw.to_steps(loop_counts)
         return TableParam(
             self.loop,
@@ -185,6 +185,12 @@ class TableRawParam(QickRawParam):
 
     def __truediv__(self, divisor: float) -> TableParam:
         return TableParam(self.loop, [v / divisor for v in self.values])
+
+    def to_rounded(self) -> TableParam:
+        """Undo manager scale/offset, retaining initial quantized raw units."""
+        return TableParam(
+            self.loop, [float((v - self.offset) / self.scale) for v in self.values]
+        )
 
     def minval(self) -> int:
         """Return the smallest raw word across all points."""
