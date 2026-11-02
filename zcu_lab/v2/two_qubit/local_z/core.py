@@ -52,6 +52,42 @@ class LocalZCfg(ConfigBase):
     Both targets use consecutive nonnegative gate_counts, including n=0.
     """
 
+    reset: Annotated[
+        Reset.Cfg | None,
+        FieldMeta(label="Reset", description="Optional reset before each shot."),
+    ] = None
+    x90_f1: Annotated[
+        Pulse.Cfg,
+        FieldMeta(
+            label="F1 Xπ/2",
+            description="填入 F1 calibrated x90 pulse slot。先做 amplitude／length Rabi，再確認 frequency MHz、gain a.u. within [-1, 1] 與 duration us。",
+        ),
+    ]
+    x90_f2: Annotated[
+        Pulse.Cfg,
+        FieldMeta(
+            label="F2 Xπ/2",
+            description="填入 F2 calibrated x90 pulse slot。先做 amplitude／length Rabi，再確認 frequency MHz、gain a.u. within [-1, 1] 與 duration us。",
+        ),
+    ]
+    drive: Annotated[
+        DualLineCfg,
+        FieldMeta(
+            label="Dual-line drive",
+            description="填入 F1/F2 charge-line pulses。先做 conditional spectroscopy／chevron，再確認 coupler 的 cz_f1／cz_f2 slots。",
+        ),
+    ]
+    readout: Annotated[
+        MuxReadout.Cfg,
+        FieldMeta(
+            label="Mux readout",
+            description="填入 full-group mux readout slot。先用 lookback 取得 timing，再做 mux onetone，確認 frequency MHz、gain a.u. within [-1, 1] 與 timing us。",
+        ),
+    ]
+    roles: JointRoles
+    gate_counts: list[Annotated[int, Field(strict=True, ge=0)]] = Field(
+        default_factory=lambda: [0, 1, 2, 3, 4], min_length=3
+    )
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
     ] = Field(default=1, gt=0)
@@ -76,42 +112,6 @@ class LocalZCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-    reset: Annotated[
-        Reset.Cfg | None,
-        FieldMeta(label="Reset", description="Optional reset before each shot."),
-    ] = None
-    x90_f1: Annotated[
-        Pulse.Cfg,
-        FieldMeta(
-            label="F1 Xπ/2",
-            description="填入 F1 calibrated x90 pulse slot。先做 amplitude／length Rabi，再確認 frequency MHz、gain a.u. within [-1, 1] 與 duration us。",
-        ),
-    ]
-    x90_f2: Annotated[
-        Pulse.Cfg,
-        FieldMeta(
-            label="F2 Xπ/2",
-            description="填入 F2 calibrated x90 pulse slot。先做 amplitude／length Rabi，再確認 frequency MHz、gain a.u. within [-1, 1] 與 duration us。",
-        ),
-    ]
-    readout: Annotated[
-        MuxReadout.Cfg,
-        FieldMeta(
-            label="Mux readout",
-            description="填入 full-group mux readout slot。先用 lookback 取得 timing，再做 mux onetone，確認 frequency MHz、gain a.u. within [-1, 1] 與 timing us。",
-        ),
-    ]
-    roles: JointRoles
-    drive: Annotated[
-        DualLineCfg,
-        FieldMeta(
-            label="Dual-line drive",
-            description="填入 F1/F2 charge-line pulses。先做 conditional spectroscopy／chevron，再確認 coupler 的 cz_f1／cz_f2 slots。",
-        ),
-    ]
-    gate_counts: list[Annotated[int, Field(strict=True, ge=0)]] = Field(
-        default_factory=lambda: [0, 1, 2, 3, 4], min_length=3
-    )
 
     @model_validator(mode="after")
     def validate_pair(self) -> Self:

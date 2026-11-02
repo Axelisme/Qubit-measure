@@ -38,6 +38,10 @@ The common frequency and F1 phase remain fixed. Choose the transition using
 conditional spectroscopy and the duration window using chevron.
 Only common envelope duration changes within each trace.
 
+The Form lists reset, Xπ preparation pulses, dual-line drive and readout in
+playback order, followed by captured roles. Set the outer relative phase
+sweep before the inner duration sweep. Repetitions, rounds and acquisition
+delays appear last.
 Enter finite scan endpoints and strictly positive durations.
 Review repetitions, rounds, optional reset and timing before Run.
 Refresh updates choices without overwriting authored inputs.

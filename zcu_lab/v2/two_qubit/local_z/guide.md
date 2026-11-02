@@ -4,6 +4,9 @@
 
 ## Run 前
 
+普通版與 heralded 表單先列 reset、X90、雙線 drive 與 mux readout，再列角色。
+接著設定外層 `gate_counts`，最後填取數欄位。
+
 選 `two_qubit/local_z`。綁定 scalar aliases `f1`、`f2`、`coupler`、`mux`。F1/F2 必須是不同 fluxonium。Coupler 是 transmon，mux 的 qubits 必須包含兩者。
 
 先校準 X90、CZ 與完整 mux readout。F1/F2 的原 tone 都需要 circle classifier 與 GE Post radius。缺 classifier、非 circle 或缺 radius 時，Run 會要求先做 GE Post。其他 tone 不需要 classifier。修改 readout 設定後，重新校準。

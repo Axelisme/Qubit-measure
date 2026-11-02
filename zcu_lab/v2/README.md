@@ -2,7 +2,7 @@
 
 **讀者：** lab-author、agent。查找實驗的檔案分工、作者契約與各家族入口。
 
-**Last updated:** 2026-11-02，Rabi 診斷圖由各實驗 core 擁有
+**Last updated:** 2026-11-02，mux flux 各自取數、表單與 Labber 匯出
 
 先從 [tutorial](../tutorial/README.md) 新增實驗，再按下列入口查契約與操作。
 實驗定義改動的驗收方式與命令範例見 [離線驗收](../README.md#實驗定義的離線驗收)。
@@ -175,23 +175,25 @@ Library 的 `readout/mux:blank` 不預填必需的通道、gain、時長或 trig
 
 `mux/onetone_flux_global` 與 `mux/twotone_flux_global` 掃 group 的 coil source。
 `mux/onetone_flux_local` 與 `mux/twotone_flux_local` 同步掃各 participant 的局部 DC 線。
-外層以軟體設值並等待 settle，內層重用既有 onetone host sweep 或 twotone hardware sweep。
+各實驗在自己的 core 建立 program 與 flux 取數迴圈，不呼叫其他實驗的 run。
+外層以軟體設值並等待 settle，內層由 onetone 在 host 掃頻，twotone 在硬體掃頻。
 Local 每 tone 有自己的 Start／Stop，共用 `flux_expts`。Global 使用一個 `flux` 範圍。
-四份 cfg 與 native 保存形狀都是 flat：`reset`、`readout`、`reps`、`rounds`、`initial_delay`、`relax_delay` 在 top-level。
-Module 與掃描欄位依 `field_order` 平鋪，不宣告 Modules／Sweep group。
+四份 cfg 各自完整宣告，Form 依 cfg 宣告順序顯示，不使用 `field_order`。
+順序為 `reset`、`readout`、`tones`、外層 DC 掃描、內層頻率點數、`participants`、DC 單位與 settle、取數欄位。
 模組仍有 selector 與子表單，掃描仍有 `SweepCfg` 子表單。
 Pulse 的 Advanced group 保留 NQZ、Phase、Pre-delay、Post-delay 與 Mixer freq 的既有摺疊。
-Schema 為 3.0。Load 舊 major 時保留資料與 metadata，cfg 為 None，不轉換舊巢狀設定。
-Onetone 的 `frequency.df` 是共用 MHz offset；twotone 的 `frequency.tones` 保存各 Q 的 drive 與 MHz 範圍，
-`frequency.expts` 是共用硬體點數。四張表單依 participants、tones、modules、frequency／DC scan、averaging、timing 排列。
+四實驗的 cfg schema 為 5.0。Load 舊 major 時保留資料與 metadata，cfg 為 None，不轉換舊設定。
+Onetone 的 `df` 是共用 MHz offset；twotone 的單一 `tones` 清單保存各 Q 的 drive 與 MHz 範圍，
+`expts` 是共用硬體點數。
 Guide 說明 kickstart、已有頻率、已有 readout slot 與 recipe 的起手步驟，以及 Open／Reset／Refresh 的差異。
-`participants` 保存 Q 名與執行順序，tone index 始終是完整 group 的原始序號。
+`participants` 保存原始 tone index 與執行順序，index 始終對應完整 group 的原始序號。
 Stop 保留已完成的 flux 點，未完成點留 NaN。Analyze 每次用原始 `tone` index 選一個 participant，
 沿既有 half／integer line picker 校準。Local 與 global 分開提出該 Q 的 `flux.period.<被掃 device>` 與預設勾選的 `flux.offset`，
 不覆蓋其他 periods 或 Q。Global 使用 cfg.flux_dev 的實際名稱，不把 coil 當別名。
 目的地只取 Run／Load capture。四個 guide 列出初值與操作路徑。
-Native 保存 tone-major 三維 IQ 與各 tone 的 DC／MHz 座標。Labber 不支援這種三維獨立 grid，
-Save 以各 output 的 status 回報其失敗，不影響成功保存的 native 資料。
+Native 保存 tone-major 三維 IQ 與各 tone 的 DC／MHz 座標。
+Labber independent 匯出沿第一軸拆分三維 IQ，每個 tone 一個二維 log，同檔保存多個 logs。
+Reader 回傳各片二維資料，不重組三維陣列。命名與維度限制見 [Labber owner](../../lib/zcu_tools/datafile/README.md#labber)。
 
 ## Mux qubit numeric cores
 

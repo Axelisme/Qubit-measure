@@ -59,6 +59,65 @@ class ConditionalPhaseCfg(ConfigBase):
     target is lowercase f1/f2; gate_counts are unique positive train lengths.
     """
 
+    reset: Annotated[
+        Reset.Cfg | None,
+        FieldMeta(label="Reset", description="Optional reset before each shot."),
+    ] = None
+    x180_f1: Annotated[
+        Pulse.Cfg,
+        FieldMeta(
+            label="F1 Xπ",
+            description="填入 F1 calibrated x180 pulse slot。先做 amplitude／length Rabi，再確認 frequency MHz、gain a.u. within [-1, 1] 與 duration us。",
+        ),
+    ]
+    x180_f2: Annotated[
+        Pulse.Cfg,
+        FieldMeta(
+            label="F2 Xπ",
+            description="填入 F2 calibrated x180 pulse slot。先做 amplitude／length Rabi，再確認 frequency MHz、gain a.u. within [-1, 1] 與 duration us。",
+        ),
+    ]
+    x90_f1: Annotated[
+        Pulse.Cfg,
+        FieldMeta(
+            label="F1 Xπ/2",
+            description="填入 F1 calibrated x90 pulse slot。先做 amplitude／length Rabi，再確認 frequency MHz、gain a.u. within [-1, 1] 與 duration us。",
+        ),
+    ]
+    x90_f2: Annotated[
+        Pulse.Cfg,
+        FieldMeta(
+            label="F2 Xπ/2",
+            description="填入 F2 calibrated x90 pulse slot。先做 amplitude／length Rabi，再確認 frequency MHz、gain a.u. within [-1, 1] 與 duration us。",
+        ),
+    ]
+    drive: Annotated[
+        DualLineCfg,
+        FieldMeta(
+            label="Dual-line drive",
+            description="填入 F1/F2 charge-line pulses。先做 conditional spectroscopy／chevron，再確認 coupler 的 cz_f1／cz_f2 slots。",
+        ),
+    ]
+    readout: Annotated[
+        MuxReadout.Cfg,
+        FieldMeta(
+            label="Mux readout",
+            description="填入 full-group mux readout slot。先用 lookback 取得 timing，再做 mux onetone，確認 frequency MHz、gain a.u. within [-1, 1] 與 timing us。",
+        ),
+    ]
+    roles: JointRoles
+    target: Literal["f1", "f2"] = "f1"
+    gate_counts: list[Annotated[int, Field(strict=True, ge=1)]] = Field(
+        default_factory=lambda: [1, 2, 3], min_length=2
+    )
+    frequency: Annotated[
+        SweepCfg,
+        FieldMeta(
+            unit="MHz",
+            label="Frequency",
+            description="填入 common CZ frequency 起訖值，單位 MHz。先用 conditional spectroscopy／chevron 定位雙線 CZ pulse。",
+        ),
+    ]
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
     ] = Field(default=1, gt=0)
@@ -83,65 +142,6 @@ class ConditionalPhaseCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-    x180_f1: Annotated[
-        Pulse.Cfg,
-        FieldMeta(
-            label="F1 Xπ",
-            description="填入 F1 calibrated x180 pulse slot。先做 amplitude／length Rabi，再確認 frequency MHz、gain a.u. within [-1, 1] 與 duration us。",
-        ),
-    ]
-    x180_f2: Annotated[
-        Pulse.Cfg,
-        FieldMeta(
-            label="F2 Xπ",
-            description="填入 F2 calibrated x180 pulse slot。先做 amplitude／length Rabi，再確認 frequency MHz、gain a.u. within [-1, 1] 與 duration us。",
-        ),
-    ]
-    reset: Annotated[
-        Reset.Cfg | None,
-        FieldMeta(label="Reset", description="Optional reset before each shot."),
-    ] = None
-    x90_f1: Annotated[
-        Pulse.Cfg,
-        FieldMeta(
-            label="F1 Xπ/2",
-            description="填入 F1 calibrated x90 pulse slot。先做 amplitude／length Rabi，再確認 frequency MHz、gain a.u. within [-1, 1] 與 duration us。",
-        ),
-    ]
-    x90_f2: Annotated[
-        Pulse.Cfg,
-        FieldMeta(
-            label="F2 Xπ/2",
-            description="填入 F2 calibrated x90 pulse slot。先做 amplitude／length Rabi，再確認 frequency MHz、gain a.u. within [-1, 1] 與 duration us。",
-        ),
-    ]
-    readout: Annotated[
-        MuxReadout.Cfg,
-        FieldMeta(
-            label="Mux readout",
-            description="填入 full-group mux readout slot。先用 lookback 取得 timing，再做 mux onetone，確認 frequency MHz、gain a.u. within [-1, 1] 與 timing us。",
-        ),
-    ]
-    roles: JointRoles
-    drive: Annotated[
-        DualLineCfg,
-        FieldMeta(
-            label="Dual-line drive",
-            description="填入 F1/F2 charge-line pulses。先做 conditional spectroscopy／chevron，再確認 coupler 的 cz_f1／cz_f2 slots。",
-        ),
-    ]
-    target: Literal["f1", "f2"] = "f1"
-    frequency: Annotated[
-        SweepCfg,
-        FieldMeta(
-            unit="MHz",
-            label="Frequency",
-            description="填入 common CZ frequency 起訖值，單位 MHz。先用 conditional spectroscopy／chevron 定位雙線 CZ pulse。",
-        ),
-    ]
-    gate_counts: list[Annotated[int, Field(strict=True, ge=1)]] = Field(
-        default_factory=lambda: [1, 2, 3], min_length=2
-    )
 
     @model_validator(mode="after")
     def validate_pair(self) -> Self:

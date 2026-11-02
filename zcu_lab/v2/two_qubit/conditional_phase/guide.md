@@ -4,6 +4,10 @@
 
 ## Prepare the inputs
 
+Both Forms show reset, Xπ, X90, dual-line drive and mux readout first.
+Captured roles and target follow. Set the outer `gate_counts` before the inner
+`frequency` sweep, then the acquisition settings.
+
 Bind `f1` and `f2` to distinct fluxoniums, `coupler` to their transmon, and `mux` to a MuxGroup containing both qubits. Calibrate Xπ, X90 and the complete mux readout first. Each role tone needs a circle classifier with radius from mux singleshot GE Post. Missing calibration, linear classification or missing radius stops Run with a GE Post prompt. Other mux tones need no classifier.
 
 Readout references `$mux.module.readout` when present. Without a slot, fill all required fields in the blank mux template. Open or Reset captures identities, calibrated pulses and original tone positions. Refresh preserves authored inputs. After changing sources, use Reset and check the inputs again.

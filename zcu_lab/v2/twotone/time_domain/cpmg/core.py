@@ -77,7 +77,7 @@ class CPMG_Cfg(ConfigBase):
         Field(min_length=1),
         FieldMeta(label="Pi pulse counts"),
     ]
-    delay: SweepCfg | list[SweepCfg]
+    delay: SweepCfg | list[SweepCfg]  # Each pulse count can use its own delay sweep.
     detune_ratio: Annotated[
         float, FieldMeta(label="Detune ratio (fringes/step)", decimals=3)
     ] = 0.0

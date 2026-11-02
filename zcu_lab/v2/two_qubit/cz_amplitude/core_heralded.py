@@ -109,6 +109,7 @@ class CZAmplitudeHeraldedExp(
         cfg_type=CZAmplitudeHeraldedCfg,
         tag="two_qubit/cz_amplitude_heralded",
         result_builder=restore_result,
+        cfg_schema_version="2.0",
     )
 
     def run(
@@ -121,7 +122,7 @@ class CZAmplitudeHeraldedExp(
         The stop signal carries only stop requests and reason text.
         """
         validate_classifiers(config.readout, config.roles)
-        scales = sweep2array(config.scales)
+        scales = sweep2array(config.scale)
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Common gain scale", ylabel="P(g,g) | herald (g,g)")
         viewer = live_line(ax)
@@ -143,7 +144,7 @@ class CZAmplitudeHeraldedExp(
             initial_delay=config.initial_delay,
             relax_delay=config.relax_delay,
         )
-        scale = builder.add_sweep("scale", config.scales)
+        scale = builder.add_sweep("scale", config.scale)
         drive_f1 = Pulse(
             "cz_f1", config.drive.f1, gain=float(config.drive.f1.gain) * scale
         )
@@ -202,7 +203,7 @@ class CZAmplitudeHeraldedExp(
         cfg, result = source.cfg, source.result
         if cfg is None:
             raise ValueError("CZ return analysis requires saved cfg")
-        if not np.array_equal(result.scales, sweep2array(cfg.scales)):
+        if not np.array_equal(result.scales, sweep2array(cfg.scale)):
             raise ValueError("CZ return scales must match saved cfg")
         if result.sums.shape != (len(result.scales), 3, 3, 3, 3):
             raise ValueError("Heralded CZ return requires sums (Ns,3,3,3,3)")

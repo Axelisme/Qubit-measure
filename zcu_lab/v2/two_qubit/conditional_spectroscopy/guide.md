@@ -18,6 +18,9 @@ F1/F2 tone 都必須有 circle classifier 與 radius。缺少校準或使用 lin
 
 ## 設定與 Run
 
+普通版與 heralded 表單先列 reset、Xπ、雙線 drive 與 mux readout，再列角色與 contrast。
+外層 DC 的 device、unit、values 在內層 frequency 前。取數欄位在最後。
+
 1. 核對兩顆 qubit 的 preparation Xπ pulses。每條 probe 使用同角色的 charge generator，F1/F2 generator 必須不同。
 2. 填 `drive.f1` 與 `drive.f2`。表單會複製已有的 coupler `cz_f1`／`cz_f2` slots，這些 pulse 不保證適合 weak probe。沒有 slot 時，表單提供 cosine 包絡與角色 wiring channel，gain、duration 與 Nyquist zone 仍須人工確認。
 3. 兩線須填相同 base frequency、envelope duration 與 pre-delay。Gain 可帶符號，gain 比例及 relative phase 由 operator 決定。兩線平行播放，等待兩線及各自 post-delay 結束。頻率用 MHz，時間用 us，phase 用 degree。

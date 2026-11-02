@@ -54,13 +54,56 @@ class CZAmplitudeCfg(ConfigBase):
     """Optional reset → B11 → simultaneous CZ → Xπ⊗Xπ → terminal mux.
 
     roles fixes captured identities and original full-mux tone positions.
-    drive uses MHz, µs, degrees and signed gains. scales is a finite, increasing
+    drive uses MHz, µs, degrees and signed gains. scale is a finite, increasing
     nonnegative common gain multiplier; phase, waveform and gain ratio stay fixed.
     F1/F2 need circle classifiers with radius from GE Post. reps is shots per
     round; rounds accumulate counts at acquisition. reset=None emits no reset.
     No bias device, confusion inversion or pure-state assumption is used.
     """
 
+    reset: Annotated[
+        Reset.Cfg | None,
+        FieldMeta(
+            label="Reset", description="Optional reset at the start of every shot."
+        ),
+    ] = None
+    x180_f1: Annotated[
+        Pulse.Cfg,
+        FieldMeta(
+            label="F1 Xπ",
+            description="填入 F1 x180 slot，先做 amplitude／length Rabi。frequency MHz、gain a.u. within [-1, 1]、duration us。",
+        ),
+    ]
+    x180_f2: Annotated[
+        Pulse.Cfg,
+        FieldMeta(
+            label="F2 Xπ",
+            description="填入 F2 x180 slot，先做 amplitude／length Rabi。frequency MHz、gain a.u. within [-1, 1]、duration us。",
+        ),
+    ]
+    drive: Annotated[
+        DualLineCfg,
+        FieldMeta(
+            label="Dual-line drive",
+            description="填入 F1/F2 charge-line pulses。先做 conditional spectroscopy／chevron，再確認 coupler 的 cz_f1／cz_f2 slots。",
+        ),
+    ]
+    readout: Annotated[
+        MuxReadout.Cfg,
+        FieldMeta(
+            label="Mux readout",
+            description="填入 full-group mux readout slot。先用 lookback 取得 timing，再做 mux onetone，確認 frequency MHz、gain a.u. within [-1, 1] 與 timing us。",
+        ),
+    ]
+    roles: JointRoles
+    scale: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="Gain scale",
+            unit="dimensionless",
+            description="填入 common gain scale 起訖值。先用 chevron 選定 CZ pulse，再由操作者確認幅度範圍。",
+        ),
+    ]
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
     ] = Field(default=1, gt=0)
@@ -68,12 +111,6 @@ class CZAmplitudeCfg(ConfigBase):
         int,
         FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
     ] = Field(default=1, gt=0)
-    reset: Annotated[
-        Reset.Cfg | None,
-        FieldMeta(
-            label="Reset", description="Optional reset at the start of every shot."
-        ),
-    ] = None
     initial_delay: Annotated[
         float,
         FieldMeta(
@@ -91,43 +128,6 @@ class CZAmplitudeCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-    x180_f1: Annotated[
-        Pulse.Cfg,
-        FieldMeta(
-            label="F1 Xπ",
-            description="填入 F1 x180 slot，先做 amplitude／length Rabi。frequency MHz、gain a.u. within [-1, 1]、duration us。",
-        ),
-    ]
-    x180_f2: Annotated[
-        Pulse.Cfg,
-        FieldMeta(
-            label="F2 Xπ",
-            description="填入 F2 x180 slot，先做 amplitude／length Rabi。frequency MHz、gain a.u. within [-1, 1]、duration us。",
-        ),
-    ]
-    readout: Annotated[
-        MuxReadout.Cfg,
-        FieldMeta(
-            label="Mux readout",
-            description="填入 full-group mux readout slot。先用 lookback 取得 timing，再做 mux onetone，確認 frequency MHz、gain a.u. within [-1, 1] 與 timing us。",
-        ),
-    ]
-    roles: JointRoles
-    drive: Annotated[
-        DualLineCfg,
-        FieldMeta(
-            label="Dual-line drive",
-            description="填入 F1/F2 charge-line pulses。先做 conditional spectroscopy／chevron，再確認 coupler 的 cz_f1／cz_f2 slots。",
-        ),
-    ]
-    scales: Annotated[
-        SweepCfg,
-        FieldMeta(
-            label="Gain scale",
-            unit="dimensionless",
-            description="填入 common gain scale 起訖值。先用 chevron 選定 CZ pulse，再由操作者確認幅度範圍。",
-        ),
-    ]
 
     @model_validator(mode="after")
     def validate_pair(self) -> Self:
@@ -135,7 +135,7 @@ class CZAmplitudeCfg(ConfigBase):
         validate_classifiers(self.readout, self.roles)
         if self.drive.f1.ch != self.x180_f1.ch or self.drive.f2.ch != self.x180_f2.ch:
             raise ValueError("Each CZ line must use its role's calibrated Xπ generator")
-        scales = sweep2array(self.scales)
+        scales = sweep2array(self.scale)
         if (
             len(scales) < 2
             or not np.all(np.isfinite(scales))
@@ -191,7 +191,7 @@ class CZAmplitudeExp(Experiment[CZAmplitudeResult, CZAmplitudeCfg]):
             ),
             result_type=CZAmplitudeResult,
             cfg_type=CZAmplitudeCfg,
-            cfg_schema_version="4.0",
+            cfg_schema_version="5.0",
             tag="two_qubit/cz_amplitude",
             result_builder=restore_result,
         )
@@ -205,7 +205,7 @@ class CZAmplitudeExp(Experiment[CZAmplitudeResult, CZAmplitudeCfg]):
         stop requests and reason text.
         """
         validate_classifiers(config.readout, config.roles)
-        scales = sweep2array(config.scales)
+        scales = sweep2array(config.scale)
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Common gain scale", ylabel="P(g,g)")
         viewer = live_line(ax)
@@ -227,7 +227,7 @@ class CZAmplitudeExp(Experiment[CZAmplitudeResult, CZAmplitudeCfg]):
             initial_delay=config.initial_delay,
             relax_delay=config.relax_delay,
         )
-        scale = builder.add_sweep("scale", config.scales)
+        scale = builder.add_sweep("scale", config.scale)
         drive_f1 = Pulse(
             "cz_f1", config.drive.f1, gain=float(config.drive.f1.gain) * scale
         )
@@ -282,7 +282,7 @@ class CZAmplitudeExp(Experiment[CZAmplitudeResult, CZAmplitudeCfg]):
         cfg, result = source.cfg, source.result
         if cfg is None:
             raise ValueError("CZ return analysis requires saved cfg")
-        if not np.array_equal(result.scales, sweep2array(cfg.scales)):
+        if not np.array_equal(result.scales, sweep2array(cfg.scale)):
             raise ValueError("CZ return scales must match saved cfg")
         terminal = analyze_return(
             result.scales,
