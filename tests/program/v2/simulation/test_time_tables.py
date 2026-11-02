@@ -23,24 +23,25 @@ def time_program(value, *, table=False, consumer="delay"):
         builder.timeline_inc(value)
     elif consumer == "delay":
         builder.delay(value)
-    elif consumer == "delay_auto":
+    receiver = PulseReadoutCfg(
+        gen_ch=0,
+        ro_ch=0,
+        nqz=1,
+        freq=100,
+        gain=0.1,
+        waveform=ConstWaveformCfg(length=0.1),
+        ro_length=0.1,
+        pre_delay=value if consumer == "pre_delay" else 0.0,
+        post_delay=value if consumer == "post_delay" else 0.0,
+        trig_offset=value if consumer == "trig_offset" else 0.0,
+    ).build("readout")
+    builder.emit(receiver)
+    if consumer == "delay_auto":
         builder.delay_auto(value)
+        builder.emit(receiver)
     elif consumer == "DelayAuto":
         builder.emit(DelayAuto("wait", t=value))
-    builder.emit(
-        PulseReadoutCfg(
-            gen_ch=0,
-            ro_ch=0,
-            nqz=1,
-            freq=100,
-            gain=0.1,
-            waveform=ConstWaveformCfg(length=0.1),
-            ro_length=0.1,
-            pre_delay=value if consumer == "pre_delay" else 0.0,
-            post_delay=value if consumer == "post_delay" else 0.0,
-            trig_offset=value if consumer == "trig_offset" else 0.0,
-        ).build("readout")
-    )
+        builder.emit(receiver)
     builder.delay_by_timeline()
     return builder.build(), env
 
