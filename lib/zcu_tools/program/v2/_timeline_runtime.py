@@ -35,6 +35,7 @@ from ._timeline_expression import (
 from ._timeline_guard import bounds
 from .macro.write_reg import WriteRegOp
 from .modules.util import get_fclk
+from .table_param import TableParam, TableRawParam
 
 
 def ceil_tick(ticks: float) -> int:
@@ -65,12 +66,18 @@ def align_end(
     """Ceil a resolved aggregate in us at every native sweep point.
 
     Call only at an aggregate or placement boundary during preprocessing.
-    Scalars and exact integer-affine sweeps remain static. Non-affine native
-    lengths use k=8 upper fixed-point conversion, retaining the aggregate tail.
+    Scalars and exact integer-affine sweeps remain static. Explicit tables
+    ceil pointwise into initialized native registers. Non-affine native lengths use k=8 upper fixed-point conversion, retaining the aggregate tail.
     native identifies the original integer lattice, not an already rounded end.
     """
 
     cycles = value * get_fclk(prog)
+    if isinstance(cycles, TableParam):
+        return prog._timeline_book.math.cycles(
+            TableParam(
+                cycles.loop, [ceil_tick(v) / get_fclk(prog) for v in cycles.values]
+            )
+        )
     if not isinstance(cycles, QickParam) or not cycles.is_sweep():
         scalar = cycles.start if isinstance(cycles, QickParam) else cycles
         return ceil_tick(scalar) / get_fclk(prog)
@@ -121,6 +128,13 @@ def placement_time(prog, value: float | QickParam) -> float | QickParam:
 
 
 def step_time(prog, value: float | QickParam) -> float | QickParam:
+    if isinstance(value, TableParam):
+        raw = prog.us2cycles(value)
+        raw.to_steps(prog.loop_dict)
+        return TableParam(
+            value.loop,
+            [ceil_tick(v * get_fclk(prog)) / get_fclk(prog) for v in value.values],
+        )
     if not isinstance(value, QickParam):
         return value
     missing = value.spans.keys() - prog.loop_dict.keys()
@@ -276,6 +290,13 @@ def parameter_expression(
     Shared loop names use the same compiler-owned variable identity.
     """
     factor = 1 if cycles else get_fclk(prog)
+    if isinstance(value, TableParam):
+        return lookup_expression(
+            prog,
+            f"table:{value.loop}",
+            tuple(round(v * factor) for v in value.values),
+            value.loop,
+        )
     if not isinstance(value, QickParam):
         return TimeVariable(round(value * factor))
     axes = prog._timeline_book.cycle_axes
@@ -315,6 +336,13 @@ def native_event_expression(prog, value: "Time") -> TimeExpression:
     ticks = value * get_fclk(prog)
     if not isinstance(ticks, QickParam):
         return TimeVariable(ceil_tick(ticks))
+    if isinstance(ticks, TableParam):
+        return lookup_expression(
+            prog,
+            f"event:{ticks.loop}",
+            tuple(ceil_tick(v) for v in ticks.values),
+            ticks.loop,
+        )
     axes = {name: prog.loop_dict[name] for name in ticks.spans}
     if len(axes) > 1:
         line = TimeVariable(Fraction(str(ticks.start)))
@@ -351,6 +379,8 @@ def source_expression(prog, name: str) -> TimeExpression:
     register = prog.reg_dict.get(name)
     if register is not None and register.init is not None:
         raw = register.init
+        if isinstance(raw, TableRawParam):
+            return lookup_expression(prog, name, raw.values, raw.loop)
         return parameter_expression(prog, QickParam(raw.start, raw.spans), cycles=True)
     limits = prog._time_bounds.describe(prog, name)
     if limits.minimum == limits.maximum:
@@ -1006,10 +1036,11 @@ class RuntimeMath(TimedMacro):
                     and difference_limits(selected, expression) == (0, 0)
                 ):
                     if isinstance(value, RuntimeEnd):
-                        return (
+                        return self.prog._timeline_book.remember_table(
                             replace(value, covers=covers, deferred=deferred)
                             if maximum
-                            else value
+                            else value,
+                            self.prog._timeline_book.table_source(value),
                         )
                     if not deferred:
                         return value
@@ -1029,7 +1060,10 @@ class RuntimeMath(TimedMacro):
             result = self._select(result, operand, maximum=maximum, target=destination)
         result = self.add(shared, result, target=destination)
         proof = choose_time(*expressions, maximum=maximum)
-        return replace(result, expression=proof, covers=covers, deferred=deferred)
+        return self.prog._timeline_book.remember_table(
+            replace(result, expression=proof, covers=covers, deferred=deferred),
+            self.table_choice(values, maximum=maximum),
+        )
 
     @staticmethod
     def _choice_coverage(values: Sequence[Time | TimeExpression]) -> tuple[Time, ...]:
@@ -1056,6 +1090,8 @@ class RuntimeMath(TimedMacro):
         Hints are author guarantees, not hardware checks. Certified framework
         sources keep their existing producer audit.
         """
+        register = self.prog.reg_dict.get(name)
+        table_init = register is not None and isinstance(register.init, TableRawParam)
         if not author:
             limits = self.prog._time_bounds.source(self.prog, name)
         else:
@@ -1068,12 +1104,14 @@ class RuntimeMath(TimedMacro):
                     name in self.prog._time_bounds.framework_sources
                     or not self.prog._time_bounds.author_source(name)
                     or name in self.prog.loop_dict
+                    or table_init
                 ):
                     # A hint supplies bounds, not permission to bypass owner audits.
                     self.prog._time_bounds.source(self.prog, name)
                 limits = CycleBounds(*range_hint)
             elif (
                 name not in self.prog.loop_dict
+                and not table_init
                 and self.prog._time_bounds.author_source(name)
             ):
                 limits = None
@@ -1194,11 +1232,124 @@ class RuntimeMath(TimedMacro):
             ),
         )
 
+    def _table_values(
+        self, values: Sequence[Time | TimeExpression]
+    ) -> tuple[TableParam, list[float | TableParam]] | None:
+        """Resolve only source-backed tables and static operands on one loop."""
+        known: list[float | TableParam] = []
+        for value in values:
+            table = (
+                self.prog._timeline_book.table_source(value)
+                if not isinstance(value, (TimeVariable, TimeAbs))
+                else None
+            )
+            if table is not None:
+                # Runtime operands already hold QICK's nearest integer cycles.
+                known.append(
+                    self.prog.us2cycles(table) / get_fclk(self.prog)
+                    if isinstance(value, RuntimeEnd)
+                    else table
+                )
+            elif isinstance(value, RuntimeEnd):
+                if value.minimum is None or value.minimum != value.maximum:
+                    return None
+                known.append(value.minimum / get_fclk(self.prog))
+            elif isinstance(value, QickParam):
+                if value.is_sweep():
+                    return None
+                known.append(value.start)
+            elif isinstance(value, (float, int)):
+                known.append(value)
+            else:
+                return None
+        tables = [value for value in known if isinstance(value, TableParam)]
+        if not tables or any(table.loop != tables[0].loop for table in tables):
+            return None
+        return tables[0], known
+
+    def table_sum(
+        self, left: Time, right: Time, *, subtract: bool = False
+    ) -> TableParam | None:
+        """Return per-point us for left + right, or left - right if subtract.
+
+        Exactly one operand must be a TableParam or source-backed RuntimeEnd.
+        The other must be static: numeric us, an unswept QickParam in us, or
+        a RuntimeEnd with equal finite cycle bounds. RuntimeEnd table sources
+        are read as their already-nearest tProc cycles, converted back to us.
+        Return None for zero/two table sources, a swept QickParam or an
+        unrelated nonconstant runtime end. Emit no instructions or new source.
+        """
+        resolved = self._table_values((left, right))
+        if resolved is None:
+            return None
+        table, values = resolved
+        if sum(isinstance(value, TableParam) for value in values) != 1:
+            return None
+        a, b = values
+        return TableParam(
+            table.loop,
+            [
+                (a.values[i] if isinstance(a, TableParam) else a)
+                + (-1 if subtract else 1)
+                * (b.values[i] if isinstance(b, TableParam) else b)
+                for i in range(len(table.values))
+            ],
+        )
+
+    def table_choice(
+        self,
+        values: Sequence[Time | TimeExpression],
+        *,
+        maximum: bool = True,
+        selector: str | None = None,
+    ) -> TableParam | None:
+        """Return per-point us for an existing table/static time choice.
+
+        Numeric/unswept QickParam operands are us. RuntimeEnd table sources
+        are read as already-nearest tProc cycles and converted to us; fixed
+        finite cycle bounds also count as static. Require at least one table
+        and all tables on one loop. Return None for other runtime sources,
+        swept QickParam, bare expressions, no tables or mixed table loops.
+
+        Without selector, maximum chooses pointwise max when True, min when
+        False. With selector, ignore maximum and choose candidate i at point
+        i. Return None unless selector names the table loop and the number of
+        candidates equals that loop's point count. This only records the
+        existing choice; it emits no instructions or runtime source inference.
+        """
+        resolved = self._table_values(values)
+        if resolved is None:
+            return None
+        table, known = resolved
+        if selector is not None and (
+            selector != table.loop or len(known) != len(table.values)
+        ):
+            return None
+        points = [
+            [
+                value.values[i] if isinstance(value, TableParam) else value
+                for value in known
+            ]
+            for i in range(len(table.values))
+        ]
+        choose = max if maximum else min
+        return TableParam(
+            table.loop,
+            [
+                row[i] if selector is not None else choose(row)
+                for i, row in enumerate(points)
+            ],
+        )
+
     def cycles(self, value: Time) -> RuntimeEnd:
         """Resolve a time to a register operand, materializing literal offsets only here."""
         if isinstance(value, RuntimeEnd):
             return self.snapshot(value) if value.offset else value
-        if isinstance(value, QickParam) and not any(value.spans.values()):
+        if (
+            isinstance(value, QickParam)
+            and not isinstance(value, TableParam)
+            and not any(value.spans.values())
+        ):
             value = value.start
         key = str(len(self.t_regs))
         rounded = self.convert_time(self.prog, value, key)
@@ -1211,7 +1362,10 @@ class RuntimeMath(TimedMacro):
         operand = self.t_regs[key]
         if isinstance(operand, str):
             expression = parameter_expression(self.prog, rounded)
-            return RuntimeEnd(operand, lower, upper, expression=expression)
+            return self.prog._timeline_book.remember_table(
+                RuntimeEnd(operand, lower, upper, expression=expression),
+                value if isinstance(value, TableParam) else None,
+            )
         if operand == 0:
             return RuntimeEnd("s0", 0, 0)
         register = self.allocate()
@@ -1244,13 +1398,19 @@ class RuntimeMath(TimedMacro):
         limits = optional_time_bounds(self.prog, value)
         return 0.0 if limits is None else limits[1]
 
-    def time_parameter(self, value: RuntimeEnd) -> QickParam:
+    def time_parameter(self, value: RuntimeEnd | TableParam) -> QickParam:
         """Return an exactly known affine time, never runtime allocation metadata.
 
-        A runtime-only or non-affine value cannot be returned as QickParam and
-        raises RuntimeError. This read does not alter the scheduled end.
+        value is a captured runtime end or already-rounded explicit time table.
+        Runtime-only and non-affine values raise RuntimeError. Constant/affine
+        tables return exact QickParam values, not TableParam. This read does not
+        allocate registers or alter the scheduled end.
         """
-        expression = runtime_expression(value)
+        expression = (
+            parameter_expression(self.prog, value)
+            if isinstance(value, TableParam)
+            else runtime_expression(value)
+        )
         axes = expression_axes(expression)
         origin = known_time_point(expression, {})
         if origin is None:
@@ -1413,6 +1573,17 @@ class RuntimeMath(TimedMacro):
         )
         if result.minimum is not None and result.maximum is not None:
             self.check(result.minimum, result.maximum)
+        if operator in ("+", "-"):
+            self.prog._timeline_book.remember_table(
+                result,
+                self.table_sum(
+                    left,
+                    right
+                    if isinstance(right, RuntimeEnd)
+                    else right / get_fclk(self.prog),
+                    subtract=operator == "-",
+                ),
+            )
         return result
 
     def covers(self, end: Time, previous: Time) -> bool:
@@ -1433,13 +1604,16 @@ class RuntimeMath(TimedMacro):
             if value.offset
             else WriteReg(dst=register, src=value.register)
         )
-        return RuntimeEnd(
-            register,
-            value.minimum,
-            value.maximum,
-            value.covers,
-            value.deferred,
-            runtime_expression(value),
+        return self.prog._timeline_book.remember_table(
+            RuntimeEnd(
+                register,
+                value.minimum,
+                value.maximum,
+                value.covers,
+                value.deferred,
+                runtime_expression(value),
+            ),
+            self.prog._timeline_book.table_source(value),
         )
 
     def add(self, a: Time, b: Time, *, target: str | None = None) -> RuntimeEnd:

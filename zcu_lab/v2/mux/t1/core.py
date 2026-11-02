@@ -21,7 +21,7 @@ window and point count in microseconds. `sampling="linear"` uses its linear Swee
 axis in one hardware loop. The result and fit retain requested times; readout
 can differ by native timing ticks. `sampling="decay"` uses the single-qubit T1
 sampling policy to concentrate points in the decay region of the same window.
-LoadValue and DelayAuto execute one shared cycle table for all qubits. Results
+A table sweep and DelayAuto execute one shared delay table for all qubits. Results
 and fits then retain quantized delays; duplicate/reordered quantized points
 raise ValueError before acquisition.
 
@@ -147,7 +147,6 @@ from zcu_tools.experiment.v2.utils.t1_sampling import materialize_nonuniform_t1_
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     DelayAuto,
-    LoadValue,
     Reset,
     ResetCfg,
     SweepCfg,
@@ -402,16 +401,7 @@ class MuxT1Exp(Experiment[MuxT1Result, MuxT1Cfg]):
                 initial_delay=cfg.initial_delay,
                 relax_delay=cfg.relax_delay,
             )
-            builder.add_loop("delay_idx", len(table.cycles))
-            builder.emit(
-                LoadValue(
-                    "load_t1_delay",
-                    values=list(table.cycles),
-                    idx_reg="delay_idx",
-                    val_reg="t1_delay_cycle",
-                    auto_compress=False,
-                )
-            )
+            delay = builder.add_table_sweep("delay_idx", table.times_us.tolist())
             if cfg.reset is not None:
                 builder.emit(Reset("reset", cfg.reset))
             timelines = [f"drive_{index}" for index in indices]
@@ -422,9 +412,9 @@ class MuxT1Exp(Experiment[MuxT1Result, MuxT1Cfg]):
                     timeline=timeline,
                 )
             builder.join(*timelines, into="default")
-            # Start the register delay after the full pulse branches, including post.
+            # Start the shared delay after the full pulse branches, including post.
             builder.delay_by_timeline()
-            builder.emit(DelayAuto("t1_delay", t="t1_delay_cycle"))
+            builder.emit(DelayAuto("t1_delay", t=delay))
             readout_module = MuxReadout("readout", readout)
             builder.emit(readout_module)
             prog = builder.build()

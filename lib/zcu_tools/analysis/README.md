@@ -1,6 +1,6 @@
 # `zcu_tools.analysis` 模塊重點文檔
 
-**Last updated:** 2026-11-01
+**Last updated:** 2026-11-02
 
 **讀者：** framework-dev。分析核心、純數值工具與前端 adapter 的分工速查。
 
@@ -20,6 +20,13 @@ fluxdep 的互動 line picker，也不要求 QICK。
 FWHM 使用半 prominence 的插值寬度，至少為谷兩側頻率步進的平均。
 函式先剔除過寬的谷，再依分數貪婪套用間距與數量上限。
 它不命名元件、不讀寫資料，也不畫圖。
+
+`estimate_prominence_factor(freqs, magnitude, options, expected_dips=N)` 依正整數峰數
+估計門檻倍率，忽略 options 原有的 prominence 倍率與數量上限。
+它先沿用 finder 的背景、雜訊、平滑、寬度與間距規則取得候選，再取第 N 與第 N+1 強
+prominence／noise 的中點。候選不足或剛好 N 個時使用現有最低門檻，保留全部候選。
+零雜訊回傳 0.0，仍受最低門檻限制。將回傳倍率與 `max_dips=N` 一起交給 finder，
+才能限制最終數量；prominence 同值或零雜訊時，finder 依既有分數與頻率順序選取。
 
 `failure.AnalysisFailed` 表示數值 owner 已辨識的無法產出分析結果，與任意程式錯誤分開。
 Experiment 公開同一型別，GUI analyze work 經分類後才讓 recipe 交付 failed 值。

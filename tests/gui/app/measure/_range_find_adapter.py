@@ -9,7 +9,6 @@ from pathlib import Path
 import numpy as np
 from numpy.typing import NDArray
 from qtpy.QtWidgets import QApplication
-from zcu_tools.analysis.dips import DipFinderOptions
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AxesSpec
 from zcu_tools.experiment.context import RunContext
@@ -26,7 +25,11 @@ from zcu_tools.gui.app.measure.range_find_frontend import (
     draw_range_find,
     make_range_find_frontend,
 )
-from zcu_tools.gui.app.measure.range_find_plugin import RangeFindPlugin, RangeFindState
+from zcu_tools.gui.app.measure.range_find_plugin import (
+    RangeFindParameters,
+    RangeFindPlugin,
+    RangeFindState,
+)
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.services.pane_commit import commit_run
 from zcu_tools.gui.app.measure.state import RunPaneState, State
@@ -80,7 +83,7 @@ def make_plugin(
     req: AnalyzeRequest[RunRecord[SpectrumCfg, SpectrumData], PickerParams],
     *,
     plots: Plots,
-    options: DipFinderOptions | None = None,
+    parameters: RangeFindParameters | None = None,
     components: tuple[str, ...] = ("west", "east"),
 ) -> RangeFindPlugin[RangeFindState]:
     data = req.run_result.result
@@ -95,7 +98,7 @@ def make_plugin(
         data.freqs,
         data.magnitude,
         components=components,
-        options=options if options is not None else DipFinderOptions(max_dips=2),
+        parameters=parameters,
         build_result=build,
     )
 
@@ -162,7 +165,7 @@ def range_application(
     tmp_path: Path,
     qapp: QApplication,
     *,
-    options: DipFinderOptions | None = None,
+    parameters: RangeFindParameters | None = None,
     data: SpectrumData | None = None,
     components: tuple[str, ...] = ("west", "east"),
 ) -> Generator[RangeApplication]:
@@ -173,7 +176,7 @@ def range_application(
         run=run,
         guide=None,
         analysis=Interactive(
-            plugin=partial(make_plugin, options=options, components=components),
+            plugin=partial(make_plugin, parameters=parameters, components=components),
             frontend=make_range_find_frontend,
             options=lambda source, env: PickerParams(),
         ),
@@ -188,14 +191,14 @@ def range_application(
     )
     ctrl.add_view(window)
     tab_id = ctrl.tab_control.new_tab("spectrum")
-    parameters = ctrl.context_control.read_context()
+    capture = ctrl.context_control.read_context()
     commit_run(
         state,
         tab_id,
         RunPaneState(
-            result=_spectrum_record(parameters, data),
-            storage=parameters.storage,
-            parameters=parameters,
+            result=_spectrum_record(capture, data),
+            storage=capture.storage,
+            parameters=capture,
         ),
     )
     state.update_tab_analyze_param_instance(tab_id, PickerParams())

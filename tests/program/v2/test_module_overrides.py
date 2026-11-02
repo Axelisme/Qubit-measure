@@ -6,7 +6,7 @@ from typing import Literal
 import numpy as np
 import pytest
 from qick.asm_v2 import QickParam, QickSweep1D
-from zcu_tools.program.v2 import TimelineBuilder, TimelineProgramV2
+from zcu_tools.program.v2 import TableParam, TimelineBuilder, TimelineProgramV2
 from zcu_tools.program.v2.modules.base import Module
 from zcu_tools.program.v2.modules.pulse import Pulse, PulseCfg
 from zcu_tools.program.v2.modules.readout import (
@@ -30,6 +30,7 @@ from zcu_tools.program.v2.utils import is_qick_param
 
 from tests.program._profiles import load_soccfg
 from tests.program.v2._mux_support import native_mux
+from tests.program.v2.wave_observations import executed_words
 
 ProgramKind = Literal["native", "builder"]
 
@@ -94,6 +95,24 @@ def _pulse_cfg(ch: int = 0) -> PulseCfg:
         gain=0.2,
         waveform=ConstWaveformCfg(length=0.1),
     )
+
+
+@pytest.mark.parametrize("via_override", [False, True])
+def test_table_ro_length_is_explicitly_unsupported(via_override):
+    cfg = PulseReadoutCfg(
+        gen_ch=0,
+        ro_ch=0,
+        nqz=1,
+        freq=100,
+        gain=0.2,
+        waveform=ConstWaveformCfg(length=0.1),
+        ro_length=0.2,
+    )
+    table = TableParam("point", [0.2, 0.4, 0.3])
+    if not via_override:
+        cfg.ro_length = table
+    with pytest.raises(NotImplementedError, match="ro_length.*TableParam"):
+        PulseReadout("readout", cfg, ro_length=table if via_override else None)
 
 
 def _assert_same_compile(actual, expected):
@@ -274,16 +293,67 @@ def test_reset_overrides_match_set_param_without_mutating_cfg(
     assert cfg.model_dump() == original
 
 
-@pytest.mark.parametrize("knob", ["freq", "gain", "length", "ro_length"])
-@pytest.mark.parametrize("swept", [False, True])
+@pytest.mark.parametrize(
+    "variant,knob",
+    [
+        ("pulse", "freq"),
+        ("pulse", "gain"),
+        ("pulse", "phase"),
+        ("two", "gain1"),
+        ("two", "gain2"),
+        ("two", "freq1"),
+        ("two", "freq2"),
+        ("bath", "qub_gain"),
+        ("bath", "qub_freq"),
+        ("bath", "res_gain"),
+        ("bath", "res_freq"),
+        ("bath", "pi2_phase"),
+    ],
+)
+@pytest.mark.parametrize("use_factory", [False, True])
+def test_reset_table_overrides_match_each_scalar_wave_program(
+    variant, knob, use_factory
+):
+    cfgs: dict[str, AbsResetCfg] = {
+        "pulse": PulseResetCfg(pulse_cfg=_pulse_cfg()),
+        "two": TwoPulseResetCfg(pulse1_cfg=_pulse_cfg(), pulse2_cfg=_pulse_cfg(1)),
+        "bath": BathResetCfg(
+            cavity_tone_cfg=_pulse_cfg(),
+            qubit_tone_cfg=_pulse_cfg(1),
+            pi2_cfg=_pulse_cfg(2),
+        ),
+    }
+    cfg = cfgs[variant]
+    values = [0.2, -0.1, 0.3] if "gain" in knob else [80.0, 100.0, 95.0]
+    table = TableParam("point", values)
+    actual = _compile("builder", [_reset_module(cfg, {knob: table}, use_factory)], True)
+    expected = [
+        executed_words(
+            _compile("builder", [_reset_module(cfg, {knob: value}, use_factory)], False)
+        )[0]
+        for value in values
+    ]
+    assert executed_words(actual) == expected * actual.loop_dict["reps"]
+
+
+@pytest.mark.parametrize("knob", ["freq", "phase", "gain", "length", "ro_length"])
+@pytest.mark.parametrize("swept", [False, True, "table"])
 def test_mux_rejects_constructor_overrides(knob, swept):
     cfg = native_mux()
     original = cfg.model_dump()
-    value = QickSweep1D("point", 0.2, 0.4) if swept else 0.2
+    value = (
+        TableParam("point", [0.2, 0.4, 0.3])
+        if swept == "table"
+        else QickSweep1D("point", 0.2, 0.4)
+        if swept
+        else 0.2
+    )
     with pytest.raises(TypeError, match="unexpected keyword argument"):
         MuxReadout("mux", cfg, **{knob: value})
     with pytest.raises(ValueError, match="does not support"):
         Readout("mux", cfg, **{knob: value})
+    with pytest.raises(ValueError, match="MuxReadout does not support"):
+        cfg.set_param(knob, value)
     assert cfg.model_dump() == original
 
 

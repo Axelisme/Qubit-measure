@@ -7,7 +7,12 @@ from math import isfinite
 import numpy as np
 from numpy.typing import NDArray
 
-from zcu_tools.analysis.dips import DipFinderOptions, SpectrumDip, find_spectrum_dips
+from zcu_tools.analysis.dips import (
+    DipFinderOptions,
+    SpectrumDip,
+    estimate_prominence_factor,
+    find_spectrum_dips,
+)
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.interactive import Action, Command, PluginDefinition, Session
 from zcu_tools.gui.remote.errors import RemoteError
@@ -28,14 +33,64 @@ class DipSelection:
 
 
 @dataclass(frozen=True)
+class RangeFindParameters:
+    """Requested picker controls, resolved against the captured spectrum on use.
+
+    prominence_factor=None estimates the noise multiplier from the caller's name
+    count; a number uses that finite nonnegative multiplier unchanged.
+    smoothing_sigma is nonnegative Gaussian sigma in samples (zero disables it).
+    max_fwhm and min_separation are finite positive widths/spacing in MHz.
+    Invalid numerical controls raise ValueError when resolved with to_options.
+    """
+
+    prominence_factor: float | None = None
+    min_separation: float = 1.0
+    smoothing_sigma: float = 0.0
+    max_fwhm: float = 25.0
+
+    def to_options(
+        self,
+        freqs: NDArray[np.float64],
+        magnitude: NDArray[np.float64],
+        *,
+        expected_dips: int,
+    ) -> DipFinderOptions:
+        """Resolve actual numerical controls for matching MHz/magnitude arrays.
+
+        Arrays and the positive expected_dips follow estimate_prominence_factor's
+        contract. Numerical validation belongs to DipFinderOptions.
+        """
+        options = DipFinderOptions(
+            smoothing_sigma=self.smoothing_sigma,
+            prominence_factor=0.0
+            if self.prominence_factor is None
+            else self.prominence_factor,
+            max_fwhm=self.max_fwhm,
+            min_separation=self.min_separation,
+            max_dips=expected_dips,
+        )
+        if self.prominence_factor is None:
+            options = replace(
+                options,
+                prominence_factor=estimate_prominence_factor(
+                    freqs, magnitude, options, expected_dips=expected_dips
+                ),
+            )
+        return options
+
+
+@dataclass(frozen=True)
 class RangeFindState:
     """Accepted controls, score-ranked candidates and frequency-ordered selections.
 
-    options controls automatic selection only; manual edits may exceed max_dips.
+    parameters retains requested controls, including None for automatic factor.
+    options contains the actual factor and caller name count for automatic
+    selection only; manual edits may exceed max_dips.
     candidates contains all separated dips passing the current numerical filters.
     selected retains manual points and caller component assignments until recompute.
     """
 
+    parameters: RangeFindParameters
     options: DipFinderOptions
     candidates: tuple[SpectrumDip, ...]
     selected: tuple[DipSelection, ...]
@@ -46,11 +101,13 @@ class RangeFindPlugin[R](PluginDefinition[RangeFindState, R]):
 
     freqs are absolute MHz and magnitude is nonnegative, matching 1-D arrays
     with at least 11 finite points. Arrays are copied and sorted. components
-    contains unique nonblank labels, initially paired in ascending frequency.
-    options=None uses DipFinderOptions defaults. build_result receives the final
-    detached state after accepted Finish; at least one selected point is required.
+    contains at least one unique nonblank label, initially paired in ascending
+    frequency. The name count fixes the automatic selection limit for this session.
+    parameters=None uses automatic factor and RangeFindParameters defaults.
+    build_result receives the final detached state after accepted Finish;
+    at least one selected point is required.
 
-    set_parameters accepts DipFinderOptions and replaces the automatic guess,
+    set_parameters accepts RangeFindParameters and replaces the automatic guess,
     retaining assignments at surviving frequencies. add_dip accepts finite MHz
     within the scan and snaps to the nearest measured sample. remove_dip accepts
     a zero-based selected index. assign_dip accepts (index, caller label or None),
@@ -63,7 +120,7 @@ class RangeFindPlugin[R](PluginDefinition[RangeFindState, R]):
     freqs: NDArray[np.float64]
     magnitude: NDArray[np.float64]
     components: tuple[str, ...]
-    set_parameters: Action[RangeFindState, DipFinderOptions]
+    set_parameters: Action[RangeFindState, RangeFindParameters]
     add_dip: Action[RangeFindState, float]
     remove_dip: Action[RangeFindState, int]
     assign_dip: Action[RangeFindState, tuple[int, str | None]]
@@ -73,62 +130,57 @@ class RangeFindPlugin[R](PluginDefinition[RangeFindState, R]):
         freqs: NDArray[np.float64],
         magnitude: NDArray[np.float64],
         *,
-        components: tuple[str, ...] = (),
-        options: DipFinderOptions | None = None,
+        components: tuple[str, ...],
+        parameters: RangeFindParameters | None = None,
         build_result: Callable[[RangeFindState], R],
     ) -> None:
-        if options is None:
-            options = DipFinderOptions()
-        candidates = find_spectrum_dips(
-            freqs, magnitude, replace(options, max_dips=None)
-        )
+        if not components:
+            raise ValueError("components must contain at least one name")
         if any(not name.strip() for name in components) or len(set(components)) != len(
             components
         ):
             raise ValueError("components must contain unique nonblank labels")
-        chosen = sorted(candidates[: options.max_dips], key=lambda dip: dip.freq)
+        if parameters is None:
+            parameters = RangeFindParameters()
+        options = parameters.to_options(freqs, magnitude, expected_dips=len(components))
+        candidates = find_spectrum_dips(
+            freqs, magnitude, replace(options, max_dips=None)
+        )
+        chosen = sorted(candidates[: len(components)], key=lambda dip: dip.freq)
         selected = tuple(
-            DipSelection(
-                dip.freq, components[index] if index < len(components) else None, dip
-            )
+            DipSelection(dip.freq, components[index], dip)
             for index, dip in enumerate(chosen)
         )
         action = Action(self._recompute)
         specs = (
             ParamSpec("smoothing_sigma", JsonType.NUMBER),
-            ParamSpec("prominence_factor", JsonType.NUMBER),
+            ParamSpec("prominence_factor", JsonType.NUMBER, nullable=True),
             ParamSpec("max_fwhm", JsonType.NUMBER),
             ParamSpec("min_separation", JsonType.NUMBER),
-            ParamSpec("max_dips", JsonType.INTEGER, nullable=True),
         )
 
         def parameters_command(
             session: Session[RangeFindState], params: Mapping[str, object]
         ) -> RangeFindState:
             values = _validated(specs, params)
-            count = values["max_dips"]
-            if count is not None and (
-                isinstance(count, bool) or not isinstance(count, int)
-            ):
-                raise InvalidInputError("max_dips must be an integer or null")
+            factor = values["prominence_factor"]
             try:
-                controls = DipFinderOptions(
+                controls = RangeFindParameters(
                     smoothing_sigma=_number(values["smoothing_sigma"]),
-                    prominence_factor=_number(values["prominence_factor"]),
+                    prominence_factor=None if factor is None else _number(factor),
                     max_fwhm=_number(values["max_fwhm"]),
                     min_separation=_number(values["min_separation"]),
-                    max_dips=count,
                 )
+                return action.execute(session, controls)
             except ValueError as exc:
                 raise InvalidInputError(str(exc)) from exc
-            return action.execute(session, controls)
 
         object.__setattr__(self, "add_dip", Action(self._add))
         object.__setattr__(self, "remove_dip", Action(_remove))
         object.__setattr__(self, "assign_dip", Action(self._assign))
         super().__init__(
             plugin_id="range_find",
-            seed=RangeFindState(options, candidates, selected),
+            seed=RangeFindState(parameters, options, candidates, selected),
             commands=(
                 Command("set_parameters", specs, parameters_command),
                 *_selection_commands(self),
@@ -145,8 +197,11 @@ class RangeFindPlugin[R](PluginDefinition[RangeFindState, R]):
         object.__setattr__(self, "set_parameters", action)
 
     def _recompute(
-        self, state: RangeFindState, options: DipFinderOptions
+        self, state: RangeFindState, parameters: RangeFindParameters
     ) -> RangeFindState:
+        options = parameters.to_options(
+            self.freqs, self.magnitude, expected_dips=len(self.components)
+        )
         candidates = find_spectrum_dips(
             self.freqs, self.magnitude, replace(options, max_dips=None)
         )
@@ -155,7 +210,7 @@ class RangeFindPlugin[R](PluginDefinition[RangeFindState, R]):
             DipSelection(dip.freq, assignments.get(dip.freq), dip)
             for dip in sorted(candidates[: options.max_dips], key=lambda dip: dip.freq)
         )
-        return RangeFindState(options, candidates, selected)
+        return RangeFindState(parameters, options, candidates, selected)
 
     def _add(self, state: RangeFindState, frequency: float) -> RangeFindState:
         if (

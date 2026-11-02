@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure`
 
-**Last updated:** 2026-11-02, analysis summary size limit
+**Last updated:** 2026-11-02, analysis summary size limit and automatic range selection threshold
 
 **讀者：** framework-dev。量測 GUI 的組裝、分頁、tab admission 與 Run／Load／Save 分工。
 
@@ -88,13 +88,21 @@ result has an empty object summary. Before completion, RPC returns summary=null.
 ## Spectrum range selection
 
 `range_find_plugin.RangeFindPlugin` captures numeric MHz/magnitude arrays and
-caller-supplied component labels. It uses `analysis.dips.find_spectrum_dips`
-for both the initial guess and parameter changes. Manual selection snaps to
+at least one caller-supplied component label. The label count fixes the expected
+number of dips for one session; change labels by starting Analyze again.
+`RangeFindParameters` keeps requested controls. A null prominence factor uses
+`analysis.dips.estimate_prominence_factor` for that count before
+`find_spectrum_dips`; a numeric factor is used unchanged for initial guesses
+and parameter changes. Use temporary labels for unidentified dips. Manual selection snaps to
 measured samples. Assigning a component to another dip clears its old assignment.
 Changing parameters replaces manual selections and retains assignments only at
 surviving frequencies. `max_dips` limits automatic selection, not manual edits.
 
-`RangeFindState.options` contains the final numerical controls.
+`RangeFindState.parameters` retains the requested controls, including null for
+automatic factor. `RangeFindState.options` contains the final numerical controls
+and actual factor. The frontend shows a readonly expected count and actual factor;
+clearing its factor input restores automatic selection. The plot title shows the
+actual factor.
 `RangeFindState.selected` contains frequency-ordered points with optional
 `component` and `estimate`. A manual point outside the current candidates has
 `estimate=None`. The adapter's terminal result builder must retain this state

@@ -262,10 +262,9 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
                     ls=":",
                     label=f"candidate {peak.center:.5g} MHz",
                 )
-        if options.plot_fit:
-            ax.plot(fit.freqs, fit.fitted, label=f"fit, FWHM={fwhm:.1g} MHz")
-            label = f"f_q = {freq:.5g} ± {freq_err:.1g} MHz"
-            ax.axvline(freq, color="r", ls="--", label=label)
+        ax.plot(fit.freqs, fit.fitted, label=f"fit, FWHM={fwhm:.1g} MHz")
+        label = f"f_q = {freq:.5g} ± {freq_err:.1g} MHz"
+        ax.axvline(freq, color="r", ls="--", label=label)
         ax.set_xlabel("Frequency (MHz)")
         ax.set_ylabel("Signal Real (a.u.)")
         ax.legend()

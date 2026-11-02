@@ -2,7 +2,7 @@
 
 **讀者：** lab-author、framework-dev、agent。撰寫實驗 core，查閱 records、資料形狀、執行與保存慣例。
 
-**Last updated:** 2026-11-02
+**Last updated:** 2026-11-02，查表掃描與非均勻 delay 用法
 
 使用者入口見 [tutorial](../tutorial/README.md)。
 
@@ -211,7 +211,8 @@ program = builder.build()
 Pulse 支援 `freq`、`gain`、`phase`、`length`。PulseReadout 支援 `freq`、`gain`、`length`、`ro_length`。
 Reset 各變體的參數見 [module 建構參數表](../../lib/zcu_tools/program/v2/modules/README.md#constructor-overrides)。
 不支援 length sweep 的 waveform 仍會報錯，MuxReadout 不接受覆寫。
-接受 `ro_length` sweep 值不代表 QICK 支援 ADC window sweep，編譯會保留既有錯誤。
+`ro_length` 不支援 `TableParam`，建構 `PulseReadout` 時 raise NotImplementedError，不會進入 build。
+線性 ADC window sweep 保留 QICK 的既有編譯限制。
 既有 `set_param` 仍可用，但它會修改呼叫它的 cfg，應只用在自己持有的 cfg 副本上。
 
 ### 存檔軸用關鍵字，固定座標不塞進 Result
@@ -539,12 +540,12 @@ Schedule 的 buffer、retry 與 partial-result 規則見 [runtime README](../../
 
 `onetone/freq` 的 frequency sampling 有兩種 mode：`linear` 沿用 program-side
 `SweepCfg` sweep；`homophasal` 保留同一個 `freq` 使用者介面，但由已擬合的 resonator
-circle 參數產生非等距 frequency array，再把 gen/readout raw frequency words 放進
-`TablePulseReadout` 的 dmem tables。每點沿用一般 `PulseReadout` 的 wmem-backed WPORT，
-並在 sweep loop 的 exec-after hook 更新下一點 generator/readout frequency words；最後一點
-回繞第一點供下一個 outer repetition 使用。這條路徑不重置 DDS phase accumulator，更新
-位置與 QICK native `QickParam` sweep 一致。非等距模式仍先把點 round 到硬體格點，並在
-相鄰點 collapse 時 fast-fail。
+circle 參數產生非等距 frequency array，再交給 `builder.add_table_sweep("freq", freqs)`。
+兩種 mode 都用 `PulseReadout("readout", cfg.readout, freq=freq)` 播放並取數。
+QICK 逐點轉成 generator/readout frequency words，原生 loop 收尾在每發後載入下一點。
+最後一點回繞第一點供下一個 outer repetition 使用，不重置 DDS phase accumulator。
+非等距模式仍先把點 round 到硬體格點，並在相鄰點 collapse 時 fast-fail。
+存檔的 `freqs` 軸與 cfg 不變。
 
 `zcu_tools.experiment.v2.utils.t1_sampling` 擁有 T1 family 的 non-uniform sampling contract，供
 `twotone/time_domain/t1` 與 singleshot `t1`、`t1_with_tone`、`t1_with_tone_sweep` 共用：
@@ -561,6 +562,39 @@ dmem 載入 pulse length 與實際 duration；const/flat-top 共用單一 wmem t
 ### Sweep 參數與 cfg 的歸屬
 
 以 module constructor keyword 傳入掃描值，不修改 caller cfg。
+均勻掃描用 `builder.add_sweep(name, spec)`，任意物理值序列用 `builder.add_table_sweep(name, values)`。
+兩者都建立頂層 loop，依宣告順序由外到內排列，重名會 raise ValueError。
+查表回傳 `TableParam`，單位由參數決定，例如 freq 用 MHz、delay 與 length 用 us。
+空序列或非有限值會 raise ValueError，不把不等距點轉成 `SweepCfg`。
+
+```python
+from zcu_tools.program.v2 import DelayAuto, PulseReadout
+
+freq = builder.add_table_sweep("freq", freqs_mhz)
+delay = builder.add_table_sweep("delay", delays_us)
+builder.emit(DelayAuto("gap", t=delay))
+builder.emit(PulseReadout("readout", config.readout, freq=freq))
+```
+
+範例使用尚未 build 的 `builder` 與非空序列 `freqs_mhz`、`delays_us`，frequency loop 在外，delay loop 在內。
+T1 decay delay 取樣也將 `table.times_us` 交給 `add_table_sweep`，再用 `DelayAuto(..., t=delay)`。
+需要同一 loop 的另一張表時，從 `zcu_tools.program.v2` import `TableParam`，以 `TableParam(name, values)` 建立。
+表長與 loop 次數不同會在 build 時 raise ValueError。
+`TableParam` 可與數字或未掃描的 `QickParam` 做 `+ - * /`，包含反向運算，結果仍是同一 loop 的新表。
+與任何另一個掃描參數運算都會 raise TypeError，包含同 loop 的另一張表。
+
+所屬 loop 每圈結尾都載入下一點，即使該發沒有播放該 pulse。最後一點後回到第一點。
+Const 與 flat-top 的 length 可查表，flat-top 只改 flat 段，其他 waveform 的 length sweep 限制不變。
+`MuxReadout` 不支援查表掃描，`ro_length` 的拒絕時機見[constructor 覆寫](#cfg-名稱順序與取數欄位)。
+時間 getter 只在量化後逐點值可表示成常數或仿射時回傳等值 `QickParam`，不回傳 `TableParam`。
+非仿射或 runtime-only 時間會 raise RuntimeError。
+具名 timeline duration 逐點 ceil，原生 QICK 轉換保留 nearest，不能假設兩種入口的取整相同。
+
+查表每點的硬體字嚴格等於該值的純量 program。
+線性掃描的實際浮點值回編到 gain 等截斷取整欄位時，可能與線性字差 1 個最小單位，因為浮點回編不保證冪等。
+要比較 linear/table parity，先以同一 profile 確認每個實際點的純量字等於線性字。
+查表與線性值的轉換入口見 [program 查表掃描](../../lib/zcu_tools/program/v2/README.md#查表掃描)。
+
 Schedule 與 step 不接收 cfg；需要修改設定時，作者在 run 內明確 deepcopy。
 `sweep2array` 只讀 sweep 定義與通道，座標建立不依賴 pulse param mutation。
 
@@ -626,8 +660,9 @@ with Schedule(signals, scope=context.scope) as sched:
 ```
 
 `add_sweep` 同時宣告 loop 並回傳 `QickParam`，所以獨立寫一行，不藏在 module 建構子中。
-多個 loop 依宣告順序由外到內。非均勻掃描用 `add_loop(name, count)` 加
-`LoadValue`，不要把不等距點轉成 `add_sweep`。
+多個 loop 依宣告順序由外到內。非均勻物理值用 `add_table_sweep(name, values)`，
+用法與限制見 [Sweep 參數與 cfg 的歸屬](#sweep-參數與-cfg-的歸屬)。
+`add_loop(name, count)` 加 `LoadValue` 保留給整數 selector 或候選 pulse 選擇。
 Builder 的 `emit`、`delay`、`delay_auto`、`timeline_inc`、
 `delay_by_timeline`、`pulse`、`trigger`、`fork`、`join`、`timeline`、`repeat` 與 `branch`
 沿用 program 層的同名 API。原生布林控制選項用 keyword，例如

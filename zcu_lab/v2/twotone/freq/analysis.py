@@ -25,12 +25,12 @@ class FreqAnalyzeOptions:
     min_prominence is relative to projected signal ptp; min_distance_mhz is the
     minimum candidate separation. min_snr gates prominence and height above
     the median in first-difference MAD noise units. min_width_samples gates
-    observable half-prominence width in sample intervals. peaks reports height
-    SNR, not prominence SNR. plot_fit controls only the fitted overlay.
+    observable half-prominence width in sample intervals; 0 disables this gate.
+    Raise it only for fine scans. peaks reports height SNR, not prominence SNR.
+    The fitted overlay is always drawn.
     """
 
     model_type: Annotated[Literal["lor", "sinc"], FieldMeta(label="Model type")] = "lor"
-    plot_fit: Annotated[bool, FieldMeta(label="Plot fit")] = True
     expected_center_mhz: Annotated[
         float | None,
         FieldMeta(label="Expected center", unit="MHz"),
@@ -48,7 +48,7 @@ class FreqAnalyzeOptions:
         float,
         FieldMeta(label="Minimum half-prominence width", unit="samples"),
         Field(ge=0, allow_inf_nan=False),
-    ] = 3.0
+    ] = 0.0
     min_distance_mhz: Annotated[
         float,
         FieldMeta(label="Minimum peak separation", unit="MHz"),
