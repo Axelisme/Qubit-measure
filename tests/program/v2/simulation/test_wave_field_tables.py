@@ -179,12 +179,21 @@ def test_wave_tables_match_scalar_words_and_actual_linear_points(
     options = dict(flat=flat, paired=paired, mixer=mixer)
     prog, env, _ = field_program(field, values, mode="table", **options)
     assert_scalar_points(prog, env, values, field, **options)
-    linear, linear_env, name = field_program(field, values, mode="linear", **options)
+    # Gain truncation need not round-trip arbitrary rounded physical values.
+    # Keep nonlinear scalar parity above; require a re-encodable linear fixture below.
+    linear_values = [0.0, 0.25, 0.5] if field == "gain" else values
+    linear, linear_env, name = field_program(
+        field, linear_values, mode="linear", **options
+    )
     actual = (
         np.asarray(linear.get_pulse_param(name, field, as_array=True))
         .flatten()
         .tolist()
     )
+    scalar_words = [
+        executed_words(field_program(field, value, **options)[0])[0] for value in actual
+    ]
+    assert executed_words(linear) == scalar_words * 2
     table, table_env, _ = field_program(field, actual, mode="table", **options)
     linear_request = request(linear, linear_env)
     table_request = request(table, table_env)
