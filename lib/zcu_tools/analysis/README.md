@@ -112,5 +112,6 @@ Fluxdep native 載入與 dispersive 投影共用此規則。
 
 `analyze_centroid3_populations(populations, calibration)` 接收已正規化的 g/e/f fractions 與 caller 從 saved run cfg 取得的 `Centroid3Classifier`。它回傳 `Centroid3IQAnalysis`，包含 raw/unclipped corrected fractions、training confusion 副本及其 condition number/minimum singular value。它保留任意 scan axes，依 prepared rows／measured columns 解矩陣，singular matrix 拋出 LinAlgError。STIRAP 與 Raman 先將 counts 正規化，再共用此入口；繪圖選擇留在 caller。
 `analyze_centroid3_iq(signals, calibration)` 先以 saved centers 分類 acquired IQ，再呼叫同一個 population 入口。兩個入口都不讀 library、Form、program 或硬體，不重新訓練校準，也不重宣告數值結果型別。
-`Centroid3IQAnalysis` 的 owner 註解支援 TypeAdapter 從 native summary 重建 float64 ndarray。
-Population 保留任意 scan axes 加末軸 g/e/f，confusion matrix 必須為 3×3；壞 dtype、shape 或 null／非有限 array 值明確拒絕。解碼不裁切 corrected fractions，也不改 summary 或儲存格式。
+完整的 `Centroid3IQAnalysis` 留給 caller 畫 raw／unclipped corrected fractions。
+`summarize_centroid3(result)` 產生 `Centroid3Summary`，複製 3×3 training confusion，保留 condition number 與 minimum singular value，不重算分析。摘要大小不隨 scan axes 或 shot 數成長，供實驗回傳與 recipe 解碼。
+`Centroid3Summary` 的 owner 註解支援 TypeAdapter 從 native summary 重建 float64 confusion matrix；壞 dtype、shape 或 null／非有限 matrix 值明確拒絕。這不改 summary 或儲存格式。

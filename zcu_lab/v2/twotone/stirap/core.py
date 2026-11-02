@@ -9,8 +9,9 @@ import numpy as np
 from numpy.typing import NDArray
 from pydantic import Field, model_validator
 from zcu_tools.analysis.singleshot import (
-    Centroid3IQAnalysis,
+    Centroid3Summary,
     analyze_centroid3_populations,
+    summarize_centroid3,
 )
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.core.simulation import ChargeDriveRequirement
@@ -295,13 +296,13 @@ class StirapExp(Experiment[StirapResult, StirapCfg]):
         options: None,
         *,
         plots: Plots,
-    ) -> Centroid3IQAnalysis:
+    ) -> Centroid3Summary:
         """Normalize acquired counts and correct with the saved readout confusion.
 
         Require source.cfg and its saved ADC classifier; missing/wrong-type
         calibration fails explicitly. No current Form, library or simulator
-        truth is consulted. Return raw/unclipped corrected g/e/f fractions,
-        training confusion and its condition/minimum singular value. Plot
+        truth is consulted. Plot raw/unclipped corrected g/e/f fractions;
+        return training confusion and its condition/minimum singular value. Plot
         requested scan coordinates; preparation-label estimates are not fidelity.
         Incomplete/nonfinite or empty counts and singular confusion fail explicitly.
         """
@@ -373,4 +374,4 @@ class StirapExp(Experiment[StirapResult, StirapCfg]):
 
         populations(None)
         figure.show()
-        return result
+        return summarize_centroid3(result)

@@ -4,7 +4,7 @@ from zcu_lab.v2.fastflux.distortion.acc_phase.core import (
     AccPhaseExp,
 )
 from zcu_lab.v2.fastflux.distortion.freq.core import FreqAnalysis, FreqCfg, FreqExp
-from zcu_lab.v2.fastflux.distortion.phase.core import PhaseAnalysis, PhaseCfg, PhaseExp
+from zcu_lab.v2.fastflux.distortion.phase.core import PhaseCfg, PhaseExp
 
 __all__ = [
     # acc phase
@@ -18,5 +18,4 @@ __all__ = [
     # phase
     "PhaseExp",
     "PhaseCfg",
-    "PhaseAnalysis",
 ]

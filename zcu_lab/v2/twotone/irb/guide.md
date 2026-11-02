@@ -16,7 +16,7 @@ Readout uses the qubit.module.readout slot captured at Open/Reset, or a readout 
 
 ## Typical writeback
 
-Analysis reports results for review; calibration stays unchanged. Fits both A*p**depth+B curves on a common IQ projection. Reports target error=(1-p_interleaved/p_reference)/2 and fidelity. 95% paired-seed bootstrap is statistical only; coherent or gate-dependent noise can bias this estimate. Estimates outside the physical range remain visible for review.
+Analysis reports scalar decay, error, fidelity and bootstrap estimates for review; calibration stays unchanged. Per-depth means and fitted curves stay in the figure. Fits both A*p**depth+B curves on a common IQ projection. Reports target error=(1-p_interleaved/p_reference)/2 and fidelity. 95% paired-seed bootstrap is statistical only; coherent or gate-dependent noise can bias this estimate. Estimates outside the physical range remain visible for review.
 
 ## Depth input
 

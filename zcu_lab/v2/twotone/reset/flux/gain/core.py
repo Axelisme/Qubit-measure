@@ -40,19 +40,12 @@ class GainResult:
 
 @dataclass(frozen=True)
 class GainAnalysis:
-    """Four-branch contrasts and an unclipped residual estimate per gain.
+    """Gain (a.u.) minimizing the plotted p0≈0 residual estimate.
 
-    contrast_ground is d0=S00-S01; contrast_excited is d1=S10-S11, in IQ units.
-    contrast_ratio is Re(d1*conj(d0))/|d0|², NaN where undefined.
-    residual_estimate=(1-r)/2 assumes p0≈0; it is not reset fidelity.
-    selected_gain is the minimum finite estimate's gain (a.u.), first in scan
-    order for ties, or None when no finite candidate exists.
+    Ties choose the first point in scan order. No finite candidate gives None.
+    The estimate is not reset fidelity; contrasts and residuals stay in the plot.
     """
 
-    contrast_ground: NDArray[np.complex128]
-    contrast_excited: NDArray[np.complex128]
-    contrast_ratio: NDArray[np.float64]
-    residual_estimate: NDArray[np.float64]
     selected_gain: float | None
 
 
@@ -193,7 +186,7 @@ class GainExp(Experiment[GainResult, GainCfg]):
         Use d0=S00-S01, d1=S10-S11 and r=Re(d1*conj(d0))/|d0|².
         Under calibrated ideal pi, identical readout and a two-state model,
         p1=(1-r)/2+r*p0 exactly. Four IQs cannot identify p0 separately.
-        Return the unclipped estimate (1-r)/2 assuming reset hardly heats g
+        Plot the unclipped estimate (1-r)/2 assuming reset hardly heats g
         (p0≈0). A thermally excited idle point, such as fluxonium near half
         flux, invalidates this approximation. The fixed offline model used for
         validation has idle first-excited-state population about 0.358. Only
@@ -265,4 +258,4 @@ class GainExp(Experiment[GainResult, GainCfg]):
             ax.grid(True)
             if selected is not None:
                 ax.axvline(selected, color="gray", linestyle="--")
-        return GainAnalysis(d0, d1, ratio, residual, selected)
+        return GainAnalysis(selected_gain=selected)

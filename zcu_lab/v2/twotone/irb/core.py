@@ -272,14 +272,13 @@ class IRB_Exp(Experiment[IRBResult, IRBCfg]):
         """Fit paired complete IQ, publishing both decays and seed-bootstrap CI."""
         del options
         result = source.result
-        analysis = analyze_irb(result.depths, result.signals)
+        fit = analyze_irb(result.depths, result.signals)
+        analysis = fit.summary
         target = source.cfg.target_gate if source.cfg is not None else "target"
         fig, ax = plots.subplots(num="fit", figsize=(9, 6))
         for arm, label in enumerate(("Reference", f"Interleaved {target}")):
-            (line,) = ax.plot(
-                result.depths, analysis.mean_signals[arm], "o", label=label
-            )
-            ax.plot(result.depths, analysis.fit_signals[arm], color=line.get_color())
+            (line,) = ax.plot(result.depths, fit.mean_signals[arm], "o", label=label)
+            ax.plot(result.depths, fit.fit_signals[arm], color=line.get_color())
         ax.set(
             xlabel="Random Clifford depth",
             ylabel="Projected IQ (a.u.)",
