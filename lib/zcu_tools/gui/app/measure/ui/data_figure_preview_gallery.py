@@ -15,6 +15,7 @@ Responsive mosaic (S1/S4):
   viewport if available) is checked against two minimum-width cards
   plus spacing. Wide when available >= 2*MIN_CARD_WIDTH + spacing,
   otherwise narrow.
+- Named figure groups follow the same width-driven layout as single previews.
 - Narrow: vertical single column (Run, Analysis, Post-Analysis).
 - Wide + 3 cards: Run left spanning two rows, Analysis top-right,
   Post-Analysis bottom-right.
@@ -213,6 +214,9 @@ class _PreviewCard(QWidget):
         self._named_names = tuple(figures)
         for name, figure in figures.items():
             card = _PreviewCard(f"{self._source_key}_member", name)
+            # Only stage cards keep the mosaic minimum; members fit their tile.
+            card.setMinimumWidth(0)
+            card._image_label.setMinimumWidth(0)
             render(card, figure)
             self._named_stack.addWidget(card)
         index = (
@@ -546,10 +550,7 @@ class DataFigurePreviewGallery(QWidget):
             self._inner_layout.setColumnStretch(i, 0)
             self._inner_layout.setRowStretch(i, 0)
 
-        named_groups = any(
-            card.named_presentation_active() for card in self._ordered_cards
-        )
-        is_wide = self._is_wide() and not named_groups
+        is_wide = self._is_wide()
         n = len(self._ordered_cards)
         if n == 0:
             return
