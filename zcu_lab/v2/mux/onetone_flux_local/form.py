@@ -1,9 +1,9 @@
 """Captured mux onetone and local DC form defaults."""
 
 from pydantic import JsonValue
-from zcu_tools.cfg_model import FieldMeta, Range, Slot
+from zcu_tools.cfg_model import FieldMeta, FormNode, Range, Slot
 from zcu_tools.gui.form import FormEnv
-from zcu_tools.gui.form_adapter import FixedElements, Form, FormContext, FormNode
+from zcu_tools.gui.form_adapter import FixedElements, Form, FormContext
 
 from zcu_lab.v2.support.measure.flux_defaults import (
     captured_flux_seed,

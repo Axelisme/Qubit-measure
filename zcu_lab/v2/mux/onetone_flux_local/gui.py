@@ -104,9 +104,9 @@ def make_interactive_plugin(
     tone must name an acquired original index. Completed flux rows survive
     Stop; unfinished rows are excluded. Historical cfg is required for Q
     identity. Missing capture permits picking but not parameter proposals.
-    Frequencies are converted from core MHz to the shared picker\'s GHz.
-    The picker starts in magnitude mode. Each analysis
-    returns one Q's lines; repeat Analyze for other acquired participants.
+    Frequencies are converted from core MHz to the shared picker's GHz.
+    The picker starts in magnitude mode. Each analysis returns one Q's lines;
+    repeat Analyze for other acquired participants.
     """
     data, cfg = req.run_result.result, req.run_result.cfg
     validate_flux_result(data)
@@ -181,7 +181,8 @@ def get_writeback_items(
 
     Missing capture or cfg yields no proposals. Identity mismatches raise
     instead of guessing a target. Proposals contain only the selected
-    signed period in qubit.flux.period, qubit.flux.offset and a raw-fit record. Simultaneous local scans still calibrate each participant using other Run-start biases.
+    signed period in qubit.flux.period, qubit.flux.offset and a raw-fit record.
+    Simultaneous local scans calibrate each participant using other Run-start biases.
     Conversion and record evidence use only Run parameters and device snapshot.
     """
     cfg, picked = req.run_result.cfg, req.analyze_result
