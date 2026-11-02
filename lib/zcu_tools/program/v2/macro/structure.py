@@ -1,8 +1,20 @@
 """Native QICK operations annotated without replacing their control shell."""
 
-from qick.asm_v2 import CloseLoop, OpenLoop, Pulse, QickRawParam
+from qick.asm_v2 import (
+    AsmInst,
+    CloseLoop,
+    OpenLoop,
+    Pulse,
+    QickRawParam,
+    ReadDmem,
+    ReadWmem,
+    WriteReg,
+    WriteWmem,
+)
 
-from .wmem import PatchWmemFromDmem
+from zcu_tools.cfg_model import TableRawParam
+
+_WAVE_FIELDS = ("freq", "phase", "env", "gain", "length", "conf")
 
 
 class SourcePulse(Pulse):
@@ -29,23 +41,29 @@ class MarkedOpenLoop(OpenLoop):
     indexes (freq, phase, env, gain, length, conf = 0..5) to integer start/step
     words; step is per iteration of this loop. Definitions come from resolved
     QICK sweeps, not their instruction expansions. tables maps WMEM word/field
-    indexes to rotated exec-after DMEM word offsets supplied by table macros.
-    Conflicting table targets raise ValueError before recording the marker.
+    indexes to rotated DMEM word offsets discovered from TableRawParam fields.
+    The same definitions drive metadata and native closing-shell updates.
     """
 
+    def preprocess(self, prog) -> None:
+        super().preprocess(prog)
+        self.tables: dict[int, dict[int, int]] = {}
+        for wave in prog.waves:
+            fields: dict[int, int] = {}
+            for field, par in enumerate(_WAVE_FIELDS):
+                raw = wave[par]
+                if isinstance(raw, TableRawParam) and raw.loop == self.name:
+                    raw.to_steps(prog.loop_dict)
+                    rotated = raw.values[1:] + raw.values[:1]
+                    fields[field] = prog.add_dmem(
+                        [(word + 2**31) % 2**32 - 2**31 for word in rotated]
+                    )
+            if fields:
+                self.tables[int(prog.wave2idx[wave.name])] = fields
+        if self.tables:
+            prog.add_reg(name="scratch", allow_reuse=True)
+
     def translate(self, prog) -> None:
-        tables: dict[int, dict[int, int]] = {}
-        for name, _count, _before, after in prog.loops:
-            if name != self.name:
-                continue
-            for macro in after.macro_list if after is not None else ():
-                if isinstance(macro, PatchWmemFromDmem):
-                    for address, fields in macro.table_definition(prog).items():
-                        if address in tables:
-                            raise ValueError(
-                                "conflicting table hooks for one WMEM entry"
-                            )
-                        tables[address] = fields
         prog.record_meta(
             type="LOOP_START",
             name=self.name,
@@ -53,7 +71,7 @@ class MarkedOpenLoop(OpenLoop):
                 "n": self.n,
                 "range_hint": None,
                 "native": True,
-                "tables": tables,
+                "tables": self.tables,
                 "sweeps": {
                     "registers": {
                         reg.full_addr(): {
@@ -97,5 +115,29 @@ class MarkedCloseLoop(CloseLoop):
     def translate(self, prog) -> None:
         name, _count = prog.loop_stack[-1]
         prog.record_meta(type="LOOP_BODY_END", name=name, info={"native": True})
+        opening = next(
+            macro
+            for macro in prog.macro_list
+            if isinstance(macro, MarkedOpenLoop) and macro.name == name
+        )
+        counter = prog.reg_dict[name].full_addr()
+        for address, fields in opening.tables.items():
+            wave_name = prog.waves[address].name
+            for field, offset in fields.items():
+                scratch = prog.reg_dict["scratch"].full_addr()
+                AsmInst(
+                    inst={
+                        "CMD": "REG_WR",
+                        "DST": scratch,
+                        "SRC": "op",
+                        "OP": f"{counter} + #{offset}",
+                    },
+                    addr_inc=1,
+                ).translate(prog)
+                # The address is dead after the read, so reuse QICK scratch for the value.
+                ReadDmem(dst="scratch", addr="scratch").translate(prog)
+                ReadWmem(name=wave_name).translate(prog)
+                WriteReg(dst="w_" + _WAVE_FIELDS[field], src="scratch").translate(prog)
+                WriteWmem(name=wave_name).translate(prog)
         super().translate(prog)
         prog.record_meta(type="LOOP_END", name=name, info={"native": True})

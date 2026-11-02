@@ -17,14 +17,13 @@ from zcu_tools.cfg_model import (
     CircleClassifier,
     LinearClassifier,
     ReadoutClassifier,
+    TableRawParam,
 )
 from zcu_tools.cfg_model import MuxReadoutCfg as CoreMuxReadoutCfg
 from zcu_tools.utils.shot_classification import classify_shots, nearest_centroid3
 
 from ..macro.readout import ReadoutEmission
-from ..macro.wmem import PatchWmemFromDmem
 from .base import AbsModuleCfg, Module, apply_cfg_overrides
-from .dmem import LoadWord
 from .pulse import Pulse, PulseCfg
 from .waveform import WaveformCfg, resolve_waveform_ref
 
@@ -459,8 +458,8 @@ class TablePulseReadout(AbsReadout):
     The current point is played through QICK's ordinary wmem-backed pulse and
     readout-config path. Once declared, the readout advances to the next paired
     frequency words at the end of every shot in the ``idx_reg`` sweep loop,
-    whether or not that shot's branch plays this readout. The loop's exec-after
-    hook loads rotated dmem tables into dedicated templates. After the final
+    whether or not that shot's branch plays this readout. Native loop closing
+    discovers its TableRawParam fields and loads rotated dmem tables. After the final
     point, the update wraps to the first pair for the next outer repetition.
     Timeline completion is generator end plus post-delay once; ADC windows do
     not extend it. A later timeline trigger must prove its ADC window disjoint.
@@ -502,24 +501,12 @@ class TablePulseReadout(AbsReadout):
             ro_ch=self.cfg.ro_ch,
             pulse_id=f"{name}_table_pulse",
         )
-        self._addr_reg = f"{name}_table_addr"
-
-        self._freq_loader = LoadWord(
-            name=f"{name}_next_freq",
-            values=self.freq_words[1:] + self.freq_words[:1],
-            idx_reg=idx_reg,
-            val_reg=f"{name}_next_freq_word",
-        )
-        self._ro_freq_loader = LoadWord(
-            name=f"{name}_next_ro_freq",
-            values=self.ro_freq_words[1:] + self.ro_freq_words[:1],
-            idx_reg=idx_reg,
-            val_reg=f"{name}_next_ro_freq_word",
-        )
+        if any(not 0 <= word < 2**32 for word in self.freq_words + self.ro_freq_words):
+            raise ValueError("TablePulseReadout words must be uint32")
 
     @property
     def initial_template(self) -> PulseReadout:
-        """Borrow the initial scalar/swept template used before exec-after updates.
+        """Borrow the initial template used before native loop table updates.
 
         The returned Module is owned by this table readout and must not be
         mutated by consumers. init(prog) initializes it and its dedicated pulse
@@ -548,40 +535,30 @@ class TablePulseReadout(AbsReadout):
                 f"match loop {self.idx_reg!r} count {matches[0].count}"
             )
         self._readout.declare(prog)
-        self._freq_loader.declare(prog)
-        self._ro_freq_loader.declare(prog)
-        prog.add_reg(self._addr_reg)
-        self._append_updates(prog)
+        self._bind_tables(prog)
 
     def lower(
         self, prog: TimelineProgramV2, *, timeline: str | None, tag: str | None
     ) -> None:
         """Play paired templates, ending at generator completion plus post-delay.
 
-        Hook updates affect only frequency words, not placement or duration.
+        Native table updates affect only frequency words, not placement or duration.
         timeline=None selects default; tag names this occurrence's config.
         """
         self._readout.lower(prog, timeline=timeline, tag=tag)
 
-    def _append_updates(self, prog: TimelineProgramV2) -> None:
-        pulse_id = self._readout.pulse.pulse_name(prog)
-        prog.append_loop_after(
-            self.idx_reg,
-            PatchWmemFromDmem(
-                name=pulse_id,
-                idx_reg=self.idx_reg,
-                addr_reg=self._addr_reg,
-                val_reg=self._freq_loader.val_reg,
-                dmem_offset=self._freq_loader.dmem_offset(prog),
-            ),
-            PatchWmemFromDmem(
-                name=self._readout.adc_name(prog),
-                idx_reg=self.idx_reg,
-                addr_reg=self._addr_reg,
-                val_reg=self._ro_freq_loader.val_reg,
-                dmem_offset=self._ro_freq_loader.dmem_offset(prog),
-            ),
-        )
+    def _bind_tables(self, prog: TimelineProgramV2) -> None:
+        for name, words in (
+            (self._readout.pulse.pulse_name(prog), self.freq_words),
+            (self._readout.adc_name(prog), self.ro_freq_words),
+        ):
+            wave_names = prog.pulses[name].get_wavenames(exclude_special=True)
+            if len(wave_names) != 1:
+                raise NotImplementedError("TablePulseReadout requires one waveform")
+            wave = prog.waves[prog.wave2idx[wave_names[0]]]
+            if int(wave.freq) % 2**32 != words[0]:
+                raise ValueError("table wrap disagrees with initial WMEM frequency")
+            wave.freq = TableRawParam(self.idx_reg, words, par="freq")
 
 
 class MuxReadout(AbsReadout):

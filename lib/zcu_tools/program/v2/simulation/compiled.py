@@ -237,6 +237,7 @@ def _validate_inner_loop(
 
 def _validate_definition(info: dict[str, Any], machine: Machine) -> None:
     registers, waves = info["sweeps"]["registers"], info["sweeps"]["waves"]
+    _check_table_wrap(info, machine)
     for name, definition in registers.items():
         if not np.all(
             machine.value(Register(name)) == signed32(np.array([definition["start"]]))
@@ -278,7 +279,7 @@ def _check_update(
 ) -> None:
     registers, waves = info["sweeps"]["registers"], info["sweeps"]["waves"]
     allowed = set(registers) | scratch
-    allowed |= {f"WMEM[{address}]" for address in waves}
+    allowed |= {f"WMEM[{address}]" for address in waves.keys() | info["tables"].keys()}
     if after.writes - allowed:
         raise ValueError(
             f"shell writes undeclared state: {sorted(after.writes - allowed)}"
@@ -289,13 +290,18 @@ def _check_update(
         )
         if np.any(after.value(Register(name)) != expected):
             raise ValueError(f"sweep update for {name} disagrees with shell")
-    for address, fields in waves.items():
+    for address in waves.keys() | info["tables"].keys():
         expected = before.wmem[address].copy()
-        for field, definition in fields.items():
+        for field, definition in waves.get(address, {}).items():
             expected[:, field] += multiplier * definition["step"]
             expected[:, field] %= 2 ** (16 if field == 5 else 32)
+        indexes = before.value(Register(info["counter_reg"]))
+        for field, offset in info["tables"].get(address, {}).items():
+            for point in range(info["n"]):
+                active = indexes == point
+                expected[active, field] = before.dmem[offset + point][active] % 2**32
         if np.any(after.wmem[address] % 2**32 != expected % 2**32):
-            raise ValueError("wave sweep update disagrees with shell")
+            raise ValueError("wave sweep/table update disagrees with shell")
 
 
 def _validate_native_sweeps(
@@ -317,10 +323,15 @@ def _validate_native_sweeps(
                 (info["sweeps"]["registers"], info["sweeps"]["waves"], info["tables"])
             ):
                 raise ValueError("reps shell may only update its own counter")
-            actual = deepcopy(seed)
-            actual.write(
-                Register(loop.counter), np.zeros(1, dtype=np.int64), actual.active
+            before = deepcopy(seed)
+            indexes = (
+                np.arange(seed.size, dtype=np.int64) % info["n"]
+                if info["tables"]
+                else np.zeros(seed.size, dtype=np.int64)
             )
+            before.write(Register(loop.counter), indexes, before.active)
+            _apply_tables(info, before, indexes)
+            actual = deepcopy(before)
             actual.writes.clear()
             closing = records[loop.body_end + 1 : loop.end]
             jump_index = next(
@@ -328,11 +339,11 @@ def _validate_native_sweeps(
             )
             for record in closing[:jump_index]:
                 _shell_compute(record, actual)
-            _check_update(info, seed, actual, 1, scratch)
+            _check_update(info, before, actual, 1, scratch)
             actual.writes.clear()
             for record in closing[jump_index + 1 :]:
                 _shell_compute(record, actual)
-            _check_update(info, seed, actual, -(info["n"] - 1), scratch)
+            _check_update(info, before, actual, -(info["n"] - 1), scratch)
         except (ValueError, KeyError, IndexError, TypeError) as exc:
             raise _failure(
                 records[loop.start], ValueError(f"sweep shell disagrees: {exc}")
@@ -354,8 +365,8 @@ def _timing_writes(records: Sequence[DecodedInstruction]) -> set[str]:
     return timing
 
 
-def _check_table_hook(info: dict[str, Any], seed: Machine, actual: Machine) -> None:
-    """Validate declared table fields against compiled DMEM, including wrap."""
+def _check_table_wrap(info: dict[str, Any], seed: Machine) -> None:
+    """Require table fields to be independent sweeps that wrap to initial WMEM."""
     for address, fields in info["tables"].items():
         expected = seed.wmem[address].copy()
         for field, offset in fields.items():
@@ -371,11 +382,6 @@ def _check_table_hook(info: dict[str, Any], seed: Machine, actual: Machine) -> N
                 != int(expected[0, field]) % 2**32
             ):
                 raise ValueError("table wrap disagrees with initial WMEM")
-            expected[:, field] = seed.dmem[offset] % 2**32
-        if np.any(actual.wmem[address] % 2**32 != expected % 2**32):
-            raise ValueError(
-                "table hook disagrees with declared DMEM offset/WMEM field"
-            )
 
 
 def _validate_hooks(
@@ -394,39 +400,29 @@ def _validate_hooks(
                 raise ValueError(
                     f"reps shell counter {loop.counter} is a cross-shot live-in"
                 )
-            tables = info["tables"]
             actual = deepcopy(seed)
             actual.writes.clear()
             for record in records[first : loop.body_end]:
                 inst = record.instruction
                 if isinstance(inst, (MetaInst, LabelInst, NopInst, TimeInst, WaitInst)):
                     continue
-                if tables:
-                    _shell_compute(record, actual)
-                elif isinstance(inst, RegWriteInst) and inst.wp is None:
+                if isinstance(inst, RegWriteInst) and inst.wp is None:
                     actual.writes.update(inst.reg_write)
                 else:
                     raise _failure(
                         record, ValueError("undeclared acquisition shell effect")
                     )
-            allowed_memory = {f"WMEM[{address}]" for address in tables}
             memory_writes = {
                 name for name in actual.writes if name.startswith(("DMEM[", "WMEM["))
             }
             timing = _timing_writes(records[first : loop.body_end])
             registers = actual.writes - memory_writes - {"s12", "s15"} - timing
-            if (
-                memory_writes - allowed_memory
-                or registers & live
-                or registers
-                and not tables
-            ):
+            if memory_writes or registers & live or registers:
                 raise ValueError(
                     f"{loop.name} shell writes undeclared/cross-shot state: {sorted(actual.writes)}"
                 )
             if "s12" in live:
                 raise ValueError("cross-shot live-in s12 is updated by the shot shell")
-            _check_table_hook(info, seed, actual)
         except (ValueError, KeyError, IndexError, TypeError) as exc:
             raise _failure(
                 records[loop.start], ValueError(f"table/shot shell disagrees: {exc}")
@@ -593,7 +589,7 @@ def _build_lanes(
         seed,
         reject_carry=outputs.size * prog.loop_dict["reps"] > 1,
     )
-    _validate_native_sweeps(prog, records, loops, seed)
+    _validate_native_sweeps(prog, records, loops, machine)
     _validate_hooks(records, loops, seed, end, live)
     names = _point_names(records, loops)
     grid = _native_grid(prog, names)

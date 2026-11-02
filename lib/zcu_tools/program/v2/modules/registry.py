@@ -10,6 +10,8 @@ from typing import TYPE_CHECKING
 
 from qick.asm_v2 import QickParam
 
+from zcu_tools.cfg_model import TableParam
+
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
@@ -50,7 +52,15 @@ class PulseRegistry:
             sorted_dict: OrderedDict[str, object] = OrderedDict()
             for key in sorted(d.keys()):
                 value = d[key]
-                if isinstance(value, QickParam):
+                if isinstance(value, TableParam):
+                    value = OrderedDict(
+                        [
+                            ("type", "TableParam"),
+                            ("loop", value.loop),
+                            ("values", value.values),
+                        ]
+                    )
+                elif isinstance(value, QickParam):
                     value = OrderedDict(
                         [
                             ("type", "QickParam"),
