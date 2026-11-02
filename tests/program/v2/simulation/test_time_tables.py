@@ -17,6 +17,22 @@ from tests.program._profiles import load_soccfg
 from tests.program.v2.simulation._compiled_support import request
 
 
+class RegisterDelay(Module):
+    name = "register_delay"
+
+    def __init__(self, value):
+        self.value = value
+
+    def declare(self, prog):
+        parameter = (
+            self.value if isinstance(self.value, QickParam) else QickParam(self.value)
+        )
+        prog.add_reg("hold", init=prog.us2cycles(parameter))
+
+    def lower(self, prog, *, timeline, tag):
+        prog.delay_reg_auto("hold")
+
+
 class PulseAtTime(Module):
     def __init__(self, value, timeline):
         self.name = "timed_drive"
@@ -60,6 +76,8 @@ def time_program(value, *, table=False, linear=False, outer=False, consumer="del
         builder.timeline_inc(value, tag="time")
     elif consumer == "delay":
         builder.delay(value, tag="time")
+    elif consumer == "register":
+        builder.emit(RegisterDelay(value))
     receiver = PulseReadoutCfg(
         gen_ch=0,
         ro_ch=0,
@@ -115,6 +133,7 @@ def scheduled_shots(prog):
         "trig_offset",
         "pulse_t",
         "native_t",
+        "register",
     ],
 )
 @pytest.mark.parametrize("outer", [False, True])
@@ -199,3 +218,8 @@ def test_nonaffine_table_time_getter_raises(consumer):
     prog, _ = time_program([0.0213, 0.0107, 0.0354], table=True, consumer=consumer)
     with pytest.raises(RuntimeError, match="non-affine"):
         prog.get_time_param("time", "t")
+
+
+def test_register_time_table_rejects_negative_noninitial_point():
+    with pytest.raises(ValueError, match="nonnegative"):
+        time_program([0.02, -0.01, 0.03], table=True, consumer="register")
