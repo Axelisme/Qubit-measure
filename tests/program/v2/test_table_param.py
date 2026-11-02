@@ -9,7 +9,7 @@ from typing import Any
 import numpy as np
 import pytest
 from qick import QickConfig
-from qick.asm_v2 import QickParam, QickProgramV2, Waveform
+from qick.asm_v2 import QickParam, QickProgramV2, TimedMacro, Waveform
 from qick.helpers import to_int
 from zcu_tools.program import v2
 
@@ -120,3 +120,48 @@ def test_qick_waveform_and_close_loop_leave_table_words_unstepped(
     np.testing.assert_array_equal(
         programs[0].binprog["wmem"], programs[1].binprog["wmem"]
     )
+
+
+def test_qick_parameter_copy_and_convert_time_preserve_table_type(
+    mock_soccfg: QickConfig,
+) -> None:
+    values = [0.15, 0.31, 0.22]
+    table = v2.TableParam("point", values)
+    prog = QickProgramV2(mock_soccfg)
+    prog.declare_gen(0, nqz=1)
+    prog.add_pulse(
+        ch=0, name="test", style="const", freq=table, phase=0, gain=0.2, length=0.1
+    )
+    prog.open_loop(len(values), name="point")
+    prog.close_loop()
+    prog.end()
+    prog.compile()
+    assert isinstance(prog.get_pulse_param("test", "freq"), v2.TableParam)
+    expected = []
+    for value in values:
+        scalar = QickProgramV2(mock_soccfg)
+        scalar.declare_gen(0, nqz=1)
+        scalar.add_pulse(
+            ch=0, name="test", style="const", freq=value, phase=0, gain=0.2, length=0.1
+        )
+        scalar.end()
+        scalar.compile()
+        expected.append(scalar.get_pulse_param("test", "freq"))
+    np.testing.assert_allclose(
+        prog.get_pulse_param("test", "freq", as_array=True), expected
+    )
+    macro = TimedMacro()
+    rounded = macro.convert_time(prog, table, "t")
+    assert isinstance(macro.t_params["t"], v2.TableParam)
+    assert isinstance(rounded, v2.TableParam)
+    expected_times = [mock_soccfg.cycles2us(mock_soccfg.us2cycles(v)) for v in values]
+    np.testing.assert_allclose(rounded.to_array(), expected_times)
+    assert "point" in repr(table)
+    assert "point" in str(table)
+
+
+@pytest.mark.parametrize("attribute", ["start", "spans", "raw_param", "derived_param"])
+def test_affine_access_rejects_tables_with_loop_diagnostic(attribute: str) -> None:
+    table = v2.TableParam("point", [1.0, 3.0])
+    with pytest.raises(TypeError, match="point"):
+        getattr(table, attribute)
