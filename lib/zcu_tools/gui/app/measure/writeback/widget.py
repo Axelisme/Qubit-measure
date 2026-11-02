@@ -190,11 +190,9 @@ class _MiddleElidedLabel(QLabel):
 
 
 def _value_label(item: WritebackItem, text: str) -> QLabel:
-    """Return a selectable label, middle-elided for records and scalar parameters."""
+    """Return a mouse-selectable label: middle-elided for a scalar parameter, else plain."""
     label: QLabel
-    if isinstance(item, RecordWriteback) or (
-        isinstance(item, ParameterWriteback) and is_scalar_value(item.proposed_value)
-    ):
+    if isinstance(item, ParameterWriteback) and is_scalar_value(item.proposed_value):
         label = _MiddleElidedLabel(text)
     else:
         label = QLabel(text)
@@ -611,7 +609,13 @@ class WritebackWidget(QWidget):
     def _make_proposed_view(
         self, item: WritebackItem
     ) -> tuple[QLabel, QTableWidget | None]:
-        proposed_label = _value_label(item, self._display_proposed(item, compact=True))
+        text = self._display_proposed(item, compact=True)
+        proposed_label: QLabel
+        if isinstance(item, RecordWriteback):
+            proposed_label = _MiddleElidedLabel(text)
+            make_label_selectable(proposed_label)
+        else:
+            proposed_label = _value_label(item, text)
         proposed_label.setToolTip(self._display_proposed(item, compact=False))
         is_matrix = isinstance(item, ParameterWriteback) and _is_matrix_value(
             self._values[item.session_id].proposed
