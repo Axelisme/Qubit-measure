@@ -55,6 +55,10 @@ Module 是具有 interface 與 implementation 的程式單位。Interface 包含
 反射、無結構 dict 與第三方無型別資料若不可避免，將轉換集中在對應 adapter，避免每個呼叫者
 重複猜測欄位。`cast` 說明的是型別主張，不提供執行期驗證。
 
+2026-11-02，使用者裁決：「我不喜歡我沒有要求的檢查」、「如果要檢查，也是Form透過annotation的ge/le檢查」。
+輸入範圍檢查只用 cfg annotation，例如 `Field(ge=..., le=...)`。
+Form 驗證由 annotation 產生的 model，不另加 `AfterValidator` 或呼叫端範圍檢查。
+
 公開函式的參數與回傳用具名型別。上層資訊往下層傳時，直接傳上層原物件，例如把展開前的
 macro 放進編譯標記；沒有現成型別的少量附加資訊用 `dict`，consumer 讀不到需要的 key 就
 raise。不要為了跨層傳遞，在每一層各定義一個欄位相同的對應類別：每改一個欄位就要同步多個

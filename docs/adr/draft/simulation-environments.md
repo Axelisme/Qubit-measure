@@ -153,7 +153,7 @@ Owner 決策與日期引文見 [[0083]]，snapshot 與 admission 細節分別見
 
 Frontend 與 mixin 位於 program/v2 專用子模組；一般 program 只用公開 mixin 與少量契約，不直接操作 interpreter／engine internals。物理 backend 留在數值 owner，YAML 與組裝不移入 program。`program-simulation-entry` contract 限制繞過公開入口的直接依賴，允許入口正常委派內部，不新增或放寬 ignore_imports。
 
-現行 frontend 依編譯指令效果處理確定性巢狀控制、table-driven pulse／readout 與 raw-word consumers，不按 Module 類別選解析器。TablePulseReadout 保留 exec-after 更新及回繞，TableLengthPulse 保留實際選中長度。Reset 仍只發實際事件，不強設 ground。FTF 不新增 BathReset reservoir 物理。
+現行 frontend 依編譯指令效果處理確定性巢狀控制、table-driven pulse／readout 與 raw-word consumers，不按 Module 類別選解析器。原生 `TableParam` pulse／readout 查表在所屬 loop 每圈結尾更新下一點，最後一點後回到第一點。`Pulse(length=TableParam)` 保留每點量化後的實際長度。Reset 仍只發實際事件，不強設 ground。FTF 不新增 BathReset reservoir 物理。
 
 Timeline 分開 pulse events 與 ADC windows，保留量化座標、signed complex samples／sample axis、carrier、phase reference、通道與來源。Frontend 不讀物理參數或選 solver 步長；backend 不解釋 Module 類別。不同控制路徑有對應 timeline，相同控制可共用不可變資料。
 
