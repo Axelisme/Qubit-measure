@@ -42,20 +42,13 @@ class LengthResult:
 
 @dataclass(frozen=True)
 class LengthAnalysis:
-    """Four-branch contrasts and an unclipped residual estimate per length.
+    """Shortest qualifying duration (us) and the operator's residual threshold.
 
-    contrast_ground is d0=S00-S01; contrast_excited is d1=S10-S11, in IQ units.
-    contrast_ratio is Re(d1*conj(d0))/|d0|², NaN where undefined.
-    residual_estimate=(1-r)/2 assumes p0≈0; it is not reset fidelity.
-    selected_length is the shortest quantized duration (us) with residual ≤ epsilon
-    and all longer measured finite points also passing, or None if none qualify.
-    epsilon records the operator's analysis threshold.
+    Every longer measured finite point must also pass epsilon. No qualifying
+    point gives None. Contrasts and p0≈0 residual estimates stay in the plot;
+    they are not reset fidelity.
     """
 
-    contrast_ground: NDArray[np.complex128]
-    contrast_excited: NDArray[np.complex128]
-    contrast_ratio: NDArray[np.float64]
-    residual_estimate: NDArray[np.float64]
     selected_length: float | None
     epsilon: float
 
@@ -213,7 +206,7 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
         Use d0=S00-S01, d1=S10-S11 and r=Re(d1*conj(d0))/|d0|².
         Under calibrated ideal pi, identical readout and a two-state model,
         p1=(1-r)/2+r*p0 exactly. Four IQs cannot identify p0 separately.
-        Return the unclipped estimate (1-r)/2 assuming reset hardly heats g
+        Plot the unclipped estimate (1-r)/2 assuming reset hardly heats g
         (p0≈0). A thermally excited idle point, such as fluxonium near half
         flux, invalidates this approximation. The fixed offline validation
         model has idle first-excited-state population about 0.358. Only after
@@ -294,4 +287,4 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
             ax.grid(True)
             if selected is not None:
                 ax.axvline(selected, color="gray", linestyle="--")
-        return LengthAnalysis(d0, d1, ratio, residual, selected, options.epsilon)
+        return LengthAnalysis(selected_length=selected, epsilon=options.epsilon)

@@ -12,6 +12,11 @@ Acquire both F1/F2 targets with consecutive nonnegative gate_counts, at least th
 
 ## Counts and plots
 
+Analyze returns fixed summaries in `fits` (gg) and `ee_fits`, ordered F1/F2,
+and their `slope_difference_deg`. Each fit contains intercept, slope, correction,
+slope error, fit quality and an unavailable reason. Per-point phases, quadratures,
+counts, curves and herald fractions stay inside analysis for plotting.
+
 Saved sums is float64 `(2,2,Nn,3,3,3,3)`. Leading scan axes follow the ordinary experiment. The final four axes are herald F1, herald F2, terminal F1, terminal F2, each ordered g/e/other. All 81 classes persist as raw accumulated counts. Rounds accumulate at acquisition. There is no host round axis or per-shot IQ storage.
 
 Analysis slices both herald (g,g) and (e,e). It reverses ee target sigma to account for the target starting in e. The other qubit is also in e, so the ee slope contains local Z plus the conditional phase per gate. It fits gg and ee independently, without a shared slope, and reports ee−gg for each target. Only the gg correction pair is proposed for writeback.

@@ -446,8 +446,8 @@ class MuxT1Exp(Experiment[MuxT1Result, MuxT1Cfg]):
         source is a Run/Load record; its cfg may be absent. options selects
         initial points to skip and single or dual exponential decay. Return
         per-tone fits with uncertainties and quality, or indexed fit failures;
-        invalid axes/options raise. Each fit includes the acquired delays,
-        projected observations and primary predictions for caller-owned
-        diagnostics. Draw only the selected primary model as fit_i.
+        invalid axes/options raise. Acquired delays, projected observations
+        and predictions stay local to analysis. Draw only the selected primary
+        model as fit_i.
         """
         return analyze_t1(source.result, options, plots=plots)

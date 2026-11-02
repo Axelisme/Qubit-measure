@@ -12,14 +12,13 @@ from zcu_tools.gui.app.measure.adapter import (
 )
 from zcu_tools.plotting.plots import Plots
 
-from .._rabi_analysis import RabiAnalysis
 from .core import ChevronCfg, ChevronExp, ChevronResult
 from .form import make_form
 
 ChevronRun: TypeAlias = RunRecord[ChevronCfg, ChevronResult]
 
 
-def _analyze(req: AnalyzeRequest[ChevronRun, None], *, plots: Plots) -> RabiAnalysis:
+def _analyze(req: AnalyzeRequest[ChevronRun, None], *, plots: Plots) -> None:
     """Analyze saved source cfg/counts, never the current Form or library."""
     return ChevronExp().analyze(req.run_result, None, plots=plots)
 

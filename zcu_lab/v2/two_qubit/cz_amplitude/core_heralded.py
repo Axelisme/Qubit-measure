@@ -31,7 +31,12 @@ from .._sums import (
     terminal_counts,
     validate_classifiers,
 )
-from .analysis import OUTCOME_LABELS, CZAmplitudeAnalysis, analyze_return
+from .analysis import (
+    OUTCOME_LABELS,
+    CZAmplitudeAnalysis,
+    analyze_return,
+    summarize_return,
+)
 from .core import CZAmplitudeCfg
 
 
@@ -59,15 +64,9 @@ class CZAmplitudeHeraldedResult:
 
 @dataclass(frozen=True)
 class CZAmplitudeHeraldedAnalysis:
-    """terminal contains the ordinary fit of herald (g,g) terminal counts.
-
-    herald_matrix is (Ns,3,3), ordered g/e/other for F1/F2. pass_fraction is its
-    (g,g) cell, shape (Ns,), not ground-state purity. Zero totals give NaN.
-    """
+    """gg first-return fit summary; herald distributions remain plot-local."""
 
     terminal: CZAmplitudeAnalysis
-    herald_matrix: NDArray[np.float64]
-    pass_fraction: NDArray[np.float64]
 
 
 def restore_result(
@@ -268,6 +267,4 @@ class CZAmplitudeHeraldedExp(
             title="Herald (g,g) is pass fraction, not ground-state purity",
         )
         ax.legend()
-        return CZAmplitudeHeraldedAnalysis(
-            terminal, herald_matrix, herald_matrix[:, 0, 0]
-        )
+        return CZAmplitudeHeraldedAnalysis(summarize_return(terminal.fit))

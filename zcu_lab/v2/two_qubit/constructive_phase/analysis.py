@@ -8,14 +8,14 @@ from zcu_tools.analysis.fitting import compute_fit_quality
 from zcu_tools.analysis.fitting.quality import FitQuality
 
 from .._rabi_analysis import (
-    RabiAnalysis,
+    RabiRate,
     ReturnData,
     fit_duration_rates,
 )
 
 
 @dataclass(frozen=True)
-class ConstructivePhaseAnalysis(RabiAnalysis):
+class ConstructivePhaseData:
     """Maximum-rate relative phase in degrees or an explicit unresolved reason.
 
     interference_quality describes the ordinary least-squares rate² fit at the
@@ -25,6 +25,8 @@ class ConstructivePhaseAnalysis(RabiAnalysis):
     quadrature or logical local-Z correction. No module is written by analysis.
     """
 
+    return_data: ReturnData
+    rates: tuple[RabiRate, ...]
     relative_phase_deg: float | None
     reason: str | None
     interference_quality: FitQuality | None
@@ -40,11 +42,25 @@ class ConstructivePhaseAnalysis(RabiAnalysis):
     ) = None
 
 
+@dataclass(frozen=True)
+class ConstructivePhaseAnalysis:
+    """Maximum-rate phase (degrees), failure reason and fixed-size fit quality.
+
+    relative_phase_deg is atan2(C,B), or None when no phase is identifiable.
+    reason explains an unavailable phase. interference_quality describes the
+    rate² interference fit. Per-coordinate rates and curves stay in analyze.
+    """
+
+    relative_phase_deg: float | None
+    reason: str | None
+    interference_quality: FitQuality | None
+
+
 def analyze_constructive_phase(
     coordinates: NDArray[np.float64],
     durations: NDArray[np.float64],
     returns: ReturnData,
-) -> ConstructivePhaseAnalysis:
+) -> ConstructivePhaseData:
     """Fit complete duration traces, then select the rate² interference maximum.
 
     Exclude unresolved slices below 1/actual duration span. More than three valid
@@ -53,7 +69,6 @@ def analyze_constructive_phase(
     residual quality. Nyquist sampling is the operator's responsibility.
     """
     rates = fit_duration_rates(durations, returns)
-    base = RabiAnalysis(returns, rates)
     phases = np.array(
         [
             coordinate
@@ -63,8 +78,8 @@ def analyze_constructive_phase(
     )
     squared = np.array([rate.rate**2 for rate in rates if rate.rate is not None])
     if len(phases) <= 3:
-        return ConstructivePhaseAnalysis(
-            base.return_data,
+        return ConstructivePhaseData(
+            returns,
             rates,
             None,
             "Need more than three identifiable phase slices",
@@ -75,7 +90,7 @@ def analyze_constructive_phase(
     try:
         coefficients, _, rank, _ = np.linalg.lstsq(design, squared, rcond=None)
         if rank != 3:
-            return ConstructivePhaseAnalysis(
+            return ConstructivePhaseData(
                 returns,
                 rates,
                 None,
@@ -89,7 +104,7 @@ def analyze_constructive_phase(
             / (len(phases) - 3)
         )
     except np.linalg.LinAlgError as exc:
-        return ConstructivePhaseAnalysis(
+        return ConstructivePhaseData(
             returns, rates, None, f"Interference fit failed: {exc}", None
         )
     quality = compute_fit_quality(
@@ -103,7 +118,7 @@ def analyze_constructive_phase(
     # Only reject a zero at floating-point roundoff, not a physical contrast gate.
     numerical_zero = 8 * np.finfo(float).eps * np.linalg.norm(coefficients)
     if modulation <= numerical_zero:
-        return ConstructivePhaseAnalysis(
+        return ConstructivePhaseData(
             returns,
             rates,
             None,
@@ -119,7 +134,7 @@ def analyze_constructive_phase(
         or phase_variance < 0
         or a + modulation <= 0
     ):
-        return ConstructivePhaseAnalysis(
+        return ConstructivePhaseData(
             returns,
             rates,
             None,
@@ -129,6 +144,6 @@ def analyze_constructive_phase(
     phase = float(np.rad2deg(np.arctan2(c, b)))
     dense = np.linspace(-180.0, 180.0, 721)
     curve = a + b * np.cos(np.deg2rad(dense)) + c * np.sin(np.deg2rad(dense))
-    return ConstructivePhaseAnalysis(
+    return ConstructivePhaseData(
         returns, rates, phase, None, quality, (phases, squared, dense, curve, phase)
     )

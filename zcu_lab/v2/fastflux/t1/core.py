@@ -64,12 +64,6 @@ class T1Cfg(ConfigBase):
     ] = 1.0
 
 
-@dataclass(frozen=True)
-class T1Analysis:
-    t1s: NDArray[np.float64]
-    t1errs: NDArray[np.float64]
-
-
 class T1Exp(Experiment[T1Result, T1Cfg]):
     # inner lengths stores memory us on disk (disk seconds) -> scale=1e-6;
     # outer gains -> IDENTITY
@@ -146,8 +140,8 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
         options: None,
         *,
         plots: Plots,
-    ) -> T1Analysis:
-        """Fit decay at each flux gain, returning T1 and fit errors in us.
+    ) -> None:
+        """Fit decay at each flux gain and plot T1 with fit errors in us.
 
         First estimate a common baseline from accepted preliminary fits, then
         refit each row with that baseline fixed. Rejected final fits retain NaN
@@ -216,5 +210,3 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
         ax.legend()
 
         fig.tight_layout()
-
-        return T1Analysis(t1s=t1s, t1errs=t1errs)

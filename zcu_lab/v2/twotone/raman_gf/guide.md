@@ -85,7 +85,9 @@ g/e/f fractions. Analysis normalizes counts and shows raw and confusion-correcte
 estimates separately. Frequency and area modes show two sets of three curves.
 Frequency-area mode shows six maps with actual detuning and source-area axes.
 The title reports the saved training matrix's condition number and minimum
-singular value. Correction solves in preparation-label coordinates and keeps
+singular value. The summary contains only the training confusion matrix and
+these two diagnostics; per-point fractions stay in the figures.
+Correction solves in preparation-label coordinates and keeps
 negative and above-one values. It does not clip or renormalize them.
 
 The e curve is a leakage-label estimate. Preparation contamination remains part

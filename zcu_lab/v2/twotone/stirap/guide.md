@@ -110,7 +110,8 @@ After Run or Load, open Analysis and click Analyze.
 Delay and amplitude show separate raw and corrected g/e/f curves.
 Detuning shows six heatmaps, with raw fractions above and corrected fractions below.
 The title reports the saved training confusion's condition number and minimum singular value.
-Analysis output also includes the full training confusion matrix.
+The summary contains only the training confusion matrix and these two diagnostics.
+Per-point raw and corrected fractions stay in the figures.
 Correction keeps negative and above-one estimates. It does not clip or renormalize them.
 
 Run rejects missing or circle/linear classifiers before acquisition.

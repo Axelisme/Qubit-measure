@@ -104,6 +104,9 @@ same source identities and complete curves.
 
 ## Interpreting the result
 
+Analyze returns only `estimate`, `fit_quality` and `reason`. Per-depth survival,
+round masks and fitted curves stay inside analysis for plotting.
+
 Paired decay analysis fits each arm to `A*p**depth+B`.
 The two-qubit dimension is 4. The reported quantities are
 `reference_epc = 3/4*(1-p_reference)` and

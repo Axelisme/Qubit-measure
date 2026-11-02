@@ -79,40 +79,12 @@ class PowerAnalyzeOptions:
 
 @dataclass(frozen=True)
 class PowerQndAnalysis:
-    """Dimensionless metric arrays (Ngain,) in the input gain order.
+    """Human-selected gain in a.u., or None for no writeback.
 
-    snr: state separation divided by isotropic noise sigma.
-    f_sep: equal-prior Gaussian midpoint separation fidelity.
-    thermal_population: excited fraction before preparation.
-    retention_on/off: contrast retained through R1 and wait, with/without R1.
-    qnd_on/off: (1 + retention_on/off) / 2.
-    flip_up_on/off: ground-to-excited transition probability.
-    flip_down_on/off: excited-to-ground transition probability.
-    pi_miss_on/off: ineffective middle-pi fraction.
-    retention_from_covariance: R1-on projected covariance retention check.
-    pareto_indices: original gain indices maximizing both f_sep and qnd_on,
-        sorted by f_sep; tied points are retained, nonfinite points excluded.
-    gain: manually selected gain in a.u., or None for no writeback.
-
-    Metrics remain unclipped; unavailable values are NaN, as in ReadoutMetrics.
+    Gain-wise metrics and the Pareto frontier stay in the analysis figures.
     No automatic gain selection is performed.
     """
 
-    snr: NDArray[np.float64]
-    f_sep: NDArray[np.float64]
-    thermal_population: NDArray[np.float64]
-    retention_on: NDArray[np.float64]
-    retention_off: NDArray[np.float64]
-    qnd_on: NDArray[np.float64]
-    qnd_off: NDArray[np.float64]
-    flip_up_on: NDArray[np.float64]
-    flip_up_off: NDArray[np.float64]
-    flip_down_on: NDArray[np.float64]
-    flip_down_off: NDArray[np.float64]
-    pi_miss_on: NDArray[np.float64]
-    pi_miss_off: NDArray[np.float64]
-    retention_from_covariance: NDArray[np.float64]
-    pareto_indices: NDArray[np.int64]
     gain: float | None
 
 
@@ -325,4 +297,4 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
         ax.set(xlabel="Gaussian separation fidelity F_sep", ylabel="QND Q (R1 on)")
         ax.legend()
         ax.grid(True)
-        return PowerQndAnalysis(**arrays, pareto_indices=indices, gain=options.gain)
+        return PowerQndAnalysis(gain=options.gain)

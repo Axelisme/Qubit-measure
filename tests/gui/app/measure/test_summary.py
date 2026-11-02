@@ -60,6 +60,45 @@ def test_summary_projects_fields_arrays_and_complex_with_nonfinite_paths() -> No
 
 @pytest.mark.parametrize(
     "value",
+    [
+        np.arange(65),
+        np.arange(65).reshape(5, 13),
+        list(range(65)),
+        tuple(range(65)),
+        [list(range(13)) for _ in range(5)],
+        (list(range(32)), np.arange(33)),
+    ],
+)
+def test_summary_rejects_oversized_sequences_with_field_path(value: object) -> None:
+    with pytest.raises(ValueError, match=r"summary\.gg\.excitation") as error:
+        summary.summarize_analysis({"gg": {"excitation": value}})
+
+    message = str(error.value)
+    assert "65" in message
+    assert "64" in message
+    assert "analysis return values must not grow with scan size" in message
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        np.arange(64).reshape(8, 8),
+        list(range(64)),
+        tuple(range(64)),
+        [list(range(8)) for _ in range(8)],
+        (list(range(32)), np.arange(32)),
+        [],
+        np.empty((0, 65)),
+    ],
+)
+def test_summary_accepts_sequences_up_to_64_flattened_elements(value: object) -> None:
+    projected = summary.summarize_analysis({"value": value})
+    assert projected.invalid == ()
+    assert projected.summary["value"] is not None
+
+
+@pytest.mark.parametrize(
+    "value",
     [Fit(frequency=1250.0), MappingProxyType({"frequency": 1250.0})],
 )
 def test_summary_projects_model_and_mapping_roots(value: object) -> None:

@@ -45,7 +45,7 @@ All metrics are dimensionless. Analysis leaves estimates outside the physical ra
 
 QND includes R1 and the waiting interval, so it also includes ordinary relaxation. Compare on and off before attributing a loss to measurement. A discrepancy between mean-based and covariance retention indicates that the two-state, isotropic-noise model may not describe the data. It does not identify or correct leakage. F_sep is a Gaussian separation estimate, not an assignment fidelity measured from labeled shots.
 
-The scatter colors and labels each point by gain. Its red Pareto frontier retains points for which no other finite point has both at least as large F_sep and QND-on, with one strictly larger. Equal points remain on the frontier. Analysis returns the original gain indices ordered by F_sep. It does not choose an optimum.
+The scatter colors and labels each point by gain. Its red Pareto frontier retains points for which no other finite point has both at least as large F_sep and QND-on, with one strictly larger. Equal points remain on the frontier. Metrics and frontier indices remain local to the plots. The analysis summary contains only the manually selected gain, or null for no writeback. It does not choose an optimum.
 
 ## Choosing and saving a gain
 

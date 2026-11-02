@@ -314,9 +314,9 @@ class MuxT2EchoExp(Experiment[MuxCoherenceResult, MuxT2EchoCfg]):
         Explicit decay needs no detune. fit_phase frees fringe phase (otherwise zero).
         Omit the first point and missing IQ. Return per-tone T2E in us, fringe
         rate in MHz, uncertainties and fit quality, or a fit failure reason.
-        Each fit includes acquired delays, projected observations and primary
-        predictions for caller-owned diagnostics. Draw only the primary curve
-        in fit_i. Invalid sources or fit methods raise.
+        Acquired delays, projected observations and predictions stay local
+        to analysis. Draw only the primary curve in fit_i. Invalid sources or
+        fit methods raise.
         """
         # 1. Omit the first requested point before removing missing IQ.
         validate_coherence_result(source.result)

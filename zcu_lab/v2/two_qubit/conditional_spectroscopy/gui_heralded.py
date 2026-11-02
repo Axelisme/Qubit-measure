@@ -10,7 +10,6 @@ from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
 from .core_heralded import (
-    SpectroscopyHeraldedAnalysis,
     SpectroscopyHeraldedCfg,
     SpectroscopyHeraldedExp,
     SpectroscopyHeraldedResult,
@@ -38,7 +37,7 @@ def run(
 
 def _analyze(
     req: AnalyzeRequest[SpectroscopyHeraldedRun, None], *, plots: Plots
-) -> SpectroscopyHeraldedAnalysis:
+) -> None:
     return SpectroscopyHeraldedExp().analyze(req.run_result, None, plots=plots)
 
 

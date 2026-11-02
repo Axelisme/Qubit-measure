@@ -66,7 +66,7 @@ def test_framework_session_drives_committed_result_and_one_terminal_operation(qa
         0,
         (),
         require_pick,
-        lambda position: MagicMock(position=position),
+        lambda position: {"position": position},
     )
 
     token = svc.start_plugin(
@@ -91,7 +91,7 @@ def test_framework_session_drives_committed_result_and_one_terminal_operation(qa
     assert adapter.get_writeback_items.call_args.args[0].ctx.parameters is captured
     result = state.get_tab("tab1").analysis.result
     assert result is not None
-    assert result.position == 3
+    assert result["position"] == 3
     assert state.get_tab("tab1").is_analyzing is False
     assert svc.get_interactive("tab1") is None
     outcome = handles.poll(token)
@@ -161,7 +161,8 @@ def test_result_build_failure_settles_failed_without_reopening_input(qapp):
         active.session.commit(lambda current: 2)
 
 
-def test_plugin_record_failure_settles_failed_and_keeps_previous_result(qapp):
+@pytest.mark.parametrize("failure", ["writeback", "oversized"])
+def test_plugin_record_failure_settles_failed_and_keeps_previous_result(qapp, failure):
     state = make_state()
     previous = MagicMock()
     previous_plots = make_plots()
@@ -186,7 +187,11 @@ def test_plugin_record_failure_settles_failed_and_keeps_previous_result(qapp):
         2,
         (),
         lambda _state: None,
-        lambda value: MagicMock(value=value),
+        lambda value: (
+            {"excitation": list(range(65))}
+            if failure == "oversized"
+            else {"value": value}
+        ),
     )
     token = svc.start_plugin(
         "tab1",
@@ -197,13 +202,19 @@ def test_plugin_record_failure_settles_failed_and_keeps_previous_result(qapp):
     )
     active = svc.get_interactive("tab1")
     assert active is not None
-    writeback.create_draft.side_effect = RuntimeError("writeback boom")
+    if failure == "writeback":
+        writeback.create_draft.side_effect = RuntimeError("writeback boom")
+    failed: list[tuple[str, str]] = []
+    on_analyze_failed(svc, lambda tid, err: failed.append((tid, err)))
 
     assert svc.finish_plugin("tab1") is True
 
     outcome = handles.poll(token)
     assert outcome is not None and outcome.status == "failed"
     assert state.get_tab("tab1").analysis.result is previous
+    assert len(failed) == 1
+    if failure == "oversized":
+        assert "summary.excitation" in failed[0][1]
     assert state.get_tab("tab1").analysis.source_operation_id == 900
     assert state.get_tab("tab1").analysis.plots is previous_plots
     assert not state.get_tab("tab1").is_analyzing
@@ -221,7 +232,7 @@ def test_concurrent_plugin_tabs_keep_independent_sessions_and_handles(qapp):
         0,
         (),
         lambda _state: None,
-        lambda position: MagicMock(position=position),
+        lambda position: {"position": position},
     )
     owner = ManualOwnerScheduler()
     first = svc.start_plugin(
@@ -251,7 +262,7 @@ def test_concurrent_plugin_tabs_keep_independent_sessions_and_handles(qapp):
     Action[int, int](lambda _current, position: position).execute(tab2.session, 8)
     assert svc.finish_plugin("tab2") is True
     result = state.get_tab("tab2").analysis.result
-    assert result is not None and result.position == 8
+    assert result is not None and result["position"] == 8
     assert state.get_tab("tab1").analysis.result is None
     second_outcome = handles.poll(second)
     assert second_outcome is not None and second_outcome.status == "finished"
@@ -285,9 +296,7 @@ def test_interactive_start_and_finish_keep_captured_operation_origin(
         TabInteractionChangedPayload,
         lambda payload, meta: observed.append((payload.fact, meta)),
     )
-    plugin = PluginDefinition(
-        "pick", 2, (), lambda _state: None, lambda state: MagicMock()
-    )
+    plugin = PluginDefinition("pick", 2, (), lambda _state: None, lambda state: {})
     with bus.origin(EventOrigin(kind="agent", client_id="client-a")):
         token = svc.start_plugin(
             "tab1",
@@ -318,9 +327,7 @@ def test_cancel_interactive_clears_analyzing_and_settles_cancelled(qapp):
     svc, _ = make_service(state, bus)
     handles = OperationHandles()
     svc, _ = make_service(state, bus, handles=handles)
-    plugin = PluginDefinition(
-        "pick", 0, (), lambda _state: None, lambda state: MagicMock()
-    )
+    plugin = PluginDefinition("pick", 0, (), lambda _state: None, lambda state: {})
     token = svc.start_plugin(
         "tab1",
         plugin,
@@ -429,9 +436,7 @@ def test_cancel_interactive_does_not_touch_fit_analyze(qapp):
 def test_cancel_interactive_is_idempotent(qapp):
     state = make_state()
     svc, _ = make_service(state, EventBus())
-    plugin = PluginDefinition(
-        "pick", 0, (), lambda _state: None, lambda state: MagicMock()
-    )
+    plugin = PluginDefinition("pick", 0, (), lambda _state: None, lambda state: {})
     svc.start_plugin(
         "tab1",
         plugin,
@@ -450,9 +455,7 @@ def test_finish_after_cancel_interactive_is_inert(qapp):
     # is gone, so finish_interactive must not resurrect the tab into analyzing.
     state = make_state()
     svc, _ = make_service(state, EventBus())
-    plugin = PluginDefinition(
-        "pick", 0, (), lambda _state: None, lambda state: MagicMock()
-    )
+    plugin = PluginDefinition("pick", 0, (), lambda _state: None, lambda state: {})
     svc.start_plugin(
         "tab1",
         plugin,
