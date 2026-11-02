@@ -14,11 +14,13 @@ Frequency 在硬體掃描。只有 DC 留在 host，因為需要設定儀器。�
 
 ## 依實際初態比較 gg 與 ee
 
+Analyze 只發布圖並回傳 `None`。頻譜、shot 數、完整性與 herald 比例只在分析內供畫圖使用。
+
 分析與 live 都使用 herald 判為 gg 和 ee 的兩組 terminal 計數。兩組保留各自的 P_e，不合併，也不擬合。Other 留在分母。零選中計數或未量點為 NaN。
 
 每個 DC 各有 F1、F2 頻譜，每張圖的四格是 probe 前的實際準備態。Herald gg 的名目準備 `(f1,f2)` 與 herald ee 的名目準備 `(1-f1,1-f2)` 疊在同格。這裡的翻轉只指 probe 前的準備 Xπ。Probe 後的 contrast 會改變 terminal 分配，圖標題列出是否啟用。
 
-`gg`、`ee` 分析結果仍以名目 `prepared_f1`、`prepared_f2` 儲存。畫圖時才對齊實際初態。兩者的 `acquired_shots` 都是全部 81 類的每點總數，`complete` 以每個頻率是否取得 reps × rounds 判定，不要求每個 shot 都通過 herald。
+分析內的 `gg`、`ee` 頻譜以名目 `prepared_f1`、`prepared_f2` 排列。畫圖時才對齊實際初態。兩者的 `acquired_shots` 都是全部 81 類的每點總數，`complete` 以每個頻率是否取得 reps × rounds 判定，不要求每個 shot 都通過 herald。
 
 Shots 圖按名目準備顯示全部 shot 數、選中 gg 與 ee 的數量，以及要求的 shot 數。取消後仍顯示已完成 rounds 的計數，不丟掉部分掃描。
 
