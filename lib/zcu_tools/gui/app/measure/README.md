@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure`
 
-**Last updated:** 2026-11-02, control-aware diagnostic presentation
+**Last updated:** 2026-11-02, native tab overflow navigation
 
 **讀者：** framework-dev。量測 GUI 的組裝、分頁、tab admission 與 Run／Load／Save 分工。
 
@@ -187,6 +187,10 @@ Experiment tabs before any folded tools. The tab switch names the family
 it will reveal. Catalog recovery changes Reload experiments to Retry reload.
 Remote control disables reload and retry while leaving the inspection and tab
 navigation entries available.
+
+Overflowed experiment tabs use Qt's native scroll arrows. The top-right all-tabs
+menu still lists every tab. Close buttons remain hidden when Local editing is
+unavailable under Remote control.
 
 The toolbar opens Setup… and SoC… as separate non-modal windows. Setup manages
 result entries and working points; SoC connects the board and displays soccfg
