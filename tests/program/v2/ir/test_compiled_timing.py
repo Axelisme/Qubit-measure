@@ -619,7 +619,7 @@ def test_compiled_wmem_attaches_scalar_wave_words_without_mutating_inputs():
     prog = ScalarProgram(load_soccfg(), reps=2, initial_delay=0, relax_delay=0)
     layout = ir.TimingLayout.from_metadata(prog.meta_infos, (ir.TimingLoop("reps", 2),))
     expected = tuple(
-        int(prog.waves[prog.wave2idx["p"]][name])
+        int(prog.waves[0][name])
         for name in ("freq", "phase", "env", "gain", "length", "conf")
     )
     wmem = ir.compiled_wmem(prog)
