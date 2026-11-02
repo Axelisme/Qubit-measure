@@ -1,6 +1,6 @@
 # Measure Qt views
 
-**Last updated:** 2026-11-01
+**Last updated:** 2026-11-02
 
 **讀者：** framework-dev。量測 Qt views、對話框與呈現生命週期。
 
@@ -16,8 +16,14 @@ Inspect and ARB editing on control transfer, including windows already open.
 Run separately locks Setup and SoC submissions; Inspect, Devices and ARB keep
 their existing Run policy. Setup… and SoC… have separate toolbar entries; the named `soc`
 window participates in remote screenshots.
-Error notifications are non-modal; confirmations, choosers and writeback editing
-keep their modal protection. See the [Measure README](../README.md)
+Diagnostic errors under an online Remote holder show an eight-second notice
+with the title and first line; the complete message goes to the error log.
+Details… opens a full non-modal report that stays open until manually closed,
+independently of the notice timer. A later error replaces the notice and restarts
+its timer. Local and offline Remote holders receive the existing manual non-modal
+report. Info diagnostics still use the status bar. The main window retires the
+notice's lifetime scope and timer before deleting its children.
+Confirmations, choosers and writeback editing keep their modal protection. See the [Measure README](../README.md)
 for pane ownership and operation lifecycles.
 
 `MainWindow` uses the More ▾ tab switch to show experiment tabs or workflow tabs in the

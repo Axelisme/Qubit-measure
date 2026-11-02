@@ -1,6 +1,6 @@
 """Onetone spectroscopy across the shared coil, with one native picker per Q.
 
-Recipe n → frequency.df Expts; flux_n → flux Expts.
+Recipe n → df Expts; flux_n → flux Expts.
 """
 
 from pydantic import Field
@@ -12,7 +12,7 @@ from zcu_tools.mcp.measure.recipe_api import (
     report_number,
 )
 
-from zcu_lab.v2.support.measure.mux_flux_adapter import MuxFluxPickSummary
+from zcu_lab.v2.support.measure.mux_results import MuxFluxPickSummary
 
 from .mux_flux_helpers import (
     MuxFluxReport,
@@ -61,12 +61,12 @@ async def mux_onetone_flux_global(
     )
     tab.set("participants", inputs.participants)
     if isinstance(inputs.df, ToneRangeInputs):
-        tab.set("frequency.df.start", inputs.df.start)
-        tab.set("frequency.df.stop", inputs.df.stop)
+        tab.set("df.start", inputs.df.start)
+        tab.set("df.stop", inputs.df.stop)
     elif inputs.df is None:
-        tab.set("frequency.df.start", None)
-        tab.set("frequency.df.stop", None)
-    tab.set("frequency.df.n", inputs.n)
+        tab.set("df.start", None)
+        tab.set("df.stop", None)
+    tab.set("df.n", inputs.n)
     if isinstance(inputs.flux, ToneRangeInputs):
         tab.set("flux.start", inputs.flux.start)
         tab.set("flux.stop", inputs.flux.stop)
