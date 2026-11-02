@@ -253,19 +253,43 @@ def test_consecutive_native_auto_followers_match_scalar_timestamps(
     assert scheduled_shots(prog) == expected_shots * (4 if outer else 2)
 
 
-def test_branch_native_auto_followers_preserve_scalar_request():
+@pytest.mark.parametrize("flat", [False, True])
+@pytest.mark.parametrize("branch", [False, True])
+@pytest.mark.parametrize("outer", [False, True])
+@pytest.mark.parametrize("followers", [2, 3])
+def test_native_auto_followers_preserve_scalar_request(flat, branch, outer, followers):
     values = [0.2, 0.107, 0.213]
     prog, env, _ = length_program(
-        values, mode="table", branch=True, auto=True, followers=2
+        values,
+        mode="table",
+        flat=flat,
+        branch=branch,
+        outer=outer,
+        auto=True,
+        followers=followers,
     )
     observed = request(prog, env)
     for index, value in enumerate(values):
         scalar, scalar_env, _ = length_program(
-            value, branch=True, point_count=len(values), auto=True, followers=2
+            value,
+            flat=flat,
+            branch=branch,
+            point_count=len(values),
+            auto=True,
+            followers=followers,
         )
-        assert replace(observed.materialize_point(index), coordinates=()) == replace(
-            request(scalar, scalar_env).materialize_point(index), coordinates=()
+        expected = replace(
+            request(scalar, scalar_env).materialize_point(index if branch else 0),
+            coordinates=(),
         )
+        for outer_index in range(2 if outer else 1):
+            assert (
+                replace(
+                    observed.materialize_point(outer_index * len(values) + index),
+                    coordinates=(),
+                )
+                == expected
+            )
 
 
 @pytest.mark.parametrize("flat", [False, True])
