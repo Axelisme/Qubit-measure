@@ -62,7 +62,13 @@ class PulseAtTime(Module):
         )
 
 
-def make_receiver(*, name="readout", pre_delay=0.0, post_delay=0.0, trig_offset=0.0):
+def make_receiver(
+    *,
+    name="readout",
+    pre_delay: float | QickParam = 0.0,
+    post_delay: float | QickParam = 0.0,
+    trig_offset: float | QickParam = 0.0,
+):
     return PulseReadoutCfg(
         gen_ch=0,
         ro_ch=0,

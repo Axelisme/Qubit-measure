@@ -113,9 +113,8 @@ def _loop_definitions(inst: MetaInst) -> None:
         raise ValueError(f"missing loop definition key {exc}") from exc
 
 
-def _table_definitions(inst: MetaInst) -> None:
-    if inst.info.get("native") is not True:
-        return
+def _register_table_definitions(inst: MetaInst) -> None:
+    """Validate native register addresses, signed words and rotated DMEM offsets."""
     registers = inst.info.get("register_tables", {})
     if not isinstance(registers, dict):
         raise ValueError("invalid register table definitions")
@@ -133,6 +132,12 @@ def _table_definitions(inst: MetaInst) -> None:
             )
         ):
             raise ValueError("invalid register table integer words")
+
+
+def _table_definitions(inst: MetaInst) -> None:
+    if inst.info.get("native") is not True:
+        return
+    _register_table_definitions(inst)
     tables = inst.info["tables"]
     if not isinstance(tables, dict):
         raise ValueError("invalid table definitions")
