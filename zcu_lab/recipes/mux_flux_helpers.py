@@ -53,12 +53,12 @@ class MuxOnetoneFluxInputs(MuxFluxInputs):
     )
     n: Annotated[int, Field(strict=True, gt=0)] | None | Keep = Field(
         default=KEEP,
-        description="Shared frequency point count, n → frequency.df Expts.",
+        description="Shared frequency point count, n → df Expts.",
     )
 
 
 class MuxTwotoneFluxInputs(MuxFluxInputs):
-    """Absolute MHz drive bounds for every original tone; n → frequency.expts."""
+    """Absolute MHz drive bounds for every original tone; n → expts."""
 
     sweeps: list[ToneRangeInputs] | None | Keep = Field(
         default=KEEP,
@@ -66,7 +66,7 @@ class MuxTwotoneFluxInputs(MuxFluxInputs):
     )
     n: Annotated[int, Field(strict=True, gt=0)] | None | Keep = Field(
         default=KEEP,
-        description="Shared hardware frequency count, n → frequency.expts.",
+        description="Shared hardware frequency count, n → expts.",
     )
 
 

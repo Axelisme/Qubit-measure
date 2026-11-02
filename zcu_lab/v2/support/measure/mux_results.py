@@ -62,3 +62,13 @@ class MuxCoherenceSummary(BaseModel):
 
     outcomes: list[MuxCoherenceFitSummary | MuxSummaryFailure]
     names: list[str] | None
+
+
+class MuxFluxPickSummary(BaseModel):
+    """Picked native DC half/integer/period values and captured original tone/Q identity."""
+
+    tone: int
+    qubit: str
+    flx_half: float | None
+    flx_int: float | None
+    flx_period: float | None
