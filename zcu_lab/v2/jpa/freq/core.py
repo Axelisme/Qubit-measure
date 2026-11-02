@@ -148,9 +148,8 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
                     relax_delay=cfg.relax_delay,
                 )
                 builder.add_loop("ge", 2)
-                reset = Reset("reset", cfg.reset)
-                if reset is not None:
-                    builder.emit(reset)
+                if cfg.reset is not None:
+                    builder.emit(Reset("reset", cfg.reset))
                 builder.delay_by_timeline()
                 # Empty g case has no pi-length padding; preserve each case's readout time.
                 with (

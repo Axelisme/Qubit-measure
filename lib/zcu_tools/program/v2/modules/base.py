@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Collection, Mapping, Sequence
-from typing import TYPE_CHECKING, Any, TypeAlias
+from collections.abc import Collection, Mapping
+from typing import TYPE_CHECKING, Any
 
 from pydantic import ValidationInfo
 from qick.asm_v2 import QickParam
@@ -87,19 +87,3 @@ class Module(ABC):
         raise NotImplementedError.
         """
         raise NotImplementedError(f"{type(self).__name__} has no timeline lowering")
-
-
-ModuleGroup: TypeAlias = Module | Sequence[Module | None] | None
-
-
-def as_modules(value: ModuleGroup) -> list[Module]:
-    """Return an ordered module list; None means no module and is skipped.
-
-    value is one module, one sequence of optional modules, or None. The returned
-    list is new; the module objects are not copied.
-    """
-    if value is None:
-        return []
-    if isinstance(value, Module):
-        return [value]
-    return [module for module in value if module is not None]

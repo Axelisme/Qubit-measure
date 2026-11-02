@@ -10,7 +10,7 @@ from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field
 from pydantic.dataclasses import dataclass as validated_dataclass
-from zcu_tools.analysis.fitting import FitQuality, compute_fit_quality, fit_rabi
+from zcu_tools.analysis.fitting import FitQuality, fit_rabi
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment, config
 from zcu_tools.experiment.context import RunContext
@@ -196,22 +196,12 @@ class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
             init_phase = 180.0
 
         fit = fit_rabi(gains, real_signals, decay=False, init_phase=init_phase)
-        pi_amp, pi_amp_err, pi2_amp, pi2_amp_err, y_fit, pOpt, pCov = (
+        pi_amp, pi_amp_err, pi2_amp, pi2_amp_err, y_fit = (
             fit.pi_x,
             fit.pi_x_err,
             fit.pi2_x,
             fit.pi2_x_err,
             fit.curve,
-            fit.params,
-            fit.cov,
-        )
-
-        names = ("y0", "yscale", "freq", "phase")
-        quality = compute_fit_quality(
-            real_signals,
-            y_fit,
-            {name: float(value) for name, value in zip(names, pOpt, strict=True)},
-            pCov,
         )
 
         fig, ax = plots.subplots(num="fit", figsize=config.figsize)
@@ -239,5 +229,5 @@ class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
         # fit_rabi computes the per-gain fit uncertainties; surface them so the GUI
         # summary carries the gain errors (the figure labels already show them).
         return AmpRabiAnalysis(
-            pi_amp, pi_amp_err, pi2_amp, pi2_amp_err, fit_quality={"fit": quality}
+            pi_amp, pi_amp_err, pi2_amp, pi2_amp_err, fit_quality={"fit": fit.quality}
         )

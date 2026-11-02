@@ -290,7 +290,7 @@ class HeraldingT1Exp(Experiment[HeraldingT1Result, HeraldingT1Cfg]):
         if options.dual_exp:
             t1b_str = f"{t1b:.2f}us ± {t1berr:.2f}us"
             ax.plot(xs, expfunc(xs, *pOpt[:3]), linestyle="--", label="t1b fit")
-            title = f"$T_1$ = {t1_str}, " + r"$T_{1b}$ = " + f"{t1b_str}"
+            title = f"$T_1$ = {t1_str},\n" + r"$T_{1b}$ = " + f"{t1b_str}"
         else:
             title = f"$T_1$ = {t1_str}"
         ax.set_title(title, fontsize=14)

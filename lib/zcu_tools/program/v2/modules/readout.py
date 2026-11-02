@@ -457,9 +457,11 @@ class TablePulseReadout(AbsReadout):
     """Sweep a pulse readout through exact dmem frequency-word tables.
 
     The current point is played through QICK's ordinary wmem-backed pulse and
-    readout-config path. At the sweep loop's exec-after hook, the next point is
-    loaded from rotated dmem tables and persisted into dedicated templates. The
-    final table entry wraps back to the first point for the next outer repetition.
+    readout-config path. Once declared, the readout advances to the next paired
+    frequency words at the end of every shot in the ``idx_reg`` sweep loop,
+    whether or not that shot's branch plays this readout. The loop's exec-after
+    hook loads rotated dmem tables into dedicated templates. After the final
+    point, the update wraps to the first pair for the next outer repetition.
     Timeline completion is generator end plus post-delay once; ADC windows do
     not extend it. A later timeline trigger must prove its ADC window disjoint.
     """
@@ -531,7 +533,9 @@ class TablePulseReadout(AbsReadout):
 
         idx_reg must name a top-level native loop with exactly the table count;
         missing loops or count mismatches raise ValueError before allocation.
-        Updates execute after each shot and wrap to the first pair.
+        Once declared, the paired frequency words advance at the end of every
+        shot in the idx_reg loop, whether or not that shot's branch plays this
+        readout. The update after the final point wraps to the first pair.
         """
         matches = [loop for loop in prog.sweep_loops if loop.name == self.idx_reg]
         if len(matches) != 1:
@@ -578,26 +582,6 @@ class TablePulseReadout(AbsReadout):
                 dmem_offset=self._ro_freq_loader.dmem_offset(prog),
             ),
         )
-
-    def _validate_loop_count(self, prog: TimelineProgramV2) -> None:
-        sweep_dict = prog.sweep_dict
-        if sweep_dict is None:
-            raise ValueError(
-                f"TablePulseReadout idx_reg={self.idx_reg!r} requires a sweep loop"
-            )
-        matches = [spec for name, spec in sweep_dict if name == self.idx_reg]
-        if len(matches) != 1:
-            raise ValueError(
-                f"TablePulseReadout idx_reg={self.idx_reg!r} must match exactly "
-                "one sweep loop"
-            )
-        spec = matches[0]
-        count = spec if isinstance(spec, int) else spec.expts
-        if count != len(self.freq_words):
-            raise ValueError(
-                f"TablePulseReadout table length {len(self.freq_words)} does not "
-                f"match loop {self.idx_reg!r} count {count}"
-            )
 
 
 class MuxReadout(AbsReadout):

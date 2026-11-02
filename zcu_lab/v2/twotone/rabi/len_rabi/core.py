@@ -10,7 +10,7 @@ from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field
 from pydantic.dataclasses import dataclass as validated_dataclass
-from zcu_tools.analysis.fitting import FitQuality, compute_fit_quality, fit_rabi
+from zcu_tools.analysis.fitting import FitQuality, fit_rabi
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment, config
 from zcu_tools.experiment.context import RunContext
@@ -273,7 +273,7 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
             decay=options.decay,
             init_phase=None if options.fit_phase else 0.0,
         )
-        pi_len, pi_len_err, pi2_len, pi2_len_err, freq, freq_err, y_fit, pOpt, pCov = (
+        pi_len, pi_len_err, pi2_len, pi2_len_err, freq, freq_err, y_fit = (
             fit.pi_x,
             fit.pi_x_err,
             fit.pi2_x,
@@ -281,18 +281,6 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
             fit.freq,
             fit.freq_err,
             fit.curve,
-            fit.params,
-            fit.cov,
-        )
-
-        names = ("y0", "yscale", "freq", "phase") + (
-            ("decay_time",) if options.decay else ()
-        )
-        quality = compute_fit_quality(
-            real_signals,
-            y_fit,
-            {name: float(value) for name, value in zip(names, pOpt, strict=True)},
-            pCov,
         )
 
         # 3. Show the oscillation and the fitted calibration lengths.
@@ -332,5 +320,5 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
             pi2_len_err,
             freq,
             freq_err,
-            fit_quality={"fit": quality},
+            fit_quality={"fit": fit.quality},
         )

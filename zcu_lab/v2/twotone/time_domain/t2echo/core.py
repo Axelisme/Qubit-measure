@@ -12,7 +12,6 @@ from pydantic import Field
 from pydantic.dataclasses import dataclass as validated_dataclass
 from zcu_tools.analysis.fitting import (
     FitQuality,
-    compute_fit_quality,
     fit_decay,
     fit_decay_fringe,
 )
@@ -250,40 +249,24 @@ class T2EchoExp(Experiment[T2EchoResult, T2EchoCfg]):
         if fit_method == "fringe":
             fixedparams = None if fit_phase else [None, None, None, 0.0, None]
             fit = fit_decay_fringe(xs, real_signals, fixedparams=fixedparams)
-            t2e, t2eerr, detune, detune_err, y_fit, pOpt, pCov = (
+            t2e, t2eerr, detune, detune_err, y_fit = (
                 fit.decay_time,
                 fit.decay_time_err,
                 fit.freq,
                 fit.freq_err,
                 fit.curve,
-                fit.params,
-                fit.cov,
             )
         elif fit_method == "decay":
             fit = fit_decay(xs, real_signals)
-            t2e, t2eerr, y_fit, pOpt, pCov = (
+            t2e, t2eerr, y_fit = (
                 fit.decay_time,
                 fit.decay_time_err,
                 fit.curve,
-                fit.params,
-                fit.cov,
             )
             detune = 0.0
             detune_err = 0.0
         else:
             raise ValueError(f"Unknown fit_method: {fit_method}")
-
-        names = (
-            ("y0", "yscale", "freq", "phase", "decay_time")
-            if fit_method == "fringe"
-            else ("y0", "yscale", "decay_time")
-        )
-        quality = compute_fit_quality(
-            real_signals,
-            y_fit,
-            {name: float(value) for name, value in zip(names, pOpt, strict=True)},
-            pCov,
-        )
 
         fig, ax = plots.subplots(num="fit", figsize=config.figsize)
 
@@ -314,5 +297,5 @@ class T2EchoExp(Experiment[T2EchoResult, T2EchoCfg]):
             t2e_err=float(t2eerr),
             detune=float(detune),
             detune_err=float(detune_err),
-            fit_quality={"fit": quality},
+            fit_quality={"fit": fit.quality},
         )

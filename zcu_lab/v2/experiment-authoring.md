@@ -2,7 +2,7 @@
 
 **讀者：** lab-author、framework-dev、agent。撰寫實驗 core，查閱 records、資料形狀、執行與保存慣例。
 
-**Last updated:** 2026-11-01
+**Last updated:** 2026-11-02
 
 使用者入口見 [tutorial](../tutorial/README.md)。
 
@@ -455,8 +455,8 @@ Raw acquisition 與 joint fit 不要求先有校準，analysis 不使用外部 c
 Amp／Len Rabi、Check、ResetCheck 與 AC Stark 使用 explicit RunContext 執行，GUI 將同次 cfg／Result 配成 RunRecord。同步 analyze 接 source／typed options／Plots，不保存跨次成功狀態。
 Check 在 Analyze 才要求 saved cfg 的 circle／radius；其他分析保留各自的 nullable cfg 契約。Amp 回傳 AmpRabiFit，Len 回傳 RabiJointFitResult，兩者的 readout 診斷只讀 source.cfg。Check 只發布分類 scatter，無數值結果。AC Stark 回傳 AcStarkAnalysis，另提供 explicit source／AcStarkPlotOptions 的 population 圖入口；即時 Ground／Excited／Other 熱圖及 current trace 各自具名。
 
-Amp與Len Rabi共同使用`zcu_tools.analysis.fitting.singleshot_rabi`的raw-IQ joint likelihood與
-`zcu_lab.v2.singleshot.plot_rabi`的population、histogram及confusion matrix診斷圖。
+Amp 與 Len Rabi 共用 `zcu_tools.analysis.fitting.singleshot_rabi` 的 raw-IQ joint likelihood。
+各實驗在自己的 analyze 畫 population、histogram 與 confusion matrix 診斷圖。
 Amp固定無衰減／零相位，Initial State描述zero-gain前的主要狀態，支援signed gain。
 Amp額外由joint frequency及其covariance推導pi/pi2 gain與誤差，保留原有scalar summary。
 兩者的GUI校準writeback共用backend validity及finite校準值檢查。
@@ -495,7 +495,7 @@ Singleshot Len Rabi的length軸由host-side `Schedule.scan`逐點執行；每個
 `Nlength × Nshot` raw buffer。stop保留已完成rows，其餘維持partial-result NaN。
 
 Joint-fit 數學與校準有效性見 [analysis owner](../../lib/zcu_tools/analysis/README.md#singleshot-初態與-joint-fit)。
-Len Rabi 的三面板診斷圖由 `singleshot/plot_rabi.py` 擁有，操作見
+Len Rabi 在自己的 core 畫三面板診斷圖，操作見
 [leaf guide](singleshot/len_rabi/guide.md)。
 
 Singleshot consumers 的分類參數由 RunRecord.cfg.readout 的 classifier 提供。
