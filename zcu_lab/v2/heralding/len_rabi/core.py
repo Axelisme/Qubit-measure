@@ -46,9 +46,10 @@ from zcu_lab.v2.twotone.rabi.len_rabi.core import LenRabiAnalyzeOptions
 
 @dataclass(frozen=True)
 class HeraldingLenRabiResult:
-    """lengths is the sweep grid (us); sums has shape (points, 3, 3).
+    """lengths is the sweep grid (us); sums has shape (points, classes, 3).
 
-    Herald states are g/e/other; components are count/sum I/sum Q.
+    Herald states follow the saved classifier's state_names order and length.
+    Components are count/sum I/sum Q.
     Unmeasured sums are NaN. Conditional means at zero count are NaN.
     """
 
@@ -128,8 +129,8 @@ def restore_result(
 class HeraldingLenRabiExp(Experiment[HeraldingLenRabiResult, HeraldingLenRabiCfg]):
     """Herald ground, sweep drive length, and store per-class count/IQ sums.
 
-    Store all herald classes, g/e/other. Live plots and fits use only the
-    herald-g conditional mean IQ.
+    Store all herald classes in classifier state_names order.
+    Live plots and fits use only the herald-g conditional mean IQ.
     """
 
     Options: ClassVar[type[LenRabiAnalyzeOptions]] = LenRabiAnalyzeOptions
@@ -160,11 +161,12 @@ class HeraldingLenRabiExp(Experiment[HeraldingLenRabiResult, HeraldingLenRabiCfg
     def run(
         self, cfg: HeraldingLenRabiCfg, *, context: RunContext
     ) -> HeraldingLenRabiResult:
-        """Acquire (Nl, 3, 3) shot sums versus drive length in us.
+        """Acquire (Nl, classes, 3) shot sums versus drive length in us.
 
         Sequence: optional reset, herald, optional init, drive, signal readout.
-        Readouts share cfg.readout with its GE Post circle classifier.
-        Classes are g/e/other; components are count/sum I/sum Q.
+        Readouts share cfg.readout and its classifier.
+        Herald states follow classifier state_names.
+        Components are count/sum I/sum Q.
         Const/flat-top use a hardware sweep. Other editable waveforms use a
         round-major host scan with cached programs; arb is rejected.
         Both hardware rounds and host segments add their sums directly.
@@ -177,22 +179,22 @@ class HeraldingLenRabiExp(Experiment[HeraldingLenRabiResult, HeraldingLenRabiCfg
                 "Len Rabi cannot sweep an arb waveform's asset-derived length. "
                 "Select a waveform with an editable length instead."
             )
-        if cfg.readout.classifier is None or cfg.readout.classifier.mode != "circle":
-            raise ValueError(
-                "Heralding requires a circle classifier with g/e/other; run GE Post"
-            )
+        if cfg.readout.classifier is None:
+            raise ValueError("Heralding requires a readout classifier")
+        num_states = len(cfg.readout.classifier.state_names)
         cfg = deepcopy(cfg)
         lengths = sweep2array(
             cfg.length, "time", {"soccfg": context.soccfg, "gen_ch": cfg.qub_pulse.ch}
         )
         if cfg.qub_pulse.waveform.style in ("const", "flat_top"):
-            return self._run_hardware(cfg, lengths, context=context)
-        return self._run_host(cfg, np.unique(lengths), context=context)
+            return self._run_hardware(cfg, lengths, num_states, context=context)
+        return self._run_host(cfg, np.unique(lengths), num_states, context=context)
 
     def _run_hardware(
         self,
         cfg: HeraldingLenRabiCfg,
         lengths: NDArray[np.float64],
+        num_states: int,
         *,
         context: RunContext,
     ) -> HeraldingLenRabiResult:
@@ -207,7 +209,7 @@ class HeraldingLenRabiExp(Experiment[HeraldingLenRabiResult, HeraldingLenRabiCfg
 
         fig.show()
         buffer = SignalBuffer(
-            (len(lengths), 3, 3),
+            (len(lengths), num_states, 3),
             dtype=np.float64,
             on_update=update,
         )
@@ -242,6 +244,7 @@ class HeraldingLenRabiExp(Experiment[HeraldingLenRabiResult, HeraldingLenRabiCfg
         self,
         cfg: HeraldingLenRabiCfg,
         lengths: NDArray[np.float64],
+        num_states: int,
         *,
         context: RunContext,
     ) -> HeraldingLenRabiResult:
@@ -256,7 +259,7 @@ class HeraldingLenRabiExp(Experiment[HeraldingLenRabiResult, HeraldingLenRabiCfg
 
         fig.show()
         buffer = SignalBuffer(
-            (len(lengths), 3, 3),
+            (len(lengths), num_states, 3),
             dtype=np.float64,
             on_update=update,
         )
@@ -267,7 +270,7 @@ class HeraldingLenRabiExp(Experiment[HeraldingLenRabiResult, HeraldingLenRabiCfg
         )
 
         acquisition_buffer = SignalBuffer(
-            (cfg.rounds, len(lengths), 3, 3), dtype=np.float64
+            (cfg.rounds, len(lengths), num_states, 3), dtype=np.float64
         )
         with Schedule(acquisition_buffer, scope=context.scope) as sched:
             programs: dict[float, TimelineProgramV2] = {}

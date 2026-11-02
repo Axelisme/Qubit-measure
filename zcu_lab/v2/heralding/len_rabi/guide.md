@@ -6,13 +6,13 @@
 
 Bind `qubit` and `resonator` to the intended components. Supply the fixed drive frequency and gain, pulse waveform, readout generator/ADC settings and timing. A prior pi calibration is not required to scan length. The starting drive and range follow ordinary length Rabi; inspect them before Run.
 
-The readout must contain a GE Post circle classifier calibrated in the same IQ coordinates and integration window, with ground/excited centers and radius. Linear and centroid3 classifiers are not supported. Missing classifier calibration stops acquisition. Changing readout gain, frequency, timing or integration length can invalidate the saved classifier.
+Readout must contain a calibrated circle, linear or centroid3 classifier in the same normalized ADC IQ coordinates and integration window. Circle needs g/e centers and a positive GE Post radius; its herald_states are g/e/other, with other the rejection region. Linear uses g/e without rejection. Centroid3 uses g/e/f; f is not other. Only shots classified as herald-g contribute to live IQ and fitting. Missing classifier calibration stops acquisition. Changing readout gain, frequency, timing or integration length can invalidate the saved classifier.
 
 Set Duration Start/Stop in us, Expts, Reps, Rounds and Relax delay. Select optional reset if needed. The hidden initialization pulse is optional, as in ordinary length Rabi. Const and flat-top waveforms use a hardware sweep. Other editable waveforms use a host scan, completing all lengths in each round. Native arb waveforms cannot change their asset-derived length and are rejected.
 
 ## Run and inspect
 
-The sequence is optional reset → ground herald → optional initialization → length-swept drive → terminal readout. Separate herald and signal pulse-readout instances share the same settings and classifier. The host stores signal counts and IQ sums for all herald classes, g/e/other. Live plots and fits use only the herald-g conditional mean IQ. This is post-selection, not active reset or joint heralding.
+The sequence is optional reset → ground herald → optional initialization → length-swept drive → terminal readout. Separate herald and signal pulse-readout instances share the same settings and classifier. The host stores signal counts and IQ sums for all herald classes in classifier order. Live plots and fits use only the herald-g conditional mean IQ. This is post-selection, not active reset or joint heralding.
 
 Run displays the selected mean IQ projected onto a real trace. Reps counts attempted shots per length and round, not accepted shots. Across rounds and host segments, count and IQ sums add directly. Herald-g conditional means are calculated from the accumulated sums. Early-stop SNR is checked after a complete curve. Acquire retry retains the ordinary length-Rabi retry policy.
 
@@ -42,7 +42,7 @@ Review the captured destination and each proposal before Apply Selected. Run and
 
 ## Save and load
 
-Save All preserves `sums` with shape (Nl, 3, 3), acquisition cfg including classifier, metadata and completed analysis. The final axes are herald_states (g/e/other) and components (count/sum I/sum Q). Old files without `sums` fail with a missing-variable error. Native Load Data restores sums and the original cfg; it does not read a current classifier to replace the saved one. Analyze again on the loaded record to inspect the same finite data. Loading a saved result does not refill the current input Form.
+Save All preserves `sums` with shape (Nl, classes, 3), acquisition cfg including classifier, metadata and completed analysis. The class count is 2 for linear and 3 for circle or centroid3. The final axes are herald_states in the saved classifier's order and components (count/sum I/sum Q). Old files without `sums` fail with a missing-variable error. Native Load Data restores sums and the original cfg; it does not read a current classifier to replace the saved one. Analyze again on the loaded record to inspect the same finite data. Loading a saved result does not refill the current input Form.
 
 ## MCP recipe
 

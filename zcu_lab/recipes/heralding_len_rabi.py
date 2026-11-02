@@ -100,7 +100,10 @@ async def heralding_len_rabi(
     """Sweep pulse length at fixed gain to calibrate pi and pi/2 rotations.
 
     Store per-class shot sums; compute herald-g conditional IQ for fitting.
-    Readout must include a GE Post circle classifier with calibrated radius.
+    Readout accepts circle, linear or centroid3. Herald states are g/e/other
+    for circle (other is rejection), g/e for linear (no rejection), and g/e/f
+    for centroid3 (f is not other). Circle requires a calibrated GE Post radius.
+    Only shots classified as herald-g contribute to signal IQ and fitting.
     After optional reset, herald ground with the saved readout classifier, apply
     optional initialization and the drive, then read accepted signal shots at each
     length. Fit the Rabi oscillations to estimate pi and pi/2

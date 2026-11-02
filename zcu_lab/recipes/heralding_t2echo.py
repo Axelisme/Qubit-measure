@@ -90,7 +90,10 @@ async def heralding_t2echo(
     """Measure refocused qubit coherence with a spin-echo delay sweep.
 
     Store per-class shot sums; compute herald-g conditional IQ for fitting.
-    Readout must include a GE Post circle classifier with calibrated radius.
+    Readout accepts circle, linear or centroid3. Herald states are g/e/other
+    for circle (other is rejection), g/e for linear (no rejection), and g/e/f
+    for centroid3 (f is not other). Circle requires a calibrated GE Post radius.
+    Only shots classified as herald-g contribute to signal IQ and fitting.
     After optional reset and ground herald, apply pi/2, wait half the total delay, apply pi, wait
     the other half, then apply a phase-shifted pi/2 pulse and read out.
     Average only accepted signal shots; fit the decay with the ordinary Echo owner.

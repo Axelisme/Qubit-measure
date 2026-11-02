@@ -2,14 +2,13 @@
 
 **讀者：** operator、agent。使用 GUI 執行單 qubit heralded T1，分析 g 類條件平均並保存各類總和。
 
-本頁給已校準單 qubit π pulse 與 pulse readout classifier 的操作員。實驗先做 herald readout，再做 π → delay → signal readout。取數保存 g、e、other 各類的 count 與 IQ 總和，即時圖與擬合只取 g 類的 signal 條件平均。這是 host post-selection，沒有 active reset，也不檢查其他 qubit。
+本頁給已校準單 qubit π pulse 與 pulse readout classifier 的操作員。實驗先做 herald readout，再做 π → delay → signal readout。取數依 classifier 順序保存各類的 count 與 IQ 總和，即時圖與擬合只取 g 類的 signal 條件平均。這是 host post-selection，沒有 active reset，也不檢查其他 qubit。
 
 ## 執行前
 
 - Pi Pulse 選 `$qubit.module.x180` 的校準脈衝。
 - Readout 選 `$resonator.module.readout` 的單音 pulse readout。兩次讀出共用此設定。Mux 不適用。
-- Readout 必須包含 GE Post circle classifier，具有 g/e centers 與 radius。Linear 與 centroid3 不適用。座標是未扣 offset 的 normalized ADC IQ。
-- Circle 將 herald 分為 g、e、other。分析只取 g 類的 signal 條件平均。
+- Readout 必須包含同座標的 circle、linear 或 centroid3 classifier。分類座標是未扣 offset 的 normalized ADC IQ。Circle 需要 g/e centers 與正的 GE Post radius，herald_states 為 g/e/other，other 是拒判區。Linear 為 g/e，沒有拒判區。Centroid3 為 g/e/f，f 不是 other。即時 IQ 與擬合只採用 herald 判為 g 的 shot。
 - 模擬讀出仍受 dispersive validity guard 限制。Gain 安全範圍取決於 carrier、pulse length、flux 與 truncation，不能直接套用別條讀出線的界限。
 
 ## Run 與 Analyze
@@ -32,6 +31,6 @@ Apply 只在操作員確認後寫回 `$qubit.t1`。
 
 ## Save 與載回
 
-Save 將 `sums` 寫入 native `data.h5`，形狀是 (Nt, 3, 3)。後兩軸是 herald_states（g、e、other）與 components（count、ΣI、ΣQ）。時間在檔案中使用 seconds，載回 Result 時恢復 us。通過比例只在分析或即時呈現時以 g 計數除以總計數，不另存變數。舊格式缺少 `sums` 時明確報錯。Cfg 保存這次 readout 的 classifier。用本實驗載回資料後可重新 Analyze，不需要目前的 classifier。
+Save 將 `sums` 寫入 native `data.h5`，形狀是 (Nt, classes, 3)，linear 的 classes 為 2，circle 與 centroid3 為 3。後兩軸是 herald_states（依存檔 classifier 順序）與 components（count、ΣI、ΣQ）。時間在檔案中使用 seconds，載回 Result 時恢復 us。通過比例只在分析或即時呈現時以 g 計數除以總計數，不另存變數。舊格式缺少 `sums` 時明確報錯。Cfg 保存這次 readout 的 classifier。用本實驗載回資料後可重新 Analyze，不需要目前的 classifier。
 
 Pass fraction 是 classifier 接受的 shot 比例，不是 ground-state purity 或 reset fidelity。FTF joint-state IQ cluster 不能當作單 qubit g/e 校準；離線走通流程也不代表物理校準完成。

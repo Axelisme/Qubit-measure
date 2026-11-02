@@ -6,7 +6,7 @@
 
 先準備校準的 π/2 pulse 與單音 pulse readout。Pi/2 Pulse 使用 `$qubit.module.x90`，Readout 使用 `$resonator.module.readout`。缺 slot 時表單提供範本，未校準的必填值保持 Invalid。Mux 不適用。
 
-Readout 必須包含 GE Post circle classifier，具有 g/e centers 與 radius。分類座標是未扣 offset 的 normalized ADC IQ。Linear 與 centroid3 不適用。Herald 與 signal 使用兩個 PulseReadout instance，共用同一 readout 設定與 classifier。
+Readout 必須包含同座標的 circle、linear 或 centroid3 classifier。分類座標是未扣 offset 的 normalized ADC IQ。Circle 需要 g/e centers 與正的 GE Post radius，herald_states 為 g/e/other，other 是拒判區。Linear 為 g/e，沒有拒判區。Centroid3 為 g/e/f，f 不是 other。即時 IQ 與擬合只採用 herald 判為 g 的 shot。Herald 與 signal 使用兩個 PulseReadout instance，共用同一 readout 設定與 classifier。
 
 Reset 是選用的前置 reset，缺 slot 時停用。Herald 本身只做 host post-selection，不做 FPGA feedback 或 active reset。模擬讀出仍受 dispersive validity guard 限制，不能直接套用其他讀出線的 gain 界限。
 
@@ -43,7 +43,7 @@ Analyze 回傳 `HeraldingT2RamseyAnalysis`：
 
 ## Save、Load 與 MCP
 
-Save 將 `sums` 寫入 native `data.h5`，形狀為 (Nt, 3, 3)，後兩軸為 herald_states（g、e、other）與 components（count、ΣI、ΣQ）。通過比例只在分析或即時呈現時以 g 計數除以總計數，不另存變數。舊格式缺少 `sums` 時明確報錯。檔案時間使用 seconds，載回恢復 us。Cfg 保存此次 readout classifier。Load 不用目前表單或 classifier 替換歷史資料。
+Save 將 `sums` 寫入 native `data.h5`，形狀為 (Nt, classes, 3)，linear 的 classes 為 2，circle 與 centroid3 為 3，後兩軸為 herald_states（依存檔 classifier 順序）與 components（count、ΣI、ΣQ）。通過比例只在分析或即時呈現時以 g 計數除以總計數，不另存變數。舊格式缺少 `sums` 時明確報錯。檔案時間使用 seconds，載回恢復 us。Cfg 保存此次 readout classifier。Load 不用目前表單或 classifier 替換歷史資料。
 
 Load 後可再 Analyze。與普通 Ramsey 一樣，native load 不恢復 run-only realized detune，因此不提出 frequency 修正；t2r 與符合來源條件的 record 提案仍可用。
 
