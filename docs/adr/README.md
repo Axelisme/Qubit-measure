@@ -12,7 +12,7 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 ## Module Boundaries
 
-- [0072 — 模組定位與依賴邊界](0072-module-boundaries.md)：Package 定位、依賴方向與各實驗獨立取數，依賴契約由 `.importlinter` 檢查。
+- [0072 — 模組定位與依賴邊界](0072-module-boundaries.md)：Package 定位、依賴方向、各實驗獨立取數與 analysis 小摘要契約，依賴方向由 `.importlinter` 檢查。
 
 ## Concurrency / Lifecycle
 
