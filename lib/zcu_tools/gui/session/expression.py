@@ -2,7 +2,9 @@
 
 Inputs use registered math functions, captured parameter paths and constants.
 Dotted paths are owner-resolved data references, not Python attribute access.
-Indexing and arbitrary calls are not part of this language.
+Subscripts read lists by integer index and mappings by string key. Strings and
+containers are intermediate values only, except a standalone $alias name.
+Arbitrary calls, Python attributes and slices are not part of this language.
 """
 
 from __future__ import annotations
@@ -109,8 +111,11 @@ def resolve_eval_ref(ref: EvalRef, parameters: ParameterContext | None) -> int |
 def evaluate_numeric_expr(expr: str, parameters: ParameterContext | None) -> float:
     """Evaluate finite real arithmetic over captured parameter paths.
 
+    Accept the same functions, captured list/mapping subscripts and numeric
+    limits as evaluate_scalar_expr, but reject complex values and alias names.
     None permits pure calculation only; parameter/library paths raise
-    ExpressionError. Numeric source, grammar and real-domain failures raise.
+    ExpressionError. Invalid paths, grammar and arithmetic also raise
+    ExpressionError. Unexpected source/provider failures propagate unchanged.
     """
     value = evaluate_scalar_expr(expr, parameters)
     if isinstance(value, (complex, str)):
@@ -129,12 +134,24 @@ def evaluate_scalar_expr(
     """Evaluate arithmetic paths or a standalone $alias name string.
 
     A standalone $alias returns its fixed resolved component/device name.
-    Names cannot enter arithmetic, functions or interpolation. Name reads need
-    a context and reject missing/unbound aliases with an alias-naming error.
+    Bare alias names cannot enter arithmetic, functions, subscripts or
+    interpolation. Name reads need a context and reject missing/unbound aliases
+    with an alias-naming error.
 
     None permits pure calculation only; parameter/library references raise
     ExpressionError. Resolve paths through ParameterContext, never the live
     session. Retain numeric limits, math functions, constants and XOR semantics.
+    min(a, b, ...) and max(a, b, ...) require at least two numeric arguments;
+    values without native ordering (such as complex numbers) raise ExpressionError.
+    Subscripts read captured lists with integer indexes (not bool or float),
+    including negative indexes, and mappings with string keys. Indexes/keys can
+    themselves be expressions, such as $mux.wiring.ro_ch[1 + 1] or
+    $qubit.flux.period[$qubit.flux_dev]. String literals and captured strings
+    serve only as keys, never arithmetic operands or final numeric results.
+    Containers serve only as intermediate values. Slices remain unsupported.
+    Out-of-range indexes, missing keys and wrong container/key types raise
+    ExpressionError. All numeric operands and selected values retain size and
+    finiteness checks; min/max do not accept an iterable-only call.
     Parameter complex tags decode through the shared scalar codec; the captured
     context itself still returns raw YAML. Malformed tags raise ExpressionError
     naming the path and retain the codec error as cause. Strings are not decoded.
@@ -148,7 +165,7 @@ def evaluate_scalar_expr(
     paths: dict[str, object] = {}
     resolve_path = _parameter_reader(parameters)
 
-    # Replace complete dotted paths before simpleeval can perform attribute access.
+    # Replace paths and subscripts before simpleeval can apply Python access rules.
     class CapturePaths(ast.NodeTransformer):
         def visit_Attribute(self, node: ast.Attribute) -> ast.Name:
             parts: list[str] = []
@@ -164,6 +181,7 @@ def evaluate_scalar_expr(
             return ast.copy_location(ast.Name(id=name, ctx=ast.Load()), node)
 
         def visit_Subscript(self, node: ast.Subscript) -> ast.Call:
+            # This internal call is inserted only after the authored AST is validated.
             self.generic_visit(node)
             return ast.copy_location(
                 ast.Call(

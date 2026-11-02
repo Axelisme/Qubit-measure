@@ -14,9 +14,9 @@ from zcu_tools.gui import form_adapter
 from zcu_tools.gui.form import FormEnv, FormErrors, FormInput, FormModel, FormState
 from zcu_tools.gui.session.context_types import SavedPoint
 from zcu_tools.gui.session.parameters import ParameterContext
+from zcu_tools.program.v2.sweep import SweepCfg
 from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
 from zcu_tools.resources.entry.schema import PointDocument, PointGeneral
-from zcu_tools.program.v2.sweep import SweepCfg
 
 
 class SweepSection(ConfigBase):
@@ -363,7 +363,9 @@ def test_indexed_expression_defaults_preserve_full_sources_and_numeric_results(
     preview = state.preview(env)
     assert preview.errors is None
     assert preview.values == {("amount",): 8.0, ("count",): 5}
-    assert form.to_cfg(require_result(state, env), env) == DefaultedCfg(amount=8, count=5)
+    assert form.to_cfg(require_result(state, env), env) == DefaultedCfg(
+        amount=8, count=5
+    )
 
 
 @pytest.mark.parametrize(

@@ -34,7 +34,10 @@ def parameters() -> Generator[ParameterContext]:
                 "format": "zcu.parameter-container",
                 "format_version": "2.0",
                 "schema_version": 1,
-                "general": {"created_at": "2026-10-08T00:00:00Z"},
+                "general": {
+                    "created_at": "2026-10-08T00:00:00Z",
+                    "ext": {"samples": [{"__complex__": [3, 4]}]},
+                },
                 "components": {
                     "Q1": {
                         "kind": "lowering/driver",
@@ -198,7 +201,10 @@ def test_list_subscripts_and_containers_reject_invalid_numeric_use(
         ("$qubit.flux.period['yoko2']", 8.0),
         ("$qubit.flux.period[$qubit.flux_dev]", 4.0),
         ("$mux.wiring['ro_ch'][max(0, $qubit.index)]", 5.0),
-        ("max($mux.wiring.ro_ch[0], min(10, $qubit.flux.period[$qubit.flux_dev] * 2))", 8.0),
+        (
+            "max($mux.wiring.ro_ch[0], min(10, $qubit.flux.period[$qubit.flux_dev] * 2))",
+            8.0,
+        ),
     ],
 )
 def test_mapping_subscripts_read_literal_and_captured_string_keys(
@@ -257,6 +263,17 @@ def test_subscripts_do_not_admit_python_attributes_calls_or_slices(
 ) -> None:
     with pytest.raises(ExpressionError):
         evaluate_scalar_expr(expression, parameters)
+
+
+def test_selected_complex_value_retains_scalar_and_real_only_boundaries(
+    parameters: ParameterContext,
+) -> None:
+    expression = "general.ext.samples[0]"
+    assert evaluate_scalar_expr(expression, parameters) == 3 + 4j
+    assert evaluate_scalar_expr("abs(general.ext.samples[0])", parameters) == 5.0
+    with pytest.raises(ExpressionError, match="real number"):
+        evaluate_numeric_expr(expression, parameters)
+    assert parameters.value("general.ext.samples") == [{"__complex__": [3, 4]}]
 
 
 @pytest.mark.parametrize(

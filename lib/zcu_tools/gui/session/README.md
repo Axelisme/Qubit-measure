@@ -1,6 +1,6 @@
 # gui/session/ — 量測 session core
 
-**Last updated:** 2026-11-01，Run snapshot 的 JSON metadata
+**Last updated:** 2026-11-02，Expression min/max 與下標
 
 **讀者：** framework-dev。Session 層的資源綁定、operation 與共用對話框分工。
 
@@ -81,7 +81,7 @@ session/
 ├── library_entry.py    — LibraryEntryForm（Module／Waveform 兩個 family）、open_library_entry 與 new_library_entry：以共用 Form 生成器從持久 Spec 建表單，開啟時固定 FormEnv 與 host 給的 arb 名稱選項；子項 library key 保持 key，文字欄位 expression 在 result 時求成數字；put／replace 產生 LibraryChange，交 apply_library_change 寫入開啟時的 target。不依賴 app，writeback 也用同一建構方式。範本新建經公開 template_input，保留其 specialized input model 建新 State，Expr 與 Slot 解析由生成器負責
 ├── arb_waveform.py     — ArbWaveformPort／ArbWaveformKeys：entry-scoped arb 資產的 host 中立 port 與 preview 結果型別；session service 實作，共用 ARB 對話框、Inspect 與各 host 的 remote 面使用
 ├── setup_control.py    — SetupControlPort／SetupControlFacet 擁有 entry open/new、point use/new、use_global 與 cached setup preferences，公開 devices facet 供 cached label 建議。SocControlPort／SocControlFacet 獨立提供連線、connection preferences 與 soccfg 查詢；SocControlFacet 持有單一可替換的連線完成訂閱
-├── expression.py       — simpleeval 共用求值引擎，封裝函式／算子白名單、AST／數值大小限制及固定 ParameterContext 查詢。裸 `$alias` 求值為名稱 str，不接受字串算術或插值。數值 `evaluate_scalar_expr` 保留 int/float/complex，`evaluate_numeric_expr` 在 real-only 邊界拒絕 complex；`**` 為冪次，`^` 沿用原生 XOR。函式為 sin/cos/tan/sqrt/exp/log/log10/abs，常數 pi/e；math 函式不自動轉 cmath。引用到的保留名稱若與來源衝突則拒絕。EvalRef 是 apply-time resolve marker，不持久化。
+├── expression.py       — simpleeval 共用求值引擎，封裝函式／算子白名單、AST／數值大小限制及固定 ParameterContext 查詢。裸 `$alias` 求值為名稱 str，不接受字串算術或插值。數值 `evaluate_scalar_expr` 保留 int/float/complex，`evaluate_numeric_expr` 在 real-only 邊界拒絕 complex；`**` 為冪次，`^` 沿用原生 XOR。函式為 sin/cos/tan/sqrt/exp/log/log10/abs/min/max，常數 pi/e；math 函式不自動轉 cmath。min/max 至少接受兩個數值參數，複數等無原生排序的值報 ExpressionError，不接受單一 iterable。下標以整數（不含 bool／float，可為負數）讀 list、以字串讀 mapping，index／key 可為運算式，例如 `$mux.wiring.ro_ch[0]` 與 `$qubit.flux.period[$qubit.flux_dev]`。字串 literal 與 captured path 字串只供下標 key，不參與算術；裸 `$alias` 名稱仍只接受獨立求值。容器只作中間值，最終值仍遵守數值契約。越界、缺 key 與錯容器／key 型別報 ExpressionError；來源故障原樣傳遞。Form 初值失敗時依既有規則留空必填，seed_sources 保存完整原文及 available／missing 狀態。AST、數值大小與資源限制不變，不開放 Python attribute、任意 call 或 slice。引用到的保留名稱若與來源衝突則拒絕。EvalRef 是 apply-time resolve marker，不持久化。
 ├── value_lookup.py     — read-only value source lookup（`ValueLookup`/`ValueRegistry`/owner-scoped replace/unregister/`ValueRef` resolve-once helpers）；純 session leaf，provider 來源由 service binder 負責，使用端只見 lookup
 ├── pbar_host.py        — ProgressBar(worker)/ProgressBarModel(主線程 SSOT)，Qt-free；worker API 同時支援 incremental `update(delta)` 與 absolute `set_progress(n)`
 ├── devices/            — 明確登錄的儀器 adapters；base 定義 driver/panel 契約與 bias_source/user_connectable 能力。各儀器 module 同檔保存 adapter 與專屬 Qt panel，service 和 dialog 共用同一 catalog，未知 type 不建立 driver 或專屬 panel
