@@ -7,7 +7,6 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import numpy as np
-from pydantic import BaseModel
 from zcu_tools.analysis.fluxdep.line_state import FluxPickInputs, FluxPickState
 from zcu_tools.cfg_model import validate_device_name
 from zcu_tools.core.element import ElementIdentity
@@ -77,16 +76,6 @@ class MuxFluxPickParams:
             "description": "Initial integer-flux DC value; None uses Run capture"
         },
     )
-
-
-class MuxFluxPickSummary(BaseModel):
-    """Picked native DC half/integer/period values and captured original tone/Q identity."""
-
-    tone: int
-    qubit: str
-    flx_half: float | None
-    flx_int: float | None
-    flx_period: float | None
 
 
 @dataclass
