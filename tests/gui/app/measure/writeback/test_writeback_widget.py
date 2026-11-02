@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Generator
+from dataclasses import asdict
 from pathlib import Path
 from typing import Literal
 from unittest.mock import MagicMock
@@ -23,6 +25,7 @@ from qtpy.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from zcu_tools.cfg_model import PulseSpec
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.scope import Scope
 from zcu_tools.gui.app.measure.adapter import (
@@ -31,12 +34,14 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.writeback import (
+    ModuleWriteback,
     ParameterWriteback,
     RecordWriteback,
     WritebackItem,
     WritebackValues,
 )
 from zcu_tools.gui.app.measure.writeback.widget import WritebackWidget
+from zcu_tools.gui.form import FormErrors
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
@@ -82,51 +87,73 @@ def _default_analyze_params(result: SampleRun, ctx: SessionEnv) -> SampleParams:
 
 
 @pytest.mark.parametrize("pane", ["analysis", "post_analysis"])
-def test_bulk_selection_updates_each_draft_and_apply_gate(qapp, tmp_path, pane):
+def test_invalid_module_warning_follows_selection(qapp, tmp_path, pane):
     ctrl = MagicMock()
-    items: list[WritebackItem] = [
-        ParameterWriteback("R1.freq", "Frequency", 6001.0),
-        ParameterWriteback("R1.kappa", "Width", 2.1),
-    ]
-    for item, identity in zip(items, ("freq", "width"), strict=True):
-        item.session_id = identity
+    item = ModuleWriteback(
+        "Q1.pulses.tuned",
+        "Synthetic invalid pulse",
+        PulseSpec(ch=0, nqz=1, freq=5000.0, gain=0.2, waveform="Q1.waveforms.flat"),
+    )
+    item.session_id = "module-1"
+    parameter = ParameterWriteback("R1.freq", "Frequency", 6001.0)
+    parameter.session_id = "freq"
+    ctrl.writeback_control.get_writeback_item_form_for_pane.return_value.result.return_value = FormErrors(
+        {("gain",): "Unknown parameter"}
+    )
+    ctrl.writeback_control.get_writeback_values_for_pane.return_value = (
+        _parameter_values([parameter])
+    )
     widget = WritebackWidget(ctrl, tab_id="tab-1", pane=pane)
-    widget.populate(items, _parameter_values(items))
-
-    def project_selection(tab_id, pane, identity, *, selected):
-        next(item for item in items if item.session_id == identity).selected = selected
-        widget.populate(items, _parameter_values(items))
-
-    ctrl.writeback_control.set_writeback_item_for_pane.side_effect = project_selection
-    widget.resize(700, 400)
+    widget.refresh_module_validity([item, parameter])
+    widget.resize(700, 350)
     widget.show()
     ui = ComponentDriver(widget)
-    ui.screenshot(tmp_path / "01-selected.png")
-    ui.click("None")
-    ui.screenshot(tmp_path / "02-none.png")
-    assert not ui.observe("Apply Selected").enabled
-    assert [
-        call.kwargs
-        for call in ctrl.writeback_control.set_writeback_item_for_pane.call_args_list
-    ] == [{"selected": False}, {"selected": False}]
-    ctrl.writeback_control.set_writeback_item_for_pane.reset_mock()
-    ui.click("All")
-    ui.screenshot(tmp_path / "03-all.png")
-    assert ui.observe("Apply Selected").enabled
-    assert {
-        call.args: call.kwargs
-        for call in ctrl.writeback_control.set_writeback_item_for_pane.call_args_list
-    } == {
-        ("tab-1", pane, "freq"): {"selected": True},
-        ("tab-1", pane, "width"): {"selected": True},
-    }
-    widget.setEnabled(False)
-    ui.click("None")
-    ui.screenshot(tmp_path / "04-read-only.png")
-    assert ctrl.writeback_control.set_writeback_item_for_pane.call_count == 2
-    widget.detach()
-    widget.deleteLater()
-    qapp.processEvents()
+    evidence = (
+        Path(os.environ.get("WRITEBACK_SELECTION_EVIDENCE", str(tmp_path))) / pane
+    )
+
+    def capture(step: str) -> None:
+        ui.screenshot(evidence / f"{step}.png")
+        (evidence / f"{step}.json").write_text(
+            json.dumps(
+                {
+                    "visible": asdict(ui.visible()),
+                    "warning": asdict(ui.observe(object_name="writebackModuleWarning")),
+                    "apply": asdict(ui.observe("Apply Selected")),
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+
+    try:
+        capture("01-invalid-selected")
+        warning = ui.observe(object_name="writebackModuleWarning")
+        assert warning.visible
+        assert warning.text == "Fix or uncheck invalid module: Q1.pulses.tuned"
+        assert not ui.observe("Apply Selected").enabled
+
+        ui.click("Q1.pulses.tuned*")
+        capture("02-invalid-unchecked")
+        assert not ui.observe("Q1.pulses.tuned*").checked
+        assert not ui.observe(object_name="writebackModuleWarning").visible
+        assert ui.observe("Apply Selected").enabled
+
+        ui.click("Q1.pulses.tuned*")
+        capture("03-invalid-reselected")
+        assert ui.observe(object_name="writebackModuleWarning").visible
+        assert not ui.observe("Apply Selected").enabled
+
+        ui.click("Q1.pulses.tuned*")
+        capture("04-invalid-unchecked-again")
+        assert not ui.observe(object_name="writebackModuleWarning").visible
+        assert ui.observe("Apply Selected").enabled
+    finally:
+        widget.detach()
+        widget.close()
+        widget.deleteLater()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        qapp.processEvents()
 
 
 def test_writeback_widget_lists_items_and_edit_buttons(qapp):
@@ -631,23 +658,34 @@ def test_captured_paths_stderr_and_matrix_copy_are_visible_in_each_pane(
         qapp.processEvents()
 
 
+@pytest.fixture
+def sample_evidence(tmp_path: Path, request: pytest.FixtureRequest) -> Path:
+    return (
+        Path(os.environ.get("WRITEBACK_RECORD_EVIDENCE", str(tmp_path)))
+        / request.node.name
+    )
+
+
 @pytest.fixture(
     params=[("analysis", 620, False), ("post_analysis", 360, True)],
     ids=["analysis-wide-unapplied", "post-analysis-narrow-applied"],
 )
 def sample_row(
-    qapp: QApplication, tmp_path: Path, request: pytest.FixtureRequest
+    qapp: QApplication, sample_evidence: Path, request: pytest.FixtureRequest
 ) -> Generator[tuple[ComponentDriver, str]]:
     pane, width, applied = request.param
     item = RecordWriteback(
         "Q1",
         "Captured sample",
         record={
-            "freq_mhz": 1250.0,
-            "dev_value": 0.00125,
-            "dev_unit": "A",
-            "run_id": "run-20261020-1234567890123456789012345678901234567890",
-            "fit": {"accepted": True},
+            "freq_mhz": 7492.38,
+            "freq_err_mhz": 0.221,
+            "devices": {
+                "bias": {"value": 0.00125, "unit": "A"},
+                "soc": "mock",
+                "lo": 6000.0,
+            },
+            "flux_frame": {"origin": [0.0, 0.0], "axes": ["x", "y"]},
         },
     )
     item.session_id = "record-1"
@@ -681,9 +719,9 @@ def sample_row(
     host.show()
     driver = ComponentDriver(host)
     try:
-        driver.screenshot(tmp_path / "01-overview.png")
+        driver.screenshot(sample_evidence / "01-overview.png")
         driver.select_tab("Writeback")
-        driver.screenshot(tmp_path / "02-sample-row.png")
+        driver.screenshot(sample_evidence / "02-sample-row.png")
         yield driver, "Q1 · record" if applied else "Q1 · record*"
     finally:
         host.close()
@@ -703,41 +741,160 @@ def test_sample_row_current_is_entry_sample(sample_row) -> None:
     assert current.text == current.tooltip == "entry record"
 
 
-def test_sample_proposal_lists_every_field_in_label_and_tooltip(sample_row) -> None:
+def test_sample_proposal_summarizes_nested_fields_on_one_line(
+    sample_row, sample_evidence: Path
+) -> None:
     driver, _ = sample_row
+    summary = "freq_mhz=7492.38, freq_err_mhz=0.221, devices{3}, flux_frame{2}"
+    driver.resize_window(1800, 600)
+    driver.screenshot(sample_evidence / "03-wide-summary.png")
     proposed = driver.observe(object_name="writebackProposed")
-    expected = {
-        "freq_mhz=1250.0",
-        "dev_value=0.00125",
-        "dev_unit=A",
-        "run_id=run-20261020-1234567890123456789012345678901234567890",
-        'fit={"accepted": true}',
-    }
-    assert set(proposed.text.splitlines()) == expected
-    assert set(proposed.tooltip.splitlines()) == expected
-    assert proposed.fully_visible
+    assert proposed.text == summary
+    assert proposed.fully_visible and proposed.caption_fits
+    assert (
+        proposed.tooltip
+        == """{
+  "freq_mhz": 7492.38,
+  "freq_err_mhz": 0.221,
+  "devices": {
+    "bias": {
+      "value": 0.00125,
+      "unit": "A"
+    },
+    "soc": "mock",
+    "lo": 6000.0
+  },
+  "flux_frame": {
+    "origin": [
+      0.0,
+      0.0
+    ],
+    "axes": [
+      "x",
+      "y"
+    ]
+  }
+}"""
+    )
+    driver.resize_window(360, 600)
+    driver.screenshot(sample_evidence / "04-narrow-summary.png")
+    narrow = driver.observe(object_name="writebackProposed")
+    prefix, suffix = narrow.text.split("…")
+    assert prefix and suffix
+    assert summary.startswith(prefix) and summary.endswith(suffix)
+    assert narrow.fully_visible and narrow.caption_fits
+    assert narrow.tooltip == proposed.tooltip
+    driver.resize_window(1800, 600)
+    driver.screenshot(sample_evidence / "05-restored-summary.png")
+    assert driver.observe(object_name="writebackProposed").text == summary
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "summary"),
+    [
+        (
+            "note",
+            "first line\nsecond line",
+            "note=first line second line, tail=end-of-record",
+        ),
+        (
+            "field\nname",
+            "first line\r\nsecond line",
+            "field name=first line second line, tail=end-of-record",
+        ),
+    ],
+    ids=["newline-value", "newline-field-and-crlf-value"],
+)
+def test_record_proposal_flattens_linebreaks_without_changing_json(
+    qapp: QApplication, sample_evidence: Path, field: str, value: str, summary: str
+) -> None:
+    item = RecordWriteback(
+        "Q1", "Record with line breaks", record={field: value, "tail": "end-of-record"}
+    )
+    record = item.record
+    item.session_id = "record-1"
+    ctrl = MagicMock()
+    ctrl.writeback_control.get_writeback_applied_for_pane.return_value = {}
+    host = QWidget()
+    layout = QVBoxLayout(host)
+    widget = WritebackWidget(ctrl, tab_id="captured")
+    widget.populate(
+        [item],
+        {
+            item.session_id: WritebackValues(
+                actual_path="Q1", current=None, proposed=record, unit=None
+            )
+        },
+    )
+    layout.addWidget(widget)
+    paste = QLineEdit()
+    paste.setObjectName("copiedRecord")
+    layout.addWidget(QLabel("Paste copied record JSON here"))
+    layout.addWidget(paste)
+    host.resize(1800, 600)
+    host.show()
+    driver = ComponentDriver(host)
+    try:
+        driver.screenshot(sample_evidence / "01-wide-linebreak-record.png")
+        proposed = driver.observe(object_name="writebackProposed")
+        assert len(proposed.text.splitlines()) == 1, "Proposed must be a single line"
+        assert proposed.text == summary
+        assert proposed.fully_visible and proposed.caption_fits
+        assert proposed.tooltip == json.dumps(record, ensure_ascii=False, indent=2)
+        current = driver.observe(object_name="writebackCurrent")
+        assert current.text == current.tooltip == "entry record"
+
+        driver.resize_window(360, 600)
+        driver.screenshot(sample_evidence / "02-narrow-linebreak-record.png")
+        narrow = driver.observe(object_name="writebackProposed")
+        assert len(narrow.text.splitlines()) == 1, "Proposed must be a single line"
+        prefix, suffix = narrow.text.split("…")
+        assert prefix and suffix
+        assert summary.startswith(prefix) and summary.endswith(suffix)
+        assert narrow.fully_visible and narrow.caption_fits
+        assert narrow.tooltip == proposed.tooltip
+
+        driver.resize_window(1800, 600)
+        driver.screenshot(sample_evidence / "03-restored-linebreak-record.png")
+        assert driver.observe(object_name="writebackProposed").text == summary
+        driver.click("Copy")
+        driver.screenshot(sample_evidence / "04-copy.png")
+        driver.invoke_context_action(
+            object_name="copiedRecord",
+            action="&Paste\tCtrl+V",
+            evidence=sample_evidence / "05-paste-menu.png",
+        )
+        driver.screenshot(sample_evidence / "06-pasted-json.png")
+        assert json.loads(driver.observe(object_name="copiedRecord").text) == record
+    finally:
+        host.close()
+        host.deleteLater()
+        qapp.processEvents()
 
 
 def test_sample_copy_pastes_complete_json_without_edit_dialog(
-    sample_row, tmp_path: Path
+    sample_row, sample_evidence: Path
 ) -> None:
     driver, _ = sample_row
     actions = [w.text for w in driver.visible().widgets if w.kind == "QPushButton"]
     assert "Copy" in actions and "Edit" not in actions
     driver.click("Copy")
-    driver.screenshot(tmp_path / "03-copy.png")
+    driver.screenshot(sample_evidence / "03-copy.png")
     driver.invoke_context_action(
         object_name="copiedSample",
         action="&Paste\tCtrl+V",
-        evidence=tmp_path / "04-paste-menu.png",
+        evidence=sample_evidence / "04-paste-menu.png",
     )
-    driver.screenshot(tmp_path / "05-pasted-json.png")
+    driver.screenshot(sample_evidence / "05-pasted-json.png")
     assert json.loads(driver.observe(object_name="copiedSample").text) == {
-        "freq_mhz": 1250.0,
-        "dev_value": 0.00125,
-        "dev_unit": "A",
-        "run_id": "run-20261020-1234567890123456789012345678901234567890",
-        "fit": {"accepted": True},
+        "freq_mhz": 7492.38,
+        "freq_err_mhz": 0.221,
+        "devices": {
+            "bias": {"value": 0.00125, "unit": "A"},
+            "soc": "mock",
+            "lo": 6000.0,
+        },
+        "flux_frame": {"origin": [0.0, 0.0], "axes": ["x", "y"]},
     }
     assert driver.dialogs() == ()
 

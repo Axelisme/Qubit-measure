@@ -80,9 +80,16 @@ the hidden name model and current tile in sync for experiment and workflow panes
 Changing pages selects its first figure; clicking a canvas tile selects that
 figure for screenshots and current-figure reads. Re-presenting the same collection
 retains the page and current figure. Data groups raster previews by source stage
-and applies the same paging rule within each group. The
-app-local plot host passes the operation's original named collection through the
-render-host port after canvas attachment. It does not rename figures, copy their
+and applies the same paging rule within each group. Gallery layout depends only
+on viewport width, including named groups. Narrow viewports stack stage cards
+in one column. Wide viewports place two cards side by side; with three cards,
+Run spans the left column and Analysis/Post-Analysis stack on the right.
+A single card fills the width in either mode. Named members and their raster
+labels shrink to the tile width, while stage cards retain their minimum width.
+Each raster aspect-fits its label without cropping as the gallery resizes.
+The app-local plot host passes the
+operation's original named collection through the render-host port after canvas
+attachment. It does not rename figures, copy their
 collection or change FigureContainer membership. Clearing a pane retires its
 presentation borrow, not the caller's saved figures. The existing foldable ledger and matching
 form/action builders live in `experiment_ledger.py`.

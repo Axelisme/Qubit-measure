@@ -167,10 +167,7 @@ def _get_writeback_items(
                             name: deepcopy(info) for name, info in devices.items()
                         },
                         "flux_frame": frame,
-                        "run": {
-                            "run_id": metadata.run_id,
-                            "experiment": metadata.experiment,
-                        },
+                        "experiment": metadata.experiment,
                         "t1_us": fit.t1,
                         "t1_err_us": fit.t1_err,
                     },

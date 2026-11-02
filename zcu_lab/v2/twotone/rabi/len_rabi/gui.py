@@ -78,7 +78,7 @@ def _LenRabi_get_writeback_items(
 
     req pairs the source RunRecord, fitted lengths/frequency and captured
     ctx.parameters. Always propose qubit.ext.rabi_freq in MHz. With cfg,
-    add qubit.pulses.pi_amp/pi2_amp pulse proposals with fitted lengths,
+    add qubit.pulses.pi_len/pi2_len pulse proposals with fitted lengths,
     independent x180/x90 slot proposals containing their resolved keys,
     and qubit.ext.pi_product = source gain * pi_len (a.u. * us).
     Same-key slots are still proposed. Without cfg return only rabi_freq.
@@ -106,9 +106,9 @@ def _LenRabi_get_writeback_items(
     if not isinstance(gain, (int, float)):
         raise ValueError("Length Rabi pi_product requires a scalar source gain")
     for target, slot, length, description in (
-        ("$qubit.pulses.pi_amp", "$qubit.module.x180", result.pi_len, "Pi pulse"),
+        ("$qubit.pulses.pi_len", "$qubit.module.x180", result.pi_len, "Pi pulse"),
         (
-            "$qubit.pulses.pi2_amp",
+            "$qubit.pulses.pi2_len",
             "$qubit.module.x90",
             result.pi2_len,
             "Pi/2 pulse",
