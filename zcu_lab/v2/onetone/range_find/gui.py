@@ -25,6 +25,7 @@ from zcu_tools.gui.app.measure.range_find_frontend import (
 )
 from zcu_tools.gui.app.measure.range_find_plugin import (
     DipSelection,
+    RangeFindParameters,
     RangeFindPlugin,
     RangeFindState,
 )
@@ -47,24 +48,26 @@ RangeFindRun: TypeAlias = RunRecord[RangeFindCfg, RangeFindResult]
 class RangeFindParams:
     """Seed the interactive guess and available labels from a JSON name list.
 
-    resonators is JSON text such as '["R2", "R1"]', or '[]' for unnamed discovery.
+    resonators is nonempty JSON text such as '["R2", "R1"]'.
+    Use temporary names for unidentified dips; the name count fixes the picker count.
     Names initially pair in frequency order; the picker can reassign them freely.
     min_separation is positive finite MHz, default 1 MHz as in core Options.
     smoothing_sigma is Gaussian sigma in samples, default zero. prominence_factor
-    is the noise multiplier, default five. max_fwhm limits width in MHz, default 25.
+    is the noise multiplier; None (an empty GUI field) estimates it from the name
+    count. max_fwhm limits width in MHz, default 25.
     to_options rejects invalid JSON and delegates the domain checks to core.
     """
 
-    resonators: Annotated[str, ParamMeta(label="Resonators (JSON)")] = "[]"
+    resonators: Annotated[str, ParamMeta(label="Resonators (JSON)")] = '["dip1"]'
     min_separation: Annotated[float, ParamMeta(label="Min separation (MHz)")] = (
         DEFAULT_MIN_SEPARATION_MHZ
     )
     smoothing_sigma: Annotated[float, ParamMeta(label="Smoothing sigma (samples)")] = (
         0.0
     )
-    prominence_factor: Annotated[float, ParamMeta(label="Prominence noise factor")] = (
-        5.0
-    )
+    prominence_factor: Annotated[
+        float | None, ParamMeta(label="Prominence noise factor")
+    ] = None
     max_fwhm: Annotated[float, ParamMeta(label="Max FWHM (MHz)")] = 25.0
 
     def to_options(self) -> RangeFindOptions:
@@ -94,7 +97,9 @@ class RangeFindParams:
 class ResonatorDipSummary(BaseModel):
     """Decode one native dip; null scalars retain unavailable estimates."""
 
-    name: str | None = Field(description="Analysis name, or null during discovery.")
+    name: str | None = Field(
+        description="Assigned analysis name, or null for an unassigned manual point."
+    )
     freq: float | None = Field(description="Absolute dip frequency in MHz.")
     depth: float | None = Field(description="Magnitude prominence depth in a.u.")
     fwhm: float | None = Field(description="Half-prominence dip width in MHz.")
@@ -109,6 +114,9 @@ class RangeFindSummary(BaseModel):
     )
     selection: RangeFindState = Field(
         description="Final numerical controls, candidates and selected points with component assignments."
+    )
+    prominence_factor: float = Field(
+        description="Actual prominence noise multiplier used for selection."
     )
     writable: list[str] = Field(description="Names present in the analysis capture.")
     diagnostic: str | None = Field(
@@ -127,7 +135,8 @@ class RangeFindAnalysis:
     dips contains optional name, absolute MHz, magnitude prominence depth,
     half-prominence FWHM in MHz and depth / FWHM score in a.u./MHz.
     Manual points outside the current candidates have null depth/FWHM/score.
-    Unnamed discovery has no writable names or identity diagnostic.
+    prominence_factor is the actual noise multiplier used for the final guess.
+    Unassigned selections have no writable names or identity diagnostic.
     writable contains only names present in the analysis capture. diagnostic
     explains omitted frequency proposals; None means every dip is writable.
     identity_diagnostic warns that dip/component pairing needs confirmation when
@@ -140,13 +149,14 @@ class RangeFindAnalysis:
     writable: tuple[str, ...]
     diagnostic: str | None
     identity_diagnostic: str | None
+    prominence_factor: float
 
 
 def _get_analyze_params(result: RangeFindRun, ctx: SessionEnv) -> RangeFindParams:
-    """Start Run/Load analysis with unnamed discovery and default MHz spacing.
+    """Start Run/Load analysis with one temporary name and automatic threshold.
 
-    result and ctx do not seed names. The operator may name dips after
-    inspecting the discovery plot, without changing the acquisition cfg.
+    result and ctx do not seed names. The operator can replace the temporary
+    names before Analyze without changing the acquisition cfg.
     """
     del result, ctx
     return RangeFindParams()
@@ -183,7 +193,12 @@ def _make_interactive_plugin(
         np.asarray(result.freqs, dtype=np.float64),
         np.abs(np.asarray(result.signals, dtype=np.complex128)),
         components=tuple(options.resonators),
-        options=options.to_dip_options(),
+        parameters=RangeFindParameters(
+            prominence_factor=options.prominence_factor,
+            min_separation=options.min_separation,
+            smoothing_sigma=options.smoothing_sigma,
+            max_fwhm=options.max_fwhm,
+        ),
         build_result=build_result,
     )
     return plugin
@@ -207,7 +222,9 @@ def _build_analysis(
     dips = tuple(_summarize_dip(dip) for dip in state.selected)
     names = [dip.name for dip in dips if dip.name is not None]
     if not names:
-        return RangeFindAnalysis(dips, state, (), None, None)
+        return RangeFindAnalysis(
+            dips, state, (), None, None, state.options.prominence_factor
+        )
     components = (
         req.parameters.document().components if req.parameters is not None else {}
     )
@@ -236,6 +253,7 @@ def _build_analysis(
             (),
             "No Run/Load parameter capture; no frequency proposals",
             identity_diagnostic,
+            state.options.prominence_factor,
         )
     writable: list[str] = []
     missing: list[str] = []
@@ -252,7 +270,12 @@ def _build_analysis(
         else None
     )
     return RangeFindAnalysis(
-        dips, state, tuple(writable), diagnostic, identity_diagnostic
+        dips,
+        state,
+        tuple(writable),
+        diagnostic,
+        identity_diagnostic,
+        state.options.prominence_factor,
     )
 
 

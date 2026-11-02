@@ -3,13 +3,18 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from dataclasses import dataclass, field
+from dataclasses import dataclass, replace
 from typing import Annotated, ClassVar
 
 import numpy as np
+from numpy.typing import NDArray
 from pydantic import Field, field_validator
 from pydantic.dataclasses import dataclass as pydantic_dataclass
-from zcu_tools.analysis.dips import DipFinderOptions, find_spectrum_dips
+from zcu_tools.analysis.dips import (
+    DipFinderOptions,
+    estimate_prominence_factor,
+    find_spectrum_dips,
+)
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment
 from zcu_tools.experiment.context import RunContext
@@ -71,16 +76,18 @@ DEFAULT_MIN_SEPARATION_MHZ = 1.0
 class RangeFindOptions:
     """Choose frequency-ordered names and minimum spacing for coarse dip detection.
 
-    resonators is a unique list of nonblank names, or empty to discover all dips.
+    resonators requires at least one unique nonblank name; its length is the
+    expected dip count. Use temporary names for unidentified dips.
     Names map to selected dips in ascending MHz order, not to a readout label.
     min_separation is finite positive MHz, default 1 MHz. smoothing_sigma is
     nonnegative Gaussian sigma in samples, default zero (no smoothing).
-    prominence_factor is the nonnegative noise multiplier, default five.
+    prominence_factor=None estimates the noise multiplier for the name count;
+    a finite nonnegative number uses that multiplier unchanged.
     max_fwhm is finite positive MHz, default 25. Selection ranks depth / FWHM.
     Validation occurs on construction, before analysis or picker setup.
     """
 
-    resonators: Annotated[list[str], Field(strict=True)] = field(default_factory=list)
+    resonators: Annotated[list[str], Field(strict=True)]
     min_separation: Annotated[float, Field(gt=0, strict=True, allow_inf_nan=False)] = (
         DEFAULT_MIN_SEPARATION_MHZ
     )
@@ -88,55 +95,76 @@ class RangeFindOptions:
         0.0
     )
     prominence_factor: Annotated[
-        float, Field(ge=0, strict=True, allow_inf_nan=False)
-    ] = 5.0
+        float | None, Field(ge=0, strict=True, allow_inf_nan=False)
+    ] = None
     max_fwhm: Annotated[float, Field(gt=0, strict=True, allow_inf_nan=False)] = 25.0
 
     @field_validator("resonators")
     @classmethod
     def unique_nonblank_names(cls, names: list[str]) -> list[str]:
         """Keep names in input order, rejecting blank or duplicate labels."""
+        if not names:
+            raise ValueError("resonators must contain at least one name")
         if any(not name.strip() for name in names):
             raise ValueError("resonators must contain nonblank strings")
         if len(set(names)) != len(names):
             raise ValueError("resonators must contain unique names")
         return names
 
-    def to_dip_options(self) -> DipFinderOptions:
-        """Return numerical dip controls, using the name count as max_dips.
+    def to_dip_options(
+        self, freqs: NDArray[np.float64], magnitude: NDArray[np.float64]
+    ) -> DipFinderOptions:
+        """Resolve the actual factor for matching MHz/magnitude spectrum arrays.
 
-        Empty names leave max_dips unlimited. Names are validated when the
-        Options object is constructed, not by this conversion.
+        The shared finder validates arrays. The name count limits selection.
         """
-        return DipFinderOptions(
+        options = DipFinderOptions(
             smoothing_sigma=self.smoothing_sigma,
-            prominence_factor=self.prominence_factor,
+            prominence_factor=0.0
+            if self.prominence_factor is None
+            else self.prominence_factor,
             max_fwhm=self.max_fwhm,
             min_separation=self.min_separation,
-            max_dips=len(self.resonators) if self.resonators else None,
+            max_dips=len(self.resonators),
         )
+        if self.prominence_factor is None:
+            options = replace(
+                options,
+                prominence_factor=estimate_prominence_factor(
+                    freqs, magnitude, options, expected_dips=len(self.resonators)
+                ),
+            )
+        return options
 
 
 @dataclass(frozen=True)
 class ResonatorDip:
     """One dip: freq is absolute MHz; depth is magnitude prominence in a.u.
 
-    name is None during discovery, or comes from Options in frequency order.
+    name comes from Options in frequency order.
     Names never select a readout channel. depth uses the background-subtracted,
     optionally Gaussian-smoothed magnitude, not a fit. fwhm is half-prominence
     width in MHz, at least one local mean frequency step. score is depth / fwhm
     in a.u./MHz; neither width nor score is a fitted resonator calibration.
     """
 
-    name: str | None
+    name: str
     freq: float
     depth: float
     fwhm: float
     score: float
 
 
+@dataclass(frozen=True)
+class RangeFindDetection:
+    """Frequency-ordered named dips and the actual prominence noise multiplier."""
+
+    dips: tuple[ResonatorDip, ...]
+    prominence_factor: float
+
+
 class RangeFindExp(Experiment[RangeFindResult, RangeFindCfg]):
-    """Acquire absolute MHz spectra and find optionally named dips."""
+    """Acquire absolute MHz spectra and find the requested named dips."""
 
     Options = RangeFindOptions
 
@@ -179,7 +207,7 @@ class RangeFindExp(Experiment[RangeFindResult, RangeFindCfg]):
         options: RangeFindOptions,
         *,
         plots: Plots,
-    ) -> tuple[ResonatorDip, ...]:
+    ) -> RangeFindDetection:
         """Remove linear magnitude background and select prominent interior dips.
 
         source supplies matching (P,) absolute MHz and complex IQ arrays, P >= 11;
@@ -188,18 +216,17 @@ class RangeFindExp(Experiment[RangeFindResult, RangeFindCfg]):
 
         Background joins median magnitude/frequency in each outer 10% of points
         (at least two per edge). The shared numerical dip finder defaults to no
-        smoothing, prominence_factor=5 and max_fwhm=25 MHz. It rejects wider dips,
+        smoothing and max_fwhm=25 MHz. Automatic prominence_factor uses the name
+        count; a number uses that factor unchanged. It rejects wider dips,
         ranks depth / FWHM and enforces min_separation in actual MHz. Selected
-        dips receive the given names in frequency order. Empty names select all
-        separated candidates without assigning names. Edge minima are excluded.
+        dips receive the given names in frequency order. Edge minima are excluded.
 
         plots receives one measured-magnitude curve with red stars at the dips,
-        annotated by name or discovery index, MHz frequency, depth, FWHM and score.
-        Return all discovered dips, or all requested named dips. Insufficient
+        annotated by name, MHz frequency, depth, FWHM and score.
+        Return requested named dips and the actual factor. Insufficient
         named dips raise ValueError naming the available count;
         no partial success or proposals are produced here.
         """
-        dip_options = options.to_dip_options()
         freqs = np.asarray(source.result.freqs, dtype=np.float64)
         signals = np.asarray(source.result.signals, dtype=np.complex128)
         if freqs.ndim != 1 or signals.shape != freqs.shape or freqs.size < 11:
@@ -215,17 +242,18 @@ class RangeFindExp(Experiment[RangeFindResult, RangeFindCfg]):
         if np.any(np.diff(freqs) <= 0):
             raise ValueError("Analysis needs distinct absolute frequencies")
 
+        dip_options = options.to_dip_options(freqs, magnitude)
         selected = find_spectrum_dips(freqs, magnitude, dip_options)
         if len(selected) < len(options.resonators):
             raise ValueError(
                 f"Found {len(selected)} significant separated dips; need {len(options.resonators)} "
                 f"(min_separation={options.min_separation:g} MHz, max_fwhm={options.max_fwhm:g} MHz, "
-                f"prominence_factor={options.prominence_factor:g}). "
+                f"prominence_factor={dip_options.prominence_factor:g}). "
                 "Check scan range, resolution, power and requested names."
             )
         dips = tuple(
             ResonatorDip(
-                options.resonators[position] if options.resonators else None,
+                options.resonators[position],
                 dip.freq,
                 dip.depth,
                 dip.fwhm,
@@ -239,8 +267,8 @@ class RangeFindExp(Experiment[RangeFindResult, RangeFindCfg]):
         @plots.on_plot_thread
         def draw(_):
             ax.plot(freqs, magnitude, label="Measured magnitude")
-            for position, dip in enumerate(dips, start=1):
-                label = dip.name if dip.name is not None else f"Dip {position}"
+            for dip in dips:
+                label = dip.name
                 measured = magnitude[np.searchsorted(freqs, dip.freq)]
                 ax.plot(
                     dip.freq,
@@ -260,6 +288,9 @@ class RangeFindExp(Experiment[RangeFindResult, RangeFindCfg]):
                     xytext=(8, 8),
                     textcoords="offset points",
                 )
+            fig.suptitle(
+                f"Prominence noise factor: {dip_options.prominence_factor:.6g}"
+            )
             ax.set_xlabel("Frequency (MHz)")
             ax.set_ylabel("Magnitude (a.u.)")
             ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.0), fontsize="small")
@@ -267,4 +298,4 @@ class RangeFindExp(Experiment[RangeFindResult, RangeFindCfg]):
             return (fig,)
 
         draw(None)
-        return dips
+        return RangeFindDetection(dips, dip_options.prominence_factor)
