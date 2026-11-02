@@ -297,9 +297,14 @@ class _Machine:
         if inst.wr or inst.ww or inst.wp or inst.port:
             raise ValueError("Unsupported register write side effects")
         if inst.src == SrcKeyword.WMEM and inst.dst.name == "r_wave":
-            # Waveform contents do not determine scheduled output times.
-            for name in WAVE_REGS:
-                self.registers.pop(name, None)
+            if self.wmem is None:
+                # Without initial WMEM, retain the timing-only unknown-data behavior.
+                for name in WAVE_REGS:
+                    self.registers.pop(name, None)
+            else:
+                words = self.read_wave(inst.addr)
+                for index, word in enumerate(words):
+                    self.registers[f"w{index}"] = _signed32(word)
             if inst.uf:
                 self.flags = None
             return
@@ -376,12 +381,13 @@ class _Machine:
             raise ValueError("Missing reference increment")
         self.reference += self.value(operand)
 
-    def read_wave(self, operand: Register | MemAddr | None) -> WaveWords:
+    def wave_address(self, operand: Register | MemAddr | None) -> int:
         if not isinstance(operand, (Register, MemAddr)):
             raise ValueError("Missing wave memory address")
-        address = (
-            self.value(operand) if isinstance(operand, Register) else operand.value
-        )
+        return self.value(operand) if isinstance(operand, Register) else operand.value
+
+    def read_wave(self, operand: Register | MemAddr | None) -> WaveWords:
+        address = self.wave_address(operand)
         if self.wmem is None or address not in self.wmem:
             raise ValueError(f"Missing compiled wmem at address {address}")
         words = self.wmem[address]
@@ -390,6 +396,16 @@ class _Machine:
                 f"Compiled wmem must contain six integer words at {address}"
             )
         return words
+
+    def wave_registers(self) -> WaveWords:
+        return (
+            self.value(Register("w0")) % 2**32,
+            self.value(Register("w1")) % 2**32,
+            self.value(Register("w2")) % 2**24,
+            self.value(Register("w3")) % 2**32,
+            self.value(Register("w4")) % 2**32,
+            self.value(Register("w5")) % 2**16,
+        )
 
     def output(
         self, inst: PortWriteInst | DportWriteInst | TrigInst, address: int
@@ -437,9 +453,12 @@ class _Machine:
             if isinstance(inst.addr, Register) and self.value(inst.addr) != address + 1:
                 raise ValueError("WAIT target must be its internal polling jump")
         elif isinstance(inst, WmemWriteInst):
-            self.condition(inst.if_cond)
+            taken = self.condition(inst.if_cond)
             if inst.time or inst.wr or inst.op or inst.uf or inst.wp:
                 raise ValueError("Unsupported wave memory side effects")
+            if taken and self.wmem is not None:
+                self.read_wave(inst.addr)
+                self.wmem[self.wave_address(inst.addr)] = self.wave_registers()
         elif not isinstance(inst, (PortWriteInst, DportWriteInst, TrigInst)):
             raise ValueError(f"Unsupported timing instruction: {inst}")
         return following
@@ -539,7 +558,10 @@ def analyze_timing(
     add/subtract, bitwise AND/OR/XOR, signed 32-bit unary ABS and hardware
     low-four-bit SR/ASR/SL shifts. ABS rejects -2147483648 because its overflow
     result is not specified by the assembler.
-    Wave data is unknown until overwritten; time/control cannot consume it.
+    With initial WMEM, wave loads, wave-register updates and WMEM_WR modify a
+    private memory copy; wave output events carry the current six raw words.
+    Without initial WMEM, wave data stays unknown until overwritten and cannot
+    drive time/control.
     Hardware s11 reads (including Resync) raise an error naming the source.
     Unknown timing/control registers, unsupported instructions/side effects,
     malformed boundaries, shot-count mismatches and exceeding positive max_steps
