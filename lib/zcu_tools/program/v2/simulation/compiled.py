@@ -39,7 +39,7 @@ from ..ir.io_instructions import (
     TrigInst,
     WmemWriteInst,
 )
-from ..ir.operands import ImmValue, Register, SrcKeyword
+from ..ir.operands import AluExpr, AluOp, ImmValue, Register, SrcKeyword
 from ._compiled_guard import guard_live_in
 from ._compiled_output import Outputs
 from ._compiled_state import IntArray, Machine, signed32
@@ -408,6 +408,44 @@ def _check_table_wrap(info: dict[str, Any], seed: Machine) -> None:
                 raise ValueError("table wrap disagrees with initial WMEM")
 
 
+def _timing_maximum_tests(
+    records: Sequence[DecodedInstruction], timing: set[str]
+) -> set[int]:
+    """Recognize TEST/copy/if(S)-copy maxima consumed by a reference advance.
+
+    Only the emitted register subtraction and its two pure copies qualify.
+    The destination must feed TIME; standalone tests and other flag consumers
+    remain undeclared shell effects.
+    """
+    accepted = set()
+    for test_record, initial_record, selected_record in zip(
+        records, records[1:], records[2:]
+    ):
+        test = test_record.instruction
+        initial = initial_record.instruction
+        selected = selected_record.instruction
+        if not (
+            isinstance(test, TestInst)
+            and test.uf
+            and isinstance(test.op, AluExpr)
+            and test.op.op == AluOp.SUB
+            and isinstance(test.op.rhs, Register)
+            and isinstance(initial, RegWriteInst)
+            and initial.dst.canonical_name in timing
+        ):
+            continue
+        if initial == RegWriteInst(
+            dst=initial.dst, src=SrcKeyword.OP, op=AluExpr(test.op.lhs, AluOp.NONE)
+        ) and selected == RegWriteInst(
+            dst=initial.dst,
+            src=SrcKeyword.OP,
+            op=AluExpr(test.op.rhs, AluOp.NONE),
+            if_cond="S",
+        ):
+            accepted.add(test_record.position)
+    return accepted
+
+
 def _validate_hooks(
     records: tuple[DecodedInstruction, ...],
     loops: dict[str, NativeLoop],
@@ -425,9 +463,14 @@ def _validate_hooks(
                 )
             actual = deepcopy(seed)
             actual.writes.clear()
-            for record in records[first : loop.body_end]:
+            tail = records[first : loop.body_end]
+            timing = _timing_writes(tail)
+            maxima = _timing_maximum_tests(tail, timing)
+            for record in tail:
                 inst = record.instruction
                 if isinstance(inst, (MetaInst, LabelInst, NopInst, TimeInst, WaitInst)):
+                    continue
+                if isinstance(inst, TestInst) and record.position in maxima:
                     continue
                 if isinstance(inst, RegWriteInst) and inst.wp is None:
                     actual.writes.update(inst.reg_write)
@@ -438,7 +481,6 @@ def _validate_hooks(
             memory_writes = {
                 name for name in actual.writes if name.startswith(("DMEM[", "WMEM["))
             }
-            timing = _timing_writes(records[first : loop.body_end])
             registers = actual.writes - memory_writes - {"s12", "s15"} - timing
             if memory_writes or registers & live or registers:
                 raise ValueError(
