@@ -430,7 +430,6 @@ def _timing_maximum_tests(
         if not (
             isinstance(test, TestInst)
             and test.uf
-            and isinstance(test.op, AluExpr)
             and test.op.op == AluOp.SUB
             and isinstance(test.op.rhs, Register)
             and isinstance(initial, RegWriteInst)
