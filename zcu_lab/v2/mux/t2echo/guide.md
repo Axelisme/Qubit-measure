@@ -95,6 +95,9 @@ A fringe fit needs six remaining points; decay needs four.
 Fringe phase is fixed at zero unless Fit phase is enabled.
 Decay uses the same model regardless of Fit phase.
 T2E and error are in us; fringe rate and error are in MHz.
+Each tone returns its index, fit values, selected model and quality, including
+fringe sampling quality when applicable. Delay coordinates, measured values
+and fitted curves are used only for plots.
 Review fit quality and pulse calibration before accepting the estimate.
 
 ## Multi-tone readout control
