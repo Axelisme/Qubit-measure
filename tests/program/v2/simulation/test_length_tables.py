@@ -238,14 +238,21 @@ def test_length_with_fractional_pre_and_post_matches_scalar_aggregate(flat, cons
     assert scheduled_shots(prog) == expected_shots * 2
 
 
-def test_consecutive_native_auto_followers_match_scalar_timestamps():
-    values = [0.213, 0.107, 0.2]
-    prog, env, _ = length_program(values, mode="table", auto=True, followers=2)
+@pytest.mark.parametrize("flat", [False, True])
+@pytest.mark.parametrize("branch", [False, True])
+@pytest.mark.parametrize("outer", [False, True])
+@pytest.mark.parametrize("followers", [2, 3])
+def test_consecutive_native_auto_followers_match_scalar_timestamps(
+    flat, branch, outer, followers
+):
+    values = [0.2, 0.107, 0.213]
+    options = dict(flat=flat, branch=branch, auto=True, followers=followers)
+    prog, _, _ = length_program(values, mode="table", outer=outer, **options)
     expected_shots = []
     for index, value in enumerate(values):
-        scalar, _, _ = length_program(value, auto=True, followers=2)
-        expected_shots.append(scheduled_shots(scalar)[0])
-    assert scheduled_shots(prog) == expected_shots * 2
+        scalar, _, _ = length_program(value, point_count=len(values), **options)
+        expected_shots.append(scheduled_shots(scalar)[index if branch else 0])
+    assert scheduled_shots(prog) == expected_shots * (4 if outer else 2)
 
 
 @pytest.mark.parametrize("flat", [False, True])
