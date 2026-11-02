@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Generator
 from pathlib import Path
 from typing import Literal
@@ -631,23 +632,34 @@ def test_captured_paths_stderr_and_matrix_copy_are_visible_in_each_pane(
         qapp.processEvents()
 
 
+@pytest.fixture
+def sample_evidence(tmp_path: Path, request: pytest.FixtureRequest) -> Path:
+    return (
+        Path(os.environ.get("WRITEBACK_RECORD_EVIDENCE", str(tmp_path)))
+        / request.node.name
+    )
+
+
 @pytest.fixture(
     params=[("analysis", 620, False), ("post_analysis", 360, True)],
     ids=["analysis-wide-unapplied", "post-analysis-narrow-applied"],
 )
 def sample_row(
-    qapp: QApplication, tmp_path: Path, request: pytest.FixtureRequest
+    qapp: QApplication, sample_evidence: Path, request: pytest.FixtureRequest
 ) -> Generator[tuple[ComponentDriver, str]]:
     pane, width, applied = request.param
     item = RecordWriteback(
         "Q1",
         "Captured sample",
         record={
-            "freq_mhz": 1250.0,
-            "dev_value": 0.00125,
-            "dev_unit": "A",
-            "run_id": "run-20261020-1234567890123456789012345678901234567890",
-            "fit": {"accepted": True},
+            "freq_mhz": 7492.38,
+            "freq_err_mhz": 0.221,
+            "devices": {
+                "bias": {"value": 0.00125, "unit": "A"},
+                "soc": "mock",
+                "lo": 6000.0,
+            },
+            "flux_frame": {"origin": [0.0, 0.0], "axes": ["x", "y"]},
         },
     )
     item.session_id = "record-1"
@@ -681,9 +693,9 @@ def sample_row(
     host.show()
     driver = ComponentDriver(host)
     try:
-        driver.screenshot(tmp_path / "01-overview.png")
+        driver.screenshot(sample_evidence / "01-overview.png")
         driver.select_tab("Writeback")
-        driver.screenshot(tmp_path / "02-sample-row.png")
+        driver.screenshot(sample_evidence / "02-sample-row.png")
         yield driver, "Q1 · record" if applied else "Q1 · record*"
     finally:
         host.close()
@@ -703,41 +715,77 @@ def test_sample_row_current_is_entry_sample(sample_row) -> None:
     assert current.text == current.tooltip == "entry record"
 
 
-def test_sample_proposal_lists_every_field_in_label_and_tooltip(sample_row) -> None:
+def test_sample_proposal_summarizes_nested_fields_on_one_line(
+    sample_row, sample_evidence: Path
+) -> None:
     driver, _ = sample_row
+    summary = "freq_mhz=7492.38, freq_err_mhz=0.221, devices{3}, flux_frame{2}"
+    driver.resize_window(1800, 600)
+    driver.screenshot(sample_evidence / "03-wide-summary.png")
     proposed = driver.observe(object_name="writebackProposed")
-    expected = {
-        "freq_mhz=1250.0",
-        "dev_value=0.00125",
-        "dev_unit=A",
-        "run_id=run-20261020-1234567890123456789012345678901234567890",
-        'fit={"accepted": true}',
-    }
-    assert set(proposed.text.splitlines()) == expected
-    assert set(proposed.tooltip.splitlines()) == expected
-    assert proposed.fully_visible
+    assert proposed.text == summary
+    assert proposed.fully_visible and proposed.caption_fits
+    assert (
+        proposed.tooltip
+        == """{
+  "freq_mhz": 7492.38,
+  "freq_err_mhz": 0.221,
+  "devices": {
+    "bias": {
+      "value": 0.00125,
+      "unit": "A"
+    },
+    "soc": "mock",
+    "lo": 6000.0
+  },
+  "flux_frame": {
+    "origin": [
+      0.0,
+      0.0
+    ],
+    "axes": [
+      "x",
+      "y"
+    ]
+  }
+}"""
+    )
+    driver.resize_window(360, 600)
+    driver.screenshot(sample_evidence / "04-narrow-summary.png")
+    narrow = driver.observe(object_name="writebackProposed")
+    prefix, suffix = narrow.text.split("…")
+    assert prefix and suffix
+    assert summary.startswith(prefix) and summary.endswith(suffix)
+    assert narrow.fully_visible and narrow.caption_fits
+    assert narrow.tooltip == proposed.tooltip
+    driver.resize_window(1800, 600)
+    driver.screenshot(sample_evidence / "05-restored-summary.png")
+    assert driver.observe(object_name="writebackProposed").text == summary
 
 
 def test_sample_copy_pastes_complete_json_without_edit_dialog(
-    sample_row, tmp_path: Path
+    sample_row, sample_evidence: Path
 ) -> None:
     driver, _ = sample_row
     actions = [w.text for w in driver.visible().widgets if w.kind == "QPushButton"]
     assert "Copy" in actions and "Edit" not in actions
     driver.click("Copy")
-    driver.screenshot(tmp_path / "03-copy.png")
+    driver.screenshot(sample_evidence / "03-copy.png")
     driver.invoke_context_action(
         object_name="copiedSample",
         action="&Paste\tCtrl+V",
-        evidence=tmp_path / "04-paste-menu.png",
+        evidence=sample_evidence / "04-paste-menu.png",
     )
-    driver.screenshot(tmp_path / "05-pasted-json.png")
+    driver.screenshot(sample_evidence / "05-pasted-json.png")
     assert json.loads(driver.observe(object_name="copiedSample").text) == {
-        "freq_mhz": 1250.0,
-        "dev_value": 0.00125,
-        "dev_unit": "A",
-        "run_id": "run-20261020-1234567890123456789012345678901234567890",
-        "fit": {"accepted": True},
+        "freq_mhz": 7492.38,
+        "freq_err_mhz": 0.221,
+        "devices": {
+            "bias": {"value": 0.00125, "unit": "A"},
+            "soc": "mock",
+            "lo": 6000.0,
+        },
+        "flux_frame": {"origin": [0.0, 0.0], "axes": ["x", "y"]},
     }
     assert driver.dialogs() == ()
 

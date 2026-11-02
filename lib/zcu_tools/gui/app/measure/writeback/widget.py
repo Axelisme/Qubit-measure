@@ -142,17 +142,22 @@ def _full_value(value: Any) -> str:
 
 
 def _record_summary(item: RecordWriteback, *, compact: bool) -> str:
-    """List every record field without truncating strings or nested JSON."""
+    """Summarize fields on one line, or return the complete indented JSON."""
+    if not compact:
+        return json.dumps(item.record, ensure_ascii=False, indent=2)
     fields: list[str] = []
     for key, value in item.record.items():
+        if isinstance(value, (dict, list)):
+            fields.append(f"{key}{{{len(value)}}}")
+            continue
         if isinstance(value, str):
             text = value
         elif _is_number(value):
-            text = _compact_value(value) if compact else _full_value(value)
+            text = _compact_value(value)
         else:
             text = json.dumps(value, ensure_ascii=False)
         fields.append(f"{key}={text}")
-    return "\n".join(fields)
+    return ", ".join(fields)
 
 
 class _MiddleElidedLabel(QLabel):
@@ -604,7 +609,13 @@ class WritebackWidget(QWidget):
     def _make_proposed_view(
         self, item: WritebackItem
     ) -> tuple[QLabel, QTableWidget | None]:
-        proposed_label = _value_label(item, self._display_proposed(item, compact=True))
+        text = self._display_proposed(item, compact=True)
+        proposed_label: QLabel
+        if isinstance(item, RecordWriteback):
+            proposed_label = _MiddleElidedLabel(text)
+            make_label_selectable(proposed_label)
+        else:
+            proposed_label = _value_label(item, text)
         proposed_label.setToolTip(self._display_proposed(item, compact=False))
         is_matrix = isinstance(item, ParameterWriteback) and _is_matrix_value(
             self._values[item.session_id].proposed
@@ -623,7 +634,7 @@ class WritebackWidget(QWidget):
         proposed_label.setSizePolicy(
             QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred
         )
-        proposed_label.setWordWrap(isinstance(item, RecordWriteback))
+        proposed_label.setWordWrap(False)
         if isinstance(item, RecordWriteback):
             proposed_label.setTextFormat(Qt.TextFormat.PlainText)
         table = None
