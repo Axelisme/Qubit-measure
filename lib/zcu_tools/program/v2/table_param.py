@@ -27,6 +27,7 @@ class TableParam:
         scale: float,
         quantize: int = 1,
         parname: str | None = None,
+        *,
         trunc: bool = False,
     ) -> "TableRawParam":
         """Convert each point using QICK scalar rounding and return raw words.
@@ -41,7 +42,7 @@ class TableParam:
                 to_int(v, scale, quantize=quantize, parname=parname, trunc=trunc)
                 for v in self.values
             ],
-            parname,
+            "" if parname is None else parname,
             quantize,
         )
         self._raw_scale = scale
@@ -59,6 +60,8 @@ class TableParam:
         if self._raw is None:
             raise RuntimeError("to_int has not been called on this TableParam")
         raw = self._raw
+        if loop_counts is not None:
+            raw.to_steps(loop_counts)
         return TableParam(
             self.loop,
             [(v - raw.offset) / raw.scale / self._raw_scale for v in raw.values],
@@ -78,7 +81,7 @@ class TableRawParam(QickRawParam):
         self,
         loop: str,
         values: Sequence[int],
-        par: str | None = None,
+        par: str = "",
         quantize: int = 1,
     ) -> None:
         self.loop = loop
