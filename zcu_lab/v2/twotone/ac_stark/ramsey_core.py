@@ -22,7 +22,6 @@ from zcu_tools.experiment.v2.runtime.schedule import (
 from zcu_tools.experiment.v2.utils.round_zcu import round_zcu_gain, sweep2array
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
-    GainSweep,
     Pulse,
     Readout,
     Reset,
@@ -61,7 +60,7 @@ class AcStarkRamseyCfg(ConfigBase):
     pi2_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Ramsey pi/2 pulse")]
     readout: Readout.Cfg
     wait_delay: Annotated[float, FieldMeta(label="Tone settling delay", unit="us")]
-    gain: Annotated[GainSweep, FieldMeta(label="Stark gain", unit="a.u.")]
+    gain: Annotated[SweepCfg, FieldMeta(label="Stark gain", unit="a.u.")]
     delay: Annotated[SweepCfg, FieldMeta(label="Ramsey delay", unit="us")]
     detune: Annotated[float, FieldMeta(label="Phase-ramp detune", unit="MHz")] = 0.0
 

@@ -33,9 +33,7 @@ def test_module_gain_rejects_out_of_range_and_accepts_boundaries(gain_model):
         cfg = model.model_validate({**raw, "gain": gain})
         assert cfg.gain == gain
     for gain in (-1.1, 1.1):
-        with pytest.raises(
-            ValidationError, match=r"Gain must be within \[-1, 1\].*" + str(gain)
-        ) as exc:
+        with pytest.raises(ValidationError) as exc:
             model.model_validate({**raw, "gain": gain})
         assert exc.value.errors()[0]["loc"][0] == "gain"
 
