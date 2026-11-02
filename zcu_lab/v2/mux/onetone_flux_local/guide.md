@@ -31,12 +31,11 @@ edits and captures sources again.
   required endpoints blank. Missing other device values contribute zero.
   Unselected lines are validated but never written.
 - `settle` is the wait in seconds after all DC writes at each flux point.
-- `modules` contains the optional common reset and full mux readout.
-- `frequency` contains only frequency-scan inputs.
-  `frequency.df` supplies a common nominal MHz offset for every selected
-  readout tone. Each offset uses the existing host-side onetone run because
-  the mux firmware cannot sweep tone frequencies in hardware. Inner
-  `participants` supplies the original tone selection.
+- `reset` is the optional common reset. `readout` holds the full mux readout.
+- `df` supplies a common nominal MHz offset for every selected readout tone.
+  Each offset uses the existing host-side onetone run because the mux firmware
+  cannot sweep tone frequencies in hardware. `participants` supplies the original
+  tone selection to that inner scan.
 
 Readout uses the mux onetone ringup-copy policy. A captured slot retains its
 mixer and ADC window; five ringup times are added to trigger coverage. Without
@@ -84,7 +83,7 @@ and reasons without rolling back edits. Analysis null goes to the picker owner.
 ## Typed cfg and form paths
 
 Python cfg and saved cfg share a flat layout. There is no `spectrum` wrapper.
-Set `participants: list[int]`, full `tones`, and `modules` at top level.
+Set `participants: list[int]`, full `tones`, `reset`, `readout` and `df` at top level.
 Open/Reset fills selected tones' per-tone DC sweep defaults and sets
 these fields to None on other tones. The nullable fields remain editable.
 Open/Reset captures the Aliases row `participants`, for example `[Q3, Q1]`,
@@ -101,7 +100,7 @@ uniqueness is checked only for selected tones.
 `reset` is optional; `readout` is the complete numeric mux
 readout. In the form, module selectors expose inline fields below
 `readout.module`; this selector wrapper is not part of Python cfg.
-`frequency.df` is a SweepCfg of common nominal MHz offsets.
+`df` is a SweepCfg of common nominal MHz offsets.
 `tones[i]` contains its fixed name, `flux_dev`, and `flux.start/stop` in native DC units. `flux_expts` is their shared positive count.
 `flux_unit` is `A`, `V` or `native`; no conversion occurs.
 `reps` and `rounds` are positive counts. `initial_delay` and `relax_delay`
@@ -110,8 +109,9 @@ Every SweepCfg supplies `start`, `stop`, positive `expts` and
 `step = (stop-start)/(expts-1)`; a single point requires equal bounds and zero
 step. Form/recipe range editors use `n` for that point count and derive step.
 
-The form orders participants, tone identities, modules, frequency/DC scans,
-averaging, then timing. Source descriptions distinguish captured settings,
+The form follows the cfg declaration: reset, readout, one tones list with local
+DC bounds, flux_expts, df, participants, flux_unit, settle, then reps, rounds,
+initial_delay and relax_delay. The local DC scan is outside the frequency scan. Source descriptions distinguish captured settings,
 derived candidates and missing required values. Generated candidates are
 marked uncalibrated; a stored value alone is not evidence of calibration.
 All full-list entries must validate even when not selected for acquisition.
@@ -168,6 +168,10 @@ new calibration. Missing historical cfg prevents identity-dependent analysis;
 missing parameter capture permits picking but yields no writeback proposals.
 
 ## Saved data
+
+Cfg schema 5.0 stores this layout. Loading a schema 4.0 run keeps its data and
+plots available but does not restore its cfg into the new Form. There is no
+cfg migration or compatibility conversion.
 
 Native data keeps original tone indices, native DC coordinates per tone,
 absolute MHz frequency coordinates per tone, and complex IQ shaped
