@@ -1,5 +1,7 @@
 """Wave-field lookup sweeps through public build, simulation and compiled words."""
 
+from dataclasses import replace
+
 from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.program.v2 import TimelineBuilder, ir
 from zcu_tools.program.v2.modules.pulse import Pulse, PulseCfg
@@ -61,7 +63,8 @@ def test_const_frequency_table_matches_scalar_program_at_every_point_and_rep():
     scalar_words = []
     for index, value in enumerate(values):
         scalar, scalar_env = const_program(value)
-        assert observed.materialize_point(index) == request(
+        # Coordinates identify the scan, not the scalar hardware output.
+        assert replace(observed.materialize_point(index), coordinates=()) == request(
             scalar, scalar_env
         ).materialize_point(0)
         scalar_words.append(executed_words(scalar)[0])
