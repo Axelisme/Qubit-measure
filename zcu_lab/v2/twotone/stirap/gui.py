@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from zcu_tools.analysis.singleshot import Centroid3IQAnalysis
+from zcu_tools.analysis.singleshot import Centroid3Summary
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import Adapter, Analysis, AnalyzeRequest
@@ -20,7 +20,7 @@ def _analyze(
     req: AnalyzeRequest[RunRecord[StirapCfg, StirapResult], None],
     *,
     plots: Plots,
-) -> Centroid3IQAnalysis:
+) -> Centroid3Summary:
     return StirapExp().analyze(req.run_result, None, plots=plots)
 
 

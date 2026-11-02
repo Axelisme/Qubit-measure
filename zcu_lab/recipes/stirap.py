@@ -3,7 +3,7 @@
 from typing import Literal
 
 from pydantic import Field
-from zcu_tools.analysis.singleshot import Centroid3IQAnalysis
+from zcu_tools.analysis.singleshot import Centroid3Summary
 from zcu_tools.mcp.measure.recipe_api import (
     KEEP,
     Keep,
@@ -167,7 +167,7 @@ async def stirap(session: RecipeSession, inputs: StirapInputs) -> StirapReport:
 
     await tab.run()
     try:
-        analysis = await tab.analyze("primary", result=Centroid3IQAnalysis)
+        analysis = await tab.analyze("primary", result=Centroid3Summary)
         if analysis.result is None:
             return StirapReport(analysis_failure=analysis.reason)
         return StirapReport(

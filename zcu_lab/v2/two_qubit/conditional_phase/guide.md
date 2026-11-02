@@ -26,6 +26,9 @@ Saved `sums` has shape `(2,2,Nn,Nf,3,3)`, ordered spectator_states, projection, 
 
 ## Read phase and quadratures
 
+Analyze returns only `frequency_mhz` and `frequency_reason`. Per-frequency phases,
+slopes, crossings, counts and herald fractions stay inside analysis for plotting.
+
 For each target projection, `sigma=(N_e-N_g)/N_total`. Other remains in the denominator. Contrast is `hypot(sigma_X,sigma_Y)`; phase is `atan2(sigma_Y,sigma_X)` in degrees, wrapped to `[-180,180)`. Analysis does not project mean IQ or reclassify shots.
 
 The phase plot shows contrast and logical phase for each spectator state and gate count. The quadratures plot shows classified X/Y sigma. The slopes plot shows the fitted phase per gate for actual spectator g and e.

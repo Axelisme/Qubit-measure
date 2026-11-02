@@ -3,7 +3,6 @@
 from pathlib import Path
 from typing import TypeAlias
 
-from pydantic import BaseModel, Field
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.utils import make_sweep
@@ -15,25 +14,6 @@ from .core import CPMG_Cfg, CPMG_Exp, CPMG_Result, CPMGAnalysis, CPMGAnalyzeOpti
 from .form import CPMGInput, make_form
 
 CPMGRunResult: TypeAlias = RunRecord[CPMG_Cfg, CPMG_Result]
-
-
-class CPMGSummary(BaseModel):
-    """Row-aligned pi-pulse counts and T2 estimates; null means unavailable.
-
-    ns[i], t2s[i] and t2errs[i] describe the same CPMG fit row.
-    """
-
-    ns: list[int] = Field(
-        description="Number of pi pulses per CPMG sequence, in fit-row order."
-    )
-
-    t2s: list[float | None] = Field(
-        description="Fitted T2 in us, aligned with ns; null when unavailable."
-    )
-
-    t2errs: list[float | None] = Field(
-        description="Native T2 fit uncertainty in us, aligned with ns and t2s; nonfinite values are null. A rejected T2 row may retain zero uncertainty."
-    )
 
 
 def _CPMG_analyze(

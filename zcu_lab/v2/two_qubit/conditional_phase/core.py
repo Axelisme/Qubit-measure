@@ -390,14 +390,6 @@ class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg
         conditional = (fitted.slopes_deg[1] - fitted.slopes_deg[0] + 180) % 360 - 180
         crossings = fitted_crossings(data.frequencies, conditional, fitted)
         answer = ConditionalPhaseAnalysis(
-            phases,
-            quadratures,
-            acquired,
-            tuple(cfg.gate_counts),
-            tuple(float(f) for f in data.frequencies),
-            fitted,
-            conditional,
-            crossings,
             crossings.frequencies_mhz[0] if crossings.reason is None else None,
             crossings.reason,
         )

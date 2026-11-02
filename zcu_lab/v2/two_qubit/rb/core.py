@@ -392,7 +392,7 @@ class RBExp(Experiment[RBResult, RBCfg]):
                 # Isolate model failure while retaining measured count diagnostics.
                 reason = str(exc)
             else:
-                estimate = estimate_d4(fit)
+                estimate = estimate_d4(fit.summary)
                 quality = (
                     compute_fit_quality(
                         fit.mean_signals[0], fit.fit_signals[0], {}, None
@@ -404,19 +404,16 @@ class RBExp(Experiment[RBResult, RBCfg]):
                 # Restore probability coordinates, not the decay ratio.
                 sign = 1.0 if np.sum(fit.mean_signals * means) >= 0 else -1.0
                 curves = sign * fit.fit_signals
-        answer = RBAnalysis(
-            survival, acquired, means, curves, estimate, quality, reason
-        )
         fig, ax = plots.subplots(num="fit", figsize=(9, 6))
         for arm, label in enumerate(("Reference", "CZ interleaved")):
-            (line,) = ax.plot(data.depths, answer.mean_survival[arm], "o", label=label)
-            if answer.estimate is not None:
-                ax.plot(data.depths, answer.fit_survival[arm], color=line.get_color())
+            (line,) = ax.plot(data.depths, means[arm], "o", label=label)
+            if estimate is not None:
+                ax.plot(data.depths, curves[arm], color=line.get_color())
         ax.set(xlabel="Random Clifford depth", ylabel="Same-shot joint00 survival")
         ax.legend()
-        if answer.reason is not None:
-            ax.set_title(f"No RB estimate: {answer.reason}")
+        if reason is not None:
+            ax.set_title(f"No RB estimate: {reason}")
         else:
             ax.set_title("d=4 paired RB; classified ensemble, statistical seed CI only")
         fig.tight_layout()
-        return answer
+        return RBAnalysis(estimate, quality, reason)

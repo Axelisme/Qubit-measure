@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import numpy as np
-from numpy.typing import NDArray
 from zcu_tools.analysis.failure import AnalysisFailed
 from zcu_tools.analysis.fitting import (
     compute_fit_quality,
@@ -32,17 +31,13 @@ class MuxT1Fit:
     """Original full-tone index and existing single-qubit T1 numerical analysis.
 
     fit holds t1/t1_err in us, optional second decay component in us and the
-    existing fit quality mapping under 'fit'. times is the float64 (N,) delay
-    axis in us after skip/finite filtering. observed and fitted are float64
-    (N,) projected IQ and primary predictions in signal units, aligned to times.
-    It owns no figures or source cfg.
+    existing fit quality mapping under 'fit'. Delay coordinates, projected IQ
+    and predictions stay local to analysis for plotting. It owns no figures
+    or source cfg.
     """
 
     index: int
     fit: T1Analysis
-    times: NDArray[np.float64]
-    observed: NDArray[np.float64]
-    fitted: NDArray[np.float64]
 
 
 def _validate_result(result: MuxT1Result) -> None:
@@ -82,8 +77,8 @@ def analyze_t1(
     indexed MuxFitFailure reasons; plotting and resource errors propagate.
     plots owns fit_i, independent of duplicate readout labels; caller
     finishes/releases figures. Draw only the selected primary model and return
-    its acquired delays, projected observations and predictions for caller-owned
-    diagnostics. No cfg or hardware is read.
+    per-tone fit summaries. Acquired delays, projected observations and
+    predictions remain local to plotting. No cfg or hardware is read.
     """
     _validate_result(result)
     times, indices, signals = result.times, result.tone_indices, result.signals
@@ -132,9 +127,6 @@ def analyze_t1(
             outcome = MuxT1Fit(
                 index,
                 T1Analysis(float(t1), float(err), t1b, errb, {"fit": quality}),
-                xs,
-                real,
-                fitted,
             )
         except (
             AnalysisFailed,

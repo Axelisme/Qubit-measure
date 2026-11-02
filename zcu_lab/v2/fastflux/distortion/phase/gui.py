@@ -8,15 +8,13 @@ from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import Adapter, Analysis, AnalyzeRequest
 from zcu_tools.plotting.plots import Plots
 
-from .core import PhaseAnalysis, PhaseCfg, PhaseExp, PhaseResult
+from .core import PhaseCfg, PhaseExp, PhaseResult
 from .form import make_form
 
 PhaseRunResult: TypeAlias = RunRecord[PhaseCfg, PhaseResult]
 
 
-def _analyze(
-    req: AnalyzeRequest[PhaseRunResult, None], *, plots: Plots
-) -> PhaseAnalysis:
+def _analyze(req: AnalyzeRequest[PhaseRunResult, None], *, plots: Plots) -> None:
     """Plot tomography and unwrapped phase using only the source run timing."""
     return PhaseExp().analyze(req.run_result, None, plots=plots)
 

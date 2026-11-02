@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Literal, TypeAlias
 
-from zcu_tools.analysis.fitting.singleshot_rabi import RabiJointFitResult
+from zcu_tools.analysis.fitting.singleshot_rabi import RabiJointFitSummary
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -44,7 +44,7 @@ class SsLenRabiAnalyzeParams:
 
 def _analyze(
     req: AnalyzeRequest[SsLenRabiRunResult, SsLenRabiAnalyzeParams], *, plots: Plots
-) -> RabiJointFitResult:
+) -> RabiJointFitSummary:
     return LenRabiExp().analyze(
         req.run_result,
         LenRabiAnalyzeOptions(
@@ -57,7 +57,7 @@ def _analyze(
 
 
 def _writeback(
-    req: WritebackRequest[SsLenRabiRunResult, RabiJointFitResult],
+    req: WritebackRequest[SsLenRabiRunResult, RabiJointFitSummary],
 ) -> Sequence[WritebackItem]:
     return rabi_calibration_writeback(
         req.analyze_result,

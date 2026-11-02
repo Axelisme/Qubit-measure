@@ -145,8 +145,11 @@ def _make_source_state() -> State:
             parameters=None, soc=None, soccfg=None, readiness=ContextReadiness.POINT
         )
     )
+    adapter = MagicMock()
+    adapter.analyze.return_value = {}
+    adapter.post_analyze.return_value = {}
     state.add_tab(
-        "tab1", Session(adapter_name="fake", adapter=MagicMock(), cfg=MagicMock())
+        "tab1", Session(adapter_name="fake", adapter=adapter, cfg=MagicMock())
     )
     commit_run(state, "tab1", RunPaneState(result=RunRecord(None, object())))
     return state
@@ -242,9 +245,7 @@ def test_interactive_writeback_retains_run_source_after_rebinding(
     state.set_context(replace(state.session_env, parameters=q2))
     writeback = MagicMock()
     service, _background = _make_primary_service(state, EventBus(), writeback=writeback)
-    plugin = PluginDefinition(
-        "pick", 0, (), lambda _state: None, lambda _state: object()
-    )
+    plugin = PluginDefinition("pick", 0, (), lambda _state: None, lambda _state: {})
     service.start_plugin(
         "tab1",
         plugin,

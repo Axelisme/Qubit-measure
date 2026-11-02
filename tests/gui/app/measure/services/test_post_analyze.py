@@ -145,6 +145,34 @@ def _make_two_tab_state() -> State:
     return state
 
 
+def test_oversized_post_analysis_fails_before_replacing_previous_result(qapp):
+    state = _make_state()
+    previous = {"frequency": 1.0}
+    commit_post_analysis(state, "tab1", PostAnalysisPaneState(result=previous))
+    adapter = MagicMock()
+    adapter.post_analyze.return_value = {"gg": {"excitation": list(range(65))}}
+    state.get_tab("tab1").adapter = adapter
+    handles = OperationHandles()
+    svc, bg = _make_service(state, EventBus(), handles=handles)
+    failed: list[tuple[str, str]] = []
+    on_post_analyze_failed(svc, lambda tid, err: failed.append((tid, err)))
+
+    plots = _plots()
+    token = svc.start_post_analyze("tab1", None, plots=plots)
+    assert bg.last_work is not None and bg.last_on_done is not None
+    bg.last_on_done(bg.last_work())
+
+    outcome = handles.poll(token)
+    assert outcome is not None and outcome.status == "failed"
+    assert outcome.error is not None and "summary.gg.excitation" in outcome.error
+    assert len(failed) == 1 and "summary.gg.excitation" in failed[0][1]
+    with pytest.raises(RuntimeError, match="Plot operation has finished"):
+        plots.ensure_active()
+    assert state.get_tab("tab1").post_analysis.result is previous
+    assert not state.get_tab("tab1").is_analyzing
+    assert handles.live_count() == 0
+
+
 def test_start_post_analyze_submits_to_bg(qapp):
     state = _make_state()
     svc, bg = _make_service(state, EventBus())
@@ -266,8 +294,7 @@ def test_finished_post_analysis_keeps_captured_inputs_across_later_edits(qapp):
         "tab1", post_analyze_params_instance=supplied, plots=Plots(NonPresentingHost())
     )
     state.update_tab_post_analyze_param_instance("tab1", {"threshold": 0.7})
-    result = MagicMock()
-    result.figure = None
+    result = {}
     assert bg.last_on_done is not None
     bg.last_on_done(result)
     supplied["threshold"] = 0.5
@@ -293,7 +320,7 @@ def test_on_post_analyze_finished_updates_state(qapp):
         "tab1", post_analyze_params_instance=object(), plots=plots
     )
 
-    post_result = object()
+    post_result = {}
 
     finished: list[tuple[str, object]] = []
     bus.subscribe(
@@ -393,7 +420,7 @@ def test_two_tabs_settle_their_own_tokens(qapp):
     assert handles.poll(token2) is None
     assert handles.live_count() == 2
 
-    r1 = object()
+    r1 = {}
     assert on_done_1 is not None
     on_done_1(r1)
 
@@ -404,7 +431,7 @@ def test_two_tabs_settle_their_own_tokens(qapp):
     assert state.get_tab("tab2").is_analyzing is True
     assert handles.live_count() == 1
 
-    r2 = object()
+    r2 = {}
     assert on_done_2 is not None
     on_done_2(r2)
 
@@ -437,7 +464,7 @@ def test_on_post_analyze_finished_post_processing_raise_settles_failed(qapp):
     failed: list[tuple[str, str]] = []
     on_post_analyze_failed(svc, lambda tid, err: failed.append((tid, err)))
 
-    post_result = object()
+    post_result = {}
     # Must not raise out of the slot (would crash Qt).
     assert bg.last_on_done is not None
     bg.last_on_done(post_result)

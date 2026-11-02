@@ -80,6 +80,10 @@ A fringe fit needs six finite points and decay needs four.
 Fixed fringe phase uses the nearest-zero 0/180-degree policy; Fit phase frees it.
 Decay uses the same model regardless of Fit phase.
 T2* and error are in us; fringe rate and error are in MHz.
+Each tone returns its index, fit values, selected model and quality, including
+fringe sampling quality when applicable.
+Analysis plots retain the delay coordinates, measured values and fitted curves.
+The returned summary does not include these arrays.
 Sampling quality uses the largest gap between acquired delays and the larger
 absolute fitted or actual detune. At least ten samples per cycle and a complete
 cycle in the scan window are required for adequate sampling. Fewer samples per

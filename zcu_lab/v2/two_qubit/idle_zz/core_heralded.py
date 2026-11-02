@@ -28,8 +28,6 @@ from zcu_lab.v2.support.device import set_flux
 
 from .._sums import herald_probabilities, sigma, terminal_counts, validate_classifiers
 from ._analysis import (
-    IdleBranchFit,
-    IdleZZAnalysis,
     complete_points,
     fit_count_traces,
     summarize,
@@ -58,24 +56,6 @@ class IdleZZHeraldedResult:
 
     delays: NDArray[np.float64]
     sums: NDArray[np.float64]
-
-
-@dataclass(frozen=True)
-class IdleZZHeraldedAnalysis:
-    """terminal reports joint frequencies in actual spectator g/e order.
-
-    terminal.branches contains gg traces; ee_branches contains paired ee traces
-    in actual spectator g/e order, with raw inverted fringes preserved. Each
-    actual state shares frequency/decay across heralds, not A/phase/offset.
-
-    herald_matrix is (D,2,T,3,3), all nine herald probabilities. pass_fraction
-    is its (g,g) cell (D,2,T), not ground-state purity. Empty points give NaN.
-    """
-
-    terminal: IdleZZAnalysis
-    ee_branches: tuple[IdleBranchFit, ...]
-    herald_matrix: NDArray[np.float64]
-    pass_fraction: NDArray[np.float64]
 
 
 def restore_result(data: GroupedLoadData[IdleZZHeraldedCfg]) -> IdleZZHeraldedResult:
@@ -232,7 +212,7 @@ class IdleZZHeraldedExp(Experiment[IdleZZHeraldedResult, IdleZZHeraldedCfg]):
         options: None,
         *,
         plots: Plots,
-    ) -> IdleZZHeraldedAnalysis:
+    ) -> None:
         """Joint-fit gg/ee by actual spectator state, then plot all herald classes.
 
         ee has inverted target fringes and exchanged spectator states. Full
@@ -356,6 +336,3 @@ class IdleZZHeraldedExp(Experiment[IdleZZHeraldedResult, IdleZZHeraldedCfg]):
                 ax.legend()
                 fig.suptitle("(g,g) is pass fraction, not ground-state purity")
                 fig.tight_layout()
-        return IdleZZHeraldedAnalysis(
-            terminal, tuple(ee_fits), matrix, matrix[..., 0, 0]
-        )

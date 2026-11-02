@@ -465,4 +465,6 @@ class ConstructivePhaseHeraldedExp(
                 title="Constructive phase · fixed signed gain ratio",
             )
             ax.legend()
-        return analysis
+        return ConstructivePhaseAnalysis(
+            analysis.relative_phase_deg, analysis.reason, analysis.interference_quality
+        )

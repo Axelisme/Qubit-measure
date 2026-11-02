@@ -277,6 +277,19 @@ curve = fit.curve
 params, covariance, quality = fit.params, fit.cov, fit.quality
 ```
 
+### Analysis 回傳值只放摘要
+
+Analysis 回傳值的大小最多 O(log N)，N 是掃描點數或 shot 數。
+可放擬合結果、純量、尺寸固定的小值，或每個 tone／qubit 一筆的結果。
+隨掃描點數或 shot 數成長的陣列只在 analyze 內用來畫圖，不放進回傳值。
+只發布圖的分析回傳 None。
+
+GUI 在 primary、interactive 與 post-analysis 發布結果前呼叫 `summarize_analysis`。
+任一 ndarray、list 或 tuple 攤平後超過 64 個元素會 raise ValueError。
+訊息包含欄位路徑、元素數、上限與不能隨掃描大小成長的規則。
+GUI 將違規顯示為該次分析的錯誤。存檔與 RPC 沿用同一個轉換函式。
+64 是檢查上限，不代表 O(N) 的資料在少於 64 個元素時就合規。
+
 ### 來源選擇與分類 read axis
 
 在 `make_form(ctx)` 用 `source(ctx, path, template)` 選來源。
@@ -454,7 +467,7 @@ Run 使用 saved readout 的 circle／radius 作 live 分類，缺 classifier �
 Raw acquisition 與 joint fit 不要求先有校準，analysis 不使用外部 confusion matrix。
 
 Amp／Len Rabi、Check、ResetCheck 與 AC Stark 使用 explicit RunContext 執行，GUI 將同次 cfg／Result 配成 RunRecord。同步 analyze 接 source／typed options／Plots，不保存跨次成功狀態。
-Check 在 Analyze 才要求 saved cfg 的 circle／radius；其他分析保留各自的 nullable cfg 契約。Amp 回傳 AmpRabiFit，Len 回傳 RabiJointFitResult，兩者的 readout 診斷只讀 source.cfg。Check 只發布分類 scatter，無數值結果。AC Stark 回傳 AcStarkAnalysis，另提供 explicit source／AcStarkPlotOptions 的 population 圖入口；即時 Ground／Excited／Other 熱圖及 current trace 各自具名。
+Check 在 Analyze 才要求 saved cfg 的 circle／radius；其他分析保留各自的 nullable cfg 契約。Amp 回傳 AmpRabiFit，Len 回傳 RabiJointFitSummary，兩者的 readout 診斷只讀 source.cfg。Check 只發布分類 scatter，無數值結果。AC Stark 回傳 AcStarkAnalysis，另提供 explicit source／AcStarkPlotOptions 的 population 圖入口；即時 Ground／Excited／Other 熱圖及 current trace 各自具名。
 
 Amp 與 Len Rabi 共用 `zcu_tools.analysis.fitting.singleshot_rabi` 的 raw-IQ joint likelihood。
 各實驗在自己的 analyze 畫 population、histogram 與 confusion matrix 診斷圖。

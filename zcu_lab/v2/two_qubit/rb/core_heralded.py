@@ -9,7 +9,6 @@ from matplotlib.lines import Line2D
 from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from zcu_tools.analysis.fitting import FitQuality, compute_fit_quality
-from zcu_tools.analysis.fitting.shared import SharedFitResult
 from zcu_tools.experiment import (
     Experiment,
     GroupedAxesSpec,
@@ -76,30 +75,16 @@ class RBHeraldedResult:
 
 @dataclass(frozen=True)
 class RBHeraldedAnalysis:
-    """Joint gg/ee return fits and separate acquired/accepted-round diagnostics.
+    """Joint gg/ee d=4 estimate and fixed residual diagnostics.
 
-    survival is (herald,depth,seed,arm,round), herald order gg/ee.
-    acquired_rounds is (depth,seed,arm,round) for all 81 finite counts, even
-    when a herald has no accepted shots. paired_rounds is (herald,seed,round).
-    mean_survival/fit_survival are (herald,arm,depth). The shared fit has one
-    decay per arm and independent A/B per herald. fit_quality order is gg ref,
-    gg interleaved, ee ref, ee interleaved. estimate counts are identity/round
-    unions; paired_rounds preserves per-herald counts. reason explains no estimate.
-    herald_matrix is (depth,seed,arm,round,3,3); pass_fraction is its gg cell,
-    not state purity. Empty or unmeasured rounds give NaN probabilities.
+    estimate is None with reason when unavailable. fit_quality is ordered gg
+    reference, gg interleaved, ee reference, ee interleaved, or None without a
+    fit. Per-depth survival, counts and herald fractions stay in analyze.
     """
 
-    survival: NDArray[np.float64]
-    acquired_rounds: NDArray[np.bool_]
-    paired_rounds: NDArray[np.bool_]
-    mean_survival: NDArray[np.float64]
-    fit_survival: NDArray[np.float64]
     estimate: RBEstimate | None
-    fit: SharedFitResult | None
     fit_quality: tuple[FitQuality, ...] | None
     reason: str | None
-    herald_matrix: NDArray[np.float64]
-    pass_fraction: NDArray[np.float64]
 
 
 def restore_result(data: GroupedLoadData[RBHeraldedCfg]) -> RBHeraldedResult:
@@ -367,7 +352,6 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
                     for h in range(2)
                     for arm in range(2)
                 )
-        matrix = herald_probabilities(data.sums)
         aggregate = herald_probabilities(np.nansum(data.sums, axis=(1, 3)))
         for herald, label in enumerate(("gg", "ee")):
             fig, ax = plots.subplots(num=f"fit_{label}", figsize=(9, 6))
@@ -390,19 +374,7 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
             _draw_herald_fractions(ax, data.depths, aggregate[:, arm])
             ax.set_title(f"{label}: (g,g) is pass fraction, not purity")
             fig.tight_layout()
-        return RBHeraldedAnalysis(
-            survival,
-            acquired,
-            paired,
-            means,
-            curves,
-            estimate,
-            fit,
-            quality,
-            reason,
-            matrix,
-            matrix[..., 0, 0],
-        )
+        return RBHeraldedAnalysis(estimate, quality, reason)
 
 
 def _draw_return_survival(

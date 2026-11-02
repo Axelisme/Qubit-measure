@@ -111,11 +111,51 @@ class CPMGAnalyzeOptions:
 
 @dataclass(frozen=True)
 class CPMGAnalysis:
-    """T2 values and errors in microseconds, indexed by pulse count."""
+    """Weighted T2(n) = T2_1 * n**gamma summary; times and errors are in us.
 
-    ns: NDArray[np.int64]
-    t2s: NDArray[np.float64]
-    t2errs: NDArray[np.float64]
+    fit_rows counts accepted rows with finite positive n, T2 and uncertainty.
+    Fewer than three usable rows leaves all four fit values None.
+    """
+
+    t2_1_us: float | None
+    t2_1_err_us: float | None
+    gamma: float | None
+    gamma_err: float | None
+    fit_rows: int
+
+
+def _summarize_t2(
+    ns: NDArray[np.int64],
+    t2s: NDArray[np.float64],
+    t2errs: NDArray[np.float64],
+) -> CPMGAnalysis:
+    """Fit log T2 against log n using absolute relative T2 uncertainties."""
+    usable = (
+        np.isfinite(ns)
+        & (ns > 0)
+        & np.isfinite(t2s)
+        & (t2s > 0)
+        & np.isfinite(t2errs)
+        & (t2errs > 0)
+    )
+    fit_rows = int(np.count_nonzero(usable))
+    if fit_rows < 3:
+        return CPMGAnalysis(None, None, None, None, fit_rows)
+    (gamma, intercept), covariance = np.polyfit(
+        np.log(ns[usable]),
+        np.log(t2s[usable]),
+        1,
+        w=t2s[usable] / t2errs[usable],
+        cov="unscaled",
+    )
+    t2_1 = float(np.exp(intercept))
+    return CPMGAnalysis(
+        t2_1_us=t2_1,
+        t2_1_err_us=t2_1 * float(np.sqrt(covariance[1, 1])),
+        gamma=float(gamma),
+        gamma_err=float(np.sqrt(covariance[0, 0])),
+        fit_rows=fit_rows,
+    )
 
 
 CPMG_LENGTHS_VARIABLE = "lengths"
@@ -425,7 +465,10 @@ class CPMG_Exp(Experiment[CPMG_Result, CPMG_Cfg]):
         rows and fits failing the decay-time, uncertainty or contrast checks
         retain NaN T2 values. Raise ValueError if no row passes. Optional t2r
         and t1 values in us add Ramsey and 2*T1 reference lines, not fit inputs.
-        Return counts, accepted decay times and their fit uncertainties.
+        Return the weighted log-linear power law T2(n)=T2_1*n**gamma and its
+        unscaled propagated errors. Only accepted rows with finite positive
+        n, T2 and uncertainty are usable. Fewer than three usable rows gives
+        None fit values without failing or changing the plotted T2 points.
         """
         result = source.result
         fit_fringe, t2r, t1 = options.fit_fringe, options.t2r, options.t1
@@ -454,16 +497,14 @@ class CPMG_Exp(Experiment[CPMG_Result, CPMG_Cfg]):
                 continue
 
             plens = lens - lens[0]
-            if fit_fringe:
-                fit = fit_decay_fringe(plens, real_signal)
-                t2 = fit.decay_time
-                t2err = fit.decay_time_err
-                fit_signal = fit.curve
-            else:
-                fit = fit_decay(plens, real_signal)
-                t2 = fit.decay_time
-                t2err = fit.decay_time_err
-                fit_signal = fit.curve
+            fit = (
+                fit_decay_fringe(plens, real_signal)
+                if fit_fringe
+                else fit_decay(plens, real_signal)
+            )
+            t2 = fit.decay_time
+            t2err = fit.decay_time_err
+            fit_signal = fit.curve
 
             if is_good_fit(plens, fit_signal, real_signal, t2, t2err):
                 t2s[i] = t2
@@ -471,6 +512,8 @@ class CPMG_Exp(Experiment[CPMG_Result, CPMG_Cfg]):
 
         if np.all(np.isnan(t2s)):
             raise ValueError("No valid Fitting T2 found. Please check the data.")
+
+        summary = _summarize_t2(times, t2s, t2errs)
 
         # Compare decay times across pulse counts without treating IQ as population.
         fig, _ = plots.subplots(num="fit", nrows=1, ncols=2, figsize=(8, 3))
@@ -483,6 +526,15 @@ class CPMG_Exp(Experiment[CPMG_Result, CPMG_Cfg]):
         ax1.set_ylabel("Time (us)")
 
         ax2.errorbar(times, t2s, yerr=t2errs, label=r"$T_{CPMG}$", color="red", fmt=".")
+        if summary.t2_1_us is not None and summary.gamma is not None:
+            fit_ns = np.geomspace(times.min(), times.max(), 200)
+            ax2.plot(
+                fit_ns,
+                summary.t2_1_us * fit_ns**summary.gamma,
+                label=r"$T_{2,1} n^{\gamma}$",
+                color="black",
+            )
+            ax2.set_title(rf"$\gamma = {summary.gamma:.3g}$")
         if t1 is not None:
             ax2.axhline(2 * t1, color="blue", linestyle="--", label=r"$2T_1$")
         if t2r is not None:
@@ -492,6 +544,7 @@ class CPMG_Exp(Experiment[CPMG_Result, CPMG_Cfg]):
         ax2.set_yscale("log")
         ax2.legend()
         ax2.set_xlabel("Number of Pi")
+        ax2.set_ylabel("T2 (us)")
 
         fig.tight_layout()
-        return CPMGAnalysis(ns=times, t2s=t2s, t2errs=t2errs)
+        return summary

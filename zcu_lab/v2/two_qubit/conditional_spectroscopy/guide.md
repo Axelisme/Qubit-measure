@@ -33,9 +33,11 @@ F1/F2 tone 都必須有 circle classifier 與 radius。缺少校準或使用 lin
 
 ## 看圖與分析
 
+Analyze 只發布圖並回傳 `None`。激發機率、每點 shot 數與完整性只在分析內供畫圖使用。
+
 Live 每個 DC／branch 顯示兩條 P_e 曲線，第一條為 F1，第二條為 F2。曲線由當下累計計數更新。FIT 分別提供 F1、F2 的四分支頻譜，各 DC 一條線。啟用 DC source 時，另有各 qubit 的四分支 DC × frequency 熱圖。
 
-P_e 等於該 qubit 判為 e 的計數除以全部 terminal 計數，other 留在分母。零計數或未量點為 NaN。已完成 rounds 的部分資料仍可分析，`acquired_shots` 列出每點計數，`complete` 表示該 DC／準備態的所有頻率都取得要求的 reps × rounds。Shots 圖列出各頻率的實際 shot 數與要求值，部分資料不會偽裝成完整掃描。
+P_e 等於該 qubit 判為 e 的計數除以全部 terminal 計數，other 留在分母。零計數或未量點為 NaN。已完成 rounds 的部分資料仍可分析，分析內的 `acquired_shots` 記錄每點計數，`complete` 表示該 DC／準備態的所有頻率都取得要求的 reps × rounds。Shots 圖列出各頻率的實際 shot 數與要求值，部分資料不會偽裝成完整掃描。
 
 這些圖顯示分類後的激發機率。它們不直接給出高階態 population、leakage、Hamiltonian 或 CZ frequency。峰的位置與下一步 probe 窗口由 operator 判讀。
 

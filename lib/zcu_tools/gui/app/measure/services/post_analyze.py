@@ -14,6 +14,7 @@ from zcu_tools.gui.app.measure.adapter import (
 from zcu_tools.gui.app.measure.events.tab import TabInteractionFact
 from zcu_tools.gui.app.measure.services.pane_commit import commit_post_analysis
 from zcu_tools.gui.app.measure.state import PostAnalysisPaneState
+from zcu_tools.gui.app.measure.summary import summarize_analysis
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.operation_handles import OperationHandles
@@ -186,6 +187,8 @@ class PostAnalyzeService(StagedAnalyzeService):
         params = captured_inputs.params
         plots = captured_inputs.plots
         writeback = self._writeback
+        if post_result is not None:
+            summarize_analysis(post_result)
         draft: Any | None = None
         try:
             proposal_items = (
