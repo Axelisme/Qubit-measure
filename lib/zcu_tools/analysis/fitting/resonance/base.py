@@ -26,8 +26,17 @@ def run_complex_refinement(
     bounds: tuple[Sequence[float], Sequence[float]],
     *,
     model_name: str,
-) -> NDArray[np.float64] | None:
-    """Run the shared bounded complex-fit optimizer with explicit fallback."""
+    parameter_names: Sequence[str] | None = None,
+) -> NDArray[np.float64]:
+    """Return the bounded least-squares parameters for a complex residual.
+
+    ``initial`` and both bounds use the residual's optimizer coordinates.
+    ``parameter_names`` labels those coordinates in boundary diagnostics; omitted
+    names use their indices. ``model_name`` identifies the fit in errors.
+    Raise ValueError on optimizer exceptions, unsuccessful termination, non-finite
+    parameters/residuals, or active bounds. Backend messages and evaluation counts
+    are retained; no sequential result is substituted.
+    """
     try:
         result = sp.optimize.least_squares(
             residual,
@@ -40,27 +49,26 @@ def run_complex_refinement(
             max_nfev=10_000,
         )
     except (RuntimeError, ValueError, FloatingPointError) as exc:
-        warnings.warn(
-            f"{model_name} complex refinement failed; using sequential "
-            f"initializer ({exc})",
-            RuntimeWarning,
-            stacklevel=2,
-        )
-        return None
+        raise ValueError(f"{model_name} complex refinement failed: {exc}") from exc
 
-    if (
-        not result.success
-        or not np.all(np.isfinite(result.x))
-        or not np.all(np.isfinite(result.fun))
-        or np.any(result.active_mask != 0)
-    ):
-        warnings.warn(
-            f"{model_name} complex refinement was non-finite, unsuccessful, or "
-            "reached a parameter bound; using sequential initializer",
-            RuntimeWarning,
-            stacklevel=2,
+    reasons = []
+    if not result.success:
+        reasons.append(f"{result.message} (nfev={result.nfev})")
+    if not np.all(np.isfinite(result.x)):
+        reasons.append("non-finite parameters")
+    if not np.all(np.isfinite(result.fun)):
+        reasons.append("non-finite residuals")
+    for active_index in np.flatnonzero(result.active_mask):
+        index = int(active_index)
+        name = parameter_names[index] if parameter_names is not None else str(index)
+        reasons.append(
+            f"parameter bound: {name}={result.x[index]} "
+            f"(lower={bounds[0][index]}, upper={bounds[1][index]})"
         )
-        return None
+    if reasons:
+        raise ValueError(
+            f"{model_name} complex refinement failed: {'; '.join(reasons)}"
+        )
     return np.asarray(result.x, dtype=np.float64)
 
 

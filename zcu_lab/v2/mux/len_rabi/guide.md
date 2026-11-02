@@ -98,9 +98,10 @@ Review the curve and fit quality, especially for small-truncation simulations.
 
 Each qualifying tone proposes `<qubit>.ext.rabi_freq` in MHz.
 With source configuration, candidates copy the measured pulse and
-set fitted pi/pi2 lengths at `<qubit>.pulses.pi_amp` and
-`<qubit>.pulses.pi2_amp`. Separate candidates set `module.x180` and
-`module.x90` to those keys.
+set fitted pi/pi2 lengths at `<qubit>.pulses.pi_len` and
+`<qubit>.pulses.pi2_len`. Separate candidates set `module.x180` and
+`module.x90` to those keys. The pi_amp/pi2_amp gain-calibration pulses remain
+unchanged.
 The `ext.pi_product` candidate is source gain times fitted pi length.
 Review the source shape, flat_top ramps and each pulse/slot destination.
 

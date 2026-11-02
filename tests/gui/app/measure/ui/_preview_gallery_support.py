@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import base64
+from io import BytesIO
 
+from matplotlib.figure import Figure
+from PIL import Image, ImageDraw
 from qtpy.QtCore import QBuffer, QByteArray, QIODevice, QRect, QSize
 from qtpy.QtGui import QColor, QPixmap
 from qtpy.QtWidgets import QApplication
@@ -40,6 +43,17 @@ def renderer_640x480(_fig: object) -> bytes:
     """Ignore the figure and return a fresh 640x480 PNG; requires a Qt application."""
     # Each call returns fresh 640x480 PNG (production screenshot size).
     return make_png_bytes(640, 480, "#286ac7")
+
+
+def framed_renderer(figure: Figure) -> bytes:
+    """Render a 4:3 white raster with a coloured perimeter supplied by its label."""
+    image = Image.new("RGB", (640, 480), str(figure.get_label()))
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((16, 16, 623, 463), fill="white")
+    draw.line((32, 448, 320, 32, 608, 448), fill="#333333", width=4)
+    output = BytesIO()
+    image.save(output, format="PNG")
+    return output.getvalue()
 
 
 def _aspect_ratio(size: QSize) -> float:
