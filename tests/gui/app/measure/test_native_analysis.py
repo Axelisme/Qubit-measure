@@ -649,9 +649,5 @@ def test_unsupported_native_field_fails_analysis_before_publication(
     assert outcome.error is not None
     assert "summary.payload" in outcome.error
     assert "object" in outcome.error
-    pane = (
-        host.state.get_tab(host.tab).post_analysis
-        if post
-        else host.state.get_tab(host.tab).analysis
-    )
-    assert pane.result is None
+    method = "tab.get_post_analyze_result" if post else "tab.get_analyze_result"
+    assert host.invoke(method) == {"summary": None, "invalid": []}

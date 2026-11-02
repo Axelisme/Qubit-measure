@@ -467,7 +467,7 @@ Run 使用 saved readout 的 circle／radius 作 live 分類，缺 classifier �
 Raw acquisition 與 joint fit 不要求先有校準，analysis 不使用外部 confusion matrix。
 
 Amp／Len Rabi、Check、ResetCheck 與 AC Stark 使用 explicit RunContext 執行，GUI 將同次 cfg／Result 配成 RunRecord。同步 analyze 接 source／typed options／Plots，不保存跨次成功狀態。
-Check 在 Analyze 才要求 saved cfg 的 circle／radius；其他分析保留各自的 nullable cfg 契約。Amp 回傳 AmpRabiFit，Len 回傳 RabiJointFitResult，兩者的 readout 診斷只讀 source.cfg。Check 只發布分類 scatter，無數值結果。AC Stark 回傳 AcStarkAnalysis，另提供 explicit source／AcStarkPlotOptions 的 population 圖入口；即時 Ground／Excited／Other 熱圖及 current trace 各自具名。
+Check 在 Analyze 才要求 saved cfg 的 circle／radius；其他分析保留各自的 nullable cfg 契約。Amp 回傳 AmpRabiFit，Len 回傳 RabiJointFitSummary，兩者的 readout 診斷只讀 source.cfg。Check 只發布分類 scatter，無數值結果。AC Stark 回傳 AcStarkAnalysis，另提供 explicit source／AcStarkPlotOptions 的 population 圖入口；即時 Ground／Excited／Other 熱圖及 current trace 各自具名。
 
 Amp 與 Len Rabi 共用 `zcu_tools.analysis.fitting.singleshot_rabi` 的 raw-IQ joint likelihood。
 各實驗在自己的 analyze 畫 population、histogram 與 confusion matrix 診斷圖。
