@@ -117,7 +117,7 @@ def _run_t1_decay(cfg: T1Cfg, *, context: RunContext, retry: int) -> T1Result:
         builder = TimelineBuilder(
             context.soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
         )
-        delay = builder.add_table_sweep("delay", table.times_us)
+        delay = builder.add_table_sweep("delay", table.times_us.tolist())
         if cfg.reset is not None:
             builder.emit(cfg.reset.build("reset"))
         builder.emit(Pulse("pi_pulse", cfg.pi_pulse))

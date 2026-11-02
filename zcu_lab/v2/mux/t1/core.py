@@ -401,7 +401,7 @@ class MuxT1Exp(Experiment[MuxT1Result, MuxT1Cfg]):
                 initial_delay=cfg.initial_delay,
                 relax_delay=cfg.relax_delay,
             )
-            delay = builder.add_table_sweep("delay_idx", table.times_us)
+            delay = builder.add_table_sweep("delay_idx", table.times_us.tolist())
             if cfg.reset is not None:
                 builder.emit(Reset("reset", cfg.reset))
             timelines = [f"drive_{index}" for index in indices]

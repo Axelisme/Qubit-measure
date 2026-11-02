@@ -213,7 +213,7 @@ class HeraldingT1Exp(Experiment[HeraldingT1Result, HeraldingT1Cfg]):
             builder = TimelineBuilder(
                 context.soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
             )
-            delay = builder.add_table_sweep("delay_idx", delay_table.times_us)
+            delay = builder.add_table_sweep("delay_idx", delay_table.times_us.tolist())
             builder.emit(PulseReadout("herald", cfg.readout))
             builder.emit(Pulse("pi_pulse", cfg.pi_pulse))
             builder.emit(DelayAuto("t1_delay", t=delay))

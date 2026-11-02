@@ -181,7 +181,7 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
             builder = TimelineBuilder(
                 context.soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
             )
-            delay = builder.add_table_sweep("delay", table.times_us)
+            delay = builder.add_table_sweep("delay", table.times_us.tolist())
             builder.add_loop("ge", 2)
             if cfg.reset is not None:
                 builder.emit(Reset("reset", cfg.reset))

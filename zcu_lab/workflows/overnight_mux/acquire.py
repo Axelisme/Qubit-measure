@@ -131,7 +131,7 @@ def _run_t1_decay(cfg: MuxT1Cfg, *, context: RunContext, retry: int) -> MuxT1Res
             initial_delay=cfg.initial_delay,
             relax_delay=cfg.relax_delay,
         )
-        delay = builder.add_table_sweep("delay_idx", table.times_us)
+        delay = builder.add_table_sweep("delay_idx", table.times_us.tolist())
         if cfg.reset is not None:
             builder.emit(Reset("reset", cfg.reset))
         timelines = [f"drive_{index}" for index in indices]
