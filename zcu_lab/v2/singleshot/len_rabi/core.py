@@ -13,7 +13,9 @@ from pydantic.dataclasses import dataclass as pydantic_dataclass
 from zcu_tools.analysis.fitting.singleshot import transition_state_bin_probabilities
 from zcu_tools.analysis.fitting.singleshot_rabi import (
     RabiJointFitResult,
+    RabiJointFitSummary,
     fit_rabi_joint,
+    summarize_rabi_joint_fit,
 )
 from zcu_tools.analysis.singleshot import classify_rabi_iq
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
@@ -317,7 +319,7 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
         options: LenRabiAnalyzeOptions,
         *,
         plots: Plots,
-    ) -> RabiJointFitResult:
+    ) -> RabiJointFitSummary:
         result = source.result
 
         fit = fit_rabi_joint(
@@ -403,4 +405,4 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
             classified_distribution,
         )
         _plot_confusion_matrix(confusion_ax, fit)
-        return fit
+        return summarize_rabi_joint_fit(fit)

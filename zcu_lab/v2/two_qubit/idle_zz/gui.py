@@ -9,7 +9,6 @@ from zcu_tools.gui.app.measure.adapter import Adapter, Analysis, AnalyzeRequest
 from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
-from ._analysis import IdleZZAnalysis
 from .core import IdleZZCfg, IdleZZExp, IdleZZResult
 from .form import idle_zz_form
 
@@ -21,7 +20,7 @@ def make_form(ctx: FormContext) -> Form[IdleZZCfg]:
     return idle_zz_form(ctx, IdleZZCfg)
 
 
-def _analyze(req: AnalyzeRequest[IdleZZRun, None], *, plots: Plots) -> IdleZZAnalysis:
+def _analyze(req: AnalyzeRequest[IdleZZRun, None], *, plots: Plots) -> None:
     """Fit saved cfg/raw only; current aliases, Form and library are ignored."""
     return IdleZZExp().analyze(req.run_result, None, plots=plots)
 

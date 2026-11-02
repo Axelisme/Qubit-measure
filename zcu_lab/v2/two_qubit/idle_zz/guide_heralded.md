@@ -24,7 +24,7 @@ Sums 是 float64 `DC × spectator_states × delay × 3 × 3 × 3 × 3` 原始計
 
 每個 DC 點另畫兩個 branch 的全部 9 類 herald 比例。g,g 是 pass fraction，分母是所有 herald classes 的總數。Pass fraction 是分類接受率，不是 ground-state purity。Classifier 誤差、有限 radius 與熱混合都限制此解讀。
 
-Terminal 分析回傳聯合 fit 的 magnitude、signed frequency、covariance error、fit_quality、ζ 與原因。terminal.branches 保留 gg 曲線，ee_branches 保留對應的 ee 原始反號曲線，兩者都按實際 spectator g/e 排列。圖上把 ee 乘 −1 疊圖，不改保存計數。外層另有 herald_matrix 與 pass_fraction。
+Analyze 只發布圖並回傳 `None`。逐 DC 的聯合 fit、ζ、誤差與原因，以及 gg／ee 曲線和 herald 比例，只在分析內供畫圖使用。兩組 branch 都按實際 spectator g/e 排列。圖上把 ee 乘 −1 疊圖，不改保存計數。
 
 ζ 是聯合頻率的 `f_e − f_g`，相當於 gg 的 `f_Xπ − f_I`。符號與解析度限制沿用普通版指南。ζ 不宣稱純 Hamiltonian ZZ，也不寫回 calibration。Analyze 只讀保存的 cfg，不查目前 Form 或 library。
 

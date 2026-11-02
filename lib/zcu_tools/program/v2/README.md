@@ -1,6 +1,6 @@
 # program/v2
 
-**Last updated:** 2026-11-02，查表掃描、ADC native tail 與 WMEM 分析
+**Last updated:** 2026-11-02，原生長度查表與 waveform-address selection
 
 **讀者：** lab-author、framework-dev、agent。查找 V2 program 公開 API、型別契約與編譯規則的 owner。
 
@@ -30,7 +30,7 @@
 每條 timeline 保存相對 reference 的結尾，`default` 不是 reference。
 帶 timeline 的 pulse／trigger 在結尾加 t 發射。Readout 的作者結尾只含 generator waveform 與 pre/post delay，ADC 視窗留在 ADC channel，shot 收尾仍等待全部 ADC。
 未帶 timeline 且未進範圍的原生輸出保留 QICK 行為。
-`pulse_by_reg` 與 `pulse_from_length_reg` 選到 timeline 時，須提供配對的 `selection` metadata。
+`pulse_by_reg` 選到 timeline 時，須提供配對的 `selection` metadata。
 同 generator 的 pulse 重疊不能靠另一條 timeline 豁免。帶 timeline 的後一個 trigger 必須證明不與同 ADC 前一視窗重疊，否則在 build 時報錯。
 原生 `t=None` 無法定位 ADC 起點，會使後一個同 ADC timeline trigger 無法證明不重疊。此未知標記不捏造 shot 收尾的 runtime 結尾。
 Builder 原生布林控制選項只接受 keyword，其餘參數沿用同名 program 方法。
@@ -109,9 +109,8 @@ Registry identity 與 lowering 使用有效 cfg，`set_param()` 則修改接收�
 線性的 `ro_length` sweep 保留 QICK ADC-window 的既有編譯限制。`TableParam` 的拒絕時機見[查表掃描](#查表掃描)。
 參數表見 [modules](modules/README.md#constructor-overrides)，跨家族 audit 見 [set_param contract](../../../../tests/cfg_model/test_set_param_contract.py)。
 
-`GainSweep` 標註的 `SweepCfg` 要求 start、stop 與實際最後一點在 [-1, 1]，單位為 DAC full-scale fraction，a.u.。
-Form 座標投影後使用相同驗證器。Start=-1、stop=1.1、step=0.5 的實際末點為 1.0，因此接受；Range + Expts 保留 stop=1.1，因此拒絕。
-一般 `SweepCfg` 不限制單位。
+`SweepCfg` 驗證 start、stop、step 與 expts 的一致性，不限制單位或 gain 範圍。
+Scalar `Gain` 保留 [-1, 1] 的欄位限制，單位為 DAC full-scale fraction，a.u.。
 
 ## 呼叫端 YAML 編譯設定
 
@@ -163,7 +162,8 @@ Compiler 選 canonical signed-digit 項數最少的 W，平手取較小 W。
 換算只用至多 15-bit shifts 與加減，不用 ARITH、DIV 或時間表。時脈比為 1 不發出換算指令。
 乘積或中間值 signed32 overflow 在 build 時拒絕。
 
-現有 native length sweep 與 waveform／length selection table 提供 runtime 長度；timeline length-register playback 仍要求 selection metadata。
+現有 native length sweep 與 `Pulse(length=TableParam)` 提供 runtime 長度。
+Waveform-address selection 透過 `pulse_by_reg` 播放，置於 timeline 時要求配對 address producer 與候選 waveform 的 selection metadata。
 這不新增任意作者 length register 或 ADC length API。Ratio 7/5 的 W=359，ratio 56/5 的 W=2872，但目前 API 未開放 ADC／PFB runtime length consumer。
 編譯期已知 bias 使用字面值，零 span 不配置 sweep register。Runtime 結尾保留既有 register 加字面值偏移，只有需要獨立 register operand 的 consumer 才物化。
 同步可拆成既有非負 register 與非負字面值的 reference advance，不改事件時間或使用 s14。
@@ -201,8 +201,6 @@ Compiled request builder 從實際輸出效果提供 references，cfg-based API 
 
 ## Macro 層
 
-Runtime pulse／readout word macro 將單一 wmem template 載入 `r_wave`，修改欄位後直接送到 port，不將修改結果寫回 wmem。
-這讓播放時的更新保持原子性，固定 template 不隨掃描點改變。
 `add_table_sweep("freq", freqs)` 回傳的參數可傳給 `PulseReadout(..., freq=freq)`，由 QICK 逐點轉成 generator／ADC 字。
 原生 loop 收尾從 rotated dmem table 更新下一點的 wmem 欄位，最後一點後還原第一點。
 更新在 shot timing 後、loop test／jump 前執行，即使該發未播放也會前進，不啟用 DDS phase reset。
@@ -213,13 +211,14 @@ Runtime pulse／readout word macro 將單一 wmem template 載入 `r_wave`，修
 
 ## ComputedPulse 與 DMEM lookup
 
-新路徑在 `declare` 宣告候選 waveform 與 wmem-index table。每次 `emit` 捕捉 selector，由同次選擇決定 playback 與 post-delay。
+`ComputedPulse.declare` 宣告候選 waveform 與 wmem-index table。每次 `emit` 捕捉 selector，由同次選擇決定 playback 與 post-delay。
 Program owner 保留 waveform 分數尾段，加入所選 post 後取整一次，不使用最大候選 duration。
 Address producer、捕捉 selector 與依賴接受全流寫入稽核。
 
-Legacy `ComputedPulse` 在 `init()` 收集候選 pulse 的起始 wmem index，以 `add_dmem(base_idxs)` 保存 table。
-`run()` 用 `val_reg + dmem_offset` 讀取該候選起始 index，再交給 `pulse_by_reg`。
-`PulseRegistry` 會去重，因此候選 index 不保證連續。Flat-top table 存第一個 ramp_up entry，`flat_top_pulse=True` 連讀 ramp_up／flat／ramp_down 三個 entry。
+`ComputedPulse.lower` 透過 `LoadValue.lower_selected` 查出候選的起始 wmem index，再交給 `pulse_by_reg`。
+候選使用各自的 pulse 名稱，lookup table 保存實際起始 index，不假設候選連續。
+Flat-top table 存第一個 ramp_up entry，`flat_top_pulse=True` 播放 ramp_up／flat／ramp_down 三個 entry。
+ComputedPulse 拒絕 int4 flat-top 的額外 dummy wave，避免候選 stride 與實際 layout 不符。
 `ProgramResourcesMixin` 擁有全程式共享的順序 dmem buffer，`add_dmem()` 回傳 slice 起點。
 `compile_datamem()` 維持 QICK 的 `np.int32` array contract。`MyProgramV2` 建立完整 binary program 後，將 remote SoC 的 dmem 轉成一維 built-in `list[int]`，保留 signed int32 與 two's-complement bit pattern。
 

@@ -136,7 +136,7 @@ class TransmissionModel:
         refine_edelay: bool,
         fit_bg_amp_slope: bool,
         fit_bg_phase_curvature: bool,
-    ) -> tuple[float, float, complex, float, float, float] | None:
+    ) -> tuple[float, float, complex, float, float, float]:
         span = float(np.ptp(freqs))
         center = 0.5 * float(np.min(freqs) + np.max(freqs))
         amp_scale = max(float(np.sqrt(np.mean(np.abs(signals) ** 2))), 1e-12)
@@ -186,6 +186,20 @@ class TransmissionModel:
         ]
         lower = [freq_lower, np.log(1.0), -1e3, -1e3]
         upper = [freq_upper, np.log(1e9), 1e3, 1e3]
+        parameter_names = [
+            "freq_offset",
+            "log_Ql",
+            "a0_real_scaled",
+            "a0_imag_scaled",
+        ] + [
+            name
+            for name, enabled in (
+                ("bg_amp_slope_scaled", fit_bg_amp_slope),
+                ("bg_phase_curvature_scaled", fit_bg_phase_curvature),
+                ("edelay_offset_scaled", refine_edelay),
+            )
+            if enabled
+        ]
         if fit_bg_amp_slope:
             initial.append(0.0)
             lower.append(-5.0)
@@ -218,9 +232,8 @@ class TransmissionModel:
             initial,
             (lower, upper),
             model_name="transmission",
+            parameter_names=parameter_names,
         )
-        if result is None:
-            return None
         return decode(result)
 
     @classmethod
@@ -237,7 +250,21 @@ class TransmissionModel:
         fit_bg_amp_slope: bool = False,
         fit_bg_phase_curvature: bool = False,
     ) -> TransmissionParams:
-        """Fit a transmission response, resolving delay aliases within a radius."""
+        """Fit a transmission response on a monotonic finite frequency grid.
+
+        ``freqs`` and complex ``signals`` are equal-length 1-D arrays with at least
+        four samples. Delay uses inverse-frequency units. Supplied ``edelay`` is
+        fixed; otherwise the optional branch seed or search radii select its
+        initial alias. A seed cannot be combined with search radii.
+        The two background options independently enable log-amplitude slope and
+        quadratic phase curvature. Disabled terms stay zero; with both off, use
+        the sequential circle/phase fit.
+
+        Return TransmissionParams. Invalid inputs raise ValueError. Background
+        refinement raises ValueError on optimizer failure, non-finite results or
+        active parameter bounds, identifying the model and cause; it never
+        substitutes the sequential initializer for a failed refinement.
+        """
         validate_complex_fit_inputs(freqs, signals)
         refine_edelay = edelay is None
         if edelay is None:
@@ -249,9 +276,8 @@ class TransmissionModel:
                 branch_seed=edelay_branch_seed,
             )
 
-        sequential = cls._fit_sequential(freqs, signals, edelay)
         if not fit_bg_amp_slope and not fit_bg_phase_curvature:
-            return sequential
+            return cls._fit_sequential(freqs, signals, edelay)
 
         initializer = cls._initializer_for_refinement(freqs, signals, edelay)
 
@@ -263,8 +289,6 @@ class TransmissionModel:
             fit_bg_amp_slope=fit_bg_amp_slope,
             fit_bg_phase_curvature=fit_bg_phase_curvature,
         )
-        if refined is None:
-            return sequential
         freq, Ql, a0, edelay, bg_amp_slope, bg_phase_curvature = refined
 
         corrected = remove_background(

@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 import numpy as np
 from numpy.typing import NDArray
+from zcu_tools.analysis.fitting import FitQuality
 
 from .._sums import joint_probabilities
 from .fit import CZReturnFit, fit_return
@@ -30,11 +31,52 @@ class CZReturnData:
 
 
 @dataclass(frozen=True)
-class CZAmplitudeAnalysis:
+class CZAmplitudeData:
     """Count-derived joint populations and zero-phase first-cycle fit."""
 
     data: CZReturnData
     fit: CZReturnFit
+
+
+@dataclass(frozen=True)
+class CZReturnSummary:
+    """First-return scale and fixed-size zero-phase cosine diagnostics.
+
+    scale is the measured first positive period, or None with reason. period
+    retains a finite fit even when coverage prevents a proposal; error is its
+    1σ uncertainty. offset and contrast are joint probabilities. fit_quality
+    describes the actual fit without imposing an acceptance threshold.
+    """
+
+    scale: float | None
+    period: float | None
+    error: float | None
+    offset: float | None
+    contrast: float | None
+    fit_quality: FitQuality | None
+    reason: str | None
+
+
+@dataclass(frozen=True)
+class CZAmplitudeAnalysis:
+    """Fixed-size first-return fit; measured probabilities remain plot-local."""
+
+    fit: CZReturnSummary
+
+
+def summarize_return(fit: CZReturnFit) -> CZAmplitudeAnalysis:
+    """Retain fit values for writeback, not the curve or per-scale counts."""
+    return CZAmplitudeAnalysis(
+        CZReturnSummary(
+            fit.scale,
+            fit.period,
+            fit.error,
+            fit.offset,
+            fit.contrast,
+            fit.fit_quality,
+            fit.reason,
+        )
+    )
 
 
 def analyze_return(
@@ -43,7 +85,7 @@ def analyze_return(
     *,
     acquired_shots: NDArray[np.float64],
     expected_shots: int,
-) -> CZAmplitudeAnalysis:
+) -> CZAmplitudeData:
     """Fit P00 from terminal counts, retaining other in the denominator.
 
     counts is (Ns,3,3), optionally already selected on herald (g,g).
@@ -65,4 +107,4 @@ def analyze_return(
         analyzed_shots=accepted,
     )
     fit = fit_return(scales, data.probabilities[:, 0, 0], data.complete, accepted)
-    return CZAmplitudeAnalysis(data, fit)
+    return CZAmplitudeData(data, fit)

@@ -31,9 +31,9 @@ DC 操作也可能影響其他 loop。工作點與補償由操作員設定並記
 
 Fitter 給非負 fringe magnitude m，單位 MHz。在兩分支同側的前提下，`f = sign(detune) * m`，`ζ = f_Xπ − f_I`。負 detune 也使用 signed frequency 求差。共同人工 phase ramp 在頻差中抵消。
 
-每個 DC 點有兩分支 Ramsey／fit 圖，另有 ζ 圖。Summary 保留 magnitude、signed frequency、frequency covariance 1σ error、sign resolution、fit_quality 與不可用原因。ζ error 是兩支 frequency errors 的平方和開根號。
+每個 DC 點有兩分支 Ramsey／fit 圖，另有 ζ 圖。ζ error 是兩支 frequency errors 的平方和開根號。Analyze 只發布圖並回傳 `None`。逐 DC 的 branch fits、ζ、誤差與原因只在分析內供畫圖使用。
 
-ζ 是名目分支的單頻模型擬合頻差，不是純化的 Hamiltonian ZZ。熱 population 可能混合多個 conditional 頻率。操作員須檢查曲線、殘差、R²、normalized residual RMS 與 relative parameter errors。有限 fit 不代表模型偏差已排除，不套自動統計拒絕門檻。
+ζ 是名目分支的單頻模型擬合頻差，不是純化的 Hamiltonian ZZ。熱 population 可能混合多個 conditional 頻率。操作員須比較量測曲線與擬合曲線，並檢查 ζ 圖的誤差和不可用原因。有限 fit 不代表模型偏差已排除，不套自動統計拒絕門檻。
 
 ### 符號辨識限制
 

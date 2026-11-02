@@ -13,7 +13,9 @@ from pydantic.dataclasses import dataclass as pydantic_dataclass
 from zcu_tools.analysis.fitting.singleshot import transition_state_bin_probabilities
 from zcu_tools.analysis.fitting.singleshot_rabi import (
     RabiJointFitResult,
+    RabiJointFitSummary,
     fit_rabi_joint,
+    summarize_rabi_joint_fit,
 )
 from zcu_tools.analysis.singleshot import classify_rabi_iq
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
@@ -24,7 +26,7 @@ from zcu_tools.experiment.v2.runtime import RunOptions
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import GainSweep, Pulse, Readout, Reset, TimelineBuilder
+from zcu_tools.program.v2 import Pulse, Readout, Reset, SweepCfg, TimelineBuilder
 
 from zcu_lab.v2.support import live_line
 from zcu_lab.v2.support.singleshot.util import (
@@ -160,14 +162,14 @@ class AmpRabiFit:
     pi2_gain_error: float
     frequency: float
     amplitude: float
-    joint_fit: RabiJointFitResult
+    joint_fit: RabiJointFitSummary
 
 
 class AmpRabiCfg(ConfigBase):
     reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
     qub_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Qub Pulse")]
     readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-    gain: Annotated[GainSweep, FieldMeta(label="Gain", unit="a.u.")]
+    gain: Annotated[SweepCfg, FieldMeta(label="Gain", unit="a.u.")]
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
     ] = 1
@@ -193,7 +195,15 @@ def _flatten_round_shots(raw: NDArray[np.complex128]) -> NDArray[np.complex128]:
 
 def _gain_calibration(fit: RabiJointFitResult) -> AmpRabiFit:
     if not fit.backend.valid:
-        return AmpRabiFit(np.nan, np.nan, np.nan, np.nan, np.nan, np.nan, fit)
+        return AmpRabiFit(
+            np.nan,
+            np.nan,
+            np.nan,
+            np.nan,
+            np.nan,
+            np.nan,
+            summarize_rabi_joint_fit(fit),
+        )
     pi_gain = np.pi / fit.omega
     omega_index = fit.backend.parameter_names.index("log_omega")
     # d(pi / omega) / d(log omega) = -pi / omega.
@@ -206,7 +216,7 @@ def _gain_calibration(fit: RabiJointFitResult) -> AmpRabiFit:
         float(pi_error / 2),
         fit.omega / (2 * np.pi),
         abs(fit.initial_populations[1] - fit.p_inf),
-        fit,
+        summarize_rabi_joint_fit(fit),
     )
 
 

@@ -6,7 +6,6 @@ from math import ceil
 
 import pytest
 from qick.asm_v2 import Macro, Pulse, QickSweep1D, WriteReg
-from zcu_tools.program.v2.macro.wmem import PulseFromRegs
 from zcu_tools.program.v2.timeline import CycleBounds, TimelineProgramV2
 
 from tests.program._profiles import GEN_MHZ, RO_MHZ, TPROC_MHZ, load_soccfg
@@ -616,20 +615,23 @@ def test_repeat_preserves_swept_parent_and_cross_loop_long_pulse(sync_at_end):
 
 
 def test_zero_entry_synchronized_repeat_accepts_unbounded_selected_start():
-    from zcu_tools.program.v2.modules import PulseCfg, TableLengthPulse
+    from zcu_tools.program.v2.modules import PulseCfg
+    from zcu_tools.program.v2.modules.computed_pulse import ComputedPulse
     from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 
-    drive = TableLengthPulse(
+    drive = ComputedPulse(
         "selected",
-        PulseCfg(
-            ch=0,
-            nqz=1,
-            freq=1000,
-            gain=0.5,
-            waveform=ConstWaveformCfg(length=7 / GEN_MHZ),
-        ),
-        lengths=[7 / GEN_MHZ, 11 / GEN_MHZ],
-        idx_reg="scan",
+        val_reg="scan",
+        pulses=[
+            PulseCfg(
+                ch=0,
+                nqz=1,
+                freq=1000,
+                gain=0.5,
+                waveform=ConstWaveformCfg(length=n / GEN_MHZ),
+            )
+            for n in (7, 11)
+        ],
     )
 
     def initialize(prog):
@@ -677,20 +679,23 @@ def test_unbounded_external_timeline_survives_synchronized_repeat(actual):
 
 
 def test_variable_repeat_selected_cross_grid_lengths_and_runtime_getters():
-    from zcu_tools.program.v2.modules import PulseCfg, TableLengthPulse
+    from zcu_tools.program.v2.modules import PulseCfg
+    from zcu_tools.program.v2.modules.computed_pulse import ComputedPulse
     from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 
-    drive = TableLengthPulse(
+    drive = ComputedPulse(
         "selected",
-        PulseCfg(
-            ch=0,
-            nqz=1,
-            freq=1000,
-            gain=0.5,
-            waveform=ConstWaveformCfg(length=7 / GEN_MHZ),
-        ),
-        lengths=[7 / GEN_MHZ, 11 / GEN_MHZ],
-        idx_reg="scan",
+        val_reg="scan",
+        pulses=[
+            PulseCfg(
+                ch=0,
+                nqz=1,
+                freq=1000,
+                gain=0.5,
+                waveform=ConstWaveformCfg(length=n / GEN_MHZ),
+            )
+            for n in (7, 11)
+        ],
     )
 
     def initialize(prog):
@@ -1103,23 +1108,13 @@ def _repeat_with_external_wait(prog: TimelineProgramV2):
         prog.delay_by_timeline()
 
 
-def _send_config(
-    prog: TimelineProgramV2, runtime_words: bool, offset: int, timeline: str | None
-):
-    if runtime_words:
-        prog.send_readoutconfig_from_regs(
-            0, "ro", freq_reg="count", t=offset / TPROC_MHZ, timeline=timeline
-        )
-    else:
-        prog.send_readoutconfig(0, "ro", t=offset / TPROC_MHZ, timeline=timeline)
+def _send_config(prog: TimelineProgramV2, offset: int, timeline: str | None):
+    prog.send_readoutconfig(0, "ro", t=offset / TPROC_MHZ, timeline=timeline)
 
 
-@pytest.mark.parametrize("runtime_words", [False, True])
 @pytest.mark.parametrize("offset", [0, 5])
 @pytest.mark.parametrize("transition", ["none", "join", "fork", "partial-native"])
-def test_register_repeat_external_source_allows_config_placement(
-    runtime_words, offset, transition
-):
+def test_register_repeat_external_source_allows_config_placement(offset, transition):
     def body(prog):
         _repeat_with_external_wait(prog)
         if transition == "join":
@@ -1128,18 +1123,17 @@ def test_register_repeat_external_source_allows_config_placement(
             prog.fork("external", into="derived")
         elif transition == "partial-native":
             prog.delay(20 / TPROC_MHZ)
-        _send_config(prog, runtime_words, offset, "external")
+        _send_config(prog, offset, "external")
 
     (shot,) = _shots(_program(body, _readout_register_initialize))
     assert _waves(shot) == [100 + offset]
     assert (shot.body_end_cycle, shot.end_cycle) == (100 + offset,) * 2
 
 
-@pytest.mark.parametrize("runtime_words", [False, True])
 @pytest.mark.parametrize("offset", [0, 5])
 @pytest.mark.parametrize("transition", ["join", "fork", "delay_by_timeline", "native"])
 def test_register_repeat_ordinary_schedule_point_allows_config_placement(
-    runtime_words, offset, transition
+    offset, transition
 ):
     def body(prog):
         _repeat_with_external_wait(prog)
@@ -1154,7 +1148,7 @@ def test_register_repeat_ordinary_schedule_point_allows_config_placement(
             prog.delay_by_timeline(timeline="external")
         else:
             prog.delay(70 / TPROC_MHZ)
-        _send_config(prog, runtime_words, offset, target)
+        _send_config(prog, offset, target)
         prog.pulse(1, "p1", timeline=target)
 
     (shot,) = _shots(_program(body, _readout_register_initialize))
@@ -1165,14 +1159,11 @@ def test_register_repeat_ordinary_schedule_point_allows_config_placement(
     assert (shot.body_end_cycle, shot.end_cycle) == (origin + PULSE_END + offset,) * 2
 
 
-@pytest.mark.parametrize("runtime_words", [False, True])
 @pytest.mark.parametrize("offset", [0, 5])
-def test_register_repeat_native_config_does_not_place_on_wait_source(
-    runtime_words, offset
-):
+def test_register_repeat_native_config_does_not_place_on_wait_source(offset):
     def body(prog):
         _repeat_with_external_wait(prog)
-        _send_config(prog, runtime_words, offset, None)
+        _send_config(prog, offset, None)
         prog.pulse(1, "p1", timeline="default")
 
     (shot,) = _shots(_program(body, _readout_register_initialize))
@@ -1672,7 +1663,7 @@ def test_nested_native_sweep_can_cross_timestamp_floor_without_losing_managed_gu
     assert [s.end_cycle - s.start_cycle for s in shots] == ends
 
 
-@pytest.mark.parametrize("native", ["macro", "runtime-words", "auto"])
+@pytest.mark.parametrize("native", ["macro", "auto"])
 def test_repeat_guard_observes_native_pulse_entrypoints(native):
     def body(prog):
         prog.delay_by_timeline()
@@ -1680,12 +1671,6 @@ def test_repeat_guard_observes_native_pulse_entrypoints(native):
             prog.pulse(0, "p0", timeline="default")
             if native == "macro":
                 prog.append_macro(Pulse(ch=0, name="p0", t=PULSE_END / TPROC_MHZ))
-            elif native == "runtime-words":
-                prog.append_macro(
-                    PulseFromRegs(
-                        ch=0, name="p0", gain_reg="count", t=PULSE_END / TPROC_MHZ
-                    )
-                )
             else:
                 prog.append_macro(Pulse(ch=0, name="p0", t="auto"))
             prog.delay_by_timeline()

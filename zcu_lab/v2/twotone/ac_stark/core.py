@@ -23,7 +23,6 @@ from zcu_tools.experiment.v2.utils.round_zcu import round_zcu_gain, sweep2array
 from zcu_tools.experiment.v2.utils.snr import snr_checker
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
-    GainSweep,
     Pulse,
     Readout,
     Reset,
@@ -86,7 +85,7 @@ class AcStarkCfg(ConfigBase):
     stark_tone: Annotated[Pulse.Cfg, FieldMeta(label="Stark resonator tone")]
     probe: Annotated[Pulse.Cfg, FieldMeta(label="Qubit spectroscopy probe")]
     readout: Readout.Cfg
-    gain: Annotated[GainSweep, FieldMeta(label="Stark gain", unit="a.u.")]
+    gain: Annotated[SweepCfg, FieldMeta(label="Stark gain", unit="a.u.")]
     freq: Annotated[SweepCfg, FieldMeta(label="Probe frequency", unit="MHz")]
     earlystop_snr: Annotated[float | None, FieldMeta(label="Early-stop SNR")] = None
 

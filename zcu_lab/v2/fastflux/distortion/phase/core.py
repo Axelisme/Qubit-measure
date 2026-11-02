@@ -62,12 +62,6 @@ class PhaseCfg(ConfigBase):
     ] = 1.0
 
 
-@dataclass(frozen=True)
-class PhaseAnalysis:
-    lengths_us: NDArray[np.float64]
-    phases_deg: NDArray[np.float64]
-
-
 class PhaseExp(Experiment[PhaseResult, PhaseCfg]):
     # inner phases raw deg (IDENTITY); outer lengths memory-us -> disk-s via US_TO_S
     AXES_SPEC: ClassVar[AxesSpec[PhaseResult, PhaseCfg]] = AxesSpec(
@@ -153,7 +147,7 @@ class PhaseExp(Experiment[PhaseResult, PhaseCfg]):
         options: None,
         *,
         plots: Plots,
-    ) -> PhaseAnalysis:
+    ) -> None:
         """Extract unwrapped phase in degrees versus the π/2-pair midpoint (us).
 
         Fit sine/cosine coefficients across projection phase at each wait.
@@ -226,5 +220,3 @@ class PhaseExp(Experiment[PhaseResult, PhaseCfg]):
         ax2.legend()
 
         fig.tight_layout()
-
-        return PhaseAnalysis(lengths_us=lengths, phases_deg=init_phases)

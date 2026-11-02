@@ -12,8 +12,9 @@ from numpy.typing import NDArray
 from pydantic import Field
 from qick import QickConfig
 from zcu_tools.analysis.singleshot import (
-    Centroid3IQAnalysis,
+    Centroid3Summary,
     analyze_centroid3_populations,
+    summarize_centroid3,
 )
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.core.waveform_format import decode_npz
@@ -33,7 +34,6 @@ from zcu_tools.experiment.v2.utils.round_zcu import round_zcu_freq, round_zcu_ga
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     Classify,
-    GainSweep,
     Pulse,
     PulseReadout,
     SweepCfg,
@@ -97,7 +97,7 @@ class RamanGFCfg(ConfigBase):
         ),
     ] = "frequency_area"
     detuning: Annotated[SweepCfg, FieldMeta(label="Two-photon detuning", unit="MHz")]
-    gain: Annotated[GainSweep, FieldMeta(label="Area via drive gain", unit="a.u.")]
+    gain: Annotated[SweepCfg, FieldMeta(label="Area via drive gain", unit="a.u.")]
     shots: Annotated[int, FieldMeta(label="Shots per point")] = Field(
         default=1024, ge=6
     )
@@ -276,14 +276,14 @@ class RamanGFExp(Experiment[RamanGFResult, RamanGFCfg]):
         options: None,
         *,
         plots: Plots,
-    ) -> Centroid3IQAnalysis:
+    ) -> Centroid3Summary:
         """Normalize acquired counts and correct with the saved readout confusion.
 
         Require source.cfg and its centroid3 ADC classifier. Missing cfg,
         missing classifier or circle/linear mode raises ValueError. No live
         Form, library, reference acquisition or simulator truth is consulted.
-        Return raw/unclipped corrected g/e/f preparation-label estimates and
-        training-matrix quality. The e label estimates leakage, not a pure
+        Plot raw/unclipped corrected g/e/f preparation-label estimates and
+        return only training confusion and its quality. The e label estimates leakage, not a pure
         energy-state population or gate fidelity. Incomplete/nonfinite or empty
         counts and singular confusion fail explicitly. Plot actual coordinates.
         """
@@ -360,4 +360,4 @@ class RamanGFExp(Experiment[RamanGFResult, RamanGFCfg]):
 
         populations(None)
         figure.show()
-        return result
+        return summarize_centroid3(result)

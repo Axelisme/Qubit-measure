@@ -60,22 +60,11 @@ class PhaseSlopeFit:
 
 @dataclass(frozen=True)
 class ConditionalPhaseAnalysis:
-    """Classified diagnostics and per-gate conditional phase from fitted slopes.
+    """Unique complete π crossing in MHz, or None with frequency_reason.
 
-    phases is (2,Nn,Nf), quadratures/acquired_shots are (2,2,Nn,Nf).
-    slope_fit uses actual spectator g/e. conditional_deg is slope_e−slope_g,
-    wrapped to [-180,180), with Nf entries. crossings contains the per-gate π
-    intersections. frequency_mhz is set only for a unique complete crossing.
+    Per-frequency phase, slope and count diagnostics are only used for plots.
     """
 
-    phases: tuple[tuple[tuple[QuadraturePhase, ...], ...], ...]
-    quadratures: NDArray[np.float64]
-    acquired_shots: NDArray[np.float64]
-    gate_counts: tuple[int, ...]
-    frequencies_mhz: tuple[float, ...]
-    slope_fit: PhaseSlopeFit
-    conditional_deg: NDArray[np.float64]
-    crossings: PhaseCrossings
     frequency_mhz: float | None
     frequency_reason: str | None
 

@@ -33,6 +33,7 @@ Invalid T1 leaves the derived field empty. Review the wait between repetitions r
 
 The live plot shows I for the four branches, not a population projection.
 Analysis plots the raw I and Q, the contrast ratio r and the residual estimate against gain.
+The summary contains only selected_gain; per-gain contrasts and residuals stay in the figure.
 Let S[a,b] be mean complex IQ with before-pi switch a and after-pi switch b.
 The after-pi differences are `d0=S[0,0]-S[0,1]` and `d1=S[1,0]-S[1,1]`.
 Analysis calculates `r=Re(d1*conj(d0))/|d0|²` without PCA or external IQg/IQe inputs.

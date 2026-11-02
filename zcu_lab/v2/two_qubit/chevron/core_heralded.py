@@ -30,7 +30,7 @@ from zcu_tools.program.v2.modules import (
 
 from zcu_lab.v2.support import live_line
 
-from .._rabi_analysis import RabiAnalysis, ReturnData, fit_duration_rates
+from .._rabi_analysis import ReturnData, fit_duration_rates
 from .._rabi_scan import RabiScanResult
 from .._sums import (
     herald_probabilities,
@@ -289,7 +289,7 @@ class ChevronHeraldedExp(Experiment[ChevronHeraldedResult, ChevronHeraldedCfg]):
         options: None,
         *,
         plots: Plots,
-    ) -> RabiAnalysis:
+    ) -> None:
         """Analyze the herald (g,g) slice and plot all nine herald fractions.
 
         Pass fraction is not ground-state purity. Empty accepted counts give
@@ -436,5 +436,3 @@ class ChevronHeraldedExp(Experiment[ChevronHeraldedResult, ChevronHeraldedCfg]):
             title="Duration cosine fits · inspect model against measured return curves",
         )
         ax.legend(title="Common drive frequency (MHz)", fontsize="x-small", ncols=2)
-
-        return RabiAnalysis(answer, rates)

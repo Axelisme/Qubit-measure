@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import math
-from collections.abc import Iterable
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Annotated, Literal, TypeAlias, TypedDict, Unpack
@@ -9,13 +7,9 @@ from typing import TYPE_CHECKING, Annotated, Literal, TypeAlias, TypedDict, Unpa
 from pydantic import BeforeValidator
 from qick.asm_v2 import QickParam
 
-from .._timeline_selected import PlaybackChoice, SelectedPlayback
 from .base import AbsModuleCfg, Module, apply_cfg_overrides
-from .dmem import LoadValue
 from .waveform import (
     AbsWaveform,
-    ConstWaveformCfg,
-    FlatTopWaveformCfg,
     WaveformCfg,
     resolve_waveform_ref,
 )
@@ -200,134 +194,3 @@ class Pulse(Module):
             tag=tag,
             timeline=timeline,
         )
-
-
-class TableLengthPulse(Module):
-    """Sweep const/flat-top pulse length from dmem with one wmem template.
-
-    name identifies this module and its generated resources. cfg is a PulseCfg
-    template with a const or flat_top waveform; it is copied, not mutated.
-    cfg supplies the generator channel, frequency (MHz), phase (degrees),
-    normalized gain and pre/post delays (us). lengths is a nonempty iterable
-    of finite, strictly positive waveform lengths in us, replacing the template
-    length at each selected point. For flat_top, each length includes the fixed
-    ramps. idx_reg names a caller-owned zero-based integer selector register;
-    initialize it with certified producers in 0..len(lengths)-1 before playback.
-
-    Declare before emit. Declaration stores one waveform template and a
-    generator-length lookup. Playback uses the selected actual waveform end,
-    including flat-top ramps. The timeline owner adds pre/post once and ceils
-    the aggregate once; fork/join takes the pointwise maximum of branch ends,
-    without padding every point to the longest length or storing duration tables.
-
-    Construction raises ValueError for empty, nonfinite or nonpositive lengths,
-    and NotImplementedError for other waveform styles. Declaration raises
-    ValueError when a selected length violates the generator's 3..65535-cycle
-    range or flat-top ramp constraints. Compilation rejects uncertified or
-    out-of-range selector producers and overlapping same-channel playback.
-    """
-
-    def __init__(
-        self,
-        name: str,
-        cfg: PulseCfg,
-        *,
-        lengths: Iterable[float],
-        idx_reg: str,
-    ) -> None:
-        self.name = name
-        self.cfg = deepcopy(cfg)
-        self.lengths = [float(length) for length in lengths]
-        self.idx_reg = idx_reg
-
-        if not self.lengths:
-            raise ValueError("TableLengthPulse requires at least one length")
-        if any(not math.isfinite(length) or length <= 0.0 for length in self.lengths):
-            raise ValueError("TableLengthPulse lengths must be finite and > 0")
-        if not isinstance(self.cfg.waveform, (ConstWaveformCfg, FlatTopWaveformCfg)):
-            raise NotImplementedError(
-                "TableLengthPulse supports only const and flat_top waveforms"
-            )
-
-        prefix = f"{name}_table_length"
-        self._length_reg = f"{prefix}_gen_cycles"
-        self._template = Pulse(f"{name}_template", self.cfg)
-
-    def declare(self, prog: TimelineProgramV2) -> None:
-        """Declare one template and the actual generator-length table, not durations.
-
-        The caller owns idx_reg. Entries must satisfy generator minimum/maximum
-        lengths and flat-top ramp constraints. Playback timing is resolved from
-        the selected actual waveform, without a duration table.
-        """
-        wave_cycles = [
-            self._wave_length_cycles(prog, length) for length in self.lengths
-        ]
-        template_cfg = self._template.cfg
-        if template_cfg is None:
-            raise ValueError(f"{self.name}: missing runtime pulse template")
-        template_cfg.set_param("length", self.lengths[0])
-        self._template.declare(prog)
-        length_loader = LoadValue(
-            f"{self.name}_load_gen_length",
-            wave_cycles,
-            idx_reg=self.idx_reg,
-            val_reg=self._length_reg,
-        )
-        length_loader.declare(prog)
-        prog.set_module_state(self, length_loader)
-
-    def lower(
-        self, prog: TimelineProgramV2, *, timeline: str | None, tag: str | None
-    ) -> None:
-        """Play the selected actual generator length; count pre/post once.
-
-        The caller initializes idx_reg with certified in-range producers.
-        Timeline owner resolves flat-top ramps, exact end rounding and audits.
-        """
-        del tag  # ModuleEmission owns the occurrence tag.
-        relation = prog.get_module_state(self, LoadValue).lower_selected(prog)
-        name = self._template.pulse_name(prog)
-        prog.pulse_from_length_reg(
-            self.cfg.ch,
-            name,
-            length_reg=self._length_reg,
-            flat_top=isinstance(self.cfg.waveform, FlatTopWaveformCfg),
-            t=self.cfg.pre_delay,
-            timeline="default" if timeline is None else timeline,
-            selection=SelectedPlayback(
-                relation.selector,
-                relation.register,
-                tuple(
-                    PlaybackChoice(name, length_cycles=cycles)
-                    for cycles in relation.table.values
-                ),
-                relation,
-            ),
-        )
-        prog.timeline_inc(
-            self.cfg.post_delay, timeline="default" if timeline is None else timeline
-        )
-
-    def _wave_length_cycles(self, prog: TimelineProgramV2, length: float) -> int:
-        wave_length = length
-        if isinstance(self.cfg.waveform, FlatTopWaveformCfg):
-            wave_length -= float(self.cfg.waveform.raise_waveform.length)
-            if wave_length <= 0.0:
-                raise ValueError(
-                    f"TableLengthPulse flat_top length {length} us must exceed "
-                    f"the fixed ramp length {self.cfg.waveform.raise_waveform.length} us"
-                )
-
-        cycles = int(prog.us2cycles(gen_ch=self.cfg.ch, us=wave_length))
-        if cycles < 3:
-            raise ValueError(
-                f"TableLengthPulse non-zero length {length} us resolves to "
-                f"{cycles} generator cycles; hardware requires at least 3"
-            )
-        if cycles >= 2**16:
-            raise ValueError(
-                f"TableLengthPulse length {length} us resolves to {cycles} "
-                "generator cycles; hardware limit is less than 2**16"
-            )
-        return cycles

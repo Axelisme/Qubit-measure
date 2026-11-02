@@ -16,7 +16,6 @@ from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
-    GainSweep,
     Pulse,
     Readout,
     Reset,
@@ -44,7 +43,7 @@ class T1Cfg(ConfigBase):
     pi_pulse: Pulse.Cfg
     flux_pulse: Pulse.Cfg
     readout: Readout.Cfg
-    gain: Annotated[GainSweep, FieldMeta(label="gain", unit="a.u.")]
+    gain: Annotated[SweepCfg, FieldMeta(label="gain", unit="a.u.")]
     length: SweepCfg
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
@@ -62,12 +61,6 @@ class T1Cfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-
-
-@dataclass(frozen=True)
-class T1Analysis:
-    t1s: NDArray[np.float64]
-    t1errs: NDArray[np.float64]
 
 
 class T1Exp(Experiment[T1Result, T1Cfg]):
@@ -146,8 +139,8 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
         options: None,
         *,
         plots: Plots,
-    ) -> T1Analysis:
-        """Fit decay at each flux gain, returning T1 and fit errors in us.
+    ) -> None:
+        """Fit decay at each flux gain and plot T1 with fit errors in us.
 
         First estimate a common baseline from accepted preliminary fits, then
         refit each row with that baseline fixed. Rejected final fits retain NaN
@@ -216,5 +209,3 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
         ax.legend()
 
         fig.tight_layout()
-
-        return T1Analysis(t1s=t1s, t1errs=t1errs)

@@ -11,7 +11,6 @@ from .modules import (
     Delay,
     DelayAuto,
     LoadValue,
-    LoadWord,
     Module,
     ModuleCfg,
     ModuleCfgFactory,
@@ -26,14 +25,13 @@ from .modules import (
     Reset,
     ResetCfg,
     SoftDelay,
-    TableLengthPulse,
     TwoPulseReset,
     TwoPulseResetCfg,
     WaveformCfg,
     WaveformCfgFactory,
 )
 from .read_axes import IQ, Classify, shot_sums, split_sums
-from .sweep import GainSweep, SweepCfg
+from .sweep import SweepCfg
 from .table_param import TableParam, TableRawParam
 from .timeline import TimelineProgramV2
 from .utils import sweep2param

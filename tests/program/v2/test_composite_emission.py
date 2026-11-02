@@ -12,7 +12,7 @@ from zcu_tools.program.v2 import TimelineBuilder
 from zcu_tools.program.v2._timeline_bounds import CycleBounds
 from zcu_tools.program.v2._timeline_selected import PlaybackChoice, SelectedPlayback
 from zcu_tools.program.v2.macro.pluse_reg import PulseByReg
-from zcu_tools.program.v2.modules import Module, Pulse, PulseCfg, TableLengthPulse
+from zcu_tools.program.v2.modules import Module, Pulse, PulseCfg
 from zcu_tools.program.v2.modules.computed_pulse import ComputedPulse
 from zcu_tools.program.v2.modules.dmem import LoadValue
 from zcu_tools.program.v2.modules.readout import (
@@ -215,60 +215,15 @@ def test_computed_pulse_uses_selected_fractional_post_not_first_or_maximum():
     ] * 2
 
 
-def test_table_length_uses_actual_playback_end_and_counts_pre_post_once():
-    pulse = TableLengthPulse(
-        "length_table",
-        _pulse_cfg(39 / GEN_MHZ),
-        lengths=[39 / GEN_MHZ, 64 / GEN_MHZ, 89 / GEN_MHZ],
-        idx_reg="index",
-    )
-
-    def body(prog):
-        prog.emit(pulse)
-        prog.emit(pulse)
-
-    prog = _program(
-        load_soccfg(1, 0),
-        [pulse],
-        body,
-        lambda p: p.add_loop("index", 3),
-    )
-    result = shots(prog)
-    spacings = [
-        PRE
-        + ceil(
-            runtime_cycles(prog.soccfg, n)
-            + Fraction("0.0005") * Fraction(str(TPROC_MHZ))
-        )
-        for n in (39, 64, 89)
-    ]
-    assert [waves(shot) for shot in result] == [
-        [PRE, PRE + spacing] for spacing in spacings
-    ] * 2
-    assert [shot.body_end_cycle - shot.start_cycle for shot in result] == [
-        2 * spacing for spacing in spacings
-    ] * 2
-    assert [shot.end_cycle - shot.start_cycle for shot in result] == [
-        2 * spacing + RELAX for spacing in spacings
-    ] * 2
-    prog.compile()
-    assert shots(prog) == result
-
-
-def _runtime_selected(kind: str, *, pre_delay: float = 0.01) -> Module:
+def _runtime_selected(*, pre_delay: float = 0.01) -> Module:
     first = _pulse_cfg(39 / GEN_MHZ).model_copy(update={"pre_delay": pre_delay})
     second = _pulse_cfg(89 / GEN_MHZ).model_copy(update={"pre_delay": pre_delay})
-    if kind == "computed":
-        return ComputedPulse("selected", val_reg="index", pulses=[first, second])
-    return TableLengthPulse(
-        "selected", first, lengths=[39 / GEN_MHZ, 89 / GEN_MHZ], idx_reg="index"
-    )
+    return ComputedPulse("selected", val_reg="index", pulses=[first, second])
 
 
-@pytest.mark.parametrize("kind", ["computed", "table"])
-def test_shared_selected_pulse_keeps_each_programs_addresses_and_loader(kind):
+def test_shared_selected_pulse_keeps_each_programs_addresses_and_loader():
     soccfg = load_soccfg(1, 0)
-    shared = _runtime_selected(kind)
+    shared = _runtime_selected()
     others = []
 
     def build(pulse, *, padded=False, interleave=False):
@@ -286,8 +241,8 @@ def test_shared_selected_pulse_keeps_each_programs_addresses_and_loader(kind):
         return _program(soccfg, [pulse], body, initialize)
 
     first = build(shared, interleave=True)
-    fresh = build(_runtime_selected(kind))
-    other_fresh = build(_runtime_selected(kind), padded=True)
+    fresh = build(_runtime_selected())
+    other_fresh = build(_runtime_selected(), padded=True)
     assert first.prog_list == fresh.prog_list
     assert shots(first) == shots(fresh)
     assert others[0].prog_list == other_fresh.prog_list
@@ -298,9 +253,8 @@ def test_shared_selected_pulse_keeps_each_programs_addresses_and_loader(kind):
     assert first.prog_list == fresh.prog_list
 
 
-@pytest.mark.parametrize("kind", ["computed", "table"])
-def test_selected_branch_paths_inside_repeat_use_actual_ends(kind):
-    pulse = _runtime_selected(kind)
+def test_selected_branch_paths_inside_repeat_use_actual_ends():
+    pulse = _runtime_selected()
 
     def initialize(prog):
         prog.add_loop("path", 2)
@@ -337,10 +291,9 @@ def test_selected_branch_paths_inside_repeat_use_actual_ends(kind):
     ] * 2
 
 
-@pytest.mark.parametrize("kind", ["computed", "table"])
 @pytest.mark.parametrize("index", [-1, 2, 2**31])
-def test_selected_playback_requires_full_selector_bounds(kind, index):
-    pulse = _runtime_selected(kind)
+def test_selected_playback_requires_full_selector_bounds(index):
+    pulse = _runtime_selected()
 
     def body(prog):
         prog.write_reg("index", index)
@@ -354,9 +307,8 @@ def test_selected_playback_requires_full_selector_bounds(kind, index):
         _program(load_soccfg(1, 0), [pulse], body, initialize)
 
 
-@pytest.mark.parametrize("kind", ["computed", "table"])
-def test_selected_runtime_origin_rejects_possible_signed_overflow(kind):
-    pulse = _runtime_selected(kind)
+def test_selected_runtime_origin_rejects_possible_signed_overflow():
+    pulse = _runtime_selected()
 
     def initialize(prog):
         prog.add_loop("index", 2)
@@ -371,10 +323,9 @@ def test_selected_runtime_origin_rejects_possible_signed_overflow(kind):
         _program(load_soccfg(1, 0), [pulse], body, initialize)
 
 
-@pytest.mark.parametrize("kind", ["computed", "table"])
 @pytest.mark.parametrize("negative_pre", [False, True])
-def test_selected_channel_overlap_cannot_borrow_coverage(kind, negative_pre):
-    pulse = _runtime_selected(kind, pre_delay=-0.01 if negative_pre else 0.01)
+def test_selected_channel_overlap_cannot_borrow_coverage(negative_pre):
+    pulse = _runtime_selected(pre_delay=-0.01 if negative_pre else 0.01)
 
     def body(prog):
         if negative_pre:
@@ -390,27 +341,17 @@ def test_selected_channel_overlap_cannot_borrow_coverage(kind, negative_pre):
         _program(load_soccfg(1, 0), [pulse], body, lambda p: p.add_loop("index", 2))
 
 
-def _negative_selected(kind: str, cycles: tuple[int, int] = (39, 64)) -> Module:
+def _negative_selected(cycles: tuple[int, int] = (39, 64)) -> Module:
     candidates = [
         _pulse_cfg(n / GEN_MHZ).model_copy(update={"post_delay": -60 / TPROC_MHZ})
         for n in cycles
     ]
-    if kind == "computed":
-        return ComputedPulse("negative", val_reg="index", pulses=candidates)
-    return TableLengthPulse(
-        "negative",
-        candidates[0],
-        lengths=[n / GEN_MHZ for n in cycles],
-        idx_reg="index",
-    )
+    return ComputedPulse("negative", val_reg="index", pulses=candidates)
 
 
-@pytest.mark.parametrize("kind", ["computed", "table"])
 @pytest.mark.parametrize("runtime", [False, True])
-def test_selected_negative_post_rounds_signed_offset_without_clamping_origin(
-    kind, runtime
-):
-    pulse = _negative_selected(kind)
+def test_selected_negative_post_rounds_signed_offset_without_clamping_origin(runtime):
+    pulse = _negative_selected()
 
     def initialize(prog):
         prog.add_loop("index", 2)
@@ -429,10 +370,9 @@ def test_selected_negative_post_rounds_signed_offset_without_clamping_origin(
     ] * 2
 
 
-@pytest.mark.parametrize("kind", ["computed", "table"])
 @pytest.mark.parametrize("wait", [False, True])
-def test_selected_negative_post_retains_physical_channel_end(kind, wait):
-    pulse = _negative_selected(kind, (39, 39))
+def test_selected_negative_post_retains_physical_channel_end(wait):
+    pulse = _negative_selected((39, 39))
     following = Pulse("following", _pulse_cfg(39 / GEN_MHZ))
 
     def initialize(prog):
@@ -463,9 +403,8 @@ def test_selected_negative_post_retains_physical_channel_end(kind, wait):
         ] * 4
 
 
-@pytest.mark.parametrize("kind", ["computed", "table"])
-def test_selected_negative_post_native_auto_alignment_uses_exact_physical_end(kind):
-    pulse = _negative_selected(kind)
+def test_selected_negative_post_native_auto_alignment_uses_exact_physical_end():
+    pulse = _negative_selected()
     following = Pulse("following", _pulse_cfg(39 / GEN_MHZ))
 
     def initialize(prog):
@@ -493,13 +432,12 @@ def test_selected_negative_post_native_auto_alignment_uses_exact_physical_end(ki
     ] * 2
 
 
-@pytest.mark.parametrize("kind", ["computed", "table"])
 @pytest.mark.parametrize("runtime", [False, True])
 @pytest.mark.parametrize("advances", [(60,), (30, 30), (59,), (30, -1, 30)])
 def test_selected_negative_post_direct_advances_recover_only_proven_physical_boundary(
-    kind, runtime, advances
+    runtime, advances
 ):
-    pulse = _negative_selected(kind)
+    pulse = _negative_selected()
     following = Pulse(
         "following", _pulse_cfg(39 / GEN_MHZ).model_copy(update={"pre_delay": 0.0})
     )
@@ -537,12 +475,11 @@ def test_selected_negative_post_direct_advances_recover_only_proven_physical_bou
         ] * 2
 
 
-@pytest.mark.parametrize("kind", ["computed", "table"])
 @pytest.mark.parametrize("delay_by_timeline", [False, True])
 def test_deferred_coverage_does_not_cover_a_later_emission_or_reused_register(
-    kind, delay_by_timeline
+    delay_by_timeline,
 ):
-    pulse = _negative_selected(kind)
+    pulse = _negative_selected()
     following = Pulse(
         "following", _pulse_cfg(39 / GEN_MHZ).model_copy(update={"pre_delay": 0.0})
     )
@@ -566,9 +503,8 @@ def test_deferred_coverage_does_not_cover_a_later_emission_or_reused_register(
         _program(load_soccfg(1, 0), [pulse, following], body, initialize)
 
 
-@pytest.mark.parametrize("kind", ["computed", "table"])
-def test_deferred_coverage_branch_does_not_hide_underpaid_path(kind):
-    pulse = _negative_selected(kind)
+def test_deferred_coverage_branch_does_not_hide_underpaid_path():
+    pulse = _negative_selected()
     following = Pulse(
         "following", _pulse_cfg(39 / GEN_MHZ).model_copy(update={"pre_delay": 0.0})
     )
@@ -592,12 +528,11 @@ def test_deferred_coverage_branch_does_not_hide_underpaid_path(kind):
         _program(load_soccfg(1, 0), [pulse, following], body, initialize)
 
 
-@pytest.mark.parametrize("kind", ["computed", "table"])
 @pytest.mark.parametrize("runtime_selector", [False, True])
 def test_deferred_coverage_through_runtime_maximum_does_not_pad_short_selection(
-    kind, runtime_selector
+    runtime_selector,
 ):
-    pulse = _negative_selected(kind)
+    pulse = _negative_selected()
     following = Pulse(
         "following", _pulse_cfg(39 / GEN_MHZ).model_copy(update={"pre_delay": 0.0})
     )
@@ -643,13 +578,15 @@ def test_equal_runtime_maximum_preserves_both_physical_boundaries(
     reverse, post, advance, following_ch
 ):
     selected = [
-        TableLengthPulse(
+        ComputedPulse(
             f"selected_{ch}",
-            _pulse_cfg(39 / GEN_MHZ).model_copy(
-                update={"ch": ch, "post_delay": post / TPROC_MHZ}
-            ),
-            lengths=[39 / GEN_MHZ, 64 / GEN_MHZ],
-            idx_reg="index",
+            val_reg="index",
+            pulses=[
+                _pulse_cfg(cycles / GEN_MHZ).model_copy(
+                    update={"ch": ch, "post_delay": post / TPROC_MHZ}
+                )
+                for cycles in (39, 64)
+            ],
         )
         for ch in (0, 1)
     ]
@@ -702,9 +639,8 @@ def test_equal_runtime_maximum_preserves_both_physical_boundaries(
             recompile(prog)
 
 
-@pytest.mark.parametrize("kind", ["computed", "table"])
-def test_deferred_coverage_repeat_backedge_and_next_shot_reload_selection(kind):
-    pulse = _negative_selected(kind)
+def test_deferred_coverage_repeat_backedge_and_next_shot_reload_selection():
+    pulse = _negative_selected()
 
     def initialize(prog):
         prog.add_loop("index", 2)
@@ -734,7 +670,7 @@ def test_deferred_coverage_repeat_backedge_and_next_shot_reload_selection(kind):
     assert shots(prog) == result
 
 
-def _flat_selected(kind: str) -> Module:
+def _flat_selected() -> Module:
     def cfg(cycles):
         return _pulse_cfg((cycles + 16) / GEN_MHZ).model_copy(
             update={
@@ -747,16 +683,11 @@ def _flat_selected(kind: str) -> Module:
             }
         )
 
-    if kind == "computed":
-        return ComputedPulse("flat", val_reg="index", pulses=[cfg(39), cfg(89)])
-    return TableLengthPulse(
-        "flat", cfg(39), lengths=[55 / GEN_MHZ, 105 / GEN_MHZ], idx_reg="index"
-    )
+    return ComputedPulse("flat", val_reg="index", pulses=[cfg(39), cfg(89)])
 
 
-@pytest.mark.parametrize("kind", ["computed", "table"])
-def test_flat_selected_runtime_origin_repeat_backedge_and_shot_reset(kind):
-    pulse = _flat_selected(kind)
+def test_flat_selected_runtime_origin_repeat_backedge_and_shot_reset():
+    pulse = _flat_selected()
 
     def initialize(prog):
         prog.add_reg("origin")
@@ -796,17 +727,15 @@ def test_flat_selected_runtime_origin_repeat_backedge_and_shot_reset(kind):
 
 
 def test_selected_parallel_join_keeps_crossing_pointwise_ends_and_runtime_origin():
-    left = TableLengthPulse(
+    left = ComputedPulse(
         "left",
-        _pulse_cfg(39 / GEN_MHZ),
-        lengths=[39 / GEN_MHZ, 64 / GEN_MHZ, 89 / GEN_MHZ],
-        idx_reg="index",
+        val_reg="index",
+        pulses=[_pulse_cfg(n / GEN_MHZ) for n in (39, 64, 89)],
     )
-    right = TableLengthPulse(
+    right = ComputedPulse(
         "right",
-        _pulse_cfg(39 / GEN_MHZ, ch=1),
-        lengths=[89 / GEN_MHZ, 64 / GEN_MHZ, 39 / GEN_MHZ],
-        idx_reg="index",
+        val_reg="index",
+        pulses=[_pulse_cfg(n / GEN_MHZ, ch=1) for n in (89, 64, 39)],
     )
 
     def initialize(prog):
@@ -888,9 +817,9 @@ class _OverwriteSelected(Macro):
         AsmInst(
             inst={
                 "CMD": "REG_WR",
-                "DST": prog._get_reg("length"),
+                "DST": prog._get_reg("address"),
                 "SRC": "imm",
-                "LIT": "#89",
+                "LIT": "#1",
             },
             addr_inc=1,
         ).translate(prog)
@@ -898,28 +827,12 @@ class _OverwriteSelected(Macro):
 
 def _change_selection(prog, loader, other, change):
     if change == "constant":
-        prog.write_reg("length", 89)
+        prog.write_reg("address", 1)
     elif change == "other_table":
         prog.emit(other)
     elif change == "consumed_other_table":
         relation = other.lower_selected(prog)
-        prog.pulse_from_length_reg(
-            0,
-            "template",
-            length_reg="length",
-            flat_top=False,
-            timeline="default",
-            selection=SelectedPlayback(
-                relation.selector,
-                "length",
-                (
-                    PlaybackChoice("template", length_cycles=89),
-                    PlaybackChoice("template", length_cycles=39),
-                ),
-                relation,
-            ),
-        )
-        prog.timeline_inc(0, timeline="default")
+        _play_selected_address(prog, relation, (1, 0))
     elif change == "selector":
         prog.write_reg("index", 1)
     elif change == "translate":
@@ -927,23 +840,22 @@ def _change_selection(prog, loader, other, change):
     elif change == "constant_branch":
         with prog.branch(by="path", align_timeline=True) as branch:
             with branch.case(0):
-                prog.write_reg("length", 89)
+                prog.write_reg("address", 1)
             with branch.case(1):
                 pass
     elif change == "constant_backedge":
         prog.delay_by_timeline()
         with prog.repeat("overwrite", 2):
-            prog.write_reg("length", 89)
+            prog.write_reg("address", 1)
             prog.delay_by_timeline()
     elif change == "constant_reset":
-        prog.write_reg("length", 89)
+        prog.write_reg("address", 1)
         loader.lower_selected(prog)
 
 
-@pytest.mark.parametrize("kind", ["computed", "table"])
 @pytest.mark.parametrize("flat", [False, True])
-def test_selected_actual_playback_words_match_independent_generator_lengths(kind, flat):
-    pulse = _flat_selected(kind) if flat else _runtime_selected(kind)
+def test_selected_actual_playback_words_match_independent_generator_lengths(flat):
+    pulse = _flat_selected() if flat else _runtime_selected()
 
     class Observed(TimelineProgramV2):
         def _initialize(self, cfg):
@@ -970,38 +882,24 @@ def test_selected_actual_playback_words_match_independent_generator_lengths(kind
             super().pulse_by_reg(ch, addr_reg, *args, **kwargs)
             self.record_word(addr_reg)
 
-        def pulse_from_length_reg(self, ch, name, *, length_reg, **kwargs):
-            super().pulse_from_length_reg(ch, name, length_reg=length_reg, **kwargs)
-            self.record_word(length_reg)
-            self.record_word("w4")
-
     prog = Observed(load_soccfg(1, 0), reps=2, initial_delay=0, relax_delay=0)
     words = [[e.value for e in shot.events if e.kind == "data"] for shot in shots(prog)]
-    if kind == "table":
-        # Observe both the true producer and the patched waveform field consumed
-        # by WPORT. The timing table alone could not establish this promise.
-        assert words == [[39, 39], [89, 89]] * 2
-    else:
-        lengths = []
-        for row in words:
-            address = row[0]
-            assert address is not None
-            lengths.append(
-                sum(
-                    int(w.length)
-                    for w in prog.waves[address : address + (3 if flat else 1)]
-                )
+    lengths = []
+    for row in words:
+        address = row[0]
+        assert address is not None
+        lengths.append(
+            sum(
+                int(w.length)
+                for w in prog.waves[address : address + (3 if flat else 1)]
             )
-        assert lengths == ([55, 105] if flat else [39, 89]) * 2
+        )
+    assert lengths == ([55, 105] if flat else [39, 89]) * 2
 
 
 @pytest.mark.parametrize("flat", [False, True])
 def test_native_address_playback_keeps_deferred_register_resolution(flat):
-    pulse = (
-        _flat_selected("computed")
-        if flat
-        else Pulse("native", _pulse_cfg(39 / GEN_MHZ))
-    )
+    pulse = _flat_selected() if flat else Pulse("native", _pulse_cfg(39 / GEN_MHZ))
 
     def body(prog):
         prog.write_reg("late", 0)
@@ -1040,7 +938,7 @@ class _FlatAddressObservation(PulseByReg):
 def test_flat_top_actual_segment_address_producers_are_preserved_or_reject_overwrite(
     managed, corrupt
 ):
-    pulse = _flat_selected("computed")
+    pulse = _flat_selected()
 
     class Observed(TimelineProgramV2):
         def _initialize(self, cfg):
@@ -1115,91 +1013,85 @@ def test_flat_top_actual_segment_address_producers_are_preserved_or_reject_overw
     assert len({prog.prog_list[i].get("TIME") for i in writes}) == 1
 
 
-def _selected_length_with_change(change: str) -> TimelineProgramV2:
-    template = Pulse("template", _pulse_cfg(39 / GEN_MHZ), pulse_id="template")
-    loader = LoadValue("lengths", [39, 89], idx_reg="index", val_reg="length")
+def _address_loaders(prog):
+    addresses = []
+    for index, cycles in enumerate((39, 89)):
+        candidate = Pulse(
+            f"candidate_{index}",
+            _pulse_cfg(cycles / GEN_MHZ),
+            pulse_id=f"candidate_{index}",
+        )
+        prog.declare(candidate)
+        wave = prog.pulses[candidate.pulse_name(prog)].get_wavenames(
+            exclude_special=False
+        )[0]
+        addresses.append(prog.wave2idx[wave])
+    loader = LoadValue("a", addresses, idx_reg="index", val_reg="address")
     other = LoadValue(
-        "other", [89, 39], idx_reg="index", val_reg="length", use_existed=True
+        "b",
+        list(reversed(addresses)),
+        idx_reg="index",
+        val_reg="address",
+        use_existed=True,
     )
+    prog.declare(loader)
+    prog.declare(other)
+    return loader, other
 
+
+def _selected_address_with_change(change: str) -> TimelineProgramV2:
     class Selection(Module):
         name = "selection"
-
-        def init(self, prog):
-            raise NotImplementedError("native-only fixture")
-
-        def run(self, prog, t=0.0):
-            raise NotImplementedError("native-only fixture")
 
         def declare(self, prog):
             if change == "constant_branch":
                 prog.add_loop("path", 2)
             prog.add_reg("index")
-            prog.declare(template)
-            prog.declare(loader)
-            prog.declare(other)
+            self.loader, self.other = _address_loaders(prog)
 
         def lower(self, prog, *, timeline, tag):
             prog.write_reg("index", 0)
-            relation = loader.lower_selected(prog)
-            _change_selection(prog, loader, other, change)
-            prog.pulse_from_length_reg(
-                0,
-                "template",
-                length_reg="length",
-                flat_top=False,
-                t=0.01,
-                timeline="default",
-                selection=SelectedPlayback(
-                    relation.selector,
-                    "length",
-                    (
-                        PlaybackChoice("template", length_cycles=39),
-                        PlaybackChoice("template", length_cycles=89),
-                    ),
-                    relation,
-                ),
-            )
+            relation = self.loader.lower_selected(prog)
+            _change_selection(prog, self.loader, self.other, change)
+            _play_selected_address(prog, relation, (0, 1), t=0.01, post=0.0005)
             if change == "selector_after_playback":
                 prog.write_reg("index", 1)
-            prog.timeline_inc(0.0005, timeline="default")
 
     return _selection_program(Selection())
 
 
 def _selection_flow_program(body, *, path_count=2):
-    template = Pulse("template", _pulse_cfg(39 / GEN_MHZ), pulse_id="template")
-    loader = LoadValue("a", [39, 89], idx_reg="index", val_reg="length")
-    other = LoadValue(
-        "b", [89, 39], idx_reg="index", val_reg="length", use_existed=True
-    )
+    class Selection(Module):
+        name = "selection"
 
-    def initialize(prog):
-        prog.add_loop("path", path_count)
-        prog.add_reg("index")
+        def declare(self, prog):
+            prog.add_loop("path", path_count)
+            prog.add_reg("index")
+            self.loader, self.other = _address_loaders(prog)
 
-    def lower(prog):
-        prog.write_reg("index", 0)
-        body(prog, loader, other)
+        def lower(self, prog, *, timeline, tag):
+            prog.write_reg("index", 0)
+            body(prog, self.loader, self.other)
 
-    return _program(load_soccfg(1, 0), [template, loader, other], lower, initialize)
+    return _selection_program(Selection())
 
 
-def _play_selected_length(prog, relation, values, timeline="default"):
-    prog.pulse_from_length_reg(
+def _play_selected_address(
+    prog, relation, values, timeline="default", *, t=0.0, post=0.0
+):
+    prog.pulse_by_reg(
         0,
-        "template",
-        length_reg="length",
-        flat_top=False,
+        "address",
+        t=t,
         timeline=timeline,
         selection=SelectedPlayback(
             relation.selector,
-            "length",
-            tuple(PlaybackChoice("template", length_cycles=n) for n in values),
+            "address",
+            tuple(PlaybackChoice(f"candidate_{index}") for index in values),
             relation,
         ),
     )
-    prog.timeline_inc(0, timeline=timeline)
+    prog.timeline_inc(post, timeline=timeline)
 
 
 @pytest.mark.parametrize("other_case", [0, 1])
@@ -1216,13 +1108,13 @@ def test_selected_playback_rejects_consumed_alternative_after_branch_join(
                 with branch.case(index) as timeline:
                     current = other if index == other_case else loader
                     relation = current.lower_selected(prog)
-                    values = (89, 39) if index == other_case else (39, 89)
-                    _play_selected_length(prog, relation, values, timeline)
+                    values = (1, 0) if index == other_case else (0, 1)
+                    _play_selected_address(prog, relation, values, timeline)
         # Both tables have valid writers/consumers, but path=other_case leaves
-        # length=89 while initial's independent capture still selects A's 39.
-        _play_selected_length(prog, initial, (39, 89))
+        # address=1 while initial's independent capture still selects A's 0.
+        _play_selected_address(prog, initial, (0, 1))
 
-    with pytest.raises(ValueError, match="length: .*selected playback selection"):
+    with pytest.raises(ValueError, match="address: .*selected playback selection"):
         _selection_flow_program(body)
 
 
@@ -1233,30 +1125,30 @@ def test_selected_playback_rejects_consumed_overwrite_on_repeat_backedge(count):
         with prog.repeat("again", count):
             # The first iteration is valid; B reaches this consumer only via
             # the second iteration's backedge, not linear preprocess order.
-            _play_selected_length(prog, initial, (39, 89))
+            _play_selected_address(prog, initial, (0, 1))
             current = other.lower_selected(prog)
-            _play_selected_length(prog, current, (89, 39))
+            _play_selected_address(prog, current, (1, 0))
             prog.delay_by_timeline()
 
-    with pytest.raises(ValueError, match="length: .*selected playback selection"):
+    with pytest.raises(ValueError, match="address: .*selected playback selection"):
         _selection_flow_program(body, path_count=3)
 
 
 def test_selected_playback_rejects_relation_missing_on_repeat_skipped_path():
     def body(prog, loader, other):
         previous = other.lower_selected(prog)
-        _play_selected_length(prog, previous, (89, 39))
+        _play_selected_address(prog, previous, (1, 0))
         prog.delay_by_timeline()
         initial = loader.lower_selected(prog)
-        _play_selected_length(prog, initial, (39, 89))
+        _play_selected_address(prog, initial, (0, 1))
         prog.delay_by_timeline()
         with prog.repeat("maybe", "path", range_hint=(0, 1)):
             current = other.lower_selected(prog)
-            _play_selected_length(prog, current, (89, 39))
+            _play_selected_address(prog, current, (1, 0))
             prog.delay_by_timeline()
-        _play_selected_length(prog, previous, (89, 39))
+        _play_selected_address(prog, previous, (1, 0))
 
-    with pytest.raises(ValueError, match="length: .*selected playback selection"):
+    with pytest.raises(ValueError, match="address: .*selected playback selection"):
         _selection_flow_program(body)
 
 
@@ -1268,9 +1160,9 @@ def test_selected_playback_allows_single_iteration_or_fresh_repeat_lookup(
         initial = loader.lower_selected(prog)
         with prog.repeat("again", count):
             current = loader.lower_selected(prog) if reload_each_time else initial
-            _play_selected_length(prog, current, (39, 89))
+            _play_selected_address(prog, current, (0, 1))
             current = other.lower_selected(prog)
-            _play_selected_length(prog, current, (89, 39))
+            _play_selected_address(prog, current, (1, 0))
             prog.delay_by_timeline()
 
     result = shots(_selection_flow_program(body))
@@ -1284,12 +1176,14 @@ def test_selected_playback_allows_single_iteration_or_fresh_repeat_lookup(
 def test_selected_playback_preserves_deferred_capture_across_empty_branch(declare_case):
     def body(prog, loader, other):
         initial = loader.lower_selected(prog)
-        prog.write_reg("index", 1)  # The loader-owned capture must still select39.
+        prog.write_reg(
+            "index", 1
+        )  # The loader-owned capture must still select the 39-cycle candidate.
         with prog.branch(by="path", align_timeline=True) as branch:
             if declare_case:
                 with branch.case(0):
                     pass
-        _play_selected_length(prog, initial, (39, 89))
+        _play_selected_address(prog, initial, (0, 1))
 
     result = shots(_selection_flow_program(body))
     assert [waves(shot) for shot in result] == [[0]] * 4
@@ -1304,9 +1198,9 @@ def test_selected_playback_uses_entry_relation_in_sibling_branch_case():
         with prog.branch(by="path", align_timeline=False) as branch:
             with branch.case(0) as timeline:
                 current = other.lower_selected(prog)
-                _play_selected_length(prog, current, (89, 39), timeline)
+                _play_selected_address(prog, current, (1, 0), timeline)
             with branch.case(1) as timeline:
-                _play_selected_length(prog, initial, (39, 89), timeline)
+                _play_selected_address(prog, initial, (0, 1), timeline)
 
     result = shots(_selection_flow_program(body))
     assert [waves(shot) for shot in result] == [[0]] * 4
@@ -1332,14 +1226,14 @@ def _selection_program(selection: Module) -> TimelineProgramV2:
     ],
 )
 def test_selected_playback_rejects_in_range_writes_without_table_relation(change):
-    with pytest.raises(ValueError, match=r"length: .*selection.*instruction"):
-        _selected_length_with_change(change)
+    with pytest.raises(ValueError, match=r"address: .*selection.*instruction"):
+        _selected_address_with_change(change)
 
 
 @pytest.mark.parametrize("change", ["selector", "selector_after_playback"])
 def test_selected_playback_captures_index_before_later_in_range_change(change):
-    prog = _selected_length_with_change(change)
-    # The first length remains39 despite the author changing index to1.
+    prog = _selected_address_with_change(change)
+    # The first length remains 39 despite the author changing index to 1.
     assert [s.body_end_cycle - s.start_cycle for s in shots(prog)] == [
         PRE
         + ceil(

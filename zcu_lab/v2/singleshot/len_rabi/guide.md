@@ -32,6 +32,10 @@ The qubit pulse uses the x180 module when present and the qub_probe template whe
 
 A backend-valid joint fit with finite centers, radius and confusion matrix proposes one complete readout-module replacement at `$resonator.module.readout`. Pulse updates `classifier`; a single-tone Mux updates `tones.0.classifier`. The proposal preserves library waveform keys and rejects differences in other tested settings. Missing saved cfg or parameter capture fails explicitly. Invalid or nonfinite fits produce no proposal.
 
+## Analysis summary
+
+Analysis returns fitted parameters, pre-pulse `initial_populations`, the fixed 3×3 `confusion_matrix` and circle-classification calibration. Backend diagnostics retain parameter names, fitted values, marginal standard deviations, validity and negative log-likelihood. Population curves, projected shots, histograms and the full covariance stay local to analysis for plotting and uncertainty calculations. They are not part of the returned summary.
+
 ## Recommended
 
 Set Initial State to the predominant state before the swept drive pulse even when the first sweep point is nonzero. Fit phase offset allows a correction within +/-90 degrees of that initial-state direction; the extrapolated zero-length population can then differ from the pre-pulse population. It is disabled by default. A prior singleshot/ge calibration is optional for raw acquisition. A sweep spanning a few pi lengths captures a full oscillation. Review the measured population curves and overlaid joint-fit curves before applying the complete module proposal.

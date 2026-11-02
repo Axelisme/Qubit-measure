@@ -18,7 +18,7 @@ from zcu_tools.mcp.measure.recipe_api import (
     recipe,
 )
 
-from zcu_lab.v2.twotone.time_domain.cpmg.gui import CPMGSummary
+from zcu_lab.v2.twotone.time_domain.cpmg.core import CPMGAnalysis
 
 
 class CPMGInputs(RecipeInputs):
@@ -94,14 +94,22 @@ class CPMGInputs(RecipeInputs):
 class CPMGReport(RecipeReport):
     """CPMG results and failure reason; cancellation returns no report."""
 
-    counts: list[int] = Field(
-        description="Measured refocusing counts, or requested counts after analysis failure; empty when GUI counts are unavailable."
+    t2_1_us: float | None = Field(
+        default=None,
+        description="Power-law T2 at n=1 in us; null without a summary fit.",
     )
-    t2_us: list[float | None] = Field(
-        description="Fitted coherence times in us; rejected rows are null."
+    t2_1_err_us: float | None = Field(
+        default=None, description="Propagated standard error of T2 at n=1 in us."
     )
-    t2_err_us: list[float | None] = Field(
-        description="Coherence uncertainties in us; rejected rows are null."
+    gamma: float | None = Field(
+        default=None, description="Dimensionless exponent in T2(n)=T2_1*n**gamma."
+    )
+    gamma_err: float | None = Field(
+        default=None, description="Standard error of the power-law exponent."
+    )
+    fit_rows: int = Field(
+        default=0,
+        description="Accepted rows with finite positive n, T2 and T2 error; zero after analysis failure.",
     )
 
 
@@ -112,7 +120,9 @@ async def cpmg(session: RecipeSession, inputs: CPMGInputs) -> CPMGReport:
     """Measure coherence versus CPMG pulse count and total evolution time.
 
     Apply pi/2, n refocusing pi pulses, a final pi/2 projection and readout.
-    Fit T_CPMG for each count, then save raw IQ and completed artifacts.
+    Fit T_CPMG for each count, summarize T2(n)=T2_1*n**gamma, then save
+    raw IQ and completed artifacts. Fewer than three usable rows returns null
+    fit values with the usable row count. Uncertainties use unscaled covariance.
     No calibration is written.
 
     points sets the pulse-count grid; length_points sets Time points and delay.expts.
@@ -128,15 +138,13 @@ async def cpmg(session: RecipeSession, inputs: CPMGInputs) -> CPMGReport:
     tab.select("readout", inputs.readout_ref)
     tab.select("pi_pulse", inputs.pi_ref)
     tab.select("pi2_pulse", inputs.pi2_ref)
-    counts: list[int] | None = None
     if not isinstance(inputs.times, Keep):
         if not isinstance(inputs.max_n, Keep) or not isinstance(inputs.points, Keep):
             raise ValueError("Use max_n/points or times, not both")
         if inputs.times is None:
             tab.set("count", None)
         else:
-            counts = inputs.times
-            tab.set("count", PositiveExplicitIntegerPoints(values=counts))
+            tab.set("count", PositiveExplicitIntegerPoints(values=inputs.times))
     elif not isinstance(inputs.max_n, Keep) or not isinstance(inputs.points, Keep):
         if isinstance(inputs.max_n, Keep) or isinstance(inputs.points, Keep):
             raise ValueError("max_n and points must be supplied together")
@@ -146,7 +154,6 @@ async def cpmg(session: RecipeSession, inputs: CPMGInputs) -> CPMGReport:
             count_grid = PositiveLogIntegerPoints(
                 max=inputs.max_n, points=inputs.points
             )
-            counts = count_grid.values
             tab.set("count", count_grid)
     tab.set("min_length_us", inputs.min_length_us)
     tab.set("max_length_us", inputs.max_length_us)
@@ -162,7 +169,7 @@ async def cpmg(session: RecipeSession, inputs: CPMGInputs) -> CPMGReport:
     try:
         analysis = await tab.analyze(
             "primary",
-            result=CPMGSummary,
+            result=CPMGAnalysis,
             updates={
                 "fit_fringe": inputs.fit_fringe,
                 "t2r": inputs.t2r,
@@ -170,17 +177,13 @@ async def cpmg(session: RecipeSession, inputs: CPMGInputs) -> CPMGReport:
             },
         )
         if analysis.result is None:
-            failure_counts = [] if counts is None else counts
-            return CPMGReport(
-                counts=failure_counts,
-                t2_us=[None] * len(failure_counts),
-                t2_err_us=[None] * len(failure_counts),
-                analysis_failure=analysis.reason,
-            )
+            return CPMGReport(analysis_failure=analysis.reason)
         return CPMGReport(
-            counts=analysis.result.ns,
-            t2_us=analysis.result.t2s,
-            t2_err_us=analysis.result.t2errs,
+            t2_1_us=analysis.result.t2_1_us,
+            t2_1_err_us=analysis.result.t2_1_err_us,
+            gamma=analysis.result.gamma,
+            gamma_err=analysis.result.gamma_err,
+            fit_rows=analysis.result.fit_rows,
         )
     finally:
         tab.save()

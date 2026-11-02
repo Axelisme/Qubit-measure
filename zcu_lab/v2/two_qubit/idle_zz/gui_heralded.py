@@ -10,7 +10,6 @@ from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
 from .core_heralded import (
-    IdleZZHeraldedAnalysis,
     IdleZZHeraldedCfg,
     IdleZZHeraldedExp,
     IdleZZHeraldedResult,
@@ -34,7 +33,7 @@ def _analyze(
     req: AnalyzeRequest[IdleZZHeraldedRun, None],
     *,
     plots: Plots,
-) -> IdleZZHeraldedAnalysis:
+) -> None:
     return IdleZZHeraldedExp().analyze(req.run_result, None, plots=plots)
 
 

@@ -156,6 +156,14 @@ class HangerModel:
         signals: NDArray[np.complex128],
         edelay: float,
     ) -> HangerParams:
+        """Seed joint refinement from a rational-smoothed circle/phase fit.
+
+        If phase fitting puts Ql at or below the joint lower bound of one, use
+        the peak absolute circle-phase slope: Ql = |freq * dphase/df| / 4.
+        Recompute Qc with the same normalized circle radius. This repair does
+        not affect the public sequential fit when background fitting is off.
+        """
+        fit_signals = signals
         try:
             corrected = remove_edelay(freqs, signals, edelay)
             rational_fit = fit_degree_one_rational(freqs, corrected)
@@ -166,14 +174,25 @@ class HangerModel:
                 RuntimeWarning,
                 stacklevel=2,
             )
-            return cls._fit_sequential(freqs, signals, edelay)
-        if rational_fit.residual_rms > 0.25:
-            return cls._fit_sequential(freqs, signals, edelay)
+        else:
+            if rational_fit.residual_rms <= 0.25:
+                fit_signals = rational_fit.evaluate(freqs) * np.exp(
+                    -1j * 2.0 * np.pi * freqs * edelay
+                )
 
-        denoised_raw = rational_fit.evaluate(freqs) * np.exp(
-            -1j * 2.0 * np.pi * freqs * edelay
-        )
-        return cls._fit_sequential(freqs, denoised_raw, edelay)
+        initializer = cls._fit_sequential(freqs, fit_signals, edelay)
+        if initializer["Ql"] <= 1.0:
+            xc, yc, r0 = initializer["circle_params"]
+            phases = calc_phase(remove_edelay(freqs, fit_signals, edelay), xc, yc)
+            slopes = np.gradient(phases, freqs)
+            peak = int(np.argmax(np.abs(slopes)))
+            Ql = float(abs(freqs[peak] * slopes[peak]) / 4.0)
+            Qc = calc_Qc(Ql, initializer["phi"], r0 / abs(initializer["a0"]))
+            initializer["Ql"] = Ql
+            initializer["Qc"] = Qc
+            initializer["fwhm"] = initializer["freq"] / Ql
+            initializer["Qi"], initializer["qi_status"] = cls._resolve_qi(Ql, Qc)
+        return initializer
 
     @classmethod
     def _refine_complex(
@@ -185,7 +204,7 @@ class HangerModel:
         refine_edelay: bool,
         fit_bg_amp_slope: bool,
         fit_bg_phase_curvature: bool,
-    ) -> tuple[float, float, float, float, complex, float, float, float] | None:
+    ) -> tuple[float, float, float, float, complex, float, float, float]:
         span = float(np.ptp(freqs))
         center = 0.5 * float(np.min(freqs) + np.max(freqs))
         amp_scale = max(float(np.sqrt(np.mean(np.abs(signals) ** 2))), 1e-12)
@@ -254,6 +273,22 @@ class HangerModel:
             1e3,
             1e3,
         ]
+        parameter_names = [
+            "freq_offset",
+            "log_Ql",
+            "log_Qc_abs",
+            "phi",
+            "a0_real_scaled",
+            "a0_imag_scaled",
+        ] + [
+            name
+            for name, enabled in (
+                ("bg_amp_slope_scaled", fit_bg_amp_slope),
+                ("bg_phase_curvature_scaled", fit_bg_phase_curvature),
+                ("edelay_offset_scaled", refine_edelay),
+            )
+            if enabled
+        ]
         if fit_bg_amp_slope:
             initial.append(0.0)
             lower.append(-5.0)
@@ -297,9 +332,8 @@ class HangerModel:
             initial,
             (lower, upper),
             model_name="hanger",
+            parameter_names=parameter_names,
         )
-        if result is None:
-            return None
         return decode(result)
 
     @classmethod
@@ -329,8 +363,9 @@ class HangerModel:
         The optional search radii bound automatic delay branch selection and
         cannot be combined with edelay_branch_seed. With both background options
         off, the sequential circle/phase fit is unchanged. Returns HangerParams;
-        invalid inputs raise ValueError. Failed background refinement warns and
-        returns the sequential fit, without adding a validity field.
+        invalid inputs raise ValueError. Background refinement also raises
+        ValueError on optimizer failure, non-finite results or active parameter
+        bounds, identifying the model and cause; it never returns an unrefined fit.
         """
         validate_complex_fit_inputs(freqs, signals)
         refine_edelay = edelay is None
@@ -343,9 +378,8 @@ class HangerModel:
                 branch_seed=edelay_branch_seed,
             )
 
-        sequential = cls._fit_sequential(freqs, signals, edelay)
         if not fit_bg_amp_slope and not fit_bg_phase_curvature:
-            return sequential
+            return cls._fit_sequential(freqs, signals, edelay)
 
         # Circle loss assumes no background; keep the supplied branch seed as
         # the joint fit's delay starting point rather than its biased refinement.
@@ -364,8 +398,6 @@ class HangerModel:
             fit_bg_amp_slope=fit_bg_amp_slope,
             fit_bg_phase_curvature=fit_bg_phase_curvature,
         )
-        if refined is None:
-            return sequential
         freq, Ql, Qc_abs, phi, a0, edelay, bg_amp_slope, bg_phase_curvature = refined
 
         corrected = remove_background(

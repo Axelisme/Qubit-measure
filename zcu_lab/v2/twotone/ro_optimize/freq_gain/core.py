@@ -21,7 +21,6 @@ from zcu_tools.experiment.v2.utils.snr import snr_as_signal
 from zcu_tools.experiment.v2.utils.tracker.moment import MomentTracker
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
-    GainSweep,
     Pulse,
     PulseReadout,
     Readout,
@@ -49,7 +48,7 @@ class FreqGainCfg(ConfigBase):
     qub_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Qubit pulse")]
     readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
     freq: Annotated[SweepCfg, FieldMeta(label="Readout freq", unit="MHz")]
-    gain: Annotated[GainSweep, FieldMeta(label="Readout gain", unit="a.u.")]
+    gain: Annotated[SweepCfg, FieldMeta(label="Readout gain", unit="a.u.")]
     skew_penalty: Annotated[float, FieldMeta(label="Skew penalty", decimals=3)] = Field(
         default=0.0, ge=0.0
     )

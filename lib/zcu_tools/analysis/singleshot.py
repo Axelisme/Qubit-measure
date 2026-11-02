@@ -222,6 +222,36 @@ class Centroid3IQAnalysis:
     minimum_singular_value: float
 
 
+@dataclass(frozen=True)
+class Centroid3Summary:
+    """Fixed-size saved-readout diagnostics in preparation-label coordinates.
+
+    Confusion rows are prepared g/e/f, columns measured g/e/f. TypeAdapter
+    decodes finite numeric lists to a float64 (3, 3) confusion matrix.
+    condition_number is its 2-norm condition number; minimum_singular_value
+    is its smallest singular value. No purity or fidelity is inferred.
+    """
+
+    confusion_matrix: Annotated[
+        NDArray[np.float64], PlainValidator(_centroid3_confusion)
+    ]
+    condition_number: float
+    minimum_singular_value: float
+
+
+def summarize_centroid3(result: Centroid3IQAnalysis) -> Centroid3Summary:
+    """Retain saved-readout diagnostics without scan-sized fractions.
+
+    Copy the training confusion matrix and retain both computed diagnostics.
+    The complete result remains available to the caller for local plotting.
+    """
+    return Centroid3Summary(
+        confusion_matrix=result.confusion_matrix.copy(),
+        condition_number=result.condition_number,
+        minimum_singular_value=result.minimum_singular_value,
+    )
+
+
 def analyze_centroid3_iq(
     signals: NDArray[np.complex128], calibration: Centroid3Classifier
 ) -> Centroid3IQAnalysis:

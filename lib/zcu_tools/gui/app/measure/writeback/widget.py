@@ -142,17 +142,22 @@ def _full_value(value: Any) -> str:
 
 
 def _record_summary(item: RecordWriteback, *, compact: bool) -> str:
-    """List every record field without truncating strings or nested JSON."""
+    """Summarize fields on one line, or return the complete indented JSON."""
+    if not compact:
+        return json.dumps(item.record, ensure_ascii=False, indent=2)
     fields: list[str] = []
     for key, value in item.record.items():
+        if isinstance(value, (dict, list)):
+            fields.append(f"{key}{{{len(value)}}}")
+            continue
         if isinstance(value, str):
             text = value
         elif _is_number(value):
-            text = _compact_value(value) if compact else _full_value(value)
+            text = _compact_value(value)
         else:
             text = json.dumps(value, ensure_ascii=False)
         fields.append(f"{key}={text}")
-    return "\n".join(fields)
+    return " ".join(", ".join(fields).splitlines())
 
 
 class _MiddleElidedLabel(QLabel):
@@ -336,7 +341,14 @@ class WritebackWidget(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(4)
 
-        layout.addLayout(self._build_selection_bar())
+        self._hint = QLabel()
+        self._hint.setObjectName("writebackModuleWarning")
+        self._hint.setWordWrap(True)
+        self._hint.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum
+        )
+        self._foregrounds.set(self._hint, warning_colour)
+        layout.addWidget(self._hint)
 
         # Apply sits above the ledger so it stays close to the analyze output.
         self._apply_btn = QPushButton("Apply Selected")
@@ -369,28 +381,6 @@ class WritebackWidget(QWidget):
 
         self._refresh_apply_enabled()
 
-    def _build_selection_bar(self) -> QHBoxLayout:
-        self._hint = QLabel(
-            "Select the items to write back. Use Edit to adjust values first."
-        )
-        self._hint.setWordWrap(True)
-        self._hint.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum
-        )
-        selection = QHBoxLayout()
-        selection.addWidget(self._hint, stretch=1)
-        self._all_btn = QPushButton("All")
-        self._none_btn = QPushButton("None")
-        self._scope.connect(
-            self._all_btn.clicked, lambda: self._select_all(selected=True)
-        )
-        self._scope.connect(
-            self._none_btn.clicked, lambda: self._select_all(selected=False)
-        )
-        selection.addWidget(self._all_btn)
-        selection.addWidget(self._none_btn)
-        return selection
-
     def changeEvent(self, a0: QEvent | None) -> None:
         super().changeEvent(a0)
         if a0 is not None and a0.type() == QEvent.Type.PaletteChange:
@@ -415,8 +405,8 @@ class WritebackWidget(QWidget):
 
         reason is the owner's failure text, shown verbatim and wrapped, first.
         unavailable_reasons follow as populate shows them. The view keeps no
-        items, so the selection hint and Apply are hidden until the next
-        populate shows them again.
+        items, so the module warning and Apply are hidden. The next populate
+        restores Apply and shows the warning only for selected invalid modules.
         """
         self.populate([], {}, unavailable_reasons=unavailable_reasons)
         self._hint.setVisible(False)
@@ -512,7 +502,6 @@ class WritebackWidget(QWidget):
         unavailable_reasons: tuple[str, ...],
     ) -> None:
         self._values = values
-        self._hint.setVisible(True)
         self._apply_btn.setVisible(True)
         # Clear old rows
         while self._rows_layout.count():
@@ -604,7 +593,13 @@ class WritebackWidget(QWidget):
     def _make_proposed_view(
         self, item: WritebackItem
     ) -> tuple[QLabel, QTableWidget | None]:
-        proposed_label = _value_label(item, self._display_proposed(item, compact=True))
+        text = self._display_proposed(item, compact=True)
+        proposed_label: QLabel
+        if isinstance(item, RecordWriteback):
+            proposed_label = _MiddleElidedLabel(text)
+            make_label_selectable(proposed_label)
+        else:
+            proposed_label = _value_label(item, text)
         proposed_label.setToolTip(self._display_proposed(item, compact=False))
         is_matrix = isinstance(item, ParameterWriteback) and _is_matrix_value(
             self._values[item.session_id].proposed
@@ -623,7 +618,7 @@ class WritebackWidget(QWidget):
         proposed_label.setSizePolicy(
             QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred
         )
-        proposed_label.setWordWrap(isinstance(item, RecordWriteback))
+        proposed_label.setWordWrap(False)
         if isinstance(item, RecordWriteback):
             proposed_label.setTextFormat(Qt.TextFormat.PlainText)
         table = None
@@ -681,10 +676,6 @@ class WritebackWidget(QWidget):
         except Exception:
             logger.exception("failed to copy writeback value")
 
-    def _select_all(self, *, selected: bool) -> None:
-        for checkbox in self._checks.values():
-            checkbox.setChecked(selected)
-
     def _on_check_toggled(self, item: WritebackItem) -> None:
         selected = self._checks[item.session_id].isChecked()
         assert self._tab_id is not None
@@ -697,24 +688,15 @@ class WritebackWidget(QWidget):
         self._refresh_apply_enabled()
 
     def _refresh_apply_enabled(self, *_: int) -> None:
-        self._all_btn.setEnabled(bool(self._checks))
-        self._none_btn.setEnabled(bool(self._checks))
         selected = {key for key, cb in self._checks.items() if cb.isChecked()}
         invalid = selected & self._invalid_modules
         self._apply_btn.setEnabled(bool(selected) and not bool(invalid))
+        self._hint.setVisible(bool(invalid))
         if invalid:
             targets = [
                 item.target_name for item in self._items if item.session_id in invalid
             ]
             self._hint.setText(f"Fix or uncheck invalid module: {', '.join(targets)}")
-            self._foregrounds.set(self._hint, warning_colour)
-        else:
-            self._hint.setText(
-                "Select the items to write back. Use Edit to adjust values first."
-            )
-            self._foregrounds.set(
-                self._hint, lambda owner: owner.palette().color(owner.foregroundRole())
-            )
 
     def _on_apply_clicked(self) -> None:
         self.apply_requested.emit()

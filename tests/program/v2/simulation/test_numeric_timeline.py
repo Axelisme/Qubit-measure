@@ -7,7 +7,7 @@ from zcu_tools.core.simulation import ChannelSignals, RoundSignals
 from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.program.v2 import TimelineBuilder
 from zcu_tools.program.v2.modules.delay import Delay, DelayAuto
-from zcu_tools.program.v2.modules.dmem import LoadValue, LoadWord
+from zcu_tools.program.v2.modules.dmem import LoadValue
 from zcu_tools.program.v2.modules.pulse import Pulse
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ArbWaveformCfg, ConstWaveformCfg
@@ -41,13 +41,12 @@ def readout(name="readout", *, channel=0, samples=31, waveform=None):
     ).build(name)
 
 
-@pytest.mark.parametrize("loader", [LoadValue, LoadWord])
-def test_empty_table_is_a_semantic_noop_if_no_consumer_needs_its_register(loader):
+def test_empty_table_is_a_semantic_noop_if_no_consumer_needs_its_register():
     env = white_noise(load_soccfg(), std_adc=0, seed=None, routes=((0, 0),))
     prog = compile_modules(
         env.soccfg,
         modules=[
-            loader("empty", [], "reps", "unused"),
+            LoadValue("empty", [], "reps", "unused"),
             readout(),
         ],
     )

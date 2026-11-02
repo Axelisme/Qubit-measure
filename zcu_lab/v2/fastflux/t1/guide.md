@@ -52,12 +52,12 @@ requires an appropriate gain range.
 
 Analyze fits each gain's decay, estimates a common baseline from accepted
 preliminary fits, then refits with that baseline fixed. The named `fit` figure
-overlays T1 on the IQ map. Rejected T1 estimates appear as null in the summary;
-their initialized zero errors are placeholders only. A flat, short or noisy trace
-may yield a rejected fit. Inspect the figure before accepting a returned value.
+overlays T1 and its uncertainty on the IQ map. Rejected estimates are omitted
+from the overlay. A flat, short or noisy trace may yield a rejected fit.
+Inspect the figure before choosing an operating point.
 
-This experiment measures a gain-dependent curve. Analysis produces a figure and
-summary; the stored operating-point T1 retains its value. Save preserves gain
+This experiment measures a gain-dependent curve. Analysis publishes only the
+figure; the stored operating-point T1 retains its value. Save preserves gain
 and time axes, complex IQ and source cfg. Load and Analyze use that saved source;
 the current form, alias table and library remain separate. Time is stored in
 seconds and restored to us. Analyze can use valid saved data even when its cfg

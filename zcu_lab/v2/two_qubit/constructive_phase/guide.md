@@ -50,6 +50,9 @@ Reset can overwrite unsaved inputs.
 
 ## Read the figures
 
+Analyze returns only `relative_phase_deg`, `reason` and `interference_quality`.
+Per-phase rates, populations and interference curves stay inside analysis for plotting.
+
 The live traces and interference map show P00 after double Xπ contrast.
 P00 is the terminal (g,g) count divided by all nine terminal class counts.
 The return figure shows all nine g/e/other joint outcomes.
@@ -61,7 +64,7 @@ Each fully acquired duration trace with nonzero selected counts uses an
 undamped cosine fit.
 Rates below 1 divided by the saved duration span are unresolved.
 Failed or degenerate fits report a reason rather than a zero rate.
-Inspect fit_quality and the measured traces against the model.
+Compare the measured return traces with the fitted curves.
 Choose spacing so the expected rate is below `1/(2 × duration spacing)`.
 Check aliasing manually. Thermal mixtures may contain more than one rate.
 

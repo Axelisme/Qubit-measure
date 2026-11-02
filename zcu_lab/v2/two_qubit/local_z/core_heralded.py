@@ -32,9 +32,14 @@ from zcu_tools.program.v2.modules import MuxReadout
 
 from zcu_lab.v2.support import live_line
 
-from .._phase import QuadraturePhase, count_phase, phase_variance, sigma_variance
+from .._phase import count_phase, phase_variance, sigma_variance
 from .._sums import herald_probabilities, sigma, terminal_counts, validate_classifiers
-from .analysis import LocalZAnalysis, LocalZTargetFit, fit_target
+from .analysis import (
+    LocalZAnalysis,
+    LocalZFit,
+    fit_target,
+    summarize_fit,
+)
 from .core import LocalZCfg
 
 
@@ -71,18 +76,14 @@ def restore_result(
 
 @dataclass(frozen=True)
 class LocalZHeraldedAnalysis(LocalZAnalysis):
-    """gg writeback fits plus independent ee diagnostics in the same target order.
+    """gg writeback fits, independent ee fits and ee−gg slopes by F1/F2 target.
 
-    ee_phases is (2,Nn), ee_quadratures and ee_acquired_shots are (2,2,Nn).
-    ee_fits has one weighted fit per target. slope_difference_deg is ee−gg per
-    target, or None when either fit is unavailable. No shared slope is imposed.
+    ee_fits and slope_difference_deg each have one entry per target.
+    Differences are None when either slope is unavailable.
     """
 
-    ee_phases: tuple[tuple[QuadraturePhase, ...], ...] = ()
-    ee_quadratures: NDArray[np.float64] | None = None
-    ee_acquired_shots: NDArray[np.float64] | None = None
-    ee_fits: tuple[LocalZTargetFit, ...] = ()
-    slope_difference_deg: tuple[float | None, ...] = ()
+    ee_fits: tuple[LocalZFit, ...]
+    slope_difference_deg: tuple[float | None, ...]
 
 
 class LocalZHeraldedExp(Experiment[LocalZHeraldedResult, LocalZHeraldedCfg]):
@@ -326,20 +327,6 @@ class LocalZHeraldedExp(Experiment[LocalZHeraldedResult, LocalZHeraldedCfg]):
             for g, e in zip(gg_fits, ee_fits, strict=True)
         )
         herald_matrix = herald_probabilities(data.sums)
-        answer = LocalZHeraldedAnalysis(
-            gg_phases,
-            gg_quadratures,
-            gg.sum(axis=(-2, -1)),
-            tuple(cfg.gate_counts),
-            gg_fits,
-            herald_matrix,
-            herald_matrix[..., 0, 0],
-            ee_phases,
-            ee_quadratures,
-            ee.sum(axis=(-2, -1)),
-            ee_fits,
-            differences,
-        )
 
         fig, _ = plots.subplots(
             num="phase", nrows=3, figsize=(10, 10), layout="constrained"
@@ -419,4 +406,8 @@ class LocalZHeraldedExp(Experiment[LocalZHeraldedResult, LocalZHeraldedCfg]):
             title="Herald distribution; (g,g) is pass fraction, not ground-state purity",
         )
         fig.colorbar(image, ax=axes, label="Herald probability")
-        return answer
+        return LocalZHeraldedAnalysis(
+            tuple(summarize_fit(fit) for fit in gg_fits),
+            tuple(summarize_fit(fit) for fit in ee_fits),
+            differences,
+        )

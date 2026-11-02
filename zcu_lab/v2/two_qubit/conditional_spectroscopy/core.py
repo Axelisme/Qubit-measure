@@ -43,7 +43,7 @@ from .._sums import (
     marginal_probabilities,
     validate_classifiers,
 )
-from .analysis import SpectroscopyAnalysis, summarize_spectra
+from .analysis import summarize_spectra
 
 
 class SpectroscopyCfg(ConfigBase):
@@ -324,7 +324,7 @@ class SpectroscopyExp(Experiment[SpectroscopyResult, SpectroscopyCfg]):
         options: None,
         *,
         plots: Plots,
-    ) -> SpectroscopyAnalysis:
+    ) -> None:
         """Plot count-derived F1/F2 P_e with other retained in the denominator."""
         del options
         data = source.result
@@ -428,4 +428,3 @@ class SpectroscopyExp(Experiment[SpectroscopyResult, SpectroscopyCfg]):
                 ylabel="Shots",
             )
             ax.legend(fontsize="small")
-        return answer

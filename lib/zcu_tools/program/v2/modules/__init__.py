@@ -16,8 +16,8 @@ from ..utils import param2str
 from .base import AbsModuleCfg, Module, resolve_module_ref
 from .computed_pulse import ComputedPulse
 from .delay import Delay, DelayAuto, SoftDelay
-from .dmem import LoadValue, LoadWord
-from .pulse import Pulse, PulseCfg, PulseOverrides, TableLengthPulse
+from .dmem import LoadValue
+from .pulse import Pulse, PulseCfg, PulseOverrides
 from .readout import (
     AbsReadout,
     AbsReadoutCfg,

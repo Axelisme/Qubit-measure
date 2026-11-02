@@ -1,6 +1,6 @@
 # `gui.app.measure.writeback`
 
-**Last updated:** 2026-11-01
+**Last updated:** 2026-11-02
 
 **讀者：** framework-dev。寫回提案、review widget 與逐項 Apply 契約。
 
@@ -60,9 +60,10 @@ Draft 複製 proposal 的初選與 note。GUI 在目的地下面顯示 note，RP
 ## Record 列
 
 Record 的目標欄顯示 `<元件名> · record`。未 Apply 時保留共用的 `*` 標記，成功後移除。
-Current 欄顯示 `entry record`。Proposed 欄與 tooltip 逐行列出全部 `key=value`，保留字串與巢狀 JSON 的完整內容。
-每個 key 與值的前綴可見。長值可能被欄寬裁切，tooltip 與 Copy 仍保留完整內容。
-Widget 將每個欄位當作一般 JSON 呈現，不識別裝置或單位。
+Current 欄顯示 `entry record`。Proposed 欄以單行列出純量 `key=value`，欄位之間以逗號分隔。
+巢狀欄位只顯示名稱與項目數，例如 `devices{3}`、`flux_frame{2}`。
+欄寬不足時以中間省略保留預覽兩端，tooltip 顯示排版過的完整 JSON。
+Widget 依一般 JSON 值的形狀呈現，不識別裝置或單位。
 Copy 將完整 JSON 放入剪貼簿。Record 沒有 Edit 動作，也不開啟編輯對話框。
 
 `RecordWriteback(target_name, description, record=...)` 提供 adapter 組裝的 JSON object。

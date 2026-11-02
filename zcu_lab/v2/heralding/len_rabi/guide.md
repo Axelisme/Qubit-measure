@@ -34,7 +34,7 @@ Analyze returns `HeraldingLenRabiAnalysis`:
 Inspect the oscillation, fitted pi/pi2 markers, uncertainties and fit quality. Writeback proposes the same targets as ordinary length Rabi, with every description marked Heralded:
 
 - `$qubit.ext.rabi_freq` in MHz.
-- `$qubit.pulses.pi_amp` and `$qubit.pulses.pi2_amp`, changing waveform length to fitted pi and pi/2 lengths.
+- `$qubit.pulses.pi_len` and `$qubit.pulses.pi2_len`, changing waveform length to fitted pi and pi/2 lengths. The pi_amp/pi2_amp gain-calibration pulses remain unchanged.
 - `$qubit.module.x180` and `$qubit.module.x90`, pointing to those resolved pulse keys.
 - `$qubit.ext.pi_product`, the source gain multiplied by the fitted pi length in gain·us.
 

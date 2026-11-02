@@ -1,6 +1,5 @@
 """Measure GUI for gain-resolved relaxation during a fast-flux pulse."""
 
-from dataclasses import dataclass
 from pathlib import Path
 from typing import TypeAlias
 
@@ -13,28 +12,14 @@ from zcu_tools.gui.app.measure.adapter import (
 )
 from zcu_tools.plotting.plots import Plots
 
-from .core import T1Analysis, T1Cfg, T1Exp, T1Result
+from .core import T1Cfg, T1Exp, T1Result
 from .form import make_form
 
 T1RunResult: TypeAlias = RunRecord[T1Cfg, T1Result]
 
 
-@dataclass(frozen=True)
-class T1AnalyzeResult:
-    """Raw gains and core decay estimates; rejected fits remain non-finite."""
-
-    gains: list[float]
-    analysis: T1Analysis
-
-
-def _analyze(
-    req: AnalyzeRequest[T1RunResult, None], *, plots: Plots
-) -> T1AnalyzeResult:
-    source = req.run_result
-    return T1AnalyzeResult(
-        gains=source.result.gains.tolist(),
-        analysis=T1Exp().analyze(source, None, plots=plots),
-    )
+def _analyze(req: AnalyzeRequest[T1RunResult, None], *, plots: Plots) -> None:
+    T1Exp().analyze(req.run_result, None, plots=plots)
 
 
 def run(cfg: T1Cfg, *, context: RunContext) -> RunRecord[T1Cfg, T1Result]:

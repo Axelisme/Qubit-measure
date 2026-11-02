@@ -13,7 +13,7 @@ from qick.asm_v2 import (
     WriteReg,
 )
 from zcu_tools.program.v2 import ir
-from zcu_tools.program.v2.modules import LoadValue, LoadWord
+from zcu_tools.program.v2.modules import LoadValue
 from zcu_tools.program.v2.timeline import TimelineProgramV2
 
 from tests.program._profiles import GEN_MHZ, RO_MHZ, TPROC_MHZ, load_soccfg
@@ -241,7 +241,8 @@ def test_runtime_events_load_s14_then_increment_for_shared_origin():
 
 @pytest.mark.parametrize("swept_offset", [False, True])
 def test_selected_events_share_output_time_and_increment_nonzero_offsets(swept_offset):
-    from zcu_tools.program.v2.modules import PulseCfg, TableLengthPulse
+    from zcu_tools.program.v2.modules import PulseCfg
+    from zcu_tools.program.v2.modules.computed_pulse import ComputedPulse
     from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 
     offset = (
@@ -249,18 +250,20 @@ def test_selected_events_share_output_time_and_increment_nonzero_offsets(swept_o
         if swept_offset
         else 7 / TPROC_MHZ
     )
-    drive = TableLengthPulse(
+    drive = ComputedPulse(
         "selected",
-        PulseCfg(
-            ch=0,
-            nqz=1,
-            freq=1000,
-            gain=0.5,
-            pre_delay=offset,
-            waveform=ConstWaveformCfg(length=7 / GEN_MHZ),
-        ),
-        lengths=[7 / GEN_MHZ, 11 / GEN_MHZ],
-        idx_reg="scan",
+        val_reg="scan",
+        pulses=[
+            PulseCfg(
+                ch=0,
+                nqz=1,
+                freq=1000,
+                gain=0.5,
+                pre_delay=offset,
+                waveform=ConstWaveformCfg(length=n / GEN_MHZ),
+            )
+            for n in (7, 11)
+        ],
     )
 
     def initialize(prog):
@@ -663,9 +666,8 @@ def test_runtime_maximum_preserves_actual_end_after_author_bounded_repeat():
         recompile(prog)
 
 
-@pytest.mark.parametrize("loader_type", [LoadValue, LoadWord])
-def test_known_table_time_producer_places_each_selected_value(loader_type):
-    loader = loader_type("time", [10, 20, 30], "scan", "loaded")
+def test_known_table_time_producer_places_each_selected_value():
+    loader = LoadValue("time", [10, 20, 30], "scan", "loaded")
 
     def body(prog):
         prog.emit(loader)
@@ -1453,10 +1455,9 @@ def test_static_timeline_end_rejects_signed_cycle_overflow(pulse_end):
         program(body)
 
 
-@pytest.mark.parametrize("loader_type", [LoadValue, LoadWord])
 @pytest.mark.parametrize("index", [0, 2])
-def test_time_lookup_accepts_inclusive_index_bounds(loader_type, index):
-    loader = loader_type("time", [5, 10, 15], "duration", "loaded")
+def test_time_lookup_accepts_inclusive_index_bounds(index):
+    loader = LoadValue("time", [5, 10, 15], "duration", "loaded")
 
     def body(prog):
         prog.write_reg("duration", index)
@@ -1470,10 +1471,9 @@ def test_time_lookup_accepts_inclusive_index_bounds(loader_type, index):
     assert [s.end_cycle - s.start_cycle for s in result] == [expected + PULSE_END] * 3
 
 
-@pytest.mark.parametrize("loader_type", [LoadValue, LoadWord])
 @pytest.mark.parametrize("hint", [None, (5, 10)])
-def test_time_lookup_rejects_sweep_larger_than_table(loader_type, hint):
-    loader = loader_type("time", [5, 10], "scan", "loaded")
+def test_time_lookup_rejects_sweep_larger_than_table(hint):
+    loader = LoadValue("time", [5, 10], "scan", "loaded")
 
     def body(prog):
         prog.emit(loader)
@@ -1483,14 +1483,11 @@ def test_time_lookup_rejects_sweep_larger_than_table(loader_type, hint):
         program(body, initialize=lambda p: p.declare(loader))
 
 
-@pytest.mark.parametrize("loader_type", [LoadValue, LoadWord])
 @pytest.mark.parametrize(
     "where", ["before_lookup", "after_lookup_reset", "backedge", "branch"]
 )
-def test_time_lookup_index_proof_covers_all_writes_and_lookup_execution(
-    loader_type, where
-):
-    loader = loader_type("time", [5, 10, 15], "duration", "loaded")
+def test_time_lookup_index_proof_covers_all_writes_and_lookup_execution(where):
+    loader = LoadValue("time", [5, 10, 15], "duration", "loaded")
 
     def lookup(prog):
         prog.emit(loader)

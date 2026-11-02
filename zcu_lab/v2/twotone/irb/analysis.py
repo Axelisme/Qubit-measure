@@ -10,7 +10,7 @@ from zcu_tools.analysis.fitting import fit_decay
 
 @dataclass(frozen=True)
 class IRBAnalysis:
-    """Unitless single-qubit IRB estimates and their plotted curves."""
+    """Unitless single-qubit IRB estimates and paired-seed uncertainty."""
 
     p_reference: float
     """Reference decay per random Clifford."""
@@ -33,6 +33,13 @@ class IRBAnalysis:
     """Number of valid resampled fits used for the interval."""
     warning: str
     """Interpretation caveat, including nonphysical ratio estimates when present."""
+
+
+@dataclass(frozen=True)
+class IRBFitResult:
+    """Complete local fit for plotting, with a fixed-size published summary."""
+
+    summary: IRBAnalysis
     mean_signals: NDArray[np.float64]
     """Projected paired means, shape (2, depth)."""
     fit_signals: NDArray[np.float64]
@@ -92,7 +99,7 @@ def analyze_irb(
     *,
     bootstrap_samples: int = 1000,
     bootstrap_seed: int = 42,
-) -> IRBAnalysis:
+) -> IRBFitResult:
     """Estimate target fidelity and reproducible 95% paired-seed uncertainty.
 
     Requires shape (round, seed, 2, depth), at least four distinct depths and two
@@ -146,7 +153,7 @@ def analyze_irb(
     )
     if error < 0:
         warning += " Interleaved decay exceeds reference: negative error estimate retained, not clipped."
-    return IRBAnalysis(
+    summary = IRBAnalysis(
         p_reference=float(ps[0]),
         p_interleaved=float(ps[1]),
         reference_epc=float((1 - ps[0]) / 2),
@@ -158,6 +165,5 @@ def analyze_irb(
         n_paired_rounds=int(paired.sum()),
         bootstrap_successes=len(fidelities),
         warning=warning,
-        mean_signals=means,
-        fit_signals=curves,
     )
+    return IRBFitResult(summary=summary, mean_signals=means, fit_signals=curves)

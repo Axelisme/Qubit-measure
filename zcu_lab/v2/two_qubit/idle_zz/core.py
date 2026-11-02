@@ -41,7 +41,6 @@ from .._readout import JointRoles
 from .._sums import sigma, validate_classifiers
 from ._analysis import (
     IdleBranchFit,
-    IdleZZAnalysis,
     complete_points,
     fit_traces,
     sigma_errors,
@@ -335,7 +334,7 @@ class IdleZZExp(Experiment[IdleZZResult, IdleZZCfg]):
         options: None,
         *,
         plots: Plots,
-    ) -> IdleZZAnalysis:
+    ) -> None:
         """Fit full saved delay axes and plot signed frequency differences.
 
         Every required delay must contain all requested rounds. Other remains
@@ -446,5 +445,3 @@ class IdleZZExp(Experiment[IdleZZResult, IdleZZCfg]):
         )
         ax.grid(True)
         fig.tight_layout()
-
-        return answer

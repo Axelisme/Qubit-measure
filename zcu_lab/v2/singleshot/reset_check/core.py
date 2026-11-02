@@ -19,11 +19,11 @@ from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     Classify,
-    GainSweep,
     Pulse,
     PulseReadout,
     Readout,
     Reset,
+    SweepCfg,
     TimelineBuilder,
     shot_sums,
 )
@@ -40,7 +40,7 @@ class ResetCheckCfg(ConfigBase):
     rabi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Rabi Pulse")]
     tested_reset: Annotated[Reset.Cfg, FieldMeta(label="Tested Reset")]
     readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
-    gain: Annotated[GainSweep, FieldMeta(label="Gain", unit="a.u.")]
+    gain: Annotated[SweepCfg, FieldMeta(label="Gain", unit="a.u.")]
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
     ] = 1
@@ -72,7 +72,8 @@ class ResetCheckResult:
 
 @dataclass(frozen=True)
 class ResetCheckAnalysis:
-    populations: NDArray[np.float64]
+    """Scan-independent reset-only population diagnostics across sampled gains."""
+
     reset_mean_excited_population: float
     reset_max_excited_population: float
     reset_max_other_population: float
@@ -211,8 +212,8 @@ class ResetCheckExp(Experiment[ResetCheckResult, ResetCheckCfg]):
         """Summarize reset-only excited and Other populations across sampled gains.
 
         Apply options.confusion_matrix when supplied, otherwise use classified
-        fractions normalized per row from source.result.counts. Return corrected G/E/Other fractions and
-        reset-only mean/worst sampled populations, and plot all three branches.
+        fractions normalized per row from source.result.counts. Return reset-only
+        mean/worst sampled populations, and plot all three corrected G/E/Other branches.
         Invalid axes or no finite reset-only samples raise ValueError.
         """
         # 1. Check population axes before optional readout-confusion correction.
@@ -232,7 +233,6 @@ class ResetCheckExp(Experiment[ResetCheckResult, ResetCheckCfg]):
             raise ValueError("No finite reset-only populations to analyze")
         worst = np.flatnonzero(valid)[np.argmax(reset_e[valid])]
         analysis = ResetCheckAnalysis(
-            populations,
             float(np.mean(reset_e[valid])),
             float(reset_e[worst]),
             float(np.max(populations[valid, 1, 2])),

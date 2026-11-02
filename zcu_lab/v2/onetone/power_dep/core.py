@@ -18,7 +18,6 @@ from zcu_tools.experiment.v2.runtime.schedule import (
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.experiment.v2.utils.snr import snr_checker
 from zcu_tools.program.v2 import (
-    GainSweep,
     PulseReadout,
     Reset,
     SweepCfg,
@@ -49,7 +48,7 @@ def _positive_snr_or_none(value: float | None) -> float | None:
 class PowerDepCfg(ConfigBase):
     reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
     readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
-    gain: Annotated[GainSweep, FieldMeta(label="Gain", unit="a.u.")]
+    gain: Annotated[SweepCfg, FieldMeta(label="Gain", unit="a.u.")]
     freq: Annotated[SweepCfg, FieldMeta(label="Frequency", unit="MHz")]
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")

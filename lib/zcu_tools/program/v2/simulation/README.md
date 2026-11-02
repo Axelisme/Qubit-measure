@@ -1,6 +1,6 @@
 # Explicit acquisition environments
 
-**Last updated:** 2026-11-02，查表掃描與逐點 native timing
+**Last updated:** 2026-11-02，原生查表掃描與 scalar lookup
 
 **讀者：** framework-dev。模擬 acquisition 的 request、round 與 raw source 契約。
 
@@ -277,13 +277,12 @@ Errors identify the instruction class, pre-optimization position and available
 loop, case and source context.
 
 Supported controls are Pulse, PulseReadout, MuxReadout, Delay, SoftDelay, DelayAuto,
-LoadValue, LoadWord, native repeat/branch, ComputedPulse, TableLengthPulse,
+LoadValue, native repeat/branch, ComputedPulse,
 and the existing reset wrappers. Parallel sequences use native
 fork/join and preserve compiled emission order. Their register effects follow the
 same shot-local and live-in rules as other instructions. Reset wrappers emit
 actual pulses only; they do not reset a quantum state. LoadValue compression
 does not affect semantic values.
-LoadWord preserves uint32 words; each compiled consumer applies its operand semantics.
 
 The frontend predecodes the compiled stream once over a NumPy grid of non-reps
 points. `AcquireRequest.templates` covers that grid with numeric slots.
@@ -326,8 +325,7 @@ include it. Persisted acquire and round replay use format version 2, preserving
 the rational time base and integer ticks. Older replay versions are rejected
 without conversion.
 
-ComputedPulse and TableLengthPulse follow the selected compiled waveform and
-timestamp effects. The frontend does not pad a selected event to the longest
+ComputedPulse follows the selected compiled waveform and timestamp effects. The frontend does not pad a selected event to the longest
 candidate. `add_table_sweep(name, values)` uses the same top-level axes as
 `add_sweep(name, spec)`, with per-point wave fields or time-register values instead
 of linear increments. Multiple tables on one loop keep their independent values.

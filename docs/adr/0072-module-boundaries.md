@@ -106,6 +106,15 @@ mux/onetone 的逐 tone 數值計算、outcomes 與單 tone 失敗隔離由 core
 gui.py 保留來源與 route prior 解析，以及 writeback。
 此規則以直接審閱確認，不新增靜態內容測試；core 不依賴 GUI 的方向仍由 C15 保護。
 
+Analysis 回傳值是 lab 實驗交給 measure GUI 的摘要，大小最多隨掃描點數 O(log N)。
+隨掃描點數或 shot 數成長的陣列只在 `analyze` 內畫圖用，不回傳。
+`summarize_analysis` 在分析完成、發布結果前檢查；任一 ndarray、list 或 tuple 攤平後超過 64 個元素就 raise `ValueError`，不截斷。
+64 是檢查上限，不代表小於 64 的 O(N) 回傳值就符合摘要契約。
+數值 helper 回傳完整計算結果，core `analyze` 用完整結果畫圖後只回小摘要，例如 `RabiJointFitSummary`、`Centroid3Summary`。
+摘要由數值 helper 的 owner 定義，GUI 不另設一層摘要型別，也不替 core 重算或重跑 fitter。
+2026-11-02，使用者對大陣列進 JSON 指出「為什麼會把很大的數據用json.dumps？這不合理」，並裁定「summarize_analysis可以檢查結果的大小，太大就報錯。summarize請不要放隨著掃描參數成O(N)以上的結果。最多O(logN)」。
+對 64 元素上限與修改 core 的選擇，使用者回覆「64可以，CPMG選a，core」。
+
 各實驗在自己的 core 取數，不呼叫另一個實驗的 `run`。
 Mux flux 各 leaf 自行建立 program、執行 flux 取數迴圈，不以帶旗標的共用 run 分派不同實驗。
 共用工具可處理數值、設定 flux 與組裝 Result，不隱藏各 leaf 的量測迴圈。

@@ -181,6 +181,125 @@ class RabiJointFitResult:
         return np.array([1.0 - p_e, p_e, 0.0])
 
 
+@dataclass(frozen=True)
+class RabiBackendSummary:
+    """Fixed-size optimizer summary in the transformed parameterization.
+
+    parameter_names gives the selected model's optimizer coordinate order:
+    p_e0_u, p_inf_u, center_mid, log_separation, log_sigma, p_avg_u,
+    log_length_ratio, log_t_r, log_omega. A constant envelope omits log_t_r;
+    a fitted phase inserts phase immediately before log_omega. _u denotes
+    dimensionless logistic coordinates, log_ natural-log coordinates,
+    center_mid projected IQ units, and phase radians.
+
+    values holds transformed optimizer coordinates in that order, not physical
+    parameters. std has the same shape/order; std[i] = sqrt(full covariance[i, i]).
+    These non-negative marginal errors use values[i]'s coordinate units, without
+    physical-parameter propagation. Missing or invalid covariance can yield NaN.
+
+    valid is True only for accepted convergence and calibration. nll is the
+    dimensionless, non-negative multinomial negative log-likelihood. Invalid
+    fits can retain finite diagnostics or NaN values/std and infinite nll.
+    No field uses None. Arrays are detached from the full result.
+    """
+
+    parameter_names: tuple[str, ...]
+    values: NDArray[np.float64]
+    std: NDArray[np.float64]
+    valid: bool
+    nll: float
+
+
+@dataclass(frozen=True)
+class RabiJointFitSummary:
+    """Scan-independent fitted populations, parameters and readout calibration.
+
+    initial_populations is the dimensionless pre-pulse [g, e, other] vector
+    of shape (3,), with entries in [0, 1] summing to one and other fixed at zero.
+    It describes the state before the residual pulse-shaping rotation.
+
+    p_inf is the dimensionless long-drive excited-population baseline in [0, 1].
+    t_r is the positive Rabi envelope decay time in input coordinate units,
+    or None for a constant envelope. omega is positive, in radians per coordinate
+    unit. Coordinates are pulse lengths or gains. phase is the residual angle
+    relative to the pre-pulse direction in [-pi/2, pi/2] radians, or zero when fixed.
+
+    projected_g_center and projected_e_center are finite scalar ground/excited
+    centers on the pooled PCA axis in IQ units, with ground below excited.
+    sigma is the positive shared Gaussian readout noise width in IQ units.
+    p_avg is the dimensionless readout stationary excited population in [0, 1].
+    length_ratio is the positive dimensionless readout-duration/relaxation-time
+    ratio. g_center and e_center are finite complex ground/excited centers in the
+    original IQ plane, in input IQ units. radius is the positive circle-classification
+    radius in IQ units, no greater than the projected center separation.
+
+    confusion_matrix is a dimensionless (3, 3) matrix with true [g, e, other]
+    rows and measured [g, e, other] columns. Each row sums to one and entries
+    lie in [0, 1]. condition_number is its dimensionless 2-norm condition number,
+    at least one, with infinity indicating singularity or failed calibration.
+    backend holds transformed optimizer values, marginal errors and fit diagnostics.
+
+    On failure, backend.valid is False. initial_populations is [NaN, NaN, 0].
+    condition_number is infinite and all confusion_matrix entries are NaN.
+    t_r is None for a constant envelope and NaN otherwise. phase is zero when
+    phase fitting is disabled and NaN otherwise. All other physical outputs are
+    NaN, including both parts of complex centers. No other field uses None.
+    Backend diagnostics may remain finite even when calibration fails.
+    Arrays are detached from the full result; no sweep or shot data are retained.
+    """
+
+    initial_populations: NDArray[np.float64]
+    p_inf: float
+    t_r: float | None
+    omega: float
+    projected_g_center: float
+    projected_e_center: float
+    sigma: float
+    p_avg: float
+    length_ratio: float
+    g_center: complex
+    e_center: complex
+    radius: float
+    confusion_matrix: NDArray[np.float64]
+    condition_number: float
+    backend: RabiBackendSummary
+    phase: float
+
+
+def summarize_rabi_joint_fit(result: RabiJointFitResult) -> RabiJointFitSummary:
+    """Keep fitted values, calibration and marginal errors without sweep data.
+
+    Pass a full fit_rabi_joint result after using its populations and projection
+    for plots. Copy fixed-size arrays and derive backend std from covariance's
+    diagonal, without fitting again or modifying result. Nonfinite failed-fit
+    values remain nonfinite for the presentation boundary to report.
+    """
+    return RabiJointFitSummary(
+        initial_populations=result.initial_populations.copy(),
+        p_inf=result.p_inf,
+        t_r=result.t_r,
+        omega=result.omega,
+        projected_g_center=result.projected_g_center,
+        projected_e_center=result.projected_e_center,
+        sigma=result.sigma,
+        p_avg=result.p_avg,
+        length_ratio=result.length_ratio,
+        g_center=result.g_center,
+        e_center=result.e_center,
+        radius=result.radius,
+        confusion_matrix=result.confusion_matrix.copy(),
+        condition_number=result.condition_number,
+        backend=RabiBackendSummary(
+            parameter_names=result.backend.parameter_names,
+            values=result.backend.values.copy(),
+            std=np.sqrt(np.diag(result.backend.covariance)),
+            valid=result.backend.valid,
+            nll=result.backend.nll,
+        ),
+        phase=result.phase,
+    )
+
+
 def _cluster_projected_iq(
     projected: NDArray[np.float64],
 ) -> tuple[NDArray[np.float64], NDArray[np.intp]]:

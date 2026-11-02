@@ -17,6 +17,7 @@ from zcu_tools.gui.app.measure.events.tab import (
 )
 from zcu_tools.gui.app.measure.services.pane_commit import commit_analysis
 from zcu_tools.gui.app.measure.state import AnalysisPaneState
+from zcu_tools.gui.app.measure.summary import summarize_analysis
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.interactive import PluginDefinition, Session
 from zcu_tools.gui.session.operation_handles import OperationHandles, OperationOutcome
@@ -424,6 +425,7 @@ class AnalyzeService(StagedAnalyzeService):
 
         proposal_items: list[Any] = []
         if analyze_result is not None:
+            summarize_analysis(analyze_result)
             proposal_items = list(
                 adapter.get_writeback_items(
                     WritebackRequest(

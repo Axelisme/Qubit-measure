@@ -20,7 +20,7 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.program.v2.macro.loop import OpenInnerLoop
 from zcu_tools.program.v2.modules.delay import Delay, DelayAuto, SoftDelay
-from zcu_tools.program.v2.modules.dmem import LoadValue, LoadWord
+from zcu_tools.program.v2.modules.dmem import LoadValue
 from zcu_tools.program.v2.modules.pulse import Pulse, PulseCfg
 from zcu_tools.program.v2.modules.readout import (
     PulseReadout,
@@ -234,8 +234,7 @@ class TestPulseIntegration:
 
 
 class TestReadoutIntegration:
-    @pytest.mark.parametrize("runtime", [False, True])
-    def test_same_named_readouts_keep_program_owned_templates(self, runtime):
+    def test_same_named_readouts_keep_program_owned_templates(self):
         cfg = _readout_cfg()
 
         def readout_module(gain):
@@ -243,8 +242,6 @@ class TestReadoutIntegration:
                 "r1",
                 cfg,
                 gain=gain,
-                gain_val="gain_word" if runtime else None,
-                ro_freq_val="ro_freq_word" if runtime else None,
             )
 
         first = readout_module(cfg.gain)
@@ -253,9 +250,6 @@ class TestReadoutIntegration:
         def build(modules):
             builder = TimelineBuilder(load_soccfg())
             builder.add_loop("choice", 2)
-            if runtime:
-                for name in ("gain_word", "ro_freq_word"):
-                    builder.emit(LoadWord(name, [0, 0], idx_reg="choice", val_reg=name))
             with builder.branch(by="choice", align_timeline=True) as cases:
                 for index, module in enumerate(modules):
                     with cases.case(index):
@@ -275,40 +269,6 @@ class TestReadoutIntegration:
         cfg = _readout_cfg()
         prog = _make_prog(modules=[PulseReadout("ro", cfg)])
         assert prog.binprog is not None
-
-    def test_pulse_readout_runtime_freq_words_compile(self):
-        cfg = _readout_cfg(freq=GEN_FREQ)
-        modules = [
-            LoadWord(
-                "load_freq",
-                values=[1, 2],
-                idx_reg="freq",
-                val_reg="freq_word",
-            ),
-            LoadWord(
-                "load_ro_freq",
-                values=[3, 4],
-                idx_reg="freq",
-                val_reg="ro_freq_word",
-            ),
-            PulseReadout(
-                "ro",
-                cfg,
-                freq_val="freq_word",
-                ro_freq_val="ro_freq_word",
-            ),
-        ]
-
-        prog = _make_prog(modules=modules, sweep=[("freq", 2)])
-
-        assert prog.binprog is not None
-        runtime_ports = [
-            inst
-            for inst in prog.prog_list
-            if inst.get("CMD") == "WPORT_WR" and inst.get("SRC") == "r_wave"
-        ]
-        assert len(runtime_ports) == 2
-        assert not any(inst.get("CMD") == "WMEM_WR" for inst in prog.prog_list)
 
     def test_readout_factory_pulse_compiles(self):
         cfg = _readout_cfg()

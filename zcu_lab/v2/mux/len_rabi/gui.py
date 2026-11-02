@@ -118,7 +118,9 @@ def _get_writeback_items(
     Missing capture returns no items. Captured bindings must match any source
     cfg names/count; errors propagate. Partial/nonfinite rows and failed fits
     produce no calibration items. Pulse proposals copy source cfg only, never
-    current library values. This method neither writes nor applies proposals.
+    current library values. Fitted lengths go to qubit.pulses.pi_len/pi2_len;
+    module.x180/x90 proposals point to those keys. This method neither writes
+    nor applies proposals.
     """
     snapshot = req.run_result.cfg
     names = None if snapshot is None else tuple(t.name for t in snapshot.tones)
@@ -152,8 +154,8 @@ def _get_writeback_items(
         if not isinstance(gain, (int, float)):
             raise ValueError("Length Rabi pi_product requires scalar source gain")
         for suffix, slot, value, description in (
-            ("pi_amp", "x180", outcome.pi_len, "Pi pulse"),
-            ("pi2_amp", "x90", outcome.pi2_len, "Pi/2 pulse"),
+            ("pi_len", "x180", outcome.pi_len, "Pi pulse"),
+            ("pi2_len", "x90", outcome.pi2_len, "Pi/2 pulse"),
         ):
             target = f"{qubit}.pulses.{suffix}"
             row_items.append(

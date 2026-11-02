@@ -60,6 +60,11 @@ A high return alone does not establish a π conditional phase.
 
 ## Fit the first complete return
 
+Analyze returns `fit`, the first-return fit summary.
+It contains `scale`, `period`, `error`, `offset`, `contrast`, `fit_quality` and
+`reason`. Counts, probabilities, curves and herald fractions stay inside analysis
+for plotting.
+
 FIT sends P00 to the fixed-zero-phase model
 `offset + contrast cos(2π scale/period)`. The candidate common scale is
 the measured first positive return, `period`.
