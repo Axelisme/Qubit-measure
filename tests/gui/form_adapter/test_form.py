@@ -280,6 +280,9 @@ def test_failed_expression_defaults_require_input_without_changing_core(
     )
     state = FormState(form.default_input(env))
     assert state.input.data == {}
+    assert form.seed_sources[("amount",)].source == expression
+    assert form.seed_sources[("amount",)].status == "missing"
+    assert form.seed_sources[("count",)].status == "missing"
     result = state.result(env)
     assert isinstance(result, FormErrors), result
     assert result.messages == {
@@ -297,11 +300,13 @@ def test_failed_expression_defaults_require_input_without_changing_core(
     )
 
 
-def test_successful_expression_defaults_are_direct_native_values() -> None:
+def test_successful_expression_defaults_keep_text_and_lower_to_native_values() -> None:
     env = FormEnv()
     form = form_adapter.Form(DefaultedCfg, {"amount": Expr("6 * 2")})
     state = FormState(form.default_input(env))
-    assert state.input.data == {"amount": 12, "count": 3}
+    assert state.input.data == {"amount": {"expr": "6 * 2"}, "count": 3}
+    assert form.seed_sources[("amount",)].source == "6 * 2"
+    assert form.seed_sources[("amount",)].status == "available"
     assert form.to_cfg(require_result(state, env), env) == DefaultedCfg(amount=12)
 
 
@@ -518,7 +523,7 @@ def test_core_tree_generates_schema_defaults_and_typed_cfg() -> None:
         "text",
     ]
     assert "optional" not in base.data
-    assert base.data["amount"] == 6
+    assert base.data["amount"] == {"expr": "2 * 3"}
     state = FormState(base)
     cfg = form.to_cfg(require_result(state, env), env)
     assert cfg == ScalarCfg(

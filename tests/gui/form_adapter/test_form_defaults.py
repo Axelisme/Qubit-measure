@@ -185,7 +185,7 @@ def test_template_required_nested_defaults_omit_none() -> None:
     assert isinstance(module, dict)
     assert module["phase"] == 0
     assert "mixer_freq" not in module
-    assert module["freq"] == 120
+    assert module["freq"] == {"expr": "100 + 20"}
     value = state.result(env)
     assert not isinstance(value, FormErrors), value
     cfg = form.to_cfg(value, env)
@@ -586,8 +586,9 @@ def test_nested_template_expression_and_static_defaults_are_isolated(
     waveform = waveform_wrapper["module"]
     assert isinstance(waveform, dict)
     expected = 0.0 if expression is None else 0.4
-    assert module["trig_offset"] == module["phase"] == expected
-    assert waveform["length"] == (0.2 if expression is None else 0.4)
+    expected_input: JsonValue = 0.0 if expression is None else {"expr": "2 * .2"}
+    assert module["trig_offset"] == module["phase"] == expected_input
+    assert waveform["length"] == (0.2 if expression is None else expected_input)
     result = state.result(env)
     if isinstance(result, FormErrors):
         pytest.fail(str(result.messages))
@@ -595,7 +596,7 @@ def test_nested_template_expression_and_static_defaults_are_isolated(
     if isinstance(cfg, FormErrors):
         pytest.fail(str(cfg.messages))
     assert cfg.readout.trig_offset == cfg.readout.phase == expected
-    assert cfg.readout.waveform.length == waveform["length"]
+    assert cfg.readout.waveform.length == (0.2 if expression is None else 0.4)
     # Another form's failed seeds must not affect this form or persistent Specs.
     failed.default_input(env)
     native = PulseReadoutCfg.model_validate(

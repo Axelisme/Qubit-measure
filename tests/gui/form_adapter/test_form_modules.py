@@ -295,7 +295,9 @@ def test_template_kind_reselection_at_each_depth_is_fresh(depth: int) -> None:
         state.select(selection_path, option.value, env)
 
     leaf = "length" if depth else "pulse_cfg"
-    expected: JsonValue = 0.4 if depth else {"kind": "ref", "name": "Q.pulses.probe"}
+    expected: JsonValue = (
+        {"expr": "2 * .2"} if depth else {"kind": "ref", "name": "Q.pulses.probe"}
+    )
     assert current()[leaf] == expected
     state.write({(*path, leaf): 1.7 if depth else {"kind": "inline"}}, env)
     choose("Inline: cosine" if depth else "Inline: reset/two_pulse")

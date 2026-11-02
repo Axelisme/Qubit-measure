@@ -448,12 +448,12 @@ def _validate_model[F: FormModel](
 def evaluate_defaults(
     model: type[FormModel], data: Mapping[str, JsonValue], env: FormEnv
 ) -> dict[str, JsonValue]:
-    """Return a detached copy of defaults data with Expr leaves turned into values.
+    """Return detached defaults, retaining accepted Expr leaves as envelopes.
 
     data is what model.defaults returned. Each text-field leaf (see
-    expression_allowed; a choice leaf included, an explicitly restricted field not) holding
+    expression_allowed; explicitly restricted fields excluded) holding
     exactly {"expr": text}, in model, model-list or nested/selected-branch sections, is
-    evaluated once with env.parameters and replaced by its JSON value. A leaf
+    checked with env.parameters and retained as its original envelope. A leaf
     is removed instead when its expression raises ExpressionError (a missing
     path, an unbound alias, a non-numeric value), when its value is not finite
     JSON, or when result(env) then reports an error inside that leaf. Its
@@ -486,7 +486,7 @@ def _evaluate_section(
     prefix: FormWritePath,
     substituted: dict[FormWritePath, dict[str, JsonValue]],
 ) -> None:
-    """Evaluate authored Expr leaves in place."""
+    """Remove uncomputable Expr leaves and track the remaining candidates."""
     for name, value in tuple(data.items()):
         info = model.model_fields.get(name)
         if info is None:
@@ -512,7 +512,7 @@ def _evaluate_section(
             del data[name]
             continue
         try:
-            data[name] = default_json(evaluated)
+            default_json(evaluated)
         except ValueError:
             # Non-finite results have no JSON value to show or store.
             del data[name]

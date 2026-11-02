@@ -769,10 +769,9 @@ def test_template_input_nested_kind_reselection_uses_authored_defaults(
         value = next(item.value for item in options if item.label == f"Inline: {kind}")
         state.select((child,), value, env)
 
-    assert (
-        expect_object(expect_object(state.input.data[child])["module"])["length"]
-        == length
-    )
+    assert expect_object(expect_object(state.input.data[child])["module"])[
+        "length"
+    ] == ({"expr": "2 * .2"} if template_id == "pulse" else length)
     state.write({(child, "module", "length"): 1.7}, env)
     choose(other_kind)
     assert expect_object(state.input.data[child]) == {
@@ -807,9 +806,12 @@ def test_template_input_models_isolate_defaults_and_recomputation(
     assert type(first_cfg) is PulseSpec and first_cfg.gain == 0.6
     assert type(second_cfg) is PulseSpec and second_cfg.gain == 0.25
     assert second_cfg.phase == 7.0 and second_cfg.ch == 3
-    refreshed = first.model.default_input(creation_env(125.0))
-    assert refreshed.data["freq"] == 125.0 and refreshed.data["gain"] == 0.6
-    assert first.data["freq"] == 120.0
+    new_env = creation_env(125.0)
+    refreshed = first.model.default_input(new_env)
+    assert refreshed.data["freq"] == {"expr": "general.ext.seed"}
+    assert refreshed.data["gain"] == 0.6
+    assert result_spec(form, FormState(refreshed), new_env).freq == 125.0
+    assert first.data["freq"] == {"expr": "general.ext.seed"}
     assert form.default_input(env).data == original_model.default_input(env).data
     assert dict(first_template.set) == {"gain": 0.6}
     assert dict(second_template.set) == {"phase": 7.0, "ch": 3}

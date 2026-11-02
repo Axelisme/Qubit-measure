@@ -1,6 +1,7 @@
 """The right-click Expression action switches a text row between Direct and Expression."""
 
 from collections.abc import Callable, Iterator, Mapping
+from pathlib import Path
 from typing import Annotated, Literal
 
 import pytest
@@ -14,6 +15,8 @@ from qtpy.QtWidgets import (
     QComboBox,
     QLineEdit,
     QMenu,
+    QPushButton,
+    QVBoxLayout,
     QWidget,
 )
 from zcu_tools.gui.form import (
@@ -29,9 +32,64 @@ from zcu_tools.gui.form import (
 from zcu_tools.gui.widgets.form import FormEditor
 
 from tests.gui._form_context import captured_ext_env
-from tests.gui._user_input import type_text
+from tests.gui._user_input import ComponentDriver, type_text
 from tests.gui.widgets.form._field_errors import field_error
 from tests.gui.widgets.form._text_input import commit_text
+
+
+class SeededAmount(FormModel):
+    """A required scalar starts with an expression against the fixed capture."""
+
+    amount: float = Field(gt=0)
+
+    @classmethod
+    def defaults(cls, env: FormEnv) -> dict[str, JsonValue]:
+        del env
+        return {"amount": {"expr": "general.ext.seed * 2"}}
+
+
+def test_default_expression_opens_in_eval_and_refreshes_visible_value(
+    qapp: QApplication, tmp_path: Path
+) -> None:
+    env = captured_ext_env(seed=4.0)
+    state = FormState(SeededAmount.default_input(env))
+    host = QWidget()
+    host.setWindowTitle("Synthetic expression defaults")
+    layout = QVBoxLayout(host)
+    editor = FormEditor(state, env, host)
+    layout.addWidget(editor)
+    refresh = QPushButton("Refresh sources", host)
+    refresh.clicked.connect(lambda: editor.refresh(captured_ext_env(seed=9.0)))
+    layout.addWidget(refresh)
+    host.resize(760, 200)
+    host.show()
+    qapp.processEvents()
+    driver = ComponentDriver(host)
+    try:
+        driver.screenshot(tmp_path / "01-default-expression.png")
+        assert (
+            driver.text_input(object_name="form.input.amount").text
+            == "general.ext.seed * 2"
+        )
+        assert driver.observe(object_name="form.value.amount").text == "= 8.0"
+        # The popup PNG exposes the checked Expression action without toggling it.
+        driver.invoke_context_action(
+            object_name="form.input.amount",
+            action="Select All\tCtrl+A",
+            evidence=tmp_path / "02-expression-menu.png",
+        )
+        driver.click("Refresh sources")
+        driver.screenshot(tmp_path / "03-refreshed-expression.png")
+        assert (
+            driver.text_input(object_name="form.input.amount").text
+            == "general.ext.seed * 2"
+        )
+        assert driver.observe(object_name="form.value.amount").text == "= 18.0"
+    finally:
+        editor.detach()
+        host.close()
+        host.deleteLater()
+        qapp.processEvents()
 
 
 class Alpha(BaseModel):

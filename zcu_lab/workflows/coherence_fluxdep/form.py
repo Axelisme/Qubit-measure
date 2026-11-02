@@ -78,7 +78,7 @@ class CoherenceTunablesForm(FormModel):
 
         t1 has no static default, so this is its only default source; the
         T1 initial guess follows T1TunablesForm.defaults (captured leaf
-        evaluated into a value, or 20 us without capture/leaf). cal, t2ramsey
+        retained as an expression, or 20 us without capture/leaf). cal, t2ramsey
         and t2echo keep their static defaults. Existing input overlays remain
         the host's responsibility; no source is recaptured.
         """
@@ -174,7 +174,8 @@ class CoherencePlanForm(FormModel):
         unfilled and required. Device membership is checked only when used.
         On initial input only, resolve $qubit.module.x180.waveform.length in
         the fixed alias capture and declare its concrete path as an expression
-        default if readable and non-null; default_input stores its value. No
+        default if readable and non-null; default_input retains accepted expression
+        text, while result supplies the ordinary value. No
         capture, absent/null values or unreadable paths leave the field
         unfilled for explicit user input. Probe references captured qub_probe,
         or copies captured x180 at gain 0.1 and length 5 us. Missing both leaves

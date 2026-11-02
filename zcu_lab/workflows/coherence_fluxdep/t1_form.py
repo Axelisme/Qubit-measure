@@ -97,7 +97,8 @@ class T1TunablesForm(FormModel):
 
         When parameters contain general.ext.guess_us
         (even explicit null), declare that path as an expression default;
-        default_input evaluates it into a direct value. A null, non-numeric
+        default_input retains its text when accepted, and result evaluates it
+        against the fixed capture. A null, non-numeric
         or non-positive leaf leaves guess_us unfilled, so result reports
         only its "Field required" instead of silently using 20 us. Otherwise
         (no capture or an absent leaf) set an explicit

@@ -1,11 +1,11 @@
-"""Expression defaults become direct values when input is built or a branch opens."""
+"""Accepted expression defaults retain their text when input or branches open."""
 
 from pathlib import Path
 from typing import Annotated, Literal
 
 import pytest
 from pydantic import Field, JsonValue
-from zcu_tools.gui.form import FormEnv, FormErrors, FormModel, FormState
+from zcu_tools.gui.form import FormEnv, FormErrors, FormInput, FormModel, FormState
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_types import (
     ContextSourceFault,
@@ -117,22 +117,22 @@ def environment(
     )
 
 
-def test_default_input_holds_evaluated_alias_path_and_arithmetic_values() -> None:
+def test_default_input_keeps_alias_path_and_arithmetic_expressions() -> None:
     env = environment(4.0)
     data = Seeded.default_input(env).data
-    assert data == {"device": "yoko1", "level": 4.0, "doubled": 8.0, "authored": 1.0}
+    assert data == {**SEEDED_EXPRESSIONS, "authored": 1.0}
     result = FormState(Seeded.default_input(env)).result(env)
     assert result == Seeded(device="yoko1", level=4.0, doubled=8.0)
 
 
-def test_nested_section_defaults_are_evaluated_too() -> None:
+def test_nested_section_defaults_keep_their_expressions() -> None:
     env = environment(2.5)
     assert Holder.default_input(env).data == {
-        "section": {"device": "yoko1", "level": 2.5, "doubled": 5.0, "authored": 1.0}
+        "section": {**SEEDED_EXPRESSIONS, "authored": 1.0}
     }
 
 
-def test_branch_switch_evaluates_new_defaults() -> None:
+def test_branch_switch_preserves_new_expression_defaults() -> None:
     env = environment(4.0)
     state = FormState(Switching.default_input(env))
     state.write({("branch", "offset"): {"expr": "general.ext.seed / 8"}}, env)
@@ -140,13 +140,82 @@ def test_branch_switch_evaluates_new_defaults() -> None:
     assert state.input.data == {
         "branch": {
             "kind": "derived",
-            "level": 5.0,
+            "level": {"expr": "general.ext.seed + 1"},
             "offset": 0.0,
         }
     }
     result = state.result(env)
     assert isinstance(result, Switching)
     assert result.branch == Derived(level=5.0, offset=0.0)
+
+
+def test_compatible_restore_into_new_branch_keeps_default_expression() -> None:
+    env = environment(4.0)
+    state = FormState(Switching.default_input(env))
+    saved = FormInput(Switching, {"branch": {"kind": "derived", "offset": 2.0}})
+    assert state.restore_input(saved, env) == ()
+    assert state.input.data["branch"] == {
+        "kind": "derived",
+        "level": {"expr": "general.ext.seed + 1"},
+        "offset": 2.0,
+    }
+    assert state.preview(environment(9.0)).values[("branch", "level")] == 10.0
+
+
+def test_reset_rebuilds_defaults_instead_of_retaining_edits() -> None:
+    env = environment(4.0)
+    state = FormState(Seeded.default_input(env))
+    state.write({("level",): 99.0}, env)
+    updated = environment(9.0)
+    state.reset(Seeded.default_input(updated))
+    assert state.input.data == {**SEEDED_EXPRESSIONS, "authored": 1.0}
+    assert state.result(updated) == Seeded(device="yoko1", level=9.0, doubled=18.0)
+    assert not state.is_dirty
+
+
+class Inline(RebuildingForm):
+    """A synthetic inline wrapper supplies nested expression defaults."""
+
+    kind: Literal["inline"] = "inline"
+    section: Derived
+
+    @classmethod
+    def defaults(cls, env: FormEnv) -> dict[str, JsonValue]:
+        return {"kind": "inline", "section": Derived.defaults(env)}
+
+
+class InlineSwitching(RebuildingForm):
+    """Fresh inline selection uses the target wrapper's defaults."""
+
+    branch_models = {("branch",): (Manual, Inline)}
+    branch: Annotated[Manual | Inline, Field(discriminator="kind")] = Field(
+        default_factory=Manual
+    )
+
+
+def test_inline_switch_preserves_nested_expression_default() -> None:
+    env = environment(4.0)
+    state = FormState(InlineSwitching.default_input(env))
+    state.select(("branch",), {"kind": "inline"}, env)
+    assert state.input.data["branch"] == {
+        "kind": "inline",
+        "section": {
+            "kind": "derived",
+            "level": {"expr": "general.ext.seed + 1"},
+            "offset": 0.0,
+        },
+    }
+    assert (
+        state.preview(environment(9.0)).values[("branch", "section", "level")] == 10.0
+    )
+
+
+def test_failed_expression_uses_existing_static_default() -> None:
+    env = environment()
+    raw: dict[str, JsonValue] = {**SEEDED_EXPRESSIONS, "authored": {"expr": "1 / 0"}}
+    state = FormState(Seeded.default_input(env, defaults=raw))
+    assert "authored" not in state.input.data
+    assert state.result(env) == Seeded(device="yoko1", level=4.0, doubled=8.0)
 
 
 def test_authored_expressions_keep_their_text() -> None:
@@ -173,7 +242,6 @@ def test_uncomputable_or_invalid_defaults_leave_only_field_required(
 ) -> None:
     data = Seeded.default_input(env).data
     assert all(name not in data for name in unfilled)
-    assert all(not isinstance(value, dict) for value in data.values())
     result = FormState(Seeded.default_input(env)).result(env)
     assert isinstance(result, FormErrors)
     assert result.messages == {(name,): "Field required" for name in unfilled}

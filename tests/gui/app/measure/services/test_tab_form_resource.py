@@ -322,7 +322,7 @@ def test_open_and_reset_factory_replace_shape_and_values_from_current_capture() 
         capture=lambda _aliases: resource_api.TabFormSources(latest),
         mutation_allowed=lambda: True,
     )
-    assert resource.input.data == {"amount": 2.0}
+    assert resource.input.data == {"amount": {"expr": "general.ext.amount"}}
     resource.write({("amount",): 7.0})
     library = LibrarySnapshot(
         ModuleLibraryDocument(
@@ -357,7 +357,7 @@ def test_open_and_reset_factory_replace_shape_and_values_from_current_capture() 
     assert calls == [False, True]
     latest = factory_env(9.0)
     resource.reset()
-    assert resource.input.data == {"amount": 9.0}
+    assert resource.input.data == {"amount": {"expr": "general.ext.amount"}}
     assert resource.result() == ScalarCore(amount=9.0)
     assert calls == [False, True, False]
 
@@ -426,10 +426,11 @@ def test_refresh_retains_seed_metadata_and_sources_until_reset() -> None:
     assert original[0].uncalibrated is True
     latest = 5.0
     resource.refresh_sources()
-    assert resource.input.data == {"amount": 2.0}
+    assert resource.input.data == {"amount": {"expr": "general.ext.amount"}}
+    assert resource.result() == ScalarCore(amount=5.0)
     assert resource.diagnostics() == original
     resource.reset()
-    assert resource.input.data == {"amount": 5.0}
+    assert resource.input.data == {"amount": {"expr": "general.ext.amount"}}
     row = resource.diagnostics()[0]
     assert row.seed_source == "general.ext.amount"
     assert row.seed_status == "available"
@@ -625,7 +626,7 @@ def test_refresh_explicit_branch_updates_projection_without_reseeding(
         resource.revoke()
 
 
-def test_refresh_preserves_authored_expression_and_direct_defaults() -> None:
+def test_refresh_preserves_default_and_authored_expressions() -> None:
     latest = 2.0
     captures: list[Mapping[str, str] | None] = []
 
@@ -645,8 +646,10 @@ def test_refresh_preserves_authored_expression_and_direct_defaults() -> None:
     resource.subscribe(lambda: published.append(resource.preview().values[("amount",)]))
     latest = 5.0
     resource.refresh_sources(aliases={"selected": "Q2"})
-    assert resource.input.data == {"amount": 4.0}
-    assert resource.result() == ScalarCore(amount=4.0)
+    assert resource.input.data == {"amount": {"expr": "general.ext.amount * 2"}}
+    assert resource.preview().values[("amount",)] == 10.0
+    assert resource.result() == ScalarCore(amount=10.0)
+    assert resource.accept().values == {"amount": 10.0}
     resource.write({("amount",): {"expr": "general.ext.amount * 3"}})
     assert resource.result() == ScalarCore(amount=15.0)
     before = resource.input.to_json()
@@ -654,10 +657,10 @@ def test_refresh_preserves_authored_expression_and_direct_defaults() -> None:
     resource.refresh_sources()
     assert resource.input.to_json() == before
     assert resource.result() == ScalarCore(amount=21.0)
-    assert published == [4.0, 15.0, 21.0]
+    assert published == [10.0, 15.0, 21.0]
     assert captures == [None, {"selected": "Q2"}, None]
     resource.reset()
-    assert resource.input.data == {"amount": 14.0}
+    assert resource.input.data == {"amount": {"expr": "general.ext.amount * 2"}}
     assert resource.result() == ScalarCore(amount=14.0)
     assert captures == [None, {"selected": "Q2"}, None, None]
 

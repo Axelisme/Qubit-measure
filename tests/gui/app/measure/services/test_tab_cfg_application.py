@@ -374,8 +374,9 @@ def test_reset_aliases_capture_once_for_run(
     services.workspace.close_tab(tab_id)
     assert services.workspace.apply_session(persisted).restored_tabs == 1
     reopened = state.get_tab(state.list_tab_ids()[0]).cfg
-    assert reopened.input.data["gain"] == 20.0
-    assert reopened.accept().values["gain"] == 20.0
+    assert reopened.input.data["gain"] == {"expr": "$qubit.gain"}
+    # Reset alias overrides are not persisted; restored Expr uses the new capture.
+    assert reopened.accept().values["gain"] == 10.0
 
 
 def test_existing_tab_and_run_keep_point_until_reset(
@@ -408,7 +409,7 @@ def test_existing_tab_and_run_keep_point_until_reset(
     assert first.parameters.value("Q1.gain") == 10.0
 
 
-def test_dollar_defaults_materialize_fixed_alias_capture_until_reset(
+def test_dollar_defaults_keep_text_and_use_fixed_alias_capture_until_reset(
     global_sources: tuple[AppServices, State],
 ) -> None:
     services, state = global_sources
@@ -418,10 +419,10 @@ def test_dollar_defaults_materialize_fixed_alias_capture_until_reset(
         (AliasRow("qubit", "Q2"), AliasRow("custom", "Q1"))
     )
     assert cfg.accept().values["gain"] == 10.0
-    assert cfg.input.data["gain"] == 10.0
+    assert cfg.input.data["gain"] == {"expr": "$qubit.gain"}
     cfg.reset()
     assert cfg.accept().values["gain"] == 20.0
-    assert cfg.input.data["gain"] == 20.0
+    assert cfg.input.data["gain"] == {"expr": "$qubit.gain"}
 
 
 @pytest.mark.parametrize("target,qubit", [(None, "Q1"), ("Q2", "Q2")])

@@ -379,8 +379,8 @@ def field_error(path: FormPath, message: str) -> PydanticCustomError:
 class FormModel(BaseModel):
     """Ordinary values with typed class-level input hooks.
 
-    Override defaults for initial input (an Expr default is
-    evaluated into its value), and choices for dynamic path-to-options
+    Override defaults for initial input (an accepted Expr default retains
+    its text), and choices for dynamic path-to-options
     mappings. Owner default_input overrides must call super first and only add
     owner admission to its complete fresh input.
     No instances carry input, environment, revision or editing state. Ordinary
@@ -407,9 +407,10 @@ class FormModel(BaseModel):
         provenance without invoking defaults hooks twice. It is not mutated.
         Used missing library or device sources raise field_error with the
         consuming path. A text-field {"expr": text} default (int, float,
-        complex or str, a choice leaf included) is evaluated once with
-        env.parameters and stored as its direct value, so the input holds no
-        envelope for it; later source changes need a new default_input. When
+        complex or str, excluding restricted leaves) is checked with
+        env.parameters and retained as its original envelope when accepted.
+        Result and preview evaluate it against their fixed env, so a source
+        refresh can update the value without changing the expression. When
         that expression fails (missing path, unbound alias, non-numeric value)
         or its value is invalid for the field, the field is left unfilled: a
         required field then reports only "Field required" from result, and a
@@ -438,9 +439,9 @@ class FormModel(BaseModel):
         model or replace missing keys with None. Source failures propagate at the
         consuming field path.
         A text-field leaf may be {"expr": text} to derive its initial value from
-        env, such as {"expr": "$flux_dev"}; default_input
-        evaluate it into a direct value (see default_input), so it never stays
-        in input as an expression.
+        env, such as {"expr": "$flux_dev"}. default_input checks its result
+        and preserves accepted expression text in input. Result and preview
+        return ordinary values using their fixed env (see default_input).
         """
         from .defaults import static_defaults
 
