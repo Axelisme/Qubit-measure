@@ -172,9 +172,8 @@ class PowerDepExp(Experiment[PowerDepResult, PowerDepCfg]):
                     relax_delay=cfg.relax_delay,
                 )
                 freq = builder.add_sweep("freq", cfg.freq)
-                reset = Reset("reset", cfg.reset)
-                if reset is not None:
-                    builder.emit(reset)
+                if cfg.reset is not None:
+                    builder.emit(Reset("reset", cfg.reset))
                 builder.emit(
                     PulseReadout("readout", cfg.readout, freq=freq, gain=step.value),
                 )

@@ -206,9 +206,8 @@ class HeraldingT2RamseyExp(Experiment[HeraldingT2RamseyResult, HeraldingT2Ramsey
                 soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
             )
             delay = builder.add_sweep("delay", cfg.delay)
-            reset = Reset("reset", cfg.reset)
-            if reset is not None:
-                builder.emit(reset)
+            if cfg.reset is not None:
+                builder.emit(Reset("reset", cfg.reset))
             builder.emit(PulseReadout("herald", cfg.readout))
             builder.emit(Pulse("pi2_pulse", cfg.pi2_pulse))
             builder.timeline_inc(delay)
