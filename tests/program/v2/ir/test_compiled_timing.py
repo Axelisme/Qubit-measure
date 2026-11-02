@@ -679,6 +679,47 @@ def test_wave_words_follow_native_sweep_updates_and_reset(parameter, start, stop
     assert ir.analyze_timing(compiled) == result
 
 
+def test_register_wave_output_uses_patched_words_without_changing_template():
+    scalar = ScalarProgram(load_soccfg())
+    expected = ir.compiled_wmem(scalar)[0]
+
+    class RegisterWaveProgram(ScalarProgram):
+        def _initialize(self, cfg):
+            self.declare_gen(ch=0, nqz=1)
+            self.add_pulse(
+                ch=0,
+                name="p",
+                style="const",
+                freq=89,
+                phase=0,
+                gain=0.3,
+                length=10 / GEN_MHZ,
+            )
+            self.add_reg("frequency")
+            self.add_reg("gain")
+            self.write_reg("frequency", expected[0])
+            self.write_reg("gain", expected[3])
+
+        def _body(self, cfg):
+            self.meta_macro("TIMING_BOUNDARY", "body_start")
+            self.pulse_from_regs(
+                ch=0, name="p", freq_reg="frequency", gain_reg="gain", t=0
+            )
+            self.append_macro(Pulse(ch=0, name="p", t=20 / TPROC_MHZ))
+            self.meta_macro("TIMING_BOUNDARY", "body_end")
+
+    prog = RegisterWaveProgram(load_soccfg(), reps=2, initial_delay=0, relax_delay=0)
+    layout = ir.TimingLayout.from_metadata(prog.meta_infos, (ir.TimingLoop("reps", 2),))
+    wmem = ir.compiled_wmem(prog)
+    result = ir.analyze_timing(
+        ir.CompiledTimingInput(prog.prog_list, prog.labels, layout, wmem=wmem)
+    )
+    assert [[event.wave_words for event in shot.events] for shot in result.shots] == [
+        [expected, wmem[0]],
+        [expected, wmem[0]],
+    ]
+
+
 def test_native_waveform_sweep_updates_do_not_require_waveform_contents():
     class GainSweepProgram(ScalarProgram):
         def _initialize(self, cfg):
