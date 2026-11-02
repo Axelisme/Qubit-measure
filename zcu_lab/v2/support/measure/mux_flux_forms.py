@@ -185,6 +185,7 @@ def make_flux_form[
 
 def mux_flux_initial_values(
     env: FormEnv,
+    _defaults: dict[str, JsonValue],
     *,
     names: tuple[str, ...],
     participants: tuple[int | str, ...],
@@ -192,6 +193,8 @@ def mux_flux_initial_values(
 ) -> dict[str, JsonValue]:
     """Seed mux DC identities, units and actual ranges from the fixed Form env.
 
+    _defaults is the detached declared raw input, unused because the returned
+    roots are built from the capture.
     names is the full captured Q order; participants contains original selected
     indices. Local scans use each Q's flux_dev and leave nonparticipant
     sweeps disabled. Global scans use $mux.flux_dev and the union of Q

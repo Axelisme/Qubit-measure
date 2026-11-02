@@ -107,12 +107,14 @@ def make_form(ctx: FormContext) -> Form[TwotoneFluxGlobalCfg]:
 
 
 def global_flux_initial_values(
-    env: FormEnv, *, names: tuple[str, ...]
+    env: FormEnv, _defaults: dict[str, JsonValue], *, names: tuple[str, ...]
 ) -> dict[str, JsonValue]:
     """Seed the shared coil, native unit and union of captured Q intervals.
 
     env contains detached group parameters and DC infos; names retains the full
-    captured Q order. Missing calibration leaves both bounds blank. Invalid
+    captured Q order. _defaults is the detached declared raw input, unused because
+    the returned roots are built from the capture.
+    Missing calibration leaves both bounds blank. Invalid
     device names, unavailable DC infos or invalid contributors raise without I/O.
     """
     group = require_mux_group(env.parameters)

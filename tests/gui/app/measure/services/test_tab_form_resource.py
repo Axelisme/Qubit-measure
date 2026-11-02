@@ -564,7 +564,9 @@ def test_refresh_explicit_branch_updates_projection_without_reseeding(
         form = Form(
             PulseInput,
             {"pulse": node},
-            initial_values=lambda _env: initializations.append("fresh") or {},
+            initial_values=lambda _env, _defaults: (
+                initializations.append("fresh") or {}
+            ),
         )
         form.bind_templates(
             {
@@ -621,6 +623,8 @@ def test_refresh_explicit_branch_updates_projection_without_reseeding(
                 for row in resource.diagnostics()
             } == provenance
         assert initializations == ["fresh"]
+        resource.reset()
+        assert initializations == ["fresh", "fresh"]
     finally:
         resource.revoke()
 

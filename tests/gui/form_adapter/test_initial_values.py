@@ -31,7 +31,9 @@ def test_factory_seeds_same_capture_without_replacing_declaration() -> None:
     env = FormEnv(devices={"bias": info})
     captures: list[FormEnv] = []
 
-    def initial_values(captured: FormEnv) -> dict[str, JsonValue]:
+    def initial_values(
+        captured: FormEnv, defaults: dict[str, JsonValue]
+    ) -> dict[str, JsonValue]:
         assert captured is env
         captures.append(captured)
         coordinate = captured.devices["bias"]
@@ -66,7 +68,7 @@ def test_factory_seeds_same_capture_without_replacing_declaration() -> None:
 
 
 def test_factory_rejects_unknown_fields_before_building_input() -> None:
-    form = Form(Scan, {}, initial_values=lambda env: {"absent": 3.0})
+    form = Form(Scan, {}, initial_values=lambda env, defaults: {"absent": 3.0})
     with pytest.raises(ValueError, match="absent"):
         form.default_input(FormEnv())
 
@@ -84,7 +86,9 @@ class Tones(ConfigBase):
     participants: list[int] = [0]
 
 
-def test_factory_patches_detached_raw_defaults_without_leaking_unreturned_edits() -> None:
+def test_factory_patches_detached_raw_defaults_without_leaking_unreturned_edits() -> (
+    None
+):
     class GroupedScan(Scan):
         tones: list[Tone]
         participants: list[int] = [0]
@@ -144,7 +148,9 @@ def test_factory_values_still_pass_fixed_identity_admission() -> None:
         Tones,
         {},
         fixed_elements=(FixedElements(("tones",), "name", ("participants",)),),
-        initial_values=lambda env: {"tones": [{"name": "same"}, {"name": "same"}]},
+        initial_values=lambda env, defaults: {
+            "tones": [{"name": "same"}, {"name": "same"}]
+        },
     )
     with pytest.raises(ValueError, match="same"):
         form.default_input(FormEnv())
@@ -160,7 +166,9 @@ def test_factory_library_reference_still_requires_captured_source() -> None:
     form = Form(
         PulsePlan,
         {},
-        initial_values=lambda env: {"pulse": {"kind": "ref", "name": "Q.pulses.probe"}},
+        initial_values=lambda env, defaults: {
+            "pulse": {"kind": "ref", "name": "Q.pulses.probe"}
+        },
     )
     with pytest.raises(ValueError, match="library"):
         form.default_input(FormEnv())
@@ -168,7 +176,7 @@ def test_factory_library_reference_still_requires_captured_source() -> None:
 
 def test_factory_invalid_values_remain_required_errors_and_seeds_are_detached() -> None:
     seeds: dict[str, JsonValue] = {"position": "invalid"}
-    form = Form(Scan, {}, initial_values=lambda env: MappingProxyType(seeds))
+    form = Form(Scan, {}, initial_values=lambda env, defaults: MappingProxyType(seeds))
     env = FormEnv()
     input = form.default_input(env)
     seeds["position"] = 2.0
@@ -179,7 +187,9 @@ def test_factory_invalid_values_remain_required_errors_and_seeds_are_detached() 
 
 
 def test_factory_source_fault_is_not_replaced_by_static_defaults() -> None:
-    def unavailable(env: FormEnv) -> dict[str, JsonValue]:
+    def unavailable(
+        env: FormEnv, defaults: dict[str, JsonValue]
+    ) -> dict[str, JsonValue]:
         raise OSError("Captured coordinate unavailable")
 
     form = Form(Scan, {}, initial_values=unavailable)
