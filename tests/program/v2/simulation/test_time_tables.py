@@ -20,8 +20,9 @@ from tests.program.v2.simulation._compiled_support import request
 class RegisterDelay(Module):
     name = "register_delay"
 
-    def __init__(self, value):
+    def __init__(self, value, *, increment=False):
         self.value = value
+        self.increment = increment
 
     def declare(self, prog):
         parameter = (
@@ -33,7 +34,10 @@ class RegisterDelay(Module):
         prog.add_reg("hold", init=raw)
 
     def lower(self, prog, *, timeline, tag):
-        prog.delay_reg_auto("hold")
+        if self.increment:
+            prog.timeline_inc("hold", tag=tag)
+        else:
+            prog.delay_reg_auto("hold")
 
 
 class PulseAtTime(Module):
@@ -79,8 +83,10 @@ def time_program(value, *, table=False, linear=False, outer=False, consumer="del
         builder.timeline_inc(value, tag="time")
     elif consumer == "delay":
         builder.delay(value, tag="time")
-    elif consumer == "register":
-        builder.emit(RegisterDelay(value))
+    elif consumer in ("register", "register_inc"):
+        builder.emit(
+            RegisterDelay(value, increment=consumer == "register_inc"), tag="time"
+        )
     receiver = PulseReadoutCfg(
         gen_ch=0,
         ro_ch=0,
@@ -137,6 +143,7 @@ def scheduled_shots(prog):
         "pulse_t",
         "native_t",
         "register",
+        "register_inc",
     ],
 )
 @pytest.mark.parametrize("outer", [False, True])
@@ -261,6 +268,7 @@ def test_adc_nonoverlap_uses_correlated_table_points_not_independent_extrema():
     assert all(t[0] + duration <= t[1] for t in triggers)
 
 
-def test_register_time_table_rejects_negative_noninitial_point():
+@pytest.mark.parametrize("consumer", ["register", "register_inc"])
+def test_register_time_table_rejects_negative_noninitial_point(consumer):
     with pytest.raises(ValueError, match="nonnegative"):
-        time_program([0.02, -0.01, 0.03], table=True, consumer="register")
+        time_program([0.02, -0.01, 0.03], table=True, consumer=consumer)
