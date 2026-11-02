@@ -2,7 +2,7 @@
 
 from collections.abc import Sequence
 from dataclasses import replace
-from math import isfinite, pi
+from math import isfinite
 
 from zcu_tools.cfg_model import (
     Expr,
@@ -15,6 +15,7 @@ from zcu_tools.cfg_model import (
 )
 from zcu_tools.gui.form_adapter import FixedElements, FormContext
 from zcu_tools.gui.session.aliases import AliasTable
+from zcu_tools.gui.session.expression import evaluate_numeric_expr
 from zcu_tools.resources.entry import RoleResolutionError
 
 from zcu_lab.components.mux import MuxGroupSchema
@@ -92,12 +93,11 @@ def mux_readout_initial(
     preserving all stored tones and scalar settings. Without a slot, seed the
     blank template with each resonator's calibration frequency and name label,
     generator from $mux.wiring.gen_ch, tone ADCs from $mux.wiring.ro_ch in group
-    order, mixer from $mux.mixer_freq, and gain 0.1. Generator, mixer and
-    frequency use Expr seeds; tone ADCs
-    are detached integers from the captured group wiring because scalar Expr
-    does not support indexing. When group ro_ch is None (not yet wired), tone
-    ADCs stay blank and required, with missing seed status. Missing/invalid Expr
-    sources also leave required input blank. The operator confirms wiring, gain
+    order, mixer from $mux.mixer_freq, and gain 0.1. Generator, mixer,
+    frequency and tone ADCs use Expr seeds, including wiring list indices.
+    When group ro_ch is None (not yet wired), tone ADCs stay blank and required,
+    with missing seed status. Missing/invalid Expr sources also leave required
+    input blank. The operator confirms wiring, gain
     and timing before Run. Durations remain unfilled unless wait_for_ringup is selected. Missing capture, mux alias or
     group/mux raises ValueError; other alias/source faults propagate.
 
@@ -116,9 +116,11 @@ def mux_readout_initial(
     us or raise ValueError. These are editable candidates,
     not device-confirmed settings; capability checks remain at Run.
     This spectroscopy exception uses a detached slot copy when available and
-    replaces tones from the group on both paths. Open/Reset leaves editable
-    timing; subsequent cfg output retains the operator's edits. No source is
-    mutated. Other mux consumers keep their original timing.
+    replaces tones from the group on both paths. The Slot-copy keeps each tone's
+    historical ro_ch=index literal, rather than reading group wiring. Timing
+    seeds retain Expr formulas and their captured source paths. Open/Reset
+    leaves editable timing; subsequent cfg output retains the operator's edits.
+    No source is mutated. Other mux consumers keep their original timing.
     """
     group = require_mux_group(ctx.parameters)
     parameters = ctx.parameters
@@ -144,7 +146,7 @@ def mux_readout_initial(
         else:
             tone["gain"] = 0.1
             if group.wiring.ro_ch is not None:
-                tone["ro_ch"] = group.wiring.ro_ch[index]
+                tone["ro_ch"] = Expr(f"$mux.wiring.ro_ch[{index}]")
         tones.append(tone)
     seeds: dict[str, TemplateSeed] = {"tones": tones}
     if wait_for_ringup:
@@ -208,7 +210,7 @@ def _ringup_timing(ctx: FormContext, group: MuxGroupSchema) -> dict[str, Templat
     parameters = ctx.parameters
     if parameters is None:
         raise ValueError("Mux timing requires a parameter capture")
-    kappas: list[float] = []
+    kappas: list[str] = []
     for index, resonator in enumerate(group.resonators):
         source = parameters.lookup_point(f"{resonator}.kappa")
         kappa = source.value
@@ -224,22 +226,27 @@ def _ringup_timing(ctx: FormContext, group: MuxGroupSchema) -> dict[str, Templat
                 f"$mux.resonators[{index}]={resonator!r}: "
                 "kappa must be finite and positive in MHz"
             )
-        kappas.append(kappa)
+        kappas.append(f"{resonator}.kappa")
     if not ctx.has("$mux.module.readout"):
         return _blank_ringup_timing(group, kappas)
-    wait_us = 5 / (2 * pi * min(kappas)) if kappas else 0.0
+    wait = "0.0"
+    if kappas:
+        linewidth = f"min({', '.join(kappas)})" if len(kappas) > 1 else kappas[0]
+        wait = f"5 / (2 * pi * {linewidth})"
     readout = parameters.library.module_spec(
         parameters.library_key("$mux.module.readout")
     )
     if not isinstance(readout, MuxReadoutSpec):
         raise TypeError("Mux readout slot must reference a MuxReadoutSpec")
-    trigger = readout.trig_offset + wait_us
-    length = max(readout.length, trigger + readout.ro_length)
-    return {"trig_offset": trigger, "length": length}
+    trigger = f"$mux.module.readout.trig_offset + {wait}"
+    length = (
+        f"max($mux.module.readout.length, {trigger} + $mux.module.readout.ro_length)"
+    )
+    return {"trig_offset": Expr(trigger), "length": Expr(length)}
 
 
 def _blank_ringup_timing(
-    group: MuxGroupSchema, kappas: list[float]
+    group: MuxGroupSchema, kappas: list[str]
 ) -> dict[str, TemplateSeed]:
     seeds: dict[str, TemplateSeed] = dict.fromkeys(
         ("trig_offset", "ro_length", "length")
@@ -248,23 +255,32 @@ def _blank_ringup_timing(
     flight_time = group.time_of_fly
     if flight_time is None or len(kappas) != len(group.resonators):
         return seeds
-    wait_us = 5 / (2 * pi * min(kappas))
-    trigger = flight_time + wait_us
-    seeds.update({"trig_offset": trigger, "length": trigger + 1.0})
+    linewidth = f"min({', '.join(kappas)})" if len(kappas) > 1 else kappas[0]
+    trigger = f"$mux.time_of_fly + 5 / (2 * pi * {linewidth})"
+    seeds.update({"trig_offset": Expr(trigger), "length": Expr(f"{trigger} + 1.0")})
     return seeds
 
 
-def mux_relax_delay(ctx: FormContext, names: tuple[str, ...]) -> float | None:
-    """Return five times the largest captured T1, in us, for shared recovery.
+def mux_relax_delay(ctx: FormContext, names: tuple[str, ...]) -> Expr | float | None:
+    """Return the largest captured five-T1 seed, in us, for shared recovery.
 
     names is the complete validated capture-ordered qubit tuple. Each missing
     T1 uses the common 30 us initial scale; any stored invalid T1 leaves the
-    required delay blank. Uses the same T1 policy as single-qubit Forms,
-    without refreshing sources or writing calibration.
+    required delay blank. Compare seeds against this fixed capture and keep
+    the winning qubit's Expr, or a literal when a missing T1 wins. Uses the
+    same T1 policy as single-qubit Forms, without refreshing sources or
+    writing calibration. Source errors propagate; empty names raises ValueError.
     """
     delays = [
         t1_initial_time(ctx.parameters, multiplier=5.0, qubit=name) for name in names
     ]
     if any(delay is None for delay in delays):
         return None
-    return max(delay for delay in delays if delay is not None)
+    return max(
+        (delay for delay in delays if delay is not None),
+        key=lambda delay: (
+            evaluate_numeric_expr(delay.text, ctx.parameters)
+            if isinstance(delay, Expr)
+            else delay
+        ),
+    )

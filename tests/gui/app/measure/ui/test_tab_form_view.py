@@ -560,7 +560,8 @@ def test_tab_refresh_reset_edit_and_run_with_component_driver(
     QTimer.singleShot(0, confirm_reset)
     driver.click("Reset")
     driver.screenshot(images / "05-reset.png")
-    assert driver.observe(object_name="form.input.gain").text == "0.5"
+    assert driver.observe(object_name="form.input.gain").text == "general.ext.amount"
+    assert any(item.text == "= 0.5" for item in driver.visible().widgets)
     assert driver.observe("Run").enabled
 
 

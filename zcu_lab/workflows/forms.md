@@ -32,9 +32,9 @@ Amp 使用同一份 Rabi averages、rounds、acquire_retry、earlystop_snr 與 r
 預設間距 0、shots 100000 是暫定模擬值。GE 要求本點 Rabi 已接受，不另加 residual 或對比門檻。它們可在 run 中更新，已開始的 GE operation 保留當次 cfg。
 `T1TunablesForm` 是 t1 子表單，不再含重複 calibration。Echo／Ramsey 子表單各有自己的 guess、averaging 與 timing。
 Ramsey detune_ratio 預設 0.05 fringes/step，不論開關都驗有限值。Plan/tunables 仍分開驗證，不新增聯合 admission。
-`defaults(env)` 不接收 previous，只宣告新表單初值。Module 切換使用 `ModuleInputField.converter(env)` 的共用繼承政策。T1 guess 以 captured general.ext.guess_us 的 expression 宣告，開表單時算成值，位於 t1.guess_us；沒有 capture／leaf 時 defaults 明確給 20 µs。
+`defaults(env)` 不接收 previous，只宣告新表單初值。Module 切換使用 `ModuleInputField.converter(env)` 的共用繼承政策。T1 guess 以 captured general.ext.guess_us 的 expression 宣告，開表單時保留有效 expression 原文，result 求值，位於 t1.guess_us；沒有 capture／leaf 時 defaults 明確給 20 µs。
 `guess_us` 沒有 Pydantic 靜態預設，`t1` 也因此沒有靜態預設，只由 `CoherenceTunablesForm.defaults` 提供。
-Null、非數字或 ≤0 的 referenced value 讓 guess_us 留空，result 只報 `t1.guess_us` 的 Field required，不落回 20。使用者寫的 expression 留在 FormInput，Engine journal 只存普通值。
+Null、非數字或 ≤0 的 referenced value 讓 guess_us 留空，result 只報 `t1.guess_us` 的 Field required，不落回 20。有效 Expr 初值與使用者寫的 expression 都留在 FormInput，Engine journal 只存普通值。
 
 `MISTPlanForm` 另要求固定 gain start/stop/points 與 disturbance pulse，reset 可明確省略；gain 不放 tunables。
 measure_mode 預設 excited，可選 ground 或 both。to_cfg 從固定 capture 的 $qubit.t1 取微秒 T1 存入 plan.t1_us，無值時為 None。MIST relax 有 T1 用 5*T1，沒有則用 tunables 的 relax_factor*guess_us。
@@ -57,7 +57,7 @@ Saved run conversion 由 coherence_fluxdep.export 與 mist_fluxdep.export 獨立
 
 Owner 的 prepare_forms/Start 用 read_context() 固定完整 alias 表與 sources，不宣告角色或檢查 kind。
 Global qubit alias 必須可讀；EMPTY 可開 workflow tab，但來源依 base 契約拒 prepare_forms/Start。
-Defaults 在同一 capture 解析 $qubit.module.x180.waveform.length，以具體路徑 expression 宣告，開表單時算成值；缺值、不可讀或不合法就留 pi_length_us 未填。
+Defaults 在同一 capture 解析 $qubit.module.x180.waveform.length，以具體路徑 expression 宣告，開表單時保留有效原文，result 求值；缺值、不可讀或不合法就留 pi_length_us 未填。
 它是 required Rabi-range estimate，供 host seed 使用，不是 fitted pi，也不放進 native CoherencePlan。
 
 `common.calibration_modules.resolve_calibration_modules` 集中 Coherence/MIST 的 pi drive、獨立 spectroscopy probe 與 pulse-backed readout 規則。
@@ -71,8 +71,8 @@ Inline module 子表單與 `input_schema` 不含 `desc`，`to_spec` 使用 Spec 
 Pure arb drive 不能改 Length-Rabi duration，回 qub_pulse consuming-field error；flat_top arb ramp 與 arb readout 保留。
 這裡不提供 gain-Rabi、time-scaling、live repository lookup 或 guessed modules。
 
-Coherence、MIST 與 Overnight 的新 flux_dev defaults 從固定 capture 的 $qubit.flux_dev 取得 direct literal device name。
-既有 direct draft 不隨 alias 修改，使用者仍可切 eval。合法 saved input 不改。
+Coherence、MIST 與 Overnight 的 flux_dev defaults 從固定 capture 的 $qubit.flux_dev 取得 direct literal device name。
+Refresh 保留既有 direct draft，不隨 alias 或 capture 修改名稱，合法 saved input 不改。Reset 才從新 capture 重建 defaults。
 缺 capture、未綁 qubit 或缺 flux_dev 時，flux_dev 留空並顯示必填錯誤，不補造 device。
 Fake caller 明填 native；YOKO 明填 A 或 V。表單不推測單位、不轉換值、不預驗 device membership。
 Native snapshot 沿當次 capture，後續 alias 修改、Prepare 或 Save 不重解析既有 run。

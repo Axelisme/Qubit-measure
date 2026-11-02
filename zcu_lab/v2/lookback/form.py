@@ -2,17 +2,17 @@
 
 from math import isfinite
 
-from zcu_tools.cfg_model import FieldMeta, Hidden, Template
+from zcu_tools.cfg_model import Expr, FieldMeta, Hidden, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
 from zcu_lab.v2.lookback.core import LookbackCfg
 
 
-def _initial_trig_offset(ctx: FormContext) -> float | None:
+def _initial_trig_offset(ctx: FormContext) -> Expr | float | None:
     """Choose an editable offset in us from the fixed resonator TOF capture.
 
     Missing capture or absent/null TOF uses a 0 us first-capture starting point,
-    not a calibration. A finite non-bool real TOF >= 0 uses TOF - 0.1 us,
+    not a calibration. A finite non-bool real TOF >= 0 uses an Expr for TOF - 0.1 us,
     including negative offsets. Invalid stored TOF leaves the required field
     blank. Lookup source, alias and path errors propagate unchanged.
     """
@@ -29,11 +29,11 @@ def _initial_trig_offset(ctx: FormContext) -> float | None:
         or value < 0
     ):
         return None
-    return value - 0.1
+    return Expr("$resonator.time_of_fly - 0.1")
 
 
-def _initial_frequency(ctx: FormContext) -> float | None:
-    """Return f_r + kappa in MHz from the fixed capture, or a required blank.
+def _initial_frequency(ctx: FormContext) -> Expr | None:
+    """Return an Expr for f_r + kappa in MHz, or a required blank.
 
     Missing/null kappa uses 1 MHz. Stored frequency and linewidth must be
     positive finite non-bool real scalars; invalid values leave the field blank.
@@ -60,7 +60,11 @@ def _initial_frequency(ctx: FormContext) -> float | None:
         or kappa <= 0
     ):
         return None
-    return freq + kappa
+    return Expr(
+        "$resonator.freq + $resonator.kappa"
+        if linewidth.present and linewidth.value is not None
+        else "$resonator.freq + 1.0"
+    )
 
 
 def make_form(ctx: FormContext) -> Form[LookbackCfg]:

@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from math import isfinite
 from typing import TYPE_CHECKING
 
-from zcu_tools.cfg_model import Slot, Template, validate_device_name
+from zcu_tools.cfg_model import Expr, Slot, Template, validate_device_name
 from zcu_tools.datafile import JsonObject
 
 from zcu_lab.components.qubit import QubitBaseSchema, QubitFluxCalibration
@@ -90,16 +90,18 @@ def t1_initial_time(
     multiplier: float,
     with_tone: bool = False,
     qubit: str = "$qubit",
-) -> float | None:
-    """Choose an editable T1-derived time in microseconds from a fixed capture.
+) -> Expr | float | None:
+    """Choose a T1-derived Form tree seed in microseconds from a fixed capture.
 
     parameters is the Open/Reset capture, or None when no capture exists.
     qubit is a direct component name or captured alias (default $qubit).
     multiplier must be finite and positive and scales the selected T1.
+    A valid selected T1 returns Expr("<multiplier> * <path>"), preserving
+    qubit's authored name or alias in the source expression.
     Normally select $qubit.t1. With with_tone=True, first select
     $qubit.ext.t1_with_tone and consult ordinary T1 only if tone T1 is absent
     or null. If all selected leaves are absent/null (or there is no capture),
-    use a 30 us fair time scale without writing calibration data.
+    return the literal multiplier * 30.0 without writing calibration data.
 
     A selected bool, non-real, nonfinite or nonpositive stored value returns
     None for a required blank; it never falls through to another source.
@@ -124,5 +126,5 @@ def t1_initial_time(
                 or value <= 0
             ):
                 return None
-            return multiplier * value
+            return Expr(f"{float(multiplier)} * {path}")
     return multiplier * 30.0

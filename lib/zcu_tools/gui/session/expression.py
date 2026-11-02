@@ -2,7 +2,9 @@
 
 Inputs use registered math functions, captured parameter paths and constants.
 Dotted paths are owner-resolved data references, not Python attribute access.
-Indexing and arbitrary calls are not part of this language.
+Subscripts read lists by integer index and mappings by string key. Strings and
+containers are intermediate values only, except a standalone $alias name.
+Arbitrary calls, Python attributes and slices are not part of this language.
 """
 
 from __future__ import annotations
@@ -11,7 +13,7 @@ import ast
 import io
 import math
 import tokenize
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -45,6 +47,8 @@ _FUNCTIONS: dict[str, Callable[..., object]] = {
     "log": math.log,
     "log10": math.log10,
     "abs": abs,
+    "min": min,
+    "max": max,
 }
 _CONSTANTS = {"pi": math.pi, "e": math.e}
 _OPERATOR_TYPES = (
@@ -68,6 +72,7 @@ _ALLOWED_NODES = (
     ast.BinOp,
     ast.UnaryOp,
     ast.Call,
+    ast.Subscript,
     *_OPERATOR_TYPES,
 )
 
@@ -106,8 +111,11 @@ def resolve_eval_ref(ref: EvalRef, parameters: ParameterContext | None) -> int |
 def evaluate_numeric_expr(expr: str, parameters: ParameterContext | None) -> float:
     """Evaluate finite real arithmetic over captured parameter paths.
 
+    Accept the same functions, captured list/mapping subscripts and numeric
+    limits as evaluate_scalar_expr, but reject complex values and alias names.
     None permits pure calculation only; parameter/library paths raise
-    ExpressionError. Numeric source, grammar and real-domain failures raise.
+    ExpressionError. Invalid paths, grammar and arithmetic also raise
+    ExpressionError. Unexpected source/provider failures propagate unchanged.
     """
     value = evaluate_scalar_expr(expr, parameters)
     if isinstance(value, (complex, str)):
@@ -126,12 +134,24 @@ def evaluate_scalar_expr(
     """Evaluate arithmetic paths or a standalone $alias name string.
 
     A standalone $alias returns its fixed resolved component/device name.
-    Names cannot enter arithmetic, functions or interpolation. Name reads need
-    a context and reject missing/unbound aliases with an alias-naming error.
+    Bare alias names cannot enter arithmetic, functions, subscripts or
+    interpolation. Name reads need a context and reject missing/unbound aliases
+    with an alias-naming error.
 
     None permits pure calculation only; parameter/library references raise
     ExpressionError. Resolve paths through ParameterContext, never the live
     session. Retain numeric limits, math functions, constants and XOR semantics.
+    min(a, b, ...) and max(a, b, ...) require at least two numeric arguments;
+    values without native ordering (such as complex numbers) raise ExpressionError.
+    Subscripts read captured lists with integer indexes (not bool or float),
+    including negative indexes, and mappings with string keys. Indexes/keys can
+    themselves be expressions, such as $mux.wiring.ro_ch[1 + 1] or
+    $qubit.flux.period[$qubit.flux_dev]. String literals and captured strings
+    serve only as keys, never arithmetic operands or final numeric results.
+    Containers serve only as intermediate values. Slices remain unsupported.
+    Out-of-range indexes, missing keys and wrong container/key types raise
+    ExpressionError. All numeric operands and selected values retain size and
+    finiteness checks; min/max do not accept an iterable-only call.
     Parameter complex tags decode through the shared scalar codec; the captured
     context itself still returns raw YAML. Malformed tags raise ExpressionError
     naming the path and retain the codec error as cause. Strings are not decoded.
@@ -142,10 +162,10 @@ def evaluate_scalar_expr(
     tree = _parse_expression(expr)
     if isinstance(tree.body, ast.Name) and tree.body.id.startswith("$"):
         return _read_alias_name(tree.body.id, parameters)
-    paths: dict[str, Scalar] = {}
+    paths: dict[str, object] = {}
     resolve_path = _parameter_reader(parameters)
 
-    # Replace complete dotted paths before simpleeval can perform attribute access.
+    # Replace paths and subscripts before simpleeval can apply Python access rules.
     class CapturePaths(ast.NodeTransformer):
         def visit_Attribute(self, node: ast.Attribute) -> ast.Name:
             parts: list[str] = []
@@ -160,24 +180,41 @@ def evaluate_scalar_expr(
             paths[name] = resolve_path(path)
             return ast.copy_location(ast.Name(id=name, ctx=ast.Load()), node)
 
+        def visit_Subscript(self, node: ast.Subscript) -> ast.Call:
+            # This internal call is inserted only after the authored AST is validated.
+            self.generic_visit(node)
+            return ast.copy_location(
+                ast.Call(
+                    func=ast.Name(id="__subscript", ctx=ast.Load()),
+                    args=[node.value, node.slice],
+                    keywords=[],
+                ),
+                node,
+            )
+
     CapturePaths().visit(tree)
 
-    def lookup(node: ast.Name) -> Scalar:
+    def lookup(node: ast.Name) -> object:
         if node.id in paths:
             return paths[node.id]
         if node.id in _FUNCTIONS:
             raise ExpressionError(f"Function {node.id!r} must be called")
         if node.id in _CONSTANTS:
             return _CONSTANTS[node.id]
-        return resolve_path(node.id)
+        value = resolve_path(node.id)
+        if node.id.startswith("$"):
+            # Bare alias names remain exclusive to the standalone name expression.
+            return _number(value, f"Parameter path {node.id!r}")
+        return value
 
     operators = {
         kind: _checked(_power if kind is ast.Pow else DEFAULT_OPERATORS[kind])
         for kind in _OPERATOR_TYPES
     }
+    functions = {name: _checked(function) for name, function in _FUNCTIONS.items()}
     evaluator = SimpleEval(
         operators=operators,
-        functions={name: _checked(function) for name, function in _FUNCTIONS.items()},
+        functions={**functions, "__subscript": _subscript},
         names=lookup,
     )
     try:
@@ -239,7 +276,7 @@ def _parse_expression(expr: str) -> ast.Expression:
             raise ExpressionError(
                 f"Unsupported expression syntax: {type(node).__name__}"
             )
-        if isinstance(node, ast.Constant):
+        if isinstance(node, ast.Constant) and not isinstance(node.value, str):
             _number(node.value, "Expression constant")
         if isinstance(node, ast.Call) and (
             not isinstance(node.func, ast.Name)
@@ -247,6 +284,13 @@ def _parse_expression(expr: str) -> ast.Expression:
             or node.keywords
         ):
             raise ExpressionError("Unsupported expression syntax: function call")
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id in ("min", "max")
+            and len(node.args) < 2
+        ):
+            raise ExpressionError("min/max require at least two numeric arguments")
         pending.extend((child, depth + 1) for child in ast.iter_child_nodes(node))
     return tree
 
@@ -294,7 +338,7 @@ def _alias_syntax(expr: str) -> tuple[str, dict[tuple[int, int], str]]:
 
 def _parameter_reader(
     parameters: ParameterContext | None,
-) -> Callable[[str], Scalar]:
+) -> Callable[[str], object]:
     """Read aliases from parameters and bare paths from one concrete-only view.
 
     Construct the bare view lazily once per evaluation. Missing/invalid paths
@@ -302,7 +346,7 @@ def _parameter_reader(
     """
     concrete_parameters: ParameterContext | None = None
 
-    def read(path: str) -> Scalar:
+    def read(path: str) -> object:
         nonlocal concrete_parameters
         if parameters is None:
             raise ExpressionError(f"Parameter path {path!r} requires a context")
@@ -318,12 +362,12 @@ def _parameter_reader(
             raise ExpressionError(f"Invalid parameter path {path!r}: {exc}") from exc
         if not result.present:
             raise ExpressionError(f"Invalid parameter path {path!r}: missing parameter")
-        return _parameter_number(result.value, path)
+        return _parameter_value(result.value, path)
 
     return read
 
 
-def _parameter_number(value: object, path: str) -> Scalar:
+def _parameter_value(value: object, path: str) -> object:
     if isinstance(value, dict) and "__complex__" in value:
         try:
             value = decode_complex(value)
@@ -331,7 +375,26 @@ def _parameter_number(value: object, path: str) -> Scalar:
             raise ExpressionError(
                 f"Invalid complex tag at parameter path {path!r}: {exc}"
             ) from exc
+    if isinstance(value, (str, list, Mapping)):
+        return value
     return _number(value, f"Parameter path {path!r}")
+
+
+def _subscript(value: object, key: object) -> object:
+    try:
+        if isinstance(value, list):
+            if isinstance(key, bool) or not isinstance(key, int):
+                raise ExpressionError("List index must be an integer")
+            result = value[key]
+        elif isinstance(value, Mapping):
+            if not isinstance(key, str):
+                raise ExpressionError("Mapping key must be a string")
+            result = value[key]
+        else:
+            raise ExpressionError("Subscript requires a list or mapping")
+    except (IndexError, KeyError) as exc:
+        raise ExpressionError(f"Invalid subscript {key!r}: {exc}") from exc
+    return _parameter_value(result, "subscript")
 
 
 def _number(value: object, label: str) -> Scalar:
@@ -346,9 +409,10 @@ def _number(value: object, label: str) -> Scalar:
 
 
 def _checked(function: Callable[..., object]) -> Callable[..., Scalar]:
-    def call(*args: Scalar) -> Scalar:
+    def call(*args: object) -> Scalar:
+        numbers = [_number(arg, "Expression operand") for arg in args]
         try:
-            result = function(*args)
+            result = function(*numbers)
         except (ArithmeticError, TypeError, ValueError) as exc:
             raise ExpressionError(f"Expression arithmetic failed: {exc}") from exc
         return _number(result, "Expression result")

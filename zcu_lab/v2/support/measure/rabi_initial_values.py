@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 from zcu_tools.cfg_model import (
     ArbWaveformCfg,
+    Expr,
     PulseSpec,
     Slot,
     Template,
@@ -21,15 +22,16 @@ def len_rabi_length_stop(
     parameters: ParameterContext | None,
     *,
     qubit: str = "$qubit",
-) -> float | None:
+) -> Expr | float | None:
     """Return the Length Rabi sweep stop in microseconds from a fixed capture.
 
     parameters is the Open/Reset capture, or None. qubit is a direct component
     name or captured alias (default $qubit). No capture, missing/null x180 or
     an Arb waveform gives 1.0 us. Otherwise read pi_len from the persistent
     waveform, following a waveform library key without materializing the pulse.
-    A finite positive non-bool pi_len gives 4*pi_len; an invalid stored pi_len
-    gives None for a required blank. Arb does not read asset-derived length.
+    A finite positive non-bool pi_len gives an Expr for 4*pi_len.
+    An invalid stored pi_len gives None for a required blank.
+    Arb does not read asset-derived length.
 
     Reads validated Specs, not pre-validation raw source data. Scalar waveform
     length is required and non-null at this boundary. Alias, malformed
@@ -45,7 +47,7 @@ def len_rabi_length_stop(
     if isinstance(waveform, ArbWaveformCfg):
         return 1.0
     pi_len = _valid_pi_len(waveform)
-    return None if pi_len is None else 4 * pi_len
+    return None if pi_len is None else Expr(f"4 * {qubit}.module.x180.waveform.length")
 
 
 def amp_rabi_initial_pulse(
@@ -58,7 +60,7 @@ def amp_rabi_initial_pulse(
     explicit waveform length 1.0 us. Arb x180 keeps its original Slot and data,
     without copying, reading assets or overriding its asset-derived length.
     For scalar waveforms, copy captured x180 and override only waveform.length
-    with 1.5*pi_len*pi_gain in us. pi_len must be finite
+    with an Expr for 1.5*pi_len*pi_gain in us. pi_len must be finite
     and positive; pi_gain must be finite and in (0, 1]. Neither accepts bool.
     Invalid stored values leave the required length blank, not a fallback.
     Only nonfinite gain also leaves gain blank so the copied pulse is editable
@@ -102,7 +104,9 @@ def amp_rabi_initial_pulse(
     ):
         length = None
     else:
-        length = 1.5 * pi_len * pi_gain
+        length = Expr(
+            f"1.5 * {qubit}.module.x180.waveform.length * {qubit}.module.x180.gain"
+        )
     return Slot(f"{qubit}.module.x180", copy=True, set={"waveform.length": length})
 
 

@@ -16,8 +16,9 @@ class FrequencyModelForm(FormModel):
     """Choose fluxonium energies (GHz) and the plan's native device affine map.
 
     Defaults use the fixed $qubit capture and detached device values. The
-    selected flux_dev half accounts for other contributors; its period
-    stays signed. Missing source/calibration leaves coordinates required.
+    selected flux_dev half accounts for other contributors; its signed period
+    retains an Expr with the captured device name as a mapping index.
+    Missing source/calibration leaves coordinates required.
     Invalid frames raise named errors. flux_bias defaults to zero; explicit
     values can replace every captured value before Start.
     """
@@ -31,7 +32,7 @@ class FrequencyModelForm(FormModel):
 
     @classmethod
     def defaults(cls, env: FormEnv) -> dict[str, JsonValue]:
-        """Seed complete numeric calibrations from the fixed capture, never live I/O."""
+        """Seed captured energies/period as Expr and half-flux as a literal, without I/O."""
         data = super().defaults(env)
         if env.parameters is not None:
             for name in ("EJ", "EC", "EL"):
@@ -41,7 +42,7 @@ class FrequencyModelForm(FormModel):
             seed = captured_flux_seed(env, "$qubit", source)
             if seed.points is not None and source is not None:
                 data["flux_half"] = seed.points.half
-                data["flux_period"] = qubit.flux.period[source]
+                data["flux_period"] = {"expr": "$qubit.flux.period[$qubit.flux_dev]"}
         return data
 
     @model_validator(mode="after")

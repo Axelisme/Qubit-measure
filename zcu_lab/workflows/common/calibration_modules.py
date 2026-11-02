@@ -188,8 +188,9 @@ def calibration_defaults(
     and value. Without a captured DC device both remain required and blank.
     This is an editable starting guess, not proof of the pulse's calibration
     location. Users must confirm it and its unit before starting.
-    pi_length_us uses the captured x180 length when available. probe_pulse
-    references $qubit.pulses.qub_probe when present; otherwise it copies captured
+    pi_length_us declares the captured x180 length path as an expression when
+    available. Accepted input retains its text; result supplies the length in us.
+    probe_pulse references $qubit.pulses.qub_probe when present; otherwise it copies captured
     x180 with frequency 0 MHz, gain 0.1 and length 5 us. Missing x180 leaves the
     probe required. The capture is not modified. No live lookups,
     device connections or simulator constants supply missing values.

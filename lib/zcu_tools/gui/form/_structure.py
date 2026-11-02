@@ -68,8 +68,9 @@ def accepts_expression(annotation: object, path: FormPath) -> bool:
     """Whether a value leaf of this annotation is a text field taking Expr input.
 
     This is the core's one text-field rule: the description permits expression
-    input. Decode and defaults evaluation accept an Expr envelope exactly
-    where it returns True. Restoration retains raw for general validation. Union members
+    input before choice and InputPolicy restrictions. Decode rejects Expr on
+    choice paths; defaults may evaluate those paths into accepted direct values.
+    Restoration retains raw for general validation. Union members
     are text values (int, float, complex, str), typed into a text field, or
     picked values (Literal, Enum, bool), chosen from a dropdown or checkbox.
     A text field has a text member and no picked member, possibly nullable.

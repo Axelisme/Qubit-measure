@@ -188,7 +188,9 @@ def test_branch_selection_starts_from_fresh_defaults_and_commits_once() -> None:
     observed: list[dict[str, JsonValue]] = []
     state.subscribe(lambda: observed.append(state.input.data))
     state.select(("branch",), {"kind": "second"}, env)
-    assert state.input.data == {"branch": {"kind": "second", "shared": 8}}
+    assert state.input.data == {
+        "branch": {"kind": "second", "shared": {"expr": "2 * 4"}}
+    }
     assert observed == [state.input.data]
     result = state.result(env)
     assert isinstance(result, FormErrors)
