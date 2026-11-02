@@ -87,4 +87,3 @@ class Module(ABC):
         raise NotImplementedError.
         """
         raise NotImplementedError(f"{type(self).__name__} has no timeline lowering")
-
