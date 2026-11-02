@@ -394,7 +394,6 @@ def _validate_hooks(
     axes = [loop for loop in loops.values() if not records[loop.start].body]
     for index, loop in enumerate(axes):
         first = axes[index + 1].end + 1 if index + 1 < len(axes) else body_end + 1
-        info = _loop_info(records, loop)
         try:
             if loop.name == "reps" and loop.counter in live:
                 raise ValueError(
