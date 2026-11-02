@@ -19,13 +19,12 @@ from zcu_tools.experiment.v2.runtime import RunOptions, Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
-    MuxReadoutCfg,
     Reset,
     ResetCfg,
     TimelineBuilder,
     sweep2param,
 )
-from zcu_tools.program.v2.modules import MuxReadout, Pulse
+from zcu_tools.program.v2.modules import MuxReadout, MuxReadoutCfg, Pulse
 
 from zcu_lab.v2.support import live_heatmap, live_line
 from zcu_lab.v2.support.device import check_flux_unit, set_flux
