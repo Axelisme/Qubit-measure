@@ -508,7 +508,9 @@ def test_gallery_member_rasters_fit_after_resize(
         detail = (row.stage_key, row.member_index, row.raster_bounds.getRect())
         assert row.member_bounds.contains(row.raster_bounds), detail
         assert row.stage_bounds.contains(row.raster_bounds), detail
-        assert all(row.edges), f"Raster perimeter is clipped: {detail}, edges={row.edges}"
+        assert all(row.edges), (
+            f"Raster perimeter is clipped: {detail}, edges={row.edges}"
+        )
         assert (
             abs(row.raster_bounds.width() * 3 - row.raster_bounds.height() * 4) <= 4
         ), detail
