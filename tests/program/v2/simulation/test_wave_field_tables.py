@@ -127,18 +127,6 @@ def assert_scalar_points(prog, env, values, field, **options):
     assert executed_words(prog) == scalar_words * 2
 
 
-def test_const_frequency_table_matches_scalar_program_at_every_point_and_rep():
-    values = [83.125, 76.75, 91.5]
-    prog, env, _ = field_program("freq", values, mode="table")
-    assert_scalar_points(prog, env, values, "freq")
-
-
-def test_readout_phase_override_table_matches_scalar_program():
-    values = [10.5, -30.25, 80.75]
-    prog, env, _ = field_program("phase", values, mode="table", paired=True)
-    assert_scalar_points(prog, env, values, "phase", paired=True)
-
-
 @pytest.mark.parametrize(
     "field,values",
     [

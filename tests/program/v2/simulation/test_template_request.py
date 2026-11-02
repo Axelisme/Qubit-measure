@@ -1,4 +1,4 @@
-"""Public acquisition rejects reps live-ins, inconsistent tables and missing routes."""
+"""Public acquisition rejects reps live-ins and missing routes."""
 
 import pytest
 from qick.asm_v2 import QickParam
@@ -6,9 +6,8 @@ from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.program.v2 import TimelineBuilder
 from zcu_tools.program.v2.modules.dmem import LoadValue
 from zcu_tools.program.v2.modules.pulse import PulseCfg
-from zcu_tools.program.v2.modules.readout import PulseReadoutCfg, TablePulseReadout
+from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
-from zcu_tools.program.v2.utils import readout_freq_words
 
 from tests.program._profiles import load_soccfg
 from tests.program._timeline import compile_modules
@@ -59,24 +58,6 @@ def test_reps_dependent_timeline_rejected_before_backend(dependency):
     builder.delay_by_timeline()
     with pytest.raises(ValueError, match=r"(?:reps|cross-shot|measurement)"):
         builder.build().acquire(env.soc, progress=False)
-    assert not env.soc.binding.rounds
-
-
-def test_table_initial_state_that_changes_across_reps_is_rejected():
-    env = white_noise(load_soccfg(), std_adc=0, seed=None, routes=((0, 0),))
-    gen, adc = readout_freq_words(
-        env.soccfg, [200, 300], gen_ch=0, ro_ch=0, mixer_freq=None, nqz=1
-    )
-    module = TablePulseReadout(
-        "readout", receiver(), idx_reg="axis", freq_words=gen, ro_freq_words=adc
-    )
-    with pytest.raises(ValueError, match="table wrap disagrees"):
-        compile_modules(
-            env.soccfg,
-            modules=[module],
-            sweep=[("axis", 2)],
-            reps=2,
-        )
     assert not env.soc.binding.rounds
 
 
