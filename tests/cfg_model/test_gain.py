@@ -10,8 +10,8 @@ from zcu_tools.cfg_model import (
     PulseReadoutCfg,
     PulseReadoutSpec,
     PulseSpec,
+    TableParam,
 )
-from zcu_tools.program.v2 import TableParam
 
 
 @pytest.fixture(

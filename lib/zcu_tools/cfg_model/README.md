@@ -1,10 +1,11 @@
 # cfg_model — 共享配置核心
 
-**Last updated:** 2026-11-01
+**Last updated:** 2026-11-02
 
 **讀者：** framework-dev。配置模型、持久 Spec 與 materialization 邊界速查。
 
 `cfg_model` 提供純資料配置模型與具名依賴契約，執行與 I/O 由 consumer 負責。
+`TableParam`／`TableRawParam` 保存逐點物理值與量化整數值，供 cfg 驗證與 program 原生 loop 更新共用；型別只依賴 stdlib、numpy 與 QICK。
 Caller 從 package root import 公開名稱。
 
 `Slot` 宣告捕捉的 library 來源，`copy=True` 建立 inline 初值，`set` 只套用到 copy。缺來源時，Form 的 required 欄位留空並標 Invalid，nullable 且預設 None 的欄位停用且有效。作者在 factory 中明確選用 Slot 或 Template。`Template.seed_metadata` 以 root-relative canonical Form paths 宣告來源與校準提示，Form 只合併採用的 Template 自身 metadata。這些節點只保存宣告；TemplateDef 展開仍只改 Slot path。

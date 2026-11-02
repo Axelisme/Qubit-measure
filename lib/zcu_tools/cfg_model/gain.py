@@ -5,6 +5,8 @@ from typing import Annotated
 from pydantic import AfterValidator, Field
 from qick.asm_v2 import QickParam
 
+from .table_param import TableParam
+
 
 def validate_gain(value: float) -> float:
     """Return a finite DAC full-scale fraction, or raise ValueError with its value."""
@@ -18,7 +20,10 @@ Gain = Annotated[float, AfterValidator(validate_gain), Field(ge=-1.0, le=1.0)]
 
 
 def _validate_gain_param(value: float | QickParam) -> float | QickParam:
-    if isinstance(value, QickParam):
+    if isinstance(value, TableParam):
+        for point in value.values:
+            validate_gain(point)
+    elif isinstance(value, QickParam):
         validate_gain(value.start)
         spans: dict[str, float] = value.spans
         # Independent loop spans combine at corners. QICK minval/maxval only

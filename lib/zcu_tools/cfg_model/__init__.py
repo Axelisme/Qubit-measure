@@ -59,6 +59,7 @@ from .spec_types import (
     is_module_spec_type,
     is_waveform_spec_type,
 )
+from .table_param import TableParam, TableRawParam
 from .template_nodes import Expr, Slot, Template, TemplateLiteral, TemplateSeed
 from .templates import TemplateDef, expand_path
 from .waveform import (
@@ -77,6 +78,8 @@ from .waveform import (
 )
 
 __all__ = [
+    "TableParam",
+    "TableRawParam",
     "FormNode",
     "Hidden",
     "Range",

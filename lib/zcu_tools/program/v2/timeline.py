@@ -16,6 +16,8 @@ from qick.asm_v2 import (
     Trigger,
 )
 
+from zcu_tools.cfg_model import TableParam, TableRawParam
+
 from ._timeline_bounds import CycleBounds, FixedLoopIndex, ProducerBounds
 from ._timeline_macros import (
     BranchCases,
@@ -56,7 +58,6 @@ from .macro.table import TableSelection
 from .modules.base import Module
 from .resources import ProgramResourcesMixin
 from .sweep import SweepCfg
-from .table_param import TableParam, TableRawParam
 from .utils import sweep2param
 
 
