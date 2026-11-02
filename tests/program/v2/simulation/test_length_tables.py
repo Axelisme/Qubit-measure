@@ -253,6 +253,21 @@ def test_consecutive_native_auto_followers_match_scalar_timestamps(
     assert scheduled_shots(prog) == expected_shots * (4 if outer else 2)
 
 
+def test_branch_native_auto_followers_preserve_scalar_request():
+    values = [0.2, 0.107, 0.213]
+    prog, env, _ = length_program(
+        values, mode="table", branch=True, auto=True, followers=2
+    )
+    observed = request(prog, env)
+    for index, value in enumerate(values):
+        scalar, scalar_env, _ = length_program(
+            value, branch=True, point_count=len(values), auto=True, followers=2
+        )
+        assert replace(observed.materialize_point(index), coordinates=()) == replace(
+            request(scalar, scalar_env).materialize_point(index), coordinates=()
+        )
+
+
 @pytest.mark.parametrize("flat", [False, True])
 @pytest.mark.parametrize("invalid_cycles", [2, 2**16])
 def test_noninitial_length_point_outside_qick_generator_range_fails_build(
