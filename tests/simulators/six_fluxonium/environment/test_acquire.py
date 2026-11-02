@@ -72,6 +72,7 @@ def mux_program(
 
 
 def pulse_program(env, frequencies, *, reps=256):
+    frequencies = [float(frequency) for frequency in frequencies]
     builder = TimelineBuilder(env.soccfg, reps=reps)
     freq = builder.add_table_sweep("axis", frequencies)
     readout = PulseReadoutCfg(
