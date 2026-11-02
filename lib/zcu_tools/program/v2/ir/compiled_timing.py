@@ -120,7 +120,7 @@ class TimingLayout:
 
 @dataclass(frozen=True)
 class CompiledTimingInput:
-    """Public linked assembly, shot layout and optional compiled data memory.
+    """Public linked assembly, shot layout and optional initial DMEM/WMEM.
 
     prog_list and labels are the final linked compiler outputs; layout identifies
     body boundaries and shot axes. dmem is the one-dimensional signed int32 word
@@ -130,9 +130,11 @@ class CompiledTimingInput:
     wmem optionally maps zero-based waveform addresses to six unsigned hardware
     words in freq, phase, env, gain, length, conf order, as from compiled_wmem().
     None leaves wave contents unknown; an empty mapping provides no waveforms.
-    Analysis never mutates these inputs. Executed reads require a known in-range
-    address and a signed int32 word; missing/malformed data, unknown/out-of-range
-    addresses and unsupported memory effects (including writes) raise ValueError.
+    Analysis never mutates these inputs. Executed DMEM reads require a known
+    in-range address and a signed int32 word. Wave accesses require a supplied
+    WMEM address and six words. Missing data, unknown/out-of-range addresses and
+    unsupported memory side effects raise ValueError. DMEM writes are unsupported;
+    plain WMEM_WR updates only the analysis copy.
     """
 
     prog_list: Sequence[Mapping[str, object]]
