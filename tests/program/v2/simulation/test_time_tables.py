@@ -27,7 +27,9 @@ class RegisterDelay(Module):
         parameter = (
             self.value if isinstance(self.value, QickParam) else QickParam(self.value)
         )
-        prog.add_reg("hold", init=prog.us2cycles(parameter))
+        raw = prog.us2cycles(parameter)
+        raw.to_steps(prog.loop_dict)
+        prog.add_reg("hold", init=raw)
 
     def lower(self, prog, *, timeline, tag):
         prog.delay_reg_auto("hold")
