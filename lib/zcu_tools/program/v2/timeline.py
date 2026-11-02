@@ -718,7 +718,23 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         expression to runtime cycles; signed overflow fails during compile.
         """
         self._timeline_book.require_reference_advance()
-        super().decrement_timestamps(t)
+        if isinstance(t, TableParam):
+            book = self._timeline_book
+            if book.native_only:
+                return
+            for channels, runtime, generator in (
+                (self.gen_chs, book.runtime_gens, True),
+                (self.ro_chs, book.runtime_ros, False),
+            ):
+                for ch in channels:
+                    if ch not in runtime:
+                        end = self.get_timestamp(
+                            gen_ch=ch if generator else None,
+                            ro_ch=None if generator else ch,
+                        )
+                        runtime[ch] = book.math.cycles(end)
+        else:
+            super().decrement_timestamps(t)
         if t is not None:
             self._timeline_book.decrement(t)
 
