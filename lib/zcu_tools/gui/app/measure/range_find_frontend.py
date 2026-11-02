@@ -20,8 +20,11 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
-from zcu_tools.analysis.dips import DipFinderOptions
-from zcu_tools.gui.app.measure.range_find_plugin import RangeFindPlugin, RangeFindState
+from zcu_tools.gui.app.measure.range_find_plugin import (
+    RangeFindParameters,
+    RangeFindPlugin,
+    RangeFindState,
+)
 from zcu_tools.gui.app.measure.ui.interactive_frontend import (
     InteractiveFrontend,
     InteractiveFrontendEnv,
@@ -65,6 +68,7 @@ def draw_range_find(
             ax.annotate(
                 dip.component, (dip.freq, y), xytext=(6, 10), textcoords="offset points"
             )
+    ax.set_title(f"Prominence noise factor: {state.options.prominence_factor:.6g}")
     ax.set_xlabel("Frequency (MHz)")
     ax.set_ylabel("Magnitude (a.u.)")
     ax.legend(loc="best", fontsize="small")
@@ -133,13 +137,19 @@ class RangeFindFrontend[R](InteractiveFrontend):
             ("prominence_factor", "Prominence noise factor"),
             ("max_fwhm", "Max FWHM (MHz)"),
             ("min_separation", "Min separation (MHz)"),
-            ("max_dips", "Resonator count (0 = all)"),
         ):
             field = QLineEdit()
             field.setObjectName(f"rangeFind.{name}")
             self._scope.connect(field.editingFinished, self._parameters_changed)
             self._fields[name] = field
             form.addRow(label, field)
+        self._fields["prominence_factor"].setPlaceholderText("Auto (empty)")
+        count = QLabel(str(len(self._plugin.components)))
+        count.setObjectName("rangeFind.expected_dips")
+        form.addRow("Expected dips", count)
+        self._actual_factor = QLabel()
+        self._actual_factor.setObjectName("rangeFind.actual_factor")
+        form.addRow("Actual noise factor", self._actual_factor)
         self._selection = QComboBox()
         self._selection.setObjectName("rangeFind.selection")
         self._component = QComboBox()
@@ -219,14 +229,14 @@ class RangeFindFrontend[R](InteractiveFrontend):
     def _refresh(self) -> None:
         state = self._session.snapshot()
         values = {
-            "smoothing_sigma": state.options.smoothing_sigma,
-            "prominence_factor": state.options.prominence_factor,
-            "max_fwhm": state.options.max_fwhm,
-            "min_separation": state.options.min_separation,
-            "max_dips": state.options.max_dips or 0,
+            "smoothing_sigma": state.parameters.smoothing_sigma,
+            "prominence_factor": state.parameters.prominence_factor,
+            "max_fwhm": state.parameters.max_fwhm,
+            "min_separation": state.parameters.min_separation,
         }
         for name, value in values.items():
-            self._fields[name].setText(str(value))
+            self._fields[name].setText("" if value is None else str(value))
+        self._actual_factor.setText(f"{state.options.prominence_factor:.6g}")
         previous = self._selection.currentIndex()
         self._selection.blockSignals(True)
         self._selection.clear()
@@ -252,16 +262,15 @@ class RangeFindFrontend[R](InteractiveFrontend):
         if self._read_only:
             return False
         try:
-            count = int(self._fields["max_dips"].text())
-            options = DipFinderOptions(
+            factor = self._fields["prominence_factor"].text().strip()
+            parameters = RangeFindParameters(
                 smoothing_sigma=float(self._fields["smoothing_sigma"].text()),
-                prominence_factor=float(self._fields["prominence_factor"].text()),
+                prominence_factor=float(factor) if factor else None,
                 max_fwhm=float(self._fields["max_fwhm"].text()),
                 min_separation=float(self._fields["min_separation"].text()),
-                max_dips=None if count == 0 else count,
             )
-            if options != self._session.snapshot().options:
-                self._plugin.set_parameters.execute(self._session, options)
+            if parameters != self._session.snapshot().parameters:
+                self._plugin.set_parameters.execute(self._session, parameters)
         except ValueError as exc:
             self._status.setText(str(exc))
             return False

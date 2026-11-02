@@ -1,6 +1,6 @@
 """Width-sensitive dip selection on magnitude spectra, without plotting or I/O."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from math import isfinite
 
 import numpy as np
@@ -99,6 +99,67 @@ def find_spectrum_dips(
     """
     if options is None:
         options = DipFinderOptions()
+    freqs, corrected, noise, floor = _prepare_spectrum(freqs, magnitude)
+    threshold = max(options.prominence_factor * noise, floor)
+    return _select_dips(freqs, corrected, options, threshold)
+
+
+def estimate_prominence_factor(
+    freqs: NDArray[np.float64],
+    magnitude: NDArray[np.float64],
+    options: DipFinderOptions | None = None,
+    *,
+    expected_dips: int,
+) -> float:
+    """Estimate a noise multiplier separating the requested prominence ranks.
+
+    freqs and magnitude follow find_spectrum_dips: matching finite 1-D arrays
+    with >= 11 points, distinct frequencies in MHz and nonnegative magnitude.
+    Inputs are not modified. options=None uses DipFinderOptions defaults.
+    expected_dips must be a positive integer, excluding bool. Invalid counts or
+    arrays raise ValueError.
+
+    options.prominence_factor and options.max_dips are ignored while collecting
+    candidates with the same background, noise, smoothing, width and spacing rules.
+    Candidates are then ranked by prominence / noise, not depth / FWHM.
+    With more than N candidates, return the midpoint of ranks N and N+1, where
+    N=expected_dips. For example, ratios 12, 8 and 4 with N=2 give factor 6.
+    Otherwise return max(1e-6 * ptp(magnitude), machine epsilon) / noise, retaining
+    all candidates. Zero noise returns 0.0, leaving that same floor in effect.
+
+    Apply the factor with max_dips=N in find_spectrum_dips to select N dips (or
+    all candidates if fewer exist). This count guarantee includes max_dips, not
+    just thresholding: equal boundary prominences still use their midpoint, and
+    zero noise cannot separate prominences. The finder resolves excess candidates
+    by its existing depth / FWHM score and stable low-frequency ties.
+    """
+    _validate_expected_dips(expected_dips)
+    if options is None:
+        options = DipFinderOptions()
+    freqs, corrected, noise, floor = _prepare_spectrum(freqs, magnitude)
+    if noise == 0:
+        return 0.0
+    candidates = _select_dips(freqs, corrected, replace(options, max_dips=None), floor)
+    if len(candidates) <= expected_dips:
+        return floor / noise
+    ratios = sorted((dip.depth / noise for dip in candidates), reverse=True)
+    return (ratios[expected_dips - 1] + ratios[expected_dips]) / 2
+
+
+def _validate_expected_dips(expected_dips: object) -> None:
+    # Runtime callers can supply counts outside the public integer annotation.
+    if (
+        isinstance(expected_dips, bool)
+        or not isinstance(expected_dips, int)
+        or expected_dips <= 0
+    ):
+        raise ValueError("expected_dips must be a positive integer")
+
+
+def _prepare_spectrum(
+    freqs: NDArray[np.float64], magnitude: NDArray[np.float64]
+) -> tuple[NDArray[np.float64], NDArray[np.float64], float, float]:
+    """Validate, sort and detrend, returning frequencies, residual, noise and floor."""
     freqs = np.asarray(freqs, dtype=np.float64)
     magnitude = np.asarray(magnitude, dtype=np.float64)
     if freqs.ndim != 1 or magnitude.shape != freqs.shape or freqs.size < 11:
@@ -119,11 +180,17 @@ def find_spectrum_dips(
     noise = float(np.median(np.abs(difference - np.median(difference)))) / (
         0.67449 * np.sqrt(2)
     )
-    threshold = max(
-        options.prominence_factor * noise,
-        1e-6 * float(np.ptp(magnitude)),
-        np.finfo(float).eps,
-    )
+    floor = max(1e-6 * float(np.ptp(magnitude)), np.finfo(float).eps)
+    return freqs, corrected, noise, floor
+
+
+def _select_dips(
+    freqs: NDArray[np.float64],
+    corrected: NDArray[np.float64],
+    options: DipFinderOptions,
+    threshold: float,
+) -> tuple[SpectrumDip, ...]:
+    """Apply smoothing, prominence, width and greedy score selection to a residual."""
     if options.smoothing_sigma > 0:
         corrected = gaussian_filter1d(corrected, sigma=options.smoothing_sigma)
     indices, properties = find_peaks(-corrected, prominence=threshold)
