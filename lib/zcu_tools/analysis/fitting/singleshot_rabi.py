@@ -188,20 +188,19 @@ class RabiBackendSummary:
     parameter_names gives the selected model's optimizer coordinate order:
     p_e0_u, p_inf_u, center_mid, log_separation, log_sigma, p_avg_u,
     log_length_ratio, log_t_r, log_omega. A constant envelope omits log_t_r;
-    a fitted phase inserts phase immediately before log_omega. The _u names
-    denote dimensionless logistic coordinates, log_ names natural-log
-    coordinates, center_mid projected IQ units, and phase radians.
+    a fitted phase inserts phase immediately before log_omega. _u denotes
+    dimensionless logistic coordinates, log_ natural-log coordinates,
+    center_mid projected IQ units, and phase radians.
 
-    values is a vector in that order, in transformed optimizer coordinates,
-    not physical population or decay parameters. std has the same shape and
-    order, with std[i] = sqrt(full covariance[i, i]) in values[i]'s coordinate
-    units. These are non-negative marginal standard deviations, not propagated
-    errors on physical parameters. Missing or invalid covariance can yield NaN.
+    values holds transformed optimizer coordinates in that order, not physical
+    parameters. std has the same shape/order; std[i] = sqrt(full covariance[i, i]).
+    These non-negative marginal errors use values[i]'s coordinate units, without
+    physical-parameter propagation. Missing or invalid covariance can yield NaN.
 
     valid is True only for accepted convergence and calibration. nll is the
     dimensionless, non-negative multinomial negative log-likelihood. Invalid
-    fits can retain finite optimizer diagnostics or NaN values/std and infinite
-    nll. No field uses None. Arrays are detached from the full result.
+    fits can retain finite diagnostics or NaN values/std and infinite nll.
+    No field uses None. Arrays are detached from the full result.
     """
 
     parameter_names: tuple[str, ...]
@@ -217,39 +216,34 @@ class RabiJointFitSummary:
 
     initial_populations is the dimensionless pre-pulse [g, e, other] vector
     of shape (3,), with entries in [0, 1] summing to one and other fixed at zero.
-    It describes the state before the residual pulse-shaping rotation, not the
-    model extrapolation at coordinate zero when phase is nonzero.
+    It describes the state before the residual pulse-shaping rotation.
 
     p_inf is the dimensionless long-drive excited-population baseline in [0, 1].
-    t_r is the positive Rabi envelope decay time in input coordinate units, or
-    None for a constant envelope. omega is the positive angular frequency in
-    radians per input coordinate unit. The coordinate can be pulse length or
-    gain. phase is the residual angle relative to the pre-pulse state direction
-    in [-pi/2, pi/2] radians, or zero when phase fitting is disabled.
+    t_r is the positive Rabi envelope decay time in input coordinate units,
+    or None for a constant envelope. omega is positive, in radians per coordinate
+    unit. Coordinates are pulse lengths or gains. phase is the residual angle
+    relative to the pre-pulse direction in [-pi/2, pi/2] radians, or zero when fixed.
 
     projected_g_center and projected_e_center are finite scalar ground/excited
     centers on the pooled PCA axis in IQ units, with ground below excited.
     sigma is the positive shared Gaussian readout noise width in IQ units.
     p_avg is the dimensionless readout stationary excited population in [0, 1].
     length_ratio is the positive dimensionless readout-duration/relaxation-time
-    ratio. g_center and e_center are the finite complex ground/excited centers
-    in the original IQ plane, in the input signals' IQ units. radius is the
-    positive circle-classification radius in IQ units, no greater than the
-    projected center separation.
+    ratio. g_center and e_center are finite complex ground/excited centers in the
+    original IQ plane, in input IQ units. radius is the positive circle-classification
+    radius in IQ units, no greater than the projected center separation.
 
     confusion_matrix is a dimensionless (3, 3) matrix with true [g, e, other]
     rows and measured [g, e, other] columns. Each row sums to one and entries
     lie in [0, 1]. condition_number is its dimensionless 2-norm condition number,
     at least one, with infinity indicating singularity or failed calibration.
-    backend holds transformed optimizer values, marginal standard deviations,
-    convergence/calibration validity and negative log-likelihood.
+    backend holds transformed optimizer values, marginal errors and fit diagnostics.
 
-    On failure, backend.valid is False. Physical scalar outputs are NaN except
-    for t_r and phase as described below. Both parts of complex centers are NaN,
-    initial_populations is [NaN, NaN, 0], and every confusion_matrix entry is NaN.
-    condition_number is infinite. t_r remains
-    None for a constant envelope and is NaN otherwise; phase remains zero when
-    phase fitting is disabled and is NaN otherwise. No other field uses None.
+    On failure, backend.valid is False. initial_populations is [NaN, NaN, 0].
+    condition_number is infinite and all confusion_matrix entries are NaN.
+    t_r is None for a constant envelope and NaN otherwise. phase is zero when
+    phase fitting is disabled and NaN otherwise. All other physical outputs are
+    NaN, including both parts of complex centers. No other field uses None.
     Backend diagnostics may remain finite even when calibration fails.
     Arrays are detached from the full result; no sweep or shot data are retained.
     """
