@@ -167,6 +167,28 @@ def test_affine_access_rejects_tables_with_loop_diagnostic(attribute: str) -> No
         getattr(table, attribute)
 
 
+@pytest.mark.parametrize(
+    "operation", [operator.add, operator.sub, operator.mul, operator.truediv]
+)
+def test_rounding_follows_qick_copies_and_scalar_derivations(
+    mock_soccfg: QickConfig, operation: Callable[..., Any]
+) -> None:
+    values = [0.017, -0.129, 0.013]
+    table = v2.TableParam("point", values)
+    scale = mock_soccfg.us2cycles(1.0)
+    derived = copy.copy(operation(table, 3.0))
+    derived.to_int(scale, parname="length")
+    expected = []
+    for value in values:
+        scalar = QickParam(value)
+        scalar_derived = copy.copy(operation(scalar, 3.0))
+        scalar_derived.to_int(scale, quantize=1, parname="length")
+        expected.append(scalar.get_rounded({"point": len(values)}).start)
+    np.testing.assert_allclose(
+        table.get_rounded({"point": len(values)}).to_array(), expected
+    )
+
+
 @pytest.mark.parametrize("frontend", ["builder", "native"])
 def test_add_table_sweep_preserves_mixed_loop_order_and_rejects_invalid_values(
     mock_soccfg: QickConfig,
