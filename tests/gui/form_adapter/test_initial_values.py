@@ -84,6 +84,61 @@ class Tones(ConfigBase):
     participants: list[int] = [0]
 
 
+def test_factory_patches_detached_raw_defaults_without_leaking_unreturned_edits() -> None:
+    class GroupedScan(Scan):
+        tones: list[Tone]
+        participants: list[int] = [0]
+
+    env = FormEnv()
+    received: list[dict[str, JsonValue]] = []
+
+    def initial_values(
+        captured: FormEnv, defaults: dict[str, JsonValue]
+    ) -> dict[str, JsonValue]:
+        assert captured is env
+        assert defaults == {
+            "scan": {"kind": "linrange", "start": 1.0, "stop": 2.0, "n": 5},
+            "count": {"expr": "2 * 4"},
+            "position": 3.0,
+            "tones": [{"name": "Q1"}, {"name": "Q2"}],
+            "participants": [0],
+        }
+        received.append(defaults)
+        tones = defaults["tones"]
+        assert isinstance(tones, list)
+        tone = tones[0]
+        assert isinstance(tone, dict)
+        tone["name"] = "patched"
+        defaults["participants"] = [1]
+        defaults["count"] = 99
+        return {"tones": [tone]} if len(received) == 1 else {}
+
+    form = Form(
+        GroupedScan,
+        {
+            "scan": Range(1.0, 2.0, expts=5),
+            "count": Expr("2 * 4"),
+            "position": 3.0,
+            "tones": [{"name": "Q1"}, {"name": "Q2"}],
+        },
+        initial_values=initial_values,
+    )
+    first = form.default_input(env)
+    fresh = form.default_input(env)
+
+    assert first.data == {
+        "scan": {"kind": "linrange", "start": 1.0, "stop": 2.0, "n": 5},
+        "count": 8,
+        "position": 3.0,
+        "tones": [{"name": "patched"}],
+        "participants": [0],
+    }
+    assert fresh.data == {**first.data, "tones": [{"name": "Q1"}, {"name": "Q2"}]}
+    received[0].clear()
+    assert first.data["tones"] == [{"name": "patched"}]
+    assert len(received) == 2
+
+
 def test_factory_values_still_pass_fixed_identity_admission() -> None:
     form = Form(
         Tones,
