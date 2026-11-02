@@ -297,16 +297,7 @@ class _Machine:
         if inst.wr or inst.ww or inst.wp or inst.port:
             raise ValueError("Unsupported register write side effects")
         if inst.src == SrcKeyword.WMEM and inst.dst.name == "r_wave":
-            if self.wmem is None:
-                # Without initial WMEM, retain the timing-only unknown-data behavior.
-                for name in WAVE_REGS:
-                    self.registers.pop(name, None)
-            else:
-                words = self.read_wave(inst.addr)
-                for index, word in enumerate(words):
-                    self.registers[f"w{index}"] = _signed32(word)
-            if inst.uf:
-                self.flags = None
+            self.load_wave(inst)
             return
         if inst.src == SrcKeyword.IMM and inst.lit is not None:
             value = inst.lit.value
@@ -397,6 +388,25 @@ class _Machine:
             )
         return words
 
+    def load_wave(self, inst: RegWriteInst) -> None:
+        if self.wmem is None:
+            # Without initial WMEM, retain the timing-only unknown-data behavior.
+            for name in WAVE_REGS:
+                self.registers.pop(name, None)
+        else:
+            for index, word in enumerate(self.read_wave(inst.addr)):
+                self.registers[f"w{index}"] = _signed32(word)
+        if inst.uf:
+            self.flags = None
+
+    def store_wave(self, inst: WmemWriteInst) -> None:
+        taken = self.condition(inst.if_cond)
+        if inst.time or inst.wr or inst.op or inst.uf or inst.wp:
+            raise ValueError("Unsupported wave memory side effects")
+        if taken and self.wmem is not None:
+            self.read_wave(inst.addr)
+            self.wmem[self.wave_address(inst.addr)] = self.wave_registers()
+
     def wave_registers(self) -> WaveWords:
         return (
             self.value(Register("w0")) % 2**32,
@@ -453,12 +463,7 @@ class _Machine:
             if isinstance(inst.addr, Register) and self.value(inst.addr) != address + 1:
                 raise ValueError("WAIT target must be its internal polling jump")
         elif isinstance(inst, WmemWriteInst):
-            taken = self.condition(inst.if_cond)
-            if inst.time or inst.wr or inst.op or inst.uf or inst.wp:
-                raise ValueError("Unsupported wave memory side effects")
-            if taken and self.wmem is not None:
-                self.read_wave(inst.addr)
-                self.wmem[self.wave_address(inst.addr)] = self.wave_registers()
+            self.store_wave(inst)
         elif not isinstance(inst, (PortWriteInst, DportWriteInst, TrigInst)):
             raise ValueError(f"Unsupported timing instruction: {inst}")
         return following
