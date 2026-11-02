@@ -54,7 +54,14 @@ def selfcal_transfer(
     if singular_values[n_states - 1] <= max(1e-8 * singular_values[0], 3 * singular_values[n_states]):
         raise AnalysisFailed("Requested states are not identifiable above the singular-value noise floor")
     projector = np.eye(6) - vectors[:, :n_states] @ vectors[:, :n_states].T
-    centers, variance = _fit_centers(projector, n_states)
+    initial = None
+    if previous is not None:
+        normalized = (previous.centers - mean) / scale
+        initial = np.r_[
+            np.column_stack([normalized.real, normalized.imag]).ravel(),
+            np.clip((previous.sigma / scale) ** 2, 0, 0.5),
+        ]
+    centers, variance = _fit_centers(projector, n_states, initial)
     inverse = np.linalg.pinv(_lift(centers, variance).T)
     joint = inverse @ moments @ inverse.T
     rows = joint.sum(axis=-1)
@@ -115,28 +122,29 @@ def _lift(centers: NDArray[np.complex128], variance: float) -> NDArray[np.float6
 
 
 def _fit_centers(
-    projector: NDArray[np.float64], n_states: int
+    projector: NDArray[np.float64], n_states: int, initial: NDArray[np.float64] | None
 ) -> tuple[NDArray[np.complex128], float]:
     """Find distinct lifted centers in the shared readout subspace."""
-    axis = np.linspace(-4, 4, 101)
-    grid = (axis[:, None] + 1j * axis[None, :]).ravel()
-    best_score = np.inf
-    initial = np.empty(2 * n_states + 1)
-    for variance in np.linspace(0, 0.5, 31):
-        lifted = _lift(grid, float(variance))
-        distances = np.linalg.norm(lifted @ projector, axis=1) / np.linalg.norm(lifted, axis=1)
-        candidates: list[complex] = []
-        for index in np.argsort(distances):
-            center = complex(grid[index])
-            if all(abs(center - other) > 0.4 for other in candidates):
-                candidates.append(center)
-            if len(candidates) == n_states:
-                break
-        centers = np.array(candidates, dtype=np.complex128)
-        score = float(np.sum((_lift(centers, float(variance)) @ projector)**2))
-        if score < best_score:
-            best_score = score
-            initial = np.r_[np.column_stack([centers.real, centers.imag]).ravel(), variance]
+    if initial is None:
+        axis = np.linspace(-4, 4, 101)
+        grid = (axis[:, None] + 1j * axis[None, :]).ravel()
+        best_score = np.inf
+        initial = np.empty(2 * n_states + 1)
+        for variance in np.linspace(0, 0.5, 31):
+            lifted = _lift(grid, float(variance))
+            distances = np.linalg.norm(lifted @ projector, axis=1) / np.linalg.norm(lifted, axis=1)
+            candidates: list[complex] = []
+            for index in np.argsort(distances):
+                center = complex(grid[index])
+                if all(abs(center - other) > 0.4 for other in candidates):
+                    candidates.append(center)
+                if len(candidates) == n_states:
+                    break
+            centers = np.array(candidates, dtype=np.complex128)
+            score = float(np.sum((_lift(centers, float(variance)) @ projector)**2))
+            if score < best_score:
+                best_score = score
+                initial = np.r_[np.column_stack([centers.real, centers.imag]).ravel(), variance]
 
     def residual(parameters: NDArray[np.float64]) -> NDArray[np.float64]:
         centers = parameters[:-1:2] + 1j * parameters[1:-1:2]
