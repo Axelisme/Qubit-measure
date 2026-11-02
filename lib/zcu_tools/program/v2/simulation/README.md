@@ -132,9 +132,6 @@ passing the bound SoC's routes. Other SoC objects keep the
 original QICK acquisition path.
 The core interpreter supports register ALU operations, Z/S flags, DMEM/WMEM and
 native sweep/reps shells, marked inner loops and register-selected branches.
-Shot-tail validation accepts the native register-maximum packet only when its
-pure conditional selection feeds the reference advance. Standalone TESTs,
-other flag operations and writes to cross-shot live state remain rejected.
 Body boundaries distinguish acquisition axes from body-local Repeat counters,
 including loops emitted during Module lowering after QICK loop discovery.
 Inner iterations produce separate slots and retain their nested coordinates.

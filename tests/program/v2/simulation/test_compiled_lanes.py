@@ -3,7 +3,7 @@
 from dataclasses import replace
 
 import pytest
-from qick.asm_v2 import AsmInst, IncReg, QickRawParam, QickSweep1D, WriteReg
+from qick.asm_v2 import IncReg, QickRawParam, QickSweep1D
 from zcu_tools.program.v2 import TableParam
 from zcu_tools.program.v2.ir import CompiledRecord, CompiledStream
 from zcu_tools.program.v2.ir.instructions import MetaInst
@@ -183,64 +183,6 @@ def test_reps_exec_after_cannot_update_an_unused_register():
 
     prog, env = program(lambda p: p.pulse(0, "p"), initialize, reps=3)
     with pytest.raises(ValueError, match="preopt.*reps.*shell"):
-        request(prog, env)
-    assert env.soc.binding.last_request is None
-
-
-@pytest.mark.parametrize(
-    "damage",
-    [
-        "standalone",
-        "add",
-        "no_flags",
-        "wrong_initial",
-        "wrong_condition",
-        "side_write",
-        "unused_result",
-        "overwritten_result",
-    ],
-)
-def test_shell_tests_outside_reference_maximum_packet_remain_rejected(damage):
-    def initialize(p):
-        left = p.add_reg(init=QickRawParam("left", 1, {}))
-        right = p.add_reg(init=QickRawParam("right", 2, {}))
-        result = p.add_reg()
-        test = {"CMD": "TEST", "OP": f"{left} - {right}", "UF": "1"}
-        if damage == "add":
-            test["OP"] = f"{left} + {right}"
-        elif damage == "no_flags":
-            del test["UF"]
-        p.append_loop_after("reps", AsmInst(inst=test, addr_inc=1))
-        if damage == "standalone":
-            return
-        p.append_loop_after(
-            "reps",
-            WriteReg(dst=result, src=right if damage == "wrong_initial" else left),
-        )
-        selected = {
-            "CMD": "REG_WR",
-            "DST": result,
-            "SRC": "op",
-            "OP": right,
-            "IF": "NS" if damage == "wrong_condition" else "S",
-        }
-        if damage == "side_write":
-            selected["UF"] = "1"
-        p.append_loop_after("reps", AsmInst(inst=selected, addr_inc=1))
-        if damage == "overwritten_result":
-            p.append_loop_after("reps", WriteReg(dst=result, src=0))
-        if damage != "unused_result":
-            p.append_loop_after(
-                "reps",
-                AsmInst(
-                    inst={"CMD": "TIME", "C_OP": "inc_ref", "R1": result}, addr_inc=1
-                ),
-            )
-
-    prog, env = program(lambda p: p.pulse(0, "p"), initialize, reps=3)
-    with pytest.raises(
-        ValueError, match="preopt.*reps.*undeclared acquisition shell effect"
-    ):
         request(prog, env)
     assert env.soc.binding.last_request is None
 
