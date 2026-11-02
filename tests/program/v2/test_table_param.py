@@ -1,13 +1,15 @@
 """Lookup parameter conversion at the QICK scalar and waveform seams."""
 
+import copy
 import operator
 from collections.abc import Callable
+from fractions import Fraction
 from typing import Any
 
 import numpy as np
 import pytest
 from qick import QickConfig
-from qick.asm_v2 import QickParam
+from qick.asm_v2 import QickParam, QickProgramV2, Waveform
 from qick.helpers import to_int
 from zcu_tools.program import v2
 
@@ -65,3 +67,56 @@ def test_scalar_arithmetic_preserves_loop_and_rejects_sweep_mixing(
     for other in [v2.TableParam("other", values), QickParam(2.0, {"other": 1.0})]:
         with pytest.raises(TypeError):
             operation(other, table) if reverse else operation(table, other)
+
+
+def test_raw_manager_transforms_preserve_all_points_and_rounding() -> None:
+    table = v2.TableParam("point", [2.0, 4.0, -6.0])
+    raw = table.to_int(2.0, parname="gain")
+    original = copy.copy(raw)
+    assert isinstance(original, v2.TableRawParam)
+    raw *= Fraction(3, 2)
+    raw += 5
+    raw *= -2
+    assert raw.values == (-22, -34, 26)
+    assert raw.start == -22
+    assert raw.minval() == -34
+    assert raw.maxval() == 26
+    assert original.values == (4, 8, -12)
+    assert raw % 16 is raw
+    raw.to_steps({"point": 3})
+    assert raw.spans == {}
+    assert raw.steps == {}
+    np.testing.assert_array_equal((raw / 2.0).to_array(), [-11, -17, 13])
+    np.testing.assert_array_equal(
+        table.get_rounded({"point": 3}).to_array(), table.values
+    )
+    cloned = copy.copy(raw)
+    np.testing.assert_array_equal(cloned.to_rounded().to_array(), [4, 8, -12])
+    uneven = v2.TableRawParam("point", [4, 3], par="gain")
+    with pytest.raises((ValueError, RuntimeError), match="even|divis"):
+        uneven *= Fraction(1, 2)
+    assert uneven.values == (4, 3)
+
+
+def test_qick_waveform_and_close_loop_leave_table_words_unstepped(
+    mock_soccfg: QickConfig,
+) -> None:
+    scale = mock_soccfg.us2cycles(1.0)
+    raw = v2.TableParam("point", [0.15, 0.31, 0.22]).to_int(scale, parname="length")
+    wave = Waveform(freq=0, phase=0, env=0, gain=0, length=raw, conf=0)
+    scalar_wave = Waveform(freq=0, phase=0, env=0, gain=0, length=raw.start, conf=0)
+    np.testing.assert_array_equal(wave.compile(), scalar_wave.compile())
+    assert wave.sweeps() == [raw]
+    programs = []
+    for candidate in [wave, scalar_wave]:
+        prog = QickProgramV2(mock_soccfg)
+        prog.add_raw_pulse("test", [candidate])
+        prog.open_loop(3, name="point")
+        prog.close_loop()
+        prog.end()
+        prog.compile()
+        programs.append(prog)
+    assert programs[0].prog_list == programs[1].prog_list
+    np.testing.assert_array_equal(
+        programs[0].binprog["wmem"], programs[1].binprog["wmem"]
+    )
