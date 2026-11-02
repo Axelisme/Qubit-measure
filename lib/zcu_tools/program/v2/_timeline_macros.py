@@ -159,13 +159,13 @@ class TimelineRuntimeAdvance(Macro):
                 ),
             ]
         ]
+        runtime = self.book.math.source(self.source.time_reg)
         if all(
             not isinstance(end, RuntimeEnd) and _bounds(end)[1] <= 1e-12
             for end in remaining
         ):
             self.book.decrement(advance)
             return
-        runtime = self.book.math.source(self.source.time_reg)
         self.book.decrement(self.book.math.add(runtime, advance))
 
     def translate(self, prog) -> None:
