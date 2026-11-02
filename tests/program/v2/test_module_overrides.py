@@ -6,7 +6,7 @@ from typing import Literal
 import numpy as np
 import pytest
 from qick.asm_v2 import QickParam, QickSweep1D
-from zcu_tools.program.v2 import TimelineBuilder, TimelineProgramV2
+from zcu_tools.program.v2 import TableParam, TimelineBuilder, TimelineProgramV2
 from zcu_tools.program.v2.modules.base import Module
 from zcu_tools.program.v2.modules.pulse import Pulse, PulseCfg
 from zcu_tools.program.v2.modules.readout import (
@@ -94,6 +94,25 @@ def _pulse_cfg(ch: int = 0) -> PulseCfg:
         gain=0.2,
         waveform=ConstWaveformCfg(length=0.1),
     )
+
+
+@pytest.mark.parametrize("via_override", [False, True])
+def test_table_ro_length_is_explicitly_unsupported(via_override):
+    cfg = PulseReadoutCfg(
+        gen_ch=0,
+        ro_ch=0,
+        nqz=1,
+        freq=100,
+        gain=0.2,
+        waveform=ConstWaveformCfg(length=0.1),
+        ro_length=0.2,
+    )
+    table = TableParam("point", [0.2, 0.4, 0.3])
+    if not via_override:
+        cfg.ro_length = table
+    with pytest.raises(NotImplementedError, match="ro_length.*TableParam"):
+        module = PulseReadout("readout", cfg, ro_length=table if via_override else None)
+        _compile("builder", [module], True)
 
 
 def _assert_same_compile(actual, expected):
