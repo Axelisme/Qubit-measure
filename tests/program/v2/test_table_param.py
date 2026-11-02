@@ -154,6 +154,11 @@ def test_qick_parameter_copy_and_convert_time_preserve_table_type(
     rounded = macro.convert_time(prog, table, "t")
     assert isinstance(macro.t_params["t"], v2.TableParam)
     assert isinstance(rounded, v2.TableParam)
+    time_reg = prog.reg_dict[macro.t_regs["t"]]
+    assert isinstance(time_reg.init, v2.TableRawParam)
+    assert list(time_reg.init.values) == [mock_soccfg.us2cycles(v) for v in values]
+    with pytest.raises(RuntimeError):
+        int(time_reg.init)
     expected_times = [mock_soccfg.cycles2us(mock_soccfg.us2cycles(v)) for v in values]
     np.testing.assert_allclose(rounded.to_array(), expected_times)
     assert "point" in repr(table)
