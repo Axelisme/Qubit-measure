@@ -60,7 +60,9 @@ Dialog 不接控制狀態，也不在 chooser／confirmation 返回後重查 hol
 
 2026-10-18，使用者裁決「1A，可以」，確認 Measure 由主視窗同步唯讀。Measure 的所有具名主選單對話框真正 non-modal，包含啟動時的 Setup。Remote 時使用者可開 Setup、Devices、Inspect 唯讀觀察。控制權變更時，主視窗同步更新仍開著的 Setup、Devices、Inspect 與 ARB Waveforms；交回 Local 即恢復可寫，既有 busy／valid gate 繼續生效。Inspect 的 ARB 入口使用當下的宿主狀態，不保留開窗時的舊值。Dialog 不自行訂閱 authority。
 
-Measure 的無需回答錯誤通知採 non-modal，保留 lifetime、訊息與 traceback，讓 agent 在通知可見時繼續操作。需要選擇的 confirmation、file chooser 與 writeback 編輯保持 modal 保護。Shared dialog lifetime helper 的預設政策與其他 app 不變。
+Measure 的無需回答錯誤通知依控制身份呈現。Remote holder 在線時，主視窗顯示約八秒後自動消失的摘要，完整內容寫入 log。Local 操作或 Remote holder 離線時，非模態報告保持到手動關閉。需要選擇的 confirmation、file chooser 與 writeback 編輯保持 modal 保護。Shared dialog lifetime helper 的預設政策與其他 app 不變。
+
+2026-11-02，使用者問「1應該要根據是否處於online操作而決定是否自動關閉彈窗？」，並以「確認」採用上述分工。Wire 仍交付同一診斷，見 [[0068]]；呈現方式不改變 operation 的結果或取消契約。
 
 Measure 量測 Stop 與 device operation Stop 在 Remote 仍可按。按下先收回成 Local 鎖定，再請求取消。嵌入 measure GUI 的 workflow Stop 同此規則（2026-10-22 advisor 代裁，待使用者確認）。Stop 是僅有的自動收回入口，取消不代表硬體已停止。Remote 關主窗先確認，拒絕不開始 teardown，接受沿既有 shutdown／cancel／cleanup 契約，不另加 reclaim。Fluxdep 沒有硬體緊急 Stop。
 

@@ -13,7 +13,7 @@ from scipy.ndimage import gaussian_filter
 from zcu_tools.analysis.fitting import (
     fit_decay,
 )
-from zcu_tools.cfg_model import ConfigBase, FieldMeta, Gain
+from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
@@ -21,7 +21,6 @@ from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
-    GainSweep,
     Pulse,
     Readout,
     Reset,
@@ -46,7 +45,7 @@ class ScanT1WithToneCfg(ConfigBase):
     pi_pulse: Pulse.Cfg
     test_pulse: Pulse.Cfg
     readout: Readout.Cfg
-    gain: Annotated[GainSweep | list[Gain], FieldMeta(label="Gain", unit="a.u.")]
+    gain: Annotated[SweepCfg, FieldMeta(label="Gain", unit="a.u.")]
     length: SweepCfg
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
@@ -83,7 +82,7 @@ class ScanT1WithToneExp(Experiment[ScanT1WithToneResult, ScanT1WithToneCfg]):
         z=AxesSpec.Z("signals", label="Signal", unit="a.u."),
         result_type=ScanT1WithToneResult,
         cfg_type=ScanT1WithToneCfg,
-        cfg_schema_version="3.0",
+        cfg_schema_version="4.0",
         tag="twotone/ge/t1_with_tone_sweep",
     )
 
@@ -92,8 +91,8 @@ class ScanT1WithToneExp(Experiment[ScanT1WithToneResult, ScanT1WithToneCfg]):
     ) -> ScanT1WithToneResult:
         """Measure tone-driven relaxation versus test-tone gain and duration.
 
-        cfg supplies reset, π, test tone and readout modules, host-scanned gains
-        and a hardware duration sweep in us. context supplies acquisition and
+        cfg supplies reset, π, test tone and readout modules, a host gain
+        SweepCfg and a hardware duration sweep in us. context supplies acquisition and
         live plots. At each gain apply reset → π → test tone → readout.
         Return quantized gains, durations and mean complex IQ with shape
         (gain, time), keeping NaN for unmeasured points. Invalid pulse or sweep
@@ -107,7 +106,6 @@ class ScanT1WithToneExp(Experiment[ScanT1WithToneResult, ScanT1WithToneCfg]):
             cfg.gain,
             "gain",
             {"soccfg": soccfg, "gen_ch": cfg.test_pulse.ch},
-            allow_array=True,
         )
         lengths = sweep2array(
             cfg.length,

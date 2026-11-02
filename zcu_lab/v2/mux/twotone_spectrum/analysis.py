@@ -33,9 +33,9 @@ def analyze_frequency(
     """Estimate each measured qubit's transition frequency and linewidth in MHz.
 
     result contains actual MHz axes and complex IQ, both shaped (K,P). options
-    selects a line shape and fit overlay: ``lor`` uses background-subtracted
+    selects a line shape: ``lor`` uses background-subtracted
     magnitude; ``sinc`` uses a signed IQ principal-axis projection that preserves
-    sidelobes. plots receives one fit_i spectrum per
+    sidelobes. plots receives one fit_i spectrum with a fitted overlay per
     original tone position. Return estimates and one-sigma errors, or a per-tone
     failure reason. Partial spectra use only finite IQ points. Invalid shapes or
     options raise before fitting; plotting errors propagate.
@@ -84,9 +84,8 @@ def analyze_frequency(
             outcomes.append(MuxFitFailure(index, str(exc)))
         else:
             ax.plot(xs, real, "o", label="measured")
-            if options.plot_fit:
-                ax.plot(xs, fitted, label=f"FWHM={width:.4g} ± {werr:.2g} MHz")
-                ax.axvline(freq, ls="--", label=f"freq={freq:.7g} ± {ferr:.2g} MHz")
+            ax.plot(xs, fitted, label=f"FWHM={width:.4g} ± {werr:.2g} MHz")
+            ax.axvline(freq, ls="--", label=f"freq={freq:.7g} ± {ferr:.2g} MHz")
             outcomes.append(outcome)
 
         ax.legend()

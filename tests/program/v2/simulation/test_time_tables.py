@@ -1,0 +1,334 @@
+"""Time lookup sweeps preserve scalar scheduling at each compiled scan point."""
+
+from dataclasses import replace
+
+import numpy as np
+import pytest
+from qick.asm_v2 import QickParam, QickSweep1D
+from zcu_tools.experiment.simulation import white_noise
+from zcu_tools.program.v2 import SweepCfg, TableParam, TimelineBuilder
+from zcu_tools.program.v2.modules.base import Module
+from zcu_tools.program.v2.modules.delay import DelayAuto
+from zcu_tools.program.v2.modules.dmem import LoadValue
+from zcu_tools.program.v2.modules.pulse import PulseCfg
+from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
+from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
+
+from tests.program._profiles import load_soccfg
+from tests.program.v2.simulation._compiled_support import request, scheduled_shots
+from tests.program.v2.wave_observations import analyze, relative_shot
+
+
+class RegisterDelay(Module):
+    name = "register_delay"
+
+    def __init__(self, value, *, increment=False):
+        self.value = value
+        self.increment = increment
+
+    def declare(self, prog):
+        parameter = (
+            self.value if isinstance(self.value, QickParam) else QickParam(self.value)
+        )
+        raw = prog.us2cycles(parameter)
+        if not raw.is_sweep():
+            raw.to_steps({})
+        prog.add_reg("hold", init=raw)
+
+    def lower(self, prog, *, timeline, tag):
+        if self.increment:
+            prog.timeline_inc("hold", tag=tag)
+        else:
+            prog.delay_reg_auto("hold")
+
+
+class PulseAtTime(Module):
+    def __init__(self, value, timeline):
+        self.name = "timed_drive"
+        self.value = value
+        self.timeline = timeline
+        self.pulse = PulseCfg(
+            ch=1, nqz=1, freq=80, gain=0.2, waveform=ConstWaveformCfg(length=0.1)
+        ).build("drive")
+
+    def declare(self, prog):
+        self.pulse.declare(prog)
+
+    def lower(self, prog, *, timeline, tag):
+        prog.pulse(
+            1,
+            self.pulse.pulse_name(prog),
+            t=self.value,
+            timeline=self.timeline,
+            tag="time",
+        )
+
+
+def make_receiver(
+    *,
+    name="readout",
+    pre_delay: float | QickParam = 0.0,
+    post_delay: float | QickParam = 0.0,
+    trig_offset: float | QickParam = 0.0,
+):
+    return PulseReadoutCfg(
+        gen_ch=0,
+        ro_ch=0,
+        nqz=1,
+        freq=100,
+        gain=0.1,
+        waveform=ConstWaveformCfg(length=0.1),
+        ro_length=0.1,
+        pre_delay=pre_delay,
+        post_delay=post_delay,
+        trig_offset=trig_offset,
+    ).build(name)
+
+
+def time_program(value, *, table=False, linear=False, outer=False, consumer="delay"):
+    env = white_noise(load_soccfg(2, 1), std_adc=0, routes=((0, 0),), seed=None)
+    builder = TimelineBuilder(env.soccfg, reps=2, initial_delay=0, relax_delay=0.1)
+    if outer:
+        builder.add_loop("outer", 2)
+    if table:
+        value = builder.add_table_sweep("point", value)
+    elif linear:
+        value = builder.add_sweep(
+            "point",
+            SweepCfg(
+                start=value[0],
+                stop=value[-1],
+                expts=len(value),
+                step=(value[-1] - value[0]) / (len(value) - 1),
+            ),
+        )
+    if consumer == "timeline_inc":
+        builder.timeline_inc(value, tag="time")
+    elif consumer == "delay":
+        builder.delay(value, tag="time")
+    elif consumer in ("register", "register_inc"):
+        builder.emit(
+            RegisterDelay(value, increment=consumer == "register_inc"), tag="time"
+        )
+    receiver = make_receiver(
+        pre_delay=value if consumer == "pre_delay" else 0.0,
+        post_delay=value if consumer == "post_delay" else 0.0,
+        trig_offset=value if consumer == "trig_offset" else 0.0,
+    )
+    if consumer in ("pulse_t", "native_t"):
+        builder.emit(
+            PulseAtTime(value, "default" if consumer == "pulse_t" else None), tag="time"
+        )
+    builder.emit(receiver)
+    if consumer == "delay_auto":
+        builder.delay_auto(value, tag="time")
+        builder.emit(receiver)
+    elif consumer == "DelayAuto":
+        builder.emit(DelayAuto("wait", t=value), tag="time")
+        builder.emit(receiver)
+    builder.delay_by_timeline()
+    return builder.build(), env
+
+
+@pytest.mark.parametrize(
+    "consumer",
+    [
+        "delay",
+        "delay_auto",
+        "DelayAuto",
+        "timeline_inc",
+        "pre_delay",
+        "post_delay",
+        "trig_offset",
+        "pulse_t",
+        "native_t",
+        "register",
+        "register_inc",
+    ],
+)
+@pytest.mark.parametrize("outer", [False, True])
+def test_time_table_matches_scalar_at_every_point_and_rep(consumer, outer):
+    values = [0.0213, 0.0107, 0.0354]
+    prog, env = time_program(values, table=True, outer=outer, consumer=consumer)
+    observed = request(prog, env)
+    expected_shots = []
+    for point, value in enumerate(values):
+        scalar, scalar_env = time_program(value, consumer=consumer)
+        assert replace(observed.materialize_point(point), coordinates=()) == request(
+            scalar, scalar_env
+        ).materialize_point(0)
+        expected_shots.append(scheduled_shots(scalar)[0])
+    assert scheduled_shots(prog) == expected_shots * (4 if outer else 2)
+
+
+@pytest.mark.parametrize(
+    "consumer",
+    [
+        "delay",
+        "delay_auto",
+        "DelayAuto",
+        "timeline_inc",
+        "pre_delay",
+        "post_delay",
+        "trig_offset",
+        "pulse_t",
+        "native_t",
+    ],
+)
+def test_time_tables_match_reencodable_linear_actual_points(consumer):
+    values = [0.015625, 0.03125, 0.046875]
+    linear, linear_env = time_program(values, linear=True, consumer=consumer)
+    parameter = QickSweep1D("point", values[0], values[-1])
+    linear.us2cycles(parameter)
+    actual = np.asarray(
+        parameter.get_rounded({"point": len(values)}).to_array({"point": len(values)})
+    ).tolist()
+    scalar_shots = []
+    for point, value in enumerate(actual):
+        scalar, scalar_env = time_program(value, consumer=consumer)
+        scalar_shots.append(scheduled_shots(scalar)[0])
+        assert replace(
+            request(linear, linear_env).materialize_point(point), coordinates=()
+        ) == request(scalar, scalar_env).materialize_point(0)
+    # Prerequisite: each actual physical point must compile back to the exact
+    # linear output words and cycles before it serves as a table parity oracle.
+    assert scheduled_shots(linear) == scalar_shots * 2
+    table, table_env = time_program(actual, table=True, consumer=consumer)
+    assert scheduled_shots(table) == scheduled_shots(linear)
+    for point in range(len(actual)):
+        assert request(table, table_env).materialize_point(point) == request(
+            linear, linear_env
+        ).materialize_point(point)
+
+
+@pytest.mark.parametrize("consumer", ["delay", "timeline_inc", "native_t", "pulse_t"])
+@pytest.mark.parametrize("constant", [False, True])
+def test_table_time_getter_returns_exact_affine_qick_parameter(consumer, constant):
+    linear, _ = time_program([0.0, 0.03125, 0.0625], linear=True, consumer=consumer)
+    expected = np.asarray(linear.get_time_param("time", "t", as_array=True)).flatten()
+    if constant:
+        expected = np.repeat(expected[0], len(expected))
+    # Use a bare delay oracle: pulse timeline placement already reports the same
+    # physical parameter, while timeline_inc reports its rounded endpoint.
+    table, _ = time_program(expected.tolist(), table=True, consumer=consumer)
+    actual = table.get_time_param("time", "t")
+    assert not isinstance(actual, TableParam)
+    if not constant:
+        assert isinstance(actual, QickParam)
+    points = table.get_time_param("time", "t", as_array=True)
+    assert np.array_equal(
+        np.asarray(points).flatten(), expected if not constant else expected[:1]
+    )
+
+
+@pytest.mark.parametrize("consumer", ["delay", "timeline_inc", "native_t", "pulse_t"])
+def test_nonaffine_table_time_getter_raises(consumer):
+    prog, _ = time_program([0.0213, 0.0107, 0.0354], table=True, consumer=consumer)
+    with pytest.raises(RuntimeError, match="non-affine"):
+        prog.get_time_param("time", "t")
+
+
+def adc_pair_program(value, *, table=False):
+    env = white_noise(load_soccfg(1, 1), std_adc=0, routes=((0, 0),), seed=None)
+    builder = TimelineBuilder(env.soccfg, initial_delay=0, relax_delay=0.1)
+    if table:
+        value = builder.add_table_sweep("point", value)
+    receiver = make_receiver(name="receiver")
+    builder.timeline_inc(value)
+    builder.fork("default", into="later")
+    builder.emit(receiver)
+    builder.timeline_inc(0.2, timeline="later")
+    builder.emit(receiver, timeline="later")
+    builder.join("later", into="default")
+    builder.delay_by_timeline()
+    return builder.build(), env
+
+
+def test_adc_nonoverlap_uses_correlated_table_points_not_independent_extrema():
+    values = [0.1, 0.4, 0.2]
+    prog, env = adc_pair_program(values, table=True)
+    observed = request(prog, env)
+    scalar_points = []
+    for point, value in enumerate(values):
+        scalar, scalar_env = adc_pair_program(value)
+        expected = request(scalar, scalar_env).materialize_point(0)
+        assert replace(observed.materialize_point(point), coordinates=()) == expected
+        scalar_points.append(expected)
+    triggers = [point.readouts[0].trigger_ticks for point in scalar_points]
+    duration = observed.readouts[0].samples * observed.readouts[0].sample_period_ticks
+    assert max(t[0] + duration for t in triggers) > min(t[1] for t in triggers)
+    assert all(t[0] + duration <= t[1] for t in triggers)
+
+
+def mixed_trigger_program(*, table_origin: bool):
+    """Combine a point-dependent origin with a native affine trigger offset."""
+    env = white_noise(load_soccfg(1, 1), std_adc=0, routes=((0, 0),), seed=None)
+    builder = TimelineBuilder(env.soccfg, reps=2, initial_delay=0, relax_delay=0.1)
+    cycles = [10, 30, 20]
+    if table_origin:
+        origin = builder.add_table_sweep(
+            "point", [env.soccfg.cycles2us(n) for n in cycles]
+        )
+        builder.timeline_inc(origin)
+    else:
+        builder.add_loop("point", len(cycles))
+        builder.emit(LoadValue("origins", cycles, "point", "origin_cycles"))
+        builder.timeline_inc("origin_cycles")
+    offset = QickSweep1D("point", env.soccfg.cycles2us(5), env.soccfg.cycles2us(9))
+    builder.emit(make_receiver(trig_offset=offset))
+    builder.delay_by_timeline()
+    return builder.build(), env
+
+
+def test_table_origin_with_swept_trigger_keeps_register_runtime_tail_rules():
+    # The independent LoadValue form is already a legal runtime composition.
+    # A table origin must not turn its native affine offset into table arithmetic.
+    expected_prog, expected_env = mixed_trigger_program(table_origin=False)
+    expected_request = request(expected_prog, expected_env)
+    prog, env = mixed_trigger_program(table_origin=True)
+    observed = request(prog, env)
+    for point in range(3):
+        assert observed.materialize_point(point) == expected_request.materialize_point(
+            point
+        )
+    expected, result = analyze(expected_prog), analyze(prog)
+    for shot, reference in zip(result.shots, expected.shots, strict=True):
+        assert relative_shot(shot) == relative_shot(reference)
+        assert shot.start_cycle == reference.start_cycle
+    assert result.end_cycle == expected.end_cycle
+
+
+def runtime_auto_program(extra, *, table_extra=False, gens_only=False):
+    env = white_noise(load_soccfg(1, 1), std_adc=0, routes=((0, 0),), seed=None)
+    builder = TimelineBuilder(env.soccfg, reps=2, initial_delay=0, relax_delay=0.1)
+    placement = builder.add_table_sweep("point", [0.0213, 0.0107, 0.0354])
+    if table_extra:
+        extra = TableParam("point", extra)
+    receiver = make_receiver(name="receiver")
+    builder.timeline_inc(placement)
+    builder.emit(receiver)
+    builder.delay_auto(extra, ros=not gens_only)
+    builder.emit(receiver)
+    builder.delay_by_timeline()
+    return builder.build(), env
+
+
+@pytest.mark.parametrize("gens_only", [False, True])
+def test_table_auto_extra_after_runtime_placement_matches_scalar_extra(gens_only):
+    values = [0.0123, 0.0245, 0.0333]
+    prog, env = runtime_auto_program(values, table_extra=True, gens_only=gens_only)
+    observed = request(prog, env)
+    expected_shots = []
+    for point, value in enumerate(values):
+        scalar, scalar_env = runtime_auto_program(value, gens_only=gens_only)
+        assert observed.materialize_point(point) == request(
+            scalar, scalar_env
+        ).materialize_point(point)
+        expected_shots.append(scheduled_shots(scalar)[point])
+    assert scheduled_shots(prog) == expected_shots * 2
+
+
+@pytest.mark.parametrize("consumer", ["register", "register_inc"])
+def test_register_time_table_rejects_negative_noninitial_point(consumer):
+    with pytest.raises(ValueError, match="nonnegative"):
+        time_program([0.02, -0.01, 0.03], table=True, consumer=consumer)

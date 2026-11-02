@@ -51,6 +51,8 @@ Rounds add at acquisition; no per-shot IQ or mean-IQ diagnostic remains.
 Unmeasured scales are NaN. Cancellation retains completed rounds.
 
 Native Load rejects old per-shot files without sums.
+The cfg schema is 2.0. Older cfgs using `scales` do not restore.
+Their saved counts and axes still load and can be plotted, but fitting requires cfg.
 Full run, saving and offline analysis use the saved cfg rather than current
 Form calibrations. Missing saved cfg stops the fit.
 

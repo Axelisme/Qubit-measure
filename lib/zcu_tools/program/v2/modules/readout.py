@@ -22,9 +22,8 @@ from zcu_tools.cfg_model import MuxReadoutCfg as CoreMuxReadoutCfg
 from zcu_tools.utils.shot_classification import classify_shots, nearest_centroid3
 
 from ..macro.readout import ReadoutEmission
-from ..macro.wmem import PatchWmemFromDmem
+from ..table_param import TableParam
 from .base import AbsModuleCfg, Module, apply_cfg_overrides
-from .dmem import LoadWord
 from .pulse import Pulse, PulseCfg
 from .waveform import WaveformCfg, resolve_waveform_ref
 
@@ -107,13 +106,13 @@ class PulseReadoutCfg(AbsReadoutCfg):
         )
 
     def set_param(self, name: str, value: float | QickParam) -> None:
-        """Set shared freq (MHz), gain, waveform length or ro_length (us).
+        """Set shared freq (MHz), gain, generator phase (deg), length or ro_length (us).
 
         Unsupported names raise ValueError; waveform length restrictions apply.
         """
         if name == "length":
             self.waveform.set_param(name, value)
-        elif name in {"freq", "gain", "ro_length"}:
+        elif name in {"freq", "gain", "phase", "ro_length"}:
             setattr(self, name, value)
         else:
             raise ValueError(f"Unknown parameter: {name}")
@@ -258,13 +257,15 @@ class PulseReadoutOverrides(TypedDict, total=False):
     """Optional readout knobs, with None retaining each cfg value.
 
     freq is shared generator/ADC carrier MHz, gain normalized generator
-    amplitude, length waveform duration us and ro_length ADC window us.
-    Each accepts a scalar or QICK sweep. Waveform length restrictions and
-    QICK ADC-window sweep compile limitations remain unchanged.
+    amplitude, phase generator angle in degrees, length waveform duration us
+    and ro_length ADC window us.
+    Each accepts a scalar or QICK sweep. Waveform length restrictions apply.
+    TableParam ro_length is unsupported; other ADC-window sweeps follow QICK.
     """
 
     freq: float | QickParam | None
     gain: float | QickParam | None
+    phase: float | QickParam | None
     length: float | QickParam | None
     ro_length: float | QickParam | None
 
@@ -336,14 +337,19 @@ class PulseReadout(AbsReadout):
         gain_val names a hardware gain-word register; freq_val/ro_freq_val are
         paired generator/ADC frequency-word registers, already lowered for mixer
         and downconversion sign. Unspecified registers use cfg scalar/sweep values.
-        freq (MHz), gain (normalized), length and ro_length (us) override the
+        freq (MHz), gain (normalized), phase (degrees), length and ro_length (us) override the
         copied cfg via set_param. None keeps cfg; unsupported waveform length
-        sweeps raise ValueError. init must precede run. Invalid QICK settings
+        sweeps raise ValueError. TableParam ro_length raises NotImplementedError.
+        init must precede run. Invalid QICK settings
         fail during initialization. Unknown keys or nonnumeric overrides raise TypeError.
         """
         self.name = name
         self.cfg = deepcopy(cfg)
         apply_cfg_overrides(self.cfg, overrides, PulseReadoutOverrides.__annotations__)
+        if isinstance(self.cfg.ro_length, TableParam):
+            raise NotImplementedError(
+                "ro_length does not support TableParam ADC windows"
+            )
         self.gain_val = gain_val
         self.freq_val = freq_val
         self.ro_freq_val = ro_freq_val
@@ -451,137 +457,6 @@ class PulseReadout(AbsReadout):
         else:
             self.pulse.play(prog, timeline=timeline)
         prog.timeline_inc(self.cfg.post_delay, timeline=timeline)
-
-
-class TablePulseReadout(AbsReadout):
-    """Sweep a pulse readout through exact dmem frequency-word tables.
-
-    The current point is played through QICK's ordinary wmem-backed pulse and
-    readout-config path. Once declared, the readout advances to the next paired
-    frequency words at the end of every shot in the ``idx_reg`` sweep loop,
-    whether or not that shot's branch plays this readout. The loop's exec-after
-    hook loads rotated dmem tables into dedicated templates. After the final
-    point, the update wraps to the first pair for the next outer repetition.
-    Timeline completion is generator end plus post-delay once; ADC windows do
-    not extend it. A later timeline trigger must prove its ADC window disjoint.
-    """
-
-    def __init__(
-        self,
-        name: str,
-        cfg: PulseReadoutCfg,
-        *,
-        idx_reg: str,
-        freq_words: Sequence[int],
-        ro_freq_words: Sequence[int],
-    ) -> None:
-        """Capture flat cfg and paired uint32 words for a named sweep loop.
-
-        idx_reg must match exactly one declared loop with the same point count.
-        Empty, unequal, or invalid uint32 tables raise ValueError. The first pair
-        must encode cfg.freq; each later pair represents one semantic frequency.
-        Dedicated templates isolate updates from shared pulses. The final update
-        wraps to the first pair before the next outer repetition.
-        """
-        self.name = name
-        self.idx_reg = idx_reg
-        self.freq_words = [int(word) for word in freq_words]
-        self.ro_freq_words = [int(word) for word in ro_freq_words]
-        if len(self.freq_words) == 0:
-            raise ValueError("TablePulseReadout requires at least one frequency word")
-        if len(self.freq_words) != len(self.ro_freq_words):
-            raise ValueError(
-                "TablePulseReadout generator/readout tables must have equal length"
-            )
-
-        self._readout = PulseReadout(name, cfg)
-        self.cfg = self._readout.cfg
-        self._readout.pulse = Pulse(
-            name=f"{name}_pulse",
-            cfg=self._readout.pulse.cfg,
-            ro_ch=self.cfg.ro_ch,
-            pulse_id=f"{name}_table_pulse",
-        )
-        self._addr_reg = f"{name}_table_addr"
-
-        self._freq_loader = LoadWord(
-            name=f"{name}_next_freq",
-            values=self.freq_words[1:] + self.freq_words[:1],
-            idx_reg=idx_reg,
-            val_reg=f"{name}_next_freq_word",
-        )
-        self._ro_freq_loader = LoadWord(
-            name=f"{name}_next_ro_freq",
-            values=self.ro_freq_words[1:] + self.ro_freq_words[:1],
-            idx_reg=idx_reg,
-            val_reg=f"{name}_next_ro_freq_word",
-        )
-
-    @property
-    def initial_template(self) -> PulseReadout:
-        """Borrow the initial scalar/swept template used before exec-after updates.
-
-        The returned Module is owned by this table readout and must not be
-        mutated by consumers. init(prog) initializes it and its dedicated pulse
-        identity. It is not the current mutable hardware wmem contents; semantic
-        interpreters own their own per-execution template-word update state.
-        """
-        return self._readout
-
-    def declare(self, prog: TimelineProgramV2) -> None:
-        """Declare independent templates and paired words for a public sweep loop.
-
-        idx_reg must name a top-level native loop with exactly the table count;
-        missing loops or count mismatches raise ValueError before allocation.
-        Once declared, the paired frequency words advance at the end of every
-        shot in the idx_reg loop, whether or not that shot's branch plays this
-        readout. The update after the final point wraps to the first pair.
-        """
-        matches = [loop for loop in prog.sweep_loops if loop.name == self.idx_reg]
-        if len(matches) != 1:
-            raise ValueError(
-                f"TablePulseReadout idx_reg={self.idx_reg!r} requires one sweep loop"
-            )
-        if matches[0].count != len(self.freq_words):
-            raise ValueError(
-                f"TablePulseReadout table length {len(self.freq_words)} does not "
-                f"match loop {self.idx_reg!r} count {matches[0].count}"
-            )
-        self._readout.declare(prog)
-        self._freq_loader.declare(prog)
-        self._ro_freq_loader.declare(prog)
-        prog.add_reg(self._addr_reg)
-        self._append_updates(prog)
-
-    def lower(
-        self, prog: TimelineProgramV2, *, timeline: str | None, tag: str | None
-    ) -> None:
-        """Play paired templates, ending at generator completion plus post-delay.
-
-        Hook updates affect only frequency words, not placement or duration.
-        timeline=None selects default; tag names this occurrence's config.
-        """
-        self._readout.lower(prog, timeline=timeline, tag=tag)
-
-    def _append_updates(self, prog: TimelineProgramV2) -> None:
-        pulse_id = self._readout.pulse.pulse_name(prog)
-        prog.append_loop_after(
-            self.idx_reg,
-            PatchWmemFromDmem(
-                name=pulse_id,
-                idx_reg=self.idx_reg,
-                addr_reg=self._addr_reg,
-                val_reg=self._freq_loader.val_reg,
-                dmem_offset=self._freq_loader.dmem_offset(prog),
-            ),
-            PatchWmemFromDmem(
-                name=self._readout.adc_name(prog),
-                idx_reg=self.idx_reg,
-                addr_reg=self._addr_reg,
-                val_reg=self._ro_freq_loader.val_reg,
-                dmem_offset=self._ro_freq_loader.dmem_offset(prog),
-            ),
-        )
 
 
 class MuxReadout(AbsReadout):

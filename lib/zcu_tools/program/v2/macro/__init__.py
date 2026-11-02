@@ -17,6 +17,16 @@ from .write_reg import WriteRegOp
 
 
 class AdditionalMacroMixin(QickProgramV2):
+    """Extend QICK's program with native loop and register-output macros.
+
+    Constructor arguments and compile failures follow QickProgramV2.
+    Every declaration rebuild resets compiler-owned loop metadata.
+    loop_wave_tables maps loop names to WMEM addresses, field indexes 0..5,
+    and rotated DMEM word offsets. loop_register_tables maps loop names and
+    register addresses to offset (rotated DMEM offset) and values (ordered
+    integer words). Opening and closing macros populate these maps at compile.
+    """
+
     def __init__(self, *args, **kwargs):
         self._delay_disabled = False
         self._source_names: list[str] = []
@@ -29,6 +39,11 @@ class AdditionalMacroMixin(QickProgramV2):
     def _init_declarations(self) -> None:
         self._source_names = []
         self._native_pulse_ordinal = 0
+        # Native loop discovery shares rotated DMEM offsets with its closing shell.
+        self.loop_wave_tables: dict[str, dict[int, dict[int, int]]] = {}
+        self.loop_register_tables: dict[
+            str, dict[str, dict[str, int | tuple[int, ...]]]
+        ] = {}
         super()._init_declarations()
 
     @contextmanager

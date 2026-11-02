@@ -9,6 +9,7 @@ from qick.asm_v2 import QickParam
 
 from .modules.base import Module
 from .sweep import SweepCfg
+from .table_param import TableParam
 from .timeline import TimelineProgramV2
 from .utils import sweep2param
 
@@ -332,6 +333,18 @@ class TimelineBuilder:
             raise ValueError(f"loop name already used: {name!r}")
         self._loop_names.add(name)
         self._initialize_actions.append(lambda prog: prog.add_loop(name, count))
+
+    def add_table_sweep(self, name: str, values: Sequence[float]) -> TableParam:
+        """Record a top-level lookup loop in outer-to-inner call order.
+
+        values must be a nonempty finite sequence in the consumer's units.
+        Return its TableParam. Duplicate/reserved names, invalid values or
+        recording after build raise ValueError.
+        """
+        self._ensure_recording()
+        param = TableParam(name, values)
+        self.add_loop(name, len(param.values))
+        return param
 
     def add_sweep(self, name: str, spec: SweepCfg) -> QickParam:
         """Record spec.expts loop points and return its uniform QICK parameter.

@@ -1,6 +1,6 @@
 """Twotone spectroscopy across the shared coil, with one native picker per Q.
 
-Recipe n → frequency.expts; flux_n → flux Expts.
+Recipe n → expts; flux_n → flux Expts.
 """
 
 from pydantic import Field
@@ -16,7 +16,7 @@ from zcu_tools.mcp.measure.recipe_contracts import (
     RecipeNeedsParameters,
 )
 
-from zcu_lab.v2.support.measure.mux_flux_adapter import MuxFluxPickSummary
+from zcu_lab.v2.support.measure.mux_results import MuxFluxPickSummary
 
 from .mux_flux_helpers import (
     MuxFluxReport,
@@ -65,10 +65,10 @@ async def mux_twotone_flux_global(
     )
     tab.set("participants", inputs.participants)
     if not isinstance(inputs.sweeps, Keep):
-        input_tones = tab.read("frequency.tones").value
+        input_tones = tab.read("tones").value
         if not isinstance(input_tones, list):
             raise RecipeNeedsParameters(
-                (MissingParameter("frequency.tones", "Full tone list is unavailable."),)
+                (MissingParameter("tones", "Full tone list is unavailable."),)
             )
         if inputs.sweeps is not None and len(inputs.sweeps) != len(input_tones):
             raise RecipeNeedsParameters(
@@ -81,10 +81,10 @@ async def mux_twotone_flux_global(
             )
         for index in range(len(input_tones)):
             tab.set(
-                f"frequency.tones.{index}.freq",
+                f"tones.{index}.freq",
                 None if inputs.sweeps is None else inputs.sweeps[index],
             )
-    tab.set("frequency.expts", inputs.n)
+    tab.set("expts", inputs.n)
     if isinstance(inputs.flux, ToneRangeInputs):
         tab.set("flux.start", inputs.flux.start)
         tab.set("flux.stop", inputs.flux.stop)

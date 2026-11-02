@@ -28,7 +28,6 @@ from zcu_tools.experiment.v2.utils.t1_sampling import materialize_nonuniform_t1_
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     DelayAuto,
-    LoadValue,
     Pulse,
     Readout,
     Reset,
@@ -194,20 +193,11 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
             builder = TimelineBuilder(
                 context.soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
             )
-            builder.add_loop("delay", len(lengths))
-            builder.emit(
-                LoadValue(
-                    "load_t1_delay",
-                    values=list(table.cycles),
-                    idx_reg="delay",
-                    val_reg="t1_delay_cycle",
-                    auto_compress=False,
-                )
-            )
+            delay = builder.add_table_sweep("delay", table.times_us.tolist())
             if cfg.reset is not None:
                 builder.emit(cfg.reset.build("reset"))
             builder.emit(Pulse("pi_pulse", cfg.pi_pulse))
-            builder.emit(DelayAuto("t1_delay", t="t1_delay_cycle"))
+            builder.emit(DelayAuto("t1_delay", t=delay))
             builder.emit(Readout("readout", cfg.readout))
             prog = builder.build()
             sched.run_acquire(

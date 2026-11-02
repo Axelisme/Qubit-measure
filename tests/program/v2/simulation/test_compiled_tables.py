@@ -12,7 +12,6 @@ from zcu_tools.program.v2.modules.pulse import Pulse, PulseCfg, TableLengthPulse
 from zcu_tools.program.v2.modules.readout import (
     PulseReadout,
     PulseReadoutCfg,
-    TablePulseReadout,
 )
 from zcu_tools.program.v2.modules.reset import (
     BathResetCfg,
@@ -177,29 +176,6 @@ def test_loadword_preserves_uint32_patterns_for_pulse_and_adc_consumers():
         assert point.events[0].frequency_mhz == pytest.approx(frequency, abs=1e-4)
         assert point.events[0].gain == pytest.approx(gain / GEN_MAXV)
         assert point.readouts[0].frequency_mhz == pytest.approx((frequency,), abs=1e-4)
-
-
-def test_table_readout_exec_after_updates_and_wrap_survive_outer_reps():
-    gen, adc = readout_freq_words(
-        load_soccfg(), [100, 250, 200], gen_ch=0, ro_ch=0, mixer_freq=None, nqz=1
-    )
-    table = TablePulseReadout(
-        "readout", receiver(), idx_reg="scan", freq_words=gen, ro_freq_words=adc
-    )
-    prog, env = module_program([table], sweep=(("scan", 3),), reps=3)
-    result = request(prog, env)
-    assert [result.materialize_point(i).events[0].source for i in range(3)] == [
-        "readout",
-        "readout",
-        "readout",
-    ]
-    assert [
-        result.materialize_point(i).events[0].frequency_mhz for i in range(3)
-    ] == pytest.approx([100, 250, 200], abs=1e-4)
-    assert [
-        result.materialize_point(i).readouts[0].frequency_mhz[0] for i in range(3)
-    ] == pytest.approx([100, 250, 200], abs=1e-4)
-    assert request(prog, env).materialize_point(0) == result.materialize_point(0)
 
 
 def test_join_preserves_readout_owner_and_author_pulse_child():

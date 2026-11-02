@@ -1,6 +1,6 @@
 """Twotone spectroscopy across zipped local DC lines, with one native picker per Q.
 
-Recipe n → frequency.expts; flux_n → flux_expts.
+Recipe n → expts; flux_n → flux_expts.
 """
 
 from pydantic import Field
@@ -16,7 +16,7 @@ from zcu_tools.mcp.measure.recipe_contracts import (
     RecipeNeedsParameters,
 )
 
-from zcu_lab.v2.support.measure.mux_flux_adapter import MuxFluxPickSummary
+from zcu_lab.v2.support.measure.mux_results import MuxFluxPickSummary
 
 from .mux_flux_helpers import (
     MuxFluxReport,
@@ -81,10 +81,10 @@ async def mux_twotone_flux_local(
             )
         for index in range(len(input_tones)):
             tab.set(
-                f"frequency.tones.{index}.freq",
+                f"tones.{index}.freq",
                 None if inputs.sweeps is None else inputs.sweeps[index],
             )
-    tab.set("frequency.expts", inputs.n)
+    tab.set("expts", inputs.n)
     if not isinstance(inputs.flux_sweeps, Keep):
         if inputs.flux_sweeps is not None and len(inputs.flux_sweeps) != len(
             input_tones

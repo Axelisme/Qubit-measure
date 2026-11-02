@@ -57,7 +57,7 @@ participants. `mux_onetone` uses the same index contract for its readout list.
 
 Both list inputs cover every original tone, including nonparticipants, in full
 group order. Neither accepts a per-tone point count. `n` sets
-`frequency.df.n` in onetone or `frequency.expts` in twotone.
+`df.n` in onetone or `expts` in twotone.
 `flux_n` sets `flux.n` globally or `flux_expts` locally.
 Range editors derive the core SweepCfg step and expts. Counts must be positive;
 a one-point scan requires equal bounds. Picking needs at least five completed
@@ -193,9 +193,12 @@ owner's current completed artifacts, not a promise of one saved pane per Q.
 The report retains earlier Q outcomes.
 
 Native data preserves tone-major three-dimensional IQ and DC/MHz coordinates.
-Labber cannot export this independent grid. Inspect per-output statuses in
-`runs`; native success and Labber failure can coexist. Recipe completion is
-not proof that every output saved.
+Labber exports this independent grid as one two-dimensional log per tone,
+slicing along the first axis and storing all logs in the same file. The reader
+returns each two-dimensional slice without reconstructing the three-dimensional
+array. Inspect per-output statuses in `runs`; outputs can fail independently,
+so native success and Labber failure can coexist. Recipe completion is not
+proof that every output saved.
 
 Adapter details and GUI paths are in the
 [onetone global](../v2/mux/onetone_flux_global/guide.md),
@@ -263,7 +266,7 @@ captured Run settings or writeback policy.
 
 | Recipe | Analysis inputs |
 | --- | --- |
-| `mux_twotone_spectrum` | `model_type`: `lor` or `sinc`; `plot_fit`: draw the fitted curve |
+| `mux_twotone_spectrum` | `model_type`: `lor` or `sinc` |
 | `mux_amp_rabi` | `skip`: points omitted before fitting |
 | `mux_len_rabi` | `decay`: fit the envelope; `fit_phase`: fit the phase offset |
 | `mux_t1` | `dual_exp`: fit two components; `skip`: points omitted before fitting |
@@ -374,7 +377,7 @@ Choose each `tones[i].drive`. Use dotted-path overrides to set MHz bounds at
 `tones[i].freq.start` and `stop`, or supply the full `sweeps` list.
 Set shared `n` for all tones. The scans advance together by point number, not through every combination
 of frequencies. Set `model_type` to `lor` or `sinc` to select the fit model.
-Set `plot_fit` to false to hide the fitted curve without changing the fit.
+The fitted curve is always shown.
 
 Successful report rows contain `freq` and `fwhm` in MHz with their errors.
 Inspect `measurement` and each `fit_i` for the peak and fit quality.
