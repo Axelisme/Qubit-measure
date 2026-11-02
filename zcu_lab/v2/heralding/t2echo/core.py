@@ -50,9 +50,10 @@ from zcu_lab.v2.twotone.time_domain.t2echo.core import T2EchoAnalyzeOptions
 
 @dataclass(frozen=True)
 class HeraldingT2EchoResult:
-    """times is the sweep grid (us); sums has shape (points, 3, 3).
+    """times is the sweep grid (us); sums has shape (points, classes, 3).
 
-    Herald states are g/e/other; components are count/sum I/sum Q.
+    Herald states follow the saved classifier's state_names order and length.
+    Components are count/sum I/sum Q.
     Unmeasured sums are NaN. Conditional means at zero count are NaN.
     true_activate_detune is run-only MHz metadata, None after native load.
     """
@@ -148,20 +149,19 @@ class HeraldingT2EchoExp(Experiment[HeraldingT2EchoResult, HeraldingT2EchoCfg]):
     def run(
         self, cfg: HeraldingT2EchoCfg, *, context: RunContext
     ) -> HeraldingT2EchoResult:
-        """Acquire (Nt, 3, 3) shot sums versus total delay in us.
+        """Acquire (Nt, classes, 3) shot sums versus total delay in us.
 
         Optional reset precedes herald. Echo is pi/2, half delay, pi, half delay,
         pi/2, signal readout. detune in MHz ramps only the final pi/2 phase.
-        Readouts share the GE Post circle classifier; classes are g/e/other.
+        Readouts share the classifier; herald states follow its state_names.
         Components are count/sum I/sum Q. Rounds add sums. Live and analyze
         select herald-g conditional IQ; zero-count means are NaN.
         Unmeasured sums remain NaN. Half-delay rounding and actual detune follow
         ordinary Echo. cfg is copied; heralding itself adds no active reset.
         """
-        if cfg.readout.classifier is None or cfg.readout.classifier.mode != "circle":
-            raise ValueError(
-                "Heralding requires a circle classifier with g/e/other; run GE Post"
-            )
+        if cfg.readout.classifier is None:
+            raise ValueError("Heralding requires a readout classifier")
+        num_states = len(cfg.readout.classifier.state_names)
         cfg = deepcopy(cfg)
         soccfg = context.soccfg
         lengths = sweep2array(cfg.delay, "time", {"soccfg": soccfg, "scaler": 0.5})
@@ -186,7 +186,7 @@ class HeraldingT2EchoExp(Experiment[HeraldingT2EchoResult, HeraldingT2EchoCfg]):
 
         fig.show()
         buffer = SignalBuffer(
-            (len(lengths), 3, 3),
+            (len(lengths), num_states, 3),
             dtype=np.float64,
             on_update=update,
         )

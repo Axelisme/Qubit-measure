@@ -48,9 +48,10 @@ from zcu_lab.v2.twotone.time_domain.t1.core import T1AnalyzeOptions
 
 @dataclass(frozen=True)
 class HeraldingT1Result:
-    """times is the sweep grid (us); sums has shape (points, 3, 3).
+    """times is the sweep grid (us); sums has shape (points, classes, 3).
 
-    Herald states are g/e/other; components are count/sum I/sum Q.
+    Herald states follow the saved classifier's state_names order and length.
+    Components are count/sum I/sum Q.
     Unmeasured sums are NaN. Conditional means at zero count are NaN.
     """
 
@@ -130,27 +131,27 @@ class HeraldingT1Exp(Experiment[HeraldingT1Result, HeraldingT1Cfg]):
     )
 
     def run(self, cfg: HeraldingT1Cfg, *, context: RunContext) -> HeraldingT1Result:
-        """Acquire (Nt, 3, 3) shot sums versus delay in us.
+        """Acquire (Nt, classes, 3) shot sums versus delay in us.
 
-        Herald classes are g/e/other; components are count/sum I/sum Q.
-        Both readouts share cfg.readout with its GE Post circle classifier.
+        Herald states follow classifier state_names.
+        Components are count/sum I/sum Q.
+        Both readouts share cfg.readout and its classifier.
         Host post-selection adds no active reset. Rounds add sums without
         normalization. Live and analyze use the herald-g conditional IQ.
         Zero-count means are NaN; unmeasured sums remain NaN.
         Linear sampling uses SweepCfg. Decay sampling uses the shared T1
         hardware-grid owner and rejects colliding points. cfg is not mutated.
         """
-        if cfg.readout.classifier is None or cfg.readout.classifier.mode != "circle":
-            raise ValueError(
-                "Heralding requires a circle classifier with g/e/other; run GE Post"
-            )
+        if cfg.readout.classifier is None:
+            raise ValueError("Heralding requires a readout classifier")
+        num_states = len(cfg.readout.classifier.state_names)
         cfg = deepcopy(cfg)
         if cfg.sampling == "linear":
-            return self._run_linear(cfg, context=context)
-        return self._run_decay(cfg, context=context)
+            return self._run_linear(cfg, num_states, context=context)
+        return self._run_decay(cfg, num_states, context=context)
 
     def _run_linear(
-        self, cfg: HeraldingT1Cfg, *, context: RunContext
+        self, cfg: HeraldingT1Cfg, num_states: int, *, context: RunContext
     ) -> HeraldingT1Result:
         """Sweep uniformly spaced free-evolution delays on the FPGA."""
         lengths = sweep2array(cfg.delay, "time", {"soccfg": context.soccfg})
@@ -164,7 +165,7 @@ class HeraldingT1Exp(Experiment[HeraldingT1Result, HeraldingT1Cfg]):
 
         fig.show()
         buffer = SignalBuffer(
-            (len(lengths), 3, 3),
+            (len(lengths), num_states, 3),
             dtype=np.float64,
             on_update=update,
         )
@@ -189,7 +190,7 @@ class HeraldingT1Exp(Experiment[HeraldingT1Result, HeraldingT1Cfg]):
         return HeraldingT1Result(lengths, buffer.array)
 
     def _run_decay(
-        self, cfg: HeraldingT1Cfg, *, context: RunContext
+        self, cfg: HeraldingT1Cfg, num_states: int, *, context: RunContext
     ) -> HeraldingT1Result:
         """Load decay-spaced delays quantized by the shared T1 grid owner."""
         delay_table = materialize_nonuniform_t1_delays(cfg.delay, soccfg=context.soccfg)
@@ -204,7 +205,7 @@ class HeraldingT1Exp(Experiment[HeraldingT1Result, HeraldingT1Cfg]):
 
         fig.show()
         buffer = SignalBuffer(
-            (len(lengths), 3, 3),
+            (len(lengths), num_states, 3),
             dtype=np.float64,
             on_update=update,
         )
