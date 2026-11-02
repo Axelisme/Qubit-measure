@@ -203,7 +203,7 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
             ls="--",
             label=f"best JPA power = {best_jpa_power:.2g} dBm",
         )
-        ax.set_xlabel("JPA Frequency (MHz)")
+        ax.set_xlabel("Power (dBm)")
         ax.set_ylabel("Signal Difference (a.u.)")
         ax.legend()
         ax.grid(True)

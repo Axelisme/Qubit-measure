@@ -1,6 +1,6 @@
 # `zcu_tools.program` — QICK integration
 
-**Last updated:** 2026-11-02，逐 channel 接線與共用 wave-port 規則
+**Last updated:** 2026-11-02，逐 channel 接線、共用 wave-port 與單 tone 讀出軸規則
 
 **讀者：** framework-dev。QICK 整合、程式建構與 acquisition 依賴速查。
 
@@ -119,10 +119,10 @@ its existing stepped-acquisition rejection. Explicit `threshold`, `angle` and
 axis contributes a one-hot vector, while `v2.IQ` contributes `(1, I, Q)`. The
 processor sums their ordered outer products over reps. Repeat a read axis to
 obtain second moments. Classify uses a detached explicit classifier or the
-readout cfg's classifier. `Classify` with `tone=None` selects a pulse readout or
-its mux readout's only tone. Multi-tone mux requires a zero-based cfg tone position
-and lists available positions on error. `IQ` still requires an explicit mux tone
-position. Pulse axes require `tone=None`. Circle requires GE Post radius and emits
+readout cfg's classifier. Both `Classify` and `IQ` with `tone=None` select a pulse
+readout or their mux readout's only tone. Multi-tone mux requires a zero-based cfg
+tone position and lists available positions on error. Pulse axes require
+`tone=None`. Circle requires GE Post radius and emits
 g/e/other; linear emits g/e; centroid3 emits g/e/f. Classification boundaries match
 `v2.modules.readout.classification_processor`.
 
