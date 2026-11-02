@@ -6,7 +6,7 @@ from pathlib import Path
 from time import monotonic
 
 import pytest
-from PyQt6.QtTest import QTest
+from qtpy.QtCore import QEventLoop, Qt, QTimer
 from qtpy.QtWidgets import QApplication, QPushButton
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
@@ -76,6 +76,17 @@ def diagnostic_window(
         qapp.processEvents()
 
 
+def _elapse(milliseconds: int) -> None:
+    """Pump Qt for a time-contract observation, not for background completion."""
+    loop = QEventLoop()
+    timer = QTimer(loop)
+    timer.setSingleShot(True)
+    timer.setTimerType(Qt.TimerType.PreciseTimer)
+    timer.timeout.connect(loop.quit)
+    timer.start(milliseconds)
+    loop.exec()
+
+
 def _notice_visible(driver: ComponentDriver) -> bool:
     return any(w.object_name == "diagnostic.notice" for w in driver.visible().widgets)
 
@@ -98,7 +109,7 @@ def test_online_remote_error_expires_and_logs_full_content(
     assert TITLE in caplog.text and MESSAGE in caplog.text
     (tmp_path / "error.log").write_text(caplog.text, encoding="utf-8")
     # Time is the product contract here: the notice must survive before expiry.
-    QTest().qWait(7000)
+    _elapse(7000)
     driver.screenshot(tmp_path / "03-before-expiry.png")
     assert _notice_visible(driver)
     qt_until(
