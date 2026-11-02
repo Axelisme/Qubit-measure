@@ -16,7 +16,7 @@ Measure 的 `TabFormResource` 擁有一份 Qt-free `FormState` 與固定來源�
 
 Library、Inspect 與 writeback 也使用 FormState／FormEditor，但各自持有 state 與提交政策，不借用 tab resource。Library 寫入持久 Spec，writeback 的 opaque draft 與 selected Apply 見 [[0008]]。舊 CfgSchema、gui.cfg、widgets.cfg 與 experiment.cfg_editing 已移除。
 
-使用者於 2026-11-02 裁定：「採用建議」。有效 Expr 初值與使用者輸入的 expression 一樣保留原文，讓初開畫面顯示 Expression 與來源公式，而非失去來源的 direct 數字。Core 仍檢查初值能否求值及被欄位接受；失敗留空，既有靜態預設與來源故障傳遞規則不變。分支初值與相容還原使用相同的 expression 表示，不新增模式或保存格式。
+使用者於 2026-11-02 裁定：「採用建議」。只有 leaf 具 Eval 能力時，有效 Expr 初值才與使用者輸入的 expression 一樣保留原文，讓初開畫面顯示 Expression 與來源公式，而非失去來源的 direct 數字。宣告 choices 的文字或數值 leaf 沒有 Eval 模式，初值沿用既有求值與 admission，保存可接受的 direct 值。這避免原本合法的初值被 choice 的 authored Expr 拒絕規則清空，不擴充 UI、result、describe 或 restore 契約。Literal、Enum、bool 與 InputPolicy 禁用 expression 的 leaf 不新增初值求值能力。Core 仍檢查初值能否求值及被欄位接受；失敗留空，既有靜態預設與來源故障傳遞規則不變。分支初值與相容還原補入的 defaults 使用相同能力分界，不新增模式或保存格式。
 
 使用者於 2026-10-25 裁定：「但我比较想是我改完就自动 apply，有隐式 apply。然后 revert 的话，感觉三个 panel 都可以有，只是 UI UX 怎么设计我还不确定。」「因为目前是 write through，所以我觉得好算了，就不做 reverse undo 功能了。」Inspect 三頁採隱式提交，不提供 revert 或 undo。
 
@@ -78,7 +78,7 @@ Open、Refresh 與 Reset 各捕捉一次 point、library、alias 表、cached de
 
 公開 `read_context(aliases=None)` 固定 point、library、storage 與全表。非空 aliases 只覆寫這次 capture 的具名列，保留 dependent authored links，不改全域表。省略、None 與 {} 使用全域列。EMPTY 且無覆寫時回 None，保留 context-free defaults，非空覆寫仍拒絕 no_context。
 
-`tab.refresh_sources(aliases=...)` 重新捕捉來源，保留全部 input data 與 explicit selections，包括有效 Expr 初值的原文與使用者填入的 direct 值，再以新來源求值與驗證。Expression 的值隨新 capture 更新，input 原文不變。缺失來源仍是欄位錯誤。`tab.reset_cfg(aliases=...)` 重新捕捉來源並以新來源重算 defaults。兩者的單次覆寫都不存入 alias 表或 memento。`tab.parameter_read` 只讀 resource.env.parameters，不收 aliases。`tab.run_start` 在任何 focus 或 operation 效果前拒絕非空 aliases，None 與 {} 使用畫面上的值與固定 capture。
+`tab.refresh_sources(aliases=...)` 重新捕捉來源，保留全部 input data 與 explicit selections，包括 Eval-capable leaf 的有效 Expr 初值原文、choice 的 direct 初值與使用者填入的 direct 值，再以新來源求值與驗證。Expression 的值隨新 capture 更新，input 原文不變。缺失來源仍是欄位錯誤。`tab.reset_cfg(aliases=...)` 重新捕捉來源並以新來源重算 defaults。兩者的單次覆寫都不存入 alias 表或 memento。`tab.parameter_read` 只讀 resource.env.parameters，不收 aliases。`tab.run_start` 在任何 focus 或 operation 效果前拒絕非空 aliases，None 與 {} 使用畫面上的值與固定 capture。
 
 RecipeSession.open_tab 的公開 aliases/reuse 用法不變。新 tab 與 reuse tab 都先 Reset，再設定參數與 Run。Target 對到 Reset 的 aliases，而非 preview 或 Run 的臨時解析。Recipe 的參數 schema 保持手寫，不從 Form 或 Python signatures 生成。
 

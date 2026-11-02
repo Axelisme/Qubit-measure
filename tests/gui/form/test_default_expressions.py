@@ -1,11 +1,19 @@
-"""Accepted expression defaults retain their text when input or branches open."""
+"""Defaults retain Expr text for Eval leaves and direct values for choices."""
 
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Annotated, Literal
 
 import pytest
 from pydantic import Field, JsonValue
-from zcu_tools.gui.form import FormEnv, FormErrors, FormInput, FormModel, FormState
+from zcu_tools.gui.form import (
+    FormEnv,
+    FormErrors,
+    FormInput,
+    FormModel,
+    FormPath,
+    FormState,
+)
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_types import (
     ContextSourceFault,
@@ -114,6 +122,110 @@ def environment(
             roles=None,
             source_faults=faults,
         )
+    )
+
+
+class NumericChoice(FormModel):
+    """A required numeric leaf accepts only the captured choices."""
+
+    level: float
+
+    @classmethod
+    def choices(cls, _env: FormEnv, /) -> Mapping[FormPath, tuple[JsonValue, ...]]:
+        """Offer only the numeric value 2.0."""
+        return {("level",): (2.0,)}
+
+    @classmethod
+    def defaults(cls, env: FormEnv) -> dict[str, JsonValue]:
+        """Derive the choice's initial value from an expression."""
+        del env
+        return {"level": {"expr": "2"}}
+
+
+def test_accepted_choice_expression_default_becomes_direct() -> None:
+    env = FormEnv()
+    initial = NumericChoice.default_input(env)
+    assert initial.data == {"level": 2.0}
+    assert FormState(initial).result(env) == NumericChoice(level=2.0)
+
+
+class StaticNumericChoice(NumericChoice):
+    """An omitted choice falls back to its static value during validation."""
+
+    level: float = 2.0
+
+
+@pytest.mark.parametrize("model", [NumericChoice, StaticNumericChoice])
+def test_nonmember_choice_expression_default_is_left_unfilled(
+    model: type[NumericChoice],
+) -> None:
+    env = FormEnv()
+    initial = model.default_input(env, defaults={"level": {"expr": "3"}})
+    assert initial.data == {}
+    result = FormState(initial).result(env)
+    if model is StaticNumericChoice:
+        assert result == StaticNumericChoice(level=2.0)
+    else:
+        assert result == FormErrors({("level",): "Field required"})
+
+
+class NestedChoice(FormModel):
+    """The enclosing model declares a choice for a nested text-field leaf."""
+
+    section: Derived
+
+    @classmethod
+    def choices(cls, _env: FormEnv, /) -> Mapping[FormPath, tuple[JsonValue, ...]]:
+        """Restrict only this occurrence of the nested leaf."""
+        return {("section", "level"): (2.0,)}
+
+    @classmethod
+    def defaults(cls, env: FormEnv) -> dict[str, JsonValue]:
+        return {"section": Derived.defaults(env)}
+
+
+def test_nested_choice_expression_default_becomes_direct() -> None:
+    env = environment(1.0)
+    initial = NestedChoice.default_input(env)
+    assert initial.data == {"section": {"kind": "derived", "level": 2.0, "offset": 0.0}}
+    assert FormState(initial).result(env) == NestedChoice(section=Derived(level=2.0))
+
+
+class ChoiceBranch(NumericChoice):
+    """A branch with local numeric choices and expression defaults."""
+
+    kind: Literal["choice"] = "choice"
+
+    @classmethod
+    def defaults(cls, env: FormEnv) -> dict[str, JsonValue]:
+        return {**super().defaults(env), "kind": "choice"}
+
+
+class ChoiceSwitching(RebuildingForm):
+    """Switching to the choice branch uses its declared defaults."""
+
+    branch_models = {("branch",): (Manual, ChoiceBranch)}
+    branch: Annotated[Manual | ChoiceBranch, Field(discriminator="kind")] = Field(
+        default_factory=Manual
+    )
+
+
+def test_branch_choice_expression_default_becomes_direct() -> None:
+    env = FormEnv()
+    state = FormState(ChoiceSwitching.default_input(env))
+    state.select(("branch",), {"kind": "choice"}, env)
+    assert state.input.data == {"branch": {"kind": "choice", "level": 2.0}}
+    assert state.result(env) == ChoiceSwitching(branch=ChoiceBranch(level=2.0))
+
+
+def test_restored_choice_expression_remains_invalid_authored_input() -> None:
+    env = FormEnv()
+    state = FormState(NumericChoice.default_input(env))
+    saved = FormInput(NumericChoice, {"level": {"expr": "2"}})
+    assert state.restore_input(saved, env) == ()
+    assert state.input.data == {"level": {"expr": "2"}}
+    assert state.result(env) == FormErrors(
+        {("level",): "Choice fields take a listed value, not an expression"}
     )
 
 

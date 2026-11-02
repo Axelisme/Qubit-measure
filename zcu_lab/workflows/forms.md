@@ -71,8 +71,8 @@ Inline module 子表單與 `input_schema` 不含 `desc`，`to_spec` 使用 Spec 
 Pure arb drive 不能改 Length-Rabi duration，回 qub_pulse consuming-field error；flat_top arb ramp 與 arb readout 保留。
 這裡不提供 gain-Rabi、time-scaling、live repository lookup 或 guessed modules。
 
-Coherence 與 MIST 的 flux_dev defaults 從固定 capture 的 $qubit.flux_dev 取得 direct literal device name。Overnight 宣告同一路徑的 expression，有效初值保留原文。
-Refresh 保留 expression 原文並以新 capture 求值。既有 direct draft 不隨 alias 修改，合法 saved input 不改。
+Coherence、MIST 與 Overnight 的 flux_dev defaults 從固定 capture 的 $qubit.flux_dev 取得 direct literal device name。
+Refresh 保留既有 direct draft，不隨 alias 或 capture 修改名稱，合法 saved input 不改。Reset 才從新 capture 重建 defaults。
 缺 capture、未綁 qubit 或缺 flux_dev 時，flux_dev 留空並顯示必填錯誤，不補造 device。
 Fake caller 明填 native；YOKO 明填 A 或 V。表單不推測單位、不轉換值、不預驗 device membership。
 Native snapshot 沿當次 capture，後續 alias 修改、Prepare 或 Save 不重解析既有 run。

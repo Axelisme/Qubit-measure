@@ -446,14 +446,21 @@ def _validate_model[F: FormModel](
 
 
 def evaluate_defaults(
-    model: type[FormModel], data: Mapping[str, JsonValue], env: FormEnv
+    model: type[FormModel],
+    data: Mapping[str, JsonValue],
+    env: FormEnv,
+    choices: Mapping[FormPath, tuple[JsonValue, ...]],
 ) -> dict[str, JsonValue]:
-    """Return detached defaults, retaining accepted Expr leaves as envelopes.
+    """Return detached defaults, keeping Eval text and direct choice values.
 
-    data is what model.defaults returned. Each text-field leaf (see
-    expression_allowed; explicitly restricted fields excluded) holding
-    exactly {"expr": text}, in model, model-list or nested/selected-branch sections, is
-    checked with env.parameters and retained as its original envelope. A leaf
+    data is what model.defaults returned. choices maps full leaf paths to the
+    options collected by the caller's source admission. Each text-field leaf
+    (see expression_allowed; explicitly restricted fields excluded) holding
+    exactly {"expr": text}, in model, model-list or nested/selected-branch
+    sections, is checked with env.parameters. Accepted defaults retain their
+    envelope unless their path has choices, which require direct JSON. This
+    defaults-only evaluation does not enable authored Expr input on choices.
+    Literal, Enum, bool and InputPolicy-restricted leaves are not evaluated. A leaf
     is removed instead when its expression raises ExpressionError (a missing
     path, an unbound alias, a non-numeric value), when its value is not finite
     JSON, or when result(env) then reports an error inside that leaf. Its
@@ -464,14 +471,14 @@ def evaluate_defaults(
     envelopes and every other value are copied unchanged. data is not edited.
     """
     evaluated = copy_object(data)
-    # Leaf path -> the object in evaluated that holds that leaf.
-    substituted: dict[FormWritePath, dict[str, JsonValue]] = {}
-    _evaluate_section(model, evaluated, env, (), substituted)
-    if not substituted:
+    # Candidate Expr path -> its parent object, for removal after admission.
+    expr_candidate_parents: dict[FormWritePath, dict[str, JsonValue]] = {}
+    _evaluate_section(model, evaluated, env, (), expr_candidate_parents, choices)
+    if not expr_candidate_parents:
         return evaluated
     checked = result(model, evaluated, env)
     if isinstance(checked, FormErrors):
-        for leaf, parent in substituted.items():
+        for leaf, parent in expr_candidate_parents.items():
             if any(path[: len(leaf)] == leaf for path in checked.messages):
                 name = leaf[-1]
                 if isinstance(name, str):
@@ -484,9 +491,10 @@ def _evaluate_section(
     data: dict[str, JsonValue],
     env: FormEnv,
     prefix: FormWritePath,
-    substituted: dict[FormWritePath, dict[str, JsonValue]],
+    expr_candidate_parents: dict[FormWritePath, dict[str, JsonValue]],
+    choices: Mapping[FormPath, tuple[JsonValue, ...]],
 ) -> None:
-    """Remove uncomputable Expr leaves and track the remaining candidates."""
+    """Prepare Expr defaults and record parents for later admission cleanup."""
     for name, value in tuple(data.items()):
         info = model.model_fields.get(name)
         if info is None:
@@ -496,11 +504,18 @@ def _evaluate_section(
         if element is not None and isinstance(value, list):
             for index, item in enumerate(value):
                 if isinstance(item, dict):
-                    _evaluate_section(element, item, env, (*path, index), substituted)
+                    _evaluate_section(
+                        element,
+                        item,
+                        env,
+                        (*path, index),
+                        expr_candidate_parents,
+                        choices,
+                    )
             continue
         child = selected(info, value)
         if child is not None and isinstance(value, dict):
-            _evaluate_section(child, value, env, path, substituted)
+            _evaluate_section(child, value, env, path, expr_candidate_parents, choices)
             continue
         text_field = expression_allowed(info, path)
         text = expr_text(value)
@@ -512,9 +527,12 @@ def _evaluate_section(
             del data[name]
             continue
         try:
-            default_json(evaluated)
+            direct = default_json(evaluated)
         except ValueError:
             # Non-finite results have no JSON value to show or store.
             del data[name]
             continue
-        substituted[path] = data
+        if path in choices:
+            # Choices accept direct defaults, not authored Expr input.
+            data[name] = direct
+        expr_candidate_parents[path] = data

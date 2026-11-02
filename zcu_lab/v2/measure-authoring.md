@@ -2,7 +2,7 @@
 
 **讀者：** lab-author、framework-dev、agent。撰寫 Measure adapter、Form、recipe、operator guide 與校準 writeback。
 
-**Last updated:** 2026-11-01
+**Last updated:** 2026-11-02
 
 使用者入口見 [tutorial](../tutorial/README.md)。
 
@@ -75,12 +75,13 @@ Adapter 以 `guide=Path(__file__).with_name("guide.md")` 宣告 operator guide�
 Run 不重新讀目前的 point、library 或 alias。所有 Run 都需要 SoC，框架不提供額外 preflight hook。
 
 Open／Reset 呼叫 `make_form(ctx)`，依固定來源建立 fresh input。Refresh 也重建 Form 定義，
-但保留 authored input、explicit selections 與已解析初值，不重新套 defaults。
+但保留 authored input、explicit selections 與既有初值，不重新套 defaults。
 `ctx.has(ref)` 用固定來源選 Slot 或 Template，缺參照回 False，來源故障 raise。
 單音 readout module 與 `module.readout` slot 由 resonator 擁有。單 qubit 表單透過 `resonator: $qubit.resonator` alias 讀取 `$resonator.module.readout`，沒有 slot 時使用 `Template("readout")`，不讀 qubit 上的舊 slot。
 既有 point 不自動遷移，需重跑 onetone/freq 並 Apply module／slot，或手動設定 `R1.module.readout` 指向有效的 library module，否則表單使用 readout 範本。
 字串是 literal，Expr 才是運算式。
-初值 expression 在建立 input 時求成 direct 值；使用者輸入的 expression 保留原文。
+初值 expression 在建立 input 時先求值並檢查欄位接受條件。具 Eval 能力的 leaf 保留原文，初開顯示 Expression；Refresh 保留原文並以新 capture 求值。
+宣告 choices 的文字或數值 leaf 沿用既有初值求值能力，以可接受的 direct 值保存，不開放 authored Expr input。Literal、Enum、bool 與 InputPolicy 禁用 expression 的 leaf 不新增初值求值能力。使用者輸入的 expression 仍保留原文交一般驗證。
 必要來源缺少時留 Invalid，不由 framework 補數字。實驗可在 `make_form` 明確選擇已定案的首次初值，見下節。Reset 重新捕捉並可換形狀，Run 使用畫面上的值。
 
 持久範本目錄由組合根以 Registry(templates=TEMPLATES) 注入，也供 Library 新建選單使用。
@@ -516,7 +517,8 @@ GUI 的 maximum search radius 預設為 `100.0`（MHz 軸時單位為 us）；�
 
 ## 校準初值政策
 
-Open／Reset 從固定 capture 產生可覆寫的 direct 初值，既有 Form 不隨來源變動重填。
+Open／Reset 從固定 capture 產生可覆寫的初值。具 Eval 能力的 leaf 保留有效 expression 原文，choice 則按既有能力保存 direct 值。
+既有 Form 不隨來源事件重填。Refresh 以新 capture 重算保留的 expression，不改 direct input；Reset 才重建 defaults。
 初值不寫回校準。Notebook 歷史常數不是相容契約。
 單一實驗的政策留在 `form.py`；多個 Form 共用的 T1／Rabi 政策由
 [`support/measure/`](support/measure/README.md) 的具名 helper 擁有。
@@ -549,7 +551,8 @@ Reps、rounds、shots、點數與其他特殊時序不因等待政策改動。
 `qub_probe` 與 `twotone/freq` 的 probe waveform.length 公允值為 1 µs，
 不依 x180／pi_len，也不新增 probe_length alias。
 
-兩種 Amplitude Rabi 的 gain 都從 −0.3 掃到 1.0，不依 x180.gain 縮放。
+Amplitude Rabi 的 gain 起點維持 −0.3。終點為 `min(1.0, multiplier * gain)`，gain 取固定 capture 的 x180.gain。
+Singleshot population 的 multiplier 為 4.0；twotone、heralding 與 mux IQ 為 1.2。終點以 Expr 保存，缺來源或求值失敗時留空。
 有 x180 且 waveform 有持久 scalar length 時，複製捕捉的 x180，
 只覆寫 waveform.length 為 1.5*pi_len*pi_gain µs。
 pi_len 為 x180 waveform.length，須為非 bool 的有限正數。
@@ -559,7 +562,7 @@ Leaf 缺失／null 或無效時，長度留空，不取絕對值、不 clamp、�
 沒有 x180 時，兩者使用同一個 qub_probe Template，明確設 gain=1 與 length=1 µs。
 
 x180 為 arb 時，Amp 保留原來源 Slot、形狀與 data，不複製、不覆寫 length，
-也不讀 asset。gain 掃描仍為 −0.3～1.0。要調長度須先換 waveform。
+也不讀 asset。gain 起點仍為 −0.3，終點沿用上述倍率與 1.0 上限。要調長度須先換 waveform。
 
 兩種 Length Rabi 都從 0.03 µs 掃到 4*pi_len。
 pi_len leaf 缺失／null 時，上限為 1 µs；值存在但無效時，上限留空。
