@@ -37,6 +37,10 @@ At each frequency coordinate, both frequencies change together.
 Individual phases remain fixed; choose relative phase with constructive_phase first.
 Only common envelope duration changes within each trace.
 
+The Form lists reset, Xπ preparation pulses, dual-line drive and readout in
+playback order, followed by captured roles. Set the outer common frequency
+sweep before the inner duration sweep. Repetitions, rounds and acquisition
+delays appear last.
 Enter finite scan endpoints and strictly positive durations.
 Review repetitions, rounds, optional reset and timing before Run.
 Refresh updates choices without overwriting authored inputs.
