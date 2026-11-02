@@ -2,7 +2,7 @@
 
 **讀者：** lab-author、agent。查找實驗的檔案分工、作者契約與各家族入口。
 
-**Last updated:** 2026-11-01，取數路徑分流與 Run metadata reader
+**Last updated:** 2026-11-02，Rabi 診斷圖由各實驗 core 擁有
 
 先從 [tutorial](../tutorial/README.md) 新增實驗，再按下列入口查契約與操作。
 實驗定義改動的驗收方式與命令範例見 [離線驗收](../README.md#實驗定義的離線驗收)。
@@ -108,8 +108,9 @@ fig.show()
 作者直接在 axes 設 ticks、顏色與標題。掃描歷史線由作者在另一個 axes 建立並更新。
 Reference marker 與動畫錄影不在這些工具中。
 
-Singleshot 的分類 IQ／區域圖在 `singleshot/plot.py`，joint-fit population／histogram／
-confusion 圖在 `singleshot/plot_rabi.py`。它們保留既有用途，分析計算仍由原分析 owner 負責。
+Singleshot 的分類 IQ／區域圖在 `singleshot/plot.py`。
+Amp／Len Rabi 在各自的 core 畫 joint-fit population、histogram 與 confusion 圖，
+分析計算仍由原分析 owner 負責。
 
 ## Mux readout 與表單初值
 

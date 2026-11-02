@@ -74,9 +74,6 @@ def test_reset_cfg_namespace_validates_and_dispatches(kind):
 
 
 class TestResetFactory:
-    def test_dispatch_none_from_none_arg(self):
-        assert Reset("r", None) is None
-
     def test_dispatch_pulse(self):
         r = Reset("r", PulseResetCfg(pulse_cfg=_make_pulse_cfg()))
         assert isinstance(r, PulseReset)

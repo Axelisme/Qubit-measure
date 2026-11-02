@@ -172,9 +172,8 @@ class HeraldingAmpRabiExp(Experiment[HeraldingAmpRabiResult, HeraldingAmpRabiCfg
                 soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
             )
             gain = builder.add_sweep("gain", cfg.gain)
-            reset = Reset("reset", cfg.reset)
-            if reset is not None:
-                builder.emit(reset)
+            if cfg.reset is not None:
+                builder.emit(Reset("reset", cfg.reset))
             builder.emit(PulseReadout("herald", cfg.readout))
             builder.emit(Pulse("init_pulse", cfg.init_pulse))
             builder.emit(Pulse("qub_pulse", cfg.qub_pulse, gain=gain))
