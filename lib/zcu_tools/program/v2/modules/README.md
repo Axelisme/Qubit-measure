@@ -1,6 +1,6 @@
 # program/v2/modules — semantic program modules
 
-**Last updated:** 2026-11-02，查表參數、時間取整與 readout phase 覆寫
+**Last updated:** 2026-11-02，原生查表掃描與 scalar lookup
 
 **讀者：** lab-author、framework-dev、agent。語意 program modules 的宣告、發射與 owner 邊界速查。
 
@@ -18,7 +18,7 @@ Each module supplies resource declaration and native lowering.
 
 ## 原生寫法
 
-Pulse、Delay、SoftDelay、DelayAuto、PulseReadout、Reset 系列、LoadValue、LoadWord、ComputedPulse、TableLengthPulse 與 MuxReadout 提供原生 lowering。
+Pulse、Delay、SoftDelay、DelayAuto、PulseReadout、Reset 系列、LoadValue、ComputedPulse 與 MuxReadout 提供原生 lowering。
 每次 `emit` 建立一個 `timeline.ModuleEmission`，保存該次原生指令與 tag。
 Module 不是 QICK Macro，不能直接交給 `append_macro`。
 同一宣告物件可重複發射，也可宣告進不同的原生 program 或 builder。
@@ -188,22 +188,18 @@ checking exact scalar re-encoding on the same profile.
   values in the signed-positive int32 range and may bit-pack small values when
   `auto_compress=True`. Use it when later semantic modules interpret the loaded
   register as an ordinary scalar, such as non-uniform delay cycles.
-- `LoadWord` represents raw uint32 register words. Its public values use the
-  `0..2^32-1` word range; storage maps those words onto the signed int32 dmem
-  representation while preserving the hardware bit pattern. It is intentionally
-  uncompressed because consumers care about the exact word loaded into a register.
 - `LoadValue.lower_index` accepts the index for the current occurrence.
   `TimelineProgramV2.emission_name` allocates occurrence-local names only during
   lowering, so repeated or nested scans do not share a counter.
-- Both loaders support native `declare`/`emit` without advancing timeline ends.
+- `LoadValue` supports native `declare`/`emit` without advancing timeline ends.
   `use_existed=True` leaves the destination declaration to the caller. An empty
-  `LoadValue` still declares its destination unless reused; an empty `LoadWord`
-  declares nothing. Neither empty loader allocates dmem or initializes a value.
+  table still declares its destination unless reused, but allocates no dmem and
+  initializes no value.
 - When a loaded value is consumed as time, the loader certifies its output range
   and the index range `0..len(values)-1`. The compiler checks all registered index
   writes, including later writes, Branch paths and loop backedges. A reset after
-  an invalid lookup cannot hide it. Non-time consumers retain their scalar or
-  raw-word contract without enabling the timing bounds checks.
+  an invalid lookup cannot hide it. Non-time consumers retain their scalar
+  contract without enabling the timing bounds checks.
 
 ## Readout configuration
 
@@ -271,25 +267,8 @@ physical simulation support.
 它依 ADC 編號查詢，不使用 tone 位置或 live library。Missing、錯型與未知 ADC 都 raise ValueError。
 Centroid3 的第三類是 f，不是 circle 的 other。需要 Other 的 consumer 須明確要求 circle。
 
-## Readout Runtime Words
+## Readout table sweeps
 
-- `PulseReadout` accepts optional `gain_val`, `freq_val`, and `ro_freq_val`
-  register names when an experiment needs per-point hardware words that cannot be
-  represented by a uniform `QickParam` sweep. The module consumes those registers
-  explicitly and patches a scratch pulse/readout config before playback; fixed
-  readout configs still use the ordinary `PulseReadoutCfg` path.
-- Runtime word support is a consumer contract, not a cfg-field contract. The
-  persistent readout cfg keeps semantic float/QickParam defaults that are valid as
-  templates; raw word ownership remains with the `LoadWord` modules that populate
-  the named registers.
-- Frequency words supplied to `freq_val` and `ro_freq_val` are the final uint32
-  hardware patterns applied to the wave frequency field. They already include
-  generator mixer lowering and the readout downconversion sign; bare `freq2reg`
-  outputs are not valid substitutes for this contract.
-- Runtime pulse/readout playback reads its fixed template from wmem, applies the
-  selected fields in `r_wave`, and sends that register bundle directly to the
-  hardware port. The runtime path does not write and immediately re-read wmem;
-  the template remains unchanged for the next sweep point.
 - For arbitrary semantic frequencies, pass the result of
   `builder.add_table_sweep("freq", freqs)` to `PulseReadout(..., freq=freq)`.
   QICK converts each value into paired generator/readout words. Native loop
@@ -297,29 +276,20 @@ Centroid3 的第三類是 f，不是 circle 的 other。需要 Other 的 consume
   including shots that do not play the readout. The final update restores the
   first point before the next outer repetition.
 
-## Runtime Pulse Length
+## Pulse length tables and selected playback
 
-- `TableLengthPulse` selects `const` or `flat_top` lengths from a table using an
-  explicit selector. Native declaration keeps one template and a generator-length
-  table. Playback resolves the actual selected waveform end, adds pre/post
-  once and ceils the aggregate once. It does not store tProcessor durations.
-- A const pulse patches the template's single `w4` length field. A flat-top pulse
-  reuses its fixed ramp entries and patches only the middle flat segment; its
-  segment WPORT writes remain contiguous.
-- Length values must be finite and strictly positive; zero fails before program
-  build. Points below the generator's three-cycle minimum also fail fast. Runtime
-  duration alignment places readout immediately after the selected pulse instead
-  of padding every point to the maximum length.
-- Parallel sequences fork from a common origin and emit on their own timelines.
-  Program `join` takes the pointwise maximum of their ends, including each
-  selected waveform and its pre/post delays. Scalar and table-backed sequences
-  use the same timeline mechanism, without a maximum-duration table.
-  Join only merges ends; `delay_by_timeline()` advances the reference when needed.
+Use `Pulse(name, cfg, length=TableParam(loop, lengths))` for const or flat-top
+length tables. Declare the loop once with `add_loop(loop, len(lengths))`, or
+use `add_table_sweep(loop, lengths)` to declare it and obtain the first table.
+Each table uses us and QICK's scalar waveform conversion at every point.
+Flat-top changes only its plateau; ramps remain fixed.
+Parallel drives can use separate tables on the same loop. Fork their timelines
+and join their pointwise ends before readout, without longest-point padding.
 
 Native `ComputedPulse` selects each candidate waveform together with its own
 post-delay. Fractional playback ends and selected posts stay separate until the
 program owner ceils their aggregate. Candidate posts may differ or use native
-sweeps. Neither selected owner pads every point to the longest entry.
+sweeps. It does not pad every point to the longest entry.
 Negative posts may put the aggregate before its origin. The physical channel end
 still guards subsequent playback. Internal offsets use signed32 cycles; register
 time consumers still require nonnegative cycles. Program owner compares raw
@@ -328,7 +298,7 @@ timeline advances consume that debt, so a compensating delay restores legal
 same-channel placement without changing the scheduled end or reference.
 
 `LoadValue.lower_selected` captures the index at the lookup position and returns
-the declared table relation. Timeline playback checks the actual address/length
+the declared table relation. Timeline playback checks the actual address
 producer against that relation. Later author selector changes do not change the
 already selected playback or its post. `ComputedPulse` shares address and capture
 storage across emissions. Each emission consumes both through playback and its

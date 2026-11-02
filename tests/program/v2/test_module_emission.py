@@ -223,8 +223,8 @@ def test_default_emit_only_moves_end_until_sync(delay_by_timeline):
     assert [s.body_end_cycle - s.start_cycle for s in shots] == [PULSE_END] * 2
 
 
-def test_shared_runtime_readout_keeps_each_programs_templates():
-    shared = _readout(freq_val="frequency", gain_val="gain", ro_freq_val="adc_word")
+def test_shared_readout_keeps_each_programs_templates():
+    shared = _readout()
     others = []
 
     def build(readout, *, padded=False, interleave=False):
@@ -232,27 +232,17 @@ def test_shared_runtime_readout_keeps_each_programs_templates():
             if padded:
                 prog.add_reg("padding")
                 prog.declare(_pulse("padding", ch=2, length=0.2))
-            for register in ("frequency", "gain", "adc_word"):
-                prog.add_reg(register)
 
         def body(prog):
             if interleave:
                 others.append(build(shared, padded=True))
-            prog.write_reg("frequency", 1000)
-            prog.write_reg("gain", 100)
-            prog.write_reg("adc_word", 2000)
             prog.emit(readout)
 
         return _program([readout], body, initialize)
 
     first = build(shared, interleave=True)
-    fresh = build(
-        _readout(freq_val="frequency", gain_val="gain", ro_freq_val="adc_word")
-    )
-    other_fresh = build(
-        _readout(freq_val="frequency", gain_val="gain", ro_freq_val="adc_word"),
-        padded=True,
-    )
+    fresh = build(_readout())
+    other_fresh = build(_readout(), padded=True)
     assert first.prog_list == fresh.prog_list
     assert _shots(first) == _shots(fresh)
     assert others[0].prog_list == other_fresh.prog_list
@@ -480,17 +470,10 @@ class _PrepareRegisters(Macro):
     """Public QICK register declarations for existing consumers."""
 
     def preprocess(self, prog):
-        for name in ("gain_word", "freq_word", "ro_freq_word", "wait_cycles"):
-            prog.add_reg(name)
+        prog.add_reg("wait_cycles")
 
     def translate(self, prog):
-        for name, value in (
-            ("gain_word", 8192),
-            ("freq_word", 12345678),
-            ("ro_freq_word", 23456789),
-            ("wait_cycles", 100),
-        ):
-            WriteReg(dst=name, src=value).translate(prog)
+        WriteReg(dst="wait_cycles", src=100).translate(prog)
 
 
 def _prepare_registers(prog):
@@ -605,66 +588,6 @@ def test_runtime_consumer_without_channels_advances_known_register_only():
         (0, 100, 100),
         (100, 200, 200),
     ]
-
-
-@pytest.mark.parametrize("timeline", [None, "read"])
-@pytest.mark.parametrize(
-    "words",
-    [
-        {"gain_val": "gain_word"},
-        {"freq_val": "freq_word"},
-        {"ro_freq_val": "ro_freq_word"},
-        {
-            "gain_val": "gain_word",
-            "freq_val": "freq_word",
-            "ro_freq_val": "ro_freq_word",
-        },
-    ],
-)
-def test_runtime_words_bind_requested_registers_to_output_fields(words, timeline):
-    readout = _readout(**words)
-
-    def body(prog):
-        if timeline is not None:
-            prog.fork("default", into=timeline)
-        prog.emit(readout, timeline=timeline)
-
-    prog = _program([readout], body, _prepare_registers)
-    # These are final hardware fields, not timing analysis or declaration identity.
-    expected = {
-        "gain_val": ("w3", "gain_word", 8192),
-        "freq_val": ("w0", "freq_word", 12345678),
-        "ro_freq_val": ("w0", "ro_freq_word", 23456789),
-    }
-    for consumer in words:
-        field, name, value = expected[consumer]
-        port = (
-            prog.soccfg["readouts"][0]["tproc_ctrl"]
-            if consumer == "ro_freq_val"
-            else prog.soccfg["gens"][1]["tproc_ch"]
-        )
-        address = "r" + str(prog.reg_dict[name].addr)
-        assert any(
-            i.get("CMD") == "REG_WR"
-            and i.get("DST") == address
-            and i.get("LIT") == f"#{value}"
-            for i in prog.prog_list
-        )
-        patches = [
-            index
-            for index, inst in enumerate(prog.prog_list)
-            if inst.get("CMD") == "REG_WR"
-            and inst.get("DST") == field
-            and inst.get("OP") == address
-        ]
-        assert patches
-        for index in patches:
-            output = next(
-                i for i in prog.prog_list[index + 1 :] if i.get("CMD") == "WPORT_WR"
-            )
-            assert (output["DST"], output["SRC"]) == (str(port), "r_wave")
-    assert [_waves(s) for s in _shots(prog)] == [[0, READ_PRE]] * 2
-    assert [s.body_end_cycle - s.start_cycle for s in _shots(prog)] == [READ_END] * 2
 
 
 @pytest.mark.parametrize("timeline", ["default", "other"])

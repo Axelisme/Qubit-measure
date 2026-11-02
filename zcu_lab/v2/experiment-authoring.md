@@ -555,9 +555,10 @@ fast-fail，不以 sorting、`unique` 或自動減點掩蓋。Direct delay list 
 contract，但不重新採樣。Singleshot `t1_with_tone` 的 zero-length 點略過 probe pulse，避免
 建立硬體不接受的 zero-cycle pulse；`t1_with_tone_sweep` 則要求完整 time axis 嚴格大於
 零，並在 device setup 前 fast-fail。其 uniform 與 non-uniform time axis 都由
-`TableLengthPulse` 在板上執行：外層 gain/frequency 維持 host scan，內層 length loop 從
-dmem 載入 pulse length 與實際 duration；const/flat-top 共用單一 wmem template，readout
-依每點真實 pulse 結束時間對齊，不把短 pulse 補到最長點。
+`Pulse("probe_pulse", cfg, length=TableParam("delay", lengths))` 在板上執行。
+外層 gain/frequency 維持 host scan，內層 delay loop 每圈從 dmem 更新下一點的 length。
+QICK 逐點轉換 const/flat-top 長度，readout 依每點真實 pulse 結束時間對齊，不把短 pulse 補到最長點。
+Mux `len_rabi` 也使用此寫法，每個參與者在同一個 point loop 上各有一張長度表。
 
 ### Sweep 參數與 cfg 的歸屬
 

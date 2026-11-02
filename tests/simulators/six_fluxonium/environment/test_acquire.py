@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 from zcu_tools.cfg_model import MuxReadoutTone
 from zcu_tools.core.simulation import RoundRequest
-from zcu_tools.program.v2.modules.dmem import LoadWord
+from zcu_tools.program.v2 import TimelineBuilder
 from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.readout import (
     MuxReadoutCfg,
@@ -15,7 +15,6 @@ from zcu_tools.program.v2.modules.readout import (
 )
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.simulation import IntegratedRound, SimulationBinding
-from zcu_tools.program.v2.utils import readout_freq_words
 from zcu_tools.simulators.six_fluxonium.config import parse_six_fluxonium
 from zcu_tools.simulators.six_fluxonium.environment import six_fluxonium
 
@@ -73,9 +72,9 @@ def mux_program(
 
 
 def pulse_program(env, frequencies, *, reps=256):
-    gen, adc = readout_freq_words(
-        env.soccfg, frequencies, gen_ch=13, ro_ch=6, mixer_freq=None, nqz=1
-    )
+    frequencies = [float(frequency) for frequency in frequencies]
+    builder = TimelineBuilder(env.soccfg, reps=reps)
+    freq = builder.add_table_sweep("axis", frequencies)
     readout = PulseReadoutCfg(
         gen_ch=13,
         ro_ch=6,
@@ -85,16 +84,9 @@ def pulse_program(env, frequencies, *, reps=256):
         waveform=ConstWaveformCfg(length=0.064),
         ro_length=0.026,
     )
-    return compile_modules(
-        env.soccfg,
-        modules=[
-            LoadWord("gen", gen, "axis", "gen_word"),
-            LoadWord("adc", adc, "axis", "adc_word"),
-            PulseReadout("pulse", readout, freq_val="gen_word", ro_freq_val="adc_word"),
-        ],
-        sweep=[("axis", len(frequencies))],
-        reps=reps,
-    )
+    builder.emit(PulseReadout("pulse", readout, freq=freq))
+    builder.delay_by_timeline()
+    return builder.build()
 
 
 def scalar_cavity_means(env, channel, cavity_indices):

@@ -299,11 +299,9 @@ class Readout:
 
 @dataclass(frozen=True)
 class _ReadoutDeclaration:
-    """Optional register-driven generator template and ADC configuration name."""
+    """Program-owned ADC configuration name."""
 
     adc_name: str
-    runtime_pulse: Pulse | None
-    runtime_ro_name: str | None
 
 
 class PulseReadout(AbsReadout):
@@ -312,7 +310,7 @@ class PulseReadout(AbsReadout):
     Timeline completion is generator end plus post-delay once. ADC integration
     stays on its channel, independent of the author timeline, until shot closure.
     A later timeline trigger on that ADC must prove the previous window complete.
-    Same-named instances receive separate program-owned ADC/runtime templates;
+    Same-named instances receive separate program-owned ADC templates;
     adc_name(prog) returns the declared ADC name. A zero gain suppresses output
     amplitude, not generator timing or ADC acquisition. Mutually exclusive
     same-named emissions may share a shot_sums label when their ADC settings,
@@ -325,18 +323,11 @@ class PulseReadout(AbsReadout):
         self,
         name: str,
         cfg: PulseReadoutCfg,
-        *,
-        gain_val: str | None = None,
-        freq_val: str | None = None,
-        ro_freq_val: str | None = None,
         **overrides: Unpack[PulseReadoutOverrides],
     ) -> None:
-        """Capture a flat readout and optional hardware-word register inputs.
+        """Capture a flat readout and semantic scalar/sweep overrides.
 
         name identifies ADC and pulse templates. cfg is copied and not mutated.
-        gain_val names a hardware gain-word register; freq_val/ro_freq_val are
-        paired generator/ADC frequency-word registers, already lowered for mixer
-        and downconversion sign. Unspecified registers use cfg scalar/sweep values.
         freq (MHz), gain (normalized), phase (degrees), length and ro_length (us) override the
         copied cfg via set_param. None keeps cfg; unsupported waveform length
         sweeps raise ValueError. TableParam ro_length raises NotImplementedError.
@@ -350,9 +341,6 @@ class PulseReadout(AbsReadout):
             raise NotImplementedError(
                 "ro_length does not support TableParam ADC windows"
             )
-        self.gain_val = gain_val
-        self.freq_val = freq_val
-        self.ro_freq_val = ro_freq_val
         pulse_cfg = self.cfg.to_pulse_cfg()
         self.pulse = Pulse(name=f"{name}_pulse", cfg=pulse_cfg, ro_ch=self.cfg.ro_ch)
 
@@ -381,30 +369,7 @@ class PulseReadout(AbsReadout):
             freq=self.cfg.freq,
             gen_ch=self.cfg.gen_ch,
         )
-        runtime_pulse = None
-        runtime_ro_name = None
-        if self._uses_runtime_pulse:
-            pulse_name = prog.allocate_template_name(f"{self.name}_runtime_pulse")
-            runtime_pulse = Pulse(
-                name=pulse_name,
-                cfg=self.pulse.cfg,
-                ro_ch=self.cfg.ro_ch,
-                pulse_id=pulse_name,
-            )
-            declare_pulse(runtime_pulse)
-        if self.ro_freq_val is not None:
-            runtime_ro_name = prog.allocate_template_name(f"{self.name}_adc_runtime")
-            prog.add_readoutconfig(
-                ch=self.cfg.ro_ch,
-                name=runtime_ro_name,
-                freq=self.cfg.freq,
-                gen_ch=self.cfg.gen_ch,
-            )
-        return _ReadoutDeclaration(adc_name, runtime_pulse, runtime_ro_name)
-
-    @property
-    def _uses_runtime_pulse(self) -> bool:
-        return self.gain_val is not None or self.freq_val is not None
+        return _ReadoutDeclaration(adc_name)
 
     def declare(self, prog: TimelineProgramV2) -> None:
         """Declare generator/ADC templates on prog before emission."""
@@ -423,39 +388,12 @@ class PulseReadout(AbsReadout):
         Declaration and QICK timing errors propagate.
         """
         timeline = timeline if timeline is not None else "default"
-        state = prog.get_module_state(self, _ReadoutDeclaration)
         prog.append_macro(ReadoutEmission(self, self.cfg.ro_ch, tag))
-        if self.ro_freq_val is None:
-            prog.send_readoutconfig(
-                self.cfg.ro_ch, self.adc_name(prog), t=0, tag=tag, timeline=timeline
-            )
-        else:
-            runtime_ro_name = state.runtime_ro_name
-            if runtime_ro_name is None:
-                raise ValueError(f"{self.name}: runtime ADC template is not declared")
-            prog.send_readoutconfig_from_regs(
-                self.cfg.ro_ch,
-                runtime_ro_name,
-                t=0,
-                tag=tag,
-                freq_reg=self.ro_freq_val,
-                timeline=timeline,
-            )
+        prog.send_readoutconfig(
+            self.cfg.ro_ch, self.adc_name(prog), t=0, tag=tag, timeline=timeline
+        )
         prog.trigger([self.cfg.ro_ch], t=self.cfg.trig_offset, timeline=timeline)
-        if self._uses_runtime_pulse:
-            runtime_pulse = state.runtime_pulse
-            if runtime_pulse is None:
-                raise ValueError(f"{self.name}: runtime pulse template is not declared")
-            prog.pulse_from_regs(
-                self.cfg.gen_ch,
-                runtime_pulse.pulse_name(prog),
-                t=self.cfg.pre_delay,
-                freq_reg=self.freq_val,
-                gain_reg=self.gain_val,
-                timeline=timeline,
-            )
-        else:
-            self.pulse.play(prog, timeline=timeline)
+        self.pulse.play(prog, timeline=timeline)
         prog.timeline_inc(self.cfg.post_delay, timeline=timeline)
 
 

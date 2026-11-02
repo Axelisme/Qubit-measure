@@ -25,10 +25,10 @@ from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     IQ,
-    GainSweep,
     Pulse,
     PulseReadout,
     Reset,
+    SweepCfg,
     TimelineBuilder,
     shot_sums,
 )
@@ -56,7 +56,7 @@ class PowerCfg(ConfigBase):
     reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
     qub_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Qubit pi pulse")]
     readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
-    gain: Annotated[GainSweep, FieldMeta(label="Gain", unit="a.u.")]
+    gain: Annotated[SweepCfg, FieldMeta(label="Gain", unit="a.u.")]
     wait: Annotated[float, FieldMeta(label="Wait", unit="us", decimals=3)] = Field(
         default=0.0, ge=0.0
     )

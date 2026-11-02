@@ -15,7 +15,6 @@ from zcu_tools.program.v2.modules import (
     ComputedPulse,
     DelayAuto,
     LoadValue,
-    LoadWord,
     PulseCfg,
 )
 from zcu_tools.program.v2.modules.readout import MuxReadoutCfg, PulseReadoutCfg
@@ -150,8 +149,8 @@ def test_fractional_native_adc_tail_never_rounds_below_physical_end():
 
 
 @pytest.mark.parametrize("relax_cycles", [9, 10])
-def test_loadword_overwrite_keeps_exact_table_tail_and_relax_guard(relax_cycles):
-    loader = LoadWord("words", [10, 20], "index", "duration", use_existed=True)
+def test_lookup_overwrite_keeps_exact_table_tail_and_relax_guard(relax_cycles):
+    loader = LoadValue("times", [10, 20], "index", "duration", use_existed=True)
 
     class Program(TimelineProgramV2):
         def _initialize(self, cfg):
