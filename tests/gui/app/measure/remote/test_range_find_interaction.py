@@ -67,10 +67,10 @@ def test_mcp_edits_and_finish_preserve_final_controls_selection_and_mapping(
                     prominence_factor=5.0,
                     max_fwhm=20.0,
                     min_separation=2.0,
-                    max_dips=1,
                 ),
             )
-            assert len(changed["state"]["selected"]) == 1
+            assert len(changed["state"]["selected"]) == 2
+            interact("remove_dip", {"index": 1})
             interact("remove_dip", {"index": 0})
             interact("add_dip", {"frequency": 5040})
             changed = interact("assign_dip", {"index": 0, "component": "east"})
@@ -95,7 +95,7 @@ def test_mcp_edits_and_finish_preserve_final_controls_selection_and_mapping(
                 prominence_factor=5.0,
                 max_fwhm=20.0,
                 min_separation=2.0,
-                max_dips=1,
+                max_dips=2,
             )
             assert summary["selected"] == [
                 {"freq": 5040.0, "component": "east", "estimate": None}

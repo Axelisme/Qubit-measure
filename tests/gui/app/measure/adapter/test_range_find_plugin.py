@@ -4,8 +4,11 @@ from collections.abc import Iterator
 
 import numpy as np
 import pytest
-from zcu_tools.analysis.dips import DipFinderOptions
-from zcu_tools.gui.app.measure.range_find_plugin import RangeFindPlugin, RangeFindState
+from zcu_tools.gui.app.measure.range_find_plugin import (
+    RangeFindParameters,
+    RangeFindPlugin,
+    RangeFindState,
+)
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.interactive import Session
 from zcu_tools.gui.session.adapters.manual_owner_scheduler import ManualOwnerScheduler
@@ -22,12 +25,40 @@ def picker() -> Iterator[
         freqs,
         magnitude,
         components=("west", "east"),
-        options=DipFinderOptions(max_dips=2),
+        parameters=RangeFindParameters(prominence_factor=5.0),
         build_result=lambda state: state,
     )
     session = plugin.open(ManualOwnerScheduler())
     try:
         yield plugin, session
+    finally:
+        session.dispose()
+
+
+@pytest.mark.parametrize("components", [("dip1",), ("west", "east")])
+def test_automatic_guess_uses_caller_name_count(components):
+    freqs = np.arange(101, dtype=np.float64) + 5000
+    magnitude = 1 + 0.001 * np.sin(np.arange(101, dtype=np.float64))
+    magnitude[20], magnitude[70] = 0.3, 0.5
+    plugin = RangeFindPlugin(
+        freqs, magnitude, components=components, build_result=lambda state: state
+    )
+    session = plugin.open(ManualOwnerScheduler())
+    try:
+        assert len(session.snapshot().selected) == len(components)
+        plugin.execute_command(
+            session,
+            "set_parameters",
+            {
+                "smoothing_sigma": 0.0,
+                "prominence_factor": None,
+                "max_fwhm": 24.0,
+                "min_separation": 1.0,
+            },
+        )
+        assert len(session.snapshot().selected) == len(components)
+        assert session.snapshot().options.max_fwhm == 24.0
+        assert session.snapshot().parameters.prominence_factor is None
     finally:
         session.dispose()
 
@@ -45,7 +76,6 @@ def test_initial_guess_selects_narrow_dips_and_pairs_caller_labels(picker):
 @pytest.mark.parametrize(
     ("changed", "expected"),
     [
-        ({"max_dips": 1}, [5020]),
         ({"min_separation": 60.0}, [5020]),
         ({"max_fwhm": 0.5}, []),
         ({"prominence_factor": 1e8}, []),
@@ -61,7 +91,6 @@ def test_parameter_commands_recompute_the_shared_automatic_guess(
         prominence_factor=5.0,
         max_fwhm=25.0,
         min_separation=1.0,
-        max_dips=2,
     )
     args.update(changed)
     plugin.execute_command(session, "set_parameters", args)

@@ -7,7 +7,9 @@ from .compiled_timing import (
     TimingEvent,
     TimingLayout,
     TimingLoop,
+    WaveWords,
     analyze_timing,
+    compiled_wmem,
 )
 
 __all__ = [
@@ -20,5 +22,7 @@ __all__ = [
     "TimingEvent",
     "TimingLayout",
     "TimingLoop",
+    "WaveWords",
     "analyze_timing",
+    "compiled_wmem",
 ]

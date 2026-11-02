@@ -5,7 +5,6 @@ from zcu_tools.program.v2.modules.readout import (
     PulseReadout,
     PulseReadoutCfg,
     Readout,
-    TablePulseReadout,
 )
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 
@@ -78,28 +77,6 @@ class TestReadoutFactory:
     def test_name_set(self):
         ro = Readout("myro", _make_pulse_ro_cfg())
         assert ro.name == "myro"
-
-
-class TestTablePulseReadout:
-    def test_rejects_empty_tables(self) -> None:
-        with pytest.raises(ValueError, match="at least one"):
-            TablePulseReadout(
-                "ro",
-                _make_pulse_ro_cfg(),
-                idx_reg="freq",
-                freq_words=[],
-                ro_freq_words=[],
-            )
-
-    def test_rejects_mismatched_table_lengths(self) -> None:
-        with pytest.raises(ValueError, match="equal length"):
-            TablePulseReadout(
-                "ro",
-                _make_pulse_ro_cfg(),
-                idx_reg="freq",
-                freq_words=[1, 2],
-                ro_freq_words=[3],
-            )
 
 
 @pytest.mark.parametrize("flat_top", [False, True])

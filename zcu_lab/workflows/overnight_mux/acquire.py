@@ -9,7 +9,7 @@ from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.v2.runtime import RunOptions, Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.experiment.v2.utils.t1_sampling import materialize_nonuniform_t1_delays
-from zcu_tools.program.v2 import DelayAuto, LoadValue, Reset, TimelineBuilder
+from zcu_tools.program.v2 import DelayAuto, Reset, TimelineBuilder
 from zcu_tools.program.v2.modules import MuxReadout, Pulse
 
 from zcu_lab.v2.mux.t1.core import MuxT1Cfg, MuxT1Result
@@ -131,16 +131,7 @@ def _run_t1_decay(cfg: MuxT1Cfg, *, context: RunContext, retry: int) -> MuxT1Res
             initial_delay=cfg.initial_delay,
             relax_delay=cfg.relax_delay,
         )
-        builder.add_loop("delay_idx", len(table.cycles))
-        builder.emit(
-            LoadValue(
-                "load_t1_delay",
-                values=list(table.cycles),
-                idx_reg="delay_idx",
-                val_reg="t1_delay_cycle",
-                auto_compress=False,
-            )
-        )
+        delay = builder.add_table_sweep("delay_idx", table.times_us.tolist())
         if cfg.reset is not None:
             builder.emit(Reset("reset", cfg.reset))
         timelines = [f"drive_{index}" for index in indices]
@@ -151,9 +142,9 @@ def _run_t1_decay(cfg: MuxT1Cfg, *, context: RunContext, retry: int) -> MuxT1Res
                 timeline=timeline,
             )
         builder.join(*timelines, into="default")
-        # Start the register delay after the full pulse branches, including post.
+        # Start the shared delay after the full pulse branches, including post.
         builder.delay_by_timeline()
-        builder.emit(DelayAuto("t1_delay", t="t1_delay_cycle"))
+        builder.emit(DelayAuto("t1_delay", t=delay))
         readout_module = MuxReadout("readout", readout)
         builder.emit(readout_module)
         prog = builder.build()
