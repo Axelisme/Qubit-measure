@@ -33,7 +33,9 @@ Both pulses need matching frequency, duration and pre-delay on independent
 generators. Their post-delays may differ; the sequence waits for both.
 Only the two charge lines are driven. The coupler stays DC-biased.
 
-Enter a finite, nonnegative, strictly increasing common gain-scale range.
+Both Forms list reset, F1/F2 Xπ, dual-line drive and mux readout first.
+Captured roles, the `scale` sweep and acquisition settings follow.
+Enter a finite, nonnegative, strictly increasing common gain-scale range in `scale`.
 The scan multiplies both original signed gains by that scale.
 Frequency, waveform, duration, relative phase and signed gain ratio stay fixed.
 Set Reps, Rounds and relaxation time for the acquisition budget.
@@ -109,6 +111,8 @@ Counts remain unnormalized. Storage does not grow with the shot count.
 Unmeasured scales are NaN. Cancellation retains completed rounds.
 
 Native Load restores the saved counts and cfg without changing current Form inputs.
+The cfg schema is 5.0. Older cfgs using `scales` do not restore.
+Their saved counts and axes still load and can be plotted, but fitting requires cfg.
 Analysis never looks up current calibrations. Missing saved cfg prevents the fit.
 Old per-shot IQ files without sums are rejected; there is no automatic conversion.
 `stop_requested` records a stop request, not data completeness.
