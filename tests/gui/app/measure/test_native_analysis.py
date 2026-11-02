@@ -629,7 +629,7 @@ class UnsupportedFit:
 
 
 @pytest.mark.parametrize("post", [False, True])
-def test_unsupported_native_field_is_a_public_rpc_and_save_error(
+def test_unsupported_native_field_fails_analysis_before_publication(
     host: Host,
     post: bool,
 ) -> None:
@@ -641,17 +641,17 @@ def test_unsupported_native_field_is_a_public_rpc_and_save_error(
     else:
         host.producer.pending.append(UnsupportedFit(object()))
         token = host.invoke("tab.analyze")["operation_id"]
-    host.wait(token)
-    method = "tab.get_post_analyze_result" if post else "tab.get_analyze_result"
-    reply = host.reply(method, operation_id=token)
-    assert not reply.ok
-    assert "summary.payload" in str(reply.error)
-    assert "object" in str(reply.error)
-    with pytest.raises(TypeError, match=r"summary\.payload.*object"):
-        host.controller.save_control.save_artifacts(
-            host.tab,
-            artifacts=(
-                ArtifactRef("post_analysis" if post else "analysis", "results"),
-            ),
-            origin=CommandOrigin("gui"),
-        )
+    assert isinstance(token, int)
+    control = host.controller.operation_control
+    qt_until(lambda: control.await_operation(token, 0).reason == "completed")
+    outcome = control.await_operation(token, 0).outcome
+    assert outcome is not None and outcome.status == "failed"
+    assert outcome.error is not None
+    assert "summary.payload" in outcome.error
+    assert "object" in outcome.error
+    pane = (
+        host.state.get_tab(host.tab).post_analysis
+        if post
+        else host.state.get_tab(host.tab).analysis
+    )
+    assert pane.result is None

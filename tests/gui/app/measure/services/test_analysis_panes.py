@@ -172,7 +172,7 @@ def test_analyze_publishes_result_from_captured_inputs() -> None:
     new_ctx = SessionEnv(parameters=parameter_capture(), soc=None, soccfg=None)
     state.set_context(new_ctx)
     state.get_tab(tab_id).run.result = RunRecord(None, "changed-after-start")
-    result = object()
+    result = {}
     bg.on_done(result)
 
     request = adapter.get_writeback_items.call_args.args[0]

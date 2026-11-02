@@ -41,11 +41,40 @@ from tests.gui.app.measure.services._analyze_support import (
 from tests.gui.session.ui._parameter_fakes import make_parameters
 
 
+def test_oversized_analysis_fails_before_replacing_previous_result(qapp):
+    state = make_state()
+    previous = {"frequency": 1.0}
+    commit_analysis(state, "tab1", AnalysisPaneState(result=previous))
+    adapter = MagicMock()
+    adapter.analyze.return_value = {"gg": {"excitation": list(range(65))}}
+    state.get_tab("tab1").adapter = adapter
+    handles = OperationHandles()
+    svc, bg = make_service(state, EventBus(), handles=handles)
+    failed: list[tuple[str, str]] = []
+    on_analyze_failed(svc, lambda tid, err: failed.append((tid, err)))
+
+    plots = make_plots()
+    token = svc.start_analyze("tab1", None, plots=plots)
+    assert bg.last_work is not None and bg.last_on_done is not None
+    bg.last_on_done(bg.last_work())
+
+    outcome = handles.poll(token)
+    assert outcome is not None and outcome.status == "failed"
+    assert outcome.error is not None and "summary.gg.excitation" in outcome.error
+    assert len(failed) == 1 and "summary.gg.excitation" in failed[0][1]
+    with pytest.raises(RuntimeError, match="Plot operation has finished"):
+        plots.ensure_active()
+    assert state.get_tab("tab1").analysis.result is previous
+    assert not state.get_tab("tab1").is_analyzing
+    assert handles.live_count() == 0
+
+
 @pytest.mark.parametrize("phase", ["work", "record"])
 @pytest.mark.parametrize("error_type", [AnalysisFailed, ValueError])
 def test_analyze_errors_settle_failed_with_original_message(qapp, phase, error_type):
     state = make_state()
     adapter = MagicMock()
+    adapter.analyze.return_value = {}
     state.get_tab("tab1").adapter = adapter
     error = error_type("analysis could not produce a result")
     if phase == "work":
@@ -104,6 +133,7 @@ def test_historical_analyze_uses_run_capture_after_alias_and_parameter_edits(
     ).bind_aliases((AliasRow("qubit", "Q2"),), {})
     state.session_env = replace(state.session_env, parameters=current)
     adapter = MagicMock()
+    adapter.analyze.return_value = {}
     state.get_tab("tab1").adapter = adapter
     svc, bg = make_service(state, EventBus())
     svc.start_analyze("tab1", analyze_params_instance=object(), plots=make_plots())
@@ -225,8 +255,7 @@ def test_finished_analysis_keeps_captured_inputs_across_later_edits(qapp):
         "tab1", analyze_params_instance=supplied, plots=make_plots()
     )
     state.update_tab_analyze_param_instance("tab1", {"threshold": 0.7})
-    result = MagicMock()
-    result.figure = None
+    result = {}
     assert bg.last_on_done is not None
     bg.last_on_done(result)
     supplied["threshold"] = 0.5
@@ -248,7 +277,7 @@ def test_on_analyze_finished_updates_state(qapp):
         "tab1", analyze_params_instance=object(), plots=make_plots()
     )
 
-    fake_result = object()
+    fake_result = {}
 
     finished_signals: list[tuple[str, object]] = []
     bus.subscribe(
@@ -285,7 +314,7 @@ def test_on_analyze_finished_emits_interaction_event(qapp):
 
     svc.start_analyze("tab1", analyze_params_instance=object(), plots=make_plots())
 
-    fake_result = object()
+    fake_result = {}
     assert bg.last_on_done is not None
     bg.last_on_done(fake_result)
 
@@ -359,7 +388,7 @@ def test_two_tabs_settle_their_own_tokens(qapp):
     assert handles.live_count() == 2
 
     # Finish tab1 only: its token settles, tab2's stays live.
-    r1 = object()
+    r1 = {}
     assert on_done_1 is not None
     on_done_1(r1)
 
@@ -371,7 +400,7 @@ def test_two_tabs_settle_their_own_tokens(qapp):
     assert handles.live_count() == 1
 
     # Finish tab2: its own (later) token settles.
-    r2 = object()
+    r2 = {}
     assert on_done_2 is not None
     on_done_2(r2)
 
@@ -398,7 +427,7 @@ def test_on_analyze_finished_post_processing_raise_settles_failed(qapp):
     failed: list[tuple[str, str]] = []
     on_analyze_failed(svc, lambda tid, err: failed.append((tid, err)))
 
-    result = object()
+    result = {}
     # Must not raise out of the slot (would crash Qt).
     assert bg.last_on_done is not None
     bg.last_on_done(result)

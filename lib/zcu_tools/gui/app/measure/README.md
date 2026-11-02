@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure`
 
-**Last updated:** 2026-11-01, neutral run metadata and GUI run stop terminal
+**Last updated:** 2026-11-02, analysis summary size limit
 
 **讀者：** framework-dev。量測 GUI 的組裝、分頁、tab admission 與 Run／Load／Save 分工。
 
@@ -68,6 +68,16 @@ They need no serializer or result base class. `summary.summarize_analysis(result
 uses declared field names and converts arrays to lists and complex values to
 `{real, imag}` objects. Non-finite values become null. Unsupported fields or root
 values raise TypeError with their summary path.
+
+Analysis return values are summaries whose size is at most O(log N), where N
+is the scan point or shot count. Return fitted results, scalars, fixed-size small
+values, or one result per tone/qubit. Keep arrays that grow with scan points or
+shots local to analyze for plotting. Each ndarray, list or tuple may contain at
+most 64 flattened elements. Larger values raise ValueError naming the field
+path, element count, limit and rule. The 64-element limit is a check, not
+permission to return O(N) data while N is small.
+Primary, interactive and post-analysis validate the summary before publishing
+the result. Violations fail that analysis and retain its previous pane.
 
 Save, live RPC and MCP use this converter without translating keys. Live RPC
 reports non-finite paths in its existing `invalid` envelope. Historical analysis

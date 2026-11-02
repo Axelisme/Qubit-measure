@@ -33,6 +33,9 @@ class AnalysisSummary:
     invalid: tuple[SummaryIssue, ...]
 
 
+MAX_SUMMARY_ELEMENTS = 64
+
+
 def summarize_analysis(result: object) -> AnalysisSummary:
     """Project a result object by field name, starting at path ``summary``.
 
@@ -43,7 +46,11 @@ def summarize_analysis(result: object) -> AnalysisSummary:
     scalars, and complex numbers become real/imag objects. Non-finite numbers
     become null with a SummaryIssue. Custom serializers and to_summary_dict
     are never called. Unsupported nested values or non-string keys raise
-    TypeError naming their path. The input is not modified.
+    TypeError naming their path. Each list, tuple or non-scalar numpy array
+    may contain at most MAX_SUMMARY_ELEMENTS (64) flattened elements; larger
+    values raise ValueError with the path, count, limit and authoring rule.
+    Analysis return values must not grow with scan size. Scalar arrays are
+    unaffected. The input is not modified.
     """
     invalid: list[SummaryIssue] = []
     projected: JsonObject = {
@@ -81,7 +88,22 @@ def _field_values(value: object, path: str) -> Mapping[str, object]:
     raise TypeError(f"{path}: unsupported value type {type(value).__name__}")
 
 
+def _element_count(value: object) -> int:
+    if isinstance(value, np.ndarray):
+        return value.size
+    if isinstance(value, (list, tuple)):
+        return sum(_element_count(item) for item in value)
+    return 1
+
+
 def _project(value: object, path: str, invalid: list[SummaryIssue]) -> JsonValue:
+    if isinstance(value, (np.ndarray, list, tuple)):
+        count = _element_count(value)
+        if count > MAX_SUMMARY_ELEMENTS:
+            raise ValueError(
+                f"{path}: {count} elements exceeds limit {MAX_SUMMARY_ELEMENTS}; "
+                "analysis return values must not grow with scan size"
+            )
     value = _numpy_value(value)
     if value is None or isinstance(value, (str, bool, int)):
         return value

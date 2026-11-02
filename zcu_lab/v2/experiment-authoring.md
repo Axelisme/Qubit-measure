@@ -276,6 +276,19 @@ curve = fit.curve
 params, covariance, quality = fit.params, fit.cov, fit.quality
 ```
 
+### Analysis 回傳值只放摘要
+
+Analysis 回傳值的大小最多 O(log N)，N 是掃描點數或 shot 數。
+可放擬合結果、純量、尺寸固定的小值，或每個 tone／qubit 一筆的結果。
+隨掃描點數或 shot 數成長的陣列只在 analyze 內用來畫圖，不放進回傳值。
+只發布圖的分析回傳 None。
+
+GUI 在 primary、interactive 與 post-analysis 發布結果前呼叫 `summarize_analysis`。
+任一 ndarray、list 或 tuple 攤平後超過 64 個元素會 raise ValueError。
+訊息包含欄位路徑、元素數、上限與不能隨掃描大小成長的規則。
+GUI 將違規顯示為該次分析的錯誤。存檔與 RPC 沿用同一個轉換函式。
+64 是檢查上限，不代表 O(N) 的資料在少於 64 個元素時就合規。
+
 ### 來源選擇與分類 read axis
 
 在 `make_form(ctx)` 用 `source(ctx, path, template)` 選來源。

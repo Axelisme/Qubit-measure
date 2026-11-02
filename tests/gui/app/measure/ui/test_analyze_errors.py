@@ -33,24 +33,31 @@ from tests.gui.app.measure._synthetic import (
 from tests.program._profiles import load_soccfg
 
 
-@pytest.mark.parametrize("error_type", [AnalysisFailed, ValueError, None])
+@pytest.mark.parametrize("error_type", [AnalysisFailed, ValueError, None, "oversized"])
 def test_analyze_shows_errors_and_publishes_returns(
-    qapp: QApplication, tmp_path: Path, error_type: type[Exception] | None
+    qapp: QApplication, tmp_path: Path, error_type: type[Exception] | str | None
 ) -> None:
-    message = "Synthetic analysis could not produce a result"
+    message = (
+        "summary.excitation: 65 elements exceeds limit 64; "
+        "analysis return values must not grow with scan size"
+        if error_type == "oversized"
+        else "Synthetic analysis could not produce a result"
+    )
 
     def analyze(
         req: AnalyzeRequest[RunRecord[SampleCfg, SampleResult], SampleParams],
         *,
         plots: Plots,
-    ) -> SampleAnalysis:
-        if error_type is not None:
+    ) -> SampleAnalysis | dict[str, list[int]]:
+        if isinstance(error_type, type):
             raise error_type(message)
         _, axes = plots.subplots(num="fit")
         axes.plot([0, 1], [0.1, 0.3], label="Synthetic fit")
         axes.set_xlabel("Sample")
         axes.set_ylabel("Signal")
         axes.legend()
+        if error_type == "oversized":
+            return {"excitation": list(range(65))}
         return SampleAnalysis(peak=0.3)
 
     registry = Registry()
@@ -82,7 +89,13 @@ def test_analyze_shows_errors_and_publishes_returns(
     window.show()
     qapp.processEvents()
     ui = ComponentDriver(window)
-    scenario = error_type.__name__ if error_type else "success"
+    scenario = (
+        error_type
+        if isinstance(error_type, str)
+        else error_type.__name__
+        if error_type
+        else "success"
+    )
     evidence = Path(os.environ.get("ANALYZE_ERROR_EVIDENCE", str(tmp_path))) / scenario
     try:
         ui.screenshot(evidence / "01-ready.png")
