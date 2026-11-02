@@ -146,7 +146,9 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
     def _make_asm(self) -> None:
         # Native loop discovery shares rotated DMEM offsets with its closing shell.
         self.loop_wave_tables: dict[str, dict[int, dict[int, int]]] = {}
-        self.loop_register_tables: dict[str, dict[str, dict]] = {}
+        self.loop_register_tables: dict[
+            str, dict[str, dict[str, int | tuple[int, ...]]]
+        ] = {}
         loop_counts = {loop.name: loop.count for loop in self.sweep_loops}
         for wave in self.waves:
             for raw in wave.sweeps():
