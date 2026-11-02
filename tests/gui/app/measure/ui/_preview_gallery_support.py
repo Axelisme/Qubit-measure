@@ -47,7 +47,7 @@ def renderer_640x480(_fig: object) -> bytes:
 
 def framed_renderer(figure: Figure) -> bytes:
     """Render a 4:3 white raster with a coloured perimeter supplied by its label."""
-    image = Image.new("RGB", (640, 480), figure.get_label())
+    image = Image.new("RGB", (640, 480), str(figure.get_label()))
     draw = ImageDraw.Draw(image)
     draw.rectangle((16, 16, 623, 463), fill="white")
     draw.line((32, 448, 320, 32, 608, 448), fill="#333333", width=4)

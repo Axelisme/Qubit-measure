@@ -453,7 +453,7 @@ def test_gallery_member_rasters_fit_after_resize(
                 mask = (
                     ImageChops.difference(image, Image.new("RGB", image.size, colour))
                     .convert("L")
-                    .point(lambda value: 255 if value == 0 else 0)
+                    .point([255] + [0] * 255)
                 )
                 bounds = mask.getbbox()
                 assert bounds is not None, f"{key} member {index} raster disappeared"
