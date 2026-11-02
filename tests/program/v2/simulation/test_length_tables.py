@@ -246,11 +246,25 @@ def test_consecutive_native_auto_followers_match_scalar_timestamps(
     flat, branch, outer, followers
 ):
     values = [0.2, 0.107, 0.213]
-    options = dict(flat=flat, branch=branch, auto=True, followers=followers)
-    prog, _, _ = length_program(values, mode="table", outer=outer, **options)
+    prog, _, _ = length_program(
+        values,
+        mode="table",
+        outer=outer,
+        flat=flat,
+        branch=branch,
+        auto=True,
+        followers=followers,
+    )
     expected_shots = []
     for index, value in enumerate(values):
-        scalar, _, _ = length_program(value, point_count=len(values), **options)
+        scalar, _, _ = length_program(
+            value,
+            point_count=len(values),
+            flat=flat,
+            branch=branch,
+            auto=True,
+            followers=followers,
+        )
         expected_shots.append(scheduled_shots(scalar)[index if branch else 0])
     assert scheduled_shots(prog) == expected_shots * (4 if outer else 2)
 
