@@ -20,7 +20,7 @@ def time_program(value, *, table=False, consumer="delay"):
         value = builder.add_table_sweep("point", value)
     if consumer == "timeline_inc":
         builder.timeline_inc(value)
-    else:
+    elif consumer == "delay":
         builder.delay(value)
     builder.emit(
         PulseReadoutCfg(
@@ -31,6 +31,7 @@ def time_program(value, *, table=False, consumer="delay"):
             gain=0.1,
             waveform=ConstWaveformCfg(length=0.1),
             ro_length=0.1,
+            pre_delay=value if consumer == "pre_delay" else 0.0,
         ).build("readout")
     )
     builder.delay_by_timeline()
@@ -53,7 +54,7 @@ def scheduled_shots(prog):
     ]
 
 
-@pytest.mark.parametrize("consumer", ["delay", "timeline_inc"])
+@pytest.mark.parametrize("consumer", ["delay", "timeline_inc", "pre_delay"])
 def test_time_table_matches_scalar_at_every_point_and_rep(consumer):
     values = [0.213, 0.107, 0.354]
     prog, env = time_program(values, table=True, consumer=consumer)
