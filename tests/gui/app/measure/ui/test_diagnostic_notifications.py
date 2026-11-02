@@ -6,7 +6,7 @@ from pathlib import Path
 from time import monotonic
 
 import pytest
-from qtpy.QtTest import QTest
+from PyQt6.QtTest import QTest
 from qtpy.QtWidgets import QApplication, QPushButton
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
@@ -51,12 +51,14 @@ def diagnostic_window(
     scope = LifetimeScope(window)
     # These fixture-only producers stand in for incoming diagnostics. The scenario
     # cannot issue business commands under Remote control, just like a real user.
+    status_bar = window.statusBar()
+    assert status_bar is not None
     for caption, severity, title, message in (
         ("Emit error", "error", TITLE, MESSAGE),
         ("Emit info", "info", "", "Synthetic progress"),
     ):
         button = QPushButton(caption, window)
-        window.statusBar().addPermanentWidget(button)
+        status_bar.addPermanentWidget(button)
         scope.connect(
             button.clicked,
             lambda checked=False, severity=severity, title=title, message=message: (
