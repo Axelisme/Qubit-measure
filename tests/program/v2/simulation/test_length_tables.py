@@ -51,6 +51,7 @@ def length_program(
     branch=False,
     point_count=1,
     auto=False,
+    followers=1,
     pre_delay=0.0,
     post_delay=0.0,
 ):
@@ -116,7 +117,8 @@ def length_program(
     else:
         builder.emit(module)
     if auto:
-        builder.emit(AutoFollower(0 if consumer == "readout" else 1))
+        for _ in range(followers):
+            builder.emit(AutoFollower(0 if consumer == "readout" else 1))
     if consumer != "readout":
         builder.emit(receiver.build("readout"))
     builder.delay_by_timeline()
@@ -229,6 +231,20 @@ def test_length_with_fractional_pre_and_post_matches_scalar_aggregate(flat, cons
         scalar, scalar_env, _ = length_program(
             value, flat=flat, consumer=consumer, pre_delay=0.0137, post_delay=0.0189
         )
+        assert replace(observed.materialize_point(index), coordinates=()) == request(
+            scalar, scalar_env
+        ).materialize_point(0)
+        expected_shots.append(scheduled_shots(scalar)[0])
+    assert scheduled_shots(prog) == expected_shots * 2
+
+
+def test_consecutive_native_auto_followers_match_scalar_timestamps():
+    values = [0.213, 0.107, 0.354]
+    prog, env, _ = length_program(values, mode="table", auto=True, followers=2)
+    observed = request(prog, env)
+    expected_shots = []
+    for index, value in enumerate(values):
+        scalar, scalar_env, _ = length_program(value, auto=True, followers=2)
         assert replace(observed.materialize_point(index), coordinates=()) == request(
             scalar, scalar_env
         ).materialize_point(0)
