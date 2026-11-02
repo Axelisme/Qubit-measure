@@ -426,6 +426,7 @@ def test_gallery_member_rasters_fit_after_resize(
     evidence = Path(os.environ.get("GALLERY_MEMBER_EVIDENCE_DIR", str(tmp_path)))
     colours = ("#c02020", "#208020", "#2020c0", "#a020a0", "#208080", "#a06020")
     measurements = {}
+    all_rows: list[tuple[str, int, QRect, QRect, QRect, list[bool]]] = []
     for step, width in (("01-wide", 1000), ("02-narrow", 360), ("03-wide-again", 1000)):
         driver.resize_window(width, 1000)
         png = driver.screenshot(evidence / f"member-{step}.png")
@@ -480,12 +481,13 @@ def test_gallery_member_rasters_fit_after_resize(
             for key, index, stage, member, raster, edges in rows
         ]
         (evidence / "dimensions.json").write_text(json.dumps(measurements, indent=2))
-        for key, index, stage, member, raster, edges in rows:
-            detail = (key, index, raster.getRect())
-            assert member.contains(raster), detail
-            assert stage.contains(raster), detail
-            assert all(edges), f"Raster perimeter is clipped: {detail}, edges={edges}"
-            assert abs(raster.width() * 3 - raster.height() * 4) <= 4, detail
+        all_rows.extend(rows)
+    for key, index, stage, member, raster, edges in all_rows:
+        detail = (key, index, raster.getRect())
+        assert member.contains(raster), detail
+        assert stage.contains(raster), detail
+        assert all(edges), f"Raster perimeter is clipped: {detail}, edges={edges}"
+        assert abs(raster.width() * 3 - raster.height() * 4) <= 4, detail
 
 
 def test_gallery_narrow_single_column_three_cards(qapp):
