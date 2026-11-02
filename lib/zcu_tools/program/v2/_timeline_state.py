@@ -599,13 +599,24 @@ class TimelineBook:
         self.source_expressions[macro.dst] = expression
 
     def remember_table(self, end: RuntimeEnd, table: TableParam | None) -> RuntimeEnd:
-        """Attach an original table or an exact table/static result to this end."""
+        """Associate this exact end with a TableParam of per-point times in us.
+
+        table is the original cycles() input or an exact table/static result.
+        None leaves the association unchanged. Return the same end object;
+        this does not change registers, expressions or scheduled times.
+        """
         if table is not None:
             self.table_ends[id(end)] = (end, table)
         return end
 
     def table_source(self, end: Time) -> TableParam | None:
-        """Return this end's original table, never infer a source from its recipe."""
+        """Return the original per-point us table for this exact end, or None.
+
+        A TableParam input returns itself. A RuntimeEnd returns only its
+        recorded identity association, without rounding its source values.
+        A new end with no association returns None, even if its register or
+        expression equals a previously recorded end.
+        """
         if isinstance(end, TableParam):
             return end
         pair = self.table_ends.get(id(end))

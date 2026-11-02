@@ -1270,7 +1270,15 @@ class RuntimeMath(TimedMacro):
     def table_sum(
         self, left: Time, right: Time, *, subtract: bool = False
     ) -> TableParam | None:
-        """Carry table plus/minus static time without promoting runtime recipes."""
+        """Return per-point us for left + right, or left - right if subtract.
+
+        Exactly one operand must be a TableParam or source-backed RuntimeEnd.
+        The other must be static: numeric us, an unswept QickParam in us, or
+        a RuntimeEnd with equal finite cycle bounds. RuntimeEnd table sources
+        are read as their already-nearest tProc cycles, converted back to us.
+        Return None for zero/two table sources, a swept QickParam or an
+        unrelated nonconstant runtime end. Emit no instructions or new source.
+        """
         resolved = self._table_values((left, right))
         if resolved is None:
             return None
@@ -1295,10 +1303,19 @@ class RuntimeMath(TimedMacro):
         maximum: bool = True,
         selector: str | None = None,
     ) -> TableParam | None:
-        """Retain a table/static max, min or same-loop branch selection.
+        """Return per-point us for an existing table/static time choice.
 
-        This only accompanies the existing choice; it emits no instructions
-        and cannot reconstruct an unrelated runtime/register source.
+        Numeric/unswept QickParam operands are us. RuntimeEnd table sources
+        are read as already-nearest tProc cycles and converted to us; fixed
+        finite cycle bounds also count as static. Require at least one table
+        and all tables on one loop. Return None for other runtime sources,
+        swept QickParam, bare expressions, no tables or mixed table loops.
+
+        Without selector, maximum chooses pointwise max when True, min when
+        False. With selector, ignore maximum and choose candidate i at point
+        i. Return None unless selector names the table loop and the number of
+        candidates equals that loop's point count. This only records the
+        existing choice; it emits no instructions or runtime source inference.
         """
         resolved = self._table_values(values)
         if resolved is None:
