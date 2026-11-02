@@ -32,8 +32,8 @@ from zcu_lab.workflows.overnight.workflow import OvernightPlan, OvernightTunable
 class OvernightPlanForm(FormModel):
     """Select fixed-flux T1/Echo pairs with calibrated pulses and fixed grids.
 
-    flux_dev starts with the $qubit.flux_dev expression when its captured
-    device name is accepted, or stays unfilled without one; flux_unit is required
+    flux_dev starts with the captured $qubit.flux_dev device name as a literal,
+    or stays unfilled without one; flux_unit is required
     A/V/native with no conversion or membership precheck. flux is its absolute
     fixed setpoint. outer_rounds is finite pair count; start_interval_s is actual
     start spacing in seconds; points is delay samples per native acquisition.
@@ -67,10 +67,12 @@ class OvernightPlanForm(FormModel):
 
     @classmethod
     def defaults(cls, env: FormEnv) -> dict[str, JsonValue]:
-        """Seed $qubit.flux_dev as an expression; leave monitoring inputs empty."""
+        """Seed the captured device name literally; leave monitoring inputs empty."""
         data = super().defaults(env)
-        # FormModel retains accepted expression defaults as text.
-        data["flux_dev"] = {"expr": "$qubit.flux_dev"}
+        if env.parameters is not None:
+            source = env.parameters.lookup("$qubit.flux_dev")
+            if source.present and source.value is not None:
+                data["flux_dev"] = source.value
         return data
 
     @classmethod

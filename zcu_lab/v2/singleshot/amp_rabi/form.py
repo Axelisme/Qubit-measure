@@ -25,7 +25,7 @@ def make_form(ctx: FormContext) -> Form[AmpRabiCfg]:
                 "$resonator.module.readout",
                 Template("readout", bindings={"resonator": "$resonator"}),
             ),
-            "gain": Range(-0.3, 1.0, expts=51),
+            "gain": Range(-0.3, "min(1.0, 4.0 * $qubit.module.x180.gain)", expts=51),
             "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),
             "reps": 1000,
             "rounds": 10,

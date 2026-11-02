@@ -2,7 +2,7 @@
 
 from dataclasses import replace
 
-from zcu_tools.cfg_model import FormNode, Hidden, Slot
+from zcu_tools.cfg_model import Expr, FormNode, Hidden, Slot
 from zcu_tools.gui.form_adapter import FixedElements, Form, FormContext
 
 from zcu_lab.v2.support.measure.mux_forms import (
@@ -35,7 +35,14 @@ def make_form(ctx: FormContext) -> Form[MuxAmpRabiCfg]:
         # Run supplies each gain; retain independent shape admission.
         drive = replace(drive, set={**drive.set, "gain": Hidden(0.0)})
         tones.append(
-            {"name": name, "drive": drive, "gain": {"start": -0.3, "stop": 1.0}}
+            {
+                "name": name,
+                "drive": drive,
+                "gain": {
+                    "start": -0.3,
+                    "stop": Expr(f"min(1.0, 1.2 * {name}.module.x180.gain)"),
+                },
+            }
         )
     readout = mux_readout_initial(ctx)
     return Form(

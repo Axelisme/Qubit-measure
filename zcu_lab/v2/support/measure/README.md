@@ -2,7 +2,7 @@
 
 **讀者：** lab-author。查閱多個量測 adapter 共用的表單初值、分析載體與 writeback 工具。
 
-**Last updated:** 2026-11-02，mux flux 共用 Summary 與各實驗表單分工
+**Last updated:** 2026-11-02，Rabi 與 mux 的 Expr 初值
 
 這個公開支援 package 擁有至少兩個 measure experiment adapters 共用的 implementation
 mechanics：analysis carriers、writeback helpers 與跨實驗的 context utilities。
@@ -11,7 +11,7 @@ mechanics：analysis carriers、writeback helpers 與跨實驗的 context utilit
 
 `mux_forms.py` 集中八個 mux Forms 的 readout 初值，以及七個 qubit Forms 的固定名稱與 recovery 初值。
 Qubit Forms 先要求完整 qubit/resonator 綁定。缺 readout slot 時從 group resonators 產生清單，每個 resonator 一個槽位。
-Group tones 的 freq 取捕捉的 resonator.freq，label 初值為 resonator 名稱。缺 slot 時，gen_ch 取 `$mux.wiring.gen_ch`，第 i 個 tone 的 ro_ch 取 `$mux.wiring.ro_ch[i]`，gain 填 0.1。gen_ch、mixer_freq 與 freq 使用 Expr 初值。各 tone 的 ro_ch 是從固定 capture 的 group.wiring.ro_ch[i] 取出的整數初值，scalar Expr 不支援 indexing。操作員仍須確認通道與振幅。
+Group tones 的 freq 取捕捉的 resonator.freq，label 初值為 resonator 名稱。缺 slot 時，gen_ch 取 `$mux.wiring.gen_ch`，第 i 個 tone 的 ro_ch 取 `$mux.wiring.ro_ch[i]`，gain 填 0.1。gen_ch、mixer_freq、freq 與 ro_ch 使用 Expr 初值，ro_ch 保留 wiring list 下標來源。操作員仍須確認通道與振幅。
 `mux_readout_initial` 未選 ringup 時，以 `source` 選擇 captured readout 的 Slot 或 `readout/mux:blank` Template。
 有 captured readout 時使用 library 完整 tones 與 scalar 設定，不讀取未使用 Template 的來源。
 缺 slot 時才採用 Template 的 scalar 初值、group tones 與 group wiring，並合併 Template 自有的 seed metadata。
@@ -22,6 +22,8 @@ length、ro_length 與 trig_offset 保持必填且未填，不猜時長或以 0 
 有 captured readout 時，helper 從固定 capture 取完整 group 已設成員的最小 kappa，在來源 trig_offset 上加五倍 ringup 等待。
 此路徑忽略缺 leaf 或 null 的 kappa。全未設時不加等待，trig_offset 保留來源值。
 Pulse 至少涵蓋 ADC 窗口，原 ro_length 與較長的 pulse 保留。
+Trigger 與 length 使用 min／max Expr。單一已設 kappa 直接引用該來源，全未設時加 0。
+Slot-copy 的 tone ADC 維持 ro_ch=index 字面值，不改成 group wiring。
 Mux onetone 缺 slot 時，ro_length 固定填入 1.0 us，不依賴 kappa 或 time_of_fly。
 完整 group 的 kappa 都有效且 group 有頂層 time_of_fly，才推導 trigger 與 length。
 trig_offset 取 `$mux.time_of_fly` 加 ringup，length 取 trig_offset + ro_length，不讀 resonator 的 pulse 路徑 TOF。
@@ -80,7 +82,7 @@ Template 持有自己的 set 與 seed metadata。
 
 `rabi_initial_values.len_rabi_length_stop` 只推導四個 Length Rabi Forms 的掃描上限。
 無 capture、缺失或 null x180、arb waveform 時上限為 1 µs。
-Scalar waveform 的有效 pi_len 給出四倍上限，已存但無效的 pi_len 則留空。
+Scalar waveform 的有效 pi_len 給出四倍上限的 Expr，已存但無效的 pi_len 則留空。
 它只讀固定 capture 中的 validated Spec，跟隨 waveform key，但不 materialize、不讀 asset、不寫回校準。
 原始來源在 owner 驗證前被拒絕或轉型的值，不屬於此 typed capture 的可觀察輸入。
 各 Form 用 `source` 選擇 x180 或 gain=1 的 qub_probe Template。
@@ -88,8 +90,12 @@ Scalar waveform 的有效 pi_len 給出四倍上限，已存但無效的 pi_len 
 Singleshot 與 mux 對選出的節點共用一次 `replace(node, set=...)`，隱藏由 Run 取代的 waveform.length。
 
 `rabi_initial_values.amp_rabi_initial_pulse` 為兩種 Amplitude Rabi 選擇相同的 pulse 來源與長度。
-x180 為 arb waveform 時保留原來源 Slot、形狀與 data，不複製、不覆寫 length，也不讀 asset。gain 仍掃 −0.3～1.0；要調長度須先換 waveform。
-有持久 scalar length 的 x180 才透過 Slot(copy=True).set 複製捕捉來源，覆寫 waveform.length=1.5*pi_len*pi_gain（µs）。
+x180 為 arb waveform 時保留原來源 Slot、形狀與 data，不複製、不覆寫 length，也不讀 asset；要調長度須先換 waveform。
+有持久 scalar length 的 x180 才透過 Slot(copy=True).set 複製捕捉來源，以 Expr 覆寫 waveform.length=1.5*pi_len*pi_gain（µs）。
+Amp Rabi gain 的起點維持 −0.3。
+Singleshot population joint fit 的終點是 min(1.0, 4.0*pi_gain)。
+Twotone、heralding 與 mux IQ fit 的終點是 min(1.0, 1.2*pi_gain)。
+各 Form 保留 endpoint Expr 與 pi_gain 來源，缺來源時留空。
 pi_len 須為有限正數，pi_gain 須為有限數且在 (0, 1]。無效來源讓必填長度留空。
 來源 gain 若為 NaN 或 ±Inf，額外設 gain=None，避免非有限數留在 JSON input。兩個必填欄位都補齊才可提交。
 有限的無效 gain 保留原值。沒有 x180 時使用 qub_probe Template，明確設定 gain=1 與 length=1 µs。

@@ -34,7 +34,7 @@ def make_form(ctx: FormContext) -> Form[HeraldingAmpRabiCfg]:
                 ),
             ),
             "init_pulse": Hidden(),
-            "gain": Range(-0.3, 1.0, expts=51),
+            "gain": Range(-0.3, "min(1.0, 1.2 * $qubit.module.x180.gain)", expts=51),
             "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),
             "reps": 1000,
             "rounds": 10,
