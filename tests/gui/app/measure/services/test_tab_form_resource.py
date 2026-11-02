@@ -565,7 +565,7 @@ def test_refresh_explicit_branch_updates_projection_without_reseeding(
             PulseInput,
             {"pulse": node},
             initial_values=lambda _env, _defaults: (
-                initializations.append("fresh") or {}
+                initializations.append("fresh") or _defaults
             ),
         )
         form.bind_templates(
@@ -625,6 +625,49 @@ def test_refresh_explicit_branch_updates_projection_without_reseeding(
         assert initializations == ["fresh"]
         resource.reset()
         assert initializations == ["fresh", "fresh"]
+    finally:
+        resource.revoke()
+
+
+def test_initial_values_complete_tree_is_adopted_only_on_open_and_reset() -> None:
+    class Pair(ConfigBase):
+        amount: float
+        declared: float
+
+    env = FormEnv()
+    received: list[dict[str, JsonValue]] = []
+
+    def initial_values(
+        captured: FormEnv, defaults: dict[str, JsonValue]
+    ) -> dict[str, JsonValue]:
+        assert captured is env
+        assert defaults == {"amount": {"expr": "2 * 4"}, "declared": 3.0}
+        received.append(defaults)
+        return {"amount": float(len(received))}
+
+    resource = resource_api.TabFormResource(
+        lambda _ctx: Form(
+            Pair,
+            {"amount": Expr("2 * 4"), "declared": 3.0},
+            initial_values=initial_values,
+        ),
+        capture=lambda _aliases: resource_api.TabFormSources(env),
+        mutation_allowed=lambda: True,
+    )
+    try:
+        assert resource.input.data == {"amount": 1.0}
+        resource.write({("amount",): 5.0})
+        assert resource.preview().values[("amount",)] == 5.0
+        result = resource.result()
+        assert isinstance(result, FormErrors)
+        assert set(result.messages) == {("declared",)}
+        resource.refresh_sources()
+        assert resource.input.data == {"amount": 5.0}
+        assert len(received) == 1
+        resource.reset()
+        assert resource.input.data == {"amount": 2.0}
+        assert len(received) == 2
+        assert received[0] is not received[1]
     finally:
         resource.revoke()
 

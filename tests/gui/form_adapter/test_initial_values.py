@@ -39,7 +39,8 @@ def test_factory_seeds_same_capture_without_replacing_declaration() -> None:
         coordinate = captured.devices["bias"]
         if not isinstance(coordinate, CapturedInfo):
             raise TypeError("Expected synthetic coordinate info")
-        return {"position": coordinate.value}
+        defaults["position"] = coordinate.value
+        return defaults
 
     form = Form(
         Scan,
@@ -86,9 +87,8 @@ class Tones(ConfigBase):
     participants: list[int] = [0]
 
 
-def test_factory_patches_detached_raw_defaults_without_leaking_unreturned_edits() -> (
-    None
-):
+@pytest.mark.parametrize("new_tree", [False, True])
+def test_factory_adopts_complete_return_and_isolates_fresh_inputs(new_tree: bool) -> None:
     class GroupedScan(Scan):
         tones: list[Tone]
         participants: list[int] = [0]
@@ -115,7 +115,9 @@ def test_factory_patches_detached_raw_defaults_without_leaking_unreturned_edits(
         tone["name"] = "patched"
         defaults["participants"] = [1]
         defaults["count"] = 99
-        return {"tones": [tone]} if len(received) == 1 else {}
+        if new_tree:
+            return {"tones": [tone], "participants": [1]}
+        return defaults
 
     form = Form(
         GroupedScan,
@@ -128,18 +130,31 @@ def test_factory_patches_detached_raw_defaults_without_leaking_unreturned_edits(
         initial_values=initial_values,
     )
     first = form.default_input(env)
-    fresh = form.default_input(env)
+    expected: dict[str, JsonValue] = (
+        {"tones": [{"name": "patched"}], "participants": [1]}
+        if new_tree
+        else {
+            "scan": {"kind": "linrange", "start": 1.0, "stop": 2.0, "n": 5},
+            "count": 99,
+            "position": 3.0,
+            "tones": [{"name": "patched"}, {"name": "Q2"}],
+            "participants": [1],
+        }
+    )
+    assert first.data == expected
+    returned_tones = received[0]["tones"]
+    assert isinstance(returned_tones, list)
+    returned_tone = returned_tones[0]
+    assert isinstance(returned_tone, dict)
+    returned_tone["name"] = "borrowed-edit"
+    assert first.data == expected
 
-    assert first.data == {
-        "scan": {"kind": "linrange", "start": 1.0, "stop": 2.0, "n": 5},
-        "count": 8,
-        "position": 3.0,
-        "tones": [{"name": "patched"}],
-        "participants": [0],
-    }
-    assert fresh.data == {**first.data, "tones": [{"name": "Q1"}, {"name": "Q2"}]}
-    received[0].clear()
-    assert first.data["tones"] == [{"name": "patched"}]
+    fresh = form.default_input(env)
+    assert fresh.data == expected
+    assert received[0] is not received[1]
+    state = FormState(first)
+    state.write({("tones", 0, "name"): "edited"}, env)
+    assert fresh.data == expected
     assert len(received) == 2
 
 
