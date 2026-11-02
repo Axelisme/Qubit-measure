@@ -8,7 +8,7 @@ from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.program.v2 import SweepCfg, TimelineBuilder, ir
 from zcu_tools.program.v2.modules.pulse import Pulse, PulseCfg
 from zcu_tools.program.v2.modules.readout import PulseReadout, PulseReadoutCfg
-from zcu_tools.program.v2.modules.reset import PulseResetCfg, Reset
+from zcu_tools.program.v2.modules.reset import PulseReset, PulseResetCfg, Reset
 from zcu_tools.program.v2.modules.waveform import (
     ConstWaveformCfg,
     FlatTopWaveformCfg,
@@ -60,6 +60,7 @@ def length_program(
         pulse = module.pulse
     elif consumer == "reset":
         module = Reset("reset", PulseResetCfg(pulse_cfg=pulse_cfg), length=override)
+        assert isinstance(module, PulseReset)
         pulse = module.reset_pulse
     else:
         module = pulse = Pulse("drive", pulse_cfg, length=override)
