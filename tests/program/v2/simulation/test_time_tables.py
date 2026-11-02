@@ -223,6 +223,46 @@ def test_nonaffine_table_time_getter_raises(consumer):
         prog.get_time_param("time", "t")
 
 
+def adc_pair_program(value, *, table=False):
+    env = white_noise(load_soccfg(1, 1), std_adc=0, routes=((0, 0),), seed=None)
+    builder = TimelineBuilder(env.soccfg, initial_delay=0, relax_delay=0.1)
+    if table:
+        value = builder.add_table_sweep("point", value)
+    receiver = PulseReadoutCfg(
+        gen_ch=0,
+        ro_ch=0,
+        nqz=1,
+        freq=100,
+        gain=0.1,
+        waveform=ConstWaveformCfg(length=0.1),
+        ro_length=0.1,
+    ).build("receiver")
+    builder.timeline_inc(value)
+    builder.fork("default", into="later")
+    builder.emit(receiver)
+    builder.timeline_inc(0.2, timeline="later")
+    builder.emit(receiver, timeline="later")
+    builder.join("later", into="default")
+    builder.delay_by_timeline()
+    return builder.build(), env
+
+
+def test_adc_nonoverlap_uses_correlated_table_points_not_independent_extrema():
+    values = [0.1, 0.4, 0.2]
+    prog, env = adc_pair_program(values, table=True)
+    observed = request(prog, env)
+    scalar_points = []
+    for point, value in enumerate(values):
+        scalar, scalar_env = adc_pair_program(value)
+        expected = request(scalar, scalar_env).materialize_point(0)
+        assert replace(observed.materialize_point(point), coordinates=()) == expected
+        scalar_points.append(expected)
+    triggers = [point.readouts[0].trigger_ticks for point in scalar_points]
+    duration = observed.readouts[0].samples * observed.readouts[0].sample_period_ticks
+    assert max(t[0] + duration for t in triggers) > min(t[1] for t in triggers)
+    assert all(t[0] + duration <= t[1] for t in triggers)
+
+
 def test_register_time_table_rejects_negative_noninitial_point():
     with pytest.raises(ValueError, match="nonnegative"):
         time_program([0.02, -0.01, 0.03], table=True, consumer="register")
