@@ -41,8 +41,10 @@ most prominent candidate. `min_prominence` defaults to 0.2 of projected signal
 peak-to-peak, and `min_distance_mhz` defaults to zero.
 `min_snr` defaults to 5. Both prominence and height above the signal median
 must reach this multiple of first-difference MAD noise sigma.
-`min_width_samples` defaults to 3 observable half-prominence sample intervals;
-single-sample spikes do not qualify.
+`min_width_samples` defaults to 0, disabling the observable half-prominence
+width gate. Raise it only for fine scans. When a line occupies only 1–2 samples,
+its center frequency can still locate the transition, but its FWHM cannot be
+resolved. To measure linewidth, scan finely around that line.
 Each candidate's `snr` is height above the median divided by noise sigma,
 not prominence divided by sigma. These are statistical gates, not proof that
 a candidate is a physical transition. Lowering `min_snr` can recover weak lines
@@ -50,7 +52,8 @@ and also admit more noise. See the fitting README for the estimator and limits.
 Analysis fits the selected interval bounded halfway to neighbouring candidates.
 The Lorentzian fit starts from the detected positive peak's center and width.
 This avoids treating a broad peak's local median as background and fitting a dip.
-Dotted gray lines mark other candidates; the red line marks the fitted center.
+Analysis always draws the fitted curve and the red line at the fitted center.
+Dotted gray lines mark other candidates.
 Candidate center and width are sampled estimates, not fitted frequency or FWHM.
 `truncated=True` means the scan clips a half-prominence crossing.
 Widen or recenter that scan before using its linewidth.
@@ -69,7 +72,7 @@ supplied center and span.
 
 ## Recommended
 
-Standard flow at a freshly calibrated actual integer-flux bias: first run a wide survey over the user-approved passband to find a real qubit feature, and use the measured response as the evidence. Predictor output and simulator truth are not evidence of a measured qubit line. Then run a narrower scan around the observed feature and fit it. Analysis defaults to the Lorentzian fit ('lor') with plot-fit on; switch to 'sinc' for power-broadened or saturated lines. If the scan looks like noise, widen/re-centre and check readout/gain before concluding there is no qubit.
+Standard flow at a freshly calibrated actual integer-flux bias: first run a wide survey over the user-approved passband to find a real qubit feature, and use the measured response as the evidence. Predictor output and simulator truth are not evidence of a measured qubit line. Then run a narrower scan around the observed feature and fit it. Analysis defaults to the Lorentzian fit ('lor'); switch to 'sinc' for power-broadened or saturated lines. If the scan looks like noise, widen/re-centre and check readout/gain before concluding there is no qubit.
 
 ## Four starting situations
 
@@ -81,6 +84,6 @@ Standard flow at a freshly calibrated actual integer-flux bias: first run a wide
 3. With a readout slot, Reset and review the captured module and remaining errors separately.
    A slot does not prove that drive pulses, sweep bounds or GE calibration are valid.
 4. Through the agent, call `twotone_spectrum` after inspecting the same Form errors.
-   center_mhz, span_mhz and points are required. points maps to frequency Expts. model_type selects lor/sinc; plot_fit controls the existing fit overlay.
+   center_mhz, span_mhz and points are required. points maps to frequency Expts. model_type selects lor/sinc; analysis always draws the fitted overlay.
    The Form chooses module sources. Omitted inputs retain Form values; null clears/disables fields. Overrides apply last, then check_ready reports missing or invalid fields before Run.
    Missing inputs return needs_parameters before acquisition. Reset may replace unsaved inputs.
