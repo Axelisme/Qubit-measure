@@ -151,10 +151,7 @@ def _T2Echo_get_writeback_items(
                 record={
                     "devices": {name: deepcopy(info) for name, info in devices.items()},
                     "flux_frame": frame,
-                    "run": {
-                        "run_id": metadata.run_id,
-                        "experiment": metadata.experiment,
-                    },
+                    "experiment": metadata.experiment,
                     "t2e_us": result.t2e,
                     "t2e_err_us": result.t2e_err,
                 },
