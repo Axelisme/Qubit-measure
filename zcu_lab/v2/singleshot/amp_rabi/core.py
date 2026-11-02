@@ -13,7 +13,9 @@ from pydantic.dataclasses import dataclass as pydantic_dataclass
 from zcu_tools.analysis.fitting.singleshot import transition_state_bin_probabilities
 from zcu_tools.analysis.fitting.singleshot_rabi import (
     RabiJointFitResult,
+    RabiJointFitSummary,
     fit_rabi_joint,
+    summarize_rabi_joint_fit,
 )
 from zcu_tools.analysis.singleshot import classify_rabi_iq
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
@@ -160,7 +162,7 @@ class AmpRabiFit:
     pi2_gain_error: float
     frequency: float
     amplitude: float
-    joint_fit: RabiJointFitResult
+    joint_fit: RabiJointFitSummary
 
 
 class AmpRabiCfg(ConfigBase):
@@ -193,7 +195,15 @@ def _flatten_round_shots(raw: NDArray[np.complex128]) -> NDArray[np.complex128]:
 
 def _gain_calibration(fit: RabiJointFitResult) -> AmpRabiFit:
     if not fit.backend.valid:
-        return AmpRabiFit(np.nan, np.nan, np.nan, np.nan, np.nan, np.nan, fit)
+        return AmpRabiFit(
+            np.nan,
+            np.nan,
+            np.nan,
+            np.nan,
+            np.nan,
+            np.nan,
+            summarize_rabi_joint_fit(fit),
+        )
     pi_gain = np.pi / fit.omega
     omega_index = fit.backend.parameter_names.index("log_omega")
     # d(pi / omega) / d(log omega) = -pi / omega.
@@ -206,7 +216,7 @@ def _gain_calibration(fit: RabiJointFitResult) -> AmpRabiFit:
         float(pi_error / 2),
         fit.omega / (2 * np.pi),
         abs(fit.initial_populations[1] - fit.p_inf),
-        fit,
+        summarize_rabi_joint_fit(fit),
     )
 
 

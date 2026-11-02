@@ -181,6 +181,89 @@ class RabiJointFitResult:
         return np.array([1.0 - p_e, p_e, 0.0])
 
 
+@dataclass(frozen=True)
+class RabiBackendSummary:
+    """Fixed-size optimizer summary in the transformed parameterization.
+
+    parameter_names orders values and std, the marginal standard deviations
+    sqrt(diag(covariance)). valid reports accepted convergence and calibration;
+    nll is the multinomial negative log-likelihood. Invalid fits may retain
+    NaN values/std and infinite nll. Arrays are detached from the full result.
+    """
+
+    parameter_names: tuple[str, ...]
+    values: NDArray[np.float64]
+    std: NDArray[np.float64]
+    valid: bool
+    nll: float
+
+
+@dataclass(frozen=True)
+class RabiJointFitSummary:
+    """Scan-independent fitted populations, parameters and readout calibration.
+
+    initial_populations is pre-pulse [g, e, other]. p_inf, t_r, omega, sigma,
+    p_avg, length_ratio and phase follow RabiPhysicalParams, with t_r=None for
+    a constant envelope. projected_g/e_center are scalar IQ coordinates;
+    g/e_center are complex IQ centers. radius is the circle-classification
+    radius. confusion_matrix maps true to measured [g, e, other] populations;
+    condition_number diagnoses its invertibility. backend contains marginal
+    errors and convergence diagnostics. Failed fits retain NaN outputs.
+    Arrays are detached from the full result; no sweep or shot data are retained.
+    """
+
+    initial_populations: NDArray[np.float64]
+    p_inf: float
+    t_r: float | None
+    omega: float
+    projected_g_center: float
+    projected_e_center: float
+    sigma: float
+    p_avg: float
+    length_ratio: float
+    g_center: complex
+    e_center: complex
+    radius: float
+    confusion_matrix: NDArray[np.float64]
+    condition_number: float
+    backend: RabiBackendSummary
+    phase: float
+
+
+def summarize_rabi_joint_fit(result: RabiJointFitResult) -> RabiJointFitSummary:
+    """Keep fitted values, calibration and marginal errors without sweep data.
+
+    Pass a full fit_rabi_joint result after using its populations and projection
+    for plots. Copy fixed-size arrays and derive backend std from covariance's
+    diagonal, without fitting again or modifying result. Nonfinite failed-fit
+    values remain nonfinite for the presentation boundary to report.
+    """
+    return RabiJointFitSummary(
+        initial_populations=result.initial_populations.copy(),
+        p_inf=result.p_inf,
+        t_r=result.t_r,
+        omega=result.omega,
+        projected_g_center=result.projected_g_center,
+        projected_e_center=result.projected_e_center,
+        sigma=result.sigma,
+        p_avg=result.p_avg,
+        length_ratio=result.length_ratio,
+        g_center=result.g_center,
+        e_center=result.e_center,
+        radius=result.radius,
+        confusion_matrix=result.confusion_matrix.copy(),
+        condition_number=result.condition_number,
+        backend=RabiBackendSummary(
+            parameter_names=result.backend.parameter_names,
+            values=result.backend.values.copy(),
+            std=np.sqrt(np.diag(result.backend.covariance)),
+            valid=result.backend.valid,
+            nll=result.backend.nll,
+        ),
+        phase=result.phase,
+    )
+
+
 def _cluster_projected_iq(
     projected: NDArray[np.float64],
 ) -> tuple[NDArray[np.float64], NDArray[np.intp]]:

@@ -36,6 +36,8 @@ Rabi uses `$qubit.module.x180` or pi_pulse. Tested reset uses `$qubit.module.res
 
 This is a diagnostic only; calibration parameters stay unchanged. It reports the reset-only mean and worst sampled excited population and the maximum Other fraction. Saved data contain class counts, so readout refitting requires a separate raw-IQ acquisition. Interpret these summaries as sampled populations rather than histogram confidence intervals.
 
+The returned analysis summary contains `reset_mean_excited_population`, `reset_max_excited_population`, `reset_max_other_population`, `worst_sample_gain` and `analyzed_reset_points`. Corrected population arrays stay local to analysis for the three-branch plot.
+
 ## Recommended
 
 Reps are shots per gain per branch per round; rounds average repeated hardware sweeps and update the live plot. Branches are independent preparations. Other counts shots outside the accepted circle regions or tied between them. Calibrated leakage and reset-channel fidelity require separate characterization.

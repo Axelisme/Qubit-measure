@@ -4,7 +4,9 @@
 
 **讀者：** lab-author。擬合模型、數值輸入、結果與失敗契約速查。
 
-`singleshot_rabi` 提供 raw-IQ sweep 的 pooled PCA、joint population fitting 與 circle-classification calibration。它接收純數值，回傳 physical parameters、population arrays 與 optimizer diagnostics。Cfg 讀取與繪圖由實驗 caller 負責。Pulse length 與 gain 使用相同 coordinate 契約，gain caller 明確關閉 decay。
+`singleshot_rabi` 提供 raw-IQ sweep 的 pooled PCA、joint population fitting 與 circle-classification calibration。`fit_rabi_joint` 接收純數值，回傳完整 `RabiJointFitResult`，包含 physical parameters、population arrays 與 optimizer diagnostics。Cfg 讀取與繪圖由實驗 caller 負責。Pulse length 與 gain 使用相同 coordinate 契約，gain caller 明確關閉 decay。
+
+Caller 畫完圖後可用 `summarize_rabi_joint_fit(result)` 產生 `RabiJointFitSummary`。摘要保留擬合值、pre-pulse populations、confusion matrix 與分類校準。`RabiBackendSummary` 保留 parameter_names、values、std、valid 與 nll；std 為完整 covariance 對角線的平方根。摘要複製固定大小陣列，不保留逐點 populations、projection 或完整 covariance，也不重跑 fitter。完整數值結果仍可供局部畫圖與 covariance 計算使用。
 
 ## Peak candidates
 
@@ -117,8 +119,8 @@ conditional family 建立 multinomial NLL 及 derived confusion matrix，不以 
 高度或 free matrix parameters 取代其機率語意。`singleshot_rabi` 擁有數值擬合，包括
 Minuit continuation、backend validity、候選選擇與 fallback，以及 circle-classification calibration。
 實驗 caller 只為 backend valid 且中心、半徑與 confusion matrix 有限的結果產生 calibration
-寫回項目。Len Rabi 的 `core.analyze` 委派 fitting，從 cfg 取出 readout 長度，並把數值與
-圖尺寸交給 `plotting.singleshot_rabi` 建圖。實驗 caller 決定寫回，plotting 建立 Figure。
+寫回項目。Len Rabi 與 Amp Rabi 的 `core.analyze` 委派 fitting，從 cfg 取出 readout 長度，
+用完整結果在實驗內建圖，再回傳摘要供寫回使用。
 
 Dual transition-rate fitting以六個stable rate names共享跨dataset identity，兩組initial
 g/e populations維持dataset-qualified local identity。`DualTransitionRateFitResult`直接持有
