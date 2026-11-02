@@ -189,6 +189,29 @@ Classify 與雙 qubit heralded 實驗保留原分類契約。
 本次總和保存裁定取代 2026-10-29「5B」的同網格 pass_fraction 保存方案。
 Result 改存所有 herald 類別的總和，通過比例改由計數衍生，不再只留下通過類別的資料。
 
+2026-11-02，使用者決定以二階 IQ 特徵支援不需 classifier 的單 qubit heralding。
+以下六維特徵決策取代 2026-10-30 引文中「一般iq訊號被轉成3維」的 IQ 部分。
+舊引文保留為歷史，Classify one-hot 與逐 shot 外積總和的契約不變。
+
+1. IQ 使用 `(1, I, Q, I², IQ, Q²)` 六個分量。
+   使用者提出：「讓iq模式的維度變成[1,i1,q1,1i,1q,ii,iq,qi,qq]就好了」。
+   對將重複的一階與 IQ／QI 分量去重成六個分量的建議，使用者答「a」。
+2. IQ 特徵固定二階，不預先加入三階。
+   使用者裁決：「先固定2階，3階有需要再考慮支援」。
+   這裡的階數不是態數，`n_states=2/3` 契約不變。
+3. IQ 與 Classify 保留為兩種軸，不合併成 Classify。
+   使用者裁決：「實作上，我考慮你的簡單方案，因為使用IQ與Classify的實驗似乎都分開了？至少在使用時就知道。」
+   這項選擇取代合併提案，不改 Classify 從 readout cfg 取用 classifier 的契約。
+4. 實驗依目的選擇是否分類。需要 population 的實驗保留分類，不需 classifier 的路徑限於本次單 qubit heralding。
+   使用者裁決：「a，但有些實驗，可能特別要求取得population，還是要支援分類，但一般只是為了訊號比較好，取出initial population影響的實驗，可以不給classifier」。
+   Classify 與雙 qubit heralded 的既有分類要求不變。
+5. 自校準用於比較掃描點間的相對變化，接受模型偏差，不宣稱結果是無偏的 gate fidelity。
+   使用者裁決：「老實說有偏差沒關係，重點是我能不能很好的看到不同掃描點的K的變化，訊號是相對的」。
+   Readout 拖尾與 herald 期間衰減的限制仍有效。
+6. 分析、擬合、即時圖與 earlystop 只使用 `C = 1 − tr J`，J 與 K 保留為診斷。
+   使用者裁決：「那就都用C，先不要直接擬合K，除非有必要我再討論」。
+   不加入 K 層級的直接擬合或額外指標。
+
 實驗層保留獨立的 `heralding/*` 組合序列，不在既有實驗加入 Reset 模組。
 T1、Amp Rabi、Len Rabi、Ramsey 與 Echo 沿用普通版 writeback 目標與規則，描述標明 Heralded，不另設校準欄位。
 使用者於 2026-10-29 裁決：「那不做active reset，讓底層支援post-selection，上層使用新實驗組，比如heralding/*」。
