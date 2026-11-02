@@ -1086,6 +1086,8 @@ class RuntimeMath(TimedMacro):
         Hints are author guarantees, not hardware checks. Certified framework
         sources keep their existing producer audit.
         """
+        register = self.prog.reg_dict.get(name)
+        table_init = register is not None and isinstance(register.init, TableRawParam)
         if not author:
             limits = self.prog._time_bounds.source(self.prog, name)
         else:
@@ -1098,12 +1100,14 @@ class RuntimeMath(TimedMacro):
                     name in self.prog._time_bounds.framework_sources
                     or not self.prog._time_bounds.author_source(name)
                     or name in self.prog.loop_dict
+                    or table_init
                 ):
                     # A hint supplies bounds, not permission to bypass owner audits.
                     self.prog._time_bounds.source(self.prog, name)
                 limits = CycleBounds(*range_hint)
             elif (
                 name not in self.prog.loop_dict
+                and not table_init
                 and self.prog._time_bounds.author_source(name)
             ):
                 limits = None
