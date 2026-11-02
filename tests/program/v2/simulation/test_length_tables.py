@@ -270,6 +270,7 @@ def test_native_auto_followers_preserve_scalar_request(flat, branch, outer, foll
         followers=followers,
     )
     observed = request(prog, env)
+    expected_shots = []
     for index, value in enumerate(values):
         scalar, scalar_env, _ = length_program(
             value,
@@ -279,10 +280,13 @@ def test_native_auto_followers_preserve_scalar_request(flat, branch, outer, foll
             auto=True,
             followers=followers,
         )
+        expected_request = request(scalar, scalar_env)
+        assert observed.relax_delay_ticks == expected_request.relax_delay_ticks
         expected = replace(
-            request(scalar, scalar_env).materialize_point(index if branch else 0),
+            expected_request.materialize_point(index if branch else 0),
             coordinates=(),
         )
+        expected_shots.append(analyze(scalar).shots[index if branch else 0])
         for outer_index in range(2 if outer else 1):
             assert (
                 replace(
@@ -291,6 +295,9 @@ def test_native_auto_followers_preserve_scalar_request(flat, branch, outer, foll
                 )
                 == expected
             )
+    # Request durations exclude the compiled shell. Observe complete shot ends
+    # and reference accumulation on the same programs used for these requests.
+    assert_scalar_shots(analyze(prog), expected_shots * (4 if outer else 2))
 
 
 @pytest.mark.parametrize("flat", [False, True])
