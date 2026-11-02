@@ -34,8 +34,8 @@ edits and captures sources again.
 - `reset` and `readout` contain the optional common reset and full mux readout.
 - `tones` is one fixed identity list in original readout order, with no drive.
 - `df` supplies a common nominal MHz offset for every selected readout tone.
-  Each offset uses the existing host-side onetone run because the mux firmware
-  cannot sweep tone frequencies in hardware.
+  Each offset rebuilds reset and readout in this experiment because the mux
+  firmware cannot sweep tone frequencies in hardware.
 
 Readout uses the mux onetone ringup-copy policy. A captured slot retains its
 mixer and ADC window; five ringup times are added to trigger coverage. Without
@@ -118,8 +118,8 @@ and required-field errors before Run.
 
 ## Run and Stop
 
-Run sets the coil at each flux point, waits for settle, then runs
-the existing mux onetone spectrum. Each `flux_i` figure shows absolute MHz
+Run sets the coil at each flux point and waits for settle. It then scans the
+frequency offsets, building reset followed by mux readout at each offset. Each `flux_i` figure shows absolute MHz
 against that tone's DC coordinate. Sources retain their final written settings.
 Run does not restore bias automatically.
 
@@ -176,7 +176,8 @@ Cfg schema 5.0 stores the independent flat cfg with top-level `df`. Loading
 schema 4.0 keeps the data and plots available but does not restore its cfg.
 The load reports a cfg schema mismatch. No automatic cfg conversion occurs.
 
-Labber export currently does not support this three-dimensional independent
-grid. Save reports that output as failed while native data and other successful
-outputs remain saved. Inspect each output status before treating a Save as
-complete. Load the native `data.h5` for analysis and writeback.
+Labber export splits each tone's three-dimensional independent payload into
+one two-dimensional log per first-axis slice in the same file. The grouped
+reader returns those two-dimensional slices, not a reconstructed tone cube.
+Inspect each output status before treating a Save as complete. Load the native
+`data.h5` for analysis and writeback.

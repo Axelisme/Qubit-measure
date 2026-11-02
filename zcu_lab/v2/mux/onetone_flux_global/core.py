@@ -2,18 +2,29 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from copy import deepcopy
+from functools import partial
 from typing import Annotated, ClassVar, Literal
 
 import numpy as np
+from matplotlib.ticker import MaxNLocator
+from numpy.typing import NDArray
 from pydantic import Field, StrictInt, model_validator
 from zcu_tools.cfg_model import ConfigBase, DeviceName, FieldMeta
 from zcu_tools.experiment import Experiment
 from zcu_tools.experiment.axes_spec import GroupedAxesSpec
 from zcu_tools.experiment.context import RunContext
-from zcu_tools.program.v2 import MuxReadout, Reset, SweepCfg
+from zcu_tools.experiment.v2.runtime import RunOptions, Schedule, SignalBuffer
+from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
+from zcu_tools.plotting.plots import Plots
+from zcu_tools.program.v2 import Reset, SweepCfg, TimelineBuilder
+from zcu_tools.program.v2.modules import MuxReadout
 
-from zcu_lab.v2.mux.onetone.core import MuxOnetoneCfg
-from zcu_lab.v2.support.mux_flux import MuxFluxResult, mux_flux_spec, run_flux_scan
+from zcu_lab.v2.support import live_heatmap, live_line
+from zcu_lab.v2.support.device import check_flux_unit, set_flux
+from zcu_lab.v2.support.mux import averaged_mux_signal
+from zcu_lab.v2.support.mux_flux import MuxFluxResult, mux_flux_spec
 from zcu_lab.v2.support.mux_sweep_cfg import validate_participants
 
 
@@ -115,23 +126,136 @@ class OnetoneFluxGlobalExp(Experiment[MuxFluxResult, OnetoneFluxGlobalCfg]):
         unsupported drivers raise TypeError. Driver/acquisition errors propagate.
         Sources remain at the final written value. No output is enabled here.
         """
-        spectrum = MuxOnetoneCfg(
-            reset=config.reset,
-            readout=config.readout,
-            df=config.df,
-            participants=list(config.participants),
-            reps=config.reps,
-            rounds=config.rounds,
-            initial_delay=config.initial_delay,
-            relax_delay=config.relax_delay,
+        # 1. Keep original tone identities and the complete planned axes after Stop.
+        cfg = deepcopy(config)
+        indices = cfg.participants
+        device = context.devices[cfg.flux_dev]
+        check_flux_unit(device.get_info(), cfg.flux_unit)
+        dfs = sweep2array(cfg.df, "none")
+        values = np.linspace(cfg.flux.start, cfg.flux.stop, cfg.flux.expts)
+        flux_values = np.tile(values, (len(indices), 1))
+        frequencies = np.asarray([cfg.readout.tones[i].freq + dfs for i in indices])
+        signals = np.full(
+            (len(indices), len(values), len(dfs)),
+            np.nan + 1j * np.nan,
+            dtype=np.complex128,
         )
-        values = np.linspace(config.flux.start, config.flux.stop, config.flux.expts)
-        flux_values = np.tile(values, (len(config.participants), 1))
-        return run_flux_scan(
-            spectrum,
-            flux_values=flux_values,
-            devices=[config.flux_dev],
-            flux_unit=config.flux_unit,
-            settle=config.settle,
-            context=context,
+        result = MuxFluxResult(
+            np.asarray(indices, dtype=np.int64), flux_values, frequencies, signals
         )
+        update = _make_flux_update(context.plots, result, cfg.flux_unit)
+        active_readout = cfg.readout.with_updates(
+            tones=[cfg.readout.tones[i] for i in indices]
+        )
+
+        # 2. Set the shared coil, settle, then scan common offsets on the host.
+        for point, value in enumerate(values):
+            if context.scope.stop.is_set():
+                break
+            set_flux(device, float(value), unit=cfg.flux_unit, stop=context.scope.stop)
+            if context.scope.stop.event.wait(cfg.settle):
+                break
+            stopped = False
+
+            def on_acquire_stop() -> None:
+                nonlocal stopped
+                stopped = True
+
+            buffer = SignalBuffer((len(dfs), len(indices)))
+            with Schedule(buffer, scope=context.scope) as sched:
+                for df, step in sched.scan("df", dfs.tolist()):
+                    readout = active_readout.with_updates(
+                        tones=[
+                            tone.with_updates(freq=tone.freq + df)
+                            for tone in active_readout.tones
+                        ]
+                    )
+                    # Reset precedes the full selected mux readout at every offset.
+                    builder = TimelineBuilder(
+                        context.soccfg,
+                        reps=cfg.reps,
+                        initial_delay=cfg.initial_delay,
+                        relax_delay=cfg.relax_delay,
+                    )
+                    if cfg.reset is not None:
+                        builder.emit(Reset("reset", cfg.reset))
+                    readout_module = MuxReadout("readout", readout)
+                    builder.emit(readout_module)
+                    prog = builder.build()
+                    _ = step.run_acquire(
+                        prog,
+                        context.soc,
+                        rounds=cfg.rounds,
+                        options=RunOptions(
+                            converter=partial(
+                                averaged_mux_signal, prog, readout_module
+                            ),
+                            on_stop=on_acquire_stop,
+                        ),
+                    )
+
+            # 3. Publish only complete spectra; an acquire-only Stop skips this point.
+            if stopped or context.scope.stop.is_set():
+                continue
+            acquired = buffer.array.T
+            nonfinite = ~np.isfinite(acquired)
+            if nonfinite.any():
+                row, column = np.argwhere(nonfinite)[0]
+                raise ValueError(
+                    f"Nonfinite inner IQ at flux point {point} (zero-based): "
+                    f"{np.count_nonzero(nonfinite)}/{acquired.size} invalid cells; "
+                    f"first at tone {indices[row]}, "
+                    f"DC={flux_values[row, point]} (native units), "
+                    f"frequency={frequencies[row, column]} MHz: "
+                    f"{acquired[row, column]!r}"
+                )
+            signals[:, point, :] = acquired
+            update(signals)
+        return result
+
+
+def _make_flux_update(
+    plots: Plots, result: MuxFluxResult, flux_unit: str
+) -> Callable[[NDArray[np.complex128]], None]:
+    """Create per-tone magnitude maps and ten scan-history lines.
+
+    Return a plot-thread updater accepting the complete tone-major IQ array.
+    Publish the planned axes before the first acquisition; the caller retains
+    ownership of Plots and its operation lifetime.
+    """
+    flux_values, frequencies = result.flux_values, result.frequencies
+    figures, heatmaps, lines = [], [], []
+    for index in result.tone_indices:
+        fig, _ = plots.subplots(1, 2, num=f"flux_{index}")
+        heat_ax, line_ax = fig.axes
+        heat_ax.set(xlabel=f"DC value ({flux_unit})", ylabel="Frequency (MHz)")
+        line_ax.set_xlabel("Frequency (MHz)")
+        line_ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+        line_ax.grid()
+        heatmaps.append(live_heatmap(heat_ax, uniform=False))
+        lines.append(live_line(line_ax, num_lines=10))
+        for artist in line_ax.lines[:-1]:
+            artist.set(marker="None", alpha=0.3, color="red")
+        line_ax.lines[-1].set(label="current line", marker=".", color="C0")
+        line_ax.legend()
+        figures.append(fig)
+
+    @plots.on_plot_thread
+    def update(data: NDArray[np.complex128]):
+        artists = []
+        for row, (heatmap, line) in enumerate(zip(heatmaps, lines, strict=True)):
+            real = np.abs(data[row])
+            valid = np.flatnonzero(~np.all(np.isnan(real), axis=1))
+            current = int(valid[-1]) if valid.size else -1
+            history = np.full((10, frequencies.shape[1]), np.nan)
+            for offset in range(min(10, current + 1)):
+                history[-offset - 1] = real[current - offset]
+            artists.extend(heatmap.set(flux_values[row], frequencies[row], real))
+            artists.extend(line.set(frequencies[row], history))
+        return artists
+
+    # Publish planned coordinates with no measured cells before the first point.
+    update(result.signals)
+    for fig in figures:
+        fig.show()
+    return update
