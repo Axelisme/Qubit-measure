@@ -18,8 +18,9 @@ class TableParam(QickParam):
     Units are those of the consuming QICK parameter. Use to_int to quantize all
     points with QICK's scalar conversion, then get_rounded for physical values.
     Empty or nonfinite values raise ValueError at construction. Scalar +, -, *,
-    / (including reversed operands) produce a new table on the same loop;
-    combining with another sweep raises TypeError. Comparisons with scalars
+    / (including reversed operands) produce a new table on the same loop.
+    Unswept QickParam operands supply their scalar value; combining with
+    another sweep raises TypeError. Comparisons with scalars
     return True if any point satisfies the comparison. Affine attributes
     start, spans, raw_param and derived_param raise TypeError naming the loop.
     """

@@ -51,6 +51,8 @@ def length_program(
     branch=False,
     point_count=1,
     auto=False,
+    pre_delay=0.0,
+    post_delay=0.0,
 ):
     env = white_noise(load_soccfg(2, 1), std_adc=0, routes=((0, 0),), seed=None)
     builder = TimelineBuilder(env.soccfg, reps=2, initial_delay=0, relax_delay=0.1)
@@ -78,7 +80,15 @@ def length_program(
         if flat
         else ConstWaveformCfg(length=value if cfg_length else 0.1)
     )
-    pulse_cfg = PulseCfg(ch=1, nqz=1, freq=80, gain=0.2, waveform=waveform)
+    pulse_cfg = PulseCfg(
+        ch=1,
+        nqz=1,
+        freq=80,
+        gain=0.2,
+        waveform=waveform,
+        pre_delay=pre_delay,
+        post_delay=post_delay,
+    )
     override = None if cfg_length else value
     receiver = PulseReadoutCfg(
         gen_ch=0,
@@ -88,6 +98,8 @@ def length_program(
         gain=0.1,
         waveform=waveform if consumer == "readout" else ConstWaveformCfg(length=0.1),
         ro_length=0.1,
+        pre_delay=pre_delay if consumer == "readout" else 0.0,
+        post_delay=post_delay if consumer == "readout" else 0.0,
     )
     if consumer == "readout":
         module = PulseReadout("readout", receiver, length=override)
@@ -197,6 +209,23 @@ def test_length_wrap_and_unplayed_branch_keep_auto_follower_at_actual_end(flat, 
             )
         expected_shots.append(scheduled_shots(scalar)[scalar_index])
     assert scheduled_shots(prog) == expected_shots * 4
+
+
+@pytest.mark.parametrize("flat", [False, True])
+@pytest.mark.parametrize("consumer", ["pulse", "readout", "reset"])
+def test_length_with_fractional_pre_and_post_matches_scalar_aggregate(flat, consumer):
+    values = [0.213, 0.107, 0.354]
+    options = dict(flat=flat, consumer=consumer, pre_delay=0.0137, post_delay=0.0189)
+    prog, env, _ = length_program(values, mode="table", **options)
+    observed = request(prog, env)
+    expected_shots = []
+    for index, value in enumerate(values):
+        scalar, scalar_env, _ = length_program(value, **options)
+        assert replace(observed.materialize_point(index), coordinates=()) == request(
+            scalar, scalar_env
+        ).materialize_point(0)
+        expected_shots.append(scheduled_shots(scalar)[0])
+    assert scheduled_shots(prog) == expected_shots * 2
 
 
 @pytest.mark.parametrize("flat", [False, True])
