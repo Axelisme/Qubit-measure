@@ -265,7 +265,7 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
             ax.plot(
                 xs, ft.expfunc(xs, *fit.params[:3]), linestyle="--", label="t1b fit"
             )
-            title = f"$T_1$ = {t1_str}, " + r"$T_{1b}$ = " + f"{t1b_str}"
+            title = f"$T_1$ = {t1_str},\n" + r"$T_{1b}$ = " + f"{t1b_str}"
         else:
             title = f"$T_1$ = {t1_str}"
         ax.set_title(title, fontsize=14)

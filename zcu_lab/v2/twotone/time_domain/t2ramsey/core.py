@@ -255,7 +255,7 @@ class T2RamseyExp(Experiment[T2RamseyResult, T2RamseyCfg]):
         t2r_str = f"{t2r:.2f}us ± {t2rerr:.2f}us"
         if fit_fringe:
             detune_str = f"{detune:.2f}MHz ± {detune_err * 1e3:.2f}kHz"
-            ax.set_title(f"T2 fringe = {t2r_str}, detune = {detune_str}", fontsize=15)
+            ax.set_title(f"T2 fringe = {t2r_str},\ndetune = {detune_str}", fontsize=15)
         else:
             ax.set_title(f"T2 decay = {t2r_str}", fontsize=15)
         ax.set_xlabel("Delay Time (us)")
