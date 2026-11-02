@@ -66,8 +66,8 @@ def align_end(
     """Ceil a resolved aggregate in us at every native sweep point.
 
     Call only at an aggregate or placement boundary during preprocessing.
-    Scalars and exact integer-affine sweeps remain static. Non-affine native
-    lengths use k=8 upper fixed-point conversion, retaining the aggregate tail.
+    Scalars and exact integer-affine sweeps remain static. Explicit tables
+    ceil pointwise into initialized native registers. Non-affine native lengths use k=8 upper fixed-point conversion, retaining the aggregate tail.
     native identifies the original integer lattice, not an already rounded end.
     """
 
@@ -1285,8 +1285,10 @@ class RuntimeMath(TimedMacro):
     def time_parameter(self, value: RuntimeEnd | TableParam) -> QickParam:
         """Return an exactly known affine time, never runtime allocation metadata.
 
-        A runtime-only or non-affine value cannot be returned as QickParam and
-        raises RuntimeError. This read does not alter the scheduled end.
+        value is a captured runtime end or already-rounded explicit time table.
+        Runtime-only and non-affine values raise RuntimeError. Constant/affine
+        tables return exact QickParam values, not TableParam. This read does not
+        allocate registers or alter the scheduled end.
         """
         expression = (
             parameter_expression(self.prog, value)

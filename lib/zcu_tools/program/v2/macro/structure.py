@@ -42,7 +42,9 @@ class MarkedOpenLoop(OpenLoop):
     words; step is per iteration of this loop. Definitions come from resolved
     QICK sweeps, not their instruction expansions. tables maps WMEM word/field
     indexes to rotated DMEM word offsets discovered from TableRawParam fields.
-    The same definitions drive metadata and native closing-shell updates.
+    register_tables maps resolved register addresses to rotated DMEM offsets
+    and ordered integer values. Those registers are discovered after time
+    consumers preprocess. Both kinds advance in the native closing shell.
     """
 
     def preprocess(self, prog) -> None:
@@ -117,6 +119,7 @@ class MarkedCloseLoop(CloseLoop):
     """
 
     def preprocess(self, prog) -> None:
+        """Discover time-register tables after body allocation and validate loops."""
         super().preprocess(prog)
         # Time registers are allocated by body preprocess, after OpenLoop.
         for reg in list(prog.reg_dict.values()):

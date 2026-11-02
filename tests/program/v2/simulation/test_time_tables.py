@@ -62,6 +62,21 @@ class PulseAtTime(Module):
         )
 
 
+def make_receiver(*, name="readout", pre_delay=0.0, post_delay=0.0, trig_offset=0.0):
+    return PulseReadoutCfg(
+        gen_ch=0,
+        ro_ch=0,
+        nqz=1,
+        freq=100,
+        gain=0.1,
+        waveform=ConstWaveformCfg(length=0.1),
+        ro_length=0.1,
+        pre_delay=pre_delay,
+        post_delay=post_delay,
+        trig_offset=trig_offset,
+    ).build(name)
+
+
 def time_program(value, *, table=False, linear=False, outer=False, consumer="delay"):
     env = white_noise(load_soccfg(2, 1), std_adc=0, routes=((0, 0),), seed=None)
     builder = TimelineBuilder(env.soccfg, reps=2, initial_delay=0, relax_delay=0.1)
@@ -87,18 +102,11 @@ def time_program(value, *, table=False, linear=False, outer=False, consumer="del
         builder.emit(
             RegisterDelay(value, increment=consumer == "register_inc"), tag="time"
         )
-    receiver = PulseReadoutCfg(
-        gen_ch=0,
-        ro_ch=0,
-        nqz=1,
-        freq=100,
-        gain=0.1,
-        waveform=ConstWaveformCfg(length=0.1),
-        ro_length=0.1,
+    receiver = make_receiver(
         pre_delay=value if consumer == "pre_delay" else 0.0,
         post_delay=value if consumer == "post_delay" else 0.0,
         trig_offset=value if consumer == "trig_offset" else 0.0,
-    ).build("readout")
+    )
     if consumer in ("pulse_t", "native_t"):
         builder.emit(
             PulseAtTime(value, "default" if consumer == "pulse_t" else None), tag="time"
@@ -233,15 +241,7 @@ def adc_pair_program(value, *, table=False):
     builder = TimelineBuilder(env.soccfg, initial_delay=0, relax_delay=0.1)
     if table:
         value = builder.add_table_sweep("point", value)
-    receiver = PulseReadoutCfg(
-        gen_ch=0,
-        ro_ch=0,
-        nqz=1,
-        freq=100,
-        gain=0.1,
-        waveform=ConstWaveformCfg(length=0.1),
-        ro_length=0.1,
-    ).build("receiver")
+    receiver = make_receiver(name="receiver")
     builder.timeline_inc(value)
     builder.fork("default", into="later")
     builder.emit(receiver)
@@ -274,15 +274,7 @@ def runtime_auto_program(extra, *, table_extra=False, gens_only=False):
     placement = builder.add_table_sweep("point", [0.0213, 0.0107, 0.0354])
     if table_extra:
         extra = TableParam("point", extra)
-    receiver = PulseReadoutCfg(
-        gen_ch=0,
-        ro_ch=0,
-        nqz=1,
-        freq=100,
-        gain=0.1,
-        waveform=ConstWaveformCfg(length=0.1),
-        ro_length=0.1,
-    ).build("receiver")
+    receiver = make_receiver(name="receiver")
     builder.timeline_inc(placement)
     builder.emit(receiver)
     builder.delay_auto(extra, ros=not gens_only)
