@@ -60,6 +60,7 @@ class MarkedOpenLoop(OpenLoop):
                     )
             if fields:
                 self.tables[int(prog.wave2idx[wave.name])] = fields
+        prog.loop_wave_tables[self.name] = self.tables
         if self.tables:
             prog.add_reg(name="scratch", allow_reuse=True)
 
@@ -115,13 +116,8 @@ class MarkedCloseLoop(CloseLoop):
     def translate(self, prog) -> None:
         name, _count = prog.loop_stack[-1]
         prog.record_meta(type="LOOP_BODY_END", name=name, info={"native": True})
-        opening = next(
-            macro
-            for macro in prog.macro_list
-            if isinstance(macro, MarkedOpenLoop) and macro.name == name
-        )
         counter = prog.reg_dict[name].full_addr()
-        for address, fields in opening.tables.items():
+        for address, fields in prog.loop_wave_tables[name].items():
             wave_name = prog.waves[address].name
             for field, offset in fields.items():
                 scratch = prog.reg_dict["scratch"].full_addr()
