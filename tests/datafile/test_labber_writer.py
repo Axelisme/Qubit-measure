@@ -130,7 +130,7 @@ def test_independent_rank_three_exports_first_axis_as_named_2d_logs(
     projected, projected_metadata = datafile.read_labber(path)
     assert projected_metadata == metadata
     for index in range(2):
-        payload = loaded.variables[f"signal_{index}"]
+        payload = loaded.variables[datafile.DataVariable(f"signal_{index}")]
         np.testing.assert_array_equal(payload.z, values[index])
         assert payload.data.unit == "V"
         assert [(axis.name, axis.unit) for axis in payload.axes] == [
@@ -147,7 +147,9 @@ def test_independent_rank_three_exports_first_axis_as_named_2d_logs(
             "frequency",
         ]
     for name, variable in original.vars.items():
-        np.testing.assert_array_equal(loaded.variables[name].z, variable.values)
+        np.testing.assert_array_equal(
+            loaded.variables[datafile.DataVariable(name)].z, variable.values
+        )
 
     # These labels and groups are the Labber wire contract visible to other readers.
     with h5py.File(path, "r") as file:
