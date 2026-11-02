@@ -12,7 +12,6 @@ from pydantic import Field
 from pydantic.dataclasses import dataclass as validated_dataclass
 from zcu_tools.analysis.fitting import (
     FitQuality,
-    compute_fit_quality,
     fit_decay,
     fit_decay_fringe,
 )
@@ -232,38 +231,22 @@ class T2RamseyExp(Experiment[T2RamseyResult, T2RamseyCfg]):
                     init_phase = 180.0
                 fixedparams = [None, None, None, init_phase, None]
             fit = fit_decay_fringe(lengths, real_signals, fixedparams=fixedparams)
-            t2r, t2rerr, detune, detune_err, y_fit, pOpt, pCov = (
+            t2r, t2rerr, detune, detune_err, y_fit = (
                 fit.decay_time,
                 fit.decay_time_err,
                 fit.freq,
                 fit.freq_err,
                 fit.curve,
-                fit.params,
-                fit.cov,
             )
         else:
             fit = fit_decay(lengths, real_signals)
-            t2r, t2rerr, y_fit, pOpt, pCov = (
+            t2r, t2rerr, y_fit = (
                 fit.decay_time,
                 fit.decay_time_err,
                 fit.curve,
-                fit.params,
-                fit.cov,
             )
             detune = 0.0
             detune_err = 0.0
-
-        names = (
-            ("y0", "yscale", "freq", "phase", "decay_time")
-            if fit_fringe
-            else ("y0", "yscale", "decay_time")
-        )
-        quality = compute_fit_quality(
-            real_signals,
-            y_fit,
-            {name: float(value) for name, value in zip(names, pOpt, strict=True)},
-            pCov,
-        )
 
         fig, ax = plots.subplots(num="fit", figsize=config.figsize)
 
@@ -287,5 +270,5 @@ class T2RamseyExp(Experiment[T2RamseyResult, T2RamseyCfg]):
             t2r_err=float(t2rerr),
             detune=float(detune),
             detune_err=float(detune_err),
-            fit_quality={"fit": quality},
+            fit_quality={"fit": fit.quality},
         )

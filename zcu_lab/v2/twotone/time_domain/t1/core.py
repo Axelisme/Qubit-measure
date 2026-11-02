@@ -13,7 +13,6 @@ from pydantic import Field
 from pydantic.dataclasses import dataclass as validated_dataclass
 from zcu_tools.analysis.fitting import (
     FitQuality,
-    compute_fit_quality,
     fit_decay,
     fit_dual_decay,
 )
@@ -238,34 +237,22 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
 
         if options.dual_exp:
             fit = fit_dual_decay(xs, real_signals)
-            t1, t1err, t1b, t1berr, y_fit, pOpt, pCov = (
+            t1, t1err, t1b, t1berr, y_fit = (
                 fit.decay_time1,
                 fit.decay_time1_err,
                 fit.decay_time2,
                 fit.decay_time2_err,
                 fit.curve,
-                fit.params,
-                fit.cov,
             )
-            names = ("y0", "yscale1", "decay_time1", "yscale2", "decay_time2")
         else:
             fit = fit_decay(xs, real_signals)
-            t1, t1err, y_fit, pOpt, pCov = (
+            t1, t1err, y_fit = (
                 fit.decay_time,
                 fit.decay_time_err,
                 fit.curve,
-                fit.params,
-                fit.cov,
             )
-            names = ("y0", "yscale", "decay_time")
             t1b = 0.0
             t1berr = 0.0
-        quality = compute_fit_quality(
-            real_signals,
-            y_fit,
-            {name: float(value) for name, value in zip(names, pOpt, strict=True)},
-            pCov,
-        )
 
         fig, ax = plots.subplots(num="fit")
 
@@ -275,7 +262,9 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
         t1_str = f"{t1:.2f}us ± {t1err:.2f}us"
         if options.dual_exp:
             t1b_str = f"{t1b:.2f}us ± {t1berr:.2f}us"
-            ax.plot(xs, ft.expfunc(xs, *pOpt[:3]), linestyle="--", label="t1b fit")
+            ax.plot(
+                xs, ft.expfunc(xs, *fit.params[:3]), linestyle="--", label="t1b fit"
+            )
             title = f"$T_1$ = {t1_str}, " + r"$T_{1b}$ = " + f"{t1b_str}"
         else:
             title = f"$T_1$ = {t1_str}"
@@ -292,5 +281,5 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
             t1_err=float(t1err),
             t1b=float(t1b) if options.dual_exp else None,
             t1b_err=float(t1berr) if options.dual_exp else None,
-            fit_quality={"fit": quality},
+            fit_quality={"fit": fit.quality},
         )
