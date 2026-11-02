@@ -58,23 +58,13 @@ class RBEstimate:
 
 @dataclass(frozen=True)
 class RBAnalysis:
-    """Survival and fit diagnostics derived only from saved cfg/counts.
+    """Fixed-size d=4 paired RB estimate and reference/interleaved fit quality.
 
-    survival has shape (depth,seed,2,round); NaN means unavailable paired round.
-    acquired_rounds has that shape and records finite whole rounds in each arm
-    before pair selection. mean_survival/fit_survival are (2,depth), with equal
-    seed weighting; fit_survival remains NaN when estimate is None. estimate is
-    absent on missing cfg/data or an unidentifiable fit. fit_quality is
-    reference/interleaved residual diagnostics, or None without a fit. Parameter
-    covariance is not exposed by the shared paired owner, so these diagnostics
-    have no parameter-error entries. reason explains
-    why (None only on success). No missing sample is replaced by measured zero.
+    estimate is None with reason when no fit is identifiable. fit_quality holds
+    residual diagnostics for each arm, or None without a fit. Survival arrays,
+    round completeness and model curves are used only inside analyze.
     """
 
-    survival: NDArray[np.float64]
-    acquired_rounds: NDArray[np.bool_]
-    mean_survival: NDArray[np.float64]
-    fit_survival: NDArray[np.float64]
     estimate: RBEstimate | None
     fit_quality: tuple[FitQuality, FitQuality] | None
     reason: str | None

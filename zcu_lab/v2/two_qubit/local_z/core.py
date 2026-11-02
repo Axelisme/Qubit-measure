@@ -40,7 +40,7 @@ from .._drive import DualLineCfg
 from .._phase import count_phase, phase_variance, sigma_variance
 from .._readout import JointRoles
 from .._sums import sigma, validate_classifiers
-from .analysis import LocalZAnalysis, fit_target
+from .analysis import LocalZAnalysis, fit_target, summarize_fit
 
 
 class LocalZCfg(ConfigBase):
@@ -342,13 +342,6 @@ class LocalZExp(Experiment[LocalZResult, LocalZCfg]):
             )
             for t in range(2)
         )
-        answer = LocalZAnalysis(
-            targets,
-            quadratures,
-            counts.sum(axis=(-2, -1)),
-            tuple(cfg.gate_counts),
-            fits,
-        )
 
         fig, _ = plots.subplots(
             num="phase", nrows=3, ncols=1, figsize=(10, 9), layout="constrained"
@@ -356,39 +349,37 @@ class LocalZExp(Experiment[LocalZResult, LocalZCfg]):
         fig.suptitle("Both targets · independent classified X/Y acquisitions")
         for t, role in enumerate((cfg.roles.f1, cfg.roles.f2)):
             fig.axes[0].plot(
-                answer.gate_counts,
-                [p.contrast for p in answer.phases[t]],
+                data.gate_counts,
+                [p.contrast for p in targets[t]],
                 ".-",
                 label=f"F{t + 1} {role}",
             )
             fig.axes[1].plot(
-                answer.gate_counts,
+                data.gate_counts,
                 [
                     np.nan if p.logical_phase_deg is None else p.logical_phase_deg
-                    for p in answer.phases[t]
+                    for p in targets[t]
                 ],
                 ".-",
                 label=f"F{t + 1} {role}",
             )
-            fit = answer.fits[t]
+            fit = fits[t]
             if fit.unwrapped_deg is not None and fit.fit_curve is not None:
                 fig.axes[2].plot(
-                    answer.gate_counts,
+                    data.gate_counts,
                     fit.unwrapped_deg,
                     ".",
                     label=f"F{t + 1} {role} unwrapped",
                 )
                 fig.axes[2].plot(
-                    answer.gate_counts,
+                    data.gate_counts,
                     fit.fit_curve,
                     "-",
                     label=f"F{t + 1} WLS; correction={fit.correction_deg:.5g} ± {fit.slope_error_deg:.2g} deg (1σ)",
                 )
         fig.axes[2].set_title(
             "\n".join(
-                f"F{t + 1}: {fit.reason}"
-                for t, fit in enumerate(answer.fits)
-                if fit.reason
+                f"F{t + 1}: {fit.reason}" for t, fit in enumerate(fits) if fit.reason
             )
             or "Complete-row WLS with intercept; correction = −slope"
         )
@@ -402,19 +393,19 @@ class LocalZExp(Experiment[LocalZResult, LocalZCfg]):
             strict=True,
         ):
             ax.set(xlabel="CZ gate count", ylabel=label)
-            ax.set_xlim(answer.gate_counts[0], answer.gate_counts[-1])
+            ax.set_xlim(data.gate_counts[0], data.gate_counts[-1])
             if ax.get_legend_handles_labels()[0]:
                 ax.legend()
         fig, axes = plots.subplots(num="quadratures", figsize=(10, 5))
         for t in range(2):
             for q, projection in enumerate(("X", "Y")):
                 axes.plot(
-                    answer.gate_counts,
-                    answer.quadratures[t, q],
+                    data.gate_counts,
+                    quadratures[t, q],
                     ".-",
                     label=f"F{t + 1} {projection}",
                 )
         axes.set(xlabel="CZ gate count", ylabel="Target sigma")
         axes.legend()
 
-        return answer
+        return LocalZAnalysis(tuple(summarize_fit(fit) for fit in fits))

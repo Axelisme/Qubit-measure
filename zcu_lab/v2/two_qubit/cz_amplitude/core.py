@@ -42,7 +42,12 @@ from .._sums import (
     joint_probabilities,
     validate_classifiers,
 )
-from .analysis import OUTCOME_LABELS, CZAmplitudeAnalysis, analyze_return
+from .analysis import (
+    OUTCOME_LABELS,
+    CZAmplitudeAnalysis,
+    analyze_return,
+    summarize_return,
+)
 
 
 class CZAmplitudeCfg(ConfigBase):
@@ -319,4 +324,4 @@ class CZAmplitudeExp(Experiment[CZAmplitudeResult, CZAmplitudeCfg]):
         )
         ax.legend()
 
-        return terminal
+        return summarize_return(terminal.fit)

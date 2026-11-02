@@ -33,18 +33,15 @@ from zcu_tools.program.v2.modules import MuxReadout
 
 from zcu_lab.v2.support import live_line
 
-from .._phase import QuadraturePhase
 from .._sums import herald_probabilities, sigma, terminal_counts, validate_classifiers
 from .analysis import (
     ConditionalPhaseAnalysis,
-    PhaseSlopeFit,
     count_quadratures,
     fit_phase_slopes,
     fitted_crossings,
     phase_points,
 )
 from .core import ConditionalPhaseCfg
-from .crossing import PhaseCrossings, phase_crossings
 
 
 class ConditionalPhaseHeraldedCfg(ConditionalPhaseCfg):
@@ -83,22 +80,7 @@ def restore_result(
 
 @dataclass(frozen=True)
 class ConditionalPhaseHeraldedAnalysis(ConditionalPhaseAnalysis):
-    """Joint writeback with gg-only fit and sign-corrected ee diagnostics.
-
-    ee arrays use actual spectator g/e order; shapes match the gg base fields.
-    gg_slope_fit/gg_conditional_deg/gg_crossings retain the independent gg fit.
-    herald_matrix has all leading scan axes plus herald (3,3); pass_fraction
-    is its (g,g) cell, not ground-state purity.
-    """
-
-    ee_phases: tuple[tuple[tuple[QuadraturePhase, ...], ...], ...]
-    ee_quadratures: NDArray[np.float64]
-    ee_acquired_shots: NDArray[np.float64]
-    gg_slope_fit: PhaseSlopeFit
-    gg_conditional_deg: NDArray[np.float64]
-    gg_crossings: PhaseCrossings
-    herald_matrix: NDArray[np.float64]
-    pass_fraction: NDArray[np.float64]
+    """Unique π crossing from shared gg/ee slopes, or its failure reason."""
 
 
 class ConditionalPhaseHeraldedExp(
@@ -333,27 +315,10 @@ class ConditionalPhaseHeraldedExp(
             gg_fitted.slopes_deg[1] - gg_fitted.slopes_deg[0] + 180
         ) % 360 - 180
         crossings = fitted_crossings(data.frequencies, conditional, fitted)
-        gg_crossings = phase_crossings(data.frequencies, gg_conditional)
         herald_matrix = herald_probabilities(data.sums)
         answer = ConditionalPhaseHeraldedAnalysis(
-            phases,
-            gg_stats.values,
-            gg_stats.acquired,
-            tuple(cfg.gate_counts),
-            tuple(float(f) for f in data.frequencies),
-            fitted,
-            conditional,
-            crossings,
             crossings.frequencies_mhz[0] if crossings.reason is None else None,
             crossings.reason,
-            ee_phases,
-            (-ee_stats.values),
-            ee_stats.acquired,
-            gg_fitted,
-            gg_conditional,
-            gg_crossings,
-            herald_matrix,
-            herald_matrix[..., 0, 0],
         )
 
         fig, _ = plots.subplots(

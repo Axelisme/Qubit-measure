@@ -13,16 +13,13 @@ from zcu_tools.gui.app.measure.adapter import (
 from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
-from .._rabi_analysis import RabiAnalysis
 from .core_heralded import ChevronHeraldedCfg, ChevronHeraldedExp, ChevronHeraldedResult
 from .form import scan_form
 
 ChevronHeraldedRun: TypeAlias = RunRecord[ChevronHeraldedCfg, ChevronHeraldedResult]
 
 
-def _analyze(
-    req: AnalyzeRequest[ChevronHeraldedRun, None], *, plots: Plots
-) -> RabiAnalysis:
+def _analyze(req: AnalyzeRequest[ChevronHeraldedRun, None], *, plots: Plots) -> None:
     """Analyze saved source cfg/counts, never the current Form or library."""
     return ChevronHeraldedExp().analyze(req.run_result, None, plots=plots)
 

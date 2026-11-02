@@ -19,9 +19,8 @@ from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2.support.measure.writeback_helpers import module_writeback
 
-from .analysis import CZAmplitudeAnalysis
+from .analysis import CZAmplitudeAnalysis, CZReturnSummary
 from .core import CZAmplitudeCfg, CZAmplitudeExp, CZAmplitudeResult
-from .fit import CZReturnFit
 from .form import make_form
 
 CZAmplitudeRun: TypeAlias = RunRecord[CZAmplitudeCfg, CZAmplitudeResult]
@@ -43,7 +42,9 @@ def _get_writeback_items(
 
 
 def amplitude_writeback(
-    cfg: CZAmplitudeCfg | None, fit: CZReturnFit, parameters: ParameterContext | None
+    cfg: CZAmplitudeCfg | None,
+    fit: CZReturnSummary,
+    parameters: ParameterContext | None,
 ) -> Sequence[WritebackItem]:
     """Propose two ordinary coupler pulses and two separate resolved slot keys.
 
