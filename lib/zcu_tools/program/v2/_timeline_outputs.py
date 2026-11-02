@@ -331,6 +331,8 @@ class TimelinePlacedTrigger(Trigger):
 
     def preprocess(self, prog) -> None:
         origin = self.book.end(self.timeline)
+        if isinstance(self.relative_t, TableParam):
+            origin = self.book.math.cycles(origin)
         if self.relative_width is not None:
             self.width = placement_time(prog, self.relative_width)
         if isinstance(origin, RuntimeEnd):
@@ -344,6 +346,8 @@ class TimelinePlacedTrigger(Trigger):
             super().preprocess(prog)
             self.t_regs["t"] = "s_out_time"
             duration = self.get_time_param("width")
+            if not duration.is_sweep():
+                duration = duration.start
             scheduled = self.book.math.add(
                 origin, placement_time(prog, self.relative_t)
             )
