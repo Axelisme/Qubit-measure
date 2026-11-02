@@ -378,6 +378,7 @@ class WritebackWidget(QWidget):
         self._hint = QLabel(
             "Select the items to write back. Use Edit to adjust values first."
         )
+        self._hint.setObjectName("writebackModuleWarning")
         self._hint.setWordWrap(True)
         self._hint.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 from collections.abc import Generator
+from dataclasses import asdict
 from pathlib import Path
 from typing import Literal
 from unittest.mock import MagicMock
@@ -24,6 +25,7 @@ from qtpy.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from zcu_tools.cfg_model import PulseSpec
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.scope import Scope
 from zcu_tools.gui.app.measure.adapter import (
@@ -32,12 +34,14 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.writeback import (
+    ModuleWriteback,
     ParameterWriteback,
     RecordWriteback,
     WritebackItem,
     WritebackValues,
 )
 from zcu_tools.gui.app.measure.writeback.widget import WritebackWidget
+from zcu_tools.gui.form import FormErrors
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
@@ -128,6 +132,76 @@ def test_bulk_selection_updates_each_draft_and_apply_gate(qapp, tmp_path, pane):
     widget.detach()
     widget.deleteLater()
     qapp.processEvents()
+
+
+@pytest.mark.parametrize("pane", ["analysis", "post_analysis"])
+def test_invalid_module_warning_follows_selection(qapp, tmp_path, pane):
+    ctrl = MagicMock()
+    item = ModuleWriteback(
+        "Q1.pulses.tuned",
+        "Synthetic invalid pulse",
+        PulseSpec(ch=0, nqz=1, freq=5000.0, gain=0.2, waveform="Q1.waveforms.flat"),
+    )
+    item.session_id = "module-1"
+    parameter = ParameterWriteback("R1.freq", "Frequency", 6001.0)
+    parameter.session_id = "freq"
+    ctrl.writeback_control.get_writeback_item_form_for_pane.return_value.result.return_value = FormErrors(
+        {("gain",): "Unknown parameter"}
+    )
+    ctrl.writeback_control.get_writeback_values_for_pane.return_value = _parameter_values(
+        [parameter]
+    )
+    widget = WritebackWidget(ctrl, tab_id="tab-1", pane=pane)
+    widget.refresh_module_validity([item, parameter])
+    widget.resize(700, 350)
+    widget.show()
+    ui = ComponentDriver(widget)
+    evidence = (
+        Path(os.environ.get("WRITEBACK_SELECTION_EVIDENCE", str(tmp_path))) / pane
+    )
+
+    def capture(step: str) -> None:
+        ui.screenshot(evidence / f"{step}.png")
+        (evidence / f"{step}.json").write_text(
+            json.dumps(
+                {
+                    "visible": asdict(ui.visible()),
+                    "warning": asdict(ui.observe(object_name="writebackModuleWarning")),
+                    "apply": asdict(ui.observe("Apply Selected")),
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+
+    try:
+        capture("01-invalid-selected")
+        warning = ui.observe(object_name="writebackModuleWarning")
+        assert warning.visible
+        assert warning.text == "Fix or uncheck invalid module: Q1.pulses.tuned"
+        assert not ui.observe("Apply Selected").enabled
+
+        ui.click("Q1.pulses.tuned*")
+        capture("02-invalid-unchecked")
+        assert not ui.observe("Q1.pulses.tuned*").checked
+        assert not ui.observe(object_name="writebackModuleWarning").visible
+        assert ui.observe("Apply Selected").enabled
+
+        ui.click("Q1.pulses.tuned*")
+        capture("03-invalid-reselected")
+        assert ui.observe(object_name="writebackModuleWarning").visible
+        assert not ui.observe("Apply Selected").enabled
+
+        ui.click("Q1.pulses.tuned*")
+        capture("04-invalid-unchecked-again")
+        assert not ui.observe(object_name="writebackModuleWarning").visible
+        assert ui.observe("Apply Selected").enabled
+    finally:
+        widget.detach()
+        widget.close()
+        widget.deleteLater()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        qapp.processEvents()
 
 
 def test_writeback_widget_lists_items_and_edit_buttons(qapp):
