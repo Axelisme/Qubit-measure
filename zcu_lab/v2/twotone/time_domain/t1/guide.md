@@ -14,6 +14,12 @@ The ordinary T1 sweep stop is 5 times the same time scale, initially 150 us when
 
 Open and Reset capture the T1 used for starting values. A missing or null T1, or an absent calibration snapshot, uses 30 us, giving a 150 us wait. An invalid stored T1 leaves required derived fields empty. Alias or parameter lookup failures report an error. Review and edit these starting values before Run; they are form inputs only. Active reset keeps the same wait unless you change it.
 
+## Tone-driven T1 gain scan
+
+The Python experiment `ScanT1WithToneExp` scans test-tone gain on the host and tone duration on the board. Its `gain` accepts one `SweepCfg` in normalized gain units, not an explicit list. `length` supplies the duration `SweepCfg` in us. The result keeps gain × duration complex IQ.
+
+The gain-only sweep schema is 4.0. Loading a schema 3.0 file leaves cfg unavailable and reports `cfg_issue`; its data arrays remain available for plotting and analysis. No cfg conversion is performed.
+
 ## Module slots
 
 Readout uses the qubit.module.readout slot captured at Open/Reset, or a readout template. Reset uses qubit.module.reset and stays disabled when absent. The drive uses qubit.module.x180 with a pi_pulse template fallback. Unset slots or slots pointing to missing modules use the named template. Saved modules remain selectable. Pulse templates read qubit.freq, qubit.wiring.ch, resonator.freq, resonator.wiring.ch/ro_ch and resonator.time_of_fly + 0.05 us; missing required calibration remains Invalid.

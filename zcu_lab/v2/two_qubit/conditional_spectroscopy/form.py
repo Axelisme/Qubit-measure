@@ -53,24 +53,6 @@ def spectroscopy_form(ctx: FormContext, cfg_type: type[T_Cfg]) -> Form[T_Cfg]:
     readout = mux_readout_initial(ctx)
     return Form(
         cfg_type,
-        # Show captured roles first and keep acquisition settings after the scan controls.
-        field_order=(
-            "roles",
-            "reset",
-            "x180_f1",
-            "x180_f2",
-            "readout",
-            "drive",
-            "contrast",
-            "dc_device",
-            "dc_unit",
-            "frequency",
-            "dc_values",
-            "reps",
-            "rounds",
-            "relax_delay",
-            "initial_delay",
-        ),
         tree={
             "reps": 1000,
             "rounds": 10,

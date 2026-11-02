@@ -244,48 +244,50 @@ class MuxFluxResult:
 
 
 def run_flux_scan(
-    cfg: GlobalFluxCfg[MuxFrequencyOffsetCfg]
-    | LocalFluxCfg[MuxFrequencyOffsetCfg]
-    | GlobalFluxCfg[FluxFrequencyCfg]
-    | LocalFluxCfg[FluxFrequencyCfg],
+    spectrum: MuxOnetoneCfg | MuxFreqCfg,
     *,
+    flux_values: NDArray[np.float64],
+    devices: list[str],
+    flux_unit: Literal["A", "V", "native"],
+    settle: float,
     context: RunContext,
 ) -> MuxFluxResult:
-    """Set selected DC sources, settle, then reuse the inner mux run per point.
+    """Set DC sources, settle, then acquire an inner mux spectrum per flux point.
 
-    cfg is not mutated. context supplies connected drivers/board and the one
-    Run scope. Validate every selected driver's unit before the first write.
-    Global scans write the coil once per point; local scans zip selected lines.
+    spectrum is a validated inner cfg with the full original readout/drive tone
+    lists, not lists sliced to participants. Its participants selects K original
+    indices in acquisition/result row order. It also supplies reset, frequency
+    sweeps, averaging counts and us timing. Onetone df is a nominal MHz offset;
+    twotone ranges are absolute MHz, quantized by the inner spectrum owner.
+
+    flux_values is finite float64 (K,F), F > 0, already selected and ordered by
+    spectrum.participants. Coordinates use flux_unit without conversion. For a
+    global scan, all K rows are identical and devices contains one source name;
+    that source is written once per point using row 0. For a local scan, devices
+    contains K distinct source names in the same selected row order, not full
+    original tone order. Each source follows its corresponding flux_values row.
+    Local lines advance together by point index, not as a Cartesian product.
+    settle is a finite nonnegative wait in seconds after each point's DC writes.
+
+    context supplies connected drivers, board, plots and the Run scope. Check
+    every selected driver's unit before the first write. Inputs are not mutated;
+    the inner cfg is deep-copied. The result reuses flux_values and returns
+    original tone indices (K,), DC coordinates (K,F), absolute MHz frequencies
+    (K,P) and complex128 IQ (K,F,P), including the full planned axes after Stop.
     Cancelling an inner acquire leaves that whole flux point NaN and continues
     with the next point. Cancelling the Run scope stops the scan during ramp,
     settle or acquisition, preserving earlier completed points and leaving the
     unfinished point and later points NaN. Uncancelled nonfinite inner IQ raises
     ValueError with the zero-based flux point and first invalid tone/cell.
-    Driver/acquisition errors propagate. Sources retain their last setting;
-    no automatic restoration occurs.
+    Missing device names raise KeyError; unit mismatch raises ValueError and
+    unsupported drivers raise TypeError. Driver/acquisition errors propagate.
+    Sources retain their last setting; no automatic restoration occurs.
     """
-    indices = list(cfg.participants)
-    if isinstance(cfg, GlobalFluxCfg):
-        values = np.linspace(cfg.flux.start, cfg.flux.stop, cfg.flux.expts)
-        flux_values = np.tile(values, (len(indices), 1))
-        devices = [cfg.flux_dev]
-    else:
-        flux_values = np.asarray(
-            [
-                np.linspace(
-                    cfg.tones[i].require_flux().start,
-                    cfg.tones[i].require_flux().stop,
-                    cfg.flux_expts,
-                )
-                for i in indices
-            ],
-            dtype=np.float64,
-        )
-        devices = [cfg.tones[i].flux_dev for i in indices]
+    indices = list(spectrum.participants)
     for name in devices:
-        check_flux_unit(context.devices[name].get_info(), cfg.flux_unit)
+        check_flux_unit(context.devices[name].get_info(), flux_unit)
 
-    spectrum = cfg.inner_cfg().model_copy(deep=True)
+    spectrum = spectrum.model_copy(deep=True)
     if isinstance(spectrum, MuxOnetoneCfg):
         spectrum.participants = list(indices)
         dfs = np.linspace(spectrum.df.start, spectrum.df.stop, spectrum.df.expts)
@@ -293,7 +295,7 @@ def run_flux_scan(
             [spectrum.readout.tones[i].freq + dfs for i in indices]
         )
     else:
-        spectrum.participants = list(cfg.participants)
+        spectrum.participants = list(indices)
         frequencies = prepare_frequency_scan(
             spectrum, soccfg=context.soccfg
         ).coordinates
@@ -305,7 +307,7 @@ def run_flux_scan(
     result = MuxFluxResult(
         np.asarray(indices, dtype=np.int64), flux_values, frequencies, signals
     )
-    update = _make_flux_update(context.plots, result, cfg.flux_unit)
+    update = _make_flux_update(context.plots, result, flux_unit)
     for point in range(flux_values.shape[1]):
         if context.scope.stop.is_set():
             break
@@ -313,10 +315,10 @@ def run_flux_scan(
             set_flux(
                 context.devices[name],
                 float(flux_values[row, point]),
-                unit=cfg.flux_unit,
+                unit=flux_unit,
                 stop=context.scope.stop,
             )
-        if context.scope.stop.event.wait(cfg.settle):
+        if context.scope.stop.event.wait(settle):
             break
         acquired, stopped = _acquire_spectrum(spectrum, context=context)
         if stopped or context.scope.stop.is_set():
@@ -432,13 +434,16 @@ def _acquire_spectrum(
 
 
 def mux_flux_spec[C: ConfigBase](
-    cfg_type: type[C], *, tag: str
+    cfg_type: type[C], *, tag: str, cfg_schema_version: str
 ) -> GroupedAxesSpec[MuxFluxResult, C]:
     """Declare native tone/flux/frequency grids, converting MHz to Hz on disk.
 
-    cfg_type and tag identify one concrete experiment. All arrays retain full
-    planned axes and NaN gaps after Stop. Loading validates shapes and axes;
-    no current library or alias is consulted.
+    cfg_type and tag identify one concrete experiment. cfg_schema_version is
+    its persisted cfg version (for example "4.0"), passed to GroupedAxesSpec
+    without conversion or compatibility handling. All arrays retain full planned
+    axes and NaN gaps after Stop. Loading validates shapes and axes; malformed
+    data raises ValueError. An incompatible cfg version leaves cfg unavailable
+    with a cfg_issue while preserving valid data. No library or alias is read.
     """
     tone = VariableAxisSpec(
         label="Tone", unit="", field_name="tone_indices", dtype=np.int64
@@ -504,7 +509,7 @@ def mux_flux_spec[C: ConfigBase](
         tag=tag,
         result_builder=build,
         result_validator=validate_flux_result,
-        cfg_schema_version="4.0",
+        cfg_schema_version=cfg_schema_version,
         labber_layout="independent",
     )
 

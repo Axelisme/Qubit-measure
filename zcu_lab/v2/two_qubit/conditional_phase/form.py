@@ -34,24 +34,6 @@ def phase_form(ctx: FormContext, cfg_type: type[CfgT]) -> Form[CfgT]:
     )
     return Form(
         cfg_type,
-        # Show captured roles first and keep acquisition settings after the gate scan.
-        field_order=(
-            "roles",
-            "x180_f1",
-            "x180_f2",
-            "x90_f1",
-            "x90_f2",
-            "readout",
-            "reset",
-            "drive",
-            "target",
-            "frequency",
-            "gate_counts",
-            "reps",
-            "rounds",
-            "relax_delay",
-            "initial_delay",
-        ),
         tree={
             "reps": 1000,
             "rounds": 10,

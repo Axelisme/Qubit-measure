@@ -57,12 +57,6 @@ class SpectroscopyCfg(ConfigBase):
     Otherwise sweep the named source in dc_unit, without compensation or restore.
     """
 
-    reps: Annotated[int, FieldMeta(label="Reps")] = Field(default=1, gt=0)
-    rounds: Annotated[int, FieldMeta(label="Rounds")] = Field(default=1, gt=0)
-    initial_delay: Annotated[float, FieldMeta(label="Initial delay", unit="us")] = 1.0
-    relax_delay: Annotated[
-        float, FieldMeta(label="Relax delay", unit="us", decimals=3)
-    ] = 1.0
     reset: Annotated[
         Reset.Cfg | None,
         FieldMeta(
@@ -77,6 +71,13 @@ class SpectroscopyCfg(ConfigBase):
         Pulse.Cfg,
         FieldMeta(label="F2 Xπ", description="Calibrated F2 preparation pulse."),
     ]
+    drive: Annotated[
+        DualLineCfg,
+        FieldMeta(
+            label="Dual-line drive",
+            description="Two charge-line weak probe pulses; confirm gains and durations before Run.",
+        ),
+    ]
     readout: Annotated[
         MuxReadout.Cfg,
         FieldMeta(
@@ -85,21 +86,6 @@ class SpectroscopyCfg(ConfigBase):
         ),
     ]
     roles: JointRoles
-    drive: Annotated[
-        DualLineCfg,
-        FieldMeta(
-            label="Dual-line drive",
-            description="Two charge-line weak probe pulses; confirm gains and durations before Run.",
-        ),
-    ]
-    frequency: Annotated[
-        SweepCfg,
-        FieldMeta(
-            unit="MHz",
-            label="Frequency",
-            description="Common probe frequency scan on both charge lines.",
-        ),
-    ]
     contrast: Annotated[bool, FieldMeta(label="Double Xπ contrast")] = True
     dc_device: Annotated[DeviceName | None, FieldMeta(label="Coupler DC source")] = None
     dc_unit: Annotated[
@@ -112,6 +98,20 @@ class SpectroscopyCfg(ConfigBase):
             description="Inactive when source is None; no F1/F2 compensation.",
         ),
     ] = Field(default_factory=lambda: SweepCfg(start=0, stop=0, step=0, expts=1))
+    frequency: Annotated[
+        SweepCfg,
+        FieldMeta(
+            unit="MHz",
+            label="Frequency",
+            description="Common probe frequency scan on both charge lines.",
+        ),
+    ]
+    reps: Annotated[int, FieldMeta(label="Reps")] = Field(default=1, gt=0)
+    rounds: Annotated[int, FieldMeta(label="Rounds")] = Field(default=1, gt=0)
+    initial_delay: Annotated[float, FieldMeta(label="Initial delay", unit="us")] = 1.0
+    relax_delay: Annotated[
+        float, FieldMeta(label="Relax delay", unit="us", decimals=3)
+    ] = 1.0
 
     @model_validator(mode="after")
     def validate_pair(self) -> Self:
