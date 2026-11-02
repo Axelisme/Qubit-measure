@@ -27,7 +27,6 @@ from .modules import (
     ResetCfg,
     SoftDelay,
     TableLengthPulse,
-    TablePulseReadout,
     TwoPulseReset,
     TwoPulseResetCfg,
     WaveformCfg,
@@ -35,5 +34,6 @@ from .modules import (
 )
 from .read_axes import IQ, Classify, shot_sums, split_sums
 from .sweep import GainSweep, SweepCfg
+from .table_param import TableParam, TableRawParam
 from .timeline import TimelineProgramV2
 from .utils import sweep2param

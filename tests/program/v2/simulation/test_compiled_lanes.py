@@ -4,6 +4,7 @@ from dataclasses import replace
 
 import pytest
 from qick.asm_v2 import IncReg, QickRawParam, QickSweep1D
+from zcu_tools.program.v2 import TableParam
 from zcu_tools.program.v2.ir import CompiledRecord, CompiledStream
 from zcu_tools.program.v2.ir.instructions import MetaInst
 
@@ -92,6 +93,39 @@ def test_missing_loop_definition_keys_fail_before_request_with_location(key):
         stream_transform=transform,
     )
     with pytest.raises(ValueError, match="MetaInst.*preopt"):
+        request(prog, env)
+    assert env.soc.binding.last_request is None
+
+
+@pytest.mark.parametrize("point", [0, 1, 2])
+def test_register_table_metadata_must_match_initial_and_rotated_dmem(point):
+    def transform(snapshot):
+        records = []
+        for record in snapshot.records:
+            inst = record.instruction
+            if (
+                isinstance(inst, MetaInst)
+                and inst.type == "LOOP_START"
+                and inst.name == "scan"
+            ):
+                definition = next(iter(inst.info["register_tables"].values()))
+                values = list(definition["values"])
+                values[point] += 1
+                definition["values"] = tuple(values)
+                inst = replace(inst, info=inst.info)
+            records.append(CompiledRecord(inst, record.p_addr))
+        return CompiledStream(tuple(records))
+
+    def body(p):
+        p.delay(TableParam("scan", [0.02, 0.01, 0.03]))
+        p.pulse(0, "p")
+
+    prog, env = program(
+        body,
+        lambda p: p.add_loop("scan", 3),
+        stream_transform=transform,
+    )
+    with pytest.raises(ValueError, match="table.*disagree"):
         request(prog, env)
     assert env.soc.binding.last_request is None
 

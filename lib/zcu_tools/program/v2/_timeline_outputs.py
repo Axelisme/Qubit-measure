@@ -18,6 +18,7 @@ from ._timeline_runtime import (
 )
 from ._timeline_state import TimelineBook
 from .modules.util import get_fclk
+from .table_param import TableParam
 
 
 def _static_ticks(prog, value: float | QickParam) -> int | None:
@@ -91,6 +92,22 @@ class TimelineObservedPulse(Pulse):
             if self.source.t == "auto"
             else self.source.t
         )
+        if isinstance(t, TableParam):
+            start = self.book.math.cycles(t)
+            self.runtime_start = start
+            self.source.t = self.book.math.preprocess_time(start)
+            self.source.preprocess(prog)
+            self.source.t_regs["t"] = start.register
+            # QICK accumulates the unrounded timestamp across native auto
+            # pulses. Keep that table after preprocessing its scalar stand-in;
+            # nearest applies to each placement, not to each duration.
+            actual_end = t + prog.pulses[self.name].get_length()
+            self.book.native_timestamp(prog, actual_end, gen_ch=self.ch)
+            finish = self.book.math.cycles(actual_end)
+            self.book.runtime_gens[self.ch] = finish
+            self.book.record_native(prog, self.ch, finish, generator=True)
+            self.record(prog, t)
+            return
         self.source.preprocess(prog)
         if self.source.t != "auto":
             self.book.runtime_gens.pop(self.ch, None)
@@ -135,6 +152,8 @@ class TimelinePlacedPulse(TimelineObservedPulse):
         previous = self.book.channel_end(prog, self.ch, generator=True)
         if self.relative_t == "auto":
             end = self.book.math.maximum(end, previous)
+        if isinstance(self.relative_t, TableParam):
+            end = self.book.math.cycles(end)
         if isinstance(end, RuntimeEnd):
             scheduled = self.book.math.add(
                 end,
@@ -170,9 +189,12 @@ class TimelinePlacedPulse(TimelineObservedPulse):
                 if self.relative_t == "auto"
                 else placement_time(prog, self.relative_t)
             )
+            length = prog.pulses[self.name].get_length()
+            if isinstance(length, QickParam) and not length.is_sweep():
+                length = length.start
             self.event_end = EventEnd(
                 end,
-                offset + prog.pulses[self.name].get_length(),
+                offset + length,
                 (finish,),
                 _pulse_static_cycles(prog, self.ch, self.name, offset),
                 self.native_length(prog),
@@ -212,7 +234,11 @@ class TimelinePlacedPulse(TimelineObservedPulse):
             self.native_length(prog),
         )
         self.book.set_end(self.timeline, finish)
-        if isinstance(finish, RuntimeEnd):
+        if isinstance(actual_end, TableParam):
+            # Native auto playback consumes QICK's nearest timestamp, not the
+            # ceiled timeline boundary retained in event_end.rounded.
+            self.book.runtime_gens[self.ch] = self.book.math.cycles(actual_end)
+        elif isinstance(finish, RuntimeEnd):
             self.book.runtime_gens[self.ch] = finish
         else:
             self.book.runtime_gens.pop(self.ch, None)
@@ -325,6 +351,8 @@ class TimelinePlacedTrigger(Trigger):
 
     def preprocess(self, prog) -> None:
         origin = self.book.end(self.timeline)
+        if isinstance(self.relative_t, TableParam):
+            origin = self.book.math.cycles(origin)
         if self.relative_width is not None:
             self.width = placement_time(prog, self.relative_width)
         if isinstance(origin, RuntimeEnd):
@@ -338,6 +366,8 @@ class TimelinePlacedTrigger(Trigger):
             super().preprocess(prog)
             self.t_regs["t"] = "s_out_time"
             duration = self.get_time_param("width")
+            if not duration.is_sweep():
+                duration = duration.start
             scheduled = self.book.math.add(
                 origin, placement_time(prog, self.relative_t)
             )
@@ -346,9 +376,18 @@ class TimelinePlacedTrigger(Trigger):
                 length = (
                     prog.ro_chs[ch]["length"] / prog.soccfg["readouts"][ch]["f_output"]
                 )
-                ro_end = self.book.math.add(scheduled, align_end(prog, length))
-                self.book.runtime_ros[ch] = ro_end
-                self.book.record_native(prog, ch, ro_end, generator=False)
+                table = self.book.table_source(scheduled)
+                if table is None:
+                    ro_end = self.book.math.add(scheduled, align_end(prog, length))
+                    self.book.runtime_ros[ch] = ro_end
+                    self.book.record_native(prog, ch, ro_end, generator=False)
+                else:
+                    # This build-known table follows the scalar ADC timestamp
+                    # rule; register-only origins still owe runtime ceil above.
+                    ro_end = table + length
+                    self.book.native_timestamp(prog, ro_end, ro_ch=ch)
+                    self.book.runtime_ros[ch] = self.book.math.cycles(ro_end)
+                    self.book.record_native(prog, ch, ro_end, generator=False)
             offset = placement_time(prog, self.relative_t)
             self.event_end = EventEnd(
                 origin,

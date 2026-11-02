@@ -349,7 +349,7 @@ class MuxFreqExp(Experiment[MuxSweepResult, MuxFreqCfg]):
         """Fit each acquired spectrum for transition frequency and linewidth.
 
         source contains actual MHz axes and IQ; its cfg may be absent. options
-        selects the line shape and fit overlay. plots receives a fit_i figure
-        per original tone index. Return estimates or a per-tone failure reason.
+        selects the line shape. plots receives a fit_i figure with a fitted
+        overlay per original tone index. Return estimates or a per-tone failure reason.
         """
         return analyze_frequency(source.result, options, plots=plots)

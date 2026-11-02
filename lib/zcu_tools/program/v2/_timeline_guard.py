@@ -9,9 +9,13 @@ from dataclasses import dataclass
 
 from qick.asm_v2 import QickParam
 
+from .table_param import TableParam
+
 
 def bounds(value: float | QickParam) -> tuple[float, float]:
     """Return minimum/maximum us over every combination of linear sweep spans."""
+    if isinstance(value, TableParam):
+        return value.minval(), value.maxval()
     if isinstance(value, QickParam):
         return (
             value.start + sum(min(0.0, s) for s in value.spans.values()),

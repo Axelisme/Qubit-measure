@@ -2,6 +2,7 @@
 
 from copy import deepcopy
 
+import numpy as np
 import pytest
 from qick.asm_v2 import AsmInst, Pulse, QickSweep1D, Trigger
 from zcu_tools.program.v2 import ir
@@ -613,6 +614,110 @@ def test_analysis_rejects_nonterminating_control_flow_with_a_step_limit():
 def test_layout_reports_unusable_boundary_metadata(metadata, message):
     with pytest.raises(ValueError, match=message):
         ir.TimingLayout.from_metadata(metadata)
+
+
+def test_compiled_wmem_attaches_scalar_wave_words_without_mutating_inputs():
+    prog = ScalarProgram(load_soccfg(), reps=2, initial_delay=0, relax_delay=0)
+    layout = ir.TimingLayout.from_metadata(prog.meta_infos, (ir.TimingLoop("reps", 2),))
+    expected = tuple(
+        int(prog.waves[0][name])
+        for name in ("freq", "phase", "env", "gain", "length", "conf")
+    )
+    wmem = ir.compiled_wmem(prog)
+    before = deepcopy((prog.prog_list, prog.labels, wmem))
+    compiled = ir.CompiledTimingInput(prog.prog_list, prog.labels, layout, wmem=wmem)
+    result = ir.analyze_timing(compiled)
+    assert [[event.wave_words for event in shot.events] for shot in result.shots] == [
+        [expected, expected],
+        [expected, expected],
+    ]
+    assert (prog.prog_list, prog.labels, wmem) == before
+    assert ir.analyze_timing(compiled) == result
+
+
+@pytest.mark.parametrize(
+    "parameter,start,stop", [("gain", -0.2, 0.3), ("freq", 97, 103)]
+)
+def test_wave_words_follow_native_sweep_updates_and_reset(parameter, start, stop):
+    def compile_parameter(value, *, swept=False, reps=1):
+        class ParameterProgram(ScalarProgram):
+            def _initialize(self, cfg):
+                self.declare_gen(ch=0, nqz=1)
+                if swept:
+                    self.add_loop("scan", 3)
+                params = {"freq": 100, "gain": 0.1}
+                params[parameter] = value
+                self.add_pulse(
+                    ch=0,
+                    name="p",
+                    style="const",
+                    phase=0,
+                    length=10 / GEN_MHZ,
+                    **params,
+                )
+
+        return ParameterProgram(
+            load_soccfg(), reps=reps, initial_delay=0, relax_delay=0
+        )
+
+    prog = compile_parameter(QickSweep1D("scan", start, stop), swept=True, reps=2)
+    expected = []
+    for point in np.asarray(prog.get_pulse_param("p", parameter, as_array=True)).flat:
+        scalar = compile_parameter(float(point))
+        expected.append(ir.compiled_wmem(scalar)[0])
+    layout = ir.TimingLayout.from_metadata(
+        prog.meta_infos, (ir.TimingLoop("reps", 2), ir.TimingLoop("scan", 3))
+    )
+    wmem = ir.compiled_wmem(prog)
+    before = deepcopy(wmem)
+    compiled = ir.CompiledTimingInput(prog.prog_list, prog.labels, layout, wmem=wmem)
+    result = ir.analyze_timing(compiled)
+    assert [[event.wave_words for event in shot.events] for shot in result.shots] == [
+        [words, words] for words in expected * 2
+    ]
+    assert wmem == before
+    assert ir.analyze_timing(compiled) == result
+
+
+def test_register_wave_output_uses_patched_words_without_changing_template():
+    scalar = ScalarProgram(load_soccfg())
+    expected = ir.compiled_wmem(scalar)[0]
+
+    class RegisterWaveProgram(ScalarProgram):
+        def _initialize(self, cfg):
+            self.declare_gen(ch=0, nqz=1)
+            self.add_pulse(
+                ch=0,
+                name="p",
+                style="const",
+                freq=89,
+                phase=0,
+                gain=0.3,
+                length=10 / GEN_MHZ,
+            )
+            self.add_reg("frequency")
+            self.add_reg("gain")
+            self.write_reg("frequency", expected[0])
+            self.write_reg("gain", expected[3])
+
+        def _body(self, cfg):
+            self.meta_macro("TIMING_BOUNDARY", "body_start")
+            self.pulse_from_regs(
+                ch=0, name="p", freq_reg="frequency", gain_reg="gain", t=0
+            )
+            self.append_macro(Pulse(ch=0, name="p", t=20 / TPROC_MHZ))
+            self.meta_macro("TIMING_BOUNDARY", "body_end")
+
+    prog = RegisterWaveProgram(load_soccfg(), reps=2, initial_delay=0, relax_delay=0)
+    layout = ir.TimingLayout.from_metadata(prog.meta_infos, (ir.TimingLoop("reps", 2),))
+    wmem = ir.compiled_wmem(prog)
+    result = ir.analyze_timing(
+        ir.CompiledTimingInput(prog.prog_list, prog.labels, layout, wmem=wmem)
+    )
+    assert [[event.wave_words for event in shot.events] for shot in result.shots] == [
+        [expected, wmem[0]],
+        [expected, wmem[0]],
+    ]
 
 
 def test_native_waveform_sweep_updates_do_not_require_waveform_contents():

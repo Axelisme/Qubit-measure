@@ -1,7 +1,7 @@
 # tolerated(file-size): Native declaration ownership and timing share one compile lifecycle.
 """Native QICK programs with timeline ends relative to reference time."""
 
-from collections.abc import Generator, Mapping
+from collections.abc import Generator, Mapping, Sequence
 from contextlib import contextmanager
 from typing import TypedDict, override
 
@@ -56,6 +56,7 @@ from .macro.table import TableSelection
 from .modules.base import Module
 from .resources import ProgramResourcesMixin
 from .sweep import SweepCfg
+from .table_param import TableParam, TableRawParam
 from .utils import sweep2param
 
 
@@ -112,7 +113,8 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
     Constructor follows MyProgramV2: reps, initial_delay, relax_delay. Native
     operations retain QICK timing. Named outputs update their relative ends;
     delay_by_timeline and body completion move reference time.
-    Each compile resets ends.
+    Each compile resets ends. Native loop metadata follows the declaration
+    lifecycle owned by AdditionalMacroMixin.
     All instructions share the existing IR and acquisition implementations.
     get_time_param returns actual scalar/affine times. Runtime-only and
     non-affine timeline times raise RuntimeError, including as_array=True.
@@ -141,6 +143,14 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         super().__init__(*args, **kwargs)
 
     def _make_asm(self) -> None:
+        loop_counts = {loop.name: loop.count for loop in self.sweep_loops}
+        for wave in self.waves:
+            for raw in wave.sweeps():
+                if isinstance(raw, TableRawParam):
+                    raw.to_steps(loop_counts)
+        for reg in self.reg_dict.values():
+            if isinstance(reg.init, TableRawParam):
+                reg.init.to_steps(loop_counts)
         self._timeline_register_pool = []
         self._timeline_book.output_time = None
         self._time_bounds = ProducerBounds()
@@ -299,6 +309,19 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         register addresses. Recompilation rebuilds it from native declarations.
         """
         return tuple(TimingLoop(name, count) for name, count, _, _ in self.loops)
+
+    def add_table_sweep(self, name: str, values: Sequence[float]) -> TableParam:
+        """Declare a top-level lookup loop and return its physical values.
+
+        Call in _initialize. values must be a nonempty finite sequence in the
+        consuming parameter's units. Loops are outer-to-inner in call order
+        after reps. Invalid values or duplicate names raise ValueError.
+        """
+        param = TableParam(name, values)
+        if any(loop.name == name for loop in self.sweep_loops):
+            raise ValueError(f"loop name already used: {name!r}")
+        self.add_loop(name, len(param.values))
+        return param
 
     def add_sweep(self, name: str, spec: SweepCfg) -> QickParam:
         """Declare a new uniform top-level loop and return its QICK parameter.
@@ -689,7 +712,23 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         expression to runtime cycles; signed overflow fails during compile.
         """
         self._timeline_book.require_reference_advance()
-        super().decrement_timestamps(t)
+        if isinstance(t, TableParam):
+            book = self._timeline_book
+            if book.native_only:
+                return
+            for channels, runtime, generator in (
+                (self.gen_chs, book.runtime_gens, True),
+                (self.ro_chs, book.runtime_ros, False),
+            ):
+                for ch in channels:
+                    if ch not in runtime:
+                        end = self.get_timestamp(
+                            gen_ch=ch if generator else None,
+                            ro_ch=None if generator else ch,
+                        )
+                        runtime[ch] = book.math.cycles(end)
+        else:
+            super().decrement_timestamps(t)
         if t is not None:
             self._timeline_book.decrement(t)
 

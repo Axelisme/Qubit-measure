@@ -7,6 +7,7 @@ from zcu_tools.program.v2.simulation.compiled import build_compiled_request
 from zcu_tools.program.v2.timeline import TimelineProgramV2
 
 from tests.program._profiles import load_soccfg
+from tests.program.v2.wave_observations import analyze
 
 
 def program(
@@ -104,6 +105,15 @@ def clock_invariance_program(
             self.trigger([0], t=0.1)
 
     return Program(soccfg, reps=2, initial_delay=0, relax_delay=0.1)
+
+
+def scheduled_shots(prog):
+    """Return per-shot event kinds, relative cycles and unsigned wave words."""
+    analysis = analyze(prog)
+    return [
+        tuple((e.kind, e.cycle - shot.start_cycle, e.wave_words) for e in shot.events)
+        for shot in analysis.shots
+    ]
 
 
 def request(prog, env):

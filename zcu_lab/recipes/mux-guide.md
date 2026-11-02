@@ -266,7 +266,7 @@ captured Run settings or writeback policy.
 
 | Recipe | Analysis inputs |
 | --- | --- |
-| `mux_twotone_spectrum` | `model_type`: `lor` or `sinc`; `plot_fit`: draw the fitted curve |
+| `mux_twotone_spectrum` | `model_type`: `lor` or `sinc` |
 | `mux_amp_rabi` | `skip`: points omitted before fitting |
 | `mux_len_rabi` | `decay`: fit the envelope; `fit_phase`: fit the phase offset |
 | `mux_t1` | `dual_exp`: fit two components; `skip`: points omitted before fitting |
@@ -377,7 +377,7 @@ Choose each `tones[i].drive`. Use dotted-path overrides to set MHz bounds at
 `tones[i].freq.start` and `stop`, or supply the full `sweeps` list.
 Set shared `n` for all tones. The scans advance together by point number, not through every combination
 of frequencies. Set `model_type` to `lor` or `sinc` to select the fit model.
-Set `plot_fit` to false to hide the fitted curve without changing the fit.
+The fitted curve is always shown.
 
 Successful report rows contain `freq` and `fwhm` in MHz with their errors.
 Inspect `measurement` and each `fit_i` for the peak and fit quality.

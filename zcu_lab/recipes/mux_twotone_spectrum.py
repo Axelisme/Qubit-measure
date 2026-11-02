@@ -49,10 +49,6 @@ class MuxTwotoneSpectrumInputs(RecipeInputs):
         default=KEEP,
         description="Frequency fit model: Lorentzian or sinc. Analysis only; omitted keeps value, null passes to owner.",
     )
-    plot_fit: bool | None | Keep = Field(
-        default=KEEP,
-        description="Draw the fitted frequency curve. Analysis only; omitted keeps value, null passes to owner.",
-    )
 
 
 class MuxTwotoneSpectrumToneReport(MuxToneReport):
@@ -98,7 +94,8 @@ async def mux_twotone_spectrum(
     readout identities remain required for every tone.
     n sets shared Expts; sweeps covers all original tones with start/stop only.
     Frequency uses MHz, length us and gain in a.u. within [-1, 1].
-    Analyze with the supplied model_type, plot_fit, then ask before writeback.
+    Analyze with the supplied model_type, then ask before writeback.
+    The fitted curve is always shown.
     Save raw and completed artifacts after Run, including expected fit failures.
     Operation errors propagate without rolling back earlier edits or saves.
     """
@@ -135,10 +132,7 @@ async def mux_twotone_spectrum(
     try:
         fit = await tab.analyze(
             "primary",
-            updates={
-                "model_type": inputs.model_type,
-                "plot_fit": inputs.plot_fit,
-            },
+            updates={"model_type": inputs.model_type},
             result=MuxTwotoneSpectrumSummary,
         )
         if fit.result is None:

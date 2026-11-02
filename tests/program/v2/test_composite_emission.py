@@ -17,8 +17,6 @@ from zcu_tools.program.v2.modules.computed_pulse import ComputedPulse
 from zcu_tools.program.v2.modules.dmem import LoadValue
 from zcu_tools.program.v2.modules.readout import (
     MuxReadout,
-    PulseReadoutCfg,
-    TablePulseReadout,
 )
 from zcu_tools.program.v2.modules.waveform import (
     ConstWaveformCfg,
@@ -26,7 +24,6 @@ from zcu_tools.program.v2.modules.waveform import (
     GaussWaveformCfg,
 )
 from zcu_tools.program.v2.timeline import TimelineProgramV2
-from zcu_tools.program.v2.utils import readout_freq_words
 
 from tests.program._profiles import GEN_MHZ, TPROC_MHZ, load_soccfg
 from tests.program._timing_expectations import (
@@ -107,71 +104,6 @@ def test_mux_end_follows_generator_plus_one_post_and_shot_waits_for_adcs(length)
     ] == [[(pre, 18), (pre + 10, 0), (spacing + pre, 18), (spacing + pre + 10, 0)]] * 2
     assert list(prog.ro_chs) == [4, 1]
     assert prog.gen_chs[0]["mux_tones"][0]["gain_int"] > 0
-    prog.compile()
-    assert shots(prog) == result
-
-
-def _table_readout() -> TablePulseReadout:
-    soccfg = load_soccfg(1, 1)
-    freq_words, ro_words = readout_freq_words(
-        soccfg, [1000.0, 1010.0, 1020.0], gen_ch=0, ro_ch=0, mixer_freq=None, nqz=1
-    )
-    return TablePulseReadout(
-        "table_read",
-        PulseReadoutCfg(
-            gen_ch=0,
-            ro_ch=0,
-            nqz=1,
-            freq=1000,
-            gain=0.5,
-            waveform=ConstWaveformCfg(length=0.101),
-            pre_delay=0.01,
-            post_delay=0.0005,
-            ro_length=0.1,
-            trig_offset=0.01,
-        ),
-        idx_reg="frequency",
-        freq_words=freq_words,
-        ro_freq_words=ro_words,
-    )
-
-
-def test_table_readout_uses_loop_hook_and_wraps_paired_words_without_padding():
-    readout = _table_readout()
-    prog = _program(
-        load_soccfg(1, 1),
-        [readout],
-        lambda p: p.emit(readout),
-        lambda p: p.add_loop("frequency", 3),
-    )
-    result = shots(prog)
-    end = PRE + tproc_ceil(
-        prog.soccfg, generator_duration(prog.soccfg, 0.101) + Fraction("0.0005")
-    )
-    assert [waves(shot) for shot in result] == [[0, PRE]] * 6
-    assert [shot.body_end_cycle - shot.start_cycle for shot in result] == [end] * 6
-    assert [shot.end_cycle - shot.start_cycle for shot in result] == [end + RELAX] * 6
-    # The loop owns paired updates after body closure, before the next point.
-    writes = [i for i, inst in enumerate(prog.prog_list) if inst["CMD"] == "WMEM_WR"]
-    body_end = next(
-        i
-        for i, inst in enumerate(prog.prog_list)
-        if inst["P_ADDR"] == prog.timing_layout.body_end
-    )
-    assert len(writes) == 2
-    assert min(writes) >= body_end
-    dmem = prog.compile_datamem()
-    assert dmem is not None
-    assert [int(word) % 2**32 for word in dmem] == (
-        readout.freq_words[1:]
-        + readout.freq_words[:1]
-        + readout.ro_freq_words[1:]
-        + readout.ro_freq_words[:1]
-    )
-    assert [(loop.name, loop.count) for loop in prog.sweep_loops] == [
-        ("reps", 2),
-        ("frequency", 3),
-    ]
     prog.compile()
     assert shots(prog) == result
 
@@ -1512,15 +1444,3 @@ def test_distinct_computed_selections_keep_captured_join_and_coverage_debt():
     assert [s.end_cycle - s.start_cycle for s in result] == [
         end + RELAX for end in ends
     ] * 2
-
-
-@pytest.mark.parametrize("count", [None, 2])
-def test_table_readout_rejects_missing_or_mismatched_public_loop(count):
-    readout = _table_readout()
-
-    def initialize(prog):
-        if count is not None:
-            prog.add_loop("frequency", count)
-
-    with pytest.raises(ValueError, match="(sweep loop|does not match loop)"):
-        _program(load_soccfg(1, 1), [readout], lambda p: p.emit(readout), initialize)

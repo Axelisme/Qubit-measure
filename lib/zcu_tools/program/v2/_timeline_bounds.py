@@ -10,6 +10,7 @@ from ._timeline_guard import bounds
 from .ir.instructions import BaseInst
 from .macro.structure import MarkedCloseLoop, MarkedOpenLoop
 from .macro.table import TableSelection
+from .table_param import TableRawParam
 
 
 @dataclass(frozen=True)
@@ -343,7 +344,11 @@ class ProducerBounds:
             result = CycleBounds(0, prog.loop_dict[name] - 1)
         elif register is not None and register.init is not None:
             raw = register.init
-            lo, hi = bounds(QickParam(raw.start, raw.spans))
+            lo, hi = (
+                (raw.minval(), raw.maxval())
+                if isinstance(raw, TableRawParam)
+                else bounds(QickParam(raw.start, raw.spans))
+            )
             result = CycleBounds(round(lo), round(hi))
         else:
             ranges = self.ranges.get(name)
@@ -381,6 +386,10 @@ class ProducerBounds:
         for name, register in prog.reg_dict.items():
             raw = register.init
             if raw is None or name not in self.sweep_times | self.sources:
+                continue
+            if isinstance(raw, TableRawParam):
+                if raw.minval() < -(2**31) or raw.maxval() > 2**31 - 1:
+                    raise ValueError(f"{name}: signed 32-bit table word overflow")
                 continue
             lo = raw.start + sum(min(0, span) for span in raw.spans.values())
             hi = raw.start + sum(max(0, span) for span in raw.spans.values())
