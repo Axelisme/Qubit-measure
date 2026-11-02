@@ -159,13 +159,16 @@ class TimelineRuntimeAdvance(Macro):
                 ),
             ]
         ]
-        runtime = self.book.math.source(self.source.time_reg)
         if all(
             not isinstance(end, RuntimeEnd) and _bounds(end)[1] <= 1e-12
             for end in remaining
         ):
+            # No tracked end needs bounds for an arbitrary author register.
+            # Certified sources, including table init, still require validation.
+            self.book.math.source(self.source.time_reg, author=True)
             self.book.decrement(advance)
             return
+        runtime = self.book.math.source(self.source.time_reg)
         self.book.decrement(self.book.math.add(runtime, advance))
 
     def translate(self, prog) -> None:
