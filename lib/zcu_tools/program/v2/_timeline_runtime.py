@@ -72,6 +72,10 @@ def align_end(
     """
 
     cycles = value * get_fclk(prog)
+    if isinstance(cycles, TableParam):
+        return TableParam(
+            cycles.loop, [ceil_tick(v) / get_fclk(prog) for v in cycles.values]
+        )
     if not isinstance(cycles, QickParam) or not cycles.is_sweep():
         scalar = cycles.start if isinstance(cycles, QickParam) else cycles
         return ceil_tick(scalar) / get_fclk(prog)
@@ -122,6 +126,10 @@ def placement_time(prog, value: float | QickParam) -> float | QickParam:
 
 
 def step_time(prog, value: float | QickParam) -> float | QickParam:
+    if isinstance(value, TableParam):
+        raw = prog.us2cycles(value)
+        raw.to_steps(prog.loop_dict)
+        return value.get_rounded(prog.loop_dict)
     if not isinstance(value, QickParam):
         return value
     missing = value.spans.keys() - prog.loop_dict.keys()
@@ -1208,7 +1216,11 @@ class RuntimeMath(TimedMacro):
         """Resolve a time to a register operand, materializing literal offsets only here."""
         if isinstance(value, RuntimeEnd):
             return self.snapshot(value) if value.offset else value
-        if isinstance(value, QickParam) and not any(value.spans.values()):
+        if (
+            isinstance(value, QickParam)
+            and not isinstance(value, TableParam)
+            and not any(value.spans.values())
+        ):
             value = value.start
         key = str(len(self.t_regs))
         rounded = self.convert_time(self.prog, value, key)
