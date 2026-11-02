@@ -7,10 +7,9 @@ from typing import Literal, TypedDict, Unpack, override
 from qick import QickConfig
 from qick.asm_v2 import QickParam
 
-from zcu_tools.cfg_model import TableParam
-
 from .modules.base import Module
 from .sweep import SweepCfg
+from .table_param import TableParam
 from .timeline import TimelineProgramV2
 from .utils import sweep2param
 

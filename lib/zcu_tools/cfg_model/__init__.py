@@ -20,7 +20,7 @@ from .device_name import (
 )
 from .field_meta import FieldMeta, get_field_meta
 from .form_nodes import FormNode, Hidden, LogPoints, Range
-from .gain import Gain, GainParam, validate_gain
+from .gain import Gain, validate_gain
 from .inputs import CfgInputMap, CfgInputValue
 from .materialization import (
     ModuleCfgFactory,
@@ -59,7 +59,6 @@ from .spec_types import (
     is_module_spec_type,
     is_waveform_spec_type,
 )
-from .table_param import TableParam, TableRawParam
 from .template_nodes import Expr, Slot, Template, TemplateLiteral, TemplateSeed
 from .templates import TemplateDef, expand_path
 from .waveform import (
@@ -78,8 +77,6 @@ from .waveform import (
 )
 
 __all__ = [
-    "TableParam",
-    "TableRawParam",
     "FormNode",
     "Hidden",
     "Range",
@@ -90,7 +87,6 @@ __all__ = [
     "LinearClassifier",
     "ReadoutClassifier",
     "Gain",
-    "GainParam",
     "validate_gain",
     "Expr",
     "Slot",

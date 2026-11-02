@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 
 from qick.asm_v2 import QickParam
 
-from zcu_tools.cfg_model import TableParam
+from ..table_param import TableParam
 
 if TYPE_CHECKING:
     from collections.abc import Mapping

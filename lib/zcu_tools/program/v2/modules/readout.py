@@ -17,12 +17,12 @@ from zcu_tools.cfg_model import (
     CircleClassifier,
     LinearClassifier,
     ReadoutClassifier,
-    TableRawParam,
 )
 from zcu_tools.cfg_model import MuxReadoutCfg as CoreMuxReadoutCfg
 from zcu_tools.utils.shot_classification import classify_shots, nearest_centroid3
 
 from ..macro.readout import ReadoutEmission
+from ..table_param import TableRawParam
 from .base import AbsModuleCfg, Module, apply_cfg_overrides
 from .pulse import Pulse, PulseCfg
 from .waveform import WaveformCfg, resolve_waveform_ref

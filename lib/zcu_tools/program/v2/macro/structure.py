@@ -12,7 +12,7 @@ from qick.asm_v2 import (
     WriteWmem,
 )
 
-from zcu_tools.cfg_model import TableRawParam
+from ..table_param import TableRawParam
 
 _WAVE_FIELDS = ("freq", "phase", "env", "gain", "length", "conf")
 

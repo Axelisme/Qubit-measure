@@ -11,7 +11,7 @@ from qick.asm_v2 import QickParam
 from .base import ConfigBase
 from .classifier import ReadoutClassifier
 from .field_meta import FieldMeta
-from .gain import Gain, GainParam
+from .gain import Gain
 from .waveform import WaveformCfg, WaveformSpec
 
 
@@ -52,7 +52,7 @@ class _PulseFields[WaveformT](_ModuleFields):
         float | QickParam,
         FieldMeta(label="Phase", unit="deg", decimals=2, group="Advanced"),
     ] = 0.0
-    gain: Annotated[GainParam, FieldMeta(label="Gain", unit="a.u.", decimals=4)]
+    gain: Annotated[Gain | QickParam, FieldMeta(label="Gain", unit="a.u.", decimals=4)]
     pre_delay: Annotated[
         float | QickParam,
         FieldMeta(label="Pre-delay", unit="us", decimals=3, group="Advanced"),
@@ -112,7 +112,7 @@ class _PulseReadoutFields[WaveformT](_ModuleFields):
     freq: Annotated[
         float | QickParam, FieldMeta(label="Frequency", unit="MHz", decimals=3)
     ]
-    gain: Annotated[GainParam, FieldMeta(label="Gain", unit="a.u.", decimals=4)]
+    gain: Annotated[Gain | QickParam, FieldMeta(label="Gain", unit="a.u.", decimals=4)]
     phase: Annotated[
         float | QickParam,
         FieldMeta(label="Phase", unit="deg", decimals=2, group="Advanced"),
