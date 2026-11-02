@@ -33,9 +33,9 @@ edits and captures sources again.
 - `settle` is the wait in seconds after all DC writes at each flux point.
 - `reset` is the optional common reset. `readout` holds the full mux readout.
 - `df` supplies a common nominal MHz offset for every selected readout tone.
-  Each offset uses the existing host-side onetone run because the mux firmware
-  cannot sweep tone frequencies in hardware. `participants` supplies the original
-  tone selection to that inner scan.
+  This experiment acquires each offset in its own host loop because the mux
+  firmware cannot sweep tone frequencies in hardware. `participants` supplies
+  the original tone selection to that inner scan.
 
 Readout uses the mux onetone ringup-copy policy. A captured slot retains its
 mixer and ADC window; five ringup times are added to trigger coverage. Without
@@ -120,8 +120,8 @@ and required-field errors before Run.
 
 ## Run and Stop
 
-Run sets only selected local sources at each flux point, waits for settle, then runs
-the existing mux onetone spectrum. Each `flux_i` figure shows absolute MHz
+Run sets only selected local sources at each flux point, waits for settle, then
+builds and acquires its own mux onetone program at each offset. Each `flux_i` figure shows absolute MHz
 against that tone's DC coordinate. Sources retain their final written settings.
 Run does not restore bias automatically.
 
