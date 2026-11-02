@@ -66,6 +66,32 @@ def test_three_state_exact_transfer_sorted_by_herald_population() -> None:
     np.testing.assert_allclose(result.populations, populations[order], atol=1e-7)
     np.testing.assert_allclose(result.transition_matrices, transitions[:, order][:, :, order], atol=1e-7)
     np.testing.assert_allclose(result.joint_probabilities, joint[:, order][:, :, order], atol=1e-7)
-    np.testing.assert_allclose(result.change_probability, [0.345, 0.703, 0.294], atol=1e-7)
+    np.testing.assert_allclose(result.change_probability, [0.3455, 0.785, 0.294], atol=1e-7)
     assert result.singular_values.shape == (4,)
     assert result.singular_values[3] < 1e-10
+
+
+@pytest.fixture
+def two_state_sums() -> NDArray[np.float64]:
+    probabilities = np.linspace(0, 0.9, 7)
+    transitions = np.array([[[1-p, p], [0.8*p, 1-0.8*p]] for p in probabilities])
+    return exact_sums(
+        np.array([1.2-0.9j, 3.5+0.4j]), 0.45, np.array([0.7, 0.3]), transitions
+    )
+
+
+def test_unmeasured_points_do_not_enter_calibration(two_state_sums: NDArray[np.float64]) -> None:
+    expected = selfcal_transfer(two_state_sums, 2)
+    sums = two_state_sums.copy()
+    sums[3] = np.nan
+
+    result = selfcal_transfer(sums, 2)
+
+    np.testing.assert_allclose(result.centers, expected.centers, atol=1e-6)
+    np.testing.assert_allclose(result.populations, expected.populations, atol=1e-6)
+    assert result.sigma == pytest.approx(expected.sigma, abs=1e-6)
+    measured = [0, 1, 2, 4, 5, 6]
+    np.testing.assert_allclose(result.transition_matrices[measured], expected.transition_matrices[measured], atol=1e-6)
+    assert np.isnan(result.transition_matrices[3]).all()
+    assert np.isnan(result.joint_probabilities[3]).all()
+    assert np.isnan(result.change_probability[3])
