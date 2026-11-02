@@ -17,6 +17,11 @@ class TableParam(QickParam):
     loop names the owning loop. values preserves point order, including repeats.
     Units are those of the consuming QICK parameter. Use to_int to quantize all
     points with QICK's scalar conversion, then get_rounded for physical values.
+    Empty or nonfinite values raise ValueError at construction. Scalar +, -, *,
+    / (including reversed operands) produce a new table on the same loop;
+    combining with another sweep raises TypeError. Comparisons with scalars
+    return True if any point satisfies the comparison. Affine attributes
+    start, spans, raw_param and derived_param raise TypeError naming the loop.
     """
 
     def __init__(self, loop: str, values: Sequence[float]) -> None:
@@ -165,9 +170,11 @@ class TableParam(QickParam):
         return values
 
     def get_rounded(self, loop_counts: dict[str, int] | None = None) -> "TableParam":
-        """Return quantized physical values; raise RuntimeError before to_int.
+        """Return physical values after the latest QICK quantization.
 
-        loop_counts supplies the declared loop sizes, as in QICK get_rounded.
+        Copies and scalar operations retain the conversion path, as in QICK.
+        Raise RuntimeError before to_int on this object or its descendants.
+        loop_counts supplies the declared loop sizes for validation.
         """
         if self._raw is None:
             if self._derived is not None and self._inverse is not None:
@@ -191,6 +198,11 @@ class TableRawParam(QickRawParam):
     par names the QICK waveform field (or register parameter). start is the
     first word. spans is empty because lookup updates are not linear steps.
     quantize is the original integer rounding grid, not a lookup increment.
+    In-place integer/Fraction multiplication and integer addition update every
+    point and start. A Fraction denominator must divide every point or raise
+    ValueError without changing the table. Modulo is deferred to Waveform.compile.
+    scale and offset track manager transforms for to_rounded; steps is None
+    before loop validation and an empty dict afterward, never linear increments.
     """
 
     def __init__(
