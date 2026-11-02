@@ -976,6 +976,7 @@ class NativeTimelineDelay(TimedMacro):
         super().__init__(tag=getattr(source, "tag", None))
         self.book = book
         self.source = source
+        self.actual_time: RuntimeEnd | None = None
 
     def preprocess(self, prog) -> None:
         auto = self.book.channel_maximum(
@@ -1003,10 +1004,16 @@ class NativeTimelineDelay(TimedMacro):
             if isinstance(self.source.t, TableParam)
             else step_time(prog, self.source.t),
         )
+        self.actual_time = actual
+        original = self.source.t
+        if isinstance(original, TableParam):
+            # QICK only allocates metadata here; the real operand is actual.
+            self.source.t = 0.0
         self.book.native_only = True
         try:
             self.source.preprocess(prog)
         finally:
+            self.source.t = original
             self.book.native_only = False
         self.source.t_regs["t"] = self.book.math.cycles(actual).register
         self.book.decrement(actual)
@@ -1015,6 +1022,8 @@ class NativeTimelineDelay(TimedMacro):
         self.source.translate(prog)
 
     def get_time_param(self, name: str) -> QickParam:
+        if name == "t" and self.actual_time is not None:
+            return self.book.math.time_parameter(self.actual_time)
         return self.source.get_time_param(name)
 
     def list_time_params(self) -> list[str]:
