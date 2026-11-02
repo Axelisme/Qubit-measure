@@ -19,6 +19,11 @@ or integration length.
 
 ## Accepted return and pass fraction
 
+Analyze returns `terminal.fit`, the gg first-return fit summary.
+It contains `scale`, `period`, `error`, `offset`, `contrast`, `fit_quality` and
+`reason`. Counts, probabilities, curves and herald fractions stay inside analysis
+for plotting.
+
 The live curve selects the herald g,g slice and displays its terminal P00.
 FIT uses that same slice and the ordinary first-cycle fit.
 P00 divides accepted terminal g,g counts by all nine accepted terminal classes,

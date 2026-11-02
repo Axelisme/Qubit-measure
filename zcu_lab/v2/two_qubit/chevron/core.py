@@ -32,7 +32,7 @@ from zcu_tools.program.v2.modules import (
 
 from zcu_lab.v2.support import live_line
 
-from .._rabi_analysis import RabiAnalysis, ReturnData, fit_duration_rates
+from .._rabi_analysis import ReturnData, fit_duration_rates
 from .._rabi_scan import DurationScanCfg, RabiScanResult
 from .._sums import (
     joint_probabilities,
@@ -315,7 +315,7 @@ class ChevronExp(Experiment[ChevronResult, ChevronCfg]):
         options: None,
         *,
         plots: Plots,
-    ) -> RabiAnalysis:
+    ) -> None:
         """Use saved count axes and cfg to plot return and fit eligible traces.
 
         Missing cfg or mismatched axes raises ValueError. Failed fits report a
@@ -424,5 +424,3 @@ class ChevronExp(Experiment[ChevronResult, ChevronCfg]):
             title="Duration cosine fits · inspect model against measured return curves",
         )
         ax.legend(title="Common drive frequency (MHz)", fontsize="x-small", ncols=2)
-
-        return RabiAnalysis(answer, rates)

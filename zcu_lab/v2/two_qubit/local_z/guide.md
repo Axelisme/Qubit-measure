@@ -30,7 +30,7 @@ Form 複製兩角色 X90 與 `$coupler.module.cz_f1`／`cz_f2`。缺 CZ slot 時
 
 分析沿 n 做相鄰主值 unwrap，再用含 intercept 的計數加權最小平方擬合 `phase_deg=intercept+slope*n`。兩 target 各自擬合。Slope 是每 CZ 的 logical Bloch phase accrual，correction 是它的負值，不重新 wrap。零 slope 可以有效，缺失 correction 維持缺失。
 
-解讀假設相鄰真實增量滿足 `|Δθ|<180°`。每 gate 額外的 360° 無法由連續 n 採樣辨認。`phase` 圖顯示 contrast、wrapped phase、unwrapped phase 與 fit。`quadratures` 圖顯示兩 target 的 X/Y sigma。Summary 保留 acquired counts、每點原因、intercept、slope、correction、slope 1σ error 與 fit_quality。每個 sigma 的 variance 是 `(P_e+P_g−sigma²)/N`，包含 g/e 的 multinomial covariance，other 留在 N。獨立 X/Y 的 variance 經 atan2 導數傳播為 phase variance，fit 使用它的倒數作權重。Covariance 是 `(XᵀWX)⁻¹`，不按 residual 重新縮放。缺失、半圈 unwrap 歧義或無正值 phase variance 時不擬合，也不提供該 correction。
+解讀假設相鄰真實增量滿足 `|Δθ|<180°`。每 gate 額外的 360° 無法由連續 n 採樣辨認。`phase` 圖顯示 contrast、wrapped phase、unwrapped phase 與 fit。`quadratures` 圖顯示兩 target 的 X/Y sigma。Summary 的 `fits` 按 F1、F2 排列，只保留各 target 的 intercept、slope、correction、slope 1σ error、fit_quality 與不可用原因。逐點 phase、quadrature、counts 和曲線只在分析內供畫圖使用。每個 sigma 的 variance 是 `(P_e+P_g−sigma²)/N`，包含 g/e 的 multinomial covariance，other 留在 N。獨立 X/Y 的 variance 經 atan2 導數傳播為 phase variance，fit 使用它的倒數作權重。Covariance 是 `(XᵀWX)⁻¹`，不按 residual 重新縮放。缺失、半圈 unwrap 歧義或無正值 phase variance 時不擬合，也不提供該 correction。
 
 普通版仍量 ensemble，local phase 可能偏離線性模型。純態 phase 與 gate fidelity 須另行驗證。
 

@@ -69,9 +69,11 @@ statistical seed variation, not readout errors or model systematics.
 
 The d=4 estimates are `reference_epc=3/4*(1-p_reference)` and
 `gate_error=3/4*(1-p_interleaved/p_reference)`. Negative error estimates
-remain negative. The result retains per-herald complete-pair masks and fit
-residual diagnostics. The estimate's paired seed and round counts refer to
-the union; use `paired_rounds` for each herald's counts. Missing saved cfg,
+remain negative. Analyze returns only `estimate`, `fit_quality` and `reason`.
+Fit quality retains residual diagnostics for gg reference/interleaved and ee
+reference/interleaved. The estimate's paired seed and round counts refer to
+the union. Per-herald pair masks, survival, curves and herald fractions stay
+inside analysis for plotting. Missing saved cfg,
 insufficient paired data, flat decay, invalid fits or unstable bootstrap
 leave an explicit reason and no estimate. A finite error remains a
 model-dependent diagnostic, not physical calibration acceptance.

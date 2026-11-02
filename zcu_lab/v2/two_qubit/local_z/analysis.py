@@ -34,22 +34,40 @@ class LocalZTargetFit:
 
 
 @dataclass(frozen=True)
-class LocalZAnalysis:
-    """F1/F2 classified phase diagnostics and complete-row weighted linear fits.
+class LocalZFit:
+    """One target's phase-line summary, in degrees and degrees per gate.
 
-    phases is (2,Nn); quadratures is (2,2,Nn) sigma, and acquired_shots is
-    the projection's terminal total. fits is F1 then F2; gate_counts is the n axis.
-    herald_matrix is the full herald distribution or None for ordinary acquisition.
-    pass_fraction is herald (g,g) acceptance, not ground-state purity.
+    correction_deg is minus slope_deg without wrapping. intercept_deg is the
+    preparation/projection offset, slope_error_deg is its count-derived 1σ
+    uncertainty. Unavailable fits keep None and reason. fit_quality contains
+    fixed-size residual and parameter-error diagnostics, not a quality gate.
     """
 
-    phases: tuple[tuple[QuadraturePhase, ...], ...]
-    quadratures: NDArray[np.float64]
-    acquired_shots: NDArray[np.float64]
-    gate_counts: tuple[int, ...]
-    fits: tuple[LocalZTargetFit, ...]
-    herald_matrix: NDArray[np.float64] | None = None
-    pass_fraction: NDArray[np.float64] | None = None
+    intercept_deg: float | None
+    slope_deg: float | None
+    correction_deg: float | None
+    slope_error_deg: float | None
+    fit_quality: FitQuality | None
+    reason: str | None
+
+
+@dataclass(frozen=True)
+class LocalZAnalysis:
+    """Fixed F1/F2 phase-line summaries in target order; no scan arrays."""
+
+    fits: tuple[LocalZFit, ...]
+
+
+def summarize_fit(fit: LocalZTargetFit) -> LocalZFit:
+    """Keep calibration values and fit diagnostics; leave curves for plotting."""
+    return LocalZFit(
+        fit.intercept_deg,
+        fit.slope_deg,
+        fit.correction_deg,
+        fit.slope_error_deg,
+        fit.fit_quality,
+        fit.reason,
+    )
 
 
 def fit_target(
