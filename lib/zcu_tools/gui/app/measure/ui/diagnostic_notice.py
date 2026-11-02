@@ -36,7 +36,7 @@ class DiagnosticNotice(QFrame):
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
         self._scope.add_cleanup(self._timer.stop)
-        self._scope.connect(self._timer.timeout, self.hide)
+        self._scope.connect(self._timer.timeout, lambda: self.hide())
         self.hide()
 
     def present(self, title: str, message: str) -> None:
