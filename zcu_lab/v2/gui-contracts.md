@@ -1,6 +1,6 @@
 # Measure GUI contracts
 
-**Last updated:** 2026-11-01
+**Last updated:** 2026-11-02
 
 **讀者：** lab-author、framework-dev、agent。查閱 concrete adapter 的來源、分析、writeback 與 capability 契約。
 
@@ -44,8 +44,10 @@ T1、T2Echo、T2Ramsey、AmpRabi、LenRabi 與 GE 的 summary 包含 core-owned 
   註冊於 `../definitions.py`。Concrete adapters 各自擁有 acquisition 初值政策，
   並共同暴露 `reps` / `rounds` / `relax_delay`。四個 qubit SNR adapter 的
   `relax_delay` 採 `1*T1`，透過 `support/measure/ctx_helpers.py` 的
-  `t1_initial_time` 共用固定 capture 的來源分類 mechanics。有效 T1 用捕捉校準，
-  缺值用 `30 us` 公允時間尺度，無效值留空，來源故障傳遞 owner 的原錯誤。
+  `t1_initial_time` 共用固定 capture 的來源分類 mechanics。有效 T1 回傳
+  `Expr("<倍率> * <來源路徑>")` tree seed，保留呼叫端的名稱或 alias；Form
+  以既有機制求值，`seed_sources` 保存 expression 與 available 狀態。
+  缺值用 `倍率 × 30 us` 字面值，無效值留空必填，來源故障傳遞 owner 的原錯誤。
   初值可覆寫，不寫回校準。純反射的 `flux_onetone` / `check` 等待維持
   `0.1 us` / `0.5 us`，六個 adapter 的 `reps` / `rounds` 不變；
   未使用的 `initial_delay` 不宣告為實驗欄位，builder 沿用 1.0 us 預設。auto optimizer 的 sweep `expts`
@@ -53,6 +55,10 @@ T1、T2Echo、T2Ramsey、AmpRabi、LenRabi 與 GE 的 summary 包含 core-owned 
   契約見 `measure-authoring.md`。
 - `support/measure/` 是公開支援 package，提供至少被兩個 concrete adapters 共用的 mechanics。
   已定案且供多個 Form 共用的初值政策也可集中在具名 domain helper，目前限 T1 時間尺度選源與 Rabi 的來源、有效性及首次初值。
+  T1 helper 的 tone 掃描先選 `ext.t1_with_tone`，僅缺失或 null 才改選普通 `t1`。
+  已存無效 tone T1 不下探。Mux recovery 在建 Form 時比較各顆的捕捉初值，
+  保留最大者的 seed。缺 T1 以 30 us 參與比較，缺值勝出時仍為 150 us 字面值。
+  任一無效 T1 留空。
   各 Form 仍明確選擇倍率或場景，並組合表單結構。校準政策不進入 generic framework，也不擴及 writeback 或實驗順序。
   本 package 不擁有 registry order，也不 import concrete adapter。
 - `support/resonator.py` 不依賴 GUI，供 onetone/freq 與 mux/onetone core 共用模型／畫圖 mechanics。Selection、delay mode 與 writeback policy 留 caller，不讓 core 經 `support/measure/` 載入 GUI。
