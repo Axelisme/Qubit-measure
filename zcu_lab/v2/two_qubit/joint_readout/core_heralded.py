@@ -348,7 +348,13 @@ class JointReadoutHeraldedExp(
                         color="white" if value > 0.5 else "black",
                     )
             ax.grid(False)
-            ax.set_xticks(range(9), OUTCOME_LABELS if group == 2 else [""] * 9)
+            ax.set_xticks(
+                range(9),
+                OUTCOME_LABELS if group == 2 else [""] * 9,
+                rotation=45,
+                ha="right",
+                rotation_mode="anchor",
+            )
             ax.set(
                 yticks=range(4),
                 yticklabels=[
@@ -360,7 +366,7 @@ class JointReadoutHeraldedExp(
                     )
                 ],
                 xlabel="Observed terminal class (F1, F2)" if group == 2 else "",
-                ylabel="Actual preparation",
+                ylabel="Actual preparation" if group == 1 else "",
                 title=title,
             )
             fig.colorbar(image, cax=colorbar_ax, label="Probability")
@@ -396,6 +402,13 @@ class JointReadoutHeraldedExp(
             title="Herald distribution\n(g,g) is pass fraction, not ground-state purity",
         )
         ax.grid(False)
+        ax.set_xticks(
+            range(9),
+            OUTCOME_LABELS,
+            rotation=45,
+            ha="right",
+            rotation_mode="anchor",
+        )
         fig.colorbar(image, cax=colorbar_ax, label="Herald probability")
         return JointReadoutHeraldedAnalysis(
             gg_counts=gg.reshape(4, 9),
