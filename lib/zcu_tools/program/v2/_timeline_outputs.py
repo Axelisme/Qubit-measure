@@ -234,7 +234,11 @@ class TimelinePlacedPulse(TimelineObservedPulse):
             self.native_length(prog),
         )
         self.book.set_end(self.timeline, finish)
-        if isinstance(finish, RuntimeEnd):
+        if isinstance(actual_end, TableParam):
+            # Native auto playback consumes QICK's nearest timestamp, not the
+            # ceiled timeline boundary retained in event_end.rounded.
+            self.book.runtime_gens[self.ch] = self.book.math.cycles(actual_end)
+        elif isinstance(finish, RuntimeEnd):
             self.book.runtime_gens[self.ch] = finish
         else:
             self.book.runtime_gens.pop(self.ch, None)
