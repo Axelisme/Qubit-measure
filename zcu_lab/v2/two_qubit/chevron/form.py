@@ -50,21 +50,6 @@ def scan_form(ctx: FormContext, cfg_type: type[T_Cfg]) -> Form[T_Cfg]:
     readout = mux_readout_initial(ctx)
     return Form(
         cfg_type,
-        # Show captured roles first, frequency before duration, and acquisition settings last.
-        field_order=(
-            "roles",
-            "reset",
-            "x180_f1",
-            "x180_f2",
-            "readout",
-            "drive",
-            "frequency",
-            "duration",
-            "reps",
-            "rounds",
-            "relax_delay",
-            "initial_delay",
-        ),
         tree={
             "reps": 1000,
             "rounds": 10,
