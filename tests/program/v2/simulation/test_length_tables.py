@@ -5,7 +5,7 @@ from dataclasses import replace
 import numpy as np
 import pytest
 from zcu_tools.experiment.simulation import white_noise
-from zcu_tools.program.v2 import SweepCfg, TimelineBuilder, ir
+from zcu_tools.program.v2 import SweepCfg, TimelineBuilder
 from zcu_tools.program.v2.modules.base import Module
 from zcu_tools.program.v2.modules.pulse import Pulse, PulseCfg
 from zcu_tools.program.v2.modules.readout import PulseReadout, PulseReadoutCfg
@@ -17,7 +17,7 @@ from zcu_tools.program.v2.modules.waveform import (
 )
 
 from tests.program._profiles import load_soccfg
-from tests.program.v2.simulation._compiled_support import request
+from tests.program.v2.simulation._compiled_support import request, scheduled_shots
 
 RAMP_LENGTH_US = 0.04
 
@@ -124,22 +124,6 @@ def length_program(
     builder.delay_by_timeline()
     prog = builder.build()
     return prog, env, pulse.pulse_name(prog)
-
-
-def scheduled_shots(prog):
-    analysis = ir.analyze_timing(
-        ir.CompiledTimingInput(
-            prog.prog_list,
-            prog.labels,
-            prog.timing_layout,
-            dmem=prog.compile_datamem(),
-            wmem=ir.compiled_wmem(prog),
-        )
-    )
-    return [
-        tuple((e.kind, e.cycle - shot.start_cycle, e.wave_words) for e in shot.events)
-        for shot in analysis.shots
-    ]
 
 
 @pytest.mark.parametrize("flat", [False, True])

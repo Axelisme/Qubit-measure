@@ -109,6 +109,21 @@ class MarkedOpenLoop(OpenLoop):
         prog.record_meta(type="LOOP_BODY_START", name=self.name, info={"native": True})
 
 
+def _load_table_word(prog, counter: str, offset: int, destination: str) -> None:
+    """Read the rotated table row at counter + offset through QICK scratch."""
+    scratch = prog.reg_dict["scratch"].full_addr()
+    AsmInst(
+        inst={
+            "CMD": "REG_WR",
+            "DST": scratch,
+            "SRC": "op",
+            "OP": f"{counter} + #{offset}",
+        },
+        addr_inc=1,
+    ).translate(prog)
+    ReadDmem(dst=destination, addr="scratch").translate(prog)
+
+
 class MarkedCloseLoop(CloseLoop):
     """Close the current QICK loop, retaining sweep updates and counter resets.
 
@@ -141,32 +156,12 @@ class MarkedCloseLoop(CloseLoop):
         prog.record_meta(type="LOOP_BODY_END", name=name, info={"native": True})
         counter = prog.reg_dict[name].full_addr()
         for address, definition in prog.loop_register_tables.get(name, {}).items():
-            scratch = prog.reg_dict["scratch"].full_addr()
-            AsmInst(
-                inst={
-                    "CMD": "REG_WR",
-                    "DST": scratch,
-                    "SRC": "op",
-                    "OP": f"{counter} + #{definition['offset']}",
-                },
-                addr_inc=1,
-            ).translate(prog)
-            ReadDmem(dst=address, addr="scratch").translate(prog)
+            _load_table_word(prog, counter, definition["offset"], address)
         for address, fields in prog.loop_wave_tables.get(name, {}).items():
             wave_name = prog.waves[address].name
             for field, offset in fields.items():
-                scratch = prog.reg_dict["scratch"].full_addr()
-                AsmInst(
-                    inst={
-                        "CMD": "REG_WR",
-                        "DST": scratch,
-                        "SRC": "op",
-                        "OP": f"{counter} + #{offset}",
-                    },
-                    addr_inc=1,
-                ).translate(prog)
                 # The address is dead after the read, so reuse QICK scratch for the value.
-                ReadDmem(dst="scratch", addr="scratch").translate(prog)
+                _load_table_word(prog, counter, offset, "scratch")
                 ReadWmem(name=wave_name).translate(prog)
                 WriteReg(dst="w_" + _WAVE_FIELDS[field], src="scratch").translate(prog)
                 WriteWmem(name=wave_name).translate(prog)

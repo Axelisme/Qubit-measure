@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 from qick.asm_v2 import QickParam, QickSweep1D
 from zcu_tools.experiment.simulation import white_noise
-from zcu_tools.program.v2 import SweepCfg, TableParam, TimelineBuilder, ir
+from zcu_tools.program.v2 import SweepCfg, TableParam, TimelineBuilder
 from zcu_tools.program.v2.modules.base import Module
 from zcu_tools.program.v2.modules.delay import DelayAuto
 from zcu_tools.program.v2.modules.pulse import PulseCfg
@@ -14,7 +14,7 @@ from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 
 from tests.program._profiles import load_soccfg
-from tests.program.v2.simulation._compiled_support import request
+from tests.program.v2.simulation._compiled_support import request, scheduled_shots
 
 
 class RegisterDelay(Module):
@@ -126,22 +126,6 @@ def time_program(value, *, table=False, linear=False, outer=False, consumer="del
         builder.emit(receiver)
     builder.delay_by_timeline()
     return builder.build(), env
-
-
-def scheduled_shots(prog):
-    analysis = ir.analyze_timing(
-        ir.CompiledTimingInput(
-            prog.prog_list,
-            prog.labels,
-            prog.timing_layout,
-            dmem=prog.compile_datamem(),
-            wmem=ir.compiled_wmem(prog),
-        )
-    )
-    return [
-        tuple((e.kind, e.cycle - shot.start_cycle, e.wave_words) for e in shot.events)
-        for shot in analysis.shots
-    ]
 
 
 @pytest.mark.parametrize(

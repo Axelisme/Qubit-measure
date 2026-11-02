@@ -1,6 +1,6 @@
 # program/v2/modules — semantic program modules
 
-**Last updated:** 2026-11-02，查表參數、loop 更新與時間取整
+**Last updated:** 2026-11-02，查表參數、時間取整與 readout phase 覆寫
 
 **讀者：** lab-author、framework-dev、agent。語意 program modules 的宣告、發射與 owner 邊界速查。
 
@@ -136,7 +136,7 @@ owners and lowering all use the effective cfg retained by the module.
 | Constructor | Override keywords |
 | --- | --- |
 | `Pulse` / `PulseReset` | `freq`, `gain`, `phase`, `length` |
-| `PulseReadout` / `Readout` with pulse cfg | `freq`, `gain`, `length`, `ro_length` |
+| `PulseReadout` / `Readout` with pulse cfg | `freq`, `gain`, `phase`, `length`, `ro_length` |
 | `TwoPulseReset` | `gain1`, `gain2`, `freq1`, `freq2`, `length` (both pulses) |
 | `BathReset` | `qub_gain`, `qub_freq`, `qub_length`, `res_gain`, `res_freq`, `res_length`, `pi2_phase` |
 

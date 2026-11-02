@@ -42,6 +42,20 @@ from .operands import (
 
 # Unsigned hardware fields in freq, phase, env, gain, length, conf order.
 WaveWords = tuple[int, int, int, int, int, int]
+_WAVE_FIELDS = ("freq", "phase", "env", "gain", "length", "conf")
+
+
+def _unsigned_wave_words(words: Sequence[int]) -> WaveWords:
+    """Normalize six words in hardware field order to their unsigned widths."""
+    freq, phase, env, gain, length, conf = words
+    return (
+        freq % 2**32,
+        phase % 2**32,
+        env % 2**24,
+        gain % 2**32,
+        length % 2**32,
+        conf % 2**16,
+    )
 
 
 def compiled_wmem(program: QickProgramV2) -> dict[int, WaveWords]:
@@ -55,14 +69,7 @@ def compiled_wmem(program: QickProgramV2) -> dict[int, WaveWords]:
     if not program.binprog:
         raise ValueError("Program must be compiled before reading WMEM")
     return {
-        index: (
-            int(wave["freq"]) % 2**32,
-            int(wave["phase"]) % 2**32,
-            int(wave["env"]) % 2**24,
-            int(wave["gain"]) % 2**32,
-            int(wave["length"]) % 2**32,
-            int(wave["conf"]) % 2**16,
-        )
+        index: _unsigned_wave_words([int(wave[field]) for field in _WAVE_FIELDS])
         for index, wave in enumerate(program.waves)
     }
 
@@ -410,13 +417,8 @@ class _Machine:
             self.wmem[self.wave_address(inst.addr)] = self.wave_registers()
 
     def wave_registers(self) -> WaveWords:
-        return (
-            self.value(Register("w0")) % 2**32,
-            self.value(Register("w1")) % 2**32,
-            self.value(Register("w2")) % 2**24,
-            self.value(Register("w3")) % 2**32,
-            self.value(Register("w4")) % 2**32,
-            self.value(Register("w5")) % 2**16,
+        return _unsigned_wave_words(
+            [self.value(Register(f"w{i}")) for i in range(len(_WAVE_FIELDS))]
         )
 
     def output(
