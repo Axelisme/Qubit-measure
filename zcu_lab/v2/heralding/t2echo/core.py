@@ -290,7 +290,6 @@ class HeraldingT2EchoExp(Experiment[HeraldingT2EchoResult, HeraldingT2EchoCfg]):
         xs = xs[1:]
         signals = signals[1:]
 
-        # Project IQ onto its signal axis before choosing the envelope model.
         real_signals = signals
 
         if fit_method == "fringe":
