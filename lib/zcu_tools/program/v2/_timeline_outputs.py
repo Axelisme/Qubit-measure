@@ -376,9 +376,18 @@ class TimelinePlacedTrigger(Trigger):
                 length = (
                     prog.ro_chs[ch]["length"] / prog.soccfg["readouts"][ch]["f_output"]
                 )
-                ro_end = self.book.math.add(scheduled, align_end(prog, length))
-                self.book.runtime_ros[ch] = ro_end
-                self.book.record_native(prog, ch, ro_end, generator=False)
+                table = self.book.table_source(origin)
+                if table is None:
+                    ro_end = self.book.math.add(scheduled, align_end(prog, length))
+                    self.book.runtime_ros[ch] = ro_end
+                    self.book.record_native(prog, ch, ro_end, generator=False)
+                else:
+                    # This build-known table follows the scalar ADC timestamp
+                    # rule; register-only origins still owe runtime ceil above.
+                    ro_end = table + placement_time(prog, self.relative_t) + length
+                    self.book.native_timestamp(prog, ro_end, ro_ch=ch)
+                    self.book.runtime_ros[ch] = self.book.math.cycles(ro_end)
+                    self.book.record_native(prog, ch, ro_end, generator=False)
             offset = placement_time(prog, self.relative_t)
             self.event_end = EventEnd(
                 origin,

@@ -190,6 +190,7 @@ class TimelineBoundary(Macro):
         super().preprocess(prog)
         if self.section == "reset":
             self.book.ends = {"default": 0.0}
+            self.book.table_ends.clear()
             self.book.cycle_axes.clear()
             self.book.source_expressions.clear()
             self.book.branch_provenance.clear()
@@ -1490,7 +1491,9 @@ class TimelineBranch(Macro):
         for tail, value in zip(self.tails, values, strict=True):
             operand = tail.cycles(value)
             tail.operations.append(WriteReg(dst=merged.register, src=operand.register))
-        return merged
+        return self.book.remember_table(
+            merged, self.book.table_choice(values, selector=self.by)
+        )
 
     def _merge_native(
         self,
@@ -1528,7 +1531,10 @@ class TimelineBranch(Macro):
                     self.result_math.covers(result[name], snapshot[ch])
                     for snapshot, result in zip(snapshots, results, strict=True)
                 ):
-                    self.book.ends[name] = replace(end, covers=(*end.covers, value))
+                    self.book.ends[name] = self.book.remember_table(
+                        replace(end, covers=(*end.covers, value)),
+                        self.book.table_source(end),
+                    )
             self.book.native_timestamp(
                 prog,
                 value,

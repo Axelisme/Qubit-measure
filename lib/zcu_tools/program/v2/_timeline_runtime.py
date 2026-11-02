@@ -1036,10 +1036,11 @@ class RuntimeMath(TimedMacro):
                     and difference_limits(selected, expression) == (0, 0)
                 ):
                     if isinstance(value, RuntimeEnd):
-                        return (
+                        return self.prog._timeline_book.remember_table(
                             replace(value, covers=covers, deferred=deferred)
                             if maximum
-                            else value
+                            else value,
+                            self.prog._timeline_book.table_source(value),
                         )
                     if not deferred:
                         return value
@@ -1059,7 +1060,10 @@ class RuntimeMath(TimedMacro):
             result = self._select(result, operand, maximum=maximum, target=destination)
         result = self.add(shared, result, target=destination)
         proof = choose_time(*expressions, maximum=maximum)
-        return replace(result, expression=proof, covers=covers, deferred=deferred)
+        return self.prog._timeline_book.remember_table(
+            replace(result, expression=proof, covers=covers, deferred=deferred),
+            self.prog._timeline_book.table_choice(values, maximum=maximum),
+        )
 
     @staticmethod
     def _choice_coverage(values: Sequence[Time | TimeExpression]) -> tuple[Time, ...]:
@@ -1249,7 +1253,10 @@ class RuntimeMath(TimedMacro):
         operand = self.t_regs[key]
         if isinstance(operand, str):
             expression = parameter_expression(self.prog, rounded)
-            return RuntimeEnd(operand, lower, upper, expression=expression)
+            return self.prog._timeline_book.remember_table(
+                RuntimeEnd(operand, lower, upper, expression=expression),
+                value if isinstance(value, TableParam) else None,
+            )
         if operand == 0:
             return RuntimeEnd("s0", 0, 0)
         register = self.allocate()
@@ -1457,6 +1464,17 @@ class RuntimeMath(TimedMacro):
         )
         if result.minimum is not None and result.maximum is not None:
             self.check(result.minimum, result.maximum)
+        if operator in ("+", "-"):
+            self.prog._timeline_book.remember_table(
+                result,
+                self.prog._timeline_book.table_sum(
+                    left,
+                    right
+                    if isinstance(right, RuntimeEnd)
+                    else right / get_fclk(self.prog),
+                    subtract=operator == "-",
+                ),
+            )
         return result
 
     def covers(self, end: Time, previous: Time) -> bool:
@@ -1477,13 +1495,16 @@ class RuntimeMath(TimedMacro):
             if value.offset
             else WriteReg(dst=register, src=value.register)
         )
-        return RuntimeEnd(
-            register,
-            value.minimum,
-            value.maximum,
-            value.covers,
-            value.deferred,
-            runtime_expression(value),
+        return self.prog._timeline_book.remember_table(
+            RuntimeEnd(
+                register,
+                value.minimum,
+                value.maximum,
+                value.covers,
+                value.deferred,
+                runtime_expression(value),
+            ),
+            self.prog._timeline_book.table_source(value),
         )
 
     def add(self, a: Time, b: Time, *, target: str | None = None) -> RuntimeEnd:
