@@ -20,12 +20,10 @@ from zcu_tools.program.v2.modules.readout import (
     MuxReadoutCfg,
     PulseReadout,
     PulseReadoutCfg,
-    TablePulseReadout,
 )
 from zcu_tools.program.v2.modules.reset import TwoPulseResetCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.simulation.compiled import build_compiled_request
-from zcu_tools.program.v2.utils import readout_freq_words
 
 from tests.program._profiles import GEN_MHZ, TPROC_MHZ, load_mux_soccfg, load_soccfg
 from tests.program._timing_expectations import (
@@ -556,7 +554,7 @@ def test_unsynchronized_dual_drive_groups_and_mux_fit_sixteen_registers(heralded
     assert len(prog.binprog["pmem"]) > 0
 
 
-@pytest.mark.parametrize("family", ["pulse", "table", "mux"])
+@pytest.mark.parametrize("family", ["pulse", "mux"])
 def test_readout_families_finish_at_generator_plus_post_before_late_adc(family):
     soccfg = (
         load_mux_soccfg(2, 2, gen_ch=0, ro_chs=(0, 1))
@@ -593,20 +591,7 @@ def test_readout_families_finish_at_generator_plus_post_before_late_adc(family):
             ro_length=1.0,
             trig_offset=0.5,
         )
-        if family == "table":
-            builder.add_loop("frequency", 2)
-            gen_words, adc_words = readout_freq_words(
-                soccfg, [100, 101], gen_ch=0, ro_ch=0, mixer_freq=None, nqz=1
-            )
-            readout = TablePulseReadout(
-                "read",
-                cfg,
-                idx_reg="frequency",
-                freq_words=gen_words,
-                ro_freq_words=adc_words,
-            )
-        else:
-            readout = PulseReadout("read", cfg)
+        readout = PulseReadout("read", cfg)
     builder.emit(readout)
     builder.emit(_pulse("next_drive"))
     prog = builder.build()

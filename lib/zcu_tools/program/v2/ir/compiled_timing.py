@@ -8,6 +8,7 @@ from typing import Literal
 
 import numpy as np
 from numpy.typing import NDArray
+from qick.asm_v2 import QickProgramV2
 
 from .hw_semantics import WAVE_REGS
 from .instructions import (
@@ -38,6 +39,39 @@ from .operands import (
     SrcKeyword,
     TimeOffset,
 )
+
+# Unsigned hardware fields in freq, phase, env, gain, length, conf order.
+WaveWords = tuple[int, int, int, int, int, int]
+_WAVE_FIELDS = ("freq", "phase", "env", "gain", "length", "conf")
+
+
+def _unsigned_wave_words(words: Sequence[int]) -> WaveWords:
+    """Normalize six words in hardware field order to their unsigned widths."""
+    freq, phase, env, gain, length, conf = words
+    return (
+        freq % 2**32,
+        phase % 2**32,
+        env % 2**24,
+        gain % 2**32,
+        length % 2**32,
+        conf % 2**16,
+    )
+
+
+def compiled_wmem(program: QickProgramV2) -> dict[int, WaveWords]:
+    """Copy initial WMEM from a successfully compiled QICK v2 program.
+
+    Keys are zero-based waveform addresses. Each value contains unsigned raw
+    freq, phase, env, gain, length and conf words (32/32/24/32/32/16 bits).
+    Swept fields use their compiled starting values. No physical units are
+    decoded. Raises ValueError if the program has no compiled binary.
+    """
+    if not program.binprog:
+        raise ValueError("Program must be compiled before reading WMEM")
+    return {
+        index: _unsigned_wave_words([int(wave[field]) for field in _WAVE_FIELDS])
+        for index, wave in enumerate(program.waves)
+    }
 
 
 @dataclass(frozen=True)
@@ -93,22 +127,28 @@ class TimingLayout:
 
 @dataclass(frozen=True)
 class CompiledTimingInput:
-    """Public linked assembly, shot layout and optional compiled data memory.
+    """Public linked assembly, shot layout and optional initial DMEM/WMEM.
 
     prog_list and labels are the final linked compiler outputs; layout identifies
     body boundaries and shot axes. dmem is the one-dimensional signed int32 word
     array returned by ProgramResourcesMixin.compile_datamem(), or its transported
     sequence of Python ints. Addresses are zero-based WORD offsets, not bytes.
     None and an empty sequence mean no data is available, not zero-filled memory.
-    Analysis never mutates these inputs. Executed reads require a known in-range
-    address and a signed int32 word; missing/malformed data, unknown/out-of-range
-    addresses and unsupported memory effects (including writes) raise ValueError.
+    wmem optionally maps zero-based waveform addresses to six unsigned hardware
+    words in freq, phase, env, gain, length, conf order, as from compiled_wmem().
+    None leaves wave contents unknown; an empty mapping provides no waveforms.
+    Analysis never mutates these inputs. Executed DMEM reads require a known
+    in-range address and a signed int32 word. Wave accesses require a supplied
+    WMEM address and six words. Missing data, unknown/out-of-range addresses and
+    unsupported memory side effects raise ValueError. DMEM writes are unsupported;
+    plain WMEM_WR updates only the analysis copy.
     """
 
     prog_list: Sequence[Mapping[str, object]]
     labels: Mapping[str, object]
     layout: TimingLayout
     dmem: Sequence[int] | NDArray[np.int32] | None = None
+    wmem: Mapping[int, WaveWords] | None = None
 
 
 @dataclass(frozen=True)
@@ -120,6 +160,9 @@ class TimingEvent:
     physical tProc output port, NOT a logical generator/ADC channel. cycle is
     absolute from the initial reference origin 0. address identifies the linked
     instruction; value holds the data-port mask or trigger level, else None.
+    wave_words holds six unsigned hardware fields in freq, phase, env, gain,
+    length, conf order for wave outputs when initial WMEM was supplied; otherwise
+    it is None. These words are not decoded into physical units.
     """
 
     kind: Literal["wave", "data", "trigger"]
@@ -127,6 +170,7 @@ class TimingEvent:
     cycle: int
     address: int
     value: int | None = None
+    wave_words: WaveWords | None = None
 
 
 @dataclass(frozen=True)
@@ -166,6 +210,7 @@ class TimingAnalysis:
 class _Machine:
     labels: Mapping[str, object]
     dmem: Sequence[int] | NDArray[np.int32] | None
+    wmem: dict[int, WaveWords] | None = None
     registers: dict[str, int | None] = field(default_factory=lambda: {"s0": 0})
     reference: int = 0
     flags: int | None = None
@@ -261,11 +306,7 @@ class _Machine:
         if inst.wr or inst.ww or inst.wp or inst.port:
             raise ValueError("Unsupported register write side effects")
         if inst.src == SrcKeyword.WMEM and inst.dst.name == "r_wave":
-            # Waveform contents do not determine scheduled output times.
-            for name in WAVE_REGS:
-                self.registers.pop(name, None)
-            if inst.uf:
-                self.flags = None
+            self.load_wave(inst)
             return
         if inst.src == SrcKeyword.IMM and inst.lit is not None:
             value = inst.lit.value
@@ -340,6 +381,46 @@ class _Machine:
             raise ValueError("Missing reference increment")
         self.reference += self.value(operand)
 
+    def wave_address(self, operand: Register | MemAddr | None) -> int:
+        if not isinstance(operand, (Register, MemAddr)):
+            raise ValueError("Missing wave memory address")
+        return self.value(operand) if isinstance(operand, Register) else operand.value
+
+    def read_wave(self, operand: Register | MemAddr | None) -> WaveWords:
+        address = self.wave_address(operand)
+        if self.wmem is None or address not in self.wmem:
+            raise ValueError(f"Missing compiled wmem at address {address}")
+        words = self.wmem[address]
+        if len(words) != 6 or any(isinstance(word, bool) for word in words):
+            raise ValueError(
+                f"Compiled wmem must contain six integer words at {address}"
+            )
+        return words
+
+    def load_wave(self, inst: RegWriteInst) -> None:
+        if self.wmem is None:
+            # Without initial WMEM, retain the timing-only unknown-data behavior.
+            for name in WAVE_REGS:
+                self.registers.pop(name, None)
+        else:
+            for index, word in enumerate(self.read_wave(inst.addr)):
+                self.registers[f"w{index}"] = _signed32(word)
+        if inst.uf:
+            self.flags = None
+
+    def store_wave(self, inst: WmemWriteInst) -> None:
+        taken = self.condition(inst.if_cond)
+        if inst.time or inst.wr or inst.op or inst.uf or inst.wp:
+            raise ValueError("Unsupported wave memory side effects")
+        if taken and self.wmem is not None:
+            self.read_wave(inst.addr)
+            self.wmem[self.wave_address(inst.addr)] = self.wave_registers()
+
+    def wave_registers(self) -> WaveWords:
+        return _unsigned_wave_words(
+            [self.value(Register(f"w{i}")) for i in range(len(_WAVE_FIELDS))]
+        )
+
     def output(
         self, inst: PortWriteInst | DportWriteInst | TrigInst, address: int
     ) -> TimingEvent | None:
@@ -354,6 +435,14 @@ class _Machine:
             kind, value = "data", self.value(inst.data)
         elif isinstance(inst, TrigInst):
             kind, value = "trigger", int(inst.src == "set")
+        wave_words = None
+        if isinstance(inst, PortWriteInst) and self.wmem is not None:
+            if inst.src == SrcKeyword.WMEM:
+                wave_words = self.read_wave(inst.addr)
+            elif isinstance(inst.src, Register) and inst.src.canonical_name == "r_wave":
+                wave_words = self.wave_registers()
+            else:
+                raise ValueError(f"Unsupported wave output source: {inst.src}")
         offset = inst.time if inst.time is not None else Register("s14")
         return TimingEvent(
             kind,
@@ -361,6 +450,7 @@ class _Machine:
             self.reference + self.value(offset),
             address,
             value,
+            wave_words,
         )
 
     def execute(self, inst: BaseInst, address: int) -> int:
@@ -382,9 +472,7 @@ class _Machine:
             if isinstance(inst.addr, Register) and self.value(inst.addr) != address + 1:
                 raise ValueError("WAIT target must be its internal polling jump")
         elif isinstance(inst, WmemWriteInst):
-            self.condition(inst.if_cond)
-            if inst.time or inst.wr or inst.op or inst.uf or inst.wp:
-                raise ValueError("Unsupported wave memory side effects")
+            self.store_wave(inst)
         elif not isinstance(inst, (PortWriteInst, DportWriteInst, TrigInst)):
             raise ValueError(f"Unsupported timing instruction: {inst}")
         return following
@@ -484,7 +572,10 @@ def analyze_timing(
     add/subtract, bitwise AND/OR/XOR, signed 32-bit unary ABS and hardware
     low-four-bit SR/ASR/SL shifts. ABS rejects -2147483648 because its overflow
     result is not specified by the assembler.
-    Wave data is unknown until overwritten; time/control cannot consume it.
+    With initial WMEM, wave loads, wave-register updates and WMEM_WR modify a
+    private memory copy; wave output events carry the current six raw words.
+    Without initial WMEM, wave data stays unknown until overwritten and cannot
+    drive time/control.
     Hardware s11 reads (including Resync) raise an error naming the source.
     Unknown timing/control registers, unsupported instructions/side effects,
     malformed boundaries, shot-count mismatches and exceeding positive max_steps
@@ -494,7 +585,11 @@ def analyze_timing(
     if max_steps <= 0:
         raise ValueError("max_steps must be positive")
     decoded, end_address = _decode(compiled)
-    machine = _Machine(compiled.labels, compiled.dmem)
+    machine = _Machine(
+        compiled.labels,
+        compiled.dmem,
+        None if compiled.wmem is None else dict(compiled.wmem),
+    )
     recorder = _Shots(compiled.layout)
     address = min(decoded)
     for _ in range(max_steps):

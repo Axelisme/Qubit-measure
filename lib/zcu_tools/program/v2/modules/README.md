@@ -1,6 +1,6 @@
 # program/v2/modules — semantic program modules
 
-**Last updated:** 2026-11-02，Reset requires a reset cfg
+**Last updated:** 2026-11-02，查表參數、時間取整與 readout phase 覆寫
 
 **讀者：** lab-author、framework-dev、agent。語意 program modules 的宣告、發射與 owner 邊界速查。
 
@@ -18,7 +18,7 @@ Each module supplies resource declaration and native lowering.
 
 ## 原生寫法
 
-Pulse、Delay、SoftDelay、DelayAuto、PulseReadout、Reset 系列、LoadValue、LoadWord、ComputedPulse、TableLengthPulse、TablePulseReadout 與 MuxReadout 提供原生 lowering。
+Pulse、Delay、SoftDelay、DelayAuto、PulseReadout、Reset 系列、LoadValue、LoadWord、ComputedPulse、TableLengthPulse 與 MuxReadout 提供原生 lowering。
 每次 `emit` 建立一個 `timeline.ModuleEmission`，保存該次原生指令與 tag。
 Module 不是 QICK Macro，不能直接交給 `append_macro`。
 同一宣告物件可重複發射，也可宣告進不同的原生 program 或 builder。
@@ -27,7 +27,7 @@ Module 不是 QICK Macro，不能直接交給 `append_macro`。
 `Pulse.pulse_name(prog)` 回傳指定 program 的 pulse 名稱，供原生 QICK 呼叫使用。
 Tag 屬於每次 emit，不存於 module constructor。
 
-Pulse、PulseReadout、TablePulseReadout 與 MuxReadout 以 generator waveform 的實際結尾加一次 post-delay，再向上取整到 tProc cycle。
+Pulse、PulseReadout 與 MuxReadout 以 generator waveform 的實際結尾加一次 post-delay，再向上取整到 tProc cycle。
 Readout 的 ADC 視窗只更新各 ADC channel 的尾端，不延長作者 timeline。
 後一個 trigger 帶 timeline 時，同 ADC 視窗重疊或無法證明不重疊會在編譯期報錯。純原生 trigger 保留 QICK 行為。
 原生 scalar／sweep trigger 以實際量化起點留下 ADC 尾端證據，供重疊檢查與 shell WAIT 使用。
@@ -40,7 +40,11 @@ Lowering 直接使用實際事件結尾，不移動 reference。
 TwoPulseReset 合併各 pulse end 加各自 post-delay。BathReset 的 pi/2 從向上取整後的 cavity end 加 post-delay 開始。
 BathReset 最後合併 qubit 與 pi/2 的實際結尾，包含各自 post-delay，不漏掉較長的 qubit。
 Scalar 與可精確表示的整數仿射 sweep 保留靜態時間。
-作者 sweep 沿用 QICK 原生 start round 與逐圈 step 截斷，不配置逐點時間 table。
+線性 sweep 沿用 QICK 原生 start round 與逐圈 step 截斷，不配置逐點時間 table。
+查表時間逐點沿用消費端的取整，具名 timeline 的 duration 用 ceil，原生 QICK 轉換保留 nearest。
+查表 length 保留 generator cycle 格點，native auto follower 與 timeline finish 分別沿用 nearest 與 ceil。
+時間 getter 對量化後恰為常數或仿射的表回傳等值 `QickParam`，不回傳 `TableParam`。
+非仿射或 runtime-only 時間 raise RuntimeError。
 Runtime 跨 generator 格點的長度以 k=8 定點換算，再將 post 加入 aggregate 後 ceil。
 已是 tProc cycle 的 branch 合流以整數乘加、max 與選擇運算重建，不配置 selected-end table。
 作者明確宣告的 waveform／length／value tables 仍可使用 DMEM。IR branch／register-loop dispatch 也可配置 jump-address table，內容是程式位址，不是時間。
@@ -132,7 +136,7 @@ owners and lowering all use the effective cfg retained by the module.
 | Constructor | Override keywords |
 | --- | --- |
 | `Pulse` / `PulseReset` | `freq`, `gain`, `phase`, `length` |
-| `PulseReadout` / `Readout` with pulse cfg | `freq`, `gain`, `length`, `ro_length` |
+| `PulseReadout` / `Readout` with pulse cfg | `freq`, `gain`, `phase`, `length`, `ro_length` |
 | `TwoPulseReset` | `gain1`, `gain2`, `freq1`, `freq2`, `length` (both pulses) |
 | `BathReset` | `qub_gain`, `qub_freq`, `qub_length`, `res_gain`, `res_freq`, `res_length`, `pi2_phase` |
 
@@ -140,11 +144,43 @@ owners and lowering all use the effective cfg retained by the module.
 lengths are us, phases are degrees and gains are normalized. `MuxReadout` does
 not accept override keywords; `Readout` with mux cfg rejects non-None overrides.
 Unsupported waveform length sweeps raise `ValueError` at construction.
-Accepting a `ro_length` sweep value does not mean QICK can compile an ADC-window
-sweep. That existing compile error is unchanged, just as with `set_param`.
+A `TableParam` in `ro_length` raises `NotImplementedError` when constructing
+`PulseReadout`, before build. Linear ADC-window sweeps retain QICK's existing
+compile restrictions. `MuxReadout` does not support table sweeps.
 
 `cfg.set_param(name, value)` remains available and mutates that cfg. Use a
 caller-owned copy when deliberately updating cfg before constructing modules.
+
+## Table sweep parameters
+
+`builder.add_table_sweep(name, values)` declares a top-level loop and returns a
+`TableParam`, where `add_sweep(name, spec)` returns a linear `QickParam`.
+Pass the returned parameter through the constructor keywords above or supported
+cfg fields. Values use the consuming parameter's units.
+Empty or nonfinite values raise `ValueError`. Duplicate loop names also raise.
+Both loop APIs nest outer-to-inner in declaration order.
+
+Create `TableParam(name, other_values)` for another independent table on the same
+loop. Each table must have one value per loop iteration; build raises `ValueError`
+on a length mismatch. Arithmetic with numbers or unswept `QickParam` scalars
+supports `+ - * /`, including reversed operands, and returns a new table on that
+loop. Arithmetic with another sweep raises `TypeError`, including a table on the
+same loop.
+
+Pulse, PulseReadout and Reset parameters use QICK's scalar conversion at each
+point. Const and flat-top lengths accept tables; only the flat segment changes
+length for flat-top. Other waveform length restrictions still apply.
+Time tables also work in `Delay`, `SoftDelay`, `DelayAuto(t=...)` and the pulse
+pre/post delays and trigger offsets. See [program table sweeps](../README.md#查表掃描)
+for constructor examples and the complete timing API.
+
+The owning loop's closing shell loads the next waveform fields and time-register
+values after every iteration, even when that shot did not play the pulse.
+The final update restores the first point before the next outer loop or repetition.
+Each table point's hardware words equal a program compiled with that scalar value.
+Recompiling linear sweep floats can differ from the linear words by one least
+unit for truncating fields such as gain. Linear/table parity requires first
+checking exact scalar re-encoding on the same profile.
 
 ## Dmem Tables
 
@@ -200,8 +236,7 @@ pulse template. Same-named readouts can therefore coexist without sharing mutabl
 configuration templates. `readout.adc_name(prog)` returns that program's ADC
 config name after declaration, like `pulse.pulse_name(prog)` for a generator pulse.
 The first template uses its base name; later allocations append a numeric suffix.
-`TablePulseReadout` uses the same accessor for its ADC word updates. Ordinary
-Pulse content-hash sharing is unchanged.
+Ordinary Pulse content-hash sharing is unchanged.
 `PulseReadoutCfg.nominal_duration_us()` returns
 `pre_delay + waveform.length + post_delay` without clock rounding or program
 initialization. It excludes ADC timing and does not replace runtime scheduling.
@@ -255,17 +290,17 @@ Centroid3 的第三類是 f，不是 circle 的 other。需要 Other 的 consume
   selected fields in `r_wave`, and sends that register bundle directly to the
   hardware port. The runtime path does not write and immediately re-read wmem;
   the template remains unchanged for the next sweep point.
-- `TablePulseReadout` is the program-side arbitrary-frequency sweep path. It owns
-  paired generator/readout uint32 tables, plays the current point through QICK's
-  ordinary wmem-backed `PulseReadout`, and uses the sweep loop's exec-after hook
-  to prepare the next point. Its dedicated templates prevent a table update from
-  mutating a pulse shared through `PulseRegistry`; the rotated tables restore the
+- For arbitrary semantic frequencies, pass the result of
+  `builder.add_table_sweep("freq", freqs)` to `PulseReadout(..., freq=freq)`.
+  QICK converts each value into paired generator/readout words. Native loop
+  closing loads the next point from rotated dmem tables after every shot,
+  including shots that do not play the readout. The final update restores the
   first point before the next outer repetition.
 
 ## Runtime Pulse Length
 
-- `TableLengthPulse` owns the arbitrary pulse-length hardware sweep for `const`
-  and `flat_top`. Native declaration keeps one template and a generator-length
+- `TableLengthPulse` selects `const` or `flat_top` lengths from a table using an
+  explicit selector. Native declaration keeps one template and a generator-length
   table. Playback resolves the actual selected waveform end, adds pre/post
   once and ceils the aggregate once. It does not store tProcessor durations.
 - A const pulse patches the template's single `w4` length field. A flat-top pulse

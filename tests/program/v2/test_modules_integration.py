@@ -26,7 +26,6 @@ from zcu_tools.program.v2.modules.readout import (
     PulseReadout,
     PulseReadoutCfg,
     Readout,
-    TablePulseReadout,
 )
 from zcu_tools.program.v2.modules.reset import (
     BathResetCfg,
@@ -37,7 +36,6 @@ from zcu_tools.program.v2.modules.reset import (
 from zcu_tools.program.v2.modules.waveform import (
     ConstWaveformCfg,
 )
-from zcu_tools.program.v2.utils import readout_freq_words
 
 from tests.program._profiles import load_soccfg
 from tests.program._timeline import compile_modules
@@ -312,93 +310,6 @@ class TestReadoutIntegration:
         assert len(runtime_ports) == 2
         assert not any(inst.get("CMD") == "WMEM_WR" for inst in prog.prog_list)
 
-    def test_table_pulse_readout_prepares_next_wmem_after_standard_playback(self):
-        soccfg = load_soccfg(n_gens=1, n_readouts=1)
-        freqs = [1000.0, 1010.0, 1020.0]
-        freq_words, ro_freq_words = readout_freq_words(
-            soccfg,
-            freqs,
-            gen_ch=GEN_CH,
-            ro_ch=RO_CH,
-            mixer_freq=None,
-            nqz=GEN_NQZ,
-        )
-        cfg = _readout_cfg(freq=freqs[0])
-        prog = compile_modules(
-            soccfg,
-            modules=[
-                TablePulseReadout(
-                    "ro",
-                    cfg,
-                    idx_reg="freq",
-                    freq_words=freq_words,
-                    ro_freq_words=ro_freq_words,
-                )
-            ],
-            sweep=[("freq", len(freqs))],
-        )
-
-        ports = [
-            (idx, inst)
-            for idx, inst in enumerate(prog.prog_list)
-            if inst.get("CMD") == "WPORT_WR"
-        ]
-        updates = [
-            (idx, inst)
-            for idx, inst in enumerate(prog.prog_list)
-            if inst.get("CMD") == "WMEM_WR"
-        ]
-        assert len(ports) == 2
-        assert all(inst.get("SRC") == "wmem" for _, inst in ports)
-        assert len(updates) == 2
-        assert min(idx for idx, _ in updates) > max(idx for idx, _ in ports)
-        time_indices = [
-            idx for idx, inst in enumerate(prog.prog_list) if inst.get("CMD") == "TIME"
-        ]
-        test_indices = [
-            idx for idx, inst in enumerate(prog.prog_list) if inst.get("CMD") == "TEST"
-        ]
-        assert any(
-            max(idx for idx, _ in ports) < idx < min(idx for idx, _ in updates)
-            for idx in time_indices
-        )
-        assert max(idx for idx, _ in updates) < min(test_indices)
-        assert not any("runtime" in wave.name for wave in prog.waves)
-        assert not any(wave.conf & 0b010000 for wave in prog.waves)
-
-        for pulse_name, expected_word in (
-            ("ro_table_pulse", freq_words[0]),
-            ("ro_adc", ro_freq_words[0]),
-        ):
-            wave_names = prog.pulses[pulse_name].get_wavenames(exclude_special=True)
-            assert len(wave_names) == 1
-            wave = prog.waves[prog.wave2idx[wave_names[0]]]
-            raw_freq = wave.freq.start if hasattr(wave.freq, "start") else wave.freq
-            assert int(raw_freq) % 2**32 == expected_word
-
-        dmem = prog.binprog["dmem"]
-        assert dmem is not None
-        assert [int(word) % 2**32 for word in dmem] == (
-            freq_words[1:] + freq_words[:1] + ro_freq_words[1:] + ro_freq_words[:1]
-        )
-
-    def test_table_pulse_readout_rejects_loop_count_mismatch(self):
-        cfg = _readout_cfg(freq=GEN_FREQ)
-        with pytest.raises(ValueError, match="does not match loop"):
-            _make_prog(
-                modules=[
-                    TablePulseReadout(
-                        "ro",
-                        cfg,
-                        idx_reg="freq",
-                        freq_words=[1, 2],
-                        ro_freq_words=[3, 4],
-                    )
-                ],
-                sweep=[("freq", 3)],
-                n_gens=1,
-            )
-
     def test_readout_factory_pulse_compiles(self):
         cfg = _readout_cfg()
         prog = _make_prog(modules=[Readout("ro", cfg)])
@@ -518,30 +429,6 @@ def test_readout_generator_and_adc_compile_one_frequency(swept):
         gen_freq, [700.0, 710.0, 720.0] if swept else 700.0, atol=1e-4
     )
     np.testing.assert_allclose(ro_freq, gen_freq, atol=1e-4)
-
-
-@pytest.mark.parametrize("sweep", [None, [("other", 2)]])
-def test_table_readout_requires_named_loop(sweep):
-    ro = TablePulseReadout(
-        "table", _readout_cfg(), idx_reg="freq", freq_words=[1, 2], ro_freq_words=[3, 4]
-    )
-    with pytest.raises(ValueError, match="requires one sweep loop"):
-        _make_prog(modules=[ro], sweep=sweep)
-
-
-def test_table_readout_does_not_share_fixed_pulse_template():
-    cfg = _readout_cfg()
-    table = TablePulseReadout(
-        "table", cfg, idx_reg="freq", freq_words=[1, 2], ro_freq_words=[3, 4]
-    )
-    prog = _make_prog(
-        modules=[Readout("fixed", cfg), Delay("adc_gap", 0.5), table],
-        sweep=[("freq", 2)],
-        reps=2,
-    )
-    pulse_names = [name for name in prog.pulses if not name.endswith("_adc")]
-    assert len(pulse_names) == 2
-    assert len({tuple(prog.pulses[name].get_wavenames()) for name in pulse_names}) == 2
 
 
 def test_unprotected_routes_keep_qick_redeclaration_semantics():

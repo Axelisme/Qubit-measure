@@ -219,7 +219,6 @@ class Inputs(RecipeInputs):
     n: int = Field(ge=2, description="Sweep sample count, mapped to GUI Expts.")
     pulse_length_us: float = Field(gt=0, description="Custom drive duration in us.")
     model_type: Literal["lor", "sinc"] | None | Keep = KEEP
-    plot_fit: bool | None | Keep = KEEP
 
 
 class Report(RecipeReport):
@@ -234,7 +233,7 @@ async def custom_spectrum(session: RecipeSession, inputs: Inputs) -> Report:
 
     n sets Form freq.n, lowered to cfg freq.expts. Frequencies use MHz.
     pulse_length_us changes the drive duration before acquisition.
-    model_type selects the existing lor/sinc fit; plot_fit controls its overlay.
+    model_type selects the existing lor/sinc fit. The fitted curve is always shown.
     Missing Form values stop before acquisition. Omitted analysis controls retain
     owner values; explicit null is passed unchanged to the analysis owner.
     """
@@ -256,9 +255,7 @@ async def custom_spectrum(session: RecipeSession, inputs: Inputs) -> Report:
     try:
         analysis = await tab.analyze(
             "primary", result=TwotoneSpectrumSummary,
-            updates={
-                "model_type": inputs.model_type, "plot_fit": inputs.plot_fit,
-            },
+            updates={"model_type": inputs.model_type},
         )
         if analysis.result is None:
             return Report(analysis_failure=analysis.reason)
