@@ -2,14 +2,15 @@
 
 from collections.abc import Sequence
 from fractions import Fraction
+from typing import Never, override
 
 import numpy as np
 from numpy.typing import NDArray
-from qick.asm_v2 import QickRawParam
+from qick.asm_v2 import QickParam, QickRawParam
 from qick.helpers import to_int
 
 
-class TableParam:
+class TableParam(QickParam):
     """Physical values belonging to one top-level loop.
 
     loop names the owning loop. values preserves point order, including repeats.
@@ -22,6 +23,20 @@ class TableParam:
         self.values = tuple(values)
         self._raw: TableRawParam | None = None
         self._raw_scale: float = 1.0
+
+    def __getattr__(self, name: str) -> Never:
+        if name in {"start", "spans", "raw_param", "derived_param"}:
+            raise TypeError(f"TableParam loop {self.loop!r} has no affine {name}")
+        raise AttributeError(name)
+
+    def __repr__(self) -> str:
+        return f"TableParam(loop={self.loop!r}, values={self.values!r})"
+
+    def __str__(self) -> str:
+        return repr(self)
+
+    def __copy__(self) -> "TableParam":
+        return TableParam(self.loop, self.values)
 
     def is_sweep(self) -> bool:
         """Return True, even for a constant or single-point table."""
@@ -89,12 +104,12 @@ class TableParam:
     def __ge__(self, other: float) -> bool:
         return self.maxval() >= other
 
+    @override
     def to_int(
         self,
         scale: float,
         quantize: int = 1,
         parname: str | None = None,
-        *,
         trunc: bool = False,
     ) -> "TableRawParam":
         """Convert each point using QICK scalar rounding and return raw words.
@@ -115,9 +130,23 @@ class TableParam:
         self._raw_scale = scale
         return self._raw
 
-    def to_array(self) -> NDArray[np.float64]:
-        """Return a detached one-dimensional array in point order."""
-        return np.asarray(self.values, dtype=np.float64)
+    @override
+    def to_array(
+        self, loop_counts: dict[str, int] | None = None, all_loops: bool = False
+    ) -> NDArray[np.float64]:
+        """Return a detached array in point order.
+
+        With loop_counts and all_loops, retain every unrelated loop as a
+        singleton dimension in declaration order, matching QICK's convention.
+        Without all_loops, return the one-dimensional lookup values.
+        """
+        values = np.asarray(self.values, dtype=np.float64)
+        if loop_counts is not None and all_loops:
+            shape = [
+                len(self.values) if name == self.loop else 1 for name in loop_counts
+            ]
+            return values.reshape(shape)
+        return values
 
     def get_rounded(self, loop_counts: dict[str, int] | None = None) -> "TableParam":
         """Return quantized physical values; raise RuntimeError before to_int.
@@ -162,7 +191,7 @@ class TableRawParam(QickRawParam):
         copied.offset = self.offset
         return copied
 
-    def __imul__(self, factor: int | Fraction) -> "TableRawParam":
+    def __imul__(self, factor: object) -> "TableRawParam":
         if not isinstance(factor, (int, Fraction)):
             raise TypeError("raw tables can only be multiplied by int or Fraction")
         if isinstance(factor, Fraction) and any(
@@ -175,7 +204,7 @@ class TableRawParam(QickRawParam):
         self.offset *= factor
         return self
 
-    def __iadd__(self, offset: int) -> "TableRawParam":
+    def __iadd__(self, offset: object) -> "TableRawParam":
         if not isinstance(offset, int):
             raise TypeError("raw table offsets must be integers")
         self.values = tuple(v + offset for v in self.values)
