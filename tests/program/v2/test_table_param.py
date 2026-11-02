@@ -4,7 +4,6 @@ import numpy as np
 import pytest
 from qick import QickConfig
 from qick.helpers import to_int
-
 from zcu_tools.program import v2
 
 
