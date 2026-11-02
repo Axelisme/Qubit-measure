@@ -113,5 +113,5 @@ def test_online_remote_error_expires_and_logs_full_content(
     )
     driver.click("Emit info")
     driver.screenshot(tmp_path / "05-info.png")
-    assert "Synthetic progress" in driver.status().message
+    assert "Synthetic progress" in driver.status().text
     assert not _notice_visible(driver)
