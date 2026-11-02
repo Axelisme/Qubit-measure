@@ -392,7 +392,7 @@ class RBExp(Experiment[RBResult, RBCfg]):
                 # Isolate model failure while retaining measured count diagnostics.
                 reason = str(exc)
             else:
-                estimate = estimate_d4(fit)
+                estimate = estimate_d4(fit.summary)
                 quality = (
                     compute_fit_quality(
                         fit.mean_signals[0], fit.fit_signals[0], {}, None
