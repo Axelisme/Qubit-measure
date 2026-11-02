@@ -638,29 +638,31 @@ def test_compiled_wmem_attaches_scalar_wave_words_without_mutating_inputs():
     "parameter,start,stop", [("gain", -0.2, 0.3), ("freq", 97, 103)]
 )
 def test_wave_words_follow_native_sweep_updates_and_reset(parameter, start, stop):
-    class ParameterProgram(ScalarProgram):
-        def _initialize(self, cfg):
-            self.declare_gen(ch=0, nqz=1)
-            if cfg["swept"]:
-                self.add_loop("scan", 3)
-            params = {"freq": 100, "gain": 0.1}
-            params[parameter] = cfg["value"]
-            self.add_pulse(
-                ch=0, name="p", style="const", phase=0, length=10 / GEN_MHZ, **params
-            )
+    def compile_parameter(value, *, swept=False, reps=1):
+        class ParameterProgram(ScalarProgram):
+            def _initialize(self, cfg):
+                self.declare_gen(ch=0, nqz=1)
+                if swept:
+                    self.add_loop("scan", 3)
+                params = {"freq": 100, "gain": 0.1}
+                params[parameter] = value
+                self.add_pulse(
+                    ch=0,
+                    name="p",
+                    style="const",
+                    phase=0,
+                    length=10 / GEN_MHZ,
+                    **params,
+                )
 
-    prog = ParameterProgram(
-        load_soccfg(),
-        cfg={"swept": True, "value": QickSweep1D("scan", start, stop)},
-        reps=2,
-        initial_delay=0,
-        relax_delay=0,
-    )
+        return ParameterProgram(
+            load_soccfg(), reps=reps, initial_delay=0, relax_delay=0
+        )
+
+    prog = compile_parameter(QickSweep1D("scan", start, stop), swept=True, reps=2)
     expected = []
     for point in prog.get_pulse_param("p", parameter, as_array=True).flatten():
-        scalar = ParameterProgram(
-            load_soccfg(), cfg={"swept": False, "value": float(point)}
-        )
+        scalar = compile_parameter(float(point))
         expected.append(ir.compiled_wmem(scalar)[0])
     layout = ir.TimingLayout.from_metadata(
         prog.meta_infos, (ir.TimingLoop("reps", 2), ir.TimingLoop("scan", 3))
