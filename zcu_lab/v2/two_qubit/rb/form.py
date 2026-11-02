@@ -33,22 +33,6 @@ def rb_form(ctx: FormContext, cfg_type: type[T_Cfg]) -> Form[T_Cfg]:
     readout = Slot("$mux.module.readout")
     return Form(
         cfg_type,
-        # Show captured roles first and keep acquisition settings after depth and seed inputs.
-        field_order=(
-            "roles",
-            "reset",
-            "x90_f1",
-            "x90_f2",
-            "readout",
-            "drive",
-            "phase_pair",
-            "depths",
-            "seeds",
-            "reps",
-            "rounds",
-            "relax_delay",
-            "initial_delay",
-        ),
         tree={
             "reps": 1000,
             "rounds": 10,

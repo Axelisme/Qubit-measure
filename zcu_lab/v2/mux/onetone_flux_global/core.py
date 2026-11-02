@@ -2,6 +2,7 @@
 
 from typing import ClassVar
 
+import numpy as np
 from zcu_tools.experiment import Experiment
 from zcu_tools.experiment.axes_spec import GroupedAxesSpec
 from zcu_tools.experiment.context import RunContext
@@ -27,7 +28,11 @@ class OnetoneFluxGlobalExp(Experiment[MuxFluxResult, OnetoneFluxGlobalCfg]):
     """Set DC, settle, acquire spectra and preserve completed flux points."""
 
     AXES_SPEC: ClassVar[GroupedAxesSpec[MuxFluxResult, OnetoneFluxGlobalCfg]] = (
-        mux_flux_spec(OnetoneFluxGlobalCfg, tag="mux/onetone_flux_global")
+        mux_flux_spec(
+            OnetoneFluxGlobalCfg,
+            tag="mux/onetone_flux_global",
+            cfg_schema_version="4.0",
+        )
     )
 
     def run(
@@ -41,4 +46,14 @@ class OnetoneFluxGlobalExp(Experiment[MuxFluxResult, OnetoneFluxGlobalCfg]):
         Driver and acquisition errors propagate.
         Sources remain at the final written value. No output is enabled here.
         """
-        return run_flux_scan(config, context=context)
+        values = np.linspace(config.flux.start, config.flux.stop, config.flux.expts)
+        flux_values = np.tile(values, (len(config.participants), 1))
+        devices = [config.flux_dev]
+        return run_flux_scan(
+            config.inner_cfg(),
+            flux_values=flux_values,
+            devices=devices,
+            flux_unit=config.flux_unit,
+            settle=config.settle,
+            context=context,
+        )

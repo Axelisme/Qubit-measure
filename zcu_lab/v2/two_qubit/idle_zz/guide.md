@@ -14,6 +14,9 @@ Refresh 更新來源與選項，保留已填輸入。修改來源或 aliases 後
 
 ## 設定與 Run
 
+普通版與 heralded 表單先列 reset、Xπ、X90 與 mux readout，再列角色與 target。
+外層 DC 的 device、unit、values 在內層 delay 前。Detune 接在 delay 後，取數欄位在最後。
+
 1. 選 target `f1` 或 `f2`，另一個是 spectator。需要 reset 時填入已校準的 reset cfg。
 2. 人工填 signed detune，單位 MHz。其絕對值須明顯大於預期 abs(ζ) 加 qubit 頻率誤差，使兩分支留在 detune 選定的同側。單一 projection 的資料不能證明此前提。
 3. 設 delay 的 µs 範圍及點數。分析至少需要 6 個不同、等距的實際 delay，正的時間跨度，並解析數個 fringe 週期。量化後 delay 不可重複。
