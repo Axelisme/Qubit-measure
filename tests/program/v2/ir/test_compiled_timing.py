@@ -2,6 +2,7 @@
 
 from copy import deepcopy
 
+import numpy as np
 import pytest
 from qick.asm_v2 import AsmInst, Pulse, QickSweep1D, Trigger
 from zcu_tools.program.v2 import ir
@@ -661,7 +662,7 @@ def test_wave_words_follow_native_sweep_updates_and_reset(parameter, start, stop
 
     prog = compile_parameter(QickSweep1D("scan", start, stop), swept=True, reps=2)
     expected = []
-    for point in prog.get_pulse_param("p", parameter, as_array=True).flatten():
+    for point in np.asarray(prog.get_pulse_param("p", parameter, as_array=True)).flat:
         scalar = compile_parameter(float(point))
         expected.append(ir.compiled_wmem(scalar)[0])
     layout = ir.TimingLayout.from_metadata(
