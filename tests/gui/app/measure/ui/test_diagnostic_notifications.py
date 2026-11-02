@@ -98,7 +98,7 @@ def test_online_remote_error_expires_and_logs_full_content(
     assert TITLE in caplog.text and MESSAGE in caplog.text
     (tmp_path / "error.log").write_text(caplog.text, encoding="utf-8")
     # Time is the product contract here: the notice must survive before expiry.
-    QTest.qWait(7000)
+    QTest().qWait(7000)
     driver.screenshot(tmp_path / "03-before-expiry.png")
     assert _notice_visible(driver)
     qt_until(
