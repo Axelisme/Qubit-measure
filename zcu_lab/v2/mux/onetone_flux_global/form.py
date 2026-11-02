@@ -22,7 +22,9 @@ from zcu_lab.v2.support.measure.seed_metadata import seed_metadata
 from .core import OnetoneFluxGlobalCfg
 
 
-def _initial_values(env: FormEnv, *, names: tuple[str, ...]) -> dict[str, JsonValue]:
+def _initial_values(
+    env: FormEnv, defaults: dict[str, JsonValue], *, names: tuple[str, ...]
+) -> dict[str, JsonValue]:
     group = require_mux_group(env.parameters)
     seeds = [captured_flux_seed(env, name, group.flux_dev) for name in names]
     units = {seed.unit for seed in seeds if seed.unit is not None}
@@ -32,11 +34,14 @@ def _initial_values(env: FormEnv, *, names: tuple[str, ...]) -> dict[str, JsonVa
         [None if seed.points is None else seed.points.integer for seed in seeds],
         [None if seed.points is None else seed.points.half for seed in seeds],
     )
-    return {
-        "flux_dev": group.flux_dev,
-        "flux_unit": next(iter(units)) if units else None,
-        "flux": {"kind": "linrange", "start": start, "stop": stop, "n": 101},
-    }
+    defaults.update(
+        {
+            "flux_dev": group.flux_dev,
+            "flux_unit": next(iter(units)) if units else None,
+            "flux": {"kind": "linrange", "start": start, "stop": stop, "n": 101},
+        }
+    )
+    return defaults
 
 
 def make_form(ctx: FormContext) -> Form[OnetoneFluxGlobalCfg]:

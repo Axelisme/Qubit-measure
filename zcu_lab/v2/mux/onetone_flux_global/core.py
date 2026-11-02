@@ -56,7 +56,7 @@ class OnetoneFluxGlobalCfg(ConfigBase):
     flux: SweepCfg
     df: Annotated[SweepCfg, FieldMeta(label="Frequency offset", unit="MHz")]
     participants: list[StrictInt]
-    flux_unit: Literal["A", "V", "native"]
+    flux_unit: Literal["A", "V", "native"] = "A"
     settle: Annotated[float, FieldMeta(unit="s")] = Field(
         default=0.1, ge=0, allow_inf_nan=False
     )
