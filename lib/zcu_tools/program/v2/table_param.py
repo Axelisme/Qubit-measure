@@ -68,6 +68,9 @@ class TableParam(QickParam):
 
     @staticmethod
     def _scalar(value: object) -> float:
+        # QICK accumulates pulse durations from a scalar QickParam(0).
+        if isinstance(value, QickParam) and not value.is_sweep():
+            return value.start
         if not isinstance(value, (int, float)):
             raise TypeError("table arithmetic requires an int or float scalar")
         return value
