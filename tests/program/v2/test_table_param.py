@@ -165,3 +165,81 @@ def test_affine_access_rejects_tables_with_loop_diagnostic(attribute: str) -> No
     table = v2.TableParam("point", [1.0, 3.0])
     with pytest.raises(TypeError, match="point"):
         getattr(table, attribute)
+
+
+@pytest.mark.parametrize("frontend", ["builder", "native"])
+def test_add_table_sweep_preserves_mixed_loop_order_and_rejects_invalid_values(
+    mock_soccfg: QickConfig,
+    frontend: str,
+) -> None:
+    def declare(program: v2.TimelineBuilder | v2.TimelineProgramV2) -> None:
+        for values in [[], [float("nan")], [1.0, float("inf")], [float("-inf")]]:
+            with pytest.raises(ValueError, match="empty|finite"):
+                program.add_table_sweep("table", values)
+        table = program.add_table_sweep("table", [2.0, 1.0, 2.0])
+        np.testing.assert_array_equal(table.to_array(), [2.0, 1.0, 2.0])
+        program.add_sweep("linear", v2.SweepCfg(start=1.0, stop=2.0, step=1.0, expts=2))
+        program.add_table_sweep("inner", [4.0])
+        with pytest.raises(ValueError, match="already used"):
+            program.add_table_sweep("linear", [1.0])
+        with pytest.raises(ValueError, match="already used"):
+            program.add_sweep(
+                "table", v2.SweepCfg(start=1.0, stop=1.0, step=0.0, expts=1)
+            )
+        with pytest.raises(ValueError, match="already used"):
+            program.add_table_sweep("reps", [1.0])
+
+    if frontend == "builder":
+        builder = v2.TimelineBuilder(mock_soccfg)
+        declare(builder)
+        prog = builder.build()
+        with pytest.raises(ValueError, match="built|frozen"):
+            builder.add_table_sweep("later", [1.0])
+    else:
+
+        class Native(v2.TimelineProgramV2):
+            def _initialize(self, cfg):
+                declare(self)
+
+        prog = Native(mock_soccfg)
+    assert [(loop.name, loop.count) for loop in prog.sweep_loops] == [
+        ("reps", 1),
+        ("table", 3),
+        ("linear", 2),
+        ("inner", 1),
+    ]
+
+
+@pytest.mark.parametrize("mismatch", [False, True])
+@pytest.mark.parametrize("storage", ["wave", "register"])
+def test_independent_tables_on_one_loop_validate_point_counts_at_build(
+    mock_soccfg: QickConfig,
+    mismatch: bool,
+    storage: str,
+) -> None:
+    values = [0.15, 0.31, 0.22]
+    other_values = [0.29, 0.11] if mismatch else [0.29, 0.11, 0.14]
+    raws: list[v2.TableRawParam] = []
+    scale = mock_soccfg.us2cycles(1.0)
+
+    class Native(v2.TimelineProgramV2):
+        def _initialize(self, cfg):
+            self.add_loop("point", len(values))
+            for name, points in [("first", values), ("second", other_values)]:
+                raw = v2.TableParam("point", points).to_int(scale, parname="length")
+                raws.append(raw)
+                if storage == "wave":
+                    self.add_raw_pulse(name, [Waveform(0, 0, 0, 0, raw, 0)])
+                else:
+                    self.add_reg(name=name, init=raw)
+
+    if mismatch:
+        with pytest.raises(ValueError, match="point"):
+            Native(mock_soccfg)
+    else:
+        prog = Native(mock_soccfg)
+        assert prog.loop_dict["point"] == len(values)
+        for raw, points in zip(raws, [values, other_values], strict=True):
+            assert list(raw.values) == [
+                to_int(v, scale, parname="length") for v in points
+            ]
