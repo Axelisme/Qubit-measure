@@ -18,15 +18,6 @@ def make_form(ctx: FormContext) -> Form[QutritPopulationCfg]:
     """
     return Form(
         QutritPopulationCfg,
-        field_order=(
-            "pi01",
-            "pi03",
-            "pi32",
-            "readout",
-            "shots",
-            "relax_delay",
-            "initial_delay",
-        ),
         tree={
             "pi01": source(
                 ctx,

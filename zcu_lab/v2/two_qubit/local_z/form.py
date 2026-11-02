@@ -31,6 +31,7 @@ def phase_form(ctx: FormContext, cfg_type: type[CfgT]) -> Form[CfgT]:
     readout = mux_readout_initial(ctx)
     return Form(
         cfg_type,
+        # Show captured roles first and keep acquisition settings after the gate-count scan.
         field_order=(
             "roles",
             "x90_f1",
