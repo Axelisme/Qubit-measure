@@ -433,7 +433,12 @@ class _Machine:
             kind, value = "trigger", int(inst.src == "set")
         wave_words = None
         if isinstance(inst, PortWriteInst) and self.wmem is not None:
-            wave_words = self.read_wave(inst.addr)
+            if inst.src == SrcKeyword.WMEM:
+                wave_words = self.read_wave(inst.addr)
+            elif isinstance(inst.src, Register) and inst.src.canonical_name == "r_wave":
+                wave_words = self.wave_registers()
+            else:
+                raise ValueError(f"Unsupported wave output source: {inst.src}")
         offset = inst.time if inst.time is not None else Register("s14")
         return TimingEvent(
             kind,
