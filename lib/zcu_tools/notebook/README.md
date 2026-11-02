@@ -52,7 +52,6 @@ Record 的校準欄位由 caller 在量測前捕捉。接受時明傳當時的�
 ```python
 from copy import deepcopy
 
-from zcu_tools.experiment.metadata import RunMetadataContent
 from zcu_lab.v2.support.flux import record_flux_frame
 from zcu_lab.v2.support.measure.record_frame import captured_qubit_flux
 
@@ -61,18 +60,18 @@ captured_flux = captured_qubit_flux(parameters, qubit)
 source = exp.run(cfg)
 saved = exp.save_run(point, source=source)
 # Analyze source and obtain t1_us. Later point edits do not change captured_flux.
-metadata = RunMetadataContent(source.metadata)
-if metadata.device_snapshot is not None:
-    devices = deepcopy(dict(metadata.device_snapshot))
+acquisition = exp.acquisition_for(source)
+if acquisition.device_snapshot is not None:
+    devices = deepcopy(dict(acquisition.device_snapshot))
     frame = record_flux_frame(captured_flux, devices)
     saved.accept(records={qubit: {
         "t1_us": t1_us, "flux_frame": frame, "devices": devices,
-        "experiment": metadata.experiment,
+        "experiment": T1Exp.AXES_SPEC.tag,
     }})
 ```
 
 上例保存完整 `devices` 快照與頂層 `experiment`，不組巢狀 `run`。
-`SavedRun.accept` 的信封提供同次來源的 `run_id`，record 不另存一份。舊 record 不轉換。
+`SavedRun.accept` 的信封 `run_id` 來自同一份 acquisition，record 不另存一份。舊 record 不轉換。
 這兩個 helper 是 lab 的選用慣例，框架不 import lab，也不解讀 `flux_frame`。
 `record_flux_frame` 複製 `{offset, period}`。Offset 以 Φ0 表示，各 signed period 使用該儀器原生單位／Φ0。
 有 period 但同次 snapshot 缺值的儀器不貢獻，period 保留；明寫無效或 bool 值以 `ValueError` 指名 device。
