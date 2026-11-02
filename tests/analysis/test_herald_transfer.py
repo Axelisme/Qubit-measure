@@ -101,3 +101,9 @@ def test_unmeasured_points_do_not_enter_calibration(two_state_sums: NDArray[np.f
 def test_rejects_unsupported_state_counts(two_state_sums: NDArray[np.float64], n_states: int) -> None:
     with pytest.raises(ValueError, match="n_states"):
         selfcal_transfer(two_state_sums, n_states)
+
+
+@pytest.mark.parametrize("shape", [(6, 6), (3, 3, 3), (2, 6, 6, 1), (7, 6, 5)])
+def test_rejects_wrong_moment_shape(shape: tuple[int, ...]) -> None:
+    with pytest.raises(ValueError, match="shape"):
+        selfcal_transfer(np.zeros(shape))
