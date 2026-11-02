@@ -116,8 +116,12 @@ def test_register_table_metadata_must_match_initial_and_rotated_dmem(point):
             records.append(CompiledRecord(inst, record.p_addr))
         return CompiledStream(tuple(records))
 
+    def body(p):
+        p.delay(TableParam("scan", [0.02, 0.01, 0.03]))
+        p.pulse(0, "p")
+
     prog, env = program(
-        lambda p: p.delay(TableParam("scan", [0.02, 0.01, 0.03])),
+        body,
         lambda p: p.add_loop("scan", 3),
         stream_transform=transform,
     )
