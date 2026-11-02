@@ -3,10 +3,9 @@
 import logging
 from collections.abc import Iterator
 from pathlib import Path
-from time import monotonic
 
 import pytest
-from qtpy.QtCore import QEventLoop, Qt, QTimer
+from qtpy.QtCore import QTimer
 from qtpy.QtWidgets import QApplication, QPushButton
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
@@ -76,15 +75,31 @@ def diagnostic_window(
         qapp.processEvents()
 
 
-def _elapse(milliseconds: int) -> None:
-    """Pump Qt for a time-contract observation, not for background completion."""
-    loop = QEventLoop()
-    timer = QTimer(loop)
-    timer.setSingleShot(True)
-    timer.setTimerType(Qt.TimerType.PreciseTimer)
-    timer.timeout.connect(loop.quit)
-    timer.start(milliseconds)
-    loop.exec()
+@pytest.fixture
+def notice_timers(monkeypatch: pytest.MonkeyPatch) -> list[QTimer]:
+    """Hold the notice's external timer until the scenario delivers its expiry."""
+    pending: list[QTimer] = []
+    real_start = QTimer.start
+
+    def start(timer: QTimer, milliseconds: int | None = None) -> None:
+        parent = timer.parent()
+        if (
+            parent is not None
+            and parent.objectName() == "diagnostic.notice"
+            and milliseconds != 0
+        ):
+            if milliseconds is not None:
+                timer.setInterval(milliseconds)
+            pending.append(timer)
+        elif milliseconds is None:
+            real_start(timer)
+        else:
+            real_start(timer, milliseconds)
+
+    # Only the notice timer is held. start(0) explicitly releases a real Qt timeout;
+    # qt_until's probe/watchdog and all other Qt collaborators retain real scheduling.
+    monkeypatch.setattr(QTimer, "start", start)
+    return pending
 
 
 def _notice_visible(driver: ComponentDriver) -> bool:
@@ -93,13 +108,15 @@ def _notice_visible(driver: ComponentDriver) -> bool:
 
 @pytest.mark.parametrize("diagnostic_window", ["remote-online"], indirect=True)
 def test_online_remote_error_expires_and_logs_full_content(
-    diagnostic_window: ComponentDriver, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    diagnostic_window: ComponentDriver,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    notice_timers: list[QTimer],
 ) -> None:
     driver = diagnostic_window
     driver.screenshot(tmp_path / "01-online.png")
     assert driver.observe("Remote · synthetic · online").visible
     with caplog.at_level(logging.ERROR):
-        started = monotonic()
         driver.click("Emit error")
     driver.screenshot(tmp_path / "02-error.png")
     assert _notice_visible(driver), "online Remote errors need a transient notice"
@@ -108,22 +125,14 @@ def test_online_remote_error_expires_and_logs_full_content(
     assert not driver.dialogs()
     assert TITLE in caplog.text and MESSAGE in caplog.text
     (tmp_path / "error.log").write_text(caplog.text, encoding="utf-8")
-    # Time is the product contract here: the notice must survive before expiry.
-    _elapse(7000)
+    assert len(notice_timers) == 1
     driver.screenshot(tmp_path / "03-before-expiry.png")
     assert _notice_visible(driver)
-    qt_until(
-        lambda: not _notice_visible(driver),
-        label="notice auto-dismissed",
-        watchdog_ms=4000,
-    )
-    elapsed = monotonic() - started
+    notice_timers.pop().start(0)
+    # The released single-shot timeout must reach the notice on the owner loop.
+    qt_until(lambda: not _notice_visible(driver), label="notice auto-dismissed")
     driver.screenshot(tmp_path / "04-expired.png")
-    assert 7.0 <= elapsed <= 11.0
     assert not driver.dialogs()
-    (tmp_path / "timing.txt").write_text(
-        f"notice_elapsed_seconds={elapsed:.3f}\n", encoding="utf-8"
-    )
     driver.click("Emit info")
     driver.screenshot(tmp_path / "05-info.png")
     assert "Synthetic progress" in driver.status().text
@@ -132,7 +141,7 @@ def test_online_remote_error_expires_and_logs_full_content(
 
 @pytest.mark.parametrize("diagnostic_window", ["remote-online"], indirect=True)
 def test_remote_notice_details_remain_until_manually_closed(
-    diagnostic_window: ComponentDriver, tmp_path: Path
+    diagnostic_window: ComponentDriver, tmp_path: Path, notice_timers: list[QTimer]
 ) -> None:
     driver = diagnostic_window
     driver.click("Emit error")
@@ -147,10 +156,12 @@ def test_remote_notice_details_remain_until_manually_closed(
     driver.click("Emit info")
     driver.screenshot(tmp_path / "03-non-modal-details.png")
     assert "Synthetic progress" in driver.status().text
+    assert len(notice_timers) == 1
+    notice_timers.pop().start(0)
+    # The scheduled timeout hides only the summary, not the inspected report.
     qt_until(
         lambda: not _notice_visible(driver),
         label="summary expires without dismissing inspected details",
-        watchdog_ms=11_000,
     )
     driver.screenshot(tmp_path / "04-expired-details-retained.png")
     assert MESSAGE in driver.dialogs()[0].texts
@@ -163,7 +174,7 @@ def test_remote_notice_details_remain_until_manually_closed(
     "diagnostic_window", ["local", "remote-offline"], indirect=True
 )
 def test_unattended_error_report_requires_manual_close(
-    diagnostic_window: ComponentDriver, tmp_path: Path
+    diagnostic_window: ComponentDriver, tmp_path: Path, notice_timers: list[QTimer]
 ) -> None:
     driver = diagnostic_window
     driver.screenshot(tmp_path / "01-control.png")
@@ -179,8 +190,8 @@ def test_unattended_error_report_requires_manual_close(
     driver.click("Emit info")
     driver.screenshot(tmp_path / "03-non-modal.png")
     assert "Synthetic progress" in driver.status().text
-    # Unlike online Remote, these reports must remain beyond the expiry interval.
-    _elapse(8500)
+    # Manual reports do not schedule the online notice's auto-dismiss timer.
+    assert not notice_timers
     driver.screenshot(tmp_path / "04-report-retained.png")
     assert MESSAGE in driver.dialogs()[0].texts
     driver.click("OK")

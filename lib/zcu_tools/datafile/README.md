@@ -96,7 +96,7 @@ Labber 至少需要一個 real step axis。單一 var 寫 single log，多個 va
 每片的 grouped identity 是 `<variable>_<i>`，`i` 從 0 開始。
 log 名稱是 `<stem> - <variable> <第一軸名稱>=<該片軸值>`，軸名與座標直接來自 var，不推測實驗語意。
 第一軸代表 tone 時，每個 tone 因而得到自己的二維 log。
-派生 identity 與任一輸入 var 名稱撞名，或 independent var 超過三維時，在建立檔案前 raise `ValueError`。
+三維 var 的第一軸為空、派生 identity 與任一輸入 var 名稱撞名，或 independent var 超過三維時，在建立檔案前 raise `ValueError`。
 common layout 與低層讀寫的維度支援不變。
 內部 helper 直接寫 marker-qualified grouped v1，並標 finalized，不經中介容器檔案。
 

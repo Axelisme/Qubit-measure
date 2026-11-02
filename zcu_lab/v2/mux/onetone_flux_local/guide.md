@@ -178,7 +178,7 @@ absolute MHz frequency coordinates per tone, and complex IQ shaped
 `(participants, flux points, frequency points)`. Frequencies use Hz on disk and
 MHz after loading. Stop gaps remain NaN after native round-trip.
 
-Labber export currently does not support this three-dimensional independent
-grid. Save reports that output as failed while native data and other successful
-outputs remain saved. Inspect each output status before treating a Save as
+Labber export writes one two-dimensional log per tone in the same file.
+The reader returns these logs separately and does not reconstruct the
+three-dimensional array. Inspect each output status before treating a Save as
 complete. Load the native `data.h5` for analysis and writeback.

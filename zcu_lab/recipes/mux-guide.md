@@ -57,7 +57,7 @@ participants. `mux_onetone` uses the same index contract for its readout list.
 
 Both list inputs cover every original tone, including nonparticipants, in full
 group order. Neither accepts a per-tone point count. `n` sets
-`frequency.df.n` in onetone or `frequency.expts` in twotone.
+`df.n` in onetone or `expts` in twotone.
 `flux_n` sets `flux.n` globally or `flux_expts` locally.
 Range editors derive the core SweepCfg step and expts. Counts must be positive;
 a one-point scan requires equal bounds. Picking needs at least five completed

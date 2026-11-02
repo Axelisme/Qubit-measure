@@ -24,8 +24,9 @@ def write_independent_labber_file(
     The first log occupies root; others occupy Log_2, Log_3, etc.
     Retain the marker-qualified grouped-v1 wire
     layout so the grouped reader can identify each variable. Mark finalized only
-    after every log succeeds. Invalid rank/name or a slice identity colliding
-    with an input variable raises ValueError before opening;
+    after every log succeeds. Invalid rank/name, an empty first axis in rank
+    three, or a slice identity colliding with an input variable raises ValueError
+    before opening;
     I/O errors propagate and may leave a partial file. No intermediate file.
     """
     logs: list[tuple[str, LabberPayload, str]] = []
@@ -37,6 +38,8 @@ def write_independent_labber_file(
                 "independent Labber layout requires rank one, two or three"
             )
         if values.ndim == 3:
+            if values.shape[0] == 0:
+                raise ValueError(f"{name}: rank-three Labber first axis is empty")
             outer = payload.axes[-1]
             for index, coordinate in enumerate(outer.values):
                 identity = f"{name}_{index}"
