@@ -16,10 +16,10 @@ from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
-    GainSweep,
     Pulse,
     Readout,
     Reset,
+    SweepCfg,
     TimelineBuilder,
 )
 from zcu_tools.utils.process import rotate2real
@@ -44,8 +44,8 @@ class MistCfg(ConfigBase):
     flux_pulse: Pulse.Cfg
     mist_pulse: Pulse.Cfg
     readout: Readout.Cfg
-    flux_gain: Annotated[GainSweep, FieldMeta(label="flux gain", unit="a.u.")]
-    mist_gain: Annotated[GainSweep, FieldMeta(label="mist gain", unit="a.u.")]
+    flux_gain: Annotated[SweepCfg, FieldMeta(label="flux gain", unit="a.u.")]
+    mist_gain: Annotated[SweepCfg, FieldMeta(label="mist gain", unit="a.u.")]
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
     ] = 1

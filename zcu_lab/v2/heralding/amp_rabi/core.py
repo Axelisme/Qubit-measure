@@ -27,9 +27,9 @@ from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     IQ,
     Classify,
-    GainSweep,
     Pulse,
     Reset,
+    SweepCfg,
     TimelineBuilder,
     shot_sums,
     split_sums,
@@ -81,7 +81,7 @@ class HeraldingAmpRabiCfg(ConfigBase):
     init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init Pulse")] = None
     qub_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Rabi Pulse")]
     readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
-    gain: Annotated[GainSweep, FieldMeta(label="Gain", unit="a.u.")]
+    gain: Annotated[SweepCfg, FieldMeta(label="Gain", unit="a.u.")]
     reps: Annotated[int, FieldMeta(label="Reps")] = 1000
     rounds: Annotated[int, FieldMeta(label="Rounds")] = 10
     relax_delay: Annotated[

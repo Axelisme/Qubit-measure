@@ -14,11 +14,11 @@ from zcu_tools.experiment.v2.runtime.schedule import Schedule
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
-    GainSweep,
     Pulse,
     PulseReset,
     Readout,
     Reset,
+    SweepCfg,
     TimelineBuilder,
 )
 
@@ -78,7 +78,7 @@ class GainCfg(ConfigBase):
         ),
     ]
     readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-    gain: Annotated[GainSweep, FieldMeta(label="Gain", unit="a.u.")]
+    gain: Annotated[SweepCfg, FieldMeta(label="Gain", unit="a.u.")]
 
     reps: Annotated[
         int,

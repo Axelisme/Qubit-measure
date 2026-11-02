@@ -109,9 +109,8 @@ Registry identity 與 lowering 使用有效 cfg，`set_param()` 則修改接收�
 線性的 `ro_length` sweep 保留 QICK ADC-window 的既有編譯限制。`TableParam` 的拒絕時機見[查表掃描](#查表掃描)。
 參數表見 [modules](modules/README.md#constructor-overrides)，跨家族 audit 見 [set_param contract](../../../../tests/cfg_model/test_set_param_contract.py)。
 
-`GainSweep` 標註的 `SweepCfg` 要求 start、stop 與實際最後一點在 [-1, 1]，單位為 DAC full-scale fraction，a.u.。
-Form 座標投影後使用相同驗證器。Start=-1、stop=1.1、step=0.5 的實際末點為 1.0，因此接受；Range + Expts 保留 stop=1.1，因此拒絕。
-一般 `SweepCfg` 不限制單位。
+`SweepCfg` 驗證 start、stop、step 與 expts 的一致性，不限制單位或 gain 範圍。
+Scalar `Gain` 保留 [-1, 1] 的欄位限制，單位為 DAC full-scale fraction，a.u.。
 
 ## 呼叫端 YAML 編譯設定
 
