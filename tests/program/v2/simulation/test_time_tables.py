@@ -17,6 +17,7 @@ from tests.program.v2.simulation._compiled_support import request
 
 class PulseAtTime(Module):
     def __init__(self, value, timeline):
+        self.name = "timed_drive"
         self.value = value
         self.timeline = timeline
         self.pulse = PulseCfg(
