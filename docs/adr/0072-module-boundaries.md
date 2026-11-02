@@ -106,6 +106,11 @@ mux/onetone 的逐 tone 數值計算、outcomes 與單 tone 失敗隔離由 core
 gui.py 保留來源與 route prior 解析，以及 writeback。
 此規則以直接審閱確認，不新增靜態內容測試；core 不依賴 GUI 的方向仍由 C15 保護。
 
+各實驗在自己的 core 取數，不呼叫另一個實驗的 `run`。
+Mux flux 各 leaf 自行建立 program、執行 flux 取數迴圈，不以帶旗標的共用 run 分派不同實驗。
+共用工具可處理數值、設定 flux 與組裝 Result，不隱藏各 leaf 的量測迴圈。
+2026-11-02，針對「各自取數」或「維持呼叫 spectrum 實驗」的選擇，使用者裁定「a，我想討論的是initial_values與Form.default_input的定位問題」，採用各實驗獨立取數。
+
 Workflow 的替代壽命模型比較與疊圖由 `zcu_lab/workflows/common` 擁有。Mux T1／T2echo core 只回本次選定模型的擬合，不為 workflow 額外比較模型。使用者於 2026-10-30 選擇「18A」，將這項診斷留在使用它的 workflow。
 
 Mux onetone core 只接收每 tone 的 edelay 種子並回傳擬合結果。Adapter 決定手動值、capture prior 與全域搜尋的優先序，記錄來源並判斷 writeback。使用者於 2026-10-30 指出「這不對勁，聽起來像是adapter的邏輯漏進core」，並選擇「A」。

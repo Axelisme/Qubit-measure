@@ -8,7 +8,7 @@ from matplotlib.lines import Line2D
 from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import model_validator
-from zcu_tools.cfg_model import FieldMeta
+from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
     Experiment,
     GroupedAxesSpec,
@@ -22,37 +22,99 @@ from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime import RunOptions, Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import Classify, Pulse, SweepCfg, TimelineBuilder, shot_sums
+from zcu_tools.program.v2 import (
+    Classify,
+    Pulse,
+    PulseCfg,
+    SweepCfg,
+    TimelineBuilder,
+    shot_sums,
+)
 from zcu_tools.program.v2.modules import (
     ConstWaveformCfg,
     FlatTopWaveformCfg,
     MuxReadout,
+    MuxReadoutCfg,
     Reset,
 )
 
 from zcu_lab.v2.support import live_line
 
+from .._drive import DualLineCfg
 from .._rabi_analysis import RabiAnalysis, ReturnData, fit_duration_rates
-from .._rabi_scan import DurationScanCfg, RabiScanResult
+from .._rabi_scan import RabiScanResult
+from .._readout import JointRoles
 from .._sums import (
     joint_probabilities,
     validate_classifiers,
 )
 
 
-class ChevronCfg(DurationScanCfg):
+class ChevronCfg(ConfigBase):
     """Common MHz frequency scan with fixed signed gains and relative phase.
 
     Both frequencies change together. Gain ratio, phases and source waveforms remain fixed.
     Optional reset precedes preparation. F1/F2 classifiers require GE Post radii.
+    duration sets both positive envelope lengths in us; scalar length-settable
+    envelopes are required. drive carries common MHz frequency, signed gains,
+    phases in degrees and timing. roles retains the captured full-tone mapping.
+    Preparation and contrast use x180_f1/x180_f2 on the drive generators.
+    Acquisition sums repetitions across rounds without storing individual shots.
+    initial_delay precedes the first repetition; relax_delay follows each one.
+    Invalid routes, classifiers, durations or unscalable waveforms raise ValueError.
     """
 
+    reset: Annotated[
+        Reset.Cfg | None,
+        FieldMeta(
+            label="Reset",
+            description="Optional reset before each shot's reads and preparation.",
+        ),
+    ] = None
+    x180_f1: Annotated[
+        PulseCfg,
+        FieldMeta(
+            label="F1 Xπ",
+            description="填入 F1 x180 slot，先做 amplitude／length Rabi。frequency MHz、gain a.u. within [-1, 1]、duration us。",
+        ),
+    ]
+    x180_f2: Annotated[
+        PulseCfg,
+        FieldMeta(
+            label="F2 Xπ",
+            description="填入 F2 x180 slot，先做 amplitude／length Rabi。frequency MHz、gain a.u. within [-1, 1]、duration us。",
+        ),
+    ]
+    drive: Annotated[
+        DualLineCfg,
+        FieldMeta(
+            label="Dual-line drive",
+            description="填入 F1/F2 charge-line pulses，先以 conditional spectroscopy 選頻，再確認 cz_f1／cz_f2 slots。",
+        ),
+    ]
+    readout: Annotated[
+        MuxReadoutCfg,
+        FieldMeta(
+            label="Mux readout",
+            description="填入 full-group mux readout slot，先用 lookback 取得 timing us，再做 mux onetone。",
+        ),
+    ]
+    roles: JointRoles
     frequency: Annotated[
         SweepCfg,
         FieldMeta(
             unit="MHz",
             label="Common drive frequency",
             description="Set the common drive frequency sweep endpoints in MHz; review the scan window before Run.",
+        ),
+    ]
+
+    duration: Annotated[
+        SweepCfg,
+        FieldMeta(
+            unit="us",
+            label="Duration",
+            description="填入兩條 charge-line 的共同 duration 起訖值，單位 us。先做 conditional spectroscopy 選頻，再由操作者確認 chevron 時間範圍。",
         ),
     ]
 
@@ -80,6 +142,20 @@ class ChevronCfg(DurationScanCfg):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
+
+    @model_validator(mode="after")
+    def validate_duration_scan(self) -> Self:
+        """Reject invalid tones, routes, durations and unscalable waveforms."""
+        validate_classifiers(self.readout, self.roles)
+        if self.drive.f1.ch != self.x180_f1.ch or self.drive.f2.ch != self.x180_f2.ch:
+            raise ValueError("Each drive must use its role's calibrated Xπ generator")
+        durations = sweep2array(self.duration)
+        if not np.all(np.isfinite(durations)) or np.any(durations <= 0):
+            raise ValueError("Drive durations must be finite and positive")
+        for pulse in (self.drive.f1, self.drive.f2):
+            probe = pulse.model_copy(deep=True)
+            probe.set_param("length", float(durations[0]))
+        return self
 
     @model_validator(mode="after")
     def validate_coordinate(self) -> Self:

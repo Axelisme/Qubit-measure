@@ -1,4 +1,4 @@
-"""Fit many experiment tabs: shrink them with elided text and list them all."""
+"""Navigate experiment tabs with native overflow arrows and an all-tabs menu."""
 
 from __future__ import annotations
 
@@ -39,13 +39,15 @@ class TabListButton(QToolButton):
 
 
 def configure_tab_bar(tabs: QTabWidget) -> TabListButton:
-    """Make tabs closable and movable, and fit many tabs to the window width.
+    """Configure ``tabs`` with close buttons, dragging and native overflow arrows.
 
-    Tabs shrink instead of scrolling, and a corner button lists every tab.
+    Install and return the top-right all-tabs menu button. Tab labels retain both
+    ends when elided. This function does not change control authority; the window
+    can hide close buttons while Local editing is unavailable. No I/O is performed.
     """
     tabs.setTabsClosable(True)
     tabs.setMovable(True)
-    tabs.setUsesScrollButtons(False)
+    tabs.setUsesScrollButtons(True)
     # Adapter names share prefixes ("twotone/...") and differ at the end, so
     # keep both ends visible.
     tabs.setElideMode(Qt.TextElideMode.ElideMiddle)

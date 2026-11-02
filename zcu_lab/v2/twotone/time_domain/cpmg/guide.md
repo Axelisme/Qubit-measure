@@ -12,6 +12,8 @@ Pi pulse counts accepts Log or List input. Log uses a maximum count and requeste
 
 Minimum time and Maximum time define one shared total-time window in us for every pulse count. Time points sets the samples per row. The initial values are 1 us, 100 us and 101 points. Increase the minimum time when a large pulse count leaves too little spacing between pulses. The same point count applies to every pulse count.
 
+For Python callers, `CPMG_Cfg.delay` also accepts a list of `SweepCfg`, one delay sweep per pi-pulse count in `count` order. Every sweep must have the same number of points. This lets different pulse counts use different total-time windows. The GUI continues to provide one shared window.
+
 Detune ratio is the number of fringe periods per time index. The default is 0.1. Use Fit fringes for this phase-ramped acquisition. Set Detune ratio to 0 and disable Fit fringes for a decay-only acquisition. Early-stop SNR optionally ends averaging of each row when its signal is resolved.
 
 ## Module sources and waiting

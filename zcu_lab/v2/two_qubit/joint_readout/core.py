@@ -57,12 +57,6 @@ class JointReadoutCfg(ConfigBase):
     inputs. reset=None emits no reset; otherwise it starts every shot.
     """
 
-    reps: Annotated[int, FieldMeta(label="Reps")] = Field(default=1, gt=0)
-    rounds: Annotated[int, FieldMeta(label="Rounds")] = Field(default=1, gt=0)
-    initial_delay: Annotated[float, FieldMeta(label="Initial delay", unit="us")] = 1.0
-    relax_delay: Annotated[
-        float, FieldMeta(label="Relax delay", unit="us", decimals=3)
-    ] = 1.0
     reset: Annotated[
         Reset.Cfg | None,
         FieldMeta(
@@ -91,6 +85,12 @@ class JointReadoutCfg(ConfigBase):
         ),
     ]
     roles: JointRoles
+    reps: Annotated[int, FieldMeta(label="Reps")] = Field(default=1, gt=0)
+    rounds: Annotated[int, FieldMeta(label="Rounds")] = Field(default=1, gt=0)
+    initial_delay: Annotated[float, FieldMeta(label="Initial delay", unit="us")] = 1.0
+    relax_delay: Annotated[
+        float, FieldMeta(label="Relax delay", unit="us", decimals=3)
+    ] = 1.0
 
     @model_validator(mode="after")
     def validate_pair(self) -> Self:

@@ -12,7 +12,7 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 ## Module Boundaries
 
-- [0072 — 模組定位與依賴邊界](0072-module-boundaries.md)：Package 定位、依賴方向與跨模組 owner，依賴契約由 `.importlinter` 檢查。
+- [0072 — 模組定位與依賴邊界](0072-module-boundaries.md)：Package 定位、依賴方向與各實驗獨立取數，依賴契約由 `.importlinter` 檢查。
 
 ## Concurrency / Lifecycle
 
@@ -32,13 +32,13 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 - [0008 — Headless Form 與 writeback draft](0008-cfg-editor-session.md)：Headless Form 與 writeback draft 的宿主所有權及 Apply 提交邊界。
 - [0037 — Session value lookup](0037-measure-gui-value-lookup-resolve-once.md)：唯讀 value lookup、resolve-once 與固定 capture。
 - [0065 — Cfg 編輯模型與使用邊界](0065-cfg-editing.md)：共用 Form、持久 Spec、固定來源與 Library／Inspect／writeback 提交邊界。
-- [0073 — Measure 表單從 core cfg 推導](0073-measure-form-derivation.md)：Measure Form 從 core cfg 推導、adapter input 與實驗 record 的邊界。
+- [0073 — Measure 表單從 core cfg 推導](0073-measure-form-derivation.md)：Measure Form 從 core cfg 推導、宣告初值 factory 與實驗 record 的邊界。
 - [0079 — Form 欄位轉換、固定元素與逐元素操作](0079-form-field-transitions.md)：已採用但尚未完成實作的 Form converter、scoped command 與固定元素設計。
 
 ## Remote / Transport
 
 - [0068 — 遠端前端、傳輸與 agent 介面](0068-remote-transport.md)：共用傳輸、holder dispatch、RPC／MCP 與事件錯誤投影。
-- [0070 — GUI 與 agent 的控制身份](0070-control-identity.md)：Measure／fluxdep 單一 holder、固定連線身份與控制權交接。
+- [0070 — GUI 與 agent 的控制身份](0070-control-identity.md)：Measure／fluxdep 單一 holder、固定連線身份、控制權交接與 Measure 診斷呈現。
 - [0075 — Agent 介面分層](0075-agent-interface-layers.md)：Agent 介面分層、共用 async host、顯式 Scope 與跨層 writeback。
 
 ## Persistence
