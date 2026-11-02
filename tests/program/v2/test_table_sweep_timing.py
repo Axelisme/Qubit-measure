@@ -33,8 +33,12 @@ def compile_scan(
     reps_innermost: bool,
 ) -> tuple[TimelineProgramV2, str]:
     """Compile the same nested scan/branch topology for every kind of parameter."""
+    soccfg = load_soccfg()
+    # Two live branch arms plus nested counters and runtime length consumers
+    # need more registers than the minimal compile fixture reserves.
+    soccfg["tprocs"][0]["dreg_qty"] *= 2
     builder = TimelineBuilder(
-        load_soccfg(),
+        soccfg,
         reps=2,
         initial_delay=0,
         relax_delay=0.1,
