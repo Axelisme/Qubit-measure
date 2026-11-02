@@ -51,6 +51,7 @@ def scan_form(ctx: FormContext, cfg_type: type[T_Cfg]) -> Form[T_Cfg]:
     )
     return Form(
         cfg_type,
+        # Show captured roles before pulse inputs and keep acquisition settings last.
         field_order=(
             "roles",
             "reset",

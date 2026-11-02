@@ -102,6 +102,7 @@ def make_form(ctx: FormContext) -> Form[FreqInput]:
     return Form(
         FreqInput,
         # The union selector replaces core sampling_mode/homophasal after the sweep.
+        # Keep sampling after the frequency sweep instead of its inherited first position.
         field_order=(
             "reset",
             "readout",

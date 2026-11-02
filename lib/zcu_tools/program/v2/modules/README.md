@@ -1,6 +1,6 @@
 # program/v2/modules — semantic program modules
 
-**Last updated:** 2026-11-01，generator-only readout completion、ADC overlap guards 與靜態 readout observation
+**Last updated:** 2026-11-02，Reset requires a reset cfg
 
 **讀者：** lab-author、framework-dev、agent。語意 program modules 的宣告、發射與 owner 邊界速查。
 
@@ -114,9 +114,8 @@ The standalone `*Cfg` names remain available to framework code and tests.
 
 `Readout(name, cfg)` and `Reset(name, cfg)` are factory classes. Their `__new__`
 returns the concrete module from `cfg.build(name)`, not an instance of the
-factory class. `Reset(name, None)` returns `None` (no reset).
-TimelineBuilder `emit(None)` performs no declaration or timed operation.
-Handwritten programs skip absent modules before calling declare or emit.
+factory class. Callers check whether the reset cfg is `None` before constructing
+a reset module. An absent cfg means no reset module is constructed or emitted.
 
 ## Constructor overrides
 

@@ -50,6 +50,7 @@ def scan_form(ctx: FormContext, cfg_type: type[T_Cfg]) -> Form[T_Cfg]:
     readout = mux_readout_initial(ctx)
     return Form(
         cfg_type,
+        # Show captured roles first, frequency before duration, and acquisition settings last.
         field_order=(
             "roles",
             "reset",

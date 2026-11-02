@@ -222,9 +222,8 @@ class HeraldingLenRabiExp(Experiment[HeraldingLenRabiResult, HeraldingLenRabiCfg
                 context.soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
             )
             length = builder.add_sweep("length", cfg.length)
-            reset = Reset("reset", cfg.reset)
-            if reset is not None:
-                builder.emit(reset)
+            if cfg.reset is not None:
+                builder.emit(Reset("reset", cfg.reset))
             builder.emit(PulseReadout("herald", cfg.readout))
             builder.emit(Pulse("init_pulse", cfg.init_pulse))
             builder.emit(Pulse("qub_pulse", cfg.qub_pulse, length=length))
@@ -279,9 +278,8 @@ class HeraldingLenRabiExp(Experiment[HeraldingLenRabiResult, HeraldingLenRabiCfg
                         builder = TimelineBuilder(
                             context.soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
                         )
-                        reset = Reset("reset", cfg.reset)
-                        if reset is not None:
-                            builder.emit(reset)
+                        if cfg.reset is not None:
+                            builder.emit(Reset("reset", cfg.reset))
                         builder.emit(PulseReadout("herald", cfg.readout))
                         builder.emit(Pulse("init_pulse", cfg.init_pulse))
                         builder.emit(Pulse("qub_pulse", cfg.qub_pulse, length=length))

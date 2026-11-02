@@ -542,17 +542,31 @@ def test_single_tone_mux_classify_resolves_implicit_and_explicit_tone(tone):
     np.testing.assert_array_equal(process(iq), [[3, 1]])
 
 
-def test_multi_tone_mux_classify_requires_tone_and_lists_available_positions():
+def test_single_tone_mux_iq_resolves_implicit_and_explicit_tone():
+    cfg = native_mux((4,))
+    prog = compile_modules(mux_soccfg(), [cfg.build("readout")])
+    iq = {
+        cfg.tones[0].ro_ch: np.array(
+            [[[[2, 3]], [[4, 5]]], [[[-1, 2]], [[1, -2]]]], dtype=np.float64
+        )
+    }
+    implicit = v2.shot_sums(prog, [v2.IQ("readout")])(iq)
+    explicit = v2.shot_sums(prog, [v2.IQ("readout", 0)])(iq)
+    np.testing.assert_array_equal(implicit, [[2, 6, 8], [2, 0, 0]])
+    np.testing.assert_array_equal(implicit, explicit)
+
+
+@pytest.mark.parametrize(
+    "axis",
+    [
+        v2.IQ("readout"),
+        v2.Classify("readout", classifier=LinearClassifier(angle=0.0, threshold=0.0)),
+    ],
+)
+def test_multi_tone_mux_requires_tone_and_lists_available_positions(axis):
     prog = compile_modules(mux_soccfg(), [native_mux((4, 1)).build("readout")])
     with pytest.raises(ValueError, match=r"readout.*available tones.*0.*1"):
-        v2.shot_sums(
-            prog,
-            [
-                v2.Classify(
-                    "readout", classifier=LinearClassifier(angle=0.0, threshold=0.0)
-                )
-            ],
-        )
+        v2.shot_sums(prog, [axis])
 
 
 def test_mux_classify_only_axes_produce_joint_counts():

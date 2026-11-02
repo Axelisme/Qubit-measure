@@ -34,6 +34,7 @@ def phase_form(ctx: FormContext, cfg_type: type[CfgT]) -> Form[CfgT]:
     )
     return Form(
         cfg_type,
+        # Show captured roles first and keep acquisition settings after the gate scan.
         field_order=(
             "roles",
             "x180_f1",

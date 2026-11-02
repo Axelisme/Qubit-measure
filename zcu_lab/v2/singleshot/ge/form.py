@@ -14,15 +14,6 @@ def make_form(ctx: FormContext) -> Form[GE_Cfg]:
     """Build starting values and shape from the captured source availability."""
     return Form(
         GE_Cfg,
-        field_order=(
-            "reset",
-            "init_pulse",
-            "probe_pulse",
-            "readout",
-            "shots",
-            "relax_delay",
-            "initial_delay",
-        ),
         tree={
             "reset": Slot("$qubit.module.reset"),
             "init_pulse": Slot("$qubit.module.x180"),
