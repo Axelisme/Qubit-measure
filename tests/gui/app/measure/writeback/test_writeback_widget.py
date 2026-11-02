@@ -789,6 +789,87 @@ def test_sample_proposal_summarizes_nested_fields_on_one_line(
     assert driver.observe(object_name="writebackProposed").text == summary
 
 
+@pytest.mark.parametrize(
+    ("field", "value", "summary"),
+    [
+        (
+            "note",
+            "first line\nsecond line",
+            "note=first line second line, tail=end-of-record",
+        ),
+        (
+            "field\nname",
+            "first line\r\nsecond line",
+            "field name=first line second line, tail=end-of-record",
+        ),
+    ],
+    ids=["newline-value", "newline-field-and-crlf-value"],
+)
+def test_record_proposal_flattens_linebreaks_without_changing_json(
+    qapp: QApplication, sample_evidence: Path, field: str, value: str, summary: str
+) -> None:
+    record = {field: value, "tail": "end-of-record"}
+    item = RecordWriteback("Q1", "Record with line breaks", record=record)
+    item.session_id = "record-1"
+    ctrl = MagicMock()
+    ctrl.writeback_control.get_writeback_applied_for_pane.return_value = {}
+    host = QWidget()
+    layout = QVBoxLayout(host)
+    widget = WritebackWidget(ctrl, tab_id="captured")
+    widget.populate(
+        [item],
+        {
+            item.session_id: WritebackValues(
+                actual_path="Q1", current=None, proposed=record, unit=None
+            )
+        },
+    )
+    layout.addWidget(widget)
+    paste = QLineEdit()
+    paste.setObjectName("copiedRecord")
+    layout.addWidget(QLabel("Paste copied record JSON here"))
+    layout.addWidget(paste)
+    host.resize(1800, 600)
+    host.show()
+    driver = ComponentDriver(host)
+    try:
+        driver.screenshot(sample_evidence / "01-wide-linebreak-record.png")
+        proposed = driver.observe(object_name="writebackProposed")
+        assert len(proposed.text.splitlines()) == 1, "Proposed must be a single line"
+        assert proposed.text == summary
+        assert proposed.fully_visible and proposed.caption_fits
+        assert proposed.tooltip == json.dumps(record, ensure_ascii=False, indent=2)
+        current = driver.observe(object_name="writebackCurrent")
+        assert current.text == current.tooltip == "entry record"
+
+        driver.resize_window(360, 600)
+        driver.screenshot(sample_evidence / "02-narrow-linebreak-record.png")
+        narrow = driver.observe(object_name="writebackProposed")
+        assert len(narrow.text.splitlines()) == 1, "Proposed must be a single line"
+        prefix, suffix = narrow.text.split("…")
+        assert prefix and suffix
+        assert summary.startswith(prefix) and summary.endswith(suffix)
+        assert narrow.fully_visible and narrow.caption_fits
+        assert narrow.tooltip == proposed.tooltip
+
+        driver.resize_window(1800, 600)
+        driver.screenshot(sample_evidence / "03-restored-linebreak-record.png")
+        assert driver.observe(object_name="writebackProposed").text == summary
+        driver.click("Copy")
+        driver.screenshot(sample_evidence / "04-copy.png")
+        driver.invoke_context_action(
+            object_name="copiedRecord",
+            action="&Paste\tCtrl+V",
+            evidence=sample_evidence / "05-paste-menu.png",
+        )
+        driver.screenshot(sample_evidence / "06-pasted-json.png")
+        assert json.loads(driver.observe(object_name="copiedRecord").text) == record
+    finally:
+        host.close()
+        host.deleteLater()
+        qapp.processEvents()
+
+
 def test_sample_copy_pastes_complete_json_without_edit_dialog(
     sample_row, sample_evidence: Path
 ) -> None:
