@@ -18,6 +18,8 @@ from zcu_tools.program.v2.modules.waveform import (
 from tests.program._profiles import load_soccfg
 from tests.program.v2.simulation._compiled_support import request
 
+RAMP_LENGTH_US = 0.04
+
 
 def length_program(
     value, *, mode="scalar", flat=False, consumer="pulse", cfg_length=False
@@ -39,7 +41,7 @@ def length_program(
     waveform = (
         FlatTopWaveformCfg(
             length=value if cfg_length else 0.2,
-            raise_waveform=GaussWaveformCfg(length=0.04, sigma=0.01),
+            raise_waveform=GaussWaveformCfg(length=RAMP_LENGTH_US, sigma=0.01),
         )
         if flat
         else ConstWaveformCfg(length=value if cfg_length else 0.1)
@@ -109,6 +111,10 @@ def test_length_matches_scalar_words_timing_and_linear_actual_points(
 
     linear, linear_env, name = length_program(values, mode="linear", **options)
     actual = np.asarray(linear.get_pulse_param(name, "length", as_array=True)).flatten()
+    # QICK's flat-top length parameter is the flat segment, whereas our cfg
+    # includes the authored ramp. Undo only that public input transformation.
+    if flat:
+        actual = actual + RAMP_LENGTH_US
     scalar_shots = []
     for index, value in enumerate(actual):
         scalar, scalar_env, _ = length_program(float(value), **options)
