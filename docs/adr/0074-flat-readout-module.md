@@ -170,6 +170,10 @@ Library readout cfg 擁有 classifier。現有實驗用兩個 PulseReadout insta
 Host scan 跨 acquire 時由 lab 加總實際取得的 sums，不把上一輪 cached 結果算成新資料。
 這是 host post-selection，不是 active reset。實際介面與資料形狀見 [program 契約](../../lib/zcu_tools/program/README.md#summed-acquisition)。
 
+單 qubit heralding 接受 circle、linear、centroid3，herald 類別軸的長度與名稱依 classifier 的 `state_names`，只採用 herald 判為 g 的 shot。
+使用者於 2026-11-02 要求：「我看了一下herald實驗，我發現只支援circle，但我不只想支援circle」。
+對支援現有三種 classifier 與依 classifier 決定 herald 類別軸的選項，使用者確認：「aa」。
+
 使用者於 2026-10-30 要求單一 processor：「H1 , 我認為processor就不要每個adc分開給，統一只給一個就行」。
 同日明定分類時機：「分類請不要在analyze裡做，浪費記憶體，分類請在processor裡做，將nread, 2的資料轉成M維資料」。
 對讀出軸，使用者提出：「不用堆到一個M維度裡，而是一個嵌套維度，一般iq訊號被轉成3維(1,i, q)，而k分類器轉成k維，幾次readout就幾層」。
