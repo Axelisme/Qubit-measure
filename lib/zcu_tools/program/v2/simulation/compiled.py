@@ -328,7 +328,12 @@ def _validate_native_sweeps(
         try:
             _validate_definition(info, seed)
             if loop.name == "reps" and any(
-                (info["sweeps"]["registers"], info["sweeps"]["waves"], info["tables"])
+                (
+                    info["sweeps"]["registers"],
+                    info["sweeps"]["waves"],
+                    info["tables"],
+                    info.get("register_tables"),
+                )
             ):
                 raise ValueError("reps shell may only update its own counter")
             before = deepcopy(seed)
@@ -375,6 +380,17 @@ def _timing_writes(records: Sequence[DecodedInstruction]) -> set[str]:
 
 def _check_table_wrap(info: dict[str, Any], seed: Machine) -> None:
     """Require table fields to be independent sweeps that wrap to initial WMEM."""
+    for name, definition in info.get("register_tables", {}).items():
+        values, offset = definition["values"], definition["offset"]
+        if name in info["sweeps"]["registers"]:
+            raise ValueError("conflicting table and sweep register")
+        if not np.all(seed.value(Register(name)) == values[0]):
+            raise ValueError(
+                "register table initial word disagrees with compiled register"
+            )
+        for point in range(info["n"]):
+            if not np.all(seed.dmem[offset + point] == values[(point + 1) % info["n"]]):
+                raise ValueError("register table values disagree with rotated DMEM")
     for address, fields in info["tables"].items():
         expected = seed.wmem[address].copy()
         for field, offset in fields.items():
