@@ -422,7 +422,7 @@ def _timing_maximum_tests(
     """
     accepted = set()
     for test_record, initial_record, selected_record in zip(
-        records, records[1:], records[2:]
+        records[:-2], records[1:-1], records[2:], strict=True
     ):
         test = test_record.instruction
         initial = initial_record.instruction
