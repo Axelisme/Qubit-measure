@@ -177,6 +177,7 @@ Recipe 可以串多個 adapter，宣告不另設單一 adapter mapping。
 | `twotone_flux_dep` | `twotone/flux_dep` | 必填 drive 的 `center_mhz`、`span_mhz`、`freq_points` 及 native flux device、unit、端點、點數。互動 picker 完成後詢問寫回 qubit flux 校準。 |
 
 有 writeback proposal 的流程先 Run、Analyze，再依各 recipe 的條件詢問寫回，只接受回答選定的候選，最後 Save。
+CPMG report 回傳 `t2_1_us`、`t2_1_err_us`、`gamma`、`gamma_err` 與 `fit_rows`。可加權列少於三列時四個擬合值為 null，仍保存圖與原始資料；分析失敗時 `fit_rows=0` 並附原因。
 STIRAP 與 Raman 沒有 writeback proposal，不詢問寫回。兩者回報 saved confusion matrix 的 condition number 與 minimum singular value；analysis summary 只保留 training confusion matrix 與這兩個診斷，逐點 g/e/f raw/corrected fractions 只畫在圖中。分析失敗仍 Save g/e/f counts。三態 reference 與 STIRAP 各 mode 不另加工具。
 四個 `mux_{onetone,twotone}_flux_{global,local}` recipe 共用 flat cfg 路徑，
 逐 participant 用原始 tone index 開啟 native picker，再分別詢問選定寫回。
