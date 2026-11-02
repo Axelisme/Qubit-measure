@@ -66,30 +66,6 @@ class IdleZZCfg(ConfigBase):
     classifiers with radii from GE Post; other tones remain in the full readout.
     """
 
-    reps: Annotated[
-        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
-    ] = Field(default=1, gt=0)
-    rounds: Annotated[
-        int,
-        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
-    ] = Field(default=1, gt=0)
-    initial_delay: Annotated[
-        float,
-        FieldMeta(
-            label="Initial delay",
-            unit="us",
-            description="Delay before the first repetition.",
-        ),
-    ] = 1.0
-    relax_delay: Annotated[
-        float,
-        FieldMeta(
-            label="Relax delay",
-            unit="us",
-            decimals=3,
-            description="Relaxation delay after each repetition.",
-        ),
-    ] = 1.0
     reset: Annotated[
         Reset.Cfg | None,
         FieldMeta(label="Reset", description="Optional reset before every shot."),
@@ -131,16 +107,6 @@ class IdleZZCfg(ConfigBase):
     ]
     roles: JointRoles
     target: Literal["f1", "f2"] = "f1"
-    detune: Annotated[
-        float,
-        Field(allow_inf_nan=False),
-        FieldMeta(
-            label="Detune",
-            unit="MHz",
-            description="填入 signed artificial phase ramp。先做 twotone frequency 與 T2 Ramsey；magnitude 必須大於預期 |ζ| 加 frequency error。",
-        ),
-    ]
-    delay: Annotated[SweepCfg, FieldMeta(label="Delay", unit="us")]
     dc_device: Annotated[
         DeviceName | None,
         FieldMeta(
@@ -158,6 +124,40 @@ class IdleZZCfg(ConfigBase):
             description="Inactive when source is None; no conversion or F1/F2 compensation.",
         ),
     ] = Field(default_factory=lambda: SweepCfg(start=0, stop=0, step=0, expts=1))
+    delay: Annotated[SweepCfg, FieldMeta(label="Delay", unit="us")]
+    detune: Annotated[
+        float,
+        Field(allow_inf_nan=False),
+        FieldMeta(
+            label="Detune",
+            unit="MHz",
+            description="填入 signed artificial phase ramp。先做 twotone frequency 與 T2 Ramsey；magnitude 必須大於預期 |ζ| 加 frequency error。",
+        ),
+    ]
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ] = Field(default=1, gt=0)
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = Field(default=1, gt=0)
+    initial_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Initial delay",
+            unit="us",
+            description="Delay before the first repetition.",
+        ),
+    ] = 1.0
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
+        ),
+    ] = 1.0
 
     @model_validator(mode="after")
     def validate_pair(self) -> Self:

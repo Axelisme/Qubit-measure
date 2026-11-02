@@ -2,7 +2,7 @@
 
 **讀者：** lab-author。查閱多個量測 adapter 共用的表單初值、分析載體與 writeback 工具。
 
-**Last updated:** 2026-11-01，來源選擇、mux readout 與 Length Rabi 初值
+**Last updated:** 2026-11-02，mux flux 共用 Summary 與各實驗表單分工
 
 這個公開支援 package 擁有至少兩個 measure experiment adapters 共用的 implementation
 mechanics：analysis carriers、writeback helpers 與跨實驗的 context utilities。
@@ -49,7 +49,7 @@ Readout-only onetone 的 `mux_readout_save_stem` 改取 cfg.readout.tones[].labe
 Recipe 從 `names[index]` 取得捕捉名稱，再建立自己的報告身分。Writeback 候選仍使用 `ElementIdentity`，原始位置不由 row offset 推測。
 框架統一將分析回傳物件轉成 JSON。實驗端不另寫 summary 方法，也不改數值、fit 或 proposal eligibility。
 Recipe 的 `analyze(result=...)` 引用 JSON-shaped BaseModel，陣列欄位用 list，非有限估計用 nullable 欄位。
-`mux_results.py` 提供原始 index、失敗與共用 coherence consumer；各實驗的 `gui.py` 提供其 JSON consumer。
+`mux_results.py` 提供原始 index、失敗、共用 coherence 與 flux picker consumer；其他實驗的 `gui.py` 提供其 JSON consumer。
 品質欄位直接使用 fitting owner 的 `FitQuality`，coherence sampling 使用 owner 的 `FringeSamplingQuality`，診斷路徑保留原生值。
 
 Concrete adapters 依賴本 package 與 framework contracts，`zcu_lab.definitions` 組合 adapters。
@@ -138,7 +138,7 @@ def make_form(ctx: FormContext) -> Form[TwoQubitCfg]:
 缺席儀器不貢獻，period 保留；明寫無效值仍報錯。
 缺 flux_dev、offset 或 selected period 時，對應必填欄位留空，不猜數字。
 Onetone／twotone 將實際 integer→half 範圍向兩側各擴 10%，MIST 不擴。
-`mux_flux_forms` 對 local 線逐 Q 使用同一路徑，global 線依 $mux.flux_dev 合併各 Q 的實際區間。
+各 mux flux Form 自行宣告欄位與初值。Local 線逐 Q 使用同一路徑，global 線以 `mux_flux_forms.global_flux_interval` 合併各 Q 在 $mux.flux_dev 的實際區間。
 Local devices 必須使用同一 native unit，不做單位換算。
 Mux picker 初線也讀各 Q 的新 flux 區塊，以 Run snapshot 的 contributors 算實際 half／integer。
 Recipes 的 flux_* inputs、reports 與 picker updates 是獨立 API，不是 component 舊欄位。
@@ -175,11 +175,11 @@ Point proposal 保存新的 period 與 offset，record 不重複保存它們。�
 
 Measure flux picker 的 plugin、frontend 與結果 carrier 位於 `zcu_tools.gui.app.measure`。Adapter 從固定 Run capture 讀初始參數，交 FluxPickInputs 與普通數值。Lib 不讀具體 Result 或 ctx_helpers。兩個 adapter 保留各自的 magnitude-only 政策，共用原有 kernel／plugin。
 
-`mux_flux_adapter.MuxFluxPickParams` 以原始 `tone` index 選 participant，不把 acquisition row 重編號。
+各 mux flux 實驗的 `gui.py` 擁有自己的 `MuxFluxPickParams`、plugin 與 writeback 接線，以原始 `tone` index 選 participant，不把 acquisition row 重編號。
 `flux_half`／`flux_int` 是可選的有限 native DC 初線值，每個 None 各自沿用該 tone 的 Run capture，缺校準才用 shared picker 初值。
 Recipe 經同一個 Analyze operation 的 typed updates 傳入，不更改 capture 或其他 tone。
 Picker done 保留原始 tone／Q 身分並產生該 Q 的 writeback proposal，不直接接受寫回。
-`mux_flux_adapter.MuxFluxPickSummary` 擁有該原始 tone／Q 與 native DC half／integer／period 結果。
+`mux_results.MuxFluxPickSummary` 擁有該原始 tone／Q 與 native DC half／integer／period 結果。
 四個 flux recipes 直接引用此 JSON consumer。框架從 `MuxFluxPickResult` 的原生欄位轉換，helper 不再建立 summary 投影。
 
 package facade 只 re-export concrete adapters 實際共用的 authoring vocabulary。單一 adapter 的

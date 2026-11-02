@@ -4,6 +4,9 @@
 
 ## Before run
 
+Both Forms list reset, F1/F2 Xπ and mux readout before the captured roles.
+Reps, rounds, initial delay and relaxation delay follow.
+
 Bind `f1` and `f2` to different fluxonium components, `coupler` to their transmon, and `mux` to the MuxGroup. Open and Reset capture aliases, role names and original full-group tone positions. Refresh preserves authored inputs. Use Reset after changing sources or aliases.
 
 The MuxGroup must contain ordered qubits and matching resonators for every tone. Keep the complete readout in that order, including tones outside F1/F2. The form shows the captured mapping as readonly fields.

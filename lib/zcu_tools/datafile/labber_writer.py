@@ -30,8 +30,14 @@ def write_labber(
     the caller when a cfg comment envelope is wanted.
 
     common requires identical grids for multiple variables; one variable writes
-    a single log. independent explicitly writes each rank-1/2 variable to its own
-    root/Log_N layout using Labber-only helpers, not a temporary native file.
+    a single log. independent writes each rank-1/2 variable to its own root/Log_N
+    log. Rank-three variables split on the NumPy first axis into two-dimensional
+    logs with identities <variable>_<zero-based index>. Their log labels are
+    "<destination stem> - <variable> <first axis name>=<coordinate>". Readers
+    return the slices separately, without reassembling the original array.
+    An empty first axis in rank three, slice identities colliding with input
+    variable names, and ranks above three raise ValueError before file creation.
+    Rank-1/2 identities and log labels stay unchanged. This uses Labber-only helpers, not a temporary native file.
     Existing paths raise FileExistsError. Bad arrays, grids, labels or unsupported
     layouts raise ValueError. I/O errors propagate and may leave a partial file.
     """

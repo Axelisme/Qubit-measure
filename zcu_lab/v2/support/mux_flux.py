@@ -1,16 +1,12 @@
-"""DC zip scans around the existing mux spectroscopy cores."""
+"""Tone-major mux flux results and native data mapping."""
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from dataclasses import dataclass, replace
-from typing import Annotated, Literal
+from dataclasses import dataclass
 
 import numpy as np
-from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
-from pydantic import Field, StrictInt, model_validator
-from zcu_tools.cfg_model import ConfigBase, DeviceName, FieldMeta
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import (
     GroupedAxesSpec,
     GroupedLoadData,
@@ -18,213 +14,6 @@ from zcu_tools.experiment import (
     VariableSpec,
     VariableZSpec,
 )
-from zcu_tools.experiment.context import RunContext
-from zcu_tools.experiment.utils.sweep import make_sweep
-from zcu_tools.plotting.plots import NonPresentingHost, Plots
-from zcu_tools.program.v2 import ResetCfg, SweepCfg
-from zcu_tools.program.v2.modules import (
-    MuxReadoutCfg,
-)
-
-from zcu_lab.v2.mux.onetone.core import (
-    MuxFrequencyOffsetCfg,
-    MuxOnetoneCfg,
-    MuxOnetoneExp,
-)
-from zcu_lab.v2.mux.twotone_spectrum.core import (
-    MuxFreqCfg,
-    MuxFreqExp,
-    MuxFreqToneCfg,
-    prepare_frequency_scan,
-)
-from zcu_lab.v2.support import live_heatmap, live_line
-from zcu_lab.v2.support.device import check_flux_unit, set_flux
-from zcu_lab.v2.support.mux_sweep_cfg import (
-    ToneRangeCfg,
-    require_tone_value,
-    validate_participants,
-)
-
-
-class FluxFrequencyCfg(ConfigBase):
-    """Twotone drive frequency scan, separate from DC ranges and timing.
-
-    tones contains every original qubit, in readout order, with independent
-    drive pulses and absolute MHz bounds. expts is their shared positive point
-    count. Top-level participants selects acquisition order, not this list.
-    """
-
-    tones: Annotated[list[MuxFreqToneCfg], FieldMeta(element_label="name")]
-    expts: int = Field(strict=True, gt=0)
-
-
-class FluxIdentityCfg(ConfigBase):
-    """Original readout position's qubit name; names are unique and nonempty."""
-
-    name: Annotated[str, FieldMeta(readonly=True)] = Field(min_length=1)
-
-
-class FluxLineCfg(FluxIdentityCfg):
-    """One local DC source and its native-unit start/stop range.
-
-    flux_dev names a connected driver. flux advances with all other selected
-    lines by point index, using the shared flux_expts, not a Cartesian product.
-    """
-
-    flux_dev: DeviceName = Field(min_length=1)
-    flux: ToneRangeCfg | None = None
-
-    def require_flux(self) -> ToneRangeCfg:
-        """Return a selected line's DC bounds, or raise ValueError with its name."""
-        if self.flux is None:
-            raise ValueError(f"{self.name}: active tone requires DC sweep")
-        return self.flux
-
-
-class MuxFluxCfg[S: (MuxFrequencyOffsetCfg, FluxFrequencyCfg), T: FluxIdentityCfg](
-    ConfigBase
-):
-    """Flat acquisition settings, original identities and ordered participants.
-
-    reset is optional; readout contains the full ordered mux readout. frequency
-    is MuxFrequencyOffsetCfg(df: SweepCfg in nominal MHz offsets) for onetone, or
-    FluxFrequencyCfg(tones: full named drives/ranges in MHz, expts: int) for
-    twotone. tones has one identity/DC range per original readout position.
-    participants is a nonempty unique selection in acquisition order.
-    Explicit reps/rounds are positive averaging counts; initial_delay and
-    relax_delay are finite nonnegative us. flux_unit is A, V or native, with
-    no conversion. settle is the cancellable wait in seconds after DC writes.
-    Persisted cfg uses these same top-level fields, with no nested spectrum.
-    """
-
-    reps: Annotated[
-        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
-    ] = 1
-    rounds: Annotated[
-        int,
-        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
-    ] = 1
-    initial_delay: Annotated[
-        float,
-        FieldMeta(
-            label="Initial delay",
-            unit="us",
-            description="Delay before the first repetition.",
-        ),
-    ] = 1.0
-    relax_delay: Annotated[
-        float,
-        FieldMeta(
-            label="Relax delay",
-            unit="us",
-            decimals=3,
-            description="Relaxation delay after each repetition.",
-        ),
-    ] = 1.0
-    reset: ResetCfg | None = None
-    readout: MuxReadoutCfg
-    frequency: S
-    tones: Annotated[list[T], FieldMeta(element_label="name")]
-    participants: list[StrictInt]
-    flux_unit: Literal["A", "V", "native"] = "A"
-    settle: Annotated[float, FieldMeta(unit="s")] = Field(
-        default=0.1, ge=0, allow_inf_nan=False
-    )
-
-    @model_validator(mode="after")
-    def validate_identities(self) -> MuxFluxCfg[S, T]:
-        """Reject invalid full identities before projecting participant indices."""
-        names = [tone.name for tone in self.tones]
-        if len(names) != len(self.readout.tones) or len(set(names)) != len(names):
-            raise ValueError(
-                "tones must name every original readout position exactly once"
-            )
-        validate_participants(names, self.participants)
-        if isinstance(self.frequency, FluxFrequencyCfg) and names != [
-            t.name for t in self.frequency.tones
-        ]:
-            raise ValueError("flux tone names must match the full frequency tone order")
-        if isinstance(self.frequency, FluxFrequencyCfg):
-            for index in self.participants:
-                tone = self.frequency.tones[index]
-                require_tone_value(tone.drive, ("frequency", "tones", index, "drive"))
-                require_tone_value(tone.freq, ("frequency", "tones", index, "freq"))
-        self.inner_cfg()
-        return self
-
-    def inner_cfg(self) -> MuxOnetoneCfg | MuxFreqCfg:
-        """Build the existing typed inner acquisition cfg without mutating self.
-
-        Copies references only into validated models; callers must deep-copy
-        before mutation. Inner owners validate modules, drives and timing.
-        Invalid settings raise their validation errors before any DC write.
-        """
-        if isinstance(self.frequency, FluxFrequencyCfg):
-            return MuxFreqCfg(
-                reset=self.reset,
-                readout=self.readout,
-                tones=list(self.frequency.tones),
-                expts=self.frequency.expts,
-                participants=list(self.participants),
-                reps=self.reps,
-                rounds=self.rounds,
-                initial_delay=self.initial_delay,
-                relax_delay=self.relax_delay,
-            )
-        return MuxOnetoneCfg(
-            reset=self.reset,
-            readout=self.readout,
-            df=self.frequency.df,
-            participants=list(self.participants),
-            reps=self.reps,
-            rounds=self.rounds,
-            initial_delay=self.initial_delay,
-            relax_delay=self.relax_delay,
-        )
-
-
-class GlobalFluxCfg[S: (MuxFrequencyOffsetCfg, FluxFrequencyCfg)](
-    MuxFluxCfg[S, FluxIdentityCfg]
-):
-    """One global coil source and one finite native-unit flux sweep."""
-
-    flux_dev: DeviceName = Field(min_length=1)
-    flux: SweepCfg
-
-    @model_validator(mode="after")
-    def validate_flux(self) -> GlobalFluxCfg[S]:
-        """Reject nonfinite global device coordinates."""
-        if not all(
-            np.isfinite(v) for v in (self.flux.start, self.flux.stop, self.flux.step)
-        ):
-            raise ValueError("flux coordinates must be finite")
-        return self
-
-
-class LocalFluxCfg[S: (MuxFrequencyOffsetCfg, FluxFrequencyCfg)](
-    MuxFluxCfg[S, FluxLineCfg]
-):
-    """Independent local line ranges with one shared positive point count.
-
-    Every full tone requires a source name; selected tones need distinct sources.
-    Unselected lines are never written. Selected lines advance in a zip scan.
-    """
-
-    flux_expts: int = Field(default=101, strict=True, gt=0)
-
-    @model_validator(mode="after")
-    def validate_lines(self) -> LocalFluxCfg[S]:
-        """Reject shared local drivers and ranges inconsistent with point count."""
-        devices = [self.tones[index].flux_dev for index in self.participants]
-        if len(set(devices)) != len(devices):
-            raise ValueError("local flux lines must use distinct devices")
-        for index in self.participants:
-            tone = self.tones[index]
-            require_tone_value(tone.flux, ("tones", index, "flux"))
-            make_sweep(
-                tone.require_flux().start, tone.require_flux().stop, self.flux_expts
-            )
-        return self
 
 
 @dataclass(frozen=True)
@@ -243,202 +32,17 @@ class MuxFluxResult:
     signals: NDArray[np.complex128]
 
 
-def run_flux_scan(
-    cfg: GlobalFluxCfg[MuxFrequencyOffsetCfg]
-    | LocalFluxCfg[MuxFrequencyOffsetCfg]
-    | GlobalFluxCfg[FluxFrequencyCfg]
-    | LocalFluxCfg[FluxFrequencyCfg],
-    *,
-    context: RunContext,
-) -> MuxFluxResult:
-    """Set selected DC sources, settle, then reuse the inner mux run per point.
-
-    cfg is not mutated. context supplies connected drivers/board and the one
-    Run scope. Validate every selected driver's unit before the first write.
-    Global scans write the coil once per point; local scans zip selected lines.
-    Cancelling an inner acquire leaves that whole flux point NaN and continues
-    with the next point. Cancelling the Run scope stops the scan during ramp,
-    settle or acquisition, preserving earlier completed points and leaving the
-    unfinished point and later points NaN. Uncancelled nonfinite inner IQ raises
-    ValueError with the zero-based flux point and first invalid tone/cell.
-    Driver/acquisition errors propagate. Sources retain their last setting;
-    no automatic restoration occurs.
-    """
-    indices = list(cfg.participants)
-    if isinstance(cfg, GlobalFluxCfg):
-        values = np.linspace(cfg.flux.start, cfg.flux.stop, cfg.flux.expts)
-        flux_values = np.tile(values, (len(indices), 1))
-        devices = [cfg.flux_dev]
-    else:
-        flux_values = np.asarray(
-            [
-                np.linspace(
-                    cfg.tones[i].require_flux().start,
-                    cfg.tones[i].require_flux().stop,
-                    cfg.flux_expts,
-                )
-                for i in indices
-            ],
-            dtype=np.float64,
-        )
-        devices = [cfg.tones[i].flux_dev for i in indices]
-    for name in devices:
-        check_flux_unit(context.devices[name].get_info(), cfg.flux_unit)
-
-    spectrum = cfg.inner_cfg().model_copy(deep=True)
-    if isinstance(spectrum, MuxOnetoneCfg):
-        spectrum.participants = list(indices)
-        dfs = np.linspace(spectrum.df.start, spectrum.df.stop, spectrum.df.expts)
-        frequencies = np.asarray(
-            [spectrum.readout.tones[i].freq + dfs for i in indices]
-        )
-    else:
-        spectrum.participants = list(cfg.participants)
-        frequencies = prepare_frequency_scan(
-            spectrum, soccfg=context.soccfg
-        ).coordinates
-    signals = np.full(
-        (len(indices), flux_values.shape[1], frequencies.shape[1]),
-        np.nan + 1j * np.nan,
-        dtype=np.complex128,
-    )
-    result = MuxFluxResult(
-        np.asarray(indices, dtype=np.int64), flux_values, frequencies, signals
-    )
-    update = _make_flux_update(context.plots, result, cfg.flux_unit)
-    for point in range(flux_values.shape[1]):
-        if context.scope.stop.is_set():
-            break
-        for row, name in enumerate(devices):
-            set_flux(
-                context.devices[name],
-                float(flux_values[row, point]),
-                unit=cfg.flux_unit,
-                stop=context.scope.stop,
-            )
-        if context.scope.stop.event.wait(cfg.settle):
-            break
-        acquired, stopped = _acquire_spectrum(spectrum, context=context)
-        if stopped or context.scope.stop.is_set():
-            # Skip incomplete IQ; the loop's root-stop check ends the whole scan.
-            continue
-        _require_finite_spectrum(
-            acquired,
-            point=point,
-            indices=indices,
-            flux_values=flux_values,
-            frequencies=frequencies,
-        )
-        signals[:, point, :] = acquired
-        update(signals)
-    return result
-
-
-def _make_flux_update(
-    plots: Plots, result: MuxFluxResult, flux_unit: str
-) -> Callable[[NDArray[np.complex128]], None]:
-    """Create per-tone magnitude maps and ten scan-history lines.
-
-    Return a plot-thread updater accepting the complete tone-major IQ array.
-    Publish the planned axes before the first acquisition; the caller retains
-    ownership of Plots and its operation lifetime.
-    """
-    flux_values, frequencies = result.flux_values, result.frequencies
-    figures, heatmaps, lines = [], [], []
-    for index in result.tone_indices:
-        fig, _ = plots.subplots(1, 2, num=f"flux_{index}")
-        heat_ax, line_ax = fig.axes
-        heat_ax.set(xlabel=f"DC value ({flux_unit})", ylabel="Frequency (MHz)")
-        line_ax.set_xlabel("Frequency (MHz)")
-        line_ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
-        line_ax.grid()
-        heatmaps.append(live_heatmap(heat_ax, uniform=False))
-        lines.append(live_line(line_ax, num_lines=10))
-        for artist in line_ax.lines[:-1]:
-            artist.set(marker="None", alpha=0.3, color="red")
-        line_ax.lines[-1].set(label="current line", marker=".", color="C0")
-        line_ax.legend()
-        figures.append(fig)
-
-    @plots.on_plot_thread
-    def update(data: NDArray[np.complex128]):
-        artists = []
-        for row, (heatmap, line) in enumerate(zip(heatmaps, lines, strict=True)):
-            real = np.abs(data[row])
-            valid = np.flatnonzero(~np.all(np.isnan(real), axis=1))
-            current = int(valid[-1]) if valid.size else -1
-            history = np.full((10, frequencies.shape[1]), np.nan)
-            for offset in range(min(10, current + 1)):
-                history[-offset - 1] = real[current - offset]
-            artists.extend(heatmap.set(flux_values[row], frequencies[row], real))
-            artists.extend(line.set(frequencies[row], history))
-        return artists
-
-    # Publish planned coordinates with no measured cells before the first point.
-    update(result.signals)
-    for fig in figures:
-        fig.show()
-    return update
-
-
-def _require_finite_spectrum(
-    acquired: NDArray[np.complex128],
-    *,
-    point: int,
-    indices: list[int],
-    flux_values: NDArray[np.float64],
-    frequencies: NDArray[np.float64],
-) -> None:
-    """Reject invalid completed IQ with its original tone and planned coordinates."""
-    nonfinite = ~np.isfinite(acquired)
-    if nonfinite.any():
-        row, column = np.argwhere(nonfinite)[0]
-        raise ValueError(
-            f"Nonfinite inner IQ at flux point {point} (zero-based): "
-            f"{np.count_nonzero(nonfinite)}/{acquired.size} invalid cells; "
-            f"first at tone {indices[row]}, "
-            f"DC={flux_values[row, point]} (native units), "
-            f"frequency={frequencies[row, column]} MHz: "
-            f"{acquired[row, column]!r}"
-        )
-
-
-def _acquire_spectrum(
-    spectrum: MuxOnetoneCfg | MuxFreqCfg, *, context: RunContext
-) -> tuple[NDArray[np.complex128], bool]:
-    # Outer maps own presentation. Retire each inner producer before the next
-    # flux point so repeated spectra do not reuse live axes or open extra tabs.
-    plots = Plots(NonPresentingHost())
-    inner = replace(context, plots=plots)
-    stopped = False
-
-    def on_acquire_stop() -> None:
-        nonlocal stopped
-        stopped = True
-
-    try:
-        if isinstance(spectrum, MuxOnetoneCfg):
-            result = MuxOnetoneExp().run(
-                spectrum, context=inner, on_acquire_stop=on_acquire_stop
-            )
-            return result.signals.T, stopped
-        result = MuxFreqExp().run(
-            spectrum, context=inner, on_acquire_stop=on_acquire_stop
-        )
-        return result.signals, stopped
-    finally:
-        plots.finish(present=False)
-        plots.release()
-
-
 def mux_flux_spec[C: ConfigBase](
-    cfg_type: type[C], *, tag: str
+    cfg_type: type[C], *, tag: str, cfg_schema_version: str
 ) -> GroupedAxesSpec[MuxFluxResult, C]:
     """Declare native tone/flux/frequency grids, converting MHz to Hz on disk.
 
-    cfg_type and tag identify one concrete experiment. All arrays retain full
-    planned axes and NaN gaps after Stop. Loading validates shapes and axes;
-    no current library or alias is consulted.
+    cfg_type and tag identify one concrete experiment. cfg_schema_version is
+    its persisted cfg version (for example "4.0"), passed to GroupedAxesSpec
+    without conversion or compatibility handling. All arrays retain full planned
+    axes and NaN gaps after Stop. Loading validates shapes and axes; malformed
+    data raises ValueError. An incompatible cfg version leaves cfg unavailable
+    with a cfg_issue while preserving valid data. No library or alias is read.
     """
     tone = VariableAxisSpec(
         label="Tone", unit="", field_name="tone_indices", dtype=np.int64
@@ -504,7 +108,7 @@ def mux_flux_spec[C: ConfigBase](
         tag=tag,
         result_builder=build,
         result_validator=validate_flux_result,
-        cfg_schema_version="4.0",
+        cfg_schema_version=cfg_schema_version,
         labber_layout="independent",
     )
 
