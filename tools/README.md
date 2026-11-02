@@ -1,6 +1,6 @@
 # tools/
 
-**Last updated:** 2026-11-01
+**Last updated:** 2026-11-02, pyright threads
 
 **讀者：** framework-dev。Repo 品質檢查的 CLI、輸出與比較機制。
 
@@ -331,6 +331,8 @@ uv run --no-sync -- python tools/check_ratchet.py --base <ref> --detector pyrigh
 `--full-pyright` 對兩側使用 candidate 設定、目前 worktree interpreter 與已安裝依賴，
 不建立 base 的另一個環境。receipt 的 `pyright_scope` 記錄範圍，成本與全樹相關，
 因此不放進快速 gate。`gate.py --with-pyright` 是現況報告，exit 0 不代表本次變更已驗收。
+
+`check_ratchet.py` 與 `gate.py --with-pyright` 以 `_support.PYRIGHT_THREADS`（4 個執行緒）呼叫 Pyright。2026-11-02 在 8 核主機上量測全樹 strict 檢查：單執行緒 152 s、4 執行緒 64 s、8 執行緒 85 s（同時有 pytest 佔用 CPU），三者的診斷完全相同。
 
 Full 模式會重用 base 的 Pyright counts。快取位於主 checkout 的
 `.agent_state/ratchet/cache/`，透過 Git common dir 定位，所有 worktree 共用。

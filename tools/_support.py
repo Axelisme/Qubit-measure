@@ -39,6 +39,11 @@ CHECKED_ROOTS: Final = (
 # an opinion about it.
 SKIPPED_DIRS: Final = frozenset({"__pycache__", ".venv", ".pytest-tmp"})
 
+# Whole-tree strict Pyright on this repo took 152 s single-threaded, 64 s with
+# 4 threads and 85 s with 8 (8-core host shared with pytest -n4), with identical
+# diagnostics; 4 leaves room for concurrent test workers.
+PYRIGHT_THREADS: Final = ("--threads", "4")
+
 
 def python_files(root: Path, *, paths: Iterable[str] | None = None) -> list[Path]:
     """Return the Python files a check should read.
