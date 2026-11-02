@@ -1,4 +1,4 @@
-"""GUI wiring and ordinary length-Rabi writeback targets for heralded data."""
+"""Heralded length Rabi proposes pi_len/pi2_len pulses and x180/x90 links."""
 
 from __future__ import annotations
 
@@ -56,7 +56,8 @@ def writeback(
 
     Convert only cfg/result types and retain metadata, including device snapshot
     and run identity. Missing cfg/capture follows the ordinary adapter policy.
-    No calibration is applied here.
+    Pulse proposals target qubit.pulses.pi_len/pi2_len, and module.x180/x90
+    point to those keys. No calibration is applied here.
     """
     source = req.run_result
     ordinary = RunRecord(
