@@ -45,7 +45,7 @@ def executed_words(prog):
         ir.CompiledTimingInput(
             prog.prog_list,
             prog.labels,
-            prog.timing_layout(),
+            prog.timing_layout,
             dmem=prog.compile_datamem(),
             wmem=ir.compiled_wmem(prog),
         )
