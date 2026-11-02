@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import os
+from collections.abc import Iterator
+from pathlib import Path
+
 import pytest
 from matplotlib.figure import Figure
 from qtpy.QtCore import QCoreApplication, QEvent, QRect, QSize
@@ -10,7 +14,9 @@ from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AnalysisMode
 from zcu_tools.gui.app.measure.ui.data_figure_preview_gallery import (
     DataFigurePreviewGallery,
 )
+from zcu_tools.plotting.figures import FigureCollection
 
+from tests.gui._user_input import ComponentDriver
 from tests.gui.app.measure.ui._preview_gallery_support import (
     FAKE_PNG_BYTES,
     assert_aspect_fit,
@@ -301,6 +307,83 @@ def test_gallery_aspect_fit_regression_640x480_in_narrow_viewport(qapp):
 # ---------------------------------------------------------------------------
 # S1/S4 responsive geometry — viewport-driven narrow vs wide mosaic
 # ---------------------------------------------------------------------------
+
+
+@pytest.fixture(params=[2, 3], ids=["two-cards", "three-cards"])
+def named_gallery(
+    qapp, request: pytest.FixtureRequest
+) -> Iterator[tuple[ComponentDriver, int]]:
+    """Present synthetic named groups through the gallery's public snapshot API."""
+    count: int = request.param
+    gallery = DataFigurePreviewGallery(
+        AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=count == 3)
+    )
+    groups = []
+    for stage in ("Run", "Analysis", "Post")[:count]:
+        group = FigureCollection()
+        for index in (1, 2):
+            figure = Figure(figsize=(3, 2))
+            axes = figure.subplots()
+            axes.plot([0, 1, 2], [0, index, 0])
+            axes.set_xlabel("Time (s)")
+            axes.set_ylabel("Signal")
+            group.adopt(f"{stage} tone {index}", figure)
+        group.seal()
+        groups.append(group)
+    gallery.update_figures(*(next(iter(group.values())) for group in groups))
+    gallery.update_collections(*groups)
+    gallery.resize(1000, 1000)
+    gallery.show()
+    QApplication.processEvents()
+    try:
+        yield ComponentDriver(gallery), count
+    finally:
+        gallery.close()
+        gallery.deleteLater()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+
+
+def _visible_card_bounds(driver: ComponentDriver, key: str) -> QRect:
+    card = driver.observe(object_name=f"previewCard_{key}")
+    assert card.fully_visible, f"{key} card is clipped or hidden"
+    assert card.bounds is not None
+    return QRect(*card.bounds)
+
+
+def test_gallery_named_groups_follow_viewport(
+    named_gallery: tuple[ComponentDriver, int], tmp_path: Path
+) -> None:
+    """Named groups use the same wide mosaic and narrow column after resizing."""
+    driver, count = named_gallery
+    evidence = Path(os.environ.get("GALLERY_LAYOUT_EVIDENCE_DIR", str(tmp_path)))
+    for step, width in (("01-wide", 1000), ("02-narrow", 360), ("03-wide-again", 1000)):
+        driver.resize_window(width, 1000)
+        driver.screenshot(evidence / f"{count}-cards-{step}.png")
+        run = _visible_card_bounds(driver, "run")
+        analysis = _visible_card_bounds(driver, "analysis")
+        assert driver.observe("Run tone 1").visible
+        assert driver.observe("Analysis tone 2").visible
+        if width == 360:
+            assert run.left() == analysis.left()
+            assert run.width() == analysis.width()
+            assert run.bottom() < analysis.top()
+            if count == 3:
+                post = _visible_card_bounds(driver, "post_analysis")
+                assert post.left() == analysis.left()
+                assert post.width() == analysis.width()
+                assert analysis.bottom() < post.top()
+        else:
+            assert run.right() < analysis.left(), "Run must be left of Analysis"
+            assert run.top() == analysis.top()
+            if count == 2:
+                assert run.bottom() == analysis.bottom()
+            else:
+                post = _visible_card_bounds(driver, "post_analysis")
+                assert post.left() == analysis.left()
+                assert analysis.bottom() < post.top()
+                assert run.bottom() == post.bottom()
+                assert run.height() > analysis.height()
+                assert run.width() >= analysis.width()
 
 
 def test_gallery_narrow_single_column_three_cards(qapp):
