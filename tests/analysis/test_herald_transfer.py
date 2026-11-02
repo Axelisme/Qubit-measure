@@ -134,3 +134,57 @@ def test_unidentifiable_data_fails_instead_of_returning_transfer(
 
     with pytest.raises(AnalysisFailed, match="identif|points|centers"):
         selfcal_transfer(sums, n_states)
+
+
+@pytest.mark.parametrize("n_states", [2, 3])
+def test_sampled_gaussian_readout_recovers_transfer_within_sampling_error(n_states: int) -> None:
+    rng = np.random.default_rng(83017)
+    centers = np.array([2.3+1.4j, 4.8+2.3j, 3.1+4j])[:n_states]
+    populations = np.array([0.7, 0.3]) if n_states == 2 else np.array([0.65, 0.25, 0.1])
+    transitions = rng.dirichlet(np.ones(n_states), size=(21, n_states))
+    transitions = 0.5 * transitions + 0.5 * np.eye(n_states)
+    sums = np.empty((len(transitions), 6, 6))
+    sigma, shots = 0.55, 20_000
+    for index, transition in enumerate(transitions):
+        herald_state = rng.choice(n_states, shots, p=populations)
+        cumulative = np.cumsum(transition[herald_state], axis=1)
+        signal_state = (rng.random((shots, 1)) > cumulative).sum(axis=1)
+        herald = centers[herald_state] + sigma*(rng.normal(size=shots) + 1j*rng.normal(size=shots))
+        signal = centers[signal_state] + sigma*(rng.normal(size=shots) + 1j*rng.normal(size=shots))
+        h = np.column_stack([np.ones(shots), herald.real, herald.imag, herald.real**2, herald.real*herald.imag, herald.imag**2])
+        s = np.column_stack([np.ones(shots), signal.real, signal.imag, signal.real**2, signal.real*signal.imag, signal.imag**2])
+        sums[index] = h.T @ s
+
+    result = selfcal_transfer(sums, n_states)
+
+    # 420,000 pooled shots constrain calibration; rare-state K rows remain noisier.
+    np.testing.assert_allclose(result.centers, centers, atol=0.03)
+    assert result.sigma == pytest.approx(sigma, abs=0.02)
+    np.testing.assert_allclose(result.populations, populations, atol=0.008)
+    assert np.sqrt(np.mean((result.transition_matrices - transitions)**2)) < 0.03
+    joint = populations[None, :, None] * transitions
+    assert np.sqrt(np.mean((result.joint_probabilities - joint)**2)) < 0.008
+    change = 1 - np.trace(joint, axis1=1, axis2=2)
+    assert np.sqrt(np.mean((result.change_probability - change)**2)) < 0.012
+
+
+@pytest.mark.parametrize("n_states", [2, 3])
+def test_previous_calibration_refines_to_full_search_result(n_states: int) -> None:
+    centers = np.array([-0.8+1.1j, 1.3+2.2j, 0.2-0.9j])[:n_states]
+    populations = np.array([0.7, 0.3]) if n_states == 2 else np.array([0.6, 0.3, 0.1])
+    first = np.repeat(np.eye(n_states)[None], 3, axis=0)
+    previous = selfcal_transfer(exact_sums(centers, 0.4, populations, first), n_states)
+    # A changed pooled herald origin/scale must not change the warm-start units.
+    updated_centers = centers * 1.04 + 0.03 - 0.02j
+    updated_populations = populations + np.array([0.02, -0.02] if n_states == 2 else [0.02, -0.01, -0.01])
+    transitions = np.repeat((0.4*np.eye(n_states) + 0.6/n_states)[None], 4, axis=0)
+    sums = exact_sums(updated_centers, 0.42, updated_populations, transitions)
+
+    full = selfcal_transfer(sums, n_states)
+    warm = selfcal_transfer(sums, n_states, previous=previous)
+
+    np.testing.assert_allclose(warm.centers, full.centers, atol=1e-6)
+    assert warm.sigma == pytest.approx(full.sigma, abs=1e-6)
+    np.testing.assert_allclose(warm.populations, full.populations, atol=1e-6)
+    np.testing.assert_allclose(warm.transition_matrices, full.transition_matrices, atol=1e-6)
+    np.testing.assert_allclose(warm.change_probability, full.change_probability, atol=1e-6)
