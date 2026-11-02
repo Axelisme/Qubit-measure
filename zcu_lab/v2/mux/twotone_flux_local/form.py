@@ -3,7 +3,7 @@
 from typing import Any
 
 from zcu_tools.cfg_model import Expr, FieldMeta, FormNode, Hidden, Slot, Template
-from zcu_tools.gui.form import FormEnv
+from zcu_tools.gui.form import FormEnv, FormWritePath
 from zcu_tools.gui.form_adapter import FixedElements, Form, FormContext
 
 from zcu_lab.v2.support.measure.flux_defaults import (
@@ -74,7 +74,7 @@ def make_form(ctx: FormContext) -> Form[TwotoneFluxLocalCfg]:
         defaults["flux_unit"] = next(iter(units)) if units else None
         return defaults
 
-    metadata = {
+    metadata: dict[FormWritePath, FieldMeta] = {
         ("readout",): FieldMeta(
             description="Captured $mux.module.readout slot, or readout/mux:blank from group wiring; confirm calibration"
         ),
