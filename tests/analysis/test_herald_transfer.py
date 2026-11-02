@@ -1,6 +1,7 @@
 """Recover state transfer through the public shared-readout calibration seam."""
 
 import numpy as np
+import pytest
 from numpy.typing import NDArray
 
 from zcu_tools.analysis.herald_transfer import selfcal_transfer
@@ -46,3 +47,25 @@ def test_two_state_exact_transfer_and_readout_in_original_units() -> None:
     np.testing.assert_allclose(result.singular_values[0], 1)
     assert result.singular_values[2] < 1e-10
     np.testing.assert_array_equal(sums, before)
+
+
+def test_three_state_exact_transfer_sorted_by_herald_population() -> None:
+    centers = np.array([1200 + 340j, 900 + 110j, 800 + 430j])
+    populations = np.array([0.18, 0.67, 0.15])
+    transitions = np.array(
+        [[[0.8, 0.15, 0.05], [0.1, 0.65, 0.25], [0.2, 0.3, 0.5]],
+         [[0.2, 0.4, 0.4], [0.7, 0.2, 0.1], [0.1, 0.6, 0.3]],
+         [[0.9, 0.05, 0.05], [0.2, 0.7, 0.1], [0.4, 0.1, 0.5]]]
+    )
+    result = selfcal_transfer(exact_sums(centers, 48.0, populations, transitions), 3)
+    order = [1, 0, 2]
+    joint = populations[None, :, None] * transitions
+
+    np.testing.assert_allclose(result.centers, centers[order], atol=1e-5)
+    assert result.sigma == pytest.approx(48.0, abs=1e-5)
+    np.testing.assert_allclose(result.populations, populations[order], atol=1e-7)
+    np.testing.assert_allclose(result.transition_matrices, transitions[:, order][:, :, order], atol=1e-7)
+    np.testing.assert_allclose(result.joint_probabilities, joint[:, order][:, :, order], atol=1e-7)
+    np.testing.assert_allclose(result.change_probability, [0.345, 0.703, 0.294], atol=1e-7)
+    assert result.singular_values.shape == (4,)
+    assert result.singular_values[3] < 1e-10
