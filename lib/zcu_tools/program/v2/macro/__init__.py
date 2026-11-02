@@ -29,6 +29,11 @@ class AdditionalMacroMixin(QickProgramV2):
     def _init_declarations(self) -> None:
         self._source_names = []
         self._native_pulse_ordinal = 0
+        # Native loop discovery shares rotated DMEM offsets with its closing shell.
+        self.loop_wave_tables: dict[str, dict[int, dict[int, int]]] = {}
+        self.loop_register_tables: dict[
+            str, dict[str, dict[str, int | tuple[int, ...]]]
+        ] = {}
         super()._init_declarations()
 
     @contextmanager
