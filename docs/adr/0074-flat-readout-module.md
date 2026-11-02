@@ -165,8 +165,6 @@ Result 原樣保存 processor 的 float64 總和，不在 run 中換成平均或
 Schedule 的 `run_acquire_summed` 讓 caller 以 `RunOptions(converter=...)` 選擇 live signal；未提供 converter 時原樣寫入總和，不把類別計數當作 IQ。
 搬遷後的實驗拒絕缺少 counts／sums 的舊格式，不從舊比例推算計數，也不加相容路徑。
 
-單 qubit heralding 使用 `[Classify("herald"), IQ("readout")]` 保存各 herald 類別下的終端 IQ 總和。
-分析選取 herald 判為 g 的類別，再由其計數算出條件平均；其他 herald 類別的資料仍保留。
 單 qubit heralding 的五個實驗使用 `[IQ("herald"), IQ("signal")]` 保存 float64 `(N, 6, 6)` 二階特徵外積總和。
 Herald 與 signal 由兩個 PulseReadout instance 發射，共用同一份 readout cfg，不需要 classifier。
 共用讀出的中心與 Gaussian width 由二階矩自校準；各點的 J 是 herald/signal 聯合機率，K 的每列是條件轉移機率。
