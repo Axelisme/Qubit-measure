@@ -547,7 +547,10 @@ class DataFigurePreviewGallery(QWidget):
             self._inner_layout.setColumnStretch(i, 0)
             self._inner_layout.setRowStretch(i, 0)
 
-        is_wide = self._is_wide()
+        named_groups = any(
+            card.named_presentation_active() for card in self._ordered_cards
+        )
+        is_wide = self._is_wide() and not named_groups
         n = len(self._ordered_cards)
         if n == 0:
             return

@@ -368,7 +368,7 @@ def test_gallery_named_groups_follow_viewport(
             assert run.width() == analysis.width()
             assert run.bottom() < analysis.top()
             if count == 3:
-                post = _visible_card_bounds(driver, "post_analysis")
+                post = _visible_card_bounds(driver, "post")
                 assert post.left() == analysis.left()
                 assert post.width() == analysis.width()
                 assert analysis.bottom() < post.top()
@@ -378,7 +378,7 @@ def test_gallery_named_groups_follow_viewport(
             if count == 2:
                 assert run.bottom() == analysis.bottom()
             else:
-                post = _visible_card_bounds(driver, "post_analysis")
+                post = _visible_card_bounds(driver, "post")
                 assert post.left() == analysis.left()
                 assert analysis.bottom() < post.top()
                 assert run.bottom() == post.bottom()
