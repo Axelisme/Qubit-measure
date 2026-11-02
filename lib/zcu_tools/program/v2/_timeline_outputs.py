@@ -98,12 +98,12 @@ class TimelineObservedPulse(Pulse):
             self.source.t = self.book.math.preprocess_time(start)
             self.source.preprocess(prog)
             self.source.t_regs["t"] = start.register
-            finish = self.book.math.add(
-                start,
-                align_end(
-                    prog, prog.pulses[self.name].get_length(), self.native_length(prog)
-                ),
-            )
+            # QICK accumulates the unrounded timestamp across native auto
+            # pulses. Keep that table after preprocessing its scalar stand-in;
+            # nearest applies to each placement, not to each duration.
+            actual_end = t + prog.pulses[self.name].get_length()
+            self.book.native_timestamp(prog, actual_end, gen_ch=self.ch)
+            finish = self.book.math.cycles(actual_end)
             self.book.runtime_gens[self.ch] = finish
             self.book.record_native(prog, self.ch, finish, generator=True)
             self.record(prog, t)
