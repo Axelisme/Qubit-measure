@@ -526,7 +526,8 @@ class TablePulseReadout(AbsReadout):
         """Declare independent templates and paired words for a public sweep loop.
 
         idx_reg must name a top-level native loop with exactly the table count;
-        missing loops or count mismatches raise ValueError before allocation.
+        Missing loops, count mismatches or a first word inconsistent with cfg.freq
+        raise ValueError during declaration.
         Once declared, the paired frequency words advance at the end of every
         shot in the idx_reg loop, whether or not that shot's branch plays this
         readout. The update after the final point wraps to the first pair.

@@ -531,8 +531,16 @@ def test_table_readout_requires_named_loop(sweep):
 
 def test_table_readout_does_not_share_fixed_pulse_template():
     cfg = _readout_cfg()
+    gen, adc = readout_freq_words(
+        load_soccfg(),
+        [float(cfg.freq), float(cfg.freq) + 10],
+        gen_ch=cfg.gen_ch,
+        ro_ch=cfg.ro_ch,
+        mixer_freq=cfg.mixer_freq,
+        nqz=cfg.nqz,
+    )
     table = TablePulseReadout(
-        "table", cfg, idx_reg="freq", freq_words=[1, 2], ro_freq_words=[3, 4]
+        "table", cfg, idx_reg="freq", freq_words=gen, ro_freq_words=adc
     )
     prog = _make_prog(
         modules=[Readout("fixed", cfg), Delay("adc_gap", 0.5), table],

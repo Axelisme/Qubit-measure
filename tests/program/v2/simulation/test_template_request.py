@@ -62,7 +62,7 @@ def test_reps_dependent_timeline_rejected_before_backend(dependency):
     assert not env.soc.binding.rounds
 
 
-def test_table_hook_initial_state_that_changes_across_reps_is_rejected():
+def test_table_initial_state_that_changes_across_reps_is_rejected():
     env = white_noise(load_soccfg(), std_adc=0, seed=None, routes=((0, 0),))
     gen, adc = readout_freq_words(
         env.soccfg, [200, 300], gen_ch=0, ro_ch=0, mixer_freq=None, nqz=1
@@ -70,16 +70,13 @@ def test_table_hook_initial_state_that_changes_across_reps_is_rejected():
     module = TablePulseReadout(
         "readout", receiver(), idx_reg="axis", freq_words=gen, ro_freq_words=adc
     )
-    prog = compile_modules(
-        env.soccfg,
-        modules=[module],
-        sweep=[("axis", 2)],
-        reps=2,
-    )
-    with pytest.raises(
-        ValueError, match=r"MetaInst.*preopt.*axis.*table wrap disagrees"
-    ):
-        prog.acquire(env.soc, progress=False)
+    with pytest.raises(ValueError, match="table wrap disagrees"):
+        compile_modules(
+            env.soccfg,
+            modules=[module],
+            sweep=[("axis", 2)],
+            reps=2,
+        )
     assert not env.soc.binding.rounds
 
 

@@ -285,15 +285,12 @@ def test_table_readout_wrap_conflicting_with_initial_template_is_rejected():
     gen, adc = readout_freq_words(
         env.soccfg, [200, 300], gen_ch=0, ro_ch=0, mixer_freq=None, nqz=1
     )
-    # The compiled template starts at cfg.freq=100. The last hook restores table[0]=200.
+    # Native table binding rejects a first word that differs from cfg.freq.
     readout = TablePulseReadout(
         "readout", receiver(), idx_reg="axis", freq_words=gen, ro_freq_words=adc
     )
-    prog = compile_modules(env.soccfg, modules=[readout], sweep=[("axis", 2)], reps=1)
-    with pytest.raises(
-        ValueError, match=r"MetaInst.*preopt.*axis.*table wrap disagrees"
-    ):
-        prog.acquire(env.soc, progress=False)
+    with pytest.raises(ValueError, match="table wrap disagrees"):
+        compile_modules(env.soccfg, modules=[readout], sweep=[("axis", 2)], reps=1)
     assert not env.soc.binding.rounds
 
 
