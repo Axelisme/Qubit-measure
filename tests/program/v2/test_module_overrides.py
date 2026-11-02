@@ -111,8 +111,7 @@ def test_table_ro_length_is_explicitly_unsupported(via_override):
     if not via_override:
         cfg.ro_length = table
     with pytest.raises(NotImplementedError, match="ro_length.*TableParam"):
-        module = PulseReadout("readout", cfg, ro_length=table if via_override else None)
-        _compile("builder", [module], True)
+        PulseReadout("readout", cfg, ro_length=table if via_override else None)
 
 
 def _assert_same_compile(actual, expected):
