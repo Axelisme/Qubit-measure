@@ -128,3 +128,61 @@ def test_online_remote_error_expires_and_logs_full_content(
     driver.screenshot(tmp_path / "05-info.png")
     assert "Synthetic progress" in driver.status().text
     assert not _notice_visible(driver)
+
+
+@pytest.mark.parametrize("diagnostic_window", ["remote-online"], indirect=True)
+def test_remote_notice_details_remain_until_manually_closed(
+    diagnostic_window: ComponentDriver, tmp_path: Path
+) -> None:
+    driver = diagnostic_window
+    driver.click("Emit error")
+    driver.screenshot(tmp_path / "01-summary.png")
+    assert any(w.text == "Details…" for w in driver.visible().widgets), (
+        "the transient notice needs a full-content inspection action"
+    )
+    driver.click("Details…")
+    driver.screenshot(tmp_path / "02-details.png")
+    assert driver.dialogs()[0].title == TITLE
+    assert MESSAGE in driver.dialogs()[0].texts
+    driver.click("Emit info")
+    driver.screenshot(tmp_path / "03-non-modal-details.png")
+    assert "Synthetic progress" in driver.status().text
+    qt_until(
+        lambda: not _notice_visible(driver),
+        label="summary expires without dismissing inspected details",
+        watchdog_ms=11_000,
+    )
+    driver.screenshot(tmp_path / "04-expired-details-retained.png")
+    assert MESSAGE in driver.dialogs()[0].texts
+    driver.click("OK")
+    driver.screenshot(tmp_path / "05-details-closed.png")
+    assert not driver.dialogs()
+
+
+@pytest.mark.parametrize(
+    "diagnostic_window", ["local", "remote-offline"], indirect=True
+)
+def test_unattended_error_report_requires_manual_close(
+    diagnostic_window: ComponentDriver, tmp_path: Path
+) -> None:
+    driver = diagnostic_window
+    driver.screenshot(tmp_path / "01-control.png")
+    assert any(
+        w.text in ("Local", "Remote · synthetic · offline")
+        for w in driver.visible().widgets
+    )
+    driver.click("Emit error")
+    driver.screenshot(tmp_path / "02-report.png")
+    assert driver.dialogs()[0].title == TITLE
+    assert MESSAGE in driver.dialogs()[0].texts
+    assert not _notice_visible(driver)
+    driver.click("Emit info")
+    driver.screenshot(tmp_path / "03-non-modal.png")
+    assert "Synthetic progress" in driver.status().text
+    # Unlike online Remote, these reports must remain beyond the expiry interval.
+    _elapse(8500)
+    driver.screenshot(tmp_path / "04-report-retained.png")
+    assert MESSAGE in driver.dialogs()[0].texts
+    driver.click("OK")
+    driver.screenshot(tmp_path / "05-closed.png")
+    assert not driver.dialogs()
