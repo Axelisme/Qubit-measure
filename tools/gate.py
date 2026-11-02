@@ -98,7 +98,9 @@ STATUS_CHECKS: Final = (
 )
 
 PYRIGHT_CHECK: Final = Check(
-    "pyright", ("pyright", "--outputjson"), "summary.errorCount"
+    "pyright",
+    ("pyright", *_support.PYRIGHT_THREADS, "--outputjson"),
+    "summary.errorCount",
 )
 
 

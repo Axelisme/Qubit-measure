@@ -218,7 +218,14 @@ def pyright_counts(
     if files is not None and not present:
         return {}
     completed = subprocess.run(
-        ("pyright", "--pythonpath", sys.executable, "--outputjson", *present),
+        (
+            "pyright",
+            *_support.PYRIGHT_THREADS,
+            "--pythonpath",
+            sys.executable,
+            "--outputjson",
+            *present,
+        ),
         cwd=tree,
         check=False,
         capture_output=True,
