@@ -284,18 +284,19 @@ def _resolve_axis(
 def split_sums(
     sums: NDArray[np.float64],
 ) -> tuple[NDArray[np.float64], NDArray[np.complex128]]:
-    """Split a final (count, sum I, sum Q) axis into counts and complex means.
+    """Split final (count, ΣI, ΣQ, ΣI², ΣIQ, ΣQ²) into counts and complex means.
 
-    sums contains float64 shot sums. Its last axis must have length three or
+    Only the first three components contribute to the result.
+    sums contains float64 shot sums. Its last axis must have length six or
     ValueError reports the actual shape. Return counts with that axis removed
     (a borrowed view) and detached complex128 means of the same shape. Empty
     cells and unmeasured NaN counts give NaN real and imaginary components,
     without divide warnings. NaN counts remain NaN.
     No input values are changed; counts are not normalized.
     """
-    if sums.ndim < 1 or sums.shape[-1] != 3:
+    if sums.ndim < 1 or sums.shape[-1] != 6:
         raise ValueError(
-            f"split_sums expected final axis length 3; actual shape {sums.shape}"
+            f"split_sums expected final axis length 6; actual shape {sums.shape}"
         )
     counts = sums[..., 0]
     means = np.full(counts.shape, complex(np.nan, np.nan), dtype=np.complex128)
