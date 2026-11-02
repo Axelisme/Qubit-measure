@@ -93,8 +93,9 @@ def fitdecaycos(
     """Fit [y0, yscale, freq (1/x), phase (deg), decay_time] and covariance.
 
     Phase is unbounded during optimization and returned modulo 360 degrees.
-    Amplitude is unbounded, so a fringe whose envelope decays before the first
-    extremum still recovers its t=0 amplitude and decay time.
+    Amplitude is bounded to 5 times the absolute initial amplitude (the data
+    half-range when not supplied), so a fringe whose envelope decays before
+    the first extremum still recovers its t=0 amplitude and decay time.
     ``fitparams`` supplies initial guesses; non-None ``fixedparams`` entries
     hold those parameters fixed. Decay time uses the units of ``xdata``.
     Optional decay_bounds=(lower, upper) constrains free decay time and clips
@@ -139,16 +140,17 @@ def fitdecaycos(
     fitparams = cast(list[float], fitparams)
 
     # bounds
+    yscale = fitparams[1]
     freq = fitparams[2]
     lower, upper = (0.0, np.inf) if decay_bounds is None else decay_bounds
     if decay_bounds is not None:
         fitparams[4] = min(max(fitparams[4], lower), upper)
-    # Amplitude stays unbounded: when the envelope decays before the first
-    # fringe extremum, the data half-range underestimates the t=0 amplitude,
-    # and a cap near it would be absorbed by a longer decay time.
+    # When the envelope decays before the first fringe extremum, the data
+    # half-range underestimates the t=0 amplitude; a cap near it is absorbed by
+    # a longer decay time. 5x leaves room for that while still bounding the fit.
     bounds = (
-        [-np.inf, -np.inf, freq_bound[0], -np.inf, lower],
-        [np.inf, np.inf, freq_bound[1], np.inf, upper],
+        [-np.inf, -5 * np.abs(yscale), freq_bound[0], -np.inf, lower],
+        [np.inf, 5 * np.abs(yscale), freq_bound[1], np.inf, upper],
     )
 
     pOpt, pCov = fit_func(xdata, ydata, decaycos, fitparams, bounds, fixedparams)
