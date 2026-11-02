@@ -22,7 +22,7 @@ from zcu_tools.cfg_model import MuxReadoutCfg as CoreMuxReadoutCfg
 from zcu_tools.utils.shot_classification import classify_shots, nearest_centroid3
 
 from ..macro.readout import ReadoutEmission
-from ..table_param import TableParam, TableRawParam
+from ..table_param import TableParam
 from .base import AbsModuleCfg, Module, apply_cfg_overrides
 from .pulse import Pulse, PulseCfg
 from .waveform import WaveformCfg, resolve_waveform_ref
@@ -457,116 +457,6 @@ class PulseReadout(AbsReadout):
         else:
             self.pulse.play(prog, timeline=timeline)
         prog.timeline_inc(self.cfg.post_delay, timeline=timeline)
-
-
-class TablePulseReadout(AbsReadout):
-    """Sweep a pulse readout through exact dmem frequency-word tables.
-
-    The current point is played through QICK's ordinary wmem-backed pulse and
-    readout-config path. Once declared, the readout advances to the next paired
-    frequency words at the end of every shot in the ``idx_reg`` sweep loop,
-    whether or not that shot's branch plays this readout. Native loop closing
-    discovers its TableRawParam fields and loads rotated dmem tables. After the final
-    point, the update wraps to the first pair for the next outer repetition.
-    Timeline completion is generator end plus post-delay once; ADC windows do
-    not extend it. A later timeline trigger must prove its ADC window disjoint.
-    """
-
-    def __init__(
-        self,
-        name: str,
-        cfg: PulseReadoutCfg,
-        *,
-        idx_reg: str,
-        freq_words: Sequence[int],
-        ro_freq_words: Sequence[int],
-    ) -> None:
-        """Capture flat cfg and paired uint32 words for a named sweep loop.
-
-        idx_reg must match exactly one declared loop with the same point count.
-        Empty, unequal, or invalid uint32 tables raise ValueError. The first pair
-        must encode cfg.freq; each later pair represents one semantic frequency.
-        Dedicated templates isolate updates from shared pulses. The final update
-        wraps to the first pair before the next outer repetition.
-        """
-        self.name = name
-        self.idx_reg = idx_reg
-        self.freq_words = [int(word) for word in freq_words]
-        self.ro_freq_words = [int(word) for word in ro_freq_words]
-        if len(self.freq_words) == 0:
-            raise ValueError("TablePulseReadout requires at least one frequency word")
-        if len(self.freq_words) != len(self.ro_freq_words):
-            raise ValueError(
-                "TablePulseReadout generator/readout tables must have equal length"
-            )
-
-        self._readout = PulseReadout(name, cfg)
-        self.cfg = self._readout.cfg
-        self._readout.pulse = Pulse(
-            name=f"{name}_pulse",
-            cfg=self._readout.pulse.cfg,
-            ro_ch=self.cfg.ro_ch,
-            pulse_id=f"{name}_table_pulse",
-        )
-        if any(not 0 <= word < 2**32 for word in self.freq_words + self.ro_freq_words):
-            raise ValueError("TablePulseReadout words must be uint32")
-
-    @property
-    def initial_template(self) -> PulseReadout:
-        """Borrow the initial template used before native loop table updates.
-
-        The returned Module is owned by this table readout and must not be
-        mutated by consumers. init(prog) initializes it and its dedicated pulse
-        identity. It is not the current mutable hardware wmem contents; semantic
-        interpreters own their own per-execution template-word update state.
-        """
-        return self._readout
-
-    def declare(self, prog: TimelineProgramV2) -> None:
-        """Declare independent templates and paired words for a public sweep loop.
-
-        idx_reg must name a top-level native loop with exactly the table count;
-        Missing loops, count mismatches or a first word inconsistent with cfg.freq
-        raise ValueError during declaration.
-        Once declared, the paired frequency words advance at the end of every
-        shot in the idx_reg loop, whether or not that shot's branch plays this
-        readout. The update after the final point wraps to the first pair.
-        """
-        matches = [loop for loop in prog.sweep_loops if loop.name == self.idx_reg]
-        if len(matches) != 1:
-            raise ValueError(
-                f"TablePulseReadout idx_reg={self.idx_reg!r} requires one sweep loop"
-            )
-        if matches[0].count != len(self.freq_words):
-            raise ValueError(
-                f"TablePulseReadout table length {len(self.freq_words)} does not "
-                f"match loop {self.idx_reg!r} count {matches[0].count}"
-            )
-        self._readout.declare(prog)
-        self._bind_tables(prog)
-
-    def lower(
-        self, prog: TimelineProgramV2, *, timeline: str | None, tag: str | None
-    ) -> None:
-        """Play paired templates, ending at generator completion plus post-delay.
-
-        Native table updates affect only frequency words, not placement or duration.
-        timeline=None selects default; tag names this occurrence's config.
-        """
-        self._readout.lower(prog, timeline=timeline, tag=tag)
-
-    def _bind_tables(self, prog: TimelineProgramV2) -> None:
-        for name, words in (
-            (self._readout.pulse.pulse_name(prog), self.freq_words),
-            (self._readout.adc_name(prog), self.ro_freq_words),
-        ):
-            wave_names = prog.pulses[name].get_wavenames(exclude_special=True)
-            if len(wave_names) != 1:
-                raise NotImplementedError("TablePulseReadout requires one waveform")
-            wave = prog.waves[prog.wave2idx[wave_names[0]]]
-            if int(wave.freq) % 2**32 != words[0]:
-                raise ValueError("table wrap disagrees with initial WMEM frequency")
-            wave.freq = TableRawParam(self.idx_reg, words, par="freq")
 
 
 class MuxReadout(AbsReadout):

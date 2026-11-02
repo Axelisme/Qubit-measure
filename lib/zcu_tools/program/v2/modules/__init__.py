@@ -28,7 +28,6 @@ from .readout import (
     PulseReadoutOverrides,
     Readout,
     ReadoutCfg,
-    TablePulseReadout,
 )
 from .reset import (
     AbsReset,

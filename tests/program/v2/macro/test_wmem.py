@@ -7,7 +7,6 @@ from qick.asm_v2 import AsmInst, WriteReg
 from qick.tprocv2_assembler import Assembler
 from zcu_tools.program.v2.macro.wmem import (
     ConfigReadoutFromRegs,
-    PatchWmemFromDmem,
     PatchWmemFromRegs,
     PulseFromRegs,
 )
@@ -156,29 +155,6 @@ def test_patch_wmem_from_regs_persists_without_port_write() -> None:
 
     assert [inst.inst["CMD"] for inst in insts] == ["REG_WR", "REG_WR", "WMEM_WR"]
     assert insts[-1].inst == {"CMD": "WMEM_WR", "DST": "&4"}
-
-
-def test_patch_wmem_from_dmem_keeps_address_and_value_registers_separate() -> None:
-    insts = PatchWmemFromDmem(
-        name="readout",
-        idx_reg="idx",
-        addr_reg="addr",
-        val_reg="freq_word",
-        dmem_offset=7,
-    ).expand(_Prog(["readout_wave"]))
-
-    assert insts[0].inst == {
-        "CMD": "REG_WR",
-        "DST": "r2",
-        "SRC": "op",
-        "OP": "r1 + #7",
-    }
-    assert insts[1].inst == {
-        "CMD": "REG_WR",
-        "DST": "s1",
-        "SRC": "dmem",
-        "ADDR": "&r2",
-    }
 
 
 @pytest.mark.parametrize("macro_factory", [_pulse_macro, _readout_macro])

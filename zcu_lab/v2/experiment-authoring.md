@@ -2,7 +2,7 @@
 
 **讀者：** lab-author、framework-dev、agent。撰寫實驗 core，查閱 records、資料形狀、執行與保存慣例。
 
-**Last updated:** 2026-11-02
+**Last updated:** 2026-11-02，onetone 非均勻頻率改用原生查表掃描
 
 使用者入口見 [tutorial](../tutorial/README.md)。
 
@@ -526,12 +526,12 @@ Schedule 的 buffer、retry 與 partial-result 規則見 [runtime README](../../
 
 `onetone/freq` 的 frequency sampling 有兩種 mode：`linear` 沿用 program-side
 `SweepCfg` sweep；`homophasal` 保留同一個 `freq` 使用者介面，但由已擬合的 resonator
-circle 參數產生非等距 frequency array，再把 gen/readout raw frequency words 放進
-`TablePulseReadout` 的 dmem tables。每點沿用一般 `PulseReadout` 的 wmem-backed WPORT，
-並在 sweep loop 的 exec-after hook 更新下一點 generator/readout frequency words；最後一點
-回繞第一點供下一個 outer repetition 使用。這條路徑不重置 DDS phase accumulator，更新
-位置與 QICK native `QickParam` sweep 一致。非等距模式仍先把點 round 到硬體格點，並在
-相鄰點 collapse 時 fast-fail。
+circle 參數產生非等距 frequency array，再交給 `builder.add_table_sweep("freq", freqs)`。
+兩種 mode 都用 `PulseReadout("readout", cfg.readout, freq=freq)` 播放並取數。
+QICK 逐點轉成 generator/readout frequency words，原生 loop 收尾在每發後載入下一點。
+最後一點回繞第一點供下一個 outer repetition 使用，不重置 DDS phase accumulator。
+非等距模式仍先把點 round 到硬體格點，並在相鄰點 collapse 時 fast-fail。
+存檔的 `freqs` 軸與 cfg 不變。
 
 `zcu_tools.experiment.v2.utils.t1_sampling` 擁有 T1 family 的 non-uniform sampling contract，供
 `twotone/time_domain/t1` 與 singleshot `t1`、`t1_with_tone`、`t1_with_tone_sweep` 共用：

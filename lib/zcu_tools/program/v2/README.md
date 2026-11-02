@@ -1,6 +1,6 @@
 # program/v2
 
-**Last updated:** 2026-11-02，公開 API 與文件 owner 分層
+**Last updated:** 2026-11-02，onetone 非均勻頻率改用原生查表掃描
 
 **讀者：** lab-author、framework-dev、agent。查找 V2 program 公開 API、型別契約與編譯規則的 owner。
 
@@ -17,7 +17,7 @@
 | `TimelineBuilder(soccfg, ..., **program_kwargs)` | `build()` 原樣轉交 QICK compilation options，例如 `reps_innermost=True`。Compiler 在 build 時回報不支援或衝突的選項。取數選項不放這裡。 |
 | `declare(module)`／`emit(module, timeline=..., tag=...)` | 手寫 program 顯式宣告。Builder 第一次 emit 時記錄宣告。同一物件可跨 program 重用，錄製或編譯後不要修改它或其 cfg。每個 program 依物件身分保存自己的宣告結果。 |
 | `build()` | 所有錄製 context 關閉後才能呼叫，否則 raise ValueError 且仍可繼續錄製。成功後 builder 凍結，再錄製或 build 都 raise ValueError。 |
-| `add_sweep(name, spec)`／`add_loop(name, count)` | 前者宣告均勻掃描並回傳 QICK 參數，非均勻值表用後者配合 `LoadValue`。 |
+| `add_sweep(name, spec)`／`add_table_sweep(name, values)`／`add_loop(name, count)` | 前兩者宣告均勻或非均勻的頂層掃描，回傳參數可傳給 module constructor。`add_loop` 配合 `LoadValue` 保留逐點選擇用途。 |
 | `fork(source, into=...)`／`join(*sources, into=target)` | Fork 宣告新 timeline，join 將既有 target 與 sources 的結尾取逐點 max。兩者只記帳，不發射動作或推進 reference。 |
 | `with timeline(name)` | 只切換範圍內省略或傳入 `None` 的 timeline 預設名字，顯式名字優先，離開後還原。 |
 | `timeline_inc(t, *, timeline=..., range_hint=...)` | 只增加結尾。Scalar／QickParam 單位為 us，register 名稱代表非負 tProc cycles。Hint 是作者保證的整數 cycle 閉區間，不增加硬體檢查。 |
@@ -153,8 +153,9 @@ Compiled request builder 從實際輸出效果提供 references，cfg-based API 
 
 Runtime pulse／readout word macro 將單一 wmem template 載入 `r_wave`，修改欄位後直接送到 port，不將修改結果寫回 wmem。
 這讓播放時的更新保持原子性，固定 template 不隨掃描點改變。
-`TablePulseReadout` 的任意頻率掃描則播放一般 wmem template，透過 QICK loop exec-after hook 執行 dmem lookup 與 wmem patch。
-更新在 shot timing 後、loop test／jump 前，沿用原生 `QickParam` sweep 位置，不啟用 DDS phase reset。
+`add_table_sweep("freq", freqs)` 回傳的參數可傳給 `PulseReadout(..., freq=freq)`，由 QICK 逐點轉成 generator／ADC 字。
+原生 loop 收尾從 rotated dmem table 更新下一點的 wmem 欄位，最後一點後還原第一點。
+更新在 shot timing 後、loop test／jump 前執行，即使該發未播放也會前進，不啟用 DDS phase reset。
 
 `MetaMacro.regs: dict[str, str]` 將 info key 對應到 logical register 名稱、ASM address 或 QICK alias。
 `translate()` 透過 `IRCompileMixin.record_meta()` 複製 info 並解析 register，在目前 instruction address 記錄 metadata，不發出 ASM、不修改輸入。
