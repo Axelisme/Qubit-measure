@@ -4,7 +4,7 @@ from dataclasses import replace
 
 import numpy as np
 import pytest
-from qick.asm_v2 import QickSweep1D
+from qick.asm_v2 import QickParam, QickSweep1D
 from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.program.v2 import SweepCfg, TimelineBuilder, ir
 from zcu_tools.program.v2.modules.pulse import Pulse, PulseCfg
@@ -51,7 +51,11 @@ def field_program(
         )
     else:
         parameter = value
-    knobs = {"freq": 100.0 if paired else 80.0, "phase": 0.0, "gain": 0.2}
+    knobs: dict[str, float | QickParam] = {
+        "freq": 100.0 if paired else 80.0,
+        "phase": 0.0,
+        "gain": 0.2,
+    }
     knobs[field] = parameter
     if mixed:
         knobs["gain"] = QickSweep1D("point", 0.1, 0.3)
@@ -74,7 +78,13 @@ def field_program(
         mixer_freq=mixer,
     )
     if paired:
-        module = PulseReadout("readout", receiver, **knobs)
+        module = PulseReadout(
+            "readout",
+            receiver,
+            freq=knobs["freq"],
+            phase=knobs["phase"],
+            gain=knobs["gain"],
+        )
         pulse = module.pulse
     else:
         pulse = Pulse(
@@ -86,7 +96,9 @@ def field_program(
                 gain=0.2,
                 waveform=waveform,
             ),
-            **knobs,
+            freq=knobs["freq"],
+            phase=knobs["phase"],
+            gain=knobs["gain"],
         )
         module = pulse
     if branch:
