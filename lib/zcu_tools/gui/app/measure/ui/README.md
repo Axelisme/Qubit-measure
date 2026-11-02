@@ -78,7 +78,10 @@ and applies the same paging rule within each group. Gallery layout depends only
 on viewport width, including named groups. Narrow viewports stack stage cards
 in one column. Wide viewports place two cards side by side; with three cards,
 Run spans the left column and Analysis/Post-Analysis stack on the right.
-A single card fills the width in either mode. The app-local plot host passes the
+A single card fills the width in either mode. Named members and their raster
+labels shrink to the tile width, while stage cards retain their minimum width.
+Each raster aspect-fits its label without cropping as the gallery resizes.
+The app-local plot host passes the
 operation's original named collection through the render-host port after canvas
 attachment. It does not rename figures, copy their
 collection or change FigureContainer membership. Clearing a pane retires its
