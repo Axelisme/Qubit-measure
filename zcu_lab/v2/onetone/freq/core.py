@@ -214,7 +214,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
             freq = (
                 builder.add_sweep("freq", cfg.freq)
                 if cfg.sampling_mode == "linear"
-                else builder.add_table_sweep("freq", freqs)
+                else builder.add_table_sweep("freq", freqs.tolist())
             )
             if cfg.reset is not None:
                 builder.emit(Reset("reset", cfg.reset))
