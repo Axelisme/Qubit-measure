@@ -35,6 +35,7 @@ from ._timeline_expression import (
 from ._timeline_guard import bounds
 from .macro.write_reg import WriteRegOp
 from .modules.util import get_fclk
+from .table_param import TableParam, TableRawParam
 
 
 def ceil_tick(ticks: float) -> int:
@@ -276,6 +277,13 @@ def parameter_expression(
     Shared loop names use the same compiler-owned variable identity.
     """
     factor = 1 if cycles else get_fclk(prog)
+    if isinstance(value, TableParam):
+        return lookup_expression(
+            prog,
+            f"table:{value.loop}",
+            tuple(round(v * factor) for v in value.values),
+            value.loop,
+        )
     if not isinstance(value, QickParam):
         return TimeVariable(round(value * factor))
     axes = prog._timeline_book.cycle_axes
@@ -351,6 +359,8 @@ def source_expression(prog, name: str) -> TimeExpression:
     register = prog.reg_dict.get(name)
     if register is not None and register.init is not None:
         raw = register.init
+        if isinstance(raw, TableRawParam):
+            return lookup_expression(prog, name, raw.values, raw.loop)
         return parameter_expression(prog, QickParam(raw.start, raw.spans), cycles=True)
     limits = prog._time_bounds.describe(prog, name)
     if limits.minimum == limits.maximum:

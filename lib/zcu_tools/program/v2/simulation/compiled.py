@@ -278,7 +278,7 @@ def _check_update(
     scratch: set[str],
 ) -> None:
     registers, waves = info["sweeps"]["registers"], info["sweeps"]["waves"]
-    allowed = set(registers) | scratch
+    allowed = set(registers) | set(info.get("register_tables", {})) | scratch
     allowed |= {f"WMEM[{address}]" for address in waves.keys() | info["tables"].keys()}
     if after.writes - allowed:
         raise ValueError(
@@ -290,6 +290,14 @@ def _check_update(
         )
         if np.any(after.value(Register(name)) != expected):
             raise ValueError(f"sweep update for {name} disagrees with shell")
+    for name, definition in info.get("register_tables", {}).items():
+        indexes = before.value(Register(info["counter_reg"]))
+        expected = before.value(Register(name)).copy()
+        for point in range(info["n"]):
+            active = indexes == point
+            expected[active] = before.dmem[definition["offset"] + point][active]
+        if np.any(after.value(Register(name)) != expected):
+            raise ValueError("register table update disagrees with shell")
     for address in waves.keys() | info["tables"].keys():
         expected = before.wmem[address].copy()
         for field, definition in waves.get(address, {}).items():
@@ -326,7 +334,7 @@ def _validate_native_sweeps(
             before = deepcopy(seed)
             indexes = (
                 np.arange(seed.size, dtype=np.int64) % info["n"]
-                if info["tables"]
+                if info["tables"] or info.get("register_tables")
                 else np.zeros(seed.size, dtype=np.int64)
             )
             before.write(Register(loop.counter), indexes, before.active)
@@ -433,6 +441,10 @@ def _apply_tables(
     machine: Machine,
     indexes: IntArray,
 ) -> None:
+    for name, definition in info.get("register_tables", {}).items():
+        machine.registers[name] = np.asarray(definition["values"], dtype=np.int64)[
+            indexes
+        ]
     for address, fields in info["tables"].items():
         for field, offset in fields.items():
             for point in range(1, info["n"]):

@@ -73,6 +73,7 @@ class MarkedOpenLoop(OpenLoop):
                 "range_hint": None,
                 "native": True,
                 "tables": self.tables,
+                "register_tables": prog.loop_register_tables.get(self.name, {}),
                 "sweeps": {
                     "registers": {
                         reg.full_addr(): {
@@ -115,11 +116,40 @@ class MarkedCloseLoop(CloseLoop):
     row restores the first word before the next outer iteration.
     """
 
+    def preprocess(self, prog) -> None:
+        super().preprocess(prog)
+        # Time registers are allocated by body preprocess, after OpenLoop.
+        for reg in list(prog.reg_dict.values()):
+            raw = reg.init
+            if not isinstance(raw, TableRawParam):
+                continue
+            tables = prog.loop_register_tables.setdefault(raw.loop, {})
+            address = reg.full_addr()
+            if address not in tables:
+                raw.to_steps(prog.loop_dict)
+                tables[address] = {
+                    "offset": prog.add_dmem(list(raw.values[1:] + raw.values[:1])),
+                    "values": raw.values,
+                }
+                prog.add_reg(name="scratch", allow_reuse=True)
+
     def translate(self, prog) -> None:
         name, _count = prog.loop_stack[-1]
         prog.record_meta(type="LOOP_BODY_END", name=name, info={"native": True})
         counter = prog.reg_dict[name].full_addr()
-        for address, fields in prog.loop_wave_tables[name].items():
+        for address, definition in prog.loop_register_tables.get(name, {}).items():
+            scratch = prog.reg_dict["scratch"].full_addr()
+            AsmInst(
+                inst={
+                    "CMD": "REG_WR",
+                    "DST": scratch,
+                    "SRC": "op",
+                    "OP": f"{counter} + #{definition['offset']}",
+                },
+                addr_inc=1,
+            ).translate(prog)
+            ReadDmem(dst=address, addr="scratch").translate(prog)
+        for address, fields in prog.loop_wave_tables.get(name, {}).items():
             wave_name = prog.waves[address].name
             for field, offset in fields.items():
                 scratch = prog.reg_dict["scratch"].full_addr()
