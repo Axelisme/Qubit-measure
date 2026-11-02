@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.program.v2 import SweepCfg, TimelineBuilder, ir
+from zcu_tools.program.v2.modules.base import Module
 from zcu_tools.program.v2.modules.pulse import Pulse, PulseCfg
 from zcu_tools.program.v2.modules.readout import PulseReadout, PulseReadoutCfg
 from zcu_tools.program.v2.modules.reset import PulseReset, PulseResetCfg, Reset
@@ -21,11 +22,40 @@ from tests.program.v2.simulation._compiled_support import request
 RAMP_LENGTH_US = 0.04
 
 
+class AutoFollower(Module):
+    """Play a scalar pulse after the preceding output on the same generator."""
+
+    name = "follower"
+
+    def __init__(self, ch):
+        self.pulse = PulseCfg(
+            ch=ch, nqz=1, freq=80, gain=0.2, waveform=ConstWaveformCfg(length=0.1)
+        ).build(self.name)
+        self.ch = ch
+
+    def declare(self, prog):
+        self.pulse.declare(prog)
+
+    def lower(self, prog, *, timeline, tag):
+        prog.pulse(self.ch, self.pulse.pulse_name(prog), t="auto", timeline=timeline)
+
+
 def length_program(
-    value, *, mode="scalar", flat=False, consumer="pulse", cfg_length=False
+    value,
+    *,
+    mode="scalar",
+    flat=False,
+    consumer="pulse",
+    cfg_length=False,
+    outer=False,
+    branch=False,
+    played=True,
+    auto=False,
 ):
     env = white_noise(load_soccfg(2, 1), std_adc=0, routes=((0, 0),), seed=None)
     builder = TimelineBuilder(env.soccfg, reps=2, initial_delay=0, relax_delay=0.1)
+    if outer:
+        builder.add_loop("outer", 2)
     if mode == "table":
         value = builder.add_table_sweep("point", value)
     elif mode == "linear":
@@ -66,12 +96,18 @@ def length_program(
         pulse = module.reset_pulse
     else:
         module = pulse = Pulse("drive", pulse_cfg, length=override)
-    builder.emit(module)
+    if branch:
+        with builder.branch(by="point", align_timeline=True) as cases, cases.case(2):
+            builder.emit(module)
+    elif played:
+        builder.emit(module)
+    if auto:
+        builder.emit(AutoFollower(0 if consumer == "readout" else 1))
     if consumer != "readout":
         builder.emit(receiver.build("readout"))
     builder.delay_by_timeline()
     prog = builder.build()
-    return prog, env, pulse.pulse_name(prog)
+    return prog, env, pulse.pulse_name(prog) if played or branch else ""
 
 
 def scheduled_shots(prog):
@@ -130,3 +166,42 @@ def test_length_matches_scalar_words_timing_and_linear_actual_points(
         assert request(table, table_env).materialize_point(index) == request(
             linear, linear_env
         ).materialize_point(index)
+
+
+@pytest.mark.parametrize("flat", [False, True])
+@pytest.mark.parametrize("branch", [False, True])
+def test_length_wrap_and_unplayed_branch_keep_auto_follower_at_actual_end(flat, branch):
+    values = [0.213, 0.107, 0.354]
+    prog, env, _ = length_program(
+        values, mode="table", flat=flat, outer=True, branch=branch, auto=True
+    )
+    observed = request(prog, env)
+    expected_shots = []
+    for index, value in enumerate(values):
+        scalar, scalar_env, _ = length_program(
+            value, flat=flat, played=not branch or index == 2, auto=True
+        )
+        expected = request(scalar, scalar_env).materialize_point(0)
+        for outer in range(2):
+            assert (
+                replace(
+                    observed.materialize_point(outer * len(values) + index),
+                    coordinates=(),
+                )
+                == expected
+            )
+        expected_shots.append(scheduled_shots(scalar)[0])
+    assert scheduled_shots(prog) == expected_shots * 4
+
+
+@pytest.mark.parametrize("flat", [False, True])
+@pytest.mark.parametrize("invalid_cycles", [2, 2**16])
+def test_noninitial_length_point_outside_qick_generator_range_fails_build(
+    flat, invalid_cycles
+):
+    soccfg = load_soccfg(2, 1)
+    length = soccfg.cycles2us(invalid_cycles, gen_ch=1)
+    if flat:
+        length += RAMP_LENGTH_US
+    with pytest.raises(RuntimeError, match="Pulse length"):
+        length_program([0.2, length, 0.3], mode="table", flat=flat)
