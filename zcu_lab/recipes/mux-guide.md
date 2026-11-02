@@ -193,9 +193,12 @@ owner's current completed artifacts, not a promise of one saved pane per Q.
 The report retains earlier Q outcomes.
 
 Native data preserves tone-major three-dimensional IQ and DC/MHz coordinates.
-Labber cannot export this independent grid. Inspect per-output statuses in
-`runs`; native success and Labber failure can coexist. Recipe completion is
-not proof that every output saved.
+Labber exports this independent grid as one two-dimensional log per tone,
+slicing along the first axis and storing all logs in the same file. The reader
+returns each two-dimensional slice without reconstructing the three-dimensional
+array. Inspect per-output statuses in `runs`; outputs can fail independently,
+so native success and Labber failure can coexist. Recipe completion is not
+proof that every output saved.
 
 Adapter details and GUI paths are in the
 [onetone global](../v2/mux/onetone_flux_global/guide.md),
