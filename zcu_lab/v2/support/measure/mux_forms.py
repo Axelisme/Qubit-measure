@@ -15,6 +15,7 @@ from zcu_tools.cfg_model import (
 )
 from zcu_tools.gui.form_adapter import FixedElements, FormContext
 from zcu_tools.gui.session.aliases import AliasTable
+from zcu_tools.gui.session.expression import evaluate_numeric_expr
 from zcu_tools.resources.entry import RoleResolutionError
 
 from zcu_lab.components.mux import MuxGroupSchema
@@ -254,17 +255,26 @@ def _blank_ringup_timing(
     return seeds
 
 
-def mux_relax_delay(ctx: FormContext, names: tuple[str, ...]) -> float | None:
-    """Return five times the largest captured T1, in us, for shared recovery.
+def mux_relax_delay(ctx: FormContext, names: tuple[str, ...]) -> Expr | float | None:
+    """Return the largest captured five-T1 seed, in us, for shared recovery.
 
     names is the complete validated capture-ordered qubit tuple. Each missing
     T1 uses the common 30 us initial scale; any stored invalid T1 leaves the
-    required delay blank. Uses the same T1 policy as single-qubit Forms,
-    without refreshing sources or writing calibration.
+    required delay blank. Compare seeds against this fixed capture and keep
+    the winning qubit's Expr, or a literal when a missing T1 wins. Uses the
+    same T1 policy as single-qubit Forms, without refreshing sources or
+    writing calibration. Source errors propagate; empty names raises ValueError.
     """
     delays = [
         t1_initial_time(ctx.parameters, multiplier=5.0, qubit=name) for name in names
     ]
     if any(delay is None for delay in delays):
         return None
-    return max(delay for delay in delays if delay is not None)
+    return max(
+        (delay for delay in delays if delay is not None),
+        key=lambda delay: (
+            evaluate_numeric_expr(delay.text, ctx.parameters)
+            if isinstance(delay, Expr)
+            else delay
+        ),
+    )
