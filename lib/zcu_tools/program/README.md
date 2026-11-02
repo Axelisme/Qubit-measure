@@ -119,8 +119,8 @@ its existing stepped-acquisition rejection. Explicit `threshold`, `angle` and
 axis contributes a one-hot vector, while `v2.IQ` contributes
 `(1, I, Q, I², IQ, Q²)` in that order. The processor sums their ordered outer
 products over reps. Two IQ axes give a `(points, 6, 6)` array, including each
-read's second moments and their cross moments. Classify uses a detached explicit classifier or the
-readout cfg's classifier. Both `Classify` and `IQ` with `tone=None` select a pulse
+read's second moments and their cross moments. Classify uses a detached explicit
+classifier or the readout cfg's classifier. Both `Classify` and `IQ` with `tone=None` select a pulse
 readout or their mux readout's only tone. Multi-tone mux requires a zero-based cfg
 tone position and lists available positions on error. Pulse axes require
 `tone=None`. Circle requires GE Post radius and emits
