@@ -22,7 +22,7 @@ Readout uses the `$resonator.module.readout` slot captured at Open/Reset; an uns
 
 ## Typical writeback
 
-Proposes qubit.ext.rabi_freq in MHz from the fit. With acquired run settings, copies the drive pulse into captured qubit.pulses.pi_amp and pi2_amp, replacing waveform.length with fitted pi and pi/2 lengths. Separately proposes qubit.module.x180/x90 pointing to those saved pulses, even when already bound to them, plus qubit.ext.pi_product = source gain * fitted pi length (a.u. * us). Every item is independently selectable. For data with IQ only, rabi_freq is the sole proposal. Pulse updates use the acquired run settings, with fitted lengths stored in the pulse copies.
+Proposes qubit.ext.rabi_freq in MHz from the fit. With acquired run settings, copies the drive pulse into captured qubit.pulses.pi_len and pi2_len, replacing waveform.length with fitted pi and pi/2 lengths. Separately proposes qubit.module.x180/x90 pointing to those saved pulses, even when already bound to them, plus qubit.ext.pi_product = source gain * fitted pi length (a.u. * us). Every item is independently selectable. For data with IQ only, rabi_freq is the sole proposal. Pulse updates use the acquired run settings, with fitted lengths stored in the pulse copies. The pi_amp/pi2_amp gain-calibration pulses remain unchanged.
 
 ## Recommended
 
