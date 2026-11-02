@@ -407,7 +407,7 @@ class TimelineAdvance(TimedMacro):
     def get_time_param(self, name: str) -> QickParam:
         if name != "t":
             raise RuntimeError("timeline advances expose only the t parameter")
-        if isinstance(self.resolved_time, RuntimeEnd):
+        if isinstance(self.resolved_time, (RuntimeEnd, TableParam)):
             return self.book.math.time_parameter(self.resolved_time)
         return (
             self.resolved_time
@@ -1091,7 +1091,10 @@ class PreparedTimelineMacro(TimedMacro):
     def get_time_param(self, name: str) -> QickParam:
         if not isinstance(self.source, TimedMacro):
             raise RuntimeError("this operation has no time parameters")
-        return self.source.get_time_param(name)
+        value = self.source.get_time_param(name)
+        return (
+            self.math.time_parameter(value) if isinstance(value, TableParam) else value
+        )
 
 
 class FixedRepeatLoop(MarkedOpenLoop):

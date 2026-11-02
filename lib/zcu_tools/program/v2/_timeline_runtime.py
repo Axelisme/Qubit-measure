@@ -1278,13 +1278,17 @@ class RuntimeMath(TimedMacro):
         limits = optional_time_bounds(self.prog, value)
         return 0.0 if limits is None else limits[1]
 
-    def time_parameter(self, value: RuntimeEnd) -> QickParam:
+    def time_parameter(self, value: RuntimeEnd | TableParam) -> QickParam:
         """Return an exactly known affine time, never runtime allocation metadata.
 
         A runtime-only or non-affine value cannot be returned as QickParam and
         raises RuntimeError. This read does not alter the scheduled end.
         """
-        expression = runtime_expression(value)
+        expression = (
+            parameter_expression(self.prog, value)
+            if isinstance(value, TableParam)
+            else runtime_expression(value)
+        )
         axes = expression_axes(expression)
         origin = known_time_point(expression, {})
         if origin is None:
