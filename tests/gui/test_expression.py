@@ -104,7 +104,6 @@ def test_evaluate_numeric_expr_uses_captured_parameter_paths():
         "1 < r_f",
         "[1, 2]",
         "1 << 2",
-        "r_f[0]",
         "'abc'",
         "True",
     ],

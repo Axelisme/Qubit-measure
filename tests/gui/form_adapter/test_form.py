@@ -12,6 +12,10 @@ from zcu_tools import cfg_model as nodes
 from zcu_tools.cfg_model import ConfigBase, Expr, FieldMeta
 from zcu_tools.gui import form_adapter
 from zcu_tools.gui.form import FormEnv, FormErrors, FormInput, FormModel, FormState
+from zcu_tools.gui.session.context_types import SavedPoint
+from zcu_tools.gui.session.parameters import ParameterContext
+from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
+from zcu_tools.resources.entry.schema import PointDocument, PointGeneral
 from zcu_tools.program.v2.sweep import SweepCfg
 
 
@@ -308,6 +312,87 @@ def test_successful_expression_defaults_keep_text_and_lower_to_native_values() -
     assert form.seed_sources[("amount",)].source == "6 * 2"
     assert form.seed_sources[("amount",)].status == "available"
     assert form.to_cfg(require_result(state, env), env) == DefaultedCfg(amount=12)
+
+
+@pytest.fixture
+def indexed_expression_env() -> FormEnv:
+    """Capture list values, mapping values and their index/key sources."""
+    return FormEnv(
+        parameters=ParameterContext(
+            point=PointDocument(
+                format="zcu.parameter-container",
+                format_version="2.0",
+                schema_version=1,
+                general=PointGeneral(
+                    created_at="2026-10-08T00:00:00Z",
+                    ext={
+                        "channels": [2, 5],
+                        "periods": {"bias": 4.0},
+                        "device": "bias",
+                        "index": 1,
+                    },
+                ),
+            ),
+            library=LibrarySnapshot(
+                ModuleLibraryDocument(format="zcu.module-library", format_version="2.0")
+            ),
+            target=SavedPoint(entry_name="entry", point="synthetic"),
+            roles=None,
+        )
+    )
+
+
+def test_indexed_expression_defaults_preserve_full_sources_and_numeric_results(
+    indexed_expression_env: FormEnv,
+) -> None:
+    env = indexed_expression_env
+    expressions = {
+        "amount": "max(1, min(9, general.ext.periods[general.ext.device] * 2))",
+        "count": "general.ext.channels[general.ext.index]",
+    }
+    form = form_adapter.Form(
+        DefaultedCfg, {name: Expr(text) for name, text in expressions.items()}
+    )
+    state = FormState(form.default_input(env))
+    assert state.input.data == {
+        name: {"expr": text} for name, text in expressions.items()
+    }
+    for name, text in expressions.items():
+        assert form.seed_sources[(name,)].source == text
+        assert form.seed_sources[(name,)].status == "available"
+    preview = state.preview(env)
+    assert preview.errors is None
+    assert preview.values == {("amount",): 8.0, ("count",): 5}
+    assert form.to_cfg(require_result(state, env), env) == DefaultedCfg(amount=8, count=5)
+
+
+@pytest.mark.parametrize(
+    "expression",
+    [
+        "general.ext.channels[2]",
+        "general.ext.periods['missing']",
+        "general.ext.channels[1.0]",
+        "general.ext.periods[0]",
+        "general.ext.device[0]",
+        "general.ext.device + 'suffix'",
+        "min(1)",
+    ],
+)
+def test_failed_indexed_defaults_record_missing_source_and_require_input(
+    indexed_expression_env: FormEnv, expression: str
+) -> None:
+    env = indexed_expression_env
+    form = form_adapter.Form(DefaultedCfg, {"amount": Expr(expression)})
+    state = FormState(form.default_input(env))
+    assert state.input.data == {"count": 3}
+    assert form.seed_sources[("amount",)].source == expression
+    assert form.seed_sources[("amount",)].status == "missing"
+    result = state.result(env)
+    assert isinstance(result, FormErrors), result
+    assert result.messages == {("amount",): "Field required"}
+    preview = state.preview(env)
+    assert preview.errors == result
+    assert preview.values == {("count",): 3}
 
 
 @pytest.mark.parametrize("endpoint", ["start", "stop"])
