@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure`
 
-**Last updated:** 2026-11-01, neutral run metadata and GUI run stop terminal
+**Last updated:** 2026-11-02, native tab overflow navigation
 
 **讀者：** framework-dev。量測 GUI 的組裝、分頁、tab admission 與 Run／Load／Save 分工。
 
@@ -8,6 +8,7 @@
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
 view 與 GUI-side remote handler。使用者套件的 adapter 擁有實驗領域知識；
 framework 接收 caller 注入的 `Adapter` 值。
+主視窗依控制身份呈現 error diagnostic。Remote holder 在線時顯示約八秒的摘要並記錄完整 error log，Details… 可開啟完整報告。Local 或 Remote 離線時，非模態報告保持到手動關閉。Info 仍顯示在狀態列。
 RunAnalyzeControl 對 MCP 結果讀取使用固定 60 秒 budget，不猜 opaque result 結構。
 Adapter 的 `make_form` 從固定 `FormContext` 產生 fresh input。
 分析與 Post 的結果／參數槽位預設 None，表示沒有數值或輸入。
@@ -186,6 +187,10 @@ Experiment tabs before any folded tools. The tab switch names the family
 it will reveal. Catalog recovery changes Reload experiments to Retry reload.
 Remote control disables reload and retry while leaving the inspection and tab
 navigation entries available.
+
+Overflowed experiment tabs use Qt's native scroll arrows. The top-right all-tabs
+menu still lists every tab. Close buttons remain hidden when Local editing is
+unavailable under Remote control.
 
 The toolbar opens Setup… and SoC… as separate non-modal windows. Setup manages
 result entries and working points; SoC connects the board and displays soccfg
