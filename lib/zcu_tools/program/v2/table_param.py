@@ -2,6 +2,7 @@
 
 from collections.abc import Sequence
 from fractions import Fraction
+from math import isfinite
 from typing import Never, override
 
 import numpy as np
@@ -21,6 +22,10 @@ class TableParam(QickParam):
     def __init__(self, loop: str, values: Sequence[float]) -> None:
         self.loop = loop
         self.values = tuple(values)
+        if not self.values:
+            raise ValueError(f"TableParam loop {loop!r} values must not be empty")
+        if not all(isfinite(v) for v in self.values):
+            raise ValueError(f"TableParam loop {loop!r} values must be finite")
         self._raw: TableRawParam | None = None
         self._raw_scale: float = 1.0
 
@@ -183,6 +188,21 @@ class TableRawParam(QickRawParam):
         self.loop = loop
         self.values = tuple(values)
         super().__init__(par=par, start=self.values[0], spans={}, quantize=quantize)
+
+    def to_steps(self, loops: dict[str, int]) -> None:
+        """Validate the owning loop and point count; produce no linear steps.
+
+        Unknown loops or a table length unlike the declared count raise
+        ValueError. Repeated calls leave steps empty without changing values.
+        """
+        if self.loop not in loops:
+            raise ValueError(f"table loop {self.loop!r} is not declared")
+        if loops[self.loop] != len(self.values):
+            raise ValueError(
+                f"table loop {self.loop!r} has {loops[self.loop]} iterations "
+                f"but the table has {len(self.values)} points"
+            )
+        self.steps = {}
 
     def __copy__(self) -> "TableRawParam":
         copied = TableRawParam(self.loop, self.values, self.par, self.quantize)

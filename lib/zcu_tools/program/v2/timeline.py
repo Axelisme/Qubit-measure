@@ -1,7 +1,7 @@
 # tolerated(file-size): Native declaration ownership and timing share one compile lifecycle.
 """Native QICK programs with timeline ends relative to reference time."""
 
-from collections.abc import Generator, Mapping
+from collections.abc import Generator, Mapping, Sequence
 from contextlib import contextmanager
 from typing import TypedDict, override
 
@@ -56,6 +56,7 @@ from .macro.table import TableSelection
 from .modules.base import Module
 from .resources import ProgramResourcesMixin
 from .sweep import SweepCfg
+from .table_param import TableParam, TableRawParam
 from .utils import sweep2param
 
 
@@ -141,6 +142,14 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         super().__init__(*args, **kwargs)
 
     def _make_asm(self) -> None:
+        loop_counts = {loop.name: loop.count for loop in self.sweep_loops}
+        for wave in self.waves:
+            for raw in wave.sweeps():
+                if isinstance(raw, TableRawParam):
+                    raw.to_steps(loop_counts)
+        for reg in self.reg_dict.values():
+            if isinstance(reg.init, TableRawParam):
+                reg.init.to_steps(loop_counts)
         self._timeline_register_pool = []
         self._timeline_book.output_time = None
         self._time_bounds = ProducerBounds()
@@ -299,6 +308,19 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         register addresses. Recompilation rebuilds it from native declarations.
         """
         return tuple(TimingLoop(name, count) for name, count, _, _ in self.loops)
+
+    def add_table_sweep(self, name: str, values: Sequence[float]) -> TableParam:
+        """Declare a top-level lookup loop and return its physical values.
+
+        Call in _initialize. values must be a nonempty finite sequence in the
+        consuming parameter's units. Loops are outer-to-inner in call order
+        after reps. Invalid values or duplicate names raise ValueError.
+        """
+        param = TableParam(name, values)
+        if any(loop.name == name for loop in self.sweep_loops):
+            raise ValueError(f"loop name already used: {name!r}")
+        self.add_loop(name, len(param.values))
+        return param
 
     def add_sweep(self, name: str, spec: SweepCfg) -> QickParam:
         """Declare a new uniform top-level loop and return its QICK parameter.
