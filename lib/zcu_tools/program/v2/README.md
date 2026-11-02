@@ -1,6 +1,6 @@
 # program/v2
 
-**Last updated:** 2026-11-02，onetone 非均勻頻率改用原生查表掃描
+**Last updated:** 2026-11-02，查表掃描、時間 getter 與 WMEM 分析
 
 **讀者：** lab-author、framework-dev、agent。查找 V2 program 公開 API、型別契約與編譯規則的 owner。
 
@@ -25,7 +25,7 @@
 | `with repeat(name, n, *, timeline=None, range_hint=None)` | 逐圈累積結尾，入口與回邊不自動同步。`n` 為非負整數或既有 count register 名稱。固定次數不接受 hint。 |
 | `with branch(by=..., align_timeline=..., timeline=None) as cases` | 依 sweep 的 zero-based index 選 `with cases.case(index)`。未宣告點執行空 case，重複、非整數或超界 index 報錯。必填 bool `align_timeline` 選全部 case 的 max 或實際 case 結尾，兩者都不推進 reference。 |
 | `pulse.pulse_name(prog)` | 取得該 program 的 pulse 宣告名稱。Pulse 按定義去重，同名不同 cfg 使用不同 waveform 名稱。 |
-| `timing_layout`／`ir.analyze_timing` | 從 linked boundary metadata 觀察逐點事件、body_end 與含外殼的 shot_end。DMEM dispatch 另傳公開 `compile_datamem()` 給 `CompiledTimingInput.dmem`，caller 不重建 table。Resync 讀硬體 s11，analysis 明確拒絕。 |
+| `timing_layout`／`ir.analyze_timing` | 從 linked boundary metadata 觀察逐點事件、body_end 與含外殼的 shot_end。DMEM lookup 傳公開 `compile_datamem()` 給 `CompiledTimingInput.dmem`。另傳 `ir.compiled_wmem(prog)` 給 `wmem` 可觀察每次 wave 輸出的六個硬體字。未傳時 `wave_words` 為 None。Resync 讀硬體 s11，analysis 明確拒絕。 |
 
 每條 timeline 保存相對 reference 的結尾，`default` 不是 reference。
 帶 timeline 的 pulse／trigger 在結尾加 t 發射。Readout 的作者結尾只含 generator waveform 與 pre/post delay，ADC 視窗留在 ADC channel，shot 收尾仍等待全部 ADC。
@@ -57,15 +57,56 @@ ADC 回邊仍須證明下一圈不早於前一視窗結尾，重疊或無法證�
 固定次數或 hint maximum 小於 2 時，兩項回邊檢查都跳過。
 `fixed_loop_indices` 提供固定 counter 名稱、點數與 writer metadata，counter 不加入 QICK top-level sweep metadata。
 
+## 查表掃描
+
+`TimelineBuilder.add_table_sweep(name, values)` 與 `TimelineProgramV2.add_table_sweep(name, values)`
+建立頂層 loop，回傳 `TableParam`。Program 子類別在 `_initialize` 呼叫。
+它等同 `add_loop(name, len(values))` 加 `TableParam(name, values)`，對應線性掃描的
+`add_sweep(name, spec)`。兩種掃描依宣告順序由外到內排列，重名會 raise ValueError。
+`values` 必須是非空、有限的物理值序列，單位由消費參數決定。空表或非有限值 raise ValueError。
+
+```python
+from zcu_tools.program.v2 import PulseReadout, TableParam
+
+freq = builder.add_table_sweep("freq", freqs_mhz)
+gain = TableParam("freq", gains)  # One gain per frequency point.
+builder.emit(PulseReadout("readout", readout_cfg, freq=freq, gain=gain))
+```
+
+範例的 `builder` 是尚未 build 的 `TimelineBuilder`，`readout_cfg` 是 `PulseReadout.Cfg`。
+`freqs_mhz` 與 `gains` 是相同長度的序列。同一 loop 可有多張獨立的表，不需再宣告 loop。
+表長與 loop 次數不符會在 build 時 raise ValueError。
+`TableParam` 可與 `int`、`float` 或未掃描的 `QickParam` 做 `+ - * /`，包含反向運算。
+結果仍是同一 loop 的新表。與另一個掃描參數運算會 raise TypeError，即使兩表屬於同一 loop。
+`TableParam` 繼承 `QickParam`，但沒有仿射的 `start`、`spans`、`raw_param` 或 `derived_param`，讀取這些屬性會 raise TypeError。
+
+QICK 將每個物理值轉成 `TableRawParam` 的硬體字，每點嚴格等於以該值編出的純量 program。
+所屬 loop 每圈結尾從 rotated DMEM 表更新 wave 欄位或時間 register。
+每發都前進，與該發是否播放該 pulse 無關。最後一點後回到第一點，供下一次外層 loop 或 reps 使用。
+同一 waveform 的不同欄位可分別使用線性掃描與查表掃描。
+
+將線性掃描的實際浮點值交給 `add_table_sweep`，不保證重現線性掃描的每個硬體字。
+Gain 等截斷取整欄位可能差 1 個最小單位，因為浮點回編不保證冪等。
+查表每點仍嚴格等於該浮點值的純量 program。
+比較 linear/table parity 前，先以同一 profile 確認每個實際點的純量字等於線性掃描字。
+實際點可從 `get_pulse_param(..., as_array=True)` 或參數的 `get_rounded` 取得。
+
+Pulse、PulseReadout 與 Reset 的參數沿用各自的單位與 waveform 限制。
+Const 與 flat-top 的 `length` 可查表，flat-top 只更新 flat 段長度。
+Arb、gauss、drag 與 cosine 的 length sweep 仍會 raise。
+`ro_length` 不支援 `TableParam`，建構 `PulseReadout` 時 raise NotImplementedError，不會進入 build。
+`MuxReadout` 不支援查表掃描。
+時間參數與 getter 的取整及失敗條件見 [Timeline 取整](#timeline-取整)。
+
 ## 型別與 cfg 契約
 
-`QickParam` runtime 物件提供 `is_sweep`、`minval`、`maxval`、`start`、`spans`、`to_array`，但第三方 stubs 可能未宣告。
+線性的 `QickParam` runtime 物件提供 `is_sweep`、`minval`、`maxval`、`start`、`spans`、`to_array`，但第三方 stubs 可能未宣告。
 Program code 透過 `utils.is_qick_param()`／`QickParamLike` 做 runtime guard 與型別收窄，不各自使用 `cast()`。
 
 `AbsModuleCfg` 與 `AbsWaveformCfg` 是抽象契約。具體 cfg 實作 `build()` 與 `set_param()`，未知參數名稱 raise ValueError。
 Pulse、PulseReadout 與 reset 的 keyword-only scalar／sweep 覆寫使用 detached effective cfg，`None` 沿用原值。
 Registry identity 與 lowering 使用有效 cfg，`set_param()` 則修改接收呼叫的 cfg。
-接受 `ro_length` sweep 不代表 QICK ADC-window 支援 sweep，setter 與 constructor 都保留既有編譯錯誤。
+線性的 `ro_length` sweep 保留 QICK ADC-window 的既有編譯限制。`TableParam` 的拒絕時機見[查表掃描](#查表掃描)。
 參數表見 [modules](modules/README.md#constructor-overrides)，跨家族 audit 見 [set_param contract](../../../../tests/cfg_model/test_set_param_contract.py)。
 
 `GainSweep` 標註的 `SweepCfg` 要求 start、stop 與實際最後一點在 [-1, 1]，單位為 DAC full-scale fraction，a.u.。
@@ -102,11 +143,16 @@ Branch readout 的 `set_reads_per_shot` 順序、逐路徑設定比對、Repeat 
 
 ## Timeline 取整
 
-每個操作將結果 ceil 到 tProc cycle 一次，事件起點也用 ceil，不用 nearest。
+具名 timeline 的操作將結果 ceil 到 tProc cycle 一次，事件起點也用 ceil。
+原生 QICK 時間轉換保留 nearest，不改成 timeline 的 ceil。
 `math.isclose(ticks, nearest, rel_tol=1e-12, abs_tol=1e-10)` 將接近整數的值視為該整數，吸收換算雜訊。
 例如 119/430.08 us 保持 119 cycles。在 2³¹ cycles 附近，相對容差也可能吸收約 0.002 cycle 的真實尾段，超出兩項容差的正尾段才向上取整。
 靜態 waveform 與 ADC 長度先作有理數時鐘換算，再將 post 加入 aggregate 後 ceil。
-作者 sweep 保留 QICK 原生 start rounding 與 step 截斷，不配置逐點時間表。
+線性 sweep 保留 QICK 原生 start rounding 與 step 截斷，不配置逐點時間表。
+`TableParam` 的 timeline duration 逐點 ceil，原生 delay 時間逐點沿用 QICK 轉換。
+`delay`、`delay_auto`／`DelayAuto(t=...)`、`timeline_inc`、pulse `t`、`pre_delay`、`post_delay`
+與 `trig_offset` 可用查表時間。編譯器以 `TableRawParam` 初始化時間 register，再於所屬 loop 結尾載入下一點。
+查表 length 保留 generator cycle 格點。Native auto follower 使用 QICK nearest 轉出的 channel 結尾，timeline finish 仍用 ceil。
 
 Runtime 跨格點 generator 長度使用 k=8 上界定點換算。
 Compiler 選 canonical signed-digit 項數最少的 W，平手取較小 W。
@@ -119,7 +165,9 @@ Compiler 選 canonical signed-digit 項數最少的 W，平手取較小 W。
 這不新增任意作者 length register 或 ADC length API。Ratio 7/5 的 W=359，ratio 56/5 的 W=2872，但目前 API 未開放 ADC／PFB runtime length consumer。
 編譯期已知 bias 使用字面值，零 span 不配置 sweep register。Runtime 結尾保留既有 register 加字面值偏移，只有需要獨立 register operand 的 consumer 才物化。
 同步可拆成既有非負 register 與非負字面值的 reference advance，不改事件時間或使用 s14。
-Scalar／仿射時間 getter 回傳實際量化值；runtime-only 或非仿射時間 raise RuntimeError。
+時間 getter 依量化後逐點值的可表示性回傳結果，不依來源型別。
+常數表與仿射表回傳等值 `QickParam`，不原樣回傳 `TableParam`。
+Runtime-only 或非仿射時間 raise RuntimeError，不能表示成線性值。
 作者資料表與 IR dispatch jump-address table 仍受支援。
 
 ## IR 與硬體對齊
