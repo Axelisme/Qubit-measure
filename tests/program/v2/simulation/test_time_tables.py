@@ -2,9 +2,11 @@
 
 from dataclasses import replace
 
+import numpy as np
 import pytest
+from qick.asm_v2 import QickParam, QickSweep1D
 from zcu_tools.experiment.simulation import white_noise
-from zcu_tools.program.v2 import TimelineBuilder, ir
+from zcu_tools.program.v2 import SweepCfg, TableParam, TimelineBuilder, ir
 from zcu_tools.program.v2.modules.base import Module
 from zcu_tools.program.v2.modules.delay import DelayAuto
 from zcu_tools.program.v2.modules.pulse import PulseCfg
@@ -28,18 +30,36 @@ class PulseAtTime(Module):
         self.pulse.declare(prog)
 
     def lower(self, prog, *, timeline, tag):
-        prog.pulse(1, self.pulse.pulse_name(prog), t=self.value, timeline=self.timeline)
+        prog.pulse(
+            1,
+            self.pulse.pulse_name(prog),
+            t=self.value,
+            timeline=self.timeline,
+            tag="time",
+        )
 
 
-def time_program(value, *, table=False, consumer="delay"):
+def time_program(value, *, table=False, linear=False, outer=False, consumer="delay"):
     env = white_noise(load_soccfg(2, 1), std_adc=0, routes=((0, 0),), seed=None)
     builder = TimelineBuilder(env.soccfg, reps=2, initial_delay=0, relax_delay=0.1)
+    if outer:
+        builder.add_loop("outer", 2)
     if table:
         value = builder.add_table_sweep("point", value)
+    elif linear:
+        value = builder.add_sweep(
+            "point",
+            SweepCfg(
+                start=value[0],
+                stop=value[-1],
+                expts=len(value),
+                step=(value[-1] - value[0]) / (len(value) - 1),
+            ),
+        )
     if consumer == "timeline_inc":
-        builder.timeline_inc(value)
+        builder.timeline_inc(value, tag="time")
     elif consumer == "delay":
-        builder.delay(value)
+        builder.delay(value, tag="time")
     receiver = PulseReadoutCfg(
         gen_ch=0,
         ro_ch=0,
@@ -56,10 +76,10 @@ def time_program(value, *, table=False, consumer="delay"):
         builder.emit(PulseAtTime(value, "default" if consumer == "pulse_t" else None))
     builder.emit(receiver)
     if consumer == "delay_auto":
-        builder.delay_auto(value)
+        builder.delay_auto(value, tag="time")
         builder.emit(receiver)
     elif consumer == "DelayAuto":
-        builder.emit(DelayAuto("wait", t=value))
+        builder.emit(DelayAuto("wait", t=value), tag="time")
         builder.emit(receiver)
     builder.delay_by_timeline()
     return builder.build(), env
@@ -107,3 +127,28 @@ def test_time_table_matches_scalar_at_every_point_and_rep(consumer):
         ).materialize_point(0)
         expected_shots.append(scheduled_shots(scalar)[0])
     assert scheduled_shots(prog) == expected_shots * 2
+
+
+@pytest.mark.parametrize("consumer", ["delay", "timeline_inc", "native_t", "pulse_t"])
+@pytest.mark.parametrize("constant", [False, True])
+def test_table_time_getter_returns_exact_affine_qick_parameter(consumer, constant):
+    linear, _ = time_program([0.0, 0.03125, 0.0625], linear=True, consumer=consumer)
+    expected = np.asarray(linear.get_time_param("time", "t", as_array=True)).flatten()
+    if constant:
+        expected = np.repeat(expected[0], len(expected))
+    # Use a bare delay oracle: pulse timeline placement already reports the same
+    # physical parameter, while timeline_inc reports its rounded endpoint.
+    table, _ = time_program(expected.tolist(), table=True, consumer=consumer)
+    actual = table.tagged_instructions["time"].get_time_param("t")
+    assert isinstance(actual, QickParam) and not isinstance(actual, TableParam)
+    assert np.array_equal(
+        np.asarray(actual.to_array({"point": len(expected)}, all_loops=True)).flatten(),
+        expected if not constant else expected[:1],
+    )
+
+
+@pytest.mark.parametrize("consumer", ["delay", "timeline_inc", "native_t", "pulse_t"])
+def test_nonaffine_table_time_getter_raises(consumer):
+    prog, _ = time_program([0.0213, 0.0107, 0.0354], table=True, consumer=consumer)
+    with pytest.raises(RuntimeError, match="non-affine"):
+        prog.get_time_param("time", "t")
