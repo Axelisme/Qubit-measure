@@ -45,7 +45,6 @@ class _TimedOperation(v2.Module):
         prog.declare_readout(0, length=0.2)
         prog.add_readoutconfig(0, "ro", freq=100)
         prog.add_reg("index")
-        prog.add_reg("runtime_word")
         prog.declare(self.loader)
 
     def lower(self, prog, *, timeline, tag):
@@ -54,16 +53,9 @@ class _TimedOperation(v2.Module):
     def play(self, prog: v2.TimelineProgramV2) -> None:
         """Leave timeline selection to the timed API, not module.emit."""
         prog.write_reg("index", 0)
-        prog.write_reg("runtime_word", 1000)
         t = 10 / TPROC_MHZ
         if self.operation == "send_readoutconfig":
             prog.send_readoutconfig(0, "ro", t=t, **self.placement)
-        elif self.operation == "send_readoutconfig_from_regs":
-            prog.send_readoutconfig_from_regs(
-                0, "ro", freq_reg="runtime_word", t=t, **self.placement
-            )
-        elif self.operation == "pulse_from_regs":
-            prog.pulse_from_regs(0, "p", gain_reg="runtime_word", t=t, **self.placement)
         else:
             relation = self.loader.lower_selected(prog)
             selection = SelectedPlayback(
@@ -124,8 +116,6 @@ def _compile_operation(frontend: str, operation: str, context: str):
     "operation",
     [
         "send_readoutconfig",
-        "send_readoutconfig_from_regs",
-        "pulse_from_regs",
         "pulse_by_reg",
     ],
 )

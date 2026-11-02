@@ -11,7 +11,6 @@ from .modules import (
     Delay,
     DelayAuto,
     LoadValue,
-    LoadWord,
     Module,
     ModuleCfg,
     ModuleCfgFactory,

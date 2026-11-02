@@ -10,7 +10,7 @@ from zcu_tools.program.v2.ir.operands import (
     Register,
     SrcKeyword,
 )
-from zcu_tools.program.v2.modules.dmem import LoadValue, LoadWord
+from zcu_tools.program.v2.modules.dmem import LoadValue
 
 from tests.program._profiles import load_soccfg
 from tests.program._timeline import compile_modules
@@ -171,14 +171,3 @@ def test_large_value_max_16bits_gets_compressed():
     values = [65535] * 64
     lv = LoadValue("x", values, idx_reg="i", val_reg="v")
     assert lv.is_compressed is True
-
-
-# ---------------------------------------------------------------------------
-# LoadWord
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize("value", [-1, 2**32])
-def test_load_word_rejects_values_outside_uint32_range(value):
-    with pytest.raises(ValueError, match="raw uint32"):
-        LoadWord("w", [value], idx_reg="i", val_reg="v")

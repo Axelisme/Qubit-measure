@@ -12,7 +12,6 @@ from .loop import CloseInnerLoop, OpenInnerLoop
 from .meta import MetaMacro
 from .pluse_reg import PulseByReg
 from .structure import MarkedCloseLoop, MarkedOpenLoop, SourcePulse
-from .wmem import ConfigReadoutFromRegs, PulseFromRegs
 from .write_reg import WriteRegOp
 
 
@@ -191,27 +190,6 @@ class AdditionalMacroMixin(QickProgramV2):
                 self.append_macro(operation)
             self.append_macro(source)
 
-    def pulse_from_regs(
-        self,
-        ch: int,
-        name: str,
-        *,
-        t: float | QickParam = 0.0,
-        tag: str | None = None,
-        freq_reg: str | None = None,
-        gain_reg: str | None = None,
-    ) -> None:
-        self.append_macro(
-            PulseFromRegs(
-                ch=ch,
-                name=name,
-                t=t,
-                tag=tag,
-                freq_reg=freq_reg,
-                gain_reg=gain_reg,
-            )
-        )
-
     def send_readoutconfig(
         self,
         ch: int,
@@ -226,25 +204,6 @@ class AdditionalMacroMixin(QickProgramV2):
         semantics while exposing its documented QickParam input type.
         """
         self.append_macro(ConfigReadout(ch=ch, name=name, t=t, tag=tag))
-
-    def send_readoutconfig_from_regs(
-        self,
-        ch: int,
-        name: str,
-        *,
-        t: float | QickParam = 0.0,
-        tag: str | None = None,
-        freq_reg: str | None = None,
-    ) -> None:
-        self.append_macro(
-            ConfigReadoutFromRegs(
-                ch=ch,
-                name=name,
-                t=t,
-                tag=tag,
-                freq_reg=freq_reg,
-            )
-        )
 
     def debug_macro(self, name: str, t: float | QickParam, prefix: str = "") -> None:
         """Insert a debug macro that prints the current time (cycle count) with a name."""

@@ -5,11 +5,10 @@ from fractions import Fraction
 import pytest
 from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.program.v2 import TimelineBuilder
-from zcu_tools.program.v2.modules import Delay, LoadValue, LoadWord
+from zcu_tools.program.v2.modules import Delay, LoadValue
 from zcu_tools.program.v2.modules.computed_pulse import ComputedPulse
 from zcu_tools.program.v2.modules.pulse import Pulse, PulseCfg
 from zcu_tools.program.v2.modules.readout import (
-    PulseReadout,
     PulseReadoutCfg,
 )
 from zcu_tools.program.v2.modules.reset import (
@@ -18,9 +17,8 @@ from zcu_tools.program.v2.modules.reset import (
     TwoPulseResetCfg,
 )
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
-from zcu_tools.program.v2.utils import readout_freq_words
 
-from tests.program._profiles import GEN_MAXV, GEN_MHZ, TPROC_MHZ, load_soccfg
+from tests.program._profiles import GEN_MHZ, TPROC_MHZ, load_soccfg
 from tests.program._timing_expectations import (
     generator_duration,
     tproc_ceil,
@@ -126,32 +124,6 @@ def test_loadvalue_selects_compiled_waveform_from_declared_table(compressed):
         assert time_us(result.time_base, event.duration_ticks) == pytest.approx(
             float(generator_duration(prog.soccfg, 0.3 if index % 2 == 0 else 0.1, 1))
         )
-
-
-def test_loadword_preserves_uint32_patterns_for_pulse_and_adc_consumers():
-    gen, adc = readout_freq_words(
-        load_soccfg(), [100, 200], gen_ch=0, ro_ch=0, mixer_freq=None, nqz=1
-    )
-    modules = [
-        LoadWord("frequency", gen, "scan", "freq_word"),
-        LoadWord("adc", adc, "scan", "adc_word"),
-        LoadWord("gain", [3276, (-6552) % 2**32], "scan", "gain_word"),
-        PulseReadout(
-            "readout",
-            receiver(),
-            freq_val="freq_word",
-            ro_freq_val="adc_word",
-            gain_val="gain_word",
-        ),
-    ]
-    prog, env = module_program(modules, sweep=(("scan", 2),))
-    result = request(prog, env)
-    for index, (frequency, gain) in enumerate([(100, 3276), (200, -6552)]):
-        point = result.materialize_point(index)
-        assert point.events[0].source == "readout"
-        assert point.events[0].frequency_mhz == pytest.approx(frequency, abs=1e-4)
-        assert point.events[0].gain == pytest.approx(gain / GEN_MAXV)
-        assert point.readouts[0].frequency_mhz == pytest.approx((frequency,), abs=1e-4)
 
 
 def test_join_preserves_readout_owner_and_author_pulse_child():

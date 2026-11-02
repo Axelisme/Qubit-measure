@@ -4,14 +4,14 @@ from collections.abc import Callable, Sequence
 
 import pytest
 from zcu_tools.program.v2 import ir
-from zcu_tools.program.v2.modules import LoadValue, LoadWord
+from zcu_tools.program.v2.modules import LoadValue
 from zcu_tools.program.v2.timeline import TimelineProgramV2
 
 from tests.program._profiles import TPROC_MHZ, load_soccfg
 
 
 def compile_lookup(
-    loader: LoadValue | LoadWord,
+    loader: LoadValue,
     *,
     prefix: Sequence[int] = (),
     indices: Sequence[int] | None = None,
@@ -66,19 +66,18 @@ def analyze(prog: TimelineProgramV2) -> ir.TimingAnalysis:
     )
 
 
-@pytest.mark.parametrize("loader_type", [LoadValue, LoadWord])
 @pytest.mark.parametrize("values", [[13, 29], [0, 1, 2, 3] * 16])
-def test_shared_lookup_keeps_each_programs_dmem_allocation(loader_type, values):
-    shared = loader_type("shared", values, "index", "value")
+def test_shared_lookup_keeps_each_programs_dmem_allocation(values):
+    shared = LoadValue("shared", values, "index", "value")
     other_programs = []
 
     def build_other():
         other_programs.append(compile_lookup(shared, prefix=(91, 83, 79)))
 
     first = compile_lookup(shared, before_body=build_other)
-    fresh = compile_lookup(loader_type("shared", values, "index", "value"))
+    fresh = compile_lookup(LoadValue("shared", values, "index", "value"))
     other_fresh = compile_lookup(
-        loader_type("shared", values, "index", "value"), prefix=(91, 83, 79)
+        LoadValue("shared", values, "index", "value"), prefix=(91, 83, 79)
     )
     assert first.prog_list == fresh.prog_list
     assert analyze(first) == analyze(fresh)
@@ -99,23 +98,6 @@ def test_scalar_lookup_reaches_consumer_without_advancing_timeline(prefix):
         (8, 2147483647),
     ]
     # Initial reference 5 + unchanged named end 13; shell adds 7.
-    assert (result.shots[0].body_end_cycle, result.shots[0].end_cycle) == (18, 25)
-
-
-@pytest.mark.parametrize("prefix", [(), (91, -7, 83)])
-def test_raw_words_keep_all_bits_at_the_register_consumer(prefix):
-    loader = LoadWord(
-        "words", [0, 0x7FFFFFFF, 0x80000000, 0xFFFFFFFF], "index", "value"
-    )
-    prog = compile_lookup(loader, prefix=prefix)
-    result = analyze(prog)
-    assert compiled_words(prog) == [*prefix, 0, 2147483647, -2147483648, -1]
-    assert [(event.cycle, event.value) for event in result.shots[0].events] == [
-        (8, 0),
-        (8, 2147483647),
-        (8, -2147483648),
-        (8, -1),
-    ]
     assert (result.shots[0].body_end_cycle, result.shots[0].end_cycle) == (18, 25)
 
 
@@ -163,26 +145,21 @@ def test_small_scalar_table_can_disable_compression():
     assert [event.value for event in analyze(prog).shots[0].events] == values
 
 
-@pytest.mark.parametrize("loader_type", [LoadValue, LoadWord])
-def test_existing_destination_is_reused_by_nonempty_lookup(loader_type):
-    loader = loader_type("reuse", [13, 29], "index", "value", use_existed=True)
+def test_existing_destination_is_reused_by_nonempty_lookup():
+    loader = LoadValue("reuse", [13, 29], "index", "value", use_existed=True)
     prog = compile_lookup(loader, existing_destination=True)
     assert [event.value for event in analyze(prog).shots[0].events] == [13, 29]
 
 
-@pytest.mark.parametrize("loader_type", [LoadValue, LoadWord])
-def test_missing_existing_destination_is_rejected(loader_type):
-    loader = loader_type("missing", [13], "index", "value", use_existed=True)
+def test_missing_existing_destination_is_rejected():
+    loader = LoadValue("missing", [13], "index", "value", use_existed=True)
     with pytest.raises(KeyError, match="value"):
         compile_lookup(loader)
 
 
-@pytest.mark.parametrize("loader_type", [LoadValue, LoadWord])
 @pytest.mark.parametrize("use_existed", [False, True])
-def test_empty_lookup_preserves_destination_and_allocates_no_dmem(
-    loader_type, use_existed
-):
-    loader = loader_type("empty", [], "unused_index", "value", use_existed=use_existed)
+def test_empty_lookup_preserves_destination_and_allocates_no_dmem(use_existed):
+    loader = LoadValue("empty", [], "unused_index", "value", use_existed=use_existed)
 
     class Program(TimelineProgramV2):
         def _initialize(self, cfg):
@@ -190,10 +167,6 @@ def test_empty_lookup_preserves_destination_and_allocates_no_dmem(
             if use_existed:
                 self.add_reg("value")
             self.declare(loader)
-            # Unlike scalar empty tables, raw-word empty tables do not allocate
-            # a destination. A later owner can still claim this register name.
-            if loader_type is LoadWord and not use_existed:
-                self.add_reg("value")
 
         def _body(self, cfg):
             self.write_reg("value", 29)
@@ -217,11 +190,10 @@ def test_empty_lookup_preserves_destination_and_allocates_no_dmem(
     assert (result.shots[0].body_end_cycle, result.shots[0].end_cycle) == (13, 13)
 
 
-@pytest.mark.parametrize("loader_type", [LoadValue, LoadWord])
 @pytest.mark.parametrize("index", [-1, 2])
-def test_out_of_buffer_lookup_is_rejected_by_compiled_consumer(loader_type, index):
+def test_out_of_buffer_lookup_is_rejected_by_compiled_consumer(index):
     prog = compile_lookup(
-        loader_type("table", [13, 29], "index", "value"), indices=[index]
+        LoadValue("table", [13, 29], "index", "value"), indices=[index]
     )
     with pytest.raises(ValueError, match="Dmem word address out of range"):
         analyze(prog)
@@ -235,10 +207,9 @@ def test_compressed_out_of_buffer_address_is_rejected(index):
         analyze(prog)
 
 
-@pytest.mark.parametrize("loader_type", [LoadValue, LoadWord])
-def test_unknown_index_register_fails_compilation(loader_type):
+def test_unknown_index_register_fails_compilation():
     with pytest.raises(KeyError, match="missing_index"):
-        compile_lookup(loader_type("table", [13], "missing_index", "value"))
+        compile_lookup(LoadValue("table", [13], "missing_index", "value"))
 
 
 @pytest.mark.parametrize("values", [[13], [0, 1] * 32 + [1]])
@@ -258,9 +229,8 @@ def test_lookup_reports_register_exhaustion(values):
         Program(load_soccfg(), initial_delay=0, relax_delay=0)
 
 
-@pytest.mark.parametrize("loader_type", [LoadValue, LoadWord])
-def test_recompile_rebuilds_table_without_accumulating_offsets(loader_type):
-    loader = loader_type("table", [13, 29], "index", "value")
+def test_recompile_rebuilds_table_without_accumulating_offsets():
+    loader = LoadValue("table", [13, 29], "index", "value")
     prog = compile_lookup(loader, prefix=[91, -7, 83])
     prog.compile()
     assert compiled_words(prog) == [91, -7, 83, 13, 29]
@@ -269,9 +239,8 @@ def test_recompile_rebuilds_table_without_accumulating_offsets(loader_type):
     assert (result.shots[0].body_end_cycle, result.shots[0].end_cycle) == (18, 25)
 
 
-@pytest.mark.parametrize("loader_type", [LoadValue, LoadWord])
-def test_destination_name_collision_is_rejected(loader_type):
+def test_destination_name_collision_is_rejected():
     with pytest.raises(NameError, match="value.*already exists"):
         compile_lookup(
-            loader_type("table", [13], "index", "value"), existing_destination=True
+            LoadValue("table", [13], "index", "value"), existing_destination=True
         )

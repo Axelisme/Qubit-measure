@@ -471,7 +471,7 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         """Select an existing name for omitted timeline arguments in this scope.
 
         Applies to emit, pulse, trigger, send_readoutconfig,
-        send_readoutconfig_from_regs, pulse_from_regs, pulse_by_reg,
+        pulse_by_reg,
         timeline_inc, delay_by_timeline and the repeat
         parent.
         The branch parent uses this default; cases shadow it. Nested
@@ -990,44 +990,6 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         self.append_macro(
             TimelineSelectedPulse(self._timeline_book, timeline, source, selection)
         )
-
-    def pulse_from_regs(
-        self, ch: int, name: str, *, timeline: str | None = None, **kwargs
-    ) -> None:
-        """Play runtime words at native t or timeline end+t, advancing a named end.
-
-        None uses the scoped name, or native reference timing outside a scope.
-        kwargs are t (us), tag, freq_reg and gain_reg containing final hardware
-        words. Native patching and template/register validation are unchanged.
-        """
-        timeline = timeline if timeline is not None else self._timeline_default
-        super().pulse_from_regs(ch, name, **kwargs)
-        if timeline is not None:
-            source = self._pop_native(Pulse)
-            self.append_macro(
-                TimelinePlacedPulse(self._timeline_book, timeline, source)
-            )
-
-    def send_readoutconfig_from_regs(
-        self, ch: int, name: str, *, timeline: str | None = None, **kwargs
-    ) -> None:
-        """Send runtime ADC words at native t or timeline end+t (us).
-
-        None uses the scoped name, or native reference timing outside a scope.
-        kwargs are t, tag and freq_reg. A timeline end becomes the scheduled config
-        instant, independent of config length. External timelines after branch
-        or Repeat schedule from their actual runtime end, without requiring
-        delay_by_timeline, join or fork first.
-        Native patching and declaration/register validation
-        are unchanged.
-        """
-        timeline = timeline if timeline is not None else self._timeline_default
-        super().send_readoutconfig_from_regs(ch, name, **kwargs)
-        if timeline is not None:
-            source = self._pop_native(ConfigReadout)
-            self.append_macro(
-                TimelinePlacedConfig(self._timeline_book, timeline, source)
-            )
 
     def trigger(self, *args, timeline: str | None = None, **kwargs) -> None:
         """Trigger ADC/tt/pins at native t or timeline end+t and advance named end.

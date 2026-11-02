@@ -160,7 +160,6 @@ def _adc_settings(
             "ro_length/window": _parameter_key(owner.cfg.ro_length),
             "phase": _parameter_key(owner.cfg.phase),
             "classifier": owner.cfg.classifier,
-            "ro_freq_val": owner.ro_freq_val,
         }
     tone = owner.cfg.tones[0 if axis.tone is None else axis.tone]
     return {

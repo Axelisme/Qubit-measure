@@ -1,6 +1,6 @@
 # program/v2
 
-**Last updated:** 2026-11-02，原生 length 查表與 ComputedPulse lookup
+**Last updated:** 2026-11-02，原生查表掃描與 scalar lookup
 
 **讀者：** lab-author、framework-dev、agent。查找 V2 program 公開 API、型別契約與編譯規則的 owner。
 
@@ -200,8 +200,6 @@ Compiled request builder 從實際輸出效果提供 references，cfg-based API 
 
 ## Macro 層
 
-Runtime pulse／readout word macro 將單一 wmem template 載入 `r_wave`，修改欄位後直接送到 port，不將修改結果寫回 wmem。
-這讓播放時的更新保持原子性，固定 template 不隨掃描點改變。
 `add_table_sweep("freq", freqs)` 回傳的參數可傳給 `PulseReadout(..., freq=freq)`，由 QICK 逐點轉成 generator／ADC 字。
 原生 loop 收尾從 rotated dmem table 更新下一點的 wmem 欄位，最後一點後還原第一點。
 更新在 shot timing 後、loop test／jump 前執行，即使該發未播放也會前進，不啟用 DDS phase reset。

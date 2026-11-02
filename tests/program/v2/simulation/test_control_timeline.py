@@ -7,17 +7,15 @@ is deleted. Keep the acquisition case on the public acquisition route.
 from fractions import Fraction
 from math import ceil
 
-import numpy as np
 import pytest
 from qick.asm_v2 import QickParam
 from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.program.v2 import TimelineBuilder
 from zcu_tools.program.v2.modules.computed_pulse import ComputedPulse
 from zcu_tools.program.v2.modules.delay import DelayAuto
-from zcu_tools.program.v2.modules.dmem import LoadValue, LoadWord
+from zcu_tools.program.v2.modules.dmem import LoadValue
 from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.readout import (
-    PulseReadout,
     PulseReadoutCfg,
 )
 from zcu_tools.program.v2.modules.reset import (
@@ -26,9 +24,8 @@ from zcu_tools.program.v2.modules.reset import (
     TwoPulseResetCfg,
 )
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
-from zcu_tools.program.v2.utils import readout_freq_words
 
-from tests.program._profiles import GEN_MAXV, GEN_MHZ, TPROC_MHZ, load_soccfg
+from tests.program._profiles import GEN_MHZ, TPROC_MHZ, load_soccfg
 from tests.program._timeline import compile_modules
 from tests.program._timing_expectations import (
     generator_duration,
@@ -112,48 +109,6 @@ def test_repeat_count_and_delay_cycles_are_local_to_each_acquire():
         assert request_of(env).materialize_point(point) == request.materialize_point(
             point
         )
-
-
-def test_loadword_uint32_frequency_and_signed_gain_are_decoded_only_by_readout():
-    env = white_noise(load_soccfg(), std_adc=0, seed=None, routes=((0, 0),))
-    gen, adc = readout_freq_words(
-        env.soccfg, [100, 200], gen_ch=0, ro_ch=0, mixer_freq=None, nqz=1
-    )
-    assert adc[0] > 2**31  # final downconversion pattern, not a positive scalar
-    modules = [
-        LoadWord("freq", gen, "axis", "freq_word"),
-        LoadWord("adc", adc, "axis", "adc_word"),
-        LoadWord("gain", [3276, (-6552) % 2**32], "axis", "gain_word"),
-        PulseReadout(
-            "readout",
-            receiver(),
-            freq_val="freq_word",
-            ro_freq_val="adc_word",
-            gain_val="gain_word",
-        ),
-    ]
-    request, _, _ = acquire(modules, sweep=[("axis", 2)])
-    assert [
-        e[0].frequency_mhz
-        for e in (
-            request.materialize_point(p).events
-            for p in range(int(np.prod(request.point_dims)))
-        )
-    ] == pytest.approx([100, 200], abs=1e-4)
-    assert [
-        e[0].gain
-        for e in (
-            request.materialize_point(p).events
-            for p in range(int(np.prod(request.point_dims)))
-        )
-    ] == pytest.approx([3276 / GEN_MAXV, -6552 / GEN_MAXV])
-    assert [
-        t.readouts[0].frequency_mhz[0]
-        for t in (
-            request.materialize_point(p)
-            for p in range(int(np.prod(request.point_dims)))
-        )
-    ] == pytest.approx([100, 200], abs=1e-4)
 
 
 @pytest.mark.parametrize(
@@ -295,9 +250,9 @@ def test_reps_counter_lookup_rejected_before_backend():
     assert not env.soc.binding.rounds
 
 
-def test_reps_counter_word_lookup_rejected_before_backend():
+def test_reps_counter_time_lookup_rejected_before_backend():
     modules = [
-        LoadWord("raw", [1], "reps", "cycles"),
+        LoadValue("time", [1], "reps", "cycles"),
         DelayAuto("invalid_wait", t="cycles"),
         receiver().build("readout"),
     ]
