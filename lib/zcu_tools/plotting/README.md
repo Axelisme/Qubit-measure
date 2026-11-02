@@ -1,6 +1,6 @@
 # `zcu_tools.plotting` — 圖管理與 owner 更新
 
-**Last updated:** 2026-11-01
+**Last updated:** 2026-11-02
 
 **讀者：** framework-dev。具名原生圖、owner 更新與診斷圖的分工。
 
@@ -78,8 +78,8 @@ Release 還原帶框架 manager 的 Agg canvas，並解除 manager 對舊 Plots 
 
 三個 live 工具及其線圖、熱圖、非均勻熱圖、scatter 格式由
 [lab 支援套件](../../../zcu_lab/v2/README.md#即時圖工具) 擁有。
-Singleshot 分類圖與 joint-fit 診斷圖分別在 lab 的 `singleshot/plot.py` 與
-`singleshot/plot_rabi.py`。實驗作者可以直接修改這些工具。
+Singleshot 分類圖在 lab 的 `singleshot/plot.py`，實驗作者可以直接修改。
+Amp／Len Rabi 在各自的 core 畫 joint-fit 診斷圖。
 獨立 liveplot plotter／backend、reference marker 與動畫錄影已退休。
 
 [fluxdep](fluxdep/README.md) 保留 Notebook 與 GUI 共用的搜尋、頻譜與選點診斷圖。
