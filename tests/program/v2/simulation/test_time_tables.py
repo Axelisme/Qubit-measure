@@ -6,6 +6,7 @@ import pytest
 
 from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.program.v2 import TimelineBuilder, ir
+from zcu_tools.program.v2.modules.delay import DelayAuto
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 
@@ -22,6 +23,10 @@ def time_program(value, *, table=False, consumer="delay"):
         builder.timeline_inc(value)
     elif consumer == "delay":
         builder.delay(value)
+    elif consumer == "delay_auto":
+        builder.delay_auto(value)
+    elif consumer == "DelayAuto":
+        builder.emit(DelayAuto("wait", t=value))
     builder.emit(
         PulseReadoutCfg(
             gen_ch=0,
@@ -57,7 +62,16 @@ def scheduled_shots(prog):
 
 
 @pytest.mark.parametrize(
-    "consumer", ["delay", "timeline_inc", "pre_delay", "post_delay", "trig_offset"]
+    "consumer",
+    [
+        "delay",
+        "delay_auto",
+        "DelayAuto",
+        "timeline_inc",
+        "pre_delay",
+        "post_delay",
+        "trig_offset",
+    ],
 )
 def test_time_table_matches_scalar_at_every_point_and_rep(consumer):
     values = [0.0213, 0.0107, 0.0354]
