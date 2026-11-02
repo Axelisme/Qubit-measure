@@ -63,6 +63,17 @@ def test_fitdecaycos_recovers_parameters():
     assert abs(pOpt[4] - true[4]) / true[4] < 1e-1
 
 
+def test_fitdecaycos_recovers_amplitude_above_observed_half_range():
+    # The first fringe extremum arrives after the envelope has decayed, so the
+    # data half-range (0.32) is below the t=0 amplitude (0.4).
+    t2 = 331.06642247829643
+    x = np.linspace(0, 3 * t2, 81)[1:]
+    y = 0.5 - 0.4 * np.exp(-x / t2) * np.cos(2 * np.pi * (4 / t2) * x + 0.2)
+    pOpt, _ = fitdecaycos(x, y)
+    assert abs(pOpt[1] - 0.4) < 1e-6
+    assert abs(pOpt[4] - t2) / t2 < 1e-6
+
+
 @pytest.mark.parametrize("decay", [False, True])
 @pytest.mark.parametrize("initial_phase,true_phase", [(355.0, 2.0), (-355.0, 358.0)])
 def test_cosine_phase_can_cross_wrap_boundary(
