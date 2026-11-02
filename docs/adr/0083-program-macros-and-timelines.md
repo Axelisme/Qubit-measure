@@ -6,6 +6,7 @@ date: 2026-10-29
 # 0083 — Program macro 與具名 timeline
 
 Builder 契約更新：2026-10-30。Timeline、Repeat、收尾證明與全面遷移裁定更新：2026-11-01。
+查表掃描與 native 時間來源裁定更新：2026-11-02。
 全部實驗使用 TimelineBuilder／TimelineProgramV2，legacy program 與 control module 已移除。
 相關：[[0072]]、[[0074]]、[[0078]]
 
@@ -104,6 +105,26 @@ Builder 產生的 program 與手寫 program 使用相同入口；program 自身�
 同日，對 module 以物件身分宣告、資源由各家族共用的方案，使用者回答：「採用建議」。
 取數入口最後依使用者「然後，我突然想到run_acquire與RunOptions比managed這名字好懂」及「用run option就好」命名。
 
+### 查表掃描與 QICK 協定
+
+2026-11-02，使用者提出：「我的想法是：add_table_sweep能支援的與add_sweep一致，實驗方式也接近，都在loop尾端更新對應register」。
+同日，對沿 QICK 四層加入查表種類的設計，使用者裁定：「採用提案」。
+以下型別接線、算術、拒絕時機與 native 時間來源由 advisor 於同日依代理授權確認。
+
+`add_table_sweep(name, values)` 與 `add_sweep` 建立相同的頂層 loop，回傳參數交給既有 module consumer。
+Program 層的 `TableParam` 繼承 `QickParam`，經 QICK 的 `to_int` 協定逐點轉成 `TableRawParam`。
+Generator／readout manager 沿用原有轉換，每點硬體字必須等於以該點純量值編出的 program，不另建 module 專屬編碼路徑。
+
+`MarkedCloseLoop` 在同一個 native 收尾內發現 waveform 與 register 的查表值，從 rotated DMEM 表載入下一點，再交給 QICK 的線性 sweep 收尾。
+每發都更新，與該發是否播放或選到分支無關。最後一點後載入第一點，供外層 loop 或下一次 reps 使用。
+
+未掃描的 `QickParam` 視為純量，可與 `TableParam` 做純量算術。
+與 swept `QickParam` 或另一個 `TableParam` 的算術仍 raise `TypeError`。
+`TableParam` 不提供仿射的 `start`／`spans` 表示，consumer 不能把查表值當成零 span 純量。
+`ro_length` 收到查表值時，在建構 `PulseReadout` 即 raise `NotImplementedError`，不延至 build。
+`MuxReadout` 不支援查表掃描。
+參數單位、waveform 限制與公開用法由 [program README](../../lib/zcu_tools/program/v2/README.md#查表掃描) 及 [modules README](../../lib/zcu_tools/program/v2/modules/README.md#constructor-overrides) 維護。
+
 ### Timeline 只存結尾，與 reference 分開
 
 採 B1 模型。每條 timeline 只存相對 `ref_time` 的目前結尾 E，下限為 0，不另存開始或 channel end 集合。
@@ -180,16 +201,27 @@ Register 次數 Repeat 內，先執行的 LoadValue 以作者 table 值域定義
 非時間 raw-word consumer 保留原契約，不因時間稽核而縮窄 uint32 words。
 Getter 對 scalar／仿射時間回實際量化值；runtime-only 或非仿射時間明確 raise RuntimeError，不回 ndarray 或 bounds 上界。
 
-每個 timeline 操作把自己的結果 ceil 到整數 tProc cycle 一次，事件起點也用 ceil，不用 nearest。
-小數只保留在單一操作內，例如實際起點、waveform／ADC 長度與 post 的合計。
+具名 timeline 操作把自己的結果 ceil 到整數 tProc cycle 一次，事件起點也用 ceil。
+原生 QICK channel timestamp 保留純量路徑的 nearest，不能用 timeline 的 ceil 結尾取代。
+小數在單一 timeline 操作內保留到收尾，例如實際起點、waveform／ADC 長度與 post 的合計。
 Runtime 整數起點 R 加靜態小數 f，下一操作計算 R＋ceil(f＋t)。
 Ceil 以 `math.isclose(ticks, nearest, rel_tol=1e-12, abs_tol=1e-10)` 吸收接近整數的換算雜訊，其餘小數照常向上取整。
 在 2³¹ 附近，相對容差最多也會吸收約 0.002 cycle 的真實小數。
-作者 sweep 沿 QICK 原生 start round 與每圈 step 往零截斷，實際值可能不同於預期值，不配置逐點時間 table。
+線性 sweep 沿 QICK 原生 start round 與每圈 step 往零截斷，實際值可能不同於預期值，不自動轉成逐點時間 table。
+作者明示的 `add_table_sweep` 依上節查表協定載入每點時間。
 2026-10-31，使用者要求：「你永遠都不能先加總再ceil，誤差會很大」，並補充「純delay的應該也是量化」。
 2026-11-01，使用者以「B，而新設計沒有查表fallback吧？」確認相對容差方案。精確有理數時間模型另行評估。
 
-靜態 generator fabric／ADC 長度先作有理數時鐘換算，再於該操作 aggregate 收尾 ceil。
+2026-11-02，查表 native timestamp 與 ADC tail 的來源規則由 advisor 依代理授權確認。
+Timeline 保留 `TableParam` 原值，native pulse 的起點加實際長度後再沿 QICK nearest 轉換，不逐段 ceil 累加。
+`TimelineBook` 以 end 物件的 identity 保存其未取整 `TableParam` 來源。`RuntimeEnd` 依值相等，來源不能按值共用；id 配合強引用區分原物件，每次 compile reset 清空紀錄。
+目前 end 換成非查表的新物件後不沿用舊來源。舊 immutable end 經 branch／fork／module 快照還原時仍能找回原表，不另同步一套來源容器。
+來源只保留原 `TableParam` 及已授權的查表加靜態值結果，不從 register 名稱、值或 proof recipe 猜出。
+Trigger 查完整 scheduled end 的來源，有表時以該時間加 ADC 長度，沿純量 native timestamp 規則記錄同一物理結尾。
+混合其他 sweep／register 或沒有表來源時，維持真正 runtime 的 ceil，不因已知點值而改成 nearest。
+這些來源紀錄不改 `RuntimeEnd`／`CycleProducer` 表示或 branch 的合流規則。
+
+靜態 generator fabric／ADC 長度先作有理數時鐘換算，再於該 timeline 操作 aggregate 收尾 ceil。
 現有 runtime 長度 sweep 與 selected waveform／length table 使用 k=8 上界定點換算，不新增一般作者 length register 或 ADC length API。
 編譯器以移位加減計算乘積，選符合誤差預算且 CSD 項數最少的 W，平手取較小值，不用 ARITH／除法器。
 換算範圍為 2²³ tProc cycles，超限或乘積／中間值 overflow 在 build 報錯。
@@ -218,7 +250,7 @@ Signed32 guard 與上述 mask 成本由 advisor 於 2026-11-01 依代理授權�
 合法非負 timeline 時間的差不溢位；無上界仍可選到 mask，但溢位修正沒有合法公開 consumer。
 該修正與目前無公開 codegen consumer 的 min 不宣稱已有端到端驗證；路徑與成本直接審閱，公開測試保留合法輸入的實際選值驗收。
 
-框架不自動配置時間或 selected-end DMEM table。作者明示的資料／waveform table 與 IR dispatch 的 jump-address table 保留。
+框架不自動配置時間或 selected-end DMEM table。作者明示的查表掃描、資料／waveform table 與 IR dispatch 的 jump-address table 保留。
 2026-10-31，使用者說明：「Dmem資源很珍貴，除了作者明確知道有用的位置，其他地方少用」。
 對 IR jump-address table，使用者回答：「Ir跳躍那個可以，因為屬於log級別的使用量，我接受」。
 已是 tProc cycles 的 Branch 合流以整數常數乘加及 max／選擇重建結尾，不用逐點網格或分段插值。
