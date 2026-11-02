@@ -1,6 +1,6 @@
 # program/v2
 
-**Last updated:** 2026-11-02，原生查表掃描與 scalar lookup
+**Last updated:** 2026-11-02，原生長度查表與 waveform-address selection
 
 **讀者：** lab-author、framework-dev、agent。查找 V2 program 公開 API、型別契約與編譯規則的 owner。
 
@@ -162,7 +162,8 @@ Compiler 選 canonical signed-digit 項數最少的 W，平手取較小 W。
 換算只用至多 15-bit shifts 與加減，不用 ARITH、DIV 或時間表。時脈比為 1 不發出換算指令。
 乘積或中間值 signed32 overflow 在 build 時拒絕。
 
-現有 native length sweep 與 waveform／length selection table 提供 runtime 長度；timeline length-register playback 仍要求 selection metadata。
+現有 native length sweep 與 `Pulse(length=TableParam)` 提供 runtime 長度。
+Waveform-address selection 透過 `pulse_by_reg` 播放，置於 timeline 時要求配對 address producer 與候選 waveform 的 selection metadata。
 這不新增任意作者 length register 或 ADC length API。Ratio 7/5 的 W=359，ratio 56/5 的 W=2872，但目前 API 未開放 ADC／PFB runtime length consumer。
 編譯期已知 bias 使用字面值，零 span 不配置 sweep register。Runtime 結尾保留既有 register 加字面值偏移，只有需要獨立 register operand 的 consumer 才物化。
 同步可拆成既有非負 register 與非負字面值的 reference advance，不改事件時間或使用 s14。
