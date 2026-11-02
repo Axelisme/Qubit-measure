@@ -268,7 +268,7 @@ def test_adc_nonoverlap_uses_correlated_table_points_not_independent_extrema():
     assert all(t[0] + duration <= t[1] for t in triggers)
 
 
-def runtime_auto_program(extra, *, table_extra=False):
+def runtime_auto_program(extra, *, table_extra=False, gens_only=False):
     env = white_noise(load_soccfg(1, 1), std_adc=0, routes=((0, 0),), seed=None)
     builder = TimelineBuilder(env.soccfg, reps=2, initial_delay=0, relax_delay=0.1)
     placement = builder.add_table_sweep("point", [0.0213, 0.0107, 0.0354])
@@ -285,19 +285,20 @@ def runtime_auto_program(extra, *, table_extra=False):
     ).build("receiver")
     builder.timeline_inc(placement)
     builder.emit(receiver)
-    builder.delay_auto(extra)
+    builder.delay_auto(extra, ros=not gens_only)
     builder.emit(receiver)
     builder.delay_by_timeline()
     return builder.build(), env
 
 
-def test_table_auto_extra_after_runtime_placement_matches_scalar_extra():
+@pytest.mark.parametrize("gens_only", [False, True])
+def test_table_auto_extra_after_runtime_placement_matches_scalar_extra(gens_only):
     values = [0.0123, 0.0245, 0.0333]
-    prog, env = runtime_auto_program(values, table_extra=True)
+    prog, env = runtime_auto_program(values, table_extra=True, gens_only=gens_only)
     observed = request(prog, env)
     expected_shots = []
     for point, value in enumerate(values):
-        scalar, scalar_env = runtime_auto_program(value)
+        scalar, scalar_env = runtime_auto_program(value, gens_only=gens_only)
         assert observed.materialize_point(point) == request(
             scalar, scalar_env
         ).materialize_point(point)
