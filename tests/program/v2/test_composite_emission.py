@@ -833,7 +833,6 @@ def _change_selection(prog, loader, other, change):
     elif change == "consumed_other_table":
         relation = other.lower_selected(prog)
         _play_selected_address(prog, relation, (1, 0))
-        prog.timeline_inc(0, timeline="default")
     elif change == "selector":
         prog.write_reg("index", 1)
     elif change == "translate":
@@ -1054,10 +1053,9 @@ def _selected_address_with_change(change: str) -> TimelineProgramV2:
             prog.write_reg("index", 0)
             relation = self.loader.lower_selected(prog)
             _change_selection(prog, self.loader, self.other, change)
-            _play_selected_address(prog, relation, (0, 1), t=0.01)
+            _play_selected_address(prog, relation, (0, 1), t=0.01, post=0.0005)
             if change == "selector_after_playback":
                 prog.write_reg("index", 1)
-            prog.timeline_inc(0.0005, timeline="default")
 
     return _selection_program(Selection())
 
@@ -1078,7 +1076,9 @@ def _selection_flow_program(body, *, path_count=2):
     return _selection_program(Selection())
 
 
-def _play_selected_address(prog, relation, values, timeline="default", *, t=0.0):
+def _play_selected_address(
+    prog, relation, values, timeline="default", *, t=0.0, post=0.0
+):
     prog.pulse_by_reg(
         0,
         "address",
@@ -1091,7 +1091,7 @@ def _play_selected_address(prog, relation, values, timeline="default", *, t=0.0)
             relation,
         ),
     )
-    prog.timeline_inc(0, timeline=timeline)
+    prog.timeline_inc(post, timeline=timeline)
 
 
 @pytest.mark.parametrize("other_case", [0, 1])

@@ -629,8 +629,8 @@ def test_zero_entry_synchronized_repeat_accepts_unbounded_selected_start():
                 nqz=1,
                 freq=1000,
                 gain=0.5,
-                waveform=ConstWaveformCfg(length=7 / GEN_MHZ),
-            ).with_updates(waveform=ConstWaveformCfg(length=n / GEN_MHZ))
+                waveform=ConstWaveformCfg(length=n / GEN_MHZ),
+            )
             for n in (7, 11)
         ],
     )
@@ -693,8 +693,8 @@ def test_variable_repeat_selected_cross_grid_lengths_and_runtime_getters():
                 nqz=1,
                 freq=1000,
                 gain=0.5,
-                waveform=ConstWaveformCfg(length=7 / GEN_MHZ),
-            ).with_updates(waveform=ConstWaveformCfg(length=n / GEN_MHZ))
+                waveform=ConstWaveformCfg(length=n / GEN_MHZ),
+            )
             for n in (7, 11)
         ],
     )

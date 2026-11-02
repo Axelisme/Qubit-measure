@@ -260,8 +260,8 @@ def test_selected_events_share_output_time_and_increment_nonzero_offsets(swept_o
                 freq=1000,
                 gain=0.5,
                 pre_delay=offset,
-                waveform=ConstWaveformCfg(length=7 / GEN_MHZ),
-            ).with_updates(waveform=ConstWaveformCfg(length=n / GEN_MHZ))
+                waveform=ConstWaveformCfg(length=n / GEN_MHZ),
+            )
             for n in (7, 11)
         ],
     )
