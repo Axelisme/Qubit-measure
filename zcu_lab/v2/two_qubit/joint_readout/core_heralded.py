@@ -7,7 +7,6 @@ from typing import Annotated, ClassVar, Self
 
 import numpy as np
 from matplotlib.lines import Line2D
-from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field, model_validator
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
@@ -25,8 +24,6 @@ from zcu_tools.experiment.v2.runtime import RunOptions, Schedule, SignalBuffer
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import Classify, Pulse, Reset, TimelineBuilder, shot_sums
 from zcu_tools.program.v2.modules import MuxReadout
-
-from zcu_lab.v2.support import live_line
 
 from .._readout import JointRoles
 from .._sums import (
@@ -206,22 +203,26 @@ class JointReadoutHeraldedExp(
         validate_classifiers(config.readout, config.roles)
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(
-            xlabel="Nominal preparation (gg, ge, eg, ee)",
+            xlabel="Nominal preparation",
             ylabel="Terminal P(g,g) | herald (g,g)",
+            xticks=range(4),
+            xticklabels=["gg", "ge", "eg", "ee"],
         )
-        viewer = live_line(ax)
-        ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+        (line,) = ax.plot([], [], marker="o", linestyle="none")
         ax.grid(False)
         fig.show()
 
         @context.plots.on_plot_thread
         def update_view(sums: NDArray[np.float64]) -> tuple[Line2D, ...]:
-            return viewer.set(
+            line.set_data(
                 np.arange(4, dtype=np.float64),
                 joint_probabilities(terminal_counts(sums, ("g", "g")))[
                     ..., 0, 0
                 ].reshape(4),
             )
+            ax.relim()
+            ax.autoscale_view()
+            return (line,)
 
         buffer = SignalBuffer(
             (2, 2, 3, 3, 3, 3), dtype=np.float64, on_update=update_view
