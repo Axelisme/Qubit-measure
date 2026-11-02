@@ -56,7 +56,7 @@ def scheduled_shots(prog):
 
 @pytest.mark.parametrize("consumer", ["delay", "timeline_inc", "pre_delay"])
 def test_time_table_matches_scalar_at_every_point_and_rep(consumer):
-    values = [0.213, 0.107, 0.354]
+    values = [0.0213, 0.0107, 0.0354]
     prog, env = time_program(values, table=True, consumer=consumer)
     observed = request(prog, env)
     expected_shots = []
