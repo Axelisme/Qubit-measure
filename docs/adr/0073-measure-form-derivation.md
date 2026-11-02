@@ -74,6 +74,16 @@ group 是 MCP 單層欄位描述可用的前端中立分類名稱 hint，因此�
 持久 Spec 保留 child key，to_cfg 不從 library materialize 或改寫 key。
 未知 seed、受屏蔽 seed、缺必要 discriminator 與不支援的選項在入口報錯。
 
+需要條件或聚合邏輯來計算初值時，adapter 提供 `Form(Cfg, tree, initial_values=factory)`。
+Form 每次建立 fresh input，先建宣告 raw 初值，再呼叫 `factory(env, defaults)`。
+`defaults` 是當次 `model.defaults(env)` 剛建的新 dict，expression 尚未求值。
+Factory 可原地修改並回傳該 dict，也可回傳新的完整初值樹，不自行重算宣告初值。
+Form 深複製回傳值並整份採用，不與宣告 defaults 做 root 欄位合併。
+這項計算留在 Open／Reset 的固定來源捕捉邊界，不由 widget 或編輯、preview、Run 重算。
+
+2026-11-02，使用者指出「我以為生成Form預設值的form_adapter就能處理這種if/else的複雜邏輯，這樣Form就只要呈現就好，或是搭配command或convert或即時計算」，並對 factory 接收宣告初值的提案選擇「A」。
+同日使用者問「Factory不能回傳新的樹嗎？他可以原地修改default並回傳吧？」，再以「採用建議」確認回傳完整初值、由 Form 整份採用的分工。
+
 Tree 對齊 model 的欄位。字串是 literal，`Expr` 才是 expression。
 `Range(start, stop, expts)`／`Range.around` 宣告掃描。Range 的字串端點轉成 `Expr`，
 數字與 None 保留原樣。`Hidden` 宣告隱藏欄位。需要顯示但不能改的值，使用樹上的初值與 `Display(readonly=True)` 或 core 欄位的 `FieldMeta(readonly=True)`。
