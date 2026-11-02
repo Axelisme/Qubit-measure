@@ -9,7 +9,6 @@ from typing import (
     TypeAlias,
     TypedDict,
     Unpack,
-    overload,
 )
 
 from pydantic import BeforeValidator, Field
@@ -163,24 +162,14 @@ class Reset:
     """Dispatch cfg to its reset module; zcu_lab uses ``Reset.Cfg`` fields.
 
     Calling Reset(name, cfg) returns cfg.build(name), not a Reset instance.
-    name labels the module. None means no reset and returns None.
+    name labels the module.
     """
 
     Cfg: TypeAlias = ResetCfg
 
-    @overload
     def __new__(
         cls, name: str, cfg: AbsResetCfg, **overrides: Unpack[ResetOverrides]
-    ) -> AbsReset: ...
-
-    @overload
-    def __new__(
-        cls, name: str, cfg: None, **overrides: Unpack[ResetOverrides]
-    ) -> None: ...
-
-    def __new__(
-        cls, name: str, cfg: AbsResetCfg | None, **overrides: Unpack[ResetOverrides]
-    ) -> AbsReset | None:
+    ) -> AbsReset:
         """Build the reset with keyword-only overrides on a detached cfg.
 
         Pulse reset accepts freq/gain/phase/length. Two-pulse reset accepts
@@ -189,13 +178,10 @@ class Reset:
         lengths us, phases degrees and gains normalized; values may be sweeps.
         None keeps each cfg value. Unknown or wrong-variant keys and nonnumeric
         values raise TypeError. Unsupported waveform sweeps raise ValueError.
-        cfg=None returns None without reset.
         """
         unknown = overrides.keys() - ResetOverrides.__annotations__.keys()
         if unknown:
             raise TypeError(f"Unknown override keywords: {sorted(unknown)}")
-        if cfg is None:
-            return None
         if isinstance(cfg, PulseResetCfg):
             allowed = PulseResetOverrides.__annotations__
         elif isinstance(cfg, TwoPulseResetCfg):

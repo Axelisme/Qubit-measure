@@ -225,9 +225,8 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
                 relax_delay=cfg.relax_delay,
             )
             freq = builder.add_sweep("freq", cfg.freq)
-            reset = Reset("reset", cfg.reset)
-            if reset is not None:
-                builder.emit(reset)
+            if cfg.reset is not None:
+                builder.emit(Reset("reset", cfg.reset))
             builder.emit(PulseReadout("readout", cfg.readout, freq=freq))
             sched.run_acquire(builder.build(), context.soc, rounds=cfg.rounds)
         return FreqResult(freqs=freqs, signals=signals.array)
@@ -256,9 +255,8 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
                 relax_delay=cfg.relax_delay,
             )
             builder.add_loop("freq", len(freqs))
-            reset = Reset("reset", cfg.reset)
-            if reset is not None:
-                builder.emit(reset)
+            if cfg.reset is not None:
+                builder.emit(Reset("reset", cfg.reset))
             # DDS table updates wrap for the next rep, preserving phase timing.
             builder.emit(
                 TablePulseReadout(

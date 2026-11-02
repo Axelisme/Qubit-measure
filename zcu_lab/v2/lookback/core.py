@@ -103,9 +103,8 @@ class LookbackExp(Experiment[LookbackResult, LookbackCfg]):
             initial_delay=run_cfg.initial_delay,
             relax_delay=run_cfg.relax_delay,
         )
-        reset = Reset("reset", run_cfg.reset)
-        if reset is not None:
-            builder.emit(reset)
+        if run_cfg.reset is not None:
+            builder.emit(Reset("reset", run_cfg.reset))
         builder.emit(Pulse("init_pulse", run_cfg.init_pulse))
         builder.emit(Readout("readout", run_cfg.readout))
         program = builder.build()
