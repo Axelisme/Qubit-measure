@@ -11,6 +11,7 @@ from zcu_tools.cfg_model import (
     PulseReadoutSpec,
     PulseSpec,
 )
+from zcu_tools.program.v2 import TableParam
 
 
 @pytest.fixture(
@@ -62,3 +63,22 @@ def test_runtime_gain_checks_entire_multidimensional_sweep_and_assignments(model
         assert cfg.gain is valid
     with pytest.raises(ValidationError, match=r"Gain must be within \[-1, 1\].*1.2"):
         model.model_validate({**raw, "gain": QickParam(1.2)})
+
+
+@pytest.mark.parametrize("model", [PulseCfg, PulseReadoutCfg])
+def test_runtime_table_gain_validates_every_point_on_construction_and_assignment(model):
+    raw = {"waveform": ConstWaveformCfg(length=0.2), "nqz": 1, "freq": 100.0}
+    if model is PulseCfg:
+        raw["ch"] = 0
+    else:
+        raw.update(gen_ch=0, ro_ch=0, ro_length=0.2)
+    valid = TableParam("point", [-1.0, 0.25, 1.0])
+    cfg = model.model_validate({**raw, "gain": valid})
+    assert cfg.gain is valid
+    for values in ([0.0, 1.1, 0.5], [0.0, -1.1, 0.5]):
+        invalid = TableParam("point", values)
+        with pytest.raises(ValidationError, match=r"Gain must be within \[-1, 1\]"):
+            model.model_validate({**raw, "gain": invalid})
+        with pytest.raises(ValidationError, match=r"Gain must be within \[-1, 1\]"):
+            cfg.set_param("gain", invalid)
+        assert cfg.gain is valid
