@@ -6,6 +6,7 @@ from typing import Any
 import matplotlib.pyplot as plt
 import numpy as np
 import pytest
+import scipy.optimize as optimize
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from zcu_tools.analysis.fitting.resonance import (
@@ -17,6 +18,7 @@ from zcu_tools.analysis.fitting.resonance import (
     normalize_signal,
     phase_func,
 )
+from zcu_tools.analysis.fitting.resonance.base import run_complex_refinement
 
 from ._resonance_truth import (
     hanger_truth,
@@ -475,7 +477,122 @@ def test_fixed_noise_refinement_reduces_complex_residual() -> None:
     assert refined_rmse < 0.35 * sequential_rmse
 
 
-def test_bound_limited_refinement_warns_and_returns_sequential_result() -> None:
+@pytest.mark.parametrize(
+    ("failure", "reason"),
+    [
+        ("exception", "backend exploded"),
+        ("exhausted", "maximum number of function evaluations"),
+        ("nonfinite_x", "non-finite parameters"),
+        ("nonfinite_fun", "non-finite residuals"),
+        ("bound", "parameter.*0.*=0.0"),
+    ],
+)
+def test_complex_refinement_rejects_failed_optimizer_results(
+    monkeypatch: pytest.MonkeyPatch, failure: str, reason: str
+) -> None:
+    result = optimize.OptimizeResult(
+        success=failure != "exhausted",
+        message="The maximum number of function evaluations is exceeded.",
+        nfev=10_000,
+        x=np.array([0.0 if failure == "bound" else 1.0]),
+        fun=np.array([0.0]),
+        active_mask=np.array([-1 if failure == "bound" else 0]),
+    )
+    if failure == "nonfinite_x":
+        result.x[0] = np.nan
+    if failure == "nonfinite_fun":
+        result.fun[0] = np.inf
+
+    def optimizer(*args: Any, **kwargs: Any) -> optimize.OptimizeResult:
+        if failure == "exception":
+            raise RuntimeError("backend exploded")
+        return result
+
+    monkeypatch.setattr(optimize, "least_squares", optimizer)
+    with pytest.raises(ValueError, match=f"synthetic.*{reason}") as exc_info:
+        run_complex_refinement(
+            lambda values: values - 1.0,
+            [1.0],
+            ([0.0], [2.0]),
+            model_name="synthetic",
+        )
+    if failure == "exhausted":
+        assert "nfev=10000" in str(exc_info.value)
+    if failure == "exception":
+        assert isinstance(exc_info.value.__cause__, RuntimeError)
+
+
+@pytest.mark.parametrize("model", [HangerModel, TransmissionModel])
+def test_model_fit_does_not_substitute_initializer_on_refinement_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    model: type[HangerModel] | type[TransmissionModel],
+) -> None:
+    freqs = np.linspace(5970.0, 6030.0, 101)
+    signals = model.calc_signals(
+        freqs,
+        freq=6000.0,
+        Ql=700.0,
+        Qc=1100.0,
+        phi=0.1,
+        a0=1.0 + 0.2j,
+        edelay=0.0,
+    )
+
+    def optimizer(*args: Any, **kwargs: Any) -> optimize.OptimizeResult:
+        raise FloatingPointError("optimizer arithmetic failed")
+
+    monkeypatch.setattr(optimize, "least_squares", optimizer)
+    with pytest.raises(
+        ValueError, match="complex refinement.*optimizer arithmetic failed"
+    ):
+        model.fit(freqs, signals, edelay=0.0, fit_bg_amp_slope=True)
+
+
+@pytest.mark.parametrize("phase_fit_ql", [0.0, 1e-12, 1.0])
+def test_hanger_fit_repairs_lower_bound_phase_initialization_and_converges(
+    monkeypatch: pytest.MonkeyPatch, phase_fit_ql: float
+) -> None:
+    freqs = np.linspace(5970.0, 6030.0, 301)
+    signals = hanger_truth(
+        freqs,
+        freq=6000.0,
+        Ql=700.0,
+        Qc_abs=1100.0,
+        phi=0.1,
+        a0=1.0 + 0.2j,
+        edelay=0.0,
+        bg_amp_slope=0.006,
+    )
+    curve_fit = optimize.curve_fit
+    least_squares = optimize.least_squares
+    joint_starts: list[float] = []
+
+    def phase_optimizer(*args: Any, **kwargs: Any) -> Any:
+        values, covariance = curve_fit(*args, **kwargs)
+        values[1] = phase_fit_ql
+        return values, covariance
+
+    def complex_optimizer(fun: Any, x0: Any, **kwargs: Any) -> optimize.OptimizeResult:
+        joint_starts.append(np.exp(x0[1]))
+        return least_squares(fun, x0, **kwargs)
+
+    # The external phase optimizer supplies a collapsed estimate. The real complex
+    # optimizer must receive a data-derived start and converge from the same fit call.
+    monkeypatch.setattr(optimize, "curve_fit", phase_optimizer)
+    monkeypatch.setattr(optimize, "least_squares", complex_optimizer)
+    result = HangerModel.fit(freqs, signals, edelay=0.0, fit_bg_amp_slope=True)
+
+    assert joint_starts[0] > 100.0
+    np.testing.assert_allclose(result["Ql"], 700.0, rtol=0.01)
+    np.testing.assert_allclose(result["freq"], 6000.0, atol=0.01)
+    np.testing.assert_allclose(
+        HangerModel.calc_signals(freqs, **result), signals, atol=1e-6
+    )
+    sequential = HangerModel.fit(freqs, signals, edelay=0.0)
+    assert sequential["Ql"] == phase_fit_ql
+
+
+def test_bound_limited_refinement_raises_with_parameter_details() -> None:
     freqs = np.linspace(5970.0, 6030.0, 401)
     # A resonance outside the scan forces the bounded fit to its frequency limit.
     signals = transmission_truth(
@@ -486,14 +603,8 @@ def test_bound_limited_refinement_warns_and_returns_sequential_result() -> None:
         edelay=0.0,
         bg_amp_slope=0.006,
     )
-    sequential = TransmissionModel.fit(freqs, signals, edelay=0.0)
-
-    with pytest.warns(RuntimeWarning, match="parameter bound"):
-        result = TransmissionModel.fit(
-            freqs, signals, edelay=0.0, fit_bg_amp_slope=True
-        )
-
-    assert result == sequential
+    with pytest.raises(ValueError, match="transmission.*bound.*freq.*=.+"):
+        TransmissionModel.fit(freqs, signals, edelay=0.0, fit_bg_amp_slope=True)
 
 
 def test_refined_corrected_geometry_and_quality_factors_are_consistent() -> None:
