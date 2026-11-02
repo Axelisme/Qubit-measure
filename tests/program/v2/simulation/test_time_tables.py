@@ -73,7 +73,9 @@ def time_program(value, *, table=False, linear=False, outer=False, consumer="del
         trig_offset=value if consumer == "trig_offset" else 0.0,
     ).build("readout")
     if consumer in ("pulse_t", "native_t"):
-        builder.emit(PulseAtTime(value, "default" if consumer == "pulse_t" else None))
+        builder.emit(
+            PulseAtTime(value, "default" if consumer == "pulse_t" else None), tag="time"
+        )
     builder.emit(receiver)
     if consumer == "delay_auto":
         builder.delay_auto(value, tag="time")
@@ -139,11 +141,13 @@ def test_table_time_getter_returns_exact_affine_qick_parameter(consumer, constan
     # Use a bare delay oracle: pulse timeline placement already reports the same
     # physical parameter, while timeline_inc reports its rounded endpoint.
     table, _ = time_program(expected.tolist(), table=True, consumer=consumer)
-    actual = table.tagged_instructions["time"].get_time_param("t")
-    assert isinstance(actual, QickParam) and not isinstance(actual, TableParam)
+    actual = table.get_time_param("time", "t")
+    assert not isinstance(actual, TableParam)
+    if not constant:
+        assert isinstance(actual, QickParam)
+    points = table.get_time_param("time", "t", as_array=True)
     assert np.array_equal(
-        np.asarray(actual.to_array({"point": len(expected)}, all_loops=True)).flatten(),
-        expected if not constant else expected[:1],
+        np.asarray(points).flatten(), expected if not constant else expected[:1]
     )
 
 
