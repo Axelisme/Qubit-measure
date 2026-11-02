@@ -43,12 +43,13 @@ def test_table_conversion_rounds_each_point_like_qick(
     "operation", [operator.add, operator.sub, operator.mul, operator.truediv]
 )
 @pytest.mark.parametrize("reverse", [False, True])
+@pytest.mark.parametrize("scalar", [3.0, QickParam(3.0)], ids=["float", "qick_scalar"])
 def test_scalar_arithmetic_preserves_loop_and_rejects_sweep_mixing(
-    operation: Callable[..., Any], reverse: bool
+    operation: Callable[..., Any], reverse: bool, scalar: float | QickParam
 ) -> None:
     values = [2.0, -4.0, 8.0, 2.0]
     table = v2.TableParam("point", values)
-    result = operation(3.0, table) if reverse else operation(table, 3.0)
+    result = operation(scalar, table) if reverse else operation(table, scalar)
     expected = [operation(3.0, v) if reverse else operation(v, 3.0) for v in values]
     assert result.loop == "point"
     assert result.is_sweep()
