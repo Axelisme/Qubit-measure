@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import json
 import os
 from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 from matplotlib.figure import Figure
+from PIL import Image, ImageChops
 from qtpy.QtCore import QCoreApplication, QEvent, QRect, QSize
 from qtpy.QtWidgets import QApplication, QLabel, QScrollArea, QWidget
 from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AnalysisMode
@@ -21,6 +23,7 @@ from tests.gui.app.measure.ui._preview_gallery_support import (
     FAKE_PNG_BYTES,
     assert_aspect_fit,
     fake_renderer,
+    framed_renderer,
     gallery_geometry_cards,
     renderer_640x480,
 )
@@ -384,6 +387,105 @@ def test_gallery_named_groups_follow_viewport(
                 assert run.bottom() == post.bottom()
                 assert run.height() > analysis.height()
                 assert run.width() >= analysis.width()
+
+
+@pytest.fixture
+def member_gallery(qapp) -> Iterator[ComponentDriver]:
+    """Show six perimeter-marked rasters through public collection snapshots."""
+    gallery = DataFigurePreviewGallery(
+        AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True),
+        renderer=framed_renderer,
+    )
+    gallery.setObjectName("memberFitGallery")
+    groups = []
+    colours = iter(("#c02020", "#208020", "#2020c0", "#a020a0", "#208080", "#a06020"))
+    for stage in ("Run", "Analysis", "Post"):
+        group = FigureCollection()
+        for index in (1, 2):
+            group.adopt(f"{stage} tone {index}", Figure(label=next(colours)))
+        group.seal()
+        groups.append(group)
+    gallery.update_figures(*(next(iter(group.values())) for group in groups))
+    gallery.update_collections(*groups)
+    gallery.resize(1000, 1000)
+    gallery.show()
+    QApplication.processEvents()
+    try:
+        yield ComponentDriver(gallery)
+    finally:
+        gallery.close()
+        gallery.deleteLater()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+
+
+def test_gallery_member_rasters_fit_after_resize(
+    member_gallery: ComponentDriver, tmp_path: Path
+) -> None:
+    """Every raster keeps all four perimeter edges inside its member and stage."""
+    driver = member_gallery
+    evidence = Path(os.environ.get("GALLERY_MEMBER_EVIDENCE_DIR", str(tmp_path)))
+    colours = ("#c02020", "#208020", "#2020c0", "#a020a0", "#208080", "#a06020")
+    measurements = {}
+    for step, width in (("01-wide", 1000), ("02-narrow", 360), ("03-wide-again", 1000)):
+        driver.resize_window(width, 1000)
+        png = driver.screenshot(evidence / f"member-{step}.png")
+        image = Image.open(png).convert("RGB")
+        window = driver.observe(object_name="memberFitGallery")
+        assert window.bounds is not None
+        origin_x, origin_y, _, _ = window.bounds
+        widgets = driver.visible().widgets
+        rows: list[tuple[str, int, QRect, QRect, QRect, list[bool]]] = []
+        for stage_index, key in enumerate(("run", "analysis", "post")):
+            stage = _visible_card_bounds(driver, key)
+            members = sorted(
+                (
+                    QRect(*widget.bounds)
+                    for widget in widgets
+                    if widget.object_name == f"previewCard_{key}_member"
+                    and widget.bounds is not None
+                ),
+                key=lambda rect: rect.x(),
+            )
+            assert len(members) == 2
+            for index, member in enumerate(members):
+                colour = colours[2 * stage_index + index]
+                mask = (
+                    ImageChops.difference(image, Image.new("RGB", image.size, colour))
+                    .convert("L")
+                    .point(lambda value: 255 if value == 0 else 0)
+                )
+                bounds = mask.getbbox()
+                assert bounds is not None, f"{key} member {index} raster disappeared"
+                x0, y0, x1, y1 = bounds
+                raster = QRect(x0 + origin_x, y0 + origin_y, x1 - x0, y1 - y0)
+                edges = [
+                    bool(mask.getpixel(point))
+                    for point in (
+                        ((x0 + x1) // 2, y0),
+                        ((x0 + x1) // 2, y1 - 1),
+                        (x0, (y0 + y1) // 2),
+                        (x1 - 1, (y0 + y1) // 2),
+                    )
+                ]
+                rows.append((key, index, stage, member, raster, edges))
+        measurements[step] = [
+            {
+                "stage": key,
+                "member": index,
+                "stage_bounds": stage.getRect(),
+                "member_bounds": member.getRect(),
+                "raster_bounds": raster.getRect(),
+                "edges": edges,
+            }
+            for key, index, stage, member, raster, edges in rows
+        ]
+        (evidence / "dimensions.json").write_text(json.dumps(measurements, indent=2))
+        for key, index, stage, member, raster, edges in rows:
+            detail = (key, index, raster.getRect())
+            assert member.contains(raster), detail
+            assert stage.contains(raster), detail
+            assert all(edges), f"Raster perimeter is clipped: {detail}, edges={edges}"
+            assert abs(raster.width() * 3 - raster.height() * 4) <= 4, detail
 
 
 def test_gallery_narrow_single_column_three_cards(qapp):
