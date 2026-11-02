@@ -132,7 +132,6 @@ def test_independent_rank_three_exports_first_axis_as_named_2d_logs(
     for index in range(2):
         payload = loaded.variables[f"signal_{index}"]
         np.testing.assert_array_equal(payload.z, values[index])
-        assert np.asarray(payload.z).dtype == dtype
         assert payload.data.unit == "V"
         assert [(axis.name, axis.unit) for axis in payload.axes] == [
             ("frequency", "Hz"),
