@@ -46,7 +46,7 @@ from zcu_lab.v2.twotone.time_domain.detune import actual_detune
 from zcu_lab.v2.twotone.time_domain.t2echo.core import T2EchoAnalyzeOptions
 
 
-@dataclass
+@dataclass(frozen=True)
 class HeraldingT2EchoAnalyzeOptions(T2EchoAnalyzeOptions):
     """Fit C using two or three states; second-order IQ identifies at most three."""
 

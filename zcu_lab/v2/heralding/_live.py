@@ -37,7 +37,7 @@ class TransferProjector:
 
 def live_transfer(
     plots: Plots, ax: Axes, xs: NDArray[np.float64]
-) -> Callable[[NDArray[np.float64]], tuple[Artist, ...]]:
+) -> Callable[[NDArray[np.float64]], None]:
     """Attach a live C line and return its plot-owner update callback.
 
     Before calibration succeeds show Calibrating without C points. Failed

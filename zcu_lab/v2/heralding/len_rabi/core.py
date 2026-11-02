@@ -42,7 +42,7 @@ from zcu_lab.v2.heralding._live import TransferProjector, live_transfer
 from zcu_lab.v2.twotone.rabi.len_rabi.core import LenRabiAnalyzeOptions
 
 
-@dataclass
+@dataclass(frozen=True)
 class HeraldingLenRabiAnalyzeOptions(LenRabiAnalyzeOptions):
     """Fit C using two or three states; second-order IQ identifies at most three."""
 

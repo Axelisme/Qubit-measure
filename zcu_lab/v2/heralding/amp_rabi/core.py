@@ -39,7 +39,7 @@ from zcu_lab.v2.heralding._live import live_transfer
 from zcu_lab.v2.twotone.rabi.amp_rabi.core import AmpRabiAnalyzeOptions
 
 
-@dataclass
+@dataclass(frozen=True)
 class HeraldingAmpRabiAnalyzeOptions(AmpRabiAnalyzeOptions):
     """Fit C using two or three states; second-order IQ identifies at most three."""
 

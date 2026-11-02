@@ -46,7 +46,7 @@ from zcu_lab.v2.twotone.time_domain.detune import actual_detune
 from zcu_lab.v2.twotone.time_domain.t2ramsey.core import T2RamseyAnalyzeOptions
 
 
-@dataclass
+@dataclass(frozen=True)
 class HeraldingT2RamseyAnalyzeOptions(T2RamseyAnalyzeOptions):
     """Fit C using two or three states; second-order IQ identifies at most three."""
 
