@@ -981,10 +981,28 @@ class NativeTimelineDelay(TimedMacro):
         auto = self.book.channel_maximum(
             prog, gens=self.source.gens, ros=self.source.ros
         )
+        if isinstance(self.source.t, TableParam) and not isinstance(auto, RuntimeEnd):
+            maximum = prog.get_max_timestamp(gens=self.source.gens, ros=self.source.ros)
+            if isinstance(maximum, QickParam) and not maximum.is_sweep():
+                maximum = maximum.start
+            original = self.source.t
+            self.source.t = original + maximum
+            self.source.auto = False
+            try:
+                self.source.preprocess(prog)
+            finally:
+                self.source.t = original
+                self.source.auto = True
+            return
         if not isinstance(auto, RuntimeEnd):
             self.source.preprocess(prog)
             return
-        actual = self.book.math.add(auto, step_time(prog, self.source.t))
+        actual = self.book.math.add(
+            auto,
+            self.source.t
+            if isinstance(self.source.t, TableParam)
+            else step_time(prog, self.source.t),
+        )
         self.book.native_only = True
         try:
             self.source.preprocess(prog)
