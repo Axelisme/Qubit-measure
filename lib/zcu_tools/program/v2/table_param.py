@@ -22,6 +22,72 @@ class TableParam:
         self._raw: TableRawParam | None = None
         self._raw_scale: float = 1.0
 
+    def is_sweep(self) -> bool:
+        """Return True, even for a constant or single-point table."""
+        return True
+
+    def __float__(self) -> float:
+        raise TypeError("a TableParam cannot be converted to a scalar float")
+
+    @staticmethod
+    def _scalar(value: object) -> float:
+        if not isinstance(value, (int, float)):
+            raise TypeError("table arithmetic requires an int or float scalar")
+        return value
+
+    def __add__(self, other: object) -> "TableParam":
+        scalar = self._scalar(other)
+        return TableParam(self.loop, [v + scalar for v in self.values])
+
+    def __radd__(self, other: object) -> "TableParam":
+        return self + other
+
+    def __sub__(self, other: object) -> "TableParam":
+        scalar = self._scalar(other)
+        return TableParam(self.loop, [v - scalar for v in self.values])
+
+    def __rsub__(self, other: object) -> "TableParam":
+        scalar = self._scalar(other)
+        return TableParam(self.loop, [scalar - v for v in self.values])
+
+    def __mul__(self, other: object) -> "TableParam":
+        scalar = self._scalar(other)
+        return TableParam(self.loop, [v * scalar for v in self.values])
+
+    def __rmul__(self, other: object) -> "TableParam":
+        return self * other
+
+    def __truediv__(self, other: object) -> "TableParam":
+        scalar = self._scalar(other)
+        return TableParam(self.loop, [v / scalar for v in self.values])
+
+    def __rtruediv__(self, other: object) -> "TableParam":
+        scalar = self._scalar(other)
+        return TableParam(self.loop, [scalar / v for v in self.values])
+
+    def __neg__(self) -> "TableParam":
+        return self * -1
+
+    def minval(self) -> float:
+        """Return the smallest physical value across all points."""
+        return min(self.values)
+
+    def maxval(self) -> float:
+        """Return the largest physical value across all points."""
+        return max(self.values)
+
+    def __lt__(self, other: float) -> bool:
+        return self.minval() < other
+
+    def __le__(self, other: float) -> bool:
+        return self.minval() <= other
+
+    def __gt__(self, other: float) -> bool:
+        return self.maxval() > other
+
+    def __ge__(self, other: float) -> bool:
+        return self.maxval() >= other
+
     def to_int(
         self,
         scale: float,
