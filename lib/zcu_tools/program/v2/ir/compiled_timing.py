@@ -52,7 +52,7 @@ def compiled_wmem(program: QickProgramV2) -> dict[int, WaveWords]:
     Swept fields use their compiled starting values. No physical units are
     decoded. Raises ValueError if the program has no compiled binary.
     """
-    if program.binprog is None:
+    if not program.binprog:
         raise ValueError("Program must be compiled before reading WMEM")
     return {
         index: (
@@ -385,9 +385,7 @@ class _Machine:
         if self.wmem is None or address not in self.wmem:
             raise ValueError(f"Missing compiled wmem at address {address}")
         words = self.wmem[address]
-        if len(words) != 6 or any(
-            isinstance(word, bool) or not isinstance(word, int) for word in words
-        ):
+        if len(words) != 6 or any(isinstance(word, bool) for word in words):
             raise ValueError(
                 f"Compiled wmem must contain six integer words at {address}"
             )
