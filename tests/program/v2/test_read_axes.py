@@ -588,19 +588,21 @@ def test_mux_classify_only_axes_produce_joint_counts():
     np.testing.assert_array_equal(process(iq), [[[1, 2], [1, 0]]])
 
 
-def test_iq_axis_sums_and_repeated_read_second_moments():
+def test_iq_axis_sums_and_repeated_read_second_order_features():
     prog = compile_modules(load_soccfg(), [readout()])
     iq = {0: np.array([[[[2, 3]], [[4, 5]]], [[[-1, 2]], [[1, -2]]]], dtype=np.float64)}
-    process = v2.shot_sums(prog, [v2.IQ("readout"), v2.IQ("readout")])
-    actual = process(iq)
-    np.testing.assert_array_equal(
-        actual,
+    features = np.array(
         [
-            [[2, 6, 8], [6, 20, 26], [8, 26, 34]],
-            [[2, 0, 0], [0, 2, -4], [0, -4, 8]],
-        ],
+            [[1, 2, 3, 4, 6, 9], [1, 4, 5, 16, 20, 25]],
+            [[1, -1, 2, 1, -2, 4], [1, 1, -2, 1, -2, 4]],
+        ]
     )
     np.testing.assert_array_equal(
-        v2.shot_sums(prog, [v2.IQ("readout")])(iq), [[2, 6, 8], [2, 0, 0]]
+        v2.shot_sums(prog, [v2.IQ("readout")])(iq),
+        [[2, 6, 8, 20, 26, 34], [2, 0, 0, 2, -4, 8]],
     )
+    actual = v2.shot_sums(prog, [v2.IQ("readout"), v2.IQ("readout")])(iq)
+    expected = np.stack([point.T @ point for point in features])
+    assert actual.shape == (2, 6, 6)
+    np.testing.assert_array_equal(actual, expected)
     assert actual.dtype == np.float64
