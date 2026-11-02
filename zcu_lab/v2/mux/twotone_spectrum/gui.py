@@ -90,7 +90,7 @@ class MuxFreqAnalyzeResult:
 def _MuxFreq_options(result: MuxFreqRunResult, ctx: SessionEnv) -> FreqAnalyzeOptions:
     """Seed the analysis controls without changing the core defaults."""
     del result, ctx
-    return FreqAnalyzeOptions(model_type="lor", plot_fit=True)
+    return FreqAnalyzeOptions(model_type="lor")
 
 
 def _analyze(
