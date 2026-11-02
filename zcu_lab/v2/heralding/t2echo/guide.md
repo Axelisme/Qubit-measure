@@ -1,41 +1,41 @@
 # Heralded T2 Echo
 
-**讀者：** operator、agent。執行單 qubit ground-heralded Hahn Echo，審閱 T2e 提案並保存結果。
+**Readers:** operator, agent. Run heralded t2 echo without a classifier and review self-calibrated state-change fits and writeback.
 
-## 執行前
+## Before Run
 
-先準備校準的 Pi Pulse、Pi/2 Pulse 與單音 pulse Readout。Open／Reset 從固定 capture 的 `$qubit.module.x180`、`$qubit.module.x90`、`$resonator.module.readout` 取初值。缺少 slot 時，表單使用範本；範本不是硬體安全預設，必須補齊通道、頻率、gain 與 timing。Delay 預設從 0 掃到 captured T2e 的 1.5 倍，Relax delay 預設為 captured T1 的 5 倍。缺校準時手動填值。
+Select calibrated π and π/2 pulses from `$qubit.module.x180` and `$qubit.module.x90`, plus single-tone `$resonator.module.readout`. Mux is not supported. Reset is optional. Delay defaults to 1.5 × captured T2e and Relax delay to 5 × captured T1; manually fill missing calibration. Templates still require channels, gains, frequencies and timing.
 
-Readout 必須包含同座標的 circle、linear 或 centroid3 classifier。分類座標是未扣 offset 的 normalized ADC IQ。Circle 需要 g/e centers 與正的 GE Post radius，herald_states 為 g/e/other，other 是拒判區。Linear 為 g/e，沒有拒判區。Centroid3 為 g/e/f，f 不是 other。即時 IQ 與擬合只採用 herald 判為 g 的 shot。Mux 與其他 qubit 的 cluster 不適用。
+## Run and analyze
 
-兩次讀出使用同一組 pulse／ADC 與 classifier。這是 host post-selection，不是 FPGA feedback，沒有 active reset 或 joint herald。模擬仍受 dispersive validity guard 限制，不能把另一條線的 readout gain 當作安全界限。
+The sequence is optional reset → herald → π/2 → half delay → π → half delay → phase-shifted π/2 → signal. Delay is total free-evolution time in us; each half is hardware-quantized. Detune ratio/step MHz ramps only the final phase. Zero ratio disables that ramp; nonzero ratio with zero step fails. Early-stop SNR uses C with its own calibration cache. Initial or current calibration failure cannot stop the round.
 
-## Run
+Select `n_states`, `fit_method` and `fit_phase`. Full calibration precedes finite delay/C filtering and removal of the first remaining point. Method decay fits an exponential; fringe fits decaying fringes. Free fringe phase is optional; otherwise phase is fixed to 0°. Source cfg detune, or run-only realized detune without cfg, must be finite for fringe fitting. Zero detune forces decay. Unknown methods and insufficient data fail rather than selecting another model.
 
-可選 Reset 在 herald 前執行。序列依序為 Reset → herald readout → π/2 → half delay → π → half delay → final π/2 → signal readout。Reset 留空時不發 reset pulse。取數依 classifier 順序保存各 herald 類別的 count 與 IQ 總和，即時圖與擬合只取 g 類的 signal 條件平均。
+The figure contains only C and the fit with π̂ in the legend. Summary returns `t2e`, `t2e_err` in us, `detune`, `detune_err` in MHz, `pi_hat`, normalized `singular_values` and `fit_quality["fit"]`. Decay-only detune and error are zero. No pointwise arrays are returned. Identification errors propagate.
 
-Delay 是總自由演化時間，單位 us，不是半延遲。兩個 half delay 各自做硬體時間量化。Detune ratio 是每個總延遲 step 的 fringes；0 關閉相位 ramp。非零時，表單轉成 ratio／requested step 的 MHz，再隨總 delay 增加 final π/2 的 phase，不改 drive frequency。退化成零 step 的 sweep 不能使用非零 ratio。
+## Review writeback
 
-Reps 是每點每 round 的 shots，Rounds 是軟體平均輪數，Relax delay 是每 shot 結束後的等待。Acquire retry 控制暫時取數失敗的重試，Early-stop SNR 留空時不提前停止。
+Ordinary Echo targets and rules remain, marked Heralded: `$qubit.t2e` and an eligible captured-bias record. Default selection requires positive finite T2e, relative error ≤0.5, R² ≥0.9 and normalized RMS ≤0.1. Missing or unsuitable diagnostics produce review notes. Inspect before Apply; analysis does not write calibration. A finite-temperature Markov bath model does not certify hardware coherence or low-frequency-noise refocusing.
 
-Measurement 顯示篩選後平均 IQ 的投影。跨 round 依通過數加權，不直接平均各 round 的平均值。零通過點的 IQ 為 NaN，通過比例為 0；未完成點保留 NaN。
+## Readout and calibration
 
-## Analyze 與 writeback
+Herald and signal use the same single-tone pulse readout. No classifier or singleshot calibration is required. Acquisition saves the outer-product sums of ψ(h) and ψ(s), where ψ(z) = (1, I, Q, I², IQ, Q²). Reps counts attempted shots at each point, and Rounds adds their sums. Heralding adds no feedback or active reset.
 
-Analyze 取 herald-g 的 signal 條件平均 IQ，先排除非有限 time／IQ，再丟掉剩餘資料的第一點。接著做 IQ rotation，取實部擬合。本實驗直接依 Fit method 的 `fit_method` 呼叫擬合工具。選 decay 時用 `fit_decay` 擬合 exponential envelope；選 fringe 時用 `fit_decay_fringe` 擬合 decaying fringe。Fit phase offset 的 `fit_phase` 只控制 fringe 的 phase offset，開啟時自由擬合，關閉時固定為 0°。
+Analysis selects `n_states`, default 2, or 3. Second-order IQ can identify at most three states. Three collinear centers, insufficient state population or a failed lift make analysis fail. Readout tails and transitions during integration can bias calibration. Herald and signal must share readout centers and isotropic Gaussian width.
 
-Fringe fit 優先讀取 source cfg 的 detune；cfg 為 None 時改讀 Result 的 `true_activate_detune`。此值為零時強制改用 decay。Fringe 缺少有限 detune，或 `fit_method` 不為 decay／fringe 時，分析拋出 ValueError。有效點不足時分析失敗，不改用另一套擬合。Pass fraction 是診斷，不是擬合權重。本實驗在 `fit` 圖畫出旋轉後的資料與擬合曲線，標題顯示壽命與標準誤，fringe fit 另顯示頻率與標準誤。
+The fitted observable is C(x) = 1 − tr J(x), the probability that the state changes between herald and signal. K[i,j] = P(i → j) is a transfer diagnostic, not a fitted curve or gate fidelity. The legend and summary report `pi_hat`, the population entering the intermediate operation after herald. Decay during herald can lower its excited population relative to the original thermal state. States are ordered by decreasing population, not assigned g/e/f labels from IQ position.
 
-Analyze 回傳 `HeraldingT2EchoAnalysis`：
+## Live display
 
-- `t2e`、`t2e_err` 是 Echo 衰減時間與標準誤，單位 us。
-- `detune`、`detune_err` 是觀測到的 fringe 頻率與標準誤，單位 MHz，包含施加的 phase ramp；decay fit 時兩者為 0。
-- 以上四個數值欄位皆不為 None。`fit_quality["fit"]` 保存無因次的殘差與相對誤差診斷。型別允許未提供診斷時 `fit_quality` 為 None，本實驗的 Analyze 每次成功都提供診斷。
+Before the first successful two-state calibration, the measurement plot says Calibrating and has no C points. Later updates warm-start from the previous successful calibration. An identification failure leaves the last plot unchanged and acquisition continues. Analyze always recalibrates the full acquired data from scratch using the selected state count. It never reuses the live calibration.
 
-寫回與普通 Echo 相同：提出 `$qubit.t2e`，有固定 capture 與 device snapshot 時，也提出同一 qubit 的 bias record。描述標明 Heralded。T2e 必須為正且有限，error／T2e ≤ 0.5、R² ≥ 0.9、normalized RMS ≤ 0.1，才預設勾選；缺 metrics 或其他不符會顯示 review note。先看 fit 與提案，再明確 Apply；Analyze 不會自行寫回。
+## Save and load
 
-## Save 與 Load
+Native Save stores float64 `sums` with shape (N, 6, 6), the grid, acquisition cfg and metadata. The last two array axes are `herald_features` and `signal_features`, both ordered (1, I, Q, I², IQ, Q²). `sums[:, 0, 0]` is the shot count. Unmeasured points stay NaN. Time coordinates use seconds in the native file and us in Result; gain coordinates retain native units.
 
-Save 在 native `data.h5` 保存 `sums`，形狀為 (Nt, classes, 6)，linear 的 classes 為 2，circle 與 centroid3 為 3，後兩軸為 herald_states（依存檔 classifier 順序）與 signal_features（count、ΣI、ΣQ、ΣI²、ΣIQ、ΣQ²）。通過比例只在分析或即時呈現時從計數計算，不儲存。舊三分量 signal 軸的 label 不符，Load 直接報錯。缺少 `sums` 的舊格式也明確報錯。檔案時間使用 seconds，Result 載回為 us。Cfg 保留本次 pulses、detune 與 readout classifier。從本實驗 Load 後可再 Analyze，不用目前表單的 classifier 或 aliases 補歷史設定。
+Old classified-herald or three-component signal files fail the existing axis-label validation at Load. There is no compatibility path. A missing `sums` variable also fails Load. Load restores the saved record, not the current Form. Analyze again after Load. Check each output's save status; native saving does not imply every export succeeded.
 
-通過比例是 classifier 接受的 shot 比例，不是獨立的 ground purity、reset fidelity 或 gate fidelity。Herald readout 本身可能改變狀態。離線的有限溫度與 Markov bath 模型不能認證低頻噪聲 refocusing，流程走通也不代表硬體 T2e 已校準。
+## MCP recipe
+
+`heralding_t2echo` selects sources, applies inputs and overrides, checks readiness, runs, analyzes, asks about writeback and saves completed data even if analysis fails. `points` maps to Expts. Existing analysis inputs are fit_method and fit_phase; set `n_states` through analysis overrides. Omitted inputs retain Form values; explicit null passes unchanged to the field owner and may be rejected.

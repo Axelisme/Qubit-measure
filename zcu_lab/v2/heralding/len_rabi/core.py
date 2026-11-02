@@ -1,14 +1,15 @@
-"""Single-qubit length Rabi with ground-herald post-selection."""
+"""Single-qubit LenRabi from self-calibrated herald/signal second moments."""
 
 from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Annotated, ClassVar
+from typing import Annotated, ClassVar, Literal
 
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import Field
 from zcu_tools.analysis.fitting import FitQuality, fit_rabi
+from zcu_tools.analysis.herald_transfer import selfcal_transfer
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
     Experiment,
@@ -28,29 +29,32 @@ from zcu_tools.experiment.v2.utils.snr import snr_checker
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     IQ,
-    Classify,
     Pulse,
     Reset,
     SweepCfg,
     TimelineBuilder,
     TimelineProgramV2,
     shot_sums,
-    split_sums,
 )
 from zcu_tools.program.v2.modules import PulseReadout
-from zcu_tools.utils.process import rotate2real
 
-from zcu_lab.v2.support import live_line
+from zcu_lab.v2.heralding._live import TransferProjector, live_transfer
 from zcu_lab.v2.twotone.rabi.len_rabi.core import LenRabiAnalyzeOptions
+
+
+@dataclass
+class HeraldingLenRabiAnalyzeOptions(LenRabiAnalyzeOptions):
+    """Fit C using two or three states; second-order IQ identifies at most three."""
+
+    n_states: Annotated[Literal[2, 3], FieldMeta(label="Number of states")] = 2
 
 
 @dataclass(frozen=True)
 class HeraldingLenRabiResult:
-    """lengths is the sweep grid (us); sums has shape (points, classes, 6).
+    """lengths is the sweep grid (us); sums is float64 (N, 6, 6).
 
-    Herald states follow the saved classifier's state_names order and length.
-    Components are count/ΣI/ΣQ/ΣI²/ΣIQ/ΣQ².
-    Unmeasured sums are NaN. Conditional means at zero count are NaN.
+    Herald and signal axes use (1, I, Q, I², IQ, Q²); sums[:, 0, 0] is
+    the shot count. Unmeasured sums are NaN.
     """
 
     lengths: NDArray[np.float64]
@@ -59,7 +63,7 @@ class HeraldingLenRabiResult:
 
 @dataclass(frozen=True)
 class HeraldingLenRabiAnalysis:
-    """Herald-g duration calibration, not gate fidelity.
+    """C-based duration calibration, not gate fidelity.
 
     Attributes:
         pi_len: Fitted pi-pulse duration in us; never None.
@@ -71,6 +75,10 @@ class HeraldingLenRabiAnalysis:
         fit_quality: Fitter diagnostics keyed by "fit", including dimensionless
             residual and relative-error metrics and fixed-phase diagnostics;
             None when not supplied. analyze always supplies them.
+    pi_hat is the post-herald population tuple in descending order; herald
+    decay can reduce its excited population relative to the initial thermal state.
+    singular_values contains the leading n_states+1 singular values normalized
+    by the largest. Neither field contains per-point values.
     """
 
     pi_len: float
@@ -79,6 +87,8 @@ class HeraldingLenRabiAnalysis:
     pi2_len_err: float
     rabi_f: float
     rabi_f_err: float
+    pi_hat: tuple[float, ...]
+    singular_values: tuple[float, ...]
     fit_quality: Mapping[str, FitQuality] | None = None
 
 
@@ -118,7 +128,7 @@ class HeraldingLenRabiCfg(ConfigBase):
 def restore_result(
     data: GroupedLoadData[HeraldingLenRabiCfg],
 ) -> HeraldingLenRabiResult:
-    """Restore per-class shot sums; old files fail naming the missing sums variable."""
+    """Restore second-order sums; incompatible axis labels fail native loading."""
     sums = data.variable("sums")
     return HeraldingLenRabiResult(
         lengths=sums.axes[2].astype(np.float64),
@@ -127,13 +137,16 @@ def restore_result(
 
 
 class HeraldingLenRabiExp(Experiment[HeraldingLenRabiResult, HeraldingLenRabiCfg]):
-    """Herald ground, sweep drive length, and store per-class count/IQ sums.
+    """Measure shared-readout herald/signal moments without a classifier.
 
-    Store all herald classes in classifier state_names order.
-    Live plots and fits use only the herald-g conditional mean IQ.
+    Optional reset, herald readout, optional init, length-swept drive, signal.
+    Live plots and fits use only state-change probability C = 1 - tr J.
+    K[i,j] = P(i -> j) is a diagnostic, not the fitted observable.
     """
 
-    Options: ClassVar[type[LenRabiAnalyzeOptions]] = LenRabiAnalyzeOptions
+    Options: ClassVar[type[HeraldingLenRabiAnalyzeOptions]] = (
+        HeraldingLenRabiAnalyzeOptions
+    )
     AXES_SPEC: ClassVar[
         GroupedAxesSpec[HeraldingLenRabiResult, HeraldingLenRabiCfg]
     ] = GroupedAxesSpec(
@@ -144,7 +157,7 @@ class HeraldingLenRabiExp(Experiment[HeraldingLenRabiResult, HeraldingLenRabiCfg
                     VariableAxisSpec(
                         label="signal_features", unit="", values=tuple(range(6))
                     ),
-                    VariableAxisSpec.generated_arange(label="herald_states", unit=""),
+                    VariableAxisSpec.generated_arange(label="herald_features", unit=""),
                     VariableAxisSpec(
                         label="Length", unit="s", field_name="lengths", scale=1e-6
                     ),
@@ -163,63 +176,50 @@ class HeraldingLenRabiExp(Experiment[HeraldingLenRabiResult, HeraldingLenRabiCfg
     def run(
         self, cfg: HeraldingLenRabiCfg, *, context: RunContext
     ) -> HeraldingLenRabiResult:
-        """Acquire (Nl, classes, 6) shot sums versus drive length in us.
+        """Acquire (N, 6, 6) moment sums without classifier calibration.
 
-        Sequence: optional reset, herald, optional init, drive, signal readout.
-        Readouts share cfg.readout and its classifier.
-        Herald states follow classifier state_names.
-        Components are count/ΣI/ΣQ/ΣI²/ΣIQ/ΣQ².
-        Const/flat-top use a hardware sweep. Other editable waveforms use a
-        round-major host scan with cached programs; arb is rejected.
-        Both hardware rounds and host segments add their sums directly.
-        Live and analyze use herald-g conditional IQ; zero-count means are NaN.
-        Unmeasured sums remain NaN. Early-stop SNR follows each full curve.
-        cfg is not mutated; heralding itself adds no active reset.
+        Optional reset, herald readout, optional init, length-swept drive, signal.
+        Both readouts use cfg.readout. Rounds add raw sums. cfg is copied.
+        Live C uses two-state self-calibration with warm starts. Before its
+        first success show Calibrating; identification failures keep the last
+        plot and do not stop acquisition. Unmeasured sums remain NaN.
+        Const/flat-top use an FPGA sweep; other editable waveforms use a
+        round-major host scan. Native arb length sweeps are rejected.
+        Early-stop SNR also uses C; a failed calibration cannot stop a round.
+        Pulse times use us. Heralding adds no active reset or feedback.
         """
         if cfg.qub_pulse.waveform.style == "arb":
             raise ValueError(
                 "Len Rabi cannot sweep an arb waveform's asset-derived length. "
                 "Select a waveform with an editable length instead."
             )
-        if cfg.readout.classifier is None:
-            raise ValueError("Heralding requires a readout classifier")
-        num_states = len(cfg.readout.classifier.state_names)
         cfg = deepcopy(cfg)
         lengths = sweep2array(
             cfg.length, "time", {"soccfg": context.soccfg, "gen_ch": cfg.qub_pulse.ch}
         )
         if cfg.qub_pulse.waveform.style in ("const", "flat_top"):
-            return self._run_hardware(cfg, lengths, num_states, context=context)
-        return self._run_host(cfg, np.unique(lengths), num_states, context=context)
+            return self._run_hardware(cfg, lengths, context=context)
+        return self._run_host(cfg, np.unique(lengths), context=context)
 
     def _run_hardware(
         self,
         cfg: HeraldingLenRabiCfg,
         lengths: NDArray[np.float64],
-        num_states: int,
         *,
         context: RunContext,
     ) -> HeraldingLenRabiResult:
         """Sweep editable const/flat-top length on the FPGA, summing rounds."""
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Length (us)", ylabel="Signal")
-        viewer = live_line(ax)
-
-        @context.plots.on_plot_thread
-        def update(data):
-            return viewer.set(lengths, rotate2real(split_sums(data)[1][..., 0]).real)
+        update = live_transfer(context.plots, ax, lengths)
 
         fig.show()
         buffer = SignalBuffer(
-            (len(lengths), num_states, 6),
+            (len(lengths), 6, 6),
             dtype=np.float64,
             on_update=update,
         )
-        check_snr = snr_checker(
-            buffer.at(),
-            cfg.earlystop_snr,
-            lambda data: rotate2real(split_sums(data)[1][..., 0]).real,
-        )
+        check_snr = snr_checker(buffer.at(), cfg.earlystop_snr, TransferProjector())
 
         with Schedule(buffer, scope=context.scope) as sched:
             builder = TimelineBuilder(
@@ -237,7 +237,7 @@ class HeraldingLenRabiExp(Experiment[HeraldingLenRabiResult, HeraldingLenRabiCfg
                 prog,
                 context.soc,
                 rounds=cfg.rounds,
-                processor=shot_sums(prog, [Classify("herald"), IQ("signal")]),
+                processor=shot_sums(prog, [IQ("herald"), IQ("signal")]),
                 options=RunOptions(converter=np.copy, stop_condition=check_snr),
             )
         return HeraldingLenRabiResult(lengths, buffer.array)
@@ -246,33 +246,24 @@ class HeraldingLenRabiExp(Experiment[HeraldingLenRabiResult, HeraldingLenRabiCfg
         self,
         cfg: HeraldingLenRabiCfg,
         lengths: NDArray[np.float64],
-        num_states: int,
         *,
         context: RunContext,
     ) -> HeraldingLenRabiResult:
         """Scan editable waveforms round-major, caching each length's program."""
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Length (us)", ylabel="Signal")
-        viewer = live_line(ax)
-
-        @context.plots.on_plot_thread
-        def update(data):
-            return viewer.set(lengths, rotate2real(split_sums(data)[1][..., 0]).real)
+        update = live_transfer(context.plots, ax, lengths)
 
         fig.show()
         buffer = SignalBuffer(
-            (len(lengths), num_states, 6),
+            (len(lengths), 6, 6),
             dtype=np.float64,
             on_update=update,
         )
-        check_snr = snr_checker(
-            buffer.at(),
-            cfg.earlystop_snr,
-            lambda data: rotate2real(split_sums(data)[1][..., 0]).real,
-        )
+        check_snr = snr_checker(buffer.at(), cfg.earlystop_snr, TransferProjector())
 
         acquisition_buffer = SignalBuffer(
-            (cfg.rounds, len(lengths), num_states, 6), dtype=np.float64
+            (cfg.rounds, len(lengths), 6, 6), dtype=np.float64
         )
         with Schedule(acquisition_buffer, scope=context.scope) as sched:
             programs: dict[float, TimelineProgramV2] = {}
@@ -296,9 +287,7 @@ class HeraldingLenRabiExp(Experiment[HeraldingLenRabiResult, HeraldingLenRabiCfg
                             prog,
                             context.soc,
                             rounds=1,
-                            processor=shot_sums(
-                                prog, [Classify("herald"), IQ("signal")]
-                            ),
+                            processor=shot_sums(prog, [IQ("herald"), IQ("signal")]),
                             options=RunOptions(converter=np.copy),
                         )
                     finally:
@@ -314,25 +303,29 @@ class HeraldingLenRabiExp(Experiment[HeraldingLenRabiResult, HeraldingLenRabiCfg
     def analyze(
         self,
         source: RunRecord[HeraldingLenRabiCfg, HeraldingLenRabiResult],
-        options: LenRabiAnalyzeOptions,
+        options: HeraldingLenRabiAnalyzeOptions,
         *,
         plots: Plots,
     ) -> HeraldingLenRabiAnalysis:
-        """Fit herald-g IQ and return pi/pi2 lengths (us), frequency and errors.
+        """Fully self-calibrate all sums and fit only C = 1 - tr J.
 
-        Discard nonfinite lengths and complex IQ, then rotate onto a real
-        contrast axis. options.decay enables the envelope; options.fit_phase
-        frees the otherwise fixed zero phase. Return the fitter's quality and publish
-        fit with pi/pi2 markers, uncertainty spans and frequency in MHz.
-        Pass fraction is diagnostic, not a fit weight. Saved cfg is not
-        required. All-NaN data raise ValueError("All data are NaN!"); other
-        invalid traces propagate the fit tool's errors.
+        Discard nonfinite lengths and C. options.decay enables a decaying
+        cosine envelope; options.fit_phase frees the otherwise zero phase.
+        Return pi/pi2 durations (us), oscillation frequency (MHz) and errors.
+        options.n_states selects 2 or 3, the second-order identifiability limit.
+        Three collinear centers fail. Readout tails can bias the calibration.
+        pi_hat describes populations entering the operation after herald;
+        herald-readout decay can lower it relative to the initial thermal state.
+        Draw only C and the fit, with pi_hat in the legend. Return fit parameters,
+        pi_hat and normalized singular values, without pointwise arrays.
+        Identification and fitting failures propagate; saved cfg is not required.
         """
         result = source.result
-        signals = split_sums(result.sums)[1][..., 0]
+        transfer = selfcal_transfer(result.sums, n_states=options.n_states)
+        signals = transfer.change_probability
         finite = np.isfinite(result.lengths) & np.isfinite(signals)
         lens, signals = result.lengths[finite], signals[finite]
-        real_signals = rotate2real(signals).real
+        real_signals = signals
 
         nan_mask = np.isnan(real_signals)
         if np.all(nan_mask):
@@ -359,24 +352,17 @@ class HeraldingLenRabiExp(Experiment[HeraldingLenRabiResult, HeraldingLenRabiCfg
         # 3. Show the oscillation and the fitted calibration lengths.
         fig, ax = plots.subplots(num="fit", figsize=config.figsize)
 
-        ax.plot(lens, real_signals, label="meas", ls="-", marker="o", markersize=3)
+        ax.plot(
+            lens,
+            real_signals,
+            label=f"C, π̂={transfer.populations.round(3).tolist()}",
+            ls="-",
+            marker="o",
+            markersize=3,
+        )
         ax.plot(lens, y_fit, label="fit")
-        ax.axvline(
-            pi_len,
-            ls="--",
-            c="red",
-            label=f"pi = {pi_len:.3g} ± {pi_len_err:.2g} μs",
-        )
-        ax.axvspan(pi_len - pi_len_err, pi_len + pi_len_err, color="red", alpha=0.2)
-        ax.axvline(
-            pi2_len,
-            ls="--",
-            c="red",
-            label=f"pi/2 = {pi2_len:.3g} ± {pi2_len_err:.2g} μs",
-        )
-        ax.axvspan(pi2_len - pi2_len_err, pi2_len + pi2_len_err, color="red", alpha=0.2)
         ax.set_xlabel("Pulse length (μs)")
-        ax.set_ylabel("Signal Real (a.u.)")
+        ax.set_ylabel("Change probability C")
         ax.set_title(f"Rabi Oscillation (f={freq:.3f} ± {freq_err:.3f} MHz)")
         ax.legend(loc=4)
         ax.grid(True)
@@ -393,5 +379,7 @@ class HeraldingLenRabiExp(Experiment[HeraldingLenRabiResult, HeraldingLenRabiCfg
             pi2_len_err,
             freq,
             freq_err,
+            pi_hat=tuple(float(p) for p in transfer.populations),
+            singular_values=tuple(float(s) for s in transfer.singular_values),
             fit_quality={"fit": fit.quality},
         )

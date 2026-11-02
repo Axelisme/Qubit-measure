@@ -1,36 +1,39 @@
 # Heralded T1
 
-**讀者：** operator、agent。使用 GUI 執行單 qubit heralded T1，分析 g 類條件平均並保存各類總和。
+**Readers:** operator, agent. Run heralded t1 without a classifier and review self-calibrated state-change fits and writeback.
 
-本頁給已校準單 qubit π pulse 與 pulse readout classifier 的操作員。實驗先做 herald readout，再做 π → delay → signal readout。取數依 classifier 順序保存各類的 count 與 IQ 總和，即時圖與擬合只取 g 類的 signal 條件平均。這是 host post-selection，沒有 active reset，也不檢查其他 qubit。
+## Before Run
 
-## 執行前
+Select a calibrated π pulse from `$qubit.module.x180` and a single-tone readout from `$resonator.module.readout`. Mux is not supported. Set Delay Start/Stop/Expts in us. Linear sampling uses a uniform FPGA sweep. Decay sampling uses the shared T1 grid and rejects colliding hardware-quantized points. Set Reps, Rounds and Relax delay. Simulation readout gain remains subject to its dispersive-validity guard.
 
-- Pi Pulse 選 `$qubit.module.x180` 的校準脈衝。
-- Readout 選 `$resonator.module.readout` 的單音 pulse readout。兩次讀出共用此設定。Mux 不適用。
-- Readout 必須包含同座標的 circle、linear 或 centroid3 classifier。分類座標是未扣 offset 的 normalized ADC IQ。Circle 需要 g/e centers 與正的 GE Post radius，herald_states 為 g/e/other，other 是拒判區。Linear 為 g/e，沒有拒判區。Centroid3 為 g/e/f，f 不是 other。即時 IQ 與擬合只採用 herald 判為 g 的 shot。
-- 模擬讀出仍受 dispersive validity guard 限制。Gain 安全範圍取決於 carrier、pulse length、flux 與 truncation，不能直接套用別條讀出線的界限。
+## Run and analyze
 
-## Run 與 Analyze
+The sequence is herald → π pulse → swept delay → signal. Select `n_states`, `skip` and `dual_exp`. Calibration uses all measured points. Skip then removes leading points on the original delay grid, and fitting omits nonfinite delay/C pairs. The default model is a + b·exp(−t/T1); `dual_exp=True` uses two decay terms.
 
-Delay 使用 us，只接受 Start/Stop/Expts 時間窗。Sampling 選 linear 時掃描線性延遲；選 decay 時使用共用 T1 衰減段取樣。硬體量化後重疊的點會報錯，不會減點。
+The fit plot contains only C and the combined fit, with π̂ in the legend. `t1` and `t1_err` use us. `t1b` and `t1b_err` are None for a single decay and use us for two decays. Summary also returns `pi_hat`, normalized `singular_values` and `fit_quality["fit"]`. No pointwise arrays are returned. Identification and fitting errors propagate.
 
-Reps 是每點每 round 的 shots，Rounds 是軟體 rounds。Relax delay 是每 shot 結束後的等待。序列依序為 herald readout、π pulse、delay、signal readout。沒有額外的 reset pulse。
+## Review writeback
 
-Run 的 measurement 顯示通過 shot 的平均 IQ magnitude。跨 round 依通過數加權，不平均各 round 的平均值。沒有 shot 通過的點為 NaN，通過比例為 0；取消前未完成的點保留 NaN。
+Apply writes `$qubit.t1` only after explicit operator confirmation. Its destination and proposal rules are unchanged.
 
-Analyze 取 herald-g 的 signal 條件平均 IQ。Skip leading points 的 `skip` 先從原網格移除前幾點，之後排除非有限 time／IQ，再做 IQ rotation，取實部擬合。本實驗直接呼叫 `fit_decay` 做單 exponential fit；開啟 Dual exponential 的 `dual_exp` 時改用 `fit_dual_decay`。本實驗在 `fit` 圖畫出旋轉後的資料與擬合曲線，標題顯示壽命與標準誤。Pass fraction 不當作 fit weight。分析不需要 saved cfg，有效點不足時分析會失敗。
+## Readout and calibration
 
-Analyze 回傳 `HeraldingT1Analysis`：
+Herald and signal use the same single-tone pulse readout. No classifier or singleshot calibration is required. Acquisition saves the outer-product sums of ψ(h) and ψ(s), where ψ(z) = (1, I, Q, I², IQ, Q²). Reps counts attempted shots at each point, and Rounds adds their sums. Heralding adds no feedback or active reset.
 
-- `t1`、`t1_err` 是主要衰減時間與標準誤，單位 us，皆不為 None。
-- `t1b`、`t1b_err` 是第二個衰減時間與標準誤，單位 us；單 exponential fit 時兩者為 None。
-- `fit_quality["fit"]` 保存無因次的殘差與相對誤差診斷。型別允許未提供診斷時 `fit_quality` 為 None，本實驗的 Analyze 每次成功都提供診斷。
+Analysis selects `n_states`, default 2, or 3. Second-order IQ can identify at most three states. Three collinear centers, insufficient state population or a failed lift make analysis fail. Readout tails and transitions during integration can bias calibration. Herald and signal must share readout centers and isotropic Gaussian width.
 
-Apply 只在操作員確認後寫回 `$qubit.t1`。
+The fitted observable is C(x) = 1 − tr J(x), the probability that the state changes between herald and signal. K[i,j] = P(i → j) is a transfer diagnostic, not a fitted curve or gate fidelity. The legend and summary report `pi_hat`, the population entering the intermediate operation after herald. Decay during herald can lower its excited population relative to the original thermal state. States are ordered by decreasing population, not assigned g/e/f labels from IQ position.
 
-## Save 與載回
+## Live display
 
-Save 將 `sums` 寫入 native `data.h5`，形狀是 (Nt, classes, 6)，linear 的 classes 為 2，circle 與 centroid3 為 3。後兩軸是 herald_states（依存檔 classifier 順序）與 signal_features（count、ΣI、ΣQ、ΣI²、ΣIQ、ΣQ²）。時間在檔案中使用 seconds，載回 Result 時恢復 us。通過比例只在分析或即時呈現時以 g 計數除以總計數，不另存變數。舊三分量 signal 軸的 label 不符，Load 直接報錯。缺少 `sums` 的舊格式也明確報錯。Cfg 保存這次 readout 的 classifier。用本實驗載回資料後可重新 Analyze，不需要目前的 classifier。
+Before the first successful two-state calibration, the measurement plot says Calibrating and has no C points. Later updates warm-start from the previous successful calibration. An identification failure leaves the last plot unchanged and acquisition continues. Analyze always recalibrates the full acquired data from scratch using the selected state count. It never reuses the live calibration.
 
-Pass fraction 是 classifier 接受的 shot 比例，不是 ground-state purity 或 reset fidelity。FTF joint-state IQ cluster 不能當作單 qubit g/e 校準；離線走通流程也不代表物理校準完成。
+## Save and load
+
+Native Save stores float64 `sums` with shape (N, 6, 6), the grid, acquisition cfg and metadata. The last two array axes are `herald_features` and `signal_features`, both ordered (1, I, Q, I², IQ, Q²). `sums[:, 0, 0]` is the shot count. Unmeasured points stay NaN. Time coordinates use seconds in the native file and us in Result; gain coordinates retain native units.
+
+Old classified-herald or three-component signal files fail the existing axis-label validation at Load. There is no compatibility path. A missing `sums` variable also fails Load. Load restores the saved record, not the current Form. Analyze again after Load. Check each output's save status; native saving does not imply every export succeeded.
+
+## MCP recipe
+
+`heralding_t1` selects sources, applies inputs and overrides, checks readiness, runs, analyzes, asks about writeback and saves completed data even if analysis fails. `points` maps to Expts. Existing analysis inputs are dual_exp and skip; set `n_states` through analysis overrides. Omitted inputs retain Form values; explicit null passes unchanged to the field owner and may be rejected.

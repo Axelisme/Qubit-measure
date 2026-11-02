@@ -17,11 +17,9 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import split_sums
 
 from zcu_lab.v2.twotone.rabi.len_rabi.core import (
     LenRabiAnalysis,
-    LenRabiAnalyzeOptions,
     LenRabiCfg,
     LenRabiResult,
 )
@@ -29,6 +27,7 @@ from zcu_lab.v2.twotone.rabi.len_rabi.gui import DEFINITION as LEN_RABI
 
 from .core import (
     HeraldingLenRabiAnalysis,
+    HeraldingLenRabiAnalyzeOptions,
     HeraldingLenRabiCfg,
     HeraldingLenRabiExp,
     HeraldingLenRabiResult,
@@ -39,9 +38,11 @@ LenRabiRunResult: TypeAlias = RunRecord[HeraldingLenRabiCfg, HeraldingLenRabiRes
 
 
 def analyze(
-    req: AnalyzeRequest[LenRabiRunResult, LenRabiAnalyzeOptions], *, plots: Plots
+    req: AnalyzeRequest[LenRabiRunResult, HeraldingLenRabiAnalyzeOptions],
+    *,
+    plots: Plots,
 ) -> HeraldingLenRabiAnalysis:
-    """Fit finite herald-g IQ and publish this experiment's calibration plot."""
+    """Fit self-calibrated C and publish fit parameters and population diagnostics."""
     return HeraldingLenRabiExp().analyze(
         req.run_result,
         req.analyze_params,
@@ -66,8 +67,11 @@ def writeback(
             if source.cfg is None
             else LenRabiCfg.model_validate(source.cfg.model_dump())
         ),
+        # Ordinary-record unconditional IQ mapping; writeback does not read signals.
         result=LenRabiResult(
-            source.result.lengths, split_sums(source.result.sums)[1][..., 0]
+            source.result.lengths,
+            (source.result.sums[:, 0, 1] + 1j * source.result.sums[:, 0, 2])
+            / source.result.sums[:, 0, 0],
         ),
         metadata=source.metadata,
     )
@@ -90,7 +94,7 @@ def writeback(
 def _run(
     cfg: HeraldingLenRabiCfg, *, context: RunContext
 ) -> RunRecord[HeraldingLenRabiCfg, HeraldingLenRabiResult]:
-    """Keep the unswept cfg and its readout classifier with selected results."""
+    """Retain acquisition cfg with unclassified herald/signal second moments."""
     return RunRecord(cfg=cfg, result=HeraldingLenRabiExp().run(cfg, context=context))
 
 
@@ -101,7 +105,7 @@ DEFINITION = Adapter(
     guide=Path(__file__).with_name("guide.md"),
     analysis=Analysis(
         fn=analyze,
-        options=lambda source, env: LenRabiAnalyzeOptions(),
+        options=lambda source, env: HeraldingLenRabiAnalyzeOptions(),
         writeback=writeback,
     ),
 )

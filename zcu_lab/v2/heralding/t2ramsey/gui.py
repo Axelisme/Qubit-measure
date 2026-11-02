@@ -18,10 +18,8 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import split_sums
 
 from zcu_lab.v2.twotone.time_domain.t2ramsey.core import (
-    T2RamseyAnalyzeOptions,
     T2RamseyCfg,
     T2RamseyResult,
 )
@@ -32,6 +30,7 @@ from zcu_lab.v2.twotone.time_domain.t2ramsey.gui import T2RamseyAnalyzeResult
 
 from .core import (
     HeraldingT2RamseyAnalysis,
+    HeraldingT2RamseyAnalyzeOptions,
     HeraldingT2RamseyCfg,
     HeraldingT2RamseyExp,
     HeraldingT2RamseyResult,
@@ -45,25 +44,19 @@ T2RamseyRunResult: TypeAlias = RunRecord[HeraldingT2RamseyCfg, HeraldingT2Ramsey
 
 
 def _T2Ramsey_analyze(
-    req: AnalyzeRequest[T2RamseyRunResult, T2RamseyAnalyzeOptions], *, plots: Plots
-) -> T2RamseyAnalyzeResult:
-    params = req.analyze_params
-    analysis: HeraldingT2RamseyAnalysis = HeraldingT2RamseyExp().analyze(
+    req: AnalyzeRequest[T2RamseyRunResult, HeraldingT2RamseyAnalyzeOptions],
+    *,
+    plots: Plots,
+) -> HeraldingT2RamseyAnalysis:
+    return HeraldingT2RamseyExp().analyze(
         req.run_result,
         req.analyze_params,
         plots=plots,
     )
-    return T2RamseyAnalyzeResult(
-        t2r=analysis.t2r,
-        t2r_err=analysis.t2r_err,
-        fit_quality=analysis.fit_quality,
-        detune=analysis.detune,
-        fit_fringe=params.fit_fringe,
-    )
 
 
 def _T2Ramsey_get_writeback_items(
-    req: WritebackRequest[T2RamseyRunResult, T2RamseyAnalyzeResult],
+    req: WritebackRequest[T2RamseyRunResult, HeraldingT2RamseyAnalysis],
 ) -> Sequence[WritebackItem]:
     """Reuse ordinary writeback rules and captured Run facts, labeled Heralded.
 
@@ -78,15 +71,25 @@ def _T2Ramsey_get_writeback_items(
             if source.cfg is None
             else T2RamseyCfg.model_validate(source.cfg.model_dump())
         ),
+        # Ordinary-record unconditional IQ mapping; writeback does not read signals.
         result=T2RamseyResult(
             source.result.times,
-            split_sums(source.result.sums)[1][..., 0],
+            (source.result.sums[:, 0, 1] + 1j * source.result.sums[:, 0, 2])
+            / source.result.sums[:, 0, 0],
             source.result.true_activate_detune,
         ),
         metadata=source.metadata,
     )
+    analysis = req.analyze_result
+    ordinary_analysis = T2RamseyAnalyzeResult(
+        t2r=analysis.t2r,
+        t2r_err=analysis.t2r_err,
+        detune=analysis.detune,
+        fit_fringe=analysis.fit_fringe,
+        fit_quality=analysis.fit_quality,
+    )
     items = T2_RAMSEY.get_writeback_items(
-        WritebackRequest(ordinary, req.analyze_result, req.ctx)
+        WritebackRequest(ordinary, ordinary_analysis, req.ctx)
     )
     return [replace(item, description=f"Heralded {item.description}") for item in items]
 
@@ -131,7 +134,7 @@ DEFINITION = Adapter(
     guide=Path(__file__).with_name("guide.md"),
     analysis=Analysis(
         fn=_T2Ramsey_analyze,
-        options=lambda source, env: T2RamseyAnalyzeOptions(),
+        options=lambda source, env: HeraldingT2RamseyAnalyzeOptions(),
         writeback=_T2Ramsey_get_writeback_items,
     ),
 )

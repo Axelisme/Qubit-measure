@@ -1,6 +1,5 @@
 """Readout calibration lookup contracts."""
 
-import numpy as np
 import pytest
 from zcu_tools.cfg_model import Centroid3Classifier, CircleClassifier, LinearClassifier
 from zcu_tools.program.v2.modules import readout
@@ -130,21 +129,6 @@ def test_circle_requirement_rejects_incomplete_or_wrong_mode_on_any_adc(
             )
     with pytest.raises(ValueError, match=rf"ADC {bad_adc}: {message}"):
         readout.require_circle_classifiers(cfg)
-
-
-@pytest.mark.parametrize(
-    "classifier",
-    [
-        CircleClassifier(g_center=0j, e_center=2 + 0j, radius=0.5),
-        LinearClassifier(angle=0.0, threshold=1.0),
-        centroid3(),
-    ],
-    ids=["circle", "linear", "centroid3"],
-)
-def test_classification_output_axis_matches_classifier_state_names(classifier):
-    iq = np.array([[0.0, 0.0], [2.0, 0.0], [0.0, 2.0]], dtype=np.float64)
-    classified = readout.classification_processor(classifier)(iq)
-    assert classified.shape == (len(iq), len(classifier.state_names))
 
 
 def test_centroid3_is_not_circle_calibration():

@@ -1,44 +1,39 @@
 # Heralded amplitude Rabi
 
-**Readers:** operator, agent. Run a single-qubit gain sweep with ground-herald post-selection and review rotation-amplitude proposals.
+**Readers:** operator, agent. Run heralded amplitude rabi without a classifier and review self-calibrated state-change fits and writeback.
 
 ## Before Run
 
-Use `heralding/amp_rabi` after calibrating the qubit frequency and pulse readout at the intended operating point. Bind `qubit` and its `resonator`, then Open or Reset the tab to capture those sources. Later alias or library edits do not change an existing Run source.
-
-Readout must contain a calibrated circle, linear or centroid3 classifier in the same normalized ADC IQ coordinates and integration window. Circle needs g/e centers and a positive GE Post radius; its herald_states are g/e/other, with other the rejection region. Linear uses g/e without rejection. Centroid3 uses g/e/f; f is not other. Only shots classified as herald-g contribute to live IQ and fitting. Missing calibration stops Run. Changing readout frequency, gain, duration, ADC window or receiver settings can invalidate the classifier; review or recalibrate it before proceeding.
-
-Choose the Rabi pulse frequency, waveform and fixed duration. A prior pi amplitude is not required. Set Gain start/stop and Expts to cover visible oscillations within your approved drive limits. Confirm Reps, Rounds and Relax delay. The suggested form values are editable starting values, not hardware-safety approval.
+Bind qubit and resonator. Choose the fixed drive frequency, waveform and duration, readout generator/ADC settings and timing. A prior pi amplitude is not required. Set Gain Start/Stop and Expts to cover oscillations within your approved drive limits. Review Reps, Rounds and Relax delay; suggested values are not hardware-safety approval.
 
 ## Run and analyze
 
-1. Select an optional Reset module if needed. The experiment then emits a herald readout, the optional init pulse, the gain-swept drive and the terminal readout. The herald and signal readouts use separate instances with the same pulse/ADC settings and classifier. Heralding itself adds no active reset or joint-qubit classification.
-2. Click Run. Each point averages only signal shots whose herald was classified as ground. Rounds are weighted by their accepted-shot counts. The live plot shows selected IQ magnitude versus the hardware-quantized gain.
-3. Open Analysis and set Skip points, `skip`, if leading gain points should be excluded. Analyze takes the herald-g conditional mean IQ and skips points on the original gain grid. It then removes nonfinite gain/IQ points, rotates IQ onto its signal axis and takes the real part. This experiment calls `fit_rabi` with `decay=False`. If the real signal nearest zero gain is above the midpoint of the trace's maximum and minimum, the fit fixes phase at 0°; otherwise it fixes phase at 180°. Pass fraction is not a fit weight. Analysis does not require saved cfg. Negative skip is rejected; empty or insufficient traces raise errors.
-4. Inspect the `fit` plot drawn by this experiment. It shows rotated IQ, the fitted curve, pi/pi2 markers and uncertainty spans. These estimates calibrate pulse amplitudes; they do not measure gate fidelity.
+The sequence is optional reset → herald → optional initialization → gain-swept drive → signal. Both readout instances use the same cfg. Open Analysis and select `n_states` and `skip`. Calibration uses every measured point, then skip removes leading points on the original gain grid. Nonfinite gain/C pairs are omitted from fitting.
 
-Analyze returns `HeraldingAmpRabiAnalysis`:
-
-- `pi_amp` and `pi_amp_err` give the fitted pi gain and its standard uncertainty in native gain units, a.u.
-- `pi2_amp` and `pi2_amp_err` give the fitted pi/2 gain and its standard uncertainty in a.u.
-- None of these four numeric fields is None. `fit_quality["fit"]` contains dimensionless residual and relative-error diagnostics. The type allows `fit_quality=None` when diagnostics are not supplied; this experiment's Analyze always supplies them on success.
-
-## Pass fraction and saving
-
-Pass fraction is the herald-g count divided by the total class count at each gain. It is computed for analysis or live presentation, not stored. Zero accepted shots give fraction zero and NaN signal IQ. Unmeasured points remain NaN. Low acceptance reduces the effective sample count even when Reps is large.
-
-The classified fraction is not an independent measurement of ground purity. It depends on classifier errors and on whether calibration and acquisition use matching IQ coordinates.
-
-Save All writes native `sums` with shape (Ngain, classes, 6) and cfg, including the classifier. The class count is 2 for linear and 3 for circle or centroid3. The final axes are herald_states in the saved classifier's order and signal_features (count/ΣI/ΣQ/ΣI²/ΣIQ/ΣQ²). Old files with a three-component signal axis fail Load because their axis label is different. Files without `sums` fail with a missing-variable error. Load Data restores the saved grid and classifier rather than rebuilding them from the current Form. Analyze can run again on the loaded record. Review each save output's status; successful native saving does not imply every export format succeeded.
+The fit is a + b·cos, with no decay envelope. C nearest zero gain selects fixed phase 0° when above the trace midpoint, otherwise 180°. The fit plot contains only C and its fit, with π̂ in the legend. The summary returns `pi_amp`, `pi_amp_err`, `pi2_amp` and `pi2_amp_err` in native gain units, plus `pi_hat`, normalized `singular_values` and `fit_quality["fit"]`. It contains no pointwise J, K or C arrays. Negative skip, identification failure and insufficient fit data raise errors.
 
 ## Review writeback
 
-Successful analysis proposes the same five destinations as ordinary amplitude Rabi. Descriptions begin with Heralded:
+Writeback retains ordinary amplitude Rabi's five destinations, marked Heralded. It proposes pulse copies at `$qubit.pulses.pi_amp` and `$qubit.pulses.pi2_amp`, their `$qubit.module.x180` and `$qubit.module.x90` links, and `$qubit.ext.pi_product` in gain·us. Captured sources and the scalar source duration are required. Without saved cfg there are no proposals. Review every item before Apply; Analyze does not write calibration.
 
-- `$qubit.pulses.pi_amp` and `$qubit.pulses.pi2_amp` receive copies of the source Rabi pulse with fitted gains.
-- `$qubit.module.x180` and `$qubit.module.x90` receive the corresponding resolved library keys.
-- `$qubit.ext.pi_product` receives fitted pi gain times the source waveform length, in native gain × us.
+## Readout and calibration
 
-Destinations come from the Run or Load capture. Inspect every proposed pulse and slot before Apply. Analysis alone does not write calibration. Missing saved cfg suppresses these proposals; missing captured parameters or a non-scalar source length prevents proposal generation.
+Herald and signal use the same single-tone pulse readout. No classifier or singleshot calibration is required. Acquisition saves the outer-product sums of ψ(h) and ψ(s), where ψ(z) = (1, I, Q, I², IQ, Q²). Reps counts attempted shots at each point, and Rounds adds their sums. Heralding adds no feedback or active reset.
 
-The MCP recipe `heralding_amp_rabi` exposes readout/drive references, optional reset, fixed frequency/duration, gain endpoints, points, reps, rounds and analysis skip. `points` maps to the Form sweep count. Omitted inputs retain Form values; explicit null goes unchanged to the Form or analysis owner and may be rejected. Overrides are applied before readiness validation. The recipe runs, analyzes, asks about writeback and saves completed Run data even when analysis fails.
+Analysis selects `n_states`, default 2, or 3. Second-order IQ can identify at most three states. Three collinear centers, insufficient state population or a failed lift make analysis fail. Readout tails and transitions during integration can bias calibration. Herald and signal must share readout centers and isotropic Gaussian width.
+
+The fitted observable is C(x) = 1 − tr J(x), the probability that the state changes between herald and signal. K[i,j] = P(i → j) is a transfer diagnostic, not a fitted curve or gate fidelity. The legend and summary report `pi_hat`, the population entering the intermediate operation after herald. Decay during herald can lower its excited population relative to the original thermal state. States are ordered by decreasing population, not assigned g/e/f labels from IQ position.
+
+## Live display
+
+Before the first successful two-state calibration, the measurement plot says Calibrating and has no C points. Later updates warm-start from the previous successful calibration. An identification failure leaves the last plot unchanged and acquisition continues. Analyze always recalibrates the full acquired data from scratch using the selected state count. It never reuses the live calibration.
+
+## Save and load
+
+Native Save stores float64 `sums` with shape (N, 6, 6), the grid, acquisition cfg and metadata. The last two array axes are `herald_features` and `signal_features`, both ordered (1, I, Q, I², IQ, Q²). `sums[:, 0, 0]` is the shot count. Unmeasured points stay NaN. Time coordinates use seconds in the native file and us in Result; gain coordinates retain native units.
+
+Old classified-herald or three-component signal files fail the existing axis-label validation at Load. There is no compatibility path. A missing `sums` variable also fails Load. Load restores the saved record, not the current Form. Analyze again after Load. Check each output's save status; native saving does not imply every export succeeded.
+
+## MCP recipe
+
+`heralding_amp_rabi` selects sources, applies inputs and overrides, checks readiness, runs, analyzes, asks about writeback and saves completed data even if analysis fails. `points` maps to Expts. Existing analysis inputs are skip; set `n_states` through analysis overrides. Omitted inputs retain Form values; explicit null passes unchanged to the field owner and may be rejected.

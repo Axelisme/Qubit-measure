@@ -11,7 +11,7 @@
 
 - [FTF bring-up 與 CZ 校準](two_qubit/guide.md) 說明既有 F1/F2 單 qubit 校準、角色與保存方式。FTF 控制鏈可執行仍不代表物理校準或 fidelity 已驗收。
   - 九個實驗各有非 heralded 與 heralded 入口，均在取數時分類並保存計數，見下方[完整清單](#two-qubit-實驗清單)。
-- [Heralded T1](heralding/t1/guide.md) 說明單 qubit pulse readout 的 ground post-selection、pass fraction 與保存。沒有 active reset 或 joint herald。
+- [Heralded T1](heralding/t1/guide.md) 說明單 qubit 共用讀出的二階矩自校準、狀態改變機率 C 與保存。不需要 classifier，沒有 active reset 或 joint herald。
 - [Experiment authoring](experiment-authoring.md) 說明核心 records 與資料形狀，新實驗從[寫法慣例](experiment-authoring.md#寫法慣例)選 cfg、分析與圖 API 的寫法。
 - [Measure authoring](measure-authoring.md) 說明 cfg defaults、operator guides、writeback 與 reload。
 - [GUI contracts](gui-contracts.md) 說明 concrete adapter hooks 與 capability。

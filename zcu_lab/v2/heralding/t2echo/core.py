@@ -1,9 +1,9 @@
-"""Hahn Echo with host-side ground-herald post-selection."""
+"""Single-qubit T2Echo from self-calibrated herald/signal second moments."""
 
 from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Annotated, ClassVar
+from typing import Annotated, ClassVar, Literal
 
 import numpy as np
 from numpy.typing import NDArray
@@ -13,6 +13,7 @@ from zcu_tools.analysis.fitting import (
     fit_decay,
     fit_decay_fringe,
 )
+from zcu_tools.analysis.herald_transfer import selfcal_transfer
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
     Experiment,
@@ -32,29 +33,32 @@ from zcu_tools.experiment.v2.utils.snr import snr_checker
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     IQ,
-    Classify,
     Pulse,
     Reset,
     SweepCfg,
     TimelineBuilder,
     shot_sums,
-    split_sums,
 )
 from zcu_tools.program.v2.modules import PulseReadout
-from zcu_tools.utils.process import rotate2real
 
-from zcu_lab.v2.support import live_line
+from zcu_lab.v2.heralding._live import TransferProjector, live_transfer
 from zcu_lab.v2.twotone.time_domain.detune import actual_detune
 from zcu_lab.v2.twotone.time_domain.t2echo.core import T2EchoAnalyzeOptions
 
 
+@dataclass
+class HeraldingT2EchoAnalyzeOptions(T2EchoAnalyzeOptions):
+    """Fit C using two or three states; second-order IQ identifies at most three."""
+
+    n_states: Annotated[Literal[2, 3], FieldMeta(label="Number of states")] = 2
+
+
 @dataclass(frozen=True)
 class HeraldingT2EchoResult:
-    """times is the sweep grid (us); sums has shape (points, classes, 6).
+    """times is the sweep grid (us); sums is float64 (N, 6, 6).
 
-    Herald states follow the saved classifier's state_names order and length.
-    Components are count/ΣI/ΣQ/ΣI²/ΣIQ/ΣQ².
-    Unmeasured sums are NaN. Conditional means at zero count are NaN.
+    Herald and signal axes use (1, I, Q, I², IQ, Q²); sums[:, 0, 0] is
+    the shot count. Unmeasured sums are NaN.
     true_activate_detune is run-only MHz metadata, None after native load.
     """
 
@@ -65,7 +69,7 @@ class HeraldingT2EchoResult:
 
 @dataclass(frozen=True)
 class HeraldingT2EchoAnalysis:
-    """Herald-g conditional Echo fit and fitting-owner diagnostics.
+    """C-based Echo fit and fitting-owner diagnostics.
 
     t2e is the Echo decay time in us; t2e_err is its standard error in us.
     detune is the observed fringe frequency in MHz, including the applied
@@ -74,20 +78,25 @@ class HeraldingT2EchoAnalysis:
     fit_quality maps "fit" to the fitter's dimensionless residual and
     relative-error metrics, fixed-phase and decay-bound diagnostics, or is
     None when diagnostics were not supplied.
+    pi_hat is the post-herald population tuple in descending order; herald
+    decay can reduce its excited population relative to the initial thermal state.
+    singular_values contains the leading n_states+1 singular values normalized
+    by the largest. Neither field contains per-point values.
     """
 
     t2e: float
     t2e_err: float
     detune: float
     detune_err: float
+    pi_hat: tuple[float, ...]
+    singular_values: tuple[float, ...]
     fit_quality: Mapping[str, FitQuality] | None = None
 
 
 class HeraldingT2EchoCfg(ConfigBase):
     """Echo pulses, total delay in us and final-pulse phase-ramp MHz.
 
-    Readout must contain a calibrated single-qubit classifier. The acquisition
-    owner validates repetitions, rounds and classifier before taking shots.
+    Herald and signal share readout settings; no classifier is required.
     """
 
     reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
@@ -107,7 +116,7 @@ class HeraldingT2EchoCfg(ConfigBase):
 
 
 def restore_result(data: GroupedLoadData[HeraldingT2EchoCfg]) -> HeraldingT2EchoResult:
-    """Restore per-class shot sums; old files fail naming the missing sums variable."""
+    """Restore second-order sums; incompatible axis labels fail native loading."""
     sums = data.variable("sums")
     return HeraldingT2EchoResult(
         times=sums.axes[2].astype(np.float64),
@@ -116,9 +125,16 @@ def restore_result(data: GroupedLoadData[HeraldingT2EchoCfg]) -> HeraldingT2Echo
 
 
 class HeraldingT2EchoExp(Experiment[HeraldingT2EchoResult, HeraldingT2EchoCfg]):
-    """Herald ground, run Hahn Echo, then average only accepted signal shots."""
+    """Measure shared-readout herald/signal moments without a classifier.
 
-    Options: ClassVar[type[T2EchoAnalyzeOptions]] = T2EchoAnalyzeOptions
+    Optional reset, herald, pi/2, half delay, pi, half delay, final pi/2, signal.
+    Live plots and fits use only state-change probability C = 1 - tr J.
+    K[i,j] = P(i -> j) is a diagnostic, not the fitted observable.
+    """
+
+    Options: ClassVar[type[HeraldingT2EchoAnalyzeOptions]] = (
+        HeraldingT2EchoAnalyzeOptions
+    )
     AXES_SPEC: ClassVar[GroupedAxesSpec[HeraldingT2EchoResult, HeraldingT2EchoCfg]] = (
         GroupedAxesSpec(
             variables=(
@@ -129,7 +145,7 @@ class HeraldingT2EchoExp(Experiment[HeraldingT2EchoResult, HeraldingT2EchoCfg]):
                             label="signal_features", unit="", values=tuple(range(6))
                         ),
                         VariableAxisSpec.generated_arange(
-                            label="herald_states", unit=""
+                            label="herald_features", unit=""
                         ),
                         VariableAxisSpec(
                             label="Time", unit="s", field_name="times", scale=1e-6
@@ -151,19 +167,17 @@ class HeraldingT2EchoExp(Experiment[HeraldingT2EchoResult, HeraldingT2EchoCfg]):
     def run(
         self, cfg: HeraldingT2EchoCfg, *, context: RunContext
     ) -> HeraldingT2EchoResult:
-        """Acquire (Nt, classes, 6) shot sums versus total delay in us.
+        """Acquire (N, 6, 6) moment sums without classifier calibration.
 
-        Optional reset precedes herald. Echo is pi/2, half delay, pi, half delay,
-        pi/2, signal readout. detune in MHz ramps only the final pi/2 phase.
-        Readouts share the classifier; herald states follow its state_names.
-        Components are count/ΣI/ΣQ/ΣI²/ΣIQ/ΣQ². Rounds add sums. Live and analyze
-        select herald-g conditional IQ; zero-count means are NaN.
-        Unmeasured sums remain NaN. Half-delay rounding and actual detune follow
-        ordinary Echo. cfg is copied; heralding itself adds no active reset.
+        Optional reset, herald, pi/2, half delay, pi, half delay, final pi/2, signal.
+        Both readouts use cfg.readout. Rounds add raw sums. cfg is copied.
+        Live C uses two-state self-calibration with warm starts. Before its
+        first success show Calibrating; identification failures keep the last
+        plot and do not stop acquisition. Unmeasured sums remain NaN.
+        detune (MHz) ramps only the final pi/2 phase, not drive frequency.
+        Early-stop SNR also uses C; a failed calibration cannot stop a round.
+        Pulse times use us. Heralding adds no active reset or feedback.
         """
-        if cfg.readout.classifier is None:
-            raise ValueError("Heralding requires a readout classifier")
-        num_states = len(cfg.readout.classifier.state_names)
         cfg = deepcopy(cfg)
         soccfg = context.soccfg
         lengths = sweep2array(cfg.delay, "time", {"soccfg": soccfg, "scaler": 0.5})
@@ -180,15 +194,11 @@ class HeraldingT2EchoExp(Experiment[HeraldingT2EchoResult, HeraldingT2EchoCfg]):
             ylabel="Amplitude",
             title=f"Heralded T2 Echo (detune={true_detune:.3f}MHz)",
         )
-        viewer = live_line(ax)
-
-        @context.plots.on_plot_thread
-        def update(data):
-            return viewer.set(lengths, rotate2real(split_sums(data)[1][..., 0]).real)
+        update = live_transfer(context.plots, ax, lengths)
 
         fig.show()
         buffer = SignalBuffer(
-            (len(lengths), num_states, 6),
+            (len(lengths), 6, 6),
             dtype=np.float64,
             on_update=update,
         )
@@ -218,13 +228,13 @@ class HeraldingT2EchoExp(Experiment[HeraldingT2EchoResult, HeraldingT2EchoCfg]):
                 prog,
                 context.soc,
                 rounds=cfg.rounds,
-                processor=shot_sums(prog, [Classify("herald"), IQ("signal")]),
+                processor=shot_sums(prog, [IQ("herald"), IQ("signal")]),
                 options=RunOptions(
                     converter=np.copy,
                     stop_condition=snr_checker(
                         buffer.at(),
                         cfg.earlystop_snr,
-                        lambda data: rotate2real(split_sums(data)[1][..., 0]).real,
+                        TransferProjector(),
                     ),
                 ),
             )
@@ -234,22 +244,25 @@ class HeraldingT2EchoExp(Experiment[HeraldingT2EchoResult, HeraldingT2EchoCfg]):
     def analyze(
         self,
         source: RunRecord[HeraldingT2EchoCfg, HeraldingT2EchoResult],
-        options: T2EchoAnalyzeOptions,
+        options: HeraldingT2EchoAnalyzeOptions,
         *,
         plots: Plots,
     ) -> HeraldingT2EchoAnalysis:
-        """Fit herald-g conditional Echo IQ after discarding nonfinite samples.
+        """Fully self-calibrate all sums and fit only C = 1 - tr J.
 
-        Drop the first remaining sample, then rotate IQ onto its real axis.
+        Discard nonfinite delay/C pairs, then drop the first remaining point.
         options.fit_method selects decay or fringe; options.fit_phase frees
-        the fringe phase, otherwise fixes it at zero degrees. Zero source
-        detune forces decay. Use cfg.detune when present, otherwise the run's
-        true_activate_detune; a requested fringe without finite detune raises
-        ValueError. Unknown fit_method also raises ValueError.
-        Draw data and fit, and return lifetime/error in us, observed fringe
-        frequency/error in MHz (both zero for decay), and the fitter's quality.
-        Pass fractions are not fit weights; insufficient data raises in the
-        fitting tool.
+        fringe phase, otherwise fixes it at zero. Zero source detune forces
+        decay. Fringe needs finite cfg.detune or run-only actual detune.
+        Return lifetime/error in us and observed fringe frequency/error in MHz.
+        options.n_states selects 2 or 3, the second-order identifiability limit.
+        Three collinear centers fail. Readout tails can bias the calibration.
+        pi_hat describes populations entering the operation after herald;
+        herald-readout decay can lower it relative to the initial thermal state.
+        Draw only C and the fit, with pi_hat in the legend. Return fit parameters,
+        pi_hat and normalized singular values, without pointwise arrays.
+        Identification and fitting failures propagate; saved cfg is used only
+        for the fringe-detune rule.
         """
         result = source.result
         fit_method = options.fit_method
@@ -269,7 +282,8 @@ class HeraldingT2EchoExp(Experiment[HeraldingT2EchoResult, HeraldingT2EchoCfg]):
             if detune_source == 0.0:
                 fit_method = "decay"
 
-        signals = split_sums(result.sums)[1][..., 0]
+        transfer = selfcal_transfer(result.sums, n_states=options.n_states)
+        signals = transfer.change_probability
         finite = np.isfinite(result.times) & np.isfinite(signals)
         xs, signals = result.times[finite], signals[finite]
 
@@ -277,7 +291,7 @@ class HeraldingT2EchoExp(Experiment[HeraldingT2EchoResult, HeraldingT2EchoCfg]):
         signals = signals[1:]
 
         # Project IQ onto its signal axis before choosing the envelope model.
-        real_signals = rotate2real(signals).real
+        real_signals = signals
 
         if fit_method == "fringe":
             fixedparams = None if fit_phase else [None, None, None, 0.0, None]
@@ -303,7 +317,14 @@ class HeraldingT2EchoExp(Experiment[HeraldingT2EchoResult, HeraldingT2EchoCfg]):
 
         fig, ax = plots.subplots(num="fit", figsize=config.figsize)
 
-        ax.plot(xs, real_signals, label="data", ls="-", marker="o", markersize=5)
+        ax.plot(
+            xs,
+            real_signals,
+            label=f"C, π̂={transfer.populations.round(3).tolist()}",
+            ls="-",
+            marker="o",
+            markersize=5,
+        )
         ax.plot(xs, y_fit, label="fit", c="orange", zorder=1)
 
         t2e_str = f"{t2e:.2f}us ± {t2eerr:.2f}us"
@@ -319,7 +340,7 @@ class HeraldingT2EchoExp(Experiment[HeraldingT2EchoResult, HeraldingT2EchoCfg]):
 
         ax.set_title(title, fontsize=14)
         ax.set_xlabel("Delay Time (us)", fontsize=14)
-        ax.set_ylabel("Signal (a.u.)", fontsize=14)
+        ax.set_ylabel("Change probability C", fontsize=14)
         ax.legend(loc="upper right")
         ax.grid(True)
 
@@ -330,5 +351,7 @@ class HeraldingT2EchoExp(Experiment[HeraldingT2EchoResult, HeraldingT2EchoCfg]):
             t2e_err=float(t2eerr),
             detune=float(detune),
             detune_err=float(detune_err),
+            pi_hat=tuple(float(p) for p in transfer.populations),
+            singular_values=tuple(float(s) for s in transfer.singular_values),
             fit_quality={"fit": fit.quality},
         )

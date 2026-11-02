@@ -80,25 +80,24 @@ class HeraldingT2RamseyReport(RecipeReport):
     )
 
 
-@recipe("heralding_t2ramsey", description="Run one ground-heralded Ramsey delay sweep.")
+@recipe(
+    "heralding_t2ramsey",
+    description="Run one self-calibrated heralding Ramsey delay sweep.",
+)
 async def heralding_t2ramsey(
     session: RecipeSession, inputs: HeraldingT2RamseyInputs
 ) -> HeraldingT2RamseyReport:
     """Measure Ramsey fringes and their decay during free qubit evolution.
 
-    Store per-class shot sums; compute herald-g conditional IQ for fitting.
-    Readout accepts circle, linear or centroid3. Herald states are g/e/other
-    for circle (other is rejection), g/e for linear (no rejection), and g/e/f
-    for centroid3 (f is not other). Circle requires a calibrated GE Post radius.
-    Only shots classified as herald-g contribute to signal IQ and fitting.
-    After optional reset and ground-herald readout, apply pi/2, wait the swept delay, then apply a
-    phase-shifted pi/2 pulse and read out, averaging only accepted shots.
-    Per-class shot sums follow the classifier order and are
-    saved on the delay grid. Pass fraction is computed from counts, not saved. Analyze before fitting the decay
-    to estimate Ramsey T2; fringe fitting also estimates detuning. Ask before
-    applying the proposed calibration; skipping writes nothing. Analysis keeps
-    the GUI parameters, which fit a free fringe phase by default. Turn off Fit
-    phase offset in the tab to use a fixed phase instead.
+    Store (N, 6, 6) herald/signal second-moment sums without a classifier.
+    Analyze self-calibrates shared readout and fits only C = 1 - tr J, the
+    probability of changing state. K[i,j] = P(i -> j) is a diagnostic, not a
+    fitted curve. pi_hat is the post-herald population; decay during herald
+    can reduce it relative to the original thermal population.
+    Analysis overrides select n_states=2 (default) or 3, the second-order limit.
+    Three collinear centers fail identification; readout tails bias estimates.
+    No feedback or active reset is added by heralding. Ask before applying
+    the ordinary calibration proposals; skipping writes nothing.
 
     points → expts sets the sweep sample count.
     Analysis controls: fit_fringe, fit_phase. Omission retains each analysis value; null is passed to its owner.

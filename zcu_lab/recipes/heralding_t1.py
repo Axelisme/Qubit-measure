@@ -22,7 +22,7 @@ class HeraldingT1Inputs(RecipeInputs):
 
     readout_ref: str | None | Keep = Field(
         KEEP,
-        description="Pulse-readout library key including classifier. Null passes to the Form owner.",
+        description="Pulse-readout library key without requiring a classifier. Null passes to the Form owner.",
     )
     pi_ref: str | None | Keep = Field(
         KEEP,
@@ -74,22 +74,22 @@ class HeraldingT1Report(RecipeReport):
 
 @recipe(
     "heralding_t1",
-    description="Run single-qubit ground-heralded T1; save per-class shot sums and analysis.",
+    description="Run single-qubit self-calibrated heralding T1; save second-moment sums and analysis.",
 )
 async def heralding_t1(
     session: RecipeSession, inputs: HeraldingT1Inputs
 ) -> HeraldingT1Report:
     """Measure T1 from the decay of the qubit's excited-state population.
 
-    Store per-class shot sums; compute herald-g conditional IQ for fitting.
-    Readout accepts circle, linear or centroid3. Herald states are g/e/other
-    for circle (other is rejection), g/e for linear (no rejection), and g/e/f
-    for centroid3 (f is not other). Circle requires a calibrated GE Post radius.
-    Only shots classified as herald-g contribute to signal IQ and fitting.
-    Herald using the saved readout classifier, apply a calibrated pi
-    pulse, wait the swept delay, then average only accepted signal shots.
-    No active reset or joint herald is performed. Fit finite IQ to estimate the relaxation
-    time, and ask before applying the proposed T1; skipping writes nothing.
+    Store (N, 6, 6) herald/signal second-moment sums without a classifier.
+    Analyze self-calibrates shared readout and fits only C = 1 - tr J, the
+    probability of changing state. K[i,j] = P(i -> j) is a diagnostic, not a
+    fitted curve. pi_hat is the post-herald population; decay during herald
+    can reduce it relative to the original thermal population.
+    Analysis overrides select n_states=2 (default) or 3, the second-order limit.
+    Three collinear centers fail identification; readout tails bias estimates.
+    No feedback or active reset is added by heralding. Ask before applying
+    the ordinary calibration proposals; skipping writes nothing.
 
     points → expts sets the sweep sample count.
     Analysis controls: dual_exp, skip. Omission retains each analysis value; null is passed to its owner.
