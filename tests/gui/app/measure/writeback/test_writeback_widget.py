@@ -100,8 +100,8 @@ def test_invalid_module_warning_follows_selection(qapp, tmp_path, pane):
     ctrl.writeback_control.get_writeback_item_form_for_pane.return_value.result.return_value = FormErrors(
         {("gain",): "Unknown parameter"}
     )
-    ctrl.writeback_control.get_writeback_values_for_pane.return_value = _parameter_values(
-        [parameter]
+    ctrl.writeback_control.get_writeback_values_for_pane.return_value = (
+        _parameter_values([parameter])
     )
     widget = WritebackWidget(ctrl, tab_id="tab-1", pane=pane)
     widget.refresh_module_validity([item, parameter])
