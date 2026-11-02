@@ -33,6 +33,8 @@ class TabListDriver(ComponentDriver):
     def tab_display(self, caption: str) -> TabDisplay:
         """Read caption's clipping and close affordance; raise for absent captions."""
         bar = self.host.tabBar()
+        if bar is None:
+            raise LookupError("No tab bar is mounted")
         index = next(i for i in range(bar.count()) if bar.tabText(i) == caption)
         rect = bar.tabRect(index)
         close = bar.tabButton(index, QTabBar.ButtonPosition.RightSide)
