@@ -9,12 +9,14 @@ from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.program.v2 import SweepCfg, TableParam, TimelineBuilder
 from zcu_tools.program.v2.modules.base import Module
 from zcu_tools.program.v2.modules.delay import DelayAuto
+from zcu_tools.program.v2.modules.dmem import LoadValue
 from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 
 from tests.program._profiles import load_soccfg
 from tests.program.v2.simulation._compiled_support import request, scheduled_shots
+from tests.program.v2.wave_observations import analyze, relative_shot
 
 
 class RegisterDelay(Module):
@@ -256,6 +258,44 @@ def test_adc_nonoverlap_uses_correlated_table_points_not_independent_extrema():
     duration = observed.readouts[0].samples * observed.readouts[0].sample_period_ticks
     assert max(t[0] + duration for t in triggers) > min(t[1] for t in triggers)
     assert all(t[0] + duration <= t[1] for t in triggers)
+
+
+def mixed_trigger_program(*, table_origin: bool):
+    """Combine a point-dependent origin with a native affine trigger offset."""
+    env = white_noise(load_soccfg(1, 1), std_adc=0, routes=((0, 0),), seed=None)
+    builder = TimelineBuilder(env.soccfg, reps=2, initial_delay=0, relax_delay=0.1)
+    cycles = [10, 30, 20]
+    if table_origin:
+        origin = builder.add_table_sweep(
+            "point", [env.soccfg.cycles2us(n) for n in cycles]
+        )
+        builder.timeline_inc(origin)
+    else:
+        builder.add_loop("point", len(cycles))
+        builder.emit(LoadValue("origins", cycles, "point", "origin_cycles"))
+        builder.timeline_inc("origin_cycles")
+    offset = QickSweep1D("point", env.soccfg.cycles2us(5), env.soccfg.cycles2us(9))
+    builder.emit(make_receiver(trig_offset=offset))
+    builder.delay_by_timeline()
+    return builder.build(), env
+
+
+def test_table_origin_with_swept_trigger_keeps_register_runtime_tail_rules():
+    # The independent LoadValue form is already a legal runtime composition.
+    # A table origin must not turn its native affine offset into table arithmetic.
+    expected_prog, expected_env = mixed_trigger_program(table_origin=False)
+    expected_request = request(expected_prog, expected_env)
+    prog, env = mixed_trigger_program(table_origin=True)
+    observed = request(prog, env)
+    for point in range(3):
+        assert observed.materialize_point(point) == expected_request.materialize_point(
+            point
+        )
+    expected, result = analyze(expected_prog), analyze(prog)
+    for shot, reference in zip(result.shots, expected.shots, strict=True):
+        assert relative_shot(shot) == relative_shot(reference)
+        assert shot.start_cycle == reference.start_cycle
+    assert result.end_cycle == expected.end_cycle
 
 
 def runtime_auto_program(extra, *, table_extra=False, gens_only=False):
