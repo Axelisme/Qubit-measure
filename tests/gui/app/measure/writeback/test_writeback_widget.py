@@ -808,8 +808,10 @@ def test_sample_proposal_summarizes_nested_fields_on_one_line(
 def test_record_proposal_flattens_linebreaks_without_changing_json(
     qapp: QApplication, sample_evidence: Path, field: str, value: str, summary: str
 ) -> None:
-    record = {field: value, "tail": "end-of-record"}
-    item = RecordWriteback("Q1", "Record with line breaks", record=record)
+    item = RecordWriteback(
+        "Q1", "Record with line breaks", record={field: value, "tail": "end-of-record"}
+    )
+    record = item.record
     item.session_id = "record-1"
     ctrl = MagicMock()
     ctrl.writeback_control.get_writeback_applied_for_pane.return_value = {}
