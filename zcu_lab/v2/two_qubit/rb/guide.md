@@ -8,6 +8,10 @@ After changing the parameter source, use Reset to recapture initial values. Refr
 
 ## Before run
 
+Both Forms list reset, X90, dual-line drive and mux readout first.
+Captured roles and the phase pair follow. The host scan inputs appear as outer
+`depths`, then inner `seeds`. Acquisition settings come last.
+
 Select `two_qubit/rb` after calibrating the F1/F2 X90 pulses, complete mux readout,
 two charge-line CZ pulses and their local-Z corrections. Bind scalar aliases
 `f1`, `f2`, `coupler` and `mux`, then Open or Reset the Form. The fixed capture
