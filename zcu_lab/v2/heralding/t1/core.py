@@ -33,7 +33,6 @@ from zcu_tools.program.v2 import (
     IQ,
     Classify,
     DelayAuto,
-    LoadValue,
     Pulse,
     SweepCfg,
     TimelineBuilder,
@@ -214,19 +213,10 @@ class HeraldingT1Exp(Experiment[HeraldingT1Result, HeraldingT1Cfg]):
             builder = TimelineBuilder(
                 context.soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
             )
-            builder.add_loop("delay_idx", len(delay_table.cycles))
-            builder.emit(
-                LoadValue(
-                    "load_t1_delay",
-                    values=list(delay_table.cycles),
-                    idx_reg="delay_idx",
-                    val_reg="t1_delay_cycle",
-                    auto_compress=False,
-                )
-            )
+            delay = builder.add_table_sweep("delay_idx", delay_table.times_us)
             builder.emit(PulseReadout("herald", cfg.readout))
             builder.emit(Pulse("pi_pulse", cfg.pi_pulse))
-            builder.emit(DelayAuto("t1_delay", t="t1_delay_cycle"))
+            builder.emit(DelayAuto("t1_delay", t=delay))
             builder.emit(PulseReadout("signal", cfg.readout))
             prog = builder.build()
             sched.run_acquire_summed(

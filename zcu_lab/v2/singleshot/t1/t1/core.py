@@ -24,7 +24,6 @@ from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     Classify,
     DelayAuto,
-    LoadValue,
     Pulse,
     PulseReadout,
     Readout,
@@ -182,17 +181,8 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
             builder = TimelineBuilder(
                 context.soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
             )
-            builder.add_loop("delay", len(lengths))
+            delay = builder.add_table_sweep("delay", table.times_us)
             builder.add_loop("ge", 2)
-            builder.emit(
-                LoadValue(
-                    "load_t1_delay",
-                    values=list(table.cycles),
-                    idx_reg="delay",
-                    val_reg="t1_delay_cycle",
-                    auto_compress=False,
-                )
-            )
             if cfg.reset is not None:
                 builder.emit(Reset("reset", cfg.reset))
             builder.delay_by_timeline()
@@ -202,7 +192,7 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
             ):
                 builder.emit(Pulse("pi_pulse", cfg.pi_pulse))
             builder.delay_by_timeline()
-            builder.emit(DelayAuto("t1_delay", t="t1_delay_cycle"))
+            builder.emit(DelayAuto("t1_delay", t=delay))
             builder.emit(Readout("readout", cfg.readout))
             program = builder.build()
             axis = Classify(
