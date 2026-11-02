@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 
-from qick.asm_v2 import QickParam, QickRawParam, TimedMacro
+from qick.asm_v2 import QickParam, TimedMacro
 
 from ._timeline_guard import PulseGuard, bounds
 from ._timeline_runtime import (
@@ -17,20 +17,17 @@ from ._timeline_runtime import (
 from ._timeline_state import TimelineBook
 from .macro.pluse_reg import PulseByReg
 from .macro.table import TableSelection
-from .macro.wmem import PulseFromLengthReg
 
 
 @dataclass(frozen=True)
 class PlaybackChoice:
     """One declared waveform and its separate post-delay in us.
 
-    name is a registered pulse. length_cycles replaces only the const/flat
-    segment's generator length when not None. post is never part of playback.
+    name is a registered pulse. post is never part of playback.
     """
 
     name: str
     post: float | QickParam = 0.0
-    length_cycles: int | None = None
 
 
 @dataclass(frozen=True)
@@ -38,7 +35,7 @@ class SelectedPlayback:
     """Framework metadata pairing a playback producer with its selector.
 
     selector is the loader-owned captured zero-based index. register is the
-    actual address/length register read by playback. choices are in selector
+    actual address register read by playback. choices are in selector
     order. relation certifies that table and its exact writers; None is rejected
     by timeline playback. Native playback needs no selection metadata.
     """
@@ -50,7 +47,7 @@ class SelectedPlayback:
 
 
 class TimelineSelectedPulse(TimedMacro):
-    """Place a runtime-address/length pulse and report its raw selected end.
+    """Place a runtime-address pulse and report its raw selected end.
 
     source retains the native playback instructions. selection describes the
     declared candidates; book and timeline supply the common emission origin.
@@ -65,7 +62,7 @@ class TimelineSelectedPulse(TimedMacro):
         self,
         book: TimelineBook,
         timeline: str,
-        source: PulseByReg | PulseFromLengthReg,
+        source: PulseByReg,
         selection: SelectedPlayback,
     ):
         super().__init__()
@@ -91,26 +88,9 @@ class TimelineSelectedPulse(TimedMacro):
         for choice in self.selection.choices:
             pulse = prog.pulses[choice.name]
             length = pulse.get_length()
-            if (
-                isinstance(self.source, PulseFromLengthReg)
-                and choice.length_cycles is not None
-            ):
-                actual_words.append(choice.length_cycles)
-                names = pulse.get_wavenames(exclude_special=False)
-                segment = names[1] if self.source.flat_top else names[0]
-                raw = prog.waves[prog.wave2idx[segment]].length
-                fixed = raw.start if isinstance(raw, QickRawParam) else raw
-                length += (choice.length_cycles - fixed) / prog.soccfg["gens"][
-                    self.source.ch
-                ]["f_fabric"]
-            elif isinstance(self.source, PulseByReg):
-                actual_words.append(
-                    prog.wave2idx[pulse.get_wavenames(exclude_special=False)[0]]
-                )
-            else:
-                raise ValueError(
-                    "runtime length playback requires generator-cycle choices"
-                )
+            actual_words.append(
+                prog.wave2idx[pulse.get_wavenames(exclude_special=False)[0]]
+            )
             lengths.append(length)
         if tuple(actual_words) != relation.table.values:
             raise ValueError(
@@ -199,16 +179,15 @@ class TimelineSelectedPulse(TimedMacro):
             )
             self.book.repeats[-1].pulse_guards[self.source.ch].then(guard)
 
-        if isinstance(self.source, PulseByReg):
-            # Address preparation is the final part of this pulse's arithmetic
-            # plan. No other plan runs before its contiguous WPORT consumption.
-            storage = tuple(
-                self.book.math.scratch(index)
-                for index in range(self.source.address_scratch_count)
-            )
-            operations = self.source.prepare_addresses(prog, storage)
-            self.source.validate_address_storage(prog)
-            self.book.math.operations.extend(operations)
+        # Address preparation is the final part of this pulse's arithmetic
+        # plan. No other plan runs before its contiguous WPORT consumption.
+        storage = tuple(
+            self.book.math.scratch(index)
+            for index in range(self.source.address_scratch_count)
+        )
+        operations = self.source.prepare_addresses(prog, storage)
+        self.source.validate_address_storage(prog)
+        self.book.math.operations.extend(operations)
 
     def translate(self, prog) -> None:
         self.source.translate(prog)

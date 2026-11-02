@@ -29,8 +29,7 @@ class _TimedOperation(v2.Module):
     def __init__(self, operation: str, placement: _Placement):
         self.operation = operation
         self.placement = placement
-        word = 39 if operation == "pulse_from_length_reg" else 0
-        self.loader = v2.LoadValue("words", [word], idx_reg="index", val_reg="word")
+        self.loader = v2.LoadValue("words", [0], idx_reg="index", val_reg="word")
 
     def init(self, prog):
         raise NotImplementedError("native-only fixture")
@@ -70,21 +69,10 @@ class _TimedOperation(v2.Module):
             selection = SelectedPlayback(
                 relation.selector,
                 "word",
-                (PlaybackChoice("p", length_cycles=39),),
+                (PlaybackChoice("p"),),
                 relation,
             )
-            if self.operation == "pulse_by_reg":
-                prog.pulse_by_reg(0, "word", t=t, selection=selection, **self.placement)
-            else:
-                prog.pulse_from_length_reg(
-                    0,
-                    "p",
-                    length_reg="word",
-                    flat_top=False,
-                    t=t,
-                    selection=selection,
-                    **self.placement,
-                )
+            prog.pulse_by_reg(0, "word", t=t, selection=selection, **self.placement)
 
 
 def _compile_operation(frontend: str, operation: str, context: str):
@@ -139,7 +127,6 @@ def _compile_operation(frontend: str, operation: str, context: str):
         "send_readoutconfig_from_regs",
         "pulse_from_regs",
         "pulse_by_reg",
-        "pulse_from_length_reg",
     ],
 )
 @pytest.mark.parametrize(
@@ -154,7 +141,7 @@ def test_timed_entry_points_select_scope_and_preserve_native_placement(
     if context != "outside" and operation.startswith("pulse"):
         expected_end += (
             ceil(runtime_cycles(prog.soccfg, 39))
-            if operation in ("pulse_by_reg", "pulse_from_length_reg")
+            if operation == "pulse_by_reg"
             else tproc_ceil(prog.soccfg, generator_duration(prog.soccfg, 39 / GEN_MHZ))
         )
     # The second, native pulse observes the selected end after delay_by_timeline. This also

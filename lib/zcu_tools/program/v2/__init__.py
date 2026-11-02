@@ -26,7 +26,6 @@ from .modules import (
     Reset,
     ResetCfg,
     SoftDelay,
-    TableLengthPulse,
     TwoPulseReset,
     TwoPulseResetCfg,
     WaveformCfg,

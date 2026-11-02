@@ -616,20 +616,23 @@ def test_repeat_preserves_swept_parent_and_cross_loop_long_pulse(sync_at_end):
 
 
 def test_zero_entry_synchronized_repeat_accepts_unbounded_selected_start():
-    from zcu_tools.program.v2.modules import PulseCfg, TableLengthPulse
+    from zcu_tools.program.v2.modules import PulseCfg
+    from zcu_tools.program.v2.modules.computed_pulse import ComputedPulse
     from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 
-    drive = TableLengthPulse(
+    drive = ComputedPulse(
         "selected",
-        PulseCfg(
-            ch=0,
-            nqz=1,
-            freq=1000,
-            gain=0.5,
-            waveform=ConstWaveformCfg(length=7 / GEN_MHZ),
-        ),
-        lengths=[7 / GEN_MHZ, 11 / GEN_MHZ],
-        idx_reg="scan",
+        val_reg="scan",
+        pulses=[
+            PulseCfg(
+                ch=0,
+                nqz=1,
+                freq=1000,
+                gain=0.5,
+                waveform=ConstWaveformCfg(length=7 / GEN_MHZ),
+            ).with_updates(waveform=ConstWaveformCfg(length=n / GEN_MHZ))
+            for n in (7, 11)
+        ],
     )
 
     def initialize(prog):
@@ -677,20 +680,23 @@ def test_unbounded_external_timeline_survives_synchronized_repeat(actual):
 
 
 def test_variable_repeat_selected_cross_grid_lengths_and_runtime_getters():
-    from zcu_tools.program.v2.modules import PulseCfg, TableLengthPulse
+    from zcu_tools.program.v2.modules import PulseCfg
+    from zcu_tools.program.v2.modules.computed_pulse import ComputedPulse
     from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 
-    drive = TableLengthPulse(
+    drive = ComputedPulse(
         "selected",
-        PulseCfg(
-            ch=0,
-            nqz=1,
-            freq=1000,
-            gain=0.5,
-            waveform=ConstWaveformCfg(length=7 / GEN_MHZ),
-        ),
-        lengths=[7 / GEN_MHZ, 11 / GEN_MHZ],
-        idx_reg="scan",
+        val_reg="scan",
+        pulses=[
+            PulseCfg(
+                ch=0,
+                nqz=1,
+                freq=1000,
+                gain=0.5,
+                waveform=ConstWaveformCfg(length=7 / GEN_MHZ),
+            ).with_updates(waveform=ConstWaveformCfg(length=n / GEN_MHZ))
+            for n in (7, 11)
+        ],
     )
 
     def initialize(prog):

@@ -472,7 +472,7 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
 
         Applies to emit, pulse, trigger, send_readoutconfig,
         send_readoutconfig_from_regs, pulse_from_regs, pulse_by_reg,
-        pulse_from_length_reg, timeline_inc, delay_by_timeline and the repeat
+        timeline_inc, delay_by_timeline and the repeat
         parent.
         The branch parent uses this default; cases shadow it. Nested
         scopes override it and restore it on exit, including exceptions.
@@ -990,41 +990,6 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         self.append_macro(
             TimelineSelectedPulse(self._timeline_book, timeline, source, selection)
         )
-
-    @override
-    def pulse_from_length_reg(
-        self,
-        ch: int,
-        name: str,
-        *,
-        length_reg: str,
-        flat_top: bool,
-        t: float | QickParam = 0.0,
-        timeline: str | None = None,
-        selection: SelectedPlayback | None = None,
-    ) -> None:
-        """Play a native length register or certified timeline-selected lengths.
-
-        None uses the scoped name, or native reference timing outside a scope.
-        Native arguments are unchanged. Timeline placement requires matching
-        framework selection metadata; raw waveform length and post stay separate.
-        Invalid producer bounds, writes and overlap fail during compilation.
-        """
-        timeline = timeline if timeline is not None else self._timeline_default
-        super().pulse_from_length_reg(
-            ch, name, length_reg=length_reg, flat_top=flat_top, t=t
-        )
-        if timeline is not None:
-            if selection is None or selection.register != length_reg:
-                raise ValueError(
-                    "timeline length playback requires matching selection metadata"
-                )
-            from .macro.wmem import PulseFromLengthReg
-
-            source = self._pop_native(PulseFromLengthReg)
-            self.append_macro(
-                TimelineSelectedPulse(self._timeline_book, timeline, source, selection)
-            )
 
     def pulse_from_regs(
         self, ch: int, name: str, *, timeline: str | None = None, **kwargs

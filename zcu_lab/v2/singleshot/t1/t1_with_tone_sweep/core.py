@@ -32,7 +32,7 @@ from zcu_tools.program.v2 import (
     Readout,
     Reset,
     SweepCfg,
-    TableLengthPulse,
+    TableParam,
     TimelineBuilder,
     shot_sums,
 )
@@ -339,11 +339,10 @@ class T1WithToneSweepExp(Experiment[T1WithToneSweepResult, T1WithToneSweepCfg]):
                     builder.emit(Pulse("pi_pulse", cfg.pi_pulse))
                 builder.delay_by_timeline()
                 builder.emit(
-                    TableLengthPulse(
+                    Pulse(
                         "probe_pulse",
                         probe_cfg,
-                        lengths=lengths,
-                        idx_reg="delay",
+                        length=TableParam("delay", lengths.tolist()),
                     )
                 )
                 builder.emit(Readout("readout", cfg.readout))

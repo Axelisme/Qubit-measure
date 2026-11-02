@@ -17,7 +17,7 @@ from .base import AbsModuleCfg, Module, resolve_module_ref
 from .computed_pulse import ComputedPulse
 from .delay import Delay, DelayAuto, SoftDelay
 from .dmem import LoadValue, LoadWord
-from .pulse import Pulse, PulseCfg, PulseOverrides, TableLengthPulse
+from .pulse import Pulse, PulseCfg, PulseOverrides
 from .readout import (
     AbsReadout,
     AbsReadoutCfg,

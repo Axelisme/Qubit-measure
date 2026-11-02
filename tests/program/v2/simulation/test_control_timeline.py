@@ -15,7 +15,7 @@ from zcu_tools.program.v2 import TimelineBuilder
 from zcu_tools.program.v2.modules.computed_pulse import ComputedPulse
 from zcu_tools.program.v2.modules.delay import DelayAuto
 from zcu_tools.program.v2.modules.dmem import LoadValue, LoadWord
-from zcu_tools.program.v2.modules.pulse import PulseCfg, TableLengthPulse
+from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.readout import (
     PulseReadout,
     PulseReadoutCfg,
@@ -37,7 +37,7 @@ from tests.program._timing_expectations import (
     runtime_cycles,
     tproc_ceil,
 )
-from tests.program.v2.simulation.support import raw_of, request_of
+from tests.program.v2.simulation.support import request_of
 from tests.program.v2.simulation.time_observations import time_us, times_us
 
 
@@ -112,129 +112,6 @@ def test_repeat_count_and_delay_cycles_are_local_to_each_acquire():
         assert request_of(env).materialize_point(point) == request.materialize_point(
             point
         )
-
-
-def test_tablelength_uses_selected_duration_and_sweeps_use_quantized_controls():
-    pulse = TableLengthPulse(
-        "length", drive(), lengths=[0.1, 0.3], idx_reg="length_axis"
-    )
-    cfg = receiver()
-    cfg.gain = QickParam(0.1, {"length_axis": 0.1})
-    request, prog, _ = acquire(
-        [pulse, cfg.build("readout")], sweep=[("length_axis", 2)], reps=2
-    )
-    assert request.loop_dims == (2, 2)
-    profile = prog.soccfg
-    lengths = (0.1, 0.3)
-    ends = [
-        ceil(runtime_cycles(profile, int(profile.us2cycles(t, gen_ch=1)), 1))
-        for t in lengths
-    ]
-    for i, events in enumerate(
-        request.materialize_point(p).events
-        for p in range(int(np.prod(request.point_dims)))
-    ):
-        assert events[0].source == "length"
-        assert time_us(request.time_base, events[0].duration_ticks) == pytest.approx(
-            float(generator_duration(profile, lengths[i % 2], 1))
-        )
-        assert time_us(request.time_base, events[1].start_ticks) == pytest.approx(
-            ends[i % 2] / TPROC_MHZ
-        )
-        assert events[1].gain == pytest.approx([0.1, 0.2][i % 2], abs=1e-4)
-    assert raw_of(prog)[0].shape == (2, 2, 1, 2)
-
-
-@pytest.mark.parametrize("flat_top", [False, True])
-@pytest.mark.parametrize("branches", [1, 2])
-@pytest.mark.parametrize("preceding_pulse", [False, True])
-def test_join_table_lengths_start_together_and_wait_for_each_points_longest_branch(
-    flat_top,
-    branches,
-    preceding_pulse,
-):
-    from zcu_tools.program.v2.modules.waveform import (
-        FlatTopWaveformCfg,
-        GaussWaveformCfg,
-    )
-
-    env = white_noise(
-        load_soccfg(n_gens=3), std_adc=0, routes=((0, 0), (1, 0), (2, 0)), seed=None
-    )
-    first = drive()
-    first.pre_delay = 0.02
-    first.post_delay = 0.03
-    second = drive().model_copy(update={"ch": 2})
-    if flat_top:
-        first.waveform = FlatTopWaveformCfg(
-            length=0.2, raise_waveform=GaussWaveformCfg(length=0.04, sigma=0.01)
-        )
-    pulses = [
-        TableLengthPulse("first", first, lengths=[0.1, 0.3], idx_reg="length"),
-        TableLengthPulse("second", second, lengths=[0.2, 0.1], idx_reg="length"),
-    ]
-    builder = TimelineBuilder(env.soccfg)
-    builder.add_loop("length", 2)
-    if preceding_pulse:
-        builder.emit(drive(length=0.04).build("reset"))
-    names = [f"branch_{i}" for i in range(branches)]
-    builder.fork("default", into=names)
-    for name, pulse in zip(names, pulses[:branches], strict=True):
-        builder.emit(pulse, timeline=name)
-    builder.join(*names, into="default")
-    builder.emit(receiver().build("readout"))
-    builder.delay_by_timeline()
-    prog = builder.build()
-    prog.acquire(env.soc, progress=False)
-    request = request_of(env)
-    origin_cycles = (
-        tproc_ceil(env.soccfg, generator_duration(env.soccfg, 0.04, 1))
-        if preceding_pulse
-        else 0
-    )
-    origin = origin_cycles / TPROC_MHZ
-    first_ends = [
-        tproc_ceil(env.soccfg, 0.02)
-        + ceil(
-            runtime_cycles(env.soccfg, int(env.soccfg.us2cycles(t, gen_ch=1)), 1)
-            + Fraction("0.03") * Fraction(str(TPROC_MHZ))
-        )
-        for t in (0.1, 0.3)
-    ]
-    second_ends = [
-        ceil(runtime_cycles(env.soccfg, int(env.soccfg.us2cycles(t, gen_ch=2)), 2))
-        for t in (0.2, 0.1)
-    ]
-    waits = [
-        max(a, b) if branches == 2 else a
-        for a, b in zip(first_ends, second_ends, strict=True)
-    ]
-    for point, expected_wait in enumerate(waits):
-        events = request.materialize_point(point).events
-        actual_sources = [event.source for event in events]
-        expected_sources = (
-            (["reset"] if preceding_pulse else [])
-            + ["first"] * (3 if flat_top else 1)
-            + (["second"] if branches == 2 else [])
-            + ["readout"]
-        )
-        assert actual_sources == expected_sources
-        first_event = next(e for e in events if e.source == "first")
-        readout = next(e for e in events if e.gen_ch == 0)
-        assert time_us(request.time_base, first_event.start_ticks) == pytest.approx(
-            origin + tproc_ceil(env.soccfg, 0.02) / TPROC_MHZ
-        )
-        if branches == 2:
-            second_event = next(e for e in events if e.gen_ch == 2)
-            assert time_us(
-                request.time_base, second_event.start_ticks
-            ) == pytest.approx(origin)
-        assert time_us(request.time_base, readout.start_ticks) == pytest.approx(
-            origin + expected_wait / TPROC_MHZ,
-            # Splitting an odd ramp can trim one fabric cycle from flat-top playback.
-            abs=2 / env.soccfg["gens"][1]["f_fabric"] if flat_top else 1e-9,
-        )
-    env.devices.close_all_devices()
 
 
 def test_loadword_uint32_frequency_and_signed_gain_are_decoded_only_by_readout():

@@ -12,7 +12,7 @@ from .loop import CloseInnerLoop, OpenInnerLoop
 from .meta import MetaMacro
 from .pluse_reg import PulseByReg
 from .structure import MarkedCloseLoop, MarkedOpenLoop, SourcePulse
-from .wmem import ConfigReadoutFromRegs, PulseFromLengthReg, PulseFromRegs
+from .wmem import ConfigReadoutFromRegs, PulseFromRegs
 from .write_reg import WriteRegOp
 
 
@@ -209,26 +209,6 @@ class AdditionalMacroMixin(QickProgramV2):
                 tag=tag,
                 freq_reg=freq_reg,
                 gain_reg=gain_reg,
-            )
-        )
-
-    def pulse_from_length_reg(
-        self,
-        ch: int,
-        name: str,
-        *,
-        length_reg: str,
-        flat_top: bool,
-        t: float | QickParam = 0.0,
-    ) -> None:
-        """Play a const/flat-top pulse template with runtime length cycles."""
-        self.append_macro(
-            PulseFromLengthReg(
-                ch=ch,
-                name=name,
-                length_reg=length_reg,
-                flat_top=flat_top,
-                t=t,
             )
         )
 

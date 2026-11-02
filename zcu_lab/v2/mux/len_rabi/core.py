@@ -116,12 +116,17 @@ from zcu_tools.experiment.v2.runtime import RunOptions, Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.experiment.v2.utils.snr import estimate_snr
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import Reset, ResetCfg, TimelineBuilder, TimelineProgramV2
+from zcu_tools.program.v2 import (
+    Reset,
+    ResetCfg,
+    TableParam,
+    TimelineBuilder,
+    TimelineProgramV2,
+)
 from zcu_tools.program.v2.modules import (
     MuxReadout,
     MuxReadoutCfg,
     Pulse,
-    TableLengthPulse,
 )
 from zcu_tools.utils.process import rotate2real
 
@@ -356,11 +361,10 @@ class MuxLenRabiExp(Experiment[MuxSweepResult, MuxLenRabiCfg]):
         signals = SignalBuffer(scan.coordinates.T.shape, on_update=update)
         with Schedule(signals, scope=context.scope) as sched:
             drives = [
-                TableLengthPulse(
+                Pulse(
                     f"drive_{index}",
                     cfg.tones[index].require_drive(),
-                    lengths=scan.coordinates[row],
-                    idx_reg="point",
+                    length=TableParam("point", scan.coordinates[row].tolist()),
                 )
                 for row, index in enumerate(scan.indices)
             ]

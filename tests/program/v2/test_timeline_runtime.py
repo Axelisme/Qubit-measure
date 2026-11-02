@@ -241,7 +241,8 @@ def test_runtime_events_load_s14_then_increment_for_shared_origin():
 
 @pytest.mark.parametrize("swept_offset", [False, True])
 def test_selected_events_share_output_time_and_increment_nonzero_offsets(swept_offset):
-    from zcu_tools.program.v2.modules import PulseCfg, TableLengthPulse
+    from zcu_tools.program.v2.modules import PulseCfg
+    from zcu_tools.program.v2.modules.computed_pulse import ComputedPulse
     from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 
     offset = (
@@ -249,18 +250,20 @@ def test_selected_events_share_output_time_and_increment_nonzero_offsets(swept_o
         if swept_offset
         else 7 / TPROC_MHZ
     )
-    drive = TableLengthPulse(
+    drive = ComputedPulse(
         "selected",
-        PulseCfg(
-            ch=0,
-            nqz=1,
-            freq=1000,
-            gain=0.5,
-            pre_delay=offset,
-            waveform=ConstWaveformCfg(length=7 / GEN_MHZ),
-        ),
-        lengths=[7 / GEN_MHZ, 11 / GEN_MHZ],
-        idx_reg="scan",
+        val_reg="scan",
+        pulses=[
+            PulseCfg(
+                ch=0,
+                nqz=1,
+                freq=1000,
+                gain=0.5,
+                pre_delay=offset,
+                waveform=ConstWaveformCfg(length=7 / GEN_MHZ),
+            ).with_updates(waveform=ConstWaveformCfg(length=n / GEN_MHZ))
+            for n in (7, 11)
+        ],
     )
 
     def initialize(prog):

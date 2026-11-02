@@ -8,7 +8,7 @@ from zcu_tools.program.v2.modules.base import Module
 from zcu_tools.program.v2.modules.computed_pulse import ComputedPulse
 from zcu_tools.program.v2.modules.delay import SoftDelay
 from zcu_tools.program.v2.modules.dmem import LoadValue
-from zcu_tools.program.v2.modules.pulse import Pulse, PulseCfg, TableLengthPulse
+from zcu_tools.program.v2.modules.pulse import Pulse, PulseCfg
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import (
     ConstWaveformCfg,
@@ -48,7 +48,7 @@ def repeated_program(env, case):
             length=QickParam(0.1078125, {"axis": 0.015625}),
             raise_waveform=GaussWaveformCfg(length=0.1, sigma=0.02),
         )
-    if case.startswith("computed") or case in ("dynamic", "branch"):
+    if case.startswith("computed") or case == "branch":
         cfg.pre_delay = 0.013
         cfg.waveform = ConstWaveformCfg(length=0.1)
     pulse: Module = Pulse("drive", cfg)
@@ -75,14 +75,6 @@ def repeated_program(env, case):
             "gate",
             val_reg="axis" if case == "computed" else "selected",
             pulses=candidates,
-        )
-    elif case == "dynamic":
-        cfg.waveform = FlatTopWaveformCfg(
-            length=0.1,
-            raise_waveform=GaussWaveformCfg(length=0.05, sigma=0.01),
-        )
-        pulse = TableLengthPulse(
-            "dynamic", cfg, lengths=[0.06, 0.12, 0.2], idx_reg="axis"
         )
     body: list[Module] = [
         SoftDelay(
@@ -137,7 +129,6 @@ def repeated_program(env, case):
         "computed_tables",
         "computed_qick_time",
         "computed_flat_top",
-        "dynamic",
         "branch",
     ],
 )
@@ -160,10 +151,6 @@ def test_repeated_request_preserves_numeric_controls(environment, case):
             for outer in range(count)
             for inner in range(2)
         }
-    if case == "dynamic":
-        assert {
-            event.source for template in request.templates for event in template.events
-        } == {"dynamic", "readout"}
     if case.startswith("computed_"):
         assert not any(
             event.source == "gate" for event in request.materialize_point(0).events

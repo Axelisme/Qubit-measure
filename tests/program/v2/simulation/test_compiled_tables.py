@@ -1,14 +1,13 @@
 """Table and reset effects read from public compiled programs, not Module trees."""
 
 from fractions import Fraction
-from math import ceil
 
 import pytest
 from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.program.v2 import TimelineBuilder
 from zcu_tools.program.v2.modules import Delay, LoadValue, LoadWord
 from zcu_tools.program.v2.modules.computed_pulse import ComputedPulse
-from zcu_tools.program.v2.modules.pulse import Pulse, PulseCfg, TableLengthPulse
+from zcu_tools.program.v2.modules.pulse import Pulse, PulseCfg
 from zcu_tools.program.v2.modules.readout import (
     PulseReadout,
     PulseReadoutCfg,
@@ -24,8 +23,6 @@ from zcu_tools.program.v2.utils import readout_freq_words
 from tests.program._profiles import GEN_MAXV, GEN_MHZ, TPROC_MHZ, load_soccfg
 from tests.program._timing_expectations import (
     generator_duration,
-    generator_tproc_grid,
-    runtime_cycles,
     tproc_ceil,
 )
 from tests.program.v2.simulation._compiled_support import request
@@ -128,27 +125,6 @@ def test_loadvalue_selects_compiled_waveform_from_declared_table(compressed):
         assert event.gain == pytest.approx(-0.4 if index % 2 == 0 else 0.2, abs=1e-4)
         assert time_us(result.time_base, event.duration_ticks) == pytest.approx(
             float(generator_duration(prog.soccfg, 0.3 if index % 2 == 0 else 0.1, 1))
-        )
-
-
-def test_tablelength_places_next_emission_after_each_selected_quantized_length():
-    table = TableLengthPulse("length", drive(), lengths=[0.1, 0.3], idx_reg="scan")
-    prog, env = module_program(
-        [table, receiver().build("readout")], sweep=(("scan", 2),)
-    )
-    result = request(prog, env)
-    ends = [
-        ceil(runtime_cycles(prog.soccfg, int(prog.us2cycles(length, gen_ch=1)), 1))
-        for length in (0.1, 0.3)
-    ]
-    for index, (length, end) in enumerate(zip((0.1, 0.3), ends, strict=True)):
-        events = result.materialize_point(index).events
-        assert events[0].source == "length"
-        assert time_us(result.time_base, events[0].duration_ticks) == pytest.approx(
-            float(generator_duration(prog.soccfg, length, 1))
-        )
-        assert time_us(result.time_base, events[1].start_ticks) == pytest.approx(
-            end / TPROC_MHZ
         )
 
 
@@ -373,75 +349,3 @@ def test_program_join_only_merges_runtime_ends():
         assert times_us(
             result.time_base, point.readouts[0].trigger_ticks
         ) == pytest.approx(((start + 2 * joined) / TPROC_MHZ,))
-
-
-def test_parallel_table_lengths_keep_crossing_maxima_across_repeated_runtime_emissions():
-    # Keep exact integer-affine candidates on any caller-owned clock ratio.
-    step = generator_tproc_grid(load_soccfg(3, 1), 1)
-    left_lengths = [n * step / GEN_MHZ for n in (1, 2, 3)]
-    right_lengths = list(reversed(left_lengths))
-    left = TableLengthPulse(
-        "left",
-        drive(),
-        lengths=left_lengths,
-        idx_reg="scan",
-    )
-    right = TableLengthPulse(
-        "right",
-        drive(ch=2),
-        lengths=right_lengths,
-        idx_reg="scan",
-    )
-    origin = LoadValue("origin", [7, 20, 10], "scan", "origin_cycles")
-    readout = receiver().build("readout")
-
-    def body(p):
-        p.emit(origin)
-        p.timeline_inc("origin_cycles")
-        for occurrence in range(2):
-            other = f"right_{occurrence}"
-            p.fork("default", into=other)
-            p.emit(left)
-            p.emit(right, timeline=other)
-            p.join("default", other, into="default")
-        p.emit(readout)
-
-    prog, env = module_program(
-        [origin, left, right, readout],
-        sweep=(("scan", 3),),
-        body=body,
-        data_registers=32,
-    )
-    result = request(prog, env)
-    # These table lengths are integer-affine on the tProc grid, so remain exact.
-    maxima = [
-        max(
-            tproc_ceil(prog.soccfg, generator_duration(prog.soccfg, left_length, 1)),
-            tproc_ceil(prog.soccfg, generator_duration(prog.soccfg, right_length, 2)),
-        )
-        for left_length, right_length in zip(left_lengths, right_lengths, strict=True)
-    ]
-    for index, (origin_cycle, maximum) in enumerate(
-        zip((7, 20, 10), maxima, strict=True)
-    ):
-        point = result.materialize_point(index)
-        assert [e.source for e in point.events] == ["left", "right"] * 2 + ["readout"]
-        assert [
-            time_us(result.time_base, e.start_ticks) for e in point.events
-        ] == pytest.approx(
-            [
-                (origin_cycle + t) / TPROC_MHZ
-                for t in [0, 0, maximum, maximum, 2 * maximum]
-            ]
-        )
-        assert [
-            time_us(result.time_base, e.duration_ticks) for e in point.events[:2]
-        ] == pytest.approx(
-            [
-                float(generator_duration(prog.soccfg, left_lengths[index], 1)),
-                float(generator_duration(prog.soccfg, right_lengths[index], 2)),
-            ]
-        )
-        assert times_us(
-            result.time_base, point.readouts[0].trigger_ticks
-        ) == pytest.approx(((origin_cycle + 2 * maximum) / TPROC_MHZ,))

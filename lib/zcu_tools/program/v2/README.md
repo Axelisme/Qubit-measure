@@ -1,6 +1,6 @@
 # program/v2
 
-**Last updated:** 2026-11-02，查表掃描、ADC native tail 與 WMEM 分析
+**Last updated:** 2026-11-02，原生 length 查表與 ComputedPulse lookup
 
 **讀者：** lab-author、framework-dev、agent。查找 V2 program 公開 API、型別契約與編譯規則的 owner。
 
@@ -30,7 +30,7 @@
 每條 timeline 保存相對 reference 的結尾，`default` 不是 reference。
 帶 timeline 的 pulse／trigger 在結尾加 t 發射。Readout 的作者結尾只含 generator waveform 與 pre/post delay，ADC 視窗留在 ADC channel，shot 收尾仍等待全部 ADC。
 未帶 timeline 且未進範圍的原生輸出保留 QICK 行為。
-`pulse_by_reg` 與 `pulse_from_length_reg` 選到 timeline 時，須提供配對的 `selection` metadata。
+`pulse_by_reg` 選到 timeline 時，須提供配對的 `selection` metadata。
 同 generator 的 pulse 重疊不能靠另一條 timeline 豁免。帶 timeline 的後一個 trigger 必須證明不與同 ADC 前一視窗重疊，否則在 build 時報錯。
 原生 `t=None` 無法定位 ADC 起點，會使後一個同 ADC timeline trigger 無法證明不重疊。此未知標記不捏造 shot 收尾的 runtime 結尾。
 Builder 原生布林控制選項只接受 keyword，其餘參數沿用同名 program 方法。
@@ -213,13 +213,14 @@ Runtime pulse／readout word macro 將單一 wmem template 載入 `r_wave`，修
 
 ## ComputedPulse 與 DMEM lookup
 
-新路徑在 `declare` 宣告候選 waveform 與 wmem-index table。每次 `emit` 捕捉 selector，由同次選擇決定 playback 與 post-delay。
+`ComputedPulse.declare` 宣告候選 waveform 與 wmem-index table。每次 `emit` 捕捉 selector，由同次選擇決定 playback 與 post-delay。
 Program owner 保留 waveform 分數尾段，加入所選 post 後取整一次，不使用最大候選 duration。
 Address producer、捕捉 selector 與依賴接受全流寫入稽核。
 
-Legacy `ComputedPulse` 在 `init()` 收集候選 pulse 的起始 wmem index，以 `add_dmem(base_idxs)` 保存 table。
-`run()` 用 `val_reg + dmem_offset` 讀取該候選起始 index，再交給 `pulse_by_reg`。
-`PulseRegistry` 會去重，因此候選 index 不保證連續。Flat-top table 存第一個 ramp_up entry，`flat_top_pulse=True` 連讀 ramp_up／flat／ramp_down 三個 entry。
+`ComputedPulse.lower` 透過 `LoadValue.lower_selected` 查出候選的起始 wmem index，再交給 `pulse_by_reg`。
+候選使用各自的 pulse 名稱，lookup table 保存實際起始 index，不假設候選連續。
+Flat-top table 存第一個 ramp_up entry，`flat_top_pulse=True` 播放 ramp_up／flat／ramp_down 三個 entry。
+ComputedPulse 拒絕 int4 flat-top 的額外 dummy wave，避免候選 stride 與實際 layout 不符。
 `ProgramResourcesMixin` 擁有全程式共享的順序 dmem buffer，`add_dmem()` 回傳 slice 起點。
 `compile_datamem()` 維持 QICK 的 `np.int32` array contract。`MyProgramV2` 建立完整 binary program 後，將 remote SoC 的 dmem 轉成一維 built-in `list[int]`，保留 signed int32 與 two's-complement bit pattern。
 
