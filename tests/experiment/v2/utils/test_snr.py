@@ -83,11 +83,10 @@ def test_curve_stop_handles_nan_and_infinite_estimates(
         decision = check()
     assert decision.met is met
     assert decision.value is None
-    assert len(estimates) == 1
     if met:
-        assert estimates[0] == np.inf
+        assert estimates == [np.inf]
     else:
-        assert np.isnan(estimates[0])
+        assert estimates == []
 
 
 def test_default_score_is_unbounded_pooled_sigma_snr() -> None:
