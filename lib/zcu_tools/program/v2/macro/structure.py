@@ -51,7 +51,7 @@ class MarkedOpenLoop(OpenLoop):
         for wave in prog.waves:
             fields: dict[int, int] = {}
             for field, par in enumerate(_WAVE_FIELDS):
-                raw = wave[par]
+                raw = getattr(wave, par)
                 if isinstance(raw, TableRawParam) and raw.loop == self.name:
                     raw.to_steps(prog.loop_dict)
                     rotated = raw.values[1:] + raw.values[:1]
