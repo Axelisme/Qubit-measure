@@ -152,7 +152,7 @@ class PulseReadoutCfg(_PulseReadoutFields[WaveformCfg], AbsReadoutCfg):
         """
         if name == "length":
             self.waveform.set_param(name, value)
-        elif name in {"freq", "gain", "ro_length"}:
+        elif name in {"freq", "gain", "phase", "ro_length"}:
             setattr(self, name, value)
         else:
             raise ValueError(f"Unknown parameter: {name}")

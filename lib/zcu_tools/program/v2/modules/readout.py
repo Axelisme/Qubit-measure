@@ -106,13 +106,13 @@ class PulseReadoutCfg(AbsReadoutCfg):
         )
 
     def set_param(self, name: str, value: float | QickParam) -> None:
-        """Set shared freq (MHz), gain, waveform length or ro_length (us).
+        """Set shared freq (MHz), gain, generator phase (deg), length or ro_length (us).
 
         Unsupported names raise ValueError; waveform length restrictions apply.
         """
         if name == "length":
             self.waveform.set_param(name, value)
-        elif name in {"freq", "gain", "ro_length"}:
+        elif name in {"freq", "gain", "phase", "ro_length"}:
             setattr(self, name, value)
         else:
             raise ValueError(f"Unknown parameter: {name}")
@@ -257,13 +257,15 @@ class PulseReadoutOverrides(TypedDict, total=False):
     """Optional readout knobs, with None retaining each cfg value.
 
     freq is shared generator/ADC carrier MHz, gain normalized generator
-    amplitude, length waveform duration us and ro_length ADC window us.
+    amplitude, phase generator angle in degrees, length waveform duration us
+    and ro_length ADC window us.
     Each accepts a scalar or QICK sweep. Waveform length restrictions and
     QICK ADC-window sweep compile limitations remain unchanged.
     """
 
     freq: float | QickParam | None
     gain: float | QickParam | None
+    phase: float | QickParam | None
     length: float | QickParam | None
     ro_length: float | QickParam | None
 
@@ -335,7 +337,7 @@ class PulseReadout(AbsReadout):
         gain_val names a hardware gain-word register; freq_val/ro_freq_val are
         paired generator/ADC frequency-word registers, already lowered for mixer
         and downconversion sign. Unspecified registers use cfg scalar/sweep values.
-        freq (MHz), gain (normalized), length and ro_length (us) override the
+        freq (MHz), gain (normalized), phase (degrees), length and ro_length (us) override the
         copied cfg via set_param. None keeps cfg; unsupported waveform length
         sweeps raise ValueError. init must precede run. Invalid QICK settings
         fail during initialization. Unknown keys or nonnumeric overrides raise TypeError.
