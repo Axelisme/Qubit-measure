@@ -214,6 +214,9 @@ class _PreviewCard(QWidget):
         self._named_names = tuple(figures)
         for name, figure in figures.items():
             card = _PreviewCard(f"{self._source_key}_member", name)
+            # Only stage cards keep the mosaic minimum; members fit their tile.
+            card.setMinimumWidth(0)
+            card._image_label.setMinimumWidth(0)
             render(card, figure)
             self._named_stack.addWidget(card)
         index = (
