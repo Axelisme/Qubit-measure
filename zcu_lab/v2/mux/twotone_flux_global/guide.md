@@ -122,8 +122,8 @@ and required-field errors before Run.
 
 ## Run and Stop
 
-Run sets the coil at each flux point, waits for settle, then runs
-the existing mux twotone spectrum. Each `flux_i` figure shows absolute MHz
+Run sets the coil at each flux point and waits for settle. It then applies
+optional reset, sweeps the selected drives together and performs mux readout. Each `flux_i` figure shows absolute MHz
 against that tone's DC coordinate. Sources retain their final written settings.
 Run does not restore bias automatically.
 
@@ -181,7 +181,6 @@ The cfg schema is 5.0 because drive-frequency settings now live in the single
 and plots, but their cfg is not restored into the new Form. No cfg migration
 is applied.
 
-Labber export currently does not support this three-dimensional independent
-grid. Save reports that output as failed while native data and other successful
-outputs remain saved. Inspect each output status before treating a Save as
+Labber export writes each tone's two-dimensional DC/frequency map as a separate
+log in the same file. Inspect each output status before treating a Save as
 complete. Load the native `data.h5` for analysis and writeback.
