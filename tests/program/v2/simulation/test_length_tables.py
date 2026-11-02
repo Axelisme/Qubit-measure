@@ -215,12 +215,20 @@ def test_length_wrap_and_unplayed_branch_keep_auto_follower_at_actual_end(flat, 
 @pytest.mark.parametrize("consumer", ["pulse", "readout", "reset"])
 def test_length_with_fractional_pre_and_post_matches_scalar_aggregate(flat, consumer):
     values = [0.213, 0.107, 0.354]
-    options = dict(flat=flat, consumer=consumer, pre_delay=0.0137, post_delay=0.0189)
-    prog, env, _ = length_program(values, mode="table", **options)
+    prog, env, _ = length_program(
+        values,
+        mode="table",
+        flat=flat,
+        consumer=consumer,
+        pre_delay=0.0137,
+        post_delay=0.0189,
+    )
     observed = request(prog, env)
     expected_shots = []
     for index, value in enumerate(values):
-        scalar, scalar_env, _ = length_program(value, **options)
+        scalar, scalar_env, _ = length_program(
+            value, flat=flat, consumer=consumer, pre_delay=0.0137, post_delay=0.0189
+        )
         assert replace(observed.materialize_point(index), coordinates=()) == request(
             scalar, scalar_env
         ).materialize_point(0)
