@@ -153,15 +153,15 @@ def test_branch_cases_share_read_labels_with_zero_gain_first_read(swept):
                 builder.emit(r2)
     prog = builder.build()
     prog.set_reads_per_shot(2)
-    process = v2.shot_sums(prog, [v2.IQ("r1"), v2.IQ("r1"), v2.IQ("r2"), v2.IQ("r2")])
+    process = v2.shot_sums(prog, [v2.IQ("r1"), v2.IQ("r2")])
     points = 16 if swept else 8
     iq = np.tile(np.array([[[[2.0, 3.0], [5.0, 7.0]]]]), (points, 2, 1, 1))
     result = process({0: iq})
-    assert result.shape == (points, 3, 3, 3, 3)
-    np.testing.assert_array_equal(result[:, 0, 0, 0, 0], 2)
-    np.testing.assert_array_equal(result[:, 1, 1, 0, 0], 8)
-    np.testing.assert_array_equal(result[:, 0, 0, 2, 2], 98)
-    np.testing.assert_array_equal(result[:, 1, 0, 2, 0], 28)
+    assert result.shape == (points, 6, 6)
+    np.testing.assert_array_equal(result[:, 0, 0], 2)
+    np.testing.assert_array_equal(result[:, 3, 0], 8)
+    np.testing.assert_array_equal(result[:, 0, 5], 98)
+    np.testing.assert_array_equal(result[:, 1, 2], 28)
     starts = [
         [
             e.cycle - shot.start_cycle
@@ -232,7 +232,7 @@ def test_branch_generator_waveform_can_differ_with_identical_adc_settings():
     result = v2.shot_sums(prog, [v2.IQ("selected")])(
         {0: np.array([[[[2.0, 3.0]]], [[[5.0, 7.0]]]])}
     )
-    np.testing.assert_array_equal(result, [[1, 2, 3], [1, 5, 7]])
+    np.testing.assert_array_equal(result, [[1, 2, 3, 4, 6, 9], [1, 5, 7, 25, 35, 49]])
 
 
 def test_correlated_branches_keep_one_selector_choice_for_the_whole_path():
@@ -251,7 +251,7 @@ def test_correlated_branches_keep_one_selector_choice_for_the_whole_path():
     prog.set_reads_per_shot(2)
     process = v2.shot_sums(prog, [v2.IQ("selected")])
     result = process({0: np.array([[[[99.0, 99.0], [5.0, 7.0]]]])})
-    np.testing.assert_array_equal(result, [[1, 5, 7]])
+    np.testing.assert_array_equal(result, [[1, 5, 7, 25, 35, 49]])
 
 
 @pytest.mark.parametrize("timeline", [True])
@@ -285,11 +285,9 @@ def test_labels_resolve_adc_trigger_order_and_repeated_emissions(timeline, mux):
     if mux:
         iq[4] *= -1  # The requested tone position 1 is ADC 1, not first ADC 4.
     result = v2.shot_sums(prog, axes)(iq)
-    expected = (
-        [[[2, 22, 26], [13, 197, 223], [16, 236, 268]]]
-        if timeline
-        else [[[2, 13, 16], [13, 125, 149], [16, 149, 178]]]
-    )
+    herald = np.array([[1, 2, 3, 4, 6, 9], [1, 11, 13, 121, 143, 169]])
+    signal = np.array([[1, 5, 7, 25, 35, 49], [1, 17, 19, 289, 323, 361]])
+    expected = (herald.T @ signal)[None, ...]
     np.testing.assert_array_equal(result, expected)
 
 
@@ -404,7 +402,7 @@ def test_control_flow_on_other_adc_preserves_selected_read_sums(control):
             1: np.zeros((1, 1, 1, 2), dtype=np.float64),
         }
     )
-    np.testing.assert_array_equal(result, [[1, 4, 5]])
+    np.testing.assert_array_equal(result, [[1, 4, 5, 16, 20, 25]])
 
 
 @pytest.mark.parametrize("inner", ["Repeat", "Branch"])
@@ -440,7 +438,10 @@ def test_nested_branch_and_repeat_still_reject_repeated_adc_trigger(inner):
 
 def test_split_sums_returns_counts_and_nan_means_without_warnings():
     sums = np.array(
-        [[[2, 6, -4], [0, 0, 0]], [[1, -3, 7], [np.nan, np.nan, np.nan]]],
+        [
+            [[2, 6, -4, 20, -12, 8], [0, 0, 0, 0, 0, 0]],
+            [[1, -3, 7, 9, -21, 49], [np.nan] * 6],
+        ],
         dtype=np.float64,
     )
     with np.errstate(all="raise"):
@@ -450,9 +451,10 @@ def test_split_sums_returns_counts_and_nan_means_without_warnings():
         means, [[3 - 2j, complex(np.nan, np.nan)], [-3 + 7j, complex(np.nan, np.nan)]]
     )
     assert means.dtype == np.complex128
-    with pytest.raises(ValueError, match="3.*2"):
-        v2.split_sums(np.zeros((4, 2), dtype=np.float64))
-    with pytest.raises(ValueError, match="3.*\\(\\)"):
+    for length in (2, 3, 5, 7):
+        with pytest.raises(ValueError, match=f"6.*{length}"):
+            v2.split_sums(np.zeros((4, length), dtype=np.float64))
+    with pytest.raises(ValueError, match="6.*\\(\\)"):
         v2.split_sums(np.array(1.0))
 
 
@@ -525,7 +527,8 @@ def test_parallel_readout_emissions_keep_labels_without_changing_admission():
     prog = Program(load_soccfg(n_gens=2, n_readouts=2))
     process = v2.shot_sums(prog, [v2.IQ("first"), v2.IQ("second")])
     iq = {ch: np.full((1, 2, 1, 2), ch + 1.0) for ch in (0, 1)}
-    np.testing.assert_array_equal(process(iq), [[[2, 4, 4], [2, 4, 4], [2, 4, 4]]])
+    expected = 2 * np.outer([1, 1, 1, 1, 1, 1], [1, 2, 2, 4, 4, 4])
+    np.testing.assert_array_equal(process(iq), expected[None, ...])
 
 
 @pytest.mark.parametrize("tone", [None, 0])
@@ -552,7 +555,9 @@ def test_single_tone_mux_iq_resolves_implicit_and_explicit_tone():
     }
     implicit = v2.shot_sums(prog, [v2.IQ("readout")])(iq)
     explicit = v2.shot_sums(prog, [v2.IQ("readout", 0)])(iq)
-    np.testing.assert_array_equal(implicit, [[2, 6, 8], [2, 0, 0]])
+    np.testing.assert_array_equal(
+        implicit, [[2, 6, 8, 20, 26, 34], [2, 0, 0, 2, -4, 8]]
+    )
     np.testing.assert_array_equal(implicit, explicit)
 
 
@@ -588,19 +593,21 @@ def test_mux_classify_only_axes_produce_joint_counts():
     np.testing.assert_array_equal(process(iq), [[[1, 2], [1, 0]]])
 
 
-def test_iq_axis_sums_and_repeated_read_second_moments():
+def test_iq_axis_sums_and_repeated_read_second_order_features():
     prog = compile_modules(load_soccfg(), [readout()])
     iq = {0: np.array([[[[2, 3]], [[4, 5]]], [[[-1, 2]], [[1, -2]]]], dtype=np.float64)}
-    process = v2.shot_sums(prog, [v2.IQ("readout"), v2.IQ("readout")])
-    actual = process(iq)
-    np.testing.assert_array_equal(
-        actual,
+    features = np.array(
         [
-            [[2, 6, 8], [6, 20, 26], [8, 26, 34]],
-            [[2, 0, 0], [0, 2, -4], [0, -4, 8]],
-        ],
+            [[1, 2, 3, 4, 6, 9], [1, 4, 5, 16, 20, 25]],
+            [[1, -1, 2, 1, -2, 4], [1, 1, -2, 1, -2, 4]],
+        ]
     )
     np.testing.assert_array_equal(
-        v2.shot_sums(prog, [v2.IQ("readout")])(iq), [[2, 6, 8], [2, 0, 0]]
+        v2.shot_sums(prog, [v2.IQ("readout")])(iq),
+        [[2, 6, 8, 20, 26, 34], [2, 0, 0, 2, -4, 8]],
     )
+    actual = v2.shot_sums(prog, [v2.IQ("readout"), v2.IQ("readout")])(iq)
+    expected = np.stack([point.T @ point for point in features])
+    assert actual.shape == (2, 6, 6)
+    np.testing.assert_array_equal(actual, expected)
     assert actual.dtype == np.float64

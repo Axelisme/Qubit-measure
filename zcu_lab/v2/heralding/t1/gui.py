@@ -13,10 +13,9 @@ from zcu_tools.gui.app.measure.adapter import (
 )
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2.twotone.time_domain.t1.core import T1AnalyzeOptions
-
 from .core import (
     HeraldingT1Analysis,
+    HeraldingT1AnalyzeOptions,
     HeraldingT1Cfg,
     HeraldingT1Exp,
     HeraldingT1Result,
@@ -27,16 +26,18 @@ from .form import make_form
 def run(
     cfg: HeraldingT1Cfg, *, context: RunContext
 ) -> RunRecord[HeraldingT1Cfg, HeraldingT1Result]:
-    """Retain the classifier and acquisition configuration with the result."""
+    """Retain acquisition cfg with unclassified herald/signal second moments."""
     return RunRecord(cfg=cfg, result=HeraldingT1Exp().run(cfg, context=context))
 
 
 def analyze(
-    req: AnalyzeRequest[RunRecord[HeraldingT1Cfg, HeraldingT1Result], T1AnalyzeOptions],
+    req: AnalyzeRequest[
+        RunRecord[HeraldingT1Cfg, HeraldingT1Result], HeraldingT1AnalyzeOptions
+    ],
     *,
     plots: Plots,
 ) -> HeraldingT1Analysis:
-    """Fit the post-selected data with nonfinite points removed."""
+    """Fit self-calibrated C and publish fit parameters and population diagnostics."""
     return HeraldingT1Exp().analyze(req.run_result, req.analyze_params, plots=plots)
 
 
@@ -63,7 +64,7 @@ DEFINITION = Adapter(
     guide=Path(__file__).with_name("guide.md"),
     analysis=Analysis(
         fn=analyze,
-        options=lambda source, env: T1AnalyzeOptions(),
+        options=lambda source, env: HeraldingT1AnalyzeOptions(),
         writeback=writeback,
     ),
 )

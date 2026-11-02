@@ -92,24 +92,24 @@ class HeraldingLenRabiReport(RecipeReport):
 
 @recipe(
     "heralding_len_rabi",
-    description="Run ground-heralded length Rabi; save per-class shot sums and analysis.",
+    description="Run self-calibrated heralding length Rabi; save second-moment sums and analysis.",
 )
 async def heralding_len_rabi(
     session: RecipeSession, inputs: HeraldingLenRabiInputs
 ) -> HeraldingLenRabiReport:
     """Sweep pulse length at fixed gain to calibrate pi and pi/2 rotations.
 
-    Store per-class shot sums; compute herald-g conditional IQ for fitting.
-    Readout accepts circle, linear or centroid3. Herald states are g/e/other
-    for circle (other is rejection), g/e for linear (no rejection), and g/e/f
-    for centroid3 (f is not other). Circle requires a calibrated GE Post radius.
-    Only shots classified as herald-g contribute to signal IQ and fitting.
-    After optional reset, herald ground with the saved readout classifier, apply
-    optional initialization and the drive, then read accepted signal shots at each
-    length. Fit the Rabi oscillations to estimate pi and pi/2
-    durations, and ask before applying the proposed calibration; skipping writes
-    nothing. This is host post-selection, not active reset. Circle heralding
-    requires a calibrated radius. Pass fraction is not independent ground purity.
+    Store (N, 6, 6) herald/signal second-moment sums without a classifier.
+    Analyze self-calibrates shared readout and fits only C = 1 - tr J, the
+    probability of changing state. K[i,j] = P(i -> j) is a diagnostic, not a
+    fitted curve. pi_hat is the post-herald population; decay during herald
+    can reduce it relative to the original thermal population.
+    This recipe has no n_states input. To change the state count, edit n_states
+    in the completed tab's Analysis settings and rerun Analyze.
+    The Analysis default is 2; second-order IQ supports at most 3 states.
+    Three collinear centers fail identification; readout tails bias estimates.
+    No feedback or active reset is added by heralding. Ask before applying
+    the ordinary calibration proposals; skipping writes nothing.
 
     points → expts sets the sweep sample count.
     Analysis controls: decay, fit_phase. Omission retains each analysis value; null is passed to its owner.

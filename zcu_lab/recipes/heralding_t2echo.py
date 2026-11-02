@@ -1,4 +1,4 @@
-"""Measure ground-heralded spin-echo decay versus total delay to estimate refocused coherence.
+"""Measure self-calibrated heralding spin-echo decay versus total delay to estimate refocused coherence.
 
 Recipe points → expts: scan sample counts map to the GUI sweep Expts field.
 """
@@ -24,7 +24,7 @@ class HeraldingT2EchoInputs(RecipeInputs):
 
     readout_ref: str | None | Keep = Field(
         KEEP,
-        description="Pulse-readout library key including classifier. Null passes to the Form owner.",
+        description="Pulse-readout library key without requiring a classifier. Null passes to the Form owner.",
     )
     use_reset: str | None | Keep = Field(
         KEEP,
@@ -82,24 +82,24 @@ class HeraldingT2EchoReport(RecipeReport):
 
 @recipe(
     "heralding_t2echo",
-    description="Run ground-heralded Echo; save per-class shot sums and analysis.",
+    description="Run self-calibrated heralding Echo; save second-moment sums and analysis.",
 )
 async def heralding_t2echo(
     session: RecipeSession, inputs: HeraldingT2EchoInputs
 ) -> HeraldingT2EchoReport:
     """Measure refocused qubit coherence with a spin-echo delay sweep.
 
-    Store per-class shot sums; compute herald-g conditional IQ for fitting.
-    Readout accepts circle, linear or centroid3. Herald states are g/e/other
-    for circle (other is rejection), g/e for linear (no rejection), and g/e/f
-    for centroid3 (f is not other). Circle requires a calibrated GE Post radius.
-    Only shots classified as herald-g contribute to signal IQ and fitting.
-    After optional reset and ground herald, apply pi/2, wait half the total delay, apply pi, wait
-    the other half, then apply a phase-shifted pi/2 pulse and read out.
-    Average only accepted signal shots; fit the decay with the ordinary Echo owner.
-    No active reset or joint herald is performed. Fringe fitting remains optional.
-    Ask before applying the proposed calibration, then save per-class shot sums and analysis.
-    Skipping writes nothing.
+    Store (N, 6, 6) herald/signal second-moment sums without a classifier.
+    Analyze self-calibrates shared readout and fits only C = 1 - tr J, the
+    probability of changing state. K[i,j] = P(i -> j) is a diagnostic, not a
+    fitted curve. pi_hat is the post-herald population; decay during herald
+    can reduce it relative to the original thermal population.
+    This recipe has no n_states input. To change the state count, edit n_states
+    in the completed tab's Analysis settings and rerun Analyze.
+    The Analysis default is 2; second-order IQ supports at most 3 states.
+    Three collinear centers fail identification; readout tails bias estimates.
+    No feedback or active reset is added by heralding. Ask before applying
+    the ordinary calibration proposals; skipping writes nothing.
 
     points → expts sets the sweep sample count.
     Analysis controls: fit_method, fit_phase. Omission retains each analysis value; null is passed to its owner.

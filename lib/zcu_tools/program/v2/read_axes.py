@@ -18,7 +18,7 @@ from .timeline import TimelineProgramV2
 
 @dataclass(frozen=True)
 class IQ:
-    """An unclassified read axis with vector (1, I, Q).
+    """An unclassified read axis with vector (1, I, Q, I², IQ, Q²).
 
     read names one logical compiled readout, present once on each Branch path.
     tone is None for PulseReadout or a zero-based MuxReadout cfg tone position.
@@ -55,7 +55,8 @@ def shot_sums(
     """Resolve compiled read labels and return a per-point shot-sum processor.
 
     prog is a compiled TimelineProgramV2. axes lists vectors
-    in output-axis order; repeat a read for second moments. Empty axes raise
+    in output-axis order. IQ includes all moments through second order; repeated
+    reads form outer products of those features. Empty axes raise
     ValueError before read-label resolution or acquisition. Timeline labels are
     emit tags, or module names when untagged.
     Each label must identify one emission on every feasible Branch path.
@@ -99,7 +100,17 @@ def shot_sums(
         for ch, index, classify in resolved:
             values = iq[ch][:, :, index]
             vector = (
-                np.concatenate([np.ones((*values.shape[:-1], 1)), values], axis=-1)
+                np.stack(
+                    [
+                        np.ones(values.shape[:-1]),
+                        values[..., 0],
+                        values[..., 1],
+                        values[..., 0] ** 2,
+                        values[..., 0] * values[..., 1],
+                        values[..., 1] ** 2,
+                    ],
+                    axis=-1,
+                )
                 if classify is None
                 else classify(values)
             )
@@ -273,18 +284,19 @@ def _resolve_axis(
 def split_sums(
     sums: NDArray[np.float64],
 ) -> tuple[NDArray[np.float64], NDArray[np.complex128]]:
-    """Split a final (count, sum I, sum Q) axis into counts and complex means.
+    """Split final (count, ΣI, ΣQ, ΣI², ΣIQ, ΣQ²) into counts and complex means.
 
-    sums contains float64 shot sums. Its last axis must have length three or
+    Only the first three components contribute to the result.
+    sums contains float64 shot sums. Its last axis must have length six or
     ValueError reports the actual shape. Return counts with that axis removed
     (a borrowed view) and detached complex128 means of the same shape. Empty
     cells and unmeasured NaN counts give NaN real and imaginary components,
     without divide warnings. NaN counts remain NaN.
     No input values are changed; counts are not normalized.
     """
-    if sums.ndim < 1 or sums.shape[-1] != 3:
+    if sums.ndim < 1 or sums.shape[-1] != 6:
         raise ValueError(
-            f"split_sums expected final axis length 3; actual shape {sums.shape}"
+            f"split_sums expected final axis length 6; actual shape {sums.shape}"
         )
     counts = sums[..., 0]
     means = np.full(counts.shape, complex(np.nan, np.nan), dtype=np.complex128)

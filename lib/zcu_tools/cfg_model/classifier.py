@@ -1,7 +1,7 @@
 """Readout calibration data, independent of acquisition and file I/O."""
 
 from math import isfinite
-from typing import Annotated, ClassVar, Literal, Self
+from typing import Annotated, Literal, Self
 
 from pydantic import (
     ConfigDict,
@@ -33,9 +33,6 @@ class CircleClassifier(ConfigBase):
     """
 
     model_config = ConfigDict(strict=True, allow_inf_nan=False)
-
-    state_names: ClassVar[tuple[str, ...]] = ("g", "e", "other")
-    """State names in classification_processor output-axis order and length."""
 
     mode: Literal["circle"] = "circle"
     g_center: complex
@@ -83,9 +80,6 @@ class LinearClassifier(ConfigBase):
 
     model_config = ConfigDict(strict=True, allow_inf_nan=False)
 
-    state_names: ClassVar[tuple[str, ...]] = ("g", "e")
-    """State names in classification_processor output-axis order and length."""
-
     mode: Literal["linear"] = "linear"
     angle: Annotated[float, FieldMeta(unit="rad")]
     threshold: float
@@ -112,9 +106,6 @@ class Centroid3Classifier(ConfigBase):
     """
 
     model_config = ConfigDict(strict=True, allow_inf_nan=False)
-
-    state_names: ClassVar[tuple[str, ...]] = ("g", "e", "f")
-    """State names in classification_processor output-axis order and length."""
 
     mode: Literal["centroid3"] = "centroid3"
     g_center: complex

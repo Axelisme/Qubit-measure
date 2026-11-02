@@ -61,6 +61,34 @@ def test_curve_stop_decision_retains_the_threshold_crossing_snr() -> None:
     assert check() == decision
 
 
+@pytest.mark.parametrize(
+    ("curve", "met"),
+    [(np.full(5, np.nan), False), (np.array([0.0, 1.0]), True)],
+    ids=["nan-projection-keeps-acquiring", "zero-noise-variation-stops"],
+)
+def test_curve_stop_handles_nan_and_infinite_estimates(
+    curve: NDArray[np.float64], met: bool
+) -> None:
+    signals = SignalBuffer(curve.shape, dtype=np.float64)
+    signals.set(np.ones_like(curve))
+    estimates: list[float] = []
+    check = snr_checker(
+        signals.at(),
+        1.0,
+        lambda values: curve,
+        after_check=estimates.append,
+        check_interval=None,
+    )
+    with np.errstate(divide="ignore", invalid="ignore"):
+        decision = check()
+    assert decision.met is met
+    assert decision.value is None
+    if met:
+        assert estimates == [np.inf]
+    else:
+        assert estimates == []
+
+
 def test_default_score_is_unbounded_pooled_sigma_snr() -> None:
     assert _score(separation=4.0) == pytest.approx(4.0)
     assert _score(separation=20.0) == pytest.approx(20.0)

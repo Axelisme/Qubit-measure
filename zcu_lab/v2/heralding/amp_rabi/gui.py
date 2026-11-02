@@ -17,7 +17,6 @@ from zcu_tools.program.v2 import split_sums
 
 from zcu_lab.v2.twotone.rabi.amp_rabi.core import (
     AmpRabiAnalysis,
-    AmpRabiAnalyzeOptions,
     AmpRabiCfg,
     AmpRabiResult,
 )
@@ -25,6 +24,7 @@ from zcu_lab.v2.twotone.rabi.amp_rabi.gui import DEFINITION as AMP_RABI
 
 from .core import (
     HeraldingAmpRabiAnalysis,
+    HeraldingAmpRabiAnalyzeOptions,
     HeraldingAmpRabiCfg,
     HeraldingAmpRabiExp,
     HeraldingAmpRabiResult,
@@ -35,18 +35,19 @@ from .form import make_form
 def run(
     cfg: HeraldingAmpRabiCfg, *, context: RunContext
 ) -> RunRecord[HeraldingAmpRabiCfg, HeraldingAmpRabiResult]:
-    """Acquire all herald-class count/IQ sums and retain cfg with classifier."""
+    """Retain acquisition cfg with unclassified herald/signal second moments."""
     return RunRecord(cfg=cfg, result=HeraldingAmpRabiExp().run(cfg, context=context))
 
 
 def analyze(
     req: AnalyzeRequest[
-        RunRecord[HeraldingAmpRabiCfg, HeraldingAmpRabiResult], AmpRabiAnalyzeOptions
+        RunRecord[HeraldingAmpRabiCfg, HeraldingAmpRabiResult],
+        HeraldingAmpRabiAnalyzeOptions,
     ],
     *,
     plots: Plots,
 ) -> HeraldingAmpRabiAnalysis:
-    """Fit finite herald-g IQ and publish this experiment's calibration plot."""
+    """Fit self-calibrated C and publish fit parameters and population diagnostics."""
     return HeraldingAmpRabiExp().analyze(
         req.run_result, req.analyze_params, plots=plots
     )
@@ -69,8 +70,10 @@ def writeback(
         return []
     ordinary = RunRecord(
         cfg=AmpRabiCfg.model_validate(source.cfg.model_dump()),
+        # Ordinary-record unconditional IQ mapping; writeback does not read signals.
         result=AmpRabiResult(
-            source.result.amps, split_sums(source.result.sums)[1][..., 0]
+            source.result.amps,
+            split_sums(source.result.sums[:, 0, :])[1],
         ),
         metadata=source.metadata,
     )
@@ -95,7 +98,7 @@ DEFINITION = Adapter(
     guide=Path(__file__).with_name("guide.md"),
     analysis=Analysis(
         fn=analyze,
-        options=lambda source, env: AmpRabiAnalyzeOptions(),
+        options=lambda source, env: HeraldingAmpRabiAnalyzeOptions(),
         writeback=writeback,
     ),
 )

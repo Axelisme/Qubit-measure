@@ -152,10 +152,13 @@ def snr_checker(
 ) -> Callable[[], StopDecision]:
     """Check a slot's projected completed-round curve against an SNR threshold.
 
-    ctx.value supplies cumulative IQ; signal2real_fn projects it to real values.
+    ctx.value supplies cumulative data; signal2real_fn projects it to a real curve.
     None disables stopping. Checks are throttled by check_interval seconds (None
-    checks every call). after_check receives each estimate. A met decision keeps
-    the first crossing SNR for subsequent calls; nonfinite estimates use None.
+    checks every call). All-NaN raw or projected curves skip estimation and do
+    not call after_check. Otherwise after_check receives each estimate. NaN
+    estimates do not stop acquisition. Positive infinity meets the threshold, as for a varying
+    curve with zero estimated noise. A met decision keeps the first crossing SNR
+    for subsequent calls; nonfinite crossing values are recorded as None.
     """
     if snr_threshold is None:
         return lambda: StopDecision(False)
@@ -176,7 +179,10 @@ def snr_checker(
         signals = np.asarray(ctx.value)
         if np.all(np.isnan(signals)):
             return StopDecision(False)
-        snr = estimate_snr(signal2real_fn(signals))
+        real_signals = signal2real_fn(signals)
+        if np.all(np.isnan(real_signals)):
+            return StopDecision(False)
+        snr = estimate_snr(real_signals)
         if after_check is not None:
             after_check(snr)
         if snr >= snr_threshold:

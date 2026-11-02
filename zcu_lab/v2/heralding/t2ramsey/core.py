@@ -1,9 +1,9 @@
-"""Single-qubit Ramsey fringes with ground-herald post-selection."""
+"""Single-qubit T2Ramsey from self-calibrated herald/signal second moments."""
 
 from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Annotated, ClassVar
+from typing import Annotated, ClassVar, Literal
 
 import numpy as np
 from numpy.typing import NDArray
@@ -13,6 +13,7 @@ from zcu_tools.analysis.fitting import (
     fit_decay,
     fit_decay_fringe,
 )
+from zcu_tools.analysis.herald_transfer import selfcal_transfer
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
     Experiment,
@@ -32,29 +33,32 @@ from zcu_tools.experiment.v2.utils.snr import snr_checker
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     IQ,
-    Classify,
     Pulse,
     Reset,
     SweepCfg,
     TimelineBuilder,
     shot_sums,
-    split_sums,
 )
 from zcu_tools.program.v2.modules import PulseReadout
-from zcu_tools.utils.process import rotate2real
 
-from zcu_lab.v2.support import live_line
+from zcu_lab.v2.heralding._live import TransferProjector, live_transfer
 from zcu_lab.v2.twotone.time_domain.detune import actual_detune
 from zcu_lab.v2.twotone.time_domain.t2ramsey.core import T2RamseyAnalyzeOptions
 
 
 @dataclass(frozen=True)
-class HeraldingT2RamseyResult:
-    """times is the sweep grid (us); sums has shape (points, classes, 3).
+class HeraldingT2RamseyAnalyzeOptions(T2RamseyAnalyzeOptions):
+    """Fit C using two or three states; second-order IQ identifies at most three."""
 
-    Herald states follow the saved classifier's state_names order and length.
-    Components are count/sum I/sum Q.
-    Unmeasured sums are NaN. Conditional means at zero count are NaN.
+    n_states: Annotated[Literal[2, 3], FieldMeta(label="Number of states")] = 2
+
+
+@dataclass(frozen=True)
+class HeraldingT2RamseyResult:
+    """times is the sweep grid (us); sums is float64 (N, 6, 6).
+
+    Herald and signal axes use (1, I, Q, I², IQ, Q²); sums[:, 0, 0] is
+    the shot count. Unmeasured sums are NaN.
     true_activate_detune is run-only MHz metadata, None after native load.
     """
 
@@ -65,7 +69,7 @@ class HeraldingT2RamseyResult:
 
 @dataclass(frozen=True)
 class HeraldingT2RamseyAnalysis:
-    """Herald-g conditional Ramsey fit and fitting-owner diagnostics.
+    """C-based Ramsey fit and fitting-owner diagnostics.
 
     t2r is the Ramsey decay time in us; t2r_err is its standard error in us.
     detune is the observed fringe frequency in MHz, including the applied
@@ -74,12 +78,20 @@ class HeraldingT2RamseyAnalysis:
     fit_quality maps "fit" to the fitter's dimensionless residual and
     relative-error metrics, fixed-phase and decay-bound diagnostics, or is
     None when diagnostics were not supplied.
+    pi_hat is the post-herald population tuple in descending order; herald
+    decay can reduce its excited population relative to the initial thermal state.
+    singular_values contains the leading n_states+1 singular values normalized
+    by the largest. Neither field contains per-point values.
+    fit_fringe records whether the fringe model was selected for writeback.
     """
 
     t2r: float
     t2r_err: float
     detune: float
     detune_err: float
+    pi_hat: tuple[float, ...]
+    singular_values: tuple[float, ...]
+    fit_fringe: bool
     fit_quality: Mapping[str, FitQuality] | None = None
 
 
@@ -119,7 +131,7 @@ class HeraldingT2RamseyCfg(ConfigBase):
 def restore_result(
     data: GroupedLoadData[HeraldingT2RamseyCfg],
 ) -> HeraldingT2RamseyResult:
-    """Restore per-class shot sums; old files fail naming the missing sums variable."""
+    """Restore second-order sums; incompatible axis labels fail native loading."""
     sums = data.variable("sums")
     return HeraldingT2RamseyResult(
         times=sums.axes[2].astype(np.float64),
@@ -128,9 +140,16 @@ def restore_result(
 
 
 class HeraldingT2RamseyExp(Experiment[HeraldingT2RamseyResult, HeraldingT2RamseyCfg]):
-    """Herald ground, apply pi/2, wait, apply phase-shifted pi/2, then read IQ."""
+    """Measure shared-readout herald/signal moments without a classifier.
 
-    Options: ClassVar[type[T2RamseyAnalyzeOptions]] = T2RamseyAnalyzeOptions
+    Optional reset, herald, pi/2, delay, phase-shifted pi/2, signal.
+    Live plots and fits use only state-change probability C = 1 - tr J.
+    K[i,j] = P(i -> j) is a diagnostic, not the fitted observable.
+    """
+
+    Options: ClassVar[type[HeraldingT2RamseyAnalyzeOptions]] = (
+        HeraldingT2RamseyAnalyzeOptions
+    )
     AXES_SPEC: ClassVar[
         GroupedAxesSpec[HeraldingT2RamseyResult, HeraldingT2RamseyCfg]
     ] = GroupedAxesSpec(
@@ -138,8 +157,10 @@ class HeraldingT2RamseyExp(Experiment[HeraldingT2RamseyResult, HeraldingT2Ramsey
             VariableSpec(
                 variable="sums",
                 axes=(
-                    VariableAxisSpec.generated_arange(label="components", unit=""),
-                    VariableAxisSpec.generated_arange(label="herald_states", unit=""),
+                    VariableAxisSpec(
+                        label="signal_features", unit="", values=tuple(range(6))
+                    ),
+                    VariableAxisSpec.generated_arange(label="herald_features", unit=""),
                     VariableAxisSpec(
                         label="Time", unit="s", field_name="times", scale=1e-6
                     ),
@@ -159,20 +180,17 @@ class HeraldingT2RamseyExp(Experiment[HeraldingT2RamseyResult, HeraldingT2Ramsey
     def run(
         self, cfg: HeraldingT2RamseyCfg, *, context: RunContext
     ) -> HeraldingT2RamseyResult:
-        """Acquire (Nt, classes, 3) shot sums versus free-evolution delay in us.
+        """Acquire (N, 6, 6) moment sums without classifier calibration.
 
-        Optional reset precedes herald, pi/2, delay, phase-shifted pi/2, signal.
-        Readouts share cfg.readout and its classifier.
-        Herald states follow classifier state_names.
-        Components are count/sum I/sum Q.
-        Rounds add sums. Live and analyze select herald-g conditional IQ.
-        Zero-count means are NaN; unmeasured sums remain NaN.
-        detune in MHz ramps the final pulse phase, not the drive frequency.
-        cfg is copied; heralding itself adds no active reset.
+        Optional reset, herald, pi/2, delay, phase-shifted pi/2, signal.
+        Both readouts use cfg.readout. Rounds add raw sums. cfg is copied.
+        Live C uses two-state self-calibration with warm starts. Before its
+        first success show Calibrating; identification failures keep the last
+        plot and do not stop acquisition. Unmeasured sums remain NaN.
+        detune (MHz) ramps only the final pi/2 phase, not drive frequency.
+        Early-stop SNR also uses C; a failed calibration cannot stop a round.
+        Pulse times use us. Heralding adds no active reset or feedback.
         """
-        if cfg.readout.classifier is None:
-            raise ValueError("Heralding requires a readout classifier")
-        num_states = len(cfg.readout.classifier.state_names)
         cfg = deepcopy(cfg)
         soccfg = context.soccfg
         lengths = sweep2array(cfg.delay, "time", {"soccfg": soccfg})
@@ -189,15 +207,11 @@ class HeraldingT2RamseyExp(Experiment[HeraldingT2RamseyResult, HeraldingT2Ramsey
             ylabel="Real Signal",
             title=f"Heralded T2 Ramsey - detune {cfg.detune:.2f} MHz",
         )
-        viewer = live_line(ax)
-
-        @context.plots.on_plot_thread
-        def update(data):
-            return viewer.set(lengths, rotate2real(split_sums(data)[1][..., 0]).real)
+        update = live_transfer(context.plots, ax, lengths)
 
         fig.show()
         buffer = SignalBuffer(
-            (len(lengths), num_states, 3),
+            (len(lengths), 6, 6),
             dtype=np.float64,
             on_update=update,
         )
@@ -225,13 +239,13 @@ class HeraldingT2RamseyExp(Experiment[HeraldingT2RamseyResult, HeraldingT2Ramsey
                 prog,
                 context.soc,
                 rounds=cfg.rounds,
-                processor=shot_sums(prog, [Classify("herald"), IQ("signal")]),
+                processor=shot_sums(prog, [IQ("herald"), IQ("signal")]),
                 options=RunOptions(
                     converter=np.copy,
                     stop_condition=snr_checker(
                         buffer.at(),
                         cfg.earlystop_snr,
-                        lambda data: rotate2real(split_sums(data)[1][..., 0]).real,
+                        TransferProjector(),
                     ),
                 ),
             )
@@ -243,29 +257,34 @@ class HeraldingT2RamseyExp(Experiment[HeraldingT2RamseyResult, HeraldingT2Ramsey
     def analyze(
         self,
         source: RunRecord[HeraldingT2RamseyCfg, HeraldingT2RamseyResult],
-        options: T2RamseyAnalyzeOptions,
+        options: HeraldingT2RamseyAnalyzeOptions,
         *,
         plots: Plots,
     ) -> HeraldingT2RamseyAnalysis:
-        """Fit herald-g conditional Ramsey IQ after discarding nonfinite samples.
+        """Fully self-calibrate all sums and fit only C = 1 - tr J.
 
-        Rotate onto the real signal axis. options.fit_fringe selects a decaying
-        fringe instead of a pure decay. options.fit_phase frees the fringe
-        phase; otherwise the signal nearest zero delay selects 0 or 180 degrees.
-        Draw data and fit, and return lifetime/error in us, observed fringe
-        frequency/error in MHz (both zero for decay), and the fitter's quality.
-        Pass fractions are not fit weights. Saved cfg is unused; insufficient
-        data raises in the fitting tool.
+        Discard nonfinite delay/C pairs. options.fit_fringe selects decaying
+        fringes instead of pure decay; options.fit_phase frees their phase.
+        Otherwise C nearest zero delay selects 0 or 180 degrees.
+        Return lifetime/error in us and observed fringe frequency/error in MHz.
+        options.n_states selects 2 or 3, the second-order identifiability limit.
+        Three collinear centers fail. Readout tails can bias the calibration.
+        pi_hat describes populations entering the operation after herald;
+        herald-readout decay can lower it relative to the initial thermal state.
+        Draw only C and the fit, with pi_hat in the legend. Return fit parameters,
+        pi_hat and normalized singular values, without pointwise arrays.
+        Identification and fitting failures propagate; saved cfg is not required.
         """
         result = source.result
         fit_fringe = options.fit_fringe
         fit_phase = options.fit_phase
 
-        signals = split_sums(result.sums)[1][..., 0]
+        transfer = selfcal_transfer(result.sums, n_states=options.n_states)
+        signals = transfer.change_probability
         finite = np.isfinite(result.times) & np.isfinite(signals)
         lengths, signals = result.times[finite], signals[finite]
 
-        real_signals = rotate2real(signals).real
+        real_signals = signals
 
         # Choose whether to fit oscillations as well as their decay envelope.
         if fit_fringe:
@@ -297,7 +316,14 @@ class HeraldingT2RamseyExp(Experiment[HeraldingT2RamseyResult, HeraldingT2Ramsey
 
         fig, ax = plots.subplots(num="fit", figsize=config.figsize)
 
-        ax.plot(lengths, real_signals, label="meas", ls="-", marker="o", markersize=3)
+        ax.plot(
+            lengths,
+            real_signals,
+            label=f"C, π̂={transfer.populations.round(3).tolist()}",
+            ls="-",
+            marker="o",
+            markersize=3,
+        )
         ax.plot(lengths, y_fit, label="fit")
         t2r_str = f"{t2r:.2f}us ± {t2rerr:.2f}us"
         if fit_fringe:
@@ -306,7 +332,7 @@ class HeraldingT2RamseyExp(Experiment[HeraldingT2RamseyResult, HeraldingT2Ramsey
         else:
             ax.set_title(f"T2 decay = {t2r_str}", fontsize=15)
         ax.set_xlabel("Delay Time (us)")
-        ax.set_ylabel("Signal Real (a.u.)")
+        ax.set_ylabel("Change probability C")
         ax.legend()
         ax.grid(True)
 
@@ -317,5 +343,8 @@ class HeraldingT2RamseyExp(Experiment[HeraldingT2RamseyResult, HeraldingT2Ramsey
             t2r_err=float(t2rerr),
             detune=float(detune),
             detune_err=float(detune_err),
+            pi_hat=tuple(float(p) for p in transfer.populations),
+            singular_values=tuple(float(s) for s in transfer.singular_values),
+            fit_fringe=options.fit_fringe,
             fit_quality={"fit": fit.quality},
         )

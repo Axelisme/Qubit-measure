@@ -22,7 +22,6 @@ from zcu_tools.program.v2 import split_sums
 
 from zcu_lab.v2.twotone.time_domain.t2echo.core import (
     T2EchoAnalysis,
-    T2EchoAnalyzeOptions,
     T2EchoCfg,
     T2EchoResult,
 )
@@ -30,6 +29,7 @@ from zcu_lab.v2.twotone.time_domain.t2echo.gui import DEFINITION as T2_ECHO
 
 from .core import (
     HeraldingT2EchoAnalysis,
+    HeraldingT2EchoAnalyzeOptions,
     HeraldingT2EchoCfg,
     HeraldingT2EchoExp,
     HeraldingT2EchoResult,
@@ -45,9 +45,11 @@ HeraldingT2EchoRunResult: TypeAlias = RunRecord[
 
 
 def analyze(
-    req: AnalyzeRequest[HeraldingT2EchoRunResult, T2EchoAnalyzeOptions], *, plots: Plots
+    req: AnalyzeRequest[HeraldingT2EchoRunResult, HeraldingT2EchoAnalyzeOptions],
+    *,
+    plots: Plots,
 ) -> HeraldingT2EchoAnalysis:
-    """Fit herald-g conditional IQ after discarding nonfinite samples."""
+    """Fit self-calibrated C and publish fit parameters and population diagnostics."""
     return HeraldingT2EchoExp().analyze(
         req.run_result,
         req.analyze_params,
@@ -71,9 +73,10 @@ def writeback(
             if source.cfg is None
             else T2EchoCfg.model_validate(source.cfg.model_dump())
         ),
+        # Ordinary-record unconditional IQ mapping; writeback does not read signals.
         result=T2EchoResult(
             source.result.times,
-            split_sums(source.result.sums)[1][..., 0],
+            split_sums(source.result.sums[:, 0, :])[1],
             source.result.true_activate_detune,
         ),
         metadata=source.metadata,
@@ -133,7 +136,7 @@ DEFINITION = Adapter(
     guide=Path(__file__).with_name("guide.md"),
     analysis=Analysis(
         fn=analyze,
-        options=lambda source, env: T2EchoAnalyzeOptions(),
+        options=lambda source, env: HeraldingT2EchoAnalyzeOptions(),
         writeback=writeback,
     ),
 )

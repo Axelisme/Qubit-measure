@@ -1,13 +1,14 @@
-"""Single-qubit amplitude Rabi with ground-herald post-selection."""
+"""Single-qubit AmpRabi from self-calibrated herald/signal second moments."""
 
 from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Annotated, ClassVar
+from typing import Annotated, ClassVar, Literal
 
 import numpy as np
 from numpy.typing import NDArray
 from zcu_tools.analysis.fitting import FitQuality, fit_rabi
+from zcu_tools.analysis.herald_transfer import selfcal_transfer
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
     Experiment,
@@ -26,28 +27,31 @@ from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     IQ,
-    Classify,
     Pulse,
     Reset,
     SweepCfg,
     TimelineBuilder,
     shot_sums,
-    split_sums,
 )
 from zcu_tools.program.v2.modules import PulseReadout
-from zcu_tools.utils.process import rotate2real
 
-from zcu_lab.v2.support import live_line
+from zcu_lab.v2.heralding._live import live_transfer
 from zcu_lab.v2.twotone.rabi.amp_rabi.core import AmpRabiAnalyzeOptions
 
 
 @dataclass(frozen=True)
-class HeraldingAmpRabiResult:
-    """amps is the sweep grid (native gain); sums has shape (points, classes, 3).
+class HeraldingAmpRabiAnalyzeOptions(AmpRabiAnalyzeOptions):
+    """Fit C using two or three states; second-order IQ identifies at most three."""
 
-    Herald states follow the saved classifier's state_names order and length.
-    Components are count/sum I/sum Q.
-    Unmeasured sums are NaN. Conditional means at zero count are NaN.
+    n_states: Annotated[Literal[2, 3], FieldMeta(label="Number of states")] = 2
+
+
+@dataclass(frozen=True)
+class HeraldingAmpRabiResult:
+    """amps is the sweep grid (native gain); sums is float64 (N, 6, 6).
+
+    Herald and signal axes use (1, I, Q, I², IQ, Q²); sums[:, 0, 0] is
+    the shot count. Unmeasured sums are NaN.
     """
 
     amps: NDArray[np.float64]
@@ -56,7 +60,7 @@ class HeraldingAmpRabiResult:
 
 @dataclass(frozen=True)
 class HeraldingAmpRabiAnalysis:
-    """Herald-g amplitude calibration, not gate fidelity.
+    """C-based amplitude calibration, not gate fidelity.
 
     Attributes:
         pi_amp: Fitted pi-pulse gain in native gain units (a.u.); never None.
@@ -66,12 +70,18 @@ class HeraldingAmpRabiAnalysis:
         fit_quality: Fitter diagnostics keyed by "fit", including dimensionless
             residual and relative-error metrics and fixed-phase diagnostics;
             None when not supplied. analyze always supplies them.
+    pi_hat is the post-herald population tuple in descending order; herald
+    decay can reduce its excited population relative to the initial thermal state.
+    singular_values contains the leading n_states+1 singular values normalized
+    by the largest. Neither field contains per-point values.
     """
 
     pi_amp: float
     pi_amp_err: float
     pi2_amp: float
     pi2_amp_err: float
+    pi_hat: tuple[float, ...]
+    singular_values: tuple[float, ...]
     fit_quality: Mapping[str, FitQuality] | None = None
 
 
@@ -93,7 +103,7 @@ class HeraldingAmpRabiCfg(ConfigBase):
 def restore_result(
     data: GroupedLoadData[HeraldingAmpRabiCfg],
 ) -> HeraldingAmpRabiResult:
-    """Restore per-class shot sums; old files fail naming the missing sums variable."""
+    """Restore second-order sums; incompatible axis labels fail native loading."""
     sums = data.variable("sums")
     return HeraldingAmpRabiResult(
         amps=sums.axes[2].astype(np.float64),
@@ -102,13 +112,16 @@ def restore_result(
 
 
 class HeraldingAmpRabiExp(Experiment[HeraldingAmpRabiResult, HeraldingAmpRabiCfg]):
-    """Herald ground, sweep drive gain, and store per-class count/IQ sums.
+    """Measure shared-readout herald/signal moments without a classifier.
 
-    Store all herald classes in classifier state_names order.
-    Live plots and fits use only the herald-g conditional mean IQ.
+    Optional reset, herald readout, optional init, gain-swept drive, signal.
+    Live plots and fits use only state-change probability C = 1 - tr J.
+    K[i,j] = P(i -> j) is a diagnostic, not the fitted observable.
     """
 
-    Options: ClassVar[type[AmpRabiAnalyzeOptions]] = AmpRabiAnalyzeOptions
+    Options: ClassVar[type[HeraldingAmpRabiAnalyzeOptions]] = (
+        HeraldingAmpRabiAnalyzeOptions
+    )
     AXES_SPEC: ClassVar[
         GroupedAxesSpec[HeraldingAmpRabiResult, HeraldingAmpRabiCfg]
     ] = GroupedAxesSpec(
@@ -116,8 +129,10 @@ class HeraldingAmpRabiExp(Experiment[HeraldingAmpRabiResult, HeraldingAmpRabiCfg
             VariableSpec(
                 variable="sums",
                 axes=(
-                    VariableAxisSpec.generated_arange(label="components", unit=""),
-                    VariableAxisSpec.generated_arange(label="herald_states", unit=""),
+                    VariableAxisSpec(
+                        label="signal_features", unit="", values=tuple(range(6))
+                    ),
+                    VariableAxisSpec.generated_arange(label="herald_features", unit=""),
                     VariableAxisSpec(label="Gain", unit="", field_name="amps"),
                 ),
                 z=VariableZSpec(
@@ -134,19 +149,15 @@ class HeraldingAmpRabiExp(Experiment[HeraldingAmpRabiResult, HeraldingAmpRabiCfg
     def run(
         self, cfg: HeraldingAmpRabiCfg, *, context: RunContext
     ) -> HeraldingAmpRabiResult:
-        """Acquire (Ngain, classes, 3) shot sums versus hardware-quantized gain.
+        """Acquire (N, 6, 6) moment sums without classifier calibration.
 
-        After optional reset, herald, apply optional init and fixed-duration
-        gain-swept drive, then read signal. Both readouts share cfg.readout and
-        its classifier. Herald states follow classifier state_names; components are
-        count/sum I/sum Q. Rounds add sums. Live and analyze use herald-g
-        conditional IQ; zero-count means are NaN. Unmeasured sums remain NaN.
-        cfg is not mutated. Pulse duration uses us, gain uses native units.
-        Heralding itself adds no active reset.
+        Optional reset, herald readout, optional init, gain-swept drive, signal.
+        Both readouts use cfg.readout. Rounds add raw sums. cfg is copied.
+        Live C uses two-state self-calibration with warm starts. Before its
+        first success show Calibrating; identification failures keep the last
+        plot and do not stop acquisition. Unmeasured sums remain NaN.
+        Pulse times use us. Heralding adds no active reset or feedback.
         """
-        if cfg.readout.classifier is None:
-            raise ValueError("Heralding requires a readout classifier")
-        num_states = len(cfg.readout.classifier.state_names)
         cfg = deepcopy(cfg)
         soccfg = context.soccfg
         gains = sweep2array(
@@ -154,15 +165,11 @@ class HeraldingAmpRabiExp(Experiment[HeraldingAmpRabiResult, HeraldingAmpRabiCfg
         )
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Pulse gain", ylabel="IQ magnitude (a.u.)")
-        viewer = live_line(ax)
-
-        @context.plots.on_plot_thread
-        def update(data):
-            return viewer.set(gains, np.abs(split_sums(data)[1][..., 0]))
+        update = live_transfer(context.plots, ax, gains)
 
         fig.show()
         buffer = SignalBuffer(
-            (len(gains), num_states, 3),
+            (len(gains), 6, 6),
             dtype=np.float64,
             on_update=update,
         )
@@ -183,7 +190,7 @@ class HeraldingAmpRabiExp(Experiment[HeraldingAmpRabiResult, HeraldingAmpRabiCfg
                 prog,
                 context.soc,
                 rounds=cfg.rounds,
-                processor=shot_sums(prog, [Classify("herald"), IQ("signal")]),
+                processor=shot_sums(prog, [IQ("herald"), IQ("signal")]),
                 options=RunOptions(
                     converter=np.copy,
                 ),
@@ -194,25 +201,29 @@ class HeraldingAmpRabiExp(Experiment[HeraldingAmpRabiResult, HeraldingAmpRabiCfg
     def analyze(
         self,
         source: RunRecord[HeraldingAmpRabiCfg, HeraldingAmpRabiResult],
-        options: AmpRabiAnalyzeOptions,
+        options: HeraldingAmpRabiAnalyzeOptions,
         *,
         plots: Plots,
     ) -> HeraldingAmpRabiAnalysis:
-        """Fit herald-g IQ and return pi/pi2 gains, errors and fit quality.
+        """Fully self-calibrate all sums and fit only C = 1 - tr J.
 
-        Skip leading points on the original gain grid, discard nonfinite gain
-        and IQ, then rotate IQ onto a real contrast axis. The point nearest zero
-        gain fixes the nondecaying Rabi phase to 0 or 180 degrees. Publish a
-        fit plot with pi/pi2 markers and uncertainty spans, and return the
-        fitter's quality diagnostics. Pass fraction is
-        diagnostic, not a fit weight. Saved cfg is not required. Negative skip
-        is rejected by Options; empty or insufficient traces propagate errors.
+        Skip options.skip leading gain points after calibration. Fit a nondecaying
+        cosine, fixing phase to 0 or 180 degrees from C nearest zero gain.
+        Return pi/pi2 gains and their standard errors in native gain units.
+        options.n_states selects 2 or 3, the second-order identifiability limit.
+        Three collinear centers fail. Readout tails can bias the calibration.
+        pi_hat describes populations entering the operation after herald;
+        herald-readout decay can lower it relative to the initial thermal state.
+        Draw only C and the fit, with pi_hat in the legend. Return fit parameters,
+        pi_hat and normalized singular values, without pointwise arrays.
+        Identification and fitting failures propagate; saved cfg is not required.
         """
         gains = source.result.amps[options.skip :]
-        signals = split_sums(source.result.sums)[1][..., 0][options.skip :]
+        transfer = selfcal_transfer(source.result.sums, n_states=options.n_states)
+        signals = transfer.change_probability[options.skip :]
         finite = np.isfinite(gains) & np.isfinite(signals)
         gains, signals = gains[finite], signals[finite]
-        real_signals = rotate2real(signals).real
+        real_signals = signals
 
         zero_signal = real_signals[np.argmin(np.abs(gains))]
         if zero_signal > 0.5 * (np.max(real_signals) + np.min(real_signals)):
@@ -231,21 +242,17 @@ class HeraldingAmpRabiExp(Experiment[HeraldingAmpRabiResult, HeraldingAmpRabiCfg
 
         fig, ax = plots.subplots(num="fit", figsize=config.figsize)
 
-        ax.plot(gains, real_signals, label="meas", ls="-", marker="o", markersize=3)
+        ax.plot(
+            gains,
+            real_signals,
+            label=f"C, π̂={transfer.populations.round(3).tolist()}",
+            ls="-",
+            marker="o",
+            markersize=3,
+        )
         ax.plot(gains, y_fit, label="fit")
-        ax.axvline(
-            pi_amp, ls="--", c="red", label=f"pi = {pi_amp:.3g} ± {pi_amp_err:.2g}"
-        )
-        ax.axvspan(pi_amp - pi_amp_err, pi_amp + pi_amp_err, color="red", alpha=0.2)
-        ax.axvline(
-            pi2_amp,
-            ls="--",
-            c="red",
-            label=f"pi/2 = {pi2_amp:.3g} ± {pi2_amp_err:.2g}",
-        )
-        ax.axvspan(pi2_amp - pi2_amp_err, pi2_amp + pi2_amp_err, color="red", alpha=0.2)
         ax.set_xlabel("Pulse gain (a.u.)")
-        ax.set_ylabel("Signal Real (a.u.)")
+        ax.set_ylabel("Change probability C")
         ax.legend(loc=4)
         ax.grid(True)
 
@@ -254,5 +261,11 @@ class HeraldingAmpRabiExp(Experiment[HeraldingAmpRabiResult, HeraldingAmpRabiCfg
         # fit_rabi computes the per-gain fit uncertainties; surface them so the GUI
         # summary carries the gain errors (the figure labels already show them).
         return HeraldingAmpRabiAnalysis(
-            pi_amp, pi_amp_err, pi2_amp, pi2_amp_err, fit_quality={"fit": fit.quality}
+            pi_amp,
+            pi_amp_err,
+            pi2_amp,
+            pi2_amp_err,
+            pi_hat=tuple(float(p) for p in transfer.populations),
+            singular_values=tuple(float(s) for s in transfer.singular_values),
+            fit_quality={"fit": fit.quality},
         )

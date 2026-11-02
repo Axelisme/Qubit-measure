@@ -1,6 +1,6 @@
 # `zcu_tools.program` — QICK integration
 
-**Last updated:** 2026-11-02，逐 channel 接線、共用 wave-port 與單 tone 讀出軸規則
+**Last updated:** 2026-11-02，IQ 二階特徵與 summed acquisition
 
 **讀者：** framework-dev。QICK 整合、程式建構與 acquisition 依賴速查。
 
@@ -116,10 +116,11 @@ its existing stepped-acquisition rejection. Explicit `threshold`, `angle` and
 `herald` options are rejected. Native `acquire` retains its IQ contract.
 
 `v2.shot_sums(prog, axes)` resolves reads after compilation. Each `v2.Classify`
-axis contributes a one-hot vector, while `v2.IQ` contributes `(1, I, Q)`. The
-processor sums their ordered outer products over reps. Repeat a read axis to
-obtain second moments. Classify uses a detached explicit classifier or the
-readout cfg's classifier. Both `Classify` and `IQ` with `tone=None` select a pulse
+axis contributes a one-hot vector, while `v2.IQ` contributes
+`(1, I, Q, I², IQ, Q²)` in that order. The processor sums their ordered outer
+products over reps. Two IQ axes give a `(points, 6, 6)` array, including each
+read's second moments and their cross moments. Classify uses a detached explicit
+classifier or the readout cfg's classifier. Both `Classify` and `IQ` with `tone=None` select a pulse
 readout or their mux readout's only tone. Multi-tone mux requires a zero-based cfg
 tone position and lists available positions on error. Pulse axes require
 `tone=None`. Circle requires GE Post radius and emits
@@ -141,8 +142,9 @@ Other ADCs may still use control flow. After building a program with Branch
 readouts, call `prog.set_reads_per_shot(count)` with the per-shot count, then
 construct `shot_sums`, then acquire. QICK counts the source triggers across all
 cases; neither the processor nor its construction changes that declaration.
-`v2.split_sums(sums)` splits a final IQ axis into counts and complex conditional
-means. Zero counts stay zero, and unmeasured NaN counts stay NaN.
+`v2.split_sums(sums)` requires a final six-component IQ axis and uses only
+count, ΣI and ΣQ to return counts and complex conditional means. Other lengths
+raise ValueError. Zero counts stay zero, and unmeasured NaN counts stay NaN.
 Both give NaN means without divide warnings.
 
 Build first, then resolve labels and call

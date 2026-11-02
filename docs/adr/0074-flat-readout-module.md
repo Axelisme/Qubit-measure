@@ -148,9 +148,10 @@ Processor 每點回傳一個總和陣列，框架只累加已完成 round 的回
 硬體與模擬使用同一條 processor 與累加路徑。
 
 讀出軸只有 `Classify` 與 `IQ`。
-Classify 把一次讀出的分類結果轉成 k 維 one-hot；IQ 把一次未分類讀出轉成 `(1, I, Q)`。
+Classify 把一次讀出的分類結果轉成 k 維 one-hot；IQ 把一次未分類讀出轉成 `(1, I, Q, I², IQ, Q²)`。
+IQ 的六個分量直接保存二階矩，不需重複同一次讀出來取得二階特徵。
 Processor 對每個掃描點計算 `Σ_shots v₁ ⊗ v₂ ⊗ …`，輸出形狀是 `(points, *axes)`。
-軸順序由作者列出的讀出軸決定。同一次讀出可列多次，以保存二次矩或交叉項。
+軸順序由作者列出的讀出軸決定。同一次讀出仍可列多次，以保存特徵的外積。
 所有 IQ 軸都取第 0 格時得到計數；只有 Classify 軸時，整個輸出就是各聯合類別的計數。
 
 讀出以字串 label 指定，不要求作者計算 ADC 的 read index。
@@ -164,15 +165,21 @@ Result 原樣保存 processor 的 float64 總和，不在 run 中換成平均或
 Schedule 的 `run_acquire_summed` 讓 caller 以 `RunOptions(converter=...)` 選擇 live signal；未提供 converter 時原樣寫入總和，不把類別計數當作 IQ。
 搬遷後的實驗拒絕缺少 counts／sums 的舊格式，不從舊比例推算計數，也不加相容路徑。
 
-單 qubit heralding 使用 `[Classify("herald"), IQ("readout")]` 保存各 herald 類別下的終端 IQ 總和。
-分析選取 herald 判為 g 的類別，再由其計數算出條件平均；其他 herald 類別的資料仍保留。
-Library readout cfg 擁有 classifier。現有實驗用兩個 PulseReadout instance 發射 herald 與 signal，共用同一份 readout cfg，不另存 herald 校準。
-Host scan 跨 acquire 時由 lab 加總實際取得的 sums，不把上一輪 cached 結果算成新資料。
-這是 host post-selection，不是 active reset。實際介面與資料形狀見 [program 契約](../../lib/zcu_tools/program/README.md#summed-acquisition)。
+單 qubit heralding 的五個實驗使用 `[IQ("herald"), IQ("signal")]` 保存 float64 `(N, 6, 6)` 二階特徵外積總和。
+Herald 與 signal 由兩個 PulseReadout instance 發射，共用同一份 readout cfg，不需要 classifier。
+共用讀出的中心與 Gaussian width 由二階矩自校準；各點的 J 是 herald/signal 聯合機率，K 的每列是條件轉移機率。
+分析、擬合、即時圖與 earlystop 只用 C = 1 − tr J，不直接擬合 K。
+Analyze 選 n_states 為 2 或 3，從完整資料重新校準。二階特徵至多辨識三態，三中心共線會失敗。
+Summary 保存擬合參數、post-herald 布居 π̂ 與正規化奇異值，不放逐點陣列。
+Herald 期間衰減會使 π̂ 低於原始熱布居，讀出拖尾也會造成偏差。
+即時圖在首次校準前標示 Calibrating，成功後熱啟動；辨識失敗保留前圖且不中斷取數。
+Live 與 earlystop 各自持有校準快取，不跨 thread 共用狀態。當次失敗回 NaN C，不觸發 earlystop。
+Host scan 跨 acquire 加總實際取得的 sums，不把 cached 結果算成新資料。這不是 active reset。
+存檔軸為 herald_features 與 signal_features；既有 label 驗證拒絕舊分類 herald 資料，沒有相容路徑。
+實際取數介面見 [program 契約](../../lib/zcu_tools/program/README.md#summed-acquisition)。
 
-單 qubit heralding 接受 circle、linear、centroid3，herald 類別軸的長度與名稱依 classifier 的 `state_names`，只採用 herald 判為 g 的 shot。
-使用者於 2026-11-02 要求：「我看了一下herald實驗，我發現只支援circle，但我不只想支援circle」。
-對支援現有三種 classifier 與依 classifier 決定 herald 類別軸的選項，使用者確認：「aa」。
+先前 circle、linear、centroid3 與 herald-g post-selection 的單 qubit 契約已由上述自校準取代。
+Classify 與雙 qubit heralded 實驗保留原分類契約。
 
 使用者於 2026-10-30 要求單一 processor：「H1 , 我認為processor就不要每個adc分開給，統一只給一個就行」。
 同日明定分類時機：「分類請不要在analyze裡做，浪費記憶體，分類請在processor裡做，將nread, 2的資料轉成M維資料」。

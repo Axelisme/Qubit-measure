@@ -1,4 +1,4 @@
-"""Measure ground-heralded Rabi oscillations versus drive gain.
+"""Measure self-calibrated heralding Rabi oscillations versus drive gain.
 
 Recipe points → expts: scan sample counts map to the GUI sweep Expts field.
 """
@@ -25,7 +25,7 @@ class HeraldingAmpRabiInputs(RecipeInputs):
 
     readout_ref: str | None | Keep = Field(
         KEEP,
-        description="Pulse-readout library key including classifier. Sources are chosen by the Form.",
+        description="Pulse-readout library key without requiring a classifier. Sources are chosen by the Form.",
     )
     drive_ref: str | None | Keep = Field(
         KEEP,
@@ -87,22 +87,24 @@ class HeraldingAmpRabiReport(RecipeReport):
 
 @recipe(
     "heralding_amp_rabi",
-    description="Run ground-heralded gain Rabi and save per-class shot sums and analysis.",
+    description="Run self-calibrated heralding gain Rabi and save second-moment sums and analysis.",
 )
 async def heralding_amp_rabi(
     session: RecipeSession, inputs: HeraldingAmpRabiInputs
 ) -> HeraldingAmpRabiReport:
     """Sweep drive gain at fixed pulse length to calibrate pi and pi/2 rotations.
 
-    Store per-class shot sums; compute herald-g conditional IQ for fitting.
-    Readout accepts circle, linear or centroid3. Herald states are g/e/other
-    for circle (other is rejection), g/e for linear (no rejection), and g/e/f
-    for centroid3 (f is not other). Circle requires a calibrated GE Post radius.
-    Only shots classified as herald-g contribute to signal IQ and fitting.
-    After optional reset, herald ground with the saved readout classifier,
-    apply the drive pulse and read out at each gain. Average only accepted shots.
-    No active reset or joint herald is added. Fit the Rabi oscillations to estimate pi and pi/2 gains,
-    and ask before applying the proposed calibration; skipping writes nothing.
+    Store (N, 6, 6) herald/signal second-moment sums without a classifier.
+    Analyze self-calibrates shared readout and fits only C = 1 - tr J, the
+    probability of changing state. K[i,j] = P(i -> j) is a diagnostic, not a
+    fitted curve. pi_hat is the post-herald population; decay during herald
+    can reduce it relative to the original thermal population.
+    This recipe has no n_states input. To change the state count, edit n_states
+    in the completed tab's Analysis settings and rerun Analyze.
+    The Analysis default is 2; second-order IQ supports at most 3 states.
+    Three collinear centers fail identification; readout tails bias estimates.
+    No feedback or active reset is added by heralding. Ask before applying
+    the ordinary calibration proposals; skipping writes nothing.
 
     points → expts sets the sweep sample count.
     Analysis controls: skip. Omission retains each analysis value; null is passed to its owner.
