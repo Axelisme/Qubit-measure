@@ -18,6 +18,7 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.plotting.plots import Plots
+from zcu_tools.program.v2 import split_sums
 
 from zcu_lab.v2.twotone.time_domain.t2echo.core import (
     T2EchoAnalysis,
@@ -75,8 +76,7 @@ def writeback(
         # Ordinary-record unconditional IQ mapping; writeback does not read signals.
         result=T2EchoResult(
             source.result.times,
-            (source.result.sums[:, 0, 1] + 1j * source.result.sums[:, 0, 2])
-            / source.result.sums[:, 0, 0],
+            split_sums(source.result.sums[:, 0, :])[1],
             source.result.true_activate_detune,
         ),
         metadata=source.metadata,

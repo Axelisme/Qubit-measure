@@ -104,7 +104,9 @@ async def heralding_len_rabi(
     probability of changing state. K[i,j] = P(i -> j) is a diagnostic, not a
     fitted curve. pi_hat is the post-herald population; decay during herald
     can reduce it relative to the original thermal population.
-    Analysis overrides select n_states=2 (default) or 3, the second-order limit.
+    This recipe has no n_states input. To change the state count, edit n_states
+    in the completed tab's Analysis settings and rerun Analyze.
+    The Analysis default is 2; second-order IQ supports at most 3 states.
     Three collinear centers fail identification; readout tails bias estimates.
     No feedback or active reset is added by heralding. Ask before applying
     the ordinary calibration proposals; skipping writes nothing.

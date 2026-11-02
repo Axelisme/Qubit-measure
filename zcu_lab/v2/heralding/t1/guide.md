@@ -36,4 +36,6 @@ Old classified-herald or three-component signal files fail the existing axis-lab
 
 ## MCP recipe
 
-`heralding_t1` selects sources, applies inputs and overrides, checks readiness, runs, analyzes, asks about writeback and saves completed data even if analysis fails. `points` maps to Expts. Existing analysis inputs are dual_exp and skip; set `n_states` through analysis overrides. Omitted inputs retain Form values; explicit null passes unchanged to the field owner and may be rejected.
+`heralding_t1` selects sources, applies inputs and overrides, checks readiness, runs, analyzes, asks about writeback and saves completed data even if analysis fails. `points` maps to Expts. Analysis inputs are `dual_exp` and `skip`. Omitted Form inputs and analysis controls retain their owner values. Explicit null passes unchanged to the field or analysis owner and may be rejected.
+
+The recipe has no `n_states` input, and Form overrides cannot set analysis options. To change the state count, edit `n_states` in the completed tab's Analysis settings and rerun Analyze. The Analysis default is 2; second-order IQ supports at most 3 states.
