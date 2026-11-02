@@ -402,7 +402,9 @@ class TimelineAdvance(TimedMacro):
             for previous in event.rounded:
                 if isinstance(previous, RuntimeEnd):
                     covers.extend(previous.covers)
-            result = replace(result, covers=tuple(covers))
+            result = self.book.remember_table(
+                replace(result, covers=tuple(covers)), self.book.table_source(result)
+            )
         return result
 
     def list_time_params(self) -> list[str]:
