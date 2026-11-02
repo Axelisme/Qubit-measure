@@ -119,8 +119,8 @@ and required-field errors before Run.
 ## Run and Stop
 
 Run sets the coil at each flux point and waits for settle. It then scans the
-frequency offsets, building reset followed by mux readout at each offset. Each `flux_i` figure shows absolute MHz
-against that tone's DC coordinate. Sources retain their final written settings.
+frequency offsets, building reset followed by mux readout at each offset.
+Each `flux_i` figure shows absolute MHz against that tone's DC coordinate. Sources retain their final written settings.
 Run does not restore bias automatically.
 
 A flux point is published only after its complete inner spectrum returns.
@@ -176,8 +176,8 @@ Cfg schema 5.0 stores the independent flat cfg with top-level `df`. Loading
 schema 4.0 keeps the data and plots available but does not restore its cfg.
 The load reports a cfg schema mismatch. No automatic cfg conversion occurs.
 
-Labber export splits each tone's three-dimensional independent payload into
-one two-dimensional log per first-axis slice in the same file. The grouped
-reader returns those two-dimensional slices, not a reconstructed tone cube.
+Labber export splits the three-dimensional independent signal payload along
+its Tone axis into one two-dimensional log per tone in the same file. The
+grouped reader returns those slices, not a reconstructed tone cube.
 Inspect each output status before treating a Save as complete. Load the native
 `data.h5` for analysis and writeback.
