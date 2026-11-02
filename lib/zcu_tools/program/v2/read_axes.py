@@ -21,9 +21,10 @@ class IQ:
     """An unclassified read axis with vector (1, I, Q).
 
     read names one logical compiled readout, present once on each Branch path.
-    tone is None for PulseReadout,
-    or the zero-based cfg tone position for MuxReadout. Values use normalized
-    ADC coordinates without IQ-offset subtraction.
+    tone is None for PulseReadout or a zero-based MuxReadout cfg tone position.
+    None also selects a mux's only tone; multi-tone mux requires an explicit
+    position and lists available tones on error. Values use normalized ADC
+    coordinates without IQ-offset subtraction.
     """
 
     read: str
@@ -35,9 +36,9 @@ class Classify:
     """A one-hot classified read axis, in g/e/other, g/e, or g/e/f order.
 
     read names one logical compiled readout, present once on each Branch path.
-    tone is None for PulseReadout or a
-    zero-based MuxReadout cfg tone position. None also selects a mux's only tone;
-    multi-tone mux requires an explicit position and lists available tones on error.
+    tone is None for PulseReadout or a zero-based MuxReadout cfg tone position.
+    None also selects a mux's only tone; multi-tone mux requires an explicit
+    position and lists available tones on error.
     classifier overrides that read's calibration; None selects its cfg calibration.
     Missing calibration and circle radius raise ValueError at shot_sums construction.
     Calibration is detached.
@@ -243,11 +244,7 @@ def _resolve_axis(
         ch, classifier = owner.cfg.ro_ch, owner.cfg.classifier
     else:
         tone_index = axis.tone
-        if (
-            isinstance(axis, Classify)
-            and tone_index is None
-            and len(owner.cfg.tones) == 1
-        ):
+        if tone_index is None and len(owner.cfg.tones) == 1:
             tone_index = 0
         if type(tone_index) is not int or not 0 <= tone_index < len(owner.cfg.tones):
             raise ValueError(
