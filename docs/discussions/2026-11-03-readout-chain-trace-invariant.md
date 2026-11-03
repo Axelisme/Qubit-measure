@@ -1,7 +1,7 @@
 ---
 date: 2026-11-03
-status: active
-superseded_by: null
+status: superseded
+superseded_by: docs/discussions/2026-11-04-readout-chain-information-limits.md
 related:
   - docs/discussions/2026-11-03-repeated-readout-chain.md
   - docs/discussions/2026-11-02-herald-transfer-matrix.md

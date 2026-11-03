@@ -65,4 +65,5 @@
 - 2026-10-30 [Readout 優化指標：用兩次讀出的一、二次矩算 SNR 與 QND](2026-10-30-readout-optimization-metrics.md)：兩次讀出的一、二次矩估 SNR 與 QND，先畫 Pareto 前緣由人選。
 - 2026-11-02 [Heralding：herald／signal 二階矩自校準的轉移矩陣與指標 C](2026-11-02-herald-transfer-matrix.md)：IQ 改二階特徵，從 herald 與 signal 的 36 個總和自校準，只用 C = 1 − tr J 分析，不需要 classifier。
 - 2026-11-03 [重複（A + readout）讀出鏈：效率、讀出 MIST 與三視角分解](2026-11-03-repeated-readout-chain.md)：重複讀出讓精度約隨 √N 提高，讀出 MIST 沿鏈累積限制 N；三視角分解遇讀出躍遷時沒有優勢。
-- 2026-11-03 [讀出鏈的 trace 不變量：低 SNR 下比較 A 變化的通用指標](2026-11-03-readout-chain-trace-invariant.md)：連續讀出鏈存 lag 0…L 共變異，每點以 tr(C₀⁻¹C_ℓ) 的非迭代等比擬合輸出 Â 與 λ̂，不需校準、態數、參考或門檻；多態分析只留給 MIST 類特殊需求。
+- 2026-11-03 [讀出鏈的 trace 不變量：低 SNR 下比較 A 變化的通用指標](2026-11-03-readout-chain-trace-invariant.md)：連續讀出鏈存 lag 0…L 共變異，每點以 tr(C₀⁻¹C_ℓ) 的非迭代等比擬合輸出 Â 與 λ̂，不需校準、態數、參考或門檻；多態分析只留給 MIST 類特殊需求。指標形式已由 [讀出鏈的資訊上限](2026-11-04-readout-chain-information-limits.md) 取代。
+- 2026-11-04 [讀出鏈的資訊上限：λ 指標、記錄層與分析層的損失、自校準](2026-11-04-readout-chain-information-limits.md)：顯示只畫 λ；讀出已知時讀出鏈在等時間下全面勝過 relax 實驗，存 lag 0…4 只損失 ≤ 18%，損失集中在分析層；改走全域兩態、兩通道的自校準估計。
