@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-11-02，逐 channel 編譯 fixture 接線
+**Last updated:** 2026-11-05，測試不綁 profile 數值
 
 **讀者：** framework-dev、agent。查閱測試的 owner、fixture、執行方式與搬遷驗收契約。
 
@@ -30,6 +30,12 @@ recording adapter 放明確可 import 的支援模組，不把 `conftest.py` 當
 `test_*.py` 匯入。Fixture 的可見範圍取決於所在目錄，`scope=` 則決定實例的生命週期；
 不要為了少建幾次物件把 fixture 提升到更廣的可見範圍。Root fixture 必須具有全套件用途。
 相似 setup 只有在代表相同語意時才共用；不同責任不為減少行數而塞入帶多個旗標的萬用 fixture。
+
+框架測試的期望值不寫死 profile 數值，例如時脈、`ticks_per_us`、fabric、f_dds、channel 數與 PFB 間距。
+期望值從測試自備的 YAML fixture 經 `build_soccfg` 與公開的時脈換算 API 推導，
+或改用不依賴數值的性質斷言，例如兩個量化結果相等、單調或整除。
+只有測 builder 的推導公式本身時，才用一份專門的小 YAML 搭配手算值。
+改 bitfile 或 mock 參數後，測試照常通過，不必跟著改。
 
 GUI 情境從 [`gui/_user_input/`](gui/_user_input/) 匯入 `ComponentDriver` 與鍵盤／滑鼠 helper，
 既有 `tests.gui._user_input` import 路徑不變。`driver.py` 負責 selector 與操作 policy；
