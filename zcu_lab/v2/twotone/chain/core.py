@@ -13,7 +13,7 @@ from typing import Annotated, ClassVar
 
 import numpy as np
 from matplotlib.ticker import MaxNLocator
-from pydantic import Field, model_validator
+from pydantic import Field
 from zcu_tools.analysis.fitting import PeakCandidate
 from zcu_tools.analysis.readout_chain import SweepSums, sweep_curve
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
@@ -78,9 +78,9 @@ class ChainCfg(ConfigBase):
         int,
         FieldMeta(
             label="Reps",
-            description="Fast sweeps per round. Each fast sweep dwells once at every frequency; require reps >= 2 and points × (reps − 1) >= 11 for the first live curve.",
+            description="Fast sweeps per round. Each fast sweep dwells once at every frequency. At least 12 fast sweeps per round give the first live curve enough dwells to estimate the noise.",
         ),
-    ] = Field(default=100, ge=2)
+    ] = Field(default=100, ge=12)
     rounds: Annotated[
         int,
         FieldMeta(
@@ -97,15 +97,6 @@ class ChainCfg(ConfigBase):
             description="Wait after each dwell's chain, before the next dwell.",
         ),
     ] = 1.0
-
-    @model_validator(mode="after")
-    def _validate_covariance_sample_size(self) -> ChainCfg:
-        if self.freq.expts * (self.reps - 1) < 11:
-            raise ValueError(
-                "points × (reps − 1) must be at least 11 for the first round's "
-                f"noise covariance; got points={self.freq.expts}, reps={self.reps}"
-            )
-        return self
 
 
 @dataclass(frozen=True)
