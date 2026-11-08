@@ -1,6 +1,6 @@
 # `zcu_tools.program` — QICK integration
 
-**Last updated:** 2026-11-02，IQ 二階特徵與 summed acquisition
+**Last updated:** 2026-11-09，讀出鏈 augmented sums
 
 **讀者：** framework-dev。QICK 整合、程式建構與 acquisition 依賴速查。
 
@@ -146,6 +146,18 @@ cases; neither the processor nor its construction changes that declaration.
 count, ΣI and ΣQ to return counts and complex conditional means. Other lengths
 raise ValueError. Zero counts stay zero, and unmeasured NaN counts stay NaN.
 Both give NaN means without divide warnings.
+
+`v2.chain_sweep_sums(prog, read)` selects a tagged or untagged `PulseReadout`
+inside one fixed body `repeat` of at least 16 reads. After building, call
+`prog.set_reads_per_shot(n)` with the repeat count before constructing the
+processor; the selected ADC must have no other triggers. Each shot contributes
+11 numbers: the IQ means, second moments, symmetric lag-1 products, and the sum
+of symmetric lag-2–15 products, each lag averaged over its own `n-k` pairs.
+The processor returns `(points, 12, 12)` sums of `z zᵀ`, with `z = (1, 11 numbers)`:
+`[0,0]` counts dwells, `[0,1:]` holds the 11 sums, and `[1:,1:]` holds their
+products. `acquire_summed` adds these matrices across rounds. Missing or ambiguous
+labels, unsupported chain structure, fewer than 16 reads, and declared or incoming
+read-count mismatches raise `ValueError`; construction does not change the declaration.
 
 Build first, then resolve labels and call
 `sched.run_acquire_summed(program, soc, processor=..., rounds=...,

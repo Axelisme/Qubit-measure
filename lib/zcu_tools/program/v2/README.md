@@ -1,6 +1,6 @@
 # program/v2
 
-**Last updated:** 2026-11-02，原生長度查表與 waveform-address selection
+**Last updated:** 2026-11-09，讀出鏈 processor 與 Repeat provenance
 
 **讀者：** lab-author、framework-dev、agent。查找 V2 program 公開 API、型別契約與編譯規則的 owner。
 
@@ -131,12 +131,14 @@ Request、數值契約與環境組裝見 [simulation](simulation/README.md)，st
 `reps` 與 `rounds` 必須為正整數，bool 不算整數，無效值在編譯或 acquire admission 前 raise ValueError。
 `acquire_summed` 以單一 processor 處理所有 ADC 的正規化 IQ，跨 round 只加總。
 `shot_sums(prog, axes)` 在 compile 後以 emit tag 或未標記 module 名稱解析 `Classify` 與 `IQ` 軸。
-Branch readout 的 `set_reads_per_shot` 順序、逐路徑設定比對、Repeat trigger 限制、外積總和與取消契約見 [summed acquisition](../README.md#summed-acquisition)。
+`chain_sweep_sums(prog, read)` 處理單一 fixed Repeat 內的 PulseReadout，回傳每點 12 × 12 augmented sums。
+兩種 processor 的 `set_reads_per_shot` 順序、read-count 檢查、外積總和與取消契約見 [summed acquisition](../README.md#summed-acquisition)。
 
 `readout_observation.observe_readouts(prog)` 由 program owner 解包 compiler wrappers，提供 readout provenance、Trigger 順序及控制 scope。
 它靜態訪問 branch 各路與 repeat body 一次，不是 runtime trace 或 linked instructions。
 `observe_readout_paths(prog)` 另回傳含 selector／case 與 observations 的 `ReadoutPath`，同 selector 的多次 Branch 共用 case index。
-它保留 Repeat scope 與未宣告的空 case，不改 flatten traversal。Consumer 保留 module identity、label、read-count 與取數驗證，不自行解析 wrappers。
+兩種 observation 皆以 `repeat_counts` 保留由外至內的 Repeat 次數，整數代表固定次數，字串代表 count register。
+Path 保留 Repeat scope 與未宣告的空 case，不改 flatten traversal。Consumer 保留 module identity、label、read-count 與取數驗證，不自行解析 wrappers。
 
 <a id="timeline-rounding"></a>
 
