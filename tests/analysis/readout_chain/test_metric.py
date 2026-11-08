@@ -242,3 +242,134 @@ def test_invalid_saved_moments_fail_at_construction(
 def test_processor_output_requires_one_row_per_setting(output: np.ndarray) -> None:
     with pytest.raises(ValueError, match="shape"):
         ReadoutSums.from_processor(np.arange(2.0), output)
+
+
+# Reference outputs from the previous term-by-term contiguous covariance.
+@pytest.mark.parametrize(
+    "centres, retention, landing, expected",
+    [
+        (
+            [-1.5, 0.0, 1.5, 0.0, 0.0, 0.0],
+            [0.75, 0.75, 0.9],
+            [0.5, 0.5, 0.0],
+            [
+                1.470900567493979,
+                0.313813611390487,
+                3.000995992229756,
+                0.7817872030788845,
+                0.7152686336969619,
+                0.0051972993429626095,
+            ],
+        ),
+        (
+            [-0.5, 0.0, 0.5, 0.0, 0.0, 1.0],
+            [0.75, 0.75, 0.9],
+            [0.49, 0.49, 0.02],
+            [
+                0.09216337861308682,
+                0.00019892468738077603,
+                1.0003030358841285,
+                0.7499691499772169,
+                0.7500340482845427,
+                0.048542437188464634,
+            ],
+        ),
+        (
+            [-1.5, 0.0, 1.5, 0.0, 0.0, 3.0],
+            [0.75, 0.75, 0.9],
+            [0.49, 0.49, 0.02],
+            [
+                1.4772180779480517,
+                0.0009615318058303575,
+                3.000929827163965,
+                0.7499968471325029,
+                0.7499999266526987,
+                0.048547370319327904,
+            ],
+        ),
+        (
+            [
+                -1.3523439306670328,
+                0.09406588960697114,
+                1.523982675052278,
+                -0.18764031172329215,
+                0.07468568823196649,
+                3.143443118712327,
+            ],
+            [0.4902133691881038, 0.53675991026555, 0.5678022222108959],
+            [0.48, 0.5, 0.02],
+            [
+                0.5520919229644344,
+                0.0005930573567781496,
+                2.8679430777401715,
+                0.5421268362982206,
+                0.4929031734672349,
+                0.02006797461225399,
+            ],
+        ),
+        (
+            [
+                -1.3952033937401496,
+                -0.2572736311776651,
+                1.3664532872555633,
+                -0.0008210135063994839,
+                -0.07355092845686388,
+                3.011773487701744,
+            ],
+            [0.98, 0.99, 0.995],
+            [0.48, 0.5, 0.02],
+            [
+                2.888183658948877,
+                0.0013040888935517152,
+                2.7688297954224277,
+                0.9877966999190795,
+                0.9829655591524091,
+                0.050940981298650774,
+            ],
+        ),
+        (
+            [
+                -1.6227092400162915,
+                -0.20366750552178575,
+                1.6525731838737987,
+                0.037044786507506706,
+                0.09304698437955058,
+                2.923058357019677,
+            ],
+            [0.999, 0.9995, 0.9999],
+            [0.48, 0.5, 0.02],
+            [
+                3.892569328007108,
+                0.0014556867459719906,
+                3.1084794162571203,
+                0.9917556844268278,
+                0.9942363591926585,
+                0.08178195652262832,
+            ],
+        ),
+    ],
+)
+def test_contiguous_covariance_preserves_saved_moment_inference(
+    centres: list[float],
+    retention: list[float],
+    landing: list[float],
+    expected: list[float],
+) -> None:
+    """Retire these references only when the one-step estimator contract changes."""
+    features = exact_moments(
+        np.array(centres).reshape(-1, 2), np.array(retention), np.array(landing)
+    )
+
+    result = readout_metric(saved_moments(features))
+
+    actual = np.concatenate(
+        (
+            result.metric,
+            result.standard_error,
+            result.separation,
+            result.retention.ravel(),
+            result.third_population,
+        )
+    )
+    # The error's finite-difference gradient amplifies covariance rounding to 1e-8.
+    np.testing.assert_allclose(actual, expected, rtol=1e-7, atol=0)

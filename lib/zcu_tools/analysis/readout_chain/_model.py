@@ -4,6 +4,8 @@ The tail is summed geometrically in steps of 32, rather than truncated at a
 retention-dependent horizon. Work per setting therefore stays bounded near λ=1.
 """
 
+from functools import cache
+
 import numpy as np
 from numba import njit
 from numpy.typing import NDArray
@@ -12,6 +14,7 @@ FloatArray = NDArray[np.float64]
 IntArray = NDArray[np.int64]
 Layout = tuple[IntArray, IntArray, IntArray]
 Model = tuple[FloatArray, FloatArray, FloatArray, FloatArray]
+OverlapLayout = tuple[IntArray, IntArray, IntArray]
 
 
 def moment_layout() -> Layout:
@@ -85,11 +88,9 @@ def model_arrays(theta: FloatArray) -> Model:
 
 
 @njit(cache=True)
-def product_expectation(
-    times: IntArray, components: IntArray, model: Model, boundary: int
-) -> float:
-    """Sorted-time Gaussian product; boundary>=0 sums the separating tail gap."""
-    powers, tail, emissions, population = model
+def product_expectation(times: IntArray, components: IntArray, model: Model) -> float:
+    """Stationary expectation of a sorted-time Gaussian product."""
+    powers, _, emissions, population = model
     weights = population.copy()
     i = 0
     previous = times[0]
@@ -97,8 +98,7 @@ def product_expectation(
         time = times[i]
         if i > 0:
             gap = time - previous
-            propagator = tail[gap] if previous < boundary <= time else powers[gap]
-            weights = weights @ propagator
+            weights = weights @ powers[gap]
         n_i, n_q = 0, 0
         while i < len(times) and times[i] == time:
             if components[i] == 0:
@@ -118,7 +118,7 @@ def moment_means_kernel(layout: Layout, model: Model) -> FloatArray:
     for i in range(113):
         degree = degrees[i]
         result[i] = product_expectation(
-            times[i, :degree], components[i, :degree], model, -1
+            times[i, :degree], components[i, :degree], model
         )
     return result
 
@@ -129,63 +129,146 @@ def moment_means(theta: FloatArray) -> FloatArray:
 
 
 @njit(cache=True)
-def joint_moment(
-    indices: tuple[int, int, int, int], layout: Layout, model: Model
-) -> float:
-    """E[f_a(t) f_b(t+h)], or its geometric positive-shift tail."""
-    a, b, shift, boundary = indices
+def joint_layout(a: int, b: int, shift: int, layout: Layout) -> IntArray:
+    """Group a joint product into (gap, I degree, Q degree) time nodes."""
     times, components, degrees = layout
-    count_a, count_b = degrees[a], degrees[b]
-    count = count_a + count_b
-    ts = np.empty(count, dtype=np.int64)
-    cs = np.empty(count, dtype=np.int64)
-    ts[:count_a], cs[:count_a] = times[a, :count_a], components[a, :count_a]
-    ts[count_a:], cs[count_a:] = times[b, :count_b] + shift, components[b, :count_b]
-    # At most six factors; insertion sort avoids allocating a general argsort.
-    for i in range(1, count):
-        time, component = ts[i], cs[i]
-        j = i - 1
-        while j >= 0 and ts[j] > time:
-            ts[j + 1], cs[j + 1] = ts[j], cs[j]
-            j -= 1
-        ts[j + 1], cs[j + 1] = time, component
-    return product_expectation(ts, cs, model, boundary)
+    factors = []
+    for column, offset in ((a, 0), (b, shift)):
+        for j in range(degrees[column]):
+            factors.append((times[column, j] + offset, components[column, j]))
+    factors.sort()
+    nodes = np.zeros((4, 3), dtype=np.int64)
+    node, previous = -1, -1
+    for time, component in factors:
+        if time != previous:
+            node += 1
+            # The first node has no propagator.
+            nodes[node, 0] = 0 if node == 0 else time - previous
+            previous = time
+        nodes[node, 1 + component] += 1
+    return nodes
 
 
 @njit(cache=True)
-def anchor_count(span_a: int, span_b: int, shift: int) -> int:
-    """Number of valid a anchors whose shifted b anchor is valid modulo 32."""
-    count = 0
-    for time in range(32 - span_a):
-        if (time + shift) % 32 < 32 - span_b:
-            count += 1
-    return count
-
-
-@njit(cache=True)
-def contiguous_covariance_kernel(layout: Layout, model: Model) -> FloatArray:
-    """B times covariance of feature averages over contiguous 32-read blocks."""
+def overlap_layout(layout: Layout) -> OverlapLayout:
+    """Precompute finite overlapping products and periodic anchor-pair counts."""
     times, _, _ = layout
-    spans = np.empty(113, dtype=np.int64)
-    for i in range(113):
-        spans[i] = times[i].max()
-    means = moment_means_kernel(layout, model)
-    result = np.empty((113, 113))
+    spans = np.array([times[i].max() for i in range(113)])
+    size = 0
     for a in range(113):
         for b in range(a, 113):
-            centre = means[a] * means[b]
-            total = anchor_count(spans[a], spans[b], 0) * (
-                joint_moment((a, b, 0, -1), layout, model) - centre
+            size += 1 + spans[a] + spans[b]
+    pairs = np.empty((size, 3), dtype=np.int64)
+    nodes = np.empty((size, 4, 3), dtype=np.int64)
+    counts = np.zeros((16, 16, 32), dtype=np.int64)
+    for span_a in range(16):
+        for span_b in range(16):
+            for shift in range(32):
+                for time in range(32 - span_a):
+                    if (time + shift) % 32 < 32 - span_b:
+                        counts[span_a, span_b, shift] += 1
+    row = 0
+    for a in range(113):
+        for b in range(a, 113):
+            pairs[row] = a, b, counts[spans[a], spans[b], 0]
+            nodes[row] = joint_layout(a, b, 0, layout)
+            row += 1
+            for left, right in ((a, b), (b, a)):
+                for shift in range(1, spans[left] + 1):
+                    pairs[row] = a, b, counts[spans[left], spans[right], shift]
+                    nodes[row] = joint_layout(left, right, shift, layout)
+                    row += 1
+    return pairs, nodes, counts
+
+
+@cache
+def covariance_layout() -> OverlapLayout:
+    """Build the parameter-independent overlap plan once, on first use."""
+    return overlap_layout(LAYOUT)
+
+
+@njit(cache=True)
+def overlap_expectation(nodes: IntArray, model: Model) -> float:
+    """Contract up to four time nodes with three scalar state weights."""
+    powers, _, emissions, population = model
+    w0, w1, w2 = population[0], population[1], population[2]
+    for node in range(4):
+        gap, n_i, n_q = nodes[node]
+        if n_i + n_q == 0:
+            break
+        if node > 0:
+            p = powers[gap]
+            w0, w1, w2 = (
+                w0 * p[0, 0] + w1 * p[1, 0] + w2 * p[2, 0],
+                w0 * p[0, 1] + w1 * p[1, 1] + w2 * p[2, 1],
+                w0 * p[0, 2] + w1 * p[1, 2] + w2 * p[2, 2],
             )
-            for shift in range(1, 48):
-                boundary = shift if shift >= 16 else -1
-                subtract = 0.0 if shift >= 16 else centre
-                total += anchor_count(spans[a], spans[b], shift) * (
-                    joint_moment((a, b, shift, boundary), layout, model) - subtract
-                )
-                total += anchor_count(spans[b], spans[a], shift) * (
-                    joint_moment((b, a, shift, boundary), layout, model) - subtract
-                )
+        w0 *= emissions[n_i, n_q, 0]
+        w1 *= emissions[n_i, n_q, 1]
+        w2 *= emissions[n_i, n_q, 2]
+    return w0 + w1 + w2
+
+
+@njit(cache=True)
+def feature_endpoints(layout: Layout, model: Model) -> tuple[FloatArray, FloatArray]:
+    """Left state weights and right conditional means for separated products."""
+    times, components, degrees = layout
+    powers, _, emissions, population = model
+    left, right = np.empty((113, 3)), np.empty((113, 3))
+    for column in range(113):
+        span = times[column].max()
+        degree = np.zeros((2, 2), dtype=np.int64)
+        for j in range(degrees[column]):
+            end = 0 if times[column, j] == 0 else 1
+            degree[end, components[column, j]] += 1
+        first = emissions[degree[0, 0], degree[0, 1]]
+        last = emissions[degree[1, 0], degree[1, 1]]
+        left[column] = ((population * first) @ powers[span]) * last
+        right[column] = first * (powers[span] @ last)
+    return left, right
+
+
+@njit(cache=True)
+def separated_propagators(counts: IntArray, model: Model) -> FloatArray:
+    """Sum n_ab(h)(R^(h-span_a)-Π) for every h > span_a, by residue."""
+    _, tail, _, _ = model
+    result = np.zeros((16, 16, 3, 3))
+    for span_a in range(16):
+        for span_b in range(16):
+            for gap in range(1, 33):
+                count = counts[span_a, span_b, (span_a + gap) % 32]
+                result[span_a, span_b] += count * tail[gap]
+    return result
+
+
+@njit(cache=True)
+def contiguous_covariance_kernel(
+    layout: Layout, overlaps: OverlapLayout, model: Model
+) -> FloatArray:
+    """Finite overlapping products plus contracted, centred geometric tails."""
+    times, _, _ = layout
+    pairs, nodes, counts = overlaps
+    spans = np.array([times[i].max() for i in range(113)])
+    left, right = feature_endpoints(layout, model)
+    means = left.sum(axis=1)
+    result = np.zeros((113, 113))
+    for row in range(len(pairs)):
+        a, b, count = pairs[row]
+        result[a, b] += count * (
+            overlap_expectation(nodes[row], model) - means[a] * means[b]
+        )
+    propagators = separated_propagators(counts, model)
+    for a in range(113):
+        for b in range(a, 113):
+            total = result[a, b]
+            for i in range(3):
+                for j in range(3):
+                    total += (
+                        left[a, i] * propagators[spans[a], spans[b], i, j] * right[b, j]
+                        + left[b, i]
+                        * propagators[spans[b], spans[a], i, j]
+                        * right[a, j]
+                    )
             result[a, b] = total / ((32 - spans[a]) * (32 - spans[b]))
             result[b, a] = result[a, b]
     return result
@@ -194,8 +277,11 @@ def contiguous_covariance_kernel(layout: Layout, model: Model) -> FloatArray:
 def contiguous_covariance(theta: FloatArray) -> FloatArray:
     """Exact asymptotic B*Cov(feature means), including inter-block dependence.
 
-    Lags 0..15 contain overlapping read noise. For h>=16 the factors do not
-    overlap. Sum those lags in 32 residue classes using the Markov resolvent.
-    The sum is exact up to floating-point error and ignores stream-end edges.
+    Evaluate overlapping time supports directly using a cached layout. For
+    disjoint supports, contract their endpoint weights with the anchor-weighted
+    Markov resolvent. All positive lags beyond the left span enter that tail.
+    The sum ignores stream-end edges and is exact up to floating-point error.
     """
-    return contiguous_covariance_kernel(LAYOUT, model_arrays(theta))
+    return contiguous_covariance_kernel(
+        LAYOUT, covariance_layout(), model_arrays(theta)
+    )
