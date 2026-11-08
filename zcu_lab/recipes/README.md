@@ -2,7 +2,7 @@
 
 **讀者：** lab-author、agent。查找 recipe 宣告、操作順序與作者契約。
 
-**Last updated:** 2026-11-01，作者 await 與測試邊界改連 owner
+**Last updated:** 2026-11-09，新增 twotone_chain
 
 Recipe 是操作 GUI tab 的 async 函式。Core 擁有 cfg、量測與分析計算，Adapter 接上表單、RunRecord 與分析來源。
 Recipe 選來源、設參數，再決定 Run、Analyze 與 writeback 問答的順序。
@@ -174,6 +174,7 @@ Recipe 可以串多個 adapter，宣告不另設單一 adapter mapping。
 | `onetone_range_find` | `onetone/range_find` | 必填絕對 MHz `freq:{start,stop}`、`n` 與非空 `resonators` 名單。名稱數是預期峰數，初始依頻率升序配對，不進 acquisition cfg。未辨識的峰先用暫用名稱，例如 `["dip1"]`。單一 Interactive 入口預設不平滑、自動依名稱數求 prominence factor、FWHM 上限 25 MHz，以 depth / FWHM 排序。`min_separation` 為有限正數 MHz，初值 1 MHz，與名單經同一 Analyze updates 傳入。Recipe 等待 agent 經 `tab_interact` 調整或確認並送 done，才詢問 writeback，不自動送 done。回覆最終 name、freq、depth、fwhm、score、實際 `prominence_factor` 與 identity／writeback 診斷。手動非候選點的 metrics 為 null。 |
 | `stirap` | `twotone/stirap` | 必填 `scan_mode`：delay、amplitude 或 detuning。第一軸 `start/stop/n` 分別是 Stokes lead（us）、共同 gain scale（無單位）或 Pump detuning（MHz）；detuning 另用 `stokes_start_mhz/stokes_stop_mhz/stokes_n` 掃 Stokes 軸。操作者提供兩個 carrier，分析只用 Run 保存的 centroid3 readout。完整 Run、Analyze、Save，不提出 writeback。 |
 | `raman_gf` | `twotone/raman_gf` | `carrier_mhz` 由操作者提供，`waveform_asset` 指定已建立的 arbitrary envelope。`scan_mode` 沿用 frequency、area、frequency_area；detuning 使用 two-photon MHz，正值使單 carrier 增加一半 detuning。分析只用 Run 保存的 centroid3 readout，完整 Run、Analyze、Save，不提出 writeback。 |
+| `twotone_chain` | `twotone/chain` | 必填 drive 的 `center_mhz`、`span_mhz`、`points`。每點 48 次無 reset 的（驅動、讀出），`reps` 是每輪快掃次數。分析以 `twotone/freq` 的峰擬合擬合離背景的 sigma 曲線，`expected_center_mhz` 選峰。回報中心、近似寬度與 5% 誤報門檻，完整 Run、Analyze、Save，不提出 writeback。 |
 | `twotone_flux_dep` | `twotone/flux_dep` | 必填 drive 的 `center_mhz`、`span_mhz`、`freq_points` 及 native flux device、unit、端點、點數。互動 picker 完成後詢問寫回 qubit flux 校準。 |
 
 有 writeback proposal 的流程先 Run、Analyze，再依各 recipe 的條件詢問寫回，只接受回答選定的候選，最後 Save。
