@@ -3,11 +3,20 @@
 from collections.abc import Callable
 from dataclasses import dataclass
 from itertools import permutations
+from typing import TYPE_CHECKING
 
 import numpy as np
 from scipy.optimize import OptimizeResult, least_squares
 
 from ._cycle_coordinates import (
+    CENTERS,
+    ENDPOINTS,
+    LANDING,
+    NUISANCE_SIZE,
+    RETENTION,
+    TABLE_DRIVE,
+    THERMAL,
+    VARIANCE,
     endpoints_of,
     joint_mean_jacobian,
     joint_table,
@@ -15,6 +24,9 @@ from ._cycle_coordinates import (
 )
 from ._cycle_emission import simplex, simplex_coordinates, simplex_gradient
 from ._cycle_engine import covariance, mean_jacobian
+
+if TYPE_CHECKING:
+    from .model import CycleModel
 
 
 @dataclass
@@ -25,7 +37,8 @@ class JointSolution:
     J: float
 
 
-def whiten(weights: np.ndarray, values: np.ndarray) -> np.ndarray:
+def apply_weights(weights: np.ndarray, values: np.ndarray) -> np.ndarray:
+    """Multiply each point's (65, ...) values by its (65, 65) weight matrix."""
     return np.einsum("nij,nj...->ni...", weights, values)
 
 
@@ -39,7 +52,15 @@ def model_weights(
 
 
 def starting_nuisance(means: np.ndarray) -> np.ndarray:
-    """Research's summary-only geometry seed, without its curve grid search."""
+    """Seed the 26 nuisance coordinates from the per-point feature means.
+
+    Place two centers on either side of the mean IQ of all reads, along the
+    principal axis of the first read's mean IQ across points, and the third
+    center perpendicular to that axis; take the variance from the first
+    read's same-read second moments. State labels are arbitrary here. Drive
+    endpoints, thermal, retention and landing start at fixed interior values.
+    No curve parameter is searched.
+    """
     first = means[:, :2]
     center = means[:, :32].reshape(-1, 16, 2).mean(axis=(0, 1))
     second = np.array(
@@ -71,17 +92,24 @@ def starting_nuisance(means: np.ndarray) -> np.ndarray:
             [[0.05, 0.05, 0.9], [0.15, 0.15, 0.7]],
         ]
     )
-    return np.concatenate(
-        [
-            np.array([simplex_coordinates(p) for p in endpoints.reshape(6, 3)]).ravel(),
-            centers.ravel(),
-            [variance, 0.95, 0.7, 0.95, 0.8, 0.95, 0.9, 0.7],
-        ]
-    )
+    seed = np.empty(NUISANCE_SIZE)
+    seed[ENDPOINTS] = np.array(
+        [simplex_coordinates(p) for p in endpoints.reshape(6, 3)]
+    ).ravel()
+    seed[CENTERS] = centers.ravel()
+    seed[VARIANCE] = variance
+    seed[THERMAL] = (0.95, 0.7)
+    seed[RETENTION] = (0.95, 0.8, 0.95)
+    seed[LANDING] = (0.9, 0.7)
+    return seed
 
 
 def solve_joint(
-    model, axis: np.ndarray, means: np.ndarray, counts: np.ndarray, q: np.ndarray
+    model: "CycleModel",
+    axis: np.ndarray,
+    means: np.ndarray,
+    counts: np.ndarray,
+    q: np.ndarray,
 ) -> JointSolution:
     # Use one common metric so assignment scores are directly comparable.
     # Curves remain at caller init while the six nuisance seeds are fitted.
@@ -95,39 +123,47 @@ def solve_joint(
     q = min(
         candidates,
         key=lambda seed: np.sum(
-            whiten(weights, means - joint_mean_jacobian(model, axis, seed)[0]) ** 2
+            apply_weights(weights, means - joint_mean_jacobian(model, axis, seed)[0])
+            ** 2
         ),
     )
     for _ in range(2):
         weights = model_weights(*joint_table(model, axis, q), counts)
         q = _joint_stage(model, axis, means, weights, q)
     predicted, jac = joint_mean_jacobian(model, axis, q)
-    weighted = whiten(weights, jac).reshape(-1, len(q))
+    weighted = apply_weights(weights, jac).reshape(-1, len(q))
     cov = np.linalg.pinv(weighted.T @ weighted, rcond=1e-12, hermitian=True)
-    residual = whiten(weights, means - predicted)
+    residual = apply_weights(weights, means - predicted)
     return JointSolution(q, cov, weights, float(np.sum(residual**2)))
 
 
 def _assigned_seed(q: np.ndarray, order: tuple[int, ...]) -> np.ndarray:
     """Move geometric states together, while leaving the model's curve rows fixed."""
-    n = len(q) - 26
-    v = q[n:]
+    n = len(q) - NUISANCE_SIZE
+    nuisance = q[n:]
     indices = np.array(order)
-    endpoints = endpoints_of(v)[indices][:, :, indices]
-    thermal = simplex(*v[19:21])[indices]
-    landing = simplex(*v[24:26])[indices]
-    return np.r_[
-        q[:n],
-        np.array([simplex_coordinates(p) for p in endpoints.reshape(6, 3)]).ravel(),
-        v[12:18].reshape(3, 2)[indices].ravel(),
-        v[18],
-        simplex_coordinates(thermal),
-        v[21:24][indices],
-        simplex_coordinates(landing),
-    ]
+    endpoints = endpoints_of(nuisance)[indices][:, :, indices]
+    assigned = np.empty(NUISANCE_SIZE)
+    assigned[ENDPOINTS] = np.array(
+        [simplex_coordinates(p) for p in endpoints.reshape(6, 3)]
+    ).ravel()
+    assigned[CENTERS] = nuisance[CENTERS].reshape(3, 2)[indices].ravel()
+    assigned[VARIANCE] = nuisance[VARIANCE]
+    assigned[THERMAL] = simplex_coordinates(simplex(*nuisance[THERMAL])[indices])
+    assigned[RETENTION] = nuisance[RETENTION][indices]
+    assigned[LANDING] = simplex_coordinates(simplex(*nuisance[LANDING])[indices])
+    return np.r_[q[:n], assigned]
 
 
-def _joint_stage(model, axis, means, weights, q, *, nuisance_only=False):
+def _joint_stage(
+    model: "CycleModel",
+    axis: np.ndarray,
+    means: np.ndarray,
+    weights: np.ndarray,
+    q: np.ndarray,
+    *,
+    nuisance_only: bool = False,
+) -> np.ndarray:
     lo, hi = nuisance_bounds()
     limits = np.asarray(model.bounds)
     lo, hi = np.r_[limits[:, 0], lo], np.r_[limits[:, 1], hi]
@@ -136,20 +172,22 @@ def _joint_stage(model, axis, means, weights, q, *, nuisance_only=False):
     cached_mean = np.empty_like(means)
     cached_jac = np.empty((len(axis), 65, len(q)))
 
-    def evaluate(v):
+    def evaluate(v: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         nonlocal previous, cached_mean, cached_jac
         if not np.array_equal(previous, v):
             cached_mean, cached_jac = joint_mean_jacobian(model, axis, v)
             previous = v.copy()
         return cached_mean, cached_jac
 
-    def residual(v):
+    def residual(v: np.ndarray) -> np.ndarray:
         full = np.r_[q[:fixed], v]
-        return whiten(weights, means - evaluate(full)[0]).ravel()
+        return apply_weights(weights, means - evaluate(full)[0]).ravel()
 
-    def derivative(v):
+    def derivative(v: np.ndarray) -> np.ndarray:
         full = np.r_[q[:fixed], v]
-        return -whiten(weights, evaluate(full)[1][:, :, fixed:]).reshape(-1, len(v))
+        return -apply_weights(weights, evaluate(full)[1][:, :, fixed:]).reshape(
+            -1, len(v)
+        )
 
     result = bounded_least_squares(
         residual, q[fixed:], derivative, (lo[fixed:], hi[fixed:]), 200
@@ -186,14 +224,14 @@ def bounded_least_squares(
 
 def local_table(drive: np.ndarray, rows: np.ndarray) -> np.ndarray:
     coordinates = np.array([[simplex_coordinates(p) for p in d] for d in drive])
-    return np.c_[coordinates.reshape(len(drive), 6), rows]
+    return np.c_[coordinates.reshape(len(drive), TABLE_DRIVE.stop), rows]
 
 
 def local_drive(table: np.ndarray) -> np.ndarray:
     return np.array([[simplex(*p) for p in t[:6].reshape(3, 2)] for t in table])
 
 
-def local_mean_jacobian(table: np.ndarray):
+def local_mean_jacobian(table: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     means, jac = mean_jacobian(local_drive(table), table[:, 6:])
     for state in range(3):
         block = slice(2 * state, 2 * state + 2)

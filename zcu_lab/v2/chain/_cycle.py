@@ -7,13 +7,14 @@ two reads of the same pulse readout. Read 2k follows D_k and read 2k+1 follows
 a read; chain_cycle_sums groups its 65 numbers by this order.
 """
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 
 import numpy as np
 from matplotlib.lines import Line2D
 from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from zcu_tools.analysis.readout_chain import (
+    CYCLE_FEATURE_COUNT,
     CycleFit,
     CycleModel,
     CycleSums,
@@ -35,7 +36,9 @@ BLOCKS_PER_CYCLE = 8
 READS_PER_CYCLE = 2 * BLOCKS_PER_CYCLE
 
 # The 65 numbers of one cycle, as the feature axis of the saved sums.
-FEATURES = tuple(range(65))
+FEATURES = tuple(range(CYCLE_FEATURE_COUNT))
+# Running sums per point are z zᵀ with z = (1, the 65 numbers of a cycle).
+AUGMENTED_SIZE = CYCLE_FEATURE_COUNT + 1
 
 
 def emit_cycle(
@@ -150,38 +153,6 @@ def first_read_iq(sums: CycleSums) -> NDArray[np.complex128]:
     return (sums.feature_sums[:, 0] + 1j * sums.feature_sums[:, 1]) / sums.cycle_count
 
 
-def rabi_model() -> CycleModel:
-    """Return the cycle model of a Rabi drive with frequency f per axis unit.
-
-    Each row's curve moves the way that state's drive response moves. From g
-    the drive reaches e with probability sin²(π f x); from e it stays in e with
-    probability cos²(π f x). The third state is not driven, so its free affine
-    row absorbs a flat response whichever curve labels it. f is in cycles per
-    axis unit, so the π point is x = 1 / (2 f).
-    """
-
-    def curves(x: NDArray[np.float64], p: Mapping[str, float]) -> NDArray[np.float64]:
-        from_g = np.sin(np.pi * p["f"] * x) ** 2
-        from_e = np.cos(np.pi * p["f"] * x) ** 2
-        return np.column_stack([from_g, from_e, from_g])
-
-    return CycleModel(curves, ("f",), [(0.0, np.inf)], oscillation_frequency="f")
-
-
-def fitted_populations(
-    model: CycleModel, fit: CycleFit, axis: NDArray[np.float64]
-) -> NDArray[np.float64]:
-    """Return the fitted first-read populations, shape (points, 3), at axis.
-
-    The thermal populations pass one operation D(x), whose row for state i is
-    (1 − f_i(x)) × endpoint 0 + f_i(x) × endpoint 1, as CycleNuisances defines.
-    """
-    curve = model.curve(axis, fit.parameters)[:, :, None]
-    endpoints = fit.nuisances.drive_endpoints
-    drive = (1 - curve) * endpoints[None, :, 0] + curve * endpoints[None, :, 1]
-    return np.einsum("i,xij->xj", fit.nuisances.thermal, drive)
-
-
 def checks_text(fit: CycleFit) -> str:
     """Return the three lack-of-fit checks as J/df, with p where fit gives one."""
     parts = []
@@ -206,13 +177,14 @@ def plot_cycle_fit(
 ) -> None:
     """Publish "populations": per-point populations and the fitted curves.
 
-    Points are fit.populations with their Wald error bars; lines are
-    fitted_populations on a dense axis, one color per state. The legend gives
-    each state's fitted thermal population, since state labels are arbitrary.
+    Points are fit.populations with their Wald error bars; lines are the
+    model's populations at the fitted values on a dense axis, one color per
+    state. The legend gives each state's fitted thermal population, since
+    state labels are arbitrary.
     result is the first title line, for example the fitted parameter.
     """
     dense = np.linspace(axis.min(), axis.max(), 400)
-    fitted = fitted_populations(model, fit, dense)
+    fitted = model.populations(dense, fit.parameters, fit.nuisances)
 
     fig, ax = plots.subplots(num="populations", figsize=config.figsize)
     for state in range(3):

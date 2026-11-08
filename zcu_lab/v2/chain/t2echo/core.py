@@ -36,6 +36,7 @@ from zcu_tools.program.v2 import (
 )
 
 from zcu_lab.v2.chain._cycle import (
+    AUGMENTED_SIZE,
     READS_PER_CYCLE,
     cycle_sums_variables,
     emit_cycle,
@@ -170,7 +171,9 @@ class ChainT2EchoExp(Experiment[CycleSums, ChainT2EchoCfg]):
         )
         update = live_cycle_curves(context.plots, delays, xlabel="Total delay (us)")
         augmented_sums = SignalBuffer(
-            (len(delays), 66, 66), dtype=np.float64, on_update=update
+            (len(delays), AUGMENTED_SIZE, AUGMENTED_SIZE),
+            dtype=np.float64,
+            on_update=update,
         )
 
         # 2. One cycle per rep: K, then (π/2, x/2, π, x/2, π/2, read, read) x 8.

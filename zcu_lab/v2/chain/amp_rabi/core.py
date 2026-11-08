@@ -13,7 +13,12 @@ from typing import Annotated, ClassVar, Self
 
 import numpy as np
 from pydantic import Field, model_validator
-from zcu_tools.analysis.readout_chain import CycleCheck, CycleSums, fit_cycle
+from zcu_tools.analysis.readout_chain import (
+    CycleCheck,
+    CycleSums,
+    fit_cycle,
+    rabi_model,
+)
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import Experiment, GroupedAxesSpec, VariableAxisSpec
 from zcu_tools.experiment.context import RunContext
@@ -30,13 +35,13 @@ from zcu_tools.program.v2 import (
 )
 
 from zcu_lab.v2.chain._cycle import (
+    AUGMENTED_SIZE,
     READS_PER_CYCLE,
     cycle_sums_variables,
     emit_cycle,
     first_read_iq,
     live_cycle_curves,
     plot_cycle_fit,
-    rabi_model,
     require_first_round_covariance,
     restore_cycle_sums,
 )
@@ -151,7 +156,9 @@ class ChainAmpRabiExp(Experiment[CycleSums, ChainAmpRabiCfg]):
         )
         update = live_cycle_curves(context.plots, gains, xlabel="Pulse gain (a.u.)")
         augmented_sums = SignalBuffer(
-            (len(gains), 66, 66), dtype=np.float64, on_update=update
+            (len(gains), AUGMENTED_SIZE, AUGMENTED_SIZE),
+            dtype=np.float64,
+            on_update=update,
         )
 
         # 2. One cycle per rep: K, then (Rabi pulse, read, read) eight times.

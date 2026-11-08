@@ -1,10 +1,38 @@
-"""Public ideal-pulse T2 curves, including the third-state lifetime."""
+"""Public per-state curve models of the Rabi, T1 and T2 cycle experiments."""
 
 import numpy as np
 import pytest
-from zcu_tools.analysis.readout_chain import t2_echo_model, t2_ramsey_model
+from zcu_tools.analysis.readout_chain import (
+    rabi_model,
+    t1_model,
+    t2_echo_model,
+    t2_ramsey_model,
+)
 
 from ._t2_samples import bloch_curves, t2_nuisance
+
+
+def test_rabi_rows_move_from_g_and_stay_in_e_at_frequency_f() -> None:
+    model = rabi_model()
+
+    values = model.curve(np.array([0.0, 0.25, 0.5]), {"f": 1.0})
+
+    # Columns g, e, third: sin², cos², and the undriven third row repeats sin².
+    np.testing.assert_allclose(
+        values, [[0, 1, 0], [0.5, 0.5, 0.5], [1, 0, 1]], atol=1e-15
+    )
+
+
+def test_t1_rows_decay_with_t1_and_the_third_row_with_tf() -> None:
+    model = t1_model()
+
+    values = model.curve(
+        np.array([0.0, 1.0, 2.0]), {"t1": 1 / np.log(2), "tf": 0.5 / np.log(2)}
+    )
+
+    np.testing.assert_allclose(
+        values, [[1, 1, 1], [0.5, 0.5, 0.25], [0.25, 0.25, 0.0625]]
+    )
 
 
 def test_echo_separates_transverse_and_third_state_decay() -> None:
@@ -26,7 +54,6 @@ def test_ramsey_detuning_is_cycles_per_delay_unit() -> None:
     np.testing.assert_allclose(
         values, [[0, 1, 1], [0.5, 0.5, 0.5], [0.75, 0.25, 0.25], [0.375, 0.625, 0.0625]]
     )
-    assert model.oscillation_frequency == "detuning"
 
 
 @pytest.mark.parametrize("factory", [t2_echo_model, t2_ramsey_model])

@@ -36,6 +36,7 @@ from zcu_tools.program.v2 import (
 )
 
 from zcu_lab.v2.chain._cycle import (
+    AUGMENTED_SIZE,
     READS_PER_CYCLE,
     cycle_sums_variables,
     emit_cycle,
@@ -177,7 +178,9 @@ class ChainT2RamseyExp(Experiment[CycleSums, ChainT2RamseyCfg]):
         delays = sweep2array(cfg.delay, "time", {"soccfg": context.soccfg})
         update = live_cycle_curves(context.plots, delays, xlabel="Delay (us)")
         augmented_sums = SignalBuffer(
-            (len(delays), 66, 66), dtype=np.float64, on_update=update
+            (len(delays), AUGMENTED_SIZE, AUGMENTED_SIZE),
+            dtype=np.float64,
+            on_update=update,
         )
 
         # 2. One cycle per rep: K, then (π/2, wait x, inverse π/2, read, read) x 8.

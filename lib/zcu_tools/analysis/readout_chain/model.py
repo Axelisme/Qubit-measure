@@ -23,27 +23,35 @@ def _validate_axis(axis: Array) -> None:
         raise ValueError("axis must be finite, nonempty and shape (points,)")
 
 
-def _validate_nuisance(nuisance: "CycleNuisances") -> None:
-    fields = [
-        ("drive_endpoints", nuisance.drive_endpoints, (3, 2, 3)),
-        ("centers", nuisance.centers, (3, 2)),
-        ("thermal", nuisance.thermal, (3,)),
-        ("read_retention", nuisance.read_retention, (3,)),
-        ("read_landing", nuisance.read_landing, (3,)),
-    ]
-    for name, value, shape in fields:
-        if value.shape != shape or not np.isfinite(value).all():
-            raise ValueError(f"nuisance {name} must be finite with shape {shape}")
-        if name == "centers":
-            continue
-        if np.any((value < 0) | (value > 1)):
-            raise ValueError(f"nuisance {name} must be in [0, 1]")
-        if name != "read_retention" and not np.allclose(
-            value.sum(axis=-1), 1, rtol=0, atol=1e-12
-        ):
-            raise ValueError(f"nuisance {name} must sum to one")
-    if not np.isfinite(nuisance.variance) or nuisance.variance <= 0:
+def _validate_nuisances(nuisances: "CycleNuisances") -> None:
+    _require_finite("drive_endpoints", nuisances.drive_endpoints, (3, 2, 3))
+    _require_probabilities("drive_endpoints", nuisances.drive_endpoints)
+    _require_finite("centers", nuisances.centers, (3, 2))
+    if not np.isfinite(nuisances.variance) or nuisances.variance <= 0:
         raise ValueError("nuisance variance must be finite and positive")
+    _require_finite("thermal", nuisances.thermal, (3,))
+    _require_probabilities("thermal", nuisances.thermal)
+    _require_finite("read_retention", nuisances.read_retention, (3,))
+    _require_unit_interval("read_retention", nuisances.read_retention)
+    _require_finite("read_landing", nuisances.read_landing, (3,))
+    _require_probabilities("read_landing", nuisances.read_landing)
+
+
+def _require_finite(name: str, value: Array, shape: tuple[int, ...]) -> None:
+    if value.shape != shape or not np.isfinite(value).all():
+        raise ValueError(f"nuisance {name} must be finite with shape {shape}")
+
+
+def _require_unit_interval(name: str, value: Array) -> None:
+    if np.any((value < 0) | (value > 1)):
+        raise ValueError(f"nuisance {name} must be in [0, 1]")
+
+
+def _require_probabilities(name: str, value: Array) -> None:
+    """Each last-axis row is in [0, 1] and sums to one."""
+    _require_unit_interval(name, value)
+    if not np.allclose(value.sum(axis=-1), 1, rtol=0, atol=1e-12):
+        raise ValueError(f"nuisance {name} must sum to one")
 
 
 Curve = Callable[[Array, Mapping[str, float]], Array]
@@ -66,9 +74,12 @@ class CycleNuisances:
         follows a truncated exponential with rate -log(1-R[i,j]). Noise is
         independent between reads and cycles. No transition gives center c_i.
 
-    State labels are arbitrary and may be permuted together. Arrays remain mutable.
-    Exactly deterministic off-diagonal read jumps are nonregular: moments raises
-    ValueError because their emission Jacobian is not finite.
+    State labels are arbitrary and may be permuted together. Construction
+    raises ValueError for a wrong shape, a non-finite value, a probability
+    outside [0, 1], a simplex that does not sum to one or a nonpositive
+    variance. Fields are frozen; their arrays remain mutable, so moments checks
+    them again. Exactly deterministic off-diagonal read jumps are nonregular:
+    moments raises ValueError because their emission Jacobian is not finite.
     """
 
     drive_endpoints: Array
@@ -77,6 +88,9 @@ class CycleNuisances:
     thermal: Array
     read_retention: Array
     read_landing: Array
+
+    def __post_init__(self) -> None:
+        _validate_nuisances(self)
 
 
 @dataclass(frozen=True)
@@ -112,7 +126,11 @@ class CycleModel:
         frequency in cycles per axis unit, used only for the R diagnostic.
         Raise ValueError at construction if it is not in parameter_names.
 
-    Use identical to repeat one scalar curve across the three states.
+    The drive row of state i is (1 - f_i(x)) * endpoint 0 + f_i(x) * endpoint 1,
+    as on CycleNuisances. Jacobian columns of the curve parameters use bounded
+    central differences of curve, because curve is a caller callable; all other
+    columns are analytic. Use identical to repeat one scalar curve across the
+    three states.
     """
 
     curve: Curve
@@ -178,7 +196,7 @@ class CycleModel:
         jump. Inputs are not changed.
         """
         _validate_axis(axis)
-        _validate_nuisance(nuisances)
+        _validate_nuisances(nuisances)
         theta = parameter_vector(self, parameters)
         q = np.concatenate([theta, pack_nuisance(nuisances)])
         means, jacobian = joint_mean_jacobian(self, axis, q)
@@ -189,3 +207,22 @@ class CycleModel:
             jacobian,
             self.parameter_names + NUISANCE_NAMES,
         )
+
+    def populations(
+        self, axis: Array, parameters: Mapping[str, float], nuisances: CycleNuisances
+    ) -> Array:
+        """Return the first-read populations before emission, shape (F,3).
+
+        The thermal populations pass one drive D(x), whose row for state i is
+        (1 - f_i(x)) * drive_endpoints[i,0] + f_i(x) * drive_endpoints[i,1].
+        axis, parameters and nuisances are as for moments; for a fit, pass
+        CycleFit.parameters and CycleFit.nuisances. Columns follow the state
+        order of nuisances. Raise ValueError for invalid inputs. Inputs are not
+        changed.
+        """
+        _validate_axis(axis)
+        _validate_nuisances(nuisances)
+        theta = parameter_vector(self, parameters)
+        q = np.concatenate([theta, pack_nuisance(nuisances)])
+        drive, _ = joint_table(self, axis, q)
+        return np.einsum("i,xij->xj", nuisances.thermal, drive)

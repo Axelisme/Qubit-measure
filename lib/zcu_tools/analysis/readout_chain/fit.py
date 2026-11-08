@@ -8,15 +8,21 @@ from scipy.stats import chi2
 
 from ._cycle_checks import inner, populations, solve_shared
 from ._cycle_coordinates import (
+    CENTERS,
+    LANDING,
     NUISANCE_NAMES,
+    RETENTION,
+    TABLE_SIZE,
+    THERMAL,
+    VARIANCE,
     endpoints_of,
     joint_table,
-    nuisance_bounds,
     parameter_vector,
+    table_bounds,
 )
 from ._cycle_emission import simplex
 from ._cycle_solver import local_table, solve_joint, starting_nuisance
-from .cycle import CycleSums
+from .cycle import CycleSums, validate_cycle_sums
 from .model import Array, CycleModel, CycleNuisances
 
 
@@ -63,11 +69,14 @@ class CycleFit:
         populations from the shared-nuisance fit with free D at each x.
     population_errors: Shape (F,3), marginal Wald errors of populations,
         including the shared-nuisance covariance via the Schur complement.
-    reliability: Research R = 1/(2*pi*axis_span*SE(frequency)), dimensionless.
-        Frequency uses cycles per axis unit, converted here to angular frequency.
-        None unless CycleModel.oscillation_frequency names a curve parameter;
-        R applies only to oscillating curves and was calibrated on Rabi. A zero
-        axis span or zero SE gives infinity. No threshold or choice is applied.
+    reliability: R = 1 / (2*pi * axis span * SE(frequency)), dimensionless.
+        frequency is the CycleModel.oscillation_frequency parameter in cycles
+        per axis unit and SE its Wald standard error, so 2*pi*SE is the
+        angular-frequency error; a larger R means a smaller frequency error
+        relative to the sweep span. Its scale was calibrated on Rabi sweeps
+        only. None unless oscillation_frequency names a curve parameter, since
+        R applies only to oscillating curves. A zero axis span or zero SE
+        gives infinity. No threshold or choice is applied.
     J: Joint constrained weighted residual sum of squares, dimensionless.
     df: Joint residual degrees of freedom, 65*F-P.
     """
@@ -94,6 +103,8 @@ def fit_cycle(
 
     init must map every curve name to one finite, in-bounds starting value.
     Nuisances start from closed-form moment geometry and fixed physical seeds.
+    The Jacobian columns of the curve parameters use bounded central
+    differences of model.curve (a caller callable); the others are analytic.
     Fit nuisances at init for each of the six assignments of geometric states
     to curve rows, then run the joint fit from the lowest-objective assignment.
     Assignment scores use common initial model-covariance weights and feasible
@@ -116,8 +127,7 @@ def fit_cycle(
     Optimisation keeps read-landing coordinates one machine epsilon inside the
     simplex-coordinate bounds to avoid nonregular deterministic read jumps.
     """
-    # Revalidate mutable saved arrays through the record's public contract.
-    CycleSums(sums.axis, sums.cycle_count, sums.feature_sums, sums.product_sum)
+    validate_cycle_sums(sums)
     theta = parameter_vector(model, init)
     means = sums.feature_sums / sums.cycle_count[:, None]
     q0 = np.r_[theta, starting_nuisance(means)]
@@ -126,12 +136,10 @@ def fit_cycle(
     q = solution.q
     nuisance = _nuisances(q[n:])
     table = local_table(*joint_table(model, sums.axis, q))
-    nuisance_lo, nuisance_hi = nuisance_bounds()
-    lo = np.r_[np.zeros(6), nuisance_lo[12:]]
-    hi = np.r_[np.ones(6), nuisance_hi[12:]]
-    shared = solve_shared(table, means, solution.weights, (lo, hi))
+    limits = table_bounds()
+    shared = solve_shared(table, means, solution.weights, limits)
     _, unrestricted_residual = inner(
-        shared.table, means, solution.weights, np.arange(20), (lo, hi), steps=60
+        shared.table, means, solution.weights, np.arange(TABLE_SIZE), limits, steps=60
     )
     within_J = float(np.sum(unrestricted_residual**2))
     points = len(sums.axis)
@@ -163,12 +171,12 @@ def _check(J: float, df: int) -> CycleCheck:
     return CycleCheck(J, df, float(chi2.sf(J, df)) if df > 0 else None)
 
 
-def _nuisances(q: Array) -> CycleNuisances:
+def _nuisances(nuisance: Array) -> CycleNuisances:
     return CycleNuisances(
-        endpoints_of(q),
-        q[12:18].reshape(3, 2).copy(),
-        float(q[18]),
-        simplex(*q[19:21]),
-        q[21:24].copy(),
-        simplex(*q[24:26]),
+        drive_endpoints=endpoints_of(nuisance),
+        centers=nuisance[CENTERS].reshape(3, 2).copy(),
+        variance=float(nuisance[VARIANCE]),
+        thermal=simplex(*nuisance[THERMAL]),
+        read_retention=nuisance[RETENTION].copy(),
+        read_landing=simplex(*nuisance[LANDING]),
     )

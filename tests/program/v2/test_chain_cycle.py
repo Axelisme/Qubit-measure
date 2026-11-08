@@ -131,11 +131,10 @@ def test_read_label_requires_one_owner_and_lists_available_labels(ambiguous: boo
         label, count = "absent", 0
     with pytest.raises(
         ValueError,
-        match=rf"label '{label}'.*expected one PulseReadout owner.*actual {count}.*readout",
-    ) as error:
+        match=rf"label '{label}'.*expected one readout owner.*actual {count}.*"
+        r"available labels.*readout",
+    ):
         v2.chain_cycle_sums(prog, label)
-    if ambiguous:
-        assert "other" in str(error.value)
 
 
 @pytest.mark.parametrize("declared", [1, 15, 17])

@@ -107,11 +107,8 @@ def test_exact_moments_recover_curve_and_joint_predictions(kind: str) -> None:
         fit.nuisances.read_landing[order], nuisance.read_landing, atol=1e-4
     )
     np.testing.assert_allclose(fit.nuisances.variance, nuisance.variance, atol=1e-5)
-    fx = model.curve(sums.axis, {name: 1.2})
-    drive = (1 - fx[:, :, None]) * nuisance.drive_endpoints[:, 0] + fx[
-        :, :, None
-    ] * nuisance.drive_endpoints[:, 1]
-    truth_populations = np.einsum("i,nij->nj", nuisance.thermal, drive)
+    # The free pointwise fit's populations match the curve model's at the truth.
+    truth_populations = model.populations(sums.axis, {name: 1.2}, nuisance)
     np.testing.assert_allclose(fit.populations[:, order], truth_populations, atol=1e-5)
 
 

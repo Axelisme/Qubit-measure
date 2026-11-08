@@ -34,6 +34,11 @@ def test_exact_moments_recover_t2_and_joint_predictions(factory) -> None:
     predicted = model.moments(axis, result.parameters, result.nuisances)
     np.testing.assert_allclose(predicted.means, moments.means, atol=1e-6)
     assert result.J < 1e-7
+    # Ramsey oscillates, so it reports a reliability; the echo decay does not.
+    if factory is t2_ramsey_model:
+        assert result.reliability is not None
+    else:
+        assert result.reliability is None
 
 
 @pytest.mark.slow

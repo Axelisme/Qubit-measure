@@ -155,19 +155,13 @@ each dwell to running moment sums for readout-chain analysis; `acquire_summed`
 adds them across rounds. Feature definitions, array layout and validation are in
 the [`chain_sweep_sums` docstring](v2/chain_sweep.py).
 
-`v2.chain_cycle_sums(prog, read)` resolves one `PulseReadout` owner by an emit
-tag or untagged module name; repeated emissions of that owner are one readout,
-not ambiguous labels. It requires 16 unrolled reads or two reads in a fixed
-Repeat of eight, no other triggers on that ADC, and an explicit
-`prog.set_reads_per_shot(16)` after build. Each rep is a thermalised
-`(D R R)^8` cycle; the caller owns the D order and thermalisation, which the
-processor does not inspect. It returns `(points, 66, 66)` sums of `z zᵀ` with
-`z = (1, 65 numbers)`: 32 ordered IQ values, nine same-read moment sums and
-24 pair-product sums grouped by intervening D count and read gap.
-`[0,0]` counts cycles and `acquire_summed` adds rounds without normalization.
-Missing or ambiguous owners, incompatible read/control structure, other triggers,
-and declared or incoming shape mismatches raise `ValueError`; the function's
-docstring gives the slot order and all six pair groups.
+`v2.chain_cycle_sums(prog, read)` selects one `PulseReadout` owner whose 16 reads
+per shot form one thermalised `(D R R)^8` cycle per rep, either unrolled or as two
+reads in a fixed Repeat of eight. After building, call `prog.set_reads_per_shot(16)`
+before constructing the processor; the selected ADC must have no other triggers.
+The processor reduces each cycle to 65 numbers and returns their per-point augmented
+sums; `acquire_summed` adds them across rounds. Slot layout and validation are in
+the [`chain_cycle_sums` docstring](v2/chain_cycle.py).
 
 Build first, then resolve labels and call
 `sched.run_acquire_summed(program, soc, processor=..., rounds=...,

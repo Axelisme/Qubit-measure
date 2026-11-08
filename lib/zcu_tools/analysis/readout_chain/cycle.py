@@ -7,6 +7,9 @@ from numpy.typing import NDArray
 
 from ._statistics import whiten
 
+# Numbers kept per cycle: I,Q of 16 reads, 9 same-read sums, 24 pair sums.
+CYCLE_FEATURE_COUNT = 65
+
 
 @dataclass(frozen=True)
 class CycleSums:
@@ -35,7 +38,7 @@ class CycleSums:
     product_sum: NDArray[np.float64]
 
     def __post_init__(self) -> None:
-        _validate_sums(self)
+        validate_cycle_sums(self)
 
     @classmethod
     def from_augmented(
@@ -50,8 +53,9 @@ class CycleSums:
         Raise ValueError for incompatible shapes, non-finite values, an empty
         axis or fewer than 2 cycles at any point. Inputs are not changed.
         """
-        if axis.ndim != 1 or augmented.shape != (len(axis), 66, 66):
-            raise ValueError("augmented sums must have shape (points, 66, 66)")
+        size = CYCLE_FEATURE_COUNT + 1
+        if axis.ndim != 1 or augmented.shape != (len(axis), size, size):
+            raise ValueError(f"augmented sums must have shape (points, {size}, {size})")
         if not np.isfinite(augmented).all():
             raise ValueError("augmented sums must contain only finite values")
         return cls(
@@ -62,15 +66,20 @@ class CycleSums:
         )
 
 
-def _validate_sums(sums: CycleSums) -> None:
+def validate_cycle_sums(sums: CycleSums) -> None:
+    """Raise ValueError unless sums still meets the CycleSums contract.
+
+    Construction checks the record once; its arrays stay mutable, so readers
+    call this again before using them. Nothing is changed.
+    """
     if sums.axis.ndim != 1 or sums.axis.size == 0:
         raise ValueError("axis must have nonempty shape (points,)")
     points = len(sums.axis)
     arrays = (
         ("axis", sums.axis, (points,)),
         ("cycle_count", sums.cycle_count, (points,)),
-        ("feature_sums", sums.feature_sums, (points, 65)),
-        ("product_sum", sums.product_sum, (65, 65)),
+        ("feature_sums", sums.feature_sums, (points, CYCLE_FEATURE_COUNT)),
+        ("product_sum", sums.product_sum, (CYCLE_FEATURE_COUNT, CYCLE_FEATURE_COUNT)),
     )
     for name, array, shape in arrays:
         if array.shape != shape:
@@ -119,7 +128,7 @@ def cycle_curves(sums: CycleSums) -> CycleCurves:
     Directions estimated on the same points inflate pure-noise variance at
     finite F; sigma units refer to the within-point standard errors.
     """
-    _validate_sums(sums)
+    validate_cycle_sums(sums)
     counts = sums.cycle_count
     means = sums.feature_sums / counts[:, None]
     whitened = whiten(means, counts, sums.product_sum)

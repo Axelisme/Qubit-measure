@@ -1,6 +1,9 @@
 """Batched matrix-chain moments and adjoint sensitivities for a K-reset cycle.
 
-Port of the research event-product covariance and forward/backward Jacobian.
+Each feature mean is a product of thermal populations, drive matrices and
+emission-moment matrices along the 16 reads; the covariance sums the same
+products over pairs of features (event products up to fourth order). The
+Jacobian uses one forward and one backward pass over each product.
 Precomputed propagators skip unobserved links in fourth-order products. Scalar
 three-state matvecs avoid temporary arrays in the covariance's innermost loop.
 Kernels are serial; callers control parallelism.
@@ -14,7 +17,9 @@ from ._cycle_features import tables
 
 
 @njit(cache=True, inline="always")
-def _multiply(a, b, c, matrix):
+def _multiply(
+    a: float, b: float, c: float, matrix: np.ndarray
+) -> tuple[float, float, float]:
     return (
         a * matrix[0, 0] + b * matrix[1, 0] + c * matrix[2, 0],
         a * matrix[0, 1] + b * matrix[1, 1] + c * matrix[2, 1],
@@ -23,7 +28,9 @@ def _multiply(a, b, c, matrix):
 
 
 @njit(cache=True)
-def _adjoint_kernel(chain, table):
+def _adjoint_kernel(
+    chain: tuple[np.ndarray, np.ndarray, np.ndarray], table: np.ndarray
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     drive, pi, matrix = chain
     nx = len(drive)
     means = np.zeros((nx, 65))
@@ -112,7 +119,9 @@ def emission_batch(
 
 
 @njit(cache=True)
-def _propagators(drive, pi, matrix):
+def _propagators(
+    drive: np.ndarray, pi: np.ndarray, matrix: np.ndarray
+) -> tuple[np.ndarray, np.ndarray]:
     nx = len(drive)
     pre = np.zeros((nx, 16, 3))
     between = np.zeros((nx, 16, 16, 3, 3))
@@ -133,7 +142,9 @@ def _propagators(drive, pi, matrix):
 
 
 @njit(cache=True)
-def _second_kernel(chain, table):
+def _second_kernel(
+    chain: tuple[np.ndarray, np.ndarray, np.ndarray], table: np.ndarray
+) -> np.ndarray:
     pre, between, matrix = chain
     result = np.zeros((len(pre), 65, 65))
     for x in range(len(pre)):

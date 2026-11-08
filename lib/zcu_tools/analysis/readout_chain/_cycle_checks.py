@@ -6,11 +6,16 @@ import numpy as np
 
 from ._cycle_emission import simplex, simplex_gradient
 from ._cycle_solver import (
+    apply_weights,
     bounded_least_squares,
     local_drive,
     local_mean_jacobian,
-    whiten,
 )
+
+# Lower and upper bounds of the table columns being fitted.
+Limits = tuple[np.ndarray, np.ndarray]
+# Table, predicted means, Jacobian, weighted residual and per-point cost.
+LineState = tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]
 
 
 @dataclass
@@ -32,7 +37,13 @@ def _normal(jac: np.ndarray, held: np.ndarray) -> np.ndarray:
     return normal + held[:, :, None] * np.eye(jac.shape[2])
 
 
-def _step(table, cols, jac, residual, limits):
+def _step(
+    table: np.ndarray,
+    cols: np.ndarray,
+    jac: np.ndarray,
+    residual: np.ndarray,
+    limits: Limits,
+) -> np.ndarray:
     lo, hi = limits
     values = table[:, cols]
     gradient = np.einsum("nfi,nf->ni", jac, residual)
@@ -57,13 +68,20 @@ def _step(table, cols, jac, residual, limits):
     return delta * np.minimum(1.0, room.min(axis=1))[:, None]
 
 
-def inner(table, means, weights, cols, limits, steps=40):
+def inner(
+    table: np.ndarray,
+    means: np.ndarray,
+    weights: np.ndarray,
+    cols: np.ndarray,
+    limits: Limits,
+    steps: int = 40,
+) -> tuple[np.ndarray, np.ndarray]:
     table = table.copy()
     predicted, jac = local_mean_jacobian(table)
-    residual = whiten(weights, means - predicted)
+    residual = apply_weights(weights, means - predicted)
     cost = np.sum(residual**2, axis=1)
     for _ in range(steps):
-        weighted = whiten(weights, jac[:, :, cols])
+        weighted = apply_weights(weights, jac[:, :, cols])
         delta = _step(table, cols, weighted, residual, limits)
         if np.max(np.abs(delta)) < 1e-9:
             break
@@ -76,7 +94,14 @@ def inner(table, means, weights, cols, limits, steps=40):
     return table, residual
 
 
-def _line_search(state, delta, cols, means, weights, limits):
+def _line_search(
+    state: LineState,
+    delta: np.ndarray,
+    cols: np.ndarray,
+    means: np.ndarray,
+    weights: np.ndarray,
+    limits: Limits,
+) -> LineState:
     table, predicted, jac, residual, cost = state
     lo, hi = limits
     accept = np.zeros(len(table), dtype=bool)
@@ -85,7 +110,7 @@ def _line_search(state, delta, cols, means, weights, limits):
         candidate = table.copy()
         candidate[:, cols] = np.clip(table[:, cols] + delta, lo, hi)
         pred, derivative = local_mean_jacobian(candidate)
-        r = whiten(weights, means - pred)
+        r = apply_weights(weights, means - pred)
         c = np.sum(r**2, axis=1)
         accept = c <= cost
         if accept.all():
@@ -104,22 +129,22 @@ def solve_shared(
     table: np.ndarray,
     means: np.ndarray,
     weights: np.ndarray,
-    limits: tuple[np.ndarray, np.ndarray],
+    limits: Limits,
 ) -> SharedSolution:
     lo, hi = limits
     cols = np.arange(6)
     current = table.copy()
     residual = np.zeros_like(means)
 
-    def fun(shared):
+    def fun(shared: np.ndarray) -> np.ndarray:
         nonlocal current, residual
         current[:, 6:] = shared
         current, residual = inner(current, means, weights, cols, (lo[:6], hi[:6]))
         return residual.ravel()
 
-    def jacobian(shared):
+    def jacobian(shared: np.ndarray) -> np.ndarray:
         current[:, 6:] = shared
-        jac = whiten(weights, local_mean_jacobian(current)[1])
+        jac = apply_weights(weights, local_mean_jacobian(current)[1])
         local, global_ = jac[:, :, :6], jac[:, :, 6:]
         normal = np.einsum("nfi,nfj->nij", local, local)
         coupling = np.einsum("nfi,nfj->nij", local, global_)
@@ -132,7 +157,7 @@ def solve_shared(
     if not result.success:
         raise RuntimeError(f"shared cycle check did not converge: {result.message}")
     fun(result.x)
-    jac = whiten(weights, local_mean_jacobian(current)[1])
+    jac = apply_weights(weights, local_mean_jacobian(current)[1])
     local, global_ = jac[:, :, :6], jac[:, :, 6:]
     fvv = np.einsum("nfi,nfj->nij", local, local)
     fvs = np.einsum("nfi,nfj->nij", local, global_)

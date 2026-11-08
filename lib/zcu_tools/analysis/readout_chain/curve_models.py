@@ -1,10 +1,64 @@
-"""Ideal-pulse transverse-decay curves for three-state cycles."""
+"""Per-state curve models of the Rabi, T1, T2 echo and T2 Ramsey cycles.
+
+Each constructor returns a CycleModel whose column i is the curve f_i(x) of
+the drive row of state i, in the order g, e, third state. The free affine
+endpoints of each row absorb amplitude, sign and imperfect pulses.
+"""
 
 from collections.abc import Mapping
 
 import numpy as np
 
 from .model import Array, CycleModel
+
+# t1 and tf stay above 1e-3 axis units, for example 1 ns on a us axis.
+_SHORTEST_DECAY = 1e-3
+
+
+def rabi_model() -> CycleModel:
+    """Return a three-state model for a Rabi drive of frequency f.
+
+    Axis x is the swept drive amount (gain, or pulse length) in caller units.
+    The fitted ``f`` is the Rabi frequency in cycles per axis unit, bounds
+    [0, infinity), so the π point is x = 1 / (2 f). The g curve is
+    sin²(π f x), the probability that the drive takes g to e; the e curve is
+    cos²(π f x), the probability that e stays in e. The third state is not
+    driven: its row's free endpoints absorb a flat response, and its curve
+    repeats the g curve. ``oscillation_frequency`` is ``f``, so CycleFit
+    reports reliability.
+    """
+
+    def curve(x: Array, parameters: Mapping[str, float]) -> Array:
+        from_g = np.sin(np.pi * parameters["f"] * x) ** 2
+        from_e = np.cos(np.pi * parameters["f"] * x) ** 2
+        return np.column_stack([from_g, from_e, from_g])
+
+    return CycleModel(curve, ("f",), [(0.0, np.inf)], oscillation_frequency="f")
+
+
+def t1_model() -> CycleModel:
+    """Return a three-state model for a π pulse followed by a wait x.
+
+    Axis x is the wait in caller time units. Fitted ``t1`` and ``tf`` use the
+    same units, with bounds [1e-3, infinity). The π pulse takes g to e,
+    which decays back with exp(-x / t1): that is the g curve. From e the π
+    pulse lands in g, which does not decay; the e row's free endpoints absorb
+    that flat response, and its curve exp(-x / t1) also covers a residual e
+    after an imperfect π. The third state decays with its own exp(-x / tf).
+
+    The g and third curves are the same family, so exchanging those two rows
+    together with t1 and tf fits the same data when the e row is flat; the
+    fit may return either labelling. Callers that know which state is most
+    populated, such as g in thermal equilibrium, label the rows by
+    CycleFit.nuisances.thermal.
+    """
+
+    def curve(x: Array, parameters: Mapping[str, float]) -> Array:
+        decay = np.exp(-x / parameters["t1"])
+        return np.column_stack([decay, decay, np.exp(-x / parameters["tf"])])
+
+    bounds = [(_SHORTEST_DECAY, np.inf), (_SHORTEST_DECAY, np.inf)]
+    return CycleModel(curve, ("t1", "tf"), bounds)
 
 
 def t2_echo_model() -> CycleModel:
@@ -27,8 +81,12 @@ def t2_echo_model() -> CycleModel:
     incoherently in the qubit subspace. Pulse errors or more complex leakage
     can violate this curve family; fit_cycle reports checks, not corrections.
     Equal t2/tf or vanishing row contrast can lose identification; Wald errors
-    then need not be calibrated. Direct curve calls raise ValueError for
-    negative/nonfinite delay; parameter validation is owned by CycleModel.
+    then need not be calibrated. The g curve is affine in exp(-x/t2), the same
+    family as the third curve, so with a small third-state population the fit
+    can put g in the third row with t2 and tf exchanged; label the rows by
+    CycleFit.nuisances.thermal as for t1_model. Direct curve calls raise
+    ValueError for negative/nonfinite delay; parameter validation is owned by
+    CycleModel.
     """
 
     def curve(axis: Array, parameters: Mapping[str, float]) -> Array:

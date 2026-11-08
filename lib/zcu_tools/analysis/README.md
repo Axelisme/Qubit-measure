@@ -67,50 +67,14 @@ centers／radius／confusion matrix 有限時才提出校準。
 不需要單發資料，也不依賴 program。輸入、輸出與失敗條件見
 [`SweepSums` 與 `sweep_curve` 的 docstring](readout_chain/sweep.py)。
 
-`CycleSums.from_augmented(axis, augmented)` 把逐點 66×66 augmented sums 轉成保存用
-record：保留逐點 cycle count 與 65 個 feature sums，只把 65×65 product sums 跨點加總。
-`cycle_curves(sums)` 回傳 `CycleCurves`，包含使用全部 features 的 `main_sigma`、
-使用第一個 read 原始 IQ 主軸的 `first_read_sigma`，以及逐點 `cycle_count`。
-兩條曲線扣除逐 feature 的掃描中位數背景，以各點 cycle count 換算成 mean 的 sigma，
-第一讀主軸的較大分量固定為正，全部 features 的投影再與第一讀曲線同向。
-方向由同一批掃描點估計，有限點數的純雜訊方差可能高於 1。
-輸入缺少 cycles、shape 不符或含非有限值時拋出 ValueError；within-point covariance
-非正定時也拋出 ValueError，不加 ridge。欄位版面與單位見 [cycle.py](readout_chain/cycle.py)。
-
-`CycleModel` 接受作者的三態曲線、參數名與 bounds。`CycleModel.identical` 把一條純量
-曲線重複三次。每個 drive row 的兩個端點都是自由的三態機率，曲線在兩端點間插值。
-`CycleNuisances` 保存端點、IQ 中心、共同等向雜訊、熱布居及讀出轉移。
-`model.moments(axis, parameters, nuisances)` 回傳 65 個數的平均、逐 cycle 共變異數與
-具名座標的平均 Jacobian，供離線模擬與診斷使用。矩陣鏈與讀出導數使用解析式，
-作者 callable 的曲線導數使用有限差分。
-
-`fit_cycle(sums, model, init)` 從必填的曲線參數起點跑一次 bounded joint GMM，
-以模型共變異數加權。工具把幾何 seed 的三個態分配到固定的 curve rows，共評估六種排列。
-各排列先固定 curve parameters 於 init 擬合 nuisance，再以共同初始權重下的最低 objective
-選出 joint fit 起點。Nuisance-only fit 達到 evaluation budget 時保留最後的可行解作評分。
-工具不搜尋其他 curve 起點，不從 pooled product sum 估權重，也不選態數。
-`CycleFit` 包含曲線參數與 Wald errors、`CycleNuisances`、聯合共變異數、自由逐點 drive
-擬合的第一讀布居與 errors，以及單點內、共用、曲線三個 J 與 df。
-單點內與曲線檢查附漸近 chi-square p。共用檢查在邊界的 chi-square 參考分布失準，
-因此 p 為 None，函式不跑 bootstrap。通過檢查不保證偏差小。
-低對比且每點 cycles 少時，Wald 區間可能低估不確定度；自由端點的額外 nuisance
-會使參數分布變寬或偏斜。完整欄位、座標與限制見 [fit.py](readout_chain/fit.py)。
-`oscillation_frequency` 可指定以 cycles／axis unit 表示的頻率參數名，
-此時 `CycleFit.reliability` 回報 R，否則為 None。工具不按 R 接受或拒絕結果。
-
-`t2_echo_model()` 與 `t2_ramsey_model()` 建立 ideal-pulse 的三態 `CycleModel`。
-兩者以總 free-evolution delay 為座標，擬合 `t2` 與第三態 lifetime `tf`，單位與座標相同。
-Ramsey 另擬合非負 `detuning`，單位是 cycles／axis unit，並回報 reliability。
-令 echo 的 `c = exp(-x/t2)`，Ramsey 的 `c = exp(-x/t2)*cos(2π*detuning*x)`。
-g/e 曲線依序是 `(1-c)/2`、`(1+c)/2`，第三條是 `exp(-x/tf)`。
-各列的自由端點吸收 amplitude、sign 與第三態離開後的分支。
-理想最後一個 π/2 不把 longitudinal T1 relaxation 投影到 population，因此不用額外 T1 輸入。
-`t2` 是包含 T1 transverse contribution 的總衰減時間，不是 pure-dephasing time。
-Pulse error 或更複雜的第三態動力學可能造成 curve misfit，工具不自動換模型。
-
-離線 exact-moment 與逐 shot 模擬已驗證這兩組 T2 curves 的 recovery。
-六種 seed 排列只處理態標籤，不排除其他局部極小值或頻率 alias。
-應檢視 curve check 與擬合結果，不能只讀 Wald error。
+`CycleSums` 保存 K-cycle 讀出鏈逐點的 cycle count、65 個 feature sums 與跨點加總的
+product sum。`cycle_curves` 從這份 record 算出 live plot 的全 feature 曲線與第一讀曲線。
+`CycleModel` 持有作者的三態曲線、參數名與 bounds；`fit_cycle` 從必填的 init 以模型
+共變異數加權的 GMM 聯合擬合 65 個數，回傳參數與 Wald 誤差、共用 nuisances、三項
+lack-of-fit 檢查與逐點布居，不做接受或拒絕。`curve_models.py` 提供 Rabi、T1、T2 echo
+與 T2 Ramsey 實驗的模型。欄位版面、座標、限制與失敗條件見
+[cycle.py](readout_chain/cycle.py)、[model.py](readout_chain/model.py)、
+[fit.py](readout_chain/fit.py) 與 [curve_models.py](readout_chain/curve_models.py) 的 docstring。
 
 ## Readout QND 指標
 

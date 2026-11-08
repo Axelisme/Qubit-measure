@@ -10,6 +10,7 @@ from zcu_tools.program.acquisition import ShotSumProcessor
 
 from .macro.readout import ReadoutEmission
 from .modules.readout import PulseReadout
+from .readout_labels import resolve_readout_label, validate_declared_reads
 from .readout_observation import (
     ReadoutObservation,
     observe_readout_paths,
@@ -24,7 +25,8 @@ def chain_cycle_sums(prog: TimelineProgramV2, read: str) -> ShotSumProcessor:
     prog is a built TimelineProgramV2. read is an emit tag, or the module name
     of an untagged PulseReadout. The label must resolve to one owner; all that
     owner's emissions belong to the cycle, including emissions with other tags.
-    Multiple owners matching the label are ambiguous. The selected ADC must
+    Multiple readout owners matching the label, pulse or mux, are ambiguous; a
+    label whose one owner is a MuxReadout is rejected. The selected ADC must
     have 16 unrolled reads, or two source reads in a fixed Repeat of eight, and
     no other triggers. Call prog.set_reads_per_shot(16) after build and before
     this function. Construction does not change that declaration. Other ADCs
@@ -106,29 +108,14 @@ def _pair_group(left: int, right: int) -> int:
 
 def _resolve_cycle(prog: TimelineProgramV2, read: str) -> int:
     observations = list(observe_readouts(prog))
-    labels: dict[str, list[PulseReadout]] = {}
-    for observation in observations:
-        source = observation.source
-        if isinstance(source, ReadoutEmission) and isinstance(
-            source.owner, PulseReadout
-        ):
-            label = source.owner.name if source.label is None else source.label
-            owners = labels.setdefault(label, [])
-            if not any(owner is source.owner for owner in owners):
-                owners.append(source.owner)
-    matches = labels.get(read, [])
-    if len(matches) != 1:
-        raise ValueError(
-            f"label {read!r}: expected one PulseReadout owner, actual {len(matches)}; "
-            f"owners: {[owner.name for owner in matches]}; available labels: {list(labels)}"
-        )
-    _validate_read_structure(matches[0], observations)
+    owner = resolve_readout_label(observations, read)
+    if not isinstance(owner, PulseReadout):
+        raise ValueError(f"label {read!r}: expected PulseReadout, actual MuxReadout")
+    _validate_read_structure(owner, observations)
     for path in observe_readout_paths(prog):
-        _validate_read_structure(matches[0], list(path.observations))
-    ch = matches[0].cfg.ro_ch
-    declared = prog.ro_chs[ch]["trigs"]
-    if declared != 16:
-        raise ValueError(f"ADC {ch}: expected 16 reads per shot; actual {declared}")
+        _validate_read_structure(owner, list(path.observations))
+    ch = owner.cfg.ro_ch
+    validate_declared_reads(prog, ch, 16)
     return ch
 
 

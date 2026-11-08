@@ -1,7 +1,9 @@
 """Gaussian emissions and analytic truncated-exponential tail moments.
 
-This ports the research emission law without its Gauss-Legendre quadrature.
-Hypergeometric integrals give E[u**k]; derivatives use -Cov(u**k,u).
+A read that leaves state i for j gives IQ mean c_j + u*(c_i - c_j), where the
+jump time u on [0,1] follows a truncated exponential, plus isotropic Gaussian
+noise (see CycleNuisances). Confluent hypergeometric functions give E[u**k] in
+closed form, without quadrature; derivatives use -Cov(u**k,u).
 """
 
 from functools import lru_cache
@@ -53,7 +55,7 @@ def _tail(p: float) -> tuple[np.ndarray, np.ndarray]:
 
 def _edge(
     centers: np.ndarray, variance: float, i: int, j: int, p: float, max_order: int
-):
+) -> tuple[np.ndarray, np.ndarray]:
     delta = centers[i] - centers[j]
     u, du = _tail(p) if i != j else (np.array([1.0, 0, 0, 0, 0, 0]), np.zeros(6))
     polys = [

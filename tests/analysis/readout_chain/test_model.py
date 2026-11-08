@@ -44,14 +44,43 @@ def test_moments_reject_malformed_axis(axis: np.ndarray) -> None:
         {"read_retention": np.array([0.8, -0.1, 0.9])},
     ],
 )
-def test_moments_reject_invalid_physical_nuisances(change: dict[str, object]) -> None:
+def test_nuisances_reject_invalid_physical_values_at_construction(
+    change: dict[str, object],
+) -> None:
+    with pytest.raises(ValueError, match="nuisance|variance|centers|thermal|retention"):
+        replace(example_nuisance(), **change)
+
+
+def test_moments_reject_nuisance_arrays_changed_after_construction() -> None:
     model = CycleModel.identical(
         lambda x, p: np.exp(-x / p["tau"]), ("tau",), ((0.1, 10.0),)
     )
-    with pytest.raises(ValueError, match="nuisance|variance|centers|thermal|retention"):
-        model.moments(
-            np.array([0.1]), {"tau": 2.0}, replace(example_nuisance(), **change)
-        )
+    nuisance = example_nuisance()
+    nuisance.thermal[:] = [0.7, 0.2, 0.2]
+
+    with pytest.raises(ValueError, match="thermal"):
+        model.moments(np.array([0.1]), {"tau": 2.0}, nuisance)
+
+
+def test_populations_pass_thermal_through_one_drive() -> None:
+    model = CycleModel.identical(lambda x, p: p["a"] * x, ("a",), ((0.0, 1.0),))
+    # State 0 moves from g toward e as the curve rises; e and the third stay.
+    endpoints = np.array(
+        [
+            [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+            [[0.0, 1.0, 0.0], [0.0, 1.0, 0.0]],
+            [[0.0, 0.0, 1.0], [0.0, 0.0, 1.0]],
+        ]
+    )
+    nuisance = replace(
+        example_nuisance(), drive_endpoints=endpoints, thermal=np.array([0.8, 0.2, 0.0])
+    )
+
+    populations = model.populations(np.array([0.0, 0.5, 1.0]), {"a": 0.5}, nuisance)
+
+    np.testing.assert_allclose(
+        populations, [[0.8, 0.2, 0.0], [0.6, 0.4, 0.0], [0.4, 0.6, 0.0]]
+    )
 
 
 def test_transition_tail_means_and_covariance_match_independent_cycles() -> None:

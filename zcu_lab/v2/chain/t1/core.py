@@ -8,18 +8,16 @@ decay curves, starting from the usual twotone T1 fit of the first read.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Annotated, ClassVar, Self
 
 import numpy as np
-from numpy.typing import NDArray
 from pydantic import Field, model_validator
 from zcu_tools.analysis.readout_chain import (
     CycleCheck,
-    CycleModel,
     CycleSums,
     fit_cycle,
+    t1_model,
 )
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import Experiment, GroupedAxesSpec, VariableAxisSpec
@@ -37,6 +35,7 @@ from zcu_tools.program.v2 import (
 )
 
 from zcu_lab.v2.chain._cycle import (
+    AUGMENTED_SIZE,
     READS_PER_CYCLE,
     cycle_sums_variables,
     emit_cycle,
@@ -51,28 +50,6 @@ from zcu_lab.v2.twotone.time_domain.t1.core import (
     T1Exp,
     T1Result,
 )
-
-# Decay times are fitted above 1 ns, so exp(-x / T) stays defined at x = 0.
-SHORTEST_DECAY_US = 1e-3
-
-
-def t1_model() -> CycleModel:
-    """Return the cycle model of a π pulse followed by a wait x in us.
-
-    Each row's curve moves the way that state's response moves. From g the π
-    pulse reaches e, which decays back with exp(-x / t1). From e the π pulse
-    lands in g, which does not decay; that row's free affine row absorbs the
-    flat response, and exp(-x / t1) also covers a residual e after an
-    imperfect π. The third state decays with its own exp(-x / tf). t1 and tf
-    are in us.
-    """
-
-    def curves(x: NDArray[np.float64], p: Mapping[str, float]) -> NDArray[np.float64]:
-        decay = np.exp(-x / p["t1"])
-        return np.column_stack([decay, decay, np.exp(-x / p["tf"])])
-
-    bounds = [(SHORTEST_DECAY_US, np.inf), (SHORTEST_DECAY_US, np.inf)]
-    return CycleModel(curves, ("t1", "tf"), bounds)
 
 
 class ChainT1Cfg(ConfigBase):
@@ -181,7 +158,9 @@ class ChainT1Exp(Experiment[CycleSums, ChainT1Cfg]):
         delays = sweep2array(cfg.delay, "time", {"soccfg": context.soccfg})
         update = live_cycle_curves(context.plots, delays, xlabel="Delay (us)")
         augmented_sums = SignalBuffer(
-            (len(delays), 66, 66), dtype=np.float64, on_update=update
+            (len(delays), AUGMENTED_SIZE, AUGMENTED_SIZE),
+            dtype=np.float64,
+            on_update=update,
         )
 
         # 2. One cycle per rep: K, then (π pulse, wait x, read, read) eight times.
