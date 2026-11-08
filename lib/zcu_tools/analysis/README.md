@@ -67,6 +67,31 @@ centers／radius／confusion matrix 有限時才提出校準。
 不需要單發資料，也不依賴 program。白化與兩個 chi-square block 的 evidence null
 由子套件的私有數值模組共用；null table 首次呼叫時建立，之後留在記憶體重用。
 
+## Readout chain 讀出調參
+
+`readout_chain.ReadoutSums.from_processor(axis, sums)` 保存每個 setting 的
+32-read block count 與 113 個 moment sums。Processor output 的 shape 是
+`(settings, 114)`，第一欄是 count。每個 lag 只用 block 內的 `32-k` 對 reads。
+相鄰 blocks 是同一條 stationary stream，不假設它們獨立。
+
+`readout_metric(sums)` 以 closed-form start 和一次帶固定弱 prior 的
+model-covariance weighted Gauss–Newton step 擬合三態。Covariance 包含跨 block
+相關，並以 32-step geometric tail 求和。模型假設每個 IQ component 有相同
+Gaussian noise variance，read transition 是逐態 retention 加共同 landing。
+函式不讀 program、檔案或硬體。首次呼叫需要編譯 Numba kernels。
+
+`ReadoutMetric` 的 `metric` 是兩個最高 stationary population 態的
+read–drive–read information。計算時只取這兩態，使用等布居與對稱 landing，
+不平均三對態。較大值較好。`ranking` 保存由高到低的 setting indices。
+`separation` 是這兩態的 d/sigma，`retention` 保存它們各自的 λ，
+`third_population` 是剩餘態的 stationary population。
+
+`standard_error` 是固定 start covariance 與 prior 下，單步 estimator 的
+delta-method sampling error。它不涵蓋單步近似的 bias。第三態未被觀測時，
+個別 λ 可能不可識別，error 也可能遠大於二態 fit 的 error。
+輸入 shape、不有限值、非整數 count 或不足兩個 blocks 會拋出 ValueError。
+無可識別主軸 signal 或非有限 fit 也會拒絕。
+
 ## Readout QND 指標
 
 `readout_metrics.readout_metrics(sums)` 分析單一 gain 點的

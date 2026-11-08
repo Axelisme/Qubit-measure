@@ -1,0 +1,244 @@
+"""Readout metric contracts at the saved-moments analysis seam."""
+
+import numpy as np
+import pytest
+from numba import njit
+from numpy.testing import assert_array_equal
+from zcu_tools.analysis.readout_chain import ReadoutSums, readout_metric
+
+
+def exact_moments(
+    centres: np.ndarray, retention: np.ndarray, landing: np.ndarray
+) -> np.ndarray:
+    """Independent finite-state expectation of the documented 113 columns.
+
+    Noise variance is one per component. The largest same-read power is two,
+    so only E[x]=c and E[x²]=c²+1 are needed at either end of a lag.
+    """
+    transition = np.diag(retention) + (1 - retention[:, None]) * landing
+    population = landing / (1 - retention)
+    population /= population.sum()
+
+    def emission(components: tuple[int, ...]) -> np.ndarray:
+        value = np.prod(centres[:, components], axis=1)
+        if len(components) == 2 and components[0] == components[1]:
+            value = value + 1
+        return value
+
+    def lag(k: int, left: tuple[int, ...], right: tuple[int, ...]) -> float:
+        return float(
+            (population * emission(left))
+            @ np.linalg.matrix_power(transition, k)
+            @ emission(right)
+        )
+
+    values = [
+        float(population @ emission(c)) for c in ((0,), (1,), (0, 0), (0, 1), (1, 1))
+    ]
+    values += [lag(k, (a,), (b,)) for k in range(1, 16) for a in (0, 1) for b in (0, 1)]
+    values += [
+        lag(k, (a, b), (c,))
+        for k in range(1, 5)
+        for a, b in ((0, 0), (0, 1), (1, 1))
+        for c in (0, 1)
+    ]
+    values += [
+        lag(k, (a,), (b, c))
+        for k in range(1, 5)
+        for a in (0, 1)
+        for b, c in ((0, 0), (0, 1), (1, 1))
+    ]
+    return np.array(values)
+
+
+def saved_moments(features: np.ndarray, blocks: int = 1_000_000) -> ReadoutSums:
+    """Wrap moment averages in the saved processor contract."""
+    features = np.atleast_2d(features)
+    output = np.column_stack((np.full(len(features), blocks), features * blocks))
+    return ReadoutSums.from_processor(np.arange(len(features), dtype=float), output)
+
+
+def test_exact_two_state_moments_recover_reference_information() -> None:
+    features = exact_moments(
+        np.array([[-1.5, 0.0], [1.5, 0.0]]),
+        np.array([0.75, 0.75]),
+        np.array([0.5, 0.5]),
+    )
+
+    result = readout_metric(saved_moments(features))
+
+    # rdr_metric.rdr(3, .75), independent read-drive-read reference.
+    np.testing.assert_allclose(result.metric, [1.4764556962025317], rtol=0.01)
+    np.testing.assert_allclose(result.separation, [3], rtol=0.01)
+    assert result.third_population[0] < 0.01
+    # A zero-population third state leaves individual λ unidentifiable.
+    assert np.isfinite(result.standard_error[0])
+    assert result.standard_error[0] >= 0
+
+
+@pytest.mark.parametrize("separation", [1.0, 3.0])
+def test_exact_three_state_moments_recover_dominant_pair_and_leakage(
+    separation: float,
+) -> None:
+    centres = separation * np.array([[-0.5, 0], [0.5, 0], [0, 1]])
+    features = exact_moments(
+        centres, np.array([0.75, 0.75, 0.9]), np.array([0.49, 0.49, 0.02])
+    )
+
+    result = readout_metric(saved_moments(features))
+
+    # rdr3.rdr_pair_info on the selected two centres/retentions (K=2).
+    reference = {1.0: 0.09207161125319693, 3.0: 1.4764556962025317}
+    np.testing.assert_allclose(result.metric, [reference[separation]], rtol=0.01)
+    np.testing.assert_allclose(result.separation, [separation], rtol=0.01)
+    np.testing.assert_allclose(result.retention, [[0.75, 0.75]], atol=0.005)
+    # Stationary π_f = (.02/.1)/(.49/.25 + .49/.25 + .02/.1).
+    np.testing.assert_allclose(
+        result.third_population, [0.04854368932038836], atol=0.002
+    )
+
+
+def test_settings_are_ranked_by_information_not_acquisition_order() -> None:
+    features = np.array(
+        [
+            exact_moments(
+                s * np.array([[-0.5, 0], [0.5, 0], [0, 1]]),
+                np.array([0.75, 0.75, 0.9]),
+                np.array([0.49, 0.49, 0.02]),
+            )
+            for s in (2.0, 1.0, 3.0)
+        ]
+    )
+
+    result = readout_metric(saved_moments(features))
+
+    assert_array_equal(result.ranking, [2, 0, 1])
+    assert np.all(result.standard_error > 0)
+
+
+def test_unidentifiable_constant_stream_fails_with_a_signal_error() -> None:
+    with pytest.raises(ValueError, match="signal"):
+        readout_metric(saved_moments(np.zeros(113)))
+
+
+@njit(cache=True)
+def stationary_block_sums(seed: int, blocks: int, landing_f: float) -> np.ndarray:
+    """Simulate one stationary stream; lag anchors never cross a 32-read edge."""
+    np.random.seed(seed)
+    centres = np.array([[-1.5, 0.0], [1.5, 0.0], [0.0, 3.0]])
+    retention = np.array([0.75, 0.75, 0.9])
+    landing = np.array([(1 - landing_f) / 2, (1 - landing_f) / 2, landing_f])
+    stationary = landing / (1 - retention)
+    stationary /= stationary.sum()
+    state = int(np.searchsorted(np.cumsum(stationary), np.random.random()))
+    cumulative_landing = np.cumsum(landing)
+    sums = np.zeros(113)
+    reads = np.empty((32, 2))
+    for _ in range(blocks):
+        for t in range(32):
+            for component in range(2):
+                reads[t, component] = centres[state, component] + np.random.randn()
+            if np.random.random() >= retention[state]:
+                state = int(np.searchsorted(cumulative_landing, np.random.random()))
+        accumulate_second_moments(reads, sums)
+        accumulate_third_moments(reads, sums)
+    return sums
+
+
+@njit(cache=True)
+def accumulate_second_moments(reads: np.ndarray, sums: np.ndarray) -> None:
+    """Add the first 65 documented block averages to test-generated sums."""
+    for t in range(32):
+        sums[:2] += reads[t] / 32
+        for j, (a, b) in enumerate(((0, 0), (0, 1), (1, 1))):
+            sums[2 + j] += reads[t, a] * reads[t, b] / 32
+    column = 5
+    for lag in range(1, 16):
+        for a in range(2):
+            for b in range(2):
+                for t in range(32 - lag):
+                    sums[column] += reads[t, a] * reads[t + lag, b] / (32 - lag)
+                column += 1
+
+
+@njit(cache=True)
+def accumulate_third_moments(reads: np.ndarray, sums: np.ndarray) -> None:
+    """Add both third-order feature families, using only within-block pairs."""
+    pairs = ((0, 0), (0, 1), (1, 1))
+    column = 65
+    for lag in range(1, 5):
+        for a, b in pairs:
+            for c in range(2):
+                for t in range(32 - lag):
+                    sums[column] += (
+                        reads[t, a] * reads[t, b] * reads[t + lag, c] / (32 - lag)
+                    )
+                column += 1
+    for lag in range(1, 5):
+        for a in range(2):
+            for b, c in pairs:
+                for t in range(32 - lag):
+                    sums[column] += (
+                        reads[t, a] * reads[t + lag, b] * reads[t + lag, c] / (32 - lag)
+                    )
+                column += 1
+
+
+def test_contiguous_stream_error_covers_truth_within_statistical_scatter() -> None:
+    blocks = 50_000
+    estimates, errors = [], []
+    for seed in (17, 29, 43, 71):
+        features = stationary_block_sums(seed, blocks, 0.02) / blocks
+        result = readout_metric(saved_moments(features, blocks))
+        estimates.append(result.metric[0])
+        errors.append(result.standard_error[0])
+    z = (np.array(estimates) - 1.4764556962025317) / np.array(errors)
+
+    assert np.all(np.isfinite(z))
+    # Four fixed streams are a scatter check, not a calibrated 68% coverage study.
+    assert np.max(np.abs(z)) < 3
+    assert abs(np.mean(z)) < 1.5
+    assert 0.2 < np.std(z, ddof=1) < 2.5
+
+
+def test_processor_record_preserves_counts_axis_and_all_moments() -> None:
+    axis = np.array([7.0, 3.0])
+    output = np.arange(228.0).reshape(2, 114)
+    output[:, 0] = [23, 91]
+
+    record = ReadoutSums.from_processor(axis, output)
+
+    assert_array_equal(record.axis, [7, 3])
+    assert_array_equal(record.block_count, [23, 91])
+    assert_array_equal(record.feature_sums, output[:, 1:])
+    output[:] = 0
+    axis[:] = 0
+    assert_array_equal(record.axis, [7, 3])
+    assert_array_equal(record.block_count, [23, 91])
+
+
+@pytest.mark.parametrize(
+    "axis, counts, features",
+    [
+        (np.empty(0), np.empty(0), np.empty((0, 113))),
+        (np.ones((2, 1)), np.ones(2) * 2, np.zeros((2, 113))),
+        (np.arange(2.0), np.ones(3) * 2, np.zeros((2, 113))),
+        (np.arange(2.0), np.ones(2) * 2, np.zeros((2, 112))),
+        (np.array([np.nan, 1]), np.ones(2) * 2, np.zeros((2, 113))),
+        (np.arange(2.0), np.array([np.inf, 2]), np.zeros((2, 113))),
+        (np.arange(2.0), np.array([1, 2]), np.zeros((2, 113))),
+        (np.arange(2.0), np.array([2.5, 2]), np.zeros((2, 113))),
+        (np.arange(2.0), np.ones(2) * 2, np.full((2, 113), np.nan)),
+    ],
+)
+def test_invalid_saved_moments_fail_at_construction(
+    axis: np.ndarray, counts: np.ndarray, features: np.ndarray
+) -> None:
+    with pytest.raises(ValueError, match="shape|finite|blocks|integer"):
+        ReadoutSums(axis, counts, features)
+
+
+@pytest.mark.parametrize("output", [np.zeros((2, 113)), np.zeros((3, 114))])
+def test_processor_output_requires_one_row_per_setting(output: np.ndarray) -> None:
+    with pytest.raises(ValueError, match="shape"):
+        ReadoutSums.from_processor(np.arange(2.0), output)
