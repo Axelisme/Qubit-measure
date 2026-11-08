@@ -85,7 +85,10 @@ record：保留逐點 cycle count 與 65 個 feature sums，只把 65×65 produc
 作者 callable 的曲線導數使用有限差分。
 
 `fit_cycle(sums, model, init)` 從必填的曲線參數起點跑一次 bounded joint GMM，
-以模型共變異數加權。它不從 pooled product sum 估權重，不搜尋其他起點，也不選態數。
+以模型共變異數加權。工具把幾何 seed 的三個態分配到固定的 curve rows，共評估六種排列。
+各排列先固定 curve parameters 於 init 擬合 nuisance，再以共同初始權重下的最低 objective
+選出 joint fit 起點。Nuisance-only fit 達到 evaluation budget 時保留最後的可行解作評分。
+工具不搜尋其他 curve 起點，不從 pooled product sum 估權重，也不選態數。
 `CycleFit` 包含曲線參數與 Wald errors、`CycleNuisances`、聯合共變異數、自由逐點 drive
 擬合的第一讀布居與 errors，以及單點內、共用、曲線三個 J 與 df。
 單點內與曲線檢查附漸近 chi-square p。共用檢查在邊界的 chi-square 參考分布失準，
@@ -105,8 +108,8 @@ g/e 曲線依序是 `(1-c)/2`、`(1+c)/2`，第三條是 `exp(-x/tf)`。
 `t2` 是包含 T1 transverse contribution 的總衰減時間，不是 pure-dephasing time。
 Pulse error 或更複雜的第三態動力學可能造成 curve misfit，工具不自動換模型。
 
-目前單起點 `fit_cycle` 在這組 complementary T2 curves 的離線資料會落入錯誤局部極小值。
-即使 exact moments 也會失敗，不能把這兩個 constructors 的存在當成 T2 recovery 已驗收。
+離線 exact-moment 與逐 shot 模擬已驗證這兩組 T2 curves 的 recovery。
+六種 seed 排列只處理態標籤，不排除其他局部極小值或頻率 alias。
 應檢視 curve check 與擬合結果，不能只讀 Wald error。
 
 ## Readout QND 指標

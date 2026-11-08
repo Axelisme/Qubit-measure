@@ -1,12 +1,18 @@
-"""Fixed-weight bounded GMM kernels and moment-derived single starts."""
+"""Fixed-weight bounded GMM kernels and moment-derived state assignments."""
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from itertools import permutations
 
 import numpy as np
 from scipy.optimize import OptimizeResult, least_squares
 
-from ._cycle_coordinates import joint_mean_jacobian, joint_table, nuisance_bounds
+from ._cycle_coordinates import (
+    endpoints_of,
+    joint_mean_jacobian,
+    joint_table,
+    nuisance_bounds,
+)
 from ._cycle_emission import simplex, simplex_coordinates, simplex_gradient
 from ._cycle_engine import covariance, mean_jacobian
 
@@ -77,8 +83,21 @@ def starting_nuisance(means: np.ndarray) -> np.ndarray:
 def solve_joint(
     model, axis: np.ndarray, means: np.ndarray, counts: np.ndarray, q: np.ndarray
 ) -> JointSolution:
+    # Use one common metric so assignment scores are directly comparable.
+    # Curves remain at caller init while the six nuisance seeds are fitted.
     weights = model_weights(*joint_table(model, axis, q), counts)
-    q = _joint_stage(model, axis, means, weights, q, nuisance_only=True)
+    candidates = [
+        _joint_stage(
+            model, axis, means, weights, _assigned_seed(q, order), nuisance_only=True
+        )
+        for order in permutations(range(3))
+    ]
+    q = min(
+        candidates,
+        key=lambda seed: np.sum(
+            whiten(weights, means - joint_mean_jacobian(model, axis, seed)[0]) ** 2
+        ),
+    )
     for _ in range(2):
         weights = model_weights(*joint_table(model, axis, q), counts)
         q = _joint_stage(model, axis, means, weights, q)
@@ -87,6 +106,25 @@ def solve_joint(
     cov = np.linalg.pinv(weighted.T @ weighted, rcond=1e-12, hermitian=True)
     residual = whiten(weights, means - predicted)
     return JointSolution(q, cov, weights, float(np.sum(residual**2)))
+
+
+def _assigned_seed(q: np.ndarray, order: tuple[int, ...]) -> np.ndarray:
+    """Move geometric states together, while leaving the model's curve rows fixed."""
+    n = len(q) - 26
+    v = q[n:]
+    indices = np.array(order)
+    endpoints = endpoints_of(v)[indices][:, :, indices]
+    thermal = simplex(*v[19:21])[indices]
+    landing = simplex(*v[24:26])[indices]
+    return np.r_[
+        q[:n],
+        np.array([simplex_coordinates(p) for p in endpoints.reshape(6, 3)]).ravel(),
+        v[12:18].reshape(3, 2)[indices].ravel(),
+        v[18],
+        simplex_coordinates(thermal),
+        v[21:24][indices],
+        simplex_coordinates(landing),
+    ]
 
 
 def _joint_stage(model, axis, means, weights, q, *, nuisance_only=False):
@@ -116,7 +154,9 @@ def _joint_stage(model, axis, means, weights, q, *, nuisance_only=False):
     result = bounded_least_squares(
         residual, q[fixed:], derivative, (lo[fixed:], hi[fixed:]), 200
     )
-    if not result.success:
+    # Assignment scoring needs a feasible seed, not a converged nuisance fit.
+    # Keep its last iterate at the budget cap; joint stages must still converge.
+    if not result.success and not nuisance_only:
         raise RuntimeError(f"joint cycle fit did not converge: {result.message}")
     return np.r_[q[:fixed], result.x]
 
