@@ -67,13 +67,16 @@ def test_exact_two_state_moments_recover_reference_information() -> None:
 
     result = readout_metric(saved_moments(features))
 
+    # Asymptotic SD of the two-state estimator for this stream at 10⁶ blocks,
+    # from the research two-state fit; an unseen third state must not inflate
+    # the error or bias the metric beyond it.
+    two_state_sd = 0.0010496
     # rdr_metric.rdr(3, .75), independent read-drive-read reference.
-    np.testing.assert_allclose(result.metric, [1.4764556962025317], rtol=0.01)
+    assert abs(result.metric[0] - 1.4764556962025317) < two_state_sd
+    assert 0.5 * two_state_sd < result.standard_error[0] < 2 * two_state_sd
     np.testing.assert_allclose(result.separation, [3], rtol=0.01)
+    np.testing.assert_allclose(result.retention, [[0.75, 0.75]], atol=0.005)
     assert result.third_population[0] < 0.01
-    # A zero-population third state leaves individual λ unidentifiable.
-    assert np.isfinite(result.standard_error[0])
-    assert result.standard_error[0] >= 0
 
 
 @pytest.mark.parametrize("separation", [1.0, 3.0])
@@ -244,7 +247,9 @@ def test_processor_output_requires_one_row_per_setting(output: np.ndarray) -> No
         ReadoutSums.from_processor(np.arange(2.0), output)
 
 
-# Reference outputs from the previous term-by-term contiguous covariance.
+# Reference outputs of the one-step estimator. Cases 2-6 were recorded with the
+# previous term-by-term contiguous covariance. Case 1 (no third state) was
+# recorded after the start began an unobserved third mode at λ 0.9.
 @pytest.mark.parametrize(
     "centres, retention, landing, expected",
     [
@@ -253,12 +258,12 @@ def test_processor_output_requires_one_row_per_setting(output: np.ndarray) -> No
             [0.75, 0.75, 0.9],
             [0.5, 0.5, 0.0],
             [
-                1.470900567493979,
-                0.313813611390487,
-                3.000995992229756,
-                0.7817872030788845,
-                0.7152686336969619,
-                0.0051972993429626095,
+                1.4763772317804855,
+                0.0009352910110219197,
+                2.99979842503713,
+                0.750014551469412,
+                0.7500183638087144,
+                0.004518775269549567,
             ],
         ),
         (

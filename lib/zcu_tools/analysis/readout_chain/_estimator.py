@@ -51,16 +51,24 @@ def projected_cumulants(features: FloatArray, retention: float) -> tuple[float, 
     return second, third
 
 
-def lag_retention(features: FloatArray, lower: float, upper: float) -> float:
-    """Closed-form lag-shift least-squares retention seed, clipped to start bounds."""
+def lag_retention(
+    features: FloatArray, lower: float, upper: float, unobserved: float
+) -> float:
+    """Closed-form lag-shift least-squares retention seed, clipped to start bounds.
+
+    unobserved is the seed when lags 1..14 carry no covariance at all.
+    """
     covariance = features[2:17] - features[0] ** 2
-    denominator = max(float(covariance[:-1] @ covariance[:-1]), 1e-300)
-    return float(np.clip(covariance[:-1] @ covariance[1:] / denominator, lower, upper))
+    denominator = float(covariance[:-1] @ covariance[:-1])
+    if not denominator > 0:
+        return unobserved
+    ratio = covariance[:-1] @ covariance[1:] / max(denominator, 1e-300)
+    return float(np.clip(ratio, lower, upper))
 
 
 def main_axis_start(features: FloatArray) -> FloatArray:
     """Scalar centre, distance, variance, retention and population from cumulants."""
-    retention = lag_retention(features, 0.02, 0.98)
+    retention = lag_retention(features, 0.02, 0.98, unobserved=0.02)
     second, third = projected_cumulants(features, retention)
     second = max(second, 1e-9)
     fraction_product = 1 / (third**2 / second**3 + 4)
@@ -91,7 +99,8 @@ def closed_form_start(features: FloatArray) -> FloatArray:
         projected_moments(features, main)
     )
     projected = projected_moments(features, orthogonal)
-    retention_f = lag_retention(projected, 0.05, 0.99)
+    # An orthogonal mode without lag covariance starts at the prior's λ 0.9.
+    retention_f = lag_retention(projected, 0.05, 0.99, unobserved=0.9)
     amplitude, skew = projected_cumulants(projected, retention_f)
     if amplitude > 1e-9 and abs(skew) > 1e-12:
         fraction_product = 1 / (skew**2 / amplitude**3 + 4)
