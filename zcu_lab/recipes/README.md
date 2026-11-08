@@ -2,7 +2,7 @@
 
 **讀者：** lab-author、agent。查找 recipe 宣告、操作順序與作者契約。
 
-**Last updated:** 2026-11-09，新增三個 readout-chain ro_optimize recipes
+**Last updated:** 2026-11-09，新增 twotone_chain 與三個 readout-chain ro_optimize recipes
 
 Recipe 是操作 GUI tab 的 async 函式。Core 擁有 cfg、量測與分析計算，Adapter 接上表單、RunRecord 與分析來源。
 Recipe 選來源、設參數，再決定 Run、Analyze 與 writeback 問答的順序。
@@ -177,6 +177,7 @@ Recipe 可以串多個 adapter，宣告不另設單一 adapter mapping。
 | `ro_optimize_chain_power` | `twotone/ro_optimize/chain_power` | 可省略 `gain_start`／`gain_stop`（a.u.）、`points`、`reps`、`rounds`。每個 shot 是 32 次連續讀出，無 reset、qubit pulse 或 relax delay。分析逐點計算 read-drive-read information，回報最大者的 `gain`、`metric`、`metric_err`、d/sigma、λ、第三態布居與無法計算的 `failures`。完整 Run、Analyze、Save，不提出 writeback。 |
 | `ro_optimize_chain_freq` | `twotone/ro_optimize/chain_freq` | 同上，掃描端點為 `freq_start_mhz`／`freq_stop_mhz`（MHz），回報 `freq_mhz`。 |
 | `ro_optimize_chain_length` | `twotone/ro_optimize/chain_length` | 同上，掃描端點為 ADC window 的 `length_start_us`／`length_stop_us`（us），pulse 固定為最長 window 加 0.11 us，回報 `length_us`。 |
+| `twotone_chain` | `twotone/chain` | 必填 drive 的 `center_mhz`、`span_mhz`、`points`。每點 48 次無 reset 的（驅動、讀出），`reps` 是每輪快掃次數。分析以 `twotone/freq` 的峰擬合擬合離背景的 sigma 曲線，`expected_center_mhz` 選峰。回報中心、近似寬度與 5% 誤報門檻，完整 Run、Analyze、Save，不提出 writeback。 |
 | `twotone_flux_dep` | `twotone/flux_dep` | 必填 drive 的 `center_mhz`、`span_mhz`、`freq_points` 及 native flux device、unit、端點、點數。互動 picker 完成後詢問寫回 qubit flux 校準。 |
 
 有 writeback proposal 的流程先 Run、Analyze，再依各 recipe 的條件詢問寫回，只接受回答選定的候選，最後 Save。

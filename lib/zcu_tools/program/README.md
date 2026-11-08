@@ -150,14 +150,10 @@ Both give NaN means without divide warnings.
 `v2.chain_sweep_sums(prog, read)` selects a tagged or untagged `PulseReadout`
 inside one fixed body `repeat` of at least 16 reads. After building, call
 `prog.set_reads_per_shot(n)` with the repeat count before constructing the
-processor; the selected ADC must have no other triggers. Each shot contributes
-11 numbers: the IQ means, second moments, symmetric lag-1 products, and the sum
-of symmetric lag-2–15 products, each lag averaged over its own `n-k` pairs.
-The processor returns `(points, 12, 12)` sums of `z zᵀ`, with `z = (1, 11 numbers)`:
-`[0,0]` counts dwells, `[0,1:]` holds the 11 sums, and `[1:,1:]` holds their
-products. `acquire_summed` adds these matrices across rounds. Missing or ambiguous
-labels, unsupported chain structure, fewer than 16 reads, and declared or incoming
-read-count mismatches raise `ValueError`; construction does not change the declaration.
+processor; the selected ADC must have no other triggers. The processor reduces
+each dwell to running moment sums for readout-chain analysis; `acquire_summed`
+adds them across rounds. Feature definitions, array layout and validation are in
+the [`chain_sweep_sums` docstring](v2/chain_sweep.py).
 
 Build first, then resolve labels and call
 `sched.run_acquire_summed(program, soc, processor=..., rounds=...,
