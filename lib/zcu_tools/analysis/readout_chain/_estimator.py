@@ -15,6 +15,10 @@ from ._model import (
 )
 
 
+class UnfittableMoments(ValueError):
+    """The saved moments of one setting cannot be fitted by the estimator."""
+
+
 def second_moments(features: FloatArray) -> FloatArray:
     """Same-read matrix followed by the fifteen lagged second-moment matrices."""
     same = np.array([[features[2], features[3]], [features[3], features[4]]])
@@ -93,7 +97,7 @@ def closed_form_start(features: FloatArray) -> FloatArray:
     signal = np.sum(second[1:4] - np.outer(mean, mean), axis=0)
     eigenvalues, axes = np.linalg.eigh((signal + signal.T) / 2)
     if eigenvalues[-1] <= 0:
-        raise ValueError("readout moments have no identifiable main-axis signal")
+        raise UnfittableMoments("readout moments have no identifiable main-axis signal")
     main, orthogonal = axes[:, 1], axes[:, 0]
     centre, distance, variance, retention, population = main_axis_start(
         projected_moments(features, main)
@@ -264,7 +268,7 @@ def fitted_pair_result(coordinates: FloatArray, covariance: FloatArray) -> Float
     """Metric, standard error, separation, two retentions and least population."""
     theta = physical_coordinates(coordinates)
     if not np.isfinite(theta).all() or theta[6] <= 0:
-        raise ValueError("non-finite one-step readout fit")
+        raise UnfittableMoments("non-finite one-step readout fit")
     population = stationary_population(theta)
     order = np.argsort(-population, kind="stable")
     pair = order[:2]

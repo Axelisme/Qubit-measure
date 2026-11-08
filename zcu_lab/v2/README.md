@@ -2,7 +2,7 @@
 
 **讀者：** lab-author、agent。查找實驗的檔案分工、作者契約與各家族入口。
 
-**Last updated:** 2026-11-09，移除單 qubit heralding 實驗
+**Last updated:** 2026-11-09，列出 readout-chain ro_optimize 的共用 helper
 
 先從 [tutorial](../tutorial/README.md) 新增實驗，再按下列入口查契約與操作。
 實驗定義改動的驗收方式與命令範例見 [離線驗收](../README.md#實驗定義的離線驗收)。
@@ -58,6 +58,8 @@ Two-qubit chevron／constructive phase 各自在 `run()` 寫出序列，
 共用型別在 [\_rabi_scan.py](two_qubit/_rabi_scan.py)，數值擬合在
 [\_rabi_analysis.py](two_qubit/_rabi_analysis.py)。兩版各自在 `analyze()` 畫自己的圖，
 [\_sums.py](two_qubit/_sums.py) 只負責分類計數的數值換算。
+Readout-chain 的 chain_power／chain_freq／chain_length 各自在 `run()` 寫出掃描與 program，
+共用的讀出 block、保存映射、metric 圖與分析在 [\_chain_common.py](twotone/ro_optimize/_chain_common.py)。
 
 `v2` 延續 program/v2 的版本脈絡，不表示 GUI framework 的第二版。通用 runtime、量化、SNR 與 tracker 工具留在 `zcu_tools.experiment.v2`。Core 不依賴 GUI，import-linter C15 檢查 core 到 GUI framework 的直接與間接依賴。
 

@@ -9,7 +9,7 @@ from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import Adapter, Analysis, AnalyzeRequest
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2.twotone.ro_optimize.chain_common import ChainAnalysis
+from zcu_lab.v2.twotone.ro_optimize._chain_common import ChainAnalysis
 from zcu_lab.v2.twotone.ro_optimize.chain_freq.core import ChainFreqCfg, ChainFreqExp
 from zcu_lab.v2.twotone.ro_optimize.chain_freq.form import make_form
 

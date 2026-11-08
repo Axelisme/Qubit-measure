@@ -8,13 +8,14 @@ from zcu_tools.mcp.measure.recipe_api import (
     KEEP,
     Keep,
     RecipeInputs,
-    RecipeReport,
     RecipeSession,
     recipe,
     report_number,
 )
 
-from zcu_lab.v2.twotone.ro_optimize.chain_common import ChainAnalysis, SettingFailure
+from zcu_lab.v2.twotone.ro_optimize._chain_common import ChainAnalysis
+
+from .ro_optimize_chain_helpers import ChainSweepReport, chain_report_fields
 
 
 class RoOptimizeChainPowerInputs(RecipeInputs):
@@ -46,29 +47,12 @@ class RoOptimizeChainPowerInputs(RecipeInputs):
     )
 
 
-class RoOptimizeChainPowerReport(RecipeReport):
+class RoOptimizeChainPowerReport(ChainSweepReport):
     """Gain with the largest readout-chain metric; cancellation returns no report."""
 
     gain: float | None = Field(
-        description="Gain with the largest metric in a.u.; null if analysis gave no result."
-    )
-    metric: float | None = Field(
-        description="Read-drive-read information at that gain; null if unavailable."
-    )
-    metric_err: float | None = Field(
-        description="One-sigma error of that metric; null if unavailable."
-    )
-    separation: float | None = Field(
-        description="d/sigma at that gain; null if unavailable."
-    )
-    retention: list[float | None] = Field(
-        description="λ of its two most populated states; empty if unavailable."
-    )
-    third_population: float | None = Field(
-        description="Third-state population at that gain; null if unavailable."
-    )
-    failures: list[SettingFailure] = Field(
-        description="Gains without a metric, with the reason."
+        default=None,
+        description="Gain with the largest metric in a.u.; null if analysis gave no result.",
     )
 
 
@@ -110,25 +94,10 @@ async def ro_optimize_chain_power(
     try:
         analysis = await tab.analyze("primary", result=ChainAnalysis)
         if analysis.result is None:
-            return RoOptimizeChainPowerReport(
-                gain=None,
-                metric=None,
-                metric_err=None,
-                separation=None,
-                retention=[],
-                third_population=None,
-                failures=[],
-                analysis_failure=analysis.reason,
-            )
-        best = analysis.result
+            return RoOptimizeChainPowerReport(analysis_failure=analysis.reason)
         return RoOptimizeChainPowerReport(
-            gain=report_number(best.best_setting),
-            metric=report_number(best.metric),
-            metric_err=report_number(best.metric_err),
-            separation=report_number(best.separation),
-            retention=[report_number(value) for value in best.retention],
-            third_population=report_number(best.third_population),
-            failures=list(best.failures),
+            gain=report_number(analysis.result.best.setting),
+            **chain_report_fields(analysis.result),
         )
     finally:
         tab.save()

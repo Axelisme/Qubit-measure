@@ -16,6 +16,14 @@ Layout = tuple[IntArray, IntArray, IntArray]
 Model = tuple[FloatArray, FloatArray, FloatArray, FloatArray]
 OverlapLayout = tuple[IntArray, IntArray, IntArray]
 
+# Number of saved block moments, and their column blocks in saved order.
+MOMENT_COUNT = 113
+MEANS = slice(0, 2)  # I, Q
+SAME_READ = slice(2, 5)  # I², IQ, Q²
+LAG_PAIRS = slice(5, 65)  # lag 1..15, each II, IQ, QI, QQ
+EARLY_TRIPLES = slice(65, 89)  # lag 1..4, each (I², IQ, Q²)_t × (I, Q)_{t+k}
+LATE_TRIPLES = slice(89, 113)  # lag 1..4, each (I, Q)_t × (I², IQ, Q²)_{t+k}
+
 
 def moment_layout() -> Layout:
     """Times, IQ components and degrees in the saved 113-column order."""

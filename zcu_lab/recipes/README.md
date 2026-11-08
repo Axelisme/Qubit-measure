@@ -27,6 +27,7 @@ Import 不開 GUI、不註冊 adapter，也不執行量測。新增宣告後須�
 掃描端點、flux 範圍與裝置單位檢查直接寫在 recipe 主體，不另設選源 helper。
 數字回報使用 lib 的 `report_number`，不改單位或精度。
 `mux_helpers.py` 只共用 tone 範圍輸入與報告欄位，不組裝 Form edits。
+`ro_optimize_chain_helpers.py` 共用三個 readout-chain ro_optimize recipe 的報告欄位，並把分析的最佳 setting 與 failures 複製成報告欄位。
 `mux_flux_helpers.py` 共用四個 flux recipe 的輸入、報告與逐 Q 分析 updates。
 Updates helper 只把完整 tones 的原始位置與 Q 名對應到分析參數，不改量測設定或選來源。
 每個 Q 都明送 `flux_half`／`flux_int`，未指定的線送 null，讓 owner 使用該 Q 的 Run capture。
@@ -176,7 +177,7 @@ Recipe 可以串多個 adapter，宣告不另設單一 adapter mapping。
 | `raman_gf` | `twotone/raman_gf` | `carrier_mhz` 由操作者提供，`waveform_asset` 指定已建立的 arbitrary envelope。`scan_mode` 沿用 frequency、area、frequency_area；detuning 使用 two-photon MHz，正值使單 carrier 增加一半 detuning。分析只用 Run 保存的 centroid3 readout，完整 Run、Analyze、Save，不提出 writeback。 |
 | `ro_optimize_chain_power` | `twotone/ro_optimize/chain_power` | 可省略 `gain_start`／`gain_stop`（a.u.）、`points`、`reps`、`rounds`。每個 shot 是 32 次連續讀出，無 reset、qubit pulse 或 relax delay。分析逐點計算 read-drive-read information，回報最大者的 `gain`、`metric`、`metric_err`、d/sigma、λ、第三態布居與無法計算的 `failures`。完整 Run、Analyze、Save，不提出 writeback。 |
 | `ro_optimize_chain_freq` | `twotone/ro_optimize/chain_freq` | 同上，掃描端點為 `freq_start_mhz`／`freq_stop_mhz`（MHz），回報 `freq_mhz`。 |
-| `ro_optimize_chain_length` | `twotone/ro_optimize/chain_length` | 同上，掃描端點為 ADC window 的 `length_start_us`／`length_stop_us`（us），pulse 固定為最長 window 加 0.11 us，回報 `length_us`。 |
+| `ro_optimize_chain_length` | `twotone/ro_optimize/chain_length` | 同上，掃描端點為 ADC window 的 `length_start_us`／`length_stop_us`（us），每個 window 的 pulse 為該 window 加 0.11 us，回報 `length_us`。 |
 | `twotone_chain` | `twotone/chain` | 必填 drive 的 `center_mhz`、`span_mhz`、`points`。每點 48 次無 reset 的（驅動、讀出），`reps` 是每輪快掃次數。分析以 `twotone/freq` 的峰擬合擬合離背景的 sigma 曲線，`expected_center_mhz` 選峰。回報中心、近似寬度與 5% 誤報門檻，完整 Run、Analyze、Save，不提出 writeback。 |
 | `twotone_flux_dep` | `twotone/flux_dep` | 必填 drive 的 `center_mhz`、`span_mhz`、`freq_points` 及 native flux device、unit、端點、點數。互動 picker 完成後詢問寫回 qubit flux 校準。 |
 

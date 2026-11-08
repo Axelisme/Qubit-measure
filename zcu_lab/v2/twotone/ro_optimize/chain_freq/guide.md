@@ -42,12 +42,13 @@ Analysis recomputes the metric of each frequency from the saved sums. It has no 
 The `metric` figure shows the metric with error bars and the best frequency as a red dashed line. Its lower panel shows d/sigma of each frequency.
 The summary reports:
 
-- `best_setting`: the frequency with the largest metric, in MHz.
-- `metric` and `metric_err`: its metric and one-sigma error.
-- `separation`: its d/sigma.
-- `retention`: λ of its two most populated states, most populated first.
-- `third_population`: the population of the third fitted state, a leakage diagnostic.
-- `failures`: each frequency whose metric could not be computed, with the reason, for example no identifiable readout signal. These frequencies are left out of both panels. The figure title counts them.
+- `best`: the frequency with the largest metric.
+  - `setting`: that frequency in MHz.
+  - `metric` and `standard_error`: its metric and one-sigma error.
+  - `separation`: its d/sigma.
+  - `retention`: λ of its two most populated states, most populated first.
+  - `third_population`: the population of the third fitted state, a leakage diagnostic.
+- `failures`: each frequency that could not be fitted, with its `setting` in MHz and the `reason`, for example no identifiable readout signal or a singular matrix. These frequencies are left out of both panels. The figure title counts them.
 
 If no frequency has a metric, the analysis fails and lists all reasons.
 

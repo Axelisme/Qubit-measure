@@ -42,12 +42,13 @@ Analysis recomputes the metric of each gain from the saved sums. It has no optio
 The `metric` figure shows the metric with error bars and the best gain as a red dashed line. Its lower panel shows d/sigma of each gain.
 The summary reports:
 
-- `best_setting`: the gain with the largest metric, in a.u.
-- `metric` and `metric_err`: its metric and one-sigma error.
-- `separation`: its d/sigma.
-- `retention`: λ of its two most populated states, most populated first.
-- `third_population`: the population of the third fitted state, a leakage diagnostic.
-- `failures`: each gain whose metric could not be computed, with the reason, for example no identifiable readout signal. These gains are left out of both panels. The figure title counts them.
+- `best`: the gain with the largest metric.
+  - `setting`: that gain in a.u..
+  - `metric` and `standard_error`: its metric and one-sigma error.
+  - `separation`: its d/sigma.
+  - `retention`: λ of its two most populated states, most populated first.
+  - `third_population`: the population of the third fitted state, a leakage diagnostic.
+- `failures`: each gain that could not be fitted, with its `setting` in a.u. and the `reason`, for example no identifiable readout signal or a singular matrix. These gains are left out of both panels. The figure title counts them.
 
 If no gain has a metric, the analysis fails and lists all reasons.
 

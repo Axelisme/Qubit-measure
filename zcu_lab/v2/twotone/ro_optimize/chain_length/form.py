@@ -21,8 +21,8 @@ def make_form(ctx: FormContext) -> Form[ChainLengthCfg]:
             seed_metadata=pulse_readout_seed_metadata(gain=0.1),
         ),
     )
-    # Run replaces the ADC window with the sweep and the pulse length with the
-    # largest window plus 0.11 us.
+    # Run sets the ADC window from the sweep and the pulse length to that
+    # window plus 0.11 us.
     readout = replace(
         readout,
         set={

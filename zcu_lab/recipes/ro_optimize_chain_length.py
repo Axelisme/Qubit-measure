@@ -1,4 +1,4 @@
-"""Readout ADC-window sweep scored by the readout-chain metric.
+"""Readout length sweep scored by the readout-chain metric.
 
 Recipe points → expts: the window sample count maps to the GUI Readout length Expts field.
 """
@@ -8,17 +8,18 @@ from zcu_tools.mcp.measure.recipe_api import (
     KEEP,
     Keep,
     RecipeInputs,
-    RecipeReport,
     RecipeSession,
     recipe,
     report_number,
 )
 
-from zcu_lab.v2.twotone.ro_optimize.chain_common import ChainAnalysis, SettingFailure
+from zcu_lab.v2.twotone.ro_optimize._chain_common import ChainAnalysis
+
+from .ro_optimize_chain_helpers import ChainSweepReport, chain_report_fields
 
 
 class RoOptimizeChainLengthInputs(RecipeInputs):
-    """Inputs for the readout-chain ADC-window sweep; units and null policies are per field."""
+    """Inputs for the readout-chain length sweep; units and null policies are per field."""
 
     readout_ref: str | None | Keep = Field(
         KEEP,
@@ -26,11 +27,11 @@ class RoOptimizeChainLengthInputs(RecipeInputs):
     )
     length_start_us: float | None | Keep = Field(
         KEEP,
-        description="Shortest ADC window in us.",
+        description="Shortest ADC window in us; each pulse is its window plus 0.11 us.",
     )
     length_stop_us: float | None | Keep = Field(
         KEEP,
-        description="Longest ADC window in us; the pulse is this plus 0.11 us.",
+        description="Longest ADC window in us.",
     )
     points: int | None | Keep = Field(
         KEEP,
@@ -46,43 +47,27 @@ class RoOptimizeChainLengthInputs(RecipeInputs):
     )
 
 
-class RoOptimizeChainLengthReport(RecipeReport):
+class RoOptimizeChainLengthReport(ChainSweepReport):
     """ADC window with the largest readout-chain metric; cancellation returns no report."""
 
     length_us: float | None = Field(
-        description="ADC window with the largest metric in us; null if analysis gave no result."
-    )
-    metric: float | None = Field(
-        description="Read-drive-read information at that window; null if unavailable."
-    )
-    metric_err: float | None = Field(
-        description="One-sigma error of that metric; null if unavailable."
-    )
-    separation: float | None = Field(
-        description="d/sigma at that window; null if unavailable."
-    )
-    retention: list[float | None] = Field(
-        description="λ of its two most populated states; empty if unavailable."
-    )
-    third_population: float | None = Field(
-        description="Third-state population at that window; null if unavailable."
-    )
-    failures: list[SettingFailure] = Field(
-        description="Windows (us) without a metric, with the reason."
+        default=None,
+        description="ADC window with the largest metric in us; null if analysis gave no result.",
     )
 
 
 @recipe(
     "ro_optimize_chain_length",
-    description="Sweep the readout ADC window with 32-read blocks, score each window by the readout-chain metric, save sums and analysis.",
+    description="Sweep the readout ADC window, with the pulse 0.11 us longer, in 32-read blocks; score each window by the readout-chain metric, save sums and analysis.",
 )
 async def ro_optimize_chain_length(
     session: RecipeSession, inputs: RoOptimizeChainLengthInputs
 ) -> RoOptimizeChainLengthReport:
-    """Read 32 times in a row at each ADC window, with no qubit pulse.
+    """Read 32 times in a row at each readout length, with no qubit pulse.
 
     Each shot is a block of 32 consecutive reads with no reset, pulse or
-    wait; the pulse stays at the longest window plus 0.11 us. Primary
+    wait; at each ADC window the readout pulse is that window plus 0.11 us,
+    so the read duration changes with the window. Primary
     computes the read-drive-read information of each window from the saved
     sums and reports the window with the largest value, its error, d/sigma,
     λ and third-state population. No writeback is proposed or requested.
@@ -111,25 +96,10 @@ async def ro_optimize_chain_length(
     try:
         analysis = await tab.analyze("primary", result=ChainAnalysis)
         if analysis.result is None:
-            return RoOptimizeChainLengthReport(
-                length_us=None,
-                metric=None,
-                metric_err=None,
-                separation=None,
-                retention=[],
-                third_population=None,
-                failures=[],
-                analysis_failure=analysis.reason,
-            )
-        best = analysis.result
+            return RoOptimizeChainLengthReport(analysis_failure=analysis.reason)
         return RoOptimizeChainLengthReport(
-            length_us=report_number(best.best_setting),
-            metric=report_number(best.metric),
-            metric_err=report_number(best.metric_err),
-            separation=report_number(best.separation),
-            retention=[report_number(value) for value in best.retention],
-            third_population=report_number(best.third_population),
-            failures=list(best.failures),
+            length_us=report_number(analysis.result.best.setting),
+            **chain_report_fields(analysis.result),
         )
     finally:
         tab.save()

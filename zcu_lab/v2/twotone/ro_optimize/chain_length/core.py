@@ -1,7 +1,8 @@
-"""Readout ADC-window sweep scored by the readout-chain metric.
+"""Readout length sweep scored by the readout-chain metric.
 
-One shot is a block of 32 consecutive reads with no reset, qubit pulse or
-wait, so the sweep needs no qubit pulse or qubit frequency. The integration
+Each setting reads with its own ADC window and a readout pulse 0.11 us
+longer. One shot is a block of 32 consecutive reads with no reset, qubit
+pulse or wait, so the sweep needs no qubit pulse or qubit frequency. The
 window with the most read-drive-read information per read wins.
 """
 
@@ -12,7 +13,12 @@ from matplotlib.artist import Artist
 from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field
-from zcu_tools.analysis.readout_chain import ReadoutSums
+from zcu_tools.analysis.readout_chain import (
+    MOMENT_COUNT,
+    ReadoutMetric,
+    ReadoutSums,
+    readout_metric,
+)
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import Experiment, GroupedAxesSpec, VariableAxisSpec
 from zcu_tools.experiment.context import RunContext
@@ -27,15 +33,13 @@ from zcu_tools.program.v2 import (
     chain_readout_sums,
 )
 
-from zcu_lab.v2.twotone.ro_optimize.chain_common import (
+from zcu_lab.v2.twotone.ro_optimize._chain_common import (
     READS_PER_BLOCK,
     ChainAnalysis,
-    SettingMetrics,
     analyze_sums,
     draw_metric,
     emit_read_block,
     finished_sums,
-    metric_per_setting,
     readout_sums_variables,
     restore_readout_sums,
 )
@@ -61,7 +65,7 @@ class ChainLengthCfg(ConfigBase):
 
 
 class ChainLengthExp(Experiment[ReadoutSums, ChainLengthCfg]):
-    # The record is readout_chain.ReadoutSums: block counts and 113 moment sums
+    # The record is readout_chain.ReadoutSums: block counts and moment sums
     # per ADC window. Windows are us in memory and seconds on disk.
     AXES_SPEC: ClassVar[GroupedAxesSpec[ReadoutSums, ChainLengthCfg]] = GroupedAxesSpec(
         variables=readout_sums_variables(
@@ -78,13 +82,13 @@ class ChainLengthExp(Experiment[ReadoutSums, ChainLengthCfg]):
     )
 
     def run(self, cfg: ChainLengthCfg, *, context: RunContext) -> ReadoutSums:
-        """Read 32 times in a row at each ADC window and keep the moment sums.
+        """Read 32 times in a row at each readout length and keep the moment sums.
 
-        The host scans the window in us, one program per window. Each shot is
-        one block: 32 reads of cfg.readout, each read starting when the
-        previous ADC window closes. The readout pulse stays at the largest
-        window plus 0.11 us for every window. There is no reset, qubit pulse
-        or relax delay. Each window runs all its rounds before the next one;
+        The host scans the ADC window in us, one program per window. The
+        readout pulse is that window plus 0.11 us, so each window reads for its
+        own duration. Each shot is one block: 32 reads of cfg.readout, each
+        read starting when the previous read's pulse and ADC window end.
+        There is no reset, qubit pulse or relax delay. Each window runs all its rounds before the next one;
         after each round the live plot shows the metric of each finished
         window with its error bar. Return the sums of the windows that
         finished at least one round; windows are in us. A stop keeps them; a
@@ -101,19 +105,19 @@ class ChainLengthExp(Experiment[ReadoutSums, ChainLengthCfg]):
         ax.grid(True)
 
         @context.plots.on_plot_thread
-        def draw(values: SettingMetrics) -> tuple[Artist, ...]:
-            return draw_metric(ax, values)
+        def draw(result: ReadoutMetric) -> tuple[Artist, ...]:
+            return draw_metric(ax, result)
 
         def update(sums: NDArray[np.float64]) -> None:
             # Compute the metric here, on the acquisition thread, so the GUI
             # thread only draws. It takes about 10 ms per window, and
             # acquisition waits for it.
-            draw(metric_per_setting(finished_sums(lengths, sums)))
+            draw(readout_metric(finished_sums(lengths, sums)))
 
         fig.show()
-        # Per window: the block count followed by the 113 moment sums.
+        # Per window: the block count followed by the moment sums.
         block_sums = SignalBuffer(
-            (len(lengths), 114), dtype=np.float64, on_update=update
+            (len(lengths), 1 + MOMENT_COUNT), dtype=np.float64, on_update=update
         )
 
         # 2. As in ro_optimize/length, rebuild the program for each window on the
@@ -127,12 +131,13 @@ class ChainLengthExp(Experiment[ReadoutSums, ChainLengthCfg]):
                 builder = TimelineBuilder(
                     context.soccfg, reps=cfg.reps, relax_delay=0.0, reps_innermost=True
                 )
-                # Hold the pulse length fixed so only the integration window changes.
+                # The pulse covers the window plus the 0.11 us margin of
+                # ro_optimize/length, so the read duration changes with the window.
                 readout = PulseReadout(
                     "readout",
                     cfg.readout,
                     ro_length=step.value,
-                    length=float(lengths.max()) + 0.11,
+                    length=step.value + 0.11,
                 )
                 emit_read_block(builder, readout)
                 prog = builder.build()
@@ -157,9 +162,9 @@ class ChainLengthExp(Experiment[ReadoutSums, ChainLengthCfg]):
         """Score each window from the saved sums and report the best one.
 
         source.cfg may be None. Publish the "metric" figure (metric with error
-        bars and the best window marked, d/sigma below). Windows whose metric
-        fails are listed in failures. No setting with a metric raises
-        ValueError. best_setting is in us.
+        bars and the best window marked, d/sigma below). Windows that cannot
+        be fitted are listed in failures. No fitted window raises ValueError.
+        best.setting is the ADC window in us; its pulse is 0.11 us longer.
         """
         del options  # This analysis has no configurable options.
         return analyze_sums(source.result, plots, label="Readout length", unit="us")

@@ -11,7 +11,12 @@ import numpy as np
 from matplotlib.artist import Artist
 from numpy.typing import NDArray
 from pydantic import Field
-from zcu_tools.analysis.readout_chain import ReadoutSums
+from zcu_tools.analysis.readout_chain import (
+    MOMENT_COUNT,
+    ReadoutMetric,
+    ReadoutSums,
+    readout_metric,
+)
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import Experiment, GroupedAxesSpec, VariableAxisSpec
 from zcu_tools.experiment.context import RunContext
@@ -26,15 +31,13 @@ from zcu_tools.program.v2 import (
     chain_readout_sums,
 )
 
-from zcu_lab.v2.twotone.ro_optimize.chain_common import (
+from zcu_lab.v2.twotone.ro_optimize._chain_common import (
     READS_PER_BLOCK,
     ChainAnalysis,
-    SettingMetrics,
     analyze_sums,
     draw_metric,
     emit_read_block,
     finished_sums,
-    metric_per_setting,
     readout_sums_variables,
     restore_readout_sums,
 )
@@ -60,7 +63,7 @@ class ChainPowerCfg(ConfigBase):
 
 
 class ChainPowerExp(Experiment[ReadoutSums, ChainPowerCfg]):
-    # The record is readout_chain.ReadoutSums: block counts and 113 moment sums
+    # The record is readout_chain.ReadoutSums: block counts and moment sums
     # per gain. Gains are a.u. in memory and on disk.
     AXES_SPEC: ClassVar[GroupedAxesSpec[ReadoutSums, ChainPowerCfg]] = GroupedAxesSpec(
         variables=readout_sums_variables(
@@ -95,18 +98,20 @@ class ChainPowerExp(Experiment[ReadoutSums, ChainPowerCfg]):
         ax.grid(True)
 
         @context.plots.on_plot_thread
-        def draw(values: SettingMetrics) -> tuple[Artist, ...]:
-            return draw_metric(ax, values)
+        def draw(result: ReadoutMetric) -> tuple[Artist, ...]:
+            return draw_metric(ax, result)
 
         def update(sums: NDArray[np.float64]) -> None:
             # Compute the metric here, on the acquisition thread, so the GUI
             # thread only draws. It takes about 10 ms per gain, and
             # acquisition waits for it.
-            draw(metric_per_setting(finished_sums(gains, sums)))
+            draw(readout_metric(finished_sums(gains, sums)))
 
         fig.show()
-        # Per gain: the block count followed by the 113 moment sums.
-        block_sums = SignalBuffer((len(gains), 114), dtype=np.float64, on_update=update)
+        # Per gain: the block count followed by the moment sums.
+        block_sums = SignalBuffer(
+            (len(gains), 1 + MOMENT_COUNT), dtype=np.float64, on_update=update
+        )
 
         # 2. One shot is one block of 32 reads; the gain sweep is outside it.
         with Schedule(block_sums, scope=context.scope) as sched:
@@ -141,8 +146,9 @@ class ChainPowerExp(Experiment[ReadoutSums, ChainPowerCfg]):
         """Score each gain from the saved sums and report the best one.
 
         source.cfg may be None. Publish the "metric" figure (metric with error
-        bars and the best gain marked, d/sigma below). Gains whose metric
-        fails are listed in failures. No setting with a metric raises ValueError.
+        bars and the best gain marked, d/sigma below). Gains that cannot be
+        fitted are listed in failures. No fitted gain raises ValueError.
+        best.setting is in a.u.
         """
         del options  # This analysis has no configurable options.
         return analyze_sums(source.result, plots, label="Readout gain", unit="a.u.")

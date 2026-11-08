@@ -65,18 +65,18 @@ def test_exact_two_state_moments_recover_reference_information() -> None:
         np.array([0.5, 0.5]),
     )
 
-    result = readout_metric(saved_moments(features))
+    fit = readout_metric(saved_moments(features)).fits[0]
 
     # Asymptotic SD of the two-state estimator for this stream at 10⁶ blocks,
     # from the research two-state fit; an unseen third state must not inflate
     # the error or bias the metric beyond it.
     two_state_sd = 0.0010496
     # rdr_metric.rdr(3, .75), independent read-drive-read reference.
-    assert abs(result.metric[0] - 1.4764556962025317) < two_state_sd
-    assert 0.5 * two_state_sd < result.standard_error[0] < 2 * two_state_sd
-    np.testing.assert_allclose(result.separation, [3], rtol=0.01)
-    np.testing.assert_allclose(result.retention, [[0.75, 0.75]], atol=0.005)
-    assert result.third_population[0] < 0.01
+    assert abs(fit.metric - 1.4764556962025317) < two_state_sd
+    assert 0.5 * two_state_sd < fit.standard_error < 2 * two_state_sd
+    np.testing.assert_allclose(fit.separation, 3, rtol=0.01)
+    np.testing.assert_allclose(fit.retention, [0.75, 0.75], atol=0.005)
+    assert fit.third_population < 0.01
 
 
 @pytest.mark.parametrize("separation", [1.0, 3.0])
@@ -88,17 +88,15 @@ def test_exact_three_state_moments_recover_dominant_pair_and_leakage(
         centres, np.array([0.75, 0.75, 0.9]), np.array([0.49, 0.49, 0.02])
     )
 
-    result = readout_metric(saved_moments(features))
+    fit = readout_metric(saved_moments(features)).fits[0]
 
     # rdr3.rdr_pair_info on the selected two centres/retentions (K=2).
     reference = {1.0: 0.09207161125319693, 3.0: 1.4764556962025317}
-    np.testing.assert_allclose(result.metric, [reference[separation]], rtol=0.01)
-    np.testing.assert_allclose(result.separation, [separation], rtol=0.01)
-    np.testing.assert_allclose(result.retention, [[0.75, 0.75]], atol=0.005)
+    np.testing.assert_allclose(fit.metric, reference[separation], rtol=0.01)
+    np.testing.assert_allclose(fit.separation, separation, rtol=0.01)
+    np.testing.assert_allclose(fit.retention, [0.75, 0.75], atol=0.005)
     # Stationary π_f = (.02/.1)/(.49/.25 + .49/.25 + .02/.1).
-    np.testing.assert_allclose(
-        result.third_population, [0.04854368932038836], atol=0.002
-    )
+    np.testing.assert_allclose(fit.third_population, 0.04854368932038836, atol=0.002)
 
 
 def test_settings_are_ranked_by_information_not_acquisition_order() -> None:
@@ -115,13 +113,49 @@ def test_settings_are_ranked_by_information_not_acquisition_order() -> None:
 
     result = readout_metric(saved_moments(features))
 
-    assert_array_equal(result.ranking, [2, 0, 1])
-    assert np.all(result.standard_error > 0)
+    assert result.ranking == (2, 0, 1)
+    assert all(fit.standard_error > 0 for fit in result.fits.values())
 
 
-def test_unidentifiable_constant_stream_fails_with_a_signal_error() -> None:
-    with pytest.raises(ValueError, match="signal"):
-        readout_metric(saved_moments(np.zeros(113)))
+def test_setting_without_signal_fails_alone_and_is_left_out_of_the_ranking() -> None:
+    signal = exact_moments(
+        3 * np.array([[-0.5, 0], [0.5, 0], [0, 1]]),
+        np.array([0.75, 0.75, 0.9]),
+        np.array([0.49, 0.49, 0.02]),
+    )
+    features = np.array([signal, np.zeros(113), signal])
+    sums = ReadoutSums(
+        axis=np.array([5.0, 6.0, 7.0]),
+        block_count=np.full(3, 1e6),
+        feature_sums=features * 1e6,
+    )
+
+    result = readout_metric(sums)
+
+    assert list(result.fits) == [0, 2]
+    assert list(result.failures) == [1]
+    assert result.failures[1].setting == 6.0
+    assert "signal" in result.failures[1].reason
+    assert result.fits[2].setting == 7.0
+    np.testing.assert_allclose(result.fits[2].metric, 1.4764556962025317, rtol=0.01)
+    assert result.ranking == (0, 2)
+
+
+def test_no_fitted_setting_returns_failures_and_an_empty_ranking() -> None:
+    result = readout_metric(saved_moments(np.zeros(113)))
+
+    assert result.fits == {}
+    assert "signal" in result.failures[0].reason
+    assert result.ranking == ()
+
+
+def test_record_changed_after_construction_still_fails_the_contract() -> None:
+    sums = saved_moments(np.zeros((2, 113)))
+    # The frozen record's arrays stay writable after construction.
+    sums.feature_sums[1, 0] = np.nan
+
+    with pytest.raises(ValueError, match="finite"):
+        readout_metric(sums)
 
 
 @njit(cache=True)
@@ -192,9 +226,9 @@ def test_contiguous_stream_error_covers_truth_within_statistical_scatter() -> No
     estimates, errors = [], []
     for seed in (17, 29, 43, 71):
         features = stationary_block_sums(seed, blocks, 0.02) / blocks
-        result = readout_metric(saved_moments(features, blocks))
-        estimates.append(result.metric[0])
-        errors.append(result.standard_error[0])
+        fit = readout_metric(saved_moments(features, blocks)).fits[0]
+        estimates.append(fit.metric)
+        errors.append(fit.standard_error)
     z = (np.array(estimates) - 1.4764556962025317) / np.array(errors)
 
     assert np.all(np.isfinite(z))
@@ -365,16 +399,14 @@ def test_contiguous_covariance_preserves_saved_moment_inference(
         np.array(centres).reshape(-1, 2), np.array(retention), np.array(landing)
     )
 
-    result = readout_metric(saved_moments(features))
+    fit = readout_metric(saved_moments(features)).fits[0]
 
-    actual = np.concatenate(
-        (
-            result.metric,
-            result.standard_error,
-            result.separation,
-            result.retention.ravel(),
-            result.third_population,
-        )
-    )
+    actual = [
+        fit.metric,
+        fit.standard_error,
+        fit.separation,
+        *fit.retention,
+        fit.third_population,
+    ]
     # The error's finite-difference gradient amplifies covariance rounding to 1e-8.
     np.testing.assert_allclose(actual, expected, rtol=1e-7, atol=0)
