@@ -128,6 +128,7 @@ from zcu_lab.v2.twotone.ac_stark.gui import (
     RAMSEY_DEFINITION as AC_STARK_RAMSEY_DEFINITION,
 )
 from zcu_lab.v2.twotone.allxy.gui import DEFINITION as ALL_XY_DEFINITION
+from zcu_lab.v2.twotone.chain.gui import DEFINITION as CHAIN_DEFINITION
 from zcu_lab.v2.twotone.ckp.gui import DEFINITION as CKP_DEFINITION
 from zcu_lab.v2.twotone.dispersive.gui import DEFINITION as DISPERSIVE_DEFINITION
 from zcu_lab.v2.twotone.fluxdep.gui import DEFINITION as FLUX_DEP_DEFINITION
@@ -201,6 +202,7 @@ ADAPTERS: dict[str, object] = {
     "onetone/power_dep": ONE_TONE_POWER_DEP_DEFINITION,
     "onetone/flux_dep": ONE_TONE_FLUX_DEP_DEFINITION,
     "twotone/freq": FREQ_DEFINITION,
+    "twotone/chain": CHAIN_DEFINITION,
     "twotone/stirap": STIRAP_DEFINITION,
     "twotone/flux_dep": FLUX_DEP_DEFINITION,
     "twotone/power_dep": POWER_DEP_DEFINITION,

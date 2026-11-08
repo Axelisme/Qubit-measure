@@ -29,6 +29,7 @@ from .t1 import DEFINITION as T1
 from .t2echo import DEFINITION as T2ECHO
 from .t2ramsey import DEFINITION as T2RAMSEY
 from .time_rabi import DEFINITION as TIME_RABI
+from .twotone_chain import DEFINITION as TWOTONE_CHAIN
 from .twotone_flux_dep import DEFINITION as TWOTONE_FLUX_DEP
 from .twotone_spectrum import DEFINITION as TWOTONE_SPECTRUM
 
@@ -47,6 +48,7 @@ RECIPES = (
     AMPLITUDE_RABI,
     TIME_RABI,
     TWOTONE_SPECTRUM,
+    TWOTONE_CHAIN,
     MIST_FLUX_DEP,
     MUX_ONETONE,
     ONETONE_RANGE_FIND,
