@@ -90,7 +90,7 @@ class CycleCurves:
         Its sign aligns with first_read_sigma when their correlation is nonzero.
     first_read_sigma: Shape (F,), median-background-subtracted first-read IQ
         mean projected onto its raw-IQ principal axis, in point-mean standard
-        errors. Its overall sign is the arbitrary sign of that principal axis.
+        errors. The axis's larger-magnitude component is positive.
     cycle_count: Shape (F,), cycle counts used for pointwise noise scaling.
     """
 
@@ -133,6 +133,8 @@ def cycle_curves(sums: CycleSums) -> CycleCurves:
     first_axis = np.linalg.svd(
         first_centered - first_centered.mean(axis=0), full_matrices=False
     )[2][0]
+    if first_axis[np.argmax(np.abs(first_axis))] < 0:
+        first_axis = -first_axis
     first_covariance = (
         sums.product_sum[:2, :2] - first_means.T @ (counts[:, None] * first_means)
     ) / (counts.sum() - len(counts))

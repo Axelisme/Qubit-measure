@@ -125,6 +125,21 @@ def test_curves_reject_arrays_changed_after_record_construction(field: str) -> N
         cycle_curves(sums)
 
 
+@pytest.mark.parametrize("direction", [[-2.0, 1.0], [1.0, -2.0]])
+def test_first_read_axis_has_positive_dominant_component(
+    direction: list[float],
+) -> None:
+    means = np.zeros((5, 65))
+    shift = np.array([-3.0, -1.0, 0.0, 1.0, 3.0])
+    means[:, :2] = shift[:, None] * direction
+    sums = controlled_sums(means, np.full(5, 100.0), np.eye(65))
+
+    curves = cycle_curves(sums)
+
+    # The principal axis is opposite to direction: its dominant component is positive.
+    np.testing.assert_allclose(curves.first_read_sigma, -10 * np.sqrt(5) * shift)
+
+
 def test_first_read_axis_is_selected_before_noise_normalization() -> None:
     means = np.zeros((4, 65))
     means[:, :2] = [[4, 0], [-4, 0], [0, 2], [0, -2]]

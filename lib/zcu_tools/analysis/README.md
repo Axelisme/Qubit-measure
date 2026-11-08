@@ -1,6 +1,6 @@
 # `zcu_tools.analysis` 模塊重點文檔
 
-**Last updated:** 2026-11-09，cycle live curves
+**Last updated:** 2026-11-09，cycle joint fit
 
 **讀者：** framework-dev。分析核心、純數值工具與前端 adapter 的分工速查。
 
@@ -72,9 +72,28 @@ record：保留逐點 cycle count 與 65 個 feature sums，只把 65×65 produc
 `cycle_curves(sums)` 回傳 `CycleCurves`，包含使用全部 features 的 `main_sigma`、
 使用第一個 read 原始 IQ 主軸的 `first_read_sigma`，以及逐點 `cycle_count`。
 兩條曲線扣除逐 feature 的掃描中位數背景，以各點 cycle count 換算成 mean 的 sigma，
-並對齊相關性的正負號。方向由同一批掃描點估計，有限點數的純雜訊方差可能高於 1。
+第一讀主軸的較大分量固定為正，全部 features 的投影再與第一讀曲線同向。
+方向由同一批掃描點估計，有限點數的純雜訊方差可能高於 1。
 輸入缺少 cycles、shape 不符或含非有限值時拋出 ValueError；within-point covariance
 非正定時也拋出 ValueError，不加 ridge。欄位版面與單位見 [cycle.py](readout_chain/cycle.py)。
+
+`CycleModel` 接受作者的三態曲線、參數名與 bounds。`CycleModel.identical` 把一條純量
+曲線重複三次。每個 drive row 的兩個端點都是自由的三態機率，曲線在兩端點間插值。
+`CycleNuisances` 保存端點、IQ 中心、共同等向雜訊、熱布居及讀出轉移。
+`model.moments(axis, parameters, nuisances)` 回傳 65 個數的平均、逐 cycle 共變異數與
+具名座標的平均 Jacobian，供離線模擬與診斷使用。矩陣鏈與讀出導數使用解析式，
+作者 callable 的曲線導數使用有限差分。
+
+`fit_cycle(sums, model, init)` 從必填的曲線參數起點跑一次 bounded joint GMM，
+以模型共變異數加權。它不從 pooled product sum 估權重，不搜尋其他起點，也不選態數。
+`CycleFit` 包含曲線參數與 Wald errors、`CycleNuisances`、聯合共變異數、自由逐點 drive
+擬合的第一讀布居與 errors，以及單點內、共用、曲線三個 J 與 df。
+單點內與曲線檢查附漸近 chi-square p。共用檢查在邊界的 chi-square 參考分布失準，
+因此 p 為 None，函式不跑 bootstrap。通過檢查不保證偏差小。
+低對比且每點 cycles 少時，Wald 區間可能低估不確定度；自由端點的額外 nuisance
+會使參數分布變寬或偏斜。完整欄位、座標與限制見 [fit.py](readout_chain/fit.py)。
+`oscillation_frequency` 可指定以 cycles／axis unit 表示的頻率參數名，
+此時 `CycleFit.reliability` 回報 R，否則為 None。工具不按 R 接受或拒絕結果。
 
 ## Readout QND 指標
 
