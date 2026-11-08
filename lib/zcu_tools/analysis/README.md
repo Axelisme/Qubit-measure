@@ -1,6 +1,6 @@
 # `zcu_tools.analysis` 模塊重點文檔
 
-**Last updated:** 2026-11-09
+**Last updated:** 2026-11-09，cycle live curves
 
 **讀者：** framework-dev。分析核心、純數值工具與前端 adapter 的分工速查。
 
@@ -60,12 +60,21 @@ Optimizer 不收斂時不以 initial guess 當校準。實驗 caller 只有在 b
 centers／radius／confusion matrix 有限時才提出校準。
 實驗的 acquisition、圖形與 writeback 仍由各 leaf 擁有，不由數值分析決定。
 
-## Readout chain 掃頻
+## Readout chain 掃頻與 cycle
 
 `readout_chain` 從保存的逐點 dwell count、11 個 feature sums 與 pooled product sum
 計算離背景的 sigma 曲線、5% family 門檻及複數 IQ mean。它只保留 running sums，
 不需要單發資料，也不依賴 program。白化與兩個 chi-square block 的 evidence null
 由子套件的私有數值模組共用；null table 首次呼叫時建立，之後留在記憶體重用。
+
+`CycleSums.from_augmented(axis, augmented)` 把逐點 66×66 augmented sums 轉成保存用
+record：保留逐點 cycle count 與 65 個 feature sums，只把 65×65 product sums 跨點加總。
+`cycle_curves(sums)` 回傳 `CycleCurves`，包含使用全部 features 的 `main_sigma`、
+使用第一個 read 原始 IQ 主軸的 `first_read_sigma`，以及逐點 `cycle_count`。
+兩條曲線扣除逐 feature 的掃描中位數背景，以各點 cycle count 換算成 mean 的 sigma，
+並對齊相關性的正負號。方向由同一批掃描點估計，有限點數的純雜訊方差可能高於 1。
+輸入缺少 cycles、shape 不符或含非有限值時拋出 ValueError；within-point covariance
+非正定時也拋出 ValueError，不加 ridge。欄位版面與單位見 [cycle.py](readout_chain/cycle.py)。
 
 ## Readout QND 指標
 
