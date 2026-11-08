@@ -1,0 +1,42 @@
+"""Starting values and form deviations for twotone/chain; Qt-free data only."""
+
+from zcu_tools.cfg_model import FieldMeta, Hidden, Range, Slot, Template
+from zcu_tools.gui.form_adapter import Form, FormContext
+
+from zcu_lab.v2.support.measure.ctx_helpers import source
+from zcu_lab.v2.support.measure.seed_metadata import pulse_readout_seed_metadata
+from zcu_lab.v2.twotone.chain.core import ChainCfg
+
+
+def make_form(ctx: FormContext) -> Form[ChainCfg]:
+    """Use the twotone/freq starting values; reps, rounds and relax use cfg defaults."""
+    return Form(
+        ChainCfg,
+        tree={
+            "reset": Slot("$qubit.module.reset"),
+            "init_pulse": None,
+            "qub_pulse": Template(
+                "qub_probe",
+                bindings={"qubit": "$qubit"},
+                # Run replaces probe frequency with the scan.
+                set={"freq": Hidden(0.0), "gain": 0.1, "waveform.length": 1.0},
+            ),
+            "readout": source(
+                ctx,
+                "$resonator.module.readout",
+                Template(
+                    "readout",
+                    bindings={"resonator": "$resonator"},
+                    seed_metadata=pulse_readout_seed_metadata(gain=0.1),
+                ),
+            ),
+            "freq": Range.around("$qubit.freq", "20 * $qubit.kappa", expts=301),
+        },
+    ).with_seed_metadata(
+        {
+            ("qub_pulse", "module", "gain"): FieldMeta(
+                description="未校準的起始值，來源：固定常數。qub_probe Template gain 0.1 a.u. within [-1, 1]; operator confirmation required",
+                calibration="uncalibrated",
+            )
+        }
+    )

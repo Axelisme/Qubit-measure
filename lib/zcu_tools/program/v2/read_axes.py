@@ -12,6 +12,11 @@ from zcu_tools.program.acquisition import ShotSumProcessor
 
 from .macro.readout import ReadoutEmission
 from .modules.readout import MuxReadout, PulseReadout, classification_processor
+from .readout_labels import (
+    emission_label,
+    resolve_readout_label,
+    validate_declared_reads,
+)
 from .readout_observation import ReadoutPath, observe_readout_paths
 from .timeline import TimelineProgramV2
 
@@ -148,7 +153,19 @@ def _resolve_path(
     unsupported: dict[int, str],
 ) -> list[_ResolvedAxis]:
     try:
-        return [_resolve_axis(prog, axis, labels, counts, unsupported) for axis in axes]
+        resolved = []
+        for axis in axes:
+            owner = resolve_readout_label(path.observations, axis.read)
+            matches = labels[axis.read]
+            if len(matches) != 1:
+                raise ValueError(
+                    f"label {axis.read!r}: expected one emission, actual {len(matches)}; "
+                    f"available labels: {list(labels)}"
+                )
+            resolved.append(
+                _resolve_axis(prog, axis, (owner, matches[0][1]), counts, unsupported)
+            )
+        return resolved
     except ValueError as error:
         if not path.cases:
             raise
@@ -219,7 +236,7 @@ def _collect_reads(
                 if isinstance(owner, PulseReadout)
                 else [tone.ro_ch for tone in owner.cfg.tones]
             )
-            label = owner.name if macro.label is None else macro.label
+            label = emission_label(macro)
             labels.setdefault(label, []).append(
                 (owner, {ch: counts[ch] for ch in channels})
             )
@@ -235,17 +252,12 @@ def _collect_reads(
 def _resolve_axis(
     prog: TimelineProgramV2,
     axis: Classify | IQ,
-    labels: _LabelReads,
+    read: tuple[PulseReadout | MuxReadout, dict[int, int]],
     counts: dict[int, int],
     unsupported: dict[int, str],
 ) -> tuple[int, int, Callable[[NDArray[np.float64]], NDArray[np.float64]] | None]:
     """Validate a label/tone and snapshot its optional classifier before acquisition."""
-    matches = labels.get(axis.read, [])
-    if len(matches) != 1:
-        raise ValueError(
-            f"label {axis.read!r} expected one emission, actual {len(matches)}; available labels: {list(labels)}"
-        )
-    owner, indices = matches[0]
+    owner, indices = read
     if isinstance(owner, PulseReadout):
         if axis.tone is not None:
             raise ValueError(
@@ -267,11 +279,7 @@ def _resolve_axis(
         raise ValueError(
             f"ADC {ch}: trigger inside {unsupported[ch]} is unsupported for read labels"
         )
-    declared = prog.ro_chs[ch]["trigs"]
-    if counts[ch] != declared:
-        raise ValueError(
-            f"ADC {ch}: declares {declared} reads per shot but emitted {counts[ch]} triggers"
-        )
+    validate_declared_reads(prog, ch, counts[ch])
     classify = None
     if isinstance(axis, Classify):
         classifier = axis.classifier if axis.classifier is not None else classifier
