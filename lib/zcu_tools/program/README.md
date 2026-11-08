@@ -1,6 +1,6 @@
 # `zcu_tools.program` — QICK integration
 
-**Last updated:** 2026-11-09，讀出鏈 augmented sums
+**Last updated:** 2026-11-09，讀出鏈與 cycle augmented sums
 
 **讀者：** framework-dev。QICK 整合、程式建構與 acquisition 依賴速查。
 
@@ -158,6 +158,20 @@ The processor returns `(points, 12, 12)` sums of `z zᵀ`, with `z = (1, 11 numb
 products. `acquire_summed` adds these matrices across rounds. Missing or ambiguous
 labels, unsupported chain structure, fewer than 16 reads, and declared or incoming
 read-count mismatches raise `ValueError`; construction does not change the declaration.
+
+`v2.chain_cycle_sums(prog, read)` resolves one `PulseReadout` owner by an emit
+tag or untagged module name; repeated emissions of that owner are one readout,
+not ambiguous labels. It requires 16 unrolled reads or two reads in a fixed
+Repeat of eight, no other triggers on that ADC, and an explicit
+`prog.set_reads_per_shot(16)` after build. Each rep is a thermalised
+`(D R R)^8` cycle; the caller owns the D order and thermalisation, which the
+processor does not inspect. It returns `(points, 66, 66)` sums of `z zᵀ` with
+`z = (1, 65 numbers)`: 32 ordered IQ values, nine same-read moment sums and
+24 pair-product sums grouped by intervening D count and read gap.
+`[0,0]` counts cycles and `acquire_summed` adds rounds without normalization.
+Missing or ambiguous owners, incompatible read/control structure, other triggers,
+and declared or incoming shape mismatches raise `ValueError`; the function's
+docstring gives the slot order and all six pair groups.
 
 Build first, then resolve labels and call
 `sched.run_acquire_summed(program, soc, processor=..., rounds=...,
