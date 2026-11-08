@@ -2,11 +2,6 @@
 
 from .amplitude_rabi import DEFINITION as AMPLITUDE_RABI
 from .cpmg import DEFINITION as CPMG
-from .heralding_amp_rabi import DEFINITION as HERALDING_AMP_RABI
-from .heralding_len_rabi import DEFINITION as HERALDING_LEN_RABI
-from .heralding_t1 import DEFINITION as HERALDING_T1
-from .heralding_t2echo import DEFINITION as HERALDING_T2ECHO
-from .heralding_t2ramsey import DEFINITION as HERALDING_T2RAMSEY
 from .lookback import DEFINITION as LOOKBACK
 from .mist_drive_frequency import DEFINITION as MIST_DRIVE_FREQUENCY
 from .mist_flux_dep import DEFINITION as MIST_FLUX_DEP
@@ -34,6 +29,7 @@ from .t1 import DEFINITION as T1
 from .t2echo import DEFINITION as T2ECHO
 from .t2ramsey import DEFINITION as T2RAMSEY
 from .time_rabi import DEFINITION as TIME_RABI
+from .twotone_chain import DEFINITION as TWOTONE_CHAIN
 from .twotone_flux_dep import DEFINITION as TWOTONE_FLUX_DEP
 from .twotone_spectrum import DEFINITION as TWOTONE_SPECTRUM
 
@@ -49,14 +45,10 @@ RECIPES = (
     T2ECHO,
     CPMG,
     T1,
-    HERALDING_T1,
-    HERALDING_AMP_RABI,
-    HERALDING_LEN_RABI,
-    HERALDING_T2RAMSEY,
-    HERALDING_T2ECHO,
     AMPLITUDE_RABI,
     TIME_RABI,
     TWOTONE_SPECTRUM,
+    TWOTONE_CHAIN,
     MIST_FLUX_DEP,
     MUX_ONETONE,
     ONETONE_RANGE_FIND,

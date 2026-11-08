@@ -2,7 +2,7 @@
 
 **讀者：** lab-author。查閱多個量測 adapter 共用的表單初值、分析載體與 writeback 工具。
 
-**Last updated:** 2026-11-02，Rabi 與 mux 的 Expr 初值
+**Last updated:** 2026-11-09，移除單 qubit heralding 實驗
 
 這個公開支援 package 擁有至少兩個 measure experiment adapters 共用的 implementation
 mechanics：analysis carriers、writeback helpers 與跨實驗的 context utilities。
@@ -94,7 +94,7 @@ x180 為 arb waveform 時保留原來源 Slot、形狀與 data，不複製、不
 有持久 scalar length 的 x180 才透過 Slot(copy=True).set 複製捕捉來源，以 Expr 覆寫 waveform.length=1.5*pi_len*pi_gain（µs）。
 Amp Rabi gain 的起點維持 −0.3。
 Singleshot population joint fit 的終點是 min(1.0, 4.0*pi_gain)。
-Twotone、heralding 與 mux IQ fit 的終點是 min(1.0, 1.2*pi_gain)。
+Twotone 與 mux IQ fit 的終點是 min(1.0, 1.2*pi_gain)。
 各 Form 保留 endpoint Expr 與 pi_gain 來源，缺來源時留空。
 pi_len 須為有限正數，pi_gain 須為有限數且在 (0, 1]。無效來源讓必填長度留空。
 來源 gain 若為 NaN 或 ±Inf，額外設 gain=None，避免非有限數留在 JSON input。兩個必填欄位都補齊才可提交。

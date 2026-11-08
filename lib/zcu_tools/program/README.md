@@ -1,6 +1,6 @@
 # `zcu_tools.program` — QICK integration
 
-**Last updated:** 2026-11-02，IQ 二階特徵與 summed acquisition
+**Last updated:** 2026-11-09，讀出鏈 augmented sums
 
 **讀者：** framework-dev。QICK 整合、程式建構與 acquisition 依賴速查。
 
@@ -146,6 +146,14 @@ cases; neither the processor nor its construction changes that declaration.
 count, ΣI and ΣQ to return counts and complex conditional means. Other lengths
 raise ValueError. Zero counts stay zero, and unmeasured NaN counts stay NaN.
 Both give NaN means without divide warnings.
+
+`v2.chain_sweep_sums(prog, read)` selects a tagged or untagged `PulseReadout`
+inside one fixed body `repeat` of at least 16 reads. After building, call
+`prog.set_reads_per_shot(n)` with the repeat count before constructing the
+processor; the selected ADC must have no other triggers. The processor reduces
+each dwell to running moment sums for readout-chain analysis; `acquire_summed`
+adds them across rounds. Feature definitions, array layout and validation are in
+the [`chain_sweep_sums` docstring](v2/chain_sweep.py).
 
 Build first, then resolve labels and call
 `sched.run_acquire_summed(program, soc, processor=..., rounds=...,
