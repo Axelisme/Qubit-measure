@@ -29,9 +29,8 @@ Reset uses the optional `$qubit.module.reset` slot. Init Pulse starts disabled; 
 Missing or invalid sources leave the affected fields empty and Invalid; supply them before Run.
 
 Reps starts at 100 and Rounds at 100, which is 10 000 fast sweeps in total.
-Reps must be at least 2, because each point needs two dwells before its noise is defined.
-Points × (Reps − 1) must be at least 11 so the first round can estimate the 11-feature noise covariance.
-For 2 points, use at least 7 Reps; for 11 or more points, 2 Reps meets this minimum.
+Reps must be at least 12, regardless of the number of frequency points.
+Each fast sweep dwells once at every frequency, so 12 fast sweeps per round give the first live curve enough dwells to estimate the noise.
 Each round acquires points × reps × 48 reads, so a smaller Reps gives more frequent live updates and less memory per round.
 One dwell lasts about 48 × (probe length + readout length) plus Relax delay, about 100 us with the starting values.
 
