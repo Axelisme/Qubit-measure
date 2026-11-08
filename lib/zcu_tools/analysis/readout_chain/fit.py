@@ -93,7 +93,8 @@ def fit_cycle(
     """Fit the saved cycle feature means with a shared three-state affine model.
 
     init must map every curve name to one finite, in-bounds starting value.
-    Nuisances start from closed-form moment geometry and fixed physical seeds.
+    Nuisances start from closed-form moment geometry and fixed physical seeds,
+    then fit with curve parameters held at init before the joint fit begins.
     Use bounded, single-start least squares and two model-covariance weight
     stages. Pooled measured products do not supply fit weights. The last-stage
     joint-model weights are held fixed for the three nested fits.

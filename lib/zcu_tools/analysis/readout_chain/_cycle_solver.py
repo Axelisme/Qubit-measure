@@ -77,13 +77,11 @@ def starting_nuisance(means: np.ndarray) -> np.ndarray:
 def solve_joint(
     model, axis: np.ndarray, means: np.ndarray, counts: np.ndarray, q: np.ndarray
 ) -> JointSolution:
-    lo, hi = nuisance_bounds()
-    limits = np.asarray(model.bounds)
-    lo, hi = np.r_[limits[:, 0], lo], np.r_[limits[:, 1], hi]
-    weights = np.empty((len(axis), 65, 65))
+    weights = model_weights(*joint_table(model, axis, q), counts)
+    q = _joint_stage(model, axis, means, weights, q, nuisance_only=True)
     for _ in range(2):
         weights = model_weights(*joint_table(model, axis, q), counts)
-        q = _joint_stage(model, axis, means, weights, q, (lo, hi))
+        q = _joint_stage(model, axis, means, weights, q)
     predicted, jac = joint_mean_jacobian(model, axis, q)
     weighted = whiten(weights, jac).reshape(-1, len(q))
     cov = np.linalg.pinv(weighted.T @ weighted, rcond=1e-12, hermitian=True)
@@ -91,7 +89,11 @@ def solve_joint(
     return JointSolution(q, cov, weights, float(np.sum(residual**2)))
 
 
-def _joint_stage(model, axis, means, weights, q, bounds):
+def _joint_stage(model, axis, means, weights, q, *, nuisance_only=False):
+    lo, hi = nuisance_bounds()
+    limits = np.asarray(model.bounds)
+    lo, hi = np.r_[limits[:, 0], lo], np.r_[limits[:, 1], hi]
+    fixed = len(model.parameter_names) if nuisance_only else 0
     previous = np.full_like(q, np.nan)
     cached_mean = np.empty_like(means)
     cached_jac = np.empty((len(axis), 65, len(q)))
@@ -104,15 +106,19 @@ def _joint_stage(model, axis, means, weights, q, bounds):
         return cached_mean, cached_jac
 
     def residual(v):
-        return whiten(weights, means - evaluate(v)[0]).ravel()
+        full = np.r_[q[:fixed], v]
+        return whiten(weights, means - evaluate(full)[0]).ravel()
 
     def derivative(v):
-        return -whiten(weights, evaluate(v)[1]).reshape(-1, len(v))
+        full = np.r_[q[:fixed], v]
+        return -whiten(weights, evaluate(full)[1][:, :, fixed:]).reshape(-1, len(v))
 
-    result = bounded_least_squares(residual, q, derivative, bounds, 200)
+    result = bounded_least_squares(
+        residual, q[fixed:], derivative, (lo[fixed:], hi[fixed:]), 200
+    )
     if not result.success:
         raise RuntimeError(f"joint cycle fit did not converge: {result.message}")
-    return result.x
+    return np.r_[q[:fixed], result.x]
 
 
 def bounded_least_squares(
