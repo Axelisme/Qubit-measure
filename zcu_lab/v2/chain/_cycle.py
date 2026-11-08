@@ -140,6 +140,34 @@ def first_read_iq(sums: CycleSums) -> NDArray[np.complex128]:
     return (sums.feature_sums[:, 0] + 1j * sums.feature_sums[:, 1]) / sums.cycle_count
 
 
+def g_and_third_decay_times(
+    fit: CycleFit, g_name: str, third_name: str
+) -> tuple[float, float, float, float]:
+    """Return the g and third-state decay times of a T1 or echo fit, with errors.
+
+    g_name and third_name are the curve parameters of the model's g row and
+    third row, for example "t1" and "tf". Return (g time, its Wald error,
+    third-state time, its Wald error) in the fit's units.
+    """
+    # In t1_model and t2_echo_model the third row's curve is the same family
+    # as the g row's, a free affine function of exp(-x / T). Exchanging the
+    # two rows together with their time constants fits the data exactly as
+    # well for T1, whose e row is flat, and nearly as well for echo when the
+    # third state is rarely populated. So the fit can land in either labelling
+    # and the checks cannot tell them apart. In thermal equilibrium g is the
+    # most populated state: when the third row's fitted thermal population
+    # exceeds the g row's, the rows are exchanged, and so are their times.
+    thermal = fit.nuisances.thermal
+    if thermal[2] > thermal[0]:
+        g_name, third_name = third_name, g_name
+    return (
+        fit.parameters[g_name],
+        fit.errors[g_name],
+        fit.parameters[third_name],
+        fit.errors[third_name],
+    )
+
+
 def checks_text(fit: CycleFit) -> str:
     """Return the three lack-of-fit checks as J/df, with p where fit gives one."""
     parts = []

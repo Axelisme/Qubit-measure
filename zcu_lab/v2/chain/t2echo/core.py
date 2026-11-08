@@ -41,6 +41,7 @@ from zcu_lab.v2.chain._cycle import (
     cycle_sums_variables,
     emit_cycle,
     first_read_iq,
+    g_and_third_decay_times,
     live_cycle_curves,
     plot_cycle_fit,
     restore_cycle_sums,
@@ -221,8 +222,9 @@ class ChainT2EchoExp(Experiment[CycleSums, ChainT2EchoCfg]):
         its T2 echo starts both t2 and tf. Then fit_cycle fits the saved sums
         with t2_echo_model and publishes "populations": per-delay first-read
         populations with error bars and the fitted curves. Return t2 and tf
-        with Wald errors and the three checks. The source cfg may be None.
-        Fitting failures of either fit propagate.
+        with Wald errors and the three checks; T2 is the time of the row with
+        the larger thermal population, g in thermal equilibrium. The source
+        cfg may be None. Fitting failures of either fit propagate.
         """
         del options  # This analysis has no configurable options.
         sums = source.result
@@ -240,8 +242,8 @@ class ChainT2EchoExp(Experiment[CycleSums, ChainT2EchoCfg]):
         model = t2_echo_model()
         fit = fit_cycle(sums, model, {"t2": textbook.t2e, "tf": textbook.t2e})
 
-        t2, t2_err = fit.parameters["t2"], fit.errors["t2"]
-        tf, tf_err = fit.parameters["tf"], fit.errors["tf"]
+        # 3. g is the most populated state, which tells the g row from the third.
+        t2, t2_err, tf, tf_err = g_and_third_decay_times(fit, "t2", "tf")
         plot_cycle_fit(
             plots,
             model,
