@@ -25,7 +25,7 @@ Its gain is an uncalibrated starting value; confirm it before Run.
 Readout uses the `$resonator.module.readout` slot or a fresh `readout` template, and must be a pulse readout; a mux readout module is rejected by the Form.
 The length runs from 0.03 us to 4 × the x180 length (1.0 us without x180) over 101 points. The cycle has no Reset or Init Pulse.
 Relax delay starts at 5 * `$qubit.t1` us, or 150 us when T1 is missing.
-Reps starts at 100 and Rounds at 100. Reps must be at least 2, and points × (Reps − 1) must be at least 65 so the first round can estimate the noise of the 65 numbers.
+Reps starts at 100 and Rounds at 100. Reps must be at least 66, so that even a single length gives the first round 65 cycles beyond its mean to estimate the noise of the 65 numbers.
 One cycle lasts about Relax delay + 8 × (pulse length + 2 × readout length).
 Missing or invalid sources leave the affected fields empty and Invalid; supply them before Run.
 

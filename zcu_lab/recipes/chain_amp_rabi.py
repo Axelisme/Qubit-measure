@@ -51,7 +51,7 @@ class ChainAmpRabiInputs(RecipeInputs):
     )
     reps: int | None | Keep = Field(
         KEEP,
-        description="Cycles per gain in each round, at least 2.",
+        description="Cycles per gain in each round, at least 66.",
     )
     rounds: int | None | Keep = Field(
         KEEP,

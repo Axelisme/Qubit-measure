@@ -43,7 +43,7 @@ class ChainT2RamseyInputs(RecipeInputs):
     )
     reps: int | None | Keep = Field(
         KEEP,
-        description="Cycles per delay in each round, at least 2.",
+        description="Cycles per delay in each round, at least 66.",
     )
     rounds: int | None | Keep = Field(
         KEEP,

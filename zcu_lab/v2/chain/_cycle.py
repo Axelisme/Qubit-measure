@@ -64,19 +64,6 @@ def emit_cycle(
         builder.delay_auto()
 
 
-def require_first_round_covariance(points: int, reps: int) -> None:
-    """Raise ValueError when one round cannot estimate the 65-number noise.
-
-    The live plot whitens with the within-point covariance of the 65 numbers,
-    which needs points × (reps − 1) >= 65 cycles beyond the point means.
-    """
-    if points * (reps - 1) < len(FEATURES):
-        raise ValueError(
-            "points × (reps − 1) must be at least 65 for the first round's "
-            f"noise covariance; got points={points}, reps={reps}"
-        )
-
-
 def cycle_sums_variables(axis: VariableAxisSpec) -> tuple[VariableSpec, ...]:
     """Return the grouped variables that save CycleSums along the sweep axis.
 

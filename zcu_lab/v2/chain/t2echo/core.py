@@ -10,10 +10,10 @@ of the first read.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Annotated, ClassVar, Self
+from typing import Annotated, ClassVar
 
 import numpy as np
-from pydantic import Field, model_validator
+from pydantic import Field
 from zcu_tools.analysis.readout_chain import (
     CycleCheck,
     CycleSums,
@@ -43,7 +43,6 @@ from zcu_lab.v2.chain._cycle import (
     first_read_iq,
     live_cycle_curves,
     plot_cycle_fit,
-    require_first_round_covariance,
     restore_cycle_sums,
 )
 from zcu_lab.v2.twotone.time_domain.t2echo.core import (
@@ -87,9 +86,9 @@ class ChainT2EchoCfg(ConfigBase):
         int,
         FieldMeta(
             label="Reps",
-            description="Cycles per delay in each round; require points × (reps − 1) >= 65 for the first live curve.",
+            description="Cycles per delay in each round, at least 66: then even one delay gives the first round 65 cycles beyond its mean, enough to estimate the noise of the 65 numbers for the first live curve.",
         ),
-    ] = Field(default=100, ge=2)
+    ] = Field(default=100, ge=66)
     rounds: Annotated[
         int,
         FieldMeta(
@@ -106,11 +105,6 @@ class ChainT2EchoCfg(ConfigBase):
             description="Thermalisation wait K before every cycle; set at least 5 T1 so each cycle starts in thermal equilibrium.",
         ),
     ] = 1.0
-
-    @model_validator(mode="after")
-    def _check_first_round_covariance(self) -> Self:
-        require_first_round_covariance(self.delay.expts, self.reps)
-        return self
 
 
 @dataclass(frozen=True)
