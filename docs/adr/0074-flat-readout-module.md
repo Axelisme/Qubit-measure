@@ -181,6 +181,11 @@ Host scan 跨 acquire 加總實際取得的 sums，不把 cached 結果算成新
 先前 circle、linear、centroid3 與 herald-g post-selection 的單 qubit 契約已由上述自校準取代。
 Classify 與雙 qubit heralded 實驗保留原分類契約。
 
+2026-11-09 註：單 qubit heralding 的五個實驗、對應 recipes 與 `zcu_tools.analysis.herald_transfer` 已移除。
+上兩段的自校準、C 指標、即時圖與存檔軸是歷史記錄，catalog 不再提供單 qubit heralding。
+使用者於 2026-11-09 說：「舊 heralding 我完全沒用過也沒讀過，可以直接刪掉。」
+`IQ` 六分量讀出軸、`shot_sums`、`split_sums` 與 Classify 的契約不變，雙 qubit heralded 實驗保留原分類契約。
+
 使用者於 2026-10-30 要求單一 processor：「H1 , 我認為processor就不要每個adc分開給，統一只給一個就行」。
 同日明定分類時機：「分類請不要在analyze裡做，浪費記憶體，分類請在processor裡做，將nread, 2的資料轉成M維資料」。
 對讀出軸，使用者提出：「不用堆到一個M維度裡，而是一個嵌套維度，一般iq訊號被轉成3維(1,i, q)，而k分類器轉成k維，幾次readout就幾層」。
@@ -220,6 +225,10 @@ T1、Amp Rabi、Len Rabi、Ramsey 與 Echo 沿用普通版 writeback 目標與�
 操作、保存與 writeback 目標見各 guide：[T1](../../zcu_lab/v2/heralding/t1/guide.md)、
 [Amp Rabi](../../zcu_lab/v2/heralding/amp_rabi/guide.md)、[Len Rabi](../../zcu_lab/v2/heralding/len_rabi/guide.md)、
 [Ramsey](../../zcu_lab/v2/heralding/t2ramsey/guide.md)、[Echo](../../zcu_lab/v2/heralding/t2echo/guide.md)。
+
+2026-11-09 註：`heralding/*` 實驗組已移除，上一段的成員、writeback 規則與 guide 連結是歷史記錄。
+這些 guide 已隨實驗刪除，連結不再指向現存檔案。
+上方第 4 至 6 項中只適用單 qubit heralding 的自校準與 C 指標規則，目前沒有實驗使用。
 
 依賴沿用 [[0072]] 的分層與 `.importlinter` C8、C15、C16。
 Experiment 使用 program 的取數能力，lab core 不依賴 GUI，framework 不反向載入 lab。
