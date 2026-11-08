@@ -46,7 +46,7 @@ t2 includes the transverse part of T1 relaxation.
 
 The `populations` plot shows, per delay, the first-read populations of a fit with a free operation at each delay, with Wald error bars, and the fitted model as lines.
 State labels are arbitrary; the legend gives each state's fitted thermal population, and the largest one is normally g.
-The g row and the third-state row follow the same decay family, so the fit can return them exchanged together with their times. When the third row's thermal population exceeds the g row's, the summary reports the two times exchanged, since g is the most populated state in thermal equilibrium.
+The g row and the third-state row follow the same decay family, so the fit can return them exchanged together with their times. When the third-state row has the largest thermal population, the summary reports the two times exchanged, since g is the most populated state in thermal equilibrium.
 The title gives t2, tf and the three lack-of-fit checks as J/df:
 
 - `within-point`: the free three-state model at each delay, with p.

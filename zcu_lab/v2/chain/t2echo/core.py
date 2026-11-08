@@ -222,9 +222,9 @@ class ChainT2EchoExp(Experiment[CycleSums, ChainT2EchoCfg]):
         its T2 echo starts both t2 and tf. Then fit_cycle fits the saved sums
         with t2_echo_model and publishes "populations": per-delay first-read
         populations with error bars and the fitted curves. Return t2 and tf
-        with Wald errors and the three checks; T2 is the time of the row with
-        the larger thermal population, g in thermal equilibrium. The source
-        cfg may be None. Fitting failures of either fit propagate.
+        with Wald errors and the three checks. t2 is the time constant of the
+        most populated state's row, g in thermal equilibrium. The source cfg
+        may be None. Fitting failures of either fit propagate.
         """
         del options  # This analysis has no configurable options.
         sums = source.result

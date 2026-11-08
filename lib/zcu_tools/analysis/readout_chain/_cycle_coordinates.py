@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 
 # The 26 nuisance coordinates that follow the curve parameters. A simplex is an
 # (s, f) pair with probabilities (s*f, s*(1-f), 1-s); see simplex.
-ENDPOINTS = slice(0, 12)  # (s, f) per state, then per endpoint 0/1
+ENDPOINTS = slice(0, 12)  # by state, then endpoint 0/1, then (s, f)
 CENTERS = slice(12, 18)  # (I, Q) per state
 VARIANCE = 18
 THERMAL = slice(19, 21)  # (s, f)

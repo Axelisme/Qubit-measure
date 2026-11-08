@@ -205,8 +205,8 @@ class ChainT1Exp(Experiment[CycleSums, ChainT1Cfg]):
         tf. Then fit_cycle fits the saved sums with t1_model and publishes
         "populations": per-delay first-read populations with error bars and
         the fitted curves. Return t1 and tf with Wald errors and the three
-        checks; T1 is the time of the row with the larger thermal population,
-        g in thermal equilibrium. The source cfg may be None. Fitting failures
+        checks. t1 is the time constant of the most populated state's row, g
+        in thermal equilibrium. The source cfg may be None. Fitting failures
         of either fit propagate.
         """
         del options  # This analysis has no configurable options.
