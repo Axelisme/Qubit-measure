@@ -1,0 +1,39 @@
+"""Shot-simulated T2 fits with physical longitudinal relaxation in the delay."""
+
+import numpy as np
+import pytest
+from zcu_tools.analysis.readout_chain import fit_cycle, t2_echo_model, t2_ramsey_model
+
+from ._t2_samples import sampled_t2_sums
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("factory", [t2_echo_model, t2_ramsey_model])
+@pytest.mark.parametrize("contrast,count", [(1.8, 2000), (0.7, 20000)])
+@pytest.mark.parametrize("seed", [9101, 9102])
+def test_shot_fits_resolve_t2_and_detuning_with_longitudinal_relaxation(
+    factory, contrast: float, count: int, seed: int
+) -> None:
+    model = factory()
+    truth = {"t2": 1.2, "tf": 0.65}
+    init = {"t2": 1.1, "tf": 0.7}
+    if model.oscillation_frequency:
+        truth["detuning"] = 0.8
+        init["detuning"] = 0.78
+    sums = sampled_t2_sums(
+        model, np.linspace(0.05, 3.0, 13), truth, contrast, count, seed
+    )
+
+    result = fit_cycle(sums, model, init)
+
+    # A few fixed replicates guard recovery/scale, not 95% calibration. The task
+    # evidence uses more replicates and reports every miss rather than seed-picking.
+    for name in ("t2", "detuning") if model.oscillation_frequency else ("t2",):
+        assert result.errors[name] > 0
+        assert abs(result.parameters[name] - truth[name]) < 4 * result.errors[name]
+    if model.oscillation_frequency:
+        assert result.reliability == pytest.approx(
+            1 / (2 * np.pi * np.ptp(sums.axis) * result.errors["detuning"])
+        )
+    else:
+        assert result.reliability is None

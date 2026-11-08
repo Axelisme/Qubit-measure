@@ -1,6 +1,6 @@
 # `zcu_tools.analysis` 模塊重點文檔
 
-**Last updated:** 2026-11-09，cycle joint fit
+**Last updated:** 2026-11-09，cycle joint fit 與 T2 曲線
 
 **讀者：** framework-dev。分析核心、純數值工具與前端 adapter 的分工速查。
 
@@ -94,6 +94,20 @@ record：保留逐點 cycle count 與 65 個 feature sums，只把 65×65 produc
 會使參數分布變寬或偏斜。完整欄位、座標與限制見 [fit.py](readout_chain/fit.py)。
 `oscillation_frequency` 可指定以 cycles／axis unit 表示的頻率參數名，
 此時 `CycleFit.reliability` 回報 R，否則為 None。工具不按 R 接受或拒絕結果。
+
+`t2_echo_model()` 與 `t2_ramsey_model()` 建立 ideal-pulse 的三態 `CycleModel`。
+兩者以總 free-evolution delay 為座標，擬合 `t2` 與第三態 lifetime `tf`，單位與座標相同。
+Ramsey 另擬合非負 `detuning`，單位是 cycles／axis unit，並回報 reliability。
+令 echo 的 `c = exp(-x/t2)`，Ramsey 的 `c = exp(-x/t2)*cos(2π*detuning*x)`。
+g/e 曲線依序是 `(1-c)/2`、`(1+c)/2`，第三條是 `exp(-x/tf)`。
+各列的自由端點吸收 amplitude、sign 與第三態離開後的分支。
+理想最後一個 π/2 不把 longitudinal T1 relaxation 投影到 population，因此不用額外 T1 輸入。
+`t2` 是包含 T1 transverse contribution 的總衰減時間，不是 pure-dephasing time。
+Pulse error 或更複雜的第三態動力學可能造成 curve misfit，工具不自動換模型。
+
+目前單起點 `fit_cycle` 在這組 complementary T2 curves 的離線資料會落入錯誤局部極小值。
+即使 exact moments 也會失敗，不能把這兩個 constructors 的存在當成 T2 recovery 已驗收。
+應檢視 curve check 與擬合結果，不能只讀 Wald error。
 
 ## Readout QND 指標
 
