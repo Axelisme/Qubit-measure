@@ -2,7 +2,7 @@
 
 **讀者：** lab-author、framework-dev、agent。撰寫 Measure adapter、Form、recipe、operator guide 與校準 writeback。
 
-**Last updated:** 2026-11-02
+**Last updated:** 2026-11-09
 
 使用者入口見 [tutorial](../tutorial/README.md)。
 
@@ -552,7 +552,7 @@ Reps、rounds、shots、點數與其他特殊時序不因等待政策改動。
 不依 x180／pi_len，也不新增 probe_length alias。
 
 Amplitude Rabi 的 gain 起點維持 −0.3。終點為 `min(1.0, multiplier * gain)`，gain 取固定 capture 的 x180.gain。
-Singleshot population 的 multiplier 為 4.0；twotone、heralding 與 mux IQ 為 1.2。終點以 Expr 保存，缺來源或求值失敗時留空。
+Singleshot population 的 multiplier 為 4.0；twotone 與 mux IQ 為 1.2。終點以 Expr 保存，缺來源或求值失敗時留空。
 有 x180 且 waveform 有持久 scalar length 時，複製捕捉的 x180，
 只覆寫 waveform.length 為 1.5*pi_len*pi_gain µs。
 pi_len 為 x180 waveform.length，須為非 bool 的有限正數。
