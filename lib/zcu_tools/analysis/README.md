@@ -64,8 +64,8 @@ centers／radius／confusion matrix 有限時才提出校準。
 
 `readout_chain` 從保存的逐點 dwell count、11 個 feature sums 與 pooled product sum
 計算離背景的 sigma 曲線、5% family 門檻及複數 IQ mean。它只保留 running sums，
-不需要單發資料，也不依賴 program。白化與兩個 chi-square block 的 evidence null
-由子套件的私有數值模組共用；null table 首次呼叫時建立，之後留在記憶體重用。
+不需要單發資料，也不依賴 program。輸入、輸出與失敗條件見
+[`SweepSums` 與 `sweep_curve` 的 docstring](readout_chain/sweep.py)。
 
 ## Readout QND 指標
 

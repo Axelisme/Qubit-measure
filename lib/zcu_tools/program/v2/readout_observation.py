@@ -41,7 +41,7 @@ class ReadoutObservation:
 
     source: ReadoutEmission | Trigger
     control_scope: str | None
-    repeat_counts: tuple[int | str, ...] = ()
+    repeat_counts: tuple[int | str, ...]
 
 
 def observe_readouts(prog: TimelineProgramV2) -> Iterator[ReadoutObservation]:

@@ -13,7 +13,7 @@ from typing import Annotated, ClassVar
 
 import numpy as np
 from matplotlib.ticker import MaxNLocator
-from pydantic import Field
+from pydantic import Field, model_validator
 from zcu_tools.analysis.fitting import PeakCandidate
 from zcu_tools.analysis.readout_chain import SweepSums, sweep_curve
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
@@ -45,9 +45,7 @@ from zcu_lab.v2.twotone.freq.analysis import FreqAnalyzeOptions, fit_spectrum
 
 # (drive, readout) cycles per dwell, fixed by the experiment design: 16 to 96
 # give the same line heights at fixed total reads, and 48 keeps the tail that
-# slow states leave along the scan direction near one point. Saved files do not
-# store this value; restore_sums sets it from here, so a new value needs a new
-# AXES_SPEC tag.
+# slow states leave along the scan direction near one point.
 READS_PER_DWELL = 48
 
 
@@ -80,7 +78,7 @@ class ChainCfg(ConfigBase):
         int,
         FieldMeta(
             label="Reps",
-            description="Fast sweeps per round. Each fast sweep dwells once at every frequency; the curve needs at least 2 dwells per point.",
+            description="Fast sweeps per round. Each fast sweep dwells once at every frequency; require reps >= 2 and points × (reps − 1) >= 11 for the first live curve.",
         ),
     ] = Field(default=100, ge=2)
     rounds: Annotated[
@@ -99,6 +97,15 @@ class ChainCfg(ConfigBase):
             description="Wait after each dwell's chain, before the next dwell.",
         ),
     ] = 1.0
+
+    @model_validator(mode="after")
+    def _validate_covariance_sample_size(self) -> ChainCfg:
+        if self.freq.expts * (self.reps - 1) < 11:
+            raise ValueError(
+                "points × (reps − 1) must be at least 11 for the first round's "
+                f"noise covariance; got points={self.freq.expts}, reps={self.reps}"
+            )
+        return self
 
 
 @dataclass(frozen=True)
@@ -121,14 +128,13 @@ class ChainAnalysis:
 
 
 def restore_sums(data: GroupedLoadData[ChainCfg]) -> SweepSums:
-    """Rebuild the saved running sums; reads per dwell is READS_PER_DWELL."""
+    """Rebuild the saved running sums from the grouped record."""
     dwell_count = data.variable("dwell_count")
     return SweepSums(
         axis=dwell_count.axes[0],
         dwell_count=dwell_count.z,
         feature_sums=data.variable("feature_sums").z,
         product_sum=data.variable("product_sum").z,
-        reads_per_dwell=READS_PER_DWELL,
     )
 
 
@@ -205,7 +211,7 @@ class ChainExp(Experiment[SweepSums, ChainCfg]):
 
         @context.plots.on_plot_thread
         def update(augmented_sums):
-            sums = SweepSums.from_augmented(freqs, augmented_sums, READS_PER_DWELL)
+            sums = SweepSums.from_augmented(freqs, augmented_sums)
             curve = sweep_curve(sums)
             level_line.set_data([freqs[0], freqs[-1]], [curve.level, curve.level])
             # Set the level first: the curve update rescales the axes to both lines.
@@ -246,7 +252,7 @@ class ChainExp(Experiment[SweepSums, ChainCfg]):
             raise RuntimeError(
                 "Stopped before the first round finished; no sums to keep"
             )
-        return SweepSums.from_augmented(freqs, augmented_sums.array, READS_PER_DWELL)
+        return SweepSums.from_augmented(freqs, augmented_sums.array)
 
     def analyze(
         self,

@@ -10,6 +10,11 @@ from zcu_tools.program.acquisition import ShotSumProcessor
 
 from .macro.readout import ReadoutEmission
 from .modules.readout import PulseReadout
+from .readout_labels import (
+    emission_label,
+    resolve_readout_label,
+    validate_declared_reads,
+)
 from .readout_observation import observe_readouts
 from .timeline import TimelineProgramV2
 
@@ -76,23 +81,21 @@ def chain_sweep_sums(prog: TimelineProgramV2, read: str) -> ShotSumProcessor:
 
 def _resolve_chain(prog: TimelineProgramV2, read: str) -> tuple[int, int]:
     observations = list(observe_readouts(prog))
-    labels: dict[str, list[tuple[PulseReadout, tuple[int | str, ...]]]] = {}
-    for observation in observations:
-        source = observation.source
-        if isinstance(source, ReadoutEmission) and isinstance(
-            source.owner, PulseReadout
-        ):
-            label = source.owner.name if source.label is None else source.label
-            labels.setdefault(label, []).append(
-                (source.owner, observation.repeat_counts)
-            )
-    matches = labels.get(read, [])
+    owner = resolve_readout_label(observations, read)
+    if not isinstance(owner, PulseReadout):
+        raise ValueError(f"label {read!r}: expected PulseReadout, actual MuxReadout")
+    matches = [
+        item
+        for item in observations
+        if isinstance(item.source, ReadoutEmission)
+        and item.source.owner is owner
+        and emission_label(item.source) == read
+    ]
     if len(matches) != 1:
         raise ValueError(
-            f"label {read!r}: expected one PulseReadout emission, actual {len(matches)}; "
-            f"available labels: {list(labels)}"
+            f"label {read!r}: expected one PulseReadout emission, actual {len(matches)}"
         )
-    owner, repeats = matches[0]
+    repeats = matches[0].repeat_counts
     ch = owner.cfg.ro_ch
     if len(repeats) != 1 or not isinstance(repeats[0], int):
         raise ValueError(
@@ -115,9 +118,5 @@ def _resolve_chain(prog: TimelineProgramV2, read: str) -> tuple[int, int]:
             f"ADC {ch}: expected trigger inside Repeat {repeats}; actual "
             f"{triggers[0].control_scope} {triggers[0].repeat_counts}"
         )
-    declared = prog.ro_chs[ch]["trigs"]
-    if declared != n:
-        raise ValueError(
-            f"ADC {ch}: expected {n} reads per shot from Repeat; actual {declared}"
-        )
+    validate_declared_reads(prog, ch, n)
     return ch, n

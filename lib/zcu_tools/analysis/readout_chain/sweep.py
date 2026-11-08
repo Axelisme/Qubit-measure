@@ -21,10 +21,9 @@ class SweepSums:
         First two columns use ADC units, remaining columns ADC units squared.
     product_sum: Shape (11, 11), sum of feature outer products over all
         dwells and points. Entry (i,j) has the product of feature i,j units.
-    reads_per_dwell: Number n of consecutive IQ reads in a shot, integer >= 16.
 
     All arrays must be finite. Construction raises ValueError for incompatible
-    shapes, non-finite arrays, fewer than 2 dwells or fewer than 16 reads.
+    shapes, non-finite arrays or fewer than 2 dwells.
     Covariance is checked by sweep_curve, not by this record constructor.
     """
 
@@ -32,7 +31,6 @@ class SweepSums:
     dwell_count: NDArray[np.float64]
     feature_sums: NDArray[np.float64]
     product_sum: NDArray[np.float64]
-    reads_per_dwell: int
 
     def __post_init__(self) -> None:
         _validate_sums(self)
@@ -42,12 +40,11 @@ class SweepSums:
         cls,
         axis: NDArray[np.float64],
         augmented: NDArray[np.float64],
-        reads_per_dwell: int,
     ) -> "SweepSums":
         """Pool processor sums of shape (F,12,12) into a saved record.
 
         Each point contains sum z zᵀ with z=(1, feature_0, ..., feature_10).
-        axis and reads_per_dwell have the meanings given on SweepSums.
+        axis contains sweep coordinates in caller-defined units, unchanged.
         Raise ValueError for incompatible shapes or non-finite inputs.
         """
         if axis.ndim != 1 or augmented.shape != (len(axis), 12, 12):
@@ -59,7 +56,6 @@ class SweepSums:
             dwell_count=augmented[:, 0, 0].copy(),
             feature_sums=augmented[:, 0, 1:].copy(),
             product_sum=augmented[:, 1:, 1:].sum(axis=0),
-            reads_per_dwell=reads_per_dwell,
         )
 
 
@@ -80,8 +76,6 @@ def _validate_sums(sums: SweepSums) -> None:
             raise ValueError(f"{name} must contain only finite values")
     if np.any(sums.dwell_count < 2):
         raise ValueError("each point must contain at least 2 dwells")
-    if sums.reads_per_dwell < 16:
-        raise ValueError("reads_per_dwell must be an integer >= 16")
 
 
 @dataclass(frozen=True)
@@ -108,10 +102,11 @@ def sweep_curve(sums: SweepSums) -> SweepCurve:
     means with sqrt(dwell_count) scaling. Combine independent 2-D IQ and 9-D
     conditional cross-block evidence against the exact chi-square null.
     Return sigma, the 5% family level, mean IQ and counts, without changing sums.
-    Raise ValueError for malformed/non-finite records, <2 dwells or <16 reads;
+    Raise ValueError for malformed/non-finite records or <2 dwells;
     raise ValueError if pooled within-point covariance is not positive definite.
     The null is asymptotic in dwell count; no small-sample correction is applied.
     """
+    # The frozen record's arrays remain mutable after construction.
     _validate_sums(sums)
     means = sums.feature_sums / sums.dwell_count[:, None]
     whitened = whiten(means, sums.dwell_count, sums.product_sum)

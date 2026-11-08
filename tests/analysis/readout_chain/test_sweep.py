@@ -20,13 +20,12 @@ def test_augmented_sums_preserve_counts_features_and_pool_products() -> None:
     )[:, None, None] * np.ones((11, 11))
     axis = np.array([5.0, 4.0, 6.0])
 
-    sums = SweepSums.from_augmented(axis, augmented, reads_per_dwell=48)
+    sums = SweepSums.from_augmented(axis, augmented)
 
     assert_array_equal(sums.axis, [5, 4, 6])
     assert_array_equal(sums.dwell_count, [2, 3, 4])
     assert_array_equal(sums.feature_sums, features)
     assert_array_equal(sums.product_sum, 9 * np.eye(11) + 6 * np.ones((11, 11)))
-    assert sums.reads_per_dwell == 48
 
 
 def controlled_sums(
@@ -41,7 +40,6 @@ def controlled_sums(
         dwell_count=counts,
         feature_sums=feature_sums,
         product_sum=product_sum,
-        reads_per_dwell=48,
     )
 
 
@@ -67,7 +65,6 @@ def test_planted_line_is_the_curve_maximum_above_family_level(column: int) -> No
     "changes, message",
     [
         ({"dwell_count": np.array([1.0, 1000, 1000])}, "dwell"),
-        ({"reads_per_dwell": 15}, "reads_per_dwell"),
         ({"axis": np.arange(2.0)}, "shape"),
         ({"axis": np.empty(0)}, "shape"),
         ({"dwell_count": np.ones((3, 1))}, "shape"),
@@ -95,10 +92,10 @@ def test_invalid_saved_record_fails_at_entry(
 )
 def test_invalid_augmented_record_fails_before_pooling(augmented: np.ndarray) -> None:
     with pytest.raises(ValueError, match="shape|finite"):
-        SweepSums.from_augmented(np.arange(3.0), augmented, reads_per_dwell=48)
+        SweepSums.from_augmented(np.arange(3.0), augmented)
 
 
-def test_gaussian_dwell_noise_has_calibrated_three_and_three_half_sigma_tails() -> None:
+def test_gaussian_dwell_noise_has_calibrated_null_rates() -> None:
     # Exact Gaussian sufficient-statistic sampling avoids retaining 120M dwells:
     # sample means and pooled within-point Wishart scatter are independent.
     rng = np.random.default_rng(1024)
@@ -113,14 +110,14 @@ def test_gaussian_dwell_noise_has_calibrated_three_and_three_half_sigma_tails() 
 
     curve = sweep_curve(sums)
 
-    for sigma in (3.0, 3.5):
-        expected = points * 2 * norm.sf(sigma)
-        observed = np.count_nonzero(curve.sigma > sigma)
-        assert abs(observed - expected) < 5 * np.sqrt(expected)
+    for probability in (0.05, 0.01):
+        expected = points * probability
+        observed = np.count_nonzero(curve.sigma > norm.isf(probability / 2))
+        assert abs(observed - expected) < 4 * np.sqrt(expected * (1 - probability))
     np.testing.assert_allclose(curve.level, norm.isf(0.05 / (2 * points)))
 
 
-def test_independent_chi_square_blocks_give_one_in_ten_thousand_tail() -> None:
+def test_independent_chi_square_blocks_have_calibrated_null_rates() -> None:
     rng = np.random.default_rng(920)
     draws = 400000
     # Antithetic means set the componentwise background to exactly zero without
@@ -134,9 +131,10 @@ def test_independent_chi_square_blocks_give_one_in_ten_thousand_tail() -> None:
 
     sigma = sweep_curve(sums).sigma[:draws]
 
-    observed = np.count_nonzero(sigma > norm.isf(1e-4 / 2))
-    expected = draws * 1e-4
-    assert abs(observed - expected) < 5 * np.sqrt(expected)
+    for probability in (0.05, 0.01):
+        observed = np.count_nonzero(sigma > norm.isf(probability / 2))
+        expected = draws * probability
+        assert abs(observed - expected) < 4 * np.sqrt(expected * (1 - probability))
 
 
 @pytest.mark.parametrize("field", ["dwell_count", "feature_sums", "axis"])
