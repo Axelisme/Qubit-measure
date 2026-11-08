@@ -1,6 +1,9 @@
 """Explicit user recipe declarations supplied only by composition roots."""
 
 from .amplitude_rabi import DEFINITION as AMPLITUDE_RABI
+from .chain_amp_rabi import DEFINITION as CHAIN_AMP_RABI
+from .chain_len_rabi import DEFINITION as CHAIN_LEN_RABI
+from .chain_t1 import DEFINITION as CHAIN_T1
 from .cpmg import DEFINITION as CPMG
 from .lookback import DEFINITION as LOOKBACK
 from .mist_drive_frequency import DEFINITION as MIST_DRIVE_FREQUENCY
@@ -49,6 +52,9 @@ RECIPES = (
     TIME_RABI,
     TWOTONE_SPECTRUM,
     TWOTONE_CHAIN,
+    CHAIN_AMP_RABI,
+    CHAIN_LEN_RABI,
+    CHAIN_T1,
     MIST_FLUX_DEP,
     MUX_ONETONE,
     ONETONE_RANGE_FIND,
