@@ -1,6 +1,6 @@
 # `zcu_tools.analysis` 模塊重點文檔
 
-**Last updated:** 2026-11-09
+**Last updated:** 2026-11-09，readout_metric 逐 setting 隔離擬合失敗
 
 **讀者：** framework-dev。分析核心、純數值工具與前端 adapter 的分工速查。
 
@@ -70,8 +70,9 @@ centers／radius／confusion matrix 有限時才提出校準。
 ## Readout chain 讀出調參
 
 `readout_chain.ReadoutSums.from_processor(axis, sums)` 保存每個 setting 的
-32-read block count 與 113 個 moment sums。Processor output 的 shape 是
-`(settings, 114)`，第一欄是 count。每個 lag 只用 block 內的 `32-k` 對 reads。
+32-read block count 與 `MOMENT_COUNT`（113）個 moment sums。Processor output 的 shape 是
+`(settings, 1 + MOMENT_COUNT)`，第一欄是 count。每個 lag 只用 block 內的 `32-k` 對 reads。
+113 個 moment 的欄位分段只在 `_model.py` 定義一次，estimator 與驗證都引用它。
 相鄰 blocks 是同一條 stationary stream，不假設它們獨立。
 
 `readout_metric(sums)` 以 closed-form start 和一次帶固定弱 prior 的
@@ -80,17 +81,21 @@ model-covariance weighted Gauss–Newton step 擬合三態。Covariance 包含�
 Gaussian noise variance，read transition 是逐態 retention 加共同 landing。
 函式不讀 program、檔案或硬體。首次呼叫需要編譯 Numba kernels。
 
-`ReadoutMetric` 的 `metric` 是兩個最高 stationary population 態的
+每個 setting 單獨擬合。`ReadoutMetric.fits` 以 setting index 對應 `SettingFit`，
+`failures` 以 index 對應 `SettingFailure`（setting 座標與原因），每個 index 只在其中一邊。
+無可識別主軸 signal、奇異矩陣或非有限 fit 成為該 setting 的 failure，不影響其他 setting，
+也不以 NaN 填位。`ranking` 只列已擬合的 indices，依 metric 由高到低。
+輸入 shape、不有限值、非整數 count 或不足兩個 blocks 仍拋出 ValueError。
+
+`SettingFit.metric` 是兩個最高 stationary population 態的
 read–drive–read information。計算時只取這兩態，使用等布居與對稱 landing，
-不平均三對態。較大值較好。`ranking` 保存由高到低的 setting indices。
-`separation` 是這兩態的 d/sigma，`retention` 保存它們各自的 λ，
-`third_population` 是剩餘態的 stationary population。
+不平均三對態。較大值較好。`separation` 是這兩態的 d/sigma，
+`retention` 保存它們各自的 λ，`third_population` 是剩餘態的 stationary population。
 
 `standard_error` 是固定 start covariance 與 prior 下，單步 estimator 的
-delta-method sampling error。它不涵蓋單步近似的 bias。第三態未被觀測時，
-個別 λ 可能不可識別，error 也可能遠大於二態 fit 的 error。
-輸入 shape、不有限值、非整數 count 或不足兩個 blocks 會拋出 ValueError。
-無可識別主軸 signal 或非有限 fit 也會拒絕。
+delta-method sampling error。它不涵蓋單步近似的 bias。
+Start 看不到第三態時（正交軸沒有 lag covariance 或 landing 不超過 1.5e-3），
+把第三態移到固定 prior；此時個別 λ 可能不可識別。
 
 ## Readout QND 指標
 

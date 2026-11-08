@@ -207,7 +207,7 @@ def test_missing_label_reports_expected_actual_and_available_labels():
         v2.chain_readout_sums(block_program(), "absent")
 
 
-def test_label_matching_two_readout_owners_reports_both_names():
+def test_label_matching_two_readout_owners_reports_owner_count():
     builder = v2.TimelineBuilder(load_soccfg())
     with builder.repeat("block", 16):
         builder.emit(block_readout("other"), tag="readout")
@@ -216,7 +216,7 @@ def test_label_matching_two_readout_owners_reports_both_names():
         builder.delay_auto()
     prog = finish_block(builder)
     with pytest.raises(
-        ValueError, match=r"label 'readout'.*expected one.*actual 2.*other.*readout"
+        ValueError, match=r"label 'readout'.*expected one.*actual 2.*readout"
     ):
         v2.chain_readout_sums(prog, "readout")
 

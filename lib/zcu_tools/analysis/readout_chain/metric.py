@@ -5,7 +5,13 @@ from dataclasses import dataclass
 import numpy as np
 from numpy.typing import NDArray
 
-from ._estimator import UnfittableMoments, fitted_pair_result, one_step_fit
+from ._estimator import (
+    UnfittableMoments,
+    central_difference,
+    one_step_fit,
+    physical_coordinates,
+)
+from ._model import MOMENT_COUNT, FloatArray, ModelParameters, stationary_population
 
 
 @dataclass(frozen=True)
@@ -14,7 +20,8 @@ class ReadoutSums:
 
     axis: Shape (F,), setting coordinates in caller-defined units.
     block_count: Shape (F,), integer number of contiguous 32-read blocks, >= 2.
-    feature_sums: Shape (F,113), sums of the per-block averages. Columns:
+    feature_sums: Shape (F, MOMENT_COUNT), MOMENT_COUNT = 113: sums of the
+        per-block averages. Columns:
         I,Q; I²,IQ,Q²; lag 1..15 II,IQ,QI,QQ; lag 1..4
         (I²,IQ,Q²)_t (I,Q)_{t+k}; then lag 1..4
         (I,Q)_t (I²,IQ,Q²)_{t+k}. Each lag uses 32-k pairs.
@@ -35,13 +42,14 @@ class ReadoutSums:
     def from_processor(
         cls, axis: NDArray[np.float64], sums: NDArray[np.float64]
     ) -> "ReadoutSums":
-        """Copy (F,114) processor output: count followed by 113 moment sums.
+        """Copy (F, 1 + MOMENT_COUNT) processor output: count, then moment sums.
 
         axis has shape (F,) and caller-defined units. Raise ValueError for
         malformed/non-finite output or counts below two or non-integer.
         """
-        if axis.ndim != 1 or sums.shape != (len(axis), 114):
-            raise ValueError("processor sums must have shape (settings, 114)")
+        columns = 1 + MOMENT_COUNT
+        if axis.ndim != 1 or sums.shape != (len(axis), columns):
+            raise ValueError(f"processor sums must have shape (settings, {columns})")
         return cls(axis.copy(), sums[:, 0].copy(), sums[:, 1:].copy())
 
 
@@ -61,6 +69,7 @@ class SettingFit:
     retention: read retention λ of the two dominant states, in descending
         stationary-population order; 0.01 <= λ <= 0.995. λ is the
         retain-versus-reset probability, not a diagonal transition.
+        Individual λ may be unidentifiable when the third state is unseen.
     third_population: stationary population of the remaining fitted state
         (the least populated), between zero and one third.
     """
@@ -107,7 +116,7 @@ class ReadoutMetric:
 def readout_metric(sums: ReadoutSums) -> ReadoutMetric:
     """Fit three states per setting with a closed-form start and one GN step.
 
-    sums holds the 113 block moments defined on ReadoutSums. Assume a stationary
+    sums holds the block moments defined on ReadoutSums. Assume a stationary
     contiguous stream, isotropic independent Gaussian read noise, and transition
     R_ij = λ_i δ_ij + (1-λ_i) ρ_j. Use exact contiguous 32-read block covariance
     at the start and the fixed weak third-state priors. Ignore stream-end edges.
@@ -118,6 +127,7 @@ def readout_metric(sums: ReadoutSums) -> ReadoutMetric:
     result) becomes a SettingFailure; the other settings are unaffected.
     Raise ValueError for malformed/non-finite sums or fewer than two blocks.
     """
+    # The frozen record's arrays remain mutable after construction.
     _validate_sums(sums)
     fits: dict[int, SettingFit] = {}
     failures: dict[int, SettingFailure] = {}
@@ -125,24 +135,78 @@ def readout_metric(sums: ReadoutSums) -> ReadoutMetric:
         setting = float(sums.axis[index])
         features = sums.feature_sums[index] / blocks
         try:
-            fitted, covariance = one_step_fit(features, float(blocks))
-            result = fitted_pair_result(fitted, covariance)
-            if not np.isfinite(result).all():
-                raise UnfittableMoments("non-finite one-step readout result")
+            fits[index] = _fit_setting(setting, features, float(blocks))
         except (UnfittableMoments, np.linalg.LinAlgError) as error:
             # Isolate: one setting the estimator cannot fit keeps the others.
             failures[index] = SettingFailure(setting, str(error))
-            continue
-        fits[index] = SettingFit(
-            setting=setting,
-            metric=float(result[0]),
-            standard_error=float(result[1]),
-            separation=float(result[2]),
-            retention=(float(result[3]), float(result[4])),
-            third_population=float(result[5]),
-        )
     ranking = sorted(fits, key=lambda index: -fits[index].metric)
     return ReadoutMetric(fits=fits, failures=failures, ranking=tuple(ranking))
+
+
+def _fit_setting(setting: float, features: FloatArray, blocks: float) -> SettingFit:
+    """Fit one setting's averaged moments and evaluate its dominant-pair metric.
+
+    The error propagates the one-step sampling covariance through a
+    central-difference gradient of the pair metric. Raise UnfittableMoments
+    or LinAlgError when the moments cannot be fitted or the fit is non-finite.
+    """
+    coordinates, covariance = one_step_fit(features, blocks)
+    model = physical_coordinates(coordinates)
+    if not model.is_finite() or model.variance <= 0:
+        raise UnfittableMoments("non-finite one-step readout fit")
+    population = stationary_population(model)
+    order = np.argsort(-population, kind="stable")
+    pair = order[:2]
+
+    def information(free: FloatArray) -> FloatArray:
+        return np.array([_pair_information(physical_coordinates(free), pair)])
+
+    gradient = central_difference(information, coordinates)[0]
+    distance = np.linalg.norm(model.centres[pair[1]] - model.centres[pair[0]])
+    fit = SettingFit(
+        setting=setting,
+        metric=_pair_information(model, pair),
+        standard_error=float(np.sqrt(max(float(gradient @ covariance @ gradient), 0))),
+        separation=float(distance / np.sqrt(model.variance)),
+        retention=(float(model.retention[pair[0]]), float(model.retention[pair[1]])),
+        third_population=float(population[order[2]]),
+    )
+    numbers = [fit.metric, fit.standard_error, fit.separation, fit.third_population]
+    if not np.isfinite([*numbers, *fit.retention]).all():
+        raise UnfittableMoments("non-finite one-step readout result")
+    return fit
+
+
+def _pair_information(model: ModelParameters, pair: NDArray[np.int64]) -> float:
+    """Two-state equal-population, symmetrised-landing RDR information.
+
+    pair holds the indices of the two states. The four centred IQ cross
+    moments form the observable; Gaussian read noise has the fitted variance
+    per component. The two retentions λ may differ.
+    """
+    centres = model.centres[pair]
+    variance = model.variance
+    retention = model.retention[pair]
+    uniform = np.full(2, 0.5)
+    transition = np.diag(retention) + (1 - retention[:, None]) * uniform
+    exchange = np.array([[-1.0, 1.0], [1.0, -1.0]])
+    mean_first, mean_second = uniform @ centres, (uniform @ transition) @ centres
+    population_covariance = np.diag(uniform) - np.outer(uniform, uniform)
+    gradient = (
+        centres.T @ population_covariance @ transition @ exchange @ centres
+    ).ravel()
+    cross_mean = np.zeros((2, 2))
+    fourth = np.zeros((4, 4))
+    for first in range(2):
+        for second in range(2):
+            probability = uniform[first] * transition[first, second]
+            left, right = centres[first] - mean_first, centres[second] - mean_second
+            cross_mean += probability * np.outer(left, right)
+            left_second = np.outer(left, left) + variance * np.eye(2)
+            right_second = np.outer(right, right) + variance * np.eye(2)
+            fourth += probability * np.kron(left_second, right_second)
+    covariance = fourth - np.outer(cross_mean.ravel(), cross_mean.ravel())
+    return float(gradient @ np.linalg.solve(covariance, gradient))
 
 
 def _validate_sums(sums: ReadoutSums) -> None:
@@ -152,7 +216,7 @@ def _validate_sums(sums: ReadoutSums) -> None:
     for name, values, shape in (
         ("axis", sums.axis, (points,)),
         ("block_count", sums.block_count, (points,)),
-        ("feature_sums", sums.feature_sums, (points, 113)),
+        ("feature_sums", sums.feature_sums, (points, MOMENT_COUNT)),
     ):
         if values.shape != shape:
             raise ValueError(f"{name} must have shape {shape}")

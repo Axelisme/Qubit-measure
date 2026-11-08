@@ -1,6 +1,6 @@
 """Compile consecutive readout blocks into additive moment sums."""
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 
 import numpy as np
 from numpy.typing import NDArray
@@ -10,7 +10,8 @@ from zcu_tools.program.acquisition import ShotSumProcessor
 
 from .macro.readout import ReadoutEmission
 from .modules.readout import PulseReadout
-from .readout_observation import ReadoutObservation, observe_readouts
+from .readout_labels import resolve_readout_label, validate_declared_reads
+from .readout_observation import observe_readouts
 from .timeline import TimelineProgramV2
 
 
@@ -18,8 +19,9 @@ def chain_readout_sums(prog: TimelineProgramV2, read: str) -> ShotSumProcessor:
     """Resolve a compiled PulseReadout block and sum 113 moments over reps.
 
     read is an emit tag or the module name of an untagged PulseReadout. It must
-    identify one owner; all emissions of that owner supply the shot's reads in
-    time order, including emissions with other tags. The program must contain
+    identify one pulse or mux readout owner, and that owner must be a
+    PulseReadout; all emissions of that owner supply the shot's reads in time
+    order, including emissions with other tags. The program must contain
     32 unrolled emissions or one emission inside one fixed Repeat of 32, with
     no other triggers on its ADC. After build, call prog.set_reads_per_shot(32)
     before constructing this processor. Construction does not change prog.
@@ -43,10 +45,10 @@ def chain_readout_sums(prog: TimelineProgramV2, read: str) -> ShotSumProcessor:
     Primes denote the read k steps later. Each mean uses 32 reads; each lag
     moment uses its own 32-k pairs within the block, never across reps. Reps
     and rounds are not averaged: acquire_summed adds completed round sums.
-    Missing/ambiguous labels, unsupported observed trigger/Repeat structure,
-    and emitted, declared or incoming read-count/shape mismatches raise
-    ValueError with expected and actual values. A missing selected ADC input
-    raises KeyError.
+    Missing/ambiguous labels, a MuxReadout owner, unsupported observed
+    trigger/Repeat structure, and emitted, declared or incoming
+    read-count/shape mismatches raise ValueError with expected and actual
+    values. A missing selected ADC input raises KeyError.
     """
     ch = _resolve_block(prog, read)
 
@@ -86,7 +88,9 @@ def chain_readout_sums(prog: TimelineProgramV2, read: str) -> ShotSumProcessor:
 
 def _resolve_block(prog: TimelineProgramV2, read: str) -> int:
     observations = list(observe_readouts(prog))
-    owner = _resolve_owner(observations, read)
+    owner = resolve_readout_label(observations, read)
+    if not isinstance(owner, PulseReadout):
+        raise ValueError(f"label {read!r}: expected PulseReadout, actual MuxReadout")
     repeats = [
         observation.repeat_counts
         for observation in observations
@@ -120,32 +124,5 @@ def _resolve_block(prog: TimelineProgramV2, read: str) -> int:
                 f"triggers with repeat counts {repeats[0]}; actual "
                 f"{trigger.control_scope} {trigger.repeat_counts}"
             )
-    declared = prog.ro_chs[ch]["trigs"]
-    if declared != 32:
-        raise ValueError(
-            f"ADC {ch}: expected 32 declared reads per shot; actual {declared}"
-        )
+    validate_declared_reads(prog, ch, 32)
     return ch
-
-
-def _resolve_owner(
-    observations: Sequence[ReadoutObservation], read: str
-) -> PulseReadout:
-    """Resolve a label by owner identity, allowing repeated emissions of one owner."""
-    labels: dict[str, list[PulseReadout]] = {}
-    for observation in observations:
-        source = observation.source
-        if isinstance(source, ReadoutEmission) and isinstance(
-            source.owner, PulseReadout
-        ):
-            label = source.owner.name if source.label is None else source.label
-            owners = labels.setdefault(label, [])
-            if source.owner not in owners:
-                owners.append(source.owner)
-    matches = labels.get(read, [])
-    if len(matches) != 1:
-        raise ValueError(
-            f"label {read!r}: expected one PulseReadout owner; actual {len(matches)} "
-            f"owners {[owner.name for owner in matches]}; available labels: {list(labels)}"
-        )
-    return matches[0]

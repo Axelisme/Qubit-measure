@@ -5,6 +5,7 @@ retention-dependent horizon. Work per setting therefore stays bounded near λ=1.
 """
 
 from functools import cache
+from typing import NamedTuple
 
 import numpy as np
 from numba import njit
@@ -13,7 +14,7 @@ from numpy.typing import NDArray
 FloatArray = NDArray[np.float64]
 IntArray = NDArray[np.int64]
 Layout = tuple[IntArray, IntArray, IntArray]
-Model = tuple[FloatArray, FloatArray, FloatArray, FloatArray]
+ModelArrays = tuple[FloatArray, FloatArray, FloatArray, FloatArray]
 OverlapLayout = tuple[IntArray, IntArray, IntArray]
 
 # Number of saved block moments, and their column blocks in saved order.
@@ -25,8 +26,33 @@ EARLY_TRIPLES = slice(65, 89)  # lag 1..4, each (I², IQ, Q²)_t × (I, Q)_{t+k}
 LATE_TRIPLES = slice(89, 113)  # lag 1..4, each (I, Q)_t × (I², IQ, Q²)_{t+k}
 
 
+class ModelParameters(NamedTuple):
+    """Three-state readout model with transition R_ij = λ_i δ_ij + (1-λ_i) ρ_j.
+
+    centres: (3, 2) IQ centre of each state, ADC units.
+    variance: Gaussian read-noise variance of each IQ component, ADC².
+    retention: (3,) λ_i, the probability that a read keeps state i.
+    landing: (3,) ρ_j, the state a read lands in when it does not keep its
+        state; sums to one.
+    """
+
+    centres: FloatArray
+    variance: float
+    retention: FloatArray
+    landing: FloatArray
+
+    def is_finite(self) -> bool:
+        """Report whether every parameter is finite."""
+        return bool(
+            np.isfinite(self.centres).all()
+            and np.isfinite(self.variance)
+            and np.isfinite(self.retention).all()
+            and np.isfinite(self.landing).all()
+        )
+
+
 def moment_layout() -> Layout:
-    """Times, IQ components and degrees in the saved 113-column order."""
+    """Times, IQ components and degrees in the saved moment-column order."""
     columns = [
         ((0, 0),),
         ((0, 1),),
@@ -47,7 +73,7 @@ def moment_layout() -> Layout:
         for a in (0, 1)
         for b, c in ((0, 0), (0, 1), (1, 1))
     ]
-    times = np.zeros((113, 3), dtype=np.int64)
+    times = np.zeros((MOMENT_COUNT, 3), dtype=np.int64)
     components = np.zeros_like(times)
     degrees = np.array([len(column) for column in columns], dtype=np.int64)
     for i, column in enumerate(columns):
@@ -60,20 +86,17 @@ def moment_layout() -> Layout:
 LAYOUT = moment_layout()
 
 
-def stationary_population(theta: FloatArray) -> FloatArray:
+def stationary_population(model: ModelParameters) -> FloatArray:
     """Stationary population of R_ij = λ_i δ_ij + (1-λ_i)ρ_j."""
-    population = theta[10:13] / (1 - theta[7:10])
+    population = model.landing / (1 - model.retention)
     return population / population.sum()
 
 
-def model_arrays(theta: FloatArray) -> Model:
+def model_arrays(model: ModelParameters) -> ModelArrays:
     """Transition powers, summed tail powers, Gaussian emissions and population."""
-    centres = theta[:6].reshape(3, 2)
-    variance = theta[6]
-    retention = theta[7:10]
-    landing = theta[10:13]
+    centres, variance, retention, landing = model
     transition = np.diag(retention) + (1 - retention[:, None]) * landing
-    population = stationary_population(theta)
+    population = stationary_population(model)
     powers = np.empty((64, 3, 3))
     powers[0] = np.eye(3)
     for gap in range(1, 64):
@@ -96,7 +119,9 @@ def model_arrays(theta: FloatArray) -> Model:
 
 
 @njit(cache=True)
-def product_expectation(times: IntArray, components: IntArray, model: Model) -> float:
+def product_expectation(
+    times: IntArray, components: IntArray, model: ModelArrays
+) -> float:
     """Stationary expectation of a sorted-time Gaussian product."""
     powers, _, emissions, population = model
     weights = population.copy()
@@ -120,10 +145,10 @@ def product_expectation(times: IntArray, components: IntArray, model: Model) -> 
 
 
 @njit(cache=True)
-def moment_means_kernel(layout: Layout, model: Model) -> FloatArray:
+def moment_means_kernel(layout: Layout, model: ModelArrays) -> FloatArray:
     times, components, degrees = layout
-    result = np.empty(113)
-    for i in range(113):
+    result = np.empty(MOMENT_COUNT)
+    for i in range(MOMENT_COUNT):
         degree = degrees[i]
         result[i] = product_expectation(
             times[i, :degree], components[i, :degree], model
@@ -131,9 +156,9 @@ def moment_means_kernel(layout: Layout, model: Model) -> FloatArray:
     return result
 
 
-def moment_means(theta: FloatArray) -> FloatArray:
-    """Exact 113 stationary feature expectations for the 13-value model vector."""
-    return moment_means_kernel(LAYOUT, model_arrays(theta))
+def moment_means(model: ModelParameters) -> FloatArray:
+    """Exact stationary expectations of the saved block moments under model."""
+    return moment_means_kernel(LAYOUT, model_arrays(model))
 
 
 @njit(cache=True)
@@ -161,10 +186,10 @@ def joint_layout(a: int, b: int, shift: int, layout: Layout) -> IntArray:
 def overlap_layout(layout: Layout) -> OverlapLayout:
     """Precompute finite overlapping products and periodic anchor-pair counts."""
     times, _, _ = layout
-    spans = np.array([times[i].max() for i in range(113)])
+    spans = np.array([times[i].max() for i in range(MOMENT_COUNT)])
     size = 0
-    for a in range(113):
-        for b in range(a, 113):
+    for a in range(MOMENT_COUNT):
+        for b in range(a, MOMENT_COUNT):
             size += 1 + spans[a] + spans[b]
     pairs = np.empty((size, 3), dtype=np.int64)
     nodes = np.empty((size, 4, 3), dtype=np.int64)
@@ -176,8 +201,8 @@ def overlap_layout(layout: Layout) -> OverlapLayout:
                     if (time + shift) % 32 < 32 - span_b:
                         counts[span_a, span_b, shift] += 1
     row = 0
-    for a in range(113):
-        for b in range(a, 113):
+    for a in range(MOMENT_COUNT):
+        for b in range(a, MOMENT_COUNT):
             pairs[row] = a, b, counts[spans[a], spans[b], 0]
             nodes[row] = joint_layout(a, b, 0, layout)
             row += 1
@@ -196,7 +221,7 @@ def covariance_layout() -> OverlapLayout:
 
 
 @njit(cache=True)
-def overlap_expectation(nodes: IntArray, model: Model) -> float:
+def overlap_expectation(nodes: IntArray, model: ModelArrays) -> float:
     """Contract up to four time nodes with three scalar state weights."""
     powers, _, emissions, population = model
     w0, w1, w2 = population[0], population[1], population[2]
@@ -218,12 +243,14 @@ def overlap_expectation(nodes: IntArray, model: Model) -> float:
 
 
 @njit(cache=True)
-def feature_endpoints(layout: Layout, model: Model) -> tuple[FloatArray, FloatArray]:
+def feature_endpoints(
+    layout: Layout, model: ModelArrays
+) -> tuple[FloatArray, FloatArray]:
     """Left state weights and right conditional means for separated products."""
     times, components, degrees = layout
     powers, _, emissions, population = model
-    left, right = np.empty((113, 3)), np.empty((113, 3))
-    for column in range(113):
+    left, right = np.empty((MOMENT_COUNT, 3)), np.empty((MOMENT_COUNT, 3))
+    for column in range(MOMENT_COUNT):
         span = times[column].max()
         degree = np.zeros((2, 2), dtype=np.int64)
         for j in range(degrees[column]):
@@ -237,7 +264,7 @@ def feature_endpoints(layout: Layout, model: Model) -> tuple[FloatArray, FloatAr
 
 
 @njit(cache=True)
-def separated_propagators(counts: IntArray, model: Model) -> FloatArray:
+def separated_propagators(counts: IntArray, model: ModelArrays) -> FloatArray:
     """Sum n_ab(h)(R^(h-span_a)-Π) for every h > span_a, by residue."""
     _, tail, _, _ = model
     result = np.zeros((16, 16, 3, 3))
@@ -251,23 +278,23 @@ def separated_propagators(counts: IntArray, model: Model) -> FloatArray:
 
 @njit(cache=True)
 def contiguous_covariance_kernel(
-    layout: Layout, overlaps: OverlapLayout, model: Model
+    layout: Layout, overlaps: OverlapLayout, model: ModelArrays
 ) -> FloatArray:
     """Finite overlapping products plus contracted, centred geometric tails."""
     times, _, _ = layout
     pairs, nodes, counts = overlaps
-    spans = np.array([times[i].max() for i in range(113)])
+    spans = np.array([times[i].max() for i in range(MOMENT_COUNT)])
     left, right = feature_endpoints(layout, model)
     means = left.sum(axis=1)
-    result = np.zeros((113, 113))
+    result = np.zeros((MOMENT_COUNT, MOMENT_COUNT))
     for row in range(len(pairs)):
         a, b, count = pairs[row]
         result[a, b] += count * (
             overlap_expectation(nodes[row], model) - means[a] * means[b]
         )
     propagators = separated_propagators(counts, model)
-    for a in range(113):
-        for b in range(a, 113):
+    for a in range(MOMENT_COUNT):
+        for b in range(a, MOMENT_COUNT):
             total = result[a, b]
             for i in range(3):
                 for j in range(3):
@@ -282,7 +309,7 @@ def contiguous_covariance_kernel(
     return result
 
 
-def contiguous_covariance(theta: FloatArray) -> FloatArray:
+def contiguous_covariance(model: ModelParameters) -> FloatArray:
     """Exact asymptotic B*Cov(feature means), including inter-block dependence.
 
     Evaluate overlapping time supports directly using a cached layout. For
@@ -291,5 +318,5 @@ def contiguous_covariance(theta: FloatArray) -> FloatArray:
     The sum ignores stream-end edges and is exact up to floating-point error.
     """
     return contiguous_covariance_kernel(
-        LAYOUT, covariance_layout(), model_arrays(theta)
+        LAYOUT, covariance_layout(), model_arrays(model)
     )
