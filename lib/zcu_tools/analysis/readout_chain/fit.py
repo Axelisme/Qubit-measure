@@ -94,9 +94,13 @@ def fit_cycle(
 
     init must map every curve name to one finite, in-bounds starting value.
     Nuisances start from closed-form moment geometry and fixed physical seeds.
-    Use bounded, single-start least squares and two model-covariance weight
-    stages. Pooled measured products do not supply fit weights. The last-stage
-    joint-model weights are held fixed for the three nested fits.
+    Fit nuisances at init for each of the six assignments of geometric states
+    to curve rows, then run the joint fit from the lowest-objective assignment.
+    Assignment scores use common initial model-covariance weights and feasible
+    last iterates if a nuisance-only fit reaches its evaluation budget.
+    Use bounded least squares and two joint model-covariance weight stages.
+    Pooled measured products do not supply fit weights. The last-stage joint-model
+    weights are held fixed for the three nested fits.
     Independent Gaussian read noise, Markov states, independent thermalised
     cycles and the emission law on CycleNuisances are assumed.
 
