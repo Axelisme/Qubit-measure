@@ -4,6 +4,8 @@ from .amplitude_rabi import DEFINITION as AMPLITUDE_RABI
 from .chain_amp_rabi import DEFINITION as CHAIN_AMP_RABI
 from .chain_len_rabi import DEFINITION as CHAIN_LEN_RABI
 from .chain_t1 import DEFINITION as CHAIN_T1
+from .chain_t2echo import DEFINITION as CHAIN_T2ECHO
+from .chain_t2ramsey import DEFINITION as CHAIN_T2RAMSEY
 from .cpmg import DEFINITION as CPMG
 from .lookback import DEFINITION as LOOKBACK
 from .mist_drive_frequency import DEFINITION as MIST_DRIVE_FREQUENCY
@@ -55,6 +57,8 @@ RECIPES = (
     CHAIN_AMP_RABI,
     CHAIN_LEN_RABI,
     CHAIN_T1,
+    CHAIN_T2RAMSEY,
+    CHAIN_T2ECHO,
     MIST_FLUX_DEP,
     MUX_ONETONE,
     ONETONE_RANGE_FIND,

@@ -2,7 +2,7 @@
 
 **讀者：** lab-author、agent。查找 recipe 宣告、操作順序與作者契約。
 
-**Last updated:** 2026-11-09，新增 chain_amp_rabi、chain_len_rabi、chain_t1
+**Last updated:** 2026-11-09，新增 chain_amp_rabi、chain_len_rabi、chain_t1、chain_t2ramsey、chain_t2echo
 
 Recipe 是操作 GUI tab 的 async 函式。Core 擁有 cfg、量測與分析計算，Adapter 接上表單、RunRecord 與分析來源。
 Recipe 選來源、設參數，再決定 Run、Analyze 與 writeback 問答的順序。
@@ -178,6 +178,8 @@ Recipe 可以串多個 adapter，宣告不另設單一 adapter mapping。
 | `chain_amp_rabi` | `chain/amp_rabi` | 掃 drive gain，`gain_range`、`points`。每個 rep 是一個 cycle：K（`relax_delay`）後 (Rabi pulse, 讀, 讀) × 8，`reps` 是每輪每點 cycle 數。分析以 `twotone/rabi/amp_rabi` 擬合第一次讀出取起點，再聯合擬合 65 個數。回報 π gain、Rabi 頻率與 Wald 誤差、R、三項檢查，完整 Run、Analyze、Save，不提出 writeback。 |
 | `chain_len_rabi` | `chain/len_rabi` | 掃 const／flat_top drive 的長度，`max_length_us`、`points`。Cycle 與 `reps` 同上。起點取自 `twotone/rabi/len_rabi` 的第一讀擬合。回報 π 長度、Rabi 頻率（MHz）與 Wald 誤差、R、三項檢查，不提出 writeback。 |
 | `chain_t1` | `chain/t1` | 掃 π 後的等待，`max_delay_us`、`points`。每個 block 是 (π, 等待, 讀, 讀)。起點取自 `twotone/t1` 的第一讀擬合。回報 T1、第三態衰減時間與 Wald 誤差、三項檢查，不提出 writeback。 |
+| `chain_t2ramsey` | `chain/t2ramsey` | 掃 Ramsey 等待，`max_delay_us`、`points`、`detune_mhz`（第二個 π/2 的相位斜率）。每個 block 是 (π/2, 等待, 反相 π/2, 讀, 讀)。起點取自 `twotone/t2ramsey` 的第一讀擬合。回報 T2、fringe 頻率、第三態衰減時間與 Wald 誤差、R、三項檢查，不提出 writeback。 |
+| `chain_t2echo` | `chain/t2echo` | 掃總 echo 等待，`max_delay_us`（總長）、`points`。每個 block 是 (π/2, x/2, π, x/2, π/2, 讀, 讀)。起點取自 `twotone/t2echo` 的第一讀擬合。回報 T2 echo、第三態衰減時間與 Wald 誤差、三項檢查，不提出 writeback。 |
 | `twotone_flux_dep` | `twotone/flux_dep` | 必填 drive 的 `center_mhz`、`span_mhz`、`freq_points` 及 native flux device、unit、端點、點數。互動 picker 完成後詢問寫回 qubit flux 校準。 |
 
 有 writeback proposal 的流程先 Run、Analyze，再依各 recipe 的條件詢問寫回，只接受回答選定的候選，最後 Save。

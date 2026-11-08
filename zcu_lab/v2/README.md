@@ -11,7 +11,7 @@
 
 - [FTF bring-up 與 CZ 校準](two_qubit/guide.md) 說明既有 F1/F2 單 qubit 校準、角色與保存方式。FTF 控制鏈可執行仍不代表物理校準或 fidelity 已驗收。
   - 九個實驗各有非 heralded 與 heralded 入口，均在取數時分類並保存計數，見下方[完整清單](#two-qubit-實驗清單)。
-- [K-cycle 讀出鏈 amp Rabi](chain/amp_rabi/guide.md)、[len Rabi](chain/len_rabi/guide.md) 與 [T1](chain/t1/guide.md) 說明每個 rep 是一個 cycle（K 後 (D, 讀, 讀) × 8）、兩條 live 曲線、聯合擬合與三項檢查。
+- [K-cycle 讀出鏈 amp Rabi](chain/amp_rabi/guide.md)、[len Rabi](chain/len_rabi/guide.md)、[T1](chain/t1/guide.md)、[T2 Ramsey](chain/t2ramsey/guide.md) 與 [T2 echo](chain/t2echo/guide.md) 說明每個 rep 是一個 cycle（K 後 (D, 讀, 讀) × 8）、兩條 live 曲線、聯合擬合與三項檢查。
 - [Experiment authoring](experiment-authoring.md) 說明核心 records 與資料形狀，新實驗從[寫法慣例](experiment-authoring.md#寫法慣例)選 cfg、分析與圖 API 的寫法。
 - [Measure authoring](measure-authoring.md) 說明 cfg defaults、operator guides、writeback 與 reload。
 - [GUI contracts](gui-contracts.md) 說明 concrete adapter hooks 與 capability。
