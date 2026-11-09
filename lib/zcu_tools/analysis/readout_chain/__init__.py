@@ -9,8 +9,20 @@ from .metric import (
     readout_metric,
 )
 from .sweep import SweepCurve, SweepSums, sweep_curve
+from .thermal import (
+    THERMAL_MOMENT_COUNT,
+    SettingScore,
+    ThermalChainScore,
+    ThermalChainSums,
+    thermal_chain_score,
+)
 
 __all__ = [
+    "SettingScore",
+    "ThermalChainScore",
+    "thermal_chain_score",
+    "THERMAL_MOMENT_COUNT",
+    "ThermalChainSums",
     "SweepSums",
     "SweepCurve",
     "sweep_curve",

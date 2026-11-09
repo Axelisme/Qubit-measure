@@ -86,7 +86,64 @@ def chain_readout_sums(prog: TimelineProgramV2, read: str) -> ShotSumProcessor:
     return process
 
 
-def _resolve_block(prog: TimelineProgramV2, read: str) -> int:
+def thermal_chain_sums(prog: TimelineProgramV2, read: str) -> ShotSumProcessor:
+    """Resolve one PulseReadout and reduce its 16-read shots to 38 columns.
+
+    read is an emit tag or an untagged module name. All emissions of that
+    owner must be 16 unrolled reads or one read in one fixed Repeat of 16.
+    Other triggers on its ADC are forbidden. Build prog, then call
+    prog.set_reads_per_shot(16) before constructing this processor.
+    Missing/ambiguous labels, non-PulseReadout owners and emitted/declared
+    counts or control scopes outside this contract raise ValueError with
+    expected and actual values. Construction does not modify prog.
+
+    The caller arranges consecutive reads with no intervening drive or extra
+    wait, followed by the thermal relaxation delay. Pulse/timing content is
+    not checked. Reads 6..14 evolve the state but supply no moments.
+
+    The callable borrows ADC-keyed float64 (points, reps, 16, 2) IQ arrays,
+    without mutation. IQ is ADC integral / rounded integration length, without
+    offset subtraction. Other ADCs are ignored; a missing selected ADC raises
+    KeyError, and a shape mismatch raises ValueError. Output is float64
+    (points, 38), summed over shots, never averaged:
+
+    * 0: shot count.
+    * 1:15: I,Q of R1,R2,R3,R4,R5,R15,R16, in that order.
+    * 15:18: R1 I²,IQ,Q².
+    * 18:38: II′,IQ′,QI′,QQ′ for (R1,R2),(R1,R3),(R1,R4),
+      (R1,R5),(R15,R16), in that order.
+
+    Reps and completed rounds add, including the shot count.
+    """
+    ch = _resolve_block(prog, read, reads=16)
+
+    def process(iq: Mapping[int, NDArray[np.float64]]) -> NDArray[np.float64]:
+        values = iq[ch]
+        if values.ndim != 4 or values.shape[2:] != (16, 2):
+            raise ValueError(
+                f"ADC {ch}: expected (points, reps, 16, 2); actual {values.shape}"
+            )
+        points, reps = values.shape[:2]
+        recorded = values[:, :, [0, 1, 2, 3, 4, 14, 15], :]
+        first_i, first_q = values[:, :, 0, 0], values[:, :, 0, 1]
+        sums = np.empty((points, 38), dtype=np.float64)
+        sums[:, 0] = reps
+        sums[:, 1:15] = recorded.sum(axis=1).reshape(points, 14)
+        sums[:, 15:18] = np.stack(
+            [first_i**2, first_i * first_q, first_q**2], axis=-1
+        ).sum(axis=1)
+        cross = np.einsum(
+            "prki,prkj->pkij",
+            values[:, :, [0, 0, 0, 0, 14], :],
+            values[:, :, [1, 2, 3, 4, 15], :],
+        )
+        sums[:, 18:38] = cross.reshape(points, 20)
+        return sums
+
+    return process
+
+
+def _resolve_block(prog: TimelineProgramV2, read: str, reads: int = 32) -> int:
     observations = list(observe_readouts(prog))
     owner = resolve_readout_label(observations, read)
     if not isinstance(owner, PulseReadout):
@@ -98,9 +155,9 @@ def _resolve_block(prog: TimelineProgramV2, read: str) -> int:
         and source.owner is owner
     ]
     ch = owner.cfg.ro_ch
-    if repeats != [(32,)] and repeats != [()] * 32:
+    if repeats != [(reads,)] and repeats != [()] * reads:
         raise ValueError(
-            f"ADC {ch}: expected 32 reads unrolled or one fixed Repeat of 32; "
+            f"ADC {ch}: expected {reads} reads unrolled or one fixed Repeat of {reads}; "
             f"actual emission repeat counts {repeats}"
         )
     triggers = [
@@ -113,7 +170,7 @@ def _resolve_block(prog: TimelineProgramV2, read: str) -> int:
             f"ADC {ch}: expected {len(repeats)} source triggers for the block; "
             f"actual {len(triggers)}"
         )
-    expected_scope = "Repeat" if repeats == [(32,)] else None
+    expected_scope = "Repeat" if repeats == [(reads,)] else None
     for trigger in triggers:
         if (
             trigger.control_scope != expected_scope
@@ -124,5 +181,5 @@ def _resolve_block(prog: TimelineProgramV2, read: str) -> int:
                 f"triggers with repeat counts {repeats[0]}; actual "
                 f"{trigger.control_scope} {trigger.repeat_counts}"
             )
-    validate_declared_reads(prog, ch, 32)
+    validate_declared_reads(prog, ch, reads)
     return ch

@@ -1,6 +1,6 @@
 # `zcu_tools.analysis` 模塊重點文檔
 
-**Last updated:** 2026-11-09，readout_metric bounded fit、no-signal test 與 all-lag information
+**Last updated:** 2026-11-10，thermal-chain closed-form score 與 MIST 排除
 
 **讀者：** framework-dev。分析核心、純數值工具與前端 adapter 的分工速查。
 
@@ -68,6 +68,14 @@ centers／radius／confusion matrix 有限時才提出校準。
 [`SweepSums` 與 `sweep_curve` 的 docstring](readout_chain/sweep.py)。
 
 ## Readout chain 讀出調參
+
+`ThermalChainSums.from_processor(axis, sums)` 保存每點 16-read shot count 與
+`THERMAL_MOMENT_COUNT`（37）個 sums。每個 shot 先回到熱平衡，再無 drive 連讀 16 次。
+`thermal_chain_score(sums)` 用閉式 covariance 計算 score、QND、兩者的一倍標準差與
+正規化的 MIST amount，不做 fit。每個 read 位置各扣自己的 mean，因此固定 IQ offset 不改結果。
+`ThermalChainScore.settings` 依 acquisition order 保留每點 `SettingScore`，包括被排除的點。
+MIST amount 大於 |correlation| 的點不進 ranking，其餘依 score − score_error 排序，同分保留 acquisition order。
+Ranking 全空時沒有最佳點。欄位、公式與 ValueError 條件見 [thermal.py](readout_chain/thermal.py)。
 
 `readout_chain.ReadoutSums.from_processor(axis, sums)` 保存每個 setting 的
 32-read block count 與 `MOMENT_COUNT`（113）個 moment sums。Processor output 的 shape 是

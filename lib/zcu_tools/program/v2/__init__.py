@@ -1,7 +1,7 @@
 from . import modules, utils
 from .base import MyProgramV2
 from .builder import BuilderBranchCases, TimelineBuilder
-from .chain_readout import chain_readout_sums
+from .chain_readout import chain_readout_sums, thermal_chain_sums
 from .chain_sweep import chain_sweep_sums
 from .modules import (
     AbsModuleCfg,
