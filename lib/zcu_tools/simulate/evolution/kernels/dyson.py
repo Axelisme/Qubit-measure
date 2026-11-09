@@ -168,10 +168,13 @@ def _path_key(a: int, b: int, c: int, r: int, s: int, dimension: int) -> int:
 
 @njit(nogil=True, cache=True)
 def _paired_path_groups(
-    indices: NDArray[np.int64], conjugates: NDArray[np.int64]
-) -> NDArray[np.int64]:
-    """Return disjoint conjugate pairs; unmatched paths must remain retained.
+    indices: NDArray[np.int64],
+    conjugates: NDArray[np.int64],
+    bounds: NDArray[np.float64],
+) -> tuple[NDArray[np.int64], NDArray[np.float64]]:
+    """Return disjoint conjugate pairs and their bounds; retain unmatched paths.
 
+    Gather bounds while pairing to avoid another scan and indexed temporaries.
     Shared tables can contain hundreds of thousands of records even for seven
     rows. Use integer keys and a half-full, linearly probed array lookup instead
     of constructing Python tuples and dict entries. Keep input order so stable
@@ -192,6 +195,7 @@ def _paired_path_groups(
             slot = (slot + 1) % capacity
         slots[slot] = path
     groups = np.empty((len(indices), 2), dtype=np.int64)
+    group_bounds = np.empty(len(indices), dtype=np.float64)
     count = 0
     for path in range(len(indices)):
         a, b, c, r, s = indices[path]
@@ -210,8 +214,11 @@ def _paired_path_groups(
         if partner >= path:
             groups[count, 0] = path
             groups[count, 1] = partner
+            group_bounds[count] = bounds[path] + (
+                0.0 if path == partner else bounds[partner]
+            )
             count += 1
-    return groups[:count]
+    return groups[:count], group_bounds[:count]
 
 
 @njit(nogil=True, cache=True)
@@ -235,6 +242,7 @@ def _pruned_path_mask(
     return keep, discarded
 
 
+@njit(nogil=True, cache=True)
 def _validate_path_records(indices: NDArray[np.int64], dimension: int) -> None:
     """Validate (a,b,c,r,s) fields without changing the path records.
 
@@ -243,18 +251,20 @@ def _validate_path_records(indices: NDArray[np.int64], dimension: int) -> None:
     for second order. r is +/-1; s is 0 for first order and +/-1 for second order.
     Return None when all records are valid, otherwise raise ValueError.
     """
-    a, b, c, r, s = indices.T
-    if (
-        np.any(a < 0)
-        or np.any(a >= dimension)
-        or np.any(b < 0)
-        or np.any(b >= dimension)
-        or np.any(c < -1)
-        or np.any(c >= dimension)
-        or np.any(abs(r) != 1)
-        or np.any(np.where(c == -1, s != 0, abs(s) != 1))
-    ):
-        raise ValueError("Dyson pruning received an invalid path record")
+    # Scan each record once instead of allocating a mask for every field.
+    for path in range(len(indices)):
+        a, b, c, r, s = indices[path]
+        if (
+            a < 0
+            or a >= dimension
+            or b < 0
+            or b >= dimension
+            or c < -1
+            or c >= dimension
+            or abs(r) != 1
+            or (s != 0 if c == -1 else abs(s) != 1)
+        ):
+            raise ValueError("Dyson pruning received an invalid path record")
 
 
 def prune_dyson_paths(
@@ -322,18 +332,14 @@ def prune_dyson_paths(
         growth = np.exp(
             max(0.0, float(np.max(eigenvalues.real))) * extent.max_duration_ns
         )
-        bounds = (
-            abs(coefficients)
-            * np.where(c == -1, strength, strength**2 / 2)
-            * growth
-            * pruning[a]
-        )
+        # Own one bound buffer and preserve the original multiplication order.
+        bounds = abs(coefficients)
+        bounds *= np.where(c == -1, strength, strength**2 / 2)
+        bounds *= growth
+        bounds *= pruning[a]
     if not np.isfinite(bounds).all():
         raise ValueError("Dyson pruning bounds must be finite")
-    groups = _paired_path_groups(indices, conjugates)
-    group_bounds = bounds[groups[:, 0]] + np.where(
-        groups[:, 0] == groups[:, 1], 0.0, bounds[groups[:, 1]]
-    )
+    groups, group_bounds = _paired_path_groups(indices, conjugates, bounds)
     keep, discarded = _pruned_path_mask(
         groups,
         group_bounds,
@@ -687,24 +693,29 @@ def _prepare_model(model: SecularModel) -> _Entry:
         )
     except np.linalg.LinAlgError as error:
         raise RuntimeError("Dyson modal decomposition failed") from error
+    population_block = np.ix_(populations, populations)
+    population_vectors = vectors[population_block]
+    population_inverse = inverse[population_block]
     couplings = []
     for drive in model.drives:
-        pair = np.stack(
-            [
-                inverse
-                @ commutator(
-                    (drive.in_phase_ghz - sign * 1j * drive.quadrature_ghz) / 2
-                )
-                @ vectors
-                for sign in (-1, 1)
-            ]
-        )
-        couplings.append(freeze(pair))
-    # Adjoint each column of W, then express it in modal coordinates. Unlike
-    # nearest-eigenvalue matching, this handles repeated coherence roots and
-    # complex-conjugate population eigenmodes of a real rate generator.
-    adjoints = vectors.reshape(size, size, -1).conj().swapaxes(0, 1)
-    conjugates = np.argmax(abs(inverse @ adjoints.reshape(size**2, -1)), axis=0)
+        sidebands = []
+        for sign in (-1, 1):
+            coupling = commutator(
+                (drive.in_phase_ghz - sign * 1j * drive.quadrature_ghz) / 2
+            )
+            # W and its inverse are identity on coherences. Only population
+            # rows/columns change in W^-1 L(A) W; avoid two dense d² products.
+            coupling[populations] = population_inverse @ coupling[populations]
+            coupling[:, populations] = coupling[:, populations] @ population_vectors
+            sidebands.append(coupling)
+        couplings.append(freeze(np.stack(sidebands)))
+    # Adjoint swaps each coherence coordinate. Only population columns need
+    # modal projection, including complex-conjugate modes of a real Q. This
+    # also avoids ambiguous eigenvalue matching for repeated coherence roots.
+    conjugates = np.arange(size**2).reshape(size, size).T.ravel().copy()
+    conjugates[populations] = populations[
+        np.argmax(abs(population_inverse @ population_vectors.conj()), axis=0)
+    ]
     conjugates.setflags(write=False)
     return _Entry(
         freeze(values), freeze(vectors), freeze(inverse), tuple(couplings), conjugates
