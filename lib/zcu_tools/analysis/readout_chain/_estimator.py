@@ -1,13 +1,10 @@
-"""Closed-form start, fixed weak priors and one Gauss-Newton update.
+"""Closed-form three-state start, coordinate maps and bounded refinement."""
 
-The start solves the two-state cumulant equations along the principal signal
-axis, then places a third state from the orthogonal axis. A step with fixed
-weak priors on the third state moves the start once toward all saved moments;
-there is no iterative optimisation or choice of state count.
-"""
+from typing import Any
 
 import numpy as np
-from scipy.special import expit
+from scipy.optimize import least_squares
+from scipy.special import expit, logit
 
 from ._model import (
     EARLY_TRIPLES,
@@ -21,6 +18,7 @@ from ._model import (
     contiguous_covariance,
     moment_mean_jacobian,
     moment_means,
+    stationary_population,
 )
 
 # The 25 scalar moments along one IQ axis (projected_moments), in order.
@@ -30,7 +28,7 @@ AXIS_LAGS = slice(2, 17)  # lag 1..15 x_t x_{t+k}
 AXIS_EARLY = slice(17, 21)  # lag 1..4 x_t² x_{t+k}
 AXIS_LATE = slice(21, 25)  # lag 1..4 x_t x_{t+k}²
 
-# The 12 free coordinates of the Gauss-Newton step, in order.
+# The 12 free coordinates of the bounded fit, in order.
 FREE_CENTRES = slice(0, 6)  # centres of g, e, f, each I then Q
 FREE_THIRD_CENTRE = slice(4, 6)
 FREE_LOG_VARIANCE = 6
@@ -320,30 +318,85 @@ def moment_jacobian(coordinates: FloatArray) -> FloatArray:
     )
 
 
-def one_step_fit(features: FloatArray, blocks: float) -> tuple[FloatArray, FloatArray]:
-    """One penalised model-weighted GN step and its sampling covariance in free space.
+class _ResidualRows:
+    """Fixed start-model whitening and prior rows for bounded least squares."""
 
-    features are the block-averaged saved moments of one setting and blocks
-    their block count. Return the fitted free coordinates and their sampling
-    covariance. Raise UnfittableMoments (no main-axis signal) or LinAlgError.
+    def __init__(self, features: FloatArray, blocks: float) -> None:
+        self.features = features
+        start = safe_start(features)
+        self.start = free_coordinates(start)
+        landing = start.landing.copy()
+        landing[np.argmin(stationary_population(start))] = 0
+        weight_model = start._replace(landing=landing / landing.sum())
+        covariance = contiguous_covariance(weight_model) / blocks
+        eigenvalues, vectors = np.linalg.eigh((covariance + covariance.T) / 2)
+        self.whitener = (
+            vectors / np.sqrt(np.maximum(eigenvalues, eigenvalues.max() * 1e-14))
+        ).T
+        self.prior, scale = prior_coordinates(start)
+        self.prior_indices = np.flatnonzero(np.isfinite(scale))
+        self.prior_root = 1 / scale[self.prior_indices]
+        self.prior_rows = np.zeros((len(self.prior_indices), FREE_COUNT))
+        self.prior_rows[np.arange(len(self.prior_indices)), self.prior_indices] = (
+            self.prior_root
+        )
+
+    def residual(self, coordinates: FloatArray) -> FloatArray:
+        moments = self.whitener @ (
+            moment_means(physical_coordinates(coordinates)) - self.features
+        )
+        prior = (coordinates - self.prior)[self.prior_indices] * self.prior_root
+        return np.concatenate((moments, prior))
+
+    def jacobian(self, coordinates: FloatArray) -> FloatArray:
+        return np.vstack(
+            (self.whitener @ moment_jacobian(coordinates), self.prior_rows)
+        )
+
+    def sampling_covariance(self, coordinates: FloatArray) -> FloatArray:
+        derivative = self.whitener @ moment_jacobian(coordinates)
+        normal = derivative.T @ derivative + self.prior_rows.T @ self.prior_rows
+        response = np.linalg.solve(normal, derivative.T)
+        # The prior is fixed, not a new random observation in each stream.
+        return response @ response.T
+
+
+def bounded_fit(features: FloatArray, blocks: float) -> tuple[FloatArray, FloatArray]:
+    """Refine one setting's (113,) moment averages with bounded trf least squares.
+
+    blocks is the number of contiguous 32-read blocks. Start with safe_start;
+    hold its weak priors and model covariance fixed. For weights only, set the
+    start's least populated state's landing to zero and renormalise landing.
+    Do not change the start, priors or free coordinates. Bound λ in [.01, .995]
+    and the two log landing ratios in [-10.8, 10.8]; keep the coordinate map's
+    1e-5 landing floor. Return (12,) free coordinates and their (12,12)
+    delta-method sampling covariance at the solution, including fixed priors.
+    Raise UnfittableMoments for a missing signal, non-finite start or exhausted
+    evaluation budget (1200 residual calls); LinAlgError for singular covariance.
     """
-    start = safe_start(features)
-    covariance = contiguous_covariance(start) / blocks
-    eigenvalues, vectors = np.linalg.eigh((covariance + covariance.T) / 2)
-    whitener = vectors / np.sqrt(np.maximum(eigenvalues, eigenvalues.max() * 1e-14))
-    coordinates = free_coordinates(start)
-    jacobian = moment_jacobian(coordinates)
-    derivative = whitener.T @ jacobian
-    residual = whitener.T @ (features - moment_means(start))
-    prior, scale = prior_coordinates(start)
-    precision = np.diag(1 / scale**2)
-    normal = derivative.T @ derivative + precision
-    update = np.linalg.solve(
-        normal, derivative.T @ residual + precision @ (prior - coordinates)
+    rows = _ResidualRows(features, blocks)
+    lower, upper = np.full(FREE_COUNT, -np.inf), np.full(FREE_COUNT, np.inf)
+    # Stay inside the clipping kinks, whose tangents use mean one-sided slopes.
+    lower[FREE_LOGIT_RETENTION] = logit(0.01) + 1e-9
+    upper[FREE_LOGIT_RETENTION] = logit(0.995) - 1e-9
+    lower[FREE_LOG_LANDING_RATIOS] = -10.8
+    upper[FREE_LOG_LANDING_RATIOS] = 10.8
+    start = np.clip(rows.start, lower + 1e-10, upper - 1e-10)
+    if not np.isfinite(rows.residual(start)).all():
+        raise UnfittableMoments("non-finite residual at the start")
+    # scipy-stubs incorrectly restricts jac to str; SciPy accepts a callable.
+    analytic: Any = rows.jacobian
+    solved = least_squares(
+        rows.residual,
+        start,
+        jac=analytic,
+        bounds=(lower, upper),
+        method="trf",
+        x_scale="jac",
+        max_nfev=100 * FREE_COUNT,
     )
-    fitted = coordinates + update
-    # Frequentist sampling covariance, not inverse penalised Hessian: the fixed
-    # prior is not a fresh random observation on every acquired stream.
-    response = np.linalg.solve(normal, derivative.T)
-    sampling_covariance = response @ response.T
-    return fitted, sampling_covariance
+    if solved.status == 0:
+        raise UnfittableMoments(
+            "fit hit the evaluation budget (1200 evaluations, status 0)"
+        )
+    return solved.x, rows.sampling_covariance(solved.x)

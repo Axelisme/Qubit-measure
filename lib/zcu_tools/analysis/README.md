@@ -1,6 +1,6 @@
 # `zcu_tools.analysis` 模塊重點文檔
 
-**Last updated:** 2026-11-09，readout_metric 解析導數與逐 setting 失敗隔離
+**Last updated:** 2026-11-09，readout_metric bounded fit、no-signal test 與 all-lag information
 
 **讀者：** framework-dev。分析核心、純數值工具與前端 adapter 的分工速查。
 
@@ -75,28 +75,41 @@ centers／radius／confusion matrix 有限時才提出校準。
 113 個 moment 的欄位分段只在 `_model.py` 定義一次，estimator 與驗證都引用它。
 相鄰 blocks 是同一條 stationary stream，不假設它們獨立。
 
-`readout_metric(sums)` 以 closed-form start 和一次帶固定弱 prior 的
-model-covariance weighted Gauss–Newton step 擬合三態。Covariance 包含跨 block
+`readout_metric(sums)` 從 closed-form start，以 SciPy bounded trf least squares 擬合
+全部 113 個 moments，固定 covariance 與弱 prior。計算權重時，先將 start 布居最少態
+的 landing 設為零，再歸一 landing。這只改權重，不改 start、prior 或 free coordinates。
+Covariance 包含跨 block
 相關，並以 32-step geometric tail 求和。模型假設每個 IQ component 有相同
 Gaussian noise variance，read transition 是逐態 retention 加共同 landing。
-Moment Jacobian 與 pair metric gradient 都用解析式，並傳遞有界 free coordinates 的鏈式法則。
+Optimizer 將 λ 限制在 [0.01, 0.995]，兩個 log landing ratios 限制在 [-10.8, 10.8]。
+Coordinate map 保留 1e-5 landing floor。Moment Jacobian 與 metric gradient 都用解析式。
 函式不讀 program、檔案或硬體。首次呼叫需要編譯 Numba kernels。
 
-每個 setting 單獨擬合。`ReadoutMetric.fits` 以 setting index 對應 `SettingFit`，
-`failures` 以 index 對應 `SettingFailure`（setting 座標與原因），每個 index 只在其中一邊。
-無可識別主軸 signal、奇異矩陣或非有限 fit 成為該 setting 的 failure，不影響其他 setting，
-也不以 NaN 填位。`ranking` 只列已擬合的 indices，依 metric 由高到低。
-輸入 shape、不有限值、非整數 count 或不足兩個 blocks 仍拋出 ValueError。
+每個 setting 先做 no-signal test。將 lag 1–4 的對稱 covariance 加總成 K，
+取 v=(K_II,K_IQ,K_QQ)。若 K 的最大 eigenvalue ≤0，或 vᵀΣ⁻¹v < 2 ln B，
+將 index 放入 `ReadoutMetric.no_signal`，不擬合也不排名。B 是 block count。
+Σ 在 centres 全等於測得 mean、同讀 covariance trace/2 為 noise variance、
+λ=0.5、uniform landing 的模型計算。
 
-`SettingFit.metric` 是兩個最高 stationary population 態的
-read–drive–read information。計算時只取這兩態，使用等布居與對稱 landing，
-不平均三對態。較大值較好。`separation` 是這兩態的 d/sigma，
-`retention` 保存它們各自的 λ，`third_population` 是剩餘態的 stationary population。
+每個 index 恰好出現在 `fits`、`no_signal`、`failures` 其中之一。
+`fits` 對應 `SettingFit`，`failures` 對應含 setting 座標與原因的 `SettingFailure`。
+奇異矩陣、非有限 fit 或耗盡 1200 次 evaluation budget 都只使該 setting 失敗。
+`ranking` 只列 fits，依 metric 由高到低。輸入 shape、不有限值、非整數 count
+或不足兩個 blocks 仍拋出 ValueError。
 
-`standard_error` 是固定 start covariance 與 prior 下，單步 estimator 的
-delta-method sampling error。它不涵蓋單步近似的 bias。
-Start 看不到第三態時（正交軸沒有 lag covariance 或 landing 不超過 1.5e-3），
-把第三態移到固定 prior；此時個別 λ 可能不可識別。
+`SettingFit.metric` 是無限對稱 ...DRDRDR... 鏈對弱 drive 的每 read information，
+以所有 lag j≥1 的 read products、精確 long-run covariance 與 GLS weights 計算。
+取 fitted stationary population 最高的兩態，設為等布居，q=d²/(4σ²)，
+Q 是兩態 transition block 逐列歸一後的 R̃_aa+R̃_bb−1。
+閉式解見 `readout_metric` docstring。它定義對稱 target，不是原始不等布居鏈的資訊量。
+較大值較好。`separation` 是這兩態的 d/sigma，`retention` 是它們各自的 λ，
+`third_population` 是剩餘態的 stationary population。`qnd` 保存 Q，`qnd_error` 是 Q
+的一倍標準差，使用相同 sampling covariance 與 Q 的解析梯度。
+
+`standard_error` 是 final analytic Jacobian、固定 start covariance 與 prior 下的
+delta-method sampling error，不涵蓋 fit bias。Start 看不到第三態時（正交軸沒有
+lag covariance 或 landing 不超過 1.5e-3），把第三態移到固定 prior；
+此時個別 λ 可能不可識別。
 
 ## Readout QND 指標
 

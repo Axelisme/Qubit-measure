@@ -1,12 +1,18 @@
 """Analytic derivatives at the numerical model seams, with test-only oracles."""
 
 from collections.abc import Callable
+from decimal import Decimal, localcontext
 
 import numpy as np
 import pytest
 from numpy.typing import NDArray
 from zcu_tools.analysis.readout_chain import _estimator, _information
-from zcu_tools.analysis.readout_chain._model import ModelParameters
+from zcu_tools.analysis.readout_chain._model import (
+    ModelParameters,
+    contiguous_covariance,
+    moment_means,
+    stationary_population,
+)
 
 FloatArray = NDArray[np.float64]
 LongArray = NDArray[np.longdouble]
@@ -47,6 +53,54 @@ def moment_oracle(free: FloatArray) -> LongArray:
             early.extend((quadratic.T @ joint @ centres).ravel())
             late.extend((centres.T @ joint @ quadratic).ravel())
     return np.array([*values, *early, *late], dtype=np.longdouble)
+
+
+def information_oracle(
+    free: FloatArray, pair: NDArray[np.int64], *, correlation_only: bool = False
+) -> LongArray:
+    """Evaluate the spec with decimal arithmetic before test-only differencing.
+
+    Tiny pair landings can make Q so close to one that even long-double Q
+    rounding pollutes a central difference of information.
+    """
+    with localcontext() as context:
+        context.prec = 50
+        x = [Decimal(float(value)) for value in free]
+        one = Decimal(1)
+        keep = [
+            min(max(one / (one + (-v).exp()), Decimal(0.01)), Decimal(0.995))
+            for v in x[7:10]
+        ]
+        weights = [
+            min(max(v, Decimal(-12)), Decimal(12)).exp() for v in [Decimal(0), *x[10:]]
+        ]
+        total = sum(weights)
+        land = [max(w / total, Decimal(1e-5)) for w in weights]
+        total = sum(land)
+        land = [w / total for w in land]
+        a, b = pair
+        q = sum((x[2 * b + c] - x[2 * a + c]) ** 2 for c in (0, 1)) / (4 * x[6].exp())
+        Q = (
+            sum(
+                (keep[i] + (1 - keep[i]) * land[i])
+                / (keep[i] + (1 - keep[i]) * (land[a] + land[b]))
+                for i in pair
+            )
+            - 1
+        )
+        kappa = (1 + Q**2 + q * (1 - Q**2)) / (2 * Q)
+        z = 1 / (kappa + (kappa**2 - 1).sqrt())
+        value = (
+            4
+            * (Q - z) ** 2
+            * (1 - Q**2 + Q * z + 3 * Q**3 * z - 4 * Q**2 * z**2)
+            / (
+                (1 - Q**2)
+                * (1 - Q * z)
+                * (1 - Q**2 + 4 * Q * z - 5 * z**2 - 3 * Q**2 * z**2 + 4 * Q * z**3)
+            )
+        )
+    return np.array([str(Q if correlation_only else value)], dtype=np.longdouble)
 
 
 def finite_difference(
@@ -188,13 +242,7 @@ def test_pair_information_gradient_matches_independent_oracle(
     with np.errstate(divide="ignore"):
         free = _estimator.free_coordinates(model)
     expected = finite_difference(
-        lambda value: np.array(
-            [
-                _information.pair_information(
-                    _estimator.physical_coordinates(value), pair
-                )
-            ]
-        ),
+        lambda value: information_oracle(value, pair),
         free,
         kink=bool(np.any(model.retention == 0.995)),
     )
@@ -203,6 +251,14 @@ def test_pair_information_gradient_matches_independent_oracle(
 
     assert actual.shape == (12,)
     assert_derivative(actual[None, :], expected)
+    expected_qnd = finite_difference(
+        lambda value: information_oracle(value, pair, correlation_only=True),
+        free,
+        kink=bool(np.any(model.retention == 0.995)),
+    )
+    assert_derivative(
+        _information.pair_correlation_gradient(free, pair)[None, :], expected_qnd
+    )
 
 
 @pytest.mark.parametrize(
@@ -235,13 +291,7 @@ def test_bounded_derivatives_follow_clips_and_mean_one_sided_kink_slopes(
         kink=True,
     )
     information = finite_difference(
-        lambda value: np.array(
-            [
-                _information.pair_information(
-                    _estimator.physical_coordinates(value), pair
-                )
-            ]
-        ),
+        lambda value: information_oracle(value, pair),
         free,
         kink=True,
     )
@@ -250,3 +300,37 @@ def test_bounded_derivatives_follow_clips_and_mean_one_sided_kink_slopes(
     assert_derivative(
         _information.pair_information_gradient(free, pair)[None, :], information
     )
+    qnd = finite_difference(
+        lambda value: information_oracle(value, pair, correlation_only=True),
+        free,
+        kink=True,
+    )
+    assert_derivative(_information.pair_correlation_gradient(free, pair)[None, :], qnd)
+
+
+def test_fit_sampling_covariance_excludes_spurious_third_state_from_weights() -> None:
+    model = ModelParameters(
+        np.array([[-0.7, 0.0], [0.7, 0.0], [0.2, 1.0]]),
+        1.0,
+        np.array([0.985, 0.95, 0.9]),
+        np.array([0.56, 0.439, 0.001]),
+    )
+    features = moment_means(model)
+    blocks = 100_000.0
+    start = _estimator.safe_start(features)
+    landing = start.landing.copy()
+    landing[np.argmin(stationary_population(start))] = 0
+    weight_model = start._replace(landing=landing / landing.sum())
+    weights = contiguous_covariance(weight_model) / blocks
+    values, vectors = np.linalg.eigh((weights + weights.T) / 2)
+    whitener = (vectors / np.sqrt(np.maximum(values, values.max() * 1e-14))).T
+
+    free, actual = _estimator.bounded_fit(features, blocks)
+
+    # Independent numerical tangent and the specified fixed-prior sandwich.
+    derivative = whitener @ finite_difference(moment_oracle, free)
+    _, scale = _estimator.prior_coordinates(start)
+    normal = derivative.T @ derivative + np.diag(1 / scale**2)
+    response = np.linalg.solve(normal, derivative.T)
+    expected = response @ response.T
+    np.testing.assert_allclose(actual, expected, rtol=1e-5, atol=1e-9)

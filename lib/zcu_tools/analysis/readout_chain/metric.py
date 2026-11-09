@@ -7,12 +7,22 @@ from numpy.typing import NDArray
 
 from ._estimator import (
     UnfittableMoments,
-    one_step_fit,
+    bounded_fit,
     physical_coordinates,
 )
+from ._information import pair_correlation, pair_correlation_gradient
 from ._information import pair_information as _pair_information
 from ._information import pair_information_gradient as _pair_information_gradient
-from ._model import MOMENT_COUNT, FloatArray, stationary_population
+from ._model import (
+    LAG_PAIRS,
+    MEANS,
+    MOMENT_COUNT,
+    SAME_READ,
+    FloatArray,
+    ModelParameters,
+    contiguous_covariance,
+    stationary_population,
+)
 
 
 @dataclass(frozen=True)
@@ -56,15 +66,23 @@ class ReadoutSums:
 
 @dataclass(frozen=True)
 class SettingFit:
-    """One-step readout fit of one setting. Every value is finite.
+    """Bounded three-state readout fit of one setting. Every value is finite.
 
     setting: the setting's coordinate from ReadoutSums.axis, in its units.
-    metric: read-drive-read information for exchange of the two most
-        populated fitted states, evaluated at equal pair populations and
-        uniform landing within that pair. Dimensionless; larger is better.
-    standard_error: one-sigma delta-method error of metric, >= 0, using the
-        start-model covariance and the one-step estimator, including its
-        fixed weak priors. Asymptotic in block count; not a fit-bias bound.
+    metric: information per read about a weak drive in an infinite symmetric
+        ...DRDRDR... chain, combining all lag j>=1 read products with GLS and
+        their exact long-run covariance. Use the two most populated fitted
+        states at equal populations, q=d²/(4σ²), and Q=R̃_aa+R̃_bb-1 of their
+        row-renormalised transition block. Dimensionless; larger is better.
+    standard_error: one-sigma delta-method sampling error of metric, >= 0,
+        using the start-model covariance, final analytic Jacobian and fixed
+        weak priors. Asymptotic in block count; not a fit-bias bound.
+    qnd: Q=R̃_aa+R̃_bb-1 for the dominant pair, with each row of its
+        transition block renormalised within the pair. Dimensionless, 0<Q<1;
+        equals λ for an equal-retention pair with no third-state landing.
+    qnd_error: one-sigma delta-method sampling error of qnd, >=0, using the
+        same sampling covariance as standard_error and Q's analytic gradient.
+        It is not a bias bound and excludes pair-selection uncertainty.
     separation: dominant-pair centre distance divided by the fitted per-I/Q
         Gaussian noise standard deviation (d/sigma).
     retention: read retention λ of the two dominant states, in descending
@@ -78,6 +96,8 @@ class SettingFit:
     setting: float
     metric: float
     standard_error: float
+    qnd: float
+    qnd_error: float
     separation: float
     retention: tuple[float, float]
     third_population: float
@@ -88,9 +108,9 @@ class SettingFailure:
     """A setting whose saved moments the estimator cannot fit.
 
     setting: the setting's coordinate from ReadoutSums.axis, in its units.
-    reason: the estimator's message, for example "readout moments have no
-        identifiable main-axis signal", "Singular matrix" or "non-finite
-        one-step readout fit".
+    reason: the estimator's message, for example "fit hit the evaluation
+        budget (1200 evaluations, status 0)", "Singular matrix", or
+        "non-finite bounded readout fit". No-signal settings are not failures.
     """
 
     setting: float
@@ -103,75 +123,142 @@ class ReadoutMetric:
 
     fits: index -> SettingFit for each setting the estimator fitted, in
         acquisition order.
+    no_signal: indices stopped by the pre-fit no-signal test, in acquisition
+        order. Every index is in exactly one of fits, no_signal and failures.
     failures: index -> SettingFailure for each setting it could not fit, in
-        acquisition order. Every index is in exactly one of fits and failures.
-    ranking: the indices in fits, metric descending; failed settings are
-        absent. Exact ties keep acquisition order. Empty when nothing fits.
+        acquisition order.
+    ranking: the indices in fits, metric descending; no-signal and failed
+        settings are absent. Exact ties keep acquisition order.
     """
 
     fits: dict[int, SettingFit]
+    no_signal: tuple[int, ...]
     failures: dict[int, SettingFailure]
     ranking: tuple[int, ...]
 
 
 def readout_metric(sums: ReadoutSums) -> ReadoutMetric:
-    """Fit three states per setting with a closed-form start and one GN step.
+    """Fit three states per setting with a closed-form start and bounded trf.
 
     sums holds the block moments defined on ReadoutSums. Assume a stationary
     contiguous stream, isotropic independent Gaussian read noise, and transition
     R_ij = λ_i δ_ij + (1-λ_i) ρ_j. Use exact contiguous 32-read block covariance
-    at the start and the fixed weak third-state priors. Ignore stream-end edges.
-    No hardware, file access or input mutation occurs. The metric discards the
-    least populated state only when evaluating the fitted dominant pair.
-    Each setting is fitted alone. A setting whose moments cannot be fitted (no
-    identifiable main-axis signal, a singular matrix or a non-finite one-step
-    result) becomes a SettingFailure; the other settings are unaffected.
+    at the start, removing its least populated state's landing and renormalising
+    landing for weights only. Keep the start and weak priors unchanged.
+    Ignore stream-end edges.
+    Bound λ in [.01, .995] and log landing ratios in [-10.8, 10.8]; retain
+    the coordinate map's 1e-5 landing floor. No hardware, file access or input
+    mutation occurs.
+
+    Before fitting, sum symmetrised lag 1..4 covariance matrices into K and
+    form v=(K_II,K_IQ,K_QQ). With B blocks, report no_signal when the largest
+    eigenvalue of K is <=0 or v.T @ inv(Σ) @ v < 2*ln(B). Σ is v's sampling
+    covariance at three coincident centres at the measured mean, noise variance
+    from the same-read covariance trace/2, λ=.5, and uniform landing. Such
+    settings are neither fitted nor ranked.
+
+    The metric is all-lag GLS information per read about a weak drive in an
+    infinite symmetric ...DRDRDR... chain, for the two most populated fitted
+    states at equal populations. Set q=d²/(4σ²), Q=R̃_aa+R̃_bb-1 from their
+    row-renormalised transition block, κ=(1+Q²+q*(1-Q²))/(2Q), z=κ-sqrt(κ²-1).
+    Then I=4*(Q-z)²*(1-Q²+Q*z+3*Q³*z-4*Q²*z²) /
+    ((1-Q²)*(1-Q*z)*(1-Q²+4*Q*z-5*z²-3*Q²*z²+4*Q*z³)). Larger is better.
+    qnd reports Q; qnd_error propagates the same sampling covariance through
+    Q's analytic gradient. The third population is a leakage diagnostic;
+    all three states fit.
+
+    Singular matrices, non-finite fits and exhaustion of the 1200-evaluation
+    budget become per-setting SettingFailure values without losing other
+    settings. Every index is in exactly one of fits, no_signal and failures.
     Raise ValueError for malformed/non-finite sums or fewer than two blocks.
     """
     # The frozen record's arrays remain mutable after construction.
     _validate_sums(sums)
     fits: dict[int, SettingFit] = {}
     failures: dict[int, SettingFailure] = {}
+    no_signal: list[int] = []
     for index, blocks in enumerate(sums.block_count):
         setting = float(sums.axis[index])
         features = sums.feature_sums[index] / blocks
         try:
-            fits[index] = _fit_setting(setting, features, float(blocks))
+            if _no_signal(features, float(blocks)):
+                no_signal.append(index)
+            else:
+                fits[index] = _fit_setting(setting, features, float(blocks))
         except (UnfittableMoments, np.linalg.LinAlgError) as error:
             # Isolate: one setting the estimator cannot fit keeps the others.
             failures[index] = SettingFailure(setting, str(error))
     ranking = sorted(fits, key=lambda index: -fits[index].metric)
-    return ReadoutMetric(fits=fits, failures=failures, ranking=tuple(ranking))
+    return ReadoutMetric(
+        fits=fits, no_signal=tuple(no_signal), failures=failures, ranking=tuple(ranking)
+    )
+
+
+def _no_signal(features: FloatArray, blocks: float) -> bool:
+    mean = features[MEANS]
+    lags = features[LAG_PAIRS].reshape(15, 2, 2)[:4] - np.outer(mean, mean)
+    pooled = ((lags + lags.transpose(0, 2, 1)) / 2).sum(axis=0)
+    if np.linalg.eigvalsh(pooled)[-1] <= 0:
+        return True
+    ii, _, qq = features[SAME_READ]
+    variance = float(ii + qq - mean @ mean) / 2
+    null = ModelParameters(
+        np.tile(mean, (3, 1)), variance, np.full(3, 0.5), np.full(3, 1 / 3)
+    )
+    derivative = np.zeros((3, MOMENT_COUNT))
+    for lag in range(4):
+        column = LAG_PAIRS.start + 4 * lag
+        derivative[0, column] = derivative[2, column + 3] = 1
+        derivative[1, column + 1 : column + 3] = 0.5
+    derivative[0, 0] = -8 * mean[0]
+    derivative[1, :2] = -4 * mean[::-1]
+    derivative[2, 1] = -8 * mean[1]
+    covariance = derivative @ contiguous_covariance(null) @ derivative.T / blocks
+    vector = pooled[np.array([0, 0, 1]), np.array([0, 1, 1])]
+    statistic = float(vector @ np.linalg.solve(covariance, vector))
+    return statistic < 2 * np.log(blocks)
 
 
 def _fit_setting(setting: float, features: FloatArray, blocks: float) -> SettingFit:
     """Fit one setting's averaged moments and evaluate its dominant-pair metric.
 
-    The error propagates the one-step sampling covariance through the analytic
+    The error propagates the final-fit sampling covariance through the analytic
     gradient of the pair metric. Raise UnfittableMoments
     or LinAlgError when the moments cannot be fitted or the fit is non-finite.
     """
-    coordinates, covariance = one_step_fit(features, blocks)
+    coordinates, covariance = bounded_fit(features, blocks)
     model = physical_coordinates(coordinates)
     if not model.is_finite() or model.variance <= 0:
-        raise UnfittableMoments("non-finite one-step readout fit")
+        raise UnfittableMoments("non-finite bounded readout fit")
     population = stationary_population(model)
     order = np.argsort(-population, kind="stable")
     pair = order[:2]
 
     gradient = _pair_information_gradient(coordinates, pair)
+    qnd_gradient = pair_correlation_gradient(coordinates, pair)
     distance = np.linalg.norm(model.centres[pair[1]] - model.centres[pair[0]])
     fit = SettingFit(
         setting=setting,
         metric=_pair_information(model, pair),
         standard_error=float(np.sqrt(max(float(gradient @ covariance @ gradient), 0))),
+        qnd=pair_correlation(model, pair),
+        qnd_error=float(
+            np.sqrt(max(float(qnd_gradient @ covariance @ qnd_gradient), 0))
+        ),
         separation=float(distance / np.sqrt(model.variance)),
         retention=(float(model.retention[pair[0]]), float(model.retention[pair[1]])),
         third_population=float(population[order[2]]),
     )
-    numbers = [fit.metric, fit.standard_error, fit.separation, fit.third_population]
+    numbers = [
+        fit.metric,
+        fit.standard_error,
+        fit.qnd,
+        fit.qnd_error,
+        fit.separation,
+        fit.third_population,
+    ]
     if not np.isfinite([*numbers, *fit.retention]).all():
-        raise UnfittableMoments("non-finite one-step readout result")
+        raise UnfittableMoments("non-finite bounded readout result")
     return fit
 
 

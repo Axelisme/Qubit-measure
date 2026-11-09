@@ -1,10 +1,14 @@
 """Readout metric contracts at the saved-moments analysis seam."""
 
+from collections.abc import Callable
+from typing import Any
+
 import numpy as np
 import pytest
 from numba import njit
 from numpy.testing import assert_array_equal
-from zcu_tools.analysis.readout_chain import ReadoutSums, readout_metric
+from scipy.optimize import OptimizeResult, least_squares
+from zcu_tools.analysis.readout_chain import ReadoutSums, _estimator, readout_metric
 
 
 def exact_moments(
@@ -67,13 +71,10 @@ def test_exact_two_state_moments_recover_reference_information() -> None:
 
     fit = readout_metric(saved_moments(features)).fits[0]
 
-    # Asymptotic SD of the two-state estimator for this stream at 10⁶ blocks,
-    # from the research two-state fit; an unseen third state must not inflate
-    # the error or bias the metric beyond it.
-    two_state_sd = 0.0010496
-    # rdr_metric.rdr(3, .75), independent read-drive-read reference.
-    assert abs(fit.metric - 1.4764556962025317) < two_state_sd
-    assert 0.5 * two_state_sd < fit.standard_error < 2 * two_state_sd
+    # Independent truncated-lag GLS at q=2.25, Q=.75. A three-state fit may
+    # assign a small unseen third population, so allow its modelling error.
+    np.testing.assert_allclose(fit.metric, 2.3030409955595212, rtol=0.02)
+    assert 0 < fit.standard_error < 0.01
     np.testing.assert_allclose(fit.separation, 3, rtol=0.01)
     np.testing.assert_allclose(fit.retention, [0.75, 0.75], atol=0.005)
     assert fit.third_population < 0.01
@@ -90,13 +91,40 @@ def test_exact_three_state_moments_recover_dominant_pair_and_leakage(
 
     fit = readout_metric(saved_moments(features)).fits[0]
 
-    # rdr3.rdr_pair_info on the selected two centres/retentions (K=2).
-    reference = {1.0: 0.09207161125319693, 3.0: 1.4764556962025317}
+    # Independent truncated-lag GLS, Q=.75/(1-.25*.02) after row normalisation.
+    reference = {1.0: 0.5430849373534309, 3.0: 2.364008370477314}
     np.testing.assert_allclose(fit.metric, reference[separation], rtol=0.01)
     np.testing.assert_allclose(fit.separation, separation, rtol=0.01)
     np.testing.assert_allclose(fit.retention, [0.75, 0.75], atol=0.005)
+    np.testing.assert_allclose(fit.qnd, 0.75 / 0.995, rtol=0.002)
+    assert 0 < fit.qnd_error < 0.01
     # Stationary π_f = (.02/.1)/(.49/.25 + .49/.25 + .02/.1).
     np.testing.assert_allclose(fit.third_population, 0.04854368932038836, atol=0.002)
+
+
+@pytest.mark.parametrize(
+    "retention, reference, qnd",
+    [
+        ([0.7, 0.8, 0.9], 2.3631887130074527, 0.7537191017591494),
+        ([0.5, 0.5, 0.95], 0.5899480231069921, 0.505050505050505),
+    ],
+)
+def test_bounded_refinement_recovers_unequal_and_low_retention_truth(
+    retention: list[float], reference: float, qnd: float
+) -> None:
+    features = exact_moments(
+        3 * np.array([[-0.5, 0], [0.5, 0], [0, 1]]),
+        np.array(retention),
+        np.array([0.49, 0.49, 0.02]),
+    )
+
+    fit = readout_metric(saved_moments(features)).fits[0]
+
+    # References are truncated-lag GLS at q=2.25 and the truth's normalised Q.
+    np.testing.assert_allclose(fit.metric, reference, rtol=0.002)
+    np.testing.assert_allclose(fit.separation, 3, rtol=0.002)
+    np.testing.assert_allclose(sorted(fit.retention), sorted(retention[:2]), atol=0.002)
+    np.testing.assert_allclose(fit.qnd, qnd, rtol=0.002)
 
 
 def test_settings_are_ranked_by_information_not_acquisition_order() -> None:
@@ -117,7 +145,7 @@ def test_settings_are_ranked_by_information_not_acquisition_order() -> None:
     assert all(fit.standard_error > 0 for fit in result.fits.values())
 
 
-def test_setting_without_signal_fails_alone_and_is_left_out_of_the_ranking() -> None:
+def test_setting_without_signal_is_reported_apart_and_is_not_ranked() -> None:
     signal = exact_moments(
         3 * np.array([[-0.5, 0], [0.5, 0], [0, 1]]),
         np.array([0.75, 0.75, 0.9]),
@@ -133,20 +161,87 @@ def test_setting_without_signal_fails_alone_and_is_left_out_of_the_ranking() -> 
     result = readout_metric(sums)
 
     assert list(result.fits) == [0, 2]
-    assert list(result.failures) == [1]
-    assert result.failures[1].setting == 6.0
-    assert "signal" in result.failures[1].reason
+    assert result.no_signal == (1,)
+    assert result.failures == {}
     assert result.fits[2].setting == 7.0
-    np.testing.assert_allclose(result.fits[2].metric, 1.4764556962025317, rtol=0.01)
+    np.testing.assert_allclose(result.fits[2].metric, 2.364008370477314, rtol=0.01)
     assert result.ranking == (0, 2)
 
 
-def test_no_fitted_setting_returns_failures_and_an_empty_ranking() -> None:
+@pytest.mark.parametrize(
+    "separation, expected_signal", [(0.0, False), (0.03, False), (0.3, True)]
+)
+def test_no_signal_test_separates_noise_from_resolvable_contrast(
+    separation: float, expected_signal: bool
+) -> None:
+    features = exact_moments(
+        np.array([2.0, -1.0]) + separation * np.array([[-0.5, 0], [0.5, 0], [0, 1]]),
+        np.array([0.75, 0.75, 0.9]),
+        np.array([0.49, 0.49, 0.02]),
+    )
+
+    result = readout_metric(saved_moments(features, blocks=200_000))
+
+    assert (0 in result.fits) == expected_signal
+    assert result.no_signal == (() if expected_signal else (0,))
+    assert result.failures == {}
+    assert result.ranking == ((0,) if expected_signal else ())
+
+
+def test_no_fitted_setting_returns_no_signal_and_an_empty_ranking() -> None:
     result = readout_metric(saved_moments(np.zeros(113)))
 
     assert result.fits == {}
-    assert "signal" in result.failures[0].reason
+    assert result.no_signal == (0,)
+    assert result.failures == {}
     assert result.ranking == ()
+
+
+def test_evaluation_budget_failure_does_not_discard_other_settings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = 0
+
+    def limited_solve(
+        fun: Callable[[np.ndarray], np.ndarray],
+        x0: np.ndarray,
+        *,
+        jac: Callable[[np.ndarray], np.ndarray],
+        bounds: tuple[np.ndarray, np.ndarray],
+        method: str,
+        x_scale: str,
+        max_nfev: int,
+    ) -> OptimizeResult:
+        nonlocal calls
+        calls += 1
+        # Delegate to the real external optimizer, but exhaust the first budget.
+        # scipy-stubs restricts jac to str; SciPy accepts a callable.
+        analytic: Any = jac
+        return least_squares(
+            fun,
+            x0,
+            jac=analytic,
+            bounds=bounds,
+            method=method,
+            x_scale=x_scale,
+            max_nfev=1 if calls == 1 else max_nfev,
+        )
+
+    monkeypatch.setattr(_estimator, "least_squares", limited_solve)
+    features = exact_moments(
+        3 * np.array([[-0.5, 0], [0.5, 0], [0, 1]]),
+        np.array([0.75, 0.75, 0.9]),
+        np.array([0.49, 0.49, 0.02]),
+    )
+
+    result = readout_metric(saved_moments(np.array([features, features])))
+
+    assert list(result.failures) == [0]
+    assert "evaluation budget" in result.failures[0].reason
+    assert result.failures[0].setting == 0.0
+    assert list(result.fits) == [1]
+    assert result.no_signal == ()
+    assert result.ranking == (1,)
 
 
 def test_record_changed_after_construction_still_fails_the_contract() -> None:
@@ -229,7 +324,7 @@ def test_contiguous_stream_error_covers_truth_within_statistical_scatter() -> No
         fit = readout_metric(saved_moments(features, blocks)).fits[0]
         estimates.append(fit.metric)
         errors.append(fit.standard_error)
-    z = (np.array(estimates) - 1.4764556962025317) / np.array(errors)
+    z = (np.array(estimates) - 2.364008370477314) / np.array(errors)
 
     assert np.all(np.isfinite(z))
     # Four fixed streams are a scatter check, not a calibrated 68% coverage study.
@@ -279,134 +374,3 @@ def test_invalid_saved_moments_fail_at_construction(
 def test_processor_output_requires_one_row_per_setting(output: np.ndarray) -> None:
     with pytest.raises(ValueError, match="shape"):
         ReadoutSums.from_processor(np.arange(2.0), output)
-
-
-# Reference outputs of the one-step estimator. Cases 2-6 were recorded with the
-# previous term-by-term contiguous covariance. Case 1 (no third state) was
-# recorded after the start began an unobserved third mode at λ 0.9.
-@pytest.mark.parametrize(
-    "centres, retention, landing, expected",
-    [
-        (
-            [-1.5, 0.0, 1.5, 0.0, 0.0, 0.0],
-            [0.75, 0.75, 0.9],
-            [0.5, 0.5, 0.0],
-            [
-                1.4763772317804855,
-                0.0009352910110219197,
-                2.99979842503713,
-                0.750014551469412,
-                0.7500183638087144,
-                0.004518775269549567,
-            ],
-        ),
-        (
-            [-0.5, 0.0, 0.5, 0.0, 0.0, 1.0],
-            [0.75, 0.75, 0.9],
-            [0.49, 0.49, 0.02],
-            [
-                0.09216337861308682,
-                0.00019892468738077603,
-                1.0003030358841285,
-                0.7499691499772169,
-                0.7500340482845427,
-                0.048542437188464634,
-            ],
-        ),
-        (
-            [-1.5, 0.0, 1.5, 0.0, 0.0, 3.0],
-            [0.75, 0.75, 0.9],
-            [0.49, 0.49, 0.02],
-            [
-                1.4772180779480517,
-                0.0009615318058303575,
-                3.000929827163965,
-                0.7499968471325029,
-                0.7499999266526987,
-                0.048547370319327904,
-            ],
-        ),
-        (
-            [
-                -1.3523439306670328,
-                0.09406588960697114,
-                1.523982675052278,
-                -0.18764031172329215,
-                0.07468568823196649,
-                3.143443118712327,
-            ],
-            [0.4902133691881038, 0.53675991026555, 0.5678022222108959],
-            [0.48, 0.5, 0.02],
-            [
-                0.5520919229644344,
-                0.0005930573567781496,
-                2.8679430777401715,
-                0.5421268362982206,
-                0.4929031734672349,
-                0.02006797461225399,
-            ],
-        ),
-        (
-            [
-                -1.3952033937401496,
-                -0.2572736311776651,
-                1.3664532872555633,
-                -0.0008210135063994839,
-                -0.07355092845686388,
-                3.011773487701744,
-            ],
-            [0.98, 0.99, 0.995],
-            [0.48, 0.5, 0.02],
-            [
-                2.888183658948877,
-                0.0013040888935517152,
-                2.7688297954224277,
-                0.9877966999190795,
-                0.9829655591524091,
-                0.050940981298650774,
-            ],
-        ),
-        (
-            [
-                -1.6227092400162915,
-                -0.20366750552178575,
-                1.6525731838737987,
-                0.037044786507506706,
-                0.09304698437955058,
-                2.923058357019677,
-            ],
-            [0.999, 0.9995, 0.9999],
-            [0.48, 0.5, 0.02],
-            [
-                3.892569328007108,
-                0.0014556867459719906,
-                3.1084794162571203,
-                0.9917556844268278,
-                0.9942363591926585,
-                0.08178195652262832,
-            ],
-        ),
-    ],
-)
-def test_contiguous_covariance_preserves_saved_moment_inference(
-    centres: list[float],
-    retention: list[float],
-    landing: list[float],
-    expected: list[float],
-) -> None:
-    """Retire these references only when the one-step estimator contract changes."""
-    features = exact_moments(
-        np.array(centres).reshape(-1, 2), np.array(retention), np.array(landing)
-    )
-
-    fit = readout_metric(saved_moments(features)).fits[0]
-
-    actual = [
-        fit.metric,
-        fit.standard_error,
-        fit.separation,
-        *fit.retention,
-        fit.third_population,
-    ]
-    # The error's finite-difference gradient amplifies covariance rounding to 1e-8.
-    np.testing.assert_allclose(actual, expected, rtol=1e-7, atol=0)
