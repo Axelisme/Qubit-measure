@@ -1,6 +1,6 @@
 # program/v2
 
-**Last updated:** 2026-11-09，32-read block sums 共用 readout label 規則
+**Last updated:** 2026-11-10，Rπ 連續 reps 與 completed-round 摘要
 
 **讀者：** lab-author、framework-dev、agent。查找 V2 program 公開 API、型別契約與編譯規則的 owner。
 
@@ -136,7 +136,13 @@ Request、數值契約與環境組裝見 [simulation](simulation/README.md)，st
 `chain_readout_sums(prog, read)` 處理同一 PulseReadout 的 32 次連讀，可展開或放在單一 fixed Repeat。
 Build 後先呼叫 `set_reads_per_shot(32)`，再建立 processor。每點回傳 114 欄：block count 與 113 個 moment sums，跨 reps 與 rounds 只加總。
 Caller 保證讀出之間沒有 drive 或額外等待；processor 不檢查 pulse 與 timing 內容。欄位順序、每個 lag 的正規化與失敗條件見函式 docstring。
-三種 processor 共用 `readout_labels` 的 label 規則：pulse 與 mux readout owners 一起判定唯一性，宣告的 read 數由 `validate_declared_reads` 檢查。
+`rpi_sums(prog, read)` 選一個 fixed Repeat（至少 16 reads）內的 PulseReadout，
+將每個 setting 的全部 reps 接為長鏈。Build 後先呼叫 `set_reads_per_shot(n)`。
+多 setting 時必須將 reps 放在最內層。每個完整 round／setting 是獨立 segment，
+35 欄輸出只加 sums/counts，固定 H=1 的單段長度由總 reads／segment 次數恢復。
+Caller 負責 Rπ 排程與無 relax 等待；processor 不檢查 π 校準或未觀察到的物理斷流。
+
+這些 processor 共用 `readout_labels` 的 label 規則：pulse 與 mux readout owners 一起判定唯一性，宣告的 read 數由 `validate_declared_reads` 檢查。
 
 `readout_observation.observe_readouts(prog)` 由 program owner 解包 compiler wrappers，提供 readout provenance、Trigger 順序及控制 scope。
 它靜態訪問 branch 各路與 repeat body 一次，不是 runtime trace 或 linked instructions。

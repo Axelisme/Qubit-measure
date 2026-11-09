@@ -1,6 +1,6 @@
 # `zcu_tools.program` — QICK integration
 
-**Last updated:** 2026-11-09，讀出鏈 augmented sums
+**Last updated:** 2026-11-10，Rπ 連續 reps 摘要
 
 **讀者：** framework-dev。QICK 整合、程式建構與 acquisition 依賴速查。
 
@@ -154,6 +154,13 @@ processor; the selected ADC must have no other triggers. The processor reduces
 each dwell to running moment sums for readout-chain analysis; `acquire_summed`
 adds them across rounds. Feature definitions, array layout and validation are in
 the [`chain_sweep_sums` docstring](v2/chain_sweep.py).
+
+`v2.rpi_sums(prog, read)` 將每個 setting 的連續 reps 當作一段 Rπ 鏈，
+每個完整 round 回傳 35 欄的可加摘要。Lag 1..15 跨 reps 與內部分塊，不跨
+setting 或 round。多 setting 必須使用 `reps_innermost=True`。Caller 排程 Rπ、
+設定 `relax_delay=0` 並校準 π；processor 無法偵測未出現在輸入的物理斷流。
+固定 H=1 的 metadata 由總 reads／segment 次數恢復單段長度，不能合併不同長度。
+欄位與建構限制見 [`rpi_sums` docstring](v2/rpi.py)。
 
 Build first, then resolve labels and call
 `sched.run_acquire_summed(program, soc, processor=..., rounds=...,

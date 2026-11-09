@@ -1,6 +1,6 @@
 # `zcu_tools.analysis` 模塊重點文檔
 
-**Last updated:** 2026-11-10，stationary Rπ saved-summary analysis
+**Last updated:** 2026-11-10，Rπ processor record 解碼與 saved-summary analysis
 
 **讀者：** framework-dev。分析核心、純數值工具與前端 adapter 的分工速查。
 
@@ -114,6 +114,10 @@ lag covariance 或 landing 不超過 1.5e-3），把第三態移到固定 prior�
 此時個別 λ 可能不可識別。
 
 ## Stationary Rπ 讀出調參
+
+`readout_chain.RPiSums.from_processor(record)` 解碼單一 setting 的 35 欄 float64
+可加摘要。固定 H=1，由 read count／segment count 恢復單段長度；只合併相同長度
+的 completed rounds。入口驗證 counts 與 moments，回傳獨立陣列，不讀 program 或檔案。
 
 `readout_chain.RPiSums` 保存單一 setting 的 18 個 moment sums、實際 read/pair counts
 及 segment 長度和次數。三種 sweep 使用相同摘要，不沿用無 π 的熱態格式。

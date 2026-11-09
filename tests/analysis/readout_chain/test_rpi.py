@@ -39,6 +39,36 @@ def model_sums(
     )
 
 
+@pytest.mark.parametrize(
+    "index,value",
+    [
+        (0, 0),
+        (0, 1.5),
+        (1, 97),
+        (1, 2**54),
+        (7, np.nan),
+        (20, -1),
+        (20, 94.5),
+        (20, 95),
+    ],
+)
+def test_processor_decoder_rejects_malformed_counts_and_sums(index: int, value: float):
+    record = np.zeros(35, dtype=np.float64)
+    record[:5] = [2, 96, 1, 2, 100]
+    record[20:35] = np.arange(94, 65, -2)
+    record[index] = value
+    with pytest.raises(ValueError, match="R-pi|pair_counts"):
+        RPiSums.from_processor(record)
+
+
+@pytest.mark.parametrize(
+    "record", [np.zeros(34), np.zeros((1, 35)), np.zeros(35, dtype=np.float32)]
+)
+def test_processor_decoder_requires_one_float64_setting_record(record):
+    with pytest.raises(ValueError, match="shape.*float64"):
+        RPiSums.from_processor(record)
+
+
 @pytest.mark.parametrize("pi_error", [0.0, 0.04])
 def test_exact_two_state_moments_recover_effective_retention_and_noise(
     pi_error: float,

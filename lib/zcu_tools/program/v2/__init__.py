@@ -33,6 +33,7 @@ from .modules import (
     WaveformCfgFactory,
 )
 from .read_axes import IQ, Classify, shot_sums, split_sums
+from .rpi import rpi_sums
 from .sweep import SweepCfg
 from .table_param import TableParam, TableRawParam
 from .timeline import TimelineProgramV2

@@ -37,6 +37,49 @@ class RPiSums:
     segment_lengths: NDArray[np.int64]
     segment_counts: NDArray[np.int64]
 
+    @classmethod
+    def from_processor(cls, record: NDArray[np.float64]) -> "RPiSums":
+        """Decode one setting's pooled float64 shape (35,) R-pi record.
+
+        Columns are 0: completed segment count S; 1: read count N; 2:4: ΣI,ΣQ;
+        4: Σ(I²+Q²); 5:20: lag dot products j=1..15; 20:35: pair counts.
+        First moments use normalized ADC units, square/products ADC units².
+        Counts are exact integers encoded as float64, no larger than 2**53.
+        All completed rounds must have the same segment length L=N/S. This
+        H=1 encoding recovers segment_lengths=[L], segment_counts=[S]; it
+        cannot encode mixed-length segments. Only add records of the same L.
+
+        Return detached arrays without changing record. Raise ValueError for
+        wrong shape/dtype, nonfinite values, noninteger or inconsistent counts,
+        or zero segments/reads. No missing lags are synthesized. This validates
+        the data contract, not the physical continuity or π calibration.
+        """
+        if record.shape != (35,) or record.dtype != np.float64:
+            raise ValueError("R-pi record must have shape (35,) and dtype float64")
+        if not np.isfinite(record).all():
+            raise ValueError("R-pi record must contain finite sums and counts")
+        counts = np.concatenate((record[:2], record[20:35]))
+        if (
+            np.any(counts < 0)
+            or np.any(counts > 2**53)
+            or np.any(counts != np.floor(counts))
+        ):
+            raise ValueError("R-pi counts must be nonnegative exact integers <= 2**53")
+        segments, reads = int(record[0]), int(record[1])
+        if segments <= 0 or reads <= 0 or reads % segments:
+            raise ValueError("R-pi N/S must be a positive integer segment length")
+        result = cls(
+            read_count=reads,
+            first_moment_sums=record[2:4].copy(),
+            same_read_square_sum=float(record[4]),
+            lag_product_sums=record[5:20].copy(),
+            pair_counts=record[20:35].astype(np.int64),
+            segment_lengths=np.array([reads // segments], dtype=np.int64),
+            segment_counts=np.array([segments], dtype=np.int64),
+        )
+        _validate_sums(result)
+        return result
+
 
 @dataclass(frozen=True)
 class RPiAnalysis:
