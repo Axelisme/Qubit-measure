@@ -1,6 +1,6 @@
 # `zcu_tools.program` — QICK integration
 
-**Last updated:** 2026-11-10，thermal-chain 完整相鄰對 sums
+**Last updated:** 2026-11-10，thermal-chain 實驗與完整相鄰對 sums
 
 **讀者：** framework-dev。QICK 整合、程式建構與 acquisition 依賴速查。
 
@@ -162,7 +162,9 @@ contain shot count and 107 sums: all 16 I/Q read means, R1 self moments,
 all 15 adjacent pairs and the three early long-lag pairs (R1,R3..R5).
 Each pair retains all four cross components; the processor applies no analysis
 weights. Reps and rounds add without averaging. The caller owns thermal
-relaxation and the absence of drives or extra waits within the shot.
+relaxation and the absence of drives or extra waits within the shot. The three
+thermal-chain ro_optimize experiments set K through relax_delay and retain every
+adjacent pair for offline scoring; the processor does not choose the best setting.
 
 Build first, then resolve labels and call
 `sched.run_acquire_summed(program, soc, processor=..., rounds=...,

@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TypeAlias
 
-from zcu_tools.analysis.readout_chain import ReadoutSums
+from zcu_tools.analysis.readout_chain import ThermalChainSums
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import Adapter, Analysis, AnalyzeRequest
@@ -13,7 +13,7 @@ from zcu_lab.v2.twotone.ro_optimize._chain_common import ChainAnalysis
 from zcu_lab.v2.twotone.ro_optimize.chain_freq.core import ChainFreqCfg, ChainFreqExp
 from zcu_lab.v2.twotone.ro_optimize.chain_freq.form import make_form
 
-ChainFreqRunResult: TypeAlias = RunRecord[ChainFreqCfg, ReadoutSums]
+ChainFreqRunResult: TypeAlias = RunRecord[ChainFreqCfg, ThermalChainSums]
 
 
 def _analyze(
@@ -27,7 +27,7 @@ def _run(cfg: ChainFreqCfg, *, context: RunContext) -> ChainFreqRunResult:
     return RunRecord(cfg=cfg, result=ChainFreqExp().run(cfg, context=context))
 
 
-# No writeback: the operator chooses the frequency from the information and QND.
+# No writeback: choose the maximum score; QND and M remain diagnostics.
 DEFINITION = Adapter(
     spec=ChainFreqExp.AXES_SPEC,
     make_form=make_form,

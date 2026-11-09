@@ -1,13 +1,8 @@
-"""Shared parts of the three readout-chain ro_optimize experiments.
+"""Shared shot, saved sums and plots for thermal-chain ro_optimize sweeps.
 
-chain_power, chain_freq and chain_length each sweep one readout parameter.
-Their shot is one block of READS_PER_BLOCK consecutive reads of one
-PulseReadout, with no reset, qubit pulse or wait. Blocks are reduced to
-moment sums by chain_readout_sums and scored by readout_chain.readout_metric.
-
-This module holds what the three share: the read block, the saved record
-layout, the metric plot and the analysis. Each core keeps its own sweep,
-program and live plot in its run method.
+Each core keeps its sweep and acquisition in run. This module supplies the
+16-read shot, the count + 107 sums layout and the same three-panel display
+for live updates and offline analysis.
 """
 
 from dataclasses import dataclass
@@ -16,14 +11,14 @@ from typing import Any
 import numpy as np
 from matplotlib.artist import Artist
 from matplotlib.axes import Axes
+from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from zcu_tools.analysis.readout_chain import (
-    MOMENT_COUNT,
-    ReadoutMetric,
-    ReadoutSums,
-    SettingFailure,
-    SettingFit,
-    readout_metric,
+    THERMAL_MOMENT_COUNT,
+    SettingScore,
+    ThermalChainScore,
+    ThermalChainSums,
+    thermal_chain_score,
 )
 from zcu_tools.experiment import (
     GroupedLoadData,
@@ -34,42 +29,38 @@ from zcu_tools.experiment import (
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import PulseReadout, TimelineBuilder
 
-# The block moments and readout_metric are defined for 32-read blocks.
-READS_PER_BLOCK = 32
-
-# y axis of the live and the analysis information plots.
-INFORMATION_YLABEL = "Information per read (all lags)"
+READS_PER_SHOT = 16
 
 
-def emit_read_block(builder: TimelineBuilder, readout: PulseReadout) -> None:
-    """Record one shot: READS_PER_BLOCK reads of readout and nothing else.
+def emit_read_shot(builder: TimelineBuilder, readout: PulseReadout) -> None:
+    """Emit 16 consecutive reads with no drive or extra wait within the shot.
 
-    Each read starts as soon as the previous read's pulse and ADC window have
-    ended (delay_auto). There is no reset, drive pulse or extra wait inside
-    the block. After build, call prog.set_reads_per_shot(READS_PER_BLOCK).
+    Each read starts when the previous pulse and ADC window have ended.
+    The builder's relax_delay supplies K after the shot. After build, declare
+    prog.set_reads_per_shot(READS_PER_SHOT) before constructing the processor.
     """
-    with builder.repeat("read", READS_PER_BLOCK):
+    with builder.repeat("read", READS_PER_SHOT):
         builder.emit(readout)
         builder.delay_auto()
 
 
 def readout_sums_variables(setting: VariableAxisSpec) -> tuple[VariableSpec, ...]:
-    """Saved layout of ReadoutSums: block counts and the moment sums per setting.
+    """Map the sweep axis and all ThermalChainSums fields to saved variables.
 
-    setting is the experiment's sweep axis, mapped to the ReadoutSums field
-    "axis" with the experiment's label, unit and disk scale.
+    setting supplies the label, disk unit and scale of the result's axis.
+    All 107 sums remain available, including every adjacent pair component.
     """
     return (
         VariableSpec(
-            "block_count",
+            "shot_count",
             (setting,),
-            VariableZSpec("block_count", label="Blocks", unit=""),
+            VariableZSpec("shot_count", label="Shots", unit=""),
         ),
         VariableSpec(
             "feature_sums",
             (
                 VariableAxisSpec(
-                    label="Moment", unit="", values=tuple(range(MOMENT_COUNT))
+                    label="Moment", unit="", values=tuple(range(THERMAL_MOMENT_COUNT))
                 ),
                 setting,
             ),
@@ -78,157 +69,119 @@ def readout_sums_variables(setting: VariableAxisSpec) -> tuple[VariableSpec, ...
     )
 
 
-def restore_readout_sums(data: GroupedLoadData[Any]) -> ReadoutSums:
-    """Rebuild the saved ReadoutSums from its two variables."""
-    block_count = data.variable("block_count")
-    return ReadoutSums(
-        axis=block_count.axes[0],
-        block_count=block_count.z,
+def restore_readout_sums(data: GroupedLoadData[Any]) -> ThermalChainSums:
+    """Restore shot counts, axis and 107 sums from their saved variables."""
+    shot_count = data.variable("shot_count")
+    return ThermalChainSums(
+        axis=shot_count.axes[0],
+        shot_count=shot_count.z,
         feature_sums=data.variable("feature_sums").z,
     )
 
 
-def finished_sums(axis: NDArray[np.float64], sums: NDArray[np.float64]) -> ReadoutSums:
-    """ReadoutSums of the settings that finished at least one round.
+def finished_sums(
+    axis: NDArray[np.float64], sums: NDArray[np.float64]
+) -> ThermalChainSums:
+    """Keep settings with a completed round from a (settings,108) buffer.
 
-    axis is (F,) in the experiment's unit. sums is the summed buffer of
-    chain_readout_sums, one row per setting: the block count, then the moment
-    sums. A setting without a finished round is a NaN row.
-    Raise RuntimeError when no setting has finished a round, for example
-    after a stop during the first round.
+    axis uses the experiment's units. Unfinished settings are NaN rows.
+    Raise RuntimeError if no setting has completed a round.
     """
     finished = ~np.isnan(sums[:, 0])
     if not finished.any():
         raise RuntimeError(
             "Stopped before any setting finished a round; no sums to keep"
         )
-    return ReadoutSums.from_processor(axis[finished], sums[finished])
+    return ThermalChainSums.from_processor(axis[finished], sums[finished])
 
 
-def plot_metric(ax: Axes, result: ReadoutMetric) -> None:
-    """Draw the information per read of each fitted setting with its one-sigma error.
+def draw_metric(
+    axes: tuple[Axes, ...], result: ThermalChainScore, *, label: str, unit: str
+) -> tuple[Artist, ...]:
+    """Replace three panels with score, QND and correlation-growth diagnostics.
 
-    The curve is blue (C0) and labelled "information ± 1σ" for a legend.
-    Settings with no signal and failed fits are left out.
+    axes are the three vertically stacked axes of one figure. label and unit
+    describe the swept parameter. Score and QND show model-conditional
+    approximate error scales, not general one-sigma errors. Score limits use
+    only score values; QND limits stay at 0..1 without clipping reported data.
+    M and |rho| share the diagnostic panel. Red lines mark the largest score,
+    with exact ties resolved by acquisition order, in live and analysis plots.
     """
-    fits = result.fits.values()
-    ax.errorbar(
-        [fit.setting for fit in fits],
-        [fit.metric for fit in fits],
-        yerr=[fit.standard_error for fit in fits],
+    ax_score, ax_qnd, ax_m = axes
+    for ax in axes:
+        ax.clear()
+    settings = result.settings
+    xs = [point.setting for point in settings]
+    scores = [point.score for point in settings]
+    best = settings[result.ranking[0]]
+    ax_score.errorbar(
+        xs,
+        scores,
+        yerr=[point.score_error for point in settings],
         fmt="o-",
         capsize=3,
         color="C0",
-        label="information ± 1σ",
+        label="Score ± model approx. scale",
     )
-
-
-def left_out_title(result: ReadoutMetric) -> str:
-    """Count the settings left off the curve, no-signal and failed fits apart.
-
-    Return an empty string when every setting is on the curve.
-    """
-    if not result.no_signal and not result.failures:
-        return ""
-    return (
-        f"Not plotted: {len(result.no_signal)} no signal, "
-        f"{len(result.failures)} fit failed"
+    low, high = min(scores), max(scores)
+    padding = 0.1 * (high - low) if high > low else 0.1 * max(abs(high), 0.01)
+    ax_score.set_ylim(low - padding, high + padding)
+    ax_score.set_ylabel("Heuristic score")
+    ax_score.set_title("Errors: model-conditional approximate scales")
+    ax_score.axvline(
+        best.setting,
+        color="r",
+        ls="--",
+        label=f"Max score: {best.setting:.5g} {unit}",
     )
-
-
-def draw_metric(ax: Axes, result: ReadoutMetric) -> tuple[Artist, ...]:
-    """Replace the error-bar curve on ax with the information of the fitted settings.
-
-    The title counts the settings left off the curve (see left_out_title).
-    """
-    for container in list(ax.containers):
-        container.remove()
-    ax.relim()
-    plot_metric(ax, result)
-    ax.autoscale_view()
-    ax.set_title(left_out_title(result))
-    return (ax,)
+    ax_qnd.errorbar(
+        xs,
+        [point.qnd for point in settings],
+        yerr=[point.qnd_error for point in settings],
+        fmt="o-",
+        capsize=3,
+        color="C0",
+        label="QND ± model approx. scale",
+    )
+    ax_qnd.set(ylabel="QND", ylim=(0, 1))
+    ax_qnd.axvline(best.setting, color="r", ls="--")
+    ax_m.plot(
+        xs, [point.mist for point in settings], "o-", label="M: correlation growth"
+    )
+    ax_m.plot(xs, [abs(point.correlation) for point in settings], "s--", label="|ρ|")
+    ax_m.set(xlabel=f"{label} ({unit})", ylabel="M / |ρ|")
+    ax_m.axvline(best.setting, color="r", ls="--")
+    for ax in axes:
+        ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+        ax.legend(loc="best")
+        ax.grid(True)
+    return tuple(axes)
 
 
 @dataclass(frozen=True)
 class ChainAnalysis:
-    """Best setting of a readout-chain sweep. No writeback is proposed.
+    """Best setting by descending thermal-chain score; no writeback proposed.
 
-    best: the fitted setting with the largest information minus its one-sigma
-        error, which need not be the highest point of the curve: its setting
-        in the experiment's axis unit (gain a.u., frequency MHz or ADC window
-        us), information (metric) and QND with their one-sigma errors, d/sigma,
-        λ of its two most populated states and the population of its third
-        fitted state.
-    no_signal: settings the no-signal test stopped before the fit, in the
-        axis unit and in axis order. They have no information value.
-    failures: settings the estimator could not fit and why, in axis order.
+    best: SettingScore in the sweep's units (gain a.u., frequency MHz or
+        ADC window us). Errors are model-conditional approximate scales.
+        M diagnoses correlation growth, not identifiable physical leakage.
+        QND is reported without clipping. Exact score ties keep acquisition order.
     """
 
-    best: SettingFit
-    no_signal: tuple[float, ...]
-    failures: tuple[SettingFailure, ...]
+    best: SettingScore
 
 
 def analyze_sums(
-    sums: ReadoutSums, plots: Plots, *, label: str, unit: str
+    sums: ThermalChainSums, plots: Plots, *, label: str, unit: str
 ) -> ChainAnalysis:
-    """Score every setting, plot information and QND, and pick the best.
+    """Score saved moments and publish score, QND and M / |rho| panels.
 
-    label and unit name the swept parameter, for example "Readout gain" and
-    "a.u.". Publish the "metric" figure: the information with error bars and
-    the best setting marked, and below it the QND of each setting with its
-    error bars. The best setting has the largest information minus its
-    one-sigma error, so the red line need not be on the highest point. Settings
-    with no signal and failed fits are left out of both panels and counted
-    apart in the title. Raise ValueError stating both counts when no setting
-    is fitted.
+    label and unit describe the sweep. The metric figure marks the largest
+    score in red; errors do not affect ranking. Invalid moments propagate
+    ValueError from thermal_chain_score. No fit or secondary threshold is used.
     """
-    result = readout_metric(sums)
-    if not result.fits:
-        message = (
-            f"No setting has a readout metric: {len(result.no_signal)} no signal, "
-            f"{len(result.failures)} fit failed"
-        )
-        if result.failures:
-            reasons = "; ".join(
-                f"{failure.setting:g}: {failure.reason}"
-                for failure in result.failures.values()
-            )
-            message += f" ({reasons})"
-        raise ValueError(message)
-    best = result.fits[result.ranking[0]]
-    fits = result.fits.values()
-
-    fig, _ = plots.subplots(2, 1, num="metric", sharex=True, figsize=(8, 6))
-    ax_information, ax_qnd = fig.axes
-    plot_metric(ax_information, result)
-    ax_information.axvline(
-        best.setting,
-        color="r",
-        ls="--",
-        label=f"best by information − 1σ = {best.setting:.5g} {unit}",
-    )
-    ax_information.set_ylabel(INFORMATION_YLABEL)
-    ax_information.set_title(left_out_title(result))
-    ax_information.legend()
-    ax_information.grid(True)
-
-    ax_qnd.errorbar(
-        [fit.setting for fit in fits],
-        [fit.qnd for fit in fits],
-        yerr=[fit.qnd_error for fit in fits],
-        fmt="o-",
-        capsize=3,
-    )
-    ax_qnd.axvline(best.setting, color="r", ls="--")
-    ax_qnd.set_xlabel(f"{label} ({unit})")
-    ax_qnd.set_ylabel("QND")
-    ax_qnd.grid(True)
+    result = thermal_chain_score(sums)
+    fig, _ = plots.subplots(3, 1, num="metric", sharex=True, figsize=(8, 8))
+    draw_metric(tuple(fig.axes), result, label=label, unit=unit)
     fig.tight_layout()
-
-    return ChainAnalysis(
-        best=best,
-        no_signal=tuple(float(sums.axis[index]) for index in result.no_signal),
-        failures=tuple(result.failures.values()),
-    )
+    return ChainAnalysis(best=result.settings[result.ranking[0]])

@@ -1,82 +1,102 @@
-# Readout gain by the readout-chain metric
+# Thermal-chain readout gain sweep
 
-**Readers:** operator, agent. Run the readout-chain gain sweep from the GUI or MCP and read its information, QND, d/sigma and λ per gain.
+**Readers:** operator, agent. Run the no-drive gain sweep and read its heuristic score, QND and correlation-growth diagnostic.
 
-**Last updated:** 2026-11-09
+**Last updated:** 2026-11-10
 
-After changing the parameter source, use Reset to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Reset can overwrite unsaved inputs.
+After changing a parameter source, use Reset to recapture initial values. Refresh updates sources and choices while preserving authored inputs. Reset can overwrite unsaved inputs.
 
-## Behavior
+## Shot and parameters
 
-`twotone/ro_optimize/chain_power` sweeps the readout gain. At each gain it reads the resonator 32 times in a row and repeats that block many times.
-A shot is one block: 32 reads of the readout pulse, each read starting as soon as the previous read's pulse and ADC window have ended.
-There is no reset, no qubit pulse and no relax delay. The sweep therefore needs no qubit pulse or qubit frequency, unlike `twotone/ro_optimize/power`, and can run before qubit calibration.
-All Reps blocks of one gain run back to back before the next gain, so the blocks of one gain form one continuous read stream.
-The experiment fixes the 32 reads per block and the zero relax delay; the Form does not offer them.
+`twotone/ro_optimize/chain_power` sweeps readout gain in a.u..
+Each shot reads one PulseReadout 16 times without a drive or reset.
+Each read starts when the previous pulse and ADC window have ended.
+The relax delay K follows each shot. Every shot after the first starts K after the previous shot.
+Set `relax_delay` in us long enough to return to thermal equilibrium.
+The Form seeds it from 5·T1. The first shot relies on the state before Run.
+There is no extra wait inside the chain.
 
-The host reduces each block to 113 moments of its IQ reads: means, second moments, correlations between reads 1 to 15 apart and third-order moments of reads 1 to 4 apart. Only running sums of these moments are kept.
-From the sums, each gain gets an information value per read about a weak drive in an infinite symmetric ...DRDRDR... chain. D is the drive and R a read. The information combines products of reads at every lag. It uses the two most populated fitted states at equal populations. Larger is better. The report calls this number `metric`.
-Information depends on the pair's QND and SNR. Here SNR is d/sigma, the distance between the states divided by the read noise. QND is R̃_aa + R̃_bb − 1 of the states' transition block, with each row renormalised within the pair. It lies between 0 and 1. At the limit of 1, reads never change the state within the pair. Information evaluates the pair at equal populations rather than its measured thermal population.
-Information weighs QND more than SNR. At d/sigma 3 and QND 0.90, raising QND to 0.95 raises information from 9.6 to 24.5 (+154%), and raising d/sigma to 4 raises it to 11.0 (+14%).
-SNR keeps a non-zero weight. Information is 0 at d/sigma 0 and rises with d/sigma at every QND, up to the limit 4·QND²/(1 − QND²).
+Readout uses the captured `$resonator.module.readout` slot, or a fresh `readout` template.
+The template uses the resonator frequency, wiring and time of flight.
+Gain starts at 10 points from 0.02 to 0.2 a.u. Run replaces the readout gain, so the Form hides it.
+Reps defaults to 2000 shots per setting per round. Rounds defaults to 320, giving 640 000 shots per setting.
+Missing or invalid sources leave fields Invalid. Supply them before Run.
 
-## Parameter sources
+This experiment needs thermal g/e contrast, not a calibrated π pulse.
+The state after K is not the readout-driven steady state. A measured 60:40 readout-driven population does not specify the population before the first read.
+Traditional `ro_optimize` experiments keep their drive-based preparation and analysis.
 
-Calibrate the readout frequency first, for example with `onetone/freq`.
-Readout uses the captured `$resonator.module.readout` slot, or a fresh `readout` template that reads `$resonator.freq`, `$resonator.wiring.ch`, `$resonator.wiring.ro_ch` and `$resonator.time_of_fly`.
-Run replaces the readout gain with the sweep, so the Form hides the readout gain.
-Gain starts at 10 points from 0.02 to 0.2 a.u. Reps starts at 1000 blocks per gain per round and Rounds at 20, which gives 20 000 blocks per gain.
-Reps must be at least 2, because the metric needs two blocks per gain.
-Each round reads every gain Reps × 32 times. One block lasts about 32 times the readout pulse length.
-Missing or invalid sources leave the affected fields empty and Invalid; supply them before Run.
+## Score and selection
 
-## Live plot
+Analysis projects early covariances onto their main IQ axis.
+It estimates ρ as the first-pair covariance divided by R1 variance, and QND from the decay of the first four R1 cross covariances.
+G is a restricted two-state, 15-lag information amplification proxy.
+It averages the model information ratio over determinant 0..1 with a fixed 24-point quadrature.
+It targets a symmetric driven ...DRDRDR... model. It does not assert that this model and K R^16 have the same physical information.
+An unequal initial thermal population reduces the effective contrast. The inferred contrast is not a calibrated g/e SNR.
 
-After every round the `measurement` plot shows the information per read of each gain with its one-sigma error bar, from all finished rounds.
-The y axis is `Information per read (all lags)`.
-Acquisition waits for the fits; then the GUI draws the plot. The first computation in a GUI session also waits for Numba to compile the analysis code.
-Gains with no signal and gains whose fit failed are left off the curve. The plot title counts them apart, for example `Not plotted: 2 no signal, 1 fit failed`.
-Stop keeps the sums of finished rounds. A stop before the first round finishes keeps nothing, and the Run fails with that message.
+M measures within-chain correlation growth.
+Analysis centres each read separately, symmetrises each adjacent covariance matrix, and weights pairs r=1..15 by (r−8)/20.
+It takes the largest eigenvalue of the summed matrix and divides by R1 variance.
+M is a diagnostic, not an identified leakage probability or physical MIST amount.
+Physical MIST means leaving g/e. Pure two-state repopulation can also increase M and incur a penalty.
 
-## Analysis
+The combined score is ρ²·G·[|ρ|/(|ρ|+max(M,0))]².
+At ρ=0 the score and its error scale are zero.
+Only the maximum score selects the best setting. Exact ties keep acquisition order.
+Errors do not affect ranking, and no second threshold excludes settings.
+If the best gain is at either scan boundary, extend that side and repeat before using it.
 
-Analysis recomputes the information of each gain from the saved sums. It has no options.
-The upper panel of the `metric` figure shows the information with error bars and the best gain as a red dashed line. The legend names the rule: the best gain has the largest information minus its one-sigma error, so it need not be the highest point of the curve.
-The lower panel shows QND of each gain with its one-sigma error bar. d/sigma is not plotted; it is in the summary and the report.
-The title counts the gains left off both panels, no-signal and failed fits apart.
-The summary reports:
+## Live and analysis plots
 
-- `best`: the gain with the largest information minus its one-sigma error.
-  - `setting`: that gain in a.u..
-  - `metric` and `standard_error`: its information per read and one-sigma error.
-  - `qnd` and `qnd_error`: its QND and one-sigma error.
-  - `separation`: its d/sigma.
-  - `retention`: λ of its two most populated states, most populated first.
-  - `third_population`: the population of the third fitted state, a leakage diagnostic.
-- `no_signal`: the gains, in a.u., that the no-signal test stopped before the fit.
-- `failures`: each gain whose fit failed, with its `setting` in a.u. and the `reason`.
+Live `measurement` and offline `metric` figures have the same three panels:
 
-If no gain is fitted, the analysis fails and states how many gains had no signal and how many fits failed, with the failure reasons.
+- Heuristic score with model-conditional approximate error bars.
+- QND with model-conditional approximate error bars. The axis stays at 0..1; reports retain unmodified QND, even outside that range.
+- M alongside |ρ|. Large M remains visible on this diagnostic axis.
 
-"No signal" and a failed fit are different results.
-A gain has no signal when the test run before the fit finds too little read-to-read correlation in the moments of lags 1 to 4: the test statistic stays below 2·ln(blocks), or the largest eigenvalue of the lag covariance is at most 0. Such a gain is not fitted and not ranked. More blocks can lift a weak gain above the test.
-A failure means the estimator could not produce a fit, rather than classifying the setting as no signal. Causes include a singular matrix, a non-finite result, or the fit reaching its budget of 1200 evaluations. The `reason` says which.
+Red dashed lines mark the maximum-score setting in every panel.
+The score axis uses score values alone, so large errors do not flatten the curve.
+Error bars can extend beyond that axis and be cut off.
+Acquisition calculates scores after each completed round, then the plot thread draws them.
+Stop keeps settings with a completed round. A stop before any completed round raises an error.
 
-If the best gain is the first or last gain of the scan, the optimum can lie outside the scanned range. Extend the range on that side and run again before you use the gain.
+Analysis has no options and can use saved sums without cfg or hardware.
+The summary is `best`, a SettingScore containing `setting` in a.u., `score`, `score_error`, `qnd`, `qnd_error`, `correlation`, `amplification` and `mist`.
+The API name `mist` holds M, with the diagnostic meaning above.
+There is no fit, no-signal classification or third-state population estimate.
+Invalid projected variance or zero early covariance norm raises ValueError rather than inventing a QND value.
 
-The error bars are the statistical errors of the fit. They do not cover the fit's bias. When the third state is not populated, the two λ values may not be separately identifiable.
+## Errors and known limits
 
-This experiment proposes no writeback. Enter the chosen gain in the readout module yourself.
+The error scales are model-conditional approximations, not general one-sigma errors or calibrated confidence intervals.
+Score propagation holds M and the main axis fixed and propagates only ρ and QND.
+It ignores their shared covariance, M uncertainty, main-axis uncertainty and selection of the maximum.
+G uses clipped QND and effective contrast to remain finite.
+At and beyond clipping, propagation uses the model slope at the clipped coordinates, not the true derivative of the clipped output.
 
-## Saved data
+Real K R^16 data have not yet validated this score.
+A rare, distant thermal third state or correlated read noise can raise the score without raising M.
+A third state overlapping g or e in IQ may hide leakage. Anisotropic noise can select the wrong main axis.
+Pure two-state drift can increase M when the initial thermal state differs from the driven steady state. The penalty does not separate this from leakage.
+Fixed pair weights retain that false-penalty limitation.
+For an increase confined to the last pair, the independent isotropic low-SNR model predicts about 59% of the endpoint-difference detection SNR. This is a model result, not a device measurement.
+Finite-shot noise can give a positive score even without useful g/e contrast.
+Vanishing g/e contrast alone does not force score to zero if a third state remains visible.
+ρ uses R1 variance rather than both endpoints' standard deviations, so arbitrary nonstationary moments have no promised global score bound.
+Approximate errors do not guarantee selection of the true best setting.
 
-The saved record is the `ReadoutSums` of the run: the gain axis in a.u., the block count of each gain and the 113 moment sums of each gain.
-Loading the file and analyzing it gives the same summary as the analysis of the run.
-The native tag is `twotone/ro_optimize/chain_power` with cfg schema `3.0`.
+## Saved data and MCP recipe
 
-## MCP recipe
+The record is ThermalChainSums with the sweep axis, shot count and 107 float64 sums per setting.
+It keeps I/Q sums of R1..R16, R1 I²/IQ/Q², all four cross components of all 15 adjacent pairs, and the R1,R3 through R1,R5 pairs.
+No weighted M aggregate replaces those pairs.
+Native save and restore preserve the moments for reanalysis of score, M and best setting.
+The tag is `twotone/ro_optimize/chain_power` and cfg schema is `4.0`. There is no earlier-schema compatibility path.
 
-`ro_optimize_chain_power` takes optional `gain_start` and `gain_stop` in a.u., `points` (gain Expts), `reps` and `rounds`. Omitted inputs keep Form values.
-The recipe runs, analyzes and saves. It never asks for writeback.
-The report gives `gain` (the best gain by information minus one sigma), `metric`, `metric_err`, `qnd`, `qnd_err`, `separation`, `retention`, `third_population`, `no_signal` and `failures`.
-Overrides apply last, then check_ready reports missing or invalid fields before Run.
+`ro_optimize_chain_power` accepts optional `gain_start` and `gain_stop` in a.u., `points`, `relax_delay`, `reps` and `rounds`.
+`points` maps to sweep Expts. Omission keeps the Form value; null passes to the field owner.
+Overrides apply last, then check_ready rejects missing or invalid inputs before Run.
+The recipe runs, analyzes and saves. It proposes no writeback.
+It reports `gain`, `score`, `score_error`, `qnd`, `qnd_error`, `correlation`, `amplification` and `mist`.
+Enter the chosen gain in the readout module yourself.

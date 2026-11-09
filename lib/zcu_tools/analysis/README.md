@@ -1,6 +1,6 @@
 # `zcu_tools.analysis` 模塊重點文檔
 
-**Last updated:** 2026-11-10，thermal-chain 完整相鄰對與合併分數
+**Last updated:** 2026-11-10，thermal-chain 實驗與完整相鄰對
 
 **讀者：** framework-dev。分析核心、純數值工具與前端 adapter 的分工速查。
 
@@ -85,49 +85,10 @@ G 的解析斜率在裁切後的 η、s 求值，clip Jacobian 當作 1，chain 
 ρ² 與 M 懲罰照原始 ρ 求導。這在裁切點及外側不是實際輸出對原估計值的真實導數。
 欄位、公式與 ValueError 條件見 [thermal.py](readout_chain/thermal.py)。
 
-`readout_chain.ReadoutSums.from_processor(axis, sums)` 保存每個 setting 的
-32-read block count 與 `MOMENT_COUNT`（113）個 moment sums。Processor output 的 shape 是
-`(settings, 1 + MOMENT_COUNT)`，第一欄是 count。每個 lag 只用 block 內的 `32-k` 對 reads。
-113 個 moment 的欄位分段只在 `_model.py` 定義一次，estimator 與驗證都引用它。
-相鄰 blocks 是同一條 stationary stream，不假設它們獨立。
-
-`readout_metric(sums)` 從 closed-form start，以 SciPy bounded trf least squares 擬合
-全部 113 個 moments，固定 covariance 與弱 prior。計算權重時，先將 start 布居最少態
-的 landing 設為零，再歸一 landing。這只改權重，不改 start、prior 或 free coordinates。
-Covariance 包含跨 block
-相關，並以 32-step geometric tail 求和。模型假設每個 IQ component 有相同
-Gaussian noise variance，read transition 是逐態 retention 加共同 landing。
-Optimizer 將 λ 限制在 [0.01, 0.995]，兩個 log landing ratios 限制在 [-10.8, 10.8]。
-Coordinate map 保留 1e-5 landing floor。Moment Jacobian 與 metric gradient 都用解析式。
-函式不讀 program、檔案或硬體。首次呼叫需要編譯 Numba kernels。
-
-每個 setting 先做 no-signal test。將 lag 1–4 的對稱 covariance 加總成 K，
-取 v=(K_II,K_IQ,K_QQ)。若 K 的最大 eigenvalue ≤0，或 vᵀΣ⁻¹v < 2 ln B，
-將 index 放入 `ReadoutMetric.no_signal`，不擬合也不排名。B 是 block count。
-Σ 在 centres 全等於測得 mean、同讀 covariance trace/2 為 noise variance、
-λ=0.5、uniform landing 的模型計算。
-
-每個 index 恰好出現在 `fits`、`no_signal`、`failures` 其中之一。
-`fits` 對應 `SettingFit`，`failures` 對應含 setting 座標與原因的 `SettingFailure`。
-奇異矩陣、非有限 fit 或耗盡 1200 次 evaluation budget 都只使該 setting 失敗。
-`ranking` 只列 fits，依 `metric − standard_error` 由高到低，同分保留 acquisition order。
-最佳點是非空 ranking 的第一個 index，不一定是 metric 最大的點。排序不改 fitted values。
-輸入 shape、不有限值、非整數 count 或不足兩個 blocks 仍拋出 ValueError。
-
-`SettingFit.metric` 是無限對稱 ...DRDRDR... 鏈對弱 drive 的每 read information，
-以所有 lag j≥1 的 read products、精確 long-run covariance 與 GLS weights 計算。
-取 fitted stationary population 最高的兩態，設為等布居，q=d²/(4σ²)，
-QND 的符號 η 是兩態 transition block 逐列歸一後的 R̃_aa+R̃_bb−1。
-閉式解見 `readout_metric` docstring。它定義對稱 target，不是原始不等布居鏈的 information。
-metric 越大表示 information 越多。`separation` 是這兩態的 d/sigma，
-`retention` 是它們各自的 λ，`third_population` 是剩餘態的 stationary population。
-`qnd` 保存 QND，`qnd_error` 是 QND 的一倍標準差，
-使用相同 sampling covariance 與 QND 的解析梯度。
-
-`standard_error` 是 final analytic Jacobian、固定 start covariance 與 prior 下的
-delta-method sampling error，不涵蓋 fit bias。Start 看不到第三態時（正交軸沒有
-lag covariance 或 landing 不超過 1.5e-3），把第三態移到固定 prior；
-此時個別 λ 可能不可識別。
+Live 與 analysis 的三個 panel 顯示 score、QND、M 與 |ρ|。只按 score 最大選點，紅線標記最佳 setting。
+QND 軸固定 0..1，保存與回報不裁切。Score 軸只按 score 值縮放，不被誤差棒撐大。
+K 後熱布居與 readout-driven steady state 不等同。稀少遠端第三態、相關雜訊或非等向雜訊可能誤導 score；
+第三態與 g/e 的 IQ 重疊可能隱藏 leakage。實機 K R^16 尚未驗證這個效用。
 
 ## Readout QND 指標
 
