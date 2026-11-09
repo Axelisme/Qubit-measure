@@ -687,24 +687,29 @@ def _prepare_model(model: SecularModel) -> _Entry:
         )
     except np.linalg.LinAlgError as error:
         raise RuntimeError("Dyson modal decomposition failed") from error
+    population_block = np.ix_(populations, populations)
+    population_vectors = vectors[population_block]
+    population_inverse = inverse[population_block]
     couplings = []
     for drive in model.drives:
-        pair = np.stack(
-            [
-                inverse
-                @ commutator(
-                    (drive.in_phase_ghz - sign * 1j * drive.quadrature_ghz) / 2
-                )
-                @ vectors
-                for sign in (-1, 1)
-            ]
-        )
-        couplings.append(freeze(pair))
-    # Adjoint each column of W, then express it in modal coordinates. Unlike
-    # nearest-eigenvalue matching, this handles repeated coherence roots and
-    # complex-conjugate population eigenmodes of a real rate generator.
-    adjoints = vectors.reshape(size, size, -1).conj().swapaxes(0, 1)
-    conjugates = np.argmax(abs(inverse @ adjoints.reshape(size**2, -1)), axis=0)
+        sidebands = []
+        for sign in (-1, 1):
+            coupling = commutator(
+                (drive.in_phase_ghz - sign * 1j * drive.quadrature_ghz) / 2
+            )
+            # W and its inverse are identity on coherences. Only population
+            # rows/columns change in W^-1 L(A) W; avoid two dense d² products.
+            coupling[populations] = population_inverse @ coupling[populations]
+            coupling[:, populations] = coupling[:, populations] @ population_vectors
+            sidebands.append(coupling)
+        couplings.append(freeze(np.stack(sidebands)))
+    # Adjoint swaps each coherence coordinate. Only population columns need
+    # modal projection, including complex-conjugate modes of a real Q. This
+    # also avoids ambiguous eigenvalue matching for repeated coherence roots.
+    conjugates = np.arange(size**2).reshape(size, size).T.ravel().copy()
+    conjugates[populations] = populations[
+        np.argmax(abs(population_inverse @ population_vectors.conj()), axis=0)
+    ]
     conjugates.setflags(write=False)
     return _Entry(
         freeze(values), freeze(vectors), freeze(inverse), tuple(couplings), conjugates
