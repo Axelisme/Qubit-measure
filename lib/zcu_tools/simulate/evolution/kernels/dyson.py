@@ -168,10 +168,13 @@ def _path_key(a: int, b: int, c: int, r: int, s: int, dimension: int) -> int:
 
 @njit(nogil=True, cache=True)
 def _paired_path_groups(
-    indices: NDArray[np.int64], conjugates: NDArray[np.int64]
-) -> NDArray[np.int64]:
-    """Return disjoint conjugate pairs; unmatched paths must remain retained.
+    indices: NDArray[np.int64],
+    conjugates: NDArray[np.int64],
+    bounds: NDArray[np.float64],
+) -> tuple[NDArray[np.int64], NDArray[np.float64]]:
+    """Return disjoint conjugate pairs and their bounds; retain unmatched paths.
 
+    Gather bounds while pairing to avoid another scan and indexed temporaries.
     Shared tables can contain hundreds of thousands of records even for seven
     rows. Use integer keys and a half-full, linearly probed array lookup instead
     of constructing Python tuples and dict entries. Keep input order so stable
@@ -192,6 +195,7 @@ def _paired_path_groups(
             slot = (slot + 1) % capacity
         slots[slot] = path
     groups = np.empty((len(indices), 2), dtype=np.int64)
+    group_bounds = np.empty(len(indices), dtype=np.float64)
     count = 0
     for path in range(len(indices)):
         a, b, c, r, s = indices[path]
@@ -210,8 +214,11 @@ def _paired_path_groups(
         if partner >= path:
             groups[count, 0] = path
             groups[count, 1] = partner
+            group_bounds[count] = bounds[path] + (
+                0.0 if path == partner else bounds[partner]
+            )
             count += 1
-    return groups[:count]
+    return groups[:count], group_bounds[:count]
 
 
 @njit(nogil=True, cache=True)
@@ -258,20 +265,6 @@ def _validate_path_records(indices: NDArray[np.int64], dimension: int) -> None:
             or (s != 0 if c == -1 else abs(s) != 1)
         ):
             raise ValueError("Dyson pruning received an invalid path record")
-
-
-@njit(nogil=True, cache=True)
-def _path_group_bounds(
-    groups: NDArray[np.int64], bounds: NDArray[np.float64]
-) -> NDArray[np.float64]:
-    """Gather each group's bound without partner-index or selection temporaries."""
-    group_bounds = np.empty(len(groups), dtype=np.float64)
-    for group in range(len(groups)):
-        path, partner = groups[group]
-        group_bounds[group] = bounds[path] + (
-            0.0 if path == partner else bounds[partner]
-        )
-    return group_bounds
 
 
 def prune_dyson_paths(
@@ -346,8 +339,7 @@ def prune_dyson_paths(
         bounds *= pruning[a]
     if not np.isfinite(bounds).all():
         raise ValueError("Dyson pruning bounds must be finite")
-    groups = _paired_path_groups(indices, conjugates)
-    group_bounds = _path_group_bounds(groups, bounds)
+    groups, group_bounds = _paired_path_groups(indices, conjugates, bounds)
     keep, discarded = _pruned_path_mask(
         groups,
         group_bounds,
