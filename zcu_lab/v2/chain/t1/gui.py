@@ -16,15 +16,21 @@ from zcu_lab.v2.chain.t1.form import make_form
 class ChainT1Summary(BaseModel):
     """Recipe JSON view of the analysis in native units; null is unavailable."""
 
-    t1: float | None = Field(description="T1 in us.")
+    t1: float | None = Field(
+        description="T1 in us, the eigen time with the larger amplitude."
+    )
     t1_err: float | None = Field(description="Wald error of T1 in us.")
-    tf: float | None = Field(description="Third-state decay time in us.")
-    tf_err: float | None = Field(description="Wald error of tf in us.")
+    secondary_time: float | None = Field(
+        description="The other eigen time in us; null when infinite."
+    )
+    secondary_time_err: float | None = Field(
+        description="Wald error of the secondary time in us."
+    )
     within_point: CycleCheck = Field(description="Within-point check J, df, p.")
     sharing: CycleCheck = Field(description="Sharing check J, df; p is null.")
     curve: CycleCheck = Field(description="Curve check J, df, p.")
     first_read_t1: float | None = Field(
-        description="T1 in us of the first-read twotone fit, the starting value."
+        description="T1 in us of the first-read single-decay fit, the starting value."
     )
 
 

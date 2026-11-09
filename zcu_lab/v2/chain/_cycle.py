@@ -17,6 +17,7 @@ from zcu_tools.analysis.readout_chain import (
     CYCLE_FEATURE_COUNT,
     CycleFit,
     CycleModel,
+    CycleNuisances,
     CycleSums,
     cycle_curves,
 )
@@ -143,21 +144,20 @@ def first_read_iq(sums: CycleSums) -> NDArray[np.complex128]:
 def g_and_third_decay_times(
     fit: CycleFit, g_name: str, third_name: str
 ) -> tuple[float, float, float, float]:
-    """Return the g and third-state decay times of a T1 or echo fit, with errors.
+    """Return the g and third-state decay times of an echo fit, with errors.
 
     g_name is the time constant of the model's g and e rows (rows 0 and 1)
-    and third_name that of the third row (row 2), for example "t1" and "tf".
+    and third_name that of the third row (row 2), for example "t2" and "tf".
     Return (g time, its Wald error, third-state time, its Wald error) in the
     fit's units.
     """
-    # In t1_model and t2_echo_model the third row's curve is the same family
-    # as the g row's, a free affine function of exp(-x / T). Exchanging the
-    # two rows together with their time constants fits the data exactly as
-    # well for T1, whose e row is flat, and nearly as well for echo when the
-    # third state is rarely populated. So the fit can land in either labelling
-    # and the checks cannot tell them apart. In thermal equilibrium g is the
-    # most populated state. The fit may also put g in row 1, which shares the
-    # g row's time constant, so the two times are exchanged only when the third
+    # In t2_echo_model the third row's curve is the same family as the g row's,
+    # a free affine function of exp(-x / T). Exchanging the two rows together
+    # with their time constants fits the data nearly as well when the third
+    # state is rarely populated. So the fit can land in either labelling and
+    # the checks cannot tell them apart. In thermal equilibrium g is the most
+    # populated state. The fit may also put g in row 1, which shares the g
+    # row's time constant, so the two times are exchanged only when the third
     # row has the largest fitted thermal population.
     thermal = fit.nuisances.thermal
     if thermal[2] > max(thermal[0], thermal[1]):
@@ -201,6 +201,8 @@ def plot_cycle_fit(
     result is the first title line, for example the fitted parameter.
     """
     dense = np.linspace(axis.min(), axis.max(), 400)
+    # fit_cycle always gives a CycleModel fit CycleNuisances.
+    assert isinstance(fit.nuisances, CycleNuisances)
     fitted = model.populations(dense, fit.parameters, fit.nuisances)
 
     fig, ax = plots.subplots(num="populations", figsize=config.figsize)

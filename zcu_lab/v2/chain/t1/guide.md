@@ -37,25 +37,33 @@ The sign of the first curve follows the second, so both decay together. Stop kee
 
 ## Analysis
 
-Analysis needs no options. It first fits the first read's mean IQ with the `twotone/t1` single-decay fit and publishes that experiment's `fit` figure; its T1 starts both fitted times.
-It then fits all 65 numbers at all delays jointly with a three-state model whose readout and population nuisances are shared across delays.
-The response per state is: from g the π pulse reaches e, which decays back with exp(−x / t1); from e the π pulse lands in g, which does not decay, so that row is nearly flat; the third state decays with its own exp(−x / tf).
-Both times are in us. The third state's decay only follows exp(−x / tf) when it decays straight to one state; a cascade through e makes tf an effective value.
+Analysis needs no options. It first fits the first read's mean IQ with a single decay. That T1 only starts the joint fit and has no figure of its own.
+It then fits all 65 numbers at all delays jointly with a three-state rate-equation model whose readout and population nuisances are shared across delays.
 
-The `populations` plot shows, per delay, the first-read populations of a fit with a free operation at each delay, with Wald error bars, and the fitted model as lines.
-State labels are arbitrary; the legend gives each state's fitted thermal population, and the largest one is normally g.
-The g row and the third-state row follow the same decay family, so the fit can return them exchanged together with their times. When the third-state row has the largest thermal population, the summary reports the two times exchanged, since g is the most populated state in thermal equilibrium.
-The title gives T1, tf and the three lack-of-fit checks as J/df:
+The operation at delay x is D(x) = D₀ exp(G x). D₀ is a free stochastic matrix: what the π pulse does at zero delay.
+G holds three non-negative pair rates in detailed balance with the fitted thermal populations, so the populations relax towards thermal equilibrium.
+
+G has two relaxation modes, each with an eigen time and an amplitude. The amplitude is the population change the mode carries from the state after D₀, summed over starting states with their thermal weights.
+
+- `T1` is the eigen time with the larger amplitude. It is the time scale that carries most of the population change after the π pulse, and it can be the shorter of the two times.
+- The `secondary time` is the other eigen time.
+
+When the two amplitudes or the two times are close, which one is called T1 can change between runs, and the Wald errors do not include that choice. A mode with a zero decay rate has an infinite time and error, which the summary reports as null.
+
+The `populations` figure is the only analysis figure. Its upper panel shows, per delay, the first-read populations of a fit with a free operation at each delay, with Wald error bars, and the fitted model as lines.
+States are named by their fitted thermal population: g is the most populated, then e, then f. The legend gives each thermal population.
+The lower panel shows (point − curve) / error for each state. The grey band is ±1.96, the 95% range of a standard normal residual. Residuals that keep one sign over a range of delays show where the curves miss the points.
+The title gives T1, the secondary time and the three lack-of-fit checks as J/df:
 
 - `within-point`: the free three-state model at each delay, with p.
 - `sharing`: shared readout nuisances against fully separate delays; it has no p.
-- `curve`: the decay curves against a free operation at each delay, with p.
+- `curve`: the rate-equation curves against a free operation at each delay, with p.
 
-The summary reports `t1` and `t1_err`, `tf` and `tf_err` in us, the three checks, the joint `J` and `df`, and `first_read_t1` from the first-read fit.
-Errors are Wald errors from the joint fit. At low state contrast and few cycles per delay they can understate the uncertainty. A small third-state population leaves tf poorly determined.
+The summary reports `t1` and `t1_err`, `secondary_time` and `secondary_time_err` in us, the three checks, the joint `J` and `df`, and `first_read_t1` from the first-read fit.
+Errors are Wald errors from the joint fit. At low state contrast and few cycles per delay they can understate the uncertainty.
 A fit failure in either step produces an analysis failure; the live plot and the saved sums remain.
 
-This experiment proposes no writeback. Compare `t1` with `first_read_t1`, and calibrate `$qubit.t1` with `twotone/t1`.
+This experiment proposes no writeback. Compare `t1` with `first_read_t1`, and calibrate `$qubit.t1` with `twotone/t1`. `first_read_t1` is one decay fitted to a curve that can hold two, so it can differ from both eigen times. With the sweep starting at 0 it is never below the delay step.
 
 ## Saved data
 
@@ -67,5 +75,5 @@ Delays are us in memory and seconds in the file. The product sum feeds only the 
 `chain_t1` takes `max_delay_us`, `points`, `reps`, `rounds`, `pi_ref` and `readout_ref`; points maps to delay Expts.
 Set Relax delay with an override on `relax_delay`.
 The recipe runs, analyzes and saves. It never asks for writeback.
-The report gives `t1_us`, `t1_err_us`, `tf_us`, `tf_err_us`, the checks `within_point`, `sharing` and `curve` (each J, df, p), and `first_read_t1_us`.
+The report gives `t1_us`, `t1_err_us`, `secondary_time_us`, `secondary_time_err_us`, the checks `within_point`, `sharing` and `curve` (each J, df, p), and `first_read_t1_us`.
 Omitted inputs retain Form values; overrides apply last, then check_ready reports missing or invalid fields before Run.

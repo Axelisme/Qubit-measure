@@ -3,7 +3,7 @@
 One cycle is one rep: the thermalisation wait K (relax_delay), then eight
 blocks of (π pulse, wait x, read, read). The host reduces each cycle to 65
 numbers and keeps only running sums. Analysis fits all 65 numbers jointly with
-decay curves, starting from the usual twotone T1 fit of the first read.
+a rate-equation model, starting from a single-decay fit of the first read.
 """
 
 from __future__ import annotations
@@ -12,15 +12,26 @@ from dataclasses import dataclass
 from typing import Annotated, ClassVar
 
 import numpy as np
+from numpy.typing import NDArray
 from pydantic import Field
+from zcu_tools.analysis.fitting import fit_decay
 from zcu_tools.analysis.readout_chain import (
     CycleCheck,
+    CycleFit,
+    CycleRelaxation,
     CycleSums,
+    RateModel,
+    RateNuisances,
     fit_cycle,
     t1_model,
 )
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import Experiment, GroupedAxesSpec, VariableAxisSpec
+from zcu_tools.experiment import (
+    Experiment,
+    GroupedAxesSpec,
+    VariableAxisSpec,
+    config,
+)
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
@@ -37,19 +48,14 @@ from zcu_tools.program.v2 import (
 from zcu_lab.v2.chain._cycle import (
     AUGMENTED_SIZE,
     READS_PER_CYCLE,
+    checks_text,
     cycle_sums_variables,
     emit_cycle,
     first_read_iq,
-    g_and_third_decay_times,
     live_cycle_curves,
-    plot_cycle_fit,
     restore_cycle_sums,
 )
-from zcu_lab.v2.twotone.time_domain.t1.core import (
-    T1AnalyzeOptions,
-    T1Exp,
-    T1Result,
-)
+from zcu_lab.v2.twotone.time_domain.t1.core import t1_signal2real
 
 
 class ChainT1Cfg(ConfigBase):
@@ -102,20 +108,22 @@ class ChainT1Cfg(ConfigBase):
 
 @dataclass(frozen=True)
 class ChainT1Analysis:
-    """Decay fit of all 65 numbers, its checks and its starting value.
+    """Rate-equation fit of all 65 numbers, its checks and its starting value.
 
-    t1 and t1_err are the fitted T1 in us and its Wald error. tf and tf_err
-    are the third state's decay time in us and its Wald error. within_point,
-    sharing and curve are the three lack-of-fit checks of fit_cycle (sharing
-    has no p). J and df are the joint weighted residual and its degrees of
-    freedom. first_read_t1 is the T1 in us of the twotone/t1 fit of the first
-    read, which gave the starting value of both t1 and tf.
+    t1 and t1_err are T1 in us and its Wald error: T1 is the eigen time of the
+    relaxation with the larger amplitude. secondary_time and secondary_time_err
+    are the other eigen time in us and its Wald error. An eigen time with a
+    zero decay rate is infinite, and so is its error. within_point, sharing
+    and curve are the three lack-of-fit checks of fit_cycle (sharing has no
+    p). J and df are the joint weighted residual and its degrees of freedom.
+    first_read_t1 is the T1 in us of the single-decay fit of the first read,
+    which gave the starting value.
     """
 
     t1: float
     t1_err: float
-    tf: float
-    tf_err: float
+    secondary_time: float
+    secondary_time_err: float
     within_point: CycleCheck
     sharing: CycleCheck
     curve: CycleCheck
@@ -126,6 +134,71 @@ class ChainT1Analysis:
 
 # Delays are us in memory and seconds on disk.
 DELAY_AXIS = VariableAxisSpec(label="Time", unit="s", field_name="axis", scale=1e-6)
+
+
+def _plot_populations(
+    plots: Plots,
+    delays: NDArray[np.float64],
+    model: RateModel,
+    fit: CycleFit,
+    nuisances: RateNuisances,
+    relaxation: CycleRelaxation,
+) -> None:
+    """Publish "populations": first-read populations above their residuals.
+
+    The upper panel has fit.populations with Wald error bars and the fitted
+    model on a dense axis. The lower panel has (point - curve) / error at each
+    delay. States are named g, e, f from the largest fitted thermal population
+    down. The title gives T1, the secondary time and the checks.
+    """
+    dense = np.linspace(delays.min(), delays.max(), 400)
+    curves = model.populations(dense, fit.parameters, nuisances)
+    at_points = model.populations(delays, fit.parameters, nuisances)
+    # A zero Wald error gives a non-finite residual, which Matplotlib leaves out.
+    residuals = (fit.populations - at_points) / fit.population_errors
+
+    fig, _ = plots.subplots(
+        num="populations",
+        nrows=2,
+        ncols=1,
+        sharex=True,
+        figsize=(config.figsize[0], 1.5 * config.figsize[1]),
+        gridspec_kw={"height_ratios": [3, 1]},
+    )
+    ax, residual_ax = fig.axes
+
+    by_thermal = np.argsort(nuisances.thermal)[::-1]
+    for name, state, color in zip("gef", by_thermal, ("C0", "C1", "C2"), strict=True):
+        ax.errorbar(
+            delays,
+            fit.populations[:, state],
+            yerr=fit.population_errors[:, state],
+            fmt="o",
+            markersize=3,
+            color=color,
+            label=f"{name}, thermal {nuisances.thermal[state]:.2f}",
+        )
+        ax.plot(dense, curves[:, state], color=color)
+        residual_ax.plot(delays, residuals[:, state], "o-", markersize=3, color=color)
+
+    ax.set_ylabel("First-read population")
+    ax.set_title(
+        f"T1 = {relaxation.t1:.4g} ± {relaxation.t1_error:.2g} us, "
+        f"secondary time {relaxation.secondary_time:.4g} ± "
+        f"{relaxation.secondary_error:.2g} us\n{checks_text(fit)}",
+        fontsize=9,
+    )
+    # Outside the axes: the curves fill the whole population range.
+    ax.legend(fontsize=8, loc="upper left", bbox_to_anchor=(1.01, 1.0))
+    ax.grid(True)
+
+    # The band is the 95% range of a standard normal residual.
+    residual_ax.axhspan(-1.96, 1.96, color="0.9", zorder=0)
+    residual_ax.axhline(0.0, color="0.4", linewidth=0.8)
+    residual_ax.set_xlabel("Delay (us)")
+    residual_ax.set_ylabel("Residual / error")
+    residual_ax.grid(True)
+    fig.tight_layout()
 
 
 class ChainT1Exp(Experiment[CycleSums, ChainT1Cfg]):
@@ -198,53 +271,43 @@ class ChainT1Exp(Experiment[CycleSums, ChainT1Cfg]):
         *,
         plots: Plots,
     ) -> ChainT1Analysis:
-        """Fit all 65 numbers with decay curves, starting from the first read.
+        """Fit all 65 numbers with the rate-equation T1 model.
 
-        First fit the first read's mean IQ with the twotone/t1 single-decay
-        fit, which also publishes its "fit" figure; its T1 starts both t1 and
-        tf. Then fit_cycle fits the saved sums with t1_model and publishes
-        "populations": per-delay first-read populations with error bars and
-        the fitted curves. Return t1 and tf with Wald errors and the three
-        checks. t1 is the time constant of the most populated state's row, g
-        in thermal equilibrium. The source cfg may be None. Fitting failures
-        of either fit propagate.
+        The T1 of a single-decay fit of the first read's mean IQ is only the
+        starting value, without a figure of its own. fit_cycle then fits the
+        saved sums with t1_model, and "populations" is the only figure
+        published. Return T1 and the secondary time with Wald errors and the
+        three checks. The source cfg may be None. Failures of either fit
+        propagate.
         """
         del options  # This analysis has no configurable options.
         sums = source.result
         delays = sums.axis
 
-        # 1. Starting value: the twotone T1 fit of the first read.
-        first_read = T1Result(times=delays, signals=first_read_iq(sums))
-        textbook = T1Exp().analyze(
-            RunRecord(cfg=None, result=first_read),
-            T1AnalyzeOptions(),
-            plots=plots,
+        # 1. Starting value: the T1 of a single-decay fit of the first read.
+        first_read_t1 = float(
+            fit_decay(delays, t1_signal2real(first_read_iq(sums))).decay_time
         )
 
-        # 2. Joint fit of all 65 numbers; the third state starts from the same T1.
+        # 2. Joint fit of all 65 numbers.
         model = t1_model()
-        fit = fit_cycle(sums, model, {"t1": textbook.t1, "tf": textbook.t1})
+        fit = fit_cycle(sums, model, {"t1": first_read_t1})
+        relaxation = fit.relaxation
+        nuisances = fit.nuisances
+        # A RateModel fit always has relaxation and RateNuisances.
+        assert relaxation is not None and isinstance(nuisances, RateNuisances)
 
-        # 3. g is the most populated state, which tells the g row from the third.
-        t1, t1_err, tf, tf_err = g_and_third_decay_times(fit, "t1", "tf")
-        plot_cycle_fit(
-            plots,
-            model,
-            fit,
-            delays,
-            xlabel="Delay (us)",
-            result=f"T1 = {t1:.4g} ± {t1_err:.2g} us, third state {tf:.3g} ± {tf_err:.2g} us",
-        )
+        _plot_populations(plots, delays, model, fit, nuisances, relaxation)
 
         return ChainT1Analysis(
-            t1=t1,
-            t1_err=t1_err,
-            tf=tf,
-            tf_err=tf_err,
+            t1=relaxation.t1,
+            t1_err=relaxation.t1_error,
+            secondary_time=relaxation.secondary_time,
+            secondary_time_err=relaxation.secondary_error,
             within_point=fit.within_point,
             sharing=fit.sharing,
             curve=fit.curve,
             J=fit.J,
             df=fit.df,
-            first_read_t1=textbook.t1,
+            first_read_t1=first_read_t1,
         )

@@ -51,16 +51,16 @@ class ChainT1Report(RecipeReport):
     """Chain T1 fit and its checks; cancellation returns no report."""
 
     t1_us: float | None = Field(
-        description="T1 from the chain fit in us; null means not estimable."
+        description="T1 in us, the larger-amplitude eigen time; null means not estimable."
     )
     t1_err_us: float | None = Field(
         description="T1 uncertainty in us; null means not estimable."
     )
-    tf_us: float | None = Field(
-        description="Third-state decay time in us; null means not estimable."
+    secondary_time_us: float | None = Field(
+        description="The other eigen time in us; null means not estimable."
     )
-    tf_err_us: float | None = Field(
-        description="Third-state decay uncertainty in us; null means not estimable."
+    secondary_time_err_us: float | None = Field(
+        description="Secondary time uncertainty in us; null means not estimable."
     )
     within_point: CycleCheck | None = Field(
         description="Within-point check J, df, p; null without analysis."
@@ -72,7 +72,7 @@ class ChainT1Report(RecipeReport):
         description="Curve check J, df, p; null without analysis."
     )
     first_read_t1_us: float | None = Field(
-        description="T1 in us of the first-read twotone fit; null means not estimable."
+        description="T1 in us of the first-read single-decay fit; null means not estimable."
     )
 
 
@@ -84,11 +84,12 @@ async def chain_t1(session: RecipeSession, inputs: ChainT1Inputs) -> ChainT1Repo
     """Sweep the wait after a pi pulse with one K-cycle per rep: K, then (pi, wait, read, read) x 8.
 
     relax_delay is the thermalisation wait K; the Form starts it at 5 T1 and
-    overrides can change it. Primary fits the first read with the twotone T1
-    fit for the starting value, then fits all 65 numbers jointly. It reports
-    T1 and the third-state decay time with Wald errors and three checks. No
-    writeback is proposed or requested. Save keeps the running sums and the
-    analysis.
+    overrides can change it. Primary fits the first read with a single decay
+    for the starting value, then fits all 65 numbers jointly with the
+    rate-equation model. It reports T1, the eigen time with the larger
+    amplitude, and the other eigen time as the secondary time, with Wald errors
+    and three checks. No writeback is proposed or requested. Save keeps the
+    running sums and the analysis.
 
     points → expts sets the sweep sample count.
     Missing Form values stop before acquisition; completed Run data is saved even if analysis fails.
@@ -115,8 +116,8 @@ async def chain_t1(session: RecipeSession, inputs: ChainT1Inputs) -> ChainT1Repo
             return ChainT1Report(
                 t1_us=None,
                 t1_err_us=None,
-                tf_us=None,
-                tf_err_us=None,
+                secondary_time_us=None,
+                secondary_time_err_us=None,
                 within_point=None,
                 sharing=None,
                 curve=None,
@@ -126,8 +127,8 @@ async def chain_t1(session: RecipeSession, inputs: ChainT1Inputs) -> ChainT1Repo
         return ChainT1Report(
             t1_us=report_number(analysis.result.t1),
             t1_err_us=report_number(analysis.result.t1_err),
-            tf_us=report_number(analysis.result.tf),
-            tf_err_us=report_number(analysis.result.tf_err),
+            secondary_time_us=report_number(analysis.result.secondary_time),
+            secondary_time_err_us=report_number(analysis.result.secondary_time_err),
             within_point=analysis.result.within_point,
             sharing=analysis.result.sharing,
             curve=analysis.result.curve,
