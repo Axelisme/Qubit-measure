@@ -1,6 +1,6 @@
 # `zcu_tools.analysis` 模塊重點文檔
 
-**Last updated:** 2026-11-10，thermal-chain closed-form score 與 MIST 排除
+**Last updated:** 2026-11-10，thermal-chain 完整相鄰對與合併分數
 
 **讀者：** framework-dev。分析核心、純數值工具與前端 adapter 的分工速查。
 
@@ -70,12 +70,20 @@ centers／radius／confusion matrix 有限時才提出校準。
 ## Readout chain 讀出調參
 
 `ThermalChainSums.from_processor(axis, sums)` 保存每點 16-read shot count 與
-`THERMAL_MOMENT_COUNT`（37）個 sums。每個 shot 先回到熱平衡，再無 drive 連讀 16 次。
-`thermal_chain_score(sums)` 用閉式 covariance 計算 score、QND、兩者的一倍標準差與
-正規化的 MIST amount，不做 fit。每個 read 位置各扣自己的 mean，因此固定 IQ offset 不改結果。
-`ThermalChainScore.settings` 依 acquisition order 保留每點 `SettingScore`，包括被排除的點。
-MIST amount 大於 |correlation| 的點不進 ranking，其餘依 score − score_error 排序，同分保留 acquisition order。
-Ranking 全空時沒有最佳點。欄位、公式與 ValueError 條件見 [thermal.py](readout_chain/thermal.py)。
+`THERMAL_MOMENT_COUNT`（107）個 sums。每個 shot 先回到熱平衡，再無 drive 連讀 16 次。
+Saved sums 保留全部 16 個 means、R1 self moments、15 個相鄰對與三個早期長 lag pairs。
+`thermal_chain_score(sums)` 逐 read 中心化後，以固定權重 (r−8)/20 加總相鄰 covariance 矩陣，
+再取最大特徵值並除以 R1 variance 得到 M。固定 IQ offset 不改結果。
+M 是鏈內相關增量的診斷，純二態再布居也可能提高它，不代表可辨識的 leakage probability。
+Score 為 ρ² G (|ρ|/(|ρ|+max(M,0)))²，ρ=0 時為零。G 是受限二態模型的 15-lag information proxy，
+用固定 24-point quadrature 計算，不做 fit，不把熱重置序列等同於 driven chain。
+`ThermalChainScore.settings` 依 acquisition order 保留每點 `SettingScore`。
+Ranking 包含所有點，只按 score 降序，同分保留 acquisition order，不使用誤差或第二門檻。
+`score_error` 與 `qnd_error` 是模型條件式近似尺度，不是一般 one-sigma 保證。
+Score scale 固定 M 與主軸，只傳播 ρ、QND，忽略共享 covariance 與選最大值造成的 selection effect。
+G 的解析斜率在裁切後的 η、s 求值，clip Jacobian 當作 1，chain term 使用裁切後 s/η。
+ρ² 與 M 懲罰照原始 ρ 求導。這在裁切點及外側不是實際輸出對原估計值的真實導數。
+欄位、公式與 ValueError 條件見 [thermal.py](readout_chain/thermal.py)。
 
 `readout_chain.ReadoutSums.from_processor(axis, sums)` 保存每個 setting 的
 32-read block count 與 `MOMENT_COUNT`（113）個 moment sums。Processor output 的 shape 是

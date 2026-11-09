@@ -87,7 +87,7 @@ def chain_readout_sums(prog: TimelineProgramV2, read: str) -> ShotSumProcessor:
 
 
 def thermal_chain_sums(prog: TimelineProgramV2, read: str) -> ShotSumProcessor:
-    """Resolve one PulseReadout and reduce its 16-read shots to 38 columns.
+    """Resolve one PulseReadout and reduce its 16-read shots to 108 columns.
 
     read is an emit tag or an untagged module name. All emissions of that
     owner must be 16 unrolled reads or one read in one fixed Repeat of 16.
@@ -99,19 +99,22 @@ def thermal_chain_sums(prog: TimelineProgramV2, read: str) -> ShotSumProcessor:
 
     The caller arranges consecutive reads with no intervening drive or extra
     wait, followed by the thermal relaxation delay. Pulse/timing content is
-    not checked. Reads 6..14 evolve the state but supply no moments.
+    not checked. Every read supplies means and adjacent-pair moments.
 
     The callable borrows ADC-keyed float64 (points, reps, 16, 2) IQ arrays,
     without mutation. IQ is ADC integral / rounded integration length, without
     offset subtraction. Other ADCs are ignored; a missing selected ADC raises
     KeyError, and a shape mismatch raises ValueError. Output is float64
-    (points, 38), summed over shots, never averaged:
+    (points, 108), summed over shots, never averaged:
 
     * 0: shot count.
-    * 1:15: I,Q of R1,R2,R3,R4,R5,R15,R16, in that order.
-    * 15:18: R1 I²,IQ,Q².
-    * 18:38: II′,IQ′,QI′,QQ′ for (R1,R2),(R1,R3),(R1,R4),
-      (R1,R5),(R15,R16), in that order.
+    * 1:33: I,Q of R1..R16, in read order.
+    * 33:36: R1 I²,IQ,Q².
+    * 36:96: II′,IQ′,QI′,QQ′ for (R1,R2)..(R15,R16), in pair order.
+    * 96:108: II′,IQ′,QI′,QQ′ for (R1,R3),(R1,R4),(R1,R5).
+
+    All cross components are preserved, including the middle adjacent pair.
+    No analysis weights are applied by this processor.
 
     Reps and completed rounds add, including the shot count.
     """
@@ -124,20 +127,19 @@ def thermal_chain_sums(prog: TimelineProgramV2, read: str) -> ShotSumProcessor:
                 f"ADC {ch}: expected (points, reps, 16, 2); actual {values.shape}"
             )
         points, reps = values.shape[:2]
-        recorded = values[:, :, [0, 1, 2, 3, 4, 14, 15], :]
         first_i, first_q = values[:, :, 0, 0], values[:, :, 0, 1]
-        sums = np.empty((points, 38), dtype=np.float64)
+        sums = np.empty((points, 108), dtype=np.float64)
         sums[:, 0] = reps
-        sums[:, 1:15] = recorded.sum(axis=1).reshape(points, 14)
-        sums[:, 15:18] = np.stack(
+        sums[:, 1:33] = values.sum(axis=1).reshape(points, 32)
+        sums[:, 33:36] = np.stack(
             [first_i**2, first_i * first_q, first_q**2], axis=-1
         ).sum(axis=1)
-        cross = np.einsum(
-            "prki,prkj->pkij",
-            values[:, :, [0, 0, 0, 0, 14], :],
-            values[:, :, [1, 2, 3, 4, 15], :],
+        adjacent = np.einsum(
+            "prki,prkj->pkij", values[:, :, :-1, :], values[:, :, 1:, :]
         )
-        sums[:, 18:38] = cross.reshape(points, 20)
+        sums[:, 36:96] = adjacent.reshape(points, 60)
+        early = np.einsum("pri,prkj->pkij", values[:, :, 0, :], values[:, :, 2:5, :])
+        sums[:, 96:108] = early.reshape(points, 12)
         return sums
 
     return process

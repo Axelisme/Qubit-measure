@@ -137,7 +137,9 @@ Request、數值契約與環境組裝見 [simulation](simulation/README.md)，st
 Build 後先呼叫 `set_reads_per_shot(32)`，再建立 processor。每點回傳 114 欄：block count 與 113 個 moment sums，跨 reps 與 rounds 只加總。
 Caller 保證讀出之間沒有 drive 或額外等待；processor 不檢查 pulse 與 timing 內容。欄位順序、每個 lag 的正規化與失敗條件見函式 docstring。
 `thermal_chain_sums(prog, read)` 處理同一 PulseReadout 的 16 次連讀，可展開或放在單一 fixed Repeat。
-Build 後先呼叫 `set_reads_per_shot(16)`，再建立 processor。每點回傳 38 欄：shot count 與 37 個 sums，跨 reps 與 rounds 只加總。
+Build 後先呼叫 `set_reads_per_shot(16)`，再建立 processor。每點回傳 108 欄：shot count 與 107 個 sums，跨 reps 與 rounds 只加總。
+Sums 保留 R1..R16 的 I/Q means、R1 self moments、全部 15 個相鄰對與 (R1,R3)、(R1,R4)、(R1,R5)。
+每對保留 II′、IQ′、QI′、QQ′ 四個 components，processor 不套分析權重。
 Caller 安排熱平衡等待與沒有 drive 的連讀；processor 檢查 owner、read 數與同 ADC 沒有其他 triggers，不檢查 drive 或 timing 內容。
 四種 processor 共用 `readout_labels` 的 label 規則：pulse 與 mux readout owners 一起判定唯一性，宣告的 read 數由 `validate_declared_reads` 檢查。
 

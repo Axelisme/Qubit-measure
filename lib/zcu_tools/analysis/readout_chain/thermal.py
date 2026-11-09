@@ -6,7 +6,7 @@ from math import atan2, cos, hypot, sin, sqrt
 import numpy as np
 from numpy.typing import NDArray
 
-THERMAL_MOMENT_COUNT = 37
+THERMAL_MOMENT_COUNT = 107
 
 
 @dataclass(frozen=True)
@@ -15,9 +15,10 @@ class ThermalChainSums:
 
     axis: Shape (F,), finite setting coordinates in caller-defined units.
     shot_count: Shape (F,), positive integer shot counts, stored as float64.
-    feature_sums: Shape (F, 37), finite sums: I,Q of R1,R2,R3,R4,R5,R15,R16;
-        R1 I²,IQ,Q²; II′,IQ′,QI′,QQ′ for (R1,R2),(R1,R3),(R1,R4),
-        (R1,R5),(R15,R16). Units are ADC or ADC² by moment degree.
+    feature_sums: Shape (F, 107), finite sums: I,Q of R1..R16;
+        R1 I²,IQ,Q²; II′,IQ′,QI′,QQ′ for all 15 adjacent pairs, followed by
+        (R1,R3),(R1,R4),(R1,R5). Units are ADC or ADC² by moment degree.
+        All four cross components are saved without analysis weighting.
 
     F must be positive. Construction raises ValueError for malformed shapes,
     nonreal/nonnumeric dtypes, non-finite values or nonpositive/noninteger
@@ -36,14 +37,14 @@ class ThermalChainSums:
     def from_processor(
         cls, axis: NDArray[np.float64], sums: NDArray[np.float64]
     ) -> "ThermalChainSums":
-        """Copy axis (F,) and processor sums (F,38): shot count then moments.
+        """Copy axis (F,) and processor sums (F,108): shot count then moments.
 
         axis uses caller-defined units. Raise ValueError for empty/mismatched
         shapes, non-finite data or nonpositive/noninteger shot counts.
         """
         if axis.ndim != 1 or sums.shape != (axis.size, 1 + THERMAL_MOMENT_COUNT):
             raise ValueError(
-                f"expected processor sums (settings, 38); actual {sums.shape}"
+                f"expected processor sums (settings, 108); actual {sums.shape}"
             )
         return cls(axis.copy(), sums[:, 0].copy(), sums[:, 1:].copy())
 
@@ -59,7 +60,7 @@ def _validate_sums(sums: ThermalChainSums) -> None:
         THERMAL_MOMENT_COUNT,
     ):
         raise ValueError(
-            f"expected shot_count ({count},) and feature_sums ({count}, 37); "
+            f"expected shot_count ({count},) and feature_sums ({count}, 107); "
             f"actual {sums.shot_count.shape} and {sums.feature_sums.shape}"
         )
     if any(
@@ -90,35 +91,41 @@ class SettingScore:
     """Dimensionless score of one setting, without clipping to physical ranges.
 
     setting: Coordinate from ThermalChainSums.axis, in caller-defined units.
-    score: y=4ρ², larger means greater first-pair g/e contrast.
-    score_error: One-sigma sampling error 8|ρ| sqrt((1+ρ²)/n).
+    score: ρ² G (|ρ|/(|ρ|+max(M,0)))²; zero at ρ=0. A heuristic utility,
+        not a leakage probability or a physical information optimum.
+    score_error: Model-conditional approximate scale propagating only ρ and
+        QND at fixed M and main axis, ignoring their shared covariance.
+        Not a general one-sigma guarantee or a selection correction.
+    amplification: G, symmetric two-state 15-lag information ratio averaged
+        over determinant 0..1, with effective rather than calibrated SNR.
     correlation: ρ=c1/v, first-pair covariance / R1 variance on the main axis.
     qnd: QND=(c1*c2+c2*c3+c3*c4)/(c1²+c2²+c3²), with cj the R1,R(1+j)
         covariance projected onto the main axis. Not restricted to [0,1].
-    qnd_error: One-sigma QND error v/sqrt(n) times the Euclidean norm of
-        QND\'s analytic gradient with respect to c1..c4.
-    mist: Largest eigenvalue of S(15,16)-S(1,2), divided by R1 variance v.
-    excluded: True exactly when mist > |correlation|; omitted from ranking.
+    qnd_error: Model-conditional approximate scale v/sqrt(n) times the norm
+        of QND's analytic gradient with respect to c1..c4.
+    mist: M=λmax(Σ(r-8)/20 S(r,r+1))/v for r=1..15. This diagnoses
+        within-chain correlation growth, including two-state repopulation;
+        it is not an identifiable physical leakage probability or rate.
     """
 
     setting: float
     score: float
     score_error: float
     correlation: float
+    amplification: float
     qnd: float
     qnd_error: float
     mist: float
-    excluded: bool
 
 
 @dataclass(frozen=True)
 class ThermalChainScore:
-    """Thermal-chain results in acquisition order, with an eligible ranking.
+    """Thermal-chain results in acquisition order, ranked by heuristic score.
 
-    settings: One SettingScore per saved setting, including excluded settings.
-    ranking: Eligible setting indices, best first by score-score_error. Exact
-        ties keep acquisition order. Empty when all settings are excluded;
-        otherwise ranking[0] is the best setting's index.
+    settings: One SettingScore per saved setting in acquisition order.
+    ranking: All setting indices by descending score. Exact ties keep
+        acquisition order. ranking[0] is the best setting's index; errors
+        do not enter ranking and no second threshold excludes settings.
     """
 
     settings: tuple[SettingScore, ...]
@@ -136,8 +143,23 @@ def thermal_chain_score(sums: ThermalChainSums) -> ThermalChainScore:
     and those four covariances onto it to obtain v and c1..c4. A constant IQ
     offset cancels through read-position centring.
 
-    Return all settings and the nonexcluded ranking, without modifying sums.
-    SettingScore documents the score, errors, QND and normalised MIST amount.
+    Return all settings and their score ranking, without modifying sums.
+    SettingScore documents the score, errors, QND and correlation-growth M.
+    G uses eta=clip(QND,0.001,0.995), s=min(|rho|/eta,0.999), q=s/(1-s).
+    Integrate J.T solve(V,J) over determinant 0..1 with fixed 24-point
+    Gauss-Legendre quadrature, divided by its determinant=0 value. The
+    15-lag two-state covariance defines J,V; the scaled solve extends G
+    continuously to s=0. This is a model information proxy, not an equality
+    between thermal-reset shots and a driven chain.
+
+    Error propagates SE(rho)=sqrt((1+rho²)/n) and the documented QND scale.
+    Analytic partials G_eta,G_s are evaluated at clipped eta,s. Model slopes
+    are dG/drho=sign(rho)*G_s/eta and dG/dQND=G_eta-s*G_s/eta, using clipped
+    s even above its cap. The rho² and M-penalty prefactor uses raw rho.
+    These slopes treat clip Jacobians as 1: at/outside a clip boundary they
+    are not true derivatives of the clipped output. Score and error have
+    continuous limit zero at rho=0. M and main-axis uncertainty are ignored.
+
     No fit, iterative solver or finite difference is used. Invalid saved sums,
     projected R1 variance <=0 or zero first-read covariance norm raise
     ValueError before scoring.
@@ -149,15 +171,53 @@ def thermal_chain_score(sums: ThermalChainSums) -> ThermalChainScore:
             sums.axis, sums.shot_count, sums.feature_sums, strict=True
         )
     )
-    eligible = [index for index, setting in enumerate(settings) if not setting.excluded]
     ranking = tuple(
         sorted(
-            eligible,
-            key=lambda index: settings[index].score - settings[index].score_error,
-            reverse=True,
+            range(len(settings)), key=lambda index: settings[index].score, reverse=True
         )
     )
     return ThermalChainScore(settings, ranking)
+
+
+def _amplification(rho: float, qnd: float) -> tuple[float, float, float]:
+    """Return G and model slopes in rho,QND at clipped eta,s (clip Jacobian=1)."""
+    eta = float(np.clip(qnd, 0.001, 0.995))
+    s = min(abs(rho) / eta, 0.999)
+    q = s / (1 - s)
+    nodes, weights = np.polynomial.legendre.leggauss(24)
+    u = eta * (nodes + 1)[:, None, None] / 2
+    j = np.arange(1, 16)
+    distance = np.abs(j[:, None] - j[None, :])
+    total = j[:, None] + j[None, :]
+    b = (1 + u**2) / (1 - u**2)
+    near, far = u**distance, u**total
+    transition = (distance + b) * near - (total + b) * far
+    covariance = np.eye(15) + 2 * q * (near + far) + q**2 * transition
+    # Dividing J by q*eta cancels from the ratio and extends it to q=0.
+    signal = j * u[:, 0, :] ** (j - 1)
+    solved = np.linalg.solve(covariance, signal[..., None])[..., 0]
+    information = np.einsum("ki,ki->k", signal, solved)
+    # All quadrature nodes are positive, so these powers have no 0/0 boundary.
+    near_u, far_u = distance * u ** (distance - 1), total * u ** (total - 1)
+    b_u = 4 * u / (1 - u**2) ** 2
+    covariance_u = 2 * q * (near_u + far_u) + q**2 * (
+        (distance + b) * near_u - (total + b) * far_u + b_u * (near - far)
+    )
+    covariance_q = 2 * (near + far) + 2 * q * transition
+    signal_u = j * (j - 1) * u[:, 0, :] ** (j - 2)
+    information_u = 2 * np.einsum("ki,ki->k", signal_u, solved) - np.einsum(
+        "ki,kij,kj->k", solved, covariance_u, solved
+    )
+    information_q = -np.einsum("ki,kij,kj->k", solved, covariance_q, solved)
+    # At determinant=0 the scaled information is exactly 1/(1+q)^2.
+    integral = float(weights @ information / 2)
+    gain = integral * (1 + q) ** 2
+    gain_eta = float(weights @ (information_u * (nodes + 1) / 2) / 2) * (1 + q) ** 2
+    gain_s = (
+        2 * (1 + q) * integral + (1 + q) ** 2 * float(weights @ information_q / 2)
+    ) / (1 - s) ** 2
+    sign = float(np.sign(rho))
+    return gain, sign * gain_s / eta, gain_eta - s * gain_s / eta
 
 
 def _largest_eigenvalue(matrix: NDArray[np.float64]) -> float:
@@ -169,13 +229,15 @@ def _largest_eigenvalue(matrix: NDArray[np.float64]) -> float:
 def _score_setting(
     setting: float, shots: float, moments: NDArray[np.float64]
 ) -> SettingScore:
-    means = moments[:14].reshape(7, 2)
-    variance = moments[[14, 15, 15, 16]].reshape(2, 2) - np.outer(means[0], means[0])
-    cross = moments[17:].reshape(5, 2, 2) - np.einsum(
-        "ki,kj->kij", means[[0, 0, 0, 0, 5]], means[[1, 2, 3, 4, 6]]
+    means = moments[:32].reshape(16, 2)
+    variance = moments[[32, 33, 33, 34]].reshape(2, 2) - np.outer(means[0], means[0])
+    adjacent = moments[35:95].reshape(15, 2, 2) - np.einsum(
+        "ki,kj->kij", means[:-1], means[1:]
     )
-    symmetric = (cross + cross.transpose(0, 2, 1)) / 2
-    main = symmetric[:4].sum(axis=0)
+    early = moments[95:].reshape(3, 2, 2) - np.einsum("i,kj->kij", means[0], means[2:5])
+    symmetric = np.concatenate([adjacent[:1], early])
+    symmetric = (symmetric + symmetric.transpose(0, 2, 1)) / 2
+    main = symmetric.sum(axis=0)
     # A real symmetric 2x2 matrix has this analytic principal-axis angle.
     angle = atan2(float(2 * main[0, 1]), float(main[0, 0] - main[1, 1])) / 2
     axis = np.array([cos(angle), sin(angle)])
@@ -196,17 +258,34 @@ def _score_setting(
         )
         / denominator
     )
-    score = 4 * rho**2
-    score_error = 8 * abs(rho) * sqrt((1 + rho**2) / shots)
+    difference = np.einsum("k,kij->ij", (np.arange(1, 16) - 8) / 20, adjacent)
+    mist = _largest_eigenvalue((difference + difference.T) / 2) / v
+    amplification, gain_rho, gain_qnd = _amplification(rho, qnd)
     qnd_error = v / sqrt(shots) * float(np.linalg.norm(gradient))
-    mist = _largest_eigenvalue(symmetric[4] - symmetric[0]) / v
+    score, score_error = 0.0, 0.0
+    if rho:
+        positive_mist = max(mist, 0)
+        magnitude = abs(rho)
+        prefactor = rho**2 * (magnitude / (magnitude + positive_mist)) ** 2
+        prefactor_rho = float(np.sign(rho)) * (
+            2
+            * magnitude**3
+            * (magnitude + 2 * positive_mist)
+            / (magnitude + positive_mist) ** 3
+        )
+        score = prefactor * amplification
+        score_rho = prefactor_rho * amplification + prefactor * gain_rho
+        score_qnd = prefactor * gain_qnd
+        score_error = hypot(
+            score_rho * sqrt((1 + rho**2) / shots), score_qnd * qnd_error
+        )
     return SettingScore(
         setting=setting,
         score=score,
         score_error=score_error,
         correlation=rho,
+        amplification=amplification,
         qnd=qnd,
         qnd_error=qnd_error,
         mist=mist,
-        excluded=mist > abs(rho),
     )

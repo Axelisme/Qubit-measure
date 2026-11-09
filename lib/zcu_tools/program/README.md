@@ -1,6 +1,6 @@
 # `zcu_tools.program` — QICK integration
 
-**Last updated:** 2026-11-09，讀出鏈 augmented sums
+**Last updated:** 2026-11-10，thermal-chain 完整相鄰對 sums
 
 **讀者：** framework-dev。QICK 整合、程式建構與 acquisition 依賴速查。
 
@@ -154,6 +154,15 @@ processor; the selected ADC must have no other triggers. The processor reduces
 each dwell to running moment sums for readout-chain analysis; `acquire_summed`
 adds them across rounds. Feature definitions, array layout and validation are in
 the [`chain_sweep_sums` docstring](v2/chain_sweep.py).
+
+`v2.thermal_chain_sums(prog, read)` selects exactly 16 consecutive reads of
+one PulseReadout, unrolled or in one fixed Repeat. After build, declare
+`prog.set_reads_per_shot(16)` before constructing the processor. Its 108 columns
+contain shot count and 107 sums: all 16 I/Q read means, R1 self moments,
+all 15 adjacent pairs and the three early long-lag pairs (R1,R3..R5).
+Each pair retains all four cross components; the processor applies no analysis
+weights. Reps and rounds add without averaging. The caller owns thermal
+relaxation and the absence of drives or extra waits within the shot.
 
 Build first, then resolve labels and call
 `sched.run_acquire_summed(program, soc, processor=..., rounds=...,

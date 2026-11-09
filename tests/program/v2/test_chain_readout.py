@@ -316,13 +316,18 @@ def test_thermal_shot_columns_equal_shot_by_shot_random_iq_sums():
     process = v2.thermal_chain_sums(block_program(16), "sample")
     iq = np.random.default_rng(42).normal(size=(3, 23, 16, 2))
     original = iq.copy()
-    expected = np.zeros((3, 38))
+    expected = np.zeros((3, 108))
     for point, shots in enumerate(iq):
         for shot in shots:
-            features = [*shot[[0, 1, 2, 3, 4, 14, 15]].ravel()]
+            features = [*shot.ravel()]
             i, q = shot[0]
             features.extend([i * i, i * q, q * q])
-            for early, late in ((0, 1), (0, 2), (0, 3), (0, 4), (14, 15)):
+            for early, late in [
+                *((r, r + 1) for r in range(15)),
+                (0, 2),
+                (0, 3),
+                (0, 4),
+            ]:
                 features.extend(np.outer(shot[early], shot[late]).ravel())
             expected[point] += np.array([1, *features])
 
@@ -354,7 +359,7 @@ def test_thermal_acquisition_adds_shots_over_rounds(unrolled):
             rounds=2,
             progress=False,
         )
-        expected = np.zeros((2, 38))
+        expected = np.zeros((2, 108))
         expected[:, 0] = 6
         np.testing.assert_array_equal(sums, expected)
         assert prog.ro_chs[0]["trigs"] == 16
@@ -440,6 +445,7 @@ def test_thermal_shot_iq_offset_leaves_saved_score_unchanged():
     rng = np.random.default_rng(57)
     latent = rng.normal(size=(2, 1200, 1, 2))
     iq = latent + rng.normal(size=(2, 1200, 16, 2))
+    iq += np.arange(16)[None, None, :, None] * np.array([0.2, -0.3])
     axis = np.array([1.0, 2.0])
     baseline = thermal_chain_score(
         ThermalChainSums.from_processor(axis, process({0: iq}))
@@ -454,6 +460,7 @@ def test_thermal_shot_iq_offset_leaves_saved_score_unchanged():
                 offset.score,
                 offset.score_error,
                 offset.correlation,
+                offset.amplification,
                 offset.qnd,
                 offset.qnd_error,
                 offset.mist,
@@ -463,14 +470,65 @@ def test_thermal_shot_iq_offset_leaves_saved_score_unchanged():
                 original.score,
                 original.score_error,
                 original.correlation,
+                original.amplification,
                 original.qnd,
                 original.qnd_error,
                 original.mist,
             ],
             rtol=1e-9,
         )
-        assert offset.excluded == original.excluded
     assert shifted.ranking == baseline.ranking
+
+
+def test_thermal_saved_adjacent_pairs_reconstruct_weighted_matrix_contrast():
+    process = v2.thermal_chain_sums(block_program(16), "sample")
+    rng = np.random.default_rng(209)
+    # Position-dependent means and signal strength detect pooled centring and
+    # endpoint-only contrasts.
+    latent = rng.normal(size=(2, 2500, 1, 2))
+    scales = np.linspace(0.5, 1.8, 16)[None, None, :, None]
+    iq = scales * latent + rng.normal(size=(2, 2500, 16, 2))
+    iq += np.arange(16)[None, None, :, None] * [0.3, -0.4]
+    saved = ThermalChainSums.from_processor(np.array([1.0, 2.0]), process({0: iq}))
+    result = thermal_chain_score(saved)
+    for point, shots in enumerate(iq):
+        centred = shots - shots.mean(axis=0)
+        adjacent = []
+        for r in range(15):
+            cross = np.zeros((2, 2))
+            for shot in centred:
+                cross += np.outer(shot[r], shot[r + 1]) / len(shots)
+            adjacent.append((cross + cross.T) / 2)
+        main = np.zeros((2, 2))
+        for lag in range(1, 5):
+            cross = np.zeros((2, 2))
+            for shot in centred:
+                cross += np.outer(shot[0], shot[lag]) / len(shots)
+            main += (cross + cross.T) / 2
+        axis = np.linalg.eigh(main)[1][:, -1]
+        variance = np.mean((centred[:, 0] @ axis) ** 2)
+        contrast = np.zeros((2, 2))
+        for r, pair in enumerate(adjacent, start=1):
+            contrast += (r - 8) / 20 * pair
+        expected = np.linalg.eigvalsh(contrast)[-1] / variance
+        np.testing.assert_allclose(result.settings[point].mist, expected, rtol=1e-9)
+        # The saved data retains each pair for later independent reanalysis.
+        raw = saved.feature_sums[point] / saved.shot_count[point]
+        means = raw[:32].reshape(16, 2)
+        for r, pair in enumerate(adjacent):
+            cross = raw[35 + 4 * r : 39 + 4 * r].reshape(2, 2) - np.outer(
+                means[r], means[r + 1]
+            )
+            np.testing.assert_allclose((cross + cross.T) / 2, pair, rtol=1e-9)
+
+
+def test_thermal_rejects_undeclared_16_reads():
+    builder = v2.TimelineBuilder(load_soccfg())
+    with builder.repeat("shot", 16):
+        builder.emit(block_readout())
+        builder.delay_auto()
+    with pytest.raises(ValueError, match=r"expected.*16.*actual.*1"):
+        v2.thermal_chain_sums(builder.build(), "readout")
 
 
 def test_thermal_requires_label_to_identify_one_readout_owner():
