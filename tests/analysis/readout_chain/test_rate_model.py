@@ -10,6 +10,7 @@ from zcu_tools.analysis.readout_chain import (
     t1_model,
 )
 
+from ._exact_moments import rate_moments
 from ._rate_truths import ALL_PAIRS, LADDER, PI_SWAP, STAR, THERMAL, RateTruth
 
 
@@ -43,7 +44,7 @@ def test_exact_moments_recover_both_modes_and_larger_amplitude_t1(
     assert result.reliability is None
     assert result.populations.shape == result.population_errors.shape == (13, 3)
     nuisance = expect_rate_nuisances(result)
-    predicted = t1_model().moments(sums.axis, result.parameters, nuisance)
+    predicted = rate_moments(sums.axis, result.parameters, nuisance)
     np.testing.assert_allclose(predicted.means, sums.feature_sums / 3000, atol=1e-7)
     # Geometric labels may move; both fitted and independently fitted populations
     # must follow the same state order, and equal the exact truth on exact moments.
@@ -88,7 +89,7 @@ def oracle_time_errors(fit: CycleFit) -> np.ndarray:
 
 
 def coordinate_nuisance(q: np.ndarray) -> RateNuisances:
-    """Construct public nuisances in the chart documented by RateModel.moments."""
+    """Construct public nuisances from a rate-fit vector in dominant D0 slots."""
 
     def probability(pair: np.ndarray) -> np.ndarray:
         s, f = pair
@@ -145,11 +146,10 @@ def test_rate_mean_jacobian_matches_oracle_in_every_coordinate(repeated: bool) -
         pi = coordinate_nuisance(q).thermal
         q[:3] = [0.05 * (pi[i] + pi[j]) for i, j in ((0, 1), (0, 2), (1, 2))]
     axis = np.array([0.0, 1.7, 12.0])
-    model = t1_model()
     names = ("rate_01", "rate_02", "rate_12")
 
     def moments(values: np.ndarray):
-        return model.moments(
+        return rate_moments(
             axis, dict(zip(names, values[:3], strict=True)), coordinate_nuisance(values)
         )
 
@@ -177,7 +177,7 @@ def test_rate_moments_and_populations_match_independent_expm_truth() -> None:
     )
     parameters = {"rate_01": 1 / 20, "rate_02": 1 / 12, "rate_12": 0.0}
     sums = STAR.sums()
-    moments = t1_model().moments(sums.axis, parameters, nuisance)
+    moments = rate_moments(sums.axis, parameters, nuisance)
     np.testing.assert_allclose(moments.means, sums.feature_sums / 3000, atol=1e-11)
     products = np.einsum(
         "n,nij->ij",
@@ -213,8 +213,23 @@ def test_rate_fit_rejects_invalid_initial_time(init: dict[str, float]) -> None:
 def test_rate_model_rejects_invalid_delays(axis: np.ndarray) -> None:
     q = oracle_coordinates()
     with pytest.raises(ValueError, match="delay"):
-        t1_model().moments(
+        t1_model().populations(
             axis,
             dict(zip(("rate_01", "rate_02", "rate_12"), q[:3], strict=True)),
             coordinate_nuisance(q),
         )
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("seed", [3101, 3102, 3103, 3104, 3105])
+def test_simulated_shots_give_t1_within_three_wald_errors(seed: int) -> None:
+    sums = STAR.sums(contrast=2.1, cycles=3000, seed=seed)
+
+    result = fit_cycle(sums, t1_model(), {"t1": 20.0})
+
+    relaxation = result.relaxation
+    assert relaxation is not None
+    times, amplitudes = STAR.modes()
+    truth = times[int(np.argmax(amplitudes))]
+    # Five fixed replicates guard the local Wald scale on shots, not precise coverage.
+    assert abs(relaxation.t1 - truth) < 3 * relaxation.t1_error

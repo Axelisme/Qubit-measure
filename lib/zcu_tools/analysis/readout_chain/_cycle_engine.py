@@ -14,6 +14,13 @@ from numba import njit
 
 from ._cycle_emission import cached_emissions, simplex, simplex_gradient
 from ._cycle_features import tables
+from ._cycle_layout import (
+    ROW_THERMAL,
+    TABLE_DRIVE,
+    TABLE_SHARED,
+    TABLE_SIZE,
+    TABLE_THERMAL,
+)
 
 
 @njit(cache=True, inline="always")
@@ -34,9 +41,9 @@ def _adjoint_kernel(
     drive, pi, matrix = chain
     nx = len(drive)
     means = np.zeros((nx, 65))
-    ga = np.zeros((nx, 65, 3, 3))
-    gp = np.zeros((nx, 65, 3))
-    gm = np.zeros((nx, 65, 15, 3, 3))
+    grad_drive = np.zeros((nx, 65, 3, 3))
+    grad_thermal = np.zeros((nx, 65, 3))
+    grad_emission = np.zeros((nx, 65, 15, 3, 3))
     forward = np.empty((25, 3))
     kinds = np.empty(24, dtype=np.int64)
     for x in range(nx):
@@ -67,9 +74,9 @@ def _adjoint_kernel(
                     for j in range(3):
                         contribution = forward[link, i] * right[j]
                         if kind == -1:
-                            ga[x, group, i, j] += contribution
+                            grad_drive[x, group, i, j] += contribution
                         else:
-                            gm[x, group, kind, i, j] += contribution
+                            grad_emission[x, group, kind, i, j] += contribution
                 transition = drive[x] if kind == -1 else matrix[x, kind]
                 # Reverse multiplication is matrix @ right, not right @ matrix.
                 r0 = (
@@ -88,20 +95,24 @@ def _adjoint_kernel(
                     + transition[2, 2] * right[2]
                 )
                 right[0], right[1], right[2] = r0, r1, r2
-            gp[x, group] += right
-    return means, ga, gp, gm
+            grad_thermal[x, group] += right
+    return means, grad_drive, grad_thermal, grad_emission
 
 
 def mean_jacobian(drive: np.ndarray, rows: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """Means and derivatives w.r.t. D's first two entries per row, then 14 nuisances."""
     matrix, dm = emission_batch(rows)
-    pi = np.array([simplex(*r[7:9]) for r in rows])
-    means, ga, gp, gm = _adjoint_kernel((drive, pi, matrix), tables()[0])
-    jac = np.empty((len(rows), 65, 20))
-    jac[:, :, :6] = (ga[:, :, :, :2] - ga[:, :, :, 2:3]).reshape(len(rows), 65, 6)
-    jac[:, :, 6:] = np.einsum("nfoij,noijk->nfk", gm, dm)
-    dpi = np.array([simplex_gradient(*r[7:9]) for r in rows])
-    jac[:, :, 13:15] += gp @ dpi
+    pi = np.array([simplex(*r[ROW_THERMAL]) for r in rows])
+    means, grad_drive, grad_thermal, grad_emission = _adjoint_kernel(
+        (drive, pi, matrix), tables()[0]
+    )
+    jac = np.empty((len(rows), 65, TABLE_SIZE))
+    jac[:, :, TABLE_DRIVE] = (
+        grad_drive[:, :, :, :2] - grad_drive[:, :, :, 2:3]
+    ).reshape(len(rows), 65, TABLE_DRIVE.stop)
+    jac[:, :, TABLE_SHARED] = np.einsum("nfoij,noijk->nfk", grad_emission, dm)
+    dpi = np.array([simplex_gradient(*r[ROW_THERMAL]) for r in rows])
+    jac[:, :, TABLE_THERMAL] += grad_thermal @ dpi
     return means, jac
 
 
@@ -110,7 +121,7 @@ def emission_batch(
 ) -> tuple[np.ndarray, np.ndarray]:
     # Thermal populations do not change emissions; shared rows reuse one evaluation.
     key = rows.copy()
-    key[:, 7:9] = 0
+    key[:, ROW_THERMAL] = 0
     _, indices, inverse = np.unique(key, axis=0, return_index=True, return_inverse=True)
     values = [cached_emissions(tuple(key[i]), max_order) for i in indices]
     return np.array([v[0] for v in values])[inverse], np.array([v[1] for v in values])[
@@ -167,8 +178,9 @@ def _second_kernel(
 
 def covariance(drive: np.ndarray, rows: np.ndarray, means: np.ndarray) -> np.ndarray:
     """Per-cycle covariance of the stored group sums from fourth-order event products."""
-    matrix = emission_batch(rows, max_order=4)[0]
-    pi = np.array([simplex(*r[7:9]) for r in rows])
+    # The covariance needs the emission matrices, not their derivatives.
+    matrix, _ = emission_batch(rows, max_order=4)
+    pi = np.array([simplex(*r[ROW_THERMAL]) for r in rows])
     pre, between = _propagators(drive, pi, matrix)
     second = _second_kernel((pre, between, matrix), tables()[1])
     return second - means[:, :, None] * means[:, None, :]

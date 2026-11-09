@@ -6,8 +6,16 @@ from itertools import permutations
 
 import numpy as np
 
-from ._cycle_coordinates import SHARED, endpoints_of
+from ._cycle_coordinates import endpoints_of
 from ._cycle_emission import simplex
+from ._cycle_layout import (
+    ROW_CENTERS,
+    ROW_LANDING,
+    ROW_RETENTION,
+    ROW_THERMAL,
+    ROW_VARIANCE,
+    SHARED,
+)
 from ._cycle_solver import (
     JointSolution,
     apply_weights,
@@ -122,11 +130,11 @@ def _nuisances(layout: RateCoordinates, q: Array) -> RateNuisances:
     shared = q[SHARED_RATE]
     return RateNuisances(
         layout.d0(q),
-        shared[:6].reshape(3, 2).copy(),
-        float(shared[6]),
-        simplex(*shared[7:9]),
-        shared[9:12].copy(),
-        simplex(*shared[12:14]),
+        shared[ROW_CENTERS].reshape(3, 2).copy(),
+        float(shared[ROW_VARIANCE]),
+        simplex(*shared[ROW_THERMAL]),
+        shared[ROW_RETENTION].copy(),
+        simplex(*shared[ROW_LANDING]),
     )
 
 

@@ -29,9 +29,6 @@ class ChainT1Summary(BaseModel):
     within_point: CycleCheck = Field(description="Within-point check J, df, p.")
     sharing: CycleCheck = Field(description="Sharing check J, df; p is null.")
     curve: CycleCheck = Field(description="Curve check J, df, p.")
-    first_read_t1: float | None = Field(
-        description="T1 in us of the first-read single-decay fit, the starting value."
-    )
 
 
 def _analyze(
@@ -47,7 +44,7 @@ def _run(cfg: ChainT1Cfg, *, context: RunContext) -> RunRecord[ChainT1Cfg, Cycle
     return RunRecord(cfg=cfg, result=ChainT1Exp().run(cfg, context=context))
 
 
-# No writeback: the chain T1 is reported beside the first-read value; twotone/t1 calibrates.
+# No writeback: twotone/t1 calibrates $qubit.t1.
 DEFINITION = Adapter(
     spec=ChainT1Exp.AXES_SPEC,
     make_form=make_form,

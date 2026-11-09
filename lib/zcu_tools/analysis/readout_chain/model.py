@@ -8,12 +8,10 @@ from numpy.typing import NDArray
 
 from ._cycle_coordinates import (
     NUISANCE_NAMES,
-    joint_mean_jacobian,
     joint_table,
     pack_nuisance,
     parameter_vector,
 )
-from ._cycle_engine import covariance
 
 Array = NDArray[np.float64]
 
@@ -77,9 +75,9 @@ class CycleNuisances:
     State labels are arbitrary and may be permuted together. Construction
     raises ValueError for a wrong shape, a non-finite value, a probability
     outside [0, 1], a simplex that does not sum to one or a nonpositive
-    variance. Fields are frozen; their arrays remain mutable, so moments checks
+    variance. Fields are frozen; their arrays remain mutable, so readers check
     them again. Exactly deterministic off-diagonal read jumps are nonregular:
-    moments raises ValueError because their emission Jacobian is not finite.
+    the fit rejects them because their emission Jacobian is not finite.
     """
 
     drive_endpoints: Array
@@ -91,26 +89,6 @@ class CycleNuisances:
 
     def __post_init__(self) -> None:
         _validate_nuisances(self)
-
-
-@dataclass(frozen=True)
-class CycleMoments:
-    """Moments of the saved 65 features, in axis order.
-
-    means: Shape (F,65), per-cycle means, in ADC or ADC-squared feature units.
-    covariance: Shape (F,65,65), per-cycle model covariance, in product feature units.
-    jacobian: Shape (F,65,P), derivatives of means by the named coordinates.
-    parameter_names: P column names. Curve coordinates come first. Simplexes use
-        (s,f): probabilities (s*f, s*(1-f), 1-s). Endpoint coordinates follow in
-        state, endpoint, then s/f order, followed by center I/Q in state order,
-        variance, thermal s/f, three retentions, landing s/f. Other coordinates
-        use the units on CycleNuisances; s,f and retentions are dimensionless.
-    """
-
-    means: Array
-    covariance: Array
-    jacobian: Array
-    parameter_names: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -130,8 +108,7 @@ class CycleModel:
         shape (F,3,len(parameter_names)), in the same parameter order.
 
     The drive row of state i is (1 - f_i(x)) * endpoint 0 + f_i(x) * endpoint 1,
-    as on CycleNuisances. All Jacobian columns are analytic. Use identical to
-    repeat one scalar curve and its derivative across the three states.
+    as on CycleNuisances. All Jacobian columns are analytic.
     """
 
     curve: Curve
@@ -165,61 +142,6 @@ class CycleModel:
         ):
             raise ValueError("oscillation_frequency must name a curve parameter")
 
-    @classmethod
-    def identical(
-        cls,
-        curve: Curve,
-        parameter_names: tuple[str, ...],
-        bounds: Sequence[tuple[float, float]],
-        *,
-        derivative: Curve,
-        oscillation_frequency: str | None = None,
-    ) -> "CycleModel":
-        """Repeat a scalar curve returning shape (F,) for each state.
-
-        curve receives the same axis and parameter mapping as CycleModel.curve.
-        derivative returns shape (F,len(parameter_names)); it is repeated over
-        states. Names, bounds and oscillation_frequency are as on CycleModel.
-        """
-
-        def repeated(axis: Array, parameters: Mapping[str, float]) -> Array:
-            return np.repeat(curve(axis, parameters)[:, None], 3, axis=1)
-
-        def repeated_derivative(axis: Array, parameters: Mapping[str, float]) -> Array:
-            return np.repeat(derivative(axis, parameters)[:, None, :], 3, axis=1)
-
-        return cls(
-            repeated,
-            parameter_names,
-            bounds,
-            oscillation_frequency,
-            derivative=repeated_derivative,
-        )
-
-    def moments(
-        self, axis: Array, parameters: Mapping[str, float], nuisances: CycleNuisances
-    ) -> CycleMoments:
-        """Return closed-form cycle means, covariance and mean Jacobian.
-
-        axis is a finite nonempty (F,) array; parameters contains exactly all
-        named curve values within bounds. Nuisances are shared over axis.
-        All derivatives are analytic, using the author's derivative callable.
-        Raise ValueError for invalid inputs or a nonregular deterministic read
-        jump. Inputs are not changed.
-        """
-        _validate_axis(axis)
-        _validate_nuisances(nuisances)
-        theta = parameter_vector(self, parameters)
-        q = np.concatenate([theta, pack_nuisance(nuisances)])
-        means, jacobian = joint_mean_jacobian(self, axis, q)
-        drive, rows = joint_table(self, axis, q)
-        return CycleMoments(
-            means,
-            covariance(drive, rows, means),
-            jacobian,
-            self.parameter_names + NUISANCE_NAMES,
-        )
-
     def populations(
         self, axis: Array, parameters: Mapping[str, float], nuisances: CycleNuisances
     ) -> Array:
@@ -227,10 +149,11 @@ class CycleModel:
 
         The thermal populations pass one drive D(x), whose row for state i is
         (1 - f_i(x)) * drive_endpoints[i,0] + f_i(x) * drive_endpoints[i,1].
-        axis, parameters and nuisances are as for moments; for a fit, pass
-        CycleFit.parameters and CycleFit.nuisances. Columns follow the state
-        order of nuisances. Raise ValueError for invalid inputs. Inputs are not
-        changed.
+        axis is a finite nonempty (F,) array; parameters contains exactly all
+        named curve values within bounds; nuisances are shared over axis. For a
+        fit, pass CycleFit.parameters and CycleFit.nuisances. Columns follow the
+        state order of nuisances. Raise ValueError for invalid inputs. Inputs
+        are not changed.
         """
         _validate_axis(axis)
         _validate_nuisances(nuisances)

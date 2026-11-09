@@ -59,8 +59,8 @@ Two-qubit chevron／constructive phase 各自在 `run()` 寫出序列，
 共用型別在 [\_rabi_scan.py](two_qubit/_rabi_scan.py)，數值擬合在
 [\_rabi_analysis.py](two_qubit/_rabi_analysis.py)。兩版各自在 `analyze()` 畫自己的圖，
 [\_sums.py](two_qubit/_sums.py) 只負責分類計數的數值換算。
-K-cycle 讀出鏈實驗各自在 `run()` 寫出 D(x)，經 [chain/\_cycle.py](chain/_cycle.py) 的 `emit_cycle` 組成同一個 (D, 讀, 讀) × 8 cycle；
-同檔也放共用的 CycleSums 存檔變數、live 曲線、Rabi 模型與 populations 圖。
+K-cycle 讀出鏈實驗各自在 `run()` 寫出 (D(x), 讀, 讀) × 8 的 `builder.repeat("cycle", BLOCKS_PER_CYCLE)` 迴圈；
+[chain/\_cycle.py](chain/_cycle.py) 放共用的 CycleSums 存檔變數、live 曲線與 populations 圖，模型留在 `zcu_tools.analysis.readout_chain.curve_models`。
 
 `v2` 延續 program/v2 的版本脈絡，不表示 GUI framework 的第二版。通用 runtime、量化、SNR 與 tracker 工具留在 `zcu_tools.experiment.v2`。Core 不依賴 GUI，import-linter C15 檢查 core 到 GUI framework 的直接與間接依賴。
 

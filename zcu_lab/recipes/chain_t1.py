@@ -71,9 +71,6 @@ class ChainT1Report(RecipeReport):
     curve: CycleCheck | None = Field(
         description="Curve check J, df, p; null without analysis."
     )
-    first_read_t1_us: float | None = Field(
-        description="T1 in us of the first-read single-decay fit; null means not estimable."
-    )
 
 
 @recipe(
@@ -121,7 +118,6 @@ async def chain_t1(session: RecipeSession, inputs: ChainT1Inputs) -> ChainT1Repo
                 within_point=None,
                 sharing=None,
                 curve=None,
-                first_read_t1_us=None,
                 analysis_failure=analysis.reason,
             )
         return ChainT1Report(
@@ -132,7 +128,6 @@ async def chain_t1(session: RecipeSession, inputs: ChainT1Inputs) -> ChainT1Repo
             within_point=analysis.result.within_point,
             sharing=analysis.result.sharing,
             curve=analysis.result.curve,
-            first_read_t1_us=report_number(analysis.result.first_read_t1),
         )
     finally:
         tab.save()

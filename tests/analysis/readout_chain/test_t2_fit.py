@@ -3,12 +3,14 @@
 import numpy as np
 import pytest
 from zcu_tools.analysis.readout_chain import (
+    CycleNuisances,
     CycleSums,
     fit_cycle,
     t2_echo_model,
     t2_ramsey_model,
 )
 
+from ._exact_moments import curve_moments
 from ._t2_samples import sampled_t2_sums, t2_nuisance
 
 
@@ -21,7 +23,7 @@ def test_exact_moments_recover_t2_and_joint_predictions(factory) -> None:
         truth["detuning"] = 0.8
         init["detuning"] = 0.78
     axis = np.linspace(0.05, 3.0, 13)
-    moments = model.moments(axis, truth, t2_nuisance(1.8))
+    moments = curve_moments(model, axis, truth, t2_nuisance(1.8))
     sums = CycleSums(
         axis, np.full(len(axis), 2000.0), 2000 * moments.means, np.zeros((65, 65))
     )
@@ -31,7 +33,8 @@ def test_exact_moments_recover_t2_and_joint_predictions(factory) -> None:
     for name, value in truth.items():
         assert result.parameters[name] == pytest.approx(value, rel=1e-5)
         assert result.errors[name] > 0
-    predicted = model.moments(axis, result.parameters, result.nuisances)
+    assert isinstance(result.nuisances, CycleNuisances)
+    predicted = curve_moments(model, axis, result.parameters, result.nuisances)
     np.testing.assert_allclose(predicted.means, moments.means, atol=1e-6)
     assert result.J < 1e-7
     # Ramsey oscillates, so it reports a reliability; the echo decay does not.

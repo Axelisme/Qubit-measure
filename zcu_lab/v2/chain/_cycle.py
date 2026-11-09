@@ -4,7 +4,9 @@ One cycle is one shot (one rep). It starts after the thermalisation wait K,
 which is the program's relax_delay, and then plays eight blocks of
 (D(x), read, read): the experiment's operation D at the sweep point x, then
 two reads of the same pulse readout. Read 2k follows D_k and read 2k+1 follows
-a read; chain_cycle_sums groups its 65 numbers by this order.
+a read; chain_cycle_sums groups its 65 numbers by this order. Each experiment
+writes this loop in its own run; every read is followed by delay_auto, so the
+second read starts after the first ADC window and the next D after the second.
 """
 
 from collections.abc import Callable
@@ -30,7 +32,6 @@ from zcu_tools.experiment import (
     config,
 )
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import PulseReadout, TimelineBuilder
 
 # Eight (D, read, read) blocks give the 16 reads per shot of chain_cycle_sums.
 BLOCKS_PER_CYCLE = 8
@@ -40,29 +41,6 @@ READS_PER_CYCLE = 2 * BLOCKS_PER_CYCLE
 FEATURES = tuple(range(CYCLE_FEATURE_COUNT))
 # Running sums per point are z zᵀ with z = (1, the 65 numbers of a cycle).
 AUGMENTED_SIZE = CYCLE_FEATURE_COUNT + 1
-
-
-def emit_cycle(
-    builder: TimelineBuilder,
-    readout: PulseReadout,
-    emit_operation: Callable[[], None],
-) -> None:
-    """Record the eight (D, read, read) blocks of one cycle on builder.
-
-    emit_operation records the operation D for the current sweep point, for
-    example builder.emit of a swept drive pulse. readout is the one pulse
-    readout whose two emissions per block make the 16 reads. Every read is
-    followed by a wait for its ADC window to close, so the second read starts
-    after the first, and the next D starts after the second. The wait K is the
-    builder's relax_delay, which follows every cycle, so each cycle starts K
-    after the previous one ends.
-    """
-    with builder.repeat("cycle", BLOCKS_PER_CYCLE):
-        emit_operation()
-        builder.emit(readout)
-        builder.delay_auto()
-        builder.emit(readout)
-        builder.delay_auto()
 
 
 def cycle_sums_variables(axis: VariableAxisSpec) -> tuple[VariableSpec, ...]:
@@ -139,35 +117,6 @@ def live_cycle_curves(
 def first_read_iq(sums: CycleSums) -> NDArray[np.complex128]:
     """Return the mean complex IQ of read 0 at each point, in ADC units."""
     return (sums.feature_sums[:, 0] + 1j * sums.feature_sums[:, 1]) / sums.cycle_count
-
-
-def g_and_third_decay_times(
-    fit: CycleFit, g_name: str, third_name: str
-) -> tuple[float, float, float, float]:
-    """Return the g and third-state decay times of an echo fit, with errors.
-
-    g_name is the time constant of the model's g and e rows (rows 0 and 1)
-    and third_name that of the third row (row 2), for example "t2" and "tf".
-    Return (g time, its Wald error, third-state time, its Wald error) in the
-    fit's units.
-    """
-    # In t2_echo_model the third row's curve is the same family as the g row's,
-    # a free affine function of exp(-x / T). Exchanging the two rows together
-    # with their time constants fits the data nearly as well when the third
-    # state is rarely populated. So the fit can land in either labelling and
-    # the checks cannot tell them apart. In thermal equilibrium g is the most
-    # populated state. The fit may also put g in row 1, which shares the g
-    # row's time constant, so the two times are exchanged only when the third
-    # row has the largest fitted thermal population.
-    thermal = fit.nuisances.thermal
-    if thermal[2] > max(thermal[0], thermal[1]):
-        g_name, third_name = third_name, g_name
-    return (
-        fit.parameters[g_name],
-        fit.errors[g_name],
-        fit.parameters[third_name],
-        fit.errors[third_name],
-    )
 
 
 def checks_text(fit: CycleFit) -> str:

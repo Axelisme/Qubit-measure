@@ -47,10 +47,10 @@ from zcu_tools.program.v2 import (
 
 from zcu_lab.v2.chain._cycle import (
     AUGMENTED_SIZE,
+    BLOCKS_PER_CYCLE,
     READS_PER_CYCLE,
     checks_text,
     cycle_sums_variables,
-    emit_cycle,
     first_read_iq,
     live_cycle_curves,
     restore_cycle_sums,
@@ -108,7 +108,7 @@ class ChainT1Cfg(ConfigBase):
 
 @dataclass(frozen=True)
 class ChainT1Analysis:
-    """Rate-equation fit of all 65 numbers, its checks and its starting value.
+    """Rate-equation fit of all 65 numbers and its checks.
 
     t1 and t1_err are T1 in us and its Wald error: T1 is the eigen time of the
     relaxation with the larger amplitude. secondary_time and secondary_time_err
@@ -116,8 +116,6 @@ class ChainT1Analysis:
     zero decay rate is infinite, and so is its error. within_point, sharing
     and curve are the three lack-of-fit checks of fit_cycle (sharing has no
     p). J and df are the joint weighted residual and its degrees of freedom.
-    first_read_t1 is the T1 in us of the single-decay fit of the first read,
-    which gave the starting value.
     """
 
     t1: float
@@ -129,7 +127,6 @@ class ChainT1Analysis:
     curve: CycleCheck
     J: float
     df: int
-    first_read_t1: float
 
 
 # Delays are us in memory and seconds on disk.
@@ -240,13 +237,15 @@ class ChainT1Exp(Experiment[CycleSums, ChainT1Cfg]):
             pi_pulse = Pulse("pi_pulse", cfg.pi_pulse)
             readout = PulseReadout("readout", cfg.readout)
 
-            def pi_then_wait() -> None:
+            with builder.repeat("cycle", BLOCKS_PER_CYCLE):
                 builder.emit(pi_pulse)
                 # The first read starts x after the π pulse ends.
                 builder.timeline_inc(delay)
                 builder.delay_by_timeline()
-
-            emit_cycle(builder, readout, pi_then_wait)
+                builder.emit(readout)
+                builder.delay_auto()
+                builder.emit(readout)
+                builder.delay_auto()
 
             prog = builder.build()
             prog.set_reads_per_shot(READS_PER_CYCLE)
@@ -309,5 +308,4 @@ class ChainT1Exp(Experiment[CycleSums, ChainT1Cfg]):
             curve=fit.curve,
             J=fit.J,
             df=fit.df,
-            first_read_t1=first_read_t1,
         )

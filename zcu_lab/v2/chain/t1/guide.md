@@ -59,11 +59,11 @@ The title gives T1, the secondary time and the three lack-of-fit checks as J/df:
 - `sharing`: shared readout nuisances against fully separate delays; it has no p.
 - `curve`: the rate-equation curves against a free operation at each delay, with p.
 
-The summary reports `t1` and `t1_err`, `secondary_time` and `secondary_time_err` in us, the three checks, the joint `J` and `df`, and `first_read_t1` from the first-read fit.
+The summary reports `t1` and `t1_err`, `secondary_time` and `secondary_time_err` in us, the three checks, and the joint `J` and `df`.
 Errors are Wald errors from the joint fit. At low state contrast and few cycles per delay they can understate the uncertainty.
 A fit failure in either step produces an analysis failure; the live plot and the saved sums remain.
 
-This experiment proposes no writeback. Compare `t1` with `first_read_t1`, and calibrate `$qubit.t1` with `twotone/t1`. `first_read_t1` is one decay fitted to a curve that can hold two, so it can differ from both eigen times. With the sweep starting at 0 it is never below the delay step.
+This experiment proposes no writeback. Calibrate `$qubit.t1` with `twotone/t1`.
 
 ## Saved data
 
@@ -75,5 +75,5 @@ Delays are us in memory and seconds in the file. The product sum feeds only the 
 `chain_t1` takes `max_delay_us`, `points`, `reps`, `rounds`, `pi_ref` and `readout_ref`; points maps to delay Expts.
 Set Relax delay with an override on `relax_delay`.
 The recipe runs, analyzes and saves. It never asks for writeback.
-The report gives `t1_us`, `t1_err_us`, `secondary_time_us`, `secondary_time_err_us`, the checks `within_point`, `sharing` and `curve` (each J, df, p), and `first_read_t1_us`.
+The report gives `t1_us`, `t1_err_us`, `secondary_time_us`, `secondary_time_err_us` and the checks `within_point`, `sharing` and `curve` (each J, df, p).
 Omitted inputs retain Form values; overrides apply last, then check_ready reports missing or invalid fields before Run.

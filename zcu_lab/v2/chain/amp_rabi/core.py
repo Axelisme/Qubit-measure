@@ -36,9 +36,9 @@ from zcu_tools.program.v2 import (
 
 from zcu_lab.v2.chain._cycle import (
     AUGMENTED_SIZE,
+    BLOCKS_PER_CYCLE,
     READS_PER_CYCLE,
     cycle_sums_variables,
-    emit_cycle,
     first_read_iq,
     live_cycle_curves,
     plot_cycle_fit,
@@ -163,7 +163,12 @@ class ChainAmpRabiExp(Experiment[CycleSums, ChainAmpRabiCfg]):
             gain = builder.add_sweep("gain", cfg.gain)
             rabi_pulse = Pulse("qub_pulse", cfg.qub_pulse, gain=gain)
             readout = PulseReadout("readout", cfg.readout)
-            emit_cycle(builder, readout, lambda: builder.emit(rabi_pulse))
+            with builder.repeat("cycle", BLOCKS_PER_CYCLE):
+                builder.emit(rabi_pulse)
+                builder.emit(readout)
+                builder.delay_auto()
+                builder.emit(readout)
+                builder.delay_auto()
 
             prog = builder.build()
             prog.set_reads_per_shot(READS_PER_CYCLE)

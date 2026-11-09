@@ -14,6 +14,7 @@ from zcu_tools.analysis.readout_chain import (
 )
 
 from ._cycle_samples import sampled_sums
+from ._exact_moments import curve_moments, repeated_curve
 
 
 def expect_curve_nuisances(fit: CycleFit) -> CycleNuisances:
@@ -24,7 +25,7 @@ def expect_curve_nuisances(fit: CycleFit) -> CycleNuisances:
 
 def planted_model(kind: str = "t1"):
     if kind == "t1":
-        model = CycleModel.identical(
+        model = repeated_curve(
             lambda x, p: np.exp(-x / p["tau"]),
             ("tau",),
             ((0.2, 5.0),),
@@ -33,7 +34,7 @@ def planted_model(kind: str = "t1"):
             ],
         )
     else:
-        model = CycleModel.identical(
+        model = repeated_curve(
             lambda x, p: np.sin(np.pi * p["frequency"] * x) ** 2,
             ("frequency",),
             ((0.1, 2.0),),
@@ -63,7 +64,7 @@ def exact_sums(
     model: CycleModel, nuisance: CycleNuisances, points: int = 9
 ) -> CycleSums:
     axis = np.linspace(0.05, 3.0, points)
-    moments = model.moments(axis, {model.parameter_names[0]: 1.2}, nuisance)
+    moments = curve_moments(model, axis, {model.parameter_names[0]: 1.2}, nuisance)
     counts = np.full(points, 3000.0)
     products = np.einsum(
         "n,nij->ij",
@@ -83,7 +84,7 @@ def test_exact_moments_recover_curve_and_joint_predictions(kind: str) -> None:
 
     np.testing.assert_allclose(fit.parameters[name], 1.2, rtol=1e-5)
     fitted_nuisance = expect_curve_nuisances(fit)
-    predicted = model.moments(sums.axis, fit.parameters, fitted_nuisance)
+    predicted = curve_moments(model, sums.axis, fit.parameters, fitted_nuisance)
     np.testing.assert_allclose(
         predicted.means, sums.feature_sums / sums.cycle_count[:, None], atol=1e-6
     )
@@ -150,7 +151,7 @@ def test_per_state_curves_fit_their_parameters_jointly() -> None:
         ),
     )
     axis = np.linspace(0.05, 3.0, 11)
-    moments = model.moments(axis, {"tau": 1.2, "leak_tau": 0.65}, nuisance)
+    moments = curve_moments(model, axis, {"tau": 1.2, "leak_tau": 0.65}, nuisance)
     sums = CycleSums(
         axis, np.full(len(axis), 3000.0), 3000 * moments.means, np.zeros((65, 65))
     )

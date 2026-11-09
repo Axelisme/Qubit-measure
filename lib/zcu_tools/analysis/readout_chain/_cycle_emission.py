@@ -13,6 +13,13 @@ import numpy as np
 from scipy.special import hyp1f1
 
 from ._cycle_features import ORDERS
+from ._cycle_layout import (
+    ROW_CENTERS,
+    ROW_LANDING,
+    ROW_RETENTION,
+    ROW_SIZE,
+    ROW_VARIANCE,
+)
 
 
 def simplex(s: float, f: float) -> np.ndarray:
@@ -91,15 +98,16 @@ def _edge(
 def emissions(row: np.ndarray, max_order: int) -> tuple[np.ndarray, np.ndarray]:
     """Emission matrices (15,3,3) and derivatives (15,3,3,14).
 
-    Row: centers*6, variance, thermal s/f, retention*3, landing s/f.
+    Row: the shared-row layout of _cycle_layout (centers, variance, thermal
+    s/f, retention, landing s/f).
     All dynamics derivatives are analytic, including tails at probability zero.
     """
-    centers, variance = row[:6].reshape(3, 2), row[6]
-    keep = row[9:12]
-    rho = simplex(*row[12:14])
-    drho = simplex_gradient(*row[12:14])
+    centers, variance = row[ROW_CENTERS].reshape(3, 2), row[ROW_VARIANCE]
+    keep = row[ROW_RETENTION]
+    rho = simplex(*row[ROW_LANDING])
+    drho = simplex_gradient(*row[ROW_LANDING])
     transition = np.diag(keep) + (1 - keep[:, None]) * rho[None, :]
-    matrices, gradients = np.zeros((15, 3, 3)), np.zeros((15, 3, 3, 14))
+    matrices, gradients = np.zeros((15, 3, 3)), np.zeros((15, 3, 3, ROW_SIZE))
     for i in range(3):
         for j in range(3):
             p = float(transition[i, j])
@@ -107,10 +115,10 @@ def emissions(row: np.ndarray, max_order: int) -> tuple[np.ndarray, np.ndarray]:
             matrices[:, i, j] = p * value
             gradients[:, i, j, 2 * i : 2 * i + 2] += p * grad[:, :2]
             gradients[:, i, j, 2 * j : 2 * j + 2] += p * grad[:, 2:4]
-            gradients[:, i, j, 6] = p * grad[:, 6]
-            dp = np.zeros(14)
-            dp[9 + i] = (i == j) - rho[j]
-            dp[12:14] = (1 - keep[i]) * drho[j]
+            gradients[:, i, j, ROW_VARIANCE] = p * grad[:, 6]
+            dp = np.zeros(ROW_SIZE)
+            dp[ROW_RETENTION.start + i] = (i == j) - rho[j]
+            dp[ROW_LANDING] = (1 - keep[i]) * drho[j]
             gradients[:, i, j] += (value + p * grad[:, 7])[:, None] * dp
     return matrices, gradients
 

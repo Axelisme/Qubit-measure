@@ -10,17 +10,25 @@ from dataclasses import dataclass, replace
 
 import numpy as np
 
-from ._cycle_coordinates import NUISANCE_NAMES, SHARED, nuisance_bounds
+from ._cycle_coordinates import NUISANCE_NAMES, nuisance_bounds
 from ._cycle_emission import simplex, simplex_coordinates, simplex_gradient
 from ._cycle_engine import mean_jacobian
-from ._rate_equation import Spectrum, propagator_jacobian, spectrum
+from ._cycle_layout import (
+    ROW_SIZE,
+    ROW_THERMAL,
+    SHARED,
+    TABLE_DRIVE,
+    TABLE_SHARED,
+    shifted,
+)
+from ._rate_equation import Spectrum, propagator, propagator_jacobian, spectrum
 from .model import Array
 
 RATE_NAMES = ("rate_01", "rate_02", "rate_12")
 D0 = slice(3, 9)
-SHARED_RATE = slice(9, 23)
-THERMAL_RATE = slice(16, 18)
-SIZE = 23
+SHARED_RATE = slice(D0.stop, D0.stop + ROW_SIZE)
+THERMAL_RATE = shifted(ROW_THERMAL, SHARED_RATE.start)
+SIZE = SHARED_RATE.stop
 PI_FLOOR = 1e-6
 RATE_MAX = 1e3
 Slots = tuple[tuple[int, ...], ...]
@@ -72,7 +80,7 @@ class RateCoordinates:
         return spectrum(q[:3], self.thermal(q))
 
     def table(self, q: Array) -> tuple[Array, Array]:
-        relaxation = propagator_jacobian(self.spectrum(q), self.axis)[0]
+        relaxation = propagator(self.spectrum(q), self.axis)
         return self.d0(q) @ relaxation, np.tile(q[SHARED_RATE], (len(self.axis), 1))
 
     def mean_jacobian(self, q: Array) -> tuple[Array, Array]:
@@ -83,7 +91,7 @@ class RateCoordinates:
 
         def through_drive(change: Array) -> Array:
             pairs = change[:, :, :2].reshape(len(self.axis), 6, -1)
-            return local[:, :, :6] @ pairs
+            return local[:, :, TABLE_DRIVE] @ pairs
 
         jac = np.zeros((len(self.axis), 65, SIZE))
         jac[:, :, :3] = through_drive(np.einsum("ij,njkp->nikp", d0, d_rate))
@@ -92,7 +100,7 @@ class RateCoordinates:
             change = gradient[row].T @ relax[:, :, :2]
             block = local[:, :, 2 * row : 2 * row + 2]
             jac[:, :, 3 + 2 * row : 5 + 2 * row] = block @ np.swapaxes(change, 1, 2)
-        jac[:, :, SHARED_RATE] = local[:, :, 6:]
+        jac[:, :, SHARED_RATE] = local[:, :, TABLE_SHARED]
         # Thermal changes both the cycle start (engine term) and the generator.
         jac[:, :, THERMAL_RATE] += through_drive(
             np.einsum("ij,njkm->nikm", d0, d_pi @ simplex_gradient(*q[THERMAL_RATE]))

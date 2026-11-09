@@ -5,6 +5,13 @@ from dataclasses import dataclass
 import numpy as np
 
 from ._cycle_emission import simplex, simplex_gradient
+from ._cycle_layout import (
+    ROW_SIZE,
+    ROW_THERMAL,
+    TABLE_DRIVE,
+    TABLE_SHARED,
+    TABLE_THERMAL,
+)
 from ._cycle_solver import (
     apply_weights,
     bounded_least_squares,
@@ -20,6 +27,18 @@ LineState = tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]
 
 @dataclass
 class SharedSolution:
+    """Fit of the shared coordinates with free drive pairs at each point.
+
+    table: Shape (F,20), fitted table rows in the layout of _cycle_layout.
+    J: Weighted residual sum of squares at table, dimensionless.
+    covariance_shared: Shape (14,14), covariance of the shared coordinates.
+    covariance_local: Shape (F,6,6), per-point covariance of the drive pairs at
+        fixed shared coordinates, the pseudoinverse of their normal matrix.
+    coupling: Shape (F,6,14), per-point covariance_local times the local-shared
+        normal block. A change of the shared coordinates moves the fitted drive
+        pairs by minus coupling times that change.
+    """
+
     table: np.ndarray
     J: float
     covariance_shared: np.ndarray
@@ -76,6 +95,16 @@ def inner(
     limits: Limits,
     steps: int = 40,
 ) -> tuple[np.ndarray, np.ndarray]:
+    """Fit the table columns cols independently at each point; hold the others.
+
+    table has shape (F,20) in the layout of _cycle_layout, means (F,65), weights
+    (F,65,65) whitening matrices. cols indexes the fitted columns of table and
+    limits gives their lower and upper bounds. Run bounded damped Gauss-Newton
+    with a per-point halving line search for at most steps iterations, stopping
+    early when no column moves by 1e-9. Return a new table and the final weighted
+    residual, shape (F,65). The inputs are not changed; numpy.linalg.LinAlgError
+    propagates from a singular solve.
+    """
     table = table.copy()
     predicted, jac = local_mean_jacobian(table)
     residual = apply_weights(weights, means - predicted)
@@ -131,58 +160,85 @@ def solve_shared(
     weights: np.ndarray,
     limits: Limits,
 ) -> SharedSolution:
+    """Fit the 14 shared coordinates with the drive pairs eliminated at each point.
+
+    table is the (F,20) starting table in the layout of _cycle_layout; each
+    point's drive pairs and the first row's shared columns seed the fit. means
+    has shape (F,65), weights (F,65,65) fixed whitening matrices, limits the
+    lower and upper bounds of all 20 columns. Each least-squares residual first
+    refits every point's drive pairs with inner. Return the SharedSolution at
+    the optimum without changing the inputs. Raise RuntimeError if the shared
+    fit does not converge.
+    """
     lo, hi = limits
-    cols = np.arange(6)
+    cols = np.arange(TABLE_DRIVE.stop)
     current = table.copy()
     residual = np.zeros_like(means)
 
     def fun(shared: np.ndarray) -> np.ndarray:
         nonlocal current, residual
-        current[:, 6:] = shared
-        current, residual = inner(current, means, weights, cols, (lo[:6], hi[:6]))
+        current[:, TABLE_SHARED] = shared
+        current, residual = inner(
+            current, means, weights, cols, (lo[TABLE_DRIVE], hi[TABLE_DRIVE])
+        )
         return residual.ravel()
 
     def jacobian(shared: np.ndarray) -> np.ndarray:
-        current[:, 6:] = shared
+        # least_squares' trf calls jac only at the accepted point, right after fun
+        # evaluated it, so current still holds the drive pairs solved for this shared.
+        current[:, TABLE_SHARED] = shared
         jac = apply_weights(weights, local_mean_jacobian(current)[1])
-        local, global_ = jac[:, :, :6], jac[:, :, 6:]
+        local, global_ = jac[:, :, TABLE_DRIVE], jac[:, :, TABLE_SHARED]
         normal = np.einsum("nfi,nfj->nij", local, local)
         coupling = np.einsum("nfi,nfj->nij", local, global_)
         projected = global_ - local @ (
             np.linalg.pinv(normal, rcond=1e-12, hermitian=True) @ coupling
         )
-        return -projected.reshape(-1, 14)
+        return -projected.reshape(-1, ROW_SIZE)
 
-    result = bounded_least_squares(fun, current[0, 6:], jacobian, (lo[6:], hi[6:]), 100)
+    result = bounded_least_squares(
+        fun,
+        current[0, TABLE_SHARED],
+        jacobian,
+        (lo[TABLE_SHARED], hi[TABLE_SHARED]),
+        100,
+    )
     if not result.success:
         raise RuntimeError(f"shared cycle check did not converge: {result.message}")
     fun(result.x)
     jac = apply_weights(weights, local_mean_jacobian(current)[1])
-    local, global_ = jac[:, :, :6], jac[:, :, 6:]
-    fvv = np.einsum("nfi,nfj->nij", local, local)
-    fvs = np.einsum("nfi,nfj->nij", local, global_)
-    cv = np.linalg.pinv(fvv, rcond=1e-12, hermitian=True)
-    coupling = cv @ fvs
+    local, global_ = jac[:, :, TABLE_DRIVE], jac[:, :, TABLE_SHARED]
+    # Normal-matrix blocks of the drive pairs (local) and shared coordinates.
+    local_normal = np.einsum("nfi,nfj->nij", local, local)
+    local_shared = np.einsum("nfi,nfj->nij", local, global_)
+    covariance_local = np.linalg.pinv(local_normal, rcond=1e-12, hermitian=True)
+    coupling = covariance_local @ local_shared
     schur = np.einsum("nfi,nfj->ij", global_, global_) - np.einsum(
-        "nij,nik->jk", fvs, coupling
+        "nij,nik->jk", local_shared, coupling
     )
-    cs = np.linalg.pinv(schur, rcond=1e-12, hermitian=True)
-    return SharedSolution(current, float(np.sum(residual**2)), cs, cv, coupling)
+    covariance_shared = np.linalg.pinv(schur, rcond=1e-12, hermitian=True)
+    return SharedSolution(
+        current,
+        float(np.sum(residual**2)),
+        covariance_shared,
+        covariance_local,
+        coupling,
+    )
 
 
 def populations(solution: SharedSolution) -> tuple[np.ndarray, np.ndarray]:
     table = solution.table
     drive = local_drive(table)
-    pi = np.array([simplex(*r[13:15]) for r in table])
+    pi = np.array([simplex(*r[TABLE_THERMAL]) for r in table])
     values = np.einsum("ni,nij->nj", pi, drive)
-    local = np.zeros((len(table), 3, 6))
-    shared = np.zeros((len(table), 3, 14))
+    local = np.zeros((len(table), 3, TABLE_DRIVE.stop))
+    shared = np.zeros((len(table), 3, ROW_SIZE))
     for x, row in enumerate(table):
         for state in range(3):
             local[x, :, 2 * state : 2 * state + 2] = pi[x, state] * simplex_gradient(
                 *row[2 * state : 2 * state + 2]
             )
-        shared[x, :, 7:9] = drive[x].T @ simplex_gradient(*row[13:15])
+        shared[x, :, ROW_THERMAL] = drive[x].T @ simplex_gradient(*row[TABLE_THERMAL])
     corrected = shared - local @ solution.coupling
     cov = local @ solution.covariance_local @ local.transpose(0, 2, 1)
     cov += corrected @ solution.covariance_shared @ corrected.transpose(0, 2, 1)

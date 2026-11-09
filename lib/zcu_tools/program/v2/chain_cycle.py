@@ -6,6 +6,7 @@ import numpy as np
 from numpy.typing import NDArray
 from qick.asm_v2 import Trigger
 
+from zcu_tools.core.chain_cycle_groups import pair_group, same_read_group
 from zcu_tools.program.acquisition import ShotSumProcessor
 
 from .macro.readout import ReadoutEmission
@@ -69,7 +70,8 @@ def chain_cycle_sums(prog: TimelineProgramV2, read: str) -> ShotSumProcessor:
         vectors[..., 0] = 1
         vectors[..., 1:33] = values.reshape(*values.shape[:2], 32)
         i, q = values[..., 0], values[..., 1]
-        for group, reads in enumerate(([0], range(2, 16, 2), range(1, 16, 2))):
+        for group in range(3):
+            reads = [read for read in range(16) if same_read_group(read) == group]
             vectors[..., 33 + 3 * group : 36 + 3 * group] = np.stack(
                 [
                     (i[..., reads] ** 2).sum(axis=-1),
@@ -80,7 +82,7 @@ def chain_cycle_sums(prog: TimelineProgramV2, read: str) -> ShotSumProcessor:
             )
         for left in range(16):
             for right in range(left + 1, 16):
-                start = 42 + 4 * _pair_group(left, right)
+                start = 42 + 4 * pair_group(left, right)
                 vectors[..., start : start + 4] += np.stack(
                     [
                         i[..., left] * i[..., right],
@@ -93,17 +95,6 @@ def chain_cycle_sums(prog: TimelineProgramV2, read: str) -> ShotSumProcessor:
         return np.einsum("pri,prj->pij", vectors, vectors)
 
     return process
-
-
-def _pair_group(left: int, right: int) -> int:
-    d, gap = right // 2 - left // 2, right - left
-    if d == 0:
-        return 0
-    if d == 1:
-        return 1 if gap == 1 else 2
-    if d == 2:
-        return 3 if gap <= 3 else 4
-    return 5
 
 
 def _resolve_cycle(prog: TimelineProgramV2, read: str) -> int:

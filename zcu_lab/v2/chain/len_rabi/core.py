@@ -36,9 +36,9 @@ from zcu_tools.program.v2 import (
 
 from zcu_lab.v2.chain._cycle import (
     AUGMENTED_SIZE,
+    BLOCKS_PER_CYCLE,
     READS_PER_CYCLE,
     cycle_sums_variables,
-    emit_cycle,
     first_read_iq,
     live_cycle_curves,
     plot_cycle_fit,
@@ -146,12 +146,6 @@ class ChainLenRabiExp(Experiment[CycleSums, ChainLenRabiCfg]):
         rounds as CycleSums along the length axis in us. A stop keeps completed
         rounds; a stop before the first round finishes raises RuntimeError.
         """
-        if cfg.qub_pulse.waveform.style not in ("const", "flat_top"):
-            raise ValueError(
-                "Chain length Rabi sweeps the pulse length on the FPGA; "
-                "select a const or flat_top waveform."
-            )
-
         # 1. Length axis and the live plot.
         lengths = sweep2array(
             cfg.length, "time", {"soccfg": context.soccfg, "gen_ch": cfg.qub_pulse.ch}
@@ -171,7 +165,12 @@ class ChainLenRabiExp(Experiment[CycleSums, ChainLenRabiCfg]):
             length = builder.add_sweep("length", cfg.length)
             rabi_pulse = Pulse("qub_pulse", cfg.qub_pulse, length=length)
             readout = PulseReadout("readout", cfg.readout)
-            emit_cycle(builder, readout, lambda: builder.emit(rabi_pulse))
+            with builder.repeat("cycle", BLOCKS_PER_CYCLE):
+                builder.emit(rabi_pulse)
+                builder.emit(readout)
+                builder.delay_auto()
+                builder.emit(readout)
+                builder.delay_auto()
 
             prog = builder.build()
             prog.set_reads_per_shot(READS_PER_CYCLE)

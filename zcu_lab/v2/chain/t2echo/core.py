@@ -16,6 +16,7 @@ import numpy as np
 from pydantic import Field
 from zcu_tools.analysis.readout_chain import (
     CycleCheck,
+    CycleFit,
     CycleSums,
     fit_cycle,
     t2_echo_model,
@@ -37,11 +38,10 @@ from zcu_tools.program.v2 import (
 
 from zcu_lab.v2.chain._cycle import (
     AUGMENTED_SIZE,
+    BLOCKS_PER_CYCLE,
     READS_PER_CYCLE,
     cycle_sums_variables,
-    emit_cycle,
     first_read_iq,
-    g_and_third_decay_times,
     live_cycle_curves,
     plot_cycle_fit,
     restore_cycle_sums,
@@ -136,6 +136,34 @@ class ChainT2EchoAnalysis:
 DELAY_AXIS = VariableAxisSpec(label="Time", unit="s", field_name="axis", scale=1e-6)
 
 
+def _decay_times(fit: CycleFit) -> tuple[float, float, float, float]:
+    """Return (t2, its Wald error, tf, its Wald error) of an echo fit, in us.
+
+    In t2_echo_model the third row's curve is the same family as the g row's,
+    a free affine function of exp(-x / T). When the third state is rarely
+    populated, exchanging the two rows and their time constants fits nearly as
+    well, so the fit can land in either labelling and the checks cannot tell
+    them apart. g is the most populated state in thermal equilibrium; the fit
+    may also put g in row 1, which shares the g row's time constant, so the
+    times are exchanged only when the third row has the largest fitted thermal
+    population.
+    """
+    thermal = fit.nuisances.thermal
+    if thermal[2] > max(thermal[0], thermal[1]):
+        return (
+            fit.parameters["tf"],
+            fit.errors["tf"],
+            fit.parameters["t2"],
+            fit.errors["t2"],
+        )
+    return (
+        fit.parameters["t2"],
+        fit.errors["t2"],
+        fit.parameters["tf"],
+        fit.errors["tf"],
+    )
+
+
 class ChainT2EchoExp(Experiment[CycleSums, ChainT2EchoCfg]):
     AXES_SPEC: ClassVar[GroupedAxesSpec[CycleSums, ChainT2EchoCfg]] = GroupedAxesSpec(
         variables=cycle_sums_variables(DELAY_AXIS),
@@ -181,7 +209,7 @@ class ChainT2EchoExp(Experiment[CycleSums, ChainT2EchoCfg]):
             pi_pulse = Pulse("pi_pulse", cfg.pi_pulse)
             readout = PulseReadout("readout", cfg.readout)
 
-            def echo() -> None:
+            with builder.repeat("cycle", BLOCKS_PER_CYCLE):
                 builder.emit(pi2_pulse)
                 builder.timeline_inc(0.5 * delay)
                 builder.delay_by_timeline()
@@ -189,8 +217,10 @@ class ChainT2EchoExp(Experiment[CycleSums, ChainT2EchoCfg]):
                 builder.timeline_inc(0.5 * delay)
                 builder.delay_by_timeline()
                 builder.emit(pi2_pulse)
-
-            emit_cycle(builder, readout, echo)
+                builder.emit(readout)
+                builder.delay_auto()
+                builder.emit(readout)
+                builder.delay_auto()
 
             prog = builder.build()
             prog.set_reads_per_shot(READS_PER_CYCLE)
@@ -243,7 +273,7 @@ class ChainT2EchoExp(Experiment[CycleSums, ChainT2EchoCfg]):
         fit = fit_cycle(sums, model, {"t2": textbook.t2e, "tf": textbook.t2e})
 
         # 3. g is the most populated state, which tells the g row from the third.
-        t2, t2_err, tf, tf_err = g_and_third_decay_times(fit, "t2", "tf")
+        t2, t2_err, tf, tf_err = _decay_times(fit)
         plot_cycle_fit(
             plots,
             model,

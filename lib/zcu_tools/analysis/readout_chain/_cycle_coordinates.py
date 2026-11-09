@@ -1,4 +1,4 @@
-"""Simplex coordinates, the nuisance layout and the affine-row chain rule."""
+"""Simplex coordinates of the nuisance vector and the affine-row chain rule."""
 
 from collections.abc import Mapping
 from typing import TYPE_CHECKING
@@ -7,27 +7,20 @@ import numpy as np
 
 from ._cycle_emission import simplex, simplex_coordinates, simplex_gradient
 from ._cycle_engine import mean_jacobian
+from ._cycle_layout import (
+    CENTERS,
+    ENDPOINTS,
+    LANDING,
+    NUISANCE_SIZE,
+    RETENTION,
+    SHARED,
+    TABLE_DRIVE,
+    THERMAL,
+    VARIANCE,
+)
 
 if TYPE_CHECKING:
     from .model import Curve, CycleModel, CycleNuisances
-
-# The 26 nuisance coordinates that follow the curve parameters. A simplex is an
-# (s, f) pair with probabilities (s*f, s*(1-f), 1-s); see simplex.
-ENDPOINTS = slice(0, 12)  # by state, then endpoint 0/1, then (s, f)
-CENTERS = slice(12, 18)  # (I, Q) per state
-VARIANCE = 18
-THERMAL = slice(19, 21)  # (s, f)
-RETENTION = slice(21, 24)  # one per state
-LANDING = slice(24, 26)  # (s, f)
-NUISANCE_SIZE = 26
-# Centers through landing are shared by every point; the emission and moment
-# kernels take these 14 coordinates as one row, in this order.
-SHARED = slice(CENTERS.start, NUISANCE_SIZE)
-
-# A per-point table row holds one free (s, f) drive pair per state, then the
-# shared coordinates.
-TABLE_DRIVE = slice(0, 6)
-TABLE_SIZE = TABLE_DRIVE.stop + SHARED.stop - SHARED.start
 
 NUISANCE_NAMES = tuple(
     [f"endpoint_{i}_{e}_{c}" for i in range(3) for e in range(2) for c in ("s", "f")]
@@ -150,6 +143,11 @@ def joint_mean_jacobian(
 def parameter_vector(
     model: "CycleModel", parameters: Mapping[str, float]
 ) -> np.ndarray:
+    """Return the curve parameter values as an array in parameter_names order.
+
+    parameters must name every curve parameter of model exactly once, with
+    finite values inside model.bounds; otherwise raise ValueError.
+    """
     if set(parameters) != set(model.parameter_names):
         raise ValueError("parameters must name every curve parameter exactly once")
     theta = np.array([parameters[k] for k in model.parameter_names], dtype=float)

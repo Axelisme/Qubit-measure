@@ -4,14 +4,15 @@ from dataclasses import dataclass
 
 import numpy as np
 from scipy.linalg import expm
-from zcu_tools.analysis.readout_chain import CycleModel, CycleNuisances, CycleSums
+from zcu_tools.analysis.readout_chain import CycleNuisances, CycleSums
 
 from ._cycle_samples import cycle_samples
+from ._exact_moments import curve_moments, repeated_curve
 
 DELAYS = np.linspace(0.0, 100.0, 13)
 THERMAL = np.array([0.84, 0.10, 0.06])
 PI_SWAP = np.array([[0.0, 1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]])
-_FLAT = CycleModel.identical(
+_FLAT = repeated_curve(
     lambda x, p: np.zeros_like(x),
     ("unused",),
     ((0.0, 1.0),),
@@ -63,7 +64,9 @@ class RateTruth:
         for i, delay in enumerate(DELAYS):
             nuisance = self.nuisance(float(delay), contrast)
             if seed is None:
-                moments = _FLAT.moments(np.array([delay]), {"unused": 0.0}, nuisance)
+                moments = curve_moments(
+                    _FLAT, np.array([delay]), {"unused": 0.0}, nuisance
+                )
                 mean = moments.means[0]
                 sums.append(cycles * mean)
                 products += cycles * (moments.covariance[0] + np.outer(mean, mean))

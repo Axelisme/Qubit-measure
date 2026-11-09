@@ -5,15 +5,15 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from ._cycle_coordinates import SHARED, pack_nuisance
-from ._cycle_engine import covariance
+from ._cycle_coordinates import pack_nuisance
+from ._cycle_layout import SHARED
 from ._rate_coordinates import (
     RATE_MAX,
     RATE_NAMES,
     RateCoordinates,
     dominant_slots,
 )
-from .model import Array, CycleMoments, CycleNuisances
+from .model import Array, CycleNuisances
 
 
 @dataclass(frozen=True)
@@ -43,6 +43,7 @@ class RateNuisances:
     read_landing: Array
 
     def __post_init__(self) -> None:
+        # Building the CycleNuisances validates every field; only its raising matters here.
         _as_cycle_nuisances(self)
 
 
@@ -102,32 +103,14 @@ class RateModel:
     these three rates: it seeds all three at 1/time.
     """
 
-    def moments(
-        self, axis: Array, parameters: Mapping[str, float], nuisances: RateNuisances
-    ) -> CycleMoments:
-        """Return exact means, covariance and analytic mean Jacobian.
-
-        Inputs follow RateModel and RateNuisances; invalid inputs raise
-        ValueError, including nonregular deterministic read jumps. Inputs are
-        unchanged. Jacobian coordinates are three pair rates, D0 row (s,f)
-        pairs, then the 14 shared coordinates of CycleMoments. D0's largest
-        entry occupies simplex slot 0, other states in ascending index order;
-        parameter_names encode each row's slot order. At tied largest entries,
-        the first state index wins. All derivatives use this fixed local chart.
-        """
-        coordinates, q = self._coordinates(axis, parameters, nuisances)
-        means, jacobian = coordinates.mean_jacobian(q)
-        drive, rows = coordinates.table(q)
-        return CycleMoments(
-            means, covariance(drive, rows, means), jacobian, coordinates.names
-        )
-
     def populations(
         self, axis: Array, parameters: Mapping[str, float], nuisances: RateNuisances
     ) -> Array:
         """Return first-read pre-emission populations (F,3), pi D0 exp(Gx).
 
-        Inputs, validation and failures are as for moments. Inputs are unchanged.
+        axis holds finite nonnegative delays; parameters holds exactly rate_01,
+        rate_02 and rate_12 in [0,1000]. Invalid inputs raise ValueError. Inputs
+        are unchanged.
         """
         coordinates, q = self._coordinates(axis, parameters, nuisances)
         return np.einsum("i,xij->xj", nuisances.thermal, coordinates.table(q)[0])

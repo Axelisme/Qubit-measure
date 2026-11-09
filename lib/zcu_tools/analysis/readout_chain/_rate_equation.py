@@ -79,10 +79,19 @@ def _exponential_direction(spec: Spectrum, delays: Array, directions: Array) -> 
     return np.moveaxis(vectors @ (conjugated * phi[:, None]) @ vectors.T, 1, -1)
 
 
+def _symmetric_propagator(spec: Spectrum, delays: Array) -> Array:
+    growth = np.exp(np.outer(delays, spec.values))
+    return (spec.vectors * growth[:, None, :]) @ spec.vectors.T
+
+
+def propagator(spec: Spectrum, delays: Array) -> Array:
+    """Return exp(Gx) at each delay, shape (F,3,3)."""
+    return _symmetric_propagator(spec, delays) * spec.ratio[None]
+
+
 def propagator_jacobian(spec: Spectrum, delays: Array) -> tuple[Array, Array, Array]:
     """Return exp(Gx), d/dgamma and d/dpi; directions are the final axis."""
-    growth = np.exp(np.outer(delays, spec.values))
-    symmetric = (spec.vectors * growth[:, None, :]) @ spec.vectors.T
+    symmetric = _symmetric_propagator(spec, delays)
     ratio = spec.ratio[None, :, :, None]
     d_rate = _exponential_direction(spec, delays, spec.rate_directions) * ratio
     d_pi = (

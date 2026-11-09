@@ -8,19 +8,21 @@ from scipy.stats import chi2
 
 from ._cycle_checks import inner, populations, solve_shared
 from ._cycle_coordinates import (
-    CENTERS,
-    LANDING,
     NUISANCE_NAMES,
-    RETENTION,
-    TABLE_SIZE,
-    THERMAL,
-    VARIANCE,
     endpoints_of,
     joint_table,
     parameter_vector,
     table_bounds,
 )
 from ._cycle_emission import simplex
+from ._cycle_layout import (
+    CENTERS,
+    LANDING,
+    RETENTION,
+    TABLE_SIZE,
+    THERMAL,
+    VARIANCE,
+)
 from ._cycle_solver import local_table, solve_joint, starting_nuisance
 from ._rate_solver import solve_rate
 from .cycle import CycleSums, validate_cycle_sums
@@ -66,8 +68,12 @@ class CycleFit:
         without residual-variance rescaling. RateModel first normalizes Jacobian
         columns so the cutoff describes collinearity rather than units. Rank loss
         and active bounds invalidate ordinary Wald coverage; the pseudoinverse does not restore identification.
-    parameter_names: Covariance column names, ordered as on CycleMoments.
-        Simplexes use (s,f), not redundant three-probability coordinates.
+    parameter_names: Covariance column names. Curve or rate parameters come
+        first. Curve models continue with the drive endpoints (state, endpoint,
+        s/f); rate models with the D0 rows (s,f), whose names encode each row's
+        slot order. Both end with center I/Q by state, variance, thermal s/f,
+        three retentions and landing s/f. Simplexes use (s,f), not redundant
+        three-probability coordinates; probabilities are (s*f, s*(1-f), 1-s).
     within_point: Unrestricted per-point three-state model residual check.
     sharing: Shared-nuisance versus fully pointwise check; no calibrated p.
     curve: Constrained model versus free pointwise drive check. RateModel

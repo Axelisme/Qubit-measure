@@ -5,19 +5,9 @@ from itertools import combinations_with_replacement
 
 import numpy as np
 
+from zcu_tools.core.chain_cycle_groups import pair_group, same_read_group
+
 ORDERS = tuple((a, b) for a in range(5) for b in range(5 - a))
-
-
-def _group(i: int, j: int) -> int:
-    drives = j // 2 - i // 2
-    gap = j - i
-    if drives == 0:
-        return 0
-    if drives == 1:
-        return 1 if gap == 1 else 2
-    if drives == 2:
-        return 3 if gap <= 3 else 4
-    return 5
 
 
 def _events(factors: tuple[tuple[int, int], ...]) -> tuple[list[int], list[int]]:
@@ -40,7 +30,7 @@ def tables() -> tuple[np.ndarray, np.ndarray]:
         (2 * k + a, ((k, a),)) for k in range(16) for a in (0, 1)
     ]
     for k in range(16):
-        group = 0 if k == 0 else (1 if k % 2 == 0 else 2)
+        group = same_read_group(k)
         for c, (a, b) in enumerate(((0, 0), (0, 1), (1, 1))):
             features.append((32 + 3 * group + c, ((k, a), (k, b))))
     for i in range(16):
@@ -48,7 +38,7 @@ def tables() -> tuple[np.ndarray, np.ndarray]:
             for a in (0, 1):
                 for b in (0, 1):
                     features.append(
-                        (41 + 4 * _group(i, j) + 2 * a + b, ((i, a), (j, b)))
+                        (41 + 4 * pair_group(i, j) + 2 * a + b, ((i, a), (j, b)))
                     )
     means, seconds = [], []
     for group, factors in features:

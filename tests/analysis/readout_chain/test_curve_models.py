@@ -8,6 +8,7 @@ from zcu_tools.analysis.readout_chain import (
     t2_ramsey_model,
 )
 
+from ._exact_moments import curve_moments
 from ._t2_samples import bloch_curves, t2_nuisance
 
 
@@ -28,10 +29,10 @@ def test_analytic_curve_derivative_matches_independent_oracle(factory) -> None:
         oracle = (model.curve(axis, plus) - model.curve(axis, minus)) / 2e-6
         np.testing.assert_allclose(analytic[:, :, col], oracle, rtol=1e-7, atol=1e-9)
         nuisance = t2_nuisance(1.8)
-        moments = model.moments(axis, parameters, nuisance)
+        moments = curve_moments(model, axis, parameters, nuisance)
         oracle_mean = (
-            model.moments(axis, plus, nuisance).means
-            - model.moments(axis, minus, nuisance).means
+            curve_moments(model, axis, plus, nuisance).means
+            - curve_moments(model, axis, minus, nuisance).means
         ) / 2e-6
         np.testing.assert_allclose(
             moments.jacobian[:, :, col], oracle_mean, rtol=1e-6, atol=1e-8
@@ -83,7 +84,7 @@ def test_ideal_analyzer_removes_longitudinal_relaxation(factory) -> None:
             axis, parameters, t1=t1, echo=not model.oscillation_frequency
         )
         np.testing.assert_allclose(physical, expected, atol=1e-14)
-    moments = model.moments(axis, parameters, t2_nuisance(1.8))
+    moments = curve_moments(model, axis, parameters, t2_nuisance(1.8))
     assert np.isfinite(moments.jacobian).all()
     assert moments.jacobian.shape == (13, 65, len(moments.parameter_names))
 

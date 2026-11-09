@@ -3,20 +3,12 @@
 from collections.abc import Callable
 from dataclasses import dataclass
 from itertools import permutations
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from scipy.optimize import OptimizeResult, least_squares
 
 from ._cycle_coordinates import (
-    CENTERS,
-    ENDPOINTS,
-    LANDING,
-    NUISANCE_SIZE,
-    RETENTION,
-    TABLE_DRIVE,
-    THERMAL,
-    VARIANCE,
     endpoints_of,
     joint_mean_jacobian,
     joint_table,
@@ -24,6 +16,17 @@ from ._cycle_coordinates import (
 )
 from ._cycle_emission import simplex, simplex_coordinates, simplex_gradient
 from ._cycle_engine import covariance, mean_jacobian
+from ._cycle_layout import (
+    CENTERS,
+    ENDPOINTS,
+    LANDING,
+    NUISANCE_SIZE,
+    RETENTION,
+    TABLE_DRIVE,
+    TABLE_SHARED,
+    THERMAL,
+    VARIANCE,
+)
 
 if TYPE_CHECKING:
     from .model import CycleModel
@@ -45,7 +48,8 @@ def apply_weights(weights: np.ndarray, values: np.ndarray) -> np.ndarray:
 def model_weights(
     drive: np.ndarray, rows: np.ndarray, counts: np.ndarray
 ) -> np.ndarray:
-    means = mean_jacobian(drive, rows)[0]
+    # The weights need the means; the kernel computes the Jacobian alongside them.
+    means, _ = mean_jacobian(drive, rows)
     omega = covariance(drive, rows, means)
     lower = np.linalg.cholesky(omega)
     return np.linalg.inv(lower) * np.sqrt(counts[:, None, None])
@@ -111,6 +115,19 @@ def solve_joint(
     counts: np.ndarray,
     q: np.ndarray,
 ) -> JointSolution:
+    """Fit the curve parameters and the 26 nuisance coordinates jointly.
+
+    model supplies the per-state curve and its analytic derivative. axis has
+    shape (F,), means (F,65) per-cycle feature means, counts (F,) cycle counts.
+    q is the start: the curve parameters, then the nuisance layout of
+    _cycle_layout. With curve parameters held at q, fit the nuisances for each
+    of the six assignments of geometric states to curve rows; run two joint
+    model-covariance weight stages from the lowest-objective assignment. Return
+    the estimate, its Moore-Penrose inverse-information covariance, the last
+    weights and J, without changing the inputs. Raise RuntimeError if a joint
+    stage does not converge; numpy.linalg.LinAlgError propagates from a model
+    covariance that is not positive definite.
+    """
     # Use one common metric so assignment scores are directly comparable.
     # Curves remain at caller init while the six nuisance seeds are fitted.
     weights = model_weights(*joint_table(model, axis, q), counts)
@@ -206,13 +223,12 @@ def bounded_least_squares(
     bounds: tuple[np.ndarray, np.ndarray],
     budget: int,
 ) -> OptimizeResult:
-    # SciPy has no installed stubs: its inferred jac='2-point' annotation omits
-    # documented callable Jacobians. Keep that untyped backend at this boundary.
-    backend: Callable[..., OptimizeResult] = least_squares
-    return backend(
+    # Without installed scipy stubs pyright infers jac: str from the '2-point' default.
+    analytic: Any = jac
+    return least_squares(
         fun,
         start,
-        jac=jac,
+        jac=analytic,
         bounds=bounds,
         x_scale="jac",
         ftol=1e-9,
@@ -228,11 +244,13 @@ def local_table(drive: np.ndarray, rows: np.ndarray) -> np.ndarray:
 
 
 def local_drive(table: np.ndarray) -> np.ndarray:
-    return np.array([[simplex(*p) for p in t[:6].reshape(3, 2)] for t in table])
+    return np.array(
+        [[simplex(*p) for p in t[TABLE_DRIVE].reshape(3, 2)] for t in table]
+    )
 
 
 def local_mean_jacobian(table: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    means, jac = mean_jacobian(local_drive(table), table[:, 6:])
+    means, jac = mean_jacobian(local_drive(table), table[:, TABLE_SHARED])
     for state in range(3):
         block = slice(2 * state, 2 * state + 2)
         grad = np.array([simplex_gradient(*r[block])[:2] for r in table])
