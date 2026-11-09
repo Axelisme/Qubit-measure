@@ -150,6 +150,21 @@ def test_thermal_unrolled_reads_reject_conditional_branch():
         v2.thermal_chain_sums(finish_block(builder, 16), "readout")
 
 
+def test_thermal_rejects_repeat_present_only_in_one_setting():
+    builder = v2.TimelineBuilder(load_soccfg())
+    builder.add_loop("point", 2)
+    readout = block_readout()
+    with (
+        builder.branch(by="point", align_timeline=True) as cases,
+        cases.case(0),
+        builder.repeat("read", 16),
+    ):
+        builder.emit(readout)
+        builder.timeline_inc(1.0)
+    with pytest.raises(ValueError, match=r"ADC 0.*expected 16.*actual.*\[\]"):
+        v2.thermal_chain_sums(finish_block(builder, 16), "readout")
+
+
 @pytest.mark.parametrize("shape", ["nested", "register"])
 def test_thermal_rejects_nested_or_register_repeat(shape):
     builder = v2.TimelineBuilder(load_soccfg())

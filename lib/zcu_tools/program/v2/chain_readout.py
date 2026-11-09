@@ -11,7 +11,11 @@ from zcu_tools.program.acquisition import ShotSumProcessor
 from .macro.readout import ReadoutEmission
 from .modules.readout import PulseReadout
 from .readout_labels import resolve_readout_label, validate_declared_reads
-from .readout_observation import observe_readouts
+from .readout_observation import (
+    ReadoutObservation,
+    observe_readout_paths,
+    observe_readouts,
+)
 from .timeline import TimelineProgramV2
 
 
@@ -19,7 +23,8 @@ def thermal_chain_sums(prog: TimelineProgramV2, read: str) -> ShotSumProcessor:
     """Resolve one PulseReadout and reduce its 16-read shots to 108 columns.
 
     read is an emit tag or an untagged module name. All emissions of that
-    owner must be 16 unrolled reads or one read in one fixed Repeat of 16.
+    owner must be 16 unrolled reads or one read in one fixed Repeat of 16,
+    on every feasible setting path, including implicit empty branch cases.
     Other triggers on its ADC are forbidden. Build prog, then call
     prog.set_reads_per_shot(16) before constructing this processor.
     Missing/ambiguous labels, non-PulseReadout owners and emitted/declared
@@ -79,6 +84,17 @@ def _resolve_block(prog: TimelineProgramV2, read: str, reads: int) -> int:
     owner = resolve_readout_label(observations, read)
     if not isinstance(owner, PulseReadout):
         raise ValueError(f"label {read!r}: expected PulseReadout, actual MuxReadout")
+    _validate_block(owner, observations, reads)
+    for path in observe_readout_paths(prog):
+        _validate_block(owner, list(path.observations), reads)
+    ch = owner.cfg.ro_ch
+    validate_declared_reads(prog, ch, reads)
+    return ch
+
+
+def _validate_block(
+    owner: PulseReadout, observations: list[ReadoutObservation], reads: int
+) -> None:
     repeats = [
         observation.repeat_counts
         for observation in observations
@@ -112,5 +128,3 @@ def _resolve_block(prog: TimelineProgramV2, read: str, reads: int) -> int:
                 f"triggers with repeat counts {repeats[0]}; actual "
                 f"{trigger.control_scope} {trigger.repeat_counts}"
             )
-    validate_declared_reads(prog, ch, reads)
-    return ch

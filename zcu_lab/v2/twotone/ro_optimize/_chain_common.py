@@ -1,24 +1,14 @@
-"""Shared shot, saved sums and plots for thermal-chain ro_optimize sweeps.
-
-Each core keeps its sweep and acquisition in run. This module supplies the
-16-read shot, the count + 107 sums layout and the same three-panel display
-for live updates and offline analysis.
-"""
+"""Saved-sum mapping and best-setting summary for thermal-chain sweeps."""
 
 from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
-from matplotlib.artist import Artist
-from matplotlib.axes import Axes
-from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from zcu_tools.analysis.readout_chain import (
     THERMAL_MOMENT_COUNT,
     SettingScore,
-    ThermalChainScore,
     ThermalChainSums,
-    thermal_chain_score,
 )
 from zcu_tools.experiment import (
     GroupedLoadData,
@@ -26,22 +16,8 @@ from zcu_tools.experiment import (
     VariableSpec,
     VariableZSpec,
 )
-from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import PulseReadout, TimelineBuilder
 
 READS_PER_SHOT = 16
-
-
-def emit_read_shot(builder: TimelineBuilder, readout: PulseReadout) -> None:
-    """Emit 16 consecutive reads with no drive or extra wait within the shot.
-
-    Each read starts when the previous pulse and ADC window have ended.
-    The builder's relax_delay supplies K after the shot. After build, declare
-    prog.set_reads_per_shot(READS_PER_SHOT) before constructing the processor.
-    """
-    with builder.repeat("read", READS_PER_SHOT):
-        builder.emit(readout)
-        builder.delay_auto()
 
 
 def readout_sums_variables(setting: VariableAxisSpec) -> tuple[VariableSpec, ...]:
@@ -95,69 +71,6 @@ def finished_sums(
     return ThermalChainSums.from_processor(axis[finished], sums[finished])
 
 
-def draw_metric(
-    axes: tuple[Axes, ...], result: ThermalChainScore, *, label: str, unit: str
-) -> tuple[Artist, ...]:
-    """Replace three panels with score, QND and correlation-growth diagnostics.
-
-    axes are the three vertically stacked axes of one figure. label and unit
-    describe the swept parameter. Score and QND show model-conditional
-    approximate error scales, not general one-sigma errors. Score limits use
-    only score values; QND limits stay at 0..1 without clipping reported data.
-    M and |rho| share the diagnostic panel. Red lines mark the largest score,
-    with exact ties resolved by acquisition order, in live and analysis plots.
-    """
-    ax_score, ax_qnd, ax_m = axes
-    for ax in axes:
-        ax.clear()
-    settings = result.settings
-    xs = [point.setting for point in settings]
-    scores = [point.score for point in settings]
-    best = settings[result.ranking[0]]
-    ax_score.errorbar(
-        xs,
-        scores,
-        yerr=[point.score_error for point in settings],
-        fmt="o-",
-        capsize=3,
-        color="C0",
-        label="Score ± model approx. scale",
-    )
-    low, high = min(scores), max(scores)
-    padding = 0.1 * (high - low) if high > low else 0.1 * max(abs(high), 0.01)
-    ax_score.set_ylim(low - padding, high + padding)
-    ax_score.set_ylabel("Heuristic score")
-    ax_score.set_title("Errors: model-conditional approximate scales")
-    ax_score.axvline(
-        best.setting,
-        color="r",
-        ls="--",
-        label=f"Max score: {best.setting:.5g} {unit}",
-    )
-    ax_qnd.errorbar(
-        xs,
-        [point.qnd for point in settings],
-        yerr=[point.qnd_error for point in settings],
-        fmt="o-",
-        capsize=3,
-        color="C0",
-        label="QND ± model approx. scale",
-    )
-    ax_qnd.set(ylabel="QND", ylim=(0, 1))
-    ax_qnd.axvline(best.setting, color="r", ls="--")
-    ax_m.plot(
-        xs, [point.mist for point in settings], "o-", label="M: correlation growth"
-    )
-    ax_m.plot(xs, [abs(point.correlation) for point in settings], "s--", label="|ρ|")
-    ax_m.set(xlabel=f"{label} ({unit})", ylabel="M / |ρ|")
-    ax_m.axvline(best.setting, color="r", ls="--")
-    for ax in axes:
-        ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
-        ax.legend(loc="best")
-        ax.grid(True)
-    return tuple(axes)
-
-
 @dataclass(frozen=True)
 class ChainAnalysis:
     """Best setting by descending thermal-chain score; no writeback proposed.
@@ -169,19 +82,3 @@ class ChainAnalysis:
     """
 
     best: SettingScore
-
-
-def analyze_sums(
-    sums: ThermalChainSums, plots: Plots, *, label: str, unit: str
-) -> ChainAnalysis:
-    """Score saved moments and publish score, QND and M / |rho| panels.
-
-    label and unit describe the sweep. The metric figure marks the largest
-    score in red; errors do not affect ranking. Invalid moments propagate
-    ValueError from thermal_chain_score. No fit or secondary threshold is used.
-    """
-    result = thermal_chain_score(sums)
-    fig, _ = plots.subplots(3, 1, num="metric", sharex=True, figsize=(8, 8))
-    draw_metric(tuple(fig.axes), result, label=label, unit=unit)
-    fig.tight_layout()
-    return ChainAnalysis(best=result.settings[result.ranking[0]])

@@ -8,6 +8,8 @@ from typing import Annotated, ClassVar
 
 import numpy as np
 from matplotlib.artist import Artist
+from matplotlib.axes import Axes
+from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field
 from zcu_tools.analysis.readout_chain import (
@@ -33,9 +35,6 @@ from zcu_tools.program.v2 import (
 from zcu_lab.v2.twotone.ro_optimize._chain_common import (
     READS_PER_SHOT,
     ChainAnalysis,
-    analyze_sums,
-    draw_metric,
-    emit_read_shot,
     finished_sums,
     readout_sums_variables,
     restore_readout_sums,
@@ -87,7 +86,8 @@ class ChainFreqExp(Experiment[ThermalChainSums, ChainFreqCfg]):
         """Acquire 16 consecutive reads per shot, separated by K=relax_delay us.
 
         Sweep readout frequency in MHz. All shots of one setting run before the next setting within each round.
-        There is no reset or drive within a shot. K after each shot lets the
+        There is no reset or drive within a shot. The readout post_delay
+        supplies the photon decay gap between reads. K after each shot lets the
         next shot start from thermal equilibrium. Live plots show score and
         QND with model-approximate errors, and M alongside |rho|, from all
         completed rounds. Return shot count and all 107 sums per setting.
@@ -102,9 +102,7 @@ class ChainFreqExp(Experiment[ThermalChainSums, ChainFreqCfg]):
 
         @context.plots.on_plot_thread
         def draw(result: ThermalChainScore) -> tuple[Artist, ...]:
-            artists = draw_metric(
-                tuple(fig.axes), result, label="Readout frequency", unit="MHz"
-            )
+            artists = _draw_metric(tuple(fig.axes), result)
             fig.tight_layout()
             return artists
 
@@ -128,7 +126,10 @@ class ChainFreqExp(Experiment[ThermalChainSums, ChainFreqCfg]):
                 reps_innermost=True,
             )
             freq = builder.add_sweep("freq", cfg.freq)
-            emit_read_shot(builder, PulseReadout("readout", cfg.readout, freq=freq))
+            readout = PulseReadout("readout", cfg.readout, freq=freq)
+            with builder.repeat("read", READS_PER_SHOT):
+                builder.emit(readout)
+                builder.delay_auto()
             prog = builder.build()
             prog.set_reads_per_shot(READS_PER_SHOT)
             sched.run_acquire_summed(
@@ -155,4 +156,71 @@ class ChainFreqExp(Experiment[ThermalChainSums, ChainFreqCfg]):
         do not affect ranking. Invalid moments raise ValueError.
         """
         del options
-        return analyze_sums(source.result, plots, label="Readout frequency", unit="MHz")
+        result = thermal_chain_score(source.result)
+        fig, _ = plots.subplots(3, 1, num="metric", sharex=True, figsize=(8, 8))
+        _draw_metric(tuple(fig.axes), result)
+        fig.tight_layout()
+        return ChainAnalysis(best=result.settings[result.ranking[0]])
+
+
+def _draw_metric(
+    axes: tuple[Axes, ...], result: ThermalChainScore
+) -> tuple[Artist, ...]:
+    """Replace three panels with score, QND and correlation-growth diagnostics.
+
+    axes are the three vertically stacked axes of this freq sweep figure.
+    Score and QND show model-conditional approximate error scales, not
+    general one-sigma errors. Score limits use
+    only score values; QND limits stay at 0..1 without clipping reported data.
+    M and |rho| share the diagnostic panel. Red lines mark the largest score,
+    with exact ties resolved by acquisition order, in live and analysis plots.
+    """
+    ax_score, ax_qnd, ax_m = axes
+    for ax in axes:
+        ax.clear()
+    settings = result.settings
+    xs = [point.setting for point in settings]
+    scores = [point.score for point in settings]
+    best = settings[result.ranking[0]]
+    ax_score.errorbar(
+        xs,
+        scores,
+        yerr=[point.score_error for point in settings],
+        fmt="o-",
+        capsize=3,
+        color="C0",
+        label="Score ± model approx. scale",
+    )
+    low, high = min(scores), max(scores)
+    padding = 0.1 * (high - low) if high > low else 0.1 * max(abs(high), 0.01)
+    ax_score.set_ylim(low - padding, high + padding)
+    ax_score.set_ylabel("Heuristic score")
+    ax_score.set_title("Errors: model-conditional approximate scales")
+    ax_score.axvline(
+        best.setting,
+        color="r",
+        ls="--",
+        label=f"Max score: {best.setting:.5g} MHz",
+    )
+    ax_qnd.errorbar(
+        xs,
+        [point.qnd for point in settings],
+        yerr=[point.qnd_error for point in settings],
+        fmt="o-",
+        capsize=3,
+        color="C0",
+        label="QND ± model approx. scale",
+    )
+    ax_qnd.set(ylabel="QND", ylim=(0, 1))
+    ax_qnd.axvline(best.setting, color="r", ls="--")
+    ax_m.plot(
+        xs, [point.mist for point in settings], "o-", label="M: correlation growth"
+    )
+    ax_m.plot(xs, [abs(point.correlation) for point in settings], "s--", label="|ρ|")
+    ax_m.set(xlabel="Readout frequency (MHz)", ylabel="M / |ρ|")
+    ax_m.axvline(best.setting, color="r", ls="--")
+    for ax in axes:
+        ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+        ax.legend(loc="best")
+        ax.grid(True)
+    return tuple(axes)
