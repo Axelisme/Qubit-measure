@@ -1,6 +1,6 @@
 # program/v2
 
-**Last updated:** 2026-11-09，讀出鏈 processor 與 Repeat provenance
+**Last updated:** 2026-11-09，讀出鏈與 cycle processor、Repeat provenance
 
 **讀者：** lab-author、framework-dev、agent。查找 V2 program 公開 API、型別契約與編譯規則的 owner。
 
@@ -132,7 +132,8 @@ Request、數值契約與環境組裝見 [simulation](simulation/README.md)，st
 `acquire_summed` 以單一 processor 處理所有 ADC 的正規化 IQ，跨 round 只加總。
 `shot_sums(prog, axes)` 在 compile 後以 emit tag 或未標記 module 名稱解析 `Classify` 與 `IQ` 軸。
 `chain_sweep_sums(prog, read)` 處理單一 fixed Repeat 內的 PulseReadout，回傳每點 12 × 12 augmented sums。
-兩種 processor 的 `set_reads_per_shot` 順序、read-count 檢查、外積總和與取消契約見 [summed acquisition](../README.md#summed-acquisition)。
+`chain_cycle_sums(prog, read)` 處理每 rep 16 次 PulseReadout 的 cycle，回傳每點 66 × 66 augmented sums；D 排列由 caller 保證。
+這些 processor 的 `set_reads_per_shot` 順序、read-count 檢查、外積總和與取消契約見 [summed acquisition](../README.md#summed-acquisition)。
 
 `readout_observation.observe_readouts(prog)` 由 program owner 解包 compiler wrappers，提供 readout provenance、Trigger 順序及控制 scope。
 它靜態訪問 branch 各路與 repeat body 一次，不是 runtime trace 或 linked instructions。

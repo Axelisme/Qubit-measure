@@ -1,6 +1,7 @@
 from . import modules, utils
 from .base import MyProgramV2
 from .builder import BuilderBranchCases, TimelineBuilder
+from .chain_cycle import chain_cycle_sums
 from .chain_sweep import chain_sweep_sums
 from .modules import (
     AbsModuleCfg,
