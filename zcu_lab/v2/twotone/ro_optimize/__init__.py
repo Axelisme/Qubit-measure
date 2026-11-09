@@ -10,6 +10,7 @@ from zcu_lab.v2.twotone.ro_optimize.freq_gain.core import FreqGainCfg, FreqGainE
 from zcu_lab.v2.twotone.ro_optimize.length.core import LengthCfg, LengthExp
 from zcu_lab.v2.twotone.ro_optimize.power.core import PowerCfg, PowerExp
 from zcu_lab.v2.twotone.ro_optimize.rpi_freq.core import RPiFreqCfg, RPiFreqExp
+from zcu_lab.v2.twotone.ro_optimize.rpi_length.core import RPiLengthCfg, RPiLengthExp
 from zcu_lab.v2.twotone.ro_optimize.rpi_power.core import RPiPowerCfg, RPiPowerExp
 
 __all__ = [
@@ -40,4 +41,6 @@ __all__ = [
     "RPiPowerCfg",
     "RPiFreqExp",
     "RPiFreqCfg",
+    "RPiLengthExp",
+    "RPiLengthCfg",
 ]

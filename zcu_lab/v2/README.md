@@ -62,8 +62,8 @@ Two-qubit chevron／constructive phase 各自在 `run()` 寫出序列，
 Readout-chain 的 chain_power／chain_freq／chain_length 各自在 `run()` 寫出掃描與 16-read shot，
 並在自己的 core 建立及更新 live／metric 三 panel，數值分數交給 `zcu_tools.analysis.readout_chain`。
 [\_chain_common.py](twotone/ro_optimize/_chain_common.py) 只保留保存映射、完成點篩選與最佳 setting 摘要型別。
-Rπ 的 rpi_power／rpi_freq 各自在 `run()` 寫出掃描與 R→π 鏈，並保留自己的 cfg、Result 與分析摘要型別。
-[\_rpi_common.py](twotone/ro_optimize/_rpi_common.py) 放兩者共用的 `rpi_sums` 解碼、選點與 score 圖。
+Rπ 的 rpi_power／rpi_freq／rpi_length 各自在 `run()` 寫出掃描與 R→π 鏈，並保留自己的 cfg、Result 與分析摘要型別。
+[\_rpi_common.py](twotone/ro_optimize/_rpi_common.py) 放三者共用的 `rpi_sums` 解碼、選點與 score 圖。
 
 K-cycle 讀出鏈實驗各自在 `run()` 寫出 (D(x), 讀, 讀) × 8 的 `builder.repeat("cycle", BLOCKS_PER_CYCLE)` 迴圈；
 [chain/\_cycle.py](chain/_cycle.py) 放共用的 CycleSums 存檔變數、live 曲線與 populations 圖，模型留在 `zcu_tools.analysis.readout_chain.curve_models`。

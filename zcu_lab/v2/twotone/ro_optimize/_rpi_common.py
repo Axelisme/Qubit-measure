@@ -1,7 +1,7 @@
 """Decoding, ranking and the score figure of the R-pi readout sweeps.
 
-rpi_power and rpi_freq share what they do with saved rpi_sums records. Each core
-keeps its own sweep, program, live plot and result types.
+rpi_power, rpi_freq and rpi_length share what they do with saved rpi_sums records.
+Each core keeps its own sweep, program, live plot and result types.
 """
 
 from collections import Counter
