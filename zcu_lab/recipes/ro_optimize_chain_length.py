@@ -48,11 +48,11 @@ class RoOptimizeChainLengthInputs(RecipeInputs):
 
 
 class RoOptimizeChainLengthReport(ChainSweepReport):
-    """ADC window with the largest readout-chain metric; cancellation returns no report."""
+    """ADC window with the largest information minus one sigma; cancellation returns no report."""
 
     length_us: float | None = Field(
         default=None,
-        description="ADC window with the largest metric in us; null if analysis gave no result.",
+        description="ADC window with the largest information minus one sigma in us; null if analysis gave no result.",
     )
 
 
@@ -67,11 +67,12 @@ async def ro_optimize_chain_length(
 
     Each shot is a block of 32 consecutive reads with no reset, pulse or
     wait; at each ADC window the readout pulse is that window plus 0.11 us,
-    so the read duration changes with the window. Primary
-    computes the read-drive-read information of each window from the saved
-    sums and reports the window with the largest value, its error, d/sigma,
-    λ and third-state population. No writeback is proposed or requested.
-    Save keeps the moment sums and the analysis.
+    so the read duration changes with the window. Primary computes the all-lag
+    information per read of each window from the saved sums and reports the
+    window with the largest information minus its one-sigma error, with its
+    information, QND, their errors, d/sigma, λ and third-state population, plus
+    the windows with no signal and the failed fits. No writeback is proposed or
+    requested. Save keeps the moment sums and the analysis.
 
     points → expts sets the window sample count. Windows are us.
     Omission retains the Form value; null is passed to its owner.

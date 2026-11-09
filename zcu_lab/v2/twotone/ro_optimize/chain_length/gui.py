@@ -30,7 +30,7 @@ def _run(cfg: ChainLengthCfg, *, context: RunContext) -> ChainLengthRunResult:
     return RunRecord(cfg=cfg, result=ChainLengthExp().run(cfg, context=context))
 
 
-# No writeback: the operator chooses the window from the metric and d/sigma.
+# No writeback: the operator chooses the window from the information and QND.
 DEFINITION = Adapter(
     spec=ChainLengthExp.AXES_SPEC,
     make_form=make_form,

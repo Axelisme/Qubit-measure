@@ -48,11 +48,11 @@ class RoOptimizeChainPowerInputs(RecipeInputs):
 
 
 class RoOptimizeChainPowerReport(ChainSweepReport):
-    """Gain with the largest readout-chain metric; cancellation returns no report."""
+    """Gain with the largest information minus one sigma; cancellation returns no report."""
 
     gain: float | None = Field(
         default=None,
-        description="Gain with the largest metric in a.u.; null if analysis gave no result.",
+        description="Gain with the largest information minus one sigma in a.u.; null if analysis gave no result.",
     )
 
 
@@ -66,10 +66,12 @@ async def ro_optimize_chain_power(
     """Read 32 times in a row at each readout gain, with no qubit pulse.
 
     Each shot is a block of 32 consecutive reads with no reset, pulse or
-    wait. Primary computes the read-drive-read information of each gain from
-    the saved sums and reports the gain with the largest value, its error,
-    d/sigma, λ and third-state population. No writeback is proposed or
-    requested. Save keeps the moment sums and the analysis.
+    wait. Primary computes the all-lag information per read of each gain from
+    the saved sums and reports the gain with the largest information minus its
+    one-sigma error, with its information, QND, their errors, d/sigma, λ and
+    third-state population, plus the gains with no signal and the failed fits.
+    No writeback is proposed or requested. Save keeps the moment sums and the
+    analysis.
 
     points → expts sets the gain sample count. Gains are a.u.
     Omission retains the Form value; null is passed to its owner.

@@ -2,8 +2,8 @@
 
 Each setting reads with its own ADC window and a readout pulse 0.11 us
 longer. One shot is a block of 32 consecutive reads with no reset, qubit
-pulse or wait, so the sweep needs no qubit pulse or qubit frequency. The
-window with the most read-drive-read information per read wins.
+pulse or wait, so the sweep needs no qubit pulse or qubit frequency. The best
+window has the largest all-lag information per read minus its one-sigma error.
 """
 
 from typing import Annotated, ClassVar
@@ -34,6 +34,7 @@ from zcu_tools.program.v2 import (
 )
 
 from zcu_lab.v2.twotone.ro_optimize._chain_common import (
+    INFORMATION_YLABEL,
     READS_PER_BLOCK,
     ChainAnalysis,
     analyze_sums,
@@ -89,7 +90,7 @@ class ChainLengthExp(Experiment[ReadoutSums, ChainLengthCfg]):
         own duration. Each shot is one block: 32 reads of cfg.readout, each
         read starting when the previous read's pulse and ADC window end.
         There is no reset, qubit pulse or relax delay. Each window runs all its rounds before the next one;
-        after each round the live plot shows the metric of each finished
+        after each round the live plot shows the information of each finished
         window with its error bar. Return the sums of the windows that
         finished at least one round; windows are in us. A stop keeps them; a
         stop before the first window finishes a round raises RuntimeError.
@@ -100,7 +101,7 @@ class ChainLengthExp(Experiment[ReadoutSums, ChainLengthCfg]):
         )
 
         fig, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel="Readout length (us)", ylabel="Read-drive-read information")
+        ax.set(xlabel="Readout length (us)", ylabel=INFORMATION_YLABEL)
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
         ax.grid(True)
 
@@ -109,9 +110,8 @@ class ChainLengthExp(Experiment[ReadoutSums, ChainLengthCfg]):
             return draw_metric(ax, result)
 
         def update(sums: NDArray[np.float64]) -> None:
-            # Compute the metric here, on the acquisition thread, so the GUI
-            # thread only draws. It takes about 10 ms per window, and
-            # acquisition waits for it.
+            # Fit here, on the acquisition thread, so the GUI thread only
+            # draws. Acquisition waits for the fits before it continues.
             draw(readout_metric(finished_sums(lengths, sums)))
 
         fig.show()
@@ -161,10 +161,11 @@ class ChainLengthExp(Experiment[ReadoutSums, ChainLengthCfg]):
     ) -> ChainAnalysis:
         """Score each window from the saved sums and report the best one.
 
-        source.cfg may be None. Publish the "metric" figure (metric with error
-        bars and the best window marked, d/sigma below). Windows that cannot
-        be fitted are listed in failures. No fitted window raises ValueError.
-        best.setting is the ADC window in us; its pulse is 0.11 us longer.
+        source.cfg may be None. Publish the "metric" figure: information with
+        error bars and the best window marked, QND with error bars below.
+        Windows with no signal are listed in no_signal and failed fits in
+        failures. No fitted window raises ValueError. best.setting is the ADC
+        window in us; its pulse is 0.11 us longer.
         """
         del options  # This analysis has no configurable options.
         return analyze_sums(source.result, plots, label="Readout length", unit="us")

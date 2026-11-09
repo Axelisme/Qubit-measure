@@ -27,7 +27,7 @@ def _run(cfg: ChainFreqCfg, *, context: RunContext) -> ChainFreqRunResult:
     return RunRecord(cfg=cfg, result=ChainFreqExp().run(cfg, context=context))
 
 
-# No writeback: the operator chooses the frequency from the metric and d/sigma.
+# No writeback: the operator chooses the frequency from the information and QND.
 DEFINITION = Adapter(
     spec=ChainFreqExp.AXES_SPEC,
     make_form=make_form,

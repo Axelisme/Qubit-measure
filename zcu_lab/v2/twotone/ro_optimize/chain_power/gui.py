@@ -27,7 +27,7 @@ def _run(cfg: ChainPowerCfg, *, context: RunContext) -> ChainPowerRunResult:
     return RunRecord(cfg=cfg, result=ChainPowerExp().run(cfg, context=context))
 
 
-# No writeback: the operator chooses the gain from the metric and d/sigma.
+# No writeback: the operator chooses the gain from the information and QND.
 DEFINITION = Adapter(
     spec=ChainPowerExp.AXES_SPEC,
     make_form=make_form,

@@ -1,8 +1,8 @@
 """Readout gain sweep scored by the readout-chain metric.
 
 One shot is a block of 32 consecutive reads with no reset, qubit pulse or
-wait, so the sweep needs no qubit pulse or qubit frequency. The gain with the
-most read-drive-read information per read wins.
+wait, so the sweep needs no qubit pulse or qubit frequency. The best gain has
+the largest all-lag information per read minus its one-sigma error.
 """
 
 from typing import Annotated, ClassVar
@@ -32,6 +32,7 @@ from zcu_tools.program.v2 import (
 )
 
 from zcu_lab.v2.twotone.ro_optimize._chain_common import (
+    INFORMATION_YLABEL,
     READS_PER_BLOCK,
     ChainAnalysis,
     analyze_sums,
@@ -84,7 +85,7 @@ class ChainPowerExp(Experiment[ReadoutSums, ChainPowerCfg]):
         read starting when the previous ADC window closes. There is no reset,
         qubit pulse or relax delay. All cfg.reps blocks of one gain run back to
         back before the next gain. After each round the live plot shows the
-        metric of each gain with its error bar, from all finished rounds.
+        information of each gain with its error bar, from all finished rounds.
         Return the sums of all finished rounds; gains are in a.u. A stop keeps
         finished rounds; a stop before the first round raises RuntimeError.
         """
@@ -94,7 +95,7 @@ class ChainPowerExp(Experiment[ReadoutSums, ChainPowerCfg]):
         )
 
         fig, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel="Readout gain (a.u.)", ylabel="Read-drive-read information")
+        ax.set(xlabel="Readout gain (a.u.)", ylabel=INFORMATION_YLABEL)
         ax.grid(True)
 
         @context.plots.on_plot_thread
@@ -102,9 +103,8 @@ class ChainPowerExp(Experiment[ReadoutSums, ChainPowerCfg]):
             return draw_metric(ax, result)
 
         def update(sums: NDArray[np.float64]) -> None:
-            # Compute the metric here, on the acquisition thread, so the GUI
-            # thread only draws. It takes about 10 ms per gain, and
-            # acquisition waits for it.
+            # Fit here, on the acquisition thread, so the GUI thread only
+            # draws. Acquisition waits for the fits before it continues.
             draw(readout_metric(finished_sums(gains, sums)))
 
         fig.show()
@@ -145,10 +145,10 @@ class ChainPowerExp(Experiment[ReadoutSums, ChainPowerCfg]):
     ) -> ChainAnalysis:
         """Score each gain from the saved sums and report the best one.
 
-        source.cfg may be None. Publish the "metric" figure (metric with error
-        bars and the best gain marked, d/sigma below). Gains that cannot be
-        fitted are listed in failures. No fitted gain raises ValueError.
-        best.setting is in a.u.
+        source.cfg may be None. Publish the "metric" figure: information with
+        error bars and the best gain marked, QND with error bars below. Gains
+        with no signal are listed in no_signal and failed fits in failures.
+        No fitted gain raises ValueError. best.setting is in a.u.
         """
         del options  # This analysis has no configurable options.
         return analyze_sums(source.result, plots, label="Readout gain", unit="a.u.")

@@ -48,11 +48,11 @@ class RoOptimizeChainFreqInputs(RecipeInputs):
 
 
 class RoOptimizeChainFreqReport(ChainSweepReport):
-    """Frequency with the largest readout-chain metric; cancellation returns no report."""
+    """Frequency with the largest information minus one sigma; cancellation returns no report."""
 
     freq_mhz: float | None = Field(
         default=None,
-        description="Frequency with the largest metric in MHz; null if analysis gave no result.",
+        description="Frequency with the largest information minus one sigma in MHz; null if analysis gave no result.",
     )
 
 
@@ -66,10 +66,12 @@ async def ro_optimize_chain_freq(
     """Read 32 times in a row at each readout frequency, with no qubit pulse.
 
     Each shot is a block of 32 consecutive reads with no reset, pulse or
-    wait. Primary computes the read-drive-read information of each frequency from
-    the saved sums and reports the frequency with the largest value, its error,
-    d/sigma, λ and third-state population. No writeback is proposed or
-    requested. Save keeps the moment sums and the analysis.
+    wait. Primary computes the all-lag information per read of each frequency
+    from the saved sums and reports the frequency with the largest information
+    minus its one-sigma error, with its information, QND, their errors,
+    d/sigma, λ and third-state population, plus the frequencies with no signal
+    and the failed fits. No writeback is proposed or requested. Save keeps the
+    moment sums and the analysis.
 
     points → expts sets the frequency sample count. Frequencies are MHz.
     Omission retains the Form value; null is passed to its owner.
