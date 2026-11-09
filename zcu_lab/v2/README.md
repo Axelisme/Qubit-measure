@@ -2,7 +2,7 @@
 
 **讀者：** lab-author、agent。查找實驗的檔案分工、作者契約與各家族入口。
 
-**Last updated:** 2026-11-09，新增 K-cycle 讀出鏈實驗
+**Last updated:** 2026-11-10，thermal-chain 與 K-cycle 讀出鏈
 
 先從 [tutorial](../tutorial/README.md) 新增實驗，再按下列入口查契約與操作。
 實驗定義改動的驗收方式與命令範例見 [離線驗收](../README.md#實驗定義的離線驗收)。
@@ -59,6 +59,10 @@ Two-qubit chevron／constructive phase 各自在 `run()` 寫出序列，
 共用型別在 [\_rabi_scan.py](two_qubit/_rabi_scan.py)，數值擬合在
 [\_rabi_analysis.py](two_qubit/_rabi_analysis.py)。兩版各自在 `analyze()` 畫自己的圖，
 [\_sums.py](two_qubit/_sums.py) 只負責分類計數的數值換算。
+Readout-chain 的 chain_power／chain_freq／chain_length 各自在 `run()` 寫出掃描與 16-read shot，
+並在自己的 core 建立及更新 live／metric 三 panel，數值分數交給 `zcu_tools.analysis.readout_chain`。
+[\_chain_common.py](twotone/ro_optimize/_chain_common.py) 只保留保存映射、完成點篩選與最佳 setting 摘要型別。
+
 K-cycle 讀出鏈實驗各自在 `run()` 寫出 (D(x), 讀, 讀) × 8 的 `builder.repeat("cycle", BLOCKS_PER_CYCLE)` 迴圈；
 [chain/\_cycle.py](chain/_cycle.py) 放共用的 CycleSums 存檔變數、live 曲線與 populations 圖，模型留在 `zcu_tools.analysis.readout_chain.curve_models`。
 

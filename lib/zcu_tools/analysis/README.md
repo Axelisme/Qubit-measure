@@ -1,6 +1,6 @@
 # `zcu_tools.analysis` 模塊重點文檔
 
-**Last updated:** 2026-11-09，rate-equation T1 與解析曲線導數
+**Last updated:** 2026-11-10，thermal-chain 與 K-cycle 讀出鏈
 
 **讀者：** framework-dev。分析核心、純數值工具與前端 adapter 的分工速查。
 
@@ -66,6 +66,31 @@ centers／radius／confusion matrix 有限時才提出校準。
 計算離背景的 sigma 曲線、5% family 門檻及複數 IQ mean。它只保留 running sums，
 不需要單發資料，也不依賴 program。輸入、輸出與失敗條件見
 [`SweepSums` 與 `sweep_curve` 的 docstring](readout_chain/sweep.py)。
+
+## Readout chain 讀出調參
+
+`ThermalChainSums.from_processor(axis, sums)` 保存每點 16-read shot count 與
+`THERMAL_MOMENT_COUNT`（107）個 sums。每個 shot 先回到熱平衡，再無 drive 連讀 16 次。
+Saved sums 保留全部 16 個 means、R1 self moments、15 個相鄰對與三個早期長 lag pairs。
+`thermal_chain_score(sums)` 逐 read 中心化後，以固定權重 (r−8)/20 加總相鄰 covariance 矩陣，
+再取最大特徵值並除以 R1 variance 得到 M。固定 IQ offset 不改結果。
+M 是鏈內相關增量的診斷，純二態再布居也可能提高它，不代表可辨識的 leakage probability。
+Score 為 ρ² G (|ρ|/(|ρ|+max(M,0)))²，ρ=0 時為零。G 是受限二態模型的 15-lag information proxy，
+用固定 24-point quadrature 計算，不做 fit，不把熱重置序列等同於 driven chain。
+`ThermalChainScore.settings` 依 acquisition order 保留每點 `SettingScore`。
+Ranking 包含所有點，只按 score 降序，同分保留 acquisition order，不使用誤差或第二門檻。
+`score_error` 與 `qnd_error` 是模型條件式近似尺度，不是一般 one-sigma 保證。
+Score scale 固定 M 與主軸，只傳播 ρ、QND，忽略共享 covariance 與選最大值造成的 selection effect。
+G 的解析斜率在裁切後的 η、s 求值，clip Jacobian 當作 1，chain term 使用裁切後 s/η。
+ρ² 與 M 懲罰照原始 ρ 求導。這在裁切點及外側不是實際輸出對原估計值的真實導數。
+欄位、公式與 ValueError 條件見 [thermal.py](readout_chain/thermal.py)。
+
+Live 與 analysis 的三個 panel 顯示 score、QND、M 與 |ρ|。只按 score 最大選點，紅線標記最佳 setting。
+QND 軸固定 0..1，保存與回報不裁切。Score 軸只按 score 值縮放，不被誤差棒撐大。
+K 後熱布居與 readout-driven steady state 不等同。稀少遠端第三態、相關雜訊或非等向雜訊可能誤導 score；
+第三態與 g/e 的 IQ 重疊可能隱藏 leakage。實機 K R^16 尚未驗證這個效用。
+
+## Readout chain K-cycle
 
 `CycleSums` 保存 K-cycle 讀出鏈逐點的 cycle count、65 個 feature sums 與跨點加總的
 product sum。`cycle_curves` 從這份 record 算出 live plot 的全 feature 曲線與第一讀曲線。

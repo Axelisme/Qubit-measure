@@ -176,6 +176,15 @@ from zcu_lab.v2.twotone.reset.single_tone.length.gui import (
 from zcu_lab.v2.twotone.ro_optimize.auto_optimize.gui import (
     DEFINITION as RO_OPT_AUTO_DEFINITION,
 )
+from zcu_lab.v2.twotone.ro_optimize.chain_freq.gui import (
+    DEFINITION as RO_OPT_CHAIN_FREQ_DEFINITION,
+)
+from zcu_lab.v2.twotone.ro_optimize.chain_length.gui import (
+    DEFINITION as RO_OPT_CHAIN_LENGTH_DEFINITION,
+)
+from zcu_lab.v2.twotone.ro_optimize.chain_power.gui import (
+    DEFINITION as RO_OPT_CHAIN_POWER_DEFINITION,
+)
 from zcu_lab.v2.twotone.ro_optimize.freq.gui import DEFINITION as RO_OPT_FREQ_DEFINITION
 from zcu_lab.v2.twotone.ro_optimize.freq_gain.gui import (
     DEFINITION as RO_OPT_FREQ_GAIN_DEFINITION,
@@ -249,6 +258,9 @@ ADAPTERS: dict[str, object] = {
     "twotone/ro_optimize/length": RO_OPT_LENGTH_DEFINITION,
     "twotone/ro_optimize/freq_gain": RO_OPT_FREQ_GAIN_DEFINITION,
     "twotone/ro_optimize/auto": RO_OPT_AUTO_DEFINITION,
+    "twotone/ro_optimize/chain_power": RO_OPT_CHAIN_POWER_DEFINITION,
+    "twotone/ro_optimize/chain_freq": RO_OPT_CHAIN_FREQ_DEFINITION,
+    "twotone/ro_optimize/chain_length": RO_OPT_CHAIN_LENGTH_DEFINITION,
     "twotone/reset/single_tone/freq": SINGLE_TONE_FREQ_DEFINITION,
     "twotone/reset/single_tone/length": SINGLE_TONE_LENGTH_DEFINITION,
     "twotone/reset/dual_tone/freq": DUAL_TONE_FREQ_DEFINITION,

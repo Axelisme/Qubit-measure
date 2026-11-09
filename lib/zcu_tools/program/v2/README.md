@@ -1,6 +1,6 @@
 # program/v2
 
-**Last updated:** 2026-11-09，讀出鏈與 cycle processor、Repeat provenance
+**Last updated:** 2026-11-10，thermal-chain 與 K-cycle 讀出鏈
 
 **讀者：** lab-author、framework-dev、agent。查找 V2 program 公開 API、型別契約與編譯規則的 owner。
 
@@ -132,6 +132,12 @@ Request、數值契約與環境組裝見 [simulation](simulation/README.md)，st
 `acquire_summed` 以單一 processor 處理所有 ADC 的正規化 IQ，跨 round 只加總。
 `shot_sums(prog, axes)` 在 compile 後以 emit tag 或未標記 module 名稱解析 `Classify` 與 `IQ` 軸。
 `chain_sweep_sums(prog, read)` 處理單一 fixed Repeat 內的 PulseReadout，回傳每點 12 × 12 augmented sums。
+`thermal_chain_sums(prog, read)` 處理同一 PulseReadout 的 16 次連讀，可展開或放在單一 fixed Repeat。
+Build 後先呼叫 `set_reads_per_shot(16)`，再建立 processor。每點回傳 108 欄：shot count 與 107 個 sums，跨 reps 與 rounds 只加總。
+Sums 保留 R1..R16 的 I/Q means、R1 self moments、全部 15 個相鄰對與 (R1,R3)、(R1,R4)、(R1,R5)。
+每對保留 II′、IQ′、QI′、QQ′ 四個 components，processor 不套分析權重。
+Caller 安排熱平衡等待與沒有 drive 的連讀；processor 檢查 owner、read 數與同 ADC 沒有其他 triggers，不檢查 drive 或 timing 內容。
+四種 processor 共用 `readout_labels` 的 label 規則：pulse 與 mux readout owners 一起判定唯一性，宣告的 read 數由 `validate_declared_reads` 檢查。
 `chain_cycle_sums(prog, read)` 處理每 rep 16 次 PulseReadout 的 cycle，回傳每點 66 × 66 augmented sums；D 排列由 caller 保證。
 這些 processor 的 `set_reads_per_shot` 順序、read-count 檢查、外積總和與取消契約見 [summed acquisition](../README.md#summed-acquisition)。
 

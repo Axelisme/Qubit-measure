@@ -28,6 +28,9 @@ from .onetone_spectrum import DEFINITION as ONETONE_SPECTRUM
 from .onetone_spectrum_over_flux import DEFINITION as ONETONE_FLUX
 from .onetone_spectrum_over_power import DEFINITION as ONETONE_POWER
 from .raman_gf import DEFINITION as RAMAN_GF
+from .ro_optimize_chain_freq import DEFINITION as RO_OPTIMIZE_CHAIN_FREQ
+from .ro_optimize_chain_length import DEFINITION as RO_OPTIMIZE_CHAIN_LENGTH
+from .ro_optimize_chain_power import DEFINITION as RO_OPTIMIZE_CHAIN_POWER
 from .singleshot_ge import DEFINITION as SINGLESHOT_GE
 from .stirap import DEFINITION as STIRAP
 from .t1 import DEFINITION as T1
@@ -76,4 +79,7 @@ RECIPES = (
     MUX_TWOTONE_FLUX_LOCAL,
     STIRAP,
     RAMAN_GF,
+    RO_OPTIMIZE_CHAIN_POWER,
+    RO_OPTIMIZE_CHAIN_FREQ,
+    RO_OPTIMIZE_CHAIN_LENGTH,
 )
