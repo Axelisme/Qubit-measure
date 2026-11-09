@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TypeAlias
 
-from zcu_tools.analysis.readout_chain import ReadoutSums
+from zcu_tools.analysis.readout_chain import ThermalChainSums
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import Adapter, Analysis, AnalyzeRequest
@@ -13,7 +13,7 @@ from zcu_lab.v2.twotone.ro_optimize._chain_common import ChainAnalysis
 from zcu_lab.v2.twotone.ro_optimize.chain_power.core import ChainPowerCfg, ChainPowerExp
 from zcu_lab.v2.twotone.ro_optimize.chain_power.form import make_form
 
-ChainPowerRunResult: TypeAlias = RunRecord[ChainPowerCfg, ReadoutSums]
+ChainPowerRunResult: TypeAlias = RunRecord[ChainPowerCfg, ThermalChainSums]
 
 
 def _analyze(
@@ -27,7 +27,7 @@ def _run(cfg: ChainPowerCfg, *, context: RunContext) -> ChainPowerRunResult:
     return RunRecord(cfg=cfg, result=ChainPowerExp().run(cfg, context=context))
 
 
-# No writeback: the operator chooses the gain from the information and QND.
+# No writeback: choose the maximum score; QND and M remain diagnostics.
 DEFINITION = Adapter(
     spec=ChainPowerExp.AXES_SPEC,
     make_form=make_form,

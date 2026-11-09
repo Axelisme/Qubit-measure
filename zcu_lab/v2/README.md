@@ -2,7 +2,7 @@
 
 **讀者：** lab-author、agent。查找實驗的檔案分工、作者契約與各家族入口。
 
-**Last updated:** 2026-11-09，列出 readout-chain ro_optimize 的共用 helper
+**Last updated:** 2026-11-10，thermal-chain 與 K-cycle 讀出鏈
 
 先從 [tutorial](../tutorial/README.md) 新增實驗，再按下列入口查契約與操作。
 實驗定義改動的驗收方式與命令範例見 [離線驗收](../README.md#實驗定義的離線驗收)。
@@ -11,6 +11,7 @@
 
 - [FTF bring-up 與 CZ 校準](two_qubit/guide.md) 說明既有 F1/F2 單 qubit 校準、角色與保存方式。FTF 控制鏈可執行仍不代表物理校準或 fidelity 已驗收。
   - 九個實驗各有非 heralded 與 heralded 入口，均在取數時分類並保存計數，見下方[完整清單](#two-qubit-實驗清單)。
+- [K-cycle 讀出鏈 amp Rabi](chain/amp_rabi/guide.md)、[len Rabi](chain/len_rabi/guide.md)、[T1](chain/t1/guide.md)、[T2 Ramsey](chain/t2ramsey/guide.md) 與 [T2 echo](chain/t2echo/guide.md) 說明每個 rep 是一個 cycle（K 後 (D, 讀, 讀) × 8）、兩條 live 曲線、聯合擬合與三項檢查。
 - [Experiment authoring](experiment-authoring.md) 說明核心 records 與資料形狀，新實驗從[寫法慣例](experiment-authoring.md#寫法慣例)選 cfg、分析與圖 API 的寫法。
 - [Measure authoring](measure-authoring.md) 說明 cfg defaults、operator guides、writeback 與 reload。
 - [GUI contracts](gui-contracts.md) 說明 concrete adapter hooks 與 capability。
@@ -58,8 +59,12 @@ Two-qubit chevron／constructive phase 各自在 `run()` 寫出序列，
 共用型別在 [\_rabi_scan.py](two_qubit/_rabi_scan.py)，數值擬合在
 [\_rabi_analysis.py](two_qubit/_rabi_analysis.py)。兩版各自在 `analyze()` 畫自己的圖，
 [\_sums.py](two_qubit/_sums.py) 只負責分類計數的數值換算。
-Readout-chain 的 chain_power／chain_freq／chain_length 各自在 `run()` 寫出掃描與 program，
-共用的讀出 block、保存映射、metric 圖與分析在 [\_chain_common.py](twotone/ro_optimize/_chain_common.py)。
+Readout-chain 的 chain_power／chain_freq／chain_length 各自在 `run()` 寫出掃描與 16-read shot，
+並在自己的 core 建立及更新 live／metric 三 panel，數值分數交給 `zcu_tools.analysis.readout_chain`。
+[\_chain_common.py](twotone/ro_optimize/_chain_common.py) 只保留保存映射、完成點篩選與最佳 setting 摘要型別。
+
+K-cycle 讀出鏈實驗各自在 `run()` 寫出 (D(x), 讀, 讀) × 8 的 `builder.repeat("cycle", BLOCKS_PER_CYCLE)` 迴圈；
+[chain/\_cycle.py](chain/_cycle.py) 放共用的 CycleSums 存檔變數、live 曲線與 populations 圖，模型留在 `zcu_tools.analysis.readout_chain.curve_models`。
 
 `v2` 延續 program/v2 的版本脈絡，不表示 GUI framework 的第二版。通用 runtime、量化、SNR 與 tracker 工具留在 `zcu_tools.experiment.v2`。Core 不依賴 GUI，import-linter C15 檢查 core 到 GUI framework 的直接與間接依賴。
 

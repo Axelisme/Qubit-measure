@@ -1,22 +1,22 @@
-"""Readout frequency sweep scored by the readout-chain metric.
+"""Thermally reset 16-read shots sweeping readout frequency.
 
-One shot is a block of 32 consecutive reads with no reset, qubit pulse or
-wait, so the sweep needs no qubit pulse or qubit frequency. The best frequency
-has the largest all-lag information per read minus its one-sigma error.
+No drive pulse is needed. The thermal g/e contrast supplies the signal.
+The best setting has the largest combined heuristic score, not score minus error.
 """
 
 from typing import Annotated, ClassVar
 
 import numpy as np
 from matplotlib.artist import Artist
+from matplotlib.axes import Axes
 from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field
 from zcu_tools.analysis.readout_chain import (
-    MOMENT_COUNT,
-    ReadoutMetric,
-    ReadoutSums,
-    readout_metric,
+    THERMAL_MOMENT_COUNT,
+    ThermalChainScore,
+    ThermalChainSums,
+    thermal_chain_score,
 )
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import Experiment, GroupedAxesSpec, VariableAxisSpec
@@ -29,16 +29,12 @@ from zcu_tools.program.v2 import (
     PulseReadout,
     SweepCfg,
     TimelineBuilder,
-    chain_readout_sums,
+    thermal_chain_sums,
 )
 
 from zcu_lab.v2.twotone.ro_optimize._chain_common import (
-    INFORMATION_YLABEL,
-    READS_PER_BLOCK,
+    READS_PER_SHOT,
     ChainAnalysis,
-    analyze_sums,
-    draw_metric,
-    emit_read_block,
     finished_sums,
     readout_sums_variables,
     restore_readout_sums,
@@ -47,111 +43,184 @@ from zcu_lab.v2.twotone.ro_optimize._chain_common import (
 
 class ChainFreqCfg(ConfigBase):
     readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
-    freq: Annotated[SweepCfg, FieldMeta(label="Readout freq", unit="MHz")]
+    freq: Annotated[SweepCfg, FieldMeta(label="Readout frequency", unit="MHz")]
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            description="K: thermal relaxation between 16-read shots.",
+        ),
+    ] = Field(ge=0)
     reps: Annotated[
         int,
-        FieldMeta(
-            label="Reps",
-            description="Blocks of 32 reads per frequency in each round; at least 2.",
-        ),
-    ] = Field(default=1000, ge=2)
+        FieldMeta(label="Reps", description="16-read shots per setting in each round."),
+    ] = Field(default=2000, ge=1)
     rounds: Annotated[
         int,
         FieldMeta(
             label="Rounds",
-            description="Software rounds. The live plot uses all finished rounds.",
+            description="Software rounds; live plots use all completed rounds.",
         ),
-    ] = 20
+    ] = Field(default=320, ge=1)
 
 
-class ChainFreqExp(Experiment[ReadoutSums, ChainFreqCfg]):
-    # The record is readout_chain.ReadoutSums: block counts and moment sums
-    # per frequency. Frequencies are MHz in memory and Hz on disk.
-    AXES_SPEC: ClassVar[GroupedAxesSpec[ReadoutSums, ChainFreqCfg]] = GroupedAxesSpec(
-        variables=readout_sums_variables(
-            VariableAxisSpec(label="Frequency", unit="Hz", field_name="axis", scale=1e6)
-        ),
-        result_type=ReadoutSums,
-        cfg_type=ChainFreqCfg,
-        tag="twotone/ro_optimize/chain_freq",
-        cfg_schema_version="3.0",
-        result_builder=restore_readout_sums,
-        labber_layout="independent",
+class ChainFreqExp(Experiment[ThermalChainSums, ChainFreqCfg]):
+    AXES_SPEC: ClassVar[GroupedAxesSpec[ThermalChainSums, ChainFreqCfg]] = (
+        GroupedAxesSpec(
+            variables=readout_sums_variables(
+                VariableAxisSpec(
+                    label="Readout frequency", unit="Hz", field_name="axis", scale=1e6
+                )
+            ),
+            result_type=ThermalChainSums,
+            cfg_type=ChainFreqCfg,
+            tag="twotone/ro_optimize/chain_freq",
+            cfg_schema_version="4.0",
+            result_builder=restore_readout_sums,
+            labber_layout="independent",
+        )
     )
 
-    def run(self, cfg: ChainFreqCfg, *, context: RunContext) -> ReadoutSums:
-        """Read 32 times in a row at each readout frequency and keep the sums.
+    def run(self, cfg: ChainFreqCfg, *, context: RunContext) -> ThermalChainSums:
+        """Acquire 16 consecutive reads per shot, separated by K=relax_delay us.
 
-        Each shot is one block: 32 reads of cfg.readout at the swept frequency,
-        each read starting when the previous ADC window closes. The generator
-        and ADC share the swept frequency. There is no reset, qubit pulse or
-        relax delay. All cfg.reps blocks of one frequency run back to back
-        before the next frequency. After each round the live plot shows the
-        information of each frequency with its error bar, from all finished rounds.
-        Return the sums of all finished rounds; frequencies are in MHz. A stop
-        keeps finished rounds; a stop before the first round raises RuntimeError.
+        Sweep readout frequency in MHz. All shots of one setting run before the next setting within each round.
+        There is no reset or drive within a shot. The readout post_delay
+        supplies the photon decay gap between reads. K after each shot lets the
+        next shot start from thermal equilibrium. Live plots show score and
+        QND with model-approximate errors, and M alongside |rho|, from all
+        completed rounds. Return shot count and all 107 sums per setting.
+        Stop keeps settings with a completed round; none raises RuntimeError.
         """
-        # 1. Frequency axis and the live metric plot.
-        freqs = sweep2array(
+        settings = sweep2array(
             cfg.freq, "freq", {"soccfg": context.soccfg, "gen_ch": cfg.readout.gen_ch}
         )
-
-        fig, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel="Readout frequency (MHz)", ylabel=INFORMATION_YLABEL)
-        ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
-        ax.grid(True)
-
-        @context.plots.on_plot_thread
-        def draw(result: ReadoutMetric) -> tuple[Artist, ...]:
-            return draw_metric(ax, result)
-
-        def update(sums: NDArray[np.float64]) -> None:
-            # Fit here, on the acquisition thread, so the GUI thread only
-            # draws. Acquisition waits for the fits before it continues.
-            draw(readout_metric(finished_sums(freqs, sums)))
-
-        fig.show()
-        # Per frequency: the block count followed by the moment sums.
-        block_sums = SignalBuffer(
-            (len(freqs), 1 + MOMENT_COUNT), dtype=np.float64, on_update=update
+        fig, _ = context.plots.subplots(
+            3, 1, num="measurement", sharex=True, figsize=(8, 8)
         )
 
-        # 2. One shot is one block of 32 reads; the frequency sweep is outside it.
-        with Schedule(block_sums, scope=context.scope) as sched:
-            # reps_innermost: the builder puts reps outermost by default; here all
-            # blocks of one frequency run back to back before the next frequency.
-            # relax_delay 0: each block starts when the previous block's last ADC
-            # window closes, so the blocks of one frequency form one contiguous stream.
+        @context.plots.on_plot_thread
+        def draw(result: ThermalChainScore) -> tuple[Artist, ...]:
+            artists = _draw_metric(tuple(fig.axes), result)
+            fig.tight_layout()
+            return artists
+
+        def update(sums: NDArray[np.float64]) -> None:
+            # Calculate off the GUI thread; the plot thread only draws.
+            draw(thermal_chain_score(finished_sums(settings, sums)))
+
+        fig.show()
+        shot_sums = SignalBuffer(
+            (len(settings), 1 + THERMAL_MOMENT_COUNT),
+            dtype=np.float64,
+            on_update=update,
+        )
+
+        # No drive: each shot reads the thermal state 16 times, then waits K.
+        with Schedule(shot_sums, scope=context.scope) as sched:
             builder = TimelineBuilder(
-                context.soccfg, reps=cfg.reps, relax_delay=0.0, reps_innermost=True
+                context.soccfg,
+                reps=cfg.reps,
+                relax_delay=cfg.relax_delay,
+                reps_innermost=True,
             )
             freq = builder.add_sweep("freq", cfg.freq)
-            emit_read_block(builder, PulseReadout("readout", cfg.readout, freq=freq))
+            readout = PulseReadout("readout", cfg.readout, freq=freq)
+            with builder.repeat("read", READS_PER_SHOT):
+                builder.emit(readout)
+                builder.delay_auto()
             prog = builder.build()
-            prog.set_reads_per_shot(READS_PER_BLOCK)
+            prog.set_reads_per_shot(READS_PER_SHOT)
             sched.run_acquire_summed(
                 prog,
                 context.soc,
-                processor=chain_readout_sums(prog, "readout"),
+                processor=thermal_chain_sums(prog, "readout"),
                 rounds=cfg.rounds,
             )
 
-        # 3. Keep the sums of all finished rounds.
-        return finished_sums(freqs, block_sums.array)
+        return finished_sums(settings, shot_sums.array)
 
     def analyze(
         self,
-        source: RunRecord[ChainFreqCfg, ReadoutSums],
+        source: RunRecord[ChainFreqCfg, ThermalChainSums],
         options: None,
         *,
         plots: Plots,
     ) -> ChainAnalysis:
-        """Score each frequency from the saved sums and report the best one.
+        """Recompute score from saved moments and report the best setting in MHz.
 
-        source.cfg may be None. Publish the "metric" figure: information with
-        error bars and the best frequency marked, QND with error bars below.
-        Frequencies with no signal are listed in no_signal and failed fits in
-        failures. No fitted frequency raises ValueError. best.setting is in MHz.
+        source.cfg may be None. The metric figure shows score and QND with
+        model-conditional approximate errors, then M with |rho|. Red lines
+        mark the maximum score; exact ties keep acquisition order. Errors
+        do not affect ranking. Invalid moments raise ValueError.
         """
-        del options  # This analysis has no configurable options.
-        return analyze_sums(source.result, plots, label="Readout frequency", unit="MHz")
+        del options
+        result = thermal_chain_score(source.result)
+        fig, _ = plots.subplots(3, 1, num="metric", sharex=True, figsize=(8, 8))
+        _draw_metric(tuple(fig.axes), result)
+        fig.tight_layout()
+        return ChainAnalysis(best=result.settings[result.ranking[0]])
+
+
+def _draw_metric(
+    axes: tuple[Axes, ...], result: ThermalChainScore
+) -> tuple[Artist, ...]:
+    """Replace three panels with score, QND and correlation-growth diagnostics.
+
+    axes are the three vertically stacked axes of this freq sweep figure.
+    Score and QND show model-conditional approximate error scales, not
+    general one-sigma errors. Score limits use
+    only score values; QND limits stay at 0..1 without clipping reported data.
+    M and |rho| share the diagnostic panel. Red lines mark the largest score,
+    with exact ties resolved by acquisition order, in live and analysis plots.
+    """
+    ax_score, ax_qnd, ax_m = axes
+    for ax in axes:
+        ax.clear()
+    settings = result.settings
+    xs = [point.setting for point in settings]
+    scores = [point.score for point in settings]
+    best = settings[result.ranking[0]]
+    ax_score.errorbar(
+        xs,
+        scores,
+        yerr=[point.score_error for point in settings],
+        fmt="o-",
+        capsize=3,
+        color="C0",
+        label="Score ± model approx. scale",
+    )
+    low, high = min(scores), max(scores)
+    padding = 0.1 * (high - low) if high > low else 0.1 * max(abs(high), 0.01)
+    ax_score.set_ylim(low - padding, high + padding)
+    ax_score.set_ylabel("Heuristic score")
+    ax_score.set_title("Errors: model-conditional approximate scales")
+    ax_score.axvline(
+        best.setting,
+        color="r",
+        ls="--",
+        label=f"Max score: {best.setting:.5g} MHz",
+    )
+    ax_qnd.errorbar(
+        xs,
+        [point.qnd for point in settings],
+        yerr=[point.qnd_error for point in settings],
+        fmt="o-",
+        capsize=3,
+        color="C0",
+        label="QND ± model approx. scale",
+    )
+    ax_qnd.set(ylabel="QND", ylim=(0, 1))
+    ax_qnd.axvline(best.setting, color="r", ls="--")
+    ax_m.plot(
+        xs, [point.mist for point in settings], "o-", label="M: correlation growth"
+    )
+    ax_m.plot(xs, [abs(point.correlation) for point in settings], "s--", label="|ρ|")
+    ax_m.set(xlabel="Readout frequency (MHz)", ylabel="M / |ρ|")
+    ax_m.axvline(best.setting, color="r", ls="--")
+    for ax in axes:
+        ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+        ax.legend(loc="best")
+        ax.grid(True)
+    return tuple(axes)

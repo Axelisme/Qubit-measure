@@ -1,4 +1,4 @@
-"""Readout length sweep scored by the readout-chain metric.
+"""Readout length sweep scored by the thermal-chain score.
 
 Recipe points → expts: the window sample count maps to the GUI Readout length Expts field.
 """
@@ -37,9 +37,12 @@ class RoOptimizeChainLengthInputs(RecipeInputs):
         KEEP,
         description="Window sample count, at least 2.",
     )
+    relax_delay: float | None | Keep = Field(
+        KEEP, description="K: thermal relaxation between 16-read shots, in us."
+    )
     reps: int | None | Keep = Field(
         KEEP,
-        description="Blocks of 32 reads per window in each round, at least 2.",
+        description="16-read shots per setting in each round, at least 1.",
     )
     rounds: int | None | Keep = Field(
         KEEP,
@@ -48,34 +51,31 @@ class RoOptimizeChainLengthInputs(RecipeInputs):
 
 
 class RoOptimizeChainLengthReport(ChainSweepReport):
-    """ADC window with the largest information minus one sigma; cancellation returns no report."""
+    """ADC window with the largest combined heuristic score; cancellation returns no report."""
 
     length_us: float | None = Field(
         default=None,
-        description="ADC window with the largest information minus one sigma in us; null if analysis gave no result.",
+        description="ADC window with the largest combined heuristic score in us; null if analysis gave no result.",
     )
 
 
 @recipe(
     "ro_optimize_chain_length",
-    description="Sweep the readout ADC window, with the pulse 0.11 us longer, in 32-read blocks; score each window by the readout-chain metric, save sums and analysis.",
+    description="Sweep the readout ADC window, with the pulse 0.11 us longer, in thermally reset 16-read shots; score each window by the thermal-chain score, save sums and analysis.",
 )
 async def ro_optimize_chain_length(
     session: RecipeSession, inputs: RoOptimizeChainLengthInputs
 ) -> RoOptimizeChainLengthReport:
-    """Read 32 times in a row at each readout length, with no qubit pulse.
+    """Sweep ADC window with thermal relaxation K and 16 reads per shot, no drive.
 
-    Each shot is a block of 32 consecutive reads with no reset, pulse or
-    wait; at each ADC window the readout pulse is that window plus 0.11 us,
-    so the read duration changes with the window. Primary computes the all-lag
-    information per read of each window from the saved sums and reports the
-    window with the largest information minus its one-sigma error, with its
-    information, QND, their errors, d/sigma, λ and third-state population, plus
-    the windows with no signal and the failed fits. No writeback is proposed or
-    requested. Save keeps the moment sums and the analysis.
+    Primary selects the maximum combined score, keeping acquisition order on
+    exact ties. It reports score and QND with model-conditional approximate
+    error scales, correlation, amplification and M (correlation growth, not
+    identifiable physical leakage). Errors do not affect selection.
+    Save keeps shot counts, all 107 sums and analysis. No writeback is proposed.
 
-    points → expts sets the window sample count. Windows are us.
-    Omission retains the Form value; null is passed to its owner.
+    points → expts sets the ADC window sample count. Windows are us; each pulse is window + 0.11 us.
+    relax_delay sets K in us. Omission retains the Form value; null goes to its owner.
     Missing Form values stop before acquisition; completed Run data is saved even if analysis fails.
     """
     tab = session.open_tab(
@@ -87,6 +87,7 @@ async def ro_optimize_chain_length(
     tab.set("length.start", inputs.length_start_us)
     tab.set("length.stop", inputs.length_stop_us)
     tab.set("length.n", inputs.points)
+    tab.set("relax_delay", inputs.relax_delay)
     tab.set("reps", inputs.reps)
     tab.set("rounds", inputs.rounds)
     for edit in inputs.overrides:
