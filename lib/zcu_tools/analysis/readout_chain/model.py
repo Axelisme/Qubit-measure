@@ -1,7 +1,7 @@
 """Three-state affine cycle model and exact-moment interface."""
 
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 from numpy.typing import NDArray
@@ -126,17 +126,19 @@ class CycleModel:
         frequency in cycles per axis unit, used only for the R diagnostic.
         Raise ValueError at construction if it is not in parameter_names.
 
+    derivative: Analytic derivative callable (axis, parameters) returning finite
+        shape (F,3,len(parameter_names)), in the same parameter order.
+
     The drive row of state i is (1 - f_i(x)) * endpoint 0 + f_i(x) * endpoint 1,
-    as on CycleNuisances. Jacobian columns of the curve parameters use bounded
-    central differences of curve, because curve is a caller callable; all other
-    columns are analytic. Use identical to repeat one scalar curve across the
-    three states.
+    as on CycleNuisances. All Jacobian columns are analytic. Use identical to
+    repeat one scalar curve and its derivative across the three states.
     """
 
     curve: Curve
     parameter_names: tuple[str, ...]
     bounds: Sequence[tuple[float, float]]
     oscillation_frequency: str | None = None
+    derivative: Curve = field(kw_only=True)
 
     def __post_init__(self) -> None:
         names = self.parameter_names
@@ -170,18 +172,29 @@ class CycleModel:
         parameter_names: tuple[str, ...],
         bounds: Sequence[tuple[float, float]],
         *,
+        derivative: Curve,
         oscillation_frequency: str | None = None,
     ) -> "CycleModel":
         """Repeat a scalar curve returning shape (F,) for each state.
 
         curve receives the same axis and parameter mapping as CycleModel.curve.
-        Names, bounds and oscillation_frequency have the meanings on CycleModel.
+        derivative returns shape (F,len(parameter_names)); it is repeated over
+        states. Names, bounds and oscillation_frequency are as on CycleModel.
         """
 
         def repeated(axis: Array, parameters: Mapping[str, float]) -> Array:
             return np.repeat(curve(axis, parameters)[:, None], 3, axis=1)
 
-        return cls(repeated, parameter_names, bounds, oscillation_frequency)
+        def repeated_derivative(axis: Array, parameters: Mapping[str, float]) -> Array:
+            return np.repeat(derivative(axis, parameters)[:, None, :], 3, axis=1)
+
+        return cls(
+            repeated,
+            parameter_names,
+            bounds,
+            oscillation_frequency,
+            derivative=repeated_derivative,
+        )
 
     def moments(
         self, axis: Array, parameters: Mapping[str, float], nuisances: CycleNuisances
@@ -190,8 +203,7 @@ class CycleModel:
 
         axis is a finite nonempty (F,) array; parameters contains exactly all
         named curve values within bounds. Nuisances are shared over axis.
-        The matrix-chain, noise and transition Jacobians are analytic. Only
-        derivatives of the author's callable curve use bounded central differences.
+        All derivatives are analytic, using the author's derivative callable.
         Raise ValueError for invalid inputs or a nonregular deterministic read
         jump. Inputs are not changed.
         """

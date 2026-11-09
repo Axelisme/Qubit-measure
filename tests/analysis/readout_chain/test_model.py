@@ -29,7 +29,10 @@ def example_nuisance() -> CycleNuisances:
 @pytest.mark.parametrize("axis", [np.array([]), np.ones((2, 1)), np.array([np.nan])])
 def test_moments_reject_malformed_axis(axis: np.ndarray) -> None:
     model = CycleModel.identical(
-        lambda x, p: np.exp(-x / p["tau"]), ("tau",), ((0.1, 10.0),)
+        lambda x, p: np.exp(-x / p["tau"]),
+        ("tau",),
+        ((0.1, 10.0),),
+        derivative=lambda x, p: (x * np.exp(-x / p["tau"]) / p["tau"] ** 2)[:, None],
     )
     with pytest.raises(ValueError, match="axis"):
         model.moments(axis, {"tau": 2.0}, example_nuisance())
@@ -53,7 +56,10 @@ def test_nuisances_reject_invalid_physical_values_at_construction(
 
 def test_moments_reject_nuisance_arrays_changed_after_construction() -> None:
     model = CycleModel.identical(
-        lambda x, p: np.exp(-x / p["tau"]), ("tau",), ((0.1, 10.0),)
+        lambda x, p: np.exp(-x / p["tau"]),
+        ("tau",),
+        ((0.1, 10.0),),
+        derivative=lambda x, p: (x * np.exp(-x / p["tau"]) / p["tau"] ** 2)[:, None],
     )
     nuisance = example_nuisance()
     nuisance.thermal[:] = [0.7, 0.2, 0.2]
@@ -63,7 +69,12 @@ def test_moments_reject_nuisance_arrays_changed_after_construction() -> None:
 
 
 def test_populations_pass_thermal_through_one_drive() -> None:
-    model = CycleModel.identical(lambda x, p: p["a"] * x, ("a",), ((0.0, 1.0),))
+    model = CycleModel.identical(
+        lambda x, p: p["a"] * x,
+        ("a",),
+        ((0.0, 1.0),),
+        derivative=lambda x, p: x[:, None],
+    )
     # State 0 moves from g toward e as the curve rises; e and the third stay.
     endpoints = np.array(
         [
@@ -90,6 +101,16 @@ def test_transition_tail_means_and_covariance_match_independent_cycles() -> None
         ),
         ("tau",),
         ((0.1, 10.0),),
+        derivative=lambda x, p: (
+            np.column_stack(
+                [
+                    x * np.exp(-x / p["tau"]),
+                    x * np.exp(-x / p["tau"]),
+                    2 * x * np.exp(-2 * x / p["tau"]),
+                ]
+            )[:, :, None]
+            / p["tau"] ** 2
+        ),
     )
     nuisance = example_nuisance()
     moments = model.moments(np.array([0.7]), {"tau": 1.2}, nuisance)
@@ -130,6 +151,16 @@ def test_mean_jacobian_matches_numerical_differentiation_for_every_coordinate() 
         ),
         ("tau",),
         ((0.1, 10.0),),
+        derivative=lambda x, p: (
+            np.column_stack(
+                [
+                    x * np.exp(-x / p["tau"]),
+                    x * np.exp(-x / p["tau"]),
+                    2 * x * np.exp(-2 * x / p["tau"]),
+                ]
+            )[:, :, None]
+            / p["tau"] ** 2
+        ),
     )
     # Six distinct simplex endpoints and nonzero read transitions exercise all derivatives.
     q = np.array(
@@ -189,7 +220,10 @@ def test_deterministic_read_jump_has_no_finite_wald_jacobian() -> None:
         read_landing=np.array([1.0, 0.0, 0.0]),
     )
     model = CycleModel.identical(
-        lambda x, p: np.exp(-x / p["tau"]), ("tau",), ((0.1, 10.0),)
+        lambda x, p: np.exp(-x / p["tau"]),
+        ("tau",),
+        ((0.1, 10.0),),
+        derivative=lambda x, p: (x * np.exp(-x / p["tau"]) / p["tau"] ** 2)[:, None],
     )
     with pytest.raises(ValueError, match="deterministic|regular"):
         model.moments(np.array([0.7]), {"tau": 1.2}, nuisance)
@@ -202,6 +236,7 @@ def test_model_rejects_unknown_frequency_coordinate() -> None:
             ("tau",),
             ((0.1, 10.0),),
             oscillation_frequency="missing",
+            derivative=lambda x, p: np.zeros((len(x), 3, 1)),
         )
 
 
@@ -217,7 +252,10 @@ def test_constant_cloud_has_gaussian_feature_moments() -> None:
         np.ones(3) / 3,
     )
     model = CycleModel.identical(
-        lambda x, p: np.exp(-x / p["tau"]), ("tau",), ((0.1, 10.0),)
+        lambda x, p: np.exp(-x / p["tau"]),
+        ("tau",),
+        ((0.1, 10.0),),
+        derivative=lambda x, p: (x * np.exp(-x / p["tau"]) / p["tau"] ** 2)[:, None],
     )
 
     moments = model.moments(np.array([0.1, 1.0]), {"tau": 2.0}, nuisance)

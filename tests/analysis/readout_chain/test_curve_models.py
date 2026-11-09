@@ -4,12 +4,38 @@ import numpy as np
 import pytest
 from zcu_tools.analysis.readout_chain import (
     rabi_model,
-    t1_model,
     t2_echo_model,
     t2_ramsey_model,
 )
 
 from ._t2_samples import bloch_curves, t2_nuisance
+
+
+@pytest.mark.parametrize("factory", [rabi_model, t2_echo_model, t2_ramsey_model])
+def test_analytic_curve_derivative_matches_independent_oracle(factory) -> None:
+    model = factory()
+    axis = np.array([0.0, 0.17, 0.8, 2.1])
+    parameters = {
+        name: value
+        for name, value in {"f": 0.8, "t2": 1.2, "tf": 0.65, "detuning": 0.8}.items()
+        if name in model.parameter_names
+    }
+    analytic = model.derivative(axis, parameters)
+    for col, name in enumerate(model.parameter_names):
+        plus, minus = dict(parameters), dict(parameters)
+        plus[name] += 1e-6
+        minus[name] -= 1e-6
+        oracle = (model.curve(axis, plus) - model.curve(axis, minus)) / 2e-6
+        np.testing.assert_allclose(analytic[:, :, col], oracle, rtol=1e-7, atol=1e-9)
+        nuisance = t2_nuisance(1.8)
+        moments = model.moments(axis, parameters, nuisance)
+        oracle_mean = (
+            model.moments(axis, plus, nuisance).means
+            - model.moments(axis, minus, nuisance).means
+        ) / 2e-6
+        np.testing.assert_allclose(
+            moments.jacobian[:, :, col], oracle_mean, rtol=1e-6, atol=1e-8
+        )
 
 
 def test_rabi_rows_move_from_g_and_stay_in_e_at_frequency_f() -> None:
@@ -20,18 +46,6 @@ def test_rabi_rows_move_from_g_and_stay_in_e_at_frequency_f() -> None:
     # Columns g, e, third: sin², cos², and the undriven third row repeats sin².
     np.testing.assert_allclose(
         values, [[0, 1, 0], [0.5, 0.5, 0.5], [1, 0, 1]], atol=1e-15
-    )
-
-
-def test_t1_rows_decay_with_t1_and_the_third_row_with_tf() -> None:
-    model = t1_model()
-
-    values = model.curve(
-        np.array([0.0, 1.0, 2.0]), {"t1": 1 / np.log(2), "tf": 0.5 / np.log(2)}
-    )
-
-    np.testing.assert_allclose(
-        values, [[1, 1, 1], [0.5, 0.5, 0.25], [0.25, 0.25, 0.0625]]
     )
 
 

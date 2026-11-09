@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 from scipy.optimize import linear_sum_assignment
 from zcu_tools.analysis.readout_chain import (
+    CycleFit,
     CycleModel,
     CycleNuisances,
     CycleSums,
@@ -15,10 +16,21 @@ from zcu_tools.analysis.readout_chain import (
 from ._cycle_samples import sampled_sums
 
 
+def expect_curve_nuisances(fit: CycleFit) -> CycleNuisances:
+    if not isinstance(fit.nuisances, CycleNuisances):
+        raise AssertionError("curve model must return curve nuisances")
+    return fit.nuisances
+
+
 def planted_model(kind: str = "t1"):
     if kind == "t1":
         model = CycleModel.identical(
-            lambda x, p: np.exp(-x / p["tau"]), ("tau",), ((0.2, 5.0),)
+            lambda x, p: np.exp(-x / p["tau"]),
+            ("tau",),
+            ((0.2, 5.0),),
+            derivative=lambda x, p: (x * np.exp(-x / p["tau"]) / p["tau"] ** 2)[
+                :, None
+            ],
         )
     else:
         model = CycleModel.identical(
@@ -26,6 +38,9 @@ def planted_model(kind: str = "t1"):
             ("frequency",),
             ((0.1, 2.0),),
             oscillation_frequency="frequency",
+            derivative=lambda x, p: (
+                np.pi * x * np.sin(2 * np.pi * p["frequency"] * x)
+            )[:, None],
         )
     nuisance = CycleNuisances(
         np.array(
@@ -67,7 +82,8 @@ def test_exact_moments_recover_curve_and_joint_predictions(kind: str) -> None:
     fit = fit_cycle(sums, model, {name: 1.1})
 
     np.testing.assert_allclose(fit.parameters[name], 1.2, rtol=1e-5)
-    predicted = model.moments(sums.axis, fit.parameters, fit.nuisances)
+    fitted_nuisance = expect_curve_nuisances(fit)
+    predicted = model.moments(sums.axis, fit.parameters, fitted_nuisance)
     np.testing.assert_allclose(
         predicted.means, sums.feature_sums / sums.cycle_count[:, None], atol=1e-6
     )
@@ -93,7 +109,7 @@ def test_exact_moments_recover_curve_and_joint_predictions(kind: str) -> None:
         fit.nuisances.centers[order], nuisance.centers, atol=1e-5
     )
     np.testing.assert_allclose(
-        fit.nuisances.drive_endpoints[order][:, :, order],
+        fitted_nuisance.drive_endpoints[order][:, :, order],
         nuisance.drive_endpoints,
         atol=1e-4,
     )
@@ -120,6 +136,18 @@ def test_per_state_curves_fit_their_parameters_jointly() -> None:
         ),
         ("tau", "leak_tau"),
         ((0.2, 5.0), (0.2, 5.0)),
+        derivative=lambda x, p: np.stack(
+            [
+                np.column_stack(
+                    [x * np.exp(-x / p["tau"]) / p["tau"] ** 2] * 2 + [np.zeros_like(x)]
+                ),
+                np.column_stack(
+                    [np.zeros_like(x)] * 2
+                    + [x * np.exp(-x / p["leak_tau"]) / p["leak_tau"] ** 2]
+                ),
+            ],
+            axis=2,
+        ),
     )
     axis = np.linspace(0.05, 3.0, 11)
     moments = model.moments(axis, {"tau": 1.2, "leak_tau": 0.65}, nuisance)

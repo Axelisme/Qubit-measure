@@ -116,7 +116,7 @@ def solve_joint(
     weights = model_weights(*joint_table(model, axis, q), counts)
     candidates = [
         _joint_stage(
-            model, axis, means, weights, _assigned_seed(q, order), nuisance_only=True
+            model, axis, means, weights, assigned_seed(q, order), nuisance_only=True
         )
         for order in permutations(range(3))
     ]
@@ -137,7 +137,7 @@ def solve_joint(
     return JointSolution(q, cov, weights, float(np.sum(residual**2)))
 
 
-def _assigned_seed(q: np.ndarray, order: tuple[int, ...]) -> np.ndarray:
+def assigned_seed(q: np.ndarray, order: tuple[int, ...]) -> np.ndarray:
     """Move geometric states together, while leaving the model's curve rows fixed."""
     n = len(q) - NUISANCE_SIZE
     nuisance = q[n:]

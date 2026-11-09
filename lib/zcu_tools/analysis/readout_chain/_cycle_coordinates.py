@@ -89,24 +89,19 @@ def curve_values(
 
 
 def curve_derivative(
-    curve: "Curve",
+    derivative: "Curve",
     axis: np.ndarray,
     names: tuple[str, ...],
     theta: np.ndarray,
-    bounds: np.ndarray,
 ) -> np.ndarray:
-    # Only the author's black-box curve is differenced; chain moments and
-    # all readout/transition derivatives are analytic.
-    cols = []
-    for k, value in enumerate(theta):
-        step = np.cbrt(np.finfo(float).eps) * max(1.0, abs(value))
-        left, right = theta.copy(), theta.copy()
-        left[k] = max(bounds[k, 0], value - step)
-        right[k] = min(bounds[k, 1], value + step)
-        fp = curve_values(curve, axis, names, right)
-        fm = curve_values(curve, axis, names, left)
-        cols.append((fp - fm) / (right[k] - left[k]))
-    return np.stack(cols, axis=2)
+    values = np.asarray(
+        derivative(axis, dict(zip(names, theta, strict=True))), dtype=float
+    )
+    if values.shape != (len(axis), 3, len(names)) or not np.isfinite(values).all():
+        raise ValueError(
+            "curve derivative must be finite with shape (points, 3, parameters)"
+        )
+    return values
 
 
 def joint_table(
@@ -136,9 +131,7 @@ def joint_mean_jacobian(
     means, local = mean_jacobian(drive, rows)
     n = len(model.parameter_names)
     fx = curve_values(model.curve, axis, model.parameter_names, q[:n])
-    df = curve_derivative(
-        model.curve, axis, model.parameter_names, q[:n], np.asarray(model.bounds)
-    )
+    df = curve_derivative(model.derivative, axis, model.parameter_names, q[:n])
     ends = endpoints_of(q[n:])
     jac = np.zeros((len(axis), means.shape[1], len(q)))
     for state in range(3):

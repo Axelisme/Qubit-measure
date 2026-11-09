@@ -78,6 +78,7 @@ def sampled_t2_sums(
         lambda x, p: bloch_curves(x, dict(p), t1=t1, echo=echo),
         model.parameter_names,
         model.bounds,
+        derivative=model.derivative,
     )
     return sampled_sums(
         physical,

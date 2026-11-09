@@ -1,6 +1,6 @@
 # `zcu_tools.analysis` 模塊重點文檔
 
-**Last updated:** 2026-11-09，cycle joint fit 與 T2 曲線
+**Last updated:** 2026-11-09，rate-equation T1 與解析曲線導數
 
 **讀者：** framework-dev。分析核心、純數值工具與前端 adapter 的分工速查。
 
@@ -69,10 +69,13 @@ centers／radius／confusion matrix 有限時才提出校準。
 
 `CycleSums` 保存 K-cycle 讀出鏈逐點的 cycle count、65 個 feature sums 與跨點加總的
 product sum。`cycle_curves` 從這份 record 算出 live plot 的全 feature 曲線與第一讀曲線。
-`CycleModel` 持有作者的三態曲線、參數名與 bounds；`fit_cycle` 從必填的 init 以模型
-共變異數加權的 GMM 聯合擬合 65 個數，回傳參數與 Wald 誤差、共用 nuisances、三項
-lack-of-fit 檢查與逐點布居，不做接受或拒絕。`curve_models.py` 提供 Rabi、T1、T2 echo
-與 T2 Ramsey 實驗的模型。欄位版面、座標、限制與失敗條件見
+`CycleModel` 持有作者的三態曲線、解析導數、參數名與 bounds。Rabi、T2 echo 與
+T2 Ramsey 使用這個模型。`t1_model()` 回傳 `RateModel`，以 `D₀ exp(Gx)` 表示
+自由 stochastic 初始 drive 與 detailed-balance relaxation。`fit_cycle` 從必填的 init
+以模型共變異數加權的 GMM 聯合擬合 65 個數，回傳參數與 Wald 誤差、共用
+nuisances、三項 lack-of-fit 檢查與逐點布居，不做接受或拒絕。T1 的 init 是
+`{"t1": textbook_time}`。其結果 `CycleFit.relaxation` 保存兩個 eigen time，並以
+thermal 加權的 L1 population 變化振幅較大者作為 T1。所有擬合導數皆為解析式。欄位版面、座標、限制與失敗條件見
 [cycle.py](readout_chain/cycle.py)、[model.py](readout_chain/model.py)、
 [fit.py](readout_chain/fit.py) 與 [curve_models.py](readout_chain/curve_models.py) 的 docstring。
 

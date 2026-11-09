@@ -22,8 +22,10 @@ from ._cycle_coordinates import (
 )
 from ._cycle_emission import simplex
 from ._cycle_solver import local_table, solve_joint, starting_nuisance
+from ._rate_solver import solve_rate
 from .cycle import CycleSums, validate_cycle_sums
 from .model import Array, CycleModel, CycleNuisances
+from .rate_model import CycleRelaxation, RateModel, RateNuisances
 
 
 @dataclass(frozen=True)
@@ -52,19 +54,24 @@ class CycleCheck:
 class CycleFit:
     """Cycle fit estimates and diagnostics, without acceptance decisions.
 
-    parameters: Curve parameter estimates by the author's name and units.
-    errors: Marginal Wald standard errors by curve name, in parameter units.
-    nuisances: Shared endpoint, geometry, thermal and read estimates. State
+    parameters: Curve parameter estimates by the author's name and units, or
+        rate_01/rate_02/rate_12 in inverse time units for RateModel. Rate indices
+        name geometric states, with no g/e/f meaning.
+    errors: Marginal Wald standard errors by curve/rate name, in parameter units.
+    relaxation: Rate-model eigen times and T1; None for curve models.
+    nuisances: Shared endpoint/D0, geometry, thermal and read estimates. State
         labels are arbitrary; comparisons must allow a simultaneous permutation.
     covariance: Joint covariance of curve and nuisance coordinates, shape (P,P),
         Moore-Penrose inverse fixed-weight information (relative cutoff 1e-12),
-        without residual-variance rescaling. Rank loss and active bounds invalidate
-        ordinary Wald coverage; the pseudoinverse does not restore identification.
+        without residual-variance rescaling. RateModel first normalizes Jacobian
+        columns so the cutoff describes collinearity rather than units. Rank loss
+        and active bounds invalidate ordinary Wald coverage; the pseudoinverse does not restore identification.
     parameter_names: Covariance column names, ordered as on CycleMoments.
         Simplexes use (s,f), not redundant three-probability coordinates.
     within_point: Unrestricted per-point three-state model residual check.
     sharing: Shared-nuisance versus fully pointwise check; no calibrated p.
-    curve: Affine author-curve versus free pointwise drive check.
+    curve: Constrained model versus free pointwise drive check. RateModel
+        has 6*F-9 restrictions; a curve model has 6*F-12-number_of_parameters.
     populations: Shape (F,3), independently fitted first-read pre-emission
         populations from the shared-nuisance fit with free D at each x.
     population_errors: Shape (F,3), marginal Wald errors of populations,
@@ -83,7 +90,7 @@ class CycleFit:
 
     parameters: Mapping[str, float]
     errors: Mapping[str, float]
-    nuisances: CycleNuisances
+    nuisances: CycleNuisances | RateNuisances
     covariance: Array
     parameter_names: tuple[str, ...]
     within_point: CycleCheck
@@ -94,17 +101,19 @@ class CycleFit:
     reliability: float | None
     J: float
     df: int
+    relaxation: CycleRelaxation | None
 
 
 def fit_cycle(
-    sums: CycleSums, model: CycleModel, init: Mapping[str, float]
+    sums: CycleSums, model: CycleModel | RateModel, init: Mapping[str, float]
 ) -> CycleFit:
-    """Fit the saved cycle feature means with a shared three-state affine model.
+    """Fit saved cycle feature means with a three-state curve or rate model.
 
-    init must map every curve name to one finite, in-bounds starting value.
-    Nuisances start from closed-form moment geometry and fixed physical seeds.
-    The Jacobian columns of the curve parameters use bounded central
-    differences of model.curve (a caller callable); the others are analytic.
+    For CycleModel, init maps every curve name to a finite in-bounds starting
+    value. For RateModel, init is exactly {"t1": textbook_time}, a finite time
+    >= 1e-3 in axis units; all three pair rates start at its inverse. No
+    textbook fit is run internally. Nuisances start from closed-form moment
+    geometry and fixed physical seeds. Every Jacobian column is analytic.
     Fit nuisances at init for each of the six assignments of geometric states
     to curve rows, then run the joint fit from the lowest-objective assignment.
     Assignment scores use common initial model-covariance weights and feasible
@@ -128,14 +137,26 @@ def fit_cycle(
     simplex-coordinate bounds to avoid nonregular deterministic read jumps.
     """
     validate_cycle_sums(sums)
-    theta = parameter_vector(model, init)
     means = sums.feature_sums / sums.cycle_count[:, None]
-    q0 = np.r_[theta, starting_nuisance(means)]
-    solution = solve_joint(model, sums.axis, means, sums.cycle_count, q0)
-    n = len(model.parameter_names)
+    relaxation = None
+    nuisance: CycleNuisances | RateNuisances
+    if isinstance(model, RateModel):
+        fitted = solve_rate(sums.axis, means, sums.cycle_count, init)
+        solution = fitted.joint
+        nuisance, relaxation = fitted.nuisances, fitted.relaxation
+        names = fitted.coordinates.names
+        n, drive_parameters = 3, 9
+        table = local_table(*fitted.coordinates.table(solution.q))
+    else:
+        theta = parameter_vector(model, init)
+        q0 = np.r_[theta, starting_nuisance(means)]
+        solution = solve_joint(model, sums.axis, means, sums.cycle_count, q0)
+        n = len(model.parameter_names)
+        nuisance = _nuisances(solution.q[n:])
+        names = model.parameter_names + NUISANCE_NAMES
+        drive_parameters = 12 + n
+        table = local_table(*joint_table(model, sums.axis, solution.q))
     q = solution.q
-    nuisance = _nuisances(q[n:])
-    table = local_table(*joint_table(model, sums.axis, q))
     limits = table_bounds()
     shared = solve_shared(table, means, solution.weights, limits)
     _, unrestricted_residual = inner(
@@ -146,24 +167,25 @@ def fit_cycle(
     values, errors = populations(shared)
     standard_errors = np.sqrt(np.maximum(0.0, np.diag(solution.covariance)))
     reliability = None
-    if model.oscillation_frequency is not None:
+    if isinstance(model, CycleModel) and model.oscillation_frequency is not None:
         index = model.parameter_names.index(model.oscillation_frequency)
         denominator = 2 * np.pi * np.ptp(sums.axis) * standard_errors[index]
         reliability = float(1 / denominator) if denominator else float("inf")
     return CycleFit(
-        dict(zip(model.parameter_names, q[:n], strict=True)),
-        dict(zip(model.parameter_names, standard_errors[:n], strict=True)),
+        dict(zip(names[:n], q[:n], strict=True)),
+        dict(zip(names[:n], standard_errors[:n], strict=True)),
         nuisance,
         solution.covariance,
-        model.parameter_names + NUISANCE_NAMES,
+        names,
         _check(within_J, 45 * points),
         CycleCheck(max(0.0, shared.J - within_J), 14 * (points - 1), None),
-        _check(max(0.0, solution.J - shared.J), 6 * points - 12 - n),
+        _check(max(0.0, solution.J - shared.J), 6 * points - drive_parameters),
         values,
         errors,
         reliability,
         solution.J,
         65 * points - len(q),
+        relaxation,
     )
 
 

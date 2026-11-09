@@ -1,8 +1,8 @@
 """Per-state curve models of the Rabi, T1, T2 echo and T2 Ramsey cycles.
 
-Each constructor returns a CycleModel whose column i is the curve f_i(x) of
-the drive row of state i, in the order g, e, third state. The free affine
-endpoints of each row absorb amplitude, sign and imperfect pulses.
+Rabi and T2 constructors return CycleModel, with state curves and free affine
+endpoints absorbing amplitude, sign and imperfect pulses. T1 instead returns
+the detailed-balance RateModel, with a free initial stochastic drive.
 """
 
 from collections.abc import Mapping
@@ -10,9 +10,7 @@ from collections.abc import Mapping
 import numpy as np
 
 from .model import Array, CycleModel
-
-# t1 and tf stay above 1e-3 axis units, for example 1 ns on a us axis.
-_SHORTEST_DECAY = 1e-3
+from .rate_model import RateModel
 
 
 def rabi_model() -> CycleModel:
@@ -33,32 +31,25 @@ def rabi_model() -> CycleModel:
         from_e = np.cos(np.pi * parameters["f"] * x) ** 2
         return np.column_stack([from_g, from_e, from_g])
 
-    return CycleModel(curve, ("f",), [(0.0, np.inf)], oscillation_frequency="f")
+    def derivative(x: Array, parameters: Mapping[str, float]) -> Array:
+        slope = np.pi * x * np.sin(2 * np.pi * parameters["f"] * x)
+        return np.column_stack([slope, -slope, slope])[:, :, None]
+
+    return CycleModel(
+        curve, ("f",), [(0.0, np.inf)], oscillation_frequency="f", derivative=derivative
+    )
 
 
-def t1_model() -> CycleModel:
-    """Return a three-state model for a π pulse followed by a wait x.
+def t1_model() -> RateModel:
+    """Return D(x) = D0 exp(Gx), the detailed-balance T1 model.
 
-    Axis x is the wait in caller time units. Fitted ``t1`` and ``tf`` use the
-    same units, with bounds [1e-3, infinity). The π pulse takes g to e,
-    which decays back with exp(-x / t1): that is the g curve. From e the π
-    pulse lands in g, which does not decay; the e row's free endpoints absorb
-    that flat response, and its curve exp(-x / t1) also covers a residual e
-    after an imperfect π. The third state decays with its own exp(-x / tf).
-
-    The g and third curves are the same family, so exchanging those two rows
-    together with t1 and tf fits the same data when the e row is flat; the
-    fit may return either labelling. Callers that know which state is most
-    populated, such as g in thermal equilibrium, label the rows by
-    CycleFit.nuisances.thermal.
+    Axis is nonnegative wait time. Three pair rates and the thermal stationary
+    distribution define G; D0 is free stochastic. fit_cycle takes
+    init={"t1": textbook_time}. It reports both eigen times and selects the
+    larger-amplitude one as T1. See RateModel and CycleRelaxation for units,
+    the geometric-state labels and the amplitude definition.
     """
-
-    def curve(x: Array, parameters: Mapping[str, float]) -> Array:
-        decay = np.exp(-x / parameters["t1"])
-        return np.column_stack([decay, decay, np.exp(-x / parameters["tf"])])
-
-    bounds = [(_SHORTEST_DECAY, np.inf), (_SHORTEST_DECAY, np.inf)]
-    return CycleModel(curve, ("t1", "tf"), bounds)
+    return RateModel()
 
 
 def t2_echo_model() -> CycleModel:
@@ -84,7 +75,7 @@ def t2_echo_model() -> CycleModel:
     then need not be calibrated. The g curve is affine in exp(-x/t2), the same
     family as the third curve, so with a small third-state population the fit
     can put g in the third row with t2 and tf exchanged; label the rows by
-    CycleFit.nuisances.thermal as for t1_model. Direct curve calls raise
+    CycleFit.nuisances.thermal. Direct curve calls raise
     ValueError for negative/nonfinite delay; parameter validation is owned by
     CycleModel.
     """
@@ -96,6 +87,7 @@ def t2_echo_model() -> CycleModel:
         curve,
         ("t2", "tf"),
         ((np.finfo(float).tiny, np.inf),) * 2,
+        derivative=lambda x, p: _derivatives(x, p, ramsey=False),
     )
 
 
@@ -139,7 +131,25 @@ def t2_ramsey_model() -> CycleModel:
             (np.finfo(float).tiny, np.inf),
         ),
         oscillation_frequency="detuning",
+        derivative=lambda x, p: _derivatives(x, p, ramsey=True),
     )
+
+
+def _derivatives(
+    axis: Array, parameters: Mapping[str, float], *, ramsey: bool
+) -> Array:
+    # Multiplying by decay before dividing avoids overflow at the positive time bound.
+    curves = _curves(axis, parameters, parameters["detuning"] if ramsey else 0.0)
+    decay = np.exp(-axis / parameters["t2"])
+    phase = 2 * np.pi * parameters["detuning"] * axis if ramsey else np.zeros_like(axis)
+    result = np.zeros((len(axis), 3, 3 if ramsey else 2))
+    slope = (axis / parameters["t2"]) * decay / parameters["t2"] * np.cos(phase) / 2
+    result[:, 0, 0], result[:, 1, 0] = -slope, slope
+    result[:, 2, -1] = (axis / parameters["tf"]) * curves[:, 2] / parameters["tf"]
+    if ramsey:
+        frequency_slope = -np.pi * axis * decay * np.sin(phase)
+        result[:, 0, 1], result[:, 1, 1] = -frequency_slope, frequency_slope
+    return result
 
 
 def _curves(axis: Array, parameters: Mapping[str, float], frequency: float) -> Array:
