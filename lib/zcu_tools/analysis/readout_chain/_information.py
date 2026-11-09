@@ -7,64 +7,66 @@ from ._estimator import physical_coordinate_jacobian, physical_coordinates
 from ._model import FloatArray, ModelParameters
 
 
-def all_lag_information(q: float, correlation: float) -> float:
+def all_lag_information(q: float, qnd: float) -> float:
     """Information per read about a weak drive in an infinite symmetric DR chain.
 
-    q >= 0 is d²/(4σ²); 0 < correlation < 1 is the symmetric-chain correlation Q.
+    q >= 0 is d²/(4σ²); 0 < qnd < 1 is the symmetric-chain QND.
     Combine products of reads at every lag j >= 1 with GLS weights using their
     exact long-run covariance. Return dimensionless information, zero at q=0.
     """
-    return _value_gradient(q, correlation)[0]
+    return _value_gradient(q, qnd)[0]
 
 
-def all_lag_information_gradient(q: float, correlation: float) -> FloatArray:
-    """Analytic (2,) gradient of all_lag_information in (q, Q) order.
+def all_lag_information_gradient(q: float, qnd: float) -> FloatArray:
+    """Analytic (2,) gradient of all_lag_information in (q, QND) order.
 
     Inputs have the same domain as all_lag_information. The gradient is zero at
     q=0. No finite differences or lag truncation are used.
     """
-    return _value_gradient(q, correlation)[1]
+    return _value_gradient(q, qnd)[1]
 
 
 def _value_gradient(q: float, correlation: float) -> tuple[float, FloatArray]:
     if q == 0:
         return 0.0, np.zeros(2)
-    # Extended intermediates preserve the small denominator when Q is near one.
-    signal, Q = np.longdouble(q), np.longdouble(correlation)
-    kappa = (1 + Q**2 + signal * (1 - Q**2)) / (2 * Q)
+    # Extended intermediates preserve the small denominator when QND is near one.
+    signal, qnd = np.longdouble(q), np.longdouble(correlation)
+    kappa = (1 + qnd**2 + signal * (1 - qnd**2)) / (2 * qnd)
     root = np.sqrt((kappa - 1) * (kappa + 1))
     # The reciprocal avoids subtracting two large, nearly equal numbers.
     z = 1 / (kappa + root)
-    dkappa = np.array([(1 - Q**2) / (2 * Q), ((1 - signal) - (1 + signal) / Q**2) / 2])
+    dkappa = np.array(
+        [(1 - qnd**2) / (2 * qnd), ((1 - signal) - (1 + signal) / qnd**2) / 2]
+    )
     dz = -z / root * dkappa
-    dQ = np.array([0.0, 1.0])
-    # Expand in Q-z so the polynomial denominator does not cancel near Q=1.
-    h, w = (1 - Q) * (1 + Q), Q - z
-    dw = dQ - dz
-    a = h * (1 + Q**2) + Q * (5 * Q**2 - 1) * w - 4 * Q**2 * w**2
-    da = (-4 * Q**3 + (15 * Q**2 - 1) * w - 8 * Q * w**2) * dQ + (
-        Q * (5 * Q**2 - 1) - 8 * Q**2 * w
+    dqnd = np.array([0.0, 1.0])
+    # Expand in qnd-z so the polynomial denominator does not cancel near QND=1.
+    h, w = (1 - qnd) * (1 + qnd), qnd - z
+    dw = dqnd - dz
+    a = h * (1 + qnd**2) + qnd * (5 * qnd**2 - 1) * w - 4 * qnd**2 * w**2
+    da = (-4 * qnd**3 + (15 * qnd**2 - 1) * w - 8 * qnd * w**2) * dqnd + (
+        qnd * (5 * qnd**2 - 1) - 8 * qnd**2 * w
     ) * dw
-    c = h**2 + 6 * Q * h * w + (9 * Q**2 - 5) * w**2 - 4 * Q * w**3
-    dc = (-4 * Q * h + 6 * (1 - 3 * Q**2) * w + 18 * Q * w**2 - 4 * w**3) * dQ + (
-        6 * Q * h + 2 * (9 * Q**2 - 5) * w - 12 * Q * w**2
-    ) * dw
-    value = 4 * (Q - z) ** 2 * a / ((1 - Q**2) * (1 - Q * z) * c)
-    gradient = value * (
-        2 * (dQ - dz) / (Q - z)
+    c = h**2 + 6 * qnd * h * w + (9 * qnd**2 - 5) * w**2 - 4 * qnd * w**3
+    dc = (
+        -4 * qnd * h + 6 * (1 - 3 * qnd**2) * w + 18 * qnd * w**2 - 4 * w**3
+    ) * dqnd + (6 * qnd * h + 2 * (9 * qnd**2 - 5) * w - 12 * qnd * w**2) * dw
+    information = 4 * (qnd - z) ** 2 * a / ((1 - qnd**2) * (1 - qnd * z) * c)
+    gradient = information * (
+        2 * (dqnd - dz) / (qnd - z)
         + da / a
-        + 2 * Q * dQ / (1 - Q**2)
-        + (z * dQ + Q * dz) / (1 - Q * z)
+        + 2 * qnd * dqnd / (1 - qnd**2)
+        + (z * dqnd + qnd * dz) / (1 - qnd * z)
         - dc / c
     )
-    return float(value), np.asarray(gradient, dtype=np.float64)
+    return float(information), np.asarray(gradient, dtype=np.float64)
 
 
 def pair_correlation(model: ModelParameters, pair: NDArray[np.int64]) -> float:
-    """Q = R̃_aa + R̃_bb - 1 for two distinct state indices in pair.
+    """QND η = R̃_aa + R̃_bb - 1 for two distinct state indices in pair.
 
     R̃ is the model transition's pair block, each row renormalised within the
-    pair. The third state's landing therefore affects Q even at fixed λ.
+    pair. The third state's landing therefore affects QND even at fixed λ.
     """
     keep, land = model.retention[pair], model.landing[pair]
     rows = keep + (1 - keep) * land.sum()
@@ -77,7 +79,7 @@ def pair_information_gradient(
     """Analytic (12,) gradient of pair_information in estimator free coordinates.
 
     Hold pair's two state indices fixed. Propagate q=d²/(4σ²) through the
-    centre/noise tangents and Q through both retention and landing tangents,
+    centre/noise tangents and QND through both retention and landing tangents,
     including the coordinate map's clipping and floor conventions.
     """
     model = physical_coordinates(coordinates)
@@ -115,7 +117,7 @@ def pair_information(model: ModelParameters, pair: NDArray[np.int64]) -> float:
     """All-lag weak-drive information per read for a fixed pair of state indices.
 
     Use an infinite symmetric ...DRDRDR... chain with equal pair populations,
-    q=d²/(4σ²) and Q from the row-renormalised pair transition block. Combine
+    q=d²/(4σ²) and QND from the row-renormalised pair transition block. Combine
     all lag j>=1 read products with exact long-run covariance and GLS weights.
     This defines a symmetric target, not the unequal-population chain's Fisher
     information. Larger dimensionless values mean more information.

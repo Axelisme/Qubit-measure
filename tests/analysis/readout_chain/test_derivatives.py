@@ -60,7 +60,7 @@ def information_oracle(
 ) -> LongArray:
     """Evaluate the spec with decimal arithmetic before test-only differencing.
 
-    Tiny pair landings can make Q so close to one that even long-double Q
+    Tiny pair landings can make QND so close to one that even long-double
     rounding pollutes a central difference of information.
     """
     with localcontext() as context:
@@ -80,7 +80,7 @@ def information_oracle(
         land = [w / total for w in land]
         a, b = pair
         q = sum((x[2 * b + c] - x[2 * a + c]) ** 2 for c in (0, 1)) / (4 * x[6].exp())
-        Q = (
+        qnd = (
             sum(
                 (keep[i] + (1 - keep[i]) * land[i])
                 / (keep[i] + (1 - keep[i]) * (land[a] + land[b]))
@@ -88,19 +88,28 @@ def information_oracle(
             )
             - 1
         )
-        kappa = (1 + Q**2 + q * (1 - Q**2)) / (2 * Q)
+        kappa = (1 + qnd**2 + q * (1 - qnd**2)) / (2 * qnd)
         z = 1 / (kappa + (kappa**2 - 1).sqrt())
-        value = (
+        information = (
             4
-            * (Q - z) ** 2
-            * (1 - Q**2 + Q * z + 3 * Q**3 * z - 4 * Q**2 * z**2)
+            * (qnd - z) ** 2
+            * (1 - qnd**2 + qnd * z + 3 * qnd**3 * z - 4 * qnd**2 * z**2)
             / (
-                (1 - Q**2)
-                * (1 - Q * z)
-                * (1 - Q**2 + 4 * Q * z - 5 * z**2 - 3 * Q**2 * z**2 + 4 * Q * z**3)
+                (1 - qnd**2)
+                * (1 - qnd * z)
+                * (
+                    1
+                    - qnd**2
+                    + 4 * qnd * z
+                    - 5 * z**2
+                    - 3 * qnd**2 * z**2
+                    + 4 * qnd * z**3
+                )
             )
         )
-    return np.array([str(Q if correlation_only else value)], dtype=np.longdouble)
+    return np.array(
+        [str(qnd if correlation_only else information)], dtype=np.longdouble
+    )
 
 
 def finite_difference(

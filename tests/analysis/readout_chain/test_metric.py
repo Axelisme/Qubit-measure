@@ -9,6 +9,7 @@ from numba import njit
 from numpy.testing import assert_array_equal
 from scipy.optimize import OptimizeResult, least_squares
 from zcu_tools.analysis.readout_chain import ReadoutSums, _estimator, readout_metric
+from zcu_tools.analysis.readout_chain.metric import SettingFit, rank_settings
 
 
 def exact_moments(
@@ -71,7 +72,7 @@ def test_exact_two_state_moments_recover_reference_information() -> None:
 
     fit = readout_metric(saved_moments(features)).fits[0]
 
-    # Independent truncated-lag GLS at q=2.25, Q=.75. A three-state fit may
+    # Independent truncated-lag GLS at q=2.25, QND=.75. A three-state fit may
     # assign a small unseen third population, so allow its modelling error.
     np.testing.assert_allclose(fit.metric, 2.3030409955595212, rtol=0.02)
     assert 0 < fit.standard_error < 0.01
@@ -91,7 +92,7 @@ def test_exact_three_state_moments_recover_dominant_pair_and_leakage(
 
     fit = readout_metric(saved_moments(features)).fits[0]
 
-    # Independent truncated-lag GLS, Q=.75/(1-.25*.02) after row normalisation.
+    # Independent truncated-lag GLS, QND=.75/(1-.25*.02) after row normalisation.
     reference = {1.0: 0.5430849373534309, 3.0: 2.364008370477314}
     np.testing.assert_allclose(fit.metric, reference[separation], rtol=0.01)
     np.testing.assert_allclose(fit.separation, separation, rtol=0.01)
@@ -120,14 +121,39 @@ def test_bounded_refinement_recovers_unequal_and_low_retention_truth(
 
     fit = readout_metric(saved_moments(features)).fits[0]
 
-    # References are truncated-lag GLS at q=2.25 and the truth's normalised Q.
+    # References are truncated-lag GLS at q=2.25 and the truth's normalised QND.
     np.testing.assert_allclose(fit.metric, reference, rtol=0.002)
     np.testing.assert_allclose(fit.separation, 3, rtol=0.002)
     np.testing.assert_allclose(sorted(fit.retention), sorted(retention[:2]), atol=0.002)
     np.testing.assert_allclose(fit.qnd, qnd, rtol=0.002)
 
 
-def test_settings_are_ranked_by_information_not_acquisition_order() -> None:
+def test_ranking_uses_information_minus_error_with_stable_ties() -> None:
+    fits = {
+        index: SettingFit(
+            setting=float(index),
+            metric=information,
+            standard_error=error,
+            qnd=0.75,
+            qnd_error=0.01,
+            separation=3.0,
+            retention=(0.75, 0.75),
+            third_population=0.02,
+        )
+        for index, (information, error) in enumerate(
+            [(10.0, 8.0), (6.0, 1.0), (8.0, 2.0), (7.0, 2.0)]
+        )
+    }
+    original = fits.copy()
+
+    ranking = rank_settings(fits)
+
+    # Scores are 2, 5, 6, 5. The largest information is not the best setting.
+    assert ranking == (2, 1, 3, 0)
+    assert fits == original
+
+
+def test_saved_moments_ranking_preserves_fit_values_and_excludes_no_signal() -> None:
     features = np.array(
         [
             exact_moments(
@@ -135,14 +161,31 @@ def test_settings_are_ranked_by_information_not_acquisition_order() -> None:
                 np.array([0.75, 0.75, 0.9]),
                 np.array([0.49, 0.49, 0.02]),
             )
-            for s in (2.0, 1.0, 3.0)
+            for s in (3.0, 0.0, 2.99, 2.98)
         ]
     )
+    counts = np.array([10_000.0, 1_000_000.0, 1_000_000.0, 1_000_000.0])
+    sums = ReadoutSums(np.arange(4.0), counts, features * counts[:, None])
+    individual_fits = {
+        index: readout_metric(
+            ReadoutSums(
+                sums.axis[index : index + 1],
+                sums.block_count[index : index + 1],
+                sums.feature_sums[index : index + 1],
+            )
+        ).fits[0]
+        for index in (0, 2, 3)
+    }
 
-    result = readout_metric(saved_moments(features))
+    result = readout_metric(sums)
 
-    assert result.ranking == (2, 0, 1)
-    assert all(fit.standard_error > 0 for fit in result.fits.values())
+    # The slightly higher-information point has fewer blocks and a larger error.
+    assert result.fits[0].metric > result.fits[2].metric > result.fits[3].metric
+    assert result.ranking == (2, 3, 0)
+    assert result.fits == individual_fits
+    assert list(result.fits) == [0, 2, 3]
+    assert result.no_signal == (1,)
+    assert result.failures == {}
 
 
 def test_setting_without_signal_is_reported_apart_and_is_not_ranked() -> None:

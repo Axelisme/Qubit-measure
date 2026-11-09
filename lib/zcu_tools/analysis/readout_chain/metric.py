@@ -72,16 +72,16 @@ class SettingFit:
     metric: information per read about a weak drive in an infinite symmetric
         ...DRDRDR... chain, combining all lag j>=1 read products with GLS and
         their exact long-run covariance. Use the two most populated fitted
-        states at equal populations, q=d²/(4σ²), and Q=R̃_aa+R̃_bb-1 of their
+        states at equal populations, q=d²/(4σ²), and QND η=R̃_aa+R̃_bb-1 of their
         row-renormalised transition block. Dimensionless; larger is better.
     standard_error: one-sigma delta-method sampling error of metric, >= 0,
         using the start-model covariance, final analytic Jacobian and fixed
         weak priors. Asymptotic in block count; not a fit-bias bound.
-    qnd: Q=R̃_aa+R̃_bb-1 for the dominant pair, with each row of its
-        transition block renormalised within the pair. Dimensionless, 0<Q<1;
+    qnd: QND η=R̃_aa+R̃_bb-1 for the dominant pair, with each row of its
+        transition block renormalised within the pair. Dimensionless, 0<η<1;
         equals λ for an equal-retention pair with no third-state landing.
     qnd_error: one-sigma delta-method sampling error of qnd, >=0, using the
-        same sampling covariance as standard_error and Q's analytic gradient.
+        same sampling covariance as standard_error and QND's analytic gradient.
         It is not a bias bound and excludes pair-selection uncertainty.
     separation: dominant-pair centre distance divided by the fitted per-I/Q
         Gaussian noise standard deviation (d/sigma).
@@ -127,14 +127,32 @@ class ReadoutMetric:
         order. Every index is in exactly one of fits, no_signal and failures.
     failures: index -> SettingFailure for each setting it could not fit, in
         acquisition order.
-    ranking: the indices in fits, metric descending; no-signal and failed
-        settings are absent. Exact ties keep acquisition order.
+    ranking: the indices in fits, ordered by metric minus standard_error,
+        largest first. Exact score ties keep acquisition order. No-signal and
+        failed settings are absent. The best setting is ranking[0] when the
+        ranking is nonempty; it need not have the largest metric.
     """
 
     fits: dict[int, SettingFit]
     no_signal: tuple[int, ...]
     failures: dict[int, SettingFailure]
     ranking: tuple[int, ...]
+
+
+def rank_settings(fits: dict[int, SettingFit]) -> tuple[int, ...]:
+    """Rank fitted indices by metric minus standard_error, largest first.
+
+    fits must be in acquisition order. Exact score ties keep that order.
+    Return an empty tuple for no fits. Do not modify fits or its values.
+    The best setting is the first returned index; its metric need not be largest.
+    """
+    return tuple(
+        sorted(
+            fits,
+            key=lambda index: fits[index].metric - fits[index].standard_error,
+            reverse=True,
+        )
+    )
 
 
 def readout_metric(sums: ReadoutSums) -> ReadoutMetric:
@@ -159,13 +177,15 @@ def readout_metric(sums: ReadoutSums) -> ReadoutMetric:
 
     The metric is all-lag GLS information per read about a weak drive in an
     infinite symmetric ...DRDRDR... chain, for the two most populated fitted
-    states at equal populations. Set q=d²/(4σ²), Q=R̃_aa+R̃_bb-1 from their
-    row-renormalised transition block, κ=(1+Q²+q*(1-Q²))/(2Q), z=κ-sqrt(κ²-1).
-    Then I=4*(Q-z)²*(1-Q²+Q*z+3*Q³*z-4*Q²*z²) /
-    ((1-Q²)*(1-Q*z)*(1-Q²+4*Q*z-5*z²-3*Q²*z²+4*Q*z³)). Larger is better.
-    qnd reports Q; qnd_error propagates the same sampling covariance through
-    Q's analytic gradient. The third population is a leakage diagnostic;
-    all three states fit.
+    states at equal populations. Set q=d²/(4σ²) and QND η=R̃_aa+R̃_bb-1 from
+    their row-renormalised transition block, κ=(1+η²+q*(1-η²))/(2η),
+    z=κ-sqrt(κ²-1). Then information=4*(η-z)²*(1-η²+η*z+3*η³*z-4*η²*z²) /
+    ((1-η²)*(1-η*z)*(1-η²+4*η*z-5*z²-3*η²*z²+4*η*z³)). Larger is better.
+    qnd reports QND; qnd_error propagates the same sampling covariance through
+    QND's analytic gradient. The third population is a leakage diagnostic;
+    all three states fit. Rank fitted settings by metric minus standard_error,
+    largest first, keeping acquisition order on exact ties. The best setting
+    need not have the largest metric. Ranking does not change fitted values.
 
     Singular matrices, non-finite fits and exhaustion of the 1200-evaluation
     budget become per-setting SettingFailure values without losing other
@@ -188,9 +208,11 @@ def readout_metric(sums: ReadoutSums) -> ReadoutMetric:
         except (UnfittableMoments, np.linalg.LinAlgError) as error:
             # Isolate: one setting the estimator cannot fit keeps the others.
             failures[index] = SettingFailure(setting, str(error))
-    ranking = sorted(fits, key=lambda index: -fits[index].metric)
     return ReadoutMetric(
-        fits=fits, no_signal=tuple(no_signal), failures=failures, ranking=tuple(ranking)
+        fits=fits,
+        no_signal=tuple(no_signal),
+        failures=failures,
+        ranking=rank_settings(fits),
     )
 
 

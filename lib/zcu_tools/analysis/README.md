@@ -94,17 +94,19 @@ Coordinate map 保留 1e-5 landing floor。Moment Jacobian 與 metric gradient �
 每個 index 恰好出現在 `fits`、`no_signal`、`failures` 其中之一。
 `fits` 對應 `SettingFit`，`failures` 對應含 setting 座標與原因的 `SettingFailure`。
 奇異矩陣、非有限 fit 或耗盡 1200 次 evaluation budget 都只使該 setting 失敗。
-`ranking` 只列 fits，依 metric 由高到低。輸入 shape、不有限值、非整數 count
-或不足兩個 blocks 仍拋出 ValueError。
+`ranking` 只列 fits，依 `metric − standard_error` 由高到低，同分保留 acquisition order。
+最佳點是非空 ranking 的第一個 index，不一定是 metric 最大的點。排序不改 fitted values。
+輸入 shape、不有限值、非整數 count 或不足兩個 blocks 仍拋出 ValueError。
 
 `SettingFit.metric` 是無限對稱 ...DRDRDR... 鏈對弱 drive 的每 read information，
 以所有 lag j≥1 的 read products、精確 long-run covariance 與 GLS weights 計算。
 取 fitted stationary population 最高的兩態，設為等布居，q=d²/(4σ²)，
-Q 是兩態 transition block 逐列歸一後的 R̃_aa+R̃_bb−1。
-閉式解見 `readout_metric` docstring。它定義對稱 target，不是原始不等布居鏈的資訊量。
-較大值較好。`separation` 是這兩態的 d/sigma，`retention` 是它們各自的 λ，
-`third_population` 是剩餘態的 stationary population。`qnd` 保存 Q，`qnd_error` 是 Q
-的一倍標準差，使用相同 sampling covariance 與 Q 的解析梯度。
+QND 的符號 η 是兩態 transition block 逐列歸一後的 R̃_aa+R̃_bb−1。
+閉式解見 `readout_metric` docstring。它定義對稱 target，不是原始不等布居鏈的 information。
+metric 越大表示 information 越多。`separation` 是這兩態的 d/sigma，
+`retention` 是它們各自的 λ，`third_population` 是剩餘態的 stationary population。
+`qnd` 保存 QND，`qnd_error` 是 QND 的一倍標準差，
+使用相同 sampling covariance 與 QND 的解析梯度。
 
 `standard_error` 是 final analytic Jacobian、固定 start covariance 與 prior 下的
 delta-method sampling error，不涵蓋 fit bias。Start 看不到第三態時（正交軸沒有
