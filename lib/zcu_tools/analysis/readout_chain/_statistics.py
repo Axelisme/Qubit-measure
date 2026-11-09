@@ -19,7 +19,7 @@ def whiten(
     counts: NDArray[np.float64],
     products: NDArray[np.float64],
 ) -> NDArray[np.float64]:
-    """Return sqrt(N) L^-1(mean - componentwise median), shape (F,11).
+    """Return sqrt(N) L^-1(mean - componentwise median), shape (F,D).
 
     products pools feature outer products; subtract each point mean before
     estimating per-dwell covariance with sum(N)-F degrees of freedom.

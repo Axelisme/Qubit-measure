@@ -1,6 +1,6 @@
 # `zcu_tools.program` — QICK integration
 
-**Last updated:** 2026-11-09，讀出鏈 augmented sums
+**Last updated:** 2026-11-09，讀出鏈與 cycle augmented sums
 
 **讀者：** framework-dev。QICK 整合、程式建構與 acquisition 依賴速查。
 
@@ -154,6 +154,14 @@ processor; the selected ADC must have no other triggers. The processor reduces
 each dwell to running moment sums for readout-chain analysis; `acquire_summed`
 adds them across rounds. Feature definitions, array layout and validation are in
 the [`chain_sweep_sums` docstring](v2/chain_sweep.py).
+
+`v2.chain_cycle_sums(prog, read)` selects one `PulseReadout` owner whose 16 reads
+per shot form one thermalised `(D R R)^8` cycle per rep, either unrolled or as two
+reads in a fixed Repeat of eight. After building, call `prog.set_reads_per_shot(16)`
+before constructing the processor; the selected ADC must have no other triggers.
+The processor reduces each cycle to 65 numbers and returns their per-point augmented
+sums; `acquire_summed` adds them across rounds. Slot layout and validation are in
+the [`chain_cycle_sums` docstring](v2/chain_cycle.py).
 
 Build first, then resolve labels and call
 `sched.run_acquire_summed(program, soc, processor=..., rounds=...,

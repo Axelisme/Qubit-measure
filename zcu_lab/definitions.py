@@ -4,6 +4,11 @@ from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.resources.entry.registry import ComponentRegistry
 
 from zcu_lab.components import register_all as register_components
+from zcu_lab.v2.chain.amp_rabi.gui import DEFINITION as CHAIN_AMP_RABI_DEFINITION
+from zcu_lab.v2.chain.len_rabi.gui import DEFINITION as CHAIN_LEN_RABI_DEFINITION
+from zcu_lab.v2.chain.t1.gui import DEFINITION as CHAIN_T1_DEFINITION
+from zcu_lab.v2.chain.t2echo.gui import DEFINITION as CHAIN_T2ECHO_DEFINITION
+from zcu_lab.v2.chain.t2ramsey.gui import DEFINITION as CHAIN_T2RAMSEY_DEFINITION
 from zcu_lab.v2.fastflux.distortion.acc_phase.gui import (
     DEFINITION as ACC_PHASE_DEFINITION,
 )
@@ -212,6 +217,11 @@ ADAPTERS: dict[str, object] = {
     "twotone/t1": T1_DEFINITION,
     "twotone/t2ramsey": T2_RAMSEY_DEFINITION,
     "twotone/t2echo": T2_ECHO_DEFINITION,
+    "chain/amp_rabi": CHAIN_AMP_RABI_DEFINITION,
+    "chain/len_rabi": CHAIN_LEN_RABI_DEFINITION,
+    "chain/t1": CHAIN_T1_DEFINITION,
+    "chain/t2ramsey": CHAIN_T2RAMSEY_DEFINITION,
+    "chain/t2echo": CHAIN_T2ECHO_DEFINITION,
     "singleshot/ge": GE_DEFINITION,
     "singleshot/qutrit_population": QUTRIT_POPULATION_DEFINITION,
     "singleshot/check": CHECK_DEFINITION,
