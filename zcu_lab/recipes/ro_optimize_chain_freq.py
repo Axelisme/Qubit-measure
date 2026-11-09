@@ -1,4 +1,4 @@
-"""Readout frequency sweep scored by the readout-chain metric.
+"""Readout frequency sweep scored by the thermal-chain score.
 
 Recipe points → expts: the frequency sample count maps to the GUI Readout freq Expts field.
 """
@@ -37,9 +37,12 @@ class RoOptimizeChainFreqInputs(RecipeInputs):
         KEEP,
         description="Frequency sample count, at least 2.",
     )
+    relax_delay: float | None | Keep = Field(
+        KEEP, description="K: thermal relaxation between 16-read shots, in us."
+    )
     reps: int | None | Keep = Field(
         KEEP,
-        description="Blocks of 32 reads per frequency in each round, at least 2.",
+        description="16-read shots per setting in each round, at least 1.",
     )
     rounds: int | None | Keep = Field(
         KEEP,
@@ -48,33 +51,31 @@ class RoOptimizeChainFreqInputs(RecipeInputs):
 
 
 class RoOptimizeChainFreqReport(ChainSweepReport):
-    """Frequency with the largest information minus one sigma; cancellation returns no report."""
+    """Frequency with the largest combined heuristic score; cancellation returns no report."""
 
     freq_mhz: float | None = Field(
         default=None,
-        description="Frequency with the largest information minus one sigma in MHz; null if analysis gave no result.",
+        description="Frequency with the largest combined heuristic score in MHz; null if analysis gave no result.",
     )
 
 
 @recipe(
     "ro_optimize_chain_freq",
-    description="Sweep readout frequency with 32-read blocks, score each frequency by the readout-chain metric, save sums and analysis.",
+    description="Sweep readout frequency with thermally reset 16-read shots, score each frequency by the thermal-chain score, save sums and analysis.",
 )
 async def ro_optimize_chain_freq(
     session: RecipeSession, inputs: RoOptimizeChainFreqInputs
 ) -> RoOptimizeChainFreqReport:
-    """Read 32 times in a row at each readout frequency, with no qubit pulse.
+    """Sweep frequency with thermal relaxation K and 16 reads per shot, no drive.
 
-    Each shot is a block of 32 consecutive reads with no reset, pulse or
-    wait. Primary computes the all-lag information per read of each frequency
-    from the saved sums and reports the frequency with the largest information
-    minus its one-sigma error, with its information, QND, their errors,
-    d/sigma, λ and third-state population, plus the frequencies with no signal
-    and the failed fits. No writeback is proposed or requested. Save keeps the
-    moment sums and the analysis.
+    Primary selects the maximum combined score, keeping acquisition order on
+    exact ties. It reports score and QND with model-conditional approximate
+    error scales, correlation, amplification and M (correlation growth, not
+    identifiable physical leakage). Errors do not affect selection.
+    Save keeps shot counts, all 107 sums and analysis. No writeback is proposed.
 
-    points → expts sets the frequency sample count. Frequencies are MHz.
-    Omission retains the Form value; null is passed to its owner.
+    points → expts sets the frequency sample count. Settings are MHz.
+    relax_delay sets K in us. Omission retains the Form value; null goes to its owner.
     Missing Form values stop before acquisition; completed Run data is saved even if analysis fails.
     """
     tab = session.open_tab(
@@ -86,6 +87,7 @@ async def ro_optimize_chain_freq(
     tab.set("freq.start", inputs.freq_start_mhz)
     tab.set("freq.stop", inputs.freq_stop_mhz)
     tab.set("freq.n", inputs.points)
+    tab.set("relax_delay", inputs.relax_delay)
     tab.set("reps", inputs.reps)
     tab.set("rounds", inputs.rounds)
     for edit in inputs.overrides:

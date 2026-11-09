@@ -5,12 +5,12 @@ from dataclasses import replace
 from zcu_tools.cfg_model import Hidden, Range, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
-from zcu_lab.v2.support.measure.ctx_helpers import source
+from zcu_lab.v2.support.measure.ctx_helpers import source, t1_initial_time
 from zcu_lab.v2.twotone.ro_optimize.chain_power.core import ChainPowerCfg
 
 
 def make_form(ctx: FormContext) -> Form[ChainPowerCfg]:
-    """Use the captured readout slot or a fresh readout template; reps and rounds use cfg defaults."""
+    """Capture readout sources and seed thermal relaxation K from 5*T1."""
     readout = source(
         ctx,
         "$resonator.module.readout",
@@ -22,6 +22,7 @@ def make_form(ctx: FormContext) -> Form[ChainPowerCfg]:
         ChainPowerCfg,
         tree={
             "readout": readout,
+            "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),
             "gain": Range(0.02, 0.2, expts=10),
         },
     )

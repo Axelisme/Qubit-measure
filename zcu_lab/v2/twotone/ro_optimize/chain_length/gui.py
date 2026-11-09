@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TypeAlias
 
-from zcu_tools.analysis.readout_chain import ReadoutSums
+from zcu_tools.analysis.readout_chain import ThermalChainSums
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import Adapter, Analysis, AnalyzeRequest
@@ -16,7 +16,7 @@ from zcu_lab.v2.twotone.ro_optimize.chain_length.core import (
 )
 from zcu_lab.v2.twotone.ro_optimize.chain_length.form import make_form
 
-ChainLengthRunResult: TypeAlias = RunRecord[ChainLengthCfg, ReadoutSums]
+ChainLengthRunResult: TypeAlias = RunRecord[ChainLengthCfg, ThermalChainSums]
 
 
 def _analyze(
@@ -30,7 +30,7 @@ def _run(cfg: ChainLengthCfg, *, context: RunContext) -> ChainLengthRunResult:
     return RunRecord(cfg=cfg, result=ChainLengthExp().run(cfg, context=context))
 
 
-# No writeback: the operator chooses the window from the information and QND.
+# No writeback: choose the maximum score; QND and M remain diagnostics.
 DEFINITION = Adapter(
     spec=ChainLengthExp.AXES_SPEC,
     make_form=make_form,

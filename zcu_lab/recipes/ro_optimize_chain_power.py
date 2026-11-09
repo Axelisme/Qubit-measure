@@ -1,4 +1,4 @@
-"""Readout gain sweep scored by the readout-chain metric.
+"""Readout gain sweep scored by the thermal-chain score.
 
 Recipe points → expts: the gain sample count maps to the GUI Gain Expts field.
 """
@@ -37,9 +37,12 @@ class RoOptimizeChainPowerInputs(RecipeInputs):
         KEEP,
         description="Gain sample count, at least 2.",
     )
+    relax_delay: float | None | Keep = Field(
+        KEEP, description="K: thermal relaxation between 16-read shots, in us."
+    )
     reps: int | None | Keep = Field(
         KEEP,
-        description="Blocks of 32 reads per gain in each round, at least 2.",
+        description="16-read shots per setting in each round, at least 1.",
     )
     rounds: int | None | Keep = Field(
         KEEP,
@@ -48,33 +51,31 @@ class RoOptimizeChainPowerInputs(RecipeInputs):
 
 
 class RoOptimizeChainPowerReport(ChainSweepReport):
-    """Gain with the largest information minus one sigma; cancellation returns no report."""
+    """Gain with the largest combined heuristic score; cancellation returns no report."""
 
     gain: float | None = Field(
         default=None,
-        description="Gain with the largest information minus one sigma in a.u.; null if analysis gave no result.",
+        description="Gain with the largest combined heuristic score in a.u.; null if analysis gave no result.",
     )
 
 
 @recipe(
     "ro_optimize_chain_power",
-    description="Sweep readout gain with 32-read blocks, score each gain by the readout-chain metric, save sums and analysis.",
+    description="Sweep readout gain with thermally reset 16-read shots, score each gain by the thermal-chain score, save sums and analysis.",
 )
 async def ro_optimize_chain_power(
     session: RecipeSession, inputs: RoOptimizeChainPowerInputs
 ) -> RoOptimizeChainPowerReport:
-    """Read 32 times in a row at each readout gain, with no qubit pulse.
+    """Sweep gain with thermal relaxation K and 16 reads per shot, no drive.
 
-    Each shot is a block of 32 consecutive reads with no reset, pulse or
-    wait. Primary computes the all-lag information per read of each gain from
-    the saved sums and reports the gain with the largest information minus its
-    one-sigma error, with its information, QND, their errors, d/sigma, λ and
-    third-state population, plus the gains with no signal and the failed fits.
-    No writeback is proposed or requested. Save keeps the moment sums and the
-    analysis.
+    Primary selects the maximum combined score, keeping acquisition order on
+    exact ties. It reports score and QND with model-conditional approximate
+    error scales, correlation, amplification and M (correlation growth, not
+    identifiable physical leakage). Errors do not affect selection.
+    Save keeps shot counts, all 107 sums and analysis. No writeback is proposed.
 
-    points → expts sets the gain sample count. Gains are a.u.
-    Omission retains the Form value; null is passed to its owner.
+    points → expts sets the gain sample count. Settings are a.u..
+    relax_delay sets K in us. Omission retains the Form value; null goes to its owner.
     Missing Form values stop before acquisition; completed Run data is saved even if analysis fails.
     """
     tab = session.open_tab(
@@ -86,6 +87,7 @@ async def ro_optimize_chain_power(
     tab.set("gain.start", inputs.gain_start)
     tab.set("gain.stop", inputs.gain_stop)
     tab.set("gain.n", inputs.points)
+    tab.set("relax_delay", inputs.relax_delay)
     tab.set("reps", inputs.reps)
     tab.set("rounds", inputs.rounds)
     for edit in inputs.overrides:

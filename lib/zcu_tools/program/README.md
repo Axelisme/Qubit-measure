@@ -1,6 +1,6 @@
 # `zcu_tools.program` — QICK integration
 
-**Last updated:** 2026-11-10，Rπ 連續 reps 摘要
+**Last updated:** 2026-11-10，thermal-chain、K-cycle 與 Rπ 讀出鏈
 
 **讀者：** framework-dev。QICK 整合、程式建構與 acquisition 依賴速查。
 
@@ -154,6 +154,25 @@ processor; the selected ADC must have no other triggers. The processor reduces
 each dwell to running moment sums for readout-chain analysis; `acquire_summed`
 adds them across rounds. Feature definitions, array layout and validation are in
 the [`chain_sweep_sums` docstring](v2/chain_sweep.py).
+
+`v2.thermal_chain_sums(prog, read)` selects exactly 16 consecutive reads of
+one PulseReadout, unrolled or in one fixed Repeat. After build, declare
+`prog.set_reads_per_shot(16)` before constructing the processor. Its 108 columns
+contain shot count and 107 sums: all 16 I/Q read means, R1 self moments,
+all 15 adjacent pairs and the three early long-lag pairs (R1,R3..R5).
+Each pair retains all four cross components; the processor applies no analysis
+weights. Reps and rounds add without averaging. The caller owns thermal
+relaxation and the absence of drives or extra waits within the shot. The three
+thermal-chain ro_optimize experiments set K through relax_delay and retain every
+adjacent pair for offline scoring; the processor does not choose the best setting.
+
+`v2.chain_cycle_sums(prog, read)` selects one `PulseReadout` owner whose 16 reads
+per shot form one thermalised `(D R R)^8` cycle per rep, either unrolled or as two
+reads in a fixed Repeat of eight. After building, call `prog.set_reads_per_shot(16)`
+before constructing the processor; the selected ADC must have no other triggers.
+The processor reduces each cycle to 65 numbers and returns their per-point augmented
+sums; `acquire_summed` adds them across rounds. Slot layout and validation are in
+the [`chain_cycle_sums` docstring](v2/chain_cycle.py).
 
 `v2.rpi_sums(prog, read)` 將每個 setting 的連續 reps 當作一段 Rπ 鏈，
 每個完整 round 回傳 35 欄的可加摘要。Lag 1..15 跨 reps 與內部分塊，不跨

@@ -2,7 +2,7 @@
 
 **讀者：** lab-author、agent。查找 recipe 宣告、操作順序與作者契約。
 
-**Last updated:** 2026-11-09，新增 twotone_chain 與三個 readout-chain ro_optimize recipes
+**Last updated:** 2026-11-10，thermal-chain 與 K-cycle 讀出鏈
 
 Recipe 是操作 GUI tab 的 async 函式。Core 擁有 cfg、量測與分析計算，Adapter 接上表單、RunRecord 與分析來源。
 Recipe 選來源、設參數，再決定 Run、Analyze 與 writeback 問答的順序。
@@ -27,7 +27,7 @@ Import 不開 GUI、不註冊 adapter，也不執行量測。新增宣告後須�
 掃描端點、flux 範圍與裝置單位檢查直接寫在 recipe 主體，不另設選源 helper。
 數字回報使用 lib 的 `report_number`，不改單位或精度。
 `mux_helpers.py` 只共用 tone 範圍輸入與報告欄位，不組裝 Form edits。
-`ro_optimize_chain_helpers.py` 共用三個 readout-chain ro_optimize recipe 的報告欄位，並把分析的最佳 setting、`no_signal` 與 `failures` 複製成報告欄位。
+`ro_optimize_chain_helpers.py` 共用三個 readout-chain ro_optimize recipe 的報告欄位，並複製最佳 setting 的 score、QND、M 與模型近似誤差尺度。
 `mux_flux_helpers.py` 共用四個 flux recipe 的輸入、報告與逐 Q 分析 updates。
 Updates helper 只把完整 tones 的原始位置與 Q 名對應到分析參數，不改量測設定或選來源。
 每個 Q 都明送 `flux_half`／`flux_int`，未指定的線送 null，讓 owner 使用該 Q 的 Run capture。
@@ -167,15 +167,16 @@ Runtime 回覆 `status="cancelled"`、`report=null` 與各次 `runs`。
 Recipe 可以串多個 adapter，宣告不另設單一 adapter mapping。
 十二個 mux 的輸入、原始 tone 位置與報告見 [mux guide](mux-guide.md)。
 
-三個 readout-chain ro_optimize recipe 都計算每次讀出的 all-lag information。
-Information 對 QND 的權重大於 SNR，SNR 的權重不為零。
-最佳 setting 是 information 減一倍標準誤差最高的點，不一定是 information 最高的點。
-最佳 setting 落在掃描邊緣時，擴大該側範圍後重測。
-
-`no_signal` 列出擬合前檢定判定訊號不足的 setting。這些點不擬合也不排名。
-`failures` 列出 estimator 無法擬合的 setting 與原因，不代表 no signal。
-Live 與 analysis 圖都不畫這兩類點，並在標題分開計數。
-Analysis 下圖顯示 QND 與一倍標準誤差棒。d/sigma 保留在報告，不畫在圖上。
+三個 thermal-chain ro_optimize recipe 以 K 等待熱平衡，再無 drive 連讀 16 次。
+`relax_delay` 設 K，單位 us。K 後熱態不同於 readout-driven steady state。
+Score 是受限二態模型的資訊 proxy，乘上 M 相關增量懲罰。M 不等於可辨識的 leakage，純二態再布居也會受罰。
+只取 score 最大的 setting，同分保留 acquisition order，誤差不參與排名。
+最佳 setting 在邊界時，擴大該側範圍後重測。
+Live 與 analysis 都顯示 score、QND、M 與 |ρ| 三個 panel，紅線標最佳點。
+QND 軸固定 0..1，但回報不裁切。Score 軸只按 score 值決定，不被大誤差棒撐大。
+誤差是模型條件式近似尺度，不是一般 one-sigma；score 傳播忽略 M、主軸及共享 covariance 的不確定度。
+稀少遠端第三態、相關雜訊及 IQ 重疊可能誤導 score 或隱藏 leakage。實機 K R^16 尚未驗證此效用。
+各實驗 guide 說明 clipping 斜率、熱態對比與偵測限制。Saved record 保留 count 加完整 107 sums，不只存 M aggregate。
 
 新增流程：
 
@@ -185,10 +186,15 @@ Analysis 下圖顯示 QND 與一倍標準誤差棒。d/sigma 保留在報告，�
 | `onetone_range_find` | `onetone/range_find` | 必填絕對 MHz `freq:{start,stop}`、`n` 與非空 `resonators` 名單。名稱數是預期峰數，初始依頻率升序配對，不進 acquisition cfg。未辨識的峰先用暫用名稱，例如 `["dip1"]`。單一 Interactive 入口預設不平滑、自動依名稱數求 prominence factor、FWHM 上限 25 MHz，以 depth / FWHM 排序。`min_separation` 為有限正數 MHz，初值 1 MHz，與名單經同一 Analyze updates 傳入。Recipe 等待 agent 經 `tab_interact` 調整或確認並送 done，才詢問 writeback，不自動送 done。回覆最終 name、freq、depth、fwhm、score、實際 `prominence_factor` 與 identity／writeback 診斷。手動非候選點的 metrics 為 null。 |
 | `stirap` | `twotone/stirap` | 必填 `scan_mode`：delay、amplitude 或 detuning。第一軸 `start/stop/n` 分別是 Stokes lead（us）、共同 gain scale（無單位）或 Pump detuning（MHz）；detuning 另用 `stokes_start_mhz/stokes_stop_mhz/stokes_n` 掃 Stokes 軸。操作者提供兩個 carrier，分析只用 Run 保存的 centroid3 readout。完整 Run、Analyze、Save，不提出 writeback。 |
 | `raman_gf` | `twotone/raman_gf` | `carrier_mhz` 由操作者提供，`waveform_asset` 指定已建立的 arbitrary envelope。`scan_mode` 沿用 frequency、area、frequency_area；detuning 使用 two-photon MHz，正值使單 carrier 增加一半 detuning。分析只用 Run 保存的 centroid3 readout，完整 Run、Analyze、Save，不提出 writeback。 |
-| `ro_optimize_chain_power` | `twotone/ro_optimize/chain_power` | 可省略 `gain_start`／`gain_stop`（a.u.）、`points`、`reps`、`rounds`。每個 shot 是 32 次連續讀出，無 reset、qubit pulse 或 relax delay。回報最佳 `gain`、`metric`（information）、`metric_err`、`qnd`、`qnd_err`、d/sigma、λ、第三態布居、`no_signal` 與 `failures`。完整 Run、Analyze、Save，不提出 writeback。 |
+| `ro_optimize_chain_power` | `twotone/ro_optimize/chain_power` | 可省略 `gain_start`／`gain_stop`（a.u.）、`points`、`relax_delay`（us）、`reps`、`rounds`。每 shot 等待 K 後連讀 16 次，無 drive。回報最佳 `gain`、`score`、`score_error`、`qnd`、`qnd_error`、`correlation`、`amplification`、`mist`（M 診斷）。完整 Run、Analyze、Save，不提出 writeback。 |
 | `ro_optimize_chain_freq` | `twotone/ro_optimize/chain_freq` | 同上，掃描端點為 `freq_start_mhz`／`freq_stop_mhz`（MHz），回報 `freq_mhz`。 |
 | `ro_optimize_chain_length` | `twotone/ro_optimize/chain_length` | 同上，掃描端點為 ADC window 的 `length_start_us`／`length_stop_us`（us），每個 window 的 pulse 為該 window 加 0.11 us，回報 `length_us`。 |
 | `twotone_chain` | `twotone/chain` | 必填 drive 的 `center_mhz`、`span_mhz`、`points`。每點 48 次無 reset 的（驅動、讀出），`reps` 是每輪快掃次數。分析以 `twotone/freq` 的峰擬合擬合離背景的 sigma 曲線，`expected_center_mhz` 選峰。回報中心、近似寬度與 5% 誤報門檻，完整 Run、Analyze、Save，不提出 writeback。 |
+| `chain_amp_rabi` | `chain/amp_rabi` | 掃 drive gain，`gain_range`、`points`。每個 rep 是一個 cycle：K（`relax_delay`）後 (Rabi pulse, 讀, 讀) × 8，`reps` 是每輪每點 cycle 數。分析以 `twotone/rabi/amp_rabi` 擬合第一次讀出取起點，再聯合擬合 65 個數。回報 π gain、Rabi 頻率與 Wald 誤差、R、三項檢查，完整 Run、Analyze、Save，不提出 writeback。 |
+| `chain_len_rabi` | `chain/len_rabi` | 掃 const／flat_top drive 的長度，`max_length_us`、`points`。Cycle 與 `reps` 同上。起點取自 `twotone/rabi/len_rabi` 的第一讀擬合。回報 π 長度、Rabi 頻率（MHz）與 Wald 誤差、R、三項檢查，不提出 writeback。 |
+| `chain_t1` | `chain/t1` | 掃 π 後的等待，`max_delay_us`、`points`。每個 block 是 (π, 等待, 讀, 讀)。起點取自第一讀的單指數擬合，聯合擬合用 rate-equation 模型。回報 T1（振幅較大的 eigen time）、secondary time 與 Wald 誤差、三項檢查，不提出 writeback。 |
+| `chain_t2ramsey` | `chain/t2ramsey` | 掃 Ramsey 等待，`max_delay_us`、`points`、`detune_mhz`（第二個 π/2 的相位斜率）。每個 block 是 (π/2, 等待, 反相 π/2, 讀, 讀)。起點取自 `twotone/t2ramsey` 的第一讀擬合。回報 T2、fringe 頻率、第三態衰減時間與 Wald 誤差、R、三項檢查，不提出 writeback。 |
+| `chain_t2echo` | `chain/t2echo` | 掃總 echo 等待，`max_delay_us`（總長）、`points`。每個 block 是 (π/2, x/2, π, x/2, π/2, 讀, 讀)。起點取自 `twotone/t2echo` 的第一讀擬合。回報 T2 echo、第三態衰減時間與 Wald 誤差、三項檢查，不提出 writeback。 |
 | `twotone_flux_dep` | `twotone/flux_dep` | 必填 drive 的 `center_mhz`、`span_mhz`、`freq_points` 及 native flux device、unit、端點、點數。互動 picker 完成後詢問寫回 qubit flux 校準。 |
 
 有 writeback proposal 的流程先 Run、Analyze，再依各 recipe 的條件詢問寫回，只接受回答選定的候選，最後 Save。
