@@ -86,6 +86,107 @@ def moment_layout() -> Layout:
 LAYOUT = moment_layout()
 
 
+class ModelTangents(NamedTuple):
+    """Physical-parameter derivatives along P coordinate directions.
+
+    centres: Shape (P, 3, 2), IQ centre derivatives.
+    variance: Shape (P,), per-component noise variance derivatives.
+    retention: Shape (P, 3), retention derivatives.
+    landing: Shape (P, 3), normalised landing derivatives.
+    """
+
+    centres: FloatArray
+    variance: FloatArray
+    retention: FloatArray
+    landing: FloatArray
+
+
+def moment_mean_jacobian(model: ModelParameters, tangent: ModelTangents) -> FloatArray:
+    """Differentiate all 113 moments along the P supplied physical tangents.
+
+    Return shape (113, P). Differentiate stationary normalisation, transition
+    powers and Gaussian emissions by the product rule; no covariance is needed.
+    """
+    centres, variance, retention, landing = model
+    transition = np.diag(retention) + (1 - retention[:, None]) * landing
+    dtransition = (
+        tangent.retention[:, :, None] * (np.eye(3) - landing)
+        + (1 - retention[None, :, None]) * tangent.landing[:, None, :]
+    )
+    weights = landing / (1 - retention)
+    dweights = tangent.landing / (1 - retention) + weights * tangent.retention / (
+        1 - retention
+    )
+    population = weights / weights.sum()
+    dpopulation = (
+        dweights - population * dweights.sum(axis=1)[:, None]
+    ) / weights.sum()
+    powers = np.empty((16, 3, 3))
+    dpowers = np.zeros((16, len(tangent.variance), 3, 3))
+    powers[0] = np.eye(3)
+    for gap in range(1, 16):
+        powers[gap] = powers[gap - 1] @ transition
+        dpowers[gap] = dpowers[gap - 1] @ transition + powers[gap - 1] @ dtransition
+    # Saved moments have at most two factors at either time node.
+    gaussian = np.stack((np.ones((3, 2)), centres, centres**2 + variance))
+    dgaussian = np.stack(
+        (
+            np.zeros_like(tangent.centres),
+            tangent.centres,
+            2 * centres * tangent.centres + tangent.variance[:, None, None],
+        )
+    )
+    emissions = gaussian[:, None, :, 0] * gaussian[None, :, :, 1]
+    demissions = (
+        dgaussian[:, None, :, :, 0] * gaussian[None, :, None, :, 1]
+        + gaussian[:, None, None, :, 0] * dgaussian[None, :, :, :, 1]
+    )
+    return moment_jacobian_kernel(
+        LAYOUT, (powers, dpowers, emissions, demissions, population, dpopulation)
+    )
+
+
+@njit(cache=True)
+def moment_jacobian_kernel(
+    layout: Layout,
+    arrays: tuple[
+        FloatArray, FloatArray, FloatArray, FloatArray, FloatArray, FloatArray
+    ],
+) -> FloatArray:
+    """Contract moment products and their analytic forward tangents."""
+    times, components, degrees = layout
+    powers, dpowers, emissions, demissions, population, dpopulation = arrays
+    result = np.empty((MOMENT_COUNT, len(dpopulation)))
+    for column in range(MOMENT_COUNT):
+        weights, derivative = population.copy(), dpopulation.copy()
+        i, previous = 0, 0
+        while i < degrees[column]:
+            time = times[column, i]
+            if i > 0:
+                gap = time - previous
+                for coordinate in range(len(derivative)):
+                    derivative[coordinate] = (
+                        derivative[coordinate] @ powers[gap]
+                        + weights @ dpowers[gap, coordinate]
+                    )
+                weights = weights @ powers[gap]
+            n_i, n_q = 0, 0
+            while i < degrees[column] and times[column, i] == time:
+                if components[column, i] == 0:
+                    n_i += 1
+                else:
+                    n_q += 1
+                i += 1
+            derivative = (
+                derivative * emissions[n_i, n_q] + weights * demissions[n_i, n_q]
+            )
+            weights *= emissions[n_i, n_q]
+            previous = time
+        for coordinate in range(len(derivative)):
+            result[column, coordinate] = derivative[coordinate].sum()
+    return result
+
+
 def stationary_population(model: ModelParameters) -> FloatArray:
     """Stationary population of R_ij = λ_i δ_ij + (1-λ_i)ρ_j."""
     population = model.landing / (1 - model.retention)

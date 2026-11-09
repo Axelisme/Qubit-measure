@@ -6,8 +6,6 @@ weak priors on the third state moves the start once toward all saved moments;
 there is no iterative optimisation or choice of state count.
 """
 
-from collections.abc import Callable
-
 import numpy as np
 from scipy.special import expit
 
@@ -19,7 +17,9 @@ from ._model import (
     SAME_READ,
     FloatArray,
     ModelParameters,
+    ModelTangents,
     contiguous_covariance,
+    moment_mean_jacobian,
     moment_means,
 )
 
@@ -263,21 +263,61 @@ def physical_coordinates(coordinates: FloatArray) -> ModelParameters:
     )
 
 
-def central_difference(
-    function: Callable[[FloatArray], FloatArray], coordinates: FloatArray
-) -> FloatArray:
-    """Derivative of a vector function of free coordinates, shape (outputs, inputs).
+def clip_slope(values: FloatArray, lower: float, upper: float) -> FloatArray:
+    """Slope of clipping, with the mean of one-sided slopes at either bound."""
+    # At a kink use the mean slope to preserve the estimator's symmetric convention.
+    # Log/exp round trips can place an exact bound a few floating-point ulps away.
+    tolerance = 8 * np.finfo(float).eps
+    at_bound = np.isclose(values, lower, rtol=tolerance, atol=0) | np.isclose(
+        values, upper, rtol=tolerance, atol=0
+    )
+    return np.where(at_bound, 0.5, ((values > lower) & (values < upper)).astype(float))
 
-    Coordinate i steps by ±1e-6 · max(|coordinates[i]|, 1e-2).
+
+def physical_coordinate_jacobian(coordinates: FloatArray) -> ModelTangents:
+    """Physical tangents along the 12 free coordinates, including bounds.
+
+    Coordinates have the order documented by free_coordinates. Clip and floor
+    derivatives vanish outside their bounds and use mean one-sided slopes at
+    exact kinks. Landing tangents include both normalisations around the floor.
     """
-    columns = []
-    for i in range(len(coordinates)):
-        step = 1e-6 * max(abs(coordinates[i]), 1e-2)
-        up, down = coordinates.copy(), coordinates.copy()
-        up[i] += step
-        down[i] -= step
-        columns.append((function(up) - function(down)) / (2 * step))
-    return np.column_stack(columns)
+    basis = np.eye(FREE_COUNT)
+    raw_retention = expit(coordinates[FREE_LOGIT_RETENTION])
+    dretention = (
+        basis[:, FREE_LOGIT_RETENTION]
+        * raw_retention
+        * (1 - raw_retention)
+        * clip_slope(raw_retention, 0.01, 0.995)
+    )
+    ratios = np.array([0.0, *coordinates[FREE_LOG_LANDING_RATIOS]])
+    weights = np.exp(np.clip(ratios, -12, 12))
+    dweights = np.column_stack(
+        (np.zeros(FREE_COUNT), basis[:, FREE_LOG_LANDING_RATIOS])
+    )
+    dweights *= weights * clip_slope(ratios, -12, 12)
+    landing = weights / weights.sum()
+    dlanding = (dweights - landing * dweights.sum(axis=1)[:, None]) / weights.sum()
+    dlanding *= clip_slope(landing, 1e-5, np.inf)
+    floored = np.maximum(landing, 1e-5)
+    normalised = floored / floored.sum()
+    dlanding = (dlanding - normalised * dlanding.sum(axis=1)[:, None]) / floored.sum()
+    return ModelTangents(
+        centres=basis[:, FREE_CENTRES].reshape(FREE_COUNT, 3, 2),
+        variance=np.exp(coordinates[FREE_LOG_VARIANCE]) * basis[:, FREE_LOG_VARIANCE],
+        retention=dretention,
+        landing=dlanding,
+    )
+
+
+def moment_jacobian(coordinates: FloatArray) -> FloatArray:
+    """Analytic (113, 12) moment Jacobian in the estimator's bounded free space.
+
+    Coordinates follow free_coordinates. Propagate log variance, clipped logit
+    retention and floored log landing-ratio tangents through the exact model.
+    """
+    return moment_mean_jacobian(
+        physical_coordinates(coordinates), physical_coordinate_jacobian(coordinates)
+    )
 
 
 def one_step_fit(features: FloatArray, blocks: float) -> tuple[FloatArray, FloatArray]:
@@ -292,9 +332,7 @@ def one_step_fit(features: FloatArray, blocks: float) -> tuple[FloatArray, Float
     eigenvalues, vectors = np.linalg.eigh((covariance + covariance.T) / 2)
     whitener = vectors / np.sqrt(np.maximum(eigenvalues, eigenvalues.max() * 1e-14))
     coordinates = free_coordinates(start)
-    jacobian = central_difference(
-        lambda free: moment_means(physical_coordinates(free)), coordinates
-    )
+    jacobian = moment_jacobian(coordinates)
     derivative = whitener.T @ jacobian
     residual = whitener.T @ (features - moment_means(start))
     prior, scale = prior_coordinates(start)

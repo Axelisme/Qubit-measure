@@ -1,6 +1,6 @@
 # `zcu_tools.analysis` 模塊重點文檔
 
-**Last updated:** 2026-11-09，readout_metric 逐 setting 隔離擬合失敗
+**Last updated:** 2026-11-09，readout_metric 解析導數與逐 setting 失敗隔離
 
 **讀者：** framework-dev。分析核心、純數值工具與前端 adapter 的分工速查。
 
@@ -79,6 +79,7 @@ centers／radius／confusion matrix 有限時才提出校準。
 model-covariance weighted Gauss–Newton step 擬合三態。Covariance 包含跨 block
 相關，並以 32-step geometric tail 求和。模型假設每個 IQ component 有相同
 Gaussian noise variance，read transition 是逐態 retention 加共同 landing。
+Moment Jacobian 與 pair metric gradient 都用解析式，並傳遞有界 free coordinates 的鏈式法則。
 函式不讀 program、檔案或硬體。首次呼叫需要編譯 Numba kernels。
 
 每個 setting 單獨擬合。`ReadoutMetric.fits` 以 setting index 對應 `SettingFit`，

@@ -7,11 +7,12 @@ from numpy.typing import NDArray
 
 from ._estimator import (
     UnfittableMoments,
-    central_difference,
     one_step_fit,
     physical_coordinates,
 )
-from ._model import MOMENT_COUNT, FloatArray, ModelParameters, stationary_population
+from ._information import pair_information as _pair_information
+from ._information import pair_information_gradient as _pair_information_gradient
+from ._model import MOMENT_COUNT, FloatArray, stationary_population
 
 
 @dataclass(frozen=True)
@@ -146,8 +147,8 @@ def readout_metric(sums: ReadoutSums) -> ReadoutMetric:
 def _fit_setting(setting: float, features: FloatArray, blocks: float) -> SettingFit:
     """Fit one setting's averaged moments and evaluate its dominant-pair metric.
 
-    The error propagates the one-step sampling covariance through a
-    central-difference gradient of the pair metric. Raise UnfittableMoments
+    The error propagates the one-step sampling covariance through the analytic
+    gradient of the pair metric. Raise UnfittableMoments
     or LinAlgError when the moments cannot be fitted or the fit is non-finite.
     """
     coordinates, covariance = one_step_fit(features, blocks)
@@ -158,10 +159,7 @@ def _fit_setting(setting: float, features: FloatArray, blocks: float) -> Setting
     order = np.argsort(-population, kind="stable")
     pair = order[:2]
 
-    def information(free: FloatArray) -> FloatArray:
-        return np.array([_pair_information(physical_coordinates(free), pair)])
-
-    gradient = central_difference(information, coordinates)[0]
+    gradient = _pair_information_gradient(coordinates, pair)
     distance = np.linalg.norm(model.centres[pair[1]] - model.centres[pair[0]])
     fit = SettingFit(
         setting=setting,
@@ -175,38 +173,6 @@ def _fit_setting(setting: float, features: FloatArray, blocks: float) -> Setting
     if not np.isfinite([*numbers, *fit.retention]).all():
         raise UnfittableMoments("non-finite one-step readout result")
     return fit
-
-
-def _pair_information(model: ModelParameters, pair: NDArray[np.int64]) -> float:
-    """Two-state equal-population, symmetrised-landing RDR information.
-
-    pair holds the indices of the two states. The four centred IQ cross
-    moments form the observable; Gaussian read noise has the fitted variance
-    per component. The two retentions λ may differ.
-    """
-    centres = model.centres[pair]
-    variance = model.variance
-    retention = model.retention[pair]
-    uniform = np.full(2, 0.5)
-    transition = np.diag(retention) + (1 - retention[:, None]) * uniform
-    exchange = np.array([[-1.0, 1.0], [1.0, -1.0]])
-    mean_first, mean_second = uniform @ centres, (uniform @ transition) @ centres
-    population_covariance = np.diag(uniform) - np.outer(uniform, uniform)
-    gradient = (
-        centres.T @ population_covariance @ transition @ exchange @ centres
-    ).ravel()
-    cross_mean = np.zeros((2, 2))
-    fourth = np.zeros((4, 4))
-    for first in range(2):
-        for second in range(2):
-            probability = uniform[first] * transition[first, second]
-            left, right = centres[first] - mean_first, centres[second] - mean_second
-            cross_mean += probability * np.outer(left, right)
-            left_second = np.outer(left, left) + variance * np.eye(2)
-            right_second = np.outer(right, right) + variance * np.eye(2)
-            fourth += probability * np.kron(left_second, right_second)
-    covariance = fourth - np.outer(cross_mean.ravel(), cross_mean.ravel())
-    return float(gradient @ np.linalg.solve(covariance, gradient))
 
 
 def _validate_sums(sums: ReadoutSums) -> None:
