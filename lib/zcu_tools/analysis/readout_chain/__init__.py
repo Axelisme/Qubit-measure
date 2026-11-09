@@ -8,6 +8,7 @@ from .metric import (
     SettingFit,
     readout_metric,
 )
+from .rpi import RPiAnalysis, RPiSums, rpi_analysis
 from .sweep import SweepCurve, SweepSums, sweep_curve
 
 __all__ = [
@@ -20,4 +21,7 @@ __all__ = [
     "SettingFit",
     "SettingFailure",
     "readout_metric",
+    "RPiSums",
+    "RPiAnalysis",
+    "rpi_analysis",
 ]

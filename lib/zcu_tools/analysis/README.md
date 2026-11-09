@@ -1,6 +1,6 @@
 # `zcu_tools.analysis` 模塊重點文檔
 
-**Last updated:** 2026-11-09，readout_metric bounded fit、no-signal test 與 all-lag information
+**Last updated:** 2026-11-10，stationary Rπ saved-summary analysis
 
 **讀者：** framework-dev。分析核心、純數值工具與前端 adapter 的分工速查。
 
@@ -112,6 +112,24 @@ metric 越大表示 information 越多。`separation` 是這兩態的 d/sigma，
 delta-method sampling error，不涵蓋 fit bias。Start 看不到第三態時（正交軸沒有
 lag covariance 或 landing 不超過 1.5e-3），把第三態移到固定 prior；
 此時個別 λ 可能不可識別。
+
+## Stationary Rπ 讀出調參
+
+`readout_chain.RPiSums` 保存單一 setting 的 18 個 moment sums、實際 read/pair counts
+及 segment 長度和次數。三種 sweep 使用相同摘要，不沿用無 π 的熱態格式。
+`rpi_analysis(sums)` 以 completed segments 合併後的 sums/counts，用固定 lag 1..15
+計算 q、Q_eff、交替振幅及每個 quadrature 的 σ²。Caller 在呼叫前合併 rounds，
+不平均 round estimates。型別與函式的 docstring 定義欄位順序、shape、單位及失敗語義。
+
+`RPiAnalysis` 同時回報 T、V₀、r₀ 與 gate 狀態。白噪聲 V₀ 包含非零 IQ mean、
+有限 segment 端點及不等 pair counts，μ 和 r₀ 使用同點 plug-in 值。
+Gate 使用 `T−3.719√V₀ > 0.0224r₀`，只代表名目白噪聲下可觀察的最小交替效應。
+它不證明 qubit 身分、不排除 leakage，也不保證相關電子學雜訊下的誤判率。
+
+有效點提供交替對比分數 `score=(T−3.719√V₀)/r₀`，供 caller 在有效點中取最大值。
+無效點保留原因和可計算的診斷，`score=None`，不提供 fallback 排名。
+分數不使用估出的 Q_eff 或無限相關尾。它是啟發式效用，高 SNR 時可能偏好比資訊
+最佳點更強的讀出。Q_eff 包含 π 誤差，σ² 不是標準誤，慢模式扣除不是一般 leakage 校正。
 
 ## Readout QND 指標
 
