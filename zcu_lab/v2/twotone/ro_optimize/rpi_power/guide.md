@@ -8,17 +8,18 @@ After changing the parameter source, use Reset to recapture initial values. Refr
 
 ## Behavior
 
-`twotone/ro_optimize/rpi_power` sweeps the readout gain with a calibrated π pulse. At each gain it plays one continuous chain `...R π R π...`, where R is the readout and π is the same fixed pulse at every gain.
+`twotone/ro_optimize/rpi_power` sweeps the readout gain with a calibrated π pulse. At each gain it plays one chain `...R π R π...` with no reset or relax delay, where R is the readout and π is the same fixed pulse at every gain.
 Use it next to `twotone/ro_optimize/power` and `twotone/ro_optimize/chain_power`. The first needs a π pulse and relax delays, the second uses no π pulse, and this one alternates reads with π pulses. Each is a separate experiment.
 
-One rep is 16 R-π pairs. All Reps of one gain run back to back with relax delay 0, and then the next gain starts. One round of one gain is one chain of Reps × 16 reads, and lags up to 15 run across reps.
+One rep is 16 R-π pairs. All Reps of one gain run before the next gain starts, with relax delay 0. One round of one gain is one chain of Reps × 16 reads, and lags up to 15 run across reps.
 Each round starts a new chain at every gain. The analysis never pairs reads across a round or gain boundary.
 The experiment fixes the 16 pairs per rep and the zero relax delay. The Form does not offer them.
 
-The readout's `post_delay` is the only wait between R and π. Each π starts `post_delay` us after the readout generator pulse ends. The wait counts from the generator end and not from the ADC window end, so a π can play while the ADC window is still open. The next readout starts when the π ends.
+The readout's `post_delay` is the only wait between R and π. Each π starts `post_delay` us after the readout generator pulse ends. The wait counts from the generator end and not from the ADC window end, so a π can play while the ADC window is still open. Inside a rep, the next readout starts when the π ends.
 The Form has no separate wait field. Change `post_delay` in the readout module to change this wait.
 
-At the end of each rep the program waits for the last ADC window to close before it starts the next rep. This wait exists only when the ADC window ends after the last π, and it is not a relax delay. In an offline build with a 0.5 us readout, 0.05 us post-delay, 0.04 us π, 0.4 us trigger offset and 0.4 us ADC window, it lasted 0.21 us once per 16 pairs. The chain is therefore not perfectly periodic at rep boundaries.
+Rep boundaries have different timing. Each rep ends with the shot closure, which waits for every ADC window to close, and the next rep starts after it. When the last ADC window closes after the last π ends, the step across a rep boundary is longer than a step inside a rep. The closure is not a relax delay, and the Form has no field for it. In an offline build with a 0.5 us readout, 0.05 us post-delay, 0.04 us π, 0.4 us trigger offset and 0.4 us ADC window, the closure added 0.21 us once per 16 pairs.
+Reads are therefore not guaranteed to be evenly spaced. The analysis still treats the reps of one gain and round as one chain, with lags across reps.
 If one ADC window would overlap the next, Run fails when the program builds and names the ADC overlap. Shorten the ADC window or lengthen the readout or its post-delay.
 
 Run does not reset the qubit, discard reads, add a warmup or calibrate the π pulse.
@@ -123,7 +124,8 @@ The estimates assume a stationary two-state chain. Several things can bias them:
 - Starting population. A chain starts from whatever state the previous gain or round left. No reset or warmup removes the start of the chain, and its reads count like all others.
 - Third state. Population outside the two alternating states can bias every estimate. The analysis removes a slow mode as an approximation, which is not a leakage correction. This experiment does not identify general leakage.
 - Large IQ offsets and π errors can bias the estimates.
-- A physical break in the chain that leaves no trace in the IQ data cannot be detected. Each finished round and gain counts as one continuous chain, and no hardware run has verified this continuity.
+- Longer steps at rep boundaries. The estimates assume the same retention at every step. A rep boundary that waits for the ADC window is a longer step, so its retention can differ. The analysis does not correct or exclude this, and no one has measured the size of the resulting bias.
+- A physical break in the chain that leaves no trace in the IQ data cannot be detected. Each finished round and gain counts as one chain, and no hardware run has verified that it is unbroken.
 
 The offline probe of this experiment checks the program and the data contract with synthetic data. It does not calibrate hardware and it does not validate the physical model.
 

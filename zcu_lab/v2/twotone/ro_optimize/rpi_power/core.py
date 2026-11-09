@@ -1,4 +1,4 @@
-"""Readout gain sweep of a continuous ...R π R π... chain with a calibrated π.
+"""Readout gain sweep of an ...R π R π... chain with a calibrated π.
 
 Each gain is one long chain of readout R and fixed π pulses, with no reset or
 relax delay between reps. readout_chain.rpi_analysis gives every gain an
@@ -160,7 +160,7 @@ def restore_result(data: GroupedLoadData[Any]) -> RPiPowerResult:
 
 
 class RPiPowerExp(Experiment[RPiPowerResult, RPiPowerCfg]):
-    """Measure a continuous R-pi chain at each readout gain and score each gain."""
+    """Measure an R-pi chain at each readout gain and score each gain."""
 
     # gains are in a.u. in memory and on disk; records keep the rpi_sums layout.
     AXES_SPEC: ClassVar[GroupedAxesSpec[RPiPowerResult, RPiPowerCfg]] = GroupedAxesSpec(
@@ -186,14 +186,21 @@ class RPiPowerExp(Experiment[RPiPowerResult, RPiPowerCfg]):
     )
 
     def run(self, cfg: RPiPowerCfg, *, context: RunContext) -> RPiPowerResult:
-        """Read a continuous R-pi chain at each readout gain and keep its sums.
+        """Read an R-pi chain at each readout gain and keep its sums.
 
-        One rep is 16 pairs of cfg.readout at the swept gain and cfg.pi_pulse.
-        All cfg.reps reps of one gain run back to back with no reset or relax
-        delay, then the next gain starts. Each pi starts cfg.readout.post_delay
-        us after the readout generator pulse ends, even when the ADC window is
-        still open; the next readout starts when the pi ends. cfg.pi_pulse does
-        not change with the sweep. Each round starts a new chain per gain.
+        One rep is 16 pairs of cfg.readout at the swept gain and cfg.pi_pulse,
+        which does not change with the sweep. All cfg.reps reps of one gain run
+        before the next gain, with no reset or relax delay. Each round starts a
+        new chain per gain.
+
+        Inside a rep, each pi starts cfg.readout.post_delay us after the readout
+        generator pulse ends, even when the ADC window is still open, and the
+        next readout starts when the pi ends. At a rep boundary the shot closure
+        first waits for the last ADC window to close, so that step can be longer
+        and reads are not guaranteed to be evenly spaced. This wait is not a
+        relax delay. The analysis still treats the reps of one gain and round
+        as one chain and assumes the same retention at every step. It neither
+        corrects nor quantifies the bias from this wait.
 
         After each round the live plot shows the score of each valid gain, from
         all finished rounds. Return the sums of all finished rounds; gains are
@@ -232,8 +239,9 @@ class RPiPowerExp(Experiment[RPiPowerResult, RPiPowerCfg]):
 
         # 2. The chain is one fixed Repeat of R then pi; the gain sweep is outside it.
         with Schedule(record_sums, scope=context.scope) as sched:
-            # reps_innermost: all reps of one gain run back to back before the next.
-            # relax_delay 0: the next rep follows at once, so the reps form one chain.
+            # reps_innermost: all reps of one gain run before the next gain.
+            # relax_delay 0: no added wait between reps. The shot closure can still
+            # wait for the last ADC window, and the reps remain one chain.
             builder = TimelineBuilder(
                 context.soccfg, reps=cfg.reps, relax_delay=0.0, reps_innermost=True
             )
