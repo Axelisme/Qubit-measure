@@ -235,6 +235,7 @@ def _pruned_path_mask(
     return keep, discarded
 
 
+@njit(nogil=True, cache=True)
 def _validate_path_records(indices: NDArray[np.int64], dimension: int) -> None:
     """Validate (a,b,c,r,s) fields without changing the path records.
 
@@ -243,18 +244,34 @@ def _validate_path_records(indices: NDArray[np.int64], dimension: int) -> None:
     for second order. r is +/-1; s is 0 for first order and +/-1 for second order.
     Return None when all records are valid, otherwise raise ValueError.
     """
-    a, b, c, r, s = indices.T
-    if (
-        np.any(a < 0)
-        or np.any(a >= dimension)
-        or np.any(b < 0)
-        or np.any(b >= dimension)
-        or np.any(c < -1)
-        or np.any(c >= dimension)
-        or np.any(abs(r) != 1)
-        or np.any(np.where(c == -1, s != 0, abs(s) != 1))
-    ):
-        raise ValueError("Dyson pruning received an invalid path record")
+    # Scan each record once instead of allocating a mask for every field.
+    for path in range(len(indices)):
+        a, b, c, r, s = indices[path]
+        if (
+            a < 0
+            or a >= dimension
+            or b < 0
+            or b >= dimension
+            or c < -1
+            or c >= dimension
+            or abs(r) != 1
+            or (s != 0 if c == -1 else abs(s) != 1)
+        ):
+            raise ValueError("Dyson pruning received an invalid path record")
+
+
+@njit(nogil=True, cache=True)
+def _path_group_bounds(
+    groups: NDArray[np.int64], bounds: NDArray[np.float64]
+) -> NDArray[np.float64]:
+    """Gather each group's bound without partner-index or selection temporaries."""
+    group_bounds = np.empty(len(groups), dtype=np.float64)
+    for group in range(len(groups)):
+        path, partner = groups[group]
+        group_bounds[group] = bounds[path] + (
+            0.0 if path == partner else bounds[partner]
+        )
+    return group_bounds
 
 
 def prune_dyson_paths(
@@ -322,18 +339,15 @@ def prune_dyson_paths(
         growth = np.exp(
             max(0.0, float(np.max(eigenvalues.real))) * extent.max_duration_ns
         )
-        bounds = (
-            abs(coefficients)
-            * np.where(c == -1, strength, strength**2 / 2)
-            * growth
-            * pruning[a]
-        )
+        # Own one bound buffer and preserve the original multiplication order.
+        bounds = abs(coefficients)
+        bounds *= np.where(c == -1, strength, strength**2 / 2)
+        bounds *= growth
+        bounds *= pruning[a]
     if not np.isfinite(bounds).all():
         raise ValueError("Dyson pruning bounds must be finite")
     groups = _paired_path_groups(indices, conjugates)
-    group_bounds = bounds[groups[:, 0]] + np.where(
-        groups[:, 0] == groups[:, 1], 0.0, bounds[groups[:, 1]]
-    )
+    group_bounds = _path_group_bounds(groups, bounds)
     keep, discarded = _pruned_path_mask(
         groups,
         group_bounds,
