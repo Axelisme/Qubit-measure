@@ -59,10 +59,12 @@ class RPiFreqCfg(ConfigBase):
     """Readout and pi modules, the readout frequency sweep and the averaging counts.
 
     readout: Readout module. Run replaces its generator and ADC frequency with
-        the sweep; its post_delay in us is the only wait between the readout
-        generator end and the pi.
-    pi_pulse: Calibrated pi pulse, the same at every frequency.
-    freq: Readout frequency sweep in MHz.
+        the sweep. The wait between the readout generator end and the pi is its
+        post_delay plus the pre_delay of pi_pulse, both in us.
+    pi_pulse: Calibrated pi pulse, the same at every frequency. Run keeps all of
+        its settings; its pre_delay in us is usually 0.
+    freq: Readout frequency sweep in MHz, absolute RF when readout.mixer_freq is
+        set and the DDS frequency otherwise.
     reps: Blocks of 16 R-pi per frequency in each round, at least 1.
     rounds: Software rounds, at least 1.
     """
@@ -97,7 +99,8 @@ class RPiFreqCfg(ConfigBase):
 class RPiFreqResult:
     """Pooled R-pi sums of every readout frequency.
 
-    freqs: Readout frequency (F,) in MHz, in sweep order.
+    freqs: Readout frequency (F,) in MHz, in sweep order, absolute RF when the
+        readout sets mixer_freq.
     records: Float64 (F, 35), one additive rpi_sums record per frequency, summed
         over finished rounds. Read it only through RPiSums.from_processor.
     """
@@ -169,22 +172,28 @@ class RPiFreqExp(Experiment[RPiFreqResult, RPiFreqCfg]):
         before the next frequency, with no reset or relax delay. Each round
         starts a new chain per frequency.
 
-        Inside a rep, each pi starts cfg.readout.post_delay us after the readout
-        generator pulse ends, even when the ADC window is still open, and the
-        next readout starts when the pi ends. At a rep boundary the shot closure
-        first waits for the last ADC window to close, so that step can be longer
-        and reads are not guaranteed to be evenly spaced. This wait is not a
-        relax delay. The analysis still treats the reps of one frequency and
-        round as one chain and assumes the same retention at every step. It
-        neither corrects nor quantifies the bias from this wait.
+        Inside a rep, each pi starts cfg.readout.post_delay plus
+        cfg.pi_pulse.pre_delay us after the readout generator pulse ends, even
+        when the ADC window is still open. The pi pre_delay is usually 0, and
+        Run keeps it as set. The next readout starts cfg.pi_pulse.post_delay
+        plus cfg.readout.pre_delay us after the pi ends, both usually 0. At a
+        rep boundary the shot closure first waits for the last ADC window to
+        close, so that step can be longer and reads are not guaranteed to be
+        evenly spaced. This wait is not a relax delay. The analysis still
+        treats the reps of one frequency and round as one chain and assumes the
+        same retention at every step. It neither corrects nor quantifies the
+        bias from this wait.
 
         After each round the live plot shows the score of each valid frequency,
         from all finished rounds. Return the sums of all finished rounds;
-        frequencies are in MHz, rounded to the common generator and ADC grid. A
-        stop keeps finished rounds. A stop before the first round raises
-        RuntimeError. ADC windows that would overlap raise ValueError when the
-        program builds. The sums cannot reveal a physical break in the chain
-        that does not appear in the IQ data.
+        frequencies are in MHz, rounded to the common generator and ADC grid.
+        With cfg.readout.mixer_freq set, cfg.freq and the returned frequencies
+        are absolute RF. An interpolating generator raises RuntimeError for a
+        frequency outside its DDS range; with a mixer that range applies to RF
+        minus the rounded mixer frequency. A stop keeps finished rounds. A stop
+        before the first round raises RuntimeError. ADC windows that would
+        overlap raise ValueError when the program builds. The sums cannot reveal
+        a physical break in the chain that does not appear in the IQ data.
         """
         # 1. Frequency axis on the common generator and ADC grid, and the live plot.
         freqs = sweep2array(
@@ -194,6 +203,7 @@ class RPiFreqExp(Experiment[RPiFreqResult, RPiFreqCfg]):
                 "soccfg": context.soccfg,
                 "gen_ch": cfg.readout.gen_ch,
                 "ro_ch": cfg.readout.ro_ch,
+                "mixer_freq": cfg.readout.mixer_freq,
             },
         )
 

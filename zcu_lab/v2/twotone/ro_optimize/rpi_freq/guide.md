@@ -12,13 +12,14 @@ After changing the parameter source, use Reset to recapture initial values. Refr
 Use it next to `twotone/ro_optimize/freq` and `twotone/ro_optimize/chain_freq`. The first compares g and e prepared with a π pulse, the second uses no π pulse and waits for thermal relaxation between shots, and this one alternates reads with π pulses. Each is a separate experiment.
 
 The sweep sets the generator and ADC frequency of the readout together. The π frequency, gain and length do not follow the sweep, and neither do the readout gain, length or `post_delay`.
+With `mixer_freq` set on the readout, the sweep and the saved frequency axis are absolute RF in MHz, on the common generator and ADC grid. The DDS plays RF minus the rounded mixer frequency. Without `mixer_freq`, the values are the DDS frequency. An interpolating generator rejects a frequency outside its DDS range and Run fails before acquisition. With a mixer, that range applies to RF minus the rounded mixer frequency.
 
 One rep is 16 R-π pairs. All Reps of one frequency run before the next frequency starts, with relax delay 0. One round of one frequency is one chain of Reps × 16 reads, and lags up to 15 run across reps.
 Each round starts a new chain at every frequency. The analysis never pairs reads across a round or frequency boundary.
 The experiment fixes the 16 pairs per rep and the zero relax delay. The Form does not offer them.
 
-The readout's `post_delay` is the only wait between R and π. Each π starts `post_delay` us after the readout generator pulse ends. The wait counts from the generator end and not from the ADC window end, so a π can play while the ADC window is still open. Inside a rep, the next readout starts when the π ends.
-The Form has no separate wait field. Change `post_delay` in the readout module to change this wait.
+The wait from R to π is the readout's `post_delay` plus the π pulse's own `pre_delay`, which is usually 0. With `post_delay` 0.05 us and a π `pre_delay` of 0.02 us, each π starts 0.07 us after the readout generator pulse ends, and the wait is the same at every frequency. The wait counts from the generator end and not from the ADC window end, so a π can play while the ADC window is still open. Inside a rep, the next readout starts after the π ends, later only by the π pulse's `post_delay` and the readout's `pre_delay`, which are usually 0.
+The Form has no separate wait field. Change `post_delay` in the readout module to change this wait. Run keeps every π setting, including a nonzero `pre_delay`.
 
 Rep boundaries have different timing. Each rep ends with the shot closure, which waits for every ADC window to close, and the next rep starts after it. When the last ADC window closes after the last π ends, the step across a rep boundary is longer than a step inside a rep. The closure is not a relax delay, and the Form has no field for it. In an offline build with a 0.5 us readout, 0.05 us post-delay, 0.04 us π, 0.4 us trigger offset and 0.4 us ADC window, the closure added 0.21 us once per 16 pairs.
 Reads are therefore not guaranteed to be evenly spaced. The analysis still treats the reps of one frequency and round as one chain, with lags across reps.

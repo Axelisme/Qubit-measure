@@ -62,9 +62,11 @@ class RPiLengthCfg(ConfigBase):
     """Readout and pi modules, the ADC window sweep and the averaging counts.
 
     readout: Readout module. Run replaces its ADC window with the sweep and its
-        pulse length with that window plus 0.11 us. Its post_delay in us is the
-        only wait between the readout generator end and the pi.
-    pi_pulse: Calibrated pi pulse, the same at every window.
+        pulse length with that window plus 0.11 us. The wait between the readout
+        generator end and the pi is its post_delay plus the pre_delay of
+        pi_pulse, both in us.
+    pi_pulse: Calibrated pi pulse, the same at every window. Run keeps all of its
+        settings; its pre_delay in us is usually 0.
     length: ADC window sweep in us.
     reps: Blocks of 16 R-pi per window in each round, at least 1.
     rounds: Software rounds, at least 1.
@@ -187,14 +189,17 @@ class RPiLengthExp(Experiment[RPiLengthResult, RPiLengthCfg]):
         window, with no reset or relax delay. Each round starts a new chain per
         window.
 
-        Inside a rep, each pi starts cfg.readout.post_delay us after the readout
-        generator pulse ends, even when the ADC window is still open, and the
-        next readout starts when the pi ends. At a rep boundary the shot closure
-        first waits for the last ADC window to close, so that step can be longer
-        and reads are not guaranteed to be evenly spaced. This wait is not a
-        relax delay. The analysis still treats the reps of one window and round
-        as one chain and assumes the same retention at every step. It neither
-        corrects nor quantifies the bias from this wait.
+        Inside a rep, each pi starts cfg.readout.post_delay plus
+        cfg.pi_pulse.pre_delay us after the readout generator pulse ends, even
+        when the ADC window is still open. The pi pre_delay is usually 0, and
+        Run keeps it as set. The next readout starts cfg.pi_pulse.post_delay
+        plus cfg.readout.pre_delay us after the pi ends, both usually 0. At a
+        rep boundary the shot closure first waits for the last ADC window to
+        close, so that step can be longer and reads are not guaranteed to be
+        evenly spaced. This wait is not a relax delay. The analysis still
+        treats the reps of one window and round as one chain and assumes the
+        same retention at every step. It neither corrects nor quantifies the
+        bias from this wait.
 
         After each round the live plot shows the score of each valid window with
         a finished round, from all finished rounds. Return the sums of the
