@@ -6,7 +6,6 @@ alternating-contrast score and its invalid reasons. The best gain is the valid
 gain with the largest score.
 """
 
-from collections import Counter
 from dataclasses import dataclass
 from typing import Annotated, Any, ClassVar
 
@@ -14,15 +13,13 @@ import numpy as np
 from matplotlib.artist import Artist
 from numpy.typing import NDArray
 from pydantic import Field
-from zcu_tools.analysis.readout_chain import RPiAnalysis, RPiSums, rpi_analysis
+from zcu_tools.analysis.readout_chain import RPiAnalysis
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
     Experiment,
     GroupedAxesSpec,
     GroupedLoadData,
     VariableAxisSpec,
-    VariableSpec,
-    VariableZSpec,
 )
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
@@ -38,16 +35,24 @@ from zcu_tools.program.v2 import (
 )
 
 from zcu_lab.v2.support import live_line
+from zcu_lab.v2.twotone.ro_optimize._rpi_common import (
+    READS_PER_REP,
+    RECORD_COLUMNS,
+    SCORE_LABEL,
+    SweepAxis,
+    analyze_records,
+    best_index,
+    draw_score_figure,
+    fix_sweep_xlim,
+    invalid_reason_counts,
+    not_plotted_title,
+    records_variable,
+    valid_values,
+)
 
-# rpi_sums needs one fixed Repeat of at least 16 reads. Its count does not cut the
-# chain: lags up to 15 run across reps.
-READS_PER_REP = 16
-
-# Columns of one rpi_sums record. Only RPiSums.from_processor reads their meaning.
-RECORD_COLUMNS = 35
-
-GAIN_LABEL = "Readout gain (a.u.)"
-SCORE_LABEL = "Alternating-contrast score"
+GAIN_AXIS = SweepAxis(
+    setting_name="gain", label="Readout gain (a.u.)", unit="a.u.", digits=5
+)
 
 
 class RPiPowerCfg(ConfigBase):
@@ -123,36 +128,6 @@ class RPiPowerAnalysis:
     invalid_reasons: dict[str, int]
 
 
-def analyze_records(records: NDArray[np.float64]) -> list[RPiAnalysis]:
-    """Run the public R-pi analyzer on each row of float64 (F, 35) records."""
-    return [rpi_analysis(RPiSums.from_processor(record)) for record in records]
-
-
-def valid_values(analyses: list[RPiAnalysis], name: str) -> NDArray[np.float64]:
-    """Return RPiAnalysis field name per gain, NaN at every invalid gain.
-
-    NaN leaves a gap in a line plot and nanargmax skips it, so invalid gains are
-    neither drawn nor ranked.
-    """
-    return np.array(
-        [
-            getattr(analysis, name) if analysis.valid else np.nan
-            for analysis in analyses
-        ],
-        dtype=np.float64,
-    )
-
-
-def not_plotted_title(analyses: list[RPiAnalysis]) -> str:
-    """Count the invalid gains left off the curves; empty when there are none."""
-    invalid = sum(not analysis.valid for analysis in analyses)
-    if invalid == 0:
-        return ""
-    if invalid == len(analyses):
-        return f"Not plotted: {invalid} invalid; no valid gain to select"
-    return f"Not plotted: {invalid} invalid"
-
-
 def restore_result(data: GroupedLoadData[Any]) -> RPiPowerResult:
     """Rebuild the gains and records from the saved "records" variable."""
     records = data.variable("records")
@@ -165,17 +140,8 @@ class RPiPowerExp(Experiment[RPiPowerResult, RPiPowerCfg]):
     # gains are in a.u. in memory and on disk; records keep the rpi_sums layout.
     AXES_SPEC: ClassVar[GroupedAxesSpec[RPiPowerResult, RPiPowerCfg]] = GroupedAxesSpec(
         variables=(
-            VariableSpec(
-                "records",
-                (
-                    VariableAxisSpec(
-                        label="Record column",
-                        unit="",
-                        values=tuple(range(RECORD_COLUMNS)),
-                    ),
-                    VariableAxisSpec(label="Gain", unit="a.u.", field_name="gains"),
-                ),
-                VariableZSpec("records", label="R-pi sums", unit="a.u."),
+            records_variable(
+                VariableAxisSpec(label="Gain", unit="a.u.", field_name="gains")
             ),
         ),
         result_type=RPiPowerResult,
@@ -215,17 +181,14 @@ class RPiPowerExp(Experiment[RPiPowerResult, RPiPowerCfg]):
         )
 
         fig, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel=GAIN_LABEL, ylabel=SCORE_LABEL)
+        ax.set(xlabel=GAIN_AXIS.label, ylabel=SCORE_LABEL)
         ax.grid(True)
-        # Fix the axis to the sweep: rounds where few gains are valid must not shrink it.
-        margin = 0.05 * float(np.ptp(gains))
-        if margin > 0:
-            ax.set_xlim(float(gains.min()) - margin, float(gains.max()) + margin)
+        fix_sweep_xlim(ax, gains)
         viewer = live_line(ax)
 
         @context.plots.on_plot_thread
         def draw(analyses: list[RPiAnalysis]) -> tuple[Artist, ...]:
-            ax.set_title(not_plotted_title(analyses))
+            ax.set_title(not_plotted_title(analyses, GAIN_AXIS.setting_name))
             return (*viewer.set(gains, valid_values(analyses, "score")), ax.title)
 
         def update(records: NDArray[np.float64]) -> None:
@@ -286,62 +249,14 @@ class RPiPowerExp(Experiment[RPiPowerResult, RPiPowerCfg]):
         del options  # This analysis has no configurable options.
         gains = source.result.gains
         analyses = analyze_records(source.result.records)
-        scores = valid_values(analyses, "score")
+        best = best_index(analyses)
 
-        best_gain, best = None, None
-        if not np.isnan(scores).all():
-            index = int(np.nanargmax(scores))
-            best_gain, best = float(gains[index]), analyses[index]
-
-        fig, _ = plots.subplots(3, 2, num="score", sharex=True, figsize=(11, 8))
-        ax_score, ax_reasons, ax_q_eff, ax_q, ax_amplitude, ax_noise = fig.axes
-
-        ax_score.plot(gains, scores, "o-", color="C0")
-        ax_score.set_ylabel(SCORE_LABEL)
-        for ax, name, ylabel in (
-            (ax_q_eff, "q_eff", "Q_eff (includes π error)"),
-            (ax_q, "q", "q = a / σ²"),
-            (ax_amplitude, "amplitude", "Amplitude a (ADC units²)"),
-            (ax_noise, "noise_variance", "Noise variance σ² (ADC units²)"),
-        ):
-            ax.plot(gains, valid_values(analyses, name), "o-")
-            ax.set_ylabel(ylabel)
-
-        # One row per reason that occurred: a mark at each gain reporting it.
-        reasons = Counter(
-            reason for analysis in analyses for reason in analysis.invalid_reasons
-        )
-        rows = sorted(reasons)
-        for row, reason in enumerate(rows):
-            rejected = [
-                gain
-                for gain, analysis in zip(gains, analyses, strict=True)
-                if reason in analysis.invalid_reasons
-            ]
-            ax_reasons.plot(rejected, [row] * len(rejected), "x", color="C3")
-        ax_reasons.set_yticks(range(len(rows)), rows)
-        ax_reasons.set_ylim(-0.5, max(len(rows), 1) - 0.5)
-        ax_reasons.set_title("Invalid reason per gain")
-
-        for ax in fig.axes:
-            ax.grid(True)
-            if best_gain is not None:
-                ax.axvline(best_gain, color="r", ls="--")
-        if best_gain is not None:
-            ax_score.legend(
-                [ax_score.lines[-1]], [f"largest score = {best_gain:.5g} a.u."]
-            )
-        ax_amplitude.set_xlabel(GAIN_LABEL)
-        ax_noise.set_xlabel(GAIN_LABEL)
-        title = not_plotted_title(analyses)
-        if title:
-            fig.suptitle(title)
-        fig.tight_layout()
+        draw_score_figure(plots, gains, analyses, best, GAIN_AXIS)
 
         return RPiPowerAnalysis(
-            best_gain=best_gain,
-            best=best,
+            best_gain=None if best is None else float(gains[best]),
+            best=None if best is None else analyses[best],
             gain_count=len(analyses),
             not_plotted=sum(not analysis.valid for analysis in analyses),
-            invalid_reasons=dict(reasons),
+            invalid_reasons=invalid_reason_counts(analyses),
         )

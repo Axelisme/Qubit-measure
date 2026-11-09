@@ -195,6 +195,9 @@ from zcu_lab.v2.twotone.ro_optimize.length.gui import (
 from zcu_lab.v2.twotone.ro_optimize.power.gui import (
     DEFINITION as RO_OPT_POWER_DEFINITION,
 )
+from zcu_lab.v2.twotone.ro_optimize.rpi_freq.gui import (
+    DEFINITION as RO_OPT_RPI_FREQ_DEFINITION,
+)
 from zcu_lab.v2.twotone.ro_optimize.rpi_power.gui import (
     DEFINITION as RO_OPT_RPI_POWER_DEFINITION,
 )
@@ -265,6 +268,7 @@ ADAPTERS: dict[str, object] = {
     "twotone/ro_optimize/chain_freq": RO_OPT_CHAIN_FREQ_DEFINITION,
     "twotone/ro_optimize/chain_length": RO_OPT_CHAIN_LENGTH_DEFINITION,
     "twotone/ro_optimize/rpi_power": RO_OPT_RPI_POWER_DEFINITION,
+    "twotone/ro_optimize/rpi_freq": RO_OPT_RPI_FREQ_DEFINITION,
     "twotone/reset/single_tone/freq": SINGLE_TONE_FREQ_DEFINITION,
     "twotone/reset/single_tone/length": SINGLE_TONE_LENGTH_DEFINITION,
     "twotone/reset/dual_tone/freq": DUAL_TONE_FREQ_DEFINITION,
