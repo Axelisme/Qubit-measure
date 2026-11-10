@@ -313,9 +313,11 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
     def add_table_sweep(self, name: str, values: Sequence[float]) -> TableParam:
         """Declare a top-level lookup loop and return its physical values.
 
-        Call in _initialize. values must be a nonempty finite sequence in the
-        consuming parameter's units. Loops are outer-to-inner in call order
-        after reps. Invalid values or duplicate names raise ValueError.
+        Call in _initialize. values must be a nonempty finite sequence of
+        built-in int/float values in the consuming parameter's units. Other
+        element types raise TypeError naming the value. Loops are outer-to-inner
+        in call order after reps. Empty/nonfinite values or duplicate names
+        raise ValueError.
         """
         param = TableParam(name, values)
         if any(loop.name == name for loop in self.sweep_loops):
