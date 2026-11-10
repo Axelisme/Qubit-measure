@@ -1,6 +1,6 @@
 # program/v2
 
-**Last updated:** 2026-11-10，thermal-chain 與 K-cycle 讀出鏈
+**Last updated:** 2026-11-10，thermal-chain、K-cycle 與 Rπ 讀出鏈
 
 **讀者：** lab-author、framework-dev、agent。查找 V2 program 公開 API、型別契約與編譯規則的 owner。
 
@@ -137,8 +137,14 @@ Build 後先呼叫 `set_reads_per_shot(16)`，再建立 processor。每點回傳
 Sums 保留 R1..R16 的 I/Q means、R1 self moments、全部 15 個相鄰對與 (R1,R3)、(R1,R4)、(R1,R5)。
 每對保留 II′、IQ′、QI′、QQ′ 四個 components，processor 不套分析權重。
 Caller 安排熱平衡等待與沒有 drive 的連讀；processor 檢查 owner、read 數與同 ADC 沒有其他 triggers，不檢查 drive 或 timing 內容。
-四種 processor 共用 `readout_labels` 的 label 規則：pulse 與 mux readout owners 一起判定唯一性，宣告的 read 數由 `validate_declared_reads` 檢查。
 `chain_cycle_sums(prog, read)` 處理每 rep 16 次 PulseReadout 的 cycle，回傳每點 66 × 66 augmented sums；D 排列由 caller 保證。
+`rpi_sums(prog, read)` 選一個 fixed Repeat（至少 16 reads）內的 PulseReadout，
+將每個 setting 的全部 reps 接為長鏈。Build 後先呼叫 `set_reads_per_shot(n)`。
+多 setting 時必須將 reps 放在最內層。每個完整 round／setting 是獨立 segment，
+35 欄輸出只加 sums/counts，固定 H=1 的單段長度由總 reads／segment 次數恢復。
+Caller 負責 Rπ 排程與無 relax 等待；processor 不檢查 π 校準或未觀察到的物理斷流。
+
+這些 processor 共用 `readout_labels` 的 label 規則：pulse 與 mux readout owners 一起判定唯一性，宣告的 read 數由 `validate_declared_reads` 檢查。
 這些 processor 的 `set_reads_per_shot` 順序、read-count 檢查、外積總和與取消契約見 [summed acquisition](../README.md#summed-acquisition)。
 
 `readout_observation.observe_readouts(prog)` 由 program owner 解包 compiler wrappers，提供 readout provenance、Trigger 順序及控制 scope。

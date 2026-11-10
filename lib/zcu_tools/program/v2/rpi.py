@@ -1,0 +1,140 @@
+"""Stationary R-pi readout sums over complete acquisition rounds."""
+
+from collections.abc import Mapping
+
+import numpy as np
+from numpy.typing import NDArray
+from qick.asm_v2 import Trigger
+
+from zcu_tools.program.acquisition import ShotSumProcessor
+
+from .macro.readout import ReadoutEmission
+from .modules.readout import PulseReadout
+from .readout_labels import resolve_readout_label, validate_declared_reads
+from .readout_observation import observe_readout_paths, observe_readouts
+from .timeline import TimelineProgramV2
+
+
+def rpi_sums(prog: TimelineProgramV2, read: str) -> ShotSumProcessor:
+    """Resolve a compiled R-pi readout and reduce a complete round to sums.
+
+    read is an emit tag or untagged PulseReadout name. The caller owns the Rπ
+    schedule and calibrated π, including fixed π settings and readout post_delay
+    measured from the generator end. Use relax_delay=0 to connect reps without
+    waiting. Multiple settings require compiled reps as the innermost loop
+    (reps_innermost=True); a single setting allows either loop order. Invalid
+    compiled loop order raises ValueError at construction.
+    The label must select one PulseReadout emission inside one fixed Repeat
+    of at least 16, with no other triggers on its ADC or conditional emission.
+    After build call prog.set_reads_per_shot(n) with the Repeat count, before
+    constructing the processor. Label/provenance/trigger/count mismatches raise
+    ValueError with expected and actual values, without changing prog.
+    No pulse physics or hidden physical discontinuity is checked.
+
+    Each call borrows ADC float64 (points, reps, reads, 2) IQ for one complete
+    round: integer integrals / rounded integration length, without IQ-offset
+    subtraction. Reps at each setting form one segment; internal chunks are
+    not cuts. Round and setting boundaries never contribute pairs. No inputs
+    are changed and other ADC inputs are ignored. Shape/dtype mismatches raise
+    ValueError with expected and actual values; a missing selected ADC raises
+    KeyError. Points, reps and reads must match the compiled program.
+    The processor has no state between calls; acquire_summed sums completed
+    rounds and discards incomplete
+    rounds using its existing cancellation contract.
+
+    Return float64 (points, 35) additive records, with Python column indices:
+    0: segment count S (one per round); 1: read count N;
+    2:4: ΣI, ΣQ; 4: Σ(I²+Q²); 5:20: lag dot-product sums j=1..15;
+    20:35: actual integer pair counts C_j. These are 18 moment sums, in ADC
+    units for first moments and ADC units squared for square/products. Counts
+    are integers encoded as float64. H=1 metadata recovers segment length L=N/S,
+    not N itself; do not combine records with different L. Each segment adds
+    max(L-j, 0) pairs. Pass one pooled record to RPiSums.from_processor in
+    analysis.readout_chain; no per-round normalization is applied here.
+    """
+    dims, avg = prog.loop_dims, prog.avg_level
+    if dims is None or avg is None:
+        raise ValueError("R-pi sums require compiled acquisition loops")
+    points = int(np.prod([size for index, size in enumerate(dims) if index != avg]))
+    if points > 1 and avg != len(dims) - 1:
+        raise ValueError("R-pi multiple settings require reps_innermost=True")
+    ch, reads = _resolve_readout(prog, read)
+    expected_shape = (points, dims[avg], reads, 2)
+
+    def process(iq: Mapping[int, NDArray[np.float64]]) -> NDArray[np.float64]:
+        values = iq[ch]
+        if values.shape != expected_shape or values.dtype != np.float64:
+            raise ValueError(
+                f"ADC {ch}: expected float64 {expected_shape}; actual "
+                f"{values.dtype} {values.shape}"
+            )
+        stream = values.reshape(points, -1, 2)
+        length = stream.shape[1]
+        sums = np.zeros((points, 35), dtype=np.float64)
+        sums[:, 0] = 1
+        sums[:, 1] = length
+        for start in range(0, length, 4096):
+            stop = min(start + 4096, length)
+            chunk = stream[:, start:stop]
+            sums[:, 2:4] += chunk.sum(axis=1)
+            sums[:, 4] += np.einsum("pti,pti->p", chunk, chunk)
+            # A pair belongs to the chunk holding its later read, exactly once.
+            # The earlier read can use the preceding chunk's last 15 reads.
+            for lag in range(1, 16):
+                later_start = max(start, lag)
+                early = stream[:, later_start - lag : stop - lag]
+                late = stream[:, later_start:stop]
+                sums[:, 4 + lag] += np.einsum("pti,pti->p", early, late)
+                sums[:, 19 + lag] += stop - later_start
+        return sums
+
+    return process
+
+
+def _resolve_readout(prog: TimelineProgramV2, read: str) -> tuple[int, int]:
+    observations = list(observe_readouts(prog))
+    owner = resolve_readout_label(observations, read)
+    if not isinstance(owner, PulseReadout):
+        raise ValueError(f"label {read!r}: expected PulseReadout, actual MuxReadout")
+    emissions = [
+        item
+        for item in observations
+        if isinstance(item.source, ReadoutEmission) and item.source.owner is owner
+    ]
+    if len(emissions) != 1:
+        raise ValueError(
+            f"label {read!r}: expected one emission, actual {len(emissions)}"
+        )
+    emission = emissions[0]
+    repeats = emission.repeat_counts
+    ch = owner.cfg.ro_ch
+    if len(repeats) != 1 or not isinstance(repeats[0], int) or repeats[0] < 16:
+        raise ValueError(
+            f"ADC {ch}: expected one fixed Repeat of at least 16; actual {repeats}"
+        )
+    if isinstance(emission.source, ReadoutEmission) and emission.source.ro_ch != ch:
+        raise ValueError(
+            f"label {read!r}: expected ADC {ch}; actual ADC {emission.source.ro_ch}"
+        )
+    triggers = [
+        item
+        for item in observations
+        if isinstance(item.source, Trigger) and ch in item.source.ros
+    ]
+    if len(triggers) != 1:
+        raise ValueError(
+            f"ADC {ch}: expected one source trigger; actual {len(triggers)}"
+        )
+    trigger = triggers[0]
+    if trigger.control_scope != "Repeat" or trigger.repeat_counts != repeats:
+        raise ValueError(
+            f"ADC {ch}: expected trigger in Repeat {repeats}; actual "
+            f"{trigger.control_scope} {trigger.repeat_counts}"
+        )
+    for path in observe_readout_paths(prog):
+        if not any(item.source is trigger.source for item in path.observations):
+            raise ValueError(
+                f"ADC {ch}: expected unconditional trigger; actual conditional"
+            )
+    validate_declared_reads(prog, ch, repeats[0])
+    return ch, repeats[0]

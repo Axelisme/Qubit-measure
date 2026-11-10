@@ -1,6 +1,6 @@
 # `zcu_tools.analysis` 模塊重點文檔
 
-**Last updated:** 2026-11-10，thermal-chain 與 K-cycle 讀出鏈
+**Last updated:** 2026-11-10，thermal-chain、K-cycle 與 Rπ saved-summary analysis
 
 **讀者：** framework-dev。分析核心、純數值工具與前端 adapter 的分工速查。
 
@@ -103,6 +103,28 @@ nuisances、三項 lack-of-fit 檢查與逐點布居，不做接受或拒絕。T
 thermal 加權的 L1 population 變化振幅較大者作為 T1。所有擬合導數皆為解析式。欄位版面、座標、限制與失敗條件見
 [cycle.py](readout_chain/cycle.py)、[model.py](readout_chain/model.py)、
 [fit.py](readout_chain/fit.py) 與 [curve_models.py](readout_chain/curve_models.py) 的 docstring。
+
+## Stationary Rπ 讀出調參
+
+`readout_chain.RPiSums.from_processor(record)` 解碼單一 setting 的 35 欄 float64
+可加摘要。固定 H=1，由 read count／segment count 恢復單段長度；只合併相同長度
+的 completed rounds。入口驗證 counts 與 moments，回傳獨立陣列，不讀 program 或檔案。
+
+`readout_chain.RPiSums` 保存單一 setting 的 18 個 moment sums、實際 read/pair counts
+及 segment 長度和次數。三種 sweep 使用相同摘要，不沿用無 π 的熱態格式。
+`rpi_analysis(sums)` 以 completed segments 合併後的 sums/counts，用固定 lag 1..15
+計算 q、Q_eff、交替振幅及每個 quadrature 的 σ²。Caller 在呼叫前合併 rounds，
+不平均 round estimates。型別與函式的 docstring 定義欄位順序、shape、單位及失敗語義。
+
+`RPiAnalysis` 同時回報 T、V₀、r₀ 與 gate 狀態。白噪聲 V₀ 包含非零 IQ mean、
+有限 segment 端點及不等 pair counts，μ 和 r₀ 使用同點 plug-in 值。
+Gate 使用 `T−3.719√V₀ > 0.0224r₀`，只代表名目白噪聲下可觀察的最小交替效應。
+它不證明 qubit 身分、不排除 leakage，也不保證相關電子學雜訊下的誤判率。
+
+有效點提供交替對比分數 `score=(T−3.719√V₀)/r₀`，供 caller 在有效點中取最大值。
+無效點保留原因和可計算的診斷，`score=None`，不提供 fallback 排名。
+分數不使用估出的 Q_eff 或無限相關尾。它是啟發式效用，高 SNR 時可能偏好比資訊
+最佳點更強的讀出。Q_eff 包含 π 誤差，σ² 不是標準誤，慢模式扣除不是一般 leakage 校正。
 
 ## Readout QND 指標
 
