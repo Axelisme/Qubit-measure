@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.fluxdep` flux-dependence analysis GUI
 
-**Last updated:** 2026-10-28
+**Last updated:** 2026-11-10
 
 **讀者：** framework-dev。通量頻譜分析 GUI 的狀態、互動與搜尋分工。
 
@@ -65,7 +65,9 @@ Operator 必須確認 `flux_dev` 是這批資料的被掃儀器，app 不從 sna
 缺 `flux_dev` 時跳過 component period，但仍寫 EJ／EC／EL 與 ledger，predictor 另依來源與 snapshot 判定。
 P1 只在 component receipt 為 written 時核對單位。目標取 planner 的 receipt.device，
 將掃描軸單位與 context.units 中該儀器的單位精確比較，缺 key 視為 native。
-不符時在任何輸出前報錯，指名儀器與兩個單位，不換算、不解析 component 或 plan.fields。
+對齊發布前與 processed collection 整批載入前，也用真實 alignment 查詢同一 planner，核對 written receipt 指名儀器的單位，讓不符在擬合前報錯。
+不以 context.default_device 或資料的 device 代替 receipt.device。未開 target、未設定 planner 或 skipped receipt 不增加限制。
+不符時保留原 State 與版本，不發布事件，指名儀器與兩個單位，不換算、不解析 component 或 plan.fields。Export 仍在任何輸出前重查。
 Predictor skipped 或 frame=None 不取消單位相符的合法 P1。
 GUI status 與 RPC／MCP 的 `flux_writeback` 只描述 component P1。
 獨立的 `predictor_writeback` 描述 predictor，兩者均為 written／skipped、目標 device 與原因，不新增 partial。

@@ -1,6 +1,6 @@
 # zcu_tools.analysis.fitting
 
-**Last updated:** 2026-11-02
+**Last updated:** 2026-11-10
 
 **讀者：** lab-author。擬合模型、數值輸入、結果與失敗契約速查。
 
@@ -73,6 +73,12 @@ Tuple 解構只供過渡相容，caller 遷移成具名存取後會移除。
 `_make` 與 `_replace` 拋出 `TypeError`，要求重跑 fitter，讓改值後的 quality 與結果一致。
 
 ## fitting helpers
+
+`fitexp` 與 `fit_decay` 的自由 amplitude 界限為 observations 全距的正負兩倍。
+明傳 amplitude 初猜的絕對值若更大，界限擴至該絕對值，讓初猜仍在可行域內。
+稀疏取樣的尾端仍可能含有衰減訊號，因此不以尾端平均產生的初猜限制 amplitude。
+固定參數保持原值；exponential 模型、初猜流程與 decay time bounds 不變。
+Dual exponential 與其他模型的 amplitude 界限不變。
 
 Cosine 與 damped-cosine fitting 在 optimizer 內不限制 phase 的週期表示，輸出才轉到
 0–360°。週期邊界不是物理限制；把 optimizer 截在 ±360° 會讓靠近邊界的 phase
