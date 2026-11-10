@@ -283,15 +283,45 @@ def hamiltonian(time, channels, args, packed):
 
 @njit(cache=True, nogil=True)
 def unitary(h, duration):
-    energies, vectors = np.linalg.eigh(h)
-    adjoint = vectors.conj().T
-    # Scale LAPACK's contiguous columns in place instead of broadcasting into a
-    # new matrix. Save the unscaled adjoint before modifying the eigenvectors.
-    for j in range(len(energies)):
-        phase = np.exp(-2j * np.pi * duration * energies[j])
-        for i in range(len(energies)):
-            vectors[i, j] *= phase
-    return vectors @ adjoint
+    """Return exp(-2πi duration h) for Hermitian h in GHz and duration in ns.
+
+    Inputs come from the common-frame Hamiltonian builder. Linear algebra
+    failures propagate; no density clipping or physical approximation is added.
+    """
+    n = h.shape[0]
+    eye = np.eye(n, dtype=np.complex128)
+    # The scalar trace commutes exactly; removing it reduces scaling work.
+    shift = np.trace(h).real / n
+    a = (-2j * np.pi * duration) * (h - shift * eye)
+    norm = 0.0
+    for j in range(n):
+        column = 0.0
+        for i in range(n):
+            column += abs(a[i, j])
+        norm = max(norm, column)
+    # Padé [7/7], with ||a / 2**s||_1 <= 0.5. This is below Higham's
+    # double-precision theta_7 = 0.9504178996162932 (SIAM J. Matrix Anal.
+    # Appl. 26(4), 2005): the scaled exact-arithmetic relative backward
+    # error is <= 2**-53. This bound excludes floating-point roundoff in
+    # polynomial evaluation, solve and squaring; Engine reference contracts
+    # cover their accumulated density error. Rational symmetry preserves
+    # unitarity for skew-Hermitian a in exact arithmetic, unlike a polynomial.
+    squarings = 0
+    while norm > 0.5:
+        norm *= 0.5
+        squarings += 1
+    a = a / (2.0**squarings)
+    a2 = a @ a
+    a4 = a2 @ a2
+    a6 = a4 @ a2
+    odd = a @ (8648640.0 * eye + 277200.0 * a2 + 1512.0 * a4 + a6)
+    even = 17297280.0 * eye + 1995840.0 * a2 + 25200.0 * a4 + 56.0 * a6
+    # Numba's solve returns a Fortran-layout matrix. Squaring needs a stable
+    # C layout across the loop's initial value and subsequent matmul results.
+    u = np.ascontiguousarray(np.linalg.solve(even - odd, even + odd))
+    for _ in range(squarings):
+        u = u @ u
+    return np.exp(-2j * np.pi * duration * shift) * u
 
 
 # Absolute entrywise density allowance per row, apportioned by elapsed time.
