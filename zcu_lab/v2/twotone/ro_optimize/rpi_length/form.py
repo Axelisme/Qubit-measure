@@ -14,8 +14,8 @@ def make_form(ctx: FormContext) -> Form[RPiLengthCfg]:
     """Use the captured readout and x180 slots, or fresh templates when absent.
 
     The pi pulse is an operator-calibrated input: this Form does not check it.
-    The ADC window sweep starts at 11 points from 0.2 to 2.2 us. Reps and rounds
-    use the cfg defaults.
+    The ADC window sweep starts at 11 points from 0.2 to 2.2 us.
+    Reps defaults to 250 cycles of 64 R-pi pairs; rounds defaults to 20.
     """
     readout = source(
         ctx,

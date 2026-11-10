@@ -1,9 +1,10 @@
 """Readout gain sweep of an ...R π R π... chain with a calibrated π.
 
-Each gain is one long chain of readout R and fixed π pulses, with no reset or
-relax delay between reps. readout_chain.rpi_analysis gives every gain an
-alternating-contrast score and its invalid reasons. The best gain is the valid
-gain with the largest score.
+Each rep is a 64-read cycle of readout R and fixed π pulses, with no reset or
+relax delay between reps. Lags stay within each cycle.
+readout_chain.rpi_analysis gives every gain an alternating-contrast score
+and its invalid reasons. The best gain is the valid gain with the
+largest score.
 """
 
 from dataclasses import dataclass
@@ -64,7 +65,7 @@ class RPiPowerCfg(ConfigBase):
     pi_pulse: Calibrated pi pulse, the same at every gain. Run keeps all of its
         settings; its pre_delay in us is usually 0.
     gain: Readout gain sweep in normalized a.u.
-    reps: Blocks of 16 R-pi per gain in each round, at least 1.
+    reps: Cycles of 64 R-pi per gain in each round, at least 1.
     rounds: Software rounds, at least 1.
     """
 
@@ -81,15 +82,15 @@ class RPiPowerCfg(ConfigBase):
         int,
         FieldMeta(
             label="Reps",
-            description="Blocks of 16 R-pi per gain in each round. "
-            "All reps of one gain form one chain.",
+            description="Cycles of 64 R-pi per gain in each round. "
+            "Lags stay within each cycle; sums accumulate across reps.",
         ),
-    ] = Field(default=1000, ge=1)
+    ] = Field(default=250, ge=1)
     rounds: Annotated[
         int,
         FieldMeta(
             label="Rounds",
-            description="Software rounds. Each round starts a new chain per gain.",
+            description="Software rounds. Cycle sums accumulate across finished rounds.",
         ),
     ] = Field(default=20, ge=1)
 
@@ -156,10 +157,10 @@ class RPiPowerExp(Experiment[RPiPowerResult, RPiPowerCfg]):
     def run(self, cfg: RPiPowerCfg, *, context: RunContext) -> RPiPowerResult:
         """Read an R-pi chain at each readout gain and keep its sums.
 
-        One rep is 16 pairs of cfg.readout at the swept gain and cfg.pi_pulse,
-        which does not change with the sweep. All cfg.reps reps of one gain run
-        before the next gain, with no reset or relax delay. Each round starts a
-        new chain per gain.
+        One rep is one cycle of 64 pairs of cfg.readout at the swept gain and
+        cfg.pi_pulse, which does not change with the sweep. All cfg.reps reps run
+        before the next gain, with no reset or relax delay. Rep, round and gain
+        boundaries never contribute lag pairs.
 
         Inside a rep, each pi starts cfg.readout.post_delay plus
         cfg.pi_pulse.pre_delay us after the readout generator pulse ends, even
@@ -168,10 +169,9 @@ class RPiPowerExp(Experiment[RPiPowerResult, RPiPowerCfg]):
         plus cfg.readout.pre_delay us after the pi ends, both usually 0. At a
         rep boundary the shot closure first waits for the last ADC window to
         close, so that step can be longer and reads are not guaranteed to be
-        evenly spaced. This wait is not a relax delay. The analysis still
-        treats the reps of one gain and round as one chain and assumes the
-        same retention at every step. It neither corrects nor quantifies the
-        bias from this wait.
+        evenly spaced across reps. This wait is not a relax delay and falls
+        outside every lag. Lag 1..15 pairs stay within each cycle; their sums
+        accumulate across reps and rounds.
 
         After each round the live plot shows the score of each valid gain, from
         all finished rounds. Return the sums of all finished rounds; gains are
@@ -205,11 +205,11 @@ class RPiPowerExp(Experiment[RPiPowerResult, RPiPowerCfg]):
             (len(gains), RECORD_COLUMNS), dtype=np.float64, on_update=update
         )
 
-        # 2. The chain is one fixed Repeat of R then pi; the gain sweep is outside it.
+        # 2. Each cycle is one fixed Repeat of R then pi; the gain sweep is outside it.
         with Schedule(record_sums, scope=context.scope) as sched:
             # reps_innermost: all reps of one gain run before the next gain.
             # relax_delay 0: no added wait between reps. The shot closure can still
-            # wait for the last ADC window, and the reps remain one chain.
+            # wait for the last ADC window, outside every lag pair.
             builder = TimelineBuilder(
                 context.soccfg, reps=cfg.reps, relax_delay=0.0, reps_innermost=True
             )

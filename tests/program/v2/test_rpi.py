@@ -1,4 +1,4 @@
-"""Compiled R-pi programs produce additive summaries of continuous setting chains."""
+"""Compiled R-pi programs produce additive summaries of independent rep cycles."""
 
 from threading import Event
 
@@ -54,11 +54,13 @@ def emit_chain(builder: v2.TimelineBuilder, reads: int = 16) -> None:
         builder.emit(pi)
 
 
-def rpi_program(*, reps: int = 3, points: int = 2, reps_innermost: bool = True):
+def rpi_program(
+    *, reps: int = 3, points: int = 2, reps_innermost: bool = True, reads: int = 16
+):
     builder = rpi_builder(reps=reps, points=points, reps_innermost=reps_innermost)
-    emit_chain(builder)
+    emit_chain(builder, reads=reads)
     prog = builder.build()
-    prog.set_reads_per_shot(16)
+    prog.set_reads_per_shot(reads)
     return prog
 
 
@@ -79,19 +81,24 @@ def pair_oracle(segments: list[NDArray[np.float64]]) -> NDArray[np.float64]:
     return record
 
 
-def test_continuous_reps_and_internal_chunks_match_each_pair_without_mutation():
-    # More than 4096 reads exercises internal chunk carry, including 15-step pairs.
-    iq = np.random.default_rng(2407).normal(size=(2, 273, 16, 2))
+@pytest.mark.parametrize("reads", [16, 64])
+def test_rep_cycles_match_each_pair_without_mutation(reads: int):
+    iq = np.random.default_rng(2407).normal(size=(2, 3, reads, 2))
+    # Distinct rep offsets make illegal cross-rep products observable in every lag.
+    iq += np.array([10.0, -30.0, 70.0])[None, :, None, None]
     original = iq.copy()
-    process = v2.rpi_sums(rpi_program(reps=273), "sample")
+    process = v2.rpi_sums(rpi_program(reads=reads), "sample")
     actual = process({0: iq})
-    expected = np.stack([pair_oracle([point.reshape(-1, 2)]) for point in iq])
+    expected = np.stack([pair_oracle(list(point)) for point in iq])
     assert actual.shape == (2, 35)
     assert actual.dtype == np.float64
+    np.testing.assert_allclose(actual[:, 5:20], expected[:, 5:20], rtol=1e-12)
     np.testing.assert_allclose(actual, expected, atol=1e-10, rtol=1e-12)
+    np.testing.assert_array_equal(actual[:, 0], [3, 3])
+    np.testing.assert_array_equal(actual[:, 1], [3 * reads, 3 * reads])
+    for point in actual:
+        np.testing.assert_array_equal(point[20:35], 3 * (reads - np.arange(1, 16)))
     np.testing.assert_array_equal(iq, original)
-    # A local 16-read block sum would have 273*15 lag-1 pairs, not L-1.
-    assert actual[0, 20] == 273 * 16 - 1
 
 
 def test_producer_summary_can_analyze_seeded_alternating_iq():
@@ -116,11 +123,11 @@ def test_pooled_rounds_decode_to_saved_summary_and_public_analysis():
     pooled = process({0: rounds[0]}) + process({0: rounds[1]})
     original = pooled.copy()
     for point in range(2):
-        expected = pair_oracle([iq[point].reshape(-1, 2) for iq in rounds])
+        expected = pair_oracle([rep for iq in rounds for rep in iq[point]])
         decoded = RPiSums.from_processor(pooled[point])
         assert decoded.read_count == 96
-        np.testing.assert_array_equal(decoded.segment_lengths, [48])
-        np.testing.assert_array_equal(decoded.segment_counts, [2])
+        np.testing.assert_array_equal(decoded.segment_lengths, [16])
+        np.testing.assert_array_equal(decoded.segment_counts, [6])
         np.testing.assert_allclose(decoded.first_moment_sums, expected[2:4])
         assert decoded.same_read_square_sum == pytest.approx(expected[4])
         np.testing.assert_allclose(decoded.lag_product_sums, expected[5:20])
@@ -131,8 +138,8 @@ def test_pooled_rounds_decode_to_saved_summary_and_public_analysis():
             same_read_square_sum=float(expected[4]),
             lag_product_sums=expected[5:20],
             pair_counts=expected[20:35].astype(np.int64),
-            segment_lengths=np.array([48], dtype=np.int64),
-            segment_counts=np.array([2], dtype=np.int64),
+            segment_lengths=np.array([16], dtype=np.int64),
+            segment_counts=np.array([6], dtype=np.int64),
         )
         actual_analysis = rpi_analysis(decoded)
         expected_analysis = rpi_analysis(reference)
@@ -145,11 +152,11 @@ def test_pooled_rounds_decode_to_saved_summary_and_public_analysis():
     # The decoder owns detached arrays, so later edits to a saved record are safe.
     detached = RPiSums.from_processor(pooled[0])
     pooled[:] = 0
-    np.testing.assert_array_equal(detached.pair_counts, np.arange(94, 65, -2))
+    np.testing.assert_array_equal(detached.pair_counts, np.arange(90, 5, -6))
 
 
 @pytest.mark.parametrize("points,reps_innermost", [(2, False), (2, True), (1, False)])
-def test_compiled_loop_order_requires_continuous_reps_only_for_multiple_settings(
+def test_compiled_loop_order_requires_innermost_reps_only_for_multiple_settings(
     points: int, reps_innermost: bool
 ):
     prog = rpi_program(points=points, reps_innermost=reps_innermost)
@@ -159,7 +166,7 @@ def test_compiled_loop_order_requires_continuous_reps_only_for_multiple_settings
     else:
         result = v2.rpi_sums(prog, "sample")({0: np.ones((points, 3, 16, 2))})
         np.testing.assert_array_equal(result[:, 1], np.full(points, 48))
-        np.testing.assert_array_equal(result[:, 20], np.full(points, 47))
+        np.testing.assert_array_equal(result[:, 20], np.full(points, 45))
 
 
 @pytest.mark.parametrize(
@@ -223,7 +230,7 @@ def expect_sums(result: object) -> NDArray[np.float64]:
 
 @pytest.mark.parametrize("cancelled", [False, True])
 @pytest.mark.parametrize("stepped", [False, True])
-def test_acquire_summed_transport_chunks_and_round_resets_preserve_completed_chains(
+def test_acquire_summed_transport_chunks_and_round_resets_preserve_completed_cycles(
     monkeypatch: pytest.MonkeyPatch, cancelled: bool, stepped: bool
 ):
     prog = rpi_program()
@@ -232,7 +239,7 @@ def test_acquire_summed_transport_chunks_and_round_resets_preserve_completed_cha
     rng = np.random.default_rng(214)
     raw = [rng.integers(-500, 500, size=(2, 3, 16, 2)) for _ in range(2)]
     rows = [values.reshape(-1, 2) for values in raw]
-    # Transport chunk cuts a setting's reps. It is not a segment boundary.
+    # Transport chunk cuts a setting's reps, but the complete round owns all cycles.
     batches = iter(
         [
             [(2, ([rows[0][:32]], {}))],
@@ -271,18 +278,18 @@ def test_acquire_summed_transport_chunks_and_round_resets_preserve_completed_cha
     expected = np.stack(
         [
             pair_oracle(
-                [values[point].reshape(-1, 2) / length for values in raw[:completed]]
+                [rep / length for values in raw[:completed] for rep in values[point]]
             )
             for point in range(2)
         ]
     )
     np.testing.assert_allclose(result, expected, rtol=1e-12, atol=1e-10)
-    np.testing.assert_array_equal(result[:, 0], completed)
+    np.testing.assert_array_equal(result[:, 0], 3 * completed)
     np.testing.assert_allclose(hooks[-1], result)
     assert len(hooks) == completed
     decoded = RPiSums.from_processor(result[0])
-    np.testing.assert_array_equal(decoded.segment_lengths, [48])
-    np.testing.assert_array_equal(decoded.segment_counts, [completed])
+    np.testing.assert_array_equal(decoded.segment_lengths, [16])
+    np.testing.assert_array_equal(decoded.segment_counts, [3 * completed])
     rpi_analysis(decoded)
 
 

@@ -8,21 +8,21 @@ After changing the parameter source, use Reset to recapture initial values. Refr
 
 ## Behavior
 
-`twotone/ro_optimize/rpi_length` sweeps the readout ADC window in us with a calibrated π pulse. At each window it plays one chain `...R π R π...` with no reset or relax delay, where R is the readout and π is the same fixed pulse at every window.
+`twotone/ro_optimize/rpi_length` sweeps the readout ADC window in us with a calibrated π pulse. At each window it plays cycles of `...R π R π...` with no reset or relax delay, where R is the readout and π is the same fixed pulse at every window.
 Use it next to `twotone/ro_optimize/length` and `twotone/ro_optimize/chain_length`. The first compares g and e prepared with a π pulse, the second uses no π pulse and waits for thermal relaxation between shots, and this one alternates reads with π pulses. Each is a separate experiment.
 
 The ADC window and the readout pulse are different lengths. The ADC window is the swept value, rounded to the ADC clock. The readout pulse is that window plus 0.11 us, rounded to the generator clock. The host builds one program per window, so a short window gets a short pulse and not the longest pulse of the scan.
 The π frequency, gain and length do not follow the sweep, and neither do the readout gain, frequency or `post_delay`.
 
-One rep is 16 R-π pairs. All Reps of one window run before the next window starts, with relax delay 0. One round of one window is one chain of Reps × 16 reads, and lags up to 15 run across reps.
-Each round starts a new chain at every window. The analysis never pairs reads across a round or window boundary.
-The experiment fixes the 16 pairs per rep, the zero relax delay and the 0.11 us margin. The Form does not offer them.
+One rep is one cycle of 64 R-π pairs. All Reps of one window run before the next window starts, with relax delay 0.
+Lags 1 to 15 pair reads only within the same cycle. The statistics accumulate across reps and rounds, without pairs crossing a rep, round or window boundary.
+The experiment fixes the 64 pairs per rep, the zero relax delay and the 0.11 us margin. The Form does not offer them.
 
 The wait from R to π is the readout's `post_delay` plus the π pulse's own `pre_delay`, which is usually 0. With `post_delay` 0.05 us and a π `pre_delay` of 0.02 us, each π starts 0.07 us after the readout generator pulse ends, and the wait is the same at every window. The wait counts from the generator end and not from the ADC window end, so a π can play while the ADC window is still open. Inside a rep, the next readout starts after the π ends, later only by the π pulse's `post_delay` and the readout's `pre_delay`, which are usually 0.
 The Form has no separate wait field. Change `post_delay` in the readout module to change this wait. Run keeps every π setting, including a nonzero `pre_delay`.
 
-Rep boundaries have different timing. Each rep ends with the shot closure, which waits for every ADC window to close, and the next rep starts after it. When the last ADC window closes after the last π ends, the step across a rep boundary is longer than a step inside a rep. The closure is not a relax delay, and the Form has no field for it. In an offline build with a 0.05 us post-delay, 0.04 us π and 0.25 us trigger offset, the closure added 0.05 us once per 16 pairs at every window.
-Reads are therefore not guaranteed to be evenly spaced. The analysis still treats the reps of one window and round as one chain, with lags across reps.
+Each rep ends with the shot closure, which waits for every ADC window to close before the next rep starts. If the last ADC window closes after the last π ends, this adds a wait at the rep boundary. The closure is not a relax delay, and the Form has no field for it.
+This rep-boundary wait falls outside every lag pair. It does not affect the within-cycle lag statistics.
 
 Run does not reset the qubit, discard reads, add a warmup or calibrate the π pulse.
 
@@ -33,7 +33,7 @@ Readout uses the captured `$resonator.module.readout` slot, or a fresh `readout`
 Pi pulse uses the captured `$qubit.module.x180` slot, or a fresh `pi_pulse` template.
 Run sets the ADC window from the sweep and the pulse length from the window, so the Form hides both lengths in the readout module.
 ADC window is in us. It starts at 11 points from 0.2 to 2.2 us.
-Reps starts at 1000 and Rounds at 20, which gives 16 000 reads per chain and 320 000 reads per window.
+Reps starts at 250 and Rounds at 20. Each window has 5 000 cycles of 64 reads, or 320 000 reads in total.
 Missing or invalid sources leave the affected fields empty and Invalid; supply them before Run.
 
 ## Live plot
@@ -124,17 +124,17 @@ Readout-chain analyses that start from a thermal state can combine a readout sco
 
 The estimates assume a stationary two-state chain. Several things can bias them:
 
-- Starting population. A chain starts from whatever state the previous window or round left. No reset or warmup removes the start of the chain, and its reads count like all others.
+- Starting population. Each cycle starts from whatever state the preceding cycle or setting left. No reset or warmup removes the start of the cycle, and its reads count like all others.
 - Third state. Population outside the two alternating states can bias every estimate. The analysis removes a slow mode as an approximation, which is not a leakage correction. This experiment does not identify general leakage and does not correct readout QND.
 - Large IQ offsets and π errors can bias the estimates.
-- Longer steps at rep boundaries. The estimates assume the same retention at every step. A rep boundary that waits for the ADC window is a longer step, so its retention can differ. The analysis does not correct or exclude this, and no one has measured the size of the resulting bias.
-- A physical break in the chain that leaves no trace in the IQ data cannot be detected. Each finished round and window counts as one chain, and no hardware run has verified that it is unbroken.
+- Slow drift. All reps of one setting run together. Drift can become a difference between settings; multiple rounds average over these changes.
+- A physical break inside a cycle that leaves no trace in the IQ data cannot be detected. Breaks between reps do not affect lag pairs. No hardware run has verified continuity inside a 64-read cycle.
 
 The offline probe of this experiment checks the program and the data contract with synthetic data. It does not calibrate hardware and it does not validate the physical model.
 
 ## Saved data
 
-The saved record has the ADC windows that finished at least one round, in us in memory and seconds on disk, and one 35-column `rpi_sums` record per window. A record holds the number of chains, the read count, the 18 moment sums and the 15 pair counts. Every chain of a window has the same length, so one count and one length describe the chains. Raw IQ is not saved.
+The saved record has the ADC windows that finished at least one round, in us in memory and seconds on disk, and one 35-column `rpi_sums` record per window. A record holds the completed cycle count S, the read count N, the 18 moment sums and the 15 pair counts. Each cycle has 64 reads, so L = N/S = 64 and C_j = S × (64 − j). Raw IQ is not saved.
 Loading the file and analyzing it gives the same summary as the analysis of the run.
 The native tag is `twotone/ro_optimize/rpi_length` with cfg schema `3.0`.
 

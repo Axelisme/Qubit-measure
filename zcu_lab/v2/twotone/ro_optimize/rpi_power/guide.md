@@ -8,18 +8,18 @@ After changing the parameter source, use Reset to recapture initial values. Refr
 
 ## Behavior
 
-`twotone/ro_optimize/rpi_power` sweeps the readout gain with a calibrated π pulse. At each gain it plays one chain `...R π R π...` with no reset or relax delay, where R is the readout and π is the same fixed pulse at every gain.
+`twotone/ro_optimize/rpi_power` sweeps the readout gain with a calibrated π pulse. At each gain it plays cycles of `...R π R π...` with no reset or relax delay, where R is the readout and π is the same fixed pulse at every gain.
 Use it next to `twotone/ro_optimize/power` and `twotone/ro_optimize/chain_power`. The first needs a π pulse and relax delays, the second uses no π pulse, and this one alternates reads with π pulses. Each is a separate experiment.
 
-One rep is 16 R-π pairs. All Reps of one gain run before the next gain starts, with relax delay 0. One round of one gain is one chain of Reps × 16 reads, and lags up to 15 run across reps.
-Each round starts a new chain at every gain. The analysis never pairs reads across a round or gain boundary.
-The experiment fixes the 16 pairs per rep and the zero relax delay. The Form does not offer them.
+One rep is one cycle of 64 R-π pairs. All Reps of one gain run before the next gain starts, with relax delay 0.
+Lags 1 to 15 pair reads only within the same cycle. The statistics accumulate across reps and rounds, without pairs crossing a rep, round or gain boundary.
+The experiment fixes the 64 pairs per rep and the zero relax delay. The Form does not offer them.
 
 The wait from R to π is the readout's `post_delay` plus the π pulse's own `pre_delay`, which is usually 0. With `post_delay` 0.05 us and a π `pre_delay` of 0.02 us, each π starts 0.07 us after the readout generator pulse ends, and the wait is the same at every gain. The wait counts from the generator end and not from the ADC window end, so a π can play while the ADC window is still open. Inside a rep, the next readout starts after the π ends, later only by the π pulse's `post_delay` and the readout's `pre_delay`, which are usually 0.
 The Form has no separate wait field. Change `post_delay` in the readout module to change this wait. Run keeps every π setting, including a nonzero `pre_delay`.
 
-Rep boundaries have different timing. Each rep ends with the shot closure, which waits for every ADC window to close, and the next rep starts after it. When the last ADC window closes after the last π ends, the step across a rep boundary is longer than a step inside a rep. The closure is not a relax delay, and the Form has no field for it. In an offline build with a 0.5 us readout, 0.05 us post-delay, 0.04 us π, 0.4 us trigger offset and 0.4 us ADC window, the closure added 0.21 us once per 16 pairs.
-Reads are therefore not guaranteed to be evenly spaced. The analysis still treats the reps of one gain and round as one chain, with lags across reps.
+Each rep ends with the shot closure, which waits for every ADC window to close before the next rep starts. If the last ADC window closes after the last π ends, this adds a wait at the rep boundary. The closure is not a relax delay, and the Form has no field for it.
+This rep-boundary wait falls outside every lag pair. It does not affect the within-cycle lag statistics.
 If one ADC window would overlap the next, Run fails when the program builds and names the ADC overlap. Shorten the ADC window or lengthen the readout or its post-delay.
 
 Run does not reset the qubit, discard reads, add a warmup or calibrate the π pulse.
@@ -31,7 +31,7 @@ Readout uses the captured `$resonator.module.readout` slot, or a fresh `readout`
 Pi pulse uses the captured `$qubit.module.x180` slot, or a fresh `pi_pulse` template.
 Run replaces the readout gain with the sweep, so the Form hides the readout gain.
 Gain is the normalized DAC amplitude in a.u., where 1 is full scale. It starts at 10 points from 0.02 to 0.2 a.u.
-Reps starts at 1000 and Rounds at 20, which gives 16 000 reads per chain and 320 000 reads per gain.
+Reps starts at 250 and Rounds at 20. Each gain has 5 000 cycles of 64 reads, or 320 000 reads in total.
 Missing or invalid sources leave the affected fields empty and Invalid; supply them before Run.
 
 ## Live plot
@@ -121,17 +121,17 @@ Readout-chain analyses that start from a thermal state can combine a readout sco
 
 The estimates assume a stationary two-state chain. Several things can bias them:
 
-- Starting population. A chain starts from whatever state the previous gain or round left. No reset or warmup removes the start of the chain, and its reads count like all others.
+- Starting population. Each cycle starts from whatever state the preceding cycle or setting left. No reset or warmup removes the start of the cycle, and its reads count like all others.
 - Third state. Population outside the two alternating states can bias every estimate. The analysis removes a slow mode as an approximation, which is not a leakage correction. This experiment does not identify general leakage.
 - Large IQ offsets and π errors can bias the estimates.
-- Longer steps at rep boundaries. The estimates assume the same retention at every step. A rep boundary that waits for the ADC window is a longer step, so its retention can differ. The analysis does not correct or exclude this, and no one has measured the size of the resulting bias.
-- A physical break in the chain that leaves no trace in the IQ data cannot be detected. Each finished round and gain counts as one chain, and no hardware run has verified that it is unbroken.
+- Slow drift. All reps of one setting run together. Drift can become a difference between settings; multiple rounds average over these changes.
+- A physical break inside a cycle that leaves no trace in the IQ data cannot be detected. Breaks between reps do not affect lag pairs. No hardware run has verified continuity inside a 64-read cycle.
 
 The offline probe of this experiment checks the program and the data contract with synthetic data. It does not calibrate hardware and it does not validate the physical model.
 
 ## Saved data
 
-The saved record has the gains in a.u. and one 35-column `rpi_sums` record per gain. A record holds the number of chains, the read count, the 18 moment sums and the 15 pair counts. Every chain of a gain has the same length, so one count and one length describe the chains. Raw IQ is not saved.
+The saved record has the gains in a.u. and one 35-column `rpi_sums` record per gain. A record holds the completed cycle count S, the read count N, the 18 moment sums and the 15 pair counts. Each cycle has 64 reads, so L = N/S = 64 and C_j = S × (64 − j). Raw IQ is not saved.
 Loading the file and analyzing it gives the same summary as the analysis of the run.
 The native tag is `twotone/ro_optimize/rpi_power` with cfg schema `3.0`.
 
