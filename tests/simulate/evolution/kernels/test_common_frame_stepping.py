@@ -17,6 +17,83 @@ from zcu_tools.simulate.evolution.kernels import REGISTRY
 from zcu_tools.simulate.evolution.secular import SecularDrive, SecularModel
 
 
+def test_long_resonant_drive_preserves_spectator_coherences():
+    # The circular drive is exact in the rotating frame. A coherent spectator
+    # exposes relative phase errors that populations and trace cannot detect.
+    strength, carrier, spectator, phase = 0.2, 0.29, 0.61, 0.39
+    x = np.array([[0, strength, 0], [strength, 0, 0], [0, 0, 0]], dtype=np.complex128)
+    y = np.array(
+        [[0, 1j * strength, 0], [-1j * strength, 0, 0], [0, 0, 0]],
+        dtype=np.complex128,
+    )
+    model = SecularModel(
+        (0,),
+        "coherent-circular-resonance",
+        np.array([0.0, carrier, spectator]) + 0.43,
+        np.eye(3, dtype=np.complex128),
+        (SecularDrive("a", x / 2, y / 2), SecularDrive("b", x / 2, y / 2)),
+        np.zeros((3, 3)),
+        np.zeros((3, 3)),
+    )
+    initial = np.array([np.sqrt(0.5), 0.5j, 0.5])
+    source = ModelSource(np.outer(initial, initial.conj()), lambda _: model)
+    durations = np.array([11.0, 137.0, 503.0, 1000.0])
+    count = len(durations)
+    track = DriveTrack(
+        "a",
+        np.zeros(count),
+        durations,
+        np.full(count, carrier),
+        np.full(count, phase),
+        np.ones(count),
+        (
+            EnvelopeSpec(
+                "sampled",
+                np.array([0.2, 1.0], dtype=np.complex128),
+                np.array([0.0, 1000.0]),
+            ),
+        ),
+        np.zeros(count, dtype=np.int64),
+        np.ones(count, dtype=bool),
+    )
+    timeline = TimelineBatch(
+        np.arange(count),
+        (track, replace(track, port="b")),
+        FluxSchedule(
+            np.arange(count + 1), np.zeros(count), np.zeros((count, 1), dtype=np.int64)
+        ),
+        durations,
+    )
+    # Integrate the linear envelope analytically, rather than reproducing CF4.
+    angle = 2 * np.pi * strength * (0.2 * durations + 0.8 * durations**2 / 2000)
+    states = np.column_stack(
+        (
+            initial[0] * np.cos(angle)
+            - 1j * np.exp(1j * phase) * initial[1] * np.sin(angle),
+            (
+                initial[1] * np.cos(angle)
+                - 1j * np.exp(-1j * phase) * initial[0] * np.sin(angle)
+            )
+            * np.exp(-2j * np.pi * carrier * durations),
+            initial[2] * np.exp(-2j * np.pi * spectator * durations),
+        )
+    )
+    expected = states[:, :, None] * states[:, None, :].conj()
+    with closing(
+        Engine(1, kernels=tuple(k for k in REGISTRY if k.name != "multitone_rwa"))
+    ) as engine:
+        result = engine.evolve(source, (timeline,), cancel=Event(), budget=0.01)
+    assert result.paths.segments_by_kernel == {"common_frame": count}
+    np.testing.assert_allclose(result.densities, expected, atol=1e-8, rtol=0)
+    np.testing.assert_allclose(
+        result.densities, result.densities.conj().swapaxes(-1, -2), atol=1e-12, rtol=0
+    )
+    np.testing.assert_allclose(
+        np.trace(result.densities, axis1=-2, axis2=-1), 1, atol=1e-12, rtol=0
+    )
+    assert np.min(np.linalg.eigvalsh(result.densities)) >= -1e-12
+
+
 def test_narrow_envelope_knots_preserve_resonant_pulse_area():
     # A circular drive has no omitted counter-rotating channel. Its exact
     # resonant solution depends only on pulse area, independently of CF4.
