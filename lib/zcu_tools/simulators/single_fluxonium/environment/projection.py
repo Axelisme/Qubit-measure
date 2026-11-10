@@ -71,7 +71,8 @@ class ProjectionRunner:
     engine/source are the source-owned evolution resources. basis is the same
     retained DC energy basis as source densities and ADC labels. floor is the
     nonnegative outcome probability threshold; cancel is forwarded unchanged.
-    One runner serves one preparation, retaining only its span diagnostics/keys.
+    One runner serves one preparation. Rank-1 continuations share a density only
+    within the same plan/span and after Engine.reuse validates the current route.
     ADC CTMC jumps do not feed back into these density continuations.
     """
 
@@ -94,7 +95,7 @@ class ProjectionRunner:
         end: NDArray[np.float64],
         outcome: _Outcome | None,
         key: bytes,
-    ) -> NDArray[np.complex128]:
+    ) -> tuple[NDArray[np.complex128], bytes]:
         start = None
         densities = None
         if outcome is not None:
@@ -126,7 +127,30 @@ class ProjectionRunner:
         # Engine returns rows in its own point order, not necessarily batch order.
         indices = {int(point): index for index, point in enumerate(result.points)}
         order = [indices[int(point)] for point in plan.batch.points]
-        return result.densities[order]
+        return result.densities[order], reuse_key
+
+    def _continue(
+        self,
+        plan: SingleFluxoniumPlan,
+        end: NDArray[np.float64],
+        outcomes: list[_Outcome],
+        key: bytes,
+    ) -> list[_Outcome]:
+        # Each input was just projected, so its last state fully specifies its
+        # rank-1 density. Absolute controls and point order are fixed by this
+        # plan/span. Keep full histories; only the continuation solve is shared.
+        continuations: dict[int, tuple[NDArray[np.complex128], bytes]] = {}
+        advanced = []
+        for outcome in outcomes:
+            state = outcome.history[-1]
+            cached = continuations.get(state)
+            if cached is None or not self.engine.reuse(
+                self.source, cached[1], cancel=self.cancel
+            ):
+                cached = self._advance(plan, end, outcome, key)
+                continuations[state] = cached
+            advanced.append(replace(outcome, densities=cached[0]))
+        return advanced
 
     def _split(
         self,
@@ -170,7 +194,7 @@ class ProjectionRunner:
         list[_Outcome], tuple[tuple[int, ...], ...], tuple[tuple[float, ...], ...]
     ]:
         points = len(plan.batch.points)
-        density = self._advance(plan, plan.read_events[0].end_ns, None, key)
+        density, _ = self._advance(plan, plan.read_events[0].end_ns, None, key)
         outcomes = [_Outcome(np.ones(points), (), density)]
         survival = np.ones(points)
         counts, pruned = [], []
@@ -183,15 +207,9 @@ class ProjectionRunner:
             )
             pruned.append(survival * dropped)
             survival *= 1 - dropped
-            outcomes = [
-                replace(
-                    outcome,
-                    densities=self._advance(
-                        plan, plan.read_events[event + 1].end_ns, outcome, key
-                    ),
-                )
-                for outcome in outcomes
-            ]
+            outcomes = self._continue(
+                plan, plan.read_events[event + 1].end_ns, outcomes, key
+            )
         return (
             outcomes,
             tuple(
