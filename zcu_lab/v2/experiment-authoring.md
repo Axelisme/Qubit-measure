@@ -2,7 +2,7 @@
 
 **讀者：** lab-author、framework-dev、agent。撰寫實驗 core，查閱 records、資料形狀、執行與保存慣例。
 
-**Last updated:** 2026-11-02，查表掃描與非均勻 delay 用法
+**Last updated:** 2026-11-10，掃描欄位型別與命名規則
 
 使用者入口見 [tutorial](../tutorial/README.md)。
 
@@ -140,8 +140,32 @@ and mean complex IQ per participating tone; the fringe decay measures T2.
 
 ### Cfg 名稱、順序與取數欄位
 
-掃描欄位用被掃量的單數名，例如 cfg 的 `delay`、`gain`、`freq`。
-`declare_sweep`／`add_sweep` 名稱跟 cfg 欄位相同，Result 用 `delays`、`gains`、`freqs`。
+連續物理量的掃描欄位用 `SweepCfg`，例如 [`twotone/zigzag_sweep`](twotone/zigzag_sweep/core.py) 的 `gain`。
+離散整數序列用 `list[int]`，例如 [`twotone/rb`](twotone/rb/core.py) 的 Clifford `depth`。
+依各實驗需求決定整數值的限制，例如是否允許零、是否要求不重複，不把某個實驗的限制套用到所有整數序列。
+
+不論硬體掃描、host 掃描或 `list[int]`，cfg 掃描欄位都用被掃量的單數名，例如 `delay`、`gain`、`freq`。
+Result 欄位用複數名，例如 `delays`、`gains`、`freqs`；沒有自然複數時用 `_values`。
+例如 `twotone/rb` 的 cfg 用 `depth`，Result 用 `depths`。
+`declare_sweep`／`add_sweep` 名稱跟 cfg 掃描欄位相同。
+
+cfg 若只提供單一計數 N，並由它推導 0 到 N 的掃描軸，欄位命名為 `n_<軸名>`。
+軸與迴圈用該量的名字，不加 `n_`。
+例如 `twotone/zigzag_sweep` 用 cfg `n_times`，以 `np.arange(0, cfg.n_times + 1)` 建立 `times`，
+用 `builder.add_loop("times", len(times))` 宣告迴圈，Result 也用 `times`。
+
+目前保留下列既有 cfg 欄位名，待遷移時改名。歷史 cfg 的相容設計尚待裁定，現在不啟用新名稱。
+Result 欄位維持原名。
+
+| 實驗 | 目前 cfg 欄位 | 待遷移時改名為 |
+| --- | --- | --- |
+| `two_qubit/conditional_spectroscopy` | `dc_values` | `dc` |
+| `two_qubit/idle_zz` | `dc_values` | `dc` |
+| `two_qubit/conditional_phase` | `gate_counts` | `gate_count` |
+| `two_qubit/local_z` | `gate_counts` | `gate_count` |
+| `two_qubit/rb` | `depths` | `depth` |
+| `two_qubit/rb` | `seeds` | `seed` |
+
 新實驗的軸 label 沿用同一個字，例如 `Delay`。既有存檔軸的 label／unit 不改，避免舊檔無法載入。
 Module 名稱等於提供設定的 cfg 欄位名，例如 `Pulse("pi_pulse", cfg.pi_pulse)`。
 欄位名寫角色，例如 `stark_tone`、`probe`，只有角色對稱時才用 `gain1`／`gain2`。
@@ -151,8 +175,8 @@ Cfg 宣告順序就是 Form 顯示順序，依序放播放順序的 modules、�
 Form 預設不寫 `field_order`。特殊需求才覆寫順序，並在原地用一行註解說明原因，
 例如讓 mux 的 participants 出現在 tones 前。
 
-取樣方式用 `sampling: Literal["linear", "decay"]`，掃描欄位只接受 `SweepCfg`。
-Linear 使用線性格點，decay 把同一時間窗的點集中在衰減段，不另接受 list 模式。
+時間掃描需要選擇取樣方式時，用 `sampling: Literal["linear", "decay"]`。
+Linear 使用線性格點，decay 把同一時間窗的點集中在衰減段，這類時間掃描不另接受 list 模式。
 各實驗保留原本的取樣預設；既有 `uniform` 欄位待遷移時改名。
 
 取數欄位在每個 cfg 最後完整寫出，不用額外基底或型別別名藏住欄位。
