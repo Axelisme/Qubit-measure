@@ -57,7 +57,9 @@ Stop 返回後先核對 Shots 圖與保存資料，再決定是否重跑。DC �
 
 ## 依實際初態比較 gg 與 ee
 
-Analyze 只發布圖並回傳 `None`。頻譜、shot 數、完整性與 herald 比例只在分析內供畫圖使用。
+一般結果按 Analyze 後會發布圖並回傳 `None`。頻譜、shot 數、完整性與 herald 比例只在分析內供畫圖使用。
+
+若 `sums` 全為 NaN，Analyze 仍發布空圖，但改回傳 `error`，說明沒有完整 acquisition round 的資料。MCP 讀取分析結果時會在 `summary.error` 取得這個原因。Save 仍可保存原始 NaN 計數與本次 cfg。
 
 分析與 live 都使用 herald 判為 gg 和 ee 的兩組 terminal 計數。兩組保留各自的 P_e，不合併，也不擬合。Other 留在分母。零選中計數或未量點為 NaN。
 
