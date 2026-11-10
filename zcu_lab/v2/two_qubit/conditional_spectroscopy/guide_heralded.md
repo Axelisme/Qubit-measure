@@ -12,6 +12,49 @@ Herald 與 terminal 重複使用同一個 mux 物件、gain、積分窗口與 ci
 
 Frequency 在硬體掃描。只有 DC 留在 host，因為需要設定儀器。每個 DC 一支 program 取完兩個準備軸與 frequency，rounds 在取數端累加。
 
+## 先驗準備，再找條件頻移
+
+1. 先核對 F1/F2 的 tone mapping、Xπ pulses，以及符合本次 readout 設定的 circle classifier 與 radius。
+   讀出設定改變後先重做 GE Post，不以 herald gg 比例代替分類器校準。
+2. 固定已授權的 DC，不做 DC 掃描。將 `drive.f1.gain`、`drive.f2.gain` 都設為 0，
+   `contrast=false`，frequency 只留一個哨兵點，保留原來的 probe duration 與等待時間。
+   四種名目準備 B00、B01、B10、B11 仍會全部執行。
+3. 從保存的 81 類 `sums` 選 herald gg，對每個 Bxy 取 terminal 的九類計數。
+   將各類計數除以該 Bxy 選中的全部 shot 數，得到 `P(ab | Bxy, herald=gg)`，other 留在分母。
+   零選中計數時不能判定 prep，先取得可用計數。檢查 B00 的 P00、B01 的 P01、B10 的 P10 與 B11 的 P11。
+   比較 `P11 | B11` 與 `P(F1=e | B10) × P(F2=e | B01)`。
+   P11 與乘積在 shot 統計不確定度內相符，且其餘名目準備對應到預期 terminal 類別時，才繼續找條件頻移。
+   若 P11 明顯偏低，先查 prep 的條件失諧與讀出分類，不用 contrast、relative phase 或強 probe 解釋缺失的準備。
+   此檢查支持準備分支存在，不扣除分類、herald 擾動與等待造成的系統誤差，也不是純態或 gate fidelity 門檻。
+4. Prep 通過後恢復待測線的弱 probe，先保持 `contrast=false`。
+   用長弱 probe 讓有效線寬小於要辨別的條件頻移，頻率步距也要能解析該頻移。
+   Pulse 時長 T 的 Fourier 尺度約為 1/T，MHz 與 us 互為倒數；功率展寬與退相干也會限制解析度。
+   例如比較 F2 在 B00 與 B10 的譜線位置時，可將 F1 probe gain 保持 0。
+   未解析時記錄線寬與步距所限的解析度，不報零頻移或零耦合。
+   找到條件線後才比較 contrast、relative phase 或較強 probe，並為各設定分別 Run、Save。
+
+## 成本、進度與 Stop
+
+每個 DC 都執行 `4 × N_frequency` 個準備態／頻率座標。
+要求的 shot 總數為 `N_DC × 4 × N_frequency × reps × rounds`，每 shot 都含 herald 與 terminal 兩次 mux readout。
+估硬體時間時，將各 shot 的 reset、準備、probe、contrast、兩次 readout 與等待時間加總，
+再計入 program 啟動、資料傳輸與 DC 設定成本。要求的 shot 數不代表已完成的 shot 數。
+
+FTF mock 的 heralded 計算成本主要隨頻率點數與四個準備分支增加，每個座標需處理 herald 後的演化與讀出。
+降低 reps 不會按比例降低這部分成本。這是 mock 的成本觀察，不表示真實硬體時間與 reps 無關。
+先用同一 adapter、相同 pulse 時長、reps 與 rounds，在單一 DC 跑完 1–3 個頻率點的牆鐘 pilot。
+記錄牆鐘時間、要求的硬體時間估算，以及實際返回的每點 shot 數，再估完整窗口的成本。
+不要把數百或數千點寬掃當作 pilot，也不要靠中途 Stop 取代少點測量。
+
+進度的外層是 DC host loop，frequency 與四種準備在同一支 program 內，不逐頻點回報進度。
+`rounds=1` 時沒有 rounds 進度條，因此外層 DC 長時間不動不代表沒有執行。
+`rounds>1` 時可看到已完成 round 的進度；live 圖與計數也只在完整 round 返回後更新。
+
+Stop 是合作停止請求，不保證立即返回。當前未完成 round 的計數不進 Result，已完成 rounds 與先前 DC 的資料保留。
+若 `rounds=1` 且在第一個 DC 的首輪完成前停止，沒有可用計數，`sums` 保持 NaN。
+若已有 DC 完成，不能將當前 DC 的空資料誤認為整次 Run 都沒有結果。
+Stop 返回後先核對 Shots 圖與保存資料，再決定是否重跑。DC 不自動恢復，繼續前確認裝置當下值。
+
 ## 依實際初態比較 gg 與 ee
 
 Analyze 只發布圖並回傳 `None`。頻譜、shot 數、完整性與 herald 比例只在分析內供畫圖使用。
