@@ -40,7 +40,12 @@ from zcu_tools.gui.app.analysis_project.native import (
     NativeSpectrumSelection,
     read_spectrum_source,
 )
+from zcu_tools.gui.app.fluxdep.export_plan import (
+    ExportPlanner,
+    require_alignment_export_unit,
+)
 from zcu_tools.gui.app.fluxdep.state import (
+    AlignmentPublication,
     FluxDepState,
     SpectrumEntry,
     SpecType,
@@ -78,9 +83,11 @@ class LoadService:
         state: FluxDepState,
         *,
         flux_context_provider: ComponentFluxProvider | None = None,
+        export_planner: ExportPlanner | None = None,
     ) -> None:
         self._state = state
         self._flux_context_provider = flux_context_provider
+        self._export_planner = export_planner
 
     def flux_context(self) -> ComponentFluxContext | None:
         """Return the target's injected context, or None without an opened target.
@@ -266,7 +273,11 @@ class LoadService:
         persisted spectrum type; legacy missing type defaults to "TwoTone".
         No workflow metadata is required beyond the processed spectrum payload.
         Reject the entire restore with InvalidInputError if any name already
-        exists, listing all conflicts before publishing any spectrum.
+        exists, listing all conflicts before publishing any spectrum. Before any
+        publication, query the configured export planner with each restored
+        alignment and require its written device's context unit to match the
+        axis. Mismatches raise ValueError naming the device and both units;
+        no conversion or fitting is performed.
         """
         spectrums = load_spectrums(filepath)
         conflicts = [name for name in spectrums if name in self._state.spectrums]
@@ -275,7 +286,7 @@ class LoadService:
                 "Processed spectrum names already exist: " + ", ".join(conflicts),
                 reason_code="spectrum_name_conflict",
             )
-        names: list[str] = []
+        entries: list[SpectrumEntry] = []
         for name, result in spectrums.items():
             spec_type: SpecType = (
                 "OneTone" if result.get("type") == "OneTone" else "TwoTone"
@@ -305,7 +316,19 @@ class LoadService:
                 points_completed=True,
                 alignment_seeded=True,
             )
+            require_alignment_export_unit(
+                self._state.project,
+                self._export_planner,
+                self._flux_context_provider,
+                AlignmentPublication(
+                    entry.flux_half, entry.flux_int, entry.flux_period
+                ),
+                entry.unit,
+            )
+            entries.append(entry)
+        names: list[str] = []
+        for entry in entries:
             self._state.put_spectrum(entry)
-            names.append(name)
+            names.append(entry.name)
         logger.debug("load_processed_spectrums: %d from %r", len(names), filepath)
         return names
