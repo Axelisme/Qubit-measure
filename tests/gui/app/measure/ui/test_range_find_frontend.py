@@ -11,8 +11,16 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from matplotlib.backends.backend_agg import FigureCanvasAgg
+from matplotlib.figure import Figure
+from matplotlib.text import Text
 from qtpy.QtWidgets import QApplication
-from zcu_tools.gui.app.measure.range_find_plugin import RangeFindParameters
+from zcu_tools.gui.app.measure.range_find_frontend import draw_range_find
+from zcu_tools.gui.app.measure.range_find_plugin import (
+    RangeFindParameters,
+    RangeFindPlugin,
+)
+from zcu_tools.gui.session.adapters.manual_owner_scheduler import ManualOwnerScheduler
 
 from tests.gui._user_input import ComponentDriver
 from tests.gui.app.measure._range_find_adapter import SpectrumData, range_application
@@ -62,6 +70,50 @@ def _wide_spectrum() -> SpectrumData:
     for freq in (7080, 7190):
         magnitude -= 1.5 * np.exp(-(((freqs - freq) / 2) ** 2))
     return SpectrumData(freqs, magnitude)
+
+
+@pytest.mark.parametrize("figsize", [(6, 2.4), (7.5, 4.3)])
+def test_adjacent_dip_names_remain_readable_in_full_spectrum(
+    tmp_path: Path, figsize: tuple[float, float]
+):
+    data = _wide_spectrum()
+    plugin = RangeFindPlugin(
+        data.freqs,
+        data.magnitude,
+        components=("R1", "Resonator right"),
+        build_result=lambda state: state,
+    )
+    session = plugin.open(ManualOwnerScheduler())
+    try:
+        figure = Figure(figsize=figsize)
+        canvas = FigureCanvasAgg(figure)
+        draw_range_find(figure, data.freqs, data.magnitude, session.snapshot())
+        canvas.draw()
+        figure.savefig(_shots(tmp_path, f"names-{figsize[0]}.png"))
+        names = [text for text in figure.axes[0].texts if text.get_visible()]
+        assert len(names) == len(plugin.components)
+        # Measure the text, not any leader line included by Annotation's extent.
+        bounds = [Text.get_window_extent(text, canvas.get_renderer()) for text in names]
+        assert not bounds[0].overlaps(bounds[1]), "Adjacent dip names overlap"
+        assert all(
+            figure.bbox.contains(box.x0, box.y0)
+            and figure.bbox.contains(box.x1, box.y1)
+            for box in bounds
+        ), "Dip names extend beyond the canvas"
+        figure.axes[0].set_xlim(7000, 7300)
+        figure.axes[0].set_ylim(0.64, 2.3)
+        canvas.draw()
+        legend = figure.axes[0].get_legend()
+        assert legend is not None
+        legend_bounds = legend.get_window_extent(canvas.get_renderer())
+        assert all(
+            not Text.get_window_extent(text, canvas.get_renderer()).overlaps(
+                legend_bounds
+            )
+            for text in names
+        ), "Zoomed dip names are hidden by the legend"
+    finally:
+        session.dispose()
 
 
 @pytest.mark.parametrize(("width", "height"), [(1275, 1539), (1100, 700)])

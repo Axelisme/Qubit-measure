@@ -1,6 +1,6 @@
 # Explicit acquisition environments
 
-**Last updated:** 2026-11-02，原生查表掃描與 scalar lookup
+**Last updated:** 2026-11-10，離線 upload 容量邊界
 
 **讀者：** framework-dev。模擬 acquisition 的 request、round 與 raw source 契約。
 
@@ -48,11 +48,16 @@ support this contract. Empty requirements retain each environment's behavior.
 The entry consumes this keyword without forwarding it on hardware calls; hardware
 wiring roles remain the operator's responsibility. Requirements are call-local.
 Other SoC objects use the original path. Integrated simulation configures the
-compiled program and readouts without serializing DAC/weight arrays for no-op
-transport. Requested uploads still validate int16 envelope and weight dtypes;
-QICK retains first-compilation ownership. Hardware and decimated paths keep
-their original configuration. Shot processing, hooks, tracker, normalization,
-averaging and Stop still belong to that pipeline.
+compiled program and readouts without serializing DAC/weight arrays for
+transport. Requested uploads validate int16 envelope and weight dtypes and
+require each envelope's sample address plus length to fit the caller's generator
+`maxlen`. Equality is allowed. `load_envelopes=False` skips upload validation.
+Decimated capture requires each window length to be strictly smaller than the
+caller's readout `buf_maxlen`, matching QICK's buffer driver. QICK still checks
+the total sample count across reads and executions. Integrated readout length is
+not limited by raw-buffer capacity. QICK retains first-compilation ownership.
+Hardware and decimated paths keep their original configuration. Shot processing,
+hooks, tracker, normalization, averaging and Stop still belong to that pipeline.
 
 `SimulationBinding(..., timing=SimulationTiming(clock=SimulationClock(...)))` optionally tracks physical
 time independently of pacing speed. One environment shares one clock. It adds
