@@ -377,7 +377,10 @@ def test_apply_writeback_does_not_swallow_unexpected_errors(apply_writeback_clie
         {},
         {"tab": ""},
         {"tab": 1},
-        {"tab": "t", "stage": "post"},
+        {"tab": "t", "stage": "invalid"},
+        {"tab": "t", "stage": 1},
+        {"tab": "t", "stage": []},
+        {"tab": "t", "extra": "post"},
         {"tab": "t", "items": "frequency"},
         {"tab": "t", "items": [1]},
         {"tab": "t", "items": [""]},
@@ -387,7 +390,7 @@ def test_apply_writeback_does_not_swallow_unexpected_errors(apply_writeback_clie
 def test_apply_writeback_rejects_invalid_arguments_before_transport(
     apply_writeback_client, arguments
 ):
-    with pytest.raises(ValueError, match="tab|items|Duplicate"):
+    with pytest.raises(ValueError, match="tab|stage|items|Duplicate"):
         apply_writeback_client.call("apply_writeback", arguments)
     assert apply_writeback_client.transport.sent == []
 
@@ -400,7 +403,7 @@ def test_apply_writeback_selects_stable_names_in_pane_order(
     apply_writeback_client, items
 ):
     result = apply_writeback_client.call(
-        "apply_writeback", {"tab": "t", "items": items}
+        "apply_writeback", {"tab": "t", "stage": None, "items": items}
     )
     expected = {
         "primary": ["param-1", "wf-1"]
@@ -441,6 +444,110 @@ def test_apply_writeback_rejects_names_before_any_write(
         method == "tab.writeback_write"
         for method, _ in apply_writeback_client.transport.sent
     )
+
+
+def test_apply_writeback_ambiguity_lists_available_stages_before_any_submission(
+    apply_writeback_client,
+):
+    apply_writeback_client.transport.replies["tab.writeback_preview"] = {
+        "ok": True,
+        "result": {
+            "has_draft": True,
+            "destination_context": {},
+            "items": [{"id": "param-1", "target_name": "readout.gain"}],
+        },
+    }
+    with pytest.raises(ValueError, match="Ambiguous") as error:
+        apply_writeback_client.call(
+            "apply_writeback", {"tab": "t", "items": ["readout.gain"]}
+        )
+    assert "primary" in str(error.value)
+    assert "post" in str(error.value)
+    assert not any(
+        method in {"tab.writeback_begin", "tab.writeback_write"}
+        for method, _ in apply_writeback_client.transport.sent
+    )
+
+
+@pytest.mark.parametrize(
+    "stage,pane,other_stage",
+    [("primary", "analysis", "post"), ("post", "post_analysis", "primary")],
+)
+@pytest.mark.parametrize("items", [None, [], ["readout.gain"]])
+def test_apply_writeback_selects_stage_with_shared_stable_target(
+    apply_writeback_client, stage, pane, other_stage, items
+):
+    apply_writeback_client.transport.replies["tab.writeback_preview"] = {
+        "ok": True,
+        "result": {
+            "has_draft": True,
+            "destination_context": {},
+            "items": [{"id": "param-1", "target_name": "readout.gain"}],
+        },
+    }
+    result = apply_writeback_client.call(
+        "apply_writeback", {"tab": "t", "stage": stage, "items": items}
+    )
+    assert result["status"] == "finished"
+    assert result["not_started"] == []
+    assert [part["stage"] for part in result["completed"]] == (
+        [] if items == [] else [stage]
+    )
+    assert result["skipped"] == (["primary", "post"] if items == [] else [other_stage])
+    writes = [
+        params
+        for method, params in apply_writeback_client.transport.sent
+        if method == "tab.writeback_write"
+    ]
+    if items == []:
+        assert writes == []
+    else:
+        assert writes == [
+            {
+                "tab_id": "t",
+                "subtab_id": pane,
+                "write": [{"id": "param-1"}],
+                "submission_id": "wb-1",
+            }
+        ]
+        assert result["completed"][0]["written"][0]["id"] == "param-1"
+        assert result["submissions"] == {stage: "wb-1"}
+        assert result["recovery"] == {
+            "rpc": "tab.writeback_receipt",
+            "params": {"submission_id": "wb-1"},
+        }
+
+
+@pytest.mark.parametrize(
+    "method",
+    ["tab.get_post_analyze_result", "tab.writeback_preview", "tab.writeback_write"],
+)
+def test_apply_writeback_selected_post_preserves_source_rejection(
+    apply_writeback_client, method
+):
+    apply_writeback_client.transport.replies[method] = {
+        "ok": False,
+        "error": {
+            "code": "precondition_failed",
+            "reason": "result_superseded",
+            "message": "source was replaced",
+        },
+    }
+    result = apply_writeback_client.call(
+        "apply_writeback", {"tab": "t", "stage": "post"}
+    )
+    assert result["status"] == "failed"
+    assert result["failed_stage"] == "post"
+    assert result["error"]["reason"] == "result_superseded"
+    assert result["completed"] == result["not_started"] == []
+    assert result["skipped"] == ["primary"]
+    writes = [
+        params
+        for method, params in apply_writeback_client.transport.sent
+        if method == "tab.writeback_write"
+    ]
+    assert len(writes) == (1 if method == "tab.writeback_write" else 0)
+    assert result["failed_stage_may_have_partial_writes"] is bool(writes)
 
 
 def test_apply_writeback_keeps_selected_confirmed_prefix_on_post_failure(
