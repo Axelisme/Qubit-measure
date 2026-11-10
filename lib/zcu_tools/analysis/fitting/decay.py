@@ -34,8 +34,10 @@ def fit_decay(
 
     xs/real_signals are matching 1-D float64 arrays of acquired nonnegative
     delays and observations. fit_params initializes (offset, amplitude, time),
-    in observation, observation and delay units. Non-None fixedparams fixes the
-    corresponding values in that order. Free decay time uses
+    in observation, observation and delay units. Free amplitude is bounded by
+    +/- twice the observation range, widened to include a larger absolute
+    supplied amplitude guess. Non-None fixedparams fixes the corresponding
+    values in that order. Free decay time uses
     decay_time_bounds(xs); initial time is clipped. Invalid delay grids raise
     ValueError and numeric fitting failures raise AnalysisFailed. Fixed times
     remain unchanged for quality diagnostics to flag separately.
