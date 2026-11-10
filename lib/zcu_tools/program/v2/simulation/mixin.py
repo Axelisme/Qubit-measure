@@ -90,7 +90,7 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
         # compiled buffers directly and has no DAC/weight transport to upload.
         program.config_all(soc, load_envelopes=False, load_mem=False)
         if options.get("load_envelopes", True):
-            self._validate_simulation_uploads()
+            self._validate_simulation_uploads(soc)
         self._prepare_statistics_averaging()
         self.rounds_pbar = make_pbar(
             total=rounds, disable=not options.get("progress", True), leave=False
@@ -127,15 +127,16 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
         point_ndim = len(self.loop_dims) - 1
         self._simulation_average_axes = (point_ndim, *range(point_ndim), point_ndim + 1)
 
-    def _validate_simulation_uploads(self) -> None:
+    def _validate_simulation_uploads(self, soc: SimulationSoc) -> None:
         program = self._program()
-        for envelopes in program.envelopes:
+        for channel, envelopes in enumerate(program.envelopes):
             contents = envelopes["envs"]
             if not isinstance(contents, dict):
                 raise ValueError("compiled generator envelope table is missing")
             for pulse in contents.values():
                 if pulse["data"].dtype != np.int16:
                     raise AssertionError("envelope data must have dtype int16")
+                soc.load_envelope(channel, pulse["data"], pulse["addr"])
         for channel, config in program.ro_chs.items():
             if program.soccfg["readouts"][channel]["has_weights"]:
                 weights = config["weights"]
