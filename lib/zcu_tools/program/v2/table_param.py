@@ -17,6 +17,8 @@ class TableParam(QickParam):
     loop names the owning loop. values preserves point order, including repeats.
     Units are those of the consuming QICK parameter. Use to_int to quantize all
     points with QICK's scalar conversion, then get_rounded for physical values.
+    Each value must be a built-in int or float; other types (including bool
+    and NumPy scalars) raise TypeError naming the value at construction.
     Empty or nonfinite values raise ValueError at construction. Scalar +, -, *,
     / (including reversed operands) produce a new table on the same loop.
     Unswept QickParam operands supply their scalar value; combining with
@@ -30,8 +32,15 @@ class TableParam(QickParam):
         self.values = tuple(values)
         if not self.values:
             raise ValueError(f"TableParam loop {loop!r} values must not be empty")
-        if not all(isfinite(v) for v in self.values):
-            raise ValueError(f"TableParam loop {loop!r} values must be finite")
+        for value in self.values:
+            if type(value) not in (int, float):
+                raise TypeError(
+                    f"TableParam loop {loop!r} value {value!r} must be a built-in int or float"
+                )
+            if not isfinite(value):
+                raise ValueError(
+                    f"TableParam loop {loop!r} value {value!r} must be finite"
+                )
         self._raw: TableRawParam | None = None
         self._raw_scale: float = 1.0
         self._derived: TableParam | None = None

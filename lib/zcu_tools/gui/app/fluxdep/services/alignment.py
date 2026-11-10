@@ -14,6 +14,11 @@ import numpy as np
 from numpy.typing import NDArray
 
 from zcu_tools.analysis.fluxdep.models import PointsData
+from zcu_tools.gui.app.analysis_project.flux import ComponentFluxProvider
+from zcu_tools.gui.app.fluxdep.export_plan import (
+    ExportPlanner,
+    require_alignment_export_unit,
+)
 from zcu_tools.gui.app.fluxdep.state import AlignmentPublication, FluxDepState
 from zcu_tools.simulate import value2flux
 
@@ -23,8 +28,16 @@ logger = logging.getLogger(__name__)
 class AlignmentService:
     """Writes a spectrum's flux alignment (from the line-picker)."""
 
-    def __init__(self, state: FluxDepState) -> None:
+    def __init__(
+        self,
+        state: FluxDepState,
+        *,
+        export_planner: ExportPlanner | None = None,
+        flux_context_provider: ComponentFluxProvider | None = None,
+    ) -> None:
         self._state = state
+        self._export_planner = export_planner
+        self._flux_context_provider = flux_context_provider
 
     def set_alignment(
         self,
@@ -41,12 +54,26 @@ class AlignmentService:
         inherited_from is retained only for an unmodified inherited draft;
         omitted clears provenance for a direct/manual publication.
         Unknown name raises KeyError; a zero period or nonfinite mapped arrays
-        raise ValueError without mutation. Must run on the State owner thread.
+        raise ValueError without mutation. A configured export planner selects
+        the calibration device from these real positions; its context unit must
+        match the spectrum axis before publication. No conversion is performed.
+        Must run on the State owner thread.
         """
         entry = self._state.spectrums[name]
         flux_period = 2.0 * abs(flux_int - flux_half)
         if flux_period == 0.0:
             raise ValueError("flux_int must differ from flux_half (period is zero)")
+
+        alignment = AlignmentPublication(
+            flux_half, flux_int, flux_period, inherited_from
+        )
+        require_alignment_export_unit(
+            self._state.project,
+            self._export_planner,
+            self._flux_context_provider,
+            alignment,
+            entry.unit,
+        )
 
         # Compute the re-mapped flux axis here (this service owns the value2flux
         # mapping), then hand it to State, which writes the axis + alignment
@@ -61,7 +88,7 @@ class AlignmentService:
         )
         self._state.set_alignment(
             name,
-            AlignmentPublication(flux_half, flux_int, flux_period, inherited_from),
+            alignment,
             new_fluxs,
             new_point_fluxs,
         )

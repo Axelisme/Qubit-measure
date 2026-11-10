@@ -337,9 +337,10 @@ class TimelineBuilder:
     def add_table_sweep(self, name: str, values: Sequence[float]) -> TableParam:
         """Record a top-level lookup loop in outer-to-inner call order.
 
-        values must be a nonempty finite sequence in the consumer's units.
-        Return its TableParam. Duplicate/reserved names, invalid values or
-        recording after build raise ValueError.
+        values must be a nonempty finite sequence of built-in int/float values
+        in the consumer's units. Other element types raise TypeError naming the
+        value. Return its TableParam. Duplicate/reserved names, empty/nonfinite
+        values or recording after build raise ValueError.
         """
         self._ensure_recording()
         param = TableParam(name, values)

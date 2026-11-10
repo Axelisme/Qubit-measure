@@ -6,6 +6,7 @@ from dataclasses import replace
 
 import numpy as np
 import pytest
+from zcu_tools.analysis.flux import ComponentFluxContext, DevicePeriod, FluxFrame
 from zcu_tools.analysis.fluxdep.search import ParamBounds
 from zcu_tools.gui.app.fluxdep.controller import Controller
 from zcu_tools.gui.app.fluxdep.event_bus import (
@@ -16,6 +17,10 @@ from zcu_tools.gui.app.fluxdep.event_bus import (
     SpectrumAddedPayload,
     SpectrumChangedPayload,
     SpectrumRemovedPayload,
+)
+from zcu_tools.gui.app.fluxdep.export_plan import (
+    ComponentExportPlan,
+    FluxWritebackReceipt,
 )
 from zcu_tools.gui.app.fluxdep.state import FluxDepState
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
@@ -71,6 +76,121 @@ def test_set_alignment_emits_changed(spectrum_hdf5):
     ctrl.set_alignment(name, flux_half=0.0, flux_int=1.0)
     assert ctrl.state.spectrums[name].aligned is True
     assert [p.name for p in seen] == [name]
+
+
+@pytest.fixture
+def unit_checked_controller(fluxonium_entry):
+    ctrl = _ctrl()
+    ctrl.setup_project(
+        str(fluxonium_entry.result_path.parent.parent), "synthetic", "Q1"
+    )
+    ctrl.configure_flux_context(
+        lambda _model: ComponentFluxContext(
+            FluxFrame(0.0, {"bias": DevicePeriod(1.0), "coil": DevicePeriod(2.0, "A")}),
+            "bias",
+            {"bias": "native", "coil": "A"},
+        )
+    )
+    ctrl.configure_export(
+        lambda _model, points: ComponentExportPlan(
+            {"EL": points.flux_period}, FluxWritebackReceipt("written", "coil", None)
+        )
+    )
+    yield ctrl
+    ctrl.interactive.dispose()
+
+
+def test_alignment_rejects_export_target_unit_before_publication(
+    unit_checked_controller, spectrum_hdf5
+):
+    ctrl = unit_checked_controller
+    name = ctrl.load_spectrum(spectrum_hdf5[0], "OneTone")
+    original = ctrl.state.get_spectrum(name)
+    versions = ctrl.state.version.snapshot()
+    seen = _record(ctrl, SpectrumChangedPayload)
+
+    with pytest.raises(ValueError, match="coil.*native.*A"):
+        ctrl.set_alignment(name, flux_half=0.0, flux_int=1.0)
+
+    assert ctrl.state.get_spectrum(name) is original
+    assert ctrl.state.version.snapshot() == versions
+    assert seen == []
+    assert ctrl.state.fit.params is None
+
+
+def test_processed_unit_mismatch_rejects_the_whole_collection(
+    unit_checked_controller, spectrum_hdf5, tmp_path
+):
+    source = _ctrl()
+    try:
+        name = source.load_spectrum(spectrum_hdf5[0], "OneTone")
+        source.set_alignment(name, flux_half=0.25, flux_int=1.25)
+        entry = source.state.get_spectrum(name)
+        source.state.put_spectrum(replace(entry, unit="A"))
+        source.state.put_spectrum(replace(entry, name="incompatible", unit="native"))
+        path = source.export_spectrums(str(tmp_path / "processed.hdf5"))
+    finally:
+        source.interactive.dispose()
+    ctrl = unit_checked_controller
+    versions = ctrl.state.version.snapshot()
+    seen = _record(ctrl, SpectrumAddedPayload)
+
+    with pytest.raises(ValueError, match="coil.*native.*A"):
+        ctrl.load_processed_spectrums(path)
+
+    assert ctrl.state.spectrums == {}
+    assert ctrl.state.version.snapshot() == versions
+    assert seen == []
+    assert ctrl.state.fit.params is None
+
+
+@pytest.mark.parametrize("policy", ["matching", "skipped", "no_target"])
+def test_compatible_alignment_and_processed_restore_keep_native_positions(
+    unit_checked_controller, spectrum_hdf5, tmp_path, policy
+):
+    ctrl = unit_checked_controller
+    if policy == "matching":
+        # Replace context after the planner. Its default is deliberately not the
+        # export target, and would reject native if used as the authority.
+        ctrl.configure_flux_context(
+            lambda _model: ComponentFluxContext(
+                None, "bias", {"bias": "A", "coil": "native"}
+            )
+        )
+    elif policy == "skipped":
+        ctrl.configure_export(
+            lambda _model, _points: ComponentExportPlan(
+                {}, FluxWritebackReceipt("skipped", "coil", "No calibration requested.")
+            )
+        )
+    else:
+        ctrl.state.set_project(None)
+    name = ctrl.load_spectrum(spectrum_hdf5[0], "OneTone")
+    ctrl.set_alignment(name, flux_half=0.25, flux_int=1.25)
+    aligned = ctrl.state.get_spectrum(name)
+    assert aligned.aligned
+    assert (aligned.flux_half, aligned.flux_int, aligned.flux_period) == (
+        0.25,
+        1.25,
+        2.0,
+    )
+    output = ctrl.export_spectrums(str(tmp_path / "compatible.hdf5"))
+    ctrl.remove_spectrum(name)
+
+    assert ctrl.load_processed_spectrums(output) == [name]
+
+    restored = ctrl.state.get_spectrum(name)
+    assert restored.aligned and restored.points_completed
+    # Processed offset/period reconstructs the canonical integer at flux=0,
+    # rather than the equivalent integer at flux=1 chosen above.
+    assert (restored.flux_half, restored.flux_int, restored.flux_period) == (
+        0.25,
+        -0.75,
+        2.0,
+    )
+    assert restored.unit == "native"
+    np.testing.assert_array_equal(restored.raw["fluxs"], aligned.raw["fluxs"])
+    assert ctrl.state.fit.params is None
 
 
 def test_set_points_emits_changed(spectrum_hdf5):

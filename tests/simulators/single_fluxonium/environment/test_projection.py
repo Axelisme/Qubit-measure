@@ -2,6 +2,8 @@
 
 from collections.abc import Generator
 from dataclasses import replace
+from itertools import product
+from threading import Event
 
 import numpy as np
 import pytest
@@ -14,8 +16,10 @@ from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.simulation import IntegratedRound
 from zcu_tools.simulate import adc
+from zcu_tools.simulate.evolution import Cancelled, Engine
 from zcu_tools.simulators.single_fluxonium.config import parse_single_fluxonium
 from zcu_tools.simulators.single_fluxonium.environment.runtime import (
+    SingleFluxoniumRuntimeOptions,
     SingleFluxoniumSource,
     single_fluxonium,
 )
@@ -106,7 +110,7 @@ def test_source_pruning_records_discarded_mass_and_rejects_empty_point(
         assert source.prepare(request, source.snapshot()) is prepared
 
 
-@pytest.mark.parametrize("projections", [1, 2])
+@pytest.mark.parametrize("projections", [1, 2, 3])
 def test_zero_floor_retains_zero_weight_histories_and_reuses_preparation(
     projection_environment: tuple[SimulationEnvironment, SingleFluxoniumSource],
     projections: int,
@@ -129,12 +133,13 @@ def test_zero_floor_retains_zero_weight_histories_and_reuses_preparation(
         np.argmax(populations, axis=-1)
         for populations in readout.populations[:projections]
     ]
-    expected = {(0,), (1,)} if projections == 1 else {(0, 0), (0, 1), (1, 0), (1, 1)}
-    assert set(zip(*histories, strict=True)) == expected
+    assert list(zip(*histories, strict=True)) == list(
+        product(range(2), repeat=projections)
+    )
     diagnostics = prepared.projection_diagnostics
     if diagnostics is None:
         raise AssertionError("projective preparation must report retained histories")
-    counts = (2,) if projections == 1 else (2, 4)
+    counts = tuple(2**index for index in range(1, projections + 1))
     assert diagnostics.retained_outcomes == (counts,)
     np.testing.assert_array_equal(diagnostics.pruned_weight, [[0] * projections])
     assert diagnostics.evolution_calls == len(prepared.reuse_keys) > 0
@@ -215,6 +220,80 @@ def test_two_projections_retain_complete_markov_outcome_histories(
     assert diagnostics.retained_outcomes == ((2, 4),)
     np.testing.assert_array_equal(diagnostics.pruned_weight, [[0, 0]])
     assert source.prepare(request, source.snapshot()) is prepared
+
+
+def test_independent_preparation_without_routing_residency_matches_full_histories(
+    projection_environment: tuple[SimulationEnvironment, SingleFluxoniumSource],
+):
+    env, reference = projection_environment
+    program = repeated_read_program(env, reads=4, reps=1)
+    program.acquire(env.soc, progress=False)
+    request = env.soc.binding.rounds[0].acquire
+    expected = reference.prepare(request, reference.snapshot())
+    source = SingleFluxoniumSource(
+        reference.settings,
+        env.devices,
+        runtime=SingleFluxoniumRuntimeOptions(
+            engine=Engine(workers=1, routing_cache_bytes=0)
+        ),
+    )
+    try:
+        actual = source.prepare(request, source.snapshot())
+        assert actual is not expected
+        np.testing.assert_allclose(
+            actual.raw.readout.weights, expected.raw.readout.weights, rtol=0, atol=1e-8
+        )
+        for actual_event, expected_event in zip(
+            actual.raw.readout.populations,
+            expected.raw.readout.populations,
+            strict=True,
+        ):
+            np.testing.assert_allclose(actual_event, expected_event, rtol=0, atol=1e-8)
+        if (
+            actual.projection_diagnostics is None
+            or expected.projection_diagnostics is None
+        ):
+            raise AssertionError("projective preparations must report histories")
+        assert (
+            actual.projection_diagnostics.retained_outcomes
+            == expected.projection_diagnostics.retained_outcomes
+        )
+        np.testing.assert_allclose(
+            actual.projection_diagnostics.pruned_weight,
+            expected.projection_diagnostics.pruned_weight,
+            rtol=0,
+            atol=1e-8,
+        )
+    finally:
+        source.close()
+
+
+def test_cancelled_projective_preparation_can_retry_without_partial_results(
+    projection_environment: tuple[SimulationEnvironment, SingleFluxoniumSource],
+):
+    env, source = projection_environment
+    program = repeated_read_program(env, reads=4, reps=1)
+    program.acquire(env.soc, progress=False)
+    request = env.soc.binding.rounds[0].acquire
+    snapshot = source.snapshot()
+    cancel = Event()
+    cancel.set()
+    with pytest.raises(Cancelled):
+        source.prepare(request, snapshot, cancel=cancel)
+    cancel.clear()
+    prepared = source.prepare(request, snapshot, cancel=cancel)
+    cancel.set()
+    with pytest.raises(Cancelled):
+        source.prepare(request, snapshot, cancel=cancel)
+    cancel.clear()
+    retried = source.prepare(request, snapshot, cancel=cancel)
+    np.testing.assert_array_equal(
+        retried.raw.readout.weights, prepared.raw.readout.weights
+    )
+    for actual, expected in zip(
+        retried.raw.readout.populations, prepared.raw.readout.populations, strict=True
+    ):
+        np.testing.assert_array_equal(actual, expected)
 
 
 def test_unobserved_terminal_keeps_terminal_state_counts_and_evolution(
