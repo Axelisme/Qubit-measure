@@ -88,6 +88,91 @@ def test_gaussian_named_result_preserves_sigma_conversion_and_quality(
     )
 
 
+@pytest.mark.parametrize("sign", [1.0, -1.0])
+@pytest.mark.parametrize("initial_amplitude", [None, 0.01])
+def test_fit_decay_recovers_noisy_sparse_decay(
+    sign: float,
+    initial_amplitude: float | None,
+) -> None:
+    depths = np.array([0, 1, 2, 4, 8, 16, 32, 64, 128], dtype=np.float64)
+    truth = 0.2 + sign * 0.8 * 0.99**depths
+    # Four independent traces reduce sigma=.001 to .0005 after averaging.
+    noise = np.random.default_rng(506).normal(0.0, 0.001, (4, 2, depths.size))
+    observations = truth + noise[:, 0].mean(axis=0)
+    initial = (
+        None
+        if initial_amplitude is None
+        else (0.2, sign * initial_amplitude, -1 / np.log(0.99))
+    )
+
+    result = fit_decay(depths, observations, fit_params=initial)
+
+    # 1% in time is about .0001 in p at p=.99. Curve errors must stay within
+    # three standard deviations of the averaged observations, not percent-level bias.
+    assert result.decay_time == pytest.approx(-1 / np.log(0.99), rel=0.01)
+    assert np.exp(-1 / result.decay_time) == pytest.approx(0.99, abs=0.0001)
+    np.testing.assert_allclose(result.curve, truth, rtol=0.0, atol=0.0015)
+    np.testing.assert_allclose(result.curve, observations, rtol=0.0, atol=0.0015)
+    assert result.quality.invalid == ()
+
+
+@pytest.mark.parametrize("sign", [1.0, -1.0])
+@pytest.mark.parametrize("fixed_index", [None, 1, 2])
+def test_fit_decay_accepts_large_initial_amplitude_and_preserves_fixed_values(
+    sign: float,
+    fixed_index: int | None,
+) -> None:
+    depths = np.array([0, 1, 2, 4, 8, 16], dtype=np.float64)
+    truth = (0.2, sign * 0.8, -1 / np.log(0.99))
+    observations = truth[0] + truth[1] * 0.99**depths
+    fixed: list[float | None] = [None, None, None]
+    if fixed_index is not None:
+        fixed[fixed_index] = truth[fixed_index]
+
+    result = fit_decay(depths, observations, fit_params=truth, fixedparams=fixed)
+
+    np.testing.assert_allclose(result.params, truth, rtol=1e-6)
+    np.testing.assert_allclose(result.curve, observations, rtol=0.0, atol=1e-8)
+    if fixed_index is not None:
+        assert result.params[fixed_index] == truth[fixed_index]
+        np.testing.assert_array_equal(result.cov[fixed_index, :], 0.0)
+        np.testing.assert_array_equal(result.cov[:, fixed_index], 0.0)
+
+
+@pytest.mark.parametrize("sign", [1.0, -1.0])
+@pytest.mark.parametrize("initial_amplitude", [0.1, 0.6])
+def test_fit_decay_keeps_finite_amplitude_bounds(
+    sign: float,
+    initial_amplitude: float,
+) -> None:
+    depths = np.array([0, 1, 2, 4, 8, 16], dtype=np.float64)
+    observations = 0.2 + sign * 0.8 * 0.99**depths
+    bound = max(2 * np.ptp(observations), initial_amplitude)
+
+    result = fit_decay(
+        depths,
+        observations,
+        fit_params=(0.2, sign * initial_amplitude, -1 / np.log(0.99)),
+    )
+
+    # This shorter window cannot reach A=.8 inside the declared feasible domain.
+    assert result.params[1] == pytest.approx(sign * bound, rel=1e-5)
+
+
+@pytest.mark.parametrize("sign", [1.0, -1.0])
+def test_fit_decay_does_not_clip_fixed_amplitude_to_observed_range(sign: float) -> None:
+    depths = np.array([0, 1, 2, 4, 8, 16], dtype=np.float64)
+    observations = 0.2 + sign * 0.8 * 0.99**depths
+
+    result = fit_decay(depths, observations, fixedparams=(None, sign * 0.8, None))
+
+    assert result.params[1] == sign * 0.8
+    assert result.decay_time == pytest.approx(-1 / np.log(0.99), rel=1e-5)
+    np.testing.assert_allclose(result.curve, observations, rtol=0.0, atol=1e-8)
+    np.testing.assert_array_equal(result.cov[1, :], 0.0)
+    np.testing.assert_array_equal(result.cov[:, 1], 0.0)
+
+
 def test_fit_decay_recovers_T1():
     xs = np.linspace(0, 20, 300)
     true = (0.1, 1.0, 5.0)

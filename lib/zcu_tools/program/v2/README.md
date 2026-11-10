@@ -63,7 +63,9 @@ ADC 回邊仍須證明下一圈不早於前一視窗結尾，重疊或無法證�
 建立頂層 loop，回傳 `TableParam`。Program 子類別在 `_initialize` 呼叫。
 它等同 `add_loop(name, len(values))` 加 `TableParam(name, values)`，對應線性掃描的
 `add_sweep(name, spec)`。兩種掃描依宣告順序由外到內排列，重名會 raise ValueError。
-`values` 必須是非空、有限的物理值序列，單位由消費參數決定。空表或非有限值 raise ValueError。
+`values` 必須是非空、有限的內建 `int`／`float` 物理值序列，單位由消費參數決定。
+其他元素型別（包含 bool 與 NumPy scalar）在建構 `TableParam` 時 raise TypeError，訊息指出值與 loop。
+NumPy array 的呼叫端先用 `.tolist()` 轉成內建數字。空表或非有限值 raise ValueError。
 
 ```python
 from zcu_tools.program.v2 import PulseReadout, TableParam
