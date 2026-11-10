@@ -286,15 +286,43 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
             ax.grid(True)
         fig.tight_layout()
 
-        _, ax = plots.subplots(num="pareto", figsize=(7, 5))
+        # Keep dense gain labels in a lookup table, not on top of the points.
+        gain_groups = np.array_split(np.flatnonzero(valid), 3)
+        table_height = max(2.0, 0.26 * len(gain_groups[0]) + 0.8)
+        fig, ax = plots.subplots(num="pareto", figsize=(13, 5 + table_height))
+        grid = fig.add_gridspec(2, 3, height_ratios=(5, table_height))
+        ax.set_subplotspec(grid[0, :])
         points = ax.scatter(
             f_sep[valid], qnd[valid], c=result.gains[valid], label="Gains"
         )
         ax.figure.colorbar(points, ax=ax, label="Gain (a.u.)")
         ax.plot(f_sep[indices], qnd[indices], "r.-", label="Pareto frontier")
-        for index in np.flatnonzero(valid):
-            ax.annotate(f"{result.gains[index]:.4g}", (f_sep[index], qnd[index]))
         ax.set(xlabel="Gaussian separation fidelity F_sep", ylabel="QND Q (R1 on)")
         ax.legend()
         ax.grid(True)
+        for column, group in enumerate(gain_groups):
+            table_ax = fig.add_subplot(grid[1, column])
+            table_ax.axis("off")
+            if len(group) == 0:
+                continue
+            table_ax.set_title("Gain lookup (* = Pareto frontier)", fontsize=10)
+            table = table_ax.table(
+                cellText=[
+                    [
+                        f"{result.gains[index]:.4g}",
+                        f"{f_sep[index]:.6g}",
+                        f"{qnd[index]:.6g}",
+                        "*" if index in frontier else "",
+                    ]
+                    for index in group
+                ],
+                colLabels=["Gain (a.u.)", "F_sep", "QND Q", ""],
+                colWidths=[0.3, 0.3, 0.3, 0.1],
+                cellLoc="center",
+                loc="upper center",
+            )
+            table.auto_set_font_size(False)
+            table.set_fontsize(9)
+            table.scale(1, 1.3)
+        fig.tight_layout()
         return PowerQndAnalysis(gain=options.gain)
