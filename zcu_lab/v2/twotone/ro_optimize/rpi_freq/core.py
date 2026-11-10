@@ -1,9 +1,10 @@
 """Readout frequency sweep of an ...R π R π... chain with a calibrated π.
 
-Each frequency is one long chain of readout R and fixed π pulses, with no reset
-or relax delay between reps. readout_chain.rpi_analysis gives every frequency an
-alternating-contrast score and its invalid reasons. The best frequency is the
-valid frequency with the largest score.
+Each rep is a 64-read cycle of readout R and fixed π pulses, with no reset or
+relax delay between reps. Lags stay within each cycle.
+readout_chain.rpi_analysis gives every frequency an alternating-contrast score
+and its invalid reasons. The best frequency is the valid frequency with the
+largest score.
 """
 
 from dataclasses import dataclass
@@ -65,7 +66,7 @@ class RPiFreqCfg(ConfigBase):
         its settings; its pre_delay in us is usually 0.
     freq: Readout frequency sweep in MHz, absolute RF when readout.mixer_freq is
         set and the DDS frequency otherwise.
-    reps: Blocks of 16 R-pi per frequency in each round, at least 1.
+    reps: Cycles of 64 R-pi per frequency in each round, at least 1.
     rounds: Software rounds, at least 1.
     """
 
@@ -82,15 +83,15 @@ class RPiFreqCfg(ConfigBase):
         int,
         FieldMeta(
             label="Reps",
-            description="Blocks of 16 R-pi per frequency in each round. "
-            "All reps of one frequency form one chain.",
+            description="Cycles of 64 R-pi per frequency in each round. "
+            "Lags stay within each cycle; sums accumulate across reps.",
         ),
-    ] = Field(default=1000, ge=1)
+    ] = Field(default=250, ge=1)
     rounds: Annotated[
         int,
         FieldMeta(
             label="Rounds",
-            description="Software rounds. Each round starts a new chain per frequency.",
+            description="Software rounds. Cycle sums accumulate across finished rounds.",
         ),
     ] = Field(default=20, ge=1)
 
@@ -165,12 +166,12 @@ class RPiFreqExp(Experiment[RPiFreqResult, RPiFreqCfg]):
     def run(self, cfg: RPiFreqCfg, *, context: RunContext) -> RPiFreqResult:
         """Read an R-pi chain at each readout frequency and keep its sums.
 
-        One rep is 16 pairs of cfg.readout at the swept frequency and
-        cfg.pi_pulse. The sweep sets the generator and ADC frequency of the
+        One rep is one cycle of 64 pairs of cfg.readout at the swept frequency
+        and cfg.pi_pulse. The sweep sets the generator and ADC frequency of the
         readout together. The pi frequency, gain and length and every other
         readout setting stay fixed. All cfg.reps reps of one frequency run
-        before the next frequency, with no reset or relax delay. Each round
-        starts a new chain per frequency.
+        before the next frequency, with no reset or relax delay. Rep, round
+        and frequency boundaries never contribute lag pairs.
 
         Inside a rep, each pi starts cfg.readout.post_delay plus
         cfg.pi_pulse.pre_delay us after the readout generator pulse ends, even
@@ -179,10 +180,9 @@ class RPiFreqExp(Experiment[RPiFreqResult, RPiFreqCfg]):
         plus cfg.readout.pre_delay us after the pi ends, both usually 0. At a
         rep boundary the shot closure first waits for the last ADC window to
         close, so that step can be longer and reads are not guaranteed to be
-        evenly spaced. This wait is not a relax delay. The analysis still
-        treats the reps of one frequency and round as one chain and assumes the
-        same retention at every step. It neither corrects nor quantifies the
-        bias from this wait.
+        evenly spaced across reps. This wait is not a relax delay and falls
+        outside every lag. Lag 1..15 pairs stay within each cycle; their sums
+        accumulate across reps and rounds.
 
         After each round the live plot shows the score of each valid frequency,
         from all finished rounds. Return the sums of all finished rounds;
@@ -227,11 +227,11 @@ class RPiFreqExp(Experiment[RPiFreqResult, RPiFreqCfg]):
             (len(freqs), RECORD_COLUMNS), dtype=np.float64, on_update=update
         )
 
-        # 2. The chain is one fixed Repeat of R then pi; the sweep is outside it.
+        # 2. Each cycle is one fixed Repeat of R then pi; the sweep is outside it.
         with Schedule(record_sums, scope=context.scope) as sched:
             # reps_innermost: all reps of one frequency run before the next one.
             # relax_delay 0: no added wait between reps. The shot closure can still
-            # wait for the last ADC window, and the reps remain one chain.
+            # wait for the last ADC window, outside every lag pair.
             builder = TimelineBuilder(
                 context.soccfg, reps=cfg.reps, relax_delay=0.0, reps_innermost=True
             )

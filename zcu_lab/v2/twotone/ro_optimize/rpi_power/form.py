@@ -13,7 +13,7 @@ def make_form(ctx: FormContext) -> Form[RPiPowerCfg]:
     """Use the captured readout and x180 slots, or fresh templates when absent.
 
     The pi pulse is an operator-calibrated input: this Form does not check it.
-    Reps and rounds use the cfg defaults.
+    Reps defaults to 250 cycles of 64 R-pi pairs; rounds defaults to 20.
     """
     readout = source(
         ctx,

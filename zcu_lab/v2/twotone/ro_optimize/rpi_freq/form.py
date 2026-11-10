@@ -15,7 +15,8 @@ def make_form(ctx: FormContext) -> Form[RPiFreqCfg]:
 
     The pi pulse is an operator-calibrated input: this Form does not check it.
     The frequency sweep starts at 11 points around $resonator.freq with half
-    width $resonator.kappa. Reps and rounds use the cfg defaults.
+    width $resonator.kappa. Reps defaults to 250 cycles of 64 R-pi pairs;
+    rounds defaults to 20.
     """
     readout = source(
         ctx,

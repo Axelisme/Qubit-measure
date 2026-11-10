@@ -20,8 +20,8 @@ def rpi_sums(prog: TimelineProgramV2, read: str) -> ShotSumProcessor:
 
     read is an emit tag or untagged PulseReadout name. The caller owns the Rπ
     schedule and calibrated π, including fixed π settings and readout post_delay
-    measured from the generator end. Use relax_delay=0 to connect reps without
-    waiting. Multiple settings require compiled reps as the innermost loop
+    measured from the generator end. Use relax_delay=0 to avoid added waiting
+    between reps. Multiple settings require compiled reps as the innermost loop
     (reps_innermost=True); a single setting allows either loop order. Invalid
     compiled loop order raises ValueError at construction.
     The label must select one PulseReadout emission inside one fixed Repeat
@@ -29,12 +29,14 @@ def rpi_sums(prog: TimelineProgramV2, read: str) -> ShotSumProcessor:
     After build call prog.set_reads_per_shot(n) with the Repeat count, before
     constructing the processor. Label/provenance/trigger/count mismatches raise
     ValueError with expected and actual values, without changing prog.
-    No pulse physics or hidden physical discontinuity is checked.
+    No pulse physics is checked. Discontinuities between reps do not affect
+    lags; hidden discontinuities inside a rep cycle cannot be detected.
 
     Each call borrows ADC float64 (points, reps, reads, 2) IQ for one complete
     round: integer integrals / rounded integration length, without IQ-offset
-    subtraction. Reps at each setting form one segment; internal chunks are
-    not cuts. Round and setting boundaries never contribute pairs. No inputs
+    subtraction. Each rep at each setting is one segment of length reads.
+    Lag 1..15 pairs stay within that cycle; sums accumulate across reps and
+    rounds. Rep, round and setting boundaries never contribute pairs. No inputs
     are changed and other ADC inputs are ignored. Shape/dtype mismatches raise
     ValueError with expected and actual values; a missing selected ADC raises
     KeyError. Points, reps and reads must match the compiled program.
@@ -43,13 +45,14 @@ def rpi_sums(prog: TimelineProgramV2, read: str) -> ShotSumProcessor:
     rounds using its existing cancellation contract.
 
     Return float64 (points, 35) additive records, with Python column indices:
-    0: segment count S (one per round); 1: read count N;
+    0: completed cycle count S (reps per round); 1: read count N = reps * reads;
     2:4: ΣI, ΣQ; 4: Σ(I²+Q²); 5:20: lag dot-product sums j=1..15;
     20:35: actual integer pair counts C_j. These are 18 moment sums, in ADC
     units for first moments and ADC units squared for square/products. Counts
     are integers encoded as float64. H=1 metadata recovers segment length L=N/S,
     not N itself; do not combine records with different L. Each segment adds
-    max(L-j, 0) pairs. Pass one pooled record to RPiSums.from_processor in
+    max(L-j, 0) pairs, so each round adds reps * max(reads-j, 0). Pass one
+    pooled record to RPiSums.from_processor in
     analysis.readout_chain; no per-round normalization is applied here.
     """
     dims, avg = prog.loop_dims, prog.avg_level
@@ -68,24 +71,17 @@ def rpi_sums(prog: TimelineProgramV2, read: str) -> ShotSumProcessor:
                 f"ADC {ch}: expected float64 {expected_shape}; actual "
                 f"{values.dtype} {values.shape}"
             )
-        stream = values.reshape(points, -1, 2)
-        length = stream.shape[1]
+        reps = values.shape[1]
         sums = np.zeros((points, 35), dtype=np.float64)
-        sums[:, 0] = 1
-        sums[:, 1] = length
-        for start in range(0, length, 4096):
-            stop = min(start + 4096, length)
-            chunk = stream[:, start:stop]
-            sums[:, 2:4] += chunk.sum(axis=1)
-            sums[:, 4] += np.einsum("pti,pti->p", chunk, chunk)
-            # A pair belongs to the chunk holding its later read, exactly once.
-            # The earlier read can use the preceding chunk's last 15 reads.
-            for lag in range(1, 16):
-                later_start = max(start, lag)
-                early = stream[:, later_start - lag : stop - lag]
-                late = stream[:, later_start:stop]
-                sums[:, 4 + lag] += np.einsum("pti,pti->p", early, late)
-                sums[:, 19 + lag] += stop - later_start
+        sums[:, 0] = reps
+        sums[:, 1] = reps * reads
+        sums[:, 2:4] = values.sum(axis=(1, 2))
+        sums[:, 4] = np.einsum("prti,prti->p", values, values)
+        for lag in range(1, 16):
+            early = values[:, :, :-lag]
+            late = values[:, :, lag:]
+            sums[:, 4 + lag] = np.einsum("prti,prti->p", early, late)
+            sums[:, 19 + lag] = reps * max(reads - lag, 0)
         return sums
 
     return process

@@ -14,9 +14,8 @@ from zcu_tools.analysis.readout_chain import RPiAnalysis, RPiSums, rpi_analysis
 from zcu_tools.experiment import VariableAxisSpec, VariableSpec, VariableZSpec
 from zcu_tools.plotting.plots import Plots
 
-# rpi_sums needs one fixed Repeat of at least 16 reads. Its count does not cut the
-# chain: lags up to 15 run across reps.
-READS_PER_REP = 16
+# One rep is one 64-read cycle; lag 1..15 pairs never cross cycle boundaries.
+READS_PER_REP = 64
 
 # Columns of one rpi_sums record. Only RPiSums.from_processor reads their meaning.
 RECORD_COLUMNS = 35

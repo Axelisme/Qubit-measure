@@ -1,9 +1,10 @@
 """Readout length sweep of an ...R π R π... chain with a calibrated π.
 
-Each ADC window is one long chain of readout R and fixed π pulses, with no reset
-or relax delay between reps. readout_chain.rpi_analysis gives every window an
-alternating-contrast score and its invalid reasons. The best window is the valid
-window with the largest score.
+Each rep is a 64-read cycle of readout R and fixed π pulses, with no reset or
+relax delay between reps. Lags stay within each cycle.
+readout_chain.rpi_analysis gives every window an alternating-contrast score
+and its invalid reasons. The best window is the valid window with the
+largest score.
 """
 
 from dataclasses import dataclass
@@ -68,7 +69,7 @@ class RPiLengthCfg(ConfigBase):
     pi_pulse: Calibrated pi pulse, the same at every window. Run keeps all of its
         settings; its pre_delay in us is usually 0.
     length: ADC window sweep in us.
-    reps: Blocks of 16 R-pi per window in each round, at least 1.
+    reps: Cycles of 64 R-pi per window in each round, at least 1.
     rounds: Software rounds, at least 1.
     """
 
@@ -93,15 +94,15 @@ class RPiLengthCfg(ConfigBase):
         int,
         FieldMeta(
             label="Reps",
-            description="Blocks of 16 R-pi per window in each round. "
-            "All reps of one window form one chain.",
+            description="Cycles of 64 R-pi per window in each round. "
+            "Lags stay within each cycle; sums accumulate across reps.",
         ),
-    ] = Field(default=1000, ge=1)
+    ] = Field(default=250, ge=1)
     rounds: Annotated[
         int,
         FieldMeta(
             label="Rounds",
-            description="Software rounds. Each round starts a new chain per window.",
+            description="Software rounds. Cycle sums accumulate across finished rounds.",
         ),
     ] = Field(default=20, ge=1)
 
@@ -184,10 +185,10 @@ class RPiLengthExp(Experiment[RPiLengthResult, RPiLengthCfg]):
         The host builds one program per window. Each program sets the ADC window
         to the swept value, rounded to the ADC clock, and the readout pulse to
         that window plus 0.11 us. The pi pulse and every other readout setting,
-        including post_delay, stay fixed. One rep is 16 pairs of the readout and
-        cfg.pi_pulse. All cfg.reps reps of one window run before the next
-        window, with no reset or relax delay. Each round starts a new chain per
-        window.
+        including post_delay, stay fixed. One rep is one cycle of 64 pairs of
+        the readout and cfg.pi_pulse. All cfg.reps reps of one window run before
+        the next window, with no reset or relax delay. Rep, round and window boundaries
+        never contribute lag pairs.
 
         Inside a rep, each pi starts cfg.readout.post_delay plus
         cfg.pi_pulse.pre_delay us after the readout generator pulse ends, even
@@ -196,10 +197,9 @@ class RPiLengthExp(Experiment[RPiLengthResult, RPiLengthCfg]):
         plus cfg.readout.pre_delay us after the pi ends, both usually 0. At a
         rep boundary the shot closure first waits for the last ADC window to
         close, so that step can be longer and reads are not guaranteed to be
-        evenly spaced. This wait is not a relax delay. The analysis still
-        treats the reps of one window and round as one chain and assumes the
-        same retention at every step. It neither corrects nor quantifies the
-        bias from this wait.
+        evenly spaced across reps. This wait is not a relax delay and falls
+        outside every lag. Lag 1..15 pairs stay within each cycle; their sums
+        accumulate across reps and rounds.
 
         After each round the live plot shows the score of each valid window with
         a finished round, from all finished rounds. Return the sums of the
@@ -241,9 +241,9 @@ class RPiLengthExp(Experiment[RPiLengthResult, RPiLengthCfg]):
         # 2. Each window has its own program: one fixed Repeat of R then pi.
         with Schedule(record_sums, scope=context.scope) as sched:
             for _, step in sched.scan("length", lengths.tolist()):
-                # reps_innermost: the reps of this window run as one chain.
+                # reps_innermost: all reps of this window run together.
                 # relax_delay 0: no added wait between reps. The shot closure can
-                # still wait for the last ADC window, and the reps remain one chain.
+                # still wait for the last ADC window, outside every lag pair.
                 builder = TimelineBuilder(
                     context.soccfg, reps=cfg.reps, relax_delay=0.0, reps_innermost=True
                 )
