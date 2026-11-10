@@ -147,13 +147,24 @@ and mean complex IQ per participating tone; the fringe decay measures T2.
 不論硬體掃描、host 掃描或 `list[int]`，cfg 掃描欄位都用被掃量的單數名，例如 `delay`、`gain`、`freq`。
 Result 欄位用複數名，例如 `delays`、`gains`、`freqs`；沒有自然複數時用 `_values`。
 例如 `twotone/rb` 的 cfg 用 `depth`，Result 用 `depths`。
-[`two_qubit/conditional_spectroscopy`](two_qubit/conditional_spectroscopy/core.py) 的 host DC 掃描則用 cfg `dc`、Result `dc_values`。
 `declare_sweep`／`add_sweep` 名稱跟 cfg 掃描欄位相同。
 
 cfg 若只提供單一計數 N，並由它推導 0 到 N 的掃描軸，欄位命名為 `n_<軸名>`。
 軸與迴圈用該量的名字，不加 `n_`。
 例如 `twotone/zigzag_sweep` 用 cfg `n_times`，以 `np.arange(0, cfg.n_times + 1)` 建立 `times`，
 用 `builder.add_loop("times", len(times))` 宣告迴圈，Result 也用 `times`。
+
+目前保留下列既有 cfg 欄位名，待遷移時改名。歷史 cfg 的相容設計尚待裁定，現在不啟用新名稱。
+Result 欄位維持原名。
+
+| 實驗 | 目前 cfg 欄位 | 待遷移時改名為 |
+| --- | --- | --- |
+| `two_qubit/conditional_spectroscopy` | `dc_values` | `dc` |
+| `two_qubit/idle_zz` | `dc_values` | `dc` |
+| `two_qubit/conditional_phase` | `gate_counts` | `gate_count` |
+| `two_qubit/local_z` | `gate_counts` | `gate_count` |
+| `two_qubit/rb` | `depths` | `depth` |
+| `two_qubit/rb` | `seeds` | `seed` |
 
 新實驗的軸 label 沿用同一個字，例如 `Delay`。既有存檔軸的 label／unit 不改，避免舊檔無法載入。
 Module 名稱等於提供設定的 cfg 欄位名，例如 `Pulse("pi_pulse", cfg.pi_pulse)`。
