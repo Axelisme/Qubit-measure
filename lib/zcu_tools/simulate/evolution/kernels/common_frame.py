@@ -515,9 +515,10 @@ def advance_common_frame(
 def _propagate_row(frame, args, control, rho):
     """Split at every local envelope knot, including held-endpoint transitions.
 
-    Segment events already bound the row. Each knot-free interval gets an
-    apply-local dyadic bath bank; neither banks nor accepted schedules survive
-    this density. The base step never exceeds the admitted fixed-step ceiling.
+    Segment events already bound the row. Knot-free intervals with exactly equal
+    base steps share a dyadic bath bank within this row only. Neither banks nor
+    accepted schedules survive the row. The base step never exceeds the admitted
+    fixed-step ceiling.
     """
     duration, steps = control
     _, _, offsets, times, _, counts = args
@@ -532,15 +533,20 @@ def _propagate_row(frame, args, control, rho):
     knots = knots[(knots >= 0) & (knots <= duration)]
     generator, decay = secular_operators(frame.model)
     dynamics = frame.channels, args, pack_entries(frame.channels)
+    bath_banks: dict[float, tuple[NDArray[np.float64], NDArray[np.float64]]] = {}
     for start, end in zip(knots[:-1], knots[1:], strict=True):
         interval = end - start
         interval_steps = max(1, int(np.ceil(interval / (duration / steps))))
         base = interval / interval_steps
-        dts = base / 2 * 2.0 ** np.arange(7)
-        populations = np.stack([expm(generator * dt / 2) for dt in dts])
-        coherences = np.stack([np.exp(-decay * dt / 2) for dt in dts])
-        for coherence in coherences:
-            np.fill_diagonal(coherence, 1.0)
+        # Do not merge nearby steps: the unchanged float defines the exact bank.
+        if base not in bath_banks:
+            dts = base / 2 * 2.0 ** np.arange(7)
+            populations = np.stack([expm(generator * dt / 2) for dt in dts])
+            coherences = np.stack([np.exp(-decay * dt / 2) for dt in dts])
+            for coherence in coherences:
+                np.fill_diagonal(coherence, 1.0)
+            bath_banks[base] = populations, coherences
+        populations, coherences = bath_banks[base]
         rho = adaptive(
             dynamics,
             (float(start), float(interval), interval_steps, duration),
