@@ -147,9 +147,15 @@ Module 名稱等於提供設定的 cfg 欄位名，例如 `Pulse("pi_pulse", cfg
 欄位名寫角色，例如 `stark_tone`、`probe`，只有角色對稱時才用 `gain1`／`gain2`。
 既有持久 cfg 欄位改名時，隨遷移更新 `cfg_schema_version`。
 
-Cfg 宣告順序就是 Form 顯示順序，依序放播放順序的 modules、外到內的掃描量、取樣方式、取數欄位。
-Form 預設不寫 `field_order`。特殊需求才覆寫順序，並在原地用一行註解說明原因，
-例如讓 mux 的 participants 出現在 tones 前。
+Form 預設依 cfg 宣告順序顯示欄位，不寫 `field_order`。
+Cfg 依序放播放順序的 modules、外到內的掃描量、取樣方式、取數欄位。
+Adapter 使用獨立輸入型別時，預設順序由該型別決定。
+只有需要調整頂層欄位時才寫 `field_order`，並在原地用一行註解說明原因。
+例如 `onetone/freq` 把繼承而來的 sampling 欄位移到 frequency sweep 後。
+指定欄位依 tuple 順序前移，未列欄位保留原相對順序，nested model 不變。
+`tree` 的寫入順序不控制畫面。未知或重複欄位會在 Form 建構時 raise `ValueError`，
+持久 Spec 的 Form 也不接受非空 `field_order`。
+GUI 作者依[表單設計與預演](measure-authoring.md#表單設計與預演)核對實際順序。
 
 取樣方式用 `sampling: Literal["linear", "decay"]`，掃描欄位只接受 `SweepCfg`。
 Linear 使用線性格點，decay 把同一時間窗的點集中在衰減段，不另接受 list 模式。
