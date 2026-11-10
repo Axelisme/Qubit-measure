@@ -100,7 +100,14 @@ def select_writeback_items(
         if stage is not None and stage["has_draft"]:
             available.extend(_name(item) for item in stage["items"])
     if len(available) != len(set(available)):
-        raise ValueError("Ambiguous writeback item names across the captured panes")
+        stages = [
+            name
+            for name, capture in (("primary", preview.primary), ("post", preview.post))
+            if capture is not None and capture["has_draft"] and capture["items"]
+        ]
+        raise ValueError(
+            f"Ambiguous writeback item names; available stages: {', '.join(stages)}"
+        )
     if requested is not None and set(requested) - set(available):
         unknown = sorted(set(requested) - set(available))
         raise ValueError(f"Unknown writeback item names: {', '.join(unknown)}")
@@ -142,16 +149,22 @@ def _skip_stage(receipt: WritebackReceipt, stage: AnalysisStage) -> None:
 
 
 def write_current_draft(
-    ctx: MeasureToolContext, tab: str, items: Sequence[str] | None = None
+    ctx: MeasureToolContext,
+    tab: str,
+    items: Sequence[str] | None = None,
+    *,
+    stage: AnalysisStage | None = None,
 ) -> WritebackReceipt:
     """Write selected current candidates once, Primary then Post, without rollback.
 
     tab is a non-empty GUI locator. items uses stable target_name, not proposal IDs
-    or checkbox flags; None means all and an empty sequence means none. Validate
-    the arguments before binding, then read both current panes before any write so
+    or checkbox flags; None means all and an empty sequence means none. stage
+    restricts reads and writes to primary/post; None selects both. Validate the
+    arguments before binding, then read the scoped panes before any write so
     unknown/ambiguous names cannot cause a partial write. Never reuse proposal IDs.
 
-    Return GUI-confirmed completed stages, skipped stages and not_started stages.
+    Return GUI-confirmed completed stages, skipped stages (including the excluded
+    stage) and not_started stages.
     A GuiRpcError stops the first failed step. A write timeout returns unknown
     and its owner submission_id/recovery, not an assertion of failed writes. The
     partial-writes flag is true only after admission of that stage's write RPC.
@@ -167,7 +180,11 @@ def write_current_draft(
         "skipped": [],
         "not_started": ["primary", "post"],
     }
-    stage: AnalysisStage = "primary"
+    panes = _PANES
+    if stage is not None:
+        panes = tuple(pane for pane in _PANES if pane[0] == stage)
+        _skip_stage(receipt, "post" if stage == "primary" else "primary")
+    stage = panes[0][0]
     write_attempted = False
 
     def admit_write() -> None:
@@ -182,11 +199,11 @@ def write_current_draft(
         ctx = ctx.bound()
         # These reads do not reveal guarded resources or authorize writes.
         present: dict[AnalysisStage, bool] = {}
-        for stage, _, method in _PANES:
+        for stage, _, method in panes:
             present[stage] = (
                 ctx.send_gui_rpc(method, {"tab_id": tab})["summary"] is not None
             )
-        for stage, subtab, _ in _PANES:
+        for stage, subtab, _ in panes:
             if present[stage]:
                 previews[stage] = _read_current_preview(ctx, tab, subtab)
             preview = previews[stage]
@@ -199,7 +216,7 @@ def write_current_draft(
             "primary": selection.preview.primary,
             "post": selection.preview.post,
         }
-        for stage, subtab, _ in _PANES:
+        for stage, subtab, _ in panes:
             write_attempted = False
             preview = selected[stage]
             if preview is None or not preview["items"]:

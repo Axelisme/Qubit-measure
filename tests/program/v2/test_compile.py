@@ -8,10 +8,15 @@ _initialize / _body / compile pipeline.
 from __future__ import annotations
 
 from collections.abc import Mapping
+from pathlib import Path
 
 import pytest
-from zcu_tools.program.v2 import TimelineProgramV2
+import yaml
+from qick import QickConfig
+from zcu_tools.program import build_soccfg
+from zcu_tools.program.v2 import Pulse, PulseCfg, TimelineBuilder, TimelineProgramV2
 from zcu_tools.program.v2.modules import Delay, SoftDelay
+from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.sweep import SweepCfg
 
 from tests.program._profiles import load_soccfg
@@ -56,6 +61,96 @@ def _expected_line(prog: TimelineProgramV2) -> int:
 # ---------------------------------------------------------------------------
 # Compile-phase tests
 # ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def interpolating_soccfg() -> QickConfig:
+    with (Path(__file__).parents[1] / "profiles" / "ordinary.yaml").open() as stream:
+        profile = yaml.safe_load(stream)
+    profile["generators"][0].update(interpolation=4, has_mixer=True)
+    return build_soccfg(profile)
+
+
+def _frequency_builder(
+    soccfg: QickConfig, start: float, stop: float, mixer_freq: float | None = 0.0
+) -> TimelineBuilder:
+    builder = TimelineBuilder(soccfg)
+    frequency = builder.add_sweep(
+        "frequency", SweepCfg(start=start, stop=stop, step=(stop - start) / 2, expts=3)
+    )
+    builder.emit(
+        Pulse(
+            "drive",
+            PulseCfg(
+                ch=0,
+                nqz=1,
+                freq=frequency,
+                mixer_freq=mixer_freq,
+                gain=0.5,
+                waveform=ConstWaveformCfg(length=0.1),
+            ),
+        )
+    )
+
+    return builder
+
+
+@pytest.mark.parametrize("direction", [1, -1])
+def test_swept_frequency_range_error_reports_endpoints_and_dds_limit(
+    interpolating_soccfg: QickConfig, direction: int
+):
+    half_range = interpolating_soccfg["gens"][0]["f_dds"] / 2
+    start, stop = direction * (5 * half_range - 5), direction * (5 * half_range + 5)
+    builder = _frequency_builder(interpolating_soccfg, start, stop)
+
+    with pytest.raises(RuntimeError) as error:
+        builder.build()
+
+    message = str(error.value)
+    assert "range" in message.lower()
+    for value in (start, stop, -half_range, half_range):
+        assert f"{value:g}" in message
+    assert isinstance(error.value.__cause__, RuntimeError)
+
+
+@pytest.mark.parametrize("has_mixer", [False, True])
+def test_legal_swept_frequency_compiles_with_and_without_mixer(
+    interpolating_soccfg: QickConfig, has_mixer: bool
+):
+    interpolating_soccfg["gens"][0]["has_mixer"] = has_mixer
+    half_range = interpolating_soccfg["gens"][0]["f_dds"] / 2
+    mixer = 4 * half_range if has_mixer else None
+    center = (mixer or 0.0) + half_range / 4
+    builder = _frequency_builder(interpolating_soccfg, center - 5, center + 5, mixer)
+
+    program = builder.build()
+
+    assert program.binprog["pmem"] is not None
+
+
+@pytest.mark.parametrize(
+    ("failure", "interpolation"),
+    [
+        (RuntimeError("conversion failed"), 4),
+        (RuntimeError("conversion failed"), 1),
+        (ValueError("conversion failed"), 4),
+    ],
+)
+def test_frequency_conversion_preserves_other_dependency_failures(
+    interpolating_soccfg: QickConfig, failure: Exception, interpolation: int
+):
+    class FailingConfig(QickConfig):
+        def freq2reg(self, f, gen_ch=0, ro_ch=None):
+            raise failure
+
+    soccfg = FailingConfig(interpolating_soccfg.get_cfg())
+    soccfg["gens"][0]["interpolation"] = interpolation
+    builder = _frequency_builder(soccfg, 10, 20)
+
+    with pytest.raises(type(failure)) as error:
+        builder.build()
+
+    assert error.value is failure
 
 
 def test_empty_program_compiles():
