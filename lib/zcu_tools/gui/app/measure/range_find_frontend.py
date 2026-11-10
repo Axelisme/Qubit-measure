@@ -44,7 +44,9 @@ def draw_range_find(
 
     freqs/magnitude are the plugin's sorted MHz/magnitude arrays. state supplies
     current candidates and manual selections. Manual points use measured
-    magnitude; no fitted values are invented. Runs on the figure owner.
+    magnitude; no fitted values are invented. Assigned names use separate
+    vertical rows in the lower half with leader lines to keep adjacent dips
+    readable. The legend stays at the upper left. Runs on the figure owner.
     """
     figure.clear()
     ax = figure.subplots()
@@ -52,6 +54,8 @@ def draw_range_find(
     if state.candidates:
         x = [dip.freq for dip in state.candidates]
         ax.plot(x, np.interp(x, freqs, magnitude), "o", color="0.6", label="Candidates")
+    label_count = sum(dip.component is not None for dip in state.selected)
+    label_row = 0
     for dip in state.selected:
         y = float(np.interp(dip.freq, freqs, magnitude))
         ax.plot(
@@ -65,13 +69,25 @@ def draw_range_find(
             else None,
         )
         if dip.component is not None:
+            label_row += 1
+            # Separate names vertically even when dip frequencies share pixels.
+            # Align toward the spectrum interior to leave room at either edge.
             ax.annotate(
-                dip.component, (dip.freq, y), xytext=(6, 10), textcoords="offset points"
+                dip.component,
+                (dip.freq, y),
+                xytext=(dip.freq, 0.5 * label_row / (label_count + 1)),
+                textcoords=("data", "axes fraction"),
+                horizontalalignment="right"
+                if dip.freq > (freqs[0] + freqs[-1]) / 2
+                else "left",
+                verticalalignment="center",
+                arrowprops={"arrowstyle": "-", "color": "0.35", "linewidth": 0.8},
+                bbox={"facecolor": "white", "edgecolor": "none", "alpha": 0.85},
             )
     ax.set_title(f"Prominence noise factor: {state.options.prominence_factor:.6g}")
     ax.set_xlabel("Frequency (MHz)")
     ax.set_ylabel("Magnitude (a.u.)")
-    ax.legend(loc="best", fontsize="small")
+    ax.legend(loc="upper left", fontsize="small")
     figure.set_layout_engine("constrained")
 
 
