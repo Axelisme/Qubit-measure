@@ -533,7 +533,7 @@ def _propagate_row(frame, args, control, rho):
     knots = knots[(knots >= 0) & (knots <= duration)]
     generator, decay = secular_operators(frame.model)
     dynamics = frame.channels, args, pack_entries(frame.channels)
-    bath_banks: dict[float, tuple[NDArray[np.float64], NDArray[np.float64]]] = {}
+    bath_banks = {}
     for start, end in zip(knots[:-1], knots[1:], strict=True):
         interval = end - start
         interval_steps = max(1, int(np.ceil(interval / (duration / steps))))
