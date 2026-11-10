@@ -37,7 +37,7 @@ def run(
 
 def _analyze(
     req: AnalyzeRequest[SpectroscopyHeraldedRun, None], *, plots: Plots
-) -> None:
+) -> dict[str, str] | None:
     return SpectroscopyHeraldedExp().analyze(req.run_result, None, plots=plots)
 
 
