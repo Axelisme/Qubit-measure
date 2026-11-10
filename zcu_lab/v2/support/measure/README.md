@@ -2,7 +2,7 @@
 
 **讀者：** lab-author。查閱多個量測 adapter 共用的表單初值、分析載體與 writeback 工具。
 
-**Last updated:** 2026-11-09，移除單 qubit heralding 實驗
+**Last updated:** 2026-11-10，ringup tone ADC 使用 group wiring
 
 這個公開支援 package 擁有至少兩個 measure experiment adapters 共用的 implementation
 mechanics：analysis carriers、writeback helpers 與跨實驗的 context utilities。
@@ -23,7 +23,7 @@ length、ro_length 與 trig_offset 保持必填且未填，不猜時長或以 0 
 此路徑忽略缺 leaf 或 null 的 kappa。全未設時不加等待，trig_offset 保留來源值。
 Pulse 至少涵蓋 ADC 窗口，原 ro_length 與較長的 pulse 保留。
 Trigger 與 length 使用 min／max Expr。單一已設 kappa 直接引用該來源，全未設時加 0。
-Slot-copy 的 tone ADC 維持 ro_ch=index 字面值，不改成 group wiring。
+Slot-copy 與 blank 初值都從 `$mux.wiring.ro_ch[i]` 取得第 i 個 tone 的 ADC，不把 tone 位置當作 ADC channel。
 Mux onetone 缺 slot 時，ro_length 固定填入 1.0 us，不依賴 kappa 或 time_of_fly。
 完整 group 的 kappa 都有效且 group 有頂層 time_of_fly，才推導 trigger 與 length。
 trig_offset 取 `$mux.time_of_fly` 加 ringup，length 取 trig_offset + ro_length，不讀 resonator 的 pulse 路徑 TOF。
