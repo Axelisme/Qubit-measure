@@ -14,6 +14,17 @@ from qick.helpers import to_int
 from zcu_tools.program import v2
 
 
+@pytest.mark.parametrize(
+    "value",
+    [np.int64(723), np.float32(7.25), np.float64(7.25), True, "7.25", 7.25j],
+)
+def test_table_rejects_non_builtin_numbers_at_construction(value: Any) -> None:
+    with pytest.raises(TypeError) as error:
+        v2.TableParam("point", [1.0, value])
+    assert repr(value) in str(error.value)
+    assert "point" in str(error.value)
+
+
 @pytest.mark.parametrize("quantize,trunc", [(1, False), (4, False), (4, True)])
 def test_table_conversion_rounds_each_point_like_qick(
     mock_soccfg: QickConfig, quantize: int, trunc: bool
