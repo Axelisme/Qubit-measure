@@ -20,8 +20,9 @@ class RPiSums:
         A zero count requires a zero sum and makes the estimate invalid.
     segment_lengths: Integer shape (H,), positive segment lengths in reads.
     segment_counts: Integer shape (H,), positive multiplicities of those lengths.
-        Repeated lengths are allowed. Chunks/reps within a segment are not cuts;
-        rounds, settings and actual discontinuities are cuts.
+        Repeated lengths are allowed. Each rep cycle is one segment; rep,
+        round and setting boundaries are cuts. Transport chunks do not change
+        cycle boundaries.
 
     There are 18 moment sums (2 first, 1 square, 15 lag), plus counts/metadata.
     Sum completed rounds before calling analysis; never average round estimates.
