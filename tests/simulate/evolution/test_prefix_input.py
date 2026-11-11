@@ -150,8 +150,7 @@ def test_plateau_routing_preserves_reusable_dyson_inputs(history):
     else:
         expected = {"floquet_period": 2, "dyson": 2, "t4": 2}
     # Isolate period/Dyson input reuse from the constant single-tone RWA route.
-    kernels = tuple(k for k in REGISTRY if k.name != "single_tone_rwa")
-    with closing(Engine(1, kernels=kernels)) as solver:
+    with closing(Engine(1, families=("t4", "dyson", "floquet_period", "t6"))) as solver:
         result = solver.evolve(src, (b,), cancel=Event())
     assert result.paths.segments_by_kernel == expected
 

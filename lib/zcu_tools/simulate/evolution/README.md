@@ -43,7 +43,7 @@ The exports in [__init__.py](__init__.py) fall into these groups:
 | Explicit joint-Fock prototype | `JointFockRequest`, `JointFockDiagnostic`, `JointFockResult`, `joint_fock_spectrum` |
 | Shared RWA Hamiltonian coefficients | `RWACoefficients`, `rwa_coefficients`, `interaction_hamiltonian` |
 
-`Engine(workers, *, kernels=None, chunks_per_worker=None,
+`Engine(workers, *, families=None, kernels=None, chunks_per_worker=None,
 routing_cache_bytes=4*1024**2)` owns immutable routing facts.
 Numerical preparations live only within one evolve. `evolve(source, batches, *, budget=1e-3, cancel=event)` consumes a
 `ModelSource` and all `TimelineBatch` inputs for one acquire. `NumericModel` is a
@@ -161,6 +161,30 @@ into rows. [Dispatch](_dispatch.py) selects candidates from flux motion, active
 tones, envelope shape, known inputs and acquire-wide prepare-key reuse, not
 experiment names. Numerical guards decide validity separately from cost.
 A rejected guard leaves the row for the next candidate.
+
+`Engine(..., families=("t4", "dop853"))` restricts every segment in the acquire,
+including shared prefixes and deferred timeline workers, to those families.
+Pass a collection of family names, not a per-segment mapping or preference list.
+The constructor copies the names and raises `ValueError` for unknown names.
+`None` preserves default routing. An empty collection rejects any nonempty
+domain. Empty work still returns an empty result.
+
+Dispatch keeps its cost ordering among allowed candidates. If cost shortcuts
+skip an expensive allowed candidate, dispatch tries it before rejecting the
+domain. Dispatch excludes rows that violate a family input precondition, such
+as common-frame carriers with an absolute mean below 1e-10 GHz. The kernel
+owner defines each precondition once. Legal preparation failures still propagate;
+dispatch does not catch them to retry another family.
+The allowlist never changes numerical guards, budget or complete-acquire
+inventory counts. A rejected pinned family cannot select an excluded family.
+If no allowed candidate passes, `RuntimeError` names the domain, caller point
+IDs and affected segment rows. The allowlist does not add fallback routes to
+other domains. `kernels=` remains an internal numerical-collaborator seam.
+
+The family names are `t4`, `adiabatic_map`, `flux_dop853`, `slow_envelope`,
+`dyson`, `single_tone_rwa`, `floquet_period`, `t6`, `single_tone_gate`,
+`shaped_sambe`, `gate_cache`, `period_table`, `common_frame`, `multitone_gate`,
+`multitone_rwa`, `floquet` and `dop853`.
 
 No-drive rows use secular propagation or adiabatic transport. Driven rows use
 constant-tone, shaped-tone or continuous-flux families. Candidate order,

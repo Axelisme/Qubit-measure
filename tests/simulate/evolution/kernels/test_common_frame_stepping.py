@@ -13,7 +13,6 @@ from zcu_tools.simulate.evolution import (
     ModelSource,
     TimelineBatch,
 )
-from zcu_tools.simulate.evolution.kernels import REGISTRY
 from zcu_tools.simulate.evolution.secular import SecularDrive, SecularModel
 
 
@@ -80,7 +79,7 @@ def test_long_resonant_drive_preserves_spectator_coherences():
     )
     expected = states[:, :, None] * states[:, None, :].conj()
     with closing(
-        Engine(1, kernels=tuple(k for k in REGISTRY if k.name != "multitone_rwa"))
+        Engine(1, families=("common_frame", "multitone_gate", "floquet", "dop853"))
     ) as engine:
         result = engine.evolve(source, (timeline,), cancel=Event(), budget=0.01)
     assert result.paths.segments_by_kernel == {"common_frame": count}
@@ -147,7 +146,7 @@ def test_narrow_envelope_knots_preserve_resonant_pulse_area():
     )
     expected = np.outer(psi, psi.conj())
     with closing(
-        Engine(1, kernels=tuple(k for k in REGISTRY if k.name != "multitone_rwa"))
+        Engine(1, families=("common_frame", "multitone_gate", "floquet", "dop853"))
     ) as engine:
         result = engine.evolve(source, (timeline,), cancel=Event(), budget=0.01)
     assert result.paths.segments_by_kernel == {"common_frame": 4}

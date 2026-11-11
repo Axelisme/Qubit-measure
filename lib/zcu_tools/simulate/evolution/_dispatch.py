@@ -30,6 +30,7 @@ from .kernel import (
     RowPlan,
     SegmentTable,
 )
+from .kernels.common_frame import zero_mean_carrier
 from .kernels.floquet import FloquetPlan
 from .kernels.floquet_period import MIN_FREQUENCY_GHZ
 from .kernels.gate_cache import GateCacheKernel
@@ -319,7 +320,16 @@ class _Classifier:
         selection: Selection | None = None,
     ):
         self.pool, self.selection = pool, selection
-        self.geometry, self.kernels = geometry, kernels
+        self.geometry = geometry
+        self.kernels = (
+            kernels
+            if context.families is None
+            else {
+                name: kernel
+                for name, kernel in kernels.items()
+                if name in context.families
+            }
+        )
         self.context = context
         self.source, self.budget = context.source, context.budget
         self.table = geometry.table
@@ -376,13 +386,35 @@ class _Classifier:
             for selected in selections
         )
 
-    def try_kernel(self, kernel: Kernel, rows: NDArray[np.int64]) -> NDArray[np.int64]:
-        """Batch cheap guards in the caller and never retry its rejected rows."""
+    def eligible_rows(
+        self, kernel: Kernel, rows: NDArray[np.int64]
+    ) -> NDArray[np.int64]:
+        """Keep structural candidates not rejected by caller or worker guards."""
         eligible = rows
+        if kernel.name == "common_frame":
+            # Its existing dispatch domain is two tones, even when cost is bypassed.
+            eligible = eligible[self.table.tones[eligible] == 2]
+            invalid_carrier = np.array(
+                [
+                    zero_mean_carrier(self.table.tone_frequency_ghz[row, :2])
+                    for row in eligible
+                ],
+                dtype=bool,
+            )
+            eligible = eligible[~invalid_carrier]
+        if self.context.families is not None:
+            rejected = self.rejected.get(kernel.name)
+            if rejected is not None:
+                eligible = eligible[~rejected[eligible]]
         if self.selection is not None:
             previous = self.selection.rejected.get(kernel.name)
             if previous is not None:
-                eligible = rows[~previous[rows]]
+                eligible = eligible[~previous[eligible]]
+        return eligible
+
+    def try_kernel(self, kernel: Kernel, rows: NDArray[np.int64]) -> NDArray[np.int64]:
+        """Batch cheap guards in the caller and never retry its rejected rows."""
+        eligible = self.eligible_rows(kernel, rows)
         if not len(eligible):
             return rows
         if kernel.guard_builds:
@@ -409,13 +441,31 @@ class _Classifier:
         return rows[(self.names[rows] == "") & ~self.deferred[rows]]
 
     def accept(self, rows: NDArray[np.int64], candidates: tuple[str, ...]) -> None:
-        """Try numerical guards in fixed cost order, or defer the remaining chain."""
+        """Try one domain's cost order, then any allowed expensive alternatives."""
+        if not len(rows):
+            return
+        domain_name, domain = next(
+            (name, domain)
+            for name, domain in self.domains.items()
+            if domain.mask[rows[0]]
+        )
+        if self.context.families is not None:
+            # Cost shortcuts may omit an expensive optional family. Exhaust the
+            # allowed domain inventory before failing, without retrying guards.
+            candidates = tuple(
+                name
+                for name in dict.fromkeys((*candidates, *domain.families))
+                if name in self.context.families
+            )
         for name in candidates:
+            rows = self.try_kernel(require(self.kernels, name, self.table, rows), rows)
             if not len(rows):
                 return
-            rows = self.try_kernel(require(self.kernels, name, self.table, rows), rows)
-        if len(rows):
-            raise RuntimeError(f"no valid kernel for segment {rows[0]}")
+        points = np.unique(self.geometry.points[self.table.timeline[rows]]).tolist()
+        raise RuntimeError(
+            f"no valid kernel for segment {rows[0]}; domain {domain_name}: "
+            f"points {points}, segments {rows.tolist()}"
+        )
 
     def classify_shaped(self, rows: NDArray[np.int64]) -> None:
         """Share acquire-wide costs with workers, independent of spectral outcomes."""

@@ -345,8 +345,7 @@ def test_omitted_resonances_decline_and_retain_original_route(kind):
     assert kernel.guard(
         table, np.array([0]), KernelContext(src, 0.001, WorkPlan())
     ).tolist() == [False]
-    original = tuple(k for k in REGISTRY if k.name != kernel.name)
-    with closing(Engine(1, kernels=original)) as engine:
+    with closing(Engine(1, families=("dyson", "floquet_period", "t6"))) as engine:
         expected = engine.evolve(src, (batch_for(table),), cancel=Event())
     with closing(Engine(1)) as engine:
         result = engine.evolve(src, (batch_for(table),), cancel=Event())
@@ -449,8 +448,7 @@ def test_restored_graph_over_block_limit_keeps_original_route():
     assert kernel.guard(
         table, np.array([0]), KernelContext(src, 0.001, WorkPlan())
     ).tolist() == [False]
-    original = tuple(k for k in REGISTRY if k.name != kernel.name)
-    with closing(Engine(1, kernels=original)) as engine:
+    with closing(Engine(1, families=("dyson", "floquet_period", "t6"))) as engine:
         expected = engine.evolve(src, (batch_for(table),), cancel=Event())
     with closing(Engine(1)) as engine:
         result = engine.evolve(src, (batch_for(table),), cancel=Event())

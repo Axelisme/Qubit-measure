@@ -104,7 +104,13 @@ def test_repeated_pair_builds_once_and_reuses_across_phase_changes(
             with closing(
                 Engine(
                     1,
-                    kernels=tuple(k for k in REGISTRY if k.name != "multitone_gate"),
+                    families=(
+                        "t4",
+                        "common_frame",
+                        "multitone_rwa",
+                        "floquet",
+                        "dop853",
+                    ),
                 )
             ) as direct:
                 reference = direct.evolve(

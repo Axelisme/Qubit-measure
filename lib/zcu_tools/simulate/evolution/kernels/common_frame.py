@@ -185,6 +185,15 @@ def _first_order_step(energies, full, frequencies) -> float:
     return _step(frequency)
 
 
+def zero_mean_carrier(frequencies_ghz: NDArray[np.float64]) -> bool:
+    """Return whether a nonempty finite carrier vector has |mean| < 1e-10 GHz.
+
+    Such carriers cannot define a common frame. This input precondition is
+    separate from cost estimates and numerical admission.
+    """
+    return abs(float(np.mean(frequencies_ghz))) < 1e-10
+
+
 def common_frame_cost_viable(
     model: SecularModel, ports: tuple[int, ...], frequencies_ghz: NDArray[np.float64]
 ) -> bool:
@@ -195,7 +204,7 @@ def common_frame_cost_viable(
     evaluating numerical admission. True says nothing about later admission.
     This is an active-channel work bound, not a carrier-spacing accuracy veto.
     """
-    if abs(float(np.mean(frequencies_ghz))) < 1e-10:
+    if zero_mean_carrier(frequencies_ghz):
         return False
     full = np.array(
         [
@@ -222,7 +231,7 @@ def common_frame_strengths(
     an admission decision or an accuracy veto. Zero mean carrier returns inf
     so dispatch retains the original solver rather than building an invalid frame.
     """
-    if abs(float(np.mean(frequencies_ghz))) < 1e-10:
+    if zero_mean_carrier(frequencies_ghz):
         return np.full((len(ports), len(model.energies_ghz)), np.inf)
     full = np.array(
         [
@@ -258,7 +267,7 @@ def build_common_frame(
         not 1 <= len(ports) <= 2
         or frequencies.shape != (len(ports),)
         or not np.isfinite(frequencies).all()
-        or abs(float(frequencies.mean())) < 1e-10
+        or zero_mean_carrier(frequencies)
         or any(p < 0 or p >= len(model.drives) for p in ports)
     ):
         raise ValueError(

@@ -547,8 +547,8 @@ def test_same_port_constant_pair_retains_original_two_tone_routing(port):
             for track in batch.tracks
         ),
     )
-    original_kernels = tuple(k for k in REGISTRY if k.name != "multitone_rwa")
-    with closing(Engine(1, kernels=original_kernels)) as engine:
+    families = ("t4", "common_frame", "multitone_gate", "floquet", "dop853")
+    with closing(Engine(1, families=families)) as engine:
         original = engine.evolve(source, (batch,), cancel=Event())
     with closing(Engine(1)) as engine:
         result = engine.evolve(source, (batch,), cancel=Event())
@@ -878,10 +878,8 @@ def test_retained_only_phase_does_not_reject_long_rows():
             routes[domain, phase] = "multitone_rwa" in result.paths.segments_by_kernel
             if domain == "same_port":
                 # Rejected rows retain the original two-tone routing and density.
-                original_kernels = tuple(
-                    k for k in REGISTRY if k.name != "multitone_rwa"
-                )
-                with closing(Engine(1, kernels=original_kernels)) as engine:
+                families = ("t4", "common_frame", "multitone_gate", "floquet", "dop853")
+                with closing(Engine(1, families=families)) as engine:
                     original = engine.evolve(source, (batch,), cancel=Event())
                 assert (
                     result.paths.segments_by_kernel == original.paths.segments_by_kernel

@@ -15,7 +15,6 @@ from zcu_tools.simulate.evolution import (
     SecularModel,
 )
 from zcu_tools.simulate.evolution.kernel import GuardResult
-from zcu_tools.simulate.evolution.kernels import REGISTRY
 
 from ._common_frame import batch, model_source
 from ._engine import RecordingKernel
@@ -29,7 +28,7 @@ def run(engine, source, timeline):
 
 def fallback(source, timeline, *, budget=0.01):
     with closing(
-        Engine(1, kernels=tuple(k for k in REGISTRY if k.name != "common_frame"))
+        Engine(1, families=("multitone_rwa", "multitone_gate", "floquet", "dop853"))
     ) as engine:
         return engine.evolve(
             source, (timeline,), cancel=Event(), budget=budget, telemetry=True
