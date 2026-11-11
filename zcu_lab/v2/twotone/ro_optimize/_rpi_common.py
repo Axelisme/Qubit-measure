@@ -1,4 +1,4 @@
-"""Decoding, ranking and the score figure of the R-pi readout sweeps.
+"""Decoding, ranking and formatting of the R-pi readout sweeps.
 
 rpi_power, rpi_freq and rpi_length share what they do with saved rpi_sums records.
 Each core keeps its own sweep, program, live plot and result types.
@@ -12,7 +12,6 @@ from matplotlib.axes import Axes
 from numpy.typing import NDArray
 from zcu_tools.analysis.readout_chain import RPiAnalysis, RPiSums, rpi_analysis
 from zcu_tools.experiment import VariableAxisSpec, VariableSpec, VariableZSpec
-from zcu_tools.plotting.plots import Plots
 
 # One rep is one 64-read cycle; lag 1..15 pairs never cross cycle boundaries.
 READS_PER_REP = 64
@@ -110,62 +109,3 @@ def fix_sweep_xlim(ax: Axes, settings: NDArray[np.float64]) -> None:
     margin = 0.05 * float(np.ptp(settings))
     if margin > 0:
         ax.set_xlim(float(settings.min()) - margin, float(settings.max()) + margin)
-
-
-def draw_score_figure(
-    plots: Plots,
-    settings: NDArray[np.float64],
-    analyses: list[RPiAnalysis],
-    best: int | None,
-    axis: SweepAxis,
-) -> None:
-    """Publish the "score" figure of one sweep.
-
-    settings is (F,) in the experiment's unit, in the order of analyses. best is
-    the index from best_index. axis names and formats the setting.
-
-    The six panels share the x axis: the score with the best setting marked, the
-    invalid reasons per setting, then Q_eff, q, amplitude and noise variance.
-    Invalid settings are left off every curve and appear only in the reason
-    panel. The figure title counts them.
-    """
-    fig, _ = plots.subplots(3, 2, num="score", sharex=True, figsize=(11, 8))
-    ax_score, ax_reasons, ax_q_eff, ax_q, ax_amplitude, ax_noise = fig.axes
-
-    ax_score.plot(settings, valid_values(analyses, "score"), "o-", color="C0")
-    ax_score.set_ylabel(SCORE_LABEL)
-    for ax, name, ylabel in (
-        (ax_q_eff, "q_eff", "Q_eff (includes π error)"),
-        (ax_q, "q", "q = a / σ²"),
-        (ax_amplitude, "amplitude", "Amplitude a (ADC units²)"),
-        (ax_noise, "noise_variance", "Noise variance σ² (ADC units²)"),
-    ):
-        ax.plot(settings, valid_values(analyses, name), "o-")
-        ax.set_ylabel(ylabel)
-
-    # One row per reason that occurred: a mark at each setting reporting it.
-    rows = sorted(invalid_reason_counts(analyses))
-    for row, reason in enumerate(rows):
-        rejected = [
-            setting
-            for setting, analysis in zip(settings, analyses, strict=True)
-            if reason in analysis.invalid_reasons
-        ]
-        ax_reasons.plot(rejected, [row] * len(rejected), "x", color="C3")
-    ax_reasons.set_yticks(range(len(rows)), rows)
-    ax_reasons.set_ylim(-0.5, max(len(rows), 1) - 0.5)
-    ax_reasons.set_title(f"Invalid reason per {axis.setting_name}")
-
-    for ax in fig.axes:
-        ax.grid(True)
-        if best is not None:
-            ax.axvline(float(settings[best]), color="r", ls="--")
-    if best is not None:
-        value = f"{float(settings[best]):.{axis.digits}g}"
-        ax_score.legend([ax_score.lines[-1]], [f"largest score = {value} {axis.unit}"])
-    ax_amplitude.set_xlabel(axis.label)
-    ax_noise.set_xlabel(axis.label)
-    title = not_plotted_title(analyses, axis.setting_name)
-    if title:
-        fig.suptitle(title)
-    fig.tight_layout()
