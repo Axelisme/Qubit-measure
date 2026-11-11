@@ -204,6 +204,9 @@ from zcu_lab.v2.twotone.ro_optimize.rpi_length.gui import (
 from zcu_lab.v2.twotone.ro_optimize.rpi_power.gui import (
     DEFINITION as RO_OPT_RPI_POWER_DEFINITION,
 )
+from zcu_lab.v2.twotone.stirap.amplitude.gui import (
+    DEFINITION as STIRAP_AMPLITUDE_DEFINITION,
+)
 from zcu_lab.v2.twotone.stirap.detuning.gui import (
     DEFINITION as STIRAP_DETUNING_DEFINITION,
 )
@@ -231,6 +234,7 @@ ADAPTERS: dict[str, object] = {
     "twotone/chain": CHAIN_DEFINITION,
     "twotone/stirap": STIRAP_DEFINITION,
     "twotone/stirap/detuning": STIRAP_DETUNING_DEFINITION,
+    "twotone/stirap/amplitude": STIRAP_AMPLITUDE_DEFINITION,
     "twotone/flux_dep": FLUX_DEP_DEFINITION,
     "twotone/power_dep": POWER_DEP_DEFINITION,
     "twotone/rabi/len_rabi": LEN_RABI_DEFINITION,
