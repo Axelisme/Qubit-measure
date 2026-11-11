@@ -148,6 +148,26 @@ def test_clear_invalidates_retained_preparation_until_evolved_again(driven):
         np.testing.assert_array_equal(after.densities, before.densities)
 
 
+@pytest.mark.parametrize("driven", [False, True])
+def test_owned_source_close_invalidates_retained_preparation_until_evolved_again(
+    driven,
+):
+    src = source()
+    small = batch(2)
+    if not driven:
+        small = replace(small, tracks=())
+    with closing(Engine(1)) as engine:
+        before = engine.evolve(src, (small,), reuse_key=b"small")
+        assert engine.reuse(src, b"small")
+        src.close()
+        assert not engine.reuse(src, b"small")
+        assert not engine.reuse(src, b"small")
+        after = engine.evolve(src, (small,), reuse_key=b"small")
+        assert engine.reuse(src, b"small")
+        assert after.paths.segments_by_kernel == before.paths.segments_by_kernel
+        np.testing.assert_array_equal(after.densities, before.densities)
+
+
 def test_clear_restores_cold_route_without_changing_density_or_model_cache():
     history = RoutingHistory()
     src = source(history)
