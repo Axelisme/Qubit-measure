@@ -5,8 +5,78 @@ from dataclasses import replace
 import numpy as np
 import pytest
 from numpy.testing import assert_array_equal
+from scipy.optimize import linear_sum_assignment
 from scipy.stats import wishart
-from zcu_tools.analysis.readout_chain import CycleSums, cycle_curves
+from zcu_tools.analysis.readout_chain import (
+    CycleNuisances,
+    CycleSums,
+    cycle_curves,
+    fit_cycle,
+)
+
+from ._exact_moments import curve_moments, repeated_curve
+
+
+def test_fit_cycle_wald_errors_follow_axis_units() -> None:
+    model = repeated_curve(
+        lambda x, p: np.sin(np.pi * p["frequency"] * x) ** 2,
+        ("frequency",),
+        ((0.1, 2.0),),
+        oscillation_frequency="frequency",
+        derivative=lambda x, p: (np.pi * x * np.sin(2 * np.pi * p["frequency"] * x))[
+            :, None
+        ],
+    )
+    nuisance = CycleNuisances(
+        np.array(
+            [
+                [[0.8, 0.15, 0.05], [0.2, 0.65, 0.15]],
+                [[0.65, 0.25, 0.1], [0.05, 0.9, 0.05]],
+                [[0.05, 0.05, 0.9], [0.15, 0.15, 0.7]],
+            ]
+        ),
+        np.array([[-1.0, 0.0], [1.0, 0.2], [0.0, 1.8]]),
+        0.25,
+        np.array([0.665, 0.285, 0.05]),
+        np.array([0.95, 0.8, 0.95]),
+        np.array([0.63, 0.27, 0.1]),
+    )
+    axis = np.linspace(0.05, 3.0, 9)
+    moments = curve_moments(model, axis, {"frequency": 1.2}, nuisance)
+    sums = CycleSums(
+        axis, np.full(len(axis), 3000.0), 3000 * moments.means, np.zeros((65, 65))
+    )
+    original = fit_cycle(sums, model, {"frequency": 1.1})
+
+    # Rescaling time coordinates changes the frequency by the reciprocal factor.
+    unit = 1e-7
+    converted = fit_cycle(
+        replace(sums, axis=axis * unit),
+        replace(model, bounds=((0.1 / unit, 2.0 / unit),)),
+        {"frequency": 1.1 / unit},
+    )
+
+    assert original.errors["frequency"] > 0
+    assert converted.parameters["frequency"] * unit == pytest.approx(
+        original.parameters["frequency"], rel=1e-5
+    )
+    assert converted.errors["frequency"] * unit == pytest.approx(
+        original.errors["frequency"], rel=1e-4
+    )
+    assert converted.reliability == pytest.approx(original.reliability, rel=1e-4)
+    # Match geometric states by their public IQ centers, not their Wald errors.
+    # Apply the same permutation to population estimates and their errors.
+    distances = np.sum(
+        (original.nuisances.centers[:, None] - converted.nuisances.centers[None]) ** 2,
+        axis=2,
+    )
+    order = linear_sum_assignment(distances)[1]
+    np.testing.assert_allclose(
+        converted.populations[:, order], original.populations, rtol=1e-4
+    )
+    np.testing.assert_allclose(
+        converted.population_errors[:, order], original.population_errors, rtol=1e-4
+    )
 
 
 def test_augmented_sums_keep_point_counts_and_features_but_pool_products() -> None:

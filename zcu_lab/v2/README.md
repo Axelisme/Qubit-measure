@@ -2,7 +2,7 @@
 
 **讀者：** lab-author、agent。查找實驗的檔案分工、作者契約與各家族入口。
 
-**Last updated:** 2026-11-11，實驗寫法指南入口
+**Last updated:** 2026-11-11，實驗寫法指南入口、cycle 與 Rπ 分析局部化
 
 先從 [tutorial](../tutorial/README.md) 新增實驗，再按下列入口查契約與操作。
 實驗定義改動的驗收方式與命令範例見 [離線驗收](../README.md#實驗定義的離線驗收)。
@@ -64,10 +64,11 @@ Readout-chain 的 chain_power／chain_freq／chain_length 各自在 `run()` 寫�
 並在自己的 core 建立及更新 live／metric 三 panel，數值分數交給 `zcu_tools.analysis.readout_chain`。
 [\_chain_common.py](twotone/ro_optimize/_chain_common.py) 只保留保存映射、完成點篩選與最佳 setting 摘要型別。
 Rπ 的 rpi_power／rpi_freq／rpi_length 各自在 `run()` 寫出掃描與 R→π 鏈，並保留自己的 cfg、Result 與分析摘要型別。
-[\_rpi_common.py](twotone/ro_optimize/_rpi_common.py) 放三者共用的 `rpi_sums` 解碼、選點與 score 圖。
+三者各自在 core 畫 score 與診斷圖；[\_rpi_common.py](twotone/ro_optimize/_rpi_common.py) 只保留共用的 `rpi_sums` 解碼、選點與格式化。
 
 K-cycle 讀出鏈實驗各自在 `run()` 寫出 (D(x), 讀, 讀) × 8 的 `builder.repeat("cycle", BLOCKS_PER_CYCLE)` 迴圈；
-[chain/\_cycle.py](chain/_cycle.py) 放共用的 CycleSums 存檔變數、live 曲線與 populations 圖，模型留在 `zcu_tools.analysis.readout_chain.curve_models`。
+Amp/Len Rabi、Echo 與 Ramsey 的 core 直接呼叫 first-read 數值 fitter，明示 phase、skip 與 envelope 政策，並畫自己的 fit 與 populations 分析圖。
+[chain/\_cycle.py](chain/_cycle.py) 保留共用的 CycleSums 存檔變數、live 曲線、IQ 投影與檢查文字格式，模型留在 `zcu_tools.analysis.readout_chain.curve_models`。
 
 `v2` 延續 program/v2 的版本脈絡，不表示 GUI framework 的第二版。通用 runtime、量化、SNR 與 tracker 工具留在 `zcu_tools.experiment.v2`。Core 不依賴 GUI，import-linter C15 檢查 core 到 GUI framework 的直接與間接依賴。
 

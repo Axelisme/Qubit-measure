@@ -19,7 +19,7 @@ The wait from R to π is the readout's `post_delay` plus the π pulse's own `pre
 The Form has no separate wait field. Change `post_delay` in the readout module to change this wait. Run keeps every π setting, including a nonzero `pre_delay`.
 
 Each rep ends with the shot closure, which waits for every ADC window to close before the next rep starts. If the last ADC window closes after the last π ends, this adds a wait at the rep boundary. The closure is not a relax delay, and the Form has no field for it.
-This rep-boundary wait falls outside every lag pair. It does not affect the within-cycle lag statistics.
+This rep-boundary wait does not appear in a lag pair's time interval, but it can still affect the estimate through the next cycle's starting population.
 If one ADC window would overlap the next, Run fails when the program builds and names the ADC overlap. Shorten the ADC window or lengthen the readout or its post-delay.
 
 Run does not reset the qubit, discard reads, add a warmup or calibrate the π pulse.
@@ -125,7 +125,7 @@ The estimates assume a stationary two-state chain. Several things can bias them:
 - Third state. Population outside the two alternating states can bias every estimate. The analysis removes a slow mode as an approximation, which is not a leakage correction. This experiment does not identify general leakage.
 - Large IQ offsets and π errors can bias the estimates.
 - Slow drift. All reps of one setting run together. Drift can become a difference between settings; multiple rounds average over these changes.
-- A physical break inside a cycle that leaves no trace in the IQ data cannot be detected. Breaks between reps do not affect lag pairs. No hardware run has verified continuity inside a 64-read cycle.
+- A physical break inside a cycle that leaves no trace in the IQ data cannot be detected. No lag pair crosses a break between reps, but the break can change the next cycle's starting population. No hardware run has verified continuity inside a 64-read cycle.
 
 The offline probe of this experiment checks the program and the data contract with synthetic data. It does not calibrate hardware and it does not validate the physical model.
 

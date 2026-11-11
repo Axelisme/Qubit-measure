@@ -43,7 +43,6 @@ from zcu_lab.v2.twotone.ro_optimize._rpi_common import (
     SweepAxis,
     analyze_records,
     best_index,
-    draw_score_figure,
     fix_sweep_xlim,
     invalid_reason_counts,
     not_plotted_title,
@@ -281,7 +280,48 @@ class RPiFreqExp(Experiment[RPiFreqResult, RPiFreqCfg]):
         analyses = analyze_records(source.result.records)
         best = best_index(analyses)
 
-        draw_score_figure(plots, freqs, analyses, best, FREQ_AXIS)
+        fig, _ = plots.subplots(3, 2, num="score", sharex=True, figsize=(11, 8))
+        ax_score, ax_reasons, ax_q_eff, ax_q, ax_amplitude, ax_noise = fig.axes
+
+        ax_score.plot(freqs, valid_values(analyses, "score"), "o-", color="C0")
+        ax_score.set_ylabel(SCORE_LABEL)
+        for ax, name, ylabel in (
+            (ax_q_eff, "q_eff", "Q_eff (includes π error)"),
+            (ax_q, "q", "q = a / σ²"),
+            (ax_amplitude, "amplitude", "Amplitude a (ADC units²)"),
+            (ax_noise, "noise_variance", "Noise variance σ² (ADC units²)"),
+        ):
+            ax.plot(freqs, valid_values(analyses, name), "o-")
+            ax.set_ylabel(ylabel)
+
+        # One row per reason that occurred: a mark at each setting reporting it.
+        rows = sorted(invalid_reason_counts(analyses))
+        for row, reason in enumerate(rows):
+            rejected = [
+                setting
+                for setting, analysis in zip(freqs, analyses, strict=True)
+                if reason in analysis.invalid_reasons
+            ]
+            ax_reasons.plot(rejected, [row] * len(rejected), "x", color="C3")
+        ax_reasons.set_yticks(range(len(rows)), rows)
+        ax_reasons.set_ylim(-0.5, max(len(rows), 1) - 0.5)
+        ax_reasons.set_title(f"Invalid reason per {FREQ_AXIS.setting_name}")
+
+        for ax in fig.axes:
+            ax.grid(True)
+            if best is not None:
+                ax.axvline(float(freqs[best]), color="r", ls="--")
+        if best is not None:
+            value = f"{float(freqs[best]):.{FREQ_AXIS.digits}g}"
+            ax_score.legend(
+                [ax_score.lines[-1]], [f"largest score = {value} {FREQ_AXIS.unit}"]
+            )
+        ax_amplitude.set_xlabel(FREQ_AXIS.label)
+        ax_noise.set_xlabel(FREQ_AXIS.label)
+        title = not_plotted_title(analyses, FREQ_AXIS.setting_name)
+        if title:
+            fig.suptitle(title)
+        fig.tight_layout()
 
         return RPiFreqAnalysis(
             best_freq=None if best is None else float(freqs[best]),

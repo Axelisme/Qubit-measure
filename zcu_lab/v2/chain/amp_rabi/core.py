@@ -12,15 +12,20 @@ from dataclasses import dataclass
 from typing import Annotated, ClassVar
 
 import numpy as np
+from numpy.typing import NDArray
 from pydantic import Field
+from zcu_tools.analysis.fitting import fit_rabi
 from zcu_tools.analysis.readout_chain import (
     CycleCheck,
+    CycleFit,
+    CycleModel,
+    CycleNuisances,
     CycleSums,
     fit_cycle,
     rabi_model,
 )
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import Experiment, GroupedAxesSpec, VariableAxisSpec
+from zcu_tools.experiment import Experiment, GroupedAxesSpec, VariableAxisSpec, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
@@ -33,21 +38,17 @@ from zcu_tools.program.v2 import (
     TimelineBuilder,
     chain_cycle_sums,
 )
+from zcu_tools.utils.process import rotate2real
 
 from zcu_lab.v2.chain._cycle import (
     AUGMENTED_SIZE,
     BLOCKS_PER_CYCLE,
     READS_PER_CYCLE,
+    checks_text,
     cycle_sums_variables,
     first_read_iq,
     live_cycle_curves,
-    plot_cycle_fit,
     restore_cycle_sums,
-)
-from zcu_lab.v2.twotone.rabi.amp_rabi.core import (
-    AmpRabiAnalyzeOptions,
-    AmpRabiExp,
-    AmpRabiResult,
 )
 
 
@@ -158,7 +159,10 @@ class ChainAmpRabiExp(Experiment[CycleSums, ChainAmpRabiCfg]):
         # 2. One cycle per rep: K, then (Rabi pulse, read, read) eight times.
         with Schedule(augmented_sums, scope=context.scope) as sched:
             builder = TimelineBuilder(
-                context.soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
+                context.soccfg,
+                reps=cfg.reps,
+                initial_delay=cfg.relax_delay,
+                relax_delay=cfg.relax_delay,
             )
             gain = builder.add_sweep("gain", cfg.gain)
             rabi_pulse = Pulse("qub_pulse", cfg.qub_pulse, gain=gain)
@@ -195,9 +199,9 @@ class ChainAmpRabiExp(Experiment[CycleSums, ChainAmpRabiCfg]):
     ) -> ChainAmpRabiAnalysis:
         """Fit all 65 numbers with a Rabi curve, starting from the first read.
 
-        First fit the first read's mean IQ with the twotone/rabi/amp_rabi fit,
-        which also publishes its "fit" figure; its π gain x_π gives the start
-        f = 1 / (2 x_π). Then fit_cycle fits the saved sums with rabi_model
+        First project the first read IQ and fit a nondecaying Rabi oscillation.
+        The near-zero gain selects 0° or 180° phase. Publish "fit"; its π gain
+        x_π gives the start f = 1 / (2 x_π). Then fit_cycle fits the saved sums with rabi_model
         and publishes "populations": per-gain first-read populations with error
         bars and the fitted curves. Return the π gain and f with Wald errors,
         R and the three checks. The source cfg may be None. Fitting failures of
@@ -207,29 +211,26 @@ class ChainAmpRabiExp(Experiment[CycleSums, ChainAmpRabiCfg]):
         sums = source.result
         gains = sums.axis
 
-        # 1. Starting value: the twotone amplitude Rabi fit of the first read.
-        first_read = AmpRabiResult(amps=gains, signals=first_read_iq(sums))
-        textbook = AmpRabiExp().analyze(
-            RunRecord(cfg=None, result=first_read),
-            AmpRabiAnalyzeOptions(),
-            plots=plots,
-        )
+        # 1. Seed from the first-read IQ using this experiment's fit policy.
+        first_read_pi_amp = _fit_first_read(plots, gains, first_read_iq(sums))
 
         # 2. Joint fit of all 65 numbers with the Rabi curve.
         model = rabi_model()
-        fit = fit_cycle(sums, model, {"f": 1 / (2 * textbook.pi_amp)})
+        fit = fit_cycle(sums, model, {"f": 1 / (2 * first_read_pi_amp)})
 
         # 3. The π gain is half a period of sin²(π f x).
         f, f_err = fit.parameters["f"], fit.errors["f"]
         pi_amp = 1 / (2 * f)
         pi_amp_err = f_err / (2 * f**2)
-        plot_cycle_fit(
+        reliability_text = (
+            "unavailable" if fit.reliability is None else f"{fit.reliability:.2g}"
+        )
+        _plot_populations(
             plots,
             model,
             fit,
             gains,
-            xlabel="Pulse gain (a.u.)",
-            result=f"pi gain = {pi_amp:.4g} ± {pi_amp_err:.2g}, R = {fit.reliability:.2g}",
+            result=f"pi gain = {pi_amp:.4g} ± {pi_amp_err:.2g}, R = {reliability_text}",
         )
 
         return ChainAmpRabiAnalysis(
@@ -243,5 +244,94 @@ class ChainAmpRabiExp(Experiment[CycleSums, ChainAmpRabiCfg]):
             curve=fit.curve,
             J=fit.J,
             df=fit.df,
-            first_read_pi_amp=textbook.pi_amp,
+            first_read_pi_amp=first_read_pi_amp,
         )
+
+
+def _fit_first_read(
+    plots: Plots,
+    gains: NDArray[np.float64],
+    signals: NDArray[np.complex128],
+) -> float:
+    """Fit and plot the first-read seed before the joint cycle analysis."""
+    real_signals = rotate2real(signals).real
+
+    zero_signal = real_signals[np.argmin(np.abs(gains))]
+    if zero_signal > 0.5 * (np.max(real_signals) + np.min(real_signals)):
+        init_phase = 0.0
+    else:
+        init_phase = 180.0
+
+    fit = fit_rabi(gains, real_signals, decay=False, init_phase=init_phase)
+    pi_amp, pi_amp_err, pi2_amp, pi2_amp_err, y_fit = (
+        fit.pi_x,
+        fit.pi_x_err,
+        fit.pi2_x,
+        fit.pi2_x_err,
+        fit.curve,
+    )
+
+    fig, ax = plots.subplots(num="fit", figsize=config.figsize)
+
+    ax.plot(gains, real_signals, label="meas", ls="-", marker="o", markersize=3)
+    ax.plot(gains, y_fit, label="fit")
+    ax.axvline(pi_amp, ls="--", c="red", label=f"pi = {pi_amp:.3g} ± {pi_amp_err:.2g}")
+    ax.axvspan(pi_amp - pi_amp_err, pi_amp + pi_amp_err, color="red", alpha=0.2)
+    ax.axvline(
+        pi2_amp,
+        ls="--",
+        c="red",
+        label=f"pi/2 = {pi2_amp:.3g} ± {pi2_amp_err:.2g}",
+    )
+    ax.axvspan(pi2_amp - pi2_amp_err, pi2_amp + pi2_amp_err, color="red", alpha=0.2)
+    ax.set_xlabel("Pulse gain (a.u.)")
+    ax.set_ylabel("Signal Real (a.u.)")
+    ax.legend(loc=4)
+    ax.grid(True)
+
+    fig.tight_layout()
+
+    return float(pi_amp)
+
+
+def _plot_populations(
+    plots: Plots,
+    model: CycleModel,
+    fit: CycleFit,
+    axis: NDArray[np.float64],
+    *,
+    result: str,
+) -> None:
+    """Publish "populations": per-point populations and the fitted curves.
+
+    Points are fit.populations with their Wald error bars; lines are the
+    model's populations at the fitted values on a dense axis, one color per
+    state. The legend gives each state's fitted thermal population, since
+    state labels are arbitrary.
+    result is the first title line, for example the fitted parameter.
+    """
+    dense = np.linspace(axis.min(), axis.max(), 400)
+    # fit_cycle always gives a CycleModel fit CycleNuisances.
+    assert isinstance(fit.nuisances, CycleNuisances)
+    fitted = model.populations(dense, fit.parameters, fit.nuisances)
+
+    fig, ax = plots.subplots(num="populations", figsize=config.figsize)
+    for state in range(3):
+        thermal = fit.nuisances.thermal[state]
+        ax.errorbar(
+            axis,
+            fit.populations[:, state],
+            yerr=fit.population_errors[:, state],
+            fmt="o",
+            markersize=3,
+            color=f"C{state}",
+            label=f"state {state}, thermal {thermal:.2f}",
+        )
+        ax.plot(dense, fitted[:, state], color=f"C{state}")
+    ax.set_xlabel("Pulse gain (a.u.)")
+    ax.set_ylabel("First-read population")
+    ax.set_title(f"{result}\n{checks_text(fit)}", fontsize=9)
+    # Outside the axes: the curves fill the whole population range.
+    ax.legend(fontsize=8, loc="upper left", bbox_to_anchor=(1.01, 1.0))
+    ax.grid(True)
+    fig.tight_layout()

@@ -31,6 +31,38 @@ from ._cycle_layout import (
 if TYPE_CHECKING:
     from .model import CycleModel
 
+_INFORMATION_RCOND = 1e-12
+
+
+@dataclass
+class ScaledInformation:
+    """Generalized covariance and null projection in column-normalized units.
+
+    Keep the null projection separate from covariance: its zero information
+    cannot be interpreted as zero uncertainty, and derived quantities can be
+    estimable even when their individual coordinate components are not.
+    """
+
+    covariance: np.ndarray
+    scale: np.ndarray
+    null_projection: np.ndarray
+
+    def errors(self, gradients: np.ndarray) -> np.ndarray:
+        """Propagate rows of gradients, returning NaN for non-estimable rows.
+
+        gradients has shape (..., quantities, parameters), with leading axes
+        broadcast against this information's optional batch axes. Test null
+        overlap in normalized units using the same 1e-6 singular-value cutoff
+        as the 1e-12 information cutoff.
+        """
+        normalized = gradients / self.scale[..., None, :]
+        overlap = np.linalg.norm(normalized @ self.null_projection, axis=-1)
+        estimable = overlap**2 <= _INFORMATION_RCOND * np.sum(normalized**2, axis=-1)
+        variance = np.einsum(
+            "...ki,...ij,...kj->...k", gradients, self.covariance, gradients
+        )
+        return np.where(estimable, np.sqrt(np.maximum(0.0, variance)), np.nan)
+
 
 @dataclass
 class JointSolution:
@@ -38,11 +70,52 @@ class JointSolution:
     covariance: np.ndarray
     weights: np.ndarray
     J: float
+    information: ScaledInformation
 
 
 def apply_weights(weights: np.ndarray, values: np.ndarray) -> np.ndarray:
     """Multiply each point's (65, ...) values by its (65, 65) weight matrix."""
     return np.einsum("nij,nj...->ni...", weights, values)
+
+
+def scaled_covariance(weighted: np.ndarray) -> np.ndarray:
+    """Invert information after column normalization, then restore coordinate units.
+
+    weighted has shape (..., observations, parameters). Use the same relative
+    normal-matrix cutoff (1e-12) for a single joint fit or batched local fits.
+    The cutoff then describes collinearity rather than parameter units.
+    """
+    scale, normal = _scaled_normal_matrix(weighted)
+    return _covariance_from_normal(scale, normal)
+
+
+def scaled_information(weighted: np.ndarray) -> ScaledInformation:
+    """Retain the numerical null space alongside the scaled generalized inverse.
+
+    weighted has shape (..., observations, parameters). The null projection
+    uses the same relative normal-matrix cutoff as scaled_covariance.
+    """
+    scale, normal = _scaled_normal_matrix(weighted)
+    values, vectors = np.linalg.eigh(normal)
+    null = np.abs(values) <= _INFORMATION_RCOND * np.max(
+        np.abs(values), axis=-1, keepdims=True
+    )
+    projection = (vectors * null[..., None, :]) @ vectors.swapaxes(-1, -2)
+    return ScaledInformation(_covariance_from_normal(scale, normal), scale, projection)
+
+
+def _scaled_normal_matrix(weighted: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Share column scaling and normal matrix for covariance and information."""
+    scale = np.linalg.norm(weighted, axis=-2)
+    scale = np.where(scale == 0, 1.0, scale)
+    scaled = weighted / scale[..., None, :]
+    return scale, scaled.swapaxes(-1, -2) @ scaled
+
+
+def _covariance_from_normal(scale: np.ndarray, normal: np.ndarray) -> np.ndarray:
+    """Restore units for both scaled_covariance and scaled_information."""
+    inverse = np.linalg.pinv(normal, rcond=_INFORMATION_RCOND, hermitian=True)
+    return inverse / (scale[..., :, None] * scale[..., None, :])
 
 
 def model_weights(
@@ -123,7 +196,7 @@ def solve_joint(
     _cycle_layout. With curve parameters held at q, fit the nuisances for each
     of the six assignments of geometric states to curve rows; run two joint
     model-covariance weight stages from the lowest-objective assignment. Return
-    the estimate, its Moore-Penrose inverse-information covariance, the last
+    the estimate, its column-normalized inverse-information covariance, the last
     weights and J, without changing the inputs. Raise RuntimeError if a joint
     stage does not converge; numpy.linalg.LinAlgError propagates from a model
     covariance that is not positive definite.
@@ -149,9 +222,11 @@ def solve_joint(
         q = _joint_stage(model, axis, means, weights, q)
     predicted, jac = joint_mean_jacobian(model, axis, q)
     weighted = apply_weights(weights, jac).reshape(-1, len(q))
-    cov = np.linalg.pinv(weighted.T @ weighted, rcond=1e-12, hermitian=True)
+    information = scaled_information(weighted)
     residual = apply_weights(weights, means - predicted)
-    return JointSolution(q, cov, weights, float(np.sum(residual**2)))
+    return JointSolution(
+        q, information.covariance, weights, float(np.sum(residual**2)), information
+    )
 
 
 def assigned_seed(q: np.ndarray, order: tuple[int, ...]) -> np.ndarray:
@@ -222,7 +297,34 @@ def bounded_least_squares(
     jac: Callable[[np.ndarray], np.ndarray],
     bounds: tuple[np.ndarray, np.ndarray],
     budget: int,
+    *,
+    stopping_tolerance: float = 1e-9,
 ) -> OptimizeResult:
+    """Minimize the sum of squared residuals within coordinate bounds using SciPy.
+
+    fun maps a parameter vector of shape (n,) to residuals of shape (m,).
+    start is a finite initial parameter vector of shape (n,) within bounds.
+    jac maps the same parameter vector to the residual Jacobian of shape
+    (m, n). bounds contains lower and upper arrays of shape (n,), with each
+    lower bound strictly below its upper bound; use infinities for unbounded
+    coordinates. budget is a positive maximum number of fun evaluations,
+    passed as max_nfev, not an iteration limit.
+
+    stopping_tolerance sets both ftol (relative cost-change tolerance) and
+    xtol (step-size tolerance), defaulting to 1e-9. The gradient tolerance
+    gtol stays fixed at 1e-9. SciPy uses x_scale="jac" to scale coordinates
+    by inverse Jacobian column norms and its default trust-region reflective
+    method. Changing stopping_tolerance does not change gtol or the budget.
+
+    Return SciPy's OptimizeResult with the final x (n,), fun (m,), jac
+    (m, n), cost, status, success and message. If SciPy stops because the
+    evaluation budget is exhausted, it returns status=0 and success=False
+    rather than raising here. Callers must inspect the result to decide
+    whether to accept it. SciPy input-validation errors (such as ValueError
+    for invalid bounds or nonfinite initial residuals) and exceptions from
+    callbacks or numerical operations (including numpy.linalg.LinAlgError)
+    propagate without being caught.
+    """
     # Without installed scipy stubs pyright infers jac: str from the '2-point' default.
     analytic: Any = jac
     return least_squares(
@@ -231,8 +333,8 @@ def bounded_least_squares(
         jac=analytic,
         bounds=bounds,
         x_scale="jac",
-        ftol=1e-9,
-        xtol=1e-9,
+        ftol=stopping_tolerance,
+        xtol=stopping_tolerance,
         gtol=1e-9,
         max_nfev=budget,
     )

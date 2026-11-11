@@ -10,13 +10,14 @@ After changing the parameter source, use Reset to recapture initial values. Refr
 
 `chain/len_rabi` sweeps the Rabi Pulse length like `twotone/rabi/len_rabi`, but every repetition is one cycle of 16 reads instead of one read.
 A cycle waits Relax delay, then plays eight blocks of the length-swept Rabi Pulse followed by two reads of the same Readout, with no reset inside the cycle.
-Relax delay is the thermalisation wait K: set it to at least 5 T1, so every cycle starts in thermal equilibrium.
+Relax delay is the thermalisation wait K, including before the first cycle. Set it to at least 5 T1 for the model's thermal-equilibrium start.
 Each read waits for the previous ADC window to close, so the second read of a block starts after the first and the next Rabi Pulse starts after the second.
 The FPGA sweeps the length, so the Rabi Pulse must use a const or flat_top waveform; Run rejects other waveforms before acquisition.
 The length loop runs outside the cycle. Reps sets the cycles at every length in one round, and Rounds sets the number of rounds.
 
 The host reduces each cycle to 65 numbers: the IQ of the 16 reads, their I², IQ, Q² summed over three read groups, and IQ products between read pairs summed over six groups set by the number of Rabi pulses and reads between them.
-Only running sums of these numbers are kept, so memory and the saved file do not grow with the number of cycles.
+For a fixed sweep, the saved sums and the accumulator across rounds have fixed size, independent of the number of cycles.
+Temporary arrays within one acquisition round grow with points × Reps. Increasing Reps therefore uses more temporary memory; increasing Rounds does not enlarge those per-round arrays.
 
 ## Parameter sources
 
@@ -42,8 +43,13 @@ The sign of the first curve follows the second, so both oscillate together. Stop
 
 Analysis needs no options. It first fits the first read's mean IQ with the `twotone/rabi/len_rabi` decaying-cosine fit and publishes that experiment's `fit` figure; its π length x_π gives the starting frequency f = 1 / (2 x_π).
 It then fits all 65 numbers at all lengths jointly with a three-state model whose readout and population nuisances are shared across lengths.
-The drive response per state is: from g the pulse reaches e with probability sin²(π f x); from e it stays in e with cos²(π f x); the third state is not driven.
-f is in MHz (cycles per us), and the π length is 1 / (2 f). The model has no decay envelope.
+The drive row for each starting state interpolates between two free population endpoints, D_i(x) = [1 − f_i(x)] × endpoint_i0 + f_i(x) × endpoint_i1.
+The curve weights are sin²(π f x) for g, cos²(π f x) for e and sin²(π f x) for the third state.
+The third-state row can vary with x. Equal endpoints give a flat row; distinct endpoints allow an oscillating response.
+f is in MHz, or cycles per us. The reported π length is 1 / (2 f) in a zero-phase model with no length offset or decay envelope.
+Interpret this value as the π total length only for a const pulse.
+Run still accepts flat_top, but its total length includes ramps whose area adds a length offset.
+The zero-phase model does not account for that offset, so its reported half-period is not a calibrated flat_top π total length.
 
 The `populations` plot shows, per length, the first-read populations of a fit with a free drive at each length, with Wald error bars, and the fitted model as lines.
 State labels are arbitrary; the legend gives each state's fitted thermal population, and the largest one is normally g.
@@ -58,6 +64,23 @@ Errors are Wald errors from the joint fit. At low state contrast and few cycles 
 A fit failure in either step produces an analysis failure; the live plot and the saved sums remain.
 
 This experiment proposes no writeback. Compare `pi_len` with `first_read_pi_len`, and calibrate x180 with `twotone/rabi/len_rabi`.
+
+### Model assumptions and starting fit
+
+The fit assumes independent thermalised cycles and Markov state transitions within each cycle.
+It shares the three IQ centers, one isotropic Gaussian noise variance, the thermal populations and the read-transition matrix across sweep points.
+Gaussian noise is independent between reads and cycles. The model does not fit a separate noise width or ellipse for each state.
+
+The read matrix is R = diag(r) + outer(1 − r, landing), with three retention values r and one landing population vector.
+For a transition i → j, the conditional IQ center lies on the line between the two state centers, at c_j + u × (c_i − c_j).
+The model draws u from a truncated exponential on [0, 1] with rate −log(1 − R[i,j]). A read without a transition uses c_i.
+This emission law is not a general model of multiple jumps during integration or resonator dynamics.
+Transitions during a long gap after integration need not produce the IQ tail that this model assigns to a read transition.
+Passing the lack-of-fit checks does not establish unbiased physical parameters.
+
+The first-read mean must support the starting fit. Weak or absent first-read contrast can make that fit fail or supply an uninformative seed even when later reads have correlations.
+The joint fit starts from the first-read curve parameters. It does not try multiple curve seeds or guarantee the correct basin.
+There is no manual initial value or fallback.
 
 ## Saved data
 

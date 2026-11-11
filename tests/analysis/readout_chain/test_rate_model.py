@@ -5,6 +5,7 @@ import pytest
 from scipy.linalg import expm
 from zcu_tools.analysis.readout_chain import (
     CycleFit,
+    CycleSums,
     RateNuisances,
     fit_cycle,
     t1_model,
@@ -56,6 +57,33 @@ def test_exact_moments_recover_both_modes_and_larger_amplitude_t1(
     assert np.isfinite(result.population_errors).all()
     assert result.within_point.df == 45 * 13
     assert result.sharing.p is None
+
+
+def test_zero_delays_leave_rates_unidentified_but_populations_estimable() -> None:
+    axis = np.zeros(3)
+    nuisance = coordinate_nuisance(oracle_coordinates())
+    parameters: dict[str, float] = dict(
+        zip(("rate_01", "rate_02", "rate_12"), (0.05, 0.08, 0.025), strict=True)
+    )
+    moments = rate_moments(axis, parameters, nuisance)
+    sums = CycleSums(axis, np.full(3, 3000.0), 3000 * moments.means, np.zeros((65, 65)))
+
+    result = fit_cycle(sums, t1_model(), {"t1": 20.0})
+
+    assert all(np.isnan(error) for error in result.errors.values())
+    relaxation = result.relaxation
+    assert relaxation is not None
+    assert np.isnan(relaxation.eigen_time_errors).all()
+    assert np.isnan(relaxation.t1_error)
+    assert np.isnan(relaxation.secondary_error)
+    assert result.reliability is None
+    assert np.isfinite(result.population_errors).all()
+    assert (result.population_errors > 0).all()
+    np.testing.assert_allclose(
+        result.populations,
+        t1_model().populations(axis, result.parameters, expect_rate_nuisances(result)),
+        atol=1e-6,
+    )
 
 
 def oracle_time_errors(fit: CycleFit) -> np.ndarray:
@@ -220,12 +248,16 @@ def test_rate_model_rejects_invalid_delays(axis: np.ndarray) -> None:
         )
 
 
+def shot_fit(seed: int) -> CycleFit:
+    sums = STAR.sums(contrast=2.1, cycles=3000, seed=seed)
+
+    return fit_cycle(sums, t1_model(), {"t1": 20.0})
+
+
 @pytest.mark.slow
 @pytest.mark.parametrize("seed", [3101, 3102, 3103, 3104, 3105])
 def test_simulated_shots_give_t1_within_three_wald_errors(seed: int) -> None:
-    sums = STAR.sums(contrast=2.1, cycles=3000, seed=seed)
-
-    result = fit_cycle(sums, t1_model(), {"t1": 20.0})
+    result = shot_fit(seed)
 
     relaxation = result.relaxation
     assert relaxation is not None
@@ -233,3 +265,29 @@ def test_simulated_shots_give_t1_within_three_wald_errors(seed: int) -> None:
     truth = times[int(np.argmax(amplitudes))]
     # Five fixed replicates guard the local Wald scale on shots, not precise coverage.
     assert abs(relaxation.t1 - truth) < 3 * relaxation.t1_error
+
+
+@pytest.mark.slow
+def test_unavailable_within_check_preserves_rate_fit_and_independent_check() -> None:
+    result = shot_fit(3101)
+
+    relaxation = result.relaxation
+    assert relaxation is not None
+    assert np.isfinite(relaxation.t1)
+    assert relaxation.t1_error > 0
+    assert np.isfinite(list(result.parameters.values())).all()
+    assert np.isfinite(list(result.errors.values())).all()
+    assert np.isnan(result.within_point.J)
+    assert result.within_point.p is None
+    assert result.within_point.df == 45 * 13
+    assert np.isnan(result.sharing.J)
+    assert result.sharing.p is None
+    assert result.sharing.df == 14 * 12
+    assert np.isfinite(result.curve.J)
+    assert result.curve.p is not None
+    assert result.curve.df == 69
+    assert result.reliability is None
+    assert result.populations.shape == (13, 3)
+    assert np.isfinite(result.populations).all()
+    assert np.isfinite(result.population_errors).all()
+    np.testing.assert_allclose(result.populations.sum(axis=1), 1)

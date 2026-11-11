@@ -18,12 +18,12 @@ def rabi_model() -> CycleModel:
 
     Axis x is the swept drive amount (gain, or pulse length) in caller units.
     The fitted ``f`` is the Rabi frequency in cycles per axis unit, bounds
-    [0, infinity), so the π point is x = 1 / (2 f). The g curve is
-    sin²(π f x), the probability that the drive takes g to e; the e curve is
-    cos²(π f x), the probability that e stays in e. The third state is not
-    driven: its row's free endpoints absorb a flat response, and its curve
-    repeats the g curve. ``oscillation_frequency`` is ``f``, so CycleFit
-    reports reliability.
+    [0, infinity), so the π point is x = 1 / (2 f). Each row interpolates
+    between two free simplex endpoints using its own curve weight. The g row
+    uses sin²(π f x), and the e row uses cos²(π f x). The third row uses the
+    same sin² weight as the g row; it is not fixed as undriven. Identical
+    endpoints allow a flat response, but the third row need not be flat.
+    ``oscillation_frequency`` is ``f``, so CycleFit reports reliability.
     """
 
     def curve(x: Array, parameters: Mapping[str, float]) -> Array:
