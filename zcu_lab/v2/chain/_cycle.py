@@ -9,17 +9,12 @@ writes this loop in its own run; every read is followed by delay_auto, so the
 second read starts after the first ADC window and the next D after the second.
 """
 
-from collections.abc import Callable
-
 import numpy as np
-from matplotlib.lines import Line2D
-from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from zcu_tools.analysis.readout_chain import (
     CYCLE_FEATURE_COUNT,
     CycleFit,
     CycleSums,
-    cycle_curves,
 )
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import (
@@ -28,7 +23,6 @@ from zcu_tools.experiment import (
     VariableSpec,
     VariableZSpec,
 )
-from zcu_tools.plotting.plots import Plots
 
 # Eight (D, read, read) blocks give the 16 reads per shot of chain_cycle_sums.
 BLOCKS_PER_CYCLE = 8
@@ -78,37 +72,6 @@ def restore_cycle_sums[C: ConfigBase](data: GroupedLoadData[C]) -> CycleSums:
         feature_sums=data.variable("feature_sums").z,
         product_sum=data.variable("product_sum").z,
     )
-
-
-def live_cycle_curves(
-    plots: Plots, axis: NDArray[np.float64], *, xlabel: str
-) -> Callable[[NDArray[np.float64]], None]:
-    """Show the all-number and first-read curves of cycle_curves on one axes.
-
-    Create the "measurement" figure with both curves in sigma units and return
-    the SignalBuffer update. The update receives the (points, 66, 66) running
-    sums of all completed rounds, pools them into CycleSums along axis and
-    redraws both curves. cycle_curves errors propagate.
-    """
-    fig, ax = plots.subplots(num="measurement")
-    ax.set(xlabel=xlabel, ylabel="Projected signal (sigma)")
-    ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
-    ax.grid()
-    (all_line,) = ax.plot([], [], marker=".", label="all 65 numbers")
-    (first_line,) = ax.plot([], [], marker=".", label="first read")
-    ax.legend()
-
-    @plots.on_plot_thread
-    def update(augmented_sums: NDArray[np.float64]) -> tuple[Line2D, Line2D]:
-        curves = cycle_curves(CycleSums.from_augmented(axis, augmented_sums))
-        all_line.set_data(axis, curves.main_sigma)
-        first_line.set_data(axis, curves.first_read_sigma)
-        ax.relim()
-        ax.autoscale_view()
-        return all_line, first_line
-
-    fig.show()
-    return update
 
 
 def first_read_iq(sums: CycleSums) -> NDArray[np.complex128]:

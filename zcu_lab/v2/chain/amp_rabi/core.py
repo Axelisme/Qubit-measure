@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import Annotated, ClassVar
 
 import numpy as np
+from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field
 from zcu_tools.analysis.fitting import fit_rabi
@@ -21,6 +22,7 @@ from zcu_tools.analysis.readout_chain import (
     CycleModel,
     CycleNuisances,
     CycleSums,
+    cycle_curves,
     fit_cycle,
     rabi_model,
 )
@@ -47,9 +49,9 @@ from zcu_lab.v2.chain._cycle import (
     checks_text,
     cycle_sums_variables,
     first_read_iq,
-    live_cycle_curves,
     restore_cycle_sums,
 )
+from zcu_lab.v2.support import live_line
 
 
 class ChainAmpRabiCfg(ConfigBase):
@@ -149,7 +151,23 @@ class ChainAmpRabiExp(Experiment[CycleSums, ChainAmpRabiCfg]):
         gains = sweep2array(
             cfg.gain, "gain", {"soccfg": context.soccfg, "gen_ch": cfg.qub_pulse.ch}
         )
-        update = live_cycle_curves(context.plots, gains, xlabel="Pulse gain (a.u.)")
+        fig, ax = context.plots.subplots(num="measurement")
+        ax.set(xlabel="Pulse gain (a.u.)", ylabel="Projected signal (sigma)")
+        ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+        ax.grid()
+        lines = live_line(ax, num_lines=2)
+        ax.lines[0].set_label("all 65 numbers")
+        ax.lines[1].set_label("first read")
+        ax.legend()
+
+        @context.plots.on_plot_thread
+        def update(data: NDArray[np.float64]):
+            curves = cycle_curves(CycleSums.from_augmented(gains, data))
+            return lines.set(
+                gains, np.stack([curves.main_sigma, curves.first_read_sigma])
+            )
+
+        fig.show()
         augmented_sums = SignalBuffer(
             (len(gains), AUGMENTED_SIZE, AUGMENTED_SIZE),
             dtype=np.float64,
