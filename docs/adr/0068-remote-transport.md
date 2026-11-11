@@ -56,7 +56,13 @@ Execution ID 只屬於 MCP session。`run_id` 取已捕捉 Save report 的原 Ru
 
 Recipe-owned done 回該 recipe 的後續 handoff，standalone analysis 保留原 execution。`answer(recipe, decision)` 只回答已捕捉的寫回提問，不寫入。Recipe 的 `accept_writeback` 一次交付 Primary／Post 選定 IDs 給 `tab.writeback_accept`。GUI owner 在同次提交檢查全部 IDs，unknown／duplicate 在第一筆寫入前拒絕。實際值與目的地取 owner 當下 draft，問答期間的編輯或替換不觸發 stale 拒絕，也不還原舊 proposal。Preview 不回 revision，accept 不收 `expected_revision`。單 pane L1 `tab.writeback_write` 的 edit/write 契約不變。RPC 回覆保留已確認成功 IDs 與失敗前綴，receipt.items 是成功 ID 對應的原捕捉候選，不是寫入值快照。Full details 的 writeback_receipts 保留各次診斷，不從回答 accepted 推斷成功。2026-10-23 使用者對所有權模型的裁定與原話見 [[0075]]。
 
-Standalone `apply_writeback(tab, items=None)` 按穩定 `target_name` 選擇當前 Primary／Post draft，不看 GUI 勾選，也不回答 recipe。省略 items 寫全部，空序列寫零項。MCP 在任何寫入前讀完兩個 pane 的當前 preview，拒絕未知、重複及跨 stage 同名，再解析當前 session ID。這些讀取不授權寫入。寫入維持 Primary 先、Post 後，首錯停止。收據只列 GUI-confirmed writes，保留失敗 stage 的不確定性，不 retry 或 rollback。
+Standalone `apply_writeback(tab, items=None, stage=None)` 按穩定 `target_name` 選擇當前 draft，不看 GUI 勾選，也不回答 recipe。
+`stage` 為 primary／post 時只讀寫該 pane，省略或 null 選兩個 pane。
+省略 items 寫所選範圍的全部項目，空序列寫零項。
+MCP 在任何寫入前讀完所選 pane 的當前 preview，拒絕未知、重複及同名，再解析當前 session ID。
+跨 stage 同名的 ambiguous 訊息列出可選 stage。這些讀取不授權寫入。
+寫入維持 Primary 先、Post 後，首錯停止。收據只列 GUI-confirmed writes，未選 stage 列為 skipped。
+收據保留失敗 stage 的不確定性，不 retry 或 rollback。
 
 Measure `tab.get_cfg` 回 Form authored input、ordinary leaf values 與 directed errors。`tab.edit_cfg`、`tab.reset_cfg` 與 `tab.run_start` 不收 cfg ref 或 expected revision。`tab.describe_cfg` 另回單層 metadata 與同次局部 input／value／Form preview errors，不附 lowered cfg errors。Workflows 的 `workflow.form` 不附 schema，`workflow.describe_form` 可描述同次 batch candidate，不提交 draft 或 Engine。
 

@@ -1,8 +1,10 @@
 """QICK transport adapter requiring an explicitly assembled simulation binding."""
 
+from collections.abc import Sequence
 from math import prod
 
 import numpy as np
+from numpy.typing import NDArray
 from qick import QickConfig
 
 from zcu_tools.core.simulation import AcquireRequest, CancellationQuery, RoundSignals
@@ -185,7 +187,22 @@ class SimulationSoc(QickConfig):
     def prepare_round(self, *args, **kwargs) -> None: ...
     def cleanup_round(self, *args, **kwargs) -> None: ...
     def load_bin_program(self, *args, **kwargs) -> None: ...
-    def load_envelope(self, *args, **kwargs) -> None: ...
+    def load_envelope(
+        self, ch: int, data: Sequence[Sequence[int]] | NDArray[np.int16], addr: int
+    ) -> None:
+        """Validate a DAC upload without retaining or transferring it.
+
+        data contains int16 I/Q sample pairs (or QICK's list transport form).
+        addr and caller-supplied generator maxlen are measured in samples.
+        Raise RuntimeError when addr + sample count exceeds that capacity,
+        matching the QICK arbitrary-envelope driver; equality is allowed.
+        """
+        maxlen = self["gens"][ch]["maxlen"]
+        if len(data) + addr > maxlen:
+            raise RuntimeError(
+                f"generator {ch}: buffer length must be {maxlen} samples or less."
+            )
+
     def load_weights(self, *args, **kwargs) -> None: ...
     def load_pulse(self, *args, **kwargs) -> None: ...
     def load_pulses(self, *args, **kwargs) -> None: ...
@@ -195,5 +212,19 @@ class SimulationSoc(QickConfig):
     def configure_readout(self, *args, **kwargs) -> None: ...
     def config_mux_readout(self, *args, **kwargs) -> None: ...
     def config_avg(self, *args, **kwargs) -> None: ...
-    def config_buf(self, *args, **kwargs) -> None: ...
+    def config_buf(self, ch: int, address: int = 0, length: int = 1) -> None:
+        """Validate a decimated capture window without configuring hardware.
+
+        address is the first capture's sample address. QICK's buffer driver
+        does not range-check it. length is the sample count and must be strictly
+        smaller than the caller-supplied readout buf_maxlen; otherwise raise
+        RuntimeError. Integrated acquisition does not use this raw-buffer limit.
+        """
+        del address
+        maxlen = self["readouts"][ch]["buf_maxlen"]
+        if length >= maxlen:
+            raise RuntimeError(
+                f"requested length={length} longer or equal to decimated buffer size={maxlen}"
+            )
+
     def enable_buf(self, *args, **kwargs) -> None: ...
