@@ -33,6 +33,7 @@ from zcu_tools.simulate.evolution import (
     FluxTerm,
     ModelSource,
     NumericModel,
+    RoutingHistory,
     SecularDrive,
     SecularModel,
     quantize_ns,
@@ -650,6 +651,7 @@ def model_source(
     sources: tuple[DriveSource, ...],
     *,
     resonators: tuple[Resonator, Resonator],
+    history: RoutingHistory | None = None,
 ) -> ModelSource:
     """Return a round-local cached secular builder, DC Gibbs density and exact H.
 
@@ -657,6 +659,7 @@ def model_source(
     The returned ModelSource owns level caching; joint/source inputs must remain
     unchanged for its lifetime. Initial density is in the DC energy eigenbasis.
     Bath applicability errors occur on model(level), not during construction.
+    history is borrowed without clearing on close; None creates owned history.
     """
     energy, _ = joint.eigensystem(joint.dc_flux)
     return ModelSource(
@@ -665,6 +668,7 @@ def model_source(
         ),
         partial(secular_model, joint, sources=sources, resonators=resonators),
         flux_expansion(joint),
+        history=history,
     )
 
 
