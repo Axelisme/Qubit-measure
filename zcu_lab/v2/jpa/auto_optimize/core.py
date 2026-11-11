@@ -411,6 +411,8 @@ class AutoOptimizeExp(Experiment[JPAOptimizeResult, JPAOptCfg]):
             strict=True,
         ):
             ax.set(xlabel=label, ylabel="SNR (a.u.)")
+        for ax in axes[1:]:
+            ax.ticklabel_format(axis="x", useOffset=False)
         viewers = [live_scatter(ax) for ax in axes]
 
         @context.plots.on_plot_thread
@@ -497,6 +499,7 @@ class AutoOptimizeExp(Experiment[JPAOptimizeResult, JPAOptCfg]):
             ax.axvline(best_value, color="r", ls="--", label=f"best = {best_value:.2g}")
             ax.scatter([best_value], [max_snr], color="r", marker="*")
             ax.set_xlabel(label_name)
+            ax.ticklabel_format(axis="x", useOffset=False)
             ax.set_ylabel("SNR")
             ax.legend()
             ax.grid(True)
