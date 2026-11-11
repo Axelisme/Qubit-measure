@@ -9,6 +9,16 @@ from numpy.typing import NDArray
 THERMAL_MOMENT_COUNT = 107
 
 
+class ThermalMomentsUnavailable(ValueError):
+    """Valid sums cannot yet estimate thermal-chain moments.
+
+    A setting has fewer than two shots, nonpositive projected R1 variance,
+    or zero first-read covariance norm. Offline scoring still fails; live
+    callers may display an unavailable preview and keep accumulating sums.
+    Malformed sums raise ordinary ValueError, not this recoverable category.
+    """
+
+
 @dataclass(frozen=True)
 class ThermalChainSums:
     """Saved additive moments of thermally reset shots, in acquisition order.
@@ -160,9 +170,11 @@ def thermal_chain_score(sums: ThermalChainSums) -> ThermalChainScore:
     are not true derivatives of the clipped output. Score and error have
     continuous limit zero at rho=0. M and main-axis uncertainty are ignored.
 
-    No fit, iterative solver or finite difference is used. Invalid saved sums,
-    projected R1 variance <=0 or zero first-read covariance norm raise
-    ValueError before scoring.
+    No fit, iterative solver or finite difference is used. Invalid saved sums
+    raise ValueError. Fewer than two shots, projected R1 variance <=0 or zero
+    first-read covariance norm raise ThermalMomentsUnavailable (a ValueError).
+    Offline callers must still reject these moments. Live callers may catch
+    only that category to display an unavailable preview and keep acquiring.
     """
     _validate_sums(sums)
     settings = tuple(
@@ -229,6 +241,11 @@ def _largest_eigenvalue(matrix: NDArray[np.float64]) -> float:
 def _score_setting(
     setting: float, shots: float, moments: NDArray[np.float64]
 ) -> SettingScore:
+    # One centred sample has no covariance, even if rounding leaves a residue.
+    if shots < 2:
+        raise ThermalMomentsUnavailable(
+            f"setting {setting}: expected at least two shots; actual {shots}"
+        )
     means = moments[:32].reshape(16, 2)
     variance = moments[[32, 33, 33, 34]].reshape(2, 2) - np.outer(means[0], means[0])
     adjacent = moments[35:95].reshape(15, 2, 2) - np.einsum(
@@ -245,7 +262,7 @@ def _score_setting(
     v = float(axis @ variance @ axis)
     denominator = float(covariances[:3] @ covariances[:3])
     if v <= 0 or denominator == 0:
-        raise ValueError(
+        raise ThermalMomentsUnavailable(
             f"setting {setting}: expected variance > 0 and covariance norm > 0; "
             f"actual v={v}, D={denominator}"
         )

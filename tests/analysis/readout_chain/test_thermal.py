@@ -2,7 +2,11 @@
 
 import numpy as np
 import pytest
-from zcu_tools.analysis.readout_chain import ThermalChainSums, thermal_chain_score
+from zcu_tools.analysis.readout_chain import (
+    ThermalChainSums,
+    ThermalMomentsUnavailable,
+    thermal_chain_score,
+)
 
 
 def test_saved_sums_copy_processor_output_and_preserve_additive_columns():
@@ -316,7 +320,7 @@ def test_ranking_uses_only_score_and_preserves_exact_ties_without_exclusion():
     moments = [
         projected_moments(0.3 * 0.8 ** np.arange(4), mist=m) for m in [0, 2, 0, 0.1]
     ]
-    counts = np.array([1, 2**20, 2**20, 2**20])
+    counts = np.array([2, 2**20, 2**20, 2**20])
     saved = ThermalChainSums(
         np.array([8.0, 2.0, 4.0, 1.0]), counts, np.array(moments) * counts[:, None]
     )
@@ -405,12 +409,31 @@ def test_zero_first_read_covariances_fail_even_with_positive_noise_variance():
         thermal_chain_score(saved_moments(moments))
 
 
+@pytest.mark.parametrize(
+    "case", ["single-shot-roundoff", "constant", "zero-covariance"]
+)
+def test_score_reports_unestimable_moments_separately_from_malformed_sums(case):
+    if case == "single-shot-roundoff":
+        # Positive centring residue must not make one shot appear estimable.
+        moments = projected_moments([1e-16, 1e-16, 1e-16, 1e-16])
+        moments[32] = 1e-16
+        sums = saved_moments(moments, shots=1)
+    elif case == "constant":
+        sums = saved_moments(np.zeros(107))
+    else:
+        sums = saved_moments(projected_moments([0, 0, 0, 0]))
+
+    with pytest.raises(ThermalMomentsUnavailable, match="setting"):
+        thermal_chain_score(sums)
+
+
 def test_score_revalidates_borrowed_saved_arrays():
     centres, transition, start = three_state_model()
     saved = saved_moments(chain_moments(centres, transition, start))
     saved.feature_sums[0, 0] = np.nan
-    with pytest.raises(ValueError, match="finite.*actual non-finite"):
+    with pytest.raises(ValueError, match="finite.*actual non-finite") as invalid:
         thermal_chain_score(saved)
+    assert not isinstance(invalid.value, ThermalMomentsUnavailable)
 
 
 @pytest.mark.parametrize("field", ["axis", "shot_count", "feature_sums"])

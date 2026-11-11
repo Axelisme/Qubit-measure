@@ -18,8 +18,6 @@ from numpy.typing import NDArray
 from zcu_tools.analysis.readout_chain import (
     CYCLE_FEATURE_COUNT,
     CycleFit,
-    CycleModel,
-    CycleNuisances,
     CycleSums,
     cycle_curves,
 )
@@ -29,7 +27,6 @@ from zcu_tools.experiment import (
     VariableAxisSpec,
     VariableSpec,
     VariableZSpec,
-    config,
 )
 from zcu_tools.plotting.plots import Plots
 
@@ -130,47 +127,3 @@ def checks_text(fit: CycleFit) -> str:
         p = "" if check.p is None else f", p={check.p:.2g}"
         parts.append(f"{name} J/df={check.J:.0f}/{check.df}{p}")
     return "; ".join(parts)
-
-
-def plot_cycle_fit(
-    plots: Plots,
-    model: CycleModel,
-    fit: CycleFit,
-    axis: NDArray[np.float64],
-    *,
-    xlabel: str,
-    result: str,
-) -> None:
-    """Publish "populations": per-point populations and the fitted curves.
-
-    Points are fit.populations with their Wald error bars; lines are the
-    model's populations at the fitted values on a dense axis, one color per
-    state. The legend gives each state's fitted thermal population, since
-    state labels are arbitrary.
-    result is the first title line, for example the fitted parameter.
-    """
-    dense = np.linspace(axis.min(), axis.max(), 400)
-    # fit_cycle always gives a CycleModel fit CycleNuisances.
-    assert isinstance(fit.nuisances, CycleNuisances)
-    fitted = model.populations(dense, fit.parameters, fit.nuisances)
-
-    fig, ax = plots.subplots(num="populations", figsize=config.figsize)
-    for state in range(3):
-        thermal = fit.nuisances.thermal[state]
-        ax.errorbar(
-            axis,
-            fit.populations[:, state],
-            yerr=fit.population_errors[:, state],
-            fmt="o",
-            markersize=3,
-            color=f"C{state}",
-            label=f"state {state}, thermal {thermal:.2f}",
-        )
-        ax.plot(dense, fitted[:, state], color=f"C{state}")
-    ax.set_xlabel(xlabel)
-    ax.set_ylabel("First-read population")
-    ax.set_title(f"{result}\n{checks_text(fit)}", fontsize=9)
-    # Outside the axes: the curves fill the whole population range.
-    ax.legend(fontsize=8, loc="upper left", bbox_to_anchor=(1.01, 1.0))
-    ax.grid(True)
-    fig.tight_layout()

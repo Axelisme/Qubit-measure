@@ -13,15 +13,20 @@ from dataclasses import dataclass
 from typing import Annotated, ClassVar
 
 import numpy as np
+from numpy.typing import NDArray
 from pydantic import Field
+from zcu_tools.analysis.fitting import fit_decay_fringe
 from zcu_tools.analysis.readout_chain import (
     CycleCheck,
+    CycleFit,
+    CycleModel,
+    CycleNuisances,
     CycleSums,
     fit_cycle,
     t2_ramsey_model,
 )
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import Experiment, GroupedAxesSpec, VariableAxisSpec
+from zcu_tools.experiment import Experiment, GroupedAxesSpec, VariableAxisSpec, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
@@ -34,21 +39,17 @@ from zcu_tools.program.v2 import (
     TimelineBuilder,
     chain_cycle_sums,
 )
+from zcu_tools.utils.process import rotate2real
 
 from zcu_lab.v2.chain._cycle import (
     AUGMENTED_SIZE,
     BLOCKS_PER_CYCLE,
     READS_PER_CYCLE,
+    checks_text,
     cycle_sums_variables,
     first_read_iq,
     live_cycle_curves,
-    plot_cycle_fit,
     restore_cycle_sums,
-)
-from zcu_lab.v2.twotone.time_domain.t2ramsey.core import (
-    T2RamseyAnalyzeOptions,
-    T2RamseyExp,
-    T2RamseyResult,
 )
 
 
@@ -180,7 +181,10 @@ class ChainT2RamseyExp(Experiment[CycleSums, ChainT2RamseyCfg]):
         # 2. One cycle per rep: K, then (π/2, wait x, inverse π/2, read, read) x 8.
         with Schedule(augmented_sums, scope=context.scope) as sched:
             builder = TimelineBuilder(
-                context.soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
+                context.soccfg,
+                reps=cfg.reps,
+                initial_delay=cfg.relax_delay,
+                relax_delay=cfg.relax_delay,
             )
             delay = builder.add_sweep("delay", cfg.delay)
             first_pi2 = Pulse("pi2_pulse1", cfg.pi2_pulse)
@@ -229,9 +233,9 @@ class ChainT2RamseyExp(Experiment[CycleSums, ChainT2RamseyCfg]):
     ) -> ChainT2RamseyAnalysis:
         """Fit all 65 numbers with Ramsey curves, starting from the first read.
 
-        First fit the first read's mean IQ with the twotone/t2ramsey decaying
-        fringe fit, which also publishes its "fit" figure; its T2 starts t2
-        and tf and its fringe frequency starts detuning. Then fit_cycle fits
+        First project the first read IQ and fit a decaying fringe with free
+        phase. Publish "fit"; its T2 starts t2 and tf and its fringe frequency
+        starts detuning. Then fit_cycle fits
         the saved sums with t2_ramsey_model and publishes "populations":
         per-delay first-read populations with error bars and the fitted
         curves. Return t2, detuning and tf with Wald errors, R and the three
@@ -242,12 +246,9 @@ class ChainT2RamseyExp(Experiment[CycleSums, ChainT2RamseyCfg]):
         sums = source.result
         delays = sums.axis
 
-        # 1. Starting values: the twotone Ramsey fringe fit of the first read.
-        first_read = T2RamseyResult(times=delays, signals=first_read_iq(sums))
-        textbook = T2RamseyExp().analyze(
-            RunRecord(cfg=None, result=first_read),
-            T2RamseyAnalyzeOptions(),
-            plots=plots,
+        # 1. Seed from the first-read IQ using this experiment's fit policy.
+        first_read_t2, first_read_detuning = _fit_first_read(
+            plots, delays, first_read_iq(sums)
         )
 
         # 2. Joint fit of all 65 numbers; the third state starts from the same T2.
@@ -255,18 +256,17 @@ class ChainT2RamseyExp(Experiment[CycleSums, ChainT2RamseyCfg]):
         fit = fit_cycle(
             sums,
             model,
-            {"t2": textbook.t2r, "detuning": textbook.detune, "tf": textbook.t2r},
+            {"t2": first_read_t2, "detuning": first_read_detuning, "tf": first_read_t2},
         )
 
         t2, t2_err = fit.parameters["t2"], fit.errors["t2"]
         detuning, detuning_err = fit.parameters["detuning"], fit.errors["detuning"]
         tf, tf_err = fit.parameters["tf"], fit.errors["tf"]
-        plot_cycle_fit(
+        _plot_populations(
             plots,
             model,
             fit,
             delays,
-            xlabel="Delay (us)",
             result=(
                 f"T2 = {t2:.4g} ± {t2_err:.2g} us, detuning = {detuning:.4g} ± "
                 f"{detuning_err:.2g} MHz, third state {tf:.3g} ± {tf_err:.2g} us, "
@@ -287,6 +287,84 @@ class ChainT2RamseyExp(Experiment[CycleSums, ChainT2RamseyCfg]):
             curve=fit.curve,
             J=fit.J,
             df=fit.df,
-            first_read_t2=textbook.t2r,
-            first_read_detuning=textbook.detune,
+            first_read_t2=first_read_t2,
+            first_read_detuning=first_read_detuning,
         )
+
+
+def _fit_first_read(
+    plots: Plots,
+    delays: NDArray[np.float64],
+    signals: NDArray[np.complex128],
+) -> tuple[float, float]:
+    """Fit and plot the first-read seed before the joint cycle analysis."""
+    # This first-read seed uses a free fringe phase, not a fixed 0/180°.
+    lengths = delays
+    real_signals = rotate2real(signals).real
+    fit = fit_decay_fringe(lengths, real_signals, fixedparams=None)
+    t2r, t2rerr, detune, detune_err, y_fit = (
+        fit.decay_time,
+        fit.decay_time_err,
+        fit.freq,
+        fit.freq_err,
+        fit.curve,
+    )
+
+    fig, ax = plots.subplots(num="fit", figsize=config.figsize)
+
+    ax.plot(lengths, real_signals, label="meas", ls="-", marker="o", markersize=3)
+    ax.plot(lengths, y_fit, label="fit")
+    t2r_str = f"{t2r:.2f}us ± {t2rerr:.2f}us"
+    detune_str = f"{detune:.2f}MHz ± {detune_err * 1e3:.2f}kHz"
+    ax.set_title(f"T2 fringe = {t2r_str},\ndetune = {detune_str}", fontsize=15)
+    ax.set_xlabel("Delay Time (us)")
+    ax.set_ylabel("Signal Real (a.u.)")
+    ax.legend()
+    ax.grid(True)
+
+    fig.tight_layout()
+
+    return float(t2r), float(detune)
+
+
+def _plot_populations(
+    plots: Plots,
+    model: CycleModel,
+    fit: CycleFit,
+    axis: NDArray[np.float64],
+    *,
+    result: str,
+) -> None:
+    """Publish "populations": per-point populations and the fitted curves.
+
+    Points are fit.populations with their Wald error bars; lines are the
+    model's populations at the fitted values on a dense axis, one color per
+    state. The legend gives each state's fitted thermal population, since
+    state labels are arbitrary.
+    result is the first title line, for example the fitted parameter.
+    """
+    dense = np.linspace(axis.min(), axis.max(), 400)
+    # fit_cycle always gives a CycleModel fit CycleNuisances.
+    assert isinstance(fit.nuisances, CycleNuisances)
+    fitted = model.populations(dense, fit.parameters, fit.nuisances)
+
+    fig, ax = plots.subplots(num="populations", figsize=config.figsize)
+    for state in range(3):
+        thermal = fit.nuisances.thermal[state]
+        ax.errorbar(
+            axis,
+            fit.populations[:, state],
+            yerr=fit.population_errors[:, state],
+            fmt="o",
+            markersize=3,
+            color=f"C{state}",
+            label=f"state {state}, thermal {thermal:.2f}",
+        )
+        ax.plot(dense, fitted[:, state], color=f"C{state}")
+    ax.set_xlabel("Delay (us)")
+    ax.set_ylabel("First-read population")
+    ax.set_title(f"{result}\n{checks_text(fit)}", fontsize=9)
+    # Outside the axes: the curves fill the whole population range.
+    ax.legend(fontsize=8, loc="upper left", bbox_to_anchor=(1.01, 1.0))
+    ax.grid(True)
+    fig.tight_layout()

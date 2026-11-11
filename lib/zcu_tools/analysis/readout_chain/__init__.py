@@ -12,6 +12,7 @@ from .thermal import (
     SettingScore,
     ThermalChainScore,
     ThermalChainSums,
+    ThermalMomentsUnavailable,
     thermal_chain_score,
 )
 
@@ -22,6 +23,7 @@ __all__ = [
     "SweepSums",
     "ThermalChainScore",
     "ThermalChainSums",
+    "ThermalMomentsUnavailable",
     "sweep_curve",
     "thermal_chain_score",
     "rabi_model",
