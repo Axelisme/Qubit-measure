@@ -39,17 +39,6 @@ from zcu_tools.program.v2.modules.waveform import EnvelopeWaveformCfg
 from .._pulses import drive_pulse
 
 
-class GainSweepCfg(SweepCfg):
-    """Linear signed DAC-gain sweep in a.u., including zero and both endpoints.
-
-    start and stop lie in [-1, 1]. Inherited expts and step must describe the
-    same linear grid; one point requires equal endpoints and zero step.
-    """
-
-    start: float = Field(ge=-1, le=1)
-    stop: float = Field(ge=-1, le=1)
-
-
 class StirapAmplitudeCfg(ConfigBase):
     """Measured carriers/MHz, independent gain ranges and fixed Stokes lead/us.
 
@@ -74,8 +63,8 @@ class StirapAmplitudeCfg(ConfigBase):
     stokes_waveform: Annotated[EnvelopeWaveformCfg, FieldMeta(label="Stokes waveform")]
     stokes_lead: Annotated[float, FieldMeta(label="Stokes lead", unit="us")] = 0.05
     readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
-    pump_gain: Annotated[GainSweepCfg, FieldMeta(label="Pump gain", unit="a.u.")]
-    stokes_gain: Annotated[GainSweepCfg, FieldMeta(label="Stokes gain", unit="a.u.")]
+    pump_gain: Annotated[SweepCfg, FieldMeta(label="Pump gain", unit="a.u.")]
+    stokes_gain: Annotated[SweepCfg, FieldMeta(label="Stokes gain", unit="a.u.")]
     shots: Annotated[int, FieldMeta(label="Shots per point")] = Field(
         default=4096, ge=1
     )

@@ -16,7 +16,8 @@ from zcu_tools.mcp.measure.recipe_api import (
 class StirapAmplitudeInputs(RecipeInputs):
     """Measured carriers and two independent signed gain ranges in a.u.
 
-    pump_n and stokes_n map to their respective sweep expts. Waveform references select a library key or an inline
+    pump_n and stokes_n map to their respective sweep expts.
+    Waveform references select a library key or an inline
     Form option such as Inline: cosine; overrides edit that family's fields.
     Omitted optional fields retain Form values; null is passed to the owner.
     """
@@ -95,6 +96,7 @@ async def stirap_amplitude(
     """Run two independent hardware gain loops at fixed carriers, lead and envelopes.
 
     pump_n/stokes_n → expts controls the two gain axes. Signed and zero gains play.
+    Run compilation rejects pulse gains outside [-1, 1]; Form edits do not.
     Choose gauss, cosine, drag or arb independently; overrides set waveform
     parameters. Analyze only the saved centroid3 readout. Save after successful
     Run even when Analyze fails; failed Run does not Save. No writeback occurs.

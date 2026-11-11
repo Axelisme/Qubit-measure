@@ -12,7 +12,7 @@ It does not compile or acquire separately at each coordinate.
 - Measure the Pump 0–3 and Stokes 3–2 carrier frequencies at the intended operating point. Enter both in MHz. Do not substitute simulator parameters for measured carriers.
 - Bind Pump and Stokes to different charge-drive generators. Check the physical wiring before using hardware.
 - Select a pulse readout with a saved `centroid3` calibration. The calibration must contain distinct g/e/f IQ centers and a training confusion matrix. Obtain it separately before this experiment.
-- Set the two gain ranges in a.u. Each start and stop must lie in [-1, 1]. Both sweeps accept negative, zero and positive gains.
+- Set the two gain ranges in a.u. Both sweeps accept negative, zero and positive gains. The Form accepts endpoints outside [-1, 1], but Run rejects them during program compilation before acquisition.
 
 ## Controls and sequence
 
@@ -28,6 +28,7 @@ It uses the same two envelopes, carrier frequencies and lead at every gain pair.
 
 `pump_gain.start`, `pump_gain.stop` and the Pump point count define the outer gain sweep.
 `stokes_gain.start`, `stokes_gain.stop` and the Stokes point count define the inner gain sweep.
+Both axes offer Range or Center coordinates, with Expts or Step sampling.
 Each generator quantizes its gain separately. Saved axes contain the requested gains, not the hardware-quantized values.
 `shots` sets repetitions at each gain pair in one acquisition round.
 `relax_delay` is the wait in us after each shot.
