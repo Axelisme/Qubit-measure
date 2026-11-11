@@ -154,8 +154,15 @@ comparisons, not another source of measurement evidence.
 
 The STIRAP controls came from acquired spectroscopy and Rabi calibration.
 They are recorded observations, not Form defaults or reusable calibration for
-another entry. The [STIRAP guide](../../v2/twotone/stirap/guide.md) explains
-spectroscopy, reference preparation and saved-readout analysis.
+another entry. The current [delay](../../v2/twotone/stirap/delay/guide.md),
+[amplitude](../../v2/twotone/stirap/amplitude/guide.md) and
+[detuning](../../v2/twotone/stirap/detuning/guide.md) guides explain the separate
+Forms, reference preparation and saved-readout analysis.
+The measurements below used the retired combined experiment, not the current
+three adapters. Its runs are not migrated or loadable. The historical common
+gain scale is not an axis of the current amplitude experiment, which scans
+Pump and Stokes gains independently. These values do not validate the new
+adapters or their waveform choices.
 
 | Control | Recorded value |
 | --- | --- |

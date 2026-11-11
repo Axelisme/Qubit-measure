@@ -2,7 +2,7 @@
 
 **Readers:** operator, lab-author, agent. Start the offline zero-flux environment and measure transition frequencies before preparing higher states.
 
-**Last updated:** 2026-11-02, caller-owned shared board inventory
+**Last updated:** 2026-11-11, independent STIRAP experiments and recipes
 
 This environment uses the Mencia 2024 Device D circuit inputs
 EJ/EC/EL = 6.78/1.47/0.22 GHz, zero flux and a 20 mK qubit bath.
@@ -108,27 +108,37 @@ A visible Form is not proof of a valid cfg or a calibrated preparation.
 
 ## Experiments and MCP
 
-New Tab exposes all three experiments together:
+New Tab exposes the reference, three independent STIRAP scans and Raman:
 
 - [Qutrit population guide](../../v2/singleshot/qutrit_population/guide.md): acquire
   g/e/f references, analyze them and Apply the centroid3 readout calibration.
-- [STIRAP guide](../../v2/twotone/stirap/guide.md): choose delay, amplitude or
-  Pump × Stokes detuning within the same Form.
+- [STIRAP delay](../../v2/twotone/stirap/delay/guide.md): scan Stokes lead in us.
+- [STIRAP amplitude](../../v2/twotone/stirap/amplitude/guide.md): scan independent
+  Pump × Stokes signed gains in one program with two hardware sweeps.
+- [STIRAP detuning](../../v2/twotone/stirap/detuning/guide.md): scan independent
+  Pump × Stokes carrier offsets in MHz with two hardware sweeps.
 - [Raman guide](../../v2/twotone/raman_gf/guide.md): scan a single carrier's
   two-photon frequency, area or both using a sampled envelope.
+
+Each STIRAP Form lets Pump and Stokes independently select gauss, cosine, drag
+or arb waveforms. Each waveform supplies its own duration.
 
 Complete spectroscopy in the order above before entering their carriers.
 Apply the acquired reference readout, then Open or Reset STIRAP/Raman so the
 next Run captures it. Analysis uses that Run's saved centroid3 readout, not a
 later library edit. Missing inputs remain Invalid instead of using model values.
 
-MCP provides only `stirap` and `raman_gf`, each with Run, Analyze and Save.
-STIRAP requires an explicit scan mode; there are no separate diagnostic tools
-or qutrit-reference recipe. Neither recipe tunes controls or asks for a
-writeback that its analysis does not propose. Restart the MCP server after
-adding recipe declarations and inspect `tools/list`; GUI Reload does not
-update that process. `recipe_guide(adapter="twotone/stirap")` and
-`recipe_guide(adapter="twotone/raman_gf")` return the guides linked above.
+MCP provides `stirap_delay`, `stirap_amplitude`, `stirap_detuning` and
+`raman_gf`, each with Run, Analyze and Save. Each STIRAP recipe opens its own
+adapter and Form. There are no separate diagnostic tools or qutrit-reference
+recipe. These recipes do not tune controls or propose writeback.
+Restart the MCP server after changing recipe declarations and inspect
+`tools/list`; GUI Reload does not update that process.
+Use `recipe_guide(adapter="twotone/stirap/delay")`,
+`recipe_guide(adapter="twotone/stirap/amplitude")`,
+`recipe_guide(adapter="twotone/stirap/detuning")` or
+`recipe_guide(adapter="twotone/raman_gf")` to read the corresponding guide.
+The retired combined STIRAP experiment's runs are not migrated or loadable.
 
 ## Numerical scope
 

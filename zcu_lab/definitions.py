@@ -211,7 +211,6 @@ from zcu_lab.v2.twotone.stirap.delay.gui import DEFINITION as STIRAP_DELAY_DEFIN
 from zcu_lab.v2.twotone.stirap.detuning.gui import (
     DEFINITION as STIRAP_DETUNING_DEFINITION,
 )
-from zcu_lab.v2.twotone.stirap.gui import DEFINITION as STIRAP_DEFINITION
 from zcu_lab.v2.twotone.time_domain.cpmg.gui import DEFINITION as CPMG_DEFINITION
 from zcu_lab.v2.twotone.time_domain.t1.gui import DEFINITION as T1_DEFINITION
 from zcu_lab.v2.twotone.time_domain.t2echo.gui import DEFINITION as T2_ECHO_DEFINITION
@@ -233,7 +232,6 @@ ADAPTERS: dict[str, object] = {
     "onetone/flux_dep": ONE_TONE_FLUX_DEP_DEFINITION,
     "twotone/freq": FREQ_DEFINITION,
     "twotone/chain": CHAIN_DEFINITION,
-    "twotone/stirap": STIRAP_DEFINITION,
     "twotone/stirap/delay": STIRAP_DELAY_DEFINITION,
     "twotone/stirap/detuning": STIRAP_DETUNING_DEFINITION,
     "twotone/stirap/amplitude": STIRAP_AMPLITUDE_DEFINITION,
