@@ -16,6 +16,12 @@ root_packages =
     apps
     scripts
 include_external_packages = True
+contract_types =
+    experiment-imports: tools.check_experiment_imports.ExperimentImportsContract
+
+[importlinter:contract:experiment-directories-independent]
+name = Experiment directories do not import other experiments or foreign family helpers
+type = experiment-imports
 
 # Physical model policy stays above every framework package.
 [importlinter:contract:framework-no-simulators]
