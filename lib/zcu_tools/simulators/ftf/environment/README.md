@@ -1,10 +1,10 @@
 # FTF environment composition
 
-**Last updated:** 2026-11-02，caller 板子決定 PFB 間距
+**Last updated:** 2026-11-12，caller-owned routing controls
 
 **讀者：** framework-dev、agent。FTF 環境的組裝接縫、數值接線與 acquisition 契約。
 
-`ftf(configuration, *, soccfg, acquisition=None, workers=1, warmup=False, time_scale=None)`
+`ftf(configuration, *, soccfg, acquisition=None, workers=1, warmup=False, time_scale=None, history=None, families=None)`
 builds the same `SimulationEnvironment` for GUI startup and Notebook callers. It creates fixed-unit V/A `FakeDevice` sources in one
 `DeviceManager`, uses each source name as its explicit FakeDevice address,
 applies initial values at environment construction and binds the caller's required
@@ -16,6 +16,16 @@ Startup, Notebook calls and caller-owned YAML setup belong to
 [simulation environments](../../../../../zcu_lab/simulation_envs/README.md#ftf-startup-與-yaml-設定).
 Field units and entry wiring belong to the [FTF field guide](../../../../../zcu_lab/simulation_envs/FTF/field-guide.md);
 schema and validation belong to [FTF config](../config/README.md).
+
+Pass `history=RoutingHistory()` from `zcu_tools.simulate.evolution` to retain
+caller-controlled routing history across acquires and model rebuilds. The source
+borrows it and does not clear it on close. After acquires drain, `history.clear()`
+forces the next acquire to solve again without resetting sampling streams,
+simulated time or model caches. `families={"t4", "dop853"}` restricts every
+span, including projective continuations. Unknown names raise at construction;
+an unavailable domain raises at acquire without bypassing guards or falling
+back outside the whitelist. Omitting both keywords preserves default routing
+and source-owned history. These controls are not physical YAML or program cfg.
 
 ## Contents
 

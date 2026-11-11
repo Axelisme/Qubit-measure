@@ -1,6 +1,7 @@
 """Single-fluxonium acquisition with complete timelines and single-cavity ADC."""
 
 import logging
+from collections.abc import Collection
 from dataclasses import dataclass
 from hashlib import sha256
 from math import prod
@@ -41,6 +42,7 @@ from zcu_tools.simulate.evolution import (
     DriveSource,
     Engine,
     ModelSource,
+    RoutingHistory,
     batch_populations,
 )
 from zcu_tools.simulate.fluxonium import (
@@ -105,7 +107,9 @@ def _build_structure(
 
 
 def _build_facts(
-    settings: SingleFluxoniumSettings, model: SingleFluxoniumModel
+    settings: SingleFluxoniumSettings,
+    model: SingleFluxoniumModel,
+    history: RoutingHistory | None,
 ) -> SingleFluxoniumFacts:
     qubit = settings.chip.qubit
     charge = model.charge_operator()
@@ -122,6 +126,7 @@ def _build_facts(
         noise=FluxoniumNoise(qubit.q_cap, qubit.q_ind, qubit.xqp, qubit.aphi),
         resonator=dispersive_resonator(settings),
         slow_envelope_segments_per_period=settings.numerics.slow_envelope_segments_per_period,
+        history=history,
     )
     try:
         return SingleFluxoniumFacts(
@@ -204,6 +209,8 @@ class SingleFluxoniumRuntimeOptions:
 
     engine: fresh exclusive Engine transferred to the source, closed by close().
         None creates an Engine with 4 MiB routing-facts residency.
+    history: borrowed routing history for every rebuilt ModelSource. None lets
+        each ModelSource own its history. Clearing it invalidates preparation reuse.
     clock: shared environment SimulationClock; source never closes/resets it.
         None creates a standalone clock. All qubits in an environment can share it.
     truth_log: private JSONL file path, or None for a fresh session directory
@@ -214,6 +221,7 @@ class SingleFluxoniumRuntimeOptions:
     engine: Engine | None = None
     clock: SimulationClock | None = None
     truth_log: Path | None = None
+    history: RoutingHistory | None = None
 
 
 class SingleFluxoniumSource:
@@ -275,6 +283,7 @@ class SingleFluxoniumSource:
         self._effective_settings = settings
         self._pending_acquire = False
         self.engine = Engine(workers=1) if runtime.engine is None else runtime.engine
+        self._history = runtime.history
         self._prepared: SingleFluxoniumPreparation | None = None
         self._session: SingleFluxoniumAcquire | None = None
         self._source_device = devices.get_all_devices().get(
@@ -396,7 +405,9 @@ class SingleFluxoniumSource:
             self._clear()
             if self._structure is None:
                 raise RuntimeError("single-fluxonium structure is unavailable")
-            self._facts = _build_facts(self.effective_settings, self._structure)
+            self._facts = _build_facts(
+                self.effective_settings, self._structure, self._history
+            )
             self._facts_key = key
         return self._facts
 
@@ -729,6 +740,8 @@ def single_fluxonium(
     private_replay: Path | None = None,
     clock: SimulationClock | None = None,
     truth_log: Path | None = None,
+    history: RoutingHistory | None = None,
+    families: Collection[str] | None = None,
 ) -> SimulationEnvironment:
     """Assemble one DC driver and a bound mock SoC, without acquiring or warmup.
 
@@ -748,6 +761,11 @@ def single_fluxonium(
     clock is owned by this environment. truth_log selects a private JSONL file
     for enabled drift, defaulting to a new session under ~/.local/state/
     zcu-tools/simulation/single-fluxonium. No truth I/O occurs with drift off.
+    history is borrowed by all model generations; clear() forces a fresh solve
+    without resetting sampling or clocks. None keeps source-owned histories.
+    families restricts every evolution span, including projective continuations;
+    None uses all families. Unknown names raise at build; no applicable candidate
+    raises at acquire without fallback or bypassing guards.
     Successful assembly is not MCP acceptance. No real hardware is opened.
     Invalid YAML/settings/profile/binding errors propagate. Builder failure closes
     its devices and preserves cleanup errors alongside the original failure.
@@ -778,7 +796,12 @@ def single_fluxonium(
             settings,
             devices,
             private_replay=private_replay,
-            runtime=SingleFluxoniumRuntimeOptions(clock=sim_clock, truth_log=truth_log),
+            runtime=SingleFluxoniumRuntimeOptions(
+                engine=Engine(workers=1, families=families),
+                history=history,
+                clock=sim_clock,
+                truth_log=truth_log,
+            ),
         )
         gens = (
             *(line.gen_ch for line in settings.drive_lines.values()),

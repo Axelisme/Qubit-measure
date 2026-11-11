@@ -1,5 +1,6 @@
 """FTF round snapshots, persistent engine ownership and compact readout sampling."""
 
+from collections.abc import Collection
 from dataclasses import dataclass, replace
 from hashlib import sha256
 from math import prod
@@ -45,6 +46,7 @@ from zcu_tools.simulate.evolution import (
     Engine,
     EvolutionResult,
     PathDiagnostics,
+    RoutingHistory,
     batch_populations,
 )
 from zcu_tools.simulators.ftf.config import FTFSettings, load_ftf, parse_ftf
@@ -532,6 +534,8 @@ class FTFSource:
     the private JSONL path; None uses ~/.local/state/zcu-tools/simulation/ftf/
     <session>/truth.jsonl. Enabled drift writes one row per loop per begin and log
     I/O errors propagate. Disabled drift creates no file or drift RNG streams.
+    history is borrowed by every rebuilt ModelSource; None creates owned
+    histories. Clearing it invalidates complete-preparation reuse, not sampling.
     Calls are synchronous, serialized by SimulationBinding, not thread-safe.
     """
 
@@ -545,6 +549,7 @@ class FTFSource:
         acquisition: FTFAcquisitionOptions | None = None,
         readout: FTFReadoutConfig | None = None,
         telemetry: RoutingTelemetry | None = None,
+        history: RoutingHistory | None = None,
     ) -> None:
         options = FTFAcquisitionOptions() if acquisition is None else acquisition
         private_replay = options.private_replay
@@ -569,6 +574,7 @@ class FTFSource:
         self._pending_acquire = False
         self.private_replay = private_replay
         self.telemetry = telemetry
+        self._history = history
         self.engine = Engine(1) if engine is None else engine
         self.evaluations: tuple[FTFNumericUse, ...] = ()
         self._session: FTFAcquire | None = None
@@ -641,7 +647,9 @@ class FTFSource:
             if self._facts is not None:
                 self._facts.source.close()
             self._facts = None
-            self._facts = FTFModelFacts(self.effective_settings, snapshot)
+            self._facts = FTFModelFacts(
+                self.effective_settings, snapshot, history=self._history
+            )
         return self._facts
 
     def snapshot(self) -> EnvironmentSnapshot:
@@ -791,6 +799,8 @@ def ftf(
     workers: int = 1,
     warmup: bool | EnvironmentWarmup = False,
     time_scale: float | None = None,
+    history: RoutingHistory | None = None,
+    families: Collection[str] | None = None,
 ) -> SimulationEnvironment:
     """Build an FTF environment from physical settings and a caller-owned board.
 
@@ -833,6 +843,11 @@ def ftf(
     credit unscaled physical seconds not spent on the wall clock, even with
     time_scale=0. acquisition.truth_log optionally selects the private drift JSONL file;
     None uses ~/.local/state/zcu-tools/simulation/ftf/<session>/truth.jsonl.
+    history is borrowed across model generations; None keeps source-owned history.
+    clear() forces a fresh solve without resetting sampling or clocks. families
+    restricts every span, including projective continuations; None allows all.
+    Unknown names raise at build; unavailable domains raise at acquire. Neither
+    routing guards nor applicability checks are bypassed.
     Enabled drift freezes losses and writes three loop rows before each request;
     I/O errors propagate. Disabled drift creates no truth log or drift RNG stream.
     """
@@ -863,7 +878,8 @@ def ftf(
             settings,
             devices,
             soccfg=soccfg,
-            engine=Engine(workers),
+            engine=Engine(workers, families=families),
+            history=history,
             acquisition=replace(options, clock=sim_clock),
             telemetry=telemetry,
         )

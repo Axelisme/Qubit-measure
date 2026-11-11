@@ -16,6 +16,7 @@ from zcu_tools.simulate.evolution import (
     FluxLevel,
     FluxTerm,
     ModelSource,
+    RoutingHistory,
     SecularDrive,
     SecularModel,
 )
@@ -361,6 +362,7 @@ class SingleFluxoniumModel:
         noise: FluxoniumNoise = _DISABLED_NOISE,
         resonator: DispersiveResonator | None = None,
         slow_envelope_segments_per_period: int = 20,
+        history: RoutingHistory | None = None,
     ) -> ModelSource:
         """Return a round-local engine source with DC Gibbs initial density.
 
@@ -372,7 +374,8 @@ class SingleFluxoniumModel:
         Invalid source/bath inputs raise on the first requested level, as in
         secular_model. slow_envelope_segments_per_period is a strict positive
         integer, default 20, forwarded to ModelSource's midpoint policy.
-        Construction validates the initial density and policy.
+        Construction validates the initial density and policy. history is borrowed
+        by ModelSource; None gives it an owned history cleared on source close.
         """
         return ModelSource(
             np.diag(
@@ -383,4 +386,5 @@ class SingleFluxoniumModel:
             ),
             self.flux_expansion(),
             slow_envelope_segments_per_period=slow_envelope_segments_per_period,
+            history=history,
         )
