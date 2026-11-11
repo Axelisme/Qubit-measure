@@ -127,6 +127,11 @@ class LineFormat:
 
 
 class HeatmapFormat:
+    """Render uniformly spaced sample-centered coordinates.
+
+    A one-sample axis spans one axis unit, centered on its sample value.
+    """
+
     def __init__(
         self,
         xlabel: str,
@@ -194,8 +199,8 @@ class HeatmapFormat:
                 "do not clear or remove template artists before updating."
             )
 
-        dx = 0.5 * (xs[-1] - xs[0]) / max(1, (len(xs) - 1))
-        dy = 0.5 * (ys[-1] - ys[0]) / max(1, (len(ys) - 1))
+        dx = 0.5 if len(xs) == 1 else 0.5 * (xs[-1] - xs[0]) / (len(xs) - 1)
+        dy = 0.5 if len(ys) == 1 else 0.5 * (ys[-1] - ys[0]) / (len(ys) - 1)
         if self.flip:
             im.set_extent((ys[0] - dy, ys[-1] + dy, xs[0] - dx, xs[-1] + dx))
             im.set_data(signals)
