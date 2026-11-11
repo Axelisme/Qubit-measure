@@ -218,13 +218,11 @@ class T2EchoExp(Experiment[T2EchoResult, T2EchoCfg]):
         Zero source detune forces decay. For fringe eligibility use cfg.detune
         when present, otherwise finite result.true_activate_detune. Missing
         detune for a requested fringe fit raises ValueError; explicit decay needs
-        no detune source. Unknown fit_method values raise ValueError.
+        no detune source. Options validate fit_method as fringe or decay.
         """
         result = source.result
         fit_method = options.fit_method
         fit_phase = options.fit_phase
-        if fit_method not in ("fringe", "decay"):
-            raise ValueError(f"Unknown fit_method: {fit_method}")
         if fit_method == "fringe":
             detune_source = (
                 source.cfg.detune
@@ -256,7 +254,7 @@ class T2EchoExp(Experiment[T2EchoResult, T2EchoCfg]):
                 fit.freq_err,
                 fit.curve,
             )
-        elif fit_method == "decay":
+        else:
             fit = fit_decay(xs, real_signals)
             t2e, t2eerr, y_fit = (
                 fit.decay_time,
@@ -265,8 +263,6 @@ class T2EchoExp(Experiment[T2EchoResult, T2EchoCfg]):
             )
             detune = 0.0
             detune_err = 0.0
-        else:
-            raise ValueError(f"Unknown fit_method: {fit_method}")
 
         fig, ax = plots.subplots(num="fit", figsize=config.figsize)
 
@@ -278,11 +274,8 @@ class T2EchoExp(Experiment[T2EchoResult, T2EchoCfg]):
             detune_str = f"{detune:.2f}MHz ± {detune_err * 1e3:.2f}kHz"
             title = r"$T_{2echo}$ fringe = " + f"{t2e_str}, detune = {detune_str}"
 
-        elif fit_method == "decay":
-            title = r"$T_{2echo}$ decay = " + f"{t2e_str}"
-
         else:
-            raise ValueError(f"Unknown fit_method: {fit_method}")
+            title = r"$T_{2echo}$ decay = " + f"{t2e_str}"
 
         ax.set_title(title, fontsize=14)
         ax.set_xlabel("Delay Time (us)", fontsize=14)
