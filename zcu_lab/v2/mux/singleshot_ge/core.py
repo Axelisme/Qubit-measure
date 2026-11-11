@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Sequence
+from copy import deepcopy
 from dataclasses import dataclass
 from functools import partial
 from typing import Annotated, ClassVar
@@ -235,7 +236,7 @@ def _raw_signal(
 def _validate_source(source: RunRecord[MuxGECfg, MuxGEResult]) -> None:
     validate_ge_result(source.result)
     if source.cfg is not None:
-        cfg = MuxGECfg.model_validate(source.cfg.model_dump())
+        cfg = source.cfg
         indices = list(cfg.participants)
         if not np.array_equal(indices, source.result.tone_indices) or cfg.shots != len(
             source.result.shot_indices
@@ -311,7 +312,7 @@ class MuxGEExp(Experiment[MuxGEResult, MuxGECfg]):
         preparations remain NaN. Acquisition, config and program errors propagate.
         """
         # 1. Use one raw-shot round and preserve the requested participant order.
-        cfg = MuxGECfg.model_validate(config.model_dump())
+        cfg = deepcopy(config)
 
         indices = list(cfg.participants)
         readout = cfg.readout.with_updates(

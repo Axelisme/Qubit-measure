@@ -37,9 +37,8 @@ from zcu_lab.v2.support.measure.mux_results import (
 from zcu_lab.v2.support.measure.mux_save_names import mux_save_stem
 from zcu_lab.v2.support.measure.record_frame import captured_qubit_flux
 from zcu_lab.v2.support.mux import MuxFitFailure, MuxSweepResult
-from zcu_lab.v2.twotone.freq.core import FreqAnalyzeOptions
 
-from .analysis import MuxFreqFit
+from .analysis import FreqAnalyzeOptions, MuxFreqFit
 from .core import MuxFreqCfg, MuxFreqExp
 from .form import make_form
 

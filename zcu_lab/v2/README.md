@@ -52,7 +52,8 @@ Leaf 的 `__init__.py` 只提供 core exports，不載入 GUI。
 兩者共用基本 T1 的 Result、Analysis 或訊號轉換，不增加 GUI adapter。
 AC Stark 的 [core.py](twotone/ac_stark/core.py) 與
 [ramsey_core.py](twotone/ac_stark/ramsey_core.py) 分別對應既有 spectroscopy／Ramsey adapters。
-Singleshot GE 的 [analysis.py](singleshot/ge/analysis.py) 擁有混淆矩陣求解與繪圖。
+Singleshot GE 與 mux GE 的混淆矩陣求解由 `zcu_tools.analysis.singleshot` 擁有。
+各實驗的 `analysis.py` 保留自己的繪圖。
 跨實驗的 row mapping 在 [support/singleshot/util.py](support/singleshot/util.py)，
 mux IQ 平均轉換在 [support/mux.py](support/mux.py)，
 AC Stark／CKP 的連續共振中心擷取在 [support/resonance.py](support/resonance.py)。

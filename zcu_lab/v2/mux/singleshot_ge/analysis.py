@@ -4,15 +4,22 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import numpy as np
 from matplotlib.axes import Axes
 from matplotlib.patches import Polygon
 from numpy.typing import NDArray
+from pydantic import Field
 from pydantic.dataclasses import dataclass as pydantic_dataclass
 from zcu_tools.analysis.failure import AnalysisFailed
-from zcu_tools.analysis.singleshot import classify_result
+from zcu_tools.analysis.fitting import FitQuality
+from zcu_tools.analysis.singleshot import (
+    GECalibration,
+    GEConfusionResult,
+    calc_confusion_matrix,
+    classify_result,
+)
 from zcu_tools.experiment import RunRecord
 from zcu_tools.experiment.utils.single_shot.ge import (
     GEFitOptions,
@@ -21,18 +28,101 @@ from zcu_tools.experiment.utils.single_shot.ge import (
 )
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2.singleshot.ge.analysis import GEConfusionResult, calc_confusion_matrix
-from zcu_lab.v2.singleshot.ge.core import (
-    GEAnalysis,
-    GEAnalyzeOptions,
-    GEPostAnalysis,
-    GEPostAnalyzeOptions,
-)
 from zcu_lab.v2.support.mux import MuxFitFailure
 from zcu_lab.v2.support.singleshot.util import ge_signals_by_state
 
 if TYPE_CHECKING:
     from .core import MuxGECfg, MuxGEResult
+
+
+@pydantic_dataclass(frozen=True, config={"arbitrary_types_allowed": True})
+class GEAnalyzeOptions:
+    """Fit controls for one tone's raw probe-off/on IQ clouds.
+
+    initial_state maps probe-off to predominantly ground or excited. backend
+    selects PCA or center rotation; angle overrides the rotation in degrees.
+    logscale selects histogram display scale. align_t1 enables T1 alignment;
+    length_ratio is readout length / T1, or None to estimate it.
+    """
+
+    initial_state: Literal["ground", "excited"] = "ground"
+    backend: Literal["pca", "center"] = "pca"
+    logscale: bool = False
+    align_t1: bool = True
+    length_ratio: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    angle: float | None = Field(default=None, allow_inf_nan=False)
+
+
+@dataclass(frozen=True)
+class GEAnalysis:
+    """Prepared-label assignment and model-based GE calibration estimates.
+
+    initial_state maps probe off/on to predominantly g/e preparation rows, not
+    pure states. fidelity is the empirical equal-weight prepared-label assignment
+    score at the contrast-maximizing histogram edge, not latent pure-state readout
+    fidelity. theta rotates IQ by exp(1j*theta), in radians; threshold is the
+    selected edge in rotated ADC units. ge_s and g_center/e_center are fitted
+    width and original-frame complex centers in normalized ADC units.
+    init_pops is the fitted (2,2) g/e population matrix for the preparation rows.
+    length_ratio is readout length / T1 (dimensionless), or None when the data
+    cannot identify it.
+    fit_quality describes those histogram fits, or None when unavailable.
+    Poor histogram residuals make populations and the population-corrected post
+    confusion matrix unreliable even when empirical assignment is high.
+    """
+
+    initial_state: Literal["ground", "excited"]
+    fidelity: float
+    theta: float
+    threshold: float
+    ge_s: float
+    g_center: complex
+    e_center: complex
+    init_pops: NDArray[np.float64]
+    length_ratio: float | None
+    fit_quality: Mapping[str, FitQuality] | None = None
+
+    def validate_calibration(self) -> None:
+        populations = np.asarray(self.init_pops, dtype=np.float64)
+        scalars = [
+            self.fidelity,
+            self.theta,
+            self.threshold,
+            self.ge_s,
+            self.g_center,
+            self.e_center,
+        ]
+        if (
+            not np.isfinite(scalars).all()
+            or not 0.0 <= self.fidelity <= 1.0
+            or self.ge_s <= 0
+            or np.isclose(self.g_center, self.e_center)
+            or populations.shape != (2, 2)
+            or not np.isfinite(populations).all()
+            or np.any(populations < 0)
+            or np.any(populations.sum(axis=1) > 1 + 1e-12)
+        ):
+            raise ValueError(
+                "Invalid GE calibration: check centers, width and populations"
+            )
+
+
+@pydantic_dataclass(frozen=True, config={"arbitrary_types_allowed": True})
+class GEPostAnalyzeOptions:
+    """One tone's radius in normalized ADC units (None: automatic selection).
+
+    consider_other adds the midpoint leakage penalty during selection only.
+    """
+
+    radius: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    consider_other: bool = False
+
+
+@dataclass(frozen=True)
+class GEPostAnalysis:
+    """Single-qubit radius and preparation-corrected g/e/other diagnostic."""
+
+    confusion: GEConfusionResult
 
 
 @pydantic_dataclass(frozen=True, config={"arbitrary_types_allowed": True})
@@ -218,7 +308,17 @@ def post_analyze_ge(
         )
         signals = (g_signals, e_signals)
         try:
-            confusion = calc_confusion_matrix(signals, item.primary, option)
+            confusion = calc_confusion_matrix(
+                signals,
+                GECalibration(
+                    g_center=item.primary.g_center,
+                    e_center=item.primary.e_center,
+                    init_pops=item.primary.init_pops,
+                    sigma=item.primary.ge_s,
+                ),
+                radius=option.radius,
+                consider_other=option.consider_other,
+            )
         except (
             ValueError,
             RuntimeError,

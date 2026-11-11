@@ -70,6 +70,7 @@ Example with validated cfg, RunContext and fresh analysis_plots::
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
+from copy import deepcopy
 from dataclasses import dataclass
 from functools import partial
 from typing import Annotated, ClassVar
@@ -103,9 +104,8 @@ from zcu_lab.v2.support.mux_sweep_cfg import (
     require_tone_value,
     validate_mux_scan,
 )
-from zcu_lab.v2.twotone.freq.core import FreqAnalyzeOptions
 
-from .analysis import MuxFreqFit, analyze_frequency
+from .analysis import FreqAnalyzeOptions, MuxFreqFit, analyze_frequency
 
 
 class MuxFreqToneCfg(MuxDriveToneCfg):
@@ -195,14 +195,14 @@ class MuxFreqScan:
 def prepare_frequency_scan(cfg: MuxFreqCfg, *, soccfg: QickConfig) -> MuxFreqScan:
     """Prepare each selected qubit's original index and rounded frequency axis.
 
-    cfg is copied and validated. soccfg supplies the board frequency grids.
+    cfg is copied. soccfg supplies the board frequency grids.
     Return MuxFreqScan with original indices and float64 (K,P) MHz coordinates
     in participant order. Coordinates use QICK's hardware start/span/step rounding.
     Sweeps advance together by point index. No per-point pulses are prepared.
     Invalid settings raise ValueError; frequency conversion errors propagate.
     This function does not acquire data or change cfg.
     """
-    cfg = MuxFreqCfg.model_validate(cfg.model_dump())
+    cfg = deepcopy(cfg)
     indices = list(cfg.participants)
     coordinates = []
     for index in indices:
@@ -261,7 +261,7 @@ class MuxFreqExp(Experiment[MuxSweepResult, MuxFreqCfg]):
         it. Observer exceptions propagate without retry or outcome changes.
         """
         # 1. Prepare zipped frequencies and readout channels in participant order.
-        cfg = MuxFreqCfg.model_validate(config.model_dump())
+        cfg = deepcopy(config)
         scan = prepare_frequency_scan(cfg, soccfg=context.soccfg)
         readout = cfg.readout.with_updates(
             tones=[cfg.readout.tones[index] for index in scan.indices]

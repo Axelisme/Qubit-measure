@@ -1,6 +1,7 @@
 """Global coil DC scan with mux twotone spectra."""
 
 from collections.abc import Callable
+from copy import deepcopy
 from functools import partial
 from typing import Annotated, ClassVar, Literal
 
@@ -19,12 +20,28 @@ from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import Reset, ResetCfg, SweepCfg, TimelineBuilder, sweep2param
 from zcu_tools.program.v2.modules import MuxReadout, MuxReadoutCfg, Pulse
 
-from zcu_lab.v2.mux.twotone_spectrum.core import MuxFreqToneCfg
 from zcu_lab.v2.support import live_heatmap, live_line
 from zcu_lab.v2.support.device import check_flux_unit, set_flux
 from zcu_lab.v2.support.mux import averaged_mux_signal
 from zcu_lab.v2.support.mux_flux import MuxFluxResult, mux_flux_spec
-from zcu_lab.v2.support.mux_sweep_cfg import require_tone_value, validate_mux_scan
+from zcu_lab.v2.support.mux_sweep_cfg import (
+    MuxDriveToneCfg,
+    ToneRangeCfg,
+    require_tone_value,
+    validate_mux_scan,
+)
+
+
+class MuxFreqToneCfg(MuxDriveToneCfg):
+    """One named drive and its independent freq bounds in MHz."""
+
+    freq: Annotated[ToneRangeCfg | None, FieldMeta(unit="MHz")] = None
+
+    def require_freq(self) -> ToneRangeCfg:
+        """Return active freq bounds, or raise ValueError naming this tone."""
+        if self.freq is None:
+            raise ValueError(f"{self.name}: active tone requires freq")
+        return self.freq
 
 
 class TwotoneFluxGlobalCfg(ConfigBase):
@@ -120,7 +137,7 @@ class TwotoneFluxGlobalExp(Experiment[MuxFluxResult, TwotoneFluxGlobalCfg]):
         retains completed points. Driver and acquisition errors propagate.
         Sources remain at the final written value. No output is enabled here.
         """
-        cfg = TwotoneFluxGlobalCfg.model_validate(config.model_dump())
+        cfg = deepcopy(config)
         indices = list(cfg.participants)
         device = context.devices[cfg.flux_dev]
         check_flux_unit(device.get_info(), cfg.flux_unit)
