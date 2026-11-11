@@ -135,7 +135,7 @@ class ConditionalPhaseHeraldedExp(
         ),
         result_type=ConditionalPhaseHeraldedResult,
         cfg_type=ConditionalPhaseHeraldedCfg,
-        cfg_schema_version="2.0",
+        cfg_schema_version="3.0",
         tag="two_qubit/conditional_phase_heralded",
         result_builder=restore_result,
     )
@@ -152,7 +152,7 @@ class ConditionalPhaseHeraldedExp(
         frequencies = sweep2array(config.frequency)
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Common CZ frequency (MHz)", ylabel="Target sigma | herald (g,g)")
-        viewer = live_line(ax, num_lines=4 * len(config.gate_counts))
+        viewer = live_line(ax, num_lines=4 * len(config.gate_count))
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
         ax.grid(False)
         fig.show()
@@ -164,7 +164,7 @@ class ConditionalPhaseHeraldedExp(
             return viewer.set(frequencies, values.reshape(-1, len(frequencies)))
 
         buffer = SignalBuffer(
-            (len(config.gate_counts), 2, 2, len(frequencies), 3, 3, 3, 3),
+            (len(config.gate_count), 2, 2, len(frequencies), 3, 3, 3, 3),
             dtype=np.float64,
             on_update=update_view,
         )
@@ -172,7 +172,7 @@ class ConditionalPhaseHeraldedExp(
         spectator = config.x180_f2 if config.target == "f1" else config.x180_f1
         with Schedule(buffer, scope=context.scope) as sched:
             # gate_count changes sequence structure, so only this axis stays on host.
-            for n, step in sched.scan("gate_count", config.gate_counts):
+            for n, step in sched.scan("gate_count", config.gate_count):
                 builder = TimelineBuilder(
                     context.soccfg,
                     reps=config.reps,
@@ -235,7 +235,7 @@ class ConditionalPhaseHeraldedExp(
                 )
         buffer.trigger_update(flush=True)
         return ConditionalPhaseHeraldedResult(
-            np.array(config.gate_counts, dtype=np.int64),
+            np.array(config.gate_count, dtype=np.int64),
             frequencies,
             np.moveaxis(buffer.array, 0, 2),
         )
@@ -257,12 +257,12 @@ class ConditionalPhaseHeraldedExp(
             data.frequencies, frequencies, rtol=8 * np.finfo(float).eps, atol=0
         ):
             raise ValueError("Conditional phase frequency axis must match saved cfg")
-        if not np.array_equal(data.gate_counts, np.array(cfg.gate_counts)):
+        if not np.array_equal(data.gate_counts, np.array(cfg.gate_count)):
             raise ValueError("Conditional phase count axes must match saved cfg")
         if data.sums.shape != (
             2,
             2,
-            len(cfg.gate_counts),
+            len(cfg.gate_count),
             len(frequencies),
             3,
             3,

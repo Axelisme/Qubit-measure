@@ -56,7 +56,7 @@ class ConditionalPhaseCfg(ConfigBase):
     Frequencies are MHz, phases degrees and delays us. reps is shots per round;
     rounds accumulate counts at acquisition. F1/F2 require circle classifiers
     with GE Post radii. reset=None skips reset; otherwise reset starts each shot.
-    target is lowercase f1/f2; gate_counts are unique positive train lengths.
+    target is lowercase f1/f2; gate_count contains unique positive train lengths.
     """
 
     reset: Annotated[
@@ -107,7 +107,7 @@ class ConditionalPhaseCfg(ConfigBase):
     ]
     roles: JointRoles
     target: Literal["f1", "f2"] = "f1"
-    gate_counts: list[Annotated[int, Field(strict=True, ge=1)]] = Field(
+    gate_count: list[Annotated[int, Field(strict=True, ge=1)]] = Field(
         default_factory=lambda: [1, 2, 3], min_length=2
     )
     frequency: Annotated[
@@ -162,9 +162,9 @@ class ConditionalPhaseCfg(ConfigBase):
             raise ValueError(
                 "Common frequency coordinates must be finite and strictly increasing"
             )
-        if len(set(self.gate_counts)) != len(self.gate_counts):
+        if len(set(self.gate_count)) != len(self.gate_count):
             raise ValueError("Gate counts must be unique")
-        reason = gate_count_alias_reason(np.array(self.gate_counts, dtype=np.int64))
+        reason = gate_count_alias_reason(np.array(self.gate_count, dtype=np.int64))
         if reason is not None:
             raise ValueError(reason)
         return self
@@ -244,7 +244,7 @@ class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg
         ),
         result_type=ConditionalPhaseResult,
         cfg_type=ConditionalPhaseCfg,
-        cfg_schema_version="5.0",
+        cfg_schema_version="6.0",
         tag="two_qubit/conditional_phase",
         result_builder=restore_result,
     )
@@ -261,7 +261,7 @@ class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg
         frequencies = sweep2array(config.frequency)
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Common CZ frequency (MHz)", ylabel="Target sigma")
-        viewer = live_line(ax, num_lines=4 * len(config.gate_counts))
+        viewer = live_line(ax, num_lines=4 * len(config.gate_count))
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
         ax.grid(False)
         fig.show()
@@ -273,7 +273,7 @@ class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg
             return viewer.set(frequencies, values.reshape(-1, len(frequencies)))
 
         buffer = SignalBuffer(
-            (len(config.gate_counts), 2, 2, len(frequencies), 3, 3),
+            (len(config.gate_count), 2, 2, len(frequencies), 3, 3),
             dtype=np.float64,
             on_update=update_view,
         )
@@ -281,7 +281,7 @@ class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg
         spectator = config.x180_f2 if config.target == "f1" else config.x180_f1
         with Schedule(buffer, scope=context.scope) as sched:
             # gate_count changes sequence structure, so only this axis stays on host.
-            for n, step in sched.scan("gate_count", config.gate_counts):
+            for n, step in sched.scan("gate_count", config.gate_count):
                 builder = TimelineBuilder(
                     context.soccfg,
                     reps=config.reps,
@@ -341,7 +341,7 @@ class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg
                 )
         buffer.trigger_update(flush=True)
         return ConditionalPhaseResult(
-            np.array(config.gate_counts, dtype=np.int64),
+            np.array(config.gate_count, dtype=np.int64),
             frequencies,
             np.moveaxis(buffer.array, 0, 2),
         )
@@ -363,9 +363,9 @@ class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg
             data.frequencies, frequencies, rtol=8 * np.finfo(float).eps, atol=0
         ):
             raise ValueError("Conditional phase frequency axis must match saved cfg")
-        if not np.array_equal(data.gate_counts, np.array(cfg.gate_counts)):
+        if not np.array_equal(data.gate_counts, np.array(cfg.gate_count)):
             raise ValueError("Conditional phase count axes must match saved cfg")
-        if data.sums.shape != (2, 2, len(cfg.gate_counts), len(frequencies), 3, 3):
+        if data.sums.shape != (2, 2, len(cfg.gate_count), len(frequencies), 3, 3):
             raise ValueError(
                 "Expected spectator × quadrature × n × frequency × 3 × 3 counts"
             )

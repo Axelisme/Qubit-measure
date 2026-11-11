@@ -138,6 +138,7 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
             ),
             result_type=RBHeraldedResult,
             cfg_type=RBHeraldedCfg,
+            cfg_schema_version="2.0",
             tag="two_qubit/rb_heralded",
             result_builder=restore_result,
         )
@@ -167,17 +168,17 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
             ):
                 totals = np.nansum(counts, axis=(1, 3))
                 curves.extend(joint_probabilities(totals)[..., cell, cell].T)
-            return viewer.set(np.array(config.depths), np.array(curves))
+            return viewer.set(np.array(config.depth), np.array(curves))
 
         buffer = SignalBuffer(
-            (len(config.depths), len(config.seeds), 2, config.rounds, 3, 3, 3, 3),
+            (len(config.depth), len(config.seed), 2, config.rounds, 3, 3, 3, 3),
             dtype=np.float64,
             on_update=update_view,
         )
         with Schedule(buffer, scope=context.scope) as sched:
             # Host depth/seed/arm change the gate sequence. Host rounds preserve paired slots.
-            for depth, depth_step in sched.scan("depth", config.depths):
-                for seed, seed_step in depth_step.scan("seed", config.seeds):
+            for depth, depth_step in sched.scan("depth", config.depth):
+                for seed, seed_step in depth_step.scan("seed", config.seed):
                     pair = make_paired_sequences(depth, seed)
                     for arm, arm_step in seed_step.scan("arm", [0, 1]):
                         sequence = (pair.reference, pair.interleaved)[arm]
@@ -261,8 +262,8 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
                             )
         buffer.trigger_update(flush=True)
         return RBHeraldedResult(
-            np.array(config.depths, dtype=np.int64),
-            np.array(config.seeds, dtype=np.int64),
+            np.array(config.depth, dtype=np.int64),
+            np.array(config.seed, dtype=np.int64),
             np.arange(config.rounds, dtype=np.int64),
             buffer.array,
         )
@@ -300,7 +301,7 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
         else:
             validate_axes(
                 (data.depths, data.seeds, np.arange(2, dtype=np.int64), data.rounds),
-                (cfg.depths, cfg.seeds, [0, 1], np.arange(cfg.rounds)),
+                (cfg.depth, cfg.seed, [0, 1], np.arange(cfg.rounds)),
             )
             for herald, counts in enumerate(
                 (

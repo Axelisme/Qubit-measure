@@ -2,10 +2,12 @@
 
 **讀者：** operator、agent。量兩個 target 的分類 local-Z slope，審閱並套用 correction pair。
 
+Cfg 掃描欄位使用 `gate_count`，此實驗的 cfg schema 為 5.0。載入舊主版本的 run 時保留 Result 與 metadata，cfg 為 None，並發出 `CfgUnavailableWarning`。這些舊 run 不支援重新分析，也不提供 cfg 遷移或欄位 alias。
+
 ## Run 前
 
 普通版與 heralded 表單先列 reset、X90、雙線 drive 與 mux readout，再列角色。
-接著設定外層 `gate_counts`，最後填取數欄位。
+接著設定外層 `gate_count`，最後填取數欄位。
 
 選 `two_qubit/local_z`。綁定 scalar aliases `f1`、`f2`、`coupler`、`mux`。F1/F2 必須是不同 fluxonium。Coupler 是 transmon，mux 的 qubits 必須包含兩者。
 

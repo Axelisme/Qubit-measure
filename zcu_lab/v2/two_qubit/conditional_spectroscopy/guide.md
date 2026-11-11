@@ -2,6 +2,8 @@
 
 **讀者：** operator、agent。本頁說明 `two_qubit/conditional_spectroscopy`。需要先判 herald 再分析的版本，請開啟 [heralded spectroscopy](guide_heralded.md)。
 
+Cfg 掃描欄位使用 `dc`，此實驗的 cfg schema 為 6.0。載入舊主版本的 run 時保留 Result 與 metadata，cfg 為 None，並發出 `CfgUnavailableWarning`。這些舊 run 不支援重新分析，也不提供 cfg 遷移或欄位 alias。
+
 ## 量測序列
 
 每個 shot 依序執行可選 reset、名目 B00/01/10/11 準備、雙線 weak probe、可選 Xπ⊗Xπ contrast、terminal mux readout。準備軸是 `prepared_f1`、`prepared_f2`，各為 0＝g、1＝e。F1 在外層，兩顆的 Xπ 在獨立 timeline 同時準備。未使用 reset 時，名目準備仍包含熱布居。

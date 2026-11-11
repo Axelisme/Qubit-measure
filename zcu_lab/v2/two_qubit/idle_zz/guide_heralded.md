@@ -2,6 +2,8 @@
 
 **讀者：** operator、agent。設定 heralded idle ZZ，判讀條件式 Ramsey 與 herald 通過比例。
 
+Cfg 掃描欄位使用 `dc`，此實驗的 cfg schema 為 6.0。載入舊主版本的 run 時保留 Result 與 metadata，cfg 為 None，並發出 `CfgUnavailableWarning`。這些舊 run 不支援重新分析，也不提供 cfg 遷移或欄位 alias。
+
 `two_qubit/idle_zz_heralded` 是獨立實驗。表單、Run 與保存結果不共用普通版的工作狀態。Target 使用小寫 `f1` 或 `f2`，脈衝、DC 掃描、detune 符號與 fit 限制見[普通版指南](guide.md)。
 
 每個 shot 做可選 reset → herald mux readout → spectator I/Xπ → target π/2 → delay → phase projection → terminal mux readout。Reset 留空時不發射 reset。兩次讀出使用同一個 mux 物件與相同 circle classifiers，herald 後的等待由 readout.post_delay 決定。

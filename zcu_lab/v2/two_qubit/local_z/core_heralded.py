@@ -128,6 +128,7 @@ class LocalZHeraldedExp(Experiment[LocalZHeraldedResult, LocalZHeraldedCfg]):
             ),
             result_type=LocalZHeraldedResult,
             cfg_type=LocalZHeraldedCfg,
+            cfg_schema_version="2.0",
             tag="two_qubit/local_z_heralded",
             result_builder=restore_result,
         )
@@ -153,16 +154,16 @@ class LocalZHeraldedExp(Experiment[LocalZHeraldedResult, LocalZHeraldedCfg]):
         def update_view(sums: NDArray[np.float64]) -> tuple[Line2D, ...]:
             counts = terminal_counts(np.moveaxis(sums, 0, 2), ("g", "g"))
             values = np.stack((sigma(counts[0], "f1"), sigma(counts[1], "f2")))
-            return viewer.set(np.array(config.gate_counts), values.reshape(4, -1))
+            return viewer.set(np.array(config.gate_count), values.reshape(4, -1))
 
         buffer = SignalBuffer(
-            (len(config.gate_counts), 2, 2, 3, 3, 3, 3),
+            (len(config.gate_count), 2, 2, 3, 3, 3, 3),
             dtype=np.float64,
             on_update=update_view,
         )
         with Schedule(buffer, scope=context.scope) as sched:
             # gate_count changes sequence structure, so only this axis stays on host.
-            for n, step in sched.scan("gate_count", config.gate_counts):
+            for n, step in sched.scan("gate_count", config.gate_count):
                 builder = TimelineBuilder(
                     context.soccfg,
                     reps=config.reps,
@@ -235,7 +236,7 @@ class LocalZHeraldedExp(Experiment[LocalZHeraldedResult, LocalZHeraldedCfg]):
                 )
         buffer.trigger_update(flush=True)
         return LocalZHeraldedResult(
-            np.array(config.gate_counts, dtype=np.int64),
+            np.array(config.gate_count, dtype=np.int64),
             np.moveaxis(buffer.array, 0, 2),
         )
 
@@ -251,9 +252,9 @@ class LocalZHeraldedExp(Experiment[LocalZHeraldedResult, LocalZHeraldedCfg]):
         cfg, data = source.cfg, source.result
         if cfg is None:
             raise ValueError("Phase analysis requires saved source cfg")
-        if not np.array_equal(data.gate_counts, np.array(cfg.gate_counts)):
+        if not np.array_equal(data.gate_counts, np.array(cfg.gate_count)):
             raise ValueError("LocalZ count axes must match saved cfg")
-        if data.sums.shape != (2, 2, len(cfg.gate_counts), 3, 3, 3, 3):
+        if data.sums.shape != (2, 2, len(cfg.gate_count), 3, 3, 3, 3):
             raise ValueError("Expected target × quadrature × gate_count × 3 × 3 counts")
         gg = terminal_counts(data.sums, ("g", "g"))
         ee = terminal_counts(data.sums, ("e", "e"))
@@ -281,7 +282,7 @@ class LocalZHeraldedExp(Experiment[LocalZHeraldedResult, LocalZHeraldedCfg]):
                 count_phase(
                     float(gg_quadratures[t, 0, n]), float(gg_quadratures[t, 1, n])
                 )
-                for n in range(len(cfg.gate_counts))
+                for n in range(len(cfg.gate_count))
             )
             for t in range(2)
         )
@@ -290,13 +291,13 @@ class LocalZHeraldedExp(Experiment[LocalZHeraldedResult, LocalZHeraldedCfg]):
                 count_phase(
                     float(ee_quadratures[t, 0, n]), float(ee_quadratures[t, 1, n])
                 )
-                for n in range(len(cfg.gate_counts))
+                for n in range(len(cfg.gate_count))
             )
             for t in range(2)
         )
         gg_fits = tuple(
             fit_target(
-                np.array(cfg.gate_counts, dtype=np.float64),
+                np.array(cfg.gate_count, dtype=np.float64),
                 gg_phases[t],
                 phase_variance(
                     gg_quadratures[t, 0],
@@ -309,7 +310,7 @@ class LocalZHeraldedExp(Experiment[LocalZHeraldedResult, LocalZHeraldedCfg]):
         )
         ee_fits = tuple(
             fit_target(
-                np.array(cfg.gate_counts, dtype=np.float64),
+                np.array(cfg.gate_count, dtype=np.float64),
                 ee_phases[t],
                 phase_variance(
                     ee_quadratures[t, 0],
@@ -338,10 +339,10 @@ class LocalZHeraldedExp(Experiment[LocalZHeraldedResult, LocalZHeraldedCfg]):
             for t in range(2):
                 label = f"{herald} F{t + 1}"
                 fig.axes[0].plot(
-                    cfg.gate_counts, [p.contrast for p in phases[t]], ".-", label=label
+                    cfg.gate_count, [p.contrast for p in phases[t]], ".-", label=label
                 )
                 fig.axes[1].plot(
-                    cfg.gate_counts,
+                    cfg.gate_count,
                     [
                         np.nan if p.logical_phase_deg is None else p.logical_phase_deg
                         for p in phases[t]
@@ -352,10 +353,10 @@ class LocalZHeraldedExp(Experiment[LocalZHeraldedResult, LocalZHeraldedCfg]):
                 fit = fits[t]
                 if fit.unwrapped_deg is not None and fit.fit_curve is not None:
                     fig.axes[2].plot(
-                        cfg.gate_counts, fit.unwrapped_deg, ".", label=label
+                        cfg.gate_count, fit.unwrapped_deg, ".", label=label
                     )
                     fig.axes[2].plot(
-                        cfg.gate_counts,
+                        cfg.gate_count,
                         fit.fit_curve,
                         label=f"{label} slope={fit.slope_deg:.5g} ± {fit.slope_error_deg:.2g} deg",
                     )
@@ -381,7 +382,7 @@ class LocalZHeraldedExp(Experiment[LocalZHeraldedResult, LocalZHeraldedCfg]):
             enumerate(("X", "Y")),
         ):
             axes.plot(
-                cfg.gate_counts,
+                cfg.gate_count,
                 values[t, q],
                 ".-",
                 label=f"{herald} F{t + 1} {projection}",
