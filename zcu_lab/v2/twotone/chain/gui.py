@@ -9,9 +9,13 @@ from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import Adapter, Analysis, AnalyzeRequest
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2.twotone.chain.core import ChainAnalysis, ChainCfg, ChainExp
+from zcu_lab.v2.twotone.chain.core import (
+    ChainAnalysis,
+    ChainAnalyzeOptions,
+    ChainCfg,
+    ChainExp,
+)
 from zcu_lab.v2.twotone.chain.form import make_form
-from zcu_lab.v2.twotone.freq.analysis import FreqAnalyzeOptions
 
 
 class TwotoneChainSummary(BaseModel):
@@ -33,7 +37,7 @@ class TwotoneChainSummary(BaseModel):
 
 
 def _analyze(
-    req: AnalyzeRequest[RunRecord[ChainCfg, SweepSums], FreqAnalyzeOptions],
+    req: AnalyzeRequest[RunRecord[ChainCfg, SweepSums], ChainAnalyzeOptions],
     *,
     plots: Plots,
 ) -> ChainAnalysis:
@@ -53,6 +57,6 @@ DEFINITION = Adapter(
     guide=Path(__file__).with_name("guide.md"),
     analysis=Analysis(
         fn=_analyze,
-        options=lambda source, env: FreqAnalyzeOptions(),
+        options=lambda source, env: ChainAnalyzeOptions(),
     ),
 )

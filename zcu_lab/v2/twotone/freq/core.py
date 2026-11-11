@@ -9,6 +9,7 @@ from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field
 from zcu_tools.analysis.fitting import PeakCandidate
+from zcu_tools.analysis.fitting.spectrum import SpectrumFitOptions, fit_spectrum
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment, config
 from zcu_tools.experiment.context import RunContext
@@ -23,7 +24,6 @@ from zcu_tools.utils.process import minus_background, rotate2real
 
 from zcu_lab.v2.support import live_line
 from zcu_lab.v2.twotone.freq.analysis import FreqAnalyzeOptions as FreqAnalyzeOptions
-from zcu_lab.v2.twotone.freq.analysis import fit_spectrum
 
 
 @dataclass(frozen=True)
@@ -248,7 +248,18 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
 
         real_signals = qubfreq_signal2real(signals, model_type=options.model_type)
 
-        fit = fit_spectrum(freqs, real_signals, options)
+        fit = fit_spectrum(
+            freqs,
+            real_signals,
+            SpectrumFitOptions(
+                model_type=options.model_type,
+                expected_center_mhz=options.expected_center_mhz,
+                min_prominence=options.min_prominence,
+                min_snr=options.min_snr,
+                min_width_samples=options.min_width_samples,
+                min_distance_mhz=options.min_distance_mhz,
+            ),
+        )
         freq, freq_err, fwhm, fwhm_err = fit.freq, fit.freq_err, fit.fwhm, fit.fwhm_err
 
         fig, ax = plots.subplots(num="fit", figsize=config.figsize)
