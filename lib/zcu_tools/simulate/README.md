@@ -1,6 +1,6 @@
 # Numeric simulation tools
 
-**Last updated:** 2026-11-11，measured performance without external evidence
+**Last updated:** 2026-11-12, versioned simulator benchmark
 
 **讀者：** framework-dev、agent。查閱數值模擬的責任邊界、快取契約與實測效能。
 
@@ -41,9 +41,19 @@ The cold-cache pairs ran each workload in two fresh processes, first with an
 empty cache and then with a disk hit. Flux scans used 21 × 41 points and 100
 repetitions; amplitude Rabi used 41 gains and 200 repetitions. All runs called
 the public experiment `run` and program acquire with production pacing and one
-native thread. The measurement scripts are not part of the repository, and this
-module provides no benchmark CLI; the revisions and workloads above are the
-record of these comparisons.
+native thread. Those historical measurement scripts are not part of the
+repository; the revisions and workloads above record those comparisons.
+
+The repository now provides [`tools/benchmark_simulator.py`](../../../tools/README.md#simulator-benchmark).
+It measures five versioned synthetic single, six and FTF workloads through public
+program acquire, with five samples per history mode. Wall and CPU timers exclude
+imports and environment construction. The first-acquire mode creates a new
+environment per sample in the same process; it does not empty the disk Numba
+cache. The other modes use two fixed warmup acquires, then either clear routing
+history before each sample or retain it. Run the CLI through `run_heavy.py
+--exclusive` to reserve both repo compute slots. JSON retains raw seconds,
+medians, MAD, configurations, hashes and library versions. `--compare` rejects
+incompatible workloads or measurement modes; a slowdown alone does not fail.
 
 ## Numba machine-code cache
 
