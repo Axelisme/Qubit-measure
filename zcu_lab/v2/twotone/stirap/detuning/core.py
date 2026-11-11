@@ -94,8 +94,20 @@ class StirapDetuningCfg(ConfigBase):
         0.05
     )
     readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
-    pump_waveform: Annotated[EnvelopeWaveformCfg, FieldMeta(label="Pump waveform")]
-    stokes_waveform: Annotated[EnvelopeWaveformCfg, FieldMeta(label="Stokes waveform")]
+    pump_waveform: Annotated[
+        EnvelopeWaveformCfg,
+        FieldMeta(
+            label="Pump waveform",
+            description="Select the Pump 0–3 envelope from the waveform library or inline parameters, with durations in us.",
+        ),
+    ]
+    stokes_waveform: Annotated[
+        EnvelopeWaveformCfg,
+        FieldMeta(
+            label="Stokes waveform",
+            description="Select the Stokes 3–2 envelope from the waveform library or inline parameters, with durations in us.",
+        ),
+    ]
     pump_detuning: Annotated[SweepCfg, FieldMeta(label="Pump detuning", unit="MHz")]
     stokes_detuning: Annotated[SweepCfg, FieldMeta(label="Stokes detuning", unit="MHz")]
     shots: Annotated[int, FieldMeta(label="Shots per point")] = Field(

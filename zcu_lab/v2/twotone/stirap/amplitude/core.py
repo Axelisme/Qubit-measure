@@ -59,12 +59,38 @@ class StirapAmplitudeCfg(ConfigBase):
     stokes_freq: Annotated[float, FieldMeta(label="Stokes carrier 3–2", unit="MHz")] = (
         Field(gt=0)
     )
-    pump_waveform: Annotated[EnvelopeWaveformCfg, FieldMeta(label="Pump waveform")]
-    stokes_waveform: Annotated[EnvelopeWaveformCfg, FieldMeta(label="Stokes waveform")]
+    pump_waveform: Annotated[
+        EnvelopeWaveformCfg,
+        FieldMeta(
+            label="Pump waveform",
+            description="Select the Pump 0–3 envelope from the waveform library or inline parameters, with durations in us.",
+        ),
+    ]
+    stokes_waveform: Annotated[
+        EnvelopeWaveformCfg,
+        FieldMeta(
+            label="Stokes waveform",
+            description="Select the Stokes 3–2 envelope from the waveform library or inline parameters, with durations in us.",
+        ),
+    ]
     stokes_lead: Annotated[float, FieldMeta(label="Stokes lead", unit="us")] = 0.05
     readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
-    pump_gain: Annotated[SweepCfg, FieldMeta(label="Pump gain", unit="a.u.")]
-    stokes_gain: Annotated[SweepCfg, FieldMeta(label="Stokes gain", unit="a.u.")]
+    pump_gain: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="Pump gain",
+            unit="a.u.",
+            description="Fill the outer signed Pump gain range in a.u. and point count from the intended drive settings.",
+        ),
+    ]
+    stokes_gain: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="Stokes gain",
+            unit="a.u.",
+            description="Fill the inner signed Stokes gain range in a.u. and point count from the intended drive settings.",
+        ),
+    ]
     shots: Annotated[int, FieldMeta(label="Shots per point")] = Field(
         default=4096, ge=1
     )
@@ -126,6 +152,7 @@ class StirapAmplitudeExp(Experiment[StirapAmplitudeResult, StirapAmplitudeCfg]):
             result_type=StirapAmplitudeResult,
             cfg_type=StirapAmplitudeCfg,
             result_builder=restore_result,
+            cfg_schema_version="3.0",
             tag="twotone/stirap/amplitude",
         )
     )
