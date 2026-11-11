@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-11-11，完整選集經 run_heavy 排隊
+**Last updated:** 2026-11-12，Evolution 精度矩陣與誤差表
 
 **讀者：** framework-dev、agent。查閱測試的 owner、fixture、執行方式與搬遷驗收契約。
 
@@ -124,6 +124,37 @@ pytest 預設使用 `-m "not slow and not sim"`，排除慢測試與模擬測試
 ticket 內只跑受影響選集。只有變更觸及 `lib/zcu_tools/simulate/` 時，才用
 `-m sim` 或包含 sim 的受影響選集跑模擬測試。`-m` 會取代預設過濾，
 若仍要排除慢測試，明寫 `-m "sim and not slow"`。
+
+### Evolution 精度矩陣
+
+從 worktree 執行下列指令。先建立 `<log-dir>`，把它換成此次執行的輸出目錄。
+
+```bash
+uv run --directory <worktree> --no-sync -- \
+  python tools/run_heavy.py --log <log-dir>/accuracy.log 1800 -- \
+  pytest --rootdir <worktree> -c <worktree>/pyproject.toml \
+  tests/simulate/evolution/contract/test_accuracy_matrix.py \
+  -n 4 --dist=worksteal -m sim --durations=0 \
+  > <log-dir>/accuracy-receipt.json
+```
+
+`accuracy.log` 的 terminal summary 列出 family、案例數、最大 density 誤差、
+最大參考收斂誤差、density 誤差最差的案例與狀態。
+`PASS` 表示最大誤差不超過 `2e-3`。`FAIL` 保留超標數字，即使案例標了 xfail。
+`NOT EXERCISED` 表示此次選集沒有該 family 的觀察值，誤差欄顯示 `-`，不填 `0`。
+案例數計算 case/family 觀察值，不是 point 或 segment 數。
+同一輸入的 pinned、空歷史與暖歷史分別計數。
+
+矩陣用 `Engine(1, families=(family,)).evolve(...)` 固定可用 family，
+再從 `paths.segments_by_kernel` 確認實際路徑。
+十個既有共用契約 family 都有 pinned 案例。
+多段案例量整條 timeline 的最終誤差。混合路徑的每個 family 列出同一個最終誤差，
+不是各段的局部誤差。
+歷史案例另外驗證八點 inventory 的結果，並比較兩點輸入在歷史改變前後的實際路徑。
+每條結果都對獨立的 full-Hamiltonian Lindblad DOP853 參考解。
+參考解用 `2e-10/2e-12` 與 `2e-12/2e-14` 各算一次，兩解最大 density 差須不超過 `2e-6`。
+建構函式在 `tests/simulate/evolution/contract/accuracy_cases.py`，
+誤差表支援函式在同目錄的 `accuracy.py`，一般 Python consumer 可以直接 import。
 
 ### 怎麼跑比較快
 
