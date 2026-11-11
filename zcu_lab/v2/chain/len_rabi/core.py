@@ -161,7 +161,10 @@ class ChainLenRabiExp(Experiment[CycleSums, ChainLenRabiCfg]):
         # 2. One cycle per rep: K, then (Rabi pulse, read, read) eight times.
         with Schedule(augmented_sums, scope=context.scope) as sched:
             builder = TimelineBuilder(
-                context.soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
+                context.soccfg,
+                reps=cfg.reps,
+                initial_delay=cfg.relax_delay,
+                relax_delay=cfg.relax_delay,
             )
             length = builder.add_sweep("length", cfg.length)
             rabi_pulse = Pulse("qub_pulse", cfg.qub_pulse, length=length)

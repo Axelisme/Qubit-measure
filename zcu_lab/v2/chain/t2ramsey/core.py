@@ -181,7 +181,10 @@ class ChainT2RamseyExp(Experiment[CycleSums, ChainT2RamseyCfg]):
         # 2. One cycle per rep: K, then (π/2, wait x, inverse π/2, read, read) x 8.
         with Schedule(augmented_sums, scope=context.scope) as sched:
             builder = TimelineBuilder(
-                context.soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
+                context.soccfg,
+                reps=cfg.reps,
+                initial_delay=cfg.relax_delay,
+                relax_delay=cfg.relax_delay,
             )
             delay = builder.add_sweep("delay", cfg.delay)
             first_pi2 = Pulse("pi2_pulse1", cfg.pi2_pulse)

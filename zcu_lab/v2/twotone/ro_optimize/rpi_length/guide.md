@@ -14,7 +14,8 @@ Use it next to `twotone/ro_optimize/length` and `twotone/ro_optimize/chain_lengt
 The ADC window and the readout pulse are different lengths. The ADC window is the swept value, rounded to the ADC clock. The readout pulse is that window plus 0.11 us, rounded to the generator clock. The host builds one program per window, so a short window gets a short pulse and not the longest pulse of the scan.
 The π frequency, gain and length do not follow the sweep, and neither do the readout gain, frequency or `post_delay`.
 
-One rep is one cycle of 64 R-π pairs. All Reps of one window run before the next window starts, with relax delay 0.
+One rep is one cycle of 64 R-π pairs, with relax delay 0.
+The acquisition order is host window point → Rounds → Reps. The host completes every round at one window before moving to the next; a round does not revisit the full window axis.
 Lags 1 to 15 pair reads only within the same cycle. The statistics accumulate across reps and rounds, without pairs crossing a rep, round or window boundary.
 The experiment fixes the 64 pairs per rep, the zero relax delay and the 0.11 us margin. The Form does not offer them.
 
@@ -22,7 +23,7 @@ The wait from R to π is the readout's `post_delay` plus the π pulse's own `pre
 The Form has no separate wait field. Change `post_delay` in the readout module to change this wait. Run keeps every π setting, including a nonzero `pre_delay`.
 
 Each rep ends with the shot closure, which waits for every ADC window to close before the next rep starts. If the last ADC window closes after the last π ends, this adds a wait at the rep boundary. The closure is not a relax delay, and the Form has no field for it.
-This rep-boundary wait falls outside every lag pair. It does not affect the within-cycle lag statistics.
+This rep-boundary wait does not appear in a lag pair's time interval, but it can still affect the estimate through the next cycle's starting population.
 
 Run does not reset the qubit, discard reads, add a warmup or calibrate the π pulse.
 
@@ -127,8 +128,8 @@ The estimates assume a stationary two-state chain. Several things can bias them:
 - Starting population. Each cycle starts from whatever state the preceding cycle or setting left. No reset or warmup removes the start of the cycle, and its reads count like all others.
 - Third state. Population outside the two alternating states can bias every estimate. The analysis removes a slow mode as an approximation, which is not a leakage correction. This experiment does not identify general leakage and does not correct readout QND.
 - Large IQ offsets and π errors can bias the estimates.
-- Slow drift. All reps of one setting run together. Drift can become a difference between settings; multiple rounds average over these changes.
-- A physical break inside a cycle that leaves no trace in the IQ data cannot be detected. Breaks between reps do not affect lag pairs. No hardware run has verified continuity inside a 64-read cycle.
+- Slow drift. The host completes all rounds at one window before visiting the next. More rounds reduce random error at that window but do not average drift over the scan. They also increase the time spent at each window.
+- A physical break inside a cycle that leaves no trace in the IQ data cannot be detected. No lag pair crosses a break between reps, but the break can change the next cycle's starting population. No hardware run has verified continuity inside a 64-read cycle.
 
 The offline probe of this experiment checks the program and the data contract with synthetic data. It does not calibrate hardware and it does not validate the physical model.
 

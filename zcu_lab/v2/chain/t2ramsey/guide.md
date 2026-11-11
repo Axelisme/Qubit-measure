@@ -12,12 +12,13 @@ After changing the parameter source, use Reset to recapture initial values. Refr
 A cycle waits Relax delay, then plays eight blocks of Pi/2 Pulse, the swept Delay, a second Pi/2 Pulse and two reads of the same Readout, with no reset inside the cycle.
 The second Pi/2 Pulse has the first one's phase plus 180 degrees, so at zero delay it undoes the first and returns the qubit to its start.
 Its phase also advances by 360 × Detune × delay degrees, which adds Detune fringes per us of delay without changing the drive frequency.
-Relax delay is the thermalisation wait K: set it to at least 5 T1, so every cycle starts in thermal equilibrium.
+Relax delay is the thermalisation wait K, including before the first cycle. Set it to at least 5 T1 for the model's thermal-equilibrium start.
 Each read waits for the previous ADC window to close, so the second read of a block starts after the first and the next Pi/2 Pulse starts after the second.
 The delay loop runs outside the cycle. Reps sets the cycles at every delay in one round, and Rounds sets the number of rounds.
 
 The host reduces each cycle to 65 numbers: the IQ of the 16 reads, their I², IQ, Q² summed over three read groups, and IQ products between read pairs summed over six groups set by the number of Ramsey blocks and reads between them.
-Only running sums of these numbers are kept, so memory and the saved file do not grow with the number of cycles.
+For a fixed sweep, the saved sums and the accumulator across rounds have fixed size, independent of the number of cycles.
+Temporary arrays within one acquisition round grow with points × Reps. Increasing Reps therefore uses more temporary memory; increasing Rounds does not enlarge those per-round arrays.
 
 ## Parameter sources
 
@@ -58,6 +59,23 @@ Errors are Wald errors from the joint fit. At low state contrast and few cycles 
 A fit failure in either step produces an analysis failure; the live plot and the saved sums remain.
 
 This experiment proposes no writeback. Compare `t2` with `first_read_t2`, and calibrate `$qubit.t2r` and the qubit frequency with `twotone/t2ramsey`.
+
+### Model assumptions and starting fit
+
+The fit assumes independent thermalised cycles and Markov state transitions within each cycle.
+It shares the three IQ centers, one isotropic Gaussian noise variance, the thermal populations and the read-transition matrix across sweep points.
+Gaussian noise is independent between reads and cycles. The model does not fit a separate noise width or ellipse for each state.
+
+The read matrix is R = diag(r) + outer(1 − r, landing), with three retention values r and one landing population vector.
+For a transition i → j, the conditional IQ center lies on the line between the two state centers, at c_j + u × (c_i − c_j).
+The model draws u from a truncated exponential on [0, 1] with rate −log(1 − R[i,j]). A read without a transition uses c_i.
+This emission law is not a general model of multiple jumps during integration or resonator dynamics.
+Transitions during a long gap after integration need not produce the IQ tail that this model assigns to a read transition.
+Passing the lack-of-fit checks does not establish unbiased physical parameters.
+
+The first-read mean must support the starting fit. Weak or absent first-read contrast can make that fit fail or supply an uninformative seed even when later reads have correlations.
+The joint fit starts from the first-read curve parameters. It does not try multiple curve seeds or guarantee the correct basin.
+There is no manual initial value or fallback.
 
 ## Saved data
 
