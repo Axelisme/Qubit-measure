@@ -1,4 +1,4 @@
-"""Nested fixed-weight fits with batched pointwise Gauss-Newton elimination."""
+"""Nested fixed-weight fits with pointwise bounded least-squares elimination."""
 
 from dataclasses import dataclass
 
@@ -24,8 +24,6 @@ from ._cycle_solver import (
 
 # Lower and upper bounds of the table columns being fitted.
 Limits = tuple[np.ndarray, np.ndarray]
-# Table, predicted means, Jacobian, weighted residual and per-point cost.
-LineState = tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]
 
 
 @dataclass
@@ -34,8 +32,8 @@ class InnerSolution:
 
     table: Fitted table, shape (F,20).
     residual: Final weighted residual, shape (F,65).
-    converged: Whether every point meets bound-scaled first-order optimality.
-    reason: Optimality reached, iteration budget exhausted, or line search failed.
+    converged: Whether every point meets primary or allowed stalled optimality.
+    reason: Optimality reached, or the failed point and solver stop.
     """
 
     table: np.ndarray
@@ -69,94 +67,82 @@ class SharedSolution:
     information_shared: ScaledInformation
 
 
-def _normal(jac: np.ndarray, held: np.ndarray) -> np.ndarray:
-    normal = np.einsum("nfi,nfj->nij", jac, jac)
-    # Numerical damping only affects iteration, not the reported covariance.
-    normal += (1e-10 * np.trace(normal, axis1=1, axis2=2) + 1e-14)[
-        :, None, None
-    ] * np.eye(jac.shape[2])
-    normal = np.where(held[:, :, None] | held[:, None, :], 0.0, normal)
-    return normal + held[:, :, None] * np.eye(jac.shape[2])
-
-
-def _step(
-    table: np.ndarray,
-    cols: np.ndarray,
-    jac: np.ndarray,
-    residual: np.ndarray,
-    limits: Limits,
-) -> np.ndarray:
-    lo, hi = limits
-    values = table[:, cols]
-    gradient = np.einsum("nfi,nf->ni", jac, residual)
-    held = ((values <= lo) & (gradient < 0)) | ((values >= hi) & (gradient > 0))
-    delta = np.zeros_like(values)
-    for _ in range(len(cols) + 1):
-        delta = np.linalg.solve(
-            _normal(jac, held), np.where(held, 0.0, gradient)[:, :, None]
-        )[:, :, 0]
-        blocked = ~held & (
-            ((values <= lo) & (delta < 0)) | ((values >= hi) & (delta > 0))
-        )
-        if not blocked.any():
-            break
-        held |= blocked
-    with np.errstate(divide="ignore", invalid="ignore"):
-        room = np.where(
-            delta > 0,
-            (hi - values) / delta,
-            np.where(delta < 0, (lo - values) / delta, np.inf),
-        )
-    return delta * np.minimum(1.0, room.min(axis=1))[:, None]
-
-
 def inner(
     table: np.ndarray,
     means: np.ndarray,
     weights: np.ndarray,
     cols: np.ndarray,
     limits: Limits,
-    steps: int = 40,
 ) -> InnerSolution:
-    """Fit the table columns cols independently at each point; hold the others.
+    """Fit table columns cols independently at each point; hold the others.
 
     table has shape (F,20) in the layout of _cycle_layout, means (F,65), weights
-    (F,65,65) whitening matrices. cols indexes the fitted columns of table and
-    limits gives their lower and upper bounds. Run bounded damped Gauss-Newton
-    with a per-point halving line search for at most steps iterations. Require
-    bound-scaled first-order optimality below 1e-9, the joint/shared solver gtol:
-    multiply each residual-gradient coordinate by the distance to its downhill
-    bound (one for unbounded directions). Zero motion is not convergence.
-    Return an InnerSolution; budget exhaustion or failed descent is explicit.
-    The inputs are not changed; numpy.linalg.LinAlgError propagates from a
-    singular solve.
+    (F,65,65) whitening matrices. cols indexes the fitted columns and limits
+    gives their lower and upper bounds. Project the start into these bounds.
+    Each point uses bounded least squares with max_nfev=200, ftol=xtol=1e-12
+    and gtol=1e-9. Independently check bound-scaled optimality <= 1e-9;
+    only ftol/xtol stops may instead satisfy scale-invariant optimality <= 1e-6.
+    Budget exhaustion always fails. Return the table and residual without
+    changing inputs; failure names the point and solver stop.
     """
     table = table.copy()
-    predicted, jac = local_mean_jacobian(table)
-    residual = apply_weights(weights, means - predicted)
-    cost = np.sum(residual**2, axis=1)
-    for iteration in range(steps + 1):
-        weighted = apply_weights(weights, jac[:, :, cols])
-        optimal = _optimality(table[:, cols], weighted, residual, limits) < 1e-9
-        if optimal.all():
-            return InnerSolution(table, residual, True, "optimality reached")
-        if iteration == steps:
-            break
-        delta = _step(table, cols, weighted, residual, limits)
-        previous_cost = cost
-        table, predicted, jac, residual, cost = _line_search(
-            (table, predicted, jac, residual, cost), delta, cols, means, weights, limits
+    table[:, cols] = np.clip(table[:, cols], *limits)
+    residual = np.zeros_like(means)
+    for point in range(len(table)):
+        fitted = _point(
+            table[point : point + 1],
+            means[point : point + 1],
+            weights[point : point + 1],
+            cols,
+            limits,
         )
-        stalled = (cost >= previous_cost) & ~optimal
-        if stalled.any():
-            # A roundoff-sized move can reach optimality without lowering J.
-            weighted = apply_weights(weights, jac[:, :, cols])
-            optimal = _optimality(table[:, cols], weighted, residual, limits) < 1e-9
-            if np.any(stalled & ~optimal):
-                return InnerSolution(
-                    table, residual, False, "line search found no descent"
-                )
-    return InnerSolution(table, residual, False, "iteration budget exhausted")
+        table[point], residual[point] = fitted.table[0], fitted.residual[0]
+        if not fitted.converged:
+            return InnerSolution(
+                table, residual, False, f"point {point}: {fitted.reason}"
+            )
+    return InnerSolution(table, residual, True, "optimality reached")
+
+
+def _point(
+    table: np.ndarray,
+    means: np.ndarray,
+    weights: np.ndarray,
+    cols: np.ndarray,
+    limits: Limits,
+) -> InnerSolution:
+    def fun(values: np.ndarray) -> np.ndarray:
+        table[0, cols] = values
+        predicted = local_mean_jacobian(table)[0]
+        return apply_weights(weights, means - predicted).ravel()
+
+    def jacobian(values: np.ndarray) -> np.ndarray:
+        table[0, cols] = values
+        jac = local_mean_jacobian(table)[1][:, :, cols]
+        return -apply_weights(weights, jac)[0]
+
+    # This is a function-evaluation budget, not a Gauss-Newton iteration count.
+    # Tighten only nested point fits; joint/shared outer settings stay unchanged.
+    result = bounded_least_squares(
+        fun, table[0, cols], jacobian, limits, 200, stopping_tolerance=1e-12
+    )
+    residual = fun(result.x)[None, :]
+    weighted = -jacobian(result.x)[None, :, :]
+    optimal = _optimality(table[:, cols], weighted, residual, limits)[0] <= 1e-9
+    # 1e-6 is about 75 times the measured roundoff stall maximum 1.34e-8,
+    # but over four orders below the nonoptimal 0.0399. A small step or
+    # SciPy success alone is not optimality; require this ratio at ftol/xtol.
+    stalled_optimal = result.status in (2, 3, 4) and (
+        _scale_invariant_optimality(weighted, residual, result.active_mask[None, :])[0]
+        <= 1e-6
+    )
+    converged = result.status > 0 and result.nfev < 200 and (optimal or stalled_optimal)
+    reason = (
+        f"{result.message}; bound-scaled optimality not reached"
+        if not converged
+        else "optimality reached"
+    )
+    return InnerSolution(table, residual, bool(converged), reason)
 
 
 def _optimality(
@@ -170,35 +156,25 @@ def _optimality(
     return np.max(np.abs(gradient * distance), axis=1)
 
 
-def _line_search(
-    state: LineState,
-    delta: np.ndarray,
-    cols: np.ndarray,
-    means: np.ndarray,
-    weights: np.ndarray,
-    limits: Limits,
-) -> LineState:
-    table, predicted, jac, residual, cost = state
-    lo, hi = limits
-    accept = np.zeros(len(table), dtype=bool)
-    candidate, pred, derivative, r, c = table, predicted, jac, residual, cost
-    for _ in range(12):
-        candidate = table.copy()
-        candidate[:, cols] = np.clip(table[:, cols] + delta, lo, hi)
-        pred, derivative = local_mean_jacobian(candidate)
-        r = apply_weights(weights, means - pred)
-        c = np.sum(r**2, axis=1)
-        accept = c <= cost
-        if accept.all():
-            break
-        delta = np.where(accept[:, None], delta, 0.5 * delta)
-    return (
-        np.where(accept[:, None], candidate, table),
-        np.where(accept[:, None], pred, predicted),
-        np.where(accept[:, None, None], derivative, jac),
-        np.where(accept[:, None], r, residual),
-        np.where(accept, c, cost),
+def _scale_invariant_optimality(
+    jac: np.ndarray, residual: np.ndarray, active_mask: np.ndarray
+) -> np.ndarray:
+    """Return max |projected A.T r| / (column norm of A * norm of r).
+
+    A is the weighted prediction Jacobian and r is observed minus predicted,
+    whitened by the same weights. SciPy's active_mask defines numerical bound
+    contact (-1 lower, +1 upper). Zero only outward downhill directions;
+    inward directions remain included. Guard zero denominators with float
+    tiny; zero columns or residuals have zero gradient. Column/residual scaling
+    cancel in the ratio.
+    """
+    gradient = np.einsum("nfi,nf->ni", jac, residual)
+    outward = ((active_mask < 0) & (gradient < 0)) | (
+        (active_mask > 0) & (gradient > 0)
     )
+    projected = np.where(outward, 0.0, gradient)
+    scale = np.linalg.norm(jac, axis=1) * np.linalg.norm(residual, axis=1)[:, None]
+    return np.max(np.abs(projected) / np.maximum(scale, np.finfo(float).tiny), axis=1)
 
 
 def solve_shared(

@@ -97,6 +97,10 @@ def test_exact_moments_recover_curve_and_joint_predictions(kind: str) -> None:
         assert fit.reliability is None
     assert fit.covariance.shape == (len(fit.parameter_names),) * 2
     assert fit.J < 1e-7
+    assert np.isfinite(fit.within_point.J)
+    assert fit.within_point.p is not None
+    assert np.isfinite(fit.sharing.J)
+    assert fit.sharing.J >= 0
     assert fit.sharing.p is None
     assert fit.curve.p is not None
     assert fit.populations.shape == fit.population_errors.shape == (9, 3)
@@ -244,23 +248,24 @@ def test_wald_weights_do_not_use_pooled_measured_products() -> None:
     np.testing.assert_allclose(original.population_errors, changed.population_errors)
 
 
-def test_unconverged_nested_fit_does_not_return_check_probabilities() -> None:
+def test_three_point_fit_returns_finite_nested_checks() -> None:
     model, nuisance = planted_model()
     sums = sampled_sums(
         model, nuisance, np.linspace(0.05, 3.0, 3), {"tau": 1.2}, 500, 761
     )
 
-    with pytest.raises(RuntimeError, match="cycle check.*(budget|line search)"):
-        fit_cycle(sums, model, {"tau": 1.1})
+    result = fit_cycle(sums, model, {"tau": 1.1})
+
+    assert np.isfinite(result.within_point.J)
+    assert np.isfinite(result.sharing.J)
+    assert np.isfinite(result.curve.J)
+    assert result.within_point.p is not None
+    assert np.isfinite(result.within_point.p)
+    assert result.curve.p is not None
+    assert np.isfinite(result.curve.p)
 
 
-@pytest.mark.slow
-@pytest.mark.parametrize("kind", ["t1", "rabi"])
-@pytest.mark.parametrize("contrast,count", [(1.76, 500), (0.176, 30000)])
-@pytest.mark.parametrize("seed", [761, 762, 763, 764])
-def test_fixed_seed_shot_wald_intervals_in_identifiable_regimes(
-    kind: str, contrast: float, count: int, seed: int
-) -> None:
+def shot_fit(kind: str, contrast: float, count: int, seed: int) -> tuple[str, CycleFit]:
     model, nuisance = planted_model(kind)
     centers = np.array(
         [
@@ -275,13 +280,44 @@ def test_fixed_seed_shot_wald_intervals_in_identifiable_regimes(
         model, nuisance, np.linspace(0.05, 3.0, 13), {name: 1.2}, count, seed
     )
 
-    result = fit_cycle(sums, model, {name: 1.1})
+    return name, fit_cycle(sums, model, {name: 1.1})
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("kind", ["t1", "rabi"])
+@pytest.mark.parametrize("contrast,count", [(1.76, 500), (0.176, 30000)])
+@pytest.mark.parametrize("seed", [761, 762, 763, 764])
+def test_fixed_seed_shot_wald_intervals_in_identifiable_regimes(
+    kind: str, contrast: float, count: int, seed: int
+) -> None:
+    name, result = shot_fit(kind, contrast, count, seed)
 
     # Four fixed replicates per regime check local Wald scale, not precise calibration.
     assert abs(result.parameters[name] - 1.2) < 1.96 * result.errors[name]
-    assert result.within_point.J >= 0
+    assert result.within_point.df == 45 * 13
     assert result.sharing.p is None
     assert np.isfinite(result.population_errors).all()
+
+
+@pytest.mark.slow
+def test_unavailable_within_check_preserves_curve_fit_and_independent_check() -> None:
+    name, result = shot_fit("t1", 1.76, 500, 761)
+
+    assert abs(result.parameters[name] - 1.2) < 1.96 * result.errors[name]
+    assert np.isnan(result.within_point.J)
+    assert result.within_point.p is None
+    assert result.within_point.df == 45 * 13
+    assert np.isnan(result.sharing.J)
+    assert result.sharing.p is None
+    assert result.sharing.df == 14 * 12
+    assert np.isfinite(result.curve.J)
+    assert result.curve.p is not None
+    assert result.curve.df == 65
+    assert result.reliability is None
+    assert result.populations.shape == (13, 3)
+    assert np.isfinite(result.populations).all()
+    assert np.isfinite(result.population_errors).all()
+    np.testing.assert_allclose(result.populations.sum(axis=1), 1)
 
 
 @pytest.mark.parametrize("init", [{}, {"tau": 0.01}, {"tau": np.nan}])

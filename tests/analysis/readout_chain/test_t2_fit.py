@@ -3,6 +3,8 @@
 import numpy as np
 import pytest
 from zcu_tools.analysis.readout_chain import (
+    CycleFit,
+    CycleModel,
     CycleNuisances,
     CycleSums,
     fit_cycle,
@@ -44,14 +46,7 @@ def test_exact_moments_recover_t2_and_joint_predictions(factory) -> None:
         assert result.reliability is None
 
 
-@pytest.mark.slow
-@pytest.mark.parametrize("factory", [t2_echo_model, t2_ramsey_model])
-@pytest.mark.parametrize("contrast,count", [(1.8, 2000), (0.7, 20000)])
-@pytest.mark.parametrize("seed", [9101, 9102])
-def test_shot_fits_resolve_t2_and_detuning_with_longitudinal_relaxation(
-    factory, contrast: float, count: int, seed: int
-) -> None:
-    model = factory()
+def shot_fit(model: CycleModel, contrast: float, count: int, seed: int) -> CycleFit:
     truth = {"t2": 1.2, "tf": 0.65}
     init = {"t2": 1.1, "tf": 0.7}
     if model.oscillation_frequency:
@@ -61,7 +56,19 @@ def test_shot_fits_resolve_t2_and_detuning_with_longitudinal_relaxation(
         model, np.linspace(0.05, 3.0, 13), truth, contrast, count, seed
     )
 
-    result = fit_cycle(sums, model, init)
+    return fit_cycle(sums, model, init)
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("factory", [t2_echo_model, t2_ramsey_model])
+@pytest.mark.parametrize("contrast,count", [(1.8, 2000), (0.7, 20000)])
+@pytest.mark.parametrize("seed", [9101, 9102])
+def test_shot_fits_resolve_t2_and_detuning_with_longitudinal_relaxation(
+    factory, contrast: float, count: int, seed: int
+) -> None:
+    model = factory()
+    truth = {"t2": 1.2, "tf": 0.65, "detuning": 0.8}
+    result = shot_fit(model, contrast, count, seed)
 
     # A few fixed replicates guard recovery/scale, not 95% calibration. The task
     # evidence uses more replicates and reports every miss rather than seed-picking.
@@ -70,7 +77,29 @@ def test_shot_fits_resolve_t2_and_detuning_with_longitudinal_relaxation(
         assert abs(result.parameters[name] - truth[name]) < 4 * result.errors[name]
     if model.oscillation_frequency:
         assert result.reliability == pytest.approx(
-            1 / (2 * np.pi * np.ptp(sums.axis) * result.errors["detuning"])
+            1 / (2 * np.pi * (3.0 - 0.05) * result.errors["detuning"])
         )
     else:
         assert result.reliability is None
+
+
+@pytest.mark.slow
+def test_unavailable_within_check_preserves_t2_fit_and_independent_check() -> None:
+    result = shot_fit(t2_echo_model(), 1.8, 2000, 9101)
+
+    assert abs(result.parameters["t2"] - 1.2) < 4 * result.errors["t2"]
+    assert result.errors["t2"] > 0
+    assert np.isnan(result.within_point.J)
+    assert result.within_point.p is None
+    assert result.within_point.df == 45 * 13
+    assert np.isnan(result.sharing.J)
+    assert result.sharing.p is None
+    assert result.sharing.df == 14 * 12
+    assert np.isfinite(result.curve.J)
+    assert result.curve.p is not None
+    assert result.curve.df == 64
+    assert result.reliability is None
+    assert result.populations.shape == (13, 3)
+    assert np.isfinite(result.populations).all()
+    assert np.isfinite(result.population_errors).all()
+    np.testing.assert_allclose(result.populations.sum(axis=1), 1)

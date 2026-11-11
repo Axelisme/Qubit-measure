@@ -36,7 +36,8 @@ class CycleCheck:
 
     J: Weighted residual sum of squares (within-point), or its increase under
         sharing/curve constraints, dimensionless. All comparisons use the same
-        last-stage joint-model covariance weights.
+        last-stage joint-model covariance weights. NaN for an unconverged
+        within-point fit and the sharing comparison that depends on it.
     df: Nominal number of restrictions, 45*F for within-point, 14*(F-1) for
         sharing, 6*F-12-number_of_curve_parameters for the curve.
     p: Chi-square survival probability for within-point/curve, or None when df
@@ -44,7 +45,9 @@ class CycleCheck:
         miscalibrated when fits reach boundaries. Calibration needs a model
         parametric bootstrap, which fit_cycle does not run. Passing a check
         does not establish small bias. Other p values are asymptotic references,
-        not finite-sample guarantees, particularly near boundaries.
+        not finite-sample guarantees, particularly near boundaries. Also None
+        when within-point did not converge; its J and the dependent sharing J
+        are NaN in that case, unlike the finite-J cases without a calibrated p.
     """
 
     J: float
@@ -80,7 +83,12 @@ class CycleFit:
         three retentions and landing s/f. Simplexes use (s,f), not redundant
         three-probability coordinates; probabilities are (s*f, s*(1-f), 1-s).
     within_point: Unrestricted per-point three-state model residual check.
+        If any point fails to converge, J is NaN, p is None, and df is unchanged.
+        Other fitted quantities and the independent curve check remain available.
     sharing: Shared-nuisance versus fully pointwise check; no calibrated p.
+        J is NaN when within_point is unavailable, otherwise finite. Thus p=None
+        can mean df<=0, uncalibrated sharing, or an unavailable within-point fit;
+        the last case is distinguished by NaN J, not unidentifiable Wald errors.
     curve: Constrained model versus free pointwise drive check. RateModel
         has 6*F-9 restrictions; a curve model has 6*F-12-number_of_parameters.
     populations: Shape (F,3), independently fitted first-read pre-emission
@@ -140,8 +148,11 @@ def fit_cycle(
 
     Return all fields described on CycleFit without changing inputs. Raise
     ValueError for malformed sums/model/curve/init; raise RuntimeError when
-    an optimiser exhausts its evaluation budget, or a nested check fails
-    first-order optimality or cannot find a descent step. A negative nested J
+    the joint or shared optimiser exhausts its evaluation budget, or the
+    sharing/curve inner fit fails optimality. An
+    unconverged within-point fit instead leaves its J and sharing J as NaN,
+    with p=None and unchanged df; parameters, errors, reliability, populations
+    and the independent curve check still return. A negative nested J
     increase beyond floating-point summation roundoff also raises RuntimeError;
     only increases within that tolerance are rounded to zero. A non-positive-definite
     model covariance raises numpy.linalg.LinAlgError. No multistart, model selection,
@@ -177,14 +188,17 @@ def fit_cycle(
     limits = table_bounds()
     shared = solve_shared(table, means, solution.weights, limits)
     unrestricted = inner(
-        shared.table, means, solution.weights, np.arange(TABLE_SIZE), limits, steps=60
+        shared.table, means, solution.weights, np.arange(TABLE_SIZE), limits
     )
-    if not unrestricted.converged:
-        raise RuntimeError(
-            f"within-point cycle check did not converge: {unrestricted.reason}"
-        )
-    within_J = float(np.sum(unrestricted.residual**2))
     points = len(sums.axis)
+    if unrestricted.converged:
+        within = _check(float(np.sum(unrestricted.residual**2)), 45 * points)
+        sharing_J = _increase(shared.J, within.J, points, "sharing")
+    else:
+        # A failed point leaves partial residuals: neither their sum nor the
+        # dependent J difference is a valid check. Do not send NaN to _increase.
+        within = CycleCheck(float("nan"), 45 * points, None)
+        sharing_J = float("nan")
     values, errors = populations(shared)
     standard_errors = solution.information.errors(np.eye(len(q)))
     reliability = None
@@ -199,10 +213,8 @@ def fit_cycle(
         nuisance,
         solution.covariance,
         names,
-        _check(within_J, 45 * points),
-        CycleCheck(
-            _increase(shared.J, within_J, points, "sharing"), 14 * (points - 1), None
-        ),
+        within,
+        CycleCheck(sharing_J, 14 * (points - 1), None),
         _check(
             _increase(solution.J, shared.J, points, "curve"),
             6 * points - drive_parameters,

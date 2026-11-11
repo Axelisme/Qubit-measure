@@ -290,6 +290,8 @@ def bounded_least_squares(
     jac: Callable[[np.ndarray], np.ndarray],
     bounds: tuple[np.ndarray, np.ndarray],
     budget: int,
+    *,
+    stopping_tolerance: float = 1e-9,
 ) -> OptimizeResult:
     # Without installed scipy stubs pyright infers jac: str from the '2-point' default.
     analytic: Any = jac
@@ -299,8 +301,8 @@ def bounded_least_squares(
         jac=analytic,
         bounds=bounds,
         x_scale="jac",
-        ftol=1e-9,
-        xtol=1e-9,
+        ftol=stopping_tolerance,
+        xtol=stopping_tolerance,
         gtol=1e-9,
         max_nfev=budget,
     )
