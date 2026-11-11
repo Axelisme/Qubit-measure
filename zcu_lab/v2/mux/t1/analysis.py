@@ -16,14 +16,9 @@ from zcu_tools.analysis.fitting import (
 from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2.support.mux import MuxFitFailure
-from zcu_lab.v2.twotone.time_domain.t1.core import (
-    T1Analysis,
-    T1AnalyzeOptions,
-    t1_signal2real,
-)
 
 if TYPE_CHECKING:
-    from .core import MuxT1Result
+    from .core import MuxT1Result, T1Analysis, T1AnalyzeOptions
 
 
 @dataclass(frozen=True)
@@ -80,6 +75,9 @@ def analyze_t1(
     per-tone fit summaries. Acquired delays, projected observations and
     predictions remain local to plotting. No cfg or hardware is read.
     """
+    # Import after core initialization: the core owns options and IQ projection.
+    from .core import T1Analysis, t1_signal2real
+
     _validate_result(result)
     times, indices, signals = result.times, result.tone_indices, result.signals
     outcomes: list[MuxT1Fit | MuxFitFailure] = []

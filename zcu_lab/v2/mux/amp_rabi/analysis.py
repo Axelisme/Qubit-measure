@@ -1,6 +1,9 @@
-"""Per-tone Amp Rabi analysis using the existing single-qubit fit policy."""
+"""Per-tone Amp Rabi fits with an undamped cosine and zero-gain phase."""
+
+from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import numpy as np
 from zcu_tools.analysis.failure import AnalysisFailed
@@ -8,10 +11,9 @@ from zcu_tools.analysis.fitting import FitQuality, compute_fit_quality, fit_rabi
 from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2.support.mux import MuxFitFailure, MuxSweepResult, validate_mux_result
-from zcu_lab.v2.twotone.rabi.amp_rabi.core import (
-    AmpRabiAnalyzeOptions,
-    rabi_signal2real,
-)
+
+if TYPE_CHECKING:
+    from .core import AmpRabiAnalyzeOptions
 
 
 @dataclass(frozen=True)
@@ -43,6 +45,9 @@ def analyze_amplitude(
     Plotting errors propagate unchanged. Does not read cfg, components, current
     forms or hardware.
     """
+    # Import after core initialization: the core owns options and IQ projection.
+    from .core import rabi_signal2real
+
     validate_mux_result(result)
     outcomes: list[MuxAmpRabiFit | MuxFitFailure] = []
     for row, raw_index in enumerate(result.tone_indices):

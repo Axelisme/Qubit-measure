@@ -32,10 +32,9 @@ from zcu_lab.v2.support.measure.mux_results import (
 from zcu_lab.v2.support.measure.mux_save_names import mux_save_stem
 from zcu_lab.v2.support.measure.writeback_helpers import module_writeback
 from zcu_lab.v2.support.mux import MuxFitFailure, MuxSweepResult
-from zcu_lab.v2.twotone.rabi.amp_rabi.core import AmpRabiAnalyzeOptions
 
 from .analysis import MuxAmpRabiFit
-from .core import MuxAmpRabiCfg, MuxAmpRabiExp
+from .core import AmpRabiAnalyzeOptions, MuxAmpRabiCfg, MuxAmpRabiExp
 from .form import make_form
 
 MuxAmpRabiRunResult: TypeAlias = RunRecord[MuxAmpRabiCfg, MuxSweepResult]

@@ -80,6 +80,7 @@ from typing import Annotated, ClassVar
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import Field, StrictInt, model_validator
+from pydantic.dataclasses import dataclass as validated_dataclass
 from qick import QickConfig
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import Experiment
@@ -98,6 +99,7 @@ from zcu_tools.program.v2.modules import (
     PulseCfg,
 )
 from zcu_tools.program.v2.utils import sweep2param
+from zcu_tools.utils.process import rotate2real
 
 from zcu_lab.v2.support import live_line
 from zcu_lab.v2.support.mux import MuxFitFailure, MuxSweepResult, averaged_mux_signal
@@ -108,9 +110,20 @@ from zcu_lab.v2.support.mux_sweep_cfg import (
     require_tone_value,
     validate_mux_scan,
 )
-from zcu_lab.v2.twotone.rabi.amp_rabi.core import AmpRabiAnalyzeOptions
 
 from .analysis import MuxAmpRabiFit, analyze_amplitude
+
+
+@validated_dataclass(frozen=True)
+class AmpRabiAnalyzeOptions:
+    """Skip leading gain points before the undamped per-tone Rabi fit."""
+
+    skip: Annotated[int, FieldMeta(label="Skip points"), Field(ge=0)] = 0
+
+
+def rabi_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
+    """Project complex IQ samples onto their real principal contrast axis."""
+    return rotate2real(signals).real
 
 
 @dataclass(frozen=True)

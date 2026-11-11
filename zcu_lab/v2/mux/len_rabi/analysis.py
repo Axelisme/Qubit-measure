@@ -1,6 +1,9 @@
-"""Per-tone length Rabi analysis using the single-qubit fitting owner."""
+"""Per-tone length Rabi fits with optional decay and free phase."""
+
+from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import numpy as np
 from zcu_tools.analysis.failure import AnalysisFailed
@@ -8,10 +11,9 @@ from zcu_tools.analysis.fitting import FitQuality, compute_fit_quality, fit_rabi
 from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2.support.mux import MuxFitFailure, MuxSweepResult, validate_mux_result
-from zcu_lab.v2.twotone.rabi.len_rabi.core import (
-    LenRabiAnalyzeOptions,
-    rabi_signal2real,
-)
+
+if TYPE_CHECKING:
+    from .core import LenRabiAnalyzeOptions
 
 
 @dataclass(frozen=True)
@@ -47,6 +49,9 @@ def analyze_length(
     changed. plots must be fresh for this analysis and receives fit_i; caller
     owns finish/release. No cfg, files, device or GUI state is consulted.
     """
+    # Import after core initialization: the core owns options and IQ projection.
+    from .core import rabi_signal2real
+
     validate_mux_result(result)
     outcomes: list[MuxLenRabiFit | MuxFitFailure] = []
     for row, raw_index in enumerate(result.tone_indices):

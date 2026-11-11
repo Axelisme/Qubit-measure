@@ -120,6 +120,7 @@ from typing import Annotated, ClassVar
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import StrictInt, model_validator
+from pydantic.dataclasses import dataclass as validated_dataclass
 from zcu_tools.analysis.failure import AnalysisFailed
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import Experiment
@@ -142,6 +143,7 @@ from zcu_tools.program.v2.modules import (
 )
 
 from zcu_lab.v2.support import live_line
+from zcu_lab.v2.support.detune import actual_detune
 from zcu_lab.v2.support.mux import MuxFitFailure, averaged_mux_signal
 from zcu_lab.v2.support.mux_coherence import (
     MuxCoherenceResult,
@@ -156,8 +158,14 @@ from zcu_lab.v2.support.mux_coherence_analysis import (
     project_coherence_trace,
 )
 from zcu_lab.v2.support.mux_coherence_persistence import coherence_spec
-from zcu_lab.v2.twotone.time_domain.detune import actual_detune
-from zcu_lab.v2.twotone.time_domain.t2ramsey.core import T2RamseyAnalyzeOptions
+
+
+@validated_dataclass(frozen=True)
+class T2RamseyAnalyzeOptions:
+    """Select fringe fitting and optionally free its phase; decay ignores phase."""
+
+    fit_fringe: Annotated[bool, FieldMeta(label="Fit fringe")] = True
+    fit_phase: Annotated[bool, FieldMeta(label="Fit phase offset (fringe only)")] = True
 
 
 class MuxT2RamseyCfg(ConfigBase):
