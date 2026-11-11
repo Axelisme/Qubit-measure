@@ -29,6 +29,22 @@ LineState = tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]
 
 
 @dataclass
+class InnerSolution:
+    """Pointwise fit and its explicit optimality/failure outcome.
+
+    table: Fitted table, shape (F,20).
+    residual: Final weighted residual, shape (F,65).
+    converged: Whether every point meets bound-scaled first-order optimality.
+    reason: Optimality reached, iteration budget exhausted, or line search failed.
+    """
+
+    table: np.ndarray
+    residual: np.ndarray
+    converged: bool
+    reason: str
+
+
+@dataclass
 class SharedSolution:
     """Fit of the shared coordinates with free drive pairs at each point.
 
@@ -101,33 +117,57 @@ def inner(
     cols: np.ndarray,
     limits: Limits,
     steps: int = 40,
-) -> tuple[np.ndarray, np.ndarray]:
+) -> InnerSolution:
     """Fit the table columns cols independently at each point; hold the others.
 
     table has shape (F,20) in the layout of _cycle_layout, means (F,65), weights
     (F,65,65) whitening matrices. cols indexes the fitted columns of table and
     limits gives their lower and upper bounds. Run bounded damped Gauss-Newton
-    with a per-point halving line search for at most steps iterations, stopping
-    early when no column moves by 1e-9. Return a new table and the final weighted
-    residual, shape (F,65). The inputs are not changed; numpy.linalg.LinAlgError
-    propagates from a singular solve.
+    with a per-point halving line search for at most steps iterations. Require
+    bound-scaled first-order optimality below 1e-9, the joint/shared solver gtol:
+    multiply each residual-gradient coordinate by the distance to its downhill
+    bound (one for unbounded directions). Zero motion is not convergence.
+    Return an InnerSolution; budget exhaustion or failed descent is explicit.
+    The inputs are not changed; numpy.linalg.LinAlgError propagates from a
+    singular solve.
     """
     table = table.copy()
     predicted, jac = local_mean_jacobian(table)
     residual = apply_weights(weights, means - predicted)
     cost = np.sum(residual**2, axis=1)
-    for _ in range(steps):
+    for iteration in range(steps + 1):
         weighted = apply_weights(weights, jac[:, :, cols])
-        delta = _step(table, cols, weighted, residual, limits)
-        if np.max(np.abs(delta)) < 1e-9:
+        optimal = _optimality(table[:, cols], weighted, residual, limits) < 1e-9
+        if optimal.all():
+            return InnerSolution(table, residual, True, "optimality reached")
+        if iteration == steps:
             break
-        previous = table
+        delta = _step(table, cols, weighted, residual, limits)
+        previous_cost = cost
         table, predicted, jac, residual, cost = _line_search(
             (table, predicted, jac, residual, cost), delta, cols, means, weights, limits
         )
-        if np.max(np.abs(table[:, cols] - previous[:, cols])) < 1e-9:
-            break
-    return table, residual
+        stalled = (cost >= previous_cost) & ~optimal
+        if stalled.any():
+            # A roundoff-sized move can reach optimality without lowering J.
+            weighted = apply_weights(weights, jac[:, :, cols])
+            optimal = _optimality(table[:, cols], weighted, residual, limits) < 1e-9
+            if np.any(stalled & ~optimal):
+                return InnerSolution(
+                    table, residual, False, "line search found no descent"
+                )
+    return InnerSolution(table, residual, False, "iteration budget exhausted")
+
+
+def _optimality(
+    values: np.ndarray, jac: np.ndarray, residual: np.ndarray, limits: Limits
+) -> np.ndarray:
+    lo, hi = limits
+    # residual = observed - predicted, so positive gradient points downhill.
+    gradient = np.einsum("nfi,nf->ni", jac, residual)
+    distance = np.where(gradient > 0, hi - values, values - lo)
+    distance = np.where(np.isfinite(distance), distance, 1.0)
+    return np.max(np.abs(gradient * distance), axis=1)
 
 
 def _line_search(
@@ -185,9 +225,12 @@ def solve_shared(
     def fun(shared: np.ndarray) -> np.ndarray:
         nonlocal current, residual
         current[:, TABLE_SHARED] = shared
-        current, residual = inner(
+        fitted = inner(
             current, means, weights, cols, (lo[TABLE_DRIVE], hi[TABLE_DRIVE])
         )
+        if not fitted.converged:
+            raise RuntimeError(f"sharing cycle check did not converge: {fitted.reason}")
+        current, residual = fitted.table, fitted.residual
         return residual.ravel()
 
     def jacobian(shared: np.ndarray) -> np.ndarray:

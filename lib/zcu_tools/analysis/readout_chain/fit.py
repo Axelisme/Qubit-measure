@@ -140,8 +140,11 @@ def fit_cycle(
 
     Return all fields described on CycleFit without changing inputs. Raise
     ValueError for malformed sums/model/curve/init; raise RuntimeError when
-    an optimiser exhausts its evaluation budget. A non-positive-definite model
-    covariance raises numpy.linalg.LinAlgError. No multistart, model selection,
+    an optimiser exhausts its evaluation budget, or a nested check fails
+    first-order optimality or cannot find a descent step. A negative nested J
+    increase beyond floating-point summation roundoff also raises RuntimeError;
+    only increases within that tolerance are rounded to zero. A non-positive-definite
+    model covariance raises numpy.linalg.LinAlgError. No multistart, model selection,
     bootstrap or profile likelihood is run. Wald errors are local asymptotic
     approximations and do not account for competing minima or active bounds.
     At low state contrast and few cycles per x, Wald intervals can under-cover.
@@ -173,10 +176,14 @@ def fit_cycle(
     q = solution.q
     limits = table_bounds()
     shared = solve_shared(table, means, solution.weights, limits)
-    _, unrestricted_residual = inner(
+    unrestricted = inner(
         shared.table, means, solution.weights, np.arange(TABLE_SIZE), limits, steps=60
     )
-    within_J = float(np.sum(unrestricted_residual**2))
+    if not unrestricted.converged:
+        raise RuntimeError(
+            f"within-point cycle check did not converge: {unrestricted.reason}"
+        )
+    within_J = float(np.sum(unrestricted.residual**2))
     points = len(sums.axis)
     values, errors = populations(shared)
     standard_errors = solution.information.errors(np.eye(len(q)))
@@ -193,8 +200,13 @@ def fit_cycle(
         solution.covariance,
         names,
         _check(within_J, 45 * points),
-        CycleCheck(max(0.0, shared.J - within_J), 14 * (points - 1), None),
-        _check(max(0.0, solution.J - shared.J), 6 * points - drive_parameters),
+        CycleCheck(
+            _increase(shared.J, within_J, points, "sharing"), 14 * (points - 1), None
+        ),
+        _check(
+            _increase(solution.J, shared.J, points, "curve"),
+            6 * points - drive_parameters,
+        ),
         values,
         errors,
         reliability,
@@ -202,6 +214,23 @@ def fit_cycle(
         65 * points - len(q),
         relaxation,
     )
+
+
+def _increase(constrained: float, free: float, points: int, check: str) -> float:
+    increase = constrained - free
+    # Each J sums 65*F squared residuals. Allow first-order roundoff for the
+    # products, sums and subtraction: (65*F+2)*eps times the combined objective
+    # scale, with a unit absolute floor near zero. This is not an optimisation
+    # tolerance: a genuinely worse free fit must not produce a passing p.
+    tolerance = (
+        (65 * points + 2) * np.finfo(float).eps * max(1.0, abs(constrained) + abs(free))
+    )
+    if increase < -tolerance:
+        raise RuntimeError(
+            f"{check} cycle check has negative J increase {increase:g} "
+            f"beyond roundoff tolerance {tolerance:g}"
+        )
+    return max(0.0, increase)
 
 
 def _check(J: float, df: int) -> CycleCheck:

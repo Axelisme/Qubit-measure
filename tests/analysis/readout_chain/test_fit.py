@@ -244,6 +244,16 @@ def test_wald_weights_do_not_use_pooled_measured_products() -> None:
     np.testing.assert_allclose(original.population_errors, changed.population_errors)
 
 
+def test_unconverged_nested_fit_does_not_return_check_probabilities() -> None:
+    model, nuisance = planted_model()
+    sums = sampled_sums(
+        model, nuisance, np.linspace(0.05, 3.0, 3), {"tau": 1.2}, 500, 761
+    )
+
+    with pytest.raises(RuntimeError, match="cycle check.*(budget|line search)"):
+        fit_cycle(sums, model, {"tau": 1.1})
+
+
 @pytest.mark.slow
 @pytest.mark.parametrize("kind", ["t1", "rabi"])
 @pytest.mark.parametrize("contrast,count", [(1.76, 500), (0.176, 30000)])
