@@ -16,6 +16,7 @@ from zcu_tools.analysis.readout_chain import (
     THERMAL_MOMENT_COUNT,
     ThermalChainScore,
     ThermalChainSums,
+    ThermalMomentsUnavailable,
     thermal_chain_score,
 )
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
@@ -88,7 +89,9 @@ class ChainPowerExp(Experiment[ThermalChainSums, ChainPowerCfg]):
         supplies the photon decay gap between reads. K after each shot lets the
         next shot start from thermal equilibrium. Live plots show score and
         QND with model-approximate errors, and M alongside |rho|, from all
-        completed rounds. Return shot count and all 107 sums per setting.
+        completed rounds. Moments not yet estimable show no score; acquisition
+        continues accumulating sums. Other analysis errors propagate.
+        Return shot count and all 107 sums per setting.
         Stop keeps settings with a completed round; none raises RuntimeError.
         """
         settings = sweep2array(
@@ -99,14 +102,19 @@ class ChainPowerExp(Experiment[ThermalChainSums, ChainPowerCfg]):
         )
 
         @context.plots.on_plot_thread
-        def draw(result: ThermalChainScore) -> tuple[Artist, ...]:
+        def draw(result: ThermalChainScore | None) -> tuple[Artist, ...]:
             artists = _draw_metric(tuple(fig.axes), result)
             fig.tight_layout()
             return artists
 
         def update(sums: NDArray[np.float64]) -> None:
             # Calculate off the GUI thread; the plot thread only draws.
-            draw(thermal_chain_score(finished_sums(settings, sums)))
+            saved = finished_sums(settings, sums)
+            try:
+                result = thermal_chain_score(saved)
+            except ThermalMomentsUnavailable:
+                result = None
+            draw(result)
 
         fig.show()
         shot_sums = SignalBuffer(
@@ -162,7 +170,7 @@ class ChainPowerExp(Experiment[ThermalChainSums, ChainPowerCfg]):
 
 
 def _draw_metric(
-    axes: tuple[Axes, ...], result: ThermalChainScore
+    axes: tuple[Axes, ...], result: ThermalChainScore | None
 ) -> tuple[Artist, ...]:
     """Replace three panels with score, QND and correlation-growth diagnostics.
 
@@ -172,10 +180,16 @@ def _draw_metric(
     only score values; QND limits stay at 0..1 without clipping reported data.
     M and |rho| share the diagnostic panel. Red lines mark the largest score,
     with exact ties resolved by acquisition order, in live and analysis plots.
+    None displays an unavailable live preview with no scored points.
     """
     ax_score, ax_qnd, ax_m = axes
     for ax in axes:
         ax.clear()
+    if result is None:
+        ax_score.set(ylabel="Heuristic score", title="Moments not yet estimable")
+        ax_qnd.set_ylabel("QND")
+        ax_m.set(xlabel="Readout gain (a.u.)", ylabel="M / |ρ|")
+        return tuple(axes)
     settings = result.settings
     xs = [point.setting for point in settings]
     scores = [point.score for point in settings]
