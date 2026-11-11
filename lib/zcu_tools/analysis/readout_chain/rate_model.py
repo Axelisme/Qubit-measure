@@ -69,7 +69,9 @@ class CycleRelaxation:
 
     eigen_times/eigen_time_errors: Shape (2,), slow then fast times and marginal
         Wald errors. Zero decay rates give infinite times/errors. Errors use
-        analytic Hellmann–Feynman gradients and the joint covariance.
+        analytic Hellmann–Feynman gradients and the joint generalized covariance.
+        An error is NaN when that eigen time involves an unconstrained direction;
+        unrelated nuisance rank loss does not remove errors for estimable times.
     amplitudes: Shape (2,), thermal-weighted sum over rows of the L1 population
         change carried by each exponential: A_k = sum_i pi_i ||(D0 P_k)_i||_1,
         where P_k is the generator's spectral projector. Dimensionless.

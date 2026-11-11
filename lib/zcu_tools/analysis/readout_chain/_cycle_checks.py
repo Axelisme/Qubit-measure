@@ -13,11 +13,13 @@ from ._cycle_layout import (
     TABLE_THERMAL,
 )
 from ._cycle_solver import (
+    ScaledInformation,
     apply_weights,
     bounded_least_squares,
     local_drive,
     local_mean_jacobian,
     scaled_covariance,
+    scaled_information,
 )
 
 # Lower and upper bounds of the table columns being fitted.
@@ -38,6 +40,8 @@ class SharedSolution:
     coupling: Shape (F,6,14), per-point covariance_local times the local-shared
         normal block. A change of the shared coordinates moves the fitted drive
         pairs by minus coupling times that change.
+    information_local: Local covariance and normalized null projection.
+    information_shared: Schur-complement covariance and normalized null projection.
     """
 
     table: np.ndarray
@@ -45,6 +49,8 @@ class SharedSolution:
     covariance_shared: np.ndarray
     covariance_local: np.ndarray
     coupling: np.ndarray
+    information_local: ScaledInformation
+    information_shared: ScaledInformation
 
 
 def _normal(jac: np.ndarray, held: np.ndarray) -> np.ndarray:
@@ -208,22 +214,33 @@ def solve_shared(
     local, global_ = jac[:, :, TABLE_DRIVE], jac[:, :, TABLE_SHARED]
     # Normal-matrix blocks of the drive pairs (local) and shared coordinates.
     local_shared = np.einsum("nfi,nfj->nij", local, global_)
-    covariance_local = scaled_covariance(local)
+    information_local = scaled_information(local)
+    covariance_local = information_local.covariance
     coupling = covariance_local @ local_shared
     # Form the Schur complement as a projected Jacobian to retain column scales
     # and avoid subtracting nearly equal normal-matrix blocks.
     projected = global_ - local @ coupling
-    covariance_shared = scaled_covariance(projected.reshape(-1, ROW_SIZE))
+    information_shared = scaled_information(projected.reshape(-1, ROW_SIZE))
+    covariance_shared = information_shared.covariance
     return SharedSolution(
         current,
         float(np.sum(residual**2)),
         covariance_shared,
         covariance_local,
         coupling,
+        information_local,
+        information_shared,
     )
 
 
 def populations(solution: SharedSolution) -> tuple[np.ndarray, np.ndarray]:
+    """Return (F,3) populations and errors from the shared-nuisance fit.
+
+    Propagate each population gradient through the local and Schur-corrected
+    shared information separately. An error is NaN if either gradient involves
+    that information's null space; unrelated nuisance rank loss does not remove
+    errors for estimable populations.
+    """
     table = solution.table
     drive = local_drive(table)
     pi = np.array([simplex(*r[TABLE_THERMAL]) for r in table])
@@ -237,6 +254,6 @@ def populations(solution: SharedSolution) -> tuple[np.ndarray, np.ndarray]:
             )
         shared[x, :, ROW_THERMAL] = drive[x].T @ simplex_gradient(*row[TABLE_THERMAL])
     corrected = shared - local @ solution.coupling
-    cov = local @ solution.covariance_local @ local.transpose(0, 2, 1)
-    cov += corrected @ solution.covariance_shared @ corrected.transpose(0, 2, 1)
-    return values, np.sqrt(np.maximum(0.0, np.diagonal(cov, axis1=1, axis2=2)))
+    local_errors = solution.information_local.errors(local)
+    shared_errors = solution.information_shared.errors(corrected)
+    return values, np.sqrt(local_errors**2 + shared_errors**2)

@@ -60,16 +60,19 @@ class CycleFit:
         rate_01/rate_02/rate_12 in inverse time units for RateModel. Rate indices
         name geometric states, with no g/e/f meaning.
     errors: Marginal Wald standard errors by curve/rate name, in parameter units.
+        NaN means the data do not constrain that parameter locally.
     relaxation: Rate-model eigen times and T1; None for curve models.
     nuisances: Shared endpoint/D0, geometry, thermal and read estimates. State
         labels are arbitrary; comparisons must allow a simultaneous permutation.
     covariance: Joint covariance of curve and nuisance coordinates, shape (P,P),
-        column-normalized pseudoinverse of fixed-weight information (relative
+        column-normalized generalized inverse of fixed-weight information (relative
         cutoff 1e-12), transformed back to parameter units without residual-variance
         rescaling. Curve, rate and nested fits normalize Jacobian columns so the
         cutoff describes collinearity rather than units. Rank loss and active
-        bounds invalidate ordinary Wald coverage; the pseudoinverse does not
-        restore identification.
+        bounds invalidate ordinary Wald coverage; the generalized inverse does not
+        restore identification. Its null-space zeros are not standard errors.
+        Parameter and derived errors involving that null space are NaN; other
+        estimable quantities retain their errors.
     parameter_names: Covariance column names. Curve or rate parameters come
         first. Curve models continue with the drive endpoints (state, endpoint,
         s/f); rate models with the D0 rows (s,f), whose names encode each row's
@@ -83,15 +86,18 @@ class CycleFit:
     populations: Shape (F,3), independently fitted first-read pre-emission
         populations from the shared-nuisance fit with free D at each x.
     population_errors: Shape (F,3), marginal Wald errors of populations,
-        including the shared-nuisance covariance via the Schur complement.
+        including the shared-nuisance covariance via the Schur complement. NaN
+        means that population involves an unconstrained local or shared direction.
+        An unrelated unidentifiable nuisance does not make all errors NaN.
     reliability: R = 1 / (2*pi * axis span * SE(frequency)), dimensionless.
         frequency is the CycleModel.oscillation_frequency parameter in cycles
         per axis unit and SE its Wald standard error, so 2*pi*SE is the
         angular-frequency error; a larger R means a smaller frequency error
         relative to the sweep span. Its scale was calibrated on Rabi sweeps
-        only. None unless oscillation_frequency names a curve parameter, since
-        R applies only to oscillating curves. A zero axis span or zero SE
-        gives infinity. No threshold or choice is applied.
+        only. None when the model has no oscillation_frequency or the named
+        frequency is unidentifiable. Other nuisance rank loss does not remove R.
+        An estimable frequency with zero axis span or zero SE gives infinity.
+        No threshold or choice is applied.
     J: Joint constrained weighted residual sum of squares, dimensionless.
     df: Joint residual degrees of freedom, 65*F-P.
     """
@@ -173,12 +179,13 @@ def fit_cycle(
     within_J = float(np.sum(unrestricted_residual**2))
     points = len(sums.axis)
     values, errors = populations(shared)
-    standard_errors = np.sqrt(np.maximum(0.0, np.diag(solution.covariance)))
+    standard_errors = solution.information.errors(np.eye(len(q)))
     reliability = None
     if isinstance(model, CycleModel) and model.oscillation_frequency is not None:
         index = model.parameter_names.index(model.oscillation_frequency)
         denominator = 2 * np.pi * np.ptp(sums.axis) * standard_errors[index]
-        reliability = float(1 / denominator) if denominator else float("inf")
+        if not np.isnan(standard_errors[index]):
+            reliability = float(1 / denominator) if denominator else float("inf")
     return CycleFit(
         dict(zip(names[:n], q[:n], strict=True)),
         dict(zip(names[:n], standard_errors[:n], strict=True)),

@@ -31,6 +31,38 @@ from ._cycle_layout import (
 if TYPE_CHECKING:
     from .model import CycleModel
 
+_INFORMATION_RCOND = 1e-12
+
+
+@dataclass
+class ScaledInformation:
+    """Generalized covariance and null projection in column-normalized units.
+
+    Keep the null projection separate from covariance: its zero information
+    cannot be interpreted as zero uncertainty, and derived quantities can be
+    estimable even when their individual coordinate components are not.
+    """
+
+    covariance: np.ndarray
+    scale: np.ndarray
+    null_projection: np.ndarray
+
+    def errors(self, gradients: np.ndarray) -> np.ndarray:
+        """Propagate rows of gradients, returning NaN for non-estimable rows.
+
+        gradients has shape (..., quantities, parameters), with leading axes
+        broadcast against this information's optional batch axes. Test null
+        overlap in normalized units using the same 1e-6 singular-value cutoff
+        as the 1e-12 information cutoff.
+        """
+        normalized = gradients / self.scale[..., None, :]
+        overlap = np.linalg.norm(normalized @ self.null_projection, axis=-1)
+        estimable = overlap**2 <= _INFORMATION_RCOND * np.sum(normalized**2, axis=-1)
+        variance = np.einsum(
+            "...ki,...ij,...kj->...k", gradients, self.covariance, gradients
+        )
+        return np.where(estimable, np.sqrt(np.maximum(0.0, variance)), np.nan)
+
 
 @dataclass
 class JointSolution:
@@ -38,6 +70,7 @@ class JointSolution:
     covariance: np.ndarray
     weights: np.ndarray
     J: float
+    information: ScaledInformation
 
 
 def apply_weights(weights: np.ndarray, values: np.ndarray) -> np.ndarray:
@@ -56,9 +89,26 @@ def scaled_covariance(weighted: np.ndarray) -> np.ndarray:
     scale = np.where(scale == 0, 1.0, scale)
     scaled = weighted / scale[..., None, :]
     inverse = np.linalg.pinv(
-        scaled.swapaxes(-1, -2) @ scaled, rcond=1e-12, hermitian=True
+        scaled.swapaxes(-1, -2) @ scaled, rcond=_INFORMATION_RCOND, hermitian=True
     )
     return inverse / (scale[..., :, None] * scale[..., None, :])
+
+
+def scaled_information(weighted: np.ndarray) -> ScaledInformation:
+    """Retain the numerical null space alongside the scaled generalized inverse.
+
+    weighted has shape (..., observations, parameters). The null projection
+    uses the same relative normal-matrix cutoff as scaled_covariance.
+    """
+    scale = np.linalg.norm(weighted, axis=-2)
+    scale = np.where(scale == 0, 1.0, scale)
+    scaled = weighted / scale[..., None, :]
+    values, vectors = np.linalg.eigh(scaled.swapaxes(-1, -2) @ scaled)
+    null = np.abs(values) <= _INFORMATION_RCOND * np.max(
+        np.abs(values), axis=-1, keepdims=True
+    )
+    projection = (vectors * null[..., None, :]) @ vectors.swapaxes(-1, -2)
+    return ScaledInformation(scaled_covariance(weighted), scale, projection)
 
 
 def model_weights(
@@ -165,9 +215,11 @@ def solve_joint(
         q = _joint_stage(model, axis, means, weights, q)
     predicted, jac = joint_mean_jacobian(model, axis, q)
     weighted = apply_weights(weights, jac).reshape(-1, len(q))
-    cov = scaled_covariance(weighted)
+    information = scaled_information(weighted)
     residual = apply_weights(weights, means - predicted)
-    return JointSolution(q, cov, weights, float(np.sum(residual**2)))
+    return JointSolution(
+        q, information.covariance, weights, float(np.sum(residual**2)), information
+    )
 
 
 def assigned_seed(q: np.ndarray, order: tuple[int, ...]) -> np.ndarray:

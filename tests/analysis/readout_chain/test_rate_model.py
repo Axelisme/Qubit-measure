@@ -5,6 +5,7 @@ import pytest
 from scipy.linalg import expm
 from zcu_tools.analysis.readout_chain import (
     CycleFit,
+    CycleSums,
     RateNuisances,
     fit_cycle,
     t1_model,
@@ -56,6 +57,33 @@ def test_exact_moments_recover_both_modes_and_larger_amplitude_t1(
     assert np.isfinite(result.population_errors).all()
     assert result.within_point.df == 45 * 13
     assert result.sharing.p is None
+
+
+def test_zero_delays_leave_rates_unidentified_but_populations_estimable() -> None:
+    axis = np.zeros(3)
+    nuisance = coordinate_nuisance(oracle_coordinates())
+    parameters: dict[str, float] = dict(
+        zip(("rate_01", "rate_02", "rate_12"), (0.05, 0.08, 0.025), strict=True)
+    )
+    moments = rate_moments(axis, parameters, nuisance)
+    sums = CycleSums(axis, np.full(3, 3000.0), 3000 * moments.means, np.zeros((65, 65)))
+
+    result = fit_cycle(sums, t1_model(), {"t1": 20.0})
+
+    assert all(np.isnan(error) for error in result.errors.values())
+    relaxation = result.relaxation
+    assert relaxation is not None
+    assert np.isnan(relaxation.eigen_time_errors).all()
+    assert np.isnan(relaxation.t1_error)
+    assert np.isnan(relaxation.secondary_error)
+    assert result.reliability is None
+    assert np.isfinite(result.population_errors).all()
+    assert (result.population_errors > 0).all()
+    np.testing.assert_allclose(
+        result.populations,
+        t1_model().populations(axis, result.parameters, expect_rate_nuisances(result)),
+        atol=1e-6,
+    )
 
 
 def oracle_time_errors(fit: CycleFit) -> np.ndarray:

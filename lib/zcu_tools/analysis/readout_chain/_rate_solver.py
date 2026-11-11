@@ -18,11 +18,12 @@ from ._cycle_layout import (
 )
 from ._cycle_solver import (
     JointSolution,
+    ScaledInformation,
     apply_weights,
     assigned_seed,
     bounded_least_squares,
     model_weights,
-    scaled_covariance,
+    scaled_information,
     starting_nuisance,
 )
 from ._rate_coordinates import (
@@ -74,11 +75,12 @@ def solve_rate(
         q = _stage(layout, means, weights, q)
     predicted, jacobian = layout.mean_jacobian(q)
     weighted = apply_weights(weights, jacobian).reshape(-1, SIZE)
-    cov = scaled_covariance(weighted)
+    information = scaled_information(weighted)
+    cov = information.covariance
     J = float(np.sum(apply_weights(weights, means - predicted) ** 2))
-    joint = JointSolution(q, cov, weights, J)
+    joint = JointSolution(q, cov, weights, J, information)
     return RateSolution(
-        joint, layout, _nuisances(layout, q), _relaxation(layout, q, cov)
+        joint, layout, _nuisances(layout, q), _relaxation(layout, q, information)
     )
 
 
@@ -130,7 +132,9 @@ def _nuisances(layout: RateCoordinates, q: Array) -> RateNuisances:
     )
 
 
-def _relaxation(layout: RateCoordinates, q: Array, cov: Array) -> CycleRelaxation:
+def _relaxation(
+    layout: RateCoordinates, q: Array, information: ScaledInformation
+) -> CycleRelaxation:
     spec = layout.spectrum(q)
     times, errors = [], []
     for mode in (1, 2):
@@ -140,7 +144,7 @@ def _relaxation(layout: RateCoordinates, q: Array, cov: Array) -> CycleRelaxatio
         else:
             gradient = layout.eigen_time_gradient(q, mode)
             times.append(float(-1 / spec.values[mode]))
-            errors.append(float(np.sqrt(max(0, gradient @ cov @ gradient))))
+            errors.append(float(information.errors(gradient[None, :])[0]))
     amplitudes = np.array([mode_amplitude(spec, layout.d0(q), k) for k in (1, 2)])
     winner = int(np.argmax(amplitudes))
     return CycleRelaxation(

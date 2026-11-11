@@ -167,6 +167,72 @@ def test_per_state_curves_fit_their_parameters_jointly() -> None:
     assert result.errors["leak_tau"] > 0
 
 
+def test_confounded_frequency_has_nan_error_and_no_reliability() -> None:
+    rabi, nuisance = planted_model("rabi")
+    model = CycleModel(
+        lambda x, p: rabi.curve(x, {"frequency": p["frequency"] + p["offset"]}),
+        ("frequency", "offset"),
+        ((0.1, 2.0), (-0.5, 0.5)),
+        oscillation_frequency="frequency",
+        derivative=lambda x, p: np.repeat(
+            rabi.derivative(x, {"frequency": p["frequency"] + p["offset"]}),
+            2,
+            axis=2,
+        ),
+    )
+    sums = exact_sums(rabi, nuisance)
+
+    result = fit_cycle(sums, model, {"frequency": 1.2, "offset": 0.0})
+
+    # Only the sum is identified; neither coordinate has a standard error.
+    assert np.isnan(result.errors["frequency"])
+    assert np.isnan(result.errors["offset"])
+    assert result.reliability is None
+    np.testing.assert_allclose(
+        result.parameters["frequency"] + result.parameters["offset"], 1.2, rtol=1e-5
+    )
+    # Curve-coordinate ambiguity does not remove pointwise population information.
+    assert np.isfinite(result.population_errors).all()
+    assert (result.population_errors > 0).all()
+
+
+def test_endpoint_rank_loss_preserves_frequency_and_population_errors() -> None:
+    rabi, nuisance = planted_model("rabi")
+
+    def curve(x, p):
+        values = rabi.curve(x, p).copy()
+        values[:, 2] = 0.5
+        return values
+
+    def derivative(x, p):
+        jacobian = rabi.derivative(x, p).copy()
+        jacobian[:, 2] = 0.0
+        return jacobian
+
+    # Only the midpoint of the third row's endpoints is constrained.
+    model = replace(rabi, curve=curve, derivative=derivative)
+    sums = exact_sums(model, nuisance)
+
+    result = fit_cycle(sums, model, {"frequency": 1.2})
+
+    np.testing.assert_allclose(result.parameters["frequency"], 1.2, rtol=1e-5)
+    assert 0 < result.errors["frequency"] < np.inf
+    assert result.reliability == pytest.approx(
+        1 / (2 * np.pi * np.ptp(sums.axis) * result.errors["frequency"])
+    )
+    assert np.isfinite(result.population_errors).all()
+    assert (result.population_errors > 0).all()
+    distances = np.sum(
+        (nuisance.centers[:, None] - result.nuisances.centers[None]) ** 2, axis=2
+    )
+    order = linear_sum_assignment(distances)[1]
+    np.testing.assert_allclose(
+        result.populations[:, order],
+        model.populations(sums.axis, {"frequency": 1.2}, nuisance),
+        atol=1e-5,
+    )
+
+
 def test_wald_weights_do_not_use_pooled_measured_products() -> None:
     model, nuisance = planted_model()
     sums = exact_sums(model, nuisance)
