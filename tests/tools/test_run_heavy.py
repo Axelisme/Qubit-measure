@@ -390,11 +390,15 @@ def test_postlaunch_cleanup_failure_still_emits_receipt(
         monkeypatch.setattr(Path, "iterdir", scan)
     elif failure == "affinity-restore":
         original_affinity = os.sched_setaffinity
-        caller_affinity = os.sched_getaffinity(0)
+        calls: list[set[int]] = []
 
         def restore_affinity(pid: int, mask: list[int] | set[int]) -> None:
             original_affinity(pid, mask)
-            if set(mask) == caller_affinity:
+            calls.append(set(mask))
+            # The runner sets the slot CPUs, launches, then restores the caller's
+            # mask; fail the restore by call order, since the caller may already
+            # be pinned to the same CPUs as the slot.
+            if len(calls) == 2:
                 raise OSError("cleanup unavailable")
 
         monkeypatch.setattr(os, "sched_setaffinity", restore_affinity)
