@@ -120,7 +120,7 @@ fig.show()
 作者直接在 axes 設 ticks、顏色與標題。掃描歷史線由作者在另一個 axes 建立並更新。
 Reference marker 與動畫錄影不在這些工具中。
 
-Singleshot 的分類 IQ／區域圖在 `singleshot/plot.py`。
+Singleshot Check 在自己的 `analyze` 畫分類 IQ／區域圖；GE 的專屬分類圖在 `singleshot/ge/analysis.py`。
 Amp／Len Rabi 在各自的 core 畫 joint-fit population、histogram 與 confusion 圖，
 分析計算仍由原分析 owner 負責。
 
