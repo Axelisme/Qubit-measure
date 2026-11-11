@@ -230,11 +230,13 @@ def main(
     session_factory: SessionFactory = open_session,
     workloads: list[Workload] | None = None,
 ) -> int:
-    """Write a complete JSON run; return nonzero on acquire or comparison failure.
+    """Write a complete JSON run; return nonzero on benchmark or output failure.
 
     argv is CLI arguments without the executable. Optional workloads/factory
-    replace synthetic acquisition inputs for in-process callers. Failures leave
-    the requested output untouched and print their cause to stderr.
+    replace synthetic acquisition inputs for in-process callers. Setup, acquire
+    and comparison failures leave the requested output untouched. Output write
+    failures return nonzero but may modify the destination or leave a partial
+    file. These failures print their cause to stderr.
     """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -267,7 +269,7 @@ def main(
             result.model_dump_json(indent=2) + "\n", encoding="utf-8"
         )
     except Exception:
-        # CLI isolation: preserve the cause and never publish a partial run.
+        # CLI isolation: preserve the cause; output writes can leave partial files.
         logging.exception("Benchmark failed; no complete result was written")
         return 1
     return 0

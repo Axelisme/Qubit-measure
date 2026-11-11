@@ -11,6 +11,26 @@ from benchmark_simulator import (
     run_benchmarks,
     run_workload,
 )
+from benchmark_simulator_workloads import make_workloads, open_session
+
+
+@pytest.mark.parametrize(
+    ("supported_name", "unsupported_name"),
+    [
+        ("single_repeated_shaped", "single_typo"),
+        ("ftf_overlap_shaped", "ftf_typo"),
+    ],
+)
+def test_open_session_rejects_unknown_name_with_supported_prefix(
+    supported_name, unsupported_name
+):
+    workload = next(item for item in make_workloads() if item.name == supported_name)
+    renamed = workload.model_copy(update={"name": unsupported_name})
+    with (
+        pytest.raises(ValueError, match=f"unsupported workload: {unsupported_name}"),
+        open_session(renamed),
+    ):
+        pass
 
 
 @pytest.fixture

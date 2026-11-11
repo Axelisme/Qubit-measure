@@ -502,10 +502,13 @@ def _program(workload: Workload, builder: TimelineBuilder) -> TimelineProgramV2:
 def open_session(workload: Workload) -> Generator[AcquireSession]:
     """Build a fresh synthetic environment and compiled program, yield acquire/clear.
 
-    Supported names come from make_workloads. No warmup runs here. Closing always
-    releases the numeric backend and fake devices, including failed acquires.
-    Configuration, compilation and acquisition errors propagate to the caller.
+    Supported names come from make_workloads; other names raise ValueError before
+    environment construction. No warmup runs here. Closing always releases the
+    numeric backend and fake devices, including failed acquires. Configuration,
+    compilation and acquisition errors propagate to the caller.
     """
+    if workload.name not in {item.name for item in make_workloads()}:
+        raise ValueError(f"unsupported workload: {workload.name}")
     board = workload.configuration["board"]
     if not isinstance(board, dict):
         raise ValueError("board must be a mapping")
