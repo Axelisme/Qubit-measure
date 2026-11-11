@@ -293,6 +293,31 @@ def bounded_least_squares(
     *,
     stopping_tolerance: float = 1e-9,
 ) -> OptimizeResult:
+    """Minimize the sum of squared residuals within coordinate bounds using SciPy.
+
+    fun maps a parameter vector of shape (n,) to residuals of shape (m,).
+    start is a finite initial parameter vector of shape (n,) within bounds.
+    jac maps the same parameter vector to the residual Jacobian of shape
+    (m, n). bounds contains lower and upper arrays of shape (n,), with each
+    lower bound strictly below its upper bound; use infinities for unbounded
+    coordinates. budget is a positive maximum number of fun evaluations,
+    passed as max_nfev, not an iteration limit.
+
+    stopping_tolerance sets both ftol (relative cost-change tolerance) and
+    xtol (step-size tolerance), defaulting to 1e-9. The gradient tolerance
+    gtol stays fixed at 1e-9. SciPy uses x_scale="jac" to scale coordinates
+    by inverse Jacobian column norms and its default trust-region reflective
+    method. Changing stopping_tolerance does not change gtol or the budget.
+
+    Return SciPy's OptimizeResult with the final x (n,), fun (m,), jac
+    (m, n), cost, status, success and message. If SciPy stops because the
+    evaluation budget is exhausted, it returns status=0 and success=False
+    rather than raising here. Callers must inspect the result to decide
+    whether to accept it. SciPy input-validation errors (such as ValueError
+    for invalid bounds or nonfinite initial residuals) and exceptions from
+    callbacks or numerical operations (including numpy.linalg.LinAlgError)
+    propagate without being caught.
+    """
     # Without installed scipy stubs pyright infers jac: str from the '2-point' default.
     analytic: Any = jac
     return least_squares(
