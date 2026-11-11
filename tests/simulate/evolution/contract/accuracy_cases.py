@@ -81,12 +81,87 @@ def drive_track(
     )
 
 
+def linear_drive_model() -> SecularModel:
+    """Return a two-level 0.6 GHz model with a noncircular X-only drive and bath.
+
+    The 2 MHz matrix element keeps omitted counterrotating terms small without
+    making them vanish as they would for a circularly polarized drive.
+    """
+    x = np.array([[0, 0.002], [0.002, 0]], complex)
+    return SecularModel(
+        (0,),
+        "accuracy-linear-drive",
+        np.array([0.0, 0.6]),
+        np.eye(2, dtype=complex),
+        (SecularDrive("drive", x, np.zeros_like(x)),),
+        np.array([[0.0, 1e-5], [0.0, 0.0]]),
+        (np.ones((2, 2)) - np.eye(2)) * 1e-5,
+    )
+
+
+def adiabatic_case() -> AccuracyCase:
+    """Build an undriven 8 ns flux ramp with a weak, noncommuting flux term.
+
+    The ramp starts in the DC basis. Its small motion keeps nonadiabatic
+    transitions small; the nonzero bath still tests full density coherences.
+    """
+    model = linear_drive_model()
+    source = coherent_source(model)
+    expansion = FluxExpansion(
+        np.diag(model.energies_ghz).astype(complex),
+        (FluxTerm(0, "sin_2pi", model.drives[0].in_phase_ghz * 0.1),),
+    )
+    source = ModelSource(source.initial_density, source.model, expansion)
+    batch = replace(
+        timeline(2, 8.0),
+        flux_waveform=FluxWaveform(
+            np.array([0, 3, 6]),
+            np.tile([0.0, 3.0, 8.0], 2),
+            np.tile([[0.0], [0.01], [0.02]], (2, 1)),
+        ),
+    )
+    return AccuracyCase("adiabatic_ramp", source, batch, ("adiabatic_map",))
+
+
+def linear_case(*, shaped: bool) -> AccuracyCase:
+    """Build a coherent 24 ns X-only drive, sampled if shaped, else constant.
+
+    Sampled controls exercise gate, Sambe and period playback. Constant controls
+    exercise single-tone RWA. Both include decay and off-grid carrier phases.
+    """
+    batch = timeline(2, 24.0)
+    # Real smooth samples satisfy the single-tone gate's slope/curvature
+    # domain; X-only polarization still has counterrotating dynamics.
+    envelope = (
+        EnvelopeSpec(
+            "sampled", np.array([0.8, 1.0, 0.8], complex), np.array([0.0, 12.0, 24.0])
+        )
+        if shaped
+        else EnvelopeSpec("constant")
+    )
+    batch = replace(
+        batch, tracks=(drive_track(batch, envelope, frequency=0.6, gain=0.08),)
+    )
+    families = (
+        ("single_tone_gate", "shaped_sambe", "period_table")
+        if shaped
+        else ("single_tone_rwa",)
+    )
+    return AccuracyCase(
+        "linear_shaped" if shaped else "linear_plateau",
+        coherent_source(linear_drive_model()),
+        batch,
+        families,
+    )
+
+
 def accuracy_case(name: str) -> AccuracyCase:
     """Build an isolated matrix input; unknown names raise ValueError.
 
     Names: idle_coherence, weak_plateau, strong_plateau, shaped_complex,
-    two_carriers, continuous_flux and joint_gate_inventory. Each call owns a
-    fresh source/history. The joint gate case keeps the full 20-point inventory.
+    two_carriers, continuous_flux, joint_gate_inventory, low_carrier,
+    linear_shaped, linear_plateau, nearby_carriers and adiabatic_ramp. Each call
+    owns a fresh source/history. The joint gate keeps its 20-point inventory.
     """
     model = synthetic_model()
     batch = timeline(2, 1.5)
@@ -145,6 +220,28 @@ def accuracy_case(name: str) -> AccuracyCase:
             batch, tracks=(drive_track(batch, shaped),), flux_waveform=waveform
         )
         return AccuracyCase(name, source, batch, ("flux_dop853",))
+    elif name == "low_carrier":
+        model = linear_drive_model()
+        batch = timeline(2, 8.0)
+        batch = replace(
+            batch, tracks=(drive_track(batch, constant, frequency=0.02, gain=0.2),)
+        )
+        families = ("slow_envelope",)
+    elif name in ("linear_shaped", "linear_plateau"):
+        return linear_case(shaped=name == "linear_shaped")
+    elif name == "nearby_carriers":
+        model = linear_drive_model()
+        batch = timeline(2, 6.5)
+        batch = replace(
+            batch,
+            tracks=(
+                drive_track(batch, constant, frequency=0.6, gain=0.08),
+                drive_track(batch, constant, frequency=0.63, gain=0.05),
+            ),
+        )
+        families = ("common_frame",)
+    elif name == "adiabatic_ramp":
+        return adiabatic_case()
     elif name == "joint_gate_inventory":
         a, b = np.zeros((4, 4), complex), np.zeros((4, 4), complex)
         a[0, 2] = a[1, 3] = 0.002

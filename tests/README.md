@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-11-12，Evolution 精度矩陣與誤差表
+**Last updated:** 2026-11-12，17 個 family 的 Evolution 精度矩陣
 
 **讀者：** framework-dev、agent。查閱測試的 owner、fixture、執行方式與搬遷驗收契約。
 
@@ -147,7 +147,20 @@ uv run --directory <worktree> --no-sync -- \
 
 矩陣用 `Engine(1, families=(family,)).evolve(...)` 固定可用 family，
 再從 `paths.segments_by_kernel` 確認實際路徑。
-十個既有共用契約 family 都有 pinned 案例。
+17 個 family 都有 pinned 案例，預期 family 沒有執行任何 segment 時獨立失敗。
+Guard 拒絕輸入會讓測試失敗，不會產生誤差觀察值。
+新增案例使用兩能階模型，包含完整 complex coherence、relaxation 與 dephasing。
+
+| 案例 | 固定的 family | 輸入 |
+| --- | --- | --- |
+| `low_carrier` | `slow_envelope` | 8 ns、20 MHz constant tone |
+| `linear_shaped` | `single_tone_gate`、`shaped_sambe`、`period_table` | 24 ns、600 MHz、實數 sampled envelope、X-only 非圓形 drive |
+| `linear_plateau` | `single_tone_rwa` | 24 ns、600 MHz constant tone、X-only drive |
+| `nearby_carriers` | `common_frame` | 6.5 ns、600 與 630 MHz 的同 port constant tones |
+| `adiabatic_ramp` | `adiabatic_map` | 8 ns、無 tone、弱非對易 flux ramp |
+
+每個案例也保留預設選路的空歷史與暖歷史驗收。
+`joint_gate_inventory` 仍使用完整 20 點 inventory。
 多段案例量整條 timeline 的最終誤差。混合路徑的每個 family 列出同一個最終誤差，
 不是各段的局部誤差。
 歷史案例另外驗證八點 inventory 的結果，並比較兩點輸入在歷史改變前後的實際路徑。

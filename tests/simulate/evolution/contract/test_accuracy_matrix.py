@@ -19,6 +19,11 @@ CASE_NAMES = (
     "two_carriers",
     "continuous_flux",
     "joint_gate_inventory",
+    "low_carrier",
+    "linear_shaped",
+    "linear_plateau",
+    "nearby_carriers",
+    "adiabatic_ramp",
 )
 PINNED = tuple(
     pytest.param(name, family, id=f"{name}-{family}")
