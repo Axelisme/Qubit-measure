@@ -101,7 +101,7 @@ F 不代表 circle 的 other。
 沒有捕捉的 library 目標或非更新欄位與實測 readout 不符時明確失敗，不自動建立或猜測目標。
 Training confusion 包含準備污染，correction 回到 preparation-label 座標，保留負值與大於 1 的結果。
 這不是 pure energy-state population 或 readout fidelity。
-STIRAP 與單頻 g↔f Raman 從該次 run 保存的 readout cfg 要求 centroid3。
+STIRAP 的 [delay](../../zcu_lab/v2/twotone/stirap/delay/guide.md)、[amplitude](../../zcu_lab/v2/twotone/stirap/amplitude/guide.md)、[detuning](../../zcu_lab/v2/twotone/stirap/detuning/guide.md) 與單頻 [g↔f Raman](../../zcu_lab/v2/twotone/raman_gf/guide.md) 從該次 run 保存的 readout cfg 要求 centroid3。
 缺少 classifier、型別不符或未知 ADC 明確失敗，不退回 circle、不從 live library 補值、不讀 simulator truth。
 校準沿 Spec、native cfg、library 與 data.h5 的 run cfg 保存，不另建 experiment calibration storage。
 Reference 分析與 centroid3 processor 共用 `utils.shot_classification` 的最近中心規則。

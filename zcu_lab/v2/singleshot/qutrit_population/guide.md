@@ -49,7 +49,10 @@ It does not create a missing library target or choose one from the current Form.
 Analyze reports a failure if the Run had no captured target, the slot is unresolved, or any non-classifier setting differs from the captured library module.
 Save and bind the intended settings, then Run again to fix those failures.
 
-Reopen a consumer after Apply to capture the new library calibration.
+After Apply, Open or Reset [STIRAP delay](../../twotone/stirap/delay/guide.md),
+[STIRAP amplitude](../../twotone/stirap/amplitude/guide.md),
+[STIRAP detuning](../../twotone/stirap/detuning/guide.md) or
+[Raman](../../twotone/raman_gf/guide.md) to capture the new library calibration.
 The classifier uses Euclidean nearest centers with no rejection region. Exact ties choose g, then e, then f.
 Consumers build a program, then use `shot_sums(prog, [Classify("readout")])`
 with the saved centroid3 calibration and `acquire_summed` to collect `[g,e,f]` counts.
