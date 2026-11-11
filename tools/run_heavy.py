@@ -306,9 +306,8 @@ def _execute(
         except (OSError, subprocess.TimeoutExpired) as cleanup_error:
             print(f"run_heavy: cleanup failed: {cleanup_error}", file=sys.stderr)
     if code < 0:
-        code = 128 + abs(
-            code
-        )  # Popen encodes signal death as a negative signal number.
+        # Popen encodes signal death as a negative signal number.
+        code = 128 + abs(code)
     print(
         json.dumps(
             {
