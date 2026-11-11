@@ -91,7 +91,7 @@ class SpectroscopyCfg(ConfigBase):
     dc_unit: Annotated[
         Literal["A", "V", "native"], FieldMeta(label="DC source working unit")
     ] = "native"
-    dc_values: Annotated[
+    dc: Annotated[
         SweepCfg,
         FieldMeta(
             label="DC source values",
@@ -124,7 +124,7 @@ class SpectroscopyCfg(ConfigBase):
         if self.dc_device is not None:
             if not self.dc_device.strip():
                 raise ValueError("DC source must name a connected device or be None")
-            if not np.all(np.isfinite(sweep2array(self.dc_values))):
+            if not np.all(np.isfinite(sweep2array(self.dc))):
                 raise ValueError("DC source coordinates must be finite")
         return self
 
@@ -191,7 +191,7 @@ class SpectroscopyExp(Experiment[SpectroscopyResult, SpectroscopyCfg]):
             ),
             result_type=SpectroscopyResult,
             cfg_type=SpectroscopyCfg,
-            cfg_schema_version="5.0",
+            cfg_schema_version="6.0",
             tag="two_qubit/conditional_spectroscopy",
             result_builder=restore_result,
         )
@@ -209,9 +209,7 @@ class SpectroscopyExp(Experiment[SpectroscopyResult, SpectroscopyCfg]):
         validate_classifiers(config.readout, config.roles)
         frequencies = sweep2array(config.frequency)
         dc_values = (
-            np.array([0.0])
-            if config.dc_device is None
-            else sweep2array(config.dc_values)
+            np.array([0.0]) if config.dc_device is None else sweep2array(config.dc)
         )
         viewers = {}
         for d, dc in enumerate(dc_values):
@@ -331,7 +329,7 @@ class SpectroscopyExp(Experiment[SpectroscopyResult, SpectroscopyCfg]):
         cfg = source.cfg
         if cfg is None:
             raise ValueError("Spectroscopy analysis requires saved cfg")
-        dc = np.array([0.0]) if cfg.dc_device is None else sweep2array(cfg.dc_values)
+        dc = np.array([0.0]) if cfg.dc_device is None else sweep2array(cfg.dc)
         frequencies = sweep2array(cfg.frequency)
         if (
             not np.array_equal(data.dc_values, dc)

@@ -2,6 +2,8 @@
 
 **Readers:** operator, agent. Run paired two-qubit RB and CZ-interleaved RB through the GUI or MCP and interpret their error estimates.
 
+Cfg sweep fields use `depth` / `seed`. This experiment uses cfg schema 5.0. Loading a run from an older major version retains Result and metadata, sets cfg to None and emits `CfgUnavailableWarning`. These old runs cannot be reanalyzed. No cfg migration or field alias is provided.
+
 **Last updated:** 2026-10-31
 
 After changing the parameter source, use Reset to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Reset can overwrite unsaved inputs.
@@ -10,7 +12,7 @@ After changing the parameter source, use Reset to recapture initial values. Refr
 
 Both Forms list reset, X90, dual-line drive and mux readout first.
 Captured roles and the phase pair follow. The host scan inputs appear as outer
-`depths`, then inner `seeds`. Acquisition settings come last.
+`depth`, then inner `seed`. Acquisition settings come last.
 
 Select `two_qubit/rb` after calibrating the F1/F2 X90 pulses, complete mux readout,
 two charge-line CZ pulses and their local-Z corrections. Bind scalar aliases
@@ -46,8 +48,8 @@ sequence construction. The heralded version jointly fits gg and ee return surviv
 
 ## Sequences and cost
 
-`depths` is an increasing list of distinct nonnegative Clifford counts.
-`seeds` is a list of distinct nonnegative 31-bit integers. Each integer is the
+`depth` is an increasing list of distinct nonnegative Clifford counts.
+`seed` is a list of distinct nonnegative 31-bit integers. Each integer is the
 complete random-sequence identity. Keep these values with the data.
 Each seed independently defines its random sequence. Reusing a
 seed at shallower depths keeps the same random Clifford prefix.
