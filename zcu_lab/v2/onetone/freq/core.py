@@ -7,11 +7,12 @@ from typing import Annotated, Any, ClassVar, Literal
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import model_validator
+from zcu_tools.analysis.fitting import HangerModel, TransmissionModel
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.experiment.v2.runtime.schedule import Schedule
+from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
@@ -26,8 +27,8 @@ from zcu_lab.v2.onetone._shared import (
 )
 from zcu_lab.v2.onetone._shared import (
     linear_freqs,
-    spectrum_buffer,
 )
+from zcu_lab.v2.support import live_line
 from zcu_lab.v2.support.resonator import (
     ResonanceOptions as FreqAnalyzeOptions,
 )
@@ -194,17 +195,24 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         soccfg = context.soccfg
         if cfg.sampling_mode == "linear":
             freqs = linear_freqs(cfg.freq, cfg.readout, context=context)
-        elif cfg.sampling_mode == "homophasal":
+        else:
             params = cfg.homophasal
             if params is None:
                 raise ValueError("homophasal sampling requires fit parameters")
             freqs = homophasal_sweep2array(
                 cfg.freq, params, self._round_info(cfg, soccfg)
             )
-        else:
-            raise ValueError(f"Invalid sampling_mode: {cfg.sampling_mode}")
 
-        signals = spectrum_buffer(freqs, plots=context.plots)
+        fig, ax = context.plots.subplots(num="measurement")
+        ax.set(xlabel="Frequency (MHz)", ylabel="Amplitude")
+        line = live_line(ax)
+
+        @context.plots.on_plot_thread
+        def update(data):
+            return line.set(freqs, np.abs(data))
+
+        fig.show()
+        signals = SignalBuffer((len(freqs),), on_update=update)
         with Schedule(signals, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 context.soccfg,
@@ -230,7 +238,28 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         plots: Plots,
     ) -> FreqAnalysis:
         fig, _ = plots.subplots(num="fit", figsize=(9, 8))
-        answer = fit_resonance(source.result.freqs, source.result.signals, options, fig)
+        answer = fit_resonance(source.result.freqs, source.result.signals, options)
+        freqs, signals = source.result.freqs[1:-1], source.result.signals[1:-1]
+        params = answer.params
+        fig.clear()
+        if "Qc" in params:
+            HangerModel.visualize_fit(
+                freqs,
+                signals,
+                params,
+                figure=fig,
+                fit_bg_amp_slope=options.fit_bg_amp_slope,
+                fit_bg_phase_curvature=options.fit_bg_phase_curvature,
+            )
+        else:
+            TransmissionModel.visualize_fit(
+                freqs,
+                signals,
+                params,
+                figure=fig,
+                fit_bg_amp_slope=options.fit_bg_amp_slope,
+                fit_bg_phase_curvature=options.fit_bg_phase_curvature,
+            )
         return FreqAnalysis(
             freq=answer.freq, fwhm=answer.fwhm, params=dict(answer.params)
         )

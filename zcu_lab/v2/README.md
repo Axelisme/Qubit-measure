@@ -2,7 +2,7 @@
 
 **讀者：** lab-author、agent。查找實驗的檔案分工、作者契約與各家族入口。
 
-**Last updated:** 2026-11-12，cycle 即時圖由各實驗建立與更新
+**Last updated:** 2026-11-12，onetone 家族各自持有圖與分析選項
 
 先從 [tutorial](../tutorial/README.md) 新增實驗，再按下列入口查契約與操作。
 實驗定義改動的驗收方式與命令範例見 [離線驗收](../README.md#實驗定義的離線驗收)。
@@ -132,8 +132,8 @@ Lookback 只有 rounds，初值為 10，core 固定 reps=1。
 Mux twotone spectrum 的 relax_delay 初值固定為 1.0 µs，不取 captured T1。
 
 `onetone/range_find` 使用普通 pulse readout 的 generator 與 ADC 硬體掃絕對 MHz。
-它與 `onetone/freq` linear 共用純 core cfg、頻率格點與繪圖 buffer。
-兩個 core 的 `run` 各自列出 reset → PulseReadout → declare_sweep → acquire 序列。
+它與 `onetone/freq` linear 共用純 core cfg 與頻率格點。
+兩個 core 的 `run` 各自列出 reset → PulseReadout → declare_sweep → acquire 序列，並建立及更新自己的圖。
 Raw 是一維頻率與 complex IQ。
 單一 primary 入口為 Interactive，靜態找谷只提供初始猜測。預設不平滑，以 depth / FWHM 排序，
 剔除超過 25 MHz 的寬谷。分析名單只在 Analyze 參數，不進 cfg 或量測表單。
@@ -154,7 +154,11 @@ ADC window 固定填入 1.0 us，完整 group 的 kappa 都有效時再推導其
 `participants` 是非空、唯一的原始整數 index list，按輸入順序量測。Open／Reset 將 alias `$participants` 的名稱依 `$mux.resonators` 位置轉成 indices；缺列、未綁或空清單預設全部。之後改 aliases 不更新現有輸入，需 Reset 或重新 Open。
 Lab 將 subset 交 program，不改完整 cfg。
 RunRecord 與 native cfg restore 保留完整 readout、labels 及 selection，不以目前表單補歷史資料。
-Adapter 提供 K 條 active live 曲線及 K 張 `fit_i` 圖，i 是原始 tone 序號。FIT 共用 onetone/freq 的模型與 delay 選項，逐 tone 隔離數值失敗。沒有歷史 cfg 時拒絕 FIT。
+Adapter 提供 K 條 active live 曲線及 K 張 `fit_i` 圖，i 是原始 tone 序號。
+Mux onetone 的 GUI 宣告自己的分析選項，包含模型與 delay 選擇。
+Core 呼叫 `support/resonator.py` 的 `fit_resonance` 做數值擬合，逐 tone 隔離數值失敗。
+Core 的 `analyze` 自己持有 Figure，選擇既有 lib model 的公開 renderer 畫擬合圖。
+沒有歷史 cfg 時拒絕 FIT。
 Module proposal 只更新成功 active tone 的頻率，保留其他完整設定，固定寫到 `$mux.readout.readout_rf`。
 單一參數從 Run／Load capture 的 `$mux.resonators` 依完整原始序號對應。Resonators 數不等於完整 tone 數時，保留 readout module 與 capture 可解析的 readout slot 提案，省略逐 resonator scalar，summary 顯示原因。
 MuxGroup 可不填 qubits 做 resonator bring-up，readout 各欄位仍可編輯，不增加完整 qubit 綁定門檻。

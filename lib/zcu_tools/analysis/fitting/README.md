@@ -1,6 +1,6 @@
 # zcu_tools.analysis.fitting
 
-**Last updated:** 2026-11-10
+**Last updated:** 2026-11-12
 
 **讀者：** lab-author。擬合模型、數值輸入、結果與失敗契約速查。
 
@@ -35,6 +35,12 @@ Prominence 須同時超過相對 ptp 門檻與 `min_snr * σ`。
 寬度只記窗內可觀察部分，不外推完整線寬。
 工具不選主峰、不擬合模型，也不決定候選能否用於校準。
 負向特徵須由 caller 先翻轉。Caller 決定投影方式、候選選擇、局部擬合與接受門檻。
+
+`spectrum.fit_spectrum` 以純數值 `SpectrumFitOptions` 選候選並擬合 lor／sinc。
+它回傳 `SpectrumFit` 的 MHz 中心、FWHM、誤差、完整候選與隔離區間的觀測／擬合陣列。
+預設選最顯著候選，或選最靠近指定中心的候選，區間以相鄰候選中心的中點為界。
+沒有合格候選或隔離後不足六點時拋出 `AnalysisFailed`；其他數值與 optimizer 失敗直接傳出。
+實驗各自宣告表單選項、轉換成數值 options，並在自己的 analyze 畫圖。
 
 ## Named fitting results
 
