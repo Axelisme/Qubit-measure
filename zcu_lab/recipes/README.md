@@ -184,6 +184,7 @@ QND 軸固定 0..1，但回報不裁切。Score 軸只按 score 值決定，不�
 | --- | --- | --- |
 | `mux_onetone` | `mux/onetone` | `participants` 收完整 readout 的原始整數 index，依清單順序執行，不以名稱查位置。`df:{start,stop}` 是共同 MHz offset，`n` 是共用點數。回覆每 tone 的 index、name、freq、kappa、fit_quality 與 identity 診斷。 |
 | `onetone_range_find` | `onetone/range_find` | 必填絕對 MHz `freq:{start,stop}`、`n` 與非空 `resonators` 名單。名稱數是預期峰數，初始依頻率升序配對，不進 acquisition cfg。未辨識的峰先用暫用名稱，例如 `["dip1"]`。單一 Interactive 入口預設不平滑、自動依名稱數求 prominence factor、FWHM 上限 25 MHz，以 depth / FWHM 排序。`min_separation` 為有限正數 MHz，初值 1 MHz，與名單經同一 Analyze updates 傳入。Recipe 等待 agent 經 `tab_interact` 調整或確認並送 done，才詢問 writeback，不自動送 done。回覆最終 name、freq、depth、fwhm、score、實際 `prominence_factor` 與 identity／writeback 診斷。手動非候選點的 metrics 為 null。 |
+| `stirap_detuning` | `twotone/stirap/detuning` | Pump 與 Stokes 各自選 gauss、cosine、drag 或 arb。`pump_start_mhz/pump_stop_mhz/pump_n` 掃內層 Pump，`stokes_start_mhz/stokes_stop_mhz/stokes_n` 掃外層 Stokes。兩軸都是加到量得載波的 MHz offset。`pump_waveform_ref/stokes_waveform_ref` 選 library key 或 `Inline: cosine` 等 Form 選項，overrides 設所選波形參數。完整 Run、Analyze、Save，不提出 writeback。 |
 | `stirap` | `twotone/stirap` | 必填 `scan_mode`：delay、amplitude 或 detuning。第一軸 `start/stop/n` 分別是 Stokes lead（us）、共同 gain scale（無單位）或 Pump detuning（MHz）；detuning 另用 `stokes_start_mhz/stokes_stop_mhz/stokes_n` 掃 Stokes 軸。操作者提供兩個 carrier，分析只用 Run 保存的 centroid3 readout。完整 Run、Analyze、Save，不提出 writeback。 |
 | `raman_gf` | `twotone/raman_gf` | `carrier_mhz` 由操作者提供，`waveform_asset` 指定已建立的 arbitrary envelope。`scan_mode` 沿用 frequency、area、frequency_area；detuning 使用 two-photon MHz，正值使單 carrier 增加一半 detuning。分析只用 Run 保存的 centroid3 readout，完整 Run、Analyze、Save，不提出 writeback。 |
 | `ro_optimize_chain_power` | `twotone/ro_optimize/chain_power` | 可省略 `gain_start`／`gain_stop`（a.u.）、`points`、`relax_delay`（us）、`reps`、`rounds`。每 shot 等待 K 後連讀 16 次，無 drive。回報最佳 `gain`、`score`、`score_error`、`qnd`、`qnd_error`、`correlation`、`amplification`、`mist`（M 診斷）。完整 Run、Analyze、Save，不提出 writeback。 |
@@ -199,7 +200,7 @@ QND 軸固定 0..1，但回報不裁切。Score 軸只按 score 值決定，不�
 
 有 writeback proposal 的流程先 Run、Analyze，再依各 recipe 的條件詢問寫回，只接受回答選定的候選，最後 Save。
 CPMG report 回傳 `t2_1_us`、`t2_1_err_us`、`gamma`、`gamma_err` 與 `fit_rows`。可加權列少於三列時四個擬合值為 null，仍保存圖與原始資料；分析失敗時 `fit_rows=0` 並附原因。
-STIRAP 與 Raman 沒有 writeback proposal，不詢問寫回。兩者回報 saved confusion matrix 的 condition number 與 minimum singular value；analysis summary 只保留 training confusion matrix 與這兩個診斷，逐點 g/e/f raw/corrected fractions 只畫在圖中。分析失敗仍 Save g/e/f counts。三態 reference 與 STIRAP 各 mode 不另加工具。
+STIRAP 與 Raman 沒有 writeback proposal，不詢問寫回。兩者回報 saved confusion matrix 的 condition number 與 minimum singular value；analysis summary 只保留 training confusion matrix 與這兩個診斷，逐點 g/e/f raw/corrected fractions 只畫在圖中。分析失敗仍 Save g/e/f counts。三態 reference 不另加工具。`stirap_detuning` 使用獨立 detuning adapter；合併的 `stirap` 暫時保留。
 四個 `mux_{onetone,twotone}_flux_{global,local}` recipe 共用 flat cfg 路徑，
 逐 participant 用原始 tone index 開啟 native picker，再分別詢問選定寫回。
 `df/n`、`sweeps/n` 與 `flux/flux_n`、`flux_sweeps/flux_n` 的形狀及預選線範例見
