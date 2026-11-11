@@ -245,7 +245,6 @@ class ConstructivePhaseExp(Experiment[ConstructivePhaseResult, ConstructivePhase
         self, config: ConstructivePhaseCfg, *, context: RunContext
     ) -> ConstructivePhaseResult:
         """Acquire all coordinates and durations in hardware, accumulating rounds."""
-        validate_classifiers(config.readout, config.roles)
         coordinates = sweep2array(config.relative_phase)
         durations = sweep2array(config.duration)
         fig, ax = context.plots.subplots(num="measurement")
@@ -320,7 +319,6 @@ class ConstructivePhaseExp(Experiment[ConstructivePhaseResult, ConstructivePhase
         self, config: ConstructivePhaseCfg, *, context: RunContext
     ) -> ConstructivePhaseResult:
         """Rebuild sampled envelopes per host duration; keep coordinates in hardware."""
-        validate_classifiers(config.readout, config.roles)
         coordinates = sweep2array(config.relative_phase)
         durations = sweep2array(config.duration)
         fig, ax = context.plots.subplots(num="measurement")

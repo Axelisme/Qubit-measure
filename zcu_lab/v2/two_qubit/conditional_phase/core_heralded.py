@@ -33,7 +33,7 @@ from zcu_tools.program.v2.modules import MuxReadout
 
 from zcu_lab.v2.support import live_line
 
-from .._sums import herald_probabilities, sigma, terminal_counts, validate_classifiers
+from .._sums import herald_probabilities, sigma, terminal_counts
 from .analysis import (
     ConditionalPhaseAnalysis,
     count_quadratures,
@@ -148,7 +148,6 @@ class ConditionalPhaseHeraldedExp(
         Counts retain spectator_states × quadrature × gate_count × frequency.
         cfg stays unchanged; acquisition accumulates rounds without averaging.
         """
-        validate_classifiers(config.readout, config.roles)
         frequencies = sweep2array(config.frequency)
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Common CZ frequency (MHz)", ylabel="Target sigma | herald (g,g)")

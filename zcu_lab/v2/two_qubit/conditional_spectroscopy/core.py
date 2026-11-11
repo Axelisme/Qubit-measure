@@ -206,7 +206,6 @@ class SpectroscopyExp(Experiment[SpectroscopyResult, SpectroscopyCfg]):
         after cooperative cancellation. Acquisition exceptions propagate unchanged.
         The stop signal carries only stop requests and reason text.
         """
-        validate_classifiers(config.readout, config.roles)
         frequencies = sweep2array(config.frequency)
         dc_values = (
             np.array([0.0]) if config.dc_device is None else sweep2array(config.dc)
