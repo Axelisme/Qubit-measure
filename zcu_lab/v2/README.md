@@ -2,7 +2,7 @@
 
 **讀者：** lab-author、agent。查找實驗的檔案分工、作者契約與各家族入口。
 
-**Last updated:** 2026-11-11，實驗寫法指南入口、cycle 與 Rπ 分析局部化
+**Last updated:** 2026-11-12，cycle 即時圖由各實驗建立與更新
 
 先從 [tutorial](../tutorial/README.md) 新增實驗，再按下列入口查契約與操作。
 實驗定義改動的驗收方式與命令範例見 [離線驗收](../README.md#實驗定義的離線驗收)。
@@ -68,7 +68,8 @@ Rπ 的 rpi_power／rpi_freq／rpi_length 各自在 `run()` 寫出掃描與 R→
 
 K-cycle 讀出鏈實驗各自在 `run()` 寫出 (D(x), 讀, 讀) × 8 的 `builder.repeat("cycle", BLOCKS_PER_CYCLE)` 迴圈；
 Amp/Len Rabi、Echo 與 Ramsey 的 core 直接呼叫 first-read 數值 fitter，明示 phase、skip 與 envelope 政策，並畫自己的 fit 與 populations 分析圖。
-[chain/\_cycle.py](chain/_cycle.py) 保留共用的 CycleSums 存檔變數、live 曲線、IQ 投影與檢查文字格式，模型留在 `zcu_tools.analysis.readout_chain.curve_models`。
+五個 core 各自在 `run()` 建立及更新 all-number 與 first-read 的 live 曲線。
+[chain/\_cycle.py](chain/_cycle.py) 保留共用的 CycleSums 存檔變數、IQ 投影與檢查文字格式，模型留在 `zcu_tools.analysis.readout_chain.curve_models`。
 
 `v2` 延續 program/v2 的版本脈絡，不表示 GUI framework 的第二版。通用 runtime、量化、SNR 與 tracker 工具留在 `zcu_tools.experiment.v2`。Core 不依賴 GUI，import-linter C15 檢查 core 到 GUI framework 的直接與間接依賴。
 

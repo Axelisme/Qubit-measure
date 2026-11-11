@@ -12,6 +12,8 @@ from dataclasses import dataclass
 from typing import Annotated, ClassVar
 
 import numpy as np
+from matplotlib import rcParams
+from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field
 from zcu_tools.analysis.fitting import fit_rabi
@@ -21,6 +23,7 @@ from zcu_tools.analysis.readout_chain import (
     CycleModel,
     CycleNuisances,
     CycleSums,
+    cycle_curves,
     fit_cycle,
     rabi_model,
 )
@@ -47,9 +50,9 @@ from zcu_lab.v2.chain._cycle import (
     checks_text,
     cycle_sums_variables,
     first_read_iq,
-    live_cycle_curves,
     restore_cycle_sums,
 )
+from zcu_lab.v2.support import live_line
 
 
 class ChainLenRabiCfg(ConfigBase):
@@ -151,7 +154,25 @@ class ChainLenRabiExp(Experiment[CycleSums, ChainLenRabiCfg]):
         lengths = sweep2array(
             cfg.length, "time", {"soccfg": context.soccfg, "gen_ch": cfg.qub_pulse.ch}
         )
-        update = live_cycle_curves(context.plots, lengths, xlabel="Pulse length (us)")
+        fig, ax = context.plots.subplots(num="measurement")
+        ax.set(xlabel="Pulse length (us)", ylabel="Projected signal (sigma)")
+        ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+        ax.grid()
+        all_line = live_line(ax)
+        first_line = live_line(ax)
+        ax.lines[0].set(label="all 65 numbers", markersize=rcParams["lines.markersize"])
+        ax.lines[1].set(label="first read", markersize=rcParams["lines.markersize"])
+        ax.legend()
+
+        @context.plots.on_plot_thread
+        def update(data: NDArray[np.float64]):
+            curves = cycle_curves(CycleSums.from_augmented(lengths, data))
+            return (
+                *all_line.set(lengths, curves.main_sigma),
+                *first_line.set(lengths, curves.first_read_sigma),
+            )
+
+        fig.show()
         augmented_sums = SignalBuffer(
             (len(lengths), AUGMENTED_SIZE, AUGMENTED_SIZE),
             dtype=np.float64,

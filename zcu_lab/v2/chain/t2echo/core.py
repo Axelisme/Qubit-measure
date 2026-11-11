@@ -13,6 +13,8 @@ from dataclasses import dataclass
 from typing import Annotated, ClassVar
 
 import numpy as np
+from matplotlib import rcParams
+from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field
 from zcu_tools.analysis.fitting import fit_decay
@@ -22,6 +24,7 @@ from zcu_tools.analysis.readout_chain import (
     CycleModel,
     CycleNuisances,
     CycleSums,
+    cycle_curves,
     fit_cycle,
     t2_echo_model,
 )
@@ -48,9 +51,9 @@ from zcu_lab.v2.chain._cycle import (
     checks_text,
     cycle_sums_variables,
     first_read_iq,
-    live_cycle_curves,
     restore_cycle_sums,
 )
+from zcu_lab.v2.support import live_line
 
 
 class ChainT2EchoCfg(ConfigBase):
@@ -192,7 +195,25 @@ class ChainT2EchoExp(Experiment[CycleSums, ChainT2EchoCfg]):
         delays = sweep2array(
             cfg.delay, "time", {"soccfg": context.soccfg, "scaler": 0.5}
         )
-        update = live_cycle_curves(context.plots, delays, xlabel="Total delay (us)")
+        fig, ax = context.plots.subplots(num="measurement")
+        ax.set(xlabel="Total delay (us)", ylabel="Projected signal (sigma)")
+        ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+        ax.grid()
+        all_line = live_line(ax)
+        first_line = live_line(ax)
+        ax.lines[0].set(label="all 65 numbers", markersize=rcParams["lines.markersize"])
+        ax.lines[1].set(label="first read", markersize=rcParams["lines.markersize"])
+        ax.legend()
+
+        @context.plots.on_plot_thread
+        def update(data: NDArray[np.float64]):
+            curves = cycle_curves(CycleSums.from_augmented(delays, data))
+            return (
+                *all_line.set(delays, curves.main_sigma),
+                *first_line.set(delays, curves.first_read_sigma),
+            )
+
+        fig.show()
         augmented_sums = SignalBuffer(
             (len(delays), AUGMENTED_SIZE, AUGMENTED_SIZE),
             dtype=np.float64,
