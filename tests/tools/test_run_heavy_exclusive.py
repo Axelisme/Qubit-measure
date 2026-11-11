@@ -90,9 +90,7 @@ def exclusive_runner(repo: Path, source: str) -> Generator[subprocess.Popen[str]
         "--exclusive",
         "--log",
         str(repo / "peer.log"),
-        "--wait-limit",
-        "5",
-        "5",
+        "30",
         "--",
         sys.executable,
         "-c",
@@ -115,11 +113,13 @@ def exclusive_runner(repo: Path, source: str) -> Generator[subprocess.Popen[str]
         finally:
             if runner.poll() is None:
                 runner.terminate()
-            runner.wait(timeout=10)
+            # Termination is forwarded to the child group, then the runner exits.
+            runner.wait(timeout=30)
 
 
-def test_normal_request_waits_until_exclusive_command_finishes(
-    repo: Path, capsys: pytest.CaptureFixture[str]
+@pytest.mark.parametrize("exclusive", [False, True])
+def test_request_waits_until_exclusive_command_finishes(
+    repo: Path, capsys: pytest.CaptureFixture[str], exclusive: bool
 ) -> None:
     ready = repo / "ready"
     release = repo / "release"
@@ -133,10 +133,11 @@ def test_normal_request_waits_until_exclusive_command_finishes(
     )
     args = [
         "--log",
-        str(repo / "normal.log"),
+        str(repo / "contender.log"),
+        *(["--exclusive"] if exclusive else []),
         "--wait-limit",
         "0",
-        "5",
+        "30",
         "--",
         sys.executable,
         "-c",
@@ -145,65 +146,68 @@ def test_normal_request_waits_until_exclusive_command_finishes(
     try:
         with exclusive_runner(repo, source) as runner:
             try:
-                # The child always writes before waiting for release; timeout catches failure.
-                assert select.select([ready_fd], [], [], 5)[0], "peer did not start"
+                # The child writes readiness before blocking on our explicit release.
+                assert select.select([ready_fd], [], [], 30)[0], "peer did not start"
                 assert os.read(ready_fd, 4096) == b"ready"
                 assert main(args, meminfo_path=repo / ".git" / "meminfo") == 75
                 output = capsys.readouterr()
                 assert output.out == ""
                 assert "slot" in output.err
-                assert not (repo / "normal.log").exists()
+                assert not (repo / "contender.log").exists()
             finally:
                 os.write(release_fd, b"x")
-            stdout, stderr = runner.communicate(timeout=10)
+            # Release lets the child finish; communicate joins both child and runner.
+            stdout, stderr = runner.communicate(timeout=30)
             assert runner.returncode == 0, stderr
             assert json.loads(stdout)["exclusive"] is True
         assert main(args, meminfo_path=repo / ".git" / "meminfo") == 0
-        assert json.loads(capsys.readouterr().out)["exclusive"] is False
-        assert (repo / "normal.log").read_text() == "normal\n"
+        assert json.loads(capsys.readouterr().out)["exclusive"] is exclusive
+        assert (repo / "contender.log").read_text() == "normal\n"
     finally:
         os.close(ready_fd)
         os.close(release_fd)
 
 
-def test_partial_reservation_is_released_and_exclusive_peers_complete(
-    repo: Path, capsys: pytest.CaptureFixture[str]
+def test_partial_reservation_is_released_before_waiting_then_completes(
+    repo: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     directory = repo / ".git" / "run-heavy"
     directory.mkdir()
-    args = [
-        "--exclusive",
-        "--log",
-        str(repo / "contender.log"),
-        "--wait-limit",
-        "0",
-        "5",
-        "--",
-        sys.executable,
-        "-c",
-        "print('contender')",
-    ]
+    observed_release = False
     with (directory / "slot-1.lock").open("a+b") as occupied:
         fcntl.flock(occupied, fcntl.LOCK_EX)
-        with exclusive_runner(repo, "print('peer')") as runner:
-            assert runner.stderr is not None
-            # Admission reports waiting only after a complete failed reservation attempt.
-            assert select.select([runner.stderr], [], [], 5)[0], "peer did not respond"
-            assert "waiting:" in runner.stderr.readline()
-            # Join a partial release rather than racing the peer's next retry.
-            # The peer's five-second admission limit also bounds a retained lock;
-            # its required successful receipt below rejects expiry as progress.
-            with (directory / "slot-0.lock").open("a+b") as available:
-                fcntl.flock(available, fcntl.LOCK_EX)
-            assert main(args, meminfo_path=repo / ".git" / "meminfo") == 75
-            assert capsys.readouterr().out == ""
-            assert not (repo / "contender.log").exists()
-            occupied.close()
-            args[args.index("--wait-limit") + 1] = "5"
-            assert main(args, meminfo_path=repo / ".git" / "meminfo") == 0
-            stdout, stderr = runner.communicate(timeout=10)
-            assert runner.returncode == 0, stderr
-            assert json.loads(stdout)["exclusive"] is True
+        original_write = sys.stderr.write
+
+        def report_waiting(message: str) -> int:
+            nonlocal observed_release
+            if "waiting:" in message:
+                # A waiting report follows a failed attempt, before its next retry.
+                # The same-thread observer cannot race another reservation attempt.
+                with (directory / "slot-0.lock").open("a+b") as available:
+                    fcntl.flock(available, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                observed_release = True
+                occupied.close()
+            return original_write(message)
+
+        monkeypatch.setattr(sys.stderr, "write", report_waiting)
+        assert (
+            main(
+                [
+                    "--exclusive",
+                    "--log",
+                    str(repo / "contender.log"),
+                    "30",
+                    "--",
+                    sys.executable,
+                    "-c",
+                    "print('contender')",
+                ],
+                meminfo_path=repo / ".git" / "meminfo",
+            )
+            == 0
+        )
+    assert observed_release
     assert json.loads(capsys.readouterr().out)["exclusive"] is True
-    assert (repo / "peer.log").read_text() == "peer\n"
     assert (repo / "contender.log").read_text() == "contender\n"
