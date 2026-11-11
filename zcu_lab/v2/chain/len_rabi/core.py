@@ -12,15 +12,20 @@ from dataclasses import dataclass
 from typing import Annotated, ClassVar
 
 import numpy as np
+from numpy.typing import NDArray
 from pydantic import Field
+from zcu_tools.analysis.fitting import fit_rabi
 from zcu_tools.analysis.readout_chain import (
     CycleCheck,
+    CycleFit,
+    CycleModel,
+    CycleNuisances,
     CycleSums,
     fit_cycle,
     rabi_model,
 )
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import Experiment, GroupedAxesSpec, VariableAxisSpec
+from zcu_tools.experiment import Experiment, GroupedAxesSpec, VariableAxisSpec, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
@@ -33,21 +38,17 @@ from zcu_tools.program.v2 import (
     TimelineBuilder,
     chain_cycle_sums,
 )
+from zcu_tools.utils.process import rotate2real
 
 from zcu_lab.v2.chain._cycle import (
     AUGMENTED_SIZE,
     BLOCKS_PER_CYCLE,
     READS_PER_CYCLE,
+    checks_text,
     cycle_sums_variables,
     first_read_iq,
     live_cycle_curves,
-    plot_cycle_fit,
     restore_cycle_sums,
-)
-from zcu_lab.v2.twotone.rabi.len_rabi.core import (
-    LenRabiAnalyzeOptions,
-    LenRabiExp,
-    LenRabiResult,
 )
 
 
@@ -160,7 +161,10 @@ class ChainLenRabiExp(Experiment[CycleSums, ChainLenRabiCfg]):
         # 2. One cycle per rep: K, then (Rabi pulse, read, read) eight times.
         with Schedule(augmented_sums, scope=context.scope) as sched:
             builder = TimelineBuilder(
-                context.soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
+                context.soccfg,
+                reps=cfg.reps,
+                initial_delay=cfg.relax_delay,
+                relax_delay=cfg.relax_delay,
             )
             length = builder.add_sweep("length", cfg.length)
             rabi_pulse = Pulse("qub_pulse", cfg.qub_pulse, length=length)
@@ -197,9 +201,9 @@ class ChainLenRabiExp(Experiment[CycleSums, ChainLenRabiCfg]):
     ) -> ChainLenRabiAnalysis:
         """Fit all 65 numbers with a Rabi curve, starting from the first read.
 
-        First fit the first read's mean IQ with the twotone/rabi/len_rabi fit
-        (decaying cosine), which also publishes its "fit" figure; its π length
-        x_π gives the start f = 1 / (2 x_π). Then fit_cycle fits the saved
+        First project the first read IQ and fit a decaying cosine with phase
+        fixed at zero. Publish "fit"; its π length x_π gives the start
+        f = 1 / (2 x_π). Then fit_cycle fits the saved
         sums with rabi_model and publishes "populations": per-length first-read
         populations with error bars and the fitted curves. Return the π length
         and f with Wald errors, R and the three checks. The source cfg may be
@@ -209,29 +213,26 @@ class ChainLenRabiExp(Experiment[CycleSums, ChainLenRabiCfg]):
         sums = source.result
         lengths = sums.axis
 
-        # 1. Starting value: the twotone length Rabi fit of the first read.
-        first_read = LenRabiResult(lengths=lengths, signals=first_read_iq(sums))
-        textbook = LenRabiExp().analyze(
-            RunRecord(cfg=None, result=first_read),
-            LenRabiAnalyzeOptions(),
-            plots=plots,
-        )
+        # 1. Seed from the first-read IQ using this experiment's fit policy.
+        first_read_pi_len = _fit_first_read(plots, lengths, first_read_iq(sums))
 
         # 2. Joint fit of all 65 numbers with the Rabi curve.
         model = rabi_model()
-        fit = fit_cycle(sums, model, {"f": 1 / (2 * textbook.pi_len)})
+        fit = fit_cycle(sums, model, {"f": 1 / (2 * first_read_pi_len)})
 
         # 3. The π length is half a period of sin²(π f x).
         f, f_err = fit.parameters["f"], fit.errors["f"]
         pi_len = 1 / (2 * f)
         pi_len_err = f_err / (2 * f**2)
-        plot_cycle_fit(
+        reliability_text = (
+            "unavailable" if fit.reliability is None else f"{fit.reliability:.2g}"
+        )
+        _plot_populations(
             plots,
             model,
             fit,
             lengths,
-            xlabel="Pulse length (us)",
-            result=f"pi length = {pi_len:.4g} ± {pi_len_err:.2g} us, R = {fit.reliability:.2g}",
+            result=f"pi length = {pi_len:.4g} ± {pi_len_err:.2g} us, R = {reliability_text}",
         )
 
         return ChainLenRabiAnalysis(
@@ -245,5 +246,111 @@ class ChainLenRabiExp(Experiment[CycleSums, ChainLenRabiCfg]):
             curve=fit.curve,
             J=fit.J,
             df=fit.df,
-            first_read_pi_len=textbook.pi_len,
+            first_read_pi_len=first_read_pi_len,
         )
+
+
+def _fit_first_read(
+    plots: Plots,
+    lengths: NDArray[np.float64],
+    signals: NDArray[np.complex128],
+) -> float:
+    """Fit and plot the first-read seed before the joint cycle analysis."""
+    lens = lengths
+    real_signals = rotate2real(signals).real
+
+    nan_mask = np.isnan(real_signals)
+    if np.all(nan_mask):
+        raise ValueError("All data are NaN!")
+
+    lens = lens[~nan_mask]
+    real_signals = real_signals[~nan_mask]
+
+    # Fit this length scan with the decaying envelope and fixed zero phase.
+    fit = fit_rabi(
+        lens,
+        real_signals,
+        decay=True,
+        init_phase=0.0,
+    )
+    pi_len, pi_len_err, pi2_len, pi2_len_err, freq, freq_err, y_fit = (
+        fit.pi_x,
+        fit.pi_x_err,
+        fit.pi2_x,
+        fit.pi2_x_err,
+        fit.freq,
+        fit.freq_err,
+        fit.curve,
+    )
+
+    # Show the oscillation and the fitted calibration lengths.
+    fig, ax = plots.subplots(num="fit", figsize=config.figsize)
+
+    ax.plot(lens, real_signals, label="meas", ls="-", marker="o", markersize=3)
+    ax.plot(lens, y_fit, label="fit")
+    ax.axvline(
+        pi_len,
+        ls="--",
+        c="red",
+        label=f"pi = {pi_len:.3g} ± {pi_len_err:.2g} μs",
+    )
+    ax.axvspan(pi_len - pi_len_err, pi_len + pi_len_err, color="red", alpha=0.2)
+    ax.axvline(
+        pi2_len,
+        ls="--",
+        c="red",
+        label=f"pi/2 = {pi2_len:.3g} ± {pi2_len_err:.2g} μs",
+    )
+    ax.axvspan(pi2_len - pi2_len_err, pi2_len + pi2_len_err, color="red", alpha=0.2)
+    ax.set_xlabel("Pulse length (μs)")
+    ax.set_ylabel("Signal Real (a.u.)")
+    ax.set_title(f"Rabi Oscillation (f={freq:.3f} ± {freq_err:.3f} MHz)")
+    ax.legend(loc=4)
+    ax.grid(True)
+
+    fig.tight_layout()
+
+    return float(pi_len)
+
+
+def _plot_populations(
+    plots: Plots,
+    model: CycleModel,
+    fit: CycleFit,
+    axis: NDArray[np.float64],
+    *,
+    result: str,
+) -> None:
+    """Publish "populations": per-point populations and the fitted curves.
+
+    Points are fit.populations with their Wald error bars; lines are the
+    model's populations at the fitted values on a dense axis, one color per
+    state. The legend gives each state's fitted thermal population, since
+    state labels are arbitrary.
+    result is the first title line, for example the fitted parameter.
+    """
+    dense = np.linspace(axis.min(), axis.max(), 400)
+    # fit_cycle always gives a CycleModel fit CycleNuisances.
+    assert isinstance(fit.nuisances, CycleNuisances)
+    fitted = model.populations(dense, fit.parameters, fit.nuisances)
+
+    fig, ax = plots.subplots(num="populations", figsize=config.figsize)
+    for state in range(3):
+        thermal = fit.nuisances.thermal[state]
+        ax.errorbar(
+            axis,
+            fit.populations[:, state],
+            yerr=fit.population_errors[:, state],
+            fmt="o",
+            markersize=3,
+            color=f"C{state}",
+            label=f"state {state}, thermal {thermal:.2f}",
+        )
+        ax.plot(dense, fitted[:, state], color=f"C{state}")
+    ax.set_xlabel("Pulse length (us)")
+    ax.set_ylabel("First-read population")
+    ax.set_title(f"{result}\n{checks_text(fit)}", fontsize=9)
+    # Outside the axes: the curves fill the whole population range.
+    ax.legend(fontsize=8, loc="upper left", bbox_to_anchor=(1.01, 1.0))
+    ax.grid(True)
+    fig.tight_layout()

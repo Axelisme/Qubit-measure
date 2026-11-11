@@ -13,16 +13,20 @@ from dataclasses import dataclass
 from typing import Annotated, ClassVar
 
 import numpy as np
+from numpy.typing import NDArray
 from pydantic import Field
+from zcu_tools.analysis.fitting import fit_decay
 from zcu_tools.analysis.readout_chain import (
     CycleCheck,
     CycleFit,
+    CycleModel,
+    CycleNuisances,
     CycleSums,
     fit_cycle,
     t2_echo_model,
 )
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import Experiment, GroupedAxesSpec, VariableAxisSpec
+from zcu_tools.experiment import Experiment, GroupedAxesSpec, VariableAxisSpec, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
@@ -35,21 +39,17 @@ from zcu_tools.program.v2 import (
     TimelineBuilder,
     chain_cycle_sums,
 )
+from zcu_tools.utils.process import rotate2real
 
 from zcu_lab.v2.chain._cycle import (
     AUGMENTED_SIZE,
     BLOCKS_PER_CYCLE,
     READS_PER_CYCLE,
+    checks_text,
     cycle_sums_variables,
     first_read_iq,
     live_cycle_curves,
-    plot_cycle_fit,
     restore_cycle_sums,
-)
-from zcu_lab.v2.twotone.time_domain.t2echo.core import (
-    T2EchoAnalyzeOptions,
-    T2EchoExp,
-    T2EchoResult,
 )
 
 
@@ -202,7 +202,10 @@ class ChainT2EchoExp(Experiment[CycleSums, ChainT2EchoCfg]):
         # 2. One cycle per rep: K, then (π/2, x/2, π, x/2, π/2, read, read) x 8.
         with Schedule(augmented_sums, scope=context.scope) as sched:
             builder = TimelineBuilder(
-                context.soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
+                context.soccfg,
+                reps=cfg.reps,
+                initial_delay=cfg.relax_delay,
+                relax_delay=cfg.relax_delay,
             )
             delay = builder.add_sweep("delay", cfg.delay)
             pi2_pulse = Pulse("pi2_pulse", cfg.pi2_pulse)
@@ -247,8 +250,8 @@ class ChainT2EchoExp(Experiment[CycleSums, ChainT2EchoCfg]):
     ) -> ChainT2EchoAnalysis:
         """Fit all 65 numbers with echo curves, starting from the first read.
 
-        First fit the first read's mean IQ with the twotone/t2echo decay fit
-        (which skips the first delay), which also publishes its "fit" figure;
+        First skip the first delay, project the first read IQ and fit a pure
+        decay. Publish "fit";
         its T2 echo starts both t2 and tf. Then fit_cycle fits the saved sums
         with t2_echo_model and publishes "populations": per-delay first-read
         populations with error bars and the fitted curves. Return t2 and tf
@@ -260,26 +263,20 @@ class ChainT2EchoExp(Experiment[CycleSums, ChainT2EchoCfg]):
         sums = source.result
         delays = sums.axis
 
-        # 1. Starting value: the twotone echo decay fit of the first read.
-        first_read = T2EchoResult(times=delays, signals=first_read_iq(sums))
-        textbook = T2EchoExp().analyze(
-            RunRecord(cfg=None, result=first_read),
-            T2EchoAnalyzeOptions(),
-            plots=plots,
-        )
+        # 1. Seed from the first-read IQ using this experiment's fit policy.
+        first_read_t2 = _fit_first_read(plots, delays, first_read_iq(sums))
 
         # 2. Joint fit of all 65 numbers; the third state starts from the same T2.
         model = t2_echo_model()
-        fit = fit_cycle(sums, model, {"t2": textbook.t2e, "tf": textbook.t2e})
+        fit = fit_cycle(sums, model, {"t2": first_read_t2, "tf": first_read_t2})
 
         # 3. g is the most populated state, which tells the g row from the third.
         t2, t2_err, tf, tf_err = _decay_times(fit)
-        plot_cycle_fit(
+        _plot_populations(
             plots,
             model,
             fit,
             delays,
-            xlabel="Total delay (us)",
             result=f"T2 echo = {t2:.4g} ± {t2_err:.2g} us, third state {tf:.3g} ± {tf_err:.2g} us",
         )
 
@@ -293,5 +290,73 @@ class ChainT2EchoExp(Experiment[CycleSums, ChainT2EchoCfg]):
             curve=fit.curve,
             J=fit.J,
             df=fit.df,
-            first_read_t2=textbook.t2e,
+            first_read_t2=first_read_t2,
         )
+
+
+def _fit_first_read(
+    plots: Plots,
+    delays: NDArray[np.float64],
+    signals: NDArray[np.complex128],
+) -> float:
+    """Fit and plot the first-read seed before the joint cycle analysis."""
+    # Echo excludes the first delay before projecting the IQ.
+    xs = delays[1:]
+    real_signals = rotate2real(signals[1:]).real
+    fit = fit_decay(xs, real_signals)
+    t2e, t2eerr, y_fit = fit.decay_time, fit.decay_time_err, fit.curve
+
+    fig, ax = plots.subplots(num="fit", figsize=config.figsize)
+    ax.plot(xs, real_signals, label="data", ls="-", marker="o", markersize=5)
+    ax.plot(xs, y_fit, label="fit", c="orange", zorder=1)
+    t2e_str = f"{t2e:.2f}us ± {t2eerr:.2f}us"
+    ax.set_title(r"$T_{2echo}$ decay = " + t2e_str, fontsize=14)
+    ax.set_xlabel("Delay Time (us)", fontsize=14)
+    ax.set_ylabel("Signal (a.u.)", fontsize=14)
+    ax.legend(loc="upper right")
+    ax.grid(True)
+    fig.tight_layout()
+    return float(t2e)
+
+
+def _plot_populations(
+    plots: Plots,
+    model: CycleModel,
+    fit: CycleFit,
+    axis: NDArray[np.float64],
+    *,
+    result: str,
+) -> None:
+    """Publish "populations": per-point populations and the fitted curves.
+
+    Points are fit.populations with their Wald error bars; lines are the
+    model's populations at the fitted values on a dense axis, one color per
+    state. The legend gives each state's fitted thermal population, since
+    state labels are arbitrary.
+    result is the first title line, for example the fitted parameter.
+    """
+    dense = np.linspace(axis.min(), axis.max(), 400)
+    # fit_cycle always gives a CycleModel fit CycleNuisances.
+    assert isinstance(fit.nuisances, CycleNuisances)
+    fitted = model.populations(dense, fit.parameters, fit.nuisances)
+
+    fig, ax = plots.subplots(num="populations", figsize=config.figsize)
+    for state in range(3):
+        thermal = fit.nuisances.thermal[state]
+        ax.errorbar(
+            axis,
+            fit.populations[:, state],
+            yerr=fit.population_errors[:, state],
+            fmt="o",
+            markersize=3,
+            color=f"C{state}",
+            label=f"state {state}, thermal {thermal:.2f}",
+        )
+        ax.plot(dense, fitted[:, state], color=f"C{state}")
+    ax.set_xlabel("Total delay (us)")
+    ax.set_ylabel("First-read population")
+    ax.set_title(f"{result}\n{checks_text(fit)}", fontsize=9)
+    # Outside the axes: the curves fill the whole population range.
+    ax.legend(fontsize=8, loc="upper left", bbox_to_anchor=(1.01, 1.0))
+    ax.grid(True)
+    fig.tight_layout()

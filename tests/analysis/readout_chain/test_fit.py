@@ -97,6 +97,10 @@ def test_exact_moments_recover_curve_and_joint_predictions(kind: str) -> None:
         assert fit.reliability is None
     assert fit.covariance.shape == (len(fit.parameter_names),) * 2
     assert fit.J < 1e-7
+    assert np.isfinite(fit.within_point.J)
+    assert fit.within_point.p is not None
+    assert np.isfinite(fit.sharing.J)
+    assert fit.sharing.J >= 0
     assert fit.sharing.p is None
     assert fit.curve.p is not None
     assert fit.populations.shape == fit.population_errors.shape == (9, 3)
@@ -167,6 +171,72 @@ def test_per_state_curves_fit_their_parameters_jointly() -> None:
     assert result.errors["leak_tau"] > 0
 
 
+def test_confounded_frequency_has_nan_error_and_no_reliability() -> None:
+    rabi, nuisance = planted_model("rabi")
+    model = CycleModel(
+        lambda x, p: rabi.curve(x, {"frequency": p["frequency"] + p["offset"]}),
+        ("frequency", "offset"),
+        ((0.1, 2.0), (-0.5, 0.5)),
+        oscillation_frequency="frequency",
+        derivative=lambda x, p: np.repeat(
+            rabi.derivative(x, {"frequency": p["frequency"] + p["offset"]}),
+            2,
+            axis=2,
+        ),
+    )
+    sums = exact_sums(rabi, nuisance)
+
+    result = fit_cycle(sums, model, {"frequency": 1.2, "offset": 0.0})
+
+    # Only the sum is identified; neither coordinate has a standard error.
+    assert np.isnan(result.errors["frequency"])
+    assert np.isnan(result.errors["offset"])
+    assert result.reliability is None
+    np.testing.assert_allclose(
+        result.parameters["frequency"] + result.parameters["offset"], 1.2, rtol=1e-5
+    )
+    # Curve-coordinate ambiguity does not remove pointwise population information.
+    assert np.isfinite(result.population_errors).all()
+    assert (result.population_errors > 0).all()
+
+
+def test_endpoint_rank_loss_preserves_frequency_and_population_errors() -> None:
+    rabi, nuisance = planted_model("rabi")
+
+    def curve(x, p):
+        values = rabi.curve(x, p).copy()
+        values[:, 2] = 0.5
+        return values
+
+    def derivative(x, p):
+        jacobian = rabi.derivative(x, p).copy()
+        jacobian[:, 2] = 0.0
+        return jacobian
+
+    # Only the midpoint of the third row's endpoints is constrained.
+    model = replace(rabi, curve=curve, derivative=derivative)
+    sums = exact_sums(model, nuisance)
+
+    result = fit_cycle(sums, model, {"frequency": 1.2})
+
+    np.testing.assert_allclose(result.parameters["frequency"], 1.2, rtol=1e-5)
+    assert 0 < result.errors["frequency"] < np.inf
+    assert result.reliability == pytest.approx(
+        1 / (2 * np.pi * np.ptp(sums.axis) * result.errors["frequency"])
+    )
+    assert np.isfinite(result.population_errors).all()
+    assert (result.population_errors > 0).all()
+    distances = np.sum(
+        (nuisance.centers[:, None] - result.nuisances.centers[None]) ** 2, axis=2
+    )
+    order = linear_sum_assignment(distances)[1]
+    np.testing.assert_allclose(
+        result.populations[:, order],
+        model.populations(sums.axis, {"frequency": 1.2}, nuisance),
+        atol=1e-5,
+    )
+
+
 def test_wald_weights_do_not_use_pooled_measured_products() -> None:
     model, nuisance = planted_model()
     sums = exact_sums(model, nuisance)
@@ -178,13 +248,24 @@ def test_wald_weights_do_not_use_pooled_measured_products() -> None:
     np.testing.assert_allclose(original.population_errors, changed.population_errors)
 
 
-@pytest.mark.slow
-@pytest.mark.parametrize("kind", ["t1", "rabi"])
-@pytest.mark.parametrize("contrast,count", [(1.76, 500), (0.176, 30000)])
-@pytest.mark.parametrize("seed", [761, 762, 763, 764])
-def test_fixed_seed_shot_wald_intervals_in_identifiable_regimes(
-    kind: str, contrast: float, count: int, seed: int
-) -> None:
+def test_three_point_fit_returns_finite_nested_checks() -> None:
+    model, nuisance = planted_model()
+    sums = sampled_sums(
+        model, nuisance, np.linspace(0.05, 3.0, 3), {"tau": 1.2}, 500, 761
+    )
+
+    result = fit_cycle(sums, model, {"tau": 1.1})
+
+    assert np.isfinite(result.within_point.J)
+    assert np.isfinite(result.sharing.J)
+    assert np.isfinite(result.curve.J)
+    assert result.within_point.p is not None
+    assert np.isfinite(result.within_point.p)
+    assert result.curve.p is not None
+    assert np.isfinite(result.curve.p)
+
+
+def shot_fit(kind: str, contrast: float, count: int, seed: int) -> tuple[str, CycleFit]:
     model, nuisance = planted_model(kind)
     centers = np.array(
         [
@@ -199,13 +280,44 @@ def test_fixed_seed_shot_wald_intervals_in_identifiable_regimes(
         model, nuisance, np.linspace(0.05, 3.0, 13), {name: 1.2}, count, seed
     )
 
-    result = fit_cycle(sums, model, {name: 1.1})
+    return name, fit_cycle(sums, model, {name: 1.1})
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("kind", ["t1", "rabi"])
+@pytest.mark.parametrize("contrast,count", [(1.76, 500), (0.176, 30000)])
+@pytest.mark.parametrize("seed", [761, 762, 763, 764])
+def test_fixed_seed_shot_wald_intervals_in_identifiable_regimes(
+    kind: str, contrast: float, count: int, seed: int
+) -> None:
+    name, result = shot_fit(kind, contrast, count, seed)
 
     # Four fixed replicates per regime check local Wald scale, not precise calibration.
     assert abs(result.parameters[name] - 1.2) < 1.96 * result.errors[name]
-    assert result.within_point.J >= 0
+    assert result.within_point.df == 45 * 13
     assert result.sharing.p is None
     assert np.isfinite(result.population_errors).all()
+
+
+@pytest.mark.slow
+def test_unavailable_within_check_preserves_curve_fit_and_independent_check() -> None:
+    name, result = shot_fit("t1", 1.76, 500, 761)
+
+    assert abs(result.parameters[name] - 1.2) < 1.96 * result.errors[name]
+    assert np.isnan(result.within_point.J)
+    assert result.within_point.p is None
+    assert result.within_point.df == 45 * 13
+    assert np.isnan(result.sharing.J)
+    assert result.sharing.p is None
+    assert result.sharing.df == 14 * 12
+    assert np.isfinite(result.curve.J)
+    assert result.curve.p is not None
+    assert result.curve.df == 65
+    assert result.reliability is None
+    assert result.populations.shape == (13, 3)
+    assert np.isfinite(result.populations).all()
+    assert np.isfinite(result.population_errors).all()
+    np.testing.assert_allclose(result.populations.sum(axis=1), 1)
 
 
 @pytest.mark.parametrize("init", [{}, {"tau": 0.01}, {"tau": np.nan}])

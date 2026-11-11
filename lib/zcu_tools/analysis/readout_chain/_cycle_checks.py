@@ -1,4 +1,4 @@
-"""Nested fixed-weight fits with batched pointwise Gauss-Newton elimination."""
+"""Nested fixed-weight fits with pointwise bounded least-squares elimination."""
 
 from dataclasses import dataclass
 
@@ -13,16 +13,38 @@ from ._cycle_layout import (
     TABLE_THERMAL,
 )
 from ._cycle_solver import (
+    ScaledInformation,
     apply_weights,
     bounded_least_squares,
     local_drive,
     local_mean_jacobian,
+    scaled_covariance,
+    scaled_information,
 )
 
 # Lower and upper bounds of the table columns being fitted.
 Limits = tuple[np.ndarray, np.ndarray]
-# Table, predicted means, Jacobian, weighted residual and per-point cost.
-LineState = tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]
+
+
+@dataclass
+class InnerSolution:
+    """Pointwise fit and its explicit optimality/failure outcome.
+
+    table: Shape (F,20). All fitted-column starts are clipped to bounds. When
+        converged, every row is fitted. On early failure, rows before the failed
+        point are fitted, that point holds the returned solver state, and later
+        rows retain their clipped starts without fitting.
+    residual: Shape (F,65). Weighted residuals at returned fitted rows, including
+        the failed point. Later rows remain zero and are not computed. Only when
+        converged may the full residual be used for an overall objective.
+    converged: Whether every point meets primary or allowed stalled optimality.
+    reason: Optimality reached, or the failed point and solver stop.
+    """
+
+    table: np.ndarray
+    residual: np.ndarray
+    converged: bool
+    reason: str
 
 
 @dataclass
@@ -33,10 +55,12 @@ class SharedSolution:
     J: Weighted residual sum of squares at table, dimensionless.
     covariance_shared: Shape (14,14), covariance of the shared coordinates.
     covariance_local: Shape (F,6,6), per-point covariance of the drive pairs at
-        fixed shared coordinates, the pseudoinverse of their normal matrix.
+        fixed shared coordinates, with column-normalized inverse information.
     coupling: Shape (F,6,14), per-point covariance_local times the local-shared
         normal block. A change of the shared coordinates moves the fitted drive
         pairs by minus coupling times that change.
+    information_local: Local covariance and normalized null projection.
+    information_shared: Schur-complement covariance and normalized null projection.
     """
 
     table: np.ndarray
@@ -44,47 +68,8 @@ class SharedSolution:
     covariance_shared: np.ndarray
     covariance_local: np.ndarray
     coupling: np.ndarray
-
-
-def _normal(jac: np.ndarray, held: np.ndarray) -> np.ndarray:
-    normal = np.einsum("nfi,nfj->nij", jac, jac)
-    # Numerical damping only affects iteration, not the reported covariance.
-    normal += (1e-10 * np.trace(normal, axis1=1, axis2=2) + 1e-14)[
-        :, None, None
-    ] * np.eye(jac.shape[2])
-    normal = np.where(held[:, :, None] | held[:, None, :], 0.0, normal)
-    return normal + held[:, :, None] * np.eye(jac.shape[2])
-
-
-def _step(
-    table: np.ndarray,
-    cols: np.ndarray,
-    jac: np.ndarray,
-    residual: np.ndarray,
-    limits: Limits,
-) -> np.ndarray:
-    lo, hi = limits
-    values = table[:, cols]
-    gradient = np.einsum("nfi,nf->ni", jac, residual)
-    held = ((values <= lo) & (gradient < 0)) | ((values >= hi) & (gradient > 0))
-    delta = np.zeros_like(values)
-    for _ in range(len(cols) + 1):
-        delta = np.linalg.solve(
-            _normal(jac, held), np.where(held, 0.0, gradient)[:, :, None]
-        )[:, :, 0]
-        blocked = ~held & (
-            ((values <= lo) & (delta < 0)) | ((values >= hi) & (delta > 0))
-        )
-        if not blocked.any():
-            break
-        held |= blocked
-    with np.errstate(divide="ignore", invalid="ignore"):
-        room = np.where(
-            delta > 0,
-            (hi - values) / delta,
-            np.where(delta < 0, (lo - values) / delta, np.inf),
-        )
-    return delta * np.minimum(1.0, room.min(axis=1))[:, None]
+    information_local: ScaledInformation
+    information_shared: ScaledInformation
 
 
 def inner(
@@ -93,65 +78,113 @@ def inner(
     weights: np.ndarray,
     cols: np.ndarray,
     limits: Limits,
-    steps: int = 40,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Fit the table columns cols independently at each point; hold the others.
+) -> InnerSolution:
+    """Fit table columns cols independently at each point; hold the others.
 
     table has shape (F,20) in the layout of _cycle_layout, means (F,65), weights
-    (F,65,65) whitening matrices. cols indexes the fitted columns of table and
-    limits gives their lower and upper bounds. Run bounded damped Gauss-Newton
-    with a per-point halving line search for at most steps iterations, stopping
-    early when no column moves by 1e-9. Return a new table and the final weighted
-    residual, shape (F,65). The inputs are not changed; numpy.linalg.LinAlgError
-    propagates from a singular solve.
+    (F,65,65) whitening matrices. cols indexes the fitted columns and limits
+    gives their lower and upper bounds. Project the start into these bounds.
+    Each point uses bounded least squares with max_nfev=200, ftol=xtol=1e-12
+    and gtol=1e-9. Independently check bound-scaled optimality <= 1e-9;
+    only ftol/xtol stops may instead satisfy scale-invariant optimality <= 1e-6.
+    Budget exhaustion always fails. Return without changing inputs. With
+    converged=True, every table row is fitted and every residual row computed.
+    On the first failed point, return early with converged=False and name that
+    point and solver stop. All fitted-column starts have already been clipped;
+    earlier rows are fitted, the failed row holds the returned solver state,
+    and later rows are not fitted. Their residual rows remain uncomputed zeros,
+    so this partial residual must not be used for an overall objective.
     """
     table = table.copy()
-    predicted, jac = local_mean_jacobian(table)
-    residual = apply_weights(weights, means - predicted)
-    cost = np.sum(residual**2, axis=1)
-    for _ in range(steps):
-        weighted = apply_weights(weights, jac[:, :, cols])
-        delta = _step(table, cols, weighted, residual, limits)
-        if np.max(np.abs(delta)) < 1e-9:
-            break
-        previous = table
-        table, predicted, jac, residual, cost = _line_search(
-            (table, predicted, jac, residual, cost), delta, cols, means, weights, limits
+    table[:, cols] = np.clip(table[:, cols], *limits)
+    residual = np.zeros_like(means)
+    for point in range(len(table)):
+        fitted = _point(
+            table[point : point + 1],
+            means[point : point + 1],
+            weights[point : point + 1],
+            cols,
+            limits,
         )
-        if np.max(np.abs(table[:, cols] - previous[:, cols])) < 1e-9:
-            break
-    return table, residual
+        table[point], residual[point] = fitted.table[0], fitted.residual[0]
+        if not fitted.converged:
+            return InnerSolution(
+                table, residual, False, f"point {point}: {fitted.reason}"
+            )
+    return InnerSolution(table, residual, True, "optimality reached")
 
 
-def _line_search(
-    state: LineState,
-    delta: np.ndarray,
-    cols: np.ndarray,
+def _point(
+    table: np.ndarray,
     means: np.ndarray,
     weights: np.ndarray,
+    cols: np.ndarray,
     limits: Limits,
-) -> LineState:
-    table, predicted, jac, residual, cost = state
-    lo, hi = limits
-    accept = np.zeros(len(table), dtype=bool)
-    candidate, pred, derivative, r, c = table, predicted, jac, residual, cost
-    for _ in range(12):
-        candidate = table.copy()
-        candidate[:, cols] = np.clip(table[:, cols] + delta, lo, hi)
-        pred, derivative = local_mean_jacobian(candidate)
-        r = apply_weights(weights, means - pred)
-        c = np.sum(r**2, axis=1)
-        accept = c <= cost
-        if accept.all():
-            break
-        delta = np.where(accept[:, None], delta, 0.5 * delta)
-    return (
-        np.where(accept[:, None], candidate, table),
-        np.where(accept[:, None], pred, predicted),
-        np.where(accept[:, None, None], derivative, jac),
-        np.where(accept[:, None], r, residual),
-        np.where(accept, c, cost),
+) -> InnerSolution:
+    def fun(values: np.ndarray) -> np.ndarray:
+        table[0, cols] = values
+        predicted = local_mean_jacobian(table)[0]
+        return apply_weights(weights, means - predicted).ravel()
+
+    def jacobian(values: np.ndarray) -> np.ndarray:
+        table[0, cols] = values
+        jac = local_mean_jacobian(table)[1][:, :, cols]
+        return -apply_weights(weights, jac)[0]
+
+    # This is a function-evaluation budget, not a Gauss-Newton iteration count.
+    # Tighten only nested point fits; joint/shared outer settings stay unchanged.
+    result = bounded_least_squares(
+        fun, table[0, cols], jacobian, limits, 200, stopping_tolerance=1e-12
     )
+    residual = fun(result.x)[None, :]
+    weighted = -jacobian(result.x)[None, :, :]
+    optimal = _optimality(table[:, cols], weighted, residual, limits)[0] <= 1e-9
+    # 1e-6 is about 75 times the measured roundoff stall maximum 1.34e-8,
+    # but over four orders below the nonoptimal 0.0399. A small step or
+    # SciPy success alone is not optimality; require this ratio at ftol/xtol.
+    stalled_optimal = result.status in (2, 3, 4) and (
+        _scale_invariant_optimality(weighted, residual, result.active_mask[None, :])[0]
+        <= 1e-6
+    )
+    converged = result.status > 0 and result.nfev < 200 and (optimal or stalled_optimal)
+    reason = (
+        f"{result.message}; bound-scaled optimality not reached"
+        if not converged
+        else "optimality reached"
+    )
+    return InnerSolution(table, residual, bool(converged), reason)
+
+
+def _optimality(
+    values: np.ndarray, jac: np.ndarray, residual: np.ndarray, limits: Limits
+) -> np.ndarray:
+    lo, hi = limits
+    # residual = observed - predicted, so positive gradient points downhill.
+    gradient = np.einsum("nfi,nf->ni", jac, residual)
+    distance = np.where(gradient > 0, hi - values, values - lo)
+    distance = np.where(np.isfinite(distance), distance, 1.0)
+    return np.max(np.abs(gradient * distance), axis=1)
+
+
+def _scale_invariant_optimality(
+    jac: np.ndarray, residual: np.ndarray, active_mask: np.ndarray
+) -> np.ndarray:
+    """Return max |projected A.T r| / (column norm of A * norm of r).
+
+    A is the weighted prediction Jacobian and r is observed minus predicted,
+    whitened by the same weights. SciPy's active_mask defines numerical bound
+    contact (-1 lower, +1 upper). Zero only outward downhill directions;
+    inward directions remain included. Guard zero denominators with float
+    tiny; zero columns or residuals have zero gradient. Column/residual scaling
+    cancel in the ratio.
+    """
+    gradient = np.einsum("nfi,nf->ni", jac, residual)
+    outward = ((active_mask < 0) & (gradient < 0)) | (
+        (active_mask > 0) & (gradient > 0)
+    )
+    projected = np.where(outward, 0.0, gradient)
+    scale = np.linalg.norm(jac, axis=1) * np.linalg.norm(residual, axis=1)[:, None]
+    return np.max(np.abs(projected) / np.maximum(scale, np.finfo(float).tiny), axis=1)
 
 
 def solve_shared(
@@ -178,9 +211,12 @@ def solve_shared(
     def fun(shared: np.ndarray) -> np.ndarray:
         nonlocal current, residual
         current[:, TABLE_SHARED] = shared
-        current, residual = inner(
+        fitted = inner(
             current, means, weights, cols, (lo[TABLE_DRIVE], hi[TABLE_DRIVE])
         )
+        if not fitted.converged:
+            raise RuntimeError(f"sharing cycle check did not converge: {fitted.reason}")
+        current, residual = fitted.table, fitted.residual
         return residual.ravel()
 
     def jacobian(shared: np.ndarray) -> np.ndarray:
@@ -189,11 +225,8 @@ def solve_shared(
         current[:, TABLE_SHARED] = shared
         jac = apply_weights(weights, local_mean_jacobian(current)[1])
         local, global_ = jac[:, :, TABLE_DRIVE], jac[:, :, TABLE_SHARED]
-        normal = np.einsum("nfi,nfj->nij", local, local)
         coupling = np.einsum("nfi,nfj->nij", local, global_)
-        projected = global_ - local @ (
-            np.linalg.pinv(normal, rcond=1e-12, hermitian=True) @ coupling
-        )
+        projected = global_ - local @ (scaled_covariance(local) @ coupling)
         return -projected.reshape(-1, ROW_SIZE)
 
     result = bounded_least_squares(
@@ -209,24 +242,34 @@ def solve_shared(
     jac = apply_weights(weights, local_mean_jacobian(current)[1])
     local, global_ = jac[:, :, TABLE_DRIVE], jac[:, :, TABLE_SHARED]
     # Normal-matrix blocks of the drive pairs (local) and shared coordinates.
-    local_normal = np.einsum("nfi,nfj->nij", local, local)
     local_shared = np.einsum("nfi,nfj->nij", local, global_)
-    covariance_local = np.linalg.pinv(local_normal, rcond=1e-12, hermitian=True)
+    information_local = scaled_information(local)
+    covariance_local = information_local.covariance
     coupling = covariance_local @ local_shared
-    schur = np.einsum("nfi,nfj->ij", global_, global_) - np.einsum(
-        "nij,nik->jk", local_shared, coupling
-    )
-    covariance_shared = np.linalg.pinv(schur, rcond=1e-12, hermitian=True)
+    # Form the Schur complement as a projected Jacobian to retain column scales
+    # and avoid subtracting nearly equal normal-matrix blocks.
+    projected = global_ - local @ coupling
+    information_shared = scaled_information(projected.reshape(-1, ROW_SIZE))
+    covariance_shared = information_shared.covariance
     return SharedSolution(
         current,
         float(np.sum(residual**2)),
         covariance_shared,
         covariance_local,
         coupling,
+        information_local,
+        information_shared,
     )
 
 
 def populations(solution: SharedSolution) -> tuple[np.ndarray, np.ndarray]:
+    """Return (F,3) populations and errors from the shared-nuisance fit.
+
+    Propagate each population gradient through the local and Schur-corrected
+    shared information separately. An error is NaN if either gradient involves
+    that information's null space; unrelated nuisance rank loss does not remove
+    errors for estimable populations.
+    """
     table = solution.table
     drive = local_drive(table)
     pi = np.array([simplex(*r[TABLE_THERMAL]) for r in table])
@@ -240,6 +283,6 @@ def populations(solution: SharedSolution) -> tuple[np.ndarray, np.ndarray]:
             )
         shared[x, :, ROW_THERMAL] = drive[x].T @ simplex_gradient(*row[TABLE_THERMAL])
     corrected = shared - local @ solution.coupling
-    cov = local @ solution.covariance_local @ local.transpose(0, 2, 1)
-    cov += corrected @ solution.covariance_shared @ corrected.transpose(0, 2, 1)
-    return values, np.sqrt(np.maximum(0.0, np.diagonal(cov, axis1=1, axis2=2)))
+    local_errors = solution.information_local.errors(local)
+    shared_errors = solution.information_shared.errors(corrected)
+    return values, np.sqrt(local_errors**2 + shared_errors**2)

@@ -231,7 +231,10 @@ class ChainT1Exp(Experiment[CycleSums, ChainT1Cfg]):
         # 2. One cycle per rep: K, then (π pulse, wait x, read, read) eight times.
         with Schedule(augmented_sums, scope=context.scope) as sched:
             builder = TimelineBuilder(
-                context.soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
+                context.soccfg,
+                reps=cfg.reps,
+                initial_delay=cfg.relax_delay,
+                relax_delay=cfg.relax_delay,
             )
             delay = builder.add_sweep("delay", cfg.delay)
             pi_pulse = Pulse("pi_pulse", cfg.pi_pulse)
