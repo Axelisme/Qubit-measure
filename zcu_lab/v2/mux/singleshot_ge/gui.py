@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import TypeAlias
+from typing import Annotated, Literal, TypeAlias
 
 import numpy as np
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from zcu_tools.analysis.fitting import FitQuality
 from zcu_tools.cfg_model import CircleClassifier
 from zcu_tools.experiment.context import RunContext
@@ -17,6 +18,7 @@ from zcu_tools.gui.app.measure.adapter import (
     Adapter,
     Analysis,
     AnalyzeRequest,
+    ParamMeta,
     PostAnalysis,
     PostAnalyzeRequest,
     PostWritebackRequest,
@@ -26,13 +28,6 @@ from zcu_tools.gui.app.measure.adapter import (
 from zcu_tools.gui.app.measure.writeback import calibrated_module_writeback
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2.singleshot.ge.core import GEAnalyzeOptions, GEPostAnalyzeOptions
-from zcu_lab.v2.singleshot.ge.gui import (
-    GEAnalyzeParams,
-    GEPostSummary,
-    ge_calibration_review_note,
-    ge_post_review_note,
-)
 from zcu_lab.v2.support.measure.mux_results import (
     MuxSummaryFailure,
     MuxSummaryTone,
@@ -42,6 +37,9 @@ from zcu_lab.v2.support.measure.mux_save_names import mux_save_stem
 from zcu_lab.v2.support.mux import MuxFitFailure
 
 from .analysis import (
+    GEAnalysis,
+    GEAnalyzeOptions,
+    GEPostAnalyzeOptions,
     MuxGEAnalysis,
     MuxGEAnalyzeOptions,
     MuxGEPostAnalysis,
@@ -51,6 +49,102 @@ from .core import MuxGECfg, MuxGEExp, MuxGEResult
 from .form import make_form
 
 MuxGERunResult: TypeAlias = RunRecord[MuxGECfg, MuxGEResult]
+
+
+@dataclass
+class GEAnalyzeParams:
+    """GUI controls for fitting paired probe-off/on IQ clouds.
+
+    initial_state identifies probe-off as predominantly ground or excited.
+    backend selects PCA or center rotation for the primary rotation/threshold fit.
+    logscale uses logarithmic histogram display; align_t1 enables T1 alignment.
+    length_ratio is readout length / T1, or None to estimate it from the data.
+    """
+
+    initial_state: Annotated[
+        Literal["ground", "excited"], ParamMeta(label="Initial State")
+    ] = "ground"
+    # ``backend`` selects the primary rotation/threshold fit. Post-analysis uses
+    # the resulting centres and does not choose or run another fit backend.
+    backend: Annotated[Literal["pca", "center"], ParamMeta(label="Backend")] = "pca"
+    logscale: Annotated[bool, ParamMeta(label="Log Scale")] = False
+    align_t1: Annotated[bool, ParamMeta(label="Align T1")] = True
+    length_ratio: Annotated[
+        float | None, ParamMeta(label="Length Ratio", decimals=4)
+    ] = None
+
+
+class GEConfusionSummary(BaseModel):
+    """Consumed post-calibration JSON fields; nonfinite estimates arrive as null."""
+
+    radius: float | None = Field(
+        description="Classification radius in ADC units; null means unavailable."
+    )
+    matrix: list[list[float | None]] = Field(
+        description="Prepared-to-measured confusion fractions; nonfinite entries are null."
+    )
+    condition_number: float | None = Field(
+        description="Dimensionless matrix condition number; null means unavailable."
+    )
+
+
+class GEPostSummary(BaseModel):
+    """Decode the consumed fields of the core post-analysis JSON object."""
+
+    confusion: GEConfusionSummary = Field(
+        description="Radius, confusion matrix and condition diagnostic from the core."
+    )
+
+
+def ge_calibration_review_note(primary: GEAnalysis) -> str | None:
+    """Explain manual selection for mux GE model-derived calibrations.
+
+    Joint histogram r2 must be >=0.9, normalized RMS <=0.1 and relative width
+    error <=0.5. These dimensionless gates also guard empirical assignment and
+    centers because a poor model is not calibration evidence. Required missing /
+    nonfinite metrics or their invalid issues prevent preselection. Unrelated
+    fixed-zero parameter issues do not. None means these review gates passed,
+    not that preparation or pure-state readout fidelity has been established.
+    """
+    quality = None if primary.fit_quality is None else primary.fit_quality.get("joint")
+    if quality is None:
+        return "Review required: joint histogram quality unavailable"
+    reasons = [
+        f"joint {issue.path}: {issue.reason}"
+        for issue in quality.invalid
+        if issue.path
+        in {"r2", "normalized_residual_rms", "relative_parameter_errors.s"}
+    ]
+    if quality.r2 is None or not math.isfinite(quality.r2):
+        reasons.append("joint r² unavailable")
+    elif quality.r2 < 0.9:
+        reasons.append(f"joint r²={quality.r2:.4g} <0.9")
+    rms = quality.normalized_residual_rms
+    if rms is None or not math.isfinite(rms):
+        reasons.append("joint normalized RMS unavailable")
+    elif rms > 0.1:
+        reasons.append(f"joint normalized RMS={rms:.4g} >0.1")
+    width_error = quality.relative_parameter_errors.get("s")
+    if width_error is None or not math.isfinite(width_error):
+        reasons.append("relative width error unavailable")
+    elif width_error > 0.5:
+        reasons.append(f"relative width error={width_error:.4g} >0.5")
+    return "Review required: " + "; ".join(reasons) if reasons else None
+
+
+def ge_post_review_note(primary: GEAnalysis, condition_number: float) -> str | None:
+    """Guard radius/confusion by primary GE quality and finite condition <=10.
+
+    The condition is dimensionless. Manual draft selection remains possible;
+    None means the review gates passed, not that the correction is reliable.
+    """
+    primary_note = ge_calibration_review_note(primary)
+    reasons = [] if primary_note is None else [primary_note]
+    if not math.isfinite(condition_number):
+        reasons.append("post condition number unavailable")
+    elif condition_number > 10:
+        reasons.append(f"post condition number={condition_number:.4g} >10")
+    return "; ".join(reasons) if reasons else None
 
 
 class MuxGEPrimarySummary(BaseModel):

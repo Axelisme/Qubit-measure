@@ -108,9 +108,8 @@ from zcu_lab.v2.support.mux_sweep_cfg import (
     require_tone_value,
     validate_mux_scan,
 )
-from zcu_lab.v2.twotone.rabi.amp_rabi.core import AmpRabiAnalyzeOptions
 
-from .analysis import MuxAmpRabiFit, analyze_amplitude
+from .analysis import AmpRabiAnalyzeOptions, MuxAmpRabiFit, analyze_amplitude
 
 
 @dataclass(frozen=True)

@@ -3,13 +3,13 @@
 from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Annotated, ClassVar
+from typing import Annotated, ClassVar, Self
 
 import numpy as np
 from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
-from pydantic import Field
-from zcu_tools.cfg_model import FieldMeta
+from pydantic import Field, model_validator
+from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
@@ -18,26 +18,64 @@ from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     ComputedPulse,
     LoadValue,
+    PulseCfg,
     Readout,
+    ReadoutCfg,
     Reset,
+    ResetCfg,
     TimelineBuilder,
     TimelineProgramV2,
 )
 
 from zcu_lab.v2.support import live_line
 
-from ..rb.core import RBCfg
-from ..rb.sequence import TargetGate, make_seed_tables
+from .._rb_sequence import TargetGate, make_seed_tables
 from .analysis import IRBAnalysis, analyze_irb, project_arm_means
 
 
-class IRBCfg(RBCfg):
+class IRBCfg(ConfigBase):
     """Paired RB settings; depth counts random Cliffords, rounds are host passes."""
+
+    reset: Annotated[ResetCfg | None, FieldMeta(label="Reset")] = None
+    I_pulse: Annotated[PulseCfg | None, FieldMeta(label="Identity Pulse")] = None
+    X90_pulse: Annotated[PulseCfg, FieldMeta(label="X90 Pulse")]
+    X180_pulse: Annotated[PulseCfg, FieldMeta(label="X180 Pulse")]
+    readout: Annotated[ReadoutCfg, FieldMeta(label="Readout")]
+    depth: Annotated[
+        list[Annotated[int, Field(ge=0, strict=True)]],
+        FieldMeta(label="Clifford depths"),
+    ] = Field(min_length=1)
+    """Ordered nonempty, unique nonnegative integer Clifford depths."""
+    seed: Annotated[int, FieldMeta(label="Random seed")]
+    n_seeds: Annotated[int, FieldMeta(label="Number of sequences")] = Field(ge=2)
+    """Number of independent random sequences shared by both arms."""
+
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ] = 1
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
+        ),
+    ] = 1.0
 
     target_gate: Annotated[TargetGate, FieldMeta(label="Target gate")] = "X90"
     """Physical Clifford inserted after each random Clifford, in its current frame."""
-    n_seeds: Annotated[int, FieldMeta(label="Number of sequences")] = Field(ge=2)
-    """Number of independent random sequences shared by both arms."""
+
+    @model_validator(mode="after")
+    def validate_depths(self) -> Self:
+        """Reject repeated depths before building any sequence or doing device I/O."""
+        if len(set(self.depth)) != len(self.depth):
+            raise ValueError("RB requires unique nonnegative integer depths")
+        return self
 
 
 @dataclass(frozen=True)

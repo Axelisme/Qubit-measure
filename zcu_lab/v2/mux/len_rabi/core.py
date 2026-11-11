@@ -139,9 +139,8 @@ from zcu_lab.v2.support.mux_sweep_cfg import (
     require_tone_value,
     validate_mux_scan,
 )
-from zcu_lab.v2.twotone.rabi.len_rabi.core import LenRabiAnalyzeOptions
 
-from .analysis import MuxLenRabiFit, analyze_length
+from .analysis import LenRabiAnalyzeOptions, MuxLenRabiFit, analyze_length
 
 
 class MuxLenRabiToneCfg(MuxDriveToneCfg):

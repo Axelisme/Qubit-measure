@@ -440,7 +440,7 @@ Recovery 最多兩個 physical pulses，用 recovery_gate_0／1 兩個 ComputedP
 IRB 獨立保存 `(round, seed, arm, depth)` IQ，arm 0=reference、1=interleaved。
 GUI 預設 X90，支援 X90／X180／Y90／Y180，使用校準 X90／X180。
 兩 arm 共 random seed，每個 random Clifford 後插 target，相鄰 gates 保持分開，各算完整 inverse 並延續 virtual-Z frame。
-序列與 program owners 是 twotone/rb/sequence.py、program.py。
+共用序列表 owner 是 twotone/_rb_sequence.py，兩個實驗各自在自己的 core.py 建立 program。
 Host 遍歷 round／seed／arm，快取各 seed／arm program，固定 rounds=1，板上做 depth／reps，arm 順序隨 round／seed 交替。
 原 RB 二維存檔與 program 內 rounds 維持原樣。
 IRB 只選完整 round／seed pairs，先平均同 seed rounds，再等權平均 seeds，共 IQ 投影軸並各 fit A*p**depth+B。

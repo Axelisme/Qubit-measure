@@ -20,8 +20,8 @@ from zcu_tools.utils.process import rotate2real
 
 from zcu_lab.v2.singleshot.ge.core import GE_Cfg, GE_Result
 from zcu_lab.v2.support import live_line
+from zcu_lab.v2.support.detune import actual_detune
 from zcu_lab.v2.support.singleshot.util import raw_shots_to_signal
-from zcu_lab.v2.twotone.time_domain.detune import actual_detune
 from zcu_lab.v2.twotone.time_domain.t2ramsey.core import (
     T2RamseyCfg,
     T2RamseyResult,

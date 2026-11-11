@@ -3,7 +3,7 @@
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Literal, TypeAlias
+from typing import Annotated, Literal, TypeAlias
 
 import numpy as np
 from pydantic import BaseModel, JsonValue
@@ -17,6 +17,7 @@ from zcu_tools.gui.app.measure.adapter import (
     AnalyzeRequest,
     ModuleWriteback,
     ParameterWriteback,
+    ParamMeta,
     WritebackItem,
     WritebackRequest,
 )
@@ -33,11 +34,55 @@ from zcu_lab.v2.mux.onetone.core import (
     validate_analysis_source,
 )
 from zcu_lab.v2.mux.onetone.form import make_form
-from zcu_lab.v2.onetone.freq.gui import OneToneFreqAnalyzeParams
 from zcu_lab.v2.support.measure.mux_save_names import mux_readout_save_stem
 from zcu_lab.v2.support.resonator import route_matched_delay
 
 MuxOnetoneRunResult: TypeAlias = RunRecord[MuxOnetoneCfg, MuxOnetoneResult]
+
+
+@dataclass
+class MuxOnetoneAnalyzeParams:
+    """Resonance model, background switches and delay seed for each mux tone."""
+
+    model_type: Annotated[Literal["hm", "t", "auto"], ParamMeta(label="Model type")] = (
+        "hm"
+    )
+    """Resonance model: "hm" for hanger, "t" for transmission, or "auto".
+
+    "auto" selects the model from the measured magnitude response.
+    The default is "hm".
+    """
+
+    fit_bg_amp_slope: Annotated[bool, ParamMeta(label="Fit amplitude background")] = (
+        True
+    )
+    """Fit the background's log-amplitude slope when True, the default.
+
+    True fits a frequency-dependent exponential amplitude envelope.
+    False keeps the log-amplitude slope at zero, giving a constant envelope.
+    """
+
+    fit_bg_phase_curvature: Annotated[bool, ParamMeta(label="Fit phase curvature")] = (
+        False
+    )
+    """Fit quadratic background phase curvature when True.
+
+    True fits a quadratic phase term alongside the electrical-delay phase.
+    False, the default, keeps the quadratic coefficient at zero.
+    """
+
+    edelay: Annotated[
+        float | None, ParamMeta(label="Electrical delay seed (us; blank = auto)")
+    ] = None
+    """Electrical-delay branch seed in us, default None, shown as blank.
+
+    A finite number, including zero or a negative value, seeds the delay branch.
+    Blank first uses a finite route-matched calibration as the seed.
+    Otherwise automatic branch selection uses an internal 100 us search cap.
+    Fitting starts from the selected branch and stores the fitted delay in the
+    analysis result. The input field retains the supplied seed or blank state.
+    Invalid seeds raise ValueError at analyze entry.
+    """
 
 
 class MuxOnetoneFitSummary(BaseModel):
@@ -142,7 +187,7 @@ def _resonators(
 
 
 def _analyze(
-    req: AnalyzeRequest[MuxOnetoneRunResult, OneToneFreqAnalyzeParams], *, plots: Plots
+    req: AnalyzeRequest[MuxOnetoneRunResult, MuxOnetoneAnalyzeParams], *, plots: Plots
 ) -> MuxOnetoneAnalyzeResult:
     """Fit each selected resonator at its saved base frequency plus MHz offset.
 
@@ -309,7 +354,7 @@ DEFINITION = Adapter(
     guide=Path(__file__).with_name("guide.md"),
     analysis=Analysis(
         fn=_analyze,
-        options=lambda source, env: OneToneFreqAnalyzeParams(),
+        options=lambda source, env: MuxOnetoneAnalyzeParams(),
         writeback=_get_writeback_items,
     ),
 )

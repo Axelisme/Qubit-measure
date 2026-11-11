@@ -19,7 +19,7 @@ from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.experiment.v2.runtime.schedule import Schedule
+from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import PulseReadout, Reset, SweepCfg, TimelineBuilder
 
@@ -28,8 +28,8 @@ from zcu_lab.v2.onetone._shared import (
 )
 from zcu_lab.v2.onetone._shared import (
     linear_freqs,
-    spectrum_buffer,
 )
+from zcu_lab.v2.support import live_line
 
 
 class RangeFindCfg(ConfigBase):
@@ -186,7 +186,16 @@ class RangeFindExp(Experiment[RangeFindResult, RangeFindCfg]):
         """
         cfg = deepcopy(config)
         freqs = linear_freqs(cfg.freq, cfg.readout, context=context)
-        signals = spectrum_buffer(freqs, plots=context.plots)
+        fig, ax = context.plots.subplots(num="measurement")
+        ax.set(xlabel="Frequency (MHz)", ylabel="Amplitude")
+        line = live_line(ax)
+
+        @context.plots.on_plot_thread
+        def update(data):
+            return line.set(freqs, np.abs(data))
+
+        fig.show()
+        signals = SignalBuffer((len(freqs),), on_update=update)
         with Schedule(signals, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 context.soccfg,

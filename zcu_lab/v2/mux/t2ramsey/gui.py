@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import TypeAlias
 
 import numpy as np
+from zcu_tools.analysis.fitting import FitQuality
 from zcu_tools.core.element import ElementIdentity
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.metadata import RunMetadataContent
@@ -34,10 +35,8 @@ from zcu_lab.v2.support.measure.record_frame import captured_qubit_flux
 from zcu_lab.v2.support.mux import MuxFitFailure
 from zcu_lab.v2.support.mux_coherence import MuxCoherenceResult
 from zcu_lab.v2.support.mux_coherence_analysis import MuxCoherenceFit
-from zcu_lab.v2.twotone.time_domain.t2echo.gui import coherence_review_note
-from zcu_lab.v2.twotone.time_domain.t2ramsey.core import T2RamseyAnalyzeOptions
 
-from .core import MuxT2RamseyCfg, MuxT2RamseyExp
+from .core import MuxT2RamseyCfg, MuxT2RamseyExp, T2RamseyAnalyzeOptions
 from .form import make_form
 
 MuxT2RamseyRunResult: TypeAlias = RunRecord[MuxT2RamseyCfg, MuxCoherenceResult]
@@ -82,6 +81,48 @@ def _frequency_review_note(outcome: MuxCoherenceFit, t2_note: str | None) -> str
         if issue.path == "relative_parameter_errors.freq"
     )
     return "; ".join(reasons) if reasons else None
+
+
+def coherence_review_note(
+    t2: float, t2_err: float, quality: FitQuality | None
+) -> str | None:
+    """Explain why this tone's T2 fit needs manual selection.
+
+    Times/errors are in us. Initial selection requires positive finite T2,
+    nonnegative finite error/T2 <=0.5, r2 >=0.9 and normalized residual RMS <=0.1.
+    Missing/nonfinite required metrics or their invalid issues require review.
+    Unrelated fixed-zero parameter issues do not reject the result. None means
+    these review gates passed, not that a calibration is physically established.
+    """
+    reasons = _coherence_fit_review_reasons(quality)
+    if not math.isfinite(t2) or t2 <= 0:
+        reasons.append("T2 must be finite and positive")
+    elif not math.isfinite(t2_err) or t2_err < 0:
+        reasons.append("T2 error must be finite and nonnegative")
+    elif t2_err / t2 > 0.5:
+        reasons.append(f"T2 relative error={t2_err / t2:.4g} >0.5")
+    return "Review required: " + "; ".join(reasons) if reasons else None
+
+
+def _coherence_fit_review_reasons(quality: FitQuality | None) -> list[str]:
+    if quality is None:
+        return ["fit quality unavailable"]
+    reasons = [
+        f"{issue.path}: {issue.reason}"
+        for issue in quality.invalid
+        if issue.path
+        in {"r2", "normalized_residual_rms", "relative_parameter_errors.decay_time"}
+    ]
+    if quality.r2 is None or not math.isfinite(quality.r2):
+        reasons.append("r² unavailable")
+    elif quality.r2 < 0.9:
+        reasons.append(f"r²={quality.r2:.4g} <0.9")
+    rms = quality.normalized_residual_rms
+    if rms is None or not math.isfinite(rms):
+        reasons.append("normalized RMS unavailable")
+    elif rms > 0.1:
+        reasons.append(f"normalized RMS={rms:.4g} >0.1")
+    return reasons
 
 
 def _MuxT2Ramsey_options(

@@ -19,12 +19,28 @@ from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import Reset, ResetCfg, SweepCfg, TimelineBuilder, sweep2param
 from zcu_tools.program.v2.modules import MuxReadout, MuxReadoutCfg, Pulse
 
-from zcu_lab.v2.mux.twotone_spectrum.core import MuxFreqToneCfg
 from zcu_lab.v2.support import live_heatmap, live_line
 from zcu_lab.v2.support.device import check_flux_unit, set_flux
 from zcu_lab.v2.support.mux import averaged_mux_signal
 from zcu_lab.v2.support.mux_flux import MuxFluxResult, mux_flux_spec
-from zcu_lab.v2.support.mux_sweep_cfg import require_tone_value, validate_mux_scan
+from zcu_lab.v2.support.mux_sweep_cfg import (
+    MuxDriveToneCfg,
+    ToneRangeCfg,
+    require_tone_value,
+    validate_mux_scan,
+)
+
+
+class MuxFreqToneCfg(MuxDriveToneCfg):
+    """One named drive and its independent freq bounds in MHz."""
+
+    freq: Annotated[ToneRangeCfg | None, FieldMeta(unit="MHz")] = None
+
+    def require_freq(self) -> ToneRangeCfg:
+        """Return active freq bounds, or raise ValueError naming this tone."""
+        if self.freq is None:
+            raise ValueError(f"{self.name}: active tone requires freq")
+        return self.freq
 
 
 class TwotoneFluxGlobalCfg(ConfigBase):

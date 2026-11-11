@@ -9,12 +9,14 @@ the saved record does not grow with the number of sweeps.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Annotated, ClassVar
+from typing import Annotated, ClassVar, Literal
 
 import numpy as np
 from matplotlib.ticker import MaxNLocator
 from pydantic import Field
+from pydantic.dataclasses import dataclass as validated_dataclass
 from zcu_tools.analysis.fitting import PeakCandidate
+from zcu_tools.analysis.fitting.spectrum import SpectrumFitOptions, fit_spectrum
 from zcu_tools.analysis.readout_chain import SweepSums, sweep_curve
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
@@ -41,12 +43,49 @@ from zcu_tools.program.v2 import (
 )
 
 from zcu_lab.v2.support import live_line
-from zcu_lab.v2.twotone.freq.analysis import FreqAnalyzeOptions, fit_spectrum
 
 # (drive, readout) cycles per dwell, fixed by the experiment design: 16 to 96
 # give the same line heights at fixed total reads, and 48 keeps the tail that
 # slow states leave along the scan direction near one point.
 READS_PER_DWELL = 48
+
+
+@validated_dataclass(frozen=True)
+class ChainAnalyzeOptions:
+    """Select lor/sinc and a candidate near expected_center_mhz (None: strongest).
+
+    min_prominence is relative to projected signal ptp; min_distance_mhz is the
+    minimum candidate separation. min_snr gates prominence and height above
+    the median in first-difference MAD noise units. min_width_samples gates
+    observable half-prominence width in sample intervals; 0 disables this gate.
+    Raise it only for fine scans. peaks reports height SNR, not prominence SNR.
+    The fitted overlay is always drawn.
+    """
+
+    model_type: Annotated[Literal["lor", "sinc"], FieldMeta(label="Model type")] = "lor"
+    expected_center_mhz: Annotated[
+        float | None,
+        FieldMeta(label="Expected center", unit="MHz"),
+        Field(allow_inf_nan=False),
+    ] = None
+    min_prominence: Annotated[
+        float, FieldMeta(label="Minimum prominence / signal range"), Field(ge=0, le=1)
+    ] = 0.2
+    min_snr: Annotated[
+        float,
+        FieldMeta(label="Minimum height above median / noise sigma"),
+        Field(ge=0, allow_inf_nan=False),
+    ] = 5.0
+    min_width_samples: Annotated[
+        float,
+        FieldMeta(label="Minimum half-prominence width", unit="samples"),
+        Field(ge=0, allow_inf_nan=False),
+    ] = 0.0
+    min_distance_mhz: Annotated[
+        float,
+        FieldMeta(label="Minimum peak separation", unit="MHz"),
+        Field(ge=0, allow_inf_nan=False),
+    ] = 0.0
 
 
 class ChainCfg(ConfigBase):
@@ -137,7 +176,7 @@ FEATURES = tuple(range(11))
 
 
 class ChainExp(Experiment[SweepSums, ChainCfg]):
-    Options: ClassVar[type[FreqAnalyzeOptions]] = FreqAnalyzeOptions
+    Options: ClassVar[type[ChainAnalyzeOptions]] = ChainAnalyzeOptions
 
     # The record is the SweepSums of readout_chain: dwell counts and 11 feature
     # sums per frequency, and one 11 x 11 product sum pooled over all points.
@@ -248,15 +287,15 @@ class ChainExp(Experiment[SweepSums, ChainCfg]):
     def analyze(
         self,
         source: RunRecord[ChainCfg, SweepSums],
-        options: FreqAnalyzeOptions,
+        options: ChainAnalyzeOptions,
         *,
         plots: Plots,
     ) -> ChainAnalysis:
-        """Fit one peak of the sigma curve with the twotone/freq peak fit.
+        """Fit one peak of the sigma curve with the numerical spectrum fitter.
 
         Recompute the sigma curve from the saved sums. Select the candidate
         nearest options.expected_center_mhz, or the most prominent one, and fit
-        it as twotone/freq does (lor or sinc). Publish the curve, the dashed 5%
+        it with the selected model (lor or sinc). Publish the curve, the dashed 5%
         level, the fit and the other candidates as ``fit``. Return centre and
         FWHM in MHz with fit errors; the FWHM of a sigma peak only approximates
         the line width. The source cfg may be None. No candidate passing the
@@ -265,7 +304,18 @@ class ChainExp(Experiment[SweepSums, ChainCfg]):
         sums = source.result
         freqs = sums.axis
         curve = sweep_curve(sums)
-        fit = fit_spectrum(freqs, curve.sigma, options)
+        fit = fit_spectrum(
+            freqs,
+            curve.sigma,
+            SpectrumFitOptions(
+                model_type=options.model_type,
+                expected_center_mhz=options.expected_center_mhz,
+                min_prominence=options.min_prominence,
+                min_snr=options.min_snr,
+                min_width_samples=options.min_width_samples,
+                min_distance_mhz=options.min_distance_mhz,
+            ),
+        )
 
         fig, ax = plots.subplots(num="fit", figsize=config.figsize)
         ax.plot(freqs, curve.sigma, label="sigma", marker="o", markersize=3)

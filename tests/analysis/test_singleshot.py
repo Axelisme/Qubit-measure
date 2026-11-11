@@ -6,9 +6,11 @@ from pydantic import JsonValue, TypeAdapter, ValidationError
 from zcu_tools.analysis.fitting.singleshot import transition_state_circle_probabilities
 from zcu_tools.analysis.singleshot import (
     Centroid3Summary,
+    GECalibration,
     analyze_centroid3_iq,
     analyze_centroid3_populations,
     analyze_reference_iq,
+    calc_confusion_matrix,
     classify_rabi_iq,
     classify_reference_iq,
     classify_result,
@@ -19,6 +21,54 @@ from zcu_tools.analysis.singleshot import (
 from zcu_tools.cfg_model import Centroid3Classifier
 from zcu_tools.gui.app.measure.summary import summarize_analysis
 from zcu_tools.utils.shot_classification import gaussian_region_probability
+
+
+def test_ge_confusion_corrects_preparation_mixing_at_explicit_radius() -> None:
+    calibration = GECalibration(
+        g_center=-1 + 0j,
+        e_center=1 + 0j,
+        init_pops=np.array([[0.75, 0.25], [0.25, 0.75]]),
+        sigma=0.1,
+    )
+    # Prepared rows have exactly the fitted mixing. Each physical state has
+    # three accepted shots and one outside the selected radius.
+    ground = np.array([-1, -1, -1, -2] * 3 + [1, 1, 1, 2], dtype=np.complex128)
+    excited = np.array([-1, -1, -1, -2] + [1, 1, 1, 2] * 3, dtype=np.complex128)
+    result = calc_confusion_matrix(
+        (ground, excited), calibration, radius=0.25, consider_other=False
+    )
+    assert result.radius == 0.25
+    np.testing.assert_allclose(
+        result.matrix, [[0.75, 0, 0.25], [0, 0.75, 0.25], [0, 0, 1]], atol=1e-15
+    )
+    np.testing.assert_array_equal(
+        result.init_matrix, [[0.75, 0.25, 0], [0.25, 0.75, 0], [0, 0, 1]]
+    )
+    assert result.g_classification == (0.5625, 0.1875, 0.25)
+    assert result.e_classification == (0.1875, 0.5625, 0.25)
+    assert np.isfinite(result.condition_number)
+
+
+@pytest.mark.parametrize("consider_other", [False, True])
+def test_ge_confusion_automatic_radius_retains_separated_clouds(
+    consider_other: bool,
+) -> None:
+    calibration = GECalibration(
+        g_center=-1 + 0j,
+        e_center=1 + 0j,
+        init_pops=np.eye(2),
+        sigma=0.1,
+    )
+    ground = np.array([-1.5, -1, -0.5], dtype=np.complex128)
+    excited = np.array([0.5, 1, 1.5], dtype=np.complex128)
+    result = calc_confusion_matrix(
+        (ground, excited), calibration, radius=None, consider_other=consider_other
+    )
+    assert 0.5 <= result.radius <= 2
+    np.testing.assert_allclose(result.matrix, np.eye(3))
+    assert result.g_classification == (1, 0, 0)
+    assert result.e_classification == (0, 1, 0)
+    assert result.condition_number == pytest.approx(1)
 
 
 def test_centroid3_iq_analysis_preserves_scan_axes_and_unclipped_estimates() -> None:
