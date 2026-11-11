@@ -12,7 +12,6 @@ from dataclasses import dataclass
 from typing import Annotated, ClassVar
 
 import numpy as np
-from matplotlib import rcParams
 from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field
@@ -228,18 +227,16 @@ class ChainT1Exp(Experiment[CycleSums, ChainT1Cfg]):
         ax.set(xlabel="Delay (us)", ylabel="Projected signal (sigma)")
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
         ax.grid()
-        all_line = live_line(ax)
-        first_line = live_line(ax)
-        ax.lines[0].set(label="all 65 numbers", markersize=rcParams["lines.markersize"])
-        ax.lines[1].set(label="first read", markersize=rcParams["lines.markersize"])
+        lines = live_line(ax, num_lines=2)
+        ax.lines[0].set_label("all 65 numbers")
+        ax.lines[1].set_label("first read")
         ax.legend()
 
         @context.plots.on_plot_thread
         def update(data: NDArray[np.float64]):
             curves = cycle_curves(CycleSums.from_augmented(delays, data))
-            return (
-                *all_line.set(delays, curves.main_sigma),
-                *first_line.set(delays, curves.first_read_sigma),
+            return lines.set(
+                delays, np.stack([curves.main_sigma, curves.first_read_sigma])
             )
 
         fig.show()
