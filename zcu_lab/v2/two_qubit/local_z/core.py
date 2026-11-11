@@ -49,7 +49,7 @@ class LocalZCfg(ConfigBase):
     Frequencies are MHz, phases degrees and delays us. reps is shots per round;
     rounds accumulate counts at acquisition. F1/F2 require circle classifiers
     with GE Post radii. reset=None skips reset; otherwise reset starts each shot.
-    Both targets use consecutive nonnegative gate_counts, including n=0.
+    Both targets use consecutive nonnegative gate_count values, including n=0.
     """
 
     reset: Annotated[
@@ -85,7 +85,7 @@ class LocalZCfg(ConfigBase):
         ),
     ]
     roles: JointRoles
-    gate_counts: list[Annotated[int, Field(strict=True, ge=0)]] = Field(
+    gate_count: list[Annotated[int, Field(strict=True, ge=0)]] = Field(
         default_factory=lambda: [0, 1, 2, 3, 4], min_length=3
     )
     reps: Annotated[
@@ -125,7 +125,7 @@ class LocalZCfg(ConfigBase):
                 raise ValueError("CZ and X90 must use the same captured role generator")
             if not isinstance(x90.phase, (int, float)) or not np.isfinite(x90.phase):
                 raise ValueError("X90 phase must be a finite scalar")
-        if any(b - a != 1 for a, b in pairwise(self.gate_counts)):
+        if any(b - a != 1 for a, b in pairwise(self.gate_count)):
             raise ValueError("Gate counts must be consecutive and strictly increasing")
         return self
 
@@ -187,7 +187,7 @@ class LocalZExp(Experiment[LocalZResult, LocalZCfg]):
         ),
         result_type=LocalZResult,
         cfg_type=LocalZCfg,
-        cfg_schema_version="4.0",
+        cfg_schema_version="5.0",
         tag="two_qubit/local_z",
         result_builder=restore_result,
     )
@@ -210,16 +210,16 @@ class LocalZExp(Experiment[LocalZResult, LocalZCfg]):
         def update_view(sums: NDArray[np.float64]) -> tuple[Line2D, ...]:
             counts = np.moveaxis(sums, 0, 2)
             values = np.stack((sigma(counts[0], "f1"), sigma(counts[1], "f2")))
-            return viewer.set(np.array(config.gate_counts), values.reshape(4, -1))
+            return viewer.set(np.array(config.gate_count), values.reshape(4, -1))
 
         buffer = SignalBuffer(
-            (len(config.gate_counts), 2, 2, 3, 3),
+            (len(config.gate_count), 2, 2, 3, 3),
             dtype=np.float64,
             on_update=update_view,
         )
         with Schedule(buffer, scope=context.scope) as sched:
             # gate_count changes sequence structure, so only this axis stays on host.
-            for n, step in sched.scan("gate_count", config.gate_counts):
+            for n, step in sched.scan("gate_count", config.gate_count):
                 builder = TimelineBuilder(
                     context.soccfg,
                     reps=config.reps,
@@ -289,7 +289,7 @@ class LocalZExp(Experiment[LocalZResult, LocalZCfg]):
                 )
         buffer.trigger_update(flush=True)
         return LocalZResult(
-            np.array(config.gate_counts, dtype=np.int64),
+            np.array(config.gate_count, dtype=np.int64),
             np.moveaxis(buffer.array, 0, 2),
         )
 
@@ -305,9 +305,9 @@ class LocalZExp(Experiment[LocalZResult, LocalZCfg]):
         cfg, data = source.cfg, source.result
         if cfg is None:
             raise ValueError("Phase analysis requires saved source cfg")
-        if not np.array_equal(data.gate_counts, np.array(cfg.gate_counts)):
+        if not np.array_equal(data.gate_counts, np.array(cfg.gate_count)):
             raise ValueError("LocalZ count axes must match saved cfg")
-        if data.sums.shape != (2, 2, len(cfg.gate_counts), 3, 3):
+        if data.sums.shape != (2, 2, len(cfg.gate_count), 3, 3):
             raise ValueError("Expected target × quadrature × gate_count × 3 × 3 counts")
         counts = data.sums
         quadratures = np.stack((sigma(counts[0], "f1"), sigma(counts[1], "f2")))
@@ -325,13 +325,13 @@ class LocalZExp(Experiment[LocalZResult, LocalZCfg]):
         targets = tuple(
             tuple(
                 count_phase(float(quadratures[t, 0, n]), float(quadratures[t, 1, n]))
-                for n in range(len(cfg.gate_counts))
+                for n in range(len(cfg.gate_count))
             )
             for t in range(2)
         )
         fits = tuple(
             fit_target(
-                np.array(cfg.gate_counts, dtype=np.float64),
+                np.array(cfg.gate_count, dtype=np.float64),
                 targets[t],
                 phase_variance(
                     quadratures[t, 0],

@@ -2,6 +2,8 @@
 
 **讀者：** operator、agent。本頁說明獨立實驗 `two_qubit/conditional_spectroscopy_heralded`。Probe、contrast、DC source、角色捕捉與校準步驟見 [普通版本](guide.md)。
 
+Cfg 掃描欄位使用 `dc`，此實驗的 cfg schema 為 3.0。載入舊主版本的 run 時保留 Result 與 metadata，cfg 為 None，並發出 `CfgUnavailableWarning`。這些舊 run 不支援重新分析，也不提供 cfg 遷移或欄位 alias。
+
 ## 序列與校準
 
 每個 shot 執行可選 reset → herald mux readout → 兩顆準備 → 雙線 weak probe → 可選 Xπ⊗Xπ contrast → terminal mux readout。

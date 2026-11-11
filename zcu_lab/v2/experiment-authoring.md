@@ -154,10 +154,13 @@ cfg 若只提供單一計數 N，並由它推導 0 到 N 的掃描軸，欄位�
 例如 `twotone/zigzag_sweep` 用 cfg `n_times`，以 `np.arange(0, cfg.n_times + 1)` 建立 `times`，
 用 `builder.add_loop("times", len(times))` 宣告迴圈，Result 也用 `times`。
 
-目前保留下列既有 cfg 欄位名，待遷移時改名。歷史 cfg 的相容設計尚待裁定，現在不啟用新名稱。
-Result 欄位維持原名。
+下列 cfg 掃描欄位已改為單數名，普通與 heralded 版本都適用。
+Result 欄位、儲存軸名與 label／unit 維持原樣。
+五個家族共 10 個實驗各自將 `cfg_schema_version` 主版本加 1。
+載入舊主版本的 run 時，保留 Result 與 metadata，cfg 為 None，並發出 `CfgUnavailableWarning`。
+不遷移舊 cfg、不提供 alias，也不支援這些舊 run 的重新分析，避免忽略舊 key 後靜默使用新預設值。
 
-| 實驗 | 目前 cfg 欄位 | 待遷移時改名為 |
+| 實驗 | 舊 cfg 欄位 | 目前 cfg 欄位 |
 | --- | --- | --- |
 | `two_qubit/conditional_spectroscopy` | `dc_values` | `dc` |
 | `two_qubit/idle_zz` | `dc_values` | `dc` |
@@ -169,7 +172,7 @@ Result 欄位維持原名。
 新實驗的軸 label 沿用同一個字，例如 `Delay`。既有存檔軸的 label／unit 不改，避免舊檔無法載入。
 Module 名稱等於提供設定的 cfg 欄位名，例如 `Pulse("pi_pulse", cfg.pi_pulse)`。
 欄位名寫角色，例如 `stark_tone`、`probe`，只有角色對稱時才用 `gain1`／`gain2`。
-既有持久 cfg 欄位改名時，隨遷移更新 `cfg_schema_version`。
+既有持久 cfg 欄位改名時，須明定歷史 cfg 的處置，並更新 `cfg_schema_version`。
 
 Form 預設依 cfg 宣告順序顯示欄位，不寫 `field_order`。
 Cfg 依序放播放順序的 modules、外到內的掃描量、取樣方式、取數欄位。

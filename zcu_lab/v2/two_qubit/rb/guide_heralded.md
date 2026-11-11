@@ -2,6 +2,8 @@
 
 **Readers:** operator, agent. Run heralded paired two-qubit RB and interpret gg/ee return survival alongside CZ-interleaved decay fits.
 
+Cfg sweep fields use `depth` / `seed`. This experiment uses cfg schema 2.0. Loading a run from an older major version retains Result and metadata, sets cfg to None and emits `CfgUnavailableWarning`. These old runs cannot be reanalyzed. No cfg migration or field alias is provided.
+
 Select `two_qubit/rb_heralded`. Calibrate the X90 pulses, full mux readout,
 dual-line CZ pulses and ordered local-Z corrections as described in the
 [ordinary RB guide](guide.md). The same component roles, sequence seeds,

@@ -62,8 +62,8 @@ class RBCfg(ConfigBase):
     phase_pair is required, ordered and component-named. Delays are us, pulse
     frequency MHz and phase degrees. No DC device is driven. reset=None emits
     no reset. F1/F2 need circle classifiers with radius from GE Post before Run.
-    depths counts random Cliffords, not primitive gates; unique increasing
-    nonnegative integers. seeds are distinct integer random.Random identities
+    depth counts random Cliffords, not primitive gates; unique increasing
+    nonnegative integers. seed contains distinct integer random.Random identities
     shared across depths/arms/rounds. The 31-bit bound preserves exact axes.
     reps is shots per host round; rounds remains a separate saved axis.
     """
@@ -104,10 +104,10 @@ class RBCfg(ConfigBase):
     ]
     roles: JointRoles
     phase_pair: CZPhasePair
-    depths: list[Annotated[int, Field(strict=True, ge=0)]] = Field(
+    depth: list[Annotated[int, Field(strict=True, ge=0)]] = Field(
         default_factory=lambda: [0, 1, 2, 3], min_length=1
     )
-    seeds: list[Annotated[int, Field(strict=True, ge=0, le=2**31 - 1)]] = Field(
+    seed: list[Annotated[int, Field(strict=True, ge=0, le=2**31 - 1)]] = Field(
         default_factory=lambda: [0, 1], min_length=1
     )
     reps: Annotated[
@@ -140,9 +140,9 @@ class RBCfg(ConfigBase):
         """Reject swapped phases, duplicate axes and mismatched role generators."""
         validate_classifiers(self.readout, self.roles)
         self.phase_pair.validate_roles(self.roles)
-        if self.depths != sorted(set(self.depths)):
+        if self.depth != sorted(set(self.depth)):
             raise ValueError("RB depths must be unique and increasing")
-        if len(set(self.seeds)) != len(self.seeds):
+        if len(set(self.seed)) != len(self.seed):
             raise ValueError("RB seeds must be distinct complete integer identities")
         for drive, x90 in (
             (self.drive.f1, self.x90_f1),
@@ -220,7 +220,7 @@ class RBExp(Experiment[RBResult, RBCfg]):
         ),
         result_type=RBResult,
         cfg_type=RBCfg,
-        cfg_schema_version="4.0",
+        cfg_schema_version="5.0",
         tag="two_qubit/rb",
         result_builder=restore_result,
     )
@@ -243,18 +243,18 @@ class RBExp(Experiment[RBResult, RBCfg]):
         def update_view(sums: NDArray[np.float64]) -> tuple[Line2D, ...]:
             totals = np.nansum(sums, axis=(1, 3))
             return viewer.set(
-                np.array(config.depths), joint_probabilities(totals)[..., 0, 0].T
+                np.array(config.depth), joint_probabilities(totals)[..., 0, 0].T
             )
 
         buffer = SignalBuffer(
-            (len(config.depths), len(config.seeds), 2, config.rounds, 3, 3),
+            (len(config.depth), len(config.seed), 2, config.rounds, 3, 3),
             dtype=np.float64,
             on_update=update_view,
         )
         with Schedule(buffer, scope=context.scope) as sched:
             # Host depth/seed/arm change the gate sequence. Host rounds preserve paired slots.
-            for depth, depth_step in sched.scan("depth", config.depths):
-                for seed, seed_step in depth_step.scan("seed", config.seeds):
+            for depth, depth_step in sched.scan("depth", config.depth):
+                for seed, seed_step in depth_step.scan("seed", config.seed):
                     pair = make_paired_sequences(depth, seed)
                     for arm, arm_step in seed_step.scan("arm", [0, 1]):
                         sequence = (pair.reference, pair.interleaved)[arm]
@@ -335,8 +335,8 @@ class RBExp(Experiment[RBResult, RBCfg]):
                             )
         buffer.trigger_update(flush=True)
         return RBResult(
-            np.array(config.depths, dtype=np.int64),
-            np.array(config.seeds, dtype=np.int64),
+            np.array(config.depth, dtype=np.int64),
+            np.array(config.seed, dtype=np.int64),
             np.arange(config.rounds, dtype=np.int64),
             buffer.array,
         )
@@ -369,7 +369,7 @@ class RBExp(Experiment[RBResult, RBCfg]):
         else:
             validate_axes(
                 (data.depths, data.seeds, np.arange(2, dtype=np.int64), data.rounds),
-                (cfg.depths, cfg.seeds, [0, 1], np.arange(cfg.rounds)),
+                (cfg.depth, cfg.seed, [0, 1], np.arange(cfg.rounds)),
             )
             if data.sums.shape != (*shape, 3, 3):
                 raise ValueError("Expected RB sums shape (depth,seed,arm,round,3,3)")

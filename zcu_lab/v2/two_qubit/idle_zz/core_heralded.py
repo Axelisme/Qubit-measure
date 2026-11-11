@@ -106,7 +106,7 @@ class IdleZZHeraldedExp(Experiment[IdleZZHeraldedResult, IdleZZHeraldedCfg]):
             ),
             result_type=IdleZZHeraldedResult,
             cfg_type=IdleZZHeraldedCfg,
-            cfg_schema_version="5.0",
+            cfg_schema_version="6.0",
             tag="two_qubit/idle_zz_heralded",
             result_builder=restore_result,
         )
@@ -124,9 +124,7 @@ class IdleZZHeraldedExp(Experiment[IdleZZHeraldedResult, IdleZZHeraldedCfg]):
         delay_sweep = round_sweep_dict(config.delay, "time", {"soccfg": context.soccfg})
         delays = sweep2array(delay_sweep)
         dc_values = (
-            np.array([0.0])
-            if config.dc_device is None
-            else sweep2array(config.dc_values)
+            np.array([0.0]) if config.dc_device is None else sweep2array(config.dc)
         )
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Delay (us)", ylabel="Target ⟨σ⟩ (gg, −ee; actual spectator g/e)")
@@ -223,9 +221,7 @@ class IdleZZHeraldedExp(Experiment[IdleZZHeraldedResult, IdleZZHeraldedCfg]):
         cfg, result = source.cfg, source.result
         if cfg is None:
             raise ValueError("Idle ZZ analysis requires saved cfg")
-        dc_values = (
-            np.array([0.0]) if cfg.dc_device is None else sweep2array(cfg.dc_values)
-        )
+        dc_values = np.array([0.0]) if cfg.dc_device is None else sweep2array(cfg.dc)
         validate_axes(
             result.dc_values,
             np.arange(2, dtype=np.int64),

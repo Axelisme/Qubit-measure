@@ -116,7 +116,7 @@ class IdleZZCfg(ConfigBase):
     dc_unit: Annotated[
         Literal["A", "V", "native"], FieldMeta(label="DC source working unit")
     ] = "native"
-    dc_values: Annotated[
+    dc: Annotated[
         SweepCfg,
         FieldMeta(
             label="DC source values",
@@ -173,7 +173,7 @@ class IdleZZCfg(ConfigBase):
         if self.dc_device is not None:
             if not self.dc_device.strip():
                 raise ValueError("DC source must name a connected device or be None")
-            if not np.all(np.isfinite(sweep2array(self.dc_values))):
+            if not np.all(np.isfinite(sweep2array(self.dc))):
                 raise ValueError("DC source coordinates must be finite")
         return self
 
@@ -236,7 +236,7 @@ class IdleZZExp(Experiment[IdleZZResult, IdleZZCfg]):
         ),
         result_type=IdleZZResult,
         cfg_type=IdleZZCfg,
-        cfg_schema_version="5.0",
+        cfg_schema_version="6.0",
         tag="two_qubit/idle_zz",
         result_builder=restore_result,
     )
@@ -251,9 +251,7 @@ class IdleZZExp(Experiment[IdleZZResult, IdleZZCfg]):
         delay_sweep = round_sweep_dict(config.delay, "time", {"soccfg": context.soccfg})
         delays = sweep2array(delay_sweep)
         dc_values = (
-            np.array([0.0])
-            if config.dc_device is None
-            else sweep2array(config.dc_values)
+            np.array([0.0]) if config.dc_device is None else sweep2array(config.dc)
         )
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Delay (us)", ylabel="Target ⟨σ⟩")
@@ -345,9 +343,7 @@ class IdleZZExp(Experiment[IdleZZResult, IdleZZCfg]):
         cfg, result = source.cfg, source.result
         if cfg is None:
             raise ValueError("Idle ZZ analysis requires saved cfg")
-        dc_values = (
-            np.array([0.0]) if cfg.dc_device is None else sweep2array(cfg.dc_values)
-        )
+        dc_values = np.array([0.0]) if cfg.dc_device is None else sweep2array(cfg.dc)
         validate_axes(
             result.dc_values,
             np.arange(2, dtype=np.int64),
