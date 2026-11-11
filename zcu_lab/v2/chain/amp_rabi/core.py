@@ -222,12 +222,15 @@ class ChainAmpRabiExp(Experiment[CycleSums, ChainAmpRabiCfg]):
         f, f_err = fit.parameters["f"], fit.errors["f"]
         pi_amp = 1 / (2 * f)
         pi_amp_err = f_err / (2 * f**2)
+        reliability_text = (
+            "unavailable" if fit.reliability is None else f"{fit.reliability:.2g}"
+        )
         _plot_populations(
             plots,
             model,
             fit,
             gains,
-            result=f"pi gain = {pi_amp:.4g} ± {pi_amp_err:.2g}, R = {fit.reliability:.2g}",
+            result=f"pi gain = {pi_amp:.4g} ± {pi_amp_err:.2g}, R = {reliability_text}",
         )
 
         return ChainAmpRabiAnalysis(

@@ -30,8 +30,13 @@ Limits = tuple[np.ndarray, np.ndarray]
 class InnerSolution:
     """Pointwise fit and its explicit optimality/failure outcome.
 
-    table: Fitted table, shape (F,20).
-    residual: Final weighted residual, shape (F,65).
+    table: Shape (F,20). All fitted-column starts are clipped to bounds. When
+        converged, every row is fitted. On early failure, rows before the failed
+        point are fitted, that point holds the returned solver state, and later
+        rows retain their clipped starts without fitting.
+    residual: Shape (F,65). Weighted residuals at returned fitted rows, including
+        the failed point. Later rows remain zero and are not computed. Only when
+        converged may the full residual be used for an overall objective.
     converged: Whether every point meets primary or allowed stalled optimality.
     reason: Optimality reached, or the failed point and solver stop.
     """
@@ -82,8 +87,13 @@ def inner(
     Each point uses bounded least squares with max_nfev=200, ftol=xtol=1e-12
     and gtol=1e-9. Independently check bound-scaled optimality <= 1e-9;
     only ftol/xtol stops may instead satisfy scale-invariant optimality <= 1e-6.
-    Budget exhaustion always fails. Return the table and residual without
-    changing inputs; failure names the point and solver stop.
+    Budget exhaustion always fails. Return without changing inputs. With
+    converged=True, every table row is fitted and every residual row computed.
+    On the first failed point, return early with converged=False and name that
+    point and solver stop. All fitted-column starts have already been clipped;
+    earlier rows are fitted, the failed row holds the returned solver state,
+    and later rows are not fitted. Their residual rows remain uncomputed zeros,
+    so this partial residual must not be used for an overall objective.
     """
     table = table.copy()
     table[:, cols] = np.clip(table[:, cols], *limits)

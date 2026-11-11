@@ -262,6 +262,9 @@ class ChainT2RamseyExp(Experiment[CycleSums, ChainT2RamseyCfg]):
         t2, t2_err = fit.parameters["t2"], fit.errors["t2"]
         detuning, detuning_err = fit.parameters["detuning"], fit.errors["detuning"]
         tf, tf_err = fit.parameters["tf"], fit.errors["tf"]
+        reliability_text = (
+            "unavailable" if fit.reliability is None else f"{fit.reliability:.2g}"
+        )
         _plot_populations(
             plots,
             model,
@@ -270,7 +273,7 @@ class ChainT2RamseyExp(Experiment[CycleSums, ChainT2RamseyCfg]):
             result=(
                 f"T2 = {t2:.4g} ± {t2_err:.2g} us, detuning = {detuning:.4g} ± "
                 f"{detuning_err:.2g} MHz, third state {tf:.3g} ± {tf_err:.2g} us, "
-                f"R = {fit.reliability:.2g}"
+                f"R = {reliability_text}"
             ),
         )
 

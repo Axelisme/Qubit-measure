@@ -224,12 +224,15 @@ class ChainLenRabiExp(Experiment[CycleSums, ChainLenRabiCfg]):
         f, f_err = fit.parameters["f"], fit.errors["f"]
         pi_len = 1 / (2 * f)
         pi_len_err = f_err / (2 * f**2)
+        reliability_text = (
+            "unavailable" if fit.reliability is None else f"{fit.reliability:.2g}"
+        )
         _plot_populations(
             plots,
             model,
             fit,
             lengths,
-            result=f"pi length = {pi_len:.4g} ± {pi_len_err:.2g} us, R = {fit.reliability:.2g}",
+            result=f"pi length = {pi_len:.4g} ± {pi_len_err:.2g} us, R = {reliability_text}",
         )
 
         return ChainLenRabiAnalysis(

@@ -85,13 +85,8 @@ def scaled_covariance(weighted: np.ndarray) -> np.ndarray:
     normal-matrix cutoff (1e-12) for a single joint fit or batched local fits.
     The cutoff then describes collinearity rather than parameter units.
     """
-    scale = np.linalg.norm(weighted, axis=-2)
-    scale = np.where(scale == 0, 1.0, scale)
-    scaled = weighted / scale[..., None, :]
-    inverse = np.linalg.pinv(
-        scaled.swapaxes(-1, -2) @ scaled, rcond=_INFORMATION_RCOND, hermitian=True
-    )
-    return inverse / (scale[..., :, None] * scale[..., None, :])
+    scale, normal = _scaled_normal_matrix(weighted)
+    return _covariance_from_normal(scale, normal)
 
 
 def scaled_information(weighted: np.ndarray) -> ScaledInformation:
@@ -100,15 +95,27 @@ def scaled_information(weighted: np.ndarray) -> ScaledInformation:
     weighted has shape (..., observations, parameters). The null projection
     uses the same relative normal-matrix cutoff as scaled_covariance.
     """
-    scale = np.linalg.norm(weighted, axis=-2)
-    scale = np.where(scale == 0, 1.0, scale)
-    scaled = weighted / scale[..., None, :]
-    values, vectors = np.linalg.eigh(scaled.swapaxes(-1, -2) @ scaled)
+    scale, normal = _scaled_normal_matrix(weighted)
+    values, vectors = np.linalg.eigh(normal)
     null = np.abs(values) <= _INFORMATION_RCOND * np.max(
         np.abs(values), axis=-1, keepdims=True
     )
     projection = (vectors * null[..., None, :]) @ vectors.swapaxes(-1, -2)
-    return ScaledInformation(scaled_covariance(weighted), scale, projection)
+    return ScaledInformation(_covariance_from_normal(scale, normal), scale, projection)
+
+
+def _scaled_normal_matrix(weighted: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Share column scaling and normal matrix for covariance and information."""
+    scale = np.linalg.norm(weighted, axis=-2)
+    scale = np.where(scale == 0, 1.0, scale)
+    scaled = weighted / scale[..., None, :]
+    return scale, scaled.swapaxes(-1, -2) @ scaled
+
+
+def _covariance_from_normal(scale: np.ndarray, normal: np.ndarray) -> np.ndarray:
+    """Restore units for both scaled_covariance and scaled_information."""
+    inverse = np.linalg.pinv(normal, rcond=_INFORMATION_RCOND, hermitian=True)
+    return inverse / (scale[..., :, None] * scale[..., None, :])
 
 
 def model_weights(
