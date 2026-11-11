@@ -309,7 +309,7 @@ Helpers 對其他 device 種類報 TypeError，driver 錯誤原樣傳播。FakeD
 ## 序列與量化入口
 
 - [ZigZag core](twotone/zigzag/core.py) 的 `run()` 明列 register loop 的 pulse 序列。
-- [Actual detune](twotone/time_domain/detune.py) 的公開 docstring 說明 Ramsey／Echo 的 time_scaler、MHz 計算與原生量化失敗語意。
+- [Actual detune](support/detune.py) 的公開 docstring 說明 Ramsey／Echo 的 time_scaler、MHz 計算與原生量化失敗語意。
 
 ## Layout
 
@@ -324,7 +324,7 @@ zcu_lab/
     └── support/          # shared domain helpers
 ```
 
-`support/resonator.py` 集中單 tone 與 mux 的模型 fitting／畫圖 mechanics 及 route prior 解析，不 import GUI。各 caller 保留選擇、失敗隔離與 writeback 政策。Core 不經 `support/measure/` 取得這些 mechanics。
+`support/resonator.py` 集中單 tone 與 mux 的模型 fitting 及 route prior 解析，不 import GUI。各實驗自己持有 Figure 並選擇 renderer，各 caller 保留分析選擇、失敗隔離與 writeback 政策。Core 不經 `support/measure/` 取得這些 mechanics。
 
 `definitions.register_all` 明列 measure adapters，從 caller 的 Registry 取得 `templates.TEMPLATES` 持久範本，填入 startup 的 library catalog。組合根以 `Registry(templates=TEMPLATES)` 注入一次，import 不註冊或操作硬體。Reload 重建 leaf、catalog 與 core-typed Notebook helper，保留 measure／singleshot shared support、workflow support、templates 與框架 identity。修改固定依賴需要重啟。
 
