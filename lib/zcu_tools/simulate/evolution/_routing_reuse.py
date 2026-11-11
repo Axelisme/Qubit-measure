@@ -28,6 +28,7 @@ from .secular import ModelSource
 @dataclass(frozen=True)
 class RoutingSnapshot:
     source: ReferenceType[ModelSource]
+    generation: int
     budget: float
     content: bytes
     inventory: tuple[tuple[bytes, int], ...]
@@ -52,11 +53,14 @@ class RoutingSnapshot:
         direct = populate_multitone_plan(table, source, plan, budget)
         return cls(
             ref(source),
+            source.history.generation,
             budget,
             plan.content_key,
             tuple(counts.items()),
             tuple(
-                source.projected_gate_usage(counts, content=plan.content_key).items()
+                source.history.projected_gate_usage(
+                    counts, content=plan.content_key
+                ).items()
             ),
             single,
             tuple(costs),
@@ -65,17 +69,21 @@ class RoutingSnapshot:
         )
 
     def reuse(self, source: ModelSource, budget: float) -> bool:
-        if self.source() is not source or budget != self.budget:
+        if (
+            self.source() is not source
+            or budget != self.budget
+            or source.history.generation != self.generation
+        ):
             return False
         if not self.inventory:
             return True
         inventory = dict(self.inventory)
-        usage = source.projected_gate_usage(inventory, content=self.content)
+        usage = source.history.projected_gate_usage(inventory, content=self.content)
         # The pricing function is pure in these relevant totals and immutable
         # facts. Identical inputs reuse its answer; changed totals still reselect
         # actual keys/rows, rather than treating counter growth as a route change.
         if tuple(usage.items()) == self.priced_usage:
-            source.record_gate_usage(inventory, content=self.content)
+            source.history.record_gate_usage(inventory, content=self.content)
             return True
         selected = tuple(
             sorted({key for family in self.single for key in family.choose(usage).keys})
@@ -86,7 +94,7 @@ class RoutingSnapshot:
         if selected != self.selected or direct != self.direct:
             # A fresh evolve will record this acquire once, using the new route.
             return False
-        source.record_gate_usage(inventory, content=self.content)
+        source.history.record_gate_usage(inventory, content=self.content)
         return True
 
 

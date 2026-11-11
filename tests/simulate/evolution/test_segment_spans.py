@@ -9,7 +9,7 @@ import pytest
 from scipy.linalg import expm
 from zcu_tools.simulate import evolution
 
-from ._engine import batch, source, track
+from ._engine import batch, track
 
 
 def test_segment_spans_include_neutral_boundaries_and_microwave_plateaus():
@@ -146,28 +146,6 @@ def test_shifts_follow_exact_query_spans_with_zero_gaps_and_repeat_density():
     assert sum(first.paths.segments_by_kernel.values()) == sum(
         map(len, query(timeline))
     )
-
-
-def test_gate_usage_inventory_distinguishes_shift_content_and_identical_repeats():
-    src = source()
-    size = src.initial_density.shape[0]
-    envelope = evolution.EnvelopeSpec(
-        "sampled", np.array([0, 1, 0], complex), np.array([0, 4, 8])
-    )
-    timeline = replace(batch(1, duration=8), tracks=(track(1, envelope, duration=8),))
-    shift = evolution.SegmentShift(0, 8, np.arange(size) * 0.01, np.zeros((size, size)))
-    with closing(evolution.Engine(1)) as engine:
-        engine.evolve(src, (timeline,), cancel=Event())
-        unshifted = src.gate_usage
-        assert unshifted
-        changed = replace(timeline, segment_shifts=((shift,),))
-        engine.evolve(src, (changed,), cancel=Event(), reuse_key=b"gate-shift")
-        combined = src.gate_usage
-        assert len(combined) == 2 * len(unshifted)
-        assert all(combined[key] == value for key, value in unshifted.items())
-        assert engine.reuse(src, b"gate-shift")
-        engine.evolve(src, (changed,), cancel=Event(), reuse_key=b"gate-shift")
-        assert src.gate_usage == combined
 
 
 @pytest.mark.parametrize("excited_shift", [-0.2, -0.1])

@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-11-01
+**Last updated:** 2026-11-12
 
 **讀者：** framework-dev、agent。Segment evolution 的公開輸入、路由與數值邊界。
 
@@ -34,7 +34,7 @@ The exports in [__init__.py](__init__.py) fall into these groups:
 | Purpose | Exports |
 | --- | --- |
 | Execution and results | `Engine`, `EvolutionResult`, `PathDiagnostics`, `FamilyRouting`, `Cancelled`, `SEGMENT_NUMERIC_VERSION` |
-| Engine model source | `ModelSource`, `SecularModel`, `SecularDrive` |
+| Engine model source and routing history | `ModelSource`, `SecularModel`, `SecularDrive`, `RoutingHistory` |
 | Flux description | `FluxExpansion`, `FluxTerm`, `FluxLevel`, `FluxSchedule`, `FluxWaveform` |
 | Batched timelines | `TimelineBatch`, `DriveTrack`, `EnvelopeSpec`, `SegmentShift`, `segment_spans` |
 | Control description | `ControlPulse`, `ControlSequence`, `Envelope`, `PhaseEvent`, `quantize_ns` |
@@ -441,26 +441,47 @@ process-level reference count and the last call restores the original limits;
 external threadpoolctl users must not change them during active evolves.
 `close()` waits for active work, clears routing facts and is idempotent.
 
-`ModelSource` owns distinct acquire content's complete row inventories, separate
-from resident preparations and numerical guards. Each numerical input digest
+`RoutingHistory` owns distinct acquire content's complete row inventories,
+separate from resident preparations and numerical guards. Each numerical input digest
 contributes its canonical gate/multitone key row multiplicities once. Identical
 repeats need no numerical playback, so counting them again would overstate gate
 amortization and select unnecessary builds. Distinct contents still accumulate
 all their rows, including rejected or nonresident keys, before prefix work.
 The digest covers model, initial density, budget and full batch content, not
-sampling sequence or cache state. Cache hits, clearing, eviction, disabled
-residency and Engine replacement do not reset this history. Thus clearing a
-preparation cache and rerunning selects the same current route. Source callers
-serialize acquires, even across Engines. `gate_usage` returns a detached snapshot;
-`record_gate_usage(inventory, content=digest)` returns the keys' current totals.
-`projected_gate_usage` predicts that operation without mutation for route checks.
-Content membership and cumulative counters are source-lifetime history, not an
-LRU: storage grows with distinct content/key pairs and is released at source
-close. Only the current inventory is visited on a hit, not the historical set.
-Callers with history-sensitive preparations use `Engine.reuse` or `Engine.evolve`
-to resolve the current route.
-`ModelSource.close()` clears models and counts after active work drains. It is
-idempotent and leaves immutable builder inputs reusable with a fresh history.
+sampling sequence or cache state. Preparation-cache hits, clearing, eviction,
+disabled residency and Engine replacement do not reset this history. Thus clearing a
+preparation cache and rerunning selects the same current route. Callers serialize
+acquires sharing a history, even across sources and Engines. Content membership
+and cumulative counters are not an LRU: storage grows with distinct content/key
+pairs until the history is cleared or released. Only the current inventory is
+visited on a hit, not the historical set. Model identities namespace usage, so
+different physics do not share amortization.
+
+To retain routing history across model sources or clear it between acquires:
+
+```python
+from zcu_tools.simulate.evolution import ModelSource, RoutingHistory
+
+history = RoutingHistory()
+source = ModelSource(initial_density, build_model, history=history)
+# Reuse history across acquires or lend it to another matching model source.
+history.clear()  # Call after all acquires sharing history have drained.
+```
+
+`ModelSource(..., history=None)` creates its own history by default. Its routing
+and distinct-content counting remain unchanged. `ModelSource.close()` clears
+model caches and this owned history after active work drains. A supplied history
+is borrowed: closing the source does not clear it. Immutable builder inputs
+remain reusable after close.
+
+`history.clear()` discards all usage and content membership. The next evolve
+selects from empty history. It also invalidates every pre-clear preparation:
+`Engine.reuse` returns False until a new evolve registers current-generation
+facts, even if the route would stay the same. Repeated reuse checks cannot
+revive an old preparation. Clearing history does not clear model caches, alter
+initial density, reset sampling RNG or reset a simulation clock. It owns none
+of those states. Callers with history-sensitive preparations use `Engine.reuse`
+or `Engine.evolve` to resolve the current route.
 
 `SEGMENT_NUMERIC_VERSION` is `segment-engine-v7`. `simulators.ftf.environment` owns private
 replay and checks backend, model, numerical, RNG and dependency versions before

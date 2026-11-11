@@ -14,9 +14,12 @@ from zcu_tools.simulate.evolution import (
     FluxSchedule,
     FluxWaveform,
     ModelSource,
+    RoutingHistory,
     SecularDrive,
     SecularModel,
+    SegmentShift,
     TimelineBatch,
+    segment_spans,
 )
 from zcu_tools.simulate.evolution.kernel import (
     ApplyContext,
@@ -30,11 +33,11 @@ from zcu_tools.simulate.evolution.workplan import WorkPlan
 from tests.simulate.evolution.contract.kernel_suite import KernelCase, reference
 
 
-def source():
+def source(history: RoutingHistory | None = None, identity: str = "single-gate"):
     x = np.array([[0, 0.002, 0], [0.002, 0, 0.001], [0, 0.001, 0]], complex)
     model = SecularModel(
         (0,),
-        "single-gate",
+        identity,
         np.array([0.0, 0.6, 1.3]),
         np.eye(3, dtype=complex),
         (SecularDrive("drive", x, np.zeros_like(x)),),
@@ -43,7 +46,11 @@ def source():
     )
     v = np.array([1, 1j, 0.3], complex)
     v /= np.linalg.norm(v)
-    return ModelSource(np.outer(v, v.conj()), lambda level: replace(model, level=level))
+    return ModelSource(
+        np.outer(v, v.conj()),
+        lambda level: replace(model, level=level),
+        history=history,
+    )
 
 
 def envelope():
@@ -108,6 +115,131 @@ def test_source_history_amortizes_later_small_acquire_and_invalidates_old_memo()
         engine.evolve(src, (batch(160),), cancel=Event())
         later = engine.evolve(src, (small,), cancel=Event())
         assert later.paths.segments_by_kernel.get("single_tone_gate") == 2
+
+
+def test_borrowed_history_survives_source_close_and_amortizes_later_acquire():
+    history = RoutingHistory()
+    first = source(history)
+    with closing(Engine(1)) as engine:
+        cold = engine.evolve(first, (batch(2),))
+        assert cold.paths.segments_by_kernel.get("shaped_sambe") == 2
+        engine.evolve(first, (batch(160),))
+        first.close()
+        later = engine.evolve(source(history), (batch(2),))
+        assert later.paths.segments_by_kernel.get("single_tone_gate") == 2
+
+
+@pytest.mark.parametrize("driven", [False, True])
+def test_clear_invalidates_retained_preparation_until_evolved_again(driven):
+    history = RoutingHistory()
+    src = source(history)
+    small = batch(2)
+    if not driven:
+        small = replace(small, tracks=())
+    with closing(Engine(1)) as engine:
+        before = engine.evolve(src, (small,), reuse_key=b"small")
+        assert engine.reuse(src, b"small")
+        history.clear()
+        assert not engine.reuse(src, b"small")
+        assert not engine.reuse(src, b"small")
+        after = engine.evolve(src, (small,), reuse_key=b"small")
+        assert engine.reuse(src, b"small")
+        assert after.paths.segments_by_kernel == before.paths.segments_by_kernel
+        np.testing.assert_array_equal(after.densities, before.densities)
+
+
+def test_clear_restores_cold_route_without_changing_density_or_model_cache():
+    history = RoutingHistory()
+    src = source(history)
+    small = batch(2)
+    with closing(Engine(1)) as engine:
+        cold = engine.evolve(src, (small,))
+        model = src.model((0,))
+        initial = src.initial_density.copy()
+        engine.evolve(src, (batch(160),))
+        warm = engine.evolve(src, (small,), reuse_key=b"small")
+        assert warm.paths.segments_by_kernel.get("single_tone_gate") == 2
+        history.clear()
+        history.clear()
+        assert not engine.reuse(src, b"small")
+        reset = engine.evolve(src, (small,), reuse_key=b"small")
+        assert reset.paths.segments_by_kernel.get("shaped_sambe") == 2
+        np.testing.assert_array_equal(reset.densities, cold.densities)
+        np.testing.assert_array_equal(src.initial_density, initial)
+        assert src.model((0,)) is model
+        assert engine.reuse(src, b"small")
+
+
+@pytest.mark.parametrize("routing_cache_bytes", [0, 4 * 1024**2])
+def test_identical_content_does_not_amortize_gate_even_after_source_replacement(
+    routing_cache_bytes,
+):
+    history = RoutingHistory()
+    src = source(history)
+    small = batch(2)
+    with closing(Engine(1, routing_cache_bytes=routing_cache_bytes)) as engine:
+        # If duplicate contents counted again, 80 repeats would pay for a gate.
+        for _ in range(80):
+            result = engine.evolve(src, (small,))
+            assert result.paths.segments_by_kernel.get("shaped_sambe") == 2
+        src.close()
+        later = engine.evolve(source(history), (small,))
+        assert later.paths.segments_by_kernel.get("shaped_sambe") == 2
+
+
+def test_shared_history_keeps_different_physics_independent():
+    history = RoutingHistory()
+    src = source(history)
+    changed_model = replace(
+        src.model((0,)),
+        identity="different-energies",
+        energies_ghz=np.array([0.0, 0.6001, 1.3001]),
+    )
+    other = ModelSource(
+        src.initial_density,
+        lambda level: replace(changed_model, level=level),
+        history=history,
+    )
+    with closing(Engine(1)) as engine:
+        engine.evolve(src, (batch(160),))
+        warm = engine.evolve(src, (batch(2),))
+        assert warm.paths.segments_by_kernel.get("single_tone_gate") == 2
+        independent = engine.evolve(other, (batch(2),))
+        assert independent.paths.segments_by_kernel.get("shaped_sambe") == 2
+        engine.evolve(other, (batch(160),))
+        later = engine.evolve(other, (batch(2),))
+        assert later.paths.segments_by_kernel.get("single_tone_gate") == 2
+
+
+def test_shifted_content_has_independent_amortization_and_stable_reuse():
+    src = source(RoutingHistory())
+
+    def shifted(count):
+        timeline = batch(count)
+        correction = np.array([0.0, 0.0001, 0.0001])
+        return replace(
+            timeline,
+            segment_shifts=tuple(
+                tuple(
+                    SegmentShift(a, b, correction, np.zeros((3, 3))) for a, b in spans
+                )
+                for spans in segment_spans(timeline)
+            ),
+        )
+
+    with closing(Engine(1)) as engine:
+        engine.evolve(src, (batch(160),))
+        warm = engine.evolve(src, (batch(2),))
+        assert warm.paths.segments_by_kernel.get("single_tone_gate") == 2
+        cold_shifted = engine.evolve(src, (shifted(2),), reuse_key=b"shifted")
+        assert cold_shifted.paths.segments_by_kernel.get("shaped_sambe") == 2
+        assert engine.reuse(src, b"shifted")
+        engine.evolve(src, (shifted(160),))
+        assert not engine.reuse(src, b"shifted")
+        later = engine.evolve(src, (shifted(2),), reuse_key=b"shifted")
+        assert later.paths.segments_by_kernel.get("single_tone_gate") == 2
+        assert engine.reuse(src, b"shifted")
+        np.testing.assert_allclose(later.densities, cold_shifted.densities, atol=2e-3)
 
 
 def test_source_acquire_order_has_same_routes_with_and_without_cache_retention():

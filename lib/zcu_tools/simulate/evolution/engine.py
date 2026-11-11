@@ -584,6 +584,8 @@ class Engine:
         this acquire's complete inventory and permits reuse with no numerical
         work. False records nothing: evolve the full acquire instead. Eviction,
         a different source, disabled residency and a changed route return False.
+        Clearing source.history also returns False for old preparations until
+        evolve registers new facts, even if the selected route stays the same.
         Calls sharing a source must serialize the check and subsequent evolve.
         Optional cancel raises Cancelled when set; None has no cancellation
         token. A closed engine raises RuntimeError.
