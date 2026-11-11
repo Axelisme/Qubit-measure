@@ -152,14 +152,14 @@ uv run --directory <worktree> --no-sync -- \
 | 全部案例，包含模擬 | `-m ""` | 是 |
 
 完整效能對照用 `not sim` 與 `sim` 兩個互斥選集，不能把 `not sim` 與空 marker 的時間相加。
-完整選集與 full Pyright 必須先取得共用 heavy queue 的明確 slot，再由 Orchestrator
-經 `.agent_state/tools/run-heavy.sh` 執行。該 runner 預設 4 workers，使用 headless GUI
-與數值函式庫 threads=1；不要為了量測另開未授權的 full 暖機。
+完整選集與 full Pyright 由 Orchestrator 用下方命令直接執行。同一台機器上有其他 task 在跑完整選集、
+full Pyright 或效能量測時，先協調時段，錯開執行。需要 Qt 的測試由所在目錄的 conftest（例如 `tests/gui/conftest.py`）設為 offscreen，
+`tests/conftest.py` 把每個 xdist worker 的數值函式庫 threads 預設為 1；不要為了量測另開未授權的 full 暖機。
 
 4 workers 的建議依據見 [worker 數比較](../docs/reference/test-speed-comparisons.md#worker-數比較)。
 保留 `worksteal`，不改 pytest 的預設 marker。
 
-全樹驗證的時點依 task 適用流程安排，並先取得 heavy slot。依變更範圍選擇 marker expression，兩種都包含 slow：
+全樹驗證的時點依 task 適用流程安排，並依上段先和其他重計算錯開時段。依變更範圍選擇 marker expression，兩種都包含 slow：
 
 - 未改 `lib/zcu_tools/simulate/`，用 `-m "not sim"`。
 - 改到 `lib/zcu_tools/simulate/`，用 `-m ""`，包含所有測試。
