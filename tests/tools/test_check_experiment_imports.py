@@ -9,6 +9,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.requires_subprocess
+
 
 def _lint_sources(
     root: Path, sources: dict[str, str]
