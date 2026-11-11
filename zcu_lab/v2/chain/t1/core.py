@@ -46,6 +46,7 @@ from zcu_tools.program.v2 import (
     TimelineBuilder,
     chain_cycle_sums,
 )
+from zcu_tools.utils.process import rotate2real
 
 from zcu_lab.v2.chain._cycle import (
     AUGMENTED_SIZE,
@@ -57,7 +58,11 @@ from zcu_lab.v2.chain._cycle import (
     restore_cycle_sums,
 )
 from zcu_lab.v2.support import live_line
-from zcu_lab.v2.twotone.time_domain.t1.core import t1_signal2real
+
+
+def t1_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
+    """Project mean complex IQ onto its principal real axis for the T1 seed."""
+    return rotate2real(signals).real
 
 
 class ChainT1Cfg(ConfigBase):
