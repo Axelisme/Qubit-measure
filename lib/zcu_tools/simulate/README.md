@@ -1,8 +1,8 @@
 # Numeric simulation tools
 
-**Last updated:** 2026-11-01，simulators package ownership
+**Last updated:** 2026-11-11，measured performance without external evidence
 
-**讀者：** framework-dev、agent。查閱數值模擬的責任邊界、快取契約與效能證據入口。
+**讀者：** framework-dev、agent。查閱數值模擬的責任邊界、快取契約與實測效能。
 
 `evolution` and `adc` are independent numeric tools. Neither imports QICK,
 DeviceManager, resources, GUI, YAML or an environment. The existing fluxonium
@@ -17,7 +17,7 @@ first sample returns the reference value and sets the time origin.
 `simulators.single_fluxonium.environment.drift.CoherenceDrift` composes loss streams and
 owns acquisition settings and private truth I/O.
 
-## Measured performance and reproduction
+## Measured performance
 
 Call-local reuse of directional-loss operators and matrix elements reduced the
 fixed single-fluxonium flux scan's resident-warm acquisition wall time from
@@ -37,28 +37,13 @@ cProfile. Each pair represents a possible first measurement after launching a
 GUI process. This is not GUI window startup time, and the four savings must not
 be added. Changed sources, versions or new signatures can still require compile.
 
-These scripts live in the separately retained `sim-bottleneck-opt` task evidence
-bundle, not in a fresh clone or an installed benchmark CLI. Its `scratch/`
-contains the following reproduction entry points:
-
-- `baseline/README.md` and `baseline/run.sh` define the original single/FTF
-  workloads through public experiment `run` and program acquire.
-- `warm-readout/implementation/report.md` describes copying the existing
-  `compare/run.sh` and inputs to a new evidence directory for the old/new pair.
-- `cold-cache/report.md` and `cold-cache/run.sh` define the two-fresh-process
-  comparison. Flux uses 21 × 41 points, reps 100; Rabi uses 41 gains, reps 200.
-- `six-baseline/README.md` and `six-baseline/launch.sh` define six-tone Rabi
-  and T1 plus the separate single-tone range and flux workloads.
-
-Use the original host with the saved evidence bundle, or preserve the bundle and
-adapt its host-specific paths before rerunning elsewhere. An orchestrator must
-provide a live worktree at each measurement's source revision with a locked
-quality environment. Set the script's lane override; archived lanes no longer
-exist. The evidence instructions preserve original configurations, cache state,
-heavy-slot coordination, single-thread limits and production pacing. Python
-entry points use `uv run --directory <live-lane> --no-sync --`. The bundle's
-`scratch/final-report.md` records the numbers, source manifests and limitations.
-No benchmark CLI is provided by this module.
+The cold-cache pairs ran each workload in two fresh processes, first with an
+empty cache and then with a disk hit. Flux scans used 21 × 41 points and 100
+repetitions; amplitude Rabi used 41 gains and 200 repetitions. All runs called
+the public experiment `run` and program acquire with production pacing and one
+native thread. The measurement scripts are not part of the repository, and this
+module provides no benchmark CLI; the revisions and workloads above are the
+record of these comparisons.
 
 ## Numba machine-code cache
 
