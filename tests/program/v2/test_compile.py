@@ -8,13 +8,21 @@ _initialize / _body / compile pipeline.
 from __future__ import annotations
 
 from collections.abc import Mapping
+from math import inf, nextafter
 from pathlib import Path
 
 import pytest
 import yaml
 from qick import QickConfig
+from qick.asm_v2 import QickParam
 from zcu_tools.program import build_soccfg
-from zcu_tools.program.v2 import Pulse, PulseCfg, TimelineBuilder, TimelineProgramV2
+from zcu_tools.program.v2 import (
+    Pulse,
+    PulseCfg,
+    TableParam,
+    TimelineBuilder,
+    TimelineProgramV2,
+)
 from zcu_tools.program.v2.modules import Delay, SoftDelay
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.sweep import SweepCfg
@@ -151,6 +159,141 @@ def test_frequency_conversion_preserves_other_dependency_failures(
         builder.build()
 
     assert error.value is failure
+
+
+def _gain_builder(
+    soccfg: QickConfig, gain: float | QickParam | SweepCfg, multiplier: float = 1.0
+) -> TimelineBuilder:
+    builder = TimelineBuilder(soccfg)
+    if isinstance(gain, SweepCfg):
+        gain = builder.add_sweep("gain", gain)
+    builder.emit(
+        Pulse(
+            "drive",
+            PulseCfg(
+                ch=0,
+                nqz=1,
+                freq=100.0,
+                gain=multiplier * gain,
+                waveform=ConstWaveformCfg(length=0.1),
+            ),
+            pulse_id="gain_probe",
+        )
+    )
+    return builder
+
+
+@pytest.mark.parametrize("gain", [1.2, -1.2, nextafter(1.0, inf)])
+def test_scalar_gain_outside_full_scale_fails_at_compile(
+    mock_soccfg: QickConfig, gain: float
+) -> None:
+    builder = _gain_builder(mock_soccfg, gain)
+
+    with pytest.raises(ValueError, match="gain range") as error:
+        builder.build()
+
+    message = str(error.value)
+    assert "gain_probe" in message
+    assert "generator 0" in message
+    assert f"[{gain}, {gain}]" in message
+    assert "[-1, 1]" in message
+
+
+@pytest.mark.parametrize("gain", [-1.0, 0.0, 1.0])
+def test_scalar_gain_including_full_scale_compiles(
+    mock_soccfg: QickConfig, gain: float
+) -> None:
+    assert _gain_builder(mock_soccfg, gain).build().binprog["pmem"] is not None
+
+
+@pytest.mark.parametrize(
+    ("start", "stop", "multiplier", "actual_range"),
+    [
+        (-0.5, 1.2, 1.0, "[-0.5, 1.2]"),
+        (1.2, -0.5, 1.0, "[-0.5, 1.2]"),
+        (-1.2, 0.5, 1.0, "[-1.2, 0.5]"),
+        (0.5, -1.2, 1.0, "[-1.2, 0.5]"),
+        (-0.6, 0.6, 2.0, "[-1.2, 1.2]"),
+        (0.6, -0.6, -2.0, "[-1.2, 1.2]"),
+    ],
+)
+def test_linear_gain_checks_actual_range_before_conversion(
+    mock_soccfg: QickConfig,
+    start: float,
+    stop: float,
+    multiplier: float,
+    actual_range: str,
+) -> None:
+    sweep = SweepCfg(start=start, stop=stop, step=(stop - start) / 2, expts=3)
+    builder = _gain_builder(mock_soccfg, sweep, multiplier)
+
+    with pytest.raises(ValueError, match="gain range") as error:
+        builder.build()
+
+    message = str(error.value)
+    assert "gain_probe" in message
+    assert "generator 0" in message
+    assert actual_range in message
+    assert "[-1, 1]" in message
+
+
+@pytest.mark.parametrize("start, stop", [(-1.0, 1.0), (1.0, -1.0)])
+def test_linear_gain_full_scale_endpoints_compile(
+    mock_soccfg: QickConfig, start: float, stop: float
+) -> None:
+    sweep = SweepCfg(start=start, stop=stop, step=stop, expts=3)
+    assert _gain_builder(mock_soccfg, sweep).build().binprog["pmem"] is not None
+
+
+@pytest.mark.parametrize(
+    ("middle", "actual_range"), [(1.2, "[0.0, 1.2]"), (-1.2, "[-1.2, 0.0]")]
+)
+def test_table_gain_checks_interior_extrema(
+    mock_soccfg: QickConfig, middle: float, actual_range: str
+) -> None:
+    builder = _gain_builder(mock_soccfg, TableParam("gain", [0.0, middle, 0.0]))
+    builder.add_loop("gain", 3)
+
+    with pytest.raises(ValueError, match="gain range") as error:
+        builder.build()
+
+    message = str(error.value)
+    assert "gain_probe" in message
+    assert "generator 0" in message
+    assert actual_range in message
+    assert "[-1, 1]" in message
+
+
+def test_table_gain_full_scale_and_zero_compile(mock_soccfg: QickConfig) -> None:
+    builder = _gain_builder(mock_soccfg, TableParam("gain", [-1.0, 0.0, 1.0]))
+    builder.add_loop("gain", 3)
+    assert builder.build().binprog["pmem"] is not None
+
+
+@pytest.mark.parametrize("gain", [1.2, -1.2])
+def test_native_pulse_gain_cannot_bypass_compile_check(
+    mock_soccfg: QickConfig, gain: float
+) -> None:
+    class NativeProgram(TimelineProgramV2):
+        def _initialize(self, cfg: None) -> None:
+            del cfg
+            self.declare_gen(0, nqz=1)
+            self.add_pulse(
+                0,
+                "native_gain",
+                style="const",
+                freq=100,
+                phase=0,
+                gain=gain,
+                length=0.1,
+            )
+
+        def _body(self, cfg: None) -> None:
+            del cfg
+            self.pulse(0, "native_gain")
+
+    with pytest.raises(ValueError, match="native_gain.*generator 0.*gain range"):
+        NativeProgram(mock_soccfg)
 
 
 def test_empty_program_compiles():

@@ -1,6 +1,6 @@
 # program/v2
 
-**Last updated:** 2026-11-10，Rπ 逐 cycle 累加
+**Last updated:** 2026-11-11，pulse gain 編譯檢查
 
 **讀者：** lab-author、framework-dev、agent。查找 V2 program 公開 API、型別契約與編譯規則的 owner。
 
@@ -113,6 +113,10 @@ Registry identity 與 lowering 使用有效 cfg，`set_param()` 則修改接收�
 
 `SweepCfg` 驗證 start、stop、step 與 expts 的一致性，不限制單位或 gain 範圍。
 Scalar `Gain` 保留 [-1, 1] 的欄位限制，單位為 DAC full-scale fraction，a.u.。
+`MyProgramV2.add_pulse` 在 QICK 轉換前檢查 pulse gain。Scalar 檢查本身，
+`QickParam` 與 `TableParam` 檢查運算後的 `minval()`／`maxval()`。
+任何值超出 [-1, 1] 都 raise ValueError，錯誤列出 pulse、generator、實際範圍與允許範圍。
+Mux 的 `declare_gen(mux_gains=...)` 不經此入口，尚無這項檢查。
 
 ## 呼叫端 YAML 編譯設定
 

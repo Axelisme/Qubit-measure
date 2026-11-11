@@ -172,7 +172,7 @@ def resolve_waveform_ref(value: Any, info: ValidationInfo) -> Any:
     return value
 
 
-RaiseWaveformCfg: TypeAlias = Annotated[
+EnvelopeWaveformCfg: TypeAlias = Annotated[
     CosineWaveformCfg | GaussWaveformCfg | DragWaveformCfg | ArbWaveformCfg,
     BeforeValidator(resolve_waveform_ref),
     Field(discriminator="style"),
@@ -182,7 +182,7 @@ RaiseWaveformCfg: TypeAlias = Annotated[
 class FlatTopWaveformCfg(AbsWaveformCfg):
     style: Literal["flat_top"] = "flat_top"
     length: float | QickParam
-    raise_waveform: RaiseWaveformCfg
+    raise_waveform: EnvelopeWaveformCfg
 
     def build(self, name: str) -> FlatTopWaveform:
         return FlatTopWaveform(name, self)
@@ -255,7 +255,7 @@ def _raise_from_core(
     core_cfg: core_cfgs.RaiseWaveformCfg,
     *,
     context: CfgValidationContext | None,
-) -> RaiseWaveformCfg:
+) -> EnvelopeWaveformCfg:
     """Convert a non-flat core envelope, resolving arb paths only at this seam."""
     if isinstance(core_cfg, core_cfgs.ArbWaveformCfg):
         if context is None or context.assets is None:
@@ -264,7 +264,7 @@ def _raise_from_core(
             data=core_cfg.data,
             path=context.assets.path_for(core_cfg.data).as_posix(),
         )
-    return TypeAdapter(RaiseWaveformCfg).validate_python(core_cfg.to_dict())
+    return TypeAdapter(EnvelopeWaveformCfg).validate_python(core_cfg.to_dict())
 
 
 class QickWaveformKwargs(TypedDict):

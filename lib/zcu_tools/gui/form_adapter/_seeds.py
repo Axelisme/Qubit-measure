@@ -23,11 +23,12 @@ from zcu_tools.resources.entry.roles import RoleResolutionError
 from ._types import branch_tag, members, type_tag
 
 
-def slot_key(slot: Slot, env: FormEnv) -> str | None:
+def slot_key(slot: Slot, env: FormEnv, *, waveform: bool = False) -> str | None:
     path = expand_path(slot.path)
     if env.library is None:
         return None
-    if not path.startswith("$") and path in env.library.module_keys():
+    keys = env.library.waveform_keys() if waveform else env.library.module_keys()
+    if not path.startswith("$") and path in keys:
         return path
     if env.parameters is None:
         return None
@@ -35,7 +36,7 @@ def slot_key(slot: Slot, env: FormEnv) -> str | None:
         key = env.parameters.library_key(path)
     except (ModuleSlotError, RoleResolutionError):
         return None
-    return key if key in env.library.module_keys() else None
+    return key if key in keys else None
 
 
 def scalar_seed(seed: TemplateSeed) -> JsonValue:

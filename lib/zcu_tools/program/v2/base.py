@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from numbers import Real
 from typing import Literal, overload
 
 import numpy as np
@@ -12,6 +13,7 @@ from .ir import IRCompileMixin
 from .macro import ImproveAsmV2
 from .modules.registry import PulseRegistry
 from .simulation import SimulationAcquireMixin
+from .utils import is_qick_param
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +56,32 @@ class MyProgramV2(  # pyright: ignore[reportIncompatibleMethodOverride]
         )
 
         logger.debug("ASM:\n%s", self.asm())
+
+    def add_pulse(self, ch: int | list[int], name: str, **kwargs: object) -> None:
+        """Declare a QICK pulse after checking its normalized gain.
+
+        ch selects one generator or a list sharing a pulse definition; name is
+        the program-local pulse identifier. kwargs are native QICK pulse style
+        parameters, including optional gain in DAC full-scale fractions.
+        Scalar gains and the minval/maxval of QickParam (including TableParam)
+        must lie in [-1, 1]. Otherwise ValueError names the pulse, generator and
+        actual/allowed range before QICK conversion. Parameters
+        without gain (such as mux masks) and other QICK errors pass through.
+        """
+        gain = kwargs.get("gain")
+        if is_qick_param(gain):
+            minimum, maximum = gain.minval(), gain.maxval()
+        elif isinstance(gain, Real):
+            minimum = maximum = float(gain)
+        else:
+            super().add_pulse(ch, name, **kwargs)
+            return
+        if minimum < -1 or maximum > 1:
+            raise ValueError(
+                f"pulse {name!r} on generator {ch} gain range "
+                f"[{minimum}, {maximum}] is outside allowed range [-1, 1]"
+            )
+        super().add_pulse(ch, name, **kwargs)
 
     def freq2reg(
         self, f: float | QickParam, gen_ch: int = 0, ro_ch: int | None = None

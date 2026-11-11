@@ -153,7 +153,7 @@ def test_fractional_hardware_span_matches_full_scale_host_words(
     ("maxv", "maxv_scale", "middle_word"),
     [(32766, 1.0, 9829), (30000, 1.0, 9000), (32766, 0.9, 8846), (32766, 0.8, 7863)],
 )
-@pytest.mark.parametrize("scaler", [1.0, 2.0, 0.3, -1.0])
+@pytest.mark.parametrize("scaler", [1.0, 2.0, 0.3, -1.0, -0.3])
 def test_custom_gain_array_preserves_shape_and_compiled_boundary_words(
     maxv, maxv_scale, middle_word, scaler
 ) -> None:

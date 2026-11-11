@@ -12,6 +12,7 @@ from __future__ import annotations
 from zcu_tools.cfg_model import (
     BathResetSpec,
     Expr,
+    GaussWaveformCfg,
     MuxReadoutSpec,
     PulseReadoutSpec,
     PulseResetSpec,
@@ -98,6 +99,7 @@ def ro(
 
 # Insertion order preserves library creation menus.
 TEMPLATES: dict[str, TemplateDef] = {
+    "waveform:gauss": TemplateDef(GaussWaveformCfg, "Gaussian envelope", {}),
     "res_probe": TemplateDef(
         PulseSpec,
         "Resonator probe",

@@ -1,4 +1,4 @@
-"""Measure GUI wiring for two-generator STIRAP scans and saved-readout analysis."""
+"""Measure GUI wiring for STIRAP detuning and saved-readout analysis."""
 
 from pathlib import Path
 
@@ -8,24 +8,26 @@ from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import Adapter, Analysis, AnalyzeRequest
 from zcu_tools.plotting.plots import Plots
 
-from .core import StirapCfg, StirapExp, StirapResult
+from .core import StirapDetuningCfg, StirapDetuningExp, StirapDetuningResult
 from .form import make_form
 
 
-def _run(cfg: StirapCfg, *, context: RunContext) -> RunRecord[StirapCfg, StirapResult]:
-    return RunRecord(cfg=cfg, result=StirapExp().run(cfg, context=context))
+def _run(
+    cfg: StirapDetuningCfg, *, context: RunContext
+) -> RunRecord[StirapDetuningCfg, StirapDetuningResult]:
+    return RunRecord(cfg=cfg, result=StirapDetuningExp().run(cfg, context=context))
 
 
 def _analyze(
-    req: AnalyzeRequest[RunRecord[StirapCfg, StirapResult], None],
+    req: AnalyzeRequest[RunRecord[StirapDetuningCfg, StirapDetuningResult], None],
     *,
     plots: Plots,
 ) -> Centroid3Summary:
-    return StirapExp().analyze(req.run_result, None, plots=plots)
+    return StirapDetuningExp().analyze(req.run_result, None, plots=plots)
 
 
 DEFINITION = Adapter(
-    spec=StirapExp.AXES_SPEC,
+    spec=StirapDetuningExp.AXES_SPEC,
     make_form=make_form,
     run=_run,
     guide=Path(__file__).with_name("guide.md"),

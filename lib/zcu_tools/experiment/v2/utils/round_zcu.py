@@ -153,9 +153,11 @@ def round_zcu_gain(
     after multiplication by finite nonzero ``scaler`` (negative is allowed).
     Target words retain truncation toward zero using ``soccfg.get_maxv``.
     Each returned float is nearest to word / (scaler * maxv) and reproduces
-    that word through QICK's constant-pulse conversion. Array shape is retained.
-    Zero words return 0.0. Raise ValueError for invalid scaler or generator scale,
-    or RuntimeError if eight outward ULP adjustments cannot reproduce a word.
+    that word through QICK's constant-pulse conversion. For target words within
+    full scale, scaler * coordinate also stays within [-1, 1]. Array shape is
+    retained. Zero words return 0.0. Raise ValueError for invalid scaler or
+    generator scale, or RuntimeError if eight ULP adjustments cannot reproduce
+    a word within its normalized range. Out-of-range targets are not saturated.
     """
     maxv, qick_scale = _gain_scales(soccfg, gen_ch, scaler)
 
@@ -183,10 +185,18 @@ def _stable_gain(word: int, maxv: float, scaler: float, qick_scale: float) -> fl
     if word == 0:
         return 0.0
     candidate = word / (scaler * maxv)
+    bounded = abs(word) <= maxv
+    # Division followed by nonbinary scaling can overshoot full scale by one
+    # ULP. Search from the nearest legal coordinate, never change the word.
+    if bounded and abs(scaler * candidate) > 1:
+        candidate = float(np.nextafter(candidate, 0.0))
     direction = math.copysign(math.inf, candidate)
     # Search in float order so the first match is the nearest to the ideal.
     for adjustment in range(9):
-        if to_int(scaler * candidate, qick_scale, parname="gain", trunc=True) == word:
+        normalized = scaler * candidate
+        if bounded and abs(normalized) > 1:
+            break
+        if to_int(normalized, qick_scale, parname="gain", trunc=True) == word:
             return float(candidate)
         if adjustment == 8:
             break

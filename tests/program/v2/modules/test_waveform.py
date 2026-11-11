@@ -4,7 +4,7 @@ from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 from zcu_tools.cfg_model import ArbWaveformCfg as CoreArbWaveformCfg
 from zcu_tools.cfg_model import CfgValidationContext
 from zcu_tools.cfg_model import FlatTopWaveformCfg as CoreFlatTopWaveformCfg
@@ -18,6 +18,7 @@ from zcu_tools.program.v2.modules.waveform import (
     CosineWaveformCfg,
     DragWaveform,
     DragWaveformCfg,
+    EnvelopeWaveformCfg,
     FlatTopWaveform,
     FlatTopWaveformCfg,
     GaussWaveform,
@@ -25,6 +26,31 @@ from zcu_tools.program.v2.modules.waveform import (
     WaveformCfgFactory,
 )
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase, ArbWaveformError
+
+
+def test_independent_envelope_fields_declare_their_selected_shapes(mock_prog):
+    class Pair(BaseModel):
+        first: EnvelopeWaveformCfg
+        second: EnvelopeWaveformCfg
+
+    pair = Pair.model_validate(
+        {
+            "first": {"style": "cosine", "length": 0.12},
+            "second": {"style": "gauss", "length": 0.21, "sigma": 0.035},
+        }
+    )
+    pair.first.build("first").create(mock_prog, 0)
+    pair.second.build("second").create(mock_prog, 1)
+    assert [event.kwargs for event in mock_prog.events_of("asm")] == [
+        {"op": "add_cosine", "ch": 0, "name": "first", "length": 0.12},
+        {
+            "op": "add_gauss",
+            "ch": 1,
+            "name": "second",
+            "length": 0.21,
+            "sigma": 0.035,
+        },
+    ]
 
 
 def test_waveform_cfg_namespace_builds_nested_flat_top(tmp_path):

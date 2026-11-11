@@ -1,7 +1,7 @@
 """Persistent module input identities and their source/literal policies."""
 
 from collections.abc import Mapping
-from typing import Annotated, Literal
+from typing import Annotated, ClassVar, Literal
 
 from pydantic import Field, JsonValue
 
@@ -22,16 +22,19 @@ class KeyRef(FormModel):
 
 
 class ModuleRef(KeyRef):
-    """Library module reference; no inline override or cached materialization.
+    """Library module/waveform reference without cached materialization.
 
-    kind selects ref. name is an actual LibrarySnapshot module key, not a role
-    or alias. A used ref needs captured library; missing/invalid names fail at
-    the consuming path through public library reads, never fall back to defaults.
+    kind selects ref. name is an actual LibrarySnapshot key, not a role or alias.
+    spec_kind selects the library namespace, module by default; generated waveform
+    fields use waveform. A used ref needs captured library; missing/invalid names
+    fail at the consuming path, never fall back to defaults.
     """
+
+    spec_kind: ClassVar[Literal["module", "waveform"]] = "module"
 
     @classmethod
     def check_sources(cls, data: Mapping[str, JsonValue], env: FormEnv) -> None:
-        """Require a captured module Spec for a literal authored name.
+        """Require a captured Spec in spec_kind for a literal authored name.
 
         Missing/non-string names remain ordinary validation errors. Missing
         capture or rejected key raises field_error at name. Unexpected source
@@ -43,10 +46,14 @@ class ModuleRef(KeyRef):
         if env.library is None:
             raise field_error(("name",), "Missing captured library")
         try:
-            env.library.module_spec(name)
+            if cls.spec_kind == "waveform":
+                env.library.waveform_spec(name)
+            else:
+                env.library.module_spec(name)
         except KeyError as exc:
             raise field_error(
-                ("name",), f"Module {name!r} is not in the captured library"
+                ("name",),
+                f"{cls.spec_kind.capitalize()} {name!r} is not in the captured library",
             ) from exc
         except ValueError as exc:
             raise field_error(("name",), str(exc)) from exc

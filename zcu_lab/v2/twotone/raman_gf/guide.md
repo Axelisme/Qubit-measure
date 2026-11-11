@@ -15,6 +15,9 @@ For example, a 0.1 us asset uses the formula
 `sqrt(abs(sin(pi*t/0.1)))` over a single 0.1 us segment with peak normalization.
 Choose that asset in the Raman drive waveform editor.
 This scan does not generate a second carrier or a pair of Lambda pulses.
+For two-generator Lambda pulses, use the separate STIRAP
+[delay](../stirap/delay/guide.md), [amplitude](../stirap/amplitude/guide.md) or
+[detuning](../stirap/detuning/guide.md) experiment.
 
 Calibrate the readout using singleshot/qutrit_population at the same readout
 settings. The final population analysis requires the saved readout module's

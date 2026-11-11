@@ -22,12 +22,14 @@ from qick.asm_v2 import QickParam
 
 from zcu_tools.cfg_model import (
     AbsModuleCfg,
+    AbsWaveformCfg,
     ConfigBase,
     ModuleCfgFactory,
     ModuleSpec,
     Slot,
     Template,
     TemplateDef,
+    WaveformCfgFactory,
     WaveformSpec,
 )
 from zcu_tools.gui.form import (
@@ -47,6 +49,10 @@ from zcu_tools.gui.form import (
 )
 from zcu_tools.program.v2.modules import AbsModuleCfg as NativeModuleBase
 from zcu_tools.program.v2.modules import ModuleCfgFactory as NativeModuleFactory
+from zcu_tools.program.v2.modules.waveform import AbsWaveformCfg as NativeWaveformBase
+from zcu_tools.program.v2.modules.waveform import (
+    WaveformCfgFactory as NativeWaveformFactory,
+)
 
 from ._converters import model_converters, module_converter
 from ._display import field_display
@@ -65,22 +71,18 @@ from ._seeds import (
     template_input,
     template_seed_tree,
 )
-from ._types import annotated_type, members, type_tag, union_type
+from ._types import annotated_type, members, union_type
 from .input_types import KeyRef, ModuleInline, ModuleRef
 from .logical import ModuleSelector
-
-_SPEC_BY_TAG = {
-    type_tag(model): model
-    for model in members(ModuleSpec)
-    if isinstance(model, type) and issubclass(model, ConfigBase)
-}
 
 
 def module_specs(annotation: object) -> tuple[type[ConfigBase], ...]:
     real = tuple(member for member in members(annotation) if member is not type(None))
     if not real or not all(
         isinstance(member, type)
-        and issubclass(member, (AbsModuleCfg, NativeModuleBase))
+        and issubclass(
+            member, (AbsModuleCfg, NativeModuleBase, AbsWaveformCfg, NativeWaveformBase)
+        )
         for member in real
     ):
         return ()
@@ -88,7 +90,7 @@ def module_specs(annotation: object) -> tuple[type[ConfigBase], ...]:
     for model in real:
         if not isinstance(model, type) or not issubclass(model, BaseModel):
             raise TypeError("Module member must be a Pydantic model")
-        tag = type_tag(model)
+        tag = _spec_tag(model)
         if tag not in _SPEC_BY_TAG:
             raise ValueError(f"No persistent Spec for module {model.__name__}")
         specs.append(_SPEC_BY_TAG[tag])
@@ -124,6 +126,9 @@ def _spec_tag(model: type[BaseModel]) -> tuple[str, str]:
             if len(tags) == 1 and isinstance(tags[0], str):
                 return name, tags[0]
     raise ValueError(f"Model needs a literal string tag: {model.__name__}")
+
+
+_SPEC_BY_TAG = {_spec_tag(model): model for model in _PERSISTENT_SPECS}
 
 
 def _inline_kinds(annotation: object) -> tuple[type[BaseModel], ...]:
@@ -579,8 +584,11 @@ class ModuleField:
         self.nullable = type(None) in members(annotation)
         self.catalog: Mapping[str, TemplateDef] = {}
         self.editable = tuple(editable_spec(spec, {}) for spec in self.specs)
+        self.waveform = all(spec in members(WaveformSpec) for spec in self.specs)
+        self.tag = _spec_tag(self.specs[0])[0]
         self.native = any(
-            isinstance(member, type) and issubclass(member, NativeModuleBase)
+            isinstance(member, type)
+            and issubclass(member, (NativeModuleBase, NativeWaveformBase))
             for member in members(annotation)
         )
         field = self
@@ -589,22 +597,32 @@ class ModuleField:
             cls: type[ModuleRef], env: FormEnv
         ) -> Mapping[tuple[str | int, ...], tuple[JsonValue, ...]]:
             del cls
-            keys: tuple[JsonValue, ...] = (
-                ()
-                if env.library is None
-                else tuple(
-                    key
-                    for key in env.library.module_keys()
-                    if isinstance(env.library.module_spec(key), field.ref_specs)
+            keys: tuple[JsonValue, ...] = ()
+            if env.library is not None:
+                candidates = (
+                    env.library.waveform_keys()
+                    if field.waveform
+                    else env.library.module_keys()
                 )
-            )
+                read = (
+                    env.library.waveform_spec
+                    if field.waveform
+                    else env.library.module_spec
+                )
+                keys = tuple(
+                    key for key in candidates if isinstance(read(key), field.ref_specs)
+                )
             return {("name",): keys}
 
         ref = new_class(
             f"{''.join(path)}Ref",
             (ModuleRef,),
             exec_body=lambda ns: ns.update(
-                {"__module__": __name__, "choices": classmethod(choices)}
+                {
+                    "__module__": __name__,
+                    "choices": classmethod(choices),
+                    "spec_kind": "waveform" if field.waveform else "module",
+                }
             ),
         )
         if not issubclass(ref, ModuleRef):
@@ -612,7 +630,7 @@ class ModuleField:
         self.ref = ref
         module = union_type(self.editable)
         if len(self.specs) > 1:
-            module = annotated_type(module, Field(discriminator="type"))
+            module = annotated_type(module, Field(discriminator=self.tag))
         namespace: dict[str, object] = {
             "__module__": __name__,
             "__annotations__": {"module": module},
@@ -669,6 +687,14 @@ class ModuleField:
         """
         key_commands: tuple[tuple[str, OptionCommand], ...] = ()
         if env.library is not None:
+            candidates = (
+                env.library.waveform_keys()
+                if self.waveform
+                else env.library.module_keys()
+            )
+            read = (
+                env.library.waveform_spec if self.waveform else env.library.module_spec
+            )
             key_commands = tuple(
                 (
                     key,
@@ -679,14 +705,14 @@ class ModuleField:
                             _copy_spec,
                             key,
                             self.editable,
-                            waveform=False,
+                            waveform=self.waveform,
                             env=env,
                             wrapper=self.inline,
                         ),
                     ),
                 )
-                for key in env.library.module_keys()
-                if isinstance(env.library.module_spec(key), self.ref_specs)
+                for key in candidates
+                if isinstance(read(key), self.ref_specs)
             )
         kind_fields: list[tuple[type[BaseModel], type[BaseModel]]] = []
         for kind in _inline_kinds(union_type(self.editable)):
@@ -722,7 +748,7 @@ class ModuleField:
         self.editable = tuple(editable_spec(spec, seeds) for spec in self.specs)
         module = union_type(self.editable)
         if len(self.specs) > 1:
-            module = annotated_type(module, Field(discriminator="type"))
+            module = annotated_type(module, Field(discriminator=self.tag))
         # Parent/value Forms already borrow this wrapper; keep its identity
         # while binding the authored Hidden and Expr projection.
         parsed = create_model(
@@ -749,15 +775,19 @@ class ModuleField:
             }
         if node is None:
             return None
-        key = slot_key(node, env)
+        key = slot_key(node, env, waveform=self.waveform)
         if key is not None and env.library is not None:
-            spec = env.library.module_spec(key)
+            spec = (
+                env.library.waveform_spec(key)
+                if self.waveform
+                else env.library.module_spec(key)
+            )
             if not isinstance(spec, self.specs):
                 raise ValueError(f"Slot {node.path!r} has incompatible module family")
             if not node.copy:
                 return {"kind": "ref", "name": key}
-            model = next(
-                model for model in self.editable if type_tag(model) == spec.type
+            model = selected_model(
+                union_type(self.editable), spec.model_dump(mode="json")
             )
             module = persistent_input(
                 model,
@@ -767,9 +797,7 @@ class ModuleField:
             return None
         for path, value in node.set.items():
             set_slot_path(model, module, path, scalar_seed(value), env)
-        selected = next(
-            model for model in self.editable if type_tag(model) == module.get("type")
-        )
+        selected = selected_model(union_type(self.editable), module)
         return {
             "kind": "inline",
             "module": supported_input(
@@ -820,7 +848,11 @@ class ModuleField:
         )
         context = env.library.validation_context() if env.library is not None else None
         try:
-            cfg = ModuleCfgFactory.from_raw(raw_module, context=context)
+            cfg = (
+                WaveformCfgFactory.from_raw(raw_module, context=context)
+                if self.waveform
+                else ModuleCfgFactory.from_raw(raw_module, context=context)
+            )
         except ValueError as exc:
             return FormErrors({prefix: str(exc)})
         mode = "key" if isinstance(item, ModuleRef) else "inline"
@@ -853,6 +885,13 @@ class ModuleField:
         else:
             raise TypeError("Expected a module reference or inline input")
         context = env.library.validation_context() if env.library is not None else None
+        if self.waveform:
+            waveform = WaveformCfgFactory.from_raw(raw, context=context)
+            return (
+                NativeWaveformFactory.from_core(waveform, context=context)
+                if self.native
+                else waveform
+            )
         cfg = ModuleCfgFactory.from_raw(raw, context=context)
         return (
             NativeModuleFactory.from_core(cfg, context=context) if self.native else cfg

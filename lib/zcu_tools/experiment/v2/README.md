@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2`
 
-**Last updated:** 2026-10-30
+**Last updated:** 2026-11-11
 
 **讀者：** framework-dev。實驗 runtime、硬體量化與共用工具入口。
 
@@ -31,7 +31,9 @@ Frequency scalar 與 sweep 也使用 QICK 自身的 signed DDS conversion，沒�
 
 Gain 座標先沿用向零截斷規則決定整數 word，再選最接近 `word / (scaler * maxv)`、
 且經 QICK constant-pulse 換算仍得到同一 word 的 float。正負 gain 都向 word 那一側
-逐 ULP 調整，零 word 回傳 `0.0`。最多調整八個 ULP，仍不相符就 raise。
+逐 ULP 調整，零 word 回傳 `0.0`。滿刻度內的目標 word 另要求 `scaler * coordinate` 留在 [-1, 1]。
+若除法與乘法的浮點誤差讓初始座標越界，先向零移一個 ULP，再搜尋能重現原 word 的合法座標。
+最多調整八個 ULP，仍不相符就 raise；不改目標 word，也不把真正超界的要求飽和到滿刻度。
 Scalar 與 custom array 共用這項契約，scaler 可為負值，但必須有限且非零。
 
 Regular host gain grid 分別截斷 start 與 step，再以 `start_word + i * step_word`
