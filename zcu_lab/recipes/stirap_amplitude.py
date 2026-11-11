@@ -1,4 +1,4 @@
-"""Run, analyze and save a common-amplitude STIRAP hardware sweep."""
+"""Run, analyze and save an independent Pump-by-Stokes gain hardware sweep."""
 
 from pydantic import Field
 from zcu_tools.analysis.singleshot import Centroid3Summary
@@ -14,22 +14,33 @@ from zcu_tools.mcp.measure.recipe_api import (
 
 
 class StirapAmplitudeInputs(RecipeInputs):
-    """Measured carriers, signed base gains and a dimensionless scale range.
+    """Measured carriers and two independent signed gain ranges in a.u.
 
-    n maps to expts. Waveform references select a library key or an inline
+    pump_n and stokes_n map to their respective sweep expts. Waveform references select a library key or an inline
     Form option such as Inline: cosine; overrides edit that family's fields.
     Omitted optional fields retain Form values; null is passed to the owner.
     """
 
     pump_freq_mhz: float = Field(description="Measured Pump 0–3 carrier in MHz.")
     stokes_freq_mhz: float = Field(description="Measured Stokes 3–2 carrier in MHz.")
-    pump_gain: float = Field(description="Signed Pump base gain, multiplied by scale.")
-    stokes_gain: float = Field(
-        description="Signed Stokes base gain, multiplied by scale."
+    pump_start: float = Field(
+        description="First signed Pump gain in a.u., within [-1, 1]."
     )
-    start: float = Field(description="First common gain multiplier, dimensionless.")
-    stop: float = Field(description="Last common gain multiplier, dimensionless.")
-    n: int = Field(ge=2, description="Scale samples, mapped to expts.")
+    pump_stop: float = Field(
+        description="Last signed Pump gain in a.u., within [-1, 1]."
+    )
+    pump_n: int = Field(
+        ge=2, description="Pump gain samples, mapped to pump_gain.expts."
+    )
+    stokes_start: float = Field(
+        description="First signed Stokes gain in a.u., within [-1, 1]."
+    )
+    stokes_stop: float = Field(
+        description="Last signed Stokes gain in a.u., within [-1, 1]."
+    )
+    stokes_n: int = Field(
+        ge=2, description="Stokes gain samples, mapped to stokes_gain.expts."
+    )
     pump_ch: int | None | Keep = Field(
         KEEP, description="Pump charge generator; omitted retains, null reaches owner."
     )
@@ -55,7 +66,7 @@ class StirapAmplitudeInputs(RecipeInputs):
     )
     shots: int | None | Keep = Field(
         KEEP,
-        description="Repetitions at each scale in one round; omitted retains, null reaches owner.",
+        description="Repetitions at each gain pair in one round; omitted retains, null reaches owner.",
     )
     relax_delay_us: float | None | Keep = Field(
         KEEP,
@@ -76,14 +87,14 @@ class StirapAmplitudeReport(RecipeReport):
 
 @recipe(
     "stirap_amplitude",
-    description="Sweep both STIRAP gains with one hardware multiplier, analyze g/e/f and save.",
+    description="Sweep independent STIRAP Pump and Stokes gains in hardware, analyze g/e/f and save.",
 )
 async def stirap_amplitude(
     session: RecipeSession, inputs: StirapAmplitudeInputs
 ) -> StirapAmplitudeReport:
-    """Run one hardware gain-scale loop at fixed carriers, lead and envelopes.
+    """Run two independent hardware gain loops at fixed carriers, lead and envelopes.
 
-    n → expts controls scale points. Pump/Stokes gain signs are retained.
+    pump_n/stokes_n → expts controls the two gain axes. Signed and zero gains play.
     Choose gauss, cosine, drag or arb independently; overrides set waveform
     parameters. Analyze only the saved centroid3 readout. Save after successful
     Run even when Analyze fails; failed Run does not Save. No writeback occurs.
@@ -100,12 +111,13 @@ async def stirap_amplitude(
     tab.set("stokes_ch", inputs.stokes_ch)
     tab.set("pump_freq", inputs.pump_freq_mhz)
     tab.set("stokes_freq", inputs.stokes_freq_mhz)
-    tab.set("pump_gain", inputs.pump_gain)
-    tab.set("stokes_gain", inputs.stokes_gain)
+    tab.set("pump_gain.start", inputs.pump_start)
+    tab.set("pump_gain.stop", inputs.pump_stop)
+    tab.set("pump_gain.n", inputs.pump_n)
+    tab.set("stokes_gain.start", inputs.stokes_start)
+    tab.set("stokes_gain.stop", inputs.stokes_stop)
+    tab.set("stokes_gain.n", inputs.stokes_n)
     tab.set("stokes_lead", inputs.stokes_lead_us)
-    tab.set("scale.start", inputs.start)
-    tab.set("scale.stop", inputs.stop)
-    tab.set("scale.n", inputs.n)
     tab.set("shots", inputs.shots)
     tab.set("relax_delay", inputs.relax_delay_us)
     for edit in inputs.overrides:

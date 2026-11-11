@@ -1,5 +1,15 @@
-"""Common-amplitude STIRAP sweep without GUI imports."""
+"""Independent Pump-by-Stokes gain sweep without GUI imports."""
 
-from .core import StirapAmplitudeCfg, StirapAmplitudeExp, StirapAmplitudeResult
+from .core import (
+    GainSweepCfg,
+    StirapAmplitudeCfg,
+    StirapAmplitudeExp,
+    StirapAmplitudeResult,
+)
 
-__all__ = ["StirapAmplitudeCfg", "StirapAmplitudeExp", "StirapAmplitudeResult"]
+__all__ = [
+    "GainSweepCfg",
+    "StirapAmplitudeCfg",
+    "StirapAmplitudeExp",
+    "StirapAmplitudeResult",
+]

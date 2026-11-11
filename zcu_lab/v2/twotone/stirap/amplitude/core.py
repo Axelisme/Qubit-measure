@@ -1,4 +1,4 @@
-"""STIRAP common-amplitude hardware sweep with two independent envelopes."""
+"""STIRAP Pump-by-Stokes gain hardware sweep with independent envelopes."""
 
 from dataclasses import dataclass
 from typing import Annotated, ClassVar, Self
@@ -39,13 +39,24 @@ from zcu_tools.program.v2.modules.waveform import EnvelopeWaveformCfg
 from .._pulses import drive_pulse
 
 
+class GainSweepCfg(SweepCfg):
+    """Linear signed DAC-gain sweep in a.u., including zero and both endpoints.
+
+    start and stop lie in [-1, 1]. Inherited expts and step must describe the
+    same linear grid; one point requires equal endpoints and zero step.
+    """
+
+    start: float = Field(ge=-1, le=1)
+    stop: float = Field(ge=-1, le=1)
+
+
 class StirapAmplitudeCfg(ConfigBase):
-    """Measured carriers/MHz, signed gains, envelopes and fixed Stokes lead/us.
+    """Measured carriers/MHz, independent gain ranges and fixed Stokes lead/us.
 
     Pump drives 0–3 and Stokes drives 2–3 on different charge generators.
-    Each scale multiplies both gains; envelope shapes and durations stay fixed.
-    Positive stokes_lead starts Stokes first. shots repetitions at each scale
-    produce g/e/f counts in one hardware acquisition round; relax_delay/us
+    Each gain axis sweeps independently; envelope shapes and durations stay
+    fixed. Positive stokes_lead starts Stokes first. shots repetitions per gain
+    pair produce g/e/f counts in one hardware acquisition round. relax_delay/us
     follows every shot. readout requires a saved centroid3 calibration.
     """
 
@@ -59,17 +70,12 @@ class StirapAmplitudeCfg(ConfigBase):
     stokes_freq: Annotated[float, FieldMeta(label="Stokes carrier 3–2", unit="MHz")] = (
         Field(gt=0)
     )
-    pump_gain: Annotated[float, FieldMeta(label="Pump gain", unit="a.u.")] = Field(
-        ge=-1, le=1
-    )
-    stokes_gain: Annotated[float, FieldMeta(label="Stokes gain", unit="a.u.")] = Field(
-        ge=-1, le=1
-    )
     pump_waveform: Annotated[EnvelopeWaveformCfg, FieldMeta(label="Pump waveform")]
     stokes_waveform: Annotated[EnvelopeWaveformCfg, FieldMeta(label="Stokes waveform")]
     stokes_lead: Annotated[float, FieldMeta(label="Stokes lead", unit="us")] = 0.05
     readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
-    scale: Annotated[SweepCfg, FieldMeta(label="Common amplitude scale")]
+    pump_gain: Annotated[GainSweepCfg, FieldMeta(label="Pump gain", unit="a.u.")]
+    stokes_gain: Annotated[GainSweepCfg, FieldMeta(label="Stokes gain", unit="a.u.")]
     shots: Annotated[int, FieldMeta(label="Shots per point")] = Field(
         default=4096, ge=1
     )
@@ -86,24 +92,28 @@ class StirapAmplitudeCfg(ConfigBase):
 
 @dataclass
 class StirapAmplitudeResult:
-    """Requested dimensionless scales (N,) and float64 g/e/f counts (N,3).
+    """Requested gains in a.u. and float64 g/e/f counts (Npump, Nstokes, 3).
 
+    pump_gains has shape (Npump,); stokes_gains has shape (Nstokes,).
     Gains are quantized separately by each generator. Unacquired counts stay
     NaN. No population correction or intermediate-state oracle is stored.
     """
 
-    scales: NDArray[np.float64]
+    pump_gains: NDArray[np.float64]
+    stokes_gains: NDArray[np.float64]
     counts: NDArray[np.float64]
 
 
 def restore_result(data: GroupedLoadData[StirapAmplitudeCfg]) -> StirapAmplitudeResult:
-    """Restore scales and g/e/f counts from the native counts variable."""
+    """Restore both gain axes and g/e/f counts from the native counts variable."""
     counts = data.variable("counts")
-    return StirapAmplitudeResult(scales=counts.axes[1], counts=counts.z)
+    return StirapAmplitudeResult(
+        pump_gains=counts.axes[2], stokes_gains=counts.axes[1], counts=counts.z
+    )
 
 
 class StirapAmplitudeExp(Experiment[StirapAmplitudeResult, StirapAmplitudeCfg]):
-    """Sweep a shared gain multiplier in one program, then analyze saved counts."""
+    """Sweep Pump and Stokes gains independently, then analyze saved counts."""
 
     AXES_SPEC: ClassVar[GroupedAxesSpec[StirapAmplitudeResult, StirapAmplitudeCfg]] = (
         GroupedAxesSpec(
@@ -113,9 +123,10 @@ class StirapAmplitudeExp(Experiment[StirapAmplitudeResult, StirapAmplitudeCfg]):
                     (
                         VariableAxisSpec.generated_arange(label="State", unit="None"),
                         VariableAxisSpec(
-                            label="Common amplitude scale",
-                            unit="None",
-                            field_name="scales",
+                            label="Stokes gain", unit="a.u.", field_name="stokes_gains"
+                        ),
+                        VariableAxisSpec(
+                            label="Pump gain", unit="a.u.", field_name="pump_gains"
                         ),
                     ),
                     VariableZSpec(
@@ -135,24 +146,46 @@ class StirapAmplitudeExp(Experiment[StirapAmplitudeResult, StirapAmplitudeCfg]):
     ) -> StirapAmplitudeResult:
         """Overlap Pump/Stokes, join both ends, then classify one terminal read.
 
-        One hardware scale loop multiplies both signed gains. Positive lead
-        delays Pump; negative lead delays Stokes. Shapes and durations remain
-        fixed across the loop. Count cfg.shots repetitions per scale in one
-        round. Require centroid3 before acquisition and pass both charge-drive
-        requirements to the backend. Hardware wiring remains operator-owned.
-        Cancellation before a complete round leaves counts NaN.
+        Two independent hardware gain loops form a Pump-by-Stokes grid. Positive
+        lead delays Pump; negative lead delays Stokes. Shapes and durations stay
+        fixed. Count cfg.shots repetitions per pair in one round. Require
+        centroid3 before acquisition and pass both charge-drive requirements to
+        the backend. Hardware wiring remains operator-owned. Cancellation
+        before a complete round leaves counts NaN.
         """
         centroid3_classifier(cfg.readout, ro_ch=cfg.readout.ro_ch)
-        scales = np.linspace(
-            cfg.scale.start, cfg.scale.stop, cfg.scale.expts, dtype=np.float64
+        pump_gains = np.linspace(
+            cfg.pump_gain.start,
+            cfg.pump_gain.stop,
+            cfg.pump_gain.expts,
+            dtype=np.float64,
         )
-        figure, ax = context.plots.subplots(num="measurement")
-        ax.set(
-            xlabel="Common amplitude scale (dimensionless)",
-            ylabel="Raw preparation-label fraction",
+        stokes_gains = np.linspace(
+            cfg.stokes_gain.start,
+            cfg.stokes_gain.stop,
+            cfg.stokes_gain.expts,
+            dtype=np.float64,
         )
-        lines = [ax.plot([], [], ".-", label=state)[0] for state in ("g", "e", "f")]
-        ax.legend()
+        figure, _ = context.plots.subplots(
+            num="measurement", ncols=3, figsize=(12, 4), layout="constrained"
+        )
+        maps = []
+        for ax, state in zip(tuple(figure.axes), ("g", "e", "f"), strict=True):
+            heatmap = ax.pcolormesh(
+                pump_gains,
+                stokes_gains,
+                np.full((len(stokes_gains), len(pump_gains)), np.nan),
+                shading="nearest",
+                vmin=0,
+                vmax=1,
+            )
+            ax.set(
+                xlabel="Pump gain (a.u.)",
+                ylabel="Stokes gain (a.u.)",
+                title=f"Raw {state}",
+            )
+            figure.colorbar(heatmap, ax=ax, label="Preparation-label fraction")
+            maps.append(heatmap)
 
         @context.plots.on_plot_thread
         def update(data: NDArray[np.float64]):
@@ -160,34 +193,31 @@ class StirapAmplitudeExp(Experiment[StirapAmplitudeResult, StirapAmplitudeCfg]):
             raw = np.divide(
                 data, total, out=np.full_like(data, np.nan), where=total > 0
             )
-            for state, line in enumerate(lines):
-                line.set_data(scales, raw[:, state])
-            ax.relim()
-            ax.autoscale_view()
-            return tuple(lines)
+            for state, heatmap in enumerate(maps):
+                heatmap.set_array(raw[:, :, state].T)
+            return tuple(maps)
 
         figure.show()
-        counts = SignalBuffer((len(scales), 3), dtype=np.float64, on_update=update)
+        counts = SignalBuffer(
+            (len(pump_gains), len(stokes_gains), 3), dtype=np.float64, on_update=update
+        )
 
-        # Both branches share a hardware multiplier, not a host-side scan.
+        # Declare outer Pump and inner Stokes loops in one hardware program.
         with Schedule(counts, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 context.soccfg, reps=cfg.shots, relax_delay=cfg.relax_delay
             )
-            scale = builder.add_sweep("scale", cfg.scale)
+            pump_gain = builder.add_sweep("pump_gain", cfg.pump_gain)
+            stokes_gain = builder.add_sweep("stokes_gain", cfg.stokes_gain)
             pump = Pulse(
                 "pump",
-                drive_pulse(
-                    cfg.pump_ch, cfg.pump_freq, cfg.pump_gain, cfg.pump_waveform
-                ),
-                gain=scale * cfg.pump_gain,
+                drive_pulse(cfg.pump_ch, cfg.pump_freq, 0.0, cfg.pump_waveform),
+                gain=pump_gain,
             )
             stokes = Pulse(
                 "stokes",
-                drive_pulse(
-                    cfg.stokes_ch, cfg.stokes_freq, cfg.stokes_gain, cfg.stokes_waveform
-                ),
-                gain=scale * cfg.stokes_gain,
+                drive_pulse(cfg.stokes_ch, cfg.stokes_freq, 0.0, cfg.stokes_waveform),
+                gain=stokes_gain,
             )
             builder.fork("default", into=["pump", "stokes"])
             builder.timeline_inc(max(cfg.stokes_lead, 0.0), timeline="pump")
@@ -208,7 +238,9 @@ class StirapAmplitudeExp(Experiment[StirapAmplitudeResult, StirapAmplitudeCfg]):
                     ChargeDriveRequirement("Stokes", cfg.stokes_ch),
                 ),
             )
-        return StirapAmplitudeResult(scales=scales, counts=counts.array)
+        return StirapAmplitudeResult(
+            pump_gains=pump_gains, stokes_gains=stokes_gains, counts=counts.array
+        )
 
     def analyze(
         self,
@@ -217,12 +249,12 @@ class StirapAmplitudeExp(Experiment[StirapAmplitudeResult, StirapAmplitudeCfg]):
         *,
         plots: Plots,
     ) -> Centroid3Summary:
-        """Correct g/e/f fractions using only the run's saved readout confusion.
+        """Plot raw and unclipped corrected g/e/f maps on both gain axes in a.u.
 
-        Plot raw and unclipped corrected fractions against dimensionless scale.
-        Return training confusion, condition number and minimum singular value,
-        not fidelity. Missing cfg/classifier, incomplete or empty counts and
-        singular confusion fail explicitly; no current calibration is read.
+        Use only the run's saved readout confusion. Return training confusion,
+        condition number and minimum singular value, not fidelity. Missing
+        cfg/classifier, incomplete or empty counts and singular confusion fail
+        explicitly; no current calibration is read.
         """
         del options
         cfg = source.cfg
@@ -239,22 +271,29 @@ class StirapAmplitudeExp(Experiment[StirapAmplitudeResult, StirapAmplitudeCfg]):
         raw = counts / counts.sum(axis=-1, keepdims=True)
         result = analyze_centroid3_populations(raw, calibration)
         figure, _ = plots.subplots(
-            num="fit", ncols=2, figsize=(10, 5), layout="constrained"
+            num="fit", nrows=2, ncols=3, figsize=(12, 8), layout="constrained"
         )
-        for ax, values, title in zip(
-            figure.axes,
+        for row, values, title in zip(
+            (figure.axes[:3], figure.axes[3:]),
             (result.raw_populations, result.corrected_populations),
-            ("Raw g/e/f fractions", "Corrected g/e/f (unclipped)"),
+            ("Raw", "Corrected (unclipped)"),
             strict=True,
         ):
-            for state, label in enumerate(("g", "e", "f")):
-                ax.plot(source.result.scales, values[:, state], ".-", label=label)
-            ax.set(
-                xlabel="Common amplitude scale (dimensionless)",
-                ylabel="Preparation-label fraction",
-                title=title,
-            )
-            ax.legend()
+            for state, (ax, label) in enumerate(zip(row, ("g", "e", "f"), strict=True)):
+                heatmap = ax.pcolormesh(
+                    source.result.pump_gains,
+                    source.result.stokes_gains,
+                    values[:, :, state].T,
+                    shading="nearest",
+                    vmin=min(0.0, float(values.min())),
+                    vmax=max(1.0, float(values.max())),
+                )
+                ax.set(
+                    xlabel="Pump gain (a.u.)",
+                    ylabel="Stokes gain (a.u.)",
+                    title=f"{title} {label}",
+                )
+                figure.colorbar(heatmap, ax=ax, label="Preparation-label fraction")
         figure.suptitle(
             f"Saved readout: condition={result.condition_number:.4g}, minimum singular value={result.minimum_singular_value:.4g}\nPreparation-label estimates, not fidelity"
         )

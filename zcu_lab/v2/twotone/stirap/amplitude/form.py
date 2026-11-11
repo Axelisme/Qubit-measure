@@ -10,7 +10,7 @@ from .core import StirapAmplitudeCfg
 
 
 def make_form(ctx: FormContext) -> Form[StirapAmplitudeCfg]:
-    """Seed Gaussian envelopes, not measured carriers, gains or scale bounds.
+    """Seed Gaussian envelopes, not measured carriers or gain sweep bounds.
 
     Both Gaussians start at sigma 0.05 us and length 0.3 us. Use the captured
     resonator readout slot when present; otherwise seed a readout template.
