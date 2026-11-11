@@ -28,7 +28,7 @@ from zcu_tools.program.v2 import Delay, Pulse, Readout, Reset, SweepCfg, Timelin
 from zcu_tools.utils.process import rotate2real
 
 from zcu_lab.v2.support import live_line
-from zcu_lab.v2.twotone.time_domain.detune import actual_detune
+from zcu_lab.v2.support.detune import actual_detune
 
 
 def t2ramsey_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:

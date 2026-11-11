@@ -138,11 +138,7 @@ class AttachedLine:
         mutation. Labels and title remain unchanged; no refresh or dispatch.
         """
         data = line_data(xs, signals, self._num_lines)
-        self._format.update(self._axes, data.xs, data.signals)
-        lines = self._format.lines
-        if lines is None:
-            raise RuntimeError("Lines not initialized")
-        return tuple(lines)
+        return self._format.update(self._axes, data.xs, data.signals)
 
 
 class AttachedHeatmap:
@@ -193,11 +189,7 @@ class AttachedHeatmap:
         labels or title, refreshing or dispatching.
         """
         data = heatmap_data(xs, ys, signals)
-        self._format.update(self._axes, data.xs, data.ys, data.signals)
-        image = self._format.im
-        if image is None:
-            raise RuntimeError("Image not initialized")
-        return (image,)
+        return self._format.update(self._axes, data.xs, data.ys, data.signals)
 
 
 class AttachedScatter:
@@ -233,8 +225,4 @@ class AttachedScatter:
         labels or title, dispatch or refresh.
         """
         data = scatter_data(xs, ys, colors)
-        self._format.update(self._axes, data.xs, data.ys, colors=data.colors)
-        scatter = self._format.scatter
-        if scatter is None:
-            raise RuntimeError("Scatter not initialized")
-        return (scatter,)
+        return self._format.update(self._axes, data.xs, data.ys, colors=data.colors)

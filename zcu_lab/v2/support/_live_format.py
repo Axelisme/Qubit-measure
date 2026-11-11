@@ -92,7 +92,8 @@ class LineFormat:
         xs: NDArray[np.float64],
         signals: NDArray[np.float64],
         title: str | None = None,
-    ) -> None:
+    ) -> tuple[Line2D, ...]:
+        """Update attached lines and return them; fail if not attached or removed."""
         if self.lines is None:
             raise RuntimeError("Lines not initialized.")
         figure = ax.get_figure()
@@ -124,6 +125,7 @@ class LineFormat:
 
         ax.relim(visible_only=True)
         ax.autoscale_view()
+        return tuple(self.lines)
 
 
 class HeatmapFormat:
@@ -188,7 +190,8 @@ class HeatmapFormat:
         ys: NDArray[np.float64],
         signals: NDArray[np.float64],
         title: str | None = None,
-    ) -> None:
+    ) -> tuple[AxesImage, ...]:
+        """Update the attached image and return it; fail if not attached or removed."""
         if self.im is None:
             raise RuntimeError("Image not initialized.")
         im = self.im
@@ -215,6 +218,7 @@ class HeatmapFormat:
 
         if title is not None:
             ax.set_title(title)
+        return (im,)
 
 
 class NonUniformHeatmapFormat:
@@ -281,7 +285,8 @@ class NonUniformHeatmapFormat:
         ys: NDArray[np.float64],
         signals: NDArray[np.float64],
         title: str | None = None,
-    ) -> None:
+    ) -> tuple[AxesImage, ...]:
+        """Update the attached image and return it; fail if not attached or removed."""
         if self.im is None:
             raise RuntimeError("Image not initialized.")
         im = self.im
@@ -317,6 +322,7 @@ class NonUniformHeatmapFormat:
 
         if title is not None:
             ax.set_title(title)
+        return (im,)
 
 
 class ScatterFormat:
@@ -360,7 +366,8 @@ class ScatterFormat:
         | NDArray[np.float64]
         | None = None,
         title: str | None = None,
-    ) -> None:
+    ) -> tuple[PathCollection, ...]:
+        """Update attached points and return them; fail if not attached or removed."""
         if self.scatter is None:
             raise RuntimeError("Scatter not initialized.")
         figure = ax.get_figure()
@@ -391,3 +398,4 @@ class ScatterFormat:
         ax.ignore_existing_data_limits = True
         ax.update_datalim(self.scatter.get_datalim(ax.transData))
         ax.autoscale_view()
+        return (self.scatter,)

@@ -103,9 +103,8 @@ from zcu_lab.v2.support.mux_sweep_cfg import (
     require_tone_value,
     validate_mux_scan,
 )
-from zcu_lab.v2.twotone.freq.core import FreqAnalyzeOptions
 
-from .analysis import MuxFreqFit, analyze_frequency
+from .analysis import FreqAnalyzeOptions, MuxFreqFit, analyze_frequency
 
 
 class MuxFreqToneCfg(MuxDriveToneCfg):

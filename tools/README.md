@@ -1,6 +1,6 @@
 # tools/
 
-**Last updated:** 2026-11-12, simulator benchmark
+**Last updated:** 2026-11-12, simulator benchmark and experiment import contract
 
 **讀者：** framework-dev。Repo 品質檢查與重計算執行器的 CLI、輸出與比較機制。
 
@@ -17,7 +17,8 @@
 它們可以被 import，`tools/check_ratchet.py` 就是這樣使用其他幾支的。
 
 `_support.py` 共用走訪樹、讀 attribute chain、透過 import 解析呼叫與載入另一支檢查的機制。
-各支檢查自行定義判準。共用模組要求 `tools/` 在 `sys.path` 上。
+各支檢查自行定義判準。`check_experiment_imports.py` 是 `.importlinter` 註冊的 custom contract，依 `core.py` 自動辨認實驗目錄，檢查實驗間與跨家族 helper 的直接 import，違規時列出來源、目標與行號；它不 import 實驗定義。
+共用模組要求 `tools/` 在 `sys.path` 上。
 直接執行某支檢查、`load_tool` 載入另一支與 pytest 的 `pythonpath` 都滿足這項要求。
 
 ## 重計算執行器

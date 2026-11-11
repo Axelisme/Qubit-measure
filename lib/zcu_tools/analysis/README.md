@@ -1,6 +1,6 @@
 # `zcu_tools.analysis` 模塊重點文檔
 
-**Last updated:** 2026-11-11，STIRAP 三種獨立掃描的分析 caller
+**Last updated:** 2026-11-11，GE confusion matrix 數值 owner
 
 **讀者：** framework-dev。分析核心、純數值工具與前端 adapter 的分工速查。
 
@@ -177,7 +177,10 @@ Fluxdep native 載入與 dispersive 投影共用此規則。
 - `dispersive/`：色散分析的前處理、electrical-delay refinement 與 auto-tune 數值核心；契約見 [dispersive README](dispersive/README.md)。
 - `fitting/`：擬合模型、shared/fixed fitting、singleshot 與 resonance fitting。契約見 [fitting README](fitting/README.md)。
 
-`singleshot.py` 擁有純數值 shot 分類、Rabi 分類比例及 confusion-matrix correction。QICK raw buffer 的 accumulator normalization 留在 caller 的實驗 helper；本模組不讀 program metadata。
+`singleshot.py` 擁有純數值 shot 分類、Rabi 分類比例及 confusion-matrix correction。
+`GECalibration` 保存原始 IQ 座標的 g/e centers、(2,2) preparation populations 與 sigma。
+`calc_confusion_matrix` 用明填的 radius 與 consider_other 計算 g/e/other diagnostic；
+radius=None 時由 `optimize_ge_radius` 選半徑。選項預設值與畫圖留在實驗。QICK raw buffer 的 accumulator normalization 留在 caller 的實驗 helper；本模組不讀 program metadata。
 
 `analyze_reference_iq` 只收三組 acquired IQ 與準備標籤。它與 centroid3 processor 共用 `utils.shot_classification.nearest_centroid3` 的 g/e/f 最近中心與等距規則。前半訓練 nearest-centroid classifier 與 confusion matrix，後半獨立計算 raw/corrected fractions 與準備標籤錯誤率。品質指標使用訓練 covariance、condition number 與 singular value。Correction 回到準備標籤座標，保留負值與大於 1 的值，不推論參考態純度。`correct_populations` 的既有預設仍 clipping；caller 可用 `clip=False` 保留線性解。
 

@@ -50,7 +50,7 @@ description="Fixed preparation pulse before each gain-swept Rabi pulse; None ski
 交付前，下面五條都要成立：
 
 1. 只讀這個 `core.py`，說得出播放序列、即時圖、分析計算與分析圖。
-2. `core.py` 的 import 只來自 `zcu_tools`、`zcu_lab.v2.support` 與本實驗目錄。需要其他地方的程式時，已經先問過。
+2. `lint-imports` 禁止含 `core.py` 的實驗目錄 import 其他實驗或其他家族的家族層模組，但放行自己家族的 helpers、`support` 及家族 `__init__.py` 匯出子實驗，違規時將所需內容改為本地宣告，或將共用數值邏輯移至 `zcu_tools.analysis` 或 `support`。
 3. 每個 cfg 欄位的 `description` 都是一句話。
 4. QICK 能掃的掃描參數都用了 `add_sweep`。
 5. 每個檢查都是 annotation 的 `ge`／`le`，或使用者要求的。

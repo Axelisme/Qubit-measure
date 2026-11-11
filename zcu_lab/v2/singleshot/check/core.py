@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Annotated, ClassVar
 
 import numpy as np
+from matplotlib.patches import Polygon
 from numpy.typing import NDArray
 from pydantic.dataclasses import dataclass as pydantic_dataclass
 from zcu_tools.analysis.singleshot import classify_result
@@ -18,7 +19,6 @@ from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import Pulse, Readout, Reset, TimelineBuilder
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg, circle_classifier
 
-from zcu_lab.v2.singleshot.plot import plot_with_classified
 from zcu_lab.v2.support.singleshot.util import raw_shots_to_signal
 
 
@@ -150,9 +150,67 @@ class CheckExp(Experiment[CheckResult, CheckCfg]):
         ne = mask_e.sum() / signals.shape[0]
         no = mask_o.sum() / signals.shape[0]
 
-        plot_with_classified(
-            ax, signals, g_center, e_center, radius, max_point=options.max_point
+        colors = np.full(signals.shape, "gray", dtype=object)
+        colors[mask_g] = "blue"
+        colors[mask_e] = "red"
+        colors[mask_o] = "green"
+
+        # plot shots
+        num_sample = signals.shape[0]
+        downsample_num = min(options.max_point, num_sample)
+        downsample_mask = np.arange(0, num_sample, max(1, num_sample // downsample_num))
+        downsample_signals = signals[downsample_mask]
+        ax.scatter(
+            downsample_signals.real,
+            downsample_signals.imag,
+            c=colors[downsample_mask].tolist(),
+            s=1,
+            alpha=0.5,
         )
+
+        # plot centers with circle
+        ax.plot(
+            g_center.real,
+            g_center.imag,
+            markerfacecolor="b",
+            label="Ground",
+            linestyle=":",
+            color="k",
+            marker="o",
+            markersize=5,
+        )
+        ax.plot(
+            e_center.real,
+            e_center.imag,
+            markerfacecolor="r",
+            label="Excited",
+            linestyle=":",
+            color="k",
+            marker="o",
+            markersize=5,
+        )
+        separation = abs(e_center - g_center)
+        axis = (e_center - g_center) / separation
+        cut_angle = (
+            np.arccos(separation / (2 * radius)) if radius > separation / 2 else 0.0
+        )
+        angles = np.linspace(cut_angle, 2 * np.pi - cut_angle, 361)
+        for center, direction, color in ((g_center, axis, "b"), (e_center, -axis, "r")):
+            boundary = center + direction * radius * np.exp(1j * angles)
+            ax.add_patch(
+                Polygon(
+                    np.column_stack((boundary.real, boundary.imag)),
+                    closed=True,
+                    color=color,
+                    fill=False,
+                    linestyle="--",
+                )
+            )
+
+        ax.set_aspect("equal")
+        ax.legend()
+        ax.set_xlabel("I value (a.u.)")
+        ax.set_ylabel("Q value (a.u.)")
 
         ax.set_title(
             f"Population: Ground: {ng:.1%}, Excited: {ne:.1%}, Other: {no:.1%}"

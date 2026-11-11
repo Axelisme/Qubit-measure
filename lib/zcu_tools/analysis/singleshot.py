@@ -5,14 +5,245 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 from itertools import combinations
-from typing import Annotated
+from typing import Annotated, NamedTuple
 
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import PlainValidator
 
 from zcu_tools.cfg_model import Centroid3Classifier
-from zcu_tools.utils.shot_classification import classify_shots, nearest_centroid3
+from zcu_tools.utils.shot_classification import (
+    classify_shots,
+    gaussian_region_probability,
+    nearest_centroid3,
+)
+
+
+@dataclass(frozen=True)
+class GECalibration:
+    """Fitted physical g/e geometry and preparation mixing, without lab settings.
+
+    g_center/e_center are complex centers in the original IQ frame, in normalized
+    ADC units. init_pops is the (2,2) preparation-row / physical-g/e-column
+    probability matrix. sigma is the fitted width in normalized ADC units.
+    """
+
+    g_center: complex
+    e_center: complex
+    init_pops: NDArray[np.float64]
+    sigma: float
+
+
+def make_init_matrix(init_pops: NDArray[np.float64]) -> NDArray[np.float64]:
+    """Extend (2,2) g/e preparation populations to a 3x3 g/e/other matrix.
+
+    The other preparation is isolated. Invalid probabilities raise ValueError.
+    """
+    # Each acquisition has its own refined preparation populations. Retaining
+    # both rows makes the diagnostic equivariant under g/e relabeling.
+    if (
+        init_pops.shape != (2, 2)
+        or not np.isfinite(init_pops).all()
+        or np.any(init_pops < 0)
+        or np.any(init_pops.sum(axis=1) > 1 + 1e-12)
+    ):
+        raise ValueError("GE initial populations must be a valid 2x2 probability array")
+    p_gg_init, p_ge_init = init_pops[0]
+    p_eg_init, p_ee_init = init_pops[1]
+    p_go_init = max(0.0, 1.0 - p_gg_init - p_ge_init)
+    p_eo_init = max(0.0, 1.0 - p_eg_init - p_ee_init)
+
+    return np.array(
+        [
+            [p_gg_init, p_ge_init, p_go_init],
+            [p_eg_init, p_ee_init, p_eo_init],
+            [0.0, 0.0, 1.0],  # assume all initial to O
+        ]
+    )
+
+
+class GEClassification(NamedTuple):
+    """One prepared state's fractions classified as ground, excited and other."""
+
+    ground: float
+    excited: float
+    other: float
+
+
+ISOLATED_OTHER_CLASSIFICATION = GEClassification(0.0, 0.0, 1.0)
+
+
+def make_result_matrix(
+    ground: GEClassification,
+    excited: GEClassification,
+    other: GEClassification = ISOLATED_OTHER_CLASSIFICATION,
+) -> NDArray[np.float64]:
+    """Stack ground/excited/other preparation rows into a 3x3 result matrix.
+
+    Columns follow GEClassification order. The default other-state row models
+    perfectly isolated classification. Values are preserved without normalization.
+    """
+    return np.array([ground, excited, other])
+
+
+def solve_confusion_matrix(
+    A_init: NDArray[np.float64],
+    Q: NDArray[np.float64],
+) -> NDArray[np.float64]:
+    """Solve preparation mixing A_init @ confusion = Q for 3x3 matrices.
+
+    Clip negative entries and normalize rows. Singular A_init raises LinAlgError.
+    """
+    confusion_matrix = np.linalg.solve(A_init, Q)
+    confusion_matrix = np.clip(confusion_matrix, 0.0, None)
+    confusion_matrix /= confusion_matrix.sum(axis=1, keepdims=True)
+
+    return confusion_matrix
+
+
+def optimize_ge_radius(
+    g_signals: NDArray[np.complex128],
+    e_signals: NDArray[np.complex128],
+    calibration: GECalibration,
+    *,
+    consider_other: bool,
+) -> float:
+    """Select a radius in normalized IQ units minimizing matrix condition number.
+
+    calibration supplies fitted centers, sigma and (2,2) preparation populations.
+    consider_other penalizes midpoint leakage only during radius selection.
+    Invalid geometry and unsuccessful optimization raise.
+    """
+    from scipy.optimize import OptimizeResult, minimize_scalar
+
+    g_center, e_center = calibration.g_center, calibration.e_center
+    init_pops, sigma = calibration.init_pops, calibration.sigma
+
+    # Validate geometry even before the optimizer evaluates its first candidate.
+    classify_result(np.empty(0, dtype=np.complex128), g_center, e_center, 0.0)
+    ge_dist = abs(g_center - e_center)
+    A_init = make_init_matrix(init_pops)
+
+    def loss_fn(radius: float) -> float:
+
+        gg_mask, ge_mask, go_mask = classify_result(
+            g_signals, g_center, e_center, radius
+        )
+        n_gg = gg_mask.sum() / gg_mask.shape[0]
+        n_ge = ge_mask.sum() / ge_mask.shape[0]
+        n_go = go_mask.sum() / go_mask.shape[0]
+
+        eg_mask, ee_mask, eo_mask = classify_result(
+            e_signals, g_center, e_center, radius
+        )
+        n_eg = eg_mask.sum() / eg_mask.shape[0]
+        n_ee = ee_mask.sum() / ee_mask.shape[0]
+        n_eo = eo_mask.sum() / eo_mask.shape[0]
+
+        # Radius-selection penalty only: model other at the midpoint.
+        # The returned calibration retains the isolated-other row.
+        n_og = (
+            float(
+                gaussian_region_probability(
+                    np.array([ge_dist / 2]), sigma, radius, ge_dist
+                )[0]
+            )
+            if consider_other
+            else 0.0
+        )
+        n_oe = n_og
+        n_oo = 1.0 - n_og - n_oe
+
+        Q = make_result_matrix(
+            GEClassification(n_gg, n_ge, n_go),
+            GEClassification(n_eg, n_ee, n_eo),
+            GEClassification(n_og, n_oe, n_oo),
+        )
+        confusion_matrix = solve_confusion_matrix(A_init, Q)
+
+        # calculate condision number of confusion matrix as loss
+        condition = float(np.linalg.cond(confusion_matrix))
+        return condition if np.isfinite(condition) else 1e12
+
+    result = minimize_scalar(loss_fn, bounds=(0.0, ge_dist), method="bounded")
+    if not isinstance(result, OptimizeResult):
+        raise TypeError("classification-radius optimizer must return OptimizeResult")
+    if not result.success or not np.isfinite(result.x):
+        raise RuntimeError("classification-radius optimization failed")
+    # The optimum can be the upper bound; bounded minimization excludes endpoints.
+    return min((float(result.x), ge_dist), key=loss_fn)
+
+
+@dataclass(frozen=True)
+class GEConfusionResult:
+    """Radius in normalized IQ units and population-corrected g/e/other matrix.
+
+    matrix and init_matrix are (3,3), with g/e/other rows and columns.
+    g_classification/e_classification are observed fractions before correction.
+    condition_number describes matrix invertibility, not calibration approval.
+    """
+
+    radius: float
+    matrix: NDArray[np.float64]
+    init_matrix: NDArray[np.float64]
+    g_classification: GEClassification
+    e_classification: GEClassification
+    condition_number: float
+
+
+def calc_confusion_matrix(
+    signals: tuple[NDArray[np.complex128], NDArray[np.complex128]],
+    calibration: GECalibration,
+    *,
+    radius: float | None,
+    consider_other: bool,
+) -> GEConfusionResult:
+    """Classify physical g/e shot arrays and correct fitted preparation mixing.
+
+    calibration supplies centers, sigma and (2,2) preparation populations.
+    signals contains two one-dimensional raw IQ arrays in normalized ADC units.
+    radius is nonnegative in those units, or None for automatic optimization.
+    consider_other selects the midpoint leakage penalty during optimization only.
+    Return a 3x3 g/e/other diagnostic; numerical failures propagate.
+    """
+    g_signals, e_signals = signals
+    g_center, e_center = calibration.g_center, calibration.e_center
+    init_matrix = make_init_matrix(calibration.init_pops)
+
+    if radius is None:
+        radius = optimize_ge_radius(
+            g_signals,
+            e_signals,
+            calibration,
+            consider_other=consider_other,
+        )
+
+    gg_mask, ge_mask, go_mask = classify_result(g_signals, g_center, e_center, radius)
+    g_classification = GEClassification(
+        float(gg_mask.mean()),
+        float(ge_mask.mean()),
+        float(go_mask.mean()),
+    )
+
+    eg_mask, ee_mask, eo_mask = classify_result(e_signals, g_center, e_center, radius)
+    e_classification = GEClassification(
+        float(eg_mask.mean()),
+        float(ee_mask.mean()),
+        float(eo_mask.mean()),
+    )
+
+    matrix = solve_confusion_matrix(
+        init_matrix,
+        make_result_matrix(g_classification, e_classification),
+    )
+    return GEConfusionResult(
+        radius=radius,
+        matrix=matrix,
+        init_matrix=init_matrix,
+        g_classification=g_classification,
+        e_classification=e_classification,
+        condition_number=float(np.linalg.cond(matrix)),
+    )
 
 
 def raw_population_signal(

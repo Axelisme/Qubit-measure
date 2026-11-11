@@ -1,4 +1,4 @@
-"""GUI-free resonance fit/plot mechanics shared by single-tone and mux scans."""
+"""Numeric resonance fitting and route priors for single-tone and mux scans."""
 
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -6,7 +6,6 @@ from numbers import Integral, Real
 from typing import Annotated, Literal
 
 import numpy as np
-from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from pydantic import Field
 from pydantic.dataclasses import dataclass as pydantic_dataclass
@@ -72,9 +71,8 @@ def fit_resonance(
     freqs: NDArray[np.float64],
     signals: NDArray[np.complex128],
     options: ResonanceOptions,
-    figure: Figure,
 ) -> ResonanceFit:
-    """Fit equal 1-D MHz/IQ arrays, dropping both endpoints, then draw figure.
+    """Fit equal 1-D MHz/IQ arrays, dropping both endpoints, without plotting.
 
     The remaining grid must be finite, strictly monotonic, and contain at least
     four observations. Model validation and numerical failures propagate; callers
@@ -90,7 +88,6 @@ def fit_resonance(
         model = TransmissionModel()
     else:
         model = get_proper_model(freqs, signals)
-    # Keep each model's typed parameter/renderer pair together.
     if isinstance(model, HangerModel):
         params = model.fit(
             freqs,
@@ -100,15 +97,6 @@ def fit_resonance(
             fit_bg_phase_curvature=options.fit_bg_phase_curvature,
             edelay_branch_seed=options.edelay_branch_seed,
             edelay_max_search_radius=options.edelay_max_search_radius,
-        )
-        figure.clear()
-        model.visualize_fit(
-            freqs,
-            signals,
-            params,
-            figure=figure,
-            fit_bg_amp_slope=options.fit_bg_amp_slope,
-            fit_bg_phase_curvature=options.fit_bg_phase_curvature,
         )
         freq, fwhm, theta0, edelay = (
             params["freq"],
@@ -128,15 +116,6 @@ def fit_resonance(
             fit_bg_phase_curvature=options.fit_bg_phase_curvature,
             edelay_branch_seed=options.edelay_branch_seed,
             edelay_max_search_radius=options.edelay_max_search_radius,
-        )
-        figure.clear()
-        model.visualize_fit(
-            freqs,
-            signals,
-            transmission,
-            figure=figure,
-            fit_bg_amp_slope=options.fit_bg_amp_slope,
-            fit_bg_phase_curvature=options.fit_bg_phase_curvature,
         )
         freq, fwhm, theta0, edelay = (
             transmission["freq"],

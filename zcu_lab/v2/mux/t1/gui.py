@@ -37,9 +37,8 @@ from zcu_lab.v2.support.measure.mux_results import (
 from zcu_lab.v2.support.measure.mux_save_names import mux_save_stem
 from zcu_lab.v2.support.measure.record_frame import captured_qubit_flux
 from zcu_lab.v2.support.mux import MuxFitFailure
-from zcu_lab.v2.twotone.time_domain.t1.core import T1AnalyzeOptions
 
-from .analysis import MuxT1Fit
+from .analysis import MuxT1Fit, T1AnalyzeOptions
 from .core import MuxT1Cfg, MuxT1Exp, MuxT1Result
 from .form import make_form
 

@@ -10,6 +10,11 @@ from numpy.typing import NDArray
 from pydantic import Field
 from pydantic.dataclasses import dataclass as pydantic_dataclass
 from zcu_tools.analysis.fitting import FitQuality
+from zcu_tools.analysis.singleshot import (
+    GECalibration,
+    GEConfusionResult,
+    calc_confusion_matrix,
+)
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment, RunRecord
 from zcu_tools.experiment.context import RunContext
@@ -25,7 +30,7 @@ from zcu_tools.program.v2 import Pulse, PulseReadout, Reset, TimelineBuilder
 
 from zcu_lab.v2.support.singleshot.util import ge_signals_by_state, raw_shots_to_signal
 
-from .analysis import GEConfusionResult, calc_confusion_matrix, plot_confusion_matrix
+from .analysis import plot_confusion_matrix
 
 
 @dataclass(frozen=True)
@@ -333,7 +338,17 @@ class GE_Exp(Experiment[GE_Result, GE_Cfg]):
         )
         signals = (g_signals, e_signals)
         try:
-            confusion = calc_confusion_matrix(signals, primary, options)
+            confusion = calc_confusion_matrix(
+                signals,
+                GECalibration(
+                    g_center=primary.g_center,
+                    e_center=primary.e_center,
+                    init_pops=primary.init_pops,
+                    sigma=primary.ge_s,
+                ),
+                radius=options.radius,
+                consider_other=options.consider_other,
+            )
         except (
             ValueError,
             RuntimeError,

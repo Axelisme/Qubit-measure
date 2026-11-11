@@ -13,6 +13,7 @@ import numpy as np
 from numpy.typing import NDArray
 from pydantic import Field, StrictInt, ValidationInfo, field_validator
 from pydantic.dataclasses import dataclass as pydantic_dataclass
+from zcu_tools.analysis.fitting import HangerModel, TransmissionModel
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment
 from zcu_tools.experiment.context import RunContext
@@ -257,51 +258,6 @@ def validate_analysis_source(
     return cfg
 
 
-def _fit_tone(
-    source: RunRecord[MuxOnetoneCfg, MuxOnetoneResult],
-    params: MuxOnetoneAnalyzeOptions,
-    column: int,
-    seed: float | None,
-    plots: Plots,
-) -> ToneFitSuccess | ToneFitFailure:
-    # The entry point already validated cfg, indices, columns and shared options.
-    cfg = source.cfg
-    if cfg is None:
-        raise ValueError("Mux FIT requires saved cfg")
-    index = int(source.result.tone_indices[column])
-    tone = cfg.readout.tones[index]
-    freqs = tone.freq + source.result.dfs
-    fig, _ = plots.subplots(num=f"fit_{index}", figsize=(9, 8))
-    try:
-        fit = fit_resonance(
-            freqs,
-            source.result.signals[:, column],
-            ResonanceOptions(
-                model_type=params.model_type,
-                fit_bg_amp_slope=params.fit_bg_amp_slope,
-                fit_bg_phase_curvature=params.fit_bg_phase_curvature,
-                edelay_branch_seed=seed,
-                edelay_max_search_radius=100.0 if seed is None else None,
-            ),
-            fig,
-        )
-        if not all(
-            np.isfinite(value) for value in (fit.freq, fit.fwhm, fit.theta0, fit.edelay)
-        ):
-            raise ValueError("Resonance fit produced nonfinite calibration scalars")
-    except (ValueError, RuntimeError, ArithmeticError, np.linalg.LinAlgError) as exc:
-        reason = str(exc)
-        fig.clear()
-        axes = fig.subplots()
-        axes.plot(freqs[1:-1], np.abs(source.result.signals[1:-1, column]))
-        axes.set(xlabel="Nominal frequency (MHz)", ylabel="Magnitude (a.u.)")
-        axes.text(0.02, 0.98, reason, transform=axes.transAxes, va="top", wrap=True)
-        fig.suptitle(f"tone {index}: {tone.label or f'tone {index}'} — FIT failed")
-        return ToneFitFailure(index, tone.label, reason)
-    fig.suptitle(f"tone {index}: {tone.label or f'tone {index}'}")
-    return ToneFitSuccess(index, tone.label, fit)
-
-
 class MuxOnetoneExp(Experiment[MuxOnetoneResult, MuxOnetoneCfg]):
     """Measure several resonator spectra with a common frequency-offset scan.
 
@@ -341,16 +297,79 @@ class MuxOnetoneExp(Experiment[MuxOnetoneResult, MuxOnetoneCfg]):
         Invalid source or seed count raises ValueError. Numerical fit failures
         retain their reason without stopping other tones.
         """
-        validate_analysis_source(source)
+        cfg = validate_analysis_source(source)
         if len(options.edelay_seeds) != len(source.result.tone_indices):
             raise ValueError(
                 "edelay_seeds must contain one seed or None per active tone"
             )
-        outcomes = tuple(
-            _fit_tone(source, options, column, seed, plots)
-            for column, seed in enumerate(options.edelay_seeds)
-        )
-        return MuxOnetoneAnalysis(outcomes)
+        outcomes: list[ToneFitSuccess | ToneFitFailure] = []
+        for column, seed in enumerate(options.edelay_seeds):
+            index = int(source.result.tone_indices[column])
+            tone = cfg.readout.tones[index]
+            freqs = tone.freq + source.result.dfs
+            signals = source.result.signals[:, column]
+            fig, _ = plots.subplots(num=f"fit_{index}", figsize=(9, 8))
+            try:
+                fit = fit_resonance(
+                    freqs,
+                    signals,
+                    ResonanceOptions(
+                        model_type=options.model_type,
+                        fit_bg_amp_slope=options.fit_bg_amp_slope,
+                        fit_bg_phase_curvature=options.fit_bg_phase_curvature,
+                        edelay_branch_seed=seed,
+                        edelay_max_search_radius=100.0 if seed is None else None,
+                    ),
+                )
+                params = fit.params
+                fig.clear()
+                if "Qc" in params:
+                    HangerModel.visualize_fit(
+                        freqs[1:-1],
+                        signals[1:-1],
+                        params,
+                        figure=fig,
+                        fit_bg_amp_slope=options.fit_bg_amp_slope,
+                        fit_bg_phase_curvature=options.fit_bg_phase_curvature,
+                    )
+                else:
+                    TransmissionModel.visualize_fit(
+                        freqs[1:-1],
+                        signals[1:-1],
+                        params,
+                        figure=fig,
+                        fit_bg_amp_slope=options.fit_bg_amp_slope,
+                        fit_bg_phase_curvature=options.fit_bg_phase_curvature,
+                    )
+                if not all(
+                    np.isfinite(value)
+                    for value in (fit.freq, fit.fwhm, fit.theta0, fit.edelay)
+                ):
+                    raise ValueError(
+                        "Resonance fit produced nonfinite calibration scalars"
+                    )
+            except (
+                ValueError,
+                RuntimeError,
+                ArithmeticError,
+                np.linalg.LinAlgError,
+            ) as exc:
+                reason = str(exc)
+                fig.clear()
+                axes = fig.subplots()
+                axes.plot(freqs[1:-1], np.abs(signals[1:-1]))
+                axes.set(xlabel="Nominal frequency (MHz)", ylabel="Magnitude (a.u.)")
+                axes.text(
+                    0.02, 0.98, reason, transform=axes.transAxes, va="top", wrap=True
+                )
+                fig.suptitle(
+                    f"tone {index}: {tone.label or f'tone {index}'} — FIT failed"
+                )
+                outcomes.append(ToneFitFailure(index, tone.label, reason))
+                continue
+            fig.suptitle(f"tone {index}: {tone.label or f'tone {index}'}")
+            outcomes.append(ToneFitSuccess(index, tone.label, fit))
+        return MuxOnetoneAnalysis(tuple(outcomes))
 
     def run(
         self,

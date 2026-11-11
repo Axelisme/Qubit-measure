@@ -16,9 +16,9 @@ from zcu_lab.v2.mux.t1.core import MuxT1Cfg, MuxT1Result
 from zcu_lab.v2.mux.t2echo.core import MuxT2EchoCfg
 from zcu_lab.v2.support import live_line
 from zcu_lab.v2.support.acquire import mux_snr_checker
+from zcu_lab.v2.support.detune import actual_detune
 from zcu_lab.v2.support.mux import averaged_mux_signal
 from zcu_lab.v2.support.mux_coherence import MuxCoherenceResult
-from zcu_lab.v2.twotone.time_domain.detune import actual_detune
 
 
 def run_mux_t1(cfg: MuxT1Cfg, *, context: RunContext, retry: int) -> MuxT1Result:

@@ -18,11 +18,12 @@ RunRecord and save/load contracts: lib/zcu_tools/experiment/README.md.
 
 from __future__ import annotations
 
-from typing import Annotated, ClassVar
+from typing import Annotated, ClassVar, Literal
 
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import Field, StrictInt, model_validator
+from pydantic.dataclasses import dataclass as validated_dataclass
 from zcu_tools.analysis.failure import AnalysisFailed
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import Experiment
@@ -46,6 +47,7 @@ from zcu_tools.program.v2.modules import (
 
 from zcu_lab.v2.support import live_line
 from zcu_lab.v2.support.acquire import mux_snr_checker
+from zcu_lab.v2.support.detune import actual_detune
 from zcu_lab.v2.support.mux import MuxFitFailure, averaged_mux_signal
 from zcu_lab.v2.support.mux_coherence import (
     MuxCoherenceResult,
@@ -61,8 +63,18 @@ from zcu_lab.v2.support.mux_coherence_analysis import (
 )
 from zcu_lab.v2.support.mux_coherence_persistence import coherence_spec
 from zcu_lab.v2.support.mux_sweep_cfg import require_tone_value
-from zcu_lab.v2.twotone.time_domain.detune import actual_detune
-from zcu_lab.v2.twotone.time_domain.t2echo.core import T2EchoAnalyzeOptions
+
+
+@validated_dataclass(frozen=True)
+class T2EchoAnalyzeOptions:
+    """Select decay or fringe fitting and optionally free the fringe phase."""
+
+    fit_method: Annotated[Literal["fringe", "decay"], FieldMeta(label="Fit method")] = (
+        "decay"
+    )
+    fit_phase: Annotated[bool, FieldMeta(label="Fit phase offset (fringe only)")] = (
+        False
+    )
 
 
 class MuxEchoToneCfg(MuxCoherenceToneCfg):

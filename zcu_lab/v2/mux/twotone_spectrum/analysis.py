@@ -1,14 +1,60 @@
 """Transition frequency and linewidth fits for the measured mux spectra."""
 
 from dataclasses import dataclass
+from typing import Annotated, Literal
 
 import numpy as np
+from numpy.typing import NDArray
+from pydantic.dataclasses import dataclass as validated_dataclass
 from zcu_tools.analysis.failure import AnalysisFailed
 from zcu_tools.analysis.fitting import FitQuality, compute_fit_quality, fit_qubit_freq
+from zcu_tools.cfg_model import FieldMeta
 from zcu_tools.plotting.plots import Plots
+from zcu_tools.utils.process import minus_background, rotate2real
 
 from zcu_lab.v2.support.mux import MuxFitFailure, MuxSweepResult, validate_mux_result
-from zcu_lab.v2.twotone.freq.core import FreqAnalyzeOptions, qubfreq_signal2real
+
+
+@validated_dataclass(frozen=True)
+class FreqAnalyzeOptions:
+    """Line shape for each spectrum: lor magnitude or signed sinc projection."""
+
+    model_type: Annotated[Literal["lor", "sinc"], FieldMeta(label="Model type")] = "lor"
+
+
+def qubfreq_signal2real(
+    signals: NDArray[np.complex128], *, model_type: Literal["lor", "sinc"] = "lor"
+) -> NDArray[np.float64]:
+    """Convert one complex128 IQ spectrum of shape (N,) to float64 contrast.
+
+    Subtract component-wise median background without mutating signals. ``lor``
+    returns the legacy absolute magnitude, also used by the Run live preview.
+    ``sinc`` projects onto the IQ principal axis with the largest absolute
+    excursion positive, retaining opposite-signed sidelobes instead of folding
+    them. The axis has no absolute physical sign; this convention makes the
+    dominant resonance positive at any fixed IQ rotation.
+
+    Return the same shape, preserving NaNs in partial spectra. Constant or
+    single-acquired-point spectra have zero contrast; all-NaN spectra remain
+    NaN. Raise ValueError for an unknown model, empty/non-1-D input, non-complex128
+    dtype or infinities. Principal-axis numerical failures propagate.
+    """
+    if model_type not in ("lor", "sinc"):
+        raise ValueError(f"Invalid frequency model: {model_type!r}")
+    if signals.ndim != 1 or signals.size == 0 or signals.dtype != np.complex128:
+        raise ValueError("Expected a nonempty complex128 spectrum of shape (N,)")
+    if np.any(np.isinf(signals)):
+        raise ValueError("Frequency spectrum must not contain infinities")
+
+    centered = minus_background(signals)
+    if model_type == "lor":
+        return np.abs(centered)
+
+    projected = rotate2real(centered).real
+    acquired = projected[~np.isnan(projected)]
+    if acquired.size and acquired[np.argmax(np.abs(acquired))] < 0:
+        projected = -projected
+    return projected
 
 
 @dataclass(frozen=True)
