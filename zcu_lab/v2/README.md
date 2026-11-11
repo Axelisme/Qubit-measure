@@ -2,13 +2,14 @@
 
 **讀者：** lab-author、agent。查找實驗的檔案分工、作者契約與各家族入口。
 
-**Last updated:** 2026-11-10，thermal-chain、K-cycle 讀出鏈與 Rπ 共用 helper
+**Last updated:** 2026-11-11，實驗寫法指南入口
 
 先從 [tutorial](../tutorial/README.md) 新增實驗，再按下列入口查契約與操作。
 實驗定義改動的驗收方式與命令範例見 [離線驗收](../README.md#實驗定義的離線驗收)。
 
 ## Reading routes
 
+- 寫或改實驗：讀 [實驗寫法指南](experiment-style.md)，從其中的範本開始寫。
 - [FTF bring-up 與 CZ 校準](two_qubit/guide.md) 說明既有 F1/F2 單 qubit 校準、角色與保存方式。FTF 控制鏈可執行仍不代表物理校準或 fidelity 已驗收。
   - 九個實驗各有非 heralded 與 heralded 入口，均在取數時分類並保存計數，見下方[完整清單](#two-qubit-實驗清單)。
 - [K-cycle 讀出鏈 amp Rabi](chain/amp_rabi/guide.md)、[len Rabi](chain/len_rabi/guide.md)、[T1](chain/t1/guide.md)、[T2 Ramsey](chain/t2ramsey/guide.md) 與 [T2 echo](chain/t2echo/guide.md) 說明每個 rep 是一個 cycle（K 後 (D, 讀, 讀) × 8）、兩條 live 曲線、聯合擬合與三項檢查。
