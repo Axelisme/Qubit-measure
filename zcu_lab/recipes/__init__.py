@@ -34,6 +34,7 @@ from .ro_optimize_chain_power import DEFINITION as RO_OPTIMIZE_CHAIN_POWER
 from .singleshot_ge import DEFINITION as SINGLESHOT_GE
 from .stirap import DEFINITION as STIRAP
 from .stirap_amplitude import DEFINITION as STIRAP_AMPLITUDE
+from .stirap_delay import DEFINITION as STIRAP_DELAY
 from .stirap_detuning import DEFINITION as STIRAP_DETUNING
 from .t1 import DEFINITION as T1
 from .t2echo import DEFINITION as T2ECHO
@@ -81,6 +82,7 @@ RECIPES = (
     MUX_TWOTONE_FLUX_LOCAL,
     STIRAP,
     STIRAP_AMPLITUDE,
+    STIRAP_DELAY,
     STIRAP_DETUNING,
     RAMAN_GF,
     RO_OPTIMIZE_CHAIN_POWER,

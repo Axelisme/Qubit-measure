@@ -2,6 +2,8 @@
 
 **讀者：** operator、agent。設定非 heralded conditional Ramsey，判讀 idle ZZ 擬合頻差與限制。
 
+Cfg 掃描欄位使用 `dc`，此實驗的 cfg schema 為 6.0。載入舊主版本的 run 時保留 Result 與 metadata，cfg 為 None，並發出 `CfgUnavailableWarning`。這些舊 run 不支援重新分析，也不提供 cfg 遷移或欄位 alias。
+
 `two_qubit/idle_zz` 比較 spectator I、Xπ 的兩個名目分支。Target 使用小寫 `f1` 或 `f2`。每個 shot 做可選 reset → spectator I/Xπ → target π/2 → delay → phase projection → terminal mux readout。reset 留空時不發射 reset。
 
 ## 開啟前確認

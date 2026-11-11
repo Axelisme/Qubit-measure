@@ -113,7 +113,7 @@ class SpectroscopyHeraldedExp(
         ),
         result_type=SpectroscopyHeraldedResult,
         cfg_type=SpectroscopyHeraldedCfg,
-        cfg_schema_version="2.0",
+        cfg_schema_version="3.0",
         tag="two_qubit/conditional_spectroscopy_heralded",
         result_builder=restore_result,
     )
@@ -130,9 +130,7 @@ class SpectroscopyHeraldedExp(
         validate_classifiers(config.readout, config.roles)
         frequencies = sweep2array(config.frequency)
         dc_values = (
-            np.array([0.0])
-            if config.dc_device is None
-            else sweep2array(config.dc_values)
+            np.array([0.0]) if config.dc_device is None else sweep2array(config.dc)
         )
         viewers = {}
         for d, dc in enumerate(dc_values):
@@ -273,7 +271,7 @@ class SpectroscopyHeraldedExp(
         data, cfg = source.result, source.cfg
         if cfg is None:
             raise ValueError("Heralded spectroscopy analysis requires saved cfg")
-        dc = np.array([0.0]) if cfg.dc_device is None else sweep2array(cfg.dc_values)
+        dc = np.array([0.0]) if cfg.dc_device is None else sweep2array(cfg.dc)
         frequencies = sweep2array(cfg.frequency)
         if (
             not np.array_equal(data.dc_values, dc)
