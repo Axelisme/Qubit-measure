@@ -40,12 +40,14 @@ class _Invocation:
     timeout: float
     command: list[str]
     wait_limit: float | None
+    exclusive: bool
 
 
 def _parse(argv: list[str] | None) -> _Invocation:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--log", required=True, type=Path)
     parser.add_argument("--wait-limit", type=float)
+    parser.add_argument("--exclusive", action="store_true")
     parser.add_argument("timeout", type=float)
     raw = sys.argv[1:] if argv is None else argv
     if "--" not in raw:
@@ -66,12 +68,13 @@ def _parse(argv: list[str] | None) -> _Invocation:
         timeout=args.timeout,
         command=command,
         wait_limit=args.wait_limit,
+        exclusive=args.exclusive,
     )
 
 
 @contextmanager
 def _spawn(
-    invocation: _Invocation, cpus: list[int], lock_fd: int
+    invocation: _Invocation, cpus: list[int], lock_fds: tuple[int, ...]
 ) -> Generator[subprocess.Popen[bytes]]:
     """Yield immediately after launch; restore affinity and close the log on exit."""
     affinity = os.sched_getaffinity(0)
@@ -86,7 +89,7 @@ def _spawn(
                 stderr=subprocess.STDOUT,
                 env={**os.environ, **CHILD_ENV},
                 start_new_session=True,
-                pass_fds=(lock_fd,),
+                pass_fds=lock_fds,
             )
             yield child
     finally:
@@ -95,7 +98,7 @@ def _spawn(
 
 @contextmanager
 def _forwarding_child(
-    invocation: _Invocation, cpus: list[int], lock_fd: int
+    invocation: _Invocation, cpus: list[int], lock_fds: tuple[int, ...]
 ) -> Generator[tuple[subprocess.Popen[bytes], list[int]]]:
     """Yield the launched child and signals queued during spawn; restore handlers."""
     child: subprocess.Popen[bytes] | None = None
@@ -111,7 +114,7 @@ def _forwarding_child(
     try:
         for sig in previous:
             signal.signal(sig, forward)
-        with _spawn(invocation, cpus, lock_fd) as child:
+        with _spawn(invocation, cpus, lock_fds) as child:
             yield child, pending
     finally:
         for sig, handler in previous.items():
@@ -189,8 +192,8 @@ class _WaitLimitExpired(Exception):
 @contextmanager
 def _acquired_slot(
     invocation: _Invocation, meminfo_path: Path, lock_directory: Path
-) -> Generator[tuple[int, int, float]]:
-    """Yield (slot index, inherited lock fd, waited seconds) after admission.
+) -> Generator[tuple[int, tuple[int, ...], float]]:
+    """Yield (first slot, inherited lock fds, waited seconds) after admission.
 
     Close our descriptor on exit, without unlocking copies inherited by children.
     Raise _WaitLimitExpired if admission exceeds the optional wait limit.
@@ -209,16 +212,33 @@ def _acquired_slot(
         attempted = True
         reason = f"MemAvailable < {MINIMUM_AVAILABLE_BYTES / 1_000_000_000:g} GB"
         if _memory_available(meminfo_path):
-            for slot in range(SLOT_COUNT):
-                with (lock_directory / f"slot-{slot}.lock").open("a+b") as lock:
-                    try:
-                        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                    except BlockingIOError:
-                        continue
-                    # Close only: LOCK_UN would also unlock inherited descriptions.
-                    yield slot, lock.fileno(), time.monotonic() - queued
-                    return
-            reason = "all CPU slots are occupied"
+            candidates = (
+                [list(range(SLOT_COUNT))]
+                if invocation.exclusive
+                else [[slot] for slot in range(SLOT_COUNT)]
+            )
+            for slots in candidates:
+                with ExitStack() as reservation:
+                    locks = []
+                    for slot in slots:
+                        lock = reservation.enter_context(
+                            (lock_directory / f"slot-{slot}.lock").open("a+b")
+                        )
+                        try:
+                            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                        except BlockingIOError:
+                            break
+                        locks.append(lock.fileno())
+                    else:
+                        # Close only: LOCK_UN would also unlock inherited descriptions.
+                        yield slots[0], tuple(locks), time.monotonic() - queued
+                        return
+                # Failed attempts close every partial lock before polling again.
+            reason = (
+                "exclusive access requires all CPU slots to be free"
+                if invocation.exclusive
+                else "all CPU slots are occupied"
+            )
         if reason != last_reported:
             print(f"run_heavy: waiting: {reason}", file=sys.stderr)
             last_reported = reason
@@ -261,16 +281,20 @@ def _execute(
                 text=True,
             ).strip()
             lock_directory = Path(common) / "run-heavy"
-        slot, lock_fd, wait_seconds = resources.enter_context(
+        slot, lock_fds, wait_seconds = resources.enter_context(
             _acquired_slot(invocation, meminfo_path, lock_directory)
         )
         metadata = _git_metadata()
         width = count // SLOT_COUNT
-        cpus = list(range(slot * width, (slot + 1) * width))
+        cpus = (
+            list(range(SLOT_COUNT * width))
+            if invocation.exclusive
+            else list(range(slot * width, (slot + 1) * width))
+        )
         started_utc = datetime.now(UTC).isoformat()
         started = time.monotonic()
         child, pending = resources.enter_context(
-            _forwarding_child(invocation, cpus, lock_fd)
+            _forwarding_child(invocation, cpus, lock_fds)
         )
     except _WaitLimitExpired as error:
         resources.close()
@@ -314,7 +338,8 @@ def _execute(
                 "command": invocation.command,
                 "cpus": cpus,
                 "env": CHILD_ENV,
-                "slot": slot,
+                "slot": None if invocation.exclusive else slot,
+                "exclusive": invocation.exclusive,
                 "cwd": str(cwd),
                 **metadata,
                 "wait_seconds": wait_seconds,
@@ -337,12 +362,14 @@ def main(
     meminfo_path: Path = Path("/proc/meminfo"),
     lock_directory: Path | None = None,
 ) -> int:
-    """Run `--log PATH [--wait-limit SECONDS] TIMEOUT -- COMMAND...` in cwd.
+    """Run `--log PATH [--wait-limit SECONDS] [--exclusive] TIMEOUT -- COMMAND...`.
 
     Call on the main thread, on Linux only, within a committed Git worktree.
-    Wait for MemAvailable >= 8 GB and one of two repository-wide CPU slots.
+    Run in cwd after MemAvailable >= 8 GB and a repository-wide CPU slot is free.
+    --exclusive waits for both slots, releasing partial reservations before retry.
     Each slot uses cpu_count // 2 consecutive machine CPUs, ignoring an odd last
-    CPU. At least two CPUs and affinity access to the acquired slot are required.
+    CPU. Exclusive commands use the union of both slots' CPUs. At least two CPUs
+    and affinity access to all reserved CPUs are required.
     The child receives fixed headless/single-thread settings and its combined
     output replaces PATH. It inherits the flock so runner death cannot free a
     slot while its command or inheriting descendants still run.
@@ -359,6 +386,8 @@ def main(
     INT/TERM received by the runner are forwarded to the entire child group.
     Check Git identity before queuing, then reread HEAD/tree/dirty after admission.
     Once the child starts, print one JSON receipt with that identity and outcome.
+    exclusive is a bool; slot is null for exclusive commands, otherwise its index.
+    cpus lists the command's affinity. Children inherit every reserved slot lock.
     Post-launch OS, value or Git-command failures report to stderr and return 70
     with a receipt, after best-effort group cleanup. Receipt-output failures
     propagate to the caller because no receipt can be written on that path.

@@ -169,6 +169,7 @@ def test_receipt_identifies_callers_worktree_and_child_exit(
         "timed_out",
         "residual_killed",
         "log",
+        "exclusive",
     }
     assert receipt["command"] == command
     assert receipt["cwd"] == str(cwd)

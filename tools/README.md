@@ -1,6 +1,6 @@
 # tools/
 
-**Last updated:** 2026-11-12, run_heavy review fixes
+**Last updated:** 2026-11-12, run_heavy exclusive admission
 
 **讀者：** framework-dev。Repo 品質檢查與重計算執行器的 CLI、輸出與比較機制。
 
@@ -27,7 +27,7 @@
 
 ```bash
 uv run --directory <worktree> --no-sync -- \
-  python tools/run_heavy.py --log <file> [--wait-limit <seconds>] <timeout-seconds> -- <command> [args...]
+  python tools/run_heavy.py --log <file> [--wait-limit <seconds>] [--exclusive] <timeout-seconds> -- <command> [args...]
 ```
 
 `--log` 將命令的 stdout 與 stderr 合併寫入指定檔案，並覆寫原有內容。
@@ -41,6 +41,9 @@ Runner 會建立鎖目錄，清理 `.agent_state/` 不會移除鎖。
 每個 slot 取得 `cpu_count // 2` 個連續 CPU，並將子程序的 CPU affinity 固定在這些核心，CPU 總數為奇數時不使用最後一核。
 Runner 依整台機器的 CPU 編號切分 slot，不依呼叫者的 affinity 改變切法。
 命令取得空 slot 且 `/proc/meminfo` 的 MemAvailable 至少 8 GB 時才啟動，讀不到 MemAvailable 就回傳 2。
+`--exclusive` 依 slot 編號順序取得兩個鎖，取不齊就全部釋放後再等。
+獨占命令使用兩個 slot 的 CPU 聯集，總核數為奇數時仍忽略最後一核。
+獨占命令持鎖期間，一般與其他獨占請求都要等待。等待不保證先來先執行。
 子程序繼承 slot 鎖，runner 結束後，命令或繼承鎖的後代仍持有鎖時不會釋出 slot。
 所有持鎖程序結束後，作業系統自動釋出鎖。
 
@@ -68,7 +71,8 @@ Runner 遇到用法錯誤、非 Linux、不在已提交的 Git worktree、少於
 | --- | --- |
 | `command`、`cwd` | 記錄命令的 argv 與執行工作目錄 |
 | `head`、`tree`、`dirty` | 排隊前先檢查 Git 是否可讀，取得 slot 後重讀該 worktree 的 HEAD commit、`HEAD^{tree}` 與修改狀態並寫入收據。`git status --porcelain` 含 untracked 且非空時將 `dirty` 設為 `true` |
-| `slot`、`cpus`、`env` | 記錄取得的 slot 編號、CPU 編號清單與 runner 固定設定的環境變數 |
+| `exclusive`、`slot` | 一般模式為 `false` 與取得的 slot 編號；獨占模式為 `true` 與 `null` |
+| `cpus`、`env` | 記錄子程序的 CPU affinity 清單與 runner 固定設定的環境變數。獨占模式的 `cpus` 是兩 slot 的聯集 |
 | `wait_seconds` | 記錄啟動前的等待秒數 |
 | `started_utc`、`finished_utc`、`elapsed_seconds` | 記錄命令開始與結束的 UTC 時間，以及執行秒數 |
 | `exit_code`、`timed_out` | 記錄 runner 的 exit status，超時時將 `timed_out` 設為 `true` |
