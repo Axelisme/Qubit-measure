@@ -1,6 +1,6 @@
 # program/v2
 
-**Last updated:** 2026-11-10，Rπ 逐 cycle 累加
+**Last updated:** 2026-11-11，pulse gain 編譯檢查
 
 **讀者：** lab-author、framework-dev、agent。查找 V2 program 公開 API、型別契約與編譯規則的 owner。
 

@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2`
 
-**Last updated:** 2026-10-30
+**Last updated:** 2026-11-11
 
 **讀者：** framework-dev。實驗 runtime、硬體量化與共用工具入口。
 
