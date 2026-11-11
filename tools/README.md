@@ -1,6 +1,6 @@
 # tools/
 
-**Last updated:** 2026-11-02, pyright threads
+**Last updated:** 2026-11-11, run_heavy
 
 **讀者：** framework-dev。Repo 品質檢查的 CLI、輸出與比較機制。
 
@@ -17,6 +17,66 @@ stdout。`check_script_awaits.py`、`check_file_size.py`、`check_test_capabilit
 `_support.py` 共用走訪樹、讀 attribute chain、透過 import 解析呼叫與載入另一支檢查的機制。
 各支檢查自行定義判準。共用模組要求 `tools/` 在 `sys.path` 上。
 直接執行某支檢查、`load_tool` 載入另一支與 pytest 的 `pythonpath` 都滿足這項要求。
+
+## 重計算執行器
+
+全樹 pytest、full Pyright 與效能量測經 `run_heavy.py` 執行，讓同一 repo 的所有 worktree 共用排隊與 CPU slot。
+先切換到要驗證的 worktree，再執行下列命令，讓子程序沿用該工作目錄：
+
+```bash
+uv run --directory <worktree> --no-sync -- \
+  python tools/run_heavy.py --log <file> [--wait-limit <seconds>] <timeout-seconds> -- <command> [args...]
+```
+
+`--log` 將命令的 stdout 與 stderr 合併寫入指定檔案，並覆寫原有內容。
+先建立 log 與收據檔案的父目錄，避免開檔失敗。
+Runner 結束後將一行 JSON 收據印到自己的 stdout，重導 stdout 即可另存收據。
+`--wait-limit` 限制等待 slot 與記憶體的秒數，省略時持續等待。
+`<timeout-seconds>` 限制命令啟動後的執行時間，不包含排隊時間。
+
+Runner 以 Linux `flock` 鎖住 `<git common dir>/run-heavy/slot-<n>.lock`，讓同一 repo 的 worktrees 共用 2 個 slot。
+Runner 會建立鎖目錄，清理 `.agent_state/` 不會移除鎖。
+每個 slot 取得 `cpu_count // 2` 個連續 CPU，並將子程序的 CPU affinity 固定在這些核心，CPU 總數為奇數時不使用最後一核。
+Runner 依整台機器的 CPU 編號切分 slot，不依呼叫者的 affinity 改變切法。
+命令取得空 slot 且 `/proc/meminfo` 的 MemAvailable 至少 8 GB 時才啟動，讀不到 MemAvailable 就回傳 2。
+子程序繼承 slot 鎖，runner 結束後，命令或繼承鎖的後代仍持有鎖時不會釋出 slot。
+所有持鎖程序結束後，作業系統自動釋出鎖。
+
+Runner 固定設定 `QT_QPA_PLATFORM=offscreen`、`MPLBACKEND=Agg`，讓命令不開啟顯示視窗。
+它也將 `OMP_NUM_THREADS`、`OPENBLAS_NUM_THREADS`、`MKL_NUM_THREADS` 與 `NUMBA_NUM_THREADS` 設為 `1`，限制數值函式庫的執行緒數。
+命令超時或結束後仍有同 process group 的存活程序時，runner 先送 SIGTERM，10 秒後仍未停止就送 SIGKILL。
+Runner 收到 SIGINT 或 SIGTERM 時，將訊號轉送給命令的整個 process group。
+
+| 結果 | Runner exit status |
+| --- | --- |
+| 命令自行結束 | 回傳命令的 exit status，被訊號終止則回傳 `128 + signal` |
+| 命令超時 | 回傳 `124` |
+| 超過 `--wait-limit` 仍未獲准啟動 | 回傳 `75`，將原因寫到 stderr，不輸出收據 |
+| 啟動前失敗 | 回傳 `2`，將原因寫到 stderr，不輸出收據 |
+
+Runner 遇到用法錯誤、非 Linux、不在已提交的 Git worktree、少於 2 核、log 無法開啟、affinity 無法設定或命令無法執行時，會在啟動前失敗。
+只有命令真的開始執行才會印收據，開始後無論成功、失敗、超時或被訊號終止都會印收據。
+
+| 收據欄位 | 記錄內容 |
+| --- | --- |
+| `command`、`cwd` | 記錄命令的 argv 與執行工作目錄 |
+| `head`、`tree`、`dirty` | 記錄該 worktree 的 HEAD commit、`HEAD^{tree}` 與排隊前的修改狀態，`git status --porcelain` 含 untracked 且非空時將 `dirty` 設為 `true` |
+| `slot`、`cpus`、`env` | 記錄取得的 slot 編號、CPU 編號清單與 runner 固定設定的環境變數 |
+| `wait_seconds` | 記錄啟動前的等待秒數 |
+| `started_utc`、`finished_utc`、`elapsed_seconds` | 記錄命令開始與結束的 UTC 時間，以及執行秒數 |
+| `exit_code`、`timed_out` | 記錄 runner 的 exit status，超時時將 `timed_out` 設為 `true` |
+| `residual_killed` | 直接子程序結束後仍找到同 process group 的存活程序時設為 `true`，超時本身的整組清理只記在 `timed_out` |
+| `log` | 記錄命令輸出 log 的路徑 |
+
+全樹測試沿用 [tests/README.md 的完整選集命令](../tests/README.md#執行測試套件)，保留 marker、rootdir 與 failure log 選項。
+Full Pyright 將下方的全樹比較命令包進 runner，讓排隊與收據套用到整次比較：
+
+```bash
+uv run --directory <worktree> --no-sync -- \
+  python tools/run_heavy.py --log <per-task 目錄>/pyright.log 1800 -- \
+  python tools/check_ratchet.py --base <ref> --detector pyright --full-pyright \
+  > <per-task 目錄>/pyright-receipt.json
+```
 
 ## Markdown reader declarations
 
@@ -111,8 +171,11 @@ before/after；這是人工審查提示，不是自動判定設定變弱，也�
 
 ```bash
 uv run --no-sync -- python tools/check_pytest_collection.py
-uv run --directory <worktree> --no-sync -- pytest --rootdir <worktree> -c <worktree>/pyproject.toml \
-  -n auto --dist=worksteal --failure-log <per-task 目錄>/pytest-failures.jsonl
+uv run --directory <worktree> --no-sync -- \
+  python tools/run_heavy.py --log <per-task 目錄>/pytest.log 1800 -- \
+  pytest --rootdir <worktree> -c <worktree>/pyproject.toml \
+  -n 4 --dist=worksteal -m "not sim" \
+  --failure-log <per-task 目錄>/pytest-failures.jsonl
 ```
 
 全樹驗證的 marker 選擇、rootdir 固定方式與 failure log 路徑、用途見 [tests/README.md](../tests/README.md#執行測試套件)。
@@ -325,7 +388,9 @@ owner／branch 與 line role 識別位置，保留 comment 增刪與 formatter �
 合併前另跑慢速全樹比較，讓未修改 caller 的診斷保持可見：
 
 ```bash
-uv run --no-sync -- python tools/check_ratchet.py --base <ref> --detector pyright --full-pyright
+uv run --directory <worktree> --no-sync -- \
+  python tools/run_heavy.py --log <per-task 目錄>/pyright.log 1800 -- \
+  python tools/check_ratchet.py --base <ref> --detector pyright --full-pyright
 ```
 
 `--full-pyright` 對兩側使用 candidate 設定、目前 worktree interpreter 與已安裝依賴，

@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-11-05，測試不綁 profile 數值
+**Last updated:** 2026-11-11，完整選集經 run_heavy 排隊
 
 **讀者：** framework-dev、agent。查閱測試的 owner、fixture、執行方式與搬遷驗收契約。
 
@@ -152,28 +152,32 @@ uv run --directory <worktree> --no-sync -- \
 | 全部案例，包含模擬 | `-m ""` | 是 |
 
 完整效能對照用 `not sim` 與 `sim` 兩個互斥選集，不能把 `not sim` 與空 marker 的時間相加。
-完整選集與 full Pyright 由 Orchestrator 用下方命令直接執行。同一台機器上有其他 task 在跑完整選集、
-full Pyright 或效能量測時，先協調時段，錯開執行。需要 Qt 的測試由所在目錄的 conftest（例如 `tests/gui/conftest.py`）設為 offscreen，
-`tests/conftest.py` 把每個 xdist worker 的數值函式庫 threads 預設為 1；不要為了量測另開未授權的 full 暖機。
+完整選集與 full Pyright 經 `tools/run_heavy.py` 執行，runner 在同一 repo 的 worktrees 間共用 2-slot queue，等到有空 slot 且 MemAvailable 至少 8 GB 才啟動命令。
+Runner 固定 headless 與單執行緒環境，結束後將 JSON 收據印到 stdout，參數與 full Pyright 用法見 [tools/README.md](../tools/README.md#重計算執行器)。
+不要為了量測另開未授權的 full 暖機。
 
 4 workers 的建議依據見 [worker 數比較](../docs/reference/test-speed-comparisons.md#worker-數比較)。
 保留 `worksteal`，不改 pytest 的預設 marker。
 
-全樹驗證的時點依 task 適用流程安排，並依上段先和其他重計算錯開時段。依變更範圍選擇 marker expression，兩種都包含 slow：
+全樹驗證的時點依 task 適用流程安排。依變更範圍選擇 marker expression，兩種都包含 slow：
 
 - 未改 `lib/zcu_tools/simulate/`，用 `-m "not sim"`。
 - 改到 `lib/zcu_tools/simulate/`，用 `-m ""`，包含所有測試。
 
+先切換到 `<worktree>`，建立下方使用的 per-task 目錄，再執行命令，將測試輸出寫入 log，將收據另存為 JSON：
+
 ```bash
 uv run --directory <worktree> --no-sync -- \
+  python tools/run_heavy.py --log <per-task 目錄>/pytest.log 1800 -- \
   pytest --rootdir <worktree> -c <worktree>/pyproject.toml \
   -n 4 --dist=worksteal -m "not sim" --durations=25 \
-  --failure-log <per-task 目錄>/pytest-failures.jsonl
+  --failure-log <per-task 目錄>/pytest-failures.jsonl \
+  > <per-task 目錄>/pytest-receipt.json
 # 若改到 lib/zcu_tools/simulate/，將上面的 -m "not sim" 換成 -m ""。
 ```
 
 `--rootdir` 與 `-c` 把 rootdir 與設定檔固定在 worktree。pytest 也從既存的選項值路徑推算 rootdir；未固定時，worktree 外既存的 `--failure-log` 檔會讓它選到主 checkout 並收集主 checkout 的測試。
-執行後核對輸出標頭的 `rootdir:` 為 `<worktree>`。
+執行後從 `pytest.log` 核對輸出標頭的 `rootdir:` 為 `<worktree>`。
 
 Watchdog／timeout 中止 pytest 時不會印失敗摘要，junitxml／lastfailed 也只在 session 結束時寫出；此 JSONL 檔是中止後唯一能定位失敗節點的來源。
 先建立 `.agent_state/` 下的 per-task 目錄，再傳入檔案路徑，遵循 [CLAUDE.md 的暫存檔生命週期](../CLAUDE.md#暫存檔生命週期)；未給 `--failure-log` 時不寫檔。
