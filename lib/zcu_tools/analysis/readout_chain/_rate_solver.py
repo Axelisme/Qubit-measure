@@ -22,6 +22,7 @@ from ._cycle_solver import (
     assigned_seed,
     bounded_least_squares,
     model_weights,
+    scaled_covariance,
     starting_nuisance,
 )
 from ._rate_coordinates import (
@@ -73,7 +74,7 @@ def solve_rate(
         q = _stage(layout, means, weights, q)
     predicted, jacobian = layout.mean_jacobian(q)
     weighted = apply_weights(weights, jacobian).reshape(-1, SIZE)
-    cov = _scaled_covariance(weighted)
+    cov = scaled_covariance(weighted)
     J = float(np.sum(apply_weights(weights, means - predicted) ** 2))
     joint = JointSolution(q, cov, weights, J)
     return RateSolution(
@@ -115,15 +116,6 @@ def _stage(
     if not result.success and not fixed:
         raise RuntimeError(f"joint rate cycle fit did not converge: {result.message}")
     return np.r_[q[:fixed], result.x]
-
-
-def _scaled_covariance(weighted: Array) -> Array:
-    # Scale columns so the cutoff describes collinearity, not inverse-time units.
-    scale = np.linalg.norm(weighted, axis=0)
-    scale[scale == 0] = 1.0
-    scaled = weighted / scale
-    inverse = np.linalg.pinv(scaled.T @ scaled, rcond=1e-12, hermitian=True)
-    return inverse / np.outer(scale, scale)
 
 
 def _nuisances(layout: RateCoordinates, q: Array) -> RateNuisances:

@@ -17,6 +17,7 @@ from ._cycle_solver import (
     bounded_least_squares,
     local_drive,
     local_mean_jacobian,
+    scaled_covariance,
 )
 
 # Lower and upper bounds of the table columns being fitted.
@@ -33,7 +34,7 @@ class SharedSolution:
     J: Weighted residual sum of squares at table, dimensionless.
     covariance_shared: Shape (14,14), covariance of the shared coordinates.
     covariance_local: Shape (F,6,6), per-point covariance of the drive pairs at
-        fixed shared coordinates, the pseudoinverse of their normal matrix.
+        fixed shared coordinates, with column-normalized inverse information.
     coupling: Shape (F,6,14), per-point covariance_local times the local-shared
         normal block. A change of the shared coordinates moves the fitted drive
         pairs by minus coupling times that change.
@@ -189,11 +190,8 @@ def solve_shared(
         current[:, TABLE_SHARED] = shared
         jac = apply_weights(weights, local_mean_jacobian(current)[1])
         local, global_ = jac[:, :, TABLE_DRIVE], jac[:, :, TABLE_SHARED]
-        normal = np.einsum("nfi,nfj->nij", local, local)
         coupling = np.einsum("nfi,nfj->nij", local, global_)
-        projected = global_ - local @ (
-            np.linalg.pinv(normal, rcond=1e-12, hermitian=True) @ coupling
-        )
+        projected = global_ - local @ (scaled_covariance(local) @ coupling)
         return -projected.reshape(-1, ROW_SIZE)
 
     result = bounded_least_squares(
@@ -209,14 +207,13 @@ def solve_shared(
     jac = apply_weights(weights, local_mean_jacobian(current)[1])
     local, global_ = jac[:, :, TABLE_DRIVE], jac[:, :, TABLE_SHARED]
     # Normal-matrix blocks of the drive pairs (local) and shared coordinates.
-    local_normal = np.einsum("nfi,nfj->nij", local, local)
     local_shared = np.einsum("nfi,nfj->nij", local, global_)
-    covariance_local = np.linalg.pinv(local_normal, rcond=1e-12, hermitian=True)
+    covariance_local = scaled_covariance(local)
     coupling = covariance_local @ local_shared
-    schur = np.einsum("nfi,nfj->ij", global_, global_) - np.einsum(
-        "nij,nik->jk", local_shared, coupling
-    )
-    covariance_shared = np.linalg.pinv(schur, rcond=1e-12, hermitian=True)
+    # Form the Schur complement as a projected Jacobian to retain column scales
+    # and avoid subtracting nearly equal normal-matrix blocks.
+    projected = global_ - local @ coupling
+    covariance_shared = scaled_covariance(projected.reshape(-1, ROW_SIZE))
     return SharedSolution(
         current,
         float(np.sum(residual**2)),

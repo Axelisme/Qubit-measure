@@ -64,10 +64,12 @@ class CycleFit:
     nuisances: Shared endpoint/D0, geometry, thermal and read estimates. State
         labels are arbitrary; comparisons must allow a simultaneous permutation.
     covariance: Joint covariance of curve and nuisance coordinates, shape (P,P),
-        Moore-Penrose inverse fixed-weight information (relative cutoff 1e-12),
-        without residual-variance rescaling. RateModel first normalizes Jacobian
-        columns so the cutoff describes collinearity rather than units. Rank loss
-        and active bounds invalidate ordinary Wald coverage; the pseudoinverse does not restore identification.
+        column-normalized pseudoinverse of fixed-weight information (relative
+        cutoff 1e-12), transformed back to parameter units without residual-variance
+        rescaling. Curve, rate and nested fits normalize Jacobian columns so the
+        cutoff describes collinearity rather than units. Rank loss and active
+        bounds invalidate ordinary Wald coverage; the pseudoinverse does not
+        restore identification.
     parameter_names: Covariance column names. Curve or rate parameters come
         first. Curve models continue with the drive endpoints (state, endpoint,
         s/f); rate models with the D0 rows (s,f), whose names encode each row's

@@ -45,6 +45,22 @@ def apply_weights(weights: np.ndarray, values: np.ndarray) -> np.ndarray:
     return np.einsum("nij,nj...->ni...", weights, values)
 
 
+def scaled_covariance(weighted: np.ndarray) -> np.ndarray:
+    """Invert information after column normalization, then restore coordinate units.
+
+    weighted has shape (..., observations, parameters). Use the same relative
+    normal-matrix cutoff (1e-12) for a single joint fit or batched local fits.
+    The cutoff then describes collinearity rather than parameter units.
+    """
+    scale = np.linalg.norm(weighted, axis=-2)
+    scale = np.where(scale == 0, 1.0, scale)
+    scaled = weighted / scale[..., None, :]
+    inverse = np.linalg.pinv(
+        scaled.swapaxes(-1, -2) @ scaled, rcond=1e-12, hermitian=True
+    )
+    return inverse / (scale[..., :, None] * scale[..., None, :])
+
+
 def model_weights(
     drive: np.ndarray, rows: np.ndarray, counts: np.ndarray
 ) -> np.ndarray:
@@ -123,7 +139,7 @@ def solve_joint(
     _cycle_layout. With curve parameters held at q, fit the nuisances for each
     of the six assignments of geometric states to curve rows; run two joint
     model-covariance weight stages from the lowest-objective assignment. Return
-    the estimate, its Moore-Penrose inverse-information covariance, the last
+    the estimate, its column-normalized inverse-information covariance, the last
     weights and J, without changing the inputs. Raise RuntimeError if a joint
     stage does not converge; numpy.linalg.LinAlgError propagates from a model
     covariance that is not positive definite.
@@ -149,7 +165,7 @@ def solve_joint(
         q = _joint_stage(model, axis, means, weights, q)
     predicted, jac = joint_mean_jacobian(model, axis, q)
     weighted = apply_weights(weights, jac).reshape(-1, len(q))
-    cov = np.linalg.pinv(weighted.T @ weighted, rcond=1e-12, hermitian=True)
+    cov = scaled_covariance(weighted)
     residual = apply_weights(weights, means - predicted)
     return JointSolution(q, cov, weights, float(np.sum(residual**2)))
 
