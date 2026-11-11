@@ -2,10 +2,12 @@
 
 **Readers:** operator, agent. Measure classified conditional phase and review a common CZ frequency proposal.
 
+Cfg sweep fields use `gate_count`. This experiment uses cfg schema 6.0. Loading a run from an older major version retains Result and metadata, sets cfg to None and emits `CfgUnavailableWarning`. These old runs cannot be reanalyzed. No cfg migration or field alias is provided.
+
 ## Prepare the inputs
 
 Both Forms show reset, Xπ, X90, dual-line drive and mux readout first.
-Captured roles and target follow. Set the outer `gate_counts` before the inner
+Captured roles and target follow. Set the outer `gate_count` before the inner
 `frequency` sweep, then the acquisition settings.
 
 Bind `f1` and `f2` to distinct fluxoniums, `coupler` to their transmon, and `mux` to a MuxGroup containing both qubits. Calibrate Xπ, X90 and the complete mux readout first. Each role tone needs a circle classifier with radius from mux singleshot GE Post. Missing calibration, linear classification or missing radius stops Run with a GE Post prompt. Other mux tones need no classifier.
@@ -14,7 +16,7 @@ Readout references `$mux.module.readout` when present. Without a slot, fill all 
 
 The Form copies `$coupler.module.cz_f1` and `cz_f2` into editable pulses. Missing CZ slots remain required. CZ, Xπ and X90 must use their captured role generator. The two CZ lines require different generators, equal finite frequency, equal envelope duration and equal pre-delay. Signed gains, relative phase, waveform and individual post-delays remain explicit. Playback starts both lines together and waits for both to finish. The coupler stays DC-biased.
 
-Choose lowercase `target=f1` or `f2`. Enter a strictly increasing common CZ frequency range in MHz and unique positive integer `gate_counts`, initially `[1,2,3]`. Each point replaces both CZ frequencies and preserves gains, phase and waveform. Set reps, rounds and delays for the authorized budget. Rounds accumulate counts at acquisition, without a host round scan.
+Choose lowercase `target=f1` or `f2`. Enter a strictly increasing common CZ frequency range in MHz and a `gate_count` list of unique positive integers, initially `[1,2,3]`. Each point replaces both CZ frequencies and preserves gains, phase and waveform. Set reps, rounds and delays for the authorized budget. Rounds accumulate counts at acquisition, without a host round scan.
 
 ## Sequence and counts
 

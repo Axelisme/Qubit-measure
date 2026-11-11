@@ -2,6 +2,8 @@
 
 **Readers:** operator, agent. Run herald-conditioned local-Z correction and inspect acceptance.
 
+Cfg sweep fields use `gate_count`. This experiment uses cfg schema 2.0. Loading a run from an older major version retains Result and metadata, sets cfg to None and emits `CfgUnavailableWarning`. These old runs cannot be reanalyzed. No cfg migration or field alias is provided.
+
 ## Inputs and sequence
 
 Choose `two_qubit/local_z_heralded`. This is a separate experiment from `two_qubit/local_z`, with its own saved cfg and Result. Bind f1, f2, coupler and mux; calibrate the same pulses and full mux readout described in the [ordinary guide](guide.md). Both role tones need a circle classifier with a GE Post radius before Run. Other tones need no classifier. Reset the Form after changing captured sources.

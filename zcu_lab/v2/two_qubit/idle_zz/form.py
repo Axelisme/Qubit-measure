@@ -42,6 +42,6 @@ def idle_zz_form(ctx: FormContext, cfg_type: type[T_Cfg]) -> Form[T_Cfg]:
             "detune": None,
             "delay": Range(0, 10, expts=101),
             "dc_device": None,
-            "dc_values": Range(0, 0, expts=1),
+            "dc": Range(0, 0, expts=1),
         },
     )
