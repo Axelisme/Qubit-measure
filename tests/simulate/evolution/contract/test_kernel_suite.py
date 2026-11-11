@@ -12,7 +12,8 @@ from numpy.typing import NDArray
 from scipy.linalg import expm
 from zcu_tools.simulate.evolution.kernel import ApplyContext, KernelContext
 
-from .kernel_suite import KernelCase, KernelContract, synthetic_model
+from .kernel_suite import KernelCase, KernelContract, reference, synthetic_model
+from .reference import density_error
 
 if TYPE_CHECKING:
     from zcu_tools.simulate.evolution import kernel
@@ -149,6 +150,50 @@ def kernel_case(request: pytest.FixtureRequest) -> KernelCase:
     vector = np.exp(1j * np.arange(size)) / np.sqrt(size)
     state = np.outer(vector, vector.conj())
     return KernelCase(DemoKernel(), source, table, np.repeat(state[None], rows, axis=0))
+
+
+@pytest.mark.sim
+@pytest.mark.parametrize("offset_ns", [0.0, 0.5])
+def test_reference_resolves_narrow_sampled_pulse(offset_ns: float) -> None:
+    """A triangular pulse with area 1/4 fully inverts a degenerate doublet."""
+    x = np.array([[0, 1], [1, 0]], dtype=complex)
+    model = evolution.SecularModel(
+        (0,),
+        "doublet",
+        np.zeros(2),
+        np.eye(2, dtype=complex),
+        (evolution.SecularDrive("drive", x, np.zeros((2, 2), dtype=complex)),),
+        np.zeros((2, 2)),
+        np.zeros((2, 2)),
+    )
+    initial = np.diag([1, 0]).astype(complex)
+    source = evolution.ModelSource(initial, lambda level: replace(model, level=level))
+    envelope = evolution.EnvelopeSpec(
+        "sampled",
+        np.array([0, 0, 25000, 0, 0], dtype=complex),
+        np.array([0, 0.731, 0.73101, 0.73102, 2.0]),
+    )
+    from zcu_tools.simulate.evolution.kernel import SegmentTable
+
+    table = SegmentTable(
+        np.array([0]),
+        np.array([3.0]),
+        np.array([2.0]),
+        np.array([[0]]),
+        np.array([1]),
+        np.array([[0]]),
+        np.array([[0.0]]),
+        np.array([[1.0]]),
+        np.array([[0.0]]),
+        np.array([[0]]),
+        np.array([[offset_ns]]),
+        (envelope,),
+    )
+    case = KernelCase(DemoKernel(), source, table, initial[None])
+    coarse = reference(case, 0, initial, rtol=2e-10, atol=2e-12)
+    fine = reference(case, 0, initial, rtol=2e-12, atol=2e-14)
+    assert density_error(coarse, fine) <= 2e-6
+    np.testing.assert_allclose(fine, np.diag([0, 1]), atol=2e-6, rtol=0)
 
 
 class TestDemoKernel(KernelContract):
