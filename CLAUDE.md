@@ -153,6 +153,10 @@ Module `README.md` 專指 `lib/` 與 `tests/` 子目錄中的高層 cheat-sheet�
 
 Agent plans 與 worktree 工作檔放在 gitignored `.agent_state/`。
 
+#### 只依賴 git 內的內容
+
+Tracked 檔案（程式碼、註解、測試、repo 文件、skills）要讀者讀取、執行或依賴的文件、腳本、工具、資料與證據，都放在 git 裡，或是外部公開來源。需要的工具或腳本加進 repo；依據來自未入庫的工作檔時，把結論與必要事實寫進正文。Tracked 檔案可以寫出 git 外的位置，供程式或 agent 存放新產生的檔案與快取，例如 `.agent_state/` 下的計畫、暫存檔與 ratchet 快取；建立與使用該位置的程式或流程在 git 裡，位置不存在時由它們重建。檢查：清空所有 gitignored 內容後，照 tracked 文件操作仍走得通。
+
 #### 使用者決策的引用
 
 `.agent_state/` 的決策編號（`Dnn`、`decisions/NNNN`）只在該 task 內有效，各 task 各自編號。Tracked 檔案（程式碼、註解、測試、repo 文件）直接寫出理由；屬於架構規則的引用 `ADR-NNNN`。使用者對元件定位、職責或跨模組邊界的裁決寫進 ADR 的決策段，附裁決日期與「」原話。
