@@ -1,17 +1,34 @@
-"""Per-tone length Rabi analysis using the single-qubit fitting owner."""
+"""Per-tone length Rabi fits with optional decay and free phase."""
+
+from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Annotated
 
 import numpy as np
+from numpy.typing import NDArray
+from pydantic.dataclasses import dataclass as validated_dataclass
 from zcu_tools.analysis.failure import AnalysisFailed
 from zcu_tools.analysis.fitting import FitQuality, compute_fit_quality, fit_rabi
+from zcu_tools.cfg_model import FieldMeta
 from zcu_tools.plotting.plots import Plots
+from zcu_tools.utils.process import rotate2real
 
 from zcu_lab.v2.support.mux import MuxFitFailure, MuxSweepResult, validate_mux_result
-from zcu_lab.v2.twotone.rabi.len_rabi.core import (
-    LenRabiAnalyzeOptions,
-    rabi_signal2real,
-)
+
+
+# Keep analysis-only definitions here so core is not a runtime dependency.
+@validated_dataclass(frozen=True)
+class LenRabiAnalyzeOptions:
+    """Select a decay envelope and a free phase for each pulse-length fit."""
+
+    decay: Annotated[bool, FieldMeta(label="Fit decay envelope")] = True
+    fit_phase: Annotated[bool, FieldMeta(label="Fit phase offset")] = False
+
+
+def rabi_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
+    """Project complex IQ samples onto their real principal contrast axis."""
+    return rotate2real(signals).real
 
 
 @dataclass(frozen=True)

@@ -1,17 +1,34 @@
-"""Per-tone Amp Rabi analysis using the existing single-qubit fit policy."""
+"""Per-tone Amp Rabi fits with an undamped cosine and zero-gain phase."""
+
+from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Annotated
 
 import numpy as np
+from numpy.typing import NDArray
+from pydantic import Field
+from pydantic.dataclasses import dataclass as validated_dataclass
 from zcu_tools.analysis.failure import AnalysisFailed
 from zcu_tools.analysis.fitting import FitQuality, compute_fit_quality, fit_rabi
+from zcu_tools.cfg_model import FieldMeta
 from zcu_tools.plotting.plots import Plots
+from zcu_tools.utils.process import rotate2real
 
 from zcu_lab.v2.support.mux import MuxFitFailure, MuxSweepResult, validate_mux_result
-from zcu_lab.v2.twotone.rabi.amp_rabi.core import (
-    AmpRabiAnalyzeOptions,
-    rabi_signal2real,
-)
+
+
+# Keep analysis-only definitions here so core is not a runtime dependency.
+@validated_dataclass(frozen=True)
+class AmpRabiAnalyzeOptions:
+    """Skip leading gain points before the undamped per-tone Rabi fit."""
+
+    skip: Annotated[int, FieldMeta(label="Skip points"), Field(ge=0)] = 0
+
+
+def rabi_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
+    """Project complex IQ samples onto their real principal contrast axis."""
+    return rotate2real(signals).real
 
 
 @dataclass(frozen=True)

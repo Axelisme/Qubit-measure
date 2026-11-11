@@ -21,7 +21,7 @@ from zcu_tools.program.v2 import (
 from zcu_tools.utils.process import rotate2real
 
 from zcu_lab.v2.support import live_line
-from zcu_lab.v2.twotone.time_domain.detune import actual_detune
+from zcu_lab.v2.support.detune import actual_detune
 from zcu_lab.v2.twotone.time_domain.t1.core import T1Cfg, T1Result
 from zcu_lab.v2.twotone.time_domain.t2echo.core import T2EchoCfg, T2EchoResult
 

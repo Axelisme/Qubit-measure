@@ -162,9 +162,8 @@ from zcu_lab.v2.support import live_line
 from zcu_lab.v2.support.acquire import mux_snr_checker
 from zcu_lab.v2.support.mux import MuxFitFailure, averaged_mux_signal
 from zcu_lab.v2.support.mux_sweep_cfg import MuxDriveToneCfg, validate_mux_tones
-from zcu_lab.v2.twotone.time_domain.t1.core import T1AnalyzeOptions
 
-from .analysis import MuxT1Fit, analyze_t1
+from .analysis import MuxT1Fit, T1AnalyzeOptions, analyze_t1
 
 
 class MuxT1ToneCfg(MuxDriveToneCfg):
