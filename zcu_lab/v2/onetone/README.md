@@ -2,7 +2,7 @@
 
 **讀者：** lab-author。查閱 one-tone 表單的 readout timing 初值與共用來源。
 
-**Last updated:** 2026-10-27，interactive range find
+**Last updated:** 2026-11-12，共用 cfg 與頻率格點，繪圖由各 core 持有
 
 `freq`、`power_dep`、`flux_dep`、`range_find` 的 `make_form` 共用
 [`_form_shared.py`](_form_shared.py) 的 `initial_readout_timing`。
