@@ -176,8 +176,9 @@ process-level reference count: the first sets the limit and the last restores
 it. Do not independently change threadpoolctl limits while an evolve is active.
 Empty work, one timeline, and `workers=1` run serially without a joblib pool.
 Other calls own a threading pool only during `evolve`; no idle pool survives.
-`FTFSource.close()` clears preparations, model-source cumulative gate usage and the engine's routing facts. Dropping the
-environment also releases this in-memory state; no disk cache is involved.
+`FTFSource.close()` clears preparations and the engine's routing facts.
+It clears source-owned routing history but preserves caller-borrowed history.
+Dropping the environment also releases this in-memory state; no disk cache is involved.
 
 ### Physical facts and conditional readout
 
