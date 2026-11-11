@@ -105,7 +105,6 @@ from typing import Annotated, ClassVar
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import Field, StrictInt, model_validator
-from pydantic.dataclasses import dataclass as validated_dataclass
 from qick import QickConfig
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import Experiment
@@ -141,20 +140,7 @@ from zcu_lab.v2.support.mux_sweep_cfg import (
     validate_mux_scan,
 )
 
-from .analysis import MuxLenRabiFit, analyze_length
-
-
-@validated_dataclass(frozen=True)
-class LenRabiAnalyzeOptions:
-    """Select a decay envelope and a free phase for each pulse-length fit."""
-
-    decay: Annotated[bool, FieldMeta(label="Fit decay envelope")] = True
-    fit_phase: Annotated[bool, FieldMeta(label="Fit phase offset")] = False
-
-
-def rabi_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
-    """Project complex IQ samples onto their real principal contrast axis."""
-    return rotate2real(signals).real
+from .analysis import LenRabiAnalyzeOptions, MuxLenRabiFit, analyze_length
 
 
 class MuxLenRabiToneCfg(MuxDriveToneCfg):

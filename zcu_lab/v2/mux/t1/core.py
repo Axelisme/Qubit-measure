@@ -130,7 +130,6 @@ The adapter below owns component proposals using the captured binding.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from dataclasses import dataclass
 from functools import partial
 from typing import Annotated, ClassVar, Literal, Self
@@ -138,8 +137,6 @@ from typing import Annotated, ClassVar, Literal, Self
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import Field, StrictInt, model_validator
-from pydantic.dataclasses import dataclass as validated_dataclass
-from zcu_tools.analysis.fitting import FitQuality
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment
 from zcu_tools.experiment.context import RunContext
@@ -160,42 +157,13 @@ from zcu_tools.program.v2.modules import (
     MuxReadoutCfg,
     Pulse,
 )
-from zcu_tools.utils.process import rotate2real
 
 from zcu_lab.v2.support import live_line
 from zcu_lab.v2.support.acquire import mux_snr_checker
 from zcu_lab.v2.support.mux import MuxFitFailure, averaged_mux_signal
 from zcu_lab.v2.support.mux_sweep_cfg import MuxDriveToneCfg, validate_mux_tones
 
-from .analysis import MuxT1Fit, analyze_t1
-
-
-@validated_dataclass(frozen=True)
-class T1AnalyzeOptions:
-    """Fit one or two decays after skipping nonnegative leading delay points."""
-
-    dual_exp: Annotated[bool, FieldMeta(label="Dual exponential")] = False
-    skip: Annotated[int, FieldMeta(label="Skip leading points"), Field(ge=0)] = 0
-
-
-@dataclass(frozen=True)
-class T1Analysis:
-    """Per-tone decay times and one-sigma errors in us, with fit diagnostics.
-
-    t1b and t1b_err hold the second component only for a dual-exponential fit.
-    fit_quality maps the selected fit to its numerical quality, or is absent.
-    """
-
-    t1: float
-    t1_err: float
-    t1b: float | None = None
-    t1b_err: float | None = None
-    fit_quality: Mapping[str, FitQuality] | None = None
-
-
-def t1_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
-    """Project complex IQ samples onto their real principal contrast axis."""
-    return rotate2real(signals).real
+from .analysis import MuxT1Fit, T1AnalyzeOptions, analyze_t1
 
 
 class MuxT1ToneCfg(MuxDriveToneCfg):

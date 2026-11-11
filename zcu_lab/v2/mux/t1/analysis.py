@@ -2,23 +2,59 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Annotated
 
 import numpy as np
+from numpy.typing import NDArray
+from pydantic import Field
+from pydantic.dataclasses import dataclass as validated_dataclass
 from zcu_tools.analysis.failure import AnalysisFailed
 from zcu_tools.analysis.fitting import (
+    FitQuality,
     compute_fit_quality,
     decay_time_bounds,
     fit_decay,
     fit_dual_decay,
 )
+from zcu_tools.cfg_model import FieldMeta
 from zcu_tools.plotting.plots import Plots
+from zcu_tools.utils.process import rotate2real
 
 from zcu_lab.v2.support.mux import MuxFitFailure
 
 if TYPE_CHECKING:
-    from .core import MuxT1Result, T1Analysis, T1AnalyzeOptions
+    from .core import MuxT1Result
+
+
+# Keep analysis-only definitions here so core is not a runtime dependency.
+@validated_dataclass(frozen=True)
+class T1AnalyzeOptions:
+    """Fit one or two decays after skipping nonnegative leading delay points."""
+
+    dual_exp: Annotated[bool, FieldMeta(label="Dual exponential")] = False
+    skip: Annotated[int, FieldMeta(label="Skip leading points"), Field(ge=0)] = 0
+
+
+@dataclass(frozen=True)
+class T1Analysis:
+    """Per-tone decay times and one-sigma errors in us, with fit diagnostics.
+
+    t1b and t1b_err hold the second component only for a dual-exponential fit.
+    fit_quality maps the selected fit to its numerical quality, or is absent.
+    """
+
+    t1: float
+    t1_err: float
+    t1b: float | None = None
+    t1b_err: float | None = None
+    fit_quality: Mapping[str, FitQuality] | None = None
+
+
+def t1_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
+    """Project complex IQ samples onto their real principal contrast axis."""
+    return rotate2real(signals).real
 
 
 @dataclass(frozen=True)
@@ -75,9 +111,6 @@ def analyze_t1(
     per-tone fit summaries. Acquired delays, projected observations and
     predictions remain local to plotting. No cfg or hardware is read.
     """
-    # Import after core initialization: the core owns options and IQ projection.
-    from .core import T1Analysis, t1_signal2real
-
     _validate_result(result)
     times, indices, signals = result.times, result.tone_indices, result.signals
     outcomes: list[MuxT1Fit | MuxFitFailure] = []

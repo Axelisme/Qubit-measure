@@ -3,17 +3,32 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import Annotated
 
 import numpy as np
+from numpy.typing import NDArray
+from pydantic.dataclasses import dataclass as validated_dataclass
 from zcu_tools.analysis.failure import AnalysisFailed
 from zcu_tools.analysis.fitting import FitQuality, compute_fit_quality, fit_rabi
+from zcu_tools.cfg_model import FieldMeta
 from zcu_tools.plotting.plots import Plots
+from zcu_tools.utils.process import rotate2real
 
 from zcu_lab.v2.support.mux import MuxFitFailure, MuxSweepResult, validate_mux_result
 
-if TYPE_CHECKING:
-    from .core import LenRabiAnalyzeOptions
+
+# Keep analysis-only definitions here so core is not a runtime dependency.
+@validated_dataclass(frozen=True)
+class LenRabiAnalyzeOptions:
+    """Select a decay envelope and a free phase for each pulse-length fit."""
+
+    decay: Annotated[bool, FieldMeta(label="Fit decay envelope")] = True
+    fit_phase: Annotated[bool, FieldMeta(label="Fit phase offset")] = False
+
+
+def rabi_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
+    """Project complex IQ samples onto their real principal contrast axis."""
+    return rotate2real(signals).real
 
 
 @dataclass(frozen=True)
@@ -49,9 +64,6 @@ def analyze_length(
     changed. plots must be fresh for this analysis and receives fit_i; caller
     owns finish/release. No cfg, files, device or GUI state is consulted.
     """
-    # Import after core initialization: the core owns options and IQ projection.
-    from .core import rabi_signal2real
-
     validate_mux_result(result)
     outcomes: list[MuxLenRabiFit | MuxFitFailure] = []
     for row, raw_index in enumerate(result.tone_indices):
