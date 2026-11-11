@@ -11,12 +11,22 @@ import subprocess
 import sys
 import time
 from collections.abc import Callable, Generator
-from contextlib import contextmanager, suppress
+from contextlib import suppress
 from datetime import datetime, timedelta
 from pathlib import Path
+from types import FrameType
 
 import pytest
 from run_heavy import main
+
+from tests.tools._run_heavy_support import (
+    assert_group_stopped,
+    group_command,
+    held_slots,
+    observed_group,
+    run,
+    unreapable_leader,
+)
 
 pytestmark = pytest.mark.requires_subprocess
 
@@ -60,11 +70,6 @@ def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     (tmp_path / ".git" / "meminfo").write_text("MemAvailable: 999999999 kB\n")
     monkeypatch.chdir(tmp_path)
     return tmp_path
-
-
-def run(repo: Path, argv: list[str]) -> int:
-    """Run main against the disposable repository's ample-memory fixture."""
-    return main(argv, meminfo_path=repo / ".git" / "meminfo")
 
 
 def test_command_receives_slot_environment_and_combined_log(
@@ -178,6 +183,75 @@ def test_receipt_identifies_callers_worktree_and_child_exit(
     assert receipt["timed_out"] is False
     assert receipt["residual_killed"] is False
     assert receipt["log"] == str(log)
+
+
+@pytest.mark.parametrize("dirty_after_admission", [False, True])
+def test_receipt_refreshes_git_identity_after_queue_admission(
+    repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    dirty_after_admission: bool,
+) -> None:
+    meminfo = repo / ".git" / "meminfo"
+    meminfo.write_text("MemAvailable: 1 kB\n")
+    if not dirty_after_admission:
+        (repo / "tracked.txt").write_text("queued edit")
+    queued_head = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], text=True
+    ).strip()
+    original_sleep = time.sleep
+    admitted = False
+
+    def change_worktree_while_queued(seconds: float) -> None:
+        nonlocal admitted
+        if admitted:
+            # Popen.wait also sleeps; only the admission sleep changes the worktree.
+            original_sleep(seconds)
+            return
+        admitted = True
+        (repo / "tracked.txt").write_text("admitted commit")
+        subprocess.run(
+            [
+                "git",
+                "-c",
+                "user.name=Test",
+                "-c",
+                "user.email=test@example.invalid",
+                "commit",
+                "-qam",
+                "commit while queued",
+            ],
+            check=True,
+        )
+        if dirty_after_admission:
+            (repo / "tracked.txt").write_text("admitted edit")
+        meminfo.write_text("MemAvailable: 999999999 kB\n")
+
+    monkeypatch.setattr(time, "sleep", change_worktree_while_queued)
+    assert (
+        run(
+            repo,
+            [
+                "--log",
+                str(repo / ".git" / "child.log"),
+                "30",
+                "--",
+                sys.executable,
+                "-c",
+                "pass",
+            ],
+        )
+        == 0
+    )
+    receipt = json.loads(capsys.readouterr().out)
+    head = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+    tree = subprocess.check_output(
+        ["git", "rev-parse", "HEAD^{tree}"], text=True
+    ).strip()
+    assert head != queued_head
+    assert receipt["head"] == head
+    assert receipt["tree"] == tree
+    assert receipt["dirty"] is dirty_after_admission
 
 
 @pytest.mark.parametrize(
@@ -296,6 +370,78 @@ def test_prelaunch_errors_return_two_without_receipt(
     assert not marker.exists()
 
 
+@pytest.mark.parametrize(
+    "failure", ["group-scan", "affinity-restore", "handler-restore"]
+)
+def test_postlaunch_cleanup_failure_still_emits_receipt(
+    repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    failure: str,
+) -> None:
+    if failure == "group-scan":
+        original_iterdir = Path.iterdir
+
+        def scan(path: Path) -> Generator[Path]:
+            if path == Path("/proc"):
+                raise PermissionError("cleanup unavailable")
+            yield from original_iterdir(path)
+
+        monkeypatch.setattr(Path, "iterdir", scan)
+    elif failure == "affinity-restore":
+        original_affinity = os.sched_setaffinity
+        caller_affinity = os.sched_getaffinity(0)
+
+        def restore_affinity(pid: int, mask: list[int] | set[int]) -> None:
+            original_affinity(pid, mask)
+            if set(mask) == caller_affinity:
+                raise OSError("cleanup unavailable")
+
+        monkeypatch.setattr(os, "sched_setaffinity", restore_affinity)
+    else:
+        original_signal = signal.signal
+        handler = signal.getsignal(signal.SIGTERM)
+
+        def restore_handler(
+            signum: int,
+            action: Callable[[int, FrameType | None], object] | int | None,
+        ) -> Callable[[int, FrameType | None], object] | int | None:
+            result = original_signal(signum, action)
+            # Fail on the last restoration, after both real handlers are restored.
+            if signum == signal.SIGTERM and action == handler:
+                raise ValueError("cleanup unavailable")
+            return result
+
+        monkeypatch.setattr(signal, "signal", restore_handler)
+
+    command = [sys.executable, "-c", "print('started')"]
+    log = repo / "child.log"
+    assert run(repo, ["--log", str(log), "30", "--", *command]) == 70
+    captured = capsys.readouterr()
+    receipt = json.loads(captured.out)
+    assert receipt["exit_code"] == 70
+    assert receipt["command"] == command
+    assert "cleanup unavailable" in captured.err
+    assert log.read_text() == "started\n"
+
+
+def test_receipt_output_failure_is_not_a_prelaunch_error(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def unavailable_receipt(value: object) -> str:
+        raise ValueError("receipt output unavailable")
+
+    monkeypatch.setattr(json, "dumps", unavailable_receipt)
+    log = repo / "child.log"
+    with pytest.raises(ValueError, match="receipt output unavailable"):
+        run(
+            repo,
+            ["--log", str(log), "30", "--", sys.executable, "-c", "print('started')"],
+        )
+    assert log.read_text() == "started\n"
+    assert capsys.readouterr().err == ""
+
+
 def test_non_linux_entrypoint_reports_platform_without_loading_fcntl(
     repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -340,70 +486,6 @@ def test_slot_uses_machine_cpus_even_when_caller_is_pinned(
     assert json.loads(capsys.readouterr().out)["cpus"] == [0, 1]
 
 
-@contextmanager
-def observed_group(
-    monkeypatch: pytest.MonkeyPatch,
-    command: list[str],
-    ready: Path,
-    on_ready: Callable[[float | None], None] | None = None,
-) -> Generator[dict[str, int]]:
-    """Observe a child's FIFO handshake and always stop/reap its owned group."""
-    os.mkfifo(ready)
-    ready_fd = os.open(ready, os.O_RDWR | os.O_NONBLOCK)
-    original_wait = subprocess.Popen.wait
-    original_killpg = os.killpg
-    children: list[subprocess.Popen[bytes]] = []
-    pids: dict[str, int] = {}
-
-    def wait(child: subprocess.Popen[bytes], timeout: float | None = None) -> int:
-        if child.args == command and not children:
-            children.append(child)
-            # The child publishes its fork; this watchdog only detects a stuck handshake.
-            assert select.select([ready_fd], [], [], 30)[0], (
-                "child never reached readiness"
-            )
-            pids.update(json.loads(os.read(ready_fd, 4096)))
-            if on_ready is not None:
-                on_ready(timeout)
-        return original_wait(child, timeout=timeout)
-
-    with monkeypatch.context() as boundary:
-        boundary.setattr(subprocess.Popen, "wait", wait)
-        try:
-            yield pids
-        finally:
-            os.close(ready_fd)
-            for child in children:
-                with suppress(ProcessLookupError):
-                    original_killpg(child.pid, signal.SIGKILL)
-                original_wait(child, timeout=30)
-
-
-def group_command(ready: Path, leader_action: str, preamble: str = "") -> list[str]:
-    """Build a two-process group whose leader publishes both PIDs to a FIFO."""
-    source = (
-        "import json, os, signal\n" + preamble + "worker = os.fork()\n"
-        "if worker == 0:\n"
-        "    signal.pause()\n"
-        "else:\n"
-        f"    with open({str(ready)!r}, 'w') as stream:\n"
-        "        print(json.dumps({'leader': os.getpid(), 'worker': worker}), file=stream, flush=True)\n"
-        f"    {leader_action}\n"
-    )
-    return [sys.executable, "-c", source]
-
-
-def assert_group_stopped(pids: dict[str, int]) -> None:
-    """Check that every observed process is gone or stopped as a zombie."""
-    assert set(pids) == {"leader", "worker"}
-    for pid in pids.values():
-        stat = Path(f"/proc/{pid}/stat")
-        assert not stat.exists() or stat.read_text().rsplit(")", 1)[1].split()[0] in {
-            "Z",
-            "X",
-        }
-
-
 @pytest.mark.parametrize("ignore_term", [False, True])
 def test_timeout_stops_the_whole_group_and_escalates_if_needed(
     repo: Path,
@@ -428,6 +510,7 @@ def test_timeout_stops_the_whole_group_and_escalates_if_needed(
         original_killpg(pgid, signum)
 
     def advance(seconds: float) -> None:
+        # Skip the TERM grace on the fake clock, but yield for actual signal delivery.
         clock[0] += max(seconds, 11.0)
         original_sleep(0)
 
@@ -446,6 +529,83 @@ def test_timeout_stops_the_whole_group_and_escalates_if_needed(
         if ignore_term:
             assert signal.SIGKILL in delivered
         assert_group_stopped(pids)
+
+
+@pytest.mark.parametrize("timed_out", [False, True])
+@pytest.mark.parametrize("stuck_leader", [False, True])
+def test_sigkill_survivor_does_not_block_receipt_forever(
+    repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    stuck_leader: bool,
+    timed_out: bool,
+) -> None:
+    ready = repo / "ready"
+    command = group_command(
+        ready,
+        "signal.pause()" if timed_out else "raise SystemExit(7)",
+        "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n",
+    )
+    original_killpg = os.killpg
+    original_iterdir = Path.iterdir
+    original_read_text = Path.read_text
+    original_sleep = time.sleep
+    clock = [100.0]
+    killed = False
+    cleaning = False
+    survivor = Path("/proc/999999999")
+
+    def expire(_timeout: float | None) -> None:
+        if timed_out:
+            raise subprocess.TimeoutExpired(command, 1)
+
+    def killpg(pgid: int, signum: int) -> None:
+        nonlocal killed, cleaning
+        original_killpg(pgid, signum)
+        cleaning = True
+        if signum == signal.SIGKILL:
+            killed = True
+
+    def proc_entries(path: Path) -> Generator[Path]:
+        yield from original_iterdir(path)
+        if path == Path("/proc") and killed:
+            yield survivor
+
+    def proc_status(path: Path) -> str:
+        if path == survivor / "stat":
+            return f"999999999 (unkillable) D 1 {pids['leader']} 0\n"
+        return original_read_text(path)
+
+    def advance(seconds: float) -> None:
+        if not cleaning:
+            # Let the leader finish normally before accelerating cleanup deadlines.
+            original_sleep(seconds)
+            return
+        # Jump over the TERM grace without waiting in real time; yield for real SIGKILL.
+        clock[0] += max(seconds, 11.0)
+        original_sleep(0)
+        assert clock[0] < 300, "SIGKILL cleanup exceeded its bounded wait"
+
+    with (
+        observed_group(monkeypatch, command, ready, expire) as pids,
+        monkeypatch.context() as boundary,
+        unreapable_leader(monkeypatch, command, lambda: killed and stuck_leader),
+    ):
+        boundary.setattr(os, "killpg", killpg)
+        boundary.setattr(Path, "iterdir", proc_entries)
+        boundary.setattr(Path, "read_text", proc_status)
+        boundary.setattr(time, "monotonic", lambda: clock[0])
+        boundary.setattr(time, "sleep", advance)
+        expected_code = 124 if timed_out else 7
+        assert (
+            run(repo, ["--log", str(repo / "child.log"), "1", "--", *command])
+            == expected_code
+        )
+        receipt = json.loads(capsys.readouterr().out)
+        assert killed
+        assert receipt["exit_code"] == expected_code
+        assert receipt["timed_out"] is timed_out
+        assert receipt["residual_killed"] is (not timed_out)
 
 
 def test_exited_leader_leaves_no_running_group_members(
@@ -558,6 +718,7 @@ def test_low_memory_wait_reports_once_then_starts_when_memory_recovers(
 
     def memory_recovers(_seconds: float) -> None:
         if len(waits) == 2:
+            # Popen.wait shares time.sleep; admission is done, so only yield to the child.
             original_sleep(0)
             return
         output = capsys.readouterr()
@@ -626,50 +787,6 @@ def test_wait_limit_expires_without_receipt_or_child(
     assert not log.exists()
 
 
-@contextmanager
-def held_slots(
-    lock_directory: Path, slots: list[int]
-) -> Generator[Callable[[int], None]]:
-    """Hold real flocks in a peer process until explicit release handshakes."""
-    lock_directory.mkdir(parents=True, exist_ok=True)
-    source = (
-        "import fcntl, pathlib, sys\n"
-        f"directory = pathlib.Path({str(lock_directory)!r})\n"
-        f"locks = {{slot: (directory / f'slot-{{slot}}.lock').open('a+b') for slot in {slots!r}}}\n"
-        "for stream in locks.values():\n"
-        "    fcntl.flock(stream, fcntl.LOCK_EX)\n"
-        "print('ready', flush=True)\n"
-        "for line in sys.stdin:\n"
-        "    locks.pop(int(line)).close()\n"
-        "    print('released', flush=True)\n"
-    )
-    with subprocess.Popen(
-        [sys.executable, "-c", source],
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        text=True,
-    ) as peer:
-        assert peer.stdin is not None and peer.stdout is not None
-        writer, reader = peer.stdin, peer.stdout
-
-        def receive(expected: str) -> None:
-            # Every read has a peer write; the timeout only catches a broken handshake.
-            assert select.select([reader], [], [], 30)[0], "lock peer did not respond"
-            assert reader.readline().strip() == expected
-
-        def release(slot: int) -> None:
-            writer.write(f"{slot}\n")
-            writer.flush()
-            receive("released")
-
-        try:
-            receive("ready")
-            yield release
-        finally:
-            writer.close()
-            peer.wait(timeout=30)
-
-
 def test_linked_worktree_uses_other_slot_while_peer_holds_first(
     repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -708,6 +825,7 @@ def test_full_slots_wait_for_release_and_report_only_reason_changes(
 
         def advance(_seconds: float) -> None:
             if len(waits) == 4:
+                # Popen.wait shares time.sleep; keep admission observations unchanged.
                 original_sleep(0)
                 return
             output = capsys.readouterr()

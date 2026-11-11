@@ -1,17 +1,19 @@
 # tools/
 
-**Last updated:** 2026-11-11, run_heavy
+**Last updated:** 2026-11-12, run_heavy review fixes
 
-**讀者：** framework-dev。Repo 品質檢查的 CLI、輸出與比較機制。
+**讀者：** framework-dev。Repo 品質檢查與重計算執行器的 CLI、輸出與比較機制。
 
-`tools/` 放 repo 內部的品質檢查。review 品質判準由 [程式碼品質](../docs/code-quality.md) 定義，環境與驗證流程依 [AGENTS.md](../AGENTS.md)。`scripts/` 放使用者自己執行的板端 server、GUI 啟動與資料工具。[`mcp_servers/`](../mcp_servers/README.md) 放 agent 的 MCP 組合根。
+`tools/` 放 repo 內部的品質檢查與重計算執行器。review 品質判準由 [程式碼品質](../docs/code-quality.md) 定義，環境與驗證流程依 [AGENTS.md](../AGENTS.md)。`scripts/` 放使用者自己執行的板端 server、GUI 啟動與資料工具。[`mcp_servers/`](../mcp_servers/README.md) 放 agent 的 MCP 組合根。
 離線 Migration CLI 位於 `migrations/migrate_storage.py`，以 `python -m migrations.migrate_storage` 執行，不接量測啟動流程。執行 legacy 遷移、處理 pending／resume 或修改 component kind 前，讀 [Agent 離線遷移說明書](../docs/storage-migration.md)。
 
-本目錄的檢查是同一個形狀：純函式加上一個回傳 exit code 的 `main()`，把 JSON receipt 輸出到
-stdout。`check_script_awaits.py`、`check_file_size.py`、`check_test_capabilities.py`、`check_test_path_correspondence.py`
+品質檢查以純函式處理判準，由回傳 exit code 的 `main()` 把 JSON receipt 輸出到 stdout。
+`run_heavy.py` 的 `main()` 管理排隊、子程序與清理，只有子程序啟動後才輸出 JSON receipt。
+`check_script_awaits.py`、`check_file_size.py`、`check_test_capabilities.py`、`check_test_path_correspondence.py`
 另把人類可讀的違規行輸出到 stderr；`check_suppressions.py` 只計量不判定，在 stderr 列出使用量最多的
 抑制（最多 20 筆）並固定 exit 0；`check_ratchet.py` 與
-`check_pytest_collection.py` 只在工具本身失敗時寫 stderr。`gate.py` 是給人看的入口，輸出純文字。
+`check_pytest_collection.py` 只在工具本身失敗時寫 stderr。`run_heavy.py` 在 stderr 說明等待原因、啟動錯誤與清理失敗。
+`gate.py` 是給人看的入口，輸出純文字。
 它們可以被 import，`tools/check_ratchet.py` 就是這樣使用其他幾支的。
 
 `_support.py` 共用走訪樹、讀 attribute chain、透過 import 解析呼叫與載入另一支檢查的機制。
@@ -45,22 +47,27 @@ Runner 依整台機器的 CPU 編號切分 slot，不依呼叫者的 affinity �
 Runner 固定設定 `QT_QPA_PLATFORM=offscreen`、`MPLBACKEND=Agg`，讓命令不開啟顯示視窗。
 它也將 `OMP_NUM_THREADS`、`OPENBLAS_NUM_THREADS`、`MKL_NUM_THREADS` 與 `NUMBA_NUM_THREADS` 設為 `1`，限制數值函式庫的執行緒數。
 命令超時或結束後仍有同 process group 的存活程序時，runner 先送 SIGTERM，10 秒後仍未停止就送 SIGKILL。
+送出 SIGKILL 後最多再等 10 秒，包含直接子程序的回收與 group 殘留檢查。
+超過上限就停止等待，在 stderr 說明可能仍有程序存活，並照常輸出收據。
+Z 或 X 狀態的程序不算存活程序；無法停止的程序若仍繼承 slot 鎖，會繼續持鎖直到結束。
 Runner 收到 SIGINT 或 SIGTERM 時，將訊號轉送給命令的整個 process group。
 
 | 結果 | Runner exit status |
 | --- | --- |
 | 命令自行結束 | 回傳命令的 exit status，被訊號終止則回傳 `128 + signal` |
 | 命令超時 | 回傳 `124` |
+| 啟動後的 runner 作業或清理失敗 | 回傳 `70`，在 stderr 說明原因，盡力清理 group 並輸出收據 |
 | 超過 `--wait-limit` 仍未獲准啟動 | 回傳 `75`，將原因寫到 stderr，不輸出收據 |
 | 啟動前失敗 | 回傳 `2`，將原因寫到 stderr，不輸出收據 |
 
 Runner 遇到用法錯誤、非 Linux、不在已提交的 Git worktree、少於 2 核、log 無法開啟、affinity 無法設定或命令無法執行時，會在啟動前失敗。
 只有命令真的開始執行才會印收據，開始後無論成功、失敗、超時或被訊號終止都會印收據。
+若收據本身無法序列化或寫入 stdout，runner 會傳出原始例外，不將它當作啟動前失敗。
 
 | 收據欄位 | 記錄內容 |
 | --- | --- |
 | `command`、`cwd` | 記錄命令的 argv 與執行工作目錄 |
-| `head`、`tree`、`dirty` | 記錄該 worktree 的 HEAD commit、`HEAD^{tree}` 與排隊前的修改狀態，`git status --porcelain` 含 untracked 且非空時將 `dirty` 設為 `true` |
+| `head`、`tree`、`dirty` | 排隊前先檢查 Git 是否可讀，取得 slot 後重讀該 worktree 的 HEAD commit、`HEAD^{tree}` 與修改狀態並寫入收據。`git status --porcelain` 含 untracked 且非空時將 `dirty` 設為 `true` |
 | `slot`、`cpus`、`env` | 記錄取得的 slot 編號、CPU 編號清單與 runner 固定設定的環境變數 |
 | `wait_seconds` | 記錄啟動前的等待秒數 |
 | `started_utc`、`finished_utc`、`elapsed_seconds` | 記錄命令開始與結束的 UTC 時間，以及執行秒數 |
@@ -170,15 +177,10 @@ before/after；這是人工審查提示，不是自動判定設定變弱，也�
 較耗時的兩項**刻意留在外面**；快速 gate 不替代 collection 與行為測試：
 
 ```bash
-uv run --no-sync -- python tools/check_pytest_collection.py
-uv run --directory <worktree> --no-sync -- \
-  python tools/run_heavy.py --log <per-task 目錄>/pytest.log 1800 -- \
-  pytest --rootdir <worktree> -c <worktree>/pyproject.toml \
-  -n 4 --dist=worksteal -m "not sim" \
-  --failure-log <per-task 目錄>/pytest-failures.jsonl
+uv run --directory <worktree> --no-sync -- python tools/check_pytest_collection.py
 ```
 
-全樹驗證的 marker 選擇、rootdir 固定方式與 failure log 路徑、用途見 [tests/README.md](../tests/README.md#執行測試套件)。
+全樹 pytest 使用 [tests/README.md 的完整選集命令](../tests/README.md#執行測試套件)，由該處維護 marker 選擇、rootdir、failure log 與收據重導。
 
 `--dist=worksteal` 維持 command-level，因 parity intentionally disables pytest plugin autoload；
 不設定 pytest 全域預設，因此未帶旗標的 `pytest -n auto` 語意不變。
@@ -385,13 +387,8 @@ owner／branch 與 line role 識別位置，保留 comment 增刪與 formatter �
 `pyproject.base.toml`，供設定層抑制比對，不讓新增 per-file-ignore 隱形。
 
 預設 Pyright 只檢查變更檔案，不能保證未修改 caller 仍符合修改後的 interface。
-合併前另跑慢速全樹比較，讓未修改 caller 的診斷保持可見：
-
-```bash
-uv run --directory <worktree> --no-sync -- \
-  python tools/run_heavy.py --log <per-task 目錄>/pyright.log 1800 -- \
-  python tools/check_ratchet.py --base <ref> --detector pyright --full-pyright
-```
+合併前另跑慢速全樹比較，讓未修改 caller 的診斷保持可見。
+使用[重計算執行器段落的 Full Pyright 命令](#重計算執行器)，保留 log 與 runner 收據。
 
 `--full-pyright` 對兩側使用 candidate 設定、目前 worktree interpreter 與已安裝依賴，
 不建立 base 的另一個環境。receipt 的 `pyright_scope` 記錄範圍，成本與全樹相關，

@@ -11,7 +11,7 @@ import subprocess
 import sys
 import time
 from collections.abc import Generator
-from contextlib import contextmanager, suppress
+from contextlib import ExitStack, contextmanager, suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -21,6 +21,9 @@ SLOT_COUNT = 2
 MINIMUM_AVAILABLE_BYTES = 8_000_000_000
 QUEUE_POLL_SECONDS = 0.25
 TERMINATION_GRACE_SECONDS = 10.0
+KILL_GRACE_SECONDS = 10.0
+TERMINATION_POLL_SECONDS = 0.05
+KILL_POLL_SECONDS = 0.01
 CHILD_ENV = {
     "QT_QPA_PLATFORM": "offscreen",
     "MPLBACKEND": "Agg",
@@ -46,7 +49,6 @@ def _parse(argv: list[str] | None) -> _Invocation:
     parser.add_argument("timeout", type=float)
     raw = sys.argv[1:] if argv is None else argv
     if "--" not in raw:
-        parser.parse_args(raw)
         parser.error("command must follow --")
     separator = raw.index("--")
     args = parser.parse_args(raw[:separator])
@@ -67,17 +69,18 @@ def _parse(argv: list[str] | None) -> _Invocation:
     )
 
 
+@contextmanager
 def _spawn(
     invocation: _Invocation, cpus: list[int], lock_fd: int
-) -> subprocess.Popen[bytes]:
-    """Start in a new process group, restoring the caller's thread affinity."""
+) -> Generator[subprocess.Popen[bytes]]:
+    """Yield immediately after launch; restore affinity and close the log on exit."""
     affinity = os.sched_getaffinity(0)
     os.sched_setaffinity(0, cpus)
     try:
         if os.sched_getaffinity(0) != set(cpus):
             raise OSError("the cpuset clipped the requested slot CPU affinity")
         with invocation.log.open("wb") as log:
-            return subprocess.Popen(
+            child = subprocess.Popen(
                 invocation.command,
                 stdout=log,
                 stderr=subprocess.STDOUT,
@@ -85,6 +88,7 @@ def _spawn(
                 start_new_session=True,
                 pass_fds=(lock_fd,),
             )
+            yield child
     finally:
         os.sched_setaffinity(0, affinity)
 
@@ -92,8 +96,8 @@ def _spawn(
 @contextmanager
 def _forwarding_child(
     invocation: _Invocation, cpus: list[int], lock_fd: int
-) -> Generator[subprocess.Popen[bytes]]:
-    """Forward INT/TERM for the child's lifetime, including signals during spawn."""
+) -> Generator[tuple[subprocess.Popen[bytes], list[int]]]:
+    """Yield the launched child and signals queued during spawn; restore handlers."""
     child: subprocess.Popen[bytes] | None = None
     pending: list[int] = []
 
@@ -107,10 +111,8 @@ def _forwarding_child(
     try:
         for sig in previous:
             signal.signal(sig, forward)
-        child = _spawn(invocation, cpus, lock_fd)
-        for sig in pending:
-            _signal_group(child.pid, sig)
-        yield child
+        with _spawn(invocation, cpus, lock_fd) as child:
+            yield child, pending
     finally:
         for sig, handler in previous.items():
             signal.signal(sig, handler)
@@ -137,19 +139,36 @@ def _group_running(pgid: int) -> bool:
 
 
 def _stop_group(child: subprocess.Popen[bytes]) -> None:
-    """TERM the whole group, KILL survivors after 10 seconds, and reap the leader."""
+    """TERM then KILL the group, bounding both phases and polling to reap the leader.
+
+    Stop waiting after KILL_GRACE_SECONDS even if the kernel still reports a
+    live group member or cannot reap the leader, so a receipt can be emitted.
+    """
     deadline = time.monotonic() + TERMINATION_GRACE_SECONDS
     _signal_group(child.pid, signal.SIGTERM)
-    while _group_running(child.pid):
-        child.poll()
+    while True:
+        leader_stopped = child.poll() is not None
+        if not _group_running(child.pid) and leader_stopped:
+            return
         if time.monotonic() >= deadline:
             _signal_group(child.pid, signal.SIGKILL)
             break
-        time.sleep(0.05)
-    child.wait()
-    # Orphan descendants can become zombies under an unreaping PID 1.
-    while _group_running(child.pid):
-        time.sleep(0.01)
+        time.sleep(TERMINATION_POLL_SECONDS)
+
+    deadline = time.monotonic() + KILL_GRACE_SECONDS
+    while True:
+        leader_stopped = child.poll() is not None
+        if not _group_running(child.pid) and leader_stopped:
+            return
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            print(
+                "run_heavy: SIGKILL cleanup wait expired; group may still exist",
+                file=sys.stderr,
+            )
+            return
+        # Zombies do not keep a group running, but D-state survivors can outlast KILL.
+        time.sleep(min(KILL_POLL_SECONDS, remaining))
 
 
 def _memory_available(meminfo_path: Path) -> bool:
@@ -176,19 +195,19 @@ def _acquired_slot(
     Close our descriptor on exit, without unlocking copies inherited by children.
     Raise _WaitLimitExpired if admission exceeds the optional wait limit.
     """
+    # Linux-only: defer import so other platforms can report the CLI platform error.
     import fcntl
 
     lock_directory.mkdir(parents=True, exist_ok=True)
     queued = time.monotonic()
-    reported = ""
+    deadline = None if invocation.wait_limit is None else queued + invocation.wait_limit
+    attempted = False
+    last_reported: str | None = None
     while True:
-        if (
-            reported
-            and invocation.wait_limit is not None
-            and time.monotonic() - queued >= invocation.wait_limit
-        ):
-            raise _WaitLimitExpired(f"wait limit expired: {reported}")
-        reason = "MemAvailable < 8 GB"
+        if attempted and deadline is not None and time.monotonic() >= deadline:
+            raise _WaitLimitExpired(f"wait limit expired: {last_reported}")
+        attempted = True
+        reason = f"MemAvailable < {MINIMUM_AVAILABLE_BYTES / 1_000_000_000:g} GB"
         if _memory_available(meminfo_path):
             for slot in range(SLOT_COUNT):
                 with (lock_directory / f"slot-{slot}.lock").open("a+b") as lock:
@@ -200,26 +219,18 @@ def _acquired_slot(
                     yield slot, lock.fileno(), time.monotonic() - queued
                     return
             reason = "all CPU slots are occupied"
-        if reason != reported:
+        if reason != last_reported:
             print(f"run_heavy: waiting: {reason}", file=sys.stderr)
-            reported = reason
-        if invocation.wait_limit is not None:
-            remaining = invocation.wait_limit - (time.monotonic() - queued)
-            if remaining <= 0:
-                raise _WaitLimitExpired(f"wait limit expired: {reason}")
-            time.sleep(min(QUEUE_POLL_SECONDS, remaining))
-        else:
-            time.sleep(QUEUE_POLL_SECONDS)
+            last_reported = reason
+        delay = QUEUE_POLL_SECONDS
+        if deadline is not None:
+            delay = min(delay, max(0.0, deadline - time.monotonic()))
+        time.sleep(delay)
 
 
-def _execute(
-    invocation: _Invocation, meminfo_path: Path, lock_directory: Path | None
-) -> int:
-    cwd = Path.cwd()
-    count = os.cpu_count()
-    if count is None or count < SLOT_COUNT:
-        raise ValueError(f"at least {SLOT_COUNT} machine CPUs are required")
-    metadata = {
+def _git_metadata() -> dict[str, str | bool]:
+    """Read HEAD, its committed tree and tracked/untracked dirtiness in cwd."""
+    return {
         "head": subprocess.check_output(
             ["git", "rev-parse", "HEAD"], text=True
         ).strip(),
@@ -232,55 +243,93 @@ def _execute(
             ).strip()
         ),
     }
-    if lock_directory is None:
-        common = subprocess.check_output(
-            ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
-            text=True,
-        ).strip()
-        lock_directory = Path(common) / "run-heavy"
-    with _acquired_slot(invocation, meminfo_path, lock_directory) as (
-        slot,
-        lock_fd,
-        wait_seconds,
-    ):
+
+
+def _execute(
+    invocation: _Invocation, meminfo_path: Path, lock_directory: Path | None
+) -> int:
+    resources = ExitStack()
+    try:
+        cwd = Path.cwd()
+        count = os.cpu_count()
+        if count is None or count < SLOT_COUNT:
+            raise ValueError(f"at least {SLOT_COUNT} machine CPUs are required")
+        _git_metadata()  # Fail fast before waiting; receipt identity is read at admission.
+        if lock_directory is None:
+            common = subprocess.check_output(
+                ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
+                text=True,
+            ).strip()
+            lock_directory = Path(common) / "run-heavy"
+        slot, lock_fd, wait_seconds = resources.enter_context(
+            _acquired_slot(invocation, meminfo_path, lock_directory)
+        )
+        metadata = _git_metadata()
         width = count // SLOT_COUNT
         cpus = list(range(slot * width, (slot + 1) * width))
         started_utc = datetime.now(UTC).isoformat()
         started = time.monotonic()
-        with _forwarding_child(invocation, cpus, lock_fd) as child:
-            timed_out = False
+        child, pending = resources.enter_context(
+            _forwarding_child(invocation, cpus, lock_fd)
+        )
+    except _WaitLimitExpired as error:
+        resources.close()
+        print(f"run_heavy: {error}", file=sys.stderr)
+        return 75
+    except (OSError, ValueError, subprocess.CalledProcessError) as error:
+        resources.close()
+        print(f"run_heavy: {error}", file=sys.stderr)
+        return 2
+
+    timed_out = False
+    residual_killed = False
+    try:
+        with resources:
+            for sig in pending:
+                _signal_group(child.pid, sig)
             try:
                 code = child.wait(timeout=invocation.timeout)
             except subprocess.TimeoutExpired:
                 timed_out = True
                 _stop_group(child)
                 code = 124
-            residual_killed = _group_running(child.pid)
-            if residual_killed:
-                _stop_group(child)
-        if code < 0:
-            code = 128 - code
-        print(
-            json.dumps(
-                {
-                    "command": invocation.command,
-                    "cpus": cpus,
-                    "env": CHILD_ENV,
-                    "slot": slot,
-                    "cwd": str(cwd),
-                    **metadata,
-                    "wait_seconds": wait_seconds,
-                    "started_utc": started_utc,
-                    "finished_utc": datetime.now(UTC).isoformat(),
-                    "elapsed_seconds": time.monotonic() - started,
-                    "exit_code": code,
-                    "timed_out": timed_out,
-                    "residual_killed": residual_killed,
-                    "log": str(invocation.log),
-                }
-            )
+            if not timed_out:
+                residual_killed = _group_running(child.pid)
+                if residual_killed:
+                    _stop_group(child)
+    except (OSError, ValueError, subprocess.CalledProcessError) as error:
+        print(f"run_heavy: post-launch failure: {error}", file=sys.stderr)
+        code = 70
+        try:
+            _signal_group(child.pid, signal.SIGKILL)
+            child.wait(timeout=KILL_GRACE_SECONDS)
+        except (OSError, subprocess.TimeoutExpired) as cleanup_error:
+            print(f"run_heavy: cleanup failed: {cleanup_error}", file=sys.stderr)
+    if code < 0:
+        code = 128 + abs(
+            code
+        )  # Popen encodes signal death as a negative signal number.
+    print(
+        json.dumps(
+            {
+                "command": invocation.command,
+                "cpus": cpus,
+                "env": CHILD_ENV,
+                "slot": slot,
+                "cwd": str(cwd),
+                **metadata,
+                "wait_seconds": wait_seconds,
+                "started_utc": started_utc,
+                "finished_utc": datetime.now(UTC).isoformat(),
+                "elapsed_seconds": time.monotonic() - started,
+                "exit_code": code,
+                "timed_out": timed_out,
+                "residual_killed": residual_killed,
+                "log": str(invocation.log),
+            }
         )
-        return code
+    )
+    return code
 
 
 def main(
@@ -305,8 +354,15 @@ def main(
     a stderr reason and no receipt. Missing MemAvailable fails with status 2.
     Return its shell status (128 + signal for signal death), or 124 on timeout.
     Timeout and residual processes get TERM, then KILL after a 10-second grace.
+    After KILL, wait at most another 10 seconds for the leader and group; report
+    survivors to stderr and still emit the receipt with timeout/residual flags.
+    Zombies and dead processes do not count as running group members.
     INT/TERM received by the runner are forwarded to the entire child group.
-    Once the child starts, print one JSON receipt with Git identity and outcome.
+    Check Git identity before queuing, then reread HEAD/tree/dirty after admission.
+    Once the child starts, print one JSON receipt with that identity and outcome.
+    Post-launch OS, value or Git-command failures report to stderr and return 70
+    with a receipt, after best-effort group cleanup. Receipt-output failures
+    propagate to the caller because no receipt can be written on that path.
     Prelaunch errors print their reason to stderr, return 2 and print no receipt.
     """
     if sys.platform != "linux":
@@ -316,14 +372,7 @@ def main(
         invocation = _parse(argv)
     except SystemExit as error:
         return int(error.code or 0)
-    try:
-        return _execute(invocation, meminfo_path, lock_directory)
-    except _WaitLimitExpired as error:
-        print(f"run_heavy: {error}", file=sys.stderr)
-        return 75
-    except (OSError, ValueError, subprocess.CalledProcessError) as error:
-        print(f"run_heavy: {error}", file=sys.stderr)
-        return 2
+    return _execute(invocation, meminfo_path, lock_directory)
 
 
 if __name__ == "__main__":
