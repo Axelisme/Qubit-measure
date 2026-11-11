@@ -85,7 +85,9 @@ class ChainFreqExp(Experiment[ThermalChainSums, ChainFreqCfg]):
     def run(self, cfg: ChainFreqCfg, *, context: RunContext) -> ThermalChainSums:
         """Acquire 16 consecutive reads per shot, separated by K=relax_delay us.
 
-        Sweep readout frequency in MHz. All shots of one setting run before the next setting within each round.
+        Sweep readout frequency in MHz on the common generator/ADC grid.
+        With mixer_freq set, the sweep and returned axis are absolute RF.
+        All shots of one setting run before the next setting within each round.
         There is no reset or drive within a shot. The readout post_delay
         supplies the photon decay gap between reads. K after each shot lets the
         next shot start from thermal equilibrium. Live plots show score and
@@ -94,7 +96,14 @@ class ChainFreqExp(Experiment[ThermalChainSums, ChainFreqCfg]):
         Stop keeps settings with a completed round; none raises RuntimeError.
         """
         settings = sweep2array(
-            cfg.freq, "freq", {"soccfg": context.soccfg, "gen_ch": cfg.readout.gen_ch}
+            cfg.freq,
+            "freq",
+            {
+                "soccfg": context.soccfg,
+                "gen_ch": cfg.readout.gen_ch,
+                "ro_ch": cfg.readout.ro_ch,
+                "mixer_freq": cfg.readout.mixer_freq,
+            },
         )
         fig, _ = context.plots.subplots(
             3, 1, num="measurement", sharex=True, figsize=(8, 8)

@@ -106,19 +106,26 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
 
         At each frequency, apply the optional reset, omit or apply qub_pulse,
         then read out. Configure qub_pulse for the intended excitation.
-        Return MHz frequencies and moment-based SNR shaped (Nfreq,);
+        Return MHz frequencies on the common generator/ADC grid and
+        moment-based SNR shaped (Nfreq,). With mixer_freq set, the sweep and
+        returned frequencies are absolute RF.
         skew_penalty optionally reduces scores for distorted IQ distributions.
         This score is not assignment fidelity. acquire_kwargs is forwarded
         to acquisition.
         """
-        # Quantize the readout frequency grid on the pulse generator.
+        # Quantize absolute RF on the common generator/ADC grid, including mixer.
         soc, soccfg = context.soc, context.soccfg
         cfg = deepcopy(cfg)
 
         freqs = sweep2array(
             cfg.freq,
             "freq",
-            {"soccfg": soccfg, "gen_ch": cfg.readout.gen_ch},
+            {
+                "soccfg": soccfg,
+                "gen_ch": cfg.readout.gen_ch,
+                "ro_ch": cfg.readout.ro_ch,
+                "mixer_freq": cfg.readout.mixer_freq,
+            },
         )
 
         # Show the separation score rather than either preparation's mean IQ.
