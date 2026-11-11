@@ -26,7 +26,7 @@ from zcu_tools.program.v2.modules import MuxReadout
 from zcu_lab.v2.support import live_line
 from zcu_lab.v2.support.device import set_flux
 
-from .._sums import herald_probabilities, sigma, terminal_counts
+from .._sums import herald_probabilities, sigma, terminal_counts, validate_classifiers
 from ._analysis import (
     complete_points,
     fit_count_traces,
@@ -120,6 +120,7 @@ class IdleZZHeraldedExp(Experiment[IdleZZHeraldedResult, IdleZZHeraldedCfg]):
         Hardware scans spectator_states and delay; DC alone stays on host
         because it changes an external instrument. Return unnormalized counts.
         """
+        validate_classifiers(config.readout, config.roles)
         delay_sweep = round_sweep_dict(config.delay, "time", {"soccfg": context.soccfg})
         delays = sweep2array(delay_sweep)
         dc_values = (

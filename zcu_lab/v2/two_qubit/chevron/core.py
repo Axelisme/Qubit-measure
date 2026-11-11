@@ -238,6 +238,7 @@ class ChevronExp(Experiment[ChevronResult, ChevronCfg]):
         self, config: ChevronCfg, *, context: RunContext
     ) -> ChevronResult:
         """Acquire all coordinates and durations in hardware, accumulating rounds."""
+        validate_classifiers(config.readout, config.roles)
         coordinates = sweep2array(config.frequency)
         durations = sweep2array(config.duration)
         fig, ax = context.plots.subplots(num="measurement")
@@ -311,6 +312,7 @@ class ChevronExp(Experiment[ChevronResult, ChevronCfg]):
         self, config: ChevronCfg, *, context: RunContext
     ) -> ChevronResult:
         """Rebuild sampled envelopes per host duration; keep coordinates in hardware."""
+        validate_classifiers(config.readout, config.roles)
         coordinates = sweep2array(config.frequency)
         durations = sweep2array(config.duration)
         fig, ax = context.plots.subplots(num="measurement")

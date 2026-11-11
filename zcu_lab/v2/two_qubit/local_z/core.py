@@ -198,6 +198,7 @@ class LocalZExp(Experiment[LocalZResult, LocalZCfg]):
         Counts retain target × quadrature × gate_count axes. No IQ is stored.
         cfg stays unchanged; completed rounds survive cancellation.
         """
+        validate_classifiers(config.readout, config.roles)
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="CZ gate count", ylabel="Target sigma")
         viewer = live_line(ax, num_lines=4)

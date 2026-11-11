@@ -257,6 +257,7 @@ class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg
         Counts retain spectator_states × quadrature × gate_count × frequency.
         cfg stays unchanged; acquisition accumulates rounds without averaging.
         """
+        validate_classifiers(config.readout, config.roles)
         frequencies = sweep2array(config.frequency)
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Common CZ frequency (MHz)", ylabel="Target sigma")

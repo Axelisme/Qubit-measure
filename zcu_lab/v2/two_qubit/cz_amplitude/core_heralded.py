@@ -29,6 +29,7 @@ from .._sums import (
     herald_probabilities,
     joint_probabilities,
     terminal_counts,
+    validate_classifiers,
 )
 from .analysis import (
     OUTCOME_LABELS,
@@ -120,6 +121,7 @@ class CZAmplitudeHeraldedExp(
         cooperative cancellation. Acquisition exceptions propagate unchanged.
         The stop signal carries only stop requests and reason text.
         """
+        validate_classifiers(config.readout, config.roles)
         scales = sweep2array(config.scale)
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Common gain scale", ylabel="P(g,g) | herald (g,g)")

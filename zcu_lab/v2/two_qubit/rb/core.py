@@ -231,6 +231,7 @@ class RBExp(Experiment[RBResult, RBCfg]):
         Each host round acquires reps shots with rounds=1, not a host average.
         Return fixed raw count slots; cfg and saved sequence identities are unchanged.
         """
+        validate_classifiers(config.readout, config.roles)
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Random Clifford depth", ylabel="Joint00 survival")
         viewer = live_line(ax, num_lines=2)

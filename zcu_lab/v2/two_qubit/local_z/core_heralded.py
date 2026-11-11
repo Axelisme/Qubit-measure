@@ -33,7 +33,7 @@ from zcu_tools.program.v2.modules import MuxReadout
 from zcu_lab.v2.support import live_line
 
 from .._phase import count_phase, phase_variance, sigma_variance
-from .._sums import herald_probabilities, sigma, terminal_counts
+from .._sums import herald_probabilities, sigma, terminal_counts, validate_classifiers
 from .analysis import (
     LocalZAnalysis,
     LocalZFit,
@@ -142,6 +142,7 @@ class LocalZHeraldedExp(Experiment[LocalZHeraldedResult, LocalZHeraldedCfg]):
         Counts retain target × quadrature × gate_count axes. No IQ is stored.
         cfg stays unchanged; completed rounds survive cancellation.
         """
+        validate_classifiers(config.readout, config.roles)
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="CZ gate count", ylabel="Target sigma | herald (g,g)")
         viewer = live_line(ax, num_lines=4)

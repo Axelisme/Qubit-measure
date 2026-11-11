@@ -204,6 +204,7 @@ class CZAmplitudeExp(Experiment[CZAmplitudeResult, CZAmplitudeCfg]):
         Acquisition exceptions propagate unchanged. The stop signal carries only
         stop requests and reason text.
         """
+        validate_classifiers(config.readout, config.roles)
         scales = sweep2array(config.scale)
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Common gain scale", ylabel="P(g,g)")
