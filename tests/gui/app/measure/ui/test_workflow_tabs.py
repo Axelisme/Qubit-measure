@@ -588,17 +588,33 @@ def test_new_run_hides_retained_exchange_until_new_question(
     _ask_shot(driver, tmp_path, "restart-02-opened")
     driver.enter_text(object_name="form.input.value", value="1")
     _ask_shot(driver, tmp_path, "restart-03-first-plan")
+    assert _text(driver, "form.input.value") == "1"
     driver.click("Start")
-    # The author coroutine yields the explicitly requested first question.
-    qt_until(lambda: _status(driver, "waiting"), label="first run question")
+    # Native waiting can precede the requested question's visible Ask projection.
+    qt_until(
+        lambda: (
+            _status(driver, "waiting")
+            and any(
+                w.object_name == "workflow.ask" and '"point": 1' in w.text
+                for w in driver.visible().widgets
+            )
+        ),
+        label="first run question presentation",
+    )
     _ask_shot(driver, tmp_path, "restart-04-first-question")
     assert driver.tabs("Ask").current == "Ask"
     assert '"point": 1' in driver.observe(object_name="workflow.ask").text
     driver.enter_text(object_name="workflow.answer", value='{"value": 17}')
     _ask_shot(driver, tmp_path, "restart-05-answer-edited")
     driver.click("Answer")
-    # Answer resumes the author coroutine, which returns.
-    qt_until(lambda: _status(driver, "done"), label="first run answered")
+    # The author returns; owner terminal delivery then unlocks Start and Plan.
+    qt_until(
+        lambda: (
+            _status(driver, "done")
+            and any(w.text == "Start" and w.enabled for w in driver.visible().widgets)
+        ),
+        label="first run completion and Start presentation",
+    )
     _ask_shot(driver, tmp_path, "restart-06-retained-exchange")
     assert driver.tabs("Ask").captions == ("Plan", "Tunables", "Ask")
     assert '"point": 1' in driver.observe(object_name="workflow.ask").text
@@ -609,9 +625,16 @@ def test_new_run_hides_retained_exchange_until_new_question(
     _ask_shot(driver, tmp_path, "restart-07-plan")
     driver.enter_text(object_name="form.input.value", value="0")
     _ask_shot(driver, tmp_path, "restart-08-question-free-plan")
+    assert _text(driver, "form.input.value") == "0"
     driver.click("Start")
-    # The zero plan returns without any Ask, so this is a stable no-question state.
-    qt_until(lambda: _status(driver, "done"), label="question-free run completed")
+    # The zero plan returns; native done alone can leave Plan read-only until delivery.
+    qt_until(
+        lambda: (
+            _status(driver, "done")
+            and any(w.text == "Start" and w.enabled for w in driver.visible().widgets)
+        ),
+        label="question-free run completion and Start presentation",
+    )
     _ask_shot(driver, tmp_path, "restart-09-question-free-run")
     assert driver.tabs("Plan").captions == ("Plan", "Tunables")
     assert not any(
@@ -621,9 +644,19 @@ def test_new_run_hides_retained_exchange_until_new_question(
     ), "A new run must clear the old exchange and hide its Ask page"
     driver.enter_text(object_name="form.input.value", value="2")
     _ask_shot(driver, tmp_path, "restart-10-new-question-plan")
+    assert _text(driver, "form.input.value") == "2"
     driver.click("Start")
-    # The nonzero plan yields a fresh question on this same tab's third run.
-    qt_until(lambda: _status(driver, "waiting"), label="new run question")
+    # The third run yields point 2; wait for that fresh Ask to be visible as well.
+    qt_until(
+        lambda: (
+            _status(driver, "waiting")
+            and any(
+                w.object_name == "workflow.ask" and '"point": 2' in w.text
+                for w in driver.visible().widgets
+            )
+        ),
+        label="new run question presentation",
+    )
     _ask_shot(driver, tmp_path, "restart-11-new-question")
     assert driver.tabs("restart-questions (1)").captions == ("restart-questions (1)",)
     assert driver.tabs("Ask").captions == ("Plan", "Tunables", "Ask")

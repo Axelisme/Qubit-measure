@@ -27,6 +27,8 @@ def fitexp(
     """Fit [y0, yscale, decay_time] and covariance to xdata/ydata.
 
     fitparams supplies initial guesses; non-None fixedparams hold values fixed.
+    Free amplitude is bounded by +/- twice the ydata range, widened to include
+    the absolute supplied amplitude guess when larger. Fixed values are unchanged.
     Optional decay_bounds=(lower, upper) constrains free decay time in x units
     and clips its initial guess. None keeps the unconstrained positive time.
     Numeric fitting failures raise AnalysisFailed; invalid bounds raise ValueError.
@@ -55,9 +57,10 @@ def fitexp(
     lower, upper = (0.0, np.inf) if decay_bounds is None else decay_bounds
     if decay_bounds is not None:
         fitparams[2] = min(max(fitparams[2], lower), upper)
+    amplitude_bound = max(2 * np.ptp(ydata), abs(fitparams[1]))
     bounds = (
-        [-np.inf, -2 * np.abs(fitparams[1]), lower],
-        [np.inf, 2 * np.abs(fitparams[1]), upper],
+        [-np.inf, -amplitude_bound, lower],
+        [np.inf, amplitude_bound, upper],
     )
 
     return fit_func(xdata, ydata, expfunc, fitparams, bounds, fixedparams=fixedparams)

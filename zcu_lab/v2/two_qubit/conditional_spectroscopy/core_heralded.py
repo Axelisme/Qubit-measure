@@ -260,11 +260,14 @@ class SpectroscopyHeraldedExp(
         options: None,
         *,
         plots: Plots,
-    ) -> None:
+    ) -> dict[str, str] | None:
         """Overlay gg/ee spectra by actual initial state and show herald/shot totals.
 
         All completed rounds enter these diagnostics, including partial scans.
         Other counts remain in denominators. No fits or writeback are produced.
+        All-NaN counts retain the empty figures and return an error summary
+        explaining that no complete acquisition round is available. Otherwise
+        return None for this figures-only analysis.
         """
         del options
         data, cfg = source.result, source.cfg
@@ -393,3 +396,8 @@ class SpectroscopyHeraldedExp(
                     yticklabels=outcomes,
                 )
                 fig.colorbar(image, ax=ax, label="Herald probability")
+        if np.all(missing):
+            return {
+                "error": "No complete acquisition round is available: all counts are NaN."
+            }
+        return None

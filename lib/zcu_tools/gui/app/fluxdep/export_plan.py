@@ -4,6 +4,13 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Literal
 
+from zcu_tools.analysis.flux import require_matching_device_unit
+from zcu_tools.gui.app.analysis_project.entry import AnalysisTarget
+from zcu_tools.gui.app.analysis_project.flux import (
+    ComponentFluxProvider,
+    component_flux_context,
+)
+from zcu_tools.resources.entry import snapshot
 from zcu_tools.resources.entry.schema import ComponentSchema
 
 from .state import AlignmentPublication
@@ -45,8 +52,11 @@ class ComponentExportPlan:
     It excludes the fit's EJ/EC/EL, which the exporter writes when declared.
     flux_writeback explains whether calibration fields are supplied or skipped.
     The planner receives a detached ComponentSchema projection and fitted native
-    integer/half positions. It must reject invalid calibration before I/O, and
-    must not infer missing device identities or contemporaneous instrument values.
+    integer/half positions. Alignment and processed restore may query it before
+    fitting to validate the written receipt's target unit. Planning must not
+    perform I/O writes or require fit results. It must reject invalid calibration
+    before I/O, and must not infer missing device identities or contemporaneous
+    instrument values.
     """
 
     fields: Mapping[str, float]
@@ -54,3 +64,30 @@ class ComponentExportPlan:
 
 
 ExportPlanner = Callable[[ComponentSchema, AlignmentPublication], ComponentExportPlan]
+
+
+def require_alignment_export_unit(
+    target: AnalysisTarget | None,
+    planner: ExportPlanner | None,
+    provider: ComponentFluxProvider | None,
+    alignment: AlignmentPublication,
+    unit: str,
+) -> None:
+    """Reject an axis unit that cannot calibrate the planner's actual device.
+
+    Query the injected planner with detached setup and real native alignment,
+    without writing its fields. Only a written receipt selects a device for
+    exact context-unit comparison; absent context units mean native. No target,
+    no planner or a skipped receipt leaves alignment unrestricted. Planner and
+    provider errors propagate; unit mismatch raises ValueError naming the device
+    and both units. No fit, I/O writes or unit conversion are performed.
+    """
+    if target is None or planner is None:
+        return
+    model = snapshot(target.resource.setup).components[target.component]
+    receipt = planner(model, alignment).flux_writeback
+    if receipt.status == "written" and receipt.device is not None:
+        context = component_flux_context(target, provider)
+        require_matching_device_unit(
+            receipt.device, unit, context.units.get(receipt.device)
+        )

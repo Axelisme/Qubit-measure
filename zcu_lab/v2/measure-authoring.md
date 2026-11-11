@@ -106,12 +106,16 @@ $qubit.flux_dev、$mux.flux_dev 或 JPA 的 flux_dev／rf_source 取得可覆寫
 
 ## 表單設計與預演
 
-每張 Form 明列 `field_order`，不要依賴 core inheritance 的欄位順序。
-可見欄位依操作流程排列：participants／tones 或 readonly roles → modules → sweep →
-averaging（reps、rounds、shots）→ timing（relax_delay、initial_delay）。
-可編輯 drive 與必要校準輸入放在 modules 後，掃描設定前。
-`field_order` 排列 adapter 輸入型別的頂層欄位；nested model 維持宣告順序。
-若實驗需要例外，在 guide 說明順序與操作步驟。
+Form 預設依 cfg 宣告順序顯示欄位，不寫 `field_order`。
+Cfg 依序放播放順序的 modules、外到內的掃描量、取樣方式、取數欄位，
+見 [cfg 撰寫慣例](experiment-authoring.md#cfg-名稱順序與取數欄位)。
+Adapter 使用獨立輸入型別時，預設順序由該型別決定。
+只有需要調整頂層欄位時才寫 `field_order`，並在原地用一行註解說明原因。
+例如 `onetone/freq` 把繼承而來的 sampling 欄位移到 frequency sweep 後。
+指定欄位依 tuple 順序前移，未列欄位保留原相對順序，nested model 不變。
+`tree` 的寫入順序不控制畫面。未知或重複欄位會在 Form 建構時 raise `ValueError`，
+持久 Spec 的 Form 也不接受非空 `field_order`。
+在 guide 依實際可見順序寫操作步驟，預演時核對繼承欄位與例外排序。
 
 同一物理量使用一致的可見 label 與單位，例如 Frequency、MHz，Delay、us，
 Gain、normalized，以及掃描點數 Expts。以宣告模型的 `FieldMeta` 指定 label／unit；
@@ -400,8 +404,19 @@ Coherence、overnight 與 overnight_mux 在 Start 的固定 `env.parameters` 捕
 逐點 append 與離線重匯出只讀 Plan。Mux 的 Plan 按固定 qubit 名稱存 frame，不按 participant 的排列位置配對。
 Headless caller 必須提供量測時的 frame，不能以空 mapping 代替缺失 capture。缺必要 frame 的舊 workflow manifest 會在載入 Plan 時報 validation error。
 Workflow 以最後一份 acquisition 的 snapshot 核對 frame；沒有 acquisition 或 snapshot 時保留 `devices=null` 的既有政策。
-Notebook 作者在量測前捕捉 flux 區塊，Run 後以 `record_flux_frame(captured_flux, RunMetadataContent(source.metadata).device_snapshot)` 核對同次值。
-Snapshot 缺席時不組 record；原始量測仍可 Save。接受時經既有 `SavedRun.accept(records={qubit: {"flux_frame": frame, "devices": devices, ...}})` 明傳。
+Notebook 作者在建立本次 cfg 時捕捉 flux 區塊，保留該次量測使用的副本。
+以 `source = exp.run(cfg)` 取得 record 後，用 `acquisition = exp.acquisition_for(source)` 取得同次 Run 開始前的儀器快照。
+`source` 必須是此 adapter 最近成功 Run 返回的同一物件，不能是複製、其他 adapter、舊 Run 或 load 的 record。
+Analyze 與失敗操作保留 acquisition；下一次成功 Run 取代它，成功 Load 清除它。
+因此在下一次成功 Run／Load 前取出本次 evidence 與待接受的 record 欄位。
+Notebook 的 Run 不把 acquisition metadata 寫入 `source.metadata`，該欄位預設為空，不從它讀快照。
+`acquisition.device_snapshot is None` 時不組 record，原始量測仍可 Save；空 dict 表示已知沒有連線裝置。
+快照存在時，以 `devices = deepcopy(dict(acquisition.device_snapshot))` 保留完整設定，
+再用 `frame = record_flux_frame(captured_flux, devices)` 核對同次值。
+`deepcopy` 從 `copy` 匯入。不得在接受時重讀目前 point、alias 或 live 裝置。
+以 `saved = exp.save_run(point, source=source)` 取得同次 Run 的保存 handle，
+再經 `saved.accept(records={qubit: {"flux_frame": frame, "devices": devices, ...}})` 明傳。
+此處 `qubit` 是具體元件名。完整範例見 [Notebook 入口](../../lib/zcu_tools/notebook/README.md#共用實驗入口)。
 框架不認得 lab 的 qubit／flux 格式，也不自動從 point 補 frame。
 作者若有自己的 flux 定義，可以自行組裝 `flux_frame`，不必使用 lab helper；仍須保存量測時的定義與值。
 

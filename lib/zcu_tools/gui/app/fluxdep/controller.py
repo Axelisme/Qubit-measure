@@ -138,6 +138,8 @@ class Controller(BaseController[FluxDepState, EventBus]):
         """
         super().__init__(state, bus if bus is not None else EventBus(), project_root)
         self.control_identity = ControlIdentity()
+        self._export_planner: ExportPlanner | None = None
+        self._flux_context_provider: ComponentFluxProvider | None = None
         self._load = LoadService(state)
         self._alignment = AlignmentService(state)
         self._points = PointsService(state)
@@ -222,11 +224,23 @@ class Controller(BaseController[FluxDepState, EventBus]):
         return name
 
     def configure_flux_context(self, provider: ComponentFluxProvider) -> None:
-        """Inject the lab projection for loads, queries and predictor exports.
+        """Inject the lab projection for loads, alignment and predictor exports.
 
-        Replaces the stateless load service and export provider, preserving spectra.
+        Replaces stateless load/alignment services and the export provider,
+        preserving spectra and the configured export planner.
         """
-        self._load = LoadService(self.state, flux_context_provider=provider)
+        self._state.assert_owner_thread()
+        self._flux_context_provider = provider
+        self._load = LoadService(
+            self.state,
+            flux_context_provider=provider,
+            export_planner=self._export_planner,
+        )
+        self._alignment = AlignmentService(
+            self.state,
+            export_planner=self._export_planner,
+            flux_context_provider=provider,
+        )
         self._fit.configure_flux_context(provider)
 
     def flux_context(self) -> ComponentFluxContext | None:
@@ -559,9 +573,23 @@ class Controller(BaseController[FluxDepState, EventBus]):
         Composition calls this after construction and before creating views or
         remote adapters. Replaces any previous policy. The callback supplies
         calibration writes and a receipt from detached setup/native positions;
-        its failures propagate before export output. Raises RuntimeError
+        alignment and processed restore also query its receipt before publishing,
+        so incompatible axis units fail before fitting. Its failures propagate
+        before publication or export output. Raises RuntimeError
         off-owner. Until configured, export rejects with export_planner_missing.
         """
+        self._state.assert_owner_thread()
+        self._export_planner = planner
+        self._load = LoadService(
+            self.state,
+            flux_context_provider=self._flux_context_provider,
+            export_planner=planner,
+        )
+        self._alignment = AlignmentService(
+            self.state,
+            export_planner=planner,
+            flux_context_provider=self._flux_context_provider,
+        )
         self._fit.configure_export(planner)
 
     def export_params(self) -> str | None:

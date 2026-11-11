@@ -6,7 +6,7 @@ from typing import Literal, overload
 import numpy as np
 from numpy.typing import NDArray
 from qick import QickConfig
-from qick.asm_v2 import AveragerProgramV2
+from qick.asm_v2 import AveragerProgramV2, QickParam, QickRawParam
 
 from .ir import IRCompileMixin
 from .macro import ImproveAsmV2
@@ -54,6 +54,32 @@ class MyProgramV2(  # pyright: ignore[reportIncompatibleMethodOverride]
         )
 
         logger.debug("ASM:\n%s", self.asm())
+
+    def freq2reg(
+        self, f: float | QickParam, gen_ch: int = 0, ro_ch: int | None = None
+    ) -> int | QickRawParam:
+        """Convert DDS MHz to generator words using QICK's channel matching.
+
+        gen_ch selects the generator; optional ro_ch matches its frequency grid
+        to that ADC. Sweeps return QickRawParam, scalars return int. A swept
+        QICK range failure raises RuntimeError with sweep and DDS limits in MHz,
+        retaining its cause. Other failures propagate unchanged.
+        """
+        try:
+            return self.soccfg.freq2reg(f, gen_ch=gen_ch, ro_ch=ro_ch)
+        except RuntimeError as error:
+            if not isinstance(f, QickParam) or not f.is_sweep():
+                raise
+            gencfg = self.soccfg["gens"][gen_ch]
+            half_range = gencfg["f_dds"] / 2
+            # Keep QICK's comparisons: this translates failure, not admission.
+            if gencfg["interpolation"] == 1 or not (f > half_range or f < -half_range):
+                raise
+            raise RuntimeError(
+                f"generator {gen_ch} frequency sweep range "
+                f"[{f.minval():g}, {f.maxval():g}] MHz is outside DDS range "
+                f"[{-half_range:g}, {half_range:g}] MHz"
+            ) from error
 
     def _init_declarations(self) -> None:
         super()._init_declarations()

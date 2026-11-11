@@ -2,10 +2,15 @@
 
 from pathlib import Path
 
+import pytest
+
 from ._support import make_client
 
 
-def test_apply_timeout_returns_queryable_owner_submission_without_retry(tmp_path: Path):
+@pytest.mark.parametrize("stage", [None, "post"])
+def test_apply_timeout_returns_queryable_owner_submission_without_retry(
+    tmp_path: Path, stage: str | None
+):
     client = make_client(tmp_path)
     for method in ("tab.get_analyze_result", "tab.get_post_analyze_result"):
         client.transport.replies[method] = {"ok": True, "result": {"summary": {}}}
@@ -32,7 +37,7 @@ def test_apply_timeout_returns_queryable_owner_submission_without_retry(tmp_path
             "status": "completed",
             "completed": [
                 {
-                    "subtab_id": "analysis",
+                    "subtab_id": "post_analysis" if stage == "post" else "analysis",
                     "item": {
                         "id": "param-1",
                         "kind": "parameter",
@@ -46,11 +51,13 @@ def test_apply_timeout_returns_queryable_owner_submission_without_retry(tmp_path
         },
     }
     try:
-        result = client.call("apply_writeback", {"tab": "tab-1"})
+        result = client.call("apply_writeback", {"tab": "tab-1", "stage": stage})
         assert result.get("submission_id") == "wb-1"
         assert result["status"] == "unknown"
         assert result["failed_stage_may_have_partial_writes"] is True
-        assert result["not_started"] == ["post"]
+        assert result["not_started"] == ([] if stage == "post" else ["post"])
+        assert result["failed_stage"] == (stage or "primary")
+        assert result["submissions"] == {stage or "primary": "wb-1"}
         assert result["recovery"] == {
             "rpc": "tab.writeback_receipt",
             "params": {"submission_id": "wb-1"},

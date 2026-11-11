@@ -116,8 +116,8 @@ def mux_readout_initial(
     us or raise ValueError. These are editable candidates,
     not device-confirmed settings; capability checks remain at Run.
     This spectroscopy exception uses a detached slot copy when available and
-    replaces tones from the group on both paths. The Slot-copy keeps each tone's
-    historical ro_ch=index literal, rather than reading group wiring. Timing
+    replaces tones from the group on both paths. Each tone's ADC is seeded
+    from $mux.wiring.ro_ch[index], including the detached Slot-copy. Timing
     seeds retain Expr formulas and their captured source paths. Open/Reset
     leaves editable timing; subsequent cfg output retains the operator's edits.
     No source is mutated. Other mux consumers keep their original timing.
@@ -140,13 +140,9 @@ def mux_readout_initial(
             "freq": Expr(f"{resonator}.freq"),
             "label": resonator,
         }
-        if wait_for_ringup and has_readout:
-            # Preserve the existing ringup-copy defaults; only blank input changes.
-            tone.update({"gain": 0.1, "ro_ch": index})
-        else:
-            tone["gain"] = 0.1
-            if group.wiring.ro_ch is not None:
-                tone["ro_ch"] = Expr(f"$mux.wiring.ro_ch[{index}]")
+        tone["gain"] = 0.1
+        if group.wiring.ro_ch is not None:
+            tone["ro_ch"] = Expr(f"$mux.wiring.ro_ch[{index}]")
         tones.append(tone)
     seeds: dict[str, TemplateSeed] = {"tones": tones}
     if wait_for_ringup:
