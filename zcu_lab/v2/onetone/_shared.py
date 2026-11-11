@@ -1,4 +1,4 @@
-"""Qt-free cfg, frequency grids and spectrum buffers for one-tone experiments."""
+"""Qt-free cfg and frequency grids for one-tone experiments."""
 
 from dataclasses import dataclass
 from typing import Annotated
@@ -7,12 +7,8 @@ import numpy as np
 from numpy.typing import NDArray
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment.context import RunContext
-from zcu_tools.experiment.v2.runtime.schedule import SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
-from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import PulseReadoutCfg, ResetCfg, SweepCfg
-
-from zcu_lab.v2.support import live_line
 
 
 @dataclass(frozen=True)
@@ -77,21 +73,3 @@ def linear_freqs(
         "freq",
         {"soccfg": context.soccfg, "gen_ch": readout.gen_ch, "ro_ch": readout.ro_ch},
     )
-
-
-def spectrum_buffer(freqs: NDArray[np.float64], *, plots: Plots) -> SignalBuffer:
-    """Create a complex NaN buffer and a live magnitude plot for (P,) MHz freqs.
-
-    plots owns the measurement figure. Buffer updates draw the entire spectrum;
-    acquisition and cancellation remain the caller's responsibility.
-    """
-    fig, ax = plots.subplots(num="measurement")
-    ax.set(xlabel="Frequency (MHz)", ylabel="Amplitude")
-    line = live_line(ax)
-
-    @plots.on_plot_thread
-    def update(data):
-        return line.set(freqs, np.abs(data))
-
-    fig.show()
-    return SignalBuffer((len(freqs),), on_update=update)
