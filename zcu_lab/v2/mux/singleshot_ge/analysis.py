@@ -83,6 +83,12 @@ class GEAnalysis:
     fit_quality: Mapping[str, FitQuality] | None = None
 
     def validate_calibration(self) -> None:
+        """Raise ValueError when calibration fields violate these conditions.
+
+        Fidelity, theta, threshold, ge_s and both centers must be finite, with
+        fidelity in [0,1], ge_s positive and centers distinct under np.isclose.
+        init_pops must be finite, nonnegative and (2,2), with row sums <= 1+1e-12.
+        """
         populations = np.asarray(self.init_pops, dtype=np.float64)
         scalars = [
             self.fidelity,

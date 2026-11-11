@@ -53,6 +53,14 @@ MuxGERunResult: TypeAlias = RunRecord[MuxGECfg, MuxGEResult]
 
 @dataclass
 class GEAnalyzeParams:
+    """GUI controls for fitting paired probe-off/on IQ clouds.
+
+    initial_state identifies probe-off as predominantly ground or excited.
+    backend selects PCA or center rotation for the primary rotation/threshold fit.
+    logscale uses logarithmic histogram display; align_t1 enables T1 alignment.
+    length_ratio is readout length / T1, or None to estimate it from the data.
+    """
+
     initial_state: Annotated[
         Literal["ground", "excited"], ParamMeta(label="Initial State")
     ] = "ground"
