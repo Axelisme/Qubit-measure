@@ -316,6 +316,15 @@ def dominance(rows: list[FamilyResult]) -> dict[str, dict[str, list[str]]]:
     return result
 
 
+def _policy_whitelist(item: Input, family: str) -> tuple[str, ...] | None:
+    """Return None for default, otherwise target and companions deduplicated in order."""
+    return (
+        None
+        if family == "default"
+        else tuple(dict.fromkeys((family, *item.companions)))
+    )
+
+
 @contextmanager
 def engine_session(item: Input, family: str) -> Generator[EngineSession]:
     """Own a fresh source/history and single-worker Engine for one family policy.
@@ -323,11 +332,7 @@ def engine_session(item: Input, family: str) -> Generator[EngineSession]:
     'default' uses normal routing. Other names pin the target plus declared
     companions, preserving numerical admission. Construction, cleanup and clear are outside timers.
     """
-    families = (
-        None
-        if family == "default"
-        else tuple(dict.fromkeys((family, *item.companions)))
-    )
+    families = _policy_whitelist(item, family)
     with whitelist_session(item, families) as session:
         yield session
 
@@ -421,11 +426,7 @@ def measure_policy(
     Wall/process CPU describe this entire group, not isolated target speed.
     Oracle errors are measured across all retained samples.
     """
-    whitelist = (
-        None
-        if family == "default"
-        else tuple(dict.fromkeys((family, *item.companions)))
-    )
+    whitelist = _policy_whitelist(item, family)
     checked_session = _availability_opener(lambda: opener(item, family))
     try:
         modes = measure_family(
