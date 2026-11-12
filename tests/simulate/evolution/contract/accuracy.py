@@ -92,4 +92,16 @@ def accuracy_table(
             f"{family} {len(samples)} {worst.density_error:.6e} "
             f"{convergence:.6e} {worst.case} {status}"
         )
+    edges = sorted(
+        (item for item in measurements if item.case.startswith("guard_edge/")),
+        key=lambda item: (item.family, item.case),
+    )
+    if edges:
+        lines.append("Guard edges: family case density_error reference_error status")
+        for item in edges:
+            status = "PASS" if item.density_error <= 2e-3 else "FAIL"
+            lines.append(
+                f"{item.family} {item.case} {item.density_error:.6e} "
+                f"{item.reference_error:.6e} {status}"
+            )
     return lines
