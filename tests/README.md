@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-11-13，Evolution 精度矩陣的超標與參考解成本政策
+**Last updated:** 2026-11-13，Evolution 精度矩陣與真實模型參考解
 
 **讀者：** framework-dev、agent。查閱測試的 owner、fixture、執行方式與搬遷驗收契約。
 
@@ -166,6 +166,18 @@ Guard 拒絕輸入會讓測試失敗，不會產生誤差觀察值。
 歷史案例另外驗證八點 inventory 的結果，並比較兩點輸入在歷史改變前後的實際路徑。
 每條結果都對獨立的 full-Hamiltonian Lindblad DOP853 參考解。
 參考解用 `2e-10/2e-12` 與 `2e-12/2e-14` 各算一次，兩解最大 density 差須不超過 `2e-6`。
+
+真實模型的多點工作負載，例如 21 能階、1 µs 的輸入，改用
+`tests/simulate/evolution/contract/interaction_reference.py` 的 `interaction_reference`。
+Lab-frame 參考解在這類輸入上一點 600 秒算不完。
+它對靜態對角 H0 做精確的旋轉座標變換，不做 RWA、不丟項，bath 與 lab-frame 參考解相同。
+兩級容差的 density 差不超過 `2e-6` 才有效。
+它只接受整個 shot 單一 schedule level 的 timeline。
+帶 continuous flux waveform 或一個 shot 多個 level 的輸入會 raise。
+兩個參考解在 DC 固定的精度案例上由 pytest 互相比對，差值不超過 `2e-6`。
+精度矩陣本身繼續用 lab-frame 參考解。
+這是測試支援，不 import production 的 kernel、dispatch 或 Engine，也不進 production。
+
 建構函式在 `tests/simulate/evolution/contract/accuracy_cases.py`，
 誤差表支援函式在同目錄的 `accuracy.py`，一般 Python consumer 可以直接 import。
 
