@@ -9,7 +9,7 @@ from numpy.typing import NDArray
 
 from ..kernel import ApplyContext, KernelContext, Prepared, SegmentTable
 from ..secular import SecularModel
-from ._dop853 import tolerances
+from ._dop853 import Tolerances, tolerances
 from ._dop853_chain import run_chain
 from ._dop853_data import (
     Context,
@@ -31,7 +31,16 @@ class DOP853Plan:
     chain: NDArray[np.int64]
 
 
-class _Data(NamedTuple):
+class EndpointData(NamedTuple):
+    """Borrowed packed inputs for ordinary density endpoint integration.
+
+    models contains read-only equal-dimension secular operators from pack_models.
+    segments contains row controls and envelope playback from pack_segments,
+    with ordinary DOP853's empty flux arrays. Model indices and global row IDs
+    passed to advance_endpoints must index these arrays. No density or mutable
+    integration workspace is stored here.
+    """
+
     models: Models
     segments: Segments
 
@@ -319,8 +328,7 @@ class DOP853Kernel:
         if np.any(playing & (table.tone_port[rows] >= models.ports[key_index, None])):
             raise ValueError("DOP853 tone port absent from model")
         advance_endpoints(
-            prepared.models,
-            packed_segments(table, context.work_plan),
+            EndpointData(prepared.models, packed_segments(table, context.work_plan)),
             (rows, key_index),
             states,
             budget,
@@ -335,21 +343,40 @@ def prepare_models(models: list[SecularModel]) -> DOP853Prepared:
 
 
 def advance_endpoints(
-    models: Models,
-    segments: Segments,
+    data: EndpointData,
     row_models: tuple[NDArray[np.int64], NDArray[np.int64]],
     states: NDArray[np.complex128],
     budget: float,
     plan: DOP853Plan,
+    *,
+    controls: Tolerances | None = None,
 ) -> None:
-    """Integrate endpoints using explicit global-row frames and chain IDs.
+    """Integrate density endpoints with caller-selected frames and local errors.
 
-    Inputs are validated packed secular operators and segments. states has one
-    slot per row, in its model eigenbasis. Each chain reads its first slot and
-    writes every endpoint; independent rows read their own slots. Numerical
-    failure can leave earlier endpoints written. No frame selection occurs here.
+    data supplies validated packed secular operators and playback arrays.
+    row_models contains global row IDs and their packed model indices,
+    aligned with writable complex states of shape (rows,M,M) in each model's
+    eigenbasis. plan supplies global-row frames and chain IDs; no frame selection
+    occurs here. Each chain reads its first slot and writes every endpoint;
+    independent interaction-frame rows read their own slots and return from
+    the H0-rotating frame to the model eigenbasis at the row's end.
+
+    Omitting controls uses budget-scaled DOP853 tolerances. Providing controls
+    uses its rtol, atol and max_step instead, allowing fixed tighter errors
+    without changing budget. The chain runner retains the full-density RMS
+    norm and caps lab-frame errors by budget divided by bare spectral phase;
+    controls.phase_budget and controls.norm_size do not override these policies.
+    Active control knots still stop integration and reset the step seed.
+    No normalization, clipping, RWA or bath splitting occurs.
+
+    budget must remain finite and positive even with explicit controls or empty
+    rows; otherwise raise ValueError. RuntimeError signals numerical failure
+    and can leave earlier endpoints written. Packed inputs and explicit controls
+    must satisfy their respective data and solver contracts.
     """
-    controls = tolerances(budget)
+    default_controls = tolerances(budget)
+    if controls is None:
+        controls = default_controls
     rows, key_index = row_models
     if not len(rows):
         return
@@ -358,7 +385,6 @@ def advance_endpoints(
         0, np.flatnonzero(interaction[1:] != interaction[:-1]) + 1, len(rows)
     ]
     for begin, end in zip(boundaries[:-1], boundaries[1:], strict=True):
-        data = _Data(models, segments)
         chain_rows = (rows[begin:end], key_index[begin:end], plan.chain)
         if interaction[begin]:
             _run_interaction(data, chain_rows, states[begin:end], controls)
