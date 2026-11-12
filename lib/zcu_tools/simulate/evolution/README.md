@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-11-13, constant RWA guard diagnostics
+**Last updated:** 2026-11-13, constant RWA guard diagnostics and structured routing refusals
 
 **讀者：** framework-dev、agent。Segment evolution 的公開輸入、路由與數值邊界。
 
@@ -236,9 +236,12 @@ owner defines each precondition once. Legal preparation failures still propagate
 dispatch does not catch them to retry another family.
 The allowlist never changes numerical guards, budget or complete-acquire
 inventory counts. A rejected pinned family cannot select an excluded family.
-If no allowed candidate passes, `RuntimeError` names the domain, caller point
-IDs and affected segment rows. The allowlist does not add fallback routes to
-other domains. `kernels=` remains an internal numerical-collaborator seam.
+If no allowed candidate passes, `NoValidKernel` names the domain, caller point
+IDs and affected segment rows. Its `attempted` tuple lists the allowed candidates
+in the final dispatch round's offer order, including cost-skipped families.
+An empty tuple means none of the allowed families is a candidate for those rows.
+The allowlist does not add fallback routes to other domains. `kernels=` remains
+an internal numerical-collaborator seam.
 
 The family names are `t4`, `adiabatic_map`, `flux_dop853`, `slow_envelope`,
 `dyson`, `single_tone_rwa`, `floquet_period`, `t6`, `single_tone_gate`,
@@ -604,10 +607,22 @@ readout densities, or zero for empty work. It never rejects output or applies
 ADC's tolerance.
 
 Invalid inputs fail at construction or entry. Missing required registry entries
-raise with segment and family context. A rejected terminal guard raises
-`RuntimeError` with `no valid kernel`. Preparation and apply failures propagate;
-they do not restart candidate selection. Cancellation raises `Cancelled` without
-partial results.
+raise with segment and family context. An exhausted candidate round raises
+`NoValidKernel`, a `RuntimeError` subclass with the unchanged `no valid kernel`
+message. Import it from `zcu_tools.simulate.evolution`. Its read-only `domain`,
+`points` and `segments` fields match the message; point IDs and segment rows are
+tuples. `attempted` is the tuple of family names offered by that final round,
+none of which accepted those rows. With `families=`, it includes all allowed
+candidates, including families tried earlier or skipped for cost. The order is
+the final round's offer order, not necessarily first-attempt order. With
+`families=None`, it excludes families tried or skipped by earlier cost shortcuts.
+
+A listed family was rejected by a numerical guard or an input precondition,
+possibly through a retained guard rejection. Under an allowlist, an unlisted
+family is not a candidate for those rows. The exception describes only the first
+failing row group; later groups in the acquire have not been checked.
+Preparation and apply failures propagate; they do not restart candidate
+selection. Cancellation raises `Cancelled` without partial results.
 
 Calls on one Engine serialize. Joblib threading is the only parallel layer;
 kernels are single-threaded and do not open pools. Multi-timeline calls with
