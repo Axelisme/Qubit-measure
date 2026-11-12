@@ -13,7 +13,9 @@ from .accuracy import (
 
 
 def test_missing_expected_family_fails_even_when_another_family_ran() -> None:
-    paths = PathDiagnostics(segments_by_kernel={"dop853": 2})
+    paths = PathDiagnostics(
+        segments_by_kernel={"dop853": 2}, duration_ns_by_kernel={"dop853": 6.0}
+    )
     with pytest.raises(AssertionError, match="t6"):
         require_families(paths, ("dop853", "t6"))
 

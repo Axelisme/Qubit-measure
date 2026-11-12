@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-11-12, shared RWA admission and coefficient owner
+**Last updated:** 2026-11-13, logical family duration diagnostics
 
 **讀者：** framework-dev、agent。Segment evolution 的公開輸入、路由與數值邊界。
 
@@ -139,7 +139,13 @@ Common-frame reports also count `prepare_builds` and `admission_rows`; other
 families currently leave these two instrumented-owner counters at zero. Telemetry does not change guards,
 routes, densities or cancellation.
 
-Each family reports logical segment `rows`, `prepare_cpu_s`, `apply_cpu_s`,
+`PathDiagnostics.duration_ns_by_kernel` always reports logical physical ns per
+family, even with telemetry off, without CPU clocks. Its immutable mapping
+has the same keys and consumers as segment counts. Merge adds lengths and
+result reuse preserves them. Enabled `FamilyRouting.duration_ns` reports the
+same logical length, including every adopting timeline for a shared prefix.
+
+Each family reports logical segment `rows`, `duration_ns`, `prepare_cpu_s`, `apply_cpu_s`,
 `actual_cpu_s` (their sum), `cache_hits`, `rejected_rows`, `estimated_cost` and
 nullable `estimated_cpu_s`. Calling-thread CPU measures guards/certificates,
 prepare, input binding and apply, in the thread

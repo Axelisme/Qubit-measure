@@ -56,7 +56,14 @@ def test_three_modes_time_five_samples_and_exclude_setup_warmup_clear(
             seen.append(history)
             history += 1
             return EvolutionResult(
-                np.array([0]), density, PathDiagnostics(segments_by_kernel={"t4": 1})
+                np.array([0]),
+                density,
+                PathDiagnostics(
+                    segments_by_kernel={"t4": 1},
+                    duration_ns_by_kernel={
+                        name: float(count) for name, count in ({"t4": 1}).items()
+                    },
+                ),
             )
 
         def clear() -> None:
@@ -111,7 +118,14 @@ def test_slow_family_uses_two_evolves_in_the_same_history(seconds: float) -> Non
             seen.append(history)
             history += 1
             return EvolutionResult(
-                np.array([0]), density, PathDiagnostics(segments_by_kernel={"t4": 1})
+                np.array([0]),
+                density,
+                PathDiagnostics(
+                    segments_by_kernel={"t4": 1},
+                    duration_ns_by_kernel={
+                        name: float(count) for name, count in ({"t4": 1}).items()
+                    },
+                ),
             )
 
         yield EngineSession(evolve, lambda: None)
@@ -171,7 +185,14 @@ def test_slow_policy_has_no_separate_probe_or_warmup() -> None:
         def evolve() -> EvolutionResult:
             seen.append(len(seen))
             return EvolutionResult(
-                np.array([0]), density, PathDiagnostics(segments_by_kernel={"t4": 1})
+                np.array([0]),
+                density,
+                PathDiagnostics(
+                    segments_by_kernel={"t4": 1},
+                    duration_ns_by_kernel={
+                        name: float(count) for name, count in ({"t4": 1}).items()
+                    },
+                ),
             )
 
         def clear() -> None:
@@ -475,7 +496,14 @@ def test_policy_does_not_allow_an_unpinned_fallback_to_masquerade_as_success() -
     def wrong_session(item: Input, family: str) -> Generator[EngineSession]:
         yield EngineSession(
             lambda: EvolutionResult(
-                np.array([0]), density, PathDiagnostics(segments_by_kernel={"t6": 1})
+                np.array([0]),
+                density,
+                PathDiagnostics(
+                    segments_by_kernel={"t6": 1},
+                    duration_ns_by_kernel={
+                        name: float(count) for name, count in ({"t6": 1}).items()
+                    },
+                ),
             ),
             lambda: None,
         )
@@ -505,7 +533,14 @@ def test_companion_counts_must_match_declared_domain_spans() -> None:
     def session(item: Input, family: str) -> Generator[EngineSession]:
         yield EngineSession(
             lambda: EvolutionResult(
-                np.array([0]), density, PathDiagnostics(segments_by_kernel=counts)
+                np.array([0]),
+                density,
+                PathDiagnostics(
+                    segments_by_kernel=counts,
+                    duration_ns_by_kernel={
+                        name: float(count) for name, count in (counts).items()
+                    },
+                ),
             ),
             lambda: None,
             lambda families: (
@@ -537,7 +572,13 @@ def test_companion_domains_cannot_overlap_target_candidate_domains() -> None:
             lambda: EvolutionResult(
                 np.array([0]),
                 density,
-                PathDiagnostics(segments_by_kernel={"single_tone_rwa": 2, "t4": 1}),
+                PathDiagnostics(
+                    segments_by_kernel={"single_tone_rwa": 2, "t4": 1},
+                    duration_ns_by_kernel={
+                        name: float(count)
+                        for name, count in ({"single_tone_rwa": 2, "t4": 1}).items()
+                    },
+                ),
             ),
             lambda: None,
         )
@@ -562,7 +603,13 @@ def test_companion_proof_requires_both_full_input_subset_refusals(
             lambda: EvolutionResult(
                 np.array([0]),
                 density,
-                PathDiagnostics(segments_by_kernel={"single_tone_rwa": 1, "t4": 1}),
+                PathDiagnostics(
+                    segments_by_kernel={"single_tone_rwa": 1, "t4": 1},
+                    duration_ns_by_kernel={
+                        name: float(count)
+                        for name, count in ({"single_tone_rwa": 1, "t4": 1}).items()
+                    },
+                ),
             ),
             lambda: None,
             lambda families: None if families == accepted_subset else refusal,
@@ -596,7 +643,14 @@ def test_late_warmup_failure_stops_measurement_without_partial_success() -> None
             if calls == 6:
                 raise error
             return EvolutionResult(
-                np.array([0]), density, PathDiagnostics(segments_by_kernel={"t4": 1})
+                np.array([0]),
+                density,
+                PathDiagnostics(
+                    segments_by_kernel={"t4": 1},
+                    duration_ns_by_kernel={
+                        name: float(count) for name, count in ({"t4": 1}).items()
+                    },
+                ),
             )
 
         yield EngineSession(evolve, lambda: None)
@@ -705,7 +759,14 @@ def test_cleanup_error_is_never_an_availability_refusal_even_with_matching_messa
     def cleanup_fails(item: Input, family: str) -> Generator[EngineSession]:
         yield EngineSession(
             lambda: EvolutionResult(
-                np.array([0]), density, PathDiagnostics(segments_by_kernel={"t4": 1})
+                np.array([0]),
+                density,
+                PathDiagnostics(
+                    segments_by_kernel={"t4": 1},
+                    duration_ns_by_kernel={
+                        name: float(count) for name, count in ({"t4": 1}).items()
+                    },
+                ),
             ),
             lambda: None,
         )

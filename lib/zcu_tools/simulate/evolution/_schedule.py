@@ -385,6 +385,7 @@ class Schedule:
         )
         paths = dispatch_diagnostics(self.table, self.dispatch.names)
         segments = Counter(paths.segments_by_kernel)
+        durations = Counter(paths.duration_ns_by_kernel)
         points = {
             name: set(self.table.timeline[self.dispatch.names == name].tolist())
             for name in paths.points_by_class
@@ -399,6 +400,7 @@ class Schedule:
                     raise RuntimeError("adopted prefix has no group")
                 prefix = self.geometry.prefix_paths[group]
                 segments.update(prefix.segments_by_kernel)
+                durations.update(prefix.duration_ns_by_kernel)
                 exceeded.update(prefix.exceeded_by_kernel)
                 for name in prefix.points_by_class:
                     points.setdefault(name, set()).add(point)
@@ -407,7 +409,8 @@ class Schedule:
             {name: len(timelines) for name, timelines in points.items()},
             exceeded,
             float(np.max(np.abs(np.trace(output, axis1=1, axis2=2) - 1))),
-            routing=self.context.work_plan.routing.snapshot(segments),
+            routing=self.context.work_plan.routing.snapshot(segments, durations),
+            duration_ns_by_kernel=durations,
             point_members={
                 name: tuple(sorted(int(self.geometry.points[i]) for i in timelines))
                 for name, timelines in points.items()

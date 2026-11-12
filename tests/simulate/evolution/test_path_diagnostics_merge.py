@@ -61,10 +61,12 @@ def test_merge_unions_members_sums_work_and_takes_max_trace():
                 estimated_cpu_s=0.4,
                 prepare_builds=2,
                 admission_rows=3,
+                duration_ns=6.0,
             )
         },
         0.05,
         point_members={"idle": (1, 3)},
+        duration_ns_by_kernel={"t4": 6.0},
     )
     second = evolution.PathDiagnostics(
         {"t4": 3},
@@ -82,10 +84,12 @@ def test_merge_unions_members_sums_work_and_takes_max_trace():
                 estimated_cpu_s=0.5,
                 prepare_builds=3,
                 admission_rows=4,
+                duration_ns=9.0,
             )
         },
         0.07,
         point_members={"idle": (3, 9), "drive": (1,)},
+        duration_ns_by_kernel={"t4": 9.0},
     )
     result = _merge((first, second))
     assert result.point_members == {"idle": (1, 3, 9), "drive": (1,)}

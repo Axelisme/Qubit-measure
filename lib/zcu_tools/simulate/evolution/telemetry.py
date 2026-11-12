@@ -16,6 +16,10 @@ class FamilyRouting:
     """One kernel family's observed work in a single evolve/acquire report.
 
     rows: logical dispatched segments, including adopted shared prefixes.
+    duration_ns: summed physical segment lengths in ns, with the same logical
+        consumers as rows. Shared prefixes count once per adopting timeline,
+        unlike CPU, which counts executed work once. Reuse preserves duration
+        even with zero CPU. Rejected-only families have zero rows and duration.
     prepare_cpu_s: summed calling-thread CPU seconds in guards, preparation,
         and input binding (including rejected work).
     apply_cpu_s: summed calling-thread CPU seconds in kernel apply calls.
@@ -43,6 +47,7 @@ class FamilyRouting:
     estimated_cpu_s: float | None = None
     prepare_builds: int = 0
     admission_rows: int = 0
+    duration_ns: float = 0.0
 
     @property
     def actual_cpu_s(self) -> float:
@@ -144,7 +149,9 @@ class RoutingCollector:
                         else:
                             total.estimated_cpu_s += value
 
-    def snapshot(self, segments: Mapping[str, int]) -> dict[str, FamilyRouting]:
+    def snapshot(
+        self, segments: Mapping[str, int], durations: Mapping[str, float]
+    ) -> dict[str, FamilyRouting]:
         """Return immutable family values after workers join; disabled returns {}."""
         if not self.enabled:
             return {}
@@ -153,6 +160,7 @@ class RoutingCollector:
             total = self._totals.get(name, _Totals())
             result[name] = FamilyRouting(
                 rows=segments.get(name, 0),
+                duration_ns=durations.get(name, 0.0),
                 prepare_builds=total.prepare_builds,
                 admission_rows=total.admission_rows,
                 prepare_cpu_s=total.prepare_cpu_s,
