@@ -53,10 +53,6 @@ class MistFluxDepInputs(RecipeInputs):
         KEEP,
         description="Photon coefficient. Analysis only; omitted keeps value, null passes to owner.",
     )
-    secondary_xaxis: bool | None | Keep = Field(
-        KEEP,
-        description="Secondary device-value axis. Analysis only; omitted keeps value, null passes to owner.",
-    )
     auto_range: bool | None | Keep = Field(
         KEEP,
         description="Full acquired range. Analysis only; omitted keeps value, null passes to owner.",
@@ -67,7 +63,7 @@ class MistFluxDepReport(RecipeReport):
     """MIST flux dependence results and failure reason; cancellation returns no report."""
 
     analysis_completed: bool = Field(
-        description="Whether the default raw-coordinate baseline-difference map completed."
+        description="Whether the baseline-difference map completed."
     )
 
     # This figure-only analysis exposes no scalar fields to the report.
@@ -83,7 +79,7 @@ async def mist_flux_dep(
     """Acquire and save one MIST map using the current global aliases.
 
     points → expts sets the sweep sample count.
-    Analysis controls: flux_half, flux_period, ac_coeff, secondary_xaxis, auto_range. Omission retains each analysis value; null is passed to its owner.
+    Analysis controls: flux_half, flux_period, ac_coeff, auto_range. Omission retains each analysis value; null is passed to its owner.
     Missing Form values stop before acquisition; completed Run data is saved even if analysis fails.
     """
     tab = session.open_tab(
@@ -122,7 +118,6 @@ async def mist_flux_dep(
                 "flux_half": inputs.flux_half,
                 "flux_period": inputs.flux_period,
                 "ac_coeff": inputs.ac_coeff,
-                "secondary_xaxis": inputs.secondary_xaxis,
                 "auto_range": inputs.auto_range,
             },
         )

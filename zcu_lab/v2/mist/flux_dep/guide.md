@@ -2,7 +2,7 @@
 
 **Readers:** operator, agent. Measure the MIST response over flux and probe gain from the GUI or MCP.
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-11-12
 
 ## Prepare and open
 
@@ -39,13 +39,16 @@ The live map subtracts each flux row's mean IQ over its first 5% of gains
 The saved data retains raw complex IQ, native flux values and hardware-rounded
 gains. The transform affects only the display.
 
-Primary analysis creates the native `fit` map. By default it shows device values
-and probe gain. Enter both half-flux device value and flux period to convert the
-horizontal axis. Enable the secondary device-value axis only with both values.
-Photon coefficient optionally maps gain squared to photon number.
-Enter these analysis-only values explicitly. Analysis uses those inputs and
-the acquired or loaded data, including records with missing historical
-configuration.
+Primary analysis creates the native `fit` map. The analysis controls are
+half-flux device value, flux period, photon coefficient and full acquired range.
+Half-flux and period start from the Run's captured qubit calibration for the
+scanned device. Missing calibration or historical configuration leaves both blank.
+You can edit or clear either value. With both values, the bottom axis shows φ
+and the top ticks show device values. If either is blank, only the bottom
+device-value axis is shown.
+Photon coefficient optionally maps gain squared to photon number; otherwise
+the vertical axis shows probe gain. Full acquired range uses the acquired
+endpoints. These controls affect only analysis of the acquired or loaded data.
 
 Analysis produces a response map, with calibration parameters left unchanged.
 Use a classified-population experiment for calibrated state populations. Save
@@ -67,6 +70,6 @@ and leaves calibration parameters unchanged.
 3. With a readout slot, Reset and review the captured module and remaining errors separately.
    A slot does not prove that drive pulses, sweep bounds or GE calibration are valid.
 4. Through the agent, call `mist_flux_dep` after inspecting the same Form errors.
-   flux_device, flux_unit, flux_range and gain_range are required. points maps to Expts on both axes. flux_half, flux_period, ac_coeff, secondary_xaxis and auto_range update only analysis.
+   flux_device, flux_unit, flux_range and gain_range are required. points maps to Expts on both axes. flux_half, flux_period, ac_coeff and auto_range update only analysis.
    The Form chooses module sources. Omitted inputs retain Form values; null clears/disables fields. Overrides apply last, then check_ready reports missing or invalid fields before Run.
    Missing inputs return needs_parameters before acquisition. Reset may replace unsaved inputs.
