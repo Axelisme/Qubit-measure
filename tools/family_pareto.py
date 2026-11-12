@@ -10,23 +10,23 @@ import subprocess
 import sys
 from collections.abc import Callable, Generator
 from contextlib import AbstractContextManager, closing, contextmanager
-from dataclasses import asdict, dataclass, field
-from importlib import import_module
+from dataclasses import asdict, dataclass, field, replace
 from importlib.metadata import version
+from math import isclose
 from pathlib import Path
 from statistics import median
 from time import perf_counter, process_time
-from typing import Protocol, runtime_checkable
+from uuid import uuid4
 
 from zcu_tools.simulate.evolution import (
     Engine,
     EvolutionResult,
+    FamilyRouting,
     ModelSource,
     TimelineBatch,
 )
 
 from tests.simulate.evolution.contract.accuracy import ALL_FAMILIES
-from tests.simulate.evolution.contract.accuracy_cases import AccuracyCase
 from tests.simulate.evolution.contract.interaction_reference import (
     interaction_reference,
 )
@@ -43,83 +43,18 @@ from tools.family_pareto_inputs import (
     make_inputs,
     physical_input,
 )
-from tools.family_pareto_reference import ReferenceCache, solve_reference
+from tools.family_pareto_reference import (
+    ReferenceCache,
+    prepare_references,
+    solve_reference,
+)
 from tools.family_pareto_report import render_summary as render_summary
+from tools.family_pareto_scenarios import make_real_inputs
 
-
-@runtime_checkable
-class Workload(Protocol):
-    """Provider-owned detached numeric input consumed without lab knowledge.
-
-    name is stable. source supplies immutable physics and initial density; batch
-    holds all points and their complete timelines. metadata describes why the
-    input represents a workload; manifest contains reproducible provenance.
-    domain_spans declares span counts from input physics. family_domains maps
-    each family to its public candidate domains. companions declares the fixed
-    family/domain companions, which cannot overlap the target's domains.
-    Providers return a fresh record with an owned source. Tools detach its models
-    and use new sources/histories for every measurement session.
-    """
-
-    name: str
-    source: ModelSource
-    batch: TimelineBatch
-    metadata: dict[str, object]
-    manifest: dict[str, object]
-    domain_spans: dict[str, int]
-    family_domains: dict[str, tuple[str, ...]]
-    companions: dict[str, tuple[str, ...]]
-
-
-def load_provider(path: str) -> Input:
-    """Load a zero-argument module:attribute provider as a real-workload input.
-
-    Import/factory failures propagate. The provider must return Workload or
-    TypeError is raised. Its owned source is closed after detaching immutable
-    models at every scheduled level plus DC. No acquire or lab details enter
-    the generic measurement sessions.
-    """
-    module, attribute = path.split(":", 1)
-    factory = getattr(import_module(module), attribute)
-    workload = factory()
-    if not isinstance(workload, Workload):
-        raise TypeError(f"{path} does not provide the Workload protocol")
-    with closing(workload.source):
-        levels = {tuple(int(v) for v in level) for level in workload.batch.flux.level}
-        levels.add(tuple(0 for _ in workload.batch.flux.level[0]))
-        models = {level: workload.source.model(level) for level in levels}
-        initial = workload.source.initial_density
-        subdivisions = workload.source.slow_envelope_segments_per_period
-        expansion = (
-            workload.source.flux_expansion()
-            if workload.batch.flux_waveform is not None
-            else None
-        )
-
-    def build() -> AccuracyCase:
-        return AccuracyCase(
-            workload.name,
-            ModelSource(
-                initial,
-                models.__getitem__,
-                expansion,
-                slow_envelope_segments_per_period=subdivisions,
-            ),
-            workload.batch,
-            tuple(workload.family_domains),
-        )
-
-    return Input(
-        workload.name,
-        build,
-        str(workload.metadata["reason"]),
-        domain_spans=workload.domain_spans,
-        family_domains=workload.family_domains,
-        companions=workload.companions,
-        metadata=workload.metadata,
-        manifest=workload.manifest,
-        category="real",
-    )
+UNAVAILABLE_PATTERN = (
+    r"no valid kernel for segment \d+; domain [a-z_]+: points \[\d+(?:, \d+)*\], "
+    r"segments \[\d+(?:, \d+)*\]"
+)
 
 
 @dataclass
@@ -133,12 +68,8 @@ class EngineSession:
 
     evolve: Callable[[], EvolutionResult]
     clear_history: Callable[[], None]
-    subset_refusal: Callable[[tuple[str, ...]], str | None] | None = None
-    """Optional full-input probe: public domain refusal text, or None on success.
-
-    Other failures must propagate. It creates its own fresh session, untimed.
-    Required only for policies with a distinct companion family.
-    """
+    on_sample: Callable[[str, "Sample | None"], None] | None = None
+    """Optional untimed observer after each sample; None sample marks a skipped mode."""
 
 
 SessionOpener = Callable[[], AbstractContextManager[EngineSession]]
@@ -158,6 +89,10 @@ class Sample:
     cpu_seconds: float
     density_error: float | None
     paths: dict[str, int]
+    routing: dict[str, FamilyRouting] = field(default_factory=dict)
+    """Immutable simulator reports; thread CPU includes guard refusals."""
+    family_cpu_s: dict[str, float] = field(default_factory=dict)
+    """Per-family prepare+apply thread CPU, not whole-process elapsed CPU."""
 
 
 @dataclass(frozen=True)
@@ -194,6 +129,10 @@ def _timed_sample(
         if reference is None
         else density_error(result.densities, reference.density),
         dict(result.paths.segments_by_kernel),
+        routing=dict(result.paths.routing),
+        family_cpu_s={
+            name: report.actual_cpu_s for name, report in result.paths.routing.items()
+        },
     )
 
 
@@ -223,13 +162,18 @@ def measure_family(
     No process or disk-cache reset occurs here. Failures always propagate.
     """
 
-    def sample(session: EngineSession) -> Sample:
-        return _timed_sample(session, reference, wall_clock, cpu_clock)
+    def sample(session: EngineSession, mode: str) -> Sample:
+        measured = _timed_sample(session, reference, wall_clock, cpu_clock)
+        if session.on_sample is not None:
+            session.on_sample(mode, measured)
+        return measured
 
     with open_session() as session:
-        first = sample(session)
+        first = sample(session, "first_evolve")
         if first.wall_seconds > 60:
-            retained = sample(session)
+            if session.on_sample is not None:
+                session.on_sample("warm_clear_history", None)
+            retained = sample(session, "warm_retain_history")
             return [
                 _measured_mode("first_evolve", [first]),
                 ModeResult(
@@ -240,7 +184,7 @@ def measure_family(
     samples = [first]
     for _ in range(4):
         with open_session() as session:
-            samples.append(sample(session))
+            samples.append(sample(session, "first_evolve"))
     modes = [_measured_mode("first_evolve", samples)]
     for name in ("warm_clear_history", "warm_retain_history"):
         with open_session() as session:
@@ -250,7 +194,7 @@ def measure_family(
             for _ in range(5):
                 if name == "warm_clear_history":
                     session.clear_history()
-                samples.append(sample(session))
+                samples.append(sample(session, name))
         modes.append(_measured_mode(name, samples))
     return modes
 
@@ -271,16 +215,13 @@ class FamilyResult:
     error: float | None
     unavailable: str | None
     modes: list[ModeResult]
-    domains: dict[str, tuple[str, ...]] = field(default_factory=dict)
-    """Pinned family -> disjoint owned domains, empty for synthetic/default."""
-    expected_segments: dict[str, int] = field(default_factory=dict)
-    """Family counts inferred from declared domains, not per-span observations."""
-    subset_refusals: dict[str, str] = field(default_factory=dict)
-    """Full-batch target-only and companions-only domain-refusal evidence."""
+    expected_route: dict[str, tuple[int, float]] = field(default_factory=dict)
+    """Family -> expected logical segment count and total physical ns."""
     attribution: str = "target"
-    """target, default, fixed_family_group or target_plus_driving_companion.
+    """target, target_and_companions, default or fixed_family_group.
 
-    Group times must never be attributed to the target alone.
+    Engine wall/process CPU describe the complete policy, not isolated target
+    speed. Family thread CPU is reported separately and is not process CPU.
     """
     whitelist: tuple[str, ...] | None = None
     """Actual families restriction; None denotes unrestricted default routing."""
@@ -393,7 +334,10 @@ def engine_session(item: Input, family: str) -> Generator[EngineSession]:
 
 @contextmanager
 def whitelist_session(
-    item: Input, families: tuple[str, ...] | None
+    item: Input,
+    families: tuple[str, ...] | None,
+    *,
+    on_sample: Callable[[str, Sample | None], None] | None = None,
 ) -> Generator[EngineSession]:
     """Own a fresh source/history and Engine with exactly the supplied whitelist.
 
@@ -403,51 +347,12 @@ def whitelist_session(
     case = item.build()
     with closing(case.source), closing(Engine(1, families=families)) as engine:
         yield EngineSession(
-            lambda: engine.evolve(case.source, (case.batch,), budget=1e-3),
+            lambda: engine.evolve(
+                case.source, (case.batch,), budget=1e-3, telemetry=True
+            ),
             case.source.history.clear,
-            lambda subset: probe_subset_refusal(item, subset),
+            on_sample,
         )
-
-
-def probe_subset_refusal(item: Input, families: tuple[str, ...]) -> str | None:
-    """Probe the complete input with one whitelist, outside every sample timer.
-
-    Return only a public missing-kernel refusal, or None when evolution succeeds.
-    Other runtime, numerical and cleanup failures propagate to the caller.
-    """
-    case = item.build()
-    with closing(case.source), closing(Engine(1, families=families)) as engine:
-        try:
-            engine.evolve(case.source, (case.batch,), budget=1e-3)
-        except RuntimeError as error:
-            if re.fullmatch(UNAVAILABLE_PATTERN, str(error)) is None:
-                raise
-            return str(error)
-    return None
-
-
-PolicyOpener = Callable[[Input, str], AbstractContextManager[EngineSession]]
-
-
-def _subset_refusals(
-    session: EngineSession, family: str, companions: tuple[str, ...]
-) -> dict[str, str]:
-    if family == "default" or not companions:
-        return {}
-    if session.subset_refusal is None:
-        raise ValueError("companion proof requires a full-input subset probe")
-    refusals = {}
-    for label, subset in (
-        ("target_only", (family,)),
-        ("companions_only", companions),
-    ):
-        refusal = session.subset_refusal(subset)
-        if refusal is None:
-            raise RuntimeError(f"{label} subset unexpectedly accepted full input")
-        if re.fullmatch(UNAVAILABLE_PATTERN, refusal) is None:
-            raise RuntimeError(refusal)
-        refusals[label] = refusal
-    return refusals
 
 
 class _InitialRefusal(Exception):
@@ -471,9 +376,33 @@ def _availability_opener(opener: SessionOpener) -> SessionOpener:
                         raise _InitialRefusal(str(error)) from error
                     raise
 
-            yield EngineSession(evolve, session.clear_history, session.subset_refusal)
+            yield EngineSession(evolve, session.clear_history, session.on_sample)
 
     return checked_session
+
+
+def _check_expected_route(
+    sample: Sample, expected: dict[str, tuple[int, float]]
+) -> None:
+    observed = {
+        name: (report.rows, report.duration_ns)
+        for name, report in sample.routing.items()
+        if report.rows
+    }
+    counts = {name: rows for name, (rows, _) in expected.items()}
+    if sample.paths != counts or observed.keys() != expected.keys():
+        raise RuntimeError(
+            f"expected route {expected}, got paths {sample.paths} and work {observed}"
+        )
+    if any(
+        observed[name][0] != rows
+        or not isclose(observed[name][1], duration, rel_tol=1e-12, abs_tol=1e-9)
+        for name, (rows, duration) in expected.items()
+    ):
+        raise RuntimeError(f"expected route {expected}, got work {observed}")
+
+
+PolicyOpener = Callable[[Input, str], AbstractContextManager[EngineSession]]
 
 
 def measure_policy(
@@ -485,28 +414,13 @@ def measure_policy(
     wall_clock: Callable[[], float] = perf_counter,
     cpu_clock: Callable[[], float] = process_time,
 ) -> FamilyResult:
-    """Measure a fixed family or default; the first timed evolve tests availability.
+    """Measure a target plus named companions, or unrestricted default routing.
 
-    Only the public missing-kernel/domain refusal may become unavailable.
-    Other setup/evolve/cleanup failures propagate. Every measured pinned path
-    must execute the target, plus declared companions when present. Domains
-    must be disjoint; counts must match input-declared domain spans. Both
-    target-only and companions-only full-input probes must refuse publicly.
-    This infers allocation from the public domain contract, not per-span
-    observations. Oracle is supplied once per physical input by the caller;
-    exact families still have measured density errors. Unavailable rows carry
-    no synthetic zero errors or times.
+    The first timed evolve tests availability. Only its matched public domain
+    refusal becomes unavailable. All other evolve/setup/cleanup failures stop.
+    Wall/process CPU describe this entire group, not isolated target speed.
+    Oracle errors are measured across all retained samples.
     """
-    domains = (
-        {**item.companions, family: item.family_domains[family]}
-        if family != "default" and item.domain_spans
-        else {}
-    )
-    seen: set[str] = set()
-    for owned in domains.values():
-        if seen.intersection(owned):
-            raise ValueError(f"pinned {family} has overlapping domains: {domains}")
-        seen.update(owned)
     whitelist = (
         None
         if family == "default"
@@ -518,52 +432,33 @@ def measure_policy(
             checked_session, reference, wall_clock=wall_clock, cpu_clock=cpu_clock
         )
     except _InitialRefusal as error:
-        return FamilyResult(
-            family, None, str(error), [], domains=domains, whitelist=whitelist
-        )
-    companions = tuple(name for name in item.companions if name != family)
-    refusals = {}
-    if companions:
-        with opener(item, family) as session:
-            refusals = _subset_refusals(session, family, companions)
-    paths = [s.paths for m in modes for s in m.samples]
-    expected = {}
-    if family != "default":
-        if item.domain_spans:
-            expected = {
-                name: sum(item.domain_spans.get(domain, 0) for domain in owned)
-                for name, owned in domains.items()
-            }
-            expected = {name: count for name, count in expected.items() if count}
-            if expected.get(family, 0) <= 0 or any(path != expected for path in paths):
-                raise RuntimeError(
-                    f"pinned {family} domain span counts differ: expected {expected}, got {paths}"
-                )
-        elif any(set(p) != {family} or p[family] <= 0 for p in paths):
-            raise RuntimeError(f"pinned {family} did not execute exclusively: {paths}")
-    error = max(_mode_error(m) for m in modes if m.samples)
-    driving = {"slow", "plateau", "shaped", "two", "multiple", "flux"}
-    attribution = (
-        "default"
-        if family == "default"
-        else "target_plus_driving_companion"
-        if any(
-            driving.intersection(owned)
-            for name, owned in domains.items()
-            if name != family
-        )
-        else "target"
-    )
+        return FamilyResult(family, None, str(error), [], whitelist=whitelist)
+    paths = [sample.paths for mode in modes for sample in mode.samples]
+    if family != "default" and any(
+        set(path) != set(whitelist or ()) or any(count <= 0 for count in path.values())
+        for path in paths
+    ):
+        raise RuntimeError(f"pinned {family} did not execute exclusively: {paths}")
+    expected = item.expected_routes.get(family, {}) if family != "default" else {}
+    if family != "default" and item.expected_routes and not expected:
+        raise RuntimeError(f"pinned {family} has no expected route declaration")
+    if expected:
+        for mode in modes:
+            for sample in mode.samples:
+                _check_expected_route(sample, expected)
     return FamilyResult(
-        family, error, None, modes, domains, expected, refusals, attribution, whitelist
+        family,
+        max(_mode_error(mode) for mode in modes if mode.samples),
+        None,
+        modes,
+        expected_route=expected,
+        attribution="default"
+        if family == "default"
+        else "target_and_companions"
+        if item.companions
+        else "target",
+        whitelist=whitelist,
     )
-
-
-# Only this verified public refusal is recoverable. Numerical failures propagate.
-UNAVAILABLE_PATTERN = (
-    r"no valid kernel for segment \d+; domain [a-z_]+: "
-    r"points \[\d+(?:, \d+)*\], segments \[\d+(?:, \d+)*\]"
-)
 
 
 @dataclass(frozen=True)
@@ -633,7 +528,11 @@ def timing_equivalents(rows: list[FamilyResult]) -> dict[str, dict[str, list[str
 
 
 def measure_fixed_group(
-    item: Input, families: tuple[str, ...], reference: ReferenceResult
+    item: Input,
+    families: tuple[str, ...],
+    reference: ReferenceResult,
+    *,
+    on_sample: Callable[[str, Sample | None], None] | None = None,
 ) -> FamilyResult:
     """Time the default route's observed family union as one fixed whitelist.
 
@@ -641,7 +540,9 @@ def measure_fixed_group(
     This is a group latency, never attributed to any one member or included
     among pinned-family dominance competitors. Failures propagate.
     """
-    modes = measure_family(lambda: whitelist_session(item, families), reference)
+    modes = measure_family(
+        lambda: whitelist_session(item, families, on_sample=on_sample), reference
+    )
     return FamilyResult(
         "fixed_default_group",
         max(_mode_error(mode) for mode in modes if mode.samples),
@@ -650,6 +551,70 @@ def measure_fixed_group(
         attribution="fixed_family_group",
         whitelist=families,
     )
+
+
+def _emit(
+    progress: Callable[[dict[str, object]], None] | None, **event: object
+) -> None:
+    if progress is not None:
+        progress(event)
+
+
+def _sample_observer(
+    progress: Callable[[dict[str, object]], None] | None,
+    input_name: str,
+    family: str,
+) -> Callable[[str, Sample | None], None] | None:
+    if progress is None:
+        return None
+
+    def observed(mode: str, sample: Sample | None) -> None:
+        _emit(
+            progress,
+            event="mode_skipped" if sample is None else "sample",
+            input=input_name,
+            family=family,
+            mode=mode,
+            sample=None if sample is None else asdict(sample),
+            reason="slow family not measured" if sample is None else None,
+        )
+
+    return observed
+
+
+def _measure_policy_observed(
+    item: Input,
+    family: str,
+    reference: ReferenceResult,
+    runner: Callable[[Input, str, ReferenceResult], FamilyResult],
+    progress: Callable[[dict[str, object]], None] | None,
+) -> FamilyResult:
+    if progress is None or runner is not measure_policy:
+        return runner(item, family, reference)
+
+    @contextmanager
+    def open_observed(item: Input, family: str) -> Generator[EngineSession]:
+        with engine_session(item, family) as session:
+            yield replace(
+                session, on_sample=_sample_observer(progress, item.name, family)
+            )
+
+    return measure_policy(item, family, reference, opener=open_observed)
+
+
+def _new_journal(
+    path: Path, start: dict[str, object]
+) -> Callable[[dict[str, object]], None]:
+    with path.open("x", encoding="utf-8") as handle:
+        handle.write(canonical_json(start) + "\n")
+
+    def append(event: dict[str, object]) -> None:
+        # Close after every event, outside timed evolve. A killed process leaves
+        # prior complete lines usable; a torn final line is not a complete event.
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(canonical_json(event) + "\n")
+
+    return append
 
 
 def run_table(
@@ -662,8 +627,7 @@ def run_table(
     policy_runner: Callable[
         [Input, str, ReferenceResult], FamilyResult
     ] = measure_policy,
-    group_runner: Callable[[Input, tuple[str, ...], ReferenceResult], FamilyResult]
-    | None = None,
+    progress: Callable[[dict[str, object]], None] | None = None,
 ) -> list[InputResult]:
     """Measure every family and default for each input, sharing identical oracles.
 
@@ -676,7 +640,8 @@ def run_table(
     ReferenceCache(only=True) requires a disk hit before any timing, never solving
     inside the batch. It cannot be combined with an injected reference_solver.
     Real default paths are also timed with their observed family union pinned,
-    separately from dominance. group_runner overrides only that group measurement.
+    separately from dominance. progress receives untimed policy/sample events,
+    including explicit skipped modes, before later failures can discard them.
     """
     cache = (
         reference_cache
@@ -688,6 +653,7 @@ def run_table(
     references: dict[str, ReferenceResult] = {}
     rows = []
     for index, item in enumerate(inputs):
+        _emit(progress, event="input_start", input=item.name)
         case = item.build()
         with closing(case.source):
             key = digest(physical_input(case))
@@ -709,9 +675,27 @@ def run_table(
                 )
                 oracle_wall, oracle_cpu = perf_counter() - wall, process_time() - cpu
         reference = references[oracle_key]
-        policies = [
-            policy_runner(item, family, reference) for family in (*families, "default")
-        ]
+        _emit(
+            progress,
+            event="reference_ready",
+            input=item.name,
+            physical_sha256=oracle_key,
+            convergence_error=reference.convergence_error,
+        )
+        policies = []
+        for family in (*families, "default"):
+            _emit(progress, event="policy_start", input=item.name, family=family)
+            measured = _measure_policy_observed(
+                item, family, reference, policy_runner, progress
+            )
+            policies.append(measured)
+            _emit(
+                progress,
+                event="policy_result",
+                input=item.name,
+                family=family,
+                result=asdict(measured),
+            )
         default = policies[-1]
         observed = tuple(
             sorted(
@@ -724,8 +708,11 @@ def run_table(
             )
         )
         fixed_group = (
-            (measure_fixed_group if group_runner is None else group_runner)(
-                item, observed, reference
+            measure_fixed_group(
+                item,
+                observed,
+                reference,
+                on_sample=_sample_observer(progress, item.name, "fixed_default_group"),
             )
             if item.category == "real" and observed
             else None
@@ -744,6 +731,9 @@ def run_table(
                 oracle_cpu,
                 fixed_group,
             )
+        )
+        _emit(
+            progress, event="input_complete", input=item.name, result=asdict(rows[-1])
         )
         print(
             f"{index + 1}/{len(inputs)} {item.name}: "
@@ -778,22 +768,21 @@ def main(argv: list[str] | None = None, *, inputs: list[Input] | None = None) ->
     only physical input construction for small in-process seam tests.
     """
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--provider", action="append", default=[])
     parser.add_argument("--reference-cache", type=Path)
     parser.add_argument("--reference-cache-only", action="store_true")
+    parser.add_argument("--prepare-references", action="store_true")
     parser.add_argument("--include-synthetic", action="store_true")
     parser.add_argument("--freeze-inputs", type=Path)
     parser.add_argument("--manifest", type=Path)
     parser.add_argument("--output", type=Path)
     parser.add_argument("--summary", type=Path)
+    parser.add_argument("--partial-output", type=Path)
     args = parser.parse_args(argv)
+    progress = None
     try:
-        items = (
-            (make_inputs() if inputs is None else inputs)
-            if not args.provider or args.include_synthetic
-            else []
-        )
-        items = [*items, *(load_provider(path) for path in args.provider)]
+        items = make_real_inputs() if inputs is None else inputs
+        if args.include_synthetic:
+            items = [*make_inputs(), *items]
         manifest = freeze_manifest(items)
         if args.freeze_inputs is not None:
             args.freeze_inputs.write_text(
@@ -801,22 +790,72 @@ def main(argv: list[str] | None = None, *, inputs: list[Input] | None = None) ->
             )
             print(f"Frozen {len(items)} inputs; manifest sha256={digest(manifest)}")
             return 0
-        if args.manifest is None or args.output is None or args.summary is None:
-            raise ValueError("measurement requires --manifest, --output and --summary")
+        if (
+            args.manifest is None
+            or args.output is None
+            or (not args.prepare_references and args.summary is None)
+        ):
+            raise ValueError(
+                "requires --manifest, --output and --summary (except reference preparation)"
+            )
         frozen = json.loads(args.manifest.read_text(encoding="utf-8"))
         if digest(frozen) != digest(manifest):
             raise ValueError(
                 "frozen manifest differs from current inputs; do not tune inputs after measurement"
             )
         state = tested_state()
+        if args.prepare_references:
+            prepared = prepare_references(
+                items,
+                ReferenceCache(args.reference_cache, only=args.reference_cache_only),
+            )
+            args.output.write_text(
+                canonical_json(
+                    {
+                        "manifest_sha256": digest(manifest),
+                        "tested_state": state,
+                        "inputs": [asdict(entry) for entry in prepared],
+                        "reference_total_wall_seconds": sum(
+                            entry.wall_seconds for entry in prepared
+                        ),
+                        "reference_total_cpu_seconds": sum(
+                            entry.cpu_seconds for entry in prepared
+                        ),
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            return 0
+        run_id = uuid4().hex
+        if args.partial_output is not None:
+            if args.partial_output.resolve() in {
+                args.output.resolve(),
+                args.summary.resolve(),
+            }:
+                raise ValueError(
+                    "partial output must be separate from complete outputs"
+                )
+            progress = _new_journal(
+                args.partial_output,
+                {
+                    "event": "run_start",
+                    "status": "partial",
+                    "run_id": run_id,
+                    "manifest_sha256": digest(manifest),
+                    "tested_state": state,
+                },
+            )
         rows = run_table(
             items,
             reference_cache=ReferenceCache(
                 args.reference_cache, only=args.reference_cache_only
             ),
+            progress=progress,
         )
         result = {
             "schema_version": 1,
+            "run_id": run_id,
             "manifest": manifest,
             "manifest_sha256": digest(manifest),
             "tested_state": state,
@@ -844,6 +883,9 @@ def main(argv: list[str] | None = None, *, inputs: list[Input] | None = None) ->
             },
             "measurement": {
                 "entry": "Engine.evolve",
+                "telemetry": True,
+                "dominance_cpu_source": "process_time around complete Engine.evolve",
+                "family_cpu_source": "FamilyRouting prepare_cpu_s/apply_cpu_s, calling-thread CPU",
                 "budget": 1e-3,
                 "workers": 1,
                 "maximum_samples_per_mode": 5,
@@ -873,8 +915,18 @@ def main(argv: list[str] | None = None, *, inputs: list[Input] | None = None) ->
         summary = render_summary(rows)
         args.output.write_text(canonical_json(result) + "\n", encoding="utf-8")
         args.summary.write_text(summary, encoding="utf-8")
-    except Exception:
-        # CLI isolation preserves failures; unavailable is handled only at probe.
+        _emit(progress, event="run_complete", run_id=run_id)
+    except Exception as error:
+        try:
+            _emit(
+                progress,
+                event="run_failed",
+                error=str(error),
+                error_type=type(error).__name__,
+            )
+        except Exception:
+            logging.exception("Could not append partial failure event")
+        # CLI isolation preserves failures; only initial domain refusals are unavailable.
         logging.exception("Pareto table failed; no complete report was written")
         return 1
     return 0

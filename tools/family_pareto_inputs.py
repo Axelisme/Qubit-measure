@@ -53,10 +53,9 @@ CASE_NAMES = (
 class Input:
     """Stable input with a fresh owned source on every build.
 
-    reason explains representation. domain_spans declares counts from input
-    physics using evolution's public domains. family_domains declares each
-    family's candidate domains; companions maps fixed companion names to their
-    domains. Empty maps retain the original single-family synthetic protocol.
+    reason explains representation. companions names additional pinned families.
+    expected_routes maps target names to expected family -> (logical rows, ns).
+    Empty declarations retain the original single-family synthetic protocol.
     metadata and manifest preserve caller-owned provenance; category separates
     real workloads from the synthetic inventory in reports.
     """
@@ -64,9 +63,10 @@ class Input:
     name: str
     build: Callable[[], AccuracyCase]
     reason: str
-    domain_spans: dict[str, int] = field(default_factory=dict)
-    family_domains: dict[str, tuple[str, ...]] = field(default_factory=dict)
-    companions: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    companions: tuple[str, ...] = ()
+    expected_routes: dict[str, dict[str, tuple[int, float]]] = field(
+        default_factory=dict
+    )
     metadata: dict[str, object] = field(default_factory=dict)
     manifest: dict[str, object] = field(default_factory=dict)
     category: str = "synthetic"
@@ -277,8 +277,7 @@ def freeze_manifest(inputs: list[Input]) -> dict[str, object]:
                             "category": item.category,
                             "metadata": item.metadata,
                             "manifest": item.manifest,
-                            "domain_spans": item.domain_spans,
-                            "family_domains": item.family_domains,
+                            "expected_routes": item.expected_routes,
                             "companions": item.companions,
                         }
                         if item.category == "real"

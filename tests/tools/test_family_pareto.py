@@ -10,6 +10,7 @@ import numpy as np
 import pytest
 from zcu_tools.simulate.evolution import (
     EvolutionResult,
+    FamilyRouting,
     ModelSource,
     PathDiagnostics,
     RoutingHistory,
@@ -513,89 +514,33 @@ def test_policy_does_not_allow_an_unpinned_fallback_to_masquerade_as_success() -
 
 
 def companion_input() -> Input:
-    """A driven point and idle tail with disjoint candidate domains."""
     return Input(
-        "drive_with_tail",
+        "companion",
         lambda: accuracy_case("linear_plateau"),
-        "synthetic domain proof",
-        domain_spans={"plateau": 1, "idle": 1},
-        family_domains={"single_tone_rwa": ("plateau",), "t4": ("idle",)},
-        companions={"t4": ("idle",)},
+        "group route",
+        companions=("t4",),
+        expected_routes={
+            "single_tone_rwa": {"single_tone_rwa": (1, 10.0), "t4": (1, 2.0)}
+        },
     )
 
 
-def test_companion_counts_must_match_declared_domain_spans() -> None:
-    density = np.eye(2, dtype=np.complex128)[None] / 2
-    item = companion_input()
-    counts = {"single_tone_rwa": 1, "t4": 1}
-
-    @contextmanager
-    def session(item: Input, family: str) -> Generator[EngineSession]:
-        yield EngineSession(
-            lambda: EvolutionResult(
-                np.array([0]),
-                density,
-                PathDiagnostics(
-                    segments_by_kernel=counts,
-                    duration_ns_by_kernel={
-                        name: float(count) for name, count in (counts).items()
-                    },
-                ),
-            ),
-            lambda: None,
-            lambda families: (
-                "no valid kernel for segment 0; domain plateau: points [0], segments [0]"
-            ),
-        )
-
-    result = measure_policy(
-        item, "single_tone_rwa", ReferenceResult(density, 0), opener=session
-    )
-    assert result.modes[0].samples[0].paths == {"single_tone_rwa": 1, "t4": 1}
-    counts = {"single_tone_rwa": 0, "t4": 2}
-    with pytest.raises(RuntimeError, match="domain span counts"):
-        measure_policy(
-            item, "single_tone_rwa", ReferenceResult(density, 0), opener=session
-        )
-
-
-def test_companion_domains_cannot_overlap_target_candidate_domains() -> None:
-    item = replace(
-        companion_input(),
-        family_domains={"single_tone_rwa": ("plateau", "idle"), "t4": ("idle",)},
-    )
-    density = np.eye(2, dtype=np.complex128)[None] / 2
-
-    @contextmanager
-    def session(item: Input, family: str) -> Generator[EngineSession]:
-        yield EngineSession(
-            lambda: EvolutionResult(
-                np.array([0]),
-                density,
-                PathDiagnostics(
-                    segments_by_kernel={"single_tone_rwa": 2, "t4": 1},
-                    duration_ns_by_kernel={
-                        name: float(count)
-                        for name, count in ({"single_tone_rwa": 2, "t4": 1}).items()
-                    },
-                ),
-            ),
-            lambda: None,
-        )
-
-    with pytest.raises(ValueError, match="overlapping domains"):
-        measure_policy(
-            item, "single_tone_rwa", ReferenceResult(density, 0), opener=session
-        )
-
-
-@pytest.mark.parametrize("accepted_subset", [None, ("t4",), ("single_tone_rwa",)])
-def test_companion_proof_requires_both_full_input_subset_refusals(
-    accepted_subset: tuple[str, ...] | None,
+@pytest.mark.parametrize("mismatch", [None, "count", "duration"])
+def test_companion_route_checks_counts_lengths_and_preserves_family_cpu(
+    mismatch: str | None,
 ) -> None:
     item = companion_input()
     density = np.eye(2, dtype=np.complex128)[None] / 2
-    refusal = "no valid kernel for segment 0; domain plateau: points [0], segments [0]"
+    count = 2 if mismatch == "count" else 1
+    duration = 11.0 if mismatch == "duration" else 10.0
+    reports = {
+        "single_tone_rwa": FamilyRouting(
+            rows=count, duration_ns=duration, prepare_cpu_s=0.3, apply_cpu_s=0.4
+        ),
+        "t4": FamilyRouting(
+            rows=1, duration_ns=2.0, prepare_cpu_s=0.1, apply_cpu_s=0.2
+        ),
+    }
 
     @contextmanager
     def session(item: Input, family: str) -> Generator[EngineSession]:
@@ -604,19 +549,16 @@ def test_companion_proof_requires_both_full_input_subset_refusals(
                 np.array([0]),
                 density,
                 PathDiagnostics(
-                    segments_by_kernel={"single_tone_rwa": 1, "t4": 1},
-                    duration_ns_by_kernel={
-                        name: float(count)
-                        for name, count in ({"single_tone_rwa": 1, "t4": 1}).items()
-                    },
+                    segments_by_kernel={"single_tone_rwa": count, "t4": 1},
+                    duration_ns_by_kernel={"single_tone_rwa": duration, "t4": 2.0},
+                    routing=reports,
                 ),
             ),
             lambda: None,
-            lambda families: None if families == accepted_subset else refusal,
         )
 
-    if accepted_subset is not None:
-        with pytest.raises(RuntimeError, match="subset unexpectedly accepted"):
+    if mismatch is not None:
+        with pytest.raises(RuntimeError, match="expected route"):
             measure_policy(
                 item, "single_tone_rwa", ReferenceResult(density, 0), opener=session
             )
@@ -624,10 +566,10 @@ def test_companion_proof_requires_both_full_input_subset_refusals(
         result = measure_policy(
             item, "single_tone_rwa", ReferenceResult(density, 0), opener=session
         )
-        assert result.subset_refusals == {
-            "target_only": refusal,
-            "companions_only": refusal,
-        }
+        sample = result.modes[0].samples[0]
+        assert sample.routing == reports
+        assert sample.family_cpu_s == pytest.approx({"single_tone_rwa": 0.7, "t4": 0.3})
+        assert result.expected_route == item.expected_routes["single_tone_rwa"]
 
 
 def test_late_warmup_failure_stops_measurement_without_partial_success() -> None:
@@ -704,7 +646,6 @@ def test_table_shares_oracle_for_identical_physics_with_different_model_identiti
 
 
 def test_table_times_the_defaults_exact_family_union_separately() -> None:
-    groups: list[tuple[str, ...]] = []
     paths = {"single_tone_rwa": 1, "t4": 1}
 
     def solve(source: ModelSource, batch: TimelineBatch) -> ReferenceResult:
@@ -727,21 +668,14 @@ def test_table_times_the_defaults_exact_family_union_separately() -> None:
             ],
         )
 
-    def fixed(
-        item: Input, families: tuple[str, ...], reference: ReferenceResult
-    ) -> FamilyResult:
-        groups.append(families)
-        return policy(item, "fixed_default_group", reference)
-
     (row,) = run_table(
         [replace(companion_input(), category="real")],
         ("single_tone_rwa",),
         reference_solver=solve,
         policy_runner=policy,
-        group_runner=fixed,
     )
-    assert groups == [("single_tone_rwa", "t4")]
     assert row.fixed_default_group is not None
+    assert row.fixed_default_group.whitelist == ("single_tone_rwa", "t4")
     assert row.fixed_default_group.family == "fixed_default_group"
     assert set(row.dominators) == {"single_tone_rwa"}
 

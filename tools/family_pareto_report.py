@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from statistics import median
 from typing import TYPE_CHECKING
 
 from tests.simulate.evolution.contract.accuracy import ALL_FAMILIES
@@ -43,6 +44,43 @@ def _render_fixed_group(row: InputResult) -> list[str]:
                 f"{len(mode.samples)} | {mode.samples[0].paths} | {ratio_text} | {finding} |"
             )
     return [*lines, ""]
+
+
+def _family_cpu_lines(row: InputResult) -> list[str]:
+    lines = []
+    policies = [*row.policies]
+    if row.fixed_default_group is not None:
+        policies.append(row.fixed_default_group)
+    for policy in policies:
+        for mode in policy.modes:
+            names = sorted({name for sample in mode.samples for name in sample.routing})
+            for name in names:
+                reports = [
+                    sample.routing[name]
+                    for sample in mode.samples
+                    if name in sample.routing
+                ]
+                rows = [report.rows for report in reports]
+                durations = [report.duration_ns for report in reports]
+                lines.append(
+                    f"| {policy.family} | {mode.mode} | {name} | {len(reports)} | "
+                    f"{min(rows)}..{max(rows)} | {min(durations):.12g}..{max(durations):.12g} | "
+                    f"{median(report.prepare_cpu_s for report in reports):.9g} | "
+                    f"{median(report.apply_cpu_s for report in reports):.9g} | "
+                    f"{median(report.actual_cpu_s for report in reports):.9g} |"
+                )
+    if not lines:
+        return []
+    return [
+        "Family diagnostics (calling-thread CPU, not policy process CPU):",
+        "",
+        "Logical row/ns ranges and phase medians use reported samples only. Guard rejection preparation can have CPU with zero rows. Raw reports retain each sample separately.",
+        "",
+        "| Policy | Mode | Family | Reported samples | Logical rows range | Cumulative ns range | Median prepare CPU s | Median apply CPU s | Median summed CPU s |",
+        "| --- | --- | --- | ---: | --- | --- | ---: | ---: | ---: |",
+        *lines,
+        "",
+    ]
 
 
 def _policy_lines(row: InputResult) -> list[str]:
@@ -87,9 +125,11 @@ def render_summary(
         "# Engine family Pareto table",
         "",
         "Timers cover Engine.evolve only, not program.acquire. Normal modes have five samples. A first evolve >60 wall seconds keeps n=1, skips clear-history with n=0, then retains history in the same session for n=1. No separate probe or warmup runs for slow families.",
-        "Errors compare complete complex density to the two-level converged full-Lindblad oracle.",
+        "Errors compare complete complex density to the two-tolerance converged full-Lindblad oracle.",
+        "Pinned target and named companions form one timed group. Group wall/process CPU is not isolated target cost. All timing samples enable routing telemetry; family prepare/apply thread CPU is diagnostic only.",
+        "Logical segment counts and cumulative ns are not per-span observation. Equal-length spans cannot be distinguished by cumulative duration.",
         "A dominator has mode-local maximum sample error <= target error and time < 0.9 * target time. Exactly 10% is equivalent.",
-        "Displayed density error and PASS/FAIL use the overall maximum across probe and all modes, not the mode-local comparator error.",
+        "Displayed density error and PASS/FAIL use the overall maximum across retained samples, not the mode-local comparator error.",
         "No epsilon or weighted score is used. FAIL means error > 2e-3, not permission to keep an inaccurate route.",
         "Conclusions apply only to the measured input set; no deletion is authorized.",
         "",
@@ -155,9 +195,9 @@ def render_summary(
             f"Oracle convergence error: {row.oracle_convergence_error:.12g}; solve/cache-load wall {row.oracle_wall_seconds:.9g}s, CPU {row.oracle_cpu_seconds:.9g}s.",
             "",
             *[
-                f"- {policy.family} ({policy.attribution}): domains {policy.domains}; expected segments {policy.expected_segments}; full-input subset refusals {policy.subset_refusals}."
+                f"- {policy.family} ({policy.attribution}): whitelist {policy.whitelist}; expected (logical rows, ns) {policy.expected_route}."
                 for policy in row.policies
-                if policy.domains
+                if policy.expected_route
             ],
             "",
             "| Family | Density error | Status | Mode/metric | Median seconds | Samples | Actual path | Dominators | Time-equivalent peers |",
@@ -166,4 +206,5 @@ def render_summary(
         lines += _policy_lines(row)
         lines.append("")
         lines += _render_fixed_group(row)
+        lines += _family_cpu_lines(row)
     return "\n".join(lines) + "\n"

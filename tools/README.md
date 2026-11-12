@@ -161,6 +161,11 @@ Acquire、暖機或比較失敗時回傳非零，stderr 保留原因，不輸出
 It times **Engine.evolve**, not `program.acquire`. The existing acquire benchmark
 above keeps its workloads and comparison contract.
 
+The default input is a fixed 24-point carrier sweep on the full 21-level
+single-fluxonium model. Add `--include-synthetic` to also measure the unchanged
+accuracy inventory and twelve amplified synthetic workloads. Reports separate
+the two categories; deletion conclusions use real inputs only.
+
 Freeze the versioned input manifest before measuring. From the lane root, replace
 `<worktree>` with its absolute path and choose a new `<results>` directory:
 
@@ -169,8 +174,15 @@ mkdir -p <results>
 uv run --directory <worktree> --no-sync -- \
   python -m tools.family_pareto --freeze-inputs <results>/inputs.json
 uv run --directory <worktree> --no-sync -- \
-  python tools/run_heavy.py --exclusive --log <results>/run.log 1800 -- \
+  python tools/run_heavy.py --log <results>/reference.log 3600 -- \
   python -m tools.family_pareto --manifest <results>/inputs.json \
+  --prepare-references --reference-cache <results>/reference-cache \
+  --output <results>/reference.json > <results>/reference-receipt.json
+uv run --directory <worktree> --no-sync -- \
+  python tools/run_heavy.py --exclusive --log <results>/run.log 9000 -- \
+  python -m tools.family_pareto --manifest <results>/inputs.json \
+  --reference-cache <results>/reference-cache --reference-cache-only \
+  --partial-output <results>/attempt.jsonl \
   --output <results>/matrix.json --summary <results>/summary.md \
   > <results>/receipt.json
 ```
@@ -180,15 +192,15 @@ Do not adjust inputs in response to measured dominance. After an intentional inp
 version change, freeze a new manifest and retain earlier results separately.
 No existing local artifacts, mutable lab YAML, GUI or hardware are required.
 
-`family_pareto_inputs.py` reuses the accuracy table's ordinary Python support.
-The manifest includes the original representatives, all guard edges, the complete
+With `--include-synthetic`, `family_pareto_inputs.py` reuses the accuracy table's
+ordinary Python support. That inventory includes the original representatives, all guard edges, the complete
 gain/split sweeps and crossing brackets, shape bridges, history inputs and the
 complete multisegment sequence. Fallback cases share the same physical inputs as
 the unity gate and long split cases. Each input is tried with every family.
 Oracle caching excludes only the model's nonphysical identity namespace. Both
 full reconstruction hashes and oracle-sharing hashes are saved.
 
-Each original domain also has a 96-point workload. Three gain factors, `1, 1.5, 2`,
+Each original synthetic domain also has a 96-point workload. Three gain factors, `1, 1.5, 2`,
 correspond to the acquire benchmark's `.08, .12, .16` ratio. Each factor has 32
 complete timeline repetitions, preserving original point phases, envelopes,
 durations, bath and flux trajectories. This is the acquire benchmark's `3 x 32`
@@ -227,7 +239,7 @@ above `2e-3` remain FAIL. Existing strict xfails are not removed.
 
 A competitor dominates only when its maximum full-density error across that
 mode's retained raw samples is no larger and its median time is
-**less than `0.9 * target_time`**. Probe and other-mode errors do not enter this
+**less than `0.9 * target_time`**. Other-mode errors do not enter this
 comparison. The family-level maximum across all timed modes remains the
 overall accuracy/PASS-FAIL value. Exactly 10% is time-equivalent.
 Time-equivalent peers have neither direction faster by more than 10%, regardless
@@ -258,47 +270,87 @@ measure only time and paths (`Sample.density_error=None`), without an oracle.
 Pareto policies always supply a real reference. Tests use controlled clocks and small
 collaborators; the complete matrix runs outside pytest through the exclusive runner.
 
-### Injected workloads and reference cache
+### Fixed scenarios, companions and reference cache
 
-`--provider module:attribute` calls a zero-argument provider and consumes its
-`Workload` record. Repeat the option for several providers. `Workload` in
-`tools.family_pareto` documents the required numeric fields and provenance.
-Providers supply a source, a complete batch, per-domain span counts, each
-family's public candidate domains and fixed companion family/domain declarations.
-The tool detaches immutable models and creates fresh source/history objects for
-measurement. It does not know experiment names, cfg fields or lab layout.
-Provider imports and construction failures stop the command.
+`family_pareto_scenarios.py` owns curated core pulse sequences. It uses public
+program components, compiled requests, and the environment source's
+`model_facts`/`plan_template` to construct complete Engine inputs.
+`family_pareto_settings.py` owns fixed single-fluxonium, FTF and board inputs,
+copied from commit `303074e166d1a563addfab4fd94717d958a7dd56`. The manifest
+records their source paths and values. Runtime construction does not import
+lab experiments, read lab YAML/profiles, execute experiments, or use replay.
+Model/template changes require a deliberate update here. The fixed FTF values
+do not track a user's working-copy edits.
 
-With providers, the default selection contains only those real workloads.
-`--include-synthetic` also includes the unchanged original inventory. With no
-provider, the original inventory remains the default. Reports separate real and
-synthetic inputs. Deletion conclusions use real inputs only. Real workloads use
-the converged exact interaction-picture oracle; synthetic inputs keep the
-lab-frame oracle.
+The carrier scenario holds a 1 us constant pulse at gain 0.1 while sweeping
+24 equally spaced carriers across DC E1−E0 ±100 MHz. The center comes from the
+fixed model, not a fitted calibration. Gains and readout values are fixed
+benchmark settings, not claims of experimental calibration. The constant envelope
+represents the plateau domain; later shaped scenarios exercise other domains.
+The full 21-level model and both scan endpoints are retained after compilation.
+The manifest records compiled carriers, model/board inputs, snapshot, exact tick
+ratio, calibration method, expected routes and full physical hashes.
 
-Companion routing has no per-span observation. It relies on evolution's public
-[domain contract](../lib/zcu_tools/simulate/evolution/README.md#kernel-summary).
-Target and companion domains must be disjoint. Each observed family count must
-equal its declared domain-span total. Full-input target-only and companions-only
-whitelists must both produce the public domain refusal, outside sample timing.
-Other errors stop measurement. Reports retain these refusals, actual counts and
-whitelists. A driving companion labels the latency
-`target_plus_driving_companion`; this is not the target's isolated latency.
-The default route is also timed with its observed family union fixed. This group
-stays outside family dominance. A greater-than-twofold difference is a finding,
-not a routing change.
+A pinned policy may include named companions, such as `t4` for the idle tail.
+The input declares `{family: (logical segment count, cumulative ns)}` for each
+target's complete group. Both quantities must match public `FamilyRouting`
+reports in every sample. A count mismatch or duration mismatch stops measurement.
+The duration comparison allows only floating accumulation noise
+(`rel_tol=1e-12`, `abs_tol=1e-9 ns`).
+Cumulative ns cannot distinguish equal-length spans. It is not per-span
+observation and does not prove disjoint domain ownership.
 
-`--reference-cache <directory>` enables a local disk cache. It is off by default.
-Prepare real-workload references in a nonexclusive run before timing. Add
-`--reference-cache-only` to the exclusive timing command. A missing or changed
-key then stops before measuring that input, without running a solver.
-Cache-only mode requires a cache directory and forbids injected solvers.
-Keys include complete physical input, both solver tolerance levels and the
-convergence contract. Model identity namespaces and routing history are not
-physical inputs. Cache files contain density and convergence error, with no
-pickle objects. Cache I/O or solver failures stop the command. Keep this
-directory outside Git. Reference solve/cache-load wall and CPU totals are
-separate from the Engine timings.
+All timing samples enable routing telemetry. The paired nonexclusive carrier
+comparison found on/off wall ratios 0.984, 1.147 and 1.004 for first, clear and
+retain modes. CPU ratios were 0.983, 1.147 and 1.005. Clear-history differed by
+about 2 ms; this single pair does not isolate instrumentation overhead from
+shared-machine variation. Telemetry remains on for all policies to collect CPU
+and logical work consistently, without adding a third evolve for slow families.
+Reported times are telemetry-enabled group latency; near-10% comparisons need
+caution given that observation.
+
+Each sample preserves `prepare_cpu_s`, `apply_cpu_s` and their sum separately
+for every reported family. These are calling-thread CPU from `FamilyRouting`,
+including preparation for rejected guards. The report shows target and companion
+rows separately. They are not whole-process CPU, may exclude routing/geometry
+overhead, and need not add up to the process CPU timer.
+Pareto dominance continues to use whole-`Engine.evolve` wall and process CPU
+separately. A target plus named companions is one timed group, never isolated
+target performance. Default routing is also compared with its observed family
+union fixed. That extra group stays outside dominance. Differences over 2x are
+findings, not routing changes.
+
+`--reference-cache <directory>` enables a local disk cache, off by default.
+`--prepare-references` with `--manifest`, `--reference-cache` and `--output`
+prepares it without Engine timing or a summary. Run that phase nonexclusive.
+Its report records physical hashes, density shapes, convergence and solve/cache
+load times. Real inputs use the exact interaction-picture oracle; synthetic
+inputs retain the lab-frame oracle. The exclusive timing phase must use
+`--reference-cache-only`; a missing or changed key stops before that input's
+timing and never runs a solver. Cache-only mode requires a cache directory and
+forbids an injected solver.
+
+Cache keys include complete physical input, both tolerance levels and the
+convergence contract. Model identity namespaces and routing history are excluded.
+Files contain density and convergence error without pickle objects.
+Only equal physical hashes permit reuse across builder changes. Keep the cache
+outside Git. Reference solve/cache-load totals remain separate from Engine time.
+
+### Partial attempts and failure handling
+
+Use a new `--partial-output` JSONL path for each timing attempt. Existing journals
+are rejected, and the journal cannot be either complete output path.
+It starts with the run ID, manifest hash, Git state and partial status.
+Each completed sample is appended outside timing, before the next evolve.
+Skipped modes and completed policies are also retained. A later ordinary failure
+adds its original error and returns nonzero without replacing earlier complete
+reports. A timeout can leave the final line incomplete; only prior complete JSON
+lines are usable. No `run_complete` event means the attempt is incomplete, even
+if older matrix/summary files remain.
+
+The bounded carrier run permits one 9000-second exclusive attempt. Stop on
+timeout, preserve its receipt and journal, and do not restart automatically.
+Use the run ID and receipt to distinguish this attempt from older complete files.
 
 ## Markdown reader declarations
 

@@ -379,6 +379,15 @@ class PathDiagnostics:
             else {},
         )
 
+    def _freeze_logical_durations(self) -> None:
+        """Own the immutable duration map and enforce its segment-count alignment."""
+        durations = dict(self.duration_ns_by_kernel)
+        if durations.keys() != self.segments_by_kernel.keys():
+            raise ValueError("duration keys must match segments_by_kernel")
+        if any(not np.isfinite(value) or value < 0 for value in durations.values()):
+            raise ValueError("duration values must be finite and nonnegative")
+        object.__setattr__(self, "duration_ns_by_kernel", MappingProxyType(durations))
+
     def warn_exceeded(self, *, stacklevel: int = 2) -> None:
         """Warn once for all report-only accuracy exceedances, if any.
 
@@ -399,12 +408,7 @@ class PathDiagnostics:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "routing", MappingProxyType(dict(self.routing)))
-        durations = dict(self.duration_ns_by_kernel)
-        if durations.keys() != self.segments_by_kernel.keys():
-            raise ValueError("duration keys must match segments_by_kernel")
-        if any(not np.isfinite(value) or value < 0 for value in durations.values()):
-            raise ValueError("duration values must be finite and nonnegative")
-        object.__setattr__(self, "duration_ns_by_kernel", MappingProxyType(durations))
+        self._freeze_logical_durations()
         members = {key: tuple(values) for key, values in self.point_members.items()}
         if members.keys() != self.points_by_class.keys():
             raise ValueError("point membership keys must match points_by_class")
