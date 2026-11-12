@@ -119,7 +119,7 @@ from typing import Annotated, ClassVar
 
 import numpy as np
 from numpy.typing import NDArray
-from pydantic import StrictInt, model_validator
+from pydantic import Field, StrictInt, model_validator
 from pydantic.dataclasses import dataclass as validated_dataclass
 from zcu_tools.analysis.failure import AnalysisFailed
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
@@ -190,11 +190,11 @@ class MuxT2RamseyCfg(ConfigBase):
 
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
-    ] = 1
+    ] = Field(default=1, gt=0)
     rounds: Annotated[
         int,
         FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
-    ] = 1
+    ] = Field(default=1, gt=0)
     initial_delay: Annotated[
         float,
         FieldMeta(
@@ -202,7 +202,7 @@ class MuxT2RamseyCfg(ConfigBase):
             unit="us",
             description="Delay before the first repetition.",
         ),
-    ] = 1.0
+    ] = Field(default=1.0, ge=0, allow_inf_nan=False)
     relax_delay: Annotated[
         float,
         FieldMeta(
@@ -211,7 +211,7 @@ class MuxT2RamseyCfg(ConfigBase):
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
-    ] = 1.0
+    ] = Field(default=1.0, ge=0, allow_inf_nan=False)
 
     @model_validator(mode="after")
     def validate_scan(self) -> MuxT2RamseyCfg:

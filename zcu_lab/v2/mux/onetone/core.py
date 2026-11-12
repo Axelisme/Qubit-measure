@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import math
 from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
@@ -11,7 +10,7 @@ from typing import Annotated, ClassVar, Literal
 
 import numpy as np
 from numpy.typing import NDArray
-from pydantic import Field, StrictInt, ValidationInfo, field_validator
+from pydantic import Field, StrictInt, field_validator
 from pydantic.dataclasses import dataclass as pydantic_dataclass
 from zcu_tools.analysis.fitting import HangerModel, TransmissionModel
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
@@ -115,13 +114,6 @@ class MuxFrequencyOffsetCfg(ConfigBase):
 
     df: Annotated[SweepCfg, FieldMeta(label="Frequency offset", unit="MHz")]
 
-    @field_validator("df")
-    @classmethod
-    def _validate_finite_df(cls, value: SweepCfg) -> SweepCfg:
-        if not all(math.isfinite(v) for v in (value.start, value.stop, value.step)):
-            raise ValueError("df start, stop and step must be finite MHz values")
-        return value
-
 
 class MuxOnetoneCfg(ConfigBase):
     """Scan every selected readout tone by the same frequency offset.
@@ -160,13 +152,6 @@ class MuxOnetoneCfg(ConfigBase):
     ]
     df: Annotated[SweepCfg, FieldMeta(label="Frequency offset", unit="MHz")]
 
-    @field_validator("df")
-    @classmethod
-    def _validate_finite_df(cls, value: SweepCfg) -> SweepCfg:
-        if not all(math.isfinite(v) for v in (value.start, value.stop, value.step)):
-            raise ValueError("df start, stop and step must be finite MHz values")
-        return value
-
     participants: Annotated[
         list[StrictInt],
         FieldMeta(
@@ -202,21 +187,16 @@ class MuxOnetoneCfg(ConfigBase):
 
     @field_validator("participants")
     @classmethod
-    def validate_participants(cls, value: list[int], info: ValidationInfo) -> list[int]:
-        """Reject empty, duplicate or out-of-range selections; preserve order.
+    def validate_participants(cls, value: list[int]) -> list[int]:
+        """Reject empty, duplicate or negative selections; preserve order.
 
-        Pydantic validates strict integer elements before this check. Range is
-        checked against the full readout when its own validation succeeded.
+        Pydantic validates strict integer elements before this check.
+        Run indexes the complete readout and rejects positive out-of-range values.
         """
         if not value or len(set(value)) != len(value):
             raise ValueError("participants must be nonempty and contain unique indices")
-        readout = info.data.get("readout")
-        if isinstance(readout, MuxReadout.Cfg) and any(
-            index < 0 or index >= len(readout.tones) for index in value
-        ):
-            raise ValueError(
-                "participants indices must be in 0..N-1 of the full readout"
-            )
+        if any(index < 0 for index in value):
+            raise ValueError("participants indices must be nonnegative")
         return value
 
 

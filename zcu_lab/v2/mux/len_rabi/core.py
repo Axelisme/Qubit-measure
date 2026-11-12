@@ -136,7 +136,6 @@ from zcu_lab.v2.support.mux_persistence import mux_sweep_spec
 from zcu_lab.v2.support.mux_sweep_cfg import (
     MuxDriveToneCfg,
     ToneRangeCfg,
-    require_tone_value,
     validate_mux_scan,
 )
 
@@ -186,11 +185,11 @@ class MuxLenRabiCfg(ConfigBase):
 
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
-    ] = 1
+    ] = Field(default=1, gt=0)
     rounds: Annotated[
         int,
         FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
-    ] = 1
+    ] = Field(default=1, gt=0)
     earlystop_snr: Annotated[
         float | None,
         FieldMeta(
@@ -205,7 +204,7 @@ class MuxLenRabiCfg(ConfigBase):
             unit="us",
             description="Delay before the first repetition.",
         ),
-    ] = 1.0
+    ] = Field(default=1.0, ge=0, allow_inf_nan=False)
     relax_delay: Annotated[
         float,
         FieldMeta(
@@ -214,7 +213,7 @@ class MuxLenRabiCfg(ConfigBase):
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
-    ] = 1.0
+    ] = Field(default=1.0, ge=0, allow_inf_nan=False)
 
     @model_validator(mode="after")
     def validate_scan(self) -> MuxLenRabiCfg:
@@ -222,15 +221,12 @@ class MuxLenRabiCfg(ConfigBase):
         validate_mux_scan(self, self.tones, self.participants, self.expts)
         for index in self.participants:
             tone = self.tones[index]
-            require_tone_value(tone.length, ("tones", index, "length"))
             drive = tone.require_drive()
             if drive.waveform.style == "arb":
                 raise ValueError(
                     f"tones[{index}].drive.waveform: arb length is asset-derived "
                     "with no public length sweep"
                 )
-            if min(tone.require_length().start, tone.require_length().stop) <= 0:
-                raise ValueError(f"tones[{index}].length lengths must be positive us")
         return self
 
 

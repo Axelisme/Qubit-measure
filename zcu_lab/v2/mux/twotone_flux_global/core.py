@@ -26,7 +26,6 @@ from zcu_lab.v2.support.mux_flux import MuxFluxResult, mux_flux_spec
 from zcu_lab.v2.support.mux_sweep_cfg import (
     MuxDriveToneCfg,
     ToneRangeCfg,
-    require_tone_value,
     validate_mux_scan,
 )
 
@@ -77,11 +76,11 @@ class TwotoneFluxGlobalCfg(ConfigBase):
 
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
-    ] = 1
+    ] = Field(default=1, gt=0)
     rounds: Annotated[
         int,
         FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
-    ] = 1
+    ] = Field(default=1, gt=0)
     initial_delay: Annotated[
         float,
         FieldMeta(
@@ -89,7 +88,7 @@ class TwotoneFluxGlobalCfg(ConfigBase):
             unit="us",
             description="Delay before the first repetition.",
         ),
-    ] = 1.0
+    ] = Field(default=1.0, ge=0, allow_inf_nan=False)
     relax_delay: Annotated[
         float,
         FieldMeta(
@@ -98,18 +97,12 @@ class TwotoneFluxGlobalCfg(ConfigBase):
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
-    ] = 1.0
+    ] = Field(default=1.0, ge=0, allow_inf_nan=False)
 
     @model_validator(mode="after")
     def validate_scan(self) -> "TwotoneFluxGlobalCfg":
         """Reject invalid participants, active drives, timing or DC coordinates."""
         validate_mux_scan(self, self.tones, self.participants, self.expts)
-        for index in self.participants:
-            require_tone_value(self.tones[index].freq, ("tones", index, "freq"))
-        if not all(
-            np.isfinite(v) for v in (self.flux.start, self.flux.stop, self.flux.step)
-        ):
-            raise ValueError("flux coordinates must be finite")
         return self
 
 

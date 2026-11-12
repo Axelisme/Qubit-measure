@@ -30,7 +30,7 @@ from typing import Annotated, ClassVar
 
 import numpy as np
 from numpy.typing import NDArray
-from pydantic import StrictInt, model_validator
+from pydantic import Field, StrictInt, model_validator
 from qick.asm_v2 import QickParam
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment, RunRecord
@@ -49,7 +49,6 @@ from zcu_tools.program.v2.modules import (
 from zcu_lab.v2.support.mux import MuxFitFailure
 from zcu_lab.v2.support.mux_sweep_cfg import (
     MuxDriveToneCfg,
-    require_tone_value,
     validate_participants,
 )
 
@@ -115,14 +114,14 @@ class MuxGECfg(ConfigBase):
     readout: MuxReadoutCfg
     tones: Annotated[list[MuxGEToneCfg], FieldMeta(element_label="name")]
     participants: list[StrictInt]
-    shots: StrictInt
+    shots: StrictInt = Field(gt=0)
 
     initial_delay: Annotated[
         float,
         FieldMeta(
             label="Initial delay", unit="us", description="Delay before the first shot."
         ),
-    ] = 1.0
+    ] = Field(default=1.0, ge=0, allow_inf_nan=False)
     relax_delay: Annotated[
         float,
         FieldMeta(
@@ -131,27 +130,17 @@ class MuxGECfg(ConfigBase):
             decimals=3,
             description="Delay after each shot.",
         ),
-    ] = 1.0
+    ] = Field(default=1.0, ge=0, allow_inf_nan=False)
 
     @model_validator(mode="after")
     def validate_acquisition(self) -> MuxGECfg:
-        """Reject invalid counts, full-list length or active channel conflicts."""
-        if self.shots <= 0:
-            raise ValueError("shots must be positive")
-        if any(
-            not math.isfinite(v) or v < 0
-            for v in (self.initial_delay, self.relax_delay)
-        ):
-            raise ValueError(
-                "initial_delay and relax_delay must be finite nonnegative us"
-            )
+        """Reject invalid full-list length or active channel conflicts."""
         if len(self.tones) != len(self.readout.tones):
             raise ValueError("tones must match the complete readout tone count")
         validate_participants([tone.name for tone in self.tones], self.participants)
         channels: set[int] = set()
         for index in self.participants:
             tone = self.tones[index]
-            require_tone_value(tone.drive, ("tones", index, "drive"))
             tone.validate_pulses()
             if (
                 tone.require_drive().ch in channels

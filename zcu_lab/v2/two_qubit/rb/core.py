@@ -62,7 +62,7 @@ class RBCfg(ConfigBase):
     phase_pair is required, ordered and component-named. Delays are us, pulse
     frequency MHz and phase degrees. No DC device is driven. reset=None emits
     no reset. F1/F2 need circle classifiers with radius from GE Post before Run.
-    depth counts random Cliffords, not primitive gates; unique increasing
+    depth counts random Cliffords, not primitive gates; nondecreasing
     nonnegative integers. seed contains distinct integer random.Random identities
     shared across depths/arms/rounds. The 31-bit bound preserves exact axes.
     reps is shots per host round; rounds remains a separate saved axis.
@@ -137,11 +137,11 @@ class RBCfg(ConfigBase):
 
     @model_validator(mode="after")
     def validate_sequence_inputs(self) -> Self:
-        """Reject swapped phases, duplicate axes and mismatched role generators."""
+        """Reject swapped phases, unordered depths, repeated seeds or wrong generators."""
         validate_classifiers(self.readout, self.roles)
         self.phase_pair.validate_roles(self.roles)
-        if self.depth != sorted(set(self.depth)):
-            raise ValueError("RB depths must be unique and increasing")
+        if self.depth != sorted(self.depth):
+            raise ValueError("RB depths must be increasing")
         if len(set(self.seed)) != len(self.seed):
             raise ValueError("RB seeds must be distinct complete integer identities")
         for drive, x90 in (

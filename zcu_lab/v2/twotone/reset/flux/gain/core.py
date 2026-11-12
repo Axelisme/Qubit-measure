@@ -123,13 +123,10 @@ class GainExp(Experiment[GainResult, GainCfg]):
         flux pulse, after-reset pi off/on, and the same readout. Both switches
         use pi_pulse unchanged. Keep flux duration and pre/post delays fixed.
         Return rounded gains (a.u.) and IQ shaped (2, 2, N), switches [0, 1].
-        Reject non-const or nonzero-frequency flux pulses before acquisition.
         Live curves show I only, without choosing a population direction.
         """
         cfg = deepcopy(cfg)
         pulse_cfg = cfg.tested_reset.pulse_cfg
-        if pulse_cfg.waveform.style != "const" or pulse_cfg.freq != 0.0:
-            raise ValueError("Flux reset requires a const pulse at zero frequency.")
 
         soc, soccfg = context.soc, context.soccfg
         gains = sweep2array(

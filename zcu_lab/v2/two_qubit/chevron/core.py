@@ -145,23 +145,13 @@ class ChevronCfg(ConfigBase):
 
     @model_validator(mode="after")
     def validate_duration_scan(self) -> Self:
-        """Reject invalid tones, routes, durations and unscalable waveforms."""
+        """Reject invalid tones, routes and nonpositive durations."""
         validate_classifiers(self.readout, self.roles)
         if self.drive.f1.ch != self.x180_f1.ch or self.drive.f2.ch != self.x180_f2.ch:
             raise ValueError("Each drive must use its role's calibrated Xπ generator")
         durations = sweep2array(self.duration)
-        if not np.all(np.isfinite(durations)) or np.any(durations <= 0):
-            raise ValueError("Drive durations must be finite and positive")
-        for pulse in (self.drive.f1, self.drive.f2):
-            probe = pulse.model_copy(deep=True)
-            probe.set_param("length", float(durations[0]))
-        return self
-
-    @model_validator(mode="after")
-    def validate_coordinate(self) -> Self:
-        """Require finite requested frequency coordinates."""
-        if not np.all(np.isfinite(sweep2array(self.frequency))):
-            raise ValueError("Common drive frequency coordinates must be finite")
+        if np.any(durations <= 0):
+            raise ValueError("Drive durations must be positive")
         return self
 
 

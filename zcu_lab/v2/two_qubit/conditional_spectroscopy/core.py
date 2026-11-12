@@ -119,13 +119,8 @@ class SpectroscopyCfg(ConfigBase):
         validate_classifiers(self.readout, self.roles)
         if self.drive.f1.ch != self.x180_f1.ch or self.drive.f2.ch != self.x180_f2.ch:
             raise ValueError("Each probe must use its role's calibrated Xπ generator")
-        if not np.all(np.isfinite(sweep2array(self.frequency))):
-            raise ValueError("Probe frequencies must be finite")
-        if self.dc_device is not None:
-            if not self.dc_device.strip():
-                raise ValueError("DC source must name a connected device or be None")
-            if not np.all(np.isfinite(sweep2array(self.dc))):
-                raise ValueError("DC source coordinates must be finite")
+        if self.dc_device is not None and not self.dc_device.strip():
+            raise ValueError("DC source must name a connected device or be None")
         return self
 
 

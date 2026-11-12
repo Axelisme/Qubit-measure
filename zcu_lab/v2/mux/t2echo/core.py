@@ -62,7 +62,6 @@ from zcu_lab.v2.support.mux_coherence_analysis import (
     project_coherence_trace,
 )
 from zcu_lab.v2.support.mux_coherence_persistence import coherence_spec
-from zcu_lab.v2.support.mux_sweep_cfg import require_tone_value
 
 
 @validated_dataclass(frozen=True)
@@ -115,11 +114,11 @@ class MuxT2EchoCfg(ConfigBase):
 
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
-    ] = 1
+    ] = Field(default=1, gt=0)
     rounds: Annotated[
         int,
         FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
-    ] = 1
+    ] = Field(default=1, gt=0)
     earlystop_snr: Annotated[
         float | None,
         FieldMeta(
@@ -134,7 +133,7 @@ class MuxT2EchoCfg(ConfigBase):
             unit="us",
             description="Delay before the first repetition.",
         ),
-    ] = 1.0
+    ] = Field(default=1.0, ge=0, allow_inf_nan=False)
     relax_delay: Annotated[
         float,
         FieldMeta(
@@ -143,14 +142,12 @@ class MuxT2EchoCfg(ConfigBase):
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
-    ] = 1.0
+    ] = Field(default=1.0, ge=0, allow_inf_nan=False)
 
     @model_validator(mode="after")
     def validate_scan(self) -> MuxT2EchoCfg:
         """Reject missing active pulses, swept values, shared channels or bad delays."""
         validate_coherence_scan(self, self.tones, self.delay, self.participants)
-        for index in self.participants:
-            require_tone_value(self.tones[index].pi_pulse, ("tones", index, "pi_pulse"))
         validate_coherence_scan(
             self,
             [

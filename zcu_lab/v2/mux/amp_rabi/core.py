@@ -105,7 +105,6 @@ from zcu_lab.v2.support.mux_persistence import mux_sweep_spec
 from zcu_lab.v2.support.mux_sweep_cfg import (
     MuxDriveToneCfg,
     ToneRangeCfg,
-    require_tone_value,
     validate_mux_scan,
 )
 
@@ -167,11 +166,11 @@ class MuxAmpRabiCfg(ConfigBase):
 
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
-    ] = 1
+    ] = Field(default=1, gt=0)
     rounds: Annotated[
         int,
         FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
-    ] = 1
+    ] = Field(default=1, gt=0)
     initial_delay: Annotated[
         float,
         FieldMeta(
@@ -179,7 +178,7 @@ class MuxAmpRabiCfg(ConfigBase):
             unit="us",
             description="Delay before the first repetition.",
         ),
-    ] = 1.0
+    ] = Field(default=1.0, ge=0, allow_inf_nan=False)
     relax_delay: Annotated[
         float,
         FieldMeta(
@@ -188,7 +187,7 @@ class MuxAmpRabiCfg(ConfigBase):
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
-    ] = 1.0
+    ] = Field(default=1.0, ge=0, allow_inf_nan=False)
 
     @model_validator(mode="after")
     def validate_scan(self) -> MuxAmpRabiCfg:
@@ -196,7 +195,6 @@ class MuxAmpRabiCfg(ConfigBase):
         validate_mux_scan(self, self.tones, self.participants, self.expts)
         for index in self.participants:
             tone = self.tones[index]
-            require_tone_value(tone.gain, ("tones", index, "gain"))
             if max(abs(tone.require_gain().start), abs(tone.require_gain().stop)) > 1:
                 raise ValueError(f"tones[{index}].gain gains must be in [-1,1]")
         return self

@@ -168,13 +168,10 @@ class IdleZZCfg(ConfigBase):
             raise ValueError("Each role's Xπ and Xπ/2 must use the same generator")
         validate_classifiers(m.readout, self.roles)
         delays = sweep2array(self.delay)
-        if not np.all(np.isfinite(delays)) or np.any(delays < 0):
-            raise ValueError("Ramsey delay must be finite and nonnegative")
-        if self.dc_device is not None:
-            if not self.dc_device.strip():
-                raise ValueError("DC source must name a connected device or be None")
-            if not np.all(np.isfinite(sweep2array(self.dc))):
-                raise ValueError("DC source coordinates must be finite")
+        if np.any(delays < 0):
+            raise ValueError("Ramsey delay must be nonnegative")
+        if self.dc_device is not None and not self.dc_device.strip():
+            raise ValueError("DC source must name a connected device or be None")
         return self
 
 

@@ -136,14 +136,9 @@ class CZAmplitudeCfg(ConfigBase):
         if self.drive.f1.ch != self.x180_f1.ch or self.drive.f2.ch != self.x180_f2.ch:
             raise ValueError("Each CZ line must use its role's calibrated Xπ generator")
         scales = sweep2array(self.scale)
-        if (
-            len(scales) < 2
-            or not np.all(np.isfinite(scales))
-            or np.any(scales < 0)
-            or np.any(np.diff(scales) <= 0)
-        ):
+        if len(scales) < 2 or np.any(scales < 0) or np.any(np.diff(scales) <= 0):
             raise ValueError(
-                "Common gain scales must be finite, nonnegative and strictly increasing"
+                "Common gain scales must be nonnegative and strictly increasing"
             )
         return self
 

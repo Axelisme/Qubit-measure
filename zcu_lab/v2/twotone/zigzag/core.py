@@ -83,7 +83,7 @@ class ZigZagExp(Experiment[ZigZagResult, ZigZagCfg]):
         Reset, apply X90, repeat the selected gate, then read out mean complex IQ.
         Return integer counts from zero through n_times and the corresponding IQ;
         each count adds two X90 pulses or one X180 pulse.
-        The selected repeat pulse must exist.
+        A None repeat pulse leaves only the initial X90 and readout.
         Cancelled acquisition preserves completed-round averages or NaN if empty.
         """
         # 1. Prepare the count axis and live view without changing the caller's cfg.
@@ -109,8 +109,6 @@ class ZigZagExp(Experiment[ZigZagResult, ZigZagCfg]):
         )
         with Schedule(signals_buffer, scope=context.scope) as sched:
             repeat_pulse = getattr(cfg, cfg.repeat_on)
-            if repeat_pulse is None:
-                raise ValueError(f"Repeat on pulse {cfg.repeat_on} not found")
             counts = [
                 n * (2 if cfg.repeat_on == "X90_pulse" else 1)
                 for n in range(cfg.n_times + 1)

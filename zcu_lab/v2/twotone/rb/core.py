@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Annotated, ClassVar, Self
+from typing import Annotated, ClassVar
 
 import numpy as np
 from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
-from pydantic import Field, model_validator
+from pydantic import Field
 from zcu_tools.analysis.fitting import fit_decay
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment, config
@@ -58,7 +58,7 @@ class RBCfg(ConfigBase):
         list[Annotated[int, Field(ge=0, strict=True)]],
         FieldMeta(label="Clifford depths"),
     ] = Field(min_length=1)
-    """Ordered nonempty, unique nonnegative integer Clifford depths."""
+    """Ordered nonempty nonnegative integer Clifford depths."""
     seed: Annotated[int, FieldMeta(label="Random seed")]
     n_seeds: Annotated[int, FieldMeta(label="Number of sequences")]
 
@@ -78,13 +78,6 @@ class RBCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-
-    @model_validator(mode="after")
-    def validate_depths(self) -> Self:
-        """Reject repeated depths before building any sequence or doing device I/O."""
-        if len(set(self.depth)) != len(self.depth):
-            raise ValueError("RB requires unique nonnegative integer depths")
-        return self
 
 
 @dataclass(frozen=True)

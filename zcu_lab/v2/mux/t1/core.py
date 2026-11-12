@@ -196,11 +196,11 @@ class MuxT1Cfg(ConfigBase):
 
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
-    ] = 1
+    ] = Field(default=1, gt=0)
     rounds: Annotated[
         int,
         FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
-    ] = 1
+    ] = Field(default=1, gt=0)
     earlystop_snr: Annotated[
         float | None,
         FieldMeta(
@@ -215,7 +215,7 @@ class MuxT1Cfg(ConfigBase):
             unit="us",
             description="Delay before the first repetition.",
         ),
-    ] = 1.0
+    ] = Field(default=1.0, ge=0, allow_inf_nan=False)
     relax_delay: Annotated[
         float,
         FieldMeta(
@@ -224,21 +224,15 @@ class MuxT1Cfg(ConfigBase):
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
-    ] = 1.0
+    ] = Field(default=1.0, ge=0, allow_inf_nan=False)
 
     @model_validator(mode="after")
     def validate_scan(self) -> Self:
         """Reject invalid counts, channels and requested delay coordinates."""
         validate_mux_tones(self, self.tones, self.participants)
         times = sweep2array(self.delay, "none")
-        if (
-            times.ndim != 1
-            or not times.size
-            or not np.all(np.isfinite(times))
-            or np.any(times < 0)
-            or np.any(np.diff(times) <= 0)
-        ):
-            raise ValueError("delays must be nonempty finite nonnegative increasing us")
+        if np.any(times < 0) or np.any(np.diff(times) <= 0):
+            raise ValueError("delays must be nonnegative increasing us")
         return self
 
 

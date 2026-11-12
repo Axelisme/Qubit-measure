@@ -45,7 +45,6 @@ from .analysis import (
     count_quadratures,
     fit_phase_slopes,
     fitted_crossings,
-    gate_count_alias_reason,
     phase_points,
 )
 
@@ -158,15 +157,10 @@ class ConditionalPhaseCfg(ConfigBase):
             if not isinstance(x90.phase, (int, float)) or not np.isfinite(x90.phase):
                 raise ValueError("X90 phase must be a finite scalar")
         frequency = sweep2array(self.frequency)
-        if not np.all(np.isfinite(frequency)) or np.any(np.diff(frequency) <= 0):
-            raise ValueError(
-                "Common frequency coordinates must be finite and strictly increasing"
-            )
+        if np.any(np.diff(frequency) <= 0):
+            raise ValueError("Common frequency coordinates must be strictly increasing")
         if len(set(self.gate_count)) != len(self.gate_count):
             raise ValueError("Gate counts must be unique")
-        reason = gate_count_alias_reason(np.array(self.gate_count, dtype=np.int64))
-        if reason is not None:
-            raise ValueError(reason)
         return self
 
 

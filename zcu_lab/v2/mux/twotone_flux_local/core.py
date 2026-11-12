@@ -33,7 +33,6 @@ from zcu_lab.v2.support.mux_flux import MuxFluxResult, mux_flux_spec
 from zcu_lab.v2.support.mux_sweep_cfg import (
     MuxDriveToneCfg,
     ToneRangeCfg,
-    require_tone_value,
     validate_mux_scan,
 )
 
@@ -96,11 +95,11 @@ class TwotoneFluxLocalCfg(ConfigBase):
 
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
-    ] = 1
+    ] = Field(default=1, gt=0)
     rounds: Annotated[
         int,
         FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
-    ] = 1
+    ] = Field(default=1, gt=0)
     initial_delay: Annotated[
         float,
         FieldMeta(
@@ -108,7 +107,7 @@ class TwotoneFluxLocalCfg(ConfigBase):
             unit="us",
             description="Delay before the first repetition.",
         ),
-    ] = 1.0
+    ] = Field(default=1.0, ge=0, allow_inf_nan=False)
     relax_delay: Annotated[
         float,
         FieldMeta(
@@ -117,7 +116,7 @@ class TwotoneFluxLocalCfg(ConfigBase):
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
-    ] = 1.0
+    ] = Field(default=1.0, ge=0, allow_inf_nan=False)
 
     @model_validator(mode="after")
     def validate_scan(self) -> TwotoneFluxLocalCfg:
@@ -126,13 +125,6 @@ class TwotoneFluxLocalCfg(ConfigBase):
         devices = [self.tones[index].flux_dev for index in self.participants]
         if len(set(devices)) != len(devices):
             raise ValueError("local flux lines must use distinct devices")
-        for index in self.participants:
-            tone = self.tones[index]
-            require_tone_value(tone.freq, ("tones", index, "freq"))
-            require_tone_value(tone.flux, ("tones", index, "flux"))
-            make_sweep(
-                tone.require_flux().start, tone.require_flux().stop, self.flux_expts
-            )
         return self
 
 

@@ -14,7 +14,6 @@ from zcu_tools.cfg_model import ConfigBase, DeviceName, FieldMeta
 from zcu_tools.experiment import Experiment
 from zcu_tools.experiment.axes_spec import GroupedAxesSpec
 from zcu_tools.experiment.context import RunContext
-from zcu_tools.experiment.utils.sweep import make_sweep
 from zcu_tools.experiment.v2.runtime import RunOptions, Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
@@ -27,7 +26,6 @@ from zcu_lab.v2.support.mux import averaged_mux_signal
 from zcu_lab.v2.support.mux_flux import MuxFluxResult, mux_flux_spec
 from zcu_lab.v2.support.mux_sweep_cfg import (
     ToneRangeCfg,
-    require_tone_value,
     validate_participants,
 )
 
@@ -95,8 +93,8 @@ class OnetoneFluxLocalCfg(ConfigBase):
     def validate_lines(self) -> Self:
         """Require full unique identities and distinct valid selected DC ranges.
 
-        Missing active bounds, duplicate devices, invalid indices or ranges
-        raise validation errors before acquisition. Inactive ranges stay optional.
+        Duplicate devices and invalid identities raise before acquisition.
+        Selected bounds are consumed by run; inactive ranges stay optional.
         """
         names = [tone.name for tone in self.tones]
         if len(names) != len(self.readout.tones) or len(set(names)) != len(names):
@@ -107,11 +105,6 @@ class OnetoneFluxLocalCfg(ConfigBase):
         devices = [self.tones[index].flux_dev for index in self.participants]
         if len(set(devices)) != len(devices):
             raise ValueError("local flux lines must use distinct devices")
-        for index in self.participants:
-            tone = self.tones[index]
-            require_tone_value(tone.flux, ("tones", index, "flux"))
-            bounds = tone.require_flux()
-            make_sweep(bounds.start, bounds.stop, self.flux_expts)
         return self
 
 

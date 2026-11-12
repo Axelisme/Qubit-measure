@@ -255,10 +255,6 @@ def _prepare_delays(
     """Round each count's total-time grid and reject intervals too short for pulses."""
     pi2_pulse, pi_pulse = cfg.pi2_pulse, cfg.pi_pulse
     windows = [cfg.delay] * len(times) if isinstance(cfg.delay, SweepCfg) else cfg.delay
-    if len(windows) != len(times):
-        raise ValueError("Provide one delay window or one per pi-pulse count")
-    if len({window.expts for window in windows}) != 1:
-        raise ValueError("All delay windows must have the same number of points")
     lengths = np.array(
         [
             sweep2array(window, "time", {"soccfg": soccfg, "scaler": 1 / (2 * count)})

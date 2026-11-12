@@ -115,23 +115,19 @@ def scan_points(
     """Return flat carrier MHz, DAC gains and envelope intensity integral in us.
 
     Points are detuning-major and gain-minor. Quantize scalar carriers/gains
-    independently using the selected generator and mixer. Reject a non-arbitrary
-    or zero-intensity envelope, and negative area-scan gains, before acquisition.
+    independently using the selected generator and mixer. Require an arbitrary
+    sampled envelope; signed gains and zero integrated intensity are accepted.
     The integral describes source samples, not a calibrated rotation angle.
     """
     if not isinstance(cfg.drive.waveform, ArbWaveformCfg):
         raise ValueError(
             "Raman drive requires a sampled arbitrary sqrt(cos)-type envelope"
         )
-    if min(cfg.gain.start, cfg.gain.stop) < 0:
-        raise ValueError("Raman area scan requires nonnegative drive gains")
     samples = decode_npz(Path(cfg.drive.waveform.path).read_bytes()).samples
     intensity = samples.idata**2
     if samples.qdata is not None:
         intensity = intensity + samples.qdata**2
     integral = float(np.trapezoid(intensity, samples.time))
-    if integral <= 0:
-        raise ValueError("Raman envelope must have nonzero integrated intensity")
     detunings = np.linspace(cfg.detuning.start, cfg.detuning.stop, cfg.detuning.expts)
     gains = np.linspace(cfg.gain.start, cfg.gain.stop, cfg.gain.expts)
     if cfg.scan_mode == "area":
@@ -204,8 +200,8 @@ class RamanGFExp(Experiment[RamanGFResult, RamanGFCfg]):
         Positive two-photon detuning raises the carrier by detuning/2 MHz.
         Each point starts after relaxation; there is no Lambda pair or reset.
         Classify cfg.shots repetitions in one round into g/e/f counts per point.
-        Require a centroid3 readout, arbitrary sampled envelope and nonnegative
-        gains before acquisition. Unfinished points retain NaN counts.
+        Require a centroid3 readout and arbitrary sampled envelope before
+        acquisition. Unfinished points retain NaN counts.
         Returned areas use the source samples' intensity integral; QICK timing
         interpolation/quantization is not an experimental rotation calibration.
         """
