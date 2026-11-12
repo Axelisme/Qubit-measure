@@ -2,7 +2,7 @@
 
 **讀者：** lab-author、agent。查找 recipe 宣告、操作順序與作者契約。
 
-**Last updated:** 2026-11-11，STIRAP 三種獨立掃描
+**Last updated:** 2026-11-12，Raman 以 drive gain 作掃描軸
 
 Recipe 是操作 GUI tab 的 async 函式。Core 擁有 cfg、量測與分析計算，Adapter 接上表單、RunRecord 與分析來源。
 Recipe 選來源、設參數，再決定 Run、Analyze 與 writeback 問答的順序。
@@ -187,7 +187,7 @@ QND 軸固定 0..1，但回報不裁切。Score 軸只按 score 值決定，不�
 | `stirap_amplitude` | `twotone/stirap/amplitude` | `pump_start/pump_stop/pump_n` 與 `stokes_start/stokes_stop/stokes_n` 指定兩條獨立 gain 軸，兩組 `n → expts`。支援 signed gain 與零值，超出 [-1, 1] 在 Run 編譯時報錯。同一 program 用兩個硬體 sweep 取得二維 g/e/f counts。Pump/Stokes 各選 gauss、cosine、drag 或 arb，`pump_waveform_ref/stokes_waveform_ref` 選 library key 或 inline Form 選項，overrides 設波形參數。載波用 MHz，固定 `stokes_lead_us` 正值表示 Stokes 先。Run、Analyze、Save，不提出 writeback。 |
 | `stirap_delay` | `twotone/stirap/delay` | `start_us/stop_us/n` 掃描 Stokes lead，正值 Stokes 先、負值 Pump 先。兩條各自選 gauss、cosine、drag 或 arb 與各自時長。必填量得的 `pump_freq_mhz/stokes_freq_mhz` 與 signed gains。完整 Run、Analyze、Save，分析只用保存的 centroid3，不提出 writeback。 |
 | `stirap_detuning` | `twotone/stirap/detuning` | Pump 與 Stokes 各自選 gauss、cosine、drag 或 arb。`pump_start_mhz/pump_stop_mhz/pump_n` 掃內層 Pump，`stokes_start_mhz/stokes_stop_mhz/stokes_n` 掃外層 Stokes。兩軸都是加到量得載波的 MHz offset。`pump_waveform_ref/stokes_waveform_ref` 選 library key 或 `Inline: cosine` 等 Form 選項，overrides 設所選波形參數。完整 Run、Analyze、Save，不提出 writeback。 |
-| `raman_gf` | `twotone/raman_gf` | `carrier_mhz` 由操作者提供，`waveform_asset` 指定已建立的 arbitrary envelope。`scan_mode` 沿用 frequency、area、frequency_area；detuning 使用 two-photon MHz，正值使單 carrier 增加一半 detuning。分析只用 Run 保存的 centroid3 readout，完整 Run、Analyze、Save，不提出 writeback。 |
+| `raman_gf` | `twotone/raman_gf` | `carrier_mhz` 由操作者提供；drive 接受任何受支援波形，`waveform_asset` 可指定已建立的 arbitrary envelope（sqrt(sin) 形狀需 arb）。`scan_mode` 使用 frequency、gain、frequency_gain；detuning 使用 two-photon MHz，正值使單 carrier 增加一半 detuning，gain 直接使用 DAC full-scale fraction（a.u.）。分析只用 Run 保存的 centroid3 readout，完整 Run、Analyze、Save，不提出 writeback。 |
 | `ro_optimize_chain_power` | `twotone/ro_optimize/chain_power` | 可省略 `gain_start`／`gain_stop`（a.u.）、`points`、`relax_delay`（us）、`reps`、`rounds`。每 shot 等待 K 後連讀 16 次，無 drive。回報最佳 `gain`、`score`、`score_error`、`qnd`、`qnd_error`、`correlation`、`amplification`、`mist`（M 診斷）。完整 Run、Analyze、Save，不提出 writeback。 |
 | `ro_optimize_chain_freq` | `twotone/ro_optimize/chain_freq` | 同上，掃描端點為 `freq_start_mhz`／`freq_stop_mhz`（MHz），回報 `freq_mhz`。 |
 | `ro_optimize_chain_length` | `twotone/ro_optimize/chain_length` | 同上，掃描端點為 ADC window 的 `length_start_us`／`length_stop_us`（us），每個 window 的 pulse 為該 window 加 0.11 us，回報 `length_us`。 |
