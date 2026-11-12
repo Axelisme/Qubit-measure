@@ -37,14 +37,23 @@ def seed_statistics(
     finite-shot variance floor 1/(4*N**2) keeps all-success/all-failure points
     usable without assigning zero error. Counts affect errors, never seed means.
     Arrays are float64 probabilities/counts, shape (depth,seed,2,round).
+    A non-two-arm survival or mismatched totals shape raises ValueError.
     A round/seed contributes only when both arms at every depth are finite.
     Unavailable seeds remain NaN in the seed arrays. At least two complete
     seeds are required; otherwise raise ValueError. totals must match survival
-    and be positive for contributing entries. Inputs are not modified.
+    and be finite and positive for contributing entries, or raise ValueError.
+    Totals in unavailable paired rounds are ignored. Inputs are not modified.
     """
+    if survival.shape[2] != 2 or totals.shape != survival.shape:
+        raise ValueError(
+            f"Expected survival shape (depth,seed,2,round) and matching totals; "
+            f"got survival shape {survival.shape}, totals shape {totals.shape}"
+        )
     complete = np.asarray(np.isfinite(survival).all(axis=(0, 2)), dtype=np.bool_)
     nrounds = complete.sum(axis=1)
     valid = complete[None, :, None, :]
+    if np.any(valid & (~np.isfinite(totals) | (totals <= 0))):
+        raise ValueError("Contributing totals must be finite and strictly positive")
     means = np.full(survival.shape[:-1], np.nan)
     variances = np.full_like(means, np.nan)
     variance = np.full_like(survival, np.nan)
@@ -124,8 +133,14 @@ def fit_joint_decay(
     Groups have independent A/B and share p by arm in A*p**depth+B; callers
     supply equal-seed means. Inputs are not modified.
     Measurable contrast in each arm, valid decaying minima and finite covariance
-    are required; otherwise raise ValueError. Shared-fit errors propagate.
+    are required; otherwise raise ValueError. Non-two-group/two-arm means or
+    mismatched errors shape raise ValueError. Shared-fit errors propagate.
     """
+    if means.shape[:2] != (2, 2) or errors.shape != means.shape:
+        raise ValueError(
+            f"Expected means shape (2,2,depth) and matching errors; "
+            f"got means shape {means.shape}, errors shape {errors.shape}"
+        )
     parameters = []
     traces = []
     xs = depths.astype(np.float64)

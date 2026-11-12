@@ -29,6 +29,38 @@ def test_paired_round_statistics_keep_equal_seed_weights_and_binomial_floor() ->
     np.testing.assert_allclose(statistics.errors, np.sqrt(0.01953125) / 2)
 
 
+@pytest.mark.parametrize("total", [0.0, -1.0, np.nan, np.inf, -np.inf])
+def test_statistics_reject_invalid_contributing_totals_but_ignore_masked_totals(
+    total: float,
+) -> None:
+    survival = np.full((2, 3, 2, 2), 0.5)
+    totals = np.full_like(survival, 100.0)
+    totals[0, 0, 0, 0] = total
+    with pytest.raises(ValueError, match="totals"):
+        owner.seed_statistics(survival, totals)
+
+    # One absent observation excludes its entire paired round, not just itself.
+    survival[1, 0, 1, 0] = np.nan
+    survival[:, 2] = np.nan
+    totals[:, 2] = total
+    result = owner.seed_statistics(survival, totals)
+    np.testing.assert_array_equal(result.means, np.full((2, 2), 0.5))
+    np.testing.assert_allclose(result.errors, np.sqrt(0.00375) / 2)
+    assert np.isnan(result.seed_means[2]).all()
+
+
+@pytest.mark.parametrize("case", ["extra-arm", "broadcast-totals"])
+def test_statistics_reject_shapes_that_would_silently_change_statistics(
+    case: str,
+) -> None:
+    survival = np.full((2, 2, 3 if case == "extra-arm" else 2, 2), 0.5)
+    totals = np.full_like(survival, 100.0)
+    if case == "broadcast-totals":
+        totals = totals[..., :1]
+    with pytest.raises(ValueError, match="shape"):
+        owner.seed_statistics(survival, totals)
+
+
 def test_repeated_seed_draws_retain_multiplicity_without_shot_weighting() -> None:
     survival = np.broadcast_to(
         np.array([0.2, 0.4, 0.8])[None, :, None, None], (2, 3, 2, 1)
@@ -40,6 +72,28 @@ def test_repeated_seed_draws_retain_multiplicity_without_shot_weighting() -> Non
     np.testing.assert_allclose(result.errors, np.sqrt(0.048) / 3)
     with pytest.raises(ValueError, match="at least two seeds"):
         owner.seed_statistics(survival[:, :1], totals[:, :1])
+
+
+@pytest.mark.parametrize("case", ["extra-group", "extra-arm", "extra-error-group"])
+def test_shared_decay_rejects_shapes_that_would_leave_data_unused(case: str) -> None:
+    depths = np.array([1, 4, 9, 16, 25, 40, 60, 80], dtype=np.int64)
+    means = np.array(
+        [
+            [0.4 * 0.98**depths + 0.3, 0.35 * 0.96**depths + 0.2],
+            [0.25 * 0.98**depths + 0.2, 0.3 * 0.96**depths + 0.35],
+        ]
+    )
+    errors = np.full_like(means, 0.01)
+    if case == "extra-group":
+        means = np.concatenate([means, means[:1]])
+        errors = np.concatenate([errors, errors[:1]])
+    elif case == "extra-arm":
+        means = np.concatenate([means, means[:, :1]], axis=1)
+        errors = np.concatenate([errors, errors[:, :1]], axis=1)
+    else:
+        errors = np.concatenate([errors, errors[:1]])
+    with pytest.raises(ValueError, match="shape"):
+        owner.fit_joint_decay(depths, means, errors)
 
 
 def test_shared_decay_recovers_both_arm_rates_and_full_covariance() -> None:
