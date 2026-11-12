@@ -1,3 +1,4 @@
+from .allxy import AllXYFitResult, fit_allxy_errors, predict_state_with_error
 from .anticross import fit_anticross, fit_anticross2d
 from .base import (
     assign_init_p,
@@ -27,6 +28,13 @@ from .decay import (
     fit_ge_decay,
 )
 from .gaussian_fringe import fit_gauss_decay_fringe
+from .irb import (
+    IRBAnalysis,
+    IRBFitResult,
+    IRBProjection,
+    analyze_irb,
+    project_arm_means,
+)
 from .multi_decay import fit_transition_rates
 from .peaks import PeakCandidate, detect_peaks
 from .phase_line import PhaseLineFit, fit_phase_line
@@ -35,6 +43,7 @@ from .phase_slopes import PhaseSlopeFit, fit_phase_slopes
 from .quality import FitQuality, QualityIssue, compute_fit_quality, decay_time_bounds
 from .qubfreq import fit_qubit_freq
 from .rabi import fit_rabi
+from .rb import RBJointDecayFit, RBSeedStatistics, fit_joint_decay, seed_statistics
 from .resonance import HangerModel, TransmissionModel, get_proper_model
 from .results import (
     DecayFit,

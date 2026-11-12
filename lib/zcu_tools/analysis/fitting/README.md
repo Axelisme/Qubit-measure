@@ -1,6 +1,6 @@
 # zcu_tools.analysis.fitting
 
-**Last updated:** 2026-11-12
+**Last updated:** 2026-11-12，Phase regressions、ALLXY coherent errors 與 paired RB
 
 **讀者：** lab-author。擬合模型、數值輸入、結果與失敗契約速查。
 
@@ -27,6 +27,45 @@ covariance without residual scaling. Adjacent half turns are ambiguous.
 All three APIs use degrees; each result documents its axes, units and failure
 fields. Callers retain count reduction, slice selection, completeness policy,
 calibration correction signs and plots. No numerical fitter imports lab types.
+
+## Paired randomized benchmarking
+
+`irb.analyze_irb` 接受 depths 與 `(round,seed,2,depth)` IQ，保留完整成對 round，
+先平均每個 seed 的 rounds，再以相同權重平均 seeds。它回傳 `IRBFitResult` 的共同投影、
+兩條 decay 曲線與 d=2 ratio／95% seed-bootstrap 摘要。固定 bootstrap seed 可重現抽樣，
+負 error 與超出 [0,1] 的 fidelity／CI 原樣保留。主入口至少需要四個不同 depth、兩個
+成對 seed 與 100 次 bootstrap；少於 90% 成功 draws 時 raise `AnalysisFailed`。
+`irb.project_arm_means` 另回傳 `IRBProjection`，讓即時圖在資料未完整時使用同一個
+IQ 軸與 reference 下降方向，不呼叫主 fitter 或 bootstrap。
+
+`rb.seed_statistics` 接受 `(depth,seed,2,round)` survival／totals，回傳
+`RBSeedStatistics` 的 seed means／variances 與 equal-seed means／errors。
+它只使用兩 arm 全 depth 完整的 rounds，保留 binomial variance floor，且至少需要兩個
+完整 seeds。`rb.fit_joint_decay` 接受 depths 與 `(2,2,depth)` means／errors，回傳
+`RBJointDecayFit` 的 global `SharedFitResult` 與曲線。第一軸是兩組資料，各 arm 共用 decay，
+各 group 保留自己的 amplitude／offset；covariance 依 reduced chi-square scaling。
+Lab 解讀 herald 與 d=4，不將這些政策交給 fitter。六組數值工具的 owner 邊界見
+[ADR-0085](../../../../docs/adr/0085-numerical-fitting-owners.md)。
+
+## ALLXY coherent errors
+
+`allxy.predict_state_with_error(gates, power_err, detune_err)` predicts scalar
+Bloch-z for a supported ordered gate pair from the Reed low-order table.
+`power_err` is the pi/2 angle error in radians, not fractional power.
+`allxy.fit_allxy_errors(sequence, real_signals, *, fit_ge)` fits caller-provided
+real signals and returns `AllXYFitResult`. It owns the signal-domain curve,
+center/contrast, amplitude/detuning parameters and separated Bloch-z deviations.
+The result centralizes nonlinear fitting and error decomposition; callers do not
+rebuild the model to plot or summarize a fit. Sequence selection, IQ rotation,
+figures and persisted summaries stay with the experiment.
+
+`fit_ge=False` fixes center and signed contrast to measured extrema estimates.
+`True` also fits those levels within the original measured-range bounds.
+Nonzero coherent errors can shrink measured contrast, so both branches can be
+biased even for noiseless signals. The fitter preserves this bound rather than
+claiming unbiased parameter recovery. Numerical failures propagate without a
+fallback. Supported pairs, array axes, units and failure details are documented
+on the two functions and result type in [allxy.py](allxy.py).
 
 ## Peak candidates
 

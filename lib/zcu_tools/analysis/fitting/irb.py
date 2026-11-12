@@ -4,8 +4,10 @@ from dataclasses import dataclass
 
 import numpy as np
 from numpy.typing import NDArray
+
 from zcu_tools.analysis.failure import AnalysisFailed
-from zcu_tools.analysis.fitting import fit_decay
+
+from .decay import fit_decay
 
 
 @dataclass(frozen=True)
@@ -23,8 +25,9 @@ class IRBAnalysis:
     gate_fidelity: float
     """One minus gate_error, not clipped to [0, 1]."""
     fidelity_ci_low: float
+    """Lower 2.5th percentile of unitless fidelity; not clipped to [0, 1]."""
     fidelity_ci_high: float
-    """95% paired seed-bootstrap percentile interval; statistical uncertainty only."""
+    """Upper 97.5th percentile of fidelity; statistical uncertainty only."""
     n_paired_seeds: int
     """Number of seeds with at least one complete round in both arms."""
     n_paired_rounds: int
@@ -37,21 +40,38 @@ class IRBAnalysis:
 
 @dataclass(frozen=True)
 class IRBFitResult:
-    """Complete local fit for plotting, with a fixed-size published summary."""
+    """Common IQ projection, two fitted decays and fixed-size d=2 summary."""
 
     summary: IRBAnalysis
+    """Unitless d=2 decay-ratio estimates and paired-seed bootstrap interval."""
     mean_signals: NDArray[np.float64]
-    """Projected paired means, shape (2, depth)."""
+    """Float64 (2,depth) in ADC units; arms reference/interleaved."""
     fit_signals: NDArray[np.float64]
-    """Fitted A*p**depth+B curves, shape (2, depth)."""
+    """A*p**depth+B in ADC units, float64 (2,depth), reference/interleaved."""
 
 
-def project_arm_means(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
-    """Project (round, seed, arm, depth) IQ onto one common PCA readout axis.
+@dataclass(frozen=True)
+class IRBProjection:
+    """Available-sample means projected onto a common oriented IQ direction."""
 
-    Available samples contribute to live means; absent points remain NaN.
-    Analysis separately selects complete pairs before calling this helper.
+    mean_signals: NDArray[np.float64]
+    """Float64 (2,depth) in input ADC units; NaN where no sample is available."""
+
+
+def project_arm_means(signals: NDArray[np.complex128]) -> IRBProjection:
+    """Average IQ over round/seed, then project both arms onto one PCA axis.
+
+    signals is complex128 (round,seed,2,depth), arms reference/interleaved,
+    in ADC units. Finite samples contribute independently to live means; missing
+    slots remain NaN. With fewer than two available means return their real
+    parts. Otherwise orient the PCA axis so reference first-to-last decreases
+    when that difference is finite. Do not center the returned projection.
+    Analysis must select complete paired curves before calling this function;
+    live callers may pass partial data. Inputs are not modified. Shape errors
+    raise ValueError and SVD failures propagate as numpy.linalg.LinAlgError.
     """
+    if signals.ndim != 4 or signals.shape[2] != 2:
+        raise ValueError("Expected IQ shape (round, seed, 2, depth)")
     finite = np.isfinite(signals)
     counts = finite.sum(axis=(0, 1))
     mean = np.full(signals.shape[2:], np.nan, dtype=np.complex128)
@@ -63,7 +83,7 @@ def project_arm_means(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     )
     available = mean[np.isfinite(mean)]
     if available.size < 2:
-        return mean.real
+        return IRBProjection(mean.real)
     centered = available - available.mean()
     _, _, vectors = np.linalg.svd(
         np.column_stack((centered.real, centered.imag)), full_matrices=False
@@ -73,7 +93,7 @@ def project_arm_means(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     delta = mean[0, 0] - mean[0, -1]
     if np.isfinite(delta) and delta.real * direction[0] + delta.imag * direction[1] < 0:
         direction = -direction
-    return mean.real * direction[0] + mean.imag * direction[1]
+    return IRBProjection(mean.real * direction[0] + mean.imag * direction[1])
 
 
 def _fit_pair(
@@ -102,8 +122,13 @@ def analyze_irb(
 ) -> IRBFitResult:
     """Estimate target fidelity and reproducible 95% paired-seed uncertainty.
 
-    Requires shape (round, seed, 2, depth), at least four distinct depths and two
-    paired seeds. Drop incomplete round/seed pairs as whole curves, average each
+    depths is int64 (depth,), measured in random Clifford counts. signals is
+    complex128 (round,seed,2,depth), arms reference/interleaved, in ADC units.
+    Bootstrap controls are a draw count >=100 and a nonnegative RNG seed.
+    Outputs retain ADC projection units; summary probabilities are unitless
+    d=2 estimates, not dimension-independent gate error. Inputs are not modified.
+    Requires at least four distinct depths and two paired seeds.
+    Drop incomplete round/seed pairs as whole curves, average each
     seed over its complete rounds, then weight seeds equally. Bootstrap resamples
     entire paired seed curves, preserving depth and arm correlations.
     Invalid inputs or unidentifiable/non-decaying fits raise ValueError.
@@ -129,7 +154,7 @@ def analyze_irb(
         np.where(paired[..., None, None], signals, 0).sum(axis=0)[kept]
         / counts[kept, None, None]
     )
-    means = project_arm_means(seed_means[None, ...])
+    means = project_arm_means(seed_means[None, ...]).mean_signals
     xs = depths.astype(np.float64)
     ps, curves = _fit_pair(xs, means)
     error = float((1 - ps[1] / ps[0]) / 2)
@@ -138,7 +163,9 @@ def analyze_irb(
     for _ in range(bootstrap_samples):
         sample = seed_means[rng.integers(0, len(seed_means), len(seed_means))]
         try:
-            boot_ps, _ = _fit_pair(xs, project_arm_means(sample[None, ...]))
+            boot_ps, _ = _fit_pair(
+                xs, project_arm_means(sample[None, ...]).mean_signals
+            )
         except AnalysisFailed:
             # A failed resample is reported in the success count, never replaced.
             continue

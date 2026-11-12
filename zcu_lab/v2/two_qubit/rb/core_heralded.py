@@ -8,7 +8,12 @@ from matplotlib.axes import Axes
 from matplotlib.lines import Line2D
 from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
-from zcu_tools.analysis.fitting import FitQuality, compute_fit_quality
+from zcu_tools.analysis.fitting import (
+    FitQuality,
+    compute_fit_quality,
+    fit_joint_decay,
+    seed_statistics,
+)
 from zcu_tools.experiment import (
     Experiment,
     GroupedAxesSpec,
@@ -34,13 +39,10 @@ from .._sums import (
 from .analysis import (
     RBEstimate,
     RBOptions,
-    aggregate_seeds,
     bootstrap_joint_error,
     count_completion,
     estimate_joint_d4,
-    fit_joint_decay,
     paired_means,
-    seed_statistics,
     validate_axes,
 )
 from .core import RBCfg
@@ -290,8 +292,7 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
         means = np.full((2, 2, len(data.depths)), np.nan)
         errors = np.full_like(means, np.nan)
         curves = np.full_like(means, np.nan)
-        seed_means = np.full((2, len(data.seeds), 2, len(data.depths)), np.nan)
-        seed_variances = np.full_like(seed_means, np.nan)
+        totals = np.full_like(survival, np.nan)
         estimate, fit, quality = None, None, None
         reason = None
         if cfg is None:
@@ -314,23 +315,21 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
                     paired[herald][None, :, None, :], returns, np.nan
                 )
                 means[herald] = paired_means(survival[herald])
-                seed_means[herald], seed_variances[herald] = seed_statistics(
-                    survival[herald], total
-                )
+                totals[herald] = total
             try:
                 if len(np.unique(data.depths)) < 4:
                     raise ValueError(
                         "Need at least four distinct depths and 100 bootstrap samples"
                     )
                 for herald in range(2):
-                    means[herald], errors[herald] = aggregate_seeds(
-                        seed_means[herald], seed_variances[herald]
-                    )
-                fit, fitted = fit_joint_decay(data.depths, means, errors)
+                    statistics = seed_statistics(survival[herald], totals[herald])
+                    means[herald], errors[herald] = statistics.means, statistics.errors
+                joint_fit = fit_joint_decay(data.depths, means, errors)
+                fit, fitted = joint_fit.fit, joint_fit.curves
                 low, high, successes = bootstrap_joint_error(
                     data.depths,
-                    seed_means,
-                    seed_variances,
+                    survival,
+                    totals,
                     samples=options.bootstrap_samples,
                     seed=options.bootstrap_seed,
                 )
