@@ -254,7 +254,7 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
         carries only stop requests and reason text.
 
         """
-        # 1. Prepare the selected scan inputs.
+        # 1. Compare gg/ee return-to-herald survival for reference and CZ-interleaved arms across depth.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Random Clifford depth", ylabel="Return to herald state")
         viewer = live_line(ax, num_lines=4)
@@ -272,7 +272,7 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
                 curves.extend(joint_probabilities(totals)[..., cell, cell].T)
             return viewer.set(np.array(config.depth), np.array(curves))
 
-        # 2. Acquire the scan and retain completed measurements.
+        # 2. Compile herald/paired-sequence/terminal programs per depth/seed/arm and reuse them across host rounds.
         buffer = SignalBuffer(
             (len(config.depth), len(config.seed), 2, config.rounds, 3, 3, 3, 3),
             dtype=np.float64,
@@ -364,7 +364,7 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
                                 options=RunOptions(),
                             )
         buffer.trigger_update(flush=True)
-        # 3. Return acquired coordinates and measurements.
+        # 3. Preserve all 81 class counts and paired round identities; unfinished slots stay NaN.
         return RBHeraldedResult(
             np.array(config.depth, dtype=np.int64),
             np.array(config.seed, dtype=np.int64),
@@ -387,7 +387,7 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
         bootstrap draws preserve correlations across arms, depths and heralds.
 
         """
-        # 1. Select the acquired values for analysis.
+        # 1. Select complete paired seed/round curves independently for gg and ee, not by acceptance size.
         data, cfg = source.result, source.cfg
         shape = (len(data.depths), len(data.seeds), 2, len(data.rounds))
         if data.sums.shape != (*shape, 3, 3, 3, 3):
@@ -422,6 +422,7 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
                 )
                 means[herald] = paired_means(survival[herald])
                 totals[herald] = total
+            # 2. Use equal-seed means and a shared decay per arm; bootstrap whole paired seed identities.
             try:
                 if len(np.unique(data.depths)) < 4:
                     raise ValueError(
@@ -459,6 +460,7 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
                     for h in range(2)
                     for arm in range(2)
                 )
+        # 3. Compare gg/ee survival fits and herald fractions separately from acquisition completeness.
         aggregate = herald_probabilities(np.nansum(data.sums, axis=(1, 3)))
         for herald, label in enumerate(("gg", "ee")):
             fig, ax = plots.subplots(num=f"fit_{label}", figsize=(9, 6))
@@ -481,5 +483,5 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
             _draw_herald_fractions(ax, data.depths, aggregate[:, arm])
             ax.set_title(f"{label}: (g,g) is pass fraction, not purity")
             fig.tight_layout()
-        # 2. Return the analysis values and quality diagnostics.
+        # 4. Keep the shared-decay d=4 estimate and seed-bootstrap interval, or its numerical failure reason.
         return RBHeraldedAnalysis(estimate, quality, reason)

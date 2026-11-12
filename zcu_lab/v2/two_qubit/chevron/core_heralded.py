@@ -125,23 +125,23 @@ class ChevronHeraldedExp(Experiment[ChevronHeraldedResult, ChevronHeraldedCfg]):
         float64 counts with the same Result axes and cancellation semantics.
 
         """
-        # 1. Prepare the selected scan inputs.
+        # 1. Use hardware duration sweeps only when both drives are constant or flat-top.
         if all(
             isinstance(pulse.waveform, (ConstWaveformCfg, FlatTopWaveformCfg))
             for pulse in (config.drive.f1, config.drive.f2)
         ):
             return self._run_hardware_duration(config, context=context)
-        # 2. Return acquired coordinates and measurements.
+        # 2. Rebuild sampled drive envelopes on the host while keeping the other axis in hardware.
         return self._run_host_duration(config, context=context)
 
     def _run_hardware_duration(
         self, config: ChevronHeraldedCfg, *, context: RunContext
     ) -> ChevronHeraldedResult:
         """Acquire all coordinates and durations in hardware, accumulating rounds."""
-        # 1. Prepare the selected scan inputs.
+        # 1. Pair common-frequency and duration axes for the two-drive return map.
         coordinates = sweep2array(config.frequency)
         durations = sweep2array(config.duration)
-        # 2. Display each acquired scan trace.
+        # 2. Track gg-heralded terminal P00 versus duration for each common-frequency slice.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Drive duration (us)", ylabel="Terminal P00 | herald (g,g)")
         viewer = live_line(ax, num_lines=len(coordinates))
@@ -157,7 +157,7 @@ class ChevronHeraldedExp(Experiment[ChevronHeraldedResult, ChevronHeraldedCfg]):
 
         class_shape = (3, 3, 3, 3)
         shape = (len(coordinates), len(durations), *class_shape)
-        # 3. Acquire the scan and retain completed measurements.
+        # 3. Sweep frequency/duration in hardware with herald before preparation and terminal readout after contrast.
         buffer = SignalBuffer(shape, dtype=np.float64, on_update=update_view)
         with Schedule(buffer, scope=context.scope) as sched:
             builder = TimelineBuilder(
@@ -211,17 +211,17 @@ class ChevronHeraldedExp(Experiment[ChevronHeraldedResult, ChevronHeraldedCfg]):
             )
         buffer.trigger_update(flush=True)
         sums = buffer.array
-        # 4. Return acquired coordinates and measurements.
+        # 4. Retain all 81 class counts, including completed rounds and NaN gaps after cancellation.
         return ChevronHeraldedResult(coordinates, durations, sums)
 
     def _run_host_duration(
         self, config: ChevronHeraldedCfg, *, context: RunContext
     ) -> ChevronHeraldedResult:
         """Rebuild sampled envelopes per host duration; keep coordinates in hardware."""
-        # 1. Prepare the selected scan inputs.
+        # 1. Keep the common-frequency grid fixed while sampled-envelope durations advance on the host.
         coordinates = sweep2array(config.frequency)
         durations = sweep2array(config.duration)
-        # 2. Display each acquired scan trace.
+        # 2. Track gg-heralded terminal P00 versus duration for each common-frequency slice.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Drive duration (us)", ylabel="Terminal P00 | herald (g,g)")
         viewer = live_line(ax, num_lines=len(coordinates))
@@ -237,7 +237,7 @@ class ChevronHeraldedExp(Experiment[ChevronHeraldedResult, ChevronHeraldedCfg]):
 
         class_shape = (3, 3, 3, 3)
         shape = (len(durations), len(coordinates), *class_shape)
-        # 3. Acquire the scan and retain completed measurements.
+        # 3. Rebuild sampled durations on the host; sweep frequency with herald before preparation and drives.
         buffer = SignalBuffer(shape, dtype=np.float64, on_update=update_view)
         # Sampled cosine/Gauss/DRAG envelopes reject QickParam lengths. Only their
         # duration stays on the host; coordinate remains a hardware sweep.
@@ -294,7 +294,7 @@ class ChevronHeraldedExp(Experiment[ChevronHeraldedResult, ChevronHeraldedCfg]):
                 )
         buffer.trigger_update(flush=True)
         sums = buffer.array.swapaxes(0, 1)
-        # 4. Return acquired coordinates and measurements.
+        # 4. Restore coordinate-major axes without discarding herald classes or partial acquisition counts.
         return ChevronHeraldedResult(coordinates, durations, sums)
 
     def analyze(
@@ -310,7 +310,7 @@ class ChevronHeraldedExp(Experiment[ChevronHeraldedResult, ChevronHeraldedCfg]):
         NaN terminal probabilities and unresolved fits. Saved cfg is required.
 
         """
-        # 1. Select the acquired values for analysis.
+        # 1. Select gg-heralded return probabilities; determine completion from all herald classes.
         del options
         if source.cfg is None:
             raise ValueError(
@@ -336,7 +336,7 @@ class ChevronHeraldedExp(Experiment[ChevronHeraldedResult, ChevronHeraldedCfg]):
             totals,
             herald_probabilities(result.sums),
         )
-        # 2. Display the scan traces and fitted curves.
+        # 2. Show the return chevron and all terminal populations before fitting duration-slice rates.
         fig, ax = plots.subplots(num="chevron", figsize=(9, 6), layout="constrained")
         image = ax.pcolormesh(
             result.durations,
@@ -376,6 +376,7 @@ class ChevronHeraldedExp(Experiment[ChevronHeraldedResult, ChevronHeraldedCfg]):
                 title=f"Terminal {labels[outcome]} · other retained in denominator",
             )
             ax.legend(title="Common drive frequency (MHz)", fontsize="x-small", ncols=2)
+        # 3. Inspect all herald fractions and ee disturbance separately from the gg return fit.
         herald_matrix = herald_probabilities(result.sums)
         fig, _ = plots.subplots(
             num="herald",
@@ -414,6 +415,7 @@ class ChevronHeraldedExp(Experiment[ChevronHeraldedResult, ChevronHeraldedCfg]):
             ylabel="Common drive frequency (MHz)",
             title="Drive disturbance of |00⟩ · ee control, no shared fit",
         )
+        # 4. Fit complete duration traces with undamped cosines; exclude rates below inverse span.
         rates = fit_duration_rates(durations, answer)
         _, ax = plots.subplots(num="rabi_rate", figsize=(10, 6), layout="constrained")
         ax.errorbar(

@@ -220,7 +220,7 @@ class TwotoneFluxLocalExp(Experiment[MuxFluxResult, TwotoneFluxLocalCfg]):
         Sources remain at the final written value. No output is enabled here.
 
         """
-        # 1. Prepare the selected scan inputs.
+        # 1. Pair local-flux grids with each participant's quantized drive-frequency axis.
         cfg = config.model_copy(deep=True)
         indices = list(cfg.participants)
         devices = [cfg.tones[i].flux_dev for i in indices]
@@ -299,7 +299,7 @@ class TwotoneFluxLocalExp(Experiment[MuxFluxResult, TwotoneFluxLocalCfg]):
         prog = builder.build()
 
         # Local lines advance together. Each point has its own acquire scope.
-        # 2. Acquire the scan and retain completed measurements.
+        # 2. Advance local lines together and reuse the hardware spectrum program after settling.
         for point in range(cfg.flux_expts):
             if context.scope.stop.is_set():
                 break
@@ -335,5 +335,5 @@ class TwotoneFluxLocalExp(Experiment[MuxFluxResult, TwotoneFluxLocalCfg]):
             _require_finite_spectrum(iq, point=point, result=result)
             signals[:, point, :] = iq
             update(signals)
-        # 3. Return acquired coordinates and measurements.
+        # 3. Keep only complete finite spectra; cancelled local-flux points remain NaN in the maps.
         return result

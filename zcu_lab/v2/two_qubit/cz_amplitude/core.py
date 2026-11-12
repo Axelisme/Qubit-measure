@@ -311,9 +311,9 @@ class CZAmplitudeExp(Experiment[CZAmplitudeResult, CZAmplitudeCfg]):
         stop requests and reason text.
 
         """
-        # 1. Prepare the selected scan inputs.
+        # 1. Use one common scale axis to preserve the two drives' signed gain ratio.
         scales = sweep2array(config.scale)
-        # 2. Display each acquired scan trace.
+        # 2. Track joint gg return after the nominal B11 preparation and double-Xpi contrast.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Common gain scale", ylabel="P(g,g)")
         viewer = live_line(ax)
@@ -326,7 +326,7 @@ class CZAmplitudeExp(Experiment[CZAmplitudeResult, CZAmplitudeCfg]):
             counts = sums
             return viewer.set(scales, joint_probabilities(counts)[..., 0, 0])
 
-        # 3. Acquire the scan and retain completed measurements.
+        # 3. Sweep gains in hardware between simultaneous preparation and contrast; sum terminal class counts.
         buffer = SignalBuffer(
             (len(scales), 3, 3), dtype=np.float64, on_update=update_view
         )
@@ -373,7 +373,7 @@ class CZAmplitudeExp(Experiment[CZAmplitudeResult, CZAmplitudeCfg]):
                 options=RunOptions(),
             )
         buffer.trigger_update(flush=True)
-        # 4. Return acquired coordinates and measurements.
+        # 4. Preserve raw nine-class counts and completed rounds without normalizing partial acquisition.
         return CZAmplitudeResult(scales, buffer.array)
 
     def analyze(
@@ -389,7 +389,7 @@ class CZAmplitudeExp(Experiment[CZAmplitudeResult, CZAmplitudeCfg]):
         Missing saved cfg raises ValueError. No IQ reclassification occurs.
 
         """
-        # 1. Select the acquired values for analysis.
+        # 1. Fit saved-count P00 on the complete measured scale prefix, retaining coverage failures.
         del options
         cfg, result = source.cfg, source.result
         if cfg is None:
@@ -403,7 +403,7 @@ class CZAmplitudeExp(Experiment[CZAmplitudeResult, CZAmplitudeCfg]):
             expected_shots=cfg.reps * cfg.rounds,
         )
 
-        # 2. Display the scan traces and fitted curves.
+        # 2. Compare all terminal populations with the zero-phase return fit; this is not gate fidelity.
         _, ax = plots.subplots(
             num="joint_return", figsize=(10, 5), layout="constrained"
         )
@@ -437,5 +437,5 @@ class CZAmplitudeExp(Experiment[CZAmplitudeResult, CZAmplitudeCfg]):
         )
         ax.legend()
 
-        # 3. Return the analysis values and quality diagnostics.
+        # 3. Keep the first positive return-scale proposal or its coverage/numerical failure diagnostics.
         return summarize_return(terminal.fit)

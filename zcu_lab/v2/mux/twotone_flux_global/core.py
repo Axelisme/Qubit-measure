@@ -180,7 +180,7 @@ class TwotoneFluxGlobalExp(Experiment[MuxFluxResult, TwotoneFluxGlobalCfg]):
         Sources remain at the final written value. No output is enabled here.
 
         """
-        # 1. Prepare the selected scan inputs.
+        # 1. Pair one shared-coil grid with each participant's quantized drive-frequency axis.
         cfg = config.model_copy(deep=True)
         indices = list(cfg.participants)
         device = context.devices[cfg.flux_dev]
@@ -225,7 +225,7 @@ class TwotoneFluxGlobalExp(Experiment[MuxFluxResult, TwotoneFluxGlobalCfg]):
         readout = cfg.readout.with_updates(
             tones=[cfg.readout.tones[i] for i in indices]
         )
-        # 2. Acquire the scan and retain completed measurements.
+        # 2. Settle the shared coil, then sweep simultaneous drives in hardware before mux readout.
         for point, value in enumerate(values):
             if context.scope.stop.is_set():
                 break
@@ -289,5 +289,5 @@ class TwotoneFluxGlobalExp(Experiment[MuxFluxResult, TwotoneFluxGlobalCfg]):
                 )
             signals[:, point, :] = spectrum
             update(signals)
-        # 3. Return acquired coordinates and measurements.
+        # 3. Keep only complete finite spectra; cancelled coil points remain NaN in the maps.
         return result

@@ -299,7 +299,7 @@ class MuxAmpRabiExp(Experiment[MuxSweepResult, MuxAmpRabiCfg]):
 
         """
         # Prepare each gain grid and select readout tones in participant order.
-        # 1. Prepare the selected scan inputs.
+        # 1. Pair quantized gain grids with the selected readout tones in participant order.
         cfg = config.model_copy(deep=True)
         scan = prepare_amplitude_scan(cfg, soccfg=context.soccfg)
         readout = cfg.readout.with_updates(
@@ -327,7 +327,7 @@ class MuxAmpRabiExp(Experiment[MuxSweepResult, MuxAmpRabiCfg]):
             )
 
         # Advance each drive gain in the same tProc point loop.
-        # 2. Acquire the scan and retain completed measurements.
+        # 2. Sweep gains in one hardware loop with simultaneous drives after reset.
         signals = SignalBuffer(scan.coordinates.T.shape, on_update=update)
         with Schedule(signals, scope=context.scope) as sched:
             drives = []
@@ -384,7 +384,7 @@ class MuxAmpRabiExp(Experiment[MuxSweepResult, MuxAmpRabiCfg]):
 
         # Publish final plots and return tone-major data, including unmeasured NaNs.
         signals.trigger_update(flush=True)
-        # 3. Return acquired coordinates and measurements.
+        # 3. Preserve compiled gain coordinates and completed-round IQ; NaN marks no completed round.
         return MuxSweepResult(
             np.asarray(scan.indices, dtype=np.int64),
             scan.coordinates,
@@ -405,10 +405,11 @@ class MuxAmpRabiExp(Experiment[MuxSweepResult, MuxAmpRabiCfg]):
         or a failure reason per original tone index. plots receives fit_i figures.
 
         """
-        # 1. Select the acquired values for analysis.
+        # 1. Validate saved gain/IQ axes before calibrating the original participant tones.
         result = source.result
         validate_mux_result(result)
         outcomes: list[MuxAmpRabiFit | MuxFitFailure] = []
+        # 2. Analyze each tone on its own acquired grid after the requested leading-point skip.
         for row, raw_index in enumerate(result.tone_indices):
             index = int(raw_index)
             signal = result.signals[row, options.skip :]
@@ -423,6 +424,7 @@ class MuxAmpRabiExp(Experiment[MuxSweepResult, MuxAmpRabiCfg]):
                     raise ValueError(
                         "Amp Rabi fit requires at least six acquired points"
                     )
+                # 3. Project IQ and fix the undamped Rabi phase from the acquired gain nearest zero.
                 real = rotate2real(signal).real
                 zero = real[np.argmin(np.abs(xs))]
                 phase = 0.0 if zero > 0.5 * (np.max(real) + np.min(real)) else 180.0
@@ -450,12 +452,14 @@ class MuxAmpRabiExp(Experiment[MuxSweepResult, MuxAmpRabiCfg]):
                 ArithmeticError,
                 np.linalg.LinAlgError,
             ) as exc:
+                # 4. Isolate each tone's fit failure and show its acquired magnitude for diagnosis.
                 ax.plot(xs, np.abs(signal), "o", label="acquired magnitude")
                 ax.text(
                     0.02, 0.98, str(exc), transform=ax.transAxes, va="top", wrap=True
                 )
                 outcomes.append(MuxFitFailure(index, str(exc)))
             else:
+                # 5. Mark pi/pi2 gains and uncertainty bands on the projected Rabi fit.
                 ax.plot(xs, real, "o", label="measured")
                 ax.plot(xs, fitted, label="fit")
                 for value, error, label in ((pi, pierr, "pi"), (pi2, pi2err, "pi/2")):
@@ -467,5 +471,5 @@ class MuxAmpRabiExp(Experiment[MuxSweepResult, MuxAmpRabiCfg]):
             ax.legend()
             ax.grid(True)
             fig.tight_layout()
-        # 2. Return the analysis values and quality diagnostics.
+        # 6. Keep pi/pi2 gains or a failure reason under each original tone identity.
         return tuple(outcomes)

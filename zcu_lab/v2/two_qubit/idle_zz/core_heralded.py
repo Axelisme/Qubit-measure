@@ -127,13 +127,13 @@ class IdleZZHeraldedExp(Experiment[IdleZZHeraldedResult, IdleZZHeraldedCfg]):
         because it changes an external instrument. Return unnormalized counts.
 
         """
-        # 1. Prepare the selected scan inputs.
+        # 1. Pair hardware-rounded Ramsey delays with optional host DC settings.
         delay_sweep = round_sweep_dict(config.delay, "time", {"soccfg": context.soccfg})
         delays = sweep2array(delay_sweep)
         dc_values = (
             np.array([0.0]) if config.dc_device is None else sweep2array(config.dc)
         )
-        # 2. Display each acquired scan trace.
+        # 2. Compare gg and sign-corrected ee Ramsey fringes in actual spectator g/e order.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Delay (us)", ylabel="Target ⟨σ⟩ (gg, −ee; actual spectator g/e)")
         viewer = live_line(ax, num_lines=len(dc_values) * 4)
@@ -149,7 +149,7 @@ class IdleZZHeraldedExp(Experiment[IdleZZHeraldedResult, IdleZZHeraldedCfg]):
                 delays, np.stack((gg, ee), axis=1).reshape(-1, len(delays))
             )
 
-        # 3. Acquire the scan and retain completed measurements.
+        # 3. Set DC on the host; scan spectator/Ramsey in hardware with herald before each sequence.
         buffer = SignalBuffer(
             (len(dc_values), 2, len(delays), 3, 3, 3, 3),
             dtype=np.float64,
@@ -211,7 +211,7 @@ class IdleZZHeraldedExp(Experiment[IdleZZHeraldedResult, IdleZZHeraldedCfg]):
                     rounds=config.rounds,
                     options=RunOptions(),
                 )
-        # 4. Return acquired coordinates and measurements.
+        # 4. Preserve all herald/terminal counts and completed rounds on the planned DC/delay axes.
         return IdleZZHeraldedResult(dc_values, delays, buffer.array)
 
     def analyze(
@@ -228,7 +228,7 @@ class IdleZZHeraldedExp(Experiment[IdleZZHeraldedResult, IdleZZHeraldedCfg]):
         Shared frequency/decay determine ζ; each herald keeps local A/phase/offset.
 
         """
-        # 1. Select the acquired values for analysis.
+        # 1. Require full acquisition before joint gg/ee fits sharing frequency/decay by actual spectator state.
         del options
         cfg, result = source.cfg, source.result
         if cfg is None:
@@ -299,7 +299,7 @@ class IdleZZHeraldedExp(Experiment[IdleZZHeraldedResult, IdleZZHeraldedCfg]):
             ax.legend()
             ax.grid(True)
             fig.tight_layout()
-        # 2. Display the scan traces and fitted curves.
+        # 2. Show fitted spectator-frequency differences and all herald fractions without claiming pure ZZ.
         fig, ax = plots.subplots(num="zeta", figsize=(8, 5))
         for index, (value, error) in enumerate(
             zip(terminal.zeta_mhz, terminal.zeta_error_mhz, strict=True)

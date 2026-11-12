@@ -426,7 +426,7 @@ class MuxFreqExp(Experiment[MuxSweepResult, MuxFreqCfg]):
         overlay per original tone index. Return estimates or a per-tone failure reason.
 
         """
-        # 1. Select the acquired values for analysis.
+        # 1. Retain acquired IQ on each tone's actual frequency grid for independent line-shape fits.
         result = source.result
         validate_mux_result(result)
 
@@ -485,5 +485,5 @@ class MuxFreqExp(Experiment[MuxSweepResult, MuxFreqCfg]):
             ax.legend()
             ax.grid(True)
             fig.tight_layout()
-        # 2. Return the analysis values and quality diagnostics.
+        # 2. Keep transition frequency, linewidth and quality, or a failure under the original tone identity.
         return tuple(outcomes)

@@ -258,7 +258,7 @@ class SpectroscopyExp(Experiment[SpectroscopyResult, SpectroscopyCfg]):
         The stop signal carries only stop requests and reason text.
 
         """
-        # 1. Prepare the selected scan inputs.
+        # 1. Show F1/F2 excitation spectra by nominal preparation and optional DC setting.
         frequencies = sweep2array(config.frequency)
         dc_values = (
             np.array([0.0]) if config.dc_device is None else sweep2array(config.dc)
@@ -293,7 +293,7 @@ class SpectroscopyExp(Experiment[SpectroscopyResult, SpectroscopyCfg]):
                 )
             return tuple(artists)
 
-        # 2. Acquire the scan and retain completed measurements.
+        # 2. Set DC on the host; scan preparations and common probe frequency in hardware before contrast/readout.
         buffer = SignalBuffer(
             (len(dc_values), 2, 2, len(frequencies), 3, 3),
             dtype=np.float64,
@@ -367,7 +367,7 @@ class SpectroscopyExp(Experiment[SpectroscopyResult, SpectroscopyCfg]):
                     rounds=config.rounds,
                     options=RunOptions(),
                 )
-        # 3. Return acquired coordinates and measurements.
+        # 3. Keep raw joint counts on planned DC/frequency axes; unmeasured points remain NaN.
         return SpectroscopyResult(dc_values, frequencies, buffer.array)
 
     def analyze(
@@ -378,7 +378,7 @@ class SpectroscopyExp(Experiment[SpectroscopyResult, SpectroscopyCfg]):
         plots: Plots,
     ) -> None:
         """Plot count-derived F1/F2 P_e with other retained in the denominator."""
-        # 1. Select the acquired values for analysis.
+        # 1. Use saved axes for preparation-resolved excitation spectra with other classes in the denominator.
         del options
         data = source.result
         cfg = source.cfg
@@ -400,6 +400,7 @@ class SpectroscopyExp(Experiment[SpectroscopyResult, SpectroscopyCfg]):
         answer = summarize_spectra(
             data.sums, data.sums.sum(axis=(-2, -1)), cfg.reps * cfg.rounds
         )
+        # 2. Compare preparation-resolved F1/F2 excitation and optional DC maps without fitting.
         for target, role in enumerate(("F1", "F2")):
             fig, _ = plots.subplots(
                 num=f"spectra_{role.lower()}",
@@ -452,7 +453,7 @@ class SpectroscopyExp(Experiment[SpectroscopyResult, SpectroscopyCfg]):
                         xlabel="Common probe frequency (MHz)",
                         ylabel=f"{cfg.dc_device} ({cfg.dc_unit})",
                     )
-        # 2. Display the scan traces and fitted curves.
+        # 3. Show acquired-shot coverage separately from excitation, including partial counts.
         fig, _ = plots.subplots(
             num="shots",
             nrows=2,

@@ -300,23 +300,23 @@ class ConstructivePhaseExp(Experiment[ConstructivePhaseResult, ConstructivePhase
         float64 counts with the same Result axes and cancellation semantics.
 
         """
-        # 1. Prepare the selected scan inputs.
+        # 1. Use hardware duration sweeps only when both drives are constant or flat-top.
         if all(
             isinstance(pulse.waveform, (ConstWaveformCfg, FlatTopWaveformCfg))
             for pulse in (config.drive.f1, config.drive.f2)
         ):
             return self._run_hardware_duration(config, context=context)
-        # 2. Return acquired coordinates and measurements.
+        # 2. Rebuild sampled drive envelopes on the host while keeping the other axis in hardware.
         return self._run_host_duration(config, context=context)
 
     def _run_hardware_duration(
         self, config: ConstructivePhaseCfg, *, context: RunContext
     ) -> ConstructivePhaseResult:
         """Acquire all coordinates and durations in hardware, accumulating rounds."""
-        # 1. Prepare the selected scan inputs.
+        # 1. Pair relative-phase and duration axes for the two-drive return map.
         coordinates = sweep2array(config.relative_phase)
         durations = sweep2array(config.duration)
-        # 2. Display each acquired scan trace.
+        # 2. Track terminal P00 versus duration for each relative-phase slice.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Drive duration (us)", ylabel="Terminal P00")
         viewer = live_line(ax, num_lines=len(coordinates))
@@ -332,7 +332,7 @@ class ConstructivePhaseExp(Experiment[ConstructivePhaseResult, ConstructivePhase
 
         class_shape = (3, 3)
         shape = (len(coordinates), len(durations), *class_shape)
-        # 3. Acquire the scan and retain completed measurements.
+        # 3. Sweep both axes in hardware through preparation, simultaneous drives and double-Xpi contrast.
         buffer = SignalBuffer(shape, dtype=np.float64, on_update=update_view)
         with Schedule(buffer, scope=context.scope) as sched:
             builder = TimelineBuilder(
@@ -384,17 +384,17 @@ class ConstructivePhaseExp(Experiment[ConstructivePhaseResult, ConstructivePhase
             )
         buffer.trigger_update(flush=True)
         sums = buffer.array
-        # 4. Return acquired coordinates and measurements.
+        # 4. Retain raw nine-class counts, including completed rounds and NaN gaps after cancellation.
         return ConstructivePhaseResult(coordinates, durations, sums)
 
     def _run_host_duration(
         self, config: ConstructivePhaseCfg, *, context: RunContext
     ) -> ConstructivePhaseResult:
         """Rebuild sampled envelopes per host duration; keep coordinates in hardware."""
-        # 1. Prepare the selected scan inputs.
+        # 1. Keep the relative-phase grid fixed while sampled-envelope durations advance on the host.
         coordinates = sweep2array(config.relative_phase)
         durations = sweep2array(config.duration)
-        # 2. Display each acquired scan trace.
+        # 2. Track terminal P00 versus duration for each relative-phase slice.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Drive duration (us)", ylabel="Terminal P00")
         viewer = live_line(ax, num_lines=len(coordinates))
@@ -410,7 +410,7 @@ class ConstructivePhaseExp(Experiment[ConstructivePhaseResult, ConstructivePhase
 
         class_shape = (3, 3)
         shape = (len(durations), len(coordinates), *class_shape)
-        # 3. Acquire the scan and retain completed measurements.
+        # 3. Rebuild each duration's prepare/drive/contrast sequence with a hardware relative-phase sweep.
         buffer = SignalBuffer(shape, dtype=np.float64, on_update=update_view)
         # Sampled cosine/Gauss/DRAG envelopes reject QickParam lengths. Only their
         # duration stays on the host; coordinate remains a hardware sweep.
@@ -465,7 +465,7 @@ class ConstructivePhaseExp(Experiment[ConstructivePhaseResult, ConstructivePhase
                 )
         buffer.trigger_update(flush=True)
         sums = buffer.array.swapaxes(0, 1)
-        # 4. Return acquired coordinates and measurements.
+        # 4. Restore coordinate-major axes without discarding class counts or partial acquisition counts.
         return ConstructivePhaseResult(coordinates, durations, sums)
 
     def analyze(
@@ -481,7 +481,7 @@ class ConstructivePhaseExp(Experiment[ConstructivePhaseResult, ConstructivePhase
         reason, not zero rates. No IQ classification or automatic write occurs.
 
         """
-        # 1. Select the acquired values for analysis.
+        # 1. Use saved axes and all terminal classes to distinguish complete traces from partial counts.
         del options
         if source.cfg is None:
             raise ValueError(
@@ -506,7 +506,7 @@ class ConstructivePhaseExp(Experiment[ConstructivePhaseResult, ConstructivePhase
             totals,
             None,
         )
-        # 2. Display the scan traces and fitted curves.
+        # 2. Show phase-dependent return and leakage before extracting identifiable duration-slice rates.
         fig, ax = plots.subplots(
             num="interference", figsize=(9, 6), layout="constrained"
         )
@@ -550,6 +550,7 @@ class ConstructivePhaseExp(Experiment[ConstructivePhaseResult, ConstructivePhase
             ax.legend(
                 title="F2 relative to F1 phase (deg)", fontsize="x-small", ncols=2
             )
+        # 3. Fit complete duration traces, then regress identifiable rates squared against relative phase.
         analysis = analyze_constructive_phase(coordinates, durations, answer)
         modulation = analysis.modulation
         _, ax = plots.subplots(num="rabi_rate", figsize=(10, 6), layout="constrained")
@@ -591,6 +592,7 @@ class ConstructivePhaseExp(Experiment[ConstructivePhaseResult, ConstructivePhase
         )
         ax.legend(title="F2 relative to F1 phase (deg)", fontsize="x-small", ncols=2)
 
+        # 4. Propose the interference maximum only when the rate-squared modulation is identifiable.
         if modulation.prediction is not None:
             _, ax = plots.subplots(
                 num="constructive_phase", figsize=(9, 6), layout="constrained"
@@ -622,7 +624,7 @@ class ConstructivePhaseExp(Experiment[ConstructivePhaseResult, ConstructivePhase
                 modulation.reason,
                 modulation.fit_quality,
             )
-        # 3. Return the analysis values and quality diagnostics.
+        # 5. Keep an unresolved constructive-phase proposal explicit with its fit diagnostics.
         return ConstructivePhaseAnalysis(
             None, modulation.reason, modulation.fit_quality
         )

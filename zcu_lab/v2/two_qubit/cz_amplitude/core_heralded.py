@@ -127,9 +127,9 @@ class CZAmplitudeHeraldedExp(
         The stop signal carries only stop requests and reason text.
 
         """
-        # 1. Prepare the selected scan inputs.
+        # 1. Use one common scale axis to preserve the two drives' signed gain ratio.
         scales = sweep2array(config.scale)
-        # 2. Display each acquired scan trace.
+        # 2. Track gg-heralded joint gg return through the common gain sweep.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Common gain scale", ylabel="P(g,g) | herald (g,g)")
         viewer = live_line(ax)
@@ -142,7 +142,7 @@ class CZAmplitudeHeraldedExp(
             counts = terminal_counts(sums, ("g", "g"))
             return viewer.set(scales, joint_probabilities(counts)[..., 0, 0])
 
-        # 3. Acquire the scan and retain completed measurements.
+        # 3. Acquire herald before preparation, simultaneous scaled drives, contrast and terminal classification.
         buffer = SignalBuffer(
             (len(scales), 3, 3, 3, 3), dtype=np.float64, on_update=update_view
         )
@@ -192,7 +192,7 @@ class CZAmplitudeHeraldedExp(
                 options=RunOptions(),
             )
         buffer.trigger_update(flush=True)
-        # 4. Return acquired coordinates and measurements.
+        # 4. Preserve all 81 class counts and completed rounds, including NaN gaps after cancellation.
         return CZAmplitudeHeraldedResult(scales, buffer.array)
 
     def analyze(
@@ -209,7 +209,7 @@ class CZAmplitudeHeraldedExp(
         NaN terminal probabilities and no proposal. Missing cfg raises ValueError.
 
         """
-        # 1. Select the acquired values for analysis.
+        # 1. Fit gg-heralded P00 on the complete scale prefix; all herald classes establish completion.
         del options
         cfg, result = source.cfg, source.result
         if cfg is None:
@@ -224,7 +224,7 @@ class CZAmplitudeHeraldedExp(
             acquired_shots=result.sums.sum(axis=(-4, -3, -2, -1)),
             expected_shots=cfg.reps * cfg.rounds,
         )
-        # 2. Display the scan traces and fitted curves.
+        # 2. Compare the gg return fit with ee disturbance and herald acceptance, not gate fidelity.
         _, ax = plots.subplots(
             num="joint_return", figsize=(10, 5), layout="constrained"
         )
@@ -279,5 +279,5 @@ class CZAmplitudeHeraldedExp(
             title="Herald (g,g) is pass fraction, not ground-state purity",
         )
         ax.legend()
-        # 3. Return the analysis values and quality diagnostics.
+        # 3. Keep the accepted return-scale proposal or its coverage/numerical failure diagnostics.
         return CZAmplitudeHeraldedAnalysis(summarize_return(terminal.fit))

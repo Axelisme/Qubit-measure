@@ -398,7 +398,7 @@ class RBExp(Experiment[RBResult, RBCfg]):
         Return fixed raw count slots; cfg and saved sequence identities are unchanged.
 
         """
-        # 1. Prepare the selected scan inputs.
+        # 1. Compare reference and CZ-interleaved joint00 survival across Clifford depth.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Random Clifford depth", ylabel="Joint00 survival")
         viewer = live_line(ax, num_lines=2)
@@ -413,7 +413,7 @@ class RBExp(Experiment[RBResult, RBCfg]):
                 np.array(config.depth), joint_probabilities(totals)[..., 0, 0].T
             )
 
-        # 2. Acquire the scan and retain completed measurements.
+        # 2. Compile each paired depth/seed/arm sequence once and keep individual host-round count slots.
         buffer = SignalBuffer(
             (len(config.depth), len(config.seed), 2, config.rounds, 3, 3),
             dtype=np.float64,
@@ -502,7 +502,7 @@ class RBExp(Experiment[RBResult, RBCfg]):
                                 options=RunOptions(),
                             )
         buffer.trigger_update(flush=True)
-        # 3. Return acquired coordinates and measurements.
+        # 3. Preserve paired sequence identities and raw terminal counts; unfinished round slots stay NaN.
         return RBResult(
             np.array(config.depth, dtype=np.int64),
             np.array(config.seed, dtype=np.int64),
@@ -525,7 +525,7 @@ class RBExp(Experiment[RBResult, RBCfg]):
         Other exceptions propagate unchanged.
 
         """
-        # 1. Select the acquired values for analysis.
+        # 1. Select seed/round pairs complete across every depth and both arms before fitting joint00 decay.
         data, cfg = source.result, source.cfg
         shape = (len(data.depths), len(data.seeds), 2, len(data.rounds))
         survival = np.full(shape, np.nan)
@@ -552,6 +552,7 @@ class RBExp(Experiment[RBResult, RBCfg]):
             )
             survival = np.where(paired[None, :, None, :], joint00, np.nan)
             means = paired_means(survival)
+            # 2. Fit paired decay and bootstrap whole seeds before the d=4 error conversion.
             try:
                 fit = analyze_irb(
                     data.depths,
@@ -575,7 +576,7 @@ class RBExp(Experiment[RBResult, RBCfg]):
                 # Restore probability coordinates, not the decay ratio.
                 sign = 1.0 if np.sum(fit.mean_signals * means) >= 0 else -1.0
                 curves = sign * fit.fit_signals
-        # 2. Display the scan traces and fitted curves.
+        # 3. Compare paired reference/interleaved mean survival and fitted probability curves with failure reasons.
         fig, ax = plots.subplots(num="fit", figsize=(9, 6))
         for arm, label in enumerate(("Reference", "CZ interleaved")):
             (line,) = ax.plot(data.depths, means[arm], "o", label=label)
@@ -588,5 +589,5 @@ class RBExp(Experiment[RBResult, RBCfg]):
         else:
             ax.set_title("d=4 paired RB; classified ensemble, statistical seed CI only")
         fig.tight_layout()
-        # 3. Return the analysis values and quality diagnostics.
+        # 4. Keep the d=4 estimate and statistical seed uncertainty, or a failure without a calibration proposal.
         return RBAnalysis(estimate, quality, reason)

@@ -701,7 +701,7 @@ class MuxGEExp(Experiment[MuxGEResult, MuxGECfg]):
         axes, mismatched cfg or invalid options raise before fitting.
 
         """
-        # 1. Select the acquired values for analysis.
+        # 1. Match GE fit overrides to original tone identities before inspecting probe-off/on pairs.
         _validate_source(source)
         indices = [int(i) for i in source.result.tone_indices]
         if any(type(i) is not int or i not in indices for i in options.overrides):
@@ -710,6 +710,7 @@ class MuxGEExp(Experiment[MuxGEResult, MuxGECfg]):
             raise ValueError("fit_i figures already exist in this operation")
         selected = [options.overrides.get(i, options.default) for i in indices]
         outcomes: list[MuxGEAnalysis | MuxFitFailure] = []
+        # 2. Inspect state-ordered IQ clouds and reject incomplete preparation pairs per tone.
         for row, (index, option) in enumerate(zip(indices, selected, strict=True)):
             name = f"fit_{index}"
             signals = ge_signals_by_state(
@@ -735,6 +736,7 @@ class MuxGEExp(Experiment[MuxGEResult, MuxGECfg]):
                 outcomes.append(MuxFitFailure(index, reason))
                 continue
             try:
+                # 3. Calibrate each complete GE pair with its selected backend and alignment policy.
                 fidelity, init_pops, fit = singleshot_ge_analysis(
                     signals,
                     angle=option.angle,
@@ -768,7 +770,7 @@ class MuxGEExp(Experiment[MuxGEResult, MuxGECfg]):
             except (GENumericalError, AnalysisFailed) as exc:
                 _failure_plot(plots, name, str(exc))
                 outcomes.append(MuxFitFailure(index, str(exc)))
-        # 2. Return the analysis values and quality diagnostics.
+        # 4. Keep per-tone GE calibrations and quality, including incomplete-pair or numerical failures.
         return tuple(outcomes)
 
     def post_analyze(
@@ -788,7 +790,7 @@ class MuxGEExp(Experiment[MuxGEResult, MuxGECfg]):
         options raise.
 
         """
-        # 1. Select the acquired values for analysis.
+        # 1. Match primary GE fits and radius overrides to the saved participant order.
         _validate_source(source)
         indices = [int(i) for i in source.result.tone_indices]
         if [item.index for item in primary] != indices:
@@ -799,6 +801,7 @@ class MuxGEExp(Experiment[MuxGEResult, MuxGECfg]):
             raise ValueError("post_i figures already exist in this operation")
         selected = [options.overrides.get(i, options.default) for i in indices]
         outcomes: list[MuxGEPostAnalysis | MuxFitFailure] = []
+        # 2. Propagate primary failures and require complete clouds before radius diagnostics.
         for row, (item, option) in enumerate(zip(primary, selected, strict=True)):
             name = f"post_{item.index}"
             if isinstance(item, MuxFitFailure):
@@ -816,6 +819,7 @@ class MuxGEExp(Experiment[MuxGEResult, MuxGECfg]):
             )
             signals = (g_signals, e_signals)
             try:
+                # 3. Estimate radius-based g/e/other confusion from the existing GE calibration.
                 confusion = calc_confusion_matrix(
                     signals,
                     GECalibration(
@@ -836,9 +840,10 @@ class MuxGEExp(Experiment[MuxGEResult, MuxGECfg]):
                 _failure_plot(plots, name, str(exc))
                 outcomes.append(MuxFitFailure(item.index, str(exc)))
                 continue
+            # 4. Show per-tone acceptance and confusion without implying a joint assignment matrix.
             _plot_confusion_matrix(
                 confusion, g_signals, e_signals, item.primary, plots, name
             )
             outcomes.append(MuxGEPostAnalysis(item.index, GEPostAnalysis(confusion)))
-        # 2. Return the analysis values and quality diagnostics.
+        # 5. Keep radius-based per-tone confusion diagnostics without refitting or a joint assignment model.
         return tuple(outcomes)

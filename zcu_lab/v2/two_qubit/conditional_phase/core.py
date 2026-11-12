@@ -333,9 +333,9 @@ class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg
         cfg stays unchanged; acquisition accumulates rounds without averaging.
 
         """
-        # 1. Prepare the selected scan inputs.
+        # 1. Use the common CZ frequency axis for every gate-count train.
         frequencies = sweep2array(config.frequency)
-        # 2. Display each acquired scan trace.
+        # 2. Track target X/Y sigma for both spectator preparations across frequency.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Common CZ frequency (MHz)", ylabel="Target sigma")
         viewer = live_line(ax, num_lines=4 * len(config.gate_count))
@@ -349,7 +349,7 @@ class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg
             values = sigma(counts, config.target)
             return viewer.set(frequencies, values.reshape(-1, len(frequencies)))
 
-        # 3. Acquire the scan and retain completed measurements.
+        # 3. Rebuild each host gate train; sweep spectator, quadrature and frequency in hardware.
         buffer = SignalBuffer(
             (len(config.gate_count), 2, 2, len(frequencies), 3, 3),
             dtype=np.float64,
@@ -418,7 +418,7 @@ class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg
                     options=RunOptions(),
                 )
         buffer.trigger_update(flush=True)
-        # 4. Return acquired coordinates and measurements.
+        # 4. Keep spectator/quadrature/train/frequency counts, including NaN gaps and completed rounds.
         return ConditionalPhaseResult(
             np.array(config.gate_count, dtype=np.int64),
             frequencies,
@@ -433,7 +433,7 @@ class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg
         plots: Plots,
     ) -> ConditionalPhaseAnalysis:
         """Fit per-gate slopes from complete counts and select a unique π crossing."""
-        # 1. Select the acquired values for analysis.
+        # 1. Require saved train and frequency axes before deriving count-weighted quadratures.
         del options
         cfg, data = source.cfg, source.result
         if cfg is None:
@@ -461,6 +461,7 @@ class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg
         )
         quadratures = np.where(complete, quadratures, np.nan)
         phases = phase_points(quadratures)
+        # 2. Fit shared X/Y gate-count slopes and require a unique conditional pi crossing.
         fitted = fit_phase_slopes(
             data.gate_counts,
             quadratures[None],
@@ -474,7 +475,7 @@ class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg
             crossings.reason,
         )
 
-        # 2. Display the scan traces and fitted curves.
+        # 3. Compare contrast, phase and spectator slopes to inspect the unique per-gate pi crossing.
         fig, _ = plots.subplots(
             num="phase", nrows=3, figsize=(10, 10), layout="constrained"
         )
@@ -536,5 +537,5 @@ class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg
             )
         axes.set(xlabel="Common CZ frequency (MHz)", ylabel="Phase slope (deg/gate)")
         axes.legend()
-        # 3. Return the analysis values and quality diagnostics.
+        # 4. Propose a frequency only for a unique fitted crossing; otherwise retain its rejection reason.
         return answer

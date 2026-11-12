@@ -149,7 +149,7 @@ class LocalZHeraldedExp(Experiment[LocalZHeraldedResult, LocalZHeraldedCfg]):
         cfg stays unchanged; completed rounds survive cancellation.
 
         """
-        # 1. Prepare the selected scan inputs.
+        # 1. Track gg-heralded X/Y sigma for both targets versus CZ gate count.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="CZ gate count", ylabel="Target sigma | herald (g,g)")
         viewer = live_line(ax, num_lines=4)
@@ -163,7 +163,7 @@ class LocalZHeraldedExp(Experiment[LocalZHeraldedResult, LocalZHeraldedCfg]):
             values = np.stack((sigma(counts[0], "f1"), sigma(counts[1], "f2")))
             return viewer.set(np.array(config.gate_count), values.reshape(4, -1))
 
-        # 2. Acquire the scan and retain completed measurements.
+        # 2. Scan target/quadrature in hardware, with herald before each host-length CZ train.
         buffer = SignalBuffer(
             (len(config.gate_count), 2, 2, 3, 3, 3, 3),
             dtype=np.float64,
@@ -243,7 +243,7 @@ class LocalZHeraldedExp(Experiment[LocalZHeraldedResult, LocalZHeraldedCfg]):
                     options=RunOptions(),
                 )
         buffer.trigger_update(flush=True)
-        # 3. Return acquired coordinates and measurements.
+        # 3. Keep all herald/terminal classes in target/quadrature/train order, including partial acquisitions.
         return LocalZHeraldedResult(
             np.array(config.gate_count, dtype=np.int64),
             np.moveaxis(buffer.array, 0, 2),
@@ -257,7 +257,7 @@ class LocalZHeraldedExp(Experiment[LocalZHeraldedResult, LocalZHeraldedCfg]):
         plots: Plots,
     ) -> LocalZHeraldedAnalysis:
         """Fit gg/ee independently and report ee-minus-gg slopes; writeback uses gg."""
-        # 1. Select the acquired values for analysis.
+        # 1. Align gg/ee target quadratures by sign and use all herald classes to establish completion.
         del options
         cfg, data = source.cfg, source.result
         if cfg is None:
@@ -305,6 +305,7 @@ class LocalZHeraldedExp(Experiment[LocalZHeraldedResult, LocalZHeraldedCfg]):
             )
             for t in range(2)
         )
+        # 2. Fit complete gg and sign-corrected ee phase rows independently for each target.
         gg_fits = tuple(
             PhaseLineFit(reason="Incomplete phase row")
             if any(p.logical_phase_deg is None for p in gg_phases[t])
@@ -343,7 +344,7 @@ class LocalZHeraldedExp(Experiment[LocalZHeraldedResult, LocalZHeraldedCfg]):
         )
         herald_matrix = herald_probabilities(data.sums)
 
-        # 2. Display the scan traces and fitted curves.
+        # 3. Compare independent gg/ee phase slopes and herald fractions; only gg supplies corrections.
         fig, _ = plots.subplots(
             num="phase", nrows=3, figsize=(10, 10), layout="constrained"
         )
@@ -422,7 +423,7 @@ class LocalZHeraldedExp(Experiment[LocalZHeraldedResult, LocalZHeraldedCfg]):
             title="Herald distribution; (g,g) is pass fraction, not ground-state purity",
         )
         fig.colorbar(image, ax=axes, label="Herald probability")
-        # 3. Return the analysis values and quality diagnostics.
+        # 4. Keep gg corrections, ee fits and ee-minus-gg slope differences as distinct diagnostics.
         return LocalZHeraldedAnalysis(
             tuple(summarize_fit(fit) for fit in gg_fits),
             tuple(summarize_fit(fit) for fit in ee_fits),

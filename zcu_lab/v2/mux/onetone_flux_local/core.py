@@ -203,7 +203,7 @@ class OnetoneFluxLocalExp(Experiment[MuxFluxResult, OnetoneFluxLocalCfg]):
 
         """
         # Retain the old inner cfg's finite-offset rejection before any DC write.
-        # 1. Prepare the selected scan inputs.
+        # 1. Check offset settings and DC units before writing the paired local-flux grids.
         if not all(
             math.isfinite(value)
             for value in (config.df.start, config.df.stop, config.df.step)
@@ -242,7 +242,7 @@ class OnetoneFluxLocalExp(Experiment[MuxFluxResult, OnetoneFluxLocalCfg]):
             tones=[cfg.readout.tones[i] for i in indices]
         )
 
-        # 2. Acquire the scan and retain completed measurements.
+        # 2. Set local lines together, settle, then scan reset/readout frequency offsets on the host.
         for point in range(cfg.flux_expts):
             if context.scope.stop.is_set():
                 break
@@ -301,5 +301,5 @@ class OnetoneFluxLocalExp(Experiment[MuxFluxResult, OnetoneFluxLocalCfg]):
             _require_finite_spectrum(acquired, point, result)
             signals[:, point, :] = acquired
             update(signals)
-        # 3. Return acquired coordinates and measurements.
+        # 3. Keep complete spectra in the flux maps; cancelled points remain NaN on the planned axes.
         return result

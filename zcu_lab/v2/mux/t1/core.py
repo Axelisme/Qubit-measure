@@ -454,16 +454,16 @@ class MuxT1Exp(Experiment[MuxT1Result, MuxT1Cfg]):
         acquisition and program errors propagate.
 
         """
-        # 1. Prepare the selected scan inputs.
+        # 1. Dispatch linear sampling to the shared hardware delay sweep.
         cfg = config.model_copy(deep=True)
         if cfg.sampling == "linear":
             return self._run_linear(cfg, context=context)
-        # 2. Return acquired coordinates and measurements.
+        # 2. Dispatch decay sampling to the quantized nonuniform hardware delay table.
         return self._run_decay(cfg, context=context)
 
     def _run_linear(self, cfg: MuxT1Cfg, *, context: RunContext) -> MuxT1Result:
         """Acquire the common linear delay sweep and return tone-major IQ."""
-        # 1. Prepare the selected scan inputs.
+        # 1. Show each participant's decay magnitude on the common requested delay axis.
         times = sweep2array(cfg.delay, "none")
         indices = list(cfg.participants)
         readout = cfg.readout.with_updates(
@@ -488,7 +488,7 @@ class MuxT1Exp(Experiment[MuxT1Result, MuxT1Cfg]):
                 for artist in viewer.set(times, np.abs(data[:, row]))
             )
 
-        # 2. Acquire the scan and retain completed measurements.
+        # 2. Sweep the shared wait after all pi branches finish, then acquire mux readout.
         signals = SignalBuffer((len(times), len(indices)), on_update=update)
         with Schedule(signals, scope=context.scope) as sched:
             builder = TimelineBuilder(
@@ -525,14 +525,14 @@ class MuxT1Exp(Experiment[MuxT1Result, MuxT1Cfg]):
                 ),
             )
         signals.trigger_update(flush=True)
-        # 3. Return acquired coordinates and measurements.
+        # 3. Keep completed-round IQ for every delay; NaN marks no completed round.
         return MuxT1Result(
             times, np.asarray(indices, dtype=np.int64), signals.array.T.copy()
         )
 
     def _run_decay(self, cfg: MuxT1Cfg, *, context: RunContext) -> MuxT1Result:
         """Acquire the nonuniform delay table and return tone-major IQ."""
-        # 1. Prepare the selected scan inputs.
+        # 1. Show each participant's decay on the collision-checked, quantized nonuniform delays.
         table = materialize_nonuniform_t1_delays(cfg.delay, soccfg=context.soccfg)
         times = table.times_us
         indices = list(cfg.participants)
@@ -558,7 +558,7 @@ class MuxT1Exp(Experiment[MuxT1Result, MuxT1Cfg]):
                 for artist in viewer.set(times, np.abs(data[:, row]))
             )
 
-        # 2. Acquire the scan and retain completed measurements.
+        # 2. Step the hardware delay table after all pi branches finish, then acquire mux readout.
         signals = SignalBuffer((len(times), len(indices)), on_update=update)
         with Schedule(signals, scope=context.scope) as sched:
             builder = TimelineBuilder(
@@ -596,7 +596,7 @@ class MuxT1Exp(Experiment[MuxT1Result, MuxT1Cfg]):
                 ),
             )
         signals.trigger_update(flush=True)
-        # 3. Return acquired coordinates and measurements.
+        # 3. Retain actual table delays and completed-round IQ without filling missing values.
         return MuxT1Result(
             times, np.asarray(indices, dtype=np.int64), signals.array.T.copy()
         )
@@ -618,5 +618,5 @@ class MuxT1Exp(Experiment[MuxT1Result, MuxT1Cfg]):
         model as fit_i.
 
         """
-        # 1. Select the acquired values for analysis.
+        # 1. Fit saved acquired delays per tone using the requested skip and single/dual decay policy.
         return fit_and_plot_t1(source.result, options, plots=plots)

@@ -365,13 +365,14 @@ class MuxOnetoneExp(Experiment[MuxOnetoneResult, MuxOnetoneCfg]):
         retain their reason without stopping other tones.
 
         """
-        # 1. Select the acquired values for analysis.
+        # 1. Require saved tone identities and one electrical-delay seed per active spectrum.
         cfg = validate_analysis_source(source)
         if len(options.edelay_seeds) != len(source.result.tone_indices):
             raise ValueError(
                 "edelay_seeds must contain one seed or None per active tone"
             )
         outcomes: list[ToneFitSuccess | ToneFitFailure] = []
+        # 2. Fit each absolute-frequency spectrum with its selected background and delay branch.
         for column, seed in enumerate(options.edelay_seeds):
             index = int(source.result.tone_indices[column])
             tone = cfg.readout.tones[index]
@@ -423,6 +424,7 @@ class MuxOnetoneExp(Experiment[MuxOnetoneResult, MuxOnetoneCfg]):
                 ArithmeticError,
                 np.linalg.LinAlgError,
             ) as exc:
+                # 3. Keep numerical failures visible as acquired magnitude without stopping other tones.
                 reason = str(exc)
                 fig.clear()
                 axes = fig.subplots()
@@ -438,5 +440,5 @@ class MuxOnetoneExp(Experiment[MuxOnetoneResult, MuxOnetoneCfg]):
                 continue
             fig.suptitle(f"tone {index}: {tone.label or f'tone {index}'}")
             outcomes.append(ToneFitSuccess(index, tone.label, fit))
-        # 2. Return the analysis values and quality diagnostics.
+        # 4. Keep resonance calibration or a fit failure attached to the original readout tone.
         return MuxOnetoneAnalysis(tuple(outcomes))

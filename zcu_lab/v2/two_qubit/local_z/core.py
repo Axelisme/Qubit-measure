@@ -248,7 +248,7 @@ class LocalZExp(Experiment[LocalZResult, LocalZCfg]):
         cfg stays unchanged; completed rounds survive cancellation.
 
         """
-        # 1. Prepare the selected scan inputs.
+        # 1. Track each target's X/Y sigma versus CZ gate count for local phase accumulation.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="CZ gate count", ylabel="Target sigma")
         viewer = live_line(ax, num_lines=4)
@@ -262,7 +262,7 @@ class LocalZExp(Experiment[LocalZResult, LocalZCfg]):
             values = np.stack((sigma(counts[0], "f1"), sigma(counts[1], "f2")))
             return viewer.set(np.array(config.gate_count), values.reshape(4, -1))
 
-        # 2. Acquire the scan and retain completed measurements.
+        # 2. Rebuild each host CZ train; select target and projection quadrature in hardware.
         buffer = SignalBuffer(
             (len(config.gate_count), 2, 2, 3, 3),
             dtype=np.float64,
@@ -339,7 +339,7 @@ class LocalZExp(Experiment[LocalZResult, LocalZCfg]):
                     options=RunOptions(),
                 )
         buffer.trigger_update(flush=True)
-        # 3. Return acquired coordinates and measurements.
+        # 3. Keep target/quadrature/train class counts and completed rounds without filling unmeasured trains.
         return LocalZResult(
             np.array(config.gate_count, dtype=np.int64),
             np.moveaxis(buffer.array, 0, 2),
@@ -353,7 +353,7 @@ class LocalZExp(Experiment[LocalZResult, LocalZCfg]):
         plots: Plots,
     ) -> LocalZAnalysis:
         """Fit complete classified phase rows with count-propagated WLS weights."""
-        # 1. Select the acquired values for analysis.
+        # 1. Require saved gate-count axes before deriving complete X/Y quadratures for both targets.
         del options
         cfg, data = source.cfg, source.result
         if cfg is None:
@@ -378,6 +378,7 @@ class LocalZExp(Experiment[LocalZResult, LocalZCfg]):
         targets: list[tuple[QuadraturePhase, ...]] = []
         phase_rows: list[NDArray[np.float64]] = []
         fits: list[PhaseLineFit] = []
+        # 2. Require complete phase rows before unwrapping and count-weighted slope fitting.
         for t in range(2):
             points = tuple(
                 count_phase(float(x), float(y))
@@ -402,7 +403,7 @@ class LocalZExp(Experiment[LocalZResult, LocalZCfg]):
             )
         summaries = tuple(map(summarize_fit, fits))
 
-        # 2. Display the scan traces and fitted curves.
+        # 3. Compare contrast, wrapped phase and weighted unwrapped fits to diagnose local-Z corrections.
         fig, _ = plots.subplots(
             num="phase", nrows=3, ncols=1, figsize=(10, 9), layout="constrained"
         )
@@ -465,5 +466,5 @@ class LocalZExp(Experiment[LocalZResult, LocalZCfg]):
         axes.set(xlabel="CZ gate count", ylabel="Target sigma")
         axes.legend()
 
-        # 3. Return the analysis values and quality diagnostics.
+        # 4. Keep each target's negative-slope correction and uncertainty, or its unresolved-fit reason.
         return LocalZAnalysis(summaries)

@@ -251,13 +251,13 @@ class IdleZZExp(Experiment[IdleZZResult, IdleZZCfg]):
         because it changes an external instrument. Return unnormalized counts.
 
         """
-        # 1. Prepare the selected scan inputs.
+        # 1. Pair hardware-rounded Ramsey delays with optional host DC settings.
         delay_sweep = round_sweep_dict(config.delay, "time", {"soccfg": context.soccfg})
         delays = sweep2array(delay_sweep)
         dc_values = (
             np.array([0.0]) if config.dc_device is None else sweep2array(config.dc)
         )
-        # 2. Display each acquired scan trace.
+        # 2. Compare target Ramsey sigma for spectator I/Xpi at each DC setting.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Delay (us)", ylabel="Target ⟨σ⟩")
         viewer = live_line(ax, num_lines=len(dc_values) * 2)
@@ -271,7 +271,7 @@ class IdleZZExp(Experiment[IdleZZResult, IdleZZCfg]):
                 delays, sigma(sums, config.target).reshape(-1, len(delays))
             )
 
-        # 3. Acquire the scan and retain completed measurements.
+        # 3. Set DC on the host; sweep spectator preparation and detuned target Ramsey delay in hardware.
         buffer = SignalBuffer(
             (len(dc_values), 2, len(delays), 3, 3),
             dtype=np.float64,
@@ -330,7 +330,7 @@ class IdleZZExp(Experiment[IdleZZResult, IdleZZCfg]):
                     rounds=config.rounds,
                     options=RunOptions(),
                 )
-        # 4. Return acquired coordinates and measurements.
+        # 4. Retain raw terminal counts for completed rounds on every planned DC/delay slot.
         return IdleZZResult(dc_values, delays, buffer.array)
 
     def analyze(
@@ -347,7 +347,7 @@ class IdleZZExp(Experiment[IdleZZResult, IdleZZCfg]):
         No calibration or DC writeback occurs.
 
         """
-        # 1. Select the acquired values for analysis.
+        # 1. Fit only full-delay, full-round Ramsey branches with count-error weights and other in the denominator.
         del options
         cfg, result = source.cfg, source.result
         if cfg is None:
@@ -427,7 +427,7 @@ class IdleZZExp(Experiment[IdleZZResult, IdleZZCfg]):
             ax.legend()
             ax.grid(True)
             fig.tight_layout()
-        # 2. Display the scan traces and fitted curves.
+        # 2. Show signed Xpi-minus-I frequency differences versus DC without claiming a pure ZZ coupling.
         fig, ax = plots.subplots(num="zeta", figsize=(8, 5))
         for index, (value, error) in enumerate(
             zip(answer.zeta_mhz, answer.zeta_error_mhz, strict=True)
