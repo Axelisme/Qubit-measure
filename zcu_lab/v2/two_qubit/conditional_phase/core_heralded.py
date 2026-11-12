@@ -35,21 +35,13 @@ from zcu_tools.program.v2.modules import MuxReadout
 from zcu_lab.v2.support import live_line
 
 from .._sums import herald_probabilities, sigma, terminal_counts
-from .analysis import (
+from .core import (
     ConditionalPhaseAnalysis,
+    ConditionalPhaseCfg,
     count_quadratures,
     fitted_crossings,
     phase_points,
 )
-from .core import ConditionalPhaseCfg
-
-
-class ConditionalPhaseHeraldedCfg(ConditionalPhaseCfg):
-    """Conditional phase preceded by optional reset and a mux herald.
-
-    All fields and units follow ConditionalPhaseCfg. Both reads use the same mux
-    object and classifiers. readout.post_delay is the wait after herald.
-    """
 
 
 @dataclass(frozen=True)
@@ -66,21 +58,35 @@ class ConditionalPhaseHeraldedResult:
     sums: NDArray[np.float64]
 
 
+@dataclass(frozen=True)
+class ConditionalPhaseHeraldedAnalysis(ConditionalPhaseAnalysis):
+    """Unique π crossing from shared gg/ee slopes, or its failure reason."""
+
+
+class ConditionalPhaseHeraldedCfg(ConditionalPhaseCfg):
+    """Conditional phase preceded by optional reset and a mux herald.
+
+    All fields and units follow ConditionalPhaseCfg. Both reads use the same mux
+    object and classifiers. readout.post_delay is the wait after herald.
+    """
+
+
 def restore_result(
     data: GroupedLoadData[ConditionalPhaseHeraldedCfg],
 ) -> ConditionalPhaseHeraldedResult:
-    """Restore 81-class sums; reject legacy raw-IQ files without sums."""
+    """Restore 81-class sums; reject legacy raw-IQ files without sums.
+
+    data supplies the grouped sums variable and its persisted scan axes. Return
+    this experiment's Result with float64 class counts and its original axis
+    ordering. Missing variables and invalid data propagate load errors. Do not
+    mutate the loaded data, acquire or draw; no raw-IQ reconstruction is attempted.
+    """
     sums = data.variable("sums")
     return ConditionalPhaseHeraldedResult(
         gate_counts=sums.axes[5].astype(np.int64),
         frequencies=sums.axes[4].astype(np.float64),
         sums=sums.z.astype(np.float64),
     )
-
-
-@dataclass(frozen=True)
-class ConditionalPhaseHeraldedAnalysis(ConditionalPhaseAnalysis):
-    """Unique π crossing from shared gg/ee slopes, or its failure reason."""
 
 
 class ConditionalPhaseHeraldedExp(
@@ -147,8 +153,11 @@ class ConditionalPhaseHeraldedExp(
 
         Counts retain spectator_states × quadrature × gate_count × frequency.
         cfg stays unchanged; acquisition accumulates rounds without averaging.
+
         """
+        # 1. Use the common CZ frequency axis for every gate-count train.
         frequencies = sweep2array(config.frequency)
+        # 2. Track gg-heralded target X/Y sigma for both spectator preparations across frequency.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Common CZ frequency (MHz)", ylabel="Target sigma | herald (g,g)")
         viewer = live_line(ax, num_lines=4 * len(config.gate_count))
@@ -162,6 +171,7 @@ class ConditionalPhaseHeraldedExp(
             values = sigma(counts, config.target)
             return viewer.set(frequencies, values.reshape(-1, len(frequencies)))
 
+        # 3. Sweep spectator/quadrature/frequency in hardware, with herald before each host-length CZ train.
         buffer = SignalBuffer(
             (len(config.gate_count), 2, 2, len(frequencies), 3, 3, 3, 3),
             dtype=np.float64,
@@ -233,6 +243,7 @@ class ConditionalPhaseHeraldedExp(
                     options=RunOptions(),
                 )
         buffer.trigger_update(flush=True)
+        # 4. Preserve all herald classes and partial acquisitions on the spectator/quadrature/train/frequency axes.
         return ConditionalPhaseHeraldedResult(
             np.array(config.gate_count, dtype=np.int64),
             frequencies,
@@ -247,6 +258,7 @@ class ConditionalPhaseHeraldedExp(
         plots: Plots,
     ) -> ConditionalPhaseHeraldedAnalysis:
         """Joint-fit sign-corrected gg/ee by actual spectator; show gg-only comparison."""
+        # 1. Require saved train and frequency axes before aligning gg/ee by actual spectator state.
         del options
         cfg, data = source.cfg, source.result
         if cfg is None:
@@ -292,6 +304,7 @@ class ConditionalPhaseHeraldedExp(
             np.where(complete[::-1], -ee_stats.values, np.nan),
         )
         phases, ee_phases = phase_points(gg_values), phase_points(ee_values)
+        # 2. Share sign-corrected gg/ee slopes by actual spectator; retain gg-only comparison.
         fitted = fit_phase_slopes(
             data.gate_counts,
             np.stack((gg_values, ee_values)),
@@ -320,6 +333,7 @@ class ConditionalPhaseHeraldedExp(
             crossings.reason,
         )
 
+        # 3. Compare shared gg/ee slopes with gg-only fits and inspect herald acceptance separately.
         fig, _ = plots.subplots(
             num="phase", nrows=3, figsize=(11, 11), layout="constrained"
         )
@@ -415,4 +429,5 @@ class ConditionalPhaseHeraldedExp(
             title="Herald distribution; (g,g) is pass fraction, not ground-state purity",
         )
         fig.colorbar(image, ax=axes, label="Herald probability")
+        # 4. Propose only the unique joint-fit pi crossing; retain the reason when it is unresolved.
         return answer

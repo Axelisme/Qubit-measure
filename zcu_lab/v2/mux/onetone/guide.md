@@ -38,7 +38,7 @@ Group 的 `time_of_fly` 缺失或 null，`trig_offset` 與 `length` 留空必填
 上述缺值情境仍填入 `ro_length = 1.0 us`。
 已設的 kappa 須為有限正數，mixer 頻率須為有限數，group time_of_fly 須為有限非負數。
 無效的已設來源會讓 Open／Reset 報錯。
-Readout 欄位說明逐項列出這些來源。
+本節逐項列出這些來源。
 候選**未經裝置確認**，不是 mux route timing 校準，也不保證所有 tone 符合硬體通帶。
 Run 邊界沿既有 capability 檢查拒絕不支援的 generator、ADC 或頻率設定。
 Run 前核對 mixer、接線、功率與 timing，必要時修改候選。

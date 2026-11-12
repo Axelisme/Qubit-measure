@@ -18,10 +18,7 @@ from pydantic import Field
 from zcu_tools.analysis.fitting import fit_decay
 from zcu_tools.analysis.readout_chain import (
     CycleCheck,
-    CycleFit,
-    CycleRelaxation,
     CycleSums,
-    RateModel,
     RateNuisances,
     cycle_curves,
     fit_cycle,
@@ -59,10 +56,30 @@ from zcu_lab.v2.chain._cycle import (
 )
 from zcu_lab.v2.support import live_line
 
+DELAY_AXIS = VariableAxisSpec(label="Time", unit="s", field_name="axis", scale=1e-6)
 
-def t1_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
-    """Project mean complex IQ onto its principal real axis for the T1 seed."""
-    return rotate2real(signals).real
+
+@dataclass(frozen=True)
+class ChainT1Analysis:
+    """Rate-equation fit of all 65 numbers and its checks.
+
+    t1 and t1_err are T1 in us and its Wald error: T1 is the eigen time of the
+    relaxation with the larger amplitude. secondary_time and secondary_time_err
+    are the other eigen time in us and its Wald error. An eigen time with a
+    zero decay rate is infinite, and so is its error. within_point, sharing
+    and curve are the three lack-of-fit checks of fit_cycle (sharing has no
+    p). J and df are the joint weighted residual and its degrees of freedom.
+    """
+
+    t1: float
+    t1_err: float
+    secondary_time: float
+    secondary_time_err: float
+    within_point: CycleCheck
+    sharing: CycleCheck
+    curve: CycleCheck
+    J: float
+    df: int
 
 
 class ChainT1Cfg(ConfigBase):
@@ -92,14 +109,14 @@ class ChainT1Cfg(ConfigBase):
         int,
         FieldMeta(
             label="Reps",
-            description="Cycles per delay in each round, at least 66: then even one delay gives the first round 65 cycles beyond its mean, enough to estimate the noise of the 65 numbers for the first live curve.",
+            description="Cycles per point in each round, at least 66.",
         ),
     ] = Field(ge=66)
     rounds: Annotated[
         int,
         FieldMeta(
             label="Rounds",
-            description="Software rounds. The live plot updates after each round.",
+            description="Software acquisition rounds.",
         ),
     ] = 1
     relax_delay: Annotated[
@@ -111,98 +128,6 @@ class ChainT1Cfg(ConfigBase):
             description="Thermalisation wait K before every cycle; set at least 5 T1 so each cycle starts in thermal equilibrium.",
         ),
     ]
-
-
-@dataclass(frozen=True)
-class ChainT1Analysis:
-    """Rate-equation fit of all 65 numbers and its checks.
-
-    t1 and t1_err are T1 in us and its Wald error: T1 is the eigen time of the
-    relaxation with the larger amplitude. secondary_time and secondary_time_err
-    are the other eigen time in us and its Wald error. An eigen time with a
-    zero decay rate is infinite, and so is its error. within_point, sharing
-    and curve are the three lack-of-fit checks of fit_cycle (sharing has no
-    p). J and df are the joint weighted residual and its degrees of freedom.
-    """
-
-    t1: float
-    t1_err: float
-    secondary_time: float
-    secondary_time_err: float
-    within_point: CycleCheck
-    sharing: CycleCheck
-    curve: CycleCheck
-    J: float
-    df: int
-
-
-# Delays are us in memory and seconds on disk.
-DELAY_AXIS = VariableAxisSpec(label="Time", unit="s", field_name="axis", scale=1e-6)
-
-
-def _plot_populations(
-    plots: Plots,
-    delays: NDArray[np.float64],
-    model: RateModel,
-    fit: CycleFit,
-    nuisances: RateNuisances,
-    relaxation: CycleRelaxation,
-) -> None:
-    """Publish "populations": first-read populations above their residuals.
-
-    The upper panel has fit.populations with Wald error bars and the fitted
-    model on a dense axis. The lower panel has (point - curve) / error at each
-    delay. States are named g, e, f from the largest fitted thermal population
-    down. The title gives T1, the secondary time and the checks.
-    """
-    dense = np.linspace(delays.min(), delays.max(), 400)
-    curves = model.populations(dense, fit.parameters, nuisances)
-    at_points = model.populations(delays, fit.parameters, nuisances)
-    # A zero Wald error gives a non-finite residual, which Matplotlib leaves out.
-    residuals = (fit.populations - at_points) / fit.population_errors
-
-    fig, _ = plots.subplots(
-        num="populations",
-        nrows=2,
-        ncols=1,
-        sharex=True,
-        figsize=(config.figsize[0], 1.5 * config.figsize[1]),
-        gridspec_kw={"height_ratios": [3, 1]},
-    )
-    ax, residual_ax = fig.axes
-
-    by_thermal = np.argsort(nuisances.thermal)[::-1]
-    for name, state, color in zip("gef", by_thermal, ("C0", "C1", "C2"), strict=True):
-        ax.errorbar(
-            delays,
-            fit.populations[:, state],
-            yerr=fit.population_errors[:, state],
-            fmt="o",
-            markersize=3,
-            color=color,
-            label=f"{name}, thermal {nuisances.thermal[state]:.2f}",
-        )
-        ax.plot(dense, curves[:, state], color=color)
-        residual_ax.plot(delays, residuals[:, state], "o-", markersize=3, color=color)
-
-    ax.set_ylabel("First-read population")
-    ax.set_title(
-        f"T1 = {relaxation.t1:.4g} ± {relaxation.t1_error:.2g} us, "
-        f"secondary time {relaxation.secondary_time:.4g} ± "
-        f"{relaxation.secondary_error:.2g} us\n{checks_text(fit)}",
-        fontsize=9,
-    )
-    # Outside the axes: the curves fill the whole population range.
-    ax.legend(fontsize=8, loc="upper left", bbox_to_anchor=(1.01, 1.0))
-    ax.grid(True)
-
-    # The band is the 95% range of a standard normal residual.
-    residual_ax.axhspan(-1.96, 1.96, color="0.9", zorder=0)
-    residual_ax.axhline(0.0, color="0.4", linewidth=0.8)
-    residual_ax.set_xlabel("Delay (us)")
-    residual_ax.set_ylabel("Residual / error")
-    residual_ax.grid(True)
-    fig.tight_layout()
 
 
 class ChainT1Exp(Experiment[CycleSums, ChainT1Cfg]):
@@ -311,7 +236,7 @@ class ChainT1Exp(Experiment[CycleSums, ChainT1Cfg]):
 
         # 1. Starting value: the T1 of a single-decay fit of the first read.
         first_read_t1 = float(
-            fit_decay(delays, t1_signal2real(first_read_iq(sums))).decay_time
+            fit_decay(delays, rotate2real(first_read_iq(sums)).real).decay_time
         )
 
         # 2. Joint fit of all 65 numbers.
@@ -322,7 +247,61 @@ class ChainT1Exp(Experiment[CycleSums, ChainT1Cfg]):
         # A RateModel fit always has relaxation and RateNuisances.
         assert relaxation is not None and isinstance(nuisances, RateNuisances)
 
-        _plot_populations(plots, delays, model, fit, nuisances, relaxation)
+        population_dense = np.linspace(delays.min(), delays.max(), 400)
+        population_curves = model.populations(
+            population_dense, fit.parameters, nuisances
+        )
+        population_at_points = model.populations(delays, fit.parameters, nuisances)
+        population_residuals = (
+            fit.populations - population_at_points
+        ) / fit.population_errors
+        population_fig, _ = plots.subplots(
+            num="populations",
+            nrows=2,
+            ncols=1,
+            sharex=True,
+            figsize=(config.figsize[0], 1.5 * config.figsize[1]),
+            gridspec_kw={"height_ratios": [3, 1]},
+        )
+        population_ax, population_residual_ax = population_fig.axes
+        population_by_thermal = np.argsort(nuisances.thermal)[::-1]
+        for population_name, population_state, population_color in zip(
+            "gef", population_by_thermal, ("C0", "C1", "C2"), strict=True
+        ):
+            population_ax.errorbar(
+                delays,
+                fit.populations[:, population_state],
+                yerr=fit.population_errors[:, population_state],
+                fmt="o",
+                markersize=3,
+                color=population_color,
+                label=f"{population_name}, thermal {nuisances.thermal[population_state]:.2f}",
+            )
+            population_ax.plot(
+                population_dense,
+                population_curves[:, population_state],
+                color=population_color,
+            )
+            population_residual_ax.plot(
+                delays,
+                population_residuals[:, population_state],
+                "o-",
+                markersize=3,
+                color=population_color,
+            )
+        population_ax.set_ylabel("First-read population")
+        population_ax.set_title(
+            f"T1 = {relaxation.t1:.4g} ± {relaxation.t1_error:.2g} us, secondary time {relaxation.secondary_time:.4g} ± {relaxation.secondary_error:.2g} us\n{checks_text(fit)}",
+            fontsize=9,
+        )
+        population_ax.legend(fontsize=8, loc="upper left", bbox_to_anchor=(1.01, 1.0))
+        population_ax.grid(True)
+        population_residual_ax.axhspan(-1.96, 1.96, color="0.9", zorder=0)
+        population_residual_ax.axhline(0.0, color="0.4", linewidth=0.8)
+        population_residual_ax.set_xlabel("Delay (us)")
+        population_residual_ax.set_ylabel("Residual / error")
+        population_residual_ax.grid(True)
+        population_fig.tight_layout()
 
         return ChainT1Analysis(
             t1=relaxation.t1,

@@ -26,6 +26,7 @@ Calibrate the readout with `onetone/freq` first, as for `twotone/freq`. Enter th
 The Form uses the same sources and starting values as `twotone/freq`: 301 points at `$qubit.freq` ± 20 * `$qubit.kappa` in MHz, a fresh `qub_probe` pulse with gain 0.1 and length 1.0 us, and the `$resonator.module.readout` slot or a fresh `readout` template.
 Readout must be a pulse readout; a mux readout module is rejected by the Form.
 Reset uses the optional `$qubit.module.reset` slot. Init Pulse starts disabled; when enabled it plays once per dwell, before the chain.
+Choose a calibrated fixed-frequency preparation pulse, with frequency in MHz and duration in us.
 Missing or invalid sources leave the affected fields empty and Invalid; supply them before Run.
 
 Reps starts at 100 and Rounds at 100, which is 10 000 fast sweeps in total.

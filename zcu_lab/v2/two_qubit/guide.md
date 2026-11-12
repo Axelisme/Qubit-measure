@@ -100,6 +100,8 @@ Herald 九類比例圖的 **pass fraction** 是 herald g,g 計數除以全部已
 | 8. [T1](../twotone/time_domain/t1/guide.md) | 看 π pulse 後的 delay decay、fit 與誤差，時間窗涵蓋衰減至接近平坦的區域。 | Preview `qubit.t1` 與誤差。更新後 Reset 後續表單，重算依 T1 建立的等待初值。 |
 | 9. [T2 Ramsey](../twotone/time_domain/t2ramsey/guide.md) 與 [T2 echo](../twotone/time_domain/t2echo/guide.md) | Ramsey 看 fringe 與衰減，echo 看重聚焦後的總 delay decay。缺 T2 初值時人工填時間窗。 | Preview `qubit.t2r`／`t2e`。Ramsey 需來源 cfg、實際 detune 與 fringe fit 齊全才另提 frequency；echo 只提 T2。Pulse module 維持原值。 |
 
+F1/F2 drive 分別填入各自的 charge-line pulse，包含 frequency、signed gain、NQZ 與 envelope duration。Frequency 單位為 MHz。Signed gain 單位為 a.u.，範圍為 [-1, 1]。Envelope duration 單位為 us。先做 F1 與 F2 的 frequency 與 amplitude／length Rabi，取得各自的 pulse 參考。高能階 drive 範圍及 CZ pulse slot 仍由操作者確認。
+
 Rabi 的 module 與 slot rows 可分開 Apply。確認 x180/x90 指向這次接受的 keys；只更新 module 時，slot 可能仍指向舊 pulse。Ramsey 更新 qubit frequency 後，也須核對後續實際 pulse frequency，scalar 與 library pulse 是獨立設定。
 
 記錄 GE 的 readout route、gain、frequency、積分窗口與其他讀出條件。Joint 分類只取 saved mux readout cfg 中角色 tone 的 circle centers 與 radius，不從單 qubit point 校準搬值。改讀出條件後要重跑 mux GE 及 GE Post。未啟用 reset 的非 heralded 版從熱 ensemble 開始；heralded 版另依 herald 結果分組。兩版都保存全部類別總和。單 qubit Rabi／T1／T2 使用上述既有實驗入口。

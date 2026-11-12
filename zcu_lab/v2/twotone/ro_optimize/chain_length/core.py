@@ -96,21 +96,25 @@ class ChainLengthExp(Experiment[ThermalChainSums, ChainLengthCfg]):
         Return shot count and all 107 sums per setting.
         Stop keeps settings with a completed round; none raises RuntimeError.
         """
+        # 1. Quantize integration windows on the readout ADC clock.
         settings = sweep2array(
             cfg.length, "time", {"soccfg": context.soccfg, "ro_ch": cfg.readout.ro_ch}
         )
+        # 2. Track thermal-chain scores and diagnostics as the integration window changes.
         fig, _ = context.plots.subplots(
             3, 1, num="measurement", sharex=True, figsize=(8, 8)
         )
 
         @context.plots.on_plot_thread
         def draw(result: ThermalChainScore | None) -> tuple[Artist, ...]:
+            """Refresh the measurement artists from the current acquired data."""
             artists = _draw_metric(tuple(fig.axes), result)
             fig.tight_layout()
             return artists
 
         def update(sums: NDArray[np.float64]) -> None:
             # Calculate off the GUI thread; the plot thread only draws.
+            """Refresh the measurement artists from the current acquired data."""
             saved = finished_sums(settings, sums)
             try:
                 result = thermal_chain_score(saved)
@@ -125,7 +129,7 @@ class ChainLengthExp(Experiment[ThermalChainSums, ChainLengthCfg]):
             on_update=update,
         )
 
-        # No drive: each shot reads the thermal state 16 times, then waits K.
+        # 3. Compare thermal readout chains with pulse duration matched to each ADC window.
         with Schedule(shot_sums, scope=context.scope) as sched:
             for _, step in sched.scan("length", settings.tolist()):
                 builder = TimelineBuilder(
@@ -169,8 +173,10 @@ class ChainLengthExp(Experiment[ThermalChainSums, ChainLengthCfg]):
         mark the maximum score; exact ties keep acquisition order. Errors
         do not affect ranking. Invalid moments raise ValueError.
         """
+        # 1. Rank integration windows by the thermal-chain score from saved moments.
         del options
         result = thermal_chain_score(source.result)
+        # 2. Inspect score, QND and correlation-growth diagnostics for the window ranking.
         fig, _ = plots.subplots(3, 1, num="metric", sharex=True, figsize=(8, 8))
         _draw_metric(tuple(fig.axes), result)
         fig.tight_layout()

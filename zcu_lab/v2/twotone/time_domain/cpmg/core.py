@@ -47,13 +47,6 @@ from zcu_tools.utils.process import rotate2real
 from zcu_lab.v2.support import live_heatmap, live_line
 
 
-def cpmg_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
-    real_signals = rotate2real(signals).real
-    max_vals = np.max(real_signals, axis=1, keepdims=True)
-    min_vals = np.min(real_signals, axis=1, keepdims=True)
-    return (real_signals - min_vals) / np.clip(max_vals - min_vals, 1e-12, None)
-
-
 @dataclass(frozen=True)
 class CPMG_Result:
     """Mean complex IQ for each pi-pulse count and total evolution time.
@@ -65,6 +58,38 @@ class CPMG_Result:
     ns: NDArray[np.int64]
     delays: NDArray[np.float64]
     signals: NDArray[np.complex128]
+
+
+@validated_dataclass(frozen=True)
+class CPMGAnalyzeOptions:
+    """Fringe fitting and optional reference coherence times in us."""
+
+    fit_fringe: Annotated[bool, FieldMeta(label="Fit fringes")] = True
+    t2r: Annotated[float | None, FieldMeta(label="Ramsey T2 reference (us)")] = None
+    t1: Annotated[float | None, FieldMeta(label="T1 reference (us)")] = None
+
+
+@dataclass(frozen=True)
+class CPMGAnalysis:
+    """Weighted T2(n) = T2_1 * n**gamma summary; times and errors are in us.
+
+    fit_rows counts accepted rows with finite positive n, T2 and uncertainty.
+    Fewer than three usable rows leaves all four fit values None.
+    """
+
+    t2_1_us: float | None
+    t2_1_err_us: float | None
+    gamma: float | None
+    gamma_err: float | None
+    fit_rows: int
+
+
+def cpmg_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
+    """Convert mean complex IQ to the real contrast used by live and analysis plots."""
+    real_signals = rotate2real(signals).real
+    max_vals = np.max(real_signals, axis=1, keepdims=True)
+    min_vals = np.min(real_signals, axis=1, keepdims=True)
+    return (real_signals - min_vals) / np.clip(max_vals - min_vals, 1e-12, None)
 
 
 class CPMG_Cfg(ConfigBase):
@@ -100,36 +125,19 @@ class CPMG_Cfg(ConfigBase):
     earlystop_snr: Annotated[float | None, FieldMeta(label="Early-stop SNR")] = None
 
 
-@validated_dataclass(frozen=True)
-class CPMGAnalyzeOptions:
-    """Fringe fitting and optional reference coherence times in us."""
-
-    fit_fringe: Annotated[bool, FieldMeta(label="Fit fringes")] = True
-    t2r: Annotated[float | None, FieldMeta(label="Ramsey T2 reference (us)")] = None
-    t1: Annotated[float | None, FieldMeta(label="T1 reference (us)")] = None
-
-
-@dataclass(frozen=True)
-class CPMGAnalysis:
-    """Weighted T2(n) = T2_1 * n**gamma summary; times and errors are in us.
-
-    fit_rows counts accepted rows with finite positive n, T2 and uncertainty.
-    Fewer than three usable rows leaves all four fit values None.
-    """
-
-    t2_1_us: float | None
-    t2_1_err_us: float | None
-    gamma: float | None
-    gamma_err: float | None
-    fit_rows: int
-
-
 def _summarize_t2(
     ns: NDArray[np.int64],
     t2s: NDArray[np.float64],
     t2errs: NDArray[np.float64],
 ) -> CPMGAnalysis:
-    """Fit log T2 against log n using absolute relative T2 uncertainties."""
+    """Return the weighted log-log T2 summary without changing inputs or plots.
+
+    Pass aligned pulse counts, fitted T2 values and their absolute errors in us.
+    Only finite positive rows contribute. Fewer than three usable rows return
+    None coefficients and their row count; otherwise return the power-law
+    coefficients and errors from the unscaled covariance. NumPy fitting errors
+    propagate.
+    """
     usable = (
         np.isfinite(ns)
         & (ns > 0)
@@ -164,6 +172,7 @@ CPMG_GROUPED_VARIABLES = (CPMG_LENGTHS_VARIABLE, CPMG_SIGNALS_VARIABLE)
 
 
 def cpmg_result_to_grouped_payloads(result: CPMG_Result) -> dict[str, LabberPayload]:
+    """Map CPMG count and time arrays to the declared grouped storage payloads."""
     return CPMG_GROUPED_AXES_SPEC.payloads_from_result(result)
 
 
@@ -172,6 +181,7 @@ def _validate_cpmg_arrays(
     lengths: NDArray[np.float64],
     signals: NDArray[np.complex128],
 ) -> None:
+    """Reject saved arrays that do not match this experiment's result layout."""
     if times.ndim != 1:
         raise ValueError(f"CPMG ns must be 1-D, got shape {times.shape}")
     if lengths.ndim != 2:
@@ -189,6 +199,7 @@ def _validate_cpmg_arrays(
 
 
 def _validate_cpmg_result(result: CPMG_Result) -> None:
+    """Reject saved arrays that do not match this experiment's result layout."""
     _validate_cpmg_arrays(
         np.asarray(result.ns, dtype=np.int64),
         np.asarray(result.delays, dtype=np.float64),
@@ -197,6 +208,7 @@ def _validate_cpmg_result(result: CPMG_Result) -> None:
 
 
 def _build_cpmg_result(data: GroupedLoadData[CPMG_Cfg]) -> CPMG_Result:
+    """Restore the experiment result from its saved variables and axis coordinates."""
     lengths_variable = data.variable(CPMG_LENGTHS_VARIABLE)
     signals_variable = data.variable(CPMG_SIGNALS_VARIABLE)
     ns = lengths_variable.axes[1].astype(np.int64)
@@ -252,7 +264,12 @@ CPMG_GROUPED_AXES_SPEC = GroupedAxesSpec(
 def _prepare_delays(
     cfg: CPMG_Cfg, times: NDArray[np.int64], soccfg: QickConfig
 ) -> tuple[list[SweepCfg], NDArray[np.float64]]:
-    """Round each count's total-time grid and reject intervals too short for pulses."""
+    """Round total-time grids and raise ValueError for too-short pulse intervals.
+
+    Pass the run cfg, pi-pulse counts and board timing configuration. Return the
+    per-count SweepCfg windows and a (count, time) array of rounded lengths in
+    us. Windows retain cfg references; no input is changed and no plot is made.
+    """
     pi2_pulse, pi_pulse = cfg.pi2_pulse, cfg.pi_pulse
     windows = [cfg.delay] * len(times) if isinstance(cfg.delay, SweepCfg) else cfg.delay
     lengths = np.array(
@@ -282,7 +299,12 @@ def _prepare_delays(
 def _live_plot(
     plots: Plots, times: NDArray[np.int64]
 ) -> Callable[[tuple[NDArray[np.float64], NDArray[np.float64], float]], None]:
-    """Show the normalized count/time map and its two most recent scan rows."""
+    """Show the count/time map and return its plot-thread update callback.
+
+    Pass the run plots and pi-pulse counts. The callback consumes a time axis in
+    us, normalized (count, time) contrast and the current SNR as a flat payload.
+    It updates the heatmap, two recent rows and SNR title; inputs are unchanged.
+    """
     fig, _ = plots.subplots(1, 2, num="measurement")
     heat_ax, line_ax = fig.axes
     heat_ax.set(xlabel="Number of Pi", ylabel="Time idxs")
@@ -302,6 +324,7 @@ def _live_plot(
 
     @plots.on_plot_thread
     def update(data: tuple[NDArray[np.float64], NDArray[np.float64], float]):
+        """Refresh the map, recent rows and SNR title; return changed artists."""
         ys, real, snr = data
         valid = np.flatnonzero(~np.all(np.isnan(real), axis=1))
         current = int(valid[-1]) if valid.size else -1
@@ -362,6 +385,7 @@ class CPMG_Exp(Experiment[CPMG_Result, CPMG_Cfg]):
         current_snr = 0.0
 
         def update_snr(snr: float) -> None:
+            """Record the latest checked SNR for the live plot title."""
             nonlocal current_snr
             current_snr = snr
 
@@ -371,9 +395,11 @@ class CPMG_Exp(Experiment[CPMG_Result, CPMG_Cfg]):
             (len(times), len(length_idxs)),
             on_update=lambda data: update_viewer(data),
         )
+        # 3. Measure refocused coherence versus evolution time for each pi-pulse count.
         with Schedule(signals_buffer, scope=context.scope) as sched:
 
             def update_viewer(data: NDArray[np.complex128]) -> None:
+                """Refresh the count map and history using the current time grid and SNR."""
                 update(
                     (lengths[current_length_idx], cpmg_signal2real(data), current_snr)
                 )
@@ -466,6 +492,7 @@ class CPMG_Exp(Experiment[CPMG_Result, CPMG_Cfg]):
         n, T2 and uncertainty are usable. Fewer than three usable rows gives
         None fit values without failing or changing the plotted T2 points.
         """
+        # 1. Separate real-IQ decay fits from normalized contrast used to compare pulse counts.
         result = source.result
         fit_fringe, t2r, t1 = options.fit_fringe, options.t2r, options.t1
 
@@ -474,7 +501,19 @@ class CPMG_Exp(Experiment[CPMG_Result, CPMG_Cfg]):
         real_signals2D = rotate2real(signals2D).real
         norm_signals = cpmg_signal2real(signals2D)
 
-        def is_good_fit(lens, fit_signal, real_signal, t2r, t2err) -> bool:
+        def is_good_fit(
+            *,
+            lens: NDArray[np.float64],
+            fit_signal: NDArray[np.float64],
+            real_signal: NDArray[np.float64],
+            t2r: float,
+            t2err: float,
+        ) -> bool | np.bool_:
+            """Return whether decay time, uncertainty and residual meet fit limits.
+
+            Pass zero-origin times in us, fitted/measured real IQ and the fitted
+            decay time/error in us. Return a boolean without mutation or plotting.
+            """
             fit_ptp = np.ptp(fit_signal)
             residual = real_signal - fit_signal
             smooth_residual = gaussian_filter1d(residual, sigma=1)
@@ -483,7 +522,7 @@ class CPMG_Exp(Experiment[CPMG_Result, CPMG_Cfg]):
                 t2r < np.max(lens) and t2err < 0.5 * t2r and fit_ptp > 4 * mean_residual
             )
 
-        # Fit each complete curve relative to its own first sampled time.
+        # 2. Fit each complete curve relative to its own first sampled time.
         t2s = np.full(len(times), np.nan, dtype=np.float64)
         t2errs = np.zeros_like(t2s)
         for i, (real_signal, lens) in enumerate(
@@ -502,7 +541,13 @@ class CPMG_Exp(Experiment[CPMG_Result, CPMG_Cfg]):
             t2err = fit.decay_time_err
             fit_signal = fit.curve
 
-            if is_good_fit(plens, fit_signal, real_signal, t2, t2err):
+            if is_good_fit(
+                lens=plens,
+                fit_signal=fit_signal,
+                real_signal=real_signal,
+                t2r=t2,
+                t2err=t2err,
+            ):
                 t2s[i] = t2
                 t2errs[i] = t2err
 
@@ -511,7 +556,7 @@ class CPMG_Exp(Experiment[CPMG_Result, CPMG_Cfg]):
 
         summary = _summarize_t2(times, t2s, t2errs)
 
-        # Compare decay times across pulse counts without treating IQ as population.
+        # 3. Compare decay times across pulse counts without treating IQ as population.
         fig, _ = plots.subplots(num="fit", nrows=1, ncols=2, figsize=(8, 3))
         ax1, ax2 = fig.axes
 

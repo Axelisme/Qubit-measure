@@ -18,8 +18,6 @@ from pydantic import Field
 from zcu_tools.analysis.fitting import fit_rabi
 from zcu_tools.analysis.readout_chain import (
     CycleCheck,
-    CycleFit,
-    CycleModel,
     CycleNuisances,
     CycleSums,
     cycle_curves,
@@ -53,46 +51,7 @@ from zcu_lab.v2.chain._cycle import (
 )
 from zcu_lab.v2.support import live_line
 
-
-class ChainAmpRabiCfg(ConfigBase):
-    qub_pulse: Annotated[
-        Pulse.Cfg,
-        FieldMeta(
-            label="Rabi Pulse",
-            description="Drive pulse D(x) played before each pair of reads; the sweep sets its gain.",
-        ),
-    ]
-    readout: Annotated[
-        PulseReadout.Cfg,
-        FieldMeta(
-            label="Readout",
-            description="Pulse readout played twice after each Rabi pulse.",
-        ),
-    ]
-    gain: Annotated[SweepCfg, FieldMeta(label="Gain", unit="a.u.")]
-    reps: Annotated[
-        int,
-        FieldMeta(
-            label="Reps",
-            description="Cycles per gain in each round, at least 66: then even one gain gives the first round 65 cycles beyond its mean, enough to estimate the noise of the 65 numbers for the first live curve.",
-        ),
-    ] = Field(ge=66)
-    rounds: Annotated[
-        int,
-        FieldMeta(
-            label="Rounds",
-            description="Software rounds. The live plot updates after each round.",
-        ),
-    ] = 1
-    relax_delay: Annotated[
-        float,
-        FieldMeta(
-            label="Relax delay",
-            unit="us",
-            decimals=3,
-            description="Thermalisation wait K before every cycle; set at least 5 T1 so each cycle starts in thermal equilibrium.",
-        ),
-    ]
+GAIN_AXIS = VariableAxisSpec(label="Gain", unit="", field_name="axis")
 
 
 @dataclass(frozen=True)
@@ -122,8 +81,45 @@ class ChainAmpRabiAnalysis:
     first_read_pi_amp: float
 
 
-# Gains are dimensionless; the record stores them unscaled.
-GAIN_AXIS = VariableAxisSpec(label="Gain", unit="", field_name="axis")
+class ChainAmpRabiCfg(ConfigBase):
+    qub_pulse: Annotated[
+        Pulse.Cfg,
+        FieldMeta(
+            label="Rabi Pulse",
+            description="Drive pulse D(x) played before each pair of reads; the sweep sets its gain.",
+        ),
+    ]
+    readout: Annotated[
+        PulseReadout.Cfg,
+        FieldMeta(
+            label="Readout",
+            description="Pulse readout played twice after each Rabi pulse.",
+        ),
+    ]
+    gain: Annotated[SweepCfg, FieldMeta(label="Gain", unit="a.u.")]
+    reps: Annotated[
+        int,
+        FieldMeta(
+            label="Reps",
+            description="Cycles per point in each round, at least 66.",
+        ),
+    ] = Field(ge=66)
+    rounds: Annotated[
+        int,
+        FieldMeta(
+            label="Rounds",
+            description="Software acquisition rounds.",
+        ),
+    ] = 1
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Thermalisation wait K before every cycle; set at least 5 T1 so each cycle starts in thermal equilibrium.",
+        ),
+    ]
 
 
 class ChainAmpRabiExp(Experiment[CycleSums, ChainAmpRabiCfg]):
@@ -230,7 +226,59 @@ class ChainAmpRabiExp(Experiment[CycleSums, ChainAmpRabiCfg]):
         gains = sums.axis
 
         # 1. Seed from the first-read IQ using this experiment's fit policy.
-        first_read_pi_amp = _fit_first_read(plots, gains, first_read_iq(sums))
+        seed_real_signals = rotate2real(first_read_iq(sums)).real
+        seed_zero_signal = seed_real_signals[np.argmin(np.abs(gains))]
+        if seed_zero_signal > 0.5 * (
+            np.max(seed_real_signals) + np.min(seed_real_signals)
+        ):
+            seed_init_phase = 0.0
+        else:
+            seed_init_phase = 180.0
+        seed_fit = fit_rabi(
+            gains, seed_real_signals, decay=False, init_phase=seed_init_phase
+        )
+        seed_pi_amp, seed_pi_amp_err, seed_pi2_amp, seed_pi2_amp_err, seed_y_fit = (
+            seed_fit.pi_x,
+            seed_fit.pi_x_err,
+            seed_fit.pi2_x,
+            seed_fit.pi2_x_err,
+            seed_fit.curve,
+        )
+        seed_fig, seed_ax = plots.subplots(num="fit", figsize=config.figsize)
+        seed_ax.plot(
+            gains, seed_real_signals, label="meas", ls="-", marker="o", markersize=3
+        )
+        seed_ax.plot(gains, seed_y_fit, label="fit")
+        seed_ax.axvline(
+            seed_pi_amp,
+            ls="--",
+            c="red",
+            label=f"pi = {seed_pi_amp:.3g} ± {seed_pi_amp_err:.2g}",
+        )
+        seed_ax.axvspan(
+            seed_pi_amp - seed_pi_amp_err,
+            seed_pi_amp + seed_pi_amp_err,
+            color="red",
+            alpha=0.2,
+        )
+        seed_ax.axvline(
+            seed_pi2_amp,
+            ls="--",
+            c="red",
+            label=f"pi/2 = {seed_pi2_amp:.3g} ± {seed_pi2_amp_err:.2g}",
+        )
+        seed_ax.axvspan(
+            seed_pi2_amp - seed_pi2_amp_err,
+            seed_pi2_amp + seed_pi2_amp_err,
+            color="red",
+            alpha=0.2,
+        )
+        seed_ax.set_xlabel("Pulse gain (a.u.)")
+        seed_ax.set_ylabel("Signal Real (a.u.)")
+        seed_ax.legend(loc=4)
+        seed_ax.grid(True)
+        seed_fig.tight_layout()
+        first_read_pi_amp = float(seed_pi_amp)
 
         # 2. Joint fit of all 65 numbers with the Rabi curve.
         model = rabi_model()
@@ -243,13 +291,39 @@ class ChainAmpRabiExp(Experiment[CycleSums, ChainAmpRabiCfg]):
         reliability_text = (
             "unavailable" if fit.reliability is None else f"{fit.reliability:.2g}"
         )
-        _plot_populations(
-            plots,
-            model,
-            fit,
-            gains,
-            result=f"pi gain = {pi_amp:.4g} ± {pi_amp_err:.2g}, R = {reliability_text}",
+        population_dense = np.linspace(gains.min(), gains.max(), 400)
+        assert isinstance(fit.nuisances, CycleNuisances)
+        population_fitted = model.populations(
+            population_dense, fit.parameters, fit.nuisances
         )
+        population_fig, population_ax = plots.subplots(
+            num="populations", figsize=config.figsize
+        )
+        for population_state in range(3):
+            population_thermal = fit.nuisances.thermal[population_state]
+            population_ax.errorbar(
+                gains,
+                fit.populations[:, population_state],
+                yerr=fit.population_errors[:, population_state],
+                fmt="o",
+                markersize=3,
+                color=f"C{population_state}",
+                label=f"state {population_state}, thermal {population_thermal:.2f}",
+            )
+            population_ax.plot(
+                population_dense,
+                population_fitted[:, population_state],
+                color=f"C{population_state}",
+            )
+        population_ax.set_xlabel("Pulse gain (a.u.)")
+        population_ax.set_ylabel("First-read population")
+        population_ax.set_title(
+            f"{f'pi gain = {pi_amp:.4g} ± {pi_amp_err:.2g}, R = {reliability_text}'}\n{checks_text(fit)}",
+            fontsize=9,
+        )
+        population_ax.legend(fontsize=8, loc="upper left", bbox_to_anchor=(1.01, 1.0))
+        population_ax.grid(True)
+        population_fig.tight_layout()
 
         return ChainAmpRabiAnalysis(
             pi_amp=pi_amp,
@@ -264,92 +338,3 @@ class ChainAmpRabiExp(Experiment[CycleSums, ChainAmpRabiCfg]):
             df=fit.df,
             first_read_pi_amp=first_read_pi_amp,
         )
-
-
-def _fit_first_read(
-    plots: Plots,
-    gains: NDArray[np.float64],
-    signals: NDArray[np.complex128],
-) -> float:
-    """Fit and plot the first-read seed before the joint cycle analysis."""
-    real_signals = rotate2real(signals).real
-
-    zero_signal = real_signals[np.argmin(np.abs(gains))]
-    if zero_signal > 0.5 * (np.max(real_signals) + np.min(real_signals)):
-        init_phase = 0.0
-    else:
-        init_phase = 180.0
-
-    fit = fit_rabi(gains, real_signals, decay=False, init_phase=init_phase)
-    pi_amp, pi_amp_err, pi2_amp, pi2_amp_err, y_fit = (
-        fit.pi_x,
-        fit.pi_x_err,
-        fit.pi2_x,
-        fit.pi2_x_err,
-        fit.curve,
-    )
-
-    fig, ax = plots.subplots(num="fit", figsize=config.figsize)
-
-    ax.plot(gains, real_signals, label="meas", ls="-", marker="o", markersize=3)
-    ax.plot(gains, y_fit, label="fit")
-    ax.axvline(pi_amp, ls="--", c="red", label=f"pi = {pi_amp:.3g} ± {pi_amp_err:.2g}")
-    ax.axvspan(pi_amp - pi_amp_err, pi_amp + pi_amp_err, color="red", alpha=0.2)
-    ax.axvline(
-        pi2_amp,
-        ls="--",
-        c="red",
-        label=f"pi/2 = {pi2_amp:.3g} ± {pi2_amp_err:.2g}",
-    )
-    ax.axvspan(pi2_amp - pi2_amp_err, pi2_amp + pi2_amp_err, color="red", alpha=0.2)
-    ax.set_xlabel("Pulse gain (a.u.)")
-    ax.set_ylabel("Signal Real (a.u.)")
-    ax.legend(loc=4)
-    ax.grid(True)
-
-    fig.tight_layout()
-
-    return float(pi_amp)
-
-
-def _plot_populations(
-    plots: Plots,
-    model: CycleModel,
-    fit: CycleFit,
-    axis: NDArray[np.float64],
-    *,
-    result: str,
-) -> None:
-    """Publish "populations": per-point populations and the fitted curves.
-
-    Points are fit.populations with their Wald error bars; lines are the
-    model's populations at the fitted values on a dense axis, one color per
-    state. The legend gives each state's fitted thermal population, since
-    state labels are arbitrary.
-    result is the first title line, for example the fitted parameter.
-    """
-    dense = np.linspace(axis.min(), axis.max(), 400)
-    # fit_cycle always gives a CycleModel fit CycleNuisances.
-    assert isinstance(fit.nuisances, CycleNuisances)
-    fitted = model.populations(dense, fit.parameters, fit.nuisances)
-
-    fig, ax = plots.subplots(num="populations", figsize=config.figsize)
-    for state in range(3):
-        thermal = fit.nuisances.thermal[state]
-        ax.errorbar(
-            axis,
-            fit.populations[:, state],
-            yerr=fit.population_errors[:, state],
-            fmt="o",
-            markersize=3,
-            color=f"C{state}",
-            label=f"state {state}, thermal {thermal:.2f}",
-        )
-        ax.plot(dense, fitted[:, state], color=f"C{state}")
-    ax.set_xlabel("Pulse gain (a.u.)")
-    ax.set_ylabel("First-read population")
-    ax.set_title(f"{result}\n{checks_text(fit)}", fontsize=9)
-    # Outside the axes: the curves fill the whole population range.
-    ax.legend(fontsize=8, loc="upper left", bbox_to_anchor=(1.01, 1.0))
-    ax.grid(True)
-    fig.tight_layout()

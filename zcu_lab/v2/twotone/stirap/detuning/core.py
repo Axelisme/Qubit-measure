@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Annotated, ClassVar, Self
 
 import numpy as np
+from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from pydantic import Field, model_validator
 from zcu_tools.analysis.singleshot import (
@@ -40,6 +41,23 @@ from zcu_tools.program.v2.modules.readout import centroid3_classifier
 from zcu_tools.program.v2.modules.waveform import EnvelopeWaveformCfg
 
 from .._pulses import drive_pulse
+
+STATE_LABELS = ("g", "e", "f")
+
+
+@dataclass(frozen=True)
+class StirapDetuningResult:
+    """counts: g/e/f shot counts, shaped (Ny,Nx,3), not corrected populations.
+
+    x_values: requested Pump detuning in MHz, shape (Nx,).
+    y_values: requested Stokes detuning in MHz, shape (Ny,).
+    The final counts axis has g/e/f order.
+    Unfinished points remain NaN. No intermediate-state oracle is included.
+    """
+
+    x_values: NDArray[np.float64]
+    y_values: NDArray[np.float64]
+    counts: NDArray[np.float64]
 
 
 class StirapDetuningCfg(ConfigBase):
@@ -124,21 +142,6 @@ class StirapDetuningCfg(ConfigBase):
         return self
 
 
-@dataclass(frozen=True)
-class StirapDetuningResult:
-    """counts: g/e/f shot counts, shaped (Ny,Nx,3), not corrected populations.
-
-    x_values: requested Pump detuning in MHz, shape (Nx,).
-    y_values: requested Stokes detuning in MHz, shape (Ny,).
-    The final counts axis has g/e/f order.
-    Unfinished points remain NaN. No intermediate-state oracle is included.
-    """
-
-    x_values: NDArray[np.float64]
-    y_values: NDArray[np.float64]
-    counts: NDArray[np.float64]
-
-
 def restore_result(data: GroupedLoadData[StirapDetuningCfg]) -> StirapDetuningResult:
     """Restore coordinates and g/e/f counts; missing counts raises ValueError."""
     counts = data.variable("counts")
@@ -200,6 +203,7 @@ class StirapDetuningExp(Experiment[StirapDetuningResult, StirapDetuningCfg]):
         acquisition. Single-fluxonium preflight requires both generators to bind charge lines.
         Hardware wiring roles remain the operator responsibility.
         """
+        # 1. Require calibrated g/e/f readout before planning the pump-Stokes detuning grid.
         centroid3_classifier(cfg.readout, ro_ch=cfg.readout.ro_ch)
         xs = np.linspace(
             cfg.pump_detuning.start, cfg.pump_detuning.stop, cfg.pump_detuning.expts
@@ -210,7 +214,8 @@ class StirapDetuningExp(Experiment[StirapDetuningResult, StirapDetuningCfg]):
             cfg.stokes_detuning.expts,
         )
         x_label = "Pump detuning (MHz)"
-        buffer = SignalBuffer((len(ys), len(xs), 3), dtype=np.float64)
+        buffer = SignalBuffer((len(ys), len(xs), len(STATE_LABELS)), dtype=np.float64)
+        # 2. Measure detuning-dependent transfer at fixed drive amplitudes and relative timing.
         with Schedule(buffer, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 context.soccfg,
@@ -242,7 +247,9 @@ class StirapDetuningExp(Experiment[StirapDetuningResult, StirapDetuningCfg]):
                 context.soc,
                 processor=shot_sums(program, [Classify("readout")]),
                 options=RunOptions(
-                    converter=lambda sums: sums.reshape(len(ys), len(xs), 3)
+                    converter=lambda sums: sums.reshape(
+                        len(ys), len(xs), len(STATE_LABELS)
+                    )
                 ),
                 charge_requirements=(
                     ChargeDriveRequirement("Pump", cfg.pump_ch),
@@ -250,10 +257,16 @@ class StirapDetuningExp(Experiment[StirapDetuningResult, StirapDetuningCfg]):
                 ),
             )
         result = StirapDetuningResult(xs, ys, buffer.array)
+        # 3. Inspect the acquired f-label fraction across both drive detunings.
         figure, _ = context.plots.subplots(num="measurement", layout="constrained")
 
         @context.plots.on_plot_thread
-        def draw(_data):
+        def draw(_data: None) -> tuple[Figure]:
+            """Add the acquired STIRAP f-fraction map and colorbar to the figure.
+
+            _data is the unused None trigger; counts come from the captured result.
+            Return the changed figure; the trigger does not supply plot data.
+            """
             ax = figure.axes[0]
             fractions = result.counts / result.counts.sum(axis=-1, keepdims=True)
             image = ax.pcolormesh(xs, ys, fractions[..., 2], shading="nearest")
@@ -282,6 +295,7 @@ class StirapDetuningExp(Experiment[StirapDetuningResult, StirapDetuningCfg]):
         requested scan coordinates; preparation-label estimates are not fidelity.
         Incomplete/nonfinite or empty counts and singular confusion fail explicitly.
         """
+        # 1. Recover g/e/f populations across detunings with the saved readout calibration.
         del options
         cfg = source.cfg
         if cfg is None:
@@ -294,24 +308,30 @@ class StirapDetuningExp(Experiment[StirapDetuningResult, StirapDetuningCfg]):
             )
         raw = counts / counts.sum(axis=-1, keepdims=True)
         result = analyze_centroid3_populations(raw, calibration)
+        # 2. Compare raw and confusion-corrected transfer maps for all three labels.
         figure, _ = plots.subplots(
             num="fit",
             nrows=2,
-            ncols=3,
+            ncols=len(STATE_LABELS),
             figsize=(11, 7),
             layout="constrained",
         )
 
         @plots.on_plot_thread
-        def populations(_data):
+        def populations(_data: None) -> tuple[Figure]:
+            """Add raw and confusion-corrected STIRAP maps and colorbars to the figure.
+
+            _data is the unused None trigger; populations come from the captured analysis.
+            Return the changed figure; the trigger does not supply plot data.
+            """
             for row, (values, title) in enumerate(
                 (
                     (result.raw_populations, "Raw g/e/f fractions"),
                     (result.corrected_populations, "Corrected g/e/f (unclipped)"),
                 )
             ):
-                for label, state in enumerate(("g", "e", "f")):
-                    ax = figure.axes[row * 3 + label]
+                for label, state in enumerate(STATE_LABELS):
+                    ax = figure.axes[row * len(STATE_LABELS) + label]
                     image = ax.pcolormesh(
                         source.result.x_values,
                         source.result.y_values,

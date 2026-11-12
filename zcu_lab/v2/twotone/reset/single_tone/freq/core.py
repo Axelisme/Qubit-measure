@@ -36,7 +36,14 @@ class FreqResult:
     signals: NDArray[np.complex128]
 
 
+@dataclass(frozen=True)
+class FreqAnalysis:
+    freq: float
+    fwhm: float
+
+
 def reset_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
+    """Convert mean complex IQ to the real contrast used by live and analysis plots."""
     return rotate2real(signals).real
 
 
@@ -65,12 +72,6 @@ class FreqCfg(ConfigBase):
     ]
 
 
-@dataclass(frozen=True)
-class FreqAnalysis:
-    freq: float
-    fwhm: float
-
-
 class FreqExp(Experiment[FreqResult, FreqCfg]):
     AXES_SPEC: ClassVar[AxesSpec[FreqResult, FreqCfg]] = AxesSpec(
         axes=(AxesSpec.Axis("freqs", label="Frequency", unit="Hz", scale=1e6),),
@@ -89,7 +90,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         complex IQ shaped (Nfreq,). The projected response supports a
         resonance fit; it is not a calibrated reset fidelity.
         """
-        # Quantize reset frequency on the tested pulse's generator.
+        # 1. Quantize reset frequency on the tested pulse's generator.
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
 
@@ -100,7 +101,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
             {"soccfg": soccfg, "gen_ch": reset_cfg.pulse_cfg.ch},
         )
 
-        # Retain complex IQ and display its projection along the response axis.
+        # 2. Retain complex IQ and display its projection along the response axis.
         plots = context.plots
         fig, ax = plots.subplots(num="measurement")
         ax.set(xlabel="Frequency (MHz)", ylabel="Amplitude")
@@ -108,12 +109,13 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
 
         @plots.on_plot_thread
         def update(data: NDArray[np.complex128]) -> tuple[Artist, ...]:
+            """Refresh the measurement artists from the current acquired data."""
             return viewer.set(freqs, reset_signal2real(data))
 
         fig.show()
         signals_buffer = SignalBuffer((len(freqs),), on_update=update)
 
-        # Sweep the tested reset frequency after the optional preparation.
+        # 3. Resolve the prepared state's reset response versus sideband frequency.
         with Schedule(signals_buffer, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
@@ -140,12 +142,13 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         Omit unmeasured NaN points, return the resonance center and FWHM
         in MHz, and publish fit. source.cfg may be None.
         """
+        # 1. Estimate the reset resonance and linewidth from measured frequency points.
         del options
         result = source.result
 
         freqs, signals = result.freqs, result.signals
 
-        # Discard NaNs (possible early abort)
+        # Discard NaNs left by a possible early abort.
         val_mask = ~np.isnan(signals)
         freqs = freqs[val_mask]
         signals = signals[val_mask]
@@ -156,6 +159,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
             freqs, real_signals, type="lor"
         )
 
+        # 2. Assess the Lorentzian reset resonance and its frequency uncertainty.
         fig, ax = plots.subplots(num="fit", figsize=config.figsize)
 
         ax.plot(freqs, real_signals, label="signal", marker="o", markersize=3)

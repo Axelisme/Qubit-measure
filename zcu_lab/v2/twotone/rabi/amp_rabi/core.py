@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Annotated, ClassVar
 
 import numpy as np
+from matplotlib.artist import Artist
 from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field
@@ -49,6 +50,7 @@ class AmpRabiAnalysis:
 
 
 def rabi_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
+    """Convert mean complex IQ to the real contrast used by live and analysis plots."""
     return rotate2real(signals).real
 
 
@@ -114,7 +116,7 @@ class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
         analysis uses the oscillation period to infer pi and pi/2 gains.
         earlystop_snr stops averaging at completed-round boundaries. None disables SNR early stop.
         """
-        # Prepare the hardware gain grid and display the mean IQ projection.
+        # 1. Quantize drive gains for rotation-amplitude calibration.
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
 
@@ -124,6 +126,7 @@ class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
             {"soccfg": soccfg, "gen_ch": cfg.qub_pulse.ch},
         )
 
+        # 2. Monitor Rabi contrast as the rotation amplitude changes.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Pulse gain", ylabel="Amplitude")
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
@@ -131,7 +134,12 @@ class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
         viewer = live_line(ax)
 
         @context.plots.on_plot_thread
-        def update(data):
+        def update(data: NDArray[np.complex128]) -> tuple[Artist, ...]:
+            """Refresh the amplitude Rabi contrast curve.
+
+            data is complex IQ in drive-gain order; NaN marks unmeasured points.
+            Return the changed artists without modifying the input array.
+            """
             return viewer.set(gains, rabi_signal2real(data))
 
         fig.show()
@@ -140,7 +148,7 @@ class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
             on_update=update,
         )
 
-        # Keep pulse duration fixed while the FPGA sweeps its rotation amplitude.
+        # 3. Keep pulse duration fixed while the FPGA sweeps its rotation amplitude.
         with Schedule(signals_buffer, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
@@ -181,6 +189,7 @@ class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
         180 degrees. Publish ``fit`` and report fit quality; these are pulse
         amplitude calibrations, not gate fidelities. Source cfg may be None.
         """
+        # 1. Calibrate pi and pi/2 gains from unskipped contrast using the near-zero-gain phase.
         result = source.result
 
         gains, signals = result.amps, result.signals
@@ -204,6 +213,7 @@ class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
             fit.curve,
         )
 
+        # 2. Assess the oscillation fit and uncertainty of the calibrated rotation gains.
         fig, ax = plots.subplots(num="fit", figsize=config.figsize)
 
         ax.plot(gains, real_signals, label="meas", ls="-", marker="o", markersize=3)
@@ -226,8 +236,7 @@ class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
 
         fig.tight_layout()
 
-        # fit_rabi computes the per-gain fit uncertainties; surface them so the GUI
-        # summary carries the gain errors (the figure labels already show them).
+        # Include the gain uncertainties in the GUI summary as well as the figure.
         return AmpRabiAnalysis(
             pi_amp, pi_amp_err, pi2_amp, pi2_amp_err, fit_quality={"fit": fit.quality}
         )

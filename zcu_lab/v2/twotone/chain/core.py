@@ -12,7 +12,9 @@ from dataclasses import dataclass
 from typing import Annotated, ClassVar, Literal
 
 import numpy as np
+from matplotlib.artist import Artist
 from matplotlib.ticker import MaxNLocator
+from numpy.typing import NDArray
 from pydantic import Field
 from pydantic.dataclasses import dataclass as validated_dataclass
 from zcu_tools.analysis.fitting import PeakCandidate
@@ -88,13 +90,32 @@ class ChainAnalyzeOptions:
     ] = 0.0
 
 
+@dataclass(frozen=True)
+class ChainAnalysis:
+    """Peak fitted on the sigma curve.
+
+    freq and freq_err are the fitted centre and its error in MHz. fwhm and
+    fwhm_err are the full width at half maximum of the sigma peak in MHz; this
+    width only approximates the line width. level is the dashed 5% family
+    false-mark level in sigma. peaks lists every candidate on the sigma curve,
+    most prominent first.
+    """
+
+    freq: float
+    freq_err: float
+    fwhm: float
+    fwhm_err: float
+    level: float
+    peaks: tuple[PeakCandidate, ...] = ()
+
+
 class ChainCfg(ConfigBase):
     reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
     init_pulse: Annotated[
         Pulse.Cfg | None,
         FieldMeta(
             label="Init Pulse",
-            description="Optional preparation played once per dwell, before the chain. Enter a calibrated fixed-frequency pulse (MHz, us), or None.",
+            description="Optional fixed-frequency pulse before each dwell's readout chain.",
         ),
     ] = None
     qub_pulse: Annotated[
@@ -117,14 +138,14 @@ class ChainCfg(ConfigBase):
         int,
         FieldMeta(
             label="Reps",
-            description="Fast sweeps per round. Each fast sweep dwells once at every frequency. At least 12 fast sweeps per round give the first live curve enough dwells to estimate the noise.",
+            description="Fast sweeps in each software round.",
         ),
     ] = Field(ge=12)
     rounds: Annotated[
         int,
         FieldMeta(
             label="Rounds",
-            description="Software rounds. The live curve updates after each round.",
+            description="Software rounds, each followed by a live update.",
         ),
     ] = 1
     relax_delay: Annotated[
@@ -136,25 +157,6 @@ class ChainCfg(ConfigBase):
             description="Wait after each dwell's chain, before the next dwell.",
         ),
     ]
-
-
-@dataclass(frozen=True)
-class ChainAnalysis:
-    """Peak fitted on the sigma curve.
-
-    freq and freq_err are the fitted centre and its error in MHz. fwhm and
-    fwhm_err are the full width at half maximum of the sigma peak in MHz; this
-    width only approximates the line width. level is the dashed 5% family
-    false-mark level in sigma. peaks lists every candidate on the sigma curve,
-    most prominent first.
-    """
-
-    freq: float
-    freq_err: float
-    fwhm: float
-    fwhm_err: float
-    level: float
-    peaks: tuple[PeakCandidate, ...] = ()
 
 
 def restore_sums(data: GroupedLoadData[ChainCfg]) -> SweepSums:
@@ -224,11 +226,12 @@ class ChainExp(Experiment[SweepSums, ChainCfg]):
         A stop keeps completed rounds. A stop before the first round finishes
         raises RuntimeError because there are no sums to keep.
         """
-        # 1. Frequency axis and the live significance plot.
+        # 1. Quantize drive frequencies for repeated-readout significance spectroscopy.
         freqs = sweep2array(
             cfg.freq, "freq", {"soccfg": context.soccfg, "gen_ch": cfg.qub_pulse.ch}
         )
 
+        # 2. Monitor spectral significance relative to the false-mark threshold.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Frequency (MHz)", ylabel="Distance from background (sigma)")
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
@@ -240,7 +243,12 @@ class ChainExp(Experiment[SweepSums, ChainCfg]):
         ax.legend()
 
         @context.plots.on_plot_thread
-        def update(augmented_sums):
+        def update(augmented_sums: NDArray[np.float64]) -> tuple[Artist, ...]:
+            """Refresh the sweep significance curve and its reference level; propagate invalid-sum errors.
+
+            augmented_sums contains float64 moment sums shaped (frequency, 12, 12).
+            Return the changed artists without modifying the input array.
+            """
             sums = SweepSums.from_augmented(freqs, augmented_sums)
             curve = sweep_curve(sums)
             level_line.set_data([freqs[0], freqs[-1]], [curve.level, curve.level])
@@ -252,7 +260,7 @@ class ChainExp(Experiment[SweepSums, ChainCfg]):
             (len(freqs), 12, 12), dtype=np.float64, on_update=update
         )
 
-        # 2. One shot per dwell: reset and init pulse, then the chain.
+        # 3. Accumulate drive-readout chain moments at each frequency after initialization.
         with Schedule(augmented_sums, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 context.soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
@@ -277,7 +285,7 @@ class ChainExp(Experiment[SweepSums, ChainCfg]):
                 rounds=cfg.rounds,
             )
 
-        # 3. Summed acquisition writes whole rounds, so NaN means no round finished.
+        # 4. Summed acquisition writes whole rounds, so NaN means no round finished.
         if np.isnan(augmented_sums.array).any():
             raise RuntimeError(
                 "Stopped before the first round finished; no sums to keep"
@@ -301,6 +309,7 @@ class ChainExp(Experiment[SweepSums, ChainCfg]):
         the line width. The source cfg may be None. No candidate passing the
         options' thresholds raises AnalysisFailed; invalid sums raise ValueError.
         """
+        # 1. Locate spectral peaks in the chain significance using the chosen peak policy.
         sums = source.result
         freqs = sums.axis
         curve = sweep_curve(sums)
@@ -317,6 +326,7 @@ class ChainExp(Experiment[SweepSums, ChainCfg]):
             ),
         )
 
+        # 2. Assess the selected resonance against competing peaks and the false-mark level.
         fig, ax = plots.subplots(num="fit", figsize=config.figsize)
         ax.plot(freqs, curve.sigma, label="sigma", marker="o", markersize=3)
         ax.axhline(curve.level, color="gray", ls="--", label="5% false-mark level")

@@ -42,6 +42,19 @@ class FreqResult:
     signals: NDArray[np.float64]
 
 
+@pydantic_dataclass(frozen=True)
+class FreqAnalyzeOptions:
+    smooth: float = 1.0
+    smooth_method: SmoothMethod = "wavelet"
+    wavelet: str = "sym4"
+    wavelet_level: int = 0
+
+
+@dataclass(frozen=True)
+class FreqAnalysis:
+    best_freq: float
+
+
 class FreqCfg(ConfigBase):
     reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
     qub_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Qubit pulse")]
@@ -67,19 +80,6 @@ class FreqCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ]
-
-
-@pydantic_dataclass(frozen=True)
-class FreqAnalyzeOptions:
-    smooth: float = 1.0
-    smooth_method: SmoothMethod = "wavelet"
-    wavelet: str = "sym4"
-    wavelet_level: int = 0
-
-
-@dataclass(frozen=True)
-class FreqAnalysis:
-    best_freq: float
 
 
 class FreqExp(Experiment[FreqResult, FreqCfg]):
@@ -113,7 +113,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         This score is not assignment fidelity. acquire_kwargs is forwarded
         to acquisition.
         """
-        # Quantize absolute RF on the common generator/ADC grid, including mixer.
+        # 1. Quantize absolute RF on the common generator/ADC grid, including mixer.
         soc, soccfg = context.soc, context.soccfg
         cfg = deepcopy(cfg)
 
@@ -128,7 +128,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
             },
         )
 
-        # Show the separation score rather than either preparation's mean IQ.
+        # 2. Show the separation score rather than either preparation's mean IQ.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Frequency (MHz)", ylabel="SNR")
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
@@ -137,6 +137,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
 
         @context.plots.on_plot_thread
         def update(data: NDArray[np.float64]) -> tuple[Artist, ...]:
+            """Refresh the measurement artists from the current acquired data."""
             return line.set(freqs, np.abs(data))
 
         fig.show()
@@ -146,7 +147,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
             on_update=update,
         )
 
-        # Compare pulse-off/on branches at each hardware-swept readout frequency.
+        # 3. Compare pulse-off/on branches at each hardware-swept readout frequency.
         with Schedule(signals_buffer, scope=context.scope) as sched:
             freq_sweep = cfg.freq
             freq_param = sweep2param("freq", freq_sweep)
@@ -182,7 +183,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
                 **(acquire_kwargs or {}),
             )
 
-        # Return the moment-derived score; raw shots and IQ moments are not retained.
+        # 4. Return the moment-derived score; raw shots and IQ moments are not retained.
         signals = signals_buffer.array
 
         return FreqResult(freqs, signals)
@@ -199,6 +200,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         options controls smoothing; unmeasured NaN scores become zero before
         smoothing. Return best_freq in MHz. source.cfg may be None.
         """
+        # 1. Select the readout frequency maximizing smoothed preparation separation.
         result = source.result
         freqs, signals = result.freqs, result.signals
 
@@ -222,6 +224,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         max_freq = float(freqs[max_id])
         max_snr = float(snrs[max_id])
 
+        # 2. Inspect the SNR maximum on the smoothed frequency response.
         _, ax = plots.subplots(num="fit", figsize=config.figsize)
 
         ax.plot(freqs, snrs)

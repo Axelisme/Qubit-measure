@@ -58,29 +58,40 @@ class CKPAnalysis:
 
 
 def ckp_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
+    """Convert mean complex IQ to the real contrast used by live and analysis plots."""
     amps = rotate2real(signals).real
     max_amp = np.nanmax(amps, axis=2, keepdims=True)
     min_amp = np.nanmin(amps, axis=2, keepdims=True)
     return (amps - min_amp) / np.clip(max_amp - min_amp, 1e-12, None)
 
 
-def _fit_resonance_traces(
-    g_res_freqs: NDArray[np.float64],
-    g_qub_freqs: NDArray[np.float64],
-    e_res_freqs: NDArray[np.float64],
-    e_qub_freqs: NDArray[np.float64],
-) -> SharedFitResult:
-    """Jointly fit resonance traces with shared baseline, scale and width.
+@dataclass(frozen=True)
+class _ResonanceTrace:
+    """Extracted qubit centers paired with resonator drive frequencies in MHz."""
 
-    Independent Lorentzian fits seed the joint fit; each state's center stays
-    local and both slopes are fixed to zero.
+    res_freqs: NDArray[np.float64]
+    """One-dimensional resonator drive coordinates for the extracted centers."""
+    qub_freqs: NDArray[np.float64]
+    """One-dimensional qubit center frequencies aligned with res_freqs."""
+
+
+def _fit_resonance_traces(
+    g_trace: _ResonanceTrace,
+    e_trace: _ResonanceTrace,
+) -> SharedFitResult:
+    """Jointly fit ground/excited traces; fitting errors propagate to the caller.
+
+    Each trace pairs resonator drive frequencies with extracted qubit centers
+    in MHz. Independent Lorentzian fits seed shared baseline, scale and width;
+    each state's center stays local and both slopes are zero. Return the shared
+    fit without plotting or changing either trace.
     """
     # y0, slope, yscale, x0, gamma
     fixedparams: list[float | None] = [None] * 5
     fixedparams[1] = 0.0  # fix slope to 0
 
-    g_params, _ = fitlor(g_res_freqs, g_qub_freqs, fixedparams=fixedparams)
-    e_params, _ = fitlor(e_res_freqs, e_qub_freqs, fixedparams=fixedparams)
+    g_params, _ = fitlor(g_trace.res_freqs, g_trace.qub_freqs, fixedparams=fixedparams)
+    e_params, _ = fitlor(e_trace.res_freqs, e_trace.qub_freqs, fixedparams=fixedparams)
 
     y0 = 0.5 * (e_params[0] + g_params[0])
     yscale = 0.5 * (e_params[2] + g_params[2])
@@ -89,14 +100,14 @@ def _fit_resonance_traces(
     return fit_shared(
         traces=(
             FitTrace(
-                g_res_freqs,
-                g_qub_freqs,
+                g_trace.res_freqs,
+                g_trace.qub_freqs,
                 lorfunc,
                 ("baseline", "g_slope", "scale", "g_res_freq", "width"),
             ),
             FitTrace(
-                e_res_freqs,
-                e_qub_freqs,
+                e_trace.res_freqs,
+                e_trace.qub_freqs,
                 lorfunc,
                 ("baseline", "e_slope", "scale", "e_res_freq", "width"),
             ),
@@ -109,12 +120,12 @@ def _fit_resonance_traces(
             ParameterSpec(
                 "g_res_freq",
                 g_params[3],
-                limits=(float(g_res_freqs.min()), float(g_res_freqs.max())),
+                limits=(float(g_trace.res_freqs.min()), float(g_trace.res_freqs.max())),
             ),
             ParameterSpec(
                 "e_res_freq",
                 e_params[3],
-                limits=(float(e_res_freqs.min()), float(e_res_freqs.max())),
+                limits=(float(e_trace.res_freqs.min()), float(e_trace.res_freqs.max())),
             ),
             ParameterSpec("width", gamma, limits=(0.0, None)),
         ),
@@ -123,33 +134,31 @@ def _fit_resonance_traces(
 
 def _plot_resonance_maps(
     result: CKP_Result,
-    amps: NDArray[np.float64],
-    fit_result: SharedFitResult,
     analysis: CKPAnalysis,
-    traces: tuple[
-        tuple[NDArray[np.float64], NDArray[np.float64]],
-        tuple[NDArray[np.float64], NDArray[np.float64]],
-    ],
+    fit_result: SharedFitResult,
+    g_trace: _ResonanceTrace,
+    e_trace: _ResonanceTrace,
     *,
     plots: Plots,
 ) -> None:
-    """Validate derived covariance, then publish both joint-fit resonance maps."""
+    """Publish ground/excited resonance maps and joint-fit curves in plots.
+
+    Pass saved map axes/IQ, the MHz summary, its shared fit and the two
+    extracted center traces in MHz. Recompute normalized amplitudes and
+    display uncertainties from the already validated fit covariance. Return
+    None; only the two-panel fit figure changes, not the input data.
+    """
+    amps = ckp_signal2real(result.signals)
     chi_variance = fit_result.projected_variance(
         {"g_res_freq": -0.5, "e_res_freq": 0.5}
     )
     kappa_variance = fit_result.projected_variance({"width": 2.0})
-    if (
-        not np.isfinite(chi_variance)
-        or not np.isfinite(kappa_variance)
-        or chi_variance < -1e-12
-        or kappa_variance < -1e-12
-    ):
-        raise RuntimeError("CKP shared fit produced invalid derived covariance")
     chi_err = np.sqrt(max(0.0, chi_variance))
     kappa_err = np.sqrt(max(0.0, kappa_variance))
 
     res_freqs, qub_freqs = result.res_freqs, result.qub_freqs
-    (g_res_freqs, g_qub_freqs), (e_res_freqs, e_qub_freqs) = traces
+    g_res_freqs, g_qub_freqs = g_trace.res_freqs, g_trace.qub_freqs
+    e_res_freqs, e_qub_freqs = e_trace.res_freqs, e_trace.qub_freqs
     chi, kappa, res_freq = analysis.chi, analysis.kappa, analysis.res_freq
     baseline, scale, width = (
         fit_result.values["baseline"],
@@ -281,7 +290,7 @@ class CKP_Exp(Experiment[CKP_Result, CKP_Cfg]):
         complex IQ on the (state, resonator frequency, qubit frequency) grid;
         the two resonance curves constrain chi, kappa and resonator frequency.
         """
-        # Prepare the two hardware frequency grids and one map per preparation.
+        # 1. Prepare the two hardware frequency grids and one map per preparation.
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
 
@@ -299,6 +308,7 @@ class CKP_Exp(Experiment[CKP_Result, CKP_Cfg]):
             {"soccfg": soccfg, "gen_ch": cfg.qub_pulse.ch},
         )
 
+        # 2. Compare ground- and excited-prepared resonance maps as the grid fills.
         figure, _ = context.plots.subplots(num="measurement", ncols=2, figsize=(10, 4))
         ax_ground, ax_excited = figure.axes
         for ax, title in ((ax_ground, "Ground State"), (ax_excited, "Excited State")):
@@ -316,6 +326,7 @@ class CKP_Exp(Experiment[CKP_Result, CKP_Cfg]):
 
         @context.plots.on_plot_thread
         def plot_fn(data: NDArray[np.complex128]):
+            """Refresh the measurement artists from the current acquired data."""
             real_signal = ckp_signal2real(data)
             return (
                 *ground.set(res_freqs, qub_freqs, real_signal[0]),
@@ -329,7 +340,7 @@ class CKP_Exp(Experiment[CKP_Result, CKP_Cfg]):
             on_update=plot_fn,
         )
 
-        # Acquire both preparations and the full frequency grid in one program.
+        # 3. Acquire both preparations and the full frequency grid in one program.
         with Schedule(signals_buffer, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
@@ -376,6 +387,7 @@ class CKP_Exp(Experiment[CKP_Result, CKP_Cfg]):
         than five centers survive per state, or the shared fit/covariance is
         invalid. ``options`` is None; source cfg is not needed.
         """
+        # 1. Infer chi, kappa and readout frequency from jointly fitted state-dependent ridges.
         del options
         result = source.result
 
@@ -393,9 +405,9 @@ class CKP_Exp(Experiment[CKP_Result, CKP_Cfg]):
                 "CKP resonance extraction requires at least five finite points per state"
             )
 
-        fit_result = _fit_resonance_traces(
-            g_res_freqs, g_qub_freqs, e_res_freqs, e_qub_freqs
-        )
+        g_trace = _ResonanceTrace(res_freqs=g_res_freqs, qub_freqs=g_qub_freqs)
+        e_trace = _ResonanceTrace(res_freqs=e_res_freqs, qub_freqs=e_qub_freqs)
+        fit_result = _fit_resonance_traces(g_trace=g_trace, e_trace=e_trace)
         diagnostics = fit_result.diagnostics
         if not diagnostics.valid or not diagnostics.covariance_accurate:
             raise RuntimeError(
@@ -415,12 +427,27 @@ class CKP_Exp(Experiment[CKP_Result, CKP_Cfg]):
             res_freq += np.sqrt(chi**2 - (kappa / 2) ** 2) * np.sign(e_freq - g_freq)
 
         analysis = CKPAnalysis(chi, kappa, res_freq)
+
+        # 2. Reject invalid derived covariance before creating the fit figure.
+        chi_variance = fit_result.projected_variance(
+            {"g_res_freq": -0.5, "e_res_freq": 0.5}
+        )
+        kappa_variance = fit_result.projected_variance({"width": 2.0})
+        if (
+            not np.isfinite(chi_variance)
+            or not np.isfinite(kappa_variance)
+            or chi_variance < -1e-12
+            or kappa_variance < -1e-12
+        ):
+            raise RuntimeError("CKP shared fit produced invalid derived covariance")
+
+        # 3. Assess the shared resonance model against both preparation maps.
         _plot_resonance_maps(
-            result,
-            amps,
-            fit_result,
-            analysis,
-            ((g_res_freqs, g_qub_freqs), (e_res_freqs, e_qub_freqs)),
+            result=result,
+            analysis=analysis,
+            fit_result=fit_result,
+            g_trace=g_trace,
+            e_trace=e_trace,
             plots=plots,
         )
         return analysis

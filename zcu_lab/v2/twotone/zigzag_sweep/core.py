@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Annotated, ClassVar, Literal
 
 import numpy as np
+from matplotlib.artist import Artist
 from matplotlib.ticker import ScalarFormatter
 from numpy.typing import NDArray
 from pydantic.dataclasses import dataclass as validated_dataclass
@@ -42,7 +43,18 @@ class ZigZagScanResult:
     signals: NDArray[np.complex128]
 
 
+@validated_dataclass(frozen=True)
+class ZigZagScanAnalyzeOptions:
+    find_range: tuple[float | None, float | None] = (None, None)
+
+
+@dataclass(frozen=True)
+class ZigZagScanAnalysis:
+    min_value: float
+
+
 def zigzag_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
+    """Convert mean complex IQ to the real contrast used by live and analysis plots."""
     return rotate2real(signals).real
 
 
@@ -84,16 +96,6 @@ class ZigZagScanCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ]
-
-
-@validated_dataclass(frozen=True)
-class ZigZagScanAnalyzeOptions:
-    find_range: tuple[float | None, float | None] = (None, None)
-
-
-@dataclass(frozen=True)
-class ZigZagScanAnalysis:
-    min_value: float
 
 
 class ZigZagScanExp(Experiment[ZigZagScanResult, ZigZagScanCfg]):
@@ -177,7 +179,12 @@ class ZigZagScanExp(Experiment[ZigZagScanResult, ZigZagScanCfg]):
         heatmap = live_heatmap(ax, uniform=True)
 
         @context.plots.on_plot_thread
-        def update(data):
+        def update(data: NDArray[np.complex128]) -> tuple[Artist, ...]:
+            """Refresh the ZigZag parameter-sweep contrast map.
+
+            data is complex IQ shaped (repeat count, swept value).
+            Return the changed artists without modifying the input array.
+            """
             real = zigzag_signal2real(data)
             return heatmap.set(times.astype(np.float64), values, real)
 
@@ -186,6 +193,7 @@ class ZigZagScanExp(Experiment[ZigZagScanResult, ZigZagScanCfg]):
             (len(times), len(values)),
             on_update=update,
         )
+        # 3. Amplify rotation errors across repeat counts while sweeping only the repeated gate.
         with Schedule(signals_buffer, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
@@ -238,6 +246,7 @@ class ZigZagScanExp(Experiment[ZigZagScanResult, ZigZagScanCfg]):
         error-amplification tuning criterion, not a gate-fidelity estimate.
         Fewer than two valid counts or an all-NaN search range raises ValueError.
         """
+        # 1. Recover the repeated-gate response and requested calibration bounds.
         result = source.result
         find_range = options.find_range
 
@@ -245,7 +254,7 @@ class ZigZagScanExp(Experiment[ZigZagScanResult, ZigZagScanCfg]):
         values = result.values
         signals = result.signals
 
-        # Compare every sweep value over the same acquired count range.
+        # 2. Compare every sweep value over the same acquired count range.
         real_signals = zigzag_signal2real(signals)  # (times , values)
         valid_cutoff = np.min(np.sum(~np.isnan(real_signals), axis=0))
 
@@ -255,7 +264,7 @@ class ZigZagScanExp(Experiment[ZigZagScanResult, ZigZagScanCfg]):
         times = times[:valid_cutoff]
         real_signals = real_signals[:valid_cutoff]
 
-        # Minimize smoothed count-to-count variation within the requested bounds.
+        # 3. Minimize smoothed count-to-count variation within the requested bounds.
         val_diff = np.sum(np.abs(np.diff(real_signals, axis=0)), axis=0)
         loss = gaussian_filter1d(val_diff, sigma=1)
 
@@ -265,6 +274,7 @@ class ZigZagScanExp(Experiment[ZigZagScanResult, ZigZagScanCfg]):
             loss[values > find_range[1]] = np.nan
         min_value = values[np.nanargmin(loss)]
 
+        # 4. Relate the selected gain or frequency to repeat-count contrast and variation loss.
         fig, _ = plots.subplots(num="fit", nrows=2, ncols=1, sharex=True)
         ax1, ax2 = fig.axes
 

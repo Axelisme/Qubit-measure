@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Annotated, ClassVar
 
 import numpy as np
+from matplotlib.artist import Artist
 from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field
@@ -57,6 +58,7 @@ class LenRabiAnalysis:
 
 
 def rabi_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
+    """Convert mean complex IQ to the real contrast used by live and analysis plots."""
     return rotate2real(signals).real
 
 
@@ -121,13 +123,14 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
         Reject native arb with ValueError before preparing coordinates or plots:
         its asset-derived length cannot be swept by this experiment.
         """
+        # 1. Reject asset-defined pulse lengths that cannot support a duration scan.
         if cfg.qub_pulse.waveform.style == "arb":
             raise ValueError(
                 "Len Rabi cannot sweep an arb waveform's asset-derived length. "
                 "Select a waveform with an editable length instead."
             )
 
-        # 1. Prepare length coordinates without changing the caller's cfg.
+        # 2. Prepare length coordinates without changing the caller's cfg.
         cfg = deepcopy(cfg)
         soccfg = context.soccfg
         lengths = sweep2array(
@@ -136,6 +139,7 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
             {"soccfg": soccfg, "gen_ch": cfg.qub_pulse.ch},
         )
 
+        # 3. Choose hardware duration sweeps or host-rebuilt sampled waveforms.
         if cfg.qub_pulse.waveform.style in ["const", "flat_top"]:
             return self._run_for_flat(cfg, lengths, context=context)
         return self._run_for_arb(cfg, np.unique(lengths), context=context)
@@ -143,6 +147,8 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
     def _run_for_flat(
         self, cfg: LenRabiCfg, lengths: NDArray[np.float64], *, context: RunContext
     ) -> LenRabiResult:
+        """Sweep constant or flat-top pulse lengths in hardware and return mean IQ."""
+        # 1. Monitor Rabi contrast across hardware-swept pulse durations.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Length (us)", ylabel="Signal")
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
@@ -150,7 +156,12 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
         viewer = live_line(ax)
 
         @context.plots.on_plot_thread
-        def update(data):
+        def update(data: NDArray[np.complex128]) -> tuple[Artist, ...]:
+            """Refresh the hardware length-sweep Rabi contrast curve.
+
+            data is complex IQ in pulse-length order; NaN marks unmeasured points.
+            Return the changed artists without modifying the input array.
+            """
             return viewer.set(lengths, rabi_signal2real(data))
 
         fig.show()
@@ -158,6 +169,7 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
             (len(lengths),),
             on_update=update,
         )
+        # 2. Measure duration-dependent rotations in one FPGA sweep with SNR early stopping.
         with Schedule(signals, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 context.soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
@@ -185,14 +197,18 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
         self, cfg: LenRabiCfg, lengths: NDArray[np.float64], *, context: RunContext
     ) -> LenRabiResult:
         # Historical name: editable shaped waveforms, not native arb assets.
+        """Compile editable shaped lengths on the host and return round-averaged IQ."""
+        # 1. Reuse each length's compiled waveform and average only acquired rounds.
         programs: dict[float, TimelineProgramV2] = {}
 
         def average_round(signals: NDArray[np.complex128]) -> NDArray[np.complex128]:
+            """Average acquired rounds while preserving NaNs at unmeasured points."""
             mask = np.any(~np.isnan(signals), axis=0)
             mean = np.full(signals.shape[1], np.nan, dtype=np.complex128)
             mean[mask] = np.nanmean(signals[:, mask], axis=0)
             return mean
 
+        # 2. Monitor the round-averaged contrast and SNR of the host duration scan.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Length (us)", ylabel="Signal")
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
@@ -200,7 +216,12 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
         viewer = live_line(ax)
 
         @context.plots.on_plot_thread
-        def update(data):
+        def update(data: NDArray[np.complex128]) -> tuple[Artist, ...]:
+            """Refresh the host length-sweep Rabi curve after averaging available rounds.
+
+            data is complex IQ shaped (round, pulse length); NaN marks unmeasured points.
+            Return the changed artists without modifying the input array.
+            """
             return viewer.set(lengths, rabi_signal2real(average_round(data)))
 
         fig.show()
@@ -213,6 +234,7 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
             cfg.earlystop_snr,
             lambda data: rabi_signal2real(average_round(data)),
         )
+        # 3. Measure each sampled-waveform duration until rounds finish or SNR suffices.
         with Schedule(signals, scope=context.scope) as sched:
             for _, rep in sched.repeat("round", cfg.rounds):
                 for length, step in rep.scan("length", lengths.tolist()):
@@ -310,9 +332,7 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
 
         fig.tight_layout()
 
-        # fit_rabi computes the per-quantity fit uncertainties; surface them so the
-        # GUI summary carries pi_len_err / pi2_len_err / rabi_f_err (the figure
-        # labels already show pi/pi2 errors and the title shows the freq error).
+        # Include length and frequency uncertainties in the GUI summary as in the figure.
         return LenRabiAnalysis(
             pi_len,
             pi_len_err,

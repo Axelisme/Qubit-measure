@@ -36,6 +36,7 @@ class RabiCheckResult:
 def reset_rabi_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     # Anchor all branches to the before-reset IQ axis. Branch offsets must not
     # rotate the projection or independently rescale the measured contrasts.
+    """Convert mean complex IQ to the real contrast used by live and analysis plots."""
     try:
         angle = find_rotate_angle(signals[0])
     except ValueError:
@@ -109,11 +110,13 @@ class RabiCheckExp(Experiment[RabiCheckResult, RabiCheckCfg]):
 
         @plots.on_plot_thread
         def update(data: NDArray[np.complex128]) -> tuple[Artist, ...]:
+            """Refresh the measurement artists from the current acquired data."""
             return viewer.set(gains, reset_rabi_signal2real(data))
 
         fig.show()
         signals_buffer = SignalBuffer((3, len(gains)), on_update=update)
 
+        # 3. Compare Rabi response before reset, after reset, and after reset plus a second rotation.
         with Schedule(signals_buffer, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
@@ -149,6 +152,7 @@ class RabiCheckExp(Experiment[RabiCheckResult, RabiCheckCfg]):
         Frequency is fitted only to the before-reset branch. All branches share
         its IQ projection and frequency; after-reset also includes a 2f term.
         """
+        # 1. Estimate reset contrast from three gain-response branches with a shared frequency.
         del options
         result = source.result
         gains, signals = result.gains, result.signals
@@ -158,6 +162,7 @@ class RabiCheckExp(Experiment[RabiCheckResult, RabiCheckCfg]):
             raise ValueError("Reset-check signals must not contain infinities")
         real_signals = reset_rabi_signal2real(signals)
         fit = fit_reset_rabi(gains, real_signals)
+        # 2. Assess contrast recovery, reset residual amplitude and second-harmonic fit residuals.
         fig, _ = plots.subplots(
             num="fit",
             nrows=2,

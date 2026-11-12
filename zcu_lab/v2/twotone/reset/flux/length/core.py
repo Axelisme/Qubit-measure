@@ -40,19 +40,6 @@ class LengthResult:
     signals: NDArray[np.complex128]
 
 
-@dataclass(frozen=True)
-class LengthAnalysis:
-    """Shortest qualifying duration (us) and the operator's residual threshold.
-
-    Every longer measured finite point must also pass epsilon. No qualifying
-    point gives None. Contrasts and p0≈0 residual estimates stay in the plot;
-    they are not reset fidelity.
-    """
-
-    selected_length: float | None
-    epsilon: float
-
-
 @pydantic_dataclass(frozen=True)
 class LengthAnalyzeOptions:
     """Residual threshold for selection only; it does not change acquisition."""
@@ -65,6 +52,19 @@ class LengthAnalyzeOptions:
         ),
         Field(allow_inf_nan=False),
     ] = 0.05
+
+
+@dataclass(frozen=True)
+class LengthAnalysis:
+    """Shortest qualifying duration (us) and the operator's residual threshold.
+
+    Every longer measured finite point must also pass epsilon. No qualifying
+    point gives None. Contrasts and p0≈0 residual estimates stay in the plot;
+    they are not reset fidelity.
+    """
+
+    selected_length: float | None
+    epsilon: float
 
 
 class LengthCfg(ConfigBase):
@@ -145,6 +145,7 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
         Return rounded lengths (us) and IQ shaped (2, 2, N), switches [0, 1].
         Live curves show I only, without choosing a population direction.
         """
+        # 1. Quantize flux-reset hold lengths and monitor all four before/after-pi branches.
         cfg = deepcopy(cfg)
         pulse_cfg = cfg.tested_reset.pulse_cfg
 
@@ -160,7 +161,7 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
             signal2real=lambda data: data.real.reshape(4, -1),
         )
 
-        # Each hold length has the Cartesian product of the two calibrated pi switches.
+        # 2. Compare before/after-pi responses at each hold length to isolate the reset contrast.
         with Schedule(signals_buffer, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
@@ -218,11 +219,13 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
         No finite or qualifying candidate gives selected_length=None.
         Publish raw I/Q, r and residual curves. source.cfg may be None.
         """
+        # 1. Require a complete before/after-pi branch layout for the hold-time estimate.
         result = source.result
         lengths, signals = result.lengths, result.signals
         if lengths.ndim != 1 or signals.shape != (2, 2, lengths.size):
             raise ValueError("Flux reset IQ must have shape (2, 2, number of lengths)")
 
+        # 2. Find the shortest hold whose residual estimate stays below epsilon at longer lengths.
         # After-pi differences cancel the common readout offset, not p0.
         with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
             d0 = signals[0, 0] - signals[0, 1]
@@ -249,7 +252,7 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
         ]
         selected = float(np.min(lengths[qualifying])) if qualifying else None
 
-        # Keep the measured branches visible beside the uncalibrated estimate.
+        # 3. Keep the measured branches visible beside the uncalibrated estimate.
         fig, _ = plots.subplots(
             num="fit", nrows=4, sharex=True, figsize=(10, 10), layout="constrained"
         )

@@ -130,6 +130,7 @@ The adapter below owns component proposals using the captured binding.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from functools import partial
 from typing import Annotated, ClassVar, Literal, Self
@@ -137,6 +138,15 @@ from typing import Annotated, ClassVar, Literal, Self
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import Field, StrictInt, model_validator
+from pydantic.dataclasses import dataclass as validated_dataclass
+from zcu_tools.analysis.failure import AnalysisFailed
+from zcu_tools.analysis.fitting import (
+    FitQuality,
+    compute_fit_quality,
+    decay_time_bounds,
+    fit_decay,
+    fit_dual_decay,
+)
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment
 from zcu_tools.experiment.context import RunContext
@@ -157,13 +167,66 @@ from zcu_tools.program.v2.modules import (
     MuxReadoutCfg,
     Pulse,
 )
+from zcu_tools.utils.process import rotate2real
 
 from zcu_lab.v2.support import live_line
 from zcu_lab.v2.support.acquire import mux_snr_checker
 from zcu_lab.v2.support.mux import MuxFitFailure, averaged_mux_signal
 from zcu_lab.v2.support.mux_sweep_cfg import MuxDriveToneCfg, validate_mux_tones
 
-from .analysis import MuxT1Fit, T1AnalyzeOptions, analyze_t1
+
+@dataclass(frozen=True)
+class MuxT1Result:
+    """Averaged complex IQ on a common delay axis.
+
+    times is float64 (P,) us, requested for uniform sampling and quantized for
+    nonuniform sampling. tone_indices is int64 (K,) of original full-tone indices
+    in participants order.
+    signals is complex128 (K,P), I+jQ in ADC-length-normalized a.u. Unwritten
+    entries remain NaN; completed-round means survive cancellation. The caller
+    must check the RunContext stop signal before declaring success.
+    """
+
+    times: NDArray[np.float64]
+    tone_indices: NDArray[np.int64]
+    signals: NDArray[np.complex128]
+
+
+@validated_dataclass(frozen=True)
+class T1AnalyzeOptions:
+    """Fit one or two decays after skipping nonnegative leading delay points."""
+
+    dual_exp: Annotated[bool, FieldMeta(label="Dual exponential")] = False
+    skip: Annotated[int, FieldMeta(label="Skip leading points"), Field(ge=0)] = 0
+
+
+@dataclass(frozen=True)
+class T1Analysis:
+    """Per-tone decay times and one-sigma errors in us, with fit diagnostics.
+
+    t1b and t1b_err hold the second component only for a dual-exponential fit.
+    fit_quality maps the selected fit to its numerical quality, or is absent.
+    """
+
+    t1: float
+    t1_err: float
+    t1b: float | None = None
+    t1b_err: float | None = None
+    fit_quality: Mapping[str, FitQuality] | None = None
+
+
+@dataclass(frozen=True)
+class MuxT1Fit:
+    """Original full-tone index and existing single-qubit T1 numerical analysis.
+
+    fit holds t1/t1_err in us, optional second decay component in us and the
+    existing fit quality mapping under 'fit'. Delay coordinates, projected IQ
+    and predictions stay local to analysis for plotting. It owns no figures
+    or source cfg.
+    """
+
+    index: int
+    fit: T1Analysis
 
 
 class MuxT1ToneCfg(MuxDriveToneCfg):
@@ -236,21 +299,120 @@ class MuxT1Cfg(ConfigBase):
         return self
 
 
-@dataclass(frozen=True)
-class MuxT1Result:
-    """Averaged complex IQ on a common delay axis.
+def _validate_result(result: MuxT1Result) -> None:
+    """Raise ValueError for invalid source axes, indices or IQ shape/dtype.
 
-    times is float64 (P,) us, requested for uniform sampling and quantized for
-    nonuniform sampling. tone_indices is int64 (K,) of original full-tone indices
-    in participants order.
-    signals is complex128 (K,P), I+jQ in ADC-length-normalized a.u. Unwritten
-    entries remain NaN; completed-round means survive cancellation. The caller
-    must check the RunContext stop signal before declaring success.
+    result supplies float64 increasing nonnegative times (P,), unique int64
+    original indices (K,) and complex128 IQ (K,P), with K,P>0. Return None
+    without mutation when those axes match; partial NaN IQ remains allowed.
     """
+    times, indices, signals = result.times, result.tone_indices, result.signals
+    if (
+        times.ndim != 1
+        or times.dtype != np.dtype(np.float64)
+        or not times.size
+        or not np.all(np.isfinite(times))
+        or np.any(times < 0)
+        or np.any(np.diff(times) <= 0)
+        or indices.ndim != 1
+        or indices.dtype != np.dtype(np.int64)
+        or not indices.size
+        or np.any(indices < 0)
+        or len(np.unique(indices)) != len(indices)
+        or signals.dtype != np.dtype(np.complex128)
+        or signals.shape != (len(indices), len(times))
+    ):
+        raise ValueError("invalid MuxT1Result axes or IQ shape/dtype")
 
-    times: NDArray[np.float64]
-    tone_indices: NDArray[np.int64]
-    signals: NDArray[np.complex128]
+
+def fit_and_plot_t1(
+    result: MuxT1Result,
+    options: T1AnalyzeOptions,
+    *,
+    plots: Plots,
+) -> tuple[MuxT1Fit | MuxFitFailure, ...]:
+    """Validate IQ axes, raise on invalid sources, and fit and plot each tone T1.
+
+    Require float64 nonnegative strictly increasing times (P,), int64 unique
+    nonnegative original indices (K,) and complex128 signals (K,P), with K,P>0.
+    NaN IQ is allowed for partial acquisition. Invalid sources and negative or
+    noninteger skip raise ValueError before fitting. Existing single/dual decay
+    fitters and quality consume only acquired points. Numeric failures return
+    indexed MuxFitFailure reasons; plotting and resource errors propagate.
+    plots owns fit_i, independent of duplicate readout labels; caller
+    finishes/releases figures. Draw only the selected primary model and return
+    per-tone fit summaries. Acquired delays, projected observations and
+    predictions remain local to plotting. No cfg or hardware is read.
+    """
+    _validate_result(result)
+    times, indices, signals = result.times, result.tone_indices, result.signals
+    outcomes: list[MuxT1Fit | MuxFitFailure] = []
+    for row, raw_index in enumerate(indices):
+        index = int(raw_index)
+        signal = signals[row, options.skip :]
+        finite = np.isfinite(signal)
+        xs = times[options.skip :][finite]
+        signal = signal[finite]
+        fig, ax = plots.subplots(num=f"fit_{index}", figsize=(8, 5))
+        ax.set(xlabel="Delay (us)", ylabel="Signal (a.u.)")
+        fig.suptitle(f"tone {index}")
+        try:
+            minimum = 6 if options.dual_exp else 4
+            if len(xs) < minimum:
+                raise ValueError(f"T1 fit requires at least {minimum} acquired points")
+            # Project acquired IQ onto its principal contrast axis.
+            real = rotate2real(signal).real
+            if options.dual_exp:
+                fit = fit_dual_decay(xs, real)
+                t1, err = fit.decay_time1, fit.decay_time1_err
+                t1b, errb = fit.decay_time2, fit.decay_time2_err
+                names = ("y0", "yscale1", "decay_time1", "yscale2", "decay_time2")
+            else:
+                fit = fit_decay(xs, real)
+                t1, err = fit.decay_time, fit.decay_time_err
+                names = ("y0", "yscale", "decay_time")
+                t1b, errb = None, None
+            fitted, params, covariance = fit.curve, fit.params, fit.cov
+            if not np.all(
+                np.isfinite(
+                    np.asarray(
+                        (t1, err, t1b, errb) if options.dual_exp else (t1, err),
+                        dtype=np.float64,
+                    )
+                )
+            ):
+                raise ValueError("T1 fit returned nonfinite estimates")
+            quality = compute_fit_quality(
+                real,
+                fitted,
+                {name: float(value) for name, value in zip(names, params, strict=True)},
+                covariance,
+                decay_bounds=decay_time_bounds(xs),
+            )
+            outcome = MuxT1Fit(
+                index,
+                T1Analysis(float(t1), float(err), t1b, errb, {"fit": quality}),
+            )
+        except (
+            AnalysisFailed,
+            ValueError,
+            RuntimeError,
+            ArithmeticError,
+            np.linalg.LinAlgError,
+        ) as exc:
+            outcomes.append(MuxFitFailure(index, str(exc)))
+            ax.plot(xs, np.abs(signal), "o", label="acquired magnitude")
+            ax.text(0.02, 0.98, str(exc), transform=ax.transAxes, va="top", wrap=True)
+        else:
+            outcomes.append(outcome)
+            ax.plot(xs, real, "o", label="measured")
+            ax.plot(xs, fitted, label=f"T1={t1:.4g} ± {err:.2g} us")
+            if options.dual_exp:
+                ax.set_title(f"Second decay: {t1b:.4g} ± {errb:.2g} us")
+        ax.legend()
+        ax.grid(True)
+        fig.tight_layout()
+    return tuple(outcomes)
 
 
 class MuxT1Exp(Experiment[MuxT1Result, MuxT1Cfg]):
@@ -261,7 +423,6 @@ class MuxT1Exp(Experiment[MuxT1Result, MuxT1Cfg]):
     recorded delays, original tone indices, complex IQ and the full cfg.
     """
 
-    Options: ClassVar[type[T1AnalyzeOptions]] = T1AnalyzeOptions
     AXES_SPEC: ClassVar[AxesSpec[MuxT1Result, MuxT1Cfg]] = AxesSpec(
         axes=(
             AxesSpec.Axis("times", label="Delay", unit="s", scale=1e-6),
@@ -273,6 +434,8 @@ class MuxT1Exp(Experiment[MuxT1Result, MuxT1Cfg]):
         cfg_schema_version="4.0",
         tag="mux/t1",
     )
+
+    Options: ClassVar[type[T1AnalyzeOptions]] = T1AnalyzeOptions
 
     def run(self, config: MuxT1Cfg, *, context: RunContext) -> MuxT1Result:
         """Acquire pi pulse -> shared wait -> mux readout for each delay in us.
@@ -289,13 +452,18 @@ class MuxT1Exp(Experiment[MuxT1Result, MuxT1Cfg]):
         completed-round averages across the sweep, or NaN before any round finishes.
         context supplies offline or hardware handles, plots and a stop signal;
         acquisition and program errors propagate.
+
         """
+        # 1. Dispatch linear sampling to the shared hardware delay sweep.
         cfg = config.model_copy(deep=True)
         if cfg.sampling == "linear":
             return self._run_linear(cfg, context=context)
+        # 2. Dispatch decay sampling to the quantized nonuniform hardware delay table.
         return self._run_decay(cfg, context=context)
 
     def _run_linear(self, cfg: MuxT1Cfg, *, context: RunContext) -> MuxT1Result:
+        """Acquire the common linear delay sweep and return tone-major IQ."""
+        # 1. Show each participant's decay magnitude on the common requested delay axis.
         times = sweep2array(cfg.delay, "none")
         indices = list(cfg.participants)
         readout = cfg.readout.with_updates(
@@ -320,6 +488,7 @@ class MuxT1Exp(Experiment[MuxT1Result, MuxT1Cfg]):
                 for artist in viewer.set(times, np.abs(data[:, row]))
             )
 
+        # 2. Sweep the shared wait after all pi branches finish, then acquire mux readout.
         signals = SignalBuffer((len(times), len(indices)), on_update=update)
         with Schedule(signals, scope=context.scope) as sched:
             builder = TimelineBuilder(
@@ -356,11 +525,14 @@ class MuxT1Exp(Experiment[MuxT1Result, MuxT1Cfg]):
                 ),
             )
         signals.trigger_update(flush=True)
+        # 3. Keep completed-round IQ for every delay; NaN marks no completed round.
         return MuxT1Result(
             times, np.asarray(indices, dtype=np.int64), signals.array.T.copy()
         )
 
     def _run_decay(self, cfg: MuxT1Cfg, *, context: RunContext) -> MuxT1Result:
+        """Acquire the nonuniform delay table and return tone-major IQ."""
+        # 1. Show each participant's decay on the collision-checked, quantized nonuniform delays.
         table = materialize_nonuniform_t1_delays(cfg.delay, soccfg=context.soccfg)
         times = table.times_us
         indices = list(cfg.participants)
@@ -386,6 +558,7 @@ class MuxT1Exp(Experiment[MuxT1Result, MuxT1Cfg]):
                 for artist in viewer.set(times, np.abs(data[:, row]))
             )
 
+        # 2. Step the hardware delay table after all pi branches finish, then acquire mux readout.
         signals = SignalBuffer((len(times), len(indices)), on_update=update)
         with Schedule(signals, scope=context.scope) as sched:
             builder = TimelineBuilder(
@@ -423,6 +596,7 @@ class MuxT1Exp(Experiment[MuxT1Result, MuxT1Cfg]):
                 ),
             )
         signals.trigger_update(flush=True)
+        # 3. Retain actual table delays and completed-round IQ without filling missing values.
         return MuxT1Result(
             times, np.asarray(indices, dtype=np.int64), signals.array.T.copy()
         )
@@ -442,5 +616,7 @@ class MuxT1Exp(Experiment[MuxT1Result, MuxT1Cfg]):
         invalid axes/options raise. Acquired delays, projected observations
         and predictions stay local to analysis. Draw only the selected primary
         model as fit_i.
+
         """
-        return analyze_t1(source.result, options, plots=plots)
+        # 1. Fit saved acquired delays per tone using the requested skip and single/dual decay policy.
+        return fit_and_plot_t1(source.result, options, plots=plots)

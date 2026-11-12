@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Annotated, ClassVar, Literal
 
 import numpy as np
+from matplotlib.artist import Artist
 from matplotlib.ticker import MaxNLocator, ScalarFormatter
 from numpy.typing import NDArray
 from pydantic import Field
@@ -31,10 +32,6 @@ class FreqFluxResult:
     values: NDArray[np.float64]
     freqs: NDArray[np.float64]
     signals: NDArray[np.complex128]
-
-
-def freqflux_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
-    return np.abs(minus_background(signals, axis=1))
 
 
 class FreqFluxCfg(ConfigBase):
@@ -112,7 +109,7 @@ class FreqFluxExp(Experiment[FreqFluxResult, FreqFluxCfg]):
         values are passed in that unit without conversion. ``acquire_retry``
         controls acquisition retries at each flux point.
         """
-        # Prepare the device-value axis and the probe's hardware frequency grid.
+        # 1. Prepare the device-value axis and the probe's hardware frequency grid.
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
 
@@ -124,6 +121,7 @@ class FreqFluxExp(Experiment[FreqFluxResult, FreqFluxCfg]):
             freq_sweep, "freq", {"soccfg": soccfg, "gen_ch": cfg.qub_pulse.ch}
         )
 
+        # 2. Track the flux-dependent contrast map and recent frequency traces.
         fig, _ = context.plots.subplots(1, 2, num="measurement")
         heat_ax, line_ax = fig.axes
         heat_ax.set(xlabel="Flux device value", ylabel="Frequency (MHz)")
@@ -142,8 +140,14 @@ class FreqFluxExp(Experiment[FreqFluxResult, FreqFluxCfg]):
         line_ax.legend()
 
         @context.plots.on_plot_thread
-        def update(data):
-            real = freqflux_signal2real(data)
+        def update(data: NDArray[np.complex128]) -> tuple[Artist, ...]:
+            """Refresh the flux contrast map and two recent frequency traces.
+
+            data is complex IQ shaped (flux bias, frequency); NaN marks unmeasured points.
+            Return the changed artists without modifying the input array.
+            """
+            # Display each row's contrast relative to its own median background.
+            real = np.abs(minus_background(data, axis=1))
             valid = np.flatnonzero(~np.all(np.isnan(real), axis=1))
             current = int(valid[-1]) if valid.size else -1
             history = np.full((2, len(freqs)), np.nan)
@@ -157,7 +161,7 @@ class FreqFluxExp(Experiment[FreqFluxResult, FreqFluxCfg]):
             on_update=update,
         )
 
-        # Set the external flux bias before acquiring each complete spectrum.
+        # 3. Set the external flux bias before acquiring each complete spectrum.
         with Schedule(signals_buffer, scope=context.scope) as sched:
             for _, step in sched.scan("flux", dev_values.tolist()):
                 set_flux(

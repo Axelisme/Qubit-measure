@@ -7,6 +7,7 @@ from typing import Annotated, ClassVar, Literal
 
 import numpy as np
 import zcu_tools.analysis.fitting as ft
+from matplotlib.artist import Artist
 from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field
@@ -45,7 +46,25 @@ class T1Result:
     signals: NDArray[np.complex128]
 
 
+@validated_dataclass(frozen=True)
+class T1AnalyzeOptions:
+    """Fit one or two decays after skipping a nonnegative number of leading points."""
+
+    dual_exp: Annotated[bool, FieldMeta(label="Dual exponential")] = False
+    skip: Annotated[int, FieldMeta(label="Skip leading points"), Field(ge=0)] = 0
+
+
+@dataclass(frozen=True)
+class T1Analysis:
+    t1: float
+    t1_err: float
+    t1b: float | None = None
+    t1b_err: float | None = None
+    fit_quality: Mapping[str, FitQuality] | None = None
+
+
 def t1_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
+    """Convert mean complex IQ to the real contrast used by live and analysis plots."""
     return rotate2real(signals).real  # (times, signals)
 
 
@@ -80,23 +99,6 @@ class T1Cfg(ConfigBase):
     ]
 
 
-@validated_dataclass(frozen=True)
-class T1AnalyzeOptions:
-    """Fit one or two decays after skipping a nonnegative number of leading points."""
-
-    dual_exp: Annotated[bool, FieldMeta(label="Dual exponential")] = False
-    skip: Annotated[int, FieldMeta(label="Skip leading points"), Field(ge=0)] = 0
-
-
-@dataclass(frozen=True)
-class T1Analysis:
-    t1: float
-    t1_err: float
-    t1b: float | None = None
-    t1b_err: float | None = None
-    fit_quality: Mapping[str, FitQuality] | None = None
-
-
 class T1Exp(Experiment[T1Result, T1Cfg]):
     """T1 relaxation time measurement.
 
@@ -124,13 +126,18 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
         Return quantized delays and mean complex IQ with shape (time,).
         Unmeasured points remain NaN.
         """
+        # 1. Isolate acquisition settings before choosing the relaxation-delay sampling path.
         cfg = deepcopy(config)
+        # 2. Choose a uniform hardware sweep or a nonuniform hardware delay table.
         if cfg.sampling == "linear":
             return self._run_linear(cfg, context=context)
         return self._run_decay(cfg, context=context)
 
     def _run_linear(self, cfg: T1Cfg, *, context: RunContext) -> T1Result:
+        """Sweep a linear delay in hardware after the pi pulse and return mean IQ."""
+        # 1. Quantize uniform delays for the excited-state relaxation trace.
         lengths = sweep2array(cfg.delay, "time", {"soccfg": context.soccfg})
+        # 2. Monitor relaxation contrast during uniform-delay averaging.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Time (us)", ylabel="Amplitude")
         ax.set_title("T1 relaxation")
@@ -139,7 +146,12 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
         viewer = live_line(ax)
 
         @context.plots.on_plot_thread
-        def update(data):
+        def update(data: NDArray[np.complex128]) -> tuple[Artist, ...]:
+            """Refresh the linear-delay T1 contrast curve.
+
+            data is complex IQ in delay order; NaN marks unmeasured points.
+            Return the changed artists without modifying the input array.
+            """
             return viewer.set(lengths, t1_signal2real(data))
 
         fig.show()
@@ -147,6 +159,7 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
             (len(lengths),),
             on_update=update,
         )
+        # 3. Measure relaxation after excitation on the uniform delay grid with SNR stopping.
         with Schedule(signals, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 context.soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
@@ -172,8 +185,11 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
         return T1Result(times=lengths, signals=signals.array)
 
     def _run_decay(self, cfg: T1Cfg, *, context: RunContext) -> T1Result:
+        """Sweep nonuniform delay-table entries after the pi pulse and return mean IQ."""
+        # 1. Materialize nonuniform relaxation delays on the hardware timing grid.
         table = materialize_nonuniform_t1_delays(cfg.delay, soccfg=context.soccfg)
         lengths = table.times_us
+        # 2. Monitor relaxation contrast at the nonuniform sampled delays.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Time (us)", ylabel="Amplitude")
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
@@ -181,7 +197,12 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
         viewer = live_line(ax)
 
         @context.plots.on_plot_thread
-        def update(data):
+        def update(data: NDArray[np.complex128]) -> tuple[Artist, ...]:
+            """Refresh the nonuniform-delay T1 contrast curve.
+
+            data is complex IQ in delay order; NaN marks unmeasured points.
+            Return the changed artists without modifying the input array.
+            """
             return viewer.set(lengths, t1_signal2real(data))
 
         fig.show()
@@ -189,6 +210,7 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
             (len(lengths),),
             on_update=update,
         )
+        # 3. Measure post-excitation relaxation using table-driven waits with SNR stopping.
         with Schedule(signals, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 context.soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
@@ -219,6 +241,7 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
         *,
         plots: Plots,
     ) -> T1Analysis:
+        # 1. Estimate single or dual relaxation lifetimes from the unskipped real-IQ decay.
         result = source.result
         xs = result.times[options.skip :]
         signals = result.signals[options.skip :]
@@ -244,6 +267,7 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
             t1b = 0.0
             t1berr = 0.0
 
+        # 2. Assess relaxation lifetimes and optional secondary decay against the measured trace.
         fig, ax = plots.subplots(num="fit")
 
         ax.plot(xs, real_signals, label="data", ls="-", marker="o", markersize=5)
