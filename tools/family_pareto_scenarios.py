@@ -407,6 +407,56 @@ def gate_sequence_input() -> Input:
     )
 
 
+def shaped_gate_sequence_input() -> Input:
+    """Compile 24 Gaussian prefixes of the X,Y,-X,-Y gate alphabet.
+
+    Gate counts are 1..24 on the fixed 21-level model at DC E1-E0. Each gate
+    lasts 100 ns with sigma 20 ns and uncalibrated gain .1. These durations
+    match the shaped gain scan, not a calibrated rotation. Resources close
+    before return; Input.build supplies a fresh caller-owned numeric source.
+    Compiler/environment failures propagate as in carrier_sweep_input.
+    """
+
+    def emit(builder: TimelineBuilder, center: float) -> None:
+        builder.add_loop("count", 24)
+        gates = [
+            Pulse(
+                f"gate_{phase}",
+                PulseCfg(
+                    ch=1,
+                    nqz=1,
+                    freq=center,
+                    phase=phase,
+                    gain=0.1,
+                    waveform=GaussWaveformCfg(length=0.1, sigma=0.02),
+                ),
+            )
+            for phase in (0, 90, 180, 270)
+        ]
+        with builder.branch(
+            by="count", align_timeline=False, timeline="default"
+        ) as cases:
+            for point in range(24):
+                with cases.case(point):
+                    for index in range(point + 1):
+                        builder.emit(gates[index % len(gates)])
+
+    return _single_input(
+        "shaped_gate_sequence",
+        emit,
+        {
+            "pulse_sequence": "1..24 Gaussian gates from repeated X,Y,-X,-Y phase alphabet, terminal readout",
+            "waveform": "gauss",
+            "pulse_length_us": 0.1,
+            "sigma_us": 0.02,
+            "gain": 0.1,
+            "gate_counts": list(range(1, 25)),
+            "gate_phases_deg": [0, 90, 180, 270],
+        },
+        _SHAPED,
+    )
+
+
 def simultaneous_drive_input() -> Input:
     """Compile a common gain scan over synchronous F1/F2 Gaussian drives.
 
@@ -538,4 +588,5 @@ def make_real_inputs() -> list[Input]:
         idle_sweep_input(),
         gate_sequence_input(),
         simultaneous_drive_input(),
+        shaped_gate_sequence_input(),
     ]

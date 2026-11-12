@@ -84,6 +84,32 @@ def test_gate_scan_preserves_variable_sequence_lengths(
     assert inventories, "a gate scan must preserve ragged, varying pulse counts"
 
 
+def test_shaped_gate_scan_compiles_gaussian_phase_alphabet_prefixes() -> None:
+    from tools import family_pareto_scenarios
+
+    item = family_pareto_scenarios.shaped_gate_sequence_input()
+    with closing((case := item.build()).source):
+        batch = case.batch
+        assert len(batch.points) == 24
+        for point, count in enumerate(range(1, 25)):
+            gates = sorted(
+                (track for track in batch.tracks if track.active[point]),
+                key=lambda track: track.start_ns[point],
+            )
+            assert len(gates) == count
+            np.testing.assert_allclose(
+                [gate.phase_rad[point] for gate in gates],
+                np.resize(np.arange(4) * np.pi / 2, count),
+                atol=1e-12,
+            )
+            envelopes = [
+                gate.envelopes[gate.envelope_index[point]] for gate in gates
+            ]
+            assert all(envelope.kind == "sampled" for envelope in envelopes)
+            assert all(np.ptp(envelope.samples.real) > 0 for envelope in envelopes)
+        assert np.all(np.diff(batch.end_ns) > 0)
+
+
 def test_joint_scan_compiles_synchronous_independent_drive_ports(
     fixed_inputs: list[Input],
 ) -> None:
