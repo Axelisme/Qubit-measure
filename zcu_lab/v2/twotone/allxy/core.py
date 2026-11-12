@@ -10,7 +10,7 @@ from matplotlib.axes import Axes
 from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic.dataclasses import dataclass as validated_dataclass
-from scipy.optimize import curve_fit
+from zcu_tools.analysis.fitting.allxy import fit_allxy_errors
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment, config
 from zcu_tools.experiment.context import RunContext
@@ -69,47 +69,6 @@ ALLXY_GATE2_IDX = [GATE_LIST.index(g2) for _, g2 in ALLXY_SEQUENCE]
 # ------------------------------------------------------------------------------
 # Helper functions
 # ------------------------------------------------------------------------------
-
-
-def predict_state_with_error(
-    gates: tuple[str, str], power_err: float, detune_err: float
-) -> float:
-    """Predict Bloch-z after a supported AllXY pair with power/detune errors.
-
-    Errors are dimensionless expansion parameters. Unsupported gate pairs raise
-    ValueError. The returned value uses the polynomial AllXY approximation.
-    """
-    ep = power_err
-    ed = detune_err
-
-    # reference: https://rsl.yale.edu/sites/default/files/2024-08/2013-RSL-Thesis-Matthew-Reed.pdf
-    # page 154
-
-    if gates == ("I", "I"):
-        state = 1
-    elif gates in [("X180", "X180"), ("Y180", "Y180")]:
-        state = 1 - 8 * ep**2 - (np.pi**2 / 32) * ed**4
-    elif gates in [("X180", "Y180"), ("Y180", "X180")]:
-        state = 1 - 4 * ep**2 - ed**2
-    elif gates in [("X90", "I"), ("Y90", "I"), ("I", "X90"), ("I", "Y90")]:
-        state = -ep + (1 - np.pi / 2) * ed**2
-    elif gates == ("X90", "Y90"):
-        state = ep**2 - 2 * ed
-    elif gates == ("Y90", "X90"):
-        state = ep**2 + 2 * ed
-    elif gates in [("X90", "Y180"), ("X180", "Y90")]:
-        state = ep - ed
-    elif gates in [("Y90", "X180"), ("Y180", "X90")]:
-        state = ep + ed
-    elif gates in [("X90", "X180"), ("X180", "X90"), ("Y90", "Y180"), ("Y180", "Y90")]:
-        state = 3 * ep + (3 * np.pi / 8) * ed**2
-    elif gates in [("X180", "I"), ("Y180", "I"), ("I", "X180"), ("I", "Y180")]:
-        state = -1 + 2 * ep**2 + 0.5 * ed**2
-    elif gates in [("X90", "X90"), ("Y90", "Y90")]:
-        state = -1 + 2 * ep**2 + 2 * ed**2
-    else:
-        raise ValueError(f"Invalid gate pair: {gates}")
-    return state
 
 
 def allxy_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -312,8 +271,6 @@ class AllXY_Exp(Experiment[AllXY_Result, AllXYCfg]):
         not gate infidelities. Publish ``fit``; source cfg may be None.
         """
         result = source.result
-        fit_ge = options.fit_ge
-
         signals = result.signals
 
         # Rotate IQ data so that the contrast lies on the real axis and take only
@@ -323,88 +280,28 @@ class AllXY_Exp(Experiment[AllXY_Result, AllXYCfg]):
 
         # Fit coherent-error parameters against the 21 pair responses.
 
-        g_signal = real_signals[sequence.index(("I", "I"))]
-        init_center = 0.5 * (np.max(real_signals) + np.min(real_signals))
-        init_contrast = np.ptp(real_signals)
-        if g_signal < init_center:
-            init_contrast = -init_contrast
-
-        def calc_sim_signal(seq, center, contrast, ep, ed) -> float:
-            return center + 0.5 * contrast * predict_state_with_error(seq, ep, ed)
-
-        if fit_ge:
-            params, *_ = curve_fit(
-                lambda _, *args: [calc_sim_signal(seq, *args) for seq in sequence],
-                np.arange(len(sequence)),
-                real_signals,
-                p0=(init_center, init_contrast, 0.0, 0.0),
-                bounds=(
-                    (np.min(real_signals), -np.abs(init_contrast), -0.2, -0.2),
-                    (np.max(real_signals), np.abs(init_contrast), 0.2, 0.2),
-                ),
-            )
-
-            center, contrast, ep, ed = params
-        else:
-            center = init_center
-            contrast = init_contrast
-
-            params, *_ = curve_fit(
-                lambda _, *args: [
-                    calc_sim_signal(seq, center, contrast, *args) for seq in sequence
-                ],
-                np.arange(len(sequence)),
-                real_signals,
-                p0=(0.0, 0.0),
-                bounds=((-0.2, -0.2), (0.2, 0.2)),
-            )
-
-            ep, ed = params
-
-        predict_signals = [
-            calc_sim_signal(seq, center, contrast, ep, ed) for seq in sequence
-        ]
-        # The model's ep is the pi/2 rotation-angle error, (pi/2) * amplitude error.
-        amplitude_error = ep / (np.pi / 2)
-        residual_rms = np.sqrt(
-            np.mean((real_signals - np.asarray(predict_signals)) ** 2)
-        ) / (0.5 * np.abs(contrast))
-
-        # Separate the Bloch-z deviations due to amplitude and detuning errors.
-        perfect_states = [predict_state_with_error(seq, 0.0, 0.0) for seq in sequence]
-        power_err = np.mean(
-            [
-                np.abs(predict_state_with_error(seq, ep, 0.0) - perf_state)
-                for seq, perf_state in zip(sequence, perfect_states, strict=False)
-            ]
-        )
-        detune_err = np.mean(
-            [
-                np.abs(predict_state_with_error(seq, 0.0, ed) - perf_state)
-                for seq, perf_state in zip(sequence, perfect_states, strict=False)
-            ]
-        )
+        fit = fit_allxy_errors(sequence, real_signals, fit_ge=options.fit_ge)
 
         # Compare the measured staircase with the fitted low-order model.
 
         fig, ax = plots.subplots(num="fit", figsize=config.figsize)
         ax.plot(real_signals, marker="o", linestyle="None", label="Measured Signals")
         ax.plot(
-            predict_signals,
+            fit.predict_signals,
             marker="x",
             linestyle="-",
             color="red",
             label="Predicted Signals",
         )
-        ax.axhline(y=float(center), color="green", linestyle="--", alpha=0.2)
+        ax.axhline(y=fit.center, color="green", linestyle="--", alpha=0.2)
         ax.axhline(
-            y=float(center) + 0.5 * float(contrast),
+            y=fit.center + 0.5 * fit.contrast,
             color="blue",
             linestyle="--",
             alpha=0.2,
         )
         ax.axhline(
-            y=float(center) - 0.5 * float(contrast),
+            y=fit.center - 0.5 * fit.contrast,
             color="blue",
             linestyle="--",
             alpha=0.2,
@@ -419,16 +316,16 @@ class AllXY_Exp(Experiment[AllXY_Result, AllXYCfg]):
         ax.grid(True)
 
         ax.set_title(
-            f"amp err: {amplitude_error:+.2%}, power dep: {power_err:.1%}, "
-            f"detune dep: {detune_err:.1%}, residual: {residual_rms:.1%}"
+            f"amp err: {fit.amplitude_error:+.2%}, power dep: {fit.power_err:.1%}, "
+            f"detune dep: {fit.detune_err:.1%}, residual: {fit.residual_rms:.1%}"
         )
 
         fig.tight_layout()
 
         return AllXYAnalysis(
-            amplitude_error=float(amplitude_error),
-            detune_param=float(ed),
-            power_err=float(power_err),
-            detune_err=float(detune_err),
-            residual_rms=float(residual_rms),
+            amplitude_error=fit.amplitude_error,
+            detune_param=fit.detune_param,
+            power_err=fit.power_err,
+            detune_err=fit.detune_err,
+            residual_rms=fit.residual_rms,
         )

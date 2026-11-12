@@ -8,16 +8,14 @@ from dataclasses import dataclass
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import Field
-from zcu_tools.analysis.fitting import FitQuality
-from zcu_tools.analysis.fitting.shared import (
-    FitTrace,
-    ParameterSpec,
-    SharedFitResult,
-    fit_shared,
+from zcu_tools.analysis.fitting import (
+    FitQuality,
+    IRBAnalysis,
+    fit_joint_decay,
+    seed_statistics,
 )
+from zcu_tools.analysis.fitting.shared import SharedFitResult
 from zcu_tools.cfg_model import ConfigBase
-
-from ...twotone.irb.analysis import IRBAnalysis
 
 
 class RBOptions(ConfigBase):
@@ -150,133 +148,23 @@ def validate_axes(
         raise ValueError("RB count axes do not match saved cfg")
 
 
-def seed_statistics(
-    survival: NDArray[np.float64],
-    totals: NDArray[np.float64],
-) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
-    """Average paired rounds equally inside seeds, returning (seed,arm,depth).
-
-    survival is (depth,seed,arm,round), already masked to whole paired rounds.
-    Binomial variance propagates through the arithmetic round average. The
-    finite-shot variance floor 1/(4*N**2) keeps all-success/all-failure points
-    usable without assigning zero error. Counts affect errors, never seed means.
-    Unavailable seeds remain NaN.
-    """
-    complete = np.asarray(np.isfinite(survival).all(axis=(0, 2)), dtype=np.bool_)
-    nrounds = complete.sum(axis=1)
-    valid = complete[None, :, None, :]
-    means = np.full(survival.shape[:-1], np.nan)
-    variances = np.full_like(means, np.nan)
-    variance = np.full_like(survival, np.nan)
-    np.divide(
-        np.maximum(survival * (1 - survival), 0.25 / np.maximum(totals, 1)),
-        totals,
-        out=variance,
-        where=totals > 0,
-    )
-    np.divide(
-        np.where(valid, survival, 0).sum(axis=-1),
-        nrounds[None, :, None],
-        out=means,
-        where=nrounds[None, :, None] > 0,
-    )
-    np.divide(
-        np.where(valid, variance, 0).sum(axis=-1),
-        nrounds[None, :, None] ** 2,
-        out=variances,
-        where=nrounds[None, :, None] > 0,
-    )
-    return means.transpose(1, 2, 0), variances.transpose(1, 2, 0)
-
-
-def aggregate_seeds(
-    means: NDArray[np.float64],
-    variances: NDArray[np.float64],
-) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
-    """Equal-seed mean and propagated binomial standard error, shape (2,depth).
-
-    Missing seeds have wholly NaN curves. Repeated bootstrap identities retain
-    their multiplicity. No seed receives an inverse-shot-count weight.
-    """
-    kept = np.isfinite(means).all(axis=(1, 2))
-    count = int(kept.sum())
-    if count < 2:
-        raise ValueError(
-            "Need at least two seeds with complete reference/interleaved pairs per herald"
-        )
-    return means[kept].mean(axis=0), np.sqrt(variances[kept].sum(axis=0)) / count
-
-
-def decay_model(
-    depth: NDArray[np.float64], p: float, amplitude: float, offset: float
-) -> NDArray[np.float64]:
-    """Return A*p**depth+B in probability coordinates."""
-    return amplitude * np.power(p, depth) + offset
-
-
-def fit_joint_decay(
-    depths: NDArray[np.int64],
-    means: NDArray[np.float64],
-    errors: NDArray[np.float64],
-) -> tuple[SharedFitResult, NDArray[np.float64]]:
-    """Fit (herald,arm,depth) curves, one decay per arm, own A/B per herald.
-
-    Requires measurable contrast in each arm, valid decaying minima and finite
-    covariance. Means have already been averaged with equal seed weights.
-    """
-    parameters = []
-    traces = []
-    xs = depths.astype(np.float64)
-    for arm in range(2):
-        if np.max(np.ptp(means[:, arm], axis=-1)) <= 1e-12:
-            raise ValueError("IRB decay has no measurable contrast")
-        parameters.append(ParameterSpec(f"p_{arm}", 0.95, limits=(1e-6, 1 - 1e-6)))
-        for herald in range(2):
-            curve = means[herald, arm]
-            amplitude = float(curve[0] - curve[-1])
-            names = (f"p_{arm}", f"A_{herald}_{arm}", f"B_{herald}_{arm}")
-            parameters.extend(
-                (
-                    ParameterSpec(names[1], amplitude, limits=(-1.0, 1.0)),
-                    ParameterSpec(names[2], float(curve[-1]), limits=(0.0, 1.0)),
-                )
-            )
-            traces.append(FitTrace(xs, curve, decay_model, names, errors[herald, arm]))
-    fit = fit_shared(traces, parameters)
-    if (
-        not fit.diagnostics.valid
-        or not np.isfinite(fit.covariance).all()
-        or fit.diagnostics.hesse_failed
-    ):
-        raise ValueError("IRB joint decay fit is unidentifiable or non-decaying")
-    curves = np.empty_like(means)
-    for herald in range(2):
-        for arm in range(2):
-            curves[herald, arm] = decay_model(
-                xs,
-                fit.values[f"p_{arm}"],
-                fit.values[f"A_{herald}_{arm}"],
-                fit.values[f"B_{herald}_{arm}"],
-            )
-    return fit, curves
-
-
 def bootstrap_joint_error(
     depths: NDArray[np.int64],
-    seed_means: NDArray[np.float64],
-    seed_variances: NDArray[np.float64],
+    survival: NDArray[np.float64],
+    totals: NDArray[np.float64],
     *,
     samples: int,
     seed: int,
 ) -> tuple[float, float, int]:
     """95% d=4 ratio CI from paired seed-identity draws across both heralds.
 
-    Inputs are (herald,seed,arm,depth), NaN for unavailable seeds. Draw from
+    Inputs are (herald,depth,seed,arm,round), survival masked to paired
+    rounds and totals in shot counts. NaN denotes unavailable survival. Draw from
     their valid identity union; each herald retains only its valid draws,
     including multiplicity. Both arms/depths travel together. Fewer than two
     retained draws in either group fails that resample, never fills missing data.
     """
-    available = np.isfinite(seed_means).all(axis=(2, 3))
+    available = np.isfinite(survival).all(axis=(1, 3)).any(axis=-1)
     identities = np.flatnonzero(available.any(axis=0))
     rng = np.random.default_rng(seed)
     errors = []
@@ -284,12 +172,15 @@ def bootstrap_joint_error(
         draw = rng.choice(identities, size=len(identities), replace=True)
         try:
             statistics = [
-                aggregate_seeds(seed_means[h, draw], seed_variances[h, draw])
+                seed_statistics(
+                    np.take(survival[h], draw, axis=1),
+                    np.take(totals[h], draw, axis=1),
+                )
                 for h in range(2)
             ]
-            means = np.array([item[0] for item in statistics])
-            uncertainty = np.array([item[1] for item in statistics])
-            fit, _ = fit_joint_decay(depths, means, uncertainty)
+            means = np.array([item.means for item in statistics])
+            uncertainty = np.array([item.errors for item in statistics])
+            fit = fit_joint_decay(depths, means, uncertainty).fit
         except (ValueError, RuntimeError):
             continue
         errors.append(0.75 * (1 - fit.values["p_1"] / fit.values["p_0"]))

@@ -11,7 +11,7 @@ from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field, model_validator
 from zcu_tools.analysis.failure import AnalysisFailed
-from zcu_tools.analysis.fitting import compute_fit_quality
+from zcu_tools.analysis.fitting import analyze_irb, compute_fit_quality
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
     Experiment,
@@ -36,7 +36,6 @@ from zcu_tools.program.v2.modules import MuxReadout
 
 from zcu_lab.v2.support import live_line
 
-from ...twotone.irb.analysis import analyze_irb
 from .._drive import DualLineCfg
 from .._readout import JointRoles
 from .._sums import (
