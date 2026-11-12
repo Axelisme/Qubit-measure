@@ -100,18 +100,17 @@ Analysis rejects incomplete, nonfinite or empty counts and singular confusion ma
 
 Save All preserves g/e/f counts and this run's readout cfg in native data.h5.
 Old raw-shot files are rejected with an error naming the missing counts variable.
-Data → Load Data → File… restores that saved run for Analyze without recalibration.
+Data → Load Data → File… restores a new 4.0 run for Analyze without recalibration.
 A later live library edit cannot change its classification. Reload experiments
 discards results after confirmation and restores tab inputs, not acquired data.
 A fresh process may restore inputs through the configured startup script.
-Load the saved native file to recover and reanalyze acquired data.
+Load a native file saved with cfg schema 4.0 to recover its data and cfg for Analyze.
 
-Older files with an extra area coordinate still load their counts, detuning and gain.
-The raw file retains area; the current result uses only detuning and gain.
-An old `frequency` configuration still restores and can be analyzed.
-Old `area` and `frequency_area` configurations fail mode validation.
-Their numeric data remains readable, but Analyze rejects the missing saved cfg.
-The loader does not rename these modes or substitute a current readout calibration.
+Older 3.x files in `frequency`, `area` and `frequency_area` modes retain their
+raw counts, detuning, gain, area and metadata. The current result restores only
+counts, detuning and gain. The loader does not restore a typed cfg because the
+schema major version differs, so these files cannot be analyzed directly.
+It does not migrate the cfg, rename modes or substitute a current readout calibration.
 
 ## MCP recipe
 

@@ -146,7 +146,7 @@ class RamanGFExp(Experiment[RamanGFResult, RamanGFCfg]):
         cfg_type=RamanGFCfg,
         result_builder=restore_result,
         tag="twotone/raman_gf",
-        cfg_schema_version="3.0",
+        cfg_schema_version="4.0",
         labber_layout="independent",
     )
 

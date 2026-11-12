@@ -85,7 +85,6 @@ from zcu_lab.workflows.common.rabi_measurement import measure_planned_rabi
 from zcu_lab.workflows.common.readout_analysis import accepted_readout_optimum
 from zcu_lab.workflows.common.saving import save_native
 from zcu_lab.workflows.common.stages import StageEnv
-from zcu_lab.workflows.common.summary import observe_operation
 
 
 @dataclass
@@ -376,7 +375,7 @@ async def calibrate_len_rabi(
         cfg,
         name="Rabi",
     )
-    observe_operation(env.summary, outcome)
+    env.summary.observe(outcome)
     diagnostics = RabiResult(
         "failed",
         None,
@@ -642,7 +641,7 @@ async def calibrate_readout(
         cfg,
         name="readout",
     )
-    observe_operation(env.summary, outcome)
+    env.summary.observe(outcome)
     # Save the landscape and choose its best point meeting the SNR threshold.
     save_native(
         outcome,

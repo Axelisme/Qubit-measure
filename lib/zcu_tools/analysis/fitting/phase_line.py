@@ -43,7 +43,7 @@ def fit_phase_line(
     Inputs are matching float64 (N,) arrays in acquisition order. n is the
     coordinate axis, phase_degrees contains complete finite degree phases,
     and variances contains their variances in degree². Caller resolves missing
-    phases before calling. At least three samples with two distinct n values
+    phases before calling. At least two samples with two distinct n values
     are required. Inputs are not modified. Unwrap uses period 360° and cannot
     infer steps exceeding a half turn. An exact adjacent 180° step is ambiguous.
     Nonpositive/nonfinite variances, half-turn ambiguity, rank deficiency or

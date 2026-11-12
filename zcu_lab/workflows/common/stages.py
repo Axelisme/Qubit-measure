@@ -15,7 +15,6 @@ from zcu_lab.workflows.common.saving import save_native
 from zcu_lab.workflows.common.summary import (
     StageName,
     SummaryAccumulator,
-    observe_operation,
 )
 
 
@@ -79,7 +78,7 @@ async def acquire_saved[Cfg: ConfigBase, Result](
     Acquisition, writer and unexpected framework exceptions propagate.
     """
     outcome = await run_core(scope, experiment, cfg, name=name)
-    observe_operation(env.summary, outcome)
+    env.summary.observe(outcome)
     save_native(
         outcome,
         scope.dir / output.filename,

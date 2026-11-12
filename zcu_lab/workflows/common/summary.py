@@ -240,8 +240,3 @@ class SummaryAccumulator:
             stages=tuple(stages.values()),
             qubits=_qubit_totals(self.points),
         )
-
-
-def observe_operation[T](summary: SummaryAccumulator, outcome: Completed[T]) -> None:
-    """Pass delivered facts to the run accumulator without altering the outcome."""
-    summary.observe(outcome)

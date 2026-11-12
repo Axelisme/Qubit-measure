@@ -25,7 +25,6 @@ from zcu_lab.workflows.common.lifetime_models import (
 )
 from zcu_lab.workflows.common.saving import save_native
 from zcu_lab.workflows.common.stages import StageEnv
-from zcu_lab.workflows.common.summary import observe_operation
 from zcu_lab.workflows.overnight_mux.acquire import run_mux_t1, run_mux_t2echo
 from zcu_lab.workflows.overnight_mux.analysis import analyze_mux_t1, analyze_mux_t2echo
 from zcu_lab.workflows.overnight_mux.pulses import FixedMuxPulses
@@ -230,7 +229,7 @@ async def measure_mux_t1(
     record = await run_core(
         scope, partial(run_mux_t1, retry=settings.acquire_retry), cfg, name="T1"
     )
-    observe_operation(env.summary, record)
+    env.summary.observe(record)
     save_native(
         record,
         scope.dir / "t1.h5",
@@ -338,7 +337,7 @@ async def measure_mux_echo(
     record = await run_core(
         scope, partial(run_mux_t2echo, retry=settings.acquire_retry), cfg, name="Echo"
     )
-    observe_operation(env.summary, record)
+    env.summary.observe(record)
     save_native(
         record,
         scope.dir / "t2echo.h5",
