@@ -7,6 +7,7 @@ import numpy as np
 from numpy.typing import NDArray
 from scipy.integrate import solve_ivp
 
+from ..baths import population_generator
 from ._constant import ConstantLine
 from .model import ReadoutModel, RealArray, readonly_array, readout_model_key
 from .readout_batch import ConditionalSums, ReadoutBatch, ReadoutEvent
@@ -46,7 +47,7 @@ class ConditionalReadout:
         ] = {}
         self._v = np.sqrt(model.kappa_external_per_ns / 2)
         self._scattering = self._v * np.exp(-1j * model.mismatch_phase_rad)
-        self._q = model.rates_per_ns - np.diag(model.rates_per_ns.sum(axis=0))
+        self._q = population_generator(model.rates_per_ns)
         detuning = model.frequencies_ghz - model.reference_frequency_ghz
         self._a = np.array(
             [

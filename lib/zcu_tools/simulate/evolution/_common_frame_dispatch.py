@@ -8,13 +8,14 @@ from numpy.typing import NDArray
 
 from ._multitone_dispatch import populate_multitone_inventory
 from .kernel import KernelContext, SegmentTable
+from .kernels._rwa_numeric import multitone_retention
 from .kernels._workload_facts import envelope_bounds
 from .kernels.common_frame import (
     coefficient_keys,
     common_frame_cost_viable,
     common_frame_strengths,
 )
-from .kernels.multitone_rwa import MultitoneRWAKernel, multitone_retention
+from .kernels.multitone_rwa import MultitoneRWAKernel
 from .workplan import FactKey
 
 

@@ -17,7 +17,7 @@ from ._joint_fock_numeric import (
     rk4,
 )
 from ._joint_fock_two_level import FockRow, pointer_cutoff, pointer_fields
-from .kernels.multitone_rwa import (
+from .kernels._rwa_numeric import (
     RWACoefficients,
     interaction_hamiltonian,
     rwa_coefficients,

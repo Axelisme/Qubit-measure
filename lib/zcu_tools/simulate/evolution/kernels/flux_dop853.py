@@ -20,7 +20,7 @@ from ._dop853_data import (
 )
 from ._dop853_intervals import playback_time
 from ._flux_expansion import TERM_KINDS, PackedExpansion, flux_hamiltonian
-from ._workload_facts import packed_segments
+from ._workload_facts import model_keys, packed_segments
 
 
 @dataclass(frozen=True)
@@ -265,8 +265,6 @@ class FluxDOP853Kernel:
             raise ValueError("flux DOP853 prepared index out of range")
         if not len(rows):
             return np.zeros(len(rows), dtype=np.bool_)
-        from ._dyson_model import model_keys
-
         _, first, inverse = np.unique(
             model_keys(table, rows), return_index=True, return_inverse=True
         )

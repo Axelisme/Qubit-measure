@@ -18,6 +18,7 @@ from ._planning import Geometry
 from ._prepare_keys import group_keys
 from .engine import Cancelled, EvolutionResult, PathDiagnostics
 from .kernel import ApplyContext, Kernel, KernelContext, Prepared, RowPlan, SegmentTable
+from .state import transform_density
 
 
 @dataclass(frozen=True)
@@ -241,8 +242,9 @@ class Schedule:
                 )
                 if level != zero:
                     model = self.source.model(level)
-                    overlap = model.eigenvectors.conj().T @ dc.eigenvectors
-                    initial = overlap @ initial @ overlap.conj().T
+                    initial = transform_density(
+                        initial, dc.eigenvectors, model.eigenvectors
+                    )
                 initial.setflags(write=False)
                 with self.context.work_plan.routing.measure(
                     binding.kernel.name, "prepare"
@@ -429,7 +431,7 @@ class Schedule:
                 rows,
                 self.dispatch.shaped,
                 self.dispatch.rejected,
-                self.dispatch.two_tone_direct,
+                self.dispatch.two_tone_first,
                 self.dispatch.names,
                 self.dispatch.plans,
             ),
@@ -597,8 +599,9 @@ class _Chunk:
             previous = self.continuous_basis.pop(int(slot), None)
             if previous is not None:
                 model = self.schedule.source.model(tuple(int(v) for v in target[index]))
-                overlap = model.eigenvectors.conj().T @ previous
-                self.states[slot] = overlap @ self.states[slot] @ overlap.conj().T
+                self.states[slot] = transform_density(
+                    self.states[slot], previous, model.eigenvectors
+                )
                 self.level[slot] = target[index]
         changed = np.any(self.level[slots] != target, axis=1)
         if not changed.any():
@@ -609,9 +612,10 @@ class _Chunk:
             width = target.shape[1]
             old = self.schedule.source.model(tuple(int(v) for v in transition[:width]))
             new = self.schedule.source.model(tuple(int(v) for v in transition[width:]))
-            overlap = new.eigenvectors.conj().T @ old.eigenvectors
             chosen = slots[mask]
-            self.states[chosen] = overlap @ self.states[chosen] @ overlap.conj().T
+            self.states[chosen] = transform_density(
+                self.states[chosen], old.eigenvectors, new.eigenvectors
+            )
         self.level[slots] = target
 
     def _continuous_boundary(
@@ -628,8 +632,9 @@ class _Chunk:
                 if previous is None:
                     level = tuple(int(v) for v in self.level[slot])
                     previous = source.model(level).eigenvectors
-                overlap = target.conj().T @ previous
-                self.states[slot] = overlap @ self.states[slot] @ overlap.conj().T
+                self.states[slot] = transform_density(
+                    self.states[slot], previous, target
+                )
             self.continuous_basis[int(slot)] = target
 
     def _apply(self, index: int, slots: NDArray[np.int64]) -> None:

@@ -206,6 +206,16 @@ def directional_rates(
     return rates
 
 
+def population_generator(rates: RealArray) -> RealArray:
+    """Return Q in 1/ns for validated directional rates[target, source].
+
+    rates is an (M,M) array in 1/ns, with nonnegative entries and zero diagonal.
+    Return a new mutable array with outgoing column sums removed. Inputs remain
+    unchanged; callers own validation of the rates and their state order.
+    """
+    return rates - np.diag(rates.sum(axis=0))
+
+
 def jump_operators(
     rates_per_ns: RealArray, eigenvectors: ComplexArray
 ) -> tuple[ComplexArray, ...]:

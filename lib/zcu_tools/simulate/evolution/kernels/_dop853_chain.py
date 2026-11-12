@@ -4,6 +4,7 @@ import numpy as np
 from numba import njit
 from numpy.typing import NDArray
 
+from ..state import transform_density
 from ._dop853 import Tolerances, integrate
 from ._dop853_intervals import row_intervals
 
@@ -52,10 +53,9 @@ def run_chain(
                 previous_model = model_index[index - 1]
                 state = states[index - 1].copy()
                 if previous_model != model:
-                    overlap = (
-                        models.basis[model].conj().T @ models.basis[previous_model]
+                    state = transform_density(
+                        state, models.basis[previous_model], models.basis[model]
                     )
-                    state = overlap @ state @ overlap.conj().T
         spectral_phase = (
             2
             * np.pi

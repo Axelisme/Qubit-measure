@@ -7,10 +7,11 @@ from numba import njit
 from numpy.typing import NDArray
 from scipy.linalg import expm
 
+from ...baths import population_generator
 from ..kernel import ApplyContext, KernelContext, Prepared, SegmentTable
 from . import gate_phase
 from ._gate_endpoints import GATE_SUBSEGMENTS, build_endpoints
-from ._secular import coherence_decay, population_generator, split_step
+from ._secular import coherence_decay, split_step
 from ._shaped import drive_bounds
 from ._workload_facts import envelope_bounds
 

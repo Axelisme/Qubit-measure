@@ -10,12 +10,8 @@ import numpy as np
 from numba import njit
 from numpy.typing import NDArray
 
+from ...baths import population_generator
 from ..secular import SecularModel
-
-
-def population_generator(rates: NDArray[np.float64]) -> NDArray[np.float64]:
-    """Return the (M,M) population generator Q, with outgoing column sums removed."""
-    return rates - np.diag(rates.sum(axis=0))
 
 
 def relaxation_decay(rates: NDArray[np.float64]) -> NDArray[np.float64]:

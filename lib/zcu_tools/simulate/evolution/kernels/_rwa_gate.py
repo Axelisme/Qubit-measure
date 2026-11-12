@@ -9,14 +9,13 @@ from numba import njit
 from numpy.typing import NDArray
 from scipy.linalg import expm
 
+from ...baths import population_generator
 from .._envelope import sample_value
 from ..kernel import ApplyContext, KernelContext, Prepared, SegmentTable
 from ..workplan import FactKey
 from ._dop853 import Tolerances, integrate, tolerances
 from ._rwa_graph import RWA_GRAPH_POLICY, PhaseGraph, phase_graph, pruning_admitted
-from ._secular import coherence_decay, population_generator, split_step
-from ._workload_facts import TableIdentity, envelope_bounds, fixed_flux
-from .multitone_rwa import (
+from ._rwa_numeric import (
     MULTITONE_RETENTION_POLICY,
     RWA_POLICY,
     RWACoefficients,
@@ -28,6 +27,8 @@ from .multitone_rwa import (
     retained_mask,
     rwa_coefficients,
 )
+from ._secular import coherence_decay, split_step
+from ._workload_facts import TableIdentity, envelope_bounds, fixed_flux
 
 _MIN_SUBSEGMENTS = 4
 _SPLIT_ALLOWANCE = 0.01

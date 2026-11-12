@@ -3,10 +3,12 @@
 import numpy as np
 from numpy.typing import NDArray
 
+from ...baths import population_generator
 from ..kernel import SegmentTable
 from ..secular import ModelSource, SecularModel
+from ..state import transform_density
 from ._dyson_model import parameters
-from ._secular import coherence_decay, population_generator
+from ._secular import coherence_decay
 
 
 def population_bound(
@@ -129,8 +131,7 @@ def accepts_population_bound(
         if initial is None:
             initial = source.initial_density
         if not np.array_equal(model.eigenvectors, dc.eigenvectors):
-            overlap = model.eigenvectors.conj().T @ dc.eigenvectors
-            initial = overlap @ initial @ overlap.conj().T
+            initial = transform_density(initial, dc.eigenvectors, model.eigenvectors)
         bound = population_bound(model, port, params[positions], initial, known)
         accepted[positions] = bound + budget / 8 <= min(0.02, (1.5 * budget) ** (2 / 3))
     return accepted
