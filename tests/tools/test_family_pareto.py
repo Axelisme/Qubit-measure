@@ -94,20 +94,22 @@ def test_three_modes_time_five_samples_and_exclude_setup_warmup_clear(
         assert all(sample.density_error == expected_error for sample in mode.samples)
 
 
-@pytest.mark.parametrize("seconds, sample_count", [(60.0, 5), (61.0, 1)])
-def test_slow_modes_keep_only_the_first_sample(
-    seconds: float, sample_count: int
-) -> None:
+@pytest.mark.parametrize("seconds", [60.0, 61.0])
+def test_slow_family_uses_two_evolves_in_the_same_history(seconds: float) -> None:
     density = np.eye(2, dtype=np.complex128)[None] / 2
     wall_ticks = count()
-    visits: list[int] = []
+    visits: list[list[int]] = []
 
     @contextmanager
     def session() -> Generator[EngineSession]:
-        visits.append(0)
+        history = 0
+        seen: list[int] = []
+        visits.append(seen)
 
         def evolve() -> EvolutionResult:
-            visits[-1] += 1
+            nonlocal history
+            seen.append(history)
+            history += 1
             return EvolutionResult(
                 np.array([0]), density, PathDiagnostics(segments_by_kernel={"t4": 1})
             )
@@ -120,9 +122,71 @@ def test_slow_modes_keep_only_the_first_sample(
         wall_clock=lambda: float(next(wall_ticks)) * seconds,
         cpu_clock=lambda: 0.0,
     )
-    assert [len(mode.samples) for mode in modes] == [sample_count] * 3
-    assert [mode.wall_median for mode in modes] == [seconds] * 3
-    assert visits == [1] * sample_count + [2 + sample_count] * 2
+    if seconds == 60:
+        assert [len(mode.samples) for mode in modes] == [5] * 3
+        assert [mode.wall_median for mode in modes] == [seconds] * 3
+        assert [len(visit) for visit in visits] == [1] * 5 + [7] * 2
+    else:
+        assert visits == [[0, 1]]
+        assert [len(mode.samples) for mode in modes] == [1, 0, 1]
+        assert modes[1].wall_median is None and modes[1].cpu_median is None
+        assert modes[1].unmeasured_reason == "slow family not measured"
+        row = FamilyResult("slow", 0.0, None, [
+            replace(mode, samples=[replace(sample, density_error=0.0) for sample in mode.samples])
+            for mode in modes
+        ])
+        fast = replace(row, family="fast", modes=[
+            ModeResult(mode.mode, [Sample(1, 1, 0, {})], 1, 1) for mode in modes
+        ])
+        for compare in (dominance, timing_equivalents):
+            compared = compare([row, fast])
+            assert "warm_clear_history/wall" not in compared["slow"]
+            assert compared["fast"]["warm_clear_history/wall"] == []
+
+
+def test_slow_policy_has_no_separate_probe_or_warmup() -> None:
+    density = np.eye(2, dtype=np.complex128)[None] / 2
+    visits: list[list[int]] = []
+    ticks = count()
+
+    @contextmanager
+    def session(item: Input, family: str) -> Generator[EngineSession]:
+        seen: list[int] = []
+        visits.append(seen)
+
+        def evolve() -> EvolutionResult:
+            seen.append(len(seen))
+            return EvolutionResult(np.array([0]), density, PathDiagnostics(segments_by_kernel={"t4": 1}))
+
+        def clear() -> None:
+            pytest.fail("slow family must not clear history")
+
+        yield EngineSession(evolve, clear)
+
+    result = measure_policy(
+        Input("idle", lambda: accuracy_case("idle_coherence"), "slow contract"),
+        "t4", ReferenceResult(density, 0), opener=session,
+        wall_clock=lambda: float(next(ticks)) * 61, cpu_clock=lambda: 0.0,
+    )
+    assert visits == [[0, 1]]
+    assert [len(mode.samples) for mode in result.modes] == [1, 0, 1]
+
+
+@pytest.mark.parametrize("compare", [dominance, timing_equivalents])
+def test_comparisons_omit_only_the_explicitly_unmeasured_slow_mode(
+    compare: Callable[[list[FamilyResult]], dict[str, dict[str, list[str]]]],
+) -> None:
+    slow = FamilyResult("slow", 0, None, [
+        ModeResult("first_evolve", [Sample(61, 61, 0, {})], 61, 61),
+        ModeResult("warm_clear_history", [], None, None, "slow family not measured"),
+        ModeResult("warm_retain_history", [Sample(1, 1, 0, {})], 1, 1),
+    ])
+    fast = replace(slow, family="fast", modes=[
+        ModeResult(mode.mode, [Sample(1, 1, 0, {})], 1, 1) for mode in slow.modes
+    ])
+    result = compare([slow, fast])
+    assert "warm_clear_history/wall" not in result["slow"]
+    assert result["fast"]["warm_clear_history/wall"] == []
 
 
 def test_dominance_keeps_ten_percent_boundary_modes_clocks_and_exact_errors_separate() -> (
