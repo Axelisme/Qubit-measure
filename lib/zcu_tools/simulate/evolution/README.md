@@ -295,10 +295,11 @@ Add its named choice to the owning domain classifier in
 
 A family without a new cost comparison needs three production locations in
 three files: its implementation, its collection entry and its domain classifier.
-A cost-ranked shaped fallback also needs its named score in
-[_shaped_dispatch.py](_shaped_dispatch.py), for four locations in four files.
-The score mapping produces sorted family names; no parallel tuple or integer
-permutation needs updating. Family-specific inventory or frame planning belongs
+For a cost-ranked shaped fallback, add its score formula and named score-map
+entry in [_shaped_dispatch.py](_shaped_dispatch.py). With its implementation and
+collection entry, that is four locations in three files. The classifier consumes
+the sorted family names without changes. No parallel tuple or integer permutation
+needs updating. Family-specific inventory or frame planning belongs
 to its existing dispatch helper when needed, not a capability registry.
 
 Add Engine accuracy inputs and the family's numerical-guard edge under
