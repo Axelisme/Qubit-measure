@@ -203,6 +203,18 @@ Do not adjust inputs in response to measured dominance. After an intentional inp
 version change, freeze a new manifest and retain earlier results separately.
 No existing local artifacts, mutable lab YAML, GUI or hardware are required.
 
+Add `--families single_tone_rwa,floquet_period` to the measurement command to
+measure only those pinned families. Default routing and its fixed observed family
+group are still measured. Without the option, all 17 pinned families are measured.
+Unknown names return nonzero and list the legal names. The option changes neither
+physical inputs nor the manifest, reference solutions or their hashes. It cannot
+be combined with `--freeze-inputs` or `--prepare-references`.
+The matrix JSON records `measured_families`; the summary lists the same names and
+opens with a partial-measurement warning when any families are omitted. Omitted
+families are unmeasured, not unavailable, and get no family conclusion.
+Dominance and timing equivalence compare only measured pinned families. Do not use
+a partial table to justify deleting a family.
+
 With `--include-synthetic`, `family_pareto_inputs.py` reuses the accuracy table's
 ordinary Python support. That inventory includes the original representatives, all guard edges, the complete
 gain/split sweeps and crossing brackets, shape bridges, history inputs and the
