@@ -88,7 +88,13 @@ class RBHeraldedCfg(RBCfg):
 
 
 def restore_result(data: GroupedLoadData[RBHeraldedCfg]) -> RBHeraldedResult:
-    """Restore all 81 class counts; old per-shot IQ files fail without sums."""
+    """Restore all 81 class counts; old per-shot IQ files fail without sums.
+
+    data supplies the grouped sums variable and its persisted scan axes. Return
+    this experiment's Result with float64 class counts and its original axis
+    ordering. Missing variables and invalid data propagate load errors. Do not
+    mutate the loaded data, acquire or draw; no raw-IQ reconstruction is attempted.
+    """
     sums = data.variable("sums")
     return RBHeraldedResult(
         depths=sums.axes[7].astype(np.int64),
@@ -106,13 +112,16 @@ def bootstrap_joint_error(
     samples: int,
     seed: int,
 ) -> tuple[float, float, int]:
-    """95% d=4 ratio CI from paired seed-identity draws across both heralds.
+    """Bootstrap the 95% d=4 ratio CI; raise ValueError below 90% valid fits.
 
     Inputs are (herald,depth,seed,arm,round), survival masked to paired
     rounds and totals in shot counts. NaN denotes unavailable survival. Draw from
     their valid identity union; each herald retains only its valid draws,
     including multiplicity. Both arms/depths travel together. Fewer than two
     retained draws in either group fails that resample, never fills missing data.
+    depths is the shared integer Clifford-depth axis. samples is the number of
+    resamples and seed initializes a local RNG. Return (low, high, valid fits)
+    without changing inputs, global random state or plots.
     """
     available = np.isfinite(survival).all(axis=(1, 3)).any(axis=-1)
     identities = np.flatnonzero(available.any(axis=0))
@@ -148,7 +157,13 @@ def _draw_return_survival(
     curves: NDArray[np.float64],
     label: str,
 ) -> None:
-    """Render already-selected arm means, error bars and curves on this axis."""
+    """Draw selected arm means, error bars and fitted curves on ax.
+
+    depths is the integer Clifford-depth axis; means, errors and curves are
+    (2,N) reference/interleaved return probabilities on that axis. label names
+    the selected gg/ee herald and return class. Add artists, labels and a legend
+    to caller-owned ax, return None and leave input arrays unchanged.
+    """
     for arm, arm_label in enumerate(("Reference", "CZ interleaved")):
         (line,) = ax.plot(depths, means[arm], "o", label=arm_label)
         ax.errorbar(
@@ -164,7 +179,12 @@ def _draw_herald_fractions(
     depths: NDArray[np.int64],
     probabilities: NDArray[np.float64],
 ) -> None:
-    """Render the caller's nine aggregated herald fractions, without filtering."""
+    """Draw the nine aggregated herald fractions and their legend on ax.
+
+    depths is the integer Clifford-depth axis; probabilities is (N,3,3), with
+    both herald axes ordered g/e/other. Add artists and axis labels without
+    filtering or changing the arrays. Return None; ax remains caller-owned.
+    """
     classes = ("g", "e", "other")
     for f1 in range(3):
         for f2 in range(3):
@@ -232,6 +252,7 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
         rounds=1 and saves all 81 counts. Unfinished slots stay NaN; cfg remains
         unchanged. Acquisition exceptions propagate unchanged. The stop signal
         carries only stop requests and reason text.
+
         """
         # 1. Prepare the selected scan inputs.
         fig, ax = context.plots.subplots(num="measurement")
@@ -364,6 +385,7 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
         and both arms. Average rounds, then seeds equally. Zero accepted shots
         mean unavailable survival, not an unacquired round. Whole seed identity
         bootstrap draws preserve correlations across arms, depths and heralds.
+
         """
         # 1. Select the acquired values for analysis.
         data, cfg = source.result, source.cfg
@@ -426,8 +448,11 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
                 union = np.asarray(paired.any(axis=0), dtype=np.bool_)
                 estimate = estimate_joint_d4(
                     fit,
-                    (low, high, successes),
-                    (int(union.any(axis=1).sum()), int(union.sum())),
+                    ci_low=low,
+                    ci_high=high,
+                    bootstrap_successes=successes,
+                    paired_seeds=int(union.any(axis=1).sum()),
+                    paired_rounds=int(union.sum()),
                 )
                 quality = tuple(
                     compute_fit_quality(means[h, arm], curves[h, arm], {}, None)

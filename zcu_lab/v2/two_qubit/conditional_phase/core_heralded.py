@@ -74,7 +74,13 @@ class ConditionalPhaseHeraldedCfg(ConditionalPhaseCfg):
 def restore_result(
     data: GroupedLoadData[ConditionalPhaseHeraldedCfg],
 ) -> ConditionalPhaseHeraldedResult:
-    """Restore 81-class sums; reject legacy raw-IQ files without sums."""
+    """Restore 81-class sums; reject legacy raw-IQ files without sums.
+
+    data supplies the grouped sums variable and its persisted scan axes. Return
+    this experiment's Result with float64 class counts and its original axis
+    ordering. Missing variables and invalid data propagate load errors. Do not
+    mutate the loaded data, acquire or draw; no raw-IQ reconstruction is attempted.
+    """
     sums = data.variable("sums")
     return ConditionalPhaseHeraldedResult(
         gate_counts=sums.axes[5].astype(np.int64),
@@ -147,6 +153,7 @@ class ConditionalPhaseHeraldedExp(
 
         Counts retain spectator_states × quadrature × gate_count × frequency.
         cfg stays unchanged; acquisition accumulates rounds without averaging.
+
         """
         # 1. Prepare the selected scan inputs.
         frequencies = sweep2array(config.frequency)

@@ -192,7 +192,13 @@ class IdleZZCfg(ConfigBase):
 
 
 def restore_result(data: GroupedLoadData[IdleZZCfg]) -> IdleZZResult:
-    """Restore summed counts; old raw-IQ files missing sums raise ValueError."""
+    """Restore summed counts; old raw-IQ files missing sums raise ValueError.
+
+    data supplies the grouped sums variable and its persisted scan axes. Return
+    this experiment's Result with float64 class counts and its original axis
+    ordering. Missing variables and invalid data propagate load errors. Do not
+    mutate the loaded data, acquire or draw; no raw-IQ reconstruction is attempted.
+    """
     sums = data.variable("sums")
     return IdleZZResult(
         sums.axes[4].astype(np.float64),
@@ -243,6 +249,7 @@ class IdleZZExp(Experiment[IdleZZResult, IdleZZCfg]):
 
         Hardware scans spectator_states and delay; DC alone stays on host
         because it changes an external instrument. Return unnormalized counts.
+
         """
         # 1. Prepare the selected scan inputs.
         delay_sweep = round_sweep_dict(config.delay, "time", {"soccfg": context.soccfg})
@@ -338,6 +345,7 @@ class IdleZZExp(Experiment[IdleZZResult, IdleZZCfg]):
         Every required delay must contain all requested rounds. Other remains
         in the sigma denominator. Count errors weight the fringe fit.
         No calibration or DC writeback occurs.
+
         """
         # 1. Select the acquired values for analysis.
         del options

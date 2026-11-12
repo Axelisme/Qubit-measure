@@ -95,6 +95,7 @@ class OnetoneFluxLocalCfg(ConfigBase):
 
         Duplicate devices and invalid identities raise before acquisition.
         Selected bounds are consumed by run; inactive ranges stay optional.
+
         """
         names = [tone.name for tone in self.tones]
         if len(names) != len(self.readout.tones) or len(set(names)) != len(names):
@@ -108,14 +109,17 @@ class OnetoneFluxLocalCfg(ConfigBase):
         return self
 
 
-def _make_flux_update(
+def _plot_flux_maps_and_make_updater(
     plots: Plots, result: MuxFluxResult, flux_unit: str
 ) -> Callable[[NDArray[np.complex128]], None]:
-    """Create per-tone magnitude maps and ten scan-history lines.
+    """Show per-tone magnitude maps and return a stateful plot-thread updater.
 
-    Return a plot-thread updater accepting the complete tone-major IQ array.
-    Publish the planned axes before the first acquisition; the caller retains
-    ownership of Plots and its operation lifetime.
+    result supplies original tone indices, DC coordinates (K,F), MHz coordinates
+    (K,P) and initial complex IQ (K,F,P). flux_unit labels DC without conversion.
+    The returned callback accepts complete IQ arrays in that same order and
+    replaces the heatmaps and up to ten recent frequency traces. It captures
+    result's coordinate arrays but never writes result or the incoming IQ.
+    plots owns the displayed figures and their lifetime; plotting errors propagate.
     """
     flux_values, frequencies = result.flux_values, result.frequencies
     figures, heatmaps, lines = [], [], []
@@ -158,7 +162,12 @@ def _make_flux_update(
 def _require_finite_spectrum(
     acquired: NDArray[np.complex128], point: int, result: MuxFluxResult
 ) -> None:
-    """Reject invalid completed IQ with its original tone and planned coordinates."""
+    """Raise ValueError for nonfinite completed IQ, reporting planned coordinates.
+
+    acquired is one tone-major (K,P) complex spectrum. point is its zero-based
+    DC index in result, which supplies original tone and planned DC/MHz axes
+    for the error message. Return None for all-finite IQ; mutate no inputs.
+    """
     nonfinite = ~np.isfinite(acquired)
     if nonfinite.any():
         row, column = np.argwhere(nonfinite)[0]
@@ -191,6 +200,7 @@ class OnetoneFluxLocalExp(Experiment[MuxFluxResult, OnetoneFluxLocalCfg]):
         Cancelling the Run scope stops the scan and retains completed points.
         Driver and acquisition errors propagate. Invalid inner spectrum settings
         raise before DC writes. Sources retain their last value; no output is enabled.
+
         """
         # Retain the old inner cfg's finite-offset rejection before any DC write.
         # 1. Prepare the selected scan inputs.
@@ -227,7 +237,7 @@ class OnetoneFluxLocalExp(Experiment[MuxFluxResult, OnetoneFluxLocalCfg]):
         result = MuxFluxResult(
             np.asarray(indices, dtype=np.int64), flux_values, frequencies, signals
         )
-        update = _make_flux_update(context.plots, result, cfg.flux_unit)
+        update = _plot_flux_maps_and_make_updater(context.plots, result, cfg.flux_unit)
         active_readout = cfg.readout.with_updates(
             tones=[cfg.readout.tones[i] for i in indices]
         )

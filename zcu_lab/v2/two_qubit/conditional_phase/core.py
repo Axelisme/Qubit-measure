@@ -203,7 +203,12 @@ def count_quadratures(
     counts: NDArray[np.float64],
     target: Literal["f1", "f2"],
 ) -> CountQuadratures:
-    """Reduce terminal (...,3,3) counts to sigma, variance and shot totals."""
+    """Reduce terminal (...,3,3) counts to sigma, variance and shot totals.
+
+    counts holds g/e/other terminal shot totals; target selects the f1 or f2
+    marginal. Return CountQuadratures on the preceding scan axes, leaving counts
+    unchanged. No acquisition or plotting occurs.
+    """
     return CountQuadratures(
         sigma(counts, target),
         sigma_variance(counts, target),
@@ -220,6 +225,9 @@ def fitted_crossings(
 
     Inputs are the increasing frequency axis, its conditional slope difference,
     and the fits that produced it. Any unavailable slope prevents selection.
+
+    Return PhaseCrossings with positions or the deduplicated unavailable-fit
+    reasons. Leave inputs unchanged; do not acquire or draw.
     """
     crossings = phase_crossings(frequencies, conditional_deg)
     reasons = [reason for state in fit.reasons for reason in state if reason]
@@ -231,7 +239,11 @@ def fitted_crossings(
 def phase_points(
     quadratures: NDArray[np.float64],
 ) -> tuple[tuple[tuple[QuadraturePhase, ...], ...], ...]:
-    """Convert (spectator,quadrature,n,frequency) sigma to diagnostic phase points."""
+    """Convert (spectator,quadrature,n,frequency) sigma to diagnostic phase points.
+
+    Return nested diagnostic points in (spectator,n,frequency) order, pairing
+    quadratures 0/1 at each position. Leave sigma unchanged; do not acquire or draw.
+    """
     return tuple(
         tuple(
             tuple(count_phase(float(x), float(y)) for x, y in zip(xs, ys, strict=True))
@@ -244,7 +256,13 @@ def phase_points(
 def restore_result(
     data: GroupedLoadData[ConditionalPhaseCfg],
 ) -> ConditionalPhaseResult:
-    """Restore classified sums; old per-shot IQ files without sums are rejected."""
+    """Restore classified sums; old per-shot IQ files without sums are rejected.
+
+    data supplies the grouped sums variable and its persisted scan axes. Return
+    this experiment's Result with float64 class counts and its original axis
+    ordering. Missing variables and invalid data propagate load errors. Do not
+    mutate the loaded data, acquire or draw; no raw-IQ reconstruction is attempted.
+    """
     sums = data.variable("sums")
     return ConditionalPhaseResult(
         gate_counts=sums.axes[3].astype(np.int64),
@@ -313,6 +331,7 @@ class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg
 
         Counts retain spectator_states × quadrature × gate_count × frequency.
         cfg stays unchanged; acquisition accumulates rounds without averaging.
+
         """
         # 1. Prepare the selected scan inputs.
         frequencies = sweep2array(config.frequency)

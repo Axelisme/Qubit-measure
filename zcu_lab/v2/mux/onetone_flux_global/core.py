@@ -98,14 +98,17 @@ class OnetoneFluxGlobalCfg(ConfigBase):
         return self
 
 
-def _make_flux_update(
+def _plot_flux_maps_and_make_updater(
     plots: Plots, result: MuxFluxResult, flux_unit: str
 ) -> Callable[[NDArray[np.complex128]], None]:
-    """Create per-tone magnitude maps and ten scan-history lines.
+    """Show per-tone magnitude maps and return a stateful plot-thread updater.
 
-    Return a plot-thread updater accepting the complete tone-major IQ array.
-    Publish the planned axes before the first acquisition; the caller retains
-    ownership of Plots and its operation lifetime.
+    result supplies original tone indices, DC coordinates (K,F), MHz coordinates
+    (K,P) and initial complex IQ (K,F,P). flux_unit labels DC without conversion.
+    The returned callback accepts complete IQ arrays in that same order and
+    replaces the heatmaps and up to ten recent frequency traces. It captures
+    result's coordinate arrays but never writes result or the incoming IQ.
+    plots owns the displayed figures and their lifetime; plotting errors propagate.
     """
     flux_values, frequencies = result.flux_values, result.frequencies
     figures, heatmaps, lines = [], [], []
@@ -169,6 +172,7 @@ class OnetoneFluxGlobalExp(Experiment[MuxFluxResult, OnetoneFluxGlobalCfg]):
         Missing devices raise KeyError; unit mismatch raises ValueError and
         unsupported drivers raise TypeError. Driver/acquisition errors propagate.
         Sources remain at the final written value. No output is enabled here.
+
         """
         # 1. Keep original tone identities and the complete planned axes after Stop.
         cfg = deepcopy(config)
@@ -187,7 +191,7 @@ class OnetoneFluxGlobalExp(Experiment[MuxFluxResult, OnetoneFluxGlobalCfg]):
         result = MuxFluxResult(
             np.asarray(indices, dtype=np.int64), flux_values, frequencies, signals
         )
-        update = _make_flux_update(context.plots, result, cfg.flux_unit)
+        update = _plot_flux_maps_and_make_updater(context.plots, result, cfg.flux_unit)
         active_readout = cfg.readout.with_updates(
             tones=[cfg.readout.tones[i] for i in indices]
         )

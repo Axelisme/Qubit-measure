@@ -206,7 +206,12 @@ class CZAmplitudeCfg(ConfigBase):
 
 
 def summarize_return(fit: CZReturnFit) -> CZAmplitudeAnalysis:
-    """Retain fit values for writeback, not the curve or per-scale counts."""
+    """Retain fit values for writeback, not the curve or per-scale counts.
+
+    fit supplies the selected return-oscillation calibration, uncertainty, quality
+    and unavailability reason. Return CZAmplitudeAnalysis with those same scalar
+    values and references; do not mutate fit, acquire or draw.
+    """
     return CZAmplitudeAnalysis(
         CZReturnSummary(
             fit.scale,
@@ -227,13 +232,17 @@ def analyze_return(
     acquired_shots: NDArray[np.float64],
     expected_shots: int,
 ) -> CZAmplitudeData:
-    """Fit P00 from terminal counts, retaining other in the denominator.
+    """Fit P00 retaining other counts; raise ValueError for wrong count/axis shapes.
 
     counts is (Ns,3,3), optionally already selected on herald (g,g).
     acquired_shots is the total before selection; expected_shots is reps*rounds.
     Fit only the contiguous fully acquired prefix with accepted shots, preserving
     first-cycle proposal policy. Partial scales remain visible but not fit.
     Wrong count/axis shapes raise ValueError. No cfg/library mutation occurs.
+
+    scales is the dimensionless amplitude multiplier axis. Return CZAmplitudeData
+    containing probabilities, accepted totals, completeness and the return fit;
+    leave all input arrays unchanged and draw nothing.
     """
     if counts.shape != (len(scales), 3, 3) or acquired_shots.shape != scales.shape:
         raise ValueError(
@@ -252,7 +261,13 @@ def analyze_return(
 
 
 def restore_result(data: GroupedLoadData[CZAmplitudeCfg]) -> CZAmplitudeResult:
-    """Restore count sums; old per-shot IQ files without sums raise ValueError."""
+    """Restore count sums; old per-shot IQ files without sums raise ValueError.
+
+    data supplies the grouped sums variable and its persisted scan axes. Return
+    this experiment's Result with float64 class counts and its original axis
+    ordering. Missing variables and invalid data propagate load errors. Do not
+    mutate the loaded data, acquire or draw; no raw-IQ reconstruction is attempted.
+    """
     sums = data.variable("sums")
     return CZAmplitudeResult(sums.axes[2], sums.z.astype(np.float64))
 
@@ -294,6 +309,7 @@ class CZAmplitudeExp(Experiment[CZAmplitudeResult, CZAmplitudeCfg]):
         The cfg is unchanged. Completed rounds survive cooperative cancellation.
         Acquisition exceptions propagate unchanged. The stop signal carries only
         stop requests and reason text.
+
         """
         # 1. Prepare the selected scan inputs.
         scales = sweep2array(config.scale)
@@ -371,6 +387,7 @@ class CZAmplitudeExp(Experiment[CZAmplitudeResult, CZAmplitudeCfg]):
 
         Coverage or numerical failure retains diagnostics with no proposal scale.
         Missing saved cfg raises ValueError. No IQ reclassification occurs.
+
         """
         # 1. Select the acquired values for analysis.
         del options

@@ -59,7 +59,13 @@ class IdleZZHeraldedCfg(IdleZZCfg):
 
 
 def restore_result(data: GroupedLoadData[IdleZZHeraldedCfg]) -> IdleZZHeraldedResult:
-    """Restore 81-class sums; old raw-IQ files missing sums raise ValueError."""
+    """Restore 81-class sums; old raw-IQ files missing sums raise ValueError.
+
+    data supplies the grouped sums variable and its persisted scan axes. Return
+    this experiment's Result with float64 class counts and its original axis
+    ordering. Missing variables and invalid data propagate load errors. Do not
+    mutate the loaded data, acquire or draw; no raw-IQ reconstruction is attempted.
+    """
     sums = data.variable("sums")
     return IdleZZHeraldedResult(
         sums.axes[6].astype(np.float64),
@@ -119,6 +125,7 @@ class IdleZZHeraldedExp(Experiment[IdleZZHeraldedResult, IdleZZHeraldedCfg]):
 
         Hardware scans spectator_states and delay; DC alone stays on host
         because it changes an external instrument. Return unnormalized counts.
+
         """
         # 1. Prepare the selected scan inputs.
         delay_sweep = round_sweep_dict(config.delay, "time", {"soccfg": context.soccfg})
@@ -219,6 +226,7 @@ class IdleZZHeraldedExp(Experiment[IdleZZHeraldedResult, IdleZZHeraldedCfg]):
         ee has inverted target fringes and exchanged spectator states. Full
         requested delay axes/rounds are required before herald selection.
         Shared frequency/decay determine ζ; each herald keeps local A/phase/offset.
+
         """
         # 1. Select the acquired values for analysis.
         del options

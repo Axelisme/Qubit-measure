@@ -71,7 +71,13 @@ class CZAmplitudeHeraldedCfg(CZAmplitudeCfg):
 def restore_result(
     data: GroupedLoadData[CZAmplitudeHeraldedCfg],
 ) -> CZAmplitudeHeraldedResult:
-    """Restore 81-class sums; old per-shot IQ files without sums raise ValueError."""
+    """Restore 81-class sums; old per-shot IQ files without sums raise ValueError.
+
+    data supplies the grouped sums variable and its persisted scan axes. Return
+    this experiment's Result with float64 class counts and its original axis
+    ordering. Missing variables and invalid data propagate load errors. Do not
+    mutate the loaded data, acquire or draw; no raw-IQ reconstruction is attempted.
+    """
     sums = data.variable("sums")
     return CZAmplitudeHeraldedResult(sums.axes[4], sums.z.astype(np.float64))
 
@@ -119,6 +125,7 @@ class CZAmplitudeHeraldedExp(
         No host round loop or per-shot IQ is stored. Completed rounds survive
         cooperative cancellation. Acquisition exceptions propagate unchanged.
         The stop signal carries only stop requests and reason text.
+
         """
         # 1. Prepare the selected scan inputs.
         scales = sweep2array(config.scale)
@@ -200,6 +207,7 @@ class CZAmplitudeHeraldedExp(
         Fit and coverage policy match the ordinary version, using all herald
         classes to determine acquisition completeness. No accepted shots gives
         NaN terminal probabilities and no proposal. Missing cfg raises ValueError.
+
         """
         # 1. Select the acquired values for analysis.
         del options

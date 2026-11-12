@@ -79,7 +79,13 @@ class LocalZHeraldedCfg(LocalZCfg):
 def restore_result(
     data: GroupedLoadData[LocalZHeraldedCfg],
 ) -> LocalZHeraldedResult:
-    """Restore 81-class sums; reject legacy raw-IQ files without sums."""
+    """Restore 81-class sums; reject legacy raw-IQ files without sums.
+
+    data supplies the grouped sums variable and its persisted scan axes. Return
+    this experiment's Result with float64 class counts and its original axis
+    ordering. Missing variables and invalid data propagate load errors. Do not
+    mutate the loaded data, acquire or draw; no raw-IQ reconstruction is attempted.
+    """
     sums = data.variable("sums")
     return LocalZHeraldedResult(
         gate_counts=sums.axes[4].astype(np.int64), sums=sums.z.astype(np.float64)
@@ -141,6 +147,7 @@ class LocalZHeraldedExp(Experiment[LocalZHeraldedResult, LocalZHeraldedCfg]):
 
         Counts retain target × quadrature × gate_count axes. No IQ is stored.
         cfg stays unchanged; completed rounds survive cancellation.
+
         """
         # 1. Prepare the selected scan inputs.
         fig, ax = context.plots.subplots(num="measurement")

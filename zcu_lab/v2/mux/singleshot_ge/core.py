@@ -183,6 +183,7 @@ class GEAnalysis:
         Fidelity, theta, threshold, ge_s and both centers must be finite, with
         fidelity in [0,1], ge_s positive and centers distinct under np.isclose.
         init_pops must be finite, nonnegative and (2,2), with row sums <= 1+1e-12.
+
         """
         populations = np.asarray(self.init_pops, dtype=np.float64)
         scalars = [
@@ -305,7 +306,12 @@ class MuxGECfg(ConfigBase):
 
 
 def _failure_plot(plots: Plots, name: str, reason: str) -> None:
-    """Publish a failure reason in the named plot, creating it when absent."""
+    """Publish a failure reason in the named plot, creating it when absent.
+
+    plots owns the figures; name selects the pane and reason supplies visible text.
+    Return None after adding text to a new pane or scheduling a title update on an
+    existing pane. Do not mutate measurement inputs; plotting errors propagate.
+    """
     if name not in plots:
         _, ax = plots.subplots(num=name)
         ax.text(0.02, 0.98, reason, transform=ax.transAxes, va="top", wrap=True)
@@ -321,17 +327,19 @@ def _failure_plot(plots: Plots, name: str, reason: str) -> None:
 
 def _plot_confusion_matrix(
     confusion: GEConfusionResult,
-    signals: tuple[NDArray[np.complex128], NDArray[np.complex128]],
+    g_signals: NDArray[np.complex128],
+    e_signals: NDArray[np.complex128],
     primary: GEAnalysis,
     plots: Plots,
     figure_name: str,
 ) -> None:
     """Publish IQ classifications and preparation/confusion matrices to plots.
 
-    signals contains physical g/e IQ arrays; primary supplies their centers.
-    figure_name must be unused. Plot ownership and duplicate names follow Plots.
+    g_signals and e_signals are physical ground/excited one-dimensional shot IQ;
+    primary supplies their centers. confusion supplies classification fractions,
+    radius and the initial/confusion matrices. Return None without mutating inputs.
+    figure_name must be unused. plots owns the new figure; plotting errors propagate.
     """
-    g_signals, e_signals = signals
     fig, _ = plots.subplots(
         num=figure_name, nrows=2, ncols=2, figsize=(8, 8), layout="constrained"
     )
@@ -397,7 +405,13 @@ def _plot_classified(
     primary: GEAnalysis,
     radius: float,
 ) -> None:
-    """Draw one tone's classified shots and nearest-center radius boundaries."""
+    """Draw one tone's classified shots and nearest-center radius boundaries.
+
+    signals is a nonempty one-dimensional shot IQ array; primary supplies ground
+    and excited centers. radius is the classification-circle radius in IQ units.
+    Add sampled points, centers, boundaries, labels and a legend to caller-owned ax.
+    Return None without changing signals or primary.
+    """
     g_center, e_center = primary.g_center, primary.e_center
     max_point = 5000
     mask_g, mask_e, mask_o = classify_result(signals, g_center, e_center, radius)
@@ -464,7 +478,12 @@ def _plot_classified(
 
 
 def _validate_fixed_pulse(pulse: Pulse.Cfg) -> None:
-    """Reject nonfinite or swept pulse settings and negative delays."""
+    """Raise ValueError for nonfinite or swept pulse settings and negative delays.
+
+    pulse supplies fixed frequency, gain, phase, delays and waveform settings.
+    Check the existing scalar and const/flat-top length rules without modifying
+    pulse. Return None when valid; do not acquire or draw.
+    """
     for name in ("freq", "gain", "phase", "pre_delay", "post_delay"):
         value = getattr(pulse, name)
         if isinstance(value, QickParam) or not math.isfinite(value):
@@ -478,7 +497,7 @@ def _validate_fixed_pulse(pulse: Pulse.Cfg) -> None:
 
 
 def validate_ge_result(result: MuxGEResult) -> None:
-    """Reject malformed source axes/dtypes or broken cross-tone shot availability.
+    """Raise ValueError for malformed raw axes or broken cross-tone shot availability.
 
     Require (K,2,S) complex128, K,S>0, unique original nonnegative
     int64 indices, [0,1] preparations and arange(S) shots. Missing preparation
@@ -519,13 +538,23 @@ def _raw_signal(
     readout: MuxReadout,
     _acquired: Sequence[NDArray[np.float64]],
 ) -> NDArray[np.complex128]:
-    """Collect this program's first raw read as complex shot IQ for acquisition."""
+    """Collect this program's first raw read as complex shot IQ for acquisition.
+
+    prog and readout identify the compiled acquisition and its read index;
+    _acquired is the unused averaged-data callback argument. Return raw complex128
+    shot IQ from the program buffer via readout. No plotting or cfg mutation occurs.
+    """
     iq = readout.collect_raw_iq(prog, read_index=0)
     return iq[..., 0] + 1j * iq[..., 1]
 
 
 def _validate_source(source: RunRecord[MuxGECfg, MuxGEResult]) -> None:
-    """Reject malformed raw results or a mismatch with the optional source cfg."""
+    """Raise ValueError for malformed raw results or mismatched optional source cfg.
+
+    source supplies the raw Result and optional saved cfg. Validate result first,
+    then compare original tone order and shot count when cfg exists. Return None
+    without mutating source or drawing.
+    """
     validate_ge_result(source.result)
     if source.cfg is not None:
         cfg = source.cfg.model_copy(deep=True)
@@ -567,6 +596,7 @@ class MuxGEExp(Experiment[MuxGEResult, MuxGECfg]):
         Use one round with reps=shots, leaving config unchanged.
         context supplies hardware, stop signal and live IQ scatter plots. Missing
         preparations remain NaN. Acquisition, config and program errors propagate.
+
         """
         # 1. Use one raw-shot round and preserve the requested participant order.
         cfg = config.model_copy(deep=True)
@@ -669,6 +699,7 @@ class MuxGEExp(Experiment[MuxGEResult, MuxGECfg]):
         tone's calibration and fit quality, or its failure reason, and draw fit_i
         in plots. Incomplete pairs do not fit. Source cfg may be absent; malformed
         axes, mismatched cfg or invalid options raise before fitting.
+
         """
         # 1. Select the acquired values for analysis.
         _validate_source(source)
@@ -755,6 +786,7 @@ class MuxGEExp(Experiment[MuxGEResult, MuxGECfg]):
         and draw post_i in plots. These are single-qubit diagnostics, not a joint
         assignment matrix. Source cfg may be absent; invalid source, primary or
         options raise.
+
         """
         # 1. Select the acquired values for analysis.
         _validate_source(source)
@@ -804,7 +836,9 @@ class MuxGEExp(Experiment[MuxGEResult, MuxGECfg]):
                 _failure_plot(plots, name, str(exc))
                 outcomes.append(MuxFitFailure(item.index, str(exc)))
                 continue
-            _plot_confusion_matrix(confusion, signals, item.primary, plots, name)
+            _plot_confusion_matrix(
+                confusion, g_signals, e_signals, item.primary, plots, name
+            )
             outcomes.append(MuxGEPostAnalysis(item.index, GEPostAnalysis(confusion)))
         # 2. Return the analysis values and quality diagnostics.
         return tuple(outcomes)

@@ -214,6 +214,11 @@ def analyze_constructive_phase(
     phases and a full-rank sine/cosine design are needed for finite uncertainty.
     Reject numerical degeneracy/nonfinite uncertainty, not low contrast/sigma or
     residual quality. Nyquist sampling is the operator's responsibility.
+
+    coordinates is the scanned relative phase in degrees; durations is the shared
+    pulse-duration axis in us. returns holds probabilities, complete masks and
+    shot totals. Return ConstructivePhaseData with selected rates, phase points
+    and phase-modulation fit. Leave inputs unchanged; do not acquire or draw.
     """
     rates = fit_duration_rates(durations, returns)
     phases = np.array(
@@ -232,7 +237,13 @@ def analyze_constructive_phase(
 def restore_result(
     data: GroupedLoadData[ConstructivePhaseCfg],
 ) -> ConstructivePhaseResult:
-    """Restore summed counts; old raw-IQ files without sums raise ValueError."""
+    """Restore summed counts; old raw-IQ files without sums raise ValueError.
+
+    data supplies the grouped sums variable and its persisted scan axes. Return
+    this experiment's Result with float64 class counts and its original axis
+    ordering. Missing variables and invalid data propagate load errors. Do not
+    mutate the loaded data, acquire or draw; no raw-IQ reconstruction is attempted.
+    """
     sums = data.variable("sums")
     return ConstructivePhaseResult(
         coordinates=sums.axes[3], durations=sums.axes[2], sums=sums.z.astype(np.float64)
@@ -287,6 +298,7 @@ class ConstructivePhaseExp(Experiment[ConstructivePhaseResult, ConstructivePhase
         Constant and flat-top drives use a hardware duration sweep. Sampled
         envelopes rebuild at each host duration. Both return coordinate-major
         float64 counts with the same Result axes and cancellation semantics.
+
         """
         # 1. Prepare the selected scan inputs.
         if all(
@@ -467,6 +479,7 @@ class ConstructivePhaseExp(Experiment[ConstructivePhaseResult, ConstructivePhase
 
         Missing cfg or mismatched axes raises ValueError. Failed fits report a
         reason, not zero rates. No IQ classification or automatic write occurs.
+
         """
         # 1. Select the acquired values for analysis.
         del options

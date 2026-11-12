@@ -185,6 +185,7 @@ class MuxOnetoneCfg(ConfigBase):
 
         Pydantic validates strict integer elements before this check.
         Run indexes the complete readout and rejects positive out-of-range values.
+
         """
         if not value or len(set(value)) != len(value):
             raise ValueError("participants must be nonempty and contain unique indices")
@@ -196,11 +197,14 @@ class MuxOnetoneCfg(ConfigBase):
 def validate_analysis_source(
     source: RunRecord[MuxOnetoneCfg, MuxOnetoneResult],
 ) -> MuxOnetoneCfg:
-    """Return saved cfg after checking original indices and the shared scan grid.
+    """Return saved cfg; raise ValueError for invalid indices or shared scan grid.
 
     Missing cfg, mismatched selection/shape, or fewer than six finite strictly
     monotonic MHz offsets raise ValueError. IQ failures remain per-tone.
     GUI callers may use this before resolving capture-dependent inputs.
+
+    source supplies the immutable Run/Load result and optional saved cfg. Return
+    that same cfg, not a copy; do not acquire, draw or mutate the record.
     """
     cfg, data = source.cfg, source.result
     if cfg is None:
@@ -272,6 +276,7 @@ class MuxOnetoneExp(Experiment[MuxOnetoneResult, MuxOnetoneCfg]):
         after its scope and progress cleanup, before it returns. Pure data stop
         does not call it. Observer exceptions propagate without retry. The
         observer does not stop later offsets or change the persisted result.
+
         """
         # 1. Select tones without changing their original indices or base frequencies.
         cfg = deepcopy(config)
@@ -358,6 +363,7 @@ class MuxOnetoneExp(Experiment[MuxOnetoneResult, MuxOnetoneCfg]):
         or decides writeback. plots receives fit_i for each original tone i.
         Invalid source or seed count raises ValueError. Numerical fit failures
         retain their reason without stopping other tones.
+
         """
         # 1. Select the acquired values for analysis.
         cfg = validate_analysis_source(source)

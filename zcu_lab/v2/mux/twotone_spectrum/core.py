@@ -156,7 +156,7 @@ class MuxFreqScan:
 def qubfreq_signal2real(
     signals: NDArray[np.complex128], *, model_type: Literal["lor", "sinc"] = "lor"
 ) -> NDArray[np.float64]:
-    """Convert one complex128 IQ spectrum of shape (N,) to float64 contrast.
+    """Convert complex IQ to contrast; raise ValueError for invalid spectra or model.
 
     Subtract component-wise median background without mutating signals. ``lor``
     returns the legacy absolute magnitude, also used by the Run live preview.
@@ -257,13 +257,14 @@ class MuxFreqCfg(ConfigBase):
 
         Reject mismatched full readout dimensions, invalid names or participants,
         and active drives sharing the readout generator. expts must be positive.
+
         """
         validate_mux_scan(self, self.tones, self.participants, self.expts)
         return self
 
 
 def prepare_frequency_scan(cfg: MuxFreqCfg, *, soccfg: QickConfig) -> MuxFreqScan:
-    """Prepare each selected qubit's original index and rounded frequency axis.
+    """Prepare original indices and MHz grids; propagate board conversion errors.
 
     cfg must already be validated and is deep-copied before use.
     soccfg supplies the board frequency grids.
@@ -330,6 +331,7 @@ class MuxFreqExp(Experiment[MuxSweepResult, MuxFreqCfg]):
         observes external cancellation once, after acquire scope and progress
         cleanup, before returning its signal view. Pure data stop does not call
         it. Observer exceptions propagate without retry or outcome changes.
+
         """
         # 1. Prepare zipped frequencies and readout channels in participant order.
         cfg = config.model_copy(deep=True)
@@ -422,6 +424,7 @@ class MuxFreqExp(Experiment[MuxSweepResult, MuxFreqCfg]):
         source contains actual MHz axes and IQ; its cfg may be absent. options
         selects the line shape. plots receives a fit_i figure with a fitted
         overlay per original tone index. Return estimates or a per-tone failure reason.
+
         """
         # 1. Select the acquired values for analysis.
         result = source.result

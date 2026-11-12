@@ -61,7 +61,13 @@ class ChevronHeraldedCfg(ChevronCfg):
 def restore_result(
     data: GroupedLoadData[ChevronHeraldedCfg],
 ) -> ChevronHeraldedResult:
-    """Restore 81-class sums; old raw-IQ files without sums raise ValueError."""
+    """Restore 81-class sums; old raw-IQ files without sums raise ValueError.
+
+    data supplies the grouped sums variable and its persisted scan axes. Return
+    this experiment's Result with float64 class counts and its original axis
+    ordering. Missing variables and invalid data propagate load errors. Do not
+    mutate the loaded data, acquire or draw; no raw-IQ reconstruction is attempted.
+    """
     sums = data.variable("sums")
     return ChevronHeraldedResult(
         coordinates=sums.axes[5], durations=sums.axes[4], sums=sums.z.astype(np.float64)
@@ -117,6 +123,7 @@ class ChevronHeraldedExp(Experiment[ChevronHeraldedResult, ChevronHeraldedCfg]):
         Constant and flat-top drives use a hardware duration sweep. Sampled
         envelopes rebuild at each host duration. Both return coordinate-major
         float64 counts with the same Result axes and cancellation semantics.
+
         """
         # 1. Prepare the selected scan inputs.
         if all(
@@ -301,6 +308,7 @@ class ChevronHeraldedExp(Experiment[ChevronHeraldedResult, ChevronHeraldedCfg]):
 
         Pass fraction is not ground-state purity. Empty accepted counts give
         NaN terminal probabilities and unresolved fits. Saved cfg is required.
+
         """
         # 1. Select the acquired values for analysis.
         del options

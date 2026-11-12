@@ -165,7 +165,13 @@ class ChevronCfg(ConfigBase):
 
 
 def restore_result(data: GroupedLoadData[ChevronCfg]) -> ChevronResult:
-    """Restore summed counts; old raw-IQ files without sums raise ValueError."""
+    """Restore summed counts; old raw-IQ files without sums raise ValueError.
+
+    data supplies the grouped sums variable and its persisted scan axes. Return
+    this experiment's Result with float64 class counts and its original axis
+    ordering. Missing variables and invalid data propagate load errors. Do not
+    mutate the loaded data, acquire or draw; no raw-IQ reconstruction is attempted.
+    """
     sums = data.variable("sums")
     return ChevronResult(
         coordinates=sums.axes[3], durations=sums.axes[2], sums=sums.z.astype(np.float64)
@@ -216,6 +222,7 @@ class ChevronExp(Experiment[ChevronResult, ChevronCfg]):
         Constant and flat-top drives use a hardware duration sweep. Sampled
         envelopes rebuild at each host duration. Both return coordinate-major
         float64 counts with the same Result axes and cancellation semantics.
+
         """
         # 1. Prepare the selected scan inputs.
         if all(
@@ -394,6 +401,7 @@ class ChevronExp(Experiment[ChevronResult, ChevronCfg]):
 
         Missing cfg or mismatched axes raises ValueError. Failed fits report a
         reason, not zero rates. No IQ classification or automatic write occurs.
+
         """
         # 1. Select the acquired values for analysis.
         del options

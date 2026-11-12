@@ -277,7 +277,7 @@ class MuxLenRabiCfg(ConfigBase):
 
 
 def prepare_length_scan(cfg: MuxLenRabiCfg, *, soccfg: QickConfig) -> MuxLengthScan:
-    """Prepare each selected qubit's pulse-length grid without acquiring data.
+    """Prepare pulse-length grids; raise for invalid or collapsed board lengths.
 
     cfg supplies complete tones and ordered participants; soccfg supplies the
     board clocks. Return original indices and float64 lengths (K,P) in us,
@@ -349,6 +349,7 @@ class MuxLenRabiExp(Experiment[MuxSweepResult, MuxLenRabiCfg]):
         retains acquired values and leaves unmeasured points NaN.
         Acquisition and cfg/build errors propagate. The caller owns plot and
         hardware cleanup and decides whether returned data can be analyzed.
+
         """
         # Prepare each qubit's length grid and select its original readout tone.
         # 1. Prepare the selected scan inputs.
@@ -552,6 +553,7 @@ class MuxLenRabiExp(Experiment[MuxSweepResult, MuxLenRabiCfg]):
         errors in us, Rabi frequency and error in MHz, and fit quality, or a
         numerical failure with its reason. Fresh caller-owned plots receive
         fit_i figures. Invalid source data raises; no live cfg or hardware is read.
+
         """
         # 1. Select the acquired values for analysis.
         result = source.result

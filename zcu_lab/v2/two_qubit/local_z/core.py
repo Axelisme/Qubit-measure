@@ -170,7 +170,12 @@ class LocalZCfg(ConfigBase):
 
 
 def summarize_fit(fit: PhaseLineFit) -> LocalZFit:
-    """Keep calibration values and fit diagnostics; leave curves for plotting."""
+    """Keep calibration values and fit diagnostics; leave curves for plotting.
+
+    fit supplies unwrapped phase-line values, uncertainties, quality and reason.
+    Return LocalZFit with the negative slope as the correction, retaining absent
+    values. Leave fit unchanged; do not acquire or draw.
+    """
     return LocalZFit(
         fit.intercept_deg,
         fit.slope_deg,
@@ -182,7 +187,13 @@ def summarize_fit(fit: PhaseLineFit) -> LocalZFit:
 
 
 def restore_result(data: GroupedLoadData[LocalZCfg]) -> LocalZResult:
-    """Restore classified sums; old per-shot IQ files without sums are rejected."""
+    """Restore classified sums; old per-shot IQ files without sums are rejected.
+
+    data supplies the grouped sums variable and its persisted scan axes. Return
+    this experiment's Result with float64 class counts and its original axis
+    ordering. Missing variables and invalid data propagate load errors. Do not
+    mutate the loaded data, acquire or draw; no raw-IQ reconstruction is attempted.
+    """
     sums = data.variable("sums")
     return LocalZResult(
         gate_counts=sums.axes[2].astype(np.int64), sums=sums.z.astype(np.float64)
@@ -235,6 +246,7 @@ class LocalZExp(Experiment[LocalZResult, LocalZCfg]):
 
         Counts retain target × quadrature × gate_count axes. No IQ is stored.
         cfg stays unchanged; completed rounds survive cancellation.
+
         """
         # 1. Prepare the selected scan inputs.
         fig, ax = context.plots.subplots(num="measurement")

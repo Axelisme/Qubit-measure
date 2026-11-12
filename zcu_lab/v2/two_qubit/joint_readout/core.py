@@ -130,7 +130,13 @@ class JointReadoutCfg(ConfigBase):
 
 
 def restore_result(data: GroupedLoadData[JointReadoutCfg]) -> JointReadoutResult:
-    """Load two-axis sums; old raw-IQ or single-axis files raise ValueError."""
+    """Load two-axis sums; old raw-IQ or single-axis files raise ValueError.
+
+    data supplies the grouped sums variable and its persisted scan axes. Return
+    this experiment's Result with float64 class counts and its original axis
+    ordering. Missing variables and invalid data propagate load errors. Do not
+    mutate the loaded data, acquire or draw; no raw-IQ reconstruction is attempted.
+    """
     sums = data.variable("sums")
     if sums.z.shape != SUMS_SHAPE:
         raise ValueError(
@@ -186,6 +192,7 @@ class JointReadoutExp(Experiment[JointReadoutResult, JointReadoutCfg]):
 
         Return (2,2,3,3) summed counts, not per-shot IQ or probabilities. All rounds
         accumulate at acquisition. cfg is unchanged; completed rounds survive stop.
+
         """
 
         # 1. Show terminal gg probability for the four preparation branches.

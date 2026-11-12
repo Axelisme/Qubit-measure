@@ -131,7 +131,12 @@ class TwotoneFluxLocalCfg(ConfigBase):
 def _require_finite_spectrum(
     acquired: NDArray[np.complex128], *, point: int, result: MuxFluxResult
 ) -> None:
-    """Report the first invalid completed IQ cell with its planned coordinates."""
+    """Raise ValueError for nonfinite completed IQ, reporting planned coordinates.
+
+    acquired is one tone-major (K,P) complex spectrum. point is its zero-based
+    DC index in result, which supplies original tone and planned DC/MHz axes
+    for the error message. Return None for all-finite IQ; mutate no inputs.
+    """
     nonfinite = ~np.isfinite(acquired)
     if nonfinite.any():
         row, column = np.argwhere(nonfinite)[0]
@@ -145,10 +150,18 @@ def _require_finite_spectrum(
         )
 
 
-def _make_flux_update(
+def _plot_flux_maps_and_make_updater(
     plots: Plots, result: MuxFluxResult, flux_unit: str
 ) -> Callable[[NDArray[np.complex128]], None]:
-    """Publish planned axes and update each tone's magnitude map and line history."""
+    """Show per-tone magnitude maps and return a stateful plot-thread updater.
+
+    result supplies original tone indices, DC coordinates (K,F), MHz coordinates
+    (K,P) and initial complex IQ (K,F,P). flux_unit labels DC without conversion.
+    The returned callback accepts complete IQ arrays in that same order and
+    replaces the heatmaps and up to ten recent frequency traces. It captures
+    result's coordinate arrays but never writes result or the incoming IQ.
+    plots owns the displayed figures and their lifetime; plotting errors propagate.
+    """
     flux_values, frequencies = result.flux_values, result.frequencies
     figures, heatmaps, lines = [], [], []
     for index in result.tone_indices:
@@ -205,6 +218,7 @@ class TwotoneFluxLocalExp(Experiment[MuxFluxResult, TwotoneFluxLocalCfg]):
         Cancelling the Run scope stops the scan and retains completed points.
         Driver and acquisition errors propagate.
         Sources remain at the final written value. No output is enabled here.
+
         """
         # 1. Prepare the selected scan inputs.
         cfg = config.model_copy(deep=True)
@@ -250,7 +264,7 @@ class TwotoneFluxLocalExp(Experiment[MuxFluxResult, TwotoneFluxLocalCfg]):
         result = MuxFluxResult(
             np.asarray(indices, dtype=np.int64), flux_values, frequencies, signals
         )
-        update = _make_flux_update(context.plots, result, cfg.flux_unit)
+        update = _plot_flux_maps_and_make_updater(context.plots, result, cfg.flux_unit)
 
         # Reset, start drives together, then read out after the longest branch.
         builder = TimelineBuilder(

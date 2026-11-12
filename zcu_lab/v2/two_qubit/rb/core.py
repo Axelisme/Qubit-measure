@@ -221,7 +221,12 @@ class RBCfg(ConfigBase):
 
 
 def estimate_d4(fit: IRBAnalysis) -> RBEstimate:
-    """Convert numerical paired-IRB estimates and interval from d=2 to d=4."""
+    """Convert numerical paired-IRB estimates and interval from d=2 to d=4.
+
+    fit supplies reference/interleaved decays, d=2 confidence limits, paired counts
+    and bootstrap diagnostics. Return RBEstimate with unchanged decay/diagnostic
+    fields and d=4 error quantities. Leave fit unchanged; do not acquire or draw.
+    """
     # The shared owner fits and resamples paired curves; only d=4 interpretation
     # belongs here. Its d=2 error is affine in the same decay ratio.
     return RBEstimate(
@@ -240,13 +245,23 @@ def estimate_d4(fit: IRBAnalysis) -> RBEstimate:
 
 def estimate_joint_d4(
     fit: SharedFitResult,
-    interval: tuple[float, float, int],
-    paired_counts: tuple[int, int],
+    *,
+    ci_low: float,
+    ci_high: float,
+    bootstrap_successes: int,
+    paired_seeds: int,
+    paired_rounds: int,
 ) -> RBEstimate:
-    """Convert joint arm decays and a seed-bootstrap interval to d=4 estimates."""
+    """Convert joint arm decays and a seed-bootstrap interval to d=4 estimates.
+
+    fit supplies reference p_0 and interleaved p_1. ci_low/ci_high bound the
+    statistical gate-error interval; bootstrap_successes counts accepted fits.
+    paired_seeds and paired_rounds count the available identity union. Return
+    RBEstimate with unclipped error and a statistical-only warning. Mutate no
+    inputs, draw nothing and propagate missing decay keys or arithmetic errors.
+    """
     pr, pi = fit.values["p_0"], fit.values["p_1"]
     error = 0.75 * (1 - pi / pr)
-    low, high, successes = interval
     warning = (
         "Statistical CI only; gate-dependent/coherent noise can bias the IRB ratio."
     )
@@ -257,11 +272,11 @@ def estimate_joint_d4(
         pi,
         0.75 * (1 - pr),
         error,
-        low,
-        high,
-        paired_counts[0],
-        paired_counts[1],
-        successes,
+        ci_low,
+        ci_high,
+        paired_seeds,
+        paired_rounds,
+        bootstrap_successes,
         warning,
     )
 
@@ -269,7 +284,12 @@ def estimate_joint_d4(
 def count_completion(
     counts: NDArray[np.float64], class_axes: tuple[int, ...]
 ) -> NDArray[np.bool_]:
-    """Identify whole finite slots, rejecting partial/nonfinite/negative counts."""
+    """Return complete-slot masks; raise ValueError for invalid or partial counts.
+
+    counts has leading scan axes and trailing class_axes (negative indices allowed).
+    All-NaN slots are unacquired. Return a boolean mask over the remaining axes;
+    leave counts unchanged and draw nothing.
+    """
     acquired = np.asarray(np.isfinite(counts).all(axis=class_axes), dtype=np.bool_)
     missing = np.isnan(counts).all(axis=class_axes)
     if not np.all(acquired | missing) or np.any(counts < 0):
@@ -278,7 +298,13 @@ def count_completion(
 
 
 def paired_means(survival: NDArray[np.float64]) -> NDArray[np.float64]:
-    """Average complete rounds inside each seed, then seeds equally, per arm."""
+    """Average complete rounds inside each seed, then seeds equally, per arm.
+
+    survival is (depth,seed,arm,round), with two arms and unavailable entries NaN.
+    Use rounds finite across every depth and both arms for each seed. Return
+    (2,depth) arm means or all NaN when no seed is complete. Mutate no inputs;
+    do not acquire or draw.
+    """
     complete = np.asarray(np.isfinite(survival).all(axis=(0, 2)), dtype=np.bool_)
     counts = complete.sum(axis=1)
     kept = counts > 0
@@ -292,7 +318,12 @@ def validate_axes(
     axes: tuple[NDArray[np.int64], ...],
     expected: tuple[Sequence[int] | NDArray[np.int64], ...],
 ) -> None:
-    """Require persisted axis identities to match the saved configuration."""
+    """Raise ValueError when persisted axis identities do not match saved cfg.
+
+    axes and expected list persisted and configured identities in the same axis
+    order (depth,seed,arm,round). Compare exact values; unequal sequence lengths also
+    raise ValueError. Return None without modifying either sequence or drawing.
+    """
     if any(
         not np.array_equal(actual, wanted)
         for actual, wanted in zip(axes, expected, strict=True)
@@ -301,7 +332,13 @@ def validate_axes(
 
 
 def restore_result(data: GroupedLoadData[RBCfg]) -> RBResult:
-    """Restore counts; old per-shot IQ files fail because sums is missing."""
+    """Restore counts; old per-shot IQ files fail because sums is missing.
+
+    data supplies the grouped sums variable and its persisted scan axes. Return
+    this experiment's Result with float64 class counts and its original axis
+    ordering. Missing variables and invalid data propagate load errors. Do not
+    mutate the loaded data, acquire or draw; no raw-IQ reconstruction is attempted.
+    """
     sums = data.variable("sums")
     return RBResult(
         depths=sums.axes[5].astype(np.int64),
@@ -359,6 +396,7 @@ class RBExp(Experiment[RBResult, RBCfg]):
 
         Each host round acquires reps shots with rounds=1, not a host average.
         Return fixed raw count slots; cfg and saved sequence identities are unchanged.
+
         """
         # 1. Prepare the selected scan inputs.
         fig, ax = context.plots.subplots(num="measurement")
@@ -485,6 +523,7 @@ class RBExp(Experiment[RBResult, RBCfg]):
         Malformed counts raise ValueError. Missing cfg, AnalysisFailed or existing
         fit ValueError/RuntimeError failures return a reason with count diagnostics.
         Other exceptions propagate unchanged.
+
         """
         # 1. Select the acquired values for analysis.
         data, cfg = source.result, source.cfg

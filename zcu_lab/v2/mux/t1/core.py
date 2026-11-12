@@ -229,11 +229,6 @@ class MuxT1Fit:
     fit: T1Analysis
 
 
-def t1_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
-    """Project complex IQ samples onto their real principal contrast axis."""
-    return rotate2real(signals).real
-
-
 class MuxT1ToneCfg(MuxDriveToneCfg):
     """One original qubit's nullable fixed pi pulse, required only when active."""
 
@@ -305,7 +300,12 @@ class MuxT1Cfg(ConfigBase):
 
 
 def _validate_result(result: MuxT1Result) -> None:
-    """Reject invalid source axes, indices and IQ shape/dtype before analysis."""
+    """Raise ValueError for invalid source axes, indices or IQ shape/dtype.
+
+    result supplies float64 increasing nonnegative times (P,), unique int64
+    original indices (K,) and complex128 IQ (K,P), with K,P>0. Return None
+    without mutation when those axes match; partial NaN IQ remains allowed.
+    """
     times, indices, signals = result.times, result.tone_indices, result.signals
     if (
         times.ndim != 1
@@ -325,13 +325,13 @@ def _validate_result(result: MuxT1Result) -> None:
         raise ValueError("invalid MuxT1Result axes or IQ shape/dtype")
 
 
-def analyze_t1(
+def fit_and_plot_t1(
     result: MuxT1Result,
     options: T1AnalyzeOptions,
     *,
     plots: Plots,
 ) -> tuple[MuxT1Fit | MuxFitFailure, ...]:
-    """Fit each IQ row against shared requested us after skip/finite filtering.
+    """Validate IQ axes, raise on invalid sources, and fit and plot each tone T1.
 
     Require float64 nonnegative strictly increasing times (P,), int64 unique
     nonnegative original indices (K,) and complex128 signals (K,P), with K,P>0.
@@ -360,7 +360,8 @@ def analyze_t1(
             minimum = 6 if options.dual_exp else 4
             if len(xs) < minimum:
                 raise ValueError(f"T1 fit requires at least {minimum} acquired points")
-            real = t1_signal2real(signal)
+            # Project acquired IQ onto its principal contrast axis.
+            real = rotate2real(signal).real
             if options.dual_exp:
                 fit = fit_dual_decay(xs, real)
                 t1, err = fit.decay_time1, fit.decay_time1_err
@@ -451,6 +452,7 @@ class MuxT1Exp(Experiment[MuxT1Result, MuxT1Cfg]):
         completed-round averages across the sweep, or NaN before any round finishes.
         context supplies offline or hardware handles, plots and a stop signal;
         acquisition and program errors propagate.
+
         """
         # 1. Prepare the selected scan inputs.
         cfg = config.model_copy(deep=True)
@@ -614,6 +616,7 @@ class MuxT1Exp(Experiment[MuxT1Result, MuxT1Cfg]):
         invalid axes/options raise. Acquired delays, projected observations
         and predictions stay local to analysis. Draw only the selected primary
         model as fit_i.
+
         """
         # 1. Select the acquired values for analysis.
-        return analyze_t1(source.result, options, plots=plots)
+        return fit_and_plot_t1(source.result, options, plots=plots)

@@ -232,7 +232,7 @@ class MuxAmpRabiCfg(ConfigBase):
 
 
 def prepare_amplitude_scan(cfg: MuxAmpRabiCfg, *, soccfg: QickConfig) -> MuxPulseScan:
-    """Prepare simultaneous gain sweeps on the board's actual gain grids.
+    """Prepare simultaneous gain grids; propagate board conversion errors.
 
     cfg must already be validated and supplies complete tones and ordered
     participants. It is deep-copied before use.
@@ -242,6 +242,8 @@ def prepare_amplitude_scan(cfg: MuxAmpRabiCfg, *, soccfg: QickConfig) -> MuxPuls
     Pulses retain nominal gains for compilation. run replaces these preliminary
     coordinates with the compiled hardware sweep's integer-step gain grid.
     Board conversion errors propagate.
+
+    Return MuxPulseScan without acquiring data or modifying the input cfg.
     """
     cfg = cfg.model_copy(deep=True)
     indices = list(cfg.participants)
@@ -294,6 +296,7 @@ class MuxAmpRabiExp(Experiment[MuxSweepResult, MuxAmpRabiCfg]):
         keeps completed-round averages, or NaN if no round completes.
         Acquisition and cfg/build errors propagate. The caller finishes/releases
         plots and decides whether returned data can be analyzed.
+
         """
         # Prepare each gain grid and select readout tones in participant order.
         # 1. Prepare the selected scan inputs.
@@ -400,6 +403,7 @@ class MuxAmpRabiExp(Experiment[MuxSweepResult, MuxAmpRabiCfg]):
         source contains the acquired gain grids and IQ; its cfg may be None.
         options.skip omits leading points. Return gains, errors and fit quality,
         or a failure reason per original tone index. plots receives fit_i figures.
+
         """
         # 1. Select the acquired values for analysis.
         result = source.result

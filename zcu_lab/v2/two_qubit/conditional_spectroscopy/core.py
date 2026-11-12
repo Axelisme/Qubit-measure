@@ -157,12 +157,16 @@ def summarize_spectra(
     acquired_shots: NDArray[np.float64],
     requested_shots: int,
 ) -> SpectroscopyAnalysis:
-    """Compute F1/F2 P_e and frequency completeness from terminal counts.
+    """Compute F1/F2 P_e and completeness; raise ValueError for invalid counts.
 
     counts ends in terminal (3,3), with g/e/other on each axis. acquired_shots
     matches the preceding scan axes and counts all shots before selection.
     Whole missing points may be NaN. Invalid or partly missing counts raise
     ValueError. Zero totals give NaN without warnings; partial counts are used.
+
+    requested_shots is reps*rounds at each scan coordinate. Return excitation,
+    acquired shots and the all-frequencies complete mask. Do not mutate inputs,
+    acquire or draw.
     """
     if counts.shape[-2:] != (3, 3) or counts.shape[:-2] != acquired_shots.shape:
         raise ValueError("Terminal counts and acquired shot coordinates must match")
@@ -186,7 +190,13 @@ def summarize_spectra(
 
 
 def restore_result(data: GroupedLoadData[SpectroscopyCfg]) -> SpectroscopyResult:
-    """Restore summed counts; old per-shot IQ files lack sums and are rejected."""
+    """Restore summed counts; old per-shot IQ files lack sums and are rejected.
+
+    data supplies the grouped sums variable and its persisted scan axes. Return
+    this experiment's Result with float64 class counts and its original axis
+    ordering. Missing variables and invalid data propagate load errors. Do not
+    mutate the loaded data, acquire or draw; no raw-IQ reconstruction is attempted.
+    """
     sums = data.variable("sums")
     return SpectroscopyResult(
         dc_values=sums.axes[5], frequencies=sums.axes[2], sums=sums.z.astype(np.float64)
@@ -246,6 +256,7 @@ class SpectroscopyExp(Experiment[SpectroscopyResult, SpectroscopyCfg]):
         Return raw counts, not IQ or proportions. Unmeasured points remain NaN
         after cooperative cancellation. Acquisition exceptions propagate unchanged.
         The stop signal carries only stop requests and reason text.
+
         """
         # 1. Prepare the selected scan inputs.
         frequencies = sweep2array(config.frequency)

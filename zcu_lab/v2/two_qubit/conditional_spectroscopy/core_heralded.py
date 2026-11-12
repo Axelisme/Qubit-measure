@@ -60,7 +60,13 @@ class SpectroscopyHeraldedCfg(SpectroscopyCfg):
 def restore_result(
     data: GroupedLoadData[SpectroscopyHeraldedCfg],
 ) -> SpectroscopyHeraldedResult:
-    """Restore all 81 counts; old per-shot IQ files lack sums and are rejected."""
+    """Restore all 81 counts; old per-shot IQ files lack sums and are rejected.
+
+    data supplies the grouped sums variable and its persisted scan axes. Return
+    this experiment's Result with float64 class counts and its original axis
+    ordering. Missing variables and invalid data propagate load errors. Do not
+    mutate the loaded data, acquire or draw; no raw-IQ reconstruction is attempted.
+    """
     sums = data.variable("sums")
     return SpectroscopyHeraldedResult(
         dc_values=sums.axes[7], frequencies=sums.axes[4], sums=sums.z.astype(np.float64)
@@ -124,6 +130,7 @@ class SpectroscopyHeraldedExp(
         Optional DC settings are not restored. Completed rounds survive
         cooperative cancellation. Acquisition exceptions propagate unchanged.
         The stop signal carries only stop requests and reason text.
+
         """
         # 1. Prepare the selected scan inputs.
         frequencies = sweep2array(config.frequency)
@@ -266,6 +273,7 @@ class SpectroscopyHeraldedExp(
         All-NaN counts retain the empty figures and return an error summary
         explaining that no complete acquisition round is available. Otherwise
         return None for this figures-only analysis.
+
         """
         # 1. Select the acquired values for analysis.
         del options
