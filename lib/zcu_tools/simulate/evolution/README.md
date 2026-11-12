@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-11-13, logical family duration diagnostics
+**Last updated:** 2026-11-13, constant RWA guard diagnostics
 
 **讀者：** framework-dev、agent。Segment evolution 的公開輸入、路由與數值邊界。
 
@@ -44,6 +44,7 @@ The exports in [__init__.py](__init__.py) fall into these groups:
 | States and population conversion | `Basis`, `DensityState`, `Populations`, `populations`, `batch_populations` |
 | Explicit joint-Fock prototype | `JointFockRequest`, `JointFockDiagnostic`, `JointFockResult`, `joint_fock_spectrum` |
 | Shared RWA Hamiltonian coefficients | `RWACoefficients`, `rwa_coefficients`, `interaction_hamiltonian` |
+| Read-only constant RWA guard query | `single_tone_rwa_diagnostic`, `SingleToneRWADiagnostic`, `RWAGuardMetric`, `RWAUncomputed` |
 
 `Engine(workers, *, families=None, kernels=None, chunks_per_worker=None,
 routing_cache_bytes=4*1024**2)` owns immutable routing facts.
@@ -86,6 +87,56 @@ The environment explicitly converts them to populations, then calls ADC's
 normalization and sampling tools. Evolution neither imports ADC nor produces
 I/Q. ADC owns its probability tolerance and readout sums; see the
 [ADC README](../adc/README.md).
+
+### Constant RWA guard diagnostics
+
+Call `single_tone_rwa_diagnostic(model, port, frequency_ghz, amplitude,
+duration_ns, budget=1e-3)` from the package root. Supply the row's `SecularModel`
+at fixed flux, including any segment shifts, and a drive port name. Frequency
+is any finite signed GHz, including zero. Amplitude is signed dimensionless
+gain, and duration is nonnegative ns. All numeric inputs must be finite and
+budget must be positive. Unknown ports, negative duration and nonfinite inputs
+raise `ValueError`.
+Numerical construction failures propagate. The query does not evolve a density,
+select a family or modify routing history. It releases its temporary facts
+before returning.
+
+The frozen `SingleToneRWADiagnostic` returns the following comparisons. A
+computed field is a frozen `RWAGuardMetric` with `value`, `threshold`, inclusive
+`comparison` and `passed`. A skipped field is `RWAUncomputed`, a frozen marker
+with neither a value nor a passed status. `accepted` requires every field to be
+computed and pass. Low and zero carriers return `accepted=False`, not an exception.
+
+| Field | Value and units | Admission |
+| --- | --- | --- |
+| `budget` | Per-segment allowance, dimensionless | ≥ 1e-3 |
+| `carrier_ghz` | Absolute carrier, GHz | ≥ 0.05 |
+| `omission_transfer` | Remaining first/second-order transfer proxy after adaptive edge restoration, dimensionless | ≤ 0.0058 |
+| `strength_ratio` | abs(gain) × sum of full quadrature spectral norms / abs(carrier), dimensionless | ≤ 0.25 |
+| `phase_rad` | 2π × duration × squared gain-weighted retained positive Fourier norm / abs(carrier), rad | ≤ 0.06 |
+| `pruning` | Phase-graph population omission bound, dimensionless | ≤ min(budget, 1e-3) |
+| `real_dimension` | Populations plus real within-component coherence coordinates, count | ≤ 64 |
+
+The [single constant RWA owner](kernels/single_tone_rwa.py) defines the query and
+graph comparisons. It shares the retention, transfer, strength and phase
+calculation with the guard through [RWA numerics](kernels/_rwa_numeric.py).
+The query preserves guard early returns. Budget always has a value. A failed
+budget leaves every later metric uncomputed. A failed carrier leaves transfer,
+strength, phase, pruning and dimension uncomputed. Transfer and strength have
+values after these domain checks. A failed strength ratio leaves the phase in
+radians uncomputed. Any base rejection leaves pruning and dimension uncomputed.
+A pruning rejection still returns dimension because the guard computes both.
+
+Transfer is computed during retention, before strength and phase comparisons.
+Its value and passed status remain visible even when either of those later
+comparisons rejects the row. The diagnostic is a numeric table, not a decision
+trace. A value and passed status do not mean that comparison participated in
+the particular rejection.
+
+The query does not diagnose sampled envelopes, multiple tones or moving flux.
+Carrier phase and initial density do not enter the comparisons. These metrics
+are admission proxies, not a certificate of final full-density accuracy.
+The guard thresholds, dispatch order and other families are unchanged.
 
 ## Joint-Fock prototype
 

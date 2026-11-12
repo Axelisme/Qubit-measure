@@ -1,6 +1,7 @@
 """Constant rotating-frame Lindbladians split by the shared retained graph."""
 
-from dataclasses import dataclass
+from contextlib import closing
+from dataclasses import dataclass, replace
 from hashlib import sha256
 
 import numpy as np
@@ -9,12 +10,27 @@ from numpy.typing import NDArray
 from scipy.linalg import expm
 
 from ..kernel import ApplyContext, KernelContext, Prepared, SegmentTable
-from ._rwa_graph import RWA_GRAPH_POLICY, phase_graph, pruning_admitted
+from ..secular import SecularModel
+from ..workplan import WorkPlan
+from ._dop853 import tolerances
+from ._rwa_fourier import EDGE_GHZ
+from ._rwa_graph import (
+    PRUNE_LIMIT,
+    RWA_GRAPH_POLICY,
+    PhaseGraph,
+    phase_graph,
+    pruning_bound,
+)
 from ._rwa_numeric import (
     ADAPTIVE_RWA_POLICY,
+    MIN_RWA_BUDGET,
+    ConstantRWAAdmission,
     RWACoefficients,
+    RWAGuardMetric,
     RWARetention,
+    RWAUncomputed,
     admit_constant_rows,
+    constant_admission,
     constant_retentions,
     interaction_hamiltonian,
     rwa_coefficients,
@@ -28,6 +44,147 @@ _POLICY = (
     ADAPTIVE_RWA_POLICY,
     _MAX_BLOCK_DIMENSION,
 )
+
+
+@dataclass(frozen=True)
+class SingleToneRWADiagnostic:
+    """Read-only admission metrics for one fixed-flux constant tone.
+
+    Each RWAGuardMetric supplies value, inclusive threshold and passed status.
+    budget is the dimensionless per-segment allowance, required >=1e-3.
+    carrier_ghz is the absolute carrier in GHz, required >=0.05.
+    omission_transfer is the dimensionless remaining first/second-order transfer
+    proxy after adaptive edge restoration, required <=0.0058. strength_ratio is
+    abs(gain)*(||X||+||Y||)/abs(carrier), dimensionless, required <=0.25.
+    phase_rad is 2*pi*duration*(gain*||retained positive Fourier operator||)^2 /
+    abs(carrier), in rad, required <=0.06. pruning is the dimensionless phase-graph
+    population omission bound, required <=min(budget,1e-3). real_dimension counts
+    populations and real coordinates of within-component coherences, required
+    <=64. accepted is true only when every comparison passes. These are calibrated
+    admission proxies, not a bound on final density error or sequence accuracy.
+
+    RWAUncomputed marks skipped numeric work and has no value or passed status.
+    budget always has a value. carrier_ghz is uncomputed after budget rejection.
+    Transfer and strength are uncomputed after budget/carrier rejection. Phase
+    is also uncomputed after strength rejection. Pruning and dimension are
+    uncomputed after any base rejection (budget/carrier/transfer/strength/phase).
+    Dimension is still computed if pruning fails. Transfer's value is computed
+    before strength/phase comparisons and remains visible if either rejects.
+    This is a numeric table, not a decision trace: a value and passed status do
+    not mean the guard used that comparison in this particular rejection.
+    """
+
+    budget: RWAGuardMetric
+    carrier_ghz: RWAGuardMetric | RWAUncomputed = RWAUncomputed()
+    omission_transfer: RWAGuardMetric | RWAUncomputed = RWAUncomputed()
+    strength_ratio: RWAGuardMetric | RWAUncomputed = RWAUncomputed()
+    phase_rad: RWAGuardMetric | RWAUncomputed = RWAUncomputed()
+    pruning: RWAGuardMetric | RWAUncomputed = RWAUncomputed()
+    real_dimension: RWAGuardMetric | RWAUncomputed = RWAUncomputed()
+
+    @property
+    def accepted(self) -> bool:
+        """Whether this constant row passes every single_tone_rwa guard."""
+        return all(
+            isinstance(metric, RWAGuardMetric) and metric.passed
+            for metric in (
+                self.budget,
+                self.carrier_ghz,
+                self.omission_transfer,
+                self.strength_ratio,
+                self.phase_rad,
+                self.pruning,
+                self.real_dimension,
+            )
+        )
+
+
+def _diagnostic(
+    admission: ConstantRWAAdmission,
+    graph: PhaseGraph | None,
+    amplitude: float,
+    duration_ns: float,
+    budget: float,
+    work_plan: WorkPlan,
+) -> SingleToneRWADiagnostic:
+    diagnostic = SingleToneRWADiagnostic(
+        RWAGuardMetric(budget, MIN_RWA_BUDGET, ">="),
+        admission.carrier_ghz,
+        admission.omission_transfer,
+        admission.strength_ratio,
+        admission.phase_rad,
+    )
+    if graph is None:
+        return diagnostic
+    return replace(
+        diagnostic,
+        pruning=RWAGuardMetric(
+            pruning_bound(graph, np.array([abs(amplitude)]), duration_ns),
+            min(budget, PRUNE_LIMIT),
+        ),
+        real_dimension=RWAGuardMetric(
+            float(len(rwa_topology(graph, work_plan).a)), _MAX_BLOCK_DIMENSION
+        ),
+    )
+
+
+def single_tone_rwa_diagnostic(
+    model: SecularModel,
+    port: str,
+    frequency_ghz: float,
+    amplitude: float,
+    duration_ns: float,
+    *,
+    budget: float = 1e-3,
+) -> SingleToneRWADiagnostic:
+    """Read every single_tone_rwa numeric guard for one constant model row.
+
+    model is the fixed-flux, energy-basis model used by that row, including any
+    segment shifts. port names one of model.drives. frequency_ghz is any finite
+    signed GHz, including zero; amplitude is finite signed dimensionless gain;
+    duration_ns is finite and nonnegative. Carrier phase and input density do
+    not affect these guards. budget is a finite positive per-segment allowance.
+
+    Returns frozen metrics for computed values, and RWAUncomputed for work
+    skipped by guard early returns. Low/zero carrier and positive budget below
+    1e-3 return accepted=False. See SingleToneRWADiagnostic for each metric's
+    availability. Raises ValueError for an unknown port, nonfinite inputs,
+    negative duration or invalid budget. Numerical construction
+    failures propagate. No evolution, routing, history or preparation is changed;
+    temporary model-only facts are released before return. This query does not
+    diagnose shaped, multitone or moving-flux rows and does not select a family.
+    """
+    tolerances(budget)
+    if (
+        not np.isfinite(frequency_ghz)
+        or not np.isfinite(amplitude)
+        or not np.isfinite(duration_ns)
+        or duration_ns < 0
+    ):
+        raise ValueError(
+            "constant RWA requires finite carrier/gain and nonnegative finite duration"
+        )
+    ports = [drive.name for drive in model.drives]
+    if port not in ports:
+        raise ValueError(f"unknown constant RWA drive port: {port}")
+    diagnostic = SingleToneRWADiagnostic(RWAGuardMetric(budget, MIN_RWA_BUDGET, ">="))
+    if not diagnostic.budget.passed:
+        return diagnostic
+    carrier = RWAGuardMetric(abs(frequency_ghz), EDGE_GHZ, ">=")
+    diagnostic = replace(diagnostic, carrier_ghz=carrier)
+    if not carrier.passed:
+        return diagnostic
+    index = ports.index(port)
+    with closing(WorkPlan()) as plan:
+        admission = constant_admission(
+            model, index, frequency_ghz, amplitude, duration_ns, plan
+        )
+        graph = None
+        if admission.accepted:
+            graph = phase_graph(
+                model, (index,), (frequency_ghz,), plan, admission.retention
+            )
+        return _diagnostic(admission, graph, amplitude, duration_ns, budget, plan)
 
 
 @dataclass(frozen=True)
@@ -291,16 +448,22 @@ class SingleToneRWAKernel:
             graph = phase_graph(
                 model, (port,), (frequency,), context.work_plan, retention
             )
-            accepted[index] = pruning_admitted(
+            admission = constant_admission(
+                model,
+                port,
+                frequency,
+                float(table.tone_amplitude[row, 0]),
+                float(table.duration_ns[row]),
+                context.work_plan,
+            )
+            accepted[index] = _diagnostic(
+                admission,
                 graph,
-                np.abs(table.tone_amplitude[row, :1]),
+                float(table.tone_amplitude[row, 0]),
                 float(table.duration_ns[row]),
                 context.budget,
-            )
-            # Keep the advertised small-block route out of dense full-space
-            # exponentials on strongly connected large joint models.
-            topology = rwa_topology(graph, context.work_plan)
-            accepted[index] &= len(topology.a) <= _MAX_BLOCK_DIMENSION
+                context.work_plan,
+            ).accepted
         return accepted
 
     def prepare_keys(

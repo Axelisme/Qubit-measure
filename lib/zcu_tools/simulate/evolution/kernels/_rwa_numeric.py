@@ -1,7 +1,7 @@
 """Shared RWA admission, retained Fourier sets and Hamiltonian coefficients."""
 
 from dataclasses import dataclass
-from typing import NamedTuple
+from typing import Literal, NamedTuple
 
 import numpy as np
 from numba import njit
@@ -18,7 +18,7 @@ from ._workload_facts import envelope_bounds, fixed_flux, packed_model, quadratu
 _REVISION = "joint-rwa-v3"
 STEP_NS = 4.0
 CONSTANT_STEP_NS = 16.0
-_MIN_BUDGET = 1e-3
+MIN_RWA_BUDGET = 1e-3
 _MAX_RATIO = 0.25
 _MAX_SLOPE = 0.025
 _MAX_CURVATURE = 0.003
@@ -37,7 +37,7 @@ RWA_POLICY = (
     STEP_NS,
     CONSTANT_STEP_NS,
     _rwa_fourier.MAX_OMISSION_TRANSFER,
-    _MIN_BUDGET,
+    MIN_RWA_BUDGET,
     _MAX_RATIO,
     _MAX_SLOPE,
     _MAX_CURVATURE,
@@ -75,6 +75,68 @@ class RWARetention:
     omission_transfer: float
     omission_phase: float | None = None
     dimension: int | None = None
+
+
+@dataclass(frozen=True)
+class RWAGuardMetric:
+    """One immutable numeric admission comparison, not a density-error bound.
+
+    value is the measured proxy; threshold uses the same units, documented on
+    the containing diagnostic field. comparison is the inclusive admission
+    direction, either <= or >=. passed evaluates that comparison.
+    """
+
+    value: float
+    threshold: float
+    comparison: Literal["<=", ">="] = "<="
+
+    @property
+    def passed(self) -> bool:
+        """Whether value satisfies the inclusive threshold comparison."""
+        return (
+            self.value <= self.threshold
+            if self.comparison == "<="
+            else self.value >= self.threshold
+        )
+
+
+@dataclass(frozen=True)
+class RWAUncomputed:
+    """An admission metric whose numeric value was not computed.
+
+    This frozen marker has neither a value nor a passed status. Earlier guard
+    rejection skipped the numeric work; it is distinct from a failed metric.
+    """
+
+
+@dataclass(frozen=True)
+class ConstantRWAAdmission:
+    """Shared constant-row retention and calibrated numeric comparisons.
+
+    retention owns the final Fourier edge set. carrier_ghz is the absolute
+    carrier in GHz, required >=0.05. omission_transfer is a
+    dimensionless first/second-order transfer proxy. strength_ratio is the
+    dimensionless full-quadrature strength divided by absolute carrier.
+    phase_rad is the retained-norm phase proxy in radians, or RWAUncomputed
+    when the strength-ratio comparison already rejected the row.
+    """
+
+    retention: RWARetention
+    carrier_ghz: RWAGuardMetric
+    omission_transfer: RWAGuardMetric
+    strength_ratio: RWAGuardMetric
+    phase_rad: RWAGuardMetric | RWAUncomputed
+
+    @property
+    def accepted(self) -> bool:
+        """Whether the carrier and shared numeric comparisons pass."""
+        return (
+            self.carrier_ghz.passed
+            and self.strength_ratio.passed
+            and isinstance(self.phase_rad, RWAGuardMetric)
+            and self.phase_rad.passed
+            and self.omission_transfer.passed
+        )
 
 
 @dataclass(frozen=True)
@@ -172,7 +234,7 @@ def _retained_norm(
     model: SecularModel,
     port: int,
     frequency: float,
-    context: KernelContext,
+    work_plan: WorkPlan,
     retention: RWARetention | None = None,
 ) -> float:
     """Cache the near-resonant positive Fourier operator spectral norm."""
@@ -194,7 +256,7 @@ def _retained_norm(
             np.linalg.norm(retained_edges(model, port, frequency, retention), 2)
         )
 
-    return context.work_plan.fact(key, build)
+    return work_plan.fact(key, build)
 
 
 def _resolve_retention(
@@ -259,6 +321,100 @@ def _resolve_retention(
     )
 
 
+def constant_retention(
+    model: SecularModel,
+    port: int,
+    frequency: float,
+    amplitude: float,
+    duration_ns: float,
+    work_plan: WorkPlan,
+) -> RWARetention:
+    """Resolve and cache one constant row's Fourier set before strength checks.
+
+    Inputs are a valid model drive index, signed carrier with magnitude >=50 MHz,
+    finite gain and nonnegative ns duration. The table inventory and standalone
+    diagnostic share this fact without computing strength or phase for other rows.
+    """
+    key = FactKey(
+        (
+            "constant-rwa-retention",
+            ADAPTIVE_RWA_POLICY,
+            model.identity,
+            model.level,
+            port,
+            frequency,
+            amplitude,
+            duration_ns,
+        ),
+        RWARetention,
+    )
+    return work_plan.fact(
+        key,
+        lambda: _resolve_retention(
+            model, (port,), (frequency,), np.array([abs(amplitude)]), duration_ns
+        ),
+    )
+
+
+def constant_admission(
+    model: SecularModel,
+    port: int,
+    frequency: float,
+    amplitude: float,
+    duration_ns: float,
+    work_plan: WorkPlan,
+) -> ConstantRWAAdmission:
+    """Cache the shared single-constant metrics and resolved Fourier set.
+
+    Caller supplies a valid drive index, signed carrier with magnitude >=50 MHz,
+    finite gain and nonnegative ns duration. No budget or density enters these
+    comparisons. Guard and public diagnostics consume this same product. A failed
+    strength comparison skips the phase-radian value, matching guard short-circuiting.
+    """
+    key = FactKey(
+        (
+            "constant-rwa-admission",
+            ADAPTIVE_RWA_POLICY,
+            model.identity,
+            model.level,
+            port,
+            frequency,
+            amplitude,
+            duration_ns,
+        ),
+        ConstantRWAAdmission,
+    )
+
+    def build() -> ConstantRWAAdmission:
+        retention = constant_retention(
+            model, port, frequency, amplitude, duration_ns, work_plan
+        )
+        norms = quadrature_norms(model, port, work_plan)
+        retained = _retained_norm(model, port, frequency, work_plan, retention)
+        # Preserve the table guard's NumPy scalar arithmetic, including overflow.
+        gain = np.float64(amplitude)
+        carrier = np.float64(abs(frequency))
+        ratio = abs(gain) * (norms.in_phase + norms.quadrature) / carrier
+        phase_rate = (gain * retained) ** 2 / carrier
+        strength = RWAGuardMetric(float(ratio), _MAX_RATIO)
+        phase: RWAGuardMetric | RWAUncomputed = RWAUncomputed()
+        if strength.passed:
+            phase = RWAGuardMetric(
+                float(2 * np.pi * duration_ns * phase_rate), _MAX_PHASE_RAD
+            )
+        return ConstantRWAAdmission(
+            retention,
+            RWAGuardMetric(abs(frequency), _rwa_fourier.EDGE_GHZ, ">="),
+            RWAGuardMetric(
+                retention.omission_transfer, _rwa_fourier.MAX_OMISSION_TRANSFER
+            ),
+            strength,
+            phase,
+        )
+
+    return work_plan.fact(key, build)
+
+
 def constant_retentions(
     table: SegmentTable, context: KernelContext
 ) -> ConstantRetentions:
@@ -288,12 +444,13 @@ def constant_retentions(
                 continue
             model = table.model(context.source, row)
             results.append(
-                _resolve_retention(
+                constant_retention(
                     model,
-                    (int(table.tone_port[row, 0]),),
-                    (float(table.tone_frequency_ghz[row, 0]),),
-                    np.abs(table.tone_amplitude[row, :1]),
+                    int(table.tone_port[row, 0]),
+                    float(table.tone_frequency_ghz[row, 0]),
+                    float(table.tone_amplitude[row, 0]),
                     float(table.duration_ns[row]),
+                    context.work_plan,
                 )
             )
         return ConstantRetentions(tuple(results))
@@ -421,7 +578,7 @@ def _row_admissible(
 ) -> bool:
     """Require the existing budget, tone-count and fixed-flux domain."""
     return not (
-        context.budget < _MIN_BUDGET
+        context.budget < MIN_RWA_BUDGET
         or (count != 1 if single_tone else count < 2)
         or not fixed_flux(table, int(row))
     )
@@ -492,7 +649,6 @@ def _admit_rows(
     tolerances(context.budget)
     bounds = envelope_bounds(table, context.work_plan)
     accepted = np.zeros(len(rows), dtype=np.bool_)
-    retentions = None
     for index, raw_row in enumerate(rows):
         row = int(raw_row)
         count = table.tones[row]
@@ -516,11 +672,17 @@ def _admit_rows(
             continue
         retention = None
         if constant_single:
-            if retentions is None:
-                retentions = constant_retentions(table, context)
-            retention = retentions.rows[row]
-            assert retention is not None  # The row passed the same domain checks above.
-        elif constant:
+            constant_retentions(table, context)
+            accepted[index] = constant_admission(
+                model,
+                int(table.tone_port[row, 0]),
+                float(table.tone_frequency_ghz[row, 0]),
+                float(table.tone_amplitude[row, 0]),
+                float(table.duration_ns[row]),
+                context.work_plan,
+            ).accepted
+            continue
+        if constant:
             ports = table.tone_port[row, :count]
             probability = _rwa_fourier.omission_probability(
                 model.energies_ghz,
@@ -541,7 +703,7 @@ def _admit_rows(
                 model,
                 port,
                 float(table.tone_frequency_ghz[row, tone]),
-                context,
+                context.work_plan,
                 retention,
             )
             phase += (
