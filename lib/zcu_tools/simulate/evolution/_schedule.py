@@ -429,7 +429,7 @@ class Schedule:
                 rows,
                 self.dispatch.shaped,
                 self.dispatch.rejected,
-                self.dispatch.two_tone_direct,
+                self.dispatch.two_tone_first,
                 self.dispatch.names,
                 self.dispatch.plans,
             ),

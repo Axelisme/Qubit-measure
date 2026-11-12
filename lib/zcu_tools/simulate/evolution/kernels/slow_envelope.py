@@ -40,6 +40,18 @@ def _bath(state: NDArray[np.complex128], channel: _Channel) -> NDArray[np.comple
     return result
 
 
+def low_carrier(frequency_ghz: NDArray[np.float64]) -> NDArray[np.bool_]:
+    """Return where signed carriers have magnitude strictly below 30 MHz.
+
+    frequency_ghz is an array in cycles/ns; the returned boolean array has the
+    same shape. Exact +/-0.03 GHz belongs to plateau propagation, not slow
+    midpoint-held propagation. Dispatch and this kernel share this comparison.
+    """
+    from .floquet_period import MIN_FREQUENCY_GHZ
+
+    return np.abs(frequency_ghz) < MIN_FREQUENCY_GHZ
+
+
 class SlowEnvelopeKernel:
     """Single constant-tone full-Hamiltonian propagation, without RWA.
 
@@ -52,7 +64,7 @@ class SlowEnvelopeKernel:
     Prepared arrays contain no density and are immutable. This calibrated
     approximation does not adapt to the requested budget or certify error for
     arbitrary models, pulse strengths or coherences. The guard admits constant
-    tones through 30 MHz; production dispatch uses it strictly below 30 MHz.
+    tones strictly below 30 MHz, matching the dispatch domain boundary.
     """
 
     name = "slow_envelope"
@@ -61,16 +73,15 @@ class SlowEnvelopeKernel:
     def guard(
         self, table: SegmentTable, rows: NDArray[np.int64], context: KernelContext
     ) -> NDArray[np.bool_]:
-        """Accept one constant tone with |carrier| at most the Floquet threshold."""
+        """Accept one constant tone with carrier magnitude strictly below 30 MHz."""
         del context
-        from .floquet_period import MIN_FREQUENCY_GHZ
 
         if not table.tone_frequency_ghz.shape[1]:
             return np.zeros(len(rows), dtype=np.bool_)
         return (
             (table.tones[rows] == 1)
             & table.constant_envelopes(rows)
-            & (np.abs(table.tone_frequency_ghz[rows, 0]) <= MIN_FREQUENCY_GHZ)
+            & low_carrier(table.tone_frequency_ghz[rows, 0])
         )
 
     def prepare_keys(
