@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-11-12, named dispatch choices and routing boundaries
+**Last updated:** 2026-11-12, named routing and shared algebra owners
 
 **讀者：** framework-dev、agent。Segment evolution 的公開輸入、路由與數值邊界。
 
@@ -504,7 +504,9 @@ class's methods.
 | Shared operation | Owner and users |
 | --- | --- |
 | Continuous flux waveform interpolation, term-kind interpretation and Hamiltonian accumulation | [kernels/_flux_expansion.py](kernels/_flux_expansion.py), shared by [adiabatic_map](kernels/adiabatic_map.py) and [flux_dop853](kernels/flux_dop853.py). Each kernel owns packing and integration. |
-| Rates → population generator Q and coherence decay | [kernels/_secular.py](kernels/_secular.py), used by static, split, modal and direct propagators. |
+| Rates → population generator Q | [../baths.py](../baths.py), shared by evolution propagators, ADC conditional responses and fluxonium manifold modes. |
+| Secular coherence decay | [kernels/_secular.py](kernels/_secular.py), used by static, split, modal and direct propagators. |
+| Density basis conversion | `transform_density` in [state.py](state.py), shared by population conversion, scheduler boundaries, Dyson input bounds and compiled DOP853 chains. Callers retain basis selection and traversal. |
 | Adaptive DOP853 tableau, tolerances and integration | [kernels/_dop853.py](kernels/_dop853.py), used by density solvers and Hilbert endpoint builders. Packing and chain traversal live in [kernels/_dop853_data.py](kernels/_dop853_data.py) and [kernels/_dop853_chain.py](kernels/_dop853_chain.py). [kernels/_dop853_intervals.py](kernels/_dop853_intervals.py) owns density knot partitioning and source-coordinate playback clocks. |
 | Ordinary density endpoint advancement | `advance_endpoints` in [kernels/dop853.py](kernels/dop853.py), used by ordinary DOP853 apply and period fractional tails with an explicitly supplied frame. |
 | Period interpolation, secular playback and fractional tails | [kernels/_period_table.py](kernels/_period_table.py), shared by [period_table](kernels/period_table.py) and [shaped_sambe](kernels/shaped_sambe.py). |

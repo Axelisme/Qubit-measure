@@ -6,8 +6,9 @@ import numpy as np
 from numpy.typing import NDArray
 from scipy.linalg import expm
 
+from ...baths import population_generator
 from ..kernel import ApplyContext, KernelContext, Prepared, SegmentTable
-from ._secular import coherence_decay, population_generator
+from ._secular import coherence_decay
 
 
 @dataclass(frozen=True)

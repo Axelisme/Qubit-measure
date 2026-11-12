@@ -5,9 +5,10 @@ from collections.abc import Iterator
 import numpy as np
 from numpy.typing import NDArray
 
+from ...baths import population_generator
 from ..kernel import SegmentTable
 from ..secular import ModelSource, SecularModel
-from ._secular import coherence_decay, population_generator, relaxation_decay
+from ._secular import coherence_decay, relaxation_decay
 
 
 def model_keys(table: SegmentTable, rows: NDArray[np.int64]) -> NDArray[np.void]:
