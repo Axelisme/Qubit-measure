@@ -34,15 +34,15 @@ def preference(
     rows: NDArray[np.int64],
     kernels: Mapping[str, Kernel],
     context: KernelContext,
-) -> NDArray[np.int64]:
-    """Order gate, period table and direct solver by estimated amortized work.
+) -> NDArray[np.str_]:
+    """Order gate_cache, period_table and dop853 by estimated amortized work.
 
     Scores are relative work units calibrated on 16-level FTF models, not clock
     measurements at dispatch. Preparation is charged per gate key or per port/
     frequency/amplitude-band key. Guards still decide numerical validity.
-    Canonical keys also allow missing required registry entries to fail later
-    with the ordinary segment-specific error. Return (len(rows), 3) permutations
-    of indices 0=gate cache, 1=period table, 2=DOP853, cheapest first.
+    Canonical keys also allow missing required kernels to fail later with the
+    ordinary segment-specific error. Return a (len(rows), 3) array of family
+    names, cheapest first; equal costs retain gate_cache/period_table/dop853 order.
     """
     gate = kernels.get("gate_cache", GateCacheKernel())
     period = kernels.get("period_table", PeriodTableKernel())
@@ -66,7 +66,9 @@ def preference(
         + 4 * tail * (1 + 0.3 * frequency)
     )
     period_work[frequency == 0] = np.inf  # Direct DC has no table benefit.
-    return np.argsort(np.column_stack((gate_work, period_work, direct)), axis=1)
+    costs = {"gate_cache": gate_work, "period_table": period_work, "dop853": direct}
+    names = np.array(tuple(costs))
+    return names[np.argsort(np.column_stack(tuple(costs.values())), axis=1)]
 
 
 @dataclass(frozen=True)

@@ -53,18 +53,18 @@ def route(batches, *, workers=1, chunks=1, reject=None):
     return result, attempts
 
 
-def multitone_batch(shaped):
+def multitone_batch(shaped, *, count=1):
     envelope = (
         EnvelopeSpec("sampled", np.array([0.2, 1.0]), np.array([0.0, 20.0]))
         if shaped
         else EnvelopeSpec("constant")
     )
-    pulse = track(1, envelope, duration=20.0)
+    pulse = track(count, envelope, duration=20.0)
     frequencies = (0.1, 0.3) if shaped else (0.1, 0.3, 0.5)
     return replace(
-        batch(1, duration=20.0),
+        batch(count, duration=20.0),
         tracks=tuple(
-            replace(pulse, frequency_ghz=np.array([frequency]))
+            replace(pulse, frequency_ghz=np.full(count, frequency))
             for frequency in frequencies
         ),
     )
@@ -88,13 +88,24 @@ def test_multitone_optional_families_are_independent(
     if optional is not None:
         kernels.insert(0, GuardRecorder(optional, attempts, accepts=accepts))
     src = source()
-    result = run(Engine(1, kernels=kernels), src, (multitone_batch(shaped),))
-    expected_attempts = [] if optional is None else [(optional, 20.0)]
+    # Gate amortization is dispatch policy, so its injected guard needs a
+    # cost-eligible sampled inventory. Constant three-tone rows still skip it.
+    count = 20 if shaped and optional == "multitone_gate" else 1
+    gate_skipped = optional == "multitone_gate" and not shaped
+    if gate_skipped:
+        expected = "dop853"
+    result = run(
+        Engine(1, kernels=kernels), src, (multitone_batch(shaped, count=count),)
+    )
+    expected_attempts = [] if optional is None or gate_skipped else [(optional, 20.0)]
     if expected == "dop853":
         expected_attempts.append(("dop853", 20.0))
-    assert attempts == expected_attempts
-    assert result.paths.segments_by_kernel == {expected: 1}
-    np.testing.assert_array_equal(result.densities[0], src.initial_density)
+    assert list(dict.fromkeys(attempts)) == expected_attempts
+    assert result.paths.segments_by_kernel == {expected: count}
+    np.testing.assert_array_equal(
+        result.densities,
+        np.broadcast_to(src.initial_density, (count, *src.initial_density.shape)),
+    )
 
 
 @pytest.mark.parametrize(

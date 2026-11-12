@@ -1,14 +1,58 @@
 """Cold prices for omission-expanded multitone RWA and full-drive integration."""
 
+from collections import Counter
 from dataclasses import dataclass
 from hashlib import sha256
 
 import numpy as np
+from numpy.typing import NDArray
 
 from .kernel import KernelContext, SegmentTable
+from .kernels._rwa_gate import GATE_POLICY, canonical_keys
 from .kernels.multitone_rwa import MultitoneRWAKernel, multitone_retention
 from .secular import ModelSource
 from .workplan import FactKey, WorkPlan
+
+# Cost break-even: four-U preparation is unamortized over 3--19 rows.
+_MIN_GATE_REUSE = 20
+_GATE_INVENTORY = FactKey(("multitone-gate-inventory", GATE_POLICY), tuple)
+
+
+def populate_gate_inventory(
+    table: SegmentTable, source: ModelSource, plan: WorkPlan
+) -> tuple[tuple[bytes, int], ...]:
+    """Publish complete-acquire canonical gate counts before numerical guards.
+
+    Return sorted (physics key, row count) pairs for sampled multitone rows.
+    Prefix/worker subsets borrow these fixed counts; density and resident cache
+    warmth do not participate. Counts determine cost, not numerical validity.
+    """
+
+    def build() -> tuple[tuple[bytes, int], ...]:
+        rows = np.flatnonzero(
+            (table.tones >= 2)
+            & ~table.constant_envelopes(np.arange(len(table.timeline)))
+        )
+        if not len(rows):
+            return ()
+        canonical = canonical_keys(table, KernelContext(source, 1e-3, plan))
+        counts = Counter(canonical[row] for row in rows)
+        return tuple(sorted(counts.items()))
+
+    return plan.fact(_GATE_INVENTORY, build)
+
+
+def gate_preferred(
+    table: SegmentTable, rows: NDArray[np.int64], context: KernelContext
+) -> NDArray[np.bool_]:
+    """Return a row-aligned cost preference for keys used at least 20 times.
+
+    Uses the complete acquire inventory, never a prefix or worker subset.
+    Pinning a family bypasses this cost preference, not its numerical guard.
+    """
+    counts = dict(populate_gate_inventory(table, context.source, context.work_plan))
+    canonical = canonical_keys(table, context)
+    return np.array([counts.get(canonical[row], 0) >= _MIN_GATE_REUSE for row in rows])
 
 
 @dataclass(frozen=True)
