@@ -35,7 +35,10 @@
 description="Fixed preparation pulse before each gain-swept Rabi pulse; None skips preparation."
 ```
 
-**預設值。** 用範本的值：`reps=1`、`rounds=1`、`relax_delay=1.0`。
+**預設值。** cfg 類別與 GUI 表單分開處理：
+
+- cfg 類別在 `core.py` 照 QICK 原生：`reps` 必填、`relax_delay` 必填、`rounds` 預設 1。欄位名稱不改。QICK 0.2.436 的 `AveragerProgramV2(soccfg, reps, final_delay, ...)` 要求明填 `reps` 與 `final_delay`，`acquire(soc, rounds=1, ...)` 則預設一個 round。
+- GUI 表單在 `form.py` 給操作起始值，維持現況。多數是 `reps=1000`、`rounds=10`、`relax_delay` 為 5 倍 T1；14 個 `relax_delay` 固定為 1.0 的表單維持原值。
 
 **檢查。** 範圍用 annotation 的 `ge`／`le`。其他檢查，例如 `model_validator` 或跨欄位條件，只在使用者要求時加，需要時先問。使用者 2026-11-02 裁定：「我不喜歡我沒有要求的檢查」、「如果要檢查，也是Form透過annotation的ge/le檢查」。
 
@@ -43,7 +46,17 @@ description="Fixed preparation pulse before each gain-swept Rabi pulse; None ski
 
 **抽象。** 只有一個實驗用到的邏輯，直接寫在那個實驗的 `core.py`。等第二、第三個實驗也需要時，再設計共同的函式或型別。使用者 2026-11-11 對 gain 專用 sweep 型別的判斷：「特化一個 gain sweep config，感覺就有點過度工程」。
 
-**Docstring 與註解。** `run` 的 docstring 用二到四句：播放什麼序列、回傳什麼、使用時要注意什麼（`twotone/rabi/amp_rabi/core.py:110-116`）。每個階段前寫一行註解說明這段做什麼（`:117`、`:143`）。
+**只有一個呼叫者的 helper。** 預設內聯，三個條件都成立才保留：
+
+1. 名字加簽名說得完。只看呼叫那一行，就知道它吃什麼、回傳什麼。
+2. 效果只有回傳值，或副作用已經寫在名字上。
+3. 進出的變數少，輸入四個以內，輸出一個值或一個具名結果。這些變數和呼叫者其他區域變數沒有耦合，不需要呼叫者先準備好什麼，也不共用會被修改的狀態。
+
+任何一項不成立就內聯。只轉傳參數的包裝、本體 5 行以內的 helper，一律內聯。被當成 callback 傳出去的函式、有兩個以上呼叫者的函式不適用這套內聯規則，例如 `run` 與 `analyze` 都用的 `*_signal2real`。
+
+**Docstring 與註解。** `run` 的 docstring 用二到四句：播放什麼序列、回傳什麼、使用時要注意什麼（`twotone/rabi/amp_rabi/core.py:110-116`）。保留的 helper 一定有 docstring，交代輸入、輸出與副作用。
+
+內聯進來的區塊開頭寫一行段落註解。所有實驗 core 的 `run` 與 `analyze` 都用編號段落註解分段，格式是 `# 1. ...`。每段一行寫目的，不重述程式碼。
 
 ## 4. 自查
 
