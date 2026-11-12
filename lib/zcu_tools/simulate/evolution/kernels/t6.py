@@ -1,4 +1,4 @@
-"""Constant-tone secular channels, powered by periods and interpolated in phase."""
+"""Constant-tone secular evolution by direct densities or reusable channels."""
 
 from dataclasses import dataclass
 
@@ -9,8 +9,12 @@ from scipy.integrate import solve_ivp
 from scipy.linalg import expm, solve
 
 from ..kernel import ApplyContext, KernelContext, Prepared, SegmentTable
-from ..secular import SecularModel
+from ..secular import ModelSource, SecularModel
+from ..workplan import FactKey, WorkPlan
+from . import dop853
+from ._dop853 import Tolerances
 from ._secular import coherence_decay
+from ._workload_facts import packed_segments
 
 
 @dataclass(frozen=True)
@@ -222,14 +226,97 @@ def _fourier(problem: _ChannelProblem, budget: float) -> NDArray[np.complex128]:
 
 
 @dataclass(frozen=True)
+class _T6Price:
+    key: bytes
+    rows: int
+    size: int
+    direct: bool
+
+
+@dataclass(frozen=True)
+class _T6Inventory:
+    prices: tuple[_T6Price, ...]
+
+
+def publish_inventory(
+    table: SegmentTable, source: ModelSource, work_plan: WorkPlan
+) -> _T6Inventory:
+    """Publish input-only strategy choices from the complete acquire table.
+
+    Call before prefix or worker classification. Each constant-tone prepare key
+    counts all its rows, independently of histories, numerical admission and
+    density. Repeated calls borrow the first publication unchanged. Standalone
+    kernel calls may supply their complete table instead. No numerical products
+    are retained here; missing keys in a published inventory fail at prepare.
+    """
+
+    def build() -> _T6Inventory:
+        rows = np.flatnonzero(
+            (table.tones == 1)
+            & table.constant_envelopes(np.arange(len(table.timeline), dtype=np.int64))
+        )
+        keys, first, counts = np.unique(
+            _keys(table, rows), return_index=True, return_counts=True
+        )
+        prices = []
+        for key, row, count in zip(keys, rows[first], counts, strict=True):
+            size = len(table.model(source, row).energies_ghz)
+            duration = float(table.duration_ns[row])
+            frequency = abs(float(table.tone_frequency_ghz[row, 0]))
+            # Initial cold prices: 21-level direct/channel ratios were .017 at
+            # 20 ns, .192 at 218 ns, .338 at 400 ns and .753 at 1000 ns near
+            # .582 GHz. Dense density products scale as M^3; channel products
+            # as M^5. These prices choose work, not numerical acceptance.
+            direct = (0.01 + 0.049 * duration * max(1.0, frequency / 0.582)) * (
+                size / 21
+            ) ** 3
+            channel = 56.0 * (size / 21) ** 5
+            prices.append(
+                _T6Price(key.tobytes(), int(count), size, count * direct < channel)
+            )
+        return _T6Inventory(tuple(prices))
+
+    return work_plan.fact(FactKey("t6-inventory", _T6Inventory), build)
+
+
+def _keys(table: SegmentTable, rows: NDArray[np.int64]) -> NDArray[np.void]:
+    keys = np.empty(
+        len(rows),
+        dtype=[
+            ("level", "<i8", (table.level.shape[1],)),
+            ("shift", "S64"),
+            ("port", "<i8"),
+            ("frequency", "<f8"),
+            ("amplitude", "<f8"),
+            ("duration", "<f8"),
+        ],
+    )
+    if not len(rows):
+        return keys
+    keys["level"] = table.level[rows]
+    keys["shift"] = table.shift_content[rows]
+    keys["port"] = table.tone_port[rows, 0]
+    keys["frequency"] = table.tone_frequency_ghz[rows, 0]
+    keys["amplitude"] = table.tone_amplitude[rows, 0]
+    keys["duration"] = table.duration_ns[rows]
+    return keys
+
+
+@dataclass(frozen=True)
 class _T6Prepared:
     coefficients: NDArray[np.complex128]
     modes: NDArray[np.float64]
     counts: NDArray[np.int64]
+    models: dop853.DOP853Prepared
 
     @property
     def nbytes(self) -> int:
-        return self.coefficients.nbytes + self.modes.nbytes + self.counts.nbytes
+        return (
+            self.coefficients.nbytes
+            + self.modes.nbytes
+            + self.counts.nbytes
+            + self.models.nbytes
+        )
 
 
 @njit(nogil=True, cache=True)
@@ -249,8 +336,11 @@ class T6Kernel:
 
     Prepare keys contain flux level, port, signed carrier GHz, signed gain and
     duration ns. The engine namespaces keys by the DC model source identity.
-    Phase and start time are apply-only. Prepare builds density-independent
-    Fourier channels; apply only evaluates those channels and multiplies states.
+    Phase and start time are apply-only. The complete acquire's key reuse and
+    cold input-only estimates choose direct density integration or Fourier
+    channels. Direct uses the shared H0-rotating density solver at fixed
+    rtol/atol 2e-11/2e-13, independent of budget, with a 0.05 ns step ceiling.
+    Channel preparation and all numerical products remain density-independent.
     A positive finite budget is required; integration or interpolation failure
     raises RuntimeError rather than silently selecting another algorithm.
     """
@@ -280,29 +370,17 @@ class T6Kernel:
     def prepare_keys(
         self, table: SegmentTable, rows: NDArray[np.int64], context: KernelContext
     ) -> NDArray[np.void]:
-        """Return fixed-width keys; equal rows share a phase-independent channel."""
+        """Return phase-independent keys with unchanged physical identity."""
         del context
-        keys = np.empty(
-            len(rows),
-            dtype=[
-                ("level", "<i8", (table.level.shape[1],)),
-                ("shift", "S64"),
-                ("port", "<i8"),
-                ("frequency", "<f8"),
-                ("amplitude", "<f8"),
-                ("duration", "<f8"),
-            ],
-        )
-        keys["level"] = table.level[rows]
-        keys["shift"] = table.shift_content[rows]
-        keys["port"] = table.tone_port[rows, 0]
-        keys["frequency"] = table.tone_frequency_ghz[rows, 0]
-        keys["amplitude"] = table.tone_amplitude[rows, 0]
-        keys["duration"] = table.duration_ns[rows]
-        return keys
+        return _keys(table, rows)
 
     def cost(self, table: SegmentTable, rows: NDArray[np.int64]) -> NDArray[np.float64]:
-        """Estimate channel evaluation cost, with a small powering allowance."""
+        """Return table-only nonnegative chunk-interleaving weights.
+
+        This coarse relative estimate does not reflect the selected direct or
+        channel strategy: this interface lacks source and acquire inventory.
+        It neither prices cold strategy selection nor changes candidate order.
+        """
         return 1 + np.log1p(
             table.duration_ns[rows] * np.abs(table.tone_frequency_ghz[rows, 0])
         )
@@ -314,7 +392,12 @@ class T6Kernel:
         rows: NDArray[np.int64],
         context: KernelContext,
     ) -> Prepared:
-        """Build immutable Fourier channels from representatives aligned to keys."""
+        """Build model-only direct data or channels from aligned key representatives.
+
+        Use the complete acquire inventory published before workers. Standalone
+        calls without a publication must supply their complete table. A missing
+        published key raises ValueError, never a worker-local strategy choice.
+        """
         source, budget = context.source, context.budget
         _check_budget(budget)
         if len(keys) != len(rows) or not np.array_equal(
@@ -323,19 +406,22 @@ class T6Kernel:
             raise ValueError("t6: keys and representative rows must align")
         if not self.guard(table, rows, context).all():
             raise ValueError("t6: prepare requires one constant tone")
-        entries = [
-            _fourier(
-                _problem(
-                    table.model(source, row),
-                    table,
-                    int(row),
-                    budget,
-                ),
-                budget,
-            )
-            for row in rows
-        ]
-        return _pack(entries)
+        inventory = publish_inventory(table, source, context.work_plan)
+        prices = {price.key: price for price in inventory.prices}
+        models = [table.model(source, row) for row in rows]
+        entries = []
+        for key, row, model in zip(keys, rows, models, strict=True):
+            price = prices.get(key.tobytes())
+            if price is None:
+                raise ValueError("t6: key absent from complete acquire inventory")
+            if price.direct:
+                dimension = len(model.energies_ghz) ** 2
+                entries.append(np.empty((0, dimension, dimension), dtype=np.complex128))
+            else:
+                entries.append(
+                    _fourier(_problem(model, table, int(row), budget), budget)
+                )
+        return _pack(entries, dop853.prepare_models(models))
 
     def guard_prepared(
         self,
@@ -369,40 +455,71 @@ class T6Kernel:
         states: NDArray[np.complex128],
         context: ApplyContext,
     ) -> NDArray[np.bool_]:
-        """Evaluate phase Fourier series and advance the aligned densities in place.
+        """Advance aligned densities with each key's already selected strategy.
 
-        Return an all-False bool mask aligned with rows; no post-apply check.
+        Direct rows integrate the full equation independently in the H0 frame,
+        returning exactly to the model basis; channel rows evaluate Fourier
+        playback. No density repair, RWA, pruning or bath splitting occurs.
+        Numerical failure raises RuntimeError without rerouting. Return an
+        all-False bool mask aligned with rows; no post-apply accuracy check.
         """
         context.require_no_plan()
         budget = context.budget
         _check_budget(budget)
         if not isinstance(prepared, _T6Prepared):
             raise ValueError("t6: incompatible prepared payload")
-        _apply_channels(
-            prepared.coefficients,
-            prepared.modes,
-            prepared.counts,
-            key_index,
-            table.tone_theta_rad[rows, 0],
-            states,
-        )
+        direct = prepared.counts[key_index] == 0
+        for selected, integrating in ((direct, True), (~direct, False)):
+            chosen = np.flatnonzero(selected)
+            if not len(chosen):
+                continue
+            chunk = states[chosen].copy()
+            if integrating:
+                plan = dop853.DOP853Plan(
+                    np.full(len(table.timeline), "interaction"),
+                    np.full(len(table.timeline), -1, dtype=np.int64),
+                )
+                dop853.advance_endpoints(
+                    dop853.EndpointData(
+                        prepared.models.models,
+                        packed_segments(table, context.work_plan),
+                    ),
+                    (rows[chosen], key_index[chosen]),
+                    chunk,
+                    budget,
+                    plan,
+                    controls=Tolerances(2e-11, 2e-13, 0.05, np.inf, 0),
+                )
+            else:
+                _apply_channels(
+                    prepared.coefficients,
+                    prepared.modes,
+                    prepared.counts,
+                    key_index[chosen],
+                    table.tone_theta_rad[rows[chosen], 0],
+                    chunk,
+                )
+            states[chosen] = chunk
         if not np.isfinite(states).all():
-            raise RuntimeError("t6: nonfinite density after channel application")
+            raise RuntimeError("t6: nonfinite density after application")
         return np.zeros(len(rows), dtype=np.bool_)
 
 
-def _pack(entries: list[NDArray[np.complex128]]) -> _T6Prepared:
+def _pack(
+    entries: list[NDArray[np.complex128]], models: dop853.DOP853Prepared
+) -> _T6Prepared:
     count = max((len(entry) for entry in entries), default=0)
     size = entries[0].shape[1] if entries else 0
     coefficients = np.zeros((len(entries), count, size, size), dtype=np.complex128)
     modes = np.zeros((len(entries), count))
     counts = np.array([len(entry) for entry in entries], dtype=np.int64)
     for i, entry in enumerate(entries):
-        coefficients[i, : len(entry)] = entry
-        modes[i, : len(entry)] = np.fft.fftfreq(len(entry), 1 / len(entry))
+        if len(entry):
+            coefficients[i, : len(entry)] = entry
+            modes[i, : len(entry)] = np.fft.fftfreq(len(entry), 1 / len(entry))
     for array in (coefficients, modes, counts):
         array.flags.writeable = False
-    return _T6Prepared(coefficients, modes, counts)
+    return _T6Prepared(coefficients, modes, counts, models)
 
 
 def _check_budget(budget: float) -> None:
