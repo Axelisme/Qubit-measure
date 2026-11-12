@@ -36,7 +36,6 @@ from .._sums import (
     herald_probabilities,
     joint_probabilities,
     terminal_counts,
-    validate_classifiers,
 )
 from .analysis import ConstructivePhaseAnalysis, analyze_constructive_phase
 from .core import ConstructivePhaseCfg
@@ -133,7 +132,6 @@ class ConstructivePhaseHeraldedExp(
         self, config: ConstructivePhaseHeraldedCfg, *, context: RunContext
     ) -> ConstructivePhaseHeraldedResult:
         """Acquire all coordinates and durations in hardware, accumulating rounds."""
-        validate_classifiers(config.readout, config.roles)
         coordinates = sweep2array(config.relative_phase)
         durations = sweep2array(config.duration)
         fig, ax = context.plots.subplots(num="measurement")
@@ -211,7 +209,6 @@ class ConstructivePhaseHeraldedExp(
         self, config: ConstructivePhaseHeraldedCfg, *, context: RunContext
     ) -> ConstructivePhaseHeraldedResult:
         """Rebuild sampled envelopes per host duration; keep coordinates in hardware."""
-        validate_classifiers(config.readout, config.roles)
         coordinates = sweep2array(config.relative_phase)
         durations = sweep2array(config.duration)
         fig, ax = context.plots.subplots(num="measurement")

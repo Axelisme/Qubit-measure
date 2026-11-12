@@ -30,7 +30,6 @@ from .._sums import (
     herald_probabilities,
     joint_probabilities,
     terminal_counts,
-    validate_classifiers,
 )
 from .analysis import (
     RBEstimate,
@@ -152,7 +151,6 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
         unchanged. Acquisition exceptions propagate unchanged. The stop signal
         carries only stop requests and reason text.
         """
-        validate_classifiers(config.readout, config.roles)
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Random Clifford depth", ylabel="Return to herald state")
         viewer = live_line(ax, num_lines=4)

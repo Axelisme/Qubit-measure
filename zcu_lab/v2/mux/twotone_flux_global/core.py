@@ -136,7 +136,7 @@ class TwotoneFluxGlobalExp(Experiment[MuxFluxResult, TwotoneFluxGlobalCfg]):
         retains completed points. Driver and acquisition errors propagate.
         Sources remain at the final written value. No output is enabled here.
         """
-        cfg = TwotoneFluxGlobalCfg.model_validate(config.model_dump())
+        cfg = config.model_copy(deep=True)
         indices = list(cfg.participants)
         device = context.devices[cfg.flux_dev]
         check_flux_unit(device.get_info(), cfg.flux_unit)

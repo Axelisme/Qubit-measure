@@ -200,7 +200,6 @@ class JointReadoutHeraldedExp(
         herald class. Rounds accumulate at acquisition; cfg remains unchanged.
         """
 
-        validate_classifiers(config.readout, config.roles)
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(
             xlabel="Nominal preparation",

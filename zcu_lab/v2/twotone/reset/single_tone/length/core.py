@@ -21,8 +21,9 @@ from zcu_tools.program.v2 import (
     SweepCfg,
     TimelineBuilder,
 )
+from zcu_tools.utils.process import rotate2real
 
-from zcu_lab.v2.support.reset import reset_scan_buffer, reset_signal2real
+from zcu_lab.v2.support.reset import reset_scan_buffer
 
 
 @dataclass(frozen=True)
@@ -31,6 +32,11 @@ class LengthResult:
 
     lengths: NDArray[np.float64]
     signals: NDArray[np.complex128]
+
+
+def reset_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
+    """Return the response-axis projection of mean IQ without modifying signals."""
+    return rotate2real(signals).real
 
 
 class LengthCfg(ConfigBase):
@@ -90,7 +96,9 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
         )
 
         # Retain complex IQ while displaying the duration-dependent projection.
-        signals_buffer = reset_scan_buffer(context.plots, lengths, xlabel="Length (us)")
+        signals_buffer = reset_scan_buffer(
+            context.plots, lengths, xlabel="Length (us)", signal2real=reset_signal2real
+        )
 
         # Sweep only the tested reset length after the optional preparation.
         with Schedule(signals_buffer, scope=context.scope) as sched:
