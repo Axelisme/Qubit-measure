@@ -1,10 +1,13 @@
-"""Builder-owned routing policy and author solve records through program acquire."""
+"""Source routing diagnostics and builder-visible acquisition controls."""
+
+from dataclasses import replace
 
 import pytest
+from zcu_tools.core.simulation import RoundRequest
 from zcu_tools.program.v2.modules.delay import SoftDelay
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
-from zcu_tools.simulate.evolution import RoutingHistory
+from zcu_tools.simulate.evolution import Engine, RoutingHistory
 from zcu_tools.simulators.ftf.environment import runtime
 
 from tests.program._profiles import profile_soccfg
@@ -54,66 +57,72 @@ def read_program(env):
     )
 
 
-def test_builder_routes_every_projective_span_and_clear_resolves_again(monkeypatch):
-    sources = []
-    source_type = runtime.FTFSource
-
-    def observed_source(
-        settings,
-        devices,
-        *,
-        soccfg,
-        engine=None,
-        acquisition=None,
-        readout=None,
-        telemetry=None,
-        history=None,
-    ):
-        source = source_type(
-            settings,
-            devices,
-            soccfg=soccfg,
-            engine=engine,
-            acquisition=acquisition,
-            readout=readout,
-            telemetry=telemetry,
+def test_source_routes_every_projective_span_and_clear_resolves_again():
+    config = routing_settings()
+    history = RoutingHistory()
+    env = runtime.ftf(config, soccfg=profile_soccfg("ftf"), time_scale=0)
+    try:
+        source = runtime.FTFSource(
+            config,
+            env.devices,
+            soccfg=env.soccfg,
+            engine=Engine(workers=1, families={"t4"}),
             history=history,
         )
-        sources.append(source)
-        return source
+        try:
+            program = read_program(env)
+            program.acquire(env.soc, progress=False)
+            request = env.soc.binding.rounds[0].acquire
+            snapshot = source.snapshot()
+            source.execute(RoundRequest(request, snapshot, 0))
+            first = source.evaluations[0]
+            assert first.projection_outcomes
+            assert set(first.paths.segments_by_kernel) == {"t4"}
+            assert first.paths.segments_by_kernel["t4"] >= 2
+            source.execute(
+                RoundRequest(
+                    replace(request, sequence=request.sequence + 1), snapshot, 0
+                )
+            )
+            reused = source.evaluations[0].paths
+            assert reused.segments_by_kernel == first.paths.segments_by_kernel
+            source.execute(
+                RoundRequest(
+                    replace(request, sequence=request.sequence + 2), snapshot, 0
+                )
+            )
+            assert source.evaluations[0].paths is reused
+            history.clear()
+            source.execute(
+                RoundRequest(
+                    replace(request, sequence=request.sequence + 3), snapshot, 0
+                )
+            )
+            assert source.evaluations[0].paths is not reused
+            assert (
+                source.evaluations[0].paths.segments_by_kernel
+                == first.paths.segments_by_kernel
+            )
+        finally:
+            source.close()
+    finally:
+        env.devices.close_all_devices()
 
-    monkeypatch.setattr(runtime, "FTFSource", observed_source)
+
+def test_builder_close_preserves_borrowed_history():
     history = RoutingHistory()
     env = runtime.ftf(
         routing_settings(),
         soccfg=profile_soccfg("ftf"),
         time_scale=0,
         history=history,
-        families={"t4"},
     )
     try:
-        program = read_program(env)
-        program.acquire(env.soc, progress=False)
-        source = sources[0]
-        first = source.evaluations[0]
-        assert set(first.paths.segments_by_kernel) == {"t4"}
-        assert first.paths.segments_by_kernel["t4"] >= 2
-        program.acquire(env.soc, progress=False)
-        reused = source.evaluations[0].paths
-        assert reused.segments_by_kernel == first.paths.segments_by_kernel
-        program.acquire(env.soc, progress=False)
-        assert source.evaluations[0].paths is reused
-        history.clear()
-        program.acquire(env.soc, progress=False)
-        assert source.evaluations[0].paths is not reused
-        assert (
-            source.evaluations[0].paths.segments_by_kernel
-            == first.paths.segments_by_kernel
-        )
+        read_program(env).acquire(env.soc, progress=False)
+        generation = history.generation
     finally:
-        for source in sources:
-            source.close()
         env.devices.close_all_devices()
+    assert history.generation == generation
 
 
 def test_builder_rejects_unknown_family_before_acquire():

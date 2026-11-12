@@ -1,4 +1,4 @@
-"""Builder routing controls at the public program acquisition boundary."""
+"""Source routing diagnostics and builder-visible acquisition controls."""
 
 import numpy as np
 import pytest
@@ -6,7 +6,7 @@ from zcu_tools.program.v2.modules.delay import SoftDelay
 from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
-from zcu_tools.simulate.evolution import RoutingHistory
+from zcu_tools.simulate.evolution import Engine, RoutingHistory
 from zcu_tools.simulators.single_fluxonium.config import parse_single_fluxonium
 from zcu_tools.simulators.single_fluxonium.environment import runtime
 
@@ -63,43 +63,56 @@ def read_program(env, *, post_herald_drive=False):
     )
 
 
-def test_builder_routes_every_projective_span_and_clear_resolves_again(monkeypatch):
-    preparations = []
+def test_source_routes_every_projective_span_and_clear_resolves_again():
+    config = routing_settings()
+    history = RoutingHistory()
+    env = runtime.single_fluxonium(config, soccfg=profile_soccfg("single_fluxonium"))
+    try:
+        source = runtime.SingleFluxoniumSource(
+            config,
+            env.devices,
+            runtime=runtime.SingleFluxoniumRuntimeOptions(
+                engine=Engine(workers=1, families={"t4"}), history=history
+            ),
+        )
+        try:
+            program = read_program(env)
+            program.acquire(env.soc, progress=False)
+            request = env.soc.binding.rounds[0].acquire
+            snapshot = source.snapshot()
+            first = source.prepare(request, snapshot)
+            assert set(first.paths.segments_by_kernel) == {"t4"}
+            diagnostics = first.projection_diagnostics
+            assert diagnostics is not None
+            assert diagnostics.evolution_calls >= 2
+            assert source.prepare(request, snapshot) is first
+            history.clear()
+            resolved = source.prepare(request, snapshot)
+            assert resolved is not first
+            assert resolved.paths.segments_by_kernel == first.paths.segments_by_kernel
+        finally:
+            source.close()
+    finally:
+        if env.close_backend is not None:
+            env.close_backend()
+        env.devices.close_all_devices()
 
-    class ObservedSource(runtime.SingleFluxoniumSource):
-        def prepare_readouts(self, validated, *, cancel=None):
-            result = super().prepare_readouts(validated, cancel=cancel)
-            preparations.append(result)
-            return result
 
-    monkeypatch.setattr(runtime, "SingleFluxoniumSource", ObservedSource)
+def test_builder_close_preserves_borrowed_history():
     history = RoutingHistory()
     env = runtime.single_fluxonium(
         routing_settings(),
         soccfg=profile_soccfg("single_fluxonium"),
         history=history,
-        families={"t4"},
     )
     try:
-        program = read_program(env)
-        program.acquire(env.soc, progress=False)
-        first = preparations[-1]
-        assert set(first.paths.segments_by_kernel) == {"t4"}
-        diagnostics = first.projection_diagnostics
-        assert diagnostics is not None
-        assert diagnostics.evolution_calls >= 2
-        program.acquire(env.soc, progress=False)
-        assert preparations[-1] is first
-        history.clear()
-        program.acquire(env.soc, progress=False)
-        assert preparations[-1] is not first
-        assert (
-            preparations[-1].paths.segments_by_kernel == first.paths.segments_by_kernel
-        )
+        read_program(env).acquire(env.soc, progress=False)
+        generation = history.generation
     finally:
         if env.close_backend is not None:
             env.close_backend()
         env.devices.close_all_devices()
+    assert history.generation == generation
 
 
 def test_builder_rejects_unknown_family_before_acquire():

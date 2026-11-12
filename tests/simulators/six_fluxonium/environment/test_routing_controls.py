@@ -1,13 +1,17 @@
-"""Six-source routing control through builder and program acquisition."""
+"""Source routing diagnostics, six-history ownership and builder controls."""
+
+from dataclasses import replace
 
 import numpy as np
 import pytest
 from zcu_tools.cfg_model import MuxReadoutTone
+from zcu_tools.core.simulation import RoundRequest
 from zcu_tools.program.v2 import TimelineBuilder
 from zcu_tools.program.v2.modules.readout import MuxReadoutCfg
 from zcu_tools.simulate.evolution import RoutingHistory
 from zcu_tools.simulators.six_fluxonium.config import parse_six_fluxonium
 from zcu_tools.simulators.six_fluxonium.environment import runtime
+from zcu_tools.simulators.six_fluxonium.environment.routing import route_request
 
 from tests.program._profiles import profile_soccfg
 from tests.simulators.six_fluxonium.config._data import six_document
@@ -46,45 +50,47 @@ def read_program(env):
     return program
 
 
-def test_builder_routes_every_cavity_span_and_clear_resolves_again(monkeypatch):
-    preparations = []
-
-    class ObservedSource(runtime.SingleFluxoniumSource):
-        def prepare_readouts(self, validated, *, cancel=None):
-            result = super().prepare_readouts(validated, cancel=cancel)
-            preparations.append(result)
-            return result
-
-    monkeypatch.setattr(runtime, "SingleFluxoniumSource", ObservedSource)
+def test_source_routes_every_cavity_span_and_clear_resolves_again():
+    config = routing_settings()
     history = RoutingHistory()
-    env = runtime.six_fluxonium(
-        routing_settings(),
-        soccfg=profile_soccfg("six_fluxonium"),
-        history=history,
-        families={"t4"},
-    )
+    env = runtime.six_fluxonium(config, soccfg=profile_soccfg("six_fluxonium"))
     try:
-        program = read_program(env)
-        program.acquire(env.soc, progress=False)
-        first = tuple(preparations)
-        assert len(first) == 2
-        for prepared in first:
-            assert set(prepared.paths.segments_by_kernel) == {"t4"}
-            diagnostics = prepared.projection_diagnostics
-            assert diagnostics is not None
-            assert diagnostics.evolution_calls >= 2
-        program.acquire(env.soc, progress=False)
-        assert all(
-            new is old for new, old in zip(preparations[-2:], first, strict=True)
+        source = runtime.SixFluxoniumSource(
+            config, env.devices, history=history, families={"t4"}
         )
-        history.clear()
-        program.acquire(env.soc, progress=False)
-        assert all(
-            new is not old for new, old in zip(preparations[-2:], first, strict=True)
-        )
-        assert all(
-            set(new.paths.segments_by_kernel) == {"t4"} for new in preparations[-2:]
-        )
+        try:
+            program = read_program(env)
+            program.acquire(env.soc, progress=False)
+            request = env.soc.binding.rounds[0].acquire
+            source.execute(RoundRequest(request, source.snapshot(), 0))
+            groups = route_request(config, request)
+            assert len(groups) == 2
+            for group in groups:
+                single = source.sources[group.cavity]
+                subrequest = replace(
+                    request,
+                    templates=group.templates,
+                    readouts=tuple(
+                        window
+                        for window in request.readouts
+                        if window.channel in group.channels
+                    ),
+                )
+                snapshot = single.snapshot()
+                first = single.prepare(subrequest, snapshot)
+                assert set(first.paths.segments_by_kernel) == {"t4"}
+                diagnostics = first.projection_diagnostics
+                assert diagnostics is not None
+                assert diagnostics.evolution_calls >= 2
+                assert single.prepare(subrequest, snapshot) is first
+                history.clear()
+                resolved = single.prepare(subrequest, snapshot)
+                assert resolved is not first
+                assert (
+                    resolved.paths.segments_by_kernel == first.paths.segments_by_kernel
+                )
+        finally:
+            source.close()
     finally:
         if env.close_backend is not None:
             env.close_backend()
@@ -116,52 +122,52 @@ def test_acquire_rejects_domain_without_an_allowed_family():
 
 
 @pytest.mark.parametrize("borrowed", [False, True])
-def test_builder_keeps_six_owned_histories_or_borrows_one_without_clearing_on_close(
-    monkeypatch,
+def test_source_keeps_six_owned_histories_or_borrows_one_without_clearing_on_close(
     borrowed,
 ):
-    sources = []
-    source_type = runtime.SixFluxoniumSource
-
-    def observed_source(
-        settings, devices, *, clock=None, truth_log=None, history=None, families=None
-    ):
-        source = source_type(
-            settings,
-            devices,
-            clock=clock,
-            truth_log=truth_log,
-            history=history,
-            families=families,
-        )
-        sources.append(source)
-        return source
-
-    monkeypatch.setattr(runtime, "SixFluxoniumSource", observed_source)
+    config = routing_settings()
     shared = RoutingHistory() if borrowed else None
-    env = runtime.six_fluxonium(
-        routing_settings(),
-        soccfg=profile_soccfg("six_fluxonium"),
-        history=shared,
-    )
+    env = runtime.six_fluxonium(config, soccfg=profile_soccfg("six_fluxonium"))
     try:
-        histories = tuple(
-            source.model_facts(source.snapshot()).source.history
-            for source in sources[0].sources
-        )
-        if borrowed:
-            assert all(history is shared for history in histories)
-        else:
-            assert len({id(history) for history in histories}) == 6
-        generations = tuple(history.generation for history in histories)
-        sources[0].close()
-        assert tuple(history.generation for history in histories) == tuple(
-            generation if borrowed else generation + 1 for generation in generations
-        )
+        source = runtime.SixFluxoniumSource(config, env.devices, history=shared)
+        try:
+            assert len(source.sources) == 6
+            histories = tuple(
+                single.model_facts(single.snapshot()).source.history
+                for single in source.sources
+            )
+            if borrowed:
+                assert all(history is shared for history in histories)
+            else:
+                assert len({id(history) for history in histories}) == 6
+            generations = tuple(history.generation for history in histories)
+            source.close()
+            assert tuple(history.generation for history in histories) == tuple(
+                generation if borrowed else generation + 1 for generation in generations
+            )
+        finally:
+            source.close()
     finally:
         if env.close_backend is not None:
             env.close_backend()
         env.devices.close_all_devices()
+
+
+def test_builder_close_preserves_borrowed_history():
+    history = RoutingHistory()
+    env = runtime.six_fluxonium(
+        routing_settings(),
+        soccfg=profile_soccfg("six_fluxonium"),
+        history=history,
+    )
+    try:
+        read_program(env).acquire(env.soc, progress=False)
+        generation = history.generation
+    finally:
+        if env.close_backend is not None:
+            env.close_backend()
+        env.devices.close_all_devices()
+    assert history.generation == generation
 
 
 @pytest.mark.parametrize("mode", ["integrated", "decimated"])
