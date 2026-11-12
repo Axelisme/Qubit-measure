@@ -2,7 +2,7 @@
 
 **讀者：** lab-author、agent。查找實驗的檔案分工、作者契約與各家族入口。
 
-**Last updated:** 2026-11-12，onetone 家族各自持有圖與分析選項
+**Last updated:** 2026-11-13，mux participants 與 generator 衝突檢查邊界
 
 先從 [tutorial](../tutorial/README.md) 新增實驗，再按下列入口查契約與操作。
 實驗定義改動的驗收方式與命令範例見 [離線驗收](../README.md#實驗定義的離線驗收)。
@@ -53,7 +53,7 @@ Leaf 的 `__init__.py` 只提供 core exports，不載入 GUI。
 AC Stark 的 [core.py](twotone/ac_stark/core.py) 與
 [ramsey_core.py](twotone/ac_stark/ramsey_core.py) 分別對應既有 spectroscopy／Ramsey adapters。
 Singleshot GE 與 mux GE 的混淆矩陣求解由 `zcu_tools.analysis.singleshot` 擁有。
-各實驗的 `analysis.py` 保留自己的繪圖。
+各實驗的 `core.py` 自行選擇分析資料並繪圖，數值擬合工具由 `zcu_tools.analysis.fitting` 擁有。
 跨實驗的 row mapping 在 [support/singleshot/util.py](support/singleshot/util.py)，
 mux IQ 平均轉換在 [support/mux.py](support/mux.py)，
 AC Stark／CKP 的連續共振中心擷取在 [support/resonance.py](support/resonance.py)。
@@ -120,7 +120,7 @@ fig.show()
 作者直接在 axes 設 ticks、顏色與標題。掃描歷史線由作者在另一個 axes 建立並更新。
 Reference marker 與動畫錄影不在這些工具中。
 
-Singleshot Check 在自己的 `analyze` 畫分類 IQ／區域圖；GE 的專屬分類圖在 `singleshot/ge/analysis.py`。
+Singleshot Check 在自己的 `analyze` 畫分類 IQ／區域圖；GE 的專屬分類圖在 `singleshot/ge/core.py`。
 Amp／Len Rabi 在各自的 core 畫 joint-fit population、histogram 與 confusion 圖，
 分析計算仍由原分析 owner 負責。
 
@@ -236,7 +236,9 @@ partial NaN 不補零。Mux GE 逐 tone 直接呼叫數值工具，不委派單 
 
 七個 mux qubit cfg 使用完整固定 `tones` 與獨立 `participants: list[int]`。
 每個元素有固定 qubit `name` 與 nullable drive；pulse sweep 類另有只含 `start`／`stop` 的 `ToneRangeCfg`，
-T1／Ramsey／Echo 使用共用 requested-delay 軸。只針對 participants 驗證 drive、逐 tone sweep 與獨立 generator。未參與欄位保留草稿，結果為 None。全 readout 身分始終驗證。三個 pulse scan 的頂層 `expts` 是共用正整數，
+T1／Ramsey／Echo 使用共用 requested-delay 軸。Participants 選擇使用的 drive 與逐 tone sweep。
+同 generator 的脈衝若重疊，program compiler 在 build 時拒絕。Cfg 仍拒絕 drive 與 readout 共用 generator。
+未參與欄位保留草稿，結果為 None。全 readout 身分始終驗證。三個 pulse scan 的頂層 `expts` 是共用正整數，
 表單在 Tones 後只顯示一個 Expts，預設為頻譜 301、Amp Rabi 51、Len Rabi 101。
 每 tone 只有 Start／Stop，不接受舊的每 tone 點數。
 Len Rabi 參與元素支援 const／flat_top 與取樣波形，例如 cosine、gauss、DRAG。

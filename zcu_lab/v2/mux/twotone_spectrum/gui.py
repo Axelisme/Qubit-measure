@@ -38,8 +38,7 @@ from zcu_lab.v2.support.measure.mux_save_names import mux_save_stem
 from zcu_lab.v2.support.measure.record_frame import captured_qubit_flux
 from zcu_lab.v2.support.mux import MuxFitFailure, MuxSweepResult
 
-from .analysis import FreqAnalyzeOptions, MuxFreqFit
-from .core import MuxFreqCfg, MuxFreqExp
+from .core import FreqAnalyzeOptions, MuxFreqCfg, MuxFreqExp, MuxFreqFit
 from .form import make_form
 
 MuxFreqRunResult: TypeAlias = RunRecord[MuxFreqCfg, MuxSweepResult]

@@ -6,10 +6,12 @@ MuxFreqExp.run(config, *, context) drives selected qubits simultaneously.
 Configuration and timing
 ------------------------
 The full tones list matches the complete MuxReadoutCfg in count and order.
-Each MuxFreqToneCfg has a fixed name, a required drive and freq bounds. Participants is
-a nonempty, unique list of original indices. Q3/Q1 selects original indices [2, 0]
-from Q1/Q2/Q3 and retains that execution/data order. Every drive must be valid,
-only for participants, on independent generators distinct from readout.
+Each MuxFreqToneCfg has a fixed name. Only participants require and use a drive
+and freq bounds. Participants is a nonempty, unique list of original indices.
+Q3/Q1 selects original indices [2, 0] from Q1/Q2/Q3 and retains that execution/data
+order. Cfg rejects active drives sharing the readout generator. Program build
+rejects overlapping active drive pulses on the same generator. Inactive tones
+retain drafts and are not subject to these active generator checks.
 The caller supplies the complete qubit/resonator bindings; numeric cfg validation
 does not resolve component identities.
 
@@ -36,7 +38,7 @@ Frequency scan and analysis
 --------------------------
 MuxFreqCfg.reset is optional; MuxFreqCfg.readout is the full mux readout.
 Sweep bounds and returned coordinates are in MHz. prepare_frequency_scan
-validates cfg and constructs independent rounded drive-frequency axes in
+copies cfg and constructs independent rounded drive-frequency axes in
 participant order. Run resolves original positions from names, not a MuxGroup.
 
 Analysis uses the single-qubit Lorentzian or sinc fitter. Each curve needs at
@@ -72,12 +74,15 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from functools import partial
-from typing import Annotated, ClassVar
+from typing import Annotated, ClassVar, Literal
 
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import Field, StrictInt, model_validator
+from pydantic.dataclasses import dataclass as validated_dataclass
 from qick import QickConfig
+from zcu_tools.analysis.failure import AnalysisFailed
+from zcu_tools.analysis.fitting import FitQuality, compute_fit_quality, fit_qubit_freq
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import Experiment
 from zcu_tools.experiment.axes_spec import GroupedAxesSpec
@@ -93,87 +98,44 @@ from zcu_tools.program.v2.modules import (
     MuxReadoutCfg,
     Pulse,
 )
+from zcu_tools.utils.process import minus_background, rotate2real
 
 from zcu_lab.v2.support import live_line
-from zcu_lab.v2.support.mux import MuxFitFailure, MuxSweepResult, averaged_mux_signal
+from zcu_lab.v2.support.mux import (
+    MuxFitFailure,
+    MuxSweepResult,
+    averaged_mux_signal,
+    validate_mux_result,
+)
 from zcu_lab.v2.support.mux_persistence import mux_sweep_spec
 from zcu_lab.v2.support.mux_sweep_cfg import (
     MuxDriveToneCfg,
     ToneRangeCfg,
-    require_tone_value,
     validate_mux_scan,
 )
 
-from .analysis import FreqAnalyzeOptions, MuxFreqFit, analyze_frequency
+
+@validated_dataclass(frozen=True)
+class FreqAnalyzeOptions:
+    """Line shape for each spectrum: lor magnitude or signed sinc projection."""
+
+    model_type: Annotated[Literal["lor", "sinc"], FieldMeta(label="Model type")] = "lor"
 
 
-class MuxFreqToneCfg(MuxDriveToneCfg):
-    """One named drive and its independent freq bounds in MHz."""
+@dataclass(frozen=True)
+class MuxFreqFit:
+    """Successful original tone index and MHz spectroscopy estimates.
 
-    freq: Annotated[ToneRangeCfg | None, FieldMeta(unit="MHz")] = None
-
-    def require_freq(self) -> ToneRangeCfg:
-        """Return active freq bounds, or raise ValueError naming this tone."""
-        if self.freq is None:
-            raise ValueError(f"{self.name}: active tone requires freq")
-        return self.freq
-
-
-class MuxFreqCfg(ConfigBase):
-    """Settings for simultaneous qubit frequency sweeps and mux readout.
-
-    modules supplies optional reset and the full readout tone list. tones gives
-    each original readout position a unique name, a drive and a MHz sweep.
-    participants selects a nonempty, unique list of original indices in measurement order.
-    All tones need distinct drive generators, separate from readout.
-    expts is the positive hardware point count shared by all tones.
-    Sweeps advance together by point, not as a Cartesian product. reps/rounds are positive averaging counts;
-    initial_delay/relax_delay are finite nonnegative waits in us.
+    freq/fwhm are transition frequency and linewidth. freq_err/fwhm_err are
+    their one-sigma uncertainties. quality reports residuals and fit reliability.
     """
 
-    reset: ResetCfg | None = None
-    readout: MuxReadoutCfg
-    tones: Annotated[list[MuxFreqToneCfg], FieldMeta(element_label="name")]
-    expts: int = Field(
-        strict=True,
-        gt=0,
-        title="Expts",
-        description="Hardware scan point count shared by all tones.",
-    )
-    participants: list[StrictInt]
-
-    reps: Annotated[
-        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
-    ] = 1
-    rounds: Annotated[
-        int,
-        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
-    ] = 1
-    initial_delay: Annotated[
-        float,
-        FieldMeta(
-            label="Initial delay",
-            unit="us",
-            description="Delay before the first repetition.",
-        ),
-    ] = 1.0
-    relax_delay: Annotated[
-        float,
-        FieldMeta(
-            label="Relax delay",
-            unit="us",
-            decimals=3,
-            description="Relaxation delay after each repetition.",
-        ),
-    ] = 1.0
-
-    @model_validator(mode="after")
-    def validate_scan(self) -> MuxFreqCfg:
-        """Reject mismatched tones, shared drive channels or an invalid point count."""
-        validate_mux_scan(self, self.tones, self.participants, self.expts)
-        for index in self.participants:
-            require_tone_value(self.tones[index].freq, ("tones", index, "freq"))
-        return self
+    index: int
+    freq: float
+    freq_err: float
+    fwhm: float
+    fwhm_err: float
+    quality: FitQuality
 
 
 @dataclass(frozen=True)
@@ -191,17 +153,128 @@ class MuxFreqScan:
     coordinates: NDArray[np.float64]
 
 
-def prepare_frequency_scan(cfg: MuxFreqCfg, *, soccfg: QickConfig) -> MuxFreqScan:
-    """Prepare each selected qubit's original index and rounded frequency axis.
+def qubfreq_signal2real(
+    signals: NDArray[np.complex128], *, model_type: Literal["lor", "sinc"] = "lor"
+) -> NDArray[np.float64]:
+    """Convert complex IQ to contrast; raise ValueError for invalid spectra or model.
 
-    cfg is copied and validated. soccfg supplies the board frequency grids.
+    Subtract component-wise median background without mutating signals. ``lor``
+    returns the legacy absolute magnitude, also used by the Run live preview.
+    ``sinc`` projects onto the IQ principal axis with the largest absolute
+    excursion positive, retaining opposite-signed sidelobes instead of folding
+    them. The axis has no absolute physical sign; this convention makes the
+    dominant resonance positive at any fixed IQ rotation.
+
+    Return the same shape, preserving NaNs in partial spectra. Constant or
+    single-acquired-point spectra have zero contrast; all-NaN spectra remain
+    NaN. Raise ValueError for an unknown model, empty/non-1-D input, non-complex128
+    dtype or infinities. Principal-axis numerical failures propagate.
+    """
+    if model_type not in ("lor", "sinc"):
+        raise ValueError(f"Invalid frequency model: {model_type!r}")
+    if signals.ndim != 1 or signals.size == 0 or signals.dtype != np.complex128:
+        raise ValueError("Expected a nonempty complex128 spectrum of shape (N,)")
+    if np.any(np.isinf(signals)):
+        raise ValueError("Frequency spectrum must not contain infinities")
+
+    centered = minus_background(signals)
+    if model_type == "lor":
+        return np.abs(centered)
+
+    projected = rotate2real(centered).real
+    acquired = projected[~np.isnan(projected)]
+    if acquired.size and acquired[np.argmax(np.abs(acquired))] < 0:
+        projected = -projected
+    return projected
+
+
+class MuxFreqToneCfg(MuxDriveToneCfg):
+    """One named drive and its independent freq bounds in MHz."""
+
+    freq: Annotated[ToneRangeCfg | None, FieldMeta(unit="MHz")] = None
+
+    def require_freq(self) -> ToneRangeCfg:
+        """Return active freq bounds, or raise ValueError naming this tone."""
+        if self.freq is None:
+            raise ValueError(f"{self.name}: active tone requires freq")
+        return self.freq
+
+
+class MuxFreqCfg(ConfigBase):
+    """Settings for simultaneous qubit frequency sweeps and mux readout.
+
+    reset is optional and may be None. readout contains the full readout tone list.
+    tones gives each original readout position a unique name.
+    participants selects a nonempty, unique list of original indices in measurement order.
+    Only participants require and use a drive and a MHz sweep.
+    Cfg rejects active drives sharing the readout generator. Program build rejects
+    overlapping active drive pulses on the same generator. Inactive tones retain
+    drafts and are not subject to these active generator checks.
+    expts is the positive hardware point count shared by all participants.
+    Sweeps advance together by point, not as a Cartesian product. reps/rounds are positive averaging counts;
+    initial_delay/relax_delay are finite nonnegative waits in us.
+    """
+
+    reset: ResetCfg | None = None
+    readout: MuxReadoutCfg
+    tones: Annotated[list[MuxFreqToneCfg], FieldMeta(element_label="name")]
+    expts: int = Field(
+        strict=True,
+        gt=0,
+        title="Expts",
+        description="Hardware scan point count shared by all tones.",
+    )
+    participants: list[StrictInt]
+
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ] = Field(gt=0)
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = Field(default=1, gt=0)
+    initial_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Initial delay",
+            unit="us",
+            description="Delay before the first repetition.",
+        ),
+    ] = Field(default=1.0, ge=0, allow_inf_nan=False)
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
+        ),
+    ] = Field(ge=0, allow_inf_nan=False)
+
+    @model_validator(mode="after")
+    def validate_scan(self) -> MuxFreqCfg:
+        """Validate full tone identities, participant drives and shared point count.
+
+        Reject mismatched full readout dimensions, invalid names or participants,
+        and active drives sharing the readout generator. expts must be positive.
+
+        """
+        validate_mux_scan(self, self.tones, self.participants, self.expts)
+        return self
+
+
+def prepare_frequency_scan(cfg: MuxFreqCfg, *, soccfg: QickConfig) -> MuxFreqScan:
+    """Prepare original indices and MHz grids; propagate board conversion errors.
+
+    cfg must already be validated and is deep-copied before use.
+    soccfg supplies the board frequency grids.
     Return MuxFreqScan with original indices and float64 (K,P) MHz coordinates
     in participant order. Coordinates use QICK's hardware start/span/step rounding.
     Sweeps advance together by point index. No per-point pulses are prepared.
-    Invalid settings raise ValueError; frequency conversion errors propagate.
+    Frequency conversion errors propagate.
     This function does not acquire data or change cfg.
     """
-    cfg = MuxFreqCfg.model_validate(cfg.model_dump())
+    cfg = cfg.model_copy(deep=True)
     indices = list(cfg.participants)
     coordinates = []
     for index in indices:
@@ -258,9 +331,10 @@ class MuxFreqExp(Experiment[MuxSweepResult, MuxFreqCfg]):
         observes external cancellation once, after acquire scope and progress
         cleanup, before returning its signal view. Pure data stop does not call
         it. Observer exceptions propagate without retry or outcome changes.
+
         """
         # 1. Prepare zipped frequencies and readout channels in participant order.
-        cfg = MuxFreqCfg.model_validate(config.model_dump())
+        cfg = config.model_copy(deep=True)
         scan = prepare_frequency_scan(cfg, soccfg=context.soccfg)
         readout = cfg.readout.with_updates(
             tones=[cfg.readout.tones[index] for index in scan.indices]
@@ -350,5 +424,66 @@ class MuxFreqExp(Experiment[MuxSweepResult, MuxFreqCfg]):
         source contains actual MHz axes and IQ; its cfg may be absent. options
         selects the line shape. plots receives a fit_i figure with a fitted
         overlay per original tone index. Return estimates or a per-tone failure reason.
+
         """
-        return analyze_frequency(source.result, options, plots=plots)
+        # 1. Retain acquired IQ on each tone's actual frequency grid for independent line-shape fits.
+        result = source.result
+        validate_mux_result(result)
+
+        # Each qubit keeps its own frequency grid and can fail independently.
+        outcomes: list[MuxFreqFit | MuxFitFailure] = []
+        for row, raw_index in enumerate(result.tone_indices):
+            index = int(raw_index)
+            finite = np.isfinite(result.signals[row])
+            xs = result.coordinates[row, finite]
+            signal = result.signals[row, finite]
+            fig, ax = plots.subplots(num=f"fit_{index}", figsize=(8, 5))
+            ax.set(xlabel="Drive frequency (MHz)", ylabel="Signal (a.u.)")
+            fig.suptitle(f"tone {index}")
+
+            # Fit only acquired points; six points are needed for the five-parameter model.
+            try:
+                if len(xs) < 6:
+                    raise ValueError(
+                        "Frequency fit requires at least six acquired points"
+                    )
+                real = qubfreq_signal2real(signal, model_type=options.model_type)
+                freq, ferr, width, werr, fitted, (params, covariance) = fit_qubit_freq(
+                    xs, real, options.model_type
+                )
+                if not np.all(np.isfinite((freq, ferr, width, werr))):
+                    raise ValueError("Frequency fit returned nonfinite estimates")
+                names = ("offset", "slope", "amplitude", "frequency", "width")
+                quality = compute_fit_quality(
+                    real,
+                    fitted,
+                    {
+                        name: float(value)
+                        for name, value in zip(names, params, strict=True)
+                    },
+                    covariance,
+                )
+                outcome = MuxFreqFit(index, freq, ferr, width, werr, quality)
+            except (
+                AnalysisFailed,
+                ValueError,
+                RuntimeError,
+                ArithmeticError,
+                np.linalg.LinAlgError,
+            ) as exc:
+                ax.plot(xs, np.abs(signal), "o", label="acquired magnitude")
+                ax.text(
+                    0.02, 0.98, str(exc), transform=ax.transAxes, va="top", wrap=True
+                )
+                outcomes.append(MuxFitFailure(index, str(exc)))
+            else:
+                ax.plot(xs, real, "o", label="measured")
+                ax.plot(xs, fitted, label=f"FWHM={width:.4g} ± {werr:.2g} MHz")
+                ax.axvline(freq, ls="--", label=f"freq={freq:.7g} ± {ferr:.2g} MHz")
+                outcomes.append(outcome)
+
+            ax.legend()
+            ax.grid(True)
+            fig.tight_layout()
+        # 2. Keep transition frequency, linewidth and quality, or a failure under the original tone identity.
+        return tuple(outcomes)

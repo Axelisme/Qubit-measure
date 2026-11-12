@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Annotated, ClassVar
 
 import numpy as np
+from matplotlib.artist import Artist
 from matplotlib.ticker import MaxNLocator, ScalarFormatter
 from numpy.typing import NDArray
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
@@ -33,10 +34,6 @@ class PowerResult:
     signals: NDArray[np.complex128]
 
 
-def gain_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
-    return np.abs(minus_background(signals, axis=1))
-
-
 class PowerCfg(ConfigBase):
     reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
     init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init Pulse")] = None
@@ -46,7 +43,7 @@ class PowerCfg(ConfigBase):
     freq: Annotated[SweepCfg, FieldMeta(label="Freq", unit="MHz")]
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
-    ] = 1
+    ]
     rounds: Annotated[
         int,
         FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
@@ -59,7 +56,7 @@ class PowerCfg(ConfigBase):
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
-    ] = 1.0
+    ]
 
 
 class PowerExp(Experiment[PowerResult, PowerCfg]):
@@ -89,7 +86,7 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
         mean complex IQ on the (gain, frequency) grid. Gain is the configured
         drive amplitude, not a calibrated power in dBm.
         """
-        # Prepare drive-gain rows and the probe's hardware frequency grid.
+        # 1. Prepare drive-gain rows and the probe's hardware frequency grid.
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
 
@@ -108,6 +105,7 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
             {"soccfg": soccfg, "gen_ch": cfg.qub_pulse.ch},
         )
 
+        # 2. Track power-dependent spectral contrast and recent frequency traces.
         fig, _ = context.plots.subplots(1, 2, num="measurement")
         heat_ax, line_ax = fig.axes
         heat_ax.set(xlabel="Pulse Gain (a.u.)", ylabel="Frequency (MHz)")
@@ -126,8 +124,14 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
         line_ax.legend()
 
         @context.plots.on_plot_thread
-        def update(data):
-            real = gain_signal2real(data)
+        def update(data: NDArray[np.complex128]) -> tuple[Artist, ...]:
+            """Refresh the drive-gain contrast map and two recent frequency traces.
+
+            data is complex IQ shaped (gain, frequency); NaN marks unmeasured points.
+            Return the changed artists without modifying the input array.
+            """
+            # Display each row's contrast relative to its own median background.
+            real = np.abs(minus_background(data, axis=1))
             valid = np.flatnonzero(~np.all(np.isnan(real), axis=1))
             current = int(valid[-1]) if valid.size else -1
             history = np.full((2, len(freqs)), np.nan)
@@ -141,7 +145,7 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
             on_update=update,
         )
 
-        # Acquire a complete spectrum at each fixed drive gain.
+        # 3. Acquire a complete spectrum at each fixed drive gain.
         with Schedule(signals_buffer, scope=context.scope) as sched:
             for _, step in sched.scan("gain", gains.tolist()):
                 builder = TimelineBuilder(

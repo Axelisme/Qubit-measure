@@ -62,7 +62,6 @@ from zcu_lab.v2.support.mux_coherence_analysis import (
     project_coherence_trace,
 )
 from zcu_lab.v2.support.mux_coherence_persistence import coherence_spec
-from zcu_lab.v2.support.mux_sweep_cfg import require_tone_value
 
 
 @validated_dataclass(frozen=True)
@@ -115,11 +114,11 @@ class MuxT2EchoCfg(ConfigBase):
 
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
-    ] = 1
+    ] = Field(gt=0)
     rounds: Annotated[
         int,
         FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
-    ] = 1
+    ] = Field(default=1, gt=0)
     earlystop_snr: Annotated[
         float | None,
         FieldMeta(
@@ -134,7 +133,7 @@ class MuxT2EchoCfg(ConfigBase):
             unit="us",
             description="Delay before the first repetition.",
         ),
-    ] = 1.0
+    ] = Field(default=1.0, ge=0, allow_inf_nan=False)
     relax_delay: Annotated[
         float,
         FieldMeta(
@@ -143,14 +142,12 @@ class MuxT2EchoCfg(ConfigBase):
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
-    ] = 1.0
+    ] = Field(ge=0, allow_inf_nan=False)
 
     @model_validator(mode="after")
     def validate_scan(self) -> MuxT2EchoCfg:
         """Reject missing active pulses, swept values, shared channels or bad delays."""
         validate_coherence_scan(self, self.tones, self.delay, self.participants)
-        for index in self.participants:
-            require_tone_value(self.tones[index].pi_pulse, ("tones", index, "pi_pulse"))
         validate_coherence_scan(
             self,
             [
@@ -173,6 +170,7 @@ class MuxT2EchoExp(Experiment[MuxCoherenceResult, MuxT2EchoCfg]):
     AXES_SPEC: ClassVar[GroupedAxesSpec[MuxCoherenceResult, MuxT2EchoCfg]] = (
         coherence_spec(MuxT2EchoCfg, tag="mux/time_domain/t2echo")
     )
+
     Options: ClassVar[type[T2EchoAnalyzeOptions]] = T2EchoAnalyzeOptions
 
     def run(self, config: MuxT2EchoCfg, *, context: RunContext) -> MuxCoherenceResult:
@@ -187,7 +185,7 @@ class MuxT2EchoExp(Experiment[MuxCoherenceResult, MuxT2EchoCfg]):
         averages and NaN gaps. Acquisition and program errors propagate.
         """
         # 1. Keep participant order while selecting from the complete tone list.
-        cfg = MuxT2EchoCfg.model_validate(config.model_dump())
+        cfg = config.model_copy(deep=True)
         indices = list(cfg.participants)
         tones = [cfg.tones[index] for index in indices]
         times = sweep2array(cfg.delay, "none")
@@ -215,12 +213,12 @@ class MuxT2EchoExp(Experiment[MuxCoherenceResult, MuxT2EchoCfg]):
 
         # 2. Show each selected tone on the common requested total-delay axis.
         viewers = []
-        for index in indices:
+        for index, tone_cfg in zip(indices, tones, strict=True):
             fig, ax = context.plots.subplots(num=f"measurement_{index}")
             ax.set(
                 xlabel="Requested delay (us)",
                 ylabel="Magnitude (a.u.)",
-                title=f"{index}: {cfg.tones[index].name}",
+                title=f"{index}: {tone_cfg.name}",
             )
             viewers.append(live_line(ax))
             fig.show()
@@ -233,6 +231,7 @@ class MuxT2EchoExp(Experiment[MuxCoherenceResult, MuxT2EchoCfg]):
                 for artist in viewer.set(times, np.abs(data[row]))
             )
 
+        # 3. Play synchronized pulse stages on the common delay sweep.
         signals = SignalBuffer((len(indices), times.size), on_update=update)
         with Schedule(signals, scope=context.scope) as sched:
             # Each stage starts all drives together and waits for its longest pulse.

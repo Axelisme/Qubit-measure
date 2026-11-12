@@ -26,7 +26,7 @@ from zcu_tools.program.v2.modules import MuxReadout
 from zcu_lab.v2.support import live_line
 from zcu_lab.v2.support.device import set_flux
 
-from .._sums import herald_probabilities, sigma, terminal_counts, validate_classifiers
+from .._sums import herald_probabilities, sigma, terminal_counts
 from ._analysis import (
     complete_points,
     fit_count_traces,
@@ -34,14 +34,6 @@ from ._analysis import (
     validate_axes,
 )
 from .core import IdleZZCfg
-
-
-class IdleZZHeraldedCfg(IdleZZCfg):
-    """IdleZZCfg with a full mux herald before spectator preparation.
-
-    reset=None emits no reset. Both reads use readout and its circle radii;
-    readout.post_delay supplies the wait after herald. target is f1 or f2.
-    """
 
 
 @dataclass(frozen=True)
@@ -58,8 +50,22 @@ class IdleZZHeraldedResult:
     sums: NDArray[np.float64]
 
 
+class IdleZZHeraldedCfg(IdleZZCfg):
+    """IdleZZCfg with a full mux herald before spectator preparation.
+
+    reset=None emits no reset. Both reads use readout and its circle radii;
+    readout.post_delay supplies the wait after herald. target is f1 or f2.
+    """
+
+
 def restore_result(data: GroupedLoadData[IdleZZHeraldedCfg]) -> IdleZZHeraldedResult:
-    """Restore 81-class sums; old raw-IQ files missing sums raise ValueError."""
+    """Restore 81-class sums; old raw-IQ files missing sums raise ValueError.
+
+    data supplies the grouped sums variable and its persisted scan axes. Return
+    this experiment's Result with float64 class counts and its original axis
+    ordering. Missing variables and invalid data propagate load errors. Do not
+    mutate the loaded data, acquire or draw; no raw-IQ reconstruction is attempted.
+    """
     sums = data.variable("sums")
     return IdleZZHeraldedResult(
         sums.axes[6].astype(np.float64),
@@ -119,13 +125,15 @@ class IdleZZHeraldedExp(Experiment[IdleZZHeraldedResult, IdleZZHeraldedCfg]):
 
         Hardware scans spectator_states and delay; DC alone stays on host
         because it changes an external instrument. Return unnormalized counts.
+
         """
-        validate_classifiers(config.readout, config.roles)
+        # 1. Pair hardware-rounded Ramsey delays with optional host DC settings.
         delay_sweep = round_sweep_dict(config.delay, "time", {"soccfg": context.soccfg})
         delays = sweep2array(delay_sweep)
         dc_values = (
             np.array([0.0]) if config.dc_device is None else sweep2array(config.dc)
         )
+        # 2. Compare gg and sign-corrected ee Ramsey fringes in actual spectator g/e order.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Delay (us)", ylabel="Target ⟨σ⟩ (gg, −ee; actual spectator g/e)")
         viewer = live_line(ax, num_lines=len(dc_values) * 4)
@@ -141,6 +149,7 @@ class IdleZZHeraldedExp(Experiment[IdleZZHeraldedResult, IdleZZHeraldedCfg]):
                 delays, np.stack((gg, ee), axis=1).reshape(-1, len(delays))
             )
 
+        # 3. Set DC on the host; scan spectator/Ramsey in hardware with herald before each sequence.
         buffer = SignalBuffer(
             (len(dc_values), 2, len(delays), 3, 3, 3, 3),
             dtype=np.float64,
@@ -202,6 +211,7 @@ class IdleZZHeraldedExp(Experiment[IdleZZHeraldedResult, IdleZZHeraldedCfg]):
                     rounds=config.rounds,
                     options=RunOptions(),
                 )
+        # 4. Preserve all herald/terminal counts and completed rounds on the planned DC/delay axes.
         return IdleZZHeraldedResult(dc_values, delays, buffer.array)
 
     def analyze(
@@ -216,7 +226,9 @@ class IdleZZHeraldedExp(Experiment[IdleZZHeraldedResult, IdleZZHeraldedCfg]):
         ee has inverted target fringes and exchanged spectator states. Full
         requested delay axes/rounds are required before herald selection.
         Shared frequency/decay determine ζ; each herald keeps local A/phase/offset.
+
         """
+        # 1. Require full acquisition before joint gg/ee fits sharing frequency/decay by actual spectator state.
         del options
         cfg, result = source.cfg, source.result
         if cfg is None:
@@ -287,6 +299,7 @@ class IdleZZHeraldedExp(Experiment[IdleZZHeraldedResult, IdleZZHeraldedCfg]):
             ax.legend()
             ax.grid(True)
             fig.tight_layout()
+        # 2. Show fitted spectator-frequency differences and all herald fractions without claiming pure ZZ.
         fig, ax = plots.subplots(num="zeta", figsize=(8, 5))
         for index, (value, error) in enumerate(
             zip(terminal.zeta_mhz, terminal.zeta_error_mhz, strict=True)

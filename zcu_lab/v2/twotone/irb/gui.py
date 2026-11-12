@@ -5,13 +5,13 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TypeAlias
 
+from zcu_tools.analysis.fitting import IRBAnalysis
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import Adapter, Analysis, AnalyzeRequest
 from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2.twotone.irb.analysis import IRBAnalysis
 from zcu_lab.v2.twotone.irb.core import IRB_Exp, IRBCfg, IRBResult
 
 from .form import make_form

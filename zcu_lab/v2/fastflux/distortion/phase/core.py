@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Annotated, ClassVar
 
 import numpy as np
+from matplotlib.artist import Artist
 from matplotlib.ticker import ScalarFormatter
 from numpy.typing import NDArray
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
@@ -33,6 +35,7 @@ class PhaseResult:
 
 
 def phase_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
+    """Return the real-valued measurement view of complex IQ without changing the input."""
     return rotate2real(signals).real
 
 
@@ -46,7 +49,7 @@ class PhaseCfg(ConfigBase):
     phase: SweepCfg
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
-    ] = 1
+    ]
     rounds: Annotated[
         int,
         FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
@@ -59,7 +62,7 @@ class PhaseCfg(ConfigBase):
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
-    ] = 1.0
+    ]
 
 
 class PhaseExp(Experiment[PhaseResult, PhaseCfg]):
@@ -85,7 +88,7 @@ class PhaseExp(Experiment[PhaseResult, PhaseCfg]):
         branch; readout_t is a minimum duration in us. Return waits in us,
         phases in degrees and mean complex IQ shaped (wait, phase).
         """
-        # Quantize the pair start time and the second pulse projection phase.
+        # 1. Quantize the pair start time and the second pulse projection phase.
         cfg = config
         soc, soccfg = context.soc, context.soccfg
 
@@ -99,7 +102,7 @@ class PhaseExp(Experiment[PhaseResult, PhaseCfg]):
             phase_sweep, "phase", {"soccfg": soccfg, "gen_ch": pi2_pulse.ch}
         )
 
-        # Keep one mean IQ value for each pair-start/projection-phase setting.
+        # 2. Keep one mean IQ value for each pair-start/projection-phase setting.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Time (us)", ylabel="Phase (deg)")
         formatter = ScalarFormatter(useMathText=True)
@@ -109,7 +112,12 @@ class PhaseExp(Experiment[PhaseResult, PhaseCfg]):
         viewer = live_heatmap(ax)
 
         @context.plots.on_plot_thread
-        def update(data):
+        def update(data: NDArray[np.complex128]) -> Iterable[Artist]:
+            """Draw acquired complex IQ on the measurement axes; return changed artists.
+
+            Read the scan-shaped data without changing it. Update the live
+            artists over the prepared coordinates; plot errors propagate.
+            """
             return viewer.set(lengths, phases, phase_signal2real(data))
 
         fig.show()
@@ -118,6 +126,7 @@ class PhaseExp(Experiment[PhaseResult, PhaseCfg]):
             on_update=update,
         )
 
+        # 3. Project the delayed pi/2 pair during flux, then join before readout.
         with Schedule(signals_buffer, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
@@ -155,6 +164,7 @@ class PhaseExp(Experiment[PhaseResult, PhaseCfg]):
         The overlaid rectangular curve is a timing reference, not a fitted
         transfer function.
         """
+        # 1. Require saved pulse timing to interpret the projection-phase map.
         del options  # This analysis has no configurable options.
         result = source.result
 
@@ -167,7 +177,7 @@ class PhaseExp(Experiment[PhaseResult, PhaseCfg]):
 
         lengths, phases, signals2D = result.lengths, result.phases, result.signals
 
-        # align to middle of two pi/2 pulses
+        # 2. Recover unwrapped projection phase at the midpoint of each pi/2 pair.
         lengths = lengths + pi2_len
 
         real_signals = phase_signal2real(signals2D)
@@ -177,6 +187,7 @@ class PhaseExp(Experiment[PhaseResult, PhaseCfg]):
         coeffs = np.linalg.pinv(X) @ real_signals.T
         init_phases = np.rad2deg(np.unwrap(np.arctan2(coeffs[2], coeffs[1])))
 
+        # 3. Use phase plateaus to construct a rectangular flux-timing reference.
         sort_idxs = np.argsort(np.abs(init_phases))
         mean_background = np.median(
             init_phases[sort_idxs[: int(len(init_phases) * 0.2)]]
@@ -194,6 +205,7 @@ class PhaseExp(Experiment[PhaseResult, PhaseCfg]):
             mean_topdetune
         )
 
+        # 4. Compare the phase map and recovered phase with flux-edge timing windows.
         fig, _ = plots.subplots(
             num="fit", nrows=2, ncols=1, figsize=(8, 4), sharex=True
         )

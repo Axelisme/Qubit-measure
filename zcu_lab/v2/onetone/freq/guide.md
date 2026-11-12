@@ -20,6 +20,9 @@ Analysis can also use the saved `resonator.ext.edelay` calibration when it match
 
 The readout starts as a fresh inline pulse with a `const` waveform. Configure its pulse settings directly in the tab.
 
+Use lookback to measure TOF, then one-tone spectroscopy to measure kappa. Review trigger offset and waveform duration in us after those calibrations.
+Enter absolute MHz sweep endpoints. The range-find Form does not infer a scan window from a known resonance center.
+
 ## Calibration updates
 
 Analysis and writeback use the fixed parameter source of the selected Run or Load result. Run keeps the source used for that measurement.

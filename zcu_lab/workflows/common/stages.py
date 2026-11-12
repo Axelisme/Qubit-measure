@@ -15,7 +15,6 @@ from zcu_lab.workflows.common.saving import save_native
 from zcu_lab.workflows.common.summary import (
     StageName,
     SummaryAccumulator,
-    observe_operation,
 )
 
 
@@ -24,14 +23,14 @@ class StageEnv:
     """Run-level services shared by stages, not their scientific inputs.
 
     plots holds workflow figures. snapshot is the captured entry/point identity
-    for native saving. summary collects delivered operation facts, or None when
-    no run report is requested. Construct once per workflow run; stages borrow
+    for native saving. summary collects delivered operation facts for the run
+    report. Construct once per workflow run; stages borrow
     these services without changing the point record or accepted histories.
     """
 
     plots: Plots
     snapshot: RunSnapshot
-    summary: SummaryAccumulator | None = None
+    summary: SummaryAccumulator
 
 
 @dataclass(frozen=True)
@@ -79,7 +78,7 @@ async def acquire_saved[Cfg: ConfigBase, Result](
     Acquisition, writer and unexpected framework exceptions propagate.
     """
     outcome = await run_core(scope, experiment, cfg, name=name)
-    observe_operation(env.summary, outcome)
+    env.summary.observe(outcome)
     save_native(
         outcome,
         scope.dir / output.filename,

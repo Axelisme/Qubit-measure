@@ -34,42 +34,11 @@ from zcu_tools.utils.process import (
 from zcu_lab.v2.support import live_heatmap, live_line
 
 
-def dual_reset_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
-    return np.abs(minus_background(signals))
-
-
 @dataclass(frozen=True)
 class FreqResult:
     freqs1: NDArray[np.float64]
     freqs2: NDArray[np.float64]
     signals: NDArray[np.complex128]
-
-
-class FreqCfg(ConfigBase):
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init pulse")] = None
-    tested_reset: Annotated[TwoPulseReset.Cfg, FieldMeta(label="Tested reset")]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-    freq1: Annotated[SweepCfg, FieldMeta(label="Freq1", unit="MHz")]
-    freq2: Annotated[SweepCfg, FieldMeta(label="Freq2", unit="MHz")]
-    method: Literal["soft", "hard"] = "soft"
-
-    reps: Annotated[
-        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
-    ] = 1
-    rounds: Annotated[
-        int,
-        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
-    ] = 1
-    relax_delay: Annotated[
-        float,
-        FieldMeta(
-            label="Relax delay",
-            unit="us",
-            decimals=3,
-            description="Relaxation delay after each repetition.",
-        ),
-    ] = 1.0
 
 
 @pydantic_dataclass(frozen=True)
@@ -87,6 +56,38 @@ class FreqAnalyzeOptions:
 class FreqAnalysis:
     freq1: float
     freq2: float
+
+
+def dual_reset_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
+    """Convert mean complex IQ to the real contrast used by live and analysis plots."""
+    return np.abs(minus_background(signals))
+
+
+class FreqCfg(ConfigBase):
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init pulse")] = None
+    tested_reset: Annotated[TwoPulseReset.Cfg, FieldMeta(label="Tested reset")]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
+    freq1: Annotated[SweepCfg, FieldMeta(label="Freq1", unit="MHz")]
+    freq2: Annotated[SweepCfg, FieldMeta(label="Freq2", unit="MHz")]
+    method: Literal["soft", "hard"] = "soft"
+
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ]
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
+        ),
+    ]
 
 
 class FreqExp(Experiment[FreqResult, FreqCfg]):
@@ -116,7 +117,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         quantized MHz axes and mean complex IQ shaped (Nfreq1, Nfreq2).
         Cancellation leaves unacquired points as NaN.
         """
-        # 1. Prepare hardware-grid axes without changing the caller's cfg.
+        # 1. Quantize both reset-tone frequency axes without changing the caller's cfg.
         cfg = deepcopy(cfg)
         soccfg = context.soccfg
         reset_cfg = cfg.tested_reset
@@ -132,6 +133,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
             allow_array=cfg.method == "soft",
         )
 
+        # 2. Choose host-stepped tone 2 or a fully hardware-swept frequency map.
         if cfg.method == "soft":
             return self._run_soft(cfg, freqs1, freqs2, context=context)
         return self._run_hard(cfg, freqs1, freqs2, context=context)
@@ -145,8 +147,10 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         context: RunContext,
     ) -> FreqResult:
         # Host rows are frequency 2; the Result restores frequency-1 rows.
+        """Scan reset carriers with a host outer loop and return the mean IQ map."""
         soc, soccfg = context.soc, context.soccfg
         plots = context.plots
+        # 1. Track the dual-tone contrast map and the current tone-1 frequency trace.
         fig, _ = plots.subplots(nrows=1, ncols=2, num="measurement")
         map_ax, line_ax = fig.axes
         map_ax.set(xlabel="Frequency1 (MHz)", ylabel="Frequency2 (MHz)")
@@ -157,6 +161,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
 
         @plots.on_plot_thread
         def update(data: NDArray[np.complex128]) -> tuple[Artist, ...]:
+            """Refresh the measurement artists from the current acquired data."""
             real = dual_reset_signal2real(data.T)
             valid = np.flatnonzero(~np.all(np.isnan(real), axis=0))
             current = real[:, valid[-1]] if valid.size else np.full(len(freqs1), np.nan)
@@ -167,6 +172,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
             (len(freqs2), len(freqs1)),
             on_update=update,
         )
+        # 2. Measure tone-1 spectra at each host-selected tone-2 frequency.
         with Schedule(signals_buffer, scope=context.scope) as sched:
             for freq2, step in sched.scan("freq2", freqs2.tolist()):
                 builder = TimelineBuilder(
@@ -197,15 +203,18 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         *,
         context: RunContext,
     ) -> FreqResult:
-        # Sweep frequency 1 outside frequency 2 in one FPGA program.
+        # Frequency 1 is outside frequency 2 in the FPGA program.
+        """Sweep both reset carriers in hardware and return the mean IQ map."""
         soc, soccfg = context.soc, context.soccfg
         plots = context.plots
+        # 1. Monitor dual-tone reset contrast across the hardware frequency grid.
         fig, ax = plots.subplots(num="measurement")
         ax.set(xlabel="Frequency1 (MHz)", ylabel="Frequency2 (MHz)")
         viewer = live_heatmap(ax)
 
         @plots.on_plot_thread
         def update(data: NDArray[np.complex128]) -> tuple[Artist, ...]:
+            """Refresh the measurement artists from the current acquired data."""
             return viewer.set(freqs1, freqs2, dual_reset_signal2real(data))
 
         fig.show()
@@ -213,6 +222,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
             (len(freqs1), len(freqs2)),
             on_update=update,
         )
+        # 2. Measure both reset-tone frequency dependences in one FPGA program.
         with Schedule(signals_buffer, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
@@ -253,7 +263,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
 
         freqs1, freqs2, signals = result.freqs1, result.freqs2, result.signals
 
-        # 1. Smooth the measured map before selecting a peak.
+        # 1. Suppress local noise before selecting the reset-frequency pair.
         signals_smooth = smooth_signal_nd(
             signals,
             options=SmoothingOptions(
@@ -265,7 +275,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
             axes=(0, 1),
         )
 
-        # 2. Select the largest contrast against the chosen background.
+        # 2. Locate the strongest response relative to the chosen corner or median background.
         if options.corner_as_background:
             amps = np.abs(signals_smooth - signals_smooth[0, 0])
         else:
@@ -274,7 +284,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         freq1_opt = freqs1[np.argmax(np.max(amps, axis=1))]
         freq2_opt = freqs2[np.argmax(np.max(amps, axis=0))]
 
-        # 3. Mark the selected pair on the original, unsmoothed IQ map.
+        # 3. Assess the selected pair on the original, unsmoothed IQ map.
         fig, ax = plots.subplots(num="fit", figsize=config.figsize)
 
         ax.imshow(

@@ -29,24 +29,14 @@ from .._sums import (
     herald_probabilities,
     joint_probabilities,
     terminal_counts,
-    validate_classifiers,
 )
-from .analysis import (
+from .core import (
     OUTCOME_LABELS,
     CZAmplitudeAnalysis,
+    CZAmplitudeCfg,
     analyze_return,
     summarize_return,
 )
-from .core import CZAmplitudeCfg
-
-
-class CZAmplitudeHeraldedCfg(CZAmplitudeCfg):
-    """Optional reset → herald → B11 → CZ → Xπ⊗Xπ → terminal mux.
-
-    Inherited readout supplies both reads and their g/e/other circle radii.
-    Its post_delay is the wait after herald. reset=None emits no reset.
-    All other fields and units match CZAmplitudeCfg.
-    """
 
 
 @dataclass(frozen=True)
@@ -69,10 +59,25 @@ class CZAmplitudeHeraldedAnalysis:
     terminal: CZAmplitudeAnalysis
 
 
+class CZAmplitudeHeraldedCfg(CZAmplitudeCfg):
+    """Optional reset → herald → B11 → CZ → Xπ⊗Xπ → terminal mux.
+
+    Inherited readout supplies both reads and their g/e/other circle radii.
+    Its post_delay is the wait after herald. reset=None emits no reset.
+    All other fields and units match CZAmplitudeCfg.
+    """
+
+
 def restore_result(
     data: GroupedLoadData[CZAmplitudeHeraldedCfg],
 ) -> CZAmplitudeHeraldedResult:
-    """Restore 81-class sums; old per-shot IQ files without sums raise ValueError."""
+    """Restore 81-class sums; old per-shot IQ files without sums raise ValueError.
+
+    data supplies the grouped sums variable and its persisted scan axes. Return
+    this experiment's Result with float64 class counts and its original axis
+    ordering. Missing variables and invalid data propagate load errors. Do not
+    mutate the loaded data, acquire or draw; no raw-IQ reconstruction is attempted.
+    """
     sums = data.variable("sums")
     return CZAmplitudeHeraldedResult(sums.axes[4], sums.z.astype(np.float64))
 
@@ -120,9 +125,11 @@ class CZAmplitudeHeraldedExp(
         No host round loop or per-shot IQ is stored. Completed rounds survive
         cooperative cancellation. Acquisition exceptions propagate unchanged.
         The stop signal carries only stop requests and reason text.
+
         """
-        validate_classifiers(config.readout, config.roles)
+        # 1. Use one common scale axis to preserve the two drives' signed gain ratio.
         scales = sweep2array(config.scale)
+        # 2. Track gg-heralded joint gg return through the common gain sweep.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Common gain scale", ylabel="P(g,g) | herald (g,g)")
         viewer = live_line(ax)
@@ -135,6 +142,7 @@ class CZAmplitudeHeraldedExp(
             counts = terminal_counts(sums, ("g", "g"))
             return viewer.set(scales, joint_probabilities(counts)[..., 0, 0])
 
+        # 3. Acquire herald before preparation, simultaneous scaled drives, contrast and terminal classification.
         buffer = SignalBuffer(
             (len(scales), 3, 3, 3, 3), dtype=np.float64, on_update=update_view
         )
@@ -184,6 +192,7 @@ class CZAmplitudeHeraldedExp(
                 options=RunOptions(),
             )
         buffer.trigger_update(flush=True)
+        # 4. Preserve all 81 class counts and completed rounds, including NaN gaps after cancellation.
         return CZAmplitudeHeraldedResult(scales, buffer.array)
 
     def analyze(
@@ -198,7 +207,9 @@ class CZAmplitudeHeraldedExp(
         Fit and coverage policy match the ordinary version, using all herald
         classes to determine acquisition completeness. No accepted shots gives
         NaN terminal probabilities and no proposal. Missing cfg raises ValueError.
+
         """
+        # 1. Fit gg-heralded P00 on the complete scale prefix; all herald classes establish completion.
         del options
         cfg, result = source.cfg, source.result
         if cfg is None:
@@ -213,6 +224,7 @@ class CZAmplitudeHeraldedExp(
             acquired_shots=result.sums.sum(axis=(-4, -3, -2, -1)),
             expected_shots=cfg.reps * cfg.rounds,
         )
+        # 2. Compare the gg return fit with ee disturbance and herald acceptance, not gate fidelity.
         _, ax = plots.subplots(
             num="joint_return", figsize=(10, 5), layout="constrained"
         )
@@ -267,4 +279,5 @@ class CZAmplitudeHeraldedExp(
             title="Herald (g,g) is pass fraction, not ground-state purity",
         )
         ax.legend()
+        # 3. Keep the accepted return-scale proposal or its coverage/numerical failure diagnostics.
         return CZAmplitudeHeraldedAnalysis(summarize_return(terminal.fit))

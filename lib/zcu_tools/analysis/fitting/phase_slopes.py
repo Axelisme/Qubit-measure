@@ -1,55 +1,25 @@
-"""Count-weighted phase-slope fits. This module contains no plotting or run policy."""
+"""Shared multi-group quadrature slopes with per-group integer-axis alias checks."""
 
 from dataclasses import dataclass
 from math import gcd
-from typing import Literal
 
 import numpy as np
 from numpy.typing import NDArray
-from zcu_tools.analysis.fitting.shared import (
-    FitTrace,
-    ParameterSpec,
-    SharedFitResult,
-    fit_shared,
-)
 
-from .._phase import QuadraturePhase, count_phase, sigma_variance
-from .._sums import sigma
-from .crossing import PhaseCrossings, phase_crossings
-
-
-@dataclass(frozen=True)
-class CountQuadratures:
-    """Count reductions with spectator × quadrature × n × frequency axes.
-
-    values is target sigma, variances is its count-derived variance, acquired
-    is each projection's shot total. Empty counts give NaN values/variances.
-    """
-
-    values: NDArray[np.float64]
-    variances: NDArray[np.float64]
-    acquired: NDArray[np.float64]
-
-
-def count_quadratures(
-    counts: NDArray[np.float64],
-    target: Literal["f1", "f2"],
-) -> CountQuadratures:
-    """Reduce terminal (...,3,3) counts to sigma, variance and shot totals."""
-    return CountQuadratures(
-        sigma(counts, target),
-        sigma_variance(counts, target),
-        counts.sum(axis=(-2, -1)),
-    )
+from .shared import FitTrace, ParameterSpec, SharedFitResult, fit_shared
 
 
 @dataclass(frozen=True)
 class PhaseSlopeFit:
-    """Shared slopes for actual spectator g/e, each array shaped (2,Nf).
+    """Joint quadrature fits for two channels and F coordinate slices.
 
-    errors_deg is the residual-scaled shared-fit standard error. fits and reasons
-    are spectator-major tuples of per-frequency optimizer results or reasons.
-    Unavailable slopes/errors stay NaN, and never authorize writeback.
+    slopes_deg: float64 (2,F) canonical slopes in degrees per integer step.
+    errors_deg: float64 (2,F) residual-scaled 1σ slope errors in degrees/step.
+    fits: channel-major (2,F) tuples of SharedFitResult or None on failure.
+        Each result owns slope, amplitude_h and phase_h (degrees), and their
+        covariance in that parameter order with product units.
+    reasons: channel-major (2,F) tuples, None on success or failure text.
+        Unavailable slopes and errors are NaN; other channels/slices continue.
     """
 
     slopes_deg: NDArray[np.float64]
@@ -58,40 +28,12 @@ class PhaseSlopeFit:
     reasons: tuple[tuple[str | None, ...], ...]
 
 
-@dataclass(frozen=True)
-class ConditionalPhaseAnalysis:
-    """Unique complete π crossing in MHz, or None with frequency_reason.
-
-    Per-frequency phase, slope and count diagnostics are only used for plots.
-    """
-
-    frequency_mhz: float | None
-    frequency_reason: str | None
-
-
-def fitted_crossings(
-    frequencies: NDArray[np.float64],
-    conditional_deg: NDArray[np.float64],
-    fit: PhaseSlopeFit,
-) -> PhaseCrossings:
-    """Find per-gate π crossings, preserving fit-unavailability reasons.
-
-    Inputs are the increasing frequency axis, its conditional slope difference,
-    and the fits that produced it. Any unavailable slope prevents selection.
-    """
-    crossings = phase_crossings(frequencies, conditional_deg)
-    reasons = [reason for state in fit.reasons for reason in state if reason]
-    if reasons:
-        return PhaseCrossings((), "; ".join(dict.fromkeys(reasons)))
-    return crossings
-
-
-def gate_count_alias_reason(n: NDArray[np.int64]) -> str | None:
+def _gate_count_alias_reason(n: NDArray[np.int64]) -> str | None:
     """Return the slope alias reason for fewer than two n or difference gcd≠1.
 
-    Integer n are train lengths. gcd=1 leaves only the unavoidable 2π slope
-    period. Offsets must be independent between herald groups, so callers check
-    each group's effective n separately, never their union.
+    gcd=1 leaves only the unavoidable 2π slope period. Independent group
+    offsets require checking each group's effective n separately, not their
+    union.
     """
     if len(n) < 2:
         return "At least two effective gate counts are required to identify a slope"
@@ -99,19 +41,6 @@ def gate_count_alias_reason(n: NDArray[np.int64]) -> str | None:
     if divisor != 1:
         return f"Gate-count differences gcd={divisor}: slope alias period 2π/{divisor}"
     return None
-
-
-def phase_points(
-    quadratures: NDArray[np.float64],
-) -> tuple[tuple[tuple[QuadraturePhase, ...], ...], ...]:
-    """Convert (spectator,quadrature,n,frequency) sigma to diagnostic phase points."""
-    return tuple(
-        tuple(
-            tuple(count_phase(float(x), float(y)) for x, y in zip(xs, ys, strict=True))
-            for xs, ys in zip(state[0], state[1], strict=True)
-        )
-        for state in quadratures
-    )
 
 
 def _quadrature_model(
@@ -168,13 +97,18 @@ def fit_phase_slopes(
 ) -> PhaseSlopeFit:
     """Fit X=A_h cos(n*slope+φ_h), Y=A_h sin(n*slope+φ_h), without DC.
 
-    Inputs have (group,actual spectator,quadrature,n,frequency) axes. Each group's
-    A/φ is independent; slope is shared by actual spectator and frequency.
-    Variances are count-derived sigma variances. NaN acquired counts mean an
-    incomplete axis and block that fit. Zero acceptance or nonpositive variance
-    removes n; each group must still have >=2 effective n with difference gcd=1.
-    Slopes use a canonical [-180,180] representative of their 2π period.
-    Failed optimization returns NaN and a reason, never a writeback value.
+    n is int64 (N,), an integer step axis. The three float64 inputs have
+    shape (G,2,2,N,F): group, channel, X/Y quadrature, step, coordinate slice.
+    quadratures are dimensionless; variances have squared quadrature units;
+    acquired_shots are totals for each independent projection. Each group's
+    amplitude/phase is independent; slope is shared within a channel/slice.
+    Phases and slopes use degrees. Nonfinite acquired counts block that fit.
+    Zero shots, nonfinite quadratures or nonpositive/nonfinite variance remove
+    a step; every group must retain >=2 steps with difference gcd=1.
+    Slopes use a canonical [-180,180] representative of their 360° period.
+    Alias, incomplete group, optimizer failure or invalid covariance return
+    NaN slope/error and a reason. Shape/index errors propagate. Inputs are not
+    modified; fitting delegates to shared.fit_shared with residual scaling.
     """
     nf = quadratures.shape[-1]
     slopes = np.full((2, nf), np.nan)
@@ -220,7 +154,7 @@ def _fit_frequency(
             & (acquired[group] > 0),
             axis=0,
         )
-        reason = gate_count_alias_reason(n[valid])
+        reason = _gate_count_alias_reason(n[valid])
         if reason is not None:
             return None, f"Group {group}: {reason}"
         observations.append(

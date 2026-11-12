@@ -40,6 +40,8 @@ def make_form(ctx: FormContext) -> Form[RPiLengthCfg]:
         RPiLengthCfg,
         field_order=("readout", "pi_pulse", "length", "reps", "rounds"),
         tree={
+            "reps": 250,
+            "rounds": 20,
             "readout": readout,
             "pi_pulse": source(
                 ctx,

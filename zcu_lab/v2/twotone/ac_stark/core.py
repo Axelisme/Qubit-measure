@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Annotated, ClassVar
 
 import numpy as np
+from matplotlib.artist import Artist
 from matplotlib.image import NonUniformImage
 from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
@@ -62,6 +63,7 @@ class AcStarkAnalysis:
 
 
 def acstark_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
+    """Convert mean complex IQ to the real contrast used by live and analysis plots."""
     real_signals = rotate2real(signals).real
 
     valid_mask = np.any(~np.isnan(real_signals), axis=1)
@@ -91,7 +93,7 @@ class AcStarkCfg(ConfigBase):
 
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
-    ] = 1
+    ]
     rounds: Annotated[
         int,
         FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
@@ -104,7 +106,7 @@ class AcStarkCfg(ConfigBase):
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
-    ] = 1.0
+    ]
 
 
 class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
@@ -138,7 +140,7 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
         frequency. Return mean complex IQ shaped (Ngain, Nfreq), with
         frequencies in MHz. ``earlystop_snr`` can end averaging per spectrum.
         """
-        # Prepare probe frequencies and gain points spaced by nominal drive power.
+        # 1. Prepare probe frequencies and gain points spaced by nominal drive power.
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
 
@@ -158,9 +160,11 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
         current_snr = 0.0
 
         def update_snr(snr: float) -> None:
+            """Record the latest checked SNR for the live plot title."""
             nonlocal current_snr
             current_snr = snr
 
+        # 2. Track the Stark-shift map, recent frequency traces and early-stop SNR.
         fig, _ = context.plots.subplots(1, 2, num="measurement")
         heat_ax, line_ax = fig.axes
         heat_ax.set(xlabel="Stark Pulse Gain (a.u.)", ylabel="Frequency (MHz)")
@@ -175,7 +179,12 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
         line_ax.legend()
 
         @context.plots.on_plot_thread
-        def update(data):
+        def update(data: NDArray[np.complex128]) -> tuple[Artist, ...]:
+            """Refresh the Stark contrast map, two recent traces and SNR title.
+
+            data is complex IQ shaped (gain, frequency); NaN marks unmeasured points.
+            Return the changed artists without modifying the input array.
+            """
             real = acstark_signal2real(data)
             valid = np.flatnonzero(~np.all(np.isnan(real), axis=1))
             current = int(valid[-1]) if valid.size else -1
@@ -195,7 +204,7 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
             on_update=update,
         )
 
-        # Acquire one frequency trace per Stark gain, retaining its SNR early stop.
+        # 3. Acquire one frequency trace per Stark gain, retaining its SNR early stop.
         with Schedule(signals_buffer, scope=context.scope) as sched:
             for _, step in sched.scan("gain", gains.tolist()):
                 builder = TimelineBuilder(
@@ -228,6 +237,7 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
                     ),
                 )
 
+        # 4. Preserve the gain-frequency grid for photon calibration.
         return AcStarkResult(gains, freqs, signals_buffer.array)
 
     def analyze(
@@ -246,6 +256,7 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
         the linear coefficient and the dispersive correction from chi/kappa.
         Publish ``fit``; source cfg may be None.
         """
+        # 1. Track resonance centers below the chosen Stark-gain cutoff.
         result = source.result
         chi, kappa, deg, cutoff = (
             options.chi,
@@ -268,7 +279,7 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
         gains2 = gains**2
         s_gains2 = s_gains**2
 
-        # Fit the Stark shift versus gain squared, allowing optional curvature.
+        # 2. Fit the Stark shift versus gain squared, allowing optional curvature.
         x2_fit = np.linspace(min(gains2), max(gains2), 100)
         if deg == 1:
             b, c = np.polyfit(s_gains2, s_freqs, 1)
@@ -277,42 +288,36 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
             a, b, c = np.polyfit(s_gains2, s_freqs, 2)
             y_fit = a * x2_fit**2 + b * x2_fit + c
 
-        # Convert the linear Stark slope to photons using the supplied chi/kappa.
+        # 3. Convert the linear Stark slope to photons using the supplied chi/kappa.
         eta = kappa**2 / (kappa**2 + chi**2)
         ac_coeff = abs(b) / (2 * eta * chi)
 
         # plot the data and the fitted polynomial
         avg_n = ac_coeff * gains2
 
+        # 4. Assess the photon calibration against the measured resonance ridge.
         fig, ax1 = plots.subplots(num="fit", figsize=config.figsize)
 
-        # Use NonUniformImage for better visualization with gain^2 as x-axis
         im = NonUniformImage(ax1, cmap="viridis", interpolation="nearest")
         im.set_data(avg_n, freqs, amps.T)
         im.set_extent((avg_n[0], avg_n[-1], freqs[0], freqs[-1]))
         ax1.add_image(im)
 
-        # Set proper limits for the plot
         ax1.set_xlim(avg_n[0], avg_n[-1])
         ax1.set_ylim(freqs[0], freqs[-1])
 
-        # Plot the resonance frequencies and fitted curve
         ax1.plot(ac_coeff * s_gains2, s_freqs, ".", c="k")
 
-        # Fit curve in terms of gain^2
         label = r"$\bar n$" + f" = {ac_coeff:.2g} " + r"$gain^2$"
         n_fit = ac_coeff * x2_fit
         ax1.plot(n_fit, y_fit, "-", label=label)
 
-        # Create secondary x-axis for gain^2 (Readout Gain²)
         ax2 = ax1.twiny()
 
-        # main x-axis: avg_n, secondary x-axis: gain^2
-        # Average photon number equals ac_coeff times gain squared.
         ax1.set_xticks(ax1.get_xticks())
         ax1.set_xlabel(r"Average Photon Number ($\bar n$)", fontsize=14)
 
-        # Show gain on the upper secondary axis.
+        # 5. Relate the calibrated photon axis to the readout gain on the upper axis.
         avgn_ticks = ax1.get_xticks()
         gain_ticks = np.sqrt(avgn_ticks / ac_coeff)
         ax2.set_xlim(ax1.get_xlim())

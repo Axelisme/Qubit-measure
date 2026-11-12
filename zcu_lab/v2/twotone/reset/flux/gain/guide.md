@@ -8,7 +8,7 @@ Each repetition applies optional reset, the before-reset pi switch, the tested f
 Both switches use the same calibrated pi pulse. Each switch has off=0 and on=1.
 The saved complex IQ has axes before pi, after pi, gain, in that order.
 
-The tested reset uses `reset/pulse` on `$qubit.wiring.lo_flux_ch`, with frequency 0 MHz and a const waveform.
+The tested reset preset uses `reset/pulse` on `$qubit.wiring.lo_flux_ch`, with frequency 0 MHz and a const waveform.
 The gain scan uses a.u.; it does not convert gain to flux.
 Open and Reset capture the module sources and fill editable starting values.
 Pi pulse uses `$qubit.module.x180` when present, otherwise the pi-pulse template. Verify its calibration before Run.
@@ -21,7 +21,7 @@ Missing required sources remain Invalid. Enter a duration to calibrate gain befo
 
 The gain range starts at a single zero-gain point. Set start, stop and point count for the permitted local-flux range before Run.
 Run replaces only the tested pulse's gain. It keeps the fixed length and timing unchanged.
-The tested pulse must retain its const waveform and zero frequency.
+The preset uses a zero-frequency const pulse. The experiment does not require a const waveform or zero frequency.
 Its `pulse_cfg.post_delay` is the time in us to wait after returning from the flux excursion for the flux tail to settle.
 0 means no wait. On hardware, measure the flux tail, for example with `fastflux/distortion`, and set this delay long enough for settling.
 

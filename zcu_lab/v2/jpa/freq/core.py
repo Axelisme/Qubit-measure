@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Annotated, ClassVar
 
 import numpy as np
-from matplotlib.axes import Axes
+from matplotlib.artist import Artist
 from numpy.typing import NDArray
 from pydantic import Field
 from zcu_tools.cfg_model import ConfigBase, DeviceName, FieldMeta
@@ -68,7 +69,7 @@ class FreqCfg(ConfigBase):
     ] = None
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
-    ] = 1
+    ]
     rounds: Annotated[
         int,
         FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
@@ -81,7 +82,7 @@ class FreqCfg(ConfigBase):
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
-    ] = 1.0
+    ]
 
 
 class FreqExp(Experiment[FreqResult, FreqCfg]):
@@ -113,18 +114,20 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         jpa_freqs = sweep2array(cfg.jpa_freq, allow_array=True)
         np.random.default_rng(cfg.seed).shuffle(jpa_freqs[1:-1])
 
-        def configure_axes(ax: Axes) -> None:
-            ax.lines[0].set_linestyle("None")
-            ax.lines[0].set_marker("o")
-
         # Show independent points because neighboring samples need not be nearby.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="JPA Frequency (MHz)", ylabel="Signal Difference")
         line = live_line(ax)
-        configure_axes(ax)
+        ax.lines[0].set_linestyle("None")
+        ax.lines[0].set_marker("o")
 
         @context.plots.on_plot_thread
-        def update(data):
+        def update(data: NDArray[np.float64]) -> Iterable[Artist]:
+            """Draw acquired SNR on the measurement axes; return changed artists.
+
+            Read the scan-shaped data without changing it. Update the live
+            artists over the prepared coordinates; plot errors propagate.
+            """
             return line.set(jpa_freqs, np.abs(data))
 
         fig.show()
@@ -187,6 +190,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         ``source`` supplies this run's frequencies and signals; no fit or
         interpolation is applied. ``options`` is None. All-NaN SNR fails.
         """
+        # 1. Select the sampled pump frequency with peak SNR, ignoring missing points.
         del options
         result = source.result
 
@@ -198,6 +202,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         max_idx = np.nanargmax(real_signals)
         best_jpa_freq = jpa_freqs[max_idx]
 
+        # 2. Mark the best frequency without connecting randomized pump settings.
         fig, ax = plots.subplots(num="fit", figsize=config.figsize)
         ax.scatter(jpa_freqs, real_signals, label="signal difference", s=2)
         ax.axvline(

@@ -146,3 +146,12 @@ The common gain scale is a hardware sweep in one compiled program.
 
 Fits use count-weighted binomial errors. Endpoint probabilities use
 Jeffreys-smoothed variance so observations at zero or one retain finite weight.
+
+## Calibration order and field units
+
+Calibrate each role's Xπ slot with amplitude and length Rabi before using it.
+Confirm pulse frequency in MHz, signed gain in [-1, 1], and duration in us.
+Use lookback to set mux timing, then mux onetone to set frequencies and gains.
+Confirm readout timing in us and gains in [-1, 1], then repeat GE Post under those conditions.
+Choose the dual-line CZ pulse with chevron and confirm the coupler's `cz_f1` and `cz_f2` slots.
+The operator must confirm the common gain-scale range before Run.

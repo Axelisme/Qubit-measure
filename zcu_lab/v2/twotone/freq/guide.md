@@ -26,6 +26,7 @@ it for preparation. In this Form enable Init Pulse, choose that π03 library
 pulse or enter its measured frequency, channel, gain and waveform inline.
 Sweep Probe Pulse to find 3–2 after that preparation. The Init Pulse frequency
 stays fixed while the probe frequency follows the sweep.
+Enter its calibrated frequency in MHz and its duration in us.
 
 Keep π01, π03 and π32 calibration records separate. Do not Apply a 0–3 or
 prepared 3–2 fit to the generic qubit.freq slot as though it were 0–1.

@@ -39,60 +39,9 @@ OUTCOME_LABELS = tuple(
     f"{f1},{f2}" for f1 in ("g", "e", "other") for f2 in ("g", "e", "other")
 )
 
-
-class JointReadoutHeraldedCfg(ConfigBase):
-    """Four named I/Xπ preparations preceded by optional reset and mux herald.
-
-    reps is shots per round; rounds accumulate counts on the acquisition side.
-    Delays are us, pulse frequency MHz and phase degrees. roles retain the
-    captured full mux mapping. Only F1/F2 require circle classifiers with GE Post
-    radii. No DC device is driven. readout and pulses are editable calibrated
-    inputs. reset=None emits no reset; otherwise it starts every shot. Herald and
-    terminal reuse one mux object; readout post_delay is the wait after herald.
-    """
-
-    reset: Annotated[
-        Reset.Cfg | None,
-        FieldMeta(
-            label="Reset", description="Optional reset at the start of every shot."
-        ),
-    ] = None
-    x180_f1: Annotated[
-        Pulse.Cfg,
-        FieldMeta(
-            label="F1 Xπ",
-            description="Calibrated F1 x180 pulse on its charge generator.",
-        ),
-    ]
-    x180_f2: Annotated[
-        Pulse.Cfg,
-        FieldMeta(
-            label="F2 Xπ",
-            description="Calibrated F2 x180 pulse on its charge generator.",
-        ),
-    ]
-    readout: Annotated[
-        MuxReadout.Cfg,
-        FieldMeta(
-            label="Mux readout",
-            description="Full mux readout; F1/F2 need circle + radius from GE Post.",
-        ),
-    ]
-    roles: JointRoles
-    reps: Annotated[int, FieldMeta(label="Reps")] = Field(default=1, gt=0)
-    rounds: Annotated[int, FieldMeta(label="Rounds")] = Field(default=1, gt=0)
-    initial_delay: Annotated[float, FieldMeta(label="Initial delay", unit="us")] = 1.0
-    relax_delay: Annotated[
-        float, FieldMeta(label="Relax delay", unit="us", decimals=3)
-    ] = 1.0
-
-    @model_validator(mode="after")
-    def validate_pair(self) -> Self:
-        """Require distinct charge generators and calibrated F1/F2 role tones."""
-        if self.x180_f1.ch == self.x180_f2.ch:
-            raise ValueError("F1/F2 Xπ pulses require different charge generators")
-        validate_classifiers(self.readout, self.roles)
-        return self
+SUMS_SHAPE = (2, 2, 3, 3, 3, 3)
+PREPARED_COUNT = len(PREPARED_STATES)
+OUTCOME_COUNT = len(OUTCOME_LABELS)
 
 
 @dataclass(frozen=True)
@@ -134,12 +83,69 @@ class JointReadoutHeraldedAnalysis:
     pass_fraction: NDArray[np.float64]
 
 
+class JointReadoutHeraldedCfg(ConfigBase):
+    """Four named I/Xπ preparations preceded by optional reset and mux herald.
+
+    reps is shots per round; rounds accumulate counts on the acquisition side.
+    Delays are us, pulse frequency MHz and phase degrees. roles retain the
+    captured full mux mapping. Only F1/F2 require circle classifiers with GE Post
+    radii. No DC device is driven. readout and pulses are editable calibrated
+    inputs. reset=None emits no reset; otherwise it starts every shot. Herald and
+    terminal reuse one mux object; readout post_delay is the wait after herald.
+    """
+
+    reset: Annotated[
+        Reset.Cfg | None,
+        FieldMeta(
+            label="Reset", description="Optional reset at the start of every shot."
+        ),
+    ] = None
+    x180_f1: Annotated[
+        Pulse.Cfg,
+        FieldMeta(
+            label="F1 Xπ",
+            description="Calibrated F1 x180 pulse on its charge generator.",
+        ),
+    ]
+    x180_f2: Annotated[
+        Pulse.Cfg,
+        FieldMeta(
+            label="F2 Xπ",
+            description="Calibrated F2 x180 pulse on its charge generator.",
+        ),
+    ]
+    readout: Annotated[
+        MuxReadout.Cfg,
+        FieldMeta(
+            label="Mux readout",
+            description="Full mux readout; F1/F2 need circle + radius from GE Post.",
+        ),
+    ]
+    roles: JointRoles
+    reps: Annotated[int, FieldMeta(label="Reps")] = Field(gt=0)
+    rounds: Annotated[int, FieldMeta(label="Rounds")] = Field(default=1, gt=0)
+    initial_delay: Annotated[float, FieldMeta(label="Initial delay", unit="us")] = 1.0
+    relax_delay: Annotated[float, FieldMeta(label="Relax delay", unit="us", decimals=3)]
+
+    @model_validator(mode="after")
+    def validate_pair(self) -> Self:
+        """Require calibrated F1/F2 role tones."""
+        validate_classifiers(self.readout, self.roles)
+        return self
+
+
 def restore_result(
     data: GroupedLoadData[JointReadoutHeraldedCfg],
 ) -> JointReadoutHeraldedResult:
-    """Load two-axis 81-class sums; old raw-IQ/single-axis files raise ValueError."""
+    """Load two-axis 81-class sums; old raw-IQ/single-axis files raise ValueError.
+
+    data supplies the grouped sums variable and its persisted scan axes. Return
+    this experiment's Result with float64 class counts and its original axis
+    ordering. Missing variables and invalid data propagate load errors. Do not
+    mutate the loaded data, acquire or draw; no raw-IQ reconstruction is attempted.
+    """
     sums = data.variable("sums")
-    if sums.z.shape != (2, 2, 3, 3, 3, 3):
+    if sums.z.shape != SUMS_SHAPE:
         raise ValueError(
             "Heralded joint readout requires two preparation axes "
             "and sums (2,2,3,3,3,3)"
@@ -198,14 +204,15 @@ class JointReadoutHeraldedExp(
 
         Both reads reuse one mux object. Return raw (2,2,3,3,3,3) counts for every
         herald class. Rounds accumulate at acquisition; cfg remains unchanged.
+
         """
 
-        validate_classifiers(config.readout, config.roles)
+        # 1. Show terminal gg probability for the four preparation branches.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(
             xlabel="Nominal preparation",
             ylabel="Terminal P(g,g) | herald (g,g)",
-            xticks=range(4),
+            xticks=range(PREPARED_COUNT),
             xticklabels=["gg", "ge", "eg", "ee"],
         )
         (line,) = ax.plot([], [], marker="o", linestyle="none")
@@ -215,18 +222,17 @@ class JointReadoutHeraldedExp(
         @context.plots.on_plot_thread
         def update_view(sums: NDArray[np.float64]) -> tuple[Line2D, ...]:
             line.set_data(
-                np.arange(4, dtype=np.float64),
+                np.arange(PREPARED_COUNT, dtype=np.float64),
                 joint_probabilities(terminal_counts(sums, ("g", "g")))[
                     ..., 0, 0
-                ].reshape(4),
+                ].reshape(PREPARED_COUNT),
             )
             ax.relim()
             ax.autoscale_view()
             return (line,)
 
-        buffer = SignalBuffer(
-            (2, 2, 3, 3, 3, 3), dtype=np.float64, on_update=update_view
-        )
+        # 2. Accumulate classified rounds without normalizing away shot totals.
+        buffer = SignalBuffer(SUMS_SHAPE, dtype=np.float64, on_update=update_view)
         with Schedule(buffer, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 context.soccfg,
@@ -273,6 +279,7 @@ class JointReadoutHeraldedExp(
                 rounds=config.rounds,
                 options=RunOptions(),
             )
+        # 3. Preserve raw counts, including unmeasured preparation branches.
         return JointReadoutHeraldedResult(sums=buffer.array)
 
     def analyze(
@@ -288,29 +295,34 @@ class JointReadoutHeraldedExp(
         Add raw counts, never group probabilities. Display completed-round
         partial counts with each row's shot total. Zero totals give NaN.
         Other herald classes stay saved but do not enter terminal analysis.
+
         """
+        # 1. Normalize terminal counts while retaining each row's shot total.
         del options
         result = source.result
-        if result.sums.shape != (2, 2, 3, 3, 3, 3):
+        if result.sums.shape != SUMS_SHAPE:
             raise ValueError("Heralded joint readout requires sums (2,2,3,3,3,3)")
 
         # Herald ee starts with both qubits excited. The same I/Xπ preparation
         # reaches the complementary state, so align nominal ee/eg/ge/gg to gg/ge/eg/ee.
-        gg = terminal_counts(result.sums, ("g", "g")).reshape(4, 3, 3)
-        ee = terminal_counts(result.sums, ("e", "e"))[::-1, ::-1].reshape(4, 3, 3)
+        gg = terminal_counts(result.sums, ("g", "g")).reshape(PREPARED_COUNT, 3, 3)
+        ee = terminal_counts(result.sums, ("e", "e"))[::-1, ::-1].reshape(
+            PREPARED_COUNT, 3, 3
+        )
         # Cancellation may leave only one route to an actual state measured.
         # Retain that route's counts; preserve NaN when neither was measured.
         available_counts = np.stack((gg, ee))
         combined = np.nansum(available_counts, axis=0)
         combined[np.all(np.isnan(available_counts), axis=0)] = np.nan
         counts = np.stack((gg, ee, combined))
-        matrices = joint_probabilities(counts).reshape(3, 4, 9)
+        matrices = joint_probabilities(counts).reshape(3, PREPARED_COUNT, OUTCOME_COUNT)
         selected_shots = counts.sum(axis=(-2, -1))
-        herald_matrix = herald_probabilities(result.sums).reshape(4, 3, 3)
-        acquired_shots = result.sums.sum(axis=(-4, -3, -2, -1)).reshape(4)
+        herald_matrix = herald_probabilities(result.sums).reshape(PREPARED_COUNT, 3, 3)
+        acquired_shots = result.sums.sum(axis=(-4, -3, -2, -1)).reshape(PREPARED_COUNT)
 
         # The GUI saves a fixed 4:3 canvas. Stack the three four-row matrices
         # and reserve a separate column so colorbars never steal matrix space.
+        # 2. Compare aligned herald groups, combined counts and herald fractions.
         fig, _axes = plots.subplots(
             num="matrix",
             nrows=3,
@@ -334,8 +346,8 @@ class JointReadoutHeraldedExp(
                 vmax=1,
                 cmap="Blues",
             )
-            for row in range(4):
-                for col in range(9):
+            for row in range(PREPARED_COUNT):
+                for col in range(OUTCOME_COUNT):
                     value = matrices[group, row, col]
                     label = f"{value:.3f}" if np.isfinite(value) else "—"
                     ax.text(
@@ -349,14 +361,14 @@ class JointReadoutHeraldedExp(
                     )
             ax.grid(False)
             ax.set_xticks(
-                range(9),
-                OUTCOME_LABELS if group == 2 else [""] * 9,
+                range(OUTCOME_COUNT),
+                OUTCOME_LABELS if group == 2 else [""] * OUTCOME_COUNT,
                 rotation=45,
                 ha="right",
                 rotation_mode="anchor",
             )
             ax.set(
-                yticks=range(4),
+                yticks=range(PREPARED_COUNT),
                 yticklabels=[
                     f"{state}; n={shots:g}"
                     for state, shots in zip(
@@ -379,16 +391,16 @@ class JointReadoutHeraldedExp(
         )
         ax, colorbar_ax = fig.axes
         image = ax.imshow(
-            np.ma.masked_invalid(herald_matrix.reshape(4, 9)),
+            np.ma.masked_invalid(herald_matrix.reshape(PREPARED_COUNT, OUTCOME_COUNT)),
             aspect="auto",
             vmin=0,
             vmax=1,
             cmap="Blues",
         )
         ax.set(
-            xticks=range(9),
+            xticks=range(OUTCOME_COUNT),
             xticklabels=OUTCOME_LABELS,
-            yticks=range(4),
+            yticks=range(PREPARED_COUNT),
             yticklabels=[
                 f"{state}; n={shots:g}"
                 for state, shots in zip(
@@ -403,19 +415,20 @@ class JointReadoutHeraldedExp(
         )
         ax.grid(False)
         ax.set_xticks(
-            range(9),
+            range(OUTCOME_COUNT),
             OUTCOME_LABELS,
             rotation=45,
             ha="right",
             rotation_mode="anchor",
         )
         fig.colorbar(image, cax=colorbar_ax, label="Herald probability")
+        # 3. Return count and probability matrices for the saved analysis.
         return JointReadoutHeraldedAnalysis(
-            gg_counts=gg.reshape(4, 9),
+            gg_counts=gg.reshape(PREPARED_COUNT, OUTCOME_COUNT),
             gg_matrix=matrices[0],
-            ee_counts=ee.reshape(4, 9),
+            ee_counts=ee.reshape(PREPARED_COUNT, OUTCOME_COUNT),
             ee_matrix=matrices[1],
-            combined_counts=combined.reshape(4, 9),
+            combined_counts=combined.reshape(PREPARED_COUNT, OUTCOME_COUNT),
             combined_matrix=matrices[2],
             selected_shots=selected_shots,
             acquired_shots=acquired_shots,

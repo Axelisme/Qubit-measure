@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Annotated, ClassVar
 
 import numpy as np
+from matplotlib.artist import Artist
 from matplotlib.image import NonUniformImage
 from matplotlib.ticker import ScalarFormatter
 from numpy.typing import NDArray
@@ -34,7 +36,15 @@ class MistResult:
     signals: NDArray[np.complex128]
 
 
+@pydantic_dataclass(frozen=True)
+class MistAnalyzeOptions:
+    ac_coeff: Annotated[
+        float | None, FieldMeta(label="Photon number / gain squared")
+    ] = None
+
+
 def mist_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
+    """Return the real-valued measurement view of complex IQ without changing the input."""
     return rotate2real(signals).real
 
 
@@ -48,7 +58,7 @@ class MistCfg(ConfigBase):
     mist_gain: Annotated[SweepCfg, FieldMeta(label="mist gain", unit="a.u.")]
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
-    ] = 1
+    ]
     rounds: Annotated[
         int,
         FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
@@ -61,14 +71,7 @@ class MistCfg(ConfigBase):
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
-    ] = 1.0
-
-
-@pydantic_dataclass(frozen=True)
-class MistAnalyzeOptions:
-    ac_coeff: Annotated[
-        float | None, FieldMeta(label="Photon number / gain squared")
-    ] = None
+    ]
 
 
 class MistExp(Experiment[MistResult, MistCfg]):
@@ -97,7 +100,7 @@ class MistExp(Experiment[MistResult, MistCfg]):
         in a.u. and mean complex IQ shaped (flux_gain, mist_gain). This contrast
         map is not a calibrated state population or transition probability.
         """
-        # Quantize both gain axes for their respective generators.
+        # 1. Quantize both gain axes for their respective generators.
         cfg = config
         soc, soccfg = context.soc, context.soccfg
 
@@ -115,7 +118,7 @@ class MistExp(Experiment[MistResult, MistCfg]):
             {"soccfg": soccfg, "gen_ch": cfg.mist_pulse.ch},
         )
 
-        # Display the averaged response without classifying individual shots.
+        # 2. Display the averaged response without classifying individual shots.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Flux Pulse Gain (a.u.)", ylabel="Mist Pulse Gain (a.u.)")
         formatter = ScalarFormatter(useMathText=True)
@@ -125,7 +128,12 @@ class MistExp(Experiment[MistResult, MistCfg]):
         viewer = live_heatmap(ax)
 
         @context.plots.on_plot_thread
-        def update(data):
+        def update(data: NDArray[np.complex128]) -> Iterable[Artist]:
+            """Draw acquired complex IQ on the measurement axes; return changed artists.
+
+            Read the scan-shaped data without changing it. Update the live
+            artists over the prepared coordinates; plot errors propagate.
+            """
             return viewer.set(flux_gains, mist_gains, mist_signal2real(data))
 
         fig.show()
@@ -135,7 +143,7 @@ class MistExp(Experiment[MistResult, MistCfg]):
         )
 
         with Schedule(signals_buffer, scope=context.scope) as sched:
-            # Build the pulse sequence without changing the caller's cfg.
+            # 3. Start flux and MIST together after initialization; read after both finish.
             builder = TimelineBuilder(
                 soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
             )
@@ -170,6 +178,7 @@ class MistExp(Experiment[MistResult, MistCfg]):
         options.ac_coeff, when supplied, scales squared gain to a photon-number
         axis; otherwise the vertical coordinate remains gain squared.
         """
+        # 1. Project mean IQ to MIST contrast without classifying individual shots.
         result = source.result
 
         flux_gains, mist_gains, signals2D = (
@@ -180,6 +189,7 @@ class MistExp(Experiment[MistResult, MistCfg]):
 
         real_signals = mist_signal2real(signals2D)
 
+        # 2. Map contrast against flux gain and MIST gain squared, optionally photons.
         fig, ax = plots.subplots(num="fit", figsize=config.figsize)
 
         if options.ac_coeff is not None:

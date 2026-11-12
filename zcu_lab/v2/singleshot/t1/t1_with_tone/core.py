@@ -37,12 +37,8 @@ from zcu_tools.program.v2 import (
 
 from zcu_lab.v2.support import live_line
 
-
-def _sum_rounds(data: NDArray[np.float64]) -> NDArray[np.float64]:
-    """Sum acquired host rounds, leaving entirely unmeasured cells as NaN."""
-    acquired = np.any(np.isfinite(data), axis=0)
-    totals = np.nansum(data, axis=0)
-    return np.where(acquired, totals, np.nan)
+POPULATION_STATES = (0, 1, 2)
+POPULATION_COUNT = len(POPULATION_STATES)
 
 
 @dataclass(frozen=True)
@@ -57,32 +53,6 @@ class T1WithToneResult:
     counts: NDArray[np.float64]
 
 
-class T1WithToneCfg(ConfigBase):
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init Pulse")] = None
-    pi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi Pulse")]
-    probe_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Probe Pulse")]
-    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
-    delay: Annotated[SweepCfg, FieldMeta(label="Delay", unit="us")]
-    sampling: Literal["linear", "decay"] = "decay"
-    reps: Annotated[
-        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
-    ] = 1
-    rounds: Annotated[
-        int,
-        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
-    ] = 1
-    relax_delay: Annotated[
-        float,
-        FieldMeta(
-            label="Relax delay",
-            unit="us",
-            decimals=3,
-            description="Relaxation delay after each repetition.",
-        ),
-    ] = 1.0
-
-
 @pydantic_dataclass(frozen=True, config={"arbitrary_types_allowed": True})
 class T1WithToneAnalyzeOptions:
     confusion_matrix: NDArray[np.float64] | None = None
@@ -95,13 +65,49 @@ class T1WithToneAnalysis:
     t1_b: float
 
 
+def _sum_rounds(data: NDArray[np.float64]) -> NDArray[np.float64]:
+    """Sum acquired host rounds, leaving entirely unmeasured cells as NaN."""
+    acquired = np.any(np.isfinite(data), axis=0)
+    totals = np.nansum(data, axis=0)
+    return np.where(acquired, totals, np.nan)
+
+
+class T1WithToneCfg(ConfigBase):
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init Pulse")] = None
+    pi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi Pulse")]
+    probe_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Probe Pulse")]
+    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
+    delay: Annotated[SweepCfg, FieldMeta(label="Delay", unit="us")]
+    sampling: Literal["linear", "decay"] = "decay"
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ]
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
+        ),
+    ]
+
+
 class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
     Options: ClassVar[type[T1WithToneAnalyzeOptions]] = T1WithToneAnalyzeOptions
 
     AXES_SPEC: ClassVar[AxesSpec[T1WithToneResult, T1WithToneCfg]] = AxesSpec(
         axes=(
             AxesSpec.Axis(
-                values=(0, 1, 2), label="Population", unit="None", dtype=np.int64
+                values=POPULATION_STATES,
+                label="Population",
+                unit="None",
+                dtype=np.int64,
             ),
             AxesSpec.Axis(
                 values=(0, 1), label="Initial State", unit="None", dtype=np.int64
@@ -119,9 +125,10 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
     )
 
     def _live_update(self, plots: Plots, lengths: NDArray[np.float64]):
+        """Show both initial-state population traces and return their live artist updater."""
         figure, _ = plots.subplots(ncols=2, num="measurement", figsize=(12, 5))
         axes = figure.axes
-        lines = [live_line(ax, num_lines=3) for ax in axes]
+        lines = [live_line(ax, num_lines=POPULATION_COUNT) for ax in axes]
         for ax in axes:
             ax.set(xlabel="Time (us)", ylabel="Amplitude", ylim=(0.0, 1.0))
             for line, label in zip(
@@ -132,6 +139,11 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
 
         @plots.on_plot_thread
         def update(counts: NDArray[np.float64]):
+            """Draw acquired shot counts on the measurement axes; return changed artists.
+
+            Read scan-shaped samples without changing them. Update the live
+            artists over the prepared coordinates; plot errors propagate.
+            """
             populations = counts / counts.sum(axis=-1, keepdims=True)
             return (
                 *lines[0].set(lengths, populations[:, 0].T),
@@ -151,6 +163,7 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
         Classification uses the first readout tone. Decay points must remain
         distinct on the probe generator's time grid.
         """
+        # 1. Choose the acquisition path for the requested sampling.
         if cfg.sampling == "linear":
             return self._run_linear(cfg, context=context)
         return self._run_decay(cfg, context=context)
@@ -158,11 +171,16 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
     def _run_linear(
         self, cfg: T1WithToneCfg, *, context: RunContext
     ) -> T1WithToneResult:
+        """Acquire both preparations with linear board delays; return counts and actual times."""
+        # 1. Quantize uniform probe durations on the tone generator time grid.
         lengths = sweep2array(
             cfg.delay, "time", {"soccfg": context.soccfg, "gen_ch": cfg.probe_pulse.ch}
         )
         update = self._live_update(context.plots, lengths)
-        buffer = SignalBuffer((len(lengths), 2, 3), dtype=np.float64, on_update=update)
+        buffer = SignalBuffer(
+            (len(lengths), 2, POPULATION_COUNT), dtype=np.float64, on_update=update
+        )
+        # 2. Compare I/pi preparations under the board-swept probe duration.
         with Schedule(buffer, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 context.soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
@@ -196,16 +214,19 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
     def _run_decay(
         self, cfg: T1WithToneCfg, *, context: RunContext
     ) -> T1WithToneResult:
+        """Acquire both preparations with nonuniform decay sampling; return counts and actual times."""
+        # 1. Resolve decay-weighted tone durations and keep round counts separate.
         lengths = materialize_nonuniform_t1_pulse_lengths(
             cfg.delay, soccfg=context.soccfg, gen_ch=cfg.probe_pulse.ch
         )
         update = self._live_update(context.plots, lengths)
         buffer = SignalBuffer(
-            (cfg.rounds, len(lengths), 2, 3),
+            (cfg.rounds, len(lengths), 2, POPULATION_COUNT),
             dtype=np.float64,
             on_update=lambda data: update(_sum_rounds(data)),
         )
         programs: dict[float, TimelineProgramV2] = {}
+        # 2. Reuse one program per duration while comparing I/pi counts each round.
         with Schedule(buffer, scope=context.scope) as sched:
             for _, rep in sched.repeat("round", cfg.rounds):
                 for length, step in rep.scan("delay", lengths.tolist()):

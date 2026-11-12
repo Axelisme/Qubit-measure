@@ -34,33 +34,6 @@ class LengthResult:
     signals: NDArray[np.float64]
 
 
-class LengthCfg(ConfigBase):
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    qub_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Qubit pulse")]
-    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
-    length: Annotated[SweepCfg, FieldMeta(label="Readout length", unit="us")]
-    skew_penalty: Annotated[float, FieldMeta(label="Skew penalty", decimals=3)] = Field(
-        default=0.0, ge=0.0
-    )
-
-    reps: Annotated[
-        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
-    ] = 1
-    rounds: Annotated[
-        int,
-        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
-    ] = 1
-    relax_delay: Annotated[
-        float,
-        FieldMeta(
-            label="Relax delay",
-            unit="us",
-            decimals=3,
-            description="Relaxation delay after each repetition.",
-        ),
-    ] = 1.0
-
-
 @pydantic_dataclass(frozen=True)
 class LengthAnalyzeOptions:
     t0: Annotated[float | None, Field(ge=0)] = None
@@ -73,6 +46,33 @@ class LengthAnalyzeOptions:
 @dataclass(frozen=True)
 class LengthAnalysis:
     best_length: float
+
+
+class LengthCfg(ConfigBase):
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    qub_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Qubit pulse")]
+    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
+    length: Annotated[SweepCfg, FieldMeta(label="Readout length", unit="us")]
+    skew_penalty: Annotated[float, FieldMeta(label="Skew penalty", decimals=3)] = Field(
+        default=0.0, ge=0.0
+    )
+
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ]
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
+        ),
+    ]
 
 
 class LengthExp(Experiment[LengthResult, LengthCfg]):
@@ -105,7 +105,7 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
         IQ distributions. SNR is not assignment fidelity.
         acquire_kwargs is forwarded to acquisition.
         """
-        # Quantize integration windows on the ADC clock, not the generator clock.
+        # 1. Quantize integration windows on the ADC clock, not the generator clock.
         soc, soccfg = context.soc, context.soccfg
         cfg = deepcopy(cfg)
 
@@ -116,7 +116,7 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
             {"soccfg": soccfg, "ro_ch": readout_cfg.ro_ch},
         )
 
-        # Display the score for each integration window, not averaged state IQ.
+        # 2. Display the score for each integration window, not averaged state IQ.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Readout Length (us)", ylabel="SNR")
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
@@ -125,6 +125,7 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
 
         @context.plots.on_plot_thread
         def update(data: NDArray[np.float64]) -> tuple[Artist, ...]:
+            """Refresh the measurement artists from the current acquired data."""
             return line.set(lengths, np.abs(data))
 
         fig.show()
@@ -134,7 +135,7 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
             on_update=update,
         )
 
-        # Rebuild per window; hold RF duration fixed while comparing pulse-off/on.
+        # 3. Rebuild per window; hold RF duration fixed while comparing pulse-off/on.
         with Schedule(signals_buffer, scope=context.scope) as sched:
             for _, step in sched.scan("length", lengths.tolist()):
                 cfg.readout.set_param("ro_length", step.value)
@@ -169,7 +170,7 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
                     **(acquire_kwargs or {}),
                 )
 
-        # Return the moment-derived score; raw shots and IQ moments are not retained.
+        # 4. Return the moment-derived score; raw shots and IQ moments are not retained.
         signals = signals_buffer.array
 
         return LengthResult(lengths, signals)
@@ -189,6 +190,7 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
         NaN scores become zero before smoothing. Return best_length in us
         and publish fit. source.cfg may be None.
         """
+        # 1. Optimize smoothed readout separation, optionally accounting for cycle-time overhead.
         result = source.result
 
         lengths, signals = result.lengths, result.signals
@@ -217,6 +219,7 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
         max_length = float(lengths[max_id])
         max_snr = float(snrs[max_id])
 
+        # 2. Inspect the chosen integration window on the smoothed SNR curve.
         _, ax = plots.subplots(num="fit", figsize=config.figsize)
 
         ax.plot(lengths, snrs)

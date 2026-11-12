@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Annotated, Any, ClassVar, Literal
 
 import numpy as np
+from matplotlib.artist import Artist
 from numpy.typing import NDArray
 from zcu_tools.cfg_model import ConfigBase, DeviceName, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment
@@ -25,6 +27,7 @@ class FluxDepResult:
 
 
 def fluxdep_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
+    """Return the real-valued measurement view of complex IQ without changing the input."""
     return np.abs(signals)
 
 
@@ -62,7 +65,7 @@ class FluxDepCfg(ConfigBase):
     ]
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
-    ] = 1
+    ]
     rounds: Annotated[
         int,
         FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
@@ -75,7 +78,7 @@ class FluxDepCfg(ConfigBase):
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
-    ] = 1.0
+    ]
 
 
 class FluxDepExp(Experiment[FluxDepResult, FluxDepCfg]):
@@ -112,7 +115,7 @@ class FluxDepExp(Experiment[FluxDepResult, FluxDepCfg]):
         acquire_kwargs forwards optional acquisition controls to the builder.
         """
 
-        # Prepare the device coordinates and the matched generator/ADC grid.
+        # 1. Prepare the device coordinates and the matched generator/ADC grid.
         soc, soccfg = context.soc, context.soccfg
         cfg = deepcopy(config)
         freq_sweep = cfg.freq
@@ -129,7 +132,7 @@ class FluxDepExp(Experiment[FluxDepResult, FluxDepCfg]):
             },
         )
 
-        # Move to the first bias with progress before collecting the map.
+        # 2. Move to the first bias with progress before collecting the map.
         set_flux(
             context.devices[cfg.flux_dev],
             dev_values[0],
@@ -138,7 +141,7 @@ class FluxDepExp(Experiment[FluxDepResult, FluxDepCfg]):
             progress=True,
         )
 
-        # Display magnitude, but retain complex IQ for each flux/frequency point.
+        # 3. Display magnitude, but retain complex IQ for each flux/frequency point.
         fig, _ = context.plots.subplots(1, 2, num="measurement")
         heat_ax, line_ax = fig.axes
         heat_ax.set(xlabel="Flux device value", ylabel="Frequency (MHz)")
@@ -150,7 +153,12 @@ class FluxDepExp(Experiment[FluxDepResult, FluxDepCfg]):
         line_ax.lines[-1].set(label="current line", marker=".", color="C0")
 
         @context.plots.on_plot_thread
-        def update(data):
+        def update(data: NDArray[np.complex128]) -> Iterable[Artist]:
+            """Draw acquired complex IQ on the measurement axes; return changed artists.
+
+            Read the scan-shaped data without changing it. Update the live
+            artists over the prepared coordinates; plot errors propagate.
+            """
             real = fluxdep_signal2real(data)
             valid = np.flatnonzero(~np.all(np.isnan(real), axis=1))
             current = int(valid[-1]) if valid.size else -1
@@ -194,7 +202,7 @@ class FluxDepExp(Experiment[FluxDepResult, FluxDepCfg]):
                     rounds=cfg.rounds,
                 )
 
-        # Publish the final map after a normal or cooperatively stopped return.
+        # 4. Publish the final map after a normal or cooperatively stopped return.
         signals_buffer.trigger_update(flush=True)
         return FluxDepResult(
             values=dev_values,

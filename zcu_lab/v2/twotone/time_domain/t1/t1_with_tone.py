@@ -5,8 +5,10 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Annotated, ClassVar
 
+import numpy as np
 import zcu_tools.analysis.fitting as ft
 from matplotlib.ticker import MaxNLocator
+from numpy.typing import NDArray
 from pydantic.dataclasses import dataclass
 from zcu_tools.analysis.fitting import (
     fit_decay,
@@ -32,6 +34,13 @@ from zcu_lab.v2.support import live_line
 from .core import T1Analysis, T1Result, t1_signal2real
 
 
+@dataclass(frozen=True)
+class T1WithToneAnalyzeOptions:
+    """Select a single decay or a sum of two decays for the measured IQ."""
+
+    dual_exp: bool = False
+
+
 class T1WithToneCfg(ConfigBase):
     reset: Reset.Cfg | None = None
     pi_pulse: Pulse.Cfg
@@ -40,7 +49,7 @@ class T1WithToneCfg(ConfigBase):
     length: SweepCfg
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
-    ] = 1
+    ]
     rounds: Annotated[
         int,
         FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
@@ -53,12 +62,7 @@ class T1WithToneCfg(ConfigBase):
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
-    ] = 1.0
-
-
-@dataclass(frozen=True)
-class T1WithToneAnalyzeOptions:
-    dual_exp: bool = False
+    ]
 
 
 class T1WithToneExp(Experiment[T1Result, T1WithToneCfg]):
@@ -94,6 +98,7 @@ class T1WithToneExp(Experiment[T1Result, T1WithToneCfg]):
             {"soccfg": soccfg, "gen_ch": cfg.test_pulse.ch},
         )
 
+        # 2. Show the mean relaxation contrast during acquisition.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Time (us)", ylabel="Amplitude")
         ax.set_title("T1 relaxation")
@@ -102,7 +107,8 @@ class T1WithToneExp(Experiment[T1Result, T1WithToneCfg]):
         viewer = live_line(ax)
 
         @context.plots.on_plot_thread
-        def update(data):
+        def update(data: NDArray[np.complex128]):
+            """Update the time trace from mean IQ and return changed artists."""
             return viewer.set(lengths, t1_signal2real(data))
 
         fig.show()
@@ -111,7 +117,7 @@ class T1WithToneExp(Experiment[T1Result, T1WithToneCfg]):
             on_update=update,
         )
         with Schedule(signals_buffer, scope=context.scope) as sched:
-            # 2. Sweep the tone after excitation, then acquire the readout IQ.
+            # 3. Sweep the tone after excitation, then acquire the readout IQ.
             builder = TimelineBuilder(
                 soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
             )
@@ -126,7 +132,7 @@ class T1WithToneExp(Experiment[T1Result, T1WithToneCfg]):
             prog = builder.build()
             sched.run_acquire(prog, soc, rounds=cfg.rounds)
 
-        # 3. Return acquired averages without filling unfinished points.
+        # 4. Return acquired averages without filling unfinished points.
         return T1Result(times=lengths, signals=signals_buffer.array)
 
     def analyze(
@@ -136,6 +142,13 @@ class T1WithToneExp(Experiment[T1Result, T1WithToneCfg]):
         *,
         plots: Plots,
     ) -> T1Analysis:
+        """Fit relaxation IQ and publish the measured and fitted time traces.
+
+        Pass saved times in us and complex IQ plus the single/dual-decay option.
+        Return T1Analysis lifetimes and errors in us; cfg is not needed. Fitting
+        failures propagate. Publish the fit figure without changing the record.
+        """
+        # 1. Project the saved IQ onto its real response axis.
         result = source.result
         dual_exp = options.dual_exp
 
@@ -143,6 +156,7 @@ class T1WithToneExp(Experiment[T1Result, T1WithToneCfg]):
 
         real_signals = t1_signal2real(signals)
 
+        # 2. Fit the selected single- or dual-decay model.
         if dual_exp:
             fit = fit_dual_decay(xs, real_signals)
             t1b, t1berr, t1, t1err, y_fit, pOpt = (
@@ -167,6 +181,7 @@ class T1WithToneExp(Experiment[T1Result, T1WithToneCfg]):
         t1_str = f"{t1:.2f}us ± {t1err:.2f}us"
         t1b_str = f"{t1b:.2f}us ± {t1berr:.2f}us" if dual_exp else "N/A"
 
+        # 3. Compare the measured decay and fitted components.
         fig, ax = plots.subplots(num="fit", figsize=config.figsize)
 
         ax.plot(xs, real_signals, label="meas", ls="-", marker="o", markersize=3)
@@ -183,6 +198,7 @@ class T1WithToneExp(Experiment[T1Result, T1WithToneCfg]):
 
         fig.tight_layout()
 
+        # 4. Return lifetimes without treating projected IQ as population.
         return T1Analysis(
             t1=float(t1),
             t1_err=float(t1err),

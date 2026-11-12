@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Annotated, ClassVar
 
 import numpy as np
+from matplotlib.artist import Artist
 from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field
@@ -31,10 +32,6 @@ from zcu_lab.v2.support import live_line
 from zcu_lab.v2.support.detune import actual_detune
 
 
-def t2ramsey_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
-    return rotate2real(signals).real
-
-
 @dataclass(frozen=True)
 class T2RamseyResult:
     """Free-evolution delays in us and mean complex IQ, one sample per delay.
@@ -49,6 +46,26 @@ class T2RamseyResult:
     true_activate_detune: float | None = None
 
 
+@validated_dataclass(frozen=True)
+class T2RamseyAnalyzeOptions:
+    fit_fringe: Annotated[bool, FieldMeta(label="Fit fringe")] = True
+    fit_phase: Annotated[bool, FieldMeta(label="Fit phase offset (fringe only)")] = True
+
+
+@dataclass(frozen=True)
+class T2RamseyAnalysis:
+    t2r: float
+    t2r_err: float
+    detune: float
+    detune_err: float
+    fit_quality: Mapping[str, FitQuality] | None = None
+
+
+def t2ramsey_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
+    """Convert mean complex IQ to the real contrast used by live and analysis plots."""
+    return rotate2real(signals).real
+
+
 class T2RamseyCfg(ConfigBase):
     reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
     pi2_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi/2 Pulse")]
@@ -57,7 +74,7 @@ class T2RamseyCfg(ConfigBase):
     detune: float = 0.0
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
-    ] = 1
+    ]
     rounds: Annotated[
         int,
         FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
@@ -77,22 +94,7 @@ class T2RamseyCfg(ConfigBase):
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
-    ] = 1.0
-
-
-@validated_dataclass(frozen=True)
-class T2RamseyAnalyzeOptions:
-    fit_fringe: Annotated[bool, FieldMeta(label="Fit fringe")] = True
-    fit_phase: Annotated[bool, FieldMeta(label="Fit phase offset (fringe only)")] = True
-
-
-@dataclass(frozen=True)
-class T2RamseyAnalysis:
-    t2r: float
-    t2r_err: float
-    detune: float
-    detune_err: float
-    fit_quality: Mapping[str, FitQuality] | None = None
+    ]
 
 
 class T2RamseyExp(Experiment[T2RamseyResult, T2RamseyCfg]):
@@ -144,7 +146,12 @@ class T2RamseyExp(Experiment[T2RamseyResult, T2RamseyCfg]):
         viewer = live_line(ax)
 
         @context.plots.on_plot_thread
-        def update(data):
+        def update(data: NDArray[np.complex128]) -> tuple[Artist, ...]:
+            """Refresh the Ramsey contrast curve.
+
+            data is complex IQ in delay order; NaN marks unmeasured points.
+            Return the changed artists without modifying the input array.
+            """
             return viewer.set(lengths, t2ramsey_signal2real(data))
 
         fig.show()
@@ -152,6 +159,7 @@ class T2RamseyExp(Experiment[T2RamseyResult, T2RamseyCfg]):
             (len(lengths),),
             on_update=update,
         )
+        # 3. Measure freely evolving coherence with a phase-ramped final projection.
         with Schedule(signals_buffer, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
@@ -159,8 +167,6 @@ class T2RamseyExp(Experiment[T2RamseyResult, T2RamseyCfg]):
             length_sweep = cfg.delay
             length_param = builder.add_sweep("delay", length_sweep)
             detune_param = 360 * detune * length_param
-
-            # 3. Let coherence evolve freely, then project with the phase ramp.
 
             if cfg.reset is not None:
                 builder.emit(cfg.reset.build("reset"))
@@ -188,7 +194,7 @@ class T2RamseyExp(Experiment[T2RamseyResult, T2RamseyCfg]):
                 ),
             )
 
-        # Keep measured IQ separate from fitted coherence times and fringe frequency.
+        # 4. Preserve the realized phase-ramp frequency with the measured Ramsey trace.
         return T2RamseyResult(
             times=lengths,
             signals=signals_buffer.array,
@@ -212,6 +218,7 @@ class T2RamseyExp(Experiment[T2RamseyResult, T2RamseyCfg]):
         corrected qubit detuning. Return uncertainties and quality, and draw
         the fit using the same samples.
         """
+        # 1. Recover real-IQ Ramsey contrast for the selected envelope and phase policy.
         result = source.result
         fit_fringe = options.fit_fringe
         fit_phase = options.fit_phase
@@ -220,7 +227,7 @@ class T2RamseyExp(Experiment[T2RamseyResult, T2RamseyCfg]):
 
         real_signals = t2ramsey_signal2real(signals)
 
-        # Choose whether to fit oscillations as well as their decay envelope.
+        # 2. Choose whether to fit oscillations as well as their decay envelope.
         if fit_fringe:
             fixedparams: list[float | None] | None = None
             if not fit_phase:
@@ -248,6 +255,7 @@ class T2RamseyExp(Experiment[T2RamseyResult, T2RamseyCfg]):
             detune = 0.0
             detune_err = 0.0
 
+        # 3. Assess Ramsey coherence time and any fitted fringe frequency against the trace.
         fig, ax = plots.subplots(num="fit", figsize=config.figsize)
 
         ax.plot(lengths, real_signals, label="meas", ls="-", marker="o", markersize=3)

@@ -35,9 +35,20 @@ from .core import t1_signal2real
 
 @dataclass(frozen=True)
 class ScanT1WithToneResult:
+    """Test-tone gains in a.u., durations in us and mean IQ shaped (gain, time)."""
+
     values: NDArray[np.float64]
     times: NDArray[np.float64]
     signals: NDArray[np.complex128]
+
+
+@dataclass(frozen=True)
+class ScanT1WithToneAnalysis:
+    """Accepted test-tone gains in a.u. and fitted T1 values/errors in us."""
+
+    gains: NDArray[np.float64]
+    t1s: NDArray[np.float64]
+    t1errs: NDArray[np.float64]
 
 
 class ScanT1WithToneCfg(ConfigBase):
@@ -49,7 +60,7 @@ class ScanT1WithToneCfg(ConfigBase):
     length: SweepCfg
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
-    ] = 1
+    ]
     rounds: Annotated[
         int,
         FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
@@ -62,14 +73,7 @@ class ScanT1WithToneCfg(ConfigBase):
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
-    ] = 1.0
-
-
-@dataclass(frozen=True)
-class ScanT1WithToneAnalysis:
-    gains: NDArray[np.float64]
-    t1s: NDArray[np.float64]
-    t1errs: NDArray[np.float64]
+    ]
 
 
 class ScanT1WithToneExp(Experiment[ScanT1WithToneResult, ScanT1WithToneCfg]):
@@ -113,6 +117,7 @@ class ScanT1WithToneExp(Experiment[ScanT1WithToneResult, ScanT1WithToneCfg]):
             {"soccfg": soccfg, "gen_ch": cfg.test_pulse.ch},
         )
 
+        # 2. Show the gain/time map and the five most recent gain rows.
         fig, _ = context.plots.subplots(1, 2, num="measurement")
         heat_ax, line_ax = fig.axes
         heat_ax.set(xlabel="gain", ylabel="Time (us)")
@@ -124,19 +129,21 @@ class ScanT1WithToneExp(Experiment[ScanT1WithToneResult, ScanT1WithToneCfg]):
         heatmap = live_heatmap(heat_ax, uniform=True)
         line_ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
         line_ax.grid()
-        lines = live_line(line_ax, num_lines=5)
+        history_rows = 5
+        lines = live_line(line_ax, num_lines=history_rows)
         for artist in line_ax.lines[:-1]:
             artist.set(marker="None", alpha=0.3, color="red")
         line_ax.lines[-1].set(label="current line", marker=".", color="C0")
         line_ax.legend()
 
         @context.plots.on_plot_thread
-        def update(data):
+        def update(data: NDArray[np.complex128]):
+            """Update the gain map and recent time traces from IQ; return artists."""
             real = t1_signal2real(data)
             valid = np.flatnonzero(~np.all(np.isnan(real), axis=1))
             current = int(valid[-1]) if valid.size else -1
-            history = np.full((5, len(lengths)), np.nan)
-            for offset in range(min(5, current + 1)):
+            history = np.full((history_rows, len(lengths)), np.nan)
+            for offset in range(min(history_rows, current + 1)):
                 history[-offset - 1] = real[current - offset]
             return (*heatmap.set(gains, lengths, real), *lines.set(lengths, history))
 
@@ -146,7 +153,7 @@ class ScanT1WithToneExp(Experiment[ScanT1WithToneResult, ScanT1WithToneCfg]):
             on_update=update,
         )
 
-        # 2. Scan gains on the host; sweep tone duration inside each program.
+        # 3. Scan gains on the host; sweep tone duration inside each program.
         with Schedule(signals_buffer, scope=context.scope) as sched:
             for _, step in sched.scan("gain", gains.tolist()):
                 builder = TimelineBuilder(
@@ -171,7 +178,7 @@ class ScanT1WithToneExp(Experiment[ScanT1WithToneResult, ScanT1WithToneCfg]):
                 prog = builder.build()
                 step.run_acquire(prog, soc, rounds=cfg.rounds)
 
-        # 3. Preserve gain-major IQ averages and unfinished NaN slots.
+        # 4. Preserve gain-major IQ averages and unfinished NaN slots.
         return ScanT1WithToneResult(
             values=gains,
             times=lengths,
@@ -185,6 +192,14 @@ class ScanT1WithToneExp(Experiment[ScanT1WithToneResult, ScanT1WithToneCfg]):
         *,
         plots: Plots,
     ) -> ScanT1WithToneAnalysis:
+        """Fit T1 for each smoothed gain row and publish the accepted decay times.
+
+        Pass saved gain/time coordinates and complex IQ with None options;
+        cfg is not needed. Return accepted gains in a.u. and T1/errors in us.
+        Skip NaN rows and fits with relative error above 0.3; raise ValueError
+        when none survive. Publish fit panels without changing the saved arrays.
+        """
+        # 1. Smooth the saved gain/time map before projecting its response axis.
         result = source.result
         del options
 
@@ -193,13 +208,14 @@ class ScanT1WithToneExp(Experiment[ScanT1WithToneResult, ScanT1WithToneCfg]):
         signals = np.asarray(gaussian_filter(signals, sigma=1), dtype=np.complex128)
         real_signals = t1_signal2real(signals)
 
+        # 2. Retain each gain row only when its fitted decay is resolved.
         t1s = np.full(len(gains), np.nan, dtype=np.float64)
         t1errs = np.zeros_like(t1s)
 
         for i in range(len(gains)):
             real_signal = real_signals[i, :]
 
-            # skip if have nan data
+            # Leave incomplete rows out of the fit summary.
             if np.any(np.isnan(real_signal)):
                 continue
 
@@ -221,6 +237,7 @@ class ScanT1WithToneExp(Experiment[ScanT1WithToneResult, ScanT1WithToneCfg]):
         t1s = t1s[valid_idxs]
         t1errs = t1errs[valid_idxs]
 
+        # 3. Compare the response map with accepted lifetimes across gains.
         fig, _ = plots.subplots(num="fit", nrows=2, ncols=1, sharex=True)
         ax1, ax2 = fig.axes
 
@@ -242,4 +259,5 @@ class ScanT1WithToneExp(Experiment[ScanT1WithToneResult, ScanT1WithToneCfg]):
         ax2.set_xlim(gains[0], gains[-1])
         ax2.grid()
 
+        # 4. Return accepted coordinates and their fitted lifetimes.
         return ScanT1WithToneAnalysis(gains=gains, t1s=t1s, t1errs=t1errs)

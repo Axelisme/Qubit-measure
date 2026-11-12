@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Annotated, ClassVar, Literal
 
 import numpy as np
+from matplotlib.artist import Artist
 from numpy.typing import NDArray
 from zcu_tools.cfg_model import ConfigBase, DeviceName, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment, config
@@ -29,6 +31,7 @@ class CheckResult:
 
 
 def check_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
+    """Return the real-valued measurement view of complex IQ without changing the input."""
     return np.abs(signals)
 
 
@@ -45,7 +48,7 @@ class CheckCfg(ConfigBase):
     freq: Annotated[SweepCfg, FieldMeta(label="Freq", unit="MHz")]
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
-    ] = 1
+    ]
     rounds: Annotated[
         int,
         FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
@@ -58,7 +61,7 @@ class CheckCfg(ConfigBase):
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
-    ] = 1.0
+    ]
 
 
 class CheckExp(Experiment[CheckResult, CheckCfg]):
@@ -105,7 +108,12 @@ class CheckExp(Experiment[CheckResult, CheckCfg]):
         line = live_line(ax, num_lines=2)
 
         @context.plots.on_plot_thread
-        def update(data):
+        def update(data: NDArray[np.complex128]) -> Iterable[Artist]:
+            """Draw acquired complex IQ on the measurement axes; return changed artists.
+
+            Read the scan-shaped data without changing it. Update the live
+            artists over the prepared coordinates; plot errors propagate.
+            """
             return line.set(freqs, check_signal2real(data))
 
         fig.show()
@@ -143,6 +151,7 @@ class CheckExp(Experiment[CheckResult, CheckCfg]):
 
         ``options`` is None. This diagnostic returns no calibration value.
         """
+        # 1. Reduce pump-off/on IQ to magnitude for a reflection-spectrum comparison.
         del options
         result = source.result
 
@@ -151,6 +160,7 @@ class CheckExp(Experiment[CheckResult, CheckCfg]):
         signals2D = result.signals
         real_signals = check_signal2real(signals2D)
 
+        # 2. Overlay both pump states on the same readout-frequency axis.
         _, ax = plots.subplots(num="fit", figsize=config.figsize)
         for i, output in enumerate(outputs):
             ax.plot(

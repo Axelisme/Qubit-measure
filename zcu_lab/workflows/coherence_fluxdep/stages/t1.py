@@ -130,8 +130,6 @@ def estimate_t1_time_s(
     Invalid cfg, guesses or timing raise ValueError; non-scalar timing raises
     TypeError. The caller decides whether this stage is enabled.
     """
-    if type(points) is not int or points < 2:
-        raise ValueError("Delay points must be a built-in integer of at least two")
     cfg, _ = _cfg(pulses, settings, points=points, guess_us=guess_us)
     delays_us = t1_delay_axis(
         start=cfg.delay.start,

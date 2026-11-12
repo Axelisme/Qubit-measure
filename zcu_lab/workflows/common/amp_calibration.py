@@ -39,7 +39,6 @@ from zcu_lab.workflows.common.frequency_tracking import trusted_curve
 from zcu_lab.workflows.common.gain import GainClamp, clamp_gain
 from zcu_lab.workflows.common.saving import save_native
 from zcu_lab.workflows.common.stages import StageEnv
-from zcu_lab.workflows.common.summary import observe_operation
 
 
 @dataclass(frozen=True)
@@ -202,7 +201,7 @@ async def calibrate_amp_rabi(
     outcome = await run_core(
         scope, partial(run_amp_rabi, retry=tun.rabi_acquire_retry), cfg, name="amp Rabi"
     )
-    observe_operation(env.summary, outcome)
+    env.summary.observe(outcome)
     amp = AmpCalibrationResult("failed", None, length, gain_clamped=tuple(gain_clamped))
     trace = None
     accepted_gain = None

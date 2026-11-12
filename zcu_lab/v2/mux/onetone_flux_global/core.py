@@ -10,7 +10,7 @@ from typing import Annotated, ClassVar, Literal
 import numpy as np
 from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
-from pydantic import Field, StrictInt, field_validator, model_validator
+from pydantic import Field, StrictInt, model_validator
 from zcu_tools.cfg_model import ConfigBase, DeviceName, FieldMeta
 from zcu_tools.experiment import Experiment
 from zcu_tools.experiment.axes_spec import GroupedAxesSpec
@@ -63,7 +63,7 @@ class OnetoneFluxGlobalCfg(ConfigBase):
 
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
-    ] = 1
+    ]
     rounds: Annotated[
         int,
         FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
@@ -84,30 +84,68 @@ class OnetoneFluxGlobalCfg(ConfigBase):
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
-    ] = 1.0
-
-    @field_validator("df")
-    @classmethod
-    def validate_finite_df(cls, value: SweepCfg) -> SweepCfg:
-        """Reject nonfinite nominal offsets before any DC write."""
-        if not all(np.isfinite(v) for v in (value.start, value.stop, value.step)):
-            raise ValueError("df start, stop and step must be finite MHz values")
-        return value
+    ]
 
     @model_validator(mode="after")
     def validate_scan(self) -> OnetoneFluxGlobalCfg:
-        """Reject mismatched identities, invalid indices and nonfinite scans."""
+        """Reject mismatched identities and invalid original indices."""
         names = [tone.name for tone in self.tones]
         if len(names) != len(self.readout.tones) or len(set(names)) != len(names):
             raise ValueError(
                 "tones must name every original readout position exactly once"
             )
         validate_participants(names, self.participants)
-        if not all(
-            np.isfinite(v) for v in (self.flux.start, self.flux.stop, self.flux.step)
-        ):
-            raise ValueError("flux coordinates must be finite")
         return self
+
+
+def _plot_flux_maps_and_make_updater(
+    plots: Plots, result: MuxFluxResult, flux_unit: str
+) -> Callable[[NDArray[np.complex128]], None]:
+    """Show per-tone magnitude maps and return a stateful plot-thread updater.
+
+    result supplies original tone indices, DC coordinates (K,F), MHz coordinates
+    (K,P) and initial complex IQ (K,F,P). flux_unit labels DC without conversion.
+    The returned callback accepts complete IQ arrays in that same order and
+    replaces the heatmaps and up to ten recent frequency traces. It captures
+    result's coordinate arrays but never writes result or the incoming IQ.
+    plots owns the displayed figures and their lifetime; plotting errors propagate.
+    """
+    flux_values, frequencies = result.flux_values, result.frequencies
+    figures, heatmaps, lines = [], [], []
+    for index in result.tone_indices:
+        fig, _ = plots.subplots(1, 2, num=f"flux_{index}")
+        heat_ax, line_ax = fig.axes
+        heat_ax.set(xlabel=f"DC value ({flux_unit})", ylabel="Frequency (MHz)")
+        line_ax.set_xlabel("Frequency (MHz)")
+        line_ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+        line_ax.grid()
+        heatmaps.append(live_heatmap(heat_ax, uniform=False))
+        lines.append(live_line(line_ax, num_lines=10))
+        for artist in line_ax.lines[:-1]:
+            artist.set(marker="None", alpha=0.3, color="red")
+        line_ax.lines[-1].set(label="current line", marker=".", color="C0")
+        line_ax.legend()
+        figures.append(fig)
+
+    @plots.on_plot_thread
+    def update(data: NDArray[np.complex128]):
+        artists = []
+        for row, (heatmap, line) in enumerate(zip(heatmaps, lines, strict=True)):
+            real = np.abs(data[row])
+            valid = np.flatnonzero(~np.all(np.isnan(real), axis=1))
+            current = int(valid[-1]) if valid.size else -1
+            history = np.full((10, frequencies.shape[1]), np.nan)
+            for offset in range(min(10, current + 1)):
+                history[-offset - 1] = real[current - offset]
+            artists.extend(heatmap.set(flux_values[row], frequencies[row], real))
+            artists.extend(line.set(frequencies[row], history))
+        return artists
+
+    # Publish planned coordinates with no measured cells before the first point.
+    update(result.signals)
+    for fig in figures:
+        fig.show()
+    return update
 
 
 class OnetoneFluxGlobalExp(Experiment[MuxFluxResult, OnetoneFluxGlobalCfg]):
@@ -134,6 +172,7 @@ class OnetoneFluxGlobalExp(Experiment[MuxFluxResult, OnetoneFluxGlobalCfg]):
         Missing devices raise KeyError; unit mismatch raises ValueError and
         unsupported drivers raise TypeError. Driver/acquisition errors propagate.
         Sources remain at the final written value. No output is enabled here.
+
         """
         # 1. Keep original tone identities and the complete planned axes after Stop.
         cfg = deepcopy(config)
@@ -152,7 +191,7 @@ class OnetoneFluxGlobalExp(Experiment[MuxFluxResult, OnetoneFluxGlobalCfg]):
         result = MuxFluxResult(
             np.asarray(indices, dtype=np.int64), flux_values, frequencies, signals
         )
-        update = _make_flux_update(context.plots, result, cfg.flux_unit)
+        update = _plot_flux_maps_and_make_updater(context.plots, result, cfg.flux_unit)
         active_readout = cfg.readout.with_updates(
             tones=[cfg.readout.tones[i] for i in indices]
         )
@@ -221,50 +260,3 @@ class OnetoneFluxGlobalExp(Experiment[MuxFluxResult, OnetoneFluxGlobalCfg]):
             signals[:, point, :] = acquired
             update(signals)
         return result
-
-
-def _make_flux_update(
-    plots: Plots, result: MuxFluxResult, flux_unit: str
-) -> Callable[[NDArray[np.complex128]], None]:
-    """Create per-tone magnitude maps and ten scan-history lines.
-
-    Return a plot-thread updater accepting the complete tone-major IQ array.
-    Publish the planned axes before the first acquisition; the caller retains
-    ownership of Plots and its operation lifetime.
-    """
-    flux_values, frequencies = result.flux_values, result.frequencies
-    figures, heatmaps, lines = [], [], []
-    for index in result.tone_indices:
-        fig, _ = plots.subplots(1, 2, num=f"flux_{index}")
-        heat_ax, line_ax = fig.axes
-        heat_ax.set(xlabel=f"DC value ({flux_unit})", ylabel="Frequency (MHz)")
-        line_ax.set_xlabel("Frequency (MHz)")
-        line_ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
-        line_ax.grid()
-        heatmaps.append(live_heatmap(heat_ax, uniform=False))
-        lines.append(live_line(line_ax, num_lines=10))
-        for artist in line_ax.lines[:-1]:
-            artist.set(marker="None", alpha=0.3, color="red")
-        line_ax.lines[-1].set(label="current line", marker=".", color="C0")
-        line_ax.legend()
-        figures.append(fig)
-
-    @plots.on_plot_thread
-    def update(data: NDArray[np.complex128]):
-        artists = []
-        for row, (heatmap, line) in enumerate(zip(heatmaps, lines, strict=True)):
-            real = np.abs(data[row])
-            valid = np.flatnonzero(~np.all(np.isnan(real), axis=1))
-            current = int(valid[-1]) if valid.size else -1
-            history = np.full((10, frequencies.shape[1]), np.nan)
-            for offset in range(min(10, current + 1)):
-                history[-offset - 1] = real[current - offset]
-            artists.extend(heatmap.set(flux_values[row], frequencies[row], real))
-            artists.extend(line.set(frequencies[row], history))
-        return artists
-
-    # Publish planned coordinates with no measured cells before the first point.
-    update(result.signals)
-    for fig in figures:
-        fig.show()
-    return update

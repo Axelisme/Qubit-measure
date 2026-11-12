@@ -113,3 +113,10 @@ waveforms reject swept lengths, so only their duration uses a host loop.
 
 Fits use count-weighted binomial errors. Endpoint probabilities use
 Jeffreys-smoothed variance so observations at zero or one retain finite weight.
+
+## Calibration order and field units
+
+Calibrate each role's Xπ slot with amplitude and length Rabi before using it.
+Confirm pulse frequency in MHz, signed gain in [-1, 1], and duration in us.
+Use conditional spectroscopy to choose the charge-line frequency.
+The operator must confirm the common duration range in us before Run.

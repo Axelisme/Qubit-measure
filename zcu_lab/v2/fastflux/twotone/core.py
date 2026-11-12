@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Annotated, ClassVar
 
 import numpy as np
+from matplotlib.artist import Artist
 from matplotlib.ticker import ScalarFormatter
 from numpy.typing import NDArray
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
@@ -33,6 +35,7 @@ class TwoToneResult:
 
 
 def twotone_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
+    """Return the real-valued measurement view of complex IQ without changing the input."""
     return rotate2real(signals).real
 
 
@@ -45,7 +48,7 @@ class TwotoneCfg(ConfigBase):
     freq: SweepCfg
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
-    ] = 1
+    ]
     rounds: Annotated[
         int,
         FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
@@ -58,7 +61,7 @@ class TwotoneCfg(ConfigBase):
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
-    ] = 1.0
+    ]
 
 
 class TwoToneExp(Experiment[TwoToneResult, TwotoneCfg]):
@@ -84,7 +87,7 @@ class TwoToneExp(Experiment[TwoToneResult, TwotoneCfg]):
         The map locates spectral features; it does not fit a transition or
         calibrate gain to physical flux.
         """
-        # Quantize flux gain and probe frequency for their own generators.
+        # 1. Quantize flux gain and probe frequency for their own generators.
         cfg = config
         soc, soccfg = context.soc, context.soccfg
 
@@ -99,7 +102,7 @@ class TwoToneExp(Experiment[TwoToneResult, TwotoneCfg]):
             {"soccfg": soccfg, "gen_ch": cfg.qub_pulse.ch},
         )
 
-        # Keep one averaged spectrum per flux gain.
+        # 2. Keep one averaged spectrum per flux gain.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Flux Pulse Gain (a.u.)", ylabel="Frequency (MHz)")
         formatter = ScalarFormatter(useMathText=True)
@@ -109,7 +112,12 @@ class TwoToneExp(Experiment[TwoToneResult, TwotoneCfg]):
         viewer = live_heatmap(ax)
 
         @context.plots.on_plot_thread
-        def update(data):
+        def update(data: NDArray[np.complex128]) -> Iterable[Artist]:
+            """Draw acquired complex IQ on the measurement axes; return changed artists.
+
+            Read the scan-shaped data without changing it. Update the live
+            artists over the prepared coordinates; plot errors propagate.
+            """
             return viewer.set(gains, freqs, twotone_signal2real(data))
 
         fig.show()
@@ -119,7 +127,7 @@ class TwoToneExp(Experiment[TwoToneResult, TwotoneCfg]):
         )
 
         with Schedule(signals_buffer, scope=context.scope) as sched:
-            # Build the pulse sequence without changing the caller's cfg.
+            # 3. Start flux and spectroscopy together; read out after both pulses finish.
             builder = TimelineBuilder(
                 soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
             )
@@ -147,6 +155,7 @@ class TwoToneExp(Experiment[TwoToneResult, TwotoneCfg]):
         plots: Plots,
     ) -> None:
         """Plot the projected IQ spectroscopy map without a resonance fit."""
+        # 1. Project mean IQ to spectroscopy contrast without fitting a resonance.
         del options  # This analysis has no configurable options.
         result = source.result
 
@@ -154,6 +163,7 @@ class TwoToneExp(Experiment[TwoToneResult, TwotoneCfg]):
 
         real_signals = twotone_signal2real(signals2D)
 
+        # 2. Locate spectral features in the flux-gain/frequency contrast map.
         fig, ax = plots.subplots(num="fit")
 
         ax.imshow(

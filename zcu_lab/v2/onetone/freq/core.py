@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Annotated, Any, ClassVar, Literal
 
 import numpy as np
+from matplotlib.artist import Artist
 from numpy.typing import NDArray
 from pydantic import model_validator
 from zcu_tools.analysis.fitting import HangerModel, TransmissionModel
@@ -46,78 +48,8 @@ class FreqAnalysis:
     params: dict[str, Any]
 
 
-class HomophasalSamplingCfg(ConfigBase):
-    r_f: Annotated[float, FieldMeta(label="Resonance frequency", unit="MHz")]
-    rf_w: Annotated[float, FieldMeta(label="Linewidth", unit="MHz")]
-    theta0: Annotated[float, FieldMeta(label="Phase offset", unit="rad")]
-
-    @model_validator(mode="after")
-    def _validate_positive_fit_params(self) -> HomophasalSamplingCfg:
-        if self.r_f <= 0.0:
-            raise ValueError(f"r_f must be positive, got {self.r_f}")
-        if self.rf_w <= 0.0:
-            raise ValueError(f"rf_w must be positive, got {self.rf_w}")
-        return self
-
-    @property
-    def q_l(self) -> float:
-        return self.r_f / self.rf_w
-
-
-class FreqCfg(ConfigBase):
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    readout: Annotated[
-        PulseReadout.Cfg,
-        FieldMeta(
-            label="Readout",
-            description="填入 resonator readout 設定。先用 lookback 取得 TOF，再以 onetone 取得 kappa，確認 trigger offset 與 waveform duration，單位 us。",
-        ),
-    ]
-    freq: Annotated[
-        SweepCfg,
-        FieldMeta(
-            label="Frequency",
-            unit="MHz",
-            description="填入 absolute MHz 起訖值。range_find 不會從已知中心自動設定掃描窗。",
-        ),
-    ]
-    sampling_mode: Annotated[SamplingMode, FieldMeta(label="Sampling mode")] = "linear"
-    homophasal: Annotated[
-        HomophasalSamplingCfg | None, FieldMeta(label="Homophasal")
-    ] = None
-
-    reps: Annotated[
-        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
-    ] = 1
-    rounds: Annotated[
-        int,
-        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
-    ] = 1
-    relax_delay: Annotated[
-        float,
-        FieldMeta(
-            label="Relax delay",
-            unit="us",
-            decimals=3,
-            description="Relaxation delay after each repetition.",
-        ),
-    ] = 1.0
-
-    @model_validator(mode="after")
-    def _validate_sampling_cfg(self) -> FreqCfg:
-        if self.sampling_mode == "homophasal":
-            if self.homophasal is None:
-                raise ValueError(
-                    "sampling_mode='homophasal' requires homophasal fit parameters"
-                )
-        elif self.homophasal is not None:
-            raise ValueError(
-                "homophasal fit parameters require sampling_mode='homophasal'"
-            )
-        return self
-
-
 def freq_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
+    """Return IQ magnitude without changing the complex input."""
     return np.abs(signals)
 
 
@@ -125,7 +57,10 @@ def homophasal_freqs_from_sweep(
     sweep: SweepCfg,
     params: HomophasalSamplingCfg,
 ) -> NDArray[np.float64]:
+    """Return MHz points equally spaced in resonator phase over the sweep bounds."""
+
     def theta_from_freq(freq: float) -> float:
+        """Return the fitted resonator phase in radians at freq MHz."""
         return params.theta0 + 2.0 * np.arctan(
             2.0 * params.q_l * (1.0 - freq / params.r_f)
         )
@@ -156,10 +91,82 @@ def homophasal_sweep2array(
     params: HomophasalSamplingCfg,
     round_info: dict[str, Any],
 ) -> NDArray[np.float64]:
+    """Return hardware-rounded equal-phase MHz points; reject collapsed neighbors."""
     freqs = homophasal_freqs_from_sweep(sweep, params)
     rounded = sweep2array(freqs, "freq", round_info, allow_array=True)
     _ensure_distinct_homophasal_freqs(rounded)
     return rounded
+
+
+class HomophasalSamplingCfg(ConfigBase):
+    r_f: Annotated[float, FieldMeta(label="Resonance frequency", unit="MHz")]
+    rf_w: Annotated[float, FieldMeta(label="Linewidth", unit="MHz")]
+    theta0: Annotated[float, FieldMeta(label="Phase offset", unit="rad")]
+
+    @model_validator(mode="after")
+    def _validate_positive_fit_params(self) -> HomophasalSamplingCfg:
+        if self.r_f <= 0.0:
+            raise ValueError(f"r_f must be positive, got {self.r_f}")
+        if self.rf_w <= 0.0:
+            raise ValueError(f"rf_w must be positive, got {self.rf_w}")
+        return self
+
+    @property
+    def q_l(self) -> float:
+        return self.r_f / self.rf_w
+
+
+class FreqCfg(ConfigBase):
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    readout: Annotated[
+        PulseReadout.Cfg,
+        FieldMeta(
+            label="Readout",
+            description="Resonator readout 設定與 timing（us）。",
+        ),
+    ]
+    freq: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="Frequency",
+            unit="MHz",
+            description="Absolute MHz 掃描起訖值。",
+        ),
+    ]
+    sampling_mode: Annotated[SamplingMode, FieldMeta(label="Sampling mode")] = "linear"
+    homophasal: Annotated[
+        HomophasalSamplingCfg | None, FieldMeta(label="Homophasal")
+    ] = None
+
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ]
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
+        ),
+    ]
+
+    @model_validator(mode="after")
+    def _validate_sampling_cfg(self) -> FreqCfg:
+        if self.sampling_mode == "homophasal":
+            if self.homophasal is None:
+                raise ValueError(
+                    "sampling_mode='homophasal' requires homophasal fit parameters"
+                )
+        elif self.homophasal is not None:
+            raise ValueError(
+                "homophasal fit parameters require sampling_mode='homophasal'"
+            )
+        return self
 
 
 class FreqExp(Experiment[FreqResult, FreqCfg]):
@@ -175,13 +182,6 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         tag="onetone/freq",
     )
 
-    def _round_info(self, cfg: FreqCfg, soccfg) -> dict[str, Any]:
-        return {
-            "soccfg": soccfg,
-            "gen_ch": cfg.readout.gen_ch,
-            "ro_ch": cfg.readout.ro_ch,
-        }
-
     def run(self, config: FreqCfg, *, context: RunContext) -> FreqResult:
         """Measure the resonator response with linear or equal-phase frequency spacing.
 
@@ -191,6 +191,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         Homophasal sampling requires positive fit parameters and rejects points
         that collapse onto the same hardware frequency.
         """
+        # 1. Resolve linear or equal-phase samples on the readout hardware grid.
         cfg = deepcopy(config)
         soccfg = context.soccfg
         if cfg.sampling_mode == "linear":
@@ -200,19 +201,32 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
             if params is None:
                 raise ValueError("homophasal sampling requires fit parameters")
             freqs = homophasal_sweep2array(
-                cfg.freq, params, self._round_info(cfg, soccfg)
+                cfg.freq,
+                params,
+                {
+                    "soccfg": soccfg,
+                    "gen_ch": cfg.readout.gen_ch,
+                    "ro_ch": cfg.readout.ro_ch,
+                },
             )
 
+        # 2. Preview resonance magnitude while preserving complex IQ for fitting.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Frequency (MHz)", ylabel="Amplitude")
         line = live_line(ax)
 
         @context.plots.on_plot_thread
-        def update(data):
+        def update(data: NDArray[np.complex128]) -> Iterable[Artist]:
+            """Draw acquired complex IQ on the measurement axes; return changed artists.
+
+            Read the scan-shaped data without changing it. Update the live
+            artists over the prepared coordinates; plot errors propagate.
+            """
             return line.set(freqs, np.abs(data))
 
         fig.show()
         signals = SignalBuffer((len(freqs),), on_update=update)
+        # 3. Reset and measure each resonator frequency with the chosen spacing.
         with Schedule(signals, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 context.soccfg,
@@ -237,8 +251,10 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         *,
         plots: Plots,
     ) -> FreqAnalysis:
+        # 1. Fit the complex resonance with the requested background model.
         fig, _ = plots.subplots(num="fit", figsize=(9, 8))
         answer = fit_resonance(source.result.freqs, source.result.signals, options)
+        # 2. Compare the fitted hanger or transmission model on interior samples.
         freqs, signals = source.result.freqs[1:-1], source.result.signals[1:-1]
         params = answer.params
         fig.clear()

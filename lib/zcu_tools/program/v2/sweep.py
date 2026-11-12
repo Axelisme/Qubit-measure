@@ -1,17 +1,18 @@
 from __future__ import annotations
 
 import math
+from typing import Annotated
 
-from pydantic import model_validator
+from pydantic import Field, model_validator
 
 from zcu_tools.cfg_model import ConfigBase
 
 
 class SweepCfg(ConfigBase):
-    start: float
-    stop: float
+    start: Annotated[float, Field(allow_inf_nan=False)]
+    stop: Annotated[float, Field(allow_inf_nan=False)]
     expts: int
-    step: float
+    step: Annotated[float, Field(allow_inf_nan=False)]
 
     @model_validator(mode="after")
     def _validate_sweep_consistency(self) -> SweepCfg:

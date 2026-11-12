@@ -50,7 +50,7 @@ class GainAnalysis:
 
 
 class GainCfg(ConfigBase):
-    """Sweep a const flux reset's gain between two calibrated pi switches."""
+    """Sweep a flux reset pulse's gain between two calibrated pi switches."""
 
     reset: Annotated[
         Reset.Cfg | None,
@@ -67,7 +67,7 @@ class GainCfg(ConfigBase):
         PulseReset.Cfg,
         FieldMeta(
             label="Tested reset",
-            description="Zero-frequency const flux pulse at fixed length; gain is swept.",
+            description="Flux reset pulse at fixed length; gain is swept.",
         ),
     ]
     readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
@@ -76,7 +76,7 @@ class GainCfg(ConfigBase):
     reps: Annotated[
         int,
         FieldMeta(label="Reps", description="Repetitions per branch/gain per round."),
-    ] = 1
+    ]
     rounds: Annotated[
         int,
         FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
@@ -89,7 +89,7 @@ class GainCfg(ConfigBase):
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
-    ] = 1.0
+    ]
 
 
 class GainExp(Experiment[GainResult, GainCfg]):
@@ -123,13 +123,11 @@ class GainExp(Experiment[GainResult, GainCfg]):
         flux pulse, after-reset pi off/on, and the same readout. Both switches
         use pi_pulse unchanged. Keep flux duration and pre/post delays fixed.
         Return rounded gains (a.u.) and IQ shaped (2, 2, N), switches [0, 1].
-        Reject non-const or nonzero-frequency flux pulses before acquisition.
         Live curves show I only, without choosing a population direction.
         """
+        # 1. Quantize flux-reset gains and monitor all four before/after-pi branches.
         cfg = deepcopy(cfg)
         pulse_cfg = cfg.tested_reset.pulse_cfg
-        if pulse_cfg.waveform.style != "const" or pulse_cfg.freq != 0.0:
-            raise ValueError("Flux reset requires a const pulse at zero frequency.")
 
         soc, soccfg = context.soc, context.soccfg
         gains = sweep2array(
@@ -143,7 +141,7 @@ class GainExp(Experiment[GainResult, GainCfg]):
             signal2real=lambda data: data.real.reshape(4, -1),
         )
 
-        # Each gain has the Cartesian product of the two calibrated pi switches.
+        # 2. Compare before/after-pi responses at each gain to isolate the reset contrast.
         with Schedule(signals_buffer, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
@@ -199,13 +197,14 @@ class GainExp(Experiment[GainResult, GainCfg]):
         choose the first gain in scan order; no candidate gives selected_gain=None.
         Publish raw I/Q, r and residual curves. source.cfg may be None.
         """
+        # 1. Require a complete before/after-pi branch layout for the gain-response estimate.
         del options
         result = source.result
         gains, signals = result.gains, result.signals
         if gains.ndim != 1 or signals.shape != (2, 2, gains.size):
             raise ValueError("Flux reset IQ must have shape (2, 2, number of gains)")
 
-        # After-pi differences cancel the common readout offset, not p0.
+        # 2. After-pi differences cancel the common readout offset, not p0.
         with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
             d0 = signals[0, 0] - signals[0, 1]
             d1 = signals[1, 0] - signals[1, 1]
@@ -229,7 +228,7 @@ class GainExp(Experiment[GainResult, GainCfg]):
             else None
         )
 
-        # Keep the measured branches visible beside the uncalibrated estimate.
+        # 3. Keep the measured branches visible beside the uncalibrated estimate.
         fig, _ = plots.subplots(
             num="fit", nrows=4, sharex=True, figsize=(10, 10), layout="constrained"
         )

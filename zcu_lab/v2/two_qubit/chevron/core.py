@@ -50,6 +50,15 @@ from .._sums import (
 )
 
 
+@dataclass(frozen=True)
+class ChevronResult(RabiScanResult):
+    """Common drive frequency coordinates, durations in us and (Nc,Nd,3,3) counts.
+
+    Terminal class axes are F1/F2, each g/e/other. Unmeasured points are NaN.
+    Counts are float64 totals, not normalized probabilities.
+    """
+
+
 class ChevronCfg(ConfigBase):
     """Common MHz frequency scan with fixed signed gains and relative phase.
 
@@ -75,14 +84,14 @@ class ChevronCfg(ConfigBase):
         PulseCfg,
         FieldMeta(
             label="F1 Xπ",
-            description="填入 F1 x180 slot，先做 amplitude／length Rabi。frequency MHz、gain a.u. within [-1, 1]、duration us。",
+            description="Calibrated F1 X180 pulse, frequency MHz, gain [-1, 1] and duration us.",
         ),
     ]
     x180_f2: Annotated[
         PulseCfg,
         FieldMeta(
             label="F2 Xπ",
-            description="填入 F2 x180 slot，先做 amplitude／length Rabi。frequency MHz、gain a.u. within [-1, 1]、duration us。",
+            description="Calibrated F2 X180 pulse, frequency MHz, gain [-1, 1] and duration us.",
         ),
     ]
     drive: Annotated[
@@ -114,13 +123,13 @@ class ChevronCfg(ConfigBase):
         FieldMeta(
             unit="us",
             label="Duration",
-            description="填入兩條 charge-line 的共同 duration 起訖值，單位 us。先做 conditional spectroscopy 選頻，再由操作者確認 chevron 時間範圍。",
+            description="Common duration sweep for both charge-line pulses in us.",
         ),
     ]
 
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
-    ] = 1
+    ]
     rounds: Annotated[
         int,
         FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
@@ -141,41 +150,28 @@ class ChevronCfg(ConfigBase):
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
-    ] = 1.0
+    ]
 
     @model_validator(mode="after")
     def validate_duration_scan(self) -> Self:
-        """Reject invalid tones, routes, durations and unscalable waveforms."""
+        """Reject invalid tones, routes and nonpositive durations."""
         validate_classifiers(self.readout, self.roles)
         if self.drive.f1.ch != self.x180_f1.ch or self.drive.f2.ch != self.x180_f2.ch:
             raise ValueError("Each drive must use its role's calibrated Xπ generator")
         durations = sweep2array(self.duration)
-        if not np.all(np.isfinite(durations)) or np.any(durations <= 0):
-            raise ValueError("Drive durations must be finite and positive")
-        for pulse in (self.drive.f1, self.drive.f2):
-            probe = pulse.model_copy(deep=True)
-            probe.set_param("length", float(durations[0]))
+        if np.any(durations <= 0):
+            raise ValueError("Drive durations must be positive")
         return self
-
-    @model_validator(mode="after")
-    def validate_coordinate(self) -> Self:
-        """Require finite requested frequency coordinates."""
-        if not np.all(np.isfinite(sweep2array(self.frequency))):
-            raise ValueError("Common drive frequency coordinates must be finite")
-        return self
-
-
-@dataclass(frozen=True)
-class ChevronResult(RabiScanResult):
-    """Common drive frequency coordinates, durations in us and (Nc,Nd,3,3) counts.
-
-    Terminal class axes are F1/F2, each g/e/other. Unmeasured points are NaN.
-    Counts are float64 totals, not normalized probabilities.
-    """
 
 
 def restore_result(data: GroupedLoadData[ChevronCfg]) -> ChevronResult:
-    """Restore summed counts; old raw-IQ files without sums raise ValueError."""
+    """Restore summed counts; old raw-IQ files without sums raise ValueError.
+
+    data supplies the grouped sums variable and its persisted scan axes. Return
+    this experiment's Result with float64 class counts and its original axis
+    ordering. Missing variables and invalid data propagate load errors. Do not
+    mutate the loaded data, acquire or draw; no raw-IQ reconstruction is attempted.
+    """
     sums = data.variable("sums")
     return ChevronResult(
         coordinates=sums.axes[3], durations=sums.axes[2], sums=sums.z.astype(np.float64)
@@ -226,21 +222,25 @@ class ChevronExp(Experiment[ChevronResult, ChevronCfg]):
         Constant and flat-top drives use a hardware duration sweep. Sampled
         envelopes rebuild at each host duration. Both return coordinate-major
         float64 counts with the same Result axes and cancellation semantics.
+
         """
+        # 1. Use hardware duration sweeps only when both drives are constant or flat-top.
         if all(
             isinstance(pulse.waveform, (ConstWaveformCfg, FlatTopWaveformCfg))
             for pulse in (config.drive.f1, config.drive.f2)
         ):
             return self._run_hardware_duration(config, context=context)
+        # 2. Rebuild sampled drive envelopes on the host while keeping the other axis in hardware.
         return self._run_host_duration(config, context=context)
 
     def _run_hardware_duration(
         self, config: ChevronCfg, *, context: RunContext
     ) -> ChevronResult:
         """Acquire all coordinates and durations in hardware, accumulating rounds."""
-        validate_classifiers(config.readout, config.roles)
+        # 1. Pair common-frequency and duration axes for the two-drive return map.
         coordinates = sweep2array(config.frequency)
         durations = sweep2array(config.duration)
+        # 2. Track terminal P00 versus duration for each common-frequency slice.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Drive duration (us)", ylabel="Terminal P00")
         viewer = live_line(ax, num_lines=len(coordinates))
@@ -256,6 +256,7 @@ class ChevronExp(Experiment[ChevronResult, ChevronCfg]):
 
         class_shape = (3, 3)
         shape = (len(coordinates), len(durations), *class_shape)
+        # 3. Sweep both axes in hardware through preparation, simultaneous drives and double-Xpi contrast.
         buffer = SignalBuffer(shape, dtype=np.float64, on_update=update_view)
         with Schedule(buffer, scope=context.scope) as sched:
             builder = TimelineBuilder(
@@ -306,15 +307,17 @@ class ChevronExp(Experiment[ChevronResult, ChevronCfg]):
             )
         buffer.trigger_update(flush=True)
         sums = buffer.array
+        # 4. Retain raw nine-class counts, including completed rounds and NaN gaps after cancellation.
         return ChevronResult(coordinates, durations, sums)
 
     def _run_host_duration(
         self, config: ChevronCfg, *, context: RunContext
     ) -> ChevronResult:
         """Rebuild sampled envelopes per host duration; keep coordinates in hardware."""
-        validate_classifiers(config.readout, config.roles)
+        # 1. Keep the common-frequency grid fixed while sampled-envelope durations advance on the host.
         coordinates = sweep2array(config.frequency)
         durations = sweep2array(config.duration)
+        # 2. Track terminal P00 versus duration for each common-frequency slice.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Drive duration (us)", ylabel="Terminal P00")
         viewer = live_line(ax, num_lines=len(coordinates))
@@ -330,6 +333,7 @@ class ChevronExp(Experiment[ChevronResult, ChevronCfg]):
 
         class_shape = (3, 3)
         shape = (len(durations), len(coordinates), *class_shape)
+        # 3. Rebuild each duration's prepare/drive/contrast sequence with a hardware common-frequency sweep.
         buffer = SignalBuffer(shape, dtype=np.float64, on_update=update_view)
         # Sampled cosine/Gauss/DRAG envelopes reject QickParam lengths. Only their
         # duration stays on the host; coordinate remains a hardware sweep.
@@ -383,6 +387,7 @@ class ChevronExp(Experiment[ChevronResult, ChevronCfg]):
                 )
         buffer.trigger_update(flush=True)
         sums = buffer.array.swapaxes(0, 1)
+        # 4. Restore coordinate-major axes without discarding class counts or partial acquisition counts.
         return ChevronResult(coordinates, durations, sums)
 
     def analyze(
@@ -396,7 +401,9 @@ class ChevronExp(Experiment[ChevronResult, ChevronCfg]):
 
         Missing cfg or mismatched axes raises ValueError. Failed fits report a
         reason, not zero rates. No IQ classification or automatic write occurs.
+
         """
+        # 1. Use saved axes and all terminal classes to distinguish complete traces from partial counts.
         del options
         if source.cfg is None:
             raise ValueError(
@@ -422,6 +429,7 @@ class ChevronExp(Experiment[ChevronResult, ChevronCfg]):
             totals,
             None,
         )
+        # 2. Show the return chevron and all terminal populations before fitting duration-slice rates.
         fig, ax = plots.subplots(num="chevron", figsize=(9, 6), layout="constrained")
         image = ax.pcolormesh(
             result.durations,
@@ -461,6 +469,7 @@ class ChevronExp(Experiment[ChevronResult, ChevronCfg]):
                 title=f"Terminal {labels[outcome]} · other retained in denominator",
             )
             ax.legend(title="Common drive frequency (MHz)", fontsize="x-small", ncols=2)
+        # 3. Fit complete duration traces with undamped cosines; exclude rates below inverse span.
         rates = fit_duration_rates(durations, answer)
         _, ax = plots.subplots(num="rabi_rate", figsize=(10, 6), layout="constrained")
         ax.errorbar(

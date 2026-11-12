@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Annotated, ClassVar
 
 import numpy as np
+from matplotlib.artist import Artist
 from matplotlib.ticker import ScalarFormatter
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter1d
@@ -35,6 +37,7 @@ class T1Result:
 
 
 def t1_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
+    """Return the real-valued measurement view of complex IQ without changing the input."""
     return rotate2real(signals).real
 
 
@@ -47,7 +50,7 @@ class T1Cfg(ConfigBase):
     length: SweepCfg
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
-    ] = 1
+    ]
     rounds: Annotated[
         int,
         FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
@@ -60,7 +63,7 @@ class T1Cfg(ConfigBase):
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
-    ] = 1.0
+    ]
 
 
 class T1Exp(Experiment[T1Result, T1Cfg]):
@@ -86,7 +89,7 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
         shaped (gain, length). Each row is a decay trace; T1 is fitted later,
         not a directly measured population or a conversion from gain to flux.
         """
-        # Resolve flux gain and duration coordinates on the hardware grid.
+        # 1. Resolve flux gain and duration coordinates on the hardware grid.
         cfg = config
         soc, soccfg = context.soc, context.soccfg
 
@@ -97,7 +100,7 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
         gains = sweep2array(gain_sweep, "gain", {"soccfg": soccfg, "gen_ch": lf_ch})
         lengths = sweep2array(length_sweep, "time", {"soccfg": soccfg, "gen_ch": lf_ch})
 
-        # Keep the relaxation traces grouped by flux gain.
+        # 2. Keep the relaxation traces grouped by flux gain.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Flux Pulse Gain (a.u.)", ylabel="Time (us)")
         formatter = ScalarFormatter(useMathText=True)
@@ -107,7 +110,12 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
         viewer = live_heatmap(ax)
 
         @context.plots.on_plot_thread
-        def update(data):
+        def update(data: NDArray[np.complex128]) -> Iterable[Artist]:
+            """Draw acquired complex IQ on the measurement axes; return changed artists.
+
+            Read the scan-shaped data without changing it. Update the live
+            artists over the prepared coordinates; plot errors propagate.
+            """
             return viewer.set(gains, lengths, t1_signal2real(data))
 
         fig.show()
@@ -117,7 +125,7 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
         )
 
         with Schedule(signals_buffer, scope=context.scope) as sched:
-            # Build the pulse sequence without changing the caller's cfg.
+            # 3. Excite with pi, then vary the flux pulse gain and duration before readout.
             builder = TimelineBuilder(
                 soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
             )
@@ -146,6 +154,7 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
         refit each row with that baseline fixed. Rejected final fits retain NaN
         T1 values; their initialized zero errors do not indicate a valid fit.
         """
+        # 1. Project each flux-gain row to a real relaxation trace.
         del options  # This analysis has no configurable options.
         result = source.result
 
@@ -153,7 +162,10 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
 
         real_signals = t1_signal2real(signals2D)
 
-        def is_good_fit(fit_signal, real_signal) -> bool:
+        def is_good_fit(
+            fit_signal: NDArray[np.float64], real_signal: NDArray[np.float64]
+        ) -> np.bool_:
+            """Return whether the candidate follows the observed relaxation trace closely enough."""
             real_ptp = np.ptp(real_signal)
             fit_ptp = np.ptp(fit_signal)
             residual = real_signal - fit_signal
@@ -162,6 +174,7 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
                 np.abs(smooth_residual)
             )
 
+        # 2. Share a median baseline from fits passing contrast/residual checks.
         prev_pOpt = None
         list_pOpt = []
         for real_signal in real_signals:
@@ -174,6 +187,7 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
             list_pOpt.append(prev_pOpt)
         mean_y0 = np.median([pOpt[0] for pOpt in list_pOpt if pOpt is not None]).item()
 
+        # 3. Refit at fixed baseline; rejected T1 values stay NaN with zero errors.
         t1s = np.full_like(gains, np.nan)
         t1errs = np.zeros_like(gains)
         for i, real_signal in enumerate(real_signals):
@@ -187,6 +201,7 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
                 t1s[i] = fit.decay_time
                 t1errs[i] = fit.decay_time_err
 
+        # 4. Overlay accepted T1 values and fit errors on the measured decay heatmap.
         fig, ax = plots.subplots(num="fit", figsize=config.figsize)
 
         ax.imshow(

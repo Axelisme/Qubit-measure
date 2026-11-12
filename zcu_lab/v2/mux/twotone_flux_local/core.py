@@ -33,7 +33,6 @@ from zcu_lab.v2.support.mux_flux import MuxFluxResult, mux_flux_spec
 from zcu_lab.v2.support.mux_sweep_cfg import (
     MuxDriveToneCfg,
     ToneRangeCfg,
-    require_tone_value,
     validate_mux_scan,
 )
 
@@ -96,11 +95,11 @@ class TwotoneFluxLocalCfg(ConfigBase):
 
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
-    ] = 1
+    ] = Field(gt=0)
     rounds: Annotated[
         int,
         FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
-    ] = 1
+    ] = Field(default=1, gt=0)
     initial_delay: Annotated[
         float,
         FieldMeta(
@@ -108,7 +107,7 @@ class TwotoneFluxLocalCfg(ConfigBase):
             unit="us",
             description="Delay before the first repetition.",
         ),
-    ] = 1.0
+    ] = Field(default=1.0, ge=0, allow_inf_nan=False)
     relax_delay: Annotated[
         float,
         FieldMeta(
@@ -117,7 +116,7 @@ class TwotoneFluxLocalCfg(ConfigBase):
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
-    ] = 1.0
+    ] = Field(ge=0, allow_inf_nan=False)
 
     @model_validator(mode="after")
     def validate_scan(self) -> TwotoneFluxLocalCfg:
@@ -126,14 +125,78 @@ class TwotoneFluxLocalCfg(ConfigBase):
         devices = [self.tones[index].flux_dev for index in self.participants]
         if len(set(devices)) != len(devices):
             raise ValueError("local flux lines must use distinct devices")
-        for index in self.participants:
-            tone = self.tones[index]
-            require_tone_value(tone.freq, ("tones", index, "freq"))
-            require_tone_value(tone.flux, ("tones", index, "flux"))
-            make_sweep(
-                tone.require_flux().start, tone.require_flux().stop, self.flux_expts
-            )
         return self
+
+
+def _require_finite_spectrum(
+    acquired: NDArray[np.complex128], *, point: int, result: MuxFluxResult
+) -> None:
+    """Raise ValueError for nonfinite completed IQ, reporting planned coordinates.
+
+    acquired is one tone-major (K,P) complex spectrum. point is its zero-based
+    DC index in result, which supplies original tone and planned DC/MHz axes
+    for the error message. Return None for all-finite IQ; mutate no inputs.
+    """
+    nonfinite = ~np.isfinite(acquired)
+    if nonfinite.any():
+        row, column = np.argwhere(nonfinite)[0]
+        raise ValueError(
+            f"Nonfinite inner IQ at flux point {point} (zero-based): "
+            f"{np.count_nonzero(nonfinite)}/{acquired.size} invalid cells; "
+            f"first at tone {result.tone_indices[row]}, "
+            f"DC={result.flux_values[row, point]} (native units), "
+            f"frequency={result.frequencies[row, column]} MHz: "
+            f"{acquired[row, column]!r}"
+        )
+
+
+def _plot_flux_maps_and_make_updater(
+    plots: Plots, result: MuxFluxResult, flux_unit: str
+) -> Callable[[NDArray[np.complex128]], None]:
+    """Show per-tone magnitude maps and return a stateful plot-thread updater.
+
+    result supplies original tone indices, DC coordinates (K,F), MHz coordinates
+    (K,P) and initial complex IQ (K,F,P). flux_unit labels DC without conversion.
+    The returned callback accepts complete IQ arrays in that same order and
+    replaces the heatmaps and up to ten recent frequency traces. It captures
+    result's coordinate arrays but never writes result or the incoming IQ.
+    plots owns the displayed figures and their lifetime; plotting errors propagate.
+    """
+    flux_values, frequencies = result.flux_values, result.frequencies
+    figures, heatmaps, lines = [], [], []
+    for index in result.tone_indices:
+        fig, _ = plots.subplots(1, 2, num=f"flux_{index}")
+        heat_ax, line_ax = fig.axes
+        heat_ax.set(xlabel=f"DC value ({flux_unit})", ylabel="Frequency (MHz)")
+        line_ax.set_xlabel("Frequency (MHz)")
+        line_ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+        line_ax.grid()
+        heatmaps.append(live_heatmap(heat_ax, uniform=False))
+        lines.append(live_line(line_ax, num_lines=10))
+        for artist in line_ax.lines[:-1]:
+            artist.set(marker="None", alpha=0.3, color="red")
+        line_ax.lines[-1].set(label="current line", marker=".", color="C0")
+        line_ax.legend()
+        figures.append(fig)
+
+    @plots.on_plot_thread
+    def update(data: NDArray[np.complex128]):
+        artists = []
+        for row, (heatmap, line) in enumerate(zip(heatmaps, lines, strict=True)):
+            real = np.abs(data[row])
+            valid = np.flatnonzero(~np.all(np.isnan(real), axis=1))
+            current = int(valid[-1]) if valid.size else -1
+            history = np.full((10, frequencies.shape[1]), np.nan)
+            for offset in range(min(10, current + 1)):
+                history[-offset - 1] = real[current - offset]
+            artists.extend(heatmap.set(flux_values[row], frequencies[row], real))
+            artists.extend(line.set(frequencies[row], history))
+        return artists
+
+    update(result.signals)
+    for fig in figures:
+        fig.show()
+    return update
 
 
 class TwotoneFluxLocalExp(Experiment[MuxFluxResult, TwotoneFluxLocalCfg]):
@@ -155,8 +218,10 @@ class TwotoneFluxLocalExp(Experiment[MuxFluxResult, TwotoneFluxLocalCfg]):
         Cancelling the Run scope stops the scan and retains completed points.
         Driver and acquisition errors propagate.
         Sources remain at the final written value. No output is enabled here.
+
         """
-        cfg = TwotoneFluxLocalCfg.model_validate(config.model_dump())
+        # 1. Pair local-flux grids with each participant's quantized drive-frequency axis.
+        cfg = config.model_copy(deep=True)
         indices = list(cfg.participants)
         devices = [cfg.tones[i].flux_dev for i in indices]
         for name in devices:
@@ -199,7 +264,7 @@ class TwotoneFluxLocalExp(Experiment[MuxFluxResult, TwotoneFluxLocalCfg]):
         result = MuxFluxResult(
             np.asarray(indices, dtype=np.int64), flux_values, frequencies, signals
         )
-        update = _make_flux_update(context.plots, result, cfg.flux_unit)
+        update = _plot_flux_maps_and_make_updater(context.plots, result, cfg.flux_unit)
 
         # Reset, start drives together, then read out after the longest branch.
         builder = TimelineBuilder(
@@ -234,6 +299,7 @@ class TwotoneFluxLocalExp(Experiment[MuxFluxResult, TwotoneFluxLocalCfg]):
         prog = builder.build()
 
         # Local lines advance together. Each point has its own acquire scope.
+        # 2. Advance local lines together and reuse the hardware spectrum program after settling.
         for point in range(cfg.flux_expts):
             if context.scope.stop.is_set():
                 break
@@ -269,62 +335,5 @@ class TwotoneFluxLocalExp(Experiment[MuxFluxResult, TwotoneFluxLocalCfg]):
             _require_finite_spectrum(iq, point=point, result=result)
             signals[:, point, :] = iq
             update(signals)
+        # 3. Keep only complete finite spectra; cancelled local-flux points remain NaN in the maps.
         return result
-
-
-def _require_finite_spectrum(
-    acquired: NDArray[np.complex128], *, point: int, result: MuxFluxResult
-) -> None:
-    """Report the first invalid completed IQ cell with its planned coordinates."""
-    nonfinite = ~np.isfinite(acquired)
-    if nonfinite.any():
-        row, column = np.argwhere(nonfinite)[0]
-        raise ValueError(
-            f"Nonfinite inner IQ at flux point {point} (zero-based): "
-            f"{np.count_nonzero(nonfinite)}/{acquired.size} invalid cells; "
-            f"first at tone {result.tone_indices[row]}, "
-            f"DC={result.flux_values[row, point]} (native units), "
-            f"frequency={result.frequencies[row, column]} MHz: "
-            f"{acquired[row, column]!r}"
-        )
-
-
-def _make_flux_update(
-    plots: Plots, result: MuxFluxResult, flux_unit: str
-) -> Callable[[NDArray[np.complex128]], None]:
-    """Publish planned axes and update each tone's magnitude map and line history."""
-    flux_values, frequencies = result.flux_values, result.frequencies
-    figures, heatmaps, lines = [], [], []
-    for index in result.tone_indices:
-        fig, _ = plots.subplots(1, 2, num=f"flux_{index}")
-        heat_ax, line_ax = fig.axes
-        heat_ax.set(xlabel=f"DC value ({flux_unit})", ylabel="Frequency (MHz)")
-        line_ax.set_xlabel("Frequency (MHz)")
-        line_ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
-        line_ax.grid()
-        heatmaps.append(live_heatmap(heat_ax, uniform=False))
-        lines.append(live_line(line_ax, num_lines=10))
-        for artist in line_ax.lines[:-1]:
-            artist.set(marker="None", alpha=0.3, color="red")
-        line_ax.lines[-1].set(label="current line", marker=".", color="C0")
-        line_ax.legend()
-        figures.append(fig)
-
-    @plots.on_plot_thread
-    def update(data: NDArray[np.complex128]):
-        artists = []
-        for row, (heatmap, line) in enumerate(zip(heatmaps, lines, strict=True)):
-            real = np.abs(data[row])
-            valid = np.flatnonzero(~np.all(np.isnan(real), axis=1))
-            current = int(valid[-1]) if valid.size else -1
-            history = np.full((10, frequencies.shape[1]), np.nan)
-            for offset in range(min(10, current + 1)):
-                history[-offset - 1] = real[current - offset]
-            artists.extend(heatmap.set(flux_values[row], frequencies[row], real))
-            artists.extend(line.set(frequencies[row], history))
-        return artists
-
-    update(result.signals)
-    for fig in figures:
-        fig.show()
-    return update

@@ -119,7 +119,7 @@ from typing import Annotated, ClassVar
 
 import numpy as np
 from numpy.typing import NDArray
-from pydantic import StrictInt, model_validator
+from pydantic import Field, StrictInt, model_validator
 from pydantic.dataclasses import dataclass as validated_dataclass
 from zcu_tools.analysis.failure import AnalysisFailed
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
@@ -190,11 +190,11 @@ class MuxT2RamseyCfg(ConfigBase):
 
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
-    ] = 1
+    ] = Field(gt=0)
     rounds: Annotated[
         int,
         FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
-    ] = 1
+    ] = Field(default=1, gt=0)
     initial_delay: Annotated[
         float,
         FieldMeta(
@@ -202,7 +202,7 @@ class MuxT2RamseyCfg(ConfigBase):
             unit="us",
             description="Delay before the first repetition.",
         ),
-    ] = 1.0
+    ] = Field(default=1.0, ge=0, allow_inf_nan=False)
     relax_delay: Annotated[
         float,
         FieldMeta(
@@ -211,7 +211,7 @@ class MuxT2RamseyCfg(ConfigBase):
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
-    ] = 1.0
+    ] = Field(ge=0, allow_inf_nan=False)
 
     @model_validator(mode="after")
     def validate_scan(self) -> MuxT2RamseyCfg:
@@ -226,6 +226,7 @@ class MuxT2RamseyExp(Experiment[MuxCoherenceResult, MuxT2RamseyCfg]):
     AXES_SPEC: ClassVar[GroupedAxesSpec[MuxCoherenceResult, MuxT2RamseyCfg]] = (
         coherence_spec(MuxT2RamseyCfg, tag="mux/time_domain/t2ramsey")
     )
+
     Options: ClassVar[type[T2RamseyAnalyzeOptions]] = T2RamseyAnalyzeOptions
 
     def run(self, config: MuxT2RamseyCfg, *, context: RunContext) -> MuxCoherenceResult:
@@ -240,7 +241,7 @@ class MuxT2RamseyExp(Experiment[MuxCoherenceResult, MuxT2RamseyCfg]):
         Acquisition, validation, build and conversion errors propagate.
         """
         # 1. Keep participant order while selecting drives and mux readout tones.
-        cfg = MuxT2RamseyCfg.model_validate(config.model_dump())
+        cfg = config.model_copy(deep=True)
         indices = list(cfg.participants)
         tones = [cfg.tones[index] for index in indices]
         drives = [tone.require_drive() for tone in tones]
@@ -328,7 +329,7 @@ class MuxT2RamseyExp(Experiment[MuxCoherenceResult, MuxT2RamseyCfg]):
             readout_module = MuxReadout("readout", readout)
             builder.emit(readout_module)
 
-            # 4. Average rounds into tone-major IQ without filling missing points.
+            # 3. Average rounds into tone-major IQ without filling missing points.
             prog = builder.build()
             _ = sched.run_acquire(
                 prog,

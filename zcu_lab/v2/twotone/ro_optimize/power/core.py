@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Annotated, Any, ClassVar
 
 import numpy as np
+from matplotlib.artist import Artist
 from numpy.typing import NDArray
 from pydantic import Field
 from pydantic.dataclasses import dataclass as pydantic_dataclass
@@ -50,23 +51,6 @@ class PowerResult:
     sums: NDArray[np.float64]
 
 
-class PowerCfg(ConfigBase):
-    """Paired-readout modules, gain sweep and wait in us; counts add over rounds."""
-
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    qub_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Qubit pi pulse")]
-    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
-    gain: Annotated[SweepCfg, FieldMeta(label="Gain", unit="a.u.")]
-    wait: Annotated[float, FieldMeta(label="Wait", unit="us", decimals=3)] = Field(
-        default=0.0, ge=0.0
-    )
-    reps: Annotated[int, FieldMeta(label="Reps")] = 1000
-    rounds: Annotated[int, FieldMeta(label="Rounds")] = 10
-    relax_delay: Annotated[
-        float, FieldMeta(label="Relax delay", unit="us", decimals=3)
-    ] = 1.0
-
-
 @pydantic_dataclass(frozen=True)
 class PowerAnalyzeOptions:
     """gain: optional human-selected gain in a.u.; None proposes no writeback.
@@ -86,6 +70,21 @@ class PowerQndAnalysis:
     """
 
     gain: float | None
+
+
+class PowerCfg(ConfigBase):
+    """Paired-readout modules, gain sweep and wait in us; counts add over rounds."""
+
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    qub_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Qubit pi pulse")]
+    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
+    gain: Annotated[SweepCfg, FieldMeta(label="Gain", unit="a.u.")]
+    wait: Annotated[float, FieldMeta(label="Wait", unit="us", decimals=3)] = Field(
+        default=0.0, ge=0.0
+    )
+    reps: Annotated[int, FieldMeta(label="Reps")]
+    rounds: Annotated[int, FieldMeta(label="Rounds")] = 1
+    relax_delay: Annotated[float, FieldMeta(label="Relax delay", unit="us", decimals=3)]
 
 
 def restore_result(data: GroupedLoadData[PowerCfg]) -> PowerResult:
@@ -147,15 +146,22 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
         Live shows the R1-on, middle-I preparation mean-IQ difference magnitude.
         cfg is not mutated. acquire_kwargs is forwarded to summed acquisition.
         """
+        # 1. Quantize readout gains for paired-read separation and QND characterization.
         gains = sweep2array(
             cfg.gain, "gain", {"soccfg": context.soccfg, "gen_ch": cfg.readout.gen_ch}
         )
+        # 2. Monitor first-read preparation contrast across readout gain.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Gain (a.u.)", ylabel="R1 preparation contrast (a.u.)")
         viewer = live_line(ax)
 
         @context.plots.on_plot_thread
-        def update(sums):
+        def update(sums: NDArray[np.float64]) -> tuple[Artist, ...]:
+            """Refresh readout-gain separation from the paired IQ moment sums.
+
+            sums is float64 with shape (gain, 8, 6, 6); zero counts display as NaN.
+            Return the changed artists without modifying the input array.
+            """
             counts = sums[:, :, 0, 0]
             counts = np.where(counts == 0, np.nan, counts)
             means = sums[:, :, 1:3, 0] / counts[..., None]
@@ -164,6 +170,7 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
 
         fig.show()
         buffer = SignalBuffer((len(gains), 8, 6, 6), dtype=np.float64, on_update=update)
+        # 3. Isolate readout backaction with eight preparation, first-read and middle-pi branches.
         with Schedule(buffer, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 context.soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
@@ -213,6 +220,7 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
         options.gain records a human choice, never an inferred optimum.
         PowerAnalyzeOptions validates finite gains within [-1, 1] at construction.
         """
+        # 1. Derive paired-read metrics and identify nondominated separation/QND settings.
         result = source.result
         metrics = [readout_metrics(sums) for sums in result.sums]
         arrays = {
@@ -247,6 +255,7 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
         indices = np.array(frontier, dtype=np.int64)
         indices = indices[np.argsort(f_sep[indices], kind="stable")]
 
+        # 2. Compare nine readout diagnostics versus gain, including R1-on/off backaction.
         fig, _ = plots.subplots(3, 3, num="metrics", figsize=(14, 11))
         for ax, name, label, symbol in zip(
             fig.axes,
@@ -286,6 +295,7 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
             ax.grid(True)
         fig.tight_layout()
 
+        # 3. Expose the separation/QND trade-off with a Pareto frontier and gain lookup.
         # Keep dense gain labels in a lookup table, not on top of the points.
         gain_groups = np.array_split(np.flatnonzero(valid), 3)
         table_height = max(2.0, 0.26 * len(gain_groups[0]) + 0.8)

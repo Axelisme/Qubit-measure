@@ -28,6 +28,11 @@ class CheckResult:
     signals: NDArray[np.complex128]
 
 
+@pydantic_dataclass(frozen=True, config={"arbitrary_types_allowed": True})
+class CheckAnalyzeOptions:
+    max_point: int = 5000
+
+
 class CheckCfg(ConfigBase):
     reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
     init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init Pulse")] = None
@@ -48,12 +53,7 @@ class CheckCfg(ConfigBase):
             decimals=3,
             description="Delay after each shot.",
         ),
-    ] = 1.0
-
-
-@pydantic_dataclass(frozen=True, config={"arbitrary_types_allowed": True})
-class CheckAnalyzeOptions:
-    max_point: int = 5000
+    ]
 
 
 class CheckExp(Experiment[CheckResult, CheckCfg]):
@@ -80,7 +80,7 @@ class CheckExp(Experiment[CheckResult, CheckCfg]):
         raw-shot conversion requires exactly one readout channel.
         """
 
-        # Keep individual shots with a separate raw-shot program configuration.
+        # 1. Keep individual shots with a separate raw-shot program configuration.
         soc, soccfg = context.soc, context.soccfg
         cfg = deepcopy(cfg)
 
@@ -125,6 +125,7 @@ class CheckExp(Experiment[CheckResult, CheckCfg]):
         cfg/classifier, linear, multiple ADCs or missing radius raise ValueError;
         missing radius prompts GE Post. No captured or live point fills gaps.
         """
+        # 1. Require the saved circle classifier to estimate G/E/Other shot fractions.
         signals = source.result.signals
         if source.cfg is None:
             raise ValueError("Check analysis requires saved readout cfg")
@@ -155,7 +156,7 @@ class CheckExp(Experiment[CheckResult, CheckCfg]):
         colors[mask_e] = "red"
         colors[mask_o] = "green"
 
-        # plot shots
+        # 2. Limit scatter density without downsampling the reported populations.
         num_sample = signals.shape[0]
         downsample_num = min(options.max_point, num_sample)
         downsample_mask = np.arange(0, num_sample, max(1, num_sample // downsample_num))
@@ -168,7 +169,7 @@ class CheckExp(Experiment[CheckResult, CheckCfg]):
             alpha=0.5,
         )
 
-        # plot centers with circle
+        # 3. Expose the saved centers and circular decision boundaries in IQ space.
         ax.plot(
             g_center.real,
             g_center.imag,

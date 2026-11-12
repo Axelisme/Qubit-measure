@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Annotated, ClassVar
 
 import numpy as np
+from matplotlib.artist import Artist
 from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic.dataclasses import dataclass as pydantic_dataclass
@@ -27,19 +29,20 @@ class PowerDepResult:
     signals: NDArray[np.complex128]
 
 
-def mist_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
-    avg_len = max(int(0.05 * len(signals)), 1)
-
-    mist_signals = signals - np.mean(signals[:avg_len])
-
-    return np.abs(mist_signals)
-
-
 @pydantic_dataclass(frozen=True)
 class PowerDepAnalyzeOptions:
     g0: complex | None = None
     e0: complex | None = None
     ac_coeff: float | None = None
+
+
+def mist_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
+    """Return the real-valued measurement view of complex IQ without changing the input."""
+    avg_len = max(int(0.05 * len(signals)), 1)
+
+    mist_signals = signals - np.mean(signals[:avg_len])
+
+    return np.abs(mist_signals)
 
 
 class PowerDepCfg(ConfigBase):
@@ -50,7 +53,7 @@ class PowerDepCfg(ConfigBase):
     gain: Annotated[SweepCfg, FieldMeta(label="gain", unit="a.u.")]
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
-    ] = 1
+    ]
     rounds: Annotated[
         int,
         FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
@@ -63,7 +66,7 @@ class PowerDepCfg(ConfigBase):
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
-    ] = 1.0
+    ]
 
 
 class PowerDepExp(Experiment[PowerDepResult, PowerDepCfg]):
@@ -110,7 +113,12 @@ class PowerDepExp(Experiment[PowerDepResult, PowerDepCfg]):
         viewer = live_line(ax)
 
         @context.plots.on_plot_thread
-        def update(data):
+        def update(data: NDArray[np.complex128]) -> Iterable[Artist]:
+            """Draw acquired complex IQ on the measurement axes; return changed artists.
+
+            Read the scan-shaped data without changing it. Update the live
+            artists over the prepared coordinates; plot errors propagate.
+            """
             return viewer.set(gains, mist_signal2real(data))
 
         fig.show()
@@ -121,7 +129,7 @@ class PowerDepExp(Experiment[PowerDepResult, PowerDepCfg]):
 
         # 2. Bind the board gain sweep without changing the other probe settings.
         with Schedule(signals_buffer, scope=context.scope) as sched:
-            # Build the pulse sequence without changing the caller's cfg.
+            # 3. Reset and initialize before each gain-swept probe and readout.
             builder = TimelineBuilder(
                 soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
             )
@@ -155,6 +163,7 @@ class PowerDepExp(Experiment[PowerDepResult, PowerDepCfg]):
         number when supplied; ``e0`` only sets the vertical display range.
         Return no fit or calibrated population estimate.
         """
+        # 1. Measure IQ displacement from g0, defaulting to the first gain sample.
         result = source.result
         g0, e0, ac_coeff = options.g0, options.e0, options.ac_coeff
 
@@ -165,6 +174,7 @@ class PowerDepExp(Experiment[PowerDepResult, PowerDepCfg]):
 
         amp_diff = np.abs(signals - g0)
 
+        # 2. Use photon number only when a gain-squared calibration is supplied.
         if ac_coeff is None:
             xs = gains
             xlabel = "probe gain (a.u.)"
@@ -172,6 +182,7 @@ class PowerDepExp(Experiment[PowerDepResult, PowerDepCfg]):
             xs = ac_coeff * gains**2
             xlabel = r"$\bar n$"
 
+        # 3. Show MIST contrast with optional e0-based vertical scaling.
         _, ax = plots.subplots(num="fit", figsize=config.figsize)
         ax.plot(xs, amp_diff.T, marker=".")
         ax.set_xlabel(xlabel, fontsize=14)

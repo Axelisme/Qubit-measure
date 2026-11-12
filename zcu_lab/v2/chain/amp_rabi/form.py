@@ -15,7 +15,7 @@ from .core import ChainAmpRabiCfg
 def make_form(ctx: FormContext) -> Form[ChainAmpRabiCfg]:
     """Use the twotone/rabi/amp_rabi pulse, readout and gain range; K is 5 T1.
 
-    Reps and rounds use the cfg defaults.
+    Reps and rounds start at 100.
     """
     pulse = amp_rabi_initial_pulse(ctx.parameters)
     # Keep shape/calibration admission; Run supplies gain itself.
@@ -23,6 +23,8 @@ def make_form(ctx: FormContext) -> Form[ChainAmpRabiCfg]:
     return Form(
         ChainAmpRabiCfg,
         tree={
+            "reps": 100,
+            "rounds": 100,
             "qub_pulse": pulse,
             "readout": source(
                 ctx,

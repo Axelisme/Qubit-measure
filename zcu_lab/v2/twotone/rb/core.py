@@ -2,12 +2,13 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Annotated, ClassVar, Self
+from typing import Annotated, ClassVar
 
 import numpy as np
+from matplotlib.artist import Artist
 from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
-from pydantic import Field, model_validator
+from pydantic import Field
 from zcu_tools.analysis.fitting import fit_decay
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment, config
@@ -39,7 +40,14 @@ class RB_Result:
     signals2D: NDArray[np.complex128]
 
 
+@dataclass(frozen=True)
+class RBAnalysis:
+    epc: float
+    fidelity: float
+
+
 def rb_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
+    """Convert mean complex IQ to the real contrast used by live and analysis plots."""
     mask = np.any(np.isfinite(signals), axis=0)  # (depths, )
     mean_signals = np.full(
         (signals.shape[1],), np.nan, dtype=np.complex128
@@ -58,13 +66,13 @@ class RBCfg(ConfigBase):
         list[Annotated[int, Field(ge=0, strict=True)]],
         FieldMeta(label="Clifford depths"),
     ] = Field(min_length=1)
-    """Ordered nonempty, unique nonnegative integer Clifford depths."""
+    """Ordered nonempty nonnegative integer Clifford depths."""
     seed: Annotated[int, FieldMeta(label="Random seed")]
     n_seeds: Annotated[int, FieldMeta(label="Number of sequences")]
 
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
-    ] = 1
+    ]
     rounds: Annotated[
         int,
         FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
@@ -77,20 +85,7 @@ class RBCfg(ConfigBase):
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
-    ] = 1.0
-
-    @model_validator(mode="after")
-    def validate_depths(self) -> Self:
-        """Reject repeated depths before building any sequence or doing device I/O."""
-        if len(set(self.depth)) != len(self.depth):
-            raise ValueError("RB requires unique nonnegative integer depths")
-        return self
-
-
-@dataclass(frozen=True)
-class RBAnalysis:
-    epc: float
-    fidelity: float
+    ]
 
 
 class RB_Exp(Experiment[RB_Result, RBCfg]):
@@ -130,6 +125,7 @@ class RB_Exp(Experiment[RB_Result, RBCfg]):
             dtype=np.int64,
         )
 
+        # 2. Monitor the seed-averaged Clifford decay contrast.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Depth", ylabel="Signal")
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
@@ -137,7 +133,12 @@ class RB_Exp(Experiment[RB_Result, RBCfg]):
         viewer = live_line(ax)
 
         @context.plots.on_plot_thread
-        def update(data):
+        def update(data: NDArray[np.complex128]) -> tuple[Artist, ...]:
+            """Refresh the randomized benchmarking contrast curve.
+
+            data is complex IQ shaped (entropy, depth); NaN marks unmeasured points.
+            Return the changed artists without modifying the input array.
+            """
             return viewer.set(depths.astype(np.float64), rb_signal2real(data))
 
         fig.show()
@@ -146,6 +147,7 @@ class RB_Exp(Experiment[RB_Result, RBCfg]):
             (len(entropys), len(depths)),
             on_update=update,
         )
+        # 3. Measure reproducible random Clifford prefixes and their recoveries for each seed.
         with Schedule(signals_buffer, scope=context.scope) as sched:
             for _, step in sched.scan("seed", entropys.tolist()):
                 tables = make_seed_tables(int(step.value), depths)
@@ -153,7 +155,7 @@ class RB_Exp(Experiment[RB_Result, RBCfg]):
                     soccfg, reps=run_cfg.reps, relax_delay=run_cfg.relax_delay
                 )
 
-                # 2. Map the seed's physical gate IDs to calibrated pulses.
+                # 4. Map the seed's physical gate IDs to calibrated pulses.
                 (
                     rand_gate_seq,
                     prefix_len_by_depth,
@@ -183,7 +185,7 @@ class RB_Exp(Experiment[RB_Result, RBCfg]):
                     MY90_pulse,
                 ]
 
-                # 3. Reset, play the depth prefix, recover the full Clifford, read out.
+                # 5. Recover each random Clifford prefix to expose depth-dependent gate error.
                 builder.add_loop("depth", len(prefix_len_by_depth))
                 builder.emit(
                     LoadValue(
@@ -243,7 +245,7 @@ class RB_Exp(Experiment[RB_Result, RBCfg]):
                 builder.emit(Readout("readout", run_cfg.readout))
                 program = builder.build()
 
-                # 4. Average reps/rounds into this seed's depth trace.
+                # 6. Average reps/rounds into this seed's depth trace.
                 step.run_acquire(program, soc, rounds=run_cfg.rounds)
 
         return RB_Result(
@@ -259,6 +261,7 @@ class RB_Exp(Experiment[RB_Result, RBCfg]):
         *,
         plots: Plots,
     ) -> RBAnalysis:
+        # 1. Infer single-qubit Clifford error from the seed-averaged contrast decay.
         result = source.result
         del options
 
@@ -282,6 +285,7 @@ class RB_Exp(Experiment[RB_Result, RBCfg]):
         fidelity = 1.0 - epc
         fidelity_err = epc_err
 
+        # 2. Assess seed scatter and the mean decay underlying the Clifford fidelity estimate.
         fig, ax = plots.subplots(num="fit", figsize=config.figsize)
 
         for si in range(signals2D.shape[0]):

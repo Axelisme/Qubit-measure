@@ -172,7 +172,10 @@ async def mux_singleshot_ge(
 
 
 def _primary_tone_reports(result: MuxGESummary) -> list[MuxGEToneReport]:
-    """Project native Primary outcomes in order, keeping identities and failures."""
+    """Return reports for result.outcomes in order, preserving names and failures.
+
+    Format successful Primary estimates with report_number; leave result unchanged.
+    """
     tones: list[MuxGEToneReport] = []
     for outcome in result.outcomes:
         name = None if result.names is None else result.names[outcome.index]
@@ -195,7 +198,11 @@ def _primary_tone_reports(result: MuxGESummary) -> list[MuxGEToneReport]:
 
 
 def _post_tone_reports(result: MuxGEPostSummary) -> list[MuxGEPostToneReport]:
-    """Project native Post radii separately, without pairing them to Primary rows."""
+    """Return radius reports for result.outcomes in order, preserving failures.
+
+    Resolve names from result.names without pairing rows to Primary outcomes.
+    Leave result unchanged.
+    """
     post_tones: list[MuxGEPostToneReport] = []
     for outcome in result.outcomes:
         name = None if result.names is None else result.names[outcome.index]

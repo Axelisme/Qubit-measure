@@ -110,8 +110,6 @@ def estimate_echo_time_s(
     or timing raise ValueError; non-scalar module timing raises TypeError.
     The caller decides whether this stage is enabled.
     """
-    if type(points) is not int or points < 2:
-        raise ValueError("Delay points must be a built-in integer of at least two")
     cfg, _ = _cfg(pulses, settings, points=points, guess=guess)
     pi, pi2 = cfg.pi_pulse, cfg.pi2_pulse
     pulse_us = (

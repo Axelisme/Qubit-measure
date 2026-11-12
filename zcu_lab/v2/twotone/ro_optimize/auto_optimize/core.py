@@ -7,6 +7,7 @@ from typing import Annotated, Any, ClassVar, cast
 
 import numpy as np
 from matplotlib.artist import Artist
+from matplotlib.axes import Axes
 from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field
@@ -143,7 +144,7 @@ class AutoOptCfg(ConfigBase):
 
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
-    ] = 1
+    ]
     rounds: Annotated[
         int,
         FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
@@ -156,7 +157,7 @@ class AutoOptCfg(ConfigBase):
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
-    ] = 1.0
+    ]
 
 
 RO_AUTO_READOUT_FREQ_VARIABLE = "readout_freq"
@@ -174,6 +175,7 @@ RO_AUTO_GROUPED_VARIABLES = (
 def _validate_auto_opt_arrays(
     params: NDArray[np.float64], signals: NDArray[np.float64]
 ) -> None:
+    """Reject saved arrays that do not match this experiment's result layout."""
     if params.ndim != 2 or params.shape[1] != 3:
         raise ValueError(
             f"RO auto-optimize params must have shape (N, 3), got {params.shape}"
@@ -190,6 +192,7 @@ def _validate_auto_opt_arrays(
 
 
 def _validate_auto_opt_result(result: AutoOptResult) -> None:
+    """Reject saved arrays that do not match this experiment's result layout."""
     _validate_auto_opt_arrays(
         np.asarray(result.params, dtype=np.float64),
         np.asarray(result.signals, dtype=np.float64),
@@ -197,6 +200,7 @@ def _validate_auto_opt_result(result: AutoOptResult) -> None:
 
 
 def _build_auto_opt_result(data: GroupedLoadData[AutoOptCfg]) -> AutoOptResult:
+    """Restore the experiment result from its saved variables and axis coordinates."""
     params = np.column_stack(
         [
             data.variable(RO_AUTO_READOUT_FREQ_VARIABLE).z,
@@ -284,8 +288,11 @@ def _live_search_plot(
 ) -> Callable[[tuple[NDArray[np.float64], NDArray[np.float64], int]], None]:
     """Show the search's four SNR panels and return a snapshot-based update.
 
-    Pass scores, sampled parameter rows (MHz, gain, us), and the current index.
-    Each update changes all four lines and the iteration title in one refresh.
+    Pass run plots and zero-based iteration coordinates. The returned callback
+    takes a flat payload of scores, sampled parameter rows (MHz, gain, us), and
+    the current index and returns None. Its body changes all four lines and the
+    iteration title in one refresh, returning changed artists to the plot
+    dispatcher. Inputs remain unchanged.
     """
     figure, initial_ax = plots.subplots(num="measurement", figsize=(8, 5))
     initial_ax.remove()
@@ -314,6 +321,7 @@ def _live_search_plot(
     def update(
         payload: tuple[NDArray[np.float64], NDArray[np.float64], int],
     ) -> list[Artist]:
+        """Refresh SNR panels from the score/parameter snapshot and return artists."""
         data, sampled_params, idx = payload
         snrs = np.abs(data)
         cur_freq, cur_gain, cur_len = sampled_params[idx, :]
@@ -362,7 +370,7 @@ class AutoOptExp(Experiment[AutoOptResult, AutoOptCfg]):
         SNR shaped (Npoint,). Unvisited rows remain NaN. SNR is not assignment
         fidelity. acquire_kwargs is forwarded to acquisition.
         """
-        # Prepare the bounded search and preserve one parameter row per candidate.
+        # 1. Prepare the bounded search and preserve one parameter row per candidate.
         run_cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
         num_points = run_cfg.num_points
@@ -376,11 +384,12 @@ class AutoOptExp(Experiment[AutoOptResult, AutoOptCfg]):
         params = np.full((num_points, 3), np.nan, dtype=np.float64)
         point_indices = np.arange(num_points, dtype=np.float64)
 
-        # Show search progress and the sampled score along each readout coordinate.
+        # 2. Show search progress and the sampled score along each readout coordinate.
         update = _live_search_plot(context.plots, point_indices)
         current_index = 0
 
         def plot_fn(data: NDArray[np.float64]) -> None:
+            """Refresh the measurement artists from the current acquired data."""
             update((data, params, current_index))
 
         signals_buffer = SignalBuffer(
@@ -389,7 +398,7 @@ class AutoOptExp(Experiment[AutoOptResult, AutoOptCfg]):
             on_update=plot_fn,
         )
 
-        # Feed back the previous score before asking for the next candidate.
+        # 3. Feed back the previous score before asking for the next candidate.
         with Schedule(signals_buffer, scope=context.scope) as sched:
             for idx, (_, step) in enumerate(sched.scan("Iteration", range(num_points))):
                 current_index = idx
@@ -438,7 +447,7 @@ class AutoOptExp(Experiment[AutoOptResult, AutoOptCfg]):
                     **(acquire_kwargs or {}),
                 )
 
-        # Keep the sampled path and scores, including unvisited NaN rows.
+        # 4. Keep the sampled path and scores, including unvisited NaN rows.
         signals = signals_buffer.array
 
         return AutoOptResult(params, signals)
@@ -457,6 +466,7 @@ class AutoOptExp(Experiment[AutoOptResult, AutoOptCfg]):
         global optimum. An all-NaN score array raises ValueError.
         source.cfg may be None.
         """
+        # 1. Select the measured frequency, gain and duration with the highest search score.
         del options
         result = source.result
 
@@ -468,6 +478,7 @@ class AutoOptExp(Experiment[AutoOptResult, AutoOptCfg]):
         best_params = params[max_id, :]
 
         figsize = (8, 5)
+        # 2. Relate the best SNR to search history and the three sampled readout coordinates.
         fig, ax = plots.subplots(num="fit", figsize=figsize)
         ax.remove()
         gs = fig.add_gridspec(3, 2, width_ratios=[1.5, 1])
@@ -487,7 +498,12 @@ class AutoOptExp(Experiment[AutoOptResult, AutoOptCfg]):
         ax_iter.legend()
         ax_iter.grid(True)
 
-        def plot_ax(ax, param_idx, label_name) -> None:
+        def plot_ax(ax: Axes, param_idx: int, label_name: str) -> None:
+            """Plot one sampled readout coordinate, best setting and measured SNR on ax.
+
+            param_idx selects frequency (0), gain (1) or length (2) from captured params.
+            label_name labels that coordinate and its units; return None after updating ax.
+            """
             ax.scatter(params[:, param_idx], snrs, s=1)
             best_value = best_params[param_idx]
             ax.axvline(best_value, color="r", ls="--", label=f"best = {best_value:.2g}")

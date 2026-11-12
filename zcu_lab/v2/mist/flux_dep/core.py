@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Annotated, ClassVar, Literal
 
 import numpy as np
+from matplotlib.artist import Artist
 from matplotlib.ticker import MaxNLocator, ScalarFormatter
 from numpy.typing import NDArray
 from pydantic.dataclasses import dataclass as pydantic_dataclass
@@ -36,7 +38,16 @@ class FluxDepResult:
     signals: NDArray[np.complex128]
 
 
+@pydantic_dataclass(frozen=True)
+class FluxDepAnalyzeOptions:
+    flux_half: float | None = None
+    flux_period: float | None = None
+    ac_coeff: float | None = None
+    auto_range: bool = True
+
+
 def mist_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
+    """Return the real-valued measurement view of complex IQ without changing the input."""
     avg_len = max(int(0.05 * signals.shape[1]), 1)
 
     mist_signals = np.abs(
@@ -47,14 +58,6 @@ def mist_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 
     ref_signals = np.sort(mist_signals.flatten())[: int(0.5 * mist_signals.size)]
     return np.clip(mist_signals, 0, 10 * np.nanmedian(ref_signals))
-
-
-@pydantic_dataclass(frozen=True)
-class FluxDepAnalyzeOptions:
-    flux_half: float | None = None
-    flux_period: float | None = None
-    ac_coeff: float | None = None
-    auto_range: bool = True
 
 
 class FluxDepCfg(ConfigBase):
@@ -74,7 +77,7 @@ class FluxDepCfg(ConfigBase):
     gain: Annotated[SweepCfg, FieldMeta(label="gain", unit="a.u.")]
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
-    ] = 1
+    ]
     rounds: Annotated[
         int,
         FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
@@ -87,7 +90,7 @@ class FluxDepCfg(ConfigBase):
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
-    ] = 1.0
+    ]
 
 
 class FluxDepExp(Experiment[FluxDepResult, FluxDepCfg]):
@@ -155,7 +158,12 @@ class FluxDepExp(Experiment[FluxDepResult, FluxDepCfg]):
         line_ax.legend()
 
         @context.plots.on_plot_thread
-        def update(data):
+        def update(data: NDArray[np.complex128]) -> Iterable[Artist]:
+            """Draw acquired complex IQ on the measurement axes; return changed artists.
+
+            Read the scan-shaped data without changing it. Update the live
+            artists over the prepared coordinates; plot errors propagate.
+            """
             real = mist_signal2real(data)
             valid = np.flatnonzero(~np.all(np.isnan(real), axis=1))
             current = int(valid[-1]) if valid.size else -1
@@ -181,7 +189,7 @@ class FluxDepExp(Experiment[FluxDepResult, FluxDepCfg]):
                     progress=False,
                 )
 
-                # Build the pulse sequence without changing the caller's cfg.
+                # 3. Reset and initialize before probing each gain at this fixed flux bias.
                 builder = TimelineBuilder(
                     soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
                 )
@@ -213,6 +221,7 @@ class FluxDepExp(Experiment[FluxDepResult, FluxDepCfg]):
         ticks on top. If either is missing, show only device values below.
         No state-population fit or calibration value is returned.
         """
+        # 1. Reference each flux row to low-gain IQ and apply optional axis calibrations.
         result = source.result
         flux_half, flux_period = options.flux_half, options.flux_period
 
@@ -233,13 +242,14 @@ class FluxDepExp(Experiment[FluxDepResult, FluxDepCfg]):
             ylabel = r"$\bar n$"
         ys = np.asarray(ys)
 
+        # 2. Show clipped MIST contrast with device ticks when flux is calibrated.
         _, ax = plots.subplots(num="fit", figsize=config.figsize)
         ax.pcolormesh(xs, ys, amp_diff.T, shading="nearest", cmap="Greys")
         ax.set_xlabel(xlabel, fontsize=14)
         ax.set_ylabel(ylabel, fontsize=12)
 
         if flux_half is not None and flux_period is not None:
-            # Match the source samples and scientific labels of the former overlay.
+            # Retain device-value references when the main axis uses calibrated flux.
             count = len(xs)
             if count <= 12:
                 tick_indices = np.arange(count)

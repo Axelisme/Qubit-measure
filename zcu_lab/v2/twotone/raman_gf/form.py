@@ -1,4 +1,4 @@
-"""Operator carrier and sampled-envelope inputs; no simulator spectrum lookup."""
+"""Operator carrier and waveform inputs; no simulator spectrum lookup."""
 
 from zcu_tools.cfg_model import Expr, Hidden, Range, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
@@ -10,15 +10,17 @@ from .core import RamanGFCfg
 
 
 def make_form(ctx: FormContext) -> Form[RamanGFCfg]:
-    """Leave the measured carrier blank and require a sampled waveform asset.
+    """Leave the measured carrier blank and accept any supported waveform.
 
-    Frequency mode holds the gain sweep's start; area mode holds the detuning
+    The default arb editor needs an asset; sqrt(sin) shapes require arb.
+
+    Frequency mode holds the gain sweep's start; gain mode holds the detuning
     sweep's start. No calibration is inferred from simulator models.
     """
     return Form(
         RamanGFCfg,
         tree={
-            "scan_mode": "frequency_area",
+            "scan_mode": "frequency_gain",
             "detuning": Range(-50, 50, expts=11),
             "gain": Range(0, 0.9, expts=10),
             "drive": Template(
