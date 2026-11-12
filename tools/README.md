@@ -277,7 +277,7 @@ program components, compiled requests, and the environment source's
 `model_facts`/`plan_template` to construct complete Engine inputs.
 `family_pareto_settings.py` owns fixed single-fluxonium, FTF and board inputs,
 copied from commit `303074e166d1a563addfab4fd94717d958a7dd56`. The manifest
-records their source paths and values. Runtime construction does not import
+records their source commit and fixed values. Runtime construction does not import
 lab experiments, read lab YAML/profiles, execute experiments, or use replay.
 Model/template changes require a deliberate update here. The fixed FTF values
 do not track a user's working-copy edits.

@@ -760,12 +760,18 @@ def tested_state() -> dict[str, str | bool]:
 def main(argv: list[str] | None = None, *, inputs: list[Input] | None = None) -> int:
     """Freeze inputs or measure a matching manifest; output failures return nonzero.
 
-    --freeze-inputs writes inputs before any oracle or timing. Otherwise require
-    --manifest, --output and --summary. A manifest mismatch or measurement failure
-    leaves output untouched. Output write failures can leave partial files and
-    return 1 with the original traceback. Run measurement through run_heavy
-    --exclusive; CLI never starts per-sample processes. Optional inputs replace
-    only physical input construction for small in-process seam tests.
+    --freeze-inputs writes inputs before any oracle or timing.
+    --prepare-references requires --manifest, --output and --reference-cache.
+    It solves or loads cached references and writes a reference report without
+    Engine measurement or a required --summary. Run preparation nonexclusive.
+    --reference-cache-only forbids solving and fails on a cache miss.
+    Measurement requires --manifest, --output and --summary. A missing required
+    path, manifest mismatch, or preparation or measurement failure returns 1
+    with the original traceback and leaves output untouched. Output write
+    failures also return 1 but can leave partial files. Run measurement through
+    run_heavy --exclusive; CLI never starts per-sample processes. Optional
+    inputs replace only physical input construction for small in-process seam
+    tests.
     """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--reference-cache", type=Path)
