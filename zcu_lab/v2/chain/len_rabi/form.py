@@ -18,11 +18,13 @@ def make_form(ctx: FormContext) -> Form[ChainLenRabiCfg]:
 
     The pulse starts from the qub_probe template rather than x180, because the
     FPGA length sweep accepts only const or flat_top waveforms. K is 5 T1;
-    reps and rounds use the cfg defaults.
+    reps and rounds start at 100.
     """
     return Form(
         ChainLenRabiCfg,
         tree={
+            "reps": 100,
+            "rounds": 100,
             "qub_pulse": Template(
                 "qub_probe",
                 bindings={"qubit": "$qubit"},

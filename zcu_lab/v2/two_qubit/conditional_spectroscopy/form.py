@@ -56,6 +56,7 @@ def spectroscopy_form(ctx: FormContext, cfg_type: type[T_Cfg]) -> Form[T_Cfg]:
         tree={
             "reps": 1000,
             "rounds": 10,
+            "relax_delay": 1.0,
             "roles": roles,
             "reset": None,
             "x180_f1": Slot("$f1.module.x180", copy=True),

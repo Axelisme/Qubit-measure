@@ -11,7 +11,7 @@ from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field, model_validator
 from zcu_tools.analysis.failure import AnalysisFailed
-from zcu_tools.analysis.fitting import compute_fit_quality
+from zcu_tools.analysis.fitting import analyze_irb, compute_fit_quality
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
     Experiment,
@@ -36,7 +36,6 @@ from zcu_tools.program.v2.modules import MuxReadout
 
 from zcu_lab.v2.support import live_line
 
-from ...twotone.irb.analysis import analyze_irb
 from .._drive import DualLineCfg
 from .._readout import JointRoles
 from .._sums import (
@@ -112,7 +111,7 @@ class RBCfg(ConfigBase):
     )
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
-    ] = Field(default=1, gt=0)
+    ] = Field(gt=0)
     rounds: Annotated[
         int,
         FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
@@ -133,7 +132,7 @@ class RBCfg(ConfigBase):
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
-    ] = 1.0
+    ]
 
     @model_validator(mode="after")
     def validate_sequence_inputs(self) -> Self:

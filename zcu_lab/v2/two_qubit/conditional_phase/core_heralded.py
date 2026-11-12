@@ -8,6 +8,7 @@ import numpy as np
 from matplotlib.lines import Line2D
 from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
+from zcu_tools.analysis.fitting.phase_slopes import fit_phase_slopes
 from zcu_tools.experiment import (
     Experiment,
     GroupedAxesSpec,
@@ -37,7 +38,6 @@ from .._sums import herald_probabilities, sigma, terminal_counts
 from .analysis import (
     ConditionalPhaseAnalysis,
     count_quadratures,
-    fit_phase_slopes,
     fitted_crossings,
     phase_points,
 )

@@ -60,11 +60,9 @@ class PowerCfg(ConfigBase):
     wait: Annotated[float, FieldMeta(label="Wait", unit="us", decimals=3)] = Field(
         default=0.0, ge=0.0
     )
-    reps: Annotated[int, FieldMeta(label="Reps")] = 1000
-    rounds: Annotated[int, FieldMeta(label="Rounds")] = 10
-    relax_delay: Annotated[
-        float, FieldMeta(label="Relax delay", unit="us", decimals=3)
-    ] = 1.0
+    reps: Annotated[int, FieldMeta(label="Reps")]
+    rounds: Annotated[int, FieldMeta(label="Rounds")] = 1
+    relax_delay: Annotated[float, FieldMeta(label="Relax delay", unit="us", decimals=3)]
 
 
 @pydantic_dataclass(frozen=True)

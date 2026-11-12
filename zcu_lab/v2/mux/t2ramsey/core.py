@@ -190,7 +190,7 @@ class MuxT2RamseyCfg(ConfigBase):
 
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
-    ] = Field(default=1, gt=0)
+    ] = Field(gt=0)
     rounds: Annotated[
         int,
         FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
@@ -211,7 +211,7 @@ class MuxT2RamseyCfg(ConfigBase):
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
-    ] = Field(default=1.0, ge=0, allow_inf_nan=False)
+    ] = Field(ge=0, allow_inf_nan=False)
 
     @model_validator(mode="after")
     def validate_scan(self) -> MuxT2RamseyCfg:

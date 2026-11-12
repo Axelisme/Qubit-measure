@@ -34,6 +34,8 @@ def make_form(ctx: FormContext) -> Form[ChainLengthCfg]:
     return Form(
         ChainLengthCfg,
         tree={
+            "reps": 2000,
+            "rounds": 320,
             "readout": readout,
             "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),
             "length": Range(0.2, 2.2, expts=11),

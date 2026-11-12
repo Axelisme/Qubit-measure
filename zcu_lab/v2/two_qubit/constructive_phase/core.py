@@ -121,7 +121,7 @@ class ConstructivePhaseCfg(ConfigBase):
 
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
-    ] = 1
+    ]
     rounds: Annotated[
         int,
         FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
@@ -142,7 +142,7 @@ class ConstructivePhaseCfg(ConfigBase):
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
-    ] = 1.0
+    ]
 
     @model_validator(mode="after")
     def validate_duration_scan(self) -> Self:
@@ -462,14 +462,14 @@ class ConstructivePhaseExp(Experiment[ConstructivePhaseResult, ConstructivePhase
                 title="F2 relative to F1 phase (deg)", fontsize="x-small", ncols=2
             )
         analysis = analyze_constructive_phase(coordinates, durations, answer)
-        rates = analysis.rates
+        modulation = analysis.modulation
         _, ax = plots.subplots(num="rabi_rate", figsize=(10, 6), layout="constrained")
         ax.errorbar(
             coordinates,
-            [rate.rate if rate.rate is not None else np.nan for rate in rates],
+            [rate.rate if rate.rate is not None else np.nan for rate in analysis.rates],
             yerr=[
                 rate.uncertainty if rate.uncertainty is not None else np.nan
-                for rate in rates
+                for rate in analysis.rates
             ],
             fmt="o",
             color="C0",
@@ -479,7 +479,7 @@ class ConstructivePhaseExp(Experiment[ConstructivePhaseResult, ConstructivePhase
             0.98,
             "\n".join(
                 f"{coordinate:g}: {rate.reason}"
-                for coordinate, rate in zip(coordinates, rates, strict=True)
+                for coordinate, rate in zip(coordinates, analysis.rates, strict=True)
                 if rate.reason
             ),
             va="top",
@@ -492,7 +492,7 @@ class ConstructivePhaseExp(Experiment[ConstructivePhaseResult, ConstructivePhase
             title="Undamped cosine model · rates below 1/duration span excluded",
         )
         _, ax = plots.subplots(num="rabi_traces", figsize=(10, 6), layout="constrained")
-        for coordinate, rate in zip(coordinates, rates, strict=True):
+        for coordinate, rate in zip(coordinates, analysis.rates, strict=True):
             if rate.fitted is not None:
                 ax.plot(durations, rate.fitted, label=f"{coordinate:g}")
         ax.set(
@@ -502,20 +502,37 @@ class ConstructivePhaseExp(Experiment[ConstructivePhaseResult, ConstructivePhase
         )
         ax.legend(title="F2 relative to F1 phase (deg)", fontsize="x-small", ncols=2)
 
-        if analysis.interference is not None:
-            phases, squared, dense, curve, maximum_phase = analysis.interference
+        if modulation.prediction is not None:
             _, ax = plots.subplots(
                 num="constructive_phase", figsize=(9, 6), layout="constrained"
             )
-            ax.plot(phases, squared, "o", label="Identifiable duration-slice rates²")
-            ax.plot(dense, curve, label="A + B cosφ + C sinφ")
-            ax.axvline(maximum_phase, ls="--", label="Maximum rate phase")
+            ax.plot(
+                analysis.phases,
+                analysis.squared_rates,
+                "o",
+                label="Identifiable duration-slice rates²",
+            )
+            ax.plot(
+                modulation.prediction.phase_degrees,
+                modulation.prediction.squared_rates,
+                label="A + B cosφ + C sinφ",
+            )
+            ax.axvline(
+                modulation.prediction.maximum_phase_deg,
+                ls="--",
+                label="Maximum rate phase",
+            )
             ax.set(
                 xlabel="F2 relative to F1 phase (deg)",
                 ylabel="Rabi rate² (MHz²)",
                 title="Constructive phase · fixed signed gain ratio",
             )
             ax.legend()
+            return ConstructivePhaseAnalysis(
+                modulation.prediction.maximum_phase_deg,
+                modulation.reason,
+                modulation.fit_quality,
+            )
         return ConstructivePhaseAnalysis(
-            analysis.relative_phase_deg, analysis.reason, analysis.interference_quality
+            None, modulation.reason, modulation.fit_quality
         )

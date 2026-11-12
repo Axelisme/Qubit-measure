@@ -53,7 +53,7 @@ class LookbackCfg(ConfigBase):
             decimals=3,
             description="Delay after each shot.",
         ),
-    ] = 1.0
+    ]
     initial_delay: Annotated[
         float,
         FieldMeta(

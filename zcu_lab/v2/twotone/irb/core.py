@@ -9,6 +9,7 @@ import numpy as np
 from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field
+from zcu_tools.analysis.fitting import IRBAnalysis, analyze_irb, project_arm_means
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment
 from zcu_tools.experiment.context import RunContext
@@ -30,7 +31,6 @@ from zcu_tools.program.v2 import (
 from zcu_lab.v2.support import live_line
 
 from .._rb_sequence import TargetGate, make_seed_tables
-from .analysis import IRBAnalysis, analyze_irb, project_arm_means
 
 
 class IRBCfg(ConfigBase):
@@ -52,7 +52,7 @@ class IRBCfg(ConfigBase):
 
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
-    ] = 1
+    ]
     rounds: Annotated[
         int,
         FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
@@ -65,7 +65,7 @@ class IRBCfg(ConfigBase):
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
-    ] = 1.0
+    ]
 
     target_gate: Annotated[TargetGate, FieldMeta(label="Target gate")] = "X90"
     """Physical Clifford inserted after each random Clifford, in its current frame."""
@@ -100,7 +100,7 @@ def _live_plot(
 
     @plots.on_plot_thread
     def update(data: NDArray[np.complex128]):
-        return viewer.set(depths.astype(float), project_arm_means(data))
+        return viewer.set(depths.astype(float), project_arm_means(data).mean_signals)
 
     fig.show()
     return update

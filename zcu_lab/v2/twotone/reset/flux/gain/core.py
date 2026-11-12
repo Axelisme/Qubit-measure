@@ -76,7 +76,7 @@ class GainCfg(ConfigBase):
     reps: Annotated[
         int,
         FieldMeta(label="Reps", description="Repetitions per branch/gain per round."),
-    ] = 1
+    ]
     rounds: Annotated[
         int,
         FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
@@ -89,7 +89,7 @@ class GainCfg(ConfigBase):
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
-    ] = 1.0
+    ]
 
 
 class GainExp(Experiment[GainResult, GainCfg]):

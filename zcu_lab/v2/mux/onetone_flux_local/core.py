@@ -79,7 +79,7 @@ class OnetoneFluxLocalCfg(ConfigBase):
         default=0.1, ge=0, allow_inf_nan=False
     )
 
-    reps: Annotated[int, FieldMeta(description="Number of repetitions per round.")] = 1
+    reps: Annotated[int, FieldMeta(description="Number of repetitions per round.")]
     rounds: Annotated[int, FieldMeta(description="Number of software rounds.")] = 1
     initial_delay: Annotated[
         float, FieldMeta(unit="us", description="Delay before the first repetition.")
@@ -87,7 +87,7 @@ class OnetoneFluxLocalCfg(ConfigBase):
     relax_delay: Annotated[
         float,
         FieldMeta(unit="us", decimals=3, description="Delay after each repetition."),
-    ] = 1.0
+    ]
 
     @model_validator(mode="after")
     def validate_lines(self) -> Self:

@@ -56,14 +56,14 @@ class ChainFreqCfg(ConfigBase):
     reps: Annotated[
         int,
         FieldMeta(label="Reps", description="16-read shots per setting in each round."),
-    ] = Field(default=2000, ge=1)
+    ] = Field(ge=1)
     rounds: Annotated[
         int,
         FieldMeta(
             label="Rounds",
             description="Software rounds; live plots use all completed rounds.",
         ),
-    ] = Field(default=320, ge=1)
+    ] = Field(default=1, ge=1)
 
 
 class ChainFreqExp(Experiment[ThermalChainSums, ChainFreqCfg]):

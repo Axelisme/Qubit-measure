@@ -8,6 +8,7 @@ import numpy as np
 from matplotlib.lines import Line2D
 from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
+from zcu_tools.analysis.fitting.phase_line import PhaseLineFit, fit_phase_line
 from zcu_tools.experiment import (
     Experiment,
     GroupedAxesSpec,
@@ -37,7 +38,6 @@ from .._sums import herald_probabilities, sigma, terminal_counts
 from .analysis import (
     LocalZAnalysis,
     LocalZFit,
-    fit_target,
     summarize_fit,
 )
 from .core import LocalZCfg
@@ -295,9 +295,11 @@ class LocalZHeraldedExp(Experiment[LocalZHeraldedResult, LocalZHeraldedCfg]):
             for t in range(2)
         )
         gg_fits = tuple(
-            fit_target(
+            PhaseLineFit(reason="Incomplete phase row")
+            if any(p.logical_phase_deg is None for p in gg_phases[t])
+            else fit_phase_line(
                 np.array(cfg.gate_count, dtype=np.float64),
-                gg_phases[t],
+                np.array([p.logical_phase_deg for p in gg_phases[t]], dtype=np.float64),
                 phase_variance(
                     gg_quadratures[t, 0],
                     gg_quadratures[t, 1],
@@ -308,9 +310,11 @@ class LocalZHeraldedExp(Experiment[LocalZHeraldedResult, LocalZHeraldedCfg]):
             for t in range(2)
         )
         ee_fits = tuple(
-            fit_target(
+            PhaseLineFit(reason="Incomplete phase row")
+            if any(p.logical_phase_deg is None for p in ee_phases[t])
+            else fit_phase_line(
                 np.array(cfg.gate_count, dtype=np.float64),
-                ee_phases[t],
+                np.array([p.logical_phase_deg for p in ee_phases[t]], dtype=np.float64),
                 phase_variance(
                     ee_quadratures[t, 0],
                     ee_quadratures[t, 1],

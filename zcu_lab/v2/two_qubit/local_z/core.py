@@ -11,6 +11,7 @@ from matplotlib.lines import Line2D
 from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field, model_validator
+from zcu_tools.analysis.fitting.phase_line import PhaseLineFit, fit_phase_line
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
     Experiment,
@@ -37,10 +38,10 @@ from zcu_tools.program.v2.modules import MuxReadout
 from zcu_lab.v2.support import live_line
 
 from .._drive import DualLineCfg
-from .._phase import count_phase, phase_variance, sigma_variance
+from .._phase import QuadraturePhase, count_phase, phase_variance, sigma_variance
 from .._readout import JointRoles
 from .._sums import sigma, validate_classifiers
-from .analysis import LocalZAnalysis, fit_target, summarize_fit
+from .analysis import LocalZAnalysis, summarize_fit
 
 
 class LocalZCfg(ConfigBase):
@@ -90,7 +91,7 @@ class LocalZCfg(ConfigBase):
     )
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
-    ] = Field(default=1, gt=0)
+    ] = Field(gt=0)
     rounds: Annotated[
         int,
         FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
@@ -111,7 +112,7 @@ class LocalZCfg(ConfigBase):
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
-    ] = 1.0
+    ]
 
     @model_validator(mode="after")
     def validate_pair(self) -> Self:
@@ -321,26 +322,32 @@ class LocalZExp(Experiment[LocalZResult, LocalZCfg]):
             atol=0,
         )
         quadratures = np.where(complete, quadratures, np.nan)
-        targets = tuple(
-            tuple(
-                count_phase(float(quadratures[t, 0, n]), float(quadratures[t, 1, n]))
-                for n in range(len(cfg.gate_count))
+        targets: list[tuple[QuadraturePhase, ...]] = []
+        phase_rows: list[NDArray[np.float64]] = []
+        fits: list[PhaseLineFit] = []
+        for t in range(2):
+            points = tuple(
+                count_phase(float(x), float(y))
+                for x, y in zip(quadratures[t, 0], quadratures[t, 1], strict=True)
             )
-            for t in range(2)
-        )
-        fits = tuple(
-            fit_target(
-                np.array(cfg.gate_count, dtype=np.float64),
-                targets[t],
-                phase_variance(
-                    quadratures[t, 0],
-                    quadratures[t, 1],
-                    variances[t, 0],
-                    variances[t, 1],
-                ),
+            values = [p.logical_phase_deg for p in points]
+            targets.append(points)
+            phase_rows.append(np.array(values, dtype=np.float64))
+            fits.append(
+                PhaseLineFit(reason="Incomplete phase row")
+                if None in values
+                else fit_phase_line(
+                    np.array(cfg.gate_count, dtype=np.float64),
+                    phase_rows[t],
+                    phase_variance(
+                        quadratures[t, 0],
+                        quadratures[t, 1],
+                        variances[t, 0],
+                        variances[t, 1],
+                    ),
+                )
             )
-            for t in range(2)
-        )
+        summaries = tuple(map(summarize_fit, fits))
 
         fig, _ = plots.subplots(
             num="phase", nrows=3, ncols=1, figsize=(10, 9), layout="constrained"
@@ -355,10 +362,7 @@ class LocalZExp(Experiment[LocalZResult, LocalZCfg]):
             )
             fig.axes[1].plot(
                 data.gate_counts,
-                [
-                    np.nan if p.logical_phase_deg is None else p.logical_phase_deg
-                    for p in targets[t]
-                ],
+                phase_rows[t],
                 ".-",
                 label=f"F{t + 1} {role}",
             )
@@ -374,7 +378,7 @@ class LocalZExp(Experiment[LocalZResult, LocalZCfg]):
                     data.gate_counts,
                     fit.fit_curve,
                     "-",
-                    label=f"F{t + 1} WLS; correction={fit.correction_deg:.5g} ± {fit.slope_error_deg:.2g} deg (1σ)",
+                    label=f"F{t + 1} WLS; correction={summaries[t].correction_deg:.5g} ± {fit.slope_error_deg:.2g} deg (1σ)",
                 )
         fig.axes[2].set_title(
             "\n".join(
@@ -407,4 +411,4 @@ class LocalZExp(Experiment[LocalZResult, LocalZCfg]):
         axes.set(xlabel="CZ gate count", ylabel="Target sigma")
         axes.legend()
 
-        return LocalZAnalysis((summarize_fit(fits[0]), summarize_fit(fits[1])))
+        return LocalZAnalysis(summaries)

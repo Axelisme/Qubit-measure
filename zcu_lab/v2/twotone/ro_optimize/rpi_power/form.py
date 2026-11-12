@@ -26,6 +26,8 @@ def make_form(ctx: FormContext) -> Form[RPiPowerCfg]:
         RPiPowerCfg,
         field_order=("readout", "pi_pulse", "gain", "reps", "rounds"),
         tree={
+            "reps": 250,
+            "rounds": 20,
             "readout": readout,
             "pi_pulse": source(
                 ctx,
