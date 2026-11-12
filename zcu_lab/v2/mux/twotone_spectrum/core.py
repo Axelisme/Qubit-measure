@@ -6,10 +6,12 @@ MuxFreqExp.run(config, *, context) drives selected qubits simultaneously.
 Configuration and timing
 ------------------------
 The full tones list matches the complete MuxReadoutCfg in count and order.
-Each MuxFreqToneCfg has a fixed name, a required drive and freq bounds. Participants is
-a nonempty, unique list of original indices. Q3/Q1 selects original indices [2, 0]
-from Q1/Q2/Q3 and retains that execution/data order. Every drive must be valid,
-only for participants, on independent generators distinct from readout.
+Each MuxFreqToneCfg has a fixed name. Only participants require and use a drive
+and freq bounds. Participants is a nonempty, unique list of original indices.
+Q3/Q1 selects original indices [2, 0] from Q1/Q2/Q3 and retains that execution/data
+order. Cfg rejects active drives sharing the readout generator. Program build
+rejects overlapping active drive pulses on the same generator. Inactive tones
+retain drafts and are not subject to these active generator checks.
 The caller supplies the complete qubit/resonator bindings; numeric cfg validation
 does not resolve component identities.
 
@@ -121,11 +123,14 @@ class MuxFreqToneCfg(MuxDriveToneCfg):
 class MuxFreqCfg(ConfigBase):
     """Settings for simultaneous qubit frequency sweeps and mux readout.
 
-    modules supplies optional reset and the full readout tone list. tones gives
-    each original readout position a unique name, a drive and a MHz sweep.
+    reset is optional and may be None. readout contains the full readout tone list.
+    tones gives each original readout position a unique name.
     participants selects a nonempty, unique list of original indices in measurement order.
-    All tones need distinct drive generators, separate from readout.
-    expts is the positive hardware point count shared by all tones.
+    Only participants require and use a drive and a MHz sweep.
+    Cfg rejects active drives sharing the readout generator. Program build rejects
+    overlapping active drive pulses on the same generator. Inactive tones retain
+    drafts and are not subject to these active generator checks.
+    expts is the positive hardware point count shared by all participants.
     Sweeps advance together by point, not as a Cartesian product. reps/rounds are positive averaging counts;
     initial_delay/relax_delay are finite nonnegative waits in us.
     """
