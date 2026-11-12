@@ -71,7 +71,7 @@ class QutritPopulationCfg(ConfigBase):
         Field(default=1.0, ge=0)
     )
     relax_delay: Annotated[float, FieldMeta(label="Relax delay", unit="us")] = Field(
-        default=1.0, ge=0
+        ge=0
     )
 
 

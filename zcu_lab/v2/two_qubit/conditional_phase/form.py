@@ -37,6 +37,7 @@ def phase_form(ctx: FormContext, cfg_type: type[CfgT]) -> Form[CfgT]:
         tree={
             "reps": 1000,
             "rounds": 10,
+            "relax_delay": 1.0,
             "roles": roles,
             "reset": None,
             "x180_f1": Slot("$f1.module.x180", copy=True),

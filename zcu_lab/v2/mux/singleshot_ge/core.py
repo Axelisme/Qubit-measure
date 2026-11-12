@@ -130,7 +130,7 @@ class MuxGECfg(ConfigBase):
             decimals=3,
             description="Delay after each shot.",
         ),
-    ] = Field(default=1.0, ge=0, allow_inf_nan=False)
+    ] = Field(ge=0, allow_inf_nan=False)
 
     @model_validator(mode="after")
     def validate_acquisition(self) -> MuxGECfg:

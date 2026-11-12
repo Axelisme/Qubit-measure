@@ -33,6 +33,8 @@ def make_form(ctx: FormContext) -> Form[RPiFreqCfg]:
         RPiFreqCfg,
         field_order=("readout", "pi_pulse", "freq", "reps", "rounds"),
         tree={
+            "reps": 250,
+            "rounds": 20,
             "readout": readout,
             "pi_pulse": source(
                 ctx,

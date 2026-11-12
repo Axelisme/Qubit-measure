@@ -111,7 +111,7 @@ class RBCfg(ConfigBase):
     )
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
-    ] = Field(default=1, gt=0)
+    ] = Field(gt=0)
     rounds: Annotated[
         int,
         FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
@@ -132,7 +132,7 @@ class RBCfg(ConfigBase):
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
-    ] = 1.0
+    ]
 
     @model_validator(mode="after")
     def validate_sequence_inputs(self) -> Self:

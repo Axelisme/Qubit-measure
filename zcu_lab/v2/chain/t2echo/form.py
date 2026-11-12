@@ -12,11 +12,13 @@ from .core import ChainT2EchoCfg
 def make_form(ctx: FormContext) -> Form[ChainT2EchoCfg]:
     """Use the twotone/t2echo pulses, readout and delay range; K is 5 T1.
 
-    Reps and rounds use the cfg defaults.
+    Reps and rounds start at 100.
     """
     return Form(
         ChainT2EchoCfg,
         tree={
+            "reps": 100,
+            "rounds": 100,
             "pi2_pulse": source(
                 ctx,
                 "$qubit.module.x90",

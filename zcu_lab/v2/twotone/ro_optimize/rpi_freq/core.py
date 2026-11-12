@@ -85,14 +85,14 @@ class RPiFreqCfg(ConfigBase):
             description="Cycles of 64 R-pi per frequency in each round. "
             "Lags stay within each cycle; sums accumulate across reps.",
         ),
-    ] = Field(default=250, ge=1)
+    ] = Field(ge=1)
     rounds: Annotated[
         int,
         FieldMeta(
             label="Rounds",
             description="Software rounds. Cycle sums accumulate across finished rounds.",
         ),
-    ] = Field(default=20, ge=1)
+    ] = Field(default=1, ge=1)
 
 
 @dataclass(frozen=True)

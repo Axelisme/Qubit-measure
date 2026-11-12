@@ -80,7 +80,7 @@ class StirapDelayCfg(ConfigBase):
     shots: Annotated[int, FieldMeta(label="Shots per point")] = Field(
         default=4096, ge=1
     )
-    relax_delay: Annotated[float, FieldMeta(unit="us")] = Field(default=1.0, ge=0)
+    relax_delay: Annotated[float, FieldMeta(unit="us")] = Field(ge=0)
 
     @model_validator(mode="after")
     def _different_generators(self) -> Self:

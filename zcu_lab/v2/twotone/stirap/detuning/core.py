@@ -114,7 +114,7 @@ class StirapDetuningCfg(ConfigBase):
         default=4096, ge=1
     )
     relax_delay: Annotated[float, FieldMeta(label="Relax delay", unit="us")] = Field(
-        default=1.0, ge=0
+        ge=0
     )
 
     @model_validator(mode="after")

@@ -174,7 +174,7 @@ class LenRabiCfg(ConfigBase):
             decimals=3,
             description="Delay after each shot.",
         ),
-    ] = 1.0
+    ]
 
 
 @pydantic_dataclass(frozen=True, config={"arbitrary_types_allowed": True})

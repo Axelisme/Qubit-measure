@@ -123,9 +123,10 @@ class MuxOnetoneCfg(ConfigBase):
     each point uses base_freq[i] + df with no cumulative
     update. Each point's program quantizes these frequencies to the hardware grid.
 
-    Explicit reps (default 1) is repetitions per round; rounds (default 1) is
-    software acquisition rounds per offset. initial_delay and relax_delay are
-    program delays in us (both default 1). No external devices are required.
+    reps is the required repetitions per round; rounds defaults to one
+    software acquisition round per offset. initial_delay defaults to 1 us;
+    relax_delay is the required delay after each repetition in us.
+    No external devices are required.
     participants selects original readout indices in execution/column order.
     Lists must be nonempty, unique integers in 0..N-1;
     bool, floating point and string indices are rejected without coercion.
@@ -162,7 +163,7 @@ class MuxOnetoneCfg(ConfigBase):
 
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
-    ] = 1
+    ]
     rounds: Annotated[
         int,
         FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
@@ -183,7 +184,7 @@ class MuxOnetoneCfg(ConfigBase):
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
-    ] = 1.0
+    ]
 
     @field_validator("participants")
     @classmethod
