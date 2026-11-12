@@ -122,7 +122,7 @@ class RPiLengthCfg(ConfigBase):
         FieldMeta(
             label="ADC window",
             unit="us",
-            description="Requested chain duration, rounded up to whole readout dwells.",
+            description="ADC integration-window sweep.",
         ),
     ]
     reps: Annotated[
