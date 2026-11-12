@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Annotated, Any, ClassVar, Literal
 
 import numpy as np
+from matplotlib.artist import Artist
 from numpy.typing import NDArray
 from pydantic import model_validator
 from zcu_tools.analysis.fitting import HangerModel, TransmissionModel
@@ -214,8 +216,12 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         line = live_line(ax)
 
         @context.plots.on_plot_thread
-        def update(data):
-            """Update live magnitude from the latest complex acquisition."""
+        def update(data: NDArray[np.complex128]) -> Iterable[Artist]:
+            """Draw acquired complex IQ on the measurement axes; return changed artists.
+
+            Read the scan-shaped data without changing it. Update the live
+            artists over the prepared coordinates; plot errors propagate.
+            """
             return line.set(freqs, np.abs(data))
 
         fig.show()

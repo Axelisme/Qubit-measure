@@ -40,6 +40,7 @@ class AccPhaseAnalysis:
 
 
 def acc_phase_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
+    """Return rotated real IQ without changing the complex input or plotting."""
     return rotate2real(signals).real
 
 

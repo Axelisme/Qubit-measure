@@ -160,7 +160,11 @@ class FreqPowerExp(Experiment[FreqPowerResult, FreqPowerCfg]):
 
         @context.plots.on_plot_thread
         def plot_fn(counts: NDArray[np.float64]):
-            """Update the measurement artists from the latest acquired data."""
+            """Draw acquired shot counts on the measurement axes; return changed artists.
+
+            Read scan-shaped samples without changing them. Update the live
+            artists over the prepared coordinates; plot errors propagate.
+            """
             populations = counts / counts.sum(axis=-1, keepdims=True)
             return tuple(
                 artist

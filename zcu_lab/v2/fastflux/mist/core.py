@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Annotated, ClassVar
 
 import numpy as np
+from matplotlib.artist import Artist
 from matplotlib.image import NonUniformImage
 from matplotlib.ticker import ScalarFormatter
 from numpy.typing import NDArray
@@ -126,8 +128,12 @@ class MistExp(Experiment[MistResult, MistCfg]):
         viewer = live_heatmap(ax)
 
         @context.plots.on_plot_thread
-        def update(data):
-            """Update the measurement artists from the latest acquired data."""
+        def update(data: NDArray[np.complex128]) -> Iterable[Artist]:
+            """Draw acquired complex IQ on the measurement axes; return changed artists.
+
+            Read the scan-shaped data without changing it. Update the live
+            artists over the prepared coordinates; plot errors propagate.
+            """
             return viewer.set(flux_gains, mist_gains, mist_signal2real(data))
 
         fig.show()

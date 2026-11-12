@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Annotated, ClassVar, Literal
 
 import numpy as np
+from matplotlib.artist import Artist
 from matplotlib.ticker import MaxNLocator, ScalarFormatter
 from numpy.typing import NDArray
 from pydantic.dataclasses import dataclass as pydantic_dataclass
@@ -156,8 +158,12 @@ class FluxDepExp(Experiment[FluxDepResult, FluxDepCfg]):
         line_ax.legend()
 
         @context.plots.on_plot_thread
-        def update(data):
-            """Update the measurement artists from the latest acquired data."""
+        def update(data: NDArray[np.complex128]) -> Iterable[Artist]:
+            """Draw acquired complex IQ on the measurement axes; return changed artists.
+
+            Read the scan-shaped data without changing it. Update the live
+            artists over the prepared coordinates; plot errors propagate.
+            """
             real = mist_signal2real(data)
             valid = np.flatnonzero(~np.all(np.isnan(real), axis=1))
             current = int(valid[-1]) if valid.size else -1

@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+from collections.abc import Callable, Iterable
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Annotated, Any, ClassVar, Literal
 
 import numpy as np
 from matplotlib import colormaps
+from matplotlib.artist import Artist
+from matplotlib.axes import Axes
 from matplotlib.colors import Normalize
 from mpl_toolkits.mplot3d import Axes3D
 from numpy.typing import NDArray
@@ -43,6 +46,14 @@ class JPAOptimizeResult:
     params: NDArray[np.float64]
     phases: NDArray[np.int32]
     signals: NDArray[np.float64]
+
+
+@dataclass(frozen=True)
+class _JPALiveSnapshot:
+    """Search result and current row copied together by the plot-thread dispatcher."""
+
+    result: JPAOptimizeResult  # Iteration-aligned candidate settings, phases and SNR.
+    index: int  # Current candidate row, including its search-phase label.
 
 
 @dataclass(frozen=True)
@@ -313,12 +324,17 @@ class AutoOptimizeExp(Experiment[JPAOptimizeResult, JPAOptCfg]):
         params = np.full((num_points, 3), np.nan, dtype=np.float64)
         phases = np.zeros(num_points, dtype=np.int32)
         point_indices = np.arange(num_points, dtype=np.float64)
-        update = self._live_plot(context, point_indices)
+        update = self._show_search_plot(context, point_indices)
         current_index = 0
 
         def plot_fn(data: NDArray[np.float64]) -> None:
             """Update the live JPA artists from the latest acquired signals."""
-            update((data, params, phases, current_index))
+            update(
+                _JPALiveSnapshot(
+                    JPAOptimizeResult(params=params, phases=phases, signals=data),
+                    current_index,
+                )
+            )
 
         signals_buffer = SignalBuffer(
             (num_points,), dtype=np.float64, on_update=plot_fn
@@ -390,9 +406,15 @@ class AutoOptimizeExp(Experiment[JPAOptimizeResult, JPAOptCfg]):
             params=params, phases=phases, signals=signals_buffer.array
         )
 
-    def _live_plot(self, context: RunContext, point_indices: NDArray[np.float64]):
-        # Show SNR versus iteration and each candidate parameter, colored by phase.
-        """Show candidate settings and SNR; return an updater for the live measurement artists."""
+    def _show_search_plot(
+        self, context: RunContext, point_indices: NDArray[np.float64]
+    ) -> Callable[[_JPALiveSnapshot], None]:
+        """Show candidate settings and SNR; return a plot-thread updater that changes these artists.
+
+        Use context.plots to create four panels over iteration indices and
+        candidate flux/MHz/dBm. The updater takes an iteration-aligned result
+        and current row, copied together before drawing. Plot errors propagate.
+        """
         figure, initial_ax = context.plots.subplots(num="measurement", figsize=(8, 5))
         initial_ax.remove()
         figure.suptitle("JPA Auto Optimization")
@@ -417,9 +439,12 @@ class AutoOptimizeExp(Experiment[JPAOptimizeResult, JPAOptCfg]):
         viewers = [live_scatter(ax) for ax in axes]
 
         @context.plots.on_plot_thread
-        def update(payload):
-            """Update the four JPA measurement panels from the candidate payload."""
-            data, sampled_params, sampled_phases, idx = payload
+        def update(snapshot: _JPALiveSnapshot) -> Iterable[Artist]:
+            """Draw a copied search result and current row; return the changed panel artists."""
+            data = snapshot.result.signals
+            sampled_params = snapshot.result.params
+            sampled_phases = snapshot.result.phases
+            idx = snapshot.index
             cur_flux, cur_freq, cur_gain = sampled_params[idx, :]
             title = (
                 f"Iteration {idx}, Phase {sampled_phases[idx]}\n"
@@ -497,7 +522,7 @@ class AutoOptimizeExp(Experiment[JPAOptimizeResult, JPAOptCfg]):
         ax_iter.legend()
         ax_iter.grid(True)
 
-        def plot_ax(ax, param_idx, label_name) -> None:
+        def plot_ax(ax: Axes, param_idx: int, label_name: str) -> None:
             """Draw one sampled JPA parameter against SNR and mark the best measured setting."""
             ax.scatter(params[:, param_idx], snrs, c=colors, s=1)
             best_value = best_params[param_idx]

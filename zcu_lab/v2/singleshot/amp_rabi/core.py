@@ -70,7 +70,12 @@ def _plot_initial_histogram(
     effective_t1_us: float | None,
     classified_distribution: NDArray[np.float64] | None,
 ) -> None:
-    """Draw the initial-point IQ histogram and fitted state contributions on ax."""
+    """Draw the initial-point IQ histogram and fitted state contributions on ax.
+
+    Read the joint fit without changing it. Annotate effective T1 in us and
+    the optional G/E/Other classified fractions when available. Return None;
+    only the caller-owned axes change, and plotting errors propagate.
+    """
     counts = fit.projection.counts[0]
     edges = fit.projection.bin_edges
     ax.stairs(counts, edges, label="Observed counts", color="black")
@@ -149,7 +154,12 @@ def _plot_initial_histogram(
 
 
 def _plot_confusion_matrix(ax: Axes, fit: RabiJointFitResult) -> None:
-    """Draw the fitted three-state confusion matrix on the caller-owned ax."""
+    """Draw the fitted three-state confusion matrix on the caller-owned ax.
+
+    Read the joint fit without changing it; show an unavailable label for an
+    invalid fit. Return None after updating the image, labels and ticks.
+    Plotting errors propagate.
+    """
     labels = ("g", "e", "other")
     matrix = fit.confusion_matrix
     if fit.backend.valid and np.isfinite(matrix).all():
@@ -304,7 +314,11 @@ class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
 
         @context.plots.on_plot_thread
         def update_view(raw: NDArray[np.complex128]):
-            """Update the measurement artists from the latest acquired data."""
+            """Draw acquired raw complex IQ on the measurement axes; return changed artists.
+
+            Read scan-shaped samples without changing them. Update the live
+            artists over the prepared coordinates; plot errors propagate.
+            """
             if viewer is None or classifier is None or classifier.radius is None:
                 return ()
             shots = _flatten_round_shots(raw)

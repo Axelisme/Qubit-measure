@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Annotated, ClassVar
 
 import numpy as np
+from matplotlib.artist import Artist
 from matplotlib.ticker import ScalarFormatter
 from numpy.typing import NDArray
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
@@ -121,8 +123,12 @@ class DriveFreqExp(Experiment[DriveFreqResult, DriveFreqCfg]):
         viewer = live_heatmap(ax)
 
         @context.plots.on_plot_thread
-        def update(data):
-            """Update the measurement artists from the latest acquired data."""
+        def update(data: NDArray[np.complex128]) -> Iterable[Artist]:
+            """Draw acquired complex IQ on the measurement axes; return changed artists.
+
+            Read the scan-shaped data without changing it. Update the live
+            artists over the prepared coordinates; plot errors propagate.
+            """
             return viewer.set(freqs, gains, drivefreq_signal2real(data))
 
         fig.show()

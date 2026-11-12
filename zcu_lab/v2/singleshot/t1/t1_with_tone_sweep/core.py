@@ -10,6 +10,7 @@ from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from pydantic import Field
 from pydantic.dataclasses import dataclass as pydantic_dataclass
+from qick import QickConfig
 from zcu_tools.analysis.fitting.multi_decay import fit_dual_transition_rates
 from zcu_tools.analysis.singleshot import correct_populations
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
@@ -68,7 +69,12 @@ def _plot_transition_rates(
     axes: tuple[Axes, Axes, Axes],
     xlabel: str,
 ) -> None:
-    """Plot three-state transition rates, showing covariance errors at every fifth point."""
+    """Plot three-state transition rates, showing covariance errors at every fifth point.
+
+    Read outer-axis xs, rates shaped (N, 6) and covariance blocks (N, 6, 6)
+    in ge, eg, eo, oe, go, og order without changing them. Update the three
+    caller-owned axes and their xlabel, returning None. Plot errors propagate.
+    """
     ax_Tg, ax_Te, ax_To = axes
     # Rate order: ge, eg, eo, oe, go, og.
     R_go = rates[:, 4]
@@ -118,9 +124,12 @@ def _require_positive_lengths(lengths: NDArray[np.float64]) -> None:
 def _fit_transition_rates(
     Ts: NDArray[np.float64], populations: NDArray[np.float64]
 ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
-    """Fit each complete sweep row and close progress even when fitting fails.
+    """Fit sweep rows with a progress bar, closing it and propagating any fitting failure.
 
-    Return rates in ge, eg, eo, oe, go, og order and their covariance blocks.
+    Read positive durations Ts in us, shaped (T,), and populations shaped
+    (N, 2, T, 3) for initial g/e and measured G/E/Other without changing them.
+    Return rates (N, 6) in ge, eg, eo, oe, go, og order and covariance blocks
+    (N, 6, 6). Process rows in order and advance progress after each fit.
     """
     # Rate order: ge, eg, eo, oe, go, og.
     N = populations.shape[0]
@@ -210,8 +219,14 @@ class T1WithToneSweepExp(Experiment[T1WithToneSweepResult, T1WithToneSweepCfg]):
     )
 
     def _resolve_outer_sweep(
-        self, cfg: T1WithToneSweepCfg, soccfg
+        self, cfg: T1WithToneSweepCfg, soccfg: QickConfig
     ) -> tuple[str, NDArray[np.float64]]:
+        """Return the hardware-rounded gain/frequency axis; raise if neither or both are set.
+
+        Read cfg and the board configuration without changing them. Return the
+        selected field name and its rounded values in gain units or MHz.
+        Hardware conversion errors propagate; no plotting or acquisition occurs.
+        """
         # The outer scan is the probe gain or frequency field, set exclusively.
         sweep_name: Literal["gain", "freq"]
         if cfg.gain is not None and cfg.freq is None:
@@ -229,6 +244,12 @@ class T1WithToneSweepExp(Experiment[T1WithToneSweepResult, T1WithToneSweepCfg]):
         return sweep_name, xs
 
     def _make_viewers(self, plots: Plots, sweep_name: str):
+        """Show six population heatmaps and two current-trace panels; return their viewers.
+
+        Use plots to own the figure and sweep_name to label gain or frequency.
+        Return six heatmap viewers in initial-state-major order, followed by
+        two three-population line viewers. Plot errors propagate.
+        """
         figure, _ = plots.subplots(
             nrows=4, ncols=2, num="measurement", figsize=(12, 10)
         )

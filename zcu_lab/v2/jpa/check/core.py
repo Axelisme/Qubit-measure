@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Annotated, ClassVar, Literal
 
 import numpy as np
+from matplotlib.artist import Artist
 from numpy.typing import NDArray
 from zcu_tools.cfg_model import ConfigBase, DeviceName, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment, config
@@ -106,8 +108,12 @@ class CheckExp(Experiment[CheckResult, CheckCfg]):
         line = live_line(ax, num_lines=2)
 
         @context.plots.on_plot_thread
-        def update(data):
-            """Update the measurement artists from the latest acquired data."""
+        def update(data: NDArray[np.complex128]) -> Iterable[Artist]:
+            """Draw acquired complex IQ on the measurement axes; return changed artists.
+
+            Read the scan-shaped data without changing it. Update the live
+            artists over the prepared coordinates; plot errors propagate.
+            """
             return line.set(freqs, check_signal2real(data))
 
         fig.show()

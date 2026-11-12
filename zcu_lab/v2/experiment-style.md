@@ -46,13 +46,14 @@ description="Fixed preparation pulse before each gain-swept Rabi pulse; None ski
 
 **抽象。** 只有一個實驗用到的邏輯，直接寫在那個實驗的 `core.py`。等第二、第三個實驗也需要時，再設計共同的函式或型別。使用者 2026-11-11 對 gain 專用 sweep 型別的判斷：「特化一個 gain sweep config，感覺就有點過度工程」。
 
-**只有一個呼叫者的 helper。** 預設內聯，三個條件都成立才保留：
+**只有一個呼叫者的 helper。** 可以留在同一個 `core.py`，但要符合兩項條件：
 
-1. 名字加簽名說得完。只看呼叫那一行，就知道它吃什麼、回傳什麼。
-2. 效果只有回傳值，或副作用已經寫在名字上。
-3. 進出的變數少，輸入四個以內，輸出一個值或一個具名結果。這些變數和呼叫者其他區域變數沒有耦合，不需要呼叫者先準備好什麼，也不共用會被修改的狀態。
+1. 名字或 docstring 第一句說明全部效果。會 raise、會畫圖、會改狀態，都要寫明。
+2. 每個參數具名、有型別、只有一個意義，不用巢狀 tuple 打包。
 
-任何一項不成立就內聯。只轉傳參數的包裝、本體 5 行以內的 helper，一律內聯。被當成 callback 傳出去的函式、有兩個以上呼叫者的函式不適用這套內聯規則，例如 `run` 與 `analyze` 都用的 `*_signal2real`。
+不符合條件的 helper 改名或改簽名，行為不變。不限制輸入數量，也不要求參數與 caller 狀態無耦合。
+
+只轉傳參數的包裝、本體 5 行以內的 helper，一律內聯。被當成 callback 傳出去的函式、有兩個以上呼叫者的函式不適用這套內聯規則，例如 `run` 與 `analyze` 都用的 `*_signal2real`。已內聯且沒有跨過品質門檻的區塊維持現狀，不為了內聯新增 suppression 或改門檻。CPMG 的加權 log-log 回歸與 `t1_with_tone_sweep` 的批次 transition-rate 擬合保留為各自 core 的 helper。
 
 **Docstring 與註解。** `run` 的 docstring 用二到四句：播放什麼序列、回傳什麼、使用時要注意什麼（`twotone/rabi/amp_rabi/core.py:110-116`）。保留的 helper 一定有 docstring，交代輸入、輸出與副作用。
 

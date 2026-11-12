@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Annotated, ClassVar
 
 import numpy as np
+from matplotlib.artist import Artist
 from numpy.typing import NDArray
 from pydantic import Field
 from zcu_tools.cfg_model import ConfigBase, DeviceName, FieldMeta
@@ -120,8 +122,12 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         ax.lines[0].set_marker("o")
 
         @context.plots.on_plot_thread
-        def update(data):
-            """Update the measurement artists from the latest acquired data."""
+        def update(data: NDArray[np.float64]) -> Iterable[Artist]:
+            """Draw acquired SNR on the measurement axes; return changed artists.
+
+            Read the scan-shaped data without changing it. Update the live
+            artists over the prepared coordinates; plot errors propagate.
+            """
             return line.set(jpa_freqs, np.abs(data))
 
         fig.show()

@@ -262,7 +262,11 @@ class GE_Exp(Experiment[GE_Result, GE_Cfg]):
 
         @context.plots.on_plot_thread
         def update(clouds: NDArray[np.complex128]):
-            """Update the measurement artists from the latest acquired data."""
+            """Draw acquired raw complex IQ on the measurement axes; return changed artists.
+
+            Read scan-shaped samples without changing them. Update the live
+            artists over the prepared coordinates; plot errors propagate.
+            """
             axes.clear()
             for cloud, label, color in zip(
                 clouds,
