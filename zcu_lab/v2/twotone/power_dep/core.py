@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Annotated, ClassVar
 
 import numpy as np
+from matplotlib.artist import Artist
 from matplotlib.ticker import MaxNLocator, ScalarFormatter
 from numpy.typing import NDArray
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
@@ -123,8 +124,12 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
         line_ax.legend()
 
         @context.plots.on_plot_thread
-        def update(data):
-            """Refresh the measurement artists from the current acquired data."""
+        def update(data: NDArray[np.complex128]) -> tuple[Artist, ...]:
+            """Refresh the drive-gain contrast map and two recent frequency traces.
+
+            data is complex IQ shaped (gain, frequency); NaN marks unmeasured points.
+            Return the changed artists without modifying the input array.
+            """
             # Display each row's contrast relative to its own median background.
             real = np.abs(minus_background(data, axis=1))
             valid = np.flatnonzero(~np.all(np.isnan(real), axis=1))

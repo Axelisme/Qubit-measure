@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Annotated, ClassVar, Literal
 
 import numpy as np
+from matplotlib.artist import Artist
 from matplotlib.ticker import ScalarFormatter
 from numpy.typing import NDArray
 from pydantic.dataclasses import dataclass as validated_dataclass
@@ -178,8 +179,12 @@ class ZigZagScanExp(Experiment[ZigZagScanResult, ZigZagScanCfg]):
         heatmap = live_heatmap(ax, uniform=True)
 
         @context.plots.on_plot_thread
-        def update(data):
-            """Refresh the measurement artists from the current acquired data."""
+        def update(data: NDArray[np.complex128]) -> tuple[Artist, ...]:
+            """Refresh the ZigZag parameter-sweep contrast map.
+
+            data is complex IQ shaped (repeat count, swept value).
+            Return the changed artists without modifying the input array.
+            """
             real = zigzag_signal2real(data)
             return heatmap.set(times.astype(np.float64), values, real)
 

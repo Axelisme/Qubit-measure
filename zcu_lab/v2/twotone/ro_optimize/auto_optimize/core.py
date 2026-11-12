@@ -7,6 +7,7 @@ from typing import Annotated, Any, ClassVar, cast
 
 import numpy as np
 from matplotlib.artist import Artist
+from matplotlib.axes import Axes
 from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field
@@ -497,8 +498,12 @@ class AutoOptExp(Experiment[AutoOptResult, AutoOptCfg]):
         ax_iter.legend()
         ax_iter.grid(True)
 
-        def plot_ax(ax, param_idx, label_name) -> None:
-            """Plot one sampled readout coordinate against its measured SNR."""
+        def plot_ax(ax: Axes, param_idx: int, label_name: str) -> None:
+            """Plot one sampled readout coordinate, best setting and measured SNR on ax.
+
+            param_idx selects frequency (0), gain (1) or length (2) from captured params.
+            label_name labels that coordinate and its units; return None after updating ax.
+            """
             ax.scatter(params[:, param_idx], snrs, s=1)
             best_value = best_params[param_idx]
             ax.axvline(best_value, color="r", ls="--", label=f"best = {best_value:.2g}")

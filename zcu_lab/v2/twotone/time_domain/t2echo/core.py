@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Annotated, ClassVar, Literal
 
 import numpy as np
+from matplotlib.artist import Artist
 from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field
@@ -148,8 +149,12 @@ class T2EchoExp(Experiment[T2EchoResult, T2EchoCfg]):
         viewer = live_line(ax)
 
         @context.plots.on_plot_thread
-        def update(data):
-            """Refresh the measurement artists from the current acquired data."""
+        def update(data: NDArray[np.complex128]) -> tuple[Artist, ...]:
+            """Refresh the echo contrast curve.
+
+            data is complex IQ in delay order; NaN marks unmeasured points.
+            Return the changed artists without modifying the input array.
+            """
             return viewer.set(lengths, t2echo_signal2real(data))
 
         fig.show()

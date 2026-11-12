@@ -12,7 +12,9 @@ from dataclasses import dataclass
 from typing import Annotated, ClassVar, Literal
 
 import numpy as np
+from matplotlib.artist import Artist
 from matplotlib.ticker import MaxNLocator
+from numpy.typing import NDArray
 from pydantic import Field
 from pydantic.dataclasses import dataclass as validated_dataclass
 from zcu_tools.analysis.fitting import PeakCandidate
@@ -241,8 +243,12 @@ class ChainExp(Experiment[SweepSums, ChainCfg]):
         ax.legend()
 
         @context.plots.on_plot_thread
-        def update(augmented_sums):
-            """Refresh the measurement artists from the current acquired data."""
+        def update(augmented_sums: NDArray[np.float64]) -> tuple[Artist, ...]:
+            """Refresh the sweep significance curve and its reference level; propagate invalid-sum errors.
+
+            augmented_sums contains float64 moment sums shaped (frequency, 12, 12).
+            Return the changed artists without modifying the input array.
+            """
             sums = SweepSums.from_augmented(freqs, augmented_sums)
             curve = sweep_curve(sums)
             level_line.set_data([freqs[0], freqs[-1]], [curve.level, curve.level])

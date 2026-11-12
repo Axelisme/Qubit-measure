@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Annotated, ClassVar
 
 import numpy as np
+from matplotlib.artist import Artist
 from matplotlib.image import NonUniformImage
 from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
@@ -178,8 +179,12 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
         line_ax.legend()
 
         @context.plots.on_plot_thread
-        def update(data):
-            """Refresh the measurement artists from the current acquired data."""
+        def update(data: NDArray[np.complex128]) -> tuple[Artist, ...]:
+            """Refresh the Stark contrast map, two recent traces and SNR title.
+
+            data is complex IQ shaped (gain, frequency); NaN marks unmeasured points.
+            Return the changed artists without modifying the input array.
+            """
             real = acstark_signal2real(data)
             valid = np.flatnonzero(~np.all(np.isnan(real), axis=1))
             current = int(valid[-1]) if valid.size else -1

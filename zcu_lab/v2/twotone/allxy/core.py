@@ -6,6 +6,7 @@ from typing import Annotated, ClassVar
 
 import numpy as np
 from matplotlib import rcParams
+from matplotlib.artist import Artist
 from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic.dataclasses import dataclass as validated_dataclass
@@ -191,8 +192,12 @@ class AllXY_Exp(Experiment[AllXY_Result, AllXYCfg]):
         line.set_markersize(5)
 
         @context.plots.on_plot_thread
-        def update(data):
-            """Refresh the measurement artists from the current acquired data."""
+        def update(data: NDArray[np.complex128]) -> tuple[Artist, ...]:
+            """Refresh the ALLXY contrast curve.
+
+            data is complex IQ in ALLXY_SEQUENCE order; NaN marks unmeasured pairs.
+            Return the changed artists without modifying the input array.
+            """
             return viewer.set(
                 np.arange(len(ALLXY_SEQUENCE), dtype=np.float64),
                 allxy_signal2real(data),

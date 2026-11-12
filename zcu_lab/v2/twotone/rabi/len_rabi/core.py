@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Annotated, ClassVar
 
 import numpy as np
+from matplotlib.artist import Artist
 from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field
@@ -155,8 +156,12 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
         viewer = live_line(ax)
 
         @context.plots.on_plot_thread
-        def update(data):
-            """Refresh the measurement artists from the current acquired data."""
+        def update(data: NDArray[np.complex128]) -> tuple[Artist, ...]:
+            """Refresh the hardware length-sweep Rabi contrast curve.
+
+            data is complex IQ in pulse-length order; NaN marks unmeasured points.
+            Return the changed artists without modifying the input array.
+            """
             return viewer.set(lengths, rabi_signal2real(data))
 
         fig.show()
@@ -211,8 +216,12 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
         viewer = live_line(ax)
 
         @context.plots.on_plot_thread
-        def update(data):
-            """Refresh the measurement artists from the current acquired data."""
+        def update(data: NDArray[np.complex128]) -> tuple[Artist, ...]:
+            """Refresh the host length-sweep Rabi curve after averaging available rounds.
+
+            data is complex IQ shaped (round, pulse length); NaN marks unmeasured points.
+            Return the changed artists without modifying the input array.
+            """
             return viewer.set(lengths, rabi_signal2real(average_round(data)))
 
         fig.show()

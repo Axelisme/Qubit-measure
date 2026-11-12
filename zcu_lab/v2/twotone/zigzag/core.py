@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Annotated, ClassVar, Literal
 
 import numpy as np
+from matplotlib.artist import Artist
 from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field
@@ -96,8 +97,12 @@ class ZigZagExp(Experiment[ZigZagResult, ZigZagCfg]):
         viewer = live_line(ax)
 
         @context.plots.on_plot_thread
-        def update(data):
-            """Refresh the measurement artists from the current acquired data."""
+        def update(data: NDArray[np.complex128]) -> tuple[Artist, ...]:
+            """Refresh the common-axis IQ projection versus repeat count.
+
+            data is complex IQ in repeat-count order; NaN marks unmeasured points.
+            Return the changed artists without modifying the input array.
+            """
             # Project the repeat-count trace onto its common real IQ axis.
             return viewer.set(times.astype(np.float64), rotate2real(data).real)
 

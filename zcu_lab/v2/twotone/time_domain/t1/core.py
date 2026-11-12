@@ -7,6 +7,7 @@ from typing import Annotated, ClassVar, Literal
 
 import numpy as np
 import zcu_tools.analysis.fitting as ft
+from matplotlib.artist import Artist
 from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field
@@ -145,8 +146,12 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
         viewer = live_line(ax)
 
         @context.plots.on_plot_thread
-        def update(data):
-            """Refresh the measurement artists from the current acquired data."""
+        def update(data: NDArray[np.complex128]) -> tuple[Artist, ...]:
+            """Refresh the linear-delay T1 contrast curve.
+
+            data is complex IQ in delay order; NaN marks unmeasured points.
+            Return the changed artists without modifying the input array.
+            """
             return viewer.set(lengths, t1_signal2real(data))
 
         fig.show()
@@ -193,8 +198,12 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
         viewer = live_line(ax)
 
         @context.plots.on_plot_thread
-        def update(data):
-            """Refresh the measurement artists from the current acquired data."""
+        def update(data: NDArray[np.complex128]) -> tuple[Artist, ...]:
+            """Refresh the nonuniform-delay T1 contrast curve.
+
+            data is complex IQ in delay order; NaN marks unmeasured points.
+            Return the changed artists without modifying the input array.
+            """
             return viewer.set(lengths, t1_signal2real(data))
 
         fig.show()

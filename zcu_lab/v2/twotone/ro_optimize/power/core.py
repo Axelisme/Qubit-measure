@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Annotated, Any, ClassVar
 
 import numpy as np
+from matplotlib.artist import Artist
 from numpy.typing import NDArray
 from pydantic import Field
 from pydantic.dataclasses import dataclass as pydantic_dataclass
@@ -155,8 +156,12 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
         viewer = live_line(ax)
 
         @context.plots.on_plot_thread
-        def update(sums):
-            """Refresh the measurement artists from the current acquired data."""
+        def update(sums: NDArray[np.float64]) -> tuple[Artist, ...]:
+            """Refresh readout-gain separation from the paired IQ moment sums.
+
+            sums is float64 with shape (gain, 8, 6, 6); zero counts display as NaN.
+            Return the changed artists without modifying the input array.
+            """
             counts = sums[:, :, 0, 0]
             counts = np.where(counts == 0, np.nan, counts)
             means = sums[:, :, 1:3, 0] / counts[..., None]

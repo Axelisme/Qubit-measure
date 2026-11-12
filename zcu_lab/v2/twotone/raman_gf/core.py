@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Annotated, ClassVar, Literal
 
 import numpy as np
+from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from pydantic import Field
 from zcu_tools.analysis.singleshot import (
@@ -219,8 +220,12 @@ class RamanGFExp(Experiment[RamanGFResult, RamanGFCfg]):
         figure, _ = context.plots.subplots(num="measurement", layout="constrained")
 
         @context.plots.on_plot_thread
-        def draw(_data):
-            """Refresh the measurement artists from the current acquired data."""
+        def draw(_data: None) -> tuple[Figure]:
+            """Add the acquired Raman preparation fractions to the figure.
+
+            _data is the unused None trigger; counts come from the captured result.
+            Return the changed figure; the trigger does not supply plot data.
+            """
             ax = figure.axes[0]
             fractions = result.counts / result.counts.sum(axis=-1, keepdims=True)
             for label, state in enumerate(STATE_LABELS):
@@ -283,8 +288,12 @@ class RamanGFExp(Experiment[RamanGFResult, RamanGFCfg]):
         )
 
         @plots.on_plot_thread
-        def populations(_data):
-            """Draw the acquired and confusion-corrected population fractions."""
+        def populations(_data: None) -> tuple[Figure]:
+            """Add raw and confusion-corrected Raman population plots to the figure.
+
+            _data is the unused None trigger; populations come from the captured analysis.
+            Return the changed figure; the trigger does not supply plot data.
+            """
             for row, (values, title) in enumerate(
                 (
                     (result.raw_populations, "Raw g/e/f fractions"),

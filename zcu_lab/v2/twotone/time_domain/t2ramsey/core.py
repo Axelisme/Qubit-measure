@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Annotated, ClassVar
 
 import numpy as np
+from matplotlib.artist import Artist
 from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field
@@ -146,8 +147,12 @@ class T2RamseyExp(Experiment[T2RamseyResult, T2RamseyCfg]):
         viewer = live_line(ax)
 
         @context.plots.on_plot_thread
-        def update(data):
-            """Refresh the measurement artists from the current acquired data."""
+        def update(data: NDArray[np.complex128]) -> tuple[Artist, ...]:
+            """Refresh the Ramsey contrast curve.
+
+            data is complex IQ in delay order; NaN marks unmeasured points.
+            Return the changed artists without modifying the input array.
+            """
             return viewer.set(lengths, t2ramsey_signal2real(data))
 
         fig.show()

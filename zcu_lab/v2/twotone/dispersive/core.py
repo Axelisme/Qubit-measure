@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Annotated, Any, ClassVar
 
 import numpy as np
+from matplotlib.artist import Artist
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from matplotlib.patches import Circle
@@ -180,8 +181,12 @@ class DispersiveExp(Experiment[DispersiveResult, DispersiveCfg]):
         viewer = live_line(ax, num_lines=2)
 
         @context.plots.on_plot_thread
-        def update(data):
-            """Refresh the measurement artists from the current acquired data."""
+        def update(data: NDArray[np.complex128]) -> tuple[Artist, ...]:
+            """Refresh the absolute IQ amplitude curves for both preparations.
+
+            data is complex IQ shaped (preparation, readout frequency).
+            Return the changed artists without modifying the input array.
+            """
             # Display absolute IQ amplitude for both preparations.
             return viewer.set(freqs, np.abs(data))
 
