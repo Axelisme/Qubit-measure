@@ -27,6 +27,7 @@ from ._shaped_dispatch import (
 )
 from ._two_tone_dispatch import first_candidate
 from .engine import PathDiagnostics
+from .exceptions import NoValidKernel
 from .kernel import (
     GuardPreparation,
     Kernel,
@@ -451,9 +452,13 @@ class _Classifier:
             if not len(rows):
                 return
         points = np.unique(self.geometry.points[self.table.timeline[rows]]).tolist()
-        raise RuntimeError(
+        raise NoValidKernel(
             f"no valid kernel for segment {rows[0]}; domain {domain}: "
-            f"points {points}, segments {rows.tolist()}"
+            f"points {points}, segments {rows.tolist()}",
+            domain=domain,
+            points=tuple(points),
+            segments=tuple(int(row) for row in rows),
+            attempted=candidates,
         )
 
     def classify_shaped(self, rows: NDArray[np.int64]) -> None:
