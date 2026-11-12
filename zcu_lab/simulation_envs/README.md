@@ -1,6 +1,6 @@
 # Simulation environments
 
-**Last updated:** 2026-11-02，共用 v2 接線與 tmux／tport
+**Last updated:** 2026-11-12，envelope 與 DDS 振幅刻度
 
 **讀者：** lab-author、agent。查找 GUI／Notebook 模擬環境、參數與 compile profile 的入口。
 
@@ -75,6 +75,30 @@ with profile_path.open() as stream:
 
 這只產生 compile config，不建立 SoC、不提供 IQ，也不操作硬體。
 欄位、時脈推導與失敗契約見 [program README](../../lib/zcu_tools/program/README.md#yaml-compile-profiles)。
+
+## Envelope gain 刻度
+
+Compiled frontend 的 product 模式將 I/Q table samples 除以 65536。
+在這些環境的 v6 generator 上，滿刻度 envelope 的峰值是同 gain DDS 輸出的
+`32766/65536 = 0.499969482421875`。
+Const、flat-top 平坦段與 mux tone 的 compiled gain 不變。
+Gauss、cosine、drag、arb 與 flat-top 兩端使用 product 刻度。
+完整係數與韌體出處見 [frontend 契約](../../lib/zcu_tools/program/v2/simulation/README.md#output-amplitude-scale)。
+
+模型 YAML 的 charge、flux 與 incident-field 係數仍以 DDS 輸出為基準，不加補償。
+各 entry 範本沒有 envelope π gain 或 pulse library，無須把物理係數翻倍。
+舊版模擬中用 envelope 校過的 program gain，等效新值約為舊值的
+`65536/32766 = 2.0001220777635353` 倍，另受 gain-word 取整影響。
+重新檢查 library pulse 的 gain、waveform 與是否超過 gain 上限。
+以 const 校過的 gain 不變；single/six guide 的 const 記錄不受此振幅修正影響。
+
+Integer 環境 field guide 的 STIRAP 與 Raman 是舊 envelope 刻度的歷史量測，
+不是目前設定的驗證結果。
+STIRAP Pump/Stokes gain `0.015/0.05` 的連續刻度等效值約為
+`0.030001831166453/0.100006103888177`。
+Raman arb gain 0.9 的等效值約為 1.800109869987182，超過 gain 上限 1。
+目前 0.1 us 的設定無法在新刻度重現該 Raman 記錄，不能沿用它的轉移率結論。
+詳見 [integer 歷史記錄說明](integer_fluxonium/field-guide.md#envelope-amplitude-revision)。
 
 ## FTF startup 與 YAML 設定
 

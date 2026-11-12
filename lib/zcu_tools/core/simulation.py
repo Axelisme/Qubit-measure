@@ -273,10 +273,12 @@ class PulseEnvelope:
     Attributes:
         sample_period_ticks: Positive int64-range spacing in the request's TimeBase.
             Sample k is at k * sample_period_ticks from pulse start, not a solver step.
-        values: Dimensionless complex DAC amplitudes on that uniform grid, preserving
-            original scale and sign. No peak normalization is applied. Interpolate
-            real and imaginary parts linearly; hold the final sample through pulse
-            end and use zero outside the event. Gain is applied separately.
+        values: Dimensionless complex output amplitudes relative to direct DDS
+            on that uniform grid, preserving sign without peak normalization.
+            The compiled QICK frontend divides signed I/Q table samples by 65536
+            for product mode; a full-scale v6 envelope peaks at 32766/65536.
+            Interpolate real and imaginary parts linearly; hold the final sample
+            through pulse end and use zero outside the event. Gain is applied separately.
         Noninteger periods raise TypeError, nonpositive periods raise ValueError,
         and periods outside int64 raise OverflowError. AcquireRequest checks the
         full envelope axis against its TimeBase range.
@@ -307,7 +309,9 @@ class PulseEvent:
             This record imposes no additional wrapping or range check.
         gain: Signed normalized DAC amplitude after gain-word quantization,
             relative to the generator's maximum gain word. Nominal full scale
-            is -1 to 1; this record does not enforce that range.
+            is -1 to 1; this record does not enforce that range. The compiled
+            frontend uses signed gain word / maxv, not maxv_scale. Multiplying
+            gain by envelope.values gives output relative to DDS full scale.
         envelope: Owned immutable continuous complex amplitude, or None for
             unity throughout duration_ticks. Never includes gain or carrier phase.
         phase_reference_ticks: Common carrier phase origin in execution ticks. After
@@ -409,8 +413,11 @@ class EventSlot:
     frequency_mhz: DDS-quantized carrier frequency.
     phase_deg: Phase-word phase; after converting ticks to physical us, carrier
         phase is phase_deg + 360 * frequency_mhz * (time_us - reference_us).
-    gain: Signed normalized DAC amplitude, nominal full scale [-1, 1].
-    envelopes: Candidate envelopes; None means unity. Plain pulses have one
+    gain: Signed gain word / generator maxv in the compiled frontend, nominal
+        full scale [-1, 1]. gain times the selected envelope sample is output
+        relative to direct DDS full scale; no product attenuation is in gain.
+    envelopes: Candidate output envelopes; None means unity for DDS/mux. QICK
+        product samples are signed I/Q table values / 65536. Plain pulses have one
         candidate; computed pulses include every selected candidate.
     envelope_index: int64 candidate index for each point.
     active: bool mask; False omits this event at that point.

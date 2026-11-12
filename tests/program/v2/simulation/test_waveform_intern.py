@@ -72,7 +72,7 @@ def test_repeated_waveforms_preserve_samples_signed_gain_and_phase(kind, tmp_pat
     assert all(e.gain < 0 for e in events)
     assert all(e.phase_deg == pytest.approx(37, abs=1e-5) for e in events)
     data = buffers[0]["data"]
-    expected_values = (data[:, 0] + 1j * data[:, 1]) / prog.soccfg.get_maxv(1)
+    expected_values = (data[:, 0] + 1j * data[:, 1]) / 65536
     # Observe playback samples, not template candidate identities or ordering.
     shaped = [e.envelope for e in events if e.envelope is not None]
     assert shaped
@@ -157,7 +157,10 @@ def test_equal_names_do_not_merge_different_compiled_content(difference):
         event.envelope for event in request.materialize_point(0).events[:2]
     ]
     assert first is not None and second is not None
-    assert first != second
+    if difference == "maxv":
+        assert first == second
+    else:
+        assert first != second
     if difference == "clock":
         np.testing.assert_array_equal(first.values, second.values)
         np.testing.assert_array_equal(
@@ -169,6 +172,6 @@ def test_equal_names_do_not_merge_different_compiled_content(difference):
             envelope_times_us(request.time_base, first),
             envelope_times_us(request.time_base, second),
         )
-        np.testing.assert_array_equal(np.array(first.values) * 2, second.values)
+        np.testing.assert_array_equal(first.values, second.values)
     else:
         assert any(value.imag != 0 for value in second.values)

@@ -104,7 +104,11 @@ uv run --directory <worktree> --no-sync -- \
 
 `benchmark_simulator_workloads.py` 擁有五個版本化合成 workload，並自帶 board profile、物理模型與 program 設定。
 它不讀 lab 實驗、預設 YAML 或測試 fixture。
-固定點序是三個 gain，`0.08 → 0.12 → 0.16`，每點 32 reps，seed 為 `20261112`。
+Const 工作負載的三個 gain 是 `0.08 → 0.12 → 0.16`。
+兩個 shaped 工作負載使用版本 2，gain 為 `0.16 → 0.24 → 0.32`，補回 product 輸出的約半刻度。
+`ftf_overlap_shaped` 的第二個 tone gain 由 0.1 改為 0.2。
+精確 product 係數是 `32766/65536`，加倍後的連續振幅比舊刻度低約 0.0061%，另有 gain-word 取整。
+每點 32 reps，seed 為 `20261112`。
 所有環境關閉 drift，並設定 `time_scale=0`。FTF 關閉 telemetry，以免計入其檔案 I/O。
 
 | Workload | 公開 acquire 的內容 |

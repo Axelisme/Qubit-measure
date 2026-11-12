@@ -373,14 +373,16 @@ def make_workloads() -> list[Workload]:
     return [
         Workload(
             name=name,
-            version=1,
-            configuration_version=1,
+            version=2 if name.endswith("shaped") else 1,
+            configuration_version=2 if name.endswith("shaped") else 1,
             configuration={
                 "board": _board(mux=name == "six_mux"),
                 "model": model,
                 "program": {
                     "reps": 32,
-                    "gains": [0.08, 0.12, 0.16],
+                    "gains": [0.16, 0.24, 0.32]
+                    if name.endswith("shaped")
+                    else [0.08, 0.12, 0.16],
                     "drive_length_us": 0.024,
                     "readout_length_us": 0.032,
                     "shaped_repeats": 4,
@@ -388,7 +390,7 @@ def make_workloads() -> list[Workload]:
                     "drive_frequency_mhz": 350,
                     "second_frequency_mhz": 550 if name.startswith("ftf") else 0,
                     "readout_frequency_mhz": 6000 if name.startswith("ftf") else 7000,
-                    "second_gain": 0.1,
+                    "second_gain": 0.2 if name == "ftf_overlap_shaped" else 0.1,
                     "readout_gain": 0.1,
                     "mux_frequencies_mhz": [6500 + 125 * ch for ch in range(6)],
                     "mux_mixer_frequency_mhz": 6800,
