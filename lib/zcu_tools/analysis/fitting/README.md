@@ -8,6 +8,26 @@
 
 Caller 畫完圖後可用 `summarize_rabi_joint_fit(result)` 產生 `RabiJointFitSummary`。摘要保留擬合值、pre-pulse populations、confusion matrix 與分類校準。`RabiBackendSummary` 保留 parameter_names、values、std、valid 與 nll；std 為完整 covariance 對角線的平方根。摘要複製固定大小陣列，不保留逐點 populations、projection 或完整 covariance，也不重跑 fitter。完整數值結果仍可供局部畫圖與 covariance 計算使用。
 
+## Phase regressions
+
+`phase_slopes.fit_phase_slopes(n, quadratures, variances, acquired_shots)` fits
+X/Y observations from independent groups with a shared slope per channel and
+coordinate slice. It delegates optimization and residual-scaled covariance to
+`shared`. Each group must independently resolve the integer-axis gcd alias.
+`PhaseSlopeFit` owns slopes, standard errors, backend results and failure reasons.
+
+`phase_modulation.fit_phase_modulation(phases, squared_rates)` fits
+`A + B cos(phase) + C sin(phase)`. `PhaseModulationFit` owns the coefficients,
+residual-scaled covariance, maximum phase and its propagated uncertainty.
+Rank deficiency and roundoff-zero modulation leave the maximum unavailable.
+
+`phase_line.fit_phase_line(n, phase_degrees, variances)` unwraps with period 360°
+and fits a weighted line. `PhaseLineFit` owns the curve and absolute-variance
+covariance without residual scaling. Adjacent half turns are ambiguous.
+All three APIs use degrees; each result documents its axes, units and failure
+fields. Callers retain count reduction, slice selection, completeness policy,
+calibration correction signs and plots. No numerical fitter imports lab types.
+
 ## Peak candidates
 
 `detect_peaks(detune, signal, *, min_prominence=0.2, min_distance=0.0, min_snr=5.0, min_width_samples=3.0)`

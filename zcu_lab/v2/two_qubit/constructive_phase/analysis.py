@@ -4,7 +4,10 @@ from dataclasses import dataclass
 
 import numpy as np
 from numpy.typing import NDArray
-from zcu_tools.analysis.fitting import compute_fit_quality
+from zcu_tools.analysis.fitting.phase_modulation import (
+    PhaseModulationFit,
+    fit_phase_modulation,
+)
 from zcu_tools.analysis.fitting.quality import FitQuality
 
 from .._rabi_analysis import (
@@ -16,30 +19,18 @@ from .._rabi_analysis import (
 
 @dataclass(frozen=True)
 class ConstructivePhaseData:
-    """Maximum-rate relative phase in degrees or an explicit unresolved reason.
+    """Duration-fit selection and its numerical phase-modulation result.
 
-    interference_quality describes the ordinary least-squares rate² fit at the
-    valid phase coordinates. interference contains measured phases and rates²,
-    the dense model axis and curve, and its resolved maximum phase.
-    relative_phase_deg is atan2(C,B), not an IQ phase
-    quadrature or logical local-Z correction. No module is written by analysis.
+    return_data and rates retain the lab duration/count diagnostics. phases and
+    squared_rates are the selected identifiable slices, in degrees and MHz².
+    modulation owns the complete regression, maximum and covariance result.
     """
 
     return_data: ReturnData
     rates: tuple[RabiRate, ...]
-    relative_phase_deg: float | None
-    reason: str | None
-    interference_quality: FitQuality | None
-    interference: (
-        tuple[
-            NDArray[np.float64],
-            NDArray[np.float64],
-            NDArray[np.float64],
-            NDArray[np.float64],
-            float,
-        ]
-        | None
-    ) = None
+    phases: NDArray[np.float64]
+    squared_rates: NDArray[np.float64]
+    modulation: PhaseModulationFit
 
 
 @dataclass(frozen=True)
@@ -77,73 +68,6 @@ def analyze_constructive_phase(
         ]
     )
     squared = np.array([rate.rate**2 for rate in rates if rate.rate is not None])
-    if len(phases) <= 3:
-        return ConstructivePhaseData(
-            returns,
-            rates,
-            None,
-            "Need more than three identifiable phase slices",
-            None,
-        )
-    radians = np.deg2rad(phases)
-    design = np.column_stack((np.ones_like(radians), np.cos(radians), np.sin(radians)))
-    try:
-        coefficients, _, rank, _ = np.linalg.lstsq(design, squared, rcond=None)
-        if rank != 3:
-            return ConstructivePhaseData(
-                returns,
-                rates,
-                None,
-                "Degenerate phase coverage: sine/cosine design is rank deficient",
-                None,
-            )
-        fitted = design @ coefficients
-        covariance = (
-            np.linalg.inv(design.T @ design)
-            * np.sum((squared - fitted) ** 2)
-            / (len(phases) - 3)
-        )
-    except np.linalg.LinAlgError as exc:
-        return ConstructivePhaseData(
-            returns, rates, None, f"Interference fit failed: {exc}", None
-        )
-    quality = compute_fit_quality(
-        squared,
-        fitted,
-        dict(zip(("A", "B", "C"), coefficients, strict=True)),
-        covariance,
-    )
-    a, b, c = coefficients
-    modulation = np.hypot(b, c)
-    # Only reject a zero at floating-point roundoff, not a physical contrast gate.
-    numerical_zero = 8 * np.finfo(float).eps * np.linalg.norm(coefficients)
-    if modulation <= numerical_zero:
-        return ConstructivePhaseData(
-            returns,
-            rates,
-            None,
-            "Zero rate² modulation: constructive phase undefined",
-            quality,
-        )
-    gradient = np.array([0.0, -c, b]) / modulation**2
-    phase_variance = float(gradient @ covariance @ gradient)
-    if (
-        not np.all(np.isfinite(coefficients))
-        or not np.all(np.isfinite(covariance))
-        or not np.isfinite(phase_variance)
-        or phase_variance < 0
-        or a + modulation <= 0
-    ):
-        return ConstructivePhaseData(
-            returns,
-            rates,
-            None,
-            "Nonfinite interference fit or unavailable phase uncertainty",
-            quality,
-        )
-    phase = float(np.rad2deg(np.arctan2(c, b)))
-    dense = np.linspace(-180.0, 180.0, 721)
-    curve = a + b * np.cos(np.deg2rad(dense)) + c * np.sin(np.deg2rad(dense))
     return ConstructivePhaseData(
-        returns, rates, phase, None, quality, (phases, squared, dense, curve, phase)
+        returns, rates, phases, squared, fit_phase_modulation(phases, squared)
     )
