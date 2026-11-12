@@ -1,6 +1,6 @@
 # Evolution kernels
 
-**Last updated:** 2026-11-12，共用 rate 與 density 代數 owner
+**Last updated:** 2026-11-12，共用 RWA admission 與 coefficients owner
 
 **讀者：** framework-dev、agent。查找演化算法的數值 owner，以及 kernel 與 dispatch、scheduler 的接縫。
 
@@ -12,6 +12,9 @@
 例如 `simulate/baths.py` 擁有 rates 到 population generator 的換算，
 `_secular.py` 擁有 coherence decay，`evolution/state.py` 擁有 density 基底轉換。
 `_flux_expansion.py` 擁有連續 flux 的插值與 Hamiltonian 累加。
+`_workload_facts.py` 的 `model_keys` 供 Dyson 與 flux DOP853 共用 flux-level／shift-content 分組。
+`_rwa_numeric.py` 擁有多個 RWA family 共用的 admission、retention、policy 與 Hamiltonian coefficients。
+Fourier 數值、phase graph 與 covariant gate builder 分別留在 `_rwa_fourier.py`、`_rwa_graph.py` 與 `_rwa_gate.py`。
 完整 owner 對照見 [evolution README](../README.md#algorithm-ownership-and-reuse)。
 
 ## 內部接縫

@@ -9,7 +9,8 @@ from numpy.typing import NDArray
 
 from .kernel import KernelContext, SegmentTable
 from .kernels._rwa_gate import GATE_POLICY, canonical_keys
-from .kernels.multitone_rwa import MultitoneRWAKernel, multitone_retention
+from .kernels._rwa_numeric import multitone_retention
+from .kernels.multitone_rwa import MultitoneRWAKernel
 from .secular import ModelSource
 from .workplan import FactKey, WorkPlan
 
