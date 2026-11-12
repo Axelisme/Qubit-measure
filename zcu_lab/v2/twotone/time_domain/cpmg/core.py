@@ -512,7 +512,7 @@ class CPMG_Exp(Experiment[CPMG_Result, CPMG_Cfg]):
             """Return whether decay time, uncertainty and residual meet fit limits.
 
             Pass zero-origin times in us, fitted/measured real IQ and the fitted
-            decay time/error in us. Return a bool without mutation or plotting.
+            decay time/error in us. Return a boolean without mutation or plotting.
             """
             fit_ptp = np.ptp(fit_signal)
             residual = real_signal - fit_signal
