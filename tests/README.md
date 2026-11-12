@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-11-12，17 個 family 的 Evolution 精度矩陣
+**Last updated:** 2026-11-13，Evolution 精度矩陣的超標與參考解成本政策
 
 **讀者：** framework-dev、agent。查閱測試的 owner、fixture、執行方式與搬遷驗收契約。
 
@@ -168,6 +168,11 @@ Guard 拒絕輸入會讓測試失敗，不會產生誤差觀察值。
 參考解用 `2e-10/2e-12` 與 `2e-12/2e-14` 各算一次，兩解最大 density 差須不超過 `2e-6`。
 建構函式在 `tests/simulate/evolution/contract/accuracy_cases.py`，
 誤差表支援函式在同目錄的 `accuracy.py`，一般 Python consumer 可以直接 import。
+
+已知的數值超標以 strict xfail 保留實測誤差，terminal summary 仍列 FAIL，不表示達標。路徑未執行或參考解未收斂必須直接失敗。新發現的超標回報使用者，不放寬 `2e-3` 門檻。
+精度比較始終使用同一個獨立物理參考解，省時間只改變參考解何時計算，不改成與目前實作輸出比較。
+參考計算變慢時先讓同一案例在每個 pytest worker 的 session 內共用一次結果。仍不足時才加本機快取，以案例輸入與參考解程式碼的 hash 為 key，內容不進 repo。
+只有首次計算也慢到不能接受時，才提議將參考結果入庫，先取得使用者同意，並用 hash 核對輸入與參考程式版本。本機 hash 快取與結果入庫是後續處理順序，現行矩陣只使用 session 共用。
 
 ### 怎麼跑比較快
 
