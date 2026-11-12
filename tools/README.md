@@ -151,6 +151,92 @@ Acquire、暖機或比較失敗時回傳非零，stderr 保留原因，不輸出
 `main(argv)` 是 CLI 薄殼。`run_workload`、`run_benchmarks` 與 `compare_results` 可直接 import。
 測試注入小型 acquire session 與 clock，驗證計時和歷史模式，不在 pytest 中跑完整 benchmark。
 
+## Engine family Pareto table
+
+`family_pareto.py` compares every family on the same complete physical inputs.
+It times **Engine.evolve**, not `program.acquire`. The existing acquire benchmark
+above keeps its workloads and comparison contract.
+
+Freeze the versioned input manifest before measuring. From the lane root, replace
+`<worktree>` with its absolute path and choose a new `<results>` directory:
+
+```bash
+mkdir -p <results>
+uv run --directory <worktree> --no-sync -- \
+  python -m tools.family_pareto --freeze-inputs <results>/inputs.json
+uv run --directory <worktree> --no-sync -- \
+  python tools/run_heavy.py --exclusive --log <results>/run.log 1800 -- \
+  python -m tools.family_pareto --manifest <results>/inputs.json \
+  --output <results>/matrix.json --summary <results>/summary.md \
+  > <results>/receipt.json
+```
+
+The measured command rejects a manifest that differs from the tracked builders.
+Do not adjust inputs in response to measured dominance. After an intentional input
+version change, freeze a new manifest and retain earlier results separately.
+No existing local artifacts, mutable lab YAML, GUI or hardware are required.
+
+`family_pareto_inputs.py` reuses the accuracy table's ordinary Python support.
+The manifest includes the original representatives, all guard edges, the complete
+gain/split sweeps and crossing brackets, shape bridges, history inputs and the
+complete multisegment sequence. Fallback cases share the same physical inputs as
+the unity gate and long split cases. Each input is tried with every family.
+Oracle caching excludes only the model's nonphysical identity namespace. Both
+full reconstruction hashes and oracle-sharing hashes are saved.
+
+Each original domain also has a 96-point workload. Three gain factors, `1, 1.5, 2`,
+correspond to the acquire benchmark's `.08, .12, .16` ratio. Each factor has 32
+complete timeline repetitions, preserving original point phases, envelopes,
+durations, bath and flux trajectories. This is the acquire benchmark's `3 x 32`
+scale, without ADC or readout. In particular, the joint-gate workload retains the
+full inventory rather than extrapolating from two points. The manifest records
+all arrays, models, initial density, optional flux expansion, expected families,
+point order and the reason for each input.
+
+Each pinned family and the separately listed default policy has three modes:
+
+- `first_evolve` creates a fresh source/history/Engine for each of five samples.
+- `warm_clear_history` creates another session, runs two untimed warmups, then
+  clears history before each of five samples.
+- `warm_retain_history` creates another session, runs the same two warmups, then
+  retains history for five samples.
+
+Construction, cleanup, oracle solves, warmups, history clearing and result
+inspection are outside the wall and process-CPU timers. All samples run in one
+process with one Engine worker. Disk caches remain unchanged. The exclusive runner
+sets native thread counts to one and supplies the HEAD/tree/dirty receipt.
+The matrix also records those Git facts, libraries, exact argv, input hashes,
+all raw samples, per-sample paths, density errors and medians.
+
+The oracle is the independent full-Lindblad timeline solve at relative/absolute
+controls `2e-10/2e-12` and `2e-12/2e-14`. Its two density results must differ by at
+most `2e-6`. Every solver's error is measured, including exact families. Values
+above `2e-3` remain FAIL. Existing strict xfails are not removed.
+
+A competitor dominates only when its full-density error is no larger and its
+median time is **less than `0.9 * target_time`**. Exactly 10% is time-equivalent.
+Time-equivalent peers have neither direction faster by more than 10%, regardless
+of error. Wall/CPU and all three modes remain separate; there is no weighted score.
+Default routing is shown but never treated as a pinned-family competitor.
+The summary lists each family's non-dominated input/mode/metric cells and the
+full measured matrix with dominators and time-equivalent peers. An all-dominated
+conclusion applies only to measured available cells, not to unmeasured physics.
+It does not authorize deleting families or accepting accuracy failures.
+
+Only a full match of the public refusal pattern below becomes `unavailable`:
+
+```text
+no valid kernel for segment \d+; domain [a-z_]+: points \[\d+(?:, \d+)*\], segments \[\d+(?:, \d+)*\]
+```
+
+The matrix preserves the complete refusal string and leaves error/timing absent.
+Other RuntimeErrors, wrong pinned paths, numerical failures and output failures
+stop the command. Measurement failures leave earlier outputs untouched. Output
+write failures return nonzero and may leave a partial destination file.
+`measure_family`, `measure_policy`, `run_table`, `dominance`, `timing_equivalents`
+and `main(argv)` are importable. Tests use controlled clocks and small
+collaborators; the complete matrix runs outside pytest through the exclusive runner.
+
 ## Markdown reader declarations
 
 ```bash

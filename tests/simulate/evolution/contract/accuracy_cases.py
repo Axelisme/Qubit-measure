@@ -17,7 +17,7 @@ from zcu_tools.simulate.evolution import (
     TimelineBatch,
 )
 
-from .kernel_suite import synthetic_model
+from .synthetic_models import synthetic_model
 
 
 @dataclass(frozen=True)
