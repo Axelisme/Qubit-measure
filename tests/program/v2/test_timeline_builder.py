@@ -37,6 +37,38 @@ from tests.program.v2.simulation.time_observations import time_us
 from tests.program.v2.timing_support import recompile, shots, waves
 
 
+@pytest.mark.parametrize("tail_sync", [False, True])
+def test_zero_bound_register_repeat_skips_empty_selector_and_preserves_readout(
+    tail_sync,
+):
+    builder = v2.TimelineBuilder(load_soccfg(), reps=2, initial_delay=0, relax_delay=0)
+    builder.add_loop("depth", 1)
+    builder.emit(v2.LoadValue("count", [0], "depth", "count"))
+    pulse = v2.Pulse.Cfg(
+        ch=1,
+        nqz=1,
+        freq=200,
+        gain=0.1,
+        waveform=ConstWaveformCfg(length=0.04),
+    )
+    with builder.repeat("gate_index", "count", range_hint=(0, 0)):
+        builder.emit(v2.LoadValue("gate", [], "gate_index", "gate"))
+        builder.emit(
+            v2.ComputedPulse("gate_pulse", val_reg="gate", pulses=[pulse, pulse])
+        )
+        if tail_sync:
+            builder.delay_by_timeline()
+    builder.emit(v2.Pulse("readout", pulse))
+    prog = builder.build()
+
+    result = shots(prog)
+    end = tproc_ceil(prog.soccfg, generator_duration(prog.soccfg, 0.04, 1))
+    assert [waves(shot) for shot in result] == [[0], [0]]
+    assert [shot.body_end_cycle - shot.start_cycle for shot in result] == [end, end]
+    recompile(prog)
+    assert shots(prog) == result
+
+
 @pytest.mark.parametrize("hint", [None, (0, 2)])
 @pytest.mark.parametrize("tail_sync", [False, True])
 def test_register_repeat_table_selector_is_ready_for_same_iteration_playback(
