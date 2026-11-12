@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Annotated, ClassVar, Literal, Self
+from typing import Annotated, ClassVar, Literal
 
 import numpy as np
 from matplotlib.ticker import MaxNLocator, ScalarFormatter
 from numpy.typing import NDArray
-from pydantic import model_validator
 from pydantic.dataclasses import dataclass as pydantic_dataclass
 from zcu_tools.cfg_model import ConfigBase, DeviceName, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment, config
@@ -55,17 +54,7 @@ class FluxDepAnalyzeOptions:
     flux_half: float | None = None
     flux_period: float | None = None
     ac_coeff: float | None = None
-    secondary_xaxis: bool = True
     auto_range: bool = True
-
-    @model_validator(mode="after")
-    def require_flux_calibration(self) -> Self:
-        """Require both calibration coordinates when showing the secondary axis."""
-        if self.secondary_xaxis and (
-            self.flux_half is None or self.flux_period is None
-        ):
-            raise ValueError("Secondary flux axis requires flux_half and flux_period")
-        return self
 
 
 class FluxDepCfg(ConfigBase):
@@ -220,8 +209,8 @@ class FluxDepExp(Experiment[FluxDepResult, FluxDepCfg]):
         Each flux row uses its first 5% of gains (at least one) as a mean
         IQ reference; display clipping limits strong outliers. ``ac_coeff``
         maps gain squared to photon number when supplied. Flux conversion
-        uses ``flux_half`` and ``flux_period`` together; requesting the
-        secondary device-value axis without both raises ValueError.
+        uses ``flux_half`` and ``flux_period`` together, with device-value
+        ticks on top. If either is missing, show only device values below.
         No state-population fit or calibration value is returned.
         """
         result = source.result
@@ -249,7 +238,7 @@ class FluxDepExp(Experiment[FluxDepResult, FluxDepCfg]):
         ax.set_xlabel(xlabel, fontsize=14)
         ax.set_ylabel(ylabel, fontsize=12)
 
-        if options.secondary_xaxis:
+        if flux_half is not None and flux_period is not None:
             # Match the source samples and scientific labels of the former overlay.
             count = len(xs)
             if count <= 12:
