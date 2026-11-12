@@ -20,6 +20,16 @@ from ._dop853_data import Models, Segments, pack_models, pack_segments
 from ._secular import secular_operators
 
 
+def model_keys(table: SegmentTable, rows: NDArray[np.int64]) -> NDArray[np.void]:
+    """Encode flux levels; the engine supplies the round's DC-model namespace."""
+    keys = np.empty(
+        len(rows), dtype=[("level", "i8", table.level.shape[1]), ("shift", "S64")]
+    )
+    keys["level"] = table.level[rows]
+    keys["shift"] = table.shift_content[rows]
+    return keys
+
+
 @dataclass(frozen=True, eq=False)
 class TableIdentity:
     """Object-identity fact key retaining its SegmentTable for the plan lifetime.

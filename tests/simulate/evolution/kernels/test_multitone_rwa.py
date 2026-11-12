@@ -339,7 +339,7 @@ def test_gate_counter_rotating_phase_rejects_long_weak_pulses(
     table = replace(case.table, tone_frequency_ghz=case.table.tone_frequency_ghz * 10)
     context = KernelContext(source, case.budget, WorkPlan())
     rows = np.arange(3)
-    from zcu_tools.simulate.evolution.kernels.multitone_rwa import admit_rows
+    from zcu_tools.simulate.evolution.kernels._rwa_numeric import admit_rows
 
     assert admit_rows(table, rows, context).all()
     long = replace(table, duration_ns=np.full(3, 1280.0))

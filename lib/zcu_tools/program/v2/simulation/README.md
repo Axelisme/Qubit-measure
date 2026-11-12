@@ -1,6 +1,6 @@
 # Explicit acquisition environments
 
-**Last updated:** 2026-11-10，離線 upload 容量邊界
+**Last updated:** 2026-11-12，QICK product 輸出刻度
 
 **讀者：** framework-dev。模擬 acquisition 的 request、round 與 raw source 契約。
 
@@ -165,6 +165,54 @@ reset raise before request construction. Holding the final sample is accepted on
 when that envelope sample is exactly zero. Phase reset would affect later commands,
 which requires DDS phase state outside the current numeric event contract.
 Do not infer support for every control form or registered experiment from this builder.
+
+### Output amplitude scale
+
+`EventSlot.gain` and materialized `PulseEvent.gain` are the signed compiled gain
+word divided by the generator's `maxv`. QICK has already applied its style-specific
+gain quantization. DDS output uses `envelope=None`, meaning unity.
+Product output stores signed complex I/Q table samples divided by **65536** in
+`PulseEnvelope.values`. The samples retain their sign and relative size;
+they are not peak-normalized. Multiplying event gain by an envelope sample gives
+complex output relative to direct DDS full scale, before carrier phase.
+The frontend puts product attenuation in the samples because every physical
+consumer already multiplies gain by the envelope. DDS events stay unchanged.
+The binding-owned envelope pool includes this sample divisor in its content key.
+
+For ordinary v4/v5/v6 generators, `maxv=32766` and `maxv_scale=1`.
+A full envelope peak is `32766/65536 = 0.499969482421875` relative to DDS.
+At equal compiled gain words, the DDS/product ratio is
+`65536/32766 = 2.0001220777635353`. This is a continuous amplitude model;
+it does not emulate each hardware multiply's integer truncation or interpolation
+filter transient. Flat-top plateaus and ramp peaks agree within gain-word
+quantization, not necessarily bit-for-bit.
+
+The following firmware references use QICK commit
+[`d0e456793b77b8ffb741545f9c1a0078921e017a`](https://github.com/openquantumhardware/qick/tree/d0e456793b77b8ffb741545f9c1a0078921e017a/firmware/ip).
+Paths in the table start at `firmware/ip/`.
+
+| Generator | Product sample divisor; factor versus the former sample/get_maxv | Firmware source |
+| --- | --- | --- |
+| `axis_signal_gen_v4` | 65536; `get_maxv/65536` | `axis_signal_gen_v4/src/signal_gen.v:419-435`, product bits `[31:16]` |
+| `axis_signal_gen_v5` | 65536; `get_maxv/65536` | `axis_signal_gen_v5/src/signal_gen.v:328-343`, product bits `[31:16]` |
+| `axis_signal_gen_v6` | 65536; `get_maxv/65536` | `axis_signal_gen_v6/src/signal_gen.v:341-376`, product bits `[31:16]`, direct DDS selection, shared gain stage |
+| `axis_sg_int4_v1`, `axis_sg_int4_v2` | 65536; `29489/65536 = 0.4499664306640625` for driver defaults | Each `axis_sg_int4_vN/src/signal_gen.v:346-374`, product bits `[31:16]` before interpolation |
+| `axis_sg_mux4_v1` | No envelope; no additional factor (1) | `axis_sg_mux4_v1/src/dds_top.v:100`, direct DDS |
+| `axis_sg_mux4_v2`, `axis_sg_mux4_v3` | No envelope; no additional factor (1) | Each `axis_sg_mux4_vN/src/dds_top.v:113-118` (v2), `108-110` (v3), DDS × tone gain uses `[30 -: 16]` |
+| `axis_sg_mux8_v1`, `axis_sg_mixmux8_v1` | No envelope; no additional factor (1) | Each `axis_sg_[mix]mux8_v1/src/dds_top.v:111-116` (mux8), `115-120` (mixmux8), DDS × tone gain uses `[30 -: 16]` |
+
+QICK **0.2.436** `asm_v2.py:1788-1802` halves flat-top plateau gain,
+multiplies that half by `maxv_scale`, and applies `maxv_scale` to const gain.
+`drivers/generator.py:13,126-147,327` defines `maxv=32766` and the int4
+interpolation headroom `maxv_scale=0.9`. `qick_asm.py:946-962` computes
+`get_maxv=floor(maxv*maxv_scale)`, so int4's default envelope limit is 29489,
+not 32766. The frontend must not apply that headroom again.
+`asm_v2.py:1845-1847` adds an int4 flat-top FIR-flush dummy command;
+nonzero held final samples still fail the existing steady-output guard.
+Amplitude scaling does not add support for that command or model FIR transients.
+Other generator types are **未對照**; they are outside QICK 0.2.436's
+`QickProgramV2.gentypes` map (`asm_v2.py:1993-2003`). This change does not
+add their support or invent coefficients.
 
 Simulation acquisition has one frontend. `build_compiled_request` reads the
 pre-optimization compiled stream, including supported instruction effects from

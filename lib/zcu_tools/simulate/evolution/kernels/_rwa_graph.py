@@ -8,7 +8,7 @@ from numpy.typing import NDArray
 
 from ..secular import SecularModel
 from ..workplan import FactKey, WorkPlan
-from .multitone_rwa import (
+from ._rwa_numeric import (
     ADAPTIVE_RWA_POLICY,
     RWA_POLICY,
     RWARetention,

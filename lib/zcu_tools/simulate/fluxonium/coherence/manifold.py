@@ -7,6 +7,7 @@ import numpy as np
 from numpy.typing import NDArray
 from scipy.constants import h, k
 
+from ...baths import population_generator
 from ..operators import validate_circuit
 from ._fast_common import (
     NoiseChannel,
@@ -128,7 +129,7 @@ def _population_modes(
         thermal /= thermal.sum()
     initial = thermal.copy()
     initial[[0, 1]] = initial[[1, 0]]
-    generator = rates - np.diag(rates.sum(axis=0))
+    generator = population_generator(rates)
     raw_values, raw_vectors = np.linalg.eig(generator)
     values = np.asarray(raw_values, dtype=np.complex128)
     vectors = np.asarray(raw_vectors, dtype=np.complex128)

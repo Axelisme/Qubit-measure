@@ -387,20 +387,21 @@ class Outputs:
             data = entry["data"]
             if offset >= 0 and offset + count <= len(data):
                 segment = data[offset : offset + count]
-                maxv = self.prog.soccfg.get_maxv(ch)
+                # QICK product mode keeps DDS × table bits [31:16], unlike DDS.
+                sample_divisor = 65536.0
                 clock = float(cfg["f_fabric"])
                 key = EnvelopeContent(
                     segment.dtype.str,
                     segment.shape,
                     segment.tobytes(),
-                    maxv,
+                    sample_divisor,
                     clock,
                     self.time_base.period_ticks(clock * spc),
                     None,
                 )
                 envelope = self.pool.get(key)
                 if envelope is None:
-                    values = (segment[:, 0] + 1j * segment[:, 1]) / maxv
+                    values = (segment[:, 0] + 1j * segment[:, 1]) / sample_divisor
                     envelope = PulseEnvelope(
                         self.time_base.period_ticks(clock * spc),
                         tuple(complex(v) for v in values),

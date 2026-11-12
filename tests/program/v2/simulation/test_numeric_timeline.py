@@ -84,12 +84,12 @@ def test_arb_preserves_signed_complex_scale_sample_axis_and_detached_ownership(
     assert time_us(observed.time_base, event.duration_ticks) == pytest.approx(
         float(generator_duration(env.soccfg, 0.1))
     )
-    assert values.real.min() == pytest.approx(-0.2, abs=1 / GEN_MAXV)
-    assert np.max(np.abs(values)) < 0.23  # never normalize this to a unit peak
-    assert values[0].imag == pytest.approx(0.1, abs=1 / GEN_MAXV)
+    assert values.real.min() == pytest.approx(-0.1, abs=1 / 65536)
+    assert np.max(np.abs(values)) < 0.115  # never normalize this to a unit peak
+    assert values[0].imag == pytest.approx(0.05, abs=1 / 65536)
     assert np.interp(
         0.025, envelope_times_us(observed.time_base, envelope), values.real
-    ) == pytest.approx(-0.05, abs=0.003)
+    ) == pytest.approx(-0.025, abs=0.0015)
     assert event.gain == pytest.approx(0.4, abs=1 / GEN_MAXV)
     # Changing the asset after preparation does not mutate the detached request.
     np.savez(path, time=[0, 0.05, 0.1], idata=[0, 0, 0], qdata=[0, 0, 0])

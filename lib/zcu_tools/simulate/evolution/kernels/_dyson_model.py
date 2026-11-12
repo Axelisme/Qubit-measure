@@ -5,19 +5,11 @@ from collections.abc import Iterator
 import numpy as np
 from numpy.typing import NDArray
 
+from ...baths import population_generator
 from ..kernel import SegmentTable
 from ..secular import ModelSource, SecularModel
-from ._secular import coherence_decay, population_generator, relaxation_decay
-
-
-def model_keys(table: SegmentTable, rows: NDArray[np.int64]) -> NDArray[np.void]:
-    """Encode flux levels; the engine supplies the round's DC-model namespace."""
-    keys = np.empty(
-        len(rows), dtype=[("level", "i8", table.level.shape[1]), ("shift", "S64")]
-    )
-    keys["level"] = table.level[rows]
-    keys["shift"] = table.shift_content[rows]
-    return keys
+from ._secular import coherence_decay, relaxation_decay
+from ._workload_facts import model_keys
 
 
 def model_groups(

@@ -5,6 +5,7 @@ from numpy.typing import NDArray
 from scipy.integrate import solve_ivp
 from scipy.linalg import expm
 
+from ...baths import population_generator
 from ..kernel import ApplyContext, KernelContext, Prepared, SegmentTable
 from ..secular import SecularDrive, SecularModel
 from ._period_table import (
@@ -18,7 +19,7 @@ from ._period_table import (
     envelopes,
     periods,
 )
-from ._secular import coherence_decay, population_generator
+from ._secular import coherence_decay
 from ._shaped import drive_bounds
 from ._workload_facts import envelope_bounds
 from .dop853 import prepare_models

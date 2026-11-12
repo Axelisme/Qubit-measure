@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 
 import numpy as np
+from numba.extending import register_jitable
 from numpy.typing import NDArray
 
 ComplexMatrix = NDArray[np.complex128]
@@ -95,6 +96,24 @@ class Populations:
         object.__setattr__(self, "values", values)
 
 
+@register_jitable
+def transform_density(
+    densities: ComplexMatrix,
+    source_vectors: ComplexMatrix,
+    target_vectors: ComplexMatrix,
+) -> ComplexMatrix:
+    """Return density in target coordinates without changing the inputs.
+
+    densities has shape (M,M) or (batch,M,M) in source coordinates. Both vector
+    arrays are unitary (M,M), with basis vectors as columns in the same ambient
+    space. Callers own validation and the physical correspondence of the bases.
+    Return a new complex array of the same shape, without clipping or
+    normalization. The same algebra serves Python and compiled kernel callers.
+    """
+    transform = target_vectors.conj().T @ source_vectors
+    return transform @ densities @ transform.conj().T
+
+
 def populations(state: DensityState, target_basis: Basis) -> Populations:
     """Return diagonal of density after an explicit source-to-target transform.
 
@@ -131,6 +150,7 @@ def batch_populations(
         raise ValueError("densities must have shape (batch, M, M) matching basis")
     if not np.isfinite(densities).all():
         raise ValueError("densities must be finite")
-    transform = target_basis.vectors.conj().T @ source_basis.vectors
-    transformed = transform @ densities @ transform.conj().T
+    transformed = transform_density(
+        densities, source_basis.vectors, target_basis.vectors
+    )
     return transformed.diagonal(axis1=-2, axis2=-1).real.copy()

@@ -1,15 +1,16 @@
 """Engine family accuracy against a converged independent full-Lindblad oracle."""
 
+from collections.abc import Callable
 from contextlib import closing
 from dataclasses import replace
 
-import numpy as np
 import pytest
 from zcu_tools.simulate.evolution import Engine, RoutingHistory, segment_spans
 
 from .accuracy import AccuracyMeasurement, measurement_property, require_families
-from .accuracy_cases import accuracy_case, history_case
-from .reference import converged_reference, density_error
+from .accuracy_cases import AccuracyCase, accuracy_case, history_case, multisegment_case
+from .guard_edge_cases import EDGE_FAMILIES, guard_edge_case
+from .reference import ReferenceResult, converged_reference, density_error
 
 CASE_NAMES = (
     "idle_coherence",
@@ -25,6 +26,12 @@ CASE_NAMES = (
     "nearby_carriers",
     "adiabatic_ramp",
 )
+KNOWN_EDGE_ERRORS = {
+    "gate_cache": 0.00929654785179012,
+    "single_tone_rwa": 0.021802081728112876,
+    "common_frame": 0.008066669226955314,
+    "shaped_sambe": 0.0030915535285839482,
+}
 PINNED = tuple(
     pytest.param(name, family, id=f"{name}-{family}")
     for name in CASE_NAMES
@@ -32,12 +39,33 @@ PINNED = tuple(
 )
 
 
+@pytest.fixture(scope="session")
+def matrix_reference() -> Callable[[AccuracyCase], ReferenceResult]:
+    """Solve each named matrix input once per session in this pytest worker.
+
+    Sources/history remain fresh per test; cached arrays contain only oracle
+    results for these deterministic physical inputs, never routing products.
+    """
+    results: dict[tuple[str, int], ReferenceResult] = {}
+
+    def reference_for(case: AccuracyCase) -> ReferenceResult:
+        key = case.name, len(case.batch.points)
+        if key not in results:
+            results[key] = converged_reference(case.source, case.batch)
+        return results[key]
+
+    return reference_for
+
+
 @pytest.mark.parametrize("name,family", PINNED)
 def test_pinned_family_density(
-    name: str, family: str, request: pytest.FixtureRequest
+    name: str,
+    family: str,
+    request: pytest.FixtureRequest,
+    matrix_reference: Callable[[AccuracyCase], ReferenceResult],
 ) -> None:
     case = accuracy_case(name)
-    reference = converged_reference(case.source, case.batch)
+    reference = matrix_reference(case)
     with closing(Engine(1, families=(family,))) as engine:
         result = engine.evolve(case.source, (case.batch,))
     require_families(result.paths, (family,))
@@ -52,12 +80,46 @@ def test_pinned_family_density(
     assert error <= 2e-3, f"{name}/{family}: density error {error:.9g} > 2e-3"
 
 
+@pytest.mark.parametrize("family", EDGE_FAMILIES)
+def test_guard_edge_density(
+    family: str,
+    request: pytest.FixtureRequest,
+    matrix_reference: Callable[[AccuracyCase], ReferenceResult],
+) -> None:
+    case = guard_edge_case(family)
+    reference = matrix_reference(case)
+    with closing(Engine(1, families=(family,))) as engine:
+        result = engine.evolve(case.source, (case.batch,))
+    require_families(result.paths, (family,))
+    error = density_error(result.densities, reference.density)
+    request.node.user_properties.append(
+        measurement_property(
+            AccuracyMeasurement(case.name, family, error, reference.convergence_error)
+        )
+    )
+    if family in KNOWN_EDGE_ERRORS:
+        # Route and oracle failures must fail independently, not become xfails.
+        request.node.add_marker(
+            pytest.mark.xfail(
+                strict=True,
+                raises=AssertionError,
+                reason=(
+                    f"{family} guard-edge density error "
+                    f"{KNOWN_EDGE_ERRORS[family]:.9g} > 2e-3"
+                ),
+            )
+        )
+    assert error <= 2e-3, f"{case.name}: density error {error:.9g} > 2e-3"
+
+
 @pytest.mark.parametrize("name", CASE_NAMES)
 def test_default_empty_and_warm_history_density(
-    name: str, request: pytest.FixtureRequest
+    name: str,
+    request: pytest.FixtureRequest,
+    matrix_reference: Callable[[AccuracyCase], ReferenceResult],
 ) -> None:
     case = accuracy_case(name)
-    reference = converged_reference(case.source, case.batch)
+    reference = matrix_reference(case)
     with closing(Engine(1)) as engine:
         for state in ("empty", "warm"):
             result = engine.evolve(case.source, (case.batch,))
@@ -78,17 +140,14 @@ def test_default_empty_and_warm_history_density(
             assert error <= 2e-3, f"{name}/{state}: density error {error:.9g} > 2e-3"
 
 
-def test_multisegment_final_density(request: pytest.FixtureRequest) -> None:
-    case = accuracy_case("weak_plateau")
-    pulse = replace(
-        case.batch.tracks[0],
-        start_ns=np.full(2, 0.3),
-        duration_ns=np.full(2, 0.9),
-        amplitude=np.full(2, 0.05),
-    )
-    batch = replace(case.batch, tracks=(pulse,), segment_boundaries=((0.7,), (0.7,)))
+def test_multisegment_final_density(
+    request: pytest.FixtureRequest,
+    matrix_reference: Callable[[AccuracyCase], ReferenceResult],
+) -> None:
+    case = replace(multisegment_case(), name="multisegment")
+    batch = case.batch
     assert all(len(spans) >= 4 for spans in segment_spans(batch))
-    reference = converged_reference(case.source, batch)
+    reference = matrix_reference(case)
     with closing(Engine(1, families=("t4", "t6"))) as engine:
         result = engine.evolve(case.source, (batch,))
     require_families(result.paths, ("t4", "t6"))
@@ -106,6 +165,7 @@ def test_multisegment_final_density(request: pytest.FixtureRequest) -> None:
 
 def test_history_changes_route_with_both_densities_validated(
     request: pytest.FixtureRequest,
+    matrix_reference: Callable[[AccuracyCase], ReferenceResult],
 ) -> None:
     history = RoutingHistory()
     small = history_case(2, history)
@@ -121,7 +181,7 @@ def test_history_changes_route_with_both_densities_validated(
     for state, case, result in zip(
         ("empty", "inventory", "warm"), (small, inventory, small), results, strict=True
     ):
-        reference = converged_reference(case.source, case.batch)
+        reference = matrix_reference(case)
         error = density_error(result.densities, reference.density)
         for family in result.paths.segments_by_kernel:
             request.node.user_properties.append(

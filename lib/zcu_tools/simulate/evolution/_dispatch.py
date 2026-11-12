@@ -11,7 +11,12 @@ from ._carrier_plan import populate_carrier_plan
 from ._common_frame_dispatch import preferred as common_frame_preferred
 from ._dop853_dispatch import direct_plans
 from ._gain_plan import plan_gain_groups
-from ._multitone_dispatch import populate_multitone_inventory, populate_multitone_plan
+from ._multitone_dispatch import (
+    gate_preferred,
+    populate_gate_inventory,
+    populate_multitone_inventory,
+    populate_multitone_plan,
+)
 from ._parallel import Executor
 from ._planning import Geometry
 from ._prepare_keys import group_keys
@@ -20,7 +25,7 @@ from ._shaped_dispatch import (
     preference,
     single_gate_preferred,
 )
-from ._two_tone_dispatch import direct_preferred
+from ._two_tone_dispatch import first_candidate
 from .engine import PathDiagnostics
 from .kernel import (
     GuardPreparation,
@@ -32,10 +37,9 @@ from .kernel import (
 )
 from .kernels.common_frame import zero_mean_carrier
 from .kernels.floquet import FloquetPlan
-from .kernels.floquet_period import MIN_FREQUENCY_GHZ
 from .kernels.gate_cache import GateCacheKernel
-from .kernels.multitone_gate import populate_gate_inventory
 from .kernels.multitone_rwa import MultitoneRWAKernel
+from .kernels.slow_envelope import low_carrier
 from .secular import ModelSource
 from .workplan import WorkPlan
 
@@ -66,17 +70,10 @@ def create_work_plan(
     return plan
 
 
-@dataclass(frozen=True)
-class _CandidateDomain:
-    mask: NDArray[np.bool_]
-    families: tuple[str, ...]
+def _domains(geometry: Geometry) -> dict[str, NDArray[np.bool_]]:
+    """Partition structural row domains before costs and numerical guards.
 
-
-def _candidate_domains(geometry: Geometry) -> dict[str, _CandidateDomain]:
-    """Dispatch's structural domains and candidate inventory, before cost/guards.
-
-    Inventory visits every family. Classification uses these same domains and
-    reorders their candidates by acquire-wide cost or skips optional families.
+    Each domain's classifier owns its named candidate choices.
     """
     table = geometry.table
     flux = geometry.flux_drive & (table.tones > 0)
@@ -85,35 +82,17 @@ def _candidate_domains(geometry: Geometry) -> dict[str, _CandidateDomain]:
     single = ordinary & (table.tones == 1)
     slow = single & constant
     if table.tone_frequency_ghz.shape[1]:
-        slow &= np.abs(table.tone_frequency_ghz[:, 0]) < MIN_FREQUENCY_GHZ
+        slow &= low_carrier(table.tone_frequency_ghz[:, 0])
     adiabatic = geometry.flux_drive & (table.tones == 0)
     return {
-        "idle": _CandidateDomain((table.tones == 0) & ~adiabatic, ("t4",)),
-        "adiabatic": _CandidateDomain(adiabatic, ("adiabatic_map",)),
-        "flux": _CandidateDomain(flux, ("flux_dop853",)),
-        "slow": _CandidateDomain(slow, ("slow_envelope",)),
-        "plateau": _CandidateDomain(
-            single & constant & ~slow,
-            ("dyson", "single_tone_rwa", "floquet_period", "t6"),
-        ),
-        "shaped": _CandidateDomain(
-            single & ~constant,
-            (
-                "single_tone_gate",
-                "shaped_sambe",
-                "gate_cache",
-                "period_table",
-                "dop853",
-            ),
-        ),
-        "two": _CandidateDomain(
-            ordinary & (table.tones == 2) & constant,
-            ("common_frame", "multitone_rwa", "floquet", "dop853"),
-        ),
-        "multiple": _CandidateDomain(
-            ordinary & (((table.tones == 2) & ~constant) | (table.tones >= 3)),
-            ("common_frame", "multitone_gate", "multitone_rwa", "dop853"),
-        ),
+        "idle": (table.tones == 0) & ~adiabatic,
+        "adiabatic": adiabatic,
+        "flux": flux,
+        "slow": slow,
+        "plateau": single & constant & ~slow,
+        "shaped": single & ~constant,
+        "two": ordinary & (table.tones == 2) & constant,
+        "multiple": ordinary & (((table.tones == 2) & ~constant) | (table.tones >= 3)),
     }
 
 
@@ -122,12 +101,12 @@ class ShapedPlan:
     """Acquire-wide shaped costs, fixed before any numerical guard.
 
     rows: all ordinary shaped global rows, in ascending order.
-    order: (len(rows), 3) gate/period/direct index permutations.
+    order: (len(rows), 3) cheapest-first gate_cache/period_table/dop853 names.
     Workers borrow these arrays and never recalculate reuse from their subset.
     """
 
     rows: NDArray[np.int64]
-    order: NDArray[np.int64]
+    order: NDArray[np.str_]
 
 
 @dataclass(frozen=True)
@@ -136,7 +115,7 @@ class Selection:
 
     rows: global rows owned by this worker's timeline.
     shaped: acquire-wide cost plan, or None if no selected row is shaped.
-    two_tone_direct: acquire-wide global-row preference, or None without two tones.
+    two_tone_first: global-row cheaper family names, or None without two tones.
     names: caller-accepted family context for timeline-local frame planning.
     plans: caller-accepted decisions to retain in the timeline-local plan.
     A selection disables further deferral and retains accepted guard products.
@@ -145,7 +124,7 @@ class Selection:
     rows: NDArray[np.int64]
     shaped: ShapedPlan | None
     rejected: Mapping[str, NDArray[np.bool_]]
-    two_tone_direct: NDArray[np.bool_] | None = None
+    two_tone_first: NDArray[np.str_] | None = None
     names: NDArray[np.str_] | None = None
     plans: Mapping[str, RowPlan] = field(default_factory=dict)
 
@@ -170,7 +149,7 @@ class Dispatch:
     deferred: worker-owned row mask, or None when no rows need worker classification.
     shaped: fixed acquire-wide cost plan, or None when no shaped work exists.
     rejected: caller guard decisions to skip in worker-local fallback chains.
-    two_tone_direct: global-row cost preference fixed before either two-tone guard;
+    two_tone_first: global-row cheaper family names fixed before either guard;
         None when no constant two-tone candidates exist.
     plans: immutable family-owned global-row decisions passed unchanged to apply;
         plans live only for this evolve.
@@ -187,7 +166,7 @@ class Dispatch:
     deferred: NDArray[np.bool_] | None = None
     shaped: ShapedPlan | None = None
     rejected: Mapping[str, NDArray[np.bool_]] = field(default_factory=dict)
-    two_tone_direct: NDArray[np.bool_] | None = None
+    two_tone_first: NDArray[np.str_] | None = None
     plans: Mapping[str, RowPlan] = field(default_factory=dict)
     chain: NDArray[np.int64] = field(
         default_factory=lambda: np.empty(0, dtype=np.int64)
@@ -333,7 +312,7 @@ class _Classifier:
         self.context = context
         self.source, self.budget = context.source, context.budget
         self.table = geometry.table
-        self.domains = _candidate_domains(geometry)
+        self.domains = _domains(geometry)
         self.names = np.full(len(self.table.timeline), "", dtype="U16")
         self.costs = np.zeros(len(self.names))
         self.deferred = np.zeros(len(self.names), dtype=bool)
@@ -341,8 +320,8 @@ class _Classifier:
         if selection is not None:
             self.scope &= np.isin(np.arange(len(self.names)), selection.rows)
         self.shaped = selection.shaped if selection is not None else None
-        self.two_tone_direct = (
-            selection.two_tone_direct if selection is not None else None
+        self.two_tone_first = (
+            selection.two_tone_first if selection is not None else None
         )
         self.preparations: dict[str, list[GuardPreparation]] = {}
         self.rejected: dict[str, NDArray[np.bool_]] = {}
@@ -440,21 +419,27 @@ class _Classifier:
                 )
         return rows[(self.names[rows] == "") & ~self.deferred[rows]]
 
-    def accept(self, rows: NDArray[np.int64], candidates: tuple[str, ...]) -> None:
-        """Try one domain's cost order, then any allowed expensive alternatives."""
+    def accept(
+        self,
+        domain: str,
+        rows: NDArray[np.int64],
+        candidates: tuple[str, ...],
+        *,
+        cost_skipped: tuple[str, ...] = (),
+    ) -> None:
+        """Try named candidates, exhausting cost-skipped allowed alternatives.
+
+        domain names the structural domain for refusal diagnostics.
+        candidates lists cheapest-first choices. cost_skipped lists candidates
+        omitted only for cost, to try last when a family allowlist is supplied.
+        Numerical guards and input preconditions remain mandatory.
+        """
         if not len(rows):
             return
-        domain_name, domain = next(
-            (name, domain)
-            for name, domain in self.domains.items()
-            if domain.mask[rows[0]]
-        )
         if self.context.families is not None:
-            # Cost shortcuts may omit an expensive optional family. Exhaust the
-            # allowed domain inventory before failing, without retrying guards.
             candidates = tuple(
                 name
-                for name in dict.fromkeys((*candidates, *domain.families))
+                for name in dict.fromkeys((*candidates, *cost_skipped))
                 if name in self.context.families
             )
         for name in candidates:
@@ -463,7 +448,7 @@ class _Classifier:
                 return
         points = np.unique(self.geometry.points[self.table.timeline[rows]]).tolist()
         raise RuntimeError(
-            f"no valid kernel for segment {rows[0]}; domain {domain_name}: "
+            f"no valid kernel for segment {rows[0]}; domain {domain}: "
             f"points {points}, segments {rows.tolist()}"
         )
 
@@ -475,14 +460,13 @@ class _Classifier:
                 preference(self.table, rows, self.kernels, self.context),
             )
         plan = self.shaped
-        families = self.domains["shaped"].families
-        covariant = self.kernels.get(families[0])
+        covariant = self.kernels.get("single_tone_gate")
         if covariant is not None:
             selected = plan.rows[self.scope[plan.rows]]
             preferred = single_gate_preferred(self.table, selected, self.context)
             if np.any(preferred):
                 self.try_kernel(covariant, selected[preferred])
-        spectral = self.kernels.get(families[1])
+        spectral = self.kernels.get("shaped_sambe")
         if spectral is not None:
             selected = plan.rows[
                 self.scope[plan.rows]
@@ -496,44 +480,49 @@ class _Classifier:
             & (self.names[plan.rows] == "")
             & ~self.deferred[plan.rows]
         )
-        families = families[2:]
         pending_rows, order = plan.rows[pending], plan.order[pending]
-        for permutation in np.unique(order, axis=0):
-            selected = pending_rows[np.all(order == permutation, axis=1)]
-            self.accept(selected, tuple(families[index] for index in permutation))
+        for candidates in np.unique(order, axis=0):
+            selected = pending_rows[np.all(order == candidates, axis=1)]
+            self.accept(
+                "shaped",
+                selected,
+                tuple(str(name) for name in candidates),
+                cost_skipped=("single_tone_gate", "shaped_sambe"),
+            )
 
     def classify(self) -> Dispatch:
-        table = self.table
         rows = np.flatnonzero(self.scope)
-        for name in ("idle", "adiabatic", "flux", "slow"):
-            domain = self.domains[name]
-            self.accept(rows[domain.mask[rows]], domain.families)
+        self.accept("idle", rows[self.domains["idle"][rows]], ("t4",))
+        self.accept(
+            "adiabatic", rows[self.domains["adiabatic"][rows]], ("adiabatic_map",)
+        )
+        self.accept("flux", rows[self.domains["flux"][rows]], ("flux_dop853",))
+        self.accept("slow", rows[self.domains["slow"][rows]], ("slow_envelope",))
         # Group shaped and constant consumers together before any legacy prepare.
-        common = self.domains["two"].mask | self.domains["multiple"].mask
+        common = self.domains["two"] | self.domains["multiple"]
         self.try_common_frame(rows[common[rows]])
-        domain = self.domains["plateau"]
-        plateau = rows[domain.mask[rows]]
-        # Distinct inputs cannot share Dyson paths; try constant RWA and period
-        # propagation first within 10 us. Keep Dyson when both guards reject.
-        distinct_input = _unshared_driven_input(table) & (table.duration_ns <= 10000.0)
-        dyson, rwa, period, terminal = domain.families
-        prefix = (rwa,) if rwa in self.kernels else ()
-        self.accept(
-            plateau[distinct_input[plateau]], (*prefix, period, dyson, terminal)
-        )
-        self.accept(
-            plateau[~distinct_input[plateau]], (dyson, *prefix, period, terminal)
-        )
-        shaped = np.flatnonzero(self.domains["shaped"].mask & self.scope)
+        self.classify_plateau(rows[self.domains["plateau"][rows]])
+        shaped = np.flatnonzero(self.domains["shaped"] & self.scope)
         if len(shaped):
             self.classify_shaped(shaped)
-        two_tone = np.flatnonzero(self.domains["two"].mask)
+        two_tone = np.flatnonzero(self.domains["two"])
         if len(two_tone):
             self.classify_two_tone(two_tone)
-        domain = self.domains["multiple"]
-        multiple = rows[domain.mask[rows]]
-        self.classify_multiple(multiple)
+        self.classify_multiple(rows[self.domains["multiple"][rows]])
         return self._result()
+
+    def classify_plateau(self, rows: NDArray[np.int64]) -> None:
+        """Prefer shared Dyson paths, or constant RWA/periods for distinct inputs."""
+        distinct = _unshared_driven_input(self.table) & (
+            self.table.duration_ns <= 10000.0
+        )
+        rwa = ("single_tone_rwa",) if "single_tone_rwa" in self.kernels else ()
+        self.accept(
+            "plateau", rows[distinct[rows]], (*rwa, "floquet_period", "dyson", "t6")
+        )
+        self.accept(
+            "plateau", rows[~distinct[rows]], ("dyson", *rwa, "floquet_period", "t6")
+        )
 
     def try_common_frame(self, rows: NDArray[np.int64]) -> NDArray[np.int64]:
         """Try the cold-priced variant without removing any original fallback."""
@@ -566,14 +555,26 @@ class _Classifier:
 
     def classify_multiple(self, rows: NDArray[np.int64]) -> None:
         """Try reusable gates, then the cheaper admitted RWA/direct alternative."""
-        _, gate, rwa, direct = self.domains["multiple"].families
         rows = rows[(self.names[rows] == "") & ~self.deferred[rows]]
-        if gate in self.kernels and len(rows):
-            rows = self.try_kernel(self.kernels[gate], rows)
+        gate = self.kernels.get("multitone_gate")
+        if gate is not None and len(rows):
+            preferred = gate_preferred(self.table, rows, self.context)
+            self.try_kernel(gate, rows[preferred])
+            rows = rows[(self.names[rows] == "") & ~self.deferred[rows]]
         preferred = self.expanded_direct(rows)
-        optional = (rwa,) if rwa in self.kernels else ()
-        self.accept(rows[preferred], (direct, *optional))
-        self.accept(rows[~preferred], (*optional, direct))
+        rwa = ("multitone_rwa",) if "multitone_rwa" in self.kernels else ()
+        self.accept(
+            "multiple",
+            rows[preferred],
+            ("dop853", *rwa),
+            cost_skipped=("common_frame", "multitone_gate"),
+        )
+        self.accept(
+            "multiple",
+            rows[~preferred],
+            (*rwa, "dop853"),
+            cost_skipped=("common_frame", "multitone_gate"),
+        )
 
     def classify_two_tone(self, rows: NDArray[np.int64]) -> None:
         """Fix acquire-wide costs before either guard; workers borrow the plan."""
@@ -582,21 +583,33 @@ class _Classifier:
         ]
         if not len(selected):
             return
-        if self.two_tone_direct is None:
-            self.two_tone_direct = np.zeros(len(self.names), dtype=bool)
-            self.two_tone_direct[rows] = direct_preferred(
-                self.table, rows, self.context
-            )
+        if self.two_tone_first is None:
+            self.two_tone_first = np.full(len(self.names), "", dtype="U16")
+            self.two_tone_first[rows] = first_candidate(self.table, rows, self.context)
         expanded = self.expanded_direct(selected)
-        _, rwa, floquet, dop853 = self.domains["two"].families
-        prefix = (rwa,) if rwa in self.kernels else ()
-        self.accept(selected[expanded], (dop853, *prefix, floquet))
+        prefix = ("multitone_rwa",) if "multitone_rwa" in self.kernels else ()
+        self.accept(
+            "two",
+            selected[expanded],
+            ("dop853", *prefix, "floquet"),
+            cost_skipped=("common_frame",),
+        )
         selected = selected[~expanded]
-        direct = self.two_tone_direct[selected]
+        direct = self.two_tone_first[selected] == "dop853"
         # Production DOP853 accepts every valid row and is terminal here.
         # Keep the Floquet tail for injected same-name kernels that may reject.
-        self.accept(selected[direct], (*prefix, dop853, floquet))
-        self.accept(selected[~direct], (*prefix, floquet, dop853))
+        self.accept(
+            "two",
+            selected[direct],
+            (*prefix, "dop853", "floquet"),
+            cost_skipped=("common_frame",),
+        )
+        self.accept(
+            "two",
+            selected[~direct],
+            (*prefix, "floquet", "dop853"),
+            cost_skipped=("common_frame",),
+        )
         self.retain_floquet_plan()
 
     def retain_floquet_plan(self) -> None:
@@ -652,7 +665,7 @@ class _Classifier:
             self.deferred,
             self.shaped,
             self.rejected,
-            self.two_tone_direct,
+            self.two_tone_first,
             self.plans,
             chain,
         )

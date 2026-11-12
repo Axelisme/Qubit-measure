@@ -37,6 +37,19 @@ def test_report_keeps_failed_error_and_worst_case() -> None:
     ]
 
 
+def test_report_keeps_each_guard_edge_visible_below_the_family_maximum() -> None:
+    lines = accuracy_table(
+        [
+            AccuracyMeasurement("representative", "t6", 1e-3, 2e-10),
+            AccuracyMeasurement("guard_edge/t6", "t6", 1e-4, 3e-10),
+            AccuracyMeasurement("guard_edge/gate_cache", "gate_cache", 0.0093, 1e-12),
+        ],
+        ("t6", "gate_cache"),
+    )
+    assert "t6 guard_edge/t6 1.000000e-04 3.000000e-10 PASS" in lines
+    assert "gate_cache guard_edge/gate_cache 9.300000e-03 1.000000e-12 FAIL" in lines
+
+
 def test_report_does_not_turn_unmeasured_family_into_zero_error() -> None:
     lines = accuracy_table([], ("floquet",))
     assert lines[1:] == ["floquet 0 - - - NOT EXERCISED"]

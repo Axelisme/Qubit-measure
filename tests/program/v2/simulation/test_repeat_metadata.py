@@ -217,7 +217,7 @@ def test_next_request_reads_current_compiled_pulse_content(environment):
     ]
     assert envelopes
     assert all(
-        value.imag == pytest.approx(7 / prog.soccfg.get_maxv(1))
+        value.imag == pytest.approx(7 / 65536)
         for envelope in envelopes
         for value in envelope.values
     )

@@ -839,7 +839,8 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         entry warns to call delay_by_timeline before entry.
         n is a nonnegative integer or existing count register distinct from name.
         Optional range_hint guarantees a closed nonnegative integer count range,
-        without runtime checks. Fixed counts forbid hints. Zero discards the body.
+        without runtime checks. Fixed counts forbid hints. Zero or a zero-maximum
+        hint discards the body, including producer checks for unreachable playback.
         Unhinted register counts skip generator backedge bounds proofs only.
         ADC backedges still require proof that the next ADC window starts at or
         after the previous window ends; overlap or an unprovable gap raises
@@ -859,7 +860,9 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         start = len(self.macro_list)
         previous = self._timeline_default
         self._timeline_default = parent
-        if n == 0:
+        # A zero-maximum hint proves this register-count body cannot execute.
+        # Do not require producers from empty tables on that unreachable path.
+        if n == 0 or range_hint == (0, 0):
             try:
                 yield
             finally:

@@ -5,9 +5,94 @@ import pytest
 from qick.asm_v2 import QickRawParam
 from zcu_tools.core.simulation import TimeBase
 
+from tests.program._profiles import load_soccfg
 from tests.program._timing_expectations import generator_duration, generator_tproc_grid
 from tests.program.v2.simulation._compiled_support import program, request
 from tests.program.v2.simulation.time_observations import envelope_times_us, time_us
+
+
+@pytest.mark.parametrize(
+    "style,generator",
+    [
+        (style, generator)
+        for generator in (
+            "axis_signal_gen_v4",
+            "axis_signal_gen_v5",
+            "axis_signal_gen_v6",
+            "axis_sg_int4_v1",
+            "axis_sg_int4_v2",
+        )
+        for style in (["arb"] if "int4" in generator else ["flat_top", "arb"])
+    ],
+)
+def test_product_output_matches_dds_scale(style, generator):
+    soccfg = load_soccfg(n_gens=2)
+    soccfg["gens"][0]["type"] = generator
+    soccfg["gens"][0]["maxv_scale"] = 0.9 if "int4" in generator else 1.0
+    peak = soccfg.get_maxv(0)
+
+    def initialize(p):
+        p.add_envelope(0, "ramp", idata=np.full(96, float(peak)))
+        p.add_pulse(
+            0,
+            "shaped",
+            style=style,
+            envelope="ramp",
+            freq=100,
+            phase=0,
+            gain=0.5,
+            **({"length": 0.1} if style == "flat_top" else {}),
+        )
+        p.add_pulse(0, "dds", style="const", freq=100, phase=0, gain=0.5, length=0.1)
+
+    def body(p):
+        p.pulse(0, "shaped")
+        p.pulse(0, "dds")
+
+    prog, env = program(body, initialize, reps=1, soccfg=soccfg)
+    *shaped, dds = request(prog, env).materialize_point(0).events
+    ramp_up = shaped[0]
+    assert ramp_up.envelope is not None
+    ramp_peak = ramp_up.gain * max(abs(v) for v in ramp_up.envelope.values)
+    if style == "flat_top":
+        _, plateau, ramp_down = shaped
+        assert plateau.envelope is None
+        # The plateau gain is quantized independently. Allow one gain-word LSB.
+        assert ramp_peak == pytest.approx(
+            plateau.gain, abs=1 / soccfg["gens"][0]["maxv"]
+        )
+        assert ramp_down.envelope is not None
+        assert (
+            ramp_down.gain * max(abs(v) for v in ramp_down.envelope.values) == ramp_peak
+        )
+    else:
+        # Firmware product[31:16] contributes E/65536 relative to direct DDS.
+        # QICK reports rounded user gains; const also has maxv_scale headroom.
+        dds_gain = prog.get_pulse_param("dds", "gain") * soccfg["gens"][0]["maxv_scale"]
+        arb_gain = prog.get_pulse_param("shaped", "gain")
+        expected_ratio = (dds_gain / arb_gain) * (65536 / peak)
+        assert dds.gain / ramp_peak == pytest.approx(expected_ratio, rel=1e-12)
+
+
+def test_const_event_retains_pre_product_scale_values():
+    prog, env = program(lambda p: p.pulse(0, "p"), reps=1)
+    observed = request(prog, env)
+    event = observed.materialize_point(0).events[0]
+    assert event.gen_ch == 0
+    assert event.start_ticks == 0
+    assert event.duration_ticks == observed.time_base.ticks(
+        generator_duration(env.soccfg, prog.get_pulse_param("p", "length"))
+    )
+    assert event.frequency_mhz == prog.get_pulse_param("p", "freq")
+    assert event.phase_deg == prog.get_pulse_param("p", "phase")
+    # Direct DDS retains QICK's rounded gain, without product attenuation.
+    assert event.gain == (
+        prog.get_pulse_param("p", "gain") * env.soccfg["gens"][0]["maxv_scale"]
+    )
+    assert event.envelope is None
+    assert event.phase_reference_ticks == 0
+    assert event.source == "native:pulse:1"
+    assert event.iterations == ()
 
 
 def test_native_arb_preserves_actual_compiled_dac_samples_and_scale():
@@ -40,7 +125,7 @@ def test_native_arb_preserves_actual_compiled_dac_samples_and_scale():
     assert envelope_times_us(observed.time_base, event.envelope)[:2] == pytest.approx(
         (0, 1 / sample_mhz)
     )
-    assert event.envelope.values[0] == pytest.approx(complex(-8191, 4096) / gen["maxv"])
+    assert event.envelope.values[0] == pytest.approx(complex(-8191, 4096) / 65536)
     assert time_us(observed.time_base, event.duration_ticks) == pytest.approx(
         48 / sample_mhz
     )
@@ -161,7 +246,7 @@ def test_ordinary_outsel_preserves_command_occupancy_and_envelope(outsel):
     if outsel == "product":
         envelope = events[0].envelope
         assert envelope is not None
-        assert envelope.values[0] == pytest.approx(8191 / gen["maxv"])
+        assert envelope.values[0] == pytest.approx(8191 / 65536)
     elif outsel == "dds":
         assert events[0].envelope is None
 

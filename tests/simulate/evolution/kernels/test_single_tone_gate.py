@@ -370,7 +370,7 @@ def test_covariance_preserves_complex_density_for_sliced_support_and_key_domains
 def test_compiled_four_unitaries_match_scipy_at_sliced_absolute_intervals(
     frequency, monkeypatch
 ):
-    from zcu_tools.simulate.evolution.kernels.multitone_rwa import (
+    from zcu_tools.simulate.evolution.kernels._rwa_numeric import (
         interaction_hamiltonian,
         rwa_coefficients,
     )

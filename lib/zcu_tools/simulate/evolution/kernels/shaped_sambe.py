@@ -7,6 +7,7 @@ from numba import njit
 from numpy.typing import NDArray
 from scipy.linalg import expm
 
+from ...baths import population_generator
 from .._carrier_plan import ramp_families_for_rows
 from .._carrier_plan import subdivisions as ramp_subdivisions
 from ..kernel import (
@@ -33,7 +34,7 @@ from ._period_table import (
     periods,
 )
 from ._sambe import eigensystem
-from ._secular import coherence_decay, population_generator
+from ._secular import coherence_decay
 from ._shaped import drive_bounds
 from ._workload_facts import drive_bound, envelope_bounds
 from .dop853 import prepare_models

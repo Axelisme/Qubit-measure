@@ -25,8 +25,8 @@ from zcu_tools.simulate.evolution.kernel import (
     SegmentTable,
 )
 from zcu_tools.simulate.evolution.kernels import REGISTRY
+from zcu_tools.simulate.evolution.kernels._rwa_numeric import rwa_coefficients
 from zcu_tools.simulate.evolution.kernels.dop853 import DOP853Kernel
-from zcu_tools.simulate.evolution.kernels.multitone_rwa import rwa_coefficients
 from zcu_tools.simulate.evolution.workplan import FactKey, WorkPlan
 
 from tests.simulate.evolution.contract.kernel_suite import KernelCase, reference

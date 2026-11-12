@@ -12,12 +12,12 @@ from .kernels._floquet_policy import (
 from .kernels.floquet import FloquetKernel
 
 
-def direct_preferred(
+def first_candidate(
     table: SegmentTable,
     rows: NDArray[np.int64],
     context: KernelContext,
-) -> NDArray[np.bool_]:
-    """Return cheapest-first choices for all constant two-tone candidate rows.
+) -> NDArray[np.str_]:
+    """Return the cheaper family name for each constant two-tone candidate row.
 
     This calibrated cost model uses duration, dimension, spectral width, carrier
     and gain-weighted drive norms to estimate DOP853 steps. Floquet charges a
@@ -38,10 +38,11 @@ def direct_preferred(
     charges construction, not a prediction that a strong probe must be rejected.
     Same-port costs are unchanged. Every candidate still needs its own guard;
     rejection tries the other family. Input rows must include the acquire-wide
-    candidate set, never a worker subset. Return a bool array aligned with rows.
+    candidate set, never a worker subset. Return a row-aligned string array:
+    'dop853' when direct integration is cheaper, otherwise 'floquet'.
     """
     source, budget = context.source, context.budget
-    preferred = np.zeros(len(rows), dtype=bool)
+    preferred = np.full(len(rows), "floquet", dtype="U16")
     if not len(rows):
         return preferred
     keys = FloquetKernel().prepare_keys(table, rows, context)
@@ -107,5 +108,5 @@ def direct_preferred(
         floquet = 0.07 * scale**6 + (frame + certificates) / len(selected)
         context.work_plan.routing.expect("dop853", table, selected, direct)
         context.work_plan.routing.expect("floquet", table, selected, floquet)
-        preferred[positions] = direct < floquet
+        preferred[positions] = np.where(direct < floquet, "dop853", "floquet")
     return preferred
