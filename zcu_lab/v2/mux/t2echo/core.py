@@ -187,7 +187,7 @@ class MuxT2EchoExp(Experiment[MuxCoherenceResult, MuxT2EchoCfg]):
         averages and NaN gaps. Acquisition and program errors propagate.
         """
         # 1. Keep participant order while selecting from the complete tone list.
-        cfg = MuxT2EchoCfg.model_validate(config.model_dump())
+        cfg = config.model_copy(deep=True)
         indices = list(cfg.participants)
         tones = [cfg.tones[index] for index in indices]
         times = sweep2array(cfg.delay, "none")

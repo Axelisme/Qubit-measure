@@ -42,8 +42,8 @@ flat_top and sampled waveforms such as cosine, gauss and DRAG.
 Const length is the entire pulse.
 Flat_top length includes raise_waveform ramps; the waveform implementation
 subtracts ramps to determine the plateau. Gain, frequency, phase and ramp
-settings stay fixed. Arb assets have fixed length and are rejected by cfg and
-run validation rather than stretched or cropped.
+settings stay fixed. Arb assets have fixed length and are rejected at cfg
+construction rather than stretched or cropped.
 
 prepare_length_scan(cfg, soccfg=...) copies cfg and resolves original indices
 in participant order. sweep2array(..., "time", gen_ch=...) creates each drive's
@@ -258,7 +258,7 @@ def prepare_length_scan(cfg: MuxLenRabiCfg, *, soccfg: QickConfig) -> MuxLengthS
     Inputs stay unchanged. Invalid cfg, nonpositive rounded lengths, collapsed
     sweeps and waveform conversion errors raise before acquisition.
     """
-    cfg = MuxLenRabiCfg.model_validate(cfg.model_dump())
+    cfg = cfg.model_copy(deep=True)
     indices = list(cfg.participants)
     coordinates = []
     for index in indices:
@@ -321,7 +321,7 @@ class MuxLenRabiExp(Experiment[MuxSweepResult, MuxLenRabiCfg]):
         hardware cleanup and decides whether returned data can be analyzed.
         """
         # 1. Prepare each qubit's length grid and select its original readout tone.
-        cfg = MuxLenRabiCfg.model_validate(config.model_dump())
+        cfg = config.model_copy(deep=True)
         scan = prepare_length_scan(cfg, soccfg=context.soccfg)
         if all(
             cfg.tones[index].require_drive().waveform.style in ("const", "flat_top")

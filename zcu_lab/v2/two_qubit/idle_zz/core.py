@@ -247,7 +247,6 @@ class IdleZZExp(Experiment[IdleZZResult, IdleZZCfg]):
         Hardware scans spectator_states and delay; DC alone stays on host
         because it changes an external instrument. Return unnormalized counts.
         """
-        validate_classifiers(config.readout, config.roles)
         delay_sweep = round_sweep_dict(config.delay, "time", {"soccfg": context.soccfg})
         delays = sweep2array(delay_sweep)
         dc_values = (

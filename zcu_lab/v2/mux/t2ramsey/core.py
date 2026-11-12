@@ -240,7 +240,7 @@ class MuxT2RamseyExp(Experiment[MuxCoherenceResult, MuxT2RamseyCfg]):
         Acquisition, validation, build and conversion errors propagate.
         """
         # 1. Keep participant order while selecting drives and mux readout tones.
-        cfg = MuxT2RamseyCfg.model_validate(config.model_dump())
+        cfg = config.model_copy(deep=True)
         indices = list(cfg.participants)
         tones = [cfg.tones[index] for index in indices]
         drives = [tone.require_drive() for tone in tones]

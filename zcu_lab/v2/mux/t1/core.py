@@ -284,7 +284,7 @@ class MuxT1Exp(Experiment[MuxT1Result, MuxT1Cfg]):
         """Acquire pi pulse -> shared wait -> mux readout for each delay in us.
 
         config supplies the full tone list, ordered participants, pi pulses,
-        reset/readout and averaging controls; it is validated without mutation.
+        reset/readout and averaging controls; it is deep-copied before use.
         The join waits for the longest pi branch, including its pulse delays, before
         the shared wait. Return times (P,), original tone indices (K,) and
         averaged complex IQ (K,P), with one live figure per tone. sampling="linear"
@@ -296,7 +296,7 @@ class MuxT1Exp(Experiment[MuxT1Result, MuxT1Cfg]):
         context supplies offline or hardware handles, plots and a stop signal;
         acquisition and program errors propagate.
         """
-        cfg = MuxT1Cfg.model_validate(config.model_dump())
+        cfg = config.model_copy(deep=True)
         if cfg.sampling == "linear":
             return self._run_linear(cfg, context=context)
         return self._run_decay(cfg, context=context)
