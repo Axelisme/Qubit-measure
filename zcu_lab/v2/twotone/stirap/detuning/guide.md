@@ -12,6 +12,7 @@ It does not infer carriers from a simulator or tune them automatically.
 
 Measure the Pump 0–3 and Stokes 3–2 carriers separately.
 Connect them to different generators and verify the physical charge-drive wiring.
+Pump and Stokes envelopes overlap, and one channel cannot play both arbitrary-waveform carrier frequencies at the same time.
 Enter the measured carriers in MHz and signed gains between -1 and 1.
 The carrier fields remain blank until you provide them.
 

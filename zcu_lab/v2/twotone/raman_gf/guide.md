@@ -20,6 +20,8 @@ This scan does not generate a second carrier or a pair of Lambda pulses.
 For two-generator Lambda pulses, use the separate STIRAP
 [delay](../stirap/delay/guide.md), [amplitude](../stirap/amplitude/guide.md) or
 [detuning](../stirap/detuning/guide.md) experiment.
+Raman and STIRAP scans remain available as different pulse sequences and tuning entry points.
+The Raman simulation checks predate the current drive-amplitude scale and have not been repeated, so successful STIRAP runs do not replace Raman validation.
 
 Calibrate the readout using singleshot/qutrit_population at the same readout
 settings. The final population analysis requires the saved readout module's
@@ -61,9 +63,9 @@ Drive gain is a DAC full-scale fraction (a.u.), not a calibrated rotation angle.
 QICK quantizes the carrier and gain; saved coordinates use those actual values.
 The scan does not calculate a two-photon area or normalize gains between waveforms.
 
-Confirm nonnegative gain, shots per point and a relaxation interval appropriate
-for ground preparation. Each point sends one Raman pulse followed immediately
-by readout. There is no reset or same-run reference preparation.
+Drive gain may be negative, zero or positive, within [-1, 1].
+Confirm shots per point and the relaxation interval for ground preparation before running.
+Each point sends one Raman pulse followed immediately by readout. There is no reset or same-run reference preparation.
 
 ## Run and save
 
@@ -125,7 +127,7 @@ that key. The default Raman Form already uses the arbitrary family.
 
 `scan_mode` accepts frequency, gain and frequency_gain.
 `detuning_start_mhz`, `detuning_stop_mhz` and `detuning_n` set the detuning axis.
-`gain_start`, `gain_stop` and `gain_n` set the nonnegative native gain axis.
+`gain_start`, `gain_stop` and `gain_n` set the signed native gain axis.
 Each `n` maps to its saved cfg `expts`. Frequency holds gain start; gain holds
 detuning start. Detuning is two-photon MHz; a positive offset raises the single
 carrier by half that value. Drive gain uses DAC full-scale fraction (a.u.).
@@ -153,8 +155,9 @@ A successful acquisition alone does not establish solver accuracy.
 This adapter neither selects the evolution kernel nor changes solver settings.
 The integer-fluxonium environment defaults to oscillator cutoff 80 and
 20 retained levels. Its [field guide](../../../simulation_envs/integer_fluxonium/field-guide.md)
-records the bounded 12-point Raman characterization, the reference/STIRAP
+records an earlier 12-point Raman characterization, the reference/STIRAP
 regressions and single-point acquire wall times at 80/15 and 80/20.
-Those checks do not validate other drives or establish gate fidelity.
+Those checks do not validate the current Raman drive-amplitude scale,
+other drives or gate fidelity.
 Existing working YAML files keep their own basis until reviewed and edited;
 restart the environment after changing them.

@@ -50,7 +50,7 @@ class GainAnalysis:
 
 
 class GainCfg(ConfigBase):
-    """Sweep a const flux reset's gain between two calibrated pi switches."""
+    """Sweep a flux reset pulse's gain between two calibrated pi switches."""
 
     reset: Annotated[
         Reset.Cfg | None,
@@ -67,7 +67,7 @@ class GainCfg(ConfigBase):
         PulseReset.Cfg,
         FieldMeta(
             label="Tested reset",
-            description="Zero-frequency const flux pulse at fixed length; gain is swept.",
+            description="Flux reset pulse at fixed length; gain is swept.",
         ),
     ]
     readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]

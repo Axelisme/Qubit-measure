@@ -24,7 +24,7 @@ date: 2026-11-12
 | Phase modulation | `phases`、`squared_rates` 的 sine／cosine 回歸、最大相位與 covariance 傳播入口。 |
 | Phase slope | `n`、`phase_degrees`、`variances` 的 unwrap 與加權直線擬合入口。 |
 
-入口只收數值陣列與既有數值或布林控制參數，不收 lab cfg、Result、Options 或 Analysis。純數值結果型別由 fitting owner 定義，caller 直接引用，不在 lab 宣告鏡像型別。每個入口回傳具名結果，docstring 定義 shape、axis、單位與失敗語意。內部小函式不因搬移而公開。
+入口只收數值陣列與既有數值或布林控制參數，不收 lab cfg、Result、Options 或 Analysis。純數值結果型別由 fitting owner 定義，caller 直接引用，不在 lab 宣告鏡像型別。擬合、統計與 IQ 投影入口回傳 fitting owner 的具名結果；ALLXY 的模型入口回傳 scalar Bloch-z。各入口的 docstring 定義 shape、axis、單位與失敗語意，內部小函式不因搬移而公開。
 
 IRB 即時圖會傳入尚未完整的資料，不能呼叫要求四個不同 depth、兩個完整成對 seed、至少 100 次 bootstrap 的主入口。共同 IQ 投影因此另設公開入口，主 fitter 和 live callback 共用同一份實作。這是介面責任的釐清，不是放寬主擬合的接受條件。
 

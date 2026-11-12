@@ -22,14 +22,22 @@
 
 `core.py` 是局部的：讀者只看這一個檔，就知道播放什麼序列、即時圖畫什麼、分析算什麼、分析圖畫什麼。
 
-- `run` 從上往下就是實驗：算掃描軸、建即時圖、建 `SignalBuffer` 與 `Schedule`、`add_sweep`、照播放順序 `emit` 每個 pulse 與 readout、`run_acquire`、回傳 `Result`。即時圖的建立與更新函式寫在 `run` 本體。
-- `analyze` 用 `zcu_tools.analysis` 的數值工具擬合，例如 `fit_rabi`。分析圖寫在 `analyze` 本體（`twotone/rabi/amp_rabi/core.py:207-227`），每個實驗各畫各的。使用者 2026-10-30 裁定：「可以共用分析工具，但畫圖就有點超過了，不利於客製化」。
+- `run` 從上往下就是實驗：算掃描軸、建即時圖、建 `SignalBuffer` 與 `Schedule`、`add_sweep`、照播放順序 `emit` 每個 pulse 與 readout、`run_acquire`、回傳 `Result`。
+- `analyze` 用 `zcu_tools.analysis` 的數值工具擬合，例如 `fit_rabi`。
+
+即時圖由這個實驗的 `run` 擁有，分析圖由這個實驗的 `analyze` 擁有。建立與更新可以直接寫在本體，或使用符合下方規則的同檔 helper。
+讀 `core.py` 就能找到量測與繪圖流程。各實驗仍各自畫圖，不把同檔 helper 的許可擴成跨實驗共用畫圖。使用者 2026-10-30 裁定：「可以共用分析工具，但畫圖就有點超過了，不利於客製化」。
+
+實驗目錄不另開 `analysis.py`。分析選項、資料選擇與圖留在 core。獨立複雜的純數值計算交給 library，沿用下方的抽取與確認規則。
+
+長度與巢狀深度只用來找需要閱讀的區塊，不因超過範本長度就拆函式。簡單的巢狀迴圈可保留。含 `break`／`continue` 的迴圈只在能簡化且保持行為時改寫。
+和實驗流程本質耦合的內容留在 `run`／`analyze`，或依下方規則保留同檔 helper。以編號註解交代每段目的，不為降低指標搬散流程。
 
 ## 3. 寫法判斷
 
 **掃描。** QICK 能掃的參數用 `builder.add_sweep`，在同一個 program 裡掃完：頻率、gain、const 與 flat-top 的長度。硬體每個 round 把所有點輪一遍，慢漂移會被平均掉，也不必每點重新編譯。電腦端迴圈（`sched.scan`）用在硬體掃不了的參數，或需要逐列更新即時圖的外層，例如 `power_dep` 的 gain。
 
-**Cfg 欄位的 description。** 用一句話寫這個欄位做什麼。它會顯示在 GUI 表單上，操作的人照它填值。推導與理由寫在實驗的 `guide.md`。範例（`twotone/rabi/amp_rabi/core.py:61`）：
+**Cfg 欄位的 description。** 用一句短語說明欄位作用。它會顯示在 GUI 表單上，操作的人照它填值。操作步驟、推導與理由寫在實驗的 `guide.md`。不為命名一致性改動現有 cfg 欄位。新實驗從上方範本沿用命名。範例（`twotone/rabi/amp_rabi/core.py:61`）：
 
 ```python
 description="Fixed preparation pulse before each gain-swept Rabi pulse; None skips preparation."
@@ -42,9 +50,30 @@ description="Fixed preparation pulse before each gain-swept Rabi pulse; None ski
 
 **檢查。** 範圍用 annotation 的 `ge`／`le`。其他檢查，例如 `model_validator` 或跨欄位條件，只在使用者要求時加，需要時先問。使用者 2026-11-02 裁定：「我不喜歡我沒有要求的檢查」、「如果要檢查，也是Form透過annotation的ge/le檢查」。
 
+Cfg 的建構驗證與 `run`／`analyze` 的使用分開。不要在 `run`／`analyze` 開頭再跑建構時已完成的 cfg 檢查。
+需要隔離呼叫者資料時使用明確的深拷貝，不以 `model_dump` 後 `model_validate` 代替拷貝。
+建構後直接修改子物件可能破壞跨欄位條件。實驗接受在後續使用時失敗及錯誤訊息改變，不為此加第二道完整重驗。
+
+整理已授權範圍內的 cfg 檢查時，逐條記錄移除後實際發生什麼，確認分類後再修改：
+
+- 單一純量欄位的範圍用欄位 annotation。
+- 後續程式仍會報錯、只是訊息較不直接的預驗可刪。
+- 只造成重複取樣或效率較低、結果仍正確的限制可刪。
+- 程式會照跑卻默默產生錯誤或無意義資料的檢查保留。
+- 不能證明屬於哪類時先保留，交使用者決定。
+
+`SweepCfg` 的有限值由 `SweepCfg` 自己保證，不在外層 `SweepCfg` 欄位加 float 限制。
+取決於 active tone 等其他欄位的條件保留在 validator，不改成會連草稿值一起拒絕的 annotation。巢狀 delay、gain、duration 的範圍也不因有限值集中而刪除。
+既有明確裁決優先於分類推論，例如 STIRAP 的不同 generator 檢查保留。這套判準不授權新增檢查或清理任務外的位置。
+
 **回傳值。** `Result` 放要存檔的原始陣列，docstring 寫單位與 shape。`Analysis` 只放使用者要拿去用的數字：`AmpRabiAnalysis` 是 π 與 π/2 的 gain、各自的誤差，以及 fit quality。可能是 `None` 的欄位，格式化成文字前先判斷。
 
-**抽象。** 只有一個實驗用到的邏輯，直接寫在那個實驗的 `core.py`。等第二、第三個實驗也需要時，再設計共同的函式或型別。使用者 2026-11-11 對 gain 專用 sweep 型別的判斷：「特化一個 gain sweep config，感覺就有點過度工程」。
+**抽象。** 單一實驗的局部邏輯留在自己的 `core.py`。獨立、大而複雜且不認得 lab cfg 的數值計算可以由 `zcu_tools` 擁有，不要求先有第二個實驗使用。
+移入 library 前列出區塊、輸入輸出與目的 package，經使用者確認後再搬。公開數值入口補合成資料測試。抽取理由是獨立的數值責任，不是兩個實驗外觀相似。
+使用者 2026-11-11 對 gain 專用 sweep 型別的判斷仍適用：「特化一個 gain sweep config，感覺就有點過度工程」。
+
+同一實驗中必須一起改的 shape、index 與 population 數量，用同檔具名常數，或把相依語句放在相鄰幾行，讓修改處直接看得到依賴。
+不為了合併相似文字新增跨實驗常數、predicate 或檢查。STIRAP 的不同 generator 條件由各實驗各留一份。
 
 **只有一個呼叫者的 helper。** 可以留在同一個 `core.py`，但要符合兩項條件：
 

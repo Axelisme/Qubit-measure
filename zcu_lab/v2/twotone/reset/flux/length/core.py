@@ -68,7 +68,7 @@ class LengthAnalysis:
 
 
 class LengthCfg(ConfigBase):
-    """Sweep a const flux reset's length between two calibrated pi switches."""
+    """Sweep a flux reset pulse's length between two calibrated pi switches."""
 
     reset: Annotated[
         Reset.Cfg | None,
@@ -85,7 +85,7 @@ class LengthCfg(ConfigBase):
         PulseReset.Cfg,
         FieldMeta(
             label="Tested reset",
-            description="Zero-frequency const flux pulse at fixed gain; hold length is swept.",
+            description="Flux reset pulse at fixed gain; hold length is swept.",
         ),
     ]
     readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
