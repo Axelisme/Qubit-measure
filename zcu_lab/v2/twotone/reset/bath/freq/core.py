@@ -52,6 +52,13 @@ class FreqGainAnalysis:
     freq: float
 
 
+def bathreset_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
+    """Convert mean complex IQ to the real contrast used by live and analysis plots."""
+    return (
+        np.abs(signals[2] - signals[0]) ** 2 + np.abs(signals[3] - signals[1]) ** 2
+    )  # (gain, freq)
+
+
 class FreqGainCfg(ConfigBase):
     reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
     init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init pulse")] = None
@@ -76,12 +83,6 @@ class FreqGainCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ]
-
-
-def bathreset_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
-    return (
-        np.abs(signals[2] - signals[0]) ** 2 + np.abs(signals[3] - signals[1]) ** 2
-    )  # (gain, freq)
 
 
 class FreqGainExp(Experiment[FreqGainResult, FreqGainCfg]):
@@ -129,7 +130,7 @@ class FreqGainExp(Experiment[FreqGainResult, FreqGainCfg]):
         gains in a.u. within [-1, 1] and frequencies in MHz. Opposite-phase differences probe
         transverse contrast, not reset fidelity.
         """
-        # Prepare cavity-drive coordinates and four relative tomography phases.
+        # 1. Prepare cavity-drive coordinates and four relative tomography phases.
         cfg = deepcopy(config)
         soc, soccfg = context.soc, context.soccfg
 
@@ -145,20 +146,22 @@ class FreqGainExp(Experiment[FreqGainResult, FreqGainCfg]):
             {"soccfg": soccfg, "gen_ch": reset_cfg.cavity_tone_cfg.ch},
         )
 
-        # Display opposite-phase contrast while retaining all four complex IQ planes.
+        # 2. Display opposite-phase contrast while retaining all four complex IQ planes.
         plots = context.plots
+        # 3. Display the measured signal during acquisition.
         fig, ax = plots.subplots(num="measurement")
         ax.set(xlabel="Cavity Frequency (MHz)", ylabel="Cavity drive Gain (a.u.)")
         viewer = live_heatmap(ax)
 
         @plots.on_plot_thread
         def update(data: NDArray[np.complex128]) -> tuple[Artist, ...]:
+            """Refresh the measurement artists from the current acquired data."""
             return viewer.set(freqs, gains, bathreset_signal2real(data).T)
 
         fig.show()
         signals_buffer = SignalBuffer((4, len(gains), len(freqs)), on_update=update)
 
-        # Sweep both cavity knobs and the final pi/2 phase in one program.
+        # 4. Sweep both cavity knobs and the final pi/2 phase in one program.
         with Schedule(signals_buffer, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
@@ -182,6 +185,7 @@ class FreqGainExp(Experiment[FreqGainResult, FreqGainCfg]):
             builder.emit(Readout("readout", cfg.readout))
             sched.run_acquire(builder.build(), soc, rounds=cfg.rounds)
 
+        # 5. Return the acquired coordinates and data.
         return FreqGainResult(
             gains=gains,
             freqs=freqs,
@@ -201,11 +205,12 @@ class FreqGainExp(Experiment[FreqGainResult, FreqGainCfg]):
         Return gain in a.u. within [-1, 1] and MHz frequency from the four-phase contrast
         map, and publish it as fit; source.cfg may be None.
         """
+        # 1. Select the saved measurements and analysis controls.
         result = source.result
 
         gains, freqs, signals = result.gains, result.freqs, result.signals
 
-        # Find peak in amplitude
+        # 2. Find peak in amplitude
         smooth_signals = smooth_signal_nd(
             signals,
             options=SmoothingOptions(
@@ -221,6 +226,7 @@ class FreqGainExp(Experiment[FreqGainResult, FreqGainCfg]):
         gain_opt = gains[np.argmax(np.max(real_signals, axis=1))]
         freq_opt = freqs[np.argmax(np.max(real_signals, axis=0))]
 
+        # 3. Compare the data and analysis on the same axes.
         fig, ax = plots.subplots(num="fit")
 
         ax.imshow(
@@ -239,4 +245,5 @@ class FreqGainExp(Experiment[FreqGainResult, FreqGainCfg]):
 
         fig.tight_layout()
 
+        # 4. Return the measured analysis summary.
         return FreqGainAnalysis(gain=float(gain_opt), freq=float(freq_opt))

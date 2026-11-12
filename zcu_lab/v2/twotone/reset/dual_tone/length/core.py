@@ -37,6 +37,7 @@ class LengthResult:
 
 
 def reset_length_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
+    """Convert mean complex IQ to the real contrast used by live and analysis plots."""
     return rotate2real(signals).real
 
 
@@ -86,7 +87,7 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
         Warn if channel time grids differ; raise ValueError if the derived
         pulse2 length is negative. The IQ response is not reset fidelity.
         """
-        # Check both channel grids and keep the configured pulse-duration difference.
+        # 1. Check both channel grids and keep the configured pulse-duration difference.
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
 
@@ -114,20 +115,22 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
             )
         lengths = pulse1_lengths  # Use pulse1 lengths as the x-axis values
 
-        # Retain complex IQ while displaying its common-axis projection.
+        # 2. Retain complex IQ while displaying its common-axis projection.
         plots = context.plots
+        # 3. Display the measured signal during acquisition.
         fig, ax = plots.subplots(num="measurement")
         ax.set(xlabel="Length (us)", ylabel="Amplitude")
         viewer = live_line(ax, num_lines=1)
 
         @plots.on_plot_thread
         def update(data: NDArray[np.complex128]) -> tuple[Artist, ...]:
+            """Refresh the measurement artists from the current acquired data."""
             return viewer.set(lengths, reset_length_signal2real(data))
 
         fig.show()
         signals_buffer = SignalBuffer((len(lengths),), on_update=update)
 
-        # Sweep both durations together before reading out the reset response.
+        # 4. Sweep both durations together before reading out the reset response.
         with Schedule(signals_buffer, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
@@ -145,6 +148,7 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
             builder.emit(Readout("readout", cfg.readout))
             sched.run_acquire(builder.build(), soc, rounds=cfg.rounds)
 
+        # 5. Return the acquired coordinates and data.
         return LengthResult(lengths, signals_buffer.array)
 
     def analyze(
@@ -159,18 +163,20 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
         Omit unmeasured NaN points and publish fit without fitting or returning
         an optimal duration. source.cfg may be None.
         """
+        # 1. Select the saved measurements and analysis controls.
         del options
         result = source.result
 
         lens, signals = result.lengths, result.signals
 
-        # Discard NaNs (possible early abort)
+        # 2. Discard NaNs (possible early abort)
         val_mask = ~np.isnan(signals)
         lens = lens[val_mask]
         signals = signals[val_mask]
 
         real_signals = reset_length_signal2real(signals)
 
+        # 3. Compare the data and analysis on the same axes.
         fig, ax = plots.subplots(num="fit", figsize=config.figsize)
 
         ax.plot(lens, real_signals, marker=".")

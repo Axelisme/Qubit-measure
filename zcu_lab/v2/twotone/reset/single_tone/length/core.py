@@ -83,7 +83,7 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
         complex IQ shaped (Nlength,). The curve shows duration dependence,
         not a calibrated reset fidelity; analysis only plots the response.
         """
-        # Quantize the tested reset duration on its generator channel.
+        # 1. Quantize the tested reset duration on its generator channel.
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
 
@@ -95,12 +95,12 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
             length_sweep, "time", dict(soccfg=soccfg, gen_ch=pulse_cfg.ch)
         )
 
-        # Retain complex IQ while displaying the duration-dependent projection.
+        # 2. Retain complex IQ while displaying the duration-dependent projection.
         signals_buffer = reset_scan_buffer(
             context.plots, lengths, xlabel="Length (us)", signal2real=reset_signal2real
         )
 
-        # Sweep only the tested reset length after the optional preparation.
+        # 3. Sweep only the tested reset length after the optional preparation.
         with Schedule(signals_buffer, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
@@ -113,6 +113,7 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
             builder.emit(Readout("readout", cfg.readout))
             sched.run_acquire(builder.build(), soc, rounds=cfg.rounds)
 
+        # 4. Return the acquired coordinates and data.
         return LengthResult(lengths, signals_buffer.array)
 
     def analyze(
@@ -127,18 +128,20 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
         Omit unmeasured NaN points and publish fit without fitting or returning
         an optimal length. source.cfg may be None.
         """
+        # 1. Select the saved measurements and analysis controls.
         del options
         result = source.result
 
         lens, signals = result.lengths, result.signals
 
-        # Discard NaNs (possible early abort)
+        # 2. Discard NaNs (possible early abort)
         val_mask = ~np.isnan(signals)
         lens = lens[val_mask]
         signals = signals[val_mask]
 
         real_signals = reset_signal2real(signals)
 
+        # 3. Compare the data and analysis on the same axes.
         fig, ax = plots.subplots(num="fit", figsize=config.figsize)
         ax.plot(lens, real_signals, marker=".")
         ax.set_xlabel("ProbeTime (us)", fontsize=14)

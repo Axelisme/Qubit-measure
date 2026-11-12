@@ -9,7 +9,6 @@ from typing import Annotated, ClassVar, Literal
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import Field
-from qick import QickConfig
 from zcu_tools.analysis.singleshot import (
     Centroid3Summary,
     analyze_centroid3_populations,
@@ -39,6 +38,9 @@ from zcu_tools.program.v2 import (
     shot_sums,
 )
 from zcu_tools.program.v2.modules.readout import centroid3_classifier
+
+
+STATE_LABELS = ("g", "e", "f")
 
 
 @dataclass(frozen=True)
@@ -104,33 +106,6 @@ class RamanGFCfg(ConfigBase):
     )
 
 
-def scan_points(
-    cfg: RamanGFCfg, soccfg: QickConfig
-) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
-    """Return flat carrier MHz and DAC gains in detuning-major, gain-minor order.
-
-    Quantize scalar carriers/gains independently using the selected generator
-    and mixer. Signed gains are accepted.
-    """
-    detunings = np.linspace(cfg.detuning.start, cfg.detuning.stop, cfg.detuning.expts)
-    gains = np.linspace(cfg.gain.start, cfg.gain.stop, cfg.gain.expts)
-    if cfg.scan_mode == "gain":
-        detunings = detunings[:1]
-    elif cfg.scan_mode == "frequency":
-        gains = gains[:1]
-    frequencies = round_zcu_freq(
-        cfg.carrier_mhz + detunings / 2,
-        soccfg,
-        cfg.drive.ch,
-        mixer_freq=cfg.drive.mixer_freq,
-    )
-    gains = round_zcu_gain(gains, soccfg, cfg.drive.ch)
-    return (
-        np.repeat(frequencies, len(gains)),
-        np.tile(gains, len(frequencies)),
-    )
-
-
 def restore_result(data: GroupedLoadData[RamanGFCfg]) -> RamanGFResult:
     """Restore g/e/f counts and actual coordinates; missing counts raises ValueError."""
     return RamanGFResult(
@@ -185,12 +160,29 @@ class RamanGFExp(Experiment[RamanGFResult, RamanGFCfg]):
         Unfinished points retain NaN counts. Gains are actual DAC settings,
         not a calibrated rotation angle.
         """
+        # 1. Prepare the scan coordinates and measurement state.
         centroid3_classifier(cfg.readout, ro_ch=cfg.readout.ro_ch)
         cfg = deepcopy(cfg)
-        point_frequencies, point_gains = scan_points(cfg, context.soccfg)
-        counts = SignalBuffer((len(point_gains), 3), dtype=np.float64)
+        detunings = np.linspace(
+            cfg.detuning.start, cfg.detuning.stop, cfg.detuning.expts
+        )
+        gains = np.linspace(cfg.gain.start, cfg.gain.stop, cfg.gain.expts)
+        if cfg.scan_mode == "gain":
+            detunings = detunings[:1]
+        elif cfg.scan_mode == "frequency":
+            gains = gains[:1]
+        frequencies = round_zcu_freq(
+            cfg.carrier_mhz + detunings / 2,
+            context.soccfg,
+            cfg.drive.ch,
+            mixer_freq=cfg.drive.mixer_freq,
+        )
+        gains = round_zcu_gain(gains, context.soccfg, cfg.drive.ch)
+        point_frequencies = np.repeat(frequencies, len(gains))
+        point_gains = np.tile(gains, len(frequencies))
+        counts = SignalBuffer((len(point_gains), len(STATE_LABELS)), dtype=np.float64)
 
-        # One carrier and one envelope, immediately followed by the same readout.
+        # 2. One carrier and one envelope, immediately followed by the same readout.
         with Schedule(counts, scope=context.scope) as sched:
             for point, step in sched.scan("point", range(len(point_gains))):
                 builder = TimelineBuilder(
@@ -213,7 +205,7 @@ class RamanGFExp(Experiment[RamanGFResult, RamanGFCfg]):
                     program,
                     context.soc,
                     processor=shot_sums(program, [Classify("readout")]),
-                    options=RunOptions(converter=lambda sums: sums.reshape(3)),
+                    options=RunOptions(converter=lambda sums: sums.reshape(len(STATE_LABELS))),
                 )
 
         result = RamanGFResult(
@@ -221,13 +213,15 @@ class RamanGFExp(Experiment[RamanGFResult, RamanGFCfg]):
             detunings=2 * (point_frequencies - cfg.carrier_mhz),
             gains=point_gains,
         )
+        # 3. Display the measured signal during acquisition.
         figure, _ = context.plots.subplots(num="measurement", layout="constrained")
 
         @context.plots.on_plot_thread
         def draw(_data):
+            """Refresh the measurement artists from the current acquired data."""
             ax = figure.axes[0]
             fractions = result.counts / result.counts.sum(axis=-1, keepdims=True)
-            for label, state in enumerate(("g", "e", "f")):
+            for label, state in enumerate(STATE_LABELS):
                 ax.plot(
                     np.arange(len(result.counts)),
                     fractions[:, label],
@@ -243,6 +237,7 @@ class RamanGFExp(Experiment[RamanGFResult, RamanGFCfg]):
 
         draw(None)
         figure.show()
+        # 4. Return the acquired coordinates and data.
         return result
 
     def analyze(
@@ -262,6 +257,7 @@ class RamanGFExp(Experiment[RamanGFResult, RamanGFCfg]):
         energy-state population or gate fidelity. Incomplete/nonfinite or empty
         counts and singular confusion fail explicitly. Plot actual coordinates.
         """
+        # 1. Select the saved measurements and analysis controls.
         del options
         cfg = source.cfg
         if cfg is None:
@@ -275,16 +271,18 @@ class RamanGFExp(Experiment[RamanGFResult, RamanGFCfg]):
         raw = counts / counts.sum(axis=-1, keepdims=True)
         result = analyze_centroid3_populations(raw, calibration)
         grid = cfg.scan_mode == "frequency_gain"
+        # 2. Compare the data and analysis on the same axes.
         figure, _ = plots.subplots(
             num="fit",
             nrows=2 if grid else 1,
-            ncols=3 if grid else 2,
+            ncols=len(STATE_LABELS) if grid else 2,
             figsize=(11, 7) if grid else (10, 5),
             layout="constrained",
         )
 
         @plots.on_plot_thread
         def populations(_data):
+            """Draw the acquired and confusion-corrected population fractions."""
             for row, (values, title) in enumerate(
                 (
                     (result.raw_populations, "Raw g/e/f fractions"),
@@ -296,7 +294,7 @@ class RamanGFExp(Experiment[RamanGFResult, RamanGFCfg]):
                     detunings = source.result.detunings.reshape(shape)[:, 0]
                     gains = source.result.gains.reshape(shape)[0, :]
                     for label, state in enumerate(("g", "e leakage label", "f")):
-                        ax = figure.axes[row * 3 + label]
+                        ax = figure.axes[row * len(STATE_LABELS) + label]
                         image = ax.pcolormesh(
                             gains,
                             detunings,
@@ -335,4 +333,5 @@ class RamanGFExp(Experiment[RamanGFResult, RamanGFCfg]):
 
         populations(None)
         figure.show()
+        # 3. Return the measured analysis summary.
         return summarize_centroid3(result)

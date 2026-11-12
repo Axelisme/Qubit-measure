@@ -33,10 +33,6 @@ class FreqFluxResult:
     signals: NDArray[np.complex128]
 
 
-def freqflux_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
-    return np.abs(minus_background(signals, axis=1))
-
-
 class FreqFluxCfg(ConfigBase):
     flux_unit: Annotated[
         Literal["A", "V", "native"],
@@ -112,7 +108,7 @@ class FreqFluxExp(Experiment[FreqFluxResult, FreqFluxCfg]):
         values are passed in that unit without conversion. ``acquire_retry``
         controls acquisition retries at each flux point.
         """
-        # Prepare the device-value axis and the probe's hardware frequency grid.
+        # 1. Prepare the device-value axis and the probe's hardware frequency grid.
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
 
@@ -124,6 +120,7 @@ class FreqFluxExp(Experiment[FreqFluxResult, FreqFluxCfg]):
             freq_sweep, "freq", {"soccfg": soccfg, "gen_ch": cfg.qub_pulse.ch}
         )
 
+        # 2. Display the measured signal during acquisition.
         fig, _ = context.plots.subplots(1, 2, num="measurement")
         heat_ax, line_ax = fig.axes
         heat_ax.set(xlabel="Flux device value", ylabel="Frequency (MHz)")
@@ -143,7 +140,8 @@ class FreqFluxExp(Experiment[FreqFluxResult, FreqFluxCfg]):
 
         @context.plots.on_plot_thread
         def update(data):
-            real = freqflux_signal2real(data)
+            """Refresh the measurement artists from the current acquired data."""
+            real = np.abs(minus_background(data, axis=1))
             valid = np.flatnonzero(~np.all(np.isnan(real), axis=1))
             current = int(valid[-1]) if valid.size else -1
             history = np.full((2, len(freqs)), np.nan)
@@ -157,7 +155,7 @@ class FreqFluxExp(Experiment[FreqFluxResult, FreqFluxCfg]):
             on_update=update,
         )
 
-        # Set the external flux bias before acquiring each complete spectrum.
+        # 3. Set the external flux bias before acquiring each complete spectrum.
         with Schedule(signals_buffer, scope=context.scope) as sched:
             for _, step in sched.scan("flux", dev_values.tolist()):
                 set_flux(
@@ -188,6 +186,7 @@ class FreqFluxExp(Experiment[FreqFluxResult, FreqFluxCfg]):
                     rounds=cfg.rounds,
                 )
 
+        # 4. Return the acquired coordinates and data.
         return FreqFluxResult(
             values=dev_values,
             freqs=freqs,

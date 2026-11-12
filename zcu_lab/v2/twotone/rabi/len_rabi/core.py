@@ -57,6 +57,7 @@ class LenRabiAnalysis:
 
 
 def rabi_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
+    """Convert mean complex IQ to the real contrast used by live and analysis plots."""
     return rotate2real(signals).real
 
 
@@ -121,13 +122,14 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
         Reject native arb with ValueError before preparing coordinates or plots:
         its asset-derived length cannot be swept by this experiment.
         """
+        # 1. Prepare the scan coordinates and measurement state.
         if cfg.qub_pulse.waveform.style == "arb":
             raise ValueError(
                 "Len Rabi cannot sweep an arb waveform's asset-derived length. "
                 "Select a waveform with an editable length instead."
             )
 
-        # 1. Prepare length coordinates without changing the caller's cfg.
+        # 2. Prepare length coordinates without changing the caller's cfg.
         cfg = deepcopy(cfg)
         soccfg = context.soccfg
         lengths = sweep2array(
@@ -138,11 +140,14 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
 
         if cfg.qub_pulse.waveform.style in ["const", "flat_top"]:
             return self._run_for_flat(cfg, lengths, context=context)
+        # 3. Return the acquired coordinates and data.
         return self._run_for_arb(cfg, np.unique(lengths), context=context)
 
     def _run_for_flat(
         self, cfg: LenRabiCfg, lengths: NDArray[np.float64], *, context: RunContext
     ) -> LenRabiResult:
+        """Sweep constant or flat-top pulse lengths in hardware and return mean IQ."""
+        # 1. Prepare the scan coordinates and measurement state.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Length (us)", ylabel="Signal")
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
@@ -151,6 +156,7 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
 
         @context.plots.on_plot_thread
         def update(data):
+            """Refresh the measurement artists from the current acquired data."""
             return viewer.set(lengths, rabi_signal2real(data))
 
         fig.show()
@@ -158,6 +164,7 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
             (len(lengths),),
             on_update=update,
         )
+        # 2. Acquire the configured pulse sequence over the scan.
         with Schedule(signals, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 context.soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
@@ -179,20 +186,24 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
                     ),
                 ),
             )
+        # 3. Return the acquired coordinates and data.
         return LenRabiResult(lengths=lengths, signals=signals.array)
 
     def _run_for_arb(
         self, cfg: LenRabiCfg, lengths: NDArray[np.float64], *, context: RunContext
     ) -> LenRabiResult:
-        # Historical name: editable shaped waveforms, not native arb assets.
+        # 1. Historical name: editable shaped waveforms, not native arb assets.
+        """Compile editable shaped lengths on the host and return round-averaged IQ."""
         programs: dict[float, TimelineProgramV2] = {}
 
         def average_round(signals: NDArray[np.complex128]) -> NDArray[np.complex128]:
+            """Average acquired rounds while preserving NaNs at unmeasured points."""
             mask = np.any(~np.isnan(signals), axis=0)
             mean = np.full(signals.shape[1], np.nan, dtype=np.complex128)
             mean[mask] = np.nanmean(signals[:, mask], axis=0)
             return mean
 
+        # 2. Display the measured signal during acquisition.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Length (us)", ylabel="Signal")
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
@@ -201,6 +212,7 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
 
         @context.plots.on_plot_thread
         def update(data):
+            """Refresh the measurement artists from the current acquired data."""
             return viewer.set(lengths, rabi_signal2real(average_round(data)))
 
         fig.show()
@@ -213,6 +225,7 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
             cfg.earlystop_snr,
             lambda data: rabi_signal2real(average_round(data)),
         )
+        # 3. Acquire the configured pulse sequence over the scan.
         with Schedule(signals, scope=context.scope) as sched:
             for _, rep in sched.repeat("round", cfg.rounds):
                 for length, step in rep.scan("length", lengths.tolist()):
@@ -234,6 +247,7 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
                     )
                 if check_snr():
                     break
+        # 4. Return the acquired coordinates and data.
         return LenRabiResult(lengths=lengths, signals=average_round(signals.array))
 
     def analyze(
@@ -311,8 +325,8 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
         fig.tight_layout()
 
         # fit_rabi computes the per-quantity fit uncertainties; surface them so the
-        # GUI summary carries pi_len_err / pi2_len_err / rabi_f_err (the figure
-        # labels already show pi/pi2 errors and the title shows the freq error).
+        # 4. GUI summary carries pi_len_err / pi2_len_err / rabi_f_err (the figure
+        # 5. labels already show pi/pi2 errors and the title shows the freq error).
         return LenRabiAnalysis(
             pi_len,
             pi_len_err,

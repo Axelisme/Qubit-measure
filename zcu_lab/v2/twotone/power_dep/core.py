@@ -33,10 +33,6 @@ class PowerResult:
     signals: NDArray[np.complex128]
 
 
-def gain_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
-    return np.abs(minus_background(signals, axis=1))
-
-
 class PowerCfg(ConfigBase):
     reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
     init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init Pulse")] = None
@@ -89,7 +85,7 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
         mean complex IQ on the (gain, frequency) grid. Gain is the configured
         drive amplitude, not a calibrated power in dBm.
         """
-        # Prepare drive-gain rows and the probe's hardware frequency grid.
+        # 1. Prepare drive-gain rows and the probe's hardware frequency grid.
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
 
@@ -108,6 +104,7 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
             {"soccfg": soccfg, "gen_ch": cfg.qub_pulse.ch},
         )
 
+        # 2. Display the measured signal during acquisition.
         fig, _ = context.plots.subplots(1, 2, num="measurement")
         heat_ax, line_ax = fig.axes
         heat_ax.set(xlabel="Pulse Gain (a.u.)", ylabel="Frequency (MHz)")
@@ -127,7 +124,8 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
 
         @context.plots.on_plot_thread
         def update(data):
-            real = gain_signal2real(data)
+            """Refresh the measurement artists from the current acquired data."""
+            real = np.abs(minus_background(data, axis=1))
             valid = np.flatnonzero(~np.all(np.isnan(real), axis=1))
             current = int(valid[-1]) if valid.size else -1
             history = np.full((2, len(freqs)), np.nan)
@@ -141,7 +139,7 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
             on_update=update,
         )
 
-        # Acquire a complete spectrum at each fixed drive gain.
+        # 3. Acquire a complete spectrum at each fixed drive gain.
         with Schedule(signals_buffer, scope=context.scope) as sched:
             for _, step in sched.scan("gain", gains.tolist()):
                 builder = TimelineBuilder(
@@ -163,6 +161,7 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
                 prog = builder.build()
                 step.run_acquire(prog, soc, rounds=cfg.rounds)
 
+        # 4. Return the acquired coordinates and data.
         return PowerResult(
             gains=gains,
             freqs=freqs,

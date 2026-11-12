@@ -58,6 +58,7 @@ class CKPAnalysis:
 
 
 def ckp_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
+    """Convert mean complex IQ to the real contrast used by live and analysis plots."""
     amps = rotate2real(signals).real
     max_amp = np.nanmax(amps, axis=2, keepdims=True)
     min_amp = np.nanmin(amps, axis=2, keepdims=True)
@@ -281,7 +282,7 @@ class CKP_Exp(Experiment[CKP_Result, CKP_Cfg]):
         complex IQ on the (state, resonator frequency, qubit frequency) grid;
         the two resonance curves constrain chi, kappa and resonator frequency.
         """
-        # Prepare the two hardware frequency grids and one map per preparation.
+        # 1. Prepare the two hardware frequency grids and one map per preparation.
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
 
@@ -299,6 +300,7 @@ class CKP_Exp(Experiment[CKP_Result, CKP_Cfg]):
             {"soccfg": soccfg, "gen_ch": cfg.qub_pulse.ch},
         )
 
+        # 2. Display the measured signal during acquisition.
         figure, _ = context.plots.subplots(num="measurement", ncols=2, figsize=(10, 4))
         ax_ground, ax_excited = figure.axes
         for ax, title in ((ax_ground, "Ground State"), (ax_excited, "Excited State")):
@@ -316,6 +318,7 @@ class CKP_Exp(Experiment[CKP_Result, CKP_Cfg]):
 
         @context.plots.on_plot_thread
         def plot_fn(data: NDArray[np.complex128]):
+            """Refresh the measurement artists from the current acquired data."""
             real_signal = ckp_signal2real(data)
             return (
                 *ground.set(res_freqs, qub_freqs, real_signal[0]),
@@ -329,7 +332,7 @@ class CKP_Exp(Experiment[CKP_Result, CKP_Cfg]):
             on_update=plot_fn,
         )
 
-        # Acquire both preparations and the full frequency grid in one program.
+        # 3. Acquire both preparations and the full frequency grid in one program.
         with Schedule(signals_buffer, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
@@ -355,6 +358,7 @@ class CKP_Exp(Experiment[CKP_Result, CKP_Cfg]):
             builder.emit(Readout("readout", cfg.readout))
             sched.run_acquire(builder.build(), soc, rounds=cfg.rounds)
 
+        # 4. Return the acquired coordinates and data.
         return CKP_Result(
             res_freqs=res_freqs,
             qub_freqs=qub_freqs,
@@ -376,6 +380,7 @@ class CKP_Exp(Experiment[CKP_Result, CKP_Cfg]):
         than five centers survive per state, or the shared fit/covariance is
         invalid. ``options`` is None; source cfg is not needed.
         """
+        # 1. Select the saved measurements and analysis controls.
         del options
         result = source.result
 
@@ -423,4 +428,5 @@ class CKP_Exp(Experiment[CKP_Result, CKP_Cfg]):
             ((g_res_freqs, g_qub_freqs), (e_res_freqs, e_qub_freqs)),
             plots=plots,
         )
+        # 2. Return the measured analysis summary.
         return analysis

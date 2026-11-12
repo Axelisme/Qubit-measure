@@ -58,6 +58,43 @@ LENGTH_AXIS = SweepAxis(
 )
 
 
+@dataclass(frozen=True)
+class RPiLengthResult:
+    """Pooled R-pi sums of every ADC window with at least one finished round.
+
+    lengths: ADC window (F,) in us, in sweep order. A stopped run keeps only the
+        windows with a finished round, so F can be smaller than the sweep.
+    records: Float64 (F, 35), one additive rpi_sums record per window, summed
+        over finished rounds. Read it only through RPiSums.from_processor.
+    """
+
+    lengths: NDArray[np.float64]
+    records: NDArray[np.float64]
+
+
+@dataclass(frozen=True)
+class RPiLengthAnalysis:
+    """Best ADC window of an R-pi sweep. No writeback is proposed.
+
+    The size does not grow with the scan. The "score" figure shows which window
+    has which invalid reason, and the saved records reproduce every window.
+
+    best_length: Valid ADC window with the largest score in us; None when no
+        window is valid. There is no fallback window.
+    best: rpi_analysis result of best_length; None when no window is valid.
+    length_count: Number of windows in the saved result.
+    not_plotted: Number of invalid windows, left off every curve and never ranked.
+    invalid_reasons: Number of windows reporting each invalid reason. One window
+        can report several reasons. Empty when every window is valid.
+    """
+
+    best_length: float | None
+    best: RPiAnalysis | None
+    length_count: int
+    not_plotted: int
+    invalid_reasons: dict[str, int]
+
+
 class RPiLengthCfg(ConfigBase):
     """Readout and pi modules, the ADC window sweep and the averaging counts.
 
@@ -104,43 +141,6 @@ class RPiLengthCfg(ConfigBase):
             description="Software rounds. Cycle sums accumulate across finished rounds.",
         ),
     ] = Field(default=1, ge=1)
-
-
-@dataclass(frozen=True)
-class RPiLengthResult:
-    """Pooled R-pi sums of every ADC window with at least one finished round.
-
-    lengths: ADC window (F,) in us, in sweep order. A stopped run keeps only the
-        windows with a finished round, so F can be smaller than the sweep.
-    records: Float64 (F, 35), one additive rpi_sums record per window, summed
-        over finished rounds. Read it only through RPiSums.from_processor.
-    """
-
-    lengths: NDArray[np.float64]
-    records: NDArray[np.float64]
-
-
-@dataclass(frozen=True)
-class RPiLengthAnalysis:
-    """Best ADC window of an R-pi sweep. No writeback is proposed.
-
-    The size does not grow with the scan. The "score" figure shows which window
-    has which invalid reason, and the saved records reproduce every window.
-
-    best_length: Valid ADC window with the largest score in us; None when no
-        window is valid. There is no fallback window.
-    best: rpi_analysis result of best_length; None when no window is valid.
-    length_count: Number of windows in the saved result.
-    not_plotted: Number of invalid windows, left off every curve and never ranked.
-    invalid_reasons: Number of windows reporting each invalid reason. One window
-        can report several reasons. Empty when every window is valid.
-    """
-
-    best_length: float | None
-    best: RPiAnalysis | None
-    length_count: int
-    not_plotted: int
-    invalid_reasons: dict[str, int]
 
 
 def restore_result(data: GroupedLoadData[Any]) -> RPiLengthResult:
@@ -213,6 +213,7 @@ class RPiLengthExp(Experiment[RPiLengthResult, RPiLengthCfg]):
             cfg.length, "time", {"soccfg": context.soccfg, "ro_ch": cfg.readout.ro_ch}
         )
 
+        # 2. Display the measured signal during acquisition.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel=LENGTH_AXIS.label, ylabel=SCORE_LABEL)
         ax.grid(True)
@@ -223,12 +224,14 @@ class RPiLengthExp(Experiment[RPiLengthResult, RPiLengthCfg]):
         def draw(
             payload: tuple[NDArray[np.float64], list[RPiAnalysis]],
         ) -> tuple[Artist, ...]:
+            """Refresh the measurement artists from the current acquired data."""
             windows, analyses = payload
             ax.set_title(not_plotted_title(analyses, LENGTH_AXIS.setting_name))
             return (*viewer.set(windows, valid_values(analyses, "score")), ax.title)
 
         def update(records: NDArray[np.float64]) -> None:
             # Analyze here, on the acquisition thread, so the GUI thread only draws.
+            """Refresh the measurement artists from the current acquired data."""
             finished = _finished(records)
             draw((lengths[finished], analyze_records(records[finished])))
 
@@ -237,7 +240,7 @@ class RPiLengthExp(Experiment[RPiLengthResult, RPiLengthCfg]):
             (len(lengths), RECORD_COLUMNS), dtype=np.float64, on_update=update
         )
 
-        # 2. Each window has its own program: one fixed Repeat of R then pi.
+        # 3. Each window has its own program: one fixed Repeat of R then pi.
         with Schedule(record_sums, scope=context.scope) as sched:
             for _, step in sched.scan("length", lengths.tolist()):
                 # reps_innermost: all reps of this window run together.
@@ -266,12 +269,13 @@ class RPiLengthExp(Experiment[RPiLengthResult, RPiLengthCfg]):
                     rounds=cfg.rounds,
                 )
 
-        # 3. Keep the windows with a finished round; the others were not measured.
+        # 4. Keep the windows with a finished round; the others were not measured.
         finished = _finished(record_sums.array)
         if not finished.any():
             raise RuntimeError(
                 "Stopped before any window finished a round; no sums to keep"
             )
+        # 5. Return the acquired coordinates and data.
         return RPiLengthResult(
             lengths=lengths[finished], records=record_sums.array[finished]
         )
@@ -293,11 +297,13 @@ class RPiLengthExp(Experiment[RPiLengthResult, RPiLengthCfg]):
         title. When no window is valid there is no best window and no fallback:
         best_length and best are None and no error is raised.
         """
+        # 1. Select the saved measurements and analysis controls.
         del options  # This analysis has no configurable options.
         lengths = source.result.lengths
         analyses = analyze_records(source.result.records)
         best = best_index(analyses)
 
+        # 2. Compare the data and analysis on the same axes.
         fig, _ = plots.subplots(3, 2, num="score", sharex=True, figsize=(11, 8))
         ax_score, ax_reasons, ax_q_eff, ax_q, ax_amplitude, ax_noise = fig.axes
 
@@ -312,7 +318,7 @@ class RPiLengthExp(Experiment[RPiLengthResult, RPiLengthCfg]):
             ax.plot(lengths, valid_values(analyses, name), "o-")
             ax.set_ylabel(ylabel)
 
-        # One row per reason that occurred: a mark at each setting reporting it.
+        # 3. One row per reason that occurred: a mark at each setting reporting it.
         rows = sorted(invalid_reason_counts(analyses))
         for row, reason in enumerate(rows):
             rejected = [
@@ -341,6 +347,7 @@ class RPiLengthExp(Experiment[RPiLengthResult, RPiLengthCfg]):
             fig.suptitle(title)
         fig.tight_layout()
 
+        # 4. Return the measured analysis summary.
         return RPiLengthAnalysis(
             best_length=None if best is None else float(lengths[best]),
             best=None if best is None else analyses[best],

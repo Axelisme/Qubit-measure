@@ -98,6 +98,7 @@ class ChainFreqExp(Experiment[ThermalChainSums, ChainFreqCfg]):
         Return shot count and all 107 sums per setting.
         Stop keeps settings with a completed round; none raises RuntimeError.
         """
+        # 1. Prepare the scan coordinates and measurement state.
         settings = sweep2array(
             cfg.freq,
             "freq",
@@ -108,18 +109,21 @@ class ChainFreqExp(Experiment[ThermalChainSums, ChainFreqCfg]):
                 "mixer_freq": cfg.readout.mixer_freq,
             },
         )
+        # 2. Display the measured signal during acquisition.
         fig, _ = context.plots.subplots(
             3, 1, num="measurement", sharex=True, figsize=(8, 8)
         )
 
         @context.plots.on_plot_thread
         def draw(result: ThermalChainScore | None) -> tuple[Artist, ...]:
+            """Refresh the measurement artists from the current acquired data."""
             artists = _draw_metric(tuple(fig.axes), result)
             fig.tight_layout()
             return artists
 
         def update(sums: NDArray[np.float64]) -> None:
             # Calculate off the GUI thread; the plot thread only draws.
+            """Refresh the measurement artists from the current acquired data."""
             saved = finished_sums(settings, sums)
             try:
                 result = thermal_chain_score(saved)
@@ -134,7 +138,7 @@ class ChainFreqExp(Experiment[ThermalChainSums, ChainFreqCfg]):
             on_update=update,
         )
 
-        # No drive: each shot reads the thermal state 16 times, then waits K.
+        # 3. No drive: each shot reads the thermal state 16 times, then waits K.
         with Schedule(shot_sums, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 context.soccfg,
@@ -156,6 +160,7 @@ class ChainFreqExp(Experiment[ThermalChainSums, ChainFreqCfg]):
                 rounds=cfg.rounds,
             )
 
+        # 4. Return the acquired coordinates and data.
         return finished_sums(settings, shot_sums.array)
 
     def analyze(
@@ -172,11 +177,14 @@ class ChainFreqExp(Experiment[ThermalChainSums, ChainFreqCfg]):
         mark the maximum score; exact ties keep acquisition order. Errors
         do not affect ranking. Invalid moments raise ValueError.
         """
+        # 1. Select the saved measurements and analysis controls.
         del options
         result = thermal_chain_score(source.result)
+        # 2. Compare the data and analysis on the same axes.
         fig, _ = plots.subplots(3, 1, num="metric", sharex=True, figsize=(8, 8))
         _draw_metric(tuple(fig.axes), result)
         fig.tight_layout()
+        # 3. Return the measured analysis summary.
         return ChainAnalysis(best=result.settings[result.ranking[0]])
 
 

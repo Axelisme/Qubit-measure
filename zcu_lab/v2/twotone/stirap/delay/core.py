@@ -34,6 +34,20 @@ from zcu_lab.v2.support import live_line
 from .._pulses import drive_pulse
 
 
+STATE_LABELS = ("g", "e", "f")
+
+
+@dataclass
+class StirapDelayResult:
+    """Requested lead coordinates (N,) in us and g/e/f counts (N, 3), float64.
+
+    Counts are not fractions. Unfinished scan points retain NaN counts.
+    """
+
+    stokes_leads: NDArray[np.float64]
+    counts: NDArray[np.float64]
+
+
 class StirapDelayCfg(ConfigBase):
     """Measured carriers in MHz, signed gains and independent drive envelopes.
 
@@ -89,17 +103,6 @@ class StirapDelayCfg(ConfigBase):
         return self
 
 
-@dataclass
-class StirapDelayResult:
-    """Requested lead coordinates (N,) in us and g/e/f counts (N, 3), float64.
-
-    Counts are not fractions. Unfinished scan points retain NaN counts.
-    """
-
-    stokes_leads: NDArray[np.float64]
-    counts: NDArray[np.float64]
-
-
 class StirapDelayExp(Experiment[StirapDelayResult, StirapDelayCfg]):
     """Acquire and analyze an independent STIRAP lead scan."""
 
@@ -125,6 +128,7 @@ class StirapDelayExp(Experiment[StirapDelayResult, StirapDelayCfg]):
         Cancellation leaves unfinished points NaN; acquisition errors propagate.
         Missing centroid3 calibration fails before acquisition.
         """
+        # 1. Prepare the scan coordinates and measurement state.
         centroid3_classifier(cfg.readout, ro_ch=cfg.readout.ro_ch)
         leads = sweep2array(cfg.stokes_lead)
         pump = Pulse(
@@ -138,23 +142,26 @@ class StirapDelayExp(Experiment[StirapDelayResult, StirapDelayCfg]):
             ),
         )
 
+        # 2. Display the measured signal during acquisition.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Stokes lead (us)", ylabel="Measured fraction")
-        viewer = live_line(ax, num_lines=3)
-        for line, state in zip(ax.lines, ("g", "e", "f"), strict=True):
+        viewer = live_line(ax, num_lines=len(STATE_LABELS))
+        for line, state in zip(ax.lines, STATE_LABELS, strict=True):
             line.set_label(state)
         ax.legend()
         ax.grid()
 
         @context.plots.on_plot_thread
         def update(data: NDArray[np.float64]):
+            """Refresh the measurement artists from the current acquired data."""
             total = data.sum(axis=-1, keepdims=True)
             fractions = np.full_like(data, np.nan)
             np.divide(data, total, out=fractions, where=total > 0)
             return viewer.set(leads, fractions.T)
 
         fig.show()
-        counts = SignalBuffer((len(leads), 3), dtype=np.float64, on_update=update)
+        counts = SignalBuffer((len(leads), len(STATE_LABELS)), dtype=np.float64, on_update=update)
+        # 3. Acquire the configured pulse sequence over the scan.
         with Schedule(counts, scope=context.scope) as sched:
             for lead, step in sched.scan("stokes_lead", leads):
                 builder = TimelineBuilder(
@@ -178,12 +185,13 @@ class StirapDelayExp(Experiment[StirapDelayResult, StirapDelayCfg]):
                     context.soc,
                     processor=processor,
                     rounds=1,
-                    options=RunOptions(converter=lambda sums: sums.reshape(3)),
+                    options=RunOptions(converter=lambda sums: sums.reshape(len(STATE_LABELS))),
                     charge_requirements=(
                         ChargeDriveRequirement("pump", cfg.pump_ch),
                         ChargeDriveRequirement("stokes", cfg.stokes_ch),
                     ),
                 )
+        # 4. Return the acquired coordinates and data.
         return StirapDelayResult(stokes_leads=leads, counts=counts.data)
 
     def analyze(
@@ -202,6 +210,7 @@ class StirapDelayExp(Experiment[StirapDelayResult, StirapDelayCfg]):
         fixed-size confusion diagnostics. Missing cfg/calibration or no usable
         points raises ValueError; singular confusion raises LinAlgError.
         """
+        # 1. Select the saved measurements and analysis controls.
         del options
         if source.cfg is None:
             raise ValueError("STIRAP delay analysis requires saved cfg")
@@ -217,9 +226,10 @@ class StirapDelayExp(Experiment[StirapDelayResult, StirapDelayCfg]):
         raw = counts[complete] / totals[complete, None]
         result = analyze_centroid3_populations(raw, calibration)
 
+        # 2. Compare the data and analysis on the same axes.
         fig, ax = plots.subplots(num="populations")
         for index, (state, color) in enumerate(
-            zip(("g", "e", "f"), ("C0", "C1", "C2"), strict=True)
+            zip(STATE_LABELS, ("C0", "C1", "C2"), strict=True)
         ):
             ax.plot(
                 leads,
@@ -243,4 +253,5 @@ class StirapDelayExp(Experiment[StirapDelayResult, StirapDelayCfg]):
         ax.legend()
         ax.grid()
         fig.tight_layout()
+        # 3. Return the measured analysis summary.
         return summarize_centroid3(result)

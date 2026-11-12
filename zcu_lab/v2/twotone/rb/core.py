@@ -39,7 +39,14 @@ class RB_Result:
     signals2D: NDArray[np.complex128]
 
 
+@dataclass(frozen=True)
+class RBAnalysis:
+    epc: float
+    fidelity: float
+
+
 def rb_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
+    """Convert mean complex IQ to the real contrast used by live and analysis plots."""
     mask = np.any(np.isfinite(signals), axis=0)  # (depths, )
     mean_signals = np.full(
         (signals.shape[1],), np.nan, dtype=np.complex128
@@ -80,12 +87,6 @@ class RBCfg(ConfigBase):
     ]
 
 
-@dataclass(frozen=True)
-class RBAnalysis:
-    epc: float
-    fidelity: float
-
-
 class RB_Exp(Experiment[RB_Result, RBCfg]):
     # depths/sub_seeds are integer sweeps on disk -> scale=IDENTITY (1.0).
     # axes inner-first [depths, sub_seeds] so native z == signals2D
@@ -123,6 +124,7 @@ class RB_Exp(Experiment[RB_Result, RBCfg]):
             dtype=np.int64,
         )
 
+        # 2. Display the measured signal during acquisition.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Depth", ylabel="Signal")
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
@@ -131,6 +133,7 @@ class RB_Exp(Experiment[RB_Result, RBCfg]):
 
         @context.plots.on_plot_thread
         def update(data):
+            """Refresh the measurement artists from the current acquired data."""
             return viewer.set(depths.astype(np.float64), rb_signal2real(data))
 
         fig.show()
@@ -139,6 +142,7 @@ class RB_Exp(Experiment[RB_Result, RBCfg]):
             (len(entropys), len(depths)),
             on_update=update,
         )
+        # 3. Acquire the configured pulse sequence over the scan.
         with Schedule(signals_buffer, scope=context.scope) as sched:
             for _, step in sched.scan("seed", entropys.tolist()):
                 tables = make_seed_tables(int(step.value), depths)
@@ -146,7 +150,7 @@ class RB_Exp(Experiment[RB_Result, RBCfg]):
                     soccfg, reps=run_cfg.reps, relax_delay=run_cfg.relax_delay
                 )
 
-                # 2. Map the seed's physical gate IDs to calibrated pulses.
+                # 4. Map the seed's physical gate IDs to calibrated pulses.
                 (
                     rand_gate_seq,
                     prefix_len_by_depth,
@@ -176,7 +180,7 @@ class RB_Exp(Experiment[RB_Result, RBCfg]):
                     MY90_pulse,
                 ]
 
-                # 3. Reset, play the depth prefix, recover the full Clifford, read out.
+                # 5. Reset, play the depth prefix, recover the full Clifford, read out.
                 builder.add_loop("depth", len(prefix_len_by_depth))
                 builder.emit(
                     LoadValue(
@@ -236,9 +240,10 @@ class RB_Exp(Experiment[RB_Result, RBCfg]):
                 builder.emit(Readout("readout", run_cfg.readout))
                 program = builder.build()
 
-                # 4. Average reps/rounds into this seed's depth trace.
+                # 6. Average reps/rounds into this seed's depth trace.
                 step.run_acquire(program, soc, rounds=run_cfg.rounds)
 
+        # 7. Return the acquired coordinates and data.
         return RB_Result(
             sub_seeds=entropys,
             depths=depths,
@@ -252,6 +257,7 @@ class RB_Exp(Experiment[RB_Result, RBCfg]):
         *,
         plots: Plots,
     ) -> RBAnalysis:
+        # 1. Select the saved measurements and analysis controls.
         result = source.result
         del options
 
@@ -275,6 +281,7 @@ class RB_Exp(Experiment[RB_Result, RBCfg]):
         fidelity = 1.0 - epc
         fidelity_err = epc_err
 
+        # 2. Compare the data and analysis on the same axes.
         fig, ax = plots.subplots(num="fit", figsize=config.figsize)
 
         for si in range(signals2D.shape[0]):
@@ -309,4 +316,5 @@ class RB_Exp(Experiment[RB_Result, RBCfg]):
 
         fig.tight_layout()
 
+        # 3. Return the measured analysis summary.
         return RBAnalysis(epc=float(epc), fidelity=float(fidelity))

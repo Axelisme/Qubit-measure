@@ -55,6 +55,42 @@ GAIN_AXIS = SweepAxis(
 )
 
 
+@dataclass(frozen=True)
+class RPiPowerResult:
+    """Pooled R-pi sums of every readout gain.
+
+    gains: Readout gain (F,) in normalized a.u., in sweep order.
+    records: Float64 (F, 35), one additive rpi_sums record per gain, summed over
+        finished rounds. Read it only through RPiSums.from_processor.
+    """
+
+    gains: NDArray[np.float64]
+    records: NDArray[np.float64]
+
+
+@dataclass(frozen=True)
+class RPiPowerAnalysis:
+    """Best gain of an R-pi sweep. No writeback is proposed.
+
+    The size does not grow with the scan. The "score" figure shows which gain
+    has which invalid reason, and the saved records reproduce every gain.
+
+    best_gain: Valid gain with the largest score in a.u.; None when no gain is
+        valid. There is no fallback gain.
+    best: rpi_analysis result of best_gain; None when no gain is valid.
+    gain_count: Number of gains in the sweep.
+    not_plotted: Number of invalid gains, left off every curve and never ranked.
+    invalid_reasons: Number of gains reporting each invalid reason. One gain can
+        report several reasons. Empty when every gain is valid.
+    """
+
+    best_gain: float | None
+    best: RPiAnalysis | None
+    gain_count: int
+    not_plotted: int
+    invalid_reasons: dict[str, int]
+
+
 class RPiPowerCfg(ConfigBase):
     """Readout and pi modules, the readout gain sweep and the averaging counts.
 
@@ -92,42 +128,6 @@ class RPiPowerCfg(ConfigBase):
             description="Software rounds. Cycle sums accumulate across finished rounds.",
         ),
     ] = Field(default=1, ge=1)
-
-
-@dataclass(frozen=True)
-class RPiPowerResult:
-    """Pooled R-pi sums of every readout gain.
-
-    gains: Readout gain (F,) in normalized a.u., in sweep order.
-    records: Float64 (F, 35), one additive rpi_sums record per gain, summed over
-        finished rounds. Read it only through RPiSums.from_processor.
-    """
-
-    gains: NDArray[np.float64]
-    records: NDArray[np.float64]
-
-
-@dataclass(frozen=True)
-class RPiPowerAnalysis:
-    """Best gain of an R-pi sweep. No writeback is proposed.
-
-    The size does not grow with the scan. The "score" figure shows which gain
-    has which invalid reason, and the saved records reproduce every gain.
-
-    best_gain: Valid gain with the largest score in a.u.; None when no gain is
-        valid. There is no fallback gain.
-    best: rpi_analysis result of best_gain; None when no gain is valid.
-    gain_count: Number of gains in the sweep.
-    not_plotted: Number of invalid gains, left off every curve and never ranked.
-    invalid_reasons: Number of gains reporting each invalid reason. One gain can
-        report several reasons. Empty when every gain is valid.
-    """
-
-    best_gain: float | None
-    best: RPiAnalysis | None
-    gain_count: int
-    not_plotted: int
-    invalid_reasons: dict[str, int]
 
 
 def restore_result(data: GroupedLoadData[Any]) -> RPiPowerResult:
@@ -184,6 +184,7 @@ class RPiPowerExp(Experiment[RPiPowerResult, RPiPowerCfg]):
             cfg.gain, "gain", {"soccfg": context.soccfg, "gen_ch": cfg.readout.gen_ch}
         )
 
+        # 2. Display the measured signal during acquisition.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel=GAIN_AXIS.label, ylabel=SCORE_LABEL)
         ax.grid(True)
@@ -192,11 +193,13 @@ class RPiPowerExp(Experiment[RPiPowerResult, RPiPowerCfg]):
 
         @context.plots.on_plot_thread
         def draw(analyses: list[RPiAnalysis]) -> tuple[Artist, ...]:
+            """Refresh the measurement artists from the current acquired data."""
             ax.set_title(not_plotted_title(analyses, GAIN_AXIS.setting_name))
             return (*viewer.set(gains, valid_values(analyses, "score")), ax.title)
 
         def update(records: NDArray[np.float64]) -> None:
             # Analyze here, on the acquisition thread, so the GUI thread only draws.
+            """Refresh the measurement artists from the current acquired data."""
             draw(analyze_records(records))
 
         fig.show()
@@ -204,7 +207,7 @@ class RPiPowerExp(Experiment[RPiPowerResult, RPiPowerCfg]):
             (len(gains), RECORD_COLUMNS), dtype=np.float64, on_update=update
         )
 
-        # 2. Each cycle is one fixed Repeat of R then pi; the gain sweep is outside it.
+        # 3. Each cycle is one fixed Repeat of R then pi; the gain sweep is outside it.
         with Schedule(record_sums, scope=context.scope) as sched:
             # reps_innermost: all reps of one gain run before the next gain.
             # relax_delay 0: no added wait between reps. The shot closure can still
@@ -227,11 +230,12 @@ class RPiPowerExp(Experiment[RPiPowerResult, RPiPowerCfg]):
                 rounds=cfg.rounds,
             )
 
-        # 3. Keep the sums of all finished rounds; an unfinished buffer stays NaN.
+        # 4. Keep the sums of all finished rounds; an unfinished buffer stays NaN.
         if np.isnan(record_sums.array).any():
             raise RuntimeError(
                 "Stopped before the first round finished; no sums to keep"
             )
+        # 5. Return the acquired coordinates and data.
         return RPiPowerResult(gains=gains, records=record_sums.array)
 
     def analyze(
@@ -250,11 +254,13 @@ class RPiPowerExp(Experiment[RPiPowerResult, RPiPowerCfg]):
         counted in the figure title. When no gain is valid there is no best
         gain and no fallback: best_gain and best are None and no error is raised.
         """
+        # 1. Select the saved measurements and analysis controls.
         del options  # This analysis has no configurable options.
         gains = source.result.gains
         analyses = analyze_records(source.result.records)
         best = best_index(analyses)
 
+        # 2. Compare the data and analysis on the same axes.
         fig, _ = plots.subplots(3, 2, num="score", sharex=True, figsize=(11, 8))
         ax_score, ax_reasons, ax_q_eff, ax_q, ax_amplitude, ax_noise = fig.axes
 
@@ -269,7 +275,7 @@ class RPiPowerExp(Experiment[RPiPowerResult, RPiPowerCfg]):
             ax.plot(gains, valid_values(analyses, name), "o-")
             ax.set_ylabel(ylabel)
 
-        # One row per reason that occurred: a mark at each setting reporting it.
+        # 3. One row per reason that occurred: a mark at each setting reporting it.
         rows = sorted(invalid_reason_counts(analyses))
         for row, reason in enumerate(rows):
             rejected = [
@@ -298,6 +304,7 @@ class RPiPowerExp(Experiment[RPiPowerResult, RPiPowerCfg]):
             fig.suptitle(title)
         fig.tight_layout()
 
+        # 4. Return the measured analysis summary.
         return RPiPowerAnalysis(
             best_gain=None if best is None else float(gains[best]),
             best=None if best is None else analyses[best],

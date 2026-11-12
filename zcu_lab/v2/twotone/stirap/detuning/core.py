@@ -42,6 +42,24 @@ from zcu_tools.program.v2.modules.waveform import EnvelopeWaveformCfg
 from .._pulses import drive_pulse
 
 
+STATE_LABELS = ("g", "e", "f")
+
+
+@dataclass(frozen=True)
+class StirapDetuningResult:
+    """counts: g/e/f shot counts, shaped (Ny,Nx,3), not corrected populations.
+
+    x_values: requested Pump detuning in MHz, shape (Nx,).
+    y_values: requested Stokes detuning in MHz, shape (Ny,).
+    The final counts axis has g/e/f order.
+    Unfinished points remain NaN. No intermediate-state oracle is included.
+    """
+
+    x_values: NDArray[np.float64]
+    y_values: NDArray[np.float64]
+    counts: NDArray[np.float64]
+
+
 class StirapDetuningCfg(ConfigBase):
     """Measured carriers in MHz, signed gains, separate envelopes and lead in us.
 
@@ -124,21 +142,6 @@ class StirapDetuningCfg(ConfigBase):
         return self
 
 
-@dataclass(frozen=True)
-class StirapDetuningResult:
-    """counts: g/e/f shot counts, shaped (Ny,Nx,3), not corrected populations.
-
-    x_values: requested Pump detuning in MHz, shape (Nx,).
-    y_values: requested Stokes detuning in MHz, shape (Ny,).
-    The final counts axis has g/e/f order.
-    Unfinished points remain NaN. No intermediate-state oracle is included.
-    """
-
-    x_values: NDArray[np.float64]
-    y_values: NDArray[np.float64]
-    counts: NDArray[np.float64]
-
-
 def restore_result(data: GroupedLoadData[StirapDetuningCfg]) -> StirapDetuningResult:
     """Restore coordinates and g/e/f counts; missing counts raises ValueError."""
     counts = data.variable("counts")
@@ -200,6 +203,7 @@ class StirapDetuningExp(Experiment[StirapDetuningResult, StirapDetuningCfg]):
         acquisition. Single-fluxonium preflight requires both generators to bind charge lines.
         Hardware wiring roles remain the operator responsibility.
         """
+        # 1. Prepare the scan coordinates and measurement state.
         centroid3_classifier(cfg.readout, ro_ch=cfg.readout.ro_ch)
         xs = np.linspace(
             cfg.pump_detuning.start, cfg.pump_detuning.stop, cfg.pump_detuning.expts
@@ -210,7 +214,8 @@ class StirapDetuningExp(Experiment[StirapDetuningResult, StirapDetuningCfg]):
             cfg.stokes_detuning.expts,
         )
         x_label = "Pump detuning (MHz)"
-        buffer = SignalBuffer((len(ys), len(xs), 3), dtype=np.float64)
+        buffer = SignalBuffer((len(ys), len(xs), len(STATE_LABELS)), dtype=np.float64)
+        # 2. Acquire the configured pulse sequence over the scan.
         with Schedule(buffer, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 context.soccfg,
@@ -242,7 +247,7 @@ class StirapDetuningExp(Experiment[StirapDetuningResult, StirapDetuningCfg]):
                 context.soc,
                 processor=shot_sums(program, [Classify("readout")]),
                 options=RunOptions(
-                    converter=lambda sums: sums.reshape(len(ys), len(xs), 3)
+                    converter=lambda sums: sums.reshape(len(ys), len(xs), len(STATE_LABELS))
                 ),
                 charge_requirements=(
                     ChargeDriveRequirement("Pump", cfg.pump_ch),
@@ -250,10 +255,12 @@ class StirapDetuningExp(Experiment[StirapDetuningResult, StirapDetuningCfg]):
                 ),
             )
         result = StirapDetuningResult(xs, ys, buffer.array)
+        # 3. Display the measured signal during acquisition.
         figure, _ = context.plots.subplots(num="measurement", layout="constrained")
 
         @context.plots.on_plot_thread
         def draw(_data):
+            """Refresh the measurement artists from the current acquired data."""
             ax = figure.axes[0]
             fractions = result.counts / result.counts.sum(axis=-1, keepdims=True)
             image = ax.pcolormesh(xs, ys, fractions[..., 2], shading="nearest")
@@ -264,6 +271,7 @@ class StirapDetuningExp(Experiment[StirapDetuningResult, StirapDetuningCfg]):
 
         draw(None)
         figure.show()
+        # 4. Return the acquired coordinates and data.
         return result
 
     def analyze(
@@ -282,6 +290,7 @@ class StirapDetuningExp(Experiment[StirapDetuningResult, StirapDetuningCfg]):
         requested scan coordinates; preparation-label estimates are not fidelity.
         Incomplete/nonfinite or empty counts and singular confusion fail explicitly.
         """
+        # 1. Select the saved measurements and analysis controls.
         del options
         cfg = source.cfg
         if cfg is None:
@@ -294,24 +303,26 @@ class StirapDetuningExp(Experiment[StirapDetuningResult, StirapDetuningCfg]):
             )
         raw = counts / counts.sum(axis=-1, keepdims=True)
         result = analyze_centroid3_populations(raw, calibration)
+        # 2. Compare the data and analysis on the same axes.
         figure, _ = plots.subplots(
             num="fit",
             nrows=2,
-            ncols=3,
+            ncols=len(STATE_LABELS),
             figsize=(11, 7),
             layout="constrained",
         )
 
         @plots.on_plot_thread
         def populations(_data):
+            """Draw the acquired and confusion-corrected population fractions."""
             for row, (values, title) in enumerate(
                 (
                     (result.raw_populations, "Raw g/e/f fractions"),
                     (result.corrected_populations, "Corrected g/e/f (unclipped)"),
                 )
             ):
-                for label, state in enumerate(("g", "e", "f")):
-                    ax = figure.axes[row * 3 + label]
+                for label, state in enumerate(STATE_LABELS):
+                    ax = figure.axes[row * len(STATE_LABELS) + label]
                     image = ax.pcolormesh(
                         source.result.x_values,
                         source.result.y_values,
@@ -331,4 +342,5 @@ class StirapDetuningExp(Experiment[StirapDetuningResult, StirapDetuningCfg]):
 
         populations(None)
         figure.show()
+        # 3. Return the measured analysis summary.
         return summarize_centroid3(result)

@@ -88,6 +88,25 @@ class ChainAnalyzeOptions:
     ] = 0.0
 
 
+@dataclass(frozen=True)
+class ChainAnalysis:
+    """Peak fitted on the sigma curve.
+
+    freq and freq_err are the fitted centre and its error in MHz. fwhm and
+    fwhm_err are the full width at half maximum of the sigma peak in MHz; this
+    width only approximates the line width. level is the dashed 5% family
+    false-mark level in sigma. peaks lists every candidate on the sigma curve,
+    most prominent first.
+    """
+
+    freq: float
+    freq_err: float
+    fwhm: float
+    fwhm_err: float
+    level: float
+    peaks: tuple[PeakCandidate, ...] = ()
+
+
 class ChainCfg(ConfigBase):
     reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
     init_pulse: Annotated[
@@ -136,25 +155,6 @@ class ChainCfg(ConfigBase):
             description="Wait after each dwell's chain, before the next dwell.",
         ),
     ]
-
-
-@dataclass(frozen=True)
-class ChainAnalysis:
-    """Peak fitted on the sigma curve.
-
-    freq and freq_err are the fitted centre and its error in MHz. fwhm and
-    fwhm_err are the full width at half maximum of the sigma peak in MHz; this
-    width only approximates the line width. level is the dashed 5% family
-    false-mark level in sigma. peaks lists every candidate on the sigma curve,
-    most prominent first.
-    """
-
-    freq: float
-    freq_err: float
-    fwhm: float
-    fwhm_err: float
-    level: float
-    peaks: tuple[PeakCandidate, ...] = ()
 
 
 def restore_sums(data: GroupedLoadData[ChainCfg]) -> SweepSums:
@@ -229,6 +229,7 @@ class ChainExp(Experiment[SweepSums, ChainCfg]):
             cfg.freq, "freq", {"soccfg": context.soccfg, "gen_ch": cfg.qub_pulse.ch}
         )
 
+        # 2. Display the measured signal during acquisition.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Frequency (MHz)", ylabel="Distance from background (sigma)")
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
@@ -241,6 +242,7 @@ class ChainExp(Experiment[SweepSums, ChainCfg]):
 
         @context.plots.on_plot_thread
         def update(augmented_sums):
+            """Refresh the measurement artists from the current acquired data."""
             sums = SweepSums.from_augmented(freqs, augmented_sums)
             curve = sweep_curve(sums)
             level_line.set_data([freqs[0], freqs[-1]], [curve.level, curve.level])
@@ -252,7 +254,7 @@ class ChainExp(Experiment[SweepSums, ChainCfg]):
             (len(freqs), 12, 12), dtype=np.float64, on_update=update
         )
 
-        # 2. One shot per dwell: reset and init pulse, then the chain.
+        # 3. One shot per dwell: reset and init pulse, then the chain.
         with Schedule(augmented_sums, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 context.soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
@@ -277,11 +279,12 @@ class ChainExp(Experiment[SweepSums, ChainCfg]):
                 rounds=cfg.rounds,
             )
 
-        # 3. Summed acquisition writes whole rounds, so NaN means no round finished.
+        # 4. Summed acquisition writes whole rounds, so NaN means no round finished.
         if np.isnan(augmented_sums.array).any():
             raise RuntimeError(
                 "Stopped before the first round finished; no sums to keep"
             )
+        # 5. Return the acquired coordinates and data.
         return SweepSums.from_augmented(freqs, augmented_sums.array)
 
     def analyze(
@@ -301,6 +304,7 @@ class ChainExp(Experiment[SweepSums, ChainCfg]):
         the line width. The source cfg may be None. No candidate passing the
         options' thresholds raises AnalysisFailed; invalid sums raise ValueError.
         """
+        # 1. Select the saved measurements and analysis controls.
         sums = source.result
         freqs = sums.axis
         curve = sweep_curve(sums)
@@ -317,6 +321,7 @@ class ChainExp(Experiment[SweepSums, ChainCfg]):
             ),
         )
 
+        # 2. Compare the data and analysis on the same axes.
         fig, ax = plots.subplots(num="fit", figsize=config.figsize)
         ax.plot(freqs, curve.sigma, label="sigma", marker="o", markersize=3)
         ax.axhline(curve.level, color="gray", ls="--", label="5% false-mark level")
@@ -337,6 +342,7 @@ class ChainExp(Experiment[SweepSums, ChainCfg]):
         ax.grid(True)
         fig.tight_layout()
 
+        # 3. Return the measured analysis summary.
         return ChainAnalysis(
             freq=fit.freq,
             freq_err=fit.freq_err,

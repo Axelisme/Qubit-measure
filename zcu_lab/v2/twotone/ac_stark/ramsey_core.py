@@ -51,6 +51,7 @@ class AcStarkRamseyAnalyzeOptions:
 
 
 def acstark_ramsey_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
+    """Convert mean complex IQ to the real contrast used by live and analysis plots."""
     return rotate2real(signals).real
 
 
@@ -114,7 +115,7 @@ class AcStarkRamseyExp(Experiment[AcStarkRamseyResult, AcStarkRamseyCfg]):
         rounding; the FPGA sweeps the Ramsey delay, not Stark pulse duration.
         Return mean complex IQ on the (gain, delay) grid with delays in us.
         """
-        # Prepare Ramsey delays and gain points spaced by nominal Stark power.
+        # 1. Prepare Ramsey delays and gain points spaced by nominal Stark power.
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
 
@@ -130,6 +131,7 @@ class AcStarkRamseyExp(Experiment[AcStarkRamseyResult, AcStarkRamseyCfg]):
         )
         gains = round_zcu_gain(gains, soccfg, cfg.stark_pulse.ch)
 
+        # 2. Display the measured signal during acquisition.
         fig, _ = context.plots.subplots(1, 2, num="measurement")
         heat_ax, line_ax = fig.axes
         heat_ax.set(xlabel="Stark Pulse Gain (a.u.)", ylabel="Time (us)")
@@ -145,6 +147,7 @@ class AcStarkRamseyExp(Experiment[AcStarkRamseyResult, AcStarkRamseyCfg]):
 
         @context.plots.on_plot_thread
         def update(data):
+            """Refresh the measurement artists from the current acquired data."""
             real = acstark_ramsey_signal2real(data)
             valid = np.flatnonzero(~np.all(np.isnan(real), axis=1))
             current = int(valid[-1]) if valid.size else -1
@@ -159,7 +162,7 @@ class AcStarkRamseyExp(Experiment[AcStarkRamseyResult, AcStarkRamseyCfg]):
             on_update=update,
         )
 
-        # At each Stark gain, sweep the Ramsey delay and its programmed phase.
+        # 3. At each Stark gain, sweep the Ramsey delay and its programmed phase.
         with Schedule(signals_buffer, scope=context.scope) as sched:
             for _, step in sched.scan("gain", gains.tolist()):
                 builder = TimelineBuilder(
@@ -189,6 +192,7 @@ class AcStarkRamseyExp(Experiment[AcStarkRamseyResult, AcStarkRamseyCfg]):
                 builder.emit(Readout("readout", cfg.readout))
                 step.run_acquire(builder.build(), soc, rounds=cfg.rounds)
 
+        # 4. Return the acquired coordinates and data.
         return AcStarkRamseyResult(gains, lengths, signals_buffer.array)
 
     def analyze(
@@ -206,6 +210,7 @@ class AcStarkRamseyExp(Experiment[AcStarkRamseyResult, AcStarkRamseyCfg]):
         Publish ``fit`` with per-gain normalized FFT magnitudes, not a fitted
         Stark coefficient or coherence time. Source cfg may be None.
         """
+        # 1. Select the saved measurements and analysis controls.
         result = source.result
         detune, cutoff = options.detune, options.cutoff
 
@@ -236,6 +241,7 @@ class AcStarkRamseyExp(Experiment[AcStarkRamseyResult, AcStarkRamseyCfg]):
 
         gains2 = gains**2
 
+        # 2. Compare the data and analysis on the same axes.
         fig, _ = plots.subplots(num="fit", nrows=2, ncols=1, sharex=True)
         ax1, ax2 = fig.axes
 

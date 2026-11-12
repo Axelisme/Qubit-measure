@@ -34,6 +34,20 @@ class LengthResult:
     signals: NDArray[np.float64]
 
 
+@pydantic_dataclass(frozen=True)
+class LengthAnalyzeOptions:
+    t0: Annotated[float | None, Field(ge=0)] = None
+    smooth: float = 1.0
+    smooth_method: SmoothMethod = "wavelet"
+    wavelet: str = "sym4"
+    wavelet_level: int = 0
+
+
+@dataclass(frozen=True)
+class LengthAnalysis:
+    best_length: float
+
+
 class LengthCfg(ConfigBase):
     reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
     qub_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Qubit pulse")]
@@ -59,20 +73,6 @@ class LengthCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ]
-
-
-@pydantic_dataclass(frozen=True)
-class LengthAnalyzeOptions:
-    t0: Annotated[float | None, Field(ge=0)] = None
-    smooth: float = 1.0
-    smooth_method: SmoothMethod = "wavelet"
-    wavelet: str = "sym4"
-    wavelet_level: int = 0
-
-
-@dataclass(frozen=True)
-class LengthAnalysis:
-    best_length: float
 
 
 class LengthExp(Experiment[LengthResult, LengthCfg]):
@@ -105,7 +105,7 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
         IQ distributions. SNR is not assignment fidelity.
         acquire_kwargs is forwarded to acquisition.
         """
-        # Quantize integration windows on the ADC clock, not the generator clock.
+        # 1. Quantize integration windows on the ADC clock, not the generator clock.
         soc, soccfg = context.soc, context.soccfg
         cfg = deepcopy(cfg)
 
@@ -116,7 +116,7 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
             {"soccfg": soccfg, "ro_ch": readout_cfg.ro_ch},
         )
 
-        # Display the score for each integration window, not averaged state IQ.
+        # 2. Display the score for each integration window, not averaged state IQ.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Readout Length (us)", ylabel="SNR")
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
@@ -125,6 +125,7 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
 
         @context.plots.on_plot_thread
         def update(data: NDArray[np.float64]) -> tuple[Artist, ...]:
+            """Refresh the measurement artists from the current acquired data."""
             return line.set(lengths, np.abs(data))
 
         fig.show()
@@ -134,7 +135,7 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
             on_update=update,
         )
 
-        # Rebuild per window; hold RF duration fixed while comparing pulse-off/on.
+        # 3. Rebuild per window; hold RF duration fixed while comparing pulse-off/on.
         with Schedule(signals_buffer, scope=context.scope) as sched:
             for _, step in sched.scan("length", lengths.tolist()):
                 cfg.readout.set_param("ro_length", step.value)
@@ -169,9 +170,10 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
                     **(acquire_kwargs or {}),
                 )
 
-        # Return the moment-derived score; raw shots and IQ moments are not retained.
+        # 4. Return the moment-derived score; raw shots and IQ moments are not retained.
         signals = signals_buffer.array
 
+        # 5. Return the acquired coordinates and data.
         return LengthResult(lengths, signals)
 
     def analyze(
@@ -189,6 +191,7 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
         NaN scores become zero before smoothing. Return best_length in us
         and publish fit. source.cfg may be None.
         """
+        # 1. Select the saved measurements and analysis controls.
         result = source.result
 
         lengths, signals = result.lengths, result.signals
@@ -217,6 +220,7 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
         max_length = float(lengths[max_id])
         max_snr = float(snrs[max_id])
 
+        # 2. Compare the data and analysis on the same axes.
         _, ax = plots.subplots(num="fit", figsize=config.figsize)
 
         ax.plot(lengths, snrs)
@@ -226,4 +230,5 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
         ax.legend()
         ax.grid(True)
 
+        # 3. Return the measured analysis summary.
         return LengthAnalysis(max_length)

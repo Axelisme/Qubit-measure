@@ -33,6 +33,20 @@ from zcu_lab.v2.support import live_line
 from .._rb_sequence import TargetGate, make_seed_tables
 
 
+@dataclass(frozen=True)
+class IRBResult:
+    """Fixed raw layout, including NaNs for unfinished acquisitions."""
+
+    rounds: NDArray[np.int64]
+    """Zero-based host pass IDs."""
+    sub_seeds: NDArray[np.int64]
+    """Independent RNG seeds, paired across arms and reused across rounds."""
+    depths: NDArray[np.int64]
+    """Number of random Cliffords; interleaved also inserts this many targets."""
+    signals: NDArray[np.complex128]
+    """Repetition-averaged IQ, shape (round, seed, arm, depth)."""
+
+
 class IRBCfg(ConfigBase):
     """Paired RB settings; depth counts random Cliffords, rounds are host passes."""
 
@@ -69,20 +83,6 @@ class IRBCfg(ConfigBase):
 
     target_gate: Annotated[TargetGate, FieldMeta(label="Target gate")] = "X90"
     """Physical Clifford inserted after each random Clifford, in its current frame."""
-
-
-@dataclass(frozen=True)
-class IRBResult:
-    """Fixed raw layout, including NaNs for unfinished acquisitions."""
-
-    rounds: NDArray[np.int64]
-    """Zero-based host pass IDs."""
-    sub_seeds: NDArray[np.int64]
-    """Independent RNG seeds, paired across arms and reused across rounds."""
-    depths: NDArray[np.int64]
-    """Number of random Cliffords; interleaved also inserts this many targets."""
-    signals: NDArray[np.complex128]
-    """Repetition-averaged IQ, shape (round, seed, arm, depth)."""
 
 
 def _live_plot(
@@ -155,6 +155,7 @@ class IRB_Exp(Experiment[IRBResult, IRBCfg]):
         )
         cache: dict[tuple[int, int], TimelineProgramV2] = {}
         program_cfg = run_cfg.with_updates(rounds=1)
+        # 2. Acquire the configured pulse sequence over the scan.
         with Schedule(buffer, scope=context.scope) as sched:
             for round_index, round_step in sched.repeat("round", run_cfg.rounds):
                 for seed_index, (seed, seed_step) in enumerate(
@@ -173,7 +174,7 @@ class IRB_Exp(Experiment[IRBResult, IRBCfg]):
                         )
                         key = (seed_index, arm)
                         if key not in cache:
-                            # 2. Prepare reference or interleaved physical gates.
+                            # 3. Prepare reference or interleaved physical gates.
                             tables = make_seed_tables(
                                 seed, depths, run_cfg.target_gate if arm else None
                             )
@@ -214,7 +215,7 @@ class IRB_Exp(Experiment[IRBResult, IRBCfg]):
                                 MY90_pulse,
                             ]
 
-                            # 3. Play this arm's prefix and its own full inverse.
+                            # 4. Play this arm's prefix and its own full inverse.
                             builder.add_loop("depth", len(prefix_len_by_depth))
                             builder.emit(
                                 LoadValue(
@@ -283,9 +284,10 @@ class IRB_Exp(Experiment[IRBResult, IRBCfg]):
                             program = builder.build()
 
                             cache[key] = program
-                        # 4. Store one round's mean IQ; reuse programs next round.
+                        # 5. Store one round's mean IQ; reuse programs next round.
                         arm_step.run_acquire(cache[key], context.soc, rounds=1)
             sched.trigger_update(flush=True)
+        # 6. Return the acquired coordinates and data.
         return IRBResult(
             rounds=np.arange(run_cfg.rounds, dtype=np.int64),
             sub_seeds=seeds,
@@ -301,11 +303,13 @@ class IRB_Exp(Experiment[IRBResult, IRBCfg]):
         plots: Plots,
     ) -> IRBAnalysis:
         """Fit paired complete IQ, publishing both decays and seed-bootstrap CI."""
+        # 1. Select the saved measurements and analysis controls.
         del options
         result = source.result
         fit = analyze_irb(result.depths, result.signals)
         analysis = fit.summary
         target = source.cfg.target_gate if source.cfg is not None else "target"
+        # 2. Compare the data and analysis on the same axes.
         fig, ax = plots.subplots(num="fit", figsize=(9, 6))
         for arm, label in enumerate(("Reference", f"Interleaved {target}")):
             (line,) = ax.plot(result.depths, fit.mean_signals[arm], "o", label=label)
@@ -320,4 +324,5 @@ class IRB_Exp(Experiment[IRBResult, IRBCfg]):
         ax.legend()
         ax.grid(True)
         fig.tight_layout()
+        # 3. Return the measured analysis summary.
         return analysis

@@ -36,6 +36,7 @@ class RabiCheckResult:
 def reset_rabi_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     # Anchor all branches to the before-reset IQ axis. Branch offsets must not
     # rotate the projection or independently rescale the measured contrasts.
+    """Convert mean complex IQ to the real contrast used by live and analysis plots."""
     try:
         angle = find_rotate_angle(signals[0])
     except ValueError:
@@ -103,17 +104,20 @@ class RabiCheckExp(Experiment[RabiCheckResult, RabiCheckCfg]):
 
         # 2. Project all three mean-IQ curves onto the before-reset IQ axis.
         plots = context.plots
+        # 3. Display the measured signal during acquisition.
         fig, ax = plots.subplots(num="measurement")
         ax.set(xlabel="Pulse gain", ylabel="Amplitude")
         viewer = live_line(ax, num_lines=3)
 
         @plots.on_plot_thread
         def update(data: NDArray[np.complex128]) -> tuple[Artist, ...]:
+            """Refresh the measurement artists from the current acquired data."""
             return viewer.set(gains, reset_rabi_signal2real(data))
 
         fig.show()
         signals_buffer = SignalBuffer((3, len(gains)), on_update=update)
 
+        # 4. Acquire the configured pulse sequence over the scan.
         with Schedule(signals_buffer, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
@@ -135,6 +139,7 @@ class RabiCheckExp(Experiment[RabiCheckResult, RabiCheckCfg]):
             builder.emit(Readout("readout", cfg.readout))
             sched.run_acquire(builder.build(), soc, rounds=cfg.rounds)
 
+        # 5. Return the acquired coordinates and data.
         return RabiCheckResult(gains, signals_buffer.array)
 
     def analyze(
@@ -149,6 +154,7 @@ class RabiCheckExp(Experiment[RabiCheckResult, RabiCheckCfg]):
         Frequency is fitted only to the before-reset branch. All branches share
         its IQ projection and frequency; after-reset also includes a 2f term.
         """
+        # 1. Select the saved measurements and analysis controls.
         del options
         result = source.result
         gains, signals = result.gains, result.signals
@@ -158,6 +164,7 @@ class RabiCheckExp(Experiment[RabiCheckResult, RabiCheckCfg]):
             raise ValueError("Reset-check signals must not contain infinities")
         real_signals = reset_rabi_signal2real(signals)
         fit = fit_reset_rabi(gains, real_signals)
+        # 2. Compare the data and analysis on the same axes.
         fig, _ = plots.subplots(
             num="fit",
             nrows=2,
@@ -199,4 +206,5 @@ class RabiCheckExp(Experiment[RabiCheckResult, RabiCheckCfg]):
         for axes in (ax, residual_ax):
             axes.legend(fontsize=9)
             axes.grid(True)
+        # 3. Return the measured analysis summary.
         return fit

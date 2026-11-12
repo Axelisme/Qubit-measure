@@ -37,6 +37,22 @@ class PowerResult:
     signals: NDArray[np.complex128]
 
 
+@pydantic_dataclass(frozen=True)
+class PowerAnalyzeOptions:
+    smooth: float = 1.0
+    smooth_method: SmoothMethod = "wavelet"
+    wavelet: str = "sym4"
+    wavelet_level: int = 0
+    xname: str | None = None
+    yname: str | None = None
+
+
+@dataclass(frozen=True)
+class PowerAnalysis:
+    gain1: float
+    gain2: float
+
+
 class PowerCfg(ConfigBase):
     reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
     init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init pulse")] = None
@@ -61,22 +77,6 @@ class PowerCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ]
-
-
-@pydantic_dataclass(frozen=True)
-class PowerAnalyzeOptions:
-    smooth: float = 1.0
-    smooth_method: SmoothMethod = "wavelet"
-    wavelet: str = "sym4"
-    wavelet_level: int = 0
-    xname: str | None = None
-    yname: str | None = None
-
-
-@dataclass(frozen=True)
-class PowerAnalysis:
-    gain1: float
-    gain2: float
 
 
 class PowerExp(Experiment[PowerResult, PowerCfg]):
@@ -104,7 +104,7 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
         The display uses the minimum-gain corner as background; this contrast
         is not a calibrated reset fidelity.
         """
-        # Prepare each reset pulse's gain grid on its own generator channel.
+        # 1. Prepare each reset pulse's gain grid on its own generator channel.
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
 
@@ -124,24 +124,27 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
             signals: NDArray[np.complex128],
         ) -> NDArray[np.float64]:
             # Choose reference point based on sweep direction (use minimum power point)
+            """Convert the reset gain map to contrast relative to its reference corner."""
             ref_i = 0 if gains1[0] < gains1[-1] else -1
             ref_j = 0 if gains2[0] < gains2[-1] else -1
             return np.abs(signals - signals[ref_i, ref_j])
 
-        # Display contrast relative to the minimum-gain corner in either scan direction.
+        # 2. Display contrast relative to the minimum-gain corner in either scan direction.
         plots = context.plots
+        # 3. Display the measured signal during acquisition.
         fig, ax = plots.subplots(num="measurement")
         ax.set(xlabel="Gain1 (a.u.)", ylabel="Gain2 (a.u.)")
         viewer = live_heatmap(ax)
 
         @plots.on_plot_thread
         def update(data: NDArray[np.complex128]) -> tuple[Artist, ...]:
+            """Refresh the measurement artists from the current acquired data."""
             return viewer.set(gains1, gains2, dual_reset_gain_signal2real(data))
 
         fig.show()
         signals_buffer = SignalBuffer((len(gains1), len(gains2)), on_update=update)
 
-        # Sweep both reset gains in hardware and collect mean IQ.
+        # 4. Sweep both reset gains in hardware and collect mean IQ.
         with Schedule(signals_buffer, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
@@ -159,6 +162,7 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
             builder.emit(Readout("readout", cfg.readout))
             sched.run_acquire(builder.build(), soc, rounds=cfg.rounds)
 
+        # 5. Return the acquired coordinates and data.
         return PowerResult(gains1, gains2, signals_buffer.array)
 
     def analyze(
@@ -175,11 +179,12 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
         according to the first corner's contrast relative to the map mean.
         Return gain1/gain2 in a.u. within [-1, 1] and publish fit; source.cfg may be None.
         """
+        # 1. Select the saved measurements and analysis controls.
         result = source.result
 
         gains1, gains2, signals = result.gains1, result.gains2, result.signals
 
-        # Apply smoothing for peak finding
+        # 2. Apply smoothing for peak finding
         signals_smooth = smooth_signal_nd(
             signals,
             options=SmoothingOptions(
@@ -195,7 +200,7 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
         ref_j = 0 if gains2[0] < gains2[-1] else -1
         amp2D = np.abs(signals_smooth - signals_smooth[ref_i, ref_j])
 
-        # Determine if we should look for max or min
+        # 3. Determine if we should look for max or min
         if amp2D[0, 0] < np.mean(amp2D):
             gain1_opt = gains1[np.argmax(np.max(amp2D, axis=1))]
             gain2_opt = gains2[np.argmax(np.max(amp2D, axis=0))]
@@ -204,6 +209,7 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
             gain2_opt = gains2[np.argmin(np.min(amp2D, axis=0))]
             amp2D = np.mean(amp2D) - amp2D
 
+        # 4. Compare the data and analysis on the same axes.
         fig, ax = plots.subplots(num="fit", figsize=config.figsize)
 
         ax.imshow(
@@ -224,4 +230,5 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
 
         fig.tight_layout()
 
+        # 5. Return the measured analysis summary.
         return PowerAnalysis(gain1=float(gain1_opt), gain2=float(gain2_opt))

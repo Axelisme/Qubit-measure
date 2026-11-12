@@ -49,8 +49,21 @@ class DispersiveResult:
     signals: NDArray[np.complex128]
 
 
-def dispersive_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
-    return np.abs(signals)
+@validated_dataclass(frozen=True)
+class DispersiveAnalyzeOptions:
+    """Choose whether both resonance fits allow an amplitude-background slope."""
+
+    fit_bg_amp_slope: Annotated[
+        bool, FieldMeta(label="Fit background amplitude slope")
+    ] = False
+
+
+@dataclass(frozen=True)
+class DispersiveAnalysis:
+    """Half the absolute resonance separation and mean FWHM, both in MHz."""
+
+    chi: float
+    avg_fwhm: float
 
 
 class DispersiveCfg(ConfigBase):
@@ -75,23 +88,6 @@ class DispersiveCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ]
-
-
-@validated_dataclass(frozen=True)
-class DispersiveAnalyzeOptions:
-    """Choose whether both resonance fits allow an amplitude-background slope."""
-
-    fit_bg_amp_slope: Annotated[
-        bool, FieldMeta(label="Fit background amplitude slope")
-    ] = False
-
-
-@dataclass(frozen=True)
-class DispersiveAnalysis:
-    """Half the absolute resonance separation and mean FWHM, both in MHz."""
-
-    chi: float
-    avg_fwhm: float
 
 
 def _plot_circle_fit(
@@ -164,7 +160,7 @@ class DispersiveExp(Experiment[DispersiveResult, DispersiveCfg]):
         Return mean complex IQ for both branches; analysis infers the
         dispersive shift from their resonance separation.
         """
-        # Prepare a common frequency axis and separate IQ traces for both branches.
+        # 1. Prepare a common frequency axis and separate IQ traces for both branches.
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
 
@@ -176,6 +172,7 @@ class DispersiveExp(Experiment[DispersiveResult, DispersiveCfg]):
             {"soccfg": soccfg, "gen_ch": cfg.qub_pulse.ch},
         )
 
+        # 2. Display the measured signal during acquisition.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Frequency (MHz)", ylabel="Amplitude")
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
@@ -184,7 +181,8 @@ class DispersiveExp(Experiment[DispersiveResult, DispersiveCfg]):
 
         @context.plots.on_plot_thread
         def update(data):
-            return viewer.set(freqs, dispersive_signal2real(data))
+            """Refresh the measurement artists from the current acquired data."""
+            return viewer.set(freqs, np.abs(data))
 
         fig.show()
         signals_buffer = SignalBuffer(
@@ -192,7 +190,7 @@ class DispersiveExp(Experiment[DispersiveResult, DispersiveCfg]):
             on_update=update,
         )
 
-        # Sweep readout frequency for both preparations in the same FPGA program.
+        # 3. Sweep readout frequency for both preparations in the same FPGA program.
         with Schedule(signals_buffer, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
@@ -209,6 +207,7 @@ class DispersiveExp(Experiment[DispersiveResult, DispersiveCfg]):
             prog = builder.build()
             sched.run_acquire(prog, soc, rounds=cfg.rounds)
 
+        # 4. Return the acquired coordinates and data.
         return DispersiveResult(freqs=freqs, signals=signals_buffer.array)
 
     def analyze(
@@ -226,6 +225,7 @@ class DispersiveExp(Experiment[DispersiveResult, DispersiveCfg]):
         source cfg may be None; the preparation labels alone do not establish
         state purity or a readout fidelity.
         """
+        # 1. Select the saved measurements and analysis controls.
         result = source.result
 
         freqs = result.freqs
@@ -239,7 +239,7 @@ class DispersiveExp(Experiment[DispersiveResult, DispersiveCfg]):
         edelay = 0.5 * (g_edelay + e_edelay)
 
         model = get_proper_model(freqs, g_signals)
-        # Keep each concrete model and its fitted parameter types in the same branch.
+        # 2. Keep each concrete model and its fitted parameter types in the same branch.
         if isinstance(model, HangerModel):
             g_params = model.fit(
                 freqs,
@@ -274,7 +274,7 @@ class DispersiveExp(Experiment[DispersiveResult, DispersiveCfg]):
         g_freq, g_fwhm = g_params["freq"], g_params["fwhm"]
         e_freq, e_fwhm = e_params["freq"], e_params["fwhm"]
 
-        # Calculate dispersive shift and average linewidth
+        # 3. Calculate dispersive shift and average linewidth
         chi = abs(g_freq - e_freq) / 2  # dispersive shift χ/2π
         avg_fwhm = (g_fwhm + e_fwhm) / 2  # average linewidth κ/2π
 
@@ -289,7 +289,7 @@ class DispersiveExp(Experiment[DispersiveResult, DispersiveCfg]):
             f"Dispersive shift χ/2π = {chi:.3f} MHz, κ/2π = {avg_fwhm:.1f} MHz"
         )
 
-        # Plot data and fits
+        # 4. Plot data and fits
         label_g = f"Ground: {g_freq:.1f} MHz, κ = {g_fwhm:.1f} MHz"
         label_e = f"Excited: {e_freq:.1f} MHz, κ = {e_fwhm:.1f} MHz"
         ax_main.scatter(freqs, g_amps, marker=".", c="b")
@@ -297,7 +297,7 @@ class DispersiveExp(Experiment[DispersiveResult, DispersiveCfg]):
         ax_main.plot(freqs, g_fit, "b-", alpha=0.7, label=label_g)
         ax_main.plot(freqs, e_fit, "r-", alpha=0.7, label=label_e)
 
-        # Mark resonance frequencies
+        # 5. Mark resonance frequencies
         ax_main.axvline(g_freq, color="b", ls="--", alpha=0.7)
         ax_main.axvline(e_freq, color="r", ls="--", alpha=0.7)
         ax_main.set_xlabel("Frequency (MHz)", fontsize=14)
@@ -306,9 +306,10 @@ class DispersiveExp(Experiment[DispersiveResult, DispersiveCfg]):
         ax_main.legend(loc="upper right")
         ax_main.grid(True)
 
-        # Plot individual circle fit
+        # 6. Plot individual circle fit
         _plot_circle_fit(ax_g, freqs, g_signals, dict(g_params), "b", "Ground")
         _plot_circle_fit(ax_e, freqs, e_signals, dict(e_params), "r", "Excited")
         ax_e.set_xlabel(r"$Re[S_{21}]$", fontsize=14)
 
+        # 7. Return the measured analysis summary.
         return DispersiveAnalysis(chi, avg_fwhm)

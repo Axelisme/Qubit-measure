@@ -6,7 +6,6 @@ from typing import Annotated, ClassVar
 
 import numpy as np
 from matplotlib import rcParams
-from matplotlib.axes import Axes
 from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic.dataclasses import dataclass as validated_dataclass
@@ -71,63 +70,14 @@ ALLXY_GATE2_IDX = [GATE_LIST.index(g2) for _, g2 in ALLXY_SEQUENCE]
 # ------------------------------------------------------------------------------
 
 
-def allxy_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
-    return rotate2real(signals).real
+@validated_dataclass(frozen=True)
+class AllXYAnalyzeOptions:
+    fit_ge: Annotated[bool, FieldMeta(label="Fit g/e levels")] = False
 
 
 # ------------------------------------------------------------------------------
 # AllXYExperiment
 # ------------------------------------------------------------------------------
-
-
-def _configure_allxy_axes(ax: Axes) -> None:
-    # Configure x-axis labels
-    name_map = {
-        "I": "$I$",
-        "X90": "$X_{90}$",
-        "Y90": "$Y_{90}$",
-        "X180": "$X_{180}$",
-        "Y180": "$Y_{180}$",
-    }
-    gate_labels = [
-        f"{name_map[gate1]}-{name_map[gate2]}" for gate1, gate2 in ALLXY_SEQUENCE
-    ]
-    ax.set_xticks(np.arange(len(ALLXY_SEQUENCE)))
-    ax.set_xticklabels(gate_labels, rotation=30, ha="right", fontsize=8)
-    ax.grid(True)
-    line = ax.lines[0]
-    line.set_marker(".")
-    line.set_linestyle(rcParams["lines.linestyle"])
-    line.set_markersize(5)
-
-
-class AllXYCfg(ConfigBase):
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    I_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Identity Pulse")] = None
-    X180_pulse: Annotated[Pulse.Cfg, FieldMeta(label="X180 Pulse")]
-    X90_pulse: Annotated[Pulse.Cfg, FieldMeta(label="X90 Pulse")]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-    reps: Annotated[
-        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
-    ]
-    rounds: Annotated[
-        int,
-        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
-    ] = 1
-    relax_delay: Annotated[
-        float,
-        FieldMeta(
-            label="Relax delay",
-            unit="us",
-            decimals=3,
-            description="Relaxation delay after each repetition.",
-        ),
-    ]
-
-
-@validated_dataclass(frozen=True)
-class AllXYAnalyzeOptions:
-    fit_ge: Annotated[bool, FieldMeta(label="Fit g/e levels")] = False
 
 
 @dataclass(frozen=True)
@@ -152,6 +102,35 @@ class AllXYAnalysis:
     power_err: float
     detune_err: float
     residual_rms: float
+
+
+def allxy_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
+    """Convert mean complex IQ to the real contrast used by live and analysis plots."""
+    return rotate2real(signals).real
+
+
+class AllXYCfg(ConfigBase):
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    I_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Identity Pulse")] = None
+    X180_pulse: Annotated[Pulse.Cfg, FieldMeta(label="X180 Pulse")]
+    X90_pulse: Annotated[Pulse.Cfg, FieldMeta(label="X90 Pulse")]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ]
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
+        ),
+    ]
 
 
 class AllXY_Exp(Experiment[AllXY_Result, AllXYCfg]):
@@ -182,19 +161,37 @@ class AllXY_Exp(Experiment[AllXY_Result, AllXYCfg]):
         complex IQ, not per-gate fidelities. Gate pulses must satisfy
         ComputedPulse's common-channel, pre-delay and waveform-style rules.
         """
-        # Keep the acquisition axis in the same order as the displayed gate pairs.
+        # 1. Keep the acquisition axis in the same order as the displayed gate pairs.
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
 
+        # 2. Display the measured signal during acquisition.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Gate", ylabel="Signal")
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
         ax.grid()
         viewer = live_line(ax)
-        _configure_allxy_axes(ax)
+        name_map = {
+            "I": "$I$",
+            "X90": "$X_{90}$",
+            "Y90": "$Y_{90}$",
+            "X180": "$X_{180}$",
+            "Y180": "$Y_{180}$",
+        }
+        gate_labels = [
+            f"{name_map[gate1]}-{name_map[gate2]}" for gate1, gate2 in ALLXY_SEQUENCE
+        ]
+        ax.set_xticks(np.arange(len(ALLXY_SEQUENCE)))
+        ax.set_xticklabels(gate_labels, rotation=30, ha="right", fontsize=8)
+        ax.grid(True)
+        line = ax.lines[0]
+        line.set_marker(".")
+        line.set_linestyle(rcParams["lines.linestyle"])
+        line.set_markersize(5)
 
         @context.plots.on_plot_thread
         def update(data):
+            """Refresh the measurement artists from the current acquired data."""
             return viewer.set(
                 np.arange(len(ALLXY_SEQUENCE), dtype=np.float64),
                 allxy_signal2real(data),
@@ -205,6 +202,7 @@ class AllXY_Exp(Experiment[AllXY_Result, AllXYCfg]):
             (len(ALLXY_SEQUENCE),),
             on_update=update,
         )
+        # 3. Acquire the configured pulse sequence over the scan.
         with Schedule(signals_buffer, scope=context.scope) as sched:
             # Derive Y rotations from X calibrations and retain an identity time slot.
             I_pulse = cfg.I_pulse
@@ -252,6 +250,7 @@ class AllXY_Exp(Experiment[AllXY_Result, AllXYCfg]):
             prog = builder.build()
             sched.run_acquire(prog, soc, rounds=cfg.rounds)
 
+        # 4. Return the acquired coordinates and data.
         return AllXY_Result(
             signals=signals_buffer.array,
         )
@@ -270,19 +269,20 @@ class AllXY_Exp(Experiment[AllXY_Result, AllXYCfg]):
         detuning and Bloch-z deviations/residuals as defined in AllXYAnalysis,
         not gate infidelities. Publish ``fit``; source cfg may be None.
         """
+        # 1. Select the saved measurements and analysis controls.
         result = source.result
         signals = result.signals
 
-        # Rotate IQ data so that the contrast lies on the real axis and take only
+        # 2. Rotate IQ data so that the contrast lies on the real axis and take only
         # the real part for further analysis.
         sequence = ALLXY_SEQUENCE
         real_signals = allxy_signal2real(signals)
 
-        # Fit coherent-error parameters against the 21 pair responses.
+        # 3. Fit coherent-error parameters against the 21 pair responses.
 
         fit = fit_allxy_errors(sequence, real_signals, fit_ge=options.fit_ge)
 
-        # Compare the measured staircase with the fitted low-order model.
+        # 4. Compare the measured staircase with the fitted low-order model.
 
         fig, ax = plots.subplots(num="fit", figsize=config.figsize)
         ax.plot(real_signals, marker="o", linestyle="None", label="Measured Signals")
@@ -322,6 +322,7 @@ class AllXY_Exp(Experiment[AllXY_Result, AllXYCfg]):
 
         fig.tight_layout()
 
+        # 5. Return the measured analysis summary.
         return AllXYAnalysis(
             amplitude_error=fit.amplitude_error,
             detune_param=fit.detune_param,

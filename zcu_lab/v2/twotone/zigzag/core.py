@@ -24,10 +24,6 @@ class ZigZagResult:
     signals: NDArray[np.complex128]
 
 
-def zigzag_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
-    return rotate2real(signals).real
-
-
 class ZigZagCfg(ConfigBase):
     reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
     X90_pulse: Annotated[Pulse.Cfg, FieldMeta(label="X90 Pulse")]
@@ -92,6 +88,7 @@ class ZigZagExp(Experiment[ZigZagResult, ZigZagCfg]):
 
         times = np.arange(0, cfg.n_times + 1)
 
+        # 2. Display the measured signal during acquisition.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Times", ylabel="Signal")
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
@@ -100,13 +97,15 @@ class ZigZagExp(Experiment[ZigZagResult, ZigZagCfg]):
 
         @context.plots.on_plot_thread
         def update(data):
-            return viewer.set(times.astype(np.float64), zigzag_signal2real(data))
+            """Refresh the measurement artists from the current acquired data."""
+            return viewer.set(times.astype(np.float64), rotate2real(data).real)
 
         fig.show()
         signals_buffer = SignalBuffer(
             (len(times),),
             on_update=update,
         )
+        # 3. Acquire the configured pulse sequence over the scan.
         with Schedule(signals_buffer, scope=context.scope) as sched:
             repeat_pulse = getattr(cfg, cfg.repeat_on)
             if repeat_pulse is None:
@@ -140,4 +139,5 @@ class ZigZagExp(Experiment[ZigZagResult, ZigZagCfg]):
             builder.emit(Readout("readout", cfg.readout))
             sched.run_acquire(builder.build(), soc, rounds=cfg.rounds)
 
+        # 4. Return the acquired coordinates and data.
         return ZigZagResult(times=times, signals=signals_buffer.array)

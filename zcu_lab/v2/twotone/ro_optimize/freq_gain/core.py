@@ -43,6 +43,20 @@ class FreqGainResult:
     signals: NDArray[np.float64]
 
 
+@pydantic_dataclass(frozen=True)
+class FreqGainAnalyzeOptions:
+    smooth: float = 1.0
+    smooth_method: SmoothMethod = "wavelet"
+    wavelet: str = "sym4"
+    wavelet_level: int = 0
+
+
+@dataclass(frozen=True)
+class FreqGainAnalysis:
+    best_freq: float
+    best_gain: float
+
+
 class FreqGainCfg(ConfigBase):
     reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
     qub_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Qubit pulse")]
@@ -69,20 +83,6 @@ class FreqGainCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ]
-
-
-@pydantic_dataclass(frozen=True)
-class FreqGainAnalyzeOptions:
-    smooth: float = 1.0
-    smooth_method: SmoothMethod = "wavelet"
-    wavelet: str = "sym4"
-    wavelet_level: int = 0
-
-
-@dataclass(frozen=True)
-class FreqGainAnalysis:
-    best_freq: float
-    best_gain: float
 
 
 class FreqGainExp(Experiment[FreqGainResult, FreqGainCfg]):
@@ -116,7 +116,7 @@ class FreqGainExp(Experiment[FreqGainResult, FreqGainCfg]):
         IQ distributions. This score is not assignment fidelity.
         acquire_kwargs is forwarded to acquisition.
         """
-        # Prepare both readout axes on the pulse generator's hardware grid.
+        # 1. Prepare both readout axes on the pulse generator's hardware grid.
         soc, soccfg = context.soc, context.soccfg
         cfg = deepcopy(cfg)
 
@@ -131,7 +131,7 @@ class FreqGainExp(Experiment[FreqGainResult, FreqGainCfg]):
             {"soccfg": soccfg, "gen_ch": cfg.readout.gen_ch},
         )
 
-        # Retain one separation score per frequency/gain pair.
+        # 2. Retain one separation score per frequency/gain pair.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Frequency (MHz)", ylabel="Gain (a.u.)")
         formatter = ScalarFormatter(useMathText=True)
@@ -142,6 +142,7 @@ class FreqGainExp(Experiment[FreqGainResult, FreqGainCfg]):
 
         @context.plots.on_plot_thread
         def update(data: NDArray[np.float64]) -> tuple[Artist, ...]:
+            """Refresh the measurement artists from the current acquired data."""
             return heatmap.set(freqs, gains, np.abs(data))
 
         fig.show()
@@ -151,7 +152,7 @@ class FreqGainExp(Experiment[FreqGainResult, FreqGainCfg]):
             on_update=update,
         )
 
-        # Compare pulse-off/on branches while sweeping both readout knobs in hardware.
+        # 3. Compare pulse-off/on branches while sweeping both readout knobs in hardware.
         with Schedule(signals_buffer, scope=context.scope) as sched:
             freq_sweep = cfg.freq
             freq_param = sweep2param("freq", freq_sweep)
@@ -192,9 +193,10 @@ class FreqGainExp(Experiment[FreqGainResult, FreqGainCfg]):
                 **(acquire_kwargs or {}),
             )
 
-        # Return the moment-derived score; raw shots and IQ moments are not retained.
+        # 4. Return the moment-derived score; raw shots and IQ moments are not retained.
         signals = signals_buffer.array
 
+        # 5. Return the acquired coordinates and data.
         return FreqGainResult(freqs, gains, signals)
 
     def analyze(
@@ -210,6 +212,7 @@ class FreqGainExp(Experiment[FreqGainResult, FreqGainCfg]):
         smoothing. Return best_freq in MHz and best_gain in a.u. within [-1, 1], and
         publish fit. source.cfg may be None.
         """
+        # 1. Select the saved measurements and analysis controls.
         result = source.result
         freqs, gains, signals = result.freqs, result.gains, result.signals
 
@@ -234,6 +237,7 @@ class FreqGainExp(Experiment[FreqGainResult, FreqGainCfg]):
         max_gain = float(gains[max_gain_id])
         max_snr = float(snrs[max_freq_id, max_gain_id])
 
+        # 2. Compare the data and analysis on the same axes.
         _, ax = plots.subplots(num="fit", figsize=config.figsize)
 
         ax.imshow(
@@ -248,4 +252,5 @@ class FreqGainExp(Experiment[FreqGainResult, FreqGainCfg]):
         ax.set_ylabel("Gain (a.u.)")
         ax.legend()
 
+        # 3. Return the measured analysis summary.
         return FreqGainAnalysis(max_freq, max_gain)

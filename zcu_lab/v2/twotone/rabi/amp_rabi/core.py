@@ -49,6 +49,7 @@ class AmpRabiAnalysis:
 
 
 def rabi_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
+    """Convert mean complex IQ to the real contrast used by live and analysis plots."""
     return rotate2real(signals).real
 
 
@@ -114,7 +115,7 @@ class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
         analysis uses the oscillation period to infer pi and pi/2 gains.
         earlystop_snr stops averaging at completed-round boundaries. None disables SNR early stop.
         """
-        # Prepare the hardware gain grid and display the mean IQ projection.
+        # 1. Prepare the hardware gain grid and display the mean IQ projection.
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
 
@@ -124,6 +125,7 @@ class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
             {"soccfg": soccfg, "gen_ch": cfg.qub_pulse.ch},
         )
 
+        # 2. Display the measured signal during acquisition.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Pulse gain", ylabel="Amplitude")
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
@@ -132,6 +134,7 @@ class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
 
         @context.plots.on_plot_thread
         def update(data):
+            """Refresh the measurement artists from the current acquired data."""
             return viewer.set(gains, rabi_signal2real(data))
 
         fig.show()
@@ -140,7 +143,7 @@ class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
             on_update=update,
         )
 
-        # Keep pulse duration fixed while the FPGA sweeps its rotation amplitude.
+        # 3. Keep pulse duration fixed while the FPGA sweeps its rotation amplitude.
         with Schedule(signals_buffer, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
@@ -165,6 +168,7 @@ class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
                 ),
             )
 
+        # 4. Return the acquired coordinates and data.
         return AmpRabiResult(amps=gains, signals=signals_buffer.array)
 
     def analyze(
@@ -181,6 +185,7 @@ class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
         180 degrees. Publish ``fit`` and report fit quality; these are pulse
         amplitude calibrations, not gate fidelities. Source cfg may be None.
         """
+        # 1. Select the saved measurements and analysis controls.
         result = source.result
 
         gains, signals = result.amps, result.signals
@@ -204,6 +209,7 @@ class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
             fit.curve,
         )
 
+        # 2. Compare the data and analysis on the same axes.
         fig, ax = plots.subplots(num="fit", figsize=config.figsize)
 
         ax.plot(gains, real_signals, label="meas", ls="-", marker="o", markersize=3)
@@ -227,7 +233,7 @@ class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
         fig.tight_layout()
 
         # fit_rabi computes the per-gain fit uncertainties; surface them so the GUI
-        # summary carries the gain errors (the figure labels already show them).
+        # 3. summary carries the gain errors (the figure labels already show them).
         return AmpRabiAnalysis(
             pi_amp, pi_amp_err, pi2_amp, pi2_amp_err, fit_quality={"fit": fit.quality}
         )

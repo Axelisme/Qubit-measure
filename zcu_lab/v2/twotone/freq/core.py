@@ -8,6 +8,7 @@ import numpy as np
 from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field
+from pydantic.dataclasses import dataclass as validated_dataclass
 from zcu_tools.analysis.fitting import PeakCandidate
 from zcu_tools.analysis.fitting.spectrum import SpectrumFitOptions, fit_spectrum
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
@@ -23,7 +24,6 @@ from zcu_tools.program.v2 import Pulse, Readout, Reset, SweepCfg, TimelineBuilde
 from zcu_tools.utils.process import minus_background, rotate2real
 
 from zcu_lab.v2.support import live_line
-from zcu_lab.v2.twotone.freq.analysis import FreqAnalyzeOptions as FreqAnalyzeOptions
 
 
 @dataclass(frozen=True)
@@ -32,6 +32,55 @@ class FreqResult:
 
     freqs: NDArray[np.float64]
     signals: NDArray[np.complex128]
+
+
+@validated_dataclass(frozen=True)
+class FreqAnalyzeOptions:
+    """Select lor/sinc and a candidate near expected_center_mhz (None: strongest).
+
+    min_prominence is relative to projected signal ptp; min_distance_mhz is the
+    minimum candidate separation. min_snr gates prominence and height above
+    the median in first-difference MAD noise units. min_width_samples gates
+    observable half-prominence width in sample intervals; 0 disables this gate.
+    Raise it only for fine scans. peaks reports height SNR, not prominence SNR.
+    The fitted overlay is always drawn.
+    """
+
+    model_type: Annotated[Literal["lor", "sinc"], FieldMeta(label="Model type")] = "lor"
+    expected_center_mhz: Annotated[
+        float | None,
+        FieldMeta(label="Expected center", unit="MHz"),
+        Field(allow_inf_nan=False),
+    ] = None
+    min_prominence: Annotated[
+        float, FieldMeta(label="Minimum prominence / signal range"), Field(ge=0, le=1)
+    ] = 0.2
+    min_snr: Annotated[
+        float,
+        FieldMeta(label="Minimum height above median / noise sigma"),
+        Field(ge=0, allow_inf_nan=False),
+    ] = 5.0
+    min_width_samples: Annotated[
+        float,
+        FieldMeta(label="Minimum half-prominence width", unit="samples"),
+        Field(ge=0, allow_inf_nan=False),
+    ] = 0.0
+    min_distance_mhz: Annotated[
+        float,
+        FieldMeta(label="Minimum peak separation", unit="MHz"),
+        Field(ge=0, allow_inf_nan=False),
+    ] = 0.0
+
+
+@dataclass(frozen=True)
+class FreqAnalysis:
+    """Fitted MHz center/FWHM/errors and all prominence-sorted peak candidates."""
+
+    freq: float
+    freq_err: float
+    fwhm: float
+    fwhm_err: float
+    peaks: tuple[PeakCandidate, ...] = ()
 
 
 def qubfreq_signal2real(
@@ -119,17 +168,6 @@ class FreqCfg(ConfigBase):
     ]
 
 
-@dataclass(frozen=True)
-class FreqAnalysis:
-    """Fitted MHz center/FWHM/errors and all prominence-sorted peak candidates."""
-
-    freq: float
-    freq_err: float
-    fwhm: float
-    fwhm_err: float
-    peaks: tuple[PeakCandidate, ...] = ()
-
-
 class FreqExp(Experiment[FreqResult, FreqCfg]):
     Options: ClassVar[type[FreqAnalyzeOptions]] = FreqAnalyzeOptions
 
@@ -157,7 +195,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         preview always uses background-subtracted magnitude (``lor``), independent
         of the model selected later for analyze.
         """
-        # Prepare the frequency axis and display the background-subtracted contrast.
+        # 1. Prepare the frequency axis and display the background-subtracted contrast.
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
 
@@ -166,6 +204,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
             cfg.freq, "freq", {"soccfg": soccfg, "gen_ch": cfg.qub_pulse.ch}
         )
 
+        # 2. Display the measured signal during acquisition.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Frequency (MHz)", ylabel="Amplitude")
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
@@ -174,6 +213,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
 
         @context.plots.on_plot_thread
         def update(data):
+            """Refresh the measurement artists from the current acquired data."""
             return viewer.set(freqs, qubfreq_signal2real(data, model_type="lor"))
 
         fig.show()
@@ -182,6 +222,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
             on_update=update,
         )
 
+        # 3. Acquire the configured pulse sequence over the scan.
         with Schedule(signals_buffer, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
@@ -210,6 +251,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
                 ),
             )
 
+        # 4. Return the acquired coordinates and data.
         return FreqResult(
             freqs=freqs,
             signals=signals_buffer.array,
@@ -236,6 +278,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         Invalid projection inputs raise ValueError; fitting/plotting errors and
         optimizer warnings propagate.
         """
+        # 1. Select the saved measurements and analysis controls.
         result = source.result
 
         freqs = result.freqs
@@ -262,6 +305,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         )
         freq, freq_err, fwhm, fwhm_err = fit.freq, fit.freq_err, fit.fwhm, fit.fwhm_err
 
+        # 2. Compare the data and analysis on the same axes.
         fig, ax = plots.subplots(num="fit", figsize=config.figsize)
 
         ax.plot(freqs, real_signals, label="signal", marker="o", markersize=3)
@@ -283,4 +327,5 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
 
         fig.tight_layout()
 
+        # 3. Return the measured analysis summary.
         return FreqAnalysis(freq, freq_err, fwhm, fwhm_err, fit.peaks)
