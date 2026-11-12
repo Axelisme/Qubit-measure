@@ -9,9 +9,9 @@ from numpy.typing import NDArray
 from ._carrier_plan import plan_ramp_families
 from .kernel import Kernel, KernelContext, SegmentTable
 from .kernels._rwa_gate import canonical_keys, gate_segments
+from .kernels._rwa_numeric import retained_edges
 from .kernels._workload_facts import envelope_bounds, fixed_flux
 from .kernels.gate_cache import GateCacheKernel
-from .kernels.multitone_rwa import retained_edges
 from .kernels.period_table import PeriodTableKernel
 from .kernels.single_tone_gate import SingleToneGateKernel
 from .secular import ModelSource

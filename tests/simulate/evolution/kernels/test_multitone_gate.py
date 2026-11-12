@@ -24,7 +24,7 @@ from zcu_tools.simulate.evolution.kernel import (
 )
 from zcu_tools.simulate.evolution.kernels import REGISTRY
 from zcu_tools.simulate.evolution.kernels._rwa_gate import GATE_POLICY, GatePrepared
-from zcu_tools.simulate.evolution.kernels.multitone_rwa import (
+from zcu_tools.simulate.evolution.kernels._rwa_numeric import (
     interaction_hamiltonian,
     rwa_coefficients,
 )

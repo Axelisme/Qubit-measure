@@ -10,8 +10,7 @@ from scipy.linalg import expm
 
 from ..kernel import ApplyContext, KernelContext, Prepared, SegmentTable
 from ._rwa_graph import RWA_GRAPH_POLICY, phase_graph, pruning_admitted
-from ._workload_facts import rwa_topology, secular_bath
-from .multitone_rwa import (
+from ._rwa_numeric import (
     ADAPTIVE_RWA_POLICY,
     RWACoefficients,
     RWARetention,
@@ -20,6 +19,7 @@ from .multitone_rwa import (
     interaction_hamiltonian,
     rwa_coefficients,
 )
+from ._workload_facts import rwa_topology, secular_bath
 
 _MAX_BLOCK_DIMENSION = 64
 _POLICY = (

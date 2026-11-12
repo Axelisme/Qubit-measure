@@ -27,7 +27,7 @@ from .joint_fock import (
     JointFockResult,
     joint_fock_spectrum,
 )
-from .kernels.multitone_rwa import (
+from .kernels._rwa_numeric import (
     RWACoefficients,
     interaction_hamiltonian,
     rwa_coefficients,

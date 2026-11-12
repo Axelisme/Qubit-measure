@@ -17,10 +17,10 @@ from ._dyson_model import (
     freeze,
     generator,
     model_groups,
-    model_keys,
     parameters,
 )
 from ._dyson_paths import build_shared_paths, contractible_modes
+from ._workload_facts import model_keys
 
 
 @njit(nogil=True, cache=True)
