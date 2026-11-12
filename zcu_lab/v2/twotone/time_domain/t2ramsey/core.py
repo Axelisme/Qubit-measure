@@ -57,7 +57,7 @@ class T2RamseyCfg(ConfigBase):
     detune: float = 0.0
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
-    ] = 1
+    ]
     rounds: Annotated[
         int,
         FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
@@ -77,7 +77,7 @@ class T2RamseyCfg(ConfigBase):
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
-    ] = 1.0
+    ]
 
 
 @validated_dataclass(frozen=True)

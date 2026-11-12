@@ -56,6 +56,7 @@ def amplitude_form(ctx: FormContext, cfg_type: type[T_Cfg]) -> Form[T_Cfg]:
         tree={
             "reps": 1000,
             "rounds": 10,
+            "relax_delay": 1.0,
             "roles": roles,
             "reset": None,
             "drive": drive,

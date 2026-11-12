@@ -49,6 +49,7 @@ def make_form(ctx: FormContext) -> Form[MuxOnetoneCfg]:
             "participants": [index for index in participants],
             "reps": 1000,
             "rounds": 10,
+            "relax_delay": 1.0,
             "reset": Hidden(),
             "readout": readout,
             "df": Range(-1.0, 1.0, expts=101),

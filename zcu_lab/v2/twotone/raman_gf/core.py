@@ -102,7 +102,7 @@ class RamanGFCfg(ConfigBase):
         default=1024, ge=6
     )
     relax_delay: Annotated[float, FieldMeta(label="Relax delay", unit="us")] = Field(
-        default=1, ge=0
+        ge=0
     )
     initial_delay: Annotated[float, FieldMeta(label="Initial delay", unit="us")] = (
         Field(default=1, ge=0)

@@ -119,14 +119,14 @@ class ChainCfg(ConfigBase):
             label="Reps",
             description="Fast sweeps per round. Each fast sweep dwells once at every frequency. At least 12 fast sweeps per round give the first live curve enough dwells to estimate the noise.",
         ),
-    ] = Field(default=100, ge=12)
+    ] = Field(ge=12)
     rounds: Annotated[
         int,
         FieldMeta(
             label="Rounds",
             description="Software rounds. The live curve updates after each round.",
         ),
-    ] = 100
+    ] = 1
     relax_delay: Annotated[
         float,
         FieldMeta(
@@ -135,7 +135,7 @@ class ChainCfg(ConfigBase):
             decimals=3,
             description="Wait after each dwell's chain, before the next dwell.",
         ),
-    ] = 1.0
+    ]
 
 
 @dataclass(frozen=True)

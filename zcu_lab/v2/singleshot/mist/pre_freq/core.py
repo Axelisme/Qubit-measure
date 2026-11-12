@@ -56,7 +56,7 @@ class PreFreqCfg(ConfigBase):
     freq: Annotated[SweepCfg, FieldMeta(label="Preparation freq", unit="MHz")]
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
-    ] = 1
+    ]
     rounds: Annotated[
         int,
         FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
@@ -69,7 +69,7 @@ class PreFreqCfg(ConfigBase):
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
-    ] = 1.0
+    ]
 
 
 @pydantic_dataclass(frozen=True, config={"arbitrary_types_allowed": True})

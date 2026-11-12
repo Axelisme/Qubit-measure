@@ -26,6 +26,8 @@ def make_form(ctx: FormContext) -> Form[ChainFreqCfg]:
     return Form(
         ChainFreqCfg,
         tree={
+            "reps": 2000,
+            "rounds": 320,
             "readout": readout,
             "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),
             "freq": Range.around("$resonator.freq", "$resonator.kappa", expts=11),

@@ -93,14 +93,14 @@ class ChainT2RamseyCfg(ConfigBase):
             label="Reps",
             description="Cycles per delay in each round, at least 66: then even one delay gives the first round 65 cycles beyond its mean, enough to estimate the noise of the 65 numbers for the first live curve.",
         ),
-    ] = Field(default=100, ge=66)
+    ] = Field(ge=66)
     rounds: Annotated[
         int,
         FieldMeta(
             label="Rounds",
             description="Software rounds. The live plot updates after each round.",
         ),
-    ] = 100
+    ] = 1
     relax_delay: Annotated[
         float,
         FieldMeta(
@@ -109,7 +109,7 @@ class ChainT2RamseyCfg(ConfigBase):
             decimals=3,
             description="Thermalisation wait K before every cycle; set at least 5 T1 so each cycle starts in thermal equilibrium.",
         ),
-    ] = 1.0
+    ]
 
 
 @dataclass(frozen=True)

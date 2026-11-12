@@ -136,7 +136,7 @@ class GE_Cfg(ConfigBase):
             decimals=3,
             description="Delay after each shot.",
         ),
-    ] = 1.0
+    ]
 
 
 class GE_Exp(Experiment[GE_Result, GE_Cfg]):
