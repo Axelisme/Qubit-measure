@@ -122,14 +122,14 @@ class RPiLengthCfg(ConfigBase):
         FieldMeta(
             label="ADC window",
             unit="us",
-            description="ADC integration-window sweep.",
+            description="ADC window sweep.",
         ),
     ]
     reps: Annotated[
         int,
         FieldMeta(
             label="Reps",
-            description="Fast dwells in each software round.",
+            description="Cycles of 64 R-π pairs in each round.",
         ),
     ] = Field(ge=1)
     rounds: Annotated[

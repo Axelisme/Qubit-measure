@@ -121,7 +121,7 @@ class RPiFreqCfg(ConfigBase):
         int,
         FieldMeta(
             label="Reps",
-            description="Fast dwells in each software round.",
+            description="Cycles of 64 R-π pairs in each round.",
         ),
     ] = Field(ge=1)
     rounds: Annotated[
