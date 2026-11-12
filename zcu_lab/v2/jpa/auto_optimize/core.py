@@ -448,8 +448,8 @@ class AutoOptimizeExp(Experiment[JPAOptimizeResult, JPAOptCfg]):
             cur_flux, cur_freq, cur_gain = sampled_params[idx, :]
             title = (
                 f"Iteration {idx}, Phase {sampled_phases[idx]}\n"
-                f"Flux: {cur_flux:.2g} (a.u.), Freq: {1e-3 * cur_freq:.4g} (GHz)\n"
-                f"Power: {cur_gain:.2g} (dBm)"
+                f"Flux: {cur_flux:#.3g} (a.u.), Freq: {1e-3 * cur_freq:.4g} (GHz)\n"
+                f"Power: {cur_gain:.1f} (dBm)"
             )
             axes[0].set_title(title)
             artists = []
@@ -522,11 +522,11 @@ class AutoOptimizeExp(Experiment[JPAOptimizeResult, JPAOptCfg]):
         ax_iter.legend()
         ax_iter.grid(True)
 
-        def plot_ax(ax: Axes, param_idx: int, label_name: str) -> None:
+        def plot_ax(ax: Axes, param_idx: int, label_name: str, best_label: str) -> None:
             """Draw one sampled JPA parameter against SNR and mark the best measured setting."""
             ax.scatter(params[:, param_idx], snrs, c=colors, s=1)
             best_value = best_params[param_idx]
-            ax.axvline(best_value, color="r", ls="--", label=f"best = {best_value:.2g}")
+            ax.axvline(best_value, color="r", ls="--", label=f"best = {best_label}")
             ax.scatter([best_value], [max_snr], color="r", marker="*")
             ax.set_xlabel(label_name)
             ax.ticklabel_format(axis="x", useOffset=False)
@@ -534,9 +534,9 @@ class AutoOptimizeExp(Experiment[JPAOptimizeResult, JPAOptCfg]):
             ax.legend()
             ax.grid(True)
 
-        plot_ax(ax_flux, 0, "JPA Flux value (a.u.)")
-        plot_ax(ax_freq, 1, "JPA Frequency (MHz)")
-        plot_ax(ax_power, 2, "JPA Power (dBm)")
+        plot_ax(ax_flux, 0, "JPA Flux value (a.u.)", f"{best_params[0]:#.3g} a.u.")
+        plot_ax(ax_freq, 1, "JPA Frequency (MHz)", f"{best_params[1]:.2f} MHz")
+        plot_ax(ax_power, 2, "JPA Power (dBm)", f"{best_params[2]:.1f} dBm")
 
         return JPAOptimizeAnalysis(
             float(best_params[0]), float(best_params[1]), float(best_params[2])

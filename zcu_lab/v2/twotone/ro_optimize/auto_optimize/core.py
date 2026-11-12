@@ -498,24 +498,25 @@ class AutoOptExp(Experiment[AutoOptResult, AutoOptCfg]):
         ax_iter.legend()
         ax_iter.grid(True)
 
-        def plot_ax(ax: Axes, param_idx: int, label_name: str) -> None:
+        def plot_ax(ax: Axes, param_idx: int, label_name: str, best_label: str) -> None:
             """Plot one sampled readout coordinate, best setting and measured SNR on ax.
 
             param_idx selects frequency (0), gain (1) or length (2) from captured params.
-            label_name labels that coordinate and its units; return None after updating ax.
+            label_name labels that coordinate and its units; best_label is its formatted
+            setting with units. Return None after updating ax.
             """
             ax.scatter(params[:, param_idx], snrs, s=1)
             best_value = best_params[param_idx]
-            ax.axvline(best_value, color="r", ls="--", label=f"best = {best_value:.2g}")
+            ax.axvline(best_value, color="r", ls="--", label=f"best = {best_label}")
             ax.scatter([best_value], [max_snr], color="r", marker="*")
             ax.set_xlabel(label_name)
             ax.set_ylabel("SNR")
             ax.legend()
             ax.grid(True)
 
-        plot_ax(ax_freq, 0, "Frequency (MHz)")
-        plot_ax(ax_gain, 1, "Readout Gain (a.u.)")
-        plot_ax(ax_len, 2, "Readout Length (us)")
+        plot_ax(ax_freq, 0, "Frequency (MHz)", f"{best_params[0]:.2f} MHz")
+        plot_ax(ax_gain, 1, "Readout Gain (a.u.)", f"{best_params[1]:.3g} a.u.")
+        plot_ax(ax_len, 2, "Readout Length (us)", f"{best_params[2]:.3g} us")
 
         return AutoOptAnalysis(
             float(best_params[0]), float(best_params[1]), float(best_params[2])

@@ -206,7 +206,7 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
             best_jpa_power,
             color="r",
             ls="--",
-            label=f"best JPA power = {best_jpa_power:.2g} dBm",
+            label=f"best JPA power = {best_jpa_power:.1f} dBm",
         )
         ax.set_xlabel("Power (dBm)")
         ax.set_ylabel("Signal Difference (a.u.)")
