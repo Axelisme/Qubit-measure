@@ -93,6 +93,7 @@ class AccPhaseExp(Experiment[AccPhaseResult, AccPhaseCfg]):
         time. Return wait times in us, projection phases in degrees and mean
         complex IQ shaped (wait, phase); analyze derives phase and detuning.
         """
+        # 1. Prepare the hardware-rounded phase and wait grids.
         # Quantize wait and projection-phase axes on the configured hardware.
         cfg = config
         soc, soccfg = context.soc, context.soccfg
@@ -107,6 +108,7 @@ class AccPhaseExp(Experiment[AccPhaseResult, AccPhaseCfg]):
             phase_sweep, "phase", {"soccfg": soccfg, "gen_ch": pi2_pulse.ch}
         )
 
+        # 2. Show the acquired wait-by-phase response.
         # Keep one mean IQ value for each wait/projection-phase pair.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Time (us)", ylabel="Phase (deg)")
@@ -126,6 +128,7 @@ class AccPhaseExp(Experiment[AccPhaseResult, AccPhaseCfg]):
             on_update=update,
         )
 
+        # 3. Acquire the joined flux and Ramsey sequence at each grid point.
         with Schedule(signals_buffer, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
@@ -145,6 +148,7 @@ class AccPhaseExp(Experiment[AccPhaseResult, AccPhaseCfg]):
             prog = builder.build()
             sched.run_acquire(prog, soc, rounds=cfg.rounds)
 
+        # 4. Preserve the measured IQ and actual scan coordinates.
         return AccPhaseResult(lengths, phases, signals_buffer.array)
 
     def analyze(
@@ -160,6 +164,7 @@ class AccPhaseExp(Experiment[AccPhaseResult, AccPhaseCfg]):
         Times refer to the first π/2 center; detuning is -dphase/dt/(2π).
         Require source.cfg for pulse timing, otherwise raise ValueError.
         """
+        # 1. Resolve saved pulse timing for the measured phase map.
         del options  # This analysis has no configurable options.
         result = source.result
 
@@ -177,6 +182,7 @@ class AccPhaseExp(Experiment[AccPhaseResult, AccPhaseCfg]):
 
         real_signals = acc_phase_signal2real(signals2D)
 
+        # 2. Recover phase and detuning from each projection-phase trace.
         thetas = np.deg2rad(phases)
         X = np.column_stack([np.ones_like(thetas), np.cos(thetas), np.sin(thetas)])
         X_inv = np.linalg.pinv(X)
@@ -197,6 +203,7 @@ class AccPhaseExp(Experiment[AccPhaseResult, AccPhaseCfg]):
             mean_topdetune
         )
 
+        # 3. Compare the measured response with the ideal flux timing.
         fig, _ = plots.subplots(
             num="fit", nrows=2, ncols=1, figsize=(8, 4), sharex=True
         )
@@ -226,6 +233,7 @@ class AccPhaseExp(Experiment[AccPhaseResult, AccPhaseCfg]):
 
         fig.tight_layout()
 
+        # 4. Return phase and detuning on the pulse-center time axis.
         return AccPhaseAnalysis(
             lengths_us=lengths, phases_rad=init_phases, detunes_mhz=detunes
         )

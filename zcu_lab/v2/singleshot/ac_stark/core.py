@@ -145,6 +145,7 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
         Subsequent analysis extracts the Stark shift.
         """
 
+        # 1. Prepare the classified probe grid and intensity-spaced gains.
         # Prepare the probe grid and a gain grid spaced in drive intensity.
         soc, soccfg = context.soc, context.soccfg
         cfg = deepcopy(cfg)
@@ -171,6 +172,7 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
             allow_array=True,
         )
 
+        # 2. Show the state-population map and current frequency trace.
         # Show measured G/E/Other fractions alongside the current trace.
         def configure_axes(ax: Axes) -> None:
             ax.set_ylim(0.0, 1.0)
@@ -218,6 +220,7 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
             dtype=np.float64,
             on_update=plot_fn,
         )
+        # 3. Acquire overlapping cavity and qubit probes across the gain grid.
         with Schedule(buffer, scope=context.scope) as sched:
             for gain_idx, (gain, step) in enumerate(
                 sched.scan("resonator gain", gains.tolist())
@@ -246,6 +249,7 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
                     rounds=cfg.rounds,
                 )
 
+        # 4. Preserve measured counts and their gain/frequency coordinates.
         # Preserve unnormalized G/E/Other counts in the Result.
         counts = buffer.array
         return AcStarkResult(gains=gains, freqs=freqs, counts=counts)
@@ -265,6 +269,7 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
         correction and an exclusive gain cutoff. Publish the fit to plots.
         Legacy G/E data raise ValueError before correction or fitting.
         """
+        # 1. Normalize the saved three-state counts and apply analysis controls.
         result = source.result
         chi, kappa = options.chi, options.kappa
         confusion_matrix, cutoff = options.confusion_matrix, options.cutoff
@@ -285,6 +290,7 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
 
         populations = correct_populations(populations, confusion_matrix)
 
+        # 2. Fit the resonance shift and convert gain squared to photon number.
         # merge two populations into one
         populations = (
             np.abs(minus_background(populations[..., 0]))
@@ -307,6 +313,7 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
         eta = kappa**2 / (kappa**2 + chi**2)
         ac_coeff = abs(b) / (2 * eta * chi)
 
+        # 3. Display the resonance fit with photon-number and readout-gain axes.
         # plot the data and the fitted polynomial
         avg_n = ac_coeff * gains2
 
@@ -351,6 +358,7 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
 
         fig.tight_layout()
 
+        # 4. Return the photon-number calibration for later analysis.
         return AcStarkAnalysis(ac_stark_coeff=float(ac_coeff))
 
     def plot(
