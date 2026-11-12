@@ -73,7 +73,7 @@ ALLXY_GATE2_IDX = [GATE_LIST.index(g2) for _, g2 in ALLXY_SEQUENCE]
 
 @validated_dataclass(frozen=True)
 class AllXYAnalyzeOptions:
-    fit_ge: Annotated[bool, FieldMeta(label="Fit g/e levels")] = False
+    """ALLXY analysis has no options; g/e levels are always fitted."""
 
 
 # ------------------------------------------------------------------------------
@@ -268,11 +268,12 @@ class AllXY_Exp(Experiment[AllXY_Result, AllXYCfg]):
     ) -> AllXYAnalysis:
         """Fit AllXY contrast to the low-order rotation/detuning error model.
 
-        ``fit_ge`` also fits the IQ center and contrast; otherwise use their
-        measured estimates. Return relative amplitude error, dimensionless
-        detuning and Bloch-z deviations/residuals as defined in AllXYAnalysis,
-        not gate infidelities. Publish ``fit``; source cfg may be None.
+        Always fit the IQ center and contrast along with the coherent errors.
+        Return relative amplitude error, dimensionless detuning and Bloch-z
+        deviations/residuals as defined in AllXYAnalysis, not gate infidelities.
+        Publish ``fit``; source cfg may be None.
         """
+        del options
         result = source.result
         signals = result.signals
 
@@ -282,7 +283,7 @@ class AllXY_Exp(Experiment[AllXY_Result, AllXYCfg]):
 
         # 2. Estimate coherent rotation errors from the 21 pair responses.
 
-        fit = fit_allxy_errors(sequence, real_signals, fit_ge=options.fit_ge)
+        fit = fit_allxy_errors(sequence, real_signals)
 
         # 3. Compare the measured staircase with the fitted low-order model.
 

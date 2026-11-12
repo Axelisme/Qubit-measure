@@ -2,7 +2,7 @@
 
 **Readers:** operator, agent. AllXY: runs the 21 standard pairs of I, X90, Y90, X180 and Y180 gates before readout. A calibrated qubit gives a staircase of ground, equator and excited levels; amplitude and detuning errors bend it in distinct patterns. Y gates are the X pulses with phase +90 deg. Runs on real hardware. Run after amplitude Rabi and Ramsey have calibrated the pi and pi/2 pulses and the frequency.
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-11-13
 
 ## Parameter sources
 
@@ -20,4 +20,4 @@ Analysis reports results for review; calibration stays unchanged. The summary re
 
 ## Recommended
 
-Leave 'Fit g/e levels' off to take the ground and excited levels from the data range; turn it on when the measured levels are noisy or cover only part of the g/e range. Use many reps and rounds: each point is a single gate pair.
+Analysis always fits the ground and excited levels together with the rotation and detuning errors. The measured range sets their starting values, but the fitted levels can lie outside it. Center is bounded to [min - ptp, max + ptp], where ptp is the measured signal range. Contrast keeps its initial sign and its magnitude is bounded to [0.5 * ptp, 3 * ptp]. The model does not include T1/T2 decay; check the residual before using its error estimates. Use many reps and rounds: each point is a single gate pair.
