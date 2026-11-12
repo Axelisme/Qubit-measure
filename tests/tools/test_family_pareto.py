@@ -94,6 +94,37 @@ def test_three_modes_time_five_samples_and_exclude_setup_warmup_clear(
         assert all(sample.density_error == expected_error for sample in mode.samples)
 
 
+@pytest.mark.parametrize("seconds, sample_count", [(60.0, 5), (61.0, 1)])
+def test_slow_modes_keep_only_the_first_sample(
+    seconds: float, sample_count: int
+) -> None:
+    density = np.eye(2, dtype=np.complex128)[None] / 2
+    wall_ticks = count()
+    visits: list[int] = []
+
+    @contextmanager
+    def session() -> Generator[EngineSession]:
+        visits.append(0)
+
+        def evolve() -> EvolutionResult:
+            visits[-1] += 1
+            return EvolutionResult(
+                np.array([0]), density, PathDiagnostics(segments_by_kernel={"t4": 1})
+            )
+
+        yield EngineSession(evolve, lambda: None)
+
+    modes = measure_family(
+        session,
+        None,
+        wall_clock=lambda: float(next(wall_ticks)) * seconds,
+        cpu_clock=lambda: 0.0,
+    )
+    assert [len(mode.samples) for mode in modes] == [sample_count] * 3
+    assert [mode.wall_median for mode in modes] == [seconds] * 3
+    assert visits == [1] * sample_count + [2 + sample_count] * 2
+
+
 def test_dominance_keeps_ten_percent_boundary_modes_clocks_and_exact_errors_separate() -> (
     None
 ):
@@ -359,6 +390,105 @@ def test_policy_does_not_allow_an_unpinned_fallback_to_masquerade_as_success() -
         measure_policy(item, "t4", ReferenceResult(density, 0), opener=wrong_session)
 
 
+def companion_input() -> Input:
+    """A driven point and idle tail with disjoint candidate domains."""
+    return Input(
+        "drive_with_tail",
+        lambda: accuracy_case("linear_plateau"),
+        "synthetic domain proof",
+        domain_spans={"plateau": 1, "idle": 1},
+        family_domains={"single_tone_rwa": ("plateau",), "t4": ("idle",)},
+        companions={"t4": ("idle",)},
+    )
+
+
+def test_companion_counts_must_match_declared_domain_spans() -> None:
+    density = np.eye(2, dtype=np.complex128)[None] / 2
+    item = companion_input()
+    counts = {"single_tone_rwa": 1, "t4": 1}
+
+    @contextmanager
+    def session(item: Input, family: str) -> Generator[EngineSession]:
+        yield EngineSession(
+            lambda: EvolutionResult(
+                np.array([0]), density, PathDiagnostics(segments_by_kernel=counts)
+            ),
+            lambda: None,
+            lambda families: (
+                "no valid kernel for segment 0; domain plateau: points [0], segments [0]"
+            ),
+        )
+
+    result = measure_policy(
+        item, "single_tone_rwa", ReferenceResult(density, 0), opener=session
+    )
+    assert result.modes[0].samples[0].paths == {"single_tone_rwa": 1, "t4": 1}
+    counts = {"single_tone_rwa": 0, "t4": 2}
+    with pytest.raises(RuntimeError, match="domain span counts"):
+        measure_policy(
+            item, "single_tone_rwa", ReferenceResult(density, 0), opener=session
+        )
+
+
+def test_companion_domains_cannot_overlap_target_candidate_domains() -> None:
+    item = replace(
+        companion_input(),
+        family_domains={"single_tone_rwa": ("plateau", "idle"), "t4": ("idle",)},
+    )
+    density = np.eye(2, dtype=np.complex128)[None] / 2
+
+    @contextmanager
+    def session(item: Input, family: str) -> Generator[EngineSession]:
+        yield EngineSession(
+            lambda: EvolutionResult(
+                np.array([0]),
+                density,
+                PathDiagnostics(segments_by_kernel={"single_tone_rwa": 2, "t4": 1}),
+            ),
+            lambda: None,
+        )
+
+    with pytest.raises(ValueError, match="overlapping domains"):
+        measure_policy(
+            item, "single_tone_rwa", ReferenceResult(density, 0), opener=session
+        )
+
+
+@pytest.mark.parametrize("accepted_subset", [None, ("t4",), ("single_tone_rwa",)])
+def test_companion_proof_requires_both_full_input_subset_refusals(
+    accepted_subset: tuple[str, ...] | None,
+) -> None:
+    item = companion_input()
+    density = np.eye(2, dtype=np.complex128)[None] / 2
+    refusal = "no valid kernel for segment 0; domain plateau: points [0], segments [0]"
+
+    @contextmanager
+    def session(item: Input, family: str) -> Generator[EngineSession]:
+        yield EngineSession(
+            lambda: EvolutionResult(
+                np.array([0]),
+                density,
+                PathDiagnostics(segments_by_kernel={"single_tone_rwa": 1, "t4": 1}),
+            ),
+            lambda: None,
+            lambda families: None if families == accepted_subset else refusal,
+        )
+
+    if accepted_subset is not None:
+        with pytest.raises(RuntimeError, match="subset unexpectedly accepted"):
+            measure_policy(
+                item, "single_tone_rwa", ReferenceResult(density, 0), opener=session
+            )
+    else:
+        result = measure_policy(
+            item, "single_tone_rwa", ReferenceResult(density, 0), opener=session
+        )
+        assert result.subset_refusals == {
+            "target_only": refusal,
+            "companions_only": refusal,
+        }
+
+
 def test_late_warmup_failure_stops_measurement_without_partial_success() -> None:
     density = np.eye(2, dtype=np.complex128)[None] / 2
     calls = 0
@@ -423,6 +553,49 @@ def test_table_shares_oracle_for_identical_physics_with_different_model_identiti
     )
     assert len(rows) == 2
     assert calls == 1
+
+
+def test_table_times_the_defaults_exact_family_union_separately() -> None:
+    groups: list[tuple[str, ...]] = []
+    paths = {"single_tone_rwa": 1, "t4": 1}
+
+    def solve(source: ModelSource, batch: TimelineBatch) -> ReferenceResult:
+        return ReferenceResult(
+            np.tile(source.initial_density, (len(batch.points), 1, 1)), 0
+        )
+
+    def policy(item: Input, family: str, reference: ReferenceResult) -> FamilyResult:
+        return FamilyResult(
+            family,
+            0,
+            None,
+            [
+                ModeResult(mode, [Sample(1, 1, 0, paths)], 1, 1)
+                for mode in (
+                    "first_evolve",
+                    "warm_clear_history",
+                    "warm_retain_history",
+                )
+            ],
+        )
+
+    def fixed(
+        item: Input, families: tuple[str, ...], reference: ReferenceResult
+    ) -> FamilyResult:
+        groups.append(families)
+        return policy(item, "fixed_default_group", reference)
+
+    (row,) = run_table(
+        [replace(companion_input(), category="real")],
+        ("single_tone_rwa",),
+        reference_solver=solve,
+        policy_runner=policy,
+        group_runner=fixed,
+    )
+    assert groups == [("single_tone_rwa", "t4")]
+    assert row.fixed_default_group is not None
+    assert row.fixed_default_group.family == "fixed_default_group"
+    assert set(row.dominators) == {"single_tone_rwa"}
 
 
 def test_cleanup_error_is_never_an_availability_refusal_even_with_matching_message() -> (

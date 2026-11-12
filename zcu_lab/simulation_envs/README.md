@@ -1,6 +1,6 @@
 # Simulation environments
 
-**Last updated:** 2026-11-12，envelope 與 DDS 振幅刻度
+**Last updated:** 2026-11-12，envelope 刻度與離線 carrier 工作負載
 
 **讀者：** lab-author、agent。查找 GUI／Notebook 模擬環境、參數與 compile profile 的入口。
 
@@ -75,6 +75,51 @@ with profile_path.open() as stream:
 
 這只產生 compile config，不建立 SoC、不提供 IQ，也不操作硬體。
 欄位、時脈推導與失敗契約見 [program README](../../lib/zcu_tools/program/README.md#yaml-compile-profiles)。
+
+## 離線 carrier 工作負載
+
+`workloads.carrier_workload()` 用 `twotone/freq` 的真實 `FreqExp.run` 建立
+24 點、21 能階的 carrier 掃描。它呼叫公開 `run_stage` 與模擬 backend，
+從 private replay 的公開 `read_replay` 取得 request 與 snapshot，再以
+`model_facts` 和 `plan_template` 取得 Engine 輸入。Manifest 記
+`program_source: experiment_run`，沒有鏡映實驗的 emit 序列。
+
+Builder 用 Git HEAD 的 `single_fluxonium/default.yaml` 與
+`profiles/qick_216_v2.yaml`，不讀使用者工作副本。Carrier 中心是模型的 E1-E0。
+掃描範圍是中心 ±100 MHz，沿用 5 MHz 起始 linewidth guess 的 20 倍範圍。
+Const pulse 長 1 us、gain 0.1，沿用實驗表單未校準的起始值。
+Readout 使用 tracked cavity 頻率與 flight time，gain 0.1、pulse/window 各 1 us。
+Reps 與 rounds 各 1，drift 與 pacing 關閉，seed 沿用範本。
+Manifest 保存全部 cfg、校準來源、blob hashes、compiled carriers 和 domain span 數。
+這些輸入不是實機校準。
+
+以下命令只量這個真實工作負載，不額外重跑合成 inventory。
+完整量表可能超過三小時，請先估時並安排 exclusive queue。
+
+```bash
+repo="$(git rev-parse --show-toplevel)"
+results="$repo/.agent_state/carrier-pareto"
+mkdir -p "$results"
+uv run --directory "$repo" --no-sync -- \
+  python tools/run_heavy.py --log "$results/freeze.log" 1800 -- \
+  python -m tools.family_pareto \
+  --provider zcu_lab.simulation_envs.workloads:carrier_workload \
+  --freeze-inputs "$results/inputs.json" > "$results/freeze-receipt.json"
+uv run --directory "$repo" --no-sync -- \
+  python tools/run_heavy.py --exclusive --log "$results/run.log" 21600 -- \
+  python -m tools.family_pareto \
+  --provider zcu_lab.simulation_envs.workloads:carrier_workload \
+  --manifest "$results/inputs.json" --reference-cache "$results/reference-cache" \
+  --output "$results/matrix.json" --summary "$results/summary.md" \
+  > "$results/receipt.json"
+```
+
+`carrier_workload(evidence_dir=Path(...))` 另保留建構用 replay 與 live PNG，
+供離線驗收判讀。沒有指定時，它讀完暫存 replay 後移除暫存目錄。
+Caller 使用完回傳的 numeric source 後呼叫 `close()`。
+工具只計時 Engine.evolve，不把建構用 acquire 算進 family 耗時。
+通用注入、伴隨 family 證法與 cache 參數見
+[量表工具](../../tools/README.md#injected-workloads-and-reference-cache)。
 
 ## Envelope gain 刻度
 

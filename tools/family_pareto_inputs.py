@@ -9,7 +9,7 @@ import hashlib
 import json
 from collections.abc import Callable
 from contextlib import closing
-from dataclasses import asdict, dataclass, replace
+from dataclasses import asdict, dataclass, field, replace
 from functools import partial
 
 import numpy as np
@@ -51,11 +51,25 @@ CASE_NAMES = (
 
 @dataclass(frozen=True)
 class Input:
-    """Stable name, fresh deterministic builder and why this complete input exists."""
+    """Stable input with a fresh owned source on every build.
+
+    reason explains representation. domain_spans declares counts from input
+    physics using evolution's public domains. family_domains declares each
+    family's candidate domains; companions maps fixed companion names to their
+    domains. Empty maps retain the original single-family synthetic protocol.
+    metadata and manifest preserve caller-owned provenance; category separates
+    real workloads from the synthetic inventory in reports.
+    """
 
     name: str
     build: Callable[[], AccuracyCase]
     reason: str
+    domain_spans: dict[str, int] = field(default_factory=dict)
+    family_domains: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    companions: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    metadata: dict[str, object] = field(default_factory=dict)
+    manifest: dict[str, object] = field(default_factory=dict)
+    category: str = "synthetic"
 
 
 def representative(name: str) -> AccuracyCase:
@@ -258,6 +272,18 @@ def freeze_manifest(inputs: list[Input]) -> dict[str, object]:
                         physical_input(case, include_identity=False)
                     ),
                     "physical": physical,
+                    **(
+                        {
+                            "category": item.category,
+                            "metadata": item.metadata,
+                            "manifest": item.manifest,
+                            "domain_spans": item.domain_spans,
+                            "family_domains": item.family_domains,
+                            "companions": item.companions,
+                        }
+                        if item.category == "real"
+                        else {}
+                    ),
                 }
             )
     return {"version": 1, "inputs": records}

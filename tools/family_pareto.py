@@ -10,11 +10,13 @@ import subprocess
 import sys
 from collections.abc import Callable, Generator
 from contextlib import AbstractContextManager, closing, contextmanager
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
+from importlib import import_module
 from importlib.metadata import version
 from pathlib import Path
 from statistics import median
 from time import perf_counter, process_time
+from typing import Protocol, runtime_checkable
 
 from zcu_tools.simulate.evolution import (
     Engine,
@@ -24,6 +26,10 @@ from zcu_tools.simulate.evolution import (
 )
 
 from tests.simulate.evolution.contract.accuracy import ALL_FAMILIES
+from tests.simulate.evolution.contract.accuracy_cases import AccuracyCase
+from tests.simulate.evolution.contract.interaction_reference import (
+    interaction_reference,
+)
 from tests.simulate.evolution.contract.reference import (
     ReferenceResult,
     converged_reference,
@@ -37,6 +43,82 @@ from tools.family_pareto_inputs import (
     make_inputs,
     physical_input,
 )
+from tools.family_pareto_reference import solve_reference
+
+
+@runtime_checkable
+class Workload(Protocol):
+    """Provider-owned detached numeric input consumed without lab knowledge.
+
+    name is stable. source supplies immutable physics and initial density; batch
+    holds all points and their complete timelines. metadata describes why the
+    input represents a workload; manifest contains reproducible provenance.
+    domain_spans declares span counts from input physics. family_domains maps
+    each family to its public candidate domains. companions declares the fixed
+    family/domain companions, which cannot overlap the target's domains.
+    Providers return a fresh record with an owned source. Tools detach its models
+    and use new sources/histories for every measurement session.
+    """
+
+    name: str
+    source: ModelSource
+    batch: TimelineBatch
+    metadata: dict[str, object]
+    manifest: dict[str, object]
+    domain_spans: dict[str, int]
+    family_domains: dict[str, tuple[str, ...]]
+    companions: dict[str, tuple[str, ...]]
+
+
+def load_provider(path: str) -> Input:
+    """Load a zero-argument module:attribute provider as a real-workload input.
+
+    Import/factory failures propagate. The provider must return Workload or
+    TypeError is raised. Its owned source is closed after detaching immutable
+    models at every scheduled level plus DC. No acquire or lab details enter
+    the generic measurement sessions.
+    """
+    module, attribute = path.split(":", 1)
+    factory = getattr(import_module(module), attribute)
+    workload = factory()
+    if not isinstance(workload, Workload):
+        raise TypeError(f"{path} does not provide the Workload protocol")
+    with closing(workload.source):
+        levels = {tuple(int(v) for v in level) for level in workload.batch.flux.level}
+        levels.add(tuple(0 for _ in workload.batch.flux.level[0]))
+        models = {level: workload.source.model(level) for level in levels}
+        initial = workload.source.initial_density
+        subdivisions = workload.source.slow_envelope_segments_per_period
+        expansion = (
+            workload.source.flux_expansion()
+            if workload.batch.flux_waveform is not None
+            else None
+        )
+
+    def build() -> AccuracyCase:
+        return AccuracyCase(
+            workload.name,
+            ModelSource(
+                initial,
+                models.__getitem__,
+                expansion,
+                slow_envelope_segments_per_period=subdivisions,
+            ),
+            workload.batch,
+            tuple(workload.family_domains),
+        )
+
+    return Input(
+        workload.name,
+        build,
+        str(workload.metadata["reason"]),
+        domain_spans=workload.domain_spans,
+        family_domains=workload.family_domains,
+        companions=workload.companions,
+        metadata=workload.metadata,
+        manifest=workload.manifest,
+        category="real",
+    )
 
 
 @dataclass
@@ -50,6 +132,12 @@ class EngineSession:
 
     evolve: Callable[[], EvolutionResult]
     clear_history: Callable[[], None]
+    subset_refusal: Callable[[tuple[str, ...]], str | None] | None = None
+    """Optional full-input probe: public domain refusal text, or None on success.
+
+    Other failures must propagate. It creates its own fresh session, untimed.
+    Required only for policies with a distinct companion family.
+    """
 
 
 SessionOpener = Callable[[], AbstractContextManager[EngineSession]]
@@ -76,7 +164,8 @@ class ModeResult:
     """One history mode's raw samples and separate timing medians.
 
     mode is first_evolve, warm_clear_history or warm_retain_history.
-    samples contains five evolves in measurement order. wall_median and
+    samples contains five evolves, or one when its first evolve exceeds 60 wall
+    seconds, in measurement order. wall_median and
     cpu_median are the respective elapsed-second medians of those samples.
     """
 
@@ -93,7 +182,10 @@ def measure_family(
     wall_clock: Callable[[], float] = perf_counter,
     cpu_clock: Callable[[], float] = process_time,
 ) -> list[ModeResult]:
-    """Measure five fresh or warmed evolves per mode; failures propagate.
+    """Measure up to five fresh or warmed evolves per mode; failures propagate.
+
+    If the first timed evolve exceeds 60 wall seconds, keep only that sample
+    for that mode. Exactly 60 seconds retains all five. Warmups are untimed.
 
     Setup, cleanup, two identical warmups, clear and result inspection are
     untimed. open_session supplies a fresh source/history/Engine on every entry.
@@ -127,6 +219,10 @@ def measure_family(
                             dict(result.paths.segments_by_kernel),
                         )
                     )
+                    if samples[0].wall_seconds > 60:
+                        break
+            if samples[0].wall_seconds > 60:
+                break
         modes.append(
             ModeResult(
                 mode,
@@ -154,6 +250,19 @@ class FamilyResult:
     error: float | None
     unavailable: str | None
     modes: list[ModeResult]
+    domains: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    """Pinned family -> disjoint owned domains, empty for synthetic/default."""
+    expected_segments: dict[str, int] = field(default_factory=dict)
+    """Family counts inferred from declared domains, not per-span observations."""
+    subset_refusals: dict[str, str] = field(default_factory=dict)
+    """Full-batch target-only and companions-only domain-refusal evidence."""
+    attribution: str = "target"
+    """target, default, fixed_family_group or target_plus_driving_companion.
+
+    Group times must never be attributed to the target alone.
+    """
+    whitelist: tuple[str, ...] | None = None
+    """Actual families restriction; None denotes unrestricted default routing."""
 
 
 def _mode_error(mode: ModeResult) -> float:
@@ -227,23 +336,75 @@ def dominance(rows: list[FamilyResult]) -> dict[str, dict[str, list[str]]]:
 def engine_session(item: Input, family: str) -> Generator[EngineSession]:
     """Own a fresh source/history and single-worker Engine for one family policy.
 
-    'default' uses normal routing. Other names pin families=(family,), preserving
-    numerical admission. Construction, cleanup and clear are outside timers.
+    'default' uses normal routing. Other names pin the target plus declared
+    companions, preserving numerical admission. Construction, cleanup and clear are outside timers.
+    """
+    families = (
+        None
+        if family == "default"
+        else tuple(dict.fromkeys((family, *item.companions)))
+    )
+    with whitelist_session(item, families) as session:
+        yield session
+
+
+@contextmanager
+def whitelist_session(
+    item: Input, families: tuple[str, ...] | None
+) -> Generator[EngineSession]:
+    """Own a fresh source/history and Engine with exactly the supplied whitelist.
+
+    None retains default routing. Unknown families and all numeric, evolve or
+    cleanup failures propagate. Setup and cleanup remain outside timing.
     """
     case = item.build()
-    with (
-        closing(case.source),
-        closing(
-            Engine(1, families=None if family == "default" else (family,))
-        ) as engine,
-    ):
+    with closing(case.source), closing(Engine(1, families=families)) as engine:
         yield EngineSession(
             lambda: engine.evolve(case.source, (case.batch,), budget=1e-3),
             case.source.history.clear,
+            lambda subset: probe_subset_refusal(item, subset),
         )
 
 
+def probe_subset_refusal(item: Input, families: tuple[str, ...]) -> str | None:
+    """Probe the complete input with one whitelist, outside every sample timer.
+
+    Return only a public missing-kernel refusal, or None when evolution succeeds.
+    Other runtime, numerical and cleanup failures propagate to the caller.
+    """
+    case = item.build()
+    with closing(case.source), closing(Engine(1, families=families)) as engine:
+        try:
+            engine.evolve(case.source, (case.batch,), budget=1e-3)
+        except RuntimeError as error:
+            if re.fullmatch(UNAVAILABLE_PATTERN, str(error)) is None:
+                raise
+            return str(error)
+    return None
+
+
 PolicyOpener = Callable[[Input, str], AbstractContextManager[EngineSession]]
+
+
+def _subset_refusals(
+    session: EngineSession, family: str, companions: tuple[str, ...]
+) -> dict[str, str]:
+    if family == "default" or not companions:
+        return {}
+    if session.subset_refusal is None:
+        raise ValueError("companion proof requires a full-input subset probe")
+    refusals = {}
+    for label, subset in (
+        ("target_only", (family,)),
+        ("companions_only", companions),
+    ):
+        refusal = session.subset_refusal(subset)
+        if refusal is None:
+            raise RuntimeError(f"{label} subset unexpectedly accepted full input")
+        if re.fullmatch(UNAVAILABLE_PATTERN, refusal) is None:
+            raise RuntimeError(refusal)
+        refusals[label] = refusal
+    return refusals
 
 
 def measure_policy(
@@ -259,17 +420,40 @@ def measure_policy(
 
     Only the public missing-kernel/domain refusal may become unavailable.
     Other setup/evolve/cleanup failures propagate. Every measured pinned path
-    must execute only that family and at least one segment. Oracle is supplied
-    once per physical input by the caller; exact families still have measured
-    density errors. No unavailable row carries synthetic zero errors or times.
+    must execute the target, plus declared companions when present. Domains
+    must be disjoint; counts must match input-declared domain spans. Both
+    target-only and companions-only full-input probes must refuse publicly.
+    This infers allocation from the public domain contract, not per-span
+    observations. Oracle is supplied once per physical input by the caller;
+    exact families still have measured density errors. Unavailable rows carry
+    no synthetic zero errors or times.
     """
+    domains = (
+        {**item.companions, family: item.family_domains[family]}
+        if family != "default" and item.domain_spans
+        else {}
+    )
+    seen: set[str] = set()
+    for owned in domains.values():
+        if seen.intersection(owned):
+            raise ValueError(f"pinned {family} has overlapping domains: {domains}")
+        seen.update(owned)
+    whitelist = (
+        None
+        if family == "default"
+        else tuple(dict.fromkeys((family, *item.companions)))
+    )
     with opener(item, family) as session:
         try:
             probe = session.evolve()
         except RuntimeError as error:
             if re.fullmatch(UNAVAILABLE_PATTERN, str(error)) is None:
                 raise
-            return FamilyResult(family, None, str(error), [])
+            return FamilyResult(
+                family, None, str(error), [], domains=domains, whitelist=whitelist
+            )
+        companions = tuple(name for name in item.companions if name != family)
+        refusals = _subset_refusals(session, family, companions)
     modes = measure_family(
         lambda: opener(item, family),
         reference,
@@ -279,13 +463,39 @@ def measure_policy(
     paths = [dict(probe.paths.segments_by_kernel)] + [
         s.paths for m in modes for s in m.samples
     ]
-    if family != "default" and any(set(p) != {family} or p[family] <= 0 for p in paths):
-        raise RuntimeError(f"pinned {family} did not execute exclusively: {paths}")
+    expected = {}
+    if family != "default":
+        if item.domain_spans:
+            expected = {
+                name: sum(item.domain_spans.get(domain, 0) for domain in owned)
+                for name, owned in domains.items()
+            }
+            expected = {name: count for name, count in expected.items() if count}
+            if expected.get(family, 0) <= 0 or any(path != expected for path in paths):
+                raise RuntimeError(
+                    f"pinned {family} domain span counts differ: expected {expected}, got {paths}"
+                )
+        elif any(set(p) != {family} or p[family] <= 0 for p in paths):
+            raise RuntimeError(f"pinned {family} did not execute exclusively: {paths}")
     error = max(
         density_error(probe.densities, reference.density),
         max(_mode_error(m) for m in modes),
     )
-    return FamilyResult(family, error, None, modes)
+    driving = {"slow", "plateau", "shaped", "two", "multiple", "flux"}
+    attribution = (
+        "default"
+        if family == "default"
+        else "target_plus_driving_companion"
+        if any(
+            driving.intersection(owned)
+            for name, owned in domains.items()
+            if name != family
+        )
+        else "target"
+    )
+    return FamilyResult(
+        family, error, None, modes, domains, expected, refusals, attribution, whitelist
+    )
 
 
 # Only this verified public refusal is recoverable. Numerical failures propagate.
@@ -315,6 +525,14 @@ class InputResult:
     policies: list[FamilyResult]
     dominators: dict[str, dict[str, list[str]]]
     timing_equivalents: dict[str, dict[str, list[str]]]
+    category: str = "synthetic"
+    """real or synthetic; deletion conclusions use only real workloads."""
+    oracle_wall_seconds: float = 0.0
+    """Elapsed solve/cache-load wall seconds, zero for an in-memory reference hit."""
+    oracle_cpu_seconds: float = 0.0
+    """Process CPU seconds spent in that solve/cache load, excluding setup."""
+    fixed_default_group: FamilyResult | None = None
+    """Separately timed whitelist of the default route's observed family union."""
 
 
 def timing_equivalents(rows: list[FamilyResult]) -> dict[str, dict[str, list[str]]]:
@@ -355,22 +573,49 @@ def timing_equivalents(rows: list[FamilyResult]) -> dict[str, dict[str, list[str
     return equivalents
 
 
+def measure_fixed_group(
+    item: Input, families: tuple[str, ...], reference: ReferenceResult
+) -> FamilyResult:
+    """Time the default route's observed family union as one fixed whitelist.
+
+    The complete input, budget and three history modes match measure_policy.
+    This is a group latency, never attributed to any one member or included
+    among pinned-family dominance competitors. Failures propagate.
+    """
+    modes = measure_family(lambda: whitelist_session(item, families), reference)
+    return FamilyResult(
+        "fixed_default_group",
+        max(_mode_error(mode) for mode in modes),
+        None,
+        modes,
+        attribution="fixed_family_group",
+        whitelist=families,
+    )
+
+
 def run_table(
     inputs: list[Input],
     families: tuple[str, ...] = ALL_FAMILIES,
     *,
-    reference_solver: Callable[
-        [ModelSource, TimelineBatch], ReferenceResult
-    ] = converged_reference,
+    reference_solver: Callable[[ModelSource, TimelineBatch], ReferenceResult]
+    | None = None,
+    reference_cache: Path | None = None,
     policy_runner: Callable[
         [Input, str, ReferenceResult], FamilyResult
     ] = measure_policy,
+    group_runner: Callable[[Input, tuple[str, ...], ReferenceResult], FamilyResult]
+    | None = None,
 ) -> list[InputResult]:
     """Measure every family and default for each input, sharing identical oracles.
 
     Inputs stay in caller order. Independent two-level full-Lindblad references
     are cached by complete physical content, not family or input alias. All
     failures except the precisely matched probe refusal stop the whole table.
+    Real inputs use the exact interaction-picture solver; synthetic inputs keep
+    the lab-frame solver. reference_cache optionally persists complete references;
+    an injected reference_solver owns its own caching and tolerance contract.
+    Real default paths are also timed with their observed family union pinned,
+    separately from dominance. group_runner overrides only that group measurement.
     """
     references: dict[str, ReferenceResult] = {}
     rows = []
@@ -379,12 +624,43 @@ def run_table(
         with closing(case.source):
             key = digest(physical_input(case))
             oracle_key = digest(physical_input(case, include_identity=False))
+            oracle_wall = oracle_cpu = 0.0
             if oracle_key not in references:
-                references[oracle_key] = reference_solver(case.source, case.batch)
+                wall, cpu = perf_counter(), process_time()
+                references[oracle_key] = (
+                    reference_solver(case.source, case.batch)
+                    if reference_solver is not None
+                    else solve_reference(
+                        case,
+                        solver=interaction_reference
+                        if item.category == "real"
+                        else converged_reference,
+                        cache_dir=reference_cache,
+                    )
+                )
+                oracle_wall, oracle_cpu = perf_counter() - wall, process_time() - cpu
         reference = references[oracle_key]
         policies = [
             policy_runner(item, family, reference) for family in (*families, "default")
         ]
+        default = policies[-1]
+        observed = tuple(
+            sorted(
+                {
+                    name
+                    for mode in default.modes
+                    for sample in mode.samples
+                    for name in sample.paths
+                }
+            )
+        )
+        fixed_group = (
+            (measure_fixed_group if group_runner is None else group_runner)(
+                item, observed, reference
+            )
+            if item.category == "real" and observed
+            else None
+        )
         rows.append(
             InputResult(
                 item.name,
@@ -394,6 +670,10 @@ def run_table(
                 policies,
                 dominance(policies),
                 timing_equivalents(policies),
+                item.category,
+                oracle_wall,
+                oracle_cpu,
+                fixed_group,
             )
         )
         print(
@@ -415,7 +695,7 @@ def render_summary(
     lines = [
         "# Engine family Pareto table",
         "",
-        "Timers cover Engine.evolve only, not program.acquire. Each mode has five wall/CPU samples.",
+        "Timers cover Engine.evolve only, not program.acquire. Each mode has up to five samples; a first timed evolve >60 wall seconds retains one.",
         "Errors compare complete complex density to the two-level converged full-Lindblad oracle.",
         "A dominator has mode-local maximum sample error <= target error and time < 0.9 * target time. Exactly 10% is equivalent.",
         "Displayed density error and PASS/FAIL use the overall maximum across probe and all modes, not the mode-local comparator error.",
@@ -425,10 +705,17 @@ def render_summary(
         "## Family conclusions",
         "",
     ]
+    conclusion_rows = [row for row in rows if row.category == "real"]
+    if not conclusion_rows:
+        conclusion_rows = rows
+        lines += [
+            "No real workloads measured. Synthetic results cannot justify deletion.",
+            "",
+        ]
     for family in families:
         available = [
             (r, p)
-            for r in rows
+            for r in conclusion_rows
             for p in r.policies
             if p.family == family and p.error is not None
         ]
@@ -441,7 +728,7 @@ def render_summary(
         lines += [
             f"### {family}",
             "",
-            f"Available on {len(available)} inputs; unavailable on {len(rows) - len(available)}.",
+            f"Available on {len(available)} inputs; unavailable on {len(conclusion_rows) - len(available)}.",
         ]
         if not available:
             lines.append("NOT EXERCISED. No dominance conclusion is possible.")
@@ -466,19 +753,29 @@ def render_summary(
         "Raw samples, per-sample paths and full inputs are in the sibling JSON.",
         "",
     ]
-    for row in rows:
+    category = None
+    for row in sorted(rows, key=lambda row: row.category):
+        if row.category != category:
+            category = row.category
+            lines += [f"## {category.capitalize()} inputs", ""]
         lines += [
             f"### {row.name}",
             "",
-            f"Oracle convergence error: {row.oracle_convergence_error:.12g}.",
+            f"Oracle convergence error: {row.oracle_convergence_error:.12g}; solve/cache-load wall {row.oracle_wall_seconds:.9g}s, CPU {row.oracle_cpu_seconds:.9g}s.",
             "",
-            "| Family | Density error | Status | Mode/metric | Median seconds | Dominators | Time-equivalent peers |",
-            "| --- | ---: | --- | --- | ---: | --- | --- |",
+            *[
+                f"- {policy.family} ({policy.attribution}): domains {policy.domains}; expected segments {policy.expected_segments}; full-input subset refusals {policy.subset_refusals}."
+                for policy in row.policies
+                if policy.domains
+            ],
+            "",
+            "| Family | Density error | Status | Mode/metric | Median seconds | Samples | Actual path | Dominators | Time-equivalent peers |",
+            "| --- | ---: | --- | --- | ---: | ---: | --- | --- | --- |",
         ]
         for policy in row.policies:
             if policy.error is None:
                 lines.append(
-                    f"| {policy.family} | — | unavailable: {policy.unavailable} | — | — | — | — |"
+                    f"| {policy.family} | — | unavailable: {policy.unavailable} | — | — | — | — | — | — |"
                 )
                 continue
             for mode in policy.modes:
@@ -491,10 +788,39 @@ def render_summary(
                     peers = row.timing_equivalents.get(policy.family, {}).get(cell, [])
                     lines.append(
                         f"| {policy.family} | {policy.error:.12g} | {'PASS' if policy.error <= 2e-3 else 'FAIL'} | "
-                        f"{cell} | {value:.9g} | {', '.join(competitors) or 'none'} | {', '.join(peers) or 'none'} |"
+                        f"{cell} | {value:.9g} | {len(mode.samples)} | {mode.samples[0].paths} | {', '.join(competitors) or 'none'} | {', '.join(peers) or 'none'} |"
                     )
         lines.append("")
+        lines += _render_fixed_group(row)
     return "\n".join(lines) + "\n"
+
+
+def _render_fixed_group(row: InputResult) -> list[str]:
+    fixed = row.fixed_default_group
+    if fixed is None:
+        return []
+    default = next(policy for policy in row.policies if policy.family == "default")
+    defaults = {mode.mode: mode for mode in default.modes}
+    lines = [
+        f"Default vs fixed same family group {fixed.whitelist} (group latency, no single-family attribution):",
+        "",
+        "| Mode/metric | Default seconds | Fixed seconds | Fixed samples | Fixed path | Default/fixed | >2x difference |",
+        "| --- | ---: | ---: | ---: | --- | ---: | --- |",
+    ]
+    for mode in fixed.modes:
+        original = defaults[mode.mode]
+        for metric, default_time, fixed_time in (
+            ("wall", original.wall_median, mode.wall_median),
+            ("cpu", original.cpu_median, mode.cpu_median),
+        ):
+            ratio = default_time / fixed_time if fixed_time > 0 else None
+            ratio_text = "undefined" if ratio is None else f"{ratio:.6g}"
+            finding = ratio is not None and (ratio > 2 or ratio < 0.5)
+            lines.append(
+                f"| {mode.mode}/{metric} | {default_time:.9g} | {fixed_time:.9g} | "
+                f"{len(mode.samples)} | {mode.samples[0].paths} | {ratio_text} | {finding} |"
+            )
+    return [*lines, ""]
 
 
 def tested_state() -> dict[str, str | bool]:
@@ -522,13 +848,21 @@ def main(argv: list[str] | None = None, *, inputs: list[Input] | None = None) ->
     only physical input construction for small in-process seam tests.
     """
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--provider", action="append", default=[])
+    parser.add_argument("--reference-cache", type=Path)
+    parser.add_argument("--include-synthetic", action="store_true")
     parser.add_argument("--freeze-inputs", type=Path)
     parser.add_argument("--manifest", type=Path)
     parser.add_argument("--output", type=Path)
     parser.add_argument("--summary", type=Path)
     args = parser.parse_args(argv)
     try:
-        items = make_inputs() if inputs is None else inputs
+        items = (
+            (make_inputs() if inputs is None else inputs)
+            if not args.provider or args.include_synthetic
+            else []
+        )
+        items = [*items, *(load_provider(path) for path in args.provider)]
         manifest = freeze_manifest(items)
         if args.freeze_inputs is not None:
             args.freeze_inputs.write_text(
@@ -544,7 +878,7 @@ def main(argv: list[str] | None = None, *, inputs: list[Input] | None = None) ->
                 "frozen manifest differs from current inputs; do not tune inputs after measurement"
             )
         state = tested_state()
-        rows = run_table(items)
+        rows = run_table(items, reference_cache=args.reference_cache)
         result = {
             "schema_version": 1,
             "manifest": manifest,
@@ -576,7 +910,17 @@ def main(argv: list[str] | None = None, *, inputs: list[Input] | None = None) ->
                 "entry": "Engine.evolve",
                 "budget": 1e-3,
                 "workers": 1,
-                "samples_per_mode": 5,
+                "maximum_samples_per_mode": 5,
+                "slow_first_evolve_wall_seconds": 60,
+                "reference_cache": str(args.reference_cache)
+                if args.reference_cache
+                else None,
+                "reference_total_wall_seconds": sum(
+                    row.oracle_wall_seconds for row in rows
+                ),
+                "reference_total_cpu_seconds": sum(
+                    row.oracle_cpu_seconds for row in rows
+                ),
                 "warmups_per_warm_mode": 2,
                 "oracle_coarse": [2e-10, 2e-12],
                 "oracle_fine": [2e-12, 2e-14],

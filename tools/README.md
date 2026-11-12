@@ -197,7 +197,12 @@ full inventory rather than extrapolating from two points. The manifest records
 all arrays, models, initial density, optional flux expansion, expected families,
 point order and the reason for each input.
 
-Each pinned family and the separately listed default policy has three modes:
+Each pinned family and the separately listed default policy has three modes.
+Each mode keeps five samples, except when its first timed evolve exceeds 60 wall
+seconds. That mode then keeps one sample. The JSON retains every sample; the
+summary states the actual count.
+
+The modes are:
 
 - `first_evolve` creates a fresh source/history/Engine for each of five samples.
 - `warm_clear_history` creates another session, runs two untimed warmups, then
@@ -218,7 +223,7 @@ most `2e-6`. Every solver's error is measured, including exact families. Values
 above `2e-3` remain FAIL. Existing strict xfails are not removed.
 
 A competitor dominates only when its maximum full-density error across that
-mode's five raw samples is no larger and its median time is
+mode's retained raw samples is no larger and its median time is
 **less than `0.9 * target_time`**. Probe and other-mode errors do not enter this
 comparison. The family-level maximum across probe and all modes remains the
 overall accuracy/PASS-FAIL value. Exactly 10% is time-equivalent.
@@ -249,6 +254,44 @@ the family-exclusion estimator reuses it with an explicit `reference=None` to
 measure only time and paths (`Sample.density_error=None`), without an oracle.
 Pareto policies always supply a real reference. Tests use controlled clocks and small
 collaborators; the complete matrix runs outside pytest through the exclusive runner.
+
+### Injected workloads and reference cache
+
+`--provider module:attribute` calls a zero-argument provider and consumes its
+`Workload` record. Repeat the option for several providers. `Workload` in
+`tools.family_pareto` documents the required numeric fields and provenance.
+Providers supply a source, a complete batch, per-domain span counts, each
+family's public candidate domains and fixed companion family/domain declarations.
+The tool detaches immutable models and creates fresh source/history objects for
+measurement. It does not know experiment names, cfg fields or lab layout.
+Provider imports and construction failures stop the command.
+
+With providers, the default selection contains only those real workloads.
+`--include-synthetic` also includes the unchanged original inventory. With no
+provider, the original inventory remains the default. Reports separate real and
+synthetic inputs. Deletion conclusions use real inputs only. Real workloads use
+the converged exact interaction-picture oracle; synthetic inputs keep the
+lab-frame oracle.
+
+Companion routing has no per-span observation. It relies on evolution's public
+[domain contract](../lib/zcu_tools/simulate/evolution/README.md#kernel-summary).
+Target and companion domains must be disjoint. Each observed family count must
+equal its declared domain-span total. Full-input target-only and companions-only
+whitelists must both produce the public domain refusal, outside sample timing.
+Other errors stop measurement. Reports retain these refusals, actual counts and
+whitelists. A driving companion labels the latency
+`target_plus_driving_companion`; this is not the target's isolated latency.
+The default route is also timed with its observed family union fixed. This group
+stays outside family dominance. A greater-than-twofold difference is a finding,
+not a routing change.
+
+`--reference-cache <directory>` enables a local disk cache. It is off by default.
+Keys include complete physical input, both solver tolerance levels and the
+convergence contract. Model identity namespaces and routing history are not
+physical inputs. Cache files contain density and convergence error, with no
+pickle objects. Cache I/O or solver failures stop the command. Keep this
+directory outside Git. Reference solve/cache-load wall and CPU totals are
+separate from the Engine timings.
 
 ## Markdown reader declarations
 
