@@ -8,6 +8,25 @@
 
 Caller 畫完圖後可用 `summarize_rabi_joint_fit(result)` 產生 `RabiJointFitSummary`。摘要保留擬合值、pre-pulse populations、confusion matrix 與分類校準。`RabiBackendSummary` 保留 parameter_names、values、std、valid 與 nll；std 為完整 covariance 對角線的平方根。摘要複製固定大小陣列，不保留逐點 populations、projection 或完整 covariance，也不重跑 fitter。完整數值結果仍可供局部畫圖與 covariance 計算使用。
 
+## Paired randomized benchmarking
+
+`irb.analyze_irb` 接受 depths 與 `(round,seed,2,depth)` IQ，保留完整成對 round，
+先平均每個 seed 的 rounds，再以相同權重平均 seeds。它回傳 `IRBFitResult` 的共同投影、
+兩條 decay 曲線與 d=2 ratio／95% seed-bootstrap 摘要。固定 bootstrap seed 可重現抽樣，
+負 error 與超出 [0,1] 的 fidelity／CI 原樣保留。主入口至少需要四個不同 depth、兩個
+成對 seed 與 100 次 bootstrap；少於 90% 成功 draws 時 raise `AnalysisFailed`。
+`irb.project_arm_means` 另回傳 `IRBProjection`，讓即時圖在資料未完整時使用同一個
+IQ 軸與 reference 下降方向，不呼叫主 fitter 或 bootstrap。
+
+`rb.seed_statistics` 接受 `(depth,seed,2,round)` survival／totals，回傳
+`RBSeedStatistics` 的 seed means／variances 與 equal-seed means／errors。
+它只使用兩 arm 全 depth 完整的 rounds，保留 binomial variance floor，且至少需要兩個
+完整 seeds。`rb.fit_joint_decay` 接受 depths 與 `(2,2,depth)` means／errors，回傳
+`RBJointDecayFit` 的 global `SharedFitResult` 與曲線。第一軸是兩組資料，各 arm 共用 decay，
+各 group 保留自己的 amplitude／offset；covariance 依 reduced chi-square scaling。
+Lab 解讀 herald 與 d=4，不將這些政策交給 fitter。六組數值工具的 owner 邊界見
+[ADR-0085](../../../../docs/adr/0085-numerical-fitting-owners.md)。
+
 ## Peak candidates
 
 `detect_peaks(detune, signal, *, min_prominence=0.2, min_distance=0.0, min_snr=5.0, min_width_samples=3.0)`
