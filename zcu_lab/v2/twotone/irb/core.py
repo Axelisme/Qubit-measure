@@ -88,7 +88,12 @@ class IRBCfg(ConfigBase):
 def _live_plot(
     plots: Plots, depths: NDArray[np.int64]
 ) -> Callable[[NDArray[np.complex128]], None]:
-    """Show paired arm means and return the owner-dispatched IQ update."""
+    """Show paired arm means and return the owner-dispatched IQ update.
+
+    Pass run plots and Clifford depths. The returned callback projects IQ with
+    shape (round, seed, arm, depth), updates both live lines and returns their
+    changed artists. Inputs are unchanged; the measurement figure is shown.
+    """
     fig, ax = plots.subplots(num="measurement")
     ax.set(xlabel="Random Clifford depth", ylabel="Signal (a.u.)")
     ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
@@ -100,6 +105,7 @@ def _live_plot(
 
     @plots.on_plot_thread
     def update(data: NDArray[np.complex128]):
+        """Update both arm means from raw IQ and return the changed artists."""
         return viewer.set(depths.astype(float), project_arm_means(data).mean_signals)
 
     fig.show()

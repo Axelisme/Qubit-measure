@@ -130,7 +130,14 @@ def _summarize_t2(
     t2s: NDArray[np.float64],
     t2errs: NDArray[np.float64],
 ) -> CPMGAnalysis:
-    """Fit log T2 against log n using absolute relative T2 uncertainties."""
+    """Return the weighted log-log T2 summary without changing inputs or plots.
+
+    Pass aligned pulse counts, fitted T2 values and their absolute errors in us.
+    Only finite positive rows contribute. Fewer than three usable rows return
+    None coefficients and their row count; otherwise return the power-law
+    coefficients and errors from the unscaled covariance. NumPy fitting errors
+    propagate.
+    """
     usable = (
         np.isfinite(ns)
         & (ns > 0)
@@ -257,7 +264,12 @@ CPMG_GROUPED_AXES_SPEC = GroupedAxesSpec(
 def _prepare_delays(
     cfg: CPMG_Cfg, times: NDArray[np.int64], soccfg: QickConfig
 ) -> tuple[list[SweepCfg], NDArray[np.float64]]:
-    """Round each count's total-time grid and reject intervals too short for pulses."""
+    """Round total-time grids and raise ValueError for too-short pulse intervals.
+
+    Pass the run cfg, pi-pulse counts and board timing configuration. Return the
+    per-count SweepCfg windows and a (count, time) array of rounded lengths in
+    us. Windows retain cfg references; no input is changed and no plot is made.
+    """
     pi2_pulse, pi_pulse = cfg.pi2_pulse, cfg.pi_pulse
     windows = [cfg.delay] * len(times) if isinstance(cfg.delay, SweepCfg) else cfg.delay
     lengths = np.array(
@@ -287,7 +299,12 @@ def _prepare_delays(
 def _live_plot(
     plots: Plots, times: NDArray[np.int64]
 ) -> Callable[[tuple[NDArray[np.float64], NDArray[np.float64], float]], None]:
-    """Show the normalized count/time map and its two most recent scan rows."""
+    """Show the count/time map and return its plot-thread update callback.
+
+    Pass the run plots and pi-pulse counts. The callback consumes a time axis in
+    us, normalized (count, time) contrast and the current SNR as a flat payload.
+    It updates the heatmap, two recent rows and SNR title; inputs are unchanged.
+    """
     fig, _ = plots.subplots(1, 2, num="measurement")
     heat_ax, line_ax = fig.axes
     heat_ax.set(xlabel="Number of Pi", ylabel="Time idxs")
@@ -307,6 +324,7 @@ def _live_plot(
 
     @plots.on_plot_thread
     def update(data: tuple[NDArray[np.float64], NDArray[np.float64], float]):
+        """Refresh the map, recent rows and SNR title; return changed artists."""
         ys, real, snr = data
         valid = np.flatnonzero(~np.all(np.isnan(real), axis=1))
         current = int(valid[-1]) if valid.size else -1
@@ -483,8 +501,19 @@ class CPMG_Exp(Experiment[CPMG_Result, CPMG_Cfg]):
         real_signals2D = rotate2real(signals2D).real
         norm_signals = cpmg_signal2real(signals2D)
 
-        def is_good_fit(lens, fit_signal, real_signal, t2r, t2err) -> bool:
-            """Accept CPMG decay only when time, uncertainty and residual meet its limits."""
+        def is_good_fit(
+            *,
+            lens: NDArray[np.float64],
+            fit_signal: NDArray[np.float64],
+            real_signal: NDArray[np.float64],
+            t2r: float,
+            t2err: float,
+        ) -> bool | np.bool_:
+            """Return whether decay time, uncertainty and residual meet fit limits.
+
+            Pass zero-origin times in us, fitted/measured real IQ and the fitted
+            decay time/error in us. Return a bool without mutation or plotting.
+            """
             fit_ptp = np.ptp(fit_signal)
             residual = real_signal - fit_signal
             smooth_residual = gaussian_filter1d(residual, sigma=1)
@@ -512,7 +541,13 @@ class CPMG_Exp(Experiment[CPMG_Result, CPMG_Cfg]):
             t2err = fit.decay_time_err
             fit_signal = fit.curve
 
-            if is_good_fit(plens, fit_signal, real_signal, t2, t2err):
+            if is_good_fit(
+                lens=plens,
+                fit_signal=fit_signal,
+                real_signal=real_signal,
+                t2r=t2,
+                t2err=t2err,
+            ):
                 t2s[i] = t2
                 t2errs[i] = t2err
 

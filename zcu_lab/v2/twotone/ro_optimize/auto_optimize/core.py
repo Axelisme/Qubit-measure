@@ -287,8 +287,10 @@ def _live_search_plot(
 ) -> Callable[[tuple[NDArray[np.float64], NDArray[np.float64], int]], None]:
     """Show the search's four SNR panels and return a snapshot-based update.
 
-    Pass scores, sampled parameter rows (MHz, gain, us), and the current index.
-    Each update changes all four lines and the iteration title in one refresh.
+    Pass run plots and zero-based iteration coordinates. The returned callback
+    takes a flat payload of scores, sampled parameter rows (MHz, gain, us), and
+    the current index. Each update changes all four lines and the iteration
+    title in one refresh and returns changed artists. Inputs remain unchanged.
     """
     figure, initial_ax = plots.subplots(num="measurement", figsize=(8, 5))
     initial_ax.remove()
@@ -317,6 +319,7 @@ def _live_search_plot(
     def update(
         payload: tuple[NDArray[np.float64], NDArray[np.float64], int],
     ) -> list[Artist]:
+        """Refresh SNR panels from the score/parameter snapshot and return artists."""
         data, sampled_params, idx = payload
         snrs = np.abs(data)
         cur_freq, cur_gain, cur_len = sampled_params[idx, :]
