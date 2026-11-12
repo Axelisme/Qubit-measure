@@ -87,8 +87,6 @@ def predict_state_with_error(
 def fit_allxy_errors(
     sequence: Sequence[tuple[str, str]],
     real_signals: NDArray[np.float64],
-    *,
-    fit_ge: bool,
 ) -> AllXYFitResult:
     """Fit the Reed ALLXY model to real signals, without IQ rotation or I/O.
 
@@ -98,25 +96,24 @@ def fit_allxy_errors(
     the same order, in any consistent signal unit with nonzero contrast.
     Inputs are not mutated. Center starts at the measured extrema midpoint;
     signed contrast starts at their difference, positive if (I, I) is high.
-    ``fit_ge=False`` fixes these estimates and fits only angle error ep
-    (radians) and dimensionless detuning ed. ``True`` also fits center and
-    contrast. Both errors start at zero and are bounded to [-0.2, 0.2].
-    Free center is bounded by the measured extrema and contrast by +/- the
-    initial absolute contrast. Nonzero coherent errors can reduce measured
-    peak-to-peak contrast below the true contrast. Both branches can therefore
-    return biased error estimates even for noiseless data; fitting g/e does
-    not remove the measured-contrast bound. The result owns the curve and
-    separated Bloch-z error summaries; see AllXYFitResult for every field/unit.
+    Center, contrast, angle error ep (radians) and dimensionless detuning ed
+    are always fitted. With ptp = max(real_signals) - min(real_signals), center
+    is bounded to [min - ptp, max + ptp]. Contrast keeps its initial sign and
+    its absolute value is bounded to [0.5 * ptp, 3 * ptp], allowing g/e levels
+    beyond the measured extrema. Both errors start at zero and are bounded to
+    [-0.2, 0.2]. The model includes coherent errors only, not T1/T2 decay.
+    The result owns the curve and separated Bloch-z error summaries;
+    see AllXYFitResult for every field/unit.
     Missing reference/unsupported pairs, non-finite signals or infeasible
     bounds raise ValueError. Malformed arrays propagate NumPy/SciPy errors.
     Optimizer nonconvergence raises RuntimeError; SciPy warnings propagate.
-    Degenerate zero contrast does not
-    yield a calibrated result (free-level bounds fail; fixed-level residual
-    normalization can produce NaN). No fallback or clipping is applied.
+    Zero measured contrast raises ValueError because the bounds coincide.
+    No fallback or clipping is applied.
     """
     g_signal = real_signals[sequence.index(("I", "I"))]
     init_center = 0.5 * (np.max(real_signals) + np.min(real_signals))
-    init_contrast = np.ptp(real_signals)
+    signal_span = np.ptp(real_signals)
+    init_contrast = signal_span
     if g_signal < init_center:
         init_contrast = -init_contrast
 
@@ -125,31 +122,18 @@ def fit_allxy_errors(
     ) -> float:
         return center + 0.5 * contrast * predict_state_with_error(seq, ep, ed)
 
-    if fit_ge:
-        params, *_ = curve_fit(
-            lambda _, *args: [calc_sim_signal(seq, *args) for seq in sequence],
-            np.arange(len(sequence)),
-            real_signals,
-            p0=(init_center, init_contrast, 0.0, 0.0),
-            bounds=(
-                (np.min(real_signals), -np.abs(init_contrast), -0.2, -0.2),
-                (np.max(real_signals), np.abs(init_contrast), 0.2, 0.2),
-            ),
-        )
-        center, contrast, ep, ed = params
-    else:
-        center = init_center
-        contrast = init_contrast
-        params, *_ = curve_fit(
-            lambda _, *args: [
-                calc_sim_signal(seq, center, contrast, *args) for seq in sequence
-            ],
-            np.arange(len(sequence)),
-            real_signals,
-            p0=(0.0, 0.0),
-            bounds=((-0.2, -0.2), (0.2, 0.2)),
-        )
-        ep, ed = params
+    contrast_lower, contrast_upper = sorted((0.5 * init_contrast, 3 * init_contrast))
+    params, *_ = curve_fit(
+        lambda _, *args: [calc_sim_signal(seq, *args) for seq in sequence],
+        np.arange(len(sequence)),
+        real_signals,
+        p0=(init_center, init_contrast, 0.0, 0.0),
+        bounds=(
+            (np.min(real_signals) - signal_span, contrast_lower, -0.2, -0.2),
+            (np.max(real_signals) + signal_span, contrast_upper, 0.2, 0.2),
+        ),
+    )
+    center, contrast, ep, ed = params
 
     predict_signals = [
         calc_sim_signal(seq, center, contrast, ep, ed) for seq in sequence

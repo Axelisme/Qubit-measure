@@ -1,6 +1,6 @@
 # zcu_tools.analysis.fitting
 
-**Last updated:** 2026-11-12，Phase regressions、ALLXY coherent errors 與 paired RB
+**Last updated:** 2026-11-13，ALLXY free g/e levels
 
 **讀者：** lab-author。擬合模型、數值輸入、結果與失敗契約速查。
 
@@ -52,18 +52,19 @@ Lab 解讀 herald 與 d=4，不將這些政策交給 fitter。六組數值工具
 `allxy.predict_state_with_error(gates, power_err, detune_err)` predicts scalar
 Bloch-z for a supported ordered gate pair from the Reed low-order table.
 `power_err` is the pi/2 angle error in radians, not fractional power.
-`allxy.fit_allxy_errors(sequence, real_signals, *, fit_ge)` fits caller-provided
+`allxy.fit_allxy_errors(sequence, real_signals)` fits caller-provided
 real signals and returns `AllXYFitResult`. It owns the signal-domain curve,
 center/contrast, amplitude/detuning parameters and separated Bloch-z deviations.
 The result centralizes nonlinear fitting and error decomposition; callers do not
 rebuild the model to plot or summarize a fit. Sequence selection, IQ rotation,
 figures and persisted summaries stay with the experiment.
 
-`fit_ge=False` fixes center and signed contrast to measured extrema estimates.
-`True` also fits those levels within the original measured-range bounds.
-Nonzero coherent errors can shrink measured contrast, so both branches can be
-biased even for noiseless signals. The fitter preserves this bound rather than
-claiming unbiased parameter recovery. Numerical failures propagate without a
+Center, signed contrast and both coherent errors are always fitted. Measured
+extrema set the initial levels, not the fitted g/e levels. With ptp equal to the
+measured signal range, center lies in [min - ptp, max + ptp]. Contrast keeps its
+initial sign and its magnitude lies in [0.5 * ptp, 3 * ptp]. Both coherent errors
+lie in [-0.2, 0.2]; the model does not include T1/T2 decay. Zero measured contrast
+fails because the bounds coincide. Numerical failures propagate without a
 fallback. Supported pairs, array axes, units and failure details are documented
 on the two functions and result type in [allxy.py](allxy.py).
 
