@@ -274,13 +274,15 @@ full measured matrix with dominators and time-equivalent peers. An all-dominated
 conclusion applies only to measured available cells, not to unmeasured physics.
 It does not authorize deleting families or accepting accuracy failures.
 
-Only a full match of the public refusal pattern below becomes `unavailable`:
-
-```text
-no valid kernel for segment \d+; domain [a-z_]+: points \[\d+(?:, \d+)*\], segments \[\d+(?:, \d+)*\]
-```
-
-The matrix preserves the complete refusal string and leaves error/timing absent.
+Only `NoValidKernel` from the first timed evolve becomes `unavailable`.
+The matrix preserves its complete message and leaves error/timing absent.
+The JSON `refusal` records the first failing group's domain, caller points,
+segment rows and final-round `attempted` families. For each whitelisted family,
+`family_reasons` is `guard_or_precondition` if it appears in `attempted`, or
+`not_candidate` if it does not. This includes named companions. The Markdown
+cell shows the same classification. No later segment group is classified.
+Candidate offer order is not necessarily first-attempt order. Unrestricted
+default routing preserves the group facts without per-family classification.
 Other RuntimeErrors, wrong pinned paths, numerical failures and output failures
 stop the command. Measurement failures leave earlier outputs untouched. Output
 write failures return nonzero and may leave a partial destination file.

@@ -13,6 +13,7 @@ from zcu_tools.simulate.evolution import (
     EvolutionResult,
     FamilyRouting,
     ModelSource,
+    NoValidKernel,
     PathDiagnostics,
     RoutingHistory,
     TimelineBatch,
@@ -454,7 +455,26 @@ def test_cli_freezes_then_measures_and_preserves_output_on_manifest_or_write_fai
         str(summary),
     ]
     assert main(argv, inputs=inputs) == 0
-    assert '"unavailable"' in output.read_text()
+    saved = json.loads(output.read_text())
+    refused = next(
+        policy
+        for policy in saved["inputs"][0]["policies"]
+        if policy["family"] == "dop853"
+    )
+    assert refused["refusal"] == {
+        "domain": "idle",
+        "points": [0, 1],
+        "segments": [0, 1],
+        "attempted": [],
+        "family_reasons": {"dop853": "not_candidate"},
+    }
+    refused_row = next(
+        line
+        for line in summary.read_text().splitlines()
+        if line.startswith("| dop853 |")
+    )
+    assert refused["unavailable"] in refused_row
+    assert "not_candidate" in refused_row
     assert "t4" in summary.read_text()
     complete = output.read_text()
     manifest.write_text("{}")
@@ -568,8 +588,56 @@ def test_cli_rejects_family_selection_outside_measurement(
     assert output.read_text() == "previous output"
 
 
+@pytest.mark.parametrize("attempted", [(), ("single_tone_gate",)])
+def test_policy_classifies_only_the_reported_failing_group(
+    attempted: tuple[str, ...],
+) -> None:
+    message = (
+        "no valid kernel for segment 3; domain shaped: points [2, 7], segments [3, 5]"
+    )
+    refusal = NoValidKernel(
+        message, domain="shaped", points=(2, 7), segments=(3, 5), attempted=attempted
+    )
+    item = Input(
+        "gates",
+        lambda: accuracy_case("shaped_complex"),
+        "structured refusal",
+        companions=("t4",),
+    )
+
+    @contextmanager
+    def refused_session(item: Input, family: str) -> Generator[EngineSession]:
+        def evolve() -> EvolutionResult:
+            raise refusal
+
+        yield EngineSession(evolve, lambda: None)
+
+    result = measure_policy(
+        item,
+        "single_tone_gate",
+        ReferenceResult(np.eye(2, dtype=np.complex128)[None] / 2, 0),
+        opener=refused_session,
+    )
+    assert result.unavailable == message
+    assert result.error is None and result.modes == []
+    detail = result.refusal
+    assert detail is not None
+    assert detail.domain == "shaped"
+    assert detail.points == (2, 7) and detail.segments == (3, 5)
+    assert detail.attempted == attempted
+    assert detail.family_reasons == {
+        "single_tone_gate": "guard_or_precondition" if attempted else "not_candidate",
+        "t4": "not_candidate",
+    }
+
+
 @pytest.mark.parametrize(
-    "message", ["numerical integration failed", "no valid kernel: malformed refusal"]
+    "message",
+    [
+        "numerical integration failed",
+        "no valid kernel: malformed refusal",
+        "no valid kernel for segment 0; domain shaped: points [0], segments [0]",
+    ],
 )
 def test_policy_does_not_disguise_other_runtime_errors_as_unavailable(
     message: str,

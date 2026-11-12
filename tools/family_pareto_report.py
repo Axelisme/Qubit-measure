@@ -88,7 +88,8 @@ def _policy_lines(row: InputResult) -> list[str]:
     for policy in row.policies:
         if policy.error is None:
             lines.append(
-                f"| {policy.family} | — | unavailable: {policy.unavailable} | — | — | — | — | — | — |"
+                f"| {policy.family} | — | unavailable: {policy.unavailable}; "
+                f"first-group classification: {policy.refusal.family_reasons if policy.refusal else {}} | — | — | — | — | — | — |"
             )
             continue
         for mode in policy.modes:
@@ -191,7 +192,7 @@ def render_summary(
     lines += [
         "## Complete measured matrix",
         "",
-        "Unavailable cells retain their exact refusal; they have no error or timing value.",
+        "Unavailable cells retain their exact refusal and first-group whitelist classification; they have no error or timing value. not_candidate means absent from the reported candidates; guard_or_precondition means offered but rejected. Later groups are not classified.",
         "Each measured cell lists its dominators. An empty list means not dominated.",
         "Raw samples, per-sample paths and full inputs are in the sibling JSON.",
         "",

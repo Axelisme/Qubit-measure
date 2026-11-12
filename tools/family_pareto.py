@@ -5,7 +5,6 @@ import json
 import logging
 import os
 import platform
-import re
 import subprocess
 import sys
 from collections.abc import Callable, Generator
@@ -16,6 +15,7 @@ from math import isclose
 from pathlib import Path
 from statistics import median
 from time import perf_counter, process_time
+from typing import Literal
 from uuid import uuid4
 
 from zcu_tools.simulate.evolution import (
@@ -23,6 +23,7 @@ from zcu_tools.simulate.evolution import (
     EvolutionResult,
     FamilyRouting,
     ModelSource,
+    NoValidKernel,
     TimelineBatch,
 )
 
@@ -50,11 +51,6 @@ from tools.family_pareto_reference import (
 )
 from tools.family_pareto_report import render_summary as render_summary
 from tools.family_pareto_scenarios import make_real_inputs
-
-UNAVAILABLE_PATTERN = (
-    r"no valid kernel for segment \d+; domain [a-z_]+: points \[\d+(?:, \d+)*\], "
-    r"segments \[\d+(?:, \d+)*\]"
-)
 
 
 @dataclass
@@ -200,6 +196,25 @@ def measure_family(
 
 
 @dataclass(frozen=True)
+class Refusal:
+    """Public facts about only the first failing group, not later segments.
+
+    domain names the structural domain. points and segments preserve affected
+    caller IDs and row IDs. attempted preserves final-round candidate offer
+    order; it is not necessarily first-attempt order.
+    family_reasons classifies each whitelisted family: not_candidate means it
+    is absent from attempted; guard_or_precondition means it is present.
+    Unrestricted default routing has no per-family classification.
+    """
+
+    domain: str
+    points: tuple[int, ...]
+    segments: tuple[int, ...]
+    attempted: tuple[str, ...]
+    family_reasons: dict[str, Literal["not_candidate", "guard_or_precondition"]]
+
+
+@dataclass(frozen=True)
 class FamilyResult:
     """Pinned family or default policy; unavailable has reason and no samples.
 
@@ -225,6 +240,8 @@ class FamilyResult:
     """
     whitelist: tuple[str, ...] | None = None
     """Actual families restriction; None denotes unrestricted default routing."""
+    refusal: Refusal | None = None
+    """Structured first-group refusal facts, or None for an available policy."""
 
 
 def _mode_time(mode: ModeResult, metric: str) -> float:
@@ -361,7 +378,11 @@ def whitelist_session(
 
 
 class _InitialRefusal(Exception):
-    """A matched refusal from the first evolve, distinct from cleanup failures."""
+    """A structured refusal from the first evolve, distinct from cleanup failures."""
+
+    def __init__(self, refusal: NoValidKernel) -> None:
+        super().__init__(str(refusal))
+        self.refusal = refusal
 
 
 def _availability_opener(opener: SessionOpener) -> SessionOpener:
@@ -376,9 +397,9 @@ def _availability_opener(opener: SessionOpener) -> SessionOpener:
                 initial, first = first, False
                 try:
                     return session.evolve()
-                except RuntimeError as error:
-                    if initial and re.fullmatch(UNAVAILABLE_PATTERN, str(error)):
-                        raise _InitialRefusal(str(error)) from error
+                except NoValidKernel as error:
+                    if initial:
+                        raise _InitialRefusal(error) from error
                     raise
 
             yield EngineSession(evolve, session.clear_history, session.on_sample)
@@ -421,8 +442,9 @@ def measure_policy(
 ) -> FamilyResult:
     """Measure a target plus named companions, or unrestricted default routing.
 
-    The first timed evolve tests availability. Only its matched public domain
-    refusal becomes unavailable. All other evolve/setup/cleanup failures stop.
+    The first timed evolve tests availability. Only its NoValidKernel becomes
+    unavailable, preserving first-group facts and classifying whitelist members
+    from attempted. All other evolve/setup/cleanup failures stop.
     Wall/process CPU describe this entire group, not isolated target speed.
     Oracle errors are measured across all retained samples.
     """
@@ -433,7 +455,26 @@ def measure_policy(
             checked_session, reference, wall_clock=wall_clock, cpu_clock=cpu_clock
         )
     except _InitialRefusal as error:
-        return FamilyResult(family, None, str(error), [], whitelist=whitelist)
+        refused = error.refusal
+        return FamilyResult(
+            family,
+            None,
+            str(refused),
+            [],
+            whitelist=whitelist,
+            refusal=Refusal(
+                refused.domain,
+                refused.points,
+                refused.segments,
+                refused.attempted,
+                {
+                    name: "guard_or_precondition"
+                    if name in refused.attempted
+                    else "not_candidate"
+                    for name in whitelist or ()
+                },
+            ),
+        )
     paths = [sample.paths for mode in modes for sample in mode.samples]
     if family != "default" and any(
         set(path) != set(whitelist or ()) or any(count <= 0 for count in path.values())
@@ -634,7 +675,7 @@ def run_table(
 
     Inputs stay in caller order. Independent two-level full-Lindblad references
     are cached by complete physical content, not family or input alias. All
-    failures except the precisely matched probe refusal stop the whole table.
+    failures except an initial NoValidKernel stop the whole table.
     Real inputs use the exact interaction-picture solver; synthetic inputs keep
     the lab-frame solver. reference_cache optionally persists complete references;
     an injected reference_solver owns its own caching and tolerance contract.
@@ -947,7 +988,7 @@ def main(argv: list[str] | None = None, *, inputs: list[Input] | None = None) ->
                 "oracle_convergence_limit": 2e-6,
                 "accuracy_limit": 2e-3,
                 "dominance": "competitor_error <= target_error and competitor_time < .9 * target_time",
-                "unavailable_pattern": UNAVAILABLE_PATTERN,
+                "unavailable_exception": "NoValidKernel",
             },
             "inputs": [asdict(row) for row in rows],
         }
