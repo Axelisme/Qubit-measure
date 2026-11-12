@@ -113,7 +113,7 @@ class ChainCfg(ConfigBase):
         Pulse.Cfg | None,
         FieldMeta(
             label="Init Pulse",
-            description="Optional preparation played once per dwell, before the chain. Enter a calibrated fixed-frequency pulse (MHz, us), or None.",
+            description="Optional fixed-frequency pulse before each dwell's readout chain.",
         ),
     ] = None
     qub_pulse: Annotated[
@@ -136,14 +136,14 @@ class ChainCfg(ConfigBase):
         int,
         FieldMeta(
             label="Reps",
-            description="Fast sweeps per round. Each fast sweep dwells once at every frequency. At least 12 fast sweeps per round give the first live curve enough dwells to estimate the noise.",
+            description="Fast sweeps in each software round.",
         ),
     ] = Field(ge=12)
     rounds: Annotated[
         int,
         FieldMeta(
             label="Rounds",
-            description="Software rounds. The live curve updates after each round.",
+            description="Software rounds, each followed by a live update.",
         ),
     ] = 1
     relax_delay: Annotated[

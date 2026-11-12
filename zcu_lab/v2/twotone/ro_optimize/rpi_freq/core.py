@@ -113,7 +113,7 @@ class RPiFreqCfg(ConfigBase):
         Pulse.Cfg,
         FieldMeta(
             label="Pi pulse",
-            description="Calibrated pi pulse. It stays the same at every frequency.",
+            description="Calibrated g-to-e pi pulse between the two chains.",
         ),
     ]
     freq: Annotated[SweepCfg, FieldMeta(label="Readout frequency", unit="MHz")]
@@ -121,15 +121,14 @@ class RPiFreqCfg(ConfigBase):
         int,
         FieldMeta(
             label="Reps",
-            description="Cycles of 64 R-pi per frequency in each round. "
-            "Lags stay within each cycle; sums accumulate across reps.",
+            description="Fast dwells in each software round.",
         ),
     ] = Field(ge=1)
     rounds: Annotated[
         int,
         FieldMeta(
             label="Rounds",
-            description="Software rounds. Cycle sums accumulate across finished rounds.",
+            description="Software rounds, each followed by a live update.",
         ),
     ] = Field(default=1, ge=1)
 

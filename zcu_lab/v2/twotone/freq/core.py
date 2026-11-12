@@ -124,7 +124,7 @@ class FreqCfg(ConfigBase):
         Pulse.Cfg | None,
         FieldMeta(
             label="Init Pulse",
-            description="Optional preparation before the swept probe. Enter a calibrated fixed-frequency pulse (MHz, us), or None for ground-state spectroscopy.",
+            description="Optional fixed-frequency preparation before each probe.",
         ),
     ] = None
     qub_pulse: Annotated[

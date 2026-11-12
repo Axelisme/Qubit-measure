@@ -125,6 +125,7 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
         @context.plots.on_plot_thread
         def update(data):
             """Refresh the measurement artists from the current acquired data."""
+            # Display each row's contrast relative to its own median background.
             real = np.abs(minus_background(data, axis=1))
             valid = np.flatnonzero(~np.all(np.isnan(real), axis=1))
             current = int(valid[-1]) if valid.size else -1

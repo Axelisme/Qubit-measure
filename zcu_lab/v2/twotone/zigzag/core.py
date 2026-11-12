@@ -98,6 +98,7 @@ class ZigZagExp(Experiment[ZigZagResult, ZigZagCfg]):
         @context.plots.on_plot_thread
         def update(data):
             """Refresh the measurement artists from the current acquired data."""
+            # Project the repeat-count trace onto its common real IQ axis.
             return viewer.set(times.astype(np.float64), rotate2real(data).real)
 
         fig.show()

@@ -38,7 +38,6 @@ from zcu_tools.program.v2.modules.waveform import EnvelopeWaveformCfg
 
 from .._pulses import drive_pulse
 
-
 STATE_LABELS = ("g", "e", "f")
 
 
@@ -188,7 +187,10 @@ class StirapAmplitudeExp(Experiment[StirapAmplitudeResult, StirapAmplitudeCfg]):
         )
         # 2. Display the measured signal during acquisition.
         figure, _ = context.plots.subplots(
-            num="measurement", ncols=len(STATE_LABELS), figsize=(12, 4), layout="constrained"
+            num="measurement",
+            ncols=len(STATE_LABELS),
+            figsize=(12, 4),
+            layout="constrained",
         )
         maps = []
         for ax, state in zip(tuple(figure.axes), STATE_LABELS, strict=True):
@@ -221,7 +223,9 @@ class StirapAmplitudeExp(Experiment[StirapAmplitudeResult, StirapAmplitudeCfg]):
 
         figure.show()
         counts = SignalBuffer(
-            (len(pump_gains), len(stokes_gains), len(STATE_LABELS)), dtype=np.float64, on_update=update
+            (len(pump_gains), len(stokes_gains), len(STATE_LABELS)),
+            dtype=np.float64,
+            on_update=update,
         )
 
         # 3. Declare outer Pump and inner Stokes loops in one hardware program.
@@ -296,10 +300,14 @@ class StirapAmplitudeExp(Experiment[StirapAmplitudeResult, StirapAmplitudeCfg]):
         result = analyze_centroid3_populations(raw, calibration)
         # 2. Compare the data and analysis on the same axes.
         figure, _ = plots.subplots(
-            num="fit", nrows=2, ncols=len(STATE_LABELS), figsize=(12, 8), layout="constrained"
+            num="fit",
+            nrows=2,
+            ncols=len(STATE_LABELS),
+            figsize=(12, 8),
+            layout="constrained",
         )
         for row, values, title in zip(
-            (figure.axes[:len(STATE_LABELS)], figure.axes[len(STATE_LABELS):]),
+            (figure.axes[: len(STATE_LABELS)], figure.axes[len(STATE_LABELS) :]),
             (result.raw_populations, result.corrected_populations),
             ("Raw", "Corrected (unclipped)"),
             strict=True,

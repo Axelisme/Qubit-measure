@@ -39,7 +39,6 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.program.v2.modules.readout import centroid3_classifier
 
-
 STATE_LABELS = ("g", "e", "f")
 
 
@@ -73,7 +72,7 @@ class RamanGFCfg(ConfigBase):
         Pulse.Cfg,
         FieldMeta(
             label="Raman drive",
-            description="Choose any waveform; sqrt(sin) requires an arb asset. Frequency and gain come from the scan.",
+            description="Raman pulse on a fixed carrier.",
         ),
     ]
     readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
@@ -83,7 +82,7 @@ class RamanGFCfg(ConfigBase):
         FieldMeta(
             label="Carrier center",
             unit="MHz",
-            description="Enter (measured f03 - measured f32)/2. Never inferred from the model.",
+            description="Raman carrier frequency.",
         ),
     ] = Field(gt=0, allow_inf_nan=False)
     scan_mode: Annotated[
@@ -167,6 +166,7 @@ class RamanGFExp(Experiment[RamanGFResult, RamanGFCfg]):
             cfg.detuning.start, cfg.detuning.stop, cfg.detuning.expts
         )
         gains = np.linspace(cfg.gain.start, cfg.gain.stop, cfg.gain.expts)
+        # 2. Pair each programmed gain with its carrier in scan order.
         if cfg.scan_mode == "gain":
             detunings = detunings[:1]
         elif cfg.scan_mode == "frequency":
@@ -182,7 +182,7 @@ class RamanGFExp(Experiment[RamanGFResult, RamanGFCfg]):
         point_gains = np.tile(gains, len(frequencies))
         counts = SignalBuffer((len(point_gains), len(STATE_LABELS)), dtype=np.float64)
 
-        # 2. One carrier and one envelope, immediately followed by the same readout.
+        # 3. One carrier and one envelope, immediately followed by the same readout.
         with Schedule(counts, scope=context.scope) as sched:
             for point, step in sched.scan("point", range(len(point_gains))):
                 builder = TimelineBuilder(
@@ -205,7 +205,9 @@ class RamanGFExp(Experiment[RamanGFResult, RamanGFCfg]):
                     program,
                     context.soc,
                     processor=shot_sums(program, [Classify("readout")]),
-                    options=RunOptions(converter=lambda sums: sums.reshape(len(STATE_LABELS))),
+                    options=RunOptions(
+                        converter=lambda sums: sums.reshape(len(STATE_LABELS))
+                    ),
                 )
 
         result = RamanGFResult(
@@ -213,7 +215,7 @@ class RamanGFExp(Experiment[RamanGFResult, RamanGFCfg]):
             detunings=2 * (point_frequencies - cfg.carrier_mhz),
             gains=point_gains,
         )
-        # 3. Display the measured signal during acquisition.
+        # 4. Display the measured signal during acquisition.
         figure, _ = context.plots.subplots(num="measurement", layout="constrained")
 
         @context.plots.on_plot_thread
@@ -237,7 +239,7 @@ class RamanGFExp(Experiment[RamanGFResult, RamanGFCfg]):
 
         draw(None)
         figure.show()
-        # 4. Return the acquired coordinates and data.
+        # 5. Return the acquired coordinates and data.
         return result
 
     def analyze(

@@ -33,7 +33,6 @@ from zcu_lab.v2.support import live_line
 
 from .._pulses import drive_pulse
 
-
 STATE_LABELS = ("g", "e", "f")
 
 
@@ -160,7 +159,9 @@ class StirapDelayExp(Experiment[StirapDelayResult, StirapDelayCfg]):
             return viewer.set(leads, fractions.T)
 
         fig.show()
-        counts = SignalBuffer((len(leads), len(STATE_LABELS)), dtype=np.float64, on_update=update)
+        counts = SignalBuffer(
+            (len(leads), len(STATE_LABELS)), dtype=np.float64, on_update=update
+        )
         # 3. Acquire the configured pulse sequence over the scan.
         with Schedule(counts, scope=context.scope) as sched:
             for lead, step in sched.scan("stokes_lead", leads):
@@ -185,7 +186,9 @@ class StirapDelayExp(Experiment[StirapDelayResult, StirapDelayCfg]):
                     context.soc,
                     processor=processor,
                     rounds=1,
-                    options=RunOptions(converter=lambda sums: sums.reshape(len(STATE_LABELS))),
+                    options=RunOptions(
+                        converter=lambda sums: sums.reshape(len(STATE_LABELS))
+                    ),
                     charge_requirements=(
                         ChargeDriveRequirement("pump", cfg.pump_ch),
                         ChargeDriveRequirement("stokes", cfg.stokes_ch),

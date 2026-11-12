@@ -171,6 +171,7 @@ class AllXY_Exp(Experiment[AllXY_Result, AllXYCfg]):
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
         ax.grid()
         viewer = live_line(ax)
+        # 3. Keep gate-pair labels aligned with acquisition order.
         name_map = {
             "I": "$I$",
             "X90": "$X_{90}$",
@@ -202,7 +203,7 @@ class AllXY_Exp(Experiment[AllXY_Result, AllXYCfg]):
             (len(ALLXY_SEQUENCE),),
             on_update=update,
         )
-        # 3. Acquire the configured pulse sequence over the scan.
+        # 4. Acquire the configured pulse sequence over the scan.
         with Schedule(signals_buffer, scope=context.scope) as sched:
             # Derive Y rotations from X calibrations and retain an identity time slot.
             I_pulse = cfg.I_pulse
@@ -250,7 +251,7 @@ class AllXY_Exp(Experiment[AllXY_Result, AllXYCfg]):
             prog = builder.build()
             sched.run_acquire(prog, soc, rounds=cfg.rounds)
 
-        # 4. Return the acquired coordinates and data.
+        # 5. Return the acquired coordinates and data.
         return AllXY_Result(
             signals=signals_buffer.array,
         )

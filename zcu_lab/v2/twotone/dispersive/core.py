@@ -182,6 +182,7 @@ class DispersiveExp(Experiment[DispersiveResult, DispersiveCfg]):
         @context.plots.on_plot_thread
         def update(data):
             """Refresh the measurement artists from the current acquired data."""
+            # Display absolute IQ amplitude for both preparations.
             return viewer.set(freqs, np.abs(data))
 
         fig.show()

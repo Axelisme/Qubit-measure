@@ -114,7 +114,7 @@ class RPiLengthCfg(ConfigBase):
         Pulse.Cfg,
         FieldMeta(
             label="Pi pulse",
-            description="Calibrated pi pulse. It stays the same at every window.",
+            description="Calibrated g-to-e pi pulse between the two chains.",
         ),
     ]
     length: Annotated[
@@ -122,23 +122,21 @@ class RPiLengthCfg(ConfigBase):
         FieldMeta(
             label="ADC window",
             unit="us",
-            description="ADC window sweep. The readout pulse is each window plus "
-            "0.11 us.",
+            description="Requested chain duration, rounded up to whole readout dwells.",
         ),
     ]
     reps: Annotated[
         int,
         FieldMeta(
             label="Reps",
-            description="Cycles of 64 R-pi per window in each round. "
-            "Lags stay within each cycle; sums accumulate across reps.",
+            description="Fast dwells in each software round.",
         ),
     ] = Field(ge=1)
     rounds: Annotated[
         int,
         FieldMeta(
             label="Rounds",
-            description="Software rounds. Cycle sums accumulate across finished rounds.",
+            description="Software rounds, each followed by a live update.",
         ),
     ] = Field(default=1, ge=1)
 

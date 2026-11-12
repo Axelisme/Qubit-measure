@@ -109,7 +109,7 @@ class RPiPowerCfg(ConfigBase):
         Pulse.Cfg,
         FieldMeta(
             label="Pi pulse",
-            description="Calibrated pi pulse. It stays the same at every gain.",
+            description="Calibrated g-to-e pi pulse between the two chains.",
         ),
     ]
     gain: Annotated[SweepCfg, FieldMeta(label="Gain", unit="a.u.")]
@@ -117,15 +117,14 @@ class RPiPowerCfg(ConfigBase):
         int,
         FieldMeta(
             label="Reps",
-            description="Cycles of 64 R-pi per gain in each round. "
-            "Lags stay within each cycle; sums accumulate across reps.",
+            description="Fast dwells in each software round.",
         ),
     ] = Field(ge=1)
     rounds: Annotated[
         int,
         FieldMeta(
             label="Rounds",
-            description="Software rounds. Cycle sums accumulate across finished rounds.",
+            description="Software rounds, each followed by a live update.",
         ),
     ] = Field(default=1, ge=1)
 

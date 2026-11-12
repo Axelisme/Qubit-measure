@@ -120,15 +120,6 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
             {"soccfg": soccfg, "gen_ch": reset_cfg.pulse2_cfg.ch},
         )
 
-        def dual_reset_gain_signal2real(
-            signals: NDArray[np.complex128],
-        ) -> NDArray[np.float64]:
-            # Choose reference point based on sweep direction (use minimum power point)
-            """Convert the reset gain map to contrast relative to its reference corner."""
-            ref_i = 0 if gains1[0] < gains1[-1] else -1
-            ref_j = 0 if gains2[0] < gains2[-1] else -1
-            return np.abs(signals - signals[ref_i, ref_j])
-
         # 2. Display contrast relative to the minimum-gain corner in either scan direction.
         plots = context.plots
         # 3. Display the measured signal during acquisition.
@@ -139,7 +130,11 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
         @plots.on_plot_thread
         def update(data: NDArray[np.complex128]) -> tuple[Artist, ...]:
             """Refresh the measurement artists from the current acquired data."""
-            return viewer.set(gains1, gains2, dual_reset_gain_signal2real(data))
+            # Use the minimum-power corner as the common contrast reference.
+            ref_i = 0 if gains1[0] < gains1[-1] else -1
+            ref_j = 0 if gains2[0] < gains2[-1] else -1
+            contrast = np.abs(data - data[ref_i, ref_j])
+            return viewer.set(gains1, gains2, contrast)
 
         fig.show()
         signals_buffer = SignalBuffer((len(gains1), len(gains2)), on_update=update)

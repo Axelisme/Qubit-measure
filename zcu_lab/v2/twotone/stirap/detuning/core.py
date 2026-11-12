@@ -41,7 +41,6 @@ from zcu_tools.program.v2.modules.waveform import EnvelopeWaveformCfg
 
 from .._pulses import drive_pulse
 
-
 STATE_LABELS = ("g", "e", "f")
 
 
@@ -247,7 +246,9 @@ class StirapDetuningExp(Experiment[StirapDetuningResult, StirapDetuningCfg]):
                 context.soc,
                 processor=shot_sums(program, [Classify("readout")]),
                 options=RunOptions(
-                    converter=lambda sums: sums.reshape(len(ys), len(xs), len(STATE_LABELS))
+                    converter=lambda sums: sums.reshape(
+                        len(ys), len(xs), len(STATE_LABELS)
+                    )
                 ),
                 charge_requirements=(
                     ChargeDriveRequirement("Pump", cfg.pump_ch),
