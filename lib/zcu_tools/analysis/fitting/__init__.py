@@ -1,3 +1,4 @@
+from .allxy import AllXYFitResult, fit_allxy_errors, predict_state_with_error
 from .anticross import fit_anticross, fit_anticross2d
 from .base import (
     assign_init_p,

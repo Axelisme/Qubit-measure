@@ -1,12 +1,32 @@
 # zcu_tools.analysis.fitting
 
-**Last updated:** 2026-11-12
+**Last updated:** 2026-11-12，ALLXY coherent errors
 
 **讀者：** lab-author。擬合模型、數值輸入、結果與失敗契約速查。
 
 `singleshot_rabi` 提供 raw-IQ sweep 的 pooled PCA、joint population fitting 與 circle-classification calibration。`fit_rabi_joint` 接收純數值，回傳完整 `RabiJointFitResult`，包含 physical parameters、population arrays 與 optimizer diagnostics。Cfg 讀取與繪圖由實驗 caller 負責。Pulse length 與 gain 使用相同 coordinate 契約，gain caller 明確關閉 decay。
 
 Caller 畫完圖後可用 `summarize_rabi_joint_fit(result)` 產生 `RabiJointFitSummary`。摘要保留擬合值、pre-pulse populations、confusion matrix 與分類校準。`RabiBackendSummary` 保留 parameter_names、values、std、valid 與 nll；std 為完整 covariance 對角線的平方根。摘要複製固定大小陣列，不保留逐點 populations、projection 或完整 covariance，也不重跑 fitter。完整數值結果仍可供局部畫圖與 covariance 計算使用。
+
+## ALLXY coherent errors
+
+`allxy.predict_state_with_error(gates, power_err, detune_err)` predicts scalar
+Bloch-z for a supported ordered gate pair from the Reed low-order table.
+`power_err` is the pi/2 angle error in radians, not fractional power.
+`allxy.fit_allxy_errors(sequence, real_signals, *, fit_ge)` fits caller-provided
+real signals and returns `AllXYFitResult`. It owns the signal-domain curve,
+center/contrast, amplitude/detuning parameters and separated Bloch-z deviations.
+The result centralizes nonlinear fitting and error decomposition; callers do not
+rebuild the model to plot or summarize a fit. Sequence selection, IQ rotation,
+figures and persisted summaries stay with the experiment.
+
+`fit_ge=False` fixes center and signed contrast to measured extrema estimates.
+`True` also fits those levels within the original measured-range bounds.
+Nonzero coherent errors can shrink measured contrast, so both branches can be
+biased even for noiseless signals. The fitter preserves this bound rather than
+claiming unbiased parameter recovery. Numerical failures propagate without a
+fallback. Supported pairs, array axes, units and failure details are documented
+on the two functions and result type in [allxy.py](allxy.py).
 
 ## Peak candidates
 
