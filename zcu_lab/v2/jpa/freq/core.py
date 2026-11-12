@@ -209,9 +209,10 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
             best_jpa_freq,
             color="r",
             ls="--",
-            label=f"best JPA frequency = {best_jpa_freq:.2g} MHz",
+            label=f"best JPA frequency = {best_jpa_freq:.2f} MHz",
         )
         ax.set_xlabel("JPA Frequency (MHz)")
+        ax.ticklabel_format(axis="x", useOffset=False)
         ax.set_ylabel("Signal Difference (a.u.)")
         ax.legend()
         ax.grid(True)

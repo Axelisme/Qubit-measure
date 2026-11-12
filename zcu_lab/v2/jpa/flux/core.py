@@ -216,7 +216,7 @@ class FluxExp(Experiment[FluxResult, FluxCfg]):
             best_jpa_flux,
             color="r",
             ls="--",
-            label=f"best JPA flux = {best_jpa_flux:.2g} a.u.",
+            label=f"best JPA flux = {best_jpa_flux:#.3g} a.u.",
         )
         ax.set_xlabel("JPA Flux value (a.u.)")
         ax.set_ylabel("Signal Difference (a.u.)")
