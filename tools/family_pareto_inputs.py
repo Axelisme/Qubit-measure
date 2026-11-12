@@ -232,13 +232,15 @@ def physical_input(
     """Serialize complete timeline, initial density, models and optional expansion.
 
     Builders in this inventory use level-independent model replacements; all
-    scheduled levels and the DC model are listed. Continuous Hamiltonians are
+    scheduled levels and the DC model with the schedule's loop count are listed.
+    Continuous Hamiltonians are
     fully specified by the supplied expansion. No mutable history is serialized.
     include_identity=False drops only the nonphysical model namespace for oracle
     sharing; complete manifests retain that namespace for route reconstruction.
     """
     levels = sorted(
-        {tuple(int(v) for v in row) for row in case.batch.flux.level} | {(0,)}
+        {tuple(int(v) for v in row) for row in case.batch.flux.level}
+        | {(0,) * case.batch.flux.level.shape[1]}
     )
     models = [asdict(case.source.model(level)) for level in levels]
     if not include_identity:

@@ -84,3 +84,28 @@ def test_gate_scan_preserves_variable_sequence_lengths(
                 assert len(np.unique(count)) == 24
                 assert np.all(np.diff(case.batch.end_ns) > 0)
     assert inventories, "a gate scan must preserve ragged, varying pulse counts"
+
+
+def test_joint_scan_compiles_synchronous_independent_drive_ports(
+    fixed_inputs: list[Input],
+) -> None:
+    synchronous = []
+    for item in fixed_inputs:
+        with closing((case := item.build()).source):
+            tracks = case.batch.tracks
+            if len(tracks) != 2 or tracks[0].port == tracks[1].port:
+                continue
+            first, second = tracks
+            assert np.all(first.active) and np.all(second.active)
+            np.testing.assert_array_equal(first.start_ns, second.start_ns)
+            np.testing.assert_array_equal(first.duration_ns, second.duration_ns)
+            assert len(case.batch.points) == 24
+            level = tuple(int(value) for value in case.batch.flux.level[0])
+            model = case.source.model(level)
+            ports = {drive.name: drive for drive in model.drives}
+            assert not np.allclose(
+                ports[first.port].in_phase_ghz, ports[second.port].in_phase_ghz
+            ), "the simultaneous ports must drive independent joint-model operators"
+            assert np.all(case.batch.end_ns >= first.start_ns + first.duration_ns)
+            synchronous.append(item.name)
+    assert synchronous, "a joint scan must preserve two simultaneous physical ports"

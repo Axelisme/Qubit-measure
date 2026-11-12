@@ -162,8 +162,10 @@ It times **Engine.evolve**, not `program.acquire`. The existing acquire benchmar
 above keeps its workloads and comparison contract.
 
 The default inputs are fixed 24-point carrier, gain, length, idle and gate-sequence
-scans on the full 21-level single-fluxonium model. Add `--include-synthetic` to also measure the unchanged
-accuracy inventory and twelve amplified synthetic workloads. Reports separate
+scans on the full 21-level single-fluxonium model, plus a synchronous dual-port
+scan on the fixed FTF model with 32 retained joint states and local 4×4×4.
+Add `--include-synthetic` to also measure the unchanged accuracy inventory and
+twelve amplified synthetic workloads. Reports separate
 the two categories; deletion conclusions use real inputs only.
 
 Freeze the versioned input manifest before measuring. From the lane root, replace
@@ -289,7 +291,14 @@ copied from commit `303074e166d1a563addfab4fd94717d958a7dd56`. The manifest
 records their source commit and fixed values. Runtime construction does not import
 lab experiments, read lab YAML/profiles, execute experiments, or use replay.
 Model/template changes require a deliberate update here. The fixed FTF values
-do not track a user's working-copy edits.
+do not track a user's working-copy edits. The tool overrides only FTF
+`retained_levels` from 16 to 32. Local levels remain 4×4×4; all other physical
+and board parameters retain that source commit's values. At the specified CZ
+working point, the conditional-phase comparison needed at least 25 joint states
+to reach a difference within 0.5°. Retaining 32 leaves margin. This is not a
+convergence claim for arbitrary CZ pulses or the full native/local model.
+FTF references and timings must be rebuilt at 32 states; 16-state results do not
+apply.
 
 All five single-model scans use the full 21-level model. Their carrier center is
 DC E1−E0 from that fixed model. Gains, phases and durations are illustrative
@@ -305,6 +314,15 @@ not at the end of that window.
 | L `length_sweep` | One drive, terminal readout | Length 20 to 400 ns | Constant, gain .1 | 1 or 2 | Changes support without also resampling a Gaussian. |
 | I `idle_sweep` | X-phase gate, idle, Y-phase gate, terminal readout | Idle 20 to 400 ns | Two constant 20 ns gates, gain .1 | 4 | Shared initial gate with changing gap and final absolute phase. |
 | N `gate_sequence` | Prefix of repeated X,Y,-X,-Y phase alphabet, terminal readout | Gate count 1 to 24 | Constant 20 ns gates, gain .1 | 2 to 35 | Ragged sequences with a reusable alphabet, without random seeds. |
+| M `simultaneous_drive` | Synchronous F1/F2 drives, terminal readout | Shared gain .01 to .1 | Two Gaussians, 100 ns, sigma 20 ns | 2 | Independent joint-model drive operators under overlapping shaped controls. |
+
+M uses public timeline fork/join to start both drives together and place readout
+after both finish. Its two carriers are the uncoupled local DC E1−E0 frequencies
+of F1 and F2, not fitted dressed-transition calibrations. Both ports act on the
+same coupled FTF density. Readout uses the fixed bare r1 cavity frequency, gain
+.1, a 1 us pulse/window and fixed flight time. This benchmark sequence is not a
+calibrated CZ gate. The CZ comparison above explains only the retained-state
+choice, not a fidelity claim for this scan.
 
 Continuous requested axes are equally spaced and include both endpoints. Native
 hardware quantization changes the realized values. Length uses a public table

@@ -3,6 +3,10 @@
 Copied from source commit 303074e166d1a563addfab4fd94717d958a7dd56.
 These values do not follow later experiment or lab-template changes. This file
 performs no I/O and imports no lab definitions. Model cutoffs are not reduced.
+The tool overrides only FTF retained_levels from 16 to 32, keeping local 4x4x4.
+At the specified CZ working point, the conditional-phase comparison needed at
+least 25 joint states to reach 0.5 degrees; 32 leaves margin. This does not show
+convergence for arbitrary CZ pulses or the full native/local model.
 """
 
 from pydantic import JsonValue
@@ -313,7 +317,7 @@ FTF_MODEL: dict[str, JsonValue] = {
             "f1": {"native_cutoff": 24, "levels": 4},
             "coupler": {"charge_cutoff": 8, "levels": 4},
             "f2": {"native_cutoff": 24, "levels": 4},
-            "retained_levels": 16,
+            "retained_levels": 32,
         },
         "solver": {
             "rtol": 1e-08,
