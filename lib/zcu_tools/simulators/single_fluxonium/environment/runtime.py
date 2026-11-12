@@ -733,7 +733,7 @@ class SingleFluxoniumSource:
         self._closed = True
 
 
-def single_fluxonium(
+def single_fluxonium(  # noqa: PLR0913  # tolerated: independent optional inputs have distinct owners; grouping any two adds a single-caller class
     configuration: SingleFluxoniumSettings | str | Path,
     *,
     soccfg: QickConfig,

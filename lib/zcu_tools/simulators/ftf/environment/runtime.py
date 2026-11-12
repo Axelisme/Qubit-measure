@@ -791,7 +791,7 @@ def _flux_generator_channels(settings: FTFSettings) -> tuple[int, ...]:
     )
 
 
-def ftf(
+def ftf(  # noqa: PLR0913  # tolerated: independent optional inputs have distinct owners; grouping any two adds a single-caller class
     configuration: FTFSettings | str | Path,
     *,
     soccfg: QickConfig,
