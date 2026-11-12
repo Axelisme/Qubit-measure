@@ -22,20 +22,18 @@ def test_fixed_scenarios_freeze_byte_identically_from_fresh_construction() -> No
     assert first.encode() == second.encode()
 
 
-def test_gain_scan_compiles_distinct_amplitudes_with_fixed_carrier(
-    fixed_inputs: list[Input],
-) -> None:
-    scans = []
-    for item in fixed_inputs:
-        case = item.build()
-        with closing(case.source):
-            for track in case.batch.tracks:
-                if (
-                    np.all(track.active)
-                    and np.ptp(track.amplitude.real) > 0
-                    and np.ptp(track.frequency_ghz) == 0
-                ):
-                    scans.append(track)
+def test_gain_scan_compiles_distinct_amplitudes_with_fixed_carrier() -> None:
+    from tools import family_pareto_scenarios
+
+    item = family_pareto_scenarios.gain_sweep_input()
+    with closing((case := item.build()).source):
+        scans = [
+            track
+            for track in case.batch.tracks
+            if np.all(track.active)
+            and np.ptp(track.amplitude.real) > 0
+            and np.ptp(track.frequency_ghz) == 0
+        ]
     assert scans, "a gain scan must compile to distinct amplitudes at fixed carrier"
     assert all(len(track.amplitude) == 24 for track in scans)
 
