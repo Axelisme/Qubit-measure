@@ -5,7 +5,7 @@ from __future__ import annotations
 import time
 import warnings
 from collections import Counter
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from contextlib import closing
 from dataclasses import dataclass, field, replace
 from hashlib import sha256
@@ -525,6 +525,19 @@ class Engine:
     kernels: optional stateless internal Kernel collection replacing the
         production registry. Names must be unique. Missing required names and
         terminal guard rejections raise instead of silently rerouting.
+    families: optional collection of production family names allowed throughout
+        this acquire, including shared prefixes and deferred workers. None keeps
+        default routing; an empty collection allows no nonempty domain. Names
+        are copied at construction and unknown names raise ValueError. Dispatch
+        tries only allowed candidates, including more expensive alternatives;
+        family input preconditions still apply. Numerical guards, budgets and
+        inventory counts remain unchanged. A domain
+        with no admitted candidate raises RuntimeError naming the domain, caller
+        points and segments. No fallback is added outside that domain.
+        Valid names: t4, adiabatic_map, flux_dop853, slow_envelope, dyson,
+        single_tone_rwa, floquet_period, t6, single_tone_gate, shaped_sambe,
+        gate_cache, period_table, common_frame, multitone_gate, multitone_rwa,
+        floquet, dop853. kernels remains an internal collaborator seam.
     chunks_per_worker: optional positive fixed chunk multiplier. None selects
         timeline batching from the complete acquire inventory and keeps six
         prepare chunks per worker. Scheduling does not change numerical admission.
@@ -546,15 +559,21 @@ class Engine:
         workers: int,
         *,
         kernels: Sequence[Kernel] | None = None,
+        families: Collection[str] | None = None,
         chunks_per_worker: int | None = None,
         routing_cache_bytes: int = 4 * 1024**2,
     ) -> None:
-        """Create routing-facts ownership; reject invalid sizes or duplicate names."""
+        """Create an Engine under the execution and family contract above."""
         from ._routing_reuse import RoutingReuse
         from .kernels import REGISTRY
 
         if workers < 1 or (chunks_per_worker is not None and chunks_per_worker < 1):
             raise ValueError("workers/chunks must be positive")
+        self._families = None if families is None else frozenset(families)
+        if self._families is not None:
+            unknown = self._families - {kernel.name for kernel in REGISTRY}
+            if unknown:
+                raise ValueError(f"unknown kernel families: {sorted(unknown)}")
         collection = REGISTRY if kernels is None else kernels
         self._kernels = {kernel.name: kernel for kernel in collection}
         if len(self._kernels) != len(collection):
@@ -584,6 +603,8 @@ class Engine:
         this acquire's complete inventory and permits reuse with no numerical
         work. False records nothing: evolve the full acquire instead. Eviction,
         a different source, disabled residency and a changed route return False.
+        Clearing source.history also returns False for old preparations until
+        evolve registers new facts, even if the selected route stays the same.
         Calls sharing a source must serialize the check and subsequent evolve.
         Optional cancel raises Cancelled when set; None has no cancellation
         token. A closed engine raises RuntimeError.
@@ -674,7 +695,7 @@ class Engine:
                 frontend_cpu_s = (
                     time.thread_time() - frontend_started if telemetry else 0.0
                 )
-                context = KernelContext(source, budget, work_plan)
+                context = KernelContext(source, budget, work_plan, self._families)
                 reuse_snapshot = self._routing_reuse.snapshot(
                     reuse_key, geometry.table, context
                 )

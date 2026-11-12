@@ -255,11 +255,14 @@ class KernelContext:
     budget is the finite positive absolute per-segment allowance. work_plan
     belongs to this evolve and is shared by prefix and timeline workers.
     Standalone callers supply a fresh WorkPlan and close it after use.
+    families is the immutable acquire-wide family allowlist for dispatch;
+    None preserves unrestricted selection. Kernels retain their original guards.
     """
 
     source: ModelSource
     budget: float
     work_plan: WorkPlan
+    families: frozenset[str] | None = None
 
     def __post_init__(self) -> None:
         if not np.isfinite(self.budget) or self.budget <= 0:

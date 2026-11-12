@@ -66,7 +66,7 @@ def delayed_readout_template():
     )
 
 
-def test_preparation_hits_preserve_source_usage_for_later_acquires(
+def test_preparation_hits_preserve_routes_for_later_acquires(
     delayed_readout_template,
 ):
     import numpy as np
@@ -88,32 +88,23 @@ def test_preparation_hits_preserve_source_usage_for_later_acquires(
     )
     readout = replace(readout, start_ticks=tick_array(np.full(2, 0.140)))
     acquire = request(templates=(replace(base, events=(drive, readout)),))
-    histories, routes = [], []
+    routes = []
     for clear in (False, True):
         source = FTFSource(settings(), DeviceManager(), soccfg=profile_soccfg("ftf"))
         try:
             draw(source, acquire)
-            numeric = source.model_facts(snapshot()).source
-            first = dict(getattr(numeric, "gate_usage", {}))
-            assert first, "shaped acquire must record its complete gate inventory"
+            first_paths = source.evaluations[0].paths.segments_by_kernel
             if clear:
                 source.preparation_cache.clear()
             draw(source, replace(acquire, sequence=8))
             assert source.preparation_cache.hits == (0 if clear else 1)
-            histories.append(dict(numeric.gate_usage))
-            assert histories[-1] == first
+            assert source.evaluations[0].paths.segments_by_kernel == first_paths
             later_drive = replace(drive, phase_deg=drive.phase_deg + 17.0)
             later = replace(base, events=(later_drive, readout))
             draw(source, replace(acquire, templates=(later,), sequence=9))
             routes.append(source.evaluations[0].paths.segments_by_kernel)
-            assert numeric.gate_usage == {
-                key: 2 * count for key, count in first.items()
-            }
-            source.close()
-            assert not numeric.gate_usage
         finally:
             source.close()
-    assert histories[0] == histories[1]
     assert routes[0] == routes[1]
 
 
@@ -221,13 +212,9 @@ def test_history_sensitive_hit_reuses_policy_facts_without_prepare_or_put(
     )
     try:
         draw(source, acquire)
-        numeric = source.model_facts(snapshot()).source
-        first_usage = numeric.gate_usage
-        assert first_usage
         first_paths = source.evaluations[0].paths
         draw(source, replace(acquire, sequence=8))
         assert source.evaluations[0].paths == first_paths
-        assert numeric.gate_usage == first_usage
         assert cache.hits == 1
         assert cache.puts == 1, (
             "unchanged results must retain their population preparation"
@@ -237,7 +224,7 @@ def test_history_sensitive_hit_reuses_policy_facts_without_prepare_or_put(
 
 
 @pytest.mark.parametrize("clear", [False, True])
-def test_repeated_content_does_not_inflate_source_amortization(
+def test_repeated_content_keeps_routes_stable_with_or_without_preparation_cache(
     clear, delayed_readout_template
 ):
     import numpy as np
@@ -270,17 +257,12 @@ def test_repeated_content_does_not_inflate_source_amortization(
     source = FTFSource(settings(), DeviceManager(), soccfg=profile_soccfg("ftf"))
     try:
         draw(source, acquire)
-        numeric = source.model_facts(snapshot()).source
-        first = numeric.gate_usage
         first_paths = source.evaluations[0].paths
-        assert first and first_paths.segments_by_kernel.get("shaped_sambe") == 2
+        assert first_paths.segments_by_kernel.get("shaped_sambe") == 2
         for sequence in range(8, 20):
             if clear:
                 source.preparation_cache.clear()
             draw(source, replace(acquire, sequence=sequence))
-            assert numeric.gate_usage == first, (
-                "one content contributes its rows only once"
-            )
             assert source.evaluations[0].paths == first_paths
     finally:
         source.close()

@@ -213,7 +213,9 @@ def populate_single_gate_plan(
         inventory, families = single_gate_costs(table, source, plan, budget)
         if not inventory:
             return ()
-        usage = source.record_gate_usage(dict(inventory), content=plan.content_key)
+        usage = source.history.record_gate_usage(
+            dict(inventory), content=plan.content_key
+        )
         return tuple(family.choose(usage) for family in families)
 
     return plan.fact(FactKey(("single-tone-gate-mixed-cold-v3", budget), tuple), build)

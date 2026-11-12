@@ -16,10 +16,11 @@ import numpy as np
 import pytest
 import zcu_tools.simulate.evolution as evolution
 from numpy.typing import NDArray
-from scipy.integrate import solve_ivp
 from zcu_tools.simulate.evolution._dop853_dispatch import direct_plans
 from zcu_tools.simulate.evolution.kernel import ApplyContext, KernelContext
 from zcu_tools.simulate.evolution.workplan import WorkPlan
+
+from .reference import reference
 
 if TYPE_CHECKING:
     from zcu_tools.simulate.evolution import kernel
@@ -82,134 +83,6 @@ class KernelCase:
         if result is not None and result.plan is not None:
             return ApplyContext(self.budget, result.plan)
         return kernel_context(self.kernel.name, self.table, self.budget)
-
-
-def _reference_hamiltonian(
-    case: KernelCase,
-    row: int,
-    time: float,
-    model: evolution.SecularModel,
-) -> NDArray[np.complex128]:
-    """Assemble H/h independently from expansion terms and playback samples."""
-    table = case.table
-    h = np.diag(model.energies_ghz).astype(complex)
-    waveform = table.flux_waveform
-    if waveform is not None:
-        first, last = waveform.offsets[table.timeline[row] : table.timeline[row] + 2]
-        sample_time = waveform.time_ns[first:last]
-        sample_flux = waveform.flux[first:last]
-        expansion = case.source.flux_expansion()
-        flux = np.array(
-            [
-                np.interp(time, sample_time, sample_flux[:, loop])
-                for loop in range(sample_flux.shape[1])
-            ]
-        )
-        fixed_h = expansion.static.copy()
-        for term in expansion.terms:
-            angle = np.pi * flux[term.loop] * (2 if "2pi" in term.kind else 1)
-            value = np.cos(angle) if term.kind.startswith("cos") else np.sin(angle)
-            fixed_h += value * term.matrix
-        h = model.eigenvectors.conj().T @ fixed_h @ model.eigenvectors
-    for tone in range(int(table.tones[row])):
-        drive = model.drives[table.tone_port[row, tone]]
-        elapsed = time - table.start_ns[row]
-        phase = (
-            table.tone_theta_rad[row, tone]
-            + 2 * np.pi * table.tone_frequency_ghz[row, tone] * elapsed
-        )
-        envelope = table.envelopes[table.tone_envelope[row, tone]]
-        amplitude = 1 + 0j
-        if envelope.kind == "sampled":
-            local = elapsed + table.tone_envelope_offset_ns[row, tone]
-            amplitude = complex(
-                np.interp(local, envelope.sample_ns, envelope.samples.real),
-                np.interp(local, envelope.sample_ns, envelope.samples.imag),
-            )
-        z = table.tone_amplitude[row, tone] * amplitude * np.exp(1j * phase)
-        h += z.real * drive.in_phase_ghz + z.imag * drive.quadrature_ghz
-    return h
-
-
-def reference(
-    case: KernelCase,
-    row: int,
-    state: NDArray[np.complex128],
-    *,
-    bath: evolution.FluxSchedule | None = None,
-) -> NDArray[np.complex128]:
-    """Integrate full Lindblad at rtol=2e-12, atol=2e-14 in row eigenbasis.
-
-    table.flux_waveform selects continuous H(flux) from source.flux_expansion;
-    otherwise H0 is static. Optional bath supplies a ragged per-timeline grid
-    schedule including switches inside the row. Each bath dissipator is rotated
-    by V_segment† V_bath, independently of Hamiltonian/drive evaluation. None
-    uses the row's constant bath. Stops at bath switches and waveform knots.
-    """
-    table = case.table
-    model = case.source.model(tuple(int(v) for v in table.level[row]))
-    size = len(model.energies_ghz)
-
-    waveform = table.flux_waveform
-    point = int(table.timeline[row])
-    sample_time = np.empty(0)
-    if waveform is not None:
-        first, last = waveform.offsets[point : point + 2]
-        sample_time = waveform.time_ns[first:last]
-    bath_time = np.empty(0)
-    bath_levels = np.empty((0, table.level.shape[1]), dtype=np.int64)
-    if bath is not None:
-        first, last = bath.offsets[point : point + 2]
-        bath_time = bath.start_ns[first:last]
-        bath_levels = bath.level[first:last]
-
-    def rhs(time: float, flat: NDArray[np.complex128]) -> NDArray[np.complex128]:
-        rho = flat.reshape(size, size)
-        h = _reference_hamiltonian(case, row, time, model)
-        derivative = -2j * np.pi * (h @ rho - rho @ h)
-        bath_rho = overlap.conj().T @ rho @ overlap
-        dissipation = -bath_model.dephasing_per_ns * bath_rho
-        for jump, loss in jumps:
-            dissipation += (
-                jump @ bath_rho @ jump.conj().T
-                - (loss @ bath_rho + bath_rho @ loss) / 2
-            )
-        derivative += overlap @ dissipation @ overlap.conj().T
-        return derivative.ravel()
-
-    start = float(table.start_ns[row])
-    end = start + float(table.duration_ns[row])
-    if end == start:
-        return state.copy()
-    boundaries = np.unique(np.r_[start, end, bath_time, sample_time])
-    boundaries = boundaries[(boundaries >= start) & (boundaries <= end)]
-    result = state.copy().ravel()
-    for left, right in zip(boundaries[:-1], boundaries[1:], strict=True):
-        bath_model = model
-        if bath is not None:
-            index = np.searchsorted(bath_time, (left + right) / 2, side="right") - 1
-            bath_model = case.source.model(tuple(int(v) for v in bath_levels[index]))
-        overlap = model.eigenvectors.conj().T @ bath_model.eigenvectors
-        # Jumps and basis changes are constant between bath boundaries. Build
-        # only nonzero jumps once, retaining an oracle independent of product RHS.
-        jumps = []
-        for target, origin in np.argwhere(bath_model.rates_per_ns > 0):
-            if target != origin:
-                jump = np.zeros((size, size), complex)
-                jump[target, origin] = np.sqrt(bath_model.rates_per_ns[target, origin])
-                jumps.append((jump, jump.conj().T @ jump))
-        solution = solve_ivp(
-            rhs,
-            (left, right),
-            result,
-            method="DOP853",
-            rtol=2e-12,
-            atol=2e-14,
-            max_step=0.05,
-        )
-        assert solution.success, solution.message
-        result = solution.y[:, -1]
-    return result.reshape(size, size)
 
 
 def assert_budget(

@@ -66,7 +66,7 @@ def populate_multitone_inventory(
             keys.append(identity)
             inventory[identity] = inventory.get(identity, 0) + 1
         usage = (
-            source.record_gate_usage(inventory, content=plan.content_key)
+            source.history.record_gate_usage(inventory, content=plan.content_key)
             if inventory
             else {}
         )

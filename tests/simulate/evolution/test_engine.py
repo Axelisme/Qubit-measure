@@ -85,10 +85,8 @@ def test_constant_decision_order_and_sequence_middle(expected):
 def test_sideband_selective_constant_tone_uses_periodic_propagation(
     frequency, expected
 ):
-    from zcu_tools.simulate.evolution.kernels import REGISTRY
-
     # Isolate periodic propagation from the constant single-tone RWA route.
-    kernels = tuple(k for k in REGISTRY if k.name != "single_tone_rwa")
+    families = ("slow_envelope", "dyson", "floquet_period", "t6")
     upper = np.diag([0.5, 0.35], 1).astype(complex)
     model = synthetic_model(3)
     model = replace(
@@ -112,7 +110,7 @@ def test_sideband_selective_constant_tone_uses_periodic_propagation(
         phase_rad=np.array([0.37]),
     )
     result = run(
-        Engine(1, kernels=kernels),
+        Engine(1, families=families),
         src,
         (replace(batch(1, duration=30.0), tracks=(pulse,)),),
     )

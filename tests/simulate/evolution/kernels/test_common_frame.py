@@ -6,7 +6,6 @@ from threading import Event
 import numpy as np
 import pytest
 from zcu_tools.simulate.evolution import Engine
-from zcu_tools.simulate.evolution.kernels import REGISTRY
 
 from .._common_frame import batch, model_source, strict_lab
 
@@ -67,7 +66,7 @@ def test_over_budget_and_expensive_rows_use_existing_fallback(gain, frequency):
     result = evolve(source, timeline)
     assert result.paths.segments_by_kernel.get("common_frame", 0) == 0
     with closing(
-        Engine(1, kernels=tuple(k for k in REGISTRY if k.name != "common_frame"))
+        Engine(1, families=("multitone_rwa", "multitone_gate", "floquet", "dop853"))
     ) as engine:
         original = engine.evolve(source, (timeline,), cancel=Event(), budget=0.01)
     np.testing.assert_array_equal(result.densities, original.densities)

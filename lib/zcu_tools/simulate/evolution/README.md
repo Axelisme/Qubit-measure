@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-11-01
+**Last updated:** 2026-11-12, kernel domains and full-density accuracy matrix
 
 **讀者：** framework-dev、agent。Segment evolution 的公開輸入、路由與數值邊界。
 
@@ -15,6 +15,7 @@ boundary and the decision to keep algorithm knowledge in dispatch.
 - [Joint-Fock prototype](#joint-fock-prototype)
 - [Routing telemetry](#routing-telemetry)
 - [Decision graph](#decision-graph)
+- [Kernel summary](#kernel-summary)
 - [Row plans and the kernel seam](#row-plans-and-the-kernel-seam)
 - [WorkPlan and cache ownership](#workplan-and-cache-ownership)
 - [Algorithm ownership and reuse](#algorithm-ownership-and-reuse)
@@ -34,7 +35,7 @@ The exports in [__init__.py](__init__.py) fall into these groups:
 | Purpose | Exports |
 | --- | --- |
 | Execution and results | `Engine`, `EvolutionResult`, `PathDiagnostics`, `FamilyRouting`, `Cancelled`, `SEGMENT_NUMERIC_VERSION` |
-| Engine model source | `ModelSource`, `SecularModel`, `SecularDrive` |
+| Engine model source and routing history | `ModelSource`, `SecularModel`, `SecularDrive`, `RoutingHistory` |
 | Flux description | `FluxExpansion`, `FluxTerm`, `FluxLevel`, `FluxSchedule`, `FluxWaveform` |
 | Batched timelines | `TimelineBatch`, `DriveTrack`, `EnvelopeSpec`, `SegmentShift`, `segment_spans` |
 | Control description | `ControlPulse`, `ControlSequence`, `Envelope`, `PhaseEvent`, `quantize_ns` |
@@ -43,7 +44,7 @@ The exports in [__init__.py](__init__.py) fall into these groups:
 | Explicit joint-Fock prototype | `JointFockRequest`, `JointFockDiagnostic`, `JointFockResult`, `joint_fock_spectrum` |
 | Shared RWA Hamiltonian coefficients | `RWACoefficients`, `rwa_coefficients`, `interaction_hamiltonian` |
 
-`Engine(workers, *, kernels=None, chunks_per_worker=None,
+`Engine(workers, *, families=None, kernels=None, chunks_per_worker=None,
 routing_cache_bytes=4*1024**2)` owns immutable routing facts.
 Numerical preparations live only within one evolve. `evolve(source, batches, *, budget=1e-3, cancel=event)` consumes a
 `ModelSource` and all `TimelineBatch` inputs for one acquire. `NumericModel` is a
@@ -162,6 +163,30 @@ tones, envelope shape, known inputs and acquire-wide prepare-key reuse, not
 experiment names. Numerical guards decide validity separately from cost.
 A rejected guard leaves the row for the next candidate.
 
+`Engine(..., families=("t4", "dop853"))` restricts every segment in the acquire,
+including shared prefixes and deferred timeline workers, to those families.
+Pass a collection of family names, not a per-segment mapping or preference list.
+The constructor copies the names and raises `ValueError` for unknown names.
+`None` preserves default routing. An empty collection rejects any nonempty
+domain. Empty work still returns an empty result.
+
+Dispatch keeps its cost ordering among allowed candidates. If cost shortcuts
+skip an expensive allowed candidate, dispatch tries it before rejecting the
+domain. Dispatch excludes rows that violate a family input precondition, such
+as common-frame carriers with an absolute mean below 1e-10 GHz. The kernel
+owner defines each precondition once. Legal preparation failures still propagate;
+dispatch does not catch them to retry another family.
+The allowlist never changes numerical guards, budget or complete-acquire
+inventory counts. A rejected pinned family cannot select an excluded family.
+If no allowed candidate passes, `RuntimeError` names the domain, caller point
+IDs and affected segment rows. The allowlist does not add fallback routes to
+other domains. `kernels=` remains an internal numerical-collaborator seam.
+
+The family names are `t4`, `adiabatic_map`, `flux_dop853`, `slow_envelope`,
+`dyson`, `single_tone_rwa`, `floquet_period`, `t6`, `single_tone_gate`,
+`shaped_sambe`, `gate_cache`, `period_table`, `common_frame`, `multitone_gate`,
+`multitone_rwa`, `floquet` and `dop853`.
+
 No-drive rows use secular propagation or adiabatic transport. Driven rows use
 constant-tone, shaped-tone or continuous-flux families. Candidate order,
 thresholds and algorithm details live with their owners:
@@ -186,6 +211,74 @@ Historical calibration note for [slow-envelope propagation](kernels/slow_envelop
 the calibrated population tolerance is 1e-2, with about 1e-4 or less measured on
 21-level Q1 and a 1e-3 synthetic regression limit. It does not adapt to budget
 or certify arbitrary pulse strengths and coherences.
+
+## Kernel summary
+
+The domains below use the names in [dispatch](_dispatch.py#L75).
+`idle` has no tones or continuous flux motion. `adiabatic` has flux motion
+without tones; `flux` has flux motion with tones. At fixed flux, `slow` has one
+constant tone with carrier magnitude below 30 MHz. `plateau` has one constant
+tone with carrier magnitude at or above 30 MHz. `shaped` has one sampled tone. `two` has two constant tones. `multiple`
+has two tones with a sampled envelope, or at least three tones.
+A family in a domain is a candidate, not a promise of selection. Cost ordering,
+input preconditions and numerical guards still apply with `families=`.
+
+In the table, `B` is the per-segment `budget`, `d` is duration in ns and `T` is
+one carrier period in ns. Split, motion, omission and phase indicators use the
+bounds defined by each linked numerical owner. They are admission criteria,
+not measurements of final full-density error. RWA slope and curvature limits
+are normalized by envelope peak. Retained real dimension counts populations
+and both real coordinates of within-component coherences.
+
+The last column records the collected full-density matrix run: 17/17 families
+PASS, 35 tests and 50 case/family observations. The largest density error is
+`1.375101e-3`, in `floquet_period`. No family is unexercised or above `2e-3`,
+and no case is xfailed. Each linked case is pinned by
+[`test_pinned_family_density`](../../../../tests/simulate/evolution/contract/test_accuracy_matrix.py#L35).
+The same named inputs also run with
+[default empty and warm routing history](../../../../tests/simulate/evolution/contract/test_accuracy_matrix.py#L55);
+those runs measure the families actually selected, not every candidate.
+The [matrix instructions](../../../../tests/README.md#evolution-精度矩陣)
+own the command and report format.
+
+| Family and use | Dispatch domain | Approximation and numerical admission | Pinned accuracy cases | Full density ≤ 2e-3 |
+| --- | --- | --- | --- | --- |
+| [`t4`](kernels/t4.py#L42), static idle evolution | `idle` | Exact secular population semigroup and coherence phases/decay. Guard requires zero tones; no approximation threshold. | [`idle_coherence`](../../../../tests/simulate/evolution/contract/accuracy_cases.py#L174) | PASS |
+| [`adiabatic_map`](kernels/adiabatic_map.py#L147), undriven flux transport | `adiabatic` | Preserve ordered populations, integrate dynamical/gauge phases and decay coherences. Requires waveform samples. Quadrature doubles from 4 to 4096 nodes per knot interval until phase-factor change ≤ B/10; overlap < 0.25 forces refinement. This does not check nonadiabatic transitions, degeneracy or crossings. | [`adiabatic_ramp`](../../../../tests/simulate/evolution/contract/accuracy_cases.py#L102) | PASS |
+| [`flux_dop853`](kernels/flux_dop853.py#L128), driven continuous flux | `flux` | Integrate full H(flux(t)) with a fixed quantized secular bath per row, stopping at active flux/envelope knots. Requires tones and waveform samples. Local rtol = min(1e-4, 0.03B), atol = min(1e-6, 0.0003B), from the [shared solver](kernels/_dop853.py#L182). | [`continuous_flux`](../../../../tests/simulate/evolution/contract/accuracy_cases.py#L207) | PASS |
+| [`slow_envelope`](kernels/slow_envelope.py#L42), low-carrier constant drive | `slow`, carrier magnitude strictly below 30 MHz | Midpoint-held full Hamiltonians with Strang bath half-steps, default 20 holds per period and one hold for DC. Kernel guard allows one constant tone with carrier magnitude through 30 MHz, inclusive. No budget adaptation; historical population calibration is separate from this density measurement. | [`low_carrier`](../../../../tests/simulate/evolution/contract/accuracy_cases.py#L223) | PASS |
+| [`dyson`](kernels/dyson.py#L758), weak constant drive | `plateau` | Second-order full-carrier modal Dyson. Calibrated guards require r ≤ min(0.1, 0.25B^(1/3)), r2 ≤ 0.05, and second-order population indicator B2 + B/8 ≤ min(0.02, (1.5B)^(2/3)). Certified shared no-drive prefixes omit the B2 check. B/8 reserves path pruning; this is not a multilevel remainder proof. | [`weak_plateau`](../../../../tests/simulate/evolution/contract/accuracy_cases.py#L176) | PASS |
+| [`single_tone_rwa`](kernels/single_tone_rwa.py#L246), constant rotating-frame block evolution | `plateau` | Fixed flux, B ≥ 1e-3, carrier magnitude ≥ 50 MHz. Initial 50 MHz edge window with omission-driven restoration; transfer proxy ≤ 0.0058, full-operator/carrier ratio ≤ 0.25 and retained-norm phase proxy ≤ 0.06 rad. Phase-graph pruning ≤ min(B, 1e-3); real generator dimension ≤ 64. Uses the full secular bath without Strang splitting. | [`linear_plateau`](../../../../tests/simulate/evolution/contract/accuracy_cases.py#L126) | PASS |
+| [`floquet_period`](kernels/floquet_period.py#L758), full-carrier constant-tone period reuse | `plateau` | Hilbert period trajectories with secular split playback. Requires carrier magnitude ≥ 0.03 GHz and some subdivision count m in 1..64 with dT²ΓV²/m² ≤ 1.0, using this owner's rad/ns drive bound. Below 1 GHz, CF4 or adjacent-cutoff Sambe uses endpoint defect ≤ min(1e-4, 0.1B). Higher carriers use DOP853 rtol min(1e-8, 1e-4B), max step T/4. These are calibrated local controls. | [`weak_plateau`](../../../../tests/simulate/evolution/contract/accuracy_cases.py#L176), [`strong_plateau`](../../../../tests/simulate/evolution/contract/accuracy_cases.py#L179) | PASS; largest family error 1.375101e-3 |
+| [`t6`](kernels/t6.py#L247), full dissipative constant-tone channel | `plateau`, terminal candidate | One constant tone at any strength. Integrate the full secular channel, power complete periods and Fourier-interpolate phase. Refine 16..512 phase nodes until off-grid channel defect and spectral tail are each ≤ B/16; failure raises rather than reroutes. | [`weak_plateau`](../../../../tests/simulate/evolution/contract/accuracy_cases.py#L176), [`strong_plateau`](../../../../tests/simulate/evolution/contract/accuracy_cases.py#L179) | PASS |
+| [`single_tone_gate`](kernels/single_tone_gate.py#L6), phase-covariant shaped RWA gates | `shaped` | Fixed flux, B ≥ 1e-3, real sampled envelope with at least 3 samples, slope ≤ 0.025/ns, curvature ≤ 0.003/ns², carrier magnitude ≥ 50 MHz. Omission restoration requires transfer ≤ 0.0058, residual phase ≤ 0.0045 rad and retained real dimension ≤ 256. Pruning ≤ min(B, 1e-3); adaptive secular split uses n ≥ 4 with d³ΓV²/n² ≤ 0.01. [Shared gate owner](kernels/_rwa_gate.py#L230). | [`linear_shaped`](../../../../tests/simulate/evolution/contract/accuracy_cases.py#L126) | PASS |
+| [`shaped_sambe`](kernels/shaped_sambe.py#L250), frozen-envelope finite-Fourier periods | `shaped` | Nonzero peak, carrier magnitude ≥ 0.03 GHz, subdivisions m ≤ 32, envelope slope ≤ 2·peak·abs(f)·m and peak drive bound ≤ 0.5·abs(f)·m. Subdivision policy limits real/complex motion to 0.01/0.0025 and secular split to 0.01. Compare adjacent harmonic cutoffs 2/3 or 3/4 and use 4 or 8 amplitude nodes; accumulated spectral plus interpolation estimate must be ≤ B/2. | [`linear_shaped`](../../../../tests/simulate/evolution/contract/accuracy_cases.py#L126) | PASS |
+| [`gate_cache`](kernels/gate_cache.py#L63), phase-interpolated full-carrier shaped gates | `shaped` | Four Hilbert subsegments with secular half-steps. Model-only secular split d³ΓV²/16 ≤ 0.01. For 0 < d ≤ 30 ns, dispatch tries 6 phase nodes with 2 probes and full-unitary defect ≤ min(1e-4, 0.1B); other keys or failed convergence use 16 nodes. Fixed-order playback does not certify arbitrary-drive error against B. | [`shaped_complex`](../../../../tests/simulate/evolution/contract/accuracy_cases.py#L184) | PASS |
+| [`period_table`](kernels/period_table.py#L79), shaped amplitude-band period playback | `shaped` | 8 Chebyshev amplitude nodes and 16 phase samples. Guard requires envelope-motion indicator ≤ 0.05, amplitude-band bandwidth ≤ 0.5 and secular split ≤ 0.01. These calibrated limits do not scale with B. DC is guard-admissible with local direct integration, but default costs prefer terminal DOP853. | [`linear_shaped`](../../../../tests/simulate/evolution/contract/accuracy_cases.py#L126) | PASS |
+| [`common_frame`](kernels/common_frame.py#L248), nearby-carrier SW2 beat dynamics | `two` or two-tone `multiple` only | Fixed-flux common frame with second-order beat/two-photon terms, first-order endpoint dressing and CF4/secular playback. Absolute mean carrier must be ≥ 1e-10 GHz. Cost requires step ≥ 2 ns, capped at 8 ns and 0.08 cycles of the fastest retained channel; fast-channel denominator must exceed 1e-10. Row-local coherent/bath indicators must be ≤ 0.03/0.01, independent of B. | [`nearby_carriers`](../../../../tests/simulate/evolution/contract/accuracy_cases.py#L232) | PASS |
+| [`multitone_gate`](kernels/multitone_gate.py#L40), reused simultaneous RWA gates | `multiple`, requires a sampled envelope | Complete canonical-key inventory ≥ 20. Fixed flux, B ≥ 1e-3, real envelopes, slope ≤ 0.025/ns, curvature ≤ 0.003/ns², each carrier magnitude ≥ 50 MHz and absolute-carrier spacing ≥ 100 MHz. Full-operator/carrier ratio ≤ 0.25, retained-norm phase proxy ≤ 0.06 rad and pruning ≤ min(B, 1e-3). Adaptive split uses n ≥ 4 with d³ΓV²/n² ≤ 0.01. These gate policies differ from ordinary multitone RWA. | [`joint_gate_inventory`](../../../../tests/simulate/evolution/contract/accuracy_cases.py#L245), 20 points | PASS |
+| [`multitone_rwa`](kernels/multitone_rwa.py#L842), simultaneous omission-restored RWA | `two`, distinct ports only; `multiple`, requires a sampled envelope | Fixed flux, B ≥ 1e-3, real envelopes, slope ≤ 0.025/ns, curvature ≤ 0.003/ns² and each carrier magnitude ≥ 50 MHz. Start with 50 MHz edges, restore omitted paths until transfer proxy ≤ 0.0058 and residual phase ≤ 0.0045 rad; retained real dimension ≤ 256. No carrier-spacing, full-operator/carrier ratio or retained-norm phase cap. Apply step ceiling is 16 ns for constants, 4 ns for sampled controls. | [`joint_gate_inventory`](../../../../tests/simulate/evolution/contract/accuracy_cases.py#L245) | PASS |
+| [`floquet`](kernels/floquet.py#L578), constant Stark tone plus probe | `two` | Larger absolute gain selects the Stark slot, with ties choosing the first; that slot requires positive carrier. Frame overlap ≥ 0.5, modal condition ≤ 1e8, maximum real eigenvalue ≤ 1e-10/ns and residual ≤ 1e-9; sampling extent ≤ 128 with at most 4096 phase samples. k=0 omission and convergence each fit B/3. Modal Dyson additionally uses r ≤ 0.1, r2 ≤ 0.05 when probe gain magnitude ≥ 0.1, Dyson norm-duration v ≤ 0.5, transfer indicator v + v²/2 ≤ 0.02 and higher-order remainder exp(v)·v³/6 ≤ B/3; otherwise use periodic channel playback. Retained-sideband admission instead requires convergence ≤ B/40 and bound ≤ 0.95B, retaining edges within 0.1/ns and averaging other harmonics through order 4. This finite-Fourier admission is not a density-error guarantee. | [`two_carriers`](../../../../tests/simulate/evolution/contract/accuracy_cases.py#L187) | PASS |
+| [`dop853`](kernels/dop853.py#L164), full-drive direct density integration | `shaped`, `two`, `multiple`, terminal candidate | No RWA or fast-path admission threshold. Accepts valid rows with finite positive B, including complex sampled envelopes. Stops at active control knots. Local rtol = min(1e-4, 0.03B), atol = min(1e-6, 0.0003B), from the [shared solver](kernels/_dop853.py#L182); these are not global error bounds. | [`shaped_complex`](../../../../tests/simulate/evolution/contract/accuracy_cases.py#L184), [`two_carriers`](../../../../tests/simulate/evolution/contract/accuracy_cases.py#L187), [`joint_gate_inventory`](../../../../tests/simulate/evolution/contract/accuracy_cases.py#L245) | PASS |
+
+The matrix measures the maximum absolute difference over every complex density
+entry at readout, against an independent full-Hamiltonian Lindblad DOP853
+reference. It includes coherences, relaxation and dephasing. The reference must
+agree within `2e-6` between rtol/atol pairs `2e-10/2e-12` and `2e-12/2e-14`.
+The collected maximum reference difference is `4.432072948e-12`.
+[Multisegment](../../../../tests/simulate/evolution/contract/test_accuracy_matrix.py#L81)
+observations measure the final density of the whole timeline, not each kernel's
+local contribution. The separate
+[history case](../../../../tests/simulate/evolution/contract/test_accuracy_matrix.py#L107)
+checks both densities when accumulated inventory changes the default route from
+`shaped_sambe` to `single_tone_gate`.
+
+These measurements cover the linked inputs, not every input admitted by a
+guard. Historical population calibrations, omission proxies and local solver
+controls do not establish a whole-sequence full-density bound. In particular,
+the slow-envelope population tolerance of `1e-2` above is not the matrix's
+`2e-3` full-density acceptance threshold. The matrix does not measure environment
+I/Q accuracy or model/basis convergence.
 
 ## Row plans and the kernel seam
 
@@ -441,26 +534,47 @@ process-level reference count and the last call restores the original limits;
 external threadpoolctl users must not change them during active evolves.
 `close()` waits for active work, clears routing facts and is idempotent.
 
-`ModelSource` owns distinct acquire content's complete row inventories, separate
-from resident preparations and numerical guards. Each numerical input digest
+`RoutingHistory` owns distinct acquire content's complete row inventories,
+separate from resident preparations and numerical guards. Each numerical input digest
 contributes its canonical gate/multitone key row multiplicities once. Identical
 repeats need no numerical playback, so counting them again would overstate gate
 amortization and select unnecessary builds. Distinct contents still accumulate
 all their rows, including rejected or nonresident keys, before prefix work.
 The digest covers model, initial density, budget and full batch content, not
-sampling sequence or cache state. Cache hits, clearing, eviction, disabled
-residency and Engine replacement do not reset this history. Thus clearing a
-preparation cache and rerunning selects the same current route. Source callers
-serialize acquires, even across Engines. `gate_usage` returns a detached snapshot;
-`record_gate_usage(inventory, content=digest)` returns the keys' current totals.
-`projected_gate_usage` predicts that operation without mutation for route checks.
-Content membership and cumulative counters are source-lifetime history, not an
-LRU: storage grows with distinct content/key pairs and is released at source
-close. Only the current inventory is visited on a hit, not the historical set.
-Callers with history-sensitive preparations use `Engine.reuse` or `Engine.evolve`
-to resolve the current route.
-`ModelSource.close()` clears models and counts after active work drains. It is
-idempotent and leaves immutable builder inputs reusable with a fresh history.
+sampling sequence or cache state. Preparation-cache hits, clearing, eviction,
+disabled residency and Engine replacement do not reset this history. Thus clearing a
+preparation cache and rerunning selects the same current route. Callers serialize
+acquires sharing a history, even across sources and Engines. Content membership
+and cumulative counters are not an LRU: storage grows with distinct content/key
+pairs until the history is cleared or released. Only the current inventory is
+visited on a hit, not the historical set. Model identities namespace usage, so
+different physics do not share amortization.
+
+To retain routing history across model sources or clear it between acquires:
+
+```python
+from zcu_tools.simulate.evolution import ModelSource, RoutingHistory
+
+history = RoutingHistory()
+source = ModelSource(initial_density, build_model, history=history)
+# Reuse history across acquires or lend it to another matching model source.
+history.clear()  # Call after all acquires sharing history have drained.
+```
+
+`ModelSource(..., history=None)` creates its own history by default. Its routing
+and distinct-content counting remain unchanged. `ModelSource.close()` clears
+model caches and this owned history after active work drains. A supplied history
+is borrowed: closing the source does not clear it. Immutable builder inputs
+remain reusable after close.
+
+`history.clear()` discards all usage and content membership. The next evolve
+selects from empty history. It also invalidates every pre-clear preparation:
+`Engine.reuse` returns False until a new evolve registers current-generation
+facts, even if the route would stay the same. Repeated reuse checks cannot
+revive an old preparation. Clearing history does not clear model caches, alter
+initial density, reset sampling RNG or reset a simulation clock. It owns none
+of those states. Callers with history-sensitive preparations use `Engine.reuse`
+or `Engine.evolve` to resolve the current route.
 
 `SEGMENT_NUMERIC_VERSION` is `segment-engine-v7`. `simulators.ftf.environment` owns private
 replay and checks backend, model, numerical, RNG and dependency versions before

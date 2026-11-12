@@ -1,6 +1,7 @@
 """Six single-model sources, seven DC currents and bounded ADC composition."""
 
 import logging
+from collections.abc import Collection
 from dataclasses import replace
 from hashlib import sha256
 from math import isfinite, prod
@@ -33,7 +34,7 @@ from zcu_tools.simulate.adc import (
     round_statistics,
     sample_traces,
 )
-from zcu_tools.simulate.evolution import Engine
+from zcu_tools.simulate.evolution import Engine, RoutingHistory
 from zcu_tools.simulators.single_fluxonium.config.schema import (
     DCBias,
     DCSource,
@@ -140,6 +141,9 @@ class SixFluxoniumSource:
     begin_acquire freezes losses once for every point/round; execute also admits
     new standalone requests. Truth I/O failures propagate. No private replay is
     provided. The caller retains device and injected clock ownership.
+    history is borrowed by all six sources; None gives each ModelSource its own.
+    families restricts every source's Engine, including projection continuations;
+    unknown names raise on construction, unavailable domains raise on acquire.
     """
 
     def __init__(
@@ -149,6 +153,8 @@ class SixFluxoniumSource:
         *,
         clock: SimulationClock | None = None,
         truth_log: Path | None = None,
+        history: RoutingHistory | None = None,
+        families: Collection[str] | None = None,
     ) -> None:
         self.settings = settings
         self._clock = SimulationClock() if clock is None else clock
@@ -191,8 +197,10 @@ class SixFluxoniumSource:
                     engine=Engine(
                         workers=1,
                         routing_cache_bytes=settings.numerics.routing_cache_bytes // 6,
+                        families=families,
                     ),
                     clock=self._clock,
+                    history=history,
                 ),
             )
             for index, qubit in enumerate(settings.qubits.ordered())
@@ -457,6 +465,8 @@ def six_fluxonium(
     soccfg: QickConfig,
     clock: SimulationClock | None = None,
     truth_log: Path | None = None,
+    history: RoutingHistory | None = None,
+    families: Collection[str] | None = None,
 ) -> SimulationEnvironment:
     """Build seven DC FakeDevices, six independent models and a bound SoC.
 
@@ -476,6 +486,10 @@ def six_fluxonium(
     truth_log selects private JSONL output for enabled drift, defaulting to
     ~/.local/state/zcu-tools/simulation/six-fluxonium/<session>/truth.jsonl.
     Drift-off writes nothing. No truth enters public metadata.
+    history is borrowed by all six model sources; None gives each its own history.
+    clear() forces fresh solves without resetting sampling or clocks. families is
+    the whitelist for every span, including projective continuations; None permits
+    all families. Unknown names raise at build, unavailable domains at acquire.
     YAML, wiring, truth I/O and construction failures propagate with cleanup failures.
     """
     settings = (
@@ -504,7 +518,12 @@ def six_fluxonium(
             )
         sim_clock = SimulationClock() if clock is None else clock
         source = SixFluxoniumSource(
-            settings, devices, clock=sim_clock, truth_log=truth_log
+            settings,
+            devices,
+            clock=sim_clock,
+            truth_log=truth_log,
+            history=history,
+            families=families,
         )
         binding = SimulationBinding(
             source.snapshot,

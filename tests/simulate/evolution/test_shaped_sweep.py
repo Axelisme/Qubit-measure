@@ -15,7 +15,6 @@ from zcu_tools.simulate.evolution import (
     SecularModel,
     TimelineBatch,
 )
-from zcu_tools.simulate.evolution.kernels.dop853 import DOP853Kernel
 
 
 @pytest.mark.parametrize("frequency", [0.05, -0.05, -0.294, 5.0])
@@ -64,7 +63,7 @@ def test_single_use_ramps_use_spectral_periods_and_match_direct_evolution(
         np.full(2, duration),
     )
     engine = Engine(1)
-    direct = Engine(1, kernels=(DOP853Kernel(),))
+    direct = Engine(1, families=("dop853",))
     try:
         actual = engine.evolve(source, (batch,), cancel=Event())
         # A complex two-tone description exercises the ordinary direct branch
@@ -203,7 +202,7 @@ def test_smooth_complex_envelopes_use_sambe_and_match_dop(
         np.full(3, duration),
     )
     engine = Engine(1)
-    direct = Engine(1, kernels=(DOP853Kernel(),))
+    direct = Engine(1, families=("dop853",))
     try:
         actual = engine.evolve(source, (batch,), cancel=Event())
         expected = direct.evolve(source, (batch,), budget=1e-7, cancel=Event())
@@ -253,7 +252,7 @@ def test_complex_fractional_tail_preserves_quadrature(frequency: float) -> None:
         np.full(1, duration),
     )
     engine = Engine(1)
-    direct = Engine(1, kernels=(DOP853Kernel(),))
+    direct = Engine(1, families=("dop853",))
     try:
         actual = engine.evolve(source, (batch,), cancel=Event())
         expected = direct.evolve(source, (batch,), budget=1e-7, cancel=Event())

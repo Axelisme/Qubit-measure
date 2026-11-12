@@ -1,10 +1,10 @@
 # Six independent fluxonium cavities
 
-**Last updated:** 2026-11-02，caller-owned board 與 YAML 路由核對
+**Last updated:** 2026-11-12，caller-owned routing controls
 
 **Readers:** framework-dev, lab-author, agent. Build and acquire six independent cavities through the normal simulation SoC.
 
-`six_fluxonium(configuration, *, soccfg)` accepts `SixFluxoniumSettings` or a YAML path and
+`six_fluxonium(configuration, *, soccfg, clock=None, truth_log=None, history=None, families=None)` accepts `SixFluxoniumSettings` or a YAML path and
 returns `SimulationEnvironment`. The builder creates seven addressed FakeDevices
 in A, `Q1_bias` through `Q6_bias` and `coil_bias`. Each local line affects only
 its own circuit. The shared coil affects all six, with each circuit's own
@@ -28,6 +28,17 @@ no acquisition restores startup currents.
 The host calls `close_backend()` after acquisitions drain, then closes its devices.
 Backend close leaves all seven DC drivers untouched. Delivered raw sources retain their
 noiseless ADC inputs after later acquisitions and backend close.
+
+Pass `history=RoutingHistory()` from `zcu_tools.simulate.evolution` to lend one
+history to all six model sources, including rebuilt sources. Closing the backend
+does not clear borrowed history. With `history=None`, each source owns a separate
+history. After acquires drain, `history.clear()` forces fresh solves without
+resetting sampling streams, simulated time or model caches.
+`families={"t4", "dop853"}` restricts every cavity's evolution spans, including
+projective continuations. Unknown names raise at construction; an unavailable
+domain raises at acquire without bypassing guards or falling back outside the
+whitelist. Omitting both keywords preserves default routing. Neither control
+belongs in physical YAML or program cfg.
 
 ## Cache budgets
 

@@ -74,6 +74,42 @@ def group_command(ready: Path, leader_action: str, preamble: str = "") -> list[s
     return [sys.executable, "-c", source]
 
 
+def forwarding_group_command(ready: Path) -> list[str]:
+    """Build a signal-ready group whose leader reaps its worker before exiting.
+
+    Block INT/TERM across fork so neither process handles them in fork setup.
+    The leader publishes readiness after the worker acknowledges its fork.
+    Keep the leader alive until the worker's handler and log write finish, so
+    residual-group cleanup cannot interrupt the signal being asserted.
+    """
+    source = (
+        "import json, os, signal\n"
+        "signals = {signal.SIGINT, signal.SIGTERM}\n"
+        "signal.pthread_sigmask(signal.SIG_BLOCK, signals)\n"
+        "leader = os.getpid()\n"
+        "ready_r, ready_w = os.pipe()\n"
+        "hold_r, hold_w = os.pipe()\n"
+        "def stopped(signum, frame):\n"
+        "    if os.getpid() == leader:\n"
+        "        os.waitpid(worker, 0)\n"
+        "    print(os.getpid(), signum, flush=True)\n"
+        "    raise SystemExit(128 + signum)\n"
+        "for signum in signals:\n"
+        "    signal.signal(signum, stopped)\n"
+        "worker = os.fork()\n"
+        "if worker == 0:\n"
+        "    os.write(ready_w, b'x')\n"
+        "else:\n"
+        "    os.read(ready_r, 1)\n"
+        f"    with open({str(ready)!r}, 'w') as stream:\n"
+        "        print(json.dumps({'leader': leader, 'worker': worker}), file=stream, flush=True)\n"
+        "signal.pthread_sigmask(signal.SIG_UNBLOCK, signals)\n"
+        # Unlike pause(), a pipe read cannot miss a signal delivered just before it.
+        "os.read(hold_r, 1)\n"
+    )
+    return [sys.executable, "-c", source]
+
+
 def assert_group_stopped(pids: dict[str, int]) -> None:
     """Check that every observed process is gone or stopped as a zombie."""
     assert set(pids) == {"leader", "worker"}

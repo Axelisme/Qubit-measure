@@ -21,6 +21,7 @@ from run_heavy import main
 
 from tests.tools._run_heavy_support import (
     assert_group_stopped,
+    forwarding_group_command,
     group_command,
     held_slots,
     observed_group,
@@ -169,6 +170,7 @@ def test_receipt_identifies_callers_worktree_and_child_exit(
         "timed_out",
         "residual_killed",
         "log",
+        "exclusive",
     }
     assert receipt["command"] == command
     assert receipt["cwd"] == str(cwd)
@@ -634,17 +636,7 @@ def test_runner_forwards_signal_to_group_and_restores_handlers(
     signum: int,
 ) -> None:
     ready = repo / "ready"
-    command = group_command(
-        ready,
-        "signal.pause()",
-        (
-            "def stopped(signum, frame):\n"
-            "    print(os.getpid(), signum, flush=True)\n"
-            "    raise SystemExit(128 + signum)\n"
-            "signal.signal(signal.SIGINT, stopped)\n"
-            "signal.signal(signal.SIGTERM, stopped)\n"
-        ),
-    )
+    command = forwarding_group_command(ready)
 
     def unhandled(signum: int, frame: object) -> None:
         pytest.fail(f"runner did not install forwarding for signal {signum}")

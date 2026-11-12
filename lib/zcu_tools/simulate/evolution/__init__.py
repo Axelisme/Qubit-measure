@@ -33,6 +33,7 @@ from .kernels.multitone_rwa import (
     rwa_coefficients,
 )
 from .model import DriveSource, NumericModel
+from .routing_history import RoutingHistory
 from .secular import (
     FluxExpansion,
     FluxLevel,

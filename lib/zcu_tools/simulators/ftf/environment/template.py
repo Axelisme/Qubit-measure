@@ -31,6 +31,7 @@ from zcu_tools.simulate.evolution import (
     EnvelopeSpec,
     FluxWaveform,
     ModelSource,
+    RoutingHistory,
     TimelineBatch,
 )
 from zcu_tools.simulate.lines import DistortionTerm, FluxLine
@@ -71,9 +72,16 @@ class FTFModelFacts:
     These objects must remain unchanged for their lifetime. Invalid DC or bath
     inputs propagate their numeric errors. No density evolution or sampling runs.
     Used by FTFSource across acquires and by standalone plan_template calls.
+    history is borrowed by the ModelSource; None creates source-owned history.
     """
 
-    def __init__(self, settings: FTFSettings, snapshot: EnvironmentSnapshot) -> None:
+    def __init__(
+        self,
+        settings: FTFSettings,
+        snapshot: EnvironmentSnapshot,
+        *,
+        history: RoutingHistory | None = None,
+    ) -> None:
         self._settings_json = settings.model_dump_json()
         self._snapshot = snapshot
         self._revision = (replay.BACKEND_VERSION, replay.SEGMENT_NUMERIC_VERSION)
@@ -84,7 +92,10 @@ class FTFModelFacts:
         )
         resonator_pair = resonators(settings)
         self.source = model_source(
-            self.joint, drive_sources(settings, self.joint), resonators=resonator_pair
+            self.joint,
+            drive_sources(settings, self.joint),
+            resonators=resonator_pair,
+            history=history,
         )
         self.readout = readout_model(self.joint, resonator_pair)
 

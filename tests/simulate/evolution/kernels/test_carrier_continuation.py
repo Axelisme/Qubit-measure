@@ -191,7 +191,6 @@ def test_engine_carrier_results_are_stable_across_warm_cache_and_worker_width(
     from threading import Event
 
     from zcu_tools.simulate.evolution import Engine
-    from zcu_tools.simulate.evolution.kernels import REGISTRY
 
     from .._engine import batch, track
 
@@ -206,12 +205,12 @@ def test_engine_carrier_results_are_stable_across_warm_cache_and_worker_width(
     changed_pulse = replace(pulse, phase_rad=pulse.phase_rad + 0.7)
     changed = replace(timeline, tracks=(changed_pulse,))
     # Isolate floquet_period continuation from the constant single-tone RWA route.
-    kernels = tuple(k for k in REGISTRY if k.name != "single_tone_rwa")
-    with closing(Engine(workers, kernels=kernels)) as engine:
+    families = ("dyson", "floquet_period", "t6")
+    with closing(Engine(workers, families=families)) as engine:
         first = engine.evolve(source, (timeline,), cancel=Event())
         # Changed phase misses exact-result memo but hits identical period keys.
         warm = engine.evolve(source, (changed,), cancel=Event())
-    with closing(Engine(1, kernels=kernels)) as engine:
+    with closing(Engine(1, families=families)) as engine:
         cold = engine.evolve(source, (changed,), cancel=Event())
     assert first.paths.segments_by_kernel == {"floquet_period": count}
     assert warm.paths.segments_by_kernel == cold.paths.segments_by_kernel

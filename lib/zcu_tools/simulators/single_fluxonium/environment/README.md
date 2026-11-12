@@ -1,10 +1,10 @@
 # Single-fluxonium acquisition
 
-**Last updated:** 2026-11-01，simulators package ownership
+**Last updated:** 2026-11-12，caller-owned routing controls
 
 **Readers:** framework-dev, lab-author, agent. Compose complete fluxonium timelines with one physical readout cavity.
 
-`single_fluxonium(path_or_settings, *, soccfg, private_replay=None)` returns the normal
+`single_fluxonium(path_or_settings, *, soccfg, private_replay=None, clock=None, truth_log=None, history=None, families=None)` returns the normal
 `SimulationEnvironment`. It creates one fixed-unit DC FakeDevice, a mock SoC,
 one route per named microwave line, an optional fast-flux route and one readout generator/ADC route.
 All generators bind to that ADC for transport admission. Only the configured
@@ -17,6 +17,16 @@ The caller owns resources after return. After acquisition drains, call
 `environment.close_backend()` when present, then clean up caller-owned devices.
 GUI startup registers the backend cleanup through its normal on-close hook.
 Transferring a driver to the GUI transfers only that driver's cleanup responsibility.
+
+Pass `history=RoutingHistory()` from `zcu_tools.simulate.evolution` to borrow
+one routing history across acquires and rebuilt model sources. Backend close
+leaves that history intact. Call `history.clear()` only after acquires drain;
+the next acquire solves again without resetting sampling streams, simulated time
+or model caches. `families={"t4", "dop853"}` limits every evolution span,
+including projective continuations. Unknown names raise at construction; an
+unavailable domain raises at acquire without bypassing guards or falling back
+outside the whitelist. Omitting both keywords preserves default routing and
+source-owned history. Neither control belongs in physical YAML or program cfg.
 
 ## Complete timelines
 
