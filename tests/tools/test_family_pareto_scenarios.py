@@ -102,9 +102,7 @@ def test_shaped_gate_scan_compiles_gaussian_phase_alphabet_prefixes() -> None:
                 np.resize(np.arange(4) * np.pi / 2, count),
                 atol=1e-12,
             )
-            envelopes = [
-                gate.envelopes[gate.envelope_index[point]] for gate in gates
-            ]
+            envelopes = [gate.envelopes[gate.envelope_index[point]] for gate in gates]
             assert all(envelope.kind == "sampled" for envelope in envelopes)
             assert all(np.ptp(envelope.samples.real) > 0 for envelope in envelopes)
         assert np.all(np.diff(batch.end_ns) > 0)

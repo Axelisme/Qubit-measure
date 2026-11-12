@@ -162,7 +162,8 @@ It times **Engine.evolve**, not `program.acquire`. The existing acquire benchmar
 above keeps its workloads and comparison contract.
 
 The default inputs are fixed 24-point carrier, gain, length, idle and gate-sequence
-scans on the full 21-level single-fluxonium model, plus a synchronous dual-port
+scans on the full 21-level single-fluxonium model, including constant and Gaussian
+gate-sequence scans, plus a synchronous dual-port
 scan on the fixed FTF model with 32 retained joint states and local 4×4×4.
 Add `--include-synthetic` to also measure the unchanged accuracy inventory and
 twelve amplified synthetic workloads. Reports separate
@@ -312,7 +313,7 @@ convergence claim for arbitrary CZ pulses or the full native/local model.
 FTF references and timings must be rebuilt at 32 states; 16-state results do not
 apply.
 
-All five single-model scans use the full 21-level model. Their carrier center is
+All six single-model scans use the full 21-level model. Their carrier center is
 DC E1−E0 from that fixed model. Gains, phases and durations are illustrative
 benchmark settings, not fitted calibrations or calibrated pi/pi/2 rotations.
 Every shot ends in readout at the fixed bare cavity frequency, gain .1, with a
@@ -327,6 +328,7 @@ not at the end of that window.
 | I `idle_sweep` | X-phase gate, idle, Y-phase gate, terminal readout | Idle 20 to 400 ns | Two constant 20 ns gates, gain .1 | 4 | Shared initial gate with changing gap and final absolute phase. |
 | N `gate_sequence` | Prefix of repeated X,Y,-X,-Y phase alphabet, terminal readout | Gate count 1 to 24 | Constant 20 ns gates, gain .1 | 2 to 35 | Ragged sequences with a reusable alphabet, without random seeds. |
 | M `simultaneous_drive` | Synchronous F1/F2 drives, terminal readout | Shared gain .01 to .1 | Two Gaussians, 100 ns, sigma 20 ns | 2 | Independent joint-model drive operators under overlapping shaped controls. |
+| S `shaped_gate_sequence` | Prefix of repeated Gaussian X,Y,-X,-Y gates, terminal readout | Gate count 1 to 24 | Gaussian 100 ns gates, sigma 20 ns, gain .1 | 2 to 47 | Reuses N's alphabet and ragged prefixes with A's shaped-gate support and width, separating shape from sequence reuse. |
 
 M uses public timeline fork/join to start both drives together and place readout
 after both finish. Its two carriers are the uncoupled local DC E1−E0 frequencies
@@ -335,6 +337,12 @@ same coupled FTF density. Readout uses the fixed bare r1 cavity frequency, gain
 .1, a 1 us pulse/window and fixed flight time. This benchmark sequence is not a
 calibrated CZ gate. The CZ comparison above explains only the retained-state
 choice, not a fidelity claim for this scan.
+
+S uses A's 100 ns support and 20 ns sigma to compare sequence reuse at the same
+Gaussian width. The support spans five sigma. These are fixed benchmark gates,
+not calibrated pi rotations. The lab's generic `pi_pulse` creation template
+seeds a constant pulse, so it supplies no calibrated Gaussian duration.
+S adds no random gates or extra repetitions to make a family admissible.
 
 Continuous requested axes are equally spaced and include both endpoints. Native
 hardware quantization changes the realized values. Length uses a public table
