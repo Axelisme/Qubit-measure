@@ -35,6 +35,7 @@ class T1Result:
 
 
 def t1_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
+    """Return the real-valued measurement view of complex IQ without changing the input."""
     return rotate2real(signals).real
 
 
@@ -86,7 +87,7 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
         shaped (gain, length). Each row is a decay trace; T1 is fitted later,
         not a directly measured population or a conversion from gain to flux.
         """
-        # Resolve flux gain and duration coordinates on the hardware grid.
+        # 1. Resolve flux gain and duration coordinates on the hardware grid.
         cfg = config
         soc, soccfg = context.soc, context.soccfg
 
@@ -97,7 +98,7 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
         gains = sweep2array(gain_sweep, "gain", {"soccfg": soccfg, "gen_ch": lf_ch})
         lengths = sweep2array(length_sweep, "time", {"soccfg": soccfg, "gen_ch": lf_ch})
 
-        # Keep the relaxation traces grouped by flux gain.
+        # 2. Keep the relaxation traces grouped by flux gain.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Flux Pulse Gain (a.u.)", ylabel="Time (us)")
         formatter = ScalarFormatter(useMathText=True)
@@ -108,6 +109,7 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
 
         @context.plots.on_plot_thread
         def update(data):
+            """Update the measurement artists from the latest acquired data."""
             return viewer.set(gains, lengths, t1_signal2real(data))
 
         fig.show()
@@ -146,6 +148,7 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
         refit each row with that baseline fixed. Rejected final fits retain NaN
         T1 values; their initialized zero errors do not indicate a valid fit.
         """
+        # 1. Select the measured data and analysis controls.
         del options  # This analysis has no configurable options.
         result = source.result
 
@@ -154,6 +157,7 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
         real_signals = t1_signal2real(signals2D)
 
         def is_good_fit(fit_signal, real_signal) -> bool:
+            """Return whether the candidate follows the observed relaxation trace closely enough."""
             real_ptp = np.ptp(real_signal)
             fit_ptp = np.ptp(fit_signal)
             residual = real_signal - fit_signal
@@ -187,6 +191,7 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
                 t1s[i] = fit.decay_time
                 t1errs[i] = fit.decay_time_err
 
+        # 2. Compare the analysis with the measured response.
         fig, ax = plots.subplots(num="fit", figsize=config.figsize)
 
         ax.imshow(

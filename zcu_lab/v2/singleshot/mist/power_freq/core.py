@@ -32,6 +32,9 @@ from zcu_tools.program.v2.modules.readout import (
 
 from zcu_lab.v2.support import live_heatmap
 
+POPULATION_STATES = (0, 1, 2)
+POPULATION_COUNT = len(POPULATION_STATES)
+
 
 @dataclass(frozen=True)
 class FreqPowerResult:
@@ -47,6 +50,11 @@ class FreqPowerResult:
     gains: NDArray[np.float64]
     freqs: NDArray[np.float64]
     counts: NDArray[np.float64]
+
+
+@pydantic_dataclass(frozen=True, config={"arbitrary_types_allowed": True})
+class FreqPowerAnalyzeOptions:
+    confusion_matrix: NDArray[np.float64] | None = None
 
 
 class FreqPowerCfg(ConfigBase):
@@ -74,18 +82,16 @@ class FreqPowerCfg(ConfigBase):
     ]
 
 
-@pydantic_dataclass(frozen=True, config={"arbitrary_types_allowed": True})
-class FreqPowerAnalyzeOptions:
-    confusion_matrix: NDArray[np.float64] | None = None
-
-
 class FreqPowerExp(Experiment[FreqPowerResult, FreqPowerCfg]):
     Options: ClassVar[type[FreqPowerAnalyzeOptions]] = FreqPowerAnalyzeOptions
 
     AXES_SPEC: ClassVar[AxesSpec[FreqPowerResult, FreqPowerCfg]] = AxesSpec(
         axes=(
             AxesSpec.Axis(
-                values=(0, 1, 2), label="Population", unit="None", dtype=np.int64
+                values=POPULATION_STATES,
+                label="Population",
+                unit="None",
+                dtype=np.int64,
             ),
             AxesSpec.Axis(
                 "freqs", label="Drive Freq", unit="Hz", scale=1e6, dtype=np.float64
@@ -119,10 +125,10 @@ class FreqPowerExp(Experiment[FreqPowerResult, FreqPowerCfg]):
         Optional confusion correction is analysis-only.
         """
 
-        # Prepare host gain points and the board frequency grid.
+        # 1. Prepare host gain points and the board frequency grid.
         soc, soccfg = context.soc, context.soccfg
         cfg = deepcopy(cfg)
-        # Keep the G/E/Other contract for every declared ADC.
+        # 2. Keep the G/E/Other contract for every declared ADC.
         require_circle_classifiers(cfg.readout)
         read_axis = Classify(
             "readout",
@@ -143,7 +149,7 @@ class FreqPowerExp(Experiment[FreqPowerResult, FreqPowerCfg]):
             {"soccfg": soccfg, "gen_ch": cfg.probe_pulse.ch},
         )
 
-        # Display the measured G/E/Other fractions in classifier order.
+        # 3. Display the measured G/E/Other fractions in classifier order.
         figure, _ = context.plots.subplots(
             nrows=3, ncols=1, num="measurement", figsize=(12, 6)
         )
@@ -154,6 +160,7 @@ class FreqPowerExp(Experiment[FreqPowerResult, FreqPowerCfg]):
 
         @context.plots.on_plot_thread
         def plot_fn(counts: NDArray[np.float64]):
+            """Update the measurement artists from the latest acquired data."""
             populations = counts / counts.sum(axis=-1, keepdims=True)
             return tuple(
                 artist
@@ -164,7 +171,7 @@ class FreqPowerExp(Experiment[FreqPowerResult, FreqPowerCfg]):
         figure.show()
 
         buffer = SignalBuffer(
-            (len(gains), len(freqs), 3),
+            (len(gains), len(freqs), POPULATION_COUNT),
             dtype=np.float64,
             on_update=plot_fn,
         )
@@ -190,7 +197,7 @@ class FreqPowerExp(Experiment[FreqPowerResult, FreqPowerCfg]):
                     rounds=cfg.rounds,
                 )
 
-        # Preserve gain/frequency/state order with explicit G/E/Other columns.
+        # 4. Preserve gain/frequency/state order with explicit G/E/Other columns.
         counts = buffer.array
 
         return FreqPowerResult(gains=gains, freqs=freqs, counts=counts)
@@ -209,10 +216,11 @@ class FreqPowerExp(Experiment[FreqPowerResult, FreqPowerCfg]):
         cfg may be None. options controls correction and any axis conversion.
         Publish the fit figure to plots. Legacy G/E data raise ValueError.
         """
+        # 1. Select the measured data and analysis controls.
         result = source.result
         gains, freqs, populations = result.gains, result.freqs, result.counts
         populations = populations / populations.sum(axis=-1, keepdims=True)
-        if populations.shape[-1] != 3:
+        if populations.shape[-1] != POPULATION_COUNT:
             raise ValueError(
                 "Expected [g,e,other] populations; legacy G/E files are unsupported. "
                 "Acquire a new run."
@@ -225,7 +233,7 @@ class FreqPowerExp(Experiment[FreqPowerResult, FreqPowerCfg]):
         )
         ax_g, ax_e, ax_o = fig.axes
 
-        # Stored populations are (gain, frequency, state); display frequency rows.
+        # 2. Stored populations are (gain, frequency, state); display frequency rows.
         im_g = ax_g.pcolormesh(gains, freqs, populations[..., 0].T, shading="nearest")
         ax_g.set_title("Ground State Population")
         ax_g.set_xlabel("Drive Gain (a.u.)")

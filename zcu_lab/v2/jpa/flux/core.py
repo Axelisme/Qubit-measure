@@ -121,6 +121,7 @@ class FluxExp(Experiment[FluxResult, FluxCfg]):
 
         @context.plots.on_plot_thread
         def update(data):
+            """Update the measurement artists from the latest acquired data."""
             return line.set(jpa_fluxs, np.abs(data))
 
         fig.show()
@@ -190,6 +191,7 @@ class FluxExp(Experiment[FluxResult, FluxCfg]):
         magnitude, and return the peak's device value without conversion.
         ``options`` is None; this is a smoothed peak, not a model fit.
         """
+        # 1. Select the measured data and analysis controls.
         del options
         result = source.result
 
@@ -201,6 +203,7 @@ class FluxExp(Experiment[FluxResult, FluxCfg]):
         max_idx = np.argmax(snrs)
         best_jpa_flux = jpa_fluxs[max_idx]
 
+        # 2. Compare the analysis with the measured response.
         fig, ax = plots.subplots(num="fit", figsize=config.figsize)
         ax.plot(jpa_fluxs, snrs, label="signal difference")
         ax.axvline(

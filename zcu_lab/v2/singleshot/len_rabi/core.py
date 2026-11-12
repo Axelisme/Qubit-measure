@@ -35,12 +35,28 @@ from zcu_lab.v2.support.singleshot.util import (
 )
 
 
+@dataclass(frozen=True)
+class LenRabiResult:
+    lengths: NDArray[np.float64]
+    shot_indices: NDArray[np.int64]
+    signals: NDArray[np.complex128]
+
+
+@pydantic_dataclass(frozen=True, config={"arbitrary_types_allowed": True})
+class LenRabiAnalyzeOptions:
+    decay: bool = True
+    fit_phase: bool = False
+    initial_state: Literal["ground", "excited"] = "ground"
+    max_calls: int | None = None
+
+
 def _plot_initial_histogram(
     ax: Axes,
     fit: RabiJointFitResult,
     effective_t1_us: float | None,
     classified_distribution: NDArray[np.float64] | None,
 ) -> None:
+    """Draw the initial-point IQ histogram and fitted state contributions on ax."""
     counts = fit.projection.counts[0]
     edges = fit.projection.bin_edges
     ax.stairs(counts, edges, label="Observed counts", color="black")
@@ -119,6 +135,7 @@ def _plot_initial_histogram(
 
 
 def _plot_confusion_matrix(ax: Axes, fit: RabiJointFitResult) -> None:
+    """Draw the fitted three-state confusion matrix on the caller-owned ax."""
     labels = ("g", "e", "other")
     matrix = fit.confusion_matrix
     if fit.backend.valid and np.isfinite(matrix).all():
@@ -147,13 +164,6 @@ def _plot_confusion_matrix(ax: Axes, fit: RabiJointFitResult) -> None:
     ax.set_ylabel("True state")
 
 
-@dataclass(frozen=True)
-class LenRabiResult:
-    lengths: NDArray[np.float64]
-    shot_indices: NDArray[np.int64]
-    signals: NDArray[np.complex128]
-
-
 class LenRabiCfg(ConfigBase):
     reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
     qub_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Qub Pulse")]
@@ -175,14 +185,6 @@ class LenRabiCfg(ConfigBase):
             description="Delay after each shot.",
         ),
     ]
-
-
-@pydantic_dataclass(frozen=True, config={"arbitrary_types_allowed": True})
-class LenRabiAnalyzeOptions:
-    decay: bool = True
-    fit_phase: bool = False
-    initial_state: Literal["ground", "excited"] = "ground"
-    max_calls: int | None = None
 
 
 class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
@@ -226,7 +228,7 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
         unexpected shot-buffer shape.
         """
 
-        # Set up one raw-shot cloud per length without changing the caller cfg.
+        # 1. Set up one raw-shot cloud per length without changing the caller cfg.
         soc, soccfg = context.soc, context.soccfg
         cfg = deepcopy(cfg)
         classifier = rabi_preview_classifier(cfg.readout)
@@ -240,25 +242,24 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
         )
         expected_shape = (len(lengths), cfg.shots)
 
-        # Preview classified populations while keeping raw IQ as the result.
-        def configure_axes(ax: Axes) -> None:
-            ax.set_ylim(0.0, 1.0)
-            for line, label in zip(
-                ax.lines, ("Ground", "Excited", "Other"), strict=True
-            ):
-                line.set_label(label)
-            ax.legend()
+        # 2. Preview classified populations while keeping raw IQ as the result.
 
         viewer = None
         if classifier is not None:
             figure, ax = context.plots.subplots(num="measurement")
             ax.set(xlabel="Length (us)", ylabel="Signal")
             viewer = live_line(ax, num_lines=3)
-            configure_axes(ax)
+            ax.set_ylim(0.0, 1.0)
+            for line, label in zip(
+                ax.lines, ("Ground", "Excited", "Other"), strict=True
+            ):
+                line.set_label(label)
+            ax.legend()
             figure.show()
 
         @context.plots.on_plot_thread
         def update_view(raw_iq: NDArray[np.complex128]):
+            """Update the measurement artists from the latest acquired data."""
             if viewer is None or classifier is None or classifier.radius is None:
                 return ()
             acquired_rows = np.all(np.isfinite(raw_iq), axis=1)
@@ -304,7 +305,7 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
                     )
                 buffer[step].set(raw_iq)
 
-        # Completed rows survive cancellation; unacquired lengths remain NaN.
+        # 3. Completed rows survive cancellation; unacquired lengths remain NaN.
         signals = buffer.array
 
         return LenRabiResult(
@@ -320,6 +321,8 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
         *,
         plots: Plots,
     ) -> RabiJointFitSummary:
+        # 1. Fit the raw IQ and interpret the readout calibration.
+        """Fit raw IQ jointly, return pulse-length calibrations, and draw populations and readout diagnostics."""
         result = source.result
 
         fit = fit_rabi_joint(
@@ -330,6 +333,7 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
             max_calls=options.max_calls,
             initial_state=options.initial_state,
         )
+        # 2. Compare fitted populations and readout diagnostics.
         readout = source.cfg.readout if source.cfg is not None else None
         ro_length = readout.ro_length if readout is not None else None
         ro_length_us = float(ro_length) if isinstance(ro_length, Real) else None

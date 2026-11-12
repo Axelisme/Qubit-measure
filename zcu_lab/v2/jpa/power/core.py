@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from typing import Annotated, ClassVar
 
 import numpy as np
-from matplotlib.axes import Axes
 from numpy.typing import NDArray
 from pydantic import Field
 from zcu_tools.cfg_model import ConfigBase, DeviceName, FieldMeta
@@ -112,18 +111,16 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
         jpa_powers = sweep2array(cfg.jpa_power, allow_array=True)
         np.random.default_rng(cfg.seed).shuffle(jpa_powers[1:-1])
 
-        def configure_axes(ax: Axes) -> None:
-            ax.lines[0].set_linestyle("None")
-            ax.lines[0].set_marker("o")
-
         # Show independent points rather than connecting randomized settings.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Power (dBm)", ylabel="Signal Difference")
         line = live_line(ax)
-        configure_axes(ax)
+        ax.lines[0].set_linestyle("None")
+        ax.lines[0].set_marker("o")
 
         @context.plots.on_plot_thread
         def update(data):
+            """Update the measurement artists from the latest acquired data."""
             return line.set(jpa_powers, np.abs(data))
 
         fig.show()
@@ -185,6 +182,7 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
         Use only ``source`` data, with no fit or interpolation; ``options``
         is None. All-NaN SNR fails rather than selecting a power.
         """
+        # 1. Select the measured data and analysis controls.
         del options
         result = source.result
 
@@ -195,6 +193,7 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
         max_idx = np.nanargmax(snrs)
         best_jpa_power = jpa_powers[max_idx]
 
+        # 2. Compare the analysis with the measured response.
         fig, ax = plots.subplots(num="fit", figsize=config.figsize)
         ax.scatter(jpa_powers, snrs, label="signal difference", s=1)
         ax.axvline(

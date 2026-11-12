@@ -32,6 +32,13 @@ class AccPhaseResult:
     signals: NDArray[np.complex128]
 
 
+@dataclass(frozen=True)
+class AccPhaseAnalysis:
+    lengths_us: NDArray[np.float64]
+    phases_rad: NDArray[np.float64]
+    detunes_mhz: NDArray[np.float64]
+
+
 def acc_phase_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return rotate2real(signals).real
 
@@ -60,13 +67,6 @@ class AccPhaseCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ]
-
-
-@dataclass(frozen=True)
-class AccPhaseAnalysis:
-    lengths_us: NDArray[np.float64]
-    phases_rad: NDArray[np.float64]
-    detunes_mhz: NDArray[np.float64]
 
 
 class AccPhaseExp(Experiment[AccPhaseResult, AccPhaseCfg]):

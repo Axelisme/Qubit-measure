@@ -34,6 +34,7 @@ class DriveFreqResult:
 
 
 def drivefreq_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
+    """Return the real-valued measurement view of complex IQ without changing the input."""
     avg_len = max(int(0.05 * signals.shape[1]), 1)
 
     mist_signals = signals - np.mean(signals[:, :avg_len])
@@ -121,6 +122,7 @@ class DriveFreqExp(Experiment[DriveFreqResult, DriveFreqCfg]):
 
         @context.plots.on_plot_thread
         def update(data):
+            """Update the measurement artists from the latest acquired data."""
             return viewer.set(freqs, gains, drivefreq_signal2real(data))
 
         fig.show()
@@ -161,6 +163,7 @@ class DriveFreqExp(Experiment[DriveFreqResult, DriveFreqCfg]):
         first 5% of gain samples (at least one). ``options`` is None; this
         response map returns no population fit or calibration value.
         """
+        # 1. Select the measured data and analysis controls.
         del options
         result = source.result
 
@@ -168,6 +171,7 @@ class DriveFreqExp(Experiment[DriveFreqResult, DriveFreqCfg]):
 
         real_signals = drivefreq_signal2real(signals)
 
+        # 2. Compare the analysis with the measured response.
         _, ax = plots.subplots(num="fit", figsize=config.figsize)
 
         ax.imshow(

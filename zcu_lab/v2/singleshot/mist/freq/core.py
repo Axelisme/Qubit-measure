@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from typing import Annotated, ClassVar
 
 import numpy as np
-from matplotlib.axes import Axes
 from numpy.typing import NDArray
 from pydantic.dataclasses import dataclass as pydantic_dataclass
 from zcu_tools.analysis.singleshot import correct_populations
@@ -33,6 +32,9 @@ from zcu_tools.program.v2.modules.readout import (
 
 from zcu_lab.v2.support import live_line
 
+POPULATION_STATES = (0, 1, 2)
+POPULATION_COUNT = len(POPULATION_STATES)
+
 
 @dataclass(frozen=True)
 class FreqResult:
@@ -45,6 +47,11 @@ class FreqResult:
 
     freqs: NDArray[np.float64]
     counts: NDArray[np.float64]
+
+
+@pydantic_dataclass(frozen=True, config={"arbitrary_types_allowed": True})
+class FreqAnalyzeOptions:
+    confusion_matrix: NDArray[np.float64] | None = None
 
 
 class FreqCfg(ConfigBase):
@@ -71,18 +78,16 @@ class FreqCfg(ConfigBase):
     ]
 
 
-@pydantic_dataclass(frozen=True, config={"arbitrary_types_allowed": True})
-class FreqAnalyzeOptions:
-    confusion_matrix: NDArray[np.float64] | None = None
-
-
 class FreqDepExp(Experiment[FreqResult, FreqCfg]):
     Options: ClassVar[type[FreqAnalyzeOptions]] = FreqAnalyzeOptions
 
     AXES_SPEC: ClassVar[AxesSpec[FreqResult, FreqCfg]] = AxesSpec(
         axes=(
             AxesSpec.Axis(
-                values=(0, 1, 2), label="Population", unit="None", dtype=np.int64
+                values=POPULATION_STATES,
+                label="Population",
+                unit="None",
+                dtype=np.int64,
             ),
             AxesSpec.Axis(
                 "freqs", label="Drive Freq", unit="Hz", scale=1e6, dtype=np.float64
@@ -108,10 +113,10 @@ class FreqDepExp(Experiment[FreqResult, FreqCfg]):
         optional confusion correction belongs to subsequent analysis.
         """
 
-        # Prepare the hardware frequency grid before collecting populations.
+        # 1. Prepare the hardware frequency grid before collecting populations.
         soc, soccfg = context.soc, context.soccfg
         cfg = deepcopy(cfg)
-        # Keep the G/E/Other contract for every declared ADC.
+        # 2. Keep the G/E/Other contract for every declared ADC.
         require_circle_classifiers(cfg.readout)
         read_axis = Classify(
             "readout",
@@ -123,27 +128,24 @@ class FreqDepExp(Experiment[FreqResult, FreqCfg]):
             {"soccfg": soccfg, "gen_ch": cfg.probe_pulse.ch},
         )
 
-        # Show the measured G/E/Other fractions in classifier order.
-        def configure_axes(ax: Axes) -> None:
-            ax.set_ylim(0.0, 1.0)
-            for line, label in zip(
-                ax.lines, ("Ground", "Excited", "Other"), strict=True
-            ):
-                line.set_label(label)
-            ax.legend()
+        # 3. Show the measured G/E/Other fractions in classifier order.
 
         figure, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Pulse freq", ylabel="Population")
-        viewer = live_line(ax, num_lines=3)
-        configure_axes(ax)
+        viewer = live_line(ax, num_lines=POPULATION_COUNT)
+        ax.set_ylim(0.0, 1.0)
+        for line, label in zip(ax.lines, ("Ground", "Excited", "Other"), strict=True):
+            line.set_label(label)
+        ax.legend()
 
         @context.plots.on_plot_thread
         def update(data: NDArray[np.float64]):
+            """Update the measurement artists from the latest acquired data."""
             return viewer.set(freqs, (data / data.sum(axis=-1, keepdims=True)).T)
 
         figure.show()
         buffer = SignalBuffer(
-            (len(freqs), 3),
+            (len(freqs), POPULATION_COUNT),
             dtype=np.float64,
             on_update=update,
         )
@@ -168,7 +170,7 @@ class FreqDepExp(Experiment[FreqResult, FreqCfg]):
                 rounds=cfg.rounds,
             )
 
-        # Keep the unnormalized G/E/Other counts in the saved Result.
+        # 4. Keep the unnormalized G/E/Other counts in the saved Result.
         counts = buffer.array
 
         return FreqResult(freqs=freqs, counts=counts)
@@ -187,10 +189,11 @@ class FreqDepExp(Experiment[FreqResult, FreqCfg]):
         cfg may be None. options controls correction and any axis conversion.
         Publish the fit figure to plots. Legacy G/E data raise ValueError.
         """
+        # 1. Select the measured data and analysis controls.
         result = source.result
         freqs, populations = result.freqs, result.counts
         populations = populations / populations.sum(axis=-1, keepdims=True)
-        if populations.shape[-1] != 3:
+        if populations.shape[-1] != POPULATION_COUNT:
             raise ValueError(
                 "Expected [g,e,other] populations; legacy G/E files are unsupported. "
                 "Acquire a new run."
@@ -198,6 +201,7 @@ class FreqDepExp(Experiment[FreqResult, FreqCfg]):
 
         populations = correct_populations(populations, options.confusion_matrix)
 
+        # 2. Compare the analysis with the measured response.
         _, ax = plots.subplots(num="fit", figsize=(6, 6))
 
         ax.plot(

@@ -33,6 +33,7 @@ class PhaseResult:
 
 
 def phase_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
+    """Return the real-valued measurement view of complex IQ without changing the input."""
     return rotate2real(signals).real
 
 
@@ -85,7 +86,7 @@ class PhaseExp(Experiment[PhaseResult, PhaseCfg]):
         branch; readout_t is a minimum duration in us. Return waits in us,
         phases in degrees and mean complex IQ shaped (wait, phase).
         """
-        # Quantize the pair start time and the second pulse projection phase.
+        # 1. Quantize the pair start time and the second pulse projection phase.
         cfg = config
         soc, soccfg = context.soc, context.soccfg
 
@@ -99,7 +100,7 @@ class PhaseExp(Experiment[PhaseResult, PhaseCfg]):
             phase_sweep, "phase", {"soccfg": soccfg, "gen_ch": pi2_pulse.ch}
         )
 
-        # Keep one mean IQ value for each pair-start/projection-phase setting.
+        # 2. Keep one mean IQ value for each pair-start/projection-phase setting.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Time (us)", ylabel="Phase (deg)")
         formatter = ScalarFormatter(useMathText=True)
@@ -110,6 +111,7 @@ class PhaseExp(Experiment[PhaseResult, PhaseCfg]):
 
         @context.plots.on_plot_thread
         def update(data):
+            """Update the measurement artists from the latest acquired data."""
             return viewer.set(lengths, phases, phase_signal2real(data))
 
         fig.show()
@@ -155,6 +157,7 @@ class PhaseExp(Experiment[PhaseResult, PhaseCfg]):
         The overlaid rectangular curve is a timing reference, not a fitted
         transfer function.
         """
+        # 1. Select the measured data and analysis controls.
         del options  # This analysis has no configurable options.
         result = source.result
 
@@ -167,7 +170,7 @@ class PhaseExp(Experiment[PhaseResult, PhaseCfg]):
 
         lengths, phases, signals2D = result.lengths, result.phases, result.signals
 
-        # align to middle of two pi/2 pulses
+        # 2. align to middle of two pi/2 pulses
         lengths = lengths + pi2_len
 
         real_signals = phase_signal2real(signals2D)

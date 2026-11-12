@@ -37,6 +37,11 @@ class LookbackAnalysis:
     predict_offset: float
 
 
+def lookback_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
+    """Return the real-valued measurement view of complex IQ without changing the input."""
+    return np.abs(signals)
+
+
 class LookbackCfg(ConfigBase):
     reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
     init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init pulse")] = None
@@ -62,10 +67,6 @@ class LookbackCfg(ConfigBase):
     ] = 1.0
 
 
-def lookback_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
-    return np.abs(signals)
-
-
 class LookbackExp(Experiment[LookbackResult, LookbackCfg]):
     Options: ClassVar[type[LookbackAnalyzeOptions]] = LookbackAnalyzeOptions
 
@@ -87,7 +88,7 @@ class LookbackExp(Experiment[LookbackResult, LookbackCfg]):
         samples rather than integrated IQ. The program uses reps=1 and config's
         software rounds without changing config.
         """
-        # Decimated acquisition uses one repetition per round, not an IQ-shot loop.
+        # 1. Decimated acquisition uses one repetition per round, not an IQ-shot loop.
         run_cfg = deepcopy(config)
 
         fig, ax = context.plots.subplots(num="measurement")
@@ -95,7 +96,7 @@ class LookbackExp(Experiment[LookbackResult, LookbackCfg]):
         line = live_line(ax)
 
         fig.show()
-        # Compile reset→optional preparation→readout before acquisition so an
+        # 2. Compile reset→optional preparation→readout before acquisition so an
         # interrupted trace still has its fixed sample-time axis and buffer.
         builder = TimelineBuilder(
             context.soccfg,
@@ -113,9 +114,10 @@ class LookbackExp(Experiment[LookbackResult, LookbackCfg]):
 
         @context.plots.on_plot_thread
         def update(data):
+            """Update the measurement artists from the latest acquired data."""
             return line.set(times, lookback_signal2real(data))
 
-        # Acquire the time-resolved trace for arrival-time analysis.
+        # 3. Acquire the time-resolved trace for arrival-time analysis.
         signals_buffer = SignalBuffer(
             (len(times),),
             on_update=update,
@@ -140,6 +142,7 @@ class LookbackExp(Experiment[LookbackResult, LookbackCfg]):
         that time as predict_offset, not a fitted resonator response. Saved cfg
         is optional and only supplies the readout-window markers on the plot.
         """
+        # 1. Select the measured data and analysis controls.
         result = source.result
         Ts = result.times
         signals = result.signals
@@ -150,7 +153,7 @@ class LookbackExp(Experiment[LookbackResult, LookbackCfg]):
             signals = gaussian_filter1d(signals, options.smooth)
         y = np.abs(signals)
 
-        # Work backward from the peak to locate the last below-threshold sample.
+        # 2. Work backward from the peak to locate the last below-threshold sample.
         max_idx = np.argmax(y)
         candidate_mask = y[:max_idx] < options.ratio * y[max_idx]
         if not np.any(candidate_mask):
@@ -160,7 +163,7 @@ class LookbackExp(Experiment[LookbackResult, LookbackCfg]):
 
         fig, ax = plots.subplots(num="fit", figsize=config.figsize)
 
-        # np.real/np.imag are used instead of .real/.imag because numpy 2.4
+        # 3. np.real/np.imag are used instead of .real/.imag because numpy 2.4
         # stubs narrow the overloaded descriptor in a way that confuses pyright
         # when the array dtype was widened by gaussian_filter1d.
         ax.plot(Ts, np.real(signals), label="I value")

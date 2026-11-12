@@ -36,7 +36,16 @@ class FluxDepResult:
     signals: NDArray[np.complex128]
 
 
+@pydantic_dataclass(frozen=True)
+class FluxDepAnalyzeOptions:
+    flux_half: float | None = None
+    flux_period: float | None = None
+    ac_coeff: float | None = None
+    auto_range: bool = True
+
+
 def mist_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
+    """Return the real-valued measurement view of complex IQ without changing the input."""
     avg_len = max(int(0.05 * signals.shape[1]), 1)
 
     mist_signals = np.abs(
@@ -47,14 +56,6 @@ def mist_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 
     ref_signals = np.sort(mist_signals.flatten())[: int(0.5 * mist_signals.size)]
     return np.clip(mist_signals, 0, 10 * np.nanmedian(ref_signals))
-
-
-@pydantic_dataclass(frozen=True)
-class FluxDepAnalyzeOptions:
-    flux_half: float | None = None
-    flux_period: float | None = None
-    ac_coeff: float | None = None
-    auto_range: bool = True
 
 
 class FluxDepCfg(ConfigBase):
@@ -156,6 +157,7 @@ class FluxDepExp(Experiment[FluxDepResult, FluxDepCfg]):
 
         @context.plots.on_plot_thread
         def update(data):
+            """Update the measurement artists from the latest acquired data."""
             real = mist_signal2real(data)
             valid = np.flatnonzero(~np.all(np.isnan(real), axis=1))
             current = int(valid[-1]) if valid.size else -1
@@ -213,6 +215,7 @@ class FluxDepExp(Experiment[FluxDepResult, FluxDepCfg]):
         ticks on top. If either is missing, show only device values below.
         No state-population fit or calibration value is returned.
         """
+        # 1. Select the measured data and analysis controls.
         result = source.result
         flux_half, flux_period = options.flux_half, options.flux_period
 
@@ -233,6 +236,7 @@ class FluxDepExp(Experiment[FluxDepResult, FluxDepCfg]):
             ylabel = r"$\bar n$"
         ys = np.asarray(ys)
 
+        # 2. Compare the analysis with the measured response.
         _, ax = plots.subplots(num="fit", figsize=config.figsize)
         ax.pcolormesh(xs, ys, amp_diff.T, shading="nearest", cmap="Greys")
         ax.set_xlabel(xlabel, fontsize=14)

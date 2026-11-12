@@ -25,6 +25,7 @@ class FluxDepResult:
 
 
 def fluxdep_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
+    """Return the real-valued measurement view of complex IQ without changing the input."""
     return np.abs(signals)
 
 
@@ -112,7 +113,7 @@ class FluxDepExp(Experiment[FluxDepResult, FluxDepCfg]):
         acquire_kwargs forwards optional acquisition controls to the builder.
         """
 
-        # Prepare the device coordinates and the matched generator/ADC grid.
+        # 1. Prepare the device coordinates and the matched generator/ADC grid.
         soc, soccfg = context.soc, context.soccfg
         cfg = deepcopy(config)
         freq_sweep = cfg.freq
@@ -129,7 +130,7 @@ class FluxDepExp(Experiment[FluxDepResult, FluxDepCfg]):
             },
         )
 
-        # Move to the first bias with progress before collecting the map.
+        # 2. Move to the first bias with progress before collecting the map.
         set_flux(
             context.devices[cfg.flux_dev],
             dev_values[0],
@@ -138,7 +139,7 @@ class FluxDepExp(Experiment[FluxDepResult, FluxDepCfg]):
             progress=True,
         )
 
-        # Display magnitude, but retain complex IQ for each flux/frequency point.
+        # 3. Display magnitude, but retain complex IQ for each flux/frequency point.
         fig, _ = context.plots.subplots(1, 2, num="measurement")
         heat_ax, line_ax = fig.axes
         heat_ax.set(xlabel="Flux device value", ylabel="Frequency (MHz)")
@@ -151,6 +152,7 @@ class FluxDepExp(Experiment[FluxDepResult, FluxDepCfg]):
 
         @context.plots.on_plot_thread
         def update(data):
+            """Update the measurement artists from the latest acquired data."""
             real = fluxdep_signal2real(data)
             valid = np.flatnonzero(~np.all(np.isnan(real), axis=1))
             current = int(valid[-1]) if valid.size else -1
@@ -194,7 +196,7 @@ class FluxDepExp(Experiment[FluxDepResult, FluxDepCfg]):
                     rounds=cfg.rounds,
                 )
 
-        # Publish the final map after a normal or cooperatively stopped return.
+        # 4. Publish the final map after a normal or cooperatively stopped return.
         signals_buffer.trigger_update(flush=True)
         return FluxDepResult(
             values=dev_values,

@@ -122,6 +122,7 @@ class OneToneFluxExp(Experiment[OneToneFluxResult, OneToneFluxCfg]):
 
         @context.plots.on_plot_thread
         def update(data):
+            """Update the measurement artists from the latest acquired data."""
             real = np.abs(data)
             valid = np.flatnonzero(~np.all(np.isnan(real), axis=1))
             current = int(valid[-1]) if valid.size else -1

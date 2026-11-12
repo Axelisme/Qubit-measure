@@ -29,6 +29,7 @@ class CheckResult:
 
 
 def check_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
+    """Return the real-valued measurement view of complex IQ without changing the input."""
     return np.abs(signals)
 
 
@@ -106,6 +107,7 @@ class CheckExp(Experiment[CheckResult, CheckCfg]):
 
         @context.plots.on_plot_thread
         def update(data):
+            """Update the measurement artists from the latest acquired data."""
             return line.set(freqs, check_signal2real(data))
 
         fig.show()
@@ -143,6 +145,7 @@ class CheckExp(Experiment[CheckResult, CheckCfg]):
 
         ``options`` is None. This diagnostic returns no calibration value.
         """
+        # 1. Select the measured data and analysis controls.
         del options
         result = source.result
 
@@ -151,6 +154,7 @@ class CheckExp(Experiment[CheckResult, CheckCfg]):
         signals2D = result.signals
         real_signals = check_signal2real(signals2D)
 
+        # 2. Compare the analysis with the measured response.
         _, ax = plots.subplots(num="fit", figsize=config.figsize)
         for i, output in enumerate(outputs):
             ax.plot(

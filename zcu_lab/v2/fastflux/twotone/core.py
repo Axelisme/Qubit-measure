@@ -33,6 +33,7 @@ class TwoToneResult:
 
 
 def twotone_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
+    """Return the real-valued measurement view of complex IQ without changing the input."""
     return rotate2real(signals).real
 
 
@@ -84,7 +85,7 @@ class TwoToneExp(Experiment[TwoToneResult, TwotoneCfg]):
         The map locates spectral features; it does not fit a transition or
         calibrate gain to physical flux.
         """
-        # Quantize flux gain and probe frequency for their own generators.
+        # 1. Quantize flux gain and probe frequency for their own generators.
         cfg = config
         soc, soccfg = context.soc, context.soccfg
 
@@ -99,7 +100,7 @@ class TwoToneExp(Experiment[TwoToneResult, TwotoneCfg]):
             {"soccfg": soccfg, "gen_ch": cfg.qub_pulse.ch},
         )
 
-        # Keep one averaged spectrum per flux gain.
+        # 2. Keep one averaged spectrum per flux gain.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Flux Pulse Gain (a.u.)", ylabel="Frequency (MHz)")
         formatter = ScalarFormatter(useMathText=True)
@@ -110,6 +111,7 @@ class TwoToneExp(Experiment[TwoToneResult, TwotoneCfg]):
 
         @context.plots.on_plot_thread
         def update(data):
+            """Update the measurement artists from the latest acquired data."""
             return viewer.set(gains, freqs, twotone_signal2real(data))
 
         fig.show()
@@ -147,6 +149,7 @@ class TwoToneExp(Experiment[TwoToneResult, TwotoneCfg]):
         plots: Plots,
     ) -> None:
         """Plot the projected IQ spectroscopy map without a resonance fit."""
+        # 1. Select the measured data and analysis controls.
         del options  # This analysis has no configurable options.
         result = source.result
 
@@ -154,6 +157,7 @@ class TwoToneExp(Experiment[TwoToneResult, TwotoneCfg]):
 
         real_signals = twotone_signal2real(signals2D)
 
+        # 2. Compare the analysis with the measured response.
         fig, ax = plots.subplots(num="fit")
 
         ax.imshow(

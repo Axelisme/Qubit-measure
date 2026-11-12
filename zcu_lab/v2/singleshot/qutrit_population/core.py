@@ -60,7 +60,7 @@ class QutritPopulationCfg(ConfigBase):
         Pulse.Cfg,
         FieldMeta(
             label="Pi 32",
-            description="Calibrated level 3 to f pulse, applied after Pi 03. Set its generator explicitly.",
+            description="Calibrated level 3 to f pulse after Pi 03, with explicit generator.",
         ),
     ]
     readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
@@ -110,7 +110,9 @@ class QutritPopulationExp(Experiment[QutritPopulationResult, QutritPopulationCfg
         No reset or preparation pulse is emitted for g. The operator must supply
         measured pulse calibrations and a relaxation interval suitable for g.
         """
+        # 1. Prepare the measurement coordinates and acquisition state.
         buffer = SignalBuffer((3, cfg.shots))
+        # 3. Acquire the pulse sequence in the declared scan order.
         with Schedule(buffer, scope=context.scope) as sched:
             for label, step in sched.scan("preparation", [0, 1, 2]):
                 builder = TimelineBuilder(
@@ -137,24 +139,22 @@ class QutritPopulationExp(Experiment[QutritPopulationResult, QutritPopulationCfg
             shot_indices=np.arange(cfg.shots, dtype=np.int64),
         )
         plots = context.plots
+        # 2. Display the measured response while retaining raw data.
         figure, _ = plots.subplots(num="measurement")
 
-        def scatter(figure):
-            ax = figure.axes[0]
-            for label, row in zip(
-                ("g: no pulse", "e: pi01", "f: pi03 then pi32"),
-                result.signals,
-                strict=True,
-            ):
-                ax.scatter(row.real, row.imag, s=2, alpha=0.3, label=label)
-            ax.set(
-                xlabel="I (mean-sample ADC)",
-                ylabel="Q (mean-sample ADC)",
-                title="Reference preparations (not pure states)",
-            )
-            ax.legend()
-
-        scatter(figure)
+        ax = figure.axes[0]
+        for label, row in zip(
+            ("g: no pulse", "e: pi01", "f: pi03 then pi32"),
+            result.signals,
+            strict=True,
+        ):
+            ax.scatter(row.real, row.imag, s=2, alpha=0.3, label=label)
+        ax.set(
+            xlabel="I (mean-sample ADC)",
+            ylabel="Q (mean-sample ADC)",
+            title="Reference preparations (not pure states)",
+        )
+        ax.legend()
         figure.show()
         return result
 
@@ -173,61 +173,60 @@ class QutritPopulationExp(Experiment[QutritPopulationResult, QutritPopulationCfg
         negative/above-one estimates and refers to preparation coordinates, not
         pure-state readout fidelity. Invalid/partial reference IQ fails explicitly.
         """
+        # 1. Select the measured data and analysis controls.
         del options
         result = analyze_reference_iq(
             source.result.signals, np.array([0, 1, 2], dtype=np.int64)
         )
+        # 2. Compare the analysis with the measured response.
         figure, _ = plots.subplots(
             nrows=2, ncols=2, num="fit", figsize=(10, 7), layout="constrained"
         )
 
-        def diagnostics(figure):
-            for ax, matrix, title in zip(
-                figure.axes[:3],
-                (
-                    result.raw_populations,
-                    result.corrected_populations,
-                    result.confusion_matrix,
-                ),
-                (
-                    "Raw evaluation fractions",
-                    "Corrected (unclipped)",
-                    "Training confusion",
-                ),
-                strict=True,
-            ):
-                ax.imshow(matrix, vmin=0, vmax=1, cmap="Blues")
-                ax.set(
-                    xticks=range(3),
-                    yticks=range(3),
-                    xticklabels=("g", "e", "f"),
-                    yticklabels=("g", "e", "f"),
-                    xlabel="Classified label"
-                    if title != "Corrected (unclipped)"
-                    else "Preparation coordinate",
-                    ylabel="Requested preparation",
-                    title=title,
-                )
-                for (i, j), value in np.ndenumerate(matrix):
-                    ax.text(
-                        j,
-                        i,
-                        f"{value:.5f}",
-                        ha="center",
-                        va="center",
-                        color="white" if value > 0.5 else "black",
-                    )
-            ax = figure.axes[3]
-            ax.axis("off")
-            ax.text(
-                0,
-                0.95,
-                f"Training / evaluation shots per label: {result.training_shots} / {result.evaluation_shots}\n\nMinimum pooled Mahalanobis: {result.minimum_separation:.5f}\nConfusion condition (2-norm): {result.condition_number:.5f}\nMinimum singular value: {result.minimum_singular_value:.5f}\n\nMacro preparation-label error: {result.macro_error:.3%}\nPer-label errors (g, e, f):\n"
-                + ", ".join(f"{error:.3%}" for error in result.label_errors)
-                + "\n\nIncludes preparation contamination.\nNot pure-state readout fidelity.\nCorrection retains negative and >1 values.",
-                va="top",
-                fontsize=10,
+        for ax, matrix, title in zip(
+            figure.axes[:3],
+            (
+                result.raw_populations,
+                result.corrected_populations,
+                result.confusion_matrix,
+            ),
+            (
+                "Raw evaluation fractions",
+                "Corrected (unclipped)",
+                "Training confusion",
+            ),
+            strict=True,
+        ):
+            ax.imshow(matrix, vmin=0, vmax=1, cmap="Blues")
+            ax.set(
+                xticks=range(3),
+                yticks=range(3),
+                xticklabels=("g", "e", "f"),
+                yticklabels=("g", "e", "f"),
+                xlabel="Classified label"
+                if title != "Corrected (unclipped)"
+                else "Preparation coordinate",
+                ylabel="Requested preparation",
+                title=title,
             )
-
-        diagnostics(figure)
+            for (i, j), value in np.ndenumerate(matrix):
+                ax.text(
+                    j,
+                    i,
+                    f"{value:.5f}",
+                    ha="center",
+                    va="center",
+                    color="white" if value > 0.5 else "black",
+                )
+        ax = figure.axes[3]
+        ax.axis("off")
+        ax.text(
+            0,
+            0.95,
+            f"Training / evaluation shots per label: {result.training_shots} / {result.evaluation_shots}\n\nMinimum pooled Mahalanobis: {result.minimum_separation:.5f}\nConfusion condition (2-norm): {result.condition_number:.5f}\nMinimum singular value: {result.minimum_singular_value:.5f}\n\nMacro preparation-label error: {result.macro_error:.3%}\nPer-label errors (g, e, f):\n"
+            + ", ".join(f"{error:.3%}" for error in result.label_errors)
+            + "\n\nIncludes preparation contamination.\nNot pure-state readout fidelity.\nCorrection retains negative and >1 values.",
+            va="top",
+            fontsize=10,
+        )
         return result

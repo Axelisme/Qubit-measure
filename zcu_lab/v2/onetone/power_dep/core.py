@@ -36,10 +36,12 @@ class PowerDepResult:
 
 
 def gaindep_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
+    """Return the real-valued measurement view of complex IQ without changing the input."""
     return rescale(minus_background(np.abs(signals), axis=-1), axis=-1)
 
 
 def _positive_snr_or_none(value: float | None) -> float | None:
+    """Return a positive SNR limit or None; reject nonpositive configured thresholds."""
     if value is not None and value <= 0:
         raise ValueError("SNR threshold must be positive or left blank (None)")
     return value
@@ -104,7 +106,7 @@ class PowerDepExp(Experiment[PowerDepResult, PowerDepCfg]):
         once its SNR reaches the threshold; None disables this early stop.
         """
 
-        # Prepare the gain points and matched generator/ADC frequency grid.
+        # 1. Prepare the gain points and matched generator/ADC frequency grid.
         cfg = deepcopy(config)
         soc, soccfg = context.soc, context.soccfg
 
@@ -127,10 +129,11 @@ class PowerDepExp(Experiment[PowerDepResult, PowerDepCfg]):
             },
         )
 
-        # Normalize magnitude only for display and the per-trace SNR check.
+        # 2. Normalize magnitude only for display and the per-trace SNR check.
         current_snr = 0.0
 
         def update_snr(snr: float) -> None:
+            """Store the latest per-trace SNR for the live measurement title."""
             nonlocal current_snr
             current_snr = snr
 
@@ -146,6 +149,7 @@ class PowerDepExp(Experiment[PowerDepResult, PowerDepCfg]):
 
         @context.plots.on_plot_thread
         def update(data):
+            """Update the measurement artists from the latest acquired data."""
             real = gaindep_signal2real(data)
             valid = np.flatnonzero(~np.all(np.isnan(real), axis=1))
             current = int(valid[-1]) if valid.size else -1
@@ -190,7 +194,7 @@ class PowerDepExp(Experiment[PowerDepResult, PowerDepCfg]):
                     rounds=cfg.rounds,
                 )
 
-        # Keep the acquired complex response, not the normalized preview.
+        # 3. Keep the acquired complex response, not the normalized preview.
         return PowerDepResult(
             gains=gains,
             freqs=freqs,

@@ -53,6 +53,26 @@ class AcStarkResult:
     counts: NDArray[np.float64]
 
 
+@pydantic_dataclass(frozen=True, config={"arbitrary_types_allowed": True})
+class AcStarkAnalyzeOptions:
+    chi: float
+    kappa: float
+    confusion_matrix: NDArray[np.float64] | None = None
+    cutoff: float | None = None
+
+
+@pydantic_dataclass(frozen=True, config={"arbitrary_types_allowed": True})
+class AcStarkPlotOptions:
+    ac_coeff: float
+    confusion_matrix: NDArray[np.float64] | None = None
+    cutoff: float | None = None
+
+
+@dataclass(frozen=True)
+class AcStarkAnalysis:
+    ac_stark_coeff: float
+
+
 class AcStarkCfg(ConfigBase):
     reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
     init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init Pulse")] = None
@@ -79,26 +99,6 @@ class AcStarkCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ]
-
-
-@pydantic_dataclass(frozen=True, config={"arbitrary_types_allowed": True})
-class AcStarkAnalyzeOptions:
-    chi: float
-    kappa: float
-    confusion_matrix: NDArray[np.float64] | None = None
-    cutoff: float | None = None
-
-
-@dataclass(frozen=True)
-class AcStarkAnalysis:
-    ac_stark_coeff: float
-
-
-@pydantic_dataclass(frozen=True, config={"arbitrary_types_allowed": True})
-class AcStarkPlotOptions:
-    ac_coeff: float
-    confusion_matrix: NDArray[np.float64] | None = None
-    cutoff: float | None = None
 
 
 class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):

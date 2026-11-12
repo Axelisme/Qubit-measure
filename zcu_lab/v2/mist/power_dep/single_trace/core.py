@@ -27,19 +27,20 @@ class PowerDepResult:
     signals: NDArray[np.complex128]
 
 
-def mist_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
-    avg_len = max(int(0.05 * len(signals)), 1)
-
-    mist_signals = signals - np.mean(signals[:avg_len])
-
-    return np.abs(mist_signals)
-
-
 @pydantic_dataclass(frozen=True)
 class PowerDepAnalyzeOptions:
     g0: complex | None = None
     e0: complex | None = None
     ac_coeff: float | None = None
+
+
+def mist_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
+    """Return the real-valued measurement view of complex IQ without changing the input."""
+    avg_len = max(int(0.05 * len(signals)), 1)
+
+    mist_signals = signals - np.mean(signals[:avg_len])
+
+    return np.abs(mist_signals)
 
 
 class PowerDepCfg(ConfigBase):
@@ -111,6 +112,7 @@ class PowerDepExp(Experiment[PowerDepResult, PowerDepCfg]):
 
         @context.plots.on_plot_thread
         def update(data):
+            """Update the measurement artists from the latest acquired data."""
             return viewer.set(gains, mist_signal2real(data))
 
         fig.show()
@@ -155,6 +157,7 @@ class PowerDepExp(Experiment[PowerDepResult, PowerDepCfg]):
         number when supplied; ``e0`` only sets the vertical display range.
         Return no fit or calibrated population estimate.
         """
+        # 1. Select the measured data and analysis controls.
         result = source.result
         g0, e0, ac_coeff = options.g0, options.e0, options.ac_coeff
 
@@ -172,6 +175,7 @@ class PowerDepExp(Experiment[PowerDepResult, PowerDepCfg]):
             xs = ac_coeff * gains**2
             xlabel = r"$\bar n$"
 
+        # 2. Compare the analysis with the measured response.
         _, ax = plots.subplots(num="fit", figsize=config.figsize)
         ax.plot(xs, amp_diff.T, marker=".")
         ax.set_xlabel(xlabel, fontsize=14)

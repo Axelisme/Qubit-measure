@@ -41,28 +41,24 @@ from zcu_tools.progress_bar import make_pbar
 from zcu_lab.v2.support import live_heatmap, live_line
 
 
-def _fit_transition_rates(
-    Ts: NDArray[np.float64], populations: NDArray[np.float64]
-) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
-    """Fit each complete sweep row and close progress even when fitting fails.
+@dataclass(frozen=True)
+class T1WithToneSweepResult:
+    """G/E/Other shot counts summed over acquired rounds in (outer value, initial state, length, population state) order.
 
-    Return rates in ge, eg, eo, oe, go, og order and their covariance blocks.
+    Lengths are in us. Initial states are 0/1 for I/pi preparation;
+    population states are 0/1/2 for g/e/other. Unmeasured entries are NaN.
     """
-    # Rate order: ge, eg, eo, oe, go, og.
-    N = populations.shape[0]
-    rates = np.zeros((N, 6), dtype=np.float64)
-    rate_Covs = np.zeros((N, 6, 6), dtype=np.float64)
-    pbar = make_pbar(total=N, desc="Fitting transition rates")
-    try:
-        for i, pop in enumerate(populations):
-            fit_result = fit_dual_transition_rates(Ts, pop[0], pop[1])
-            rates[i] = fit_result.rates.as_array()
-            rate_Covs[i] = fit_result.covariance[:6, :6]
-            pbar.update()
-    finally:
-        pbar.close()
 
-    return rates, rate_Covs
+    xs: NDArray[np.float64]
+    lengths: NDArray[np.float64]
+    counts: NDArray[np.float64]
+
+
+@pydantic_dataclass(frozen=True, config={"arbitrary_types_allowed": True})
+class T1WithToneSweepAnalyzeOptions:
+    ac_coeff: float | None = None
+    confusion_matrix: NDArray[np.float64] | None = None
+    xlabel: str = ""
 
 
 def _plot_transition_rates(
@@ -119,17 +115,28 @@ def _require_positive_lengths(lengths: NDArray[np.float64]) -> None:
         )
 
 
-@dataclass(frozen=True)
-class T1WithToneSweepResult:
-    """G/E/Other shot counts summed over acquired rounds in (outer value, initial state, length, population state) order.
+def _fit_transition_rates(
+    Ts: NDArray[np.float64], populations: NDArray[np.float64]
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    """Fit each complete sweep row and close progress even when fitting fails.
 
-    Lengths are in us. Initial states are 0/1 for I/pi preparation;
-    population states are 0/1/2 for g/e/other. Unmeasured entries are NaN.
+    Return rates in ge, eg, eo, oe, go, og order and their covariance blocks.
     """
+    # Rate order: ge, eg, eo, oe, go, og.
+    N = populations.shape[0]
+    rates = np.zeros((N, 6), dtype=np.float64)
+    rate_Covs = np.zeros((N, 6, 6), dtype=np.float64)
+    pbar = make_pbar(total=N, desc="Fitting transition rates")
+    try:
+        for i, pop in enumerate(populations):
+            fit_result = fit_dual_transition_rates(Ts, pop[0], pop[1])
+            rates[i] = fit_result.rates.as_array()
+            rate_Covs[i] = fit_result.covariance[:6, :6]
+            pbar.update()
+    finally:
+        pbar.close()
 
-    xs: NDArray[np.float64]
-    lengths: NDArray[np.float64]
-    counts: NDArray[np.float64]
+    return rates, rate_Covs
 
 
 class T1WithToneSweepCfg(ConfigBase):
@@ -174,13 +181,6 @@ class T1WithToneSweepCfg(ConfigBase):
             description="Retries after a transient acquisition failure.",
         ),
     ] = Field(default=0, ge=0)
-
-
-@pydantic_dataclass(frozen=True, config={"arbitrary_types_allowed": True})
-class T1WithToneSweepAnalyzeOptions:
-    ac_coeff: float | None = None
-    confusion_matrix: NDArray[np.float64] | None = None
-    xlabel: str = ""
 
 
 class T1WithToneSweepExp(Experiment[T1WithToneSweepResult, T1WithToneSweepCfg]):

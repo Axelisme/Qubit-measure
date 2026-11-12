@@ -46,6 +46,56 @@ class FreqAnalysis:
     params: dict[str, Any]
 
 
+def freq_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
+    """Return IQ magnitude without changing the complex input."""
+    return np.abs(signals)
+
+
+def homophasal_freqs_from_sweep(
+    sweep: SweepCfg,
+    params: HomophasalSamplingCfg,
+) -> NDArray[np.float64]:
+    """Return MHz points equally spaced in resonator phase over the sweep bounds."""
+
+    def theta_from_freq(freq: float) -> float:
+        """Return the fitted resonator phase in radians at freq MHz."""
+        return params.theta0 + 2.0 * np.arctan(
+            2.0 * params.q_l * (1.0 - freq / params.r_f)
+        )
+
+    theta_start = theta_from_freq(sweep.start)
+    theta_stop = theta_from_freq(sweep.stop)
+    thetas = np.linspace(theta_start, theta_stop, sweep.expts, endpoint=True)
+    freqs = params.r_f * (
+        1.0 - np.tan((thetas - params.theta0) / 2.0) / (2.0 * params.q_l)
+    )
+    return np.asarray(freqs, dtype=np.float64)
+
+
+def _ensure_distinct_homophasal_freqs(freqs: NDArray[np.float64]) -> None:
+    if len(freqs) <= 1:
+        return
+    diffs = np.diff(freqs)
+    if np.any(np.isclose(diffs, 0.0, rtol=1e-9, atol=1e-12)):
+        raise ValueError(
+            "homophasal frequency points collapse after hardware quantization. "
+            "Increase the sweep span or reduce expts so adjacent points remain "
+            "distinct on the hardware grid."
+        )
+
+
+def homophasal_sweep2array(
+    sweep: SweepCfg,
+    params: HomophasalSamplingCfg,
+    round_info: dict[str, Any],
+) -> NDArray[np.float64]:
+    """Return hardware-rounded equal-phase MHz points; reject collapsed neighbors."""
+    freqs = homophasal_freqs_from_sweep(sweep, params)
+    rounded = sweep2array(freqs, "freq", round_info, allow_array=True)
+    _ensure_distinct_homophasal_freqs(rounded)
+    return rounded
+
+
 class HomophasalSamplingCfg(ConfigBase):
     r_f: Annotated[float, FieldMeta(label="Resonance frequency", unit="MHz")]
     rf_w: Annotated[float, FieldMeta(label="Linewidth", unit="MHz")]
@@ -70,7 +120,7 @@ class FreqCfg(ConfigBase):
         PulseReadout.Cfg,
         FieldMeta(
             label="Readout",
-            description="填入 resonator readout 設定。先用 lookback 取得 TOF，再以 onetone 取得 kappa，確認 trigger offset 與 waveform duration，單位 us。",
+            description="Resonator readout 設定與 timing（us）。",
         ),
     ]
     freq: Annotated[
@@ -78,7 +128,7 @@ class FreqCfg(ConfigBase):
         FieldMeta(
             label="Frequency",
             unit="MHz",
-            description="填入 absolute MHz 起訖值。range_find 不會從已知中心自動設定掃描窗。",
+            description="Absolute MHz 掃描起訖值。",
         ),
     ]
     sampling_mode: Annotated[SamplingMode, FieldMeta(label="Sampling mode")] = "linear"
@@ -117,51 +167,6 @@ class FreqCfg(ConfigBase):
         return self
 
 
-def freq_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
-    return np.abs(signals)
-
-
-def homophasal_freqs_from_sweep(
-    sweep: SweepCfg,
-    params: HomophasalSamplingCfg,
-) -> NDArray[np.float64]:
-    def theta_from_freq(freq: float) -> float:
-        return params.theta0 + 2.0 * np.arctan(
-            2.0 * params.q_l * (1.0 - freq / params.r_f)
-        )
-
-    theta_start = theta_from_freq(sweep.start)
-    theta_stop = theta_from_freq(sweep.stop)
-    thetas = np.linspace(theta_start, theta_stop, sweep.expts, endpoint=True)
-    freqs = params.r_f * (
-        1.0 - np.tan((thetas - params.theta0) / 2.0) / (2.0 * params.q_l)
-    )
-    return np.asarray(freqs, dtype=np.float64)
-
-
-def _ensure_distinct_homophasal_freqs(freqs: NDArray[np.float64]) -> None:
-    if len(freqs) <= 1:
-        return
-    diffs = np.diff(freqs)
-    if np.any(np.isclose(diffs, 0.0, rtol=1e-9, atol=1e-12)):
-        raise ValueError(
-            "homophasal frequency points collapse after hardware quantization. "
-            "Increase the sweep span or reduce expts so adjacent points remain "
-            "distinct on the hardware grid."
-        )
-
-
-def homophasal_sweep2array(
-    sweep: SweepCfg,
-    params: HomophasalSamplingCfg,
-    round_info: dict[str, Any],
-) -> NDArray[np.float64]:
-    freqs = homophasal_freqs_from_sweep(sweep, params)
-    rounded = sweep2array(freqs, "freq", round_info, allow_array=True)
-    _ensure_distinct_homophasal_freqs(rounded)
-    return rounded
-
-
 class FreqExp(Experiment[FreqResult, FreqCfg]):
     Options: ClassVar[type[FreqAnalyzeOptions]] = FreqAnalyzeOptions
 
@@ -175,13 +180,6 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         tag="onetone/freq",
     )
 
-    def _round_info(self, cfg: FreqCfg, soccfg) -> dict[str, Any]:
-        return {
-            "soccfg": soccfg,
-            "gen_ch": cfg.readout.gen_ch,
-            "ro_ch": cfg.readout.ro_ch,
-        }
-
     def run(self, config: FreqCfg, *, context: RunContext) -> FreqResult:
         """Measure the resonator response with linear or equal-phase frequency spacing.
 
@@ -191,6 +189,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         Homophasal sampling requires positive fit parameters and rejects points
         that collapse onto the same hardware frequency.
         """
+        # 1. Prepare the measurement coordinates and acquisition state.
         cfg = deepcopy(config)
         soccfg = context.soccfg
         if cfg.sampling_mode == "linear":
@@ -200,19 +199,28 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
             if params is None:
                 raise ValueError("homophasal sampling requires fit parameters")
             freqs = homophasal_sweep2array(
-                cfg.freq, params, self._round_info(cfg, soccfg)
+                cfg.freq,
+                params,
+                {
+                    "soccfg": soccfg,
+                    "gen_ch": cfg.readout.gen_ch,
+                    "ro_ch": cfg.readout.ro_ch,
+                },
             )
 
+        # 2. Display the measured response while retaining raw data.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Frequency (MHz)", ylabel="Amplitude")
         line = live_line(ax)
 
         @context.plots.on_plot_thread
         def update(data):
+            """Update live magnitude from the latest complex acquisition."""
             return line.set(freqs, np.abs(data))
 
         fig.show()
         signals = SignalBuffer((len(freqs),), on_update=update)
+        # 3. Acquire the pulse sequence in the declared scan order.
         with Schedule(signals, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 context.soccfg,
@@ -237,6 +245,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         *,
         plots: Plots,
     ) -> FreqAnalysis:
+        # 1. Select the measured data and analysis controls.
         fig, _ = plots.subplots(num="fit", figsize=(9, 8))
         answer = fit_resonance(source.result.freqs, source.result.signals, options)
         freqs, signals = source.result.freqs[1:-1], source.result.signals[1:-1]

@@ -34,7 +34,15 @@ class MistResult:
     signals: NDArray[np.complex128]
 
 
+@pydantic_dataclass(frozen=True)
+class MistAnalyzeOptions:
+    ac_coeff: Annotated[
+        float | None, FieldMeta(label="Photon number / gain squared")
+    ] = None
+
+
 def mist_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
+    """Return the real-valued measurement view of complex IQ without changing the input."""
     return rotate2real(signals).real
 
 
@@ -64,13 +72,6 @@ class MistCfg(ConfigBase):
     ]
 
 
-@pydantic_dataclass(frozen=True)
-class MistAnalyzeOptions:
-    ac_coeff: Annotated[
-        float | None, FieldMeta(label="Photon number / gain squared")
-    ] = None
-
-
 class MistExp(Experiment[MistResult, MistCfg]):
     Options: ClassVar[type[MistAnalyzeOptions]] = MistAnalyzeOptions
 
@@ -97,7 +98,7 @@ class MistExp(Experiment[MistResult, MistCfg]):
         in a.u. and mean complex IQ shaped (flux_gain, mist_gain). This contrast
         map is not a calibrated state population or transition probability.
         """
-        # Quantize both gain axes for their respective generators.
+        # 1. Quantize both gain axes for their respective generators.
         cfg = config
         soc, soccfg = context.soc, context.soccfg
 
@@ -115,7 +116,7 @@ class MistExp(Experiment[MistResult, MistCfg]):
             {"soccfg": soccfg, "gen_ch": cfg.mist_pulse.ch},
         )
 
-        # Display the averaged response without classifying individual shots.
+        # 2. Display the averaged response without classifying individual shots.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Flux Pulse Gain (a.u.)", ylabel="Mist Pulse Gain (a.u.)")
         formatter = ScalarFormatter(useMathText=True)
@@ -126,6 +127,7 @@ class MistExp(Experiment[MistResult, MistCfg]):
 
         @context.plots.on_plot_thread
         def update(data):
+            """Update the measurement artists from the latest acquired data."""
             return viewer.set(flux_gains, mist_gains, mist_signal2real(data))
 
         fig.show()
@@ -170,6 +172,7 @@ class MistExp(Experiment[MistResult, MistCfg]):
         options.ac_coeff, when supplied, scales squared gain to a photon-number
         axis; otherwise the vertical coordinate remains gain squared.
         """
+        # 1. Select the measured data and analysis controls.
         result = source.result
 
         flux_gains, mist_gains, signals2D = (
@@ -180,6 +183,7 @@ class MistExp(Experiment[MistResult, MistCfg]):
 
         real_signals = mist_signal2real(signals2D)
 
+        # 2. Compare the analysis with the measured response.
         fig, ax = plots.subplots(num="fit", figsize=config.figsize)
 
         if options.ac_coeff is not None:
