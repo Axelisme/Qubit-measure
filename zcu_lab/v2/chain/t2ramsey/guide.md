@@ -25,6 +25,7 @@ Temporary arrays within one acquisition round grow with points × Reps. Increasi
 Pi/2 Pulse uses the `$qubit.module.x90` slot or a fresh `pi2_pulse` template, and Readout the `$resonator.module.readout` slot or a fresh `readout` template.
 Readout must be a pulse readout; a mux readout module is rejected by the Form. The cycle has no Reset.
 Delay runs from 0 to 1.5 × `$qubit.t2r` over 101 points, and Detune starts at 5 / (1.5 × `$qubit.t2r`) MHz, which gives five fringes over the range. Both stay empty when T2r is missing.
+Detune ramps the phase of the second π/2 pulse without changing its drive frequency.
 Relax delay starts at 5 * `$qubit.t1` us, or 150 us when T1 is missing.
 Every cycle contains eight delays, so one cycle lasts about Relax delay + 8 × (delay + 2 × π/2 length + 2 × readout length).
 Reps starts at 100 and Rounds at 100. Reps must be at least 66, so that even a single delay gives the first round 65 cycles beyond its mean to estimate the noise of the 65 numbers.

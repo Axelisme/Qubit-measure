@@ -34,9 +34,9 @@ class RamanGFInputs(RecipeInputs):
         KEEP,
         description="Operator-supplied (measured f03 - measured f32)/2 in MHz. No model lookup.",
     )
-    scan_mode: Literal["frequency", "area", "frequency_area"] | None | Keep = Field(
+    scan_mode: Literal["frequency", "gain", "frequency_gain"] | None | Keep = Field(
         KEEP,
-        description="Frequency, area or Cartesian frequency-area scan.",
+        description="Frequency, gain or Cartesian frequency-gain scan.",
     )
     detuning_start_mhz: float | None | Keep = Field(
         KEEP,
@@ -56,7 +56,7 @@ class RamanGFInputs(RecipeInputs):
     )
     gain_stop: float | None | Keep = Field(
         KEEP,
-        description="Native nonnegative gain stop; area = gain squared times envelope intensity integral (us), not angle.",
+        description="Native nonnegative drive-gain stop in DAC full-scale fraction, not angle.",
     )
     gain_n: int | None | Keep = Field(
         KEEP,
@@ -90,14 +90,14 @@ class RamanGFReport(RecipeReport):
     description="Run a single-tone two-photon g/f scan, analyze g/e/f counts and save counts and analysis.",
 )
 async def raman_gf(session: RecipeSession, inputs: RamanGFInputs) -> RamanGFReport:
-    """Play one sampled Raman pulse then readout at each scan point, analyze and save.
+    """Play one Raman pulse then readout at each scan point, analyze and save.
 
     The operator supplies carrier_mhz from spectroscopy in MHz, never from a
     simulator model. Detuning is 2*f_drive - 2*carrier_mhz; positive detuning
     raises the single carrier by detuning/2. Frequency mode holds gain_start;
-    area mode holds detuning_start_mhz; frequency_area scans both axes.
-    detuning_n/gain_n set Form n, lowered to cfg expts. Gain is in native units;
-    source-envelope area is gain^2 us. Relaxation timing uses us.
+    gain mode holds detuning_start_mhz; frequency_gain scans both axes.
+    detuning_n/gain_n set Form n, lowered to cfg expts. Gain is a DAC full-scale
+    fraction (a.u.), not a calibrated rotation angle. Relaxation timing uses us.
 
     Omission (Python KEEP, not a JSON value) retains the Form value and source.
     Explicit null is passed unchanged to the Form owner, including overrides.

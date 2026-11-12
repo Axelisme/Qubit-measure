@@ -43,34 +43,6 @@ class FreqGainResult:
     signals: NDArray[np.float64]
 
 
-class FreqGainCfg(ConfigBase):
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    qub_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Qubit pulse")]
-    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
-    freq: Annotated[SweepCfg, FieldMeta(label="Readout freq", unit="MHz")]
-    gain: Annotated[SweepCfg, FieldMeta(label="Readout gain", unit="a.u.")]
-    skew_penalty: Annotated[float, FieldMeta(label="Skew penalty", decimals=3)] = Field(
-        default=0.0, ge=0.0
-    )
-
-    reps: Annotated[
-        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
-    ] = 1
-    rounds: Annotated[
-        int,
-        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
-    ] = 1
-    relax_delay: Annotated[
-        float,
-        FieldMeta(
-            label="Relax delay",
-            unit="us",
-            decimals=3,
-            description="Relaxation delay after each repetition.",
-        ),
-    ] = 1.0
-
-
 @pydantic_dataclass(frozen=True)
 class FreqGainAnalyzeOptions:
     smooth: float = 1.0
@@ -83,6 +55,34 @@ class FreqGainAnalyzeOptions:
 class FreqGainAnalysis:
     best_freq: float
     best_gain: float
+
+
+class FreqGainCfg(ConfigBase):
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    qub_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Qubit pulse")]
+    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
+    freq: Annotated[SweepCfg, FieldMeta(label="Readout freq", unit="MHz")]
+    gain: Annotated[SweepCfg, FieldMeta(label="Readout gain", unit="a.u.")]
+    skew_penalty: Annotated[float, FieldMeta(label="Skew penalty", decimals=3)] = Field(
+        default=0.0, ge=0.0
+    )
+
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ]
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
+        ),
+    ]
 
 
 class FreqGainExp(Experiment[FreqGainResult, FreqGainCfg]):
@@ -116,7 +116,7 @@ class FreqGainExp(Experiment[FreqGainResult, FreqGainCfg]):
         IQ distributions. This score is not assignment fidelity.
         acquire_kwargs is forwarded to acquisition.
         """
-        # Prepare both readout axes on the pulse generator's hardware grid.
+        # 1. Prepare both readout axes on the pulse generator's hardware grid.
         soc, soccfg = context.soc, context.soccfg
         cfg = deepcopy(cfg)
 
@@ -131,7 +131,7 @@ class FreqGainExp(Experiment[FreqGainResult, FreqGainCfg]):
             {"soccfg": soccfg, "gen_ch": cfg.readout.gen_ch},
         )
 
-        # Retain one separation score per frequency/gain pair.
+        # 2. Retain one separation score per frequency/gain pair.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Frequency (MHz)", ylabel="Gain (a.u.)")
         formatter = ScalarFormatter(useMathText=True)
@@ -142,6 +142,7 @@ class FreqGainExp(Experiment[FreqGainResult, FreqGainCfg]):
 
         @context.plots.on_plot_thread
         def update(data: NDArray[np.float64]) -> tuple[Artist, ...]:
+            """Refresh the measurement artists from the current acquired data."""
             return heatmap.set(freqs, gains, np.abs(data))
 
         fig.show()
@@ -151,7 +152,7 @@ class FreqGainExp(Experiment[FreqGainResult, FreqGainCfg]):
             on_update=update,
         )
 
-        # Compare pulse-off/on branches while sweeping both readout knobs in hardware.
+        # 3. Compare pulse-off/on branches while sweeping both readout knobs in hardware.
         with Schedule(signals_buffer, scope=context.scope) as sched:
             freq_sweep = cfg.freq
             freq_param = sweep2param("freq", freq_sweep)
@@ -192,7 +193,7 @@ class FreqGainExp(Experiment[FreqGainResult, FreqGainCfg]):
                 **(acquire_kwargs or {}),
             )
 
-        # Return the moment-derived score; raw shots and IQ moments are not retained.
+        # 4. Return the moment-derived score; raw shots and IQ moments are not retained.
         signals = signals_buffer.array
 
         return FreqGainResult(freqs, gains, signals)
@@ -210,6 +211,7 @@ class FreqGainExp(Experiment[FreqGainResult, FreqGainCfg]):
         smoothing. Return best_freq in MHz and best_gain in a.u. within [-1, 1], and
         publish fit. source.cfg may be None.
         """
+        # 1. Select the frequency-gain pair maximizing the smoothed readout-separation map.
         result = source.result
         freqs, gains, signals = result.freqs, result.gains, result.signals
 
@@ -234,6 +236,7 @@ class FreqGainExp(Experiment[FreqGainResult, FreqGainCfg]):
         max_gain = float(gains[max_gain_id])
         max_snr = float(snrs[max_freq_id, max_gain_id])
 
+        # 2. Locate the optimal readout setting on the smoothed SNR map.
         _, ax = plots.subplots(num="fit", figsize=config.figsize)
 
         ax.imshow(

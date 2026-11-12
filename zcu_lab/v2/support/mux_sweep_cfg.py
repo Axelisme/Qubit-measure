@@ -4,8 +4,7 @@ import math
 from collections.abc import Sequence
 from typing import Annotated, Protocol
 
-from pydantic import Field, ValidationError
-from pydantic_core import PydanticCustomError
+from pydantic import Field
 from qick.asm_v2 import QickParam
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.program.v2 import PulseCfg
@@ -84,27 +83,6 @@ class MuxDriveToneCfg(ConfigBase):
             raise ValueError("drive.waveform.length must be fixed")
 
 
-def require_tone_value(value: object, path: tuple[str | int, ...]) -> None:
-    """Reject None with a directed native cfg error asking to fill this setting.
-
-    path identifies the original tone field, including enclosing frequency when
-    needed. Non-null values retain their ordinary schema/scan validation.
-    """
-    if value is None:
-        raise ValidationError.from_exception_data(
-            "Mux tone",
-            [
-                {
-                    "type": PydanticCustomError(
-                        "required_tone", "填入 {setting}", {"setting": path[-1]}
-                    ),
-                    "loc": path,
-                    "input": None,
-                }
-            ],
-        )
-
-
 def validate_mux_tones(
     cfg: MuxAcquisition,
     tones: Sequence[MuxDriveToneCfg],
@@ -114,14 +92,10 @@ def validate_mux_tones(
 
     cfg provides shared positive reps/rounds and finite nonnegative delays in us.
     tones must match the full numeric readout length. Each active drive channel must
-    be distinct and different from readout.gen_ch. Raise ValueError with original
+    differ from readout.gen_ch. Raise ValueError with original
     indices/actual values; never read bindings or change inputs. No sweep is needed.
     """
-    # Check shared averaging and readout dimensions before indexing full tones.
-    if cfg.reps <= 0 or cfg.rounds <= 0:
-        raise ValueError("reps and rounds must be positive")
-    if any(not math.isfinite(v) or v < 0 for v in (cfg.initial_delay, cfg.relax_delay)):
-        raise ValueError("initial_delay and relax_delay must be finite nonnegative us")
+    # Check complete readout dimensions before indexing full tones.
     if len(tones) != len(cfg.readout.tones):
         raise ValueError(
             f"tones length={len(tones)}; full readout count={len(cfg.readout.tones)}"
@@ -129,17 +103,14 @@ def validate_mux_tones(
     validate_participants([tone.name for tone in tones], participants)
 
     # Only participants consume drives; readout still contains every tone.
-    channels: dict[int, int] = {}
     for i in participants:
         tone = tones[i]
-        require_tone_value(tone.drive, ("tones", i, "drive"))
         tone.validate_tone()
         drive = tone.require_drive()
-        if drive.ch == cfg.readout.gen_ch or drive.ch in channels:
+        if drive.ch == cfg.readout.gen_ch:
             raise ValueError(
-                f"tones[{i}].drive.ch={drive.ch}: requires independent generator; prior tone={channels.get(drive.ch)}; readout.gen_ch={cfg.readout.gen_ch}"
+                f"tones[{i}].drive.ch={drive.ch}: drive and readout require different generators"
             )
-        channels[drive.ch] = i
 
 
 def validate_mux_scan(
@@ -163,8 +134,9 @@ def validate_participants(names: Sequence[str], participants: Sequence[int]) -> 
     """Check complete names and nonempty unique original indices, preserving order.
 
     names contains the full captured identity list. participants indexes that
-    list directly, not a selected subset. Negative, bool, duplicate and out-of-
-    range values raise ValueError with the participant input position.
+    list directly, not a selected subset. Negative, bool and duplicate values
+    raise ValueError with the participant input position. Consumers index the
+    complete list directly and reject positive out-of-range indices there.
     """
     if any(not name for name in names) or len(set(names)) != len(names):
         raise ValueError("tones names must be nonempty and unique")
@@ -172,8 +144,8 @@ def validate_participants(names: Sequence[str], participants: Sequence[int]) -> 
         raise ValueError("participants must be nonempty")
     seen: set[int] = set()
     for position, index in enumerate(participants):
-        if type(index) is not int or not 0 <= index < len(names) or index in seen:
+        if type(index) is not int or index < 0 or index in seen:
             raise ValueError(
-                f"participants[{position}]={index!r}: expected unique original tone index in [0, {len(names)})"
+                f"participants[{position}]={index!r}: expected unique nonnegative original tone index"
             )
         seen.add(index)

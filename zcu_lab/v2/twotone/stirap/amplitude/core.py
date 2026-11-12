@@ -38,6 +38,22 @@ from zcu_tools.program.v2.modules.waveform import EnvelopeWaveformCfg
 
 from .._pulses import drive_pulse
 
+STATE_LABELS = ("g", "e", "f")
+
+
+@dataclass
+class StirapAmplitudeResult:
+    """Requested gains in a.u. and float64 g/e/f counts (Npump, Nstokes, 3).
+
+    pump_gains has shape (Npump,); stokes_gains has shape (Nstokes,).
+    Gains are quantized separately by each generator. Unacquired counts stay
+    NaN. No population correction or intermediate-state oracle is stored.
+    """
+
+    pump_gains: NDArray[np.float64]
+    stokes_gains: NDArray[np.float64]
+    counts: NDArray[np.float64]
+
 
 class StirapAmplitudeCfg(ConfigBase):
     """Measured carriers/MHz, independent gain ranges and fixed Stokes lead/us.
@@ -95,7 +111,7 @@ class StirapAmplitudeCfg(ConfigBase):
         default=4096, ge=1
     )
     relax_delay: Annotated[float, FieldMeta(label="Relax delay", unit="us")] = Field(
-        default=1.0, ge=0
+        ge=0
     )
 
     @model_validator(mode="after")
@@ -103,20 +119,6 @@ class StirapAmplitudeCfg(ConfigBase):
         if self.pump_ch == self.stokes_ch:
             raise ValueError("Pump and Stokes require different bound generators")
         return self
-
-
-@dataclass
-class StirapAmplitudeResult:
-    """Requested gains in a.u. and float64 g/e/f counts (Npump, Nstokes, 3).
-
-    pump_gains has shape (Npump,); stokes_gains has shape (Nstokes,).
-    Gains are quantized separately by each generator. Unacquired counts stay
-    NaN. No population correction or intermediate-state oracle is stored.
-    """
-
-    pump_gains: NDArray[np.float64]
-    stokes_gains: NDArray[np.float64]
-    counts: NDArray[np.float64]
 
 
 def restore_result(data: GroupedLoadData[StirapAmplitudeCfg]) -> StirapAmplitudeResult:
@@ -169,6 +171,7 @@ class StirapAmplitudeExp(Experiment[StirapAmplitudeResult, StirapAmplitudeCfg]):
         the backend. Hardware wiring remains operator-owned. Cancellation
         before a complete round leaves counts NaN.
         """
+        # 1. Require calibrated g/e/f readout before planning the pump-Stokes gain map.
         centroid3_classifier(cfg.readout, ro_ch=cfg.readout.ro_ch)
         pump_gains = np.linspace(
             cfg.pump_gain.start,
@@ -182,11 +185,15 @@ class StirapAmplitudeExp(Experiment[StirapAmplitudeResult, StirapAmplitudeCfg]):
             cfg.stokes_gain.expts,
             dtype=np.float64,
         )
+        # 2. Monitor raw g/e/f transfer fractions across pump and Stokes amplitudes.
         figure, _ = context.plots.subplots(
-            num="measurement", ncols=3, figsize=(12, 4), layout="constrained"
+            num="measurement",
+            ncols=len(STATE_LABELS),
+            figsize=(12, 4),
+            layout="constrained",
         )
         maps = []
-        for ax, state in zip(tuple(figure.axes), ("g", "e", "f"), strict=True):
+        for ax, state in zip(tuple(figure.axes), STATE_LABELS, strict=True):
             heatmap = ax.pcolormesh(
                 pump_gains,
                 stokes_gains,
@@ -205,6 +212,7 @@ class StirapAmplitudeExp(Experiment[StirapAmplitudeResult, StirapAmplitudeCfg]):
 
         @context.plots.on_plot_thread
         def update(data: NDArray[np.float64]):
+            """Refresh the measurement artists from the current acquired data."""
             total = data.sum(axis=-1, keepdims=True)
             raw = np.divide(
                 data, total, out=np.full_like(data, np.nan), where=total > 0
@@ -215,10 +223,12 @@ class StirapAmplitudeExp(Experiment[StirapAmplitudeResult, StirapAmplitudeCfg]):
 
         figure.show()
         counts = SignalBuffer(
-            (len(pump_gains), len(stokes_gains), 3), dtype=np.float64, on_update=update
+            (len(pump_gains), len(stokes_gains), len(STATE_LABELS)),
+            dtype=np.float64,
+            on_update=update,
         )
 
-        # Declare outer Pump and inner Stokes loops in one hardware program.
+        # 3. Measure transfer across both drive gains with fixed relative pulse timing.
         with Schedule(counts, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 context.soccfg, reps=cfg.shots, relax_delay=cfg.relax_delay
@@ -272,6 +282,7 @@ class StirapAmplitudeExp(Experiment[StirapAmplitudeResult, StirapAmplitudeCfg]):
         cfg/classifier, incomplete or empty counts and singular confusion fail
         explicitly; no current calibration is read.
         """
+        # 1. Recover g/e/f transfer populations using the saved readout confusion calibration.
         del options
         cfg = source.cfg
         if cfg is None:
@@ -286,16 +297,21 @@ class StirapAmplitudeExp(Experiment[StirapAmplitudeResult, StirapAmplitudeCfg]):
             )
         raw = counts / counts.sum(axis=-1, keepdims=True)
         result = analyze_centroid3_populations(raw, calibration)
+        # 2. Compare raw and corrected population maps across pump and Stokes gains.
         figure, _ = plots.subplots(
-            num="fit", nrows=2, ncols=3, figsize=(12, 8), layout="constrained"
+            num="fit",
+            nrows=2,
+            ncols=len(STATE_LABELS),
+            figsize=(12, 8),
+            layout="constrained",
         )
         for row, values, title in zip(
-            (figure.axes[:3], figure.axes[3:]),
+            (figure.axes[: len(STATE_LABELS)], figure.axes[len(STATE_LABELS) :]),
             (result.raw_populations, result.corrected_populations),
             ("Raw", "Corrected (unclipped)"),
             strict=True,
         ):
-            for state, (ax, label) in enumerate(zip(row, ("g", "e", "f"), strict=True)):
+            for state, (ax, label) in enumerate(zip(row, STATE_LABELS, strict=True)):
                 heatmap = ax.pcolormesh(
                     source.result.pump_gains,
                     source.result.stokes_gains,

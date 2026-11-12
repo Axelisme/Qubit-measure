@@ -7,6 +7,7 @@
 Open `twotone/stirap/delay` in Measure GUI, or call MCP recipe `stirap_delay`.
 Provide the measured Pump 0–3 and Stokes 3–2 carrier frequencies in MHz.
 Choose two different charge-drive generators.
+Pump and Stokes envelopes overlap, and one channel cannot play both arbitrary-waveform carrier frequencies at the same time.
 Set each signed gain within [-1, 1]. The sign is preserved during playback.
 
 Select a readout with saved `centroid3` centers and a 3×3 training confusion matrix.

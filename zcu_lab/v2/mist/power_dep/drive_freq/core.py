@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Annotated, ClassVar
 
 import numpy as np
+from matplotlib.artist import Artist
 from matplotlib.ticker import ScalarFormatter
 from numpy.typing import NDArray
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
@@ -34,6 +36,7 @@ class DriveFreqResult:
 
 
 def drivefreq_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
+    """Return the real-valued measurement view of complex IQ without changing the input."""
     avg_len = max(int(0.05 * signals.shape[1]), 1)
 
     mist_signals = signals - np.mean(signals[:, :avg_len])
@@ -50,7 +53,7 @@ class DriveFreqCfg(ConfigBase):
     gain: Annotated[SweepCfg, FieldMeta(label="gain", unit="a.u.")]
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
-    ] = 1
+    ]
     rounds: Annotated[
         int,
         FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
@@ -63,7 +66,7 @@ class DriveFreqCfg(ConfigBase):
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
-    ] = 1.0
+    ]
 
 
 class DriveFreqExp(Experiment[DriveFreqResult, DriveFreqCfg]):
@@ -120,7 +123,12 @@ class DriveFreqExp(Experiment[DriveFreqResult, DriveFreqCfg]):
         viewer = live_heatmap(ax)
 
         @context.plots.on_plot_thread
-        def update(data):
+        def update(data: NDArray[np.complex128]) -> Iterable[Artist]:
+            """Draw acquired complex IQ on the measurement axes; return changed artists.
+
+            Read the scan-shaped data without changing it. Update the live
+            artists over the prepared coordinates; plot errors propagate.
+            """
             return viewer.set(freqs, gains, drivefreq_signal2real(data))
 
         fig.show()
@@ -131,7 +139,7 @@ class DriveFreqExp(Experiment[DriveFreqResult, DriveFreqCfg]):
 
         # 2. Bind frequency and gain sweeps to the same probe pulse.
         with Schedule(signals_buffer, scope=context.scope) as sched:
-            # Build the pulse sequence without changing the caller's cfg.
+            # 3. Reset and initialize before each frequency/gain-swept probe and readout.
             builder = TimelineBuilder(
                 soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
             )
@@ -161,6 +169,7 @@ class DriveFreqExp(Experiment[DriveFreqResult, DriveFreqCfg]):
         first 5% of gain samples (at least one). ``options`` is None; this
         response map returns no population fit or calibration value.
         """
+        # 1. Reference all frequencies to the pooled low-gain IQ background.
         del options
         result = source.result
 
@@ -168,6 +177,7 @@ class DriveFreqExp(Experiment[DriveFreqResult, DriveFreqCfg]):
 
         real_signals = drivefreq_signal2real(signals)
 
+        # 2. Show MIST contrast over probe frequency and gain without a population fit.
         _, ax = plots.subplots(num="fit", figsize=config.figsize)
 
         ax.imshow(

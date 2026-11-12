@@ -19,8 +19,13 @@ from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2.support.measure.writeback_helpers import module_writeback
 
-from .analysis import CZAmplitudeAnalysis, CZReturnSummary
-from .core import CZAmplitudeCfg, CZAmplitudeExp, CZAmplitudeResult
+from .core import (
+    CZAmplitudeAnalysis,
+    CZAmplitudeCfg,
+    CZAmplitudeExp,
+    CZAmplitudeResult,
+    CZReturnSummary,
+)
 from .form import make_form
 
 CZAmplitudeRun: TypeAlias = RunRecord[CZAmplitudeCfg, CZAmplitudeResult]

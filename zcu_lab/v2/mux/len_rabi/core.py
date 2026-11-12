@@ -42,8 +42,8 @@ flat_top and sampled waveforms such as cosine, gauss and DRAG.
 Const length is the entire pulse.
 Flat_top length includes raise_waveform ramps; the waveform implementation
 subtracts ramps to determine the plateau. Gain, frequency, phase and ramp
-settings stay fixed. Arb assets have fixed length and are rejected by cfg and
-run validation rather than stretched or cropped.
+settings stay fixed. Arb assets have fixed length and are rejected at cfg
+construction rather than stretched or cropped.
 
 prepare_length_scan(cfg, soccfg=...) copies cfg and resolves original indices
 in participant order. sweep2array(..., "time", gen_ch=...) creates each drive's
@@ -105,7 +105,10 @@ from typing import Annotated, ClassVar
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import Field, StrictInt, model_validator
+from pydantic.dataclasses import dataclass as validated_dataclass
 from qick import QickConfig
+from zcu_tools.analysis.failure import AnalysisFailed
+from zcu_tools.analysis.fitting import FitQuality, compute_fit_quality, fit_rabi
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import Experiment
 from zcu_tools.experiment.axes_spec import GroupedAxesSpec
@@ -131,16 +134,58 @@ from zcu_tools.program.v2.modules import (
 from zcu_tools.utils.process import rotate2real
 
 from zcu_lab.v2.support import live_line
-from zcu_lab.v2.support.mux import MuxFitFailure, MuxSweepResult, averaged_mux_signal
+from zcu_lab.v2.support.mux import (
+    MuxFitFailure,
+    MuxSweepResult,
+    averaged_mux_signal,
+    validate_mux_result,
+)
 from zcu_lab.v2.support.mux_persistence import mux_sweep_spec
 from zcu_lab.v2.support.mux_sweep_cfg import (
     MuxDriveToneCfg,
     ToneRangeCfg,
-    require_tone_value,
     validate_mux_scan,
 )
 
-from .analysis import LenRabiAnalyzeOptions, MuxLenRabiFit, analyze_length
+
+@validated_dataclass(frozen=True)
+class LenRabiAnalyzeOptions:
+    """Select a decay envelope and a free phase for each pulse-length fit."""
+
+    decay: Annotated[bool, FieldMeta(label="Fit decay envelope")] = True
+    fit_phase: Annotated[bool, FieldMeta(label="Fit phase offset")] = False
+
+
+@dataclass(frozen=True)
+class MuxLenRabiFit:
+    """Fit for original tone index, with lengths in us and frequency in MHz.
+
+    pi_len/pi2_len are fitted pi/pi2 total pulse lengths. Their *_err fields and
+    rabi_f_err are one-sigma uncertainties from the owner's full covariance.
+    rabi_f is the oscillation frequency in inverse us. quality describes the
+    chosen cosine model and the finite acquired samples actually fitted.
+    """
+
+    index: int
+    pi_len: float
+    pi_len_err: float
+    pi2_len: float
+    pi2_len_err: float
+    rabi_f: float
+    rabi_f_err: float
+    quality: FitQuality
+
+
+@dataclass(frozen=True)
+class MuxLengthScan:
+    """Prepared length axes without acquisition state or per-point pulse copies.
+
+    indices retains original tone indices in participant order. coordinates is
+    float64 (K,P), containing each drive's rounded total lengths in us.
+    """
+
+    indices: Sequence[int]
+    coordinates: NDArray[np.float64]
 
 
 class MuxLenRabiToneCfg(MuxDriveToneCfg):
@@ -186,11 +231,11 @@ class MuxLenRabiCfg(ConfigBase):
 
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
-    ] = 1
+    ] = Field(gt=0)
     rounds: Annotated[
         int,
         FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
-    ] = 1
+    ] = Field(default=1, gt=0)
     earlystop_snr: Annotated[
         float | None,
         FieldMeta(
@@ -205,7 +250,7 @@ class MuxLenRabiCfg(ConfigBase):
             unit="us",
             description="Delay before the first repetition.",
         ),
-    ] = 1.0
+    ] = Field(default=1.0, ge=0, allow_inf_nan=False)
     relax_delay: Annotated[
         float,
         FieldMeta(
@@ -214,7 +259,7 @@ class MuxLenRabiCfg(ConfigBase):
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
-    ] = 1.0
+    ] = Field(ge=0, allow_inf_nan=False)
 
     @model_validator(mode="after")
     def validate_scan(self) -> MuxLenRabiCfg:
@@ -222,32 +267,17 @@ class MuxLenRabiCfg(ConfigBase):
         validate_mux_scan(self, self.tones, self.participants, self.expts)
         for index in self.participants:
             tone = self.tones[index]
-            require_tone_value(tone.length, ("tones", index, "length"))
             drive = tone.require_drive()
             if drive.waveform.style == "arb":
                 raise ValueError(
                     f"tones[{index}].drive.waveform: arb length is asset-derived "
                     "with no public length sweep"
                 )
-            if min(tone.require_length().start, tone.require_length().stop) <= 0:
-                raise ValueError(f"tones[{index}].length lengths must be positive us")
         return self
 
 
-@dataclass(frozen=True)
-class MuxLengthScan:
-    """Prepared length axes without acquisition state or per-point pulse copies.
-
-    indices retains original tone indices in participant order. coordinates is
-    float64 (K,P), containing each drive's rounded total lengths in us.
-    """
-
-    indices: Sequence[int]
-    coordinates: NDArray[np.float64]
-
-
 def prepare_length_scan(cfg: MuxLenRabiCfg, *, soccfg: QickConfig) -> MuxLengthScan:
-    """Prepare each selected qubit's pulse-length grid without acquiring data.
+    """Prepare pulse-length grids; raise for invalid or collapsed board lengths.
 
     cfg supplies complete tones and ordered participants; soccfg supplies the
     board clocks. Return original indices and float64 lengths (K,P) in us,
@@ -258,7 +288,7 @@ def prepare_length_scan(cfg: MuxLenRabiCfg, *, soccfg: QickConfig) -> MuxLengthS
     Inputs stay unchanged. Invalid cfg, nonpositive rounded lengths, collapsed
     sweeps and waveform conversion errors raise before acquisition.
     """
-    cfg = MuxLenRabiCfg.model_validate(cfg.model_dump())
+    cfg = cfg.model_copy(deep=True)
     indices = list(cfg.participants)
     coordinates = []
     for index in indices:
@@ -319,15 +349,18 @@ class MuxLenRabiExp(Experiment[MuxSweepResult, MuxLenRabiCfg]):
         retains acquired values and leaves unmeasured points NaN.
         Acquisition and cfg/build errors propagate. The caller owns plot and
         hardware cleanup and decides whether returned data can be analyzed.
+
         """
-        # 1. Prepare each qubit's length grid and select its original readout tone.
-        cfg = MuxLenRabiCfg.model_validate(config.model_dump())
+        # Prepare each qubit's length grid and select its original readout tone.
+        # 1. Use hardware length tables only when every selected drive is constant or flat-top.
+        cfg = config.model_copy(deep=True)
         scan = prepare_length_scan(cfg, soccfg=context.soccfg)
         if all(
             cfg.tones[index].require_drive().waveform.style in ("const", "flat_top")
             for index in scan.indices
         ):
             return self._run_for_flat(cfg, scan, context=context)
+        # 2. Use cached host-point programs for sampled envelopes on any participant.
         return self._run_for_arb(cfg, scan, context=context)
 
     def _run_for_flat(
@@ -356,7 +389,7 @@ class MuxLenRabiExp(Experiment[MuxSweepResult, MuxLenRabiCfg]):
                 for artist in viewer.set(scan.coordinates[row], np.abs(data[:, row]))
             )
 
-        # 2. One hardware point loop selects all participants' length tables.
+        # 1. One hardware point loop selects all participants' length tables.
         signals = SignalBuffer(scan.coordinates.T.shape, on_update=update)
         with Schedule(signals, scope=context.scope) as sched:
             drives = [
@@ -388,7 +421,7 @@ class MuxLenRabiExp(Experiment[MuxSweepResult, MuxLenRabiCfg]):
             builder.emit(readout_module)
             prog = builder.build()
 
-            # 3. Publish the full point/tone matrix after each completed round.
+            # 2. Publish the full point/tone matrix after each completed round.
             _ = sched.run_acquire(
                 prog,
                 context.soc,
@@ -408,6 +441,7 @@ class MuxLenRabiExp(Experiment[MuxSweepResult, MuxLenRabiCfg]):
         self, cfg: MuxLenRabiCfg, scan: MuxLengthScan, *, context: RunContext
     ) -> MuxSweepResult:
         """Scan sampled waveforms on the host; native arb assets stay unsupported."""
+        # 1. Show each participant's length response and average only measured round/point pairs.
         rounds = cfg.rounds
         cfg = cfg.model_copy(deep=True)
         cfg.rounds = 1
@@ -443,6 +477,7 @@ class MuxLenRabiExp(Experiment[MuxSweepResult, MuxLenRabiCfg]):
                 for artist in viewer.set(scan.coordinates[row], np.abs(mean[:, row]))
             )
 
+        # 2. Reuse each point's reset/simultaneous-drive/readout program across host rounds.
         signals = SignalBuffer((rounds, *scan.coordinates.T.shape), on_update=update)
         with Schedule(signals, scope=context.scope) as sched:
             for _, rep in sched.repeat("round", rounds):
@@ -497,6 +532,7 @@ class MuxLenRabiExp(Experiment[MuxSweepResult, MuxLenRabiCfg]):
                 ):
                     break
         signals.trigger_update(flush=True)
+        # 3. Keep available-round means on the planned length grids; untouched points remain NaN.
         return MuxSweepResult(
             np.asarray(scan.indices, dtype=np.int64),
             scan.coordinates,
@@ -517,5 +553,82 @@ class MuxLenRabiExp(Experiment[MuxSweepResult, MuxLenRabiCfg]):
         errors in us, Rabi frequency and error in MHz, and fit quality, or a
         numerical failure with its reason. Fresh caller-owned plots receive
         fit_i figures. Invalid source data raises; no live cfg or hardware is read.
+
         """
-        return analyze_length(source.result, options, plots=plots)
+        # 1. Fit acquired length points per tone, with optional damping and a fixed or free phase.
+        result = source.result
+        validate_mux_result(result)
+        outcomes: list[MuxLenRabiFit | MuxFitFailure] = []
+        # 2. Drop missing IQ per tone without substituting points from another length grid.
+        for row, raw_index in enumerate(result.tone_indices):
+            index = int(raw_index)
+            signal = result.signals[row]
+            finite = np.isfinite(signal)
+            xs = result.coordinates[row, finite]
+            signal = signal[finite]
+            fig, ax = plots.subplots(num=f"fit_{index}", figsize=(8, 5))
+            ax.set(xlabel="Pulse length (us)", ylabel="Signal real (a.u.)")
+            fig.suptitle(f"tone {index}")
+            try:
+                if len(xs) < 6:
+                    raise ValueError(
+                        "Len Rabi fit requires at least six acquired points"
+                    )
+                # 3. Project IQ before fitting the selected damped/undamped cosine and phase policy.
+                real = rotate2real(signal).real
+                fit = fit_rabi(
+                    xs,
+                    real,
+                    decay=options.decay,
+                    init_phase=None if options.fit_phase else 0.0,
+                )
+                pi, pierr = fit.pi_x, fit.pi_x_err
+                pi2, pi2err = fit.pi2_x, fit.pi2_x_err
+                freq, freqerr = fit.freq, fit.freq_err
+                fitted, params, covariance = fit.curve, fit.params, fit.cov
+                if not np.all(np.isfinite((pi, pierr, pi2, pi2err, freq, freqerr))):
+                    raise ValueError("Len Rabi fit returned nonfinite estimates")
+                names = ("y0", "yscale", "freq", "phase") + (
+                    ("decay_time",) if options.decay else ()
+                )
+                quality = compute_fit_quality(
+                    real,
+                    fitted,
+                    {
+                        name: float(value)
+                        for name, value in zip(names, params, strict=True)
+                    },
+                    covariance,
+                )
+                outcome = MuxLenRabiFit(
+                    index, pi, pierr, pi2, pi2err, freq, freqerr, quality
+                )
+            except (
+                AnalysisFailed,
+                ValueError,
+                RuntimeError,
+                ArithmeticError,
+                np.linalg.LinAlgError,
+            ) as exc:
+                # 4. Keep a failed tone's acquired magnitude and reason without stopping other fits.
+                ax.plot(xs, np.abs(signal), "o", label="acquired magnitude")
+                ax.text(
+                    0.02, 0.98, str(exc), transform=ax.transAxes, va="top", wrap=True
+                )
+                outcomes.append(MuxFitFailure(index, str(exc)))
+            else:
+                # 5. Show pi/pi2 length uncertainty and Rabi frequency on each successful fit.
+                ax.plot(xs, real, "o", label="measured")
+                ax.plot(xs, fitted, label="fit")
+                for value, error, label in ((pi, pierr, "pi"), (pi2, pi2err, "pi/2")):
+                    ax.axvline(
+                        value, ls="--", label=f"{label}={value:.4g} ± {error:.2g} us"
+                    )
+                    ax.axvspan(value - error, value + error, alpha=0.2, color="red")
+                ax.set_title(f"Rabi f={freq:.4g} ± {freqerr:.2g} MHz")
+                outcomes.append(outcome)
+            ax.legend()
+            ax.grid(True)
+            fig.tight_layout()
+        # 6. Preserve each tone's pi/pi2 lengths, frequency and quality, or its failure reason.
+        return tuple(outcomes)

@@ -36,19 +36,12 @@ from .._sums import (
     herald_probabilities,
     joint_probabilities,
     terminal_counts,
-    validate_classifiers,
 )
-from .analysis import ConstructivePhaseAnalysis, analyze_constructive_phase
-from .core import ConstructivePhaseCfg
-
-
-class ConstructivePhaseHeraldedCfg(ConstructivePhaseCfg):
-    """Relative F2 minus F1 phase scan in degrees at fixed common frequency. Herald precedes B11 preparation.
-
-    The same full mux cfg supplies herald and terminal reads, separated by
-    readout.post_delay. reset=None emits no reset. Other inputs match ordinary
-    ConstructivePhaseCfg, including the circle classifiers with radius from GE Post.
-    """
+from .core import (
+    ConstructivePhaseAnalysis,
+    ConstructivePhaseCfg,
+    analyze_constructive_phase,
+)
 
 
 @dataclass(frozen=True)
@@ -60,13 +53,86 @@ class ConstructivePhaseHeraldedResult(RabiScanResult):
     """
 
 
+class ConstructivePhaseHeraldedCfg(ConstructivePhaseCfg):
+    """Relative F2 minus F1 phase scan in degrees at fixed common frequency. Herald precedes B11 preparation.
+
+    The same full mux cfg supplies herald and terminal reads, separated by
+    readout.post_delay. reset=None emits no reset. Other inputs match ordinary
+    ConstructivePhaseCfg, including the circle classifiers with radius from GE Post.
+    """
+
+
 def restore_result(
     data: GroupedLoadData[ConstructivePhaseHeraldedCfg],
 ) -> ConstructivePhaseHeraldedResult:
-    """Restore 81-class sums; old raw-IQ files without sums raise ValueError."""
+    """Restore 81-class sums; old raw-IQ files without sums raise ValueError.
+
+    data supplies the grouped sums variable and its persisted scan axes. Return
+    this experiment's Result with float64 class counts and its original axis
+    ordering. Missing variables and invalid data propagate load errors. Do not
+    mutate the loaded data, acquire or draw; no raw-IQ reconstruction is attempted.
+    """
     sums = data.variable("sums")
     return ConstructivePhaseHeraldedResult(
         coordinates=sums.axes[5], durations=sums.axes[4], sums=sums.z.astype(np.float64)
+    )
+
+
+def _plot_return(
+    plots: Plots,
+    coordinates: NDArray[np.float64],
+    durations: NDArray[np.float64],
+    populations: NDArray[np.float64],
+    relative_phase_deg: float | None,
+) -> None:
+    """Plot three terminal fractions at the nearest measured phase in degrees.
+
+    populations contains all nine normalized outcomes per phase and duration.
+    None selects the first phase. Annotate the largest remaining outcome and
+    its peak fraction. Do not acquire or change the supplied arrays.
+    """
+    phase_index = 0
+    if relative_phase_deg is not None:
+        phase_distance = (coordinates - relative_phase_deg + 180) % 360 - 180
+        phase_index = int(np.argmin(np.abs(phase_distance)))
+    values = populations[phase_index]
+    other_indices = [1, 2, 3, 5, 6, 7, 8]
+    other_peaks = np.nanmax(values[:, other_indices], axis=0)
+    largest_other = other_indices[int(np.argmax(other_peaks))]
+    states = ("in g", "in e", "outside g/e")
+    _, ax = plots.subplots(num="return", figsize=(11, 6), layout="constrained")
+    ax.plot(durations, values[:, 0], ".-", color="C0", label="Both qubits in g")
+    ax.plot(durations, values[:, 4], ".-", color="C3", label="Both qubits in e")
+    ax.plot(
+        durations,
+        values[:, other_indices].sum(axis=1),
+        ".-",
+        color="0.45",
+        label="Anything else",
+    )
+    ax.set(
+        xlabel="Drive duration (us)",
+        ylabel="Fraction of herald-accepted shots",
+        ylim=(0, 1),
+        title="Where the two qubits end up after the drive · both in g at herald\n"
+        f"(relative phase {coordinates[phase_index]:g}°"
+        + (
+            "; closest measured to recommendation)"
+            if relative_phase_deg is not None
+            else "; first measured phase, no recommendation)"
+        ),
+    )
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.14), ncols=3, frameon=False)
+    ax.text(
+        0.99,
+        0.02,
+        f"Largest part of 'anything else': qubit 1 {states[largest_other // 3]}, "
+        f"qubit 2 {states[largest_other % 3]} (up to {other_peaks.max():.1%})",
+        ha="right",
+        va="bottom",
+        transform=ax.transAxes,
+        fontsize="x-small",
+        color="0.35",
     )
 
 
@@ -121,21 +187,25 @@ class ConstructivePhaseHeraldedExp(
         Constant and flat-top drives use a hardware duration sweep. Sampled
         envelopes rebuild at each host duration. Both return coordinate-major
         float64 counts with the same Result axes and cancellation semantics.
+
         """
+        # 1. Use hardware duration sweeps only when both drives are constant or flat-top.
         if all(
             isinstance(pulse.waveform, (ConstWaveformCfg, FlatTopWaveformCfg))
             for pulse in (config.drive.f1, config.drive.f2)
         ):
             return self._run_hardware_duration(config, context=context)
+        # 2. Rebuild sampled drive envelopes on the host while keeping the other axis in hardware.
         return self._run_host_duration(config, context=context)
 
     def _run_hardware_duration(
         self, config: ConstructivePhaseHeraldedCfg, *, context: RunContext
     ) -> ConstructivePhaseHeraldedResult:
         """Acquire all coordinates and durations in hardware, accumulating rounds."""
-        validate_classifiers(config.readout, config.roles)
+        # 1. Pair relative-phase and duration axes for the two-drive return map.
         coordinates = sweep2array(config.relative_phase)
         durations = sweep2array(config.duration)
+        # 2. Track gg-heralded terminal P00 versus duration for each relative-phase slice.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Drive duration (us)", ylabel="Terminal P00 | herald (g,g)")
         viewer = live_line(ax, num_lines=len(coordinates))
@@ -151,6 +221,7 @@ class ConstructivePhaseHeraldedExp(
 
         class_shape = (3, 3, 3, 3)
         shape = (len(coordinates), len(durations), *class_shape)
+        # 3. Sweep phase/duration in hardware with herald before preparation and terminal readout after contrast.
         buffer = SignalBuffer(shape, dtype=np.float64, on_update=update_view)
         with Schedule(buffer, scope=context.scope) as sched:
             builder = TimelineBuilder(
@@ -205,15 +276,17 @@ class ConstructivePhaseHeraldedExp(
             )
         buffer.trigger_update(flush=True)
         sums = buffer.array
+        # 4. Retain all 81 class counts, including completed rounds and NaN gaps after cancellation.
         return ConstructivePhaseHeraldedResult(coordinates, durations, sums)
 
     def _run_host_duration(
         self, config: ConstructivePhaseHeraldedCfg, *, context: RunContext
     ) -> ConstructivePhaseHeraldedResult:
         """Rebuild sampled envelopes per host duration; keep coordinates in hardware."""
-        validate_classifiers(config.readout, config.roles)
+        # 1. Keep the relative-phase grid fixed while sampled-envelope durations advance on the host.
         coordinates = sweep2array(config.relative_phase)
         durations = sweep2array(config.duration)
+        # 2. Track gg-heralded terminal P00 versus duration for each relative-phase slice.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Drive duration (us)", ylabel="Terminal P00 | herald (g,g)")
         viewer = live_line(ax, num_lines=len(coordinates))
@@ -229,6 +302,7 @@ class ConstructivePhaseHeraldedExp(
 
         class_shape = (3, 3, 3, 3)
         shape = (len(durations), len(coordinates), *class_shape)
+        # 3. Rebuild each duration's herald/prepare/drive/contrast sequence with a hardware relative-phase sweep.
         buffer = SignalBuffer(shape, dtype=np.float64, on_update=update_view)
         # Sampled cosine/Gauss/DRAG envelopes reject QickParam lengths. Only their
         # duration stays on the host; coordinate remains a hardware sweep.
@@ -286,6 +360,7 @@ class ConstructivePhaseHeraldedExp(
                 )
         buffer.trigger_update(flush=True)
         sums = buffer.array.swapaxes(0, 1)
+        # 4. Restore coordinate-major axes without discarding herald classes or partial acquisition counts.
         return ConstructivePhaseHeraldedResult(coordinates, durations, sums)
 
     def analyze(
@@ -301,7 +376,9 @@ class ConstructivePhaseHeraldedExp(
 
         Pass fraction is not ground-state purity. Empty accepted counts give
         NaN terminal probabilities and unresolved fits. Saved cfg is required.
+
         """
+        # 1. Select gg-heralded return probabilities; determine completion from all herald classes.
         del options
         if source.cfg is None:
             raise ValueError(
@@ -327,6 +404,7 @@ class ConstructivePhaseHeraldedExp(
             totals,
             herald_probabilities(result.sums),
         )
+        # 2. Show phase-dependent return and leakage before extracting identifiable duration-slice rates.
         fig, ax = plots.subplots(
             num="interference", figsize=(9, 6), layout="constrained"
         )
@@ -347,29 +425,7 @@ class ConstructivePhaseHeraldedExp(
         labels = tuple(
             f"({a},{b})" for a in ("g", "e", "other") for b in ("g", "e", "other")
         )
-        fig, _ = plots.subplots(
-            num="return",
-            nrows=3,
-            ncols=3,
-            figsize=(13, 10),
-            squeeze=False,
-            layout="constrained",
-        )
-        for outcome, ax in enumerate(fig.axes):
-            for coordinate, values in zip(
-                result.coordinates, answer.populations, strict=True
-            ):
-                ax.plot(
-                    result.durations, values[:, outcome], ".-", label=f"{coordinate:g}"
-                )
-            ax.set(
-                xlabel="Drive duration (us)",
-                ylabel=f"Observed P{labels[outcome]}",
-                title=f"Terminal {labels[outcome]} · other retained in denominator",
-            )
-            ax.legend(
-                title="F2 relative to F1 phase (deg)", fontsize="x-small", ncols=2
-            )
+        # 3. Inspect all herald fractions and ee disturbance separately from the gg return fit.
         herald_matrix = herald_probabilities(result.sums)
         fig, _ = plots.subplots(
             num="herald",
@@ -410,15 +466,16 @@ class ConstructivePhaseHeraldedExp(
             ylabel="F2 relative to F1 phase (deg)",
             title="Drive disturbance of |00⟩ · ee control, no shared fit",
         )
+        # 4. Fit complete duration traces, then regress identifiable rates squared against relative phase.
         analysis = analyze_constructive_phase(coordinates, durations, answer)
-        rates = analysis.rates
+        modulation = analysis.modulation
         _, ax = plots.subplots(num="rabi_rate", figsize=(10, 6), layout="constrained")
         ax.errorbar(
             coordinates,
-            [rate.rate if rate.rate is not None else np.nan for rate in rates],
+            [rate.rate if rate.rate is not None else np.nan for rate in analysis.rates],
             yerr=[
                 rate.uncertainty if rate.uncertainty is not None else np.nan
-                for rate in rates
+                for rate in analysis.rates
             ],
             fmt="o",
             color="C0",
@@ -428,7 +485,7 @@ class ConstructivePhaseHeraldedExp(
             0.98,
             "\n".join(
                 f"{coordinate:g}: {rate.reason}"
-                for coordinate, rate in zip(coordinates, rates, strict=True)
+                for coordinate, rate in zip(coordinates, analysis.rates, strict=True)
                 if rate.reason
             ),
             va="top",
@@ -441,7 +498,7 @@ class ConstructivePhaseHeraldedExp(
             title="Undamped cosine model · rates below 1/duration span excluded",
         )
         _, ax = plots.subplots(num="rabi_traces", figsize=(10, 6), layout="constrained")
-        for coordinate, rate in zip(coordinates, rates, strict=True):
+        for coordinate, rate in zip(coordinates, analysis.rates, strict=True):
             if rate.fitted is not None:
                 ax.plot(durations, rate.fitted, label=f"{coordinate:g}")
         ax.set(
@@ -451,20 +508,50 @@ class ConstructivePhaseHeraldedExp(
         )
         ax.legend(title="F2 relative to F1 phase (deg)", fontsize="x-small", ncols=2)
 
-        if analysis.interference is not None:
-            phases, squared, dense, curve, maximum_phase = analysis.interference
+        # 5. Summarize terminal outcomes at the measured phase nearest the proposed maximum.
+        _plot_return(
+            plots,
+            coordinates,
+            durations,
+            answer.populations,
+            modulation.prediction.maximum_phase_deg
+            if modulation.prediction is not None
+            else None,
+        )
+
+        # 6. Propose the interference maximum only when the rate-squared modulation is identifiable.
+        if modulation.prediction is not None:
             _, ax = plots.subplots(
                 num="constructive_phase", figsize=(9, 6), layout="constrained"
             )
-            ax.plot(phases, squared, "o", label="Identifiable duration-slice rates²")
-            ax.plot(dense, curve, label="A + B cosφ + C sinφ")
-            ax.axvline(maximum_phase, ls="--", label="Maximum rate phase")
+            ax.plot(
+                analysis.phases,
+                analysis.squared_rates,
+                "o",
+                label="Identifiable duration-slice rates²",
+            )
+            ax.plot(
+                modulation.prediction.phase_degrees,
+                modulation.prediction.squared_rates,
+                label="A + B cosφ + C sinφ",
+            )
+            ax.axvline(
+                modulation.prediction.maximum_phase_deg,
+                ls="--",
+                label="Maximum rate phase",
+            )
             ax.set(
                 xlabel="F2 relative to F1 phase (deg)",
                 ylabel="Rabi rate² (MHz²)",
                 title="Constructive phase · fixed signed gain ratio",
             )
             ax.legend()
+            return ConstructivePhaseAnalysis(
+                modulation.prediction.maximum_phase_deg,
+                modulation.reason,
+                modulation.fit_quality,
+            )
+        # 7. Keep an unresolved constructive-phase proposal explicit with its fit diagnostics.
         return ConstructivePhaseAnalysis(
-            analysis.relative_phase_deg, analysis.reason, analysis.interference_quality
+            None, modulation.reason, modulation.fit_quality
         )

@@ -260,7 +260,8 @@ def confirm_frequency_candidate(
         scan,
         diagnostics=scan.diagnostics.model_copy(
             update={
-                "gates": scan.diagnostics.gates + confirmation_gates(coarse_fit, scan),
+                "gates": scan.diagnostics.gates
+                + confirmation_gates(coarse_fit.frequency_mhz, peak, scan),
             }
         ),
     )

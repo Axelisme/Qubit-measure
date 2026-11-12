@@ -9,7 +9,7 @@ Both switches use the same calibrated pi pulse. Each switch has off=0 and on=1.
 Saved complex IQ has axes before pi, after pi, length, in that order.
 The saved length axis contains the hardware-quantized hold durations in us.
 
-The tested reset uses `reset/pulse` on `$qubit.wiring.lo_flux_ch`, with frequency 0 MHz and a const waveform.
+The tested reset preset uses `reset/pulse` on `$qubit.wiring.lo_flux_ch`, with frequency 0 MHz and a const waveform.
 Its fixed gain starts from `$qubit.ext.flux_reset_gain` through the `flux_reset` template.
 Review that gain from the gain scan before calibrating duration. A gain proposal alone does not prove effective reset.
 Missing required sources remain Invalid. Enter a fixed gain if it has not been saved.
@@ -22,7 +22,7 @@ Readout uses `$resonator.module.readout`, or the readout template if that slot i
 
 The length range starts at a single 0.1 us point. Set start, stop and point count for the permitted hold-length range before Run.
 Run replaces only the tested pulse's hold length. It keeps the gain and pre/post delays unchanged.
-The tested pulse must retain its const waveform and zero frequency.
+The preset uses a zero-frequency const pulse. The experiment does not require a const waveform or zero frequency.
 Its `pulse_cfg.post_delay` is the time in us to wait after returning from the flux excursion for the flux tail to settle.
 0 means no wait. On hardware, measure the flux tail, for example with `fastflux/distortion`, and set this delay long enough for settling.
 

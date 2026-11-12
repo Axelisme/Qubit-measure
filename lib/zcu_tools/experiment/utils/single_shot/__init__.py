@@ -28,15 +28,13 @@ def fit_singleshot2d(
     ----------
     signals : NDArray
         複數測量信號。可以是一維數組或二維數組（多個測量組）。
-    num_gauss : int, default=2
+    num_gauss : int, default=3
         要擬合的高斯分佈數量。
-    plot : bool, default=True
-        是否生成可視化圖形。
-    method : Literal["standard", "bayesian"], default="standard"
+    method : Literal["standard", "bayesian"], default="bayesian"
         使用的擬合方法:
         - "standard": 使用標準GMM擬合指定數量的高斯分佈
         - "bayesian": 使用貝葉斯GMM自動確定最佳組件數量（不超過num_gauss）
-    現在總是繪製信心圓，半徑由 sigma 決定。
+    函式總是繪製各分佈的資料點與中心，並顯示分佈權重。
 
     返回
     -------

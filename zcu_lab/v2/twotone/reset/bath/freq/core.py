@@ -52,6 +52,13 @@ class FreqGainAnalysis:
     freq: float
 
 
+def bathreset_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
+    """Convert mean complex IQ to the real contrast used by live and analysis plots."""
+    return (
+        np.abs(signals[2] - signals[0]) ** 2 + np.abs(signals[3] - signals[1]) ** 2
+    )  # (gain, freq)
+
+
 class FreqGainCfg(ConfigBase):
     reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
     init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init pulse")] = None
@@ -62,7 +69,7 @@ class FreqGainCfg(ConfigBase):
 
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
-    ] = 1
+    ]
     rounds: Annotated[
         int,
         FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
@@ -75,13 +82,7 @@ class FreqGainCfg(ConfigBase):
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
-    ] = 1.0
-
-
-def bathreset_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
-    return (
-        np.abs(signals[2] - signals[0]) ** 2 + np.abs(signals[3] - signals[1]) ** 2
-    )  # (gain, freq)
+    ]
 
 
 class FreqGainExp(Experiment[FreqGainResult, FreqGainCfg]):
@@ -129,7 +130,7 @@ class FreqGainExp(Experiment[FreqGainResult, FreqGainCfg]):
         gains in a.u. within [-1, 1] and frequencies in MHz. Opposite-phase differences probe
         transverse contrast, not reset fidelity.
         """
-        # Prepare cavity-drive coordinates and four relative tomography phases.
+        # 1. Prepare cavity-drive coordinates and four relative tomography phases.
         cfg = deepcopy(config)
         soc, soccfg = context.soc, context.soccfg
 
@@ -145,7 +146,7 @@ class FreqGainExp(Experiment[FreqGainResult, FreqGainCfg]):
             {"soccfg": soccfg, "gen_ch": reset_cfg.cavity_tone_cfg.ch},
         )
 
-        # Display opposite-phase contrast while retaining all four complex IQ planes.
+        # 2. Display opposite-phase contrast while retaining all four complex IQ planes.
         plots = context.plots
         fig, ax = plots.subplots(num="measurement")
         ax.set(xlabel="Cavity Frequency (MHz)", ylabel="Cavity drive Gain (a.u.)")
@@ -153,12 +154,13 @@ class FreqGainExp(Experiment[FreqGainResult, FreqGainCfg]):
 
         @plots.on_plot_thread
         def update(data: NDArray[np.complex128]) -> tuple[Artist, ...]:
+            """Refresh the measurement artists from the current acquired data."""
             return viewer.set(freqs, gains, bathreset_signal2real(data).T)
 
         fig.show()
         signals_buffer = SignalBuffer((4, len(gains), len(freqs)), on_update=update)
 
-        # Sweep both cavity knobs and the final pi/2 phase in one program.
+        # 3. Resolve reset tomography across cavity gain and frequency in one program.
         with Schedule(signals_buffer, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
@@ -205,7 +207,7 @@ class FreqGainExp(Experiment[FreqGainResult, FreqGainCfg]):
 
         gains, freqs, signals = result.gains, result.freqs, result.signals
 
-        # Find peak in amplitude
+        # 1. Locate the strongest reset tomography contrast after spatial smoothing.
         smooth_signals = smooth_signal_nd(
             signals,
             options=SmoothingOptions(
@@ -221,6 +223,7 @@ class FreqGainExp(Experiment[FreqGainResult, FreqGainCfg]):
         gain_opt = gains[np.argmax(np.max(real_signals, axis=1))]
         freq_opt = freqs[np.argmax(np.max(real_signals, axis=0))]
 
+        # 2. Identify the optimal cavity gain and frequency on the smoothed contrast map.
         fig, ax = plots.subplots(num="fit")
 
         ax.imshow(

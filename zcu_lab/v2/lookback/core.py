@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Annotated, ClassVar
 
 import numpy as np
+from matplotlib.artist import Artist
 from numpy.typing import NDArray
 from pydantic.dataclasses import dataclass as pydantic_dataclass
 from scipy.ndimage import gaussian_filter1d
@@ -37,6 +39,11 @@ class LookbackAnalysis:
     predict_offset: float
 
 
+def lookback_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
+    """Return the real-valued measurement view of complex IQ without changing the input."""
+    return np.abs(signals)
+
+
 class LookbackCfg(ConfigBase):
     reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
     init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init pulse")] = None
@@ -53,17 +60,13 @@ class LookbackCfg(ConfigBase):
             decimals=3,
             description="Delay after each shot.",
         ),
-    ] = 1.0
+    ]
     initial_delay: Annotated[
         float,
         FieldMeta(
             label="Initial delay", unit="us", description="Delay before the first shot."
         ),
     ] = 1.0
-
-
-def lookback_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
-    return np.abs(signals)
 
 
 class LookbackExp(Experiment[LookbackResult, LookbackCfg]):
@@ -87,7 +90,7 @@ class LookbackExp(Experiment[LookbackResult, LookbackCfg]):
         samples rather than integrated IQ. The program uses reps=1 and config's
         software rounds without changing config.
         """
-        # Decimated acquisition uses one repetition per round, not an IQ-shot loop.
+        # 1. Decimated acquisition uses one repetition per round, not an IQ-shot loop.
         run_cfg = deepcopy(config)
 
         fig, ax = context.plots.subplots(num="measurement")
@@ -95,8 +98,7 @@ class LookbackExp(Experiment[LookbackResult, LookbackCfg]):
         line = live_line(ax)
 
         fig.show()
-        # Compile reset→optional preparation→readout before acquisition so an
-        # interrupted trace still has its fixed sample-time axis and buffer.
+        # 2. Fix the reset/preparation/readout sample axis before a possible stop.
         builder = TimelineBuilder(
             context.soccfg,
             reps=1,
@@ -112,10 +114,15 @@ class LookbackExp(Experiment[LookbackResult, LookbackCfg]):
         assert isinstance(times, np.ndarray)
 
         @context.plots.on_plot_thread
-        def update(data):
+        def update(data: NDArray[np.complex128]) -> Iterable[Artist]:
+            """Draw acquired complex IQ on the measurement axes; return changed artists.
+
+            Read the scan-shaped data without changing it. Update the live
+            artists over the prepared coordinates; plot errors propagate.
+            """
             return line.set(times, lookback_signal2real(data))
 
-        # Acquire the time-resolved trace for arrival-time analysis.
+        # 3. Acquire the time-resolved trace for arrival-time analysis.
         signals_buffer = SignalBuffer(
             (len(times),),
             on_update=update,
@@ -140,6 +147,7 @@ class LookbackExp(Experiment[LookbackResult, LookbackCfg]):
         that time as predict_offset, not a fitted resonator response. Saved cfg
         is optional and only supplies the readout-window markers on the plot.
         """
+        # 1. Optionally smooth complex ADC samples before locating readout arrival.
         result = source.result
         Ts = result.times
         signals = result.signals
@@ -150,7 +158,7 @@ class LookbackExp(Experiment[LookbackResult, LookbackCfg]):
             signals = gaussian_filter1d(signals, options.smooth)
         y = np.abs(signals)
 
-        # Work backward from the peak to locate the last below-threshold sample.
+        # 2. Work backward from the peak to locate the last below-threshold sample.
         max_idx = np.argmax(y)
         candidate_mask = y[:max_idx] < options.ratio * y[max_idx]
         if not np.any(candidate_mask):
@@ -158,6 +166,7 @@ class LookbackExp(Experiment[LookbackResult, LookbackCfg]):
         else:
             offset = float(Ts[np.nonzero(candidate_mask)[0][-1]])
 
+        # 3. Compare IQ and magnitude with arrival and saved readout-window markers.
         fig, ax = plots.subplots(num="fit", figsize=config.figsize)
 
         # np.real/np.imag are used instead of .real/.imag because numpy 2.4

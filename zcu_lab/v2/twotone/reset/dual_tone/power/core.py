@@ -37,32 +37,6 @@ class PowerResult:
     signals: NDArray[np.complex128]
 
 
-class PowerCfg(ConfigBase):
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init pulse")] = None
-    tested_reset: Annotated[TwoPulseReset.Cfg, FieldMeta(label="Tested reset")]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-    gain1: Annotated[SweepCfg, FieldMeta(label="Gain1", unit="a.u.")]
-    gain2: Annotated[SweepCfg, FieldMeta(label="Gain2", unit="a.u.")]
-
-    reps: Annotated[
-        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
-    ] = 1
-    rounds: Annotated[
-        int,
-        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
-    ] = 1
-    relax_delay: Annotated[
-        float,
-        FieldMeta(
-            label="Relax delay",
-            unit="us",
-            decimals=3,
-            description="Relaxation delay after each repetition.",
-        ),
-    ] = 1.0
-
-
 @pydantic_dataclass(frozen=True)
 class PowerAnalyzeOptions:
     smooth: float = 1.0
@@ -77,6 +51,32 @@ class PowerAnalyzeOptions:
 class PowerAnalysis:
     gain1: float
     gain2: float
+
+
+class PowerCfg(ConfigBase):
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init pulse")] = None
+    tested_reset: Annotated[TwoPulseReset.Cfg, FieldMeta(label="Tested reset")]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
+    gain1: Annotated[SweepCfg, FieldMeta(label="Gain1", unit="a.u.")]
+    gain2: Annotated[SweepCfg, FieldMeta(label="Gain2", unit="a.u.")]
+
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ]
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
+        ),
+    ]
 
 
 class PowerExp(Experiment[PowerResult, PowerCfg]):
@@ -104,7 +104,7 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
         The display uses the minimum-gain corner as background; this contrast
         is not a calibrated reset fidelity.
         """
-        # Prepare each reset pulse's gain grid on its own generator channel.
+        # 1. Prepare each reset pulse's gain grid on its own generator channel.
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
 
@@ -120,15 +120,7 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
             {"soccfg": soccfg, "gen_ch": reset_cfg.pulse2_cfg.ch},
         )
 
-        def dual_reset_gain_signal2real(
-            signals: NDArray[np.complex128],
-        ) -> NDArray[np.float64]:
-            # Choose reference point based on sweep direction (use minimum power point)
-            ref_i = 0 if gains1[0] < gains1[-1] else -1
-            ref_j = 0 if gains2[0] < gains2[-1] else -1
-            return np.abs(signals - signals[ref_i, ref_j])
-
-        # Display contrast relative to the minimum-gain corner in either scan direction.
+        # 2. Display contrast relative to the minimum-gain corner in either scan direction.
         plots = context.plots
         fig, ax = plots.subplots(num="measurement")
         ax.set(xlabel="Gain1 (a.u.)", ylabel="Gain2 (a.u.)")
@@ -136,12 +128,17 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
 
         @plots.on_plot_thread
         def update(data: NDArray[np.complex128]) -> tuple[Artist, ...]:
-            return viewer.set(gains1, gains2, dual_reset_gain_signal2real(data))
+            """Refresh the measurement artists from the current acquired data."""
+            # Use the minimum-power corner as the common contrast reference.
+            ref_i = 0 if gains1[0] < gains1[-1] else -1
+            ref_j = 0 if gains2[0] < gains2[-1] else -1
+            contrast = np.abs(data - data[ref_i, ref_j])
+            return viewer.set(gains1, gains2, contrast)
 
         fig.show()
         signals_buffer = SignalBuffer((len(gains1), len(gains2)), on_update=update)
 
-        # Sweep both reset gains in hardware and collect mean IQ.
+        # 3. Measure reset response across both tone gains in one FPGA sweep.
         with Schedule(signals_buffer, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
@@ -179,7 +176,7 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
 
         gains1, gains2, signals = result.gains1, result.gains2, result.signals
 
-        # Apply smoothing for peak finding
+        # 1. Resolve reset contrast relative to the minimum-power corner after smoothing.
         signals_smooth = smooth_signal_nd(
             signals,
             options=SmoothingOptions(
@@ -195,7 +192,7 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
         ref_j = 0 if gains2[0] < gains2[-1] else -1
         amp2D = np.abs(signals_smooth - signals_smooth[ref_i, ref_j])
 
-        # Determine if we should look for max or min
+        # 2. Choose the gain pair at the contrast extremum indicated by the map background.
         if amp2D[0, 0] < np.mean(amp2D):
             gain1_opt = gains1[np.argmax(np.max(amp2D, axis=1))]
             gain2_opt = gains2[np.argmax(np.max(amp2D, axis=0))]
@@ -204,6 +201,7 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
             gain2_opt = gains2[np.argmin(np.min(amp2D, axis=0))]
             amp2D = np.mean(amp2D) - amp2D
 
+        # 3. Inspect the selected gain pair on the smoothed reset-contrast map.
         fig, ax = plots.subplots(num="fit", figsize=config.figsize)
 
         ax.imshow(

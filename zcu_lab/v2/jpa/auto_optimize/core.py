@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+from collections.abc import Callable, Iterable
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Annotated, Any, ClassVar, Literal
 
 import numpy as np
 from matplotlib import colormaps
+from matplotlib.artist import Artist
+from matplotlib.axes import Axes
 from matplotlib.colors import Normalize
 from mpl_toolkits.mplot3d import Axes3D
 from numpy.typing import NDArray
@@ -46,10 +49,90 @@ class JPAOptimizeResult:
 
 
 @dataclass(frozen=True)
+class _JPALiveSnapshot:
+    """Search result and current row copied together by the plot-thread dispatcher."""
+
+    result: JPAOptimizeResult  # Iteration-aligned candidate settings, phases and SNR.
+    index: int  # Current candidate row, including its search-phase label.
+
+
+@dataclass(frozen=True)
 class JPAOptimizeAnalysis:
     best_flux: float
     best_freq: float
     best_power: float
+
+
+def _validate_jpa_auto_arrays(
+    params: NDArray[np.float64],
+    phases: NDArray[Any],
+    signals: NDArray[np.float64],
+) -> None:
+    if params.ndim != 2 or params.shape[1] != 3:
+        raise ValueError(
+            f"JPA auto-optimize params must have shape (N, 3), got {params.shape}"
+        )
+    if phases.ndim != 1:
+        raise ValueError(
+            f"JPA auto-optimize phases must be 1-D, got shape {phases.shape}"
+        )
+    if signals.ndim != 1:
+        raise ValueError(
+            f"JPA auto-optimize signals must be 1-D, got shape {signals.shape}"
+        )
+    if phases.shape[0] != params.shape[0]:
+        raise ValueError(
+            "JPA auto-optimize phases length must match params rows "
+            f"(got phases={phases.shape}, params={params.shape})"
+        )
+    if signals.shape[0] != params.shape[0]:
+        raise ValueError(
+            "JPA auto-optimize signals length must match params rows "
+            f"(got signals={signals.shape}, params={params.shape})"
+        )
+
+
+JPA_AUTO_FLUX_VARIABLE = "jpa_flux"
+JPA_AUTO_FREQ_VARIABLE = "jpa_freq"
+JPA_AUTO_POWER_VARIABLE = "jpa_power"
+JPA_AUTO_PHASE_VARIABLE = "jpa_phase"
+JPA_AUTO_SNR_VARIABLE = "snr"
+JPA_AUTO_GROUPED_VARIABLES = (
+    JPA_AUTO_FLUX_VARIABLE,
+    JPA_AUTO_FREQ_VARIABLE,
+    JPA_AUTO_POWER_VARIABLE,
+    JPA_AUTO_PHASE_VARIABLE,
+    JPA_AUTO_SNR_VARIABLE,
+)
+
+
+def _validate_jpa_auto_result(result: JPAOptimizeResult) -> None:
+    _validate_jpa_auto_arrays(
+        np.asarray(result.params, dtype=np.float64),
+        np.asarray(result.phases),
+        np.asarray(result.signals, dtype=np.float64),
+    )
+
+
+def _build_jpa_auto_result(
+    data: GroupedLoadData[JPAOptCfg],
+) -> JPAOptimizeResult:
+    """Build the JPA result from grouped saved variables without acquiring or plotting."""
+    params = np.column_stack(
+        [
+            data.variable(JPA_AUTO_FLUX_VARIABLE).z,
+            data.variable(JPA_AUTO_FREQ_VARIABLE).z,
+            data.variable(JPA_AUTO_POWER_VARIABLE).z,
+        ]
+    ).astype(np.float64)
+    phases = data.variable(JPA_AUTO_PHASE_VARIABLE).z.astype(np.int32)
+    signals = data.variable(JPA_AUTO_SNR_VARIABLE).z.astype(np.float64)
+    _validate_jpa_auto_arrays(params, phases, signals)
+    return JPAOptimizeResult(
+        params=params,
+        phases=phases,
+        signals=signals,
+    )
 
 
 class JPAOptCfg(ConfigBase):
@@ -82,9 +165,7 @@ class JPAOptCfg(ConfigBase):
         FieldMeta(
             label="JPA flux device value",
             description=(
-                "Flux bounds in flux_unit coordinates. Start/stop are search bounds. "
-                "Point counts are relative resolution hints for phase-1 allocation, "
-                "not Cartesian sample counts."
+                "Flux search bounds and relative resolution for phase-1 sampling."
             ),
         ),
     ]
@@ -117,7 +198,7 @@ class JPAOptCfg(ConfigBase):
     ] = None
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
-    ] = 1
+    ]
     rounds: Annotated[
         int,
         FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
@@ -130,78 +211,7 @@ class JPAOptCfg(ConfigBase):
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
-    ] = 1.0
-
-
-JPA_AUTO_FLUX_VARIABLE = "jpa_flux"
-JPA_AUTO_FREQ_VARIABLE = "jpa_freq"
-JPA_AUTO_POWER_VARIABLE = "jpa_power"
-JPA_AUTO_PHASE_VARIABLE = "jpa_phase"
-JPA_AUTO_SNR_VARIABLE = "snr"
-JPA_AUTO_GROUPED_VARIABLES = (
-    JPA_AUTO_FLUX_VARIABLE,
-    JPA_AUTO_FREQ_VARIABLE,
-    JPA_AUTO_POWER_VARIABLE,
-    JPA_AUTO_PHASE_VARIABLE,
-    JPA_AUTO_SNR_VARIABLE,
-)
-
-
-def _validate_jpa_auto_arrays(
-    params: NDArray[np.float64],
-    phases: NDArray[Any],
-    signals: NDArray[np.float64],
-) -> None:
-    if params.ndim != 2 or params.shape[1] != 3:
-        raise ValueError(
-            f"JPA auto-optimize params must have shape (N, 3), got {params.shape}"
-        )
-    if phases.ndim != 1:
-        raise ValueError(
-            f"JPA auto-optimize phases must be 1-D, got shape {phases.shape}"
-        )
-    if signals.ndim != 1:
-        raise ValueError(
-            f"JPA auto-optimize signals must be 1-D, got shape {signals.shape}"
-        )
-    if phases.shape[0] != params.shape[0]:
-        raise ValueError(
-            "JPA auto-optimize phases length must match params rows "
-            f"(got phases={phases.shape}, params={params.shape})"
-        )
-    if signals.shape[0] != params.shape[0]:
-        raise ValueError(
-            "JPA auto-optimize signals length must match params rows "
-            f"(got signals={signals.shape}, params={params.shape})"
-        )
-
-
-def _validate_jpa_auto_result(result: JPAOptimizeResult) -> None:
-    _validate_jpa_auto_arrays(
-        np.asarray(result.params, dtype=np.float64),
-        np.asarray(result.phases),
-        np.asarray(result.signals, dtype=np.float64),
-    )
-
-
-def _build_jpa_auto_result(
-    data: GroupedLoadData[JPAOptCfg],
-) -> JPAOptimizeResult:
-    params = np.column_stack(
-        [
-            data.variable(JPA_AUTO_FLUX_VARIABLE).z,
-            data.variable(JPA_AUTO_FREQ_VARIABLE).z,
-            data.variable(JPA_AUTO_POWER_VARIABLE).z,
-        ]
-    ).astype(np.float64)
-    phases = data.variable(JPA_AUTO_PHASE_VARIABLE).z.astype(np.int32)
-    signals = data.variable(JPA_AUTO_SNR_VARIABLE).z.astype(np.float64)
-    _validate_jpa_auto_arrays(params, phases, signals)
-    return JPAOptimizeResult(
-        params=params,
-        phases=phases,
-        signals=signals,
-    )
+    ]
 
 
 _JPA_AUTO_ITERATION_AXIS = (
@@ -314,11 +324,17 @@ class AutoOptimizeExp(Experiment[JPAOptimizeResult, JPAOptCfg]):
         params = np.full((num_points, 3), np.nan, dtype=np.float64)
         phases = np.zeros(num_points, dtype=np.int32)
         point_indices = np.arange(num_points, dtype=np.float64)
-        update = self._live_plot(context, point_indices)
+        update = self._show_search_plot(context, point_indices)
         current_index = 0
 
         def plot_fn(data: NDArray[np.float64]) -> None:
-            update((data, params, phases, current_index))
+            """Update the live JPA artists from the latest acquired signals."""
+            update(
+                _JPALiveSnapshot(
+                    JPAOptimizeResult(params=params, phases=phases, signals=data),
+                    current_index,
+                )
+            )
 
         signals_buffer = SignalBuffer(
             (num_points,), dtype=np.float64, on_update=plot_fn
@@ -390,8 +406,15 @@ class AutoOptimizeExp(Experiment[JPAOptimizeResult, JPAOptCfg]):
             params=params, phases=phases, signals=signals_buffer.array
         )
 
-    def _live_plot(self, context: RunContext, point_indices: NDArray[np.float64]):
-        # Show SNR versus iteration and each candidate parameter, colored by phase.
+    def _show_search_plot(
+        self, context: RunContext, point_indices: NDArray[np.float64]
+    ) -> Callable[[_JPALiveSnapshot], None]:
+        """Show candidate settings and SNR; return a plot-thread updater that changes these artists.
+
+        Use context.plots to create four panels over iteration indices and
+        candidate flux/MHz/dBm. The updater takes an iteration-aligned result
+        and current row, copied together before drawing. Plot errors propagate.
+        """
         figure, initial_ax = context.plots.subplots(num="measurement", figsize=(8, 5))
         initial_ax.remove()
         figure.suptitle("JPA Auto Optimization")
@@ -416,13 +439,17 @@ class AutoOptimizeExp(Experiment[JPAOptimizeResult, JPAOptCfg]):
         viewers = [live_scatter(ax) for ax in axes]
 
         @context.plots.on_plot_thread
-        def update(payload):
-            data, sampled_params, sampled_phases, idx = payload
+        def update(snapshot: _JPALiveSnapshot) -> Iterable[Artist]:
+            """Draw a copied search result and current row; return the changed panel artists."""
+            data = snapshot.result.signals
+            sampled_params = snapshot.result.params
+            sampled_phases = snapshot.result.phases
+            idx = snapshot.index
             cur_flux, cur_freq, cur_gain = sampled_params[idx, :]
             title = (
                 f"Iteration {idx}, Phase {sampled_phases[idx]}\n"
-                f"Flux: {cur_flux:.2g} (a.u.), Freq: {1e-3 * cur_freq:.4g} (GHz)\n"
-                f"Power: {cur_gain:.2g} (dBm)"
+                f"Flux: {cur_flux:#.3g} (a.u.), Freq: {1e-3 * cur_freq:.4g} (GHz)\n"
+                f"Power: {cur_gain:.1f} (dBm)"
             )
             axes[0].set_title(title)
             artists = []
@@ -460,6 +487,7 @@ class AutoOptimizeExp(Experiment[JPAOptimizeResult, JPAOptCfg]):
         returned flux is a device value, frequency is MHz, and power is dBm.
         All-NaN SNR fails rather than proposing an unmeasured candidate.
         """
+        # 1. Choose the highest measured SNR without interpolating a new setting.
         result = source.result
 
         params = result.params
@@ -474,6 +502,7 @@ class AutoOptimizeExp(Experiment[JPAOptimizeResult, JPAOptCfg]):
         colors = phases
 
         figsize = (8, 5)
+        # 2. Mark the best candidate in iteration and pump/bias views, colored by phase.
         fig, initial_ax = plots.subplots(num="fit", figsize=figsize)
         initial_ax.remove()
         gs = fig.add_gridspec(3, 2, width_ratios=[1.5, 1])
@@ -493,10 +522,11 @@ class AutoOptimizeExp(Experiment[JPAOptimizeResult, JPAOptCfg]):
         ax_iter.legend()
         ax_iter.grid(True)
 
-        def plot_ax(ax, param_idx, label_name) -> None:
+        def plot_ax(ax: Axes, param_idx: int, label_name: str, best_label: str) -> None:
+            """Draw one sampled JPA parameter against SNR and mark the best measured setting."""
             ax.scatter(params[:, param_idx], snrs, c=colors, s=1)
             best_value = best_params[param_idx]
-            ax.axvline(best_value, color="r", ls="--", label=f"best = {best_value:.2g}")
+            ax.axvline(best_value, color="r", ls="--", label=f"best = {best_label}")
             ax.scatter([best_value], [max_snr], color="r", marker="*")
             ax.set_xlabel(label_name)
             ax.ticklabel_format(axis="x", useOffset=False)
@@ -504,9 +534,9 @@ class AutoOptimizeExp(Experiment[JPAOptimizeResult, JPAOptCfg]):
             ax.legend()
             ax.grid(True)
 
-        plot_ax(ax_flux, 0, "JPA Flux value (a.u.)")
-        plot_ax(ax_freq, 1, "JPA Frequency (MHz)")
-        plot_ax(ax_power, 2, "JPA Power (dBm)")
+        plot_ax(ax_flux, 0, "JPA Flux value (a.u.)", f"{best_params[0]:#.3g} a.u.")
+        plot_ax(ax_freq, 1, "JPA Frequency (MHz)", f"{best_params[1]:.2f} MHz")
+        plot_ax(ax_power, 2, "JPA Power (dBm)", f"{best_params[2]:.1f} dBm")
 
         return JPAOptimizeAnalysis(
             float(best_params[0]), float(best_params[1]), float(best_params[2])

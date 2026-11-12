@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Annotated, ClassVar, Literal
 
 import numpy as np
+from matplotlib.artist import Artist
 from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field
@@ -22,10 +23,6 @@ from zcu_lab.v2.support import live_line
 class ZigZagResult:
     times: NDArray[np.int64]
     signals: NDArray[np.complex128]
-
-
-def zigzag_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
-    return rotate2real(signals).real
 
 
 class ZigZagCfg(ConfigBase):
@@ -50,7 +47,7 @@ class ZigZagCfg(ConfigBase):
 
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
-    ] = 1
+    ]
     rounds: Annotated[
         int,
         FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
@@ -63,7 +60,7 @@ class ZigZagCfg(ConfigBase):
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
-    ] = 1.0
+    ]
 
 
 class ZigZagExp(Experiment[ZigZagResult, ZigZagCfg]):
@@ -92,6 +89,7 @@ class ZigZagExp(Experiment[ZigZagResult, ZigZagCfg]):
 
         times = np.arange(0, cfg.n_times + 1)
 
+        # 2. Monitor repeated-gate contrast on a common IQ projection axis.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Times", ylabel="Signal")
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
@@ -99,14 +97,21 @@ class ZigZagExp(Experiment[ZigZagResult, ZigZagCfg]):
         viewer = live_line(ax)
 
         @context.plots.on_plot_thread
-        def update(data):
-            return viewer.set(times.astype(np.float64), zigzag_signal2real(data))
+        def update(data: NDArray[np.complex128]) -> tuple[Artist, ...]:
+            """Refresh the common-axis IQ projection versus repeat count.
+
+            data is complex IQ in repeat-count order; NaN marks unmeasured points.
+            Return the changed artists without modifying the input array.
+            """
+            # Project the repeat-count trace onto its common real IQ axis.
+            return viewer.set(times.astype(np.float64), rotate2real(data).real)
 
         fig.show()
         signals_buffer = SignalBuffer(
             (len(times),),
             on_update=update,
         )
+        # 3. Amplify rotation errors by repeating the selected gate after the initial X90.
         with Schedule(signals_buffer, scope=context.scope) as sched:
             repeat_pulse = getattr(cfg, cfg.repeat_on)
             if repeat_pulse is None:

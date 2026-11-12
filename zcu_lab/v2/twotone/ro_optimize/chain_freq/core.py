@@ -56,14 +56,14 @@ class ChainFreqCfg(ConfigBase):
     reps: Annotated[
         int,
         FieldMeta(label="Reps", description="16-read shots per setting in each round."),
-    ] = Field(default=2000, ge=1)
+    ] = Field(ge=1)
     rounds: Annotated[
         int,
         FieldMeta(
             label="Rounds",
             description="Software rounds; live plots use all completed rounds.",
         ),
-    ] = Field(default=320, ge=1)
+    ] = Field(default=1, ge=1)
 
 
 class ChainFreqExp(Experiment[ThermalChainSums, ChainFreqCfg]):
@@ -98,6 +98,7 @@ class ChainFreqExp(Experiment[ThermalChainSums, ChainFreqCfg]):
         Return shot count and all 107 sums per setting.
         Stop keeps settings with a completed round; none raises RuntimeError.
         """
+        # 1. Quantize readout frequencies on the shared generator/ADC grid.
         settings = sweep2array(
             cfg.freq,
             "freq",
@@ -108,18 +109,21 @@ class ChainFreqExp(Experiment[ThermalChainSums, ChainFreqCfg]):
                 "mixer_freq": cfg.readout.mixer_freq,
             },
         )
+        # 2. Track thermal-chain readout scores and diagnostics across frequency.
         fig, _ = context.plots.subplots(
             3, 1, num="measurement", sharex=True, figsize=(8, 8)
         )
 
         @context.plots.on_plot_thread
         def draw(result: ThermalChainScore | None) -> tuple[Artist, ...]:
+            """Refresh the measurement artists from the current acquired data."""
             artists = _draw_metric(tuple(fig.axes), result)
             fig.tight_layout()
             return artists
 
         def update(sums: NDArray[np.float64]) -> None:
             # Calculate off the GUI thread; the plot thread only draws.
+            """Refresh the measurement artists from the current acquired data."""
             saved = finished_sums(settings, sums)
             try:
                 result = thermal_chain_score(saved)
@@ -134,7 +138,7 @@ class ChainFreqExp(Experiment[ThermalChainSums, ChainFreqCfg]):
             on_update=update,
         )
 
-        # No drive: each shot reads the thermal state 16 times, then waits K.
+        # 3. No drive: each shot reads the thermal state 16 times, then waits K.
         with Schedule(shot_sums, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 context.soccfg,
@@ -172,8 +176,10 @@ class ChainFreqExp(Experiment[ThermalChainSums, ChainFreqCfg]):
         mark the maximum score; exact ties keep acquisition order. Errors
         do not affect ranking. Invalid moments raise ValueError.
         """
+        # 1. Rank readout frequencies by the thermal-chain score from saved moments.
         del options
         result = thermal_chain_score(source.result)
+        # 2. Inspect score, QND and correlation-growth diagnostics for the frequency ranking.
         fig, _ = plots.subplots(3, 1, num="metric", sharex=True, figsize=(8, 8))
         _draw_metric(tuple(fig.axes), result)
         fig.tight_layout()

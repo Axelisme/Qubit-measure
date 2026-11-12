@@ -9,10 +9,13 @@ from zcu_lab.v2.twotone.chain.core import ChainCfg
 
 
 def make_form(ctx: FormContext) -> Form[ChainCfg]:
-    """Use the twotone/freq starting values; reps, rounds and relax use cfg defaults."""
+    """Use twotone/freq sources, 100 reps, 100 rounds and a 1 us relax delay."""
     return Form(
         ChainCfg,
         tree={
+            "reps": 100,
+            "rounds": 100,
+            "relax_delay": 1.0,
             "reset": Slot("$qubit.module.reset"),
             "init_pulse": None,
             "qub_pulse": Template(

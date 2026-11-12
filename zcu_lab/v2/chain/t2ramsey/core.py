@@ -19,8 +19,6 @@ from pydantic import Field
 from zcu_tools.analysis.fitting import fit_decay_fringe
 from zcu_tools.analysis.readout_chain import (
     CycleCheck,
-    CycleFit,
-    CycleModel,
     CycleNuisances,
     CycleSums,
     cycle_curves,
@@ -54,62 +52,7 @@ from zcu_lab.v2.chain._cycle import (
 )
 from zcu_lab.v2.support import live_line
 
-
-class ChainT2RamseyCfg(ConfigBase):
-    pi2_pulse: Annotated[
-        Pulse.Cfg,
-        FieldMeta(
-            label="Pi/2 Pulse",
-            description="Calibrated π/2 pulse played before each wait, and again with opposite phase after it.",
-        ),
-    ]
-    readout: Annotated[
-        PulseReadout.Cfg,
-        FieldMeta(
-            label="Readout",
-            description="Pulse readout played twice after each second π/2.",
-        ),
-    ]
-    delay: Annotated[
-        SweepCfg,
-        FieldMeta(
-            label="Delay",
-            unit="us",
-            description="Free-evolution wait x between the two π/2 pulses.",
-        ),
-    ]
-    detune: Annotated[
-        float,
-        FieldMeta(
-            label="Detune",
-            unit="MHz",
-            decimals=3,
-            description="Phase ramp of the second π/2: this many fringes per us of delay. It does not change the drive frequency.",
-        ),
-    ] = 0.0
-    reps: Annotated[
-        int,
-        FieldMeta(
-            label="Reps",
-            description="Cycles per delay in each round, at least 66: then even one delay gives the first round 65 cycles beyond its mean, enough to estimate the noise of the 65 numbers for the first live curve.",
-        ),
-    ] = Field(default=100, ge=66)
-    rounds: Annotated[
-        int,
-        FieldMeta(
-            label="Rounds",
-            description="Software rounds. The live plot updates after each round.",
-        ),
-    ] = 100
-    relax_delay: Annotated[
-        float,
-        FieldMeta(
-            label="Relax delay",
-            unit="us",
-            decimals=3,
-            description="Thermalisation wait K before every cycle; set at least 5 T1 so each cycle starts in thermal equilibrium.",
-        ),
-    ] = 1.0
+DELAY_AXIS = VariableAxisSpec(label="Time", unit="s", field_name="axis", scale=1e-6)
 
 
 @dataclass(frozen=True)
@@ -144,8 +87,61 @@ class ChainT2RamseyAnalysis:
     first_read_detuning: float
 
 
-# Delays are us in memory and seconds on disk.
-DELAY_AXIS = VariableAxisSpec(label="Time", unit="s", field_name="axis", scale=1e-6)
+class ChainT2RamseyCfg(ConfigBase):
+    pi2_pulse: Annotated[
+        Pulse.Cfg,
+        FieldMeta(
+            label="Pi/2 Pulse",
+            description="Calibrated π/2 pulse played before each wait, and again with opposite phase after it.",
+        ),
+    ]
+    readout: Annotated[
+        PulseReadout.Cfg,
+        FieldMeta(
+            label="Readout",
+            description="Pulse readout played twice after each second π/2.",
+        ),
+    ]
+    delay: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="Delay",
+            unit="us",
+            description="Free-evolution wait x between the two π/2 pulses.",
+        ),
+    ]
+    detune: Annotated[
+        float,
+        FieldMeta(
+            label="Detune",
+            unit="MHz",
+            decimals=3,
+            description="Second π/2 phase ramp in fringes per us, without changing the drive frequency.",
+        ),
+    ] = 0.0
+    reps: Annotated[
+        int,
+        FieldMeta(
+            label="Reps",
+            description="Cycles per point in each round, at least 66.",
+        ),
+    ] = Field(ge=66)
+    rounds: Annotated[
+        int,
+        FieldMeta(
+            label="Rounds",
+            description="Software acquisition rounds.",
+        ),
+    ] = 1
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Thermalisation wait K before every cycle; set at least 5 T1 so each cycle starts in thermal equilibrium.",
+        ),
+    ]
 
 
 class ChainT2RamseyExp(Experiment[CycleSums, ChainT2RamseyCfg]):
@@ -265,9 +261,37 @@ class ChainT2RamseyExp(Experiment[CycleSums, ChainT2RamseyCfg]):
         delays = sums.axis
 
         # 1. Seed from the first-read IQ using this experiment's fit policy.
-        first_read_t2, first_read_detuning = _fit_first_read(
-            plots, delays, first_read_iq(sums)
+        seed_lengths = delays
+        seed_real_signals = rotate2real(first_read_iq(sums)).real
+        seed_fit = fit_decay_fringe(seed_lengths, seed_real_signals, fixedparams=None)
+        seed_t2r, seed_t2rerr, seed_detune, seed_detune_err, seed_y_fit = (
+            seed_fit.decay_time,
+            seed_fit.decay_time_err,
+            seed_fit.freq,
+            seed_fit.freq_err,
+            seed_fit.curve,
         )
+        seed_fig, seed_ax = plots.subplots(num="fit", figsize=config.figsize)
+        seed_ax.plot(
+            seed_lengths,
+            seed_real_signals,
+            label="meas",
+            ls="-",
+            marker="o",
+            markersize=3,
+        )
+        seed_ax.plot(seed_lengths, seed_y_fit, label="fit")
+        seed_t2r_str = f"{seed_t2r:.2f}us ± {seed_t2rerr:.2f}us"
+        seed_detune_str = f"{seed_detune:.2f}MHz ± {seed_detune_err * 1000.0:.2f}kHz"
+        seed_ax.set_title(
+            f"T2 fringe = {seed_t2r_str},\ndetune = {seed_detune_str}", fontsize=15
+        )
+        seed_ax.set_xlabel("Delay Time (us)")
+        seed_ax.set_ylabel("Signal Real (a.u.)")
+        seed_ax.legend()
+        seed_ax.grid(True)
+        seed_fig.tight_layout()
+        first_read_t2, first_read_detuning = (float(seed_t2r), float(seed_detune))
 
         # 2. Joint fit of all 65 numbers; the third state starts from the same T2.
         model = t2_ramsey_model()
@@ -283,17 +307,39 @@ class ChainT2RamseyExp(Experiment[CycleSums, ChainT2RamseyCfg]):
         reliability_text = (
             "unavailable" if fit.reliability is None else f"{fit.reliability:.2g}"
         )
-        _plot_populations(
-            plots,
-            model,
-            fit,
-            delays,
-            result=(
-                f"T2 = {t2:.4g} ± {t2_err:.2g} us, detuning = {detuning:.4g} ± "
-                f"{detuning_err:.2g} MHz, third state {tf:.3g} ± {tf_err:.2g} us, "
-                f"R = {reliability_text}"
-            ),
+        population_dense = np.linspace(delays.min(), delays.max(), 400)
+        assert isinstance(fit.nuisances, CycleNuisances)
+        population_fitted = model.populations(
+            population_dense, fit.parameters, fit.nuisances
         )
+        population_fig, population_ax = plots.subplots(
+            num="populations", figsize=config.figsize
+        )
+        for population_state in range(3):
+            population_thermal = fit.nuisances.thermal[population_state]
+            population_ax.errorbar(
+                delays,
+                fit.populations[:, population_state],
+                yerr=fit.population_errors[:, population_state],
+                fmt="o",
+                markersize=3,
+                color=f"C{population_state}",
+                label=f"state {population_state}, thermal {population_thermal:.2f}",
+            )
+            population_ax.plot(
+                population_dense,
+                population_fitted[:, population_state],
+                color=f"C{population_state}",
+            )
+        population_ax.set_xlabel("Delay (us)")
+        population_ax.set_ylabel("First-read population")
+        population_ax.set_title(
+            f"{f'T2 = {t2:.4g} ± {t2_err:.2g} us, detuning = {detuning:.4g} ± {detuning_err:.2g} MHz, third state {tf:.3g} ± {tf_err:.2g} us, R = {reliability_text}'}\n{checks_text(fit)}",
+            fontsize=9,
+        )
+        population_ax.legend(fontsize=8, loc="upper left", bbox_to_anchor=(1.01, 1.0))
+        population_ax.grid(True)
+        population_fig.tight_layout()
 
         return ChainT2RamseyAnalysis(
             t2=t2,
@@ -311,81 +357,3 @@ class ChainT2RamseyExp(Experiment[CycleSums, ChainT2RamseyCfg]):
             first_read_t2=first_read_t2,
             first_read_detuning=first_read_detuning,
         )
-
-
-def _fit_first_read(
-    plots: Plots,
-    delays: NDArray[np.float64],
-    signals: NDArray[np.complex128],
-) -> tuple[float, float]:
-    """Fit and plot the first-read seed before the joint cycle analysis."""
-    # This first-read seed uses a free fringe phase, not a fixed 0/180°.
-    lengths = delays
-    real_signals = rotate2real(signals).real
-    fit = fit_decay_fringe(lengths, real_signals, fixedparams=None)
-    t2r, t2rerr, detune, detune_err, y_fit = (
-        fit.decay_time,
-        fit.decay_time_err,
-        fit.freq,
-        fit.freq_err,
-        fit.curve,
-    )
-
-    fig, ax = plots.subplots(num="fit", figsize=config.figsize)
-
-    ax.plot(lengths, real_signals, label="meas", ls="-", marker="o", markersize=3)
-    ax.plot(lengths, y_fit, label="fit")
-    t2r_str = f"{t2r:.2f}us ± {t2rerr:.2f}us"
-    detune_str = f"{detune:.2f}MHz ± {detune_err * 1e3:.2f}kHz"
-    ax.set_title(f"T2 fringe = {t2r_str},\ndetune = {detune_str}", fontsize=15)
-    ax.set_xlabel("Delay Time (us)")
-    ax.set_ylabel("Signal Real (a.u.)")
-    ax.legend()
-    ax.grid(True)
-
-    fig.tight_layout()
-
-    return float(t2r), float(detune)
-
-
-def _plot_populations(
-    plots: Plots,
-    model: CycleModel,
-    fit: CycleFit,
-    axis: NDArray[np.float64],
-    *,
-    result: str,
-) -> None:
-    """Publish "populations": per-point populations and the fitted curves.
-
-    Points are fit.populations with their Wald error bars; lines are the
-    model's populations at the fitted values on a dense axis, one color per
-    state. The legend gives each state's fitted thermal population, since
-    state labels are arbitrary.
-    result is the first title line, for example the fitted parameter.
-    """
-    dense = np.linspace(axis.min(), axis.max(), 400)
-    # fit_cycle always gives a CycleModel fit CycleNuisances.
-    assert isinstance(fit.nuisances, CycleNuisances)
-    fitted = model.populations(dense, fit.parameters, fit.nuisances)
-
-    fig, ax = plots.subplots(num="populations", figsize=config.figsize)
-    for state in range(3):
-        thermal = fit.nuisances.thermal[state]
-        ax.errorbar(
-            axis,
-            fit.populations[:, state],
-            yerr=fit.population_errors[:, state],
-            fmt="o",
-            markersize=3,
-            color=f"C{state}",
-            label=f"state {state}, thermal {thermal:.2f}",
-        )
-        ax.plot(dense, fitted[:, state], color=f"C{state}")
-    ax.set_xlabel("Delay (us)")
-    ax.set_ylabel("First-read population")
-    ax.set_title(f"{result}\n{checks_text(fit)}", fontsize=9)
-    # Outside the axes: the curves fill the whole population range.
-    ax.legend(fontsize=8, loc="upper left", bbox_to_anchor=(1.01, 1.0))
-    ax.grid(True)
-    fig.tight_layout()

@@ -9,7 +9,7 @@ from zcu_tools.gui.app.measure.adapter import Adapter, Analysis, AnalyzeRequest
 from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
-from .analysis import RBOptions
+from .core import RBOptions
 from .core_heralded import (
     RBHeraldedAnalysis,
     RBHeraldedCfg,

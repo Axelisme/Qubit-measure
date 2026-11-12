@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Annotated, ClassVar, Literal
 
 import numpy as np
+from matplotlib.artist import Artist
 from numpy.typing import NDArray
 from pydantic import Field
 from scipy.ndimage import gaussian_filter1d
@@ -71,7 +73,7 @@ class FluxCfg(ConfigBase):
     ] = Field(default=0.0, ge=0.0)
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
-    ] = 1
+    ]
     rounds: Annotated[
         int,
         FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
@@ -84,7 +86,7 @@ class FluxCfg(ConfigBase):
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
-    ] = 1.0
+    ]
 
 
 class FluxExp(Experiment[FluxResult, FluxCfg]):
@@ -120,7 +122,12 @@ class FluxExp(Experiment[FluxResult, FluxCfg]):
         line = live_line(ax)
 
         @context.plots.on_plot_thread
-        def update(data):
+        def update(data: NDArray[np.float64]) -> Iterable[Artist]:
+            """Draw acquired SNR on the measurement axes; return changed artists.
+
+            Read the scan-shaped data without changing it. Update the live
+            artists over the prepared coordinates; plot errors propagate.
+            """
             return line.set(jpa_fluxs, np.abs(data))
 
         fig.show()
@@ -190,6 +197,7 @@ class FluxExp(Experiment[FluxResult, FluxCfg]):
         magnitude, and return the peak's device value without conversion.
         ``options`` is None; this is a smoothed peak, not a model fit.
         """
+        # 1. Choose the sampled bias at peak SNR after one-sample Gaussian smoothing.
         del options
         result = source.result
 
@@ -201,13 +209,14 @@ class FluxExp(Experiment[FluxResult, FluxCfg]):
         max_idx = np.argmax(snrs)
         best_jpa_flux = jpa_fluxs[max_idx]
 
+        # 2. Mark the selected bias on the smoothed SNR trace.
         fig, ax = plots.subplots(num="fit", figsize=config.figsize)
         ax.plot(jpa_fluxs, snrs, label="signal difference")
         ax.axvline(
             best_jpa_flux,
             color="r",
             ls="--",
-            label=f"best JPA flux = {best_jpa_flux:.2g} a.u.",
+            label=f"best JPA flux = {best_jpa_flux:#.3g} a.u.",
         )
         ax.set_xlabel("JPA Flux value (a.u.)")
         ax.set_ylabel("Signal Difference (a.u.)")

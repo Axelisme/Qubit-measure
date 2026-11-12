@@ -8,8 +8,7 @@ from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import Adapter, Analysis, AnalyzeRequest
 from zcu_tools.plotting.plots import Plots
 
-from .analysis import RBAnalysis, RBOptions
-from .core import RBCfg, RBExp, RBResult
+from .core import RBAnalysis, RBCfg, RBExp, RBOptions, RBResult
 from .form import make_form
 
 RBRun: TypeAlias = RunRecord[RBCfg, RBResult]

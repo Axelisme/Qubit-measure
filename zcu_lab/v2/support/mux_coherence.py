@@ -42,8 +42,6 @@ def validate_coherence_scan(
     validate_mux_tones(cfg, tones, participants)
 
     # Check the shared evolution window and each final-pulse phase ramp.
-    if not all(math.isfinite(v) for v in (delay.start, delay.stop, delay.step)):
-        raise ValueError("delay start/stop/step must be finite")
     if min(delay.start, delay.stop) < 0:
         raise ValueError("delay must be nonnegative us")
     for index in participants:

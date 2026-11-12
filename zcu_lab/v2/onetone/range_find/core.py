@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from copy import deepcopy
 from dataclasses import dataclass, replace
 from typing import Annotated, ClassVar
 
 import numpy as np
+from matplotlib.artist import Artist
 from numpy.typing import NDArray
 from pydantic import Field, field_validator
 from pydantic.dataclasses import dataclass as pydantic_dataclass
@@ -30,44 +32,6 @@ from zcu_lab.v2.onetone._shared import (
     linear_freqs,
 )
 from zcu_lab.v2.support import live_line
-
-
-class RangeFindCfg(ConfigBase):
-    """Pulse-readout acquisition for a wide absolute-frequency survey."""
-
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    readout: Annotated[
-        PulseReadout.Cfg,
-        FieldMeta(
-            label="Readout",
-            description="填入 resonator readout 設定。先用 lookback 取得 TOF，再以 onetone 取得 kappa，確認 trigger offset 與 waveform duration，單位 us。",
-        ),
-    ]
-    freq: Annotated[
-        SweepCfg,
-        FieldMeta(
-            label="Frequency",
-            unit="MHz",
-            description="填入 absolute MHz 起訖值。range_find 不會從已知中心自動設定掃描窗。",
-        ),
-    ]
-    reps: Annotated[
-        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
-    ] = 1
-    rounds: Annotated[
-        int,
-        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
-    ] = 1
-    relax_delay: Annotated[
-        float,
-        FieldMeta(
-            label="Relax delay",
-            unit="us",
-            decimals=3,
-            description="Relaxation delay after each repetition.",
-        ),
-    ] = 1.0
-
 
 DEFAULT_MIN_SEPARATION_MHZ = 1.0
 
@@ -111,31 +75,6 @@ class RangeFindOptions:
             raise ValueError("resonators must contain unique names")
         return names
 
-    def to_dip_options(
-        self, freqs: NDArray[np.float64], magnitude: NDArray[np.float64]
-    ) -> DipFinderOptions:
-        """Resolve the actual factor for matching MHz/magnitude spectrum arrays.
-
-        The shared finder validates arrays. The name count limits selection.
-        """
-        options = DipFinderOptions(
-            smoothing_sigma=self.smoothing_sigma,
-            prominence_factor=0.0
-            if self.prominence_factor is None
-            else self.prominence_factor,
-            max_fwhm=self.max_fwhm,
-            min_separation=self.min_separation,
-            max_dips=len(self.resonators),
-        )
-        if self.prominence_factor is None:
-            options = replace(
-                options,
-                prominence_factor=estimate_prominence_factor(
-                    freqs, magnitude, options, expected_dips=len(self.resonators)
-                ),
-            )
-        return options
-
 
 @dataclass(frozen=True)
 class ResonatorDip:
@@ -163,6 +102,43 @@ class RangeFindDetection:
     prominence_factor: float
 
 
+class RangeFindCfg(ConfigBase):
+    """Pulse-readout acquisition for a wide absolute-frequency survey."""
+
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    readout: Annotated[
+        PulseReadout.Cfg,
+        FieldMeta(
+            label="Readout",
+            description="Resonator readout 設定與 timing（us）。",
+        ),
+    ]
+    freq: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="Frequency",
+            unit="MHz",
+            description="Absolute MHz 掃描起訖值。",
+        ),
+    ]
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ]
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
+        ),
+    ]
+
+
 class RangeFindExp(Experiment[RangeFindResult, RangeFindCfg]):
     """Acquire absolute MHz spectra and find the requested named dips."""
 
@@ -184,18 +160,26 @@ class RangeFindExp(Experiment[RangeFindResult, RangeFindCfg]):
         context supplies SoC, cancellation and live plots. Return absolute MHz
         and complex IQ; failures propagate and cancellation preserves partial IQ.
         """
+        # 1. Resolve the wide-band resonator survey on the readout frequency grid.
         cfg = deepcopy(config)
         freqs = linear_freqs(cfg.freq, cfg.readout, context=context)
+        # 2. Preview magnitude dips while preserving complex IQ for dip detection.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Frequency (MHz)", ylabel="Amplitude")
         line = live_line(ax)
 
         @context.plots.on_plot_thread
-        def update(data):
+        def update(data: NDArray[np.complex128]) -> Iterable[Artist]:
+            """Draw acquired complex IQ on the measurement axes; return changed artists.
+
+            Read the scan-shaped data without changing it. Update the live
+            artists over the prepared coordinates; plot errors propagate.
+            """
             return line.set(freqs, np.abs(data))
 
         fig.show()
         signals = SignalBuffer((len(freqs),), on_update=update)
+        # 3. Reset and read out each board-swept survey frequency.
         with Schedule(signals, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 context.soccfg,
@@ -236,6 +220,7 @@ class RangeFindExp(Experiment[RangeFindResult, RangeFindCfg]):
         named dips raise ValueError naming the available count;
         no partial success or proposals are produced here.
         """
+        # 1. Require a complete, distinct frequency grid before ranking resonator dips.
         freqs = np.asarray(source.result.freqs, dtype=np.float64)
         signals = np.asarray(source.result.signals, dtype=np.complex128)
         if freqs.ndim != 1 or signals.shape != freqs.shape or freqs.size < 11:
@@ -251,7 +236,23 @@ class RangeFindExp(Experiment[RangeFindResult, RangeFindCfg]):
         if np.any(np.diff(freqs) <= 0):
             raise ValueError("Analysis needs distinct absolute frequencies")
 
-        dip_options = options.to_dip_options(freqs, magnitude)
+        # 2. Resolve the requested dip count and its prominence threshold.
+        dip_options = DipFinderOptions(
+            smoothing_sigma=options.smoothing_sigma,
+            prominence_factor=0.0
+            if options.prominence_factor is None
+            else options.prominence_factor,
+            max_fwhm=options.max_fwhm,
+            min_separation=options.min_separation,
+            max_dips=len(options.resonators),
+        )
+        if options.prominence_factor is None:
+            dip_options = replace(
+                dip_options,
+                prominence_factor=estimate_prominence_factor(
+                    freqs, magnitude, dip_options, expected_dips=len(options.resonators)
+                ),
+            )
         selected = find_spectrum_dips(freqs, magnitude, dip_options)
         if len(selected) < len(options.resonators):
             raise ValueError(
@@ -271,10 +272,12 @@ class RangeFindExp(Experiment[RangeFindResult, RangeFindCfg]):
             for position, dip in enumerate(sorted(selected, key=lambda dip: dip.freq))
         )
 
+        # 3. Label the selected dips by name, frequency, width, depth, and score.
         fig, ax = plots.subplots(nrows=1, num="fit", figsize=(9, 4.5))
 
         @plots.on_plot_thread
-        def draw(_):
+        def draw(_: None) -> Iterable[Artist]:
+            """Draw the measured spectrum and named dip markers on the supplied axes."""
             ax.plot(freqs, magnitude, label="Measured magnitude")
             for dip in dips:
                 label = dip.name

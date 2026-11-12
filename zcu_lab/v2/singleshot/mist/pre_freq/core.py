@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from typing import Annotated, ClassVar
 
 import numpy as np
-from matplotlib.axes import Axes
 from numpy.typing import NDArray
 from pydantic.dataclasses import dataclass as pydantic_dataclass
 from zcu_tools.analysis.singleshot import correct_populations
@@ -33,6 +32,9 @@ from zcu_tools.program.v2.modules.readout import (
 
 from zcu_lab.v2.support import live_line
 
+POPULATION_STATES = (0, 1, 2)
+POPULATION_COUNT = len(POPULATION_STATES)
+
 
 @dataclass(frozen=True)
 class PreFreqResult:
@@ -47,6 +49,11 @@ class PreFreqResult:
     counts: NDArray[np.float64]
 
 
+@pydantic_dataclass(frozen=True, config={"arbitrary_types_allowed": True})
+class PreFreqAnalyzeOptions:
+    confusion_matrix: NDArray[np.float64] | None = None
+
+
 class PreFreqCfg(ConfigBase):
     reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
     init_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Preparation pulse")]
@@ -56,7 +63,7 @@ class PreFreqCfg(ConfigBase):
     freq: Annotated[SweepCfg, FieldMeta(label="Preparation freq", unit="MHz")]
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
-    ] = 1
+    ]
     rounds: Annotated[
         int,
         FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
@@ -69,12 +76,7 @@ class PreFreqCfg(ConfigBase):
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
-    ] = 1.0
-
-
-@pydantic_dataclass(frozen=True, config={"arbitrary_types_allowed": True})
-class PreFreqAnalyzeOptions:
-    confusion_matrix: NDArray[np.float64] | None = None
+    ]
 
 
 class PreFreqExp(Experiment[PreFreqResult, PreFreqCfg]):
@@ -83,7 +85,10 @@ class PreFreqExp(Experiment[PreFreqResult, PreFreqCfg]):
     AXES_SPEC: ClassVar[AxesSpec[PreFreqResult, PreFreqCfg]] = AxesSpec(
         axes=(
             AxesSpec.Axis(
-                values=(0, 1, 2), label="Population", unit="None", dtype=np.int64
+                values=POPULATION_STATES,
+                label="Population",
+                unit="None",
+                dtype=np.int64,
             ),
             AxesSpec.Axis(
                 "freqs",
@@ -114,10 +119,10 @@ class PreFreqExp(Experiment[PreFreqResult, PreFreqCfg]):
         Optional confusion correction belongs to subsequent analysis.
         """
 
-        # Sweep the preparation tone, not the later MIST probe.
+        # 1. Sweep the preparation tone, not the later MIST probe.
         soc, soccfg = context.soc, context.soccfg
         cfg = deepcopy(cfg)
-        # Keep the G/E/Other contract for every declared ADC.
+        # 2. Keep the G/E/Other contract for every declared ADC.
         require_circle_classifiers(cfg.readout)
         read_axis = Classify(
             "readout",
@@ -129,27 +134,28 @@ class PreFreqExp(Experiment[PreFreqResult, PreFreqCfg]):
             {"soccfg": soccfg, "gen_ch": cfg.init_pulse.ch},
         )
 
-        # Show the measured G/E/Other fractions in classifier order.
-        def configure_axes(ax: Axes) -> None:
-            ax.set_ylim(0.0, 1.0)
-            for line, label in zip(
-                ax.lines, ("Ground", "Excited", "Other"), strict=True
-            ):
-                line.set_label(label)
-            ax.legend()
+        # 3. Show the measured G/E/Other fractions in classifier order.
 
         figure, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Pre Pulse Frequency", ylabel="MIST")
-        viewer = live_line(ax, num_lines=3)
-        configure_axes(ax)
+        viewer = live_line(ax, num_lines=POPULATION_COUNT)
+        ax.set_ylim(0.0, 1.0)
+        for line, label in zip(ax.lines, ("Ground", "Excited", "Other"), strict=True):
+            line.set_label(label)
+        ax.legend()
 
         @context.plots.on_plot_thread
         def update(data: NDArray[np.float64]):
+            """Draw acquired shot counts on the measurement axes; return changed artists.
+
+            Read scan-shaped samples without changing them. Update the live
+            artists over the prepared coordinates; plot errors propagate.
+            """
             return viewer.set(freqs, (data / data.sum(axis=-1, keepdims=True)).T)
 
         figure.show()
         buffer = SignalBuffer(
-            (len(freqs), 3),
+            (len(freqs), POPULATION_COUNT),
             dtype=np.float64,
             on_update=update,
         )
@@ -175,7 +181,7 @@ class PreFreqExp(Experiment[PreFreqResult, PreFreqCfg]):
                 rounds=cfg.rounds,
             )
 
-        # Keep the unnormalized G/E/Other counts in the saved Result.
+        # 4. Keep the unnormalized G/E/Other counts in the saved Result.
         counts = buffer.array
 
         return PreFreqResult(freqs=freqs, counts=counts)
@@ -194,10 +200,11 @@ class PreFreqExp(Experiment[PreFreqResult, PreFreqCfg]):
         Three-column data can be analyzed without cfg. Legacy G/E data raise
         ValueError.
         """
+        # 1. Normalize G/E/Other counts and apply optional confusion correction.
         result = source.result
         freqs, populations = result.freqs, result.counts
         populations = populations / populations.sum(axis=-1, keepdims=True)
-        if populations.shape[-1] != 3:
+        if populations.shape[-1] != POPULATION_COUNT:
             raise ValueError(
                 "Expected [g,e,other] populations; legacy G/E files are unsupported. "
                 "Acquire a new run."
@@ -205,6 +212,7 @@ class PreFreqExp(Experiment[PreFreqResult, PreFreqCfg]):
 
         populations = correct_populations(populations, options.confusion_matrix)
 
+        # 2. Isolate preparation-frequency dependence with the later probe held fixed.
         _, ax = plots.subplots(num="fit", figsize=(6, 6))
 
         ax.plot(

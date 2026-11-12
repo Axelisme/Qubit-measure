@@ -43,7 +43,37 @@ from .._sums import (
     marginal_probabilities,
     validate_classifiers,
 )
-from .analysis import summarize_spectra
+
+
+@dataclass(frozen=True)
+class SpectroscopyResult:
+    """Raw float64 sums (DC,2,2,frequency,3,3), terminal F1/F2 g/e/other.
+
+    DC coordinates are device-native, or [0] when inactive. Frequencies are MHz.
+    Preparation axes are fixed [0,1] (g/e), F1 outer. Unmeasured points
+    remain NaN; completed acquisition rounds survive cancellation.
+    """
+
+    dc_values: NDArray[np.float64]
+
+    frequencies: NDArray[np.float64]
+    sums: NDArray[np.float64]
+
+
+@dataclass(frozen=True)
+class SpectroscopyAnalysis:
+    """Count-derived spectra on (DC, prepared_f1, prepared_f2, frequency).
+
+    excitation adds a final F1/F2 axis. acquired_shots is the per-point total,
+    before herald selection when applicable. complete omits frequency and marks
+    preparations with every requested reps × rounds. Partial counts enter P_e;
+    zero counts give NaN. Other remains in the denominator. These probabilities
+    are not confusion-corrected energy-state populations.
+    """
+
+    excitation: NDArray[np.float64]
+    acquired_shots: NDArray[np.float64]
+    complete: NDArray[np.bool_]
 
 
 class SpectroscopyCfg(ConfigBase):
@@ -106,12 +136,10 @@ class SpectroscopyCfg(ConfigBase):
             description="Common probe frequency scan on both charge lines.",
         ),
     ]
-    reps: Annotated[int, FieldMeta(label="Reps")] = Field(default=1, gt=0)
+    reps: Annotated[int, FieldMeta(label="Reps")] = Field(gt=0)
     rounds: Annotated[int, FieldMeta(label="Rounds")] = Field(default=1, gt=0)
     initial_delay: Annotated[float, FieldMeta(label="Initial delay", unit="us")] = 1.0
-    relax_delay: Annotated[
-        float, FieldMeta(label="Relax delay", unit="us", decimals=3)
-    ] = 1.0
+    relax_delay: Annotated[float, FieldMeta(label="Relax delay", unit="us", decimals=3)]
 
     @model_validator(mode="after")
     def validate_pair(self) -> Self:
@@ -119,33 +147,56 @@ class SpectroscopyCfg(ConfigBase):
         validate_classifiers(self.readout, self.roles)
         if self.drive.f1.ch != self.x180_f1.ch or self.drive.f2.ch != self.x180_f2.ch:
             raise ValueError("Each probe must use its role's calibrated Xπ generator")
-        if not np.all(np.isfinite(sweep2array(self.frequency))):
-            raise ValueError("Probe frequencies must be finite")
-        if self.dc_device is not None:
-            if not self.dc_device.strip():
-                raise ValueError("DC source must name a connected device or be None")
-            if not np.all(np.isfinite(sweep2array(self.dc))):
-                raise ValueError("DC source coordinates must be finite")
+        if self.dc_device is not None and not self.dc_device.strip():
+            raise ValueError("DC source must name a connected device or be None")
         return self
 
 
-@dataclass(frozen=True)
-class SpectroscopyResult:
-    """Raw float64 sums (DC,2,2,frequency,3,3), terminal F1/F2 g/e/other.
+def summarize_spectra(
+    counts: NDArray[np.float64],
+    acquired_shots: NDArray[np.float64],
+    requested_shots: int,
+) -> SpectroscopyAnalysis:
+    """Compute F1/F2 P_e and completeness; raise ValueError for invalid counts.
 
-    DC coordinates are device-native, or [0] when inactive. Frequencies are MHz.
-    Preparation axes are fixed [0,1] (g/e), F1 outer. Unmeasured points
-    remain NaN; completed acquisition rounds survive cancellation.
+    counts ends in terminal (3,3), with g/e/other on each axis. acquired_shots
+    matches the preceding scan axes and counts all shots before selection.
+    Whole missing points may be NaN. Invalid or partly missing counts raise
+    ValueError. Zero totals give NaN without warnings; partial counts are used.
+
+    requested_shots is reps*rounds at each scan coordinate. Return excitation,
+    acquired shots and the all-frequencies complete mask. Do not mutate inputs,
+    acquire or draw.
     """
-
-    dc_values: NDArray[np.float64]
-
-    frequencies: NDArray[np.float64]
-    sums: NDArray[np.float64]
+    if counts.shape[-2:] != (3, 3) or counts.shape[:-2] != acquired_shots.shape:
+        raise ValueError("Terminal counts and acquired shot coordinates must match")
+    finite = np.all(np.isfinite(counts) & (counts >= 0), axis=(-2, -1))
+    missing = np.all(np.isnan(counts), axis=(-2, -1))
+    if not np.all(finite | missing):
+        raise ValueError("Spectroscopy contains invalid or partially missing counts")
+    if not np.all(
+        np.isnan(acquired_shots) | (np.isfinite(acquired_shots) & (acquired_shots >= 0))
+    ):
+        raise ValueError("Acquired shots must be nonnegative totals or NaN")
+    excitation = np.stack(
+        [marginal_probabilities(counts, target)[..., 1] for target in ("f1", "f2")],
+        axis=-1,
+    )
+    return SpectroscopyAnalysis(
+        excitation,
+        acquired_shots,
+        np.all(acquired_shots >= requested_shots, axis=-1),
+    )
 
 
 def restore_result(data: GroupedLoadData[SpectroscopyCfg]) -> SpectroscopyResult:
-    """Restore summed counts; old per-shot IQ files lack sums and are rejected."""
+    """Restore summed counts; old per-shot IQ files lack sums and are rejected.
+
+    data supplies the grouped sums variable and its persisted scan axes. Return
+    this experiment's Result with float64 class counts and its original axis
+    ordering. Missing variables and invalid data propagate load errors. Do not
+    mutate the loaded data, acquire or draw; no raw-IQ reconstruction is attempted.
+    """
     sums = data.variable("sums")
     return SpectroscopyResult(
         dc_values=sums.axes[5], frequencies=sums.axes[2], sums=sums.z.astype(np.float64)
@@ -205,8 +256,9 @@ class SpectroscopyExp(Experiment[SpectroscopyResult, SpectroscopyCfg]):
         Return raw counts, not IQ or proportions. Unmeasured points remain NaN
         after cooperative cancellation. Acquisition exceptions propagate unchanged.
         The stop signal carries only stop requests and reason text.
+
         """
-        validate_classifiers(config.readout, config.roles)
+        # 1. Show F1/F2 excitation spectra by nominal preparation and optional DC setting.
         frequencies = sweep2array(config.frequency)
         dc_values = (
             np.array([0.0]) if config.dc_device is None else sweep2array(config.dc)
@@ -241,6 +293,7 @@ class SpectroscopyExp(Experiment[SpectroscopyResult, SpectroscopyCfg]):
                 )
             return tuple(artists)
 
+        # 2. Set DC on the host; scan preparations and common probe frequency in hardware before contrast/readout.
         buffer = SignalBuffer(
             (len(dc_values), 2, 2, len(frequencies), 3, 3),
             dtype=np.float64,
@@ -314,6 +367,7 @@ class SpectroscopyExp(Experiment[SpectroscopyResult, SpectroscopyCfg]):
                     rounds=config.rounds,
                     options=RunOptions(),
                 )
+        # 3. Keep raw joint counts on planned DC/frequency axes; unmeasured points remain NaN.
         return SpectroscopyResult(dc_values, frequencies, buffer.array)
 
     def analyze(
@@ -324,6 +378,7 @@ class SpectroscopyExp(Experiment[SpectroscopyResult, SpectroscopyCfg]):
         plots: Plots,
     ) -> None:
         """Plot count-derived F1/F2 P_e with other retained in the denominator."""
+        # 1. Use saved axes for preparation-resolved excitation spectra with other classes in the denominator.
         del options
         data = source.result
         cfg = source.cfg
@@ -345,6 +400,7 @@ class SpectroscopyExp(Experiment[SpectroscopyResult, SpectroscopyCfg]):
         answer = summarize_spectra(
             data.sums, data.sums.sum(axis=(-2, -1)), cfg.reps * cfg.rounds
         )
+        # 2. Compare preparation-resolved F1/F2 excitation and optional DC maps without fitting.
         for target, role in enumerate(("F1", "F2")):
             fig, _ = plots.subplots(
                 num=f"spectra_{role.lower()}",
@@ -397,6 +453,7 @@ class SpectroscopyExp(Experiment[SpectroscopyResult, SpectroscopyCfg]):
                         xlabel="Common probe frequency (MHz)",
                         ylabel=f"{cfg.dc_device} ({cfg.dc_unit})",
                     )
+        # 3. Show acquired-shot coverage separately from excitation, including partial counts.
         fig, _ = plots.subplots(
             num="shots",
             nrows=2,

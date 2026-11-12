@@ -36,14 +36,15 @@ class PhaseResult:
     signals: NDArray[np.complex128]
 
 
-def bathreset_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
-    return rotate2real(signals).real
-
-
 @dataclass(frozen=True)
 class PhaseAnalysis:
     max_phase: float
     min_phase: float
+
+
+def bathreset_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
+    """Convert mean complex IQ to the real contrast used by live and analysis plots."""
+    return rotate2real(signals).real
 
 
 class PhaseCfg(ConfigBase):
@@ -55,7 +56,7 @@ class PhaseCfg(ConfigBase):
 
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
-    ] = 1
+    ]
     rounds: Annotated[
         int,
         FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
@@ -68,7 +69,7 @@ class PhaseCfg(ConfigBase):
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
-    ] = 1.0
+    ]
 
 
 class PhaseExp(Experiment[PhaseResult, PhaseCfg]):
@@ -96,7 +97,7 @@ class PhaseExp(Experiment[PhaseResult, PhaseCfg]):
         The resulting fringe selects opposite preparation directions through
         cosine analysis; it does not measure reset fidelity.
         """
-        # Quantize the final pi/2 phase on its own generator channel.
+        # 1. Quantize the final pi/2 phase on its own generator channel.
         cfg = deepcopy(config)
         soc, soccfg = context.soc, context.soccfg
 
@@ -109,7 +110,7 @@ class PhaseExp(Experiment[PhaseResult, PhaseCfg]):
             },
         )
 
-        # Display the phase fringe without discarding the complex IQ response.
+        # 2. Display the phase fringe without discarding the complex IQ response.
         plots = context.plots
         fig, ax = plots.subplots(num="measurement")
         ax.set(xlabel="Phase (deg)", ylabel="Signal (a.u.)")
@@ -117,12 +118,13 @@ class PhaseExp(Experiment[PhaseResult, PhaseCfg]):
 
         @plots.on_plot_thread
         def update(data: NDArray[np.complex128]) -> tuple[Artist, ...]:
+            """Refresh the measurement artists from the current acquired data."""
             return viewer.set(phases, bathreset_signal2real(data))
 
         fig.show()
         signals_buffer = SignalBuffer((len(phases),), on_update=update)
 
-        # Sweep only the final rotation; keep the simultaneous bath tones fixed.
+        # 3. Measure the reset phase fringe with fixed simultaneous bath tones.
         with Schedule(signals_buffer, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
@@ -150,6 +152,7 @@ class PhaseExp(Experiment[PhaseResult, PhaseCfg]):
         zero-centered turn, and publish fit. These are extrema of the IQ
         projection, not calibrated populations; source.cfg may be None.
         """
+        # 1. Find maximum- and minimum-contrast phases from a fixed-period tomography fringe.
         del options
         result = source.result
 
@@ -174,6 +177,7 @@ class PhaseExp(Experiment[PhaseResult, PhaseCfg]):
         while abs(min_phase) > abs(min_phase + 360):
             min_phase += 360
 
+        # 2. Assess the phase-fringe fit and its equivalent extrema nearest zero degrees.
         fig, ax = plots.subplots(num="fit")
 
         ax.plot(phases, real_signals, ".-", label="data")

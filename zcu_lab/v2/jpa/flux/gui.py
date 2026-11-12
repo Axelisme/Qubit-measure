@@ -43,7 +43,7 @@ def _relabel_flux_figure(fig: Figure, best_flux: float) -> None:
         for line in ax.get_lines():
             label = line.get_label()
             if isinstance(label, str) and label.startswith("best JPA flux"):
-                line.set_label(f"best JPA flux device value = {best_flux:.2g}")
+                line.set_label(f"best JPA flux device value = {best_flux:#.3g}")
         legend = ax.get_legend()
         if legend is not None:
             ax.legend()

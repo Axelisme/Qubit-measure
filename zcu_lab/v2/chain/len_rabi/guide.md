@@ -23,6 +23,7 @@ Temporary arrays within one acquisition round grow with points × Reps. Increasi
 
 The Rabi Pulse starts from a fresh `qub_probe` const pulse with gain 1.0, not from x180, because x180 usually has a shaped waveform that the FPGA length sweep cannot stretch.
 Its gain is an uncalibrated starting value; confirm it before Run.
+The length sweep accepts const and flat_top drive waveforms.
 Readout uses the `$resonator.module.readout` slot or a fresh `readout` template, and must be a pulse readout; a mux readout module is rejected by the Form.
 The length runs from 0.03 us to 4 × the x180 length (1.0 us without x180) over 101 points. The cycle has no Reset or Init Pulse.
 Relax delay starts at 5 * `$qubit.t1` us, or 150 us when T1 is missing.

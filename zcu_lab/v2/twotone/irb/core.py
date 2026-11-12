@@ -3,12 +3,13 @@
 from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Annotated, ClassVar, Self
+from typing import Annotated, ClassVar
 
 import numpy as np
 from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
-from pydantic import Field, model_validator
+from pydantic import Field
+from zcu_tools.analysis.fitting import IRBAnalysis, analyze_irb, project_arm_means
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment
 from zcu_tools.experiment.context import RunContext
@@ -30,52 +31,6 @@ from zcu_tools.program.v2 import (
 from zcu_lab.v2.support import live_line
 
 from .._rb_sequence import TargetGate, make_seed_tables
-from .analysis import IRBAnalysis, analyze_irb, project_arm_means
-
-
-class IRBCfg(ConfigBase):
-    """Paired RB settings; depth counts random Cliffords, rounds are host passes."""
-
-    reset: Annotated[ResetCfg | None, FieldMeta(label="Reset")] = None
-    I_pulse: Annotated[PulseCfg | None, FieldMeta(label="Identity Pulse")] = None
-    X90_pulse: Annotated[PulseCfg, FieldMeta(label="X90 Pulse")]
-    X180_pulse: Annotated[PulseCfg, FieldMeta(label="X180 Pulse")]
-    readout: Annotated[ReadoutCfg, FieldMeta(label="Readout")]
-    depth: Annotated[
-        list[Annotated[int, Field(ge=0, strict=True)]],
-        FieldMeta(label="Clifford depths"),
-    ] = Field(min_length=1)
-    """Ordered nonempty, unique nonnegative integer Clifford depths."""
-    seed: Annotated[int, FieldMeta(label="Random seed")]
-    n_seeds: Annotated[int, FieldMeta(label="Number of sequences")] = Field(ge=2)
-    """Number of independent random sequences shared by both arms."""
-
-    reps: Annotated[
-        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
-    ] = 1
-    rounds: Annotated[
-        int,
-        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
-    ] = 1
-    relax_delay: Annotated[
-        float,
-        FieldMeta(
-            label="Relax delay",
-            unit="us",
-            decimals=3,
-            description="Relaxation delay after each repetition.",
-        ),
-    ] = 1.0
-
-    target_gate: Annotated[TargetGate, FieldMeta(label="Target gate")] = "X90"
-    """Physical Clifford inserted after each random Clifford, in its current frame."""
-
-    @model_validator(mode="after")
-    def validate_depths(self) -> Self:
-        """Reject repeated depths before building any sequence or doing device I/O."""
-        if len(set(self.depth)) != len(self.depth):
-            raise ValueError("RB requires unique nonnegative integer depths")
-        return self
 
 
 @dataclass(frozen=True)
@@ -92,10 +47,54 @@ class IRBResult:
     """Repetition-averaged IQ, shape (round, seed, arm, depth)."""
 
 
+class IRBCfg(ConfigBase):
+    """Paired RB settings; depth counts random Cliffords, rounds are host passes."""
+
+    reset: Annotated[ResetCfg | None, FieldMeta(label="Reset")] = None
+    I_pulse: Annotated[PulseCfg | None, FieldMeta(label="Identity Pulse")] = None
+    X90_pulse: Annotated[PulseCfg, FieldMeta(label="X90 Pulse")]
+    X180_pulse: Annotated[PulseCfg, FieldMeta(label="X180 Pulse")]
+    readout: Annotated[ReadoutCfg, FieldMeta(label="Readout")]
+    depth: Annotated[
+        list[Annotated[int, Field(ge=0, strict=True)]],
+        FieldMeta(label="Clifford depths"),
+    ] = Field(min_length=1)
+    """Ordered nonempty nonnegative integer Clifford depths."""
+    seed: Annotated[int, FieldMeta(label="Random seed")]
+    n_seeds: Annotated[int, FieldMeta(label="Number of sequences")] = Field(ge=2)
+    """Number of independent random sequences shared by both arms."""
+
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ]
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
+        ),
+    ]
+
+    target_gate: Annotated[TargetGate, FieldMeta(label="Target gate")] = "X90"
+    """Physical Clifford inserted after each random Clifford, in its current frame."""
+
+
 def _live_plot(
     plots: Plots, depths: NDArray[np.int64]
 ) -> Callable[[NDArray[np.complex128]], None]:
-    """Show paired arm means and return the owner-dispatched IQ update."""
+    """Show paired arm means and return the owner-dispatched IQ update.
+
+    Pass run plots and Clifford depths. The returned owner-dispatched callback
+    accepts IQ with shape (round, seed, arm, depth) and returns None. Its body
+    projects IQ, updates both live lines and returns their changed artists to the
+    plot dispatcher. Inputs are unchanged; the measurement figure is shown.
+    """
     fig, ax = plots.subplots(num="measurement")
     ax.set(xlabel="Random Clifford depth", ylabel="Signal (a.u.)")
     ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
@@ -107,7 +106,8 @@ def _live_plot(
 
     @plots.on_plot_thread
     def update(data: NDArray[np.complex128]):
-        return viewer.set(depths.astype(float), project_arm_means(data))
+        """Update both arm means from raw IQ and return the changed artists."""
+        return viewer.set(depths.astype(float), project_arm_means(data).mean_signals)
 
     fig.show()
     return update
@@ -162,6 +162,7 @@ class IRB_Exp(Experiment[IRBResult, IRBCfg]):
         )
         cache: dict[tuple[int, int], TimelineProgramV2] = {}
         program_cfg = run_cfg.with_updates(rounds=1)
+        # 2. Balance drift by alternating paired reference and interleaved arms across rounds.
         with Schedule(buffer, scope=context.scope) as sched:
             for round_index, round_step in sched.repeat("round", run_cfg.rounds):
                 for seed_index, (seed, seed_step) in enumerate(
@@ -180,7 +181,7 @@ class IRB_Exp(Experiment[IRBResult, IRBCfg]):
                         )
                         key = (seed_index, arm)
                         if key not in cache:
-                            # 2. Prepare reference or interleaved physical gates.
+                            # 3. Realize reference or target-interleaved Cliffords with calibrated rotations.
                             tables = make_seed_tables(
                                 seed, depths, run_cfg.target_gate if arm else None
                             )
@@ -221,7 +222,7 @@ class IRB_Exp(Experiment[IRBResult, IRBCfg]):
                                 MY90_pulse,
                             ]
 
-                            # 3. Play this arm's prefix and its own full inverse.
+                            # 4. Play this arm's prefix and its own full inverse.
                             builder.add_loop("depth", len(prefix_len_by_depth))
                             builder.emit(
                                 LoadValue(
@@ -290,7 +291,7 @@ class IRB_Exp(Experiment[IRBResult, IRBCfg]):
                             program = builder.build()
 
                             cache[key] = program
-                        # 4. Store one round's mean IQ; reuse programs next round.
+                        # 5. Store one round's mean IQ; reuse programs next round.
                         arm_step.run_acquire(cache[key], context.soc, rounds=1)
             sched.trigger_update(flush=True)
         return IRBResult(
@@ -308,11 +309,13 @@ class IRB_Exp(Experiment[IRBResult, IRBCfg]):
         plots: Plots,
     ) -> IRBAnalysis:
         """Fit paired complete IQ, publishing both decays and seed-bootstrap CI."""
+        # 1. Estimate target-gate fidelity from paired decay curves and seed bootstrap.
         del options
         result = source.result
         fit = analyze_irb(result.depths, result.signals)
         analysis = fit.summary
         target = source.cfg.target_gate if source.cfg is not None else "target"
+        # 2. Compare reference and interleaved decays with the statistical fidelity interval.
         fig, ax = plots.subplots(num="fit", figsize=(9, 6))
         for arm, label in enumerate(("Reference", f"Interleaved {target}")):
             (line,) = ax.plot(result.depths, fit.mean_signals[arm], "o", label=label)

@@ -33,6 +33,19 @@ from zcu_lab.v2.support import live_line
 
 from .._pulses import drive_pulse
 
+STATE_LABELS = ("g", "e", "f")
+
+
+@dataclass
+class StirapDelayResult:
+    """Requested lead coordinates (N,) in us and g/e/f counts (N, 3), float64.
+
+    Counts are not fractions. Unfinished scan points retain NaN counts.
+    """
+
+    stokes_leads: NDArray[np.float64]
+    counts: NDArray[np.float64]
+
 
 class StirapDelayCfg(ConfigBase):
     """Measured carriers in MHz, signed gains and independent drive envelopes.
@@ -80,24 +93,13 @@ class StirapDelayCfg(ConfigBase):
     shots: Annotated[int, FieldMeta(label="Shots per point")] = Field(
         default=4096, ge=1
     )
-    relax_delay: Annotated[float, FieldMeta(unit="us")] = Field(default=1.0, ge=0)
+    relax_delay: Annotated[float, FieldMeta(unit="us")] = Field(ge=0)
 
     @model_validator(mode="after")
     def _different_generators(self) -> Self:
         if self.pump_ch == self.stokes_ch:
             raise ValueError("Pump and Stokes require different bound generators")
         return self
-
-
-@dataclass
-class StirapDelayResult:
-    """Requested lead coordinates (N,) in us and g/e/f counts (N, 3), float64.
-
-    Counts are not fractions. Unfinished scan points retain NaN counts.
-    """
-
-    stokes_leads: NDArray[np.float64]
-    counts: NDArray[np.float64]
 
 
 class StirapDelayExp(Experiment[StirapDelayResult, StirapDelayCfg]):
@@ -125,6 +127,7 @@ class StirapDelayExp(Experiment[StirapDelayResult, StirapDelayCfg]):
         Cancellation leaves unfinished points NaN; acquisition errors propagate.
         Missing centroid3 calibration fails before acquisition.
         """
+        # 1. Require calibrated g/e/f readout and keep drive shapes fixed for the timing scan.
         centroid3_classifier(cfg.readout, ro_ch=cfg.readout.ro_ch)
         leads = sweep2array(cfg.stokes_lead)
         pump = Pulse(
@@ -138,23 +141,28 @@ class StirapDelayExp(Experiment[StirapDelayResult, StirapDelayCfg]):
             ),
         )
 
+        # 2. Monitor g/e/f transfer fractions as the Stokes lead changes.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Stokes lead (us)", ylabel="Measured fraction")
-        viewer = live_line(ax, num_lines=3)
-        for line, state in zip(ax.lines, ("g", "e", "f"), strict=True):
+        viewer = live_line(ax, num_lines=len(STATE_LABELS))
+        for line, state in zip(ax.lines, STATE_LABELS, strict=True):
             line.set_label(state)
         ax.legend()
         ax.grid()
 
         @context.plots.on_plot_thread
         def update(data: NDArray[np.float64]):
+            """Refresh the measurement artists from the current acquired data."""
             total = data.sum(axis=-1, keepdims=True)
             fractions = np.full_like(data, np.nan)
             np.divide(data, total, out=fractions, where=total > 0)
             return viewer.set(leads, fractions.T)
 
         fig.show()
-        counts = SignalBuffer((len(leads), 3), dtype=np.float64, on_update=update)
+        counts = SignalBuffer(
+            (len(leads), len(STATE_LABELS)), dtype=np.float64, on_update=update
+        )
+        # 3. Measure transfer for Stokes-first and pump-first timing without changing pulse shapes.
         with Schedule(counts, scope=context.scope) as sched:
             for lead, step in sched.scan("stokes_lead", leads):
                 builder = TimelineBuilder(
@@ -178,7 +186,9 @@ class StirapDelayExp(Experiment[StirapDelayResult, StirapDelayCfg]):
                     context.soc,
                     processor=processor,
                     rounds=1,
-                    options=RunOptions(converter=lambda sums: sums.reshape(3)),
+                    options=RunOptions(
+                        converter=lambda sums: sums.reshape(len(STATE_LABELS))
+                    ),
                     charge_requirements=(
                         ChargeDriveRequirement("pump", cfg.pump_ch),
                         ChargeDriveRequirement("stokes", cfg.stokes_ch),
@@ -202,6 +212,7 @@ class StirapDelayExp(Experiment[StirapDelayResult, StirapDelayCfg]):
         fixed-size confusion diagnostics. Missing cfg/calibration or no usable
         points raises ValueError; singular confusion raises LinAlgError.
         """
+        # 1. Correct completed timing points with the saved g/e/f readout calibration.
         del options
         if source.cfg is None:
             raise ValueError("STIRAP delay analysis requires saved cfg")
@@ -217,9 +228,10 @@ class StirapDelayExp(Experiment[StirapDelayResult, StirapDelayCfg]):
         raw = counts[complete] / totals[complete, None]
         result = analyze_centroid3_populations(raw, calibration)
 
+        # 2. Compare raw and corrected transfer populations versus Stokes lead.
         fig, ax = plots.subplots(num="populations")
         for index, (state, color) in enumerate(
-            zip(("g", "e", "f"), ("C0", "C1", "C2"), strict=True)
+            zip(STATE_LABELS, ("C0", "C1", "C2"), strict=True)
         ):
             ax.plot(
                 leads,

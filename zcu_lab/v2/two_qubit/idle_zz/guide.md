@@ -68,3 +68,13 @@ record = exp.run(cfg)
 exp.analyze(None)
 exp.save_run(point_view, source=record)
 ```
+
+## Calibration order and field units
+
+Calibrate each role's Xπ and Xπ/2 slots with amplitude and length Rabi before using them.
+Confirm pulse frequency in MHz, signed gain in [-1, 1], and duration in us.
+Use lookback to set mux timing, then mux onetone to set frequencies and gains.
+Confirm readout timing in us and gains in [-1, 1].
+
+Before choosing the signed artificial detune, calibrate the qubit frequency with twotone spectroscopy and measure T2 Ramsey.
+Keep its magnitude greater than the expected |ζ| plus the frequency error, as required above.

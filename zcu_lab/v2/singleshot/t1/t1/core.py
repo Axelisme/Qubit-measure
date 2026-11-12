@@ -36,6 +36,9 @@ from zcu_tools.program.v2 import (
 from zcu_lab.v2.support import live_line
 from zcu_lab.v2.support.singleshot.util import readout_confusion_matrix
 
+POPULATION_STATES = (0, 1, 2)
+POPULATION_COUNT = len(POPULATION_STATES)
+
 
 @dataclass(frozen=True)
 class T1Result:
@@ -49,6 +52,11 @@ class T1Result:
     counts: NDArray[np.float64]
 
 
+@pydantic_dataclass(frozen=True, config={"arbitrary_types_allowed": True})
+class T1AnalyzeOptions:
+    skip: int = Field(default=0, ge=0)
+
+
 class T1Cfg(ConfigBase):
     reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
     pi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi Pulse")]
@@ -57,7 +65,7 @@ class T1Cfg(ConfigBase):
     sampling: Literal["linear", "decay"] = "decay"
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
-    ] = 1
+    ]
     rounds: Annotated[
         int,
         FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
@@ -70,12 +78,7 @@ class T1Cfg(ConfigBase):
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
-    ] = 1.0
-
-
-@pydantic_dataclass(frozen=True, config={"arbitrary_types_allowed": True})
-class T1AnalyzeOptions:
-    skip: int = Field(default=0, ge=0)
+    ]
 
 
 class T1Exp(Experiment[T1Result, T1Cfg]):
@@ -86,7 +89,10 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
     AXES_SPEC: ClassVar[AxesSpec[T1Result, T1Cfg]] = AxesSpec(
         axes=(
             AxesSpec.Axis(
-                values=(0, 1, 2), label="Population", unit="None", dtype=np.int64
+                values=POPULATION_STATES,
+                label="Population",
+                unit="None",
+                dtype=np.int64,
             ),
             AxesSpec.Axis(
                 values=(0, 1), label="Initial State", unit="None", dtype=np.int64
@@ -104,9 +110,10 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
     )
 
     def _live_update(self, plots: Plots, lengths: NDArray[np.float64]):
+        """Show both initial-state population traces and return their live artist updater."""
         figure, _ = plots.subplots(ncols=2, num="measurement", figsize=(12, 5))
         axes = figure.axes
-        lines = [live_line(ax, num_lines=3) for ax in axes]
+        lines = [live_line(ax, num_lines=POPULATION_COUNT) for ax in axes]
         for ax in axes:
             ax.set(xlabel="Time (us)", ylabel="Amplitude", ylim=(0.0, 1.0))
             for line, label in zip(
@@ -117,6 +124,11 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
 
         @plots.on_plot_thread
         def update(counts: NDArray[np.float64]):
+            """Draw acquired shot counts on the measurement axes; return changed artists.
+
+            Read scan-shaped samples without changing them. Update the live
+            artists over the prepared coordinates; plot errors propagate.
+            """
             populations = counts / counts.sum(axis=-1, keepdims=True)
             return (
                 *lines[0].set(lengths, populations[:, 0].T),
@@ -135,14 +147,20 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
         (delay, initial state, population state). The first readout tone supplies
         classification. Decay points that collide on the time grid raise ValueError.
         """
+        # 1. Choose the acquisition path for the requested sampling.
         if cfg.sampling == "linear":
             return self._run_linear(cfg, context=context)
         return self._run_decay(cfg, context=context)
 
     def _run_linear(self, cfg: T1Cfg, *, context: RunContext) -> T1Result:
+        """Acquire both preparations with linear board delays; return counts and actual times."""
+        # 1. Quantize uniform delays and reserve G/E/Other counts for I/pi preparation.
         lengths = sweep2array(cfg.delay, "time", {"soccfg": context.soccfg})
         update = self._live_update(context.plots, lengths)
-        buffer = SignalBuffer((len(lengths), 2, 3), dtype=np.float64, on_update=update)
+        buffer = SignalBuffer(
+            (len(lengths), 2, POPULATION_COUNT), dtype=np.float64, on_update=update
+        )
+        # 2. Compare reset-only and pi-prepared relaxation with board-swept waits.
         with Schedule(buffer, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 context.soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
@@ -173,10 +191,15 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
         return T1Result(lengths=lengths, counts=buffer.array)
 
     def _run_decay(self, cfg: T1Cfg, *, context: RunContext) -> T1Result:
+        """Acquire both preparations with nonuniform decay sampling; return counts and actual times."""
+        # 1. Resolve distinct decay-weighted delays for the I/pi relaxation comparison.
         table = materialize_nonuniform_t1_delays(cfg.delay, soccfg=context.soccfg)
         lengths = table.times_us
         update = self._live_update(context.plots, lengths)
-        buffer = SignalBuffer((len(lengths), 2, 3), dtype=np.float64, on_update=update)
+        buffer = SignalBuffer(
+            (len(lengths), 2, POPULATION_COUNT), dtype=np.float64, on_update=update
+        )
+        # 2. Compare I/pi relaxation with table-driven waits and summed class counts.
         with Schedule(buffer, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 context.soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay

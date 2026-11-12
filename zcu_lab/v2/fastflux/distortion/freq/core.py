@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Annotated, ClassVar
 
 import numpy as np
+from matplotlib.artist import Artist
 from matplotlib.ticker import ScalarFormatter
 from numpy.typing import NDArray
 from zcu_tools.analysis.fitting import fitlor
@@ -33,27 +35,15 @@ class FreqResult:
     signals: NDArray[np.complex128]
 
 
+@dataclass(frozen=True)
+class FreqAnalysis:
+    lengths_us: NDArray[np.float64]
+    freqs_mhz: NDArray[np.float64]
+
+
 def freq_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
+    """Return the real-valued measurement view of complex IQ without changing the input."""
     return rotate2real(signals).real
-
-
-def get_resonance_freq(
-    xs: NDArray[np.float64], freqs: NDArray[np.float64], amps: NDArray[np.float64]
-) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
-    s_xs = []
-    s_freqs = []
-
-    for x, amp in zip(xs, amps, strict=False):
-        if np.any(np.isnan(amp)):
-            continue
-
-        param, _ = fitlor(freqs, amp)
-        curr_freq = param[3]
-
-        s_xs.append(x)
-        s_freqs.append(curr_freq)
-
-    return np.array(s_xs), np.array(s_freqs)
 
 
 class FreqCfg(ConfigBase):
@@ -66,7 +56,7 @@ class FreqCfg(ConfigBase):
     freq: SweepCfg
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
-    ] = 1
+    ]
     rounds: Annotated[
         int,
         FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
@@ -79,13 +69,7 @@ class FreqCfg(ConfigBase):
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
-    ] = 1.0
-
-
-@dataclass(frozen=True)
-class FreqAnalysis:
-    lengths_us: NDArray[np.float64]
-    freqs_mhz: NDArray[np.float64]
+    ]
 
 
 class FreqExp(Experiment[FreqResult, FreqCfg]):
@@ -112,7 +96,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         frequencies in MHz and mean complex IQ shaped (wait, frequency).
         Resonance fits in analyze trace the flux-induced frequency response.
         """
-        # Quantize probe timing and frequency on the configured hardware.
+        # 1. Quantize probe timing and frequency on the configured hardware.
         cfg = config
         soc, soccfg = context.soc, context.soccfg
 
@@ -126,7 +110,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
             freq_sweep, "freq", {"soccfg": soccfg, "gen_ch": qub_pulse.ch}
         )
 
-        # Keep the delayed spectroscopy map in wait-major order.
+        # 2. Keep the delayed spectroscopy map in wait-major order.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Time (us)", ylabel="Frequency (MHz)")
         formatter = ScalarFormatter(useMathText=True)
@@ -136,7 +120,12 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         viewer = live_heatmap(ax)
 
         @context.plots.on_plot_thread
-        def update(data):
+        def update(data: NDArray[np.complex128]) -> Iterable[Artist]:
+            """Draw acquired complex IQ on the measurement axes; return changed artists.
+
+            Read the scan-shaped data without changing it. Update the live
+            artists over the prepared coordinates; plot errors propagate.
+            """
             return viewer.set(lengths, freqs, freq_signal2real(data))
 
         fig.show()
@@ -146,7 +135,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         )
 
         with Schedule(signals_buffer, scope=context.scope) as sched:
-            # Build the pulse sequence without changing the caller's cfg.
+            # 3. Probe during the flux transient and read out after all timing branches.
             builder = TimelineBuilder(
                 soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
             )
@@ -179,6 +168,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         rows containing NaN. Require source.cfg for probe/flux timing, otherwise
         raise ValueError; the ideal curve is only a timing reference.
         """
+        # 1. Require saved pulse timing to interpret the delayed spectroscopy map.
         del options  # This analysis has no configurable options.
         result = source.result
 
@@ -191,12 +181,27 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
 
         lengths, freqs, signals = result.lengths, result.freqs, result.signals
 
-        # align to center of qubit pulse
+        # 2. Locate each spectroscopy sample at the qubit-probe center.
         lengths = lengths + qub_len / 2
 
         amps = freq_signal2real(signals)
-        s_lengths, s_freqs = get_resonance_freq(lengths, freqs, amps)
+        # 3. Recover the resonance from each complete delay trace.
+        fit_lengths = []
+        fit_freqs = []
 
+        for x, amp in zip(lengths, amps, strict=False):
+            if np.any(np.isnan(amp)):
+                continue
+
+            param, _ = fitlor(freqs, amp)
+            curr_freq = param[3]
+
+            fit_lengths.append(x)
+            fit_freqs.append(curr_freq)
+
+        s_lengths, s_freqs = np.array(fit_lengths), np.array(fit_freqs)
+
+        # 4. Use low/high detuning bands to construct a flux-timing reference.
         sort_idxs = np.argsort(np.abs(s_freqs - s_freqs[0]))
         mean_background = np.mean(s_freqs[sort_idxs[: int(len(s_freqs) * 0.1)]])
         mean_topdetune = np.mean(s_freqs[sort_idxs[int(len(s_freqs) * 0.9) :]])
@@ -210,6 +215,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
             mean_topdetune
         )
 
+        # 5. Compare resonance tracks with ideal timing and finite-probe edge windows.
         fig, ax = plots.subplots(num="fit", figsize=config.figsize)
 
         ax.imshow(
@@ -221,7 +227,6 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
             origin="lower",
         )
 
-        # Plot the resonance frequencies and fitted curve
         ax.plot(s_lengths, s_freqs, ".", c="k")
         ax.plot(ideal_lengths, ideal_curve, "g-", label="Ideal")
 

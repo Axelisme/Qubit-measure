@@ -37,6 +37,7 @@ class LengthResult:
 
 
 def bathreset_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
+    """Convert mean complex IQ to the real contrast used by live and analysis plots."""
     return np.asarray(
         np.abs(signals[..., 2] - signals[..., 0]) ** 2
         + np.abs(signals[..., 3] - signals[..., 1]) ** 2,
@@ -53,7 +54,7 @@ class LengthCfg(ConfigBase):
 
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
-    ] = 1
+    ]
     rounds: Annotated[
         int,
         FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
@@ -66,7 +67,7 @@ class LengthCfg(ConfigBase):
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
-    ] = 1.0
+    ]
 
 
 class LengthExp(Experiment[LengthResult, LengthCfg]):
@@ -105,7 +106,7 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
         Return lengths and round-averaged complex IQ shaped (Nlength, 4).
         Opposite-phase contrast is not a calibrated reset fidelity.
         """
-        # Prepare qubit-tone lengths while preserving the cavity-tone duration offset.
+        # 1. Prepare qubit-tone lengths while preserving the cavity-tone duration offset.
         cfg = deepcopy(config)
         soc, soccfg = context.soc, context.soccfg
 
@@ -130,13 +131,14 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
         def average_signals(
             signals: NDArray[np.complex128],
         ) -> NDArray[np.complex128]:
+            """Average acquired rounds for the phase-resolved reset-length display."""
             _signals = np.asarray(signals)  # shape: (rounds, lengths, 4)
             mean_signals = np.full_like(_signals[0], fill_value=np.nan)
             mask = np.any(np.isfinite(_signals), axis=0)
             mean_signals[mask] = np.nanmean(_signals[:, mask], axis=0)
             return mean_signals  # (lengths, 4)
 
-        # Show tomography contrast, but retain phase-resolved IQ for round averaging.
+        # 2. Show tomography contrast, but retain phase-resolved IQ for round averaging.
         plots = context.plots
         fig, ax = plots.subplots(num="measurement")
         ax.set(xlabel="Length (us)", ylabel="Signal (a.u.)")
@@ -144,12 +146,13 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
 
         @plots.on_plot_thread
         def update(data: NDArray[np.complex128]) -> tuple[Artist, ...]:
+            """Refresh the measurement artists from the current acquired data."""
             return viewer.set(lengths, bathreset_signal2real(average_signals(data)))
 
         fig.show()
         buffer = SignalBuffer((rounds, len(lengths), 4), on_update=update)
 
-        # Repeat the host length scan; each program sweeps the four pi/2 phases.
+        # 3. Resolve four-phase tomography versus tone duration while retaining the cavity offset.
         with Schedule(buffer, scope=context.scope) as sched:
             for _, rep in sched.repeat("rounds", rounds):
                 for length, step in rep.scan("length", lengths.tolist()):
@@ -197,6 +200,7 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
         Use opposite-phase IQ differences from source.result and publish fit.
         No duration is fitted or returned; source.cfg may be None.
         """
+        # 1. Recover reset tomography contrast from the round-averaged phase responses.
         del options
         result = source.result
 
@@ -204,6 +208,7 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
 
         real_signals = bathreset_signal2real(signals)
 
+        # 2. Inspect how bath-reset contrast changes with qubit-tone duration.
         _, ax = plots.subplots(num="fit")
 
         ax.plot(lens, real_signals, marker=".")

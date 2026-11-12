@@ -49,6 +49,22 @@ from ._analysis import (
 )
 
 
+@dataclass(frozen=True)
+class IdleZZResult:
+    """Unnormalized float64 sums (D,2,T,3,3), terminal F1/F2 g/e/other.
+
+    dc_values is the D-point device coordinate, or [0] when DC is disabled.
+    The spectator axis is fixed [0,1] for I/Xπ. delays is actual quantized µs.
+    Rounds accumulate without averaging. Unmeasured points stay NaN; completed
+    rounds survive cancellation. No individual shots or IQ are retained.
+    """
+
+    dc_values: NDArray[np.float64]
+
+    delays: NDArray[np.float64]
+    sums: NDArray[np.float64]
+
+
 class IdleZZCfg(ConfigBase):
     """Target f1/f2 Ramsey with nominal spectator I/Xπ branches and optional reset.
 
@@ -73,35 +89,35 @@ class IdleZZCfg(ConfigBase):
         Pulse.Cfg,
         FieldMeta(
             label="F1 Xπ",
-            description="填入 F1 calibrated x180 pulse slot。先做 amplitude／length Rabi，再確認 frequency MHz、gain a.u. within [-1, 1] 與 duration us。",
+            description="Calibrated F1 X180 pulse, frequency MHz, gain [-1, 1] and duration us.",
         ),
     ]
     x180_f2: Annotated[
         Pulse.Cfg,
         FieldMeta(
             label="F2 Xπ",
-            description="填入 F2 calibrated x180 pulse slot。先做 amplitude／length Rabi，再確認 frequency MHz、gain a.u. within [-1, 1] 與 duration us。",
+            description="Calibrated F2 X180 pulse, frequency MHz, gain [-1, 1] and duration us.",
         ),
     ]
     x90_f1: Annotated[
         Pulse.Cfg,
         FieldMeta(
             label="F1 Xπ/2",
-            description="填入 F1 calibrated x90 pulse slot。先做 amplitude／length Rabi，再確認 frequency MHz、gain a.u. within [-1, 1] 與 duration us。",
+            description="Calibrated F1 X90 pulse, frequency MHz, gain [-1, 1] and duration us.",
         ),
     ]
     x90_f2: Annotated[
         Pulse.Cfg,
         FieldMeta(
             label="F2 Xπ/2",
-            description="填入 F2 calibrated x90 pulse slot。先做 amplitude／length Rabi，再確認 frequency MHz、gain a.u. within [-1, 1] 與 duration us。",
+            description="Calibrated F2 X90 pulse, frequency MHz, gain [-1, 1] and duration us.",
         ),
     ]
     readout: Annotated[
         MuxReadout.Cfg,
         FieldMeta(
             label="Mux readout",
-            description="填入 full-group mux readout slot。先用 lookback 取得 timing，再做 mux onetone，確認 frequency MHz、gain a.u. within [-1, 1] 與 timing us。",
+            description="Full-group mux readout with calibrated frequencies, gains and timing.",
         ),
     ]
     roles: JointRoles
@@ -130,12 +146,12 @@ class IdleZZCfg(ConfigBase):
         FieldMeta(
             label="Detune",
             unit="MHz",
-            description="填入 signed artificial phase ramp。先做 twotone frequency 與 T2 Ramsey；magnitude 必須大於預期 |ζ| 加 frequency error。",
+            description="Signed artificial phase ramp in MHz, exceeding expected |ζ| plus frequency error.",
         ),
     ]
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
-    ] = Field(default=1, gt=0)
+    ] = Field(gt=0)
     rounds: Annotated[
         int,
         FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
@@ -156,7 +172,7 @@ class IdleZZCfg(ConfigBase):
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
-    ] = 1.0
+    ]
 
     @model_validator(mode="after")
     def validate_pair(self) -> Self:
@@ -168,34 +184,21 @@ class IdleZZCfg(ConfigBase):
             raise ValueError("Each role's Xπ and Xπ/2 must use the same generator")
         validate_classifiers(m.readout, self.roles)
         delays = sweep2array(self.delay)
-        if not np.all(np.isfinite(delays)) or np.any(delays < 0):
-            raise ValueError("Ramsey delay must be finite and nonnegative")
-        if self.dc_device is not None:
-            if not self.dc_device.strip():
-                raise ValueError("DC source must name a connected device or be None")
-            if not np.all(np.isfinite(sweep2array(self.dc))):
-                raise ValueError("DC source coordinates must be finite")
+        if np.any(delays < 0):
+            raise ValueError("Ramsey delay must be nonnegative")
+        if self.dc_device is not None and not self.dc_device.strip():
+            raise ValueError("DC source must name a connected device or be None")
         return self
 
 
-@dataclass(frozen=True)
-class IdleZZResult:
-    """Unnormalized float64 sums (D,2,T,3,3), terminal F1/F2 g/e/other.
-
-    dc_values is the D-point device coordinate, or [0] when DC is disabled.
-    The spectator axis is fixed [0,1] for I/Xπ. delays is actual quantized µs.
-    Rounds accumulate without averaging. Unmeasured points stay NaN; completed
-    rounds survive cancellation. No individual shots or IQ are retained.
-    """
-
-    dc_values: NDArray[np.float64]
-
-    delays: NDArray[np.float64]
-    sums: NDArray[np.float64]
-
-
 def restore_result(data: GroupedLoadData[IdleZZCfg]) -> IdleZZResult:
-    """Restore summed counts; old raw-IQ files missing sums raise ValueError."""
+    """Restore summed counts; old raw-IQ files missing sums raise ValueError.
+
+    data supplies the grouped sums variable and its persisted scan axes. Return
+    this experiment's Result with float64 class counts and its original axis
+    ordering. Missing variables and invalid data propagate load errors. Do not
+    mutate the loaded data, acquire or draw; no raw-IQ reconstruction is attempted.
+    """
     sums = data.variable("sums")
     return IdleZZResult(
         sums.axes[4].astype(np.float64),
@@ -246,13 +249,15 @@ class IdleZZExp(Experiment[IdleZZResult, IdleZZCfg]):
 
         Hardware scans spectator_states and delay; DC alone stays on host
         because it changes an external instrument. Return unnormalized counts.
+
         """
-        validate_classifiers(config.readout, config.roles)
+        # 1. Pair hardware-rounded Ramsey delays with optional host DC settings.
         delay_sweep = round_sweep_dict(config.delay, "time", {"soccfg": context.soccfg})
         delays = sweep2array(delay_sweep)
         dc_values = (
             np.array([0.0]) if config.dc_device is None else sweep2array(config.dc)
         )
+        # 2. Compare target Ramsey sigma for spectator I/Xpi at each DC setting.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Delay (us)", ylabel="Target ⟨σ⟩")
         viewer = live_line(ax, num_lines=len(dc_values) * 2)
@@ -266,6 +271,7 @@ class IdleZZExp(Experiment[IdleZZResult, IdleZZCfg]):
                 delays, sigma(sums, config.target).reshape(-1, len(delays))
             )
 
+        # 3. Set DC on the host; sweep spectator preparation and detuned target Ramsey delay in hardware.
         buffer = SignalBuffer(
             (len(dc_values), 2, len(delays), 3, 3),
             dtype=np.float64,
@@ -324,6 +330,7 @@ class IdleZZExp(Experiment[IdleZZResult, IdleZZCfg]):
                     rounds=config.rounds,
                     options=RunOptions(),
                 )
+        # 4. Retain raw terminal counts for completed rounds on every planned DC/delay slot.
         return IdleZZResult(dc_values, delays, buffer.array)
 
     def analyze(
@@ -338,7 +345,9 @@ class IdleZZExp(Experiment[IdleZZResult, IdleZZCfg]):
         Every required delay must contain all requested rounds. Other remains
         in the sigma denominator. Count errors weight the fringe fit.
         No calibration or DC writeback occurs.
+
         """
+        # 1. Fit only full-delay, full-round Ramsey branches with count-error weights and other in the denominator.
         del options
         cfg, result = source.cfg, source.result
         if cfg is None:
@@ -418,6 +427,7 @@ class IdleZZExp(Experiment[IdleZZResult, IdleZZCfg]):
             ax.legend()
             ax.grid(True)
             fig.tight_layout()
+        # 2. Show signed Xpi-minus-I frequency differences versus DC without claiming a pure ZZ coupling.
         fig, ax = plots.subplots(num="zeta", figsize=(8, 5))
         for index, (value, error) in enumerate(
             zip(answer.zeta_mhz, answer.zeta_error_mhz, strict=True)

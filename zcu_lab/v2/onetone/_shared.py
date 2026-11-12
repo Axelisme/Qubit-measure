@@ -27,7 +27,7 @@ class LinearFreqCfg(ConfigBase):
         PulseReadoutCfg,
         FieldMeta(
             label="Readout",
-            description="填入 resonator readout 設定。先用 lookback 取得 TOF，再以 onetone 取得 kappa，確認 trigger offset 與 waveform duration，單位 us。",
+            description="Resonator readout 設定與 timing（us）。",
         ),
     ]
     freq: Annotated[
@@ -35,12 +35,12 @@ class LinearFreqCfg(ConfigBase):
         FieldMeta(
             label="Frequency",
             unit="MHz",
-            description="填入 absolute MHz 起訖值。range_find 不會從已知中心自動設定掃描窗。",
+            description="Absolute MHz 掃描起訖值。",
         ),
     ]
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
-    ] = 1
+    ]
     rounds: Annotated[
         int,
         FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
@@ -53,7 +53,7 @@ class LinearFreqCfg(ConfigBase):
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
-    ] = 1.0
+    ]
 
 
 def linear_freqs(

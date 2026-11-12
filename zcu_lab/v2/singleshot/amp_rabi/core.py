@@ -35,12 +35,47 @@ from zcu_lab.v2.support.singleshot.util import (
 )
 
 
+@dataclass(frozen=True)
+class AmpRabiResult:
+    gains: NDArray[np.float64]
+    shot_indices: NDArray[np.int64]
+    signals: NDArray[np.complex128]
+
+
+@pydantic_dataclass(frozen=True, config={"arbitrary_types_allowed": True})
+class AmpRabiAnalyzeOptions:
+    initial_state: Literal["ground", "excited"] = "ground"
+    max_calls: int | None = None
+
+
+@dataclass(frozen=True)
+class AmpRabiFit:
+    pi_gain: float
+    pi_gain_error: float
+    pi2_gain: float
+    pi2_gain_error: float
+    frequency: float
+    amplitude: float
+    joint_fit: RabiJointFitSummary
+
+
+def _flatten_round_shots(raw: NDArray[np.complex128]) -> NDArray[np.complex128]:
+    """(round, gain, shot) -> (gain, round * shot), preserving every IQ sample."""
+    return raw.transpose(1, 0, 2).reshape(raw.shape[1], -1)
+
+
 def _plot_initial_histogram(
     ax: Axes,
     fit: RabiJointFitResult,
     effective_t1_us: float | None,
     classified_distribution: NDArray[np.float64] | None,
 ) -> None:
+    """Draw the initial-point IQ histogram and fitted state contributions on ax.
+
+    Read the joint fit without changing it. Annotate effective T1 in us and
+    the optional G/E/Other classified fractions when available. Return None;
+    only the caller-owned axes change, and plotting errors propagate.
+    """
     counts = fit.projection.counts[0]
     edges = fit.projection.bin_edges
     ax.stairs(counts, edges, label="Observed counts", color="black")
@@ -119,6 +154,12 @@ def _plot_initial_histogram(
 
 
 def _plot_confusion_matrix(ax: Axes, fit: RabiJointFitResult) -> None:
+    """Draw the fitted three-state confusion matrix on the caller-owned ax.
+
+    Read the joint fit without changing it; show an unavailable label for an
+    invalid fit. Return None after updating the image, labels and ticks.
+    Plotting errors propagate.
+    """
     labels = ("g", "e", "other")
     matrix = fit.confusion_matrix
     if fit.backend.valid and np.isfinite(matrix).all():
@@ -147,53 +188,8 @@ def _plot_confusion_matrix(ax: Axes, fit: RabiJointFitResult) -> None:
     ax.set_ylabel("True state")
 
 
-@dataclass(frozen=True)
-class AmpRabiResult:
-    gains: NDArray[np.float64]
-    shot_indices: NDArray[np.int64]
-    signals: NDArray[np.complex128]
-
-
-@dataclass(frozen=True)
-class AmpRabiFit:
-    pi_gain: float
-    pi_gain_error: float
-    pi2_gain: float
-    pi2_gain_error: float
-    frequency: float
-    amplitude: float
-    joint_fit: RabiJointFitSummary
-
-
-class AmpRabiCfg(ConfigBase):
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    qub_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Qub Pulse")]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-    gain: Annotated[SweepCfg, FieldMeta(label="Gain", unit="a.u.")]
-    reps: Annotated[
-        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
-    ] = 1
-    rounds: Annotated[
-        int,
-        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
-    ] = 1
-    relax_delay: Annotated[
-        float,
-        FieldMeta(
-            label="Relax delay",
-            unit="us",
-            decimals=3,
-            description="Relaxation delay after each repetition.",
-        ),
-    ] = 1.0
-
-
-def _flatten_round_shots(raw: NDArray[np.complex128]) -> NDArray[np.complex128]:
-    """(round, gain, shot) -> (gain, round * shot), preserving every IQ sample."""
-    return raw.transpose(1, 0, 2).reshape(raw.shape[1], -1)
-
-
 def _gain_calibration(fit: RabiJointFitResult) -> AmpRabiFit:
+    """Return gain calibrations and errors from a joint Rabi fit without changing it."""
     if not fit.backend.valid:
         return AmpRabiFit(
             np.nan,
@@ -220,10 +216,27 @@ def _gain_calibration(fit: RabiJointFitResult) -> AmpRabiFit:
     )
 
 
-@pydantic_dataclass(frozen=True, config={"arbitrary_types_allowed": True})
-class AmpRabiAnalyzeOptions:
-    initial_state: Literal["ground", "excited"] = "ground"
-    max_calls: int | None = None
+class AmpRabiCfg(ConfigBase):
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    qub_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Qub Pulse")]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
+    gain: Annotated[SweepCfg, FieldMeta(label="Gain", unit="a.u.")]
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ]
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
+        ),
+    ]
 
 
 class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
@@ -264,7 +277,7 @@ class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
         raw-shot buffer shape.
         """
 
-        # Validate live classification before acquiring any shots.
+        # 1. Validate live classification before acquiring any shots.
         soc, soccfg = context.soc, context.soccfg
         classifier = rabi_preview_classifier(cfg.readout)
         cfg = deepcopy(cfg)
@@ -275,8 +288,13 @@ class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
             {"soccfg": soccfg, "gen_ch": cfg.qub_pulse.ch},
         )
 
-        # Preview populations from complete shot columns without losing raw IQ.
-        def configure_axes(ax: Axes) -> None:
+        # 2. Preview populations from complete shot columns without losing raw IQ.
+
+        viewer = None
+        if classifier is not None:
+            figure, ax = context.plots.subplots(num="measurement")
+            ax.set(xlabel="Pulse gain (a.u.)", ylabel="Classified population")
+            viewer = live_line(ax, num_lines=3)
             ax.set_ylim(-0.02, 1.02)
             for line, kwargs in zip(
                 ax.lines,
@@ -292,17 +310,15 @@ class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
             ):
                 line.set(**kwargs)
             ax.legend()
-
-        viewer = None
-        if classifier is not None:
-            figure, ax = context.plots.subplots(num="measurement")
-            ax.set(xlabel="Pulse gain (a.u.)", ylabel="Classified population")
-            viewer = live_line(ax, num_lines=3)
-            configure_axes(ax)
             figure.show()
 
         @context.plots.on_plot_thread
         def update_view(raw: NDArray[np.complex128]):
+            """Draw acquired raw complex IQ on the measurement axes; return changed artists.
+
+            Read scan-shaped samples without changing them. Update the live
+            artists over the prepared coordinates; plot errors propagate.
+            """
             if viewer is None or classifier is None or classifier.radius is None:
                 return ()
             shots = _flatten_round_shots(raw)
@@ -350,7 +366,7 @@ class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
                     )
                 buffer[step].set(raw.T)
 
-        # Join round/shot axes only; unacquired rounds remain NaN.
+        # 3. Join round/shot axes only; unacquired rounds remain NaN.
         return AmpRabiResult(
             gains,
             np.arange(rounds * cfg.reps, dtype=np.int64),
@@ -364,6 +380,8 @@ class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
         *,
         plots: Plots,
     ) -> AmpRabiFit:
+        # 1. Fit the raw IQ and interpret the readout calibration.
+        """Fit raw IQ jointly, return gain calibrations, and draw populations and readout diagnostics."""
         result = source.result
         if result.signals.shape != (
             result.gains.size,
@@ -383,6 +401,7 @@ class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
             initial_state=options.initial_state,
             max_calls=options.max_calls,
         )
+        # 2. Compare fitted populations and readout diagnostics.
         readout = source.cfg.readout if source.cfg is not None else None
         ro_length = readout.ro_length if readout is not None else None
         ro_length_us = float(ro_length) if isinstance(ro_length, Real) else None
@@ -430,6 +449,7 @@ class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
         ax.set_ylim(0.0, 1.0)
         ax.legend(loc=4)
         ax.grid(True)
+        # 3. Show readout diagnostics, deriving T1 and initial fractions only if valid.
         effective_t1_us = None
         if (
             joint.backend.valid

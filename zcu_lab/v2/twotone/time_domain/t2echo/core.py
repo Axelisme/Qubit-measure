@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Annotated, ClassVar, Literal
 
 import numpy as np
+from matplotlib.artist import Artist
 from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field
@@ -45,7 +46,27 @@ class T2EchoResult:
     true_activate_detune: float | None = None
 
 
+@validated_dataclass(frozen=True)
+class T2EchoAnalyzeOptions:
+    fit_method: Annotated[Literal["fringe", "decay"], FieldMeta(label="Fit method")] = (
+        "decay"
+    )
+    fit_phase: Annotated[bool, FieldMeta(label="Fit phase offset (fringe only)")] = (
+        False
+    )
+
+
+@dataclass(frozen=True)
+class T2EchoAnalysis:
+    t2e: float
+    t2e_err: float
+    detune: float
+    detune_err: float
+    fit_quality: Mapping[str, FitQuality] | None = None
+
+
 def t2echo_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
+    """Convert mean complex IQ to the real contrast used by live and analysis plots."""
     return rotate2real(signals).real
 
 
@@ -58,7 +79,7 @@ class T2EchoCfg(ConfigBase):
     detune: float = 0.0
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
-    ] = 1
+    ]
     rounds: Annotated[
         int,
         FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
@@ -78,26 +99,7 @@ class T2EchoCfg(ConfigBase):
             decimals=3,
             description="Relaxation delay after each repetition.",
         ),
-    ] = 1.0
-
-
-@validated_dataclass(frozen=True)
-class T2EchoAnalyzeOptions:
-    fit_method: Annotated[Literal["fringe", "decay"], FieldMeta(label="Fit method")] = (
-        "decay"
-    )
-    fit_phase: Annotated[bool, FieldMeta(label="Fit phase offset (fringe only)")] = (
-        False
-    )
-
-
-@dataclass(frozen=True)
-class T2EchoAnalysis:
-    t2e: float
-    t2e_err: float
-    detune: float
-    detune_err: float
-    fit_quality: Mapping[str, FitQuality] | None = None
+    ]
 
 
 class T2EchoExp(Experiment[T2EchoResult, T2EchoCfg]):
@@ -147,7 +149,12 @@ class T2EchoExp(Experiment[T2EchoResult, T2EchoCfg]):
         viewer = live_line(ax)
 
         @context.plots.on_plot_thread
-        def update(data):
+        def update(data: NDArray[np.complex128]) -> tuple[Artist, ...]:
+            """Refresh the echo contrast curve.
+
+            data is complex IQ in delay order; NaN marks unmeasured points.
+            Return the changed artists without modifying the input array.
+            """
             return viewer.set(lengths, t2echo_signal2real(data))
 
         fig.show()
@@ -155,6 +162,7 @@ class T2EchoExp(Experiment[T2EchoResult, T2EchoCfg]):
             (len(lengths),),
             on_update=update,
         )
+        # 3. Measure midpoint-refocused coherence with a phase-ramped final projection.
         with Schedule(signals_buffer, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
@@ -162,8 +170,6 @@ class T2EchoExp(Experiment[T2EchoResult, T2EchoCfg]):
             length_sweep = cfg.delay
             length_param = builder.add_sweep("delay", length_sweep)
             detune_param = 360 * detune * length_param
-
-            # 3. Refocus at the midpoint, then project with the programmed phase ramp.
 
             if cfg.reset is not None:
                 builder.emit(cfg.reset.build("reset"))
@@ -194,7 +200,7 @@ class T2EchoExp(Experiment[T2EchoResult, T2EchoCfg]):
                 ),
             )
 
-        # Keep measured IQ separate from fitted coherence times and fringe frequency.
+        # 4. Preserve the realized phase-ramp frequency with the measured echo trace.
         return T2EchoResult(
             times=lengths,
             signals=signals_buffer.array,
@@ -220,6 +226,7 @@ class T2EchoExp(Experiment[T2EchoResult, T2EchoCfg]):
         detune for a requested fringe fit raises ValueError; explicit decay needs
         no detune source. Options validate fit_method as fringe or decay.
         """
+        # 1. Resolve the fringe-detuning source, falling back to a decay fit at zero detuning.
         result = source.result
         fit_method = options.fit_method
         fit_phase = options.fit_phase
@@ -241,7 +248,7 @@ class T2EchoExp(Experiment[T2EchoResult, T2EchoCfg]):
         xs = xs[1:]
         signals = signals[1:]
 
-        # Project IQ onto its signal axis before choosing the envelope model.
+        # 2. Estimate echo coherence from the real-IQ trace after omitting its first point.
         real_signals = rotate2real(signals).real
 
         if fit_method == "fringe":
@@ -264,6 +271,7 @@ class T2EchoExp(Experiment[T2EchoResult, T2EchoCfg]):
             detune = 0.0
             detune_err = 0.0
 
+        # 3. Assess echo decay and any fitted fringe frequency against the measured trace.
         fig, ax = plots.subplots(num="fit", figsize=config.figsize)
 
         ax.plot(xs, real_signals, label="data", ls="-", marker="o", markersize=5)

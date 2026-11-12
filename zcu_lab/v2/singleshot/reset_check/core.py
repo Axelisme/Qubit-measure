@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from typing import Annotated, ClassVar
 
 import numpy as np
-from matplotlib.axes import Axes
 from numpy.typing import NDArray
 from pydantic.dataclasses import dataclass as pydantic_dataclass
 from zcu_tools.analysis.singleshot import correct_populations
@@ -31,32 +30,12 @@ from zcu_tools.program.v2.modules.readout import require_circle_classifiers
 
 from zcu_lab.v2.support import live_line
 
+POPULATION_STATES = (0, 1, 2)
+POPULATION_COUNT = len(POPULATION_STATES)
+
 BRANCH_LABELS = ("Before reset", "Reset only", "Reset + Rabi")
+BRANCH_COUNT = len(BRANCH_LABELS)
 BRANCH_LINESTYLES = ("-", "--", ":")
-
-
-class ResetCheckCfg(ConfigBase):
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    rabi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Rabi Pulse")]
-    tested_reset: Annotated[Reset.Cfg, FieldMeta(label="Tested Reset")]
-    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
-    gain: Annotated[SweepCfg, FieldMeta(label="Gain", unit="a.u.")]
-    reps: Annotated[
-        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
-    ] = 1
-    rounds: Annotated[
-        int,
-        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
-    ] = 1
-    relax_delay: Annotated[
-        float,
-        FieldMeta(
-            label="Relax delay",
-            unit="us",
-            decimals=3,
-            description="Relaxation delay after each repetition.",
-        ),
-    ] = 1.0
 
 
 @dataclass(frozen=True)
@@ -68,6 +47,11 @@ class ResetCheckResult:
 
     gains: NDArray[np.float64]
     counts: NDArray[np.float64]
+
+
+@pydantic_dataclass(frozen=True, config={"arbitrary_types_allowed": True})
+class ResetCheckAnalyzeOptions:
+    confusion_matrix: NDArray[np.float64] | None = None
 
 
 @dataclass(frozen=True)
@@ -82,6 +66,7 @@ class ResetCheckAnalysis:
 
 
 def _population_line_kwargs() -> list[dict[str, str]]:
+    """Return branch/state labels and styles in the flattened count-axis order."""
     return [
         {"label": f"{label}: {state}", "color": color, "linestyle": style}
         for label, style in zip(BRANCH_LABELS, BRANCH_LINESTYLES, strict=True)
@@ -89,9 +74,28 @@ def _population_line_kwargs() -> list[dict[str, str]]:
     ]
 
 
-@pydantic_dataclass(frozen=True, config={"arbitrary_types_allowed": True})
-class ResetCheckAnalyzeOptions:
-    confusion_matrix: NDArray[np.float64] | None = None
+class ResetCheckCfg(ConfigBase):
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    rabi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Rabi Pulse")]
+    tested_reset: Annotated[Reset.Cfg, FieldMeta(label="Tested Reset")]
+    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
+    gain: Annotated[SweepCfg, FieldMeta(label="Gain", unit="a.u.")]
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ]
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
+        ),
+    ]
 
 
 class ResetCheckExp(Experiment[ResetCheckResult, ResetCheckCfg]):
@@ -100,10 +104,16 @@ class ResetCheckExp(Experiment[ResetCheckResult, ResetCheckCfg]):
     AXES_SPEC: ClassVar[AxesSpec[ResetCheckResult, ResetCheckCfg]] = AxesSpec(
         axes=(
             AxesSpec.Axis(
-                values=(0, 1, 2), label="Population", unit="None", dtype=np.int64
+                values=POPULATION_STATES,
+                label="Population",
+                unit="None",
+                dtype=np.int64,
             ),
             AxesSpec.Axis(
-                values=(0, 1, 2), label="Reset State", unit="None", dtype=np.int64
+                values=tuple(range(BRANCH_COUNT)),
+                label="Reset State",
+                unit="None",
+                dtype=np.int64,
             ),
             AxesSpec.Axis("gains", label="Gain", unit="a.u.", dtype=np.float64),
         ),
@@ -142,27 +152,32 @@ class ResetCheckExp(Experiment[ResetCheckResult, ResetCheckCfg]):
         )
 
         # 2. Show G/E/Other for all three independent preparations.
-        def configure_axes(ax: Axes) -> None:
-            ax.set_ylim(-0.02, 1.02)
-            for line, kwargs in zip(ax.lines, _population_line_kwargs(), strict=True):
-                line.set(**kwargs)
-            ax.legend()
 
         figure, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Pulse gain (a.u.)", ylabel="Classified population")
-        viewer = live_line(ax, num_lines=9)
-        configure_axes(ax)
+        viewer = live_line(ax, num_lines=BRANCH_COUNT * POPULATION_COUNT)
+        ax.set_ylim(-0.02, 1.02)
+        for line, kwargs in zip(ax.lines, _population_line_kwargs(), strict=True):
+            line.set(**kwargs)
+        ax.legend()
 
         @context.plots.on_plot_thread
         def update(data: NDArray[np.float64]):
+            """Draw acquired shot counts on the measurement axes; return changed artists.
+
+            Read scan-shaped samples without changing them. Update the live
+            artists over the prepared coordinates; plot errors propagate.
+            """
             return viewer.set(
                 gains,
-                (data / data.sum(axis=-1, keepdims=True)).reshape(gains.size, 9).T,
+                (data / data.sum(axis=-1, keepdims=True))
+                .reshape(gains.size, BRANCH_COUNT * POPULATION_COUNT)
+                .T,
             )
 
         figure.show()
         buffer = SignalBuffer(
-            (gains.size, 3, 3),
+            (gains.size, BRANCH_COUNT, POPULATION_COUNT),
             dtype=np.float64,
             on_update=update,
         )
@@ -174,7 +189,7 @@ class ResetCheckExp(Experiment[ResetCheckResult, ResetCheckCfg]):
             gain = builder.add_sweep("gain", cfg.gain)
             rabi_pulse = Pulse("rabi_pulse", cfg.rabi_pulse, gain=gain)
             tested_reset = Reset("tested_reset", cfg.tested_reset)
-            builder.add_loop("reset_sel", 3)
+            builder.add_loop("reset_sel", BRANCH_COUNT)
             if cfg.reset is not None:
                 builder.emit(Reset("reset", cfg.reset))
             builder.emit(rabi_pulse)
@@ -219,7 +234,7 @@ class ResetCheckExp(Experiment[ResetCheckResult, ResetCheckCfg]):
         # 1. Check population axes before optional readout-confusion correction.
         result = source.result
         confusion_matrix = options.confusion_matrix
-        if result.counts.shape != (result.gains.size, 3, 3):
+        if result.counts.shape != (result.gains.size, BRANCH_COUNT, POPULATION_COUNT):
             raise ValueError(
                 "Reset check requires (gain, branch, G/E/Other) populations"
             )
@@ -244,7 +259,9 @@ class ResetCheckExp(Experiment[ResetCheckResult, ResetCheckCfg]):
         _, ax = plots.subplots(num="populations", figsize=(10, 6))
         order = np.argsort(result.gains)
         for values, kwargs in zip(
-            populations[order].reshape(result.gains.size, 9).T,
+            populations[order]
+            .reshape(result.gains.size, BRANCH_COUNT * POPULATION_COUNT)
+            .T,
             _population_line_kwargs(),
             strict=True,
         ):
