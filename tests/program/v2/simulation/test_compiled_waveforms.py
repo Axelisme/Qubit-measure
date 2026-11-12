@@ -58,29 +58,37 @@ def test_product_output_matches_dds_scale(style, generator):
         _, plateau, ramp_down = shaped
         assert plateau.envelope is None
         # The plateau gain is quantized independently. Allow one gain-word LSB.
-        assert ramp_peak == pytest.approx(plateau.gain, abs=1 / 32766)
+        assert ramp_peak == pytest.approx(
+            plateau.gain, abs=1 / soccfg["gens"][0]["maxv"]
+        )
         assert ramp_down.envelope is not None
         assert (
             ramp_down.gain * max(abs(v) for v in ramp_down.envelope.values) == ramp_peak
         )
     else:
         # Firmware product[31:16] contributes E/65536 relative to direct DDS.
-        # QICK also applies maxv_scale to const gain (14744 vs arb 16383 on int4).
-        expected_ratio = (
-            (14744 / 16383) * (65536 / 29489) if "int4" in generator else 65536 / 32766
-        )
+        # QICK reports rounded user gains; const also has maxv_scale headroom.
+        dds_gain = prog.get_pulse_param("dds", "gain") * soccfg["gens"][0]["maxv_scale"]
+        arb_gain = prog.get_pulse_param("shaped", "gain")
+        expected_ratio = (dds_gain / arb_gain) * (65536 / peak)
         assert dds.gain / ramp_peak == pytest.approx(expected_ratio, rel=1e-12)
 
 
 def test_const_event_retains_pre_product_scale_values():
     prog, env = program(lambda p: p.pulse(0, "p"), reps=1)
-    event = request(prog, env).materialize_point(0).events[0]
+    observed = request(prog, env)
+    event = observed.materialize_point(0).events[0]
     assert event.gen_ch == 0
     assert event.start_ticks == 0
-    assert event.duration_ticks == 4256
-    assert event.frequency_mhz == 99.99999904632568
-    assert event.phase_deg == 29.999999972060323
-    assert event.gain == -0.24998474027955808
+    assert event.duration_ticks == observed.time_base.ticks(
+        generator_duration(env.soccfg, prog.get_pulse_param("p", "length"))
+    )
+    assert event.frequency_mhz == prog.get_pulse_param("p", "freq")
+    assert event.phase_deg == prog.get_pulse_param("p", "phase")
+    # Direct DDS retains QICK's rounded gain, without product attenuation.
+    assert event.gain == (
+        prog.get_pulse_param("p", "gain") * env.soccfg["gens"][0]["maxv_scale"]
+    )
     assert event.envelope is None
     assert event.phase_reference_ticks == 0
     assert event.source == "native:pulse:1"
