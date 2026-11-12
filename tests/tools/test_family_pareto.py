@@ -2,6 +2,7 @@
 
 from collections.abc import Generator
 from contextlib import contextmanager
+from dataclasses import replace
 from itertools import count
 from pathlib import Path
 
@@ -125,6 +126,24 @@ def test_dominance_keeps_ten_percent_boundary_modes_clocks_and_exact_errors_sepa
     assert equivalent["target"]["first_evolve/wall"] == ["boundary"]
     assert equivalent["target"]["first_evolve/cpu"] == ["boundary", "faster"]
     assert equivalent["boundary"]["warm_clear_history/wall"] == ["target", "faster"]
+
+
+@pytest.mark.parametrize("compare", [dominance, timing_equivalents])
+def test_comparisons_pair_history_modes_by_name(compare) -> None:
+    target = FamilyResult(
+        "target", 0.001, None,
+        [ModeResult(mode, [Sample(time, time, 0.001, {})] * 5, time, time)
+         for mode, time in (("first_evolve", 10), ("warm_clear_history", 20),
+                            ("warm_retain_history", 40))],
+    )
+    other = replace(target, family="other", modes=list(reversed(target.modes)))
+    result = compare([target, other])
+    expected = [] if compare is dominance else ["other"]
+    assert result["target"] == {
+        "first_evolve/wall": expected, "first_evolve/cpu": expected,
+        "warm_clear_history/wall": expected, "warm_clear_history/cpu": expected,
+        "warm_retain_history/wall": expected, "warm_retain_history/cpu": expected,
+    }
 
 
 @pytest.mark.sim
