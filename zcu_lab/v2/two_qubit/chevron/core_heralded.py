@@ -40,21 +40,21 @@ from .._sums import (
 from .core import ChevronCfg
 
 
-class ChevronHeraldedCfg(ChevronCfg):
-    """Common MHz frequency scan with fixed signed gains and relative phase. Herald precedes B11 preparation.
-
-    The same full mux cfg supplies herald and terminal reads, separated by
-    readout.post_delay. reset=None emits no reset. Other inputs match ordinary
-    ChevronCfg, including the circle classifiers with radius from GE Post.
-    """
-
-
 @dataclass(frozen=True)
 class ChevronHeraldedResult(RabiScanResult):
     """Common drive frequency coordinates, durations in us and (Nc,Nd,3,3,3,3) counts.
 
     Class order is g/e/other; axes are herald F1/F2 then terminal F1/F2.
     Unmeasured points are NaN. Counts retain all herald outcomes, unnormalized.
+    """
+
+
+class ChevronHeraldedCfg(ChevronCfg):
+    """Common MHz frequency scan with fixed signed gains and relative phase. Herald precedes B11 preparation.
+
+    The same full mux cfg supplies herald and terminal reads, separated by
+    readout.post_delay. reset=None emits no reset. Other inputs match ordinary
+    ChevronCfg, including the circle classifiers with radius from GE Post.
     """
 
 
@@ -118,19 +118,23 @@ class ChevronHeraldedExp(Experiment[ChevronHeraldedResult, ChevronHeraldedCfg]):
         envelopes rebuild at each host duration. Both return coordinate-major
         float64 counts with the same Result axes and cancellation semantics.
         """
+        # 1. Prepare the selected scan inputs.
         if all(
             isinstance(pulse.waveform, (ConstWaveformCfg, FlatTopWaveformCfg))
             for pulse in (config.drive.f1, config.drive.f2)
         ):
             return self._run_hardware_duration(config, context=context)
+        # 2. Return acquired coordinates and measurements.
         return self._run_host_duration(config, context=context)
 
     def _run_hardware_duration(
         self, config: ChevronHeraldedCfg, *, context: RunContext
     ) -> ChevronHeraldedResult:
         """Acquire all coordinates and durations in hardware, accumulating rounds."""
+        # 1. Prepare the selected scan inputs.
         coordinates = sweep2array(config.frequency)
         durations = sweep2array(config.duration)
+        # 2. Display each acquired scan trace.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Drive duration (us)", ylabel="Terminal P00 | herald (g,g)")
         viewer = live_line(ax, num_lines=len(coordinates))
@@ -146,6 +150,7 @@ class ChevronHeraldedExp(Experiment[ChevronHeraldedResult, ChevronHeraldedCfg]):
 
         class_shape = (3, 3, 3, 3)
         shape = (len(coordinates), len(durations), *class_shape)
+        # 3. Acquire the scan and retain completed measurements.
         buffer = SignalBuffer(shape, dtype=np.float64, on_update=update_view)
         with Schedule(buffer, scope=context.scope) as sched:
             builder = TimelineBuilder(
@@ -199,14 +204,17 @@ class ChevronHeraldedExp(Experiment[ChevronHeraldedResult, ChevronHeraldedCfg]):
             )
         buffer.trigger_update(flush=True)
         sums = buffer.array
+        # 4. Return acquired coordinates and measurements.
         return ChevronHeraldedResult(coordinates, durations, sums)
 
     def _run_host_duration(
         self, config: ChevronHeraldedCfg, *, context: RunContext
     ) -> ChevronHeraldedResult:
         """Rebuild sampled envelopes per host duration; keep coordinates in hardware."""
+        # 1. Prepare the selected scan inputs.
         coordinates = sweep2array(config.frequency)
         durations = sweep2array(config.duration)
+        # 2. Display each acquired scan trace.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Drive duration (us)", ylabel="Terminal P00 | herald (g,g)")
         viewer = live_line(ax, num_lines=len(coordinates))
@@ -222,6 +230,7 @@ class ChevronHeraldedExp(Experiment[ChevronHeraldedResult, ChevronHeraldedCfg]):
 
         class_shape = (3, 3, 3, 3)
         shape = (len(durations), len(coordinates), *class_shape)
+        # 3. Acquire the scan and retain completed measurements.
         buffer = SignalBuffer(shape, dtype=np.float64, on_update=update_view)
         # Sampled cosine/Gauss/DRAG envelopes reject QickParam lengths. Only their
         # duration stays on the host; coordinate remains a hardware sweep.
@@ -278,6 +287,7 @@ class ChevronHeraldedExp(Experiment[ChevronHeraldedResult, ChevronHeraldedCfg]):
                 )
         buffer.trigger_update(flush=True)
         sums = buffer.array.swapaxes(0, 1)
+        # 4. Return acquired coordinates and measurements.
         return ChevronHeraldedResult(coordinates, durations, sums)
 
     def analyze(
@@ -292,6 +302,7 @@ class ChevronHeraldedExp(Experiment[ChevronHeraldedResult, ChevronHeraldedCfg]):
         Pass fraction is not ground-state purity. Empty accepted counts give
         NaN terminal probabilities and unresolved fits. Saved cfg is required.
         """
+        # 1. Select the acquired values for analysis.
         del options
         if source.cfg is None:
             raise ValueError(
@@ -317,6 +328,7 @@ class ChevronHeraldedExp(Experiment[ChevronHeraldedResult, ChevronHeraldedCfg]):
             totals,
             herald_probabilities(result.sums),
         )
+        # 2. Display the scan traces and fitted curves.
         fig, ax = plots.subplots(num="chevron", figsize=(9, 6), layout="constrained")
         image = ax.pcolormesh(
             result.durations,

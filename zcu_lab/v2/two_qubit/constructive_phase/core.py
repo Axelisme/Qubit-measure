@@ -8,6 +8,11 @@ from matplotlib.lines import Line2D
 from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import model_validator
+from zcu_tools.analysis.fitting.phase_modulation import (
+    PhaseModulationFit,
+    fit_phase_modulation,
+)
+from zcu_tools.analysis.fitting.quality import FitQuality
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
     Experiment,
@@ -41,14 +46,56 @@ from zcu_tools.program.v2.modules import (
 from zcu_lab.v2.support import live_line
 
 from .._drive import DualLineCfg
-from .._rabi_analysis import ReturnData
+from .._rabi_analysis import (
+    RabiRate,
+    ReturnData,
+    fit_duration_rates,
+)
 from .._rabi_scan import RabiScanResult
 from .._readout import JointRoles
 from .._sums import (
     joint_probabilities,
     validate_classifiers,
 )
-from .analysis import ConstructivePhaseAnalysis, analyze_constructive_phase
+
+
+@dataclass(frozen=True)
+class ConstructivePhaseResult(RabiScanResult):
+    """F2 relative to F1 phase coordinates, durations in us and (Nc,Nd,3,3) counts.
+
+    Terminal class axes are F1/F2, each g/e/other. Unmeasured points are NaN.
+    Counts are float64 totals, not normalized probabilities.
+    """
+
+
+@dataclass(frozen=True)
+class ConstructivePhaseData:
+    """Duration-fit selection and its numerical phase-modulation result.
+
+    return_data and rates retain the lab duration/count diagnostics. phases and
+    squared_rates are the selected identifiable slices, in degrees and MHz².
+    modulation owns the complete regression, maximum and covariance result.
+    """
+
+    return_data: ReturnData
+    rates: tuple[RabiRate, ...]
+    phases: NDArray[np.float64]
+    squared_rates: NDArray[np.float64]
+    modulation: PhaseModulationFit
+
+
+@dataclass(frozen=True)
+class ConstructivePhaseAnalysis:
+    """Maximum-rate phase (degrees), failure reason and fixed-size fit quality.
+
+    relative_phase_deg is atan2(C,B), or None when no phase is identifiable.
+    reason explains an unavailable phase. interference_quality describes the
+    rate² interference fit. Per-coordinate rates and curves stay in analyze.
+    """
+
+    relative_phase_deg: float | None
+    reason: str | None
+    interference_quality: FitQuality | None
 
 
 class ConstructivePhaseCfg(ConfigBase):
@@ -76,14 +123,14 @@ class ConstructivePhaseCfg(ConfigBase):
         PulseCfg,
         FieldMeta(
             label="F1 Xπ",
-            description="填入 F1 x180 slot，先做 amplitude／length Rabi。frequency MHz、gain a.u. within [-1, 1]、duration us。",
+            description="Calibrated F1 X180 pulse, frequency MHz, gain [-1, 1] and duration us.",
         ),
     ]
     x180_f2: Annotated[
         PulseCfg,
         FieldMeta(
             label="F2 Xπ",
-            description="填入 F2 x180 slot，先做 amplitude／length Rabi。frequency MHz、gain a.u. within [-1, 1]、duration us。",
+            description="Calibrated F2 X180 pulse, frequency MHz, gain [-1, 1] and duration us.",
         ),
     ]
     drive: Annotated[
@@ -115,7 +162,7 @@ class ConstructivePhaseCfg(ConfigBase):
         FieldMeta(
             unit="us",
             label="Duration",
-            description="填入兩條 charge-line 的共同 duration 起訖值，單位 us。先做 conditional spectroscopy 選頻，再由操作者確認 chevron 時間範圍。",
+            description="Common duration sweep for both charge-line pulses in us.",
         ),
     ]
 
@@ -156,13 +203,30 @@ class ConstructivePhaseCfg(ConfigBase):
         return self
 
 
-@dataclass(frozen=True)
-class ConstructivePhaseResult(RabiScanResult):
-    """F2 relative to F1 phase coordinates, durations in us and (Nc,Nd,3,3) counts.
+def analyze_constructive_phase(
+    coordinates: NDArray[np.float64],
+    durations: NDArray[np.float64],
+    returns: ReturnData,
+) -> ConstructivePhaseData:
+    """Fit complete duration traces, then select the rate² interference maximum.
 
-    Terminal class axes are F1/F2, each g/e/other. Unmeasured points are NaN.
-    Counts are float64 totals, not normalized probabilities.
+    Exclude unresolved slices below 1/actual duration span. More than three valid
+    phases and a full-rank sine/cosine design are needed for finite uncertainty.
+    Reject numerical degeneracy/nonfinite uncertainty, not low contrast/sigma or
+    residual quality. Nyquist sampling is the operator's responsibility.
     """
+    rates = fit_duration_rates(durations, returns)
+    phases = np.array(
+        [
+            coordinate
+            for coordinate, rate in zip(coordinates, rates, strict=True)
+            if rate.rate is not None
+        ]
+    )
+    squared = np.array([rate.rate**2 for rate in rates if rate.rate is not None])
+    return ConstructivePhaseData(
+        returns, rates, phases, squared, fit_phase_modulation(phases, squared)
+    )
 
 
 def restore_result(
@@ -224,19 +288,23 @@ class ConstructivePhaseExp(Experiment[ConstructivePhaseResult, ConstructivePhase
         envelopes rebuild at each host duration. Both return coordinate-major
         float64 counts with the same Result axes and cancellation semantics.
         """
+        # 1. Prepare the selected scan inputs.
         if all(
             isinstance(pulse.waveform, (ConstWaveformCfg, FlatTopWaveformCfg))
             for pulse in (config.drive.f1, config.drive.f2)
         ):
             return self._run_hardware_duration(config, context=context)
+        # 2. Return acquired coordinates and measurements.
         return self._run_host_duration(config, context=context)
 
     def _run_hardware_duration(
         self, config: ConstructivePhaseCfg, *, context: RunContext
     ) -> ConstructivePhaseResult:
         """Acquire all coordinates and durations in hardware, accumulating rounds."""
+        # 1. Prepare the selected scan inputs.
         coordinates = sweep2array(config.relative_phase)
         durations = sweep2array(config.duration)
+        # 2. Display each acquired scan trace.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Drive duration (us)", ylabel="Terminal P00")
         viewer = live_line(ax, num_lines=len(coordinates))
@@ -252,6 +320,7 @@ class ConstructivePhaseExp(Experiment[ConstructivePhaseResult, ConstructivePhase
 
         class_shape = (3, 3)
         shape = (len(coordinates), len(durations), *class_shape)
+        # 3. Acquire the scan and retain completed measurements.
         buffer = SignalBuffer(shape, dtype=np.float64, on_update=update_view)
         with Schedule(buffer, scope=context.scope) as sched:
             builder = TimelineBuilder(
@@ -303,14 +372,17 @@ class ConstructivePhaseExp(Experiment[ConstructivePhaseResult, ConstructivePhase
             )
         buffer.trigger_update(flush=True)
         sums = buffer.array
+        # 4. Return acquired coordinates and measurements.
         return ConstructivePhaseResult(coordinates, durations, sums)
 
     def _run_host_duration(
         self, config: ConstructivePhaseCfg, *, context: RunContext
     ) -> ConstructivePhaseResult:
         """Rebuild sampled envelopes per host duration; keep coordinates in hardware."""
+        # 1. Prepare the selected scan inputs.
         coordinates = sweep2array(config.relative_phase)
         durations = sweep2array(config.duration)
+        # 2. Display each acquired scan trace.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Drive duration (us)", ylabel="Terminal P00")
         viewer = live_line(ax, num_lines=len(coordinates))
@@ -326,6 +398,7 @@ class ConstructivePhaseExp(Experiment[ConstructivePhaseResult, ConstructivePhase
 
         class_shape = (3, 3)
         shape = (len(durations), len(coordinates), *class_shape)
+        # 3. Acquire the scan and retain completed measurements.
         buffer = SignalBuffer(shape, dtype=np.float64, on_update=update_view)
         # Sampled cosine/Gauss/DRAG envelopes reject QickParam lengths. Only their
         # duration stays on the host; coordinate remains a hardware sweep.
@@ -380,6 +453,7 @@ class ConstructivePhaseExp(Experiment[ConstructivePhaseResult, ConstructivePhase
                 )
         buffer.trigger_update(flush=True)
         sums = buffer.array.swapaxes(0, 1)
+        # 4. Return acquired coordinates and measurements.
         return ConstructivePhaseResult(coordinates, durations, sums)
 
     def analyze(
@@ -394,6 +468,7 @@ class ConstructivePhaseExp(Experiment[ConstructivePhaseResult, ConstructivePhase
         Missing cfg or mismatched axes raises ValueError. Failed fits report a
         reason, not zero rates. No IQ classification or automatic write occurs.
         """
+        # 1. Select the acquired values for analysis.
         del options
         if source.cfg is None:
             raise ValueError(
@@ -418,6 +493,7 @@ class ConstructivePhaseExp(Experiment[ConstructivePhaseResult, ConstructivePhase
             totals,
             None,
         )
+        # 2. Display the scan traces and fitted curves.
         fig, ax = plots.subplots(
             num="interference", figsize=(9, 6), layout="constrained"
         )
@@ -533,6 +609,7 @@ class ConstructivePhaseExp(Experiment[ConstructivePhaseResult, ConstructivePhase
                 modulation.reason,
                 modulation.fit_quality,
             )
+        # 3. Return the analysis values and quality diagnostics.
         return ConstructivePhaseAnalysis(
             None, modulation.reason, modulation.fit_quality
         )

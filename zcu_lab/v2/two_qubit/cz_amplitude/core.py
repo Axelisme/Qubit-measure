@@ -10,6 +10,7 @@ from matplotlib.lines import Line2D
 from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field, model_validator
+from zcu_tools.analysis.fitting import FitQuality
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
     Experiment,
@@ -42,12 +43,73 @@ from .._sums import (
     joint_probabilities,
     validate_classifiers,
 )
-from .analysis import (
-    OUTCOME_LABELS,
-    CZAmplitudeAnalysis,
-    analyze_return,
-    summarize_return,
+from .fit import CZReturnFit, fit_return
+
+OUTCOME_LABELS = tuple(
+    f"{f1},{f2}" for f1 in ("g", "e", "other") for f2 in ("g", "e", "other")
 )
+
+
+@dataclass(frozen=True)
+class CZAmplitudeResult:
+    """scales is the gain multiplier; sums is float64 (Ns,3,3) raw counts.
+
+    Class axes are terminal F1/F2, each ordered g/e/other. Rounds add without
+    averaging. Unmeasured scales remain NaN; completed rounds survive stop.
+    """
+
+    scales: NDArray[np.float64]
+    sums: NDArray[np.float64]
+
+
+@dataclass(frozen=True)
+class CZReturnData:
+    """counts/probabilities are (Ns,3,3), F1/F2 classes ordered g/e/other.
+
+    complete marks scales with every requested shot acquired and nonzero accepted
+    counts. acquired_shots includes all herald classes; analyzed_shots is the
+    selected terminal total, including other. Zero totals give NaN probabilities.
+    """
+
+    counts: NDArray[np.float64]
+    probabilities: NDArray[np.float64]
+    complete: NDArray[np.bool_]
+    acquired_shots: NDArray[np.float64]
+    analyzed_shots: NDArray[np.float64]
+
+
+@dataclass(frozen=True)
+class CZAmplitudeData:
+    """Count-derived joint populations and zero-phase first-cycle fit."""
+
+    data: CZReturnData
+    fit: CZReturnFit
+
+
+@dataclass(frozen=True)
+class CZReturnSummary:
+    """First-return scale and fixed-size zero-phase cosine diagnostics.
+
+    scale is the measured first positive period, or None with reason. period
+    retains a finite fit even when coverage prevents a proposal; error is its
+    1σ uncertainty. offset and contrast are joint probabilities. fit_quality
+    describes the actual fit without imposing an acceptance threshold.
+    """
+
+    scale: float | None
+    period: float | None
+    error: float | None
+    offset: float | None
+    contrast: float | None
+    fit_quality: FitQuality | None
+    reason: str | None
+
+
+@dataclass(frozen=True)
+class CZAmplitudeAnalysis:
+    """Fixed-size first-return fit; measured probabilities remain plot-local."""
+
+    fit: CZReturnSummary
 
 
 class CZAmplitudeCfg(ConfigBase):
@@ -71,28 +133,28 @@ class CZAmplitudeCfg(ConfigBase):
         Pulse.Cfg,
         FieldMeta(
             label="F1 Xπ",
-            description="填入 F1 x180 slot，先做 amplitude／length Rabi。frequency MHz、gain a.u. within [-1, 1]、duration us。",
+            description="Calibrated F1 X180 pulse, frequency MHz, gain [-1, 1] and duration us.",
         ),
     ]
     x180_f2: Annotated[
         Pulse.Cfg,
         FieldMeta(
             label="F2 Xπ",
-            description="填入 F2 x180 slot，先做 amplitude／length Rabi。frequency MHz、gain a.u. within [-1, 1]、duration us。",
+            description="Calibrated F2 X180 pulse, frequency MHz, gain [-1, 1] and duration us.",
         ),
     ]
     drive: Annotated[
         DualLineCfg,
         FieldMeta(
             label="Dual-line drive",
-            description="填入 F1/F2 charge-line pulses。先做 conditional spectroscopy／chevron，再確認 coupler 的 cz_f1／cz_f2 slots。",
+            description="F1/F2 charge-line CZ pulses from the calibrated coupler slots.",
         ),
     ]
     readout: Annotated[
         MuxReadout.Cfg,
         FieldMeta(
             label="Mux readout",
-            description="填入 full-group mux readout slot。先用 lookback 取得 timing，再做 mux onetone，確認 frequency MHz、gain a.u. within [-1, 1] 與 timing us。",
+            description="Full-group mux readout with calibrated frequencies, gains and timing.",
         ),
     ]
     roles: JointRoles
@@ -101,7 +163,7 @@ class CZAmplitudeCfg(ConfigBase):
         FieldMeta(
             label="Gain scale",
             unit="dimensionless",
-            description="填入 common gain scale 起訖值。先用 chevron 選定 CZ pulse，再由操作者確認幅度範圍。",
+            description="Common gain-scale sweep for the selected CZ pulse.",
         ),
     ]
     reps: Annotated[
@@ -143,16 +205,50 @@ class CZAmplitudeCfg(ConfigBase):
         return self
 
 
-@dataclass(frozen=True)
-class CZAmplitudeResult:
-    """scales is the gain multiplier; sums is float64 (Ns,3,3) raw counts.
+def summarize_return(fit: CZReturnFit) -> CZAmplitudeAnalysis:
+    """Retain fit values for writeback, not the curve or per-scale counts."""
+    return CZAmplitudeAnalysis(
+        CZReturnSummary(
+            fit.scale,
+            fit.period,
+            fit.error,
+            fit.offset,
+            fit.contrast,
+            fit.fit_quality,
+            fit.reason,
+        )
+    )
 
-    Class axes are terminal F1/F2, each ordered g/e/other. Rounds add without
-    averaging. Unmeasured scales remain NaN; completed rounds survive stop.
+
+def analyze_return(
+    scales: NDArray[np.float64],
+    counts: NDArray[np.float64],
+    *,
+    acquired_shots: NDArray[np.float64],
+    expected_shots: int,
+) -> CZAmplitudeData:
+    """Fit P00 from terminal counts, retaining other in the denominator.
+
+    counts is (Ns,3,3), optionally already selected on herald (g,g).
+    acquired_shots is the total before selection; expected_shots is reps*rounds.
+    Fit only the contiguous fully acquired prefix with accepted shots, preserving
+    first-cycle proposal policy. Partial scales remain visible but not fit.
+    Wrong count/axis shapes raise ValueError. No cfg/library mutation occurs.
     """
-
-    scales: NDArray[np.float64]
-    sums: NDArray[np.float64]
+    if counts.shape != (len(scales), 3, 3) or acquired_shots.shape != scales.shape:
+        raise ValueError(
+            "CZ return requires scales (Ns,), counts (Ns,3,3) and shot totals (Ns,)"
+        )
+    accepted = counts.sum(axis=(-2, -1))
+    data = CZReturnData(
+        counts=counts,
+        probabilities=joint_probabilities(counts),
+        complete=(acquired_shots == expected_shots) & (accepted > 0),
+        acquired_shots=acquired_shots,
+        analyzed_shots=accepted,
+    )
+    fit = fit_return(scales, data.probabilities[:, 0, 0], data.complete, accepted)
+    return CZAmplitudeData(data, fit)
 
 
 def restore_result(data: GroupedLoadData[CZAmplitudeCfg]) -> CZAmplitudeResult:
@@ -199,7 +295,9 @@ class CZAmplitudeExp(Experiment[CZAmplitudeResult, CZAmplitudeCfg]):
         Acquisition exceptions propagate unchanged. The stop signal carries only
         stop requests and reason text.
         """
+        # 1. Prepare the selected scan inputs.
         scales = sweep2array(config.scale)
+        # 2. Display each acquired scan trace.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Common gain scale", ylabel="P(g,g)")
         viewer = live_line(ax)
@@ -212,6 +310,7 @@ class CZAmplitudeExp(Experiment[CZAmplitudeResult, CZAmplitudeCfg]):
             counts = sums
             return viewer.set(scales, joint_probabilities(counts)[..., 0, 0])
 
+        # 3. Acquire the scan and retain completed measurements.
         buffer = SignalBuffer(
             (len(scales), 3, 3), dtype=np.float64, on_update=update_view
         )
@@ -258,6 +357,7 @@ class CZAmplitudeExp(Experiment[CZAmplitudeResult, CZAmplitudeCfg]):
                 options=RunOptions(),
             )
         buffer.trigger_update(flush=True)
+        # 4. Return acquired coordinates and measurements.
         return CZAmplitudeResult(scales, buffer.array)
 
     def analyze(
@@ -272,6 +372,7 @@ class CZAmplitudeExp(Experiment[CZAmplitudeResult, CZAmplitudeCfg]):
         Coverage or numerical failure retains diagnostics with no proposal scale.
         Missing saved cfg raises ValueError. No IQ reclassification occurs.
         """
+        # 1. Select the acquired values for analysis.
         del options
         cfg, result = source.cfg, source.result
         if cfg is None:
@@ -285,6 +386,7 @@ class CZAmplitudeExp(Experiment[CZAmplitudeResult, CZAmplitudeCfg]):
             expected_shots=cfg.reps * cfg.rounds,
         )
 
+        # 2. Display the scan traces and fitted curves.
         _, ax = plots.subplots(
             num="joint_return", figsize=(10, 5), layout="constrained"
         )
@@ -318,4 +420,5 @@ class CZAmplitudeExp(Experiment[CZAmplitudeResult, CZAmplitudeCfg]):
         )
         ax.legend()
 
+        # 3. Return the analysis values and quality diagnostics.
         return summarize_return(terminal.fit)

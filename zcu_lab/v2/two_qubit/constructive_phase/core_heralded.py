@@ -37,17 +37,11 @@ from .._sums import (
     joint_probabilities,
     terminal_counts,
 )
-from .analysis import ConstructivePhaseAnalysis, analyze_constructive_phase
-from .core import ConstructivePhaseCfg
-
-
-class ConstructivePhaseHeraldedCfg(ConstructivePhaseCfg):
-    """Relative F2 minus F1 phase scan in degrees at fixed common frequency. Herald precedes B11 preparation.
-
-    The same full mux cfg supplies herald and terminal reads, separated by
-    readout.post_delay. reset=None emits no reset. Other inputs match ordinary
-    ConstructivePhaseCfg, including the circle classifiers with radius from GE Post.
-    """
+from .core import (
+    ConstructivePhaseAnalysis,
+    ConstructivePhaseCfg,
+    analyze_constructive_phase,
+)
 
 
 @dataclass(frozen=True)
@@ -56,6 +50,15 @@ class ConstructivePhaseHeraldedResult(RabiScanResult):
 
     Class order is g/e/other; axes are herald F1/F2 then terminal F1/F2.
     Unmeasured points are NaN. Counts retain all herald outcomes, unnormalized.
+    """
+
+
+class ConstructivePhaseHeraldedCfg(ConstructivePhaseCfg):
+    """Relative F2 minus F1 phase scan in degrees at fixed common frequency. Herald precedes B11 preparation.
+
+    The same full mux cfg supplies herald and terminal reads, separated by
+    readout.post_delay. reset=None emits no reset. Other inputs match ordinary
+    ConstructivePhaseCfg, including the circle classifiers with radius from GE Post.
     """
 
 
@@ -121,19 +124,23 @@ class ConstructivePhaseHeraldedExp(
         envelopes rebuild at each host duration. Both return coordinate-major
         float64 counts with the same Result axes and cancellation semantics.
         """
+        # 1. Prepare the selected scan inputs.
         if all(
             isinstance(pulse.waveform, (ConstWaveformCfg, FlatTopWaveformCfg))
             for pulse in (config.drive.f1, config.drive.f2)
         ):
             return self._run_hardware_duration(config, context=context)
+        # 2. Return acquired coordinates and measurements.
         return self._run_host_duration(config, context=context)
 
     def _run_hardware_duration(
         self, config: ConstructivePhaseHeraldedCfg, *, context: RunContext
     ) -> ConstructivePhaseHeraldedResult:
         """Acquire all coordinates and durations in hardware, accumulating rounds."""
+        # 1. Prepare the selected scan inputs.
         coordinates = sweep2array(config.relative_phase)
         durations = sweep2array(config.duration)
+        # 2. Display each acquired scan trace.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Drive duration (us)", ylabel="Terminal P00 | herald (g,g)")
         viewer = live_line(ax, num_lines=len(coordinates))
@@ -149,6 +156,7 @@ class ConstructivePhaseHeraldedExp(
 
         class_shape = (3, 3, 3, 3)
         shape = (len(coordinates), len(durations), *class_shape)
+        # 3. Acquire the scan and retain completed measurements.
         buffer = SignalBuffer(shape, dtype=np.float64, on_update=update_view)
         with Schedule(buffer, scope=context.scope) as sched:
             builder = TimelineBuilder(
@@ -203,14 +211,17 @@ class ConstructivePhaseHeraldedExp(
             )
         buffer.trigger_update(flush=True)
         sums = buffer.array
+        # 4. Return acquired coordinates and measurements.
         return ConstructivePhaseHeraldedResult(coordinates, durations, sums)
 
     def _run_host_duration(
         self, config: ConstructivePhaseHeraldedCfg, *, context: RunContext
     ) -> ConstructivePhaseHeraldedResult:
         """Rebuild sampled envelopes per host duration; keep coordinates in hardware."""
+        # 1. Prepare the selected scan inputs.
         coordinates = sweep2array(config.relative_phase)
         durations = sweep2array(config.duration)
+        # 2. Display each acquired scan trace.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Drive duration (us)", ylabel="Terminal P00 | herald (g,g)")
         viewer = live_line(ax, num_lines=len(coordinates))
@@ -226,6 +237,7 @@ class ConstructivePhaseHeraldedExp(
 
         class_shape = (3, 3, 3, 3)
         shape = (len(durations), len(coordinates), *class_shape)
+        # 3. Acquire the scan and retain completed measurements.
         buffer = SignalBuffer(shape, dtype=np.float64, on_update=update_view)
         # Sampled cosine/Gauss/DRAG envelopes reject QickParam lengths. Only their
         # duration stays on the host; coordinate remains a hardware sweep.
@@ -283,6 +295,7 @@ class ConstructivePhaseHeraldedExp(
                 )
         buffer.trigger_update(flush=True)
         sums = buffer.array.swapaxes(0, 1)
+        # 4. Return acquired coordinates and measurements.
         return ConstructivePhaseHeraldedResult(coordinates, durations, sums)
 
     def analyze(
@@ -299,6 +312,7 @@ class ConstructivePhaseHeraldedExp(
         Pass fraction is not ground-state purity. Empty accepted counts give
         NaN terminal probabilities and unresolved fits. Saved cfg is required.
         """
+        # 1. Select the acquired values for analysis.
         del options
         if source.cfg is None:
             raise ValueError(
@@ -324,6 +338,7 @@ class ConstructivePhaseHeraldedExp(
             totals,
             herald_probabilities(result.sums),
         )
+        # 2. Display the scan traces and fitted curves.
         fig, ax = plots.subplots(
             num="interference", figsize=(9, 6), layout="constrained"
         )
@@ -479,6 +494,7 @@ class ConstructivePhaseHeraldedExp(
                 modulation.reason,
                 modulation.fit_quality,
             )
+        # 3. Return the analysis values and quality diagnostics.
         return ConstructivePhaseAnalysis(
             None, modulation.reason, modulation.fit_quality
         )

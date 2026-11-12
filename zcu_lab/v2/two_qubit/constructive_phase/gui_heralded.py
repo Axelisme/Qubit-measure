@@ -20,7 +20,7 @@ from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2.support.measure.writeback_helpers import module_writeback
 
-from .analysis import ConstructivePhaseAnalysis
+from .core import ConstructivePhaseAnalysis
 from .core_heralded import (
     ConstructivePhaseHeraldedCfg,
     ConstructivePhaseHeraldedExp,

@@ -128,6 +128,64 @@ class TwotoneFluxLocalCfg(ConfigBase):
         return self
 
 
+def _require_finite_spectrum(
+    acquired: NDArray[np.complex128], *, point: int, result: MuxFluxResult
+) -> None:
+    """Report the first invalid completed IQ cell with its planned coordinates."""
+    nonfinite = ~np.isfinite(acquired)
+    if nonfinite.any():
+        row, column = np.argwhere(nonfinite)[0]
+        raise ValueError(
+            f"Nonfinite inner IQ at flux point {point} (zero-based): "
+            f"{np.count_nonzero(nonfinite)}/{acquired.size} invalid cells; "
+            f"first at tone {result.tone_indices[row]}, "
+            f"DC={result.flux_values[row, point]} (native units), "
+            f"frequency={result.frequencies[row, column]} MHz: "
+            f"{acquired[row, column]!r}"
+        )
+
+
+def _make_flux_update(
+    plots: Plots, result: MuxFluxResult, flux_unit: str
+) -> Callable[[NDArray[np.complex128]], None]:
+    """Publish planned axes and update each tone's magnitude map and line history."""
+    flux_values, frequencies = result.flux_values, result.frequencies
+    figures, heatmaps, lines = [], [], []
+    for index in result.tone_indices:
+        fig, _ = plots.subplots(1, 2, num=f"flux_{index}")
+        heat_ax, line_ax = fig.axes
+        heat_ax.set(xlabel=f"DC value ({flux_unit})", ylabel="Frequency (MHz)")
+        line_ax.set_xlabel("Frequency (MHz)")
+        line_ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+        line_ax.grid()
+        heatmaps.append(live_heatmap(heat_ax, uniform=False))
+        lines.append(live_line(line_ax, num_lines=10))
+        for artist in line_ax.lines[:-1]:
+            artist.set(marker="None", alpha=0.3, color="red")
+        line_ax.lines[-1].set(label="current line", marker=".", color="C0")
+        line_ax.legend()
+        figures.append(fig)
+
+    @plots.on_plot_thread
+    def update(data: NDArray[np.complex128]):
+        artists = []
+        for row, (heatmap, line) in enumerate(zip(heatmaps, lines, strict=True)):
+            real = np.abs(data[row])
+            valid = np.flatnonzero(~np.all(np.isnan(real), axis=1))
+            current = int(valid[-1]) if valid.size else -1
+            history = np.full((10, frequencies.shape[1]), np.nan)
+            for offset in range(min(10, current + 1)):
+                history[-offset - 1] = real[current - offset]
+            artists.extend(heatmap.set(flux_values[row], frequencies[row], real))
+            artists.extend(line.set(frequencies[row], history))
+        return artists
+
+    update(result.signals)
+    for fig in figures:
+        fig.show()
+    return update
+
+
 class TwotoneFluxLocalExp(Experiment[MuxFluxResult, TwotoneFluxLocalCfg]):
     """Set DC, settle, acquire spectra and preserve completed flux points."""
 
@@ -148,6 +206,7 @@ class TwotoneFluxLocalExp(Experiment[MuxFluxResult, TwotoneFluxLocalCfg]):
         Driver and acquisition errors propagate.
         Sources remain at the final written value. No output is enabled here.
         """
+        # 1. Prepare the selected scan inputs.
         cfg = config.model_copy(deep=True)
         indices = list(cfg.participants)
         devices = [cfg.tones[i].flux_dev for i in indices]
@@ -226,6 +285,7 @@ class TwotoneFluxLocalExp(Experiment[MuxFluxResult, TwotoneFluxLocalCfg]):
         prog = builder.build()
 
         # Local lines advance together. Each point has its own acquire scope.
+        # 2. Acquire the scan and retain completed measurements.
         for point in range(cfg.flux_expts):
             if context.scope.stop.is_set():
                 break
@@ -261,62 +321,5 @@ class TwotoneFluxLocalExp(Experiment[MuxFluxResult, TwotoneFluxLocalCfg]):
             _require_finite_spectrum(iq, point=point, result=result)
             signals[:, point, :] = iq
             update(signals)
+        # 3. Return acquired coordinates and measurements.
         return result
-
-
-def _require_finite_spectrum(
-    acquired: NDArray[np.complex128], *, point: int, result: MuxFluxResult
-) -> None:
-    """Report the first invalid completed IQ cell with its planned coordinates."""
-    nonfinite = ~np.isfinite(acquired)
-    if nonfinite.any():
-        row, column = np.argwhere(nonfinite)[0]
-        raise ValueError(
-            f"Nonfinite inner IQ at flux point {point} (zero-based): "
-            f"{np.count_nonzero(nonfinite)}/{acquired.size} invalid cells; "
-            f"first at tone {result.tone_indices[row]}, "
-            f"DC={result.flux_values[row, point]} (native units), "
-            f"frequency={result.frequencies[row, column]} MHz: "
-            f"{acquired[row, column]!r}"
-        )
-
-
-def _make_flux_update(
-    plots: Plots, result: MuxFluxResult, flux_unit: str
-) -> Callable[[NDArray[np.complex128]], None]:
-    """Publish planned axes and update each tone's magnitude map and line history."""
-    flux_values, frequencies = result.flux_values, result.frequencies
-    figures, heatmaps, lines = [], [], []
-    for index in result.tone_indices:
-        fig, _ = plots.subplots(1, 2, num=f"flux_{index}")
-        heat_ax, line_ax = fig.axes
-        heat_ax.set(xlabel=f"DC value ({flux_unit})", ylabel="Frequency (MHz)")
-        line_ax.set_xlabel("Frequency (MHz)")
-        line_ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
-        line_ax.grid()
-        heatmaps.append(live_heatmap(heat_ax, uniform=False))
-        lines.append(live_line(line_ax, num_lines=10))
-        for artist in line_ax.lines[:-1]:
-            artist.set(marker="None", alpha=0.3, color="red")
-        line_ax.lines[-1].set(label="current line", marker=".", color="C0")
-        line_ax.legend()
-        figures.append(fig)
-
-    @plots.on_plot_thread
-    def update(data: NDArray[np.complex128]):
-        artists = []
-        for row, (heatmap, line) in enumerate(zip(heatmaps, lines, strict=True)):
-            real = np.abs(data[row])
-            valid = np.flatnonzero(~np.all(np.isnan(real), axis=1))
-            current = int(valid[-1]) if valid.size else -1
-            history = np.full((10, frequencies.shape[1]), np.nan)
-            for offset in range(min(10, current + 1)):
-                history[-offset - 1] = real[current - offset]
-            artists.extend(heatmap.set(flux_values[row], frequencies[row], real))
-            artists.extend(line.set(frequencies[row], history))
-        return artists
-
-    update(result.signals)
-    for fig in figures:
-        fig.show()
-    return update

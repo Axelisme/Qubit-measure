@@ -170,6 +170,7 @@ class MuxT2EchoExp(Experiment[MuxCoherenceResult, MuxT2EchoCfg]):
     AXES_SPEC: ClassVar[GroupedAxesSpec[MuxCoherenceResult, MuxT2EchoCfg]] = (
         coherence_spec(MuxT2EchoCfg, tag="mux/time_domain/t2echo")
     )
+
     Options: ClassVar[type[T2EchoAnalyzeOptions]] = T2EchoAnalyzeOptions
 
     def run(self, config: MuxT2EchoCfg, *, context: RunContext) -> MuxCoherenceResult:
@@ -212,12 +213,12 @@ class MuxT2EchoExp(Experiment[MuxCoherenceResult, MuxT2EchoCfg]):
 
         # 2. Show each selected tone on the common requested total-delay axis.
         viewers = []
-        for index in indices:
+        for index, tone_cfg in zip(indices, tones, strict=True):
             fig, ax = context.plots.subplots(num=f"measurement_{index}")
             ax.set(
                 xlabel="Requested delay (us)",
                 ylabel="Magnitude (a.u.)",
-                title=f"{index}: {cfg.tones[index].name}",
+                title=f"{index}: {tone_cfg.name}",
             )
             viewers.append(live_line(ax))
             fig.show()
@@ -230,6 +231,7 @@ class MuxT2EchoExp(Experiment[MuxCoherenceResult, MuxT2EchoCfg]):
                 for artist in viewer.set(times, np.abs(data[row]))
             )
 
+        # 3. Play synchronized pulse stages on the common delay sweep.
         signals = SignalBuffer((len(indices), times.size), on_update=update)
         with Schedule(signals, scope=context.scope) as sched:
             # Each stage starts all drives together and waits for its longest pulse.

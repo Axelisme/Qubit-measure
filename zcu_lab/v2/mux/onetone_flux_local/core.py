@@ -108,126 +108,6 @@ class OnetoneFluxLocalCfg(ConfigBase):
         return self
 
 
-class OnetoneFluxLocalExp(Experiment[MuxFluxResult, OnetoneFluxLocalCfg]):
-    """Set DC, settle, acquire spectra and preserve completed flux points."""
-
-    AXES_SPEC: ClassVar[GroupedAxesSpec[MuxFluxResult, OnetoneFluxLocalCfg]] = (
-        mux_flux_spec(
-            OnetoneFluxLocalCfg,
-            tag="mux/onetone_flux_local",
-            cfg_schema_version="5.0",
-        )
-    )
-
-    def run(self, config: OnetoneFluxLocalCfg, *, context: RunContext) -> MuxFluxResult:
-        """Run config without mutation using context's drivers, board and Stop.
-
-        Return tone-major maps in absolute MHz and native DC coordinates.
-        Cancelling an inner acquire leaves that point NaN and scans the next.
-        Cancelling the Run scope stops the scan and retains completed points.
-        Driver and acquisition errors propagate. Invalid inner spectrum settings
-        raise before DC writes. Sources retain their last value; no output is enabled.
-        """
-        # Retain the old inner cfg's finite-offset rejection before any DC write.
-        if not all(
-            math.isfinite(value)
-            for value in (config.df.start, config.df.stop, config.df.step)
-        ):
-            raise ValueError("df start, stop and step must be finite MHz values")
-        cfg = deepcopy(config)
-        indices = cfg.participants
-        flux_values = np.asarray(
-            [
-                np.linspace(
-                    config.tones[i].require_flux().start,
-                    config.tones[i].require_flux().stop,
-                    config.flux_expts,
-                )
-                for i in config.participants
-            ],
-            dtype=np.float64,
-        )
-        devices = [cfg.tones[i].flux_dev for i in indices]
-        for name in devices:
-            check_flux_unit(context.devices[name].get_info(), cfg.flux_unit)
-        dfs = sweep2array(cfg.df, "none")
-        frequencies = np.asarray(
-            [cfg.readout.tones[i].freq + dfs for i in indices], dtype=np.float64
-        )
-        signals = np.full(
-            (len(indices), cfg.flux_expts, len(dfs)),
-            np.nan + 1j * np.nan,
-            dtype=np.complex128,
-        )
-        result = MuxFluxResult(
-            np.asarray(indices, dtype=np.int64), flux_values, frequencies, signals
-        )
-        update = _make_flux_update(context.plots, result, cfg.flux_unit)
-        active_readout = cfg.readout.with_updates(
-            tones=[cfg.readout.tones[i] for i in indices]
-        )
-
-        for point in range(cfg.flux_expts):
-            if context.scope.stop.is_set():
-                break
-            for row, name in enumerate(devices):
-                set_flux(
-                    context.devices[name],
-                    float(flux_values[row, point]),
-                    unit=cfg.flux_unit,
-                    stop=context.scope.stop,
-                )
-            if context.scope.stop.event.wait(cfg.settle):
-                break
-
-            # Each flux point owns an offset scan. An acquire-only stop discards
-            # this entire point, but still lets the next flux point run.
-            stopped = False
-
-            def on_acquire_stop() -> None:
-                nonlocal stopped
-                stopped = True
-
-            spectrum = SignalBuffer((len(dfs), len(indices)))
-            with Schedule(spectrum, scope=context.scope) as sched:
-                for df, step in sched.scan("df", dfs.tolist()):
-                    readout = active_readout.with_updates(
-                        tones=[
-                            tone.with_updates(freq=tone.freq + df)
-                            for tone in active_readout.tones
-                        ]
-                    )
-                    builder = TimelineBuilder(
-                        context.soccfg,
-                        reps=cfg.reps,
-                        initial_delay=cfg.initial_delay,
-                        relax_delay=cfg.relax_delay,
-                    )
-                    if cfg.reset is not None:
-                        builder.emit(Reset("reset", cfg.reset))
-                    readout_module = MuxReadout("readout", readout)
-                    builder.emit(readout_module)
-                    prog = builder.build()
-                    _ = step.run_acquire(
-                        prog,
-                        context.soc,
-                        rounds=cfg.rounds,
-                        options=RunOptions(
-                            converter=partial(
-                                averaged_mux_signal, prog, readout_module
-                            ),
-                            on_stop=on_acquire_stop,
-                        ),
-                    )
-            if stopped or context.scope.stop.is_set():
-                continue
-            acquired = spectrum.array.T
-            _require_finite_spectrum(acquired, point, result)
-            signals[:, point, :] = acquired
-            update(signals)
-        return result
-
-
 def _make_flux_update(
     plots: Plots, result: MuxFluxResult, flux_unit: str
 ) -> Callable[[NDArray[np.complex128]], None]:
@@ -290,3 +170,126 @@ def _require_finite_spectrum(
             f"frequency={result.frequencies[row, column]} MHz: "
             f"{acquired[row, column]!r}"
         )
+
+
+class OnetoneFluxLocalExp(Experiment[MuxFluxResult, OnetoneFluxLocalCfg]):
+    """Set DC, settle, acquire spectra and preserve completed flux points."""
+
+    AXES_SPEC: ClassVar[GroupedAxesSpec[MuxFluxResult, OnetoneFluxLocalCfg]] = (
+        mux_flux_spec(
+            OnetoneFluxLocalCfg,
+            tag="mux/onetone_flux_local",
+            cfg_schema_version="5.0",
+        )
+    )
+
+    def run(self, config: OnetoneFluxLocalCfg, *, context: RunContext) -> MuxFluxResult:
+        """Run config without mutation using context's drivers, board and Stop.
+
+        Return tone-major maps in absolute MHz and native DC coordinates.
+        Cancelling an inner acquire leaves that point NaN and scans the next.
+        Cancelling the Run scope stops the scan and retains completed points.
+        Driver and acquisition errors propagate. Invalid inner spectrum settings
+        raise before DC writes. Sources retain their last value; no output is enabled.
+        """
+        # Retain the old inner cfg's finite-offset rejection before any DC write.
+        # 1. Prepare the selected scan inputs.
+        if not all(
+            math.isfinite(value)
+            for value in (config.df.start, config.df.stop, config.df.step)
+        ):
+            raise ValueError("df start, stop and step must be finite MHz values")
+        cfg = deepcopy(config)
+        indices = cfg.participants
+        flux_values = np.asarray(
+            [
+                np.linspace(
+                    config.tones[i].require_flux().start,
+                    config.tones[i].require_flux().stop,
+                    config.flux_expts,
+                )
+                for i in config.participants
+            ],
+            dtype=np.float64,
+        )
+        devices = [cfg.tones[i].flux_dev for i in indices]
+        for name in devices:
+            check_flux_unit(context.devices[name].get_info(), cfg.flux_unit)
+        dfs = sweep2array(cfg.df, "none")
+        frequencies = np.asarray(
+            [cfg.readout.tones[i].freq + dfs for i in indices], dtype=np.float64
+        )
+        signals = np.full(
+            (len(indices), cfg.flux_expts, len(dfs)),
+            np.nan + 1j * np.nan,
+            dtype=np.complex128,
+        )
+        result = MuxFluxResult(
+            np.asarray(indices, dtype=np.int64), flux_values, frequencies, signals
+        )
+        update = _make_flux_update(context.plots, result, cfg.flux_unit)
+        active_readout = cfg.readout.with_updates(
+            tones=[cfg.readout.tones[i] for i in indices]
+        )
+
+        # 2. Acquire the scan and retain completed measurements.
+        for point in range(cfg.flux_expts):
+            if context.scope.stop.is_set():
+                break
+            for row, name in enumerate(devices):
+                set_flux(
+                    context.devices[name],
+                    float(flux_values[row, point]),
+                    unit=cfg.flux_unit,
+                    stop=context.scope.stop,
+                )
+            if context.scope.stop.event.wait(cfg.settle):
+                break
+
+            # Each flux point owns an offset scan. An acquire-only stop discards
+            # this entire point, but still lets the next flux point run.
+            stopped = False
+
+            def on_acquire_stop() -> None:
+                nonlocal stopped
+                stopped = True
+
+            spectrum = SignalBuffer((len(dfs), len(indices)))
+            with Schedule(spectrum, scope=context.scope) as sched:
+                for df, step in sched.scan("df", dfs.tolist()):
+                    readout = active_readout.with_updates(
+                        tones=[
+                            tone.with_updates(freq=tone.freq + df)
+                            for tone in active_readout.tones
+                        ]
+                    )
+                    builder = TimelineBuilder(
+                        context.soccfg,
+                        reps=cfg.reps,
+                        initial_delay=cfg.initial_delay,
+                        relax_delay=cfg.relax_delay,
+                    )
+                    if cfg.reset is not None:
+                        builder.emit(Reset("reset", cfg.reset))
+                    readout_module = MuxReadout("readout", readout)
+                    builder.emit(readout_module)
+                    prog = builder.build()
+                    _ = step.run_acquire(
+                        prog,
+                        context.soc,
+                        rounds=cfg.rounds,
+                        options=RunOptions(
+                            converter=partial(
+                                averaged_mux_signal, prog, readout_module
+                            ),
+                            on_stop=on_acquire_stop,
+                        ),
+                    )
+            if stopped or context.scope.stop.is_set():
+                continue
+            acquired = spectrum.array.T
+            _require_finite_spectrum(acquired, point, result)
+            signals[:, point, :] = acquired
+            update(signals)
+        # 3. Return acquired coordinates and measurements.
+        return result

@@ -35,20 +35,12 @@ from zcu_lab.v2.support import live_line
 
 from .._phase import count_phase, phase_variance, sigma_variance
 from .._sums import herald_probabilities, sigma, terminal_counts
-from .analysis import (
+from .core import (
     LocalZAnalysis,
+    LocalZCfg,
     LocalZFit,
     summarize_fit,
 )
-from .core import LocalZCfg
-
-
-class LocalZHeraldedCfg(LocalZCfg):
-    """Both local-Z targets preceded by optional reset and a mux herald.
-
-    All fields and units follow LocalZCfg. Both reads use the same mux
-    object and classifiers. readout.post_delay is the wait after herald.
-    """
 
 
 @dataclass(frozen=True)
@@ -64,16 +56,6 @@ class LocalZHeraldedResult:
     sums: NDArray[np.float64]
 
 
-def restore_result(
-    data: GroupedLoadData[LocalZHeraldedCfg],
-) -> LocalZHeraldedResult:
-    """Restore 81-class sums; reject legacy raw-IQ files without sums."""
-    sums = data.variable("sums")
-    return LocalZHeraldedResult(
-        gate_counts=sums.axes[4].astype(np.int64), sums=sums.z.astype(np.float64)
-    )
-
-
 @dataclass(frozen=True)
 class LocalZHeraldedAnalysis(LocalZAnalysis):
     """gg writeback fits, independent ee fits and ee−gg slopes by F1/F2 target.
@@ -84,6 +66,24 @@ class LocalZHeraldedAnalysis(LocalZAnalysis):
 
     ee_fits: tuple[LocalZFit, ...]
     slope_difference_deg: tuple[float | None, ...]
+
+
+class LocalZHeraldedCfg(LocalZCfg):
+    """Both local-Z targets preceded by optional reset and a mux herald.
+
+    All fields and units follow LocalZCfg. Both reads use the same mux
+    object and classifiers. readout.post_delay is the wait after herald.
+    """
+
+
+def restore_result(
+    data: GroupedLoadData[LocalZHeraldedCfg],
+) -> LocalZHeraldedResult:
+    """Restore 81-class sums; reject legacy raw-IQ files without sums."""
+    sums = data.variable("sums")
+    return LocalZHeraldedResult(
+        gate_counts=sums.axes[4].astype(np.int64), sums=sums.z.astype(np.float64)
+    )
 
 
 class LocalZHeraldedExp(Experiment[LocalZHeraldedResult, LocalZHeraldedCfg]):
@@ -142,6 +142,7 @@ class LocalZHeraldedExp(Experiment[LocalZHeraldedResult, LocalZHeraldedCfg]):
         Counts retain target × quadrature × gate_count axes. No IQ is stored.
         cfg stays unchanged; completed rounds survive cancellation.
         """
+        # 1. Prepare the selected scan inputs.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="CZ gate count", ylabel="Target sigma | herald (g,g)")
         viewer = live_line(ax, num_lines=4)
@@ -155,6 +156,7 @@ class LocalZHeraldedExp(Experiment[LocalZHeraldedResult, LocalZHeraldedCfg]):
             values = np.stack((sigma(counts[0], "f1"), sigma(counts[1], "f2")))
             return viewer.set(np.array(config.gate_count), values.reshape(4, -1))
 
+        # 2. Acquire the scan and retain completed measurements.
         buffer = SignalBuffer(
             (len(config.gate_count), 2, 2, 3, 3, 3, 3),
             dtype=np.float64,
@@ -234,6 +236,7 @@ class LocalZHeraldedExp(Experiment[LocalZHeraldedResult, LocalZHeraldedCfg]):
                     options=RunOptions(),
                 )
         buffer.trigger_update(flush=True)
+        # 3. Return acquired coordinates and measurements.
         return LocalZHeraldedResult(
             np.array(config.gate_count, dtype=np.int64),
             np.moveaxis(buffer.array, 0, 2),
@@ -247,6 +250,7 @@ class LocalZHeraldedExp(Experiment[LocalZHeraldedResult, LocalZHeraldedCfg]):
         plots: Plots,
     ) -> LocalZHeraldedAnalysis:
         """Fit gg/ee independently and report ee-minus-gg slopes; writeback uses gg."""
+        # 1. Select the acquired values for analysis.
         del options
         cfg, data = source.cfg, source.result
         if cfg is None:
@@ -332,6 +336,7 @@ class LocalZHeraldedExp(Experiment[LocalZHeraldedResult, LocalZHeraldedCfg]):
         )
         herald_matrix = herald_probabilities(data.sums)
 
+        # 2. Display the scan traces and fitted curves.
         fig, _ = plots.subplots(
             num="phase", nrows=3, figsize=(10, 10), layout="constrained"
         )
@@ -410,6 +415,7 @@ class LocalZHeraldedExp(Experiment[LocalZHeraldedResult, LocalZHeraldedCfg]):
             title="Herald distribution; (g,g) is pass fraction, not ground-state purity",
         )
         fig.colorbar(image, ax=axes, label="Herald probability")
+        # 3. Return the analysis values and quality diagnostics.
         return LocalZHeraldedAnalysis(
             tuple(summarize_fit(fit) for fit in gg_fits),
             tuple(summarize_fit(fit) for fit in ee_fits),

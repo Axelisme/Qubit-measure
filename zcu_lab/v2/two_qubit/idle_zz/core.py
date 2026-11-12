@@ -49,6 +49,22 @@ from ._analysis import (
 )
 
 
+@dataclass(frozen=True)
+class IdleZZResult:
+    """Unnormalized float64 sums (D,2,T,3,3), terminal F1/F2 g/e/other.
+
+    dc_values is the D-point device coordinate, or [0] when DC is disabled.
+    The spectator axis is fixed [0,1] for I/Xπ. delays is actual quantized µs.
+    Rounds accumulate without averaging. Unmeasured points stay NaN; completed
+    rounds survive cancellation. No individual shots or IQ are retained.
+    """
+
+    dc_values: NDArray[np.float64]
+
+    delays: NDArray[np.float64]
+    sums: NDArray[np.float64]
+
+
 class IdleZZCfg(ConfigBase):
     """Target f1/f2 Ramsey with nominal spectator I/Xπ branches and optional reset.
 
@@ -73,35 +89,35 @@ class IdleZZCfg(ConfigBase):
         Pulse.Cfg,
         FieldMeta(
             label="F1 Xπ",
-            description="填入 F1 calibrated x180 pulse slot。先做 amplitude／length Rabi，再確認 frequency MHz、gain a.u. within [-1, 1] 與 duration us。",
+            description="Calibrated F1 X180 pulse, frequency MHz, gain [-1, 1] and duration us.",
         ),
     ]
     x180_f2: Annotated[
         Pulse.Cfg,
         FieldMeta(
             label="F2 Xπ",
-            description="填入 F2 calibrated x180 pulse slot。先做 amplitude／length Rabi，再確認 frequency MHz、gain a.u. within [-1, 1] 與 duration us。",
+            description="Calibrated F2 X180 pulse, frequency MHz, gain [-1, 1] and duration us.",
         ),
     ]
     x90_f1: Annotated[
         Pulse.Cfg,
         FieldMeta(
             label="F1 Xπ/2",
-            description="填入 F1 calibrated x90 pulse slot。先做 amplitude／length Rabi，再確認 frequency MHz、gain a.u. within [-1, 1] 與 duration us。",
+            description="Calibrated F1 X90 pulse, frequency MHz, gain [-1, 1] and duration us.",
         ),
     ]
     x90_f2: Annotated[
         Pulse.Cfg,
         FieldMeta(
             label="F2 Xπ/2",
-            description="填入 F2 calibrated x90 pulse slot。先做 amplitude／length Rabi，再確認 frequency MHz、gain a.u. within [-1, 1] 與 duration us。",
+            description="Calibrated F2 X90 pulse, frequency MHz, gain [-1, 1] and duration us.",
         ),
     ]
     readout: Annotated[
         MuxReadout.Cfg,
         FieldMeta(
             label="Mux readout",
-            description="填入 full-group mux readout slot。先用 lookback 取得 timing，再做 mux onetone，確認 frequency MHz、gain a.u. within [-1, 1] 與 timing us。",
+            description="Full-group mux readout with calibrated frequencies, gains and timing.",
         ),
     ]
     roles: JointRoles
@@ -130,7 +146,7 @@ class IdleZZCfg(ConfigBase):
         FieldMeta(
             label="Detune",
             unit="MHz",
-            description="填入 signed artificial phase ramp。先做 twotone frequency 與 T2 Ramsey；magnitude 必須大於預期 |ζ| 加 frequency error。",
+            description="Signed artificial phase ramp in MHz, exceeding expected |ζ| plus frequency error.",
         ),
     ]
     reps: Annotated[
@@ -173,22 +189,6 @@ class IdleZZCfg(ConfigBase):
         if self.dc_device is not None and not self.dc_device.strip():
             raise ValueError("DC source must name a connected device or be None")
         return self
-
-
-@dataclass(frozen=True)
-class IdleZZResult:
-    """Unnormalized float64 sums (D,2,T,3,3), terminal F1/F2 g/e/other.
-
-    dc_values is the D-point device coordinate, or [0] when DC is disabled.
-    The spectator axis is fixed [0,1] for I/Xπ. delays is actual quantized µs.
-    Rounds accumulate without averaging. Unmeasured points stay NaN; completed
-    rounds survive cancellation. No individual shots or IQ are retained.
-    """
-
-    dc_values: NDArray[np.float64]
-
-    delays: NDArray[np.float64]
-    sums: NDArray[np.float64]
 
 
 def restore_result(data: GroupedLoadData[IdleZZCfg]) -> IdleZZResult:
@@ -244,11 +244,13 @@ class IdleZZExp(Experiment[IdleZZResult, IdleZZCfg]):
         Hardware scans spectator_states and delay; DC alone stays on host
         because it changes an external instrument. Return unnormalized counts.
         """
+        # 1. Prepare the selected scan inputs.
         delay_sweep = round_sweep_dict(config.delay, "time", {"soccfg": context.soccfg})
         delays = sweep2array(delay_sweep)
         dc_values = (
             np.array([0.0]) if config.dc_device is None else sweep2array(config.dc)
         )
+        # 2. Display each acquired scan trace.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Delay (us)", ylabel="Target ⟨σ⟩")
         viewer = live_line(ax, num_lines=len(dc_values) * 2)
@@ -262,6 +264,7 @@ class IdleZZExp(Experiment[IdleZZResult, IdleZZCfg]):
                 delays, sigma(sums, config.target).reshape(-1, len(delays))
             )
 
+        # 3. Acquire the scan and retain completed measurements.
         buffer = SignalBuffer(
             (len(dc_values), 2, len(delays), 3, 3),
             dtype=np.float64,
@@ -320,6 +323,7 @@ class IdleZZExp(Experiment[IdleZZResult, IdleZZCfg]):
                     rounds=config.rounds,
                     options=RunOptions(),
                 )
+        # 4. Return acquired coordinates and measurements.
         return IdleZZResult(dc_values, delays, buffer.array)
 
     def analyze(
@@ -335,6 +339,7 @@ class IdleZZExp(Experiment[IdleZZResult, IdleZZCfg]):
         in the sigma denominator. Count errors weight the fringe fit.
         No calibration or DC writeback occurs.
         """
+        # 1. Select the acquired values for analysis.
         del options
         cfg, result = source.cfg, source.result
         if cfg is None:
@@ -414,6 +419,7 @@ class IdleZZExp(Experiment[IdleZZResult, IdleZZCfg]):
             ax.legend()
             ax.grid(True)
             fig.tight_layout()
+        # 2. Display the scan traces and fitted curves.
         fig, ax = plots.subplots(num="zeta", figsize=(8, 5))
         for index, (value, error) in enumerate(
             zip(answer.zeta_mhz, answer.zeta_error_mhz, strict=True)

@@ -35,21 +35,13 @@ from zcu_tools.program.v2.modules import MuxReadout
 from zcu_lab.v2.support import live_line
 
 from .._sums import herald_probabilities, sigma, terminal_counts
-from .analysis import (
+from .core import (
     ConditionalPhaseAnalysis,
+    ConditionalPhaseCfg,
     count_quadratures,
     fitted_crossings,
     phase_points,
 )
-from .core import ConditionalPhaseCfg
-
-
-class ConditionalPhaseHeraldedCfg(ConditionalPhaseCfg):
-    """Conditional phase preceded by optional reset and a mux herald.
-
-    All fields and units follow ConditionalPhaseCfg. Both reads use the same mux
-    object and classifiers. readout.post_delay is the wait after herald.
-    """
 
 
 @dataclass(frozen=True)
@@ -66,6 +58,19 @@ class ConditionalPhaseHeraldedResult:
     sums: NDArray[np.float64]
 
 
+@dataclass(frozen=True)
+class ConditionalPhaseHeraldedAnalysis(ConditionalPhaseAnalysis):
+    """Unique π crossing from shared gg/ee slopes, or its failure reason."""
+
+
+class ConditionalPhaseHeraldedCfg(ConditionalPhaseCfg):
+    """Conditional phase preceded by optional reset and a mux herald.
+
+    All fields and units follow ConditionalPhaseCfg. Both reads use the same mux
+    object and classifiers. readout.post_delay is the wait after herald.
+    """
+
+
 def restore_result(
     data: GroupedLoadData[ConditionalPhaseHeraldedCfg],
 ) -> ConditionalPhaseHeraldedResult:
@@ -76,11 +81,6 @@ def restore_result(
         frequencies=sums.axes[4].astype(np.float64),
         sums=sums.z.astype(np.float64),
     )
-
-
-@dataclass(frozen=True)
-class ConditionalPhaseHeraldedAnalysis(ConditionalPhaseAnalysis):
-    """Unique π crossing from shared gg/ee slopes, or its failure reason."""
 
 
 class ConditionalPhaseHeraldedExp(
@@ -148,7 +148,9 @@ class ConditionalPhaseHeraldedExp(
         Counts retain spectator_states × quadrature × gate_count × frequency.
         cfg stays unchanged; acquisition accumulates rounds without averaging.
         """
+        # 1. Prepare the selected scan inputs.
         frequencies = sweep2array(config.frequency)
+        # 2. Display each acquired scan trace.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Common CZ frequency (MHz)", ylabel="Target sigma | herald (g,g)")
         viewer = live_line(ax, num_lines=4 * len(config.gate_count))
@@ -162,6 +164,7 @@ class ConditionalPhaseHeraldedExp(
             values = sigma(counts, config.target)
             return viewer.set(frequencies, values.reshape(-1, len(frequencies)))
 
+        # 3. Acquire the scan and retain completed measurements.
         buffer = SignalBuffer(
             (len(config.gate_count), 2, 2, len(frequencies), 3, 3, 3, 3),
             dtype=np.float64,
@@ -233,6 +236,7 @@ class ConditionalPhaseHeraldedExp(
                     options=RunOptions(),
                 )
         buffer.trigger_update(flush=True)
+        # 4. Return acquired coordinates and measurements.
         return ConditionalPhaseHeraldedResult(
             np.array(config.gate_count, dtype=np.int64),
             frequencies,
@@ -247,6 +251,7 @@ class ConditionalPhaseHeraldedExp(
         plots: Plots,
     ) -> ConditionalPhaseHeraldedAnalysis:
         """Joint-fit sign-corrected gg/ee by actual spectator; show gg-only comparison."""
+        # 1. Select the acquired values for analysis.
         del options
         cfg, data = source.cfg, source.result
         if cfg is None:
@@ -320,6 +325,7 @@ class ConditionalPhaseHeraldedExp(
             crossings.reason,
         )
 
+        # 2. Display the scan traces and fitted curves.
         fig, _ = plots.subplots(
             num="phase", nrows=3, figsize=(11, 11), layout="constrained"
         )
@@ -415,4 +421,5 @@ class ConditionalPhaseHeraldedExp(
             title="Herald distribution; (g,g) is pass fraction, not ground-state purity",
         )
         fig.colorbar(image, ax=axes, label="Herald probability")
+        # 3. Return the analysis values and quality diagnostics.
         return answer

@@ -11,6 +11,7 @@ from matplotlib.lines import Line2D
 from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field, model_validator
+from zcu_tools.analysis.fitting import phase_slopes
 from zcu_tools.analysis.fitting.phase_slopes import fit_phase_slopes
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
@@ -39,14 +40,48 @@ from zcu_tools.program.v2.modules import MuxReadout
 from zcu_lab.v2.support import live_line
 
 from .._drive import DualLineCfg
+from .._phase import QuadraturePhase, count_phase, sigma_variance
 from .._readout import JointRoles
 from .._sums import sigma, validate_classifiers
-from .analysis import (
-    ConditionalPhaseAnalysis,
-    count_quadratures,
-    fitted_crossings,
-    phase_points,
-)
+from .crossing import PhaseCrossings, phase_crossings
+
+
+@dataclass(frozen=True)
+class ConditionalPhaseResult:
+    """Summed counts with branch × quadrature × n × frequency leading axes.
+
+    Fixed spectator states [0,1] denote I/Xπ; quadratures [0,1] denote X/Y.
+    sums is float64 with terminal F1/F2 g/e/other class axes, each length 3.
+    Rounds add without averaging. Unmeasured points remain NaN.
+    """
+
+    gate_counts: NDArray[np.int64]
+    frequencies: NDArray[np.float64]
+    sums: NDArray[np.float64]
+
+
+@dataclass(frozen=True)
+class CountQuadratures:
+    """Count reductions with spectator × quadrature × n × frequency axes.
+
+    values is target sigma, variances is its count-derived variance, acquired
+    is each projection's shot total. Empty counts give NaN values/variances.
+    """
+
+    values: NDArray[np.float64]
+    variances: NDArray[np.float64]
+    acquired: NDArray[np.float64]
+
+
+@dataclass(frozen=True)
+class ConditionalPhaseAnalysis:
+    """Unique complete π crossing in MHz, or None with frequency_reason.
+
+    Per-frequency phase, slope and count diagnostics are only used for plots.
+    """
+
+    frequency_mhz: float | None
+    frequency_reason: str | None
 
 
 class ConditionalPhaseCfg(ConfigBase):
@@ -66,42 +101,42 @@ class ConditionalPhaseCfg(ConfigBase):
         Pulse.Cfg,
         FieldMeta(
             label="F1 Xπ",
-            description="填入 F1 calibrated x180 pulse slot。先做 amplitude／length Rabi，再確認 frequency MHz、gain a.u. within [-1, 1] 與 duration us。",
+            description="Calibrated F1 X180 pulse, frequency MHz, gain [-1, 1] and duration us.",
         ),
     ]
     x180_f2: Annotated[
         Pulse.Cfg,
         FieldMeta(
             label="F2 Xπ",
-            description="填入 F2 calibrated x180 pulse slot。先做 amplitude／length Rabi，再確認 frequency MHz、gain a.u. within [-1, 1] 與 duration us。",
+            description="Calibrated F2 X180 pulse, frequency MHz, gain [-1, 1] and duration us.",
         ),
     ]
     x90_f1: Annotated[
         Pulse.Cfg,
         FieldMeta(
             label="F1 Xπ/2",
-            description="填入 F1 calibrated x90 pulse slot。先做 amplitude／length Rabi，再確認 frequency MHz、gain a.u. within [-1, 1] 與 duration us。",
+            description="Calibrated F1 X90 pulse, frequency MHz, gain [-1, 1] and duration us.",
         ),
     ]
     x90_f2: Annotated[
         Pulse.Cfg,
         FieldMeta(
             label="F2 Xπ/2",
-            description="填入 F2 calibrated x90 pulse slot。先做 amplitude／length Rabi，再確認 frequency MHz、gain a.u. within [-1, 1] 與 duration us。",
+            description="Calibrated F2 X90 pulse, frequency MHz, gain [-1, 1] and duration us.",
         ),
     ]
     drive: Annotated[
         DualLineCfg,
         FieldMeta(
             label="Dual-line drive",
-            description="填入 F1/F2 charge-line pulses。先做 conditional spectroscopy／chevron，再確認 coupler 的 cz_f1／cz_f2 slots。",
+            description="F1/F2 charge-line CZ pulses from the calibrated coupler slots.",
         ),
     ]
     readout: Annotated[
         MuxReadout.Cfg,
         FieldMeta(
             label="Mux readout",
-            description="填入 full-group mux readout slot。先用 lookback 取得 timing，再做 mux onetone，確認 frequency MHz、gain a.u. within [-1, 1] 與 timing us。",
+            description="Full-group mux readout with calibrated frequencies, gains and timing.",
         ),
     ]
     roles: JointRoles
@@ -114,7 +149,7 @@ class ConditionalPhaseCfg(ConfigBase):
         FieldMeta(
             unit="MHz",
             label="Frequency",
-            description="填入 common CZ frequency 起訖值，單位 MHz。先用 conditional spectroscopy／chevron 定位雙線 CZ pulse。",
+            description="Common CZ frequency sweep in MHz.",
         ),
     ]
     reps: Annotated[
@@ -164,18 +199,46 @@ class ConditionalPhaseCfg(ConfigBase):
         return self
 
 
-@dataclass(frozen=True)
-class ConditionalPhaseResult:
-    """Summed counts with branch × quadrature × n × frequency leading axes.
+def count_quadratures(
+    counts: NDArray[np.float64],
+    target: Literal["f1", "f2"],
+) -> CountQuadratures:
+    """Reduce terminal (...,3,3) counts to sigma, variance and shot totals."""
+    return CountQuadratures(
+        sigma(counts, target),
+        sigma_variance(counts, target),
+        counts.sum(axis=(-2, -1)),
+    )
 
-    Fixed spectator states [0,1] denote I/Xπ; quadratures [0,1] denote X/Y.
-    sums is float64 with terminal F1/F2 g/e/other class axes, each length 3.
-    Rounds add without averaging. Unmeasured points remain NaN.
+
+def fitted_crossings(
+    frequencies: NDArray[np.float64],
+    conditional_deg: NDArray[np.float64],
+    fit: phase_slopes.PhaseSlopeFit,
+) -> PhaseCrossings:
+    """Find per-gate π crossings, preserving fit-unavailability reasons.
+
+    Inputs are the increasing frequency axis, its conditional slope difference,
+    and the fits that produced it. Any unavailable slope prevents selection.
     """
+    crossings = phase_crossings(frequencies, conditional_deg)
+    reasons = [reason for state in fit.reasons for reason in state if reason]
+    if reasons:
+        return PhaseCrossings((), "; ".join(dict.fromkeys(reasons)))
+    return crossings
 
-    gate_counts: NDArray[np.int64]
-    frequencies: NDArray[np.float64]
-    sums: NDArray[np.float64]
+
+def phase_points(
+    quadratures: NDArray[np.float64],
+) -> tuple[tuple[tuple[QuadraturePhase, ...], ...], ...]:
+    """Convert (spectator,quadrature,n,frequency) sigma to diagnostic phase points."""
+    return tuple(
+        tuple(
+            tuple(count_phase(float(x), float(y)) for x, y in zip(xs, ys, strict=True))
+            for xs, ys in zip(state[0], state[1], strict=True)
+        )
+        for state in quadratures
+    )
 
 
 def restore_result(
@@ -251,7 +314,9 @@ class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg
         Counts retain spectator_states × quadrature × gate_count × frequency.
         cfg stays unchanged; acquisition accumulates rounds without averaging.
         """
+        # 1. Prepare the selected scan inputs.
         frequencies = sweep2array(config.frequency)
+        # 2. Display each acquired scan trace.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Common CZ frequency (MHz)", ylabel="Target sigma")
         viewer = live_line(ax, num_lines=4 * len(config.gate_count))
@@ -265,6 +330,7 @@ class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg
             values = sigma(counts, config.target)
             return viewer.set(frequencies, values.reshape(-1, len(frequencies)))
 
+        # 3. Acquire the scan and retain completed measurements.
         buffer = SignalBuffer(
             (len(config.gate_count), 2, 2, len(frequencies), 3, 3),
             dtype=np.float64,
@@ -333,6 +399,7 @@ class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg
                     options=RunOptions(),
                 )
         buffer.trigger_update(flush=True)
+        # 4. Return acquired coordinates and measurements.
         return ConditionalPhaseResult(
             np.array(config.gate_count, dtype=np.int64),
             frequencies,
@@ -347,6 +414,7 @@ class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg
         plots: Plots,
     ) -> ConditionalPhaseAnalysis:
         """Fit per-gate slopes from complete counts and select a unique π crossing."""
+        # 1. Select the acquired values for analysis.
         del options
         cfg, data = source.cfg, source.result
         if cfg is None:
@@ -387,6 +455,7 @@ class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg
             crossings.reason,
         )
 
+        # 2. Display the scan traces and fitted curves.
         fig, _ = plots.subplots(
             num="phase", nrows=3, figsize=(10, 10), layout="constrained"
         )
@@ -448,4 +517,5 @@ class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg
             )
         axes.set(xlabel="Common CZ frequency (MHz)", ylabel="Phase slope (deg/gate)")
         axes.legend()
+        # 3. Return the analysis values and quality diagnostics.
         return answer

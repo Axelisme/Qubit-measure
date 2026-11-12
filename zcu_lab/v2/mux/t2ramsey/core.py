@@ -226,6 +226,7 @@ class MuxT2RamseyExp(Experiment[MuxCoherenceResult, MuxT2RamseyCfg]):
     AXES_SPEC: ClassVar[GroupedAxesSpec[MuxCoherenceResult, MuxT2RamseyCfg]] = (
         coherence_spec(MuxT2RamseyCfg, tag="mux/time_domain/t2ramsey")
     )
+
     Options: ClassVar[type[T2RamseyAnalyzeOptions]] = T2RamseyAnalyzeOptions
 
     def run(self, config: MuxT2RamseyCfg, *, context: RunContext) -> MuxCoherenceResult:
@@ -328,7 +329,7 @@ class MuxT2RamseyExp(Experiment[MuxCoherenceResult, MuxT2RamseyCfg]):
             readout_module = MuxReadout("readout", readout)
             builder.emit(readout_module)
 
-            # 4. Average rounds into tone-major IQ without filling missing points.
+            # 3. Average rounds into tone-major IQ without filling missing points.
             prog = builder.build()
             _ = sched.run_acquire(
                 prog,

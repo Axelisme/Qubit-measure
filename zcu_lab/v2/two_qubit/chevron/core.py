@@ -50,6 +50,15 @@ from .._sums import (
 )
 
 
+@dataclass(frozen=True)
+class ChevronResult(RabiScanResult):
+    """Common drive frequency coordinates, durations in us and (Nc,Nd,3,3) counts.
+
+    Terminal class axes are F1/F2, each g/e/other. Unmeasured points are NaN.
+    Counts are float64 totals, not normalized probabilities.
+    """
+
+
 class ChevronCfg(ConfigBase):
     """Common MHz frequency scan with fixed signed gains and relative phase.
 
@@ -75,14 +84,14 @@ class ChevronCfg(ConfigBase):
         PulseCfg,
         FieldMeta(
             label="F1 Xπ",
-            description="填入 F1 x180 slot，先做 amplitude／length Rabi。frequency MHz、gain a.u. within [-1, 1]、duration us。",
+            description="Calibrated F1 X180 pulse, frequency MHz, gain [-1, 1] and duration us.",
         ),
     ]
     x180_f2: Annotated[
         PulseCfg,
         FieldMeta(
             label="F2 Xπ",
-            description="填入 F2 x180 slot，先做 amplitude／length Rabi。frequency MHz、gain a.u. within [-1, 1]、duration us。",
+            description="Calibrated F2 X180 pulse, frequency MHz, gain [-1, 1] and duration us.",
         ),
     ]
     drive: Annotated[
@@ -114,7 +123,7 @@ class ChevronCfg(ConfigBase):
         FieldMeta(
             unit="us",
             label="Duration",
-            description="填入兩條 charge-line 的共同 duration 起訖值，單位 us。先做 conditional spectroscopy 選頻，再由操作者確認 chevron 時間範圍。",
+            description="Common duration sweep for both charge-line pulses in us.",
         ),
     ]
 
@@ -153,15 +162,6 @@ class ChevronCfg(ConfigBase):
         if np.any(durations <= 0):
             raise ValueError("Drive durations must be positive")
         return self
-
-
-@dataclass(frozen=True)
-class ChevronResult(RabiScanResult):
-    """Common drive frequency coordinates, durations in us and (Nc,Nd,3,3) counts.
-
-    Terminal class axes are F1/F2, each g/e/other. Unmeasured points are NaN.
-    Counts are float64 totals, not normalized probabilities.
-    """
 
 
 def restore_result(data: GroupedLoadData[ChevronCfg]) -> ChevronResult:
@@ -217,19 +217,23 @@ class ChevronExp(Experiment[ChevronResult, ChevronCfg]):
         envelopes rebuild at each host duration. Both return coordinate-major
         float64 counts with the same Result axes and cancellation semantics.
         """
+        # 1. Prepare the selected scan inputs.
         if all(
             isinstance(pulse.waveform, (ConstWaveformCfg, FlatTopWaveformCfg))
             for pulse in (config.drive.f1, config.drive.f2)
         ):
             return self._run_hardware_duration(config, context=context)
+        # 2. Return acquired coordinates and measurements.
         return self._run_host_duration(config, context=context)
 
     def _run_hardware_duration(
         self, config: ChevronCfg, *, context: RunContext
     ) -> ChevronResult:
         """Acquire all coordinates and durations in hardware, accumulating rounds."""
+        # 1. Prepare the selected scan inputs.
         coordinates = sweep2array(config.frequency)
         durations = sweep2array(config.duration)
+        # 2. Display each acquired scan trace.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Drive duration (us)", ylabel="Terminal P00")
         viewer = live_line(ax, num_lines=len(coordinates))
@@ -245,6 +249,7 @@ class ChevronExp(Experiment[ChevronResult, ChevronCfg]):
 
         class_shape = (3, 3)
         shape = (len(coordinates), len(durations), *class_shape)
+        # 3. Acquire the scan and retain completed measurements.
         buffer = SignalBuffer(shape, dtype=np.float64, on_update=update_view)
         with Schedule(buffer, scope=context.scope) as sched:
             builder = TimelineBuilder(
@@ -295,14 +300,17 @@ class ChevronExp(Experiment[ChevronResult, ChevronCfg]):
             )
         buffer.trigger_update(flush=True)
         sums = buffer.array
+        # 4. Return acquired coordinates and measurements.
         return ChevronResult(coordinates, durations, sums)
 
     def _run_host_duration(
         self, config: ChevronCfg, *, context: RunContext
     ) -> ChevronResult:
         """Rebuild sampled envelopes per host duration; keep coordinates in hardware."""
+        # 1. Prepare the selected scan inputs.
         coordinates = sweep2array(config.frequency)
         durations = sweep2array(config.duration)
+        # 2. Display each acquired scan trace.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Drive duration (us)", ylabel="Terminal P00")
         viewer = live_line(ax, num_lines=len(coordinates))
@@ -318,6 +326,7 @@ class ChevronExp(Experiment[ChevronResult, ChevronCfg]):
 
         class_shape = (3, 3)
         shape = (len(durations), len(coordinates), *class_shape)
+        # 3. Acquire the scan and retain completed measurements.
         buffer = SignalBuffer(shape, dtype=np.float64, on_update=update_view)
         # Sampled cosine/Gauss/DRAG envelopes reject QickParam lengths. Only their
         # duration stays on the host; coordinate remains a hardware sweep.
@@ -371,6 +380,7 @@ class ChevronExp(Experiment[ChevronResult, ChevronCfg]):
                 )
         buffer.trigger_update(flush=True)
         sums = buffer.array.swapaxes(0, 1)
+        # 4. Return acquired coordinates and measurements.
         return ChevronResult(coordinates, durations, sums)
 
     def analyze(
@@ -385,6 +395,7 @@ class ChevronExp(Experiment[ChevronResult, ChevronCfg]):
         Missing cfg or mismatched axes raises ValueError. Failed fits report a
         reason, not zero rates. No IQ classification or automatic write occurs.
         """
+        # 1. Select the acquired values for analysis.
         del options
         if source.cfg is None:
             raise ValueError(
@@ -410,6 +421,7 @@ class ChevronExp(Experiment[ChevronResult, ChevronCfg]):
             totals,
             None,
         )
+        # 2. Display the scan traces and fitted curves.
         fig, ax = plots.subplots(num="chevron", figsize=(9, 6), layout="constrained")
         image = ax.pcolormesh(
             result.durations,

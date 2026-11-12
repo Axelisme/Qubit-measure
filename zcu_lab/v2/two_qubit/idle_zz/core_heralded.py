@@ -36,14 +36,6 @@ from ._analysis import (
 from .core import IdleZZCfg
 
 
-class IdleZZHeraldedCfg(IdleZZCfg):
-    """IdleZZCfg with a full mux herald before spectator preparation.
-
-    reset=None emits no reset. Both reads use readout and its circle radii;
-    readout.post_delay supplies the wait after herald. target is f1 or f2.
-    """
-
-
 @dataclass(frozen=True)
 class IdleZZHeraldedResult:
     """Axes match IdleZZResult; sums is float64 (D,2,T,3,3,3,3).
@@ -56,6 +48,14 @@ class IdleZZHeraldedResult:
 
     delays: NDArray[np.float64]
     sums: NDArray[np.float64]
+
+
+class IdleZZHeraldedCfg(IdleZZCfg):
+    """IdleZZCfg with a full mux herald before spectator preparation.
+
+    reset=None emits no reset. Both reads use readout and its circle radii;
+    readout.post_delay supplies the wait after herald. target is f1 or f2.
+    """
 
 
 def restore_result(data: GroupedLoadData[IdleZZHeraldedCfg]) -> IdleZZHeraldedResult:
@@ -120,11 +120,13 @@ class IdleZZHeraldedExp(Experiment[IdleZZHeraldedResult, IdleZZHeraldedCfg]):
         Hardware scans spectator_states and delay; DC alone stays on host
         because it changes an external instrument. Return unnormalized counts.
         """
+        # 1. Prepare the selected scan inputs.
         delay_sweep = round_sweep_dict(config.delay, "time", {"soccfg": context.soccfg})
         delays = sweep2array(delay_sweep)
         dc_values = (
             np.array([0.0]) if config.dc_device is None else sweep2array(config.dc)
         )
+        # 2. Display each acquired scan trace.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Delay (us)", ylabel="Target ⟨σ⟩ (gg, −ee; actual spectator g/e)")
         viewer = live_line(ax, num_lines=len(dc_values) * 4)
@@ -140,6 +142,7 @@ class IdleZZHeraldedExp(Experiment[IdleZZHeraldedResult, IdleZZHeraldedCfg]):
                 delays, np.stack((gg, ee), axis=1).reshape(-1, len(delays))
             )
 
+        # 3. Acquire the scan and retain completed measurements.
         buffer = SignalBuffer(
             (len(dc_values), 2, len(delays), 3, 3, 3, 3),
             dtype=np.float64,
@@ -201,6 +204,7 @@ class IdleZZHeraldedExp(Experiment[IdleZZHeraldedResult, IdleZZHeraldedCfg]):
                     rounds=config.rounds,
                     options=RunOptions(),
                 )
+        # 4. Return acquired coordinates and measurements.
         return IdleZZHeraldedResult(dc_values, delays, buffer.array)
 
     def analyze(
@@ -216,6 +220,7 @@ class IdleZZHeraldedExp(Experiment[IdleZZHeraldedResult, IdleZZHeraldedCfg]):
         requested delay axes/rounds are required before herald selection.
         Shared frequency/decay determine ζ; each herald keeps local A/phase/offset.
         """
+        # 1. Select the acquired values for analysis.
         del options
         cfg, result = source.cfg, source.result
         if cfg is None:
@@ -286,6 +291,7 @@ class IdleZZHeraldedExp(Experiment[IdleZZHeraldedResult, IdleZZHeraldedCfg]):
             ax.legend()
             ax.grid(True)
             fig.tight_layout()
+        # 2. Display the scan traces and fitted curves.
         fig, ax = plots.subplots(num="zeta", figsize=(8, 5))
         for index, (value, error) in enumerate(
             zip(terminal.zeta_mhz, terminal.zeta_error_mhz, strict=True)

@@ -64,3 +64,12 @@ record = exp.run(cfg)
 analysis = exp.analyze(None)
 saved = exp.save_run(point_view, source=record)
 ```
+
+## Calibration order and field units
+
+Calibrate each role's Xπ/2 slot with amplitude and length Rabi before using it.
+Confirm pulse frequency in MHz, signed gain in [-1, 1], and duration in us.
+Use lookback to set mux timing, then mux onetone to set frequencies and gains.
+Confirm readout timing in us and gains in [-1, 1].
+Locate the dual-line CZ pulse with conditional spectroscopy and chevron.
+Confirm the coupler's `cz_f1` and `cz_f2` slots before copying them into the Form.

@@ -11,6 +11,7 @@ from matplotlib.lines import Line2D
 from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field, model_validator
+from zcu_tools.analysis.fitting import FitQuality
 from zcu_tools.analysis.fitting.phase_line import PhaseLineFit, fit_phase_line
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
@@ -41,7 +42,44 @@ from .._drive import DualLineCfg
 from .._phase import QuadraturePhase, count_phase, phase_variance, sigma_variance
 from .._readout import JointRoles
 from .._sums import sigma, validate_classifiers
-from .analysis import LocalZAnalysis, summarize_fit
+
+
+@dataclass(frozen=True)
+class LocalZResult:
+    """Summed counts with target × quadrature × n leading axes.
+
+    Fixed targets [0,1] denote F1/F2; quadratures [0,1] denote X/Y.
+    sums is float64 with terminal F1/F2 g/e/other class axes, each length 3.
+    Rounds add without averaging. Unmeasured points remain NaN.
+    """
+
+    gate_counts: NDArray[np.int64]
+    sums: NDArray[np.float64]
+
+
+@dataclass(frozen=True)
+class LocalZFit:
+    """One target's phase-line summary, in degrees and degrees per gate.
+
+    correction_deg is minus slope_deg without wrapping. intercept_deg is the
+    preparation/projection offset, slope_error_deg is its count-derived 1σ
+    uncertainty. Unavailable fits keep None and reason. fit_quality contains
+    fixed-size residual and parameter-error diagnostics, not a quality gate.
+    """
+
+    intercept_deg: float | None
+    slope_deg: float | None
+    correction_deg: float | None
+    slope_error_deg: float | None
+    fit_quality: FitQuality | None
+    reason: str | None
+
+
+@dataclass(frozen=True)
+class LocalZAnalysis:
+    """Fixed F1/F2 phase-line summaries in target order; no scan arrays."""
+
+    fits: tuple[LocalZFit, ...]
 
 
 class LocalZCfg(ConfigBase):
@@ -61,28 +99,28 @@ class LocalZCfg(ConfigBase):
         Pulse.Cfg,
         FieldMeta(
             label="F1 Xπ/2",
-            description="填入 F1 calibrated x90 pulse slot。先做 amplitude／length Rabi，再確認 frequency MHz、gain a.u. within [-1, 1] 與 duration us。",
+            description="Calibrated F1 X90 pulse, frequency MHz, gain [-1, 1] and duration us.",
         ),
     ]
     x90_f2: Annotated[
         Pulse.Cfg,
         FieldMeta(
             label="F2 Xπ/2",
-            description="填入 F2 calibrated x90 pulse slot。先做 amplitude／length Rabi，再確認 frequency MHz、gain a.u. within [-1, 1] 與 duration us。",
+            description="Calibrated F2 X90 pulse, frequency MHz, gain [-1, 1] and duration us.",
         ),
     ]
     drive: Annotated[
         DualLineCfg,
         FieldMeta(
             label="Dual-line drive",
-            description="填入 F1/F2 charge-line pulses。先做 conditional spectroscopy／chevron，再確認 coupler 的 cz_f1／cz_f2 slots。",
+            description="F1/F2 charge-line CZ pulses from the calibrated coupler slots.",
         ),
     ]
     readout: Annotated[
         MuxReadout.Cfg,
         FieldMeta(
             label="Mux readout",
-            description="填入 full-group mux readout slot。先用 lookback 取得 timing，再做 mux onetone，確認 frequency MHz、gain a.u. within [-1, 1] 與 timing us。",
+            description="Full-group mux readout with calibrated frequencies, gains and timing.",
         ),
     ]
     roles: JointRoles
@@ -131,17 +169,16 @@ class LocalZCfg(ConfigBase):
         return self
 
 
-@dataclass(frozen=True)
-class LocalZResult:
-    """Summed counts with target × quadrature × n leading axes.
-
-    Fixed targets [0,1] denote F1/F2; quadratures [0,1] denote X/Y.
-    sums is float64 with terminal F1/F2 g/e/other class axes, each length 3.
-    Rounds add without averaging. Unmeasured points remain NaN.
-    """
-
-    gate_counts: NDArray[np.int64]
-    sums: NDArray[np.float64]
+def summarize_fit(fit: PhaseLineFit) -> LocalZFit:
+    """Keep calibration values and fit diagnostics; leave curves for plotting."""
+    return LocalZFit(
+        fit.intercept_deg,
+        fit.slope_deg,
+        None if fit.slope_deg is None else -fit.slope_deg,
+        fit.slope_error_deg,
+        fit.fit_quality,
+        fit.reason,
+    )
 
 
 def restore_result(data: GroupedLoadData[LocalZCfg]) -> LocalZResult:
@@ -199,6 +236,7 @@ class LocalZExp(Experiment[LocalZResult, LocalZCfg]):
         Counts retain target × quadrature × gate_count axes. No IQ is stored.
         cfg stays unchanged; completed rounds survive cancellation.
         """
+        # 1. Prepare the selected scan inputs.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="CZ gate count", ylabel="Target sigma")
         viewer = live_line(ax, num_lines=4)
@@ -212,6 +250,7 @@ class LocalZExp(Experiment[LocalZResult, LocalZCfg]):
             values = np.stack((sigma(counts[0], "f1"), sigma(counts[1], "f2")))
             return viewer.set(np.array(config.gate_count), values.reshape(4, -1))
 
+        # 2. Acquire the scan and retain completed measurements.
         buffer = SignalBuffer(
             (len(config.gate_count), 2, 2, 3, 3),
             dtype=np.float64,
@@ -288,6 +327,7 @@ class LocalZExp(Experiment[LocalZResult, LocalZCfg]):
                     options=RunOptions(),
                 )
         buffer.trigger_update(flush=True)
+        # 3. Return acquired coordinates and measurements.
         return LocalZResult(
             np.array(config.gate_count, dtype=np.int64),
             np.moveaxis(buffer.array, 0, 2),
@@ -301,6 +341,7 @@ class LocalZExp(Experiment[LocalZResult, LocalZCfg]):
         plots: Plots,
     ) -> LocalZAnalysis:
         """Fit complete classified phase rows with count-propagated WLS weights."""
+        # 1. Select the acquired values for analysis.
         del options
         cfg, data = source.cfg, source.result
         if cfg is None:
@@ -349,6 +390,7 @@ class LocalZExp(Experiment[LocalZResult, LocalZCfg]):
             )
         summaries = tuple(map(summarize_fit, fits))
 
+        # 2. Display the scan traces and fitted curves.
         fig, _ = plots.subplots(
             num="phase", nrows=3, ncols=1, figsize=(10, 9), layout="constrained"
         )
@@ -411,4 +453,5 @@ class LocalZExp(Experiment[LocalZResult, LocalZCfg]):
         axes.set(xlabel="CZ gate count", ylabel="Target sigma")
         axes.legend()
 
+        # 3. Return the analysis values and quality diagnostics.
         return LocalZAnalysis(summaries)

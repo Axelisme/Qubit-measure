@@ -31,16 +31,7 @@ from .._sums import (
     marginal_probabilities,
     terminal_counts,
 )
-from .analysis import summarize_spectra
-from .core import SpectroscopyCfg
-
-
-class SpectroscopyHeraldedCfg(SpectroscopyCfg):
-    """Optional reset → herald → nominal branch → probe → contrast → terminal.
-
-    Both reads use the same mux settings and circle radii. Its post_delay is the
-    wait after herald. Other fields and units match SpectroscopyCfg.
-    """
+from .core import SpectroscopyCfg, summarize_spectra
 
 
 @dataclass(frozen=True)
@@ -56,6 +47,14 @@ class SpectroscopyHeraldedResult:
 
     frequencies: NDArray[np.float64]
     sums: NDArray[np.float64]
+
+
+class SpectroscopyHeraldedCfg(SpectroscopyCfg):
+    """Optional reset → herald → nominal branch → probe → contrast → terminal.
+
+    Both reads use the same mux settings and circle radii. Its post_delay is the
+    wait after herald. Other fields and units match SpectroscopyCfg.
+    """
 
 
 def restore_result(
@@ -126,6 +125,7 @@ class SpectroscopyHeraldedExp(
         cooperative cancellation. Acquisition exceptions propagate unchanged.
         The stop signal carries only stop requests and reason text.
         """
+        # 1. Prepare the selected scan inputs.
         frequencies = sweep2array(config.frequency)
         dc_values = (
             np.array([0.0]) if config.dc_device is None else sweep2array(config.dc)
@@ -172,6 +172,7 @@ class SpectroscopyHeraldedExp(
                 )
             return tuple(artists)
 
+        # 2. Acquire the scan and retain completed measurements.
         buffer = SignalBuffer(
             (len(dc_values), 2, 2, len(frequencies), 3, 3, 3, 3),
             dtype=np.float64,
@@ -248,6 +249,7 @@ class SpectroscopyHeraldedExp(
                     rounds=config.rounds,
                     options=RunOptions(),
                 )
+        # 3. Return acquired coordinates and measurements.
         return SpectroscopyHeraldedResult(dc_values, frequencies, buffer.array)
 
     def analyze(
@@ -265,6 +267,7 @@ class SpectroscopyHeraldedExp(
         explaining that no complete acquisition round is available. Otherwise
         return None for this figures-only analysis.
         """
+        # 1. Select the acquired values for analysis.
         del options
         data, cfg = source.result, source.cfg
         if cfg is None:
@@ -329,6 +332,7 @@ class SpectroscopyHeraldedExp(
                         ylim=(0, 1),
                     )
                     ax.legend(fontsize="small")
+        # 2. Display the scan traces and fitted curves.
         fig, _ = plots.subplots(
             num="shots",
             nrows=len(dc),
@@ -396,4 +400,5 @@ class SpectroscopyHeraldedExp(
             return {
                 "error": "No complete acquisition round is available: all counts are NaN."
             }
+        # 3. Return the analysis values and quality diagnostics.
         return None

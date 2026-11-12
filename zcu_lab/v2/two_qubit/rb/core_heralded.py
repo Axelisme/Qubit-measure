@@ -36,26 +36,16 @@ from .._sums import (
     joint_probabilities,
     terminal_counts,
 )
-from .analysis import (
+from .core import (
+    RBCfg,
     RBEstimate,
     RBOptions,
-    bootstrap_joint_error,
     count_completion,
     estimate_joint_d4,
     paired_means,
     validate_axes,
 )
-from .core import RBCfg
 from .sequence import TwoQubitGate, make_paired_sequences
-
-
-class RBHeraldedCfg(RBCfg):
-    """Optional reset → herald → paired sequence → terminal, per host round.
-
-    Fields and units match RBCfg. Both reads share the saved full mux cfg and
-    circle radii. Its post_delay supplies the wait after herald. reset=None
-    emits no reset; rounds stays a host axis rather than an acquisition average.
-    """
 
 
 @dataclass(frozen=True)
@@ -88,6 +78,15 @@ class RBHeraldedAnalysis:
     reason: str | None
 
 
+class RBHeraldedCfg(RBCfg):
+    """Optional reset → herald → paired sequence → terminal, per host round.
+
+    Fields and units match RBCfg. Both reads share the saved full mux cfg and
+    circle radii. Its post_delay supplies the wait after herald. reset=None
+    emits no reset; rounds stays a host axis rather than an acquisition average.
+    """
+
+
 def restore_result(data: GroupedLoadData[RBHeraldedCfg]) -> RBHeraldedResult:
     """Restore all 81 class counts; old per-shot IQ files fail without sums."""
     sums = data.variable("sums")
@@ -99,10 +98,89 @@ def restore_result(data: GroupedLoadData[RBHeraldedCfg]) -> RBHeraldedResult:
     )
 
 
+def bootstrap_joint_error(
+    depths: NDArray[np.int64],
+    survival: NDArray[np.float64],
+    totals: NDArray[np.float64],
+    *,
+    samples: int,
+    seed: int,
+) -> tuple[float, float, int]:
+    """95% d=4 ratio CI from paired seed-identity draws across both heralds.
+
+    Inputs are (herald,depth,seed,arm,round), survival masked to paired
+    rounds and totals in shot counts. NaN denotes unavailable survival. Draw from
+    their valid identity union; each herald retains only its valid draws,
+    including multiplicity. Both arms/depths travel together. Fewer than two
+    retained draws in either group fails that resample, never fills missing data.
+    """
+    available = np.isfinite(survival).all(axis=(1, 3)).any(axis=-1)
+    identities = np.flatnonzero(available.any(axis=0))
+    rng = np.random.default_rng(seed)
+    errors = []
+    for _ in range(samples):
+        draw = rng.choice(identities, size=len(identities), replace=True)
+        try:
+            statistics = [
+                seed_statistics(
+                    np.take(survival[h], draw, axis=1),
+                    np.take(totals[h], draw, axis=1),
+                )
+                for h in range(2)
+            ]
+            means = np.array([item.means for item in statistics])
+            uncertainty = np.array([item.errors for item in statistics])
+            fit = fit_joint_decay(depths, means, uncertainty).fit
+        except (ValueError, RuntimeError):
+            continue
+        errors.append(0.75 * (1 - fit.values["p_1"] / fit.values["p_0"]))
+    if len(errors) < 0.9 * samples:
+        raise ValueError(f"Unstable bootstrap: {len(errors)}/{samples} valid fits")
+    low, high = np.quantile(errors, [0.025, 0.975])
+    return float(low), float(high), len(errors)
+
+
+def _draw_return_survival(
+    ax: Axes,
+    depths: NDArray[np.int64],
+    means: NDArray[np.float64],
+    errors: NDArray[np.float64],
+    curves: NDArray[np.float64],
+    label: str,
+) -> None:
+    """Render already-selected arm means, error bars and curves on this axis."""
+    for arm, arm_label in enumerate(("Reference", "CZ interleaved")):
+        (line,) = ax.plot(depths, means[arm], "o", label=arm_label)
+        ax.errorbar(
+            depths, means[arm], yerr=errors[arm], fmt="none", ecolor=line.get_color()
+        )
+        ax.plot(depths, curves[arm], color=line.get_color())
+    ax.set(xlabel="Random Clifford depth", ylabel=f"Return to {label} | herald {label}")
+    ax.legend()
+
+
+def _draw_herald_fractions(
+    ax: Axes,
+    depths: NDArray[np.int64],
+    probabilities: NDArray[np.float64],
+) -> None:
+    """Render the caller's nine aggregated herald fractions, without filtering."""
+    classes = ("g", "e", "other")
+    for f1 in range(3):
+        for f2 in range(3):
+            ax.plot(
+                depths,
+                probabilities[:, f1, f2],
+                "o-",
+                label=f"{classes[f1]},{classes[f2]}",
+            )
+    ax.set(xlabel="Random Clifford depth", ylabel="Herald probability")
+    ax.legend()
+
+
 class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
     """Paired RB with separate gg/ee complete rounds and shared arm decays."""
 
-    Options = RBOptions
     AXES_SPEC: ClassVar[GroupedAxesSpec[RBHeraldedResult, RBHeraldedCfg]] = (
         GroupedAxesSpec(
             variables=(
@@ -145,6 +223,8 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
         )
     )
 
+    Options = RBOptions
+
     def run(self, config: RBHeraldedCfg, *, context: RunContext) -> RBHeraldedResult:
         """Acquire optional reset → herald → paired sequence → terminal.
 
@@ -153,6 +233,7 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
         unchanged. Acquisition exceptions propagate unchanged. The stop signal
         carries only stop requests and reason text.
         """
+        # 1. Prepare the selected scan inputs.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Random Clifford depth", ylabel="Return to herald state")
         viewer = live_line(ax, num_lines=4)
@@ -170,6 +251,7 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
                 curves.extend(joint_probabilities(totals)[..., cell, cell].T)
             return viewer.set(np.array(config.depth), np.array(curves))
 
+        # 2. Acquire the scan and retain completed measurements.
         buffer = SignalBuffer(
             (len(config.depth), len(config.seed), 2, config.rounds, 3, 3, 3, 3),
             dtype=np.float64,
@@ -261,6 +343,7 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
                                 options=RunOptions(),
                             )
         buffer.trigger_update(flush=True)
+        # 3. Return acquired coordinates and measurements.
         return RBHeraldedResult(
             np.array(config.depth, dtype=np.int64),
             np.array(config.seed, dtype=np.int64),
@@ -282,6 +365,7 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
         mean unavailable survival, not an unacquired round. Whole seed identity
         bootstrap draws preserve correlations across arms, depths and heralds.
         """
+        # 1. Select the acquired values for analysis.
         data, cfg = source.result, source.cfg
         shape = (len(data.depths), len(data.seeds), 2, len(data.rounds))
         if data.sums.shape != (*shape, 3, 3, 3, 3):
@@ -372,42 +456,5 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
             _draw_herald_fractions(ax, data.depths, aggregate[:, arm])
             ax.set_title(f"{label}: (g,g) is pass fraction, not purity")
             fig.tight_layout()
+        # 2. Return the analysis values and quality diagnostics.
         return RBHeraldedAnalysis(estimate, quality, reason)
-
-
-def _draw_return_survival(
-    ax: Axes,
-    depths: NDArray[np.int64],
-    means: NDArray[np.float64],
-    errors: NDArray[np.float64],
-    curves: NDArray[np.float64],
-    label: str,
-) -> None:
-    """Render already-selected arm means, error bars and curves on this axis."""
-    for arm, arm_label in enumerate(("Reference", "CZ interleaved")):
-        (line,) = ax.plot(depths, means[arm], "o", label=arm_label)
-        ax.errorbar(
-            depths, means[arm], yerr=errors[arm], fmt="none", ecolor=line.get_color()
-        )
-        ax.plot(depths, curves[arm], color=line.get_color())
-    ax.set(xlabel="Random Clifford depth", ylabel=f"Return to {label} | herald {label}")
-    ax.legend()
-
-
-def _draw_herald_fractions(
-    ax: Axes,
-    depths: NDArray[np.int64],
-    probabilities: NDArray[np.float64],
-) -> None:
-    """Render the caller's nine aggregated herald fractions, without filtering."""
-    classes = ("g", "e", "other")
-    for f1 in range(3):
-        for f2 in range(3):
-            ax.plot(
-                depths,
-                probabilities[:, f1, f2],
-                "o-",
-                label=f"{classes[f1]},{classes[f2]}",
-            )
-    ax.set(xlabel="Random Clifford depth", ylabel="Herald probability")
-    ax.legend()

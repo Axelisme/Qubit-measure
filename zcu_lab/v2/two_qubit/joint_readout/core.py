@@ -46,6 +46,38 @@ OUTCOME_LABELS = tuple(
     f"{f1},{f2}" for f1 in ("g", "e", "other") for f2 in ("g", "e", "other")
 )
 
+SUMS_SHAPE = (2, 2, 3, 3)
+PREPARED_COUNT = len(PREPARED_STATES)
+OUTCOME_COUNT = len(OUTCOME_LABELS)
+
+
+@dataclass(frozen=True)
+class JointReadoutResult:
+    """prepared_f1/f2 are int64 [0,1]; sums is float64 (2,2,3,3) counts.
+
+    Preparation indices are 0=g, 1=e; F1 is outer, giving gg/ge/eg/ee.
+    Class axes are terminal F1,
+    terminal F2, each g/e/other. Rounds add without averaging; unmeasured branches
+    remain NaN. Completed rounds survive cooperative cancellation. Acquisition
+    exceptions propagate unchanged from run; the stop signal carries only stop
+    requests and reason text, not errors or data completeness.
+    """
+
+    sums: NDArray[np.float64]
+
+
+@dataclass(frozen=True)
+class JointReadoutAnalysis:
+    """counts and row-normalized matrix are (4,9), including other outcomes.
+
+    Columns are F1-major g/e/other pairs; acquired_shots is each row's total.
+    Zero-count or unmeasured rows have NaN probabilities.
+    """
+
+    counts: NDArray[np.float64]
+    matrix: NDArray[np.float64]
+    acquired_shots: NDArray[np.float64]
+
 
 class JointReadoutCfg(ConfigBase):
     """Four nominal thermal I/Xπ branches with optional reset before preparation.
@@ -97,38 +129,10 @@ class JointReadoutCfg(ConfigBase):
         return self
 
 
-@dataclass(frozen=True)
-class JointReadoutResult:
-    """prepared_f1/f2 are int64 [0,1]; sums is float64 (2,2,3,3) counts.
-
-    Preparation indices are 0=g, 1=e; F1 is outer, giving gg/ge/eg/ee.
-    Class axes are terminal F1,
-    terminal F2, each g/e/other. Rounds add without averaging; unmeasured branches
-    remain NaN. Completed rounds survive cooperative cancellation. Acquisition
-    exceptions propagate unchanged from run; the stop signal carries only stop
-    requests and reason text, not errors or data completeness.
-    """
-
-    sums: NDArray[np.float64]
-
-
-@dataclass(frozen=True)
-class JointReadoutAnalysis:
-    """counts and row-normalized matrix are (4,9), including other outcomes.
-
-    Columns are F1-major g/e/other pairs; acquired_shots is each row's total.
-    Zero-count or unmeasured rows have NaN probabilities.
-    """
-
-    counts: NDArray[np.float64]
-    matrix: NDArray[np.float64]
-    acquired_shots: NDArray[np.float64]
-
-
 def restore_result(data: GroupedLoadData[JointReadoutCfg]) -> JointReadoutResult:
     """Load two-axis sums; old raw-IQ or single-axis files raise ValueError."""
     sums = data.variable("sums")
-    if sums.z.shape != (2, 2, 3, 3):
+    if sums.z.shape != SUMS_SHAPE:
         raise ValueError(
             "Joint readout requires two preparation axes and sums (2,2,3,3)"
         )
@@ -184,21 +188,23 @@ class JointReadoutExp(Experiment[JointReadoutResult, JointReadoutCfg]):
         accumulate at acquisition. cfg is unchanged; completed rounds survive stop.
         """
 
+        # 1. Show terminal gg probability for the four preparation branches.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Nominal preparation (gg, ge, eg, ee)", ylabel="Terminal P(g,g)")
         viewer = live_line(ax)
-        ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+        ax.xaxis.set_major_locator(MaxNLocator(nbins=PREPARED_COUNT))
         ax.grid(False)
         fig.show()
 
         @context.plots.on_plot_thread
         def update_view(sums: NDArray[np.float64]) -> tuple[Line2D, ...]:
             return viewer.set(
-                np.arange(4, dtype=np.float64),
-                joint_probabilities(sums)[..., 0, 0].reshape(4),
+                np.arange(PREPARED_COUNT, dtype=np.float64),
+                joint_probabilities(sums)[..., 0, 0].reshape(PREPARED_COUNT),
             )
 
-        buffer = SignalBuffer((2, 2, 3, 3), dtype=np.float64, on_update=update_view)
+        # 2. Accumulate classified rounds without normalizing away shot totals.
+        buffer = SignalBuffer(SUMS_SHAPE, dtype=np.float64, on_update=update_view)
         with Schedule(buffer, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 context.soccfg,
@@ -242,6 +248,7 @@ class JointReadoutExp(Experiment[JointReadoutResult, JointReadoutCfg]):
                 rounds=config.rounds,
                 options=RunOptions(),
             )
+        # 3. Preserve raw counts, including unmeasured preparation branches.
         return JointReadoutResult(sums=buffer.array)
 
     def analyze(
@@ -252,21 +259,25 @@ class JointReadoutExp(Experiment[JointReadoutResult, JointReadoutCfg]):
         plots: Plots,
     ) -> JointReadoutAnalysis:
         """Normalize counts to a 4×9 matrix, including g/e/other for both roles."""
+        # 1. Normalize terminal counts while retaining each row's shot total.
         del options
         result = source.result
-        if result.sums.shape != (2, 2, 3, 3):
+        if result.sums.shape != SUMS_SHAPE:
             raise ValueError("Joint readout requires sums (2,2,3,3)")
         answer = JointReadoutAnalysis(
-            counts=result.sums.reshape(4, 9),
-            matrix=joint_probabilities(result.sums).reshape(4, 9),
-            acquired_shots=result.sums.sum(axis=(-2, -1)).reshape(4),
+            counts=result.sums.reshape(PREPARED_COUNT, OUTCOME_COUNT),
+            matrix=joint_probabilities(result.sums).reshape(
+                PREPARED_COUNT, OUTCOME_COUNT
+            ),
+            acquired_shots=result.sums.sum(axis=(-2, -1)).reshape(PREPARED_COUNT),
         )
+        # 2. Show all nine terminal classes for each nominal preparation.
         fig, axes = plots.subplots(num="matrix", figsize=(12, 5))
         image = axes.imshow(
             np.ma.masked_invalid(answer.matrix), vmin=0, vmax=1, cmap="Blues"
         )
-        for row in range(4):
-            for col in range(9):
+        for row in range(PREPARED_COUNT):
+            for col in range(OUTCOME_COUNT):
                 value = answer.matrix[row, col]
                 label = (
                     f"{value:.3f}\nn={answer.counts[row, col]:g}"
@@ -275,9 +286,9 @@ class JointReadoutExp(Experiment[JointReadoutResult, JointReadoutCfg]):
                 )
                 axes.text(col, row, label, ha="center", va="center", fontsize=8)
         axes.set(
-            xticks=range(9),
+            xticks=range(OUTCOME_COUNT),
             xticklabels=OUTCOME_LABELS,
-            yticks=range(4),
+            yticks=range(PREPARED_COUNT),
             yticklabels=[
                 f"{label}; n={shots:g}"
                 for label, shots in zip(
@@ -290,4 +301,5 @@ class JointReadoutExp(Experiment[JointReadoutResult, JointReadoutCfg]):
         )
         fig.colorbar(image, ax=axes, label="Row-normalized probability")
         fig.tight_layout()
+        # 3. Return count and probability matrices for the saved analysis.
         return answer

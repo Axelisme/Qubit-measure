@@ -74,12 +74,15 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from functools import partial
-from typing import Annotated, ClassVar
+from typing import Annotated, ClassVar, Literal
 
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import Field, StrictInt, model_validator
+from pydantic.dataclasses import dataclass as validated_dataclass
 from qick import QickConfig
+from zcu_tools.analysis.failure import AnalysisFailed
+from zcu_tools.analysis.fitting import FitQuality, compute_fit_quality, fit_qubit_freq
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import Experiment
 from zcu_tools.experiment.axes_spec import GroupedAxesSpec
@@ -95,9 +98,15 @@ from zcu_tools.program.v2.modules import (
     MuxReadoutCfg,
     Pulse,
 )
+from zcu_tools.utils.process import minus_background, rotate2real
 
 from zcu_lab.v2.support import live_line
-from zcu_lab.v2.support.mux import MuxFitFailure, MuxSweepResult, averaged_mux_signal
+from zcu_lab.v2.support.mux import (
+    MuxFitFailure,
+    MuxSweepResult,
+    averaged_mux_signal,
+    validate_mux_result,
+)
 from zcu_lab.v2.support.mux_persistence import mux_sweep_spec
 from zcu_lab.v2.support.mux_sweep_cfg import (
     MuxDriveToneCfg,
@@ -105,7 +114,78 @@ from zcu_lab.v2.support.mux_sweep_cfg import (
     validate_mux_scan,
 )
 
-from .analysis import FreqAnalyzeOptions, MuxFreqFit, analyze_frequency
+
+@validated_dataclass(frozen=True)
+class FreqAnalyzeOptions:
+    """Line shape for each spectrum: lor magnitude or signed sinc projection."""
+
+    model_type: Annotated[Literal["lor", "sinc"], FieldMeta(label="Model type")] = "lor"
+
+
+@dataclass(frozen=True)
+class MuxFreqFit:
+    """Successful original tone index and MHz spectroscopy estimates.
+
+    freq/fwhm are transition frequency and linewidth. freq_err/fwhm_err are
+    their one-sigma uncertainties. quality reports residuals and fit reliability.
+    """
+
+    index: int
+    freq: float
+    freq_err: float
+    fwhm: float
+    fwhm_err: float
+    quality: FitQuality
+
+
+@dataclass(frozen=True)
+class MuxFreqScan:
+    """Selected tone positions and hardware-rounded frequency axes for a zip scan.
+
+    indices is a nonempty sequence of unique original tone positions, in
+    participant order. coordinates is float64 (K,P) in MHz, with K selected
+    tones and P sweep points. Each row uses that drive's hardware grid;
+    columns advance together by point index, not as a Cartesian product.
+    This record contains no pulses or acquisition state. Treat values as read-only.
+    """
+
+    indices: Sequence[int]
+    coordinates: NDArray[np.float64]
+
+
+def qubfreq_signal2real(
+    signals: NDArray[np.complex128], *, model_type: Literal["lor", "sinc"] = "lor"
+) -> NDArray[np.float64]:
+    """Convert one complex128 IQ spectrum of shape (N,) to float64 contrast.
+
+    Subtract component-wise median background without mutating signals. ``lor``
+    returns the legacy absolute magnitude, also used by the Run live preview.
+    ``sinc`` projects onto the IQ principal axis with the largest absolute
+    excursion positive, retaining opposite-signed sidelobes instead of folding
+    them. The axis has no absolute physical sign; this convention makes the
+    dominant resonance positive at any fixed IQ rotation.
+
+    Return the same shape, preserving NaNs in partial spectra. Constant or
+    single-acquired-point spectra have zero contrast; all-NaN spectra remain
+    NaN. Raise ValueError for an unknown model, empty/non-1-D input, non-complex128
+    dtype or infinities. Principal-axis numerical failures propagate.
+    """
+    if model_type not in ("lor", "sinc"):
+        raise ValueError(f"Invalid frequency model: {model_type!r}")
+    if signals.ndim != 1 or signals.size == 0 or signals.dtype != np.complex128:
+        raise ValueError("Expected a nonempty complex128 spectrum of shape (N,)")
+    if np.any(np.isinf(signals)):
+        raise ValueError("Frequency spectrum must not contain infinities")
+
+    centered = minus_background(signals)
+    if model_type == "lor":
+        return np.abs(centered)
+
+    projected = rotate2real(centered).real
+    acquired = projected[~np.isnan(projected)]
+    if acquired.size and acquired[np.argmax(np.abs(acquired))] < 0:
+        projected = -projected
+    return projected
 
 
 class MuxFreqToneCfg(MuxDriveToneCfg):
@@ -180,21 +260,6 @@ class MuxFreqCfg(ConfigBase):
         """
         validate_mux_scan(self, self.tones, self.participants, self.expts)
         return self
-
-
-@dataclass(frozen=True)
-class MuxFreqScan:
-    """Selected tone positions and hardware-rounded frequency axes for a zip scan.
-
-    indices is a nonempty sequence of unique original tone positions, in
-    participant order. coordinates is float64 (K,P) in MHz, with K selected
-    tones and P sweep points. Each row uses that drive's hardware grid;
-    columns advance together by point index, not as a Cartesian product.
-    This record contains no pulses or acquisition state. Treat values as read-only.
-    """
-
-    indices: Sequence[int]
-    coordinates: NDArray[np.float64]
 
 
 def prepare_frequency_scan(cfg: MuxFreqCfg, *, soccfg: QickConfig) -> MuxFreqScan:
@@ -358,4 +423,64 @@ class MuxFreqExp(Experiment[MuxSweepResult, MuxFreqCfg]):
         selects the line shape. plots receives a fit_i figure with a fitted
         overlay per original tone index. Return estimates or a per-tone failure reason.
         """
-        return analyze_frequency(source.result, options, plots=plots)
+        # 1. Select the acquired values for analysis.
+        result = source.result
+        validate_mux_result(result)
+
+        # Each qubit keeps its own frequency grid and can fail independently.
+        outcomes: list[MuxFreqFit | MuxFitFailure] = []
+        for row, raw_index in enumerate(result.tone_indices):
+            index = int(raw_index)
+            finite = np.isfinite(result.signals[row])
+            xs = result.coordinates[row, finite]
+            signal = result.signals[row, finite]
+            fig, ax = plots.subplots(num=f"fit_{index}", figsize=(8, 5))
+            ax.set(xlabel="Drive frequency (MHz)", ylabel="Signal (a.u.)")
+            fig.suptitle(f"tone {index}")
+
+            # Fit only acquired points; six points are needed for the five-parameter model.
+            try:
+                if len(xs) < 6:
+                    raise ValueError(
+                        "Frequency fit requires at least six acquired points"
+                    )
+                real = qubfreq_signal2real(signal, model_type=options.model_type)
+                freq, ferr, width, werr, fitted, (params, covariance) = fit_qubit_freq(
+                    xs, real, options.model_type
+                )
+                if not np.all(np.isfinite((freq, ferr, width, werr))):
+                    raise ValueError("Frequency fit returned nonfinite estimates")
+                names = ("offset", "slope", "amplitude", "frequency", "width")
+                quality = compute_fit_quality(
+                    real,
+                    fitted,
+                    {
+                        name: float(value)
+                        for name, value in zip(names, params, strict=True)
+                    },
+                    covariance,
+                )
+                outcome = MuxFreqFit(index, freq, ferr, width, werr, quality)
+            except (
+                AnalysisFailed,
+                ValueError,
+                RuntimeError,
+                ArithmeticError,
+                np.linalg.LinAlgError,
+            ) as exc:
+                ax.plot(xs, np.abs(signal), "o", label="acquired magnitude")
+                ax.text(
+                    0.02, 0.98, str(exc), transform=ax.transAxes, va="top", wrap=True
+                )
+                outcomes.append(MuxFitFailure(index, str(exc)))
+            else:
+                ax.plot(xs, real, "o", label="measured")
+                ax.plot(xs, fitted, label=f"FWHM={width:.4g} ± {werr:.2g} MHz")
+                ax.axvline(freq, ls="--", label=f"freq={freq:.7g} ± {ferr:.2g} MHz")
+                outcomes.append(outcome)
+
+            ax.legend()
+            ax.grid(True)
+            fig.tight_layout()
+        # 2. Return the analysis values and quality diagnostics.
+        return tuple(outcomes)

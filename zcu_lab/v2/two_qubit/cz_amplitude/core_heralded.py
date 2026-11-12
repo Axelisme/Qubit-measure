@@ -30,22 +30,13 @@ from .._sums import (
     joint_probabilities,
     terminal_counts,
 )
-from .analysis import (
+from .core import (
     OUTCOME_LABELS,
     CZAmplitudeAnalysis,
+    CZAmplitudeCfg,
     analyze_return,
     summarize_return,
 )
-from .core import CZAmplitudeCfg
-
-
-class CZAmplitudeHeraldedCfg(CZAmplitudeCfg):
-    """Optional reset → herald → B11 → CZ → Xπ⊗Xπ → terminal mux.
-
-    Inherited readout supplies both reads and their g/e/other circle radii.
-    Its post_delay is the wait after herald. reset=None emits no reset.
-    All other fields and units match CZAmplitudeCfg.
-    """
 
 
 @dataclass(frozen=True)
@@ -66,6 +57,15 @@ class CZAmplitudeHeraldedAnalysis:
     """gg first-return fit summary; herald distributions remain plot-local."""
 
     terminal: CZAmplitudeAnalysis
+
+
+class CZAmplitudeHeraldedCfg(CZAmplitudeCfg):
+    """Optional reset → herald → B11 → CZ → Xπ⊗Xπ → terminal mux.
+
+    Inherited readout supplies both reads and their g/e/other circle radii.
+    Its post_delay is the wait after herald. reset=None emits no reset.
+    All other fields and units match CZAmplitudeCfg.
+    """
 
 
 def restore_result(
@@ -120,7 +120,9 @@ class CZAmplitudeHeraldedExp(
         cooperative cancellation. Acquisition exceptions propagate unchanged.
         The stop signal carries only stop requests and reason text.
         """
+        # 1. Prepare the selected scan inputs.
         scales = sweep2array(config.scale)
+        # 2. Display each acquired scan trace.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Common gain scale", ylabel="P(g,g) | herald (g,g)")
         viewer = live_line(ax)
@@ -133,6 +135,7 @@ class CZAmplitudeHeraldedExp(
             counts = terminal_counts(sums, ("g", "g"))
             return viewer.set(scales, joint_probabilities(counts)[..., 0, 0])
 
+        # 3. Acquire the scan and retain completed measurements.
         buffer = SignalBuffer(
             (len(scales), 3, 3, 3, 3), dtype=np.float64, on_update=update_view
         )
@@ -182,6 +185,7 @@ class CZAmplitudeHeraldedExp(
                 options=RunOptions(),
             )
         buffer.trigger_update(flush=True)
+        # 4. Return acquired coordinates and measurements.
         return CZAmplitudeHeraldedResult(scales, buffer.array)
 
     def analyze(
@@ -197,6 +201,7 @@ class CZAmplitudeHeraldedExp(
         classes to determine acquisition completeness. No accepted shots gives
         NaN terminal probabilities and no proposal. Missing cfg raises ValueError.
         """
+        # 1. Select the acquired values for analysis.
         del options
         cfg, result = source.cfg, source.result
         if cfg is None:
@@ -211,6 +216,7 @@ class CZAmplitudeHeraldedExp(
             acquired_shots=result.sums.sum(axis=(-4, -3, -2, -1)),
             expected_shots=cfg.reps * cfg.rounds,
         )
+        # 2. Display the scan traces and fitted curves.
         _, ax = plots.subplots(
             num="joint_return", figsize=(10, 5), layout="constrained"
         )
@@ -265,4 +271,5 @@ class CZAmplitudeHeraldedExp(
             title="Herald (g,g) is pass fraction, not ground-state purity",
         )
         ax.legend()
+        # 3. Return the analysis values and quality diagnostics.
         return CZAmplitudeHeraldedAnalysis(summarize_return(terminal.fit))
