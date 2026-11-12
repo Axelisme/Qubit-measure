@@ -198,9 +198,12 @@ all arrays, models, initial density, optional flux expansion, expected families,
 point order and the reason for each input.
 
 Each pinned family and the separately listed default policy has three modes.
-Each mode keeps five samples, except when its first timed evolve exceeds 60 wall
-seconds. That mode then keeps one sample. The JSON retains every sample; the
-summary states the actual count.
+Normal modes keep five samples. If a family's first empty-history evolve
+exceeds 60 wall seconds, it is the only first-evolve sample. No separate probe
+or warmup runs. Clear-history is unmeasured with n=0, an explicit reason and
+None times. Retain-history immediately runs once in that same session, n=1.
+The JSON retains every sample. Every mode lists its count, including zero.
+Dominance and timing equivalence use only shared measured modes.
 
 The modes are:
 
@@ -225,7 +228,7 @@ above `2e-3` remain FAIL. Existing strict xfails are not removed.
 A competitor dominates only when its maximum full-density error across that
 mode's retained raw samples is no larger and its median time is
 **less than `0.9 * target_time`**. Probe and other-mode errors do not enter this
-comparison. The family-level maximum across probe and all modes remains the
+comparison. The family-level maximum across all timed modes remains the
 overall accuracy/PASS-FAIL value. Exactly 10% is time-equivalent.
 Time-equivalent peers have neither direction faster by more than 10%, regardless
 of error. Wall/CPU and all three modes remain separate; there is no weighted score.
@@ -286,6 +289,10 @@ stays outside family dominance. A greater-than-twofold difference is a finding,
 not a routing change.
 
 `--reference-cache <directory>` enables a local disk cache. It is off by default.
+Prepare real-workload references in a nonexclusive run before timing. Add
+`--reference-cache-only` to the exclusive timing command. A missing or changed
+key then stops before measuring that input, without running a solver.
+Cache-only mode requires a cache directory and forbids injected solvers.
 Keys include complete physical input, both solver tolerance levels and the
 convergence contract. Model identity namespaces and routing history are not
 physical inputs. Cache files contain density and convergence error, with no

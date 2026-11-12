@@ -43,7 +43,7 @@ from tools.family_pareto_inputs import (
     make_inputs,
     physical_input,
 )
-from tools.family_pareto_reference import solve_reference
+from tools.family_pareto_reference import ReferenceCache, solve_reference
 from tools.family_pareto_report import render_summary as render_summary
 
 
@@ -165,9 +165,10 @@ class ModeResult:
     """One history mode's raw samples and separate timing medians.
 
     mode is first_evolve, warm_clear_history or warm_retain_history.
-    samples contains five evolves, or one when its first evolve exceeds 60 wall
-    seconds, in measurement order. wall_median and
-    cpu_median are the respective elapsed-second medians of those samples.
+    Normal modes contain five samples. A slow family's first and retained
+    modes contain one each. Its clear-history mode has samples=[], None times
+    and unmeasured_reason='slow family not measured'. It has no comparison cell.
+    wall_median and cpu_median are separate elapsed-second medians when measured.
     """
 
     mode: str
@@ -187,15 +188,22 @@ def _timed_sample(
     result = session.evolve()
     cpu_elapsed, wall_elapsed = cpu_clock() - cpu, wall_clock() - wall
     return Sample(
-        wall_elapsed, cpu_elapsed,
-        None if reference is None else density_error(result.densities, reference.density),
+        wall_elapsed,
+        cpu_elapsed,
+        None
+        if reference is None
+        else density_error(result.densities, reference.density),
         dict(result.paths.segments_by_kernel),
     )
 
 
 def _measured_mode(name: str, samples: list[Sample]) -> ModeResult:
-    return ModeResult(name, samples, median(s.wall_seconds for s in samples),
-                      median(s.cpu_seconds for s in samples))
+    return ModeResult(
+        name,
+        samples,
+        median(s.wall_seconds for s in samples),
+        median(s.cpu_seconds for s in samples),
+    )
 
 
 def measure_family(
@@ -214,6 +222,7 @@ def measure_family(
     each warm mode. Setup, cleanup, history clearing and inspection are untimed.
     No process or disk-cache reset occurs here. Failures always propagate.
     """
+
     def sample(session: EngineSession) -> Sample:
         return _timed_sample(session, reference, wall_clock, cpu_clock)
 
@@ -223,7 +232,9 @@ def measure_family(
             retained = sample(session)
             return [
                 _measured_mode("first_evolve", [first]),
-                ModeResult("warm_clear_history", [], None, None, "slow family not measured"),
+                ModeResult(
+                    "warm_clear_history", [], None, None, "slow family not measured"
+                ),
                 _measured_mode("warm_retain_history", [retained]),
             ]
     samples = [first]
@@ -249,7 +260,7 @@ class FamilyResult:
     """Pinned family or default policy; unavailable has reason and no samples.
 
     family is a pinned family name, or 'default' for normal routing.
-    error is the maximum density error across probe and all timed evolves for
+    error is the maximum density error across all timed evolves for
     overall accuracy reporting/PASS-FAIL, never an assumed exact-solver zero.
     unavailable is the refusal reason, with error=None and modes=[]; otherwise
     unavailable=None and modes contains each of the three history modes once,
@@ -273,6 +284,13 @@ class FamilyResult:
     """
     whitelist: tuple[str, ...] | None = None
     """Actual families restriction; None denotes unrestricted default routing."""
+
+
+def _mode_time(mode: ModeResult, metric: str) -> float:
+    value = mode.wall_median if metric == "wall" else mode.cpu_median
+    if value is None:
+        raise ValueError("measured mode requires timing")
+    return value
 
 
 def _mode_error(mode: ModeResult) -> float:
@@ -307,8 +325,11 @@ def _available_modes(rows: list[FamilyResult]) -> dict[str, dict[str, ModeResult
                 if not (
                     mode.mode == "warm_clear_history"
                     and mode.unmeasured_reason == "slow family not measured"
-                    and not mode.samples and mode.wall_median is None and mode.cpu_median is None
-                    and len(first.samples) == 1 and first.samples[0].wall_seconds > 60
+                    and not mode.samples
+                    and mode.wall_median is None
+                    and mode.cpu_median is None
+                    and len(first.samples) == 1
+                    and first.samples[0].wall_seconds > 60
                     and len(by_name["warm_retain_history"].samples) == 1
                 ):
                     raise ValueError(f"{row.family}: invalid unmeasured history mode")
@@ -328,10 +349,10 @@ def dominance(rows: list[FamilyResult]) -> dict[str, dict[str, list[str]]]:
     Error is the maximum of that history mode's raw sample density errors;
     probe/other-mode errors and FamilyResult.error do not enter this comparison.
     Equality at ten percent is equivalent timing, with no error epsilon.
-    All three unique history modes are required per available row, in any order;
-    missing/duplicate/unknown modes raise ValueError. Available rows also require
-    an overall error and nonempty measured density errors in every mode;
-    timing/path-only results raise ValueError, never become unavailable.
+    All three unique modes are required in any order. Missing, duplicate and
+    unknown modes raise. A slow family's explicitly unmeasured clear-history
+    mode is excluded. Other empty modes, missing errors and timing/path-only
+    rows raise ValueError. Comparisons use only shared measured modes.
     """
     modes = _available_modes(rows)
     available = [r for r in rows if r.family in modes]
@@ -340,18 +361,14 @@ def dominance(rows: list[FamilyResult]) -> dict[str, dict[str, list[str]]]:
         cells = {}
         for mode in modes[target.family].values():
             for metric in ("wall", "cpu"):
-                target_time = mode.wall_median if metric == "wall" else mode.cpu_median
+                target_time = _mode_time(mode, metric)
                 cells[f"{mode.mode}/{metric}"] = [
                     other.family
                     for other in available
                     if other.family != target.family
                     and mode.mode in modes[other.family]
                     and _mode_error(modes[other.family][mode.mode]) <= _mode_error(mode)
-                    and (
-                        modes[other.family][mode.mode].wall_median
-                        if metric == "wall"
-                        else modes[other.family][mode.mode].cpu_median
-                    )
+                    and _mode_time(modes[other.family][mode.mode], metric)
                     < 0.9 * target_time
                 ]
         result[target.family] = cells
@@ -437,6 +454,28 @@ class _InitialRefusal(Exception):
     """A matched refusal from the first evolve, distinct from cleanup failures."""
 
 
+def _availability_opener(opener: SessionOpener) -> SessionOpener:
+    first = True
+
+    @contextmanager
+    def checked_session() -> Generator[EngineSession]:
+        with opener() as session:
+
+            def evolve() -> EvolutionResult:
+                nonlocal first
+                initial, first = first, False
+                try:
+                    return session.evolve()
+                except RuntimeError as error:
+                    if initial and re.fullmatch(UNAVAILABLE_PATTERN, str(error)):
+                        raise _InitialRefusal(str(error)) from error
+                    raise
+
+            yield EngineSession(evolve, session.clear_history, session.subset_refusal)
+
+    return checked_session
+
+
 def measure_policy(
     item: Input,
     family: str,
@@ -446,7 +485,7 @@ def measure_policy(
     wall_clock: Callable[[], float] = perf_counter,
     cpu_clock: Callable[[], float] = process_time,
 ) -> FamilyResult:
-    """Probe availability, then measure a fixed family or default policy.
+    """Measure a fixed family or default; the first timed evolve tests availability.
 
     Only the public missing-kernel/domain refusal may become unavailable.
     Other setup/evolve/cleanup failures propagate. Every measured pinned path
@@ -473,26 +512,15 @@ def measure_policy(
         if family == "default"
         else tuple(dict.fromkeys((family, *item.companions)))
     )
-    first = True
-
-    @contextmanager
-    def checked_session() -> Generator[EngineSession]:
-        with opener(item, family) as session:
-            def evolve() -> EvolutionResult:
-                nonlocal first
-                initial, first = first, False
-                try:
-                    return session.evolve()
-                except RuntimeError as error:
-                    if initial and re.fullmatch(UNAVAILABLE_PATTERN, str(error)):
-                        raise _InitialRefusal(str(error)) from error
-                    raise
-            yield EngineSession(evolve, session.clear_history, session.subset_refusal)
-
+    checked_session = _availability_opener(lambda: opener(item, family))
     try:
-        modes = measure_family(checked_session, reference, wall_clock=wall_clock, cpu_clock=cpu_clock)
+        modes = measure_family(
+            checked_session, reference, wall_clock=wall_clock, cpu_clock=cpu_clock
+        )
     except _InitialRefusal as error:
-        return FamilyResult(family, None, str(error), [], domains=domains, whitelist=whitelist)
+        return FamilyResult(
+            family, None, str(error), [], domains=domains, whitelist=whitelist
+        )
     companions = tuple(name for name in item.companions if name != family)
     refusals = {}
     if companions:
@@ -573,11 +601,10 @@ def timing_equivalents(rows: list[FamilyResult]) -> dict[str, dict[str, list[str
 
     This is symmetric: other_time >= .9*target_time and target_time >=
     .9*other_time. It is not Pareto dominance and never merges wall and CPU.
-    All three unique history modes are required per available row, in any order;
-    missing/duplicate/unknown modes raise ValueError. Unavailable and default
-    rows are omitted. Available rows require an overall error and nonempty
-    measured density errors in every mode; timing/path-only results raise
-    ValueError rather than becoming unavailable.
+    All three unique history modes are required in any order. A slow family's
+    explicitly unmeasured clear-history mode is excluded. Other empty modes,
+    missing/duplicate/unknown modes, missing errors and timing/path-only rows
+    raise ValueError. Unavailable and default rows are omitted.
     """
     modes = _available_modes(rows)
     available = [r for r in rows if r.family in modes]
@@ -586,16 +613,15 @@ def timing_equivalents(rows: list[FamilyResult]) -> dict[str, dict[str, list[str
         cells = {}
         for mode in modes[target.family].values():
             for metric in ("wall", "cpu"):
-                target_time = mode.wall_median if metric == "wall" else mode.cpu_median
+                target_time = _mode_time(mode, metric)
                 peers = []
                 for other in available:
-                    if other.family == target.family or mode.mode not in modes[other.family]:
+                    if (
+                        other.family == target.family
+                        or mode.mode not in modes[other.family]
+                    ):
                         continue
-                    other_time = (
-                        modes[other.family][mode.mode].wall_median
-                        if metric == "wall"
-                        else modes[other.family][mode.mode].cpu_median
-                    )
+                    other_time = _mode_time(modes[other.family][mode.mode], metric)
                     if (
                         other_time >= 0.9 * target_time
                         and target_time >= 0.9 * other_time
@@ -632,7 +658,7 @@ def run_table(
     *,
     reference_solver: Callable[[ModelSource, TimelineBatch], ReferenceResult]
     | None = None,
-    reference_cache: Path | None = None,
+    reference_cache: Path | ReferenceCache | None = None,
     policy_runner: Callable[
         [Input, str, ReferenceResult], FamilyResult
     ] = measure_policy,
@@ -647,9 +673,18 @@ def run_table(
     Real inputs use the exact interaction-picture solver; synthetic inputs keep
     the lab-frame solver. reference_cache optionally persists complete references;
     an injected reference_solver owns its own caching and tolerance contract.
+    ReferenceCache(only=True) requires a disk hit before any timing, never solving
+    inside the batch. It cannot be combined with an injected reference_solver.
     Real default paths are also timed with their observed family union pinned,
     separately from dominance. group_runner overrides only that group measurement.
     """
+    cache = (
+        reference_cache
+        if isinstance(reference_cache, ReferenceCache)
+        else ReferenceCache(reference_cache)
+    )
+    if cache.only and reference_solver is not None:
+        raise ValueError("cache-only timing cannot use an injected reference solver")
     references: dict[str, ReferenceResult] = {}
     rows = []
     for index, item in enumerate(inputs):
@@ -668,7 +703,8 @@ def run_table(
                         solver=interaction_reference
                         if item.category == "real"
                         else converged_reference,
-                        cache_dir=reference_cache,
+                        cache_dir=cache.directory,
+                        cache_only=cache.only,
                     )
                 )
                 oracle_wall, oracle_cpu = perf_counter() - wall, process_time() - cpu
@@ -744,6 +780,7 @@ def main(argv: list[str] | None = None, *, inputs: list[Input] | None = None) ->
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--provider", action="append", default=[])
     parser.add_argument("--reference-cache", type=Path)
+    parser.add_argument("--reference-cache-only", action="store_true")
     parser.add_argument("--include-synthetic", action="store_true")
     parser.add_argument("--freeze-inputs", type=Path)
     parser.add_argument("--manifest", type=Path)
@@ -772,7 +809,12 @@ def main(argv: list[str] | None = None, *, inputs: list[Input] | None = None) ->
                 "frozen manifest differs from current inputs; do not tune inputs after measurement"
             )
         state = tested_state()
-        rows = run_table(items, reference_cache=args.reference_cache)
+        rows = run_table(
+            items,
+            reference_cache=ReferenceCache(
+                args.reference_cache, only=args.reference_cache_only
+            ),
+        )
         result = {
             "schema_version": 1,
             "manifest": manifest,
@@ -806,6 +848,9 @@ def main(argv: list[str] | None = None, *, inputs: list[Input] | None = None) ->
                 "workers": 1,
                 "maximum_samples_per_mode": 5,
                 "slow_first_evolve_wall_seconds": 60,
+                "slow_clear_history": "unmeasured; n=0; no median or dominance",
+                "slow_retain_history": "same session immediately after first evolve; n=1",
+                "reference_cache_only": args.reference_cache_only,
                 "reference_cache": str(args.reference_cache)
                 if args.reference_cache
                 else None,

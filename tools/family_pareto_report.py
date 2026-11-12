@@ -25,7 +25,9 @@ def _render_fixed_group(row: InputResult) -> list[str]:
     for mode in fixed.modes:
         original = defaults[mode.mode]
         if not mode.samples or not original.samples:
-            lines.append(f"| {mode.mode} | — | — | {len(mode.samples)} | slow family not measured | — | — |")
+            lines.append(
+                f"| {mode.mode} | — | — | {len(mode.samples)} | slow family not measured | — | — |"
+            )
             continue
         for metric, default_time, fixed_time in (
             ("wall", original.wall_median, mode.wall_median),
@@ -41,6 +43,36 @@ def _render_fixed_group(row: InputResult) -> list[str]:
                 f"{len(mode.samples)} | {mode.samples[0].paths} | {ratio_text} | {finding} |"
             )
     return [*lines, ""]
+
+
+def _policy_lines(row: InputResult) -> list[str]:
+    lines: list[str] = []
+    for policy in row.policies:
+        if policy.error is None:
+            lines.append(
+                f"| {policy.family} | — | unavailable: {policy.unavailable} | — | — | — | — | — | — |"
+            )
+            continue
+        for mode in policy.modes:
+            if not mode.samples:
+                lines.append(
+                    f"| {policy.family} | — | 慢 family 未量: {mode.unmeasured_reason} | {mode.mode} | — | 0 | — | — | — |"
+                )
+                continue
+            for metric, value in (
+                ("wall", mode.wall_median),
+                ("cpu", mode.cpu_median),
+            ):
+                if value is None:
+                    raise ValueError("measured mode has missing time")
+                cell = f"{mode.mode}/{metric}"
+                competitors = row.dominators.get(policy.family, {}).get(cell, [])
+                peers = row.timing_equivalents.get(policy.family, {}).get(cell, [])
+                lines.append(
+                    f"| {policy.family} | {policy.error:.12g} | {'PASS' if policy.error <= 2e-3 else 'FAIL'} | "
+                    f"{cell} | {value:.9g} | {len(mode.samples)} | {mode.samples[0].paths} | {', '.join(competitors) or 'none'} | {', '.join(peers) or 'none'} |"
+                )
+    return lines
 
 
 def render_summary(
@@ -131,31 +163,7 @@ def render_summary(
             "| Family | Density error | Status | Mode/metric | Median seconds | Samples | Actual path | Dominators | Time-equivalent peers |",
             "| --- | ---: | --- | --- | ---: | ---: | --- | --- | --- |",
         ]
-        for policy in row.policies:
-            if policy.error is None:
-                lines.append(
-                    f"| {policy.family} | — | unavailable: {policy.unavailable} | — | — | — | — | — | — |"
-                )
-                continue
-            for mode in policy.modes:
-                if not mode.samples:
-                    lines.append(f"| {policy.family} | — | 慢 family 未量: {mode.unmeasured_reason} | {mode.mode} | — | 0 | — | — | — |")
-                    continue
-                for metric, value in (
-                    ("wall", mode.wall_median),
-                    ("cpu", mode.cpu_median),
-                ):
-                    if value is None:
-                        raise ValueError("measured mode has missing time")
-                    cell = f"{mode.mode}/{metric}"
-                    competitors = row.dominators.get(policy.family, {}).get(cell, [])
-                    peers = row.timing_equivalents.get(policy.family, {}).get(cell, [])
-                    lines.append(
-                        f"| {policy.family} | {policy.error:.12g} | {'PASS' if policy.error <= 2e-3 else 'FAIL'} | "
-                        f"{cell} | {value:.9g} | {len(mode.samples)} | {mode.samples[0].paths} | {', '.join(competitors) or 'none'} | {', '.join(peers) or 'none'} |"
-                    )
+        lines += _policy_lines(row)
         lines.append("")
         lines += _render_fixed_group(row)
     return "\n".join(lines) + "\n"
-
-
