@@ -9,8 +9,10 @@ the calibrated Pi03 pulse, then measure the 3–2 transition.
 Compute the carrier center as (measured f03 − measured f32) / 2 in MHz.
 The form leaves this field blank. It does not read a simulator spectrum.
 
-Prepare a sampled arbitrary waveform asset before running. A baseline envelope
-is sqrt(sin(pi*t/T)) for 0 ≤ t ≤ T, equivalent to a centered sqrt(cos) pulse.
+Choose any supported drive waveform: arb, cosine, gauss, drag, const or flat_top.
+The default editor selects arb and needs a waveform asset.
+To use sqrt(sin(pi*t/T)) for 0 ≤ t ≤ T, select arb and prepare an asset;
+this shape is equivalent to a centered sqrt(cos) pulse.
 For example, a 0.1 us asset uses the formula
 `sqrt(abs(sin(pi*t/0.1)))` over a single 0.1 us segment with peak normalization.
 Choose that asset in the Raman drive waveform editor.
@@ -31,7 +33,7 @@ or collects new references. Preparation-label fractions are not gate fidelity.
 ## Configure the form
 
 Open **New Tab → twotone → raman_gf**.
-Choose the Raman drive generator, NQZ, phase and sampled waveform.
+Choose the Raman drive generator, NQZ, phase and waveform.
 The scan supplies the drive frequency and gain; they are not independent fields.
 Select the readout module, then confirm its generator, ADC, frequency, gain,
 waveform, integration length and trigger offset.
@@ -39,8 +41,8 @@ waveform, integration length and trigger offset.
 The form lists drive and readout first, then carrier center, scan mode, ranges,
 shots and relaxation time.
 A kickstart entry supplies wiring and nominal readout candidates, not pulse or
-readout timing calibration. Blank carrier, waveform asset or required timing
-keeps Run disabled.
+readout timing calibration. A blank carrier or required timing keeps Run disabled.
+An arb waveform also needs its asset before Run becomes available.
 Entering a spectroscopy carrier alone does not complete the readout.
 An existing readout slot is used on Open or Reset; its presence does not prove
 that its settings or classifier remain calibrated.
@@ -50,16 +52,14 @@ The modes use the following ranges:
 | Mode | Varied quantities | Held value |
 | --- | --- | --- |
 | frequency | Two-photon detuning | Gain start |
-| area | Drive gain | Detuning start |
-| frequency_area | Detuning × gain | None |
+| gain | Drive gain | Detuning start |
+| frequency_gain | Detuning × gain | None |
 
 Two-photon detuning is `2*f_drive − 2*carrier_center`, in MHz.
 A positive value raises the single carrier by half that detuning.
-Area is `gain² * integral(abs(envelope)² dt)`, in gain² us.
-It describes the source envelope, not a calibrated rotation angle.
+Drive gain is a DAC full-scale fraction (a.u.), not a calibrated rotation angle.
 QICK quantizes the carrier and gain; saved coordinates use those actual values.
-The intensity integral uses source samples and does not account for DAC
-interpolation or timing quantization.
+The scan does not calculate a two-photon area or normalize gains between waveforms.
 
 Confirm nonnegative gain, shots per point and a relaxation interval appropriate
 for ground preparation. Each point sends one Raman pulse followed immediately
@@ -72,7 +72,7 @@ The shots field sets repetitions per point in one round, not a saved shot axis.
 Points are ordered by detuning first, then gain.
 The measurement plot shows counts divided by the total count at each point.
 Stop retains completed rows and leaves unfinished rows as NaN.
-Save keeps counts, actual detuning, gain and area together with this run's cfg.
+Save keeps counts, actual detuning and gain together with this run's cfg.
 It does not copy a later library change into an existing result.
 
 After changing source parameters or library bindings, Reset captures them again
@@ -85,8 +85,8 @@ Restart the application after changing a fixed framework dependency.
 
 Open Analysis and click Analyze after Run. The measurement figure retains raw
 g/e/f fractions. Analysis normalizes counts and shows raw and confusion-corrected g/e/f
-estimates separately. Frequency and area modes show two sets of three curves.
-Frequency-area mode shows six maps with actual detuning and source-area axes.
+estimates separately. Frequency and gain modes show two sets of three curves.
+Frequency-gain mode shows six maps with actual detuning and drive-gain axes.
 The title reports the saved training matrix's condition number and minimum
 singular value. The summary contains only the training confusion matrix and
 these two diagnostics; per-point fractions stay in the figures.
@@ -106,6 +106,13 @@ discards results after confirmation and restores tab inputs, not acquired data.
 A fresh process may restore inputs through the configured startup script.
 Load the saved native file to recover and reanalyze acquired data.
 
+Older files with an extra area coordinate still load their counts, detuning and gain.
+The raw file retains area; the current result uses only detuning and gain.
+An old `frequency` configuration still restores and can be analyzed.
+Old `area` and `frequency_area` configurations fail mode validation.
+Their numeric data remains readable, but Analyze rejects the missing saved cfg.
+The loader does not rename these modes or substitute a current readout calibration.
+
 ## MCP recipe
 
 Use `recipe_guide(adapter="twotone/raman_gf")` to read this guide.
@@ -117,12 +124,12 @@ preserving their family. Choose an arbitrary waveform source before setting
 that key. The default Raman Form already uses the arbitrary family.
 `readout_ref` selects the acquired centroid3 readout library module.
 
-`scan_mode` accepts frequency, area and frequency_area.
+`scan_mode` accepts frequency, gain and frequency_gain.
 `detuning_start_mhz`, `detuning_stop_mhz` and `detuning_n` set the detuning axis.
 `gain_start`, `gain_stop` and `gain_n` set the nonnegative native gain axis.
-Each `n` maps to its saved cfg `expts`. Frequency holds gain start; area holds
+Each `n` maps to its saved cfg `expts`. Frequency holds gain start; gain holds
 detuning start. Detuning is two-photon MHz; a positive offset raises the single
-carrier by half that value. The area unit is gain² us, not a calibrated angle.
+carrier by half that value. Drive gain uses DAC full-scale fraction (a.u.).
 `shots` sets repetitions per point; `relax_delay_us` uses us.
 
 Omitted inputs retain Form values and sources; explicit null goes unchanged to

@@ -1,12 +1,32 @@
 # zcu_tools.analysis.fitting
 
-**Last updated:** 2026-11-12，ALLXY coherent errors 與 paired RB
+**Last updated:** 2026-11-12，Phase regressions、ALLXY coherent errors 與 paired RB
 
 **讀者：** lab-author。擬合模型、數值輸入、結果與失敗契約速查。
 
 `singleshot_rabi` 提供 raw-IQ sweep 的 pooled PCA、joint population fitting 與 circle-classification calibration。`fit_rabi_joint` 接收純數值，回傳完整 `RabiJointFitResult`，包含 physical parameters、population arrays 與 optimizer diagnostics。Cfg 讀取與繪圖由實驗 caller 負責。Pulse length 與 gain 使用相同 coordinate 契約，gain caller 明確關閉 decay。
 
 Caller 畫完圖後可用 `summarize_rabi_joint_fit(result)` 產生 `RabiJointFitSummary`。摘要保留擬合值、pre-pulse populations、confusion matrix 與分類校準。`RabiBackendSummary` 保留 parameter_names、values、std、valid 與 nll；std 為完整 covariance 對角線的平方根。摘要複製固定大小陣列，不保留逐點 populations、projection 或完整 covariance，也不重跑 fitter。完整數值結果仍可供局部畫圖與 covariance 計算使用。
+
+## Phase regressions
+
+`phase_slopes.fit_phase_slopes(n, quadratures, variances, acquired_shots)` fits
+X/Y observations from independent groups with a shared slope per channel and
+coordinate slice. It delegates optimization and residual-scaled covariance to
+`shared`. Each group must independently resolve the integer-axis gcd alias.
+`PhaseSlopeFit` owns slopes, standard errors, backend results and failure reasons.
+
+`phase_modulation.fit_phase_modulation(phases, squared_rates)` fits
+`A + B cos(phase) + C sin(phase)`. `PhaseModulationFit` owns the coefficients,
+residual-scaled covariance, maximum phase and its propagated uncertainty.
+Rank deficiency and roundoff-zero modulation leave the maximum unavailable.
+
+`phase_line.fit_phase_line(n, phase_degrees, variances)` unwraps with period 360°
+and fits a weighted line. `PhaseLineFit` owns the curve and absolute-variance
+covariance without residual scaling. Adjacent half turns are ambiguous.
+All three APIs use degrees; each result documents its axes, units and failure
+fields. Callers retain count reduction, slice selection, completeness policy,
+calibration correction signs and plots. No numerical fitter imports lab types.
 
 ## Paired randomized benchmarking
 

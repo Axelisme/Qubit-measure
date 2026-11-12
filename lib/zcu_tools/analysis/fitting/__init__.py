@@ -37,6 +37,9 @@ from .irb import (
 )
 from .multi_decay import fit_transition_rates
 from .peaks import PeakCandidate, detect_peaks
+from .phase_line import PhaseLineFit, fit_phase_line
+from .phase_modulation import PhaseModulationFit, fit_phase_modulation
+from .phase_slopes import PhaseSlopeFit, fit_phase_slopes
 from .quality import FitQuality, QualityIssue, compute_fit_quality, decay_time_bounds
 from .qubfreq import fit_qubit_freq
 from .rabi import fit_rabi
