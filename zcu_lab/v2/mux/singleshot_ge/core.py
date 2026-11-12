@@ -138,18 +138,13 @@ class MuxGECfg(ConfigBase):
         if len(self.tones) != len(self.readout.tones):
             raise ValueError("tones must match the complete readout tone count")
         validate_participants([tone.name for tone in self.tones], self.participants)
-        channels: set[int] = set()
         for index in self.participants:
             tone = self.tones[index]
             tone.validate_pulses()
-            if (
-                tone.require_drive().ch in channels
-                or tone.require_drive().ch == self.readout.gen_ch
-            ):
+            if tone.require_drive().ch == self.readout.gen_ch:
                 raise ValueError(
                     f"tones[{index}].drive requires an independent generator"
                 )
-            channels.add(tone.require_drive().ch)
         return self
 
 

@@ -92,7 +92,7 @@ def validate_mux_tones(
 
     cfg provides shared positive reps/rounds and finite nonnegative delays in us.
     tones must match the full numeric readout length. Each active drive channel must
-    be distinct and different from readout.gen_ch. Raise ValueError with original
+    differ from readout.gen_ch. Raise ValueError with original
     indices/actual values; never read bindings or change inputs. No sweep is needed.
     """
     # Check complete readout dimensions before indexing full tones.
@@ -103,16 +103,14 @@ def validate_mux_tones(
     validate_participants([tone.name for tone in tones], participants)
 
     # Only participants consume drives; readout still contains every tone.
-    channels: dict[int, int] = {}
     for i in participants:
         tone = tones[i]
         tone.validate_tone()
         drive = tone.require_drive()
-        if drive.ch == cfg.readout.gen_ch or drive.ch in channels:
+        if drive.ch == cfg.readout.gen_ch:
             raise ValueError(
-                f"tones[{i}].drive.ch={drive.ch}: requires independent generator; prior tone={channels.get(drive.ch)}; readout.gen_ch={cfg.readout.gen_ch}"
+                f"tones[{i}].drive.ch={drive.ch}: drive and readout require different generators"
             )
-        channels[drive.ch] = i
 
 
 def validate_mux_scan(

@@ -88,9 +88,7 @@ class JointReadoutHeraldedCfg(ConfigBase):
 
     @model_validator(mode="after")
     def validate_pair(self) -> Self:
-        """Require distinct charge generators and calibrated F1/F2 role tones."""
-        if self.x180_f1.ch == self.x180_f2.ch:
-            raise ValueError("F1/F2 Xπ pulses require different charge generators")
+        """Require calibrated F1/F2 role tones."""
         validate_classifiers(self.readout, self.roles)
         return self
 

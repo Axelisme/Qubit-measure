@@ -41,9 +41,7 @@ class DualLineCfg(ConfigBase):
 
     @model_validator(mode="after")
     def validate_lines(self) -> Self:
-        """Reject non-scalar/mismatched timing or frequency and shared generators."""
-        if self.f1.ch == self.f2.ch:
-            raise ValueError("Dual-line drive requires independent charge generators")
+        """Reject non-scalar/mismatched timing or frequency."""
         durations: list[float] = []
         for pulse in (self.f1, self.f2):
             for name, value in (
