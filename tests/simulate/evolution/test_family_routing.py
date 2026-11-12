@@ -10,6 +10,7 @@ from zcu_tools.simulate.evolution import (
     FluxExpansion,
     FluxWaveform,
     ModelSource,
+    NoValidKernel,
 )
 from zcu_tools.simulate.evolution.kernel import GuardResult
 
@@ -104,6 +105,74 @@ def test_empty_domain_reports_affected_points_and_segments(domain):
         RuntimeError, match=rf"domain {domain}.*points.*42.*segments.*0"
     ):
         run(Engine(1, families=()), src, (timeline,))
+
+
+def test_guard_refusal_exposes_read_only_segment_context():
+    timeline = replace(
+        batch(2),
+        points=np.array([42, 7]),
+        tracks=(track(2, EnvelopeSpec("constant")),),
+    )
+    with pytest.raises(NoValidKernel) as caught:
+        run(
+            Engine(
+                1,
+                kernels=(RecordingKernel("dyson", accepts=False),),
+                families=("t4", "dyson"),
+            ),
+            source(),
+            (timeline,),
+        )
+    error = caught.value
+    assert isinstance(error, RuntimeError)
+    assert error.domain == "plateau"
+    assert error.points == (7, 42)
+    assert error.segments == (0, 1)
+    assert error.attempted == ("dyson",)
+    assert str(error) == (
+        "no valid kernel for segment 0; domain plateau: points [7, 42], segments [0, 1]"
+    )
+    for field in ("domain", "points", "segments", "attempted"):
+        with pytest.raises(AttributeError):
+            setattr(error, field, None)
+
+
+def test_allowlist_without_domain_candidates_has_no_attempted_families():
+    timeline = replace(batch(1), tracks=(track(1, EnvelopeSpec("constant")),))
+    with pytest.raises(NoValidKernel, match="no valid kernel for segment") as caught:
+        run(Engine(1, families=("t4",)), source(), (timeline,))
+    assert caught.value.domain == "plateau"
+    assert caught.value.points == (0,)
+    assert caught.value.segments == (0,)
+    assert caught.value.attempted == ()
+
+
+def test_default_refusal_lists_final_candidates_in_dispatch_order():
+    timeline = replace(batch(1), tracks=(track(1, EnvelopeSpec("constant")),))
+    kernels = tuple(
+        RecordingKernel(name, accepts=False)
+        for name in ("dyson", "single_tone_rwa", "floquet_period", "t6")
+    )
+    with pytest.raises(NoValidKernel, match="no valid kernel for segment") as caught:
+        run(Engine(1, kernels=kernels, families=None), source(), (timeline,))
+    assert caught.value.domain == "plateau"
+    assert caught.value.attempted == (
+        "dyson",
+        "single_tone_rwa",
+        "floquet_period",
+        "t6",
+    )
+
+
+def test_cost_skipped_allowed_family_is_listed_after_precondition_refusal():
+    pulse = track(1, EnvelopeSpec("constant"))
+    timeline = replace(
+        batch(1),
+        tracks=(pulse, replace(pulse, frequency_ghz=np.array([-0.1]))),
+    )
+    with pytest.raises(NoValidKernel, match="domain two") as caught:
+        run(Engine(1, families=("common_frame",)), source(), (timeline,))
+    assert caught.value.attempted == ("common_frame",)
 
 
 def test_pinned_family_rejected_by_numerical_guard_does_not_reroute():

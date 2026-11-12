@@ -21,6 +21,7 @@ from .engine import (
     merge_path_diagnostics,
     segment_spans,
 )
+from .exceptions import NoValidKernel
 from .joint_fock import (
     JointFockDiagnostic,
     JointFockRequest,
