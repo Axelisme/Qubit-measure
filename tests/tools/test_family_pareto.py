@@ -1,6 +1,6 @@
 """Public Engine-only measurement and comparison contracts, without real timers."""
 
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from dataclasses import replace
 from itertools import count
@@ -8,7 +8,21 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from family_pareto import (
+from zcu_tools.simulate.evolution import (
+    EvolutionResult,
+    ModelSource,
+    PathDiagnostics,
+    RoutingHistory,
+    TimelineBatch,
+)
+
+from tests.simulate.evolution.contract.accuracy_cases import accuracy_case, history_case
+from tests.simulate.evolution.contract.guard_sweep_cost import measure_engine_cost
+from tests.simulate.evolution.contract.reference import (
+    ReferenceResult,
+    converged_reference,
+)
+from tools.family_pareto import (
     EngineSession,
     FamilyResult,
     ModeResult,
@@ -20,23 +34,13 @@ from family_pareto import (
     run_table,
     timing_equivalents,
 )
-from family_pareto_inputs import Input
-from zcu_tools.simulate.evolution import (
-    EvolutionResult,
-    ModelSource,
-    PathDiagnostics,
-    RoutingHistory,
-    TimelineBatch,
-)
-
-from tests.simulate.evolution.contract.accuracy_cases import accuracy_case, history_case
-from tests.simulate.evolution.contract.reference import (
-    ReferenceResult,
-    converged_reference,
-)
+from tools.family_pareto_inputs import Input
 
 
-def test_three_modes_time_five_samples_and_exclude_setup_warmup_clear() -> None:
+@pytest.mark.parametrize("measure_errors", [True, False])
+def test_three_modes_time_five_samples_and_exclude_setup_warmup_clear(
+    measure_errors: bool,
+) -> None:
     visits: list[list[int]] = []
     clock = count()
     density = np.eye(2, dtype=np.complex128)[None] / 2
@@ -63,7 +67,7 @@ def test_three_modes_time_five_samples_and_exclude_setup_warmup_clear() -> None:
 
     result = measure_family(
         session,
-        ReferenceResult(density, 0.0),
+        ReferenceResult(density, 0.0) if measure_errors else None,
         wall_clock=lambda: float(next(clock)),
         cpu_clock=lambda: float(next(clock)),
     )
@@ -86,7 +90,8 @@ def test_three_modes_time_five_samples_and_exclude_setup_warmup_clear() -> None:
         assert mode.wall_median == 3.0
         assert mode.cpu_median == 1.0
         assert all(sample.paths == {"t4": 1} for sample in mode.samples)
-        assert all(sample.density_error == 0 for sample in mode.samples)
+        expected_error = 0 if measure_errors else None
+        assert all(sample.density_error == expected_error for sample in mode.samples)
 
 
 def test_dominance_keeps_ten_percent_boundary_modes_clocks_and_exact_errors_separate() -> (
@@ -129,21 +134,133 @@ def test_dominance_keeps_ten_percent_boundary_modes_clocks_and_exact_errors_sepa
 
 
 @pytest.mark.parametrize("compare", [dominance, timing_equivalents])
-def test_comparisons_pair_history_modes_by_name(compare) -> None:
+def test_comparisons_pair_history_modes_by_name(
+    compare: Callable[[list[FamilyResult]], dict[str, dict[str, list[str]]]],
+) -> None:
     target = FamilyResult(
-        "target", 0.001, None,
-        [ModeResult(mode, [Sample(time, time, 0.001, {})] * 5, time, time)
-         for mode, time in (("first_evolve", 10), ("warm_clear_history", 20),
-                            ("warm_retain_history", 40))],
+        "target",
+        0.001,
+        None,
+        [
+            ModeResult(mode, [Sample(time, time, 0.001, {})] * 5, time, time)
+            for mode, time in (
+                ("first_evolve", 10),
+                ("warm_clear_history", 20),
+                ("warm_retain_history", 40),
+            )
+        ],
     )
     other = replace(target, family="other", modes=list(reversed(target.modes)))
     result = compare([target, other])
     expected = [] if compare is dominance else ["other"]
     assert result["target"] == {
-        "first_evolve/wall": expected, "first_evolve/cpu": expected,
-        "warm_clear_history/wall": expected, "warm_clear_history/cpu": expected,
-        "warm_retain_history/wall": expected, "warm_retain_history/cpu": expected,
+        "first_evolve/wall": expected,
+        "first_evolve/cpu": expected,
+        "warm_clear_history/wall": expected,
+        "warm_clear_history/cpu": expected,
+        "warm_retain_history/wall": expected,
+        "warm_retain_history/cpu": expected,
     }
+
+
+@pytest.mark.parametrize("compare", [dominance, timing_equivalents])
+def test_comparisons_reject_missing_history_modes(
+    compare: Callable[[list[FamilyResult]], dict[str, dict[str, list[str]]]],
+) -> None:
+    row = FamilyResult(
+        "incomplete",
+        0.001,
+        None,
+        [ModeResult("first_evolve", [Sample(1, 1, 0.001, {})] * 5, 1, 1)],
+    )
+    with pytest.raises(ValueError, match="history modes"):
+        compare([row])
+
+
+@pytest.mark.parametrize("compare", [dominance, timing_equivalents])
+@pytest.mark.parametrize("missing", ["samples", "error", "family_error"])
+def test_comparisons_reject_unmeasured_available_rows(
+    compare: Callable[[list[FamilyResult]], dict[str, dict[str, list[str]]]],
+    missing: str,
+) -> None:
+    row = FamilyResult(
+        "unmeasured",
+        None if missing == "family_error" else 0.001,
+        None,
+        [
+            ModeResult(
+                mode,
+                []
+                if missing == "samples"
+                else [Sample(1, 1, None if missing == "error" else 0.001, {})] * 5,
+                1,
+                1,
+            )
+            for mode in ("first_evolve", "warm_clear_history", "warm_retain_history")
+        ],
+    )
+    with pytest.raises(ValueError, match="density error"):
+        compare([row])
+
+
+def test_dominance_uses_only_errors_from_the_compared_history_mode() -> None:
+    target = FamilyResult(
+        "target",
+        0.1,
+        None,
+        [
+            ModeResult(mode, [Sample(10, 10, error, {})] * 5, 10, 10)
+            for mode, error in (
+                ("first_evolve", 0.001),
+                ("warm_clear_history", 0.01),
+                ("warm_retain_history", 0.01),
+            )
+        ],
+    )
+    other = FamilyResult(
+        "other",
+        0.2,
+        None,
+        [
+            ModeResult(mode, [Sample(time, time, error, {})] * 5, time, time)
+            for mode, error, time in (
+                ("first_evolve", 0.002, 1),
+                ("warm_clear_history", 0.01, 8.99),
+                ("warm_retain_history", 0.01, 9),
+            )
+        ],
+    )
+    assert dominance([target, other])["target"] == {
+        "first_evolve/wall": [],
+        "first_evolve/cpu": [],
+        "warm_clear_history/wall": ["other"],
+        "warm_clear_history/cpu": ["other"],
+        "warm_retain_history/wall": [],
+        "warm_retain_history/cpu": [],
+    }
+
+
+@pytest.mark.sim
+def test_exclusion_estimator_preserves_policies_modes_and_observed_paths() -> None:
+    results = measure_engine_cost(
+        lambda: replace(accuracy_case("weak_plateau"), families=("t6",))
+    )
+    assert [(r.policy, r.mode) for r in results] == [
+        (policy, mode)
+        for policy in ("pinned", "excluded")
+        for mode in ("first_evolve", "warm_clear_history", "warm_retain_history")
+    ]
+    for result in results:
+        assert (
+            len(result.wall_seconds)
+            == len(result.cpu_seconds)
+            == len(result.paths)
+            == 5
+        )
+        if result.policy == "pinned":
+            assert all(path.get("t6", 0) == 2 for path in result.paths)
+        else:
+            assert all(path and "t6" not in path for path in result.paths)
 
 
 @pytest.mark.sim
@@ -287,7 +404,19 @@ def test_table_shares_oracle_for_identical_physics_with_different_model_identiti
         )
 
     def policy(item: Input, family: str, reference: ReferenceResult) -> FamilyResult:
-        return FamilyResult(family, 0, None, [])
+        return FamilyResult(
+            family,
+            0,
+            None,
+            [
+                ModeResult(mode, [Sample(1, 1, 0, {})] * 5, 1, 1)
+                for mode in (
+                    "first_evolve",
+                    "warm_clear_history",
+                    "warm_retain_history",
+                )
+            ],
+        )
 
     rows = run_table(
         inputs, ("single_tone_gate",), reference_solver=solve, policy_runner=policy

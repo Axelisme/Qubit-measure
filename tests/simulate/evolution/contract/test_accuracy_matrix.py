@@ -4,12 +4,11 @@ from collections.abc import Callable
 from contextlib import closing
 from dataclasses import replace
 
-import numpy as np
 import pytest
 from zcu_tools.simulate.evolution import Engine, RoutingHistory, segment_spans
 
 from .accuracy import AccuracyMeasurement, measurement_property, require_families
-from .accuracy_cases import AccuracyCase, accuracy_case, history_case
+from .accuracy_cases import AccuracyCase, accuracy_case, history_case, multisegment_case
 from .guard_edge_cases import EDGE_FAMILIES, guard_edge_case
 from .reference import ReferenceResult, converged_reference, density_error
 
@@ -145,16 +144,10 @@ def test_multisegment_final_density(
     request: pytest.FixtureRequest,
     matrix_reference: Callable[[AccuracyCase], ReferenceResult],
 ) -> None:
-    case = accuracy_case("weak_plateau")
-    pulse = replace(
-        case.batch.tracks[0],
-        start_ns=np.full(2, 0.3),
-        duration_ns=np.full(2, 0.9),
-        amplitude=np.full(2, 0.05),
-    )
-    batch = replace(case.batch, tracks=(pulse,), segment_boundaries=((0.7,), (0.7,)))
+    case = replace(multisegment_case(), name="multisegment")
+    batch = case.batch
     assert all(len(spans) >= 4 for spans in segment_spans(batch))
-    reference = matrix_reference(replace(case, name="multisegment", batch=batch))
+    reference = matrix_reference(case)
     with closing(Engine(1, families=("t4", "t6"))) as engine:
         result = engine.evolve(case.source, (batch,))
     require_families(result.paths, ("t4", "t6"))

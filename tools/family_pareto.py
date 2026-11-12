@@ -41,7 +41,12 @@ from tools.family_pareto_inputs import (
 
 @dataclass
 class EngineSession:
-    """Untimed ownership adapter: execute one evolve or clear routing history."""
+    """Adapter borrowed from the caller's context-managed fresh Engine session.
+
+    evolve calls public Engine.evolve and returns its result; it must not perform
+    setup/cleanup. clear_history clears that source's routing history, untimed.
+    The owning context manager releases the source and Engine on exit.
+    """
 
     evolve: Callable[[], EvolutionResult]
     clear_history: Callable[[], None]
@@ -52,17 +57,28 @@ SessionOpener = Callable[[], AbstractContextManager[EngineSession]]
 
 @dataclass(frozen=True)
 class Sample:
-    """One evolve's elapsed seconds, full density error and observed segment counts."""
+    """One timed evolve, inspected after the clocks stop.
+
+    wall_seconds and cpu_seconds are elapsed wall/process CPU seconds.
+    density_error is the maximum absolute complex density difference to oracle,
+    or None when measure_family receives reference=None for timing/path only.
+    paths maps executed family names to segment counts.
+    """
 
     wall_seconds: float
     cpu_seconds: float
-    density_error: float
+    density_error: float | None
     paths: dict[str, int]
 
 
 @dataclass(frozen=True)
 class ModeResult:
-    """Five ordered samples and wall/CPU medians for one routing-history mode."""
+    """One history mode's raw samples and separate timing medians.
+
+    mode is first_evolve, warm_clear_history or warm_retain_history.
+    samples contains five evolves in measurement order. wall_median and
+    cpu_median are the respective elapsed-second medians of those samples.
+    """
 
     mode: str
     samples: list[Sample]
@@ -72,7 +88,7 @@ class ModeResult:
 
 def measure_family(
     open_session: SessionOpener,
-    reference: ReferenceResult,
+    reference: ReferenceResult | None,
     *,
     wall_clock: Callable[[], float] = perf_counter,
     cpu_clock: Callable[[], float] = process_time,
@@ -83,6 +99,8 @@ def measure_family(
     untimed. open_session supplies a fresh source/history/Engine on every entry.
     Clocks return monotonic wall and process CPU seconds. No sample spawns a
     process or resets disk caches. Only public Engine.evolve is timed.
+    reference is a real oracle result, or explicitly None to omit density error
+    measurement (timing/path-only consumers). No oracle is solved here.
     """
     modes = []
     for mode in ("first_evolve", "warm_clear_history", "warm_retain_history"):
@@ -103,7 +121,9 @@ def measure_family(
                         Sample(
                             wall_elapsed,
                             cpu_elapsed,
-                            density_error(result.densities, reference.density),
+                            None
+                            if reference is None
+                            else density_error(result.densities, reference.density),
                             dict(result.paths.segments_by_kernel),
                         )
                     )
@@ -122,8 +142,12 @@ def measure_family(
 class FamilyResult:
     """Pinned family or default policy; unavailable has reason and no samples.
 
-    error is the maximum full density error across measured evolves, never an
-    assumed zero for exact solvers. modes retain separate wall/CPU measurements.
+    family is a pinned family name, or 'default' for normal routing.
+    error is the maximum density error across probe and all timed evolves for
+    overall accuracy reporting/PASS-FAIL, never an assumed exact-solver zero.
+    unavailable is the refusal reason, with error=None and modes=[]; otherwise
+    unavailable=None and modes contains each of the three history modes once,
+    in any order. modes retain separate raw samples and wall/CPU medians.
     """
 
     family: str
@@ -132,30 +156,66 @@ class FamilyResult:
     modes: list[ModeResult]
 
 
+def _mode_error(mode: ModeResult) -> float:
+    errors = []
+    for sample in mode.samples:
+        if sample.density_error is None:
+            raise ValueError(f"{mode.mode}: require measured density errors")
+        errors.append(sample.density_error)
+    if not errors:
+        raise ValueError(f"{mode.mode}: require measured density errors")
+    return max(errors)
+
+
+def _available_modes(rows: list[FamilyResult]) -> dict[str, dict[str, ModeResult]]:
+    modes = {}
+    for row in rows:
+        if row.unavailable is not None or row.family == "default":
+            continue
+        if row.error is None:
+            raise ValueError(f"{row.family}: require measured density error")
+        by_name = {mode.mode: mode for mode in row.modes}
+        if len(row.modes) != 3 or set(by_name) != {
+            "first_evolve",
+            "warm_clear_history",
+            "warm_retain_history",
+        }:
+            raise ValueError(f"{row.family}: require all three unique history modes")
+        for mode in row.modes:
+            _mode_error(mode)
+        modes[row.family] = by_name
+    return modes
+
+
 def dominance(rows: list[FamilyResult]) -> dict[str, dict[str, list[str]]]:
     """List dominators by family and mode/clock; omit unavailable and default.
 
     A competitor must have error <= target error and time < .9*target time.
+    Error is the maximum of that history mode's raw sample density errors;
+    probe/other-mode errors and FamilyResult.error do not enter this comparison.
     Equality at ten percent is equivalent timing, with no error epsilon.
+    All three unique history modes are required per available row, in any order;
+    missing/duplicate/unknown modes raise ValueError. Available rows also require
+    an overall error and nonempty measured density errors in every mode;
+    timing/path-only results raise ValueError, never become unavailable.
     """
-    available = [r for r in rows if r.error is not None and r.family != "default"]
+    modes = _available_modes(rows)
+    available = [r for r in rows if r.family in modes]
     result: dict[str, dict[str, list[str]]] = {}
     for target in available:
         cells = {}
-        for index, mode in enumerate(target.modes):
+        for mode in target.modes:
             for metric in ("wall", "cpu"):
                 target_time = mode.wall_median if metric == "wall" else mode.cpu_median
                 cells[f"{mode.mode}/{metric}"] = [
                     other.family
                     for other in available
                     if other.family != target.family
-                    and other.error is not None
-                    and target.error is not None
-                    and other.error <= target.error
+                    and _mode_error(modes[other.family][mode.mode]) <= _mode_error(mode)
                     and (
-                        other.modes[index].wall_median
+                        modes[other.family][mode.mode].wall_median
                         if metric == "wall"
-                        else other.modes[index].cpu_median
+                        else modes[other.family][mode.mode].cpu_median
                     )
                     < 0.9 * target_time
                 ]
@@ -223,7 +283,7 @@ def measure_policy(
         raise RuntimeError(f"pinned {family} did not execute exclusively: {paths}")
     error = max(
         density_error(probe.densities, reference.density),
-        max(s.density_error for m in modes for s in m.samples),
+        max(_mode_error(m) for m in modes),
     )
     return FamilyResult(family, error, None, modes)
 
@@ -237,7 +297,16 @@ UNAVAILABLE_PATTERN = (
 
 @dataclass(frozen=True)
 class InputResult:
-    """Complete input matrix row: oracle convergence, policies and cell dominators."""
+    """Complete input row, with independent wall/CPU and history-mode cells.
+
+    name is the stable manifest input name. physical_sha256 hashes the complete
+    input; oracle_sha256 excludes nonphysical identity for shared references.
+    oracle_convergence_error is the maximum density difference between the two
+    oracle tolerance levels. policies contains pinned results and default.
+    dominators maps pinned family -> 'mode/wall' or 'mode/cpu' -> dominating
+    family names. timing_equivalents has the same keys and time-equivalent peers.
+    Unavailable policies have no comparison cells; default is not a competitor.
+    """
 
     name: str
     physical_sha256: str
@@ -253,12 +322,18 @@ def timing_equivalents(rows: list[FamilyResult]) -> dict[str, dict[str, list[str
 
     This is symmetric: other_time >= .9*target_time and target_time >=
     .9*other_time. It is not Pareto dominance and never merges wall and CPU.
+    All three unique history modes are required per available row, in any order;
+    missing/duplicate/unknown modes raise ValueError. Unavailable and default
+    rows are omitted. Available rows require an overall error and nonempty
+    measured density errors in every mode; timing/path-only results raise
+    ValueError rather than becoming unavailable.
     """
-    available = [r for r in rows if r.error is not None and r.family != "default"]
+    modes = _available_modes(rows)
+    available = [r for r in rows if r.family in modes]
     equivalents: dict[str, dict[str, list[str]]] = {}
     for target in available:
         cells = {}
-        for index, mode in enumerate(target.modes):
+        for mode in target.modes:
             for metric in ("wall", "cpu"):
                 target_time = mode.wall_median if metric == "wall" else mode.cpu_median
                 peers = []
@@ -266,9 +341,9 @@ def timing_equivalents(rows: list[FamilyResult]) -> dict[str, dict[str, list[str
                     if other.family == target.family:
                         continue
                     other_time = (
-                        other.modes[index].wall_median
+                        modes[other.family][mode.mode].wall_median
                         if metric == "wall"
-                        else other.modes[index].cpu_median
+                        else modes[other.family][mode.mode].cpu_median
                     )
                     if (
                         other_time >= 0.9 * target_time
@@ -342,7 +417,8 @@ def render_summary(
         "",
         "Timers cover Engine.evolve only, not program.acquire. Each mode has five wall/CPU samples.",
         "Errors compare complete complex density to the two-level converged full-Lindblad oracle.",
-        "A dominator has error <= target error and time < 0.9 * target time. Exactly 10% is equivalent.",
+        "A dominator has mode-local maximum sample error <= target error and time < 0.9 * target time. Exactly 10% is equivalent.",
+        "Displayed density error and PASS/FAIL use the overall maximum across probe and all modes, not the mode-local comparator error.",
         "No epsilon or weighted score is used. FAIL means error > 2e-3, not permission to keep an inaccurate route.",
         "Conclusions apply only to the measured input set; no deletion is authorized.",
         "",

@@ -277,6 +277,22 @@ def accuracy_case(name: str) -> AccuracyCase:
     return AccuracyCase(name, coherent_source(model), batch, families)
 
 
+def multisegment_case() -> AccuracyCase:
+    """Build the accuracy table's complete idle/drive/idle sequence."""
+    case = accuracy_case("weak_plateau")
+    pulse = replace(
+        case.batch.tracks[0],
+        start_ns=np.full(2, 0.3),
+        duration_ns=np.full(2, 0.9),
+        amplitude=np.full(2, 0.05),
+    )
+    return replace(
+        case,
+        name="multisegment/final",
+        batch=replace(case.batch, tracks=(pulse,), segment_boundaries=((0.7,), (0.7,))),
+    )
+
+
 def history_case(count: int, history: RoutingHistory) -> AccuracyCase:
     """Build count shaped 24 ns gates sharing caller-owned routing history.
 

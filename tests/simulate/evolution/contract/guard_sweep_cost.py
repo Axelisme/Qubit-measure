@@ -5,13 +5,13 @@ pytest. This module uses only Engine/ModelSource public execution and history;
 it does not assemble benchmark internals or alter numerical admission.
 """
 
-from collections.abc import Callable
-from contextlib import closing
+from collections.abc import Callable, Generator
+from contextlib import closing, contextmanager
 from dataclasses import dataclass
-from statistics import median
-from time import perf_counter, process_time
 
-from zcu_tools.simulate.evolution import Engine
+from zcu_tools.simulate.evolution import Engine, PathDiagnostics
+
+from tools.family_pareto import EngineSession, measure_family
 
 from .accuracy import ALL_FAMILIES, require_families
 from .accuracy_cases import AccuracyCase
@@ -49,51 +49,50 @@ def measure_engine_cost(
     excluded samples must never exercise it. Record actual alternative paths.
     Excluding a whole family only estimates a counterfactual fallback cost,
     not the precise effect of a future narrower guard or program acquire.
+    The shared measure_family protocol measures timing/paths without an oracle.
     """
+    # Read the pinned policy name outside all timed sessions; no oracle is needed.
+    case = build_case()
+    with closing(case.source):
+        (family,) = case.families
     results: list[EngineCost] = []
     for policy in ("pinned", "excluded"):
-        for mode in ("first_evolve", "warm_clear_history", "warm_retain_history"):
-            walls: list[float] = []
-            cpus: list[float] = []
-            paths: list[dict[str, int]] = []
-            repetitions = 5 if mode == "first_evolve" else 1
-            for _ in range(repetitions):
-                case = build_case()
-                (family,) = case.families
-                families = (
-                    (family,)
-                    if policy == "pinned"
-                    else tuple(name for name in ALL_FAMILIES if name != family)
+
+        @contextmanager
+        def session(policy: str = policy) -> Generator[EngineSession]:
+            case = build_case()
+            families = (
+                (family,)
+                if policy == "pinned"
+                else tuple(name for name in ALL_FAMILIES if name != family)
+            )
+            with (
+                closing(case.source),
+                closing(Engine(1, families=families)) as engine,
+            ):
+                yield EngineSession(
+                    lambda: engine.evolve(case.source, (case.batch,), budget=1e-3),
+                    case.source.history.clear,
                 )
-                with (
-                    closing(case.source),
-                    closing(Engine(1, families=families)) as engine,
-                ):
-                    if mode != "first_evolve":
-                        for _ in range(2):
-                            engine.evolve(case.source, (case.batch,), budget=1e-3)
-                    count = 1 if mode == "first_evolve" else 5
-                    for _ in range(count):
-                        if mode == "warm_clear_history":
-                            case.source.history.clear()
-                        wall, cpu = perf_counter(), process_time()
-                        result = engine.evolve(case.source, (case.batch,), budget=1e-3)
-                        cpus.append(process_time() - cpu)
-                        walls.append(perf_counter() - wall)
-                        if policy == "pinned":
-                            require_families(result.paths, (family,))
-                        else:
-                            assert not result.paths.segments_by_kernel.get(family, 0)
-                        paths.append(dict(result.paths.segments_by_kernel))
+
+        modes = measure_family(session, None)
+        for mode in modes:
+            for sample in mode.samples:
+                if policy == "pinned":
+                    require_families(
+                        PathDiagnostics(segments_by_kernel=sample.paths), (family,)
+                    )
+                else:
+                    assert not sample.paths.get(family, 0)
             results.append(
                 EngineCost(
                     policy,
-                    mode,
-                    tuple(walls),
-                    tuple(cpus),
-                    tuple(paths),
-                    median(walls),
-                    median(cpus),
+                    mode.mode,
+                    tuple(s.wall_seconds for s in mode.samples),
+                    tuple(s.cpu_seconds for s in mode.samples),
+                    tuple(s.paths for s in mode.samples),
+                    mode.wall_median,
+                    mode.cpu_median,
                 )
             )
     return tuple(results)

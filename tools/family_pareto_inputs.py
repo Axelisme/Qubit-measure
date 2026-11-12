@@ -19,6 +19,7 @@ from tests.simulate.evolution.contract.accuracy_cases import (
     AccuracyCase,
     accuracy_case,
     history_case,
+    multisegment_case,
 )
 from tests.simulate.evolution.contract.guard_edge_cases import (
     EDGE_FAMILIES,
@@ -55,22 +56,6 @@ class Input:
     name: str
     build: Callable[[], AccuracyCase]
     reason: str
-
-
-def multisegment_case() -> AccuracyCase:
-    """Build the accuracy table's complete idle/drive/idle sequence."""
-    case = accuracy_case("weak_plateau")
-    pulse = replace(
-        case.batch.tracks[0],
-        start_ns=np.full(2, 0.3),
-        duration_ns=np.full(2, 0.9),
-        amplitude=np.full(2, 0.05),
-    )
-    return replace(
-        case,
-        name="multisegment/final",
-        batch=replace(case.batch, tracks=(pulse,), segment_boundaries=((0.7,), (0.7,))),
-    )
 
 
 def representative(name: str) -> AccuracyCase:

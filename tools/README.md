@@ -213,8 +213,11 @@ controls `2e-10/2e-12` and `2e-12/2e-14`. Its two density results must differ by
 most `2e-6`. Every solver's error is measured, including exact families. Values
 above `2e-3` remain FAIL. Existing strict xfails are not removed.
 
-A competitor dominates only when its full-density error is no larger and its
-median time is **less than `0.9 * target_time`**. Exactly 10% is time-equivalent.
+A competitor dominates only when its maximum full-density error across that
+mode's five raw samples is no larger and its median time is
+**less than `0.9 * target_time`**. Probe and other-mode errors do not enter this
+comparison. The family-level maximum across probe and all modes remains the
+overall accuracy/PASS-FAIL value. Exactly 10% is time-equivalent.
 Time-equivalent peers have neither direction faster by more than 10%, regardless
 of error. Wall/CPU and all three modes remain separate; there is no weighted score.
 Default routing is shown but never treated as a pinned-family competitor.
@@ -234,7 +237,13 @@ Other RuntimeErrors, wrong pinned paths, numerical failures and output failures
 stop the command. Measurement failures leave earlier outputs untouched. Output
 write failures return nonzero and may leave a partial destination file.
 `measure_family`, `measure_policy`, `run_table`, `dominance`, `timing_equivalents`
-and `main(argv)` are importable. Tests use controlled clocks and small
+and `main(argv)` are importable. Comparators pair modes by name, not list order;
+every available pinned row must have all three unique modes and measured sample
+errors. Missing mode/error information raises ValueError. Unavailable and default
+rows are not competitors. `measure_family` owns the Engine-only timing protocol;
+the family-exclusion estimator reuses it with an explicit `reference=None` to
+measure only time and paths (`Sample.density_error=None`), without an oracle.
+Pareto policies always supply a real reference. Tests use controlled clocks and small
 collaborators; the complete matrix runs outside pytest through the exclusive runner.
 
 ## Markdown reader declarations
