@@ -11,15 +11,18 @@ from zcu_tools.core.simulation import PulseEnvelope
 class EnvelopeContent:
     """Exact compiled DAC inputs, never program identities or buffer references.
 
-    dtype/shape/samples describe the current DAC array. maxv normalizes its
-    amplitude; sample_period_ticks sets the sample interval in the request time base.
+    dtype/shape/samples describe the current DAC array. sample_divisor converts
+    signed DAC samples to output amplitude relative to direct DDS. It is 65536
+    for QICK product mode, including interpolated generators. fabric_mhz is the
+    generator fabric clock in MHz. sample_period_ticks sets the sample interval
+    in the request time base.
     flat_duration_ticks is playback duration for flat-tops, otherwise None.
     """
 
     dtype: str
     shape: tuple[int, ...]
     samples: bytes
-    maxv: float
+    sample_divisor: float
     fabric_mhz: float
     sample_period_ticks: int
     flat_duration_ticks: int | None
@@ -94,7 +97,7 @@ def _entry_bytes(key: EnvelopeContent, envelope: PulseEnvelope) -> int:
             key.dtype,
             key.shape,
             key.samples,
-            key.maxv,
+            key.sample_divisor,
             key.fabric_mhz,
             key.sample_period_ticks,
             key.flat_duration_ticks,

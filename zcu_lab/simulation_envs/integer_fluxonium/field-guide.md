@@ -2,7 +2,33 @@
 
 **Readers:** operator, lab-author, agent. Interpret the synthetic basis and readout checks without treating model inputs as measured calibration.
 
-**Last updated:** 2026-11-01, historical pre-v2 board annotations
+**Last updated:** 2026-11-12, historical envelope-scale annotations
+
+## Envelope amplitude revision
+
+The STIRAP and Raman measurements below used the former simulator envelope
+scale, before QICK product output was divided by 65536.
+Their seeds, controls, populations, IQ values, thresholds and timings remain
+historical records. They do not validate the current frontend at those gains.
+The board-clock switch noted below is a separate change.
+
+With the current v6 scale, multiply a former envelope gain by
+`65536/32766 = 2.0001220777635353` to preserve its continuous drive amplitude,
+then account for gain-word quantization.
+The recorded STIRAP Pump/Stokes gains `0.015/0.05` correspond approximately to
+`0.030001831166453/0.100006103888177`.
+These are amplitude conversions, not new acquired-IQ validation.
+The Raman arb gain 0.9 would require approximately 1.800109869987182,
+above the supported gain limit 1. The recorded 0.1 us Raman setting cannot
+reproduce its previous transfer under the current scale.
+It requires a new pulse-duration or parameter study before reuse.
+
+The physical charge-drive coefficient remains 1 GHz per DDS-normalized gain.
+The recorded constant reference π pulses and constant readout keep their
+amplitude calibration. Doubling the physical coefficient would also double
+those constant drives, so this revision does not change it.
+See the [compiled amplitude contract](../../../lib/zcu_tools/program/v2/simulation/README.md#output-amplitude-scale)
+for generator coefficients and firmware sources.
 
 ## Circuit, bath and routing
 

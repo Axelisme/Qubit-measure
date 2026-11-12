@@ -92,7 +92,10 @@ def test_new_preparation_checks_current_compiled_content(environment, difference
     else:
         prog.soccfg["gens"][1]["maxv"] //= 2
     changed = envelope(prog, soc, 2)
-    assert changed is not first
+    if difference == "maxv":
+        assert changed is first  # Gain-word scale does not change product samples.
+    else:
+        assert changed is not first
     if difference == "clock":
         # The same samples now occupy half their original physical period.
         changed_request = build_compiled_request(
@@ -106,7 +109,7 @@ def test_new_preparation_checks_current_compiled_content(environment, difference
             old_request.time_base.ns(first.sample_period_ticks) / 2
         )
         assert changed.values == first.values
-    else:
+    elif difference == "samples":
         assert changed != first
     assert first.sample_period_ticks == old_times
     assert first.values == old_values
