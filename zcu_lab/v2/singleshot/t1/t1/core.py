@@ -154,13 +154,13 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
 
     def _run_linear(self, cfg: T1Cfg, *, context: RunContext) -> T1Result:
         """Acquire both preparations with linear board delays; return counts and actual times."""
-        # 1. Prepare the measurement coordinates and acquisition state.
+        # 1. Quantize uniform delays and reserve G/E/Other counts for I/pi preparation.
         lengths = sweep2array(cfg.delay, "time", {"soccfg": context.soccfg})
         update = self._live_update(context.plots, lengths)
         buffer = SignalBuffer(
             (len(lengths), 2, POPULATION_COUNT), dtype=np.float64, on_update=update
         )
-        # 2. Acquire the pulse sequence in the declared scan order.
+        # 2. Compare reset-only and pi-prepared relaxation with board-swept waits.
         with Schedule(buffer, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 context.soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
@@ -192,14 +192,14 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
 
     def _run_decay(self, cfg: T1Cfg, *, context: RunContext) -> T1Result:
         """Acquire both preparations with nonuniform decay sampling; return counts and actual times."""
-        # 1. Prepare the measurement coordinates and acquisition state.
+        # 1. Resolve distinct decay-weighted delays for the I/pi relaxation comparison.
         table = materialize_nonuniform_t1_delays(cfg.delay, soccfg=context.soccfg)
         lengths = table.times_us
         update = self._live_update(context.plots, lengths)
         buffer = SignalBuffer(
             (len(lengths), 2, POPULATION_COUNT), dtype=np.float64, on_update=update
         )
-        # 2. Acquire the pulse sequence in the declared scan order.
+        # 2. Compare I/pi relaxation with table-driven waits and summed class counts.
         with Schedule(buffer, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 context.soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay

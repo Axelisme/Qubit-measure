@@ -189,7 +189,7 @@ class FluxDepExp(Experiment[FluxDepResult, FluxDepCfg]):
                     progress=False,
                 )
 
-                # Build the pulse sequence without changing the caller's cfg.
+                # 3. Reset and initialize before probing each gain at this fixed flux bias.
                 builder = TimelineBuilder(
                     soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
                 )
@@ -221,7 +221,7 @@ class FluxDepExp(Experiment[FluxDepResult, FluxDepCfg]):
         ticks on top. If either is missing, show only device values below.
         No state-population fit or calibration value is returned.
         """
-        # 1. Select the measured data and analysis controls.
+        # 1. Reference each flux row to low-gain IQ and apply optional axis calibrations.
         result = source.result
         flux_half, flux_period = options.flux_half, options.flux_period
 
@@ -242,14 +242,14 @@ class FluxDepExp(Experiment[FluxDepResult, FluxDepCfg]):
             ylabel = r"$\bar n$"
         ys = np.asarray(ys)
 
-        # 2. Compare the analysis with the measured response.
+        # 2. Show clipped MIST contrast with device ticks when flux is calibrated.
         _, ax = plots.subplots(num="fit", figsize=config.figsize)
         ax.pcolormesh(xs, ys, amp_diff.T, shading="nearest", cmap="Greys")
         ax.set_xlabel(xlabel, fontsize=14)
         ax.set_ylabel(ylabel, fontsize=12)
 
         if flux_half is not None and flux_period is not None:
-            # Match the source samples and scientific labels of the former overlay.
+            # Retain device-value references when the main axis uses calibrated flux.
             count = len(xs)
             if count <= 12:
                 tick_indices = np.arange(count)

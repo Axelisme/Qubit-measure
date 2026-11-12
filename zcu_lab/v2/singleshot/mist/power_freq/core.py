@@ -220,7 +220,7 @@ class FreqPowerExp(Experiment[FreqPowerResult, FreqPowerCfg]):
         cfg may be None. options controls correction and any axis conversion.
         Publish the fit figure to plots. Legacy G/E data raise ValueError.
         """
-        # 1. Select the measured data and analysis controls.
+        # 1. Normalize each gain/frequency point and optionally correct G/E/Other fractions.
         result = source.result
         gains, freqs, populations = result.gains, result.freqs, result.counts
         populations = populations / populations.sum(axis=-1, keepdims=True)

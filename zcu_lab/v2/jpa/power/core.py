@@ -188,7 +188,7 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
         Use only ``source`` data, with no fit or interpolation; ``options``
         is None. All-NaN SNR fails rather than selecting a power.
         """
-        # 1. Select the measured data and analysis controls.
+        # 1. Select the sampled pump power with peak SNR, ignoring missing points.
         del options
         result = source.result
 
@@ -199,7 +199,7 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
         max_idx = np.nanargmax(snrs)
         best_jpa_power = jpa_powers[max_idx]
 
-        # 2. Compare the analysis with the measured response.
+        # 2. Mark the best power without connecting randomized pump settings.
         fig, ax = plots.subplots(num="fit", figsize=config.figsize)
         ax.scatter(jpa_powers, snrs, label="signal difference", s=1)
         ax.axvline(

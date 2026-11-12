@@ -151,7 +151,7 @@ class CheckExp(Experiment[CheckResult, CheckCfg]):
 
         ``options`` is None. This diagnostic returns no calibration value.
         """
-        # 1. Select the measured data and analysis controls.
+        # 1. Reduce pump-off/on IQ to magnitude for a reflection-spectrum comparison.
         del options
         result = source.result
 
@@ -160,7 +160,7 @@ class CheckExp(Experiment[CheckResult, CheckCfg]):
         signals2D = result.signals
         real_signals = check_signal2real(signals2D)
 
-        # 2. Compare the analysis with the measured response.
+        # 2. Overlay both pump states on the same readout-frequency axis.
         _, ax = plots.subplots(num="fit", figsize=config.figsize)
         for i, output in enumerate(outputs):
             ax.plot(

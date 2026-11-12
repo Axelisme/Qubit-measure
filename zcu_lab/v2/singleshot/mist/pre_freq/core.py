@@ -200,7 +200,7 @@ class PreFreqExp(Experiment[PreFreqResult, PreFreqCfg]):
         Three-column data can be analyzed without cfg. Legacy G/E data raise
         ValueError.
         """
-        # 1. Select the measured data and analysis controls.
+        # 1. Normalize G/E/Other counts and apply optional confusion correction.
         result = source.result
         freqs, populations = result.freqs, result.counts
         populations = populations / populations.sum(axis=-1, keepdims=True)
@@ -212,7 +212,7 @@ class PreFreqExp(Experiment[PreFreqResult, PreFreqCfg]):
 
         populations = correct_populations(populations, options.confusion_matrix)
 
-        # 2. Compare the analysis with the measured response.
+        # 2. Isolate preparation-frequency dependence with the later probe held fixed.
         _, ax = plots.subplots(num="fit", figsize=(6, 6))
 
         ax.plot(

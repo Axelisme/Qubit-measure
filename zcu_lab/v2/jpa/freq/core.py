@@ -190,7 +190,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         ``source`` supplies this run's frequencies and signals; no fit or
         interpolation is applied. ``options`` is None. All-NaN SNR fails.
         """
-        # 1. Select the measured data and analysis controls.
+        # 1. Select the sampled pump frequency with peak SNR, ignoring missing points.
         del options
         result = source.result
 
@@ -202,7 +202,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         max_idx = np.nanargmax(real_signals)
         best_jpa_freq = jpa_freqs[max_idx]
 
-        # 2. Compare the analysis with the measured response.
+        # 2. Mark the best frequency without connecting randomized pump settings.
         fig, ax = plots.subplots(num="fit", figsize=config.figsize)
         ax.scatter(jpa_freqs, real_signals, label="signal difference", s=2)
         ax.axvline(

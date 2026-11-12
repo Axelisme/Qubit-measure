@@ -449,6 +449,7 @@ class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
         ax.set_ylim(0.0, 1.0)
         ax.legend(loc=4)
         ax.grid(True)
+        # 3. Show readout diagnostics, deriving T1 and initial fractions only if valid.
         effective_t1_us = None
         if (
             joint.backend.valid

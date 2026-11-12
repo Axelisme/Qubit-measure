@@ -110,9 +110,9 @@ class QutritPopulationExp(Experiment[QutritPopulationResult, QutritPopulationCfg
         No reset or preparation pulse is emitted for g. The operator must supply
         measured pulse calibrations and a relaxation interval suitable for g.
         """
-        # 1. Prepare the measurement coordinates and acquisition state.
+        # 1. Reserve separate raw IQ clouds for the three reference preparations.
         buffer = SignalBuffer((3, cfg.shots))
-        # 3. Acquire the pulse sequence in the declared scan order.
+        # 2. Compare no pulse, pi01, and pi03-then-pi32 preparations with raw readout.
         with Schedule(buffer, scope=context.scope) as sched:
             for label, step in sched.scan("preparation", [0, 1, 2]):
                 builder = TimelineBuilder(
@@ -139,7 +139,7 @@ class QutritPopulationExp(Experiment[QutritPopulationResult, QutritPopulationCfg
             shot_indices=np.arange(cfg.shots, dtype=np.int64),
         )
         plots = context.plots
-        # 2. Display the measured response while retaining raw data.
+        # 3. Inspect reference-cloud separation without assuming pure prepared states.
         figure, _ = plots.subplots(num="measurement")
 
         ax = figure.axes[0]
@@ -173,12 +173,12 @@ class QutritPopulationExp(Experiment[QutritPopulationResult, QutritPopulationCfg
         negative/above-one estimates and refers to preparation coordinates, not
         pure-state readout fidelity. Invalid/partial reference IQ fails explicitly.
         """
-        # 1. Select the measured data and analysis controls.
+        # 1. Split reference IQ for training and evaluation without clipping correction.
         del options
         result = analyze_reference_iq(
             source.result.signals, np.array([0, 1, 2], dtype=np.int64)
         )
-        # 2. Compare the analysis with the measured response.
+        # 2. Expose raw/corrected fractions, training confusion, and label-quality limits.
         figure, _ = plots.subplots(
             nrows=2, ncols=2, num="fit", figsize=(10, 7), layout="constrained"
         )

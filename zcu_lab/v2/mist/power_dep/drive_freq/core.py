@@ -139,7 +139,7 @@ class DriveFreqExp(Experiment[DriveFreqResult, DriveFreqCfg]):
 
         # 2. Bind frequency and gain sweeps to the same probe pulse.
         with Schedule(signals_buffer, scope=context.scope) as sched:
-            # Build the pulse sequence without changing the caller's cfg.
+            # 3. Reset and initialize before each frequency/gain-swept probe and readout.
             builder = TimelineBuilder(
                 soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
             )
@@ -169,7 +169,7 @@ class DriveFreqExp(Experiment[DriveFreqResult, DriveFreqCfg]):
         first 5% of gain samples (at least one). ``options`` is None; this
         response map returns no population fit or calibration value.
         """
-        # 1. Select the measured data and analysis controls.
+        # 1. Reference all frequencies to the pooled low-gain IQ background.
         del options
         result = source.result
 
@@ -177,7 +177,7 @@ class DriveFreqExp(Experiment[DriveFreqResult, DriveFreqCfg]):
 
         real_signals = drivefreq_signal2real(signals)
 
-        # 2. Compare the analysis with the measured response.
+        # 2. Show MIST contrast over probe frequency and gain without a population fit.
         _, ax = plots.subplots(num="fit", figsize=config.figsize)
 
         ax.imshow(

@@ -127,7 +127,7 @@ class TwoToneExp(Experiment[TwoToneResult, TwotoneCfg]):
         )
 
         with Schedule(signals_buffer, scope=context.scope) as sched:
-            # Build the pulse sequence without changing the caller's cfg.
+            # 3. Start flux and spectroscopy together; read out after both pulses finish.
             builder = TimelineBuilder(
                 soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
             )
@@ -155,7 +155,7 @@ class TwoToneExp(Experiment[TwoToneResult, TwotoneCfg]):
         plots: Plots,
     ) -> None:
         """Plot the projected IQ spectroscopy map without a resonance fit."""
-        # 1. Select the measured data and analysis controls.
+        # 1. Project mean IQ to spectroscopy contrast without fitting a resonance.
         del options  # This analysis has no configurable options.
         result = source.result
 
@@ -163,7 +163,7 @@ class TwoToneExp(Experiment[TwoToneResult, TwotoneCfg]):
 
         real_signals = twotone_signal2real(signals2D)
 
-        # 2. Compare the analysis with the measured response.
+        # 2. Locate spectral features in the flux-gain/frequency contrast map.
         fig, ax = plots.subplots(num="fit")
 
         ax.imshow(

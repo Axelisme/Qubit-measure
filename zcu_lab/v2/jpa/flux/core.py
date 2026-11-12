@@ -197,7 +197,7 @@ class FluxExp(Experiment[FluxResult, FluxCfg]):
         magnitude, and return the peak's device value without conversion.
         ``options`` is None; this is a smoothed peak, not a model fit.
         """
-        # 1. Select the measured data and analysis controls.
+        # 1. Choose the sampled bias at peak SNR after one-sample Gaussian smoothing.
         del options
         result = source.result
 
@@ -209,7 +209,7 @@ class FluxExp(Experiment[FluxResult, FluxCfg]):
         max_idx = np.argmax(snrs)
         best_jpa_flux = jpa_fluxs[max_idx]
 
-        # 2. Compare the analysis with the measured response.
+        # 2. Mark the selected bias on the smoothed SNR trace.
         fig, ax = plots.subplots(num="fit", figsize=config.figsize)
         ax.plot(jpa_fluxs, snrs, label="signal difference")
         ax.axvline(

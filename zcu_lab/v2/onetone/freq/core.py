@@ -191,7 +191,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         Homophasal sampling requires positive fit parameters and rejects points
         that collapse onto the same hardware frequency.
         """
-        # 1. Prepare the measurement coordinates and acquisition state.
+        # 1. Resolve linear or equal-phase samples on the readout hardware grid.
         cfg = deepcopy(config)
         soccfg = context.soccfg
         if cfg.sampling_mode == "linear":
@@ -210,7 +210,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
                 },
             )
 
-        # 2. Display the measured response while retaining raw data.
+        # 2. Preview resonance magnitude while preserving complex IQ for fitting.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Frequency (MHz)", ylabel="Amplitude")
         line = live_line(ax)
@@ -226,7 +226,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
 
         fig.show()
         signals = SignalBuffer((len(freqs),), on_update=update)
-        # 3. Acquire the pulse sequence in the declared scan order.
+        # 3. Reset and measure each resonator frequency with the chosen spacing.
         with Schedule(signals, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 context.soccfg,
@@ -251,9 +251,10 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         *,
         plots: Plots,
     ) -> FreqAnalysis:
-        # 1. Select the measured data and analysis controls.
+        # 1. Fit the complex resonance with the requested background model.
         fig, _ = plots.subplots(num="fit", figsize=(9, 8))
         answer = fit_resonance(source.result.freqs, source.result.signals, options)
+        # 2. Compare the fitted hanger or transmission model on interior samples.
         freqs, signals = source.result.freqs[1:-1], source.result.signals[1:-1]
         params = answer.params
         fig.clear()

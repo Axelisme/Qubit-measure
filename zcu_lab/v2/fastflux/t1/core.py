@@ -125,7 +125,7 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
         )
 
         with Schedule(signals_buffer, scope=context.scope) as sched:
-            # Build the pulse sequence without changing the caller's cfg.
+            # 3. Excite with pi, then vary the flux pulse gain and duration before readout.
             builder = TimelineBuilder(
                 soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
             )
@@ -154,7 +154,7 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
         refit each row with that baseline fixed. Rejected final fits retain NaN
         T1 values; their initialized zero errors do not indicate a valid fit.
         """
-        # 1. Select the measured data and analysis controls.
+        # 1. Project each flux-gain row to a real relaxation trace.
         del options  # This analysis has no configurable options.
         result = source.result
 
@@ -174,6 +174,7 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
                 np.abs(smooth_residual)
             )
 
+        # 2. Share a median baseline from fits passing contrast/residual checks.
         prev_pOpt = None
         list_pOpt = []
         for real_signal in real_signals:
@@ -186,6 +187,7 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
             list_pOpt.append(prev_pOpt)
         mean_y0 = np.median([pOpt[0] for pOpt in list_pOpt if pOpt is not None]).item()
 
+        # 3. Refit at fixed baseline; rejected T1 values stay NaN with zero errors.
         t1s = np.full_like(gains, np.nan)
         t1errs = np.zeros_like(gains)
         for i, real_signal in enumerate(real_signals):
@@ -199,7 +201,7 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
                 t1s[i] = fit.decay_time
                 t1errs[i] = fit.decay_time_err
 
-        # 2. Compare the analysis with the measured response.
+        # 4. Overlay accepted T1 values and fit errors on the measured decay heatmap.
         fig, ax = plots.subplots(num="fit", figsize=config.figsize)
 
         ax.imshow(

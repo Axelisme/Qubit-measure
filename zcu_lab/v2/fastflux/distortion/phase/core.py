@@ -126,6 +126,7 @@ class PhaseExp(Experiment[PhaseResult, PhaseCfg]):
             on_update=update,
         )
 
+        # 3. Project the delayed pi/2 pair during flux, then join before readout.
         with Schedule(signals_buffer, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
@@ -163,7 +164,7 @@ class PhaseExp(Experiment[PhaseResult, PhaseCfg]):
         The overlaid rectangular curve is a timing reference, not a fitted
         transfer function.
         """
-        # 1. Select the measured data and analysis controls.
+        # 1. Require saved pulse timing to interpret the projection-phase map.
         del options  # This analysis has no configurable options.
         result = source.result
 
@@ -176,7 +177,7 @@ class PhaseExp(Experiment[PhaseResult, PhaseCfg]):
 
         lengths, phases, signals2D = result.lengths, result.phases, result.signals
 
-        # 2. align to middle of two pi/2 pulses
+        # 2. Recover unwrapped projection phase at the midpoint of each pi/2 pair.
         lengths = lengths + pi2_len
 
         real_signals = phase_signal2real(signals2D)
@@ -186,6 +187,7 @@ class PhaseExp(Experiment[PhaseResult, PhaseCfg]):
         coeffs = np.linalg.pinv(X) @ real_signals.T
         init_phases = np.rad2deg(np.unwrap(np.arctan2(coeffs[2], coeffs[1])))
 
+        # 3. Use phase plateaus to construct a rectangular flux-timing reference.
         sort_idxs = np.argsort(np.abs(init_phases))
         mean_background = np.median(
             init_phases[sort_idxs[: int(len(init_phases) * 0.2)]]
@@ -203,6 +205,7 @@ class PhaseExp(Experiment[PhaseResult, PhaseCfg]):
             mean_topdetune
         )
 
+        # 4. Compare the phase map and recovered phase with flux-edge timing windows.
         fig, _ = plots.subplots(
             num="fit", nrows=2, ncols=1, figsize=(8, 4), sharex=True
         )

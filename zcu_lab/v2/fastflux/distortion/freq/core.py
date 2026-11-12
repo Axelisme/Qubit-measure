@@ -135,7 +135,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         )
 
         with Schedule(signals_buffer, scope=context.scope) as sched:
-            # Build the pulse sequence without changing the caller's cfg.
+            # 3. Probe during the flux transient and read out after all timing branches.
             builder = TimelineBuilder(
                 soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
             )
@@ -168,7 +168,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         rows containing NaN. Require source.cfg for probe/flux timing, otherwise
         raise ValueError; the ideal curve is only a timing reference.
         """
-        # 1. Select the measured data and analysis controls.
+        # 1. Require saved pulse timing to interpret the delayed spectroscopy map.
         del options  # This analysis has no configurable options.
         result = source.result
 
@@ -181,7 +181,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
 
         lengths, freqs, signals = result.lengths, result.freqs, result.signals
 
-        # 2. align to center of qubit pulse
+        # 2. Locate each spectroscopy sample at the qubit-probe center.
         lengths = lengths + qub_len / 2
 
         amps = freq_signal2real(signals)
@@ -201,6 +201,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
 
         s_lengths, s_freqs = np.array(fit_lengths), np.array(fit_freqs)
 
+        # 4. Use low/high detuning bands to construct a flux-timing reference.
         sort_idxs = np.argsort(np.abs(s_freqs - s_freqs[0]))
         mean_background = np.mean(s_freqs[sort_idxs[: int(len(s_freqs) * 0.1)]])
         mean_topdetune = np.mean(s_freqs[sort_idxs[int(len(s_freqs) * 0.9) :]])
@@ -214,6 +215,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
             mean_topdetune
         )
 
+        # 5. Compare resonance tracks with ideal timing and finite-probe edge windows.
         fig, ax = plots.subplots(num="fit", figsize=config.figsize)
 
         ax.imshow(
@@ -225,7 +227,6 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
             origin="lower",
         )
 
-        # 4. Plot the resonance frequencies and fitted curve
         ax.plot(s_lengths, s_freqs, ".", c="k")
         ax.plot(ideal_lengths, ideal_curve, "g-", label="Ideal")
 

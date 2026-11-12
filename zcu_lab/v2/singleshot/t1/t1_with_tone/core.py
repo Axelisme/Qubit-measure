@@ -172,7 +172,7 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
         self, cfg: T1WithToneCfg, *, context: RunContext
     ) -> T1WithToneResult:
         """Acquire both preparations with linear board delays; return counts and actual times."""
-        # 1. Prepare the measurement coordinates and acquisition state.
+        # 1. Quantize uniform probe durations on the tone generator time grid.
         lengths = sweep2array(
             cfg.delay, "time", {"soccfg": context.soccfg, "gen_ch": cfg.probe_pulse.ch}
         )
@@ -180,7 +180,7 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
         buffer = SignalBuffer(
             (len(lengths), 2, POPULATION_COUNT), dtype=np.float64, on_update=update
         )
-        # 2. Acquire the pulse sequence in the declared scan order.
+        # 2. Compare I/pi preparations under the board-swept probe duration.
         with Schedule(buffer, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 context.soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
@@ -215,7 +215,7 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
         self, cfg: T1WithToneCfg, *, context: RunContext
     ) -> T1WithToneResult:
         """Acquire both preparations with nonuniform decay sampling; return counts and actual times."""
-        # 1. Prepare the measurement coordinates and acquisition state.
+        # 1. Resolve decay-weighted tone durations and keep round counts separate.
         lengths = materialize_nonuniform_t1_pulse_lengths(
             cfg.delay, soccfg=context.soccfg, gen_ch=cfg.probe_pulse.ch
         )
@@ -226,7 +226,7 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
             on_update=lambda data: update(_sum_rounds(data)),
         )
         programs: dict[float, TimelineProgramV2] = {}
-        # 2. Acquire the pulse sequence in the declared scan order.
+        # 2. Reuse one program per duration while comparing I/pi counts each round.
         with Schedule(buffer, scope=context.scope) as sched:
             for _, rep in sched.repeat("round", cfg.rounds):
                 for length, step in rep.scan("delay", lengths.tolist()):

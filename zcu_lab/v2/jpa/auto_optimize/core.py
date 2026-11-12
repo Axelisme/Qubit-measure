@@ -487,7 +487,7 @@ class AutoOptimizeExp(Experiment[JPAOptimizeResult, JPAOptCfg]):
         returned flux is a device value, frequency is MHz, and power is dBm.
         All-NaN SNR fails rather than proposing an unmeasured candidate.
         """
-        # 1. Select the measured data and analysis controls.
+        # 1. Choose the highest measured SNR without interpolating a new setting.
         result = source.result
 
         params = result.params
@@ -502,7 +502,7 @@ class AutoOptimizeExp(Experiment[JPAOptimizeResult, JPAOptCfg]):
         colors = phases
 
         figsize = (8, 5)
-        # 2. Compare the analysis with the measured response.
+        # 2. Mark the best candidate in iteration and pump/bias views, colored by phase.
         fig, initial_ax = plots.subplots(num="fit", figsize=figsize)
         initial_ax.remove()
         gs = fig.add_gridspec(3, 2, width_ratios=[1.5, 1])

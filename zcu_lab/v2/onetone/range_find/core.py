@@ -160,10 +160,10 @@ class RangeFindExp(Experiment[RangeFindResult, RangeFindCfg]):
         context supplies SoC, cancellation and live plots. Return absolute MHz
         and complex IQ; failures propagate and cancellation preserves partial IQ.
         """
-        # 1. Prepare the measurement coordinates and acquisition state.
+        # 1. Resolve the wide-band resonator survey on the readout frequency grid.
         cfg = deepcopy(config)
         freqs = linear_freqs(cfg.freq, cfg.readout, context=context)
-        # 2. Display the measured response while retaining raw data.
+        # 2. Preview magnitude dips while preserving complex IQ for dip detection.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Frequency (MHz)", ylabel="Amplitude")
         line = live_line(ax)
@@ -179,7 +179,7 @@ class RangeFindExp(Experiment[RangeFindResult, RangeFindCfg]):
 
         fig.show()
         signals = SignalBuffer((len(freqs),), on_update=update)
-        # 3. Acquire the pulse sequence in the declared scan order.
+        # 3. Reset and read out each board-swept survey frequency.
         with Schedule(signals, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 context.soccfg,
@@ -220,7 +220,7 @@ class RangeFindExp(Experiment[RangeFindResult, RangeFindCfg]):
         named dips raise ValueError naming the available count;
         no partial success or proposals are produced here.
         """
-        # 1. Select the measured data and analysis controls.
+        # 1. Require a complete, distinct frequency grid before ranking resonator dips.
         freqs = np.asarray(source.result.freqs, dtype=np.float64)
         signals = np.asarray(source.result.signals, dtype=np.complex128)
         if freqs.ndim != 1 or signals.shape != freqs.shape or freqs.size < 11:
@@ -272,6 +272,7 @@ class RangeFindExp(Experiment[RangeFindResult, RangeFindCfg]):
             for position, dip in enumerate(sorted(selected, key=lambda dip: dip.freq))
         )
 
+        # 3. Label the selected dips by name, frequency, width, depth, and score.
         fig, ax = plots.subplots(nrows=1, num="fit", figsize=(9, 4.5))
 
         @plots.on_plot_thread

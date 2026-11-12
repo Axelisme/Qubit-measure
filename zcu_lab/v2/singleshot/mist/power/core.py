@@ -194,7 +194,7 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
         cfg may be None. options controls correction and any axis conversion.
         Publish the fit figure to plots. Legacy G/E data raise ValueError.
         """
-        # 1. Select the measured data and analysis controls.
+        # 1. Normalize G/E/Other counts and apply optional confusion correction.
         result = source.result
         gains, populations = result.gains, result.counts
         populations = populations / populations.sum(axis=-1, keepdims=True)
@@ -206,6 +206,7 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
 
         populations = correct_populations(populations, options.confusion_matrix)
 
+        # 2. Use gain coordinates unless a photon-number calibration is supplied.
         if options.ac_coeff is None:
             xs = gains
             xlabel = "probe gain (a.u.)"
@@ -213,7 +214,7 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
             xs = options.ac_coeff * gains**2
             xlabel = r"$\bar n$"
 
-        # 2. Compare the analysis with the measured response.
+        # 3. Show probe-induced populations with optional logarithmic gain/photon axis.
         _, ax = plots.subplots(num="fit", figsize=(6, 6))
 
         ax.plot(

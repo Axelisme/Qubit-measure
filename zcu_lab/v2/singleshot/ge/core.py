@@ -362,6 +362,7 @@ class GE_Exp(Experiment[GE_Result, GE_Cfg]):
         axes.set_aspect("equal", adjustable="datalim")
         axes.grid()
         axes.legend()
+        # 2. Fit readout separation and preparation mixing in physical g/e order.
         fidelity, init_pops, fit = singleshot_ge_analysis(
             signals,
             angle=options.angle,
@@ -373,6 +374,7 @@ class GE_Exp(Experiment[GE_Result, GE_Cfg]):
             ),
             plots=None,
         )
+        # 3. Validate the calibration and label an unidentifiable length ratio.
         analysis = GEAnalysis(
             initial_state=options.initial_state,
             fidelity=fidelity,

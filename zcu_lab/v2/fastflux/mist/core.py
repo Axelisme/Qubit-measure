@@ -143,7 +143,7 @@ class MistExp(Experiment[MistResult, MistCfg]):
         )
 
         with Schedule(signals_buffer, scope=context.scope) as sched:
-            # Build the pulse sequence without changing the caller's cfg.
+            # 3. Start flux and MIST together after initialization; read after both finish.
             builder = TimelineBuilder(
                 soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
             )
@@ -178,7 +178,7 @@ class MistExp(Experiment[MistResult, MistCfg]):
         options.ac_coeff, when supplied, scales squared gain to a photon-number
         axis; otherwise the vertical coordinate remains gain squared.
         """
-        # 1. Select the measured data and analysis controls.
+        # 1. Project mean IQ to MIST contrast without classifying individual shots.
         result = source.result
 
         flux_gains, mist_gains, signals2D = (
@@ -189,7 +189,7 @@ class MistExp(Experiment[MistResult, MistCfg]):
 
         real_signals = mist_signal2real(signals2D)
 
-        # 2. Compare the analysis with the measured response.
+        # 2. Map contrast against flux gain and MIST gain squared, optionally photons.
         fig, ax = plots.subplots(num="fit", figsize=config.figsize)
 
         if options.ac_coeff is not None:

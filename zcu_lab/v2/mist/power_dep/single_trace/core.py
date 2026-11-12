@@ -129,7 +129,7 @@ class PowerDepExp(Experiment[PowerDepResult, PowerDepCfg]):
 
         # 2. Bind the board gain sweep without changing the other probe settings.
         with Schedule(signals_buffer, scope=context.scope) as sched:
-            # Build the pulse sequence without changing the caller's cfg.
+            # 3. Reset and initialize before each gain-swept probe and readout.
             builder = TimelineBuilder(
                 soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
             )
@@ -163,7 +163,7 @@ class PowerDepExp(Experiment[PowerDepResult, PowerDepCfg]):
         number when supplied; ``e0`` only sets the vertical display range.
         Return no fit or calibrated population estimate.
         """
-        # 1. Select the measured data and analysis controls.
+        # 1. Measure IQ displacement from g0, defaulting to the first gain sample.
         result = source.result
         g0, e0, ac_coeff = options.g0, options.e0, options.ac_coeff
 
@@ -174,6 +174,7 @@ class PowerDepExp(Experiment[PowerDepResult, PowerDepCfg]):
 
         amp_diff = np.abs(signals - g0)
 
+        # 2. Use photon number only when a gain-squared calibration is supplied.
         if ac_coeff is None:
             xs = gains
             xlabel = "probe gain (a.u.)"
@@ -181,7 +182,7 @@ class PowerDepExp(Experiment[PowerDepResult, PowerDepCfg]):
             xs = ac_coeff * gains**2
             xlabel = r"$\bar n$"
 
-        # 2. Compare the analysis with the measured response.
+        # 3. Show MIST contrast with optional e0-based vertical scaling.
         _, ax = plots.subplots(num="fit", figsize=config.figsize)
         ax.plot(xs, amp_diff.T, marker=".")
         ax.set_xlabel(xlabel, fontsize=14)

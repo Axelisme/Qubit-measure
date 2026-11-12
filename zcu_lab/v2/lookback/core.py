@@ -98,8 +98,7 @@ class LookbackExp(Experiment[LookbackResult, LookbackCfg]):
         line = live_line(ax)
 
         fig.show()
-        # 2. Compile reset→optional preparation→readout before acquisition so an
-        # interrupted trace still has its fixed sample-time axis and buffer.
+        # 2. Fix the reset/preparation/readout sample axis before a possible stop.
         builder = TimelineBuilder(
             context.soccfg,
             reps=1,
@@ -148,7 +147,7 @@ class LookbackExp(Experiment[LookbackResult, LookbackCfg]):
         that time as predict_offset, not a fitted resonator response. Saved cfg
         is optional and only supplies the readout-window markers on the plot.
         """
-        # 1. Select the measured data and analysis controls.
+        # 1. Optionally smooth complex ADC samples before locating readout arrival.
         result = source.result
         Ts = result.times
         signals = result.signals
@@ -167,9 +166,10 @@ class LookbackExp(Experiment[LookbackResult, LookbackCfg]):
         else:
             offset = float(Ts[np.nonzero(candidate_mask)[0][-1]])
 
+        # 3. Compare IQ and magnitude with arrival and saved readout-window markers.
         fig, ax = plots.subplots(num="fit", figsize=config.figsize)
 
-        # 3. np.real/np.imag are used instead of .real/.imag because numpy 2.4
+        # np.real/np.imag are used instead of .real/.imag because numpy 2.4
         # stubs narrow the overloaded descriptor in a way that confuses pyright
         # when the array dtype was widened by gaussian_filter1d.
         ax.plot(Ts, np.real(signals), label="I value")
