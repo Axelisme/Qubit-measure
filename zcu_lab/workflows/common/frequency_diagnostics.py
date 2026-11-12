@@ -6,6 +6,7 @@ import math
 from typing import TYPE_CHECKING
 
 import numpy as np
+from zcu_tools.analysis.fitting.peaks import PeakCandidate
 from zcu_tools.experiment.v2.utils.snr import estimate_snr
 
 from zcu_lab.v2.twotone.freq.core import FreqResult
@@ -153,16 +154,15 @@ def fit_diagnostics(
 
 
 def confirmation_gates(
-    coarse_fit: FrequencyFit, scan: FrequencyScan
+    coarse_center_mhz: float, peak: PeakCandidate, scan: FrequencyScan
 ) -> tuple[Gate, ...]:
     """Record fine-peak presence and displacement versus the coarse peak width.
 
     The strongest fine peak is used, as in confirm_frequency_candidate. No
-    candidate is selected or accepted here. Width and displacement use MHz.
+    candidate is selected or accepted here. peak is the selected coarse
+    candidate; coarse_center_mhz is its fitted center. Width and displacement
+    use MHz. Inputs are unchanged.
     """
-    peak = coarse_fit.selected_peak
-    if peak is None:
-        raise ValueError("Fine confirmation requires a coarse candidate")
     strongest = next(iter(scan.peaks), None)
     return (
         gate("fine_candidate_present", "==", 1, float(strongest is not None)),
@@ -170,8 +170,6 @@ def confirmation_gates(
             "fine_peak_distance_mhz",
             "<=",
             peak.width,
-            None
-            if strongest is None
-            else abs(strongest.center - coarse_fit.frequency_mhz),
+            None if strongest is None else abs(strongest.center - coarse_center_mhz),
         ),
     )

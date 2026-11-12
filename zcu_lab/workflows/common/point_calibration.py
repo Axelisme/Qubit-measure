@@ -154,7 +154,6 @@ def _record_rabi(
         )
     amp = stage.record.amp
     if amp is not None and amp.status == "accepted":
-        assert stage.record.frequency_mhz is not None
         carry.last_amp_gain = stage.record.drive_gain
         carry.last = replace(
             _prior(carry),
@@ -188,7 +187,6 @@ def _record_readout(
     """Retain an accepted readout's freq/gain and its producer point."""
     if readout.status != "accepted":
         return
-    assert readout.frequency_mhz is not None and readout.gain is not None
     carry.last = replace(
         _prior(carry),
         readout_freq_mhz=readout.frequency_mhz,
@@ -213,10 +211,11 @@ async def calibrate_point(
     pulses are the plan's drive, probe and readout templates; each stage
     receives the readout retained in carry. settings supplies fresh policy
     before every stage. guess names the point and its positive history-based T1
-    estimate in us. carry holds the accepted history and feedback controllers:
-    stages receive only frequency_tracker and rabi_drive; this function updates
-    last, f01_by_flux, traces, last_amp_gain and readout_source from their
-    results, then redraws the shared heatmaps.
+    estimate in us. Mutate the supplied carry in place: update last,
+    f01_by_flux, frequency_traces, rabi_traces, amp_traces, last_amp_gain and
+    readout_source from stage results, then redraw the shared heatmaps.
+    Stages also update carry.frequency_tracker and carry.rabi_drive in place.
+    These changes remain in carry if a later stage fails or is cancelled.
     Rabi delegates len_only, amp_only or len_then_amp to calibrate_rabi,
     including AmpRabi where selected. Readout runs on cadence with this point's
     pi, otherwise it returns skipped without postponing its cadence.
@@ -233,9 +232,6 @@ async def calibrate_point(
     point = guess.point
     if scope.cancelled:
         return result
-    tracker = carry.frequency_tracker
-    if tracker is None:
-        raise ValueError("Frequency calibration requires a captured physical predictor")
     tun = settings.current
     _apply_readout_policy(carry, tun)
     frequency = await calibrate_frequency(
@@ -244,7 +240,7 @@ async def calibrate_point(
         replace(pulses, readout=_retained_readout(pulses, carry)),
         tun,
         guess=FrequencyGuess(point=point, seed_flux=carry.seed_flux),
-        tracker=tracker,
+        tracker=carry.frequency_tracker,
     )
     result.frequency = frequency.record
     _record_frequency(scope, env, point, carry, frequency)

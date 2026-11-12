@@ -9,14 +9,8 @@ from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from zcu_tools.experiment.v2.runtime.schedule import SignalBuffer
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.utils.process import rotate2real
 
 from zcu_lab.v2.support.live import live_line
-
-
-def reset_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
-    """Project complex mean IQ onto its response axis, without population calibration."""
-    return rotate2real(signals).real
 
 
 def reset_scan_buffer(
@@ -25,16 +19,14 @@ def reset_scan_buffer(
     *,
     xlabel: str,
     branch_shape: tuple[int, ...] = (),
-    signal2real: Callable[
-        [NDArray[np.complex128]], NDArray[np.float64]
-    ] = reset_signal2real,
+    signal2real: Callable[[NDArray[np.complex128]], NDArray[np.float64]],
 ) -> SignalBuffer:
     """Retain complex IQ scans and publish caller-selected real display curves.
 
     coordinates contains hardware-rounded scan values; xlabel names their unit.
     branch_shape gives leading IQ dimensions, defaulting to one unbranched scan.
     signal2real maps that buffer to (prod(branch_shape), len(coordinates)), or a
-    1D curve for one line. The default is an uncalibrated response-axis projection.
+    1D curve for one line. The caller must supply the display conversion.
     Unmeasured points stay NaN. Display conversion never selects a reset optimum.
     """
     fig, ax = plots.subplots(num="measurement")

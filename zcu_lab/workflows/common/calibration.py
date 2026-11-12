@@ -116,7 +116,7 @@ class CalCarry:
     last_amp_gain: float | None = None
     rabi_drive: RabiDriveFeedback = field(default_factory=RabiDriveFeedback)
     readout_source: CalibrationSource | None = None
-    frequency_tracker: FrequencyTracker | None = None
+    frequency_tracker: FrequencyTracker = field(kw_only=True)
 
 
 class CalibrationSource(BaseModel):
