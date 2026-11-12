@@ -1,6 +1,6 @@
 # zcu_tools.analysis.fitting
 
-**Last updated:** 2026-11-12
+**Last updated:** 2026-11-12，ALLXY coherent errors 與 paired RB
 
 **讀者：** lab-author。擬合模型、數值輸入、結果與失敗契約速查。
 
@@ -26,6 +26,26 @@ IQ 軸與 reference 下降方向，不呼叫主 fitter 或 bootstrap。
 各 group 保留自己的 amplitude／offset；covariance 依 reduced chi-square scaling。
 Lab 解讀 herald 與 d=4，不將這些政策交給 fitter。六組數值工具的 owner 邊界見
 [ADR-0085](../../../../docs/adr/0085-numerical-fitting-owners.md)。
+
+## ALLXY coherent errors
+
+`allxy.predict_state_with_error(gates, power_err, detune_err)` predicts scalar
+Bloch-z for a supported ordered gate pair from the Reed low-order table.
+`power_err` is the pi/2 angle error in radians, not fractional power.
+`allxy.fit_allxy_errors(sequence, real_signals, *, fit_ge)` fits caller-provided
+real signals and returns `AllXYFitResult`. It owns the signal-domain curve,
+center/contrast, amplitude/detuning parameters and separated Bloch-z deviations.
+The result centralizes nonlinear fitting and error decomposition; callers do not
+rebuild the model to plot or summarize a fit. Sequence selection, IQ rotation,
+figures and persisted summaries stay with the experiment.
+
+`fit_ge=False` fixes center and signed contrast to measured extrema estimates.
+`True` also fits those levels within the original measured-range bounds.
+Nonzero coherent errors can shrink measured contrast, so both branches can be
+biased even for noiseless signals. The fitter preserves this bound rather than
+claiming unbiased parameter recovery. Numerical failures propagate without a
+fallback. Supported pairs, array axes, units and failure details are documented
+on the two functions and result type in [allxy.py](allxy.py).
 
 ## Peak candidates
 
