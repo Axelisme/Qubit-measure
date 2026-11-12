@@ -117,7 +117,6 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
 
         # 2. Retain complex IQ while displaying its common-axis projection.
         plots = context.plots
-        # 3. Display the measured signal during acquisition.
         fig, ax = plots.subplots(num="measurement")
         ax.set(xlabel="Length (us)", ylabel="Amplitude")
         viewer = live_line(ax, num_lines=1)
@@ -130,7 +129,7 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
         fig.show()
         signals_buffer = SignalBuffer((len(lengths),), on_update=update)
 
-        # 4. Sweep both durations together before reading out the reset response.
+        # 3. Measure duration-dependent reset response while preserving the tone-length offset.
         with Schedule(signals_buffer, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
@@ -148,7 +147,6 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
             builder.emit(Readout("readout", cfg.readout))
             sched.run_acquire(builder.build(), soc, rounds=cfg.rounds)
 
-        # 5. Return the acquired coordinates and data.
         return LengthResult(lengths, signals_buffer.array)
 
     def analyze(
@@ -163,20 +161,20 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
         Omit unmeasured NaN points and publish fit without fitting or returning
         an optimal duration. source.cfg may be None.
         """
-        # 1. Select the saved measurements and analysis controls.
+        # 1. Recover the measured duration dependence without unacquired length points.
         del options
         result = source.result
 
         lens, signals = result.lengths, result.signals
 
-        # 2. Discard NaNs (possible early abort)
+        # Discard NaNs left by a possible early abort.
         val_mask = ~np.isnan(signals)
         lens = lens[val_mask]
         signals = signals[val_mask]
 
         real_signals = reset_length_signal2real(signals)
 
-        # 3. Compare the data and analysis on the same axes.
+        # 2. Inspect reset contrast versus the common duration scan.
         fig, ax = plots.subplots(num="fit", figsize=config.figsize)
 
         ax.plot(lens, real_signals, marker=".")

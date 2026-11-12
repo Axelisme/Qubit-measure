@@ -138,7 +138,6 @@ class T2RamseyExp(Experiment[T2RamseyResult, T2RamseyCfg]):
 
         # 2. Display the IQ projection while averaging the delay sweep.
         title = f"T2 Ramsey - detune {detune:.2f} MHz"
-        # 3. Display the measured signal during acquisition.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Time (us)", ylabel="Real Signal")
         ax.set_title(title)
@@ -160,7 +159,7 @@ class T2RamseyExp(Experiment[T2RamseyResult, T2RamseyCfg]):
             (len(lengths),),
             on_update=update,
         )
-        # 4. Acquire the configured pulse sequence over the scan.
+        # 3. Measure freely evolving coherence with a phase-ramped final projection.
         with Schedule(signals_buffer, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
@@ -168,8 +167,6 @@ class T2RamseyExp(Experiment[T2RamseyResult, T2RamseyCfg]):
             length_sweep = cfg.delay
             length_param = builder.add_sweep("delay", length_sweep)
             detune_param = 360 * detune * length_param
-
-            # 5. Let coherence evolve freely, then project with the phase ramp.
 
             if cfg.reset is not None:
                 builder.emit(cfg.reset.build("reset"))
@@ -197,7 +194,7 @@ class T2RamseyExp(Experiment[T2RamseyResult, T2RamseyCfg]):
                 ),
             )
 
-        # 6. Keep measured IQ separate from fitted coherence times and fringe frequency.
+        # 4. Preserve the realized phase-ramp frequency with the measured Ramsey trace.
         return T2RamseyResult(
             times=lengths,
             signals=signals_buffer.array,
@@ -221,7 +218,7 @@ class T2RamseyExp(Experiment[T2RamseyResult, T2RamseyCfg]):
         corrected qubit detuning. Return uncertainties and quality, and draw
         the fit using the same samples.
         """
-        # 1. Select the saved measurements and analysis controls.
+        # 1. Recover real-IQ Ramsey contrast for the selected envelope and phase policy.
         result = source.result
         fit_fringe = options.fit_fringe
         fit_phase = options.fit_phase
@@ -258,7 +255,7 @@ class T2RamseyExp(Experiment[T2RamseyResult, T2RamseyCfg]):
             detune = 0.0
             detune_err = 0.0
 
-        # 3. Compare the data and analysis on the same axes.
+        # 3. Assess Ramsey coherence time and any fitted fringe frequency against the trace.
         fig, ax = plots.subplots(num="fit", figsize=config.figsize)
 
         ax.plot(lengths, real_signals, label="meas", ls="-", marker="o", markersize=3)
@@ -276,7 +273,6 @@ class T2RamseyExp(Experiment[T2RamseyResult, T2RamseyCfg]):
 
         fig.tight_layout()
 
-        # 4. Return the measured analysis summary.
         return T2RamseyAnalysis(
             t2r=float(t2r),
             t2r_err=float(t2rerr),

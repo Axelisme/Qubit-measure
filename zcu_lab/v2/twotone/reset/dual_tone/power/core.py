@@ -122,7 +122,6 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
 
         # 2. Display contrast relative to the minimum-gain corner in either scan direction.
         plots = context.plots
-        # 3. Display the measured signal during acquisition.
         fig, ax = plots.subplots(num="measurement")
         ax.set(xlabel="Gain1 (a.u.)", ylabel="Gain2 (a.u.)")
         viewer = live_heatmap(ax)
@@ -139,7 +138,7 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
         fig.show()
         signals_buffer = SignalBuffer((len(gains1), len(gains2)), on_update=update)
 
-        # 4. Sweep both reset gains in hardware and collect mean IQ.
+        # 3. Measure reset response across both tone gains in one FPGA sweep.
         with Schedule(signals_buffer, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
@@ -157,7 +156,6 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
             builder.emit(Readout("readout", cfg.readout))
             sched.run_acquire(builder.build(), soc, rounds=cfg.rounds)
 
-        # 5. Return the acquired coordinates and data.
         return PowerResult(gains1, gains2, signals_buffer.array)
 
     def analyze(
@@ -174,12 +172,11 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
         according to the first corner's contrast relative to the map mean.
         Return gain1/gain2 in a.u. within [-1, 1] and publish fit; source.cfg may be None.
         """
-        # 1. Select the saved measurements and analysis controls.
         result = source.result
 
         gains1, gains2, signals = result.gains1, result.gains2, result.signals
 
-        # 2. Apply smoothing for peak finding
+        # 1. Resolve reset contrast relative to the minimum-power corner after smoothing.
         signals_smooth = smooth_signal_nd(
             signals,
             options=SmoothingOptions(
@@ -195,7 +192,7 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
         ref_j = 0 if gains2[0] < gains2[-1] else -1
         amp2D = np.abs(signals_smooth - signals_smooth[ref_i, ref_j])
 
-        # 3. Determine if we should look for max or min
+        # 2. Choose the gain pair at the contrast extremum indicated by the map background.
         if amp2D[0, 0] < np.mean(amp2D):
             gain1_opt = gains1[np.argmax(np.max(amp2D, axis=1))]
             gain2_opt = gains2[np.argmax(np.max(amp2D, axis=0))]
@@ -204,7 +201,7 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
             gain2_opt = gains2[np.argmin(np.min(amp2D, axis=0))]
             amp2D = np.mean(amp2D) - amp2D
 
-        # 4. Compare the data and analysis on the same axes.
+        # 3. Inspect the selected gain pair on the smoothed reset-contrast map.
         fig, ax = plots.subplots(num="fit", figsize=config.figsize)
 
         ax.imshow(
@@ -225,5 +222,4 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
 
         fig.tight_layout()
 
-        # 5. Return the measured analysis summary.
         return PowerAnalysis(gain1=float(gain1_opt), gain2=float(gain2_opt))

@@ -162,7 +162,7 @@ class T2EchoExp(Experiment[T2EchoResult, T2EchoCfg]):
             (len(lengths),),
             on_update=update,
         )
-        # 3. Acquire the configured pulse sequence over the scan.
+        # 3. Measure midpoint-refocused coherence with a phase-ramped final projection.
         with Schedule(signals_buffer, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
@@ -170,8 +170,6 @@ class T2EchoExp(Experiment[T2EchoResult, T2EchoCfg]):
             length_sweep = cfg.delay
             length_param = builder.add_sweep("delay", length_sweep)
             detune_param = 360 * detune * length_param
-
-            # 4. Refocus at the midpoint, then project with the programmed phase ramp.
 
             if cfg.reset is not None:
                 builder.emit(cfg.reset.build("reset"))
@@ -202,7 +200,7 @@ class T2EchoExp(Experiment[T2EchoResult, T2EchoCfg]):
                 ),
             )
 
-        # 5. Keep measured IQ separate from fitted coherence times and fringe frequency.
+        # 4. Preserve the realized phase-ramp frequency with the measured echo trace.
         return T2EchoResult(
             times=lengths,
             signals=signals_buffer.array,
@@ -228,7 +226,7 @@ class T2EchoExp(Experiment[T2EchoResult, T2EchoCfg]):
         detune for a requested fringe fit raises ValueError; explicit decay needs
         no detune source. Options validate fit_method as fringe or decay.
         """
-        # 1. Select the saved measurements and analysis controls.
+        # 1. Resolve the fringe-detuning source, falling back to a decay fit at zero detuning.
         result = source.result
         fit_method = options.fit_method
         fit_phase = options.fit_phase
@@ -250,7 +248,7 @@ class T2EchoExp(Experiment[T2EchoResult, T2EchoCfg]):
         xs = xs[1:]
         signals = signals[1:]
 
-        # 2. Project IQ onto its signal axis before choosing the envelope model.
+        # 2. Estimate echo coherence from the real-IQ trace after omitting its first point.
         real_signals = rotate2real(signals).real
 
         if fit_method == "fringe":
@@ -273,7 +271,7 @@ class T2EchoExp(Experiment[T2EchoResult, T2EchoCfg]):
             detune = 0.0
             detune_err = 0.0
 
-        # 3. Compare the data and analysis on the same axes.
+        # 3. Assess echo decay and any fitted fringe frequency against the measured trace.
         fig, ax = plots.subplots(num="fit", figsize=config.figsize)
 
         ax.plot(xs, real_signals, label="data", ls="-", marker="o", markersize=5)
@@ -295,7 +293,6 @@ class T2EchoExp(Experiment[T2EchoResult, T2EchoCfg]):
 
         fig.tight_layout()
 
-        # 4. Return the measured analysis summary.
         return T2EchoAnalysis(
             t2e=float(t2e),
             t2e_err=float(t2eerr),

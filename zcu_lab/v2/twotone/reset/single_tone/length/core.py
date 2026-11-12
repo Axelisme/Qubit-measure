@@ -113,7 +113,6 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
             builder.emit(Readout("readout", cfg.readout))
             sched.run_acquire(builder.build(), soc, rounds=cfg.rounds)
 
-        # 4. Return the acquired coordinates and data.
         return LengthResult(lengths, signals_buffer.array)
 
     def analyze(
@@ -128,20 +127,20 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
         Omit unmeasured NaN points and publish fit without fitting or returning
         an optimal length. source.cfg may be None.
         """
-        # 1. Select the saved measurements and analysis controls.
+        # 1. Recover the projected reset-duration response from acquired points only.
         del options
         result = source.result
 
         lens, signals = result.lengths, result.signals
 
-        # 2. Discard NaNs (possible early abort)
+        # Discard NaNs left by a possible early abort.
         val_mask = ~np.isnan(signals)
         lens = lens[val_mask]
         signals = signals[val_mask]
 
         real_signals = reset_signal2real(signals)
 
-        # 3. Compare the data and analysis on the same axes.
+        # 2. Inspect the sideband-reset response as its duration changes.
         fig, ax = plots.subplots(num="fit", figsize=config.figsize)
         ax.plot(lens, real_signals, marker=".")
         ax.set_xlabel("ProbeTime (us)", fontsize=14)

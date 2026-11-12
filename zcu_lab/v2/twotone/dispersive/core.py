@@ -173,7 +173,7 @@ class DispersiveExp(Experiment[DispersiveResult, DispersiveCfg]):
             {"soccfg": soccfg, "gen_ch": cfg.qub_pulse.ch},
         )
 
-        # 2. Display the measured signal during acquisition.
+        # 2. Monitor the readout resonance contrast of both preparations.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Frequency (MHz)", ylabel="Amplitude")
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
@@ -213,7 +213,6 @@ class DispersiveExp(Experiment[DispersiveResult, DispersiveCfg]):
             prog = builder.build()
             sched.run_acquire(prog, soc, rounds=cfg.rounds)
 
-        # 4. Return the acquired coordinates and data.
         return DispersiveResult(freqs=freqs, signals=signals_buffer.array)
 
     def analyze(
@@ -231,7 +230,7 @@ class DispersiveExp(Experiment[DispersiveResult, DispersiveCfg]):
         source cfg may be None; the preparation labels alone do not establish
         state purity or a readout fidelity.
         """
-        # 1. Select the saved measurements and analysis controls.
+        # 1. Estimate a common electrical delay for the two state-dependent resonances.
         result = source.result
 
         freqs = result.freqs
@@ -245,7 +244,7 @@ class DispersiveExp(Experiment[DispersiveResult, DispersiveCfg]):
         edelay = 0.5 * (g_edelay + e_edelay)
 
         model = get_proper_model(freqs, g_signals)
-        # 2. Keep each concrete model and its fitted parameter types in the same branch.
+        # 2. Fit both complex resonances with the selected hanger or transmission model.
         if isinstance(model, HangerModel):
             g_params = model.fit(
                 freqs,
@@ -280,7 +279,7 @@ class DispersiveExp(Experiment[DispersiveResult, DispersiveCfg]):
         g_freq, g_fwhm = g_params["freq"], g_params["fwhm"]
         e_freq, e_fwhm = e_params["freq"], e_params["fwhm"]
 
-        # 3. Calculate dispersive shift and average linewidth
+        # 3. Infer the dispersive splitting and mean linewidth from both resonances.
         chi = abs(g_freq - e_freq) / 2  # dispersive shift χ/2π
         avg_fwhm = (g_fwhm + e_fwhm) / 2  # average linewidth κ/2π
 
@@ -295,7 +294,7 @@ class DispersiveExp(Experiment[DispersiveResult, DispersiveCfg]):
             f"Dispersive shift χ/2π = {chi:.3f} MHz, κ/2π = {avg_fwhm:.1f} MHz"
         )
 
-        # 4. Plot data and fits
+        # 4. Compare the state-dependent resonance positions and amplitude fits.
         label_g = f"Ground: {g_freq:.1f} MHz, κ = {g_fwhm:.1f} MHz"
         label_e = f"Excited: {e_freq:.1f} MHz, κ = {e_fwhm:.1f} MHz"
         ax_main.scatter(freqs, g_amps, marker=".", c="b")
@@ -303,7 +302,6 @@ class DispersiveExp(Experiment[DispersiveResult, DispersiveCfg]):
         ax_main.plot(freqs, g_fit, "b-", alpha=0.7, label=label_g)
         ax_main.plot(freqs, e_fit, "r-", alpha=0.7, label=label_e)
 
-        # 5. Mark resonance frequencies
         ax_main.axvline(g_freq, color="b", ls="--", alpha=0.7)
         ax_main.axvline(e_freq, color="r", ls="--", alpha=0.7)
         ax_main.set_xlabel("Frequency (MHz)", fontsize=14)
@@ -312,10 +310,9 @@ class DispersiveExp(Experiment[DispersiveResult, DispersiveCfg]):
         ax_main.legend(loc="upper right")
         ax_main.grid(True)
 
-        # 6. Plot individual circle fit
+        # 5. Check each complex-IQ circle against its resonance fit.
         _plot_circle_fit(ax_g, freqs, g_signals, dict(g_params), "b", "Ground")
         _plot_circle_fit(ax_e, freqs, e_signals, dict(e_params), "r", "Excited")
         ax_e.set_xlabel(r"$Re[S_{21}]$", fontsize=14)
 
-        # 7. Return the measured analysis summary.
         return DispersiveAnalysis(chi, avg_fwhm)

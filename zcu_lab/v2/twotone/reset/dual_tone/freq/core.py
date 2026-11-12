@@ -117,7 +117,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         quantized MHz axes and mean complex IQ shaped (Nfreq1, Nfreq2).
         Cancellation leaves unacquired points as NaN.
         """
-        # 1. Prepare hardware-grid axes without changing the caller's cfg.
+        # 1. Quantize both reset-tone frequency axes without changing the caller's cfg.
         cfg = deepcopy(cfg)
         soccfg = context.soccfg
         reset_cfg = cfg.tested_reset
@@ -133,9 +133,9 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
             allow_array=cfg.method == "soft",
         )
 
+        # 2. Choose host-stepped tone 2 or a fully hardware-swept frequency map.
         if cfg.method == "soft":
             return self._run_soft(cfg, freqs1, freqs2, context=context)
-        # 2. Return the acquired coordinates and data.
         return self._run_hard(cfg, freqs1, freqs2, context=context)
 
     def _run_soft(
@@ -146,11 +146,11 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         *,
         context: RunContext,
     ) -> FreqResult:
-        # 1. Host rows are frequency 2; the Result restores frequency-1 rows.
+        # Host rows are frequency 2; the Result restores frequency-1 rows.
         """Scan reset carriers with a host outer loop and return the mean IQ map."""
         soc, soccfg = context.soc, context.soccfg
         plots = context.plots
-        # 2. Display the measured signal during acquisition.
+        # 1. Track the dual-tone contrast map and the current tone-1 frequency trace.
         fig, _ = plots.subplots(nrows=1, ncols=2, num="measurement")
         map_ax, line_ax = fig.axes
         map_ax.set(xlabel="Frequency1 (MHz)", ylabel="Frequency2 (MHz)")
@@ -172,7 +172,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
             (len(freqs2), len(freqs1)),
             on_update=update,
         )
-        # 3. Acquire the configured pulse sequence over the scan.
+        # 2. Measure tone-1 spectra at each host-selected tone-2 frequency.
         with Schedule(signals_buffer, scope=context.scope) as sched:
             for freq2, step in sched.scan("freq2", freqs2.tolist()):
                 builder = TimelineBuilder(
@@ -193,7 +193,6 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
                 builder.emit(Readout("readout", cfg.readout))
                 step.run_acquire(builder.build(), soc, rounds=cfg.rounds)
 
-        # 4. Return the acquired coordinates and data.
         return FreqResult(freqs1, freqs2, signals_buffer.array.T)
 
     def _run_hard(
@@ -204,11 +203,11 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         *,
         context: RunContext,
     ) -> FreqResult:
-        # 1. Sweep frequency 1 outside frequency 2 in one FPGA program.
+        # Frequency 1 is outside frequency 2 in the FPGA program.
         """Sweep both reset carriers in hardware and return the mean IQ map."""
         soc, soccfg = context.soc, context.soccfg
         plots = context.plots
-        # 2. Display the measured signal during acquisition.
+        # 1. Monitor dual-tone reset contrast across the hardware frequency grid.
         fig, ax = plots.subplots(num="measurement")
         ax.set(xlabel="Frequency1 (MHz)", ylabel="Frequency2 (MHz)")
         viewer = live_heatmap(ax)
@@ -223,7 +222,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
             (len(freqs1), len(freqs2)),
             on_update=update,
         )
-        # 3. Acquire the configured pulse sequence over the scan.
+        # 2. Measure both reset-tone frequency dependences in one FPGA program.
         with Schedule(signals_buffer, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
@@ -244,7 +243,6 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
             builder.emit(Readout("readout", cfg.readout))
             sched.run_acquire(builder.build(), soc, rounds=cfg.rounds)
 
-        # 4. Return the acquired coordinates and data.
         return FreqResult(freqs1, freqs2, signals_buffer.array)
 
     def analyze(
@@ -261,12 +259,11 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         in MHz and plot the measured IQ map; this contrast is not reset fidelity.
         The source cfg may be absent.
         """
-        # 1. Select the saved measurements and analysis controls.
         result = source.result
 
         freqs1, freqs2, signals = result.freqs1, result.freqs2, result.signals
 
-        # 2. Smooth the measured map before selecting a peak.
+        # 1. Suppress local noise before selecting the reset-frequency pair.
         signals_smooth = smooth_signal_nd(
             signals,
             options=SmoothingOptions(
@@ -278,7 +275,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
             axes=(0, 1),
         )
 
-        # 3. Select the largest contrast against the chosen background.
+        # 2. Locate the strongest response relative to the chosen corner or median background.
         if options.corner_as_background:
             amps = np.abs(signals_smooth - signals_smooth[0, 0])
         else:
@@ -287,7 +284,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         freq1_opt = freqs1[np.argmax(np.max(amps, axis=1))]
         freq2_opt = freqs2[np.argmax(np.max(amps, axis=0))]
 
-        # 4. Mark the selected pair on the original, unsmoothed IQ map.
+        # 3. Assess the selected pair on the original, unsmoothed IQ map.
         fig, ax = plots.subplots(num="fit", figsize=config.figsize)
 
         ax.imshow(
@@ -308,5 +305,4 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
 
         fig.tight_layout()
 
-        # 5. Return the measured analysis summary.
         return FreqAnalysis(freq1=float(freq1_opt), freq2=float(freq2_opt))

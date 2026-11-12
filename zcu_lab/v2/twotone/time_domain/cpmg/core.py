@@ -395,7 +395,7 @@ class CPMG_Exp(Experiment[CPMG_Result, CPMG_Cfg]):
             (len(times), len(length_idxs)),
             on_update=lambda data: update_viewer(data),
         )
-        # 3. Acquire the configured pulse sequence over the scan.
+        # 3. Measure refocused coherence versus evolution time for each pi-pulse count.
         with Schedule(signals_buffer, scope=context.scope) as sched:
 
             def update_viewer(data: NDArray[np.complex128]) -> None:
@@ -492,7 +492,7 @@ class CPMG_Exp(Experiment[CPMG_Result, CPMG_Cfg]):
         n, T2 and uncertainty are usable. Fewer than three usable rows gives
         None fit values without failing or changing the plotted T2 points.
         """
-        # 1. Select the saved measurements and analysis controls.
+        # 1. Separate real-IQ decay fits from normalized contrast used to compare pulse counts.
         result = source.result
         fit_fringe, t2r, t1 = options.fit_fringe, options.t2r, options.t1
 
@@ -588,5 +588,4 @@ class CPMG_Exp(Experiment[CPMG_Result, CPMG_Cfg]):
         ax2.set_ylabel("T2 (us)")
 
         fig.tight_layout()
-        # 4. Return the measured analysis summary.
         return summary

@@ -145,7 +145,7 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
         Return rounded lengths (us) and IQ shaped (2, 2, N), switches [0, 1].
         Live curves show I only, without choosing a population direction.
         """
-        # 1. Prepare the scan coordinates and measurement state.
+        # 1. Quantize flux-reset hold lengths and monitor all four before/after-pi branches.
         cfg = deepcopy(cfg)
         pulse_cfg = cfg.tested_reset.pulse_cfg
 
@@ -161,7 +161,7 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
             signal2real=lambda data: data.real.reshape(4, -1),
         )
 
-        # 2. Each hold length has the Cartesian product of the two calibrated pi switches.
+        # 2. Compare before/after-pi responses at each hold length to isolate the reset contrast.
         with Schedule(signals_buffer, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
@@ -190,7 +190,6 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
             builder.emit(Readout("readout", cfg.readout))
             sched.run_acquire(builder.build(), soc, rounds=cfg.rounds)
 
-        # 3. Return the acquired coordinates and data.
         return LengthResult(lengths=lengths, signals=signals_buffer.array)
 
     def analyze(
@@ -220,13 +219,14 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
         No finite or qualifying candidate gives selected_length=None.
         Publish raw I/Q, r and residual curves. source.cfg may be None.
         """
-        # 1. Select the saved measurements and analysis controls.
+        # 1. Require a complete before/after-pi branch layout for the hold-time estimate.
         result = source.result
         lengths, signals = result.lengths, result.signals
         if lengths.ndim != 1 or signals.shape != (2, 2, lengths.size):
             raise ValueError("Flux reset IQ must have shape (2, 2, number of lengths)")
 
-        # 2. After-pi differences cancel the common readout offset, not p0.
+        # 2. Find the shortest hold whose residual estimate stays below epsilon at longer lengths.
+        # After-pi differences cancel the common readout offset, not p0.
         with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
             d0 = signals[0, 0] - signals[0, 1]
             d1 = signals[1, 0] - signals[1, 1]
@@ -287,5 +287,4 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
             ax.grid(True)
             if selected is not None:
                 ax.axvline(selected, color="gray", linestyle="--")
-        # 4. Return the measured analysis summary.
         return LengthAnalysis(selected_length=selected, epsilon=options.epsilon)

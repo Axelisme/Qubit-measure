@@ -148,7 +148,6 @@ class FreqGainExp(Experiment[FreqGainResult, FreqGainCfg]):
 
         # 2. Display opposite-phase contrast while retaining all four complex IQ planes.
         plots = context.plots
-        # 3. Display the measured signal during acquisition.
         fig, ax = plots.subplots(num="measurement")
         ax.set(xlabel="Cavity Frequency (MHz)", ylabel="Cavity drive Gain (a.u.)")
         viewer = live_heatmap(ax)
@@ -161,7 +160,7 @@ class FreqGainExp(Experiment[FreqGainResult, FreqGainCfg]):
         fig.show()
         signals_buffer = SignalBuffer((4, len(gains), len(freqs)), on_update=update)
 
-        # 4. Sweep both cavity knobs and the final pi/2 phase in one program.
+        # 3. Resolve reset tomography across cavity gain and frequency in one program.
         with Schedule(signals_buffer, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
@@ -185,7 +184,6 @@ class FreqGainExp(Experiment[FreqGainResult, FreqGainCfg]):
             builder.emit(Readout("readout", cfg.readout))
             sched.run_acquire(builder.build(), soc, rounds=cfg.rounds)
 
-        # 5. Return the acquired coordinates and data.
         return FreqGainResult(
             gains=gains,
             freqs=freqs,
@@ -205,12 +203,11 @@ class FreqGainExp(Experiment[FreqGainResult, FreqGainCfg]):
         Return gain in a.u. within [-1, 1] and MHz frequency from the four-phase contrast
         map, and publish it as fit; source.cfg may be None.
         """
-        # 1. Select the saved measurements and analysis controls.
         result = source.result
 
         gains, freqs, signals = result.gains, result.freqs, result.signals
 
-        # 2. Find peak in amplitude
+        # 1. Locate the strongest reset tomography contrast after spatial smoothing.
         smooth_signals = smooth_signal_nd(
             signals,
             options=SmoothingOptions(
@@ -226,7 +223,7 @@ class FreqGainExp(Experiment[FreqGainResult, FreqGainCfg]):
         gain_opt = gains[np.argmax(np.max(real_signals, axis=1))]
         freq_opt = freqs[np.argmax(np.max(real_signals, axis=0))]
 
-        # 3. Compare the data and analysis on the same axes.
+        # 2. Identify the optimal cavity gain and frequency on the smoothed contrast map.
         fig, ax = plots.subplots(num="fit")
 
         ax.imshow(
@@ -245,5 +242,4 @@ class FreqGainExp(Experiment[FreqGainResult, FreqGainCfg]):
 
         fig.tight_layout()
 
-        # 4. Return the measured analysis summary.
         return FreqGainAnalysis(gain=float(gain_opt), freq=float(freq_opt))

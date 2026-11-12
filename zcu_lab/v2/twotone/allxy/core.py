@@ -162,17 +162,16 @@ class AllXY_Exp(Experiment[AllXY_Result, AllXYCfg]):
         complex IQ, not per-gate fidelities. Gate pulses must satisfy
         ComputedPulse's common-channel, pre-delay and waveform-style rules.
         """
-        # 1. Keep the acquisition axis in the same order as the displayed gate pairs.
+        # 1. Isolate the gate calibrations used to measure the ALLXY staircase.
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
 
-        # 2. Display the measured signal during acquisition.
+        # 2. Track the staircase with gate-pair labels in acquisition order.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Gate", ylabel="Signal")
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
         ax.grid()
         viewer = live_line(ax)
-        # 3. Keep gate-pair labels aligned with acquisition order.
         name_map = {
             "I": "$I$",
             "X90": "$X_{90}$",
@@ -208,7 +207,7 @@ class AllXY_Exp(Experiment[AllXY_Result, AllXYCfg]):
             (len(ALLXY_SEQUENCE),),
             on_update=update,
         )
-        # 4. Acquire the configured pulse sequence over the scan.
+        # 3. Measure all 21 gate pairs using the calibrated X rotations and derived Y rotations.
         with Schedule(signals_buffer, scope=context.scope) as sched:
             # Derive Y rotations from X calibrations and retain an identity time slot.
             I_pulse = cfg.I_pulse
@@ -256,7 +255,6 @@ class AllXY_Exp(Experiment[AllXY_Result, AllXYCfg]):
             prog = builder.build()
             sched.run_acquire(prog, soc, rounds=cfg.rounds)
 
-        # 5. Return the acquired coordinates and data.
         return AllXY_Result(
             signals=signals_buffer.array,
         )
@@ -275,20 +273,18 @@ class AllXY_Exp(Experiment[AllXY_Result, AllXYCfg]):
         detuning and Bloch-z deviations/residuals as defined in AllXYAnalysis,
         not gate infidelities. Publish ``fit``; source cfg may be None.
         """
-        # 1. Select the saved measurements and analysis controls.
         result = source.result
         signals = result.signals
 
-        # 2. Rotate IQ data so that the contrast lies on the real axis and take only
-        # the real part for further analysis.
+        # 1. Project the gate-pair IQ onto a common contrast axis for error estimation.
         sequence = ALLXY_SEQUENCE
         real_signals = allxy_signal2real(signals)
 
-        # 3. Fit coherent-error parameters against the 21 pair responses.
+        # 2. Estimate coherent rotation errors from the 21 pair responses.
 
         fit = fit_allxy_errors(sequence, real_signals, fit_ge=options.fit_ge)
 
-        # 4. Compare the measured staircase with the fitted low-order model.
+        # 3. Compare the measured staircase with the fitted low-order model.
 
         fig, ax = plots.subplots(num="fit", figsize=config.figsize)
         ax.plot(real_signals, marker="o", linestyle="None", label="Measured Signals")
@@ -328,7 +324,6 @@ class AllXY_Exp(Experiment[AllXY_Result, AllXYCfg]):
 
         fig.tight_layout()
 
-        # 5. Return the measured analysis summary.
         return AllXYAnalysis(
             amplitude_error=fit.amplitude_error,
             detune_param=fit.detune_param,

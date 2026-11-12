@@ -290,8 +290,9 @@ def _live_search_plot(
 
     Pass run plots and zero-based iteration coordinates. The returned callback
     takes a flat payload of scores, sampled parameter rows (MHz, gain, us), and
-    the current index. Each update changes all four lines and the iteration
-    title in one refresh and returns changed artists. Inputs remain unchanged.
+    the current index and returns None. Its body changes all four lines and the
+    iteration title in one refresh, returning changed artists to the plot
+    dispatcher. Inputs remain unchanged.
     """
     figure, initial_ax = plots.subplots(num="measurement", figsize=(8, 5))
     initial_ax.remove()
@@ -449,7 +450,6 @@ class AutoOptExp(Experiment[AutoOptResult, AutoOptCfg]):
         # 4. Keep the sampled path and scores, including unvisited NaN rows.
         signals = signals_buffer.array
 
-        # 5. Return the acquired coordinates and data.
         return AutoOptResult(params, signals)
 
     def analyze(
@@ -466,7 +466,7 @@ class AutoOptExp(Experiment[AutoOptResult, AutoOptCfg]):
         global optimum. An all-NaN score array raises ValueError.
         source.cfg may be None.
         """
-        # 1. Select the saved measurements and analysis controls.
+        # 1. Select the measured frequency, gain and duration with the highest search score.
         del options
         result = source.result
 
@@ -478,7 +478,7 @@ class AutoOptExp(Experiment[AutoOptResult, AutoOptCfg]):
         best_params = params[max_id, :]
 
         figsize = (8, 5)
-        # 2. Compare the data and analysis on the same axes.
+        # 2. Relate the best SNR to search history and the three sampled readout coordinates.
         fig, ax = plots.subplots(num="fit", figsize=figsize)
         ax.remove()
         gs = fig.add_gridspec(3, 2, width_ratios=[1.5, 1])
@@ -517,7 +517,6 @@ class AutoOptExp(Experiment[AutoOptResult, AutoOptCfg]):
         plot_ax(ax_gain, 1, "Readout Gain (a.u.)")
         plot_ax(ax_len, 2, "Readout Length (us)")
 
-        # 3. Return the measured analysis summary.
         return AutoOptAnalysis(
             float(best_params[0]), float(best_params[1]), float(best_params[2])
         )

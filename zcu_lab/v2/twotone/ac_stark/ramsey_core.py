@@ -132,7 +132,7 @@ class AcStarkRamseyExp(Experiment[AcStarkRamseyResult, AcStarkRamseyCfg]):
         )
         gains = round_zcu_gain(gains, soccfg, cfg.stark_pulse.ch)
 
-        # 2. Display the measured signal during acquisition.
+        # 2. Track Stark-dependent Ramsey oscillations and recent delay traces.
         fig, _ = context.plots.subplots(1, 2, num="measurement")
         heat_ax, line_ax = fig.axes
         heat_ax.set(xlabel="Stark Pulse Gain (a.u.)", ylabel="Time (us)")
@@ -197,7 +197,7 @@ class AcStarkRamseyExp(Experiment[AcStarkRamseyResult, AcStarkRamseyCfg]):
                 builder.emit(Readout("readout", cfg.readout))
                 step.run_acquire(builder.build(), soc, rounds=cfg.rounds)
 
-        # 4. Return the acquired coordinates and data.
+        # 4. Preserve the gain-delay map for Stark-shift spectroscopy.
         return AcStarkRamseyResult(gains, lengths, signals_buffer.array)
 
     def analyze(
@@ -215,7 +215,7 @@ class AcStarkRamseyExp(Experiment[AcStarkRamseyResult, AcStarkRamseyCfg]):
         Publish ``fit`` with per-gain normalized FFT magnitudes, not a fitted
         Stark coefficient or coherence time. Source cfg may be None.
         """
-        # 1. Select the saved measurements and analysis controls.
+        # 1. Resolve Stark-shift sidebands near the chosen Ramsey detuning below cutoff.
         result = source.result
         detune, cutoff = options.detune, options.cutoff
 
@@ -246,7 +246,7 @@ class AcStarkRamseyExp(Experiment[AcStarkRamseyResult, AcStarkRamseyCfg]):
 
         gains2 = gains**2
 
-        # 2. Compare the data and analysis on the same axes.
+        # 2. Compare time-domain fringes with normalized sidebands versus Stark power.
         fig, _ = plots.subplots(num="fit", nrows=2, ncols=1, sharex=True)
         ax1, ax2 = fig.axes
 

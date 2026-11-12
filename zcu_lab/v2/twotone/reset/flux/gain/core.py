@@ -125,7 +125,7 @@ class GainExp(Experiment[GainResult, GainCfg]):
         Return rounded gains (a.u.) and IQ shaped (2, 2, N), switches [0, 1].
         Live curves show I only, without choosing a population direction.
         """
-        # 1. Prepare the scan coordinates and measurement state.
+        # 1. Quantize flux-reset gains and monitor all four before/after-pi branches.
         cfg = deepcopy(cfg)
         pulse_cfg = cfg.tested_reset.pulse_cfg
 
@@ -141,7 +141,7 @@ class GainExp(Experiment[GainResult, GainCfg]):
             signal2real=lambda data: data.real.reshape(4, -1),
         )
 
-        # 2. Each gain has the Cartesian product of the two calibrated pi switches.
+        # 2. Compare before/after-pi responses at each gain to isolate the reset contrast.
         with Schedule(signals_buffer, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
@@ -170,7 +170,6 @@ class GainExp(Experiment[GainResult, GainCfg]):
             builder.emit(Readout("readout", cfg.readout))
             sched.run_acquire(builder.build(), soc, rounds=cfg.rounds)
 
-        # 3. Return the acquired coordinates and data.
         return GainResult(gains=gains, signals=signals_buffer.array)
 
     def analyze(
@@ -198,7 +197,7 @@ class GainExp(Experiment[GainResult, GainCfg]):
         choose the first gain in scan order; no candidate gives selected_gain=None.
         Publish raw I/Q, r and residual curves. source.cfg may be None.
         """
-        # 1. Select the saved measurements and analysis controls.
+        # 1. Require a complete before/after-pi branch layout for the gain-response estimate.
         del options
         result = source.result
         gains, signals = result.gains, result.signals
@@ -258,5 +257,4 @@ class GainExp(Experiment[GainResult, GainCfg]):
             ax.grid(True)
             if selected is not None:
                 ax.axvline(selected, color="gray", linestyle="--")
-        # 4. Return the measured analysis summary.
         return GainAnalysis(selected_gain=selected)

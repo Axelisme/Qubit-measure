@@ -89,7 +89,7 @@ class ZigZagExp(Experiment[ZigZagResult, ZigZagCfg]):
 
         times = np.arange(0, cfg.n_times + 1)
 
-        # 2. Display the measured signal during acquisition.
+        # 2. Monitor repeated-gate contrast on a common IQ projection axis.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Times", ylabel="Signal")
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
@@ -111,7 +111,7 @@ class ZigZagExp(Experiment[ZigZagResult, ZigZagCfg]):
             (len(times),),
             on_update=update,
         )
-        # 3. Acquire the configured pulse sequence over the scan.
+        # 3. Amplify rotation errors by repeating the selected gate after the initial X90.
         with Schedule(signals_buffer, scope=context.scope) as sched:
             repeat_pulse = getattr(cfg, cfg.repeat_on)
             if repeat_pulse is None:
@@ -145,5 +145,4 @@ class ZigZagExp(Experiment[ZigZagResult, ZigZagCfg]):
             builder.emit(Readout("readout", cfg.readout))
             sched.run_acquire(builder.build(), soc, rounds=cfg.rounds)
 
-        # 4. Return the acquired coordinates and data.
         return ZigZagResult(times=times, signals=signals_buffer.array)

@@ -94,11 +94,11 @@ class ChainPowerExp(Experiment[ThermalChainSums, ChainPowerCfg]):
         Return shot count and all 107 sums per setting.
         Stop keeps settings with a completed round; none raises RuntimeError.
         """
-        # 1. Prepare the scan coordinates and measurement state.
+        # 1. Quantize readout gains for thermal-chain power optimization.
         settings = sweep2array(
             cfg.gain, "gain", {"soccfg": context.soccfg, "gen_ch": cfg.readout.gen_ch}
         )
-        # 2. Display the measured signal during acquisition.
+        # 2. Track thermal-chain readout scores and diagnostics across gain.
         fig, _ = context.plots.subplots(
             3, 1, num="measurement", sharex=True, figsize=(8, 8)
         )
@@ -149,7 +149,6 @@ class ChainPowerExp(Experiment[ThermalChainSums, ChainPowerCfg]):
                 rounds=cfg.rounds,
             )
 
-        # 4. Return the acquired coordinates and data.
         return finished_sums(settings, shot_sums.array)
 
     def analyze(
@@ -166,14 +165,13 @@ class ChainPowerExp(Experiment[ThermalChainSums, ChainPowerCfg]):
         mark the maximum score; exact ties keep acquisition order. Errors
         do not affect ranking. Invalid moments raise ValueError.
         """
-        # 1. Select the saved measurements and analysis controls.
+        # 1. Rank readout gains by the thermal-chain score from saved moments.
         del options
         result = thermal_chain_score(source.result)
-        # 2. Compare the data and analysis on the same axes.
+        # 2. Inspect score, QND and correlation-growth diagnostics for the gain ranking.
         fig, _ = plots.subplots(3, 1, num="metric", sharex=True, figsize=(8, 8))
         _draw_metric(tuple(fig.axes), result)
         fig.tight_layout()
-        # 3. Return the measured analysis summary.
         return ChainAnalysis(best=result.settings[result.ranking[0]])
 
 

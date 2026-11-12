@@ -171,7 +171,7 @@ class StirapAmplitudeExp(Experiment[StirapAmplitudeResult, StirapAmplitudeCfg]):
         the backend. Hardware wiring remains operator-owned. Cancellation
         before a complete round leaves counts NaN.
         """
-        # 1. Prepare the scan coordinates and measurement state.
+        # 1. Require calibrated g/e/f readout before planning the pump-Stokes gain map.
         centroid3_classifier(cfg.readout, ro_ch=cfg.readout.ro_ch)
         pump_gains = np.linspace(
             cfg.pump_gain.start,
@@ -185,7 +185,7 @@ class StirapAmplitudeExp(Experiment[StirapAmplitudeResult, StirapAmplitudeCfg]):
             cfg.stokes_gain.expts,
             dtype=np.float64,
         )
-        # 2. Display the measured signal during acquisition.
+        # 2. Monitor raw g/e/f transfer fractions across pump and Stokes amplitudes.
         figure, _ = context.plots.subplots(
             num="measurement",
             ncols=len(STATE_LABELS),
@@ -228,7 +228,7 @@ class StirapAmplitudeExp(Experiment[StirapAmplitudeResult, StirapAmplitudeCfg]):
             on_update=update,
         )
 
-        # 3. Declare outer Pump and inner Stokes loops in one hardware program.
+        # 3. Measure transfer across both drive gains with fixed relative pulse timing.
         with Schedule(counts, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 context.soccfg, reps=cfg.shots, relax_delay=cfg.relax_delay
@@ -264,7 +264,6 @@ class StirapAmplitudeExp(Experiment[StirapAmplitudeResult, StirapAmplitudeCfg]):
                     ChargeDriveRequirement("Stokes", cfg.stokes_ch),
                 ),
             )
-        # 4. Return the acquired coordinates and data.
         return StirapAmplitudeResult(
             pump_gains=pump_gains, stokes_gains=stokes_gains, counts=counts.array
         )
@@ -283,7 +282,7 @@ class StirapAmplitudeExp(Experiment[StirapAmplitudeResult, StirapAmplitudeCfg]):
         cfg/classifier, incomplete or empty counts and singular confusion fail
         explicitly; no current calibration is read.
         """
-        # 1. Select the saved measurements and analysis controls.
+        # 1. Recover g/e/f transfer populations using the saved readout confusion calibration.
         del options
         cfg = source.cfg
         if cfg is None:
@@ -298,7 +297,7 @@ class StirapAmplitudeExp(Experiment[StirapAmplitudeResult, StirapAmplitudeCfg]):
             )
         raw = counts / counts.sum(axis=-1, keepdims=True)
         result = analyze_centroid3_populations(raw, calibration)
-        # 2. Compare the data and analysis on the same axes.
+        # 2. Compare raw and corrected population maps across pump and Stokes gains.
         figure, _ = plots.subplots(
             num="fit",
             nrows=2,
@@ -331,5 +330,4 @@ class StirapAmplitudeExp(Experiment[StirapAmplitudeResult, StirapAmplitudeCfg]):
             f"Saved readout: condition={result.condition_number:.4g}, minimum singular value={result.minimum_singular_value:.4g}\nPreparation-label estimates, not fidelity"
         )
         figure.show()
-        # 3. Return the measured analysis summary.
         return summarize_centroid3(result)

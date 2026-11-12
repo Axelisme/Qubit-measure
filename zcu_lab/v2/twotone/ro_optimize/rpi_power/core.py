@@ -109,7 +109,7 @@ class RPiPowerCfg(ConfigBase):
         Pulse.Cfg,
         FieldMeta(
             label="Pi pulse",
-            description="Calibrated g-to-e pi pulse between the two chains.",
+            description="Calibrated g-to-e pi pulse after every readout in the R-pi cycle.",
         ),
     ]
     gain: Annotated[SweepCfg, FieldMeta(label="Gain", unit="a.u.")]
@@ -178,12 +178,12 @@ class RPiPowerExp(Experiment[RPiPowerResult, RPiPowerCfg]):
         when the program builds. The sums cannot reveal a physical break in the
         chain that does not appear in the IQ data.
         """
-        # 1. Gain axis and the live score plot.
+        # 1. Quantize readout gains for R-pi chain optimization.
         gains = sweep2array(
             cfg.gain, "gain", {"soccfg": context.soccfg, "gen_ch": cfg.readout.gen_ch}
         )
 
-        # 2. Display the measured signal during acquisition.
+        # 2. Track valid R-pi scores and flag unplottable gain settings.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel=GAIN_AXIS.label, ylabel=SCORE_LABEL)
         ax.grid(True)
@@ -206,7 +206,7 @@ class RPiPowerExp(Experiment[RPiPowerResult, RPiPowerCfg]):
             (len(gains), RECORD_COLUMNS), dtype=np.float64, on_update=update
         )
 
-        # 3. Each cycle is one fixed Repeat of R then pi; the gain sweep is outside it.
+        # 3. Measure alternating readout-pi correlations at each gain without relaxation waits.
         with Schedule(record_sums, scope=context.scope) as sched:
             # reps_innermost: all reps of one gain run before the next gain.
             # relax_delay 0: no added wait between reps. The shot closure can still
@@ -234,7 +234,6 @@ class RPiPowerExp(Experiment[RPiPowerResult, RPiPowerCfg]):
             raise RuntimeError(
                 "Stopped before the first round finished; no sums to keep"
             )
-        # 5. Return the acquired coordinates and data.
         return RPiPowerResult(gains=gains, records=record_sums.array)
 
     def analyze(
@@ -253,13 +252,13 @@ class RPiPowerExp(Experiment[RPiPowerResult, RPiPowerCfg]):
         counted in the figure title. When no gain is valid there is no best
         gain and no fallback: best_gain and best are None and no error is raised.
         """
-        # 1. Select the saved measurements and analysis controls.
+        # 1. Rank readout gains using valid R-pi lag-correlation scores.
         del options  # This analysis has no configurable options.
         gains = source.result.gains
         analyses = analyze_records(source.result.records)
         best = best_index(analyses)
 
-        # 2. Compare the data and analysis on the same axes.
+        # 2. Diagnose gain-dependent score through effective Q, correlation and noise.
         fig, _ = plots.subplots(3, 2, num="score", sharex=True, figsize=(11, 8))
         ax_score, ax_reasons, ax_q_eff, ax_q, ax_amplitude, ax_noise = fig.axes
 
@@ -274,7 +273,7 @@ class RPiPowerExp(Experiment[RPiPowerResult, RPiPowerCfg]):
             ax.plot(gains, valid_values(analyses, name), "o-")
             ax.set_ylabel(ylabel)
 
-        # 3. One row per reason that occurred: a mark at each setting reporting it.
+        # 3. Explain rejected settings alongside the best valid readout gain.
         rows = sorted(invalid_reason_counts(analyses))
         for row, reason in enumerate(rows):
             rejected = [
@@ -303,7 +302,6 @@ class RPiPowerExp(Experiment[RPiPowerResult, RPiPowerCfg]):
             fig.suptitle(title)
         fig.tight_layout()
 
-        # 4. Return the measured analysis summary.
         return RPiPowerAnalysis(
             best_gain=None if best is None else float(gains[best]),
             best=None if best is None else analyses[best],

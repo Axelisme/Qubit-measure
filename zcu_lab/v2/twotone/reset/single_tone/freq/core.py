@@ -103,7 +103,6 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
 
         # 2. Retain complex IQ and display its projection along the response axis.
         plots = context.plots
-        # 3. Display the measured signal during acquisition.
         fig, ax = plots.subplots(num="measurement")
         ax.set(xlabel="Frequency (MHz)", ylabel="Amplitude")
         viewer = live_line(ax, num_lines=1)
@@ -116,7 +115,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         fig.show()
         signals_buffer = SignalBuffer((len(freqs),), on_update=update)
 
-        # 4. Sweep the tested reset frequency after the optional preparation.
+        # 3. Resolve the prepared state's reset response versus sideband frequency.
         with Schedule(signals_buffer, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
@@ -129,7 +128,6 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
             builder.emit(Readout("readout", cfg.readout))
             sched.run_acquire(builder.build(), soc, rounds=cfg.rounds)
 
-        # 5. Return the acquired coordinates and data.
         return FreqResult(freqs, signals_buffer.array)
 
     def analyze(
@@ -144,13 +142,13 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         Omit unmeasured NaN points, return the resonance center and FWHM
         in MHz, and publish fit. source.cfg may be None.
         """
-        # 1. Select the saved measurements and analysis controls.
+        # 1. Estimate the reset resonance and linewidth from measured frequency points.
         del options
         result = source.result
 
         freqs, signals = result.freqs, result.signals
 
-        # 2. Discard NaNs (possible early abort)
+        # Discard NaNs left by a possible early abort.
         val_mask = ~np.isnan(signals)
         freqs = freqs[val_mask]
         signals = signals[val_mask]
@@ -161,7 +159,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
             freqs, real_signals, type="lor"
         )
 
-        # 3. Compare the data and analysis on the same axes.
+        # 2. Assess the Lorentzian reset resonance and its frequency uncertainty.
         fig, ax = plots.subplots(num="fit", figsize=config.figsize)
 
         ax.plot(freqs, real_signals, label="signal", marker="o", markersize=3)
@@ -176,5 +174,4 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
 
         fig.tight_layout()
 
-        # 4. Return the measured analysis summary.
         return FreqAnalysis(freq=float(freq), fwhm=float(fwhm))

@@ -203,7 +203,7 @@ class StirapDetuningExp(Experiment[StirapDetuningResult, StirapDetuningCfg]):
         acquisition. Single-fluxonium preflight requires both generators to bind charge lines.
         Hardware wiring roles remain the operator responsibility.
         """
-        # 1. Prepare the scan coordinates and measurement state.
+        # 1. Require calibrated g/e/f readout before planning the pump-Stokes detuning grid.
         centroid3_classifier(cfg.readout, ro_ch=cfg.readout.ro_ch)
         xs = np.linspace(
             cfg.pump_detuning.start, cfg.pump_detuning.stop, cfg.pump_detuning.expts
@@ -215,7 +215,7 @@ class StirapDetuningExp(Experiment[StirapDetuningResult, StirapDetuningCfg]):
         )
         x_label = "Pump detuning (MHz)"
         buffer = SignalBuffer((len(ys), len(xs), len(STATE_LABELS)), dtype=np.float64)
-        # 2. Acquire the configured pulse sequence over the scan.
+        # 2. Measure detuning-dependent transfer at fixed drive amplitudes and relative timing.
         with Schedule(buffer, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 context.soccfg,
@@ -257,7 +257,7 @@ class StirapDetuningExp(Experiment[StirapDetuningResult, StirapDetuningCfg]):
                 ),
             )
         result = StirapDetuningResult(xs, ys, buffer.array)
-        # 3. Display the measured signal during acquisition.
+        # 3. Inspect the acquired f-label fraction across both drive detunings.
         figure, _ = context.plots.subplots(num="measurement", layout="constrained")
 
         @context.plots.on_plot_thread
@@ -277,7 +277,6 @@ class StirapDetuningExp(Experiment[StirapDetuningResult, StirapDetuningCfg]):
 
         draw(None)
         figure.show()
-        # 4. Return the acquired coordinates and data.
         return result
 
     def analyze(
@@ -296,7 +295,7 @@ class StirapDetuningExp(Experiment[StirapDetuningResult, StirapDetuningCfg]):
         requested scan coordinates; preparation-label estimates are not fidelity.
         Incomplete/nonfinite or empty counts and singular confusion fail explicitly.
         """
-        # 1. Select the saved measurements and analysis controls.
+        # 1. Recover g/e/f populations across detunings with the saved readout calibration.
         del options
         cfg = source.cfg
         if cfg is None:
@@ -309,7 +308,7 @@ class StirapDetuningExp(Experiment[StirapDetuningResult, StirapDetuningCfg]):
             )
         raw = counts / counts.sum(axis=-1, keepdims=True)
         result = analyze_centroid3_populations(raw, calibration)
-        # 2. Compare the data and analysis on the same axes.
+        # 2. Compare raw and confusion-corrected transfer maps for all three labels.
         figure, _ = plots.subplots(
             num="fit",
             nrows=2,
@@ -352,5 +351,4 @@ class StirapDetuningExp(Experiment[StirapDetuningResult, StirapDetuningCfg]):
 
         populations(None)
         figure.show()
-        # 3. Return the measured analysis summary.
         return summarize_centroid3(result)

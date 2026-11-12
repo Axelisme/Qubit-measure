@@ -146,11 +146,11 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
         Live shows the R1-on, middle-I preparation mean-IQ difference magnitude.
         cfg is not mutated. acquire_kwargs is forwarded to summed acquisition.
         """
-        # 1. Prepare the scan coordinates and measurement state.
+        # 1. Quantize readout gains for paired-read separation and QND characterization.
         gains = sweep2array(
             cfg.gain, "gain", {"soccfg": context.soccfg, "gen_ch": cfg.readout.gen_ch}
         )
-        # 2. Display the measured signal during acquisition.
+        # 2. Monitor first-read preparation contrast across readout gain.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Gain (a.u.)", ylabel="R1 preparation contrast (a.u.)")
         viewer = live_line(ax)
@@ -170,7 +170,7 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
 
         fig.show()
         buffer = SignalBuffer((len(gains), 8, 6, 6), dtype=np.float64, on_update=update)
-        # 3. Acquire the configured pulse sequence over the scan.
+        # 3. Isolate readout backaction with eight preparation, first-read and middle-pi branches.
         with Schedule(buffer, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 context.soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
@@ -204,7 +204,6 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
                 options=RunOptions(converter=np.copy),
                 **(acquire_kwargs or {}),
             )
-        # 4. Return the acquired coordinates and data.
         return PowerResult(gains, buffer.array)
 
     def analyze(
@@ -221,7 +220,7 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
         options.gain records a human choice, never an inferred optimum.
         PowerAnalyzeOptions validates finite gains within [-1, 1] at construction.
         """
-        # 1. Select the saved measurements and analysis controls.
+        # 1. Derive paired-read metrics and identify nondominated separation/QND settings.
         result = source.result
         metrics = [readout_metrics(sums) for sums in result.sums]
         arrays = {
@@ -256,7 +255,7 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
         indices = np.array(frontier, dtype=np.int64)
         indices = indices[np.argsort(f_sep[indices], kind="stable")]
 
-        # 2. Compare the data and analysis on the same axes.
+        # 2. Compare nine readout diagnostics versus gain, including R1-on/off backaction.
         fig, _ = plots.subplots(3, 3, num="metrics", figsize=(14, 11))
         for ax, name, label, symbol in zip(
             fig.axes,
@@ -296,10 +295,10 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
             ax.grid(True)
         fig.tight_layout()
 
-        # 3. Keep dense gain labels in a lookup table, not on top of the points.
+        # 3. Expose the separation/QND trade-off with a Pareto frontier and gain lookup.
+        # Keep dense gain labels in a lookup table, not on top of the points.
         gain_groups = np.array_split(np.flatnonzero(valid), 3)
         table_height = max(2.0, 0.26 * len(gain_groups[0]) + 0.8)
-        # 4. Compare the data and analysis on the same axes.
         fig, ax = plots.subplots(num="pareto", figsize=(13, 5 + table_height))
         grid = fig.add_gridspec(2, 3, height_ratios=(5, table_height))
         ax.set_subplotspec(grid[0, :])
@@ -336,5 +335,4 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
             table.set_fontsize(9)
             table.scale(1, 1.3)
         fig.tight_layout()
-        # 5. Return the measured analysis summary.
         return PowerQndAnalysis(gain=options.gain)

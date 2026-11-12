@@ -186,7 +186,6 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         # 4. Return the moment-derived score; raw shots and IQ moments are not retained.
         signals = signals_buffer.array
 
-        # 5. Return the acquired coordinates and data.
         return FreqResult(freqs, signals)
 
     def analyze(
@@ -201,7 +200,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         options controls smoothing; unmeasured NaN scores become zero before
         smoothing. Return best_freq in MHz. source.cfg may be None.
         """
-        # 1. Select the saved measurements and analysis controls.
+        # 1. Select the readout frequency maximizing smoothed preparation separation.
         result = source.result
         freqs, signals = result.freqs, result.signals
 
@@ -225,7 +224,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         max_freq = float(freqs[max_id])
         max_snr = float(snrs[max_id])
 
-        # 2. Compare the data and analysis on the same axes.
+        # 2. Inspect the SNR maximum on the smoothed frequency response.
         _, ax = plots.subplots(num="fit", figsize=config.figsize)
 
         ax.plot(freqs, snrs)
@@ -235,5 +234,4 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         ax.legend()
         ax.grid(True)
 
-        # 3. Return the measured analysis summary.
         return FreqAnalysis(max_freq)

@@ -308,7 +308,7 @@ class CKP_Exp(Experiment[CKP_Result, CKP_Cfg]):
             {"soccfg": soccfg, "gen_ch": cfg.qub_pulse.ch},
         )
 
-        # 2. Display the measured signal during acquisition.
+        # 2. Compare ground- and excited-prepared resonance maps as the grid fills.
         figure, _ = context.plots.subplots(num="measurement", ncols=2, figsize=(10, 4))
         ax_ground, ax_excited = figure.axes
         for ax, title in ((ax_ground, "Ground State"), (ax_excited, "Excited State")):
@@ -366,7 +366,6 @@ class CKP_Exp(Experiment[CKP_Result, CKP_Cfg]):
             builder.emit(Readout("readout", cfg.readout))
             sched.run_acquire(builder.build(), soc, rounds=cfg.rounds)
 
-        # 4. Return the acquired coordinates and data.
         return CKP_Result(
             res_freqs=res_freqs,
             qub_freqs=qub_freqs,
@@ -388,7 +387,7 @@ class CKP_Exp(Experiment[CKP_Result, CKP_Cfg]):
         than five centers survive per state, or the shared fit/covariance is
         invalid. ``options`` is None; source cfg is not needed.
         """
-        # 1. Select the saved measurements and analysis controls.
+        # 1. Infer chi, kappa and readout frequency from jointly fitted state-dependent ridges.
         del options
         result = source.result
 
@@ -442,7 +441,7 @@ class CKP_Exp(Experiment[CKP_Result, CKP_Cfg]):
         ):
             raise RuntimeError("CKP shared fit produced invalid derived covariance")
 
-        # 3. Publish both maps and return the measured analysis summary.
+        # 3. Assess the shared resonance model against both preparation maps.
         _plot_resonance_maps(
             result=result,
             analysis=analysis,

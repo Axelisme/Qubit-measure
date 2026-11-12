@@ -226,12 +226,12 @@ class ChainExp(Experiment[SweepSums, ChainCfg]):
         A stop keeps completed rounds. A stop before the first round finishes
         raises RuntimeError because there are no sums to keep.
         """
-        # 1. Frequency axis and the live significance plot.
+        # 1. Quantize drive frequencies for repeated-readout significance spectroscopy.
         freqs = sweep2array(
             cfg.freq, "freq", {"soccfg": context.soccfg, "gen_ch": cfg.qub_pulse.ch}
         )
 
-        # 2. Display the measured signal during acquisition.
+        # 2. Monitor spectral significance relative to the false-mark threshold.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Frequency (MHz)", ylabel="Distance from background (sigma)")
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
@@ -260,7 +260,7 @@ class ChainExp(Experiment[SweepSums, ChainCfg]):
             (len(freqs), 12, 12), dtype=np.float64, on_update=update
         )
 
-        # 3. One shot per dwell: reset and init pulse, then the chain.
+        # 3. Accumulate drive-readout chain moments at each frequency after initialization.
         with Schedule(augmented_sums, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 context.soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
@@ -290,7 +290,6 @@ class ChainExp(Experiment[SweepSums, ChainCfg]):
             raise RuntimeError(
                 "Stopped before the first round finished; no sums to keep"
             )
-        # 5. Return the acquired coordinates and data.
         return SweepSums.from_augmented(freqs, augmented_sums.array)
 
     def analyze(
@@ -310,7 +309,7 @@ class ChainExp(Experiment[SweepSums, ChainCfg]):
         the line width. The source cfg may be None. No candidate passing the
         options' thresholds raises AnalysisFailed; invalid sums raise ValueError.
         """
-        # 1. Select the saved measurements and analysis controls.
+        # 1. Locate spectral peaks in the chain significance using the chosen peak policy.
         sums = source.result
         freqs = sums.axis
         curve = sweep_curve(sums)
@@ -327,7 +326,7 @@ class ChainExp(Experiment[SweepSums, ChainCfg]):
             ),
         )
 
-        # 2. Compare the data and analysis on the same axes.
+        # 2. Assess the selected resonance against competing peaks and the false-mark level.
         fig, ax = plots.subplots(num="fit", figsize=config.figsize)
         ax.plot(freqs, curve.sigma, label="sigma", marker="o", markersize=3)
         ax.axhline(curve.level, color="gray", ls="--", label="5% false-mark level")
@@ -348,7 +347,6 @@ class ChainExp(Experiment[SweepSums, ChainCfg]):
         ax.grid(True)
         fig.tight_layout()
 
-        # 3. Return the measured analysis summary.
         return ChainAnalysis(
             freq=fit.freq,
             freq_err=fit.freq_err,

@@ -125,7 +125,7 @@ class RB_Exp(Experiment[RB_Result, RBCfg]):
             dtype=np.int64,
         )
 
-        # 2. Display the measured signal during acquisition.
+        # 2. Monitor the seed-averaged Clifford decay contrast.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Depth", ylabel="Signal")
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
@@ -147,7 +147,7 @@ class RB_Exp(Experiment[RB_Result, RBCfg]):
             (len(entropys), len(depths)),
             on_update=update,
         )
-        # 3. Acquire the configured pulse sequence over the scan.
+        # 3. Measure reproducible random Clifford prefixes and their recoveries for each seed.
         with Schedule(signals_buffer, scope=context.scope) as sched:
             for _, step in sched.scan("seed", entropys.tolist()):
                 tables = make_seed_tables(int(step.value), depths)
@@ -185,7 +185,7 @@ class RB_Exp(Experiment[RB_Result, RBCfg]):
                     MY90_pulse,
                 ]
 
-                # 5. Reset, play the depth prefix, recover the full Clifford, read out.
+                # 5. Recover each random Clifford prefix to expose depth-dependent gate error.
                 builder.add_loop("depth", len(prefix_len_by_depth))
                 builder.emit(
                     LoadValue(
@@ -248,7 +248,6 @@ class RB_Exp(Experiment[RB_Result, RBCfg]):
                 # 6. Average reps/rounds into this seed's depth trace.
                 step.run_acquire(program, soc, rounds=run_cfg.rounds)
 
-        # 7. Return the acquired coordinates and data.
         return RB_Result(
             sub_seeds=entropys,
             depths=depths,
@@ -262,7 +261,7 @@ class RB_Exp(Experiment[RB_Result, RBCfg]):
         *,
         plots: Plots,
     ) -> RBAnalysis:
-        # 1. Select the saved measurements and analysis controls.
+        # 1. Infer single-qubit Clifford error from the seed-averaged contrast decay.
         result = source.result
         del options
 
@@ -286,7 +285,7 @@ class RB_Exp(Experiment[RB_Result, RBCfg]):
         fidelity = 1.0 - epc
         fidelity_err = epc_err
 
-        # 2. Compare the data and analysis on the same axes.
+        # 2. Assess seed scatter and the mean decay underlying the Clifford fidelity estimate.
         fig, ax = plots.subplots(num="fit", figsize=config.figsize)
 
         for si in range(signals2D.shape[0]):
@@ -321,5 +320,4 @@ class RB_Exp(Experiment[RB_Result, RBCfg]):
 
         fig.tight_layout()
 
-        # 3. Return the measured analysis summary.
         return RBAnalysis(epc=float(epc), fidelity=float(fidelity))

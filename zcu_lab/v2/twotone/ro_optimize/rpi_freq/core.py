@@ -113,7 +113,7 @@ class RPiFreqCfg(ConfigBase):
         Pulse.Cfg,
         FieldMeta(
             label="Pi pulse",
-            description="Calibrated g-to-e pi pulse between the two chains.",
+            description="Calibrated g-to-e pi pulse after every readout in the R-pi cycle.",
         ),
     ]
     freq: Annotated[SweepCfg, FieldMeta(label="Readout frequency", unit="MHz")]
@@ -193,7 +193,7 @@ class RPiFreqExp(Experiment[RPiFreqResult, RPiFreqCfg]):
         overlap raise ValueError when the program builds. The sums cannot reveal
         a physical break in the chain that does not appear in the IQ data.
         """
-        # 1. Frequency axis on the common generator and ADC grid, and the live plot.
+        # 1. Quantize readout frequencies on the common generator/ADC grid.
         freqs = sweep2array(
             cfg.freq,
             "freq",
@@ -205,7 +205,7 @@ class RPiFreqExp(Experiment[RPiFreqResult, RPiFreqCfg]):
             },
         )
 
-        # 2. Display the measured signal during acquisition.
+        # 2. Track valid R-pi readout scores and flag unplottable frequency settings.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel=FREQ_AXIS.label, ylabel=SCORE_LABEL)
         ax.grid(True)
@@ -228,7 +228,7 @@ class RPiFreqExp(Experiment[RPiFreqResult, RPiFreqCfg]):
             (len(freqs), RECORD_COLUMNS), dtype=np.float64, on_update=update
         )
 
-        # 3. Each cycle is one fixed Repeat of R then pi; the sweep is outside it.
+        # 3. Measure alternating readout-pi correlations at each frequency without relaxation waits.
         with Schedule(record_sums, scope=context.scope) as sched:
             # reps_innermost: all reps of one frequency run before the next one.
             # relax_delay 0: no added wait between reps. The shot closure can still
@@ -257,7 +257,6 @@ class RPiFreqExp(Experiment[RPiFreqResult, RPiFreqCfg]):
             raise RuntimeError(
                 "Stopped before the first round finished; no sums to keep"
             )
-        # 5. Return the acquired coordinates and data.
         return RPiFreqResult(freqs=freqs, records=record_sums.array)
 
     def analyze(
@@ -278,13 +277,13 @@ class RPiFreqExp(Experiment[RPiFreqResult, RPiFreqCfg]):
         frequency and no fallback: best_freq and best are None and no error is
         raised.
         """
-        # 1. Select the saved measurements and analysis controls.
+        # 1. Rank readout frequencies using valid R-pi lag-correlation scores.
         del options  # This analysis has no configurable options.
         freqs = source.result.freqs
         analyses = analyze_records(source.result.records)
         best = best_index(analyses)
 
-        # 2. Compare the data and analysis on the same axes.
+        # 2. Diagnose frequency-dependent score through effective Q, correlation and noise.
         fig, _ = plots.subplots(3, 2, num="score", sharex=True, figsize=(11, 8))
         ax_score, ax_reasons, ax_q_eff, ax_q, ax_amplitude, ax_noise = fig.axes
 
@@ -299,7 +298,7 @@ class RPiFreqExp(Experiment[RPiFreqResult, RPiFreqCfg]):
             ax.plot(freqs, valid_values(analyses, name), "o-")
             ax.set_ylabel(ylabel)
 
-        # 3. One row per reason that occurred: a mark at each setting reporting it.
+        # 3. Explain rejected settings alongside the best valid readout frequency.
         rows = sorted(invalid_reason_counts(analyses))
         for row, reason in enumerate(rows):
             rejected = [
@@ -328,7 +327,6 @@ class RPiFreqExp(Experiment[RPiFreqResult, RPiFreqCfg]):
             fig.suptitle(title)
         fig.tight_layout()
 
-        # 4. Return the measured analysis summary.
         return RPiFreqAnalysis(
             best_freq=None if best is None else float(freqs[best]),
             best=None if best is None else analyses[best],

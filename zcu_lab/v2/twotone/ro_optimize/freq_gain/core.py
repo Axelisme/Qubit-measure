@@ -196,7 +196,6 @@ class FreqGainExp(Experiment[FreqGainResult, FreqGainCfg]):
         # 4. Return the moment-derived score; raw shots and IQ moments are not retained.
         signals = signals_buffer.array
 
-        # 5. Return the acquired coordinates and data.
         return FreqGainResult(freqs, gains, signals)
 
     def analyze(
@@ -212,7 +211,7 @@ class FreqGainExp(Experiment[FreqGainResult, FreqGainCfg]):
         smoothing. Return best_freq in MHz and best_gain in a.u. within [-1, 1], and
         publish fit. source.cfg may be None.
         """
-        # 1. Select the saved measurements and analysis controls.
+        # 1. Select the frequency-gain pair maximizing the smoothed readout-separation map.
         result = source.result
         freqs, gains, signals = result.freqs, result.gains, result.signals
 
@@ -237,7 +236,7 @@ class FreqGainExp(Experiment[FreqGainResult, FreqGainCfg]):
         max_gain = float(gains[max_gain_id])
         max_snr = float(snrs[max_freq_id, max_gain_id])
 
-        # 2. Compare the data and analysis on the same axes.
+        # 2. Locate the optimal readout setting on the smoothed SNR map.
         _, ax = plots.subplots(num="fit", figsize=config.figsize)
 
         ax.imshow(
@@ -252,5 +251,4 @@ class FreqGainExp(Experiment[FreqGainResult, FreqGainCfg]):
         ax.set_ylabel("Gain (a.u.)")
         ax.legend()
 
-        # 3. Return the measured analysis summary.
         return FreqGainAnalysis(max_freq, max_gain)

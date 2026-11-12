@@ -140,7 +140,6 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
 
         # 2. Show tomography contrast, but retain phase-resolved IQ for round averaging.
         plots = context.plots
-        # 3. Display the measured signal during acquisition.
         fig, ax = plots.subplots(num="measurement")
         ax.set(xlabel="Length (us)", ylabel="Signal (a.u.)")
         viewer = live_line(ax, num_lines=1)
@@ -153,7 +152,7 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
         fig.show()
         buffer = SignalBuffer((rounds, len(lengths), 4), on_update=update)
 
-        # 4. Repeat the host length scan; each program sweeps the four pi/2 phases.
+        # 3. Resolve four-phase tomography versus tone duration while retaining the cavity offset.
         with Schedule(buffer, scope=context.scope) as sched:
             for _, rep in sched.repeat("rounds", rounds):
                 for length, step in rep.scan("length", lengths.tolist()):
@@ -184,7 +183,6 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
                     step.run_acquire(program, soc, rounds=cfg.rounds)
         signals = average_signals(buffer.array)
 
-        # 5. Return the acquired coordinates and data.
         return LengthResult(
             lengths=lengths,
             signals=signals,
@@ -202,7 +200,7 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
         Use opposite-phase IQ differences from source.result and publish fit.
         No duration is fitted or returned; source.cfg may be None.
         """
-        # 1. Select the saved measurements and analysis controls.
+        # 1. Recover reset tomography contrast from the round-averaged phase responses.
         del options
         result = source.result
 
@@ -210,7 +208,7 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
 
         real_signals = bathreset_signal2real(signals)
 
-        # 2. Compare the data and analysis on the same axes.
+        # 2. Inspect how bath-reset contrast changes with qubit-tone duration.
         _, ax = plots.subplots(num="fit")
 
         ax.plot(lens, real_signals, marker=".")

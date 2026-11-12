@@ -105,7 +105,7 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
             {"soccfg": soccfg, "gen_ch": cfg.qub_pulse.ch},
         )
 
-        # 2. Display the measured signal during acquisition.
+        # 2. Track power-dependent spectral contrast and recent frequency traces.
         fig, _ = context.plots.subplots(1, 2, num="measurement")
         heat_ax, line_ax = fig.axes
         heat_ax.set(xlabel="Pulse Gain (a.u.)", ylabel="Frequency (MHz)")
@@ -167,7 +167,6 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
                 prog = builder.build()
                 step.run_acquire(prog, soc, rounds=cfg.rounds)
 
-        # 4. Return the acquired coordinates and data.
         return PowerResult(
             gains=gains,
             freqs=freqs,

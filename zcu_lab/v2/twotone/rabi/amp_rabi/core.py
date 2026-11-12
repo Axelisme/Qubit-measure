@@ -116,7 +116,7 @@ class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
         analysis uses the oscillation period to infer pi and pi/2 gains.
         earlystop_snr stops averaging at completed-round boundaries. None disables SNR early stop.
         """
-        # 1. Prepare the hardware gain grid and display the mean IQ projection.
+        # 1. Quantize drive gains for rotation-amplitude calibration.
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
 
@@ -126,7 +126,7 @@ class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
             {"soccfg": soccfg, "gen_ch": cfg.qub_pulse.ch},
         )
 
-        # 2. Display the measured signal during acquisition.
+        # 2. Monitor Rabi contrast as the rotation amplitude changes.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Pulse gain", ylabel="Amplitude")
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
@@ -173,7 +173,6 @@ class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
                 ),
             )
 
-        # 4. Return the acquired coordinates and data.
         return AmpRabiResult(amps=gains, signals=signals_buffer.array)
 
     def analyze(
@@ -190,7 +189,7 @@ class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
         180 degrees. Publish ``fit`` and report fit quality; these are pulse
         amplitude calibrations, not gate fidelities. Source cfg may be None.
         """
-        # 1. Select the saved measurements and analysis controls.
+        # 1. Calibrate pi and pi/2 gains from unskipped contrast using the near-zero-gain phase.
         result = source.result
 
         gains, signals = result.amps, result.signals
@@ -214,7 +213,7 @@ class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
             fit.curve,
         )
 
-        # 2. Compare the data and analysis on the same axes.
+        # 2. Assess the oscillation fit and uncertainty of the calibrated rotation gains.
         fig, ax = plots.subplots(num="fit", figsize=config.figsize)
 
         ax.plot(gains, real_signals, label="meas", ls="-", marker="o", markersize=3)
@@ -237,8 +236,7 @@ class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
 
         fig.tight_layout()
 
-        # fit_rabi computes the per-gain fit uncertainties; surface them so the GUI
-        # 3. summary carries the gain errors (the figure labels already show them).
+        # Include the gain uncertainties in the GUI summary as well as the figure.
         return AmpRabiAnalysis(
             pi_amp, pi_amp_err, pi2_amp, pi2_amp_err, fit_quality={"fit": fit.quality}
         )

@@ -112,7 +112,6 @@ class PhaseExp(Experiment[PhaseResult, PhaseCfg]):
 
         # 2. Display the phase fringe without discarding the complex IQ response.
         plots = context.plots
-        # 3. Display the measured signal during acquisition.
         fig, ax = plots.subplots(num="measurement")
         ax.set(xlabel="Phase (deg)", ylabel="Signal (a.u.)")
         viewer = live_line(ax, num_lines=1)
@@ -125,7 +124,7 @@ class PhaseExp(Experiment[PhaseResult, PhaseCfg]):
         fig.show()
         signals_buffer = SignalBuffer((len(phases),), on_update=update)
 
-        # 4. Sweep only the final rotation; keep the simultaneous bath tones fixed.
+        # 3. Measure the reset phase fringe with fixed simultaneous bath tones.
         with Schedule(signals_buffer, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
@@ -138,7 +137,6 @@ class PhaseExp(Experiment[PhaseResult, PhaseCfg]):
             builder.emit(Readout("readout", cfg.readout))
             sched.run_acquire(builder.build(), soc, rounds=cfg.rounds)
 
-        # 5. Return the acquired coordinates and data.
         return PhaseResult(phases, signals_buffer.array)
 
     def analyze(
@@ -154,7 +152,7 @@ class PhaseExp(Experiment[PhaseResult, PhaseCfg]):
         zero-centered turn, and publish fit. These are extrema of the IQ
         projection, not calibrated populations; source.cfg may be None.
         """
-        # 1. Select the saved measurements and analysis controls.
+        # 1. Find maximum- and minimum-contrast phases from a fixed-period tomography fringe.
         del options
         result = source.result
 
@@ -179,7 +177,7 @@ class PhaseExp(Experiment[PhaseResult, PhaseCfg]):
         while abs(min_phase) > abs(min_phase + 360):
             min_phase += 360
 
-        # 2. Compare the data and analysis on the same axes.
+        # 2. Assess the phase-fringe fit and its equivalent extrema nearest zero degrees.
         fig, ax = plots.subplots(num="fit")
 
         ax.plot(phases, real_signals, ".-", label="data")
@@ -197,5 +195,4 @@ class PhaseExp(Experiment[PhaseResult, PhaseCfg]):
 
         fig.tight_layout()
 
-        # 3. Return the measured analysis summary.
         return PhaseAnalysis(max_phase=max_phase, min_phase=min_phase)

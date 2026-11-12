@@ -126,18 +126,18 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
         Return quantized delays and mean complex IQ with shape (time,).
         Unmeasured points remain NaN.
         """
-        # 1. Prepare the scan coordinates and measurement state.
+        # 1. Isolate acquisition settings before choosing the relaxation-delay sampling path.
         cfg = deepcopy(config)
+        # 2. Choose a uniform hardware sweep or a nonuniform hardware delay table.
         if cfg.sampling == "linear":
             return self._run_linear(cfg, context=context)
-        # 2. Return the acquired coordinates and data.
         return self._run_decay(cfg, context=context)
 
     def _run_linear(self, cfg: T1Cfg, *, context: RunContext) -> T1Result:
         """Sweep a linear delay in hardware after the pi pulse and return mean IQ."""
-        # 1. Prepare the scan coordinates and measurement state.
+        # 1. Quantize uniform delays for the excited-state relaxation trace.
         lengths = sweep2array(cfg.delay, "time", {"soccfg": context.soccfg})
-        # 2. Display the measured signal during acquisition.
+        # 2. Monitor relaxation contrast during uniform-delay averaging.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Time (us)", ylabel="Amplitude")
         ax.set_title("T1 relaxation")
@@ -159,7 +159,7 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
             (len(lengths),),
             on_update=update,
         )
-        # 3. Acquire the configured pulse sequence over the scan.
+        # 3. Measure relaxation after excitation on the uniform delay grid with SNR stopping.
         with Schedule(signals, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 context.soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
@@ -182,15 +182,14 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
                     ),
                 ),
             )
-        # 4. Return the acquired coordinates and data.
         return T1Result(times=lengths, signals=signals.array)
 
     def _run_decay(self, cfg: T1Cfg, *, context: RunContext) -> T1Result:
         """Sweep nonuniform delay-table entries after the pi pulse and return mean IQ."""
-        # 1. Prepare the scan coordinates and measurement state.
+        # 1. Materialize nonuniform relaxation delays on the hardware timing grid.
         table = materialize_nonuniform_t1_delays(cfg.delay, soccfg=context.soccfg)
         lengths = table.times_us
-        # 2. Display the measured signal during acquisition.
+        # 2. Monitor relaxation contrast at the nonuniform sampled delays.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Time (us)", ylabel="Amplitude")
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
@@ -211,7 +210,7 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
             (len(lengths),),
             on_update=update,
         )
-        # 3. Acquire the configured pulse sequence over the scan.
+        # 3. Measure post-excitation relaxation using table-driven waits with SNR stopping.
         with Schedule(signals, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 context.soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
@@ -233,7 +232,6 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
                     ),
                 ),
             )
-        # 4. Return the acquired coordinates and data.
         return T1Result(times=lengths, signals=signals.array)
 
     def analyze(
@@ -243,7 +241,7 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
         *,
         plots: Plots,
     ) -> T1Analysis:
-        # 1. Select the saved measurements and analysis controls.
+        # 1. Estimate single or dual relaxation lifetimes from the unskipped real-IQ decay.
         result = source.result
         xs = result.times[options.skip :]
         signals = result.signals[options.skip :]
@@ -269,7 +267,7 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
             t1b = 0.0
             t1berr = 0.0
 
-        # 2. Compare the data and analysis on the same axes.
+        # 2. Assess relaxation lifetimes and optional secondary decay against the measured trace.
         fig, ax = plots.subplots(num="fit")
 
         ax.plot(xs, real_signals, label="data", ls="-", marker="o", markersize=5)
@@ -292,7 +290,6 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
 
         fig.tight_layout()
 
-        # 3. Return the measured analysis summary.
         return T1Analysis(
             t1=float(t1),
             t1_err=float(t1err),

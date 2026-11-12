@@ -196,7 +196,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         preview always uses background-subtracted magnitude (``lor``), independent
         of the model selected later for analyze.
         """
-        # 1. Prepare the frequency axis and display the background-subtracted contrast.
+        # 1. Quantize probe frequencies for qubit resonance spectroscopy.
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
 
@@ -205,7 +205,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
             cfg.freq, "freq", {"soccfg": soccfg, "gen_ch": cfg.qub_pulse.ch}
         )
 
-        # 2. Display the measured signal during acquisition.
+        # 2. Monitor resonance contrast relative to the IQ background.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Frequency (MHz)", ylabel="Amplitude")
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
@@ -227,7 +227,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
             on_update=update,
         )
 
-        # 3. Acquire the configured pulse sequence over the scan.
+        # 3. Probe the initialized qubit across frequencies until rounds finish or SNR suffices.
         with Schedule(signals_buffer, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
@@ -256,7 +256,6 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
                 ),
             )
 
-        # 4. Return the acquired coordinates and data.
         return FreqResult(
             freqs=freqs,
             signals=signals_buffer.array,
@@ -283,7 +282,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         Invalid projection inputs raise ValueError; fitting/plotting errors and
         optimizer warnings propagate.
         """
-        # 1. Select the saved measurements and analysis controls.
+        # 1. Fit the selected resonance model to measured, non-NaN spectral contrast.
         result = source.result
 
         freqs = result.freqs
@@ -310,7 +309,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         )
         freq, freq_err, fwhm, fwhm_err = fit.freq, fit.freq_err, fit.fwhm, fit.fwhm_err
 
-        # 2. Compare the data and analysis on the same axes.
+        # 2. Assess the selected resonance and linewidth against competing spectral peaks.
         fig, ax = plots.subplots(num="fit", figsize=config.figsize)
 
         ax.plot(freqs, real_signals, label="signal", marker="o", markersize=3)
@@ -332,5 +331,4 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
 
         fig.tight_layout()
 
-        # 3. Return the measured analysis summary.
         return FreqAnalysis(freq, freq_err, fwhm, fwhm_err, fit.peaks)

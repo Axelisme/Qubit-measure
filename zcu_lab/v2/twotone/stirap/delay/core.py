@@ -127,7 +127,7 @@ class StirapDelayExp(Experiment[StirapDelayResult, StirapDelayCfg]):
         Cancellation leaves unfinished points NaN; acquisition errors propagate.
         Missing centroid3 calibration fails before acquisition.
         """
-        # 1. Prepare the scan coordinates and measurement state.
+        # 1. Require calibrated g/e/f readout and keep drive shapes fixed for the timing scan.
         centroid3_classifier(cfg.readout, ro_ch=cfg.readout.ro_ch)
         leads = sweep2array(cfg.stokes_lead)
         pump = Pulse(
@@ -141,7 +141,7 @@ class StirapDelayExp(Experiment[StirapDelayResult, StirapDelayCfg]):
             ),
         )
 
-        # 2. Display the measured signal during acquisition.
+        # 2. Monitor g/e/f transfer fractions as the Stokes lead changes.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Stokes lead (us)", ylabel="Measured fraction")
         viewer = live_line(ax, num_lines=len(STATE_LABELS))
@@ -162,7 +162,7 @@ class StirapDelayExp(Experiment[StirapDelayResult, StirapDelayCfg]):
         counts = SignalBuffer(
             (len(leads), len(STATE_LABELS)), dtype=np.float64, on_update=update
         )
-        # 3. Acquire the configured pulse sequence over the scan.
+        # 3. Measure transfer for Stokes-first and pump-first timing without changing pulse shapes.
         with Schedule(counts, scope=context.scope) as sched:
             for lead, step in sched.scan("stokes_lead", leads):
                 builder = TimelineBuilder(
@@ -194,7 +194,6 @@ class StirapDelayExp(Experiment[StirapDelayResult, StirapDelayCfg]):
                         ChargeDriveRequirement("stokes", cfg.stokes_ch),
                     ),
                 )
-        # 4. Return the acquired coordinates and data.
         return StirapDelayResult(stokes_leads=leads, counts=counts.data)
 
     def analyze(
@@ -213,7 +212,7 @@ class StirapDelayExp(Experiment[StirapDelayResult, StirapDelayCfg]):
         fixed-size confusion diagnostics. Missing cfg/calibration or no usable
         points raises ValueError; singular confusion raises LinAlgError.
         """
-        # 1. Select the saved measurements and analysis controls.
+        # 1. Correct completed timing points with the saved g/e/f readout calibration.
         del options
         if source.cfg is None:
             raise ValueError("STIRAP delay analysis requires saved cfg")
@@ -229,7 +228,7 @@ class StirapDelayExp(Experiment[StirapDelayResult, StirapDelayCfg]):
         raw = counts[complete] / totals[complete, None]
         result = analyze_centroid3_populations(raw, calibration)
 
-        # 2. Compare the data and analysis on the same axes.
+        # 2. Compare raw and corrected transfer populations versus Stokes lead.
         fig, ax = plots.subplots(num="populations")
         for index, (state, color) in enumerate(
             zip(STATE_LABELS, ("C0", "C1", "C2"), strict=True)
@@ -256,5 +255,4 @@ class StirapDelayExp(Experiment[StirapDelayResult, StirapDelayCfg]):
         ax.legend()
         ax.grid()
         fig.tight_layout()
-        # 3. Return the measured analysis summary.
         return summarize_centroid3(result)

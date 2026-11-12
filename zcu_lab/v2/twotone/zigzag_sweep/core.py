@@ -193,7 +193,7 @@ class ZigZagScanExp(Experiment[ZigZagScanResult, ZigZagScanCfg]):
             (len(times), len(values)),
             on_update=update,
         )
-        # 3. Acquire the configured pulse sequence over the scan.
+        # 3. Amplify rotation errors across repeat counts while sweeping only the repeated gate.
         with Schedule(signals_buffer, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
@@ -226,7 +226,6 @@ class ZigZagScanExp(Experiment[ZigZagScanResult, ZigZagScanCfg]):
             builder.emit(Readout("readout", cfg.readout))
             sched.run_acquire(builder.build(), soc, rounds=cfg.rounds)
 
-        # 4. Return the acquired coordinates and data.
         return ZigZagScanResult(
             times=times, values=values, signals=signals_buffer.array
         )
@@ -247,7 +246,7 @@ class ZigZagScanExp(Experiment[ZigZagScanResult, ZigZagScanCfg]):
         error-amplification tuning criterion, not a gate-fidelity estimate.
         Fewer than two valid counts or an all-NaN search range raises ValueError.
         """
-        # 1. Select the saved measurements and analysis controls.
+        # 1. Recover the repeated-gate response and requested calibration bounds.
         result = source.result
         find_range = options.find_range
 
@@ -275,7 +274,7 @@ class ZigZagScanExp(Experiment[ZigZagScanResult, ZigZagScanCfg]):
             loss[values > find_range[1]] = np.nan
         min_value = values[np.nanargmin(loss)]
 
-        # 4. Compare the data and analysis on the same axes.
+        # 4. Relate the selected gain or frequency to repeat-count contrast and variation loss.
         fig, _ = plots.subplots(num="fit", nrows=2, ncols=1, sharex=True)
         ax1, ax2 = fig.axes
 
@@ -298,5 +297,4 @@ class ZigZagScanExp(Experiment[ZigZagScanResult, ZigZagScanCfg]):
         ax2.set_xlabel("Sweep value (a.u.)")
         ax2.set_ylabel("Loss (a.u.)")
 
-        # 5. Return the measured analysis summary.
         return ZigZagScanAnalysis(min_value=float(min_value))

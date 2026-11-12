@@ -114,7 +114,7 @@ class RPiLengthCfg(ConfigBase):
         Pulse.Cfg,
         FieldMeta(
             label="Pi pulse",
-            description="Calibrated g-to-e pi pulse between the two chains.",
+            description="Calibrated g-to-e pi pulse after every readout in the R-pi cycle.",
         ),
     ]
     length: Annotated[
@@ -206,12 +206,12 @@ class RPiLengthExp(Experiment[RPiLengthResult, RPiLengthCfg]):
         The sums cannot reveal a physical break in the chain that does not
         appear in the IQ data.
         """
-        # 1. ADC window axis on the ADC clock, and the live score plot.
+        # 1. Quantize readout integration windows on the ADC clock.
         lengths = sweep2array(
             cfg.length, "time", {"soccfg": context.soccfg, "ro_ch": cfg.readout.ro_ch}
         )
 
-        # 2. Display the measured signal during acquisition.
+        # 2. Track valid R-pi scores from completed windows and flag rejected settings.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel=LENGTH_AXIS.label, ylabel=SCORE_LABEL)
         ax.grid(True)
@@ -238,7 +238,7 @@ class RPiLengthExp(Experiment[RPiLengthResult, RPiLengthCfg]):
             (len(lengths), RECORD_COLUMNS), dtype=np.float64, on_update=update
         )
 
-        # 3. Each window has its own program: one fixed Repeat of R then pi.
+        # 3. Measure alternating readout-pi correlations with a pulse matched to each ADC window.
         with Schedule(record_sums, scope=context.scope) as sched:
             for _, step in sched.scan("length", lengths.tolist()):
                 # reps_innermost: all reps of this window run together.
@@ -273,7 +273,6 @@ class RPiLengthExp(Experiment[RPiLengthResult, RPiLengthCfg]):
             raise RuntimeError(
                 "Stopped before any window finished a round; no sums to keep"
             )
-        # 5. Return the acquired coordinates and data.
         return RPiLengthResult(
             lengths=lengths[finished], records=record_sums.array[finished]
         )
@@ -295,13 +294,13 @@ class RPiLengthExp(Experiment[RPiLengthResult, RPiLengthCfg]):
         title. When no window is valid there is no best window and no fallback:
         best_length and best are None and no error is raised.
         """
-        # 1. Select the saved measurements and analysis controls.
+        # 1. Rank completed readout windows using valid R-pi lag-correlation scores.
         del options  # This analysis has no configurable options.
         lengths = source.result.lengths
         analyses = analyze_records(source.result.records)
         best = best_index(analyses)
 
-        # 2. Compare the data and analysis on the same axes.
+        # 2. Diagnose window-dependent score through effective Q, correlation and noise.
         fig, _ = plots.subplots(3, 2, num="score", sharex=True, figsize=(11, 8))
         ax_score, ax_reasons, ax_q_eff, ax_q, ax_amplitude, ax_noise = fig.axes
 
@@ -316,7 +315,7 @@ class RPiLengthExp(Experiment[RPiLengthResult, RPiLengthCfg]):
             ax.plot(lengths, valid_values(analyses, name), "o-")
             ax.set_ylabel(ylabel)
 
-        # 3. One row per reason that occurred: a mark at each setting reporting it.
+        # 3. Explain rejected windows alongside the best valid integration duration.
         rows = sorted(invalid_reason_counts(analyses))
         for row, reason in enumerate(rows):
             rejected = [
@@ -345,7 +344,6 @@ class RPiLengthExp(Experiment[RPiLengthResult, RPiLengthCfg]):
             fig.suptitle(title)
         fig.tight_layout()
 
-        # 4. Return the measured analysis summary.
         return RPiLengthAnalysis(
             best_length=None if best is None else float(lengths[best]),
             best=None if best is None else analyses[best],

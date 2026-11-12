@@ -173,7 +173,6 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
         # 4. Return the moment-derived score; raw shots and IQ moments are not retained.
         signals = signals_buffer.array
 
-        # 5. Return the acquired coordinates and data.
         return LengthResult(lengths, signals)
 
     def analyze(
@@ -191,7 +190,7 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
         NaN scores become zero before smoothing. Return best_length in us
         and publish fit. source.cfg may be None.
         """
-        # 1. Select the saved measurements and analysis controls.
+        # 1. Optimize smoothed readout separation, optionally accounting for cycle-time overhead.
         result = source.result
 
         lengths, signals = result.lengths, result.signals
@@ -220,7 +219,7 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
         max_length = float(lengths[max_id])
         max_snr = float(snrs[max_id])
 
-        # 2. Compare the data and analysis on the same axes.
+        # 2. Inspect the chosen integration window on the smoothed SNR curve.
         _, ax = plots.subplots(num="fit", figsize=config.figsize)
 
         ax.plot(lengths, snrs)
@@ -230,5 +229,4 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
         ax.legend()
         ax.grid(True)
 
-        # 3. Return the measured analysis summary.
         return LengthAnalysis(max_length)

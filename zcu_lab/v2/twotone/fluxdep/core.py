@@ -121,7 +121,7 @@ class FreqFluxExp(Experiment[FreqFluxResult, FreqFluxCfg]):
             freq_sweep, "freq", {"soccfg": soccfg, "gen_ch": cfg.qub_pulse.ch}
         )
 
-        # 2. Display the measured signal during acquisition.
+        # 2. Track the flux-dependent contrast map and recent frequency traces.
         fig, _ = context.plots.subplots(1, 2, num="measurement")
         heat_ax, line_ax = fig.axes
         heat_ax.set(xlabel="Flux device value", ylabel="Frequency (MHz)")
@@ -192,7 +192,6 @@ class FreqFluxExp(Experiment[FreqFluxResult, FreqFluxCfg]):
                     rounds=cfg.rounds,
                 )
 
-        # 4. Return the acquired coordinates and data.
         return FreqFluxResult(
             values=dev_values,
             freqs=freqs,

@@ -96,11 +96,11 @@ class ChainLengthExp(Experiment[ThermalChainSums, ChainLengthCfg]):
         Return shot count and all 107 sums per setting.
         Stop keeps settings with a completed round; none raises RuntimeError.
         """
-        # 1. Prepare the scan coordinates and measurement state.
+        # 1. Quantize integration windows on the readout ADC clock.
         settings = sweep2array(
             cfg.length, "time", {"soccfg": context.soccfg, "ro_ch": cfg.readout.ro_ch}
         )
-        # 2. Display the measured signal during acquisition.
+        # 2. Track thermal-chain scores and diagnostics as the integration window changes.
         fig, _ = context.plots.subplots(
             3, 1, num="measurement", sharex=True, figsize=(8, 8)
         )
@@ -129,7 +129,7 @@ class ChainLengthExp(Experiment[ThermalChainSums, ChainLengthCfg]):
             on_update=update,
         )
 
-        # 3. No drive: each shot reads the thermal state 16 times, then waits K.
+        # 3. Compare thermal readout chains with pulse duration matched to each ADC window.
         with Schedule(shot_sums, scope=context.scope) as sched:
             for _, step in sched.scan("length", settings.tolist()):
                 builder = TimelineBuilder(
@@ -157,7 +157,6 @@ class ChainLengthExp(Experiment[ThermalChainSums, ChainLengthCfg]):
                     rounds=cfg.rounds,
                 )
 
-        # 4. Return the acquired coordinates and data.
         return finished_sums(settings, shot_sums.array)
 
     def analyze(
@@ -174,14 +173,13 @@ class ChainLengthExp(Experiment[ThermalChainSums, ChainLengthCfg]):
         mark the maximum score; exact ties keep acquisition order. Errors
         do not affect ranking. Invalid moments raise ValueError.
         """
-        # 1. Select the saved measurements and analysis controls.
+        # 1. Rank integration windows by the thermal-chain score from saved moments.
         del options
         result = thermal_chain_score(source.result)
-        # 2. Compare the data and analysis on the same axes.
+        # 2. Inspect score, QND and correlation-growth diagnostics for the window ranking.
         fig, _ = plots.subplots(3, 1, num="metric", sharex=True, figsize=(8, 8))
         _draw_metric(tuple(fig.axes), result)
         fig.tight_layout()
-        # 3. Return the measured analysis summary.
         return ChainAnalysis(best=result.settings[result.ranking[0]])
 
 

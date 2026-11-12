@@ -160,7 +160,7 @@ class RamanGFExp(Experiment[RamanGFResult, RamanGFCfg]):
         Unfinished points retain NaN counts. Gains are actual DAC settings,
         not a calibrated rotation angle.
         """
-        # 1. Prepare the scan coordinates and measurement state.
+        # 1. Require calibrated g/e/f classification before planning the Raman scan.
         centroid3_classifier(cfg.readout, ro_ch=cfg.readout.ro_ch)
         cfg = deepcopy(cfg)
         detunings = np.linspace(
@@ -183,7 +183,7 @@ class RamanGFExp(Experiment[RamanGFResult, RamanGFCfg]):
         point_gains = np.tile(gains, len(frequencies))
         counts = SignalBuffer((len(point_gains), len(STATE_LABELS)), dtype=np.float64)
 
-        # 3. One carrier and one envelope, immediately followed by the same readout.
+        # 3. Measure Raman preparation labels for each carrier-gain pair with a fixed envelope.
         with Schedule(counts, scope=context.scope) as sched:
             for point, step in sched.scan("point", range(len(point_gains))):
                 builder = TimelineBuilder(
@@ -216,7 +216,7 @@ class RamanGFExp(Experiment[RamanGFResult, RamanGFCfg]):
             detunings=2 * (point_frequencies - cfg.carrier_mhz),
             gains=point_gains,
         )
-        # 4. Display the measured signal during acquisition.
+        # 4. Inspect the acquired preparation-label fractions in detuning-major scan order.
         figure, _ = context.plots.subplots(num="measurement", layout="constrained")
 
         @context.plots.on_plot_thread
@@ -244,7 +244,6 @@ class RamanGFExp(Experiment[RamanGFResult, RamanGFCfg]):
 
         draw(None)
         figure.show()
-        # 5. Return the acquired coordinates and data.
         return result
 
     def analyze(
@@ -264,7 +263,7 @@ class RamanGFExp(Experiment[RamanGFResult, RamanGFCfg]):
         energy-state population or gate fidelity. Incomplete/nonfinite or empty
         counts and singular confusion fail explicitly. Plot actual coordinates.
         """
-        # 1. Select the saved measurements and analysis controls.
+        # 1. Recover g/e/f populations from counts using the saved readout confusion calibration.
         del options
         cfg = source.cfg
         if cfg is None:
@@ -278,7 +277,7 @@ class RamanGFExp(Experiment[RamanGFResult, RamanGFCfg]):
         raw = counts / counts.sum(axis=-1, keepdims=True)
         result = analyze_centroid3_populations(raw, calibration)
         grid = cfg.scan_mode == "frequency_gain"
-        # 2. Compare the data and analysis on the same axes.
+        # 2. Compare raw and corrected populations along the scanned gain or detuning axes.
         figure, _ = plots.subplots(
             num="fit",
             nrows=2 if grid else 1,
@@ -344,5 +343,4 @@ class RamanGFExp(Experiment[RamanGFResult, RamanGFCfg]):
 
         populations(None)
         figure.show()
-        # 3. Return the measured analysis summary.
         return summarize_centroid3(result)
