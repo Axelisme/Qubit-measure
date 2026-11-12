@@ -26,6 +26,20 @@ Kernel、dispatch、scheduler 與 cache 是內部實作，不是第二套整合�
 引擎回傳 readout 起點的量子態與 family 診斷。
 Environment 顯式組合 population 轉換與 ADC；readout 的樣本加總仍由 `simulate.adc` 擁有。
 
+2026-11-12，使用者對具名歷史與整次 acquire 的 family 白名單裁定：「可以」。
+量測層可持有 `RoutingHistory`，經環境 builder 的 `history` 借給 model source。未提供時由 source 自有。Source 關閉只清自己的歷史，借用歷史由 caller 管理。
+`RoutingHistory` 擁有選路用的使用記錄。`clear()` 清空記錄並使先前的 preparation 失效，不重設模型快取、初態、RNG 或時鐘。歷史與 reuse 判定由 evolution 擁有。
+Builder 的 `families` 是整次 acquire 的候選白名單，不是逐段指定算法。每段仍由 dispatch 選路並驗證。固定候選可以略過成本捷徑，不能略過輸入前置條件或數值 guard。無可用候選時回報 domain 與受影響的點、段。
+這兩項控制不是物理 YAML、`AcquireRequest`、實驗 cfg 或 program binding 的欄位。不提供逐段 family 對照、callback、偏好順序或公開 kernel registry。詳細生命週期與失敗契約見 [evolution README](../../lib/zcu_tools/simulate/evolution/README.md#accuracy-failures-and-lifecycle)。
+
+### 歷史控制與精度驗收
+
+2026-11-12，使用者裁定：「B，只要為了優化速度可以損失一點一致性，只要誤差在容許範圍」，並要求「應該已正確的物理演化為誤差參考，而不是當前實作，否則誤差會累計」。
+Dispatch 可以依量測歷史選擇不同 kernel，量測層用公開參數控制空歷史、沿用歷史與允許的 family，不以 monkeypatch 操作內部狀態。
+精度驗收以獨立的完整 Hamiltonian 參考解為準，不以當前或重構前輸出作真值，也不要求重構前後逐值一致。Density 最大絕對差與 population 等效 expected I/Q 誤差的目標均為 `2e-3`。
+可用的候選須逐一對參考解驗證。現行有四個 guard 邊緣案例超標，以 strict xfail 保留，不放寬誤差門檻。案例與限制見 [evolution README 的 kernel 表](../../lib/zcu_tools/simulate/evolution/README.md#kernel-summary)，環境 expected I/Q 驗收尚未交付。
+算法數值集中在自己的 owner，新增算法或優化不要求修改不相關模組。實際擴充位置見 [evolution README 的 Adding a family](../../lib/zcu_tools/simulate/evolution/README.md#adding-a-family)。
+
 ### 內部允許實質耦合，dispatch 擁有決策知識
 
 使用者於 2026-10-18 裁決：「Q2只要是有助於分類的資訊，planner都可以知道。」

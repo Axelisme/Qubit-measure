@@ -21,7 +21,7 @@ status: accepted
 | `datafile` | 量測資料檔的儲存工具：Labber、`data.h5`、streaming、grouped。包括版面慣例、讀回時依 schema 驗證、通道型別與 metadata 編碼 | 存檔位置與批次（見 ADR-0063）；實驗語意 |
 | `device` | 各 pyvisa 儀器的定義與控制介面 | 實驗流程 |
 | `program` | 控制 ZCU216 與底層 QICK 的工具和類別，包括由呼叫端 profile mapping 建 QickConfig 的 `build_soccfg` 與模擬 SoC binding；時脈、channel 型別與數量等硬體 profile 數值不留在 lib | 參數與資產的保存 |
-| `analysis` | 分析工具 | 檔案讀寫；畫圖 |
+| `analysis` | 分析工具；模型自己的公開 renderer，使用與客製化由 caller 決定 | 檔案讀寫；實驗的圖形政策 |
 | `plotting` | 具名 Figure、owner 更新機制與共用診斷圖 | 分析計算；lab 的 live 工具與格式 |
 | `simulate` | 數值模擬 | 讀取資料容器；呼叫端傳入數值 |
 | `simulators` | 具體物理模擬器（FTF、single_fluxonium、six_fluxonium）的模型、environment 與私有 replay | 通用演化、ADC、bath、元件 Hamiltonian 等機制，留在 `simulate` |
@@ -125,6 +125,20 @@ Workflow 的替代壽命模型比較與疊圖由 `zcu_lab/workflows/common` 擁�
 Mux onetone core 只接收每 tone 的 edelay 種子並回傳擬合結果。Adapter 決定手動值、capture prior 與全域搜尋的優先序，記錄來源並判斷 writeback。使用者於 2026-10-30 指出「這不對勁，聽起來像是adapter的邏輯漏進core」，並選擇「A」。
 
 各實驗獨立完成 analyze 與畫圖，不組假 source 呼叫另一個實驗的 analyze。實驗可共用數值分析工具，不共用分析圖的畫法。使用者於 2026-10-30 裁定「不能獨立重複分析嗎？可以共用分析工具，但畫圖就有點超過了，不利於客製化」。Mux GE 因而逐 tone 呼叫既有數值工具並自行畫圖。
+
+2026-11-12，使用者確認以下分工：「確認」，並說明「實驗間重複算是偶然耦合而不是實際耦合。」
+含 `core.py` 的實驗目錄不 import 其他實驗或其他家族的家族層模組。自己家族的 helper、`support` 與家族 `__init__.py` 匯出子實驗不受此限制。
+Cfg、分析選項、結果型別、小訊號轉換、GUI 選項與 review 文字由各實驗宣告，欄位只留自己使用的。宣告放在同一實驗內使用它的檔案。繼承其他實驗 cfg 也改成本地宣告，保留原本經繼承生效的 validator，除非另有行為變更裁決。
+多個實驗共用的資料數值分析放 `zcu_tools.analysis`。認得 lab 型別的邏輯放家族私有模組，跨家族時放 `zcu_lab/v2/support`。只有單一家族使用的序列產生與查表留家族層，不視為資料分析。
+即時圖也由各實驗的 `run` 擁有。Helper 換 owner 後，所有呼叫者直接 import 新位置，不留舊路徑 re-export。
+
+2026-11-12，使用者對數值與繪圖分離及公開 renderer 的例外裁定：「接受」。
+`support.resonator.fit_resonance` 只回傳數值擬合結果。`onetone/freq` 與 `mux/onetone` 各自在 `analyze` 持有 Figure，決定何時畫圖與是否使用模型 renderer。
+不共用分析圖，指不在 lab／support 放替多個實驗建圖與畫圖的 helper。Lib 擬合模型自己的公開 renderer 是模型介面，可以使用，不複製它的內容，也不呼叫模型私有方法。
+
+2026-11-12，使用者對 GE confusion 的 owner 與介面裁定：「可以」。
+GE confusion 的數值計算由既有 `zcu_tools.analysis.singleshot` 擁有，與分類及 population correction 放在一起。Lab 各自從自己的分析結果組成 `GECalibration`，不把 lab cfg 傳入數值層。
+分析選項的預設值、lab 結果與存檔格式、GUI 文字及 confusion 圖留在各實驗。Lib 只收明填的選項，介面細節由 [analysis README](../../lib/zcu_tools/analysis/README.md#子模組) 與函式 docstring 擁有。
 
 以上分工沿用 lab → analysis／plotting 的依賴方向。Framework 不反向 import lab 由 C16 保護，core 不依賴 GUI 由 C15 保護，分層與無循環由 C8、C9 檢查。
 
@@ -423,6 +437,8 @@ Device API 的局部參數與錯誤細節留在 module 文件與 docstring。
 | C16 | `forbidden` | `zcu_tools` 不 import `zcu_lab` |
 | C19 | `forbidden` | `core` 在 repo 內只依賴 `utils` |
 | C21 | `forbidden` | `zcu_tools` 不反向依賴使用者入口 `scripts` |
+
+`.importlinter` 的 `experiment-directories-independent` contract 檢查上述實驗與家族邊界，不新增 `ignore_imports` 例外。
 
 `composition-roots-above-framework-and-lab` 的 `layers` contract 約束 `apps : mcp_servers` > `zcu_lab` > `zcu_tools`。Lab 與 framework 不反向 import 任一組合根，不新增 `ignore_imports`。
 
