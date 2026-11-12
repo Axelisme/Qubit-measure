@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Annotated, ClassVar, Self
 
@@ -11,7 +12,13 @@ from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field, model_validator
 from zcu_tools.analysis.failure import AnalysisFailed
-from zcu_tools.analysis.fitting import analyze_irb, compute_fit_quality
+from zcu_tools.analysis.fitting import (
+    FitQuality,
+    IRBAnalysis,
+    analyze_irb,
+    compute_fit_quality,
+)
+from zcu_tools.analysis.fitting.shared import SharedFitResult
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
     Experiment,
@@ -42,16 +49,75 @@ from .._sums import (
     joint_probabilities,
     validate_classifiers,
 )
-from .analysis import (
-    RBAnalysis,
-    RBOptions,
-    count_completion,
-    estimate_d4,
-    paired_means,
-    validate_axes,
-)
 from .program import CZPhasePair
 from .sequence import TwoQubitGate, make_paired_sequences
+
+
+@dataclass(frozen=True)
+class RBResult:
+    """Float64 class counts with axes (depth,seed,arm,round,F1,F2).
+
+    depths counts random Cliffords; seeds retains exact random.Random identities.
+    The fixed arm axis [0,1] means reference/CZ-interleaved. rounds=[0..rounds-1] is a host
+    acquisition axis. sums ends in (3,3), ordered g/e/other on each role.
+    Counts are unnormalized; a wholly unacquired round stays NaN.
+    """
+
+    depths: NDArray[np.int64]
+    seeds: NDArray[np.int64]
+
+    rounds: NDArray[np.int64]
+    sums: NDArray[np.float64]
+
+
+class RBOptions(ConfigBase):
+    """Analysis-only reproducible paired-seed bootstrap settings.
+
+    bootstrap_samples is at least 100 whole-seed resamples, not independent
+    shots. bootstrap_seed is the nonnegative RNG seed for this uncertainty
+    calculation, separate from the acquired sequence identities.
+    """
+
+    bootstrap_samples: int = Field(default=1000, ge=100)
+    bootstrap_seed: int = Field(default=42, ge=0)
+
+
+@dataclass(frozen=True)
+class RBEstimate:
+    """Unitless d=4 RB estimates, conditional on the exponential decay model.
+
+    p_reference/p_interleaved are per random Clifford (plus CZ for interleaved).
+    reference_epc=3/4*(1-p_reference). gate_error=3/4*(1-p_i/p_r), not clipped.
+    error_ci_low/error_ci_high is the 95% paired-seed percentile interval.
+    n_paired_seeds/n_paired_rounds count complete curves/round-seed pairs.
+    bootstrap_successes counts valid resampled fits; warning describes ratio
+    and model limitations. No field asserts calibrated physical fidelity.
+    """
+
+    p_reference: float
+    p_interleaved: float
+    reference_epc: float
+    gate_error: float
+    error_ci_low: float
+    error_ci_high: float
+    n_paired_seeds: int
+    n_paired_rounds: int
+    bootstrap_successes: int
+    warning: str
+
+
+@dataclass(frozen=True)
+class RBAnalysis:
+    """Fixed-size d=4 paired RB estimate and reference/interleaved fit quality.
+
+    estimate is None with reason when no fit is identifiable. fit_quality holds
+    residual diagnostics for each arm, or None without a fit. Survival arrays,
+    round completeness and model curves are used only inside analyze.
+    """
+
+    estimate: RBEstimate | None
+    fit_quality: tuple[FitQuality, FitQuality] | None
+    reason: str | None
 
 
 class RBCfg(ConfigBase):
@@ -77,28 +143,28 @@ class RBCfg(ConfigBase):
         Pulse.Cfg,
         FieldMeta(
             label="F1 Xπ/2",
-            description="填入 F1 calibrated x90 pulse slot。先做 amplitude／length Rabi，再確認 frequency MHz、gain a.u. within [-1, 1] 與 duration us。",
+            description="Calibrated F1 X90 pulse, frequency MHz, gain [-1, 1] and duration us.",
         ),
     ]
     x90_f2: Annotated[
         Pulse.Cfg,
         FieldMeta(
             label="F2 Xπ/2",
-            description="填入 F2 calibrated x90 pulse slot。先做 amplitude／length Rabi，再確認 frequency MHz、gain a.u. within [-1, 1] 與 duration us。",
+            description="Calibrated F2 X90 pulse, frequency MHz, gain [-1, 1] and duration us.",
         ),
     ]
     drive: Annotated[
         DualLineCfg,
         FieldMeta(
             label="Dual-line drive",
-            description="填入 F1/F2 charge-line pulses。先做 conditional spectroscopy／chevron，再確認 coupler 的 cz_f1／cz_f2 slots。",
+            description="F1/F2 charge-line CZ pulses from the calibrated coupler slots.",
         ),
     ]
     readout: Annotated[
         MuxReadout.Cfg,
         FieldMeta(
             label="Mux readout",
-            description="填入 full-group mux readout slot。先用 lookback 取得 timing，再做 mux onetone，確認 frequency MHz、gain a.u. within [-1, 1] 與 timing us。",
+            description="Full-group mux readout with calibrated frequencies, gains and timing.",
         ),
     ]
     roles: JointRoles
@@ -154,25 +220,125 @@ class RBCfg(ConfigBase):
         return self
 
 
-@dataclass(frozen=True)
-class RBResult:
-    """Float64 class counts with axes (depth,seed,arm,round,F1,F2).
+def estimate_d4(fit: IRBAnalysis) -> RBEstimate:
+    """Convert numerical paired-IRB estimates and interval from d=2 to d=4.
 
-    depths counts random Cliffords; seeds retains exact random.Random identities.
-    The fixed arm axis [0,1] means reference/CZ-interleaved. rounds=[0..rounds-1] is a host
-    acquisition axis. sums ends in (3,3), ordered g/e/other on each role.
-    Counts are unnormalized; a wholly unacquired round stays NaN.
+    fit supplies reference/interleaved decays, d=2 confidence limits, paired counts
+    and bootstrap diagnostics. Return RBEstimate with unchanged decay/diagnostic
+    fields and d=4 error quantities. Leave fit unchanged; do not acquire or draw.
     """
+    # The shared owner fits and resamples paired curves; only d=4 interpretation
+    # belongs here. Its d=2 error is affine in the same decay ratio.
+    return RBEstimate(
+        p_reference=fit.p_reference,
+        p_interleaved=fit.p_interleaved,
+        reference_epc=0.75 * (1 - fit.p_reference),
+        gate_error=0.75 * (1 - fit.p_interleaved / fit.p_reference),
+        error_ci_low=1.5 * (1 - fit.fidelity_ci_high),
+        error_ci_high=1.5 * (1 - fit.fidelity_ci_low),
+        n_paired_seeds=fit.n_paired_seeds,
+        n_paired_rounds=fit.n_paired_rounds,
+        bootstrap_successes=fit.bootstrap_successes,
+        warning=fit.warning,
+    )
 
-    depths: NDArray[np.int64]
-    seeds: NDArray[np.int64]
 
-    rounds: NDArray[np.int64]
-    sums: NDArray[np.float64]
+def estimate_joint_d4(
+    fit: SharedFitResult,
+    *,
+    ci_low: float,
+    ci_high: float,
+    bootstrap_successes: int,
+    paired_seeds: int,
+    paired_rounds: int,
+) -> RBEstimate:
+    """Convert joint arm decays and a seed-bootstrap interval to d=4 estimates.
+
+    fit supplies reference p_0 and interleaved p_1. ci_low/ci_high bound the
+    statistical gate-error interval; bootstrap_successes counts accepted fits.
+    paired_seeds and paired_rounds count the available identity union. Return
+    RBEstimate with unclipped error and a statistical-only warning. Mutate no
+    inputs, draw nothing and propagate missing decay keys or arithmetic errors.
+    """
+    pr, pi = fit.values["p_0"], fit.values["p_1"]
+    error = 0.75 * (1 - pi / pr)
+    warning = (
+        "Statistical CI only; gate-dependent/coherent noise can bias the IRB ratio."
+    )
+    if error < 0:
+        warning += " Interleaved decay exceeds reference: negative error estimate retained, not clipped."
+    return RBEstimate(
+        pr,
+        pi,
+        0.75 * (1 - pr),
+        error,
+        ci_low,
+        ci_high,
+        paired_seeds,
+        paired_rounds,
+        bootstrap_successes,
+        warning,
+    )
+
+
+def count_completion(
+    counts: NDArray[np.float64], class_axes: tuple[int, ...]
+) -> NDArray[np.bool_]:
+    """Return complete-slot masks; raise ValueError for invalid or partial counts.
+
+    counts has leading scan axes and trailing class_axes (negative indices allowed).
+    All-NaN slots are unacquired. Return a boolean mask over the remaining axes;
+    leave counts unchanged and draw nothing.
+    """
+    acquired = np.asarray(np.isfinite(counts).all(axis=class_axes), dtype=np.bool_)
+    missing = np.isnan(counts).all(axis=class_axes)
+    if not np.all(acquired | missing) or np.any(counts < 0):
+        raise ValueError("RB sums contains invalid counts or a partial round")
+    return acquired
+
+
+def paired_means(survival: NDArray[np.float64]) -> NDArray[np.float64]:
+    """Average complete rounds inside each seed, then seeds equally, per arm.
+
+    survival is (depth,seed,arm,round), with two arms and unavailable entries NaN.
+    Use rounds finite across every depth and both arms for each seed. Return
+    (2,depth) arm means or all NaN when no seed is complete. Mutate no inputs;
+    do not acquire or draw.
+    """
+    complete = np.asarray(np.isfinite(survival).all(axis=(0, 2)), dtype=np.bool_)
+    counts = complete.sum(axis=1)
+    kept = counts > 0
+    if not np.any(kept):
+        return np.full((2, survival.shape[0]), np.nan)
+    seed_means = np.where(complete[None, :, None, :], survival, 0).sum(axis=-1)
+    return (seed_means[:, kept, :] / counts[None, kept, None]).mean(axis=1).T
+
+
+def validate_axes(
+    axes: tuple[NDArray[np.int64], ...],
+    expected: tuple[Sequence[int] | NDArray[np.int64], ...],
+) -> None:
+    """Raise ValueError when persisted axis identities do not match saved cfg.
+
+    axes and expected list persisted and configured identities in the same axis
+    order (depth,seed,arm,round). Compare exact values; unequal sequence lengths also
+    raise ValueError. Return None without modifying either sequence or drawing.
+    """
+    if any(
+        not np.array_equal(actual, wanted)
+        for actual, wanted in zip(axes, expected, strict=True)
+    ):
+        raise ValueError("RB count axes do not match saved cfg")
 
 
 def restore_result(data: GroupedLoadData[RBCfg]) -> RBResult:
-    """Restore counts; old per-shot IQ files fail because sums is missing."""
+    """Restore counts; old per-shot IQ files fail because sums is missing.
+
+    data supplies the grouped sums variable and its persisted scan axes. Return
+    this experiment's Result with float64 class counts and its original axis
+    ordering. Missing variables and invalid data propagate load errors. Do not
+    mutate the loaded data, acquire or draw; no raw-IQ reconstruction is attempted.
+    """
     sums = data.variable("sums")
     return RBResult(
         depths=sums.axes[5].astype(np.int64),
@@ -185,7 +351,6 @@ def restore_result(data: GroupedLoadData[RBCfg]) -> RBResult:
 class RBExp(Experiment[RBResult, RBCfg]):
     """Paired RB counts, native IO and complete-round joint00 analysis."""
 
-    Options = RBOptions
     AXES_SPEC: ClassVar[GroupedAxesSpec[RBResult, RBCfg]] = GroupedAxesSpec(
         variables=(
             VariableSpec(
@@ -224,12 +389,16 @@ class RBExp(Experiment[RBResult, RBCfg]):
         result_builder=restore_result,
     )
 
+    Options = RBOptions
+
     def run(self, config: RBCfg, *, context: RunContext) -> RBResult:
         """Acquire optional reset → paired sequence → terminal class counts.
 
         Each host round acquires reps shots with rounds=1, not a host average.
         Return fixed raw count slots; cfg and saved sequence identities are unchanged.
+
         """
+        # 1. Compare reference and CZ-interleaved joint00 survival across Clifford depth.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Random Clifford depth", ylabel="Joint00 survival")
         viewer = live_line(ax, num_lines=2)
@@ -244,6 +413,7 @@ class RBExp(Experiment[RBResult, RBCfg]):
                 np.array(config.depth), joint_probabilities(totals)[..., 0, 0].T
             )
 
+        # 2. Compile each paired depth/seed/arm sequence once and keep individual host-round count slots.
         buffer = SignalBuffer(
             (len(config.depth), len(config.seed), 2, config.rounds, 3, 3),
             dtype=np.float64,
@@ -332,6 +502,7 @@ class RBExp(Experiment[RBResult, RBCfg]):
                                 options=RunOptions(),
                             )
         buffer.trigger_update(flush=True)
+        # 3. Preserve paired sequence identities and raw terminal counts; unfinished round slots stay NaN.
         return RBResult(
             np.array(config.depth, dtype=np.int64),
             np.array(config.seed, dtype=np.int64),
@@ -352,7 +523,9 @@ class RBExp(Experiment[RBResult, RBCfg]):
         Malformed counts raise ValueError. Missing cfg, AnalysisFailed or existing
         fit ValueError/RuntimeError failures return a reason with count diagnostics.
         Other exceptions propagate unchanged.
+
         """
+        # 1. Select seed/round pairs complete across every depth and both arms before fitting joint00 decay.
         data, cfg = source.result, source.cfg
         shape = (len(data.depths), len(data.seeds), 2, len(data.rounds))
         survival = np.full(shape, np.nan)
@@ -379,6 +552,7 @@ class RBExp(Experiment[RBResult, RBCfg]):
             )
             survival = np.where(paired[None, :, None, :], joint00, np.nan)
             means = paired_means(survival)
+            # 2. Fit paired decay and bootstrap whole seeds before the d=4 error conversion.
             try:
                 fit = analyze_irb(
                     data.depths,
@@ -402,6 +576,7 @@ class RBExp(Experiment[RBResult, RBCfg]):
                 # Restore probability coordinates, not the decay ratio.
                 sign = 1.0 if np.sum(fit.mean_signals * means) >= 0 else -1.0
                 curves = sign * fit.fit_signals
+        # 3. Compare paired reference/interleaved mean survival and fitted probability curves with failure reasons.
         fig, ax = plots.subplots(num="fit", figsize=(9, 6))
         for arm, label in enumerate(("Reference", "CZ interleaved")):
             (line,) = ax.plot(data.depths, means[arm], "o", label=label)
@@ -414,4 +589,5 @@ class RBExp(Experiment[RBResult, RBCfg]):
         else:
             ax.set_title("d=4 paired RB; classified ensemble, statistical seed CI only")
         fig.tight_layout()
+        # 4. Keep the d=4 estimate and statistical seed uncertainty, or a failure without a calibration proposal.
         return RBAnalysis(estimate, quality, reason)

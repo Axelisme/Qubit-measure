@@ -16,8 +16,7 @@ from zcu_tools.gui.app.measure.adapter import (
 )
 from zcu_tools.plotting.plots import Plots
 
-from .analysis import LocalZAnalysis
-from .core import LocalZCfg, LocalZExp, LocalZResult
+from .core import LocalZAnalysis, LocalZCfg, LocalZExp, LocalZResult
 from .form import make_form
 
 LocalZRun: TypeAlias = RunRecord[LocalZCfg, LocalZResult]

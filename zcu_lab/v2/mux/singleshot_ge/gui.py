@@ -36,16 +36,18 @@ from zcu_lab.v2.support.measure.mux_results import (
 from zcu_lab.v2.support.measure.mux_save_names import mux_save_stem
 from zcu_lab.v2.support.mux import MuxFitFailure
 
-from .analysis import (
+from .core import (
     GEAnalysis,
     GEAnalyzeOptions,
     GEPostAnalyzeOptions,
     MuxGEAnalysis,
     MuxGEAnalyzeOptions,
+    MuxGECfg,
+    MuxGEExp,
     MuxGEPostAnalysis,
     MuxGEPostOptions,
+    MuxGEResult,
 )
-from .core import MuxGECfg, MuxGEExp, MuxGEResult
 from .form import make_form
 
 MuxGERunResult: TypeAlias = RunRecord[MuxGECfg, MuxGEResult]

@@ -31,16 +31,7 @@ from .._sums import (
     marginal_probabilities,
     terminal_counts,
 )
-from .analysis import summarize_spectra
-from .core import SpectroscopyCfg
-
-
-class SpectroscopyHeraldedCfg(SpectroscopyCfg):
-    """Optional reset → herald → nominal branch → probe → contrast → terminal.
-
-    Both reads use the same mux settings and circle radii. Its post_delay is the
-    wait after herald. Other fields and units match SpectroscopyCfg.
-    """
+from .core import SpectroscopyCfg, summarize_spectra
 
 
 @dataclass(frozen=True)
@@ -58,10 +49,24 @@ class SpectroscopyHeraldedResult:
     sums: NDArray[np.float64]
 
 
+class SpectroscopyHeraldedCfg(SpectroscopyCfg):
+    """Optional reset → herald → nominal branch → probe → contrast → terminal.
+
+    Both reads use the same mux settings and circle radii. Its post_delay is the
+    wait after herald. Other fields and units match SpectroscopyCfg.
+    """
+
+
 def restore_result(
     data: GroupedLoadData[SpectroscopyHeraldedCfg],
 ) -> SpectroscopyHeraldedResult:
-    """Restore all 81 counts; old per-shot IQ files lack sums and are rejected."""
+    """Restore all 81 counts; old per-shot IQ files lack sums and are rejected.
+
+    data supplies the grouped sums variable and its persisted scan axes. Return
+    this experiment's Result with float64 class counts and its original axis
+    ordering. Missing variables and invalid data propagate load errors. Do not
+    mutate the loaded data, acquire or draw; no raw-IQ reconstruction is attempted.
+    """
     sums = data.variable("sums")
     return SpectroscopyHeraldedResult(
         dc_values=sums.axes[7], frequencies=sums.axes[4], sums=sums.z.astype(np.float64)
@@ -125,7 +130,9 @@ class SpectroscopyHeraldedExp(
         Optional DC settings are not restored. Completed rounds survive
         cooperative cancellation. Acquisition exceptions propagate unchanged.
         The stop signal carries only stop requests and reason text.
+
         """
+        # 1. Overlay gg/ee excitation by actual initial state for each optional DC setting.
         frequencies = sweep2array(config.frequency)
         dc_values = (
             np.array([0.0]) if config.dc_device is None else sweep2array(config.dc)
@@ -172,6 +179,7 @@ class SpectroscopyHeraldedExp(
                 )
             return tuple(artists)
 
+        # 2. Set DC on the host; acquire herald before preparation/probe/contrast and terminal readout in hardware.
         buffer = SignalBuffer(
             (len(dc_values), 2, 2, len(frequencies), 3, 3, 3, 3),
             dtype=np.float64,
@@ -248,6 +256,7 @@ class SpectroscopyHeraldedExp(
                     rounds=config.rounds,
                     options=RunOptions(),
                 )
+        # 3. Preserve all herald/terminal class counts and completed rounds on the planned axes.
         return SpectroscopyHeraldedResult(dc_values, frequencies, buffer.array)
 
     def analyze(
@@ -264,7 +273,9 @@ class SpectroscopyHeraldedExp(
         All-NaN counts retain the empty figures and return an error summary
         explaining that no complete acquisition round is available. Otherwise
         return None for this figures-only analysis.
+
         """
+        # 1. Require saved DC/preparation/frequency axes and distinguish valid counts from missing acquisitions.
         del options
         data, cfg = source.result, source.cfg
         if cfg is None:
@@ -295,6 +306,7 @@ class SpectroscopyHeraldedExp(
         ee_counts = terminal_counts(data.sums, ("e", "e"))
         gg = summarize_spectra(gg_counts, acquired, cfg.reps * cfg.rounds)
         ee = summarize_spectra(ee_counts, acquired, cfg.reps * cfg.rounds)
+        # 2. Overlay gg/ee spectra under the same actual initial state, including partial acquisitions.
         for d, value in enumerate(dc):
             for target, role in enumerate(("F1", "F2")):
                 fig, _ = plots.subplots(
@@ -329,6 +341,7 @@ class SpectroscopyHeraldedExp(
                         ylim=(0, 1),
                     )
                     ax.legend(fontsize="small")
+        # 3. Compare all-shot coverage, selected gg/ee totals and herald fractions without fitting.
         fig, _ = plots.subplots(
             num="shots",
             nrows=len(dc),
@@ -396,4 +409,5 @@ class SpectroscopyHeraldedExp(
             return {
                 "error": "No complete acquisition round is available: all counts are NaN."
             }
+        # 4. Leave an acquired partial scan as figures-only diagnostics; all-NaN data reports no completed round.
         return None
