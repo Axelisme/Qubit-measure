@@ -161,34 +161,57 @@ Acquire、暖機或比較失敗時回傳非零，stderr 保留原因，不輸出
 It times **Engine.evolve**, not `program.acquire`. The existing acquire benchmark
 above keeps its workloads and comparison contract.
 
+The default inputs are fixed 24-point carrier, gain, length, idle and gate-sequence
+scans on the full 21-level single-fluxonium model, plus a synchronous dual-port
+scan on the fixed FTF model with 32 retained joint states and local 4×4×4.
+Add `--include-synthetic` to also measure the unchanged accuracy inventory and
+twelve amplified synthetic workloads. Reports separate
+the two categories; deletion conclusions use real inputs only.
+
 Freeze the versioned input manifest before measuring. From the lane root, replace
 `<worktree>` with its absolute path and choose a new `<results>` directory:
 
 ```bash
 mkdir -p <results>
 uv run --directory <worktree> --no-sync -- \
-  python -m tools.family_pareto --freeze-inputs <results>/inputs.json
+  python tools/run_heavy.py --log <results>/freeze.log 120 -- \
+  python -m tools.family_pareto --freeze-inputs <results>/inputs.json \
+  > <results>/freeze-receipt.json
 uv run --directory <worktree> --no-sync -- \
-  python tools/run_heavy.py --exclusive --log <results>/run.log 1800 -- \
+  python tools/run_heavy.py --log <results>/reference.log <reference-timeout-seconds> -- \
   python -m tools.family_pareto --manifest <results>/inputs.json \
+  --prepare-references --reference-cache <results>/reference-cache \
+  --output <results>/reference.json > <results>/reference-receipt.json
+uv run --directory <worktree> --no-sync -- \
+  python tools/run_heavy.py --exclusive --log <results>/run.log <timing-timeout-seconds> -- \
+  python -m tools.family_pareto --manifest <results>/inputs.json \
+  --reference-cache <results>/reference-cache --reference-cache-only \
+  --partial-output <results>/attempt.jsonl \
   --output <results>/matrix.json --summary <results>/summary.md \
   > <results>/receipt.json
 ```
+
+Choose reference and timing timeouts from the approved batch budget. These commands
+do not grant a timing allowance. The earlier carrier-only 9000-second allowance
+does not apply to new scenarios. Freeze through the nonexclusive runner too, so
+native thread settings match reference preparation and timing. Different native
+thread widths can change model bath rates in their final floating-point bits and
+therefore change the exact manifest/cache hashes.
 
 The measured command rejects a manifest that differs from the tracked builders.
 Do not adjust inputs in response to measured dominance. After an intentional input
 version change, freeze a new manifest and retain earlier results separately.
 No existing local artifacts, mutable lab YAML, GUI or hardware are required.
 
-`family_pareto_inputs.py` reuses the accuracy table's ordinary Python support.
-The manifest includes the original representatives, all guard edges, the complete
+With `--include-synthetic`, `family_pareto_inputs.py` reuses the accuracy table's
+ordinary Python support. That inventory includes the original representatives, all guard edges, the complete
 gain/split sweeps and crossing brackets, shape bridges, history inputs and the
 complete multisegment sequence. Fallback cases share the same physical inputs as
 the unity gate and long split cases. Each input is tried with every family.
 Oracle caching excludes only the model's nonphysical identity namespace. Both
 full reconstruction hashes and oracle-sharing hashes are saved.
 
-Each original domain also has a 96-point workload. Three gain factors, `1, 1.5, 2`,
+Each original synthetic domain also has a 96-point workload. Three gain factors, `1, 1.5, 2`,
 correspond to the acquire benchmark's `.08, .12, .16` ratio. Each factor has 32
 complete timeline repetitions, preserving original point phases, envelopes,
 durations, bath and flux trajectories. This is the acquire benchmark's `3 x 32`
@@ -197,7 +220,15 @@ full inventory rather than extrapolating from two points. The manifest records
 all arrays, models, initial density, optional flux expansion, expected families,
 point order and the reason for each input.
 
-Each pinned family and the separately listed default policy has three modes:
+Each pinned family and the separately listed default policy has three modes.
+Normal modes keep five samples. If a family's first empty-history evolve
+exceeds 60 wall seconds, it is the only first-evolve sample. No separate probe
+or warmup runs. Clear-history is unmeasured with n=0, an explicit reason and
+None times. Retain-history immediately runs once in that same session, n=1.
+The JSON retains every sample. Every mode lists its count, including zero.
+Dominance and timing equivalence use only shared measured modes.
+
+The modes are:
 
 - `first_evolve` creates a fresh source/history/Engine for each of five samples.
 - `warm_clear_history` creates another session, runs two untimed warmups, then
@@ -218,9 +249,9 @@ most `2e-6`. Every solver's error is measured, including exact families. Values
 above `2e-3` remain FAIL. Existing strict xfails are not removed.
 
 A competitor dominates only when its maximum full-density error across that
-mode's five raw samples is no larger and its median time is
-**less than `0.9 * target_time`**. Probe and other-mode errors do not enter this
-comparison. The family-level maximum across probe and all modes remains the
+mode's retained raw samples is no larger and its median time is
+**less than `0.9 * target_time`**. Other-mode errors do not enter this
+comparison. The family-level maximum across all timed modes remains the
 overall accuracy/PASS-FAIL value. Exactly 10% is time-equivalent.
 Time-equivalent peers have neither direction faster by more than 10%, regardless
 of error. Wall/CPU and all three modes remain separate; there is no weighted score.
@@ -249,6 +280,125 @@ the family-exclusion estimator reuses it with an explicit `reference=None` to
 measure only time and paths (`Sample.density_error=None`), without an oracle.
 Pareto policies always supply a real reference. Tests use controlled clocks and small
 collaborators; the complete matrix runs outside pytest through the exclusive runner.
+
+### Fixed scenarios, companions and reference cache
+
+`family_pareto_scenarios.py` owns curated core pulse sequences. It uses public
+program components, compiled requests, and the environment source's
+`model_facts`/`plan_template` to construct complete Engine inputs.
+`family_pareto_settings.py` owns fixed single-fluxonium, FTF and board inputs,
+copied from commit `303074e166d1a563addfab4fd94717d958a7dd56`. The manifest
+records their source commit and fixed values. Runtime construction does not import
+lab experiments, read lab YAML/profiles, execute experiments, or use replay.
+Model/template changes require a deliberate update here. The fixed FTF values
+do not track a user's working-copy edits. The tool overrides only FTF
+`retained_levels` from 16 to 32. Local levels remain 4×4×4; all other physical
+and board parameters retain that source commit's values. At the specified CZ
+working point, the conditional-phase comparison needed at least 25 joint states
+to reach a difference within 0.5°. Retaining 32 leaves margin. This is not a
+convergence claim for arbitrary CZ pulses or the full native/local model.
+FTF references and timings must be rebuilt at 32 states; 16-state results do not
+apply.
+
+All five single-model scans use the full 21-level model. Their carrier center is
+DC E1−E0 from that fixed model. Gains, phases and durations are illustrative
+benchmark settings, not fitted calibrations or calibrated pi/pi/2 rotations.
+Every shot ends in readout at the fixed bare cavity frequency, gain .1, with a
+1 us pulse/window and fixed flight time. The Engine batch ends at readout start,
+not at the end of that window.
+
+| Scan | Core sequence | Requested axis, 24 points | Envelope and pulse lengths | Compiled logical spans per point | Reason |
+| --- | --- | --- | --- | --- | --- |
+| F `carrier_sweep` | One drive, terminal readout | DC E1−E0 ±100 MHz | Constant, 1000 ns, gain .1 | 2 | Frequency reuse without exact duplicate carriers. |
+| A `gain_sweep` | One drive, terminal readout | Gain .01 to .1 | Gaussian, 100 ns, sigma 20 ns | 2 | Shaped-family input at fixed envelope and carrier. |
+| L `length_sweep` | One drive, terminal readout | Length 20 to 400 ns | Constant, gain .1 | 1 or 2 | Changes support without also resampling a Gaussian. |
+| I `idle_sweep` | X-phase gate, idle, Y-phase gate, terminal readout | Idle 20 to 400 ns | Two constant 20 ns gates, gain .1 | 4 | Shared initial gate with changing gap and final absolute phase. |
+| N `gate_sequence` | Prefix of repeated X,Y,-X,-Y phase alphabet, terminal readout | Gate count 1 to 24 | Constant 20 ns gates, gain .1 | 2 to 35 | Ragged sequences with a reusable alphabet, without random seeds. |
+| M `simultaneous_drive` | Synchronous F1/F2 drives, terminal readout | Shared gain .01 to .1 | Two Gaussians, 100 ns, sigma 20 ns | 2 | Independent joint-model drive operators under overlapping shaped controls. |
+
+M uses public timeline fork/join to start both drives together and place readout
+after both finish. Its two carriers are the uncoupled local DC E1−E0 frequencies
+of F1 and F2, not fitted dressed-transition calibrations. Both ports act on the
+same coupled FTF density. Readout uses the fixed bare r1 cavity frequency, gain
+.1, a 1 us pulse/window and fixed flight time. This benchmark sequence is not a
+calibrated CZ gate. The CZ comparison above explains only the retained-state
+choice, not a fidelity claim for this scan.
+
+Continuous requested axes are equally spaced and include both endpoints. Native
+hardware quantization changes the realized values. Length uses a public table
+sweep so each requested length is quantized as its own scalar pulse, rather than
+accumulating a truncated increment. Its realized supports with this fixed board
+are 20, 36, 54, 70, 86, 102, 118, 136, 152, 168, 186, 202, 218, 236, 252, 268,
+284, 300, 318, 334, 350, 368, 384 and 400 ns. Other hardware values also follow
+the public compiler conversion. The manifest preserves requested ranges and full
+physical arrays, not a claim that every requested value is exactly representable.
+
+Span counts include compiler alignment gaps and the no-drive readout lead. N can
+have short gaps between gates even though its core requests no extra idle.
+The manifest records every point's actual span count, compiled carriers,
+model/board inputs, snapshot, exact tick ratio, calibration method, expected
+routes and full physical hashes. Logical spans are not unique cached preparations.
+
+A pinned policy may include named companions, such as `t4` for the idle tail.
+The input declares `{family: (logical segment count, cumulative ns)}` for each
+target's complete group. Both quantities must match public `FamilyRouting`
+reports in every sample. A count mismatch or duration mismatch stops measurement.
+The duration comparison allows only floating accumulation noise
+(`rel_tol=1e-12`, `abs_tol=1e-9 ns`).
+Cumulative ns cannot distinguish equal-length spans. It is not per-span
+observation and does not prove disjoint domain ownership.
+
+All timing samples enable routing telemetry. The paired nonexclusive carrier
+comparison found on/off wall ratios 0.984, 1.147 and 1.004 for first, clear and
+retain modes. CPU ratios were 0.983, 1.147 and 1.005. Clear-history differed by
+about 2 ms; this single pair does not isolate instrumentation overhead from
+shared-machine variation. Telemetry remains on for all policies to collect CPU
+and logical work consistently, without adding a third evolve for slow families.
+Reported times are telemetry-enabled group latency; near-10% comparisons need
+caution given that observation.
+
+Each sample preserves `prepare_cpu_s`, `apply_cpu_s` and their sum separately
+for every reported family. These are calling-thread CPU from `FamilyRouting`,
+including preparation for rejected guards. The report shows target and companion
+rows separately. They are not whole-process CPU, may exclude routing/geometry
+overhead, and need not add up to the process CPU timer.
+Pareto dominance continues to use whole-`Engine.evolve` wall and process CPU
+separately. A target plus named companions is one timed group, never isolated
+target performance. Default routing is also compared with its observed family
+union fixed. That extra group stays outside dominance. Differences over 2x are
+findings, not routing changes.
+
+`--reference-cache <directory>` enables a local disk cache, off by default.
+`--prepare-references` with `--manifest`, `--reference-cache` and `--output`
+prepares it without Engine timing or a summary. Run that phase nonexclusive.
+Its report records physical hashes, density shapes, convergence and solve/cache
+load times. Real inputs use the exact interaction-picture oracle; synthetic
+inputs retain the lab-frame oracle. The exclusive timing phase must use
+`--reference-cache-only`; a missing or changed key stops before that input's
+timing and never runs a solver. Cache-only mode requires a cache directory and
+forbids an injected solver.
+
+Cache keys include complete physical input, both tolerance levels and the
+convergence contract. Model identity namespaces and routing history are excluded.
+Files contain density and convergence error without pickle objects.
+Only equal physical hashes permit reuse across builder changes. Keep the cache
+outside Git. Reference solve/cache-load totals remain separate from Engine time.
+
+### Partial attempts and failure handling
+
+Use a new `--partial-output` JSONL path for each timing attempt. Existing journals
+are rejected, and the journal cannot be either complete output path.
+It starts with the run ID, manifest hash, Git state and partial status.
+Each completed sample is appended outside timing, before the next evolve.
+Skipped modes and completed policies are also retained. A later ordinary failure
+adds its original error and returns nonzero without replacing earlier complete
+reports. A timeout can leave the final line incomplete; only prior complete JSON
+lines are usable. No `run_complete` event means the attempt is incomplete, even
+if older matrix/summary files remain.
+
+The bounded carrier run permits one 9000-second exclusive attempt. Stop on
+timeout, preserve its receipt and journal, and do not restart automatically.
+Use the run ID and receipt to distinguish this attempt from older complete files.
 
 ## Markdown reader declarations
 

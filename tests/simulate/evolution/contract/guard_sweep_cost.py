@@ -9,23 +9,25 @@ from collections.abc import Callable, Generator
 from contextlib import closing, contextmanager
 from dataclasses import dataclass
 
-from zcu_tools.simulate.evolution import Engine, PathDiagnostics
+from zcu_tools.simulate.evolution import Engine
 
 from tools.family_pareto import EngineSession, measure_family
 
-from .accuracy import ALL_FAMILIES, require_families
+from .accuracy import ALL_FAMILIES
 from .accuracy_cases import AccuracyCase
 
 
 @dataclass(frozen=True)
 class EngineCost:
-    """Five raw evolve samples for one family policy and history mode.
+    """Raw evolve samples for one family policy and history mode.
 
     policy is pinned or excluded. mode is first_evolve, warm_clear_history or
     warm_retain_history. Paths are per-sample segment counts. Wall and CPU
     samples and their medians use seconds. Construction, cleanup, history.clear
     and two fixed warmup evolves are untimed. First mode uses five fresh
     source/Engine pairs in this process, not fresh processes or disk caches.
+    The shared slow-family protocol instead retains one first/retain sample
+    and omits clear-history, whose samples are empty and medians are None.
     """
 
     policy: str
@@ -33,8 +35,8 @@ class EngineCost:
     wall_seconds: tuple[float, ...]
     cpu_seconds: tuple[float, ...]
     paths: tuple[dict[str, int], ...]
-    wall_median: float
-    cpu_median: float
+    wall_median: float | None
+    cpu_median: float | None
 
 
 def measure_engine_cost(
@@ -79,8 +81,8 @@ def measure_engine_cost(
         for mode in modes:
             for sample in mode.samples:
                 if policy == "pinned":
-                    require_families(
-                        PathDiagnostics(segments_by_kernel=sample.paths), (family,)
+                    assert sample.paths.get(family, 0) > 0, (
+                        f"expected family not exercised: {family}; got {sample.paths}"
                     )
                 else:
                     assert not sample.paths.get(family, 0)

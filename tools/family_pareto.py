@@ -10,20 +10,26 @@ import subprocess
 import sys
 from collections.abc import Callable, Generator
 from contextlib import AbstractContextManager, closing, contextmanager
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field, replace
 from importlib.metadata import version
+from math import isclose
 from pathlib import Path
 from statistics import median
 from time import perf_counter, process_time
+from uuid import uuid4
 
 from zcu_tools.simulate.evolution import (
     Engine,
     EvolutionResult,
+    FamilyRouting,
     ModelSource,
     TimelineBatch,
 )
 
 from tests.simulate.evolution.contract.accuracy import ALL_FAMILIES
+from tests.simulate.evolution.contract.interaction_reference import (
+    interaction_reference,
+)
 from tests.simulate.evolution.contract.reference import (
     ReferenceResult,
     converged_reference,
@@ -36,6 +42,18 @@ from tools.family_pareto_inputs import (
     freeze_manifest,
     make_inputs,
     physical_input,
+)
+from tools.family_pareto_reference import (
+    ReferenceCache,
+    prepare_references,
+    solve_reference,
+)
+from tools.family_pareto_report import render_summary as render_summary
+from tools.family_pareto_scenarios import make_real_inputs
+
+UNAVAILABLE_PATTERN = (
+    r"no valid kernel for segment \d+; domain [a-z_]+: points \[\d+(?:, \d+)*\], "
+    r"segments \[\d+(?:, \d+)*\]"
 )
 
 
@@ -50,6 +68,8 @@ class EngineSession:
 
     evolve: Callable[[], EvolutionResult]
     clear_history: Callable[[], None]
+    on_sample: Callable[[str, "Sample | None"], None] | None = None
+    """Optional untimed observer after each sample; None sample marks a skipped mode."""
 
 
 SessionOpener = Callable[[], AbstractContextManager[EngineSession]]
@@ -69,6 +89,10 @@ class Sample:
     cpu_seconds: float
     density_error: float | None
     paths: dict[str, int]
+    routing: dict[str, FamilyRouting] = field(default_factory=dict)
+    """Immutable simulator reports; thread CPU includes guard refusals."""
+    family_cpu_s: dict[str, float] = field(default_factory=dict)
+    """Per-family prepare+apply thread CPU, not whole-process elapsed CPU."""
 
 
 @dataclass(frozen=True)
@@ -76,14 +100,49 @@ class ModeResult:
     """One history mode's raw samples and separate timing medians.
 
     mode is first_evolve, warm_clear_history or warm_retain_history.
-    samples contains five evolves in measurement order. wall_median and
-    cpu_median are the respective elapsed-second medians of those samples.
+    Normal modes contain five samples. A slow family's first and retained
+    modes contain one each. Its clear-history mode has samples=[], None times
+    and unmeasured_reason='slow family not measured'. It has no comparison cell.
+    wall_median and cpu_median are separate elapsed-second medians when measured.
     """
 
     mode: str
     samples: list[Sample]
-    wall_median: float
-    cpu_median: float
+    wall_median: float | None
+    cpu_median: float | None
+    unmeasured_reason: str | None = None
+
+
+def _timed_sample(
+    session: EngineSession,
+    reference: ReferenceResult | None,
+    wall_clock: Callable[[], float],
+    cpu_clock: Callable[[], float],
+) -> Sample:
+    wall, cpu = wall_clock(), cpu_clock()
+    result = session.evolve()
+    cpu_elapsed, wall_elapsed = cpu_clock() - cpu, wall_clock() - wall
+    return Sample(
+        wall_elapsed,
+        cpu_elapsed,
+        None
+        if reference is None
+        else density_error(result.densities, reference.density),
+        dict(result.paths.segments_by_kernel),
+        routing=dict(result.paths.routing),
+        family_cpu_s={
+            name: report.actual_cpu_s for name, report in result.paths.routing.items()
+        },
+    )
+
+
+def _measured_mode(name: str, samples: list[Sample]) -> ModeResult:
+    return ModeResult(
+        name,
+        samples,
+        median(s.wall_seconds for s in samples),
+        median(s.cpu_seconds for s in samples),
+    )
 
 
 def measure_family(
@@ -93,48 +152,50 @@ def measure_family(
     wall_clock: Callable[[], float] = perf_counter,
     cpu_clock: Callable[[], float] = process_time,
 ) -> list[ModeResult]:
-    """Measure five fresh or warmed evolves per mode; failures propagate.
+    """Time public evolves only, with fresh sessions and an optional real oracle.
 
-    Setup, cleanup, two identical warmups, clear and result inspection are
-    untimed. open_session supplies a fresh source/history/Engine on every entry.
-    Clocks return monotonic wall and process CPU seconds. No sample spawns a
-    process or resets disk caches. Only public Engine.evolve is timed.
-    reference is a real oracle result, or explicitly None to omit density error
-    measurement (timing/path-only consumers). No oracle is solved here.
+    The first empty-history evolve is a sample, never a separate probe. Above
+    60 wall seconds retain it, immediately time one more evolve in that same
+    history, and leave warm_clear_history unmeasured with explicit None times.
+    Otherwise collect five samples per mode, with two untimed warmups before
+    each warm mode. Setup, cleanup, history clearing and inspection are untimed.
+    No process or disk-cache reset occurs here. Failures always propagate.
     """
-    modes = []
-    for mode in ("first_evolve", "warm_clear_history", "warm_retain_history"):
-        samples = []
-        for _ in range(5 if mode == "first_evolve" else 1):
-            with open_session() as session:
-                if mode != "first_evolve":
-                    for _ in range(2):
-                        session.evolve()
-                for _ in range(1 if mode == "first_evolve" else 5):
-                    if mode == "warm_clear_history":
-                        session.clear_history()
-                    wall, cpu = wall_clock(), cpu_clock()
-                    result = session.evolve()
-                    cpu_elapsed = cpu_clock() - cpu
-                    wall_elapsed = wall_clock() - wall
-                    samples.append(
-                        Sample(
-                            wall_elapsed,
-                            cpu_elapsed,
-                            None
-                            if reference is None
-                            else density_error(result.densities, reference.density),
-                            dict(result.paths.segments_by_kernel),
-                        )
-                    )
-        modes.append(
-            ModeResult(
-                mode,
-                samples,
-                median(s.wall_seconds for s in samples),
-                median(s.cpu_seconds for s in samples),
-            )
-        )
+
+    def sample(session: EngineSession, mode: str) -> Sample:
+        measured = _timed_sample(session, reference, wall_clock, cpu_clock)
+        if session.on_sample is not None:
+            session.on_sample(mode, measured)
+        return measured
+
+    with open_session() as session:
+        first = sample(session, "first_evolve")
+        if first.wall_seconds > 60:
+            if session.on_sample is not None:
+                session.on_sample("warm_clear_history", None)
+            retained = sample(session, "warm_retain_history")
+            return [
+                _measured_mode("first_evolve", [first]),
+                ModeResult(
+                    "warm_clear_history", [], None, None, "slow family not measured"
+                ),
+                _measured_mode("warm_retain_history", [retained]),
+            ]
+    samples = [first]
+    for _ in range(4):
+        with open_session() as session:
+            samples.append(sample(session, "first_evolve"))
+    modes = [_measured_mode("first_evolve", samples)]
+    for name in ("warm_clear_history", "warm_retain_history"):
+        with open_session() as session:
+            session.evolve()
+            session.evolve()
+            samples = []
+            for _ in range(5):
+                if name == "warm_clear_history":
+                    session.clear_history()
+                samples.append(sample(session, name))
+        modes.append(_measured_mode(name, samples))
     return modes
 
 
@@ -143,7 +204,7 @@ class FamilyResult:
     """Pinned family or default policy; unavailable has reason and no samples.
 
     family is a pinned family name, or 'default' for normal routing.
-    error is the maximum density error across probe and all timed evolves for
+    error is the maximum density error across all timed evolves for
     overall accuracy reporting/PASS-FAIL, never an assumed exact-solver zero.
     unavailable is the refusal reason, with error=None and modes=[]; otherwise
     unavailable=None and modes contains each of the three history modes once,
@@ -154,6 +215,23 @@ class FamilyResult:
     error: float | None
     unavailable: str | None
     modes: list[ModeResult]
+    expected_route: dict[str, tuple[int, float]] = field(default_factory=dict)
+    """Family -> expected logical segment count and total physical ns."""
+    attribution: str = "target"
+    """target, target_and_companions, default or fixed_family_group.
+
+    Engine wall/process CPU describe the complete policy, not isolated target
+    speed. Family thread CPU is reported separately and is not process CPU.
+    """
+    whitelist: tuple[str, ...] | None = None
+    """Actual families restriction; None denotes unrestricted default routing."""
+
+
+def _mode_time(mode: ModeResult, metric: str) -> float:
+    value = mode.wall_median if metric == "wall" else mode.cpu_median
+    if value is None:
+        raise ValueError("measured mode requires timing")
+    return value
 
 
 def _mode_error(mode: ModeResult) -> float:
@@ -181,9 +259,27 @@ def _available_modes(rows: list[FamilyResult]) -> dict[str, dict[str, ModeResult
             "warm_retain_history",
         }:
             raise ValueError(f"{row.family}: require all three unique history modes")
+        first = by_name["first_evolve"]
+        measured = {}
         for mode in row.modes:
+            if mode.unmeasured_reason is not None:
+                if not (
+                    mode.mode == "warm_clear_history"
+                    and mode.unmeasured_reason == "slow family not measured"
+                    and not mode.samples
+                    and mode.wall_median is None
+                    and mode.cpu_median is None
+                    and len(first.samples) == 1
+                    and first.samples[0].wall_seconds > 60
+                    and len(by_name["warm_retain_history"].samples) == 1
+                ):
+                    raise ValueError(f"{row.family}: invalid unmeasured history mode")
+                continue
             _mode_error(mode)
-        modes[row.family] = by_name
+            if mode.wall_median is None or mode.cpu_median is None:
+                raise ValueError(f"{row.family}: measured mode requires timing")
+            measured[mode.mode] = mode
+        modes[row.family] = measured
     return modes
 
 
@@ -194,53 +290,121 @@ def dominance(rows: list[FamilyResult]) -> dict[str, dict[str, list[str]]]:
     Error is the maximum of that history mode's raw sample density errors;
     probe/other-mode errors and FamilyResult.error do not enter this comparison.
     Equality at ten percent is equivalent timing, with no error epsilon.
-    All three unique history modes are required per available row, in any order;
-    missing/duplicate/unknown modes raise ValueError. Available rows also require
-    an overall error and nonempty measured density errors in every mode;
-    timing/path-only results raise ValueError, never become unavailable.
+    All three unique modes are required in any order. Missing, duplicate and
+    unknown modes raise. A slow family's explicitly unmeasured clear-history
+    mode is excluded. Other empty modes, missing errors and timing/path-only
+    rows raise ValueError. Comparisons use only shared measured modes.
     """
     modes = _available_modes(rows)
     available = [r for r in rows if r.family in modes]
     result: dict[str, dict[str, list[str]]] = {}
     for target in available:
         cells = {}
-        for mode in target.modes:
+        for mode in modes[target.family].values():
             for metric in ("wall", "cpu"):
-                target_time = mode.wall_median if metric == "wall" else mode.cpu_median
+                target_time = _mode_time(mode, metric)
                 cells[f"{mode.mode}/{metric}"] = [
                     other.family
                     for other in available
                     if other.family != target.family
+                    and mode.mode in modes[other.family]
                     and _mode_error(modes[other.family][mode.mode]) <= _mode_error(mode)
-                    and (
-                        modes[other.family][mode.mode].wall_median
-                        if metric == "wall"
-                        else modes[other.family][mode.mode].cpu_median
-                    )
+                    and _mode_time(modes[other.family][mode.mode], metric)
                     < 0.9 * target_time
                 ]
         result[target.family] = cells
     return result
 
 
+def _policy_whitelist(item: Input, family: str) -> tuple[str, ...] | None:
+    """Return None for default, otherwise target and companions deduplicated in order."""
+    return (
+        None
+        if family == "default"
+        else tuple(dict.fromkeys((family, *item.companions)))
+    )
+
+
 @contextmanager
 def engine_session(item: Input, family: str) -> Generator[EngineSession]:
     """Own a fresh source/history and single-worker Engine for one family policy.
 
-    'default' uses normal routing. Other names pin families=(family,), preserving
-    numerical admission. Construction, cleanup and clear are outside timers.
+    'default' uses normal routing. Other names pin the target plus declared
+    companions, preserving numerical admission. Construction, cleanup and clear are outside timers.
+    """
+    families = _policy_whitelist(item, family)
+    with whitelist_session(item, families) as session:
+        yield session
+
+
+@contextmanager
+def whitelist_session(
+    item: Input,
+    families: tuple[str, ...] | None,
+    *,
+    on_sample: Callable[[str, Sample | None], None] | None = None,
+) -> Generator[EngineSession]:
+    """Own a fresh source/history and Engine with exactly the supplied whitelist.
+
+    None retains default routing. Unknown families and all numeric, evolve or
+    cleanup failures propagate. Setup and cleanup remain outside timing.
     """
     case = item.build()
-    with (
-        closing(case.source),
-        closing(
-            Engine(1, families=None if family == "default" else (family,))
-        ) as engine,
-    ):
+    with closing(case.source), closing(Engine(1, families=families)) as engine:
         yield EngineSession(
-            lambda: engine.evolve(case.source, (case.batch,), budget=1e-3),
+            lambda: engine.evolve(
+                case.source, (case.batch,), budget=1e-3, telemetry=True
+            ),
             case.source.history.clear,
+            on_sample,
         )
+
+
+class _InitialRefusal(Exception):
+    """A matched refusal from the first evolve, distinct from cleanup failures."""
+
+
+def _availability_opener(opener: SessionOpener) -> SessionOpener:
+    first = True
+
+    @contextmanager
+    def checked_session() -> Generator[EngineSession]:
+        with opener() as session:
+
+            def evolve() -> EvolutionResult:
+                nonlocal first
+                initial, first = first, False
+                try:
+                    return session.evolve()
+                except RuntimeError as error:
+                    if initial and re.fullmatch(UNAVAILABLE_PATTERN, str(error)):
+                        raise _InitialRefusal(str(error)) from error
+                    raise
+
+            yield EngineSession(evolve, session.clear_history, session.on_sample)
+
+    return checked_session
+
+
+def _check_expected_route(
+    sample: Sample, expected: dict[str, tuple[int, float]]
+) -> None:
+    observed = {
+        name: (report.rows, report.duration_ns)
+        for name, report in sample.routing.items()
+        if report.rows
+    }
+    counts = {name: rows for name, (rows, _) in expected.items()}
+    if sample.paths != counts or observed.keys() != expected.keys():
+        raise RuntimeError(
+            f"expected route {expected}, got paths {sample.paths} and work {observed}"
+        )
+    if any(
+        observed[name][0] != rows
+        or not isclose(observed[name][1], duration, rel_tol=1e-12, abs_tol=1e-9)
+        for name, (rows, duration) in expected.items()
+    ):
+        raise RuntimeError(f"expected route {expected}, got work {observed}")
 
 
 PolicyOpener = Callable[[Input, str], AbstractContextManager[EngineSession]]
@@ -255,44 +419,47 @@ def measure_policy(
     wall_clock: Callable[[], float] = perf_counter,
     cpu_clock: Callable[[], float] = process_time,
 ) -> FamilyResult:
-    """Probe availability, then measure a fixed family or default policy.
+    """Measure a target plus named companions, or unrestricted default routing.
 
-    Only the public missing-kernel/domain refusal may become unavailable.
-    Other setup/evolve/cleanup failures propagate. Every measured pinned path
-    must execute only that family and at least one segment. Oracle is supplied
-    once per physical input by the caller; exact families still have measured
-    density errors. No unavailable row carries synthetic zero errors or times.
+    The first timed evolve tests availability. Only its matched public domain
+    refusal becomes unavailable. All other evolve/setup/cleanup failures stop.
+    Wall/process CPU describe this entire group, not isolated target speed.
+    Oracle errors are measured across all retained samples.
     """
-    with opener(item, family) as session:
-        try:
-            probe = session.evolve()
-        except RuntimeError as error:
-            if re.fullmatch(UNAVAILABLE_PATTERN, str(error)) is None:
-                raise
-            return FamilyResult(family, None, str(error), [])
-    modes = measure_family(
-        lambda: opener(item, family),
-        reference,
-        wall_clock=wall_clock,
-        cpu_clock=cpu_clock,
-    )
-    paths = [dict(probe.paths.segments_by_kernel)] + [
-        s.paths for m in modes for s in m.samples
-    ]
-    if family != "default" and any(set(p) != {family} or p[family] <= 0 for p in paths):
+    whitelist = _policy_whitelist(item, family)
+    checked_session = _availability_opener(lambda: opener(item, family))
+    try:
+        modes = measure_family(
+            checked_session, reference, wall_clock=wall_clock, cpu_clock=cpu_clock
+        )
+    except _InitialRefusal as error:
+        return FamilyResult(family, None, str(error), [], whitelist=whitelist)
+    paths = [sample.paths for mode in modes for sample in mode.samples]
+    if family != "default" and any(
+        set(path) != set(whitelist or ()) or any(count <= 0 for count in path.values())
+        for path in paths
+    ):
         raise RuntimeError(f"pinned {family} did not execute exclusively: {paths}")
-    error = max(
-        density_error(probe.densities, reference.density),
-        max(_mode_error(m) for m in modes),
+    expected = item.expected_routes.get(family, {}) if family != "default" else {}
+    if family != "default" and item.expected_routes and not expected:
+        raise RuntimeError(f"pinned {family} has no expected route declaration")
+    if expected:
+        for mode in modes:
+            for sample in mode.samples:
+                _check_expected_route(sample, expected)
+    return FamilyResult(
+        family,
+        max(_mode_error(mode) for mode in modes if mode.samples),
+        None,
+        modes,
+        expected_route=expected,
+        attribution="default"
+        if family == "default"
+        else "target_and_companions"
+        if item.companions
+        else "target",
+        whitelist=whitelist,
     )
-    return FamilyResult(family, error, None, modes)
-
-
-# Only this verified public refusal is recoverable. Numerical failures propagate.
-UNAVAILABLE_PATTERN = (
-    r"no valid kernel for segment \d+; domain [a-z_]+: "
-    r"points \[\d+(?:, \d+)*\], segments \[\d+(?:, \d+)*\]"
-)
 
 
 @dataclass(frozen=True)
@@ -315,6 +482,14 @@ class InputResult:
     policies: list[FamilyResult]
     dominators: dict[str, dict[str, list[str]]]
     timing_equivalents: dict[str, dict[str, list[str]]]
+    category: str = "synthetic"
+    """real or synthetic; deletion conclusions use only real workloads."""
+    oracle_wall_seconds: float = 0.0
+    """Elapsed solve/cache-load wall seconds, zero for an in-memory reference hit."""
+    oracle_cpu_seconds: float = 0.0
+    """Process CPU seconds spent in that solve/cache load, excluding setup."""
+    fixed_default_group: FamilyResult | None = None
+    """Separately timed whitelist of the default route's observed family union."""
 
 
 def timing_equivalents(rows: list[FamilyResult]) -> dict[str, dict[str, list[str]]]:
@@ -322,29 +497,27 @@ def timing_equivalents(rows: list[FamilyResult]) -> dict[str, dict[str, list[str
 
     This is symmetric: other_time >= .9*target_time and target_time >=
     .9*other_time. It is not Pareto dominance and never merges wall and CPU.
-    All three unique history modes are required per available row, in any order;
-    missing/duplicate/unknown modes raise ValueError. Unavailable and default
-    rows are omitted. Available rows require an overall error and nonempty
-    measured density errors in every mode; timing/path-only results raise
-    ValueError rather than becoming unavailable.
+    All three unique history modes are required in any order. A slow family's
+    explicitly unmeasured clear-history mode is excluded. Other empty modes,
+    missing/duplicate/unknown modes, missing errors and timing/path-only rows
+    raise ValueError. Unavailable and default rows are omitted.
     """
     modes = _available_modes(rows)
     available = [r for r in rows if r.family in modes]
     equivalents: dict[str, dict[str, list[str]]] = {}
     for target in available:
         cells = {}
-        for mode in target.modes:
+        for mode in modes[target.family].values():
             for metric in ("wall", "cpu"):
-                target_time = mode.wall_median if metric == "wall" else mode.cpu_median
+                target_time = _mode_time(mode, metric)
                 peers = []
                 for other in available:
-                    if other.family == target.family:
+                    if (
+                        other.family == target.family
+                        or mode.mode not in modes[other.family]
+                    ):
                         continue
-                    other_time = (
-                        modes[other.family][mode.mode].wall_median
-                        if metric == "wall"
-                        else modes[other.family][mode.mode].cpu_median
-                    )
+                    other_time = _mode_time(modes[other.family][mode.mode], metric)
                     if (
                         other_time >= 0.9 * target_time
                         and target_time >= 0.9 * other_time
@@ -355,36 +528,196 @@ def timing_equivalents(rows: list[FamilyResult]) -> dict[str, dict[str, list[str
     return equivalents
 
 
+def measure_fixed_group(
+    item: Input,
+    families: tuple[str, ...],
+    reference: ReferenceResult,
+    *,
+    on_sample: Callable[[str, Sample | None], None] | None = None,
+) -> FamilyResult:
+    """Time the default route's observed family union as one fixed whitelist.
+
+    The complete input, budget and three history modes match measure_policy.
+    This is a group latency, never attributed to any one member or included
+    among pinned-family dominance competitors. Failures propagate.
+    """
+    modes = measure_family(
+        lambda: whitelist_session(item, families, on_sample=on_sample), reference
+    )
+    return FamilyResult(
+        "fixed_default_group",
+        max(_mode_error(mode) for mode in modes if mode.samples),
+        None,
+        modes,
+        attribution="fixed_family_group",
+        whitelist=families,
+    )
+
+
+def _emit(
+    progress: Callable[[dict[str, object]], None] | None, **event: object
+) -> None:
+    if progress is not None:
+        progress(event)
+
+
+def _sample_observer(
+    progress: Callable[[dict[str, object]], None] | None,
+    input_name: str,
+    family: str,
+) -> Callable[[str, Sample | None], None] | None:
+    if progress is None:
+        return None
+
+    def observed(mode: str, sample: Sample | None) -> None:
+        _emit(
+            progress,
+            event="mode_skipped" if sample is None else "sample",
+            input=input_name,
+            family=family,
+            mode=mode,
+            sample=None if sample is None else asdict(sample),
+            reason="slow family not measured" if sample is None else None,
+        )
+
+    return observed
+
+
+def _measure_policy_observed(
+    item: Input,
+    family: str,
+    reference: ReferenceResult,
+    runner: Callable[[Input, str, ReferenceResult], FamilyResult],
+    progress: Callable[[dict[str, object]], None] | None,
+) -> FamilyResult:
+    if progress is None or runner is not measure_policy:
+        return runner(item, family, reference)
+
+    @contextmanager
+    def open_observed(item: Input, family: str) -> Generator[EngineSession]:
+        with engine_session(item, family) as session:
+            yield replace(
+                session, on_sample=_sample_observer(progress, item.name, family)
+            )
+
+    return measure_policy(item, family, reference, opener=open_observed)
+
+
+def _new_journal(
+    path: Path, start: dict[str, object]
+) -> Callable[[dict[str, object]], None]:
+    with path.open("x", encoding="utf-8") as handle:
+        handle.write(canonical_json(start) + "\n")
+
+    def append(event: dict[str, object]) -> None:
+        # Close after every event, outside timed evolve. A killed process leaves
+        # prior complete lines usable; a torn final line is not a complete event.
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(canonical_json(event) + "\n")
+
+    return append
+
+
 def run_table(
     inputs: list[Input],
     families: tuple[str, ...] = ALL_FAMILIES,
     *,
-    reference_solver: Callable[
-        [ModelSource, TimelineBatch], ReferenceResult
-    ] = converged_reference,
+    reference_solver: Callable[[ModelSource, TimelineBatch], ReferenceResult]
+    | None = None,
+    reference_cache: Path | ReferenceCache | None = None,
     policy_runner: Callable[
         [Input, str, ReferenceResult], FamilyResult
     ] = measure_policy,
+    progress: Callable[[dict[str, object]], None] | None = None,
 ) -> list[InputResult]:
     """Measure every family and default for each input, sharing identical oracles.
 
     Inputs stay in caller order. Independent two-level full-Lindblad references
     are cached by complete physical content, not family or input alias. All
     failures except the precisely matched probe refusal stop the whole table.
+    Real inputs use the exact interaction-picture solver; synthetic inputs keep
+    the lab-frame solver. reference_cache optionally persists complete references;
+    an injected reference_solver owns its own caching and tolerance contract.
+    ReferenceCache(only=True) requires a disk hit before any timing, never solving
+    inside the batch. It cannot be combined with an injected reference_solver.
+    Real default paths are also timed with their observed family union pinned,
+    separately from dominance. progress receives untimed policy/sample events,
+    including explicit skipped modes, before later failures can discard them.
     """
+    cache = (
+        reference_cache
+        if isinstance(reference_cache, ReferenceCache)
+        else ReferenceCache(reference_cache)
+    )
+    if cache.only and reference_solver is not None:
+        raise ValueError("cache-only timing cannot use an injected reference solver")
     references: dict[str, ReferenceResult] = {}
     rows = []
     for index, item in enumerate(inputs):
+        _emit(progress, event="input_start", input=item.name)
         case = item.build()
         with closing(case.source):
             key = digest(physical_input(case))
             oracle_key = digest(physical_input(case, include_identity=False))
+            oracle_wall = oracle_cpu = 0.0
             if oracle_key not in references:
-                references[oracle_key] = reference_solver(case.source, case.batch)
+                wall, cpu = perf_counter(), process_time()
+                references[oracle_key] = (
+                    reference_solver(case.source, case.batch)
+                    if reference_solver is not None
+                    else solve_reference(
+                        case,
+                        solver=interaction_reference
+                        if item.category == "real"
+                        else converged_reference,
+                        cache_dir=cache.directory,
+                        cache_only=cache.only,
+                    )
+                )
+                oracle_wall, oracle_cpu = perf_counter() - wall, process_time() - cpu
         reference = references[oracle_key]
-        policies = [
-            policy_runner(item, family, reference) for family in (*families, "default")
-        ]
+        _emit(
+            progress,
+            event="reference_ready",
+            input=item.name,
+            physical_sha256=oracle_key,
+            convergence_error=reference.convergence_error,
+        )
+        policies = []
+        for family in (*families, "default"):
+            _emit(progress, event="policy_start", input=item.name, family=family)
+            measured = _measure_policy_observed(
+                item, family, reference, policy_runner, progress
+            )
+            policies.append(measured)
+            _emit(
+                progress,
+                event="policy_result",
+                input=item.name,
+                family=family,
+                result=asdict(measured),
+            )
+        default = policies[-1]
+        observed = tuple(
+            sorted(
+                {
+                    name
+                    for mode in default.modes
+                    for sample in mode.samples
+                    for name in sample.paths
+                }
+            )
+        )
+        fixed_group = (
+            measure_fixed_group(
+                item,
+                observed,
+                reference,
+                on_sample=_sample_observer(progress, item.name, "fixed_default_group"),
+            )
+            if item.category == "real" and observed
+            else None
+        )
         rows.append(
             InputResult(
                 item.name,
@@ -394,7 +727,14 @@ def run_table(
                 policies,
                 dominance(policies),
                 timing_equivalents(policies),
+                item.category,
+                oracle_wall,
+                oracle_cpu,
+                fixed_group,
             )
+        )
+        _emit(
+            progress, event="input_complete", input=item.name, result=asdict(rows[-1])
         )
         print(
             f"{index + 1}/{len(inputs)} {item.name}: "
@@ -402,99 +742,6 @@ def run_table(
             flush=True,
         )
     return rows
-
-
-def render_summary(
-    rows: list[InputResult], families: tuple[str, ...] = ALL_FAMILIES
-) -> str:
-    """Render per-family conclusions and all measured mode/clock cells.
-
-    Dominance is limited to measured inputs. No family deletion or accuracy
-    exception follows from this report. Default is shown but never a competitor.
-    """
-    lines = [
-        "# Engine family Pareto table",
-        "",
-        "Timers cover Engine.evolve only, not program.acquire. Each mode has five wall/CPU samples.",
-        "Errors compare complete complex density to the two-level converged full-Lindblad oracle.",
-        "A dominator has mode-local maximum sample error <= target error and time < 0.9 * target time. Exactly 10% is equivalent.",
-        "Displayed density error and PASS/FAIL use the overall maximum across probe and all modes, not the mode-local comparator error.",
-        "No epsilon or weighted score is used. FAIL means error > 2e-3, not permission to keep an inaccurate route.",
-        "Conclusions apply only to the measured input set; no deletion is authorized.",
-        "",
-        "## Family conclusions",
-        "",
-    ]
-    for family in families:
-        available = [
-            (r, p)
-            for r in rows
-            for p in r.policies
-            if p.family == family and p.error is not None
-        ]
-        nondominated = [
-            (r.name, cell)
-            for r, _ in available
-            for cell, competitors in r.dominators[family].items()
-            if not competitors
-        ]
-        lines += [
-            f"### {family}",
-            "",
-            f"Available on {len(available)} inputs; unavailable on {len(rows) - len(available)}.",
-        ]
-        if not available:
-            lines.append("NOT EXERCISED. No dominance conclusion is possible.")
-        else:
-            worst = max(p.error for _, p in available if p.error is not None)
-            lines.append(
-                f"Maximum density error {worst:.12g}: {'PASS' if worst <= 2e-3 else 'FAIL'}."
-            )
-            if nondominated:
-                lines.append("Not dominated on these input/mode/metric cells:")
-                lines += [f"- `{name}`: {cell}" for name, cell in nondominated]
-            else:
-                lines.append(
-                    "Every measured available input/mode/metric cell is dominated; this is not a proof for unmeasured inputs."
-                )
-        lines.append("")
-    lines += [
-        "## Complete measured matrix",
-        "",
-        "Unavailable cells retain their exact refusal; they have no error or timing value.",
-        "Each measured cell lists its dominators. An empty list means not dominated.",
-        "Raw samples, per-sample paths and full inputs are in the sibling JSON.",
-        "",
-    ]
-    for row in rows:
-        lines += [
-            f"### {row.name}",
-            "",
-            f"Oracle convergence error: {row.oracle_convergence_error:.12g}.",
-            "",
-            "| Family | Density error | Status | Mode/metric | Median seconds | Dominators | Time-equivalent peers |",
-            "| --- | ---: | --- | --- | ---: | --- | --- |",
-        ]
-        for policy in row.policies:
-            if policy.error is None:
-                lines.append(
-                    f"| {policy.family} | — | unavailable: {policy.unavailable} | — | — | — | — |"
-                )
-                continue
-            for mode in policy.modes:
-                for metric, value in (
-                    ("wall", mode.wall_median),
-                    ("cpu", mode.cpu_median),
-                ):
-                    cell = f"{mode.mode}/{metric}"
-                    competitors = row.dominators.get(policy.family, {}).get(cell, [])
-                    peers = row.timing_equivalents.get(policy.family, {}).get(cell, [])
-                    lines.append(
-                        f"| {policy.family} | {policy.error:.12g} | {'PASS' if policy.error <= 2e-3 else 'FAIL'} | "
-                        f"{cell} | {value:.9g} | {', '.join(competitors) or 'none'} | {', '.join(peers) or 'none'} |"
-                    )
-        lines.append("")
-    return "\n".join(lines) + "\n"
 
 
 def tested_state() -> dict[str, str | bool]:
@@ -514,21 +761,35 @@ def tested_state() -> dict[str, str | bool]:
 def main(argv: list[str] | None = None, *, inputs: list[Input] | None = None) -> int:
     """Freeze inputs or measure a matching manifest; output failures return nonzero.
 
-    --freeze-inputs writes inputs before any oracle or timing. Otherwise require
-    --manifest, --output and --summary. A manifest mismatch or measurement failure
-    leaves output untouched. Output write failures can leave partial files and
-    return 1 with the original traceback. Run measurement through run_heavy
-    --exclusive; CLI never starts per-sample processes. Optional inputs replace
-    only physical input construction for small in-process seam tests.
+    --freeze-inputs writes inputs before any oracle or timing.
+    --prepare-references requires --manifest, --output and --reference-cache.
+    It solves or loads cached references and writes a reference report without
+    Engine measurement or a required --summary. Run preparation nonexclusive.
+    --reference-cache-only forbids solving and fails on a cache miss.
+    Measurement requires --manifest, --output and --summary. A missing required
+    path, manifest mismatch, or preparation or measurement failure returns 1
+    with the original traceback and leaves output untouched. Output write
+    failures also return 1 but can leave partial files. Run measurement through
+    run_heavy --exclusive; CLI never starts per-sample processes. Optional
+    inputs replace only physical input construction for small in-process seam
+    tests.
     """
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--reference-cache", type=Path)
+    parser.add_argument("--reference-cache-only", action="store_true")
+    parser.add_argument("--prepare-references", action="store_true")
+    parser.add_argument("--include-synthetic", action="store_true")
     parser.add_argument("--freeze-inputs", type=Path)
     parser.add_argument("--manifest", type=Path)
     parser.add_argument("--output", type=Path)
     parser.add_argument("--summary", type=Path)
+    parser.add_argument("--partial-output", type=Path)
     args = parser.parse_args(argv)
+    progress = None
     try:
-        items = make_inputs() if inputs is None else inputs
+        items = make_real_inputs() if inputs is None else inputs
+        if args.include_synthetic:
+            items = [*make_inputs(), *items]
         manifest = freeze_manifest(items)
         if args.freeze_inputs is not None:
             args.freeze_inputs.write_text(
@@ -536,17 +797,72 @@ def main(argv: list[str] | None = None, *, inputs: list[Input] | None = None) ->
             )
             print(f"Frozen {len(items)} inputs; manifest sha256={digest(manifest)}")
             return 0
-        if args.manifest is None or args.output is None or args.summary is None:
-            raise ValueError("measurement requires --manifest, --output and --summary")
+        if (
+            args.manifest is None
+            or args.output is None
+            or (not args.prepare_references and args.summary is None)
+        ):
+            raise ValueError(
+                "requires --manifest, --output and --summary (except reference preparation)"
+            )
         frozen = json.loads(args.manifest.read_text(encoding="utf-8"))
         if digest(frozen) != digest(manifest):
             raise ValueError(
                 "frozen manifest differs from current inputs; do not tune inputs after measurement"
             )
         state = tested_state()
-        rows = run_table(items)
+        if args.prepare_references:
+            prepared = prepare_references(
+                items,
+                ReferenceCache(args.reference_cache, only=args.reference_cache_only),
+            )
+            args.output.write_text(
+                canonical_json(
+                    {
+                        "manifest_sha256": digest(manifest),
+                        "tested_state": state,
+                        "inputs": [asdict(entry) for entry in prepared],
+                        "reference_total_wall_seconds": sum(
+                            entry.wall_seconds for entry in prepared
+                        ),
+                        "reference_total_cpu_seconds": sum(
+                            entry.cpu_seconds for entry in prepared
+                        ),
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            return 0
+        run_id = uuid4().hex
+        if args.partial_output is not None:
+            if args.partial_output.resolve() in {
+                args.output.resolve(),
+                args.summary.resolve(),
+            }:
+                raise ValueError(
+                    "partial output must be separate from complete outputs"
+                )
+            progress = _new_journal(
+                args.partial_output,
+                {
+                    "event": "run_start",
+                    "status": "partial",
+                    "run_id": run_id,
+                    "manifest_sha256": digest(manifest),
+                    "tested_state": state,
+                },
+            )
+        rows = run_table(
+            items,
+            reference_cache=ReferenceCache(
+                args.reference_cache, only=args.reference_cache_only
+            ),
+            progress=progress,
+        )
         result = {
             "schema_version": 1,
+            "run_id": run_id,
             "manifest": manifest,
             "manifest_sha256": digest(manifest),
             "tested_state": state,
@@ -574,9 +890,25 @@ def main(argv: list[str] | None = None, *, inputs: list[Input] | None = None) ->
             },
             "measurement": {
                 "entry": "Engine.evolve",
+                "telemetry": True,
+                "dominance_cpu_source": "process_time around complete Engine.evolve",
+                "family_cpu_source": "FamilyRouting prepare_cpu_s/apply_cpu_s, calling-thread CPU",
                 "budget": 1e-3,
                 "workers": 1,
-                "samples_per_mode": 5,
+                "maximum_samples_per_mode": 5,
+                "slow_first_evolve_wall_seconds": 60,
+                "slow_clear_history": "unmeasured; n=0; no median or dominance",
+                "slow_retain_history": "same session immediately after first evolve; n=1",
+                "reference_cache_only": args.reference_cache_only,
+                "reference_cache": str(args.reference_cache)
+                if args.reference_cache
+                else None,
+                "reference_total_wall_seconds": sum(
+                    row.oracle_wall_seconds for row in rows
+                ),
+                "reference_total_cpu_seconds": sum(
+                    row.oracle_cpu_seconds for row in rows
+                ),
                 "warmups_per_warm_mode": 2,
                 "oracle_coarse": [2e-10, 2e-12],
                 "oracle_fine": [2e-12, 2e-14],
@@ -590,8 +922,18 @@ def main(argv: list[str] | None = None, *, inputs: list[Input] | None = None) ->
         summary = render_summary(rows)
         args.output.write_text(canonical_json(result) + "\n", encoding="utf-8")
         args.summary.write_text(summary, encoding="utf-8")
-    except Exception:
-        # CLI isolation preserves failures; unavailable is handled only at probe.
+        _emit(progress, event="run_complete", run_id=run_id)
+    except Exception as error:
+        try:
+            _emit(
+                progress,
+                event="run_failed",
+                error=str(error),
+                error_type=type(error).__name__,
+            )
+        except Exception:
+            logging.exception("Could not append partial failure event")
+        # CLI isolation preserves failures; only initial domain refusals are unavailable.
         logging.exception("Pareto table failed; no complete report was written")
         return 1
     return 0

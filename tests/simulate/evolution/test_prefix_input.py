@@ -168,6 +168,20 @@ def test_distinct_long_plateau_retains_dyson():
     assert result.paths.segments_by_kernel == {"floquet_period": 2, "dyson": 2, "t4": 2}
 
 
+def test_shared_prefix_duration_counts_every_adopting_timeline():
+    src, timeline, kernel = source(), batch(), ObservedDyson()
+    with closing(engine(kernel)) as solver:
+        result = solver.evolve(src, (timeline,), cancel=Event(), telemetry=True)
+    assert hasattr(result.paths, "duration_ns_by_kernel"), (
+        "shared-prefix diagnostics need logical duration"
+    )
+    assert sum(result.paths.duration_ns_by_kernel.values()) == pytest.approx(12.0)
+    assert sum(
+        report.duration_ns for report in result.paths.routing.values()
+    ) == pytest.approx(12.0)
+    assert len([rho for starts, rho in kernel.inputs if np.all(starts == 3.0)]) == 1
+
+
 def test_shared_driven_input_matches_dop853_and_stays_evolve_local():
     src, b, kernel = source(), batch(), ObservedDyson()
     with closing(engine(kernel)) as solver:

@@ -347,22 +347,46 @@ class PathDiagnostics:
     and member tuples own immutable copies. Invalid membership raises ValueError.
     """
 
+    duration_ns_by_kernel: Mapping[str, float] = field(default_factory=dict)
+    """Family -> total physical ns with the same logical consumers as segments.
+
+    Shared prefixes count once per adopting timeline. Always populated without
+    CPU clocks, including when telemetry is off. Keys must equal segment keys;
+    values must be finite and nonnegative. The mapping owns a read-only copy.
+    Merge adds lengths; exact-result reuse retains them with zero measured CPU.
+    """
+
     def for_reuse(self, *, telemetry: bool) -> PathDiagnostics:
         """Preserve routes but report no kernel calls for an exact-result hit.
 
         Enabled reports count each logical segment as a cache hit, with zero
-        CPU, rejections and estimated work. Disabled reports have no routing.
+        CPU, rejections and estimated work. Physical duration is preserved even
+        through a telemetry-disabled report. Disabled reports have no routing.
         """
         return replace(
             self,
             frontend_cpu_s=0.0,
             routing={
-                name: FamilyRouting(rows=count, cache_hits=count, estimated_cpu_s=0.0)
+                name: FamilyRouting(
+                    rows=count,
+                    cache_hits=count,
+                    estimated_cpu_s=0.0,
+                    duration_ns=self.duration_ns_by_kernel[name],
+                )
                 for name, count in self.segments_by_kernel.items()
             }
             if telemetry
             else {},
         )
+
+    def _freeze_logical_durations(self) -> None:
+        """Own the immutable duration map and enforce its segment-count alignment."""
+        durations = dict(self.duration_ns_by_kernel)
+        if durations.keys() != self.segments_by_kernel.keys():
+            raise ValueError("duration keys must match segments_by_kernel")
+        if any(not np.isfinite(value) or value < 0 for value in durations.values()):
+            raise ValueError("duration values must be finite and nonnegative")
+        object.__setattr__(self, "duration_ns_by_kernel", MappingProxyType(durations))
 
     def warn_exceeded(self, *, stacklevel: int = 2) -> None:
         """Warn once for all report-only accuracy exceedances, if any.
@@ -384,6 +408,7 @@ class PathDiagnostics:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "routing", MappingProxyType(dict(self.routing)))
+        self._freeze_logical_durations()
         members = {key: tuple(values) for key, values in self.point_members.items()}
         if members.keys() != self.points_by_class.keys():
             raise ValueError("point membership keys must match points_by_class")
@@ -420,7 +445,8 @@ def merge_path_diagnostics(parts: Sequence[PathDiagnostics]) -> PathDiagnostics:
 
     parts is a sequence of validated PathDiagnostics. Per-class point_members
     are unioned and sorted; points_by_class is the resulting distinct count.
-    segments_by_kernel, exceeded_by_kernel and frontend_cpu_s are summed.
+    segments_by_kernel, duration_ns_by_kernel, exceeded_by_kernel and
+    frontend_cpu_s are summed.
     max_trace_error is the maximum, or zero for empty parts. Routing sums each
     family's rows, CPU times, hits, rejections, costs, builds and admission rows;
     estimated_cpu_s is None if any contributing family estimate is unknown.
@@ -429,11 +455,13 @@ def merge_path_diagnostics(parts: Sequence[PathDiagnostics]) -> PathDiagnostics:
     Inputs are unchanged; the result owns immutable mappings and member tuples.
     """
     segments: Counter[str] = Counter()
+    durations: Counter[str] = Counter()
     exceeded: Counter[str] = Counter()
     members: dict[str, set[int]] = {}
     routing: dict[str, list[FamilyRouting]] = {}
     for part in parts:
         segments.update(part.segments_by_kernel)
+        durations.update(part.duration_ns_by_kernel)
         exceeded.update(part.exceeded_by_kernel)
         for name, indices in part.point_members.items():
             members.setdefault(name, set()).update(indices)
@@ -447,12 +475,14 @@ def merge_path_diagnostics(parts: Sequence[PathDiagnostics]) -> PathDiagnostics:
         {name: _merge_family(reports) for name, reports in routing.items()},
         sum(part.frontend_cpu_s for part in parts),
         {name: tuple(sorted(indices)) for name, indices in members.items()},
+        duration_ns_by_kernel=durations,
     )
 
 
 def _merge_family(parts: Sequence[FamilyRouting]) -> FamilyRouting:
     return FamilyRouting(
         rows=sum(part.rows for part in parts),
+        duration_ns=sum(part.duration_ns for part in parts),
         prepare_cpu_s=sum(part.prepare_cpu_s for part in parts),
         apply_cpu_s=sum(part.apply_cpu_s for part in parts),
         cache_hits=sum(part.cache_hits for part in parts),

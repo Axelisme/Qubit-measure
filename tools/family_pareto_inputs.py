@@ -9,7 +9,7 @@ import hashlib
 import json
 from collections.abc import Callable
 from contextlib import closing
-from dataclasses import asdict, dataclass, replace
+from dataclasses import asdict, dataclass, field, replace
 from functools import partial
 
 import numpy as np
@@ -51,11 +51,25 @@ CASE_NAMES = (
 
 @dataclass(frozen=True)
 class Input:
-    """Stable name, fresh deterministic builder and why this complete input exists."""
+    """Stable input with a fresh owned source on every build.
+
+    reason explains representation. companions names additional pinned families.
+    expected_routes maps target names to expected family -> (logical rows, ns).
+    Empty declarations retain the original single-family synthetic protocol.
+    metadata and manifest preserve caller-owned provenance; category separates
+    real workloads from the synthetic inventory in reports.
+    """
 
     name: str
     build: Callable[[], AccuracyCase]
     reason: str
+    companions: tuple[str, ...] = ()
+    expected_routes: dict[str, dict[str, tuple[int, float]]] = field(
+        default_factory=dict
+    )
+    metadata: dict[str, object] = field(default_factory=dict)
+    manifest: dict[str, object] = field(default_factory=dict)
+    category: str = "synthetic"
 
 
 def representative(name: str) -> AccuracyCase:
@@ -218,13 +232,15 @@ def physical_input(
     """Serialize complete timeline, initial density, models and optional expansion.
 
     Builders in this inventory use level-independent model replacements; all
-    scheduled levels and the DC model are listed. Continuous Hamiltonians are
+    scheduled levels and the DC model with the schedule's loop count are listed.
+    Continuous Hamiltonians are
     fully specified by the supplied expansion. No mutable history is serialized.
     include_identity=False drops only the nonphysical model namespace for oracle
     sharing; complete manifests retain that namespace for route reconstruction.
     """
     levels = sorted(
-        {tuple(int(v) for v in row) for row in case.batch.flux.level} | {(0,)}
+        {tuple(int(v) for v in row) for row in case.batch.flux.level}
+        | {(0,) * case.batch.flux.level.shape[1]}
     )
     models = [asdict(case.source.model(level)) for level in levels]
     if not include_identity:
@@ -258,6 +274,17 @@ def freeze_manifest(inputs: list[Input]) -> dict[str, object]:
                         physical_input(case, include_identity=False)
                     ),
                     "physical": physical,
+                    **(
+                        {
+                            "category": item.category,
+                            "metadata": item.metadata,
+                            "manifest": item.manifest,
+                            "expected_routes": item.expected_routes,
+                            "companions": item.companions,
+                        }
+                        if item.category == "real"
+                        else {}
+                    ),
                 }
             )
     return {"version": 1, "inputs": records}

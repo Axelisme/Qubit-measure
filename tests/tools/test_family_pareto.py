@@ -10,6 +10,7 @@ import numpy as np
 import pytest
 from zcu_tools.simulate.evolution import (
     EvolutionResult,
+    FamilyRouting,
     ModelSource,
     PathDiagnostics,
     RoutingHistory,
@@ -56,7 +57,14 @@ def test_three_modes_time_five_samples_and_exclude_setup_warmup_clear(
             seen.append(history)
             history += 1
             return EvolutionResult(
-                np.array([0]), density, PathDiagnostics(segments_by_kernel={"t4": 1})
+                np.array([0]),
+                density,
+                PathDiagnostics(
+                    segments_by_kernel={"t4": 1},
+                    duration_ns_by_kernel={
+                        name: float(count) for name, count in ({"t4": 1}).items()
+                    },
+                ),
             )
 
         def clear() -> None:
@@ -92,6 +100,145 @@ def test_three_modes_time_five_samples_and_exclude_setup_warmup_clear(
         assert all(sample.paths == {"t4": 1} for sample in mode.samples)
         expected_error = 0 if measure_errors else None
         assert all(sample.density_error == expected_error for sample in mode.samples)
+
+
+@pytest.mark.parametrize("seconds", [60.0, 61.0])
+def test_slow_family_uses_two_evolves_in_the_same_history(seconds: float) -> None:
+    density = np.eye(2, dtype=np.complex128)[None] / 2
+    wall_ticks = count()
+    visits: list[list[int]] = []
+
+    @contextmanager
+    def session() -> Generator[EngineSession]:
+        history = 0
+        seen: list[int] = []
+        visits.append(seen)
+
+        def evolve() -> EvolutionResult:
+            nonlocal history
+            seen.append(history)
+            history += 1
+            return EvolutionResult(
+                np.array([0]),
+                density,
+                PathDiagnostics(
+                    segments_by_kernel={"t4": 1},
+                    duration_ns_by_kernel={
+                        name: float(count) for name, count in ({"t4": 1}).items()
+                    },
+                ),
+            )
+
+        yield EngineSession(evolve, lambda: None)
+
+    modes = measure_family(
+        session,
+        None,
+        wall_clock=lambda: float(next(wall_ticks)) * seconds,
+        cpu_clock=lambda: 0.0,
+    )
+    if seconds == 60:
+        assert [len(mode.samples) for mode in modes] == [5] * 3
+        assert [mode.wall_median for mode in modes] == [seconds] * 3
+        assert [len(visit) for visit in visits] == [1] * 5 + [7] * 2
+    else:
+        assert visits == [[0, 1]]
+        assert [len(mode.samples) for mode in modes] == [1, 0, 1]
+        assert modes[1].wall_median is None and modes[1].cpu_median is None
+        assert modes[1].unmeasured_reason == "slow family not measured"
+        row = FamilyResult(
+            "slow",
+            0.0,
+            None,
+            [
+                replace(
+                    mode,
+                    samples=[
+                        replace(sample, density_error=0.0) for sample in mode.samples
+                    ],
+                )
+                for mode in modes
+            ],
+        )
+        fast = replace(
+            row,
+            family="fast",
+            modes=[
+                ModeResult(mode.mode, [Sample(1, 1, 0, {})], 1, 1) for mode in modes
+            ],
+        )
+        for compare in (dominance, timing_equivalents):
+            compared = compare([row, fast])
+            assert "warm_clear_history/wall" not in compared["slow"]
+            assert compared["fast"]["warm_clear_history/wall"] == []
+
+
+def test_slow_policy_has_no_separate_probe_or_warmup() -> None:
+    density = np.eye(2, dtype=np.complex128)[None] / 2
+    visits: list[list[int]] = []
+    ticks = count()
+
+    @contextmanager
+    def session(item: Input, family: str) -> Generator[EngineSession]:
+        seen: list[int] = []
+        visits.append(seen)
+
+        def evolve() -> EvolutionResult:
+            seen.append(len(seen))
+            return EvolutionResult(
+                np.array([0]),
+                density,
+                PathDiagnostics(
+                    segments_by_kernel={"t4": 1},
+                    duration_ns_by_kernel={
+                        name: float(count) for name, count in ({"t4": 1}).items()
+                    },
+                ),
+            )
+
+        def clear() -> None:
+            pytest.fail("slow family must not clear history")
+
+        yield EngineSession(evolve, clear)
+
+    result = measure_policy(
+        Input("idle", lambda: accuracy_case("idle_coherence"), "slow contract"),
+        "t4",
+        ReferenceResult(density, 0),
+        opener=session,
+        wall_clock=lambda: float(next(ticks)) * 61,
+        cpu_clock=lambda: 0.0,
+    )
+    assert visits == [[0, 1]]
+    assert [len(mode.samples) for mode in result.modes] == [1, 0, 1]
+
+
+@pytest.mark.parametrize("compare", [dominance, timing_equivalents])
+def test_comparisons_omit_only_the_explicitly_unmeasured_slow_mode(
+    compare: Callable[[list[FamilyResult]], dict[str, dict[str, list[str]]]],
+) -> None:
+    slow = FamilyResult(
+        "slow",
+        0,
+        None,
+        [
+            ModeResult("first_evolve", [Sample(61, 61, 0, {})], 61, 61),
+            ModeResult(
+                "warm_clear_history", [], None, None, "slow family not measured"
+            ),
+            ModeResult("warm_retain_history", [Sample(1, 1, 0, {})], 1, 1),
+        ],
+    )
+    fast = replace(
+        slow,
+        family="fast",
+        modes=[
+            ModeResult(mode.mode, [Sample(1, 1, 0, {})], 1, 1) for mode in slow.modes
+        ],
+    )
+    result = compare([slow, fast])
+    assert "warm_clear_history/wall" not in result["slow"]
+    assert result["fast"]["warm_clear_history/wall"] == []
 
 
 def test_dominance_keeps_ten_percent_boundary_modes_clocks_and_exact_errors_separate() -> (
@@ -350,13 +497,79 @@ def test_policy_does_not_allow_an_unpinned_fallback_to_masquerade_as_success() -
     def wrong_session(item: Input, family: str) -> Generator[EngineSession]:
         yield EngineSession(
             lambda: EvolutionResult(
-                np.array([0]), density, PathDiagnostics(segments_by_kernel={"t6": 1})
+                np.array([0]),
+                density,
+                PathDiagnostics(
+                    segments_by_kernel={"t6": 1},
+                    duration_ns_by_kernel={
+                        name: float(count) for name, count in ({"t6": 1}).items()
+                    },
+                ),
             ),
             lambda: None,
         )
 
     with pytest.raises(RuntimeError, match="pinned t4 did not execute exclusively"):
         measure_policy(item, "t4", ReferenceResult(density, 0), opener=wrong_session)
+
+
+def companion_input() -> Input:
+    return Input(
+        "companion",
+        lambda: accuracy_case("linear_plateau"),
+        "group route",
+        companions=("t4",),
+        expected_routes={
+            "single_tone_rwa": {"single_tone_rwa": (1, 10.0), "t4": (1, 2.0)}
+        },
+    )
+
+
+@pytest.mark.parametrize("mismatch", [None, "count", "duration"])
+def test_companion_route_checks_counts_lengths_and_preserves_family_cpu(
+    mismatch: str | None,
+) -> None:
+    item = companion_input()
+    density = np.eye(2, dtype=np.complex128)[None] / 2
+    count = 2 if mismatch == "count" else 1
+    duration = 11.0 if mismatch == "duration" else 10.0
+    reports = {
+        "single_tone_rwa": FamilyRouting(
+            rows=count, duration_ns=duration, prepare_cpu_s=0.3, apply_cpu_s=0.4
+        ),
+        "t4": FamilyRouting(
+            rows=1, duration_ns=2.0, prepare_cpu_s=0.1, apply_cpu_s=0.2
+        ),
+    }
+
+    @contextmanager
+    def session(item: Input, family: str) -> Generator[EngineSession]:
+        yield EngineSession(
+            lambda: EvolutionResult(
+                np.array([0]),
+                density,
+                PathDiagnostics(
+                    segments_by_kernel={"single_tone_rwa": count, "t4": 1},
+                    duration_ns_by_kernel={"single_tone_rwa": duration, "t4": 2.0},
+                    routing=reports,
+                ),
+            ),
+            lambda: None,
+        )
+
+    if mismatch is not None:
+        with pytest.raises(RuntimeError, match="expected route"):
+            measure_policy(
+                item, "single_tone_rwa", ReferenceResult(density, 0), opener=session
+            )
+    else:
+        result = measure_policy(
+            item, "single_tone_rwa", ReferenceResult(density, 0), opener=session
+        )
+        sample = result.modes[0].samples[0]
+        assert sample.routing == reports
+        assert sample.family_cpu_s == pytest.approx({"single_tone_rwa": 0.7, "t4": 0.3})
+        assert result.expected_route == item.expected_routes["single_tone_rwa"]
 
 
 def test_late_warmup_failure_stops_measurement_without_partial_success() -> None:
@@ -372,7 +585,14 @@ def test_late_warmup_failure_stops_measurement_without_partial_success() -> None
             if calls == 6:
                 raise error
             return EvolutionResult(
-                np.array([0]), density, PathDiagnostics(segments_by_kernel={"t4": 1})
+                np.array([0]),
+                density,
+                PathDiagnostics(
+                    segments_by_kernel={"t4": 1},
+                    duration_ns_by_kernel={
+                        name: float(count) for name, count in ({"t4": 1}).items()
+                    },
+                ),
             )
 
         yield EngineSession(evolve, lambda: None)
@@ -425,6 +645,41 @@ def test_table_shares_oracle_for_identical_physics_with_different_model_identiti
     assert calls == 1
 
 
+def test_table_times_the_defaults_exact_family_union_separately() -> None:
+    paths = {"single_tone_rwa": 1, "t4": 1}
+
+    def solve(source: ModelSource, batch: TimelineBatch) -> ReferenceResult:
+        return ReferenceResult(
+            np.tile(source.initial_density, (len(batch.points), 1, 1)), 0
+        )
+
+    def policy(item: Input, family: str, reference: ReferenceResult) -> FamilyResult:
+        return FamilyResult(
+            family,
+            0,
+            None,
+            [
+                ModeResult(mode, [Sample(1, 1, 0, paths)], 1, 1)
+                for mode in (
+                    "first_evolve",
+                    "warm_clear_history",
+                    "warm_retain_history",
+                )
+            ],
+        )
+
+    (row,) = run_table(
+        [replace(companion_input(), category="real")],
+        ("single_tone_rwa",),
+        reference_solver=solve,
+        policy_runner=policy,
+    )
+    assert row.fixed_default_group is not None
+    assert row.fixed_default_group.whitelist == ("single_tone_rwa", "t4")
+    assert row.fixed_default_group.family == "fixed_default_group"
+    assert set(row.dominators) == {"single_tone_rwa"}
+
+
 def test_cleanup_error_is_never_an_availability_refusal_even_with_matching_message() -> (
     None
 ):
@@ -438,7 +693,14 @@ def test_cleanup_error_is_never_an_availability_refusal_even_with_matching_messa
     def cleanup_fails(item: Input, family: str) -> Generator[EngineSession]:
         yield EngineSession(
             lambda: EvolutionResult(
-                np.array([0]), density, PathDiagnostics(segments_by_kernel={"t4": 1})
+                np.array([0]),
+                density,
+                PathDiagnostics(
+                    segments_by_kernel={"t4": 1},
+                    duration_ns_by_kernel={
+                        name: float(count) for name, count in ({"t4": 1}).items()
+                    },
+                ),
             ),
             lambda: None,
         )

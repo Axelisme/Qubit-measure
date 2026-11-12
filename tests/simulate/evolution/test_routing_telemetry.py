@@ -1,13 +1,59 @@
 """Routing reports observe dispatch and numeric transparency."""
 
 import time
-from dataclasses import replace
+from contextlib import closing
+from dataclasses import FrozenInstanceError, replace
+from operator import setitem
 from threading import Event
 
+import numpy as np
 import pytest
-from zcu_tools.simulate.evolution import Engine, EnvelopeSpec
+from zcu_tools.simulate.evolution import (
+    Engine,
+    EnvelopeSpec,
+    PathDiagnostics,
+    merge_path_diagnostics,
+)
 
 from ._engine import RecordingKernel, batch, source, track
+
+
+@pytest.mark.parametrize("telemetry", [False, True])
+def test_engine_logical_durations_survive_reuse_and_merge(telemetry: bool):
+    timelines = replace(batch(3), end_ns=np.array([1.0, 2.0, 4.0]))
+    with (
+        closing(source()) as src,
+        closing(Engine(1, kernels=[RecordingKernel("t4")])) as engine,
+    ):
+        result = engine.evolve(src, (timelines,), cancel=Event(), telemetry=telemetry)
+    assert hasattr(result.paths, "duration_ns_by_kernel"), (
+        "Engine must report logical physical duration without CPU telemetry"
+    )
+    assert result.paths.duration_ns_by_kernel == {"t4": 7.0}
+    pytest.raises(TypeError, setitem, result.paths.duration_ns_by_kernel, "t4", 9.0)
+    reused = result.paths.for_reuse(telemetry=False).for_reuse(telemetry=True)
+    report = reused.routing["t4"]
+    assert (report.rows, report.duration_ns, report.cache_hits) == (3, 7.0, 3)
+    assert report.prepare_cpu_s == report.apply_cpu_s == report.actual_cpu_s == 0.0
+    pytest.raises(FrozenInstanceError, setattr, report, "duration_ns", 9.0)
+    merged = merge_path_diagnostics((result.paths, reused))
+    assert merged.duration_ns_by_kernel == {"t4": 14.0}
+    if telemetry:
+        assert result.paths.routing["t4"].duration_ns == 7.0
+        assert merged.routing["t4"].duration_ns == 14.0
+    else:
+        assert result.paths.routing == {}
+
+
+@pytest.mark.parametrize(
+    "durations",
+    [{}, {"other": 1.0}, {"t4": -1.0}, {"t4": float("nan")}, {"t4": float("inf")}],
+)
+def test_diagnostic_duration_rejects_missing_keys_or_invalid_values(
+    durations: dict[str, float],
+):
+    with pytest.raises(ValueError, match="duration"):
+        PathDiagnostics(segments_by_kernel={"t4": 1}, duration_ns_by_kernel=durations)
 
 
 def test_family_report_counts_rejections_and_selected_work():
@@ -63,6 +109,11 @@ def test_opt_out_avoids_thread_clock_and_keeps_routes_and_density_bitwise(
         monkeypatch.setattr(time, "thread_time", forbidden_clock)
         plain = disabled.evolve(src, (timelines,), cancel=Event(), telemetry=False)
         assert plain.paths.routing == {}
+        assert (
+            plain.paths.duration_ns_by_kernel
+            == observed.paths.duration_ns_by_kernel
+            == {"t4": 9.0}
+        )
         assert observed.paths.routing["t4"].rows == 3
         assert plain.paths.segments_by_kernel == observed.paths.segments_by_kernel
         assert plain.densities.tobytes() == observed.densities.tobytes()
