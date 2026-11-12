@@ -242,9 +242,6 @@ class SummaryAccumulator:
         )
 
 
-def observe_operation[T](
-    summary: SummaryAccumulator | None, outcome: Completed[T]
-) -> None:
-    """Pass delivered facts to an optional run accumulator without altering the outcome."""
-    if summary is not None:
-        summary.observe(outcome)
+def observe_operation[T](summary: SummaryAccumulator, outcome: Completed[T]) -> None:
+    """Pass delivered facts to the run accumulator without altering the outcome."""
+    summary.observe(outcome)

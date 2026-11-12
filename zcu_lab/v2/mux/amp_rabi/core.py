@@ -203,15 +203,16 @@ class MuxAmpRabiCfg(ConfigBase):
 def prepare_amplitude_scan(cfg: MuxAmpRabiCfg, *, soccfg: QickConfig) -> MuxPulseScan:
     """Prepare simultaneous gain sweeps on the board's actual gain grids.
 
-    cfg supplies the complete tones and ordered participants; it is not mutated.
+    cfg must already be validated and supplies complete tones and ordered
+    participants. It is deep-copied before use.
     soccfg describes the target board. Each participant gets its own normalized
     gain coordinates and one pulse per point, rounded as independent scalar
     pulses. Sweeps advance together by point index, not as a Cartesian product.
     Pulses retain nominal gains for compilation. run replaces these preliminary
     coordinates with the compiled hardware sweep's integer-step gain grid.
-    Invalid cfg raises ValueError; board conversion errors propagate.
+    Board conversion errors propagate.
     """
-    cfg = MuxAmpRabiCfg.model_validate(cfg.model_dump())
+    cfg = cfg.model_copy(deep=True)
     indices = list(cfg.participants)
     coordinates = []
     points = [[] for _ in range(cfg.expts)]
@@ -264,7 +265,7 @@ class MuxAmpRabiExp(Experiment[MuxSweepResult, MuxAmpRabiCfg]):
         plots and decides whether returned data can be analyzed.
         """
         # Prepare each gain grid and select readout tones in participant order.
-        cfg = MuxAmpRabiCfg.model_validate(config.model_dump())
+        cfg = config.model_copy(deep=True)
         scan = prepare_amplitude_scan(cfg, soccfg=context.soccfg)
         readout = cfg.readout.with_updates(
             tones=[cfg.readout.tones[index] for index in scan.indices]

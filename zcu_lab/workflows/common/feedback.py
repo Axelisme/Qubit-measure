@@ -10,29 +10,9 @@ from __future__ import annotations
 import math
 from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import Protocol, runtime_checkable
 
 import numpy as np
 from zcu_tools.utils.math import IDWInterpolation
-
-
-@runtime_checkable
-class ScalarEstimator(Protocol):
-    """A scalar flux-indexed estimator."""
-
-    def observe(self, flux: float, value: float) -> None: ...
-    def replace_observations(
-        self, observations: Iterable[tuple[float, float]]
-    ) -> None: ...
-    def estimate(self, flux: float) -> FeedbackSample | None: ...
-
-
-@runtime_checkable
-class ScalarController(Protocol):
-    """A scalar actuator controller."""
-
-    def latest(self) -> FeedbackSample | None: ...
-    def propose(self, current: float, normalized_error: float) -> FeedbackSample: ...
 
 
 @dataclass(frozen=True)
@@ -94,47 +74,6 @@ def _sample(value: float, age_queries: int, decay_points: float) -> FeedbackSamp
         confidence=_confidence(age_queries, decay_points),
         age_queries=age_queries,
     )
-
-
-@dataclass
-class LastGoodEstimator:
-    """Keep the latest finite observation, decaying confidence per query.
-
-    decay_points is the positive query-age e-folding time (default 3).
-    observe resets age; replace_observations replaces history and resets age.
-    estimate returns None before observation; flux is unused.
-    """
-
-    decay_points: float = 3.0
-    _value: float | None = None
-    _query_count: int = 0
-    _last_update_query: int = 0
-
-    def __post_init__(self) -> None:
-        self.decay_points = _positive_finite("decay_points", self.decay_points)
-
-    def observe(self, flux: float, value: float) -> None:
-        del flux
-        self._value = _finite("observation", value)
-        self._last_update_query = self._query_count
-
-    def replace_observations(self, observations: Iterable[tuple[float, float]]) -> None:
-        latest: float | None = None
-        for flux, value in observations:
-            _finite("flux", flux)
-            latest = _finite("observation", value)
-        self._value = latest
-        self._query_count = 0
-        self._last_update_query = 0
-
-    def estimate(self, flux: float) -> FeedbackSample | None:
-        del flux
-        if self._value is None:
-            return None
-        age_queries = max(0, self._query_count - self._last_update_query)
-        sample = _sample(self._value, age_queries, self.decay_points)
-        self._query_count += 1
-        return sample
 
 
 @dataclass

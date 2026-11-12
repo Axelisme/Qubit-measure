@@ -36,7 +36,7 @@ Frequency scan and analysis
 --------------------------
 MuxFreqCfg.reset is optional; MuxFreqCfg.readout is the full mux readout.
 Sweep bounds and returned coordinates are in MHz. prepare_frequency_scan
-validates cfg and constructs independent rounded drive-frequency axes in
+copies cfg and constructs independent rounded drive-frequency axes in
 participant order. Run resolves original positions from names, not a MuxGroup.
 
 Analysis uses the single-qubit Lorentzian or sinc fitter. Each curve needs at
@@ -191,14 +191,15 @@ class MuxFreqScan:
 def prepare_frequency_scan(cfg: MuxFreqCfg, *, soccfg: QickConfig) -> MuxFreqScan:
     """Prepare each selected qubit's original index and rounded frequency axis.
 
-    cfg is copied and validated. soccfg supplies the board frequency grids.
+    cfg must already be validated and is deep-copied before use.
+    soccfg supplies the board frequency grids.
     Return MuxFreqScan with original indices and float64 (K,P) MHz coordinates
     in participant order. Coordinates use QICK's hardware start/span/step rounding.
     Sweeps advance together by point index. No per-point pulses are prepared.
-    Invalid settings raise ValueError; frequency conversion errors propagate.
+    Frequency conversion errors propagate.
     This function does not acquire data or change cfg.
     """
-    cfg = MuxFreqCfg.model_validate(cfg.model_dump())
+    cfg = cfg.model_copy(deep=True)
     indices = list(cfg.participants)
     coordinates = []
     for index in indices:
@@ -257,7 +258,7 @@ class MuxFreqExp(Experiment[MuxSweepResult, MuxFreqCfg]):
         it. Observer exceptions propagate without retry or outcome changes.
         """
         # 1. Prepare zipped frequencies and readout channels in participant order.
-        cfg = MuxFreqCfg.model_validate(config.model_dump())
+        cfg = config.model_copy(deep=True)
         scan = prepare_frequency_scan(cfg, soccfg=context.soccfg)
         readout = cfg.readout.with_updates(
             tones=[cfg.readout.tones[index] for index in scan.indices]

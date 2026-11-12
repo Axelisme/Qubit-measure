@@ -186,7 +186,6 @@ class JointReadoutExp(Experiment[JointReadoutResult, JointReadoutCfg]):
         accumulate at acquisition. cfg is unchanged; completed rounds survive stop.
         """
 
-        validate_classifiers(config.readout, config.roles)
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Nominal preparation (gg, ge, eg, ee)", ylabel="Terminal P(g,g)")
         viewer = live_line(ax)

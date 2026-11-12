@@ -148,7 +148,7 @@ class TwotoneFluxLocalExp(Experiment[MuxFluxResult, TwotoneFluxLocalCfg]):
         Driver and acquisition errors propagate.
         Sources remain at the final written value. No output is enabled here.
         """
-        cfg = TwotoneFluxLocalCfg.model_validate(config.model_dump())
+        cfg = config.model_copy(deep=True)
         indices = list(cfg.participants)
         devices = [cfg.tones[i].flux_dev for i in indices]
         for name in devices:
