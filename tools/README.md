@@ -161,8 +161,8 @@ Acquire、暖機或比較失敗時回傳非零，stderr 保留原因，不輸出
 It times **Engine.evolve**, not `program.acquire`. The existing acquire benchmark
 above keeps its workloads and comparison contract.
 
-The default input is a fixed 24-point carrier sweep on the full 21-level
-single-fluxonium model. Add `--include-synthetic` to also measure the unchanged
+The default inputs are fixed 24-point carrier, gain, length, idle and gate-sequence
+scans on the full 21-level single-fluxonium model. Add `--include-synthetic` to also measure the unchanged
 accuracy inventory and twelve amplified synthetic workloads. Reports separate
 the two categories; deletion conclusions use real inputs only.
 
@@ -172,20 +172,29 @@ Freeze the versioned input manifest before measuring. From the lane root, replac
 ```bash
 mkdir -p <results>
 uv run --directory <worktree> --no-sync -- \
-  python -m tools.family_pareto --freeze-inputs <results>/inputs.json
+  python tools/run_heavy.py --log <results>/freeze.log 120 -- \
+  python -m tools.family_pareto --freeze-inputs <results>/inputs.json \
+  > <results>/freeze-receipt.json
 uv run --directory <worktree> --no-sync -- \
-  python tools/run_heavy.py --log <results>/reference.log 3600 -- \
+  python tools/run_heavy.py --log <results>/reference.log <reference-timeout-seconds> -- \
   python -m tools.family_pareto --manifest <results>/inputs.json \
   --prepare-references --reference-cache <results>/reference-cache \
   --output <results>/reference.json > <results>/reference-receipt.json
 uv run --directory <worktree> --no-sync -- \
-  python tools/run_heavy.py --exclusive --log <results>/run.log 9000 -- \
+  python tools/run_heavy.py --exclusive --log <results>/run.log <timing-timeout-seconds> -- \
   python -m tools.family_pareto --manifest <results>/inputs.json \
   --reference-cache <results>/reference-cache --reference-cache-only \
   --partial-output <results>/attempt.jsonl \
   --output <results>/matrix.json --summary <results>/summary.md \
   > <results>/receipt.json
 ```
+
+Choose reference and timing timeouts from the approved batch budget. These commands
+do not grant a timing allowance. The earlier carrier-only 9000-second allowance
+does not apply to new scenarios. Freeze through the nonexclusive runner too, so
+native thread settings match reference preparation and timing. Different native
+thread widths can change model bath rates in their final floating-point bits and
+therefore change the exact manifest/cache hashes.
 
 The measured command rejects a manifest that differs from the tracked builders.
 Do not adjust inputs in response to measured dominance. After an intentional input
@@ -282,14 +291,35 @@ lab experiments, read lab YAML/profiles, execute experiments, or use replay.
 Model/template changes require a deliberate update here. The fixed FTF values
 do not track a user's working-copy edits.
 
-The carrier scenario holds a 1 us constant pulse at gain 0.1 while sweeping
-24 equally spaced carriers across DC E1−E0 ±100 MHz. The center comes from the
-fixed model, not a fitted calibration. Gains and readout values are fixed
-benchmark settings, not claims of experimental calibration. The constant envelope
-represents the plateau domain; later shaped scenarios exercise other domains.
-The full 21-level model and both scan endpoints are retained after compilation.
-The manifest records compiled carriers, model/board inputs, snapshot, exact tick
-ratio, calibration method, expected routes and full physical hashes.
+All five single-model scans use the full 21-level model. Their carrier center is
+DC E1−E0 from that fixed model. Gains, phases and durations are illustrative
+benchmark settings, not fitted calibrations or calibrated pi/pi/2 rotations.
+Every shot ends in readout at the fixed bare cavity frequency, gain .1, with a
+1 us pulse/window and fixed flight time. The Engine batch ends at readout start,
+not at the end of that window.
+
+| Scan | Core sequence | Requested axis, 24 points | Envelope and pulse lengths | Compiled logical spans per point | Reason |
+| --- | --- | --- | --- | --- | --- |
+| F `carrier_sweep` | One drive, terminal readout | DC E1−E0 ±100 MHz | Constant, 1000 ns, gain .1 | 2 | Frequency reuse without exact duplicate carriers. |
+| A `gain_sweep` | One drive, terminal readout | Gain .01 to .1 | Gaussian, 100 ns, sigma 20 ns | 2 | Shaped-family input at fixed envelope and carrier. |
+| L `length_sweep` | One drive, terminal readout | Length 20 to 400 ns | Constant, gain .1 | 1 or 2 | Changes support without also resampling a Gaussian. |
+| I `idle_sweep` | X-phase gate, idle, Y-phase gate, terminal readout | Idle 20 to 400 ns | Two constant 20 ns gates, gain .1 | 4 | Shared initial gate with changing gap and final absolute phase. |
+| N `gate_sequence` | Prefix of repeated X,Y,-X,-Y phase alphabet, terminal readout | Gate count 1 to 24 | Constant 20 ns gates, gain .1 | 2 to 35 | Ragged sequences with a reusable alphabet, without random seeds. |
+
+Continuous requested axes are equally spaced and include both endpoints. Native
+hardware quantization changes the realized values. Length uses a public table
+sweep so each requested length is quantized as its own scalar pulse, rather than
+accumulating a truncated increment. Its realized supports with this fixed board
+are 20, 36, 54, 70, 86, 102, 118, 136, 152, 168, 186, 202, 218, 236, 252, 268,
+284, 300, 318, 334, 350, 368, 384 and 400 ns. Other hardware values also follow
+the public compiler conversion. The manifest preserves requested ranges and full
+physical arrays, not a claim that every requested value is exactly representable.
+
+Span counts include compiler alignment gaps and the no-drive readout lead. N can
+have short gaps between gates even though its core requests no extra idle.
+The manifest records every point's actual span count, compiled carriers,
+model/board inputs, snapshot, exact tick ratio, calibration method, expected
+routes and full physical hashes. Logical spans are not unique cached preparations.
 
 A pinned policy may include named companions, such as `t4` for the idle tail.
 The input declares `{family: (logical segment count, cumulative ns)}` for each

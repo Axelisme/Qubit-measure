@@ -1,7 +1,17 @@
 """Public fixed-scenario construction and reproducible manifest freezing."""
 
-from tools.family_pareto_inputs import canonical_json, freeze_manifest
+from contextlib import closing
+
+import numpy as np
+import pytest
+
+from tools.family_pareto_inputs import Input, canonical_json, freeze_manifest
 from tools.family_pareto_scenarios import make_real_inputs
+
+
+@pytest.fixture(scope="module")
+def fixed_inputs() -> list[Input]:
+    return make_real_inputs()
 
 
 def test_fixed_scenarios_freeze_byte_identically_from_fresh_construction() -> None:
@@ -10,3 +20,67 @@ def test_fixed_scenarios_freeze_byte_identically_from_fresh_construction() -> No
     first = canonical_json(freeze_manifest(first_inputs)) + "\n"
     second = canonical_json(freeze_manifest(make_real_inputs())) + "\n"
     assert first.encode() == second.encode()
+
+
+def test_gain_scan_compiles_distinct_amplitudes_with_fixed_carrier(
+    fixed_inputs: list[Input],
+) -> None:
+    scans = []
+    for item in fixed_inputs:
+        case = item.build()
+        with closing(case.source):
+            for track in case.batch.tracks:
+                if (
+                    np.all(track.active)
+                    and np.ptp(track.amplitude.real) > 0
+                    and np.ptp(track.frequency_ghz) == 0
+                ):
+                    scans.append(track)
+    assert scans, "a gain scan must compile to distinct amplitudes at fixed carrier"
+    assert all(len(track.amplitude) == 24 for track in scans)
+
+
+def test_length_scan_compiles_monotone_distinct_pulse_supports(
+    fixed_inputs: list[Input],
+) -> None:
+    durations = []
+    for item in fixed_inputs:
+        with closing((case := item.build()).source):
+            durations.extend(
+                track.duration_ns
+                for track in case.batch.tracks
+                if np.all(track.active) and np.ptp(track.duration_ns) > 0
+            )
+    assert durations, "a length scan must change compiled pulse support"
+    assert all(
+        len(values) == 24 and np.all(np.diff(values) > 0) for values in durations
+    )
+
+
+def test_idle_scan_changes_gap_between_fixed_gates(fixed_inputs: list[Input]) -> None:
+    gaps = []
+    for item in fixed_inputs:
+        with closing((case := item.build()).source):
+            tracks = case.batch.tracks
+            if len(tracks) != 2 or not all(np.all(t.active) for t in tracks):
+                continue
+            gap = tracks[1].start_ns - tracks[0].start_ns - tracks[0].duration_ns
+            if np.ptp(gap) > 0:
+                gaps.append(gap)
+                assert all(np.ptp(t.duration_ns) == 0 for t in tracks)
+    assert gaps, "an idle scan must vary a gap, not the gates' durations"
+    assert all(len(gap) == 24 and np.all(np.diff(gap) > 0) for gap in gaps)
+
+
+def test_gate_scan_preserves_variable_sequence_lengths(
+    fixed_inputs: list[Input],
+) -> None:
+    inventories = []
+    for item in fixed_inputs:
+        with closing((case := item.build()).source):
+            count = np.sum([t.active for t in case.batch.tracks], axis=0)
+            if np.ptp(count) > 0:
+                inventories.append(count)
+                assert len(np.unique(count)) == 24
+                assert np.all(np.diff(case.batch.end_ns) > 0)
+    assert inventories, "a gate scan must preserve ragged, varying pulse counts"
