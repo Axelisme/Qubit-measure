@@ -168,7 +168,11 @@ class MuxFreqCfg(ConfigBase):
 
     @model_validator(mode="after")
     def validate_scan(self) -> MuxFreqCfg:
-        """Reject mismatched tones, shared drive channels or an invalid point count."""
+        """Validate full tone identities, participant drives and shared point count.
+
+        Reject mismatched full readout dimensions, invalid names or participants,
+        and active drives sharing the readout generator. expts must be positive.
+        """
         validate_mux_scan(self, self.tones, self.participants, self.expts)
         return self
 
