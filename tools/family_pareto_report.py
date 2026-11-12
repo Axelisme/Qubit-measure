@@ -118,11 +118,23 @@ def render_summary(
 ) -> str:
     """Render per-family conclusions and all measured mode/clock cells.
 
-    Dominance is limited to measured inputs. No family deletion or accuracy
-    exception follows from this report. Default is shown but never a competitor.
+    families names the measured pinned policies, in conclusion order. A subset
+    marks the report as partial; omitted families get no availability conclusion.
+    Dominance is limited to measured inputs and families. No family deletion or
+    accuracy exception follows. Default is shown but never a competitor.
     """
     lines = [
         "# Engine family Pareto table",
+        "",
+        *(
+            [
+                "Partial measurement: omitted families are unmeasured, not unavailable. Dominance compares only measured families; this table cannot justify deletion.",
+                "",
+            ]
+            if set(families) != set(ALL_FAMILIES)
+            else []
+        ),
+        f"Measured pinned families: {', '.join(families)}. Default routing and its fixed observed family group remain separate policies.",
         "",
         "Timers cover Engine.evolve only, not program.acquire. Normal modes have five samples. A first evolve >60 wall seconds keeps n=1, skips clear-history with n=0, then retains history in the same session for n=1. No separate probe or warmup runs for slow families.",
         "Errors compare complete complex density to the two-tolerance converged full-Lindblad oracle.",

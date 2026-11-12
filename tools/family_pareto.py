@@ -758,6 +758,24 @@ def tested_state() -> dict[str, str | bool]:
     }
 
 
+def _selected_families(
+    names: str | None, *, freezing: bool, preparing_references: bool
+) -> tuple[str, ...]:
+    if names is None:
+        return ALL_FAMILIES
+    if freezing or preparing_references:
+        raise ValueError(
+            "--families cannot be combined with --freeze-inputs or --prepare-references"
+        )
+    families = tuple(dict.fromkeys(names.split(",")))
+    unknown = [name for name in families if name not in ALL_FAMILIES]
+    if unknown:
+        raise ValueError(
+            f"Unknown families: {unknown}. Legal names: {', '.join(ALL_FAMILIES)}"
+        )
+    return families
+
+
 def main(argv: list[str] | None = None, *, inputs: list[Input] | None = None) -> int:
     """Freeze inputs or measure a matching manifest; output failures return nonzero.
 
@@ -766,6 +784,12 @@ def main(argv: list[str] | None = None, *, inputs: list[Input] | None = None) ->
     It solves or loads cached references and writes a reference report without
     Engine measurement or a required --summary. Run preparation nonexclusive.
     --reference-cache-only forbids solving and fails on a cache miss.
+    --families NAME[,NAME...] measures only those pinned families, plus default
+    routing and its fixed observed family group. Omitting it measures all families.
+    It leaves physical inputs, the manifest and reference hashes unchanged.
+    Unknown names return 1 with the legal family names in the traceback.
+    Combining --families with --freeze-inputs or --prepare-references returns 1
+    before writing any output or building inputs.
     Measurement requires --manifest, --output and --summary. A missing required
     path, manifest mismatch, or preparation or measurement failure returns 1
     with the original traceback and leaves output untouched. Output write
@@ -784,9 +808,15 @@ def main(argv: list[str] | None = None, *, inputs: list[Input] | None = None) ->
     parser.add_argument("--output", type=Path)
     parser.add_argument("--summary", type=Path)
     parser.add_argument("--partial-output", type=Path)
+    parser.add_argument("--families", metavar="NAME[,NAME...]")
     args = parser.parse_args(argv)
     progress = None
     try:
+        families = _selected_families(
+            args.families,
+            freezing=args.freeze_inputs is not None,
+            preparing_references=args.prepare_references,
+        )
         items = make_real_inputs() if inputs is None else inputs
         if args.include_synthetic:
             items = [*make_inputs(), *items]
@@ -855,6 +885,7 @@ def main(argv: list[str] | None = None, *, inputs: list[Input] | None = None) ->
             )
         rows = run_table(
             items,
+            families,
             reference_cache=ReferenceCache(
                 args.reference_cache, only=args.reference_cache_only
             ),
@@ -863,6 +894,7 @@ def main(argv: list[str] | None = None, *, inputs: list[Input] | None = None) ->
         result = {
             "schema_version": 1,
             "run_id": run_id,
+            "measured_families": families,
             "manifest": manifest,
             "manifest_sha256": digest(manifest),
             "tested_state": state,
@@ -919,7 +951,7 @@ def main(argv: list[str] | None = None, *, inputs: list[Input] | None = None) ->
             },
             "inputs": [asdict(row) for row in rows],
         }
-        summary = render_summary(rows)
+        summary = render_summary(rows, families)
         args.output.write_text(canonical_json(result) + "\n", encoding="utf-8")
         args.summary.write_text(summary, encoding="utf-8")
         _emit(progress, event="run_complete", run_id=run_id)
