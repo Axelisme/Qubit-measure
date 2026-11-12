@@ -9,12 +9,14 @@ Known exceedances are marked only after route and two-level oracle validation.
 
 from collections.abc import Callable
 from contextlib import closing
+from dataclasses import replace
 
 import pytest
 from zcu_tools.simulate.evolution import Engine
 
 from .accuracy import AccuracyMeasurement, measurement_property, require_families
 from .accuracy_cases import AccuracyCase
+from .guard_edge_cases import guard_edge_case
 from .guard_sweep_cases import (
     gate_shape_bridge_case,
     gate_split_case,
@@ -197,3 +199,28 @@ def test_gate_shape_bridge_density(
     check_sweep_density(
         gate_shape_bridge_case(shaped=shaped), known_error, request, sweep_reference
     )
+
+
+@pytest.mark.sim
+@pytest.mark.parametrize(
+    "name,family,known_error",
+    [
+        ("unity_gate_edge", "single_tone_gate", 0.012847428903254271),
+        ("long_gate_edge", "shaped_sambe", 0.0030387059893683213),
+    ],
+)
+def test_cost_fallback_density(
+    name: str,
+    family: str,
+    known_error: float | None,
+    request: pytest.FixtureRequest,
+    sweep_reference: Callable[[AccuracyCase], ReferenceResult],
+) -> None:
+    """Exclusion can select another inaccurate family; retain those findings."""
+    case = (
+        guard_edge_case("gate_cache")
+        if name == "unity_gate_edge"
+        else gate_split_case(gamma=0.01, v=0.018, split=0.00999999)
+    )
+    case = replace(case, name=case.name + "/fallback=" + family, families=(family,))
+    check_sweep_density(case, known_error, request, sweep_reference)
