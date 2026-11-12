@@ -250,6 +250,64 @@ def restore_result(
     )
 
 
+def _plot_return(
+    plots: Plots,
+    coordinates: NDArray[np.float64],
+    durations: NDArray[np.float64],
+    populations: NDArray[np.float64],
+    relative_phase_deg: float | None,
+) -> None:
+    """Plot three terminal fractions at the nearest measured phase in degrees.
+
+    populations contains all nine normalized outcomes per phase and duration.
+    None selects the first phase. Annotate the largest remaining outcome and
+    its peak fraction. Do not acquire or change the supplied arrays.
+    """
+    phase_index = 0
+    if relative_phase_deg is not None:
+        phase_distance = (coordinates - relative_phase_deg + 180) % 360 - 180
+        phase_index = int(np.argmin(np.abs(phase_distance)))
+    values = populations[phase_index]
+    other_indices = [1, 2, 3, 5, 6, 7, 8]
+    other_peaks = np.nanmax(values[:, other_indices], axis=0)
+    largest_other = other_indices[int(np.argmax(other_peaks))]
+    states = ("in g", "in e", "outside g/e")
+    _, ax = plots.subplots(num="return", figsize=(11, 6), layout="constrained")
+    ax.plot(durations, values[:, 0], ".-", color="C0", label="Both qubits in g")
+    ax.plot(durations, values[:, 4], ".-", color="C3", label="Both qubits in e")
+    ax.plot(
+        durations,
+        values[:, other_indices].sum(axis=1),
+        ".-",
+        color="0.45",
+        label="Anything else",
+    )
+    ax.set(
+        xlabel="Drive duration (us)",
+        ylabel="Fraction of shots",
+        ylim=(0, 1),
+        title="Where the two qubits end up after the drive\n"
+        f"(relative phase {coordinates[phase_index]:g}°"
+        + (
+            "; closest measured to recommendation)"
+            if relative_phase_deg is not None
+            else "; first measured phase, no recommendation)"
+        ),
+    )
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.14), ncols=3, frameon=False)
+    ax.text(
+        0.99,
+        0.02,
+        f"Largest part of 'anything else': qubit 1 {states[largest_other // 3]}, "
+        f"qubit 2 {states[largest_other % 3]} (up to {other_peaks.max():.1%})",
+        ha="right",
+        va="bottom",
+        transform=ax.transAxes,
+        fontsize="x-small",
+        color="0.35",
+    )
+
+
 class ConstructivePhaseExp(Experiment[ConstructivePhaseResult, ConstructivePhaseCfg]):
     """Acquire and persist the ordinary constructive_phase count scan."""
 
@@ -524,32 +582,6 @@ class ConstructivePhaseExp(Experiment[ConstructivePhaseResult, ConstructivePhase
             ylabel="F2 relative to F1 phase (deg)",
             title="Nominal B11 return proxy · not gate fidelity",
         )
-        labels = tuple(
-            f"({a},{b})" for a in ("g", "e", "other") for b in ("g", "e", "other")
-        )
-        fig, _ = plots.subplots(
-            num="return",
-            nrows=3,
-            ncols=3,
-            figsize=(13, 10),
-            squeeze=False,
-            layout="constrained",
-        )
-        for outcome, ax in enumerate(fig.axes):
-            for coordinate, values in zip(
-                result.coordinates, answer.populations, strict=True
-            ):
-                ax.plot(
-                    result.durations, values[:, outcome], ".-", label=f"{coordinate:g}"
-                )
-            ax.set(
-                xlabel="Drive duration (us)",
-                ylabel=f"Observed P{labels[outcome]}",
-                title=f"Terminal {labels[outcome]} · other retained in denominator",
-            )
-            ax.legend(
-                title="F2 relative to F1 phase (deg)", fontsize="x-small", ncols=2
-            )
         # 3. Fit complete duration traces, then regress identifiable rates squared against relative phase.
         analysis = analyze_constructive_phase(coordinates, durations, answer)
         modulation = analysis.modulation
@@ -592,7 +624,18 @@ class ConstructivePhaseExp(Experiment[ConstructivePhaseResult, ConstructivePhase
         )
         ax.legend(title="F2 relative to F1 phase (deg)", fontsize="x-small", ncols=2)
 
-        # 4. Propose the interference maximum only when the rate-squared modulation is identifiable.
+        # 4. Summarize terminal outcomes at the measured phase nearest the proposed maximum.
+        _plot_return(
+            plots,
+            coordinates,
+            durations,
+            answer.populations,
+            modulation.prediction.maximum_phase_deg
+            if modulation.prediction is not None
+            else None,
+        )
+
+        # 5. Propose the interference maximum only when the rate-squared modulation is identifiable.
         if modulation.prediction is not None:
             _, ax = plots.subplots(
                 num="constructive_phase", figsize=(9, 6), layout="constrained"
@@ -624,7 +667,7 @@ class ConstructivePhaseExp(Experiment[ConstructivePhaseResult, ConstructivePhase
                 modulation.reason,
                 modulation.fit_quality,
             )
-        # 5. Keep an unresolved constructive-phase proposal explicit with its fit diagnostics.
+        # 6. Keep an unresolved constructive-phase proposal explicit with its fit diagnostics.
         return ConstructivePhaseAnalysis(
             None, modulation.reason, modulation.fit_quality
         )

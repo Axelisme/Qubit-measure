@@ -55,7 +55,12 @@ Per-phase rates, populations and interference curves stay inside analysis for pl
 
 The live traces and interference map show P00 after double Xπ contrast.
 P00 is the terminal (g,g) count divided by all nine terminal class counts.
-The return figure shows all nine g/e/other joint outcomes.
+The return figure shows three fractions: both qubits in g, both in e, and
+anything else (the other seven joint outcomes). They add up to one at each
+duration. It shows the measured phase closest to the proposed relative phase,
+or the first measured phase when no proposal is available. The title gives the
+plotted phase in degrees. The corner note names the largest individual outcome
+within anything else and its peak fraction over the plotted durations.
 These figures include preparation and readout errors.
 They do not measure gate fidelity or resolve physical leakage by themselves.
 There are no mean-IQ diagnostics or saved IQ clouds.
