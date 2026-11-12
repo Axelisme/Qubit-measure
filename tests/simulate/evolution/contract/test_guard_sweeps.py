@@ -24,6 +24,7 @@ from .guard_sweep_cases import (
 )
 from .reference import ReferenceResult, converged_reference, density_error
 
+# Scale=1 is already covered by the unchanged guard-edge matrix.
 SCALED_SAMPLES = (
     ("single_tone_rwa", 0.05, 0.002056922640059744),
     ("single_tone_rwa", 0.1, 0.004026441344577358),
@@ -35,7 +36,6 @@ SCALED_SAMPLES = (
     ("single_tone_rwa", 0.7, 0.02338565582638955),
     ("single_tone_rwa", 0.8, 0.02372345902526813),
     ("single_tone_rwa", 0.9, 0.02142050511880427),
-    ("single_tone_rwa", 1, 0.021802081728112876),
     ("common_frame", 0.05, None),
     ("common_frame", 0.1, None),
     ("common_frame", 0.2, None),
@@ -46,7 +46,6 @@ SCALED_SAMPLES = (
     ("common_frame", 0.7, 0.002780801440299356),
     ("common_frame", 0.8, 0.004327340785507475),
     ("common_frame", 0.9, 0.005249151472340078),
-    ("common_frame", 1, 0.008066669226955314),
     ("shaped_sambe", 0.05, 0.006976190290283084),
     ("shaped_sambe", 0.1, 0.013939786732875038),
     ("shaped_sambe", 0.2, 0.009994325894870235),
@@ -57,7 +56,6 @@ SCALED_SAMPLES = (
     ("shaped_sambe", 0.7, 0.005127072522687026),
     ("shaped_sambe", 0.8, 0.0030436859867629283),
     ("shaped_sambe", 0.9, 0.0027439229863831147),
-    ("shaped_sambe", 1, 0.0030915535285839482),
     ("single_tone_rwa", 0.048593750000000005, None),
     ("single_tone_rwa", 0.04859765625, 0.0020000189837015014),
     ("common_frame", 0.5242578124999999, None),
@@ -222,5 +220,6 @@ def test_cost_fallback_density(
         if name == "unity_gate_edge"
         else gate_split_case(gamma=0.01, v=0.018, split=0.00999999)
     )
-    case = replace(case, name=case.name + "/fallback=" + family, families=(family,))
+    # Keep the physical-input name so both pinned families share one oracle.
+    case = replace(case, families=(family,))
     check_sweep_density(case, known_error, request, sweep_reference)
