@@ -27,7 +27,14 @@ _FINE = SolverTolerances(2e-12, 2e-14)
 
 @dataclass(frozen=True)
 class ReferenceCache:
-    """Cache location and solve permission travel together through table callers."""
+    """Configure persistent reference caching and permission to solve cache misses.
+
+    directory is the local cache directory, or None to disable persistent
+    caching. only=False allows solving on a miss; only=True requires a cache
+    hit and never solves. Construction does not validate these combinations.
+    solve_reference requires a directory when cache_only=True, while
+    prepare_references always requires a non-None directory.
+    """
 
     directory: Path | None
     only: bool = False
@@ -35,7 +42,19 @@ class ReferenceCache:
 
 @dataclass(frozen=True)
 class PreparedReference:
-    """Complete reference facts; times include either solving or cache loading."""
+    """Describe one input's solved or cache-loaded reference.
+
+    name is the stable Input name. physical_sha256 is the SHA-256 digest of
+    the complete physical input excluding nonphysical model identity. It is
+    not the cache key, which also includes tolerances and convergence version.
+    density_shape gives the point-aligned density array dimensions as
+    (points, M, M), where M is the model dimension.
+    convergence_error is the dimensionless maximum absolute density difference
+    between the coarse and fine tolerance solves, over all points and entries.
+    wall_seconds is elapsed wall time and cpu_seconds is whole-process CPU
+    time, both in seconds, for solving or loading this reference. These times
+    exclude input construction and source cleanup.
+    """
 
     name: str
     physical_sha256: str
@@ -48,7 +67,22 @@ class PreparedReference:
 def prepare_references(
     inputs: list[Input], cache: ReferenceCache
 ) -> list[PreparedReference]:
-    """Populate or verify the oracle cache without starting any Engine session."""
+    """Prepare each input's reference in a persistent cache without Engine timing.
+
+    inputs supplies stable names and builders that each create a fresh owned
+    source. cache selects the directory and whether misses may be solved;
+    cache.directory must be non-None even when cache.only=False. Each input is
+    built in order, and its source is closed after solving or loading, including
+    on failure. Real inputs use the interaction-picture solver; other inputs
+    use the lab-frame solver, both with the default coarse and fine tolerances.
+    Return one PreparedReference per input in the same order, with its physical
+    hash, density shape, convergence error and solve/load times. No Engine
+    session or measurement starts.
+
+    Raise ValueError if cache.directory is None. A cache-only miss raises
+    FileNotFoundError without solving. Builder, solver and cache I/O errors
+    propagate; earlier cache writes remain if a later input fails.
+    """
     if cache.directory is None:
         raise ValueError("reference preparation requires a cache directory")
     prepared = []
