@@ -297,17 +297,21 @@ class WorkPlan:
     Groups start empty and each family is published once before workers start.
     fact/resource are thread-safe. close is idempotent and runs after workers
     drain on success, cancellation or failure. Acquiring after close raises
-    RuntimeError. Model-only resident cache ownership is separate.
+    RuntimeError. complete_table retains the full immutable evolve geometry for
+    lazy inventories until close; None lets standalone callers supply geometry.
+    Model-only resident cache ownership is separate.
     """
 
-    def __init__(self, *, content_key: bytes = b"") -> None:
+    def __init__(
+        self, *, content_key: bytes = b"", complete_table: SegmentTable | None = None
+    ) -> None:
         # Engine supplies the whole numerical input digest, independent of caches.
         self.content_key = content_key
         self.routing = RoutingCollector()
+        self._complete_table = complete_table
         self._facts: dict[Hashable, _Resource] = {}
         self._resources: dict[Hashable, _Resource] = {}
         self._carrier_workspace: CarrierWorkspace | None = None
-        self._common_frame_table: SegmentTable | None = None
         self._published: set[str] = set()
         self._gain_groups: tuple[GainGroupPlan, ...] = ()
         self._cf4_carrier_groups: tuple[CF4CarrierGroupPlan, ...] = ()
@@ -317,19 +321,14 @@ class WorkPlan:
         self._closed = False
 
     @property
-    def common_frame_table(self) -> SegmentTable | None:
-        """Borrow the complete immutable geometry for lazy common-frame pricing.
+    def complete_table(self) -> SegmentTable | None:
+        """Borrow full evolve geometry for lazy inventories, or None if absent.
 
-        None before publication. This is a reference to the Engine-owned table,
-        not a copied tensor product. Prefixes and workers price its complete
-        inventory, and close drops the reference after all workers drain.
+        The constructor retains the immutable table before prefix/worker planning.
+        Standalone plans may omit it and use the caller's complete table instead.
+        close drops this reference after workers drain.
         """
-        return self._common_frame_table
-
-    def publish_common_frame_table(self, table: SegmentTable) -> None:
-        """Publish complete candidate geometry once before prefix classification."""
-        self._publish("common-frame")
-        self._common_frame_table = table
+        return self._complete_table
 
     @property
     def gain_groups(self) -> tuple[GainGroupPlan, ...]:
@@ -441,7 +440,7 @@ class WorkPlan:
             self._facts.clear()
             self._resources.clear()
             self._carrier_workspace = None
-            self._common_frame_table = None
+            self._complete_table = None
             self._published.clear()
             self._gain_groups = ()
             self._cf4_carrier_groups = ()

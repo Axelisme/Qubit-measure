@@ -153,7 +153,7 @@ def populate_multitone_plan(
     """
 
     def build() -> frozenset[int]:
-        complete = plan.common_frame_table
+        complete = plan.complete_table
         geometry = table if complete is None else complete
         inventory = populate_multitone_inventory(geometry, source, plan, budget)
         context = KernelContext(source, budget, plan)

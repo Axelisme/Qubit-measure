@@ -12,7 +12,7 @@ from ..kernel import SegmentTable
 from ..workplan import WorkPlan
 from ._dop853_data import pack_segments
 from ._workload_facts import envelope_bounds
-from .dop853 import DOP853Plan, DOP853Prepared, advance_endpoints
+from .dop853 import DOP853Plan, DOP853Prepared, EndpointData, advance_endpoints
 
 
 class PeriodPlayback(NamedTuple):
@@ -416,8 +416,7 @@ def advance_tail(
     )
     plan = DOP853Plan(frame, np.full(len(active), -1, dtype=np.int64))
     advance_endpoints(
-        entry.fallback.models,
-        pack_segments(tail_table),
+        EndpointData(entry.fallback.models, pack_segments(tail_table)),
         (local_rows, np.zeros(len(active), dtype=np.int64)),
         chunk,
         entry.tail_budget,
