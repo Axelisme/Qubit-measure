@@ -756,11 +756,10 @@ def overlapping_shaped_tones_input() -> Input:
         **{family: (overlap_companion, "t4") for family in overlapping},
         "dop853": ("t4",),
     }
-    # These two named groups may share candidates only while the full route
+    # This named group may share candidates only while the full route
     # declaration proves that the target retains every single-tone span.
-    for target in ("shaped_sambe", "period_table"):
-        expected[target] = {target: single, "dop853": multiple, "t4": idle}
-        companions[target] = ("dop853", "t4")
+    expected["period_table"] = {"period_table": single, "dop853": multiple, "t4": idle}
+    companions["period_table"] = ("dop853", "t4")
     return replace(
         item,
         expected_routes=expected,

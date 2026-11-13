@@ -396,8 +396,8 @@ targets. Unlisted targets keep that shared tuple; an explicit empty tuple pins
 the target alone. `companions_for(target)` resolves this declaration.
 Only inputs with a nonempty mapping add `companions_by_target` to the frozen
 manifest. Existing inputs keep their manifest keys and physical/oracle hashes.
-O2's `single_tone_gate` and `gate_cache` targets use `common_frame` plus `t4`.
-Its `shaped_sambe` and `period_table` targets use `dop853` plus `t4`.
+O2's `single_tone_gate`, `gate_cache` and `shaped_sambe` targets use
+`common_frame` plus `t4`. Its `period_table` target uses `dop853` plus `t4`.
 Its `common_frame`, `multitone_gate` and `multitone_rwa` targets use
 `shaped_sambe` plus `t4`. `dop853` uses only `t4`.
 The original `multitone_rwa` overlap companion and `single_tone_gate` single-tone
@@ -407,8 +407,10 @@ next tried `common_frame`. Overlap targets refused their own multiple-tone spans
 `shaped_sambe` as companion; that is not a reason to replace the companion.
 Companion changes are input declarations, never runtime fallback choices.
 After both overlap companions refused, the two named targets `shaped_sambe` and
-`period_table` use a `dop853` companion. It can also handle single-tone spans,
-so these two groups require the target to keep all 46 single-tone rows/7264 ns,
+`period_table` each tried a `dop853` companion. In the `shaped_sambe` probe,
+`dop853` took 13 single-tone rows/2894 ns from the target. That group keeps its
+`common_frame` companion and remains companion-blocked.
+The `period_table` group requires its target to keep all 46 single-tone rows/7264 ns,
 `dop853` to handle exactly 23 overlap rows/3574 ns, and `t4` to handle
 25 idle rows/43.696428571428555 ns. Every sample must match the full declaration.
 A mismatch stops the attempt; that group remains companion-blocked rather than
