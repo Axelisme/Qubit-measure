@@ -13,7 +13,7 @@ from zcu_tools.simulate.evolution.kernel import (
     SegmentTable,
 )
 from zcu_tools.simulate.evolution.kernels import dop853
-from zcu_tools.simulate.evolution.kernels._dop853 import Tolerances
+from zcu_tools.simulate.evolution.kernels._dop853_data import pack_segments
 from zcu_tools.simulate.evolution.kernels.t6 import T6Kernel, publish_inventory
 from zcu_tools.simulate.evolution.workplan import WorkPlan
 
@@ -58,12 +58,10 @@ def endpoint_used(monkeypatch: pytest.MonkeyPatch) -> Callable[[], bool]:
         states: NDArray[np.complex128],
         budget: float,
         plan: dop853.DOP853Plan,
-        *,
-        controls: Tolerances | None = None,
     ) -> None:
         nonlocal called
         called = True
-        original(data, row_models, states, budget, plan, controls=controls)
+        original(data, row_models, states, budget, plan)
 
     monkeypatch.setattr(dop853, "advance_endpoints", observe)
     return lambda: called
@@ -97,8 +95,40 @@ def test_key_reuse_selects_strategy_with_full_density_accuracy(
     expected = np.stack(
         [reference(case, row, state) for row, state in enumerate(case.states)]
     )
-    np.testing.assert_allclose(actual, expected, rtol=0, atol=2e-9)
+    tolerance = case.budget if count == 1 else 2e-9
+    np.testing.assert_allclose(actual, expected, rtol=0, atol=tolerance)
     assert endpoint_used() is (count == 1)
+
+
+@pytest.mark.parametrize("budget", [1e-3, 1e-5])
+def test_direct_density_uses_shared_budget_policy(budget: float) -> None:
+    case = replace(constant_case(1, -0.37), budget=budget)
+    case = replace(
+        case,
+        table=replace(
+            case.table,
+            duration_ns=np.array([4.0]),
+            tone_amplitude=np.array([[0.51]]),
+        ),
+    )
+    shared = case.states.copy()
+    dop853.advance_endpoints(
+        dop853.EndpointData(
+            dop853.prepare_models([case.source.model((0,))]).models,
+            pack_segments(case.table),
+        ),
+        (np.array([0]), np.array([0])),
+        shared,
+        budget,
+        dop853.DOP853Plan(np.array(["interaction"]), np.array([-1])),
+    )
+    # Single-use selection is covered separately. Here both interfaces must
+    # honor the same budget policy, not merely fall below an accuracy ceiling.
+    actual = apply_case(case, WorkPlan())
+    expected = reference(case, 0, case.states[0])
+    np.testing.assert_allclose(actual[0], expected, rtol=0, atol=budget)
+    np.testing.assert_allclose(shared[0], expected, rtol=0, atol=budget)
+    np.testing.assert_allclose(actual, shared, rtol=0, atol=5e-12)
 
 
 def test_published_inventory_survives_singleton_worker_table(
@@ -153,7 +183,9 @@ def test_mixed_strategies_keep_row_order_and_partition_independence() -> None:
     expected = np.stack(
         [reference(case, row, state) for row, state in enumerate(case.states)]
     )
-    np.testing.assert_allclose(whole, expected, rtol=0, atol=2e-9)
+    # Only row zero has a single-use key; all remaining rows reuse a channel.
+    np.testing.assert_allclose(whole[:1], expected[:1], rtol=0, atol=case.budget)
+    np.testing.assert_allclose(whole[1:], expected[1:], rtol=0, atol=2e-9)
 
 
 def test_direct_numerical_failure_raises_without_repair() -> None:

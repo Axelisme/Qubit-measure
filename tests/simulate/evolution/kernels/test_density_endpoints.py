@@ -1,10 +1,9 @@
-"""Caller-controlled endpoint accuracy through the shared numerical seam."""
+"""Budget validation through the shared density endpoint seam."""
 
 import numpy as np
 import pytest
 from zcu_tools.simulate.evolution import EnvelopeSpec, ModelSource
 from zcu_tools.simulate.evolution.kernel import SegmentTable
-from zcu_tools.simulate.evolution.kernels._dop853 import Tolerances
 from zcu_tools.simulate.evolution.kernels._dop853_data import pack_segments
 from zcu_tools.simulate.evolution.kernels.dop853 import (
     DOP853Kernel,
@@ -15,7 +14,6 @@ from zcu_tools.simulate.evolution.kernels.dop853 import (
 )
 
 from tests.simulate.evolution.contract.kernel_suite import KernelCase, synthetic_model
-from tests.simulate.evolution.contract.reference import density_error, reference
 
 
 @pytest.fixture
@@ -43,32 +41,9 @@ def endpoint_case() -> KernelCase:
     )
 
 
-def test_tighter_controls_improve_full_density(endpoint_case: KernelCase) -> None:
-    case = endpoint_case
-    models = prepare_models([case.source.model((0,))]).models
-    segments = pack_segments(case.table)
-    plan = DOP853Plan(np.array(["interaction"]), np.array([-1]))
-    expected = reference(case, 0, case.states[0])[None]
-    errors = []
-    for rtol, atol in ((1e-3, 1e-5), (2e-11, 2e-13)):
-        actual = case.states.copy()
-        advance_endpoints(
-            EndpointData(models, segments),
-            (np.array([0]), np.array([0])),
-            actual,
-            case.budget,
-            plan,
-            controls=Tolerances(rtol, atol, np.inf, np.inf, 0),
-        )
-        errors.append(density_error(actual, expected))
-    print(f"Full-density errors: loose={errors[0]:.17g}, tight={errors[1]:.17g}")
-    assert errors[1] < errors[0]
-    assert errors[1] < 1e-9
-
-
 @pytest.mark.parametrize("budget", [0.0, -1.0, np.inf, np.nan])
 @pytest.mark.parametrize("empty", [False, True])
-def test_explicit_controls_still_require_valid_budget(
+def test_endpoints_require_valid_budget(
     endpoint_case: KernelCase, budget: float, empty: bool
 ) -> None:
     case = endpoint_case
@@ -83,5 +58,4 @@ def test_explicit_controls_still_require_valid_budget(
             case.states[rows].copy(),
             budget,
             DOP853Plan(np.array(["interaction"]), np.array([-1])),
-            controls=Tolerances(2e-11, 2e-13, np.inf, np.inf, 0),
         )

@@ -9,7 +9,7 @@ from numpy.typing import NDArray
 
 from ..kernel import ApplyContext, KernelContext, Prepared, SegmentTable
 from ..secular import SecularModel
-from ._dop853 import Tolerances, tolerances
+from ._dop853 import tolerances
 from ._dop853_chain import run_chain
 from ._dop853_data import (
     Context,
@@ -348,8 +348,6 @@ def advance_endpoints(
     states: NDArray[np.complex128],
     budget: float,
     plan: DOP853Plan,
-    *,
-    controls: Tolerances | None = None,
 ) -> None:
     """Integrate density endpoints with caller-selected frames and local errors.
 
@@ -361,22 +359,19 @@ def advance_endpoints(
     independent interaction-frame rows read their own slots and return from
     the H0-rotating frame to the model eigenbasis at the row's end.
 
-    Omitting controls uses budget-scaled DOP853 tolerances. Providing controls
-    uses its rtol, atol and max_step instead, allowing fixed tighter errors
-    without changing budget. The chain runner retains the full-density RMS
-    norm and caps lab-frame errors by budget divided by bare spectral phase;
-    controls.phase_budget and controls.norm_size do not override these policies.
+    Local rtol=min(1e-4, 0.03*budget) and atol=min(1e-6, 0.0003*budget)
+    follow the shared DOP853 budget policy, without a fixed step ceiling.
+    These are local controls, not a whole-sequence error bound. The chain runner
+    retains the full-density RMS norm and caps lab-frame errors by budget
+    divided by bare spectral phase.
     Active control knots still stop integration and reset the step seed.
     No normalization, clipping, RWA or bath splitting occurs.
 
-    budget must remain finite and positive even with explicit controls or empty
-    rows; otherwise raise ValueError. RuntimeError signals numerical failure
-    and can leave earlier endpoints written. Packed inputs and explicit controls
-    must satisfy their respective data and solver contracts.
+    budget must be finite and positive even with empty rows; otherwise raise
+    ValueError. RuntimeError signals numerical failure and can leave earlier
+    endpoints written. Packed inputs must satisfy their data contracts.
     """
-    default_controls = tolerances(budget)
-    if controls is None:
-        controls = default_controls
+    controls = tolerances(budget)
     rows, key_index = row_models
     if not len(rows):
         return

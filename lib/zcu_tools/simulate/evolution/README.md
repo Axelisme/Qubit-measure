@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-11-13, constant-tone strategies and structured routing refusals
+**Last updated:** 2026-11-13, budget-scaled constant-tone direct integration
 
 **讀者：** framework-dev、agent。Segment evolution 的公開輸入、路由與數值邊界。
 
@@ -265,7 +265,7 @@ own the command and report format.
 | [`dyson`](kernels/dyson.py#L758), weak constant drive | `plateau` | Second-order full-carrier modal Dyson. Calibrated guards require r ≤ min(0.1, 0.25B^(1/3)), r2 ≤ 0.05, and second-order population indicator B2 + B/8 ≤ min(0.02, (1.5B)^(2/3)). Certified shared no-drive prefixes omit the B2 check. B/8 reserves path pruning; this is not a multilevel remainder proof. | [`weak_plateau`](../../../../tests/simulate/evolution/contract/accuracy_cases.py#L176) | PASS |
 | [`single_tone_rwa`](kernels/single_tone_rwa.py#L246), constant rotating-frame block evolution | `plateau` | Fixed flux, B ≥ 1e-3, carrier magnitude ≥ 50 MHz. Initial 50 MHz edge window with omission-driven restoration; transfer proxy ≤ 0.0058, full-operator/carrier ratio ≤ 0.25 and retained-norm phase proxy ≤ 0.06 rad. Phase-graph pruning ≤ min(B, 1e-3); real generator dimension ≤ 64. Uses the full secular bath without Strang splitting. | [`linear_plateau`](../../../../tests/simulate/evolution/contract/accuracy_cases.py#L126) | FAIL at guard edge: 2.180208e-2; strict xfail |
 | [`floquet_period`](kernels/floquet_period.py#L758), full-carrier constant-tone period reuse | `plateau` | Hilbert period trajectories with secular split playback. Requires carrier magnitude ≥ 0.03 GHz and some subdivision count m in 1..64 with dT²ΓV²/m² ≤ 1.0, using this owner's rad/ns drive bound. Below 1 GHz, CF4 or adjacent-cutoff Sambe uses endpoint defect ≤ min(1e-4, 0.1B). Higher carriers use DOP853 rtol min(1e-8, 1e-4B), max step T/4. These are calibrated local controls. | [`weak_plateau`](../../../../tests/simulate/evolution/contract/accuracy_cases.py#L176), [`strong_plateau`](../../../../tests/simulate/evolution/contract/accuracy_cases.py#L179) | PASS; largest family error 1.375101e-3 |
-| [`t6`](kernels/t6.py), full dissipative constant-tone evolution | `plateau`, terminal candidate | One constant tone at any strength. Direct integrates each density in the H0 frame with the full secular bath, fixed rtol/atol 2e-11/2e-13 and max step 0.05 ns, independent of B. Channel powers complete periods and Fourier-interpolates phase, refining 16..512 nodes until off-grid defect and spectral tail are each ≤ B/16. Complete-key reuse selects the strategy as described below. Neither strategy does RWA or density repair; numerical failure raises rather than reroutes. | [`weak_plateau`](../../../../tests/simulate/evolution/contract/accuracy_cases.py#L176), [`strong_plateau`](../../../../tests/simulate/evolution/contract/accuracy_cases.py#L179) | PASS |
+| [`t6`](kernels/t6.py), full dissipative constant-tone evolution | `plateau`, terminal candidate | One constant tone at any strength. Direct integrates each density in the H0 frame with the full secular bath and the shared dop853 policy: local rtol = min(1e-4, 0.03B), atol = min(1e-6, 0.0003B), without a fixed step ceiling. These are not whole-sequence error bounds. Channel retains its existing integration controls, powers complete periods and Fourier-interpolates phase, refining 16..512 nodes until off-grid defect and spectral tail are each ≤ B/16. Complete-key reuse selects the strategy as described below. Neither strategy does RWA or density repair; numerical failure raises rather than reroutes. | [`weak_plateau`](../../../../tests/simulate/evolution/contract/accuracy_cases.py#L176), [`strong_plateau`](../../../../tests/simulate/evolution/contract/accuracy_cases.py#L179) | PASS |
 | [`single_tone_gate`](kernels/single_tone_gate.py#L6), phase-covariant shaped RWA gates | `shaped` | Fixed flux, B ≥ 1e-3, real sampled envelope with at least 3 samples, slope ≤ 0.025/ns, curvature ≤ 0.003/ns², carrier magnitude ≥ 50 MHz. Omission restoration requires transfer ≤ 0.0058, residual phase ≤ 0.0045 rad and retained real dimension ≤ 256. Pruning ≤ min(B, 1e-3); adaptive secular split uses n ≥ 4 with d³ΓV²/n² ≤ 0.01. [Shared gate owner](kernels/_rwa_gate.py#L230). | [`linear_shaped`](../../../../tests/simulate/evolution/contract/accuracy_cases.py#L126) | PASS |
 | [`shaped_sambe`](kernels/shaped_sambe.py#L250), frozen-envelope finite-Fourier periods | `shaped` | Nonzero peak, carrier magnitude ≥ 0.03 GHz, subdivisions m ≤ 32, envelope slope ≤ 2·peak·abs(f)·m and peak drive bound ≤ 0.5·abs(f)·m. Subdivision policy limits real/complex motion to 0.01/0.0025 and secular split to 0.01. Compare adjacent harmonic cutoffs 2/3 or 3/4 and use 4 or 8 amplitude nodes; accumulated spectral plus interpolation estimate must be ≤ B/2. | [`linear_shaped`](../../../../tests/simulate/evolution/contract/accuracy_cases.py#L126) | FAIL at guard edge: 3.091554e-3; strict xfail |
 | [`gate_cache`](kernels/gate_cache.py#L63), phase-interpolated full-carrier shaped gates | `shaped` | Four Hilbert subsegments with secular half-steps. Model-only secular split d³ΓV²/16 ≤ 0.01. For 0 < d ≤ 30 ns, dispatch tries 6 phase nodes with 2 probes and full-unitary defect ≤ min(1e-4, 0.1B); other keys or failed convergence use 16 nodes. Fixed-order playback does not certify arbitrary-drive error against B. | [`shaped_complex`](../../../../tests/simulate/evolution/contract/accuracy_cases.py#L184) | FAIL at guard edge: 9.296548e-3; strict xfail |
@@ -278,13 +278,16 @@ own the command and report format.
 
 `t6` selects direct when `N * C_direct < C_channel`; otherwise it builds a
 channel. `N` counts that prepare key's rows in the complete acquire inventory,
-not a worker subset or routing history. For `M` levels, duration `d` ns and
-absolute carrier `f` GHz, the initial cold estimates are
+not a worker subset or routing history. This count does not account for channel
+rebuilds when a prepared prefix expires; the estimate does not model prefix
+lifetime. For `M` levels, duration `d` ns and absolute carrier `f` GHz, the
+initial cold estimates are
 `C_direct = (0.01 + 0.049*d*max(1, f/0.582))*(M/21)^3` and
 `C_channel = 56*(M/21)^5`. Four 21-level single-use measurements near 0.582 GHz
 gave direct/channel ratios 0.017, 0.192, 0.338 and 0.753 at 20, 218, 400 and
-1000 ns. The dimension powers estimate dense density/channel products; they
-are not measured scaling guarantees. The publisher stores only input-derived
+1000 ns. Those measurements used fixed tighter direct tolerances; they do not
+measure the budget-scaled direct solver. The dimension powers estimate dense
+density/channel products; they are not measured scaling guarantees. The publisher stores only input-derived
 key counts, dimensions and decisions in the evolve's WorkPlan. Preparation
 borrows those decisions and rejects a missing published key. Standalone Kernel
 calls without a publication must supply their complete table and source.

@@ -12,7 +12,6 @@ from ..kernel import ApplyContext, KernelContext, Prepared, SegmentTable
 from ..secular import ModelSource, SecularModel
 from ..workplan import FactKey, WorkPlan
 from . import dop853
-from ._dop853 import Tolerances
 from ._secular import coherence_decay
 from ._workload_facts import packed_segments
 
@@ -338,9 +337,11 @@ class T6Kernel:
     duration ns. The engine namespaces keys by the DC model source identity.
     Phase and start time are apply-only. The complete acquire's key reuse and
     cold input-only estimates choose direct density integration or Fourier
-    channels. Direct uses the shared H0-rotating density solver at fixed
-    rtol/atol 2e-11/2e-13, independent of budget, with a 0.05 ns step ceiling.
-    Channel preparation and all numerical products remain density-independent.
+    channels. Direct uses the shared H0-rotating density solver with the same
+    budget-scaled local tolerances as dop853, without a fixed step ceiling.
+    These controls do not bound whole-sequence error. Channel integration and
+    interpolation controls are unchanged. All preparations remain
+    density-independent.
     A positive finite budget is required; integration or interpolation failure
     raises RuntimeError rather than silently selecting another algorithm.
     """
@@ -488,7 +489,6 @@ class T6Kernel:
                     chunk,
                     budget,
                     plan,
-                    controls=Tolerances(2e-11, 2e-13, 0.05, np.inf, 0),
                 )
             else:
                 _apply_channels(
