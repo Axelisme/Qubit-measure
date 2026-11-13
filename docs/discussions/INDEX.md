@@ -33,6 +33,7 @@
 - 2026-10-21 [Joint Fock CKP 性能研究：保守 RK4 加 N+1 cutoff 外推 129 s](2026-10-21-joint-fock-performance-study.md)：兩能階保守版外推 129 s，16 能階成本不可行，改評估動態 [0,2] 與四階診斷。
 - 2026-10-28 [FTF 固定 DC flux ramp 的截斷與成本界限](2026-10-28-ftf-fixed-dc-flux-benchmark.md)：M16 僅為最大成功尺寸，M24／M32 reference 失敗，不能認證大幅 excursion 或 reset fidelity。
 - 2026-10-29 [Module 改 QICK Macro 與模擬 frontend 改讀 macro](2026-10-29-module-to-macro.md)：記錄 Module 改 macro 與具名 timeline 的原型比較及六次後記，現行決策見 [ADR-0083](../adr/0083-program-macros-and-timelines.md)。
+- 2026-11-14 [t6 的 direct 加速策略與職責歸屬](2026-11-14-t6-direct-strategy.md)：加速策略與職責歸屬。`t6` 依完整 acquire 的 key 列數在 channel 與 H0 旋轉座標 direct 積分間選擇，direct 容差跟 budget，定價與選擇歸 dispatch helper。
 
 ## Program 與 timeline 編譯
 
