@@ -262,14 +262,12 @@ def publish_inventory(
             size = len(table.model(source, row).energies_ghz)
             duration = float(table.duration_ns[row])
             frequency = abs(float(table.tone_frequency_ghz[row, 0]))
-            # Initial cold prices: 21-level direct/channel ratios were .017 at
-            # 20 ns, .192 at 218 ns, .338 at 400 ns and .753 at 1000 ns near
-            # .582 GHz. Dense density products scale as M^3; channel products
-            # as M^5. These prices choose work, not numerical acceptance.
-            direct = (0.01 + 0.049 * duration * max(1.0, frequency / 0.582)) * (
-                size / 21
-            ) ** 3
-            channel = 56.0 * (size / 21) ** 5
+            # Budget-scaled direct prices use warm 21-level I/L aggregates.
+            # Channel production aggregates give about 31 s per build.
+            # Dimension powers and the carrier factor remain uncalibrated
+            # outside those inputs. Prices do not model prefix lifetimes.
+            direct = 0.0012 * duration * max(1.0, frequency / 0.582) * (size / 21) ** 3
+            channel = 31.0 * (size / 21) ** 5
             prices.append(
                 _T6Price(key.tobytes(), int(count), size, count * direct < channel)
             )

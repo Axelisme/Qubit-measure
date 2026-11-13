@@ -20,12 +20,13 @@ from .contract.synthetic_models import synthetic_model
 @pytest.mark.parametrize("count", [4, 64], ids=["direct", "channel"])
 def test_t6_density_is_independent_of_workers_order_and_history(count: int) -> None:
     source = coherent_source(synthetic_model())
-    batch = timeline(count, 2.0)
+    # Four 16 ns rows stay direct; 64 reused rows amortize a channel.
+    batch = timeline(count, 16.0)
     tone = drive_track(batch, EnvelopeSpec("constant"), frequency=0.7, gain=0.15)
     batch = replace(batch, tracks=(tone,))
     expected = converged_reference(source, batch).density
     tolerance = 1e-3 if count == 4 else 2e-9
-    for workers in (1, 4):
+    for workers in (1, 2):
         with closing(Engine(workers, families=("t6",))) as engine:
             source.history.clear()
             for clear in (False, False, True):

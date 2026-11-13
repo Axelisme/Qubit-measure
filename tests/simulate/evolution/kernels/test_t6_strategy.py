@@ -29,7 +29,8 @@ def constant_case(count: int, frequency: float = 0.7) -> KernelCase:
     table = SegmentTable(
         timeline=np.arange(count),
         start_ns=np.arange(count, dtype=np.float64) * 0.37,
-        duration_ns=np.full(count, 2.0),
+        # A short single use stays direct; many reused rows amortize a channel.
+        duration_ns=np.full(count, 16.0),
         level=np.zeros((count, 1), dtype=np.int64),
         tones=np.ones(count, dtype=np.int64),
         tone_port=np.zeros((count, 1), dtype=np.int64),

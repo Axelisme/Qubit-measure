@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-11-13, budget-scaled constant-tone direct integration
+**Last updated:** 2026-11-13, budget-scaled direct cost calibration
 
 **讀者：** framework-dev、agent。Segment evolution 的公開輸入、路由與數值邊界。
 
@@ -281,14 +281,26 @@ channel. `N` counts that prepare key's rows in the complete acquire inventory,
 not a worker subset or routing history. This count does not account for channel
 rebuilds when a prepared prefix expires; the estimate does not model prefix
 lifetime. For `M` levels, duration `d` ns and absolute carrier `f` GHz, the
-initial cold estimates are
-`C_direct = (0.01 + 0.049*d*max(1, f/0.582))*(M/21)^3` and
-`C_channel = 56*(M/21)^5`. Four 21-level single-use measurements near 0.582 GHz
-gave direct/channel ratios 0.017, 0.192, 0.338 and 0.753 at 20, 218, 400 and
-1000 ns. Those measurements used fixed tighter direct tolerances; they do not
-measure the budget-scaled direct solver. The dimension powers estimate dense
-density/channel products; they are not measured scaling guarantees. The publisher stores only input-derived
-key counts, dimensions and decisions in the evolve's WorkPlan. Preparation
+estimates in seconds are
+`C_direct = 0.0012*d*max(1, f/0.582)*(M/21)^3` and
+`C_channel = 31*(M/21)^5`. Direct uses two 21-level aggregate apply-CPU
+measurements at budget `1e-3`, near 0.582 GHz: 48 rows totaling 960 ns took
+1.138655 s, and 24 rows totaling 5040.244 ns took 6.056137 s. Each is the second
+fresh-source/history/Engine sample in one process, not a repeated-history sample.
+A nonnegative affine least-squares fit gives zero intercept and 0.001201
+seconds/ns. The rounded price leaves actual-minus-estimated residuals of
+-0.013345 and +0.007844 s. These nonexclusive probes set an initial price; they
+are not performance acceptance or an isolated measurement of cold-start cost.
+Channel's 31 s/build comes from earlier production aggregates; its numerical
+controls and accuracy are unchanged.
+
+Both direct calibration inputs have the same dimension and carrier. They do not
+identify the dimension powers, frequency factor or breakpoint, which retain the
+earlier heuristic. Different budgets can also change direct work without
+changing this estimate. These are coarse strategy-selection prices, not runtime
+guarantees. In particular, complete-inventory counts omit prefix-lifetime channel
+rebuilds. The publisher stores only input-derived key counts, dimensions and
+decisions in the evolve's WorkPlan. Preparation
 borrows those decisions and rejects a missing published key. Standalone Kernel
 calls without a publication must supply their complete table and source.
 `cost(table, rows)` retains table-only chunk-interleaving weights, not the
