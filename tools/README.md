@@ -396,18 +396,24 @@ targets. Unlisted targets keep that shared tuple; an explicit empty tuple pins
 the target alone. `companions_for(target)` resolves this declaration.
 Only inputs with a nonempty mapping add `companions_by_target` to the frozen
 manifest. Existing inputs keep their manifest keys and physical/oracle hashes.
-O2's four single-tone shaped targets use `common_frame` plus `t4`.
+O2's `single_tone_gate` and `gate_cache` targets use `common_frame` plus `t4`.
+Its `shaped_sambe` and `period_table` targets use `dop853` plus `t4`.
 Its `common_frame`, `multitone_gate` and `multitone_rwa` targets use
 `shaped_sambe` plus `t4`. `dop853` uses only `t4`.
 The original `multitone_rwa` overlap companion and `single_tone_gate` single-tone
 companion refused their respective spans on this fixed input. A subsequent
 `multitone_gate` overlap companion also refused, so the four shaped targets
-use `common_frame`. Overlap targets refused their own multiple-tone spans with
+next tried `common_frame`. Overlap targets refused their own multiple-tone spans with
 `shaped_sambe` as companion; that is not a reason to replace the companion.
-Companion changes are whole-class input declarations, never runtime fallback
-choices. Two rejected approved companions end the search; the table retains
-companion-blocked groups without inferring target unavailability.
-These companions cannot compete for the target's type of span.
+Companion changes are input declarations, never runtime fallback choices.
+After both overlap companions refused, the two named targets `shaped_sambe` and
+`period_table` use a `dop853` companion. It can also handle single-tone spans,
+so these two groups require the target to keep all 46 single-tone rows/7264 ns,
+`dop853` to handle exactly 23 overlap rows/3574 ns, and `t4` to handle
+25 idle rows/43.696428571428555 ns. Every sample must match the full declaration.
+A mismatch stops the attempt; that group remains companion-blocked rather than
+changing the expected route to the observed one. No other companion can compete
+for the target's type of span.
 O2 counts each span's active tone supports using public `segment_spans`, then
 sums rows and ns for idle, single-tone and overlap work. It does not reproduce
 the dispatch candidate table or add a fallback.
