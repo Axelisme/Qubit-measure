@@ -396,12 +396,17 @@ targets. Unlisted targets keep that shared tuple; an explicit empty tuple pins
 the target alone. `companions_for(target)` resolves this declaration.
 Only inputs with a nonempty mapping add `companions_by_target` to the frozen
 manifest. Existing inputs keep their manifest keys and physical/oracle hashes.
-O2's four single-tone shaped targets use `multitone_gate` plus `t4`.
+O2's four single-tone shaped targets use `common_frame` plus `t4`.
 Its `common_frame`, `multitone_gate` and `multitone_rwa` targets use
 `shaped_sambe` plus `t4`. `dop853` uses only `t4`.
 The original `multitone_rwa` overlap companion and `single_tone_gate` single-tone
-companion refused their respective spans on this fixed input. Companion changes
-are whole-class input declarations, never runtime fallback choices.
+companion refused their respective spans on this fixed input. A subsequent
+`multitone_gate` overlap companion also refused, so the four shaped targets
+use `common_frame`. Overlap targets refused their own multiple-tone spans with
+`shaped_sambe` as companion; that is not a reason to replace the companion.
+Companion changes are whole-class input declarations, never runtime fallback
+choices. Two rejected approved companions end the search; the table retains
+companion-blocked groups without inferring target unavailability.
 These companions cannot compete for the target's type of span.
 O2 counts each span's active tone supports using public `segment_spans`, then
 sums rows and ns for idle, single-tone and overlap work. It does not reproduce

@@ -671,7 +671,7 @@ def overlapping_shaped_tones_input() -> Input:
     """
     shaped = ("single_tone_gate", "shaped_sambe", "gate_cache", "period_table")
     overlapping = ("common_frame", "multitone_gate", "multitone_rwa")
-    single_companion = "multitone_gate"
+    single_companion = "common_frame"
     overlap_companion = "shaped_sambe"
 
     def emit(builder: TimelineBuilder, _model: SecularModel) -> None:
