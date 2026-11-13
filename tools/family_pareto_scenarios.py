@@ -2,7 +2,7 @@
 
 from collections.abc import Callable
 from contextlib import ExitStack, closing
-from dataclasses import asdict
+from dataclasses import asdict, replace
 
 import numpy as np
 from zcu_tools.program import build_soccfg
@@ -30,6 +30,7 @@ from tools.family_pareto_inputs import Input
 from tools.family_pareto_settings import (
     BOARD_PROFILE,
     FTF_MODEL,
+    INTEGER_MODEL,
     SINGLE_MODEL,
     SOURCE_COMMIT,
 )
@@ -579,6 +580,198 @@ def simultaneous_drive_input() -> Input:
     )
 
 
+def integer_fluxonium_input(
+    name: str,
+    emit: Callable[[TimelineBuilder, SecularModel], None],
+    manifest: dict[str, object],
+    families: tuple[str, ...],
+) -> Input:
+    """Compile a core sequence on the fixed 80-native/20-retained integer model.
+
+    emit receives a public TimelineBuilder and the DC SecularModel (GHz), and
+    emits the entire scan before readout. Pump uses gen1 and Stokes gen2; both
+    couple to the same charge operator at 1 GHz/gain. Constant or sampled
+    waveforms and public sweeps are supported. No drive is added by this builder.
+    manifest must include pulse_sequence prose and should describe requested
+    axes, gains, carriers and units. families lists admissible pinned targets.
+    The returned Input owns a fresh detached numeric source on each build;
+    callers close it. It declares each target for all driven spans plus t4 for
+    idle; mixed-domain callers replace expected_routes and companion declarations.
+    Compilation, model, resource cleanup and malformed manifest errors propagate.
+    """
+    settings = parse_single_fluxonium(INTEGER_MODEL)
+    board = build_soccfg(BOARD_PROFILE)
+    env = single_fluxonium(settings, soccfg=board)
+    with ExitStack() as stack:
+        stack.callback(env.devices.close_all_devices)
+        if env.close_backend is not None:
+            stack.callback(env.close_backend)
+        owner = stack.enter_context(
+            closing(SingleFluxoniumSource(settings, env.devices))
+        )
+        snapshot = owner.snapshot()
+        numeric = stack.enter_context(closing(owner.model_facts(snapshot).source))
+        builder = TimelineBuilder(board, reps=1, relax_delay=1.0)
+        emit(builder, numeric.model((0,)))
+        builder.emit(
+            Readout(
+                "readout",
+                PulseReadoutCfg(
+                    gen_ch=0,
+                    ro_ch=0,
+                    nqz=1,
+                    freq=settings.readout.resonator.frequency_ghz * 1000,
+                    gain=0.1,
+                    waveform=ConstWaveformCfg(length=1.0),
+                    ro_length=1.0,
+                    trig_offset=settings.readout.adc.time_of_flight_ns / 1000,
+                ),
+            )
+        )
+        request = build_compiled_request(
+            builder.build(), "integrated", env.soc.binding, 0, routes=env.soc.routes
+        )
+        (template,) = request.templates
+        batch = owner.plan_template(
+            snapshot, template, time_base=request.time_base
+        ).batch
+        build = _numeric_builder(AccuracyCase(name, numeric, batch, families))
+    return _declared_input(
+        name,
+        build,
+        {
+            **manifest,
+            "source_commit": SOURCE_COMMIT,
+            "model_source": "fixed integer-fluxonium physical parameters, native 80/retained 20",
+            "effective_settings": settings.model_dump(mode="json"),
+            "board_configuration": BOARD_PROFILE,
+            "snapshot": asdict(snapshot),
+            "time_base": {
+                "ticks_per_us_numerator": request.time_base.ticks_per_us.numerator,
+                "ticks_per_us_denominator": request.time_base.ticks_per_us.denominator,
+            },
+            "compiled_carriers_ghz": [
+                track.frequency_ghz.tolist() for track in batch.tracks
+            ],
+            "calibration": {
+                "gain_method": "uncalibrated benchmark gains, not acquired-IQ validation",
+                "readout_method": "bare cavity, gain 0.1, 1 us pulse/window, zero flight time",
+            },
+        },
+    )
+
+
+def overlapping_shaped_tones_input() -> Input:
+    """Compile 24 Stokes-first Gaussian leads from disjoint to full overlap.
+
+    Each port addresses the same integer-fluxonium charge operator. Requested
+    support/sigma are 0.3/0.05 us. Carriers and converted gains start from the
+    historical synthetic STIRAP controls, not a calibrated transfer claim.
+    No inventory repetitions are added for multitone_gate's cost preference.
+    """
+    shaped = ("single_tone_gate", "shaped_sambe", "gate_cache", "period_table")
+    overlapping = ("common_frame", "multitone_gate", "multitone_rwa")
+    single_companion = "common_frame"
+    overlap_companion = "shaped_sambe"
+
+    def emit(builder: TimelineBuilder, _model: SecularModel) -> None:
+        lead = builder.add_table_sweep("lead", np.linspace(0.3, 0.0, 24).tolist())
+        builder.fork("default", into="pump")
+        builder.emit(
+            Pulse(
+                "stokes",
+                PulseCfg(
+                    ch=2,
+                    nqz=1,
+                    freq=3111.1686681315896,
+                    gain=0.100006103888177,
+                    waveform=GaussWaveformCfg(length=0.3, sigma=0.05),
+                ),
+            )
+        )
+        builder.emit(
+            Pulse(
+                "pump",
+                PulseCfg(
+                    ch=1,
+                    nqz=1,
+                    freq=7241.848921606473,
+                    gain=0.030001831166453,
+                    pre_delay=lead,
+                    waveform=GaussWaveformCfg(length=0.3, sigma=0.05),
+                ),
+            ),
+            timeline="pump",
+        )
+        builder.join("pump", into="default")
+
+    item = integer_fluxonium_input(
+        "overlapping_shaped_tones",
+        emit,
+        {
+            "pulse_sequence": "Stokes-first Gaussian pair with decreasing lead, then terminal readout",
+            "waveform": "gauss",
+            "pulse_length_us": 0.3,
+            "sigma_us": 0.05,
+            "lead_range_us": [0.3, 0.0],
+            "carriers_mhz": {"Pump": 7241.848921606473, "Stokes": 3111.1686681315896},
+            "gains": {"Pump": 0.030001831166453, "Stokes": 0.100006103888177},
+            "controls_reason": "historical synthetic STIRAP carriers and envelope-scale-converted gains; current delay-form width/support scale; not calibrated transfer",
+            "inventory_reason": "one pair per delay, no repetitions to satisfy multitone_gate cost",
+        },
+        (*shaped, *overlapping, "dop853"),
+    )
+    counts = [0, 0, 0]
+    durations = [0.0, 0.0, 0.0]
+    with closing((case := item.build()).source):
+        for point, spans in enumerate(segment_spans(case.batch)):
+            for start, end in spans:
+                tones = sum(
+                    bool(
+                        track.active[point]
+                        and track.start_ns[point] <= start
+                        and end <= track.start_ns[point] + track.duration_ns[point]
+                    )
+                    for track in case.batch.tracks
+                )
+                counts[tones] += 1
+                durations[tones] += end - start
+    idle, single, multiple = [(counts[i], durations[i]) for i in range(3)]
+    expected = {
+        family: {family: single, single_companion: multiple, "t4": idle}
+        for family in shaped
+    }
+    expected.update(
+        {
+            family: {family: multiple, overlap_companion: single, "t4": idle}
+            for family in overlapping
+        }
+    )
+    expected["dop853"] = {
+        "dop853": (counts[1] + counts[2], durations[1] + durations[2]),
+        "t4": idle,
+    }
+    companions = {
+        **{family: (single_companion, "t4") for family in shaped},
+        **{family: (overlap_companion, "t4") for family in overlapping},
+        "dop853": ("t4",),
+    }
+    # This named group may share candidates only while the full route
+    # declaration proves that the target retains every single-tone span.
+    expected["period_table"] = {"period_table": single, "dop853": multiple, "t4": idle}
+    companions["period_table"] = ("dop853", "t4")
+    return replace(
+        item,
+        expected_routes=expected,
+        companions_by_target=companions,
+        manifest={
+            **item.manifest,
+            "expected_routes": expected,
+            "support_work": {"idle": idle, "single": single, "overlap": multiple},
+        },
+    )
+
+
 def make_real_inputs() -> list[Input]:
     """Build fixed real-model scenarios with detached fresh-source factories."""
     return [
@@ -589,4 +782,5 @@ def make_real_inputs() -> list[Input]:
         gate_sequence_input(),
         simultaneous_drive_input(),
         shaped_gate_sequence_input(),
+        overlapping_shaped_tones_input(),
     ]

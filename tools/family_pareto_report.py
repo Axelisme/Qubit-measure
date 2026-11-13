@@ -2,13 +2,34 @@
 
 from __future__ import annotations
 
+import json
 from statistics import median
 from typing import TYPE_CHECKING
+
+from pydantic import TypeAdapter
 
 from tests.simulate.evolution.contract.accuracy import ALL_FAMILIES
 
 if TYPE_CHECKING:
     from tools.family_pareto import InputResult
+
+
+def render_saved_summary(matrix_json: str) -> str:
+    """Render a saved family_pareto matrix JSON without running any measurement.
+
+    matrix_json is the complete JSON text written by family_pareto.main, with
+    inputs and measured_families. Restore its public result dataclasses and use
+    render_summary; retain stored errors, timings and comparison cells unchanged.
+    Extra provenance/derived keys are ignored. Missing keys, malformed JSON or
+    invalid result fields raise KeyError or ValueError. No files are written.
+    """
+    # Import after module initialization: family_pareto re-exports render_summary.
+    from tools.family_pareto import InputResult
+
+    matrix = json.loads(matrix_json)
+    rows = TypeAdapter(list[InputResult]).validate_python(matrix["inputs"])
+    families = TypeAdapter(tuple[str, ...]).validate_python(matrix["measured_families"])
+    return render_summary(rows, families)
 
 
 def _render_fixed_group(row: InputResult) -> list[str]:
@@ -62,22 +83,33 @@ def _family_cpu_lines(row: InputResult) -> list[str]:
                 ]
                 rows = [report.rows for report in reports]
                 durations = [report.duration_ns for report in reports]
+                role = "group member"
+                if name == policy.family:
+                    role = "target"
+                elif policy.attribution in {"target", "target_and_companions"}:
+                    role = (
+                        "companion"
+                        if name in (policy.whitelist or ())
+                        else "preparation diagnostic"
+                    )
                 lines.append(
                     f"| {policy.family} | {mode.mode} | {name} | {len(reports)} | "
                     f"{min(rows)}..{max(rows)} | {min(durations):.12g}..{max(durations):.12g} | "
                     f"{median(report.prepare_cpu_s for report in reports):.9g} | "
                     f"{median(report.apply_cpu_s for report in reports):.9g} | "
-                    f"{median(report.actual_cpu_s for report in reports):.9g} |"
+                    f"{median(report.actual_cpu_s for report in reports):.9g} | "
+                    f"{role} | "
+                    f"{median(sample.family_cpu_shares[name] for sample in mode.samples if name in sample.routing):.6g} |"
                 )
     if not lines:
         return []
     return [
-        "Family diagnostics (calling-thread CPU, not policy process CPU):",
+        "Family diagnostics (calling-thread CPU, not wall or policy process CPU):",
         "",
-        "Logical row/ns ranges and phase medians use reported samples only. Guard rejection preparation can have CPU with zero rows. Raw reports retain each sample separately.",
+        "Logical row/ns ranges and phase medians use reported samples only. Fractions divide each family prepare+apply CPU by the summed reported thread CPU in that sample, then take the median. They exclude unreported overhead and are not wall/process CPU shares. Guard rejection preparation can have CPU with zero rows. Raw reports retain each sample separately.",
         "",
-        "| Policy | Mode | Family | Reported samples | Logical rows range | Cumulative ns range | Median prepare CPU s | Median apply CPU s | Median summed CPU s |",
-        "| --- | --- | --- | ---: | --- | --- | ---: | ---: | ---: |",
+        "| Policy | Mode | Family | Reported samples | Logical rows range | Cumulative ns range | Median prepare CPU s | Median apply CPU s | Median summed CPU s | Role | Median fraction of reported thread CPU |",
+        "| --- | --- | --- | ---: | --- | --- | ---: | ---: | ---: | --- | ---: |",
         *lines,
         "",
     ]
@@ -88,7 +120,9 @@ def _policy_lines(row: InputResult) -> list[str]:
     for policy in row.policies:
         if policy.error is None:
             lines.append(
-                f"| {policy.family} | — | unavailable: {policy.unavailable}; "
+                f"| {policy.family} | — | "
+                f"{'companion-blocked' if policy.companion_blocked else 'unavailable'}: "
+                f"{policy.companion_blocked or policy.unavailable}; "
                 f"first-group classification: {policy.refusal.family_reasons if policy.refusal else {}} | — | — | — | — | — | — |"
             )
             continue
@@ -106,10 +140,19 @@ def _policy_lines(row: InputResult) -> list[str]:
                     raise ValueError("measured mode has missing time")
                 cell = f"{mode.mode}/{metric}"
                 competitors = row.dominators.get(policy.family, {}).get(cell, [])
+                comparisons = row.dominance_same_companions.get(policy.family, {}).get(
+                    cell, {}
+                )
+                labeled_competitors = [
+                    f"{name} (same companions)"
+                    if comparisons[name]
+                    else f"{name} (different companions; observation only)"
+                    for name in competitors
+                ]
                 peers = row.timing_equivalents.get(policy.family, {}).get(cell, [])
                 lines.append(
                     f"| {policy.family} | {policy.error:.12g} | {'PASS' if policy.error <= 2e-3 else 'FAIL'} | "
-                    f"{cell} | {value:.9g} | {len(mode.samples)} | {mode.samples[0].paths} | {', '.join(competitors) or 'none'} | {', '.join(peers) or 'none'} |"
+                    f"{cell} | {value:.9g} | {len(mode.samples)} | {mode.samples[0].paths} | {', '.join(labeled_competitors) or 'none'} | {', '.join(peers) or 'none'} |"
                 )
     return lines
 
@@ -123,6 +166,9 @@ def render_summary(
     marks the report as partial; omitted families get no availability conclusion.
     Dominance is limited to measured inputs and families. No family deletion or
     accuracy exception follows. Default is shown but never a competitor.
+    Diagnostic roles distinguish the target, its whitelisted companions and
+    non-whitelisted preparation reports. All reported CPU enters the shares,
+    including zero-row guard preparation. Default/fixed policies use group members.
     """
     lines = [
         "# Engine family Pareto table",
@@ -145,6 +191,7 @@ def render_summary(
         "Displayed density error and PASS/FAIL use the overall maximum across retained samples, not the mode-local comparator error.",
         "No epsilon or weighted score is used. FAIL means error > 2e-3, not permission to keep an inaccurate route.",
         "Conclusions apply only to the measured input set; no deletion is authorized.",
+        "Every dominance relation marks companion equality. Different-companion dominance is observation only and cannot alone justify deletion. Companion-blocked rows do not classify the target as unavailable or guard-refused.",
         "",
         "## Family conclusions",
         "",
@@ -166,13 +213,15 @@ def render_summary(
         nondominated = [
             (r.name, cell)
             for r, _ in available
-            for cell, competitors in r.dominators[family].items()
-            if not competitors
+            for cell in r.dominators[family]
+            if not any(r.dominance_same_companions[family][cell].values())
         ]
         lines += [
             f"### {family}",
             "",
-            f"Available on {len(available)} inputs; unavailable on {len(conclusion_rows) - len(available)}.",
+            f"Available on {len(available)} inputs; "
+            f"companion-blocked on {sum(p.companion_blocked is not None for r in conclusion_rows for p in r.policies if p.family == family)}; "
+            f"unavailable on {sum(p.unavailable is not None for r in conclusion_rows for p in r.policies if p.family == family)}.",
         ]
         if not available:
             lines.append("NOT EXERCISED. No dominance conclusion is possible.")
@@ -182,7 +231,9 @@ def render_summary(
                 f"Maximum density error {worst:.12g}: {'PASS' if worst <= 2e-3 else 'FAIL'}."
             )
             if nondominated:
-                lines.append("Not dominated on these input/mode/metric cells:")
+                lines.append(
+                    "Not dominated within equal-companion groups on these input/mode/metric cells:"
+                )
                 lines += [f"- `{name}`: {cell}" for name, cell in nondominated]
             else:
                 lines.append(

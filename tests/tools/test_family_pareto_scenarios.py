@@ -38,11 +38,11 @@ def test_gain_scan_compiles_distinct_amplitudes_with_fixed_carrier() -> None:
     assert all(len(track.amplitude) == 24 for track in scans)
 
 
-def test_length_scan_compiles_monotone_distinct_pulse_supports(
-    fixed_inputs: list[Input],
-) -> None:
+def test_length_scan_compiles_monotone_distinct_pulse_supports() -> None:
+    from tools.family_pareto_scenarios import length_sweep_input
+
     durations = []
-    for item in fixed_inputs:
+    for item in [length_sweep_input()]:
         with closing((case := item.build()).source):
             durations.extend(
                 track.duration_ns
@@ -55,9 +55,11 @@ def test_length_scan_compiles_monotone_distinct_pulse_supports(
     )
 
 
-def test_idle_scan_changes_gap_between_fixed_gates(fixed_inputs: list[Input]) -> None:
+def test_idle_scan_changes_gap_between_fixed_gates() -> None:
+    from tools.family_pareto_scenarios import idle_sweep_input
+
     gaps = []
-    for item in fixed_inputs:
+    for item in [idle_sweep_input()]:
         with closing((case := item.build()).source):
             tracks = case.batch.tracks
             if len(tracks) != 2 or not all(np.all(t.active) for t in tracks):
@@ -108,11 +110,41 @@ def test_shaped_gate_scan_compiles_gaussian_phase_alphabet_prefixes() -> None:
         assert np.all(np.diff(batch.end_ns) > 0)
 
 
-def test_joint_scan_compiles_synchronous_independent_drive_ports(
-    fixed_inputs: list[Input],
-) -> None:
+def test_delay_scan_compiles_two_same_qubit_gaussians_from_separated_to_overlapping() -> (
+    None
+):
+    from tools import family_pareto_scenarios
+
+    item = family_pareto_scenarios.overlapping_shaped_tones_input()
+    with closing((case := item.build()).source):
+        batch = case.batch
+        assert len(batch.points) == 24
+        assert len(batch.tracks) == 2
+        first, second = sorted(batch.tracks, key=lambda track: track.start_ns[0])
+        assert np.all(first.active) and np.all(second.active)
+        assert first.start_ns[0] + first.duration_ns[0] <= second.start_ns[0]
+        assert first.start_ns[-1] == second.start_ns[-1]
+        assert first.duration_ns[-1] == second.duration_ns[-1]
+        lead = second.start_ns - first.start_ns
+        assert np.all(np.diff(lead) < 0)
+        assert np.allclose(first.duration_ns, 300, atol=2)
+        for track in batch.tracks:
+            envelope = track.envelopes[track.envelope_index[0]]
+            assert envelope.kind == "sampled" and np.ptp(envelope.samples.real) > 0
+        model = case.source.model((0,))
+        assert len(model.energies_ghz) == 20
+        ports = {drive.name: drive for drive in model.drives}
+        assert first.port != second.port
+        np.testing.assert_array_equal(
+            ports[first.port].in_phase_ghz, ports[second.port].in_phase_ghz
+        )
+
+
+def test_joint_scan_compiles_synchronous_independent_drive_ports() -> None:
+    from tools.family_pareto_scenarios import simultaneous_drive_input
+
     synchronous = []
-    for item in fixed_inputs:
+    for item in [simultaneous_drive_input()]:
         with closing((case := item.build()).source):
             tracks = case.batch.tracks
             if len(tracks) != 2 or tracks[0].port == tracks[1].port:
