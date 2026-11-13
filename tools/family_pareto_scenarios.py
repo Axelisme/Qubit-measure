@@ -942,18 +942,29 @@ def overlapping_constant_tones_input() -> Input:
     return replace(item, manifest={**item.manifest, **carriers})
 
 
-def make_real_inputs() -> list[Input]:
-    """Build fixed real-model scenarios with detached fresh-source factories."""
-    return [
-        carrier_sweep_input(),
-        gain_sweep_input(),
-        length_sweep_input(),
-        idle_sweep_input(),
-        gate_sequence_input(),
-        simultaneous_drive_input(),
-        shaped_gate_sequence_input(),
-        overlapping_shaped_tones_input(),
-        overlapping_constant_tones_input(),
-        long_gate_sequence_input(),
-        long_shaped_gate_sequence_input(),
-    ]
+def make_real_inputs(scenario: str | None = None) -> list[Input]:
+    """Build all fixed scenarios, or only the named Input before any model work.
+
+    Returned inputs own detached fresh-source factories. An unknown scenario
+    raises ValueError listing legal Input names without constructing models.
+    """
+    builders = {
+        "carrier_sweep": carrier_sweep_input,
+        "gain_sweep": gain_sweep_input,
+        "length_sweep": length_sweep_input,
+        "idle_sweep": idle_sweep_input,
+        "gate_sequence": gate_sequence_input,
+        "simultaneous_drive": simultaneous_drive_input,
+        "shaped_gate_sequence": shaped_gate_sequence_input,
+        "overlapping_shaped_tones": overlapping_shaped_tones_input,
+        "overlapping_constant_tones": overlapping_constant_tones_input,
+        "long_gate_sequence": long_gate_sequence_input,
+        "long_shaped_gate_sequence": long_shaped_gate_sequence_input,
+    }
+    if scenario is None:
+        return [build() for build in builders.values()]
+    if scenario not in builders:
+        raise ValueError(
+            f"Unknown scenario: {scenario}. Legal names: {', '.join(builders)}"
+        )
+    return [builders[scenario]()]

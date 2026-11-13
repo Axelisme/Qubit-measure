@@ -4,8 +4,10 @@ import json
 from collections.abc import Callable, Generator
 from contextlib import closing, contextmanager
 from dataclasses import asdict, replace
+from datetime import datetime, timedelta
 from itertools import count
 from pathlib import Path
+from typing import Literal
 
 import numpy as np
 import pytest
@@ -20,7 +22,11 @@ from zcu_tools.simulate.evolution import (
 )
 
 from tests.simulate.evolution.contract.accuracy import ALL_FAMILIES
-from tests.simulate.evolution.contract.accuracy_cases import accuracy_case, history_case
+from tests.simulate.evolution.contract.accuracy_cases import (
+    AccuracyCase,
+    accuracy_case,
+    history_case,
+)
 from tests.simulate.evolution.contract.guard_sweep_cost import measure_engine_cost
 from tests.simulate.evolution.contract.reference import (
     ReferenceResult,
@@ -32,6 +38,7 @@ from tools.family_pareto import (
     FamilyResult,
     InputResult,
     ModeResult,
+    Refusal,
     Sample,
     dominance,
     main,
@@ -39,6 +46,7 @@ from tools.family_pareto import (
     measure_policy,
     render_summary,
     run_table,
+    tested_state,
     timing_equivalents,
 )
 from tools.family_pareto_inputs import Input, canonical_json, freeze_manifest
@@ -460,6 +468,38 @@ def test_exclusion_estimator_preserves_policies_modes_and_observed_paths() -> No
             assert all(path and "t6" not in path for path in result.paths)
 
 
+@pytest.mark.parametrize(
+    ("error", "reason", "blocked", "expected"),
+    [
+        (2e-3, None, None, "qualified"),
+        (2.0001e-3, None, None, "over_limit"),
+        (None, "guard_or_precondition", None, "guard_or_precondition"),
+        (None, "not_candidate", None, "not_candidate"),
+        (None, "guard_or_precondition", "companion refused", "companion_blocked"),
+    ],
+)
+def test_family_status_owns_accuracy_and_companion_priority(
+    error: float | None,
+    reason: Literal["guard_or_precondition", "not_candidate"] | None,
+    blocked: str | None,
+    expected: str,
+) -> None:
+    refusal = (
+        None
+        if reason is None
+        else Refusal("plateau", (0,), (0,), ("t6",), {"t6": reason})
+    )
+    policy = FamilyResult(
+        "t6",
+        error,
+        None if reason is None else "refused",
+        [],
+        refusal=refusal,
+        companion_blocked=blocked,
+    )
+    assert policy.status == expected
+
+
 @pytest.mark.sim
 def test_real_engine_pins_path_and_reports_domain_refusal_without_zero_values() -> None:
     item = Input("idle", lambda: accuracy_case("idle_coherence"), "tiny Engine seam")
@@ -528,6 +568,197 @@ def test_cli_freezes_then_measures_and_preserves_output_on_manifest_or_write_fai
     assert main(argv, inputs=inputs) == 1
     assert output.read_text() == complete
     assert main(["--freeze-inputs", str(tmp_path)], inputs=inputs) == 1
+
+
+def test_cli_scenario_selects_before_build_and_freezes_in_the_same_command(
+    tmp_path: Path,
+) -> None:
+    def must_not_build() -> AccuracyCase:
+        raise AssertionError("unselected input was built")
+
+    inputs = [
+        Input("unused", must_not_build, "must remain unbuilt"),
+        Input("idle", lambda: accuracy_case("idle_coherence"), "tiny scenario"),
+    ]
+    cache = tmp_path / "cache"
+    prepared = tmp_path / "prepared.json"
+    assert (
+        main(
+            [
+                "--scenario",
+                "idle",
+                "--prepare-references",
+                "--reference-cache",
+                str(cache),
+                "--output",
+                str(prepared),
+            ],
+            inputs=inputs,
+        )
+        == 0
+    )
+    matrix = tmp_path / "matrix.json"
+    report = tmp_path / "report.md"
+    assert (
+        main(
+            [
+                "--scenario",
+                "idle",
+                "--families",
+                "t4",
+                "--reference-cache",
+                str(cache),
+                "--output",
+                str(matrix),
+                "--summary",
+                str(report),
+                "--exclusive",
+                "--partial-output",
+                str(tmp_path / "journal.jsonl"),
+            ],
+            inputs=inputs,
+        )
+        == 0
+    )
+    saved = json.loads(matrix.read_text())
+    assert [item["name"] for item in saved["manifest"]["inputs"]] == ["idle"]
+    assert (
+        saved["manifest_sha256"] == json.loads(prepared.read_text())["manifest_sha256"]
+    )
+    assert saved["measurement"]["reference_cache_only"] is True
+    assert saved["exclusive"] is True
+    assert datetime.fromisoformat(saved["started_at_utc"]).utcoffset() == timedelta(0)
+    assert saved["inputs"][0]["policies"][0]["error"] < 2e-3
+
+
+def test_cli_scenario_cache_miss_stops_without_solving_and_explains_rebuild(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    matrix = tmp_path / "matrix.json"
+    cache = tmp_path / "empty-cache"
+    assert (
+        main(
+            [
+                "--scenario",
+                "idle",
+                "--families",
+                "t4",
+                "--reference-cache",
+                str(cache),
+                "--output",
+                str(matrix),
+                "--summary",
+                str(tmp_path / "report.md"),
+                "--partial-output",
+                str(tmp_path / "journal.jsonl"),
+            ],
+            inputs=[Input("idle", lambda: accuracy_case("idle_coherence"), "tiny")],
+        )
+        == 1
+    )
+    assert not matrix.exists()
+    assert not list(cache.glob("*.npz"))
+    assert "reference cache miss" in caplog.text
+    assert "--prepare-references" in caplog.text
+    assert "native thread" in caplog.text
+
+
+def test_cli_scenario_unknown_name_does_not_build_and_lists_legal_names(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    def must_not_build() -> AccuracyCase:
+        raise AssertionError("unknown selection must not build")
+
+    assert (
+        main(["--scenario", "unknown"], inputs=[Input("idle", must_not_build, "tiny")])
+        == 1
+    )
+    assert "Unknown scenario: unknown. Legal names: idle" in caplog.text
+
+
+@pytest.mark.parametrize(
+    "baseline_kind", ["fingerprint_mismatch", "malformed", "missing"]
+)
+def test_cli_summary_comparison_never_blocks_writing_current_measurement(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], baseline_kind: str
+) -> None:
+    inputs = [Input("idle", lambda: accuracy_case("idle_coherence"), "tiny")]
+    cache = tmp_path / "cache"
+    assert (
+        main(
+            [
+                "--scenario",
+                "idle",
+                "--prepare-references",
+                "--reference-cache",
+                str(cache),
+                "--output",
+                str(tmp_path / "prepared.json"),
+            ],
+            inputs=inputs,
+        )
+        == 0
+    )
+    destination = tmp_path / "current.json"
+    baseline = tmp_path / "baseline.json"
+    if baseline_kind == "fingerprint_mismatch":
+        baseline.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "name": "idle",
+                    "manifest_sha256": "old-manifest",
+                    "physical_sha256": "old-physical",
+                    "oracle_sha256": "old-oracle",
+                    "measured_families": ["t4"],
+                    "policies": {},
+                    "provenance": {
+                        "head": "old",
+                        "tree": "old",
+                        "dirty": False,
+                        "started_at_utc": "2026-11-12T00:00:00+00:00",
+                        "exclusive": True,
+                    },
+                }
+            )
+        )
+    elif baseline_kind == "malformed":
+        baseline.write_text("{}")
+    assert (
+        main(
+            [
+                "--scenario",
+                "idle",
+                "--families",
+                "t4",
+                "--reference-cache",
+                str(cache),
+                "--output",
+                str(tmp_path / "matrix.json"),
+                "--summary",
+                str(tmp_path / "report.md"),
+                "--partial-output",
+                str(tmp_path / "journal.jsonl"),
+                "--summary-output",
+                str(destination),
+                "--compare-summary",
+                str(baseline),
+            ],
+            inputs=inputs,
+        )
+        == 0
+    )
+    saved = json.loads(destination.read_text())
+    assert saved["measured_families"] == ["t4"]
+    assert saved["policies"]["t4"]["status"] == "qualified"
+    assert saved["provenance"]["exclusive"] is False
+    assert saved["provenance"]["dirty"] == tested_state()["dirty"]
+    assert destination.with_suffix(".md").exists()
+    assert (
+        "Not comparable"
+        if baseline_kind == "fingerprint_mismatch"
+        else "Comparison unavailable"
+    ) in capsys.readouterr().out
 
 
 def test_cli_selects_families_without_changing_inputs_or_default_group(

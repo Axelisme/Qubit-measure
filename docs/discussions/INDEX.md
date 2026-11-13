@@ -18,6 +18,8 @@
 
 ## 模擬量測環境
 
+- 2026-11-14 [Family 量表的單場景重量與摘要](2026-11-14-family-pareto-remeasurement.md)：參考解與完整結果跨 worktree 共用本機儲存，摘要入庫，比對不判跨時段快慢。
+
 - 2026-10-13 [模擬量測環境、低能投影與 FTF preset 的討論](2026-10-13-simulation-environment-ftf-preset.md)：保留環境與 preset 的早期選項，後續方向見[模擬環境草稿](../adr/draft/simulation-environments.md)。
 - 2026-10-15 [離線GPU建庫、分段演化與插值重用](2026-10-15-offline-propagator-library.md)：離線建庫的早期方案已由 [FTF 模擬加速討論](2026-10-16-ftf-simulation-speedup.md) 的 runtime 路線取代。
 - 2026-10-16 [FTF 模擬加速：快速路徑、shot 統計、分段快取與分派決策圖](2026-10-16-ftf-simulation-speedup.md)：每點演化一次後做 shot 統計抽樣，以 runtime 分派和快取取代離線 U 表與 density record。

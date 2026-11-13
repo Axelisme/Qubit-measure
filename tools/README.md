@@ -173,8 +173,97 @@ Add `--include-synthetic` to also measure the unchanged accuracy inventory and
 twelve amplified synthetic workloads. Reports separate
 the two categories; deletion conclusions use real inputs only.
 
-Freeze the versioned input manifest before measuring. From the lane root, replace
-`<worktree>` with its absolute path and choose a new `<results>` directory:
+### Single-scenario remeasurement
+
+Select a scenario by its `Input.name` from the table below. The tool selects the
+builder before constructing any model, freezes that input and measures it in the
+same command. An unknown name fails with the legal names. Do not supply a manifest.
+After obtaining the timing budget, run from the worktree root:
+
+```bash
+uv run --directory <worktree> --no-sync -- \
+  python tools/run_heavy.py --exclusive --log <results>/run.log <timing-timeout-seconds> -- \
+  python -m tools.family_pareto --scenario shaped_gate_sequence --exclusive \
+  --summary-output tools/data/family_pareto/summaries/shaped_gate_sequence.json \
+  > <results>/receipt.json
+```
+
+The runner's `--exclusive` acquires the lock. The inner `--exclusive` only records
+the caller's declaration. The tool neither verifies the lock nor reads the receipt.
+It records its own UTC start time, HEAD, tree and dirty state in the matrix and
+summary. Dates and exclusive annotations do not determine accuracy or eligibility.
+
+By default, references live in
+`<main repo>/.agent_state/benchmark/family_pareto/references/`. The tool locates the
+main repository with Git's absolute common directory, so all worktrees share the
+cache. It creates missing directories. Complete matrices, diagnostic reports and
+journals default to `<main repo>/.agent_state/benchmark/family_pareto/<Input.name>/<run-id>/`.
+These files stay local and survive task cleanup. `--output`, `--summary` and
+`--partial-output` override the matrix, diagnostic report and journal paths.
+The command prints their destinations. Do not add references or full matrices to Git.
+
+Single-scenario measurement is cache-only. A missing key stops without solving.
+The diagnostic names the key and explains reference preparation. Native thread
+settings can change the final floating-point bits of model inputs and their hashes.
+Always use `run_heavy.py` for preparation, freezing and measurement so these settings
+match. Clearing local data or moving to another machine requires preparing references
+again. A cache miss does not grant permission to solve. After cost approval, rebuild
+one scenario's references nonexclusively with:
+
+```bash
+uv run --directory <worktree> --no-sync -- \
+  python tools/run_heavy.py --log <results>/reference.log <reference-timeout-seconds> -- \
+  python -m tools.family_pareto --scenario shaped_gate_sequence --prepare-references \
+  --output <results>/reference.json > <results>/reference-receipt.json
+```
+
+Preparation uses the existing reference owner and its physical-input/tolerance key.
+It loads valid cache entries and solves only misses. Add `--reference-cache-only`
+to preparation to forbid solving. `--reference-cache <directory>` overrides the
+shared reference location without changing the key or solver contract.
+
+`--summary-output <path>.json` writes one current-run summary and a generated sibling
+`.md`, creating parents as needed. Without it, the tool writes `summary.json` beside
+the complete matrix. To update the tracked record, point it at
+`tools/data/family_pareto/summaries/<Input.name>.json` and review the whole replacement.
+There is no exclusive, clean-tree or all-family write gate, and no policy-by-policy
+merge of different runs. `--families` still produces a partial measurement.
+
+`family_pareto_summary.py` owns the summary schema, builder, JSON/Markdown output and
+comparison. JSON is the numeric source. Each pinned policy, default policy and
+fixed observed family group retains its status, final density error, three history
+modes' wall/process CPU medians, sample counts and unmeasured reasons. Missing values
+remain `null`. Refused policies have zero samples in every mode and the refusal as
+the unmeasured reason. Whitelists, companions and attribution identify group cost;
+these are not isolated target timings. Provenance includes HEAD/tree/dirty, tool UTC
+start time and the exclusive annotation. Manifest/physical/oracle hashes and
+`measured_families` identify inputs and coverage. The summary stores no dominance.
+
+`FamilyResult.status` owns the five outcomes and the final-error limit. They are
+`qualified` for error ≤ 2e-3, `over_limit`, `guard_or_precondition`, `not_candidate`
+and `companion_blocked`. Companion refusal takes precedence over target refusal.
+Reports and summaries read this property. Missing public refusal facts fail instead
+of guessing a classification from text.
+
+The command compares against the tracked scenario JSON if available.
+`--compare-summary <path>.json` selects another baseline. It reads the baseline
+before writing, including when both paths are the same. Missing or invalid baselines
+print a diagnostic but do not block the new summary. Different input fingerprints
+mark the runs not comparable. Partial runs compare only common measured families,
+plus separately present default/fixed groups, and list families missing from either
+run. Output lists status/error pairs, mode values and numerical time deltas, plus
+version, dirty, exclusive and coverage changes. These differences do not establish
+cross-run speed or dominance.
+
+Historical full matrices are not converted into this summary schema. New records
+require new measurements. Preparing references or running the example commands still
+requires the corresponding cost approval.
+
+### Inventory-wide manifest workflow
+
+Without `--scenario`, freeze the versioned input manifest before measuring. From
+the lane root, replace `<worktree>` with its absolute path and choose a new
+`<results>` directory:
 
 ```bash
 mkdir -p <results>
@@ -508,7 +597,9 @@ justify deleting a target. Family conclusions compare equal-companion groups.
 The summary reports each family's prepare/apply thread CPU and its fraction of
 summed reported thread CPU. These fractions are not wall or process-CPU shares.
 
-`--reference-cache <directory>` enables a local disk cache, off by default.
+In the inventory-wide manifest workflow, `--reference-cache <directory>` enables
+a local disk cache, off by default. Single-scenario commands use the shared cache
+and default to cache-only measurement as described above.
 `--prepare-references` with `--manifest`, `--reference-cache` and `--output`
 prepares it without Engine timing or a summary. Run that phase nonexclusive.
 Its report records physical hashes, density shapes, convergence and solve/cache

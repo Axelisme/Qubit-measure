@@ -121,7 +121,7 @@ def _policy_lines(row: InputResult) -> list[str]:
         if policy.error is None:
             lines.append(
                 f"| {policy.family} | — | "
-                f"{'companion-blocked' if policy.companion_blocked else 'unavailable'}: "
+                f"{policy.status}: "
                 f"{policy.companion_blocked or policy.unavailable}; "
                 f"first-group classification: {policy.refusal.family_reasons if policy.refusal else {}} | — | — | — | — | — | — |"
             )
@@ -151,7 +151,7 @@ def _policy_lines(row: InputResult) -> list[str]:
                 ]
                 peers = row.timing_equivalents.get(policy.family, {}).get(cell, [])
                 lines.append(
-                    f"| {policy.family} | {policy.error:.12g} | {'PASS' if policy.error <= 2e-3 else 'FAIL'} | "
+                    f"| {policy.family} | {policy.error:.12g} | {'PASS' if policy.status == 'qualified' else 'FAIL'} | "
                     f"{cell} | {value:.9g} | {len(mode.samples)} | {mode.samples[0].paths} | {', '.join(labeled_competitors) or 'none'} | {', '.join(peers) or 'none'} |"
                 )
     return lines
@@ -228,7 +228,8 @@ def render_summary(
         else:
             worst = max(p.error for _, p in available if p.error is not None)
             lines.append(
-                f"Maximum density error {worst:.12g}: {'PASS' if worst <= 2e-3 else 'FAIL'}."
+                f"Maximum density error {worst:.12g}: "
+                f"{'FAIL' if any(p.status == 'over_limit' for _, p in available) else 'PASS'}."
             )
             if nondominated:
                 lines.append(
