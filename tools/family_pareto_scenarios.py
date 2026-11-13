@@ -772,6 +772,75 @@ def overlapping_shaped_tones_input() -> Input:
     )
 
 
+def overlapping_constant_tones_input() -> Input:
+    """Compile a fixed carrier and 24 scanned carriers with full constant overlap.
+
+    Both charge lines act on the same full integer-fluxonium model. Pump stays
+    at DC E1-E0; Stokes scans +/-50 MHz around it. Both supports are 1 us.
+    Gains .02/.002 preserve the generic reset's physical charge-drive scale
+    on the integer model's stronger line, with a tenfold weaker probe. These
+    controls are benchmark settings, not a calibrated reset or AC Stark scan.
+    Input.build returns a fresh caller-owned source that must be closed.
+    """
+    carriers: dict[str, object] = {}
+
+    def emit(builder: TimelineBuilder, model: SecularModel) -> None:
+        center = float((model.energies_ghz[1] - model.energies_ghz[0]) * 1000)
+        carriers.update(
+            {
+                "fixed_carrier_mhz": center,
+                "scanned_carrier_range_mhz": [center - 50, center + 50],
+            }
+        )
+        carrier = builder.add_sweep(
+            "carrier",
+            SweepCfg(start=center - 50, stop=center + 50, step=100 / 23, expts=24),
+        )
+        builder.fork("default", into="probe")
+        builder.emit(
+            Pulse(
+                "pump",
+                PulseCfg(
+                    ch=1,
+                    nqz=1,
+                    freq=center,
+                    gain=0.02,
+                    waveform=ConstWaveformCfg(length=1.0),
+                ),
+            )
+        )
+        builder.emit(
+            Pulse(
+                "probe",
+                PulseCfg(
+                    ch=2,
+                    nqz=1,
+                    freq=center,
+                    gain=0.002,
+                    waveform=ConstWaveformCfg(length=1.0),
+                ),
+                freq=carrier,
+            ),
+            timeline="probe",
+        )
+        builder.join("probe", into="default")
+
+    item = integer_fluxonium_input(
+        "overlapping_constant_tones",
+        emit,
+        {
+            "pulse_sequence": "equal-length fully overlapping constant charge tones, fixed Pump and scanned Stokes, then terminal readout",
+            "waveform": "constant",
+            "pulse_length_us": 1.0,
+            "gains": {"Pump": 0.02, "Stokes": 0.002},
+            "carrier_method": "DC model E1-E0, Stokes offset +/-50 MHz",
+            "controls_reason": "dual-tone reset core and +/-50 MHz form range; generic reset 1 us support and physical drive scale, tenfold weaker probe; not calibrated",
+        },
+        ("floquet", "common_frame", "multitone_rwa", "dop853"),
+    )
+    return replace(item, manifest={**item.manifest, **carriers})
+
+
 def make_real_inputs() -> list[Input]:
     """Build fixed real-model scenarios with detached fresh-source factories."""
     return [
@@ -783,4 +852,5 @@ def make_real_inputs() -> list[Input]:
         simultaneous_drive_input(),
         shaped_gate_sequence_input(),
         overlapping_shaped_tones_input(),
+        overlapping_constant_tones_input(),
     ]

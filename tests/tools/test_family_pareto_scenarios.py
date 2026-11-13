@@ -140,6 +140,35 @@ def test_delay_scan_compiles_two_same_qubit_gaussians_from_separated_to_overlapp
         )
 
 
+def test_constant_tone_scan_compiles_fully_overlapping_same_qubit_drives() -> None:
+    from tools import family_pareto_scenarios
+
+    item = family_pareto_scenarios.overlapping_constant_tones_input()
+    with closing((case := item.build()).source):
+        batch = case.batch
+        assert len(batch.points) == 24
+        assert len(batch.tracks) == 2
+        first, second = batch.tracks
+        assert first.port != second.port
+        assert np.all(first.active) and np.all(second.active)
+        np.testing.assert_array_equal(first.start_ns, second.start_ns)
+        np.testing.assert_array_equal(first.duration_ns, second.duration_ns)
+        assert np.all(first.duration_ns > 0)
+        for track in batch.tracks:
+            assert all(envelope.kind == "constant" for envelope in track.envelopes)
+        carrier_ranges = sorted(np.ptp(track.frequency_ghz) for track in batch.tracks)
+        assert carrier_ranges[0] == 0 and carrier_ranges[1] > 0
+        scanned = max(batch.tracks, key=lambda track: np.ptp(track.frequency_ghz))
+        assert np.all(np.diff(scanned.frequency_ghz) > 0)
+        model = case.source.model((0,))
+        ports = {drive.name: drive for drive in model.drives}
+        np.testing.assert_array_equal(
+            ports[first.port].in_phase_ghz, ports[second.port].in_phase_ghz
+        )
+        assert np.any(ports[first.port].in_phase_ghz != 0)
+        assert np.all(batch.end_ns >= first.start_ns + first.duration_ns)
+
+
 def test_joint_scan_compiles_synchronous_independent_drive_ports() -> None:
     from tools.family_pareto_scenarios import simultaneous_drive_input
 

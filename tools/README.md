@@ -167,7 +167,8 @@ gate-sequence scans, plus a synchronous dual-port
 scan on the fixed FTF model with 32 retained joint states and local 4×4×4.
 A 24-point Gaussian relative-delay scan uses the fixed integer-fluxonium model
 with native cutoff 80 and 20 retained levels. Its two charge ports address the
-same qubit.
+same qubit. A separate 24-point constant-tone carrier scan uses those same
+integer-model charge ports with equal support and complete overlap.
 Add `--include-synthetic` to also measure the unchanged accuracy inventory and
 twelve amplified synthetic workloads. Reports separate
 the two categories; deletion conclusions use real inputs only.
@@ -334,6 +335,7 @@ not at the end of that window.
 | N `gate_sequence` | Prefix of repeated X,Y,-X,-Y phase alphabet, terminal readout | Gate count 1 to 24 | Constant 20 ns gates, gain .1 | 2 to 35 | Ragged sequences with a reusable alphabet, without random seeds. |
 | M `simultaneous_drive` | Synchronous F1/F2 drives, terminal readout | Shared gain .01 to .1 | Two Gaussians, 100 ns, sigma 20 ns | 2 | Independent joint-model drive operators under overlapping shaped controls. |
 | S `shaped_gate_sequence` | Prefix of repeated Gaussian X,Y,-X,-Y gates, terminal readout | Gate count 1 to 24 | Gaussian 100 ns gates, sigma 20 ns, gain .1 | 2 to 47 | Reuses N's alphabet and ragged prefixes with A's shaped-gate support and width, separating shape from sequence reuse. |
+| O1 `overlapping_constant_tones` | Fully overlapping constant Pump/Stokes pair, terminal readout | Pump fixed at DC E1−E0; Stokes scans that center ±50 MHz | Both 1000 ns; gains .02/.002 | 2 | A carrier slice of the dual-tone reset scan on one qubit, without a cavity drive. |
 | O2 `overlapping_shaped_tones` | Stokes-first Gaussian pair on one qubit, terminal readout | Stokes lead .3 to 0 us | Both supports .3 us, sigma .05 us; Pump 7241.848921606473 MHz/gain .030001831166453; Stokes 3111.1686681315896 MHz/gain .100006103888177 | Public support partition includes single-tone, overlap and idle spans | Uses the STIRAP delay sequence without artificial inventory repeats. |
 
 M uses public timeline fork/join to start both drives together and place readout
@@ -363,6 +365,25 @@ The endpoints remain separated and fully overlapping. Each shot has one pair;
 changing the relative lead changes overlap support, rather than repeating a
 canonical gate 20 times for `multitone_gate`'s default cost preference.
 Pinning `multitone_gate` bypasses that preference, not its numerical guards.
+
+O1 takes its overlap sequence from `twotone/reset/dual_tone/freq` and its
+±50 MHz scan range from that experiment's Form. The Form's actual reset
+frequencies and gains come from caller-owned component ext values, not fixed
+calibrations. The generic `two_pulse_reset` template supplies constant 1 us
+supports and gain .2. O1 uses DC E1−E0 as an explicit uncalibrated carrier center.
+The generic single-model charge line has coefficient .1 GHz/gain; the integer
+line has 1 GHz/gain. Pump gain .02 preserves the .02 GHz charge coefficient
+of the template's .2 gain on the single line. Stokes gain .002 gives a tenfold
+weaker probe on the same operator. These coefficients are not Rabi rates.
+Both pulses start together on generators 1 and 2, use equal support, and end
+before the generator 0/ADC 0 readout described for O2. There is no cavity drive
+before readout, so this is not an AC Stark experiment or a calibrated reset.
+The small drive coefficients and nearby positive carriers give `common_frame`
+and `floquet` a potential admission point. Actual numerical guards still decide
+availability; the scan adds no repetitions, guard overrides or runtime fallback.
+The fixed target declarations assign all driven rows/ns to the target and the
+idle tail to `t4`, using public compiled supports before any Engine measurement.
+Default routing and its observed-union group keep their existing protocol.
 
 `integer_fluxonium_input(name, emit, manifest, families)` owns the shared fixed
 integer settings, board, environment, compilation and numeric-source detachment.
