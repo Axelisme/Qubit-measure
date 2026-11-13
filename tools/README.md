@@ -319,14 +319,14 @@ convergence claim for arbitrary CZ pulses or the full native/local model.
 FTF references and timings must be rebuilt at 32 states; 16-state results do not
 apply.
 
-All six single-model scans use the full 21-level model. Their carrier center is
+All single-fluxonium scans use the full 21-level model. Their carrier center is
 DC E1−E0 from that fixed model. Gains, phases and durations are illustrative
 benchmark settings, not fitted calibrations or calibrated pi/pi/2 rotations.
 Every shot ends in readout at the fixed bare cavity frequency, gain .1, with a
 1 us pulse/window and fixed flight time. The Engine batch ends at readout start,
 not at the end of that window.
 
-| Scan | Core sequence | Requested axis, 24 points | Envelope and pulse lengths | Compiled logical spans per point | Reason |
+| Scan | Core sequence | Requested axis (24 points unless stated) | Envelope and pulse lengths | Compiled logical spans per point | Reason |
 | --- | --- | --- | --- | --- | --- |
 | F `carrier_sweep` | One drive, terminal readout | DC E1−E0 ±100 MHz | Constant, 1000 ns, gain .1 | 2 | Frequency reuse without exact duplicate carriers. |
 | A `gain_sweep` | One drive, terminal readout | Gain .01 to .1 | Gaussian, 100 ns, sigma 20 ns | 2 | Shaped-family input at fixed envelope and carrier. |
@@ -335,6 +335,8 @@ not at the end of that window.
 | N `gate_sequence` | Prefix of repeated X,Y,-X,-Y phase alphabet, terminal readout | Gate count 1 to 24 | Constant 20 ns gates, gain .1 | 2 to 35 | Ragged sequences with a reusable alphabet, without random seeds. |
 | M `simultaneous_drive` | Synchronous F1/F2 drives, terminal readout | Shared gain .01 to .1 | Two Gaussians, 100 ns, sigma 20 ns | 2 | Independent joint-model drive operators under overlapping shaped controls. |
 | S `shaped_gate_sequence` | Prefix of repeated Gaussian X,Y,-X,-Y gates, terminal readout | Gate count 1 to 24 | Gaussian 100 ns gates, sigma 20 ns, gain .1 | 2 to 47 | Reuses N's alphabet and ragged prefixes with A's shaped-gate support and width, separating shape from sequence reuse. |
+| N-long `long_gate_sequence` | N's constant X,Y,-X,-Y prefixes, terminal readout | Gate counts 50, 100, 200 (three points) | Same constant 20 ns gates and gain .1 as N | Public compiled support partition, including alignment gaps and readout lead | Checks whole-sequence accuracy beyond 24 gates without replacing N. |
+| S-long `long_shaped_gate_sequence` | S's Gaussian X,Y,-X,-Y prefixes, terminal readout | Gate counts 50, 100, 200 (three points) | Same Gaussian 100 ns gates, sigma 20 ns and gain .1 as S | Public compiled support partition, including alignment gaps and readout lead | Checks shaped-gate reuse at long sequence lengths without replacing S. |
 | O1 `overlapping_constant_tones` | Fully overlapping constant Pump/Stokes pair, terminal readout | Pump fixed at DC E1−E0; Stokes scans that center ±50 MHz | Both 1000 ns; gains .02/.002 | 2 | A carrier slice of the dual-tone reset scan on one qubit, without a cavity drive. |
 | O2 `overlapping_shaped_tones` | Stokes-first Gaussian pair on one qubit, terminal readout | Stokes lead .3 to 0 us | Both supports .3 us, sigma .05 us; Pump 7241.848921606473 MHz/gain .030001831166453; Stokes 3111.1686681315896 MHz/gain .100006103888177 | Public support partition includes single-tone, overlap and idle spans | Uses the STIRAP delay sequence without artificial inventory repeats. |
 
@@ -351,6 +353,20 @@ Gaussian width. The support spans five sigma. These are fixed benchmark gates,
 not calibrated pi rotations. The lab's generic `pi_pulse` creation template
 seeds a constant pulse, so it supplies no calibrated Gaussian duration.
 S adds no random gates or extra repetitions to make a family admissible.
+
+`long_gate_sequence_input()` and `long_shaped_gate_sequence_input()` compile
+N-long and S-long through the same public program and single-fluxonium model
+path as N and S. The default fixed inventory includes both three-point scans
+alongside the original nine scenarios. Only the requested gate counts change.
+The model and board values retain source commit
+`303074e166d1a563addfab4fd94717d958a7dd56`; DC bias, initial density, carrier,
+phase cycle, pulse parameters and terminal readout follow N or S respectively.
+Each branch emits its complete prefix without idealizing away compiler timing.
+The frozen manifest declares the gate counts and complete target/`t4` rows/ns
+from public compiled supports. Long-sequence reference reuse requires checking
+the full physical input, point order, basis, both tolerances and convergence
+contract; matching gate counts or pulse durations alone does not permit reuse.
+Accuracy-only family observations are not exclusive timing samples.
 
 O2 copies the integer model's two charge lines, Pump on generator 1 and Stokes
 on generator 2. Both couple to the full charge operator at 1 GHz/gain.
