@@ -671,6 +671,8 @@ def overlapping_shaped_tones_input() -> Input:
     """
     shaped = ("single_tone_gate", "shaped_sambe", "gate_cache", "period_table")
     overlapping = ("common_frame", "multitone_gate", "multitone_rwa")
+    single_companion = "multitone_gate"
+    overlap_companion = "shaped_sambe"
 
     def emit(builder: TimelineBuilder, _model: SecularModel) -> None:
         lead = builder.add_table_sweep("lead", np.linspace(0.3, 0.0, 24).tolist())
@@ -736,12 +738,12 @@ def overlapping_shaped_tones_input() -> Input:
                 durations[tones] += end - start
     idle, single, multiple = [(counts[i], durations[i]) for i in range(3)]
     expected = {
-        family: {family: single, "multitone_rwa": multiple, "t4": idle}
+        family: {family: single, single_companion: multiple, "t4": idle}
         for family in shaped
     }
     expected.update(
         {
-            family: {family: multiple, "single_tone_gate": single, "t4": idle}
+            family: {family: multiple, overlap_companion: single, "t4": idle}
             for family in overlapping
         }
     )
@@ -750,8 +752,8 @@ def overlapping_shaped_tones_input() -> Input:
         "t4": idle,
     }
     companions = {
-        **{family: ("multitone_rwa", "t4") for family in shaped},
-        **{family: ("single_tone_gate", "t4") for family in overlapping},
+        **{family: (single_companion, "t4") for family in shaped},
+        **{family: (overlap_companion, "t4") for family in overlapping},
         "dop853": ("t4",),
     }
     return replace(
