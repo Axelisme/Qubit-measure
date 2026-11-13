@@ -44,9 +44,19 @@ def _single_input(
     emit: Callable[[TimelineBuilder, float], None],
     manifest: dict[str, object],
     families: tuple[str, ...],
+    *,
+    dc_bias_phi0: float | None = None,
 ) -> Input:
-    """Own single-model resources; compile a core sequence before fixed readout."""
+    """Compile at fixed DC; an optional offset override leaves the live source unchanged."""
     settings = parse_single_fluxonium(SINGLE_MODEL)
+    if dc_bias_phi0 is not None:
+        settings = settings.model_copy(
+            update={
+                "dc_bias": settings.dc_bias.model_copy(
+                    update={"offset_phi0": dc_bias_phi0}
+                )
+            }
+        )
     settings = settings.model_copy(
         update={
             "drift": None,
@@ -201,6 +211,19 @@ def carrier_sweep_input() -> Input:
     return; Input.build supplies a fresh caller-owned numeric source. All timing
     and amplitudes come from the public compiler/environment conversion.
     """
+    return _carrier_sweep_input("carrier_sweep")
+
+
+def carrier_sweep_bias045_input() -> Input:
+    """Compile F at 0.45 Phi0 with its model E1-E0 center and unchanged offsets.
+
+    Pulse controls, compiler conversion and ownership follow carrier_sweep_input.
+    """
+    return _carrier_sweep_input("carrier_sweep_bias045", dc_bias_phi0=0.45)
+
+
+def _carrier_sweep_input(name: str, *, dc_bias_phi0: float | None = None) -> Input:
+    """Share F's public-program sequence between the two fixed DC settings."""
 
     def emit(builder: TimelineBuilder, center: float) -> None:
         carrier = builder.add_sweep(
@@ -222,7 +245,7 @@ def carrier_sweep_input() -> Input:
         )
 
     return _single_input(
-        "carrier_sweep",
+        name,
         emit,
         {
             "pulse_sequence": "constant drive, then terminal readout",
@@ -232,6 +255,7 @@ def carrier_sweep_input() -> Input:
             "carrier_offset_range_mhz": [-100, 100],
         },
         _PLATEAU,
+        dc_bias_phi0=dc_bias_phi0,
     )
 
 
@@ -368,6 +392,19 @@ def gate_sequence_input() -> Input:
     These are benchmark gates, not calibrated rotations or random RB sequences.
     Ownership and compilation failures follow carrier_sweep_input.
     """
+    return _gate_sequence_input("gate_sequence")
+
+
+def gate_sequence_bias045_input() -> Input:
+    """Compile N at 0.45 Phi0 with its model E1-E0 carrier and unchanged gates.
+
+    Prefixes, compiler conversion and ownership follow gate_sequence_input.
+    """
+    return _gate_sequence_input("gate_sequence_bias045", dc_bias_phi0=0.45)
+
+
+def _gate_sequence_input(name: str, *, dc_bias_phi0: float | None = None) -> Input:
+    """Share N's public-program sequence between the two fixed DC settings."""
 
     def emit(builder: TimelineBuilder, center: float) -> None:
         builder.add_loop("count", 24)
@@ -394,7 +431,7 @@ def gate_sequence_input() -> Input:
                         builder.emit(gates[index % len(gates)])
 
     return _single_input(
-        "gate_sequence",
+        name,
         emit,
         {
             "pulse_sequence": "1..24 gates from repeated X,Y,-X,-Y phase alphabet, terminal readout",
@@ -405,6 +442,7 @@ def gate_sequence_input() -> Input:
             "gate_phases_deg": [0, 90, 180, 270],
         },
         _PLATEAU,
+        dc_bias_phi0=dc_bias_phi0,
     )
 
 
@@ -853,4 +891,6 @@ def make_real_inputs() -> list[Input]:
         shaped_gate_sequence_input(),
         overlapping_shaped_tones_input(),
         overlapping_constant_tones_input(),
+        carrier_sweep_bias045_input(),
+        gate_sequence_bias045_input(),
     ]

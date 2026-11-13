@@ -1,6 +1,6 @@
 # tools/
 
-**Last updated:** 2026-11-12, simulator benchmark and experiment import contract
+**Last updated:** 2026-11-13, second-DC-bias family scenarios
 
 **讀者：** framework-dev。Repo 品質檢查與重計算執行器的 CLI、輸出與比較機制。
 
@@ -163,7 +163,8 @@ above keeps its workloads and comparison contract.
 
 The default inputs are fixed 24-point carrier, gain, length, idle and gate-sequence
 scans on the full 21-level single-fluxonium model, including constant and Gaussian
-gate-sequence scans, plus a synchronous dual-port
+gate-sequence scans. Separate F and N scans use that same model at 0.45 Φ0.
+The inputs also include a synchronous dual-port
 scan on the fixed FTF model with 32 retained joint states and local 4×4×4.
 A 24-point Gaussian relative-delay scan uses the fixed integer-fluxonium model
 with native cutoff 80 and 20 retained levels. Its two charge ports address the
@@ -319,8 +320,8 @@ convergence claim for arbitrary CZ pulses or the full native/local model.
 FTF references and timings must be rebuilt at 32 states; 16-state results do not
 apply.
 
-All six single-model scans use the full 21-level model. Their carrier center is
-DC E1−E0 from that fixed model. Gains, phases and durations are illustrative
+The single-fluxonium scans use the full 21-level model. Their carrier center is
+DC E1−E0 from the public model at each scan's fixed bias. Gains, phases and durations are illustrative
 benchmark settings, not fitted calibrations or calibrated pi/pi/2 rotations.
 Every shot ends in readout at the fixed bare cavity frequency, gain .1, with a
 1 us pulse/window and fixed flight time. The Engine batch ends at readout start,
@@ -329,14 +330,29 @@ not at the end of that window.
 | Scan | Core sequence | Requested axis, 24 points | Envelope and pulse lengths | Compiled logical spans per point | Reason |
 | --- | --- | --- | --- | --- | --- |
 | F `carrier_sweep` | One drive, terminal readout | DC E1−E0 ±100 MHz | Constant, 1000 ns, gain .1 | 2 | Frequency reuse without exact duplicate carriers. |
+| F-bias045 `carrier_sweep_bias045` | Same as F at 0.45 Φ0 | Biased DC E1−E0 ±100 MHz | Same as F | Same as F | Compares the same carrier offsets at a second DC bias. |
 | A `gain_sweep` | One drive, terminal readout | Gain .01 to .1 | Gaussian, 100 ns, sigma 20 ns | 2 | Shaped-family input at fixed envelope and carrier. |
 | L `length_sweep` | One drive, terminal readout | Length 20 to 400 ns | Constant, gain .1 | 1 or 2 | Changes support without also resampling a Gaussian. |
 | I `idle_sweep` | X-phase gate, idle, Y-phase gate, terminal readout | Idle 20 to 400 ns | Two constant 20 ns gates, gain .1 | 4 | Shared initial gate with changing gap and final absolute phase. |
 | N `gate_sequence` | Prefix of repeated X,Y,-X,-Y phase alphabet, terminal readout | Gate count 1 to 24 | Constant 20 ns gates, gain .1 | 2 to 35 | Ragged sequences with a reusable alphabet, without random seeds. |
+| N-bias045 `gate_sequence_bias045` | Same as N at 0.45 Φ0 | Gate count 1 to 24, carrier at biased DC E1−E0 | Same as N | Same as N | Compares the same compiled gate prefixes at a second DC bias. |
 | M `simultaneous_drive` | Synchronous F1/F2 drives, terminal readout | Shared gain .01 to .1 | Two Gaussians, 100 ns, sigma 20 ns | 2 | Independent joint-model drive operators under overlapping shaped controls. |
 | S `shaped_gate_sequence` | Prefix of repeated Gaussian X,Y,-X,-Y gates, terminal readout | Gate count 1 to 24 | Gaussian 100 ns gates, sigma 20 ns, gain .1 | 2 to 47 | Reuses N's alphabet and ragged prefixes with A's shaped-gate support and width, separating shape from sequence reuse. |
 | O1 `overlapping_constant_tones` | Fully overlapping constant Pump/Stokes pair, terminal readout | Pump fixed at DC E1−E0; Stokes scans that center ±50 MHz | Both 1000 ns; gains .02/.002 | 2 | A carrier slice of the dual-tone reset scan on one qubit, without a cavity drive. |
 | O2 `overlapping_shaped_tones` | Stokes-first Gaussian pair on one qubit, terminal readout | Stokes lead .3 to 0 us | Both supports .3 us, sigma .05 us; Pump 7241.848921606473 MHz/gain .030001831166453; Stokes 3111.1686681315896 MHz/gain .100006103888177 | Public support partition includes single-tone, overlap and idle spans | Uses the STIRAP delay sequence without artificial inventory repeats. |
+
+`carrier_sweep_bias045_input()` and `gate_sequence_bias045_input()` keep the
+fixed single-fluxonium physical and board values from the source commit above.
+They override only the public `DCBias.offset_phi0` from .5 to .45. The DC source
+still starts at zero, so `offset_phi0 + flux_per_unit * live_value` is .45 Φ0.
+Each builder obtains that bias's model through `snapshot()` and `model_facts()`.
+Its E1−E0 sets the requested carrier center before public program compilation.
+The original F and N builders stay at .5 Φ0. Each pair shares its core sequence,
+so the new bias retains F's 24 offsets and N's 1..24 prefixes, constant pulses,
+phase alphabet, compiler alignment gaps and terminal readout lead.
+The manifest records the effective settings and compiled carriers. These are
+separate inputs, not replacements or calibrated rotations. Builder availability
+does not establish reference convergence, family admission or timing at .45 Φ0.
 
 M uses public timeline fork/join to start both drives together and place readout
 after both finish. Its two carriers are the uncoupled local DC E1−E0 frequencies

@@ -1,12 +1,143 @@
 """Public fixed-scenario construction and reproducible manifest freezing."""
 
-from contextlib import closing
+from collections.abc import Iterator
+from contextlib import ExitStack, closing
 
 import numpy as np
 import pytest
+from zcu_tools.program import build_soccfg
+from zcu_tools.simulate.evolution import SecularModel
+from zcu_tools.simulators.single_fluxonium.config import parse_single_fluxonium
+from zcu_tools.simulators.single_fluxonium.environment import (
+    SingleFluxoniumSource,
+    single_fluxonium,
+)
 
 from tools.family_pareto_inputs import Input, canonical_json, freeze_manifest
 from tools.family_pareto_scenarios import make_real_inputs
+from tools.family_pareto_settings import BOARD_PROFILE, SINGLE_MODEL
+
+
+@pytest.fixture(scope="module")
+def bias045_model() -> Iterator[SecularModel]:
+    settings = parse_single_fluxonium(SINGLE_MODEL)
+    settings = settings.model_copy(
+        update={
+            "dc_bias": settings.dc_bias.model_copy(update={"offset_phi0": 0.45}),
+            "drift": None,
+        }
+    )
+    env = single_fluxonium(settings, soccfg=build_soccfg(BOARD_PROFILE))
+    with ExitStack() as stack:
+        stack.callback(env.devices.close_all_devices)
+        if env.close_backend is not None:
+            stack.callback(env.close_backend)
+        owner = stack.enter_context(
+            closing(SingleFluxoniumSource(settings, env.devices))
+        )
+        facts = owner.model_facts(owner.snapshot())
+        stack.enter_context(closing(facts.source))
+        assert facts.model.dc_flux == pytest.approx(0.45)
+        yield facts.source.model((0,))
+
+
+def assert_same_model(actual: SecularModel, expected: SecularModel) -> None:
+    assert actual.energies_ghz.shape == (21,)
+    np.testing.assert_allclose(actual.energies_ghz, expected.energies_ghz)
+    np.testing.assert_allclose(actual.rates_per_ns, expected.rates_per_ns)
+    np.testing.assert_allclose(actual.dephasing_per_ns, expected.dephasing_per_ns)
+    assert len(actual.drives) == len(expected.drives)
+    for drive, expected_drive in zip(actual.drives, expected.drives, strict=True):
+        assert drive.name == expected_drive.name
+        np.testing.assert_allclose(drive.in_phase_ghz, expected_drive.in_phase_ghz)
+        np.testing.assert_allclose(drive.quadrature_ghz, expected_drive.quadrature_ghz)
+
+
+def test_bias045_carrier_scan_uses_biased_model_and_preserves_compiled_offsets(
+    bias045_model: SecularModel,
+) -> None:
+    from tools import family_pareto_scenarios
+
+    item = family_pareto_scenarios.carrier_sweep_bias045_input()
+    original = family_pareto_scenarios.carrier_sweep_input()
+    with (
+        closing((case := item.build()).source),
+        closing((base := original.build()).source),
+    ):
+        model = case.source.model((0,))
+        base_model = base.source.model((0,))
+        assert_same_model(model, bias045_model)
+        assert not np.allclose(model.energies_ghz, base_model.energies_ghz)
+        center = model.energies_ghz[1] - model.energies_ghz[0]
+        base_center = base_model.energies_ghz[1] - base_model.energies_ghz[0]
+        assert len(case.batch.points) == 24
+        assert len(case.batch.tracks) == len(base.batch.tracks) == 1
+        track, base_track = case.batch.tracks[0], base.batch.tracks[0]
+        np.testing.assert_allclose(
+            track.frequency_ghz - center,
+            base_track.frequency_ghz - base_center,
+            atol=1e-8,
+        )
+        assert np.ptp(track.frequency_ghz) == pytest.approx(
+            np.ptp(base_track.frequency_ghz)
+        )
+        np.testing.assert_array_equal(track.active, base_track.active)
+        np.testing.assert_array_equal(track.start_ns, base_track.start_ns)
+        np.testing.assert_array_equal(track.duration_ns, base_track.duration_ns)
+        np.testing.assert_array_equal(track.amplitude, base_track.amplitude)
+        np.testing.assert_array_equal(track.phase_rad, base_track.phase_rad)
+        assert all(envelope.kind == "constant" for envelope in track.envelopes)
+        np.testing.assert_array_equal(track.envelope_index, base_track.envelope_index)
+        np.testing.assert_array_equal(case.batch.end_ns, base.batch.end_ns)
+        np.testing.assert_array_equal(case.batch.flux.level, base.batch.flux.level)
+
+
+def test_bias045_gate_scan_uses_biased_model_and_preserves_compiled_prefixes(
+    bias045_model: SecularModel,
+) -> None:
+    from tools import family_pareto_scenarios
+
+    item = family_pareto_scenarios.gate_sequence_bias045_input()
+    original = family_pareto_scenarios.gate_sequence_input()
+    with (
+        closing((case := item.build()).source),
+        closing((base := original.build()).source),
+    ):
+        model = case.source.model((0,))
+        assert_same_model(model, bias045_model)
+        assert not np.allclose(model.energies_ghz, base.source.model((0,)).energies_ghz)
+        center = model.energies_ghz[1] - model.energies_ghz[0]
+        batch = case.batch
+        np.testing.assert_array_equal(
+            np.sum([track.active for track in batch.tracks], axis=0),
+            np.arange(1, 25),
+        )
+        assert len(batch.tracks) == len(base.batch.tracks)
+        for track, base_track in zip(batch.tracks, base.batch.tracks, strict=True):
+            np.testing.assert_allclose(
+                track.frequency_ghz[track.active], center, atol=1e-8
+            )
+            np.testing.assert_array_equal(track.active, base_track.active)
+            np.testing.assert_array_equal(track.start_ns, base_track.start_ns)
+            np.testing.assert_array_equal(track.duration_ns, base_track.duration_ns)
+            np.testing.assert_array_equal(track.amplitude, base_track.amplitude)
+            np.testing.assert_array_equal(track.phase_rad, base_track.phase_rad)
+            assert all(envelope.kind == "constant" for envelope in track.envelopes)
+            np.testing.assert_array_equal(
+                track.envelope_index, base_track.envelope_index
+            )
+        for point, count in enumerate(range(1, 25)):
+            gates = sorted(
+                (track for track in batch.tracks if track.active[point]),
+                key=lambda track: track.start_ns[point],
+            )
+            np.testing.assert_allclose(
+                [gate.phase_rad[point] for gate in gates],
+                np.resize(np.arange(4) * np.pi / 2, count),
+                atol=1e-12,
+            )
+        np.testing.assert_array_equal(batch.end_ns, base.batch.end_ns)
+        np.testing.assert_array_equal(batch.flux.level, base.batch.flux.level)
 
 
 @pytest.fixture(scope="module")
