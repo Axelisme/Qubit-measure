@@ -1,6 +1,6 @@
 # Evolution kernels
 
-**Last updated:** 2026-11-13，共用 density 積分的 budget 語意
+**Last updated:** 2026-11-14，t6 dispatch ownership
 
 **讀者：** framework-dev、agent。查找演化算法的數值 owner，以及 kernel 與 dispatch、scheduler 的接縫。
 
@@ -18,6 +18,8 @@ Fourier 數值、phase graph 與 covariant gate builder 分別留在 `_rwa_fouri
 `dop853.advance_endpoints` 擁有旋轉座標 density 積分，`dop853` 與 `t6` direct
 沿用相同的每段 budget 容差規則。這是局部積分控制，不保證整條序列的最終誤差。
 `t6` channel 的積分與插值控制不變。
+[`_t6_dispatch`](../_t6_dispatch.py) 擁有 direct／channel 定價、完整 prepare-key
+inventory 與選擇。第一次 `t6.prepare` 才呼叫 publisher；kernel 只消費決定並建置數值產品。
 完整 owner 對照見 [evolution README](../README.md#algorithm-ownership-and-reuse)。
 
 ## 內部接縫

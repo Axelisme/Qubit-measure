@@ -8,9 +8,9 @@ from numpy.typing import NDArray
 from scipy.integrate import solve_ivp
 from scipy.linalg import expm, solve
 
+from .._t6_dispatch import inventory_key, prepare_keys
 from ..kernel import ApplyContext, KernelContext, Prepared, SegmentTable
-from ..secular import ModelSource, SecularModel
-from ..workplan import FactKey, WorkPlan
+from ..secular import SecularModel
 from . import dop853
 from ._secular import coherence_decay
 from ._workload_facts import packed_segments
@@ -225,98 +225,6 @@ def _fourier(problem: _ChannelProblem, budget: float) -> NDArray[np.complex128]:
 
 
 @dataclass(frozen=True)
-class _T6Price:
-    key: bytes
-    rows: int
-    size: int
-    direct: bool
-
-
-@dataclass(frozen=True)
-class _T6Inventory:
-    prices: tuple[_T6Price, ...]
-
-
-def publish_inventory(
-    table: SegmentTable, source: ModelSource, work_plan: WorkPlan
-) -> _T6Inventory:
-    """Publish input-only strategy choices from the complete acquire table.
-
-    The first prepare calls this lazily, using work_plan.complete_table when
-    present; otherwise table must be the standalone caller's complete geometry.
-    source supplies models for that geometry. Each constant-tone prepare key
-    counts all its rows, independently of histories, numerical admission and
-    density. Explicit early publication is also allowed. Repeated calls borrow
-    the first publication unchanged, sharing builder failures without retries.
-    No numerical products are retained here; missing published keys fail at prepare.
-    """
-
-    def build() -> _T6Inventory:
-        complete = work_plan.complete_table
-        full_table = table if complete is None else complete
-        rows = np.flatnonzero(
-            (full_table.tones == 1)
-            & full_table.constant_envelopes(
-                np.arange(len(full_table.timeline), dtype=np.int64)
-            )
-        )
-        keys, first, counts = np.unique(
-            _keys(full_table, rows), return_index=True, return_counts=True
-        )
-        prices = []
-        for key, row, count in zip(keys, rows[first], counts, strict=True):
-            size = len(full_table.model(source, row).energies_ghz)
-            duration = float(full_table.duration_ns[row])
-            frequency = abs(float(full_table.tone_frequency_ghz[row, 0]))
-            # Budget-scaled direct prices use warm 21-level I/L aggregates.
-            # Channel production aggregates give about 31 s per build.
-            # Dimension powers and the carrier factor remain uncalibrated
-            # outside those inputs. Prices do not model prefix lifetimes.
-            direct = 0.0012 * duration * max(1.0, frequency / 0.582) * (size / 21) ** 3
-            channel = 31.0 * (size / 21) ** 5
-            prices.append(
-                _T6Price(
-                    _inventory_key(key), int(count), size, count * direct < channel
-                )
-            )
-        return _T6Inventory(tuple(prices))
-
-    return work_plan.fact(FactKey("t6-inventory", _T6Inventory), build)
-
-
-def _inventory_key(key: np.void) -> bytes:
-    """Match np.unique's numeric zero equality when indexing inventory by bytes."""
-    normalized = key.copy()
-    for field in ("frequency", "amplitude", "duration"):
-        if normalized[field] == 0:
-            normalized[field] = 0.0
-    return normalized.tobytes()
-
-
-def _keys(table: SegmentTable, rows: NDArray[np.int64]) -> NDArray[np.void]:
-    keys = np.empty(
-        len(rows),
-        dtype=[
-            ("level", "<i8", (table.level.shape[1],)),
-            ("shift", "S64"),
-            ("port", "<i8"),
-            ("frequency", "<f8"),
-            ("amplitude", "<f8"),
-            ("duration", "<f8"),
-        ],
-    )
-    if not len(rows):
-        return keys
-    keys["level"] = table.level[rows]
-    keys["shift"] = table.shift_content[rows]
-    keys["port"] = table.tone_port[rows, 0]
-    keys["frequency"] = table.tone_frequency_ghz[rows, 0]
-    keys["amplitude"] = table.tone_amplitude[rows, 0]
-    keys["duration"] = table.duration_ns[rows]
-    return keys
-
-
-@dataclass(frozen=True)
 class _T6Prepared:
     coefficients: NDArray[np.complex128]
     modes: NDArray[np.float64]
@@ -388,7 +296,7 @@ class T6Kernel:
     ) -> NDArray[np.void]:
         """Return phase-independent keys with unchanged physical identity."""
         del context
-        return _keys(table, rows)
+        return prepare_keys(table, rows)
 
     def cost(self, table: SegmentTable, rows: NDArray[np.int64]) -> NDArray[np.float64]:
         """Return table-only nonnegative chunk-interleaving weights.
@@ -415,6 +323,8 @@ class T6Kernel:
         retained geometry or a publication must supply their complete table.
         A missing published key raises ValueError, never a worker-local choice.
         """
+        from .._t6_dispatch import publish_inventory
+
         source, budget = context.source, context.budget
         _check_budget(budget)
         if len(keys) != len(rows) or not np.array_equal(
@@ -428,7 +338,7 @@ class T6Kernel:
         models = [table.model(source, row) for row in rows]
         entries = []
         for key, row, model in zip(keys, rows, models, strict=True):
-            price = prices.get(_inventory_key(key))
+            price = prices.get(inventory_key(key))
             if price is None:
                 raise ValueError("t6: key absent from complete acquire inventory")
             if price.direct:

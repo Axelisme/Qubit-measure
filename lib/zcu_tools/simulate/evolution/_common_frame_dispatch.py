@@ -148,7 +148,7 @@ def _cheap_rwa(
     cheap = np.zeros(len(rows), dtype=bool)
     if rwa is None:
         return cheap
-    if table is context.work_plan.common_frame_table:
+    if table is context.work_plan.complete_table:
         inventory = populate_multitone_inventory(
             table, context.source, context.work_plan, context.budget
         )
@@ -184,7 +184,7 @@ def preferred(
     selected = ~_cheap_rwa(table, rows, context, rwa)
     if not np.any(selected):
         return selected
-    complete = context.work_plan.common_frame_table
+    complete = context.work_plan.complete_table
     if complete is None:
         raise RuntimeError("common-frame pricing requires complete geometry")
     pricing = populate_common_frame_plan(complete, context, price_rwa=rwa is not None)

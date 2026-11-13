@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-11-13, lazy complete-input t6 inventory
+**Last updated:** 2026-11-14, dispatch-owned t6 inventory
 
 **讀者：** framework-dev、agent。Segment evolution 的公開輸入、路由與數值邊界。
 
@@ -205,6 +205,7 @@ thresholds and algorithm details live with their owners:
 | --- | --- |
 | Row domains, named candidate order and terminal routes | [dispatch](_dispatch.py); [kernel collection](kernels/__init__.py) instantiates implementations only |
 | Shaped and two-tone cold-cost choices | [shaped dispatch](_shaped_dispatch.py), [two-tone dispatch](_two_tone_dispatch.py) return family names, not positional indices or unnamed flags |
+| `t6` direct/channel pricing and complete-acquire key inventory | [t6 dispatch](_t6_dispatch.py), called lazily by [t6 preparation](kernels/t6.py) |
 | Multitone gate amortization | [multitone dispatch](_multitone_dispatch.py) owns the 20-use cost preference and complete-acquire canonical-key inventory |
 | Slow/plateau carrier boundary | [slow-envelope comparison](kernels/slow_envelope.py) owns the strict absolute-carrier comparison shared by dispatch and its guard |
 | Common-frame pricing and numerical construction | [common-frame dispatch](_common_frame_dispatch.py), [kernel](kernels/common_frame_kernel.py) |
@@ -276,9 +277,10 @@ own the command and report format.
 | [`floquet`](kernels/floquet.py#L578), constant Stark tone plus probe | `two` | Larger absolute gain selects the Stark slot, with ties choosing the first; that slot requires positive carrier. Frame overlap ≥ 0.5, modal condition ≤ 1e8, maximum real eigenvalue ≤ 1e-10/ns and residual ≤ 1e-9; sampling extent ≤ 128 with at most 4096 phase samples. k=0 omission and convergence each fit B/3. Modal Dyson additionally uses r ≤ 0.1, r2 ≤ 0.05 when probe gain magnitude ≥ 0.1, Dyson norm-duration v ≤ 0.5, transfer indicator v + v²/2 ≤ 0.02 and higher-order remainder exp(v)·v³/6 ≤ B/3; otherwise use periodic channel playback. Retained-sideband admission instead requires convergence ≤ B/40 and bound ≤ 0.95B, retaining edges within 0.1/ns and averaging other harmonics through order 4. This finite-Fourier admission is not a density-error guarantee. | [`two_carriers`](../../../../tests/simulate/evolution/contract/accuracy_cases.py#L187) | PASS |
 | [`dop853`](kernels/dop853.py#L164), full-drive direct density integration | `shaped`, `two`, `multiple`, terminal candidate | No RWA or fast-path admission threshold. Accepts valid rows with finite positive B, including complex sampled envelopes. Stops at active control knots. Local rtol = min(1e-4, 0.03B), atol = min(1e-6, 0.0003B), from the [shared solver](kernels/_dop853.py#L182); these are not global error bounds. | [`shaped_complex`](../../../../tests/simulate/evolution/contract/accuracy_cases.py#L184), [`two_carriers`](../../../../tests/simulate/evolution/contract/accuracy_cases.py#L187), [`joint_gate_inventory`](../../../../tests/simulate/evolution/contract/accuracy_cases.py#L245) | PASS |
 
-`t6` selects direct when `N * C_direct < C_channel`; otherwise it builds a
-channel. `N` counts that prepare key's rows in the complete acquire inventory,
-not a worker subset or routing history. This count does not account for channel
+[t6 dispatch](_t6_dispatch.py) selects direct when
+`N * C_direct < C_channel`; otherwise [t6](kernels/t6.py) builds a channel.
+`N` counts that prepare key's rows in the complete acquire inventory, not a worker
+subset or routing history. This count does not account for channel
 rebuilds when a prepared prefix expires; the estimate does not model prefix
 lifetime. For `M` levels, duration `d` ns and absolute carrier `f` GHz, the
 estimates in seconds are
@@ -300,8 +302,8 @@ earlier heuristic. Different budgets can also change direct work without
 changing this estimate. These are coarse strategy-selection prices, not runtime
 guarantees. In particular, complete-inventory counts omit prefix-lifetime channel
 rebuilds. WorkPlan retains the complete table before prefix/worker planning.
-The first `t6.prepare` asks the publisher to build input-derived key counts,
-dimensions and decisions from that table. Prefixes and workers share the
+The first `t6.prepare` asks `_t6_dispatch.publish_inventory` to build key counts,
+dimensions and decisions from that table's inputs. Prefixes and workers share the
 publication through the existing single-flight fact, including builder failures.
 Plans without `t6.prepare` do not scan t6 candidate keys. Preparation rejects a
 missing published key rather than recounting its worker subset. Standalone Kernel
@@ -418,7 +420,8 @@ densities in place and returns a row-aligned boolean exceedance mask.
 evolve table before workers start. Prefix representatives, caller classification
 and timeline workers share it through `KernelContext` and `ApplyContext`. Engine
 drains its pool before closing the plan on success, cancellation or failure.
-Closing drops the retained complete geometry along with the evolve-local facts.
+The single `complete_table` field supplies full immutable geometry to common-frame,
+multitone and t6 dispatch. Closing drops it along with the evolve-local facts.
 The registry kernels retain no evolve-local data.
 
 ### Facts and algorithm groups

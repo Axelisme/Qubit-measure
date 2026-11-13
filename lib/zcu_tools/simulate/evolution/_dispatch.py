@@ -63,7 +63,6 @@ def create_work_plan(
     """
     plan = WorkPlan(content_key=content_key, complete_table=table)
     plan.routing.enabled = telemetry
-    plan.publish_common_frame_table(table)
     populate_carrier_plan(table, source, plan)
     plan_gain_groups(table, source, plan)
     populate_gate_inventory(table, source, plan)

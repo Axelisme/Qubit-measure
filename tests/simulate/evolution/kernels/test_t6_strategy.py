@@ -7,6 +7,7 @@ import numpy as np
 import pytest
 from numpy.typing import NDArray
 from zcu_tools.simulate.evolution import EnvelopeSpec, ModelSource
+from zcu_tools.simulate.evolution._t6_dispatch import publish_inventory
 from zcu_tools.simulate.evolution.kernel import (
     ApplyContext,
     KernelContext,
@@ -14,7 +15,7 @@ from zcu_tools.simulate.evolution.kernel import (
 )
 from zcu_tools.simulate.evolution.kernels import dop853
 from zcu_tools.simulate.evolution.kernels._dop853_data import pack_segments
-from zcu_tools.simulate.evolution.kernels.t6 import T6Kernel, publish_inventory
+from zcu_tools.simulate.evolution.kernels.t6 import T6Kernel
 from zcu_tools.simulate.evolution.workplan import WorkPlan
 
 from ..contract.kernel_suite import KernelCase, reference, synthetic_model
