@@ -1,6 +1,6 @@
 # tools/
 
-**Last updated:** 2026-11-14, recorded thirteen scenario summaries
+**Last updated:** 2026-11-14, qualified family dominance and thirteen-workload conclusions
 
 **讀者：** framework-dev。Repo 品質檢查與重計算執行器的 CLI、輸出與比較機制。
 
@@ -182,8 +182,10 @@ The thirteen recorded tables use clean commit
 access, all 17 pinned families, default routing and its fixed observed union.
 The generated summaries retain over-limit errors and refusal reasons.
 JSON is the numeric source; the paired Markdown lists the same outcomes and provenance.
-These records contain no dominance conclusions. Compare times within one table,
-not across scenarios or measurement runs.
+These records contain no dominance conclusions. The
+[kernel evidence table](../lib/zcu_tools/simulate/evolution/README.md#recorded-real-workload-evidence)
+lists the qualified candidates' non-dominated workloads and evidence limits.
+Compare times within one table, not across scenarios or measurement runs.
 
 | Scenario | Generated summary | Numeric source |
 | --- | --- | --- |
@@ -389,18 +391,25 @@ controls `2e-10/2e-12` and `2e-12/2e-14`. Its two density results must differ by
 most `2e-6`. Every solver's error is measured, including exact families. Values
 above `2e-3` remain FAIL. Existing strict xfails are not removed.
 
-A competitor dominates only when its maximum full-density error across that
-mode's retained raw samples is no larger and its median time is
-**less than `0.9 * target_time`**. Other-mode errors do not enter this
-comparison. The family-level maximum across all timed modes remains the
-overall accuracy/PASS-FAIL value. Exactly 10% is time-equivalent.
+Only policies whose final density error is at most `2e-3` participate in
+dominance. This error is the maximum after each complete pulse sequence across
+all retained modes, not a per-kernel error or segment budget. Qualified policies
+are equally accurate. A competitor dominates only when its median time is
+**less than `0.9 * target_time`**. Exactly 10% is time-equivalent.
+`t4`, `adiabatic_map`, `flux_dop853` and `slow_envelope` have exclusive domains;
+`t6` and `dop853` are their domains' last candidates. These six families are
+directly retained and are neither dominators nor dominated targets. Refused,
+companion-blocked and over-limit policies provide no dominance evidence.
 Time-equivalent peers have neither direction faster by more than 10%, regardless
 of error. Wall/CPU and all three modes remain separate; there is no weighted score.
 Default routing is shown but never treated as a pinned-family competitor.
-The summary lists each family's non-dominated input/mode/metric cells and the
-full measured matrix with dominators and time-equivalent peers. An all-dominated
-conclusion applies only to measured available cells, not to unmeasured physics.
-It does not authorize deleting families or accepting accuracy failures.
+The summary lists each candidate family's non-dominated input/mode/metric cells
+and the full measured matrix with dominators and time-equivalent peers. An
+all-dominated conclusion applies only to measured qualified cells, not to
+unmeasured physics. Before deleting a more accurate but slower candidate, its
+faster dominator must also qualify on the same type of long sequence, with far
+more than 24 gates. Neither these results nor long-sequence qualification
+authorize deletion without user approval.
 
 Only `NoValidKernel` from the first timed evolve becomes `unavailable`.
 The matrix preserves its complete message and leaves error/timing absent.
@@ -617,8 +626,9 @@ caution given that observation.
 text of an existing matrix without solving references or timing evolves. It
 restores the recorded result types and uses the same summary renderer. Save the
 returned Markdown separately from the measured summary and record the renderer
-version separately from the matrix's measurement version. Stored comparison
-cells remain unchanged; re-rendering does not apply a new dominance definition.
+version separately from the matrix's measurement version. Re-rendering recomputes
+dominance from recorded errors and times using the current qualification rule.
+It does not modify the matrix, its provenance or any raw measurement.
 
 Each sample preserves `prepare_cpu_s`, `apply_cpu_s` and their sum separately
 for every reported family. These are calling-thread CPU from `FamilyRouting`,

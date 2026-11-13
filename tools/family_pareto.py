@@ -237,6 +237,9 @@ FamilyStatus = Literal[
     "companion_blocked",
 ]
 ACCURACY_LIMIT = 2e-3
+DIRECTLY_RETAINED = frozenset(
+    {"t4", "adiabatic_map", "flux_dop853", "slow_envelope", "t6", "dop853"}
+)
 
 
 @dataclass(frozen=True)
@@ -324,7 +327,7 @@ def _available_modes(rows: list[FamilyResult]) -> dict[str, dict[str, ModeResult
         if (
             row.unavailable is not None
             or row.companion_blocked is not None
-            or row.family == "default"
+            or row.family in {"default", "fixed_default_group"}
         ):
             continue
         if row.error is None:
@@ -361,19 +364,25 @@ def _available_modes(rows: list[FamilyResult]) -> dict[str, dict[str, ModeResult
 
 
 def dominance(rows: list[FamilyResult]) -> dict[str, dict[str, list[str]]]:
-    """List dominators by family and mode/clock; omit unavailable and default.
+    """List dominators among qualified, non-retained pinned families.
 
-    A competitor must have error <= target error and time < .9*target time.
-    Error is the maximum of that history mode's raw sample density errors;
-    probe/other-mode errors and FamilyResult.error do not enter this comparison.
-    Equality at ten percent is equivalent timing, with no error epsilon.
+    Both policies must have complete-sequence FamilyResult.error <= 2e-3.
+    Qualified policies are equally accurate; only time < .9*target time
+    dominates. Exactly ten percent is equivalent timing. DIRECTLY_RETAINED
+    families, default/fixed groups and refused policies are not competitors.
     All three unique modes are required in any order. Missing, duplicate and
     unknown modes raise. A slow family's explicitly unmeasured clear-history
     mode is excluded. Other empty modes, missing errors and timing/path-only
     rows raise ValueError. Comparisons use only shared measured modes.
     """
     modes = _available_modes(rows)
-    available = [r for r in rows if r.family in modes]
+    available = [
+        r
+        for r in rows
+        if r.family in modes
+        and r.family not in DIRECTLY_RETAINED
+        and r.status == "qualified"
+    ]
     result: dict[str, dict[str, list[str]]] = {}
     for target in available:
         cells = {}
@@ -385,7 +394,6 @@ def dominance(rows: list[FamilyResult]) -> dict[str, dict[str, list[str]]]:
                     for other in available
                     if other.family != target.family
                     and mode.mode in modes[other.family]
-                    and _mode_error(modes[other.family][mode.mode]) <= _mode_error(mode)
                     and _mode_time(modes[other.family][mode.mode], metric)
                     < 0.9 * target_time
                 ]

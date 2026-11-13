@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from statistics import median
 from typing import TYPE_CHECKING
 
@@ -19,15 +20,17 @@ def render_saved_summary(matrix_json: str) -> str:
 
     matrix_json is the complete JSON text written by family_pareto.main, with
     inputs and measured_families. Restore its public result dataclasses and use
-    render_summary; retain stored errors, timings and comparison cells unchanged.
+    render_summary; retain recorded errors and timings, but recompute dominance
+    using the current qualification rule. The source matrix is not modified.
     Extra provenance/derived keys are ignored. Missing keys, malformed JSON or
     invalid result fields raise KeyError or ValueError. No files are written.
     """
     # Import after module initialization: family_pareto re-exports render_summary.
-    from tools.family_pareto import InputResult
+    from tools.family_pareto import InputResult, dominance
 
     matrix = json.loads(matrix_json)
     rows = TypeAdapter(list[InputResult]).validate_python(matrix["inputs"])
+    rows = [replace(row, dominators=dominance(row.policies)) for row in rows]
     families = TypeAdapter(tuple[str, ...]).validate_python(matrix["measured_families"])
     return render_summary(rows, families)
 
@@ -170,6 +173,8 @@ def render_summary(
     non-whitelisted preparation reports. All reported CPU enters the shares,
     including zero-row guard preparation. Default/fixed policies use group members.
     """
+    from tools.family_pareto import DIRECTLY_RETAINED
+
     lines = [
         "# Engine family Pareto table",
         "",
@@ -187,8 +192,8 @@ def render_summary(
         "Errors compare complete complex density to the two-tolerance converged full-Lindblad oracle.",
         "Pinned target and named companions form one timed group. Group wall/process CPU is not isolated target cost. All timing samples enable routing telemetry; family prepare/apply thread CPU is diagnostic only.",
         "Logical segment counts and cumulative ns are not per-span observation. Equal-length spans cannot be distinguished by cumulative duration.",
-        "A dominator has mode-local maximum sample error <= target error and time < 0.9 * target time. Exactly 10% is equivalent.",
-        "Displayed density error and PASS/FAIL use the overall maximum across retained samples, not the mode-local comparator error.",
+        "Only policies with complete-sequence final density error <= 2e-3 compete. Qualified policies are equally accurate; time < 0.9 * target time dominates. Exactly 10% is equivalent.",
+        "t4, adiabatic_map, flux_dop853, slow_envelope, t6 and dop853 are directly retained, never dominators or dominated targets. Default/fixed groups also stay outside dominance.",
         "No epsilon or weighted score is used. FAIL means error > 2e-3, not permission to keep an inaccurate route.",
         "Conclusions apply only to the measured input set; no deletion is authorized.",
         "Every dominance relation marks companion equality. Different-companion dominance is observation only and cannot alone justify deletion. Companion-blocked rows do not classify the target as unavailable or guard-refused.",
@@ -212,8 +217,9 @@ def render_summary(
         ]
         nondominated = [
             (r.name, cell)
-            for r, _ in available
-            for cell in r.dominators[family]
+            for r, p in available
+            if p.status == "qualified"
+            for cell in r.dominators.get(family, {})
             if not any(r.dominance_same_companions[family][cell].values())
         ]
         lines += [
@@ -223,7 +229,11 @@ def render_summary(
             f"companion-blocked on {sum(p.companion_blocked is not None for r in conclusion_rows for p in r.policies if p.family == family)}; "
             f"unavailable on {sum(p.unavailable is not None for r in conclusion_rows for p in r.policies if p.family == family)}.",
         ]
-        if not available:
+        if family in DIRECTLY_RETAINED:
+            lines.append(
+                "Directly retained for its exclusive domain or last-candidate role. No dominance comparison applies; recorded errors remain unchanged."
+            )
+        elif not available:
             lines.append("NOT EXERCISED. No dominance conclusion is possible.")
         else:
             worst = max(p.error for _, p in available if p.error is not None)
@@ -231,21 +241,25 @@ def render_summary(
                 f"Maximum density error {worst:.12g}: "
                 f"{'FAIL' if any(p.status == 'over_limit' for _, p in available) else 'PASS'}."
             )
-            if nondominated:
+            if not any(p.status == "qualified" for _, p in available):
+                lines.append(
+                    "No qualified input. Over-limit results are not dominance evidence."
+                )
+            elif nondominated:
                 lines.append(
                     "Not dominated within equal-companion groups on these input/mode/metric cells:"
                 )
                 lines += [f"- `{name}`: {cell}" for name, cell in nondominated]
             else:
                 lines.append(
-                    "Every measured available input/mode/metric cell is dominated; this is not a proof for unmeasured inputs."
+                    "Every measured qualified input/mode/metric cell is dominated; refused, over-limit and unmeasured inputs are not dominance evidence."
                 )
         lines.append("")
     lines += [
         "## Complete measured matrix",
         "",
         "Unavailable cells retain their exact refusal and first-group whitelist classification; they have no error or timing value. not_candidate means absent from the reported candidates; guard_or_precondition means offered but rejected. Later groups are not classified.",
-        "Each measured cell lists its dominators. An empty list means not dominated.",
+        "Only qualified non-retained pinned cells have dominance comparisons. Empty competitor lists on other rows do not establish non-dominance.",
         "Raw samples, per-sample paths and full inputs are in the sibling JSON.",
         "",
     ]

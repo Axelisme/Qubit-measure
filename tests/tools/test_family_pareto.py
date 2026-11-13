@@ -408,36 +408,53 @@ def test_comparisons_reject_unmeasured_available_rows(
         compare([row])
 
 
-def test_dominance_uses_only_errors_from_the_compared_history_mode() -> None:
+def test_dominance_uses_final_qualification_and_excludes_directly_retained() -> None:
     target = FamilyResult(
         "target",
-        0.1,
+        1e-6,
         None,
         [
             ModeResult(mode, [Sample(10, 10, error, {})] * 5, 10, 10)
             for mode, error in (
                 ("first_evolve", 0.001),
-                ("warm_clear_history", 0.01),
-                ("warm_retain_history", 0.01),
+                ("warm_clear_history", 1e-6),
+                ("warm_retain_history", 1e-6),
             )
         ],
     )
     other = FamilyResult(
         "other",
-        0.2,
+        2e-3,
         None,
         [
             ModeResult(mode, [Sample(time, time, error, {})] * 5, time, time)
             for mode, error, time in (
                 ("first_evolve", 0.002, 1),
-                ("warm_clear_history", 0.01, 8.99),
-                ("warm_retain_history", 0.01, 9),
+                ("warm_clear_history", 2e-3, 8.99),
+                ("warm_retain_history", 2e-3, 9),
             )
         ],
     )
-    assert dominance([target, other])["target"] == {
-        "first_evolve/wall": [],
-        "first_evolve/cpu": [],
+    excluded = [
+        replace(other, family=name)
+        for name in (
+            "t4",
+            "adiabatic_map",
+            "flux_dop853",
+            "slow_envelope",
+            "t6",
+            "dop853",
+            "default",
+            "fixed_default_group",
+        )
+    ]
+    # One bad final result disqualifies the entire policy, even if a mode passed.
+    over_limit = replace(other, family="over_limit", error=2e-3 + 1e-12)
+    result = dominance([target, other, over_limit, *excluded])
+    assert set(result) == {"target", "other"}
+    assert result["target"] == {
+        "first_evolve/wall": ["other"],
+        "first_evolve/cpu": ["other"],
         "warm_clear_history/wall": ["other"],
         "warm_clear_history/cpu": ["other"],
         "warm_retain_history/wall": [],
@@ -805,7 +822,7 @@ def test_cli_selects_families_without_changing_inputs_or_default_group(
         row["fixed_default_group"]["whitelist"]
         == full["inputs"][0]["fixed_default_group"]["whitelist"]
     )
-    assert set(row["dominators"]) == {"t6", "floquet_period"}
+    assert set(row["dominators"]) == {"floquet_period"}
     for comparisons in (row["dominators"], row["timing_equivalents"]):
         for family, cells in comparisons.items():
             for peers in cells.values():
@@ -1202,7 +1219,10 @@ def test_saved_summary_restores_routing_reports_and_measured_family_selection() 
         "period_table",
         1e-4,
         None,
-        [ModeResult("first_evolve", [sample], 9, 8)],
+        [
+            ModeResult(mode, [sample], 9, 8)
+            for mode in ("first_evolve", "warm_clear_history", "warm_retain_history")
+        ],
         expected_route={"period_table": (2, 10), "t4": (1, 2)},
         attribution="target_and_companions",
         whitelist=("period_table", "t4"),
@@ -1231,6 +1251,52 @@ def test_saved_summary_restores_routing_reports_and_measured_family_selection() 
         "### period_table",
         "### synthetic",
     ]
+
+
+def test_saved_report_recomputes_qualified_dominance() -> None:
+    def policy(name: str, error: float, seconds: float) -> FamilyResult:
+        return FamilyResult(
+            name,
+            error,
+            None,
+            [
+                ModeResult(
+                    mode, [Sample(seconds, seconds, error, {})], seconds, seconds
+                )
+                for mode in (
+                    "first_evolve",
+                    "warm_clear_history",
+                    "warm_retain_history",
+                )
+            ],
+        )
+
+    policies = [
+        policy("period_table", 1e-6, 10),
+        policy("shaped_sambe", 2e-3, 1),
+        policy("gate_cache", 0.01, 0.1),
+        policy("dop853", 1e-8, 0.01),
+    ]
+    stored = {
+        p.family: {
+            f"{mode.mode}/{metric}": []
+            for mode in p.modes
+            for metric in ("wall", "cpu")
+        }
+        for p in policies
+    }
+    row = InputResult("synthetic", "physical", "oracle", 0, policies, stored, {})
+    saved = canonical_json(
+        {"inputs": [asdict(row)], "measured_families": [p.family for p in policies]}
+    )
+    rendered = family_pareto_report.render_saved_summary(saved)
+    cells = [
+        [cell.strip() for cell in line.strip("|").split("|")]
+        for line in rendered.splitlines()
+        if line.startswith("| period_table |")
+    ]
+    assert len(cells) == 6
+    assert {cell[7] for cell in cells} == {"shaped_sambe (same companions)"}
 
 
 def test_late_warmup_failure_stops_measurement_without_partial_success() -> None:
