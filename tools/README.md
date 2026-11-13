@@ -1,6 +1,6 @@
 # tools/
 
-**Last updated:** 2026-11-14, integrated scenario selection and second-DC-bias inputs
+**Last updated:** 2026-11-14, recorded thirteen scenario summaries
 
 **讀者：** framework-dev。Repo 品質檢查與重計算執行器的 CLI、輸出與比較機制。
 
@@ -173,6 +173,40 @@ integer-model charge ports with equal support and complete overlap.
 Add `--include-synthetic` to also measure the unchanged accuracy inventory and
 twelve amplified synthetic workloads. Reports separate
 the two categories; deletion conclusions use real inputs only.
+
+### Recorded scenario summaries
+
+The thirteen recorded tables use clean commit
+`3545520dd8d5e8784be642246605f263654ce72b`, tree
+`c9f484253fae2cc0db5a7d80dc1dd21bbe808d77`. Each table ran once with exclusive
+access, all 17 pinned families, default routing and its fixed observed union.
+The generated summaries retain over-limit errors and refusal reasons.
+JSON is the numeric source; the paired Markdown lists the same outcomes and provenance.
+These records contain no dominance conclusions. Compare times within one table,
+not across scenarios or measurement runs.
+
+| Scenario | Generated summary | Numeric source |
+| --- | --- | --- |
+| F carrier sweep | [Markdown](data/family_pareto/summaries/carrier_sweep.md) | [JSON](data/family_pareto/summaries/carrier_sweep.json) |
+| A gain sweep | [Markdown](data/family_pareto/summaries/gain_sweep.md) | [JSON](data/family_pareto/summaries/gain_sweep.json) |
+| L length sweep | [Markdown](data/family_pareto/summaries/length_sweep.md) | [JSON](data/family_pareto/summaries/length_sweep.json) |
+| I idle sweep | [Markdown](data/family_pareto/summaries/idle_sweep.md) | [JSON](data/family_pareto/summaries/idle_sweep.json) |
+| N gate sequence | [Markdown](data/family_pareto/summaries/gate_sequence.md) | [JSON](data/family_pareto/summaries/gate_sequence.json) |
+| M simultaneous drive | [Markdown](data/family_pareto/summaries/simultaneous_drive.md) | [JSON](data/family_pareto/summaries/simultaneous_drive.json) |
+| S shaped gate sequence | [Markdown](data/family_pareto/summaries/shaped_gate_sequence.md) | [JSON](data/family_pareto/summaries/shaped_gate_sequence.json) |
+| O1 overlapping constant tones | [Markdown](data/family_pareto/summaries/overlapping_constant_tones.md) | [JSON](data/family_pareto/summaries/overlapping_constant_tones.json) |
+| O2 overlapping shaped tones | [Markdown](data/family_pareto/summaries/overlapping_shaped_tones.md) | [JSON](data/family_pareto/summaries/overlapping_shaped_tones.json) |
+| N-long 50/100/200 gates | [Markdown](data/family_pareto/summaries/long_gate_sequence.md) | [JSON](data/family_pareto/summaries/long_gate_sequence.json) |
+| S-long 50/100/200 shaped gates | [Markdown](data/family_pareto/summaries/long_shaped_gate_sequence.md) | [JSON](data/family_pareto/summaries/long_shaped_gate_sequence.json) |
+| F carrier sweep at 0.45 Φ0 | [Markdown](data/family_pareto/summaries/carrier_sweep_bias045.md) | [JSON](data/family_pareto/summaries/carrier_sweep_bias045.json) |
+| N gate sequence at 0.45 Φ0 | [Markdown](data/family_pareto/summaries/gate_sequence_bias045.md) | [JSON](data/family_pareto/summaries/gate_sequence_bias045.json) |
+
+References remain in the shared local `references/` directory described below.
+Complete matrices, diagnostic reports and journals remain under the corresponding
+local scenario directories. They survive task cleanup and are not tracked.
+The tracked summaries can be read without those local files. Remeasurement needs
+the reference cache; clearing it or moving to another machine requires reference
+preparation after cost approval.
 
 ### Single-scenario remeasurement
 
