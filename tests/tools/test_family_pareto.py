@@ -3,7 +3,7 @@
 import json
 from collections.abc import Callable, Generator
 from contextlib import closing, contextmanager
-from dataclasses import replace
+from dataclasses import asdict, replace
 from itertools import count
 from pathlib import Path
 
@@ -26,6 +26,7 @@ from tests.simulate.evolution.contract.reference import (
     ReferenceResult,
     converged_reference,
 )
+from tools import family_pareto_report
 from tools.family_pareto import (
     EngineSession,
     FamilyResult,
@@ -36,6 +37,7 @@ from tools.family_pareto import (
     main,
     measure_family,
     measure_policy,
+    render_summary,
     run_table,
     timing_equivalents,
 )
@@ -848,6 +850,156 @@ def test_companion_route_checks_counts_lengths_and_preserves_family_cpu(
             {"single_tone_rwa": 0.7, "t4": 0.3}
         )
         assert result.expected_route == item.expected_routes["single_tone_rwa"]
+
+
+@pytest.mark.parametrize(
+    ("family", "attribution", "whitelist", "companion_role", "diagnostic_role"),
+    [
+        (
+            "period_table",
+            "target_and_companions",
+            ("period_table", "t4"),
+            "companion",
+            "preparation diagnostic",
+        ),
+        (
+            "dop853",
+            "target_and_companions",
+            ("dop853", "t4"),
+            "companion",
+            "preparation diagnostic",
+        ),
+        (
+            "period_table",
+            "target",
+            ("period_table",),
+            "preparation diagnostic",
+            "preparation diagnostic",
+        ),
+        ("default", "default", None, "group member", "group member"),
+        (
+            "fixed_default_group",
+            "fixed_family_group",
+            ("period_table", "t4"),
+            "group member",
+            "group member",
+        ),
+    ],
+)
+def test_summary_preserves_diagnostic_cpu_without_calling_it_a_companion(
+    family: str,
+    attribution: str,
+    whitelist: tuple[str, ...] | None,
+    companion_role: str,
+    diagnostic_role: str,
+) -> None:
+    target = family if attribution.startswith("target") else "period_table"
+    reports = {
+        target: FamilyRouting(
+            rows=2, duration_ns=10, prepare_cpu_s=0.2, apply_cpu_s=0.3
+        ),
+        "t4": (
+            FamilyRouting(prepare_cpu_s=0.2)
+            if attribution == "target"
+            else FamilyRouting(
+                rows=1, duration_ns=2, prepare_cpu_s=0.1, apply_cpu_s=0.1
+            )
+        ),
+        "single_tone_gate": FamilyRouting(rows=0, duration_ns=0, prepare_cpu_s=0.3),
+    }
+    sample = Sample(
+        9,
+        8,
+        1e-4,
+        {name: report.rows for name, report in reports.items() if report.rows},
+        routing=reports,
+    )
+    policy = FamilyResult(
+        family,
+        1e-4,
+        None,
+        [ModeResult("first_evolve", [sample], 9, 8)],
+        attribution=attribution,
+        whitelist=whitelist,
+    )
+    row = InputResult("synthetic", "physical", "oracle", 0, [policy], {family: {}}, {})
+    if attribution == "fixed_family_group":
+        row = replace(
+            row,
+            policies=[
+                replace(policy, family="default", attribution="default", whitelist=None)
+            ],
+            fixed_default_group=policy,
+        )
+    rendered = render_summary([row], families=(target,))
+    cells = {
+        fields[2]: fields
+        for line in rendered.splitlines()
+        if line.startswith(f"| {family} | first_evolve |")
+        for fields in [[cell.strip() for cell in line.strip("|").split("|")]]
+    }
+    assert cells[target][9] == (
+        "target" if attribution.startswith("target") else "group member"
+    )
+    assert cells["t4"][9] == companion_role
+    diagnostic = cells["single_tone_gate"]
+    assert diagnostic[9] == diagnostic_role
+    assert diagnostic[3:6] == ["1", "0..0", "0..0"]
+    assert [float(value) for value in diagnostic[6:9]] == pytest.approx([0.3, 0, 0.3])
+    assert {name: float(fields[10]) for name, fields in cells.items()} == pytest.approx(
+        {target: 0.5, "t4": 0.2, "single_tone_gate": 0.3}
+    )
+
+
+def test_saved_summary_restores_routing_reports_and_measured_family_selection() -> None:
+    sample = Sample(
+        9,
+        8,
+        1e-4,
+        {"period_table": 2, "t4": 1},
+        routing={
+            "period_table": FamilyRouting(
+                rows=2, duration_ns=10, prepare_cpu_s=0.2, apply_cpu_s=0.3
+            ),
+            "t4": FamilyRouting(
+                rows=1, duration_ns=2, prepare_cpu_s=0.1, apply_cpu_s=0.1
+            ),
+            "single_tone_gate": FamilyRouting(prepare_cpu_s=0.3),
+        },
+    )
+    policy = FamilyResult(
+        "period_table",
+        1e-4,
+        None,
+        [ModeResult("first_evolve", [sample], 9, 8)],
+        expected_route={"period_table": (2, 10), "t4": (1, 2)},
+        attribution="target_and_companions",
+        whitelist=("period_table", "t4"),
+    )
+    row = InputResult(
+        "synthetic", "physical", "oracle", 0, [policy], {"period_table": {}}, {}
+    )
+    saved = canonical_json(
+        {
+            "inputs": [
+                {
+                    **asdict(row),
+                    "dominance_same_companions": row.dominance_same_companions,
+                }
+            ],
+            "measured_families": ["period_table"],
+        }
+    )
+    rendered = family_pareto_report.render_saved_summary(saved)
+    # Compare dynamic table data, not prose or a fixed Markdown snapshot.
+    direct = render_summary([row], families=("period_table",))
+    assert [line for line in rendered.splitlines() if line.startswith("| ")] == [
+        line for line in direct.splitlines() if line.startswith("| ")
+    ]
+    assert [line for line in rendered.splitlines() if line.startswith("### ")] == [
+        "### period_table",
+        "### synthetic",
+    ]
 
 
 def test_late_warmup_failure_stops_measurement_without_partial_success() -> None:

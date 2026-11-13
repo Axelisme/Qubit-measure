@@ -2,13 +2,34 @@
 
 from __future__ import annotations
 
+import json
 from statistics import median
 from typing import TYPE_CHECKING
+
+from pydantic import TypeAdapter
 
 from tests.simulate.evolution.contract.accuracy import ALL_FAMILIES
 
 if TYPE_CHECKING:
     from tools.family_pareto import InputResult
+
+
+def render_saved_summary(matrix_json: str) -> str:
+    """Render a saved family_pareto matrix JSON without running any measurement.
+
+    matrix_json is the complete JSON text written by family_pareto.main, with
+    inputs and measured_families. Restore its public result dataclasses and use
+    render_summary; retain stored errors, timings and comparison cells unchanged.
+    Extra provenance/derived keys are ignored. Missing keys, malformed JSON or
+    invalid result fields raise KeyError or ValueError. No files are written.
+    """
+    # Import after module initialization: family_pareto re-exports render_summary.
+    from tools.family_pareto import InputResult
+
+    matrix = json.loads(matrix_json)
+    rows = TypeAdapter(list[InputResult]).validate_python(matrix["inputs"])
+    families = TypeAdapter(tuple[str, ...]).validate_python(matrix["measured_families"])
+    return render_summary(rows, families)
 
 
 def _render_fixed_group(row: InputResult) -> list[str]:
@@ -62,13 +83,22 @@ def _family_cpu_lines(row: InputResult) -> list[str]:
                 ]
                 rows = [report.rows for report in reports]
                 durations = [report.duration_ns for report in reports]
+                role = "group member"
+                if name == policy.family:
+                    role = "target"
+                elif policy.attribution in {"target", "target_and_companions"}:
+                    role = (
+                        "companion"
+                        if name in (policy.whitelist or ())
+                        else "preparation diagnostic"
+                    )
                 lines.append(
                     f"| {policy.family} | {mode.mode} | {name} | {len(reports)} | "
                     f"{min(rows)}..{max(rows)} | {min(durations):.12g}..{max(durations):.12g} | "
                     f"{median(report.prepare_cpu_s for report in reports):.9g} | "
                     f"{median(report.apply_cpu_s for report in reports):.9g} | "
                     f"{median(report.actual_cpu_s for report in reports):.9g} | "
-                    f"{'target' if name == policy.family else 'companion' if policy.attribution == 'target_and_companions' else 'group member'} | "
+                    f"{role} | "
                     f"{median(sample.family_cpu_shares[name] for sample in mode.samples if name in sample.routing):.6g} |"
                 )
     if not lines:
@@ -136,6 +166,9 @@ def render_summary(
     marks the report as partial; omitted families get no availability conclusion.
     Dominance is limited to measured inputs and families. No family deletion or
     accuracy exception follows. Default is shown but never a competitor.
+    Diagnostic roles distinguish the target, its whitelisted companions and
+    non-whitelisted preparation reports. All reported CPU enters the shares,
+    including zero-row guard preparation. Default/fixed policies use group members.
     """
     lines = [
         "# Engine family Pareto table",

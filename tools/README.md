@@ -436,10 +436,21 @@ and logical work consistently, without adding a third evolve for slow families.
 Reported times are telemetry-enabled group latency; near-10% comparisons need
 caution given that observation.
 
+`tools.family_pareto_report.render_saved_summary(matrix_json)` renders the JSON
+text of an existing matrix without solving references or timing evolves. It
+restores the recorded result types and uses the same summary renderer. Save the
+returned Markdown separately from the measured summary and record the renderer
+version separately from the matrix's measurement version. Stored comparison
+cells remain unchanged; re-rendering does not apply a new dominance definition.
+
 Each sample preserves `prepare_cpu_s`, `apply_cpu_s` and their sum separately
 for every reported family. These are calling-thread CPU from `FamilyRouting`,
 including preparation for rejected guards. The report shows target and companion
-rows separately. They are not whole-process CPU, may exclude routing/geometry
+rows separately. Only whitelisted non-target families are companions; other
+reports in a pinned policy are preparation diagnostics, including zero-row guard
+CPU. All reported prepare+apply CPU remains in each share's denominator.
+Default and fixed-group reports retain group-member attribution.
+They are not whole-process CPU, may exclude routing/geometry
 overhead, and need not add up to the process CPU timer.
 Pareto dominance continues to use whole-`Engine.evolve` wall and process CPU
 separately. A target plus named companions is one timed group, never isolated
