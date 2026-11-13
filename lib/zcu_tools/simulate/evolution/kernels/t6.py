@@ -242,26 +242,32 @@ def publish_inventory(
 ) -> _T6Inventory:
     """Publish input-only strategy choices from the complete acquire table.
 
-    Call before prefix or worker classification. Each constant-tone prepare key
+    The first prepare calls this lazily, using work_plan.complete_table when
+    present; otherwise table must be the standalone caller's complete geometry.
+    source supplies models for that geometry. Each constant-tone prepare key
     counts all its rows, independently of histories, numerical admission and
-    density. Repeated calls borrow the first publication unchanged. Standalone
-    kernel calls may supply their complete table instead. No numerical products
-    are retained here; missing keys in a published inventory fail at prepare.
+    density. Explicit early publication is also allowed. Repeated calls borrow
+    the first publication unchanged, sharing builder failures without retries.
+    No numerical products are retained here; missing published keys fail at prepare.
     """
 
     def build() -> _T6Inventory:
+        complete = work_plan.complete_table
+        full_table = table if complete is None else complete
         rows = np.flatnonzero(
-            (table.tones == 1)
-            & table.constant_envelopes(np.arange(len(table.timeline), dtype=np.int64))
+            (full_table.tones == 1)
+            & full_table.constant_envelopes(
+                np.arange(len(full_table.timeline), dtype=np.int64)
+            )
         )
         keys, first, counts = np.unique(
-            _keys(table, rows), return_index=True, return_counts=True
+            _keys(full_table, rows), return_index=True, return_counts=True
         )
         prices = []
         for key, row, count in zip(keys, rows[first], counts, strict=True):
-            size = len(table.model(source, row).energies_ghz)
-            duration = float(table.duration_ns[row])
-            frequency = abs(float(table.tone_frequency_ghz[row, 0]))
+            size = len(full_table.model(source, row).energies_ghz)
+            duration = float(full_table.duration_ns[row])
+            frequency = abs(float(full_table.tone_frequency_ghz[row, 0]))
             # Budget-scaled direct prices use warm 21-level I/L aggregates.
             # Channel production aggregates give about 31 s per build.
             # Dimension powers and the carrier factor remain uncalibrated
@@ -393,9 +399,10 @@ class T6Kernel:
     ) -> Prepared:
         """Build model-only direct data or channels from aligned key representatives.
 
-        Use the complete acquire inventory published before workers. Standalone
-        calls without a publication must supply their complete table. A missing
-        published key raises ValueError, never a worker-local strategy choice.
+        Lazily publish the complete acquire inventory from the plan's retained
+        table and share it with prefixes and workers. Standalone calls without
+        retained geometry or a publication must supply their complete table.
+        A missing published key raises ValueError, never a worker-local choice.
         """
         source, budget = context.source, context.budget
         _check_budget(budget)

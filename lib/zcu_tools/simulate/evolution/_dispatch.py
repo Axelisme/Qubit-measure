@@ -41,7 +41,6 @@ from .kernels.floquet import FloquetPlan
 from .kernels.gate_cache import GateCacheKernel
 from .kernels.multitone_rwa import MultitoneRWAKernel
 from .kernels.slow_envelope import low_carrier
-from .kernels.t6 import publish_inventory as publish_t6_inventory
 from .secular import ModelSource
 from .workplan import WorkPlan
 
@@ -57,14 +56,14 @@ def create_work_plan(
     """Create ownership for the complete evolve before prefix/worker planning.
 
     table is the full immutable geometry and source owns model identity.
+    The plan retains table for lazy inventories such as t6 strategy selection.
     Algorithm-specific group planners populate this plan before workers start;
     budget is the numerical admission budget for cold mixed gate plans.
     telemetry enables calling-thread CPU accounting before those plans build.
     """
-    plan = WorkPlan(content_key=content_key)
+    plan = WorkPlan(content_key=content_key, complete_table=table)
     plan.routing.enabled = telemetry
     plan.publish_common_frame_table(table)
-    publish_t6_inventory(table, source, plan)
     populate_carrier_plan(table, source, plan)
     plan_gain_groups(table, source, plan)
     populate_gate_inventory(table, source, plan)

@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-11-13, budget-scaled direct cost calibration
+**Last updated:** 2026-11-13, lazy complete-input t6 inventory
 
 **讀者：** framework-dev、agent。Segment evolution 的公開輸入、路由與數值邊界。
 
@@ -299,10 +299,14 @@ identify the dimension powers, frequency factor or breakpoint, which retain the
 earlier heuristic. Different budgets can also change direct work without
 changing this estimate. These are coarse strategy-selection prices, not runtime
 guarantees. In particular, complete-inventory counts omit prefix-lifetime channel
-rebuilds. The publisher stores only input-derived key counts, dimensions and
-decisions in the evolve's WorkPlan. Preparation
-borrows those decisions and rejects a missing published key. Standalone Kernel
-calls without a publication must supply their complete table and source.
+rebuilds. WorkPlan retains the complete table before prefix/worker planning.
+The first `t6.prepare` asks the publisher to build input-derived key counts,
+dimensions and decisions from that table. Prefixes and workers share the
+publication through the existing single-flight fact, including builder failures.
+Plans without `t6.prepare` do not scan t6 candidate keys. Preparation rejects a
+missing published key rather than recounting its worker subset. Standalone Kernel
+calls without retained geometry or a publication must supply their complete table
+and source; explicit early publication remains supported.
 `cost(table, rows)` retains table-only chunk-interleaving weights, not the
 selected strategy's cold price. It does not determine candidate order.
 
@@ -414,6 +418,7 @@ densities in place and returns a row-aligned boolean exceedance mask.
 evolve table before workers start. Prefix representatives, caller classification
 and timeline workers share it through `KernelContext` and `ApplyContext`. Engine
 drains its pool before closing the plan on success, cancellation or failure.
+Closing drops the retained complete geometry along with the evolve-local facts.
 The registry kernels retain no evolve-local data.
 
 ### Facts and algorithm groups

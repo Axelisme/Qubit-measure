@@ -297,13 +297,18 @@ class WorkPlan:
     Groups start empty and each family is published once before workers start.
     fact/resource are thread-safe. close is idempotent and runs after workers
     drain on success, cancellation or failure. Acquiring after close raises
-    RuntimeError. Model-only resident cache ownership is separate.
+    RuntimeError. complete_table retains the full immutable evolve geometry for
+    lazy inventories until close; None lets standalone callers supply geometry.
+    Model-only resident cache ownership is separate.
     """
 
-    def __init__(self, *, content_key: bytes = b"") -> None:
+    def __init__(
+        self, *, content_key: bytes = b"", complete_table: SegmentTable | None = None
+    ) -> None:
         # Engine supplies the whole numerical input digest, independent of caches.
         self.content_key = content_key
         self.routing = RoutingCollector()
+        self._complete_table = complete_table
         self._facts: dict[Hashable, _Resource] = {}
         self._resources: dict[Hashable, _Resource] = {}
         self._carrier_workspace: CarrierWorkspace | None = None
@@ -315,6 +320,16 @@ class WorkPlan:
         self._ramp_families: tuple[RampFamilyPlan, ...] = ()
         self._lock = RLock()
         self._closed = False
+
+    @property
+    def complete_table(self) -> SegmentTable | None:
+        """Borrow full evolve geometry for lazy inventories, or None if absent.
+
+        The constructor retains the immutable table before prefix/worker planning.
+        Standalone plans may omit it and use the caller's complete table instead.
+        close drops this reference after workers drain.
+        """
+        return self._complete_table
 
     @property
     def common_frame_table(self) -> SegmentTable | None:
@@ -441,6 +456,7 @@ class WorkPlan:
             self._facts.clear()
             self._resources.clear()
             self._carrier_workspace = None
+            self._complete_table = None
             self._common_frame_table = None
             self._published.clear()
             self._gain_groups = ()
