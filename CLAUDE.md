@@ -111,10 +111,15 @@ Worktree 只隔離檔案，不隔離 ZCU／儀器、GUI subprocess 或固定 por
 | 生命週期 | 位置與清理方式 |
 | --- | --- |
 | 不長過 worktree | 放在 worktree 內。 |
-| 不長過 task | 放在 `.agent_state/` 下的 per-task 目錄。 |
+| 一張票 | `.agent_state/plans/<task>/scratch/<ticket>/`，收票時刪除。 |
+| 一個 task | `.agent_state/plans/<task>/scratch/`，task 封存時清理。 |
+| 跨 task 的 effort | `.agent_state/maps/<effort>/scratch/`，effort 結束時清理。 |
+| 永久 | 進 git：數據放在使用它的工具旁，結論寫進 ADR、README 或討論紀錄。 |
 | 必須使用 `/tmp` | 任務結束前刪除。 |
 
 `/tmp` 是 RAM-backed tmpfs，不讓平行 lanes 共用具名路徑。
+
+`.agent_state/` 最上層只有 `plans`、`maps`、`archives`、`worktrees`、`backlog`、`measurement-tasks`、`ratchet`、`benchmark` 與 `quality`，不放散檔，也不放沒有主人的 scratch。調查與研究的產出放在提出問題的 task 或 map 的 scratch；要留存的寫成討論紀錄。每個 worktree 有主人與移除時機：票的 lane 在收票或放棄時、integration 在落地後、spike 在報告被接受時、小修改在合併後。移除包含 worktree、分支與空掉的上層目錄。保留下來的證據以能重新核對結論為準，原始大檔在 task 封存時刪除。
 
 ### 5. 完成前驗證
 
@@ -147,6 +152,15 @@ Worktree 只隔離檔案，不隔離 ZCU／儀器、GUI subprocess 或固定 por
 
 Module `README.md` 專指 `lib/` 與 `tests/` 子目錄中的高層 cheat-sheet。只在取得新的高層知識時更新；發現 note 過時則告知使用者並更新。內容限於高層概念、架構與重要決策，實作細節留在程式碼或其他文件。使用現在式，並刷新 `**Last updated:** YYYY-MM-DD`；日期可附主題或 Phase，不寫 commit hash。
 
+#### 文件之間的關聯
+
+文件與程式碼的關聯由下層指向上層，全部可以用搜尋查到：
+
+- Module README 列出管轄它的 ADR，以 `ADR-NNNN` 引用；沒有 ADR 管轄時寫明沒有。程式碼受某篇 ADR 約束的位置，以註解引用 `ADR-NNNN`。
+- 文件指向程式碼時連到檔案或寫出名稱，不釘行號：`#L123` 會隨編輯錯位。
+- 改動 tracked 程式碼後、交付前，執行 `tools/doc_relations.py <base>`。它列出相關文件（改動路徑上的 README、這些 README 與改動程式引用的 ADR、引用同一批 ADR 的其他文件），以及提到被刪除、改名或改動的名稱與檔案路徑的文件行。文件對被改對象另有稱呼時，用 `--term` 補上。每一筆給一個處置：無關、已一致、已更新。用法見 [tools/README.md](tools/README.md#document-relations)。
+- `tools/doc_relations.py --check` 檢查相對連結的目標與 `ADR-NNNN` 是否存在。
+
 #### 編碼與 agent 工作檔
 
 中文文件使用 UTF-8。Windows 或 PowerShell 顯示 mojibake 時，先將 terminal 切換為 UTF-8，例如 `chcp 65001` 或設定 `$OutputEncoding`，不改寫檔案編碼。
@@ -161,11 +175,27 @@ Tracked 檔案（程式碼、註解、測試、repo 文件、skills）要讀者�
 
 `.agent_state/` 的決策編號（`Dnn`、`decisions/NNNN`）只在該 task 內有效，各 task 各自編號。Tracked 檔案（程式碼、註解、測試、repo 文件）直接寫出理由；屬於架構規則的引用 `ADR-NNNN`。使用者對元件定位、職責或跨模組邊界的裁決寫進 ADR 的決策段，附裁決日期與「」原話。
 
+使用者的取捨原則同樣寫進該領域 ADR 的決策段，每條包含：規則、一個例子、適用邊界（什麼情況下會反過來選）、「」原話與日期、出處的討論紀錄。已核准但尚未落實的方向寫進 `docs/adr/draft/`。`docs/adr/README.md` 各領域分節的開頭列出該領域原則的一行摘要，各自指向擁有它的 ADR 段落；索引只放摘要與指標。
+
+#### 先例
+
+做設計決策前，先查同類問題過去怎麼裁、repo 現在怎麼解：ADR、`docs/discussions/INDEX.md`，以及程式碼中已解決同類問題的寫法。
+
+| 強度 | 來源 |
+| --- | --- |
+| 有拘束力 | 使用者親自裁定的決策、ADR、原則 |
+| 僅供參考 | 既有程式碼的寫法、使用者尚未覆核的代裁 |
+| 不得援引 | 已標記為債務的寫法 |
+
+對每個先例表態：遵循；區別，並寫出事實上哪裡不同；或建議推翻，並寫出理由。有拘束力的先例只能由使用者推翻。推翻後，依舊先例寫的程式碼在同一個 task 一起修改，或登記為債務；同一類問題不並存兩種沒有紀錄的寫法。同類裁決多次一致時，提議歸納成一條原則。
+
 #### 討論紀錄
 
-`docs/discussions/` 保存值得留下的討論快照：外部方案評估、選項比較、被否決的方案與理由，以及推導過程。討論產生上述內容時，agent 提議記錄，使用者同意後才寫；使用者明確要求時直接寫。
+`docs/discussions/` 保存值得留下的討論快照：外部方案評估、選項比較、被否決的方案與理由，以及推導過程。它同時是先例的彙編。討論產生上述內容時，agent 提議記錄，使用者同意後才寫；使用者明確要求時直接寫。
 
-- 每個討論濃縮成一篇 `YYYY-MM-DD-slug.md`，並在 `INDEX.md` 依主題加一行：日期、標題連結、一句結論。
+新增或刪除一個概念、改變公開介面或行為的意義、改變資料格式、跨越模組邊界、或難以反悔的決策，在落地時一律寫一篇。內容取自決策前的調查：問題、成因、比較過的選項、查到的先例與對每個先例的立場、裁決。
+
+- 每個討論濃縮成一篇 `YYYY-MM-DD-slug.md`，並在 `INDEX.md` 依主題加一行：日期、標題連結、問題類型、一句結論。問題類型是一個短詞（例如「刪除或收窄」「資料入庫」），讓同類決策可以被搜尋到。
 - 快照不擁有決策。決策寫進 ADR，討論只連結；討論中的事實由程式碼、ADR 或 README 擁有時，附路徑而不複製。
 - 快照必須 self-contained：只連結 tracked 檔案或外部公開來源，不引用 `.agent_state/` 或其他 gitignored、本機路徑。當時依據未入庫的工作檔時，把結論與必要事實寫進正文，並註明原始工作檔未入庫。
 - Frontmatter 記 `date`、`status`（`active`／`superseded`）、`superseded_by`、`related`，以及 `basis`：當時依據的本 repo commit 與外部來源版本。
