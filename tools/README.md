@@ -1,6 +1,6 @@
 # tools/
 
-**Last updated:** 2026-11-13, second-DC-bias family scenarios
+**Last updated:** 2026-11-14, integrated scenario selection and second-DC-bias inputs
 
 **讀者：** framework-dev。Repo 品質檢查與重計算執行器的 CLI、輸出與比較機制。
 
@@ -174,8 +174,97 @@ Add `--include-synthetic` to also measure the unchanged accuracy inventory and
 twelve amplified synthetic workloads. Reports separate
 the two categories; deletion conclusions use real inputs only.
 
-Freeze the versioned input manifest before measuring. From the lane root, replace
-`<worktree>` with its absolute path and choose a new `<results>` directory:
+### Single-scenario remeasurement
+
+Select a scenario by its `Input.name` from the table below. The tool selects the
+builder before constructing any model, freezes that input and measures it in the
+same command. An unknown name fails with the legal names. Do not supply a manifest.
+After obtaining the timing budget, run from the worktree root:
+
+```bash
+uv run --directory <worktree> --no-sync -- \
+  python tools/run_heavy.py --exclusive --log <results>/run.log <timing-timeout-seconds> -- \
+  python -m tools.family_pareto --scenario shaped_gate_sequence --exclusive \
+  --summary-output tools/data/family_pareto/summaries/shaped_gate_sequence.json \
+  > <results>/receipt.json
+```
+
+The runner's `--exclusive` acquires the lock. The inner `--exclusive` only records
+the caller's declaration. The tool neither verifies the lock nor reads the receipt.
+It records its own UTC start time, HEAD, tree and dirty state in the matrix and
+summary. Dates and exclusive annotations do not determine accuracy or eligibility.
+
+By default, references live in
+`<main repo>/.agent_state/benchmark/family_pareto/references/`. The tool locates the
+main repository with Git's absolute common directory, so all worktrees share the
+cache. It creates missing directories. Complete matrices, diagnostic reports and
+journals default to `<main repo>/.agent_state/benchmark/family_pareto/<Input.name>/<run-id>/`.
+These files stay local and survive task cleanup. `--output`, `--summary` and
+`--partial-output` override the matrix, diagnostic report and journal paths.
+The command prints their destinations. Do not add references or full matrices to Git.
+
+Single-scenario measurement is cache-only. A missing key stops without solving.
+The diagnostic names the key and explains reference preparation. Native thread
+settings can change the final floating-point bits of model inputs and their hashes.
+Always use `run_heavy.py` for preparation, freezing and measurement so these settings
+match. Clearing local data or moving to another machine requires preparing references
+again. A cache miss does not grant permission to solve. After cost approval, rebuild
+one scenario's references nonexclusively with:
+
+```bash
+uv run --directory <worktree> --no-sync -- \
+  python tools/run_heavy.py --log <results>/reference.log <reference-timeout-seconds> -- \
+  python -m tools.family_pareto --scenario shaped_gate_sequence --prepare-references \
+  --output <results>/reference.json > <results>/reference-receipt.json
+```
+
+Preparation uses the existing reference owner and its physical-input/tolerance key.
+It loads valid cache entries and solves only misses. Add `--reference-cache-only`
+to preparation to forbid solving. `--reference-cache <directory>` overrides the
+shared reference location without changing the key or solver contract.
+
+`--summary-output <path>.json` writes one current-run summary and a generated sibling
+`.md`, creating parents as needed. Without it, the tool writes `summary.json` beside
+the complete matrix. To update the tracked record, point it at
+`tools/data/family_pareto/summaries/<Input.name>.json` and review the whole replacement.
+There is no exclusive, clean-tree or all-family write gate, and no policy-by-policy
+merge of different runs. `--families` still produces a partial measurement.
+
+`family_pareto_summary.py` owns the summary schema, builder, JSON/Markdown output and
+comparison. JSON is the numeric source. Each pinned policy, default policy and
+fixed observed family group retains its status, final density error, three history
+modes' wall/process CPU medians, sample counts and unmeasured reasons. Missing values
+remain `null`. Refused policies have zero samples in every mode and the refusal as
+the unmeasured reason. Whitelists, companions and attribution identify group cost;
+these are not isolated target timings. Provenance includes HEAD/tree/dirty, tool UTC
+start time and the exclusive annotation. Manifest/physical/oracle hashes and
+`measured_families` identify inputs and coverage. The summary stores no dominance.
+
+`FamilyResult.status` owns the five outcomes and the final-error limit. They are
+`qualified` for error ≤ 2e-3, `over_limit`, `guard_or_precondition`, `not_candidate`
+and `companion_blocked`. Companion refusal takes precedence over target refusal.
+Reports and summaries read this property. Missing public refusal facts fail instead
+of guessing a classification from text.
+
+The command compares against the tracked scenario JSON if available.
+`--compare-summary <path>.json` selects another baseline. It reads the baseline
+before writing, including when both paths are the same. Missing or invalid baselines
+print a diagnostic but do not block the new summary. Different input fingerprints
+mark the runs not comparable. Partial runs compare only common measured families,
+plus separately present default/fixed groups, and list families missing from either
+run. Output lists status/error pairs, mode values and numerical time deltas, plus
+version, dirty, exclusive and coverage changes. These differences do not establish
+cross-run speed or dominance.
+
+Historical full matrices are not converted into this summary schema. New records
+require new measurements. Preparing references or running the example commands still
+requires the corresponding cost approval.
+
+### Inventory-wide manifest workflow
+
+Without `--scenario`, freeze the versioned input manifest before measuring. From
+the lane root, replace `<worktree>` with its absolute path and choose a new
+`<results>` directory:
 
 ```bash
 mkdir -p <results>
@@ -327,7 +416,7 @@ Every shot ends in readout at the fixed bare cavity frequency, gain .1, with a
 1 us pulse/window and fixed flight time. The Engine batch ends at readout start,
 not at the end of that window.
 
-| Scan | Core sequence | Requested axis, 24 points | Envelope and pulse lengths | Compiled logical spans per point | Reason |
+| Scan | Core sequence | Requested axis (24 points unless stated) | Envelope and pulse lengths | Compiled logical spans per point | Reason |
 | --- | --- | --- | --- | --- | --- |
 | F `carrier_sweep` | One drive, terminal readout | DC E1−E0 ±100 MHz | Constant, 1000 ns, gain .1 | 2 | Frequency reuse without exact duplicate carriers. |
 | F-bias045 `carrier_sweep_bias045` | Same as F at 0.45 Φ0 | Biased DC E1−E0 ±100 MHz | Same as F | Same as F | Compares the same carrier offsets at a second DC bias. |
@@ -338,6 +427,8 @@ not at the end of that window.
 | N-bias045 `gate_sequence_bias045` | Same as N at 0.45 Φ0 | Gate count 1 to 24, carrier at biased DC E1−E0 | Same as N | Same as N | Compares the same compiled gate prefixes at a second DC bias. |
 | M `simultaneous_drive` | Synchronous F1/F2 drives, terminal readout | Shared gain .01 to .1 | Two Gaussians, 100 ns, sigma 20 ns | 2 | Independent joint-model drive operators under overlapping shaped controls. |
 | S `shaped_gate_sequence` | Prefix of repeated Gaussian X,Y,-X,-Y gates, terminal readout | Gate count 1 to 24 | Gaussian 100 ns gates, sigma 20 ns, gain .1 | 2 to 47 | Reuses N's alphabet and ragged prefixes with A's shaped-gate support and width, separating shape from sequence reuse. |
+| N-long `long_gate_sequence` | N's constant X,Y,-X,-Y prefixes, terminal readout | Gate counts 50, 100, 200 (three points) | Same constant 20 ns gates and gain .1 as N | Public compiled support partition, including alignment gaps and readout lead | Checks whole-sequence accuracy beyond 24 gates without replacing N. |
+| S-long `long_shaped_gate_sequence` | S's Gaussian X,Y,-X,-Y prefixes, terminal readout | Gate counts 50, 100, 200 (three points) | Same Gaussian 100 ns gates, sigma 20 ns and gain .1 as S | Public compiled support partition, including alignment gaps and readout lead | Checks shaped-gate reuse at long sequence lengths without replacing S. |
 | O1 `overlapping_constant_tones` | Fully overlapping constant Pump/Stokes pair, terminal readout | Pump fixed at DC E1−E0; Stokes scans that center ±50 MHz | Both 1000 ns; gains .02/.002 | 2 | A carrier slice of the dual-tone reset scan on one qubit, without a cavity drive. |
 | O2 `overlapping_shaped_tones` | Stokes-first Gaussian pair on one qubit, terminal readout | Stokes lead .3 to 0 us | Both supports .3 us, sigma .05 us; Pump 7241.848921606473 MHz/gain .030001831166453; Stokes 3111.1686681315896 MHz/gain .100006103888177 | Public support partition includes single-tone, overlap and idle spans | Uses the STIRAP delay sequence without artificial inventory repeats. |
 
@@ -367,6 +458,21 @@ Gaussian width. The support spans five sigma. These are fixed benchmark gates,
 not calibrated pi rotations. The lab's generic `pi_pulse` creation template
 seeds a constant pulse, so it supplies no calibrated Gaussian duration.
 S adds no random gates or extra repetitions to make a family admissible.
+
+`long_gate_sequence_input()` and `long_shaped_gate_sequence_input()` compile
+N-long and S-long through the same public program and single-fluxonium model
+path as N and S. The default fixed inventory includes both three-point scans
+and both bias045 scans alongside the original nine scenarios, for thirteen total.
+Only the requested gate counts change for the long scans.
+The model and board values retain source commit
+`303074e166d1a563addfab4fd94717d958a7dd56`; DC bias, initial density, carrier,
+phase cycle, pulse parameters and terminal readout follow N or S respectively.
+Each branch emits its complete prefix without idealizing away compiler timing.
+The frozen manifest declares the gate counts and complete target/`t4` rows/ns
+from public compiled supports. Long-sequence reference reuse requires checking
+the full physical input, point order, basis, both tolerances and convergence
+contract; matching gate counts or pulse durations alone does not permit reuse.
+Accuracy-only family observations are not exclusive timing samples.
 
 O2 copies the integer model's two charge lines, Pump on generator 1 and Stokes
 on generator 2. Both couple to the full charge operator at 1 GHz/gain.
@@ -508,7 +614,9 @@ justify deleting a target. Family conclusions compare equal-companion groups.
 The summary reports each family's prepare/apply thread CPU and its fraction of
 summed reported thread CPU. These fractions are not wall or process-CPU shares.
 
-`--reference-cache <directory>` enables a local disk cache, off by default.
+In the inventory-wide manifest workflow, `--reference-cache <directory>` enables
+a local disk cache, off by default. Single-scenario commands use the shared cache
+and default to cache-only measurement as described above.
 `--prepare-references` with `--manifest`, `--reference-cache` and `--output`
 prepares it without Engine timing or a summary. Run that phase nonexclusive.
 Its report records physical hashes, density shapes, convergence and solve/cache

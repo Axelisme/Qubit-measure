@@ -10,6 +10,7 @@ import sys
 from collections.abc import Callable, Generator
 from contextlib import AbstractContextManager, closing, contextmanager
 from dataclasses import asdict, dataclass, field, replace
+from datetime import datetime, timezone
 from importlib.metadata import version
 from math import isclose
 from pathlib import Path
@@ -228,6 +229,16 @@ class Refusal:
     family_reasons: dict[str, Literal["not_candidate", "guard_or_precondition"]]
 
 
+FamilyStatus = Literal[
+    "qualified",
+    "over_limit",
+    "guard_or_precondition",
+    "not_candidate",
+    "companion_blocked",
+]
+ACCURACY_LIMIT = 2e-3
+
+
 @dataclass(frozen=True)
 class FamilyResult:
     """Pinned family or default policy; refusals have a reason and no samples.
@@ -263,6 +274,30 @@ class FamilyResult:
     Such a group has no samples/error and unavailable=None. It is not evidence
     that the target is unavailable or that its numerical guard refused.
     """
+
+    @property
+    def status(self) -> FamilyStatus:
+        """Classify complete-sequence accuracy or the first public refusal.
+
+        Companion refusal takes precedence. Missing error/refusal facts raise
+        ValueError or KeyError; no classification is inferred from the message.
+        Default/fixed groups use attempted families rather than a target name.
+        """
+        if self.companion_blocked is not None:
+            return "companion_blocked"
+        if self.unavailable is not None:
+            if self.refusal is None:
+                raise ValueError(f"{self.family}: missing public refusal facts")
+            if self.attribution in {"default", "fixed_family_group"}:
+                return (
+                    "guard_or_precondition"
+                    if self.refusal.attempted
+                    else "not_candidate"
+                )
+            return self.refusal.family_reasons[self.family]
+        if self.error is None:
+            raise ValueError(f"{self.family}: missing final density error")
+        return "qualified" if self.error <= ACCURACY_LIMIT else "over_limit"
 
 
 def _mode_time(mode: ModeResult, metric: str) -> float:
@@ -857,6 +892,23 @@ def tested_state() -> dict[str, str | bool]:
     }
 
 
+def local_data_directory() -> Path:
+    """Create shared benchmark storage located through Git's absolute common dir.
+
+    All worktrees share the main repository's .agent_state/benchmark/family_pareto.
+    Git or filesystem errors propagate; no references are solved here.
+    """
+    common = Path(
+        subprocess.check_output(
+            ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
+            text=True,
+        ).strip()
+    )
+    directory = common.parent / ".agent_state" / "benchmark" / "family_pareto"
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory
+
+
 def _selected_families(
     names: str | None, *, freezing: bool, preparing_references: bool
 ) -> tuple[str, ...]:
@@ -875,9 +927,121 @@ def _selected_families(
     return families
 
 
+def _command_inputs(
+    args: argparse.Namespace, inputs: list[Input] | None
+) -> list[Input]:
+    if args.scenario is not None and args.include_synthetic:
+        raise ValueError("--scenario cannot be combined with --include-synthetic")
+    if args.scenario is None and (
+        args.summary_output is not None or args.compare_summary is not None
+    ):
+        raise ValueError("--summary-output and --compare-summary require --scenario")
+    items = make_real_inputs(args.scenario) if inputs is None else inputs
+    if inputs is not None and args.scenario is not None:
+        legal = [item.name for item in items]
+        items = [item for item in items if item.name == args.scenario]
+        if not items:
+            raise ValueError(
+                f"Unknown scenario: {args.scenario}. Legal names: {', '.join(legal)}"
+            )
+    return [*make_inputs(), *items] if args.include_synthetic else items
+
+
+def _scenario_paths(args: argparse.Namespace, run_id: str) -> None:
+    if args.scenario is None:
+        return
+    if args.manifest is not None:
+        raise ValueError(
+            "--scenario freezes its own manifest; do not supply --manifest"
+        )
+    if args.reference_cache is None:
+        args.reference_cache = local_data_directory() / "references"
+    args.reference_cache_only = args.reference_cache_only or not args.prepare_references
+    if args.output is None or (
+        not args.prepare_references
+        and (args.summary is None or args.partial_output is None)
+    ):
+        directory = local_data_directory() / args.scenario / run_id
+        directory.mkdir(parents=True)
+        args.output = args.output or directory / "matrix.json"
+        args.summary = args.summary or directory / "report.md"
+        args.partial_output = args.partial_output or directory / "journal.jsonl"
+    args.summary_output = args.summary_output or args.output.with_name("summary.json")
+    args.compare_summary = args.compare_summary or (
+        Path(__file__).parent
+        / "data"
+        / "family_pareto"
+        / "summaries"
+        / f"{args.scenario}.json"
+    )
+
+
+def _parse_command(argv: list[str] | None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--scenario")
+    parser.add_argument(
+        "--exclusive",
+        action="store_true",
+        help="annotation only; does not acquire a lock",
+    )
+    parser.add_argument("--reference-cache", type=Path)
+    parser.add_argument("--reference-cache-only", action="store_true")
+    parser.add_argument("--prepare-references", action="store_true")
+    parser.add_argument("--include-synthetic", action="store_true")
+    parser.add_argument("--freeze-inputs", type=Path)
+    parser.add_argument("--manifest", type=Path)
+    parser.add_argument("--output", type=Path)
+    parser.add_argument("--summary", type=Path)
+    parser.add_argument("--summary-output", type=Path)
+    parser.add_argument("--compare-summary", type=Path)
+    parser.add_argument("--partial-output", type=Path)
+    parser.add_argument("--families", metavar="NAME[,NAME...]")
+    return parser.parse_args(argv)
+
+
+def _write_scenario_summary(
+    args: argparse.Namespace,
+    rows: list[InputResult],
+    state: dict[str, str | bool],
+    started_at_utc: str,
+    manifest_sha256: str,
+) -> None:
+    # Delay import because the summary owner consumes the result types above.
+    from pydantic import TypeAdapter
+
+    from tools.family_pareto_summary import Provenance, build_summary, publish_summary
+
+    provenance = TypeAdapter(Provenance).validate_python(
+        {
+            **state,
+            "started_at_utc": started_at_utc,
+            "exclusive": args.exclusive,
+        }
+    )
+    summary = build_summary(
+        rows[0],
+        manifest_sha256=manifest_sha256,
+        measured_families=_selected_families(
+            args.families, freezing=False, preparing_references=False
+        ),
+        provenance=provenance,
+    )
+    publish_summary(summary, args.summary_output, args.compare_summary)
+    print(f"Scenario summary: {args.summary_output}")
+
+
 def main(argv: list[str] | None = None, *, inputs: list[Input] | None = None) -> int:
     """Freeze inputs or measure a matching manifest; output failures return nonzero.
 
+    --scenario NAME selects before construction, freezes in this command and
+    measures cache-only without --manifest. Missing paths default to shared
+    local Git-common-dir benchmark storage. --prepare-references explicitly
+    permits solving misses, using the same scenario workflow without timing.
+    --summary-output writes current-schema JSON plus sibling Markdown, and
+    --compare-summary overrides the tracked scenario baseline. Comparison
+    failure/mismatch does not block writes. --exclusive is an annotation only.
+
+    Without --scenario, the inventory workflow below remains explicit.
     --freeze-inputs writes inputs before any oracle or timing.
     --prepare-references requires --manifest, --output and --reference-cache.
     It solves or loads cached references and writes a reference report without
@@ -897,18 +1061,7 @@ def main(argv: list[str] | None = None, *, inputs: list[Input] | None = None) ->
     inputs replace only physical input construction for small in-process seam
     tests.
     """
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--reference-cache", type=Path)
-    parser.add_argument("--reference-cache-only", action="store_true")
-    parser.add_argument("--prepare-references", action="store_true")
-    parser.add_argument("--include-synthetic", action="store_true")
-    parser.add_argument("--freeze-inputs", type=Path)
-    parser.add_argument("--manifest", type=Path)
-    parser.add_argument("--output", type=Path)
-    parser.add_argument("--summary", type=Path)
-    parser.add_argument("--partial-output", type=Path)
-    parser.add_argument("--families", metavar="NAME[,NAME...]")
-    args = parser.parse_args(argv)
+    args = _parse_command(argv)
     progress = None
     try:
         families = _selected_families(
@@ -916,9 +1069,10 @@ def main(argv: list[str] | None = None, *, inputs: list[Input] | None = None) ->
             freezing=args.freeze_inputs is not None,
             preparing_references=args.prepare_references,
         )
-        items = make_real_inputs() if inputs is None else inputs
-        if args.include_synthetic:
-            items = [*make_inputs(), *items]
+        started_at_utc = datetime.now(timezone.utc).isoformat()
+        items = _command_inputs(args, inputs)
+        run_id = uuid4().hex
+        _scenario_paths(args, run_id)
         manifest = freeze_manifest(items)
         if args.freeze_inputs is not None:
             args.freeze_inputs.write_text(
@@ -927,18 +1081,19 @@ def main(argv: list[str] | None = None, *, inputs: list[Input] | None = None) ->
             print(f"Frozen {len(items)} inputs; manifest sha256={digest(manifest)}")
             return 0
         if (
-            args.manifest is None
+            (args.manifest is None and args.scenario is None)
             or args.output is None
             or (not args.prepare_references and args.summary is None)
         ):
             raise ValueError(
                 "requires --manifest, --output and --summary (except reference preparation)"
             )
-        frozen = json.loads(args.manifest.read_text(encoding="utf-8"))
-        if digest(frozen) != digest(manifest):
-            raise ValueError(
-                "frozen manifest differs from current inputs; do not tune inputs after measurement"
-            )
+        if args.manifest is not None:
+            frozen = json.loads(args.manifest.read_text(encoding="utf-8"))
+            if digest(frozen) != digest(manifest):
+                raise ValueError(
+                    "frozen manifest differs from current inputs; do not tune inputs after measurement"
+                )
         state = tested_state()
         if args.prepare_references:
             prepared = prepare_references(
@@ -963,7 +1118,6 @@ def main(argv: list[str] | None = None, *, inputs: list[Input] | None = None) ->
                 encoding="utf-8",
             )
             return 0
-        run_id = uuid4().hex
         if args.partial_output is not None:
             if args.partial_output.resolve() in {
                 args.output.resolve(),
@@ -992,6 +1146,8 @@ def main(argv: list[str] | None = None, *, inputs: list[Input] | None = None) ->
         )
         result = {
             "schema_version": 1,
+            "started_at_utc": started_at_utc,
+            "exclusive": args.exclusive,
             "run_id": run_id,
             "measured_families": families,
             "manifest": manifest,
@@ -1044,7 +1200,7 @@ def main(argv: list[str] | None = None, *, inputs: list[Input] | None = None) ->
                 "oracle_coarse": [2e-10, 2e-12],
                 "oracle_fine": [2e-12, 2e-14],
                 "oracle_convergence_limit": 2e-6,
-                "accuracy_limit": 2e-3,
+                "accuracy_limit": ACCURACY_LIMIT,
                 "dominance": "competitor_error <= target_error and competitor_time < .9 * target_time",
                 "unavailable_exception": "NoValidKernel",
             },
@@ -1059,6 +1215,11 @@ def main(argv: list[str] | None = None, *, inputs: list[Input] | None = None) ->
         summary = render_summary(rows, families)
         args.output.write_text(canonical_json(result) + "\n", encoding="utf-8")
         args.summary.write_text(summary, encoding="utf-8")
+        print(
+            f"Complete matrix: {args.output}; report: {args.summary}; journal: {args.partial_output}"
+        )
+        if args.scenario is not None:
+            _write_scenario_summary(args, rows, state, started_at_utc, digest(manifest))
         _emit(progress, event="run_complete", run_id=run_id)
     except Exception as error:
         try:

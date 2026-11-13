@@ -165,7 +165,11 @@ def solve_reference(
         with np.load(destination, allow_pickle=False) as saved:
             return ReferenceResult(saved["density"], float(saved["convergence_error"]))
     if cache_only:
-        raise FileNotFoundError(f"reference cache miss: {key}")
+        raise FileNotFoundError(
+            f"reference cache miss: {key}. Re-solving is required: obtain cost approval, "
+            "then run --prepare-references before measurement. Keep the same native thread "
+            "settings through run_heavy; native thread settings can change input fingerprints."
+        )
     result = solver(case.source, case.batch, coarse=coarse, fine=fine)
     # Publish a complete file so concurrent readers never load a partial archive.
     with NamedTemporaryFile(dir=cache_dir, suffix=".npz", delete=False) as temporary:

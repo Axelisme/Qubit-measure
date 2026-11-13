@@ -446,6 +446,56 @@ def _gate_sequence_input(name: str, *, dc_bias_phi0: float | None = None) -> Inp
     )
 
 
+def long_gate_sequence_input() -> Input:
+    """Compile N's constant-gate prefixes at 50, 100 and 200 gates.
+
+    Keep N's full 21-level model, DC E1-E0 carrier, 20 ns support, gain .1
+    and X,Y,-X,-Y phase cycle. Public compilation preserves alignment gaps
+    and terminal readout lead. These are uncalibrated benchmark gates.
+    Resources close before return; Input.build supplies a fresh caller-owned
+    numeric source. Compiler/environment failures propagate as in gate_sequence_input.
+    """
+    gate_counts = (50, 100, 200)
+
+    def emit(builder: TimelineBuilder, center: float) -> None:
+        builder.add_loop("count", len(gate_counts))
+        gates = [
+            Pulse(
+                f"gate_{phase}",
+                PulseCfg(
+                    ch=1,
+                    nqz=1,
+                    freq=center,
+                    phase=phase,
+                    gain=0.1,
+                    waveform=ConstWaveformCfg(length=0.02),
+                ),
+            )
+            for phase in (0, 90, 180, 270)
+        ]
+        with builder.branch(
+            by="count", align_timeline=False, timeline="default"
+        ) as cases:
+            for point, count in enumerate(gate_counts):
+                with cases.case(point):
+                    for index in range(count):
+                        builder.emit(gates[index % len(gates)])
+
+    return _single_input(
+        "long_gate_sequence",
+        emit,
+        {
+            "pulse_sequence": "50/100/200 gates from repeated X,Y,-X,-Y phase alphabet, terminal readout",
+            "waveform": "constant",
+            "pulse_length_us": 0.02,
+            "gain": 0.1,
+            "gate_counts": list(gate_counts),
+            "gate_phases_deg": [0, 90, 180, 270],
+        },
+        _PLATEAU,
+    )
+
+
 def shaped_gate_sequence_input() -> Input:
     """Compile 24 Gaussian prefixes of the X,Y,-X,-Y gate alphabet.
 
@@ -490,6 +540,57 @@ def shaped_gate_sequence_input() -> Input:
             "sigma_us": 0.02,
             "gain": 0.1,
             "gate_counts": list(range(1, 25)),
+            "gate_phases_deg": [0, 90, 180, 270],
+        },
+        _SHAPED,
+    )
+
+
+def long_shaped_gate_sequence_input() -> Input:
+    """Compile S's Gaussian-gate prefixes at 50, 100 and 200 gates.
+
+    Keep S's full 21-level model, DC E1-E0 carrier, 100 ns support, 20 ns
+    sigma, gain .1 and X,Y,-X,-Y phase cycle. Public compilation preserves
+    alignment gaps and terminal readout lead. These are uncalibrated gates.
+    Resources close before return; Input.build supplies a fresh caller-owned
+    numeric source. Failures propagate as in shaped_gate_sequence_input.
+    """
+    gate_counts = (50, 100, 200)
+
+    def emit(builder: TimelineBuilder, center: float) -> None:
+        builder.add_loop("count", len(gate_counts))
+        gates = [
+            Pulse(
+                f"gate_{phase}",
+                PulseCfg(
+                    ch=1,
+                    nqz=1,
+                    freq=center,
+                    phase=phase,
+                    gain=0.1,
+                    waveform=GaussWaveformCfg(length=0.1, sigma=0.02),
+                ),
+            )
+            for phase in (0, 90, 180, 270)
+        ]
+        with builder.branch(
+            by="count", align_timeline=False, timeline="default"
+        ) as cases:
+            for point, count in enumerate(gate_counts):
+                with cases.case(point):
+                    for index in range(count):
+                        builder.emit(gates[index % len(gates)])
+
+    return _single_input(
+        "long_shaped_gate_sequence",
+        emit,
+        {
+            "pulse_sequence": "50/100/200 Gaussian gates from repeated X,Y,-X,-Y phase alphabet, terminal readout",
+            "waveform": "gauss",
+            "pulse_length_us": 0.1,
+            "sigma_us": 0.02,
+            "gain": 0.1,
+            "gate_counts": list(gate_counts),
             "gate_phases_deg": [0, 90, 180, 270],
         },
         _SHAPED,
@@ -879,18 +980,31 @@ def overlapping_constant_tones_input() -> Input:
     return replace(item, manifest={**item.manifest, **carriers})
 
 
-def make_real_inputs() -> list[Input]:
-    """Build fixed real-model scenarios with detached fresh-source factories."""
-    return [
-        carrier_sweep_input(),
-        gain_sweep_input(),
-        length_sweep_input(),
-        idle_sweep_input(),
-        gate_sequence_input(),
-        simultaneous_drive_input(),
-        shaped_gate_sequence_input(),
-        overlapping_shaped_tones_input(),
-        overlapping_constant_tones_input(),
-        carrier_sweep_bias045_input(),
-        gate_sequence_bias045_input(),
-    ]
+def make_real_inputs(scenario: str | None = None) -> list[Input]:
+    """Build all fixed scenarios, or only the named Input before any model work.
+
+    Returned inputs own detached fresh-source factories. An unknown scenario
+    raises ValueError listing legal Input names without constructing models.
+    """
+    builders = {
+        "carrier_sweep": carrier_sweep_input,
+        "gain_sweep": gain_sweep_input,
+        "length_sweep": length_sweep_input,
+        "idle_sweep": idle_sweep_input,
+        "gate_sequence": gate_sequence_input,
+        "simultaneous_drive": simultaneous_drive_input,
+        "shaped_gate_sequence": shaped_gate_sequence_input,
+        "overlapping_shaped_tones": overlapping_shaped_tones_input,
+        "overlapping_constant_tones": overlapping_constant_tones_input,
+        "long_gate_sequence": long_gate_sequence_input,
+        "long_shaped_gate_sequence": long_shaped_gate_sequence_input,
+        "carrier_sweep_bias045": carrier_sweep_bias045_input,
+        "gate_sequence_bias045": gate_sequence_bias045_input,
+    }
+    if scenario is None:
+        return [build() for build in builders.values()]
+    if scenario not in builders:
+        raise ValueError(
+            f"Unknown scenario: {scenario}. Legal names: {', '.join(builders)}"
+        )
+    return [builders[scenario]()]

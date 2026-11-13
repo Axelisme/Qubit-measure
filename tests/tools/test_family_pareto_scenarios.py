@@ -13,7 +13,7 @@ from zcu_tools.simulators.single_fluxonium.environment import (
     single_fluxonium,
 )
 
-from tools.family_pareto_inputs import Input, canonical_json, freeze_manifest
+from tools.family_pareto_inputs import canonical_json, freeze_manifest
 from tools.family_pareto_scenarios import make_real_inputs
 from tools.family_pareto_settings import BOARD_PROFILE, SINGLE_MODEL
 
@@ -140,11 +140,6 @@ def test_bias045_gate_scan_uses_biased_model_and_preserves_compiled_prefixes(
         np.testing.assert_array_equal(batch.flux.level, base.batch.flux.level)
 
 
-@pytest.fixture(scope="module")
-def fixed_inputs() -> list[Input]:
-    return make_real_inputs()
-
-
 def test_fixed_scenarios_freeze_byte_identically_from_fresh_construction() -> None:
     first_inputs = make_real_inputs()
     assert first_inputs, "fixed-scenario construction must yield usable numeric inputs"
@@ -203,18 +198,84 @@ def test_idle_scan_changes_gap_between_fixed_gates() -> None:
     assert all(len(gap) == 24 and np.all(np.diff(gap) > 0) for gap in gaps)
 
 
-def test_gate_scan_preserves_variable_sequence_lengths(
-    fixed_inputs: list[Input],
-) -> None:
-    inventories = []
-    for item in fixed_inputs:
-        with closing((case := item.build()).source):
-            count = np.sum([t.active for t in case.batch.tracks], axis=0)
-            if np.ptp(count) > 0:
-                inventories.append(count)
-                assert len(np.unique(count)) == 24
-                assert np.all(np.diff(case.batch.end_ns) > 0)
-    assert inventories, "a gate scan must preserve ragged, varying pulse counts"
+def test_gate_scan_preserves_variable_sequence_lengths() -> None:
+    from tools.family_pareto_scenarios import gate_sequence_input
+
+    item = gate_sequence_input()
+    with closing((case := item.build()).source):
+        count = np.sum([track.active for track in case.batch.tracks], axis=0)
+        np.testing.assert_array_equal(count, np.arange(1, 25))
+        assert np.all(np.diff(case.batch.end_ns) > 0)
+
+
+def test_long_constant_gate_scan_compiles_original_phase_alphabet() -> None:
+    from tools import family_pareto_scenarios
+
+    item = family_pareto_scenarios.long_gate_sequence_input()
+    original = family_pareto_scenarios.gate_sequence_input()
+    with (
+        closing((case := item.build()).source),
+        closing((short := original.build()).source),
+    ):
+        batch = case.batch
+        assert len(batch.points) == 3
+        np.testing.assert_array_equal(
+            np.sum([track.active for track in batch.tracks], axis=0),
+            [50, 100, 200],
+        )
+        np.testing.assert_array_equal(
+            case.source.model((0,)).energies_ghz,
+            short.source.model((0,)).energies_ghz,
+        )
+        np.testing.assert_array_equal(
+            case.source.initial_density, short.source.initial_density
+        )
+        prefix = sorted(
+            (track for track in short.batch.tracks if track.active[-1]),
+            key=lambda track: track.start_ns[-1],
+        )
+        for point, count in enumerate((50, 100, 200)):
+            gates = sorted(
+                (track for track in batch.tracks if track.active[point]),
+                key=lambda track: track.start_ns[point],
+            )
+            np.testing.assert_allclose(
+                [gate.phase_rad[point] for gate in gates],
+                np.resize([0, np.pi / 2, np.pi, 3 * np.pi / 2], count),
+                atol=1e-12,
+            )
+            assert all(
+                gate.envelopes[gate.envelope_index[point]].kind == "constant"
+                for gate in gates
+            )
+            np.testing.assert_allclose(
+                [gate.duration_ns[point] for gate in gates], 20, atol=2
+            )
+            for gate, reference in zip(gates[: len(prefix)], prefix, strict=True):
+                assert gate.port == reference.port
+                for field in (
+                    "start_ns",
+                    "duration_ns",
+                    "frequency_ghz",
+                    "phase_rad",
+                    "amplitude",
+                ):
+                    np.testing.assert_array_equal(
+                        getattr(gate, field)[point], getattr(reference, field)[-1]
+                    )
+            gaps = [
+                second.start_ns[point]
+                - first.start_ns[point]
+                - first.duration_ns[point]
+                for first, second in zip(gates[:-1], gates[1:], strict=True)
+            ]
+            assert np.all(np.asarray(gaps) >= 0)
+            assert np.any(np.asarray(gaps) > 0)
+            assert (
+                batch.end_ns[point]
+                > gates[-1].start_ns[point] + gates[-1].duration_ns[point]
+            )
+        assert np.all(np.diff(batch.end_ns) > 0)
 
 
 def test_shaped_gate_scan_compiles_gaussian_phase_alphabet_prefixes() -> None:
@@ -238,6 +299,83 @@ def test_shaped_gate_scan_compiles_gaussian_phase_alphabet_prefixes() -> None:
             envelopes = [gate.envelopes[gate.envelope_index[point]] for gate in gates]
             assert all(envelope.kind == "sampled" for envelope in envelopes)
             assert all(np.ptp(envelope.samples.real) > 0 for envelope in envelopes)
+        assert np.all(np.diff(batch.end_ns) > 0)
+
+
+def test_long_shaped_gate_scan_compiles_original_gaussian_alphabet() -> None:
+    from tools import family_pareto_scenarios
+
+    item = family_pareto_scenarios.long_shaped_gate_sequence_input()
+    original = family_pareto_scenarios.shaped_gate_sequence_input()
+    with (
+        closing((case := item.build()).source),
+        closing((short := original.build()).source),
+    ):
+        batch = case.batch
+        assert len(batch.points) == 3
+        np.testing.assert_array_equal(
+            np.sum([track.active for track in batch.tracks], axis=0),
+            [50, 100, 200],
+        )
+        np.testing.assert_array_equal(
+            case.source.model((0,)).energies_ghz,
+            short.source.model((0,)).energies_ghz,
+        )
+        np.testing.assert_array_equal(
+            case.source.initial_density, short.source.initial_density
+        )
+        prefix = sorted(
+            (track for track in short.batch.tracks if track.active[-1]),
+            key=lambda track: track.start_ns[-1],
+        )
+        reference_envelope = prefix[0].envelopes[prefix[0].envelope_index[-1]]
+        for point, count in enumerate((50, 100, 200)):
+            gates = sorted(
+                (track for track in batch.tracks if track.active[point]),
+                key=lambda track: track.start_ns[point],
+            )
+            np.testing.assert_allclose(
+                [gate.phase_rad[point] for gate in gates],
+                np.resize([0, np.pi / 2, np.pi, 3 * np.pi / 2], count),
+                atol=1e-12,
+            )
+            for gate in gates:
+                envelope = gate.envelopes[gate.envelope_index[point]]
+                assert envelope.kind == "sampled"
+                assert np.ptp(envelope.samples.real) > 0
+                np.testing.assert_array_equal(
+                    envelope.samples, reference_envelope.samples
+                )
+                np.testing.assert_array_equal(
+                    gate.amplitude[point], prefix[0].amplitude[-1]
+                )
+                np.testing.assert_array_equal(
+                    gate.frequency_ghz[point], prefix[0].frequency_ghz[-1]
+                )
+            np.testing.assert_allclose(
+                [gate.duration_ns[point] for gate in gates], 100, atol=2
+            )
+            for gate, reference in zip(gates[: len(prefix)], prefix, strict=True):
+                assert gate.port == reference.port
+                for field in (
+                    "start_ns",
+                    "duration_ns",
+                    "frequency_ghz",
+                    "phase_rad",
+                    "amplitude",
+                ):
+                    np.testing.assert_array_equal(
+                        getattr(gate, field)[point], getattr(reference, field)[-1]
+                    )
+            assert all(
+                second.start_ns[point]
+                >= first.start_ns[point] + first.duration_ns[point]
+                for first, second in zip(gates[:-1], gates[1:], strict=True)
+            )
+            assert (
+                batch.end_ns[point]
+                > gates[-1].start_ns[point] + gates[-1].duration_ns[point]
+            )
         assert np.all(np.diff(batch.end_ns) > 0)
 
 
