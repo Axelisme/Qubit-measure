@@ -668,6 +668,34 @@ stderr 同時列出路徑與原因。無違規回傳 0，有違規回傳 1；Git
 `Violation(path, reason)` tuple，不讀檔、不修改輸入。合成來源測試位於
 `tests/tools/test_check_doc_readers.py`，不把 repo 文件內容固定在 pytest 裡。
 
+## Document relations
+
+```bash
+uv run --directory <worktree> --no-sync -- python tools/doc_relations.py <base> [--term <literal> ...]
+uv run --directory <worktree> --no-sync -- python tools/doc_relations.py --check
+```
+
+`doc_relations.py <base>` 比較 commit `<base>` 與工作目錄，列出這次改動可能讓哪些 tracked 文件過時。
+輸出兩種行：
+
+- `related: <path>  (<reason>)`：由引用關係找到的文件。包含每個改動路徑上各層的 `README.md`、
+  這些 README 與改動檔案以 `ADR-NNNN` 或 `adr/NNNN-` 連結引用的 ADR，以及引用同一批 ADR 的其他文件。
+  被超過 8 份其他文件引用的 ADR 只列它本身，原因欄註明略過的份數。
+- `hit: <path>:<line>: <term> (<source>): <text>`：文件中出現搜尋詞的行。搜尋詞來自改動的 `.py` 檔：
+  被刪除或改名的公開頂層函式、類別與大寫常數（`removed name`），定義內容有變的（`changed name`），
+  以及檔案路徑的最後兩段（`changed path`）。`--term` 可重複，補上文件實際使用的稱呼（`given`）。
+  名稱以完整單詞比對，路徑以子字串比對。方法名稱不納入，因為會命中不相干的敘述。
+
+單一搜尋詞的命中超過 `--max-hits`（預設 40）時，只印一行 `too many:`，請換更精確的詞。
+討論快照與 `docs/adr/retired/` 是凍結文件，兩種行都不列。這個模式一律回傳 0。
+
+`doc_relations.py --check` 檢查所有 tracked Markdown：相對連結必須指到 tracked 檔案或含有 tracked 檔案的目錄，
+不得用 `.py#L<n>` 釘行號；`ADR-NNNN` 必須對應 `docs/adr/` 或 `docs/adr/retired/` 下的檔案。
+每筆違規印一行 `<path>:<line>: <reason>`，有違規回傳 1。
+
+`--root <repo>` 指定另一個 checkout。`related_documents`、`search_terms`、`find_hits` 與 `check_references`
+接受路徑到文字的 mapping，不讀檔；合成來源測試位於 `tests/tools/test_doc_relations.py`。
+
 ## Routing telemetry analysis
 
 `uv run --directory <worktree> --no-sync -- python tools/analyze_routing_telemetry.py .sim_telemetry/`
