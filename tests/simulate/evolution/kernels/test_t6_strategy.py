@@ -145,6 +145,58 @@ def test_published_inventory_survives_singleton_worker_table(
     assert not endpoint_used(), "a worker must borrow complete-acquire reuse"
 
 
+@pytest.mark.parametrize("published", [False, True], ids=["standalone", "published"])
+@pytest.mark.parametrize("zero_field", ["frequency", "amplitude", "duration"])
+def test_signed_zero_representative_uses_complete_inventory(
+    endpoint_used: Callable[[], bool], published: bool, zero_field: str
+) -> None:
+    case = constant_case(64, 0.0)
+    frequency = case.table.tone_frequency_ghz.copy()
+    amplitude = case.table.tone_amplitude.copy()
+    duration = case.table.duration_ns.copy()
+    if zero_field == "frequency":
+        frequency[:, 0] = 0.0
+        frequency[1, 0] = -0.0
+    elif zero_field == "amplitude":
+        amplitude[:, 0] = 0.0
+        amplitude[1, 0] = -0.0
+    else:
+        duration[:] = 0.0
+        duration[1] = -0.0
+    case = replace(
+        case,
+        table=replace(
+            case.table,
+            tone_frequency_ghz=frequency,
+            tone_amplitude=amplitude,
+            duration_ns=duration,
+        ),
+    )
+    plan = WorkPlan()
+    if published:
+        publish_inventory(case.table, case.source, plan)
+    context = KernelContext(case.source, case.budget, plan)
+    representative = np.array([1], dtype=np.int64)
+    assert case.kernel.guard(case.table, representative, context).all()
+    keys = case.kernel.prepare_keys(case.table, representative, context)
+    prepared = case.kernel.prepare(keys, case.table, representative, context)
+    rows = np.array([1, 0], dtype=np.int64)
+    actual = case.states[rows].copy()
+    case.kernel.apply(
+        prepared,
+        np.zeros(len(rows), dtype=np.int64),
+        case.table,
+        rows,
+        actual,
+        ApplyContext(case.budget),
+    )
+    expected = np.stack([reference(case, row, case.states[row]) for row in rows])
+    np.testing.assert_allclose(actual, expected, rtol=0, atol=2e-9)
+    # Reuse comes from all 64 rows, not the single prepare representative.
+    # Zero-duration keys always select direct because they have no apply work.
+    assert endpoint_used() is (zero_field == "duration")
+
+
 def test_published_inventory_rejects_unknown_key() -> None:
     case = constant_case(1)
     plan = WorkPlan()

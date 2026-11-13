@@ -275,11 +275,22 @@ def publish_inventory(
             direct = 0.0012 * duration * max(1.0, frequency / 0.582) * (size / 21) ** 3
             channel = 31.0 * (size / 21) ** 5
             prices.append(
-                _T6Price(key.tobytes(), int(count), size, count * direct < channel)
+                _T6Price(
+                    _inventory_key(key), int(count), size, count * direct < channel
+                )
             )
         return _T6Inventory(tuple(prices))
 
     return work_plan.fact(FactKey("t6-inventory", _T6Inventory), build)
+
+
+def _inventory_key(key: np.void) -> bytes:
+    """Match np.unique's numeric zero equality when indexing inventory by bytes."""
+    normalized = key.copy()
+    for field in ("frequency", "amplitude", "duration"):
+        if normalized[field] == 0:
+            normalized[field] = 0.0
+    return normalized.tobytes()
 
 
 def _keys(table: SegmentTable, rows: NDArray[np.int64]) -> NDArray[np.void]:
@@ -417,7 +428,7 @@ class T6Kernel:
         models = [table.model(source, row) for row in rows]
         entries = []
         for key, row, model in zip(keys, rows, models, strict=True):
-            price = prices.get(key.tobytes())
+            price = prices.get(_inventory_key(key))
             if price is None:
                 raise ValueError("t6: key absent from complete acquire inventory")
             if price.direct:
