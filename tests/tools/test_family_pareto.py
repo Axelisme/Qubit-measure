@@ -2,7 +2,7 @@
 
 import json
 from collections.abc import Callable, Generator
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from dataclasses import replace
 from itertools import count
 from pathlib import Path
@@ -29,6 +29,7 @@ from tests.simulate.evolution.contract.reference import (
 from tools.family_pareto import (
     EngineSession,
     FamilyResult,
+    InputResult,
     ModeResult,
     Sample,
     dominance,
@@ -38,7 +39,7 @@ from tools.family_pareto import (
     run_table,
     timing_equivalents,
 )
-from tools.family_pareto_inputs import Input
+from tools.family_pareto_inputs import Input, canonical_json, freeze_manifest
 
 
 @pytest.mark.parametrize("measure_errors", [True, False])
@@ -244,6 +245,46 @@ def test_comparisons_omit_only_the_explicitly_unmeasured_slow_mode(
     assert result["fast"]["warm_clear_history/wall"] == []
 
 
+def test_dominance_relations_distinguish_equal_and_different_companion_groups() -> None:
+    policies = [
+        FamilyResult(
+            "gate_cache",
+            1e-4,
+            None,
+            [],
+            whitelist=("gate_cache", "multitone_rwa", "t4"),
+        ),
+        FamilyResult(
+            "period_table",
+            1e-5,
+            None,
+            [],
+            whitelist=("period_table", "t4", "multitone_rwa"),
+        ),
+        FamilyResult(
+            "multitone_gate",
+            1e-5,
+            None,
+            [],
+            whitelist=("multitone_gate", "single_tone_gate", "t4"),
+        ),
+    ]
+    row = InputResult(
+        "overlap",
+        "physical",
+        "oracle",
+        0,
+        policies,
+        {"gate_cache": {"first_evolve/wall": ["period_table", "multitone_gate"]}},
+        {},
+    )
+    assert row.dominance_same_companions == {
+        "gate_cache": {
+            "first_evolve/wall": {"period_table": True, "multitone_gate": False}
+        }
+    }
+
+
 def test_dominance_keeps_ten_percent_boundary_modes_clocks_and_exact_errors_separate() -> (
     None
 ):
@@ -269,6 +310,9 @@ def test_dominance_keeps_ten_percent_boundary_modes_clocks_and_exact_errors_sepa
         row("less_accurate", 0.002000000001, 1, 1),
         row("default", 0, 0.1, 0.1),
         FamilyResult("unavailable", None, "refused", []),
+        FamilyResult(
+            "blocked", None, None, [], companion_blocked="idle companion refused"
+        ),
     ]
     result = dominance(rows)
     assert result["target"]["first_evolve/wall"] == ["faster"]
@@ -277,6 +321,7 @@ def test_dominance_keeps_ten_percent_boundary_modes_clocks_and_exact_errors_sepa
     assert result["faster"]["warm_retain_history/cpu"] == ["boundary"]
     assert "default" not in result
     assert "unavailable" not in result
+    assert "blocked" not in result
     equivalent = timing_equivalents(rows)
     assert equivalent["target"]["first_evolve/wall"] == ["boundary"]
     assert equivalent["target"]["first_evolve/cpu"] == ["boundary", "faster"]
@@ -662,6 +707,40 @@ def test_policy_does_not_disguise_other_runtime_errors_as_unavailable(
     assert caught.value is error
 
 
+def test_policy_attributes_companion_refusal_without_declaring_target_unavailable() -> (
+    None
+):
+    item = companion_input()
+    refusal = NoValidKernel(
+        "first idle group refused",
+        domain="idle",
+        points=(0,),
+        segments=(1,),
+        attempted=("t4",),
+    )
+
+    @contextmanager
+    def session(item: Input, family: str) -> Generator[EngineSession]:
+        def evolve() -> EvolutionResult:
+            raise refusal
+
+        yield EngineSession(evolve, lambda: None)
+
+    result = measure_policy(
+        item,
+        "single_tone_rwa",
+        ReferenceResult(np.eye(2, dtype=np.complex128)[None] / 2, 0),
+        opener=session,
+    )
+    assert result.unavailable is None
+    assert result.companion_blocked == str(refusal)
+    assert result.expected_route == item.expected_routes["single_tone_rwa"]
+    assert result.attribution == "target_and_companions"
+    assert result.error is None and result.modes == []
+    assert result.refusal is not None
+    assert result.refusal.attempted == ("t4",)
+
+
 def test_policy_does_not_allow_an_unpinned_fallback_to_masquerade_as_success() -> None:
     density = np.eye(2, dtype=np.complex128)[None] / 2
     item = Input(
@@ -686,6 +765,27 @@ def test_policy_does_not_allow_an_unpinned_fallback_to_masquerade_as_success() -
 
     with pytest.raises(RuntimeError, match="pinned t4 did not execute exclusively"):
         measure_policy(item, "t4", ReferenceResult(density, 0), opener=wrong_session)
+
+
+def test_policy_uses_target_companions_instead_of_default_and_freezes_them() -> None:
+    assert companion_input().companions_by_target == {}
+    item = Input(
+        "idle",
+        lambda: accuracy_case("idle_coherence"),
+        "target override excludes the otherwise declared driven companion",
+        companions=("dop853",),
+        companions_by_target={"t4": ()},
+    )
+    with closing((case := item.build()).source):
+        reference = converged_reference(case.source, case.batch)
+    result = measure_policy(item, "t4", reference)
+    assert result.whitelist == ("t4",)
+    assert result.attribution == "target"
+    assert all(
+        set(sample.paths) == {"t4"} for mode in result.modes for sample in mode.samples
+    )
+    manifest = json.loads(canonical_json(freeze_manifest([item])))
+    assert manifest["inputs"][0]["companions_by_target"] == {"t4": []}
 
 
 def companion_input() -> Input:
@@ -744,6 +844,9 @@ def test_companion_route_checks_counts_lengths_and_preserves_family_cpu(
         sample = result.modes[0].samples[0]
         assert sample.routing == reports
         assert sample.family_cpu_s == pytest.approx({"single_tone_rwa": 0.7, "t4": 0.3})
+        assert sample.family_cpu_shares == pytest.approx(
+            {"single_tone_rwa": 0.7, "t4": 0.3}
+        )
         assert result.expected_route == item.expected_routes["single_tone_rwa"]
 
 

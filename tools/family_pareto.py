@@ -90,6 +90,20 @@ class Sample:
     family_cpu_s: dict[str, float] = field(default_factory=dict)
     """Per-family prepare+apply thread CPU, not whole-process elapsed CPU."""
 
+    @property
+    def family_cpu_shares(self) -> dict[str, float]:
+        """Family fractions of summed reported prepare+apply thread CPU.
+
+        Includes rejected-guard preparation. Returns zero fractions if the sum
+        is zero. These are neither wall nor process-CPU shares and exclude
+        unreported routing/geometry overhead.
+        """
+        total = sum(report.actual_cpu_s for report in self.routing.values())
+        return {
+            name: report.actual_cpu_s / total if total else 0.0
+            for name, report in self.routing.items()
+        }
+
 
 @dataclass(frozen=True)
 class ModeResult:
@@ -216,14 +230,15 @@ class Refusal:
 
 @dataclass(frozen=True)
 class FamilyResult:
-    """Pinned family or default policy; unavailable has reason and no samples.
+    """Pinned family or default policy; refusals have a reason and no samples.
 
     family is a pinned family name, or 'default' for normal routing.
     error is the maximum density error across all timed evolves for
     overall accuracy reporting/PASS-FAIL, never an assumed exact-solver zero.
     unavailable is the refusal reason, with error=None and modes=[]; otherwise
     unavailable=None and modes contains each of the three history modes once,
-    in any order. modes retain separate raw samples and wall/CPU medians.
+    in any order, unless companion_blocked describes a companion refusal.
+    modes retain separate raw samples and wall/CPU medians.
     """
 
     family: str
@@ -242,6 +257,12 @@ class FamilyResult:
     """Actual families restriction; None denotes unrestricted default routing."""
     refusal: Refusal | None = None
     """Structured first-group refusal facts, or None for an available policy."""
+    companion_blocked: str | None = None
+    """Exact refusal when only companions were attempted in the failing group.
+
+    Such a group has no samples/error and unavailable=None. It is not evidence
+    that the target is unavailable or that its numerical guard refused.
+    """
 
 
 def _mode_time(mode: ModeResult, metric: str) -> float:
@@ -265,7 +286,11 @@ def _mode_error(mode: ModeResult) -> float:
 def _available_modes(rows: list[FamilyResult]) -> dict[str, dict[str, ModeResult]]:
     modes = {}
     for row in rows:
-        if row.unavailable is not None or row.family == "default":
+        if (
+            row.unavailable is not None
+            or row.companion_blocked is not None
+            or row.family == "default"
+        ):
             continue
         if row.error is None:
             raise ValueError(f"{row.family}: require measured density error")
@@ -338,7 +363,7 @@ def _policy_whitelist(item: Input, family: str) -> tuple[str, ...] | None:
     return (
         None
         if family == "default"
-        else tuple(dict.fromkeys((family, *item.companions)))
+        else tuple(dict.fromkeys((family, *item.companions_for(family))))
     )
 
 
@@ -443,12 +468,21 @@ def measure_policy(
     """Measure a target plus named companions, or unrestricted default routing.
 
     The first timed evolve tests availability. Only its NoValidKernel becomes
-    unavailable, preserving first-group facts and classifying whitelist members
-    from attempted. All other evolve/setup/cleanup failures stop.
+    unavailable, or companion_blocked when attempted contains a companion but
+    not the target. Both preserve first-group facts and whitelist classification.
+    Neither infers later groups. All other evolve/setup/cleanup failures stop.
     Wall/process CPU describe this entire group, not isolated target speed.
     Oracle errors are measured across all retained samples.
     """
     whitelist = _policy_whitelist(item, family)
+    expected = item.expected_routes.get(family, {}) if family != "default" else {}
+    attribution = (
+        "default"
+        if family == "default"
+        else "target_and_companions"
+        if item.companions_for(family)
+        else "target"
+    )
     checked_session = _availability_opener(lambda: opener(item, family))
     try:
         modes = measure_family(
@@ -456,11 +490,19 @@ def measure_policy(
         )
     except _InitialRefusal as error:
         refused = error.refusal
+        companion_blocked = (
+            family != "default"
+            and family not in refused.attempted
+            and any(name in refused.attempted for name in item.companions_for(family))
+        )
         return FamilyResult(
             family,
             None,
-            str(refused),
+            None if companion_blocked else str(refused),
             [],
+            companion_blocked=str(refused) if companion_blocked else None,
+            expected_route=expected,
+            attribution=attribution,
             whitelist=whitelist,
             refusal=Refusal(
                 refused.domain,
@@ -481,7 +523,6 @@ def measure_policy(
         for path in paths
     ):
         raise RuntimeError(f"pinned {family} did not execute exclusively: {paths}")
-    expected = item.expected_routes.get(family, {}) if family != "default" else {}
     if family != "default" and item.expected_routes and not expected:
         raise RuntimeError(f"pinned {family} has no expected route declaration")
     if expected:
@@ -494,11 +535,7 @@ def measure_policy(
         None,
         modes,
         expected_route=expected,
-        attribution="default"
-        if family == "default"
-        else "target_and_companions"
-        if item.companions
-        else "target",
+        attribution=attribution,
         whitelist=whitelist,
     )
 
@@ -531,6 +568,27 @@ class InputResult:
     """Process CPU seconds spent in that solve/cache load, excluding setup."""
     fixed_default_group: FamilyResult | None = None
     """Separately timed whitelist of the default route's observed family union."""
+
+    @property
+    def dominance_same_companions(self) -> dict[str, dict[str, dict[str, bool]]]:
+        """Mark each target/cell/dominator relation by equal companion sets.
+
+        Cell names are mode/wall or mode/cpu, as in dominators. False means
+        group-level observation only, not independent evidence for deletion.
+        Ordering of a whitelist does not affect companion equality. A missing
+        whitelist denotes a single-family policy for legacy synthetic results.
+        """
+        companions = {
+            policy.family: set(policy.whitelist or ()) - {policy.family}
+            for policy in self.policies
+        }
+        return {
+            target: {
+                cell: {peer: companions[target] == companions[peer] for peer in peers}
+                for cell, peers in cells.items()
+            }
+            for target, cells in self.dominators.items()
+        }
 
 
 def timing_equivalents(rows: list[FamilyResult]) -> dict[str, dict[str, list[str]]]:
@@ -990,7 +1048,13 @@ def main(argv: list[str] | None = None, *, inputs: list[Input] | None = None) ->
                 "dominance": "competitor_error <= target_error and competitor_time < .9 * target_time",
                 "unavailable_exception": "NoValidKernel",
             },
-            "inputs": [asdict(row) for row in rows],
+            "inputs": [
+                {
+                    **asdict(row),
+                    "dominance_same_companions": row.dominance_same_companions,
+                }
+                for row in rows
+            ],
         }
         summary = render_summary(rows, families)
         args.output.write_text(canonical_json(result) + "\n", encoding="utf-8")

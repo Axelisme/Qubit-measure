@@ -165,6 +165,9 @@ The default inputs are fixed 24-point carrier, gain, length, idle and gate-seque
 scans on the full 21-level single-fluxonium model, including constant and Gaussian
 gate-sequence scans, plus a synchronous dual-port
 scan on the fixed FTF model with 32 retained joint states and local 4×4×4.
+A 24-point Gaussian relative-delay scan uses the fixed integer-fluxonium model
+with native cutoff 80 and 20 retained levels. Its two charge ports address the
+same qubit.
 Add `--include-synthetic` to also measure the unchanged accuracy inventory and
 twelve amplified synthetic workloads. Reports separate
 the two categories; deletion conclusions use real inputs only.
@@ -301,7 +304,7 @@ collaborators; the complete matrix runs outside pytest through the exclusive run
 `family_pareto_scenarios.py` owns curated core pulse sequences. It uses public
 program components, compiled requests, and the environment source's
 `model_facts`/`plan_template` to construct complete Engine inputs.
-`family_pareto_settings.py` owns fixed single-fluxonium, FTF and board inputs,
+`family_pareto_settings.py` owns fixed single-fluxonium, integer-fluxonium, FTF and board inputs,
 copied from commit `303074e166d1a563addfab4fd94717d958a7dd56`. The manifest
 records their source commit and fixed values. Runtime construction does not import
 lab experiments, read lab YAML/profiles, execute experiments, or use replay.
@@ -331,6 +334,7 @@ not at the end of that window.
 | N `gate_sequence` | Prefix of repeated X,Y,-X,-Y phase alphabet, terminal readout | Gate count 1 to 24 | Constant 20 ns gates, gain .1 | 2 to 35 | Ragged sequences with a reusable alphabet, without random seeds. |
 | M `simultaneous_drive` | Synchronous F1/F2 drives, terminal readout | Shared gain .01 to .1 | Two Gaussians, 100 ns, sigma 20 ns | 2 | Independent joint-model drive operators under overlapping shaped controls. |
 | S `shaped_gate_sequence` | Prefix of repeated Gaussian X,Y,-X,-Y gates, terminal readout | Gate count 1 to 24 | Gaussian 100 ns gates, sigma 20 ns, gain .1 | 2 to 47 | Reuses N's alphabet and ragged prefixes with A's shaped-gate support and width, separating shape from sequence reuse. |
+| O2 `overlapping_shaped_tones` | Stokes-first Gaussian pair on one qubit, terminal readout | Stokes lead .3 to 0 us | Both supports .3 us, sigma .05 us; Pump 7241.848921606473 MHz/gain .030001831166453; Stokes 3111.1686681315896 MHz/gain .100006103888177 | Public support partition includes single-tone, overlap and idle spans | Uses the STIRAP delay sequence without artificial inventory repeats. |
 
 M uses public timeline fork/join to start both drives together and place readout
 after both finish. Its two carriers are the uncoupled local DC E1−E0 frequencies
@@ -345,6 +349,31 @@ Gaussian width. The support spans five sigma. These are fixed benchmark gates,
 not calibrated pi rotations. The lab's generic `pi_pulse` creation template
 seeds a constant pulse, so it supplies no calibrated Gaussian duration.
 S adds no random gates or extra repetitions to make a family admissible.
+
+O2 copies the integer model's two charge lines, Pump on generator 1 and Stokes
+on generator 2. Both couple to the full charge operator at 1 GHz/gain.
+The source commit's historical synthetic STIRAP controls supply the carriers.
+Their former envelope gains .015/.05 convert by 65536/32766 to the gains above.
+The current STIRAP delay sequence supplies the .05 us sigma/.3 us support scale.
+These choices are benchmark controls, not calibrated population transfer or
+new acquired-IQ validation. Readout uses generator 0/ADC 0 at 7460 MHz,
+gain .1, a 1 us pulse/window and zero flight time.
+The lead uses a table sweep so each requested value is quantized independently.
+The endpoints remain separated and fully overlapping. Each shot has one pair;
+changing the relative lead changes overlap support, rather than repeating a
+canonical gate 20 times for `multitone_gate`'s default cost preference.
+Pinning `multitone_gate` bypasses that preference, not its numerical guards.
+
+`integer_fluxonium_input(name, emit, manifest, families)` owns the shared fixed
+integer settings, board, environment, compilation and numeric-source detachment.
+Its `emit(builder, dc_model)` callback receives a public `TimelineBuilder` and
+DC `SecularModel`. It can emit constant or Gaussian pulses on either charge line
+and use the model's GHz energies to choose carriers. The builder appends terminal
+readout. The returned `Input.build()` creates a fresh source that callers close.
+Callers supply `manifest["pulse_sequence"]` and requested control provenance.
+The default declaration assigns driven spans to each target and idle to `t4`.
+Mixed-domain callers replace that declaration, as O2 does. The same builder can
+therefore compile a two-constant-charge-tone scan without another model copy.
 
 Continuous requested axes are equally spaced and include both endpoints. Native
 hardware quantization changes the realized values. Length uses a public table
@@ -362,6 +391,18 @@ model/board inputs, snapshot, exact tick ratio, calibration method, expected
 routes and full physical hashes. Logical spans are not unique cached preparations.
 
 A pinned policy may include named companions, such as `t4` for the idle tail.
+`Input.companions_by_target` replaces the shared `companions` tuple for listed
+targets. Unlisted targets keep that shared tuple; an explicit empty tuple pins
+the target alone. `companions_for(target)` resolves this declaration.
+Only inputs with a nonempty mapping add `companions_by_target` to the frozen
+manifest. Existing inputs keep their manifest keys and physical/oracle hashes.
+O2's four single-tone shaped targets use `multitone_rwa` plus `t4`.
+Its `common_frame`, `multitone_gate` and `multitone_rwa` targets use
+`single_tone_gate` plus `t4`. `dop853` uses only `t4`.
+These companions cannot compete for the target's type of span.
+O2 counts each span's active tone supports using public `segment_spans`, then
+sums rows and ns for idle, single-tone and overlap work. It does not reproduce
+the dispatch candidate table or add a fallback.
 The input declares `{family: (logical segment count, cumulative ns)}` for each
 target's complete group. Both quantities must match public `FamilyRouting`
 reports in every sample. A count mismatch or duration mismatch stops measurement.
@@ -387,8 +428,21 @@ overhead, and need not add up to the process CPU timer.
 Pareto dominance continues to use whole-`Engine.evolve` wall and process CPU
 separately. A target plus named companions is one timed group, never isolated
 target performance. Default routing is also compared with its observed family
-union fixed. That extra group stays outside dominance. Differences over 2x are
-findings, not routing changes.
+union fixed. That extra group has no expected-route declaration or route check;
+this applies to every scenario, including O2. It stays outside dominance.
+Differences over 2x are findings, not routing changes.
+
+A refusal with an attempted companion but no attempted target is
+`companion_blocked`, with no `unavailable` value for the target.
+The original message and first failing group's `attempted` facts remain intact.
+This does not classify later groups or claim that the target's guard refused.
+If a whole class of targets cannot produce a table because of the same blocked
+companion, stop and request a companion decision. Do not substitute a fallback.
+Each dominance relation records whether the two companion sets match.
+Different-companion relations are group observations only; they cannot alone
+justify deleting a target. Family conclusions compare equal-companion groups.
+The summary reports each family's prepare/apply thread CPU and its fraction of
+summed reported thread CPU. These fractions are not wall or process-CPU shares.
 
 `--reference-cache <directory>` enables a local disk cache, off by default.
 `--prepare-references` with `--manifest`, `--reference-cache` and `--output`
