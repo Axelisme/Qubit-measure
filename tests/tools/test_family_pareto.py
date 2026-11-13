@@ -1,5 +1,6 @@
 """Public Engine-only measurement and comparison contracts, without real timers."""
 
+import json
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from dataclasses import replace
@@ -17,6 +18,7 @@ from zcu_tools.simulate.evolution import (
     TimelineBatch,
 )
 
+from tests.simulate.evolution.contract.accuracy import ALL_FAMILIES
 from tests.simulate.evolution.contract.accuracy_cases import accuracy_case, history_case
 from tests.simulate.evolution.contract.guard_sweep_cost import measure_engine_cost
 from tests.simulate.evolution.contract.reference import (
@@ -459,6 +461,111 @@ def test_cli_freezes_then_measures_and_preserves_output_on_manifest_or_write_fai
     assert main(argv, inputs=inputs) == 1
     assert output.read_text() == complete
     assert main(["--freeze-inputs", str(tmp_path)], inputs=inputs) == 1
+
+
+def test_cli_selects_families_without_changing_inputs_or_default_group(
+    tmp_path: Path,
+) -> None:
+    inputs = [
+        Input(
+            "plateau",
+            lambda: accuracy_case("weak_plateau"),
+            "tiny Engine seam",
+            category="real",
+        )
+    ]
+    manifest = tmp_path / "inputs.json"
+    output = tmp_path / "matrix.json"
+    summary = tmp_path / "summary.md"
+    assert main(["--freeze-inputs", str(manifest)], inputs=inputs) == 0
+    frozen = manifest.read_bytes()
+    argv = [
+        "--manifest",
+        str(manifest),
+        "--output",
+        str(output),
+        "--summary",
+        str(summary),
+    ]
+    assert main(argv, inputs=inputs) == 0
+    full = json.loads(output.read_text())
+    assert main([*argv, "--families", "t6,floquet_period"], inputs=inputs) == 0
+    partial = json.loads(output.read_text())
+    assert partial["measured_families"] == ["t6", "floquet_period"]
+    assert partial["manifest_sha256"] == full["manifest_sha256"]
+    assert manifest.read_bytes() == frozen
+    row = partial["inputs"][0]
+    assert row["physical_sha256"] == full["inputs"][0]["physical_sha256"]
+    assert row["oracle_sha256"] == full["inputs"][0]["oracle_sha256"]
+    assert [policy["family"] for policy in row["policies"]] == [
+        "t6",
+        "floquet_period",
+        "default",
+    ]
+    assert row["fixed_default_group"]["family"] == "fixed_default_group"
+    assert (
+        row["fixed_default_group"]["whitelist"]
+        == full["inputs"][0]["fixed_default_group"]["whitelist"]
+    )
+    assert set(row["dominators"]) == {"t6", "floquet_period"}
+    for comparisons in (row["dominators"], row["timing_equivalents"]):
+        for family, cells in comparisons.items():
+            for peers in cells.values():
+                assert set(peers) <= {"t6", "floquet_period"} - {family}
+    report = summary.read_text()
+    assert "Partial measurement" in report.split("\n\n")[1]
+    assert "unmeasured, not unavailable" in report
+    assert "Measured pinned families: t6, floquet_period" in report
+    conclusions = report.split("## Family conclusions\n", 1)[1].split(
+        "## Complete measured matrix", 1
+    )[0]
+    assert [line for line in conclusions.splitlines() if line.startswith("### ")] == [
+        "### t6",
+        "### floquet_period",
+    ]
+
+
+@pytest.mark.parametrize("names", ["not_a_family", "t6,not_a_family", "", "t6,"])
+def test_cli_rejects_unknown_families_with_legal_names(
+    names: str,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    assert main(["--families", names], inputs=[]) == 1
+    assert "Unknown families" in caplog.text
+    assert all(family in caplog.text for family in ALL_FAMILIES)
+
+
+@pytest.mark.parametrize("phase", ["--freeze-inputs", "--prepare-references"])
+def test_cli_rejects_family_selection_outside_measurement(
+    phase: str,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    manifest = tmp_path / "inputs.json"
+    output = tmp_path / "output.json"
+    assert main(["--freeze-inputs", str(manifest)], inputs=[]) == 0
+    output.write_text("previous output")
+    phase_args = [phase, str(output)] if phase == "--freeze-inputs" else [phase]
+    assert (
+        main(
+            [
+                "--families",
+                "t6",
+                "--manifest",
+                str(manifest),
+                "--output",
+                str(output),
+                "--reference-cache",
+                str(tmp_path / "references"),
+                *phase_args,
+            ],
+            inputs=[],
+        )
+        == 1
+    )
+    assert "--families cannot be combined" in caplog.text
+    assert phase in caplog.text
+    assert output.read_text() == "previous output"
 
 
 @pytest.mark.parametrize(
