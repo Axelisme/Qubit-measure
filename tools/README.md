@@ -1,6 +1,6 @@
 # tools/
 
-**Last updated:** 2026-11-14, public single-model construction and eight-point random-scan summaries
+**Last updated:** 2026-11-14, no-evolution sample rejection and corrected DOP853 summaries
 
 **讀者：** framework-dev。Repo 品質檢查與重計算執行器的 CLI、輸出與比較機制。
 
@@ -176,10 +176,11 @@ the two categories; deletion conclusions use real inputs only.
 
 ### Recorded scenario summaries
 
-The original thirteen recorded tables use clean commit
+The first thirteen scenarios originally ran at clean commit
 `3545520dd8d5e8784be642246605f263654ce72b`, tree
 `c9f484253fae2cc0db5a7d80dc1dd21bbe808d77`. Each table ran once with exclusive
 access, all 17 pinned families, default routing and its fixed observed union.
+The A gain-sweep record now uses the remeasurement described after the table.
 The generated summaries retain over-limit errors and refusal reasons.
 JSON is the numeric source; the paired Markdown lists the same outcomes and provenance.
 These records contain no dominance conclusions. The
@@ -203,13 +204,21 @@ Compare times within one table, not across scenarios or measurement runs.
 | F carrier sweep at 0.45 Φ0 | [Markdown](data/family_pareto/summaries/carrier_sweep_bias045.md) | [JSON](data/family_pareto/summaries/carrier_sweep_bias045.json) |
 | N gate sequence at 0.45 Φ0 | [Markdown](data/family_pareto/summaries/gate_sequence_bias045.md) | [JSON](data/family_pareto/summaries/gate_sequence_bias045.json) |
 
-The two eight-point RB-type tables use clean commit
+The eight-point random constant-gate table uses clean commit
 `4e64d9abfcaf04f066c8d8f82672eaa2378c8e0f`, tree
-`5add8d093d14ae99097a7d839faad6fda57fa1aa`. Each ran once with exclusive
+`5add8d093d14ae99097a7d839faad6fda57fa1aa`. It ran once with exclusive
 access and the same 17 pinned families, default routing and its fixed observed
-union. The plateau table records `single_tone_rwa`, default routing and the
-fixed union as `over_limit`. The shaped table records `dop853` as
-`over_limit`. These outcomes remain in the generated records.
+union. It records `single_tone_rwa`, default routing and the fixed union as
+`over_limit`.
+
+The A gain-sweep and eight-point random shaped-gate tables each ran once again
+with exclusive access at clean commit
+`7743f24a78ced9a632f7984d521f10e840155cba`, tree
+`977db41f067d4b092c0eb6bd0bc44746f6401658`. Both remeasurements use the same
+complete policy coverage and cached references. `dop853` qualifies at
+`4.14019e-6` on A and `2.88700e-5` on random shaped gates. These replace its
+earlier `over_limit` records, which reflected unevolved densities. Other
+policies retain their statuses and final errors.
 
 | Scenario | Generated summary | Numeric source |
 | --- | --- | --- |
@@ -433,6 +442,10 @@ segment rows and final-round `attempted` families. For each whitelisted family,
 cell shows the same classification. No later segment group is classified.
 Candidate offer order is not necessarily first-attempt order. Unrestricted
 default routing preserves the group facts without per-family classification.
+A timed result within `1e-9` of its initial density at any point stops the
+command with RuntimeError if the reference moved more than `2e-3` at that
+point. This check runs after the clocks stop. An unchanged reference allows
+an unchanged result.
 Other RuntimeErrors, wrong pinned paths, numerical failures and output failures
 stop the command. Measurement failures leave earlier outputs untouched. Output
 write failures return nonzero and may leave a partial destination file.

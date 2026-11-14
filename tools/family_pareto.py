@@ -19,6 +19,8 @@ from time import perf_counter, process_time
 from typing import Literal
 from uuid import uuid4
 
+import numpy as np
+from numpy.typing import NDArray
 from zcu_tools.simulate.evolution import (
     Engine,
     EvolutionResult,
@@ -67,6 +69,8 @@ class EngineSession:
     clear_history: Callable[[], None]
     on_sample: Callable[[str, "Sample | None"], None] | None = None
     """Optional untimed observer after each sample; None sample marks a skipped mode."""
+    initial_density: NDArray[np.complex128] | None = None
+    """DC initial density (M,M); None is timing-only and skips no-evolution checks."""
 
 
 SessionOpener = Callable[[], AbstractContextManager[EngineSession]]
@@ -133,12 +137,26 @@ def _timed_sample(
     wall, cpu = wall_clock(), cpu_clock()
     result = session.evolve()
     cpu_elapsed, wall_elapsed = cpu_clock() - cpu, wall_clock() - wall
+    oracle_error = (
+        None
+        if reference is None
+        else density_error(result.densities, reference.density)
+    )
+    if reference is not None and session.initial_density is not None:
+        for point, actual, expected in zip(
+            result.points, result.densities, reference.density, strict=True
+        ):
+            result_motion = density_error(actual, session.initial_density)
+            reference_motion = density_error(expected, session.initial_density)
+            if result_motion <= 1e-9 and reference_motion > ACCURACY_LIMIT:
+                raise RuntimeError(
+                    f"point {point}: result moved {result_motion:.1e} from the initial "
+                    f"density while the reference moved {reference_motion:.3g}"
+                )
     return Sample(
         wall_elapsed,
         cpu_elapsed,
-        None
-        if reference is None
-        else density_error(result.densities, reference.density),
+        oracle_error,
         dict(result.paths.segments_by_kernel),
         routing=dict(result.paths.routing),
         family_cpu_s={
@@ -170,6 +188,9 @@ def measure_family(
     history, and leave warm_clear_history unmeasured with explicit None times.
     Otherwise collect five samples per mode, with two untimed warmups before
     each warm mode. Setup, cleanup, history clearing and inspection are untimed.
+    With a reference and session.initial_density, a point staying within 1e-9
+    of its initial density while the reference moves beyond ACCURACY_LIMIT
+    raises RuntimeError before recording the sample. This inspection is untimed.
     No process or disk-cache reset occurs here. Failures always propagate.
     """
 
@@ -442,6 +463,7 @@ def whitelist_session(
             ),
             case.source.history.clear,
             on_sample,
+            initial_density=case.source.initial_density,
         )
 
 
@@ -470,7 +492,7 @@ def _availability_opener(opener: SessionOpener) -> SessionOpener:
                         raise _InitialRefusal(error) from error
                     raise
 
-            yield EngineSession(evolve, session.clear_history, session.on_sample)
+            yield replace(session, evolve=evolve)
 
     return checked_session
 
@@ -515,7 +537,10 @@ def measure_policy(
     not the target. Both preserve first-group facts and whitelist classification.
     Neither infers later groups. All other evolve/setup/cleanup failures stop.
     Wall/process CPU describe this entire group, not isolated target speed.
-    Oracle errors are measured across all retained samples.
+    Oracle errors are measured across all retained samples. With a session's
+    initial_density, RuntimeError rejects any point staying within 1e-9 of that
+    density when the reference moves beyond ACCURACY_LIMIT. Runtime errors
+    retain their identity and gain a note naming the scenario and family.
     """
     whitelist = _policy_whitelist(item, family)
     expected = item.expected_routes.get(family, {}) if family != "default" else {}
@@ -560,6 +585,9 @@ def measure_policy(
                 },
             ),
         )
+    except RuntimeError as error:
+        error.add_note(f"scenario {item.name}, family {family}")
+        raise
     paths = [sample.paths for mode in modes for sample in mode.samples]
     if family != "default" and any(
         set(path) != set(whitelist or ()) or any(count <= 0 for count in path.values())
@@ -681,11 +709,18 @@ def measure_fixed_group(
 
     The complete input, budget and three history modes match measure_policy.
     This is a group latency, never attributed to any one member or included
-    among pinned-family dominance competitors. Failures propagate.
+    among pinned-family dominance competitors. RuntimeError rejects a point
+    staying within 1e-9 of its initial density while the reference moves beyond
+    ACCURACY_LIMIT. Runtime errors gain scenario/fixed-group context; all
+    failures propagate.
     """
-    modes = measure_family(
-        lambda: whitelist_session(item, families, on_sample=on_sample), reference
-    )
+    try:
+        modes = measure_family(
+            lambda: whitelist_session(item, families, on_sample=on_sample), reference
+        )
+    except RuntimeError as error:
+        error.add_note(f"scenario {item.name}, family fixed_default_group {families}")
+        raise
     return FamilyResult(
         "fixed_default_group",
         max(_mode_error(mode) for mode in modes if mode.samples),

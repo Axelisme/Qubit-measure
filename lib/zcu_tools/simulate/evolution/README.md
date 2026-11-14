@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-11-14, common-frame step pricing
+**Last updated:** 2026-11-14, common-frame step pricing and remeasured DOP853 evidence
 
 **讀者：** framework-dev、agent。Segment evolution 的公開輸入、路由與數值邊界。
 
@@ -296,7 +296,7 @@ evidence. These observations do not authorize deletion or guard changes.
 | `flux_dop853` | Directly retained, exclusive driven-flux domain | No continuous-flux workload in these thirteen tables. |
 | `slow_envelope` | Directly retained, exclusive low-carrier domain | These inputs do not exercise its domain. |
 | `t6` | Directly retained, terminal plateau candidate | [N-long](../../../../tools/data/family_pareto/summaries/long_gate_sequence.md) qualifies; local budget controls are not a final-error guarantee. |
-| `dop853` | Directly retained, terminal shaped/two/multiple candidate | [A](../../../../tools/data/family_pareto/summaries/gain_sweep.md) fails at 3.19414e-2; retained does not mean accurate on every input. |
+| `dop853` | Directly retained, terminal shaped/two/multiple candidate | [A](../../../../tools/data/family_pareto/summaries/gain_sweep.md) qualifies at 4.14019e-6 on remeasurement; retained does not mean accurate on every input. |
 | `dyson` | No measured target | Offered plateau groups refuse; no dominance conclusion. |
 | `single_tone_rwa` | 4: L, I, N, N-long | [N-long](../../../../tools/data/family_pareto/summaries/long_gate_sequence.md) qualifies at 1.24701e-3 over 50/100/200 gates. F and both bias045 tables fail. Disposition remains pending, not approved for deletion. |
 | `floquet_period` | 4: F, I, F-bias045, N-bias045 | L, N and N-long are dominated by qualified `single_tone_rwa`; [F-bias045](../../../../tools/data/family_pareto/summaries/carrier_sweep_bias045.md) supplies a qualified alternative to RWA. |

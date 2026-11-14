@@ -2,7 +2,7 @@
 
 # gain_sweep
 
-Provenance: {"dirty":false,"exclusive":true,"head":"3545520dd8d5e8784be642246605f263654ce72b","started_at_utc":"2026-11-13T19:19:33.821501+00:00","tree":"c9f484253fae2cc0db5a7d80dc1dd21bbe808d77"}
+Provenance: {"dirty":false,"exclusive":true,"head":"7743f24a78ced9a632f7984d521f10e840155cba","started_at_utc":"2026-11-14T10:57:28.789390+00:00","tree":"977db41f067d4b092c0eb6bd0bc44746f6401658"}
 
 Measured pinned families: t4, adiabatic_map, flux_dop853, slow_envelope, dyson, single_tone_rwa, floquet_period, t6, single_tone_gate, shaped_sambe, gate_cache, period_table, common_frame, multitone_gate, multitone_rwa, floquet, dop853.
 
@@ -28,7 +28,7 @@ Times describe this table only; differences between runs do not establish faster
 | multitone_gate | not_candidate | None | target_and_companions | ('multitone_gate', 't4') | ('t4',) | no valid kernel for segment 0; domain shaped: points [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23], segments [0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 32, 34, 36, 38, 40, 42, 44, 46] |
 | multitone_rwa | not_candidate | None | target_and_companions | ('multitone_rwa', 't4') | ('t4',) | no valid kernel for segment 0; domain shaped: points [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23], segments [0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 32, 34, 36, 38, 40, 42, 44, 46] |
 | floquet | not_candidate | None | target_and_companions | ('floquet', 't4') | ('t4',) | no valid kernel for segment 0; domain shaped: points [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23], segments [0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 32, 34, 36, 38, 40, 42, 44, 46] |
-| dop853 | over_limit | 0.03194139499853242 | target_and_companions | ('dop853', 't4') | ('t4',) | — |
+| dop853 | qualified | 4.140191491686218e-06 | target_and_companions | ('dop853', 't4') | ('t4',) | — |
 | default | qualified | 5.5663988903865505e-05 | default | None | () | — |
 | fixed_default_group | qualified | 5.5663988903865505e-05 | fixed_family_group | ('shaped_sambe', 't4') | () | — |
 
@@ -61,15 +61,15 @@ Times describe this table only; differences between runs do not establish faster
 | single_tone_gate | first_evolve | None | None | 0 | no valid kernel for segment 0; domain shaped: points [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23], segments [0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 32, 34, 36, 38, 40, 42, 44, 46] |
 | single_tone_gate | warm_clear_history | None | None | 0 | no valid kernel for segment 0; domain shaped: points [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23], segments [0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 32, 34, 36, 38, 40, 42, 44, 46] |
 | single_tone_gate | warm_retain_history | None | None | 0 | no valid kernel for segment 0; domain shaped: points [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23], segments [0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 32, 34, 36, 38, 40, 42, 44, 46] |
-| shaped_sambe | first_evolve | 0.2992805719986791 | 0.29820591600000057 | 5 | — |
-| shaped_sambe | warm_clear_history | 0.2983903709973674 | 0.29738521699999865 | 5 | — |
-| shaped_sambe | warm_retain_history | 0.2967488020003657 | 0.2952612289999994 | 5 | — |
-| gate_cache | first_evolve | 660.7169935159982 | 659.0031240779999 | 1 | — |
+| shaped_sambe | first_evolve | 0.2923028910008725 | 0.29144324600000004 | 5 | — |
+| shaped_sambe | warm_clear_history | 0.28905188299540896 | 0.2882731930000002 | 5 | — |
+| shaped_sambe | warm_retain_history | 0.29038338699319866 | 0.2894857159999997 | 5 | — |
+| gate_cache | first_evolve | 640.497671812991 | 639.506768365 | 1 | — |
 | gate_cache | warm_clear_history | None | None | 0 | slow family not measured |
-| gate_cache | warm_retain_history | 661.6098456110012 | 659.9348865579999 | 1 | — |
-| period_table | first_evolve | 33.65126069800317 | 33.50536718099988 | 5 | — |
-| period_table | warm_clear_history | 33.79726669500087 | 33.677981158999955 | 5 | — |
-| period_table | warm_retain_history | 34.36366532299871 | 34.220246047000046 | 5 | — |
+| gate_cache | warm_retain_history | 645.1594158480002 | 644.101285445 | 1 | — |
+| period_table | first_evolve | 33.79836635099491 | 33.670978017999914 | 5 | — |
+| period_table | warm_clear_history | 32.90917052399891 | 32.78747449999992 | 5 | — |
+| period_table | warm_retain_history | 33.03653652800131 | 32.92713845800017 | 5 | — |
 | common_frame | first_evolve | None | None | 0 | no valid kernel for segment 0; domain shaped: points [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23], segments [0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 32, 34, 36, 38, 40, 42, 44, 46] |
 | common_frame | warm_clear_history | None | None | 0 | no valid kernel for segment 0; domain shaped: points [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23], segments [0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 32, 34, 36, 38, 40, 42, 44, 46] |
 | common_frame | warm_retain_history | None | None | 0 | no valid kernel for segment 0; domain shaped: points [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23], segments [0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 32, 34, 36, 38, 40, 42, 44, 46] |
@@ -82,12 +82,12 @@ Times describe this table only; differences between runs do not establish faster
 | floquet | first_evolve | None | None | 0 | no valid kernel for segment 0; domain shaped: points [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23], segments [0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 32, 34, 36, 38, 40, 42, 44, 46] |
 | floquet | warm_clear_history | None | None | 0 | no valid kernel for segment 0; domain shaped: points [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23], segments [0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 32, 34, 36, 38, 40, 42, 44, 46] |
 | floquet | warm_retain_history | None | None | 0 | no valid kernel for segment 0; domain shaped: points [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23], segments [0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 32, 34, 36, 38, 40, 42, 44, 46] |
-| dop853 | first_evolve | 0.02284541600238299 | 0.022752097999955367 | 5 | — |
-| dop853 | warm_clear_history | 0.01937687399913557 | 0.019295053999940137 | 5 | — |
-| dop853 | warm_retain_history | 0.018822796999302227 | 0.018748426999991352 | 5 | — |
-| default | first_evolve | 0.3029030290017545 | 0.3016830819999541 | 5 | — |
-| default | warm_clear_history | 0.29974404299719026 | 0.2985313839999435 | 5 | — |
-| default | warm_retain_history | 0.3043422480004665 | 0.3031579009998495 | 5 | — |
-| fixed_default_group | first_evolve | 0.3048935970000457 | 0.3037039870000626 | 5 | — |
-| fixed_default_group | warm_clear_history | 0.30460915599906 | 0.3033713130000706 | 5 | — |
-| fixed_default_group | warm_retain_history | 0.3004032980024931 | 0.2992484850001347 | 5 | — |
+| dop853 | first_evolve | 4.501249273002031 | 4.494586172000027 | 5 | — |
+| dop853 | warm_clear_history | 4.497347110998817 | 4.490248371999996 | 5 | — |
+| dop853 | warm_retain_history | 4.489386836008634 | 4.482363329999998 | 5 | — |
+| default | first_evolve | 0.2896481420029886 | 0.2889324329998999 | 5 | — |
+| default | warm_clear_history | 0.2869582109997282 | 0.2862961319999613 | 5 | — |
+| default | warm_retain_history | 0.28798480599652976 | 0.28729445700014367 | 5 | — |
+| fixed_default_group | first_evolve | 0.287021874988568 | 0.2862892870000451 | 5 | — |
+| fixed_default_group | warm_clear_history | 0.2891559350100579 | 0.2884199399998124 | 5 | — |
+| fixed_default_group | warm_retain_history | 0.2895113630074775 | 0.28881361999992805 | 5 | — |
