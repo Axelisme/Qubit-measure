@@ -1,6 +1,6 @@
 # tools/
 
-**Last updated:** 2026-11-14, public single-model construction, eight-point random scans and recorded conclusions
+**Last updated:** 2026-11-14, public single-model construction and eight-point random-scan summaries
 
 **讀者：** framework-dev。Repo 品質檢查與重計算執行器的 CLI、輸出與比較機制。
 
@@ -202,6 +202,19 @@ Compare times within one table, not across scenarios or measurement runs.
 | S-long 50/100/200 shaped gates | [Markdown](data/family_pareto/summaries/long_shaped_gate_sequence.md) | [JSON](data/family_pareto/summaries/long_shaped_gate_sequence.json) |
 | F carrier sweep at 0.45 Φ0 | [Markdown](data/family_pareto/summaries/carrier_sweep_bias045.md) | [JSON](data/family_pareto/summaries/carrier_sweep_bias045.json) |
 | N gate sequence at 0.45 Φ0 | [Markdown](data/family_pareto/summaries/gate_sequence_bias045.md) | [JSON](data/family_pareto/summaries/gate_sequence_bias045.json) |
+
+The two eight-point RB-type tables use clean commit
+`4e64d9abfcaf04f066c8d8f82672eaa2378c8e0f`, tree
+`5add8d093d14ae99097a7d839faad6fda57fa1aa`. Each ran once with exclusive
+access and the same 17 pinned families, default routing and its fixed observed
+union. The plateau table records `single_tone_rwa`, default routing and the
+fixed union as `over_limit`. The shaped table records `dop853` as
+`over_limit`. These outcomes remain in the generated records.
+
+| Scenario | Generated summary | Numeric source |
+| --- | --- | --- |
+| Random constant-gate sequence | [Markdown](data/family_pareto/summaries/random_gate_sequence.md) | [JSON](data/family_pareto/summaries/random_gate_sequence.json) |
+| Random shaped-gate sequence | [Markdown](data/family_pareto/summaries/random_shaped_gate_sequence.md) | [JSON](data/family_pareto/summaries/random_shaped_gate_sequence.json) |
 
 References remain in the shared local `references/` directory described below.
 Complete matrices, diagnostic reports and journals remain under the corresponding
@@ -471,8 +484,8 @@ not at the end of that window.
 | N-bias045 `gate_sequence_bias045` | Same as N at 0.45 Φ0 | Gate count 1 to 24, carrier at biased DC E1−E0 | Same as N | Same as N | Compares the same compiled gate prefixes at a second DC bias. |
 | M `simultaneous_drive` | Synchronous F1/F2 drives, terminal readout | Shared gain .01 to .1 | Two Gaussians, 100 ns, sigma 20 ns | 2 | Independent joint-model drive operators under overlapping shaped controls. |
 | S `shaped_gate_sequence` | Prefix of repeated Gaussian X,Y,-X,-Y gates, terminal readout | Gate count 1 to 24 | Gaussian 100 ns gates, sigma 20 ns, gain .1 | 2 to 47 | Reuses N's alphabet and ragged prefixes with A's shaped-gate support and width, separating shape from sequence reuse. |
-| `random_gate_sequence` | Fixed random primitive phase prefixes and recovery phases, terminal readout | 8 fixed samples from 20 seeds; selected depths [0,1,2,4,8,16,32,128], 8/20 seeds | Same constant gates as N | Public support partition, including zero-gate idle points | Measures phase-dependent sequence error without replacing N's cyclic alphabet. |
-| `random_shaped_gate_sequence` | Same fixed phases as random_gate_sequence, with Gaussian gates | Same 8 seed/depth points | Same Gaussian gates as S | Public support partition, including zero-gate idle points | Separates shaped-gate reuse from the fixed cyclic phase order. |
+| `random_gate_sequence` | Fixed random primitive phase prefixes and recovery phases, terminal readout | 8 fixed samples from 20 seeds; selected depths [0,1,2,4,8,16,32,128], 8/20 seeds | Same constant gates as N | Public support partition, including one zero-gate point | Measures phase-dependent sequence error without replacing N's cyclic alphabet. |
+| `random_shaped_gate_sequence` | Same fixed phases as random_gate_sequence, with Gaussian gates | Same 8 seed/depth points | Same Gaussian gates as S | Public support partition, including one zero-gate point | Separates shaped-gate reuse from the fixed cyclic phase order. |
 | N-long `long_gate_sequence` | N's constant X,Y,-X,-Y prefixes, terminal readout | Gate counts 50, 100, 200 (three points) | Same constant 20 ns gates and gain .1 as N | Public compiled support partition, including alignment gaps and readout lead | Checks whole-sequence accuracy beyond 24 gates without replacing N. |
 | S-long `long_shaped_gate_sequence` | S's Gaussian X,Y,-X,-Y prefixes, terminal readout | Gate counts 50, 100, 200 (three points) | Same Gaussian 100 ns gates, sigma 20 ns and gain .1 as S | Public compiled support partition, including alignment gaps and readout lead | Checks shaped-gate reuse at long sequence lengths without replacing S. |
 | O1 `overlapping_constant_tones` | Fully overlapping constant Pump/Stokes pair, terminal readout | Pump fixed at DC E1−E0; Stokes scans that center ±50 MHz | Both 1000 ns; gains .02/.002 | 2 | A carrier slice of the dual-tone reset scan on one qubit, without a cavity drive. |
