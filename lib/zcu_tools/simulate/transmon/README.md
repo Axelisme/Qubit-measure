@@ -1,8 +1,11 @@
 # SQUID transmon simulation
 
-**Last updated:** 2026-10-27
+**Last updated:** 2026-11-14
 
 **讀者：** framework-dev。SQUID transmon predictor 的輸入、查詢與失敗契約。
+
+[ADR-0071](../../../../docs/adr/0071-coherence-units.md) defines energy/h and frequency units.
+[ADR-0072](../../../../docs/adr/0072-module-boundaries.md) places numeric prediction in `simulate`, outside component persistence and device control.
 
 `TransmonParams` holds EJmax and EC in GHz and junction asymmetry d in [0, 1].
 None means unknown. `missing()` lists unknown fields. `build_predictor()` rejects

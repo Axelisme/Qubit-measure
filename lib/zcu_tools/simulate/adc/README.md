@@ -1,8 +1,12 @@
 # ADC probability and readout contracts
 
-**Last updated:** 2026-10-31, empty read events
+**Last updated:** 2026-11-14
 
 **讀者：** framework-dev、agent。ADC 機率、讀出訊號與 interval moment 契約。
+
+[ADR-0071](../../../../docs/adr/0071-coherence-units.md) defines frequency and decay-rate units.
+[ADR-0072](../../../../docs/adr/0072-module-boundaries.md) places ADC numerics in `simulate`, outside model environment assembly.
+[ADR-0078](../../../../docs/adr/0078-evolution-module-boundary.md) assigns field integrals, bounded field caching and complete raw sampling to ADC.
 
 Importing `simulate.adc` initializes the shared simulator Numba cache policy
 before creating dispatchers, even if evolution has not been imported. ADC and

@@ -1,8 +1,12 @@
 # Fixed-coordinate FTF numerics
 
-**Last updated:** 2026-11-01，simulators package ownership
+**Last updated:** 2026-11-14
 
 **讀者：** framework-dev、agent。固定座標 FTF 數值模型、路由與快取契約。
+
+[ADR-0071](../../../../../docs/adr/0071-coherence-units.md) defines frequency, time and loss units.
+[ADR-0072](../../../../../docs/adr/0072-module-boundaries.md) separates model physics from shared numeric mechanisms.
+[ADR-0078](../../../../../docs/adr/0078-evolution-module-boundary.md) governs evolution integration and ADC field-cache ownership.
 
 `JointParameters` supplies F1/C/F2 numeric circuits and signed full-charge
 couplings in GHz. `JointModel` selects fixed local levels at DC, forms their

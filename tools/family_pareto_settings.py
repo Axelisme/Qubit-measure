@@ -105,6 +105,80 @@ SINGLE_MODEL: dict[str, JsonValue] = {
 }
 
 
+INTEGER_MODEL: dict[str, JsonValue] = {
+    "format": "zcu.single-fluxonium",
+    "version": 1,
+    "chip": {
+        "qubit": {
+            "ej_ghz": 6.78,
+            "ec_ghz": 1.47,
+            "el_ghz": 0.22,
+            "q_cap": 100000.0,
+            "q_ind": None,
+            "xqp": 0.0,
+            "aphi": 0.0,
+        },
+        "temperature_k": 0.020,
+    },
+    "dc_bias": {
+        "offset_phi0": 0.0,
+        "source": {
+            "name": "flux_bias",
+            "unit": "A",
+            "limits": [-1.0, 1.0],
+            "initial": 0.0,
+            "ramp_step": 0.01,
+            "flux_per_unit": 1.0,
+        },
+    },
+    "drive_lines": {
+        "Pump": {
+            "name": "Pump",
+            "gen_ch": 1,
+            "charge_drive_ghz_per_gain": {"real": 1.0, "imag": 0.0},
+        },
+        "Stokes": {
+            "name": "Stokes",
+            "gen_ch": 2,
+            "charge_drive_ghz_per_gain": {"real": 1.0, "imag": 0.0},
+        },
+    },
+    "flux_line": None,
+    "readout": {
+        "drive": {"gen_ch": 0, "input_per_gain": 1.0},
+        "resonator": {
+            "frequency_ghz": 7.46,
+            "charge_coefficient_ghz": 0.10,
+            "kappa_external_mhz": 15.0,
+            "kappa_internal_mhz": 0.0,
+            "thermal_occupation": 0.0,
+        },
+        "adc": {
+            "background": {"ripple_period_mhz": 1000.0, "pivot_ghz": 0.0},
+            "ro_ch": 0,
+            "gain": 1000.0,
+            "phase_deg": 0.0,
+            "time_of_flight_ns": 0.0,
+            "offset_adc": [0.0, 0.0],
+            "noise_psd_adc2_ns": [[400.0, 0.0], [0.0, 400.0]],
+        },
+    },
+    "numerics": {
+        "projection_prune_floor": 1e-9,
+        "slow_envelope_segments_per_period": 20,
+        "truncation": {"native_cutoff": 80, "levels": 20},
+        "solver": {
+            "rtol": 1e-7,
+            "atol": 1e-9,
+            "max_step_ns": 0.05,
+            "bath_segment_ns": 10.0,
+        },
+        "seed": 20261029,
+        "time_scale": 0.0,
+    },
+}
+
+
 FTF_MODEL: dict[str, JsonValue] = {
     "format": "zcu.ftf",
     "version": 2,

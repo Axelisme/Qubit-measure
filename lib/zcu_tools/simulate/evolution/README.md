@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-11-14, constant RWA endpoint kicks
+**Last updated:** 2026-11-14, endpoint kicks and main pricing reconciliation
 
 **讀者：** framework-dev、agent。Segment evolution 的公開輸入、路由與數值邊界。
 
@@ -256,6 +256,7 @@ thresholds and algorithm details live with their owners:
 | --- | --- |
 | Row domains, named candidate order and terminal routes | [dispatch](_dispatch.py); [kernel collection](kernels/__init__.py) instantiates implementations only |
 | Shaped and two-tone cold-cost choices | [shaped dispatch](_shaped_dispatch.py), [two-tone dispatch](_two_tone_dispatch.py) return family names, not positional indices or unnamed flags |
+| `t6` direct/channel pricing and complete-acquire key inventory | [t6 dispatch](_t6_dispatch.py), called lazily by [t6 preparation](kernels/t6.py) |
 | Multitone gate amortization | [multitone dispatch](_multitone_dispatch.py) owns the 20-use cost preference and complete-acquire canonical-key inventory |
 | Slow/plateau carrier boundary | [slow-envelope comparison](kernels/slow_envelope.py) owns the strict absolute-carrier comparison shared by dispatch and its guard |
 | Common-frame pricing and numerical construction | [common-frame dispatch](_common_frame_dispatch.py), [kernel](kernels/common_frame_kernel.py) |
@@ -277,7 +278,7 @@ or certify arbitrary pulse strengths and coherences.
 
 ## Kernel summary
 
-The domains below use the names in [dispatch](_dispatch.py#L75).
+The domains below use the names in [dispatch](_dispatch.py).
 `idle` has no tones or continuous flux motion. `adiabatic` has flux motion
 without tones; `flux` has flux motion with tones. At fixed flux, `slow` has one
 constant tone with carrier magnitude below 30 MHz. `plateau` has one constant
@@ -303,40 +304,113 @@ guard-edge error is `7.745247e-4`. Representative inputs are pinned by
 [`test_guard_edge_density`](../../../../tests/simulate/evolution/contract/test_accuracy_matrix.py)
 pins the [guard-edge inputs](../../../../tests/simulate/evolution/contract/guard_edge_cases.py).
 The same named inputs also run with
-[default empty and warm routing history](../../../../tests/simulate/evolution/contract/test_accuracy_matrix.py#L55);
+[default empty and warm routing history](../../../../tests/simulate/evolution/contract/test_accuracy_matrix.py);
 those runs measure the families actually selected, not every candidate.
 The [matrix instructions](../../../../tests/README.md#evolution-精度矩陣)
 own the command and report format.
 
 | Family and use | Dispatch domain | Approximation and numerical admission | Pinned accuracy cases | Full density ≤ 2e-3 |
 | --- | --- | --- | --- | --- |
-| [`t4`](kernels/t4.py#L42), static idle evolution | `idle` | Exact secular population semigroup and coherence phases/decay. Guard requires zero tones; no approximation threshold. | [`idle_coherence`](../../../../tests/simulate/evolution/contract/accuracy_cases.py#L174) | PASS |
-| [`adiabatic_map`](kernels/adiabatic_map.py#L147), undriven flux transport | `adiabatic` | Preserve ordered populations, integrate dynamical/gauge phases and decay coherences. Requires waveform samples. Quadrature doubles from 4 to 4096 nodes per knot interval until phase-factor change ≤ B/10; overlap < 0.25 forces refinement. This does not check nonadiabatic transitions, degeneracy or crossings. | [`adiabatic_ramp`](../../../../tests/simulate/evolution/contract/accuracy_cases.py#L102) | PASS |
-| [`flux_dop853`](kernels/flux_dop853.py#L128), driven continuous flux | `flux` | Integrate full H(flux(t)) with a fixed quantized secular bath per row, stopping at active flux/envelope knots. Requires tones and waveform samples. Local rtol = min(1e-4, 0.03B), atol = min(1e-6, 0.0003B), from the [shared solver](kernels/_dop853.py#L182). | [`continuous_flux`](../../../../tests/simulate/evolution/contract/accuracy_cases.py#L207) | PASS |
-| [`slow_envelope`](kernels/slow_envelope.py#L42), low-carrier constant drive | `slow`, carrier magnitude strictly below 30 MHz | Midpoint-held full Hamiltonians with Strang bath half-steps, default 20 holds per period and one hold for DC. Dispatch and kernel guard share the strict absolute-carrier < 30 MHz comparison; exactly ±30 MHz belongs to plateau. No budget adaptation; historical population calibration is separate from this density measurement. | [`low_carrier`](../../../../tests/simulate/evolution/contract/accuracy_cases.py#L223); [boundary contract](../../../../tests/simulate/evolution/contract/test_routing_boundaries.py) | PASS |
-| [`dyson`](kernels/dyson.py#L758), weak constant drive | `plateau` | Second-order full-carrier modal Dyson. Calibrated guards require r ≤ min(0.1, 0.25B^(1/3)), r2 ≤ 0.05, and second-order population indicator B2 + B/8 ≤ min(0.02, (1.5B)^(2/3)). Certified shared no-drive prefixes omit the B2 check. B/8 reserves path pruning; this is not a multilevel remainder proof. | [`weak_plateau`](../../../../tests/simulate/evolution/contract/accuracy_cases.py#L176) | PASS |
-| [`single_tone_rwa`](kernels/single_tone_rwa.py#L246), constant rotating-frame block evolution | `plateau` | Fixed flux, B ≥ 1e-3, carrier magnitude ≥ 50 MHz. Initial 50 MHz edge window with omission-driven restoration; transfer proxy ≤ 0.0058, full-operator/carrier ratio ≤ 0.25 and retained-norm phase proxy ≤ 0.06 rad. Phase-graph pruning ≤ min(B, 1e-3); real generator dimension ≤ 64. First-order endpoint kicks include every edge outside the resolved retention mask, including diagonal ±carrier terms; phase-graph pruning is separate. Cross-component density entries below 1e-5 after the initial kick are dropped. Uses the full secular bath without Strang splitting. | [`linear_plateau`](../../../../tests/simulate/evolution/contract/accuracy_cases.py#L126) | PASS at guard edge: 7.745247e-4 |
-| [`floquet_period`](kernels/floquet_period.py#L758), full-carrier constant-tone period reuse | `plateau` | Hilbert period trajectories with secular split playback. Requires carrier magnitude ≥ 0.03 GHz and some subdivision count m in 1..64 with dT²ΓV²/m² ≤ 1.0, using this owner's rad/ns drive bound. Below 1 GHz, CF4 or adjacent-cutoff Sambe uses endpoint defect ≤ min(1e-4, 0.1B). Higher carriers use DOP853 rtol min(1e-8, 1e-4B), max step T/4. These are calibrated local controls. | [`weak_plateau`](../../../../tests/simulate/evolution/contract/accuracy_cases.py#L176), [`strong_plateau`](../../../../tests/simulate/evolution/contract/accuracy_cases.py#L179) | PASS; largest family error 1.375101e-3 |
-| [`t6`](kernels/t6.py#L247), full dissipative constant-tone channel | `plateau`, terminal candidate | One constant tone at any strength. Integrate the full secular channel, power complete periods and Fourier-interpolate phase. Refine 16..512 phase nodes until off-grid channel defect and spectral tail are each ≤ B/16; failure raises rather than reroutes. | [`weak_plateau`](../../../../tests/simulate/evolution/contract/accuracy_cases.py#L176), [`strong_plateau`](../../../../tests/simulate/evolution/contract/accuracy_cases.py#L179) | PASS |
-| [`single_tone_gate`](kernels/single_tone_gate.py#L6), phase-covariant shaped RWA gates | `shaped` | Fixed flux, B ≥ 1e-3, real sampled envelope with at least 3 samples, slope ≤ 0.025/ns, curvature ≤ 0.003/ns², carrier magnitude ≥ 50 MHz. Omission restoration requires transfer ≤ 0.0058, residual phase ≤ 0.0045 rad and retained real dimension ≤ 256. Pruning ≤ min(B, 1e-3); adaptive secular split uses n ≥ 4 with d³ΓV²/n² ≤ 0.01. [Shared gate owner](kernels/_rwa_gate.py#L230). | [`linear_shaped`](../../../../tests/simulate/evolution/contract/accuracy_cases.py#L126) | PASS |
-| [`shaped_sambe`](kernels/shaped_sambe.py#L250), frozen-envelope finite-Fourier periods | `shaped` | Nonzero peak, carrier magnitude ≥ 0.03 GHz, subdivisions m ≤ 32, envelope slope ≤ 2·peak·abs(f)·m and peak drive bound ≤ 0.5·abs(f)·m. Subdivision policy limits real/complex motion to 0.01/0.0025 and secular split to 0.01. Compare adjacent harmonic cutoffs 2/3 or 3/4 and use 4 or 8 amplitude nodes; accumulated spectral plus interpolation estimate must be ≤ B/2. | [`linear_shaped`](../../../../tests/simulate/evolution/contract/accuracy_cases.py#L126) | FAIL at guard edge: 3.091554e-3; strict xfail |
-| [`gate_cache`](kernels/gate_cache.py#L63), phase-interpolated full-carrier shaped gates | `shaped` | Four Hilbert subsegments with secular half-steps. Model-only secular split d³ΓV²/16 ≤ 0.01. For 0 < d ≤ 30 ns, dispatch tries 6 phase nodes with 2 probes and full-unitary defect ≤ min(1e-4, 0.1B); other keys or failed convergence use 16 nodes. Fixed-order playback does not certify arbitrary-drive error against B. | [`shaped_complex`](../../../../tests/simulate/evolution/contract/accuracy_cases.py#L184) | FAIL at guard edge: 9.296548e-3; strict xfail |
-| [`period_table`](kernels/period_table.py#L79), shaped amplitude-band period playback | `shaped` | 8 Chebyshev amplitude nodes and 16 phase samples. Guard requires envelope-motion indicator ≤ 0.05, amplitude-band bandwidth ≤ 0.5 and secular split ≤ 0.01. These calibrated limits do not scale with B. DC is guard-admissible with local direct integration, but default costs prefer terminal DOP853. | [`linear_shaped`](../../../../tests/simulate/evolution/contract/accuracy_cases.py#L126) | PASS |
-| [`common_frame`](kernels/common_frame.py#L248), nearby-carrier SW2 beat dynamics | `two` or two-tone `multiple` only | Fixed-flux common frame with second-order beat/two-photon terms, first-order endpoint dressing and CF4/secular playback. Absolute mean carrier must be ≥ 1e-10 GHz. Cost requires step ≥ 2 ns, capped at 8 ns and 0.08 cycles of the fastest retained channel; fast-channel denominator must exceed 1e-10. Row-local coherent/bath indicators must be ≤ 0.03/0.01, independent of B. | [`nearby_carriers`](../../../../tests/simulate/evolution/contract/accuracy_cases.py#L232) | FAIL at guard edge: 8.066669e-3; strict xfail |
-| [`multitone_gate`](kernels/multitone_gate.py#L40), reused simultaneous RWA gates | `multiple`, requires a sampled envelope | Default cost preference requires complete canonical-key inventory ≥ 20; 19 uses retains multitone RWA. Pinning this family bypasses cost, so 19 uses is allowed. Numerical admission: Fixed flux, B ≥ 1e-3, real envelopes, slope ≤ 0.025/ns, curvature ≤ 0.003/ns², each carrier magnitude ≥ 50 MHz and absolute-carrier spacing ≥ 100 MHz. Full-operator/carrier ratio ≤ 0.25, retained-norm phase proxy ≤ 0.06 rad and pruning ≤ min(B, 1e-3). Adaptive split uses n ≥ 4 with d³ΓV²/n² ≤ 0.01. These gate policies differ from ordinary multitone RWA. | [`joint_gate_inventory`](../../../../tests/simulate/evolution/contract/accuracy_cases.py#L245), 20 points; [19/20 boundary contract](../../../../tests/simulate/evolution/contract/test_routing_boundaries.py) | PASS |
-| [`multitone_rwa`](kernels/multitone_rwa.py#L227), simultaneous omission-restored RWA | `two`, distinct ports only; `multiple`, requires a sampled envelope | Fixed flux, B ≥ 1e-3, real envelopes, slope ≤ 0.025/ns, curvature ≤ 0.003/ns² and each carrier magnitude ≥ 50 MHz. Start with 50 MHz edges, restore omitted paths until transfer proxy ≤ 0.0058 and residual phase ≤ 0.0045 rad; retained real dimension ≤ 256. No carrier-spacing, full-operator/carrier ratio or retained-norm phase cap. Apply step ceiling is 16 ns for constants, 4 ns for sampled controls. | [`joint_gate_inventory`](../../../../tests/simulate/evolution/contract/accuracy_cases.py#L245) | PASS |
-| [`floquet`](kernels/floquet.py#L578), constant Stark tone plus probe | `two` | Larger absolute gain selects the Stark slot, with ties choosing the first; that slot requires positive carrier. Frame overlap ≥ 0.5, modal condition ≤ 1e8, maximum real eigenvalue ≤ 1e-10/ns and residual ≤ 1e-9; sampling extent ≤ 128 with at most 4096 phase samples. k=0 omission and convergence each fit B/3. Modal Dyson additionally uses r ≤ 0.1, r2 ≤ 0.05 when probe gain magnitude ≥ 0.1, Dyson norm-duration v ≤ 0.5, transfer indicator v + v²/2 ≤ 0.02 and higher-order remainder exp(v)·v³/6 ≤ B/3; otherwise use periodic channel playback. Retained-sideband admission instead requires convergence ≤ B/40 and bound ≤ 0.95B, retaining edges within 0.1/ns and averaging other harmonics through order 4. This finite-Fourier admission is not a density-error guarantee. | [`two_carriers`](../../../../tests/simulate/evolution/contract/accuracy_cases.py#L187) | PASS |
-| [`dop853`](kernels/dop853.py#L164), full-drive direct density integration | `shaped`, `two`, `multiple`, terminal candidate | No RWA or fast-path admission threshold. Accepts valid rows with finite positive B, including complex sampled envelopes. Stops at active control knots. Local rtol = min(1e-4, 0.03B), atol = min(1e-6, 0.0003B), from the [shared solver](kernels/_dop853.py#L182); these are not global error bounds. | [`shaped_complex`](../../../../tests/simulate/evolution/contract/accuracy_cases.py#L184), [`two_carriers`](../../../../tests/simulate/evolution/contract/accuracy_cases.py#L187), [`joint_gate_inventory`](../../../../tests/simulate/evolution/contract/accuracy_cases.py#L245) | PASS |
+| [`t4`](kernels/t4.py), static idle evolution | `idle` | Exact secular population semigroup and coherence phases/decay. Guard requires zero tones; no approximation threshold. | [`idle_coherence`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
+| [`adiabatic_map`](kernels/adiabatic_map.py), undriven flux transport | `adiabatic` | Preserve ordered populations, integrate dynamical/gauge phases and decay coherences. Requires waveform samples. Quadrature doubles from 4 to 4096 nodes per knot interval until phase-factor change ≤ B/10; overlap < 0.25 forces refinement. This does not check nonadiabatic transitions, degeneracy or crossings. | [`adiabatic_ramp`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
+| [`flux_dop853`](kernels/flux_dop853.py), driven continuous flux | `flux` | Integrate full H(flux(t)) with a fixed quantized secular bath per row, stopping at active flux/envelope knots. Requires tones and waveform samples. Local rtol = min(1e-4, 0.03B), atol = min(1e-6, 0.0003B), from the [shared solver](kernels/_dop853.py). | [`continuous_flux`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
+| [`slow_envelope`](kernels/slow_envelope.py), low-carrier constant drive | `slow`, carrier magnitude strictly below 30 MHz | Midpoint-held full Hamiltonians with Strang bath half-steps, default 20 holds per period and one hold for DC. Dispatch and kernel guard share the strict absolute-carrier < 30 MHz comparison; exactly ±30 MHz belongs to plateau. No budget adaptation; historical population calibration is separate from this density measurement. | [`low_carrier`](../../../../tests/simulate/evolution/contract/accuracy_cases.py); [boundary contract](../../../../tests/simulate/evolution/contract/test_routing_boundaries.py) | PASS |
+| [`dyson`](kernels/dyson.py), weak constant drive | `plateau` | Second-order full-carrier modal Dyson. Calibrated guards require r ≤ min(0.1, 0.25B^(1/3)), r2 ≤ 0.05, and second-order population indicator B2 + B/8 ≤ min(0.02, (1.5B)^(2/3)). Certified shared no-drive prefixes omit the B2 check. B/8 reserves path pruning; this is not a multilevel remainder proof. | [`weak_plateau`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
+| [`single_tone_rwa`](kernels/single_tone_rwa.py), constant rotating-frame block evolution | `plateau` | Fixed flux, B ≥ 1e-3, carrier magnitude ≥ 50 MHz. Initial 50 MHz edge window with omission-driven restoration; transfer proxy ≤ 0.0058, full-operator/carrier ratio ≤ 0.25 and retained-norm phase proxy ≤ 0.06 rad. Phase-graph pruning ≤ min(B, 1e-3); real generator dimension ≤ 64. First-order endpoint kicks include every edge outside the resolved retention mask, including diagonal ±carrier terms; phase-graph pruning is separate. Cross-component density entries below 1e-5 after the initial kick are dropped. Uses the full secular bath without Strang splitting. | [`linear_plateau`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS at guard edge: 7.745247e-4 |
+| [`floquet_period`](kernels/floquet_period.py), full-carrier constant-tone period reuse | `plateau` | Hilbert period trajectories with secular split playback. Requires carrier magnitude ≥ 0.03 GHz and some subdivision count m in 1..64 with dT²ΓV²/m² ≤ 1.0, using this owner's rad/ns drive bound. Below 1 GHz, CF4 or adjacent-cutoff Sambe uses endpoint defect ≤ min(1e-4, 0.1B). Higher carriers use DOP853 rtol min(1e-8, 1e-4B), max step T/4. These are calibrated local controls. | [`weak_plateau`](../../../../tests/simulate/evolution/contract/accuracy_cases.py), [`strong_plateau`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS; largest family error 1.375101e-3 |
+| [`t6`](kernels/t6.py), full dissipative constant-tone evolution | `plateau`, terminal candidate | One constant tone at any strength. Direct integrates each density in the H0 frame with the full secular bath and the shared dop853 policy: local rtol = min(1e-4, 0.03B), atol = min(1e-6, 0.0003B), without a fixed step ceiling. These are not whole-sequence error bounds. Channel retains its existing integration controls, powers complete periods and Fourier-interpolates phase, refining 16..512 nodes until off-grid defect and spectral tail are each ≤ B/16. Complete-key reuse selects the strategy as described below. Neither strategy does RWA or density repair; numerical failure raises rather than reroutes. | [`weak_plateau`](../../../../tests/simulate/evolution/contract/accuracy_cases.py), [`strong_plateau`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
+| [`single_tone_gate`](kernels/single_tone_gate.py), phase-covariant shaped RWA gates | `shaped` | Fixed flux, B ≥ 1e-3, real sampled envelope with at least 3 samples, slope ≤ 0.025/ns, curvature ≤ 0.003/ns², carrier magnitude ≥ 50 MHz. Omission restoration requires transfer ≤ 0.0058, residual phase ≤ 0.0045 rad and retained real dimension ≤ 256. Pruning ≤ min(B, 1e-3); adaptive secular split uses n ≥ 4 with d³ΓV²/n² ≤ 0.01. [Shared gate owner](kernels/_rwa_gate.py). | [`linear_shaped`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
+| [`shaped_sambe`](kernels/shaped_sambe.py), frozen-envelope finite-Fourier periods | `shaped` | Nonzero peak, carrier magnitude ≥ 0.03 GHz, subdivisions m ≤ 32, envelope slope ≤ 2·peak·abs(f)·m and peak drive bound ≤ 0.5·abs(f)·m. Subdivision policy limits real/complex motion to 0.01/0.0025 and secular split to 0.01. Compare adjacent harmonic cutoffs 2/3 or 3/4 and use 4 or 8 amplitude nodes; accumulated spectral plus interpolation estimate must be ≤ B/2. | [`linear_shaped`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | FAIL at guard edge: 3.091554e-3; strict xfail |
+| [`gate_cache`](kernels/gate_cache.py), phase-interpolated full-carrier shaped gates | `shaped` | Four Hilbert subsegments with secular half-steps. Model-only secular split d³ΓV²/16 ≤ 0.01. For 0 < d ≤ 30 ns, dispatch tries 6 phase nodes with 2 probes and full-unitary defect ≤ min(1e-4, 0.1B); other keys or failed convergence use 16 nodes. Fixed-order playback does not certify arbitrary-drive error against B. | [`shaped_complex`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | FAIL at guard edge: 9.296548e-3; strict xfail |
+| [`period_table`](kernels/period_table.py), shaped amplitude-band period playback | `shaped` | 8 Chebyshev amplitude nodes and 16 phase samples. Guard requires envelope-motion indicator ≤ 0.05, amplitude-band bandwidth ≤ 0.5 and secular split ≤ 0.01. These calibrated limits do not scale with B. DC is guard-admissible with local direct integration, but default costs prefer terminal DOP853. | [`linear_shaped`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
+| [`common_frame`](kernels/common_frame.py), common-frame SW2 beat dynamics | `two` or two-tone `multiple` only | Fixed-flux common frame with second-order beat/two-photon terms, first-order endpoint dressing and CF4/secular playback. Absolute mean carrier must be ≥ 1e-10 GHz. CF4 steps are capped at 8 ns and 0.08 cycles of the fastest retained channel, with no lower cutoff. Dispatch prices first-order playback steps, so cost rises with active carrier spacing; numerical guards determine applicability. Fast-channel denominator must exceed 1e-10. Row-local coherent/bath indicators must be ≤ 0.03/0.01, independent of B. | [`nearby_carriers`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | FAIL at guard edge: 8.066669e-3; strict xfail |
+| [`multitone_gate`](kernels/multitone_gate.py), reused simultaneous RWA gates | `multiple`, requires a sampled envelope | When comparing `multitone_rwa` and `multitone_gate`, cost preference selects the gate at complete canonical-key inventory ≥ 20 and retains multitone RWA at 19 uses. Pinning this family bypasses cost, so 19 uses is allowed. Numerical admission: Fixed flux, B ≥ 1e-3, real envelopes, slope ≤ 0.025/ns, curvature ≤ 0.003/ns², each carrier magnitude ≥ 50 MHz and absolute-carrier spacing ≥ 100 MHz. Full-operator/carrier ratio ≤ 0.25, retained-norm phase proxy ≤ 0.06 rad and pruning ≤ min(B, 1e-3). Adaptive split uses n ≥ 4 with d³ΓV²/n² ≤ 0.01. These gate policies differ from ordinary multitone RWA. | [`joint_gate_inventory`](../../../../tests/simulate/evolution/contract/accuracy_cases.py), 20 points; [19/20 boundary contract](../../../../tests/simulate/evolution/contract/test_routing_boundaries.py) | PASS |
+| [`multitone_rwa`](kernels/multitone_rwa.py), simultaneous omission-restored RWA | `two`, distinct ports only; `multiple`, requires a sampled envelope | Fixed flux, B ≥ 1e-3, real envelopes, slope ≤ 0.025/ns, curvature ≤ 0.003/ns² and each carrier magnitude ≥ 50 MHz. Start with 50 MHz edges, restore omitted paths until transfer proxy ≤ 0.0058 and residual phase ≤ 0.0045 rad; retained real dimension ≤ 256. No carrier-spacing, full-operator/carrier ratio or retained-norm phase cap. Apply step ceiling is 16 ns for constants, 4 ns for sampled controls. | [`joint_gate_inventory`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
+| [`floquet`](kernels/floquet.py), constant Stark tone plus probe | `two` | Larger absolute gain selects the Stark slot, with ties choosing the first; that slot requires positive carrier. Frame overlap ≥ 0.5, modal condition ≤ 1e8, maximum real eigenvalue ≤ 1e-10/ns and residual ≤ 1e-9; sampling extent ≤ 128 with at most 4096 phase samples. k=0 omission and convergence each fit B/3. Modal Dyson additionally uses r ≤ 0.1, r2 ≤ 0.05 when probe gain magnitude ≥ 0.1, Dyson norm-duration v ≤ 0.5, transfer indicator v + v²/2 ≤ 0.02 and higher-order remainder exp(v)·v³/6 ≤ B/3; otherwise use periodic channel playback. Retained-sideband admission instead requires convergence ≤ B/40 and bound ≤ 0.95B, retaining edges within 0.1/ns and averaging other harmonics through order 4. This finite-Fourier admission is not a density-error guarantee. | [`two_carriers`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
+| [`dop853`](kernels/dop853.py), full-drive direct density integration | `shaped`, `two`, `multiple`, terminal candidate | No RWA or fast-path admission threshold. Accepts valid rows with finite positive B, including complex sampled envelopes. Stops at active control knots. Local rtol = min(1e-4, 0.03B), atol = min(1e-6, 0.0003B), from the [shared solver](kernels/_dop853.py); these are not global error bounds. | [`shaped_complex`](../../../../tests/simulate/evolution/contract/accuracy_cases.py), [`two_carriers`](../../../../tests/simulate/evolution/contract/accuracy_cases.py), [`joint_gate_inventory`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
+
+### Recorded real-workload evidence
+
+The [thirteen recorded summaries](../../../../tools/README.md#recorded-scenario-summaries)
+retain the final errors, three history modes, wall/process CPU medians, companions
+and measurement provenance. Dominance compares only policies whose maximum final
+whole-sequence density error is at most `2e-3`. Qualified policies are equally
+accurate; another qualified candidate must be more than 10% faster to dominate.
+Default/fixed groups and the six directly retained families do not compete.
+Counts below use equal-companion groups and apply separately to all three modes
+and both clocks. Refusals, blocked companions and FAIL cells are not dominance
+evidence. These observations do not authorize deletion or guard changes.
+
+| Family | Not dominated on recorded workloads | Evidence and limits |
+| --- | --- | --- |
+| `t4` | Directly retained, exclusive idle domain | Pinned policies refuse driven spans; idle companion work is not an isolated target measurement. |
+| `adiabatic_map` | Directly retained, exclusive undriven-flux domain | No continuous-flux workload in these thirteen tables. |
+| `flux_dop853` | Directly retained, exclusive driven-flux domain | No continuous-flux workload in these thirteen tables. |
+| `slow_envelope` | Directly retained, exclusive low-carrier domain | These inputs do not exercise its domain. |
+| `t6` | Directly retained, terminal plateau candidate | [N-long](../../../../tools/data/family_pareto/summaries/long_gate_sequence.md) qualifies; local budget controls are not a final-error guarantee. |
+| `dop853` | Directly retained, terminal shaped/two/multiple candidate | [A](../../../../tools/data/family_pareto/summaries/gain_sweep.md) fails at 3.19414e-2; retained does not mean accurate on every input. |
+| `dyson` | No measured target | Offered plateau groups refuse; no dominance conclusion. |
+| `single_tone_rwa` | 4: L, I, N, N-long | [N-long](../../../../tools/data/family_pareto/summaries/long_gate_sequence.md) qualifies at 1.24701e-3 over 50/100/200 gates. F and both bias045 tables fail. Disposition remains pending, not approved for deletion. |
+| `floquet_period` | 4: F, I, F-bias045, N-bias045 | L, N and N-long are dominated by qualified `single_tone_rwa`; [F-bias045](../../../../tools/data/family_pareto/summaries/carrier_sweep_bias045.md) supplies a qualified alternative to RWA. |
+| `single_tone_gate` | No measured target | Shaped target groups refuse; no dominance conclusion. |
+| `shaped_sambe` | 3: A, S, S-long | [S-long](../../../../tools/data/family_pareto/summaries/long_shaped_gate_sequence.md) qualifies at 8.42157e-5; O2 is companion-blocked, not target-refused. |
+| `gate_cache` | 0 of 3 qualified workloads | A, S and S-long are dominated by `shaped_sambe` and `period_table`. A clear-history is unmeasured. No deletion is authorized. |
+| `period_table` | 1: O2 | [O2](../../../../tools/data/family_pareto/summaries/overlapping_shaped_tones.md) qualifies with `dop853` plus `t4` companions; A, S and S-long are dominated by `shaped_sambe`. |
+| `common_frame` | No measured target | M, O1 and O2 target guards/preconditions refuse; no dominance conclusion. |
+| `multitone_gate` | No measured target | M and O2 target guards/preconditions refuse; no dominance conclusion. |
+| `multitone_rwa` | No qualified target | [O1](../../../../tools/data/family_pareto/summaries/overlapping_constant_tones.md) fails at 2.59000e-3; M and O2 refuse. |
+| `floquet` | No measured target | O1 target guard/precondition refuses; other inputs are not its candidates. |
+
+The long shaped sequence supplies final-error evidence for `shaped_sambe` and
+`period_table` as faster alternatives to `gate_cache`. It does not establish
+coverage of every shaped workload. Cavity-drive, multiple-readout and continuous
+flux workloads remain outside these tables. Family removal still requires the
+relevant workload evidence and user approval.
+
+[t6 dispatch](_t6_dispatch.py) selects direct when
+`N * C_direct < C_channel`; otherwise [t6](kernels/t6.py) builds a channel.
+`N` counts that prepare key's rows in the complete acquire inventory, not a worker
+subset or routing history. This count does not account for channel
+rebuilds when a prepared prefix expires; the estimate does not model prefix
+lifetime. For `M` levels, duration `d` ns and absolute carrier `f` GHz, the
+estimates in seconds are
+`C_direct = 0.0012*d*max(1, f/0.582)*(M/21)^3` and
+`C_channel = 31*(M/21)^5`. Direct uses two 21-level aggregate apply-CPU
+measurements at budget `1e-3`, near 0.582 GHz: 48 rows totaling 960 ns took
+1.138655 s, and 24 rows totaling 5040.244 ns took 6.056137 s. Each is the second
+fresh-source/history/Engine sample in one process, not a repeated-history sample.
+A nonnegative affine least-squares fit gives zero intercept and 0.001201
+seconds/ns. The rounded price leaves actual-minus-estimated residuals of
+-0.013345 and +0.007844 s. These nonexclusive probes set an initial price; they
+are not performance acceptance or an isolated measurement of cold-start cost.
+Channel's 31 s/build comes from earlier production aggregates; its numerical
+controls and accuracy are unchanged.
+
+Both direct calibration inputs have the same dimension and carrier. They do not
+identify the dimension powers, frequency factor or breakpoint, which retain the
+earlier heuristic. Different budgets can also change direct work without
+changing this estimate. These are coarse strategy-selection prices, not runtime
+guarantees. In particular, complete-inventory counts omit prefix-lifetime channel
+rebuilds. WorkPlan retains the complete table before prefix/worker planning.
+The first `t6.prepare` asks `_t6_dispatch.publish_inventory` to build key counts,
+dimensions and decisions from that table's inputs. Prefixes and workers share the
+publication through the existing single-flight fact, including builder failures.
+Plans without `t6.prepare` do not scan t6 candidate keys. Preparation rejects a
+missing published key rather than recounting its worker subset. Standalone Kernel
+calls without retained geometry or a publication must supply their complete table
+and source; explicit early publication remains supported.
+`cost(table, rows)` retains table-only chunk-interleaving weights, not the
+selected strategy's cold price. It does not determine candidate order.
 
 The matrix measures the maximum absolute difference over every complex density
 entry at readout, against an independent full-Hamiltonian Lindblad DOP853
 reference. It includes coherences, relaxation and dephasing. The reference must
 agree within `2e-6` between rtol/atol pairs `2e-10/2e-12` and `2e-12/2e-14`.
 The collected maximum reference difference is `4.432072948e-12`.
-[Multisegment](../../../../tests/simulate/evolution/contract/test_accuracy_matrix.py#L81)
+[Multisegment](../../../../tests/simulate/evolution/contract/test_accuracy_matrix.py)
 observations measure the final density of the whole timeline, not each kernel's
 local contribution. The separate
-[history case](../../../../tests/simulate/evolution/contract/test_accuracy_matrix.py#L107)
+[history case](../../../../tests/simulate/evolution/contract/test_accuracy_matrix.py)
 checks both densities when accumulated inventory changes the default route from
 `shaped_sambe` to `single_tone_gate`.
 
@@ -436,6 +510,8 @@ densities in place and returns a row-aligned boolean exceedance mask.
 evolve table before workers start. Prefix representatives, caller classification
 and timeline workers share it through `KernelContext` and `ApplyContext`. Engine
 drains its pool before closing the plan on success, cancellation or failure.
+The single `complete_table` field supplies full immutable geometry to common-frame,
+multitone and t6 dispatch. Closing drops it along with the evolve-local facts.
 The registry kernels retain no evolve-local data.
 
 ### Facts and algorithm groups
@@ -570,7 +646,7 @@ class's methods.
 | Secular coherence decay | [kernels/_secular.py](kernels/_secular.py), used by static, split, modal and direct propagators. |
 | Density basis conversion | `transform_density` in [state.py](state.py), shared by population conversion, scheduler boundaries, Dyson input bounds and compiled DOP853 chains. Callers retain basis selection and traversal. |
 | Adaptive DOP853 tableau, tolerances and integration | [kernels/_dop853.py](kernels/_dop853.py), used by density solvers and Hilbert endpoint builders. Packing and chain traversal live in [kernels/_dop853_data.py](kernels/_dop853_data.py) and [kernels/_dop853_chain.py](kernels/_dop853_chain.py). [kernels/_dop853_intervals.py](kernels/_dop853_intervals.py) owns density knot partitioning and source-coordinate playback clocks. |
-| Ordinary density endpoint advancement | `advance_endpoints` in [kernels/dop853.py](kernels/dop853.py), used by ordinary DOP853 apply and period fractional tails with an explicitly supplied frame. |
+| Ordinary density endpoints, including H0-rotating-frame integration | `advance_endpoints` in [kernels/dop853.py](kernels/dop853.py) owns the full-drive secular density equation and exact return to the model eigenbasis. Ordinary DOP853 apply, `t6` direct rows and period fractional tails share this entry point and its budget-scaled local tolerance policy, supplying explicit frames. Budget validation, knot stops and numerical failures are unchanged. |
 | Period interpolation, secular playback and fractional tails | [kernels/_period_table.py](kernels/_period_table.py), shared by [period_table](kernels/period_table.py) and [shaped_sambe](kernels/shaped_sambe.py). |
 | Gate Hilbert endpoint integration | [kernels/_gate_endpoints.py](kernels/_gate_endpoints.py), shared by sixteen-node and [adaptive phase](kernels/gate_phase.py) builders. |
 | Constant-tone Hilbert period build and playback | [kernels/floquet_period.py](kernels/floquet_period.py) owns period builds and trajectories, with [CF4 grid](kernels/_cf4_grid.py) and [Sambe](kernels/_period_sambe.py) helpers. [kernels/_period_channel.py](kernels/_period_channel.py) owns complete secular-channel playback. Separate from two-tone Floquet frames. |

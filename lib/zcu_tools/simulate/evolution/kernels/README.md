@@ -1,6 +1,6 @@
 # Evolution kernels
 
-**Last updated:** 2026-11-14，constant RWA endpoint kick owner
+**Last updated:** 2026-11-14，endpoint kick 與 t6 dispatch owners
 
 **讀者：** framework-dev、agent。查找演化算法的數值 owner，以及 kernel 與 dispatch、scheduler 的接縫。
 
@@ -17,6 +17,11 @@
 Fourier 係數與 omitted-edge endpoint kick 數值留在 `_rwa_fourier.py`。
 `_rwa_numeric.py` 以 resolved retention mask 準備 kick 係數，目前只有 `single_tone_rwa` 套用。
 Phase graph 與 covariant gate builder 分別留在 `_rwa_graph.py` 與 `_rwa_gate.py`。
+`dop853.advance_endpoints` 擁有旋轉座標 density 積分，`dop853` 與 `t6` direct
+沿用相同的每段 budget 容差規則。這是局部積分控制，不保證整條序列的最終誤差。
+`t6` channel 的積分與插值控制不變。
+[`_t6_dispatch`](../_t6_dispatch.py) 擁有 direct／channel 定價、完整 prepare-key
+inventory 與選擇。第一次 `t6.prepare` 才呼叫 publisher；kernel 只消費決定並建置數值產品。
 完整 owner 對照見 [evolution README](../README.md#algorithm-ownership-and-reuse)。
 
 ## 內部接縫

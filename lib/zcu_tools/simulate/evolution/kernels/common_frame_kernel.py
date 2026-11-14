@@ -83,7 +83,7 @@ class CommonFrameKernel:
         rows: NDArray[np.int64],
         context: KernelContext,
     ) -> CommonFramePrepared:
-        """Build one immutable product per unique key, including cost bypasses."""
+        """Build one immutable numerical product per unique coefficient key."""
         frames = []
         for row in rows:
             count = int(table.tones[row])

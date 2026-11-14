@@ -1,8 +1,12 @@
 # Six independent fluxonium cavities
 
-**Last updated:** 2026-11-12，caller-owned routing controls
+**Last updated:** 2026-11-14
 
 **Readers:** framework-dev, lab-author, agent. Build and acquire six independent cavities through the normal simulation SoC.
+
+[ADR-0072](../../../../../docs/adr/0072-module-boundaries.md) defines model/framework ownership and physical charge admission.
+[ADR-0078](../../../../../docs/adr/0078-evolution-module-boundary.md) governs routing history, preparation lifetimes and raw sampling ownership.
+[ADR-0084](../../../../../docs/adr/0084-simulation-integer-time-base.md) defines integer request timing and physical-time conversion.
 
 `six_fluxonium(configuration, *, soccfg, clock=None, truth_log=None, history=None, families=None)` accepts `SixFluxoniumSettings` or a YAML path and
 returns `SimulationEnvironment`. The builder creates seven addressed FakeDevices

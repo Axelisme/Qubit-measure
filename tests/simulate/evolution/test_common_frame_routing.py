@@ -35,6 +35,26 @@ def fallback(source, timeline, *, budget=0.01):
         )
 
 
+def test_widely_spaced_carriers_are_pinnable_but_default_skips_unprofitable_work():
+    with closing(model_source()) as source:
+        timeline = batch([16], gain=0.03, frequency=0.39)
+        with closing(Engine(1, families=("common_frame",))) as engine:
+            pinned = run(engine, source, timeline)
+        assert pinned.paths.segments_by_kernel == {"common_frame": 1}
+        assert pinned.paths.routing["common_frame"].rejected_rows == 0
+
+        with closing(Engine(1)) as engine:
+            default = run(engine, source, timeline)
+        report = default.paths.routing.get("common_frame", FamilyRouting())
+        assert report.admission_rows == 0
+        original = fallback(source, timeline)
+        assert default.paths.segments_by_kernel == original.paths.segments_by_kernel
+        np.testing.assert_array_equal(default.densities, original.densities)
+        np.testing.assert_allclose(
+            pinned.densities, original.densities, atol=2e-3, rtol=0
+        )
+
+
 def test_shared_constant_coefficients_build_once_for_all_rows():
     source = model_source()
     timeline = batch([32, 48, 64, 80], gain=0.3)

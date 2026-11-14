@@ -1,6 +1,6 @@
 # tools/
 
-**Last updated:** 2026-11-12, simulator benchmark and experiment import contract
+**Last updated:** 2026-11-14, qualified family dominance and thirteen-workload conclusions
 
 **讀者：** framework-dev。Repo 品質檢查與重計算執行器的 CLI、輸出與比較機制。
 
@@ -162,14 +162,145 @@ It times **Engine.evolve**, not `program.acquire`. The existing acquire benchmar
 above keeps its workloads and comparison contract.
 
 The default inputs are fixed 24-point carrier, gain, length, idle and gate-sequence
-scans on the full 21-level single-fluxonium model, plus a synchronous dual-port
+scans on the full 21-level single-fluxonium model, including constant and Gaussian
+gate-sequence scans. Separate F and N scans use that same model at 0.45 Φ0.
+The inputs also include a synchronous dual-port
 scan on the fixed FTF model with 32 retained joint states and local 4×4×4.
+A 24-point Gaussian relative-delay scan uses the fixed integer-fluxonium model
+with native cutoff 80 and 20 retained levels. Its two charge ports address the
+same qubit. A separate 24-point constant-tone carrier scan uses those same
+integer-model charge ports with equal support and complete overlap.
 Add `--include-synthetic` to also measure the unchanged accuracy inventory and
 twelve amplified synthetic workloads. Reports separate
 the two categories; deletion conclusions use real inputs only.
 
-Freeze the versioned input manifest before measuring. From the lane root, replace
-`<worktree>` with its absolute path and choose a new `<results>` directory:
+### Recorded scenario summaries
+
+The thirteen recorded tables use clean commit
+`3545520dd8d5e8784be642246605f263654ce72b`, tree
+`c9f484253fae2cc0db5a7d80dc1dd21bbe808d77`. Each table ran once with exclusive
+access, all 17 pinned families, default routing and its fixed observed union.
+The generated summaries retain over-limit errors and refusal reasons.
+JSON is the numeric source; the paired Markdown lists the same outcomes and provenance.
+These records contain no dominance conclusions. The
+[kernel evidence table](../lib/zcu_tools/simulate/evolution/README.md#recorded-real-workload-evidence)
+lists the qualified candidates' non-dominated workloads and evidence limits.
+Compare times within one table, not across scenarios or measurement runs.
+
+| Scenario | Generated summary | Numeric source |
+| --- | --- | --- |
+| F carrier sweep | [Markdown](data/family_pareto/summaries/carrier_sweep.md) | [JSON](data/family_pareto/summaries/carrier_sweep.json) |
+| A gain sweep | [Markdown](data/family_pareto/summaries/gain_sweep.md) | [JSON](data/family_pareto/summaries/gain_sweep.json) |
+| L length sweep | [Markdown](data/family_pareto/summaries/length_sweep.md) | [JSON](data/family_pareto/summaries/length_sweep.json) |
+| I idle sweep | [Markdown](data/family_pareto/summaries/idle_sweep.md) | [JSON](data/family_pareto/summaries/idle_sweep.json) |
+| N gate sequence | [Markdown](data/family_pareto/summaries/gate_sequence.md) | [JSON](data/family_pareto/summaries/gate_sequence.json) |
+| M simultaneous drive | [Markdown](data/family_pareto/summaries/simultaneous_drive.md) | [JSON](data/family_pareto/summaries/simultaneous_drive.json) |
+| S shaped gate sequence | [Markdown](data/family_pareto/summaries/shaped_gate_sequence.md) | [JSON](data/family_pareto/summaries/shaped_gate_sequence.json) |
+| O1 overlapping constant tones | [Markdown](data/family_pareto/summaries/overlapping_constant_tones.md) | [JSON](data/family_pareto/summaries/overlapping_constant_tones.json) |
+| O2 overlapping shaped tones | [Markdown](data/family_pareto/summaries/overlapping_shaped_tones.md) | [JSON](data/family_pareto/summaries/overlapping_shaped_tones.json) |
+| N-long 50/100/200 gates | [Markdown](data/family_pareto/summaries/long_gate_sequence.md) | [JSON](data/family_pareto/summaries/long_gate_sequence.json) |
+| S-long 50/100/200 shaped gates | [Markdown](data/family_pareto/summaries/long_shaped_gate_sequence.md) | [JSON](data/family_pareto/summaries/long_shaped_gate_sequence.json) |
+| F carrier sweep at 0.45 Φ0 | [Markdown](data/family_pareto/summaries/carrier_sweep_bias045.md) | [JSON](data/family_pareto/summaries/carrier_sweep_bias045.json) |
+| N gate sequence at 0.45 Φ0 | [Markdown](data/family_pareto/summaries/gate_sequence_bias045.md) | [JSON](data/family_pareto/summaries/gate_sequence_bias045.json) |
+
+References remain in the shared local `references/` directory described below.
+Complete matrices, diagnostic reports and journals remain under the corresponding
+local scenario directories. They survive task cleanup and are not tracked.
+The tracked summaries can be read without those local files. Remeasurement needs
+the reference cache; clearing it or moving to another machine requires reference
+preparation after cost approval.
+
+### Single-scenario remeasurement
+
+Select a scenario by its `Input.name` from the table below. The tool selects the
+builder before constructing any model, freezes that input and measures it in the
+same command. An unknown name fails with the legal names. Do not supply a manifest.
+After obtaining the timing budget, run from the worktree root:
+
+```bash
+uv run --directory <worktree> --no-sync -- \
+  python tools/run_heavy.py --exclusive --log <results>/run.log <timing-timeout-seconds> -- \
+  python -m tools.family_pareto --scenario shaped_gate_sequence --exclusive \
+  --summary-output tools/data/family_pareto/summaries/shaped_gate_sequence.json \
+  > <results>/receipt.json
+```
+
+The runner's `--exclusive` acquires the lock. The inner `--exclusive` only records
+the caller's declaration. The tool neither verifies the lock nor reads the receipt.
+It records its own UTC start time, HEAD, tree and dirty state in the matrix and
+summary. Dates and exclusive annotations do not determine accuracy or eligibility.
+
+By default, references live in
+`<main repo>/.agent_state/benchmark/family_pareto/references/`. The tool locates the
+main repository with Git's absolute common directory, so all worktrees share the
+cache. It creates missing directories. Complete matrices, diagnostic reports and
+journals default to `<main repo>/.agent_state/benchmark/family_pareto/<Input.name>/<run-id>/`.
+These files stay local and survive task cleanup. `--output`, `--summary` and
+`--partial-output` override the matrix, diagnostic report and journal paths.
+The command prints their destinations. Do not add references or full matrices to Git.
+
+Single-scenario measurement is cache-only. A missing key stops without solving.
+The diagnostic names the key and explains reference preparation. Native thread
+settings can change the final floating-point bits of model inputs and their hashes.
+Always use `run_heavy.py` for preparation, freezing and measurement so these settings
+match. Clearing local data or moving to another machine requires preparing references
+again. A cache miss does not grant permission to solve. After cost approval, rebuild
+one scenario's references nonexclusively with:
+
+```bash
+uv run --directory <worktree> --no-sync -- \
+  python tools/run_heavy.py --log <results>/reference.log <reference-timeout-seconds> -- \
+  python -m tools.family_pareto --scenario shaped_gate_sequence --prepare-references \
+  --output <results>/reference.json > <results>/reference-receipt.json
+```
+
+Preparation uses the existing reference owner and its physical-input/tolerance key.
+It loads valid cache entries and solves only misses. Add `--reference-cache-only`
+to preparation to forbid solving. `--reference-cache <directory>` overrides the
+shared reference location without changing the key or solver contract.
+
+`--summary-output <path>.json` writes one current-run summary and a generated sibling
+`.md`, creating parents as needed. Without it, the tool writes `summary.json` beside
+the complete matrix. To update the tracked record, point it at
+`tools/data/family_pareto/summaries/<Input.name>.json` and review the whole replacement.
+There is no exclusive, clean-tree or all-family write gate, and no policy-by-policy
+merge of different runs. `--families` still produces a partial measurement.
+
+`family_pareto_summary.py` owns the summary schema, builder, JSON/Markdown output and
+comparison. JSON is the numeric source. Each pinned policy, default policy and
+fixed observed family group retains its status, final density error, three history
+modes' wall/process CPU medians, sample counts and unmeasured reasons. Missing values
+remain `null`. Refused policies have zero samples in every mode and the refusal as
+the unmeasured reason. Whitelists, companions and attribution identify group cost;
+these are not isolated target timings. Provenance includes HEAD/tree/dirty, tool UTC
+start time and the exclusive annotation. Manifest/physical/oracle hashes and
+`measured_families` identify inputs and coverage. The summary stores no dominance.
+
+`FamilyResult.status` owns the five outcomes and the final-error limit. They are
+`qualified` for error ≤ 2e-3, `over_limit`, `guard_or_precondition`, `not_candidate`
+and `companion_blocked`. Companion refusal takes precedence over target refusal.
+Reports and summaries read this property. Missing public refusal facts fail instead
+of guessing a classification from text.
+
+The command compares against the tracked scenario JSON if available.
+`--compare-summary <path>.json` selects another baseline. It reads the baseline
+before writing, including when both paths are the same. Missing or invalid baselines
+print a diagnostic but do not block the new summary. Different input fingerprints
+mark the runs not comparable. Partial runs compare only common measured families,
+plus separately present default/fixed groups, and list families missing from either
+run. Output lists status/error pairs, mode values and numerical time deltas, plus
+version, dirty, exclusive and coverage changes. These differences do not establish
+cross-run speed or dominance.
+
+Historical full matrices are not converted into this summary schema. New records
+require new measurements. Preparing references or running the example commands still
+requires the corresponding cost approval.
+
+### Inventory-wide manifest workflow
+
+Without `--scenario`, freeze the versioned input manifest before measuring. From
+the lane root, replace `<worktree>` with its absolute path and choose a new
+`<results>` directory:
 
 ```bash
 mkdir -p <results>
@@ -260,26 +391,35 @@ controls `2e-10/2e-12` and `2e-12/2e-14`. Its two density results must differ by
 most `2e-6`. Every solver's error is measured, including exact families. Values
 above `2e-3` remain FAIL. Existing strict xfails are not removed.
 
-A competitor dominates only when its maximum full-density error across that
-mode's retained raw samples is no larger and its median time is
-**less than `0.9 * target_time`**. Other-mode errors do not enter this
-comparison. The family-level maximum across all timed modes remains the
-overall accuracy/PASS-FAIL value. Exactly 10% is time-equivalent.
+Only policies whose final density error is at most `2e-3` participate in
+dominance. This error is the maximum after each complete pulse sequence across
+all retained modes, not a per-kernel error or segment budget. Qualified policies
+are equally accurate. A competitor dominates only when its median time is
+**less than `0.9 * target_time`**. Exactly 10% is time-equivalent.
+`t4`, `adiabatic_map`, `flux_dop853` and `slow_envelope` have exclusive domains;
+`t6` and `dop853` are their domains' last candidates. These six families are
+directly retained and are neither dominators nor dominated targets. Refused,
+companion-blocked and over-limit policies provide no dominance evidence.
 Time-equivalent peers have neither direction faster by more than 10%, regardless
 of error. Wall/CPU and all three modes remain separate; there is no weighted score.
 Default routing is shown but never treated as a pinned-family competitor.
-The summary lists each family's non-dominated input/mode/metric cells and the
-full measured matrix with dominators and time-equivalent peers. An all-dominated
-conclusion applies only to measured available cells, not to unmeasured physics.
-It does not authorize deleting families or accepting accuracy failures.
+The summary lists each candidate family's non-dominated input/mode/metric cells
+and the full measured matrix with dominators and time-equivalent peers. An
+all-dominated conclusion applies only to measured qualified cells, not to
+unmeasured physics. Before deleting a more accurate but slower candidate, its
+faster dominator must also qualify on the same type of long sequence, with far
+more than 24 gates. Neither these results nor long-sequence qualification
+authorize deletion without user approval.
 
-Only a full match of the public refusal pattern below becomes `unavailable`:
-
-```text
-no valid kernel for segment \d+; domain [a-z_]+: points \[\d+(?:, \d+)*\], segments \[\d+(?:, \d+)*\]
-```
-
-The matrix preserves the complete refusal string and leaves error/timing absent.
+Only `NoValidKernel` from the first timed evolve becomes `unavailable`.
+The matrix preserves its complete message and leaves error/timing absent.
+The JSON `refusal` records the first failing group's domain, caller points,
+segment rows and final-round `attempted` families. For each whitelisted family,
+`family_reasons` is `guard_or_precondition` if it appears in `attempted`, or
+`not_candidate` if it does not. This includes named companions. The Markdown
+cell shows the same classification. No later segment group is classified.
+Candidate offer order is not necessarily first-attempt order. Unrestricted
+default routing preserves the group facts without per-family classification.
 Other RuntimeErrors, wrong pinned paths, numerical failures and output failures
 stop the command. Measurement failures leave earlier outputs untouched. Output
 write failures return nonzero and may leave a partial destination file.
@@ -298,7 +438,7 @@ collaborators; the complete matrix runs outside pytest through the exclusive run
 `family_pareto_scenarios.py` owns curated core pulse sequences. It uses public
 program components, compiled requests, and the environment source's
 `model_facts`/`plan_template` to construct complete Engine inputs.
-`family_pareto_settings.py` owns fixed single-fluxonium, FTF and board inputs,
+`family_pareto_settings.py` owns fixed single-fluxonium, integer-fluxonium, FTF and board inputs,
 copied from commit `303074e166d1a563addfab4fd94717d958a7dd56`. The manifest
 records their source commit and fixed values. Runtime construction does not import
 lab experiments, read lab YAML/profiles, execute experiments, or use replay.
@@ -312,21 +452,41 @@ convergence claim for arbitrary CZ pulses or the full native/local model.
 FTF references and timings must be rebuilt at 32 states; 16-state results do not
 apply.
 
-All five single-model scans use the full 21-level model. Their carrier center is
-DC E1−E0 from that fixed model. Gains, phases and durations are illustrative
+The single-fluxonium scans use the full 21-level model. Their carrier center is
+DC E1−E0 from the public model at each scan's fixed bias. Gains, phases and durations are illustrative
 benchmark settings, not fitted calibrations or calibrated pi/pi/2 rotations.
 Every shot ends in readout at the fixed bare cavity frequency, gain .1, with a
 1 us pulse/window and fixed flight time. The Engine batch ends at readout start,
 not at the end of that window.
 
-| Scan | Core sequence | Requested axis, 24 points | Envelope and pulse lengths | Compiled logical spans per point | Reason |
+| Scan | Core sequence | Requested axis (24 points unless stated) | Envelope and pulse lengths | Compiled logical spans per point | Reason |
 | --- | --- | --- | --- | --- | --- |
 | F `carrier_sweep` | One drive, terminal readout | DC E1−E0 ±100 MHz | Constant, 1000 ns, gain .1 | 2 | Frequency reuse without exact duplicate carriers. |
+| F-bias045 `carrier_sweep_bias045` | Same as F at 0.45 Φ0 | Biased DC E1−E0 ±100 MHz | Same as F | Same as F | Compares the same carrier offsets at a second DC bias. |
 | A `gain_sweep` | One drive, terminal readout | Gain .01 to .1 | Gaussian, 100 ns, sigma 20 ns | 2 | Shaped-family input at fixed envelope and carrier. |
 | L `length_sweep` | One drive, terminal readout | Length 20 to 400 ns | Constant, gain .1 | 1 or 2 | Changes support without also resampling a Gaussian. |
 | I `idle_sweep` | X-phase gate, idle, Y-phase gate, terminal readout | Idle 20 to 400 ns | Two constant 20 ns gates, gain .1 | 4 | Shared initial gate with changing gap and final absolute phase. |
 | N `gate_sequence` | Prefix of repeated X,Y,-X,-Y phase alphabet, terminal readout | Gate count 1 to 24 | Constant 20 ns gates, gain .1 | 2 to 35 | Ragged sequences with a reusable alphabet, without random seeds. |
+| N-bias045 `gate_sequence_bias045` | Same as N at 0.45 Φ0 | Gate count 1 to 24, carrier at biased DC E1−E0 | Same as N | Same as N | Compares the same compiled gate prefixes at a second DC bias. |
 | M `simultaneous_drive` | Synchronous F1/F2 drives, terminal readout | Shared gain .01 to .1 | Two Gaussians, 100 ns, sigma 20 ns | 2 | Independent joint-model drive operators under overlapping shaped controls. |
+| S `shaped_gate_sequence` | Prefix of repeated Gaussian X,Y,-X,-Y gates, terminal readout | Gate count 1 to 24 | Gaussian 100 ns gates, sigma 20 ns, gain .1 | 2 to 47 | Reuses N's alphabet and ragged prefixes with A's shaped-gate support and width, separating shape from sequence reuse. |
+| N-long `long_gate_sequence` | N's constant X,Y,-X,-Y prefixes, terminal readout | Gate counts 50, 100, 200 (three points) | Same constant 20 ns gates and gain .1 as N | Public compiled support partition, including alignment gaps and readout lead | Checks whole-sequence accuracy beyond 24 gates without replacing N. |
+| S-long `long_shaped_gate_sequence` | S's Gaussian X,Y,-X,-Y prefixes, terminal readout | Gate counts 50, 100, 200 (three points) | Same Gaussian 100 ns gates, sigma 20 ns and gain .1 as S | Public compiled support partition, including alignment gaps and readout lead | Checks shaped-gate reuse at long sequence lengths without replacing S. |
+| O1 `overlapping_constant_tones` | Fully overlapping constant Pump/Stokes pair, terminal readout | Pump fixed at DC E1−E0; Stokes scans that center ±50 MHz | Both 1000 ns; gains .02/.002 | 2 | A carrier slice of the dual-tone reset scan on one qubit, without a cavity drive. |
+| O2 `overlapping_shaped_tones` | Stokes-first Gaussian pair on one qubit, terminal readout | Stokes lead .3 to 0 us | Both supports .3 us, sigma .05 us; Pump 7241.848921606473 MHz/gain .030001831166453; Stokes 3111.1686681315896 MHz/gain .100006103888177 | Public support partition includes single-tone, overlap and idle spans | Uses the STIRAP delay sequence without artificial inventory repeats. |
+
+`carrier_sweep_bias045_input()` and `gate_sequence_bias045_input()` keep the
+fixed single-fluxonium physical and board values from the source commit above.
+They override only the public `DCBias.offset_phi0` from .5 to .45. The DC source
+still starts at zero, so `offset_phi0 + flux_per_unit * live_value` is .45 Φ0.
+Each builder obtains that bias's model through `snapshot()` and `model_facts()`.
+Its E1−E0 sets the requested carrier center before public program compilation.
+The original F and N builders stay at .5 Φ0. Each pair shares its core sequence,
+so the new bias retains F's 24 offsets and N's 1..24 prefixes, constant pulses,
+phase alphabet, compiler alignment gaps and terminal readout lead.
+The manifest records the effective settings and compiled carriers. These are
+separate inputs, not replacements or calibrated rotations. Builder availability
+does not establish reference convergence, family admission or timing at .45 Φ0.
 
 M uses public timeline fork/join to start both drives together and place readout
 after both finish. Its two carriers are the uncoupled local DC E1−E0 frequencies
@@ -335,6 +495,71 @@ same coupled FTF density. Readout uses the fixed bare r1 cavity frequency, gain
 .1, a 1 us pulse/window and fixed flight time. This benchmark sequence is not a
 calibrated CZ gate. The CZ comparison above explains only the retained-state
 choice, not a fidelity claim for this scan.
+
+S uses A's 100 ns support and 20 ns sigma to compare sequence reuse at the same
+Gaussian width. The support spans five sigma. These are fixed benchmark gates,
+not calibrated pi rotations. The lab's generic `pi_pulse` creation template
+seeds a constant pulse, so it supplies no calibrated Gaussian duration.
+S adds no random gates or extra repetitions to make a family admissible.
+
+`long_gate_sequence_input()` and `long_shaped_gate_sequence_input()` compile
+N-long and S-long through the same public program and single-fluxonium model
+path as N and S. The default fixed inventory includes both three-point scans
+and both bias045 scans alongside the original nine scenarios, for thirteen total.
+Only the requested gate counts change for the long scans.
+The model and board values retain source commit
+`303074e166d1a563addfab4fd94717d958a7dd56`; DC bias, initial density, carrier,
+phase cycle, pulse parameters and terminal readout follow N or S respectively.
+Each branch emits its complete prefix without idealizing away compiler timing.
+The frozen manifest declares the gate counts and complete target/`t4` rows/ns
+from public compiled supports. Long-sequence reference reuse requires checking
+the full physical input, point order, basis, both tolerances and convergence
+contract; matching gate counts or pulse durations alone does not permit reuse.
+Accuracy-only family observations are not exclusive timing samples.
+
+O2 copies the integer model's two charge lines, Pump on generator 1 and Stokes
+on generator 2. Both couple to the full charge operator at 1 GHz/gain.
+The source commit's historical synthetic STIRAP controls supply the carriers.
+Their former envelope gains .015/.05 convert by 65536/32766 to the gains above.
+The current STIRAP delay sequence supplies the .05 us sigma/.3 us support scale.
+These choices are benchmark controls, not calibrated population transfer or
+new acquired-IQ validation. Readout uses generator 0/ADC 0 at 7460 MHz,
+gain .1, a 1 us pulse/window and zero flight time.
+The lead uses a table sweep so each requested value is quantized independently.
+The endpoints remain separated and fully overlapping. Each shot has one pair;
+changing the relative lead changes overlap support, rather than repeating a
+canonical gate 20 times for `multitone_gate`'s default cost preference.
+Pinning `multitone_gate` bypasses that preference, not its numerical guards.
+
+O1 takes its overlap sequence from `twotone/reset/dual_tone/freq` and its
+±50 MHz scan range from that experiment's Form. The Form's actual reset
+frequencies and gains come from caller-owned component ext values, not fixed
+calibrations. The generic `two_pulse_reset` template supplies constant 1 us
+supports and gain .2. O1 uses DC E1−E0 as an explicit uncalibrated carrier center.
+The generic single-model charge line has coefficient .1 GHz/gain; the integer
+line has 1 GHz/gain. Pump gain .02 preserves the .02 GHz charge coefficient
+of the template's .2 gain on the single line. Stokes gain .002 gives a tenfold
+weaker probe on the same operator. These coefficients are not Rabi rates.
+Both pulses start together on generators 1 and 2, use equal support, and end
+before the generator 0/ADC 0 readout described for O2. There is no cavity drive
+before readout, so this is not an AC Stark experiment or a calibrated reset.
+The small drive coefficients and nearby positive carriers give `common_frame`
+and `floquet` a potential admission point. Actual numerical guards still decide
+availability; the scan adds no repetitions, guard overrides or runtime fallback.
+The fixed target declarations assign all driven rows/ns to the target and the
+idle tail to `t4`, using public compiled supports before any Engine measurement.
+Default routing and its observed-union group keep their existing protocol.
+
+`integer_fluxonium_input(name, emit, manifest, families)` owns the shared fixed
+integer settings, board, environment, compilation and numeric-source detachment.
+Its `emit(builder, dc_model)` callback receives a public `TimelineBuilder` and
+DC `SecularModel`. It can emit constant or Gaussian pulses on either charge line
+and use the model's GHz energies to choose carriers. The builder appends terminal
+readout. The returned `Input.build()` creates a fresh source that callers close.
+Callers supply `manifest["pulse_sequence"]` and requested control provenance.
+The default declaration assigns driven spans to each target and idle to `t4`.
+Mixed-domain callers replace that declaration, as O2 does. The same builder can
+therefore compile a two-constant-charge-tone scan without another model copy.
 
 Continuous requested axes are equally spaced and include both endpoints. Native
 hardware quantization changes the realized values. Length uses a public table
@@ -352,6 +577,34 @@ model/board inputs, snapshot, exact tick ratio, calibration method, expected
 routes and full physical hashes. Logical spans are not unique cached preparations.
 
 A pinned policy may include named companions, such as `t4` for the idle tail.
+`Input.companions_by_target` replaces the shared `companions` tuple for listed
+targets. Unlisted targets keep that shared tuple; an explicit empty tuple pins
+the target alone. `companions_for(target)` resolves this declaration.
+Only inputs with a nonempty mapping add `companions_by_target` to the frozen
+manifest. Existing inputs keep their manifest keys and physical/oracle hashes.
+O2's `single_tone_gate`, `gate_cache` and `shaped_sambe` targets use
+`common_frame` plus `t4`. Its `period_table` target uses `dop853` plus `t4`.
+Its `common_frame`, `multitone_gate` and `multitone_rwa` targets use
+`shaped_sambe` plus `t4`. `dop853` uses only `t4`.
+The original `multitone_rwa` overlap companion and `single_tone_gate` single-tone
+companion refused their respective spans on this fixed input. A subsequent
+`multitone_gate` overlap companion also refused, so the four shaped targets
+next tried `common_frame`. Overlap targets refused their own multiple-tone spans with
+`shaped_sambe` as companion; that is not a reason to replace the companion.
+Companion changes are input declarations, never runtime fallback choices.
+After both overlap companions refused, the two named targets `shaped_sambe` and
+`period_table` each tried a `dop853` companion. In the `shaped_sambe` probe,
+`dop853` took 13 single-tone rows/2894 ns from the target. That group keeps its
+`common_frame` companion and remains companion-blocked.
+The `period_table` group requires its target to keep all 46 single-tone rows/7264 ns,
+`dop853` to handle exactly 23 overlap rows/3574 ns, and `t4` to handle
+25 idle rows/43.696428571428555 ns. Every sample must match the full declaration.
+A mismatch stops the attempt; that group remains companion-blocked rather than
+changing the expected route to the observed one. No other companion can compete
+for the target's type of span.
+O2 counts each span's active tone supports using public `segment_spans`, then
+sums rows and ns for idle, single-tone and overlap work. It does not reproduce
+the dispatch candidate table or add a fallback.
 The input declares `{family: (logical segment count, cumulative ns)}` for each
 target's complete group. Both quantities must match public `FamilyRouting`
 reports in every sample. A count mismatch or duration mismatch stops measurement.
@@ -369,18 +622,45 @@ and logical work consistently, without adding a third evolve for slow families.
 Reported times are telemetry-enabled group latency; near-10% comparisons need
 caution given that observation.
 
+`tools.family_pareto_report.render_saved_summary(matrix_json)` renders the JSON
+text of an existing matrix without solving references or timing evolves. It
+restores the recorded result types and uses the same summary renderer. Save the
+returned Markdown separately from the measured summary and record the renderer
+version separately from the matrix's measurement version. Re-rendering recomputes
+dominance from recorded errors and times using the current qualification rule.
+It does not modify the matrix, its provenance or any raw measurement.
+
 Each sample preserves `prepare_cpu_s`, `apply_cpu_s` and their sum separately
 for every reported family. These are calling-thread CPU from `FamilyRouting`,
 including preparation for rejected guards. The report shows target and companion
-rows separately. They are not whole-process CPU, may exclude routing/geometry
+rows separately. Only whitelisted non-target families are companions; other
+reports in a pinned policy are preparation diagnostics, including zero-row guard
+CPU. All reported prepare+apply CPU remains in each share's denominator.
+Default and fixed-group reports retain group-member attribution.
+They are not whole-process CPU, may exclude routing/geometry
 overhead, and need not add up to the process CPU timer.
 Pareto dominance continues to use whole-`Engine.evolve` wall and process CPU
 separately. A target plus named companions is one timed group, never isolated
 target performance. Default routing is also compared with its observed family
-union fixed. That extra group stays outside dominance. Differences over 2x are
-findings, not routing changes.
+union fixed. That extra group has no expected-route declaration or route check;
+this applies to every scenario, including O2. It stays outside dominance.
+Differences over 2x are findings, not routing changes.
 
-`--reference-cache <directory>` enables a local disk cache, off by default.
+A refusal with an attempted companion but no attempted target is
+`companion_blocked`, with no `unavailable` value for the target.
+The original message and first failing group's `attempted` facts remain intact.
+This does not classify later groups or claim that the target's guard refused.
+If a whole class of targets cannot produce a table because of the same blocked
+companion, stop and request a companion decision. Do not substitute a fallback.
+Each dominance relation records whether the two companion sets match.
+Different-companion relations are group observations only; they cannot alone
+justify deleting a target. Family conclusions compare equal-companion groups.
+The summary reports each family's prepare/apply thread CPU and its fraction of
+summed reported thread CPU. These fractions are not wall or process-CPU shares.
+
+In the inventory-wide manifest workflow, `--reference-cache <directory>` enables
+a local disk cache, off by default. Single-scenario commands use the shared cache
+and default to cache-only measurement as described above.
 `--prepare-references` with `--manifest`, `--reference-cache` and `--output`
 prepares it without Engine timing or a summary. Run that phase nonexclusive.
 Its report records physical hashes, density shapes, convergence and solve/cache
@@ -431,6 +711,34 @@ stderr 同時列出路徑與原因。無違規回傳 0，有違規回傳 1；Git
 `check_sources(mapping)` 接受 repo-relative Markdown 路徑到文字的 mapping，回傳依路徑排序的
 `Violation(path, reason)` tuple，不讀檔、不修改輸入。合成來源測試位於
 `tests/tools/test_check_doc_readers.py`，不把 repo 文件內容固定在 pytest 裡。
+
+## Document relations
+
+```bash
+uv run --directory <worktree> --no-sync -- python tools/doc_relations.py <base> [--term <literal> ...]
+uv run --directory <worktree> --no-sync -- python tools/doc_relations.py --check
+```
+
+`doc_relations.py <base>` 比較 commit `<base>` 與工作目錄，列出這次改動可能讓哪些 tracked 文件過時。
+輸出兩種行：
+
+- `related: <path>  (<reason>)`：由引用關係找到的文件。包含每個改動路徑上各層的 `README.md`、
+  這些 README 與改動檔案以 `ADR-NNNN` 或 `adr/NNNN-` 連結引用的 ADR，以及引用同一批 ADR 的其他文件。
+  被超過 8 份其他文件引用的 ADR 只列它本身，原因欄註明略過的份數。
+- `hit: <path>:<line>: <term> (<source>): <text>`：文件中出現搜尋詞的行。搜尋詞來自改動的 `.py` 檔：
+  被刪除或改名的公開頂層函式、類別與大寫常數（`removed name`），定義內容有變的（`changed name`），
+  以及檔案路徑的最後兩段（`changed path`）。`--term` 可重複，補上文件實際使用的稱呼（`given`）。
+  名稱以完整單詞比對，路徑以子字串比對。方法名稱不納入，因為會命中不相干的敘述。
+
+單一搜尋詞的命中超過 `--max-hits`（預設 40）時，只印一行 `too many:`，請換更精確的詞。
+討論快照與 `docs/adr/retired/` 是凍結文件，兩種行都不列。這個模式一律回傳 0。
+
+`doc_relations.py --check` 檢查所有 tracked Markdown：相對連結必須指到 tracked 檔案或含有 tracked 檔案的目錄，
+不得用 `.py#L<n>` 釘行號；`ADR-NNNN` 必須對應 `docs/adr/` 或 `docs/adr/retired/` 下的檔案。
+每筆違規印一行 `<path>:<line>: <reason>`，有違規回傳 1。
+
+`--root <repo>` 指定另一個 checkout。`related_documents`、`search_terms`、`find_hits` 與 `check_references`
+接受路徑到文字的 mapping，不讀檔；合成來源測試位於 `tests/tools/test_doc_relations.py`。
 
 ## Routing telemetry analysis
 

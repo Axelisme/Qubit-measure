@@ -70,6 +70,16 @@ class Input:
     metadata: dict[str, object] = field(default_factory=dict)
     manifest: dict[str, object] = field(default_factory=dict)
     category: str = "synthetic"
+    companions_by_target: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    """Target -> replacement companions; absent targets use companions.
+
+    An empty tuple explicitly pins that target alone. Names are evolution
+    family names. This routing declaration never changes physical/oracle hashes.
+    """
+
+    def companions_for(self, target: str) -> tuple[str, ...]:
+        """Return the target override, or the shared companions when absent."""
+        return self.companions_by_target.get(target, self.companions)
 
 
 def representative(name: str) -> AccuracyCase:
@@ -274,6 +284,11 @@ def freeze_manifest(inputs: list[Input]) -> dict[str, object]:
                         physical_input(case, include_identity=False)
                     ),
                     "physical": physical,
+                    **(
+                        {"companions_by_target": item.companions_by_target}
+                        if item.companions_by_target
+                        else {}
+                    ),
                     **(
                         {
                             "category": item.category,

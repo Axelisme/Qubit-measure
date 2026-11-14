@@ -1,17 +1,143 @@
 """Public fixed-scenario construction and reproducible manifest freezing."""
 
-from contextlib import closing
+from collections.abc import Iterator
+from contextlib import ExitStack, closing
 
 import numpy as np
 import pytest
+from zcu_tools.program import build_soccfg
+from zcu_tools.simulate.evolution import SecularModel
+from zcu_tools.simulators.single_fluxonium.config import parse_single_fluxonium
+from zcu_tools.simulators.single_fluxonium.environment import (
+    SingleFluxoniumSource,
+    single_fluxonium,
+)
 
-from tools.family_pareto_inputs import Input, canonical_json, freeze_manifest
+from tools.family_pareto_inputs import canonical_json, freeze_manifest
 from tools.family_pareto_scenarios import make_real_inputs
+from tools.family_pareto_settings import BOARD_PROFILE, SINGLE_MODEL
 
 
 @pytest.fixture(scope="module")
-def fixed_inputs() -> list[Input]:
-    return make_real_inputs()
+def bias045_model() -> Iterator[SecularModel]:
+    settings = parse_single_fluxonium(SINGLE_MODEL)
+    settings = settings.model_copy(
+        update={
+            "dc_bias": settings.dc_bias.model_copy(update={"offset_phi0": 0.45}),
+            "drift": None,
+        }
+    )
+    env = single_fluxonium(settings, soccfg=build_soccfg(BOARD_PROFILE))
+    with ExitStack() as stack:
+        stack.callback(env.devices.close_all_devices)
+        if env.close_backend is not None:
+            stack.callback(env.close_backend)
+        owner = stack.enter_context(
+            closing(SingleFluxoniumSource(settings, env.devices))
+        )
+        facts = owner.model_facts(owner.snapshot())
+        stack.enter_context(closing(facts.source))
+        assert facts.model.dc_flux == pytest.approx(0.45)
+        yield facts.source.model((0,))
+
+
+def assert_same_model(actual: SecularModel, expected: SecularModel) -> None:
+    assert actual.energies_ghz.shape == (21,)
+    np.testing.assert_allclose(actual.energies_ghz, expected.energies_ghz)
+    np.testing.assert_allclose(actual.rates_per_ns, expected.rates_per_ns)
+    np.testing.assert_allclose(actual.dephasing_per_ns, expected.dephasing_per_ns)
+    assert len(actual.drives) == len(expected.drives)
+    for drive, expected_drive in zip(actual.drives, expected.drives, strict=True):
+        assert drive.name == expected_drive.name
+        np.testing.assert_allclose(drive.in_phase_ghz, expected_drive.in_phase_ghz)
+        np.testing.assert_allclose(drive.quadrature_ghz, expected_drive.quadrature_ghz)
+
+
+def test_bias045_carrier_scan_uses_biased_model_and_preserves_compiled_offsets(
+    bias045_model: SecularModel,
+) -> None:
+    from tools import family_pareto_scenarios
+
+    item = family_pareto_scenarios.carrier_sweep_bias045_input()
+    original = family_pareto_scenarios.carrier_sweep_input()
+    with (
+        closing((case := item.build()).source),
+        closing((base := original.build()).source),
+    ):
+        model = case.source.model((0,))
+        base_model = base.source.model((0,))
+        assert_same_model(model, bias045_model)
+        assert not np.allclose(model.energies_ghz, base_model.energies_ghz)
+        center = model.energies_ghz[1] - model.energies_ghz[0]
+        base_center = base_model.energies_ghz[1] - base_model.energies_ghz[0]
+        assert len(case.batch.points) == 24
+        assert len(case.batch.tracks) == len(base.batch.tracks) == 1
+        track, base_track = case.batch.tracks[0], base.batch.tracks[0]
+        np.testing.assert_allclose(
+            track.frequency_ghz - center,
+            base_track.frequency_ghz - base_center,
+            atol=1e-8,
+        )
+        assert np.ptp(track.frequency_ghz) == pytest.approx(
+            np.ptp(base_track.frequency_ghz)
+        )
+        np.testing.assert_array_equal(track.active, base_track.active)
+        np.testing.assert_array_equal(track.start_ns, base_track.start_ns)
+        np.testing.assert_array_equal(track.duration_ns, base_track.duration_ns)
+        np.testing.assert_array_equal(track.amplitude, base_track.amplitude)
+        np.testing.assert_array_equal(track.phase_rad, base_track.phase_rad)
+        assert all(envelope.kind == "constant" for envelope in track.envelopes)
+        np.testing.assert_array_equal(track.envelope_index, base_track.envelope_index)
+        np.testing.assert_array_equal(case.batch.end_ns, base.batch.end_ns)
+        np.testing.assert_array_equal(case.batch.flux.level, base.batch.flux.level)
+
+
+def test_bias045_gate_scan_uses_biased_model_and_preserves_compiled_prefixes(
+    bias045_model: SecularModel,
+) -> None:
+    from tools import family_pareto_scenarios
+
+    item = family_pareto_scenarios.gate_sequence_bias045_input()
+    original = family_pareto_scenarios.gate_sequence_input()
+    with (
+        closing((case := item.build()).source),
+        closing((base := original.build()).source),
+    ):
+        model = case.source.model((0,))
+        assert_same_model(model, bias045_model)
+        assert not np.allclose(model.energies_ghz, base.source.model((0,)).energies_ghz)
+        center = model.energies_ghz[1] - model.energies_ghz[0]
+        batch = case.batch
+        np.testing.assert_array_equal(
+            np.sum([track.active for track in batch.tracks], axis=0),
+            np.arange(1, 25),
+        )
+        assert len(batch.tracks) == len(base.batch.tracks)
+        for track, base_track in zip(batch.tracks, base.batch.tracks, strict=True):
+            np.testing.assert_allclose(
+                track.frequency_ghz[track.active], center, atol=1e-8
+            )
+            np.testing.assert_array_equal(track.active, base_track.active)
+            np.testing.assert_array_equal(track.start_ns, base_track.start_ns)
+            np.testing.assert_array_equal(track.duration_ns, base_track.duration_ns)
+            np.testing.assert_array_equal(track.amplitude, base_track.amplitude)
+            np.testing.assert_array_equal(track.phase_rad, base_track.phase_rad)
+            assert all(envelope.kind == "constant" for envelope in track.envelopes)
+            np.testing.assert_array_equal(
+                track.envelope_index, base_track.envelope_index
+            )
+        for point, count in enumerate(range(1, 25)):
+            gates = sorted(
+                (track for track in batch.tracks if track.active[point]),
+                key=lambda track: track.start_ns[point],
+            )
+            np.testing.assert_allclose(
+                [gate.phase_rad[point] for gate in gates],
+                np.resize(np.arange(4) * np.pi / 2, count),
+                atol=1e-12,
+            )
+        np.testing.assert_array_equal(batch.end_ns, base.batch.end_ns)
+        np.testing.assert_array_equal(batch.flux.level, base.batch.flux.level)
 
 
 def test_fixed_scenarios_freeze_byte_identically_from_fresh_construction() -> None:
@@ -38,11 +164,11 @@ def test_gain_scan_compiles_distinct_amplitudes_with_fixed_carrier() -> None:
     assert all(len(track.amplitude) == 24 for track in scans)
 
 
-def test_length_scan_compiles_monotone_distinct_pulse_supports(
-    fixed_inputs: list[Input],
-) -> None:
+def test_length_scan_compiles_monotone_distinct_pulse_supports() -> None:
+    from tools.family_pareto_scenarios import length_sweep_input
+
     durations = []
-    for item in fixed_inputs:
+    for item in [length_sweep_input()]:
         with closing((case := item.build()).source):
             durations.extend(
                 track.duration_ns
@@ -55,9 +181,11 @@ def test_length_scan_compiles_monotone_distinct_pulse_supports(
     )
 
 
-def test_idle_scan_changes_gap_between_fixed_gates(fixed_inputs: list[Input]) -> None:
+def test_idle_scan_changes_gap_between_fixed_gates() -> None:
+    from tools.family_pareto_scenarios import idle_sweep_input
+
     gaps = []
-    for item in fixed_inputs:
+    for item in [idle_sweep_input()]:
         with closing((case := item.build()).source):
             tracks = case.batch.tracks
             if len(tracks) != 2 or not all(np.all(t.active) for t in tracks):
@@ -70,25 +198,251 @@ def test_idle_scan_changes_gap_between_fixed_gates(fixed_inputs: list[Input]) ->
     assert all(len(gap) == 24 and np.all(np.diff(gap) > 0) for gap in gaps)
 
 
-def test_gate_scan_preserves_variable_sequence_lengths(
-    fixed_inputs: list[Input],
-) -> None:
-    inventories = []
-    for item in fixed_inputs:
-        with closing((case := item.build()).source):
-            count = np.sum([t.active for t in case.batch.tracks], axis=0)
-            if np.ptp(count) > 0:
-                inventories.append(count)
-                assert len(np.unique(count)) == 24
-                assert np.all(np.diff(case.batch.end_ns) > 0)
-    assert inventories, "a gate scan must preserve ragged, varying pulse counts"
+def test_gate_scan_preserves_variable_sequence_lengths() -> None:
+    from tools.family_pareto_scenarios import gate_sequence_input
+
+    item = gate_sequence_input()
+    with closing((case := item.build()).source):
+        count = np.sum([track.active for track in case.batch.tracks], axis=0)
+        np.testing.assert_array_equal(count, np.arange(1, 25))
+        assert np.all(np.diff(case.batch.end_ns) > 0)
 
 
-def test_joint_scan_compiles_synchronous_independent_drive_ports(
-    fixed_inputs: list[Input],
-) -> None:
+def test_long_constant_gate_scan_compiles_original_phase_alphabet() -> None:
+    from tools import family_pareto_scenarios
+
+    item = family_pareto_scenarios.long_gate_sequence_input()
+    original = family_pareto_scenarios.gate_sequence_input()
+    with (
+        closing((case := item.build()).source),
+        closing((short := original.build()).source),
+    ):
+        batch = case.batch
+        assert len(batch.points) == 3
+        np.testing.assert_array_equal(
+            np.sum([track.active for track in batch.tracks], axis=0),
+            [50, 100, 200],
+        )
+        np.testing.assert_array_equal(
+            case.source.model((0,)).energies_ghz,
+            short.source.model((0,)).energies_ghz,
+        )
+        np.testing.assert_array_equal(
+            case.source.initial_density, short.source.initial_density
+        )
+        prefix = sorted(
+            (track for track in short.batch.tracks if track.active[-1]),
+            key=lambda track: track.start_ns[-1],
+        )
+        for point, count in enumerate((50, 100, 200)):
+            gates = sorted(
+                (track for track in batch.tracks if track.active[point]),
+                key=lambda track: track.start_ns[point],
+            )
+            np.testing.assert_allclose(
+                [gate.phase_rad[point] for gate in gates],
+                np.resize([0, np.pi / 2, np.pi, 3 * np.pi / 2], count),
+                atol=1e-12,
+            )
+            assert all(
+                gate.envelopes[gate.envelope_index[point]].kind == "constant"
+                for gate in gates
+            )
+            np.testing.assert_allclose(
+                [gate.duration_ns[point] for gate in gates], 20, atol=2
+            )
+            for gate, reference in zip(gates[: len(prefix)], prefix, strict=True):
+                assert gate.port == reference.port
+                for field in (
+                    "start_ns",
+                    "duration_ns",
+                    "frequency_ghz",
+                    "phase_rad",
+                    "amplitude",
+                ):
+                    np.testing.assert_array_equal(
+                        getattr(gate, field)[point], getattr(reference, field)[-1]
+                    )
+            gaps = [
+                second.start_ns[point]
+                - first.start_ns[point]
+                - first.duration_ns[point]
+                for first, second in zip(gates[:-1], gates[1:], strict=True)
+            ]
+            assert np.all(np.asarray(gaps) >= 0)
+            assert np.any(np.asarray(gaps) > 0)
+            assert (
+                batch.end_ns[point]
+                > gates[-1].start_ns[point] + gates[-1].duration_ns[point]
+            )
+        assert np.all(np.diff(batch.end_ns) > 0)
+
+
+def test_shaped_gate_scan_compiles_gaussian_phase_alphabet_prefixes() -> None:
+    from tools import family_pareto_scenarios
+
+    item = family_pareto_scenarios.shaped_gate_sequence_input()
+    with closing((case := item.build()).source):
+        batch = case.batch
+        assert len(batch.points) == 24
+        for point, count in enumerate(range(1, 25)):
+            gates = sorted(
+                (track for track in batch.tracks if track.active[point]),
+                key=lambda track: track.start_ns[point],
+            )
+            assert len(gates) == count
+            np.testing.assert_allclose(
+                [gate.phase_rad[point] for gate in gates],
+                np.resize(np.arange(4) * np.pi / 2, count),
+                atol=1e-12,
+            )
+            envelopes = [gate.envelopes[gate.envelope_index[point]] for gate in gates]
+            assert all(envelope.kind == "sampled" for envelope in envelopes)
+            assert all(np.ptp(envelope.samples.real) > 0 for envelope in envelopes)
+        assert np.all(np.diff(batch.end_ns) > 0)
+
+
+def test_long_shaped_gate_scan_compiles_original_gaussian_alphabet() -> None:
+    from tools import family_pareto_scenarios
+
+    item = family_pareto_scenarios.long_shaped_gate_sequence_input()
+    original = family_pareto_scenarios.shaped_gate_sequence_input()
+    with (
+        closing((case := item.build()).source),
+        closing((short := original.build()).source),
+    ):
+        batch = case.batch
+        assert len(batch.points) == 3
+        np.testing.assert_array_equal(
+            np.sum([track.active for track in batch.tracks], axis=0),
+            [50, 100, 200],
+        )
+        np.testing.assert_array_equal(
+            case.source.model((0,)).energies_ghz,
+            short.source.model((0,)).energies_ghz,
+        )
+        np.testing.assert_array_equal(
+            case.source.initial_density, short.source.initial_density
+        )
+        prefix = sorted(
+            (track for track in short.batch.tracks if track.active[-1]),
+            key=lambda track: track.start_ns[-1],
+        )
+        reference_envelope = prefix[0].envelopes[prefix[0].envelope_index[-1]]
+        for point, count in enumerate((50, 100, 200)):
+            gates = sorted(
+                (track for track in batch.tracks if track.active[point]),
+                key=lambda track: track.start_ns[point],
+            )
+            np.testing.assert_allclose(
+                [gate.phase_rad[point] for gate in gates],
+                np.resize([0, np.pi / 2, np.pi, 3 * np.pi / 2], count),
+                atol=1e-12,
+            )
+            for gate in gates:
+                envelope = gate.envelopes[gate.envelope_index[point]]
+                assert envelope.kind == "sampled"
+                assert np.ptp(envelope.samples.real) > 0
+                np.testing.assert_array_equal(
+                    envelope.samples, reference_envelope.samples
+                )
+                np.testing.assert_array_equal(
+                    gate.amplitude[point], prefix[0].amplitude[-1]
+                )
+                np.testing.assert_array_equal(
+                    gate.frequency_ghz[point], prefix[0].frequency_ghz[-1]
+                )
+            np.testing.assert_allclose(
+                [gate.duration_ns[point] for gate in gates], 100, atol=2
+            )
+            for gate, reference in zip(gates[: len(prefix)], prefix, strict=True):
+                assert gate.port == reference.port
+                for field in (
+                    "start_ns",
+                    "duration_ns",
+                    "frequency_ghz",
+                    "phase_rad",
+                    "amplitude",
+                ):
+                    np.testing.assert_array_equal(
+                        getattr(gate, field)[point], getattr(reference, field)[-1]
+                    )
+            assert all(
+                second.start_ns[point]
+                >= first.start_ns[point] + first.duration_ns[point]
+                for first, second in zip(gates[:-1], gates[1:], strict=True)
+            )
+            assert (
+                batch.end_ns[point]
+                > gates[-1].start_ns[point] + gates[-1].duration_ns[point]
+            )
+        assert np.all(np.diff(batch.end_ns) > 0)
+
+
+def test_delay_scan_compiles_two_same_qubit_gaussians_from_separated_to_overlapping() -> (
+    None
+):
+    from tools import family_pareto_scenarios
+
+    item = family_pareto_scenarios.overlapping_shaped_tones_input()
+    with closing((case := item.build()).source):
+        batch = case.batch
+        assert len(batch.points) == 24
+        assert len(batch.tracks) == 2
+        first, second = sorted(batch.tracks, key=lambda track: track.start_ns[0])
+        assert np.all(first.active) and np.all(second.active)
+        assert first.start_ns[0] + first.duration_ns[0] <= second.start_ns[0]
+        assert first.start_ns[-1] == second.start_ns[-1]
+        assert first.duration_ns[-1] == second.duration_ns[-1]
+        lead = second.start_ns - first.start_ns
+        assert np.all(np.diff(lead) < 0)
+        assert np.allclose(first.duration_ns, 300, atol=2)
+        for track in batch.tracks:
+            envelope = track.envelopes[track.envelope_index[0]]
+            assert envelope.kind == "sampled" and np.ptp(envelope.samples.real) > 0
+        model = case.source.model((0,))
+        assert len(model.energies_ghz) == 20
+        ports = {drive.name: drive for drive in model.drives}
+        assert first.port != second.port
+        np.testing.assert_array_equal(
+            ports[first.port].in_phase_ghz, ports[second.port].in_phase_ghz
+        )
+
+
+def test_constant_tone_scan_compiles_fully_overlapping_same_qubit_drives() -> None:
+    from tools import family_pareto_scenarios
+
+    item = family_pareto_scenarios.overlapping_constant_tones_input()
+    with closing((case := item.build()).source):
+        batch = case.batch
+        assert len(batch.points) == 24
+        assert len(batch.tracks) == 2
+        first, second = batch.tracks
+        assert first.port != second.port
+        assert np.all(first.active) and np.all(second.active)
+        np.testing.assert_array_equal(first.start_ns, second.start_ns)
+        np.testing.assert_array_equal(first.duration_ns, second.duration_ns)
+        assert np.all(first.duration_ns > 0)
+        for track in batch.tracks:
+            assert all(envelope.kind == "constant" for envelope in track.envelopes)
+        carrier_ranges = sorted(np.ptp(track.frequency_ghz) for track in batch.tracks)
+        assert carrier_ranges[0] == 0 and carrier_ranges[1] > 0
+        scanned = max(batch.tracks, key=lambda track: np.ptp(track.frequency_ghz))
+        assert np.all(np.diff(scanned.frequency_ghz) > 0)
+        model = case.source.model((0,))
+        ports = {drive.name: drive for drive in model.drives}
+        np.testing.assert_array_equal(
+            ports[first.port].in_phase_ghz, ports[second.port].in_phase_ghz
+        )
+        assert np.any(ports[first.port].in_phase_ghz != 0)
+        assert np.all(batch.end_ns >= first.start_ns + first.duration_ns)
+
+
+def test_joint_scan_compiles_synchronous_independent_drive_ports() -> None:
+    from tools.family_pareto_scenarios import simultaneous_drive_input
+
     synchronous = []
-    for item in fixed_inputs:
+    for item in [simultaneous_drive_input()]:
         with closing((case := item.build()).source):
             tracks = case.batch.tracks
             if len(tracks) != 2 or tracks[0].port == tracks[1].port:
