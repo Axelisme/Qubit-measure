@@ -1,8 +1,11 @@
 """Tool-owned public-program scans over fixed models, without lab I/O."""
 
+import json
 from collections.abc import Callable
 from contextlib import ExitStack, closing
 from dataclasses import asdict, replace
+from pathlib import Path
+from typing import TypedDict
 
 import numpy as np
 from zcu_tools.program import build_soccfg
@@ -570,6 +573,99 @@ def shaped_gate_sequence_input() -> Input:
     )
 
 
+class _PhasePoint(TypedDict):
+    """Physical pulse phases in degrees, split before the terminal recovery."""
+
+    primitive_phases_deg: list[int]
+    recovery_phases_deg: list[int]
+
+
+class _PhaseControls(TypedDict):
+    """Ordered scan points; other JSON keys retain offline generation provenance."""
+
+    points: list[_PhasePoint]
+
+
+def random_gate_sequence_input() -> Input:
+    """Compile 8 fixed RB-type phase sequences with N's constant gates.
+
+    The checked-in controls select 8 seed/depth pairs from 20 seeds and nine
+    depths through 128. Each primitive and recovery phase uses an uncalibrated
+    gain .1, 20 ns constant pulse at the fixed 21-level model's DC E1-E0.
+    Identity/virtual gates emit no pulse. Recovery need not restore identity.
+    Resources close before return; Input.build creates a fresh caller-owned
+    numeric source. Fixed-data I/O and compiler/environment failures propagate.
+    """
+    return _random_gate_sequence_input(
+        "random_gate_sequence", ConstWaveformCfg(length=0.02), _PLATEAU
+    )
+
+
+def random_shaped_gate_sequence_input() -> Input:
+    """Compile the same 8 RB-type phase sequences with S's Gaussian gates.
+
+    Every physical pulse uses gain .1, 100 ns support and sigma 20 ns at the
+    fixed 21-level model's DC E1-E0. These are not calibrated Clifford rotations.
+    Identity/virtual gates emit no pulse. Resources close before return;
+    Input.build creates a fresh caller-owned numeric source. Fixed-data I/O
+    and compiler/environment failures propagate.
+    """
+    return _random_gate_sequence_input(
+        "random_shaped_gate_sequence",
+        GaussWaveformCfg(length=0.1, sigma=0.02),
+        _SHAPED,
+    )
+
+
+def _random_gate_sequence_input(
+    name: str,
+    waveform: ConstWaveformCfg | GaussWaveformCfg,
+    families: tuple[str, ...],
+) -> Input:
+    """Compile fixed phase-only controls without executing lab or Clifford code."""
+    controls: _PhaseControls = json.loads(
+        (
+            Path(__file__).parent / "data/family_pareto/random_gate_sequences.json"
+        ).read_text(encoding="utf-8")
+    )
+    sequences = [
+        point["primitive_phases_deg"] + point["recovery_phases_deg"]
+        for point in controls["points"]
+    ]
+
+    def emit(builder: TimelineBuilder, center: float) -> None:
+        builder.add_loop("sequence", len(sequences))
+        gates = {
+            phase: Pulse(
+                f"gate_{phase}",
+                PulseCfg(
+                    ch=1, nqz=1, freq=center, phase=phase, gain=0.1, waveform=waveform
+                ),
+            )
+            for phase in (0, 90, 180, 270)
+        }
+        with builder.branch(
+            by="sequence", align_timeline=False, timeline="default"
+        ) as cases:
+            for point, phases in enumerate(sequences):
+                with cases.case(point):
+                    for phase in phases:
+                        builder.emit(gates[phase])
+
+    return single_model_input(
+        name,
+        emit,
+        {
+            "pulse_sequence": "fixed random primitive phase prefixes and recovery phases, terminal readout",
+            "phase_controls": controls,
+            "gate_waveform": waveform.model_dump(mode="json"),
+            "gain": 0.1,
+            "gate_counts": [len(phases) for phases in sequences],
+        },
+        families,
+    )
+
+
 def long_shaped_gate_sequence_input() -> Input:
     """Compile S's Gaussian-gate prefixes at 50, 100 and 200 gates.
 
@@ -1024,6 +1120,8 @@ def make_real_inputs(scenario: str | None = None) -> list[Input]:
         "long_shaped_gate_sequence": long_shaped_gate_sequence_input,
         "carrier_sweep_bias045": carrier_sweep_bias045_input,
         "gate_sequence_bias045": gate_sequence_bias045_input,
+        "random_gate_sequence": random_gate_sequence_input,
+        "random_shaped_gate_sequence": random_shaped_gate_sequence_input,
     }
     if scenario is None:
         return [build() for build in builders.values()]
