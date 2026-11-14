@@ -8,7 +8,6 @@ from threading import Event
 
 import numpy as np
 import pytest
-from scipy.linalg import expm
 from zcu_tools.simulate.evolution import (
     DriveTrack,
     Engine,
@@ -30,6 +29,10 @@ from zcu_tools.simulate.evolution.kernels.dop853 import DOP853Kernel
 from zcu_tools.simulate.evolution.workplan import FactKey, WorkPlan
 
 from tests.simulate.evolution.contract.kernel_suite import KernelCase, reference
+from tests.simulate.evolution.contract.reference import (
+    converged_reference,
+    density_error,
+)
 
 
 def source_for(energies, x):
@@ -200,6 +203,19 @@ def test_graph_fact_hits_do_not_skip_strength_phase_or_budget_admission():
         ]
 
 
+def test_off_window_tone_preserves_full_density_at_readout():
+    # The omitted off-resonant edge contributes first-order coherence even
+    # when its population-transfer proxy passes the existing guard.
+    src = source_for([0.0, 0.71], [[0.002, 0.006], [0.006, -0.002]])
+    batch = batch_for(table_for(0.6, 1.0, 24.0, 0.73))
+    strict = converged_reference(src, batch)
+    with closing(Engine(1, families=("single_tone_rwa",))) as engine:
+        result = engine.evolve(src, (batch,))
+    assert result.paths.segments_by_kernel == {"single_tone_rwa": 1}
+    error = density_error(result.densities, strict.density)
+    assert error <= 2e-3, f"off-window full density error {error:.9g} > 2e-3"
+
+
 def test_constant_resonant_probe_uses_block_family():
     src = source_for([0.0, 0.3, 0.91], [[0, 0.01, 0], [0.01, 0, 0.002], [0, 0.002, 0]])
     with closing(Engine(1)) as engine:
@@ -215,118 +231,34 @@ def test_constant_resonant_probe_uses_block_family():
     np.testing.assert_allclose(result.densities, strict, atol=0.002, rtol=0)
 
 
-@pytest.mark.parametrize("complex_input", [False, True])
-def test_blocks_preserve_cross_component_coherences_and_complex_residuals(
-    complex_input,
-):
-    src = source_for([0.0, 0.3, 0.91], [[0, 0.01, 0], [0.01, 0, 0.002], [0, 0.002, 0]])
-    table = table_for()
-    kernel = family()
-    context = KernelContext(src, 0.001, WorkPlan())
-    rows = np.array([0])
-    assert kernel.guard(table, rows, context).tolist() == [True]
-    prepared = kernel.prepare(
-        kernel.prepare_keys(table, rows, context), table, rows, context
-    )
-    rho = np.array([[0.6, 0.1j, 0], [-0.1j, 0.3, 0], [0, 0, 0.1]], complex)
-    if complex_input:
-        rho += np.array(
-            [[1e-8j, 0, 0.03 + 0.04j], [0, 0, -0.02j], [0.01, 0.02, 0]], complex
-        )
-    states = rho[None].copy()
-    kernel.apply(prepared, rows, table, rows, states, ApplyContext(0.001))
-    # Independent dense Liouvillian reference, including all cross-block entries.
-    model = src.model((0,))
-    coeff = rwa_coefficients(model, (0,), (0.3,))
-    q = np.array([1, 0, 0])
-    h = np.diag(model.energies_ghz + q * 0.3 + coeff.diagonal[0] * 0.5**2).astype(
-        complex
-    )
-    h += 0.5 * (coeff.positive[0] + coeff.negative[0])
-    outgoing = model.rates_per_ns.sum(axis=0)
-    decay = (outgoing[:, None] + outgoing[None, :]) / 2
-
-    def rhs(v):
-        r = v.reshape(3, 3)
-        d = -2j * np.pi * (h @ r - r @ h) - decay * r
-        d[np.diag_indices(3)] += model.rates_per_ns @ np.diag(r)
-        return d.ravel()
-
-    generator = np.column_stack([rhs(v) for v in np.eye(9, dtype=complex)])
-    start = np.exp(1j * q * 0.7)
-    rotated = rho * start.conj()[:, None] * start[None, :]
-    expected = (expm(generator * 200) @ rotated.ravel()).reshape(3, 3)
-    end = np.exp(1j * q * (0.7 + 2 * np.pi * 0.3 * 200))
-    expected *= end[:, None] * end.conj()[None, :]
-    np.testing.assert_allclose(states[0], expected, atol=2e-12, rtol=0)
-
-
-def dense_rwa_reference(src, rho, frequency, theta, duration, charges):
-    """Independent full Liouvillian, without component or Hermitian splitting."""
-    model = src.model((0,))
-    coeff = rwa_coefficients(model, (0,), (frequency,))
-    h = np.diag(
-        model.energies_ghz + charges * frequency + coeff.diagonal[0] * 0.5**2
-    ).astype(complex)
-    h += 0.5 * (coeff.positive[0] + coeff.negative[0])
-    outgoing = model.rates_per_ns.sum(axis=0)
-    decay = (outgoing[:, None] + outgoing[None, :]) / 2
-    size = len(charges)
-
-    def rhs(v):
-        r = v.reshape(size, size)
-        d = -2j * np.pi * (h @ r - r @ h) - decay * r
-        d[np.diag_indices(size)] += model.rates_per_ns @ np.diag(r)
-        return d.ravel()
-
-    generator = np.column_stack([rhs(v) for v in np.eye(size**2, dtype=complex)])
-    start = np.exp(1j * charges * theta)
-    rotated = rho * start.conj()[:, None] * start[None, :]
-    expected = (expm(generator * duration) @ rotated.ravel()).reshape(size, size)
-    end = np.exp(1j * charges * (theta + 2 * np.pi * frequency * duration))
-    return expected * end[:, None] * end.conj()[None, :]
-
-
 @pytest.mark.parametrize("frequency", [0.3, -0.3])
 @pytest.mark.parametrize("duration", [0.0, 17.3, 200.0])
 @pytest.mark.parametrize("coupled", [False, True])
-def test_complex_playback_matches_dense_reference_across_components(
+def test_complex_coherences_across_components_match_full_hamiltonian(
     frequency, duration, coupled
 ):
-    # Two dimers and two singletons, or an entirely scalar graph. The bath
-    # transfers population across components, independently of their topology.
+    # Two dimers and two singletons, or an entirely scalar graph. Compare the
+    # complete physical density, not the old bare-RWA approximation's output.
     x = np.zeros((6, 6), dtype=complex)
     if coupled:
         x[0, 1] = x[1, 0] = 0.003
         x[2, 3] = x[3, 2] = 0.004
     src = source_for([0.0, 0.3, 0.9, 1.2, 1.8, 2.4], x)
-    table = table_for(frequency=frequency, duration=duration, theta=-0.83)
-    kernel = family()
-    rows = np.array([0])
-    context = KernelContext(src, 0.001, WorkPlan())
-    assert kernel.guard(table, rows, context).tolist() == [True]
-    prepared = kernel.prepare(
-        kernel.prepare_keys(table, rows, context), table, rows, context
-    )
-    charges = np.zeros(6, dtype=np.int64)
-    if coupled:
-        charges[[0, 2] if frequency > 0 else [1, 3]] = 1
     rng = np.random.default_rng(41)
-    dense = rng.normal(size=(6, 6)) + 1j * rng.normal(size=(6, 6))
-    reverse_only = np.zeros((6, 6), dtype=complex)
-    # Below any useful tolerance, but not zero. The nonzero block is only in
-    # the reverse direction, so scanning forward RHS alone loses this signal.
-    reverse_only[3, 0] = 1e-90 * (1 + 2j)
-    reverse_only[5, 4] = 1e-90j
-    for rho in (dense, reverse_only, src.initial_density):
-        states = rho[None].copy()
-        exceeded = kernel.apply(
-            prepared, rows, table, rows, states, ApplyContext(0.001)
-        )
-        assert not np.any(exceeded)
-        expected = dense_rwa_reference(src, rho, frequency, -0.83, duration, charges)
-        scale = float(np.max(np.abs(rho)))
-        np.testing.assert_allclose(states[0], expected, atol=2e-12 * scale, rtol=0)
+    vector = rng.normal(size=6) + 1j * rng.normal(size=6)
+    vector /= np.linalg.norm(vector)
+    src = ModelSource(np.outer(vector, vector.conj()), src.model)
+    batch = batch_for(table_for(frequency=frequency, duration=duration, theta=-0.83))
+    strict = converged_reference(src, batch)
+    with closing(Engine(1, families=("single_tone_rwa",))) as engine:
+        result = engine.evolve(src, (batch,))
+    if duration == 0:
+        # Engine does not schedule an empty span; it returns the initial density.
+        assert not result.paths.segments_by_kernel
+        np.testing.assert_array_equal(result.densities[0], src.initial_density)
+    else:
+        assert result.paths.segments_by_kernel == {"single_tone_rwa": 1}
+    assert density_error(result.densities, strict.density) <= 2e-3
 
 
 @pytest.mark.parametrize("kind", ["outside-one-photon", "same-tone-two-photon"])

@@ -770,6 +770,32 @@ def retained_edges(
     return coupling * mask
 
 
+def rwa_kick_coefficients(
+    model: SecularModel,
+    port: int,
+    frequency: float,
+    amplitude: float,
+    retention: RWARetention,
+) -> NDArray[np.complex128]:
+    """Prepare caller-owned (2,M,M) omitted c/d for a constant-tone kick.
+
+    port indexes the model drive; frequency is signed GHz, amplitude is signed
+    gain. retention is this row's resolved window plus restored edges, not the
+    pruned phase graph. Signs are ordered (+1,-1). Includes diagonal +/-f
+    terms, excludes every retained edge and its adjoint. Outputs are
+    dimensionless; phase and duration enter only during endpoint playback.
+    """
+    drive = model.drives[port]
+    return _rwa_fourier.kick_coefficients(
+        model.energies_ghz,
+        drive.in_phase_ghz,
+        drive.quadrature_ghz,
+        frequency,
+        amplitude,
+        retained_mask(model, (frequency,), retention)[0],
+    )
+
+
 def rwa_coefficients(
     model: SecularModel,
     ports: tuple[int, ...],

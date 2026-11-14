@@ -1,4 +1,4 @@
-"""Constant rotating-frame Lindbladians split by the shared retained graph."""
+"""Endpoint-dressed constant rotating-frame Lindbladians by retained graph."""
 
 from contextlib import closing
 from dataclasses import dataclass, replace
@@ -13,7 +13,7 @@ from ..kernel import ApplyContext, KernelContext, Prepared, SegmentTable
 from ..secular import SecularModel
 from ..workplan import WorkPlan
 from ._dop853 import tolerances
-from ._rwa_fourier import EDGE_GHZ
+from ._rwa_fourier import EDGE_GHZ, endpoint_kick
 from ._rwa_graph import (
     PRUNE_LIMIT,
     RWA_GRAPH_POLICY,
@@ -34,12 +34,18 @@ from ._rwa_numeric import (
     constant_retentions,
     interaction_hamiltonian,
     rwa_coefficients,
+    rwa_kick_coefficients,
 )
 from ._workload_facts import rwa_topology, secular_bath
 
 _MAX_BLOCK_DIMENSION = 64
+# Kick-created cross-component coherences activate costly pair generators.
+# Dropping <1e-4 accumulated 7.3e-4 error over 200 random-phase gates; use
+# ten times less to leave margin under the 2e-3 final-density allowance.
+_CROSS_COMPONENT_CUTOFF = 1e-5
 _POLICY = (
-    "constant-rwa-blocks-v2",
+    "constant-rwa-endpoint-kick-v3",
+    _CROSS_COMPONENT_CUTOFF,
     RWA_GRAPH_POLICY,
     ADAPTIVE_RWA_POLICY,
     _MAX_BLOCK_DIMENSION,
@@ -199,6 +205,7 @@ class _Block:
     components: tuple[NDArray[np.int64], ...]
     labels: NDArray[np.int64]
     charges: NDArray[np.int64]
+    kick: NDArray[np.complex128]
 
     @property
     def nbytes(self) -> int:
@@ -213,6 +220,7 @@ class _Block:
                 self.kind,
                 self.labels,
                 self.charges,
+                self.kick,
                 *self.components,
             )
         )
@@ -296,9 +304,12 @@ def _build(
     generator = _generator(h, bath.population, decay, a, b, kind)
     charges = graph.charges[:, 0].copy()
     labels = topology.labels.copy()
-    for array in (h, decay, generator, a, b, kind, labels, charges, *components):
+    kick = rwa_kick_coefficients(
+        model, port, frequency, float(table.tone_amplitude[row, 0]), retention
+    )
+    for array in (h, decay, generator, a, b, kind, labels, charges, kick, *components):
         array.setflags(write=False)
-    return _Block(h, decay, generator, a, b, kind, components, labels, charges)
+    return _Block(h, decay, generator, a, b, kind, components, labels, charges, kick)
 
 
 @njit(nogil=True, cache=True)
@@ -314,13 +325,15 @@ def _initial_coordinates(operators, coordinates, topology, rho, theta, duration)
     for i in range(size):
         for j in range(size):
             value = rho[i, j] * phase[i].conjugate() * phase[j]
+            if labels[i] != labels[j] and abs(value) < _CROSS_COMPONENT_CUTOFF:
+                value = 0j
             rotated[i, j] = value
             result[i, j] = value * np.exp(
                 (-2j * np.pi * (h[i, i] - h[j, j]) - decay[i, j]) * duration
             )
             if labels[i] != labels[j] and value != 0:
                 # Either direction activates the pair, including non-Hermitian
-                # residuals. Only an exact-zero RHS may skip its exponential.
+                # residuals, after the cross-component small-entry cutoff.
                 active[min(labels[i], labels[j]), max(labels[i], labels[j])] = True
     state = np.empty(len(a), dtype=np.complex128)
     for k in range(len(a)):
@@ -363,6 +376,8 @@ def _play(
     theta: float,
     duration: float,
 ) -> NDArray[np.complex128]:
+    initial = expm(1j * endpoint_kick(entry.kick, theta))
+    rho = initial @ rho @ initial.conj().T
     rho, result, state, active = _initial_coordinates(
         (entry.h, entry.decay),
         (entry.a, entry.b, entry.kind),
@@ -397,7 +412,11 @@ def _play(
                 .conj()
                 .T
             )
-    return _finish_frame(result, entry.charges, theta, frequency, duration)
+    result = _finish_frame(result, entry.charges, theta, frequency, duration)
+    terminal = expm(
+        -1j * endpoint_kick(entry.kick, theta + 2 * np.pi * frequency * duration)
+    )
+    return terminal @ result @ terminal.conj().T
 
 
 class SingleToneRWAKernel:
@@ -420,9 +439,11 @@ class SingleToneRWAKernel:
     omission rule is recomputed each round, with no amplitude cutoff.
     The shared omission estimate, Fourier terms and virtual diagonal all use
     that same final set; incompatible phase cycles still require pruning.
-    Other component pairs use small complex generators; exact-zero input blocks
-    skip their exponential only at apply. No clipping, normalization, input
-    reduction, dense full-space channel or Strang splitting is used.
+    First-order endpoint kicks restore omitted-edge micromotion before and
+    after each row. Other component pairs use small complex generators;
+    cross-component input entries below 1e-5 are dropped at apply.
+    No clipping, normalization, dense full-space channel or Strang splitting
+    is used.
     This is a calibrated RWA approximation, not an error certificate.
     """
 
@@ -495,7 +516,7 @@ class SingleToneRWAKernel:
         return keys
 
     def cost(self, table: SegmentTable, rows: NDArray[np.int64]) -> NDArray[np.float64]:
-        """Estimate one small constant-generator exponential per row."""
+        """Use the existing constant-block price pending workload calibration."""
         del table
         return np.full(len(rows), 4.0, dtype=np.float64)
 
@@ -536,7 +557,7 @@ class SingleToneRWAKernel:
         source_initial: NDArray[np.complex128],
         context: KernelContext,
     ) -> None:
-        """No input binding; full complex density playback remains linear."""
+        """No input binding; apply owns the cross-component small-entry cutoff."""
         del prepared, key_index, table, rows, source_initial, context
 
     def apply(
@@ -552,8 +573,9 @@ class SingleToneRWAKernel:
 
         states is (rows,M,M) in the model eigenbasis. Reject invalid payloads,
         row plans, indices and shapes with ValueError. Numerical failures
-        propagate, without retry or rerouting. Arbitrary complex residuals and
-        cross-component coherences are retained, not symmetrized or discarded.
+        propagate, without retry or rerouting. Endpoint kicks surround rotating-
+        frame playback. Complex residuals are not symmetrized; cross-component
+        input entries below 1e-5 after the initial kick are discarded.
         """
         if context.plan is not None or not isinstance(prepared, _Prepared):
             raise ValueError("constant RWA requires its own payload and no row plan")
