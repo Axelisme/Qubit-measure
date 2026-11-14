@@ -1209,7 +1209,14 @@ def main(argv: list[str] | None = None, *, inputs: list[Input] | None = None) ->
                 "oracle_fine": [2e-12, 2e-14],
                 "oracle_convergence_limit": 2e-6,
                 "accuracy_limit": ACCURACY_LIMIT,
-                "dominance": "competitor_error <= target_error and competitor_time < .9 * target_time",
+                "dominance": (
+                    "both policies' maximum complete-sequence final density errors "
+                    f"<= accuracy_limit ({ACCURACY_LIMIT:g}); qualified policies "
+                    "are equally accurate; neither policy is default/fixed or "
+                    f"directly retained ({', '.join(sorted(DIRECTLY_RETAINED))}); "
+                    "per shared measured mode and wall/CPU metric, "
+                    "competitor_time < .9 * target_time"
+                ),
                 "unavailable_exception": "NoValidKernel",
             },
             "inputs": [
