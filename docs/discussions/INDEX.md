@@ -18,6 +18,8 @@
 
 ## 模擬量測環境
 
+- 2026-11-14 [RB 型相位序列作為固定量表輸入](2026-11-14-random-gate-sequence-workloads.md)：場景擴充。離線固定 phase prefix 與 recovery，constant／Gaussian 共用，不加入 runtime RB 代數。
+
 - 2026-11-13 [Family 支配的定義：容許範圍內只比耗時](2026-11-13-family-dominance-within-tolerance.md)：取捨原則。合格 family 只比耗時，刪除前仍須同型態長序列證據與使用者點頭。
 
 - 2026-11-14 [Family 量表的單場景重量與摘要](2026-11-14-family-pareto-remeasurement.md)：資料入庫。參考解與完整結果跨 worktree 共用本機儲存，摘要入庫，比對不判跨時段快慢。

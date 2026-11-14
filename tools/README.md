@@ -1,6 +1,6 @@
 # tools/
 
-**Last updated:** 2026-11-14, qualified family dominance and thirteen-workload conclusions
+**Last updated:** 2026-11-14, fixed random-phase gate-sequence scenarios
 
 **讀者：** framework-dev。Repo 品質檢查與重計算執行器的 CLI、輸出與比較機制。
 
@@ -176,7 +176,7 @@ the two categories; deletion conclusions use real inputs only.
 
 ### Recorded scenario summaries
 
-The thirteen recorded tables use clean commit
+The original thirteen recorded tables use clean commit
 `3545520dd8d5e8784be642246605f263654ce72b`, tree
 `c9f484253fae2cc0db5a7d80dc1dd21bbe808d77`. Each table ran once with exclusive
 access, all 17 pinned families, default routing and its fixed observed union.
@@ -470,6 +470,8 @@ not at the end of that window.
 | N-bias045 `gate_sequence_bias045` | Same as N at 0.45 Φ0 | Gate count 1 to 24, carrier at biased DC E1−E0 | Same as N | Same as N | Compares the same compiled gate prefixes at a second DC bias. |
 | M `simultaneous_drive` | Synchronous F1/F2 drives, terminal readout | Shared gain .01 to .1 | Two Gaussians, 100 ns, sigma 20 ns | 2 | Independent joint-model drive operators under overlapping shaped controls. |
 | S `shaped_gate_sequence` | Prefix of repeated Gaussian X,Y,-X,-Y gates, terminal readout | Gate count 1 to 24 | Gaussian 100 ns gates, sigma 20 ns, gain .1 | 2 to 47 | Reuses N's alphabet and ragged prefixes with A's shaped-gate support and width, separating shape from sequence reuse. |
+| `random_gate_sequence` | Fixed random primitive phase prefixes and recovery phases, terminal readout | 24 seed-major samples of 20 seeds × depths [0,1,2,4,8,16,32,64,128] | Same constant gates as N | Public support partition, including zero-gate idle points | Measures phase-dependent sequence error without replacing N's cyclic alphabet. |
+| `random_shaped_gate_sequence` | Same fixed phases as random_gate_sequence, with Gaussian gates | Same 24 seed/depth points | Same Gaussian gates as S | Public support partition, including zero-gate idle points | Separates shaped-gate reuse from the fixed cyclic phase order. |
 | N-long `long_gate_sequence` | N's constant X,Y,-X,-Y prefixes, terminal readout | Gate counts 50, 100, 200 (three points) | Same constant 20 ns gates and gain .1 as N | Public compiled support partition, including alignment gaps and readout lead | Checks whole-sequence accuracy beyond 24 gates without replacing N. |
 | S-long `long_shaped_gate_sequence` | S's Gaussian X,Y,-X,-Y prefixes, terminal readout | Gate counts 50, 100, 200 (three points) | Same Gaussian 100 ns gates, sigma 20 ns and gain .1 as S | Public compiled support partition, including alignment gaps and readout lead | Checks shaped-gate reuse at long sequence lengths without replacing S. |
 | O1 `overlapping_constant_tones` | Fully overlapping constant Pump/Stokes pair, terminal readout | Pump fixed at DC E1−E0; Stokes scans that center ±50 MHz | Both 1000 ns; gains .02/.002 | 2 | A carrier slice of the dual-tone reset scan on one qubit, without a cavity drive. |
@@ -502,10 +504,29 @@ not calibrated pi rotations. The lab's generic `pi_pulse` creation template
 seeds a constant pulse, so it supplies no calibrated Gaussian duration.
 S adds no random gates or extra repetitions to make a family admissible.
 
+The two random-phase scans share
+[`random_gate_sequences.json`](data/family_pareto/random_gate_sequences.json).
+Its phases were generated offline from the user-authored Clifford prefix and
+inverse-recovery tables at commit `46a4291cfdf1b1617bc1fb03499813450b16ed7e`,
+`zcu_lab/v2/twotone/rb/sequence.py`. The file records that source's SHA-256,
+parent seed 42, all 20 spawned seeds, the nine depths and selected indices.
+It flattens the seed/depth Cartesian product in seed-major order and selects
+`np.linspace(0,179,24,dtype=int)`. Each point retains its primitive phase prefix
+and recovery phases separately. Virtual Z changes the copied phase frame;
+identity gates and recovery padding emit no pulse. Four selected depth-zero
+points therefore contain only the terminal readout lead.
+The builders compile those phases through public Pulse/TimelineBuilder components.
+They do not import lab code, run Clifford algebra or read lab YAML.
+Model, carrier, gain, envelope, pulse length, initial density and companions follow
+N or S. These uncalibrated gates need not return the state to identity.
+The inputs measure evolution error on an RB-type phase order, not RB fidelity.
+Changing seeds or depths requires regenerating and reviewing the fixed controls.
+
 `long_gate_sequence_input()` and `long_shaped_gate_sequence_input()` compile
 N-long and S-long through the same public program and single-fluxonium model
-path as N and S. The default fixed inventory includes both three-point scans
-and both bias045 scans alongside the original nine scenarios, for thirteen total.
+path as N and S. The default fixed inventory includes both three-point scans,
+both bias045 scans and both random-phase scans alongside the original nine
+scenarios, for fifteen total.
 Only the requested gate counts change for the long scans.
 The model and board values retain source commit
 `303074e166d1a563addfab4fd94717d958a7dd56`; DC bias, initial density, carrier,
