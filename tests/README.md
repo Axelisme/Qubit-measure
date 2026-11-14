@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-11-14，sampled multitone 暫停驗收
+**Last updated:** 2026-11-15，sampled multitone 暫停驗收與模型尺寸
 
 **讀者：** framework-dev、agent。查閱測試的 owner、fixture、執行方式與搬遷驗收契約。
 
@@ -151,7 +151,11 @@ uv run --directory <worktree> --no-sync -- \
 `multitone_gate` 暫停 admission，矩陣不替它建立 density 案例，表中顯示 `NOT EXERCISED`。
 它的 sampled 拒收由 routing boundary 契約驗證，不填 error=0，也不報 PASS。
 Active family 的 guard 拒絕輸入會讓 density 測試失敗，不會產生誤差觀察值。
-新增案例使用兩能階模型，包含完整 complex coherence、relaxation 與 dephasing。
+各案例包含完整 complex coherence、relaxation 與 dephasing。模型尺寸依案例族區分：
+
+- 兩能階：`low_carrier`、`linear_shaped`、`linear_plateau`、`nearby_carriers`、`adiabatic_ramp` 與 `history_gate`。
+- 三能階：`idle_coherence`、`weak_plateau`、`strong_plateau`、`shaped_complex`、`two_carriers`、`continuous_flux`、`cheap_sampled_*` 與 `multisegment/final`。
+- 四能階：`joint_gate_inventory` 與 `joint_constant`。
 
 | 案例 | 固定的 family | 輸入 |
 | --- | --- | --- |

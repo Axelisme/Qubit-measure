@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-11-14, sampled multitone admission pause
+**Last updated:** 2026-11-15, sampled multitone pause and reference convergence scope
 
 **讀者：** framework-dev、agent。Segment evolution 的公開輸入、路由與數值邊界。
 
@@ -362,7 +362,6 @@ The matrix measures the maximum absolute difference over every complex density
 entry at readout, against an independent full-Hamiltonian Lindblad DOP853
 reference. It includes coherences, relaxation and dephasing. The reference must
 agree within `2e-6` between rtol/atol pairs `2e-10/2e-12` and `2e-12/2e-14`.
-The collected maximum reference difference is `4.432072948e-12`.
 [Multisegment](../../../../tests/simulate/evolution/contract/test_accuracy_matrix.py)
 observations measure the final density of the whole timeline, not each kernel's
 local contribution. The separate
