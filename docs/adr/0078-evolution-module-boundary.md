@@ -40,6 +40,30 @@ Dispatch 可以依量測歷史選擇不同 kernel，量測層用公開參數控�
 可用的候選須逐一對參考解驗證。現行有四個 guard 邊緣案例超標，以 strict xfail 保留，不放寬誤差門檻。案例與限制見 [evolution README 的 kernel 表](../../lib/zcu_tools/simulate/evolution/README.md#kernel-summary)，環境 expected I/Q 驗收尚未交付。
 算法數值集中在自己的 owner，新增算法或優化不要求修改不相關模組。實際擴充位置見 [evolution README 的 Adding a family](../../lib/zcu_tools/simulate/evolution/README.md#adding-a-family)。
 
+### Family 去留：合格只比耗時
+
+以每點跑完整條 pulse sequence 後，最終 density 對獨立參考解的最大絕對差判定精度。
+最終誤差 ≤ `2e-3` 的 family 視為一樣準，彼此只比耗時。
+另一個合格的 family 快超過 10% 才算支配它。
+某種輸入只有它能算的 family 不參加比較，包含獨占一個適用域的 family，以及各適用域的最後一道候選。
+
+當時 Gaussian gate 序列的 S 表中，`shaped_sambe` 的誤差與耗時為 `1.45e-4`、0.27 秒，
+`period_table` 為 `2.96e-5`、9.0 秒，`gate_cache` 為 `1.10e-5`、54 秒。
+三者都合格，後兩者被 `shaped_sambe` 支配，即使它們準一個數量級。
+這組數字是 2026-11-13 討論時的範例，不替代後續量表的實測記錄。
+
+適用邊界：
+
+- 單一 kernel 的誤差或每段 `budget` 不算合格證據，只有量到的完整序列最終誤差算。
+- 要因此刪掉較準但較慢的 family，須先有支配它的 family 在同型態長序列上仍 ≤ `2e-3` 的實測，gate 數須遠多於 24。沒有這份證據就不刪。
+- 刪除須由使用者看過數據後點頭。
+
+2026-11-13，使用者說：「我通常是要求在给定最终精度容许范围内尽可能加速，所以通常这种精度差距极小的，我会优先选速度。」
+使用者並澄清：「你要注意哦，这个精度是最终精度，也就是整个 post sequence 模拟最后的精度，而不是单个 kernel 的精度哦。」
+對整理後的規則答「確認」。
+出處與選項比較見 [family 支配定義的討論](../discussions/2026-11-13-family-dominance-within-tolerance.md)。
+量表判定機制見 [tools README](../../tools/README.md#engine-family-pareto-table)。
+
 ### 內部允許實質耦合，dispatch 擁有決策知識
 
 使用者於 2026-10-18 裁決：「Q2只要是有助於分類的資訊，planner都可以知道。」
