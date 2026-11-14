@@ -52,3 +52,11 @@ N 的 X、Y、−X、−Y 循環會讓部分 RWA 誤差抵消。既有 N 表的�
 - [場景 builder](../../tools/family_pareto_scenarios.py) 擁有公開 program 編譯與固定模型接線。
 - [既有單場景流程](2026-11-14-family-pareto-remeasurement.md) 說明參考解、摘要與量測標註的取捨。
 - [程式碼品質](../code-quality.md#依判定用途決定查核與記錄) 規定狀態與誤差等判定數字的單一 owner。
+
+## 後記：2026-11-14 固定選點減為八點
+
+最初 24 點的 constant 整批參考解在 1800 s timeout，沒有產生完整 cache。後續在同 seed、depth32 的 44-gate 點量得 constant 與 Gaussian 參考解 wall 分別為49.406 s 與281.058 s，倍率為5.688775。這是兩級容差求解的單點成本，不是 family 正式計時。
+
+Designer 依「參考解太慢時先減點數，不縮小模型」採八點，取代原先等距挑24點。七點方案會再少 depth16 與一個 seed，合計成本估值只省約209 s。九點方案加規劃餘裕後估5049 s，超過當時剩餘4749 s的參考解額度。這些外推不是完成上界，原始工作檔未入庫。
+
+實際選點由[固定控制資料](../../tools/data/family_pareto/random_gate_sequences.json)記錄。兩個場景仍共用同一份 phases，保留母軸兩端、depth32 的 pilot 點與最大 depth128。最高 depth 只有一個 seed，且占總 gates 約66%。這是精度工作負載，不代表 RB 的 seed 統計。模型、gate 參數與原有 N、S 場景不變。

@@ -563,9 +563,9 @@ class _PhaseControls(TypedDict):
 
 
 def random_gate_sequence_input() -> Input:
-    """Compile 24 fixed RB-type phase sequences with N's constant gates.
+    """Compile 8 fixed RB-type phase sequences with N's constant gates.
 
-    The checked-in controls select 24 seed/depth pairs from 20 seeds and nine
+    The checked-in controls select 8 seed/depth pairs from 20 seeds and nine
     depths through 128. Each primitive and recovery phase uses an uncalibrated
     gain .1, 20 ns constant pulse at the fixed 21-level model's DC E1-E0.
     Identity/virtual gates emit no pulse. Recovery need not restore identity.
@@ -578,7 +578,7 @@ def random_gate_sequence_input() -> Input:
 
 
 def random_shaped_gate_sequence_input() -> Input:
-    """Compile the same 24 RB-type phase sequences with S's Gaussian gates.
+    """Compile the same 8 RB-type phase sequences with S's Gaussian gates.
 
     Every physical pulse uses gain .1, 100 ns support and sigma 20 ns at the
     fixed 21-level model's DC E1-E0. These are not calibrated Clifford rotations.

@@ -163,21 +163,23 @@ def test_random_gate_scan_preserves_model_pulses_and_companions(
         )
         assert case.families == reference.families
         batch = case.batch
-        assert len(batch.points) == 24
+        assert len(batch.points) == 8
         counts = np.sum([track.active for track in batch.tracks], axis=0)
         assert np.unique(counts).size > 1
+        assert counts[0] == 0
         # User-authored seed 4091952314, depth 32: 43 primitives plus one recovery.
+        selected_point = 1
         selected = sorted(
-            (track for track in batch.tracks if track.active[2]),
-            key=lambda track: track.start_ns[2],
+            (track for track in batch.tracks if track.active[selected_point]),
+            key=lambda track: track.start_ns[selected_point],
         )
         assert len(selected) == 44
         np.testing.assert_allclose(
-            [gate.phase_rad[2] for gate in selected[:12]],
+            [gate.phase_rad[selected_point] for gate in selected[:12]],
             np.deg2rad([90, 90, 0, 90, 0, 90, 0, 90, 0, 270, 0, 90]),
             atol=1e-12,
         )
-        assert selected[-1].phase_rad[2] == 0
+        assert selected[-1].phase_rad[selected_point] == 0
         exemplar = next(track for track in reference.batch.tracks if track.active[-1])
         # The compiler can add a clock step to support at a different absolute start.
         allowed_durations = np.unique(

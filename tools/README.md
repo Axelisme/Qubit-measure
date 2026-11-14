@@ -1,6 +1,6 @@
 # tools/
 
-**Last updated:** 2026-11-14, fixed random-phase gate-sequence scenarios
+**Last updated:** 2026-11-14, eight-point random-phase gate-sequence scenarios
 
 **讀者：** framework-dev。Repo 品質檢查與重計算執行器的 CLI、輸出與比較機制。
 
@@ -470,8 +470,8 @@ not at the end of that window.
 | N-bias045 `gate_sequence_bias045` | Same as N at 0.45 Φ0 | Gate count 1 to 24, carrier at biased DC E1−E0 | Same as N | Same as N | Compares the same compiled gate prefixes at a second DC bias. |
 | M `simultaneous_drive` | Synchronous F1/F2 drives, terminal readout | Shared gain .01 to .1 | Two Gaussians, 100 ns, sigma 20 ns | 2 | Independent joint-model drive operators under overlapping shaped controls. |
 | S `shaped_gate_sequence` | Prefix of repeated Gaussian X,Y,-X,-Y gates, terminal readout | Gate count 1 to 24 | Gaussian 100 ns gates, sigma 20 ns, gain .1 | 2 to 47 | Reuses N's alphabet and ragged prefixes with A's shaped-gate support and width, separating shape from sequence reuse. |
-| `random_gate_sequence` | Fixed random primitive phase prefixes and recovery phases, terminal readout | 24 seed-major samples of 20 seeds × depths [0,1,2,4,8,16,32,64,128] | Same constant gates as N | Public support partition, including zero-gate idle points | Measures phase-dependent sequence error without replacing N's cyclic alphabet. |
-| `random_shaped_gate_sequence` | Same fixed phases as random_gate_sequence, with Gaussian gates | Same 24 seed/depth points | Same Gaussian gates as S | Public support partition, including zero-gate idle points | Separates shaped-gate reuse from the fixed cyclic phase order. |
+| `random_gate_sequence` | Fixed random primitive phase prefixes and recovery phases, terminal readout | 8 fixed samples from 20 seeds; selected depths [0,1,2,4,8,16,32,128], 8/20 seeds | Same constant gates as N | Public support partition, including zero-gate idle points | Measures phase-dependent sequence error without replacing N's cyclic alphabet. |
+| `random_shaped_gate_sequence` | Same fixed phases as random_gate_sequence, with Gaussian gates | Same 8 seed/depth points | Same Gaussian gates as S | Public support partition, including zero-gate idle points | Separates shaped-gate reuse from the fixed cyclic phase order. |
 | N-long `long_gate_sequence` | N's constant X,Y,-X,-Y prefixes, terminal readout | Gate counts 50, 100, 200 (three points) | Same constant 20 ns gates and gain .1 as N | Public compiled support partition, including alignment gaps and readout lead | Checks whole-sequence accuracy beyond 24 gates without replacing N. |
 | S-long `long_shaped_gate_sequence` | S's Gaussian X,Y,-X,-Y prefixes, terminal readout | Gate counts 50, 100, 200 (three points) | Same Gaussian 100 ns gates, sigma 20 ns and gain .1 as S | Public compiled support partition, including alignment gaps and readout lead | Checks shaped-gate reuse at long sequence lengths without replacing S. |
 | O1 `overlapping_constant_tones` | Fully overlapping constant Pump/Stokes pair, terminal readout | Pump fixed at DC E1−E0; Stokes scans that center ±50 MHz | Both 1000 ns; gains .02/.002 | 2 | A carrier slice of the dual-tone reset scan on one qubit, without a cavity drive. |
@@ -510,17 +510,23 @@ Its phases were generated offline from the user-authored Clifford prefix and
 inverse-recovery tables at commit `46a4291cfdf1b1617bc1fb03499813450b16ed7e`,
 `zcu_lab/v2/twotone/rb/sequence.py`. The file records that source's SHA-256,
 parent seed 42, all 20 spawned seeds, the nine depths and selected indices.
-It flattens the seed/depth Cartesian product in seed-major order and selects
-`np.linspace(0,179,24,dtype=int)`. Each point retains its primitive phase prefix
-and recovery phases separately. Virtual Z changes the copied phase frame;
-identity gates and recovery padding emit no pulse. Four selected depth-zero
-points therefore contain only the terminal readout lead.
+The parent axis is the seed-major Cartesian product of those 20 seeds and nine
+depths. The retained parent indices are [0,15,23,85,101,147,163,179], a fixed subset
+of the initial `np.linspace(0,179,24,dtype=int)` selection. These eight points use
+eight seeds and depths [0,1,2,4,8,16,32,128], with 243 physical gates in total.
+They keep both axis endpoints and depth128, but omit depth64 to reduce reference
+cost without shrinking the model. The selection favors shorter sequences at
+other depths and does not represent RB seed statistics.
+Each point retains its primitive phase prefix and recovery phases separately.
+Virtual Z changes the copied phase frame; identity gates and recovery padding
+emit no pulse. The selected depth-zero point emits no drive. Its Engine batch
+ends at readout start with zero duration.
 The builders compile those phases through public Pulse/TimelineBuilder components.
 They do not import lab code, run Clifford algebra or read lab YAML.
 Model, carrier, gain, envelope, pulse length, initial density and companions follow
 N or S. These uncalibrated gates need not return the state to identity.
 The inputs measure evolution error on an RB-type phase order, not RB fidelity.
-Changing seeds or depths requires regenerating and reviewing the fixed controls.
+Changes to the fixed controls require review. New seed/depth sequences require offline generation.
 
 `long_gate_sequence_input()` and `long_shaped_gate_sequence_input()` compile
 N-long and S-long through the same public program and single-fluxonium model
