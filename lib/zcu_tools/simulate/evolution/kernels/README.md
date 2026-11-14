@@ -1,6 +1,6 @@
 # Evolution kernels
 
-**Last updated:** 2026-11-14，endpoint kick 與 t6 dispatch owners
+**Last updated:** 2026-11-15，常數雙 tone endpoint kick consumer
 
 **讀者：** framework-dev、agent。查找演化算法的數值 owner，以及 kernel 與 dispatch、scheduler 的接縫。
 
@@ -15,7 +15,9 @@
 `_workload_facts.py` 的 `model_keys` 供 Dyson 與 flux DOP853 共用 flux-level／shift-content 分組。
 `_rwa_numeric.py` 擁有多個 RWA family 共用的 admission、retention、policy 與 Hamiltonian coefficients。
 Fourier 係數與 omitted-edge endpoint kick 數值留在 `_rwa_fourier.py`。
-`_rwa_numeric.py` 以 resolved retention mask 準備 kick 係數，目前只有 `single_tone_rwa` 套用。
+`single_tone_rwa` 與常數雙 tone 的 `multitone_rwa` 都使用 resolved retention mask 的補集準備 kick。
+`multitone_rwa` 在每個 row 端點先加總所有 tone 的 kick，再作用於 density。
+末端 kick 與演化使用相同的 row duration；sampled row 不套用 kick。
 Phase graph 與 covariant gate builder 分別留在 `_rwa_graph.py` 與 `_rwa_gate.py`。
 `dop853.advance_endpoints` 擁有旋轉座標 density 積分，`dop853` 與 `t6` direct
 沿用相同的每段 budget 容差規則。這是局部積分控制，不保證整條序列的最終誤差。
