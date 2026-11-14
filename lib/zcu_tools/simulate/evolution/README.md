@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-11-14, endpoint kicks, common-frame pricing, and remeasured DOP853 evidence
+**Last updated:** 2026-11-15, read-only common-frame guard diagnostics
 
 **讀者：** framework-dev、agent。Segment evolution 的公開輸入、路由與數值邊界。
 
@@ -45,6 +45,7 @@ The exports in [__init__.py](__init__.py) fall into these groups:
 | Explicit joint-Fock prototype | `JointFockRequest`, `JointFockDiagnostic`, `JointFockResult`, `joint_fock_spectrum` |
 | Shared RWA Hamiltonian coefficients | `RWACoefficients`, `rwa_coefficients`, `interaction_hamiltonian` |
 | Read-only constant RWA guard query | `single_tone_rwa_diagnostic`, `SingleToneRWADiagnostic`, `RWAGuardMetric`, `RWAUncomputed` |
+| Read-only common-frame guard query | `common_frame_diagnostic`, `CommonFrameDiagnostic` |
 
 `Engine(workers, *, families=None, kernels=None, chunks_per_worker=None,
 routing_cache_bytes=4*1024**2)` owns immutable routing facts.
@@ -137,6 +138,47 @@ The query does not diagnose sampled envelopes, multiple tones or moving flux.
 Carrier phase and initial density do not enter the comparisons. These metrics
 are admission proxies, not a certificate of final full-density accuracy.
 The guard thresholds, dispatch order and other families are unchanged.
+
+### Common-frame guard diagnostics
+
+Call `common_frame_diagnostic(model, ports, frequencies_ghz, amplitudes,
+duration_ns, envelopes=None)` from the package root. Supply the row's fixed-flux
+`SecularModel`, including segment shifts. Each tuple describes two tones in the
+same order. Port names may repeat. Frequencies are finite signed GHz, gains are
+finite signed dimensionless values, and duration is finite nonnegative ns.
+Optional `EnvelopeSpec` values describe the complete envelopes. The default is
+unity. Full-envelope peak and slope bounds apply even when the row slices a
+pulse. Phase, offsets and initial density do not affect these indicators.
+Unknown ports, invalid tuple lengths, nonfinite values and negative duration
+raise `ValueError`.
+
+The frozen `CommonFrameDiagnostic` reports `accepted` and `reason` from the
+numerical guard. It does not predict which family wins dispatch pricing.
+The comparisons do not depend on the Engine's per-segment budget.
+
+| Field | Value and units |
+| --- | --- |
+| `denominator_min_ghz` | Smallest absolute SW denominator, GHz. Must exceed 1e-10. |
+| `coherent` | `RWAGuardMetric` for the dimensionless sum of `second`, `third`, `fourth`, `tail` and `derivative`, required ≤ 0.03. |
+| `bath` | `RWAGuardMetric` for dimensionless oscillatory bath dressing plus secular T·gamma·eta², required ≤ 0.01. |
+| `eta` | Maximum absolute peak-weighted SW generator matrix row sum, dimensionless. |
+| `second`, `third`, `fourth` | Omitted-channel integral indicators at each order, dimensionless. |
+| `tail` | Fifth-and-higher BCH norm tail without oscillatory cancellation, dimensionless. |
+| `derivative` | Envelope-slope omission indicator, dimensionless. |
+
+`reason` is `accepted`, `carrier`, `denominator`, `coherent` or `bath`.
+A zero mean carrier returns `accepted=False` and leaves all numeric fields
+`RWAUncomputed`. A denominator rejection exposes its minimum but leaves the
+later indicators uncomputed. A coherent rejection still exposes bath and all
+components because admission computes them together. Computed values do not
+imply that every comparison participated in the rejection.
+
+The [common-frame owner](kernels/common_frame.py) builds one temporary coefficient
+product and calls the same row-local admission used by the guard once.
+The query does not evolve a density, change inputs or routing history, retain
+preparations, or compute extra indicators. These calibrated proxies do not
+certify full-density accuracy. Guard thresholds and routing behaviour are
+unchanged.
 
 ## Joint-Fock prototype
 
