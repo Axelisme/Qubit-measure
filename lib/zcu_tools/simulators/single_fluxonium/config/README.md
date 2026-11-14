@@ -1,8 +1,10 @@
 # Single-fluxonium YAML values
 
-**Last updated:** 2026-11-01
+**Last updated:** 2026-11-14
 
 **讀者：** framework-dev。查閱 single-fluxonium YAML 的載入入口、欄位單位與驗證規則。
+
+[ADR-0072](../../../../../docs/adr/0072-module-boundaries.md) separates model configuration from shared framework mechanisms and caller-owned board profiles.
 
 `load_single_fluxonium(path)` reads UTF-8 YAML. `parse_single_fluxonium(document)` validates a decoded document. Both return immutable `SingleFluxoniumSettings` and reject invalid values with dotted field paths. Neither creates devices or numerical models.
 

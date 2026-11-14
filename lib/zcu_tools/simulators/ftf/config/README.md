@@ -2,7 +2,9 @@
 
 **讀者：** framework-dev。FTF YAML schema、單位與欄位診斷契約。
 
-**Last updated:** 2026-11-02，共用 v2 板子載入範例
+**Last updated:** 2026-11-14
+
+[ADR-0072](../../../../../docs/adr/0072-module-boundaries.md) 規定模型設定與框架機制的分工，以及呼叫端提供板子 profile 的邊界。
 
 `load_ftf(path)` 一次讀取 UTF-8 YAML，`parse_ftf(document)` 驗證記憶體中的文件。兩者回傳 immutable `FTFSettings`。本模組擁有 schema、單位與欄位路徑診斷，不依賴 `simulate`、`device` 或 `program`，也不建立裝置或決定物理適用性。
 

@@ -1,8 +1,12 @@
 # Physical simulator models
 
-**Last updated:** 2026-11-01
+**Last updated:** 2026-11-14
 
 **Readers:** framework-dev, lab-author, agent. Locate physical model configuration, numerics and environment builders.
+
+[ADR-0072](../../../docs/adr/0072-module-boundaries.md) defines model placement and framework dependencies.
+[ADR-0078](../../../docs/adr/0078-evolution-module-boundary.md) governs evolution integration and preparation lifetimes.
+[ADR-0084](../../../docs/adr/0084-simulation-integer-time-base.md) defines integer request times and replay v2.
 
 `simulators` composes framework mechanisms into three physical environments.
 Each model owns its topology, YAML schema and environment assembly.

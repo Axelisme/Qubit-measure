@@ -1,8 +1,11 @@
 # waveform_format — samples and NPZ codec
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-11-14
 
 **讀者：** framework-dev。波形 samples、NPZ codec 與格式錯誤契約。
+
+[ADR-0072](../../../../docs/adr/0072-module-boundaries.md) 規定 core 的無狀態 codec 邊界。
+[ADR-0063](../../../../docs/adr/0063-persistence-ownership.md) 區分 samples／NPZ codec、resources 的 formula 語意與實體 I/O，以及 program／sim 的播放責任。
 
 此模組只接收值或 bytes。`WaveformSamples`、`WaveformFile`、`validate_samples`、`decode_npz` 與 `encode_npz` 是公開接縫。
 
