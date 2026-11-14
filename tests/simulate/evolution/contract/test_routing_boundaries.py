@@ -38,13 +38,18 @@ def _joint_gate_case(count: int) -> AccuracyCase:
 @pytest.mark.parametrize(
     "count,family", [(19, "multitone_rwa"), (20, "multitone_gate")]
 )
-def test_default_multitone_gate_cost_boundary(count: int, family: str) -> None:
+def test_whitelisted_multitone_gate_cost_boundary(count: int, family: str) -> None:
+    """Keep the whitelisted 19/20 split and unrestricted default density accuracy."""
     case = _joint_gate_case(count)
     reference = converged_reference(case.source, case.batch)
-    with closing(Engine(1)) as engine:
+    with closing(Engine(1, families=("multitone_rwa", "multitone_gate"))) as engine:
         result = engine.evolve(case.source, (case.batch,))
     assert dict(result.paths.segments_by_kernel) == {family: count}
     assert density_error(result.densities, reference.density) <= 2e-3
+
+    with closing(Engine(1)) as engine:
+        default_result = engine.evolve(case.source, (case.batch,))
+    assert density_error(default_result.densities, reference.density) <= 2e-3
 
 
 def test_pinned_multitone_gate_below_cost_break_even() -> None:

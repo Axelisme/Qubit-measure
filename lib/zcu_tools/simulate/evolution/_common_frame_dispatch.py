@@ -12,7 +12,7 @@ from .kernels._rwa_numeric import multitone_retention
 from .kernels._workload_facts import envelope_bounds
 from .kernels.common_frame import (
     coefficient_keys,
-    common_frame_cost_viable,
+    common_frame_steps,
     common_frame_strengths,
 )
 from .kernels.multitone_rwa import MultitoneRWAKernel
@@ -93,6 +93,10 @@ def _prices(
         model = table.model(source, row)
         size = len(model.energies_ghz) / 3
         duration = float(table.duration_ns[row])
+        ports = tuple(int(v) for v in table.tone_port[row, :2])
+        steps = common_frame_steps(
+            model, ports, table.tone_frequency_ghz[row, :2], duration
+        )
         original = 0.001 + 0.000040 * duration
         if fixed:
             original = min(original, 0.003 + 0.000014 * duration)
@@ -102,7 +106,7 @@ def _prices(
         grouped[key.tobytes()].append(
             (
                 0.0035 * size**2,
-                (0.0005 + 0.000028 * duration) * size**1.5,
+                (0.0005 + 0.000224 * steps) * size**1.5,
                 original,
             )
         )
@@ -125,8 +129,9 @@ def populate_common_frame_plan(
     """Publish complete-group prices lazily; prefix/worker subsets only borrow.
 
     Three-level calibration charges a 3.5 ms coefficient build including its
-    handoff, plus .5 ms/row and 28 us/ns apply. Legacy constant prices use the
-    lower direct/RWA estimate; admitted constant RWA uses retained dimension,
+    handoff, plus .5 ms/row and 224 us/first-order CF4 step (28 us/ns at 8 ns).
+    Legacy constant prices use the lower direct/RWA estimate; admitted constant
+    RWA uses retained dimension,
     restored bandwidth and duration instead of dense cubic scaling. Shaped
     rows retain dense integration prices. Small-matrix CF4
     prices scale as M**1.5 and coefficient work as M**2. These are scheduling
@@ -207,11 +212,6 @@ def preferred(
         representative = int(rows[indices[0]])
         model = table.model(context.source, representative)
         ports = tuple(int(v) for v in table.tone_port[representative, :2])
-        if not common_frame_cost_viable(
-            model, ports, table.tone_frequency_ghz[representative, :2]
-        ):
-            selected[indices] = False
-            continue
         strengths = context.work_plan.fact(
             FactKey(("common-frame-cost-strength", price.key), np.ndarray),
             lambda row=representative, model=model, ports=ports: common_frame_strengths(
