@@ -1,6 +1,6 @@
 # tools/
 
-**Last updated:** 2026-11-14, public single-model construction and thirteen-workload conclusions
+**Last updated:** 2026-11-14, no-evolution sample rejection and corrected DOP853 summaries
 
 **讀者：** framework-dev。Repo 品質檢查與重計算執行器的 CLI、輸出與比較機制。
 
@@ -176,10 +176,11 @@ the two categories; deletion conclusions use real inputs only.
 
 ### Recorded scenario summaries
 
-The thirteen recorded tables use clean commit
+The first thirteen scenarios originally ran at clean commit
 `3545520dd8d5e8784be642246605f263654ce72b`, tree
 `c9f484253fae2cc0db5a7d80dc1dd21bbe808d77`. Each table ran once with exclusive
 access, all 17 pinned families, default routing and its fixed observed union.
+The A gain-sweep record now uses the remeasurement described after the table.
 The generated summaries retain over-limit errors and refusal reasons.
 JSON is the numeric source; the paired Markdown lists the same outcomes and provenance.
 These records contain no dominance conclusions. The
@@ -202,6 +203,27 @@ Compare times within one table, not across scenarios or measurement runs.
 | S-long 50/100/200 shaped gates | [Markdown](data/family_pareto/summaries/long_shaped_gate_sequence.md) | [JSON](data/family_pareto/summaries/long_shaped_gate_sequence.json) |
 | F carrier sweep at 0.45 Φ0 | [Markdown](data/family_pareto/summaries/carrier_sweep_bias045.md) | [JSON](data/family_pareto/summaries/carrier_sweep_bias045.json) |
 | N gate sequence at 0.45 Φ0 | [Markdown](data/family_pareto/summaries/gate_sequence_bias045.md) | [JSON](data/family_pareto/summaries/gate_sequence_bias045.json) |
+
+The eight-point random constant-gate table uses clean commit
+`4e64d9abfcaf04f066c8d8f82672eaa2378c8e0f`, tree
+`5add8d093d14ae99097a7d839faad6fda57fa1aa`. It ran once with exclusive
+access and the same 17 pinned families, default routing and its fixed observed
+union. It records `single_tone_rwa`, default routing and the fixed union as
+`over_limit`.
+
+The A gain-sweep and eight-point random shaped-gate tables each ran once again
+with exclusive access at clean commit
+`7743f24a78ced9a632f7984d521f10e840155cba`, tree
+`977db41f067d4b092c0eb6bd0bc44746f6401658`. Both remeasurements use the same
+complete policy coverage and cached references. `dop853` qualifies at
+`4.14019e-6` on A and `2.88700e-5` on random shaped gates. These replace its
+earlier `over_limit` records, which reflected unevolved densities. Other
+policies retain their statuses and final errors.
+
+| Scenario | Generated summary | Numeric source |
+| --- | --- | --- |
+| Random constant-gate sequence | [Markdown](data/family_pareto/summaries/random_gate_sequence.md) | [JSON](data/family_pareto/summaries/random_gate_sequence.json) |
+| Random shaped-gate sequence | [Markdown](data/family_pareto/summaries/random_shaped_gate_sequence.md) | [JSON](data/family_pareto/summaries/random_shaped_gate_sequence.json) |
 
 References remain in the shared local `references/` directory described below.
 Complete matrices, diagnostic reports and journals remain under the corresponding
@@ -420,6 +442,10 @@ segment rows and final-round `attempted` families. For each whitelisted family,
 cell shows the same classification. No later segment group is classified.
 Candidate offer order is not necessarily first-attempt order. Unrestricted
 default routing preserves the group facts without per-family classification.
+A timed result within `1e-9` of its initial density at any point stops the
+command with RuntimeError if the reference moved more than `2e-3` at that
+point. This check runs after the clocks stop. An unchanged reference allows
+an unchanged result.
 Other RuntimeErrors, wrong pinned paths, numerical failures and output failures
 stop the command. Measurement failures leave earlier outputs untouched. Output
 write failures return nonzero and may leave a partial destination file.
@@ -471,6 +497,8 @@ not at the end of that window.
 | N-bias045 `gate_sequence_bias045` | Same as N at 0.45 Φ0 | Gate count 1 to 24, carrier at biased DC E1−E0 | Same as N | Same as N | Compares the same compiled gate prefixes at a second DC bias. |
 | M `simultaneous_drive` | Synchronous F1/F2 drives, terminal readout | Shared gain .01 to .1 | Two Gaussians, 100 ns, sigma 20 ns | 2 | Independent joint-model drive operators under overlapping shaped controls. |
 | S `shaped_gate_sequence` | Prefix of repeated Gaussian X,Y,-X,-Y gates, terminal readout | Gate count 1 to 24 | Gaussian 100 ns gates, sigma 20 ns, gain .1 | 2 to 47 | Reuses N's alphabet and ragged prefixes with A's shaped-gate support and width, separating shape from sequence reuse. |
+| `random_gate_sequence` | Fixed random primitive phase prefixes and recovery phases, terminal readout | 8 fixed samples from 20 seeds; selected depths [0,1,2,4,8,16,32,128], 8/20 seeds | Same constant gates as N | Public support partition, including one zero-gate point | Measures phase-dependent sequence error without replacing N's cyclic alphabet. |
+| `random_shaped_gate_sequence` | Same fixed phases as random_gate_sequence, with Gaussian gates | Same 8 seed/depth points | Same Gaussian gates as S | Public support partition, including one zero-gate point | Separates shaped-gate reuse from the fixed cyclic phase order. |
 | N-long `long_gate_sequence` | N's constant X,Y,-X,-Y prefixes, terminal readout | Gate counts 50, 100, 200 (three points) | Same constant 20 ns gates and gain .1 as N | Public compiled support partition, including alignment gaps and readout lead | Checks whole-sequence accuracy beyond 24 gates without replacing N. |
 | S-long `long_shaped_gate_sequence` | S's Gaussian X,Y,-X,-Y prefixes, terminal readout | Gate counts 50, 100, 200 (three points) | Same Gaussian 100 ns gates, sigma 20 ns and gain .1 as S | Public compiled support partition, including alignment gaps and readout lead | Checks shaped-gate reuse at long sequence lengths without replacing S. |
 | O1 `overlapping_constant_tones` | Fully overlapping constant Pump/Stokes pair, terminal readout | Pump fixed at DC E1−E0; Stokes scans that center ±50 MHz | Both 1000 ns; gains .02/.002 | 2 | A carrier slice of the dual-tone reset scan on one qubit, without a cavity drive. |
@@ -503,10 +531,35 @@ not calibrated pi rotations. The lab's generic `pi_pulse` creation template
 seeds a constant pulse, so it supplies no calibrated Gaussian duration.
 S adds no random gates or extra repetitions to make a family admissible.
 
+The two random-phase scans share
+[`random_gate_sequences.json`](data/family_pareto/random_gate_sequences.json).
+Its phases were generated offline from the user-authored Clifford prefix and
+inverse-recovery tables at commit `46a4291cfdf1b1617bc1fb03499813450b16ed7e`,
+`zcu_lab/v2/twotone/rb/sequence.py`. The file records that source's SHA-256,
+parent seed 42, all 20 spawned seeds, the nine depths and selected indices.
+The parent axis is the seed-major Cartesian product of those 20 seeds and nine
+depths. The retained parent indices are [0,15,23,85,101,147,163,179], a fixed subset
+of the initial `np.linspace(0,179,24,dtype=int)` selection. These eight points use
+eight seeds and depths [0,1,2,4,8,16,32,128], with 243 physical gates in total.
+They keep both axis endpoints and depth128, but omit depth64 to reduce reference
+cost without shrinking the model. The selection favors shorter sequences at
+other depths and does not represent RB seed statistics.
+Each point retains its primitive phase prefix and recovery phases separately.
+Virtual Z changes the copied phase frame; identity gates and recovery padding
+emit no pulse. The selected depth-zero point emits no drive. Its Engine batch
+ends at readout start with zero duration.
+The builders compile those phases through public Pulse/TimelineBuilder components.
+They do not import lab code, run Clifford algebra or read lab YAML.
+Model, carrier, gain, envelope, pulse length, initial density and companions follow
+N or S. These uncalibrated gates need not return the state to identity.
+The inputs measure evolution error on an RB-type phase order, not RB fidelity.
+Changes to the fixed controls require review. New seed/depth sequences require offline generation.
+
 `long_gate_sequence_input()` and `long_shaped_gate_sequence_input()` compile
 N-long and S-long through the same public program and single-fluxonium model
-path as N and S. The default fixed inventory includes both three-point scans
-and both bias045 scans alongside the original nine scenarios, for thirteen total.
+path as N and S. The default fixed inventory includes both three-point scans,
+both bias045 scans and both random-phase scans alongside the original nine
+scenarios, for fifteen total.
 Only the requested gate counts change for the long scans.
 The model and board values retain source commit
 `303074e166d1a563addfab4fd94717d958a7dd56`; DC bias, initial density, carrier,

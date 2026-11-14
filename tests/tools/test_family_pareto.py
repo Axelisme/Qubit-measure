@@ -34,6 +34,7 @@ from tests.simulate.evolution.contract.reference import (
 )
 from tools import family_pareto_report
 from tools.family_pareto import (
+    ACCURACY_LIMIT,
     EngineSession,
     FamilyResult,
     InputResult,
@@ -924,6 +925,61 @@ def test_policy_classifies_only_the_reported_failing_group(
         "single_tone_gate": "guard_or_precondition" if attempted else "not_candidate",
         "t4": "not_candidate",
     }
+
+
+@pytest.mark.parametrize(
+    ("result_motion", "reference_motion", "reject"),
+    [
+        (0.0, 0.25, True),
+        (1e-14, 0.25, True),
+        (0.0, 0.0, False),
+        (0.0, ACCURACY_LIMIT / 2, False),
+        (2e-9, 0.25, False),
+    ],
+)
+def test_policy_rejects_initial_density_only_when_reference_moved(
+    result_motion: float,
+    reference_motion: float,
+    reject: bool,
+) -> None:
+    item = Input("shaped_no_op", lambda: accuracy_case("shaped_complex"), "no-op fake")
+    with closing(item.build().source) as source:
+        initial_density = source.initial_density
+    density = np.repeat(initial_density[None], 2, axis=0)
+    reference_density = density.copy()
+    density[1, 0, 0] += result_motion
+    reference_density[1, 0, 0] += reference_motion
+    reference = ReferenceResult(reference_density, 0)
+
+    @contextmanager
+    def unchanged_session(item: Input, family: str) -> Generator[EngineSession]:
+        yield EngineSession(
+            lambda: EvolutionResult(
+                np.array([0, 1]),
+                density,
+                PathDiagnostics(
+                    segments_by_kernel={family: 1},
+                    duration_ns_by_kernel={family: 1.0},
+                ),
+            ),
+            lambda: None,
+            initial_density=initial_density,
+        )
+
+    if reject:
+        with pytest.raises(
+            RuntimeError,
+            match=(
+                r"(?s)point 1: result moved .*reference moved 0.25"
+                r".*shaped_no_op.*dop853"
+            ),
+        ):
+            measure_policy(item, "dop853", reference, opener=unchanged_session)
+    else:
+        result = measure_policy(item, "dop853", reference, opener=unchanged_session)
+        assert result.status == (
+            "qualified" if reference_motion <= ACCURACY_LIMIT else "over_limit"
+        )
 
 
 @pytest.mark.parametrize(
