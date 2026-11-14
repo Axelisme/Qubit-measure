@@ -222,12 +222,10 @@ T1、Amp Rabi、Len Rabi、Ramsey 與 Echo 沿用普通版 writeback 目標與�
 使用者於 2026-10-29 裁決：「那不做active reset，讓底層支援post-selection，上層使用新實驗組，比如heralding/*」。
 對 Amp Rabi、Len Rabi、Ramsey、Echo 的成員清單，使用者回答：「herald第二階段清單採用建議」。
 對沿用普通版 writeback 並標明 Heralded 的選項，使用者回答：「Herald選A」。
-操作、保存與 writeback 目標見各 guide：[T1](../../zcu_lab/v2/heralding/t1/guide.md)、
-[Amp Rabi](../../zcu_lab/v2/heralding/amp_rabi/guide.md)、[Len Rabi](../../zcu_lab/v2/heralding/len_rabi/guide.md)、
-[Ramsey](../../zcu_lab/v2/heralding/t2ramsey/guide.md)、[Echo](../../zcu_lab/v2/heralding/t2echo/guide.md)。
+操作、保存與 writeback 目標原見各 guide：T1、Amp Rabi、Len Rabi、Ramsey、Echo。
 
-2026-11-09 註：`heralding/*` 實驗組已移除，上一段的成員、writeback 規則與 guide 連結是歷史記錄。
-這些 guide 已隨實驗刪除，連結不再指向現存檔案。
+2026-11-09 註：`heralding/*` 實驗組已移除，上一段的成員、writeback 規則與 guide 名稱是歷史記錄。
+這五份 guide 已於 `188409d1d`（Remove single-qubit heralding experiments and herald_transfer）隨實驗刪除。
 上方第 4 至 6 項中只適用單 qubit heralding 的自校準與 C 指標規則，目前沒有實驗使用。
 
 依賴沿用 [[0072]] 的分層與 `.importlinter` C8、C15、C16。

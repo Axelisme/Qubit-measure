@@ -18,6 +18,12 @@
 
 ## 模擬量測環境
 
+- 2026-11-14 [common_frame 的步長成本歸 dispatch](2026-11-14-common-frame-step-pricing.md)：成本歸屬。移除 kernel 的 2 ns 下限，dispatch 依 first-order 步數比較成本，數值 guard 決定適用域。
+
+- 2026-11-13 [Family 支配的定義：容許範圍內只比耗時](2026-11-13-family-dominance-within-tolerance.md)：取捨原則。合格 family 只比耗時，刪除前仍須同型態長序列證據與使用者點頭。
+
+- 2026-11-14 [Family 量表的單場景重量與摘要](2026-11-14-family-pareto-remeasurement.md)：資料入庫。參考解與完整結果跨 worktree 共用本機儲存，摘要入庫，比對不判跨時段快慢。
+
 - 2026-10-13 [模擬量測環境、低能投影與 FTF preset 的討論](2026-10-13-simulation-environment-ftf-preset.md)：保留環境與 preset 的早期選項，後續方向見[模擬環境草稿](../adr/draft/simulation-environments.md)。
 - 2026-10-15 [離線GPU建庫、分段演化與插值重用](2026-10-15-offline-propagator-library.md)：離線建庫的早期方案已由 [FTF 模擬加速討論](2026-10-16-ftf-simulation-speedup.md) 的 runtime 路線取代。
 - 2026-10-16 [FTF 模擬加速：快速路徑、shot 統計、分段快取與分派決策圖](2026-10-16-ftf-simulation-speedup.md)：每點演化一次後做 shot 統計抽樣，以 runtime 分派和快取取代離線 U 表與 density record。
@@ -33,6 +39,7 @@
 - 2026-10-21 [Joint Fock CKP 性能研究：保守 RK4 加 N+1 cutoff 外推 129 s](2026-10-21-joint-fock-performance-study.md)：兩能階保守版外推 129 s，16 能階成本不可行，改評估動態 [0,2] 與四階診斷。
 - 2026-10-28 [FTF 固定 DC flux ramp 的截斷與成本界限](2026-10-28-ftf-fixed-dc-flux-benchmark.md)：M16 僅為最大成功尺寸，M24／M32 reference 失敗，不能認證大幅 excursion 或 reset fidelity。
 - 2026-10-29 [Module 改 QICK Macro 與模擬 frontend 改讀 macro](2026-10-29-module-to-macro.md)：記錄 Module 改 macro 與具名 timeline 的原型比較及六次後記，現行決策見 [ADR-0083](../adr/0083-program-macros-and-timelines.md)。
+- 2026-11-14 [t6 的 direct 加速策略與職責歸屬](2026-11-14-t6-direct-strategy.md)：加速策略與職責歸屬。`t6` 依完整 acquire 的 key 列數在 channel 與 H0 旋轉座標 direct 積分間選擇，direct 容差跟 budget，定價與選擇歸 dispatch helper。
 
 ## Program 與 timeline 編譯
 

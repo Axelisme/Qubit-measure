@@ -1,8 +1,10 @@
 # Six-fluxonium material
 
-**Last updated:** 2026-11-01
+**Last updated:** 2026-11-14
 
 **Readers:** framework-dev, lab-author, agent. Load six circuit materials with local currents and one shared coil.
+
+[ADR-0072](../../../../../docs/adr/0072-module-boundaries.md) separates model configuration from shared framework mechanisms and caller-owned board profiles.
 
 `parse_six_fluxonium(document)` validates a decoded mapping.
 `load_six_fluxonium(path)` reads UTF-8 YAML relative to the caller's cwd.
