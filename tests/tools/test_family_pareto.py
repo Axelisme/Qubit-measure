@@ -2,10 +2,12 @@
 
 import json
 from collections.abc import Callable, Generator
-from contextlib import contextmanager
-from dataclasses import replace
+from contextlib import closing, contextmanager
+from dataclasses import asdict, replace
+from datetime import datetime, timedelta
 from itertools import count
 from pathlib import Path
+from typing import Literal
 
 import numpy as np
 import pytest
@@ -13,31 +15,41 @@ from zcu_tools.simulate.evolution import (
     EvolutionResult,
     FamilyRouting,
     ModelSource,
+    NoValidKernel,
     PathDiagnostics,
     RoutingHistory,
     TimelineBatch,
 )
 
 from tests.simulate.evolution.contract.accuracy import ALL_FAMILIES
-from tests.simulate.evolution.contract.accuracy_cases import accuracy_case, history_case
+from tests.simulate.evolution.contract.accuracy_cases import (
+    AccuracyCase,
+    accuracy_case,
+    history_case,
+)
 from tests.simulate.evolution.contract.guard_sweep_cost import measure_engine_cost
 from tests.simulate.evolution.contract.reference import (
     ReferenceResult,
     converged_reference,
 )
+from tools import family_pareto_report
 from tools.family_pareto import (
     EngineSession,
     FamilyResult,
+    InputResult,
     ModeResult,
+    Refusal,
     Sample,
     dominance,
     main,
     measure_family,
     measure_policy,
+    render_summary,
     run_table,
+    tested_state,
     timing_equivalents,
 )
-from tools.family_pareto_inputs import Input
+from tools.family_pareto_inputs import Input, canonical_json, freeze_manifest
 
 
 @pytest.mark.parametrize("measure_errors", [True, False])
@@ -243,6 +255,46 @@ def test_comparisons_omit_only_the_explicitly_unmeasured_slow_mode(
     assert result["fast"]["warm_clear_history/wall"] == []
 
 
+def test_dominance_relations_distinguish_equal_and_different_companion_groups() -> None:
+    policies = [
+        FamilyResult(
+            "gate_cache",
+            1e-4,
+            None,
+            [],
+            whitelist=("gate_cache", "multitone_rwa", "t4"),
+        ),
+        FamilyResult(
+            "period_table",
+            1e-5,
+            None,
+            [],
+            whitelist=("period_table", "t4", "multitone_rwa"),
+        ),
+        FamilyResult(
+            "multitone_gate",
+            1e-5,
+            None,
+            [],
+            whitelist=("multitone_gate", "single_tone_gate", "t4"),
+        ),
+    ]
+    row = InputResult(
+        "overlap",
+        "physical",
+        "oracle",
+        0,
+        policies,
+        {"gate_cache": {"first_evolve/wall": ["period_table", "multitone_gate"]}},
+        {},
+    )
+    assert row.dominance_same_companions == {
+        "gate_cache": {
+            "first_evolve/wall": {"period_table": True, "multitone_gate": False}
+        }
+    }
+
+
 def test_dominance_keeps_ten_percent_boundary_modes_clocks_and_exact_errors_separate() -> (
     None
 ):
@@ -268,6 +320,9 @@ def test_dominance_keeps_ten_percent_boundary_modes_clocks_and_exact_errors_sepa
         row("less_accurate", 0.002000000001, 1, 1),
         row("default", 0, 0.1, 0.1),
         FamilyResult("unavailable", None, "refused", []),
+        FamilyResult(
+            "blocked", None, None, [], companion_blocked="idle companion refused"
+        ),
     ]
     result = dominance(rows)
     assert result["target"]["first_evolve/wall"] == ["faster"]
@@ -276,6 +331,7 @@ def test_dominance_keeps_ten_percent_boundary_modes_clocks_and_exact_errors_sepa
     assert result["faster"]["warm_retain_history/cpu"] == ["boundary"]
     assert "default" not in result
     assert "unavailable" not in result
+    assert "blocked" not in result
     equivalent = timing_equivalents(rows)
     assert equivalent["target"]["first_evolve/wall"] == ["boundary"]
     assert equivalent["target"]["first_evolve/cpu"] == ["boundary", "faster"]
@@ -352,36 +408,53 @@ def test_comparisons_reject_unmeasured_available_rows(
         compare([row])
 
 
-def test_dominance_uses_only_errors_from_the_compared_history_mode() -> None:
+def test_dominance_uses_final_qualification_and_excludes_directly_retained() -> None:
     target = FamilyResult(
         "target",
-        0.1,
+        1e-6,
         None,
         [
             ModeResult(mode, [Sample(10, 10, error, {})] * 5, 10, 10)
             for mode, error in (
                 ("first_evolve", 0.001),
-                ("warm_clear_history", 0.01),
-                ("warm_retain_history", 0.01),
+                ("warm_clear_history", 1e-6),
+                ("warm_retain_history", 1e-6),
             )
         ],
     )
     other = FamilyResult(
         "other",
-        0.2,
+        2e-3,
         None,
         [
             ModeResult(mode, [Sample(time, time, error, {})] * 5, time, time)
             for mode, error, time in (
                 ("first_evolve", 0.002, 1),
-                ("warm_clear_history", 0.01, 8.99),
-                ("warm_retain_history", 0.01, 9),
+                ("warm_clear_history", 2e-3, 8.99),
+                ("warm_retain_history", 2e-3, 9),
             )
         ],
     )
-    assert dominance([target, other])["target"] == {
-        "first_evolve/wall": [],
-        "first_evolve/cpu": [],
+    excluded = [
+        replace(other, family=name)
+        for name in (
+            "t4",
+            "adiabatic_map",
+            "flux_dop853",
+            "slow_envelope",
+            "t6",
+            "dop853",
+            "default",
+            "fixed_default_group",
+        )
+    ]
+    # One bad final result disqualifies the entire policy, even if a mode passed.
+    over_limit = replace(other, family="over_limit", error=2e-3 + 1e-12)
+    result = dominance([target, other, over_limit, *excluded])
+    assert set(result) == {"target", "other"}
+    assert result["target"] == {
+        "first_evolve/wall": ["other"],
+        "first_evolve/cpu": ["other"],
         "warm_clear_history/wall": ["other"],
         "warm_clear_history/cpu": ["other"],
         "warm_retain_history/wall": [],
@@ -410,6 +483,38 @@ def test_exclusion_estimator_preserves_policies_modes_and_observed_paths() -> No
             assert all(path.get("t6", 0) == 2 for path in result.paths)
         else:
             assert all(path and "t6" not in path for path in result.paths)
+
+
+@pytest.mark.parametrize(
+    ("error", "reason", "blocked", "expected"),
+    [
+        (2e-3, None, None, "qualified"),
+        (2.0001e-3, None, None, "over_limit"),
+        (None, "guard_or_precondition", None, "guard_or_precondition"),
+        (None, "not_candidate", None, "not_candidate"),
+        (None, "guard_or_precondition", "companion refused", "companion_blocked"),
+    ],
+)
+def test_family_status_owns_accuracy_and_companion_priority(
+    error: float | None,
+    reason: Literal["guard_or_precondition", "not_candidate"] | None,
+    blocked: str | None,
+    expected: str,
+) -> None:
+    refusal = (
+        None
+        if reason is None
+        else Refusal("plateau", (0,), (0,), ("t6",), {"t6": reason})
+    )
+    policy = FamilyResult(
+        "t6",
+        error,
+        None if reason is None else "refused",
+        [],
+        refusal=refusal,
+        companion_blocked=blocked,
+    )
+    assert policy.status == expected
 
 
 @pytest.mark.sim
@@ -454,13 +559,223 @@ def test_cli_freezes_then_measures_and_preserves_output_on_manifest_or_write_fai
         str(summary),
     ]
     assert main(argv, inputs=inputs) == 0
-    assert '"unavailable"' in output.read_text()
+    saved = json.loads(output.read_text())
+    refused = next(
+        policy
+        for policy in saved["inputs"][0]["policies"]
+        if policy["family"] == "dop853"
+    )
+    assert refused["refusal"] == {
+        "domain": "idle",
+        "points": [0, 1],
+        "segments": [0, 1],
+        "attempted": [],
+        "family_reasons": {"dop853": "not_candidate"},
+    }
+    refused_row = next(
+        line
+        for line in summary.read_text().splitlines()
+        if line.startswith("| dop853 |")
+    )
+    assert refused["unavailable"] in refused_row
+    assert "not_candidate" in refused_row
     assert "t4" in summary.read_text()
     complete = output.read_text()
     manifest.write_text("{}")
     assert main(argv, inputs=inputs) == 1
     assert output.read_text() == complete
     assert main(["--freeze-inputs", str(tmp_path)], inputs=inputs) == 1
+
+
+def test_cli_scenario_selects_before_build_and_freezes_in_the_same_command(
+    tmp_path: Path,
+) -> None:
+    def must_not_build() -> AccuracyCase:
+        raise AssertionError("unselected input was built")
+
+    inputs = [
+        Input("unused", must_not_build, "must remain unbuilt"),
+        Input("idle", lambda: accuracy_case("idle_coherence"), "tiny scenario"),
+    ]
+    cache = tmp_path / "cache"
+    prepared = tmp_path / "prepared.json"
+    assert (
+        main(
+            [
+                "--scenario",
+                "idle",
+                "--prepare-references",
+                "--reference-cache",
+                str(cache),
+                "--output",
+                str(prepared),
+            ],
+            inputs=inputs,
+        )
+        == 0
+    )
+    matrix = tmp_path / "matrix.json"
+    report = tmp_path / "report.md"
+    assert (
+        main(
+            [
+                "--scenario",
+                "idle",
+                "--families",
+                "t4",
+                "--reference-cache",
+                str(cache),
+                "--output",
+                str(matrix),
+                "--summary",
+                str(report),
+                "--exclusive",
+                "--partial-output",
+                str(tmp_path / "journal.jsonl"),
+            ],
+            inputs=inputs,
+        )
+        == 0
+    )
+    saved = json.loads(matrix.read_text())
+    assert [item["name"] for item in saved["manifest"]["inputs"]] == ["idle"]
+    assert (
+        saved["manifest_sha256"] == json.loads(prepared.read_text())["manifest_sha256"]
+    )
+    assert saved["measurement"]["reference_cache_only"] is True
+    assert saved["exclusive"] is True
+    assert datetime.fromisoformat(saved["started_at_utc"]).utcoffset() == timedelta(0)
+    assert saved["inputs"][0]["policies"][0]["error"] < 2e-3
+
+
+def test_cli_scenario_cache_miss_stops_without_solving_and_explains_rebuild(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    matrix = tmp_path / "matrix.json"
+    cache = tmp_path / "empty-cache"
+    assert (
+        main(
+            [
+                "--scenario",
+                "idle",
+                "--families",
+                "t4",
+                "--reference-cache",
+                str(cache),
+                "--output",
+                str(matrix),
+                "--summary",
+                str(tmp_path / "report.md"),
+                "--partial-output",
+                str(tmp_path / "journal.jsonl"),
+            ],
+            inputs=[Input("idle", lambda: accuracy_case("idle_coherence"), "tiny")],
+        )
+        == 1
+    )
+    assert not matrix.exists()
+    assert not list(cache.glob("*.npz"))
+    assert "reference cache miss" in caplog.text
+    assert "--prepare-references" in caplog.text
+    assert "native thread" in caplog.text
+
+
+def test_cli_scenario_unknown_name_does_not_build_and_lists_legal_names(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    def must_not_build() -> AccuracyCase:
+        raise AssertionError("unknown selection must not build")
+
+    assert (
+        main(["--scenario", "unknown"], inputs=[Input("idle", must_not_build, "tiny")])
+        == 1
+    )
+    assert "Unknown scenario: unknown. Legal names: idle" in caplog.text
+
+
+@pytest.mark.parametrize(
+    "baseline_kind", ["fingerprint_mismatch", "malformed", "missing"]
+)
+def test_cli_summary_comparison_never_blocks_writing_current_measurement(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], baseline_kind: str
+) -> None:
+    inputs = [Input("idle", lambda: accuracy_case("idle_coherence"), "tiny")]
+    cache = tmp_path / "cache"
+    assert (
+        main(
+            [
+                "--scenario",
+                "idle",
+                "--prepare-references",
+                "--reference-cache",
+                str(cache),
+                "--output",
+                str(tmp_path / "prepared.json"),
+            ],
+            inputs=inputs,
+        )
+        == 0
+    )
+    destination = tmp_path / "current.json"
+    baseline = tmp_path / "baseline.json"
+    if baseline_kind == "fingerprint_mismatch":
+        baseline.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "name": "idle",
+                    "manifest_sha256": "old-manifest",
+                    "physical_sha256": "old-physical",
+                    "oracle_sha256": "old-oracle",
+                    "measured_families": ["t4"],
+                    "policies": {},
+                    "provenance": {
+                        "head": "old",
+                        "tree": "old",
+                        "dirty": False,
+                        "started_at_utc": "2026-11-12T00:00:00+00:00",
+                        "exclusive": True,
+                    },
+                }
+            )
+        )
+    elif baseline_kind == "malformed":
+        baseline.write_text("{}")
+    assert (
+        main(
+            [
+                "--scenario",
+                "idle",
+                "--families",
+                "t4",
+                "--reference-cache",
+                str(cache),
+                "--output",
+                str(tmp_path / "matrix.json"),
+                "--summary",
+                str(tmp_path / "report.md"),
+                "--partial-output",
+                str(tmp_path / "journal.jsonl"),
+                "--summary-output",
+                str(destination),
+                "--compare-summary",
+                str(baseline),
+            ],
+            inputs=inputs,
+        )
+        == 0
+    )
+    saved = json.loads(destination.read_text())
+    assert saved["measured_families"] == ["t4"]
+    assert saved["policies"]["t4"]["status"] == "qualified"
+    assert saved["provenance"]["exclusive"] is False
+    assert saved["provenance"]["dirty"] == tested_state()["dirty"]
+    assert destination.with_suffix(".md").exists()
+    assert (
+        "Not comparable"
+        if baseline_kind == "fingerprint_mismatch"
+        else "Comparison unavailable"
+    ) in capsys.readouterr().out
 
 
 def test_cli_selects_families_without_changing_inputs_or_default_group(
@@ -507,7 +822,7 @@ def test_cli_selects_families_without_changing_inputs_or_default_group(
         row["fixed_default_group"]["whitelist"]
         == full["inputs"][0]["fixed_default_group"]["whitelist"]
     )
-    assert set(row["dominators"]) == {"t6", "floquet_period"}
+    assert set(row["dominators"]) == {"floquet_period"}
     for comparisons in (row["dominators"], row["timing_equivalents"]):
         for family, cells in comparisons.items():
             for peers in cells.values():
@@ -568,8 +883,56 @@ def test_cli_rejects_family_selection_outside_measurement(
     assert output.read_text() == "previous output"
 
 
+@pytest.mark.parametrize("attempted", [(), ("single_tone_gate",)])
+def test_policy_classifies_only_the_reported_failing_group(
+    attempted: tuple[str, ...],
+) -> None:
+    message = (
+        "no valid kernel for segment 3; domain shaped: points [2, 7], segments [3, 5]"
+    )
+    refusal = NoValidKernel(
+        message, domain="shaped", points=(2, 7), segments=(3, 5), attempted=attempted
+    )
+    item = Input(
+        "gates",
+        lambda: accuracy_case("shaped_complex"),
+        "structured refusal",
+        companions=("t4",),
+    )
+
+    @contextmanager
+    def refused_session(item: Input, family: str) -> Generator[EngineSession]:
+        def evolve() -> EvolutionResult:
+            raise refusal
+
+        yield EngineSession(evolve, lambda: None)
+
+    result = measure_policy(
+        item,
+        "single_tone_gate",
+        ReferenceResult(np.eye(2, dtype=np.complex128)[None] / 2, 0),
+        opener=refused_session,
+    )
+    assert result.unavailable == message
+    assert result.error is None and result.modes == []
+    detail = result.refusal
+    assert detail is not None
+    assert detail.domain == "shaped"
+    assert detail.points == (2, 7) and detail.segments == (3, 5)
+    assert detail.attempted == attempted
+    assert detail.family_reasons == {
+        "single_tone_gate": "guard_or_precondition" if attempted else "not_candidate",
+        "t4": "not_candidate",
+    }
+
+
 @pytest.mark.parametrize(
-    "message", ["numerical integration failed", "no valid kernel: malformed refusal"]
+    "message",
+    [
+        "numerical integration failed",
+        "no valid kernel: malformed refusal",
+        "no valid kernel for segment 0; domain shaped: points [0], segments [0]",
+    ],
 )
 def test_policy_does_not_disguise_other_runtime_errors_as_unavailable(
     message: str,
@@ -592,6 +955,40 @@ def test_policy_does_not_disguise_other_runtime_errors_as_unavailable(
             opener=broken_session,
         )
     assert caught.value is error
+
+
+def test_policy_attributes_companion_refusal_without_declaring_target_unavailable() -> (
+    None
+):
+    item = companion_input()
+    refusal = NoValidKernel(
+        "first idle group refused",
+        domain="idle",
+        points=(0,),
+        segments=(1,),
+        attempted=("t4",),
+    )
+
+    @contextmanager
+    def session(item: Input, family: str) -> Generator[EngineSession]:
+        def evolve() -> EvolutionResult:
+            raise refusal
+
+        yield EngineSession(evolve, lambda: None)
+
+    result = measure_policy(
+        item,
+        "single_tone_rwa",
+        ReferenceResult(np.eye(2, dtype=np.complex128)[None] / 2, 0),
+        opener=session,
+    )
+    assert result.unavailable is None
+    assert result.companion_blocked == str(refusal)
+    assert result.expected_route == item.expected_routes["single_tone_rwa"]
+    assert result.attribution == "target_and_companions"
+    assert result.error is None and result.modes == []
+    assert result.refusal is not None
+    assert result.refusal.attempted == ("t4",)
 
 
 def test_policy_does_not_allow_an_unpinned_fallback_to_masquerade_as_success() -> None:
@@ -618,6 +1015,27 @@ def test_policy_does_not_allow_an_unpinned_fallback_to_masquerade_as_success() -
 
     with pytest.raises(RuntimeError, match="pinned t4 did not execute exclusively"):
         measure_policy(item, "t4", ReferenceResult(density, 0), opener=wrong_session)
+
+
+def test_policy_uses_target_companions_instead_of_default_and_freezes_them() -> None:
+    assert companion_input().companions_by_target == {}
+    item = Input(
+        "idle",
+        lambda: accuracy_case("idle_coherence"),
+        "target override excludes the otherwise declared driven companion",
+        companions=("dop853",),
+        companions_by_target={"t4": ()},
+    )
+    with closing((case := item.build()).source):
+        reference = converged_reference(case.source, case.batch)
+    result = measure_policy(item, "t4", reference)
+    assert result.whitelist == ("t4",)
+    assert result.attribution == "target"
+    assert all(
+        set(sample.paths) == {"t4"} for mode in result.modes for sample in mode.samples
+    )
+    manifest = json.loads(canonical_json(freeze_manifest([item])))
+    assert manifest["inputs"][0]["companions_by_target"] == {"t4": []}
 
 
 def companion_input() -> Input:
@@ -676,7 +1094,209 @@ def test_companion_route_checks_counts_lengths_and_preserves_family_cpu(
         sample = result.modes[0].samples[0]
         assert sample.routing == reports
         assert sample.family_cpu_s == pytest.approx({"single_tone_rwa": 0.7, "t4": 0.3})
+        assert sample.family_cpu_shares == pytest.approx(
+            {"single_tone_rwa": 0.7, "t4": 0.3}
+        )
         assert result.expected_route == item.expected_routes["single_tone_rwa"]
+
+
+@pytest.mark.parametrize(
+    ("family", "attribution", "whitelist", "companion_role", "diagnostic_role"),
+    [
+        (
+            "period_table",
+            "target_and_companions",
+            ("period_table", "t4"),
+            "companion",
+            "preparation diagnostic",
+        ),
+        (
+            "dop853",
+            "target_and_companions",
+            ("dop853", "t4"),
+            "companion",
+            "preparation diagnostic",
+        ),
+        (
+            "period_table",
+            "target",
+            ("period_table",),
+            "preparation diagnostic",
+            "preparation diagnostic",
+        ),
+        ("default", "default", None, "group member", "group member"),
+        (
+            "fixed_default_group",
+            "fixed_family_group",
+            ("period_table", "t4"),
+            "group member",
+            "group member",
+        ),
+    ],
+)
+def test_summary_preserves_diagnostic_cpu_without_calling_it_a_companion(
+    family: str,
+    attribution: str,
+    whitelist: tuple[str, ...] | None,
+    companion_role: str,
+    diagnostic_role: str,
+) -> None:
+    target = family if attribution.startswith("target") else "period_table"
+    reports = {
+        target: FamilyRouting(
+            rows=2, duration_ns=10, prepare_cpu_s=0.2, apply_cpu_s=0.3
+        ),
+        "t4": (
+            FamilyRouting(prepare_cpu_s=0.2)
+            if attribution == "target"
+            else FamilyRouting(
+                rows=1, duration_ns=2, prepare_cpu_s=0.1, apply_cpu_s=0.1
+            )
+        ),
+        "single_tone_gate": FamilyRouting(rows=0, duration_ns=0, prepare_cpu_s=0.3),
+    }
+    sample = Sample(
+        9,
+        8,
+        1e-4,
+        {name: report.rows for name, report in reports.items() if report.rows},
+        routing=reports,
+    )
+    policy = FamilyResult(
+        family,
+        1e-4,
+        None,
+        [ModeResult("first_evolve", [sample], 9, 8)],
+        attribution=attribution,
+        whitelist=whitelist,
+    )
+    row = InputResult("synthetic", "physical", "oracle", 0, [policy], {family: {}}, {})
+    if attribution == "fixed_family_group":
+        row = replace(
+            row,
+            policies=[
+                replace(policy, family="default", attribution="default", whitelist=None)
+            ],
+            fixed_default_group=policy,
+        )
+    rendered = render_summary([row], families=(target,))
+    cells = {
+        fields[2]: fields
+        for line in rendered.splitlines()
+        if line.startswith(f"| {family} | first_evolve |")
+        for fields in [[cell.strip() for cell in line.strip("|").split("|")]]
+    }
+    assert cells[target][9] == (
+        "target" if attribution.startswith("target") else "group member"
+    )
+    assert cells["t4"][9] == companion_role
+    diagnostic = cells["single_tone_gate"]
+    assert diagnostic[9] == diagnostic_role
+    assert diagnostic[3:6] == ["1", "0..0", "0..0"]
+    assert [float(value) for value in diagnostic[6:9]] == pytest.approx([0.3, 0, 0.3])
+    assert {name: float(fields[10]) for name, fields in cells.items()} == pytest.approx(
+        {target: 0.5, "t4": 0.2, "single_tone_gate": 0.3}
+    )
+
+
+def test_saved_summary_restores_routing_reports_and_measured_family_selection() -> None:
+    sample = Sample(
+        9,
+        8,
+        1e-4,
+        {"period_table": 2, "t4": 1},
+        routing={
+            "period_table": FamilyRouting(
+                rows=2, duration_ns=10, prepare_cpu_s=0.2, apply_cpu_s=0.3
+            ),
+            "t4": FamilyRouting(
+                rows=1, duration_ns=2, prepare_cpu_s=0.1, apply_cpu_s=0.1
+            ),
+            "single_tone_gate": FamilyRouting(prepare_cpu_s=0.3),
+        },
+    )
+    policy = FamilyResult(
+        "period_table",
+        1e-4,
+        None,
+        [
+            ModeResult(mode, [sample], 9, 8)
+            for mode in ("first_evolve", "warm_clear_history", "warm_retain_history")
+        ],
+        expected_route={"period_table": (2, 10), "t4": (1, 2)},
+        attribution="target_and_companions",
+        whitelist=("period_table", "t4"),
+    )
+    row = InputResult(
+        "synthetic", "physical", "oracle", 0, [policy], {"period_table": {}}, {}
+    )
+    saved = canonical_json(
+        {
+            "inputs": [
+                {
+                    **asdict(row),
+                    "dominance_same_companions": row.dominance_same_companions,
+                }
+            ],
+            "measured_families": ["period_table"],
+        }
+    )
+    rendered = family_pareto_report.render_saved_summary(saved)
+    # Compare dynamic table data, not prose or a fixed Markdown snapshot.
+    direct = render_summary([row], families=("period_table",))
+    assert [line for line in rendered.splitlines() if line.startswith("| ")] == [
+        line for line in direct.splitlines() if line.startswith("| ")
+    ]
+    assert [line for line in rendered.splitlines() if line.startswith("### ")] == [
+        "### period_table",
+        "### synthetic",
+    ]
+
+
+def test_saved_report_recomputes_qualified_dominance() -> None:
+    def policy(name: str, error: float, seconds: float) -> FamilyResult:
+        return FamilyResult(
+            name,
+            error,
+            None,
+            [
+                ModeResult(
+                    mode, [Sample(seconds, seconds, error, {})], seconds, seconds
+                )
+                for mode in (
+                    "first_evolve",
+                    "warm_clear_history",
+                    "warm_retain_history",
+                )
+            ],
+        )
+
+    policies = [
+        policy("period_table", 1e-6, 10),
+        policy("shaped_sambe", 2e-3, 1),
+        policy("gate_cache", 0.01, 0.1),
+        policy("dop853", 1e-8, 0.01),
+    ]
+    stored = {
+        p.family: {
+            f"{mode.mode}/{metric}": []
+            for mode in p.modes
+            for metric in ("wall", "cpu")
+        }
+        for p in policies
+    }
+    row = InputResult("synthetic", "physical", "oracle", 0, policies, stored, {})
+    saved = canonical_json(
+        {"inputs": [asdict(row)], "measured_families": [p.family for p in policies]}
+    )
+    rendered = family_pareto_report.render_saved_summary(saved)
+    cells = [
+        [cell.strip() for cell in line.strip("|").split("|")]
+        for line in rendered.splitlines()
+        if line.startswith("| period_table |")
+    ]
+    assert len(cells) == 6
+    assert {cell[7] for cell in cells} == {"shaped_sambe (same companions)"}
 
 
 def test_late_warmup_failure_stops_measurement_without_partial_success() -> None:

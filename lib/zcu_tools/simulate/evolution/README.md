@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-11-14, dispatch-owned t6 inventory
+**Last updated:** 2026-11-14, thirteen-workload family conclusions
 
 **讀者：** framework-dev、agent。Segment evolution 的公開輸入、路由與數值邊界。
 
@@ -276,6 +276,44 @@ own the command and report format.
 | [`multitone_rwa`](kernels/multitone_rwa.py#L227), simultaneous omission-restored RWA | `two`, distinct ports only; `multiple`, requires a sampled envelope | Fixed flux, B ≥ 1e-3, real envelopes, slope ≤ 0.025/ns, curvature ≤ 0.003/ns² and each carrier magnitude ≥ 50 MHz. Start with 50 MHz edges, restore omitted paths until transfer proxy ≤ 0.0058 and residual phase ≤ 0.0045 rad; retained real dimension ≤ 256. No carrier-spacing, full-operator/carrier ratio or retained-norm phase cap. Apply step ceiling is 16 ns for constants, 4 ns for sampled controls. | [`joint_gate_inventory`](../../../../tests/simulate/evolution/contract/accuracy_cases.py#L245) | PASS |
 | [`floquet`](kernels/floquet.py#L578), constant Stark tone plus probe | `two` | Larger absolute gain selects the Stark slot, with ties choosing the first; that slot requires positive carrier. Frame overlap ≥ 0.5, modal condition ≤ 1e8, maximum real eigenvalue ≤ 1e-10/ns and residual ≤ 1e-9; sampling extent ≤ 128 with at most 4096 phase samples. k=0 omission and convergence each fit B/3. Modal Dyson additionally uses r ≤ 0.1, r2 ≤ 0.05 when probe gain magnitude ≥ 0.1, Dyson norm-duration v ≤ 0.5, transfer indicator v + v²/2 ≤ 0.02 and higher-order remainder exp(v)·v³/6 ≤ B/3; otherwise use periodic channel playback. Retained-sideband admission instead requires convergence ≤ B/40 and bound ≤ 0.95B, retaining edges within 0.1/ns and averaging other harmonics through order 4. This finite-Fourier admission is not a density-error guarantee. | [`two_carriers`](../../../../tests/simulate/evolution/contract/accuracy_cases.py#L187) | PASS |
 | [`dop853`](kernels/dop853.py#L164), full-drive direct density integration | `shaped`, `two`, `multiple`, terminal candidate | No RWA or fast-path admission threshold. Accepts valid rows with finite positive B, including complex sampled envelopes. Stops at active control knots. Local rtol = min(1e-4, 0.03B), atol = min(1e-6, 0.0003B), from the [shared solver](kernels/_dop853.py#L182); these are not global error bounds. | [`shaped_complex`](../../../../tests/simulate/evolution/contract/accuracy_cases.py#L184), [`two_carriers`](../../../../tests/simulate/evolution/contract/accuracy_cases.py#L187), [`joint_gate_inventory`](../../../../tests/simulate/evolution/contract/accuracy_cases.py#L245) | PASS |
+
+### Recorded real-workload evidence
+
+The [thirteen recorded summaries](../../../../tools/README.md#recorded-scenario-summaries)
+retain the final errors, three history modes, wall/process CPU medians, companions
+and measurement provenance. Dominance compares only policies whose maximum final
+whole-sequence density error is at most `2e-3`. Qualified policies are equally
+accurate; another qualified candidate must be more than 10% faster to dominate.
+Default/fixed groups and the six directly retained families do not compete.
+Counts below use equal-companion groups and apply separately to all three modes
+and both clocks. Refusals, blocked companions and FAIL cells are not dominance
+evidence. These observations do not authorize deletion or guard changes.
+
+| Family | Not dominated on recorded workloads | Evidence and limits |
+| --- | --- | --- |
+| `t4` | Directly retained, exclusive idle domain | Pinned policies refuse driven spans; idle companion work is not an isolated target measurement. |
+| `adiabatic_map` | Directly retained, exclusive undriven-flux domain | No continuous-flux workload in these thirteen tables. |
+| `flux_dop853` | Directly retained, exclusive driven-flux domain | No continuous-flux workload in these thirteen tables. |
+| `slow_envelope` | Directly retained, exclusive low-carrier domain | These inputs do not exercise its domain. |
+| `t6` | Directly retained, terminal plateau candidate | [N-long](../../../../tools/data/family_pareto/summaries/long_gate_sequence.md) qualifies; local budget controls are not a final-error guarantee. |
+| `dop853` | Directly retained, terminal shaped/two/multiple candidate | [A](../../../../tools/data/family_pareto/summaries/gain_sweep.md) fails at 3.19414e-2; retained does not mean accurate on every input. |
+| `dyson` | No measured target | Offered plateau groups refuse; no dominance conclusion. |
+| `single_tone_rwa` | 4: L, I, N, N-long | [N-long](../../../../tools/data/family_pareto/summaries/long_gate_sequence.md) qualifies at 1.24701e-3 over 50/100/200 gates. F and both bias045 tables fail. Disposition remains pending, not approved for deletion. |
+| `floquet_period` | 4: F, I, F-bias045, N-bias045 | L, N and N-long are dominated by qualified `single_tone_rwa`; [F-bias045](../../../../tools/data/family_pareto/summaries/carrier_sweep_bias045.md) supplies a qualified alternative to RWA. |
+| `single_tone_gate` | No measured target | Shaped target groups refuse; no dominance conclusion. |
+| `shaped_sambe` | 3: A, S, S-long | [S-long](../../../../tools/data/family_pareto/summaries/long_shaped_gate_sequence.md) qualifies at 8.42157e-5; O2 is companion-blocked, not target-refused. |
+| `gate_cache` | 0 of 3 qualified workloads | A, S and S-long are dominated by `shaped_sambe` and `period_table`. A clear-history is unmeasured. No deletion is authorized. |
+| `period_table` | 1: O2 | [O2](../../../../tools/data/family_pareto/summaries/overlapping_shaped_tones.md) qualifies with `dop853` plus `t4` companions; A, S and S-long are dominated by `shaped_sambe`. |
+| `common_frame` | No measured target | M, O1 and O2 target guards/preconditions refuse; no dominance conclusion. |
+| `multitone_gate` | No measured target | M and O2 target guards/preconditions refuse; no dominance conclusion. |
+| `multitone_rwa` | No qualified target | [O1](../../../../tools/data/family_pareto/summaries/overlapping_constant_tones.md) fails at 2.59000e-3; M and O2 refuse. |
+| `floquet` | No measured target | O1 target guard/precondition refuses; other inputs are not its candidates. |
+
+The long shaped sequence supplies final-error evidence for `shaped_sambe` and
+`period_table` as faster alternatives to `gate_cache`. It does not establish
+coverage of every shaped workload. Cavity-drive, multiple-readout and continuous
+flux workloads remain outside these tables. Family removal still requires the
+relevant workload evidence and user approval.
 
 [t6 dispatch](_t6_dispatch.py) selects direct when
 `N * C_direct < C_channel`; otherwise [t6](kernels/t6.py) builds a channel.
