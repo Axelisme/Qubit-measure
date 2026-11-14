@@ -1,6 +1,6 @@
 # Evolution kernels
 
-**Last updated:** 2026-11-14，t6 dispatch ownership
+**Last updated:** 2026-11-14，sampled multitone pause
 
 **讀者：** framework-dev、agent。查找演化算法的數值 owner，以及 kernel 與 dispatch、scheduler 的接縫。
 
@@ -14,6 +14,8 @@
 `_flux_expansion.py` 擁有連續 flux 的插值與 Hamiltonian 累加。
 `_workload_facts.py` 的 `model_keys` 供 Dyson 與 flux DOP853 共用 flux-level／shift-content 分組。
 `_rwa_numeric.py` 擁有多個 RWA family 共用的 admission、retention、policy 與 Hamiltonian coefficients。
+`multitone_rwa` 的 family guard 暫時只收 distinct-port constant pairs。
+`multitone_gate` 的 family guard 暫停所有 admission，共用 single-tone 數值 owner 不變。
 Fourier 數值、phase graph 與 covariant gate builder 分別留在 `_rwa_fourier.py`、`_rwa_graph.py` 與 `_rwa_gate.py`。
 `dop853.advance_endpoints` 擁有旋轉座標 density 積分，`dop853` 與 `t6` direct
 沿用相同的每段 budget 容差規則。這是局部積分控制，不保證整條序列的最終誤差。
