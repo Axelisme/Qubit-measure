@@ -27,7 +27,7 @@ def first_candidate(
     work scales with budget**(-1/8). No guard, trial integration, cache inspection
     or timing occurs here.
 
-    Coefficients were calibrated on 16-level FTF S9 throughput (16 ns, weak),
+    Floquet coefficients were calibrated on 16-level FTF S9 throughput (16 ns, weak),
     S9 qualitative (514 ns, strong), and 16--512 ns / .02--.5 gain boundary rows
     at .5 and 7.29 GHz. They are estimates outside that calibration, not universal
     timing predictions. Cold distinct-port balanced drives were also calibrated
@@ -69,12 +69,16 @@ def first_candidate(
         stark_frequency = np.abs(frequency[np.arange(len(selected)), stark])
         duration = table.duration_ns[selected]
         tolerance_work = (1e-3 / budget) ** 0.125
+        # 2026-11-14: log least-squares refit against warm DOP853 process CPU,
+        # 13 single-fluxonium points, 8--20 levels, 16--1000 ns, including O1
+        # and absolute carriers. Bandwidth already grows with dimension;
+        # fitted scale power is 0.324, not cubic. Estimate/actual: 0.926--1.095.
         direct = (
-            8e-5
+            3.47e-5
             * duration
             * (width + np.max(np.abs(frequency), axis=1) + 2 * strength)
             * (1 + 4 * np.sqrt(strength) + 4 * strength)
-            * scale**3
+            * scale**0.324
             * tolerance_work
         )
         probe = 1 - stark
