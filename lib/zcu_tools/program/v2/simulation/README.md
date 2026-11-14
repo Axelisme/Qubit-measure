@@ -1,8 +1,13 @@
 # Explicit acquisition environments
 
-**Last updated:** 2026-11-12，QICK product 輸出刻度
+**Last updated:** 2026-11-14
 
 **讀者：** framework-dev。模擬 acquisition 的 request、round 與 raw source 契約。
+
+[ADR-0072](../../../../../docs/adr/0072-module-boundaries.md) separates hardware acquisition, simulation binding and physical environment validation.
+[ADR-0078](../../../../../docs/adr/0078-evolution-module-boundary.md) assigns the RawShots interface to program and raw generation to numeric owners.
+[ADR-0083](../../../../../docs/adr/0083-program-macros-and-timelines.md) defines compiled snapshots and the simulation frontend boundary.
+[ADR-0084](../../../../../docs/adr/0084-simulation-integer-time-base.md) defines the common integer request time base and pacing conversion.
 
 `SimulationAcquireMixin` enters once through `MyProgramV2`. With a
 `SimulationSoc`, it admits a synchronous call, builds one `AcquireRequest`,
