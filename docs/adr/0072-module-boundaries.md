@@ -191,8 +191,11 @@ Fluxdep 所需非均勻背景由自己的私有 renderer 擁有，不依賴 lab 
 1. 能力模組：`datafile`、`device`、`program`、`analysis`、`plotting`、`simulate`、`resources`、`core`、`cfg_model`、`utils`、`progress_bar`、`qick_remote`
 2. 實驗框架：`experiment`
 3. 前端框架：`gui`、`notebook`、`mcp`
-4. 使用者套件：`zcu_lab`
-5. 組合根：GUI 在 `apps/`，agent MCP 在 `mcp_servers/`，使用者薄殼在 `scripts/`。`apps` 與 `mcp_servers` 同層且互不 import，皆可依賴 `zcu_lab` 與 `zcu_tools`。MCP 以注入的 module 字串啟動 GUI，不 import GUI 組合根。使用者在 2026-10-25 選擇「乙」的問題脈絡與決策見 [[0068]]。
+4. 使用者空間：`zcu_lab`、`scripts`。使用者撰寫內容並安排結構。
+5. 組合根：GUI 在 `apps/`，agent MCP 在 `mcp_servers/`。兩者同層且互不 import，可依賴 `zcu_tools`；對 lab 只直接 import `zcu_lab.assembly`，以 `lab_definitions()` 取得宣告。MCP 以注入的 module 字串啟動 GUI，不 import GUI 組合根。使用者在 2026-10-25 選擇「乙」的問題脈絡與決策見 [[0068]]。
+
+`tools/` 是開發工具，對 lab 同樣只直接 import `zcu_lab.assembly`；量表工具 `tools/family_pareto*.py` 不 import lab。
+`migrations/` 轉換 lab 實驗保存的舊資料，可以直接 import 實驗與元件，不受 assembly 入口限制。
 
 `scripts/` 的每個 Python 檔案都是可獨立執行的使用者入口，不放被其他入口依賴的實作套件。
 可重用實作放在 `lib/zcu_tools/`，依上表定位；rclone 外部資料夾傳輸不屬於量測資料檔格式或實驗容器，
@@ -202,7 +205,7 @@ Fluxdep 所需非均勻背景由自己的私有 renderer 擁有，不依賴 lab 
 
 - `zcu_tools` 不 import `zcu_lab`。定義由組合根注入，框架不反向載入使用者實驗。
 - 框架 package 不得 import `simulators`，由 import-linter `framework-no-simulators` forbidden contract 保護。
-- tests 不依賴 `zcu_lab`，不 import、不綁定實驗流程或預設值。
+- tests 不依賴使用者空間 `zcu_lab` 與 `scripts`，不 import、不綁定實驗流程或預設值。`tests/scripts/` 既有的腳本 `main` import 是待移除債務。
 
 框架測試使用最小合成 workflow／adapter，不綁定實驗流程或預設值。Tests 不 import `zcu_lab`，也不增加個別實驗的 durable 測試。使用者於 2026-10-12 裁定：「我給你一個判斷方法，如果我刪除zcu_lab測試會報錯，那測試就是寫錯了。」
 
@@ -213,6 +216,28 @@ Fluxdep 所需非均勻背景由自己的私有 renderer 擁有，不依賴 lab 
 2026-10-30 使用者提出：「關於測試實驗定義的方式，用ui跑e2e有點太重量級了，我認為可以修改規則，透過建立context的方式測試run與analysis」。當時比較 A（只改驗收規則）、B（改規則並提供共用 probe）、C（再加 `zcu_lab` 自有的 durable 測試）。使用者回答：「B」。採用共用 probe，讓各實驗只需提供實驗與 cfg，不再各自組裝離線驗收流程；durable lab 測試不在此決定範圍。
 
 2026-11-01 使用者「run跟analysis本來就該分開測試，不要有e2e的測試」，stage-tests（main 2f5e933c3）實作。
+
+### 使用者空間的依賴原則
+
+GUI、MCP 組合根與開發工具需要 lab 宣告時，只直接 import `zcu_lab.assembly`。
+例如 `apps/measure.py` 呼叫 `lab_definitions()` 取得宣告，不直接 import `zcu_lab.v2.twotone.freq.core`。
+這讓 lab 可以在 assembly 後方調整實驗、元件、recipe 與 workflow 的佈局。
+`migrations/` 是例外，因為它必須認得舊資料所屬實驗的格式。若遷移工具改成供不同 lab 共用的框架，改用 assembly 消費宣告，不保留此例外。
+這條規則不保證刪除 lab 後現有 lab 組合根仍能啟動，也不引入位置字串或 Python entry point 註冊。
+
+2026-11-14，使用者說：「其实应该是 B， 因为我对这个 repo 的期望是，我把 [zcu_lab] 删掉，也可以正常运作。而 [zcu_lab] 是使用者自由的、控制的、写的、安排结构的模块。」
+接著澄清：「我的意思是 ，Script 的定位与 [zcu_lab] 比较像，而 Tool 的定位是用于开发。我不确定该不该让它依赖 Lab。MCP 需要发现、实验，而也确实是需要一种正规的方法来宣告你有哪些实验。我不确定要怎么好的结合两者，让 MCP 尽量不依赖[zcu_lab]。」
+使用者對註冊機制的取捨是：「但是呢，我又不想把注册逻辑搞得太复杂，导致实作行数太多。有简单的方法吗？还是我就放弃？我就是让它可以依赖，但是只依赖局部的部分的档案。」
+使用者對 assembly 入口限制與 migrations 例外回答：「好，甲」。引文中的 `[zcu_lab]` 代替語音輸入的 lab 名稱。
+
+量表工具的場景是挑選過、固定的一組，核心 pulse 序列與模型參數放在工具內，不 import lab，也不讀可變的 lab YAML。
+例如 `tools/family_pareto_scenarios.py` 用公開 program 元件組序列，固定模型值由 `tools/family_pareto_settings.py` 持有。
+此處接受與 lab 重複，讓讀工具的人可以直接看懂場景；lab 序列改動不會自動更新量表。
+這個取捨只適用於固定的 optimizer benchmark。需要真實 lab 宣告的品質檢查仍經 assembly 取得宣告，不複製一份。
+
+2026-11-12，使用者說：「我其實不樂意看到tool依賴zcu_lab，我認為你要測試，那就只複製最核心的pulse序列來模擬啊，又不需要整個experiment」。
+對工具內建場景的方案，使用者回答：「你這個工具的目的是對優化器做benchmark吧？那場景自然是挑選過的」，並補充：「而且這樣tool也能提高可讀性，我寧可重複也要提高可讀性」。
+兩次裁決的比較與先例立場見 [Lab 依賴邊界討論](../discussions/2026-11-14-lab-dependency-boundary.md)。
 
 ### Lab 定義與組合根
 
@@ -235,6 +260,8 @@ Framework 的四個入口各自在自己的 package 宣告最小 Protocol，只�
 
 上述 owner 路徑都以 `zcu_tools` 為前綴。`LabDefinitions` 與 framework 測試的合成 lab 物件以結構符合這些 Protocol。
 C16 禁止 framework import `zcu_lab`，所以入口不依賴具體 dataclass。
+`lab-assembly-only` forbidden contract 限制 `apps`、`mcp_servers` 與 `tools` 不直接 import assembly 以外的 lab 子模組。
+`allow_indirect_imports = True` 保留經 assembly 間接載入 lab 的路徑。新增 lab 直接子模組時，同步加入 contract 的 `forbidden_modules`。
 C13 限制 MCP 只使用 GUI remote 契約，不能為共用 lab 型別新增 GUI import。
 若把九欄 dataclass 放在 framework 的跨 GUI／MCP package，就會把 measure catalog、workflow 與 fluxdep policy 一起帶給不使用它們的入口。
 因此具體描述留在 lab，消費契約留在各入口，不設共用的 framework lab package。
@@ -442,7 +469,9 @@ Device API 的局部參數與錯誤細節留在 module 文件與 docstring。
 
 `composition-roots-above-framework-and-lab` 的 `layers` contract 約束 `apps : mcp_servers` > `zcu_lab` > `zcu_tools`。Lab 與 framework 不反向 import 任一組合根，不新增 `ignore_imports`。
 
-`zcu_tools`、`zcu_lab`、離線 `migrations` 與 repo 的 `apps`、`mcp_servers`、`scripts` 都是 import-linter 的 root packages。只為離線遷移存在的程式與對照表放在 `migrations/`，`zcu_lab` 與 `zcu_tools` 不 import 它，遷移完成後可整個刪除。使用者於 2026-10-14 裁定：「我自己會預期，我遷移完後刪除migrations就可以了」。三個 GUI 與 measure MCP 組合根各注入一個 lab 描述，兩個 analysis MCP 只注入 GUI module 名稱；framework 不反向載入使用者定義。Tests 的 lab 獨立性由 review 檢查 import，必要時以 grep `zcu_lab` 輔助，不新增 tests import contract。
+`lab-assembly-only` 的 `forbidden` contract 列出 assembly 以外的 lab 直接子模組，保護組合根與開發工具的直接 import 邊界；`migrations` 與使用者空間 `scripts` 不在 source_modules 中。
+
+`zcu_tools`、`zcu_lab`、離線 `migrations` 與 repo 的 `apps`、`mcp_servers`、`scripts`、`tools` 都是 import-linter 的 root packages。只為離線遷移存在的程式與對照表放在 `migrations/`，`zcu_lab` 與 `zcu_tools` 不 import 它，遷移完成後可整個刪除。使用者於 2026-10-14 裁定：「我自己會預期，我遷移完後刪除migrations就可以了」。三個 GUI 與 measure MCP 組合根各注入一個 lab 描述，兩個 analysis MCP 只注入 GUI module 名稱；framework 不反向載入使用者定義。Tests 的 lab 獨立性由 review 檢查 import，必要時以 grep `zcu_lab` 輔助，不新增 tests import contract。
 
 債務以確切的 module 對逐條列在 `ignore_imports`，不用萬用字元，每組註解寫明「債務，由誰移除」。`ignore_imports` 只減不增。
 
