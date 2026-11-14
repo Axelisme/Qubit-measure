@@ -18,6 +18,8 @@
 
 ## 模擬量測環境
 
+- 2026-11-14 [common_frame 的步長成本歸 dispatch](2026-11-14-common-frame-step-pricing.md)：成本歸屬。移除 kernel 的 2 ns 下限，dispatch 依 first-order 步數比較成本，數值 guard 決定適用域。
+
 - 2026-11-13 [Family 支配的定義：容許範圍內只比耗時](2026-11-13-family-dominance-within-tolerance.md)：取捨原則。合格 family 只比耗時，刪除前仍須同型態長序列證據與使用者點頭。
 
 - 2026-11-14 [Family 量表的單場景重量與摘要](2026-11-14-family-pareto-remeasurement.md)：資料入庫。參考解與完整結果跨 worktree 共用本機儲存，摘要入庫，比對不判跨時段快慢。
