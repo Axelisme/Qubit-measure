@@ -15,6 +15,7 @@ root_packages =
     mcp_servers
     apps
     scripts
+    tools
 include_external_packages = True
 contract_types =
     experiment-imports: tools.check_experiment_imports.ExperimentImportsContract
@@ -64,6 +65,29 @@ layers =
     apps : mcp_servers
     zcu_lab
     zcu_tools
+
+# ADR-0072: roots and development tools import lab only through assembly.
+# Indirect imports through assembly are expected; list all other direct children.
+[importlinter:contract:lab-assembly-only]
+name = Composition roots and development tools reach lab only through assembly
+type = forbidden
+source_modules =
+    apps
+    mcp_servers
+    tools
+forbidden_modules =
+    zcu_lab.component_flux
+    zcu_lab.components
+    zcu_lab.definitions
+    zcu_lab.fluxdep_export
+    zcu_lab.kickstart
+    zcu_lab.recipes
+    zcu_lab.simulation_envs
+    zcu_lab.templates
+    zcu_lab.tutorial
+    zcu_lab.v2
+    zcu_lab.workflows
+allow_indirect_imports = True
 
 # ADR-0080: datafile can be imported without any other framework package.
 [importlinter:contract:datafile-standalone]

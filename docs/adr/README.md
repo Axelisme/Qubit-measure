@@ -12,6 +12,8 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 ## Module Boundaries
 
+原則：組合根與開發工具只經 assembly 依賴使用者 lab，固定量表場景則不依賴 lab，見 [ADR-0072](0072-module-boundaries.md#使用者空間的依賴原則)。
+
 - [0072 — 模組定位與依賴邊界](0072-module-boundaries.md)：Package 定位、依賴方向、各實驗獨立取數與 analysis 小摘要契約，依賴方向由 `.importlinter` 檢查。
 
 ## Concurrency / Lifecycle
