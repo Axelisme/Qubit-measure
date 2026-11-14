@@ -202,10 +202,34 @@ def test_deferred_floquet_retains_shared_admissions_alongside_direct_plans(worke
     assert sum(len(rows) for _, rows, _ in dop853.calls) == n
 
 
+@pytest.mark.parametrize(
+    ("levels", "duration", "expected"),
+    [(8, 512, "floquet"), (16, 5000, "dop853")],
+)
+def test_dimension_calibrated_two_tone_cost(levels, duration, expected):
+    # Small models still pay ODE work; larger models must not pay a cubic
+    # dimension charge on top of their already dimension-dependent bandwidth.
+    model = synthetic_model(levels)
+    attempts = []
+    kernels = tuple(GuardRecorder(name, attempts) for name in ("floquet", "dop853"))
+    with (
+        closing(
+            ModelSource(np.eye(levels, dtype=complex) / levels, lambda level: model)
+        ) as src,
+        closing(Engine(1, kernels=kernels)) as engine,
+    ):
+        result = engine.evolve(src, (two_tone_batch(duration, 0.02, 0),))
+    assert result.paths.segments_by_kernel == {expected: 1}
+    assert attempts == [(expected, float(duration))]
+    np.testing.assert_array_equal(result.densities[0], src.initial_density)
+
+
 def test_short_weak_direct_and_long_strong_floquet():
-    result, attempts = route((two_tone_batch(16, 0.02, 0), two_tone_batch(512, 0.5, 1)))
+    result, attempts = route(
+        (two_tone_batch(16, 0.02, 0), two_tone_batch(1024, 0.5, 1))
+    )
     assert result.paths.segments_by_kernel == {"dop853": 1, "floquet": 1}
-    assert sorted(attempts) == [("dop853", 16.0), ("floquet", 512.0)]
+    assert sorted(attempts) == [("dop853", 16.0), ("floquet", 1024.0)]
 
 
 def test_cheaper_guard_rejection_tries_other_two_tone_family():
@@ -213,8 +237,8 @@ def test_cheaper_guard_rejection_tries_other_two_tone_family():
     result, attempts = route((two_tone_batch(16, 0.02, 0),), reject="dop853")
     assert attempts == [("dop853", 16.0), ("floquet", 16.0)]
     assert result.paths.segments_by_kernel == {"floquet": 1}
-    result, attempts = route((two_tone_batch(512, 0.5, 0),), reject="floquet")
-    assert attempts == [("floquet", 512.0), ("dop853", 512.0)]
+    result, attempts = route((two_tone_batch(1024, 0.5, 0),), reject="floquet")
+    assert attempts == [("floquet", 1024.0), ("dop853", 1024.0)]
     assert result.paths.segments_by_kernel == {"dop853": 1}
 
 
