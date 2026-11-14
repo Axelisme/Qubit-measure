@@ -42,7 +42,7 @@ _PLATEAU = ("dyson", "single_tone_rwa", "floquet_period", "t6")
 _SHAPED = ("single_tone_gate", "shaped_sambe", "gate_cache", "period_table", "dop853")
 
 
-def _single_input(
+def single_model_input(
     name: str,
     emit: Callable[[TimelineBuilder, float], None],
     manifest: dict[str, object],
@@ -50,7 +50,31 @@ def _single_input(
     *,
     dc_bias_phi0: float | None = None,
 ) -> Input:
-    """Compile at fixed DC; an optional offset override leaves the live source unchanged."""
+    """Compile a caller's pulse sequence on the fixed 21-level single model.
+
+    name identifies the returned real Input and each built AccuracyCase.
+    emit(builder, center) runs once with a public TimelineBuilder and the DC
+    E1-E0 carrier center in MHz. Use public Pulse/TimelineBuilder operations
+    to emit the complete sequence or scan before terminal readout; the charge
+    drive uses generator 1. Pulse frequencies are MHz and durations are us.
+    This builder then appends generator 0/ADC 0 readout and compiles the input.
+    dc_bias_phi0 optionally replaces the fixed DC offset (.5 Phi0), without
+    changing the live DC source value. Drift is disabled and time_scale is zero.
+
+    manifest supplies caller provenance: pulse_sequence is required prose;
+    other JSON-compatible entries can describe axes, gains, carriers and units.
+    Generated model/settings, calibration, timing and route facts take precedence
+    over caller entries with the same keys. families is a tuple of evolution
+    family names, e.g. ("dyson", "single_tone_rwa"), to declare pinned targets
+    for driven spans, with t4 as the idle companion; it does not bypass guards.
+
+    Construction closes the environment, device and temporary source resources
+    before returning. Each Input.build() creates an AccuracyCase with a fresh
+    detached numeric source; the caller must close that case's source.
+    Callback, model, compilation and cleanup errors propagate. A missing
+    pulse_sequence raises KeyError; provenance serialization errors propagate
+    when the manifest is frozen.
+    """
     settings = parse_single_fluxonium(SINGLE_MODEL)
     if dc_bias_phi0 is not None:
         settings = settings.model_copy(
@@ -247,7 +271,7 @@ def _carrier_sweep_input(name: str, *, dc_bias_phi0: float | None = None) -> Inp
             )
         )
 
-    return _single_input(
+    return single_model_input(
         name,
         emit,
         {
@@ -287,7 +311,7 @@ def gain_sweep_input() -> Input:
             )
         )
 
-    return _single_input(
+    return single_model_input(
         "gain_sweep",
         emit,
         {
@@ -325,7 +349,7 @@ def length_sweep_input() -> Input:
             )
         )
 
-    return _single_input(
+    return single_model_input(
         "length_sweep",
         emit,
         {
@@ -374,7 +398,7 @@ def idle_sweep_input() -> Input:
         builder.timeline_inc(idle)
         builder.emit(second, timeline="default")
 
-    return _single_input(
+    return single_model_input(
         "idle_sweep",
         emit,
         {
@@ -433,7 +457,7 @@ def _gate_sequence_input(name: str, *, dc_bias_phi0: float | None = None) -> Inp
                     for index in range(point + 1):
                         builder.emit(gates[index % len(gates)])
 
-    return _single_input(
+    return single_model_input(
         name,
         emit,
         {
@@ -484,7 +508,7 @@ def long_gate_sequence_input() -> Input:
                     for index in range(count):
                         builder.emit(gates[index % len(gates)])
 
-    return _single_input(
+    return single_model_input(
         "long_gate_sequence",
         emit,
         {
@@ -533,7 +557,7 @@ def shaped_gate_sequence_input() -> Input:
                     for index in range(point + 1):
                         builder.emit(gates[index % len(gates)])
 
-    return _single_input(
+    return single_model_input(
         "shaped_gate_sequence",
         emit,
         {
@@ -628,7 +652,7 @@ def _random_gate_sequence_input(
                     for phase in phases:
                         builder.emit(gates[phase])
 
-    return _single_input(
+    return single_model_input(
         name,
         emit,
         {
@@ -677,7 +701,7 @@ def long_shaped_gate_sequence_input() -> Input:
                     for index in range(count):
                         builder.emit(gates[index % len(gates)])
 
-    return _single_input(
+    return single_model_input(
         "long_shaped_gate_sequence",
         emit,
         {

@@ -6,6 +6,9 @@ from contextlib import ExitStack, closing
 import numpy as np
 import pytest
 from zcu_tools.program import build_soccfg
+from zcu_tools.program.v2 import Pulse, TimelineBuilder
+from zcu_tools.program.v2.modules.pulse import PulseCfg
+from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.simulate.evolution import SecularModel
 from zcu_tools.simulators.single_fluxonium.config import parse_single_fluxonium
 from zcu_tools.simulators.single_fluxonium.environment import (
@@ -14,7 +17,7 @@ from zcu_tools.simulators.single_fluxonium.environment import (
 )
 
 from tools.family_pareto_inputs import canonical_json, freeze_manifest
-from tools.family_pareto_scenarios import make_real_inputs
+from tools.family_pareto_scenarios import make_real_inputs, single_model_input
 from tools.family_pareto_settings import BOARD_PROFILE, SINGLE_MODEL
 
 
@@ -222,6 +225,47 @@ def test_fixed_scenarios_freeze_byte_identically_from_fresh_construction() -> No
     first = canonical_json(freeze_manifest(first_inputs)) + "\n"
     second = canonical_json(freeze_manifest(make_real_inputs())) + "\n"
     assert first.encode() == second.encode()
+
+
+def test_single_model_input_compiles_callback_with_fresh_sources() -> None:
+    def emit(builder: TimelineBuilder, center: float) -> None:
+        builder.emit(
+            Pulse(
+                "drive",
+                PulseCfg(
+                    ch=1,
+                    nqz=1,
+                    freq=center,
+                    gain=0.1,
+                    waveform=ConstWaveformCfg(length=0.1),
+                ),
+            )
+        )
+
+    item = single_model_input(
+        "custom_single",
+        emit,
+        {"pulse_sequence": "constant drive, then terminal readout"},
+        ("dyson",),
+    )
+    with (
+        closing((first := item.build()).source),
+        closing((second := item.build()).source),
+    ):
+        assert first.source is not second.source
+        assert first.name == second.name == "custom_single"
+        assert first.families == second.families == ("dyson",)
+        assert len(first.batch.points) == 1
+        assert len(first.batch.tracks) == 1
+        model = first.source.model((0,))
+        assert model.energies_ghz.shape == (21,)
+        np.testing.assert_allclose(
+            first.batch.tracks[0].frequency_ghz,
+            model.energies_ghz[1] - model.energies_ghz[0],
+        )
+        np.testing.assert_allclose(
+            first.source.initial_density, second.source.initial_density
+        )
 
 
 def test_gain_scan_compiles_distinct_amplitudes_with_fixed_carrier() -> None:

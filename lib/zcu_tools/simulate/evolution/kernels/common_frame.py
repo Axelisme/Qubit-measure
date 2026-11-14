@@ -29,14 +29,13 @@ from ._secular import secular_operators
 
 # These are calibrated indicators, not rigorous trace-distance certificates.
 _COHERENT_LIMIT, _BATH_LIMIT = 0.03, 0.01
-_MAX_STEP_NS, _PHASE_CYCLES, _MIN_STEP_NS = 8.0, 0.08, 2.0
+_MAX_STEP_NS, _PHASE_CYCLES = 8.0, 0.08
 COMMON_FRAME_POLICY = (
     "common-frame-sw2-v1",
     _COHERENT_LIMIT,
     _BATH_LIMIT,
     _MAX_STEP_NS,
     _PHASE_CYCLES,
-    _MIN_STEP_NS,
 )
 
 
@@ -67,17 +66,15 @@ def coefficient_keys(
 
 @dataclass(frozen=True)
 class CommonFrame:
-    """Immutable model-only coefficients, including cost-rejected builds.
+    """Immutable model-only coefficients for numerical admission and playback.
 
     model: full secular model, including basis, rates and drive quadratures.
     ports: ordered model drive indices (one or two, duplicates permitted).
     frequencies_ghz: matching signed carriers in cycles/ns, read-only copy.
-    step_ns: CF4 step ceiling from active first/SW2 frequencies; a ceiling below
-        2 ns rejects on work, not on an accuracy/carrier-spacing veto.
-    cost_bypass: True if a lower bound already exceeded the work policy or the
-        active SW2 channels did. No remainder tensors are built in either case.
-    channels: opaque native first/SW2 Hamiltonian and endpoint generators, or
-        None after an early cost exit. Frequencies use angular ns**-1 there.
+    step_ns: CF4 step ceiling from active first/SW2 frequencies, capped at 8 ns
+        and 0.08 cycles of the fastest retained channel, with no cost cutoff.
+    channels: opaque native first/SW2 Hamiltonian and endpoint generators.
+        Frequencies use angular ns**-1 there.
     remainder: (monomials,M,M) absolute omitted-channel GHz coefficients.
     monomials: (terms,2*tones) exponents of signed tone gains; degrees: their
         total orders (2, 3 or 4). Grouping sums absolute ordered coefficients.
@@ -91,8 +88,7 @@ class CommonFrame:
     ports: tuple[int, ...]
     frequencies_ghz: NDArray[np.float64]
     step_ns: float
-    cost_bypass: bool
-    channels: Channels | None
+    channels: Channels
     remainder: NDArray[np.float64]
     monomials: NDArray[np.int64]
     degrees: NDArray[np.int64]
@@ -110,10 +106,7 @@ class CommonFrame:
             self.slow_norms,
             self.fast_norms,
         ]
-        if self.channels is not None:
-            arrays.extend(
-                value for value in self.channels if isinstance(value, np.ndarray)
-            )
+        arrays.extend(value for value in self.channels if isinstance(value, np.ndarray))
         return sum(array.nbytes for array in arrays)
 
 
@@ -121,8 +114,8 @@ class CommonFrame:
 class CommonFrameAdmission:
     """Current row's detuning-aware indicators, not mathematical certificates.
 
-    accepted: coherent sum <= .03, bath <= .01, no denominator/work rejection.
-    reason: 'accepted', 'cost', 'denominator', 'coherent', or 'bath'. Dispatch
+    accepted: coherent sum <= .03, bath <= .01, no denominator rejection.
+    reason: 'accepted', 'denominator', 'coherent', or 'bath'. Dispatch
         must use an existing algorithm for every rejected row.
     step_ns, steps: CF4 ceiling in ns and ceil(duration/step), at least one.
     eta: maximum absolute matrix row sum of peak-weighted SW generators.
@@ -130,7 +123,7 @@ class CommonFrameAdmission:
     tail: fifth-and-higher BCH norm tail, without oscillatory cancellation.
     derivative: envelope-derivative omission indicator.
     bath: first-order oscillatory bath dressing plus secular T*gamma*eta**2.
-    Cost/denominator exits have zero indicators, which do not imply accuracy.
+    Denominator exits have zero indicators, which do not imply accuracy.
     Slow-propagator detuning changes and mixed bath/envelope higher orders are
     not rigorously bounded. These are calibrated admission data only.
     """
@@ -194,30 +187,31 @@ def zero_mean_carrier(frequencies_ghz: NDArray[np.float64]) -> bool:
     return abs(float(np.mean(frequencies_ghz))) < 1e-10
 
 
-def common_frame_cost_viable(
-    model: SecularModel, ports: tuple[int, ...], frequencies_ghz: NDArray[np.float64]
-) -> bool:
-    """Whether first-order playback can meet the unchanged build work policy.
+def common_frame_steps(
+    model: SecularModel,
+    ports: tuple[int, ...],
+    frequencies_ghz: NDArray[np.float64],
+    duration_ns: float,
+) -> float:
+    """Estimate first-order playback steps for dispatch pricing, not admission.
 
-    Inputs are the ordered ports and signed carriers used by build_common_frame.
-    False proves its first-order cost exit without building SW2/remainders or
-    evaluating numerical admission. True says nothing about later admission.
-    This is an active-channel work bound, not a carrier-spacing accuracy veto.
+    Inputs match build_common_frame, plus the positive row duration in ns.
+    Return max(1, duration/step) without rounding or building SW2/remainders.
+    A zero mean carrier returns inf because no common frame can be built.
+    Numerical guards alone determine the valid carrier-spacing range.
     """
     if zero_mean_carrier(frequencies_ghz):
-        return False
+        return np.inf
     full = np.array(
         [
             (model.drives[p].in_phase_ghz - 1j * model.drives[p].quadrature_ghz) / 2
             for p in ports
         ]
     )
-    return (
-        _first_order_step(
-            model.energies_ghz - model.energies_ghz[0], full, frequencies_ghz
-        )
-        >= _MIN_STEP_NS
+    step = _first_order_step(
+        model.energies_ghz - model.energies_ghz[0], full, frequencies_ghz
     )
+    return max(1.0, duration_ns / step)
 
 
 def common_frame_strengths(
@@ -257,8 +251,8 @@ def build_common_frame(
     ordered second-order SW beat/two-photon channels. Endpoint SW dressing
     restores the omitted fast channels to first order.
 
-    A first-order CF4 cost lower bound precedes SW construction. Active SW2
-    channels refine it before remainder construction. Equal signed monomials
+    Active SW2 channels set the CF4 step ceiling without a cost cutoff.
+    Denominator failure skips remainder construction. Equal signed monomials
     share packed absolute remainder matrices, instead of dense q**4 tensors.
     Arrays are read-only; independent calls and worker threads share no state.
     """
@@ -282,34 +276,31 @@ def build_common_frame(
         ]
     )
     labels = np.rint(energies / float(frequencies.mean()))
-    step = _first_order_step(energies, full, frequencies)
-    channels = None
+    channels = coefficients(energies, full, frequencies)
+    active_channels = np.any(np.abs(channels.operators) > 1e-16, axis=(1, 2))
+    slow_frequency = float(
+        np.max(np.abs(channels.omega[active_channels]), initial=0) / (2 * np.pi)
+    )
+    step = _step(slow_frequency)
     monomials = np.empty((0, 2 * len(ports)), dtype=np.int64)
     degrees = np.empty(0, dtype=np.int64)
     remainder = np.empty((0, len(energies), len(energies)))
     slow_norms, fast_norms = np.empty(0), np.empty(0)
-    if step >= _MIN_STEP_NS:
-        channels = coefficients(energies, full, frequencies)
-        active_channels = np.any(np.abs(channels.operators) > 1e-16, axis=(1, 2))
-        slow_frequency = float(
-            np.max(np.abs(channels.omega[active_channels]), initial=0) / (2 * np.pi)
+    if channels.denominator_min > 1e-10:
+        monomials, degrees, groups, powers = _monomial_inventory(2 * len(ports))
+        remainder = remainder_channels(channels, labels, groups, powers)
+        count = 2 * len(ports)
+        slow_norms = np.array(
+            [np.linalg.norm(channels.operators[a], 2) for a in range(count)],
+            dtype=np.float64,
         )
-        step = _step(slow_frequency)
-        if step >= _MIN_STEP_NS and channels.denominator_min > 1e-10:
-            monomials, degrees, groups, powers = _monomial_inventory(2 * len(ports))
-            remainder = remainder_channels(channels, labels, groups, powers)
-            count = 2 * len(ports)
-            slow_norms = np.array(
-                [np.linalg.norm(channels.operators[a], 2) for a in range(count)],
-                dtype=np.float64,
-            )
-            fast_norms = np.array(
-                [
-                    np.linalg.norm(channels.signed[a] - channels.operators[a], 2)
-                    for a in range(count)
-                ],
-                dtype=np.float64,
-            )
+        fast_norms = np.array(
+            [
+                np.linalg.norm(channels.signed[a] - channels.operators[a], 2)
+                for a in range(count)
+            ],
+            dtype=np.float64,
+        )
     arrays: list[np.ndarray] = [
         frequencies,
         remainder,
@@ -318,8 +309,7 @@ def build_common_frame(
         slow_norms,
         fast_norms,
     ]
-    if channels is not None:
-        arrays.extend(value for value in channels if isinstance(value, np.ndarray))
+    arrays.extend(value for value in channels if isinstance(value, np.ndarray))
     for array in arrays:
         array.setflags(write=False)
     return CommonFrame(
@@ -327,7 +317,6 @@ def build_common_frame(
         ports,
         frequencies,
         step,
-        step < _MIN_STEP_NS,
         channels,
         remainder,
         monomials,
@@ -390,10 +379,8 @@ def _admission(
     frame: CommonFrame, duration: float, peaks, slopes
 ) -> CommonFrameAdmission:
     steps = max(1, int(np.ceil(duration / frame.step_ns)))
-    if frame.cost_bypass:
-        return CommonFrameAdmission(False, "cost", frame.step_ns, steps)
     channels = frame.channels
-    if channels is None or channels.denominator_min <= 1e-10:
+    if channels.denominator_min <= 1e-10:
         return CommonFrameAdmission(False, "denominator", frame.step_ns, steps)
     signed_frequencies = np.repeat(frame.frequencies_ghz, 2) * np.tile(
         [1, -1], len(frame.ports)
@@ -515,8 +502,7 @@ def advance_common_frame(
     _, peaks, slopes = _row_envelopes(frame, table, row)
     duration = float(table.duration_ns[row])
     admission = _admission(frame, duration, peaks, slopes)
-    channels = frame.channels
-    if not admission.accepted or channels is None:
+    if not admission.accepted:
         raise ValueError(f"common-frame row rejected: {admission.reason}")
     return advance_admitted_common_frame(frame, table, row, state, admission)
 
@@ -580,7 +566,7 @@ def advance_admitted_common_frame(
     and computes admission itself. A rejected admission raises ValueError.
     """
     channels = frame.channels
-    if not admission.accepted or channels is None:
+    if not admission.accepted:
         raise ValueError(f"common-frame row rejected: {admission.reason}")
     args, _, _ = _row_envelopes(frame, table, row)
     duration = float(table.duration_ns[row])

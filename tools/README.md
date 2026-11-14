@@ -1,6 +1,6 @@
 # tools/
 
-**Last updated:** 2026-11-14, eight-point random-phase gate-sequence scenarios
+**Last updated:** 2026-11-14, public single-model construction, eight-point random scans and recorded conclusions
 
 **讀者：** framework-dev。Repo 品質檢查與重計算執行器的 CLI、輸出與比較機制。
 
@@ -438,6 +438,7 @@ collaborators; the complete matrix runs outside pytest through the exclusive run
 `family_pareto_scenarios.py` owns curated core pulse sequences. It uses public
 program components, compiled requests, and the environment source's
 `model_facts`/`plan_template` to construct complete Engine inputs.
+`single_model_input(name, emit, manifest, families)` is the public single-model construction entry point.
 `family_pareto_settings.py` owns fixed single-fluxonium, integer-fluxonium, FTF and board inputs,
 copied from commit `303074e166d1a563addfab4fd94717d958a7dd56`. The manifest
 records their source commit and fixed values. Runtime construction does not import
