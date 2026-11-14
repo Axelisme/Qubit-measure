@@ -143,6 +143,82 @@ def test_bias045_gate_scan_uses_biased_model_and_preserves_compiled_prefixes(
         np.testing.assert_array_equal(batch.flux.level, base.batch.flux.level)
 
 
+@pytest.mark.parametrize(
+    ("scenario", "original_name"),
+    [
+        ("random_gate_sequence", "gate_sequence"),
+        ("random_shaped_gate_sequence", "shaped_gate_sequence"),
+    ],
+)
+def test_random_gate_scan_preserves_model_pulses_and_companions(
+    scenario: str, original_name: str
+) -> None:
+    (item,) = make_real_inputs(scenario)
+    (original,) = make_real_inputs(original_name)
+    assert item.companions == original.companions
+    with (
+        closing((case := item.build()).source),
+        closing((reference := original.build()).source),
+    ):
+        assert_same_model(case.source.model((0,)), reference.source.model((0,)))
+        np.testing.assert_array_equal(
+            case.source.initial_density, reference.source.initial_density
+        )
+        assert case.families == reference.families
+        batch = case.batch
+        assert len(batch.points) == 8
+        counts = np.sum([track.active for track in batch.tracks], axis=0)
+        assert np.unique(counts).size > 1
+        assert counts[0] == 0
+        # User-authored seed 4091952314, depth 32: 43 primitives plus one recovery.
+        selected_point = 1
+        selected = sorted(
+            (track for track in batch.tracks if track.active[selected_point]),
+            key=lambda track: track.start_ns[selected_point],
+        )
+        assert len(selected) == 44
+        np.testing.assert_allclose(
+            [gate.phase_rad[selected_point] for gate in selected[:12]],
+            np.deg2rad([90, 90, 0, 90, 0, 90, 0, 90, 0, 270, 0, 90]),
+            atol=1e-12,
+        )
+        assert selected[-1].phase_rad[selected_point] == 0
+        exemplar = next(track for track in reference.batch.tracks if track.active[-1])
+        # The compiler can add a clock step to support at a different absolute start.
+        allowed_durations = np.unique(
+            np.concatenate(
+                [track.duration_ns[track.active] for track in reference.batch.tracks]
+            )
+        )
+        for point in range(len(batch.points)):
+            gates = sorted(
+                (track for track in batch.tracks if track.active[point]),
+                key=lambda track: track.start_ns[point],
+            )
+            for gate in gates:
+                assert gate.duration_ns[point] in allowed_durations
+                for field in ("frequency_ghz", "amplitude"):
+                    np.testing.assert_array_equal(
+                        getattr(gate, field)[point], getattr(exemplar, field)[-1]
+                    )
+                actual = gate.envelopes[gate.envelope_index[point]]
+                expected = exemplar.envelopes[exemplar.envelope_index[-1]]
+                assert actual.kind == expected.kind
+                np.testing.assert_array_equal(actual.samples, expected.samples)
+            if gates:
+                # Readout-start clips generator support rounded on a different clock.
+                assert batch.end_ns[point] > gates[-1].start_ns[point]
+
+
+@pytest.mark.parametrize(
+    "scenario", ["random_gate_sequence", "random_shaped_gate_sequence"]
+)
+def test_random_gate_scan_freezes_byte_identically(scenario: str) -> None:
+    first = canonical_json(freeze_manifest(make_real_inputs(scenario))) + "\n"
+    second = canonical_json(freeze_manifest(make_real_inputs(scenario))) + "\n"
+    assert first.encode() == second.encode()
+
+
 def test_fixed_scenarios_freeze_byte_identically_from_fresh_construction() -> None:
     first_inputs = make_real_inputs()
     assert first_inputs, "fixed-scenario construction must yield usable numeric inputs"
