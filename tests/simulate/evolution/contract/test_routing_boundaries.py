@@ -1,13 +1,16 @@
-"""Engine routing boundaries separate dispatch costs from numerical admission."""
+"""Engine routing boundaries separate dispatch costs from numerical admission.
+
+Sampled multitone rejection applies on both sides of the 19/20 cost split.
+Pinned calls cannot restore admission; no numerical fix is assumed to reopen it.
+"""
 
 from contextlib import closing
 from dataclasses import replace
 
 import numpy as np
 import pytest
-from zcu_tools.simulate.evolution import Engine, EnvelopeSpec
+from zcu_tools.simulate.evolution import Engine, EnvelopeSpec, NoValidKernel
 
-from .accuracy import require_families
 from .accuracy_cases import (
     AccuracyCase,
     accuracy_case,
@@ -35,37 +38,40 @@ def _joint_gate_case(count: int) -> AccuracyCase:
     return replace(case, batch=replace(batch, tracks=tracks))
 
 
-@pytest.mark.parametrize(
-    "count,family", [(19, "multitone_rwa"), (20, "multitone_gate")]
-)
-def test_whitelisted_multitone_gate_cost_boundary(count: int, family: str) -> None:
-    """Keep the whitelisted 19/20 split and unrestricted default density accuracy."""
+@pytest.mark.parametrize("count", [19, 20])
+def test_whitelisted_multitone_gate_cost_boundary(count: int) -> None:
+    """Neither side of the cost boundary can revive sampled admission."""
     case = _joint_gate_case(count)
-    reference = converged_reference(case.source, case.batch)
-    with closing(Engine(1, families=("multitone_rwa", "multitone_gate"))) as engine:
-        result = engine.evolve(case.source, (case.batch,))
-    assert dict(result.paths.segments_by_kernel) == {family: count}
-    assert density_error(result.densities, reference.density) <= 2e-3
+    with (
+        closing(Engine(1, families=("multitone_rwa", "multitone_gate"))) as engine,
+        pytest.raises(NoValidKernel) as rejected,
+    ):
+        engine.evolve(case.source, (case.batch,))
+    assert rejected.value.domain == "multiple"
+    assert rejected.value.points == tuple(range(count))
+    assert set(rejected.value.attempted) == {"multitone_rwa", "multitone_gate"}
 
+    reference = converged_reference(case.source, case.batch)
     with closing(Engine(1)) as engine:
-        default_result = engine.evolve(case.source, (case.batch,))
-    assert density_error(default_result.densities, reference.density) <= 2e-3
+        for _ in range(2):
+            result = engine.evolve(case.source, (case.batch,))
+            assert result.paths.segments_by_kernel == {"common_frame": count}
+            assert density_error(result.densities, reference.density) <= 2e-3
 
 
 def test_pinned_multitone_gate_below_cost_break_even() -> None:
+    """Pinning bypasses price, not sampled rejection, even after warm fallback."""
     case = _joint_gate_case(19)
-    reference = converged_reference(case.source, case.batch)
-    with closing(Engine(1, families=("multitone_gate",))) as engine:
-        result = engine.evolve(case.source, (case.batch,))
-    require_families(result.paths, ("multitone_gate",))
-    assert density_error(result.densities, reference.density) <= 2e-3
-
-    # Pinning bypasses cost, not the shared RWA minimum-budget admission.
-    with (
-        closing(Engine(1, families=("multitone_gate",))) as engine,
-        pytest.raises(RuntimeError, match=r"domain multiple: points \[0, 1,"),
-    ):
-        engine.evolve(case.source, (case.batch,), budget=1e-4)
+    with closing(Engine(1)) as engine:
+        engine.evolve(case.source, (case.batch,))
+    for family in ("multitone_gate", "multitone_rwa"):
+        with (
+            closing(Engine(1, families=(family,))) as engine,
+            pytest.raises(NoValidKernel) as rejected,
+        ):
+            engine.evolve(case.source, (case.batch,))
+        assert rejected.value.domain == "multiple"
+        assert rejected.value.attempted == (family,)
 
 
 def _carrier_case(frequency: float) -> AccuracyCase:

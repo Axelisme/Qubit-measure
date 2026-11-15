@@ -18,6 +18,8 @@
 
 ## 模擬量測環境
 
+- 2026-11-14 [Sampled multitone 的過渡期拒收](2026-11-14-sampled-multitone-interim.md)：收窄 admission。兩個 multitone family 暫停 sampled 列，保留 constant pairs 與既有 fallback 定價。
+
 - 2026-11-14 [RB 型相位序列作為固定量表輸入](2026-11-14-random-gate-sequence-workloads.md)：場景擴充。離線固定 phase prefix 與 recovery，constant／Gaussian 共用，不加入 runtime RB 代數。
 
 - 2026-11-14 [common_frame 的步長成本歸 dispatch](2026-11-14-common-frame-step-pricing.md)：成本歸屬。移除 kernel 的 2 ns 下限，dispatch 依 first-order 步數比較成本，數值 guard 決定適用域。
