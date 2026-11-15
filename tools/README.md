@@ -1,6 +1,6 @@
 # tools/
 
-**Last updated:** 2026-11-15，新增單 fluxonium STIRAP 型 workload
+**Last updated:** 2026-11-15, dedicated simultaneous two-tone Engine inputs
 
 **讀者：** framework-dev。Repo 品質檢查與重計算執行器的 CLI、輸出與比較機制。
 
@@ -102,10 +102,10 @@ uv run --directory <worktree> --no-sync -- \
   > .agent_state/benchmark/receipt.json
 ```
 
-`benchmark_simulator_workloads.py` 擁有六個版本化合成 workload，並自帶 board profile、物理模型與 program 設定。
+`benchmark_simulator_workloads.py` 擁有五個版本化合成 workload，並自帶 board profile、物理模型與 program 設定。
 它不讀 lab 實驗、預設 YAML 或測試 fixture。
 Const 工作負載的三個 gain 是 `0.08 → 0.12 → 0.16`。
-原有的 `single_repeated_shaped` 與 `ftf_overlap_shaped` 使用版本 2，gain 為 `0.16 → 0.24 → 0.32`，補回 product 輸出的約半刻度。
+兩個 shaped 工作負載使用版本 2，gain 為 `0.16 → 0.24 → 0.32`，補回 product 輸出的約半刻度。
 `ftf_overlap_shaped` 的第二個 tone gain 由 0.1 改為 0.2。
 精確 product 係數是 `32766/65536`，加倍後的連續振幅比舊刻度低約 0.0061%，另有 gain-word 取整。
 每點 32 reps，seed 為 `20261112`。
@@ -118,16 +118,6 @@ Const 工作負載的三個 gain 是 `0.08 → 0.12 → 0.16`。
 | `six_mux` | 依序驅動六個獨立 fluxonium，再用同一次 mux acquire 讀取六個 ADC。 |
 | `ftf_simultaneous_tones` | 不同 generator 的兩個常數 tone 同時驅動 FTF，隨後 pulse readout。 |
 | `ftf_overlap_shaped` | 不同 generator 的兩個 Gaussian tone 部分重疊，第二個晚 8 ns 開始。 |
-| `single_stirap_shaped` | 20 能階單 fluxonium 的相鄰 0↔1、1↔2 躍遷，Stokes 比 Pump 早 0.105 µs，兩個 Gaussian tone 部分重疊，掃三個 Pump gain。 |
-
-`single_stirap_shaped` 的 timeline 與設定版本都是 1。
-它沿用合成單 fluxonium 的 EJ/EC/EL=4/1/1 GHz、DC=0.45 Φ0，native cutoff 為 80，保留最低 20 態。
-兩條 charge drive 的係數都是 1 GHz/gain，沒有 fast-flux line。
-兩個 Gaussian 的 σ 都是 0.07 µs，support 都是 0.42 µs。
-Pump gain 掃 `0.0344 → 0.043 → 0.0516`，Stokes gain 固定為 `0.143`；這是未校準的 workload，不宣稱 STIRAP 轉移保真度。
-Carrier 分別為 `1433.4218883789758` 與 `2904.5631072147653` MHz。
-它們來自公開 `simulate.fluxonium.calculate_eigensystem` 在上述 DC、native cutoff 80 的 E1−E0 與 E2−E1，GHz 能量差乘 1000，不額外取整；編譯時由 QICK 量化至 DDS 格點。
-它保留既有公開 acquire 計時邊界與預設選路，不 pin family、不改 guard。
 
 每個 workload 依序量三種模式，每種五次：
 
@@ -468,6 +458,54 @@ the family-exclusion estimator reuses it with an explicit `reference=None` to
 measure only time and paths (`Sample.density_error=None`), without an oracle.
 Pareto policies always supply a real reference. Tests use controlled clocks and small
 collaborators; the complete matrix runs outside pytest through the exclusive runner.
+
+### Dedicated DOP853 segments
+
+`family_pareto_scenarios.dop853_segment_input(Dop853Coordinates(...))` builds
+simultaneous two-tone Engine inputs. It does not use acquire, append readout,
+change `single_model_input`, or join the default family-table inventory.
+The factory validates settings before `SingleFluxoniumSource.model_facts`
+rebuilds the retained model and Gibbs initial density. It uses the fixed single
+model with bias .45, two charge ports and no fast flux. Levels above the fixed
+native cutoff raise `ValueError`; no prebuilt matrix is sliced.
+
+```python
+from contextlib import closing
+from zcu_tools.simulate.evolution import Engine
+from tools.family_pareto_scenarios import Dop853Coordinates, dop853_segment_input
+
+item = dop853_segment_input(Dop853Coordinates(envelope="sampled", repeats=2))
+with closing((case := item.build()).source), closing(Engine(workers=1)) as engine:
+    result = engine.evolve(case.source, (case.batch,), families=("dop853",), telemetry=True)
+```
+
+Run numerical measurements through `run_heavy.py` under the applicable compute
+grant. Importing or constructing inputs does not solve references or evolve.
+Coordinates select `gaussian` or non-Gaussian `sampled` envelopes, support in ns,
+retained `levels`, sample `knots` including both endpoints, `repeats` in
+1/2/20/100, and independent `points`. Both tones have the same support. Every
+sample is a linear-interpolation knot. Gaussian centers differ within that
+support. Flat-top plateaus are outside this input. Each repeated pair restarts
+its pulse-local carrier phase, with no gaps or companion family. End time is
+N times the support. N does not multiply the point count. For multiple points,
+only Pump gain varies; Engine worker count is a separate execution setting.
+Change one coordinate at a time to isolate duration, dimension or knot density.
+The controls are benchmark inputs, not calibrated STIRAP transfer.
+
+`freeze_manifest([item])` records complete physical/oracle hashes and the
+versioned coordinates. `family_pareto_reference.reference_cache_key(case)`
+returns the persistent reference key without disk access or integration.
+`solve_reference(case, solver=interaction_reference, cache_dir=...)` uses the
+existing independent full-Lindblad interaction-picture oracle. It stops at
+knots and checks two tolerances. Use `cache_only=True` during timing; misses
+raise instead of solving. Worker count does not enter the key. N and points do.
+Same-dimension reference agreement does not establish retained-level convergence.
+
+Measure wall/process only around `Engine.evolve`, keeping construction,
+reference loading and density comparison outside. These are whole-Engine times,
+not bare kernel costs. Report public `prepare_cpu_s`, `apply_cpu_s`, `rows` and
+`cache_hits` separately. `apply_cpu_s / rows` is a logical-row amortization,
+not one apply call's cost. Missing diagnostics are errors, not zeros.
 
 ### Fixed scenarios, companions and reference cache
 

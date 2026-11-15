@@ -128,6 +128,30 @@ class ReferenceSolver(Protocol):
         ...
 
 
+def reference_cache_key(
+    case: AccuracyCase,
+    *,
+    coarse: SolverTolerances = _COARSE,
+    fine: SolverTolerances = _FINE,
+) -> str:
+    """Return the persistent oracle key without solving or accessing disk.
+
+    case supplies the complete physical timeline, model and initial density.
+    Both tolerances and the convergence contract enter the key; model namespace,
+    solver implementation and Engine worker count do not. N and points are part
+    of the physical timeline. The caller owns case.source. Model errors propagate.
+    """
+    return digest(
+        {
+            "version": 1,
+            "physical": physical_input(case, include_identity=False),
+            "coarse": asdict(coarse),
+            "fine": asdict(fine),
+            "convergence_limit": 2e-6,
+        }
+    )
+
+
 def solve_reference(
     case: AccuracyCase,
     *,
@@ -150,15 +174,7 @@ def solve_reference(
         if cache_only:
             raise ValueError("cache-only reference requires a cache directory")
         return solver(case.source, case.batch, coarse=coarse, fine=fine)
-    key = digest(
-        {
-            "version": 1,
-            "physical": physical_input(case, include_identity=False),
-            "coarse": asdict(coarse),
-            "fine": asdict(fine),
-            "convergence_limit": 2e-6,
-        }
-    )
+    key = reference_cache_key(case, coarse=coarse, fine=fine)
     cache_dir.mkdir(parents=True, exist_ok=True)
     destination = cache_dir / f"{key}.npz"
     if destination.exists():

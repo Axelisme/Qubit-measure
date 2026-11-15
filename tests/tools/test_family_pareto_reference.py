@@ -15,7 +15,47 @@ from tests.simulate.evolution.contract.reference import (
 )
 from tools.family_pareto import FamilyResult, run_table
 from tools.family_pareto_inputs import Input
-from tools.family_pareto_reference import ReferenceCache, solve_reference
+from tools.family_pareto_reference import (
+    ReferenceCache,
+    reference_cache_key,
+    solve_reference,
+)
+from tools.family_pareto_scenarios import Dop853Coordinates, dop853_segment_input
+
+
+def test_segment_reference_key_predicts_cache_hit_and_separates_repeats_and_points(
+    tmp_path: Path,
+) -> None:
+    def solver(
+        source: ModelSource,
+        batch: TimelineBatch,
+        *,
+        coarse: SolverTolerances,
+        fine: SolverTolerances,
+    ) -> ReferenceResult:
+        return ReferenceResult(
+            np.tile(source.initial_density, (len(batch.points), 1, 1)), 1e-9
+        )
+
+    keys = []
+    for coordinates in (
+        Dop853Coordinates(levels=3),
+        Dop853Coordinates(levels=3, repeats=2),
+        Dop853Coordinates(levels=3, points=2),
+    ):
+        item = dop853_segment_input(coordinates)
+        with closing((case := item.build()).source):
+            key = reference_cache_key(case)
+            keys.append(key)
+            with pytest.raises(FileNotFoundError, match=key):
+                solve_reference(case, cache_dir=tmp_path, cache_only=True)
+            expected = solve_reference(case, solver=solver, cache_dir=tmp_path)
+            assert (tmp_path / f"{key}.npz").exists()
+        with closing((fresh := item.build()).source):
+            assert reference_cache_key(fresh) == key
+            actual = solve_reference(fresh, cache_dir=tmp_path, cache_only=True)
+            np.testing.assert_array_equal(actual.density, expected.density)
+    assert len(set(keys)) == 3
 
 
 def test_cache_reuses_density_but_invalidates_physics_and_tolerances(
