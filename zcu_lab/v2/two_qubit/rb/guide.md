@@ -69,8 +69,8 @@ After CZ, the two named logical corrections advance the respective frames.
 Virtual Z updates the logical frame only. Computational-basis readout is
 invariant to terminal Z frames.
 
-Since 2026-11-15, this non-heralded experiment uses the same concurrent
-single-qubit schedule in the reference and interleaved arms. Each qubit's X90
+Since 2026-11-15, this experiment and the heralded variant use the same
+concurrent single-qubit schedule in the reference and interleaved arms. Each qubit's X90
 pulses and virtual Z updates keep their original order. Each X90 starts as
 soon as its own qubit's preceding pulse and configured delays finish, without
 waiting for the other qubit. With zero X90 delays, the sequence
@@ -84,8 +84,7 @@ Both arms use this schedule so that their comparison does not mix the inserted
 CZ with a change in single-qubit concurrency or idle duration. Overlapping X90
 crosstalk contributes to both arms; this does not prove that all crosstalk
 cancels in the error estimate. Do not directly combine these error estimates
-with data acquired before this date under the serial schedule. This update
-does not change the heralded variant's schedule.
+with data acquired before this date under the serial schedule.
 
 Each depth/seed/arm has one compiled program and `rounds` host acquisitions of
 `reps` shots. Every host acquisition uses `rounds=1` to preserve its own slot.

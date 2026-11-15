@@ -50,7 +50,8 @@ from .._sums import (
     validate_classifiers,
 )
 from .program import CZPhasePair
-from .sequence import TwoQubitGate, make_paired_sequences
+from .scheduling import emit_sequence
+from .sequence import make_paired_sequences
 
 
 @dataclass(frozen=True)
@@ -436,63 +437,15 @@ class RBExp(Experiment[RBResult, RBCfg]):
                         if config.reset is not None:
                             builder.emit(Reset("reset", config.reset))
 
-                        # ADR-0083: join synchronizes ends without moving reference.
-                        # Each qubit advances independently until a common CZ boundary.
-                        timelines = ("rb_f1_time", "rb_f2_time")
-                        builder.fork("default", into=list(timelines))
-                        # The recovery makes the net logical operation identity.
-                        # Positive logical Z advances a frame; X uses base minus frame.
-                        frames = [0.0, 0.0]
-                        pulses = (config.x90_f1, config.x90_f2)
-                        for index, gate in enumerate(sequence.gates):
-                            if gate in (TwoQubitGate.Z90_Q0, TwoQubitGate.Z90_Q1):
-                                role = 0 if gate == TwoQubitGate.Z90_Q0 else 1
-                                frames[role] = (frames[role] + 90.0) % 360.0
-                            elif gate in (TwoQubitGate.X90_Q0, TwoQubitGate.X90_Q1):
-                                role = 0 if gate == TwoQubitGate.X90_Q0 else 1
-                                pulse = pulses[role]
-                                builder.emit(
-                                    Pulse(
-                                        f"gate_{index}_x90_f{role + 1}",
-                                        pulse,
-                                        phase=(float(pulse.phase) - frames[role])
-                                        % 360.0,
-                                    ),
-                                    timeline=timelines[role],
-                                )
-                            elif gate == TwoQubitGate.CZ:
-                                builder.join(*timelines, into="default")
-                                builder.fork(
-                                    "default",
-                                    into=[
-                                        f"gate_{index}_cz_f1_time",
-                                        f"gate_{index}_cz_f2_time",
-                                    ],
-                                )
-                                builder.emit(
-                                    Pulse(f"gate_{index}_cz_f1", config.drive.f1),
-                                    timeline=f"gate_{index}_cz_f1_time",
-                                )
-                                builder.emit(
-                                    Pulse(f"gate_{index}_cz_f2", config.drive.f2),
-                                    timeline=f"gate_{index}_cz_f2_time",
-                                )
-                                builder.join(
-                                    f"gate_{index}_cz_f1_time",
-                                    f"gate_{index}_cz_f2_time",
-                                    into="default",
-                                )
-                                for timeline in timelines:
-                                    builder.join("default", into=timeline)
-                                frames[0] = (
-                                    frames[0] + config.phase_pair.correction_f1_deg
-                                ) % 360.0
-                                frames[1] = (
-                                    frames[1] + config.phase_pair.correction_f2_deg
-                                ) % 360.0
-                            else:
-                                raise ValueError(f"Unknown two-qubit gate: {gate!r}")
-                        builder.join(*timelines, into="default")
+                        # Both arms keep per-role order, overlap X90s and meet at each CZ.
+                        emit_sequence(
+                            builder,
+                            sequence,
+                            x90_f1=config.x90_f1,
+                            x90_f2=config.x90_f2,
+                            drive=config.drive,
+                            phase_pair=config.phase_pair,
+                        )
                         builder.emit(readout, tag="terminal")
                         prog = builder.build()
                         processor = shot_sums(
