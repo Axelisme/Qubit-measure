@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-11-15, t6 direct-only evolution
+**Last updated:** 2026-11-15, two-tone pricing and per-row Floquet fallback
 
 **讀者：** framework-dev、agent。Segment evolution 的公開輸入、路由與數值邊界。
 
@@ -169,6 +169,11 @@ into rows. [Dispatch](_dispatch.py) selects candidates from flux motion, active
 tones, envelope shape, known inputs and acquire-wide prepare-key reuse, not
 experiment names. Numerical guards decide validity separately from cost.
 A rejected guard leaves the row for the next candidate.
+Floquet admission is per row. With the default family set, a refused row
+continues to another candidate while admitted rows keep their Floquet plans.
+A fixed `families` set can remove that fallback. If any row then has no admitted
+candidate, the whole evolve call raises `NoValidKernel` without partial results.
+This does not move Floquet ahead of `multitone_rwa` in the candidate order.
 
 `Engine(..., families=("t4", "dop853"))` restricts every segment in the acquire,
 including shared prefixes and deferred timeline workers, to those families.
@@ -282,7 +287,7 @@ routes and final densities. This does not force every sampled row to DOP853.
 | [`common_frame`](kernels/common_frame.py), common-frame SW2 beat dynamics | `two` or two-tone `multiple` only | Fixed-flux common frame with second-order beat/two-photon terms, first-order endpoint dressing and CF4/secular playback. Absolute mean carrier must be ≥ 1e-10 GHz. CF4 steps are capped at 8 ns and 0.08 cycles of the fastest retained channel, with no lower cutoff. Dispatch prices first-order playback steps, so cost rises with active carrier spacing; numerical guards determine applicability. Fast-channel denominator must exceed 1e-10. Row-local coherent/bath indicators must be ≤ 0.03/0.01, independent of B. | [`nearby_carriers`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | FAIL at guard edge: 8.066669e-3; strict xfail |
 | [`multitone_gate`](kernels/multitone_gate.py), retained simultaneous RWA gate family | `multiple`, disabled | Rejects every row. The retained 20-use inventory cost preference cannot restore numerical admission at 19 or 20 uses; pinning cannot bypass rejection. Shared single-tone gate numerics are unchanged. | [19/20 and pinned rejection contract](../../../../tests/simulate/evolution/contract/test_routing_boundaries.py) | NOT EXERCISED; no density error |
 | [`multitone_rwa`](kernels/multitone_rwa.py), simultaneous omission-restored RWA | `two`, distinct ports only | Exactly two constant envelopes, fixed flux, B ≥ 1e-3 and each carrier magnitude ≥ 50 MHz. Sampled rows are rejected. Start with 50 MHz edges, restore omitted paths until transfer proxy ≤ 0.0058 and residual phase ≤ 0.0045 rad; retained real dimension ≤ 256. No carrier-spacing, full-operator/carrier ratio or retained-norm phase cap. Apply step ceiling is 16 ns. | [`joint_constant`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
-| [`floquet`](kernels/floquet.py), constant Stark tone plus probe | `two` | Larger absolute gain selects the Stark slot, with ties choosing the first; that slot requires positive carrier. Frame overlap ≥ 0.5, modal condition ≤ 1e8, maximum real eigenvalue ≤ 1e-10/ns and residual ≤ 1e-9; sampling extent ≤ 128 with at most 4096 phase samples. k=0 omission and convergence each fit B/3. Modal Dyson additionally uses r ≤ 0.1, r2 ≤ 0.05 when probe gain magnitude ≥ 0.1, Dyson norm-duration v ≤ 0.5, transfer indicator v + v²/2 ≤ 0.02 and higher-order remainder exp(v)·v³/6 ≤ B/3; otherwise use periodic channel playback. Retained-sideband admission instead requires convergence ≤ B/40 and bound ≤ 0.95B, retaining edges within 0.1/ns and averaging other harmonics through order 4. This finite-Fourier admission is not a density-error guarantee. | [`two_carriers`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
+| [`floquet`](kernels/floquet.py), constant Stark tone plus probe | `two` | Larger absolute gain selects the Stark slot, with ties choosing the first; that slot requires positive carrier. Frame overlap ≥ 0.5, modal condition ≤ 1e8, maximum real eigenvalue ≤ 1e-10/ns and residual ≤ 1e-9; sampling extent ≤ 128 with at most 4096 phase samples. k=0 omission and convergence each fit B/3. Modal Dyson additionally uses r ≤ 0.1, r2 ≤ 0.05 when probe gain magnitude ≥ 0.1, Dyson norm-duration v ≤ 0.5, transfer indicator v + v²/2 ≤ 0.02 and higher-order remainder exp(v)·v³/6 ≤ B/3; otherwise use periodic channel playback. Retained-sideband admission instead requires convergence ≤ B/40 and bound ≤ 0.95B, retaining edges within 0.1/ns and averaging other harmonics through order 4. Admission is per row; refused rows continue to other allowed candidates. This finite-Fourier admission is not a density-error guarantee. | [`two_carriers`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
 | [`dop853`](kernels/dop853.py), full-drive direct density integration | `shaped`, `two`, `multiple`, terminal candidate | No RWA or fast-path admission threshold. Accepts valid rows with finite positive B, including complex sampled envelopes. Stops at active control knots. Local rtol = min(1e-4, 0.03B), atol = min(1e-6, 0.0003B), from the [shared solver](kernels/_dop853.py); these are not global error bounds. | [`shaped_complex`](../../../../tests/simulate/evolution/contract/accuracy_cases.py), [`two_carriers`](../../../../tests/simulate/evolution/contract/accuracy_cases.py), [`joint_gate_inventory`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
 
 ### Recorded real-workload evidence
