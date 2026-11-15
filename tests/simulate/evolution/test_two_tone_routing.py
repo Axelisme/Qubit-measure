@@ -6,7 +6,12 @@ from threading import Event
 
 import numpy as np
 import pytest
-from zcu_tools.simulate.evolution import Engine, EnvelopeSpec, ModelSource
+from zcu_tools.simulate.evolution import (
+    Engine,
+    EnvelopeSpec,
+    ModelSource,
+    NoValidKernel,
+)
 from zcu_tools.simulate.evolution.kernel import GuardResult, KernelContext
 from zcu_tools.simulate.evolution.kernels.dop853 import DOP853Plan
 from zcu_tools.simulate.evolution.kernels.floquet import FloquetAdmission, FloquetPlan
@@ -222,6 +227,56 @@ def test_dimension_calibrated_two_tone_cost(levels, duration, expected):
     assert result.paths.segments_by_kernel == {expected: 1}
     assert attempts == [(expected, float(duration))]
     np.testing.assert_array_equal(result.densities[0], src.initial_density)
+
+
+@pytest.mark.parametrize("workers", [1, 2])
+def test_detuning_inventory_amortizes_floquet_certificates(workers: int) -> None:
+    # The numerical collaborators accept both families. Only acquire-wide
+    # pricing chooses the path; no guard result or coefficient is prescribed.
+    timelines = []
+    for point, detuning in enumerate(np.linspace(-0.008, 0.008, 11)):
+        timeline = two_tone_batch(512, 0.2, point)
+        strong, probe = timeline.tracks
+        timelines.append(
+            replace(
+                timeline,
+                tracks=(
+                    strong,
+                    replace(probe, frequency_ghz=np.array([0.425 + detuning])),
+                ),
+            )
+        )
+    result, _ = route(tuple(timelines), workers=workers)
+    assert result.paths.segments_by_kernel == {"floquet": 11}
+
+
+@pytest.mark.parametrize("families", [None, ("floquet",)])
+def test_floquet_row_refusal_falls_back_only_to_allowed_families(
+    families: tuple[str, ...] | None,
+) -> None:
+    class ShortFloquet(RecordingKernel):
+        """Admit only short rows to isolate dispatch's per-row fallback."""
+
+        def guard(self, table, rows, context):
+            return table.duration_ns[rows] <= 512
+
+    model = synthetic_model(16)
+    timelines = (two_tone_batch(512, 0.5, 0), two_tone_batch(1024, 0.5, 1))
+    kernels = (ShortFloquet("floquet"), RecordingKernel("dop853"))
+    with (
+        closing(
+            ModelSource(np.eye(16, dtype=np.complex128) / 16, lambda level: model)
+        ) as src,
+        closing(Engine(1, kernels=kernels, families=families)) as engine,
+    ):
+        if families is not None:
+            with pytest.raises(NoValidKernel, match=r"domain two.*points.*1.*segments"):
+                engine.evolve(src, timelines)
+        else:
+            result = engine.evolve(src, timelines)
+            assert result.paths.segments_by_kernel == {"floquet": 1, "dop853": 1}
+            np.testing.assert_array_equal(result.densities[0], src.initial_density)
+            np.testing.assert_array_equal(result.densities[1], src.initial_density)
 
 
 def test_short_weak_direct_and_long_strong_floquet():
