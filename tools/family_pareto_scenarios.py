@@ -189,7 +189,7 @@ def dop853_segment_input(coordinates: Dop853Coordinates) -> Input:
     Settings are validated before the public single-fluxonium owner rebuilds
     the model and Gibbs initial state. levels above native_cutoff raise ValueError.
     Every Input.build() returns a fresh owned source, which callers must close.
-    Pin Engine.evolve families=("dop853",); guards remain enabled. Same-dimension
+    Pin Engine(workers=1, families=("dop853",)); guards remain enabled. Same-dimension
     reference agreement does not establish retained-level convergence.
     """
     settings = parse_single_fluxonium(

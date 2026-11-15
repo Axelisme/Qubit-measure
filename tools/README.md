@@ -475,8 +475,8 @@ from zcu_tools.simulate.evolution import Engine
 from tools.family_pareto_scenarios import Dop853Coordinates, dop853_segment_input
 
 item = dop853_segment_input(Dop853Coordinates(envelope="sampled", repeats=2))
-with closing((case := item.build()).source), closing(Engine(workers=1)) as engine:
-    result = engine.evolve(case.source, (case.batch,), families=("dop853",), telemetry=True)
+with closing((case := item.build()).source), closing(Engine(workers=1, families=("dop853",))) as engine:
+    result = engine.evolve(case.source, (case.batch,), telemetry=True)
 ```
 
 Run numerical measurements through `run_heavy.py` under the applicable compute
