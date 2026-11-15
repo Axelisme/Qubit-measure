@@ -351,17 +351,19 @@ class _Classifier:
         """Record only query observations; ordinary evolve does no extra pricing."""
         if self.trace is None or not len(rows):
             return
-        prices = (
+        scheduling_costs = (
             kernel.cost(self.table, rows)
             if decision != "untested_after_short_circuit"
             else [None] * len(rows)
         )
-        for row, price in zip(rows, prices, strict=True):
+        for row, scheduling_cost in zip(rows, scheduling_costs, strict=True):
             candidates = self.trace.setdefault(int(row), {})
             if decision == "untested_after_short_circuit" and kernel.name in candidates:
                 continue
             candidates[kernel.name] = DispatchCandidate(
-                kernel.name, decision, None if price is None else float(price)
+                kernel.name,
+                decision,
+                None if scheduling_cost is None else float(scheduling_cost),
             )
 
     def guard_keys(

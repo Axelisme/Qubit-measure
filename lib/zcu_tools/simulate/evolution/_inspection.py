@@ -45,15 +45,16 @@ class DispatchCandidate:
     guard: accepted/rejected for an evaluated numerical guard, deferred when a
         local prepare key must wait for its worker, or
         untested_after_short_circuit when an earlier candidate stopped the round.
-    price: nonnegative kernel scheduling-work estimate, not seconds or a guard
-        certificate. Evaluated and deferred candidates include this estimate;
-        short-circuited candidates have None. This is Kernel.cost, not the
-        separate acquire-wide ordering formula.
+    scheduling_cost: nonnegative relative row work for chunk interleaving,
+        from Kernel.cost. Evaluated and deferred candidates include this value;
+        short-circuited candidates have None. It is not seconds or a guard
+        certificate and cannot explain why a family was chosen. The separate
+        cold-amortized candidate-ordering estimate is not exposed.
     """
 
     family: str
     guard: GuardDecision
-    price: float | None
+    scheduling_cost: float | None
 
 
 @dataclass(frozen=True)

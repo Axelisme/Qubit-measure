@@ -36,8 +36,8 @@ def test_query_matches_evolve_and_maps_split_rows_to_batches_and_points():
     for row in query.rows:
         assert row.status == "selected"
         assert [(c.family, c.guard) for c in row.candidates] == [("t4", "accepted")]
-        assert row.candidates[0].price is not None
-        assert row.candidates[0].price >= 0
+        assert row.candidates[0].scheduling_cost is not None
+        assert row.candidates[0].scheduling_cost >= 0
 
 
 def test_later_short_circuit_keeps_an_earlier_guard_rejection():
@@ -106,7 +106,7 @@ def test_floquet_query_runs_shared_guard_but_defers_local_frame(count):
     for row in query.rows:
         (candidate,) = row.candidates
         assert candidate.family == "floquet"
-        assert candidate.price is not None
+        assert candidate.scheduling_cost is not None
         if count == 1:
             assert row.status == "deferred" and row.family is None
             assert candidate.guard == "deferred"
@@ -127,4 +127,4 @@ def test_query_marks_candidates_after_an_accepted_guard_as_untested():
         assert all(
             c.guard == "untested_after_short_circuit" for c in row.candidates[1:]
         )
-        assert all(c.price is None for c in row.candidates[1:])
+        assert all(c.scheduling_cost is None for c in row.candidates[1:])

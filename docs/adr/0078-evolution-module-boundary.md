@@ -25,7 +25,7 @@ Kernel、dispatch、scheduler 與 cache 維持內部實作。呼叫端經 `Engin
 
 2026-11-16，使用者核可公開 dispatch 查詢的實作計畫：「1核可」；對 Floquet guard 選「B」，保留一週期 propagator 計算。
 `Engine.inspect_dispatch(source, batches, budget=...)` 與 evolve 共用 classifier 和 guard，不演化 density。
-查詢逐 split row 回傳 family、guard 判定與價格，或 deferred、short-circuit、needs-prefix 原因。
+查詢逐 split row 回傳 family、guard 判定與相對排程工作量 `scheduling_cost`，或 deferred、short-circuit、needs-prefix 原因。
 查詢以投影的完整 inventory 使用次數計價，不修改 `RoutingHistory` 的 usage、content membership 或 generation，也不註冊 routing reuse facts。
 因此查詢的已決定路由等於相同初始 history 下 evolve 的路由，且不改變後續 evolve 的路由或 density。
 Guard preparation 在查詢返回時釋放，不留在 Engine；source model cache 與 shift registration 仍可被填入。

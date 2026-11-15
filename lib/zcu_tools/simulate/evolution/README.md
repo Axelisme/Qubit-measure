@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-11-16, dispatch inspection without history changes
+**Last updated:** 2026-11-16, dispatch scheduling cost naming
 
 **讀者：** framework-dev、agent。Segment evolution 的公開輸入、路由與數值邊界。
 
@@ -116,10 +116,11 @@ An evaluated guard reports `accepted` or `rejected`. A local key reports
 `deferred`. Candidates after a stopped round report
 `untested_after_short_circuit`, unless an earlier round already evaluated them.
 Structurally inapplicable and cost-skipped families are not listed unless
-actually offered. Candidate `price` is the kernel's nonnegative scheduling-work
-estimate, not seconds or a numerical certificate. It is separate from the
-acquire-wide formulas that order candidates. Short-circuited candidates have
-`price=None`; evaluated and deferred candidates include their estimate.
+actually offered. Candidate `scheduling_cost` is `Kernel.cost`'s nonnegative
+relative row work for chunk interleaving, not seconds or a numerical certificate;
+it cannot explain why a family was chosen. The cold-amortized estimate used to
+order candidates is not exposed. Short-circuited candidates have
+`scheduling_cost=None`; evaluated and deferred candidates include their value.
 
 Inspection does not modify routing history. It projects usage without writing
 counters, content membership or generation, and does not create routing-reuse
