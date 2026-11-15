@@ -2,7 +2,8 @@
 
 import importlib.util
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Generator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
@@ -97,6 +98,26 @@ class SimulationEnvironment:
                 and FakeDevice(address=device.address) is device
             ),
         )
+
+
+@contextmanager
+def closing_environment(env: SimulationEnvironment) -> Generator[SimulationEnvironment]:
+    """Yield a caller-owned environment and release it on normal or exceptional exit.
+
+    Enter only after the builder returns; drain acquisition before leaving. Exit
+    calls close_backend when present, then devices.close_all_devices, including
+    when backend release raises. Cleanup errors propagate without retry. If both
+    cleanup steps fail, the device error propagates with the backend error as its
+    context. The helper does not make the frozen bundle a context manager.
+    """
+    try:
+        yield env
+    finally:
+        try:
+            if env.close_backend is not None:
+                env.close_backend()
+        finally:
+            env.devices.close_all_devices()
 
 
 def white_noise(

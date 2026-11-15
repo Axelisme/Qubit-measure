@@ -184,10 +184,10 @@ def _certify(
     frame: Frame,
     lam: Complex,
     basis: tuple[Complex, Complex, float],
-    center: float,
-    port: int,
+    probe_bin: tuple[int, float],
+    admission: tuple[Real, float, Certificate | None],
     probe_transforms: dict[int, tuple[Complex, float]] | None = None,
-) -> Certificate:
+) -> Certificate | None:
     """Certify bath only for port=-1, otherwise one unit-gain probe port.
 
     basis contains right modes, inverse modes and their spectral-norm product.
@@ -195,12 +195,40 @@ def _certify(
     and q/r/e contributions are identical for every probe bin and port.
     probe_transforms maps each probe term index to its full physical-basis
     matrix and norm, shared across bins. None keeps the direct bath transforms.
+    probe_bin is (port, center_GHz), with (-1, 0) for bath only. admission is
+    (current parameter rows, budget, optional completed bath certificate).
+    Return None as soon as the partial nonnegative bound exceeds 0.95*budget
+    for every row. Never reuse partial data for another duration or gain.
     """
+    port, center = probe_bin
+    parameters, budget, bath = admission
     modes, inverse, condition = basis
     size = int(round(np.sqrt(len(lam))))
-    q, r, e = np.zeros(2), np.zeros(2), np.zeros(2)
-    rows, columns, values, frequencies, signs = [], [], [], [], []
+    q, r, e, tail = (
+        (np.zeros(2), np.zeros(2), np.zeros(2), np.zeros(2))
+        if bath is None
+        else tuple(a.copy() for a in (bath.q, bath.r, bath.e, bath.tail))
+    )
+    rows, columns, values, frequencies, signs = (
+        ([], [], [], [], [])
+        if bath is None
+        else tuple(
+            a.tolist()
+            for a in (
+                bath.rows,
+                bath.columns,
+                bath.values,
+                bath.frequencies,
+                bath.signs,
+            )
+        )
+    )
+    tail[int(port >= 0)] += np.sqrt(size) * frame.tail[port + 1]
     for index in np.flatnonzero(frame.ports == port):
+        if np.isfinite(budget) and all(
+            _bound((q, r, e, tail), lam, row) > 0.95 * budget for row in parameters
+        ):
+            return None
         nu = frame.frequencies[index]
         coefficient = frame.coefficients[index]
         sign = frame.signs[index]
@@ -239,8 +267,6 @@ def _certify(
         values.extend(retained[ri, ci])
         frequencies.extend(np.full(len(ri), nu))
         signs.extend(np.full(len(ri), sign))
-    tail = np.zeros(2)
-    tail[int(port >= 0)] = np.sqrt(size) * frame.tail[port + 1]
     arrays = (
         np.asarray(rows, dtype=np.int64),
         np.asarray(columns, dtype=np.int64),
@@ -257,30 +283,12 @@ def _certify(
     return Certificate(center, *arrays)
 
 
-def _with_bath(bath: Certificate, probe: Certificate) -> Certificate:
-    """Combine disjoint bath/probe slots without recomputing any norm."""
-    arrays = (
-        np.concatenate((bath.rows, probe.rows)),
-        np.concatenate((bath.columns, probe.columns)),
-        np.concatenate((bath.values, probe.values)),
-        np.concatenate((bath.frequencies, probe.frequencies)),
-        np.concatenate((bath.signs, probe.signs)),
-        bath.q + probe.q,
-        bath.r + probe.r,
-        bath.e + probe.e,
-        bath.tail + probe.tail,
-    )
-    for array in arrays:
-        array.flags.writeable = False
-    return Certificate(probe.center, *arrays)
-
-
-def _bound(certificate: Certificate, lam: Complex, parameters: Real) -> float:
+def _bound(
+    terms: tuple[Real, Real, Real, Real], lam: Complex, parameters: Real
+) -> float:
+    """Evaluate the same nonnegative q/r/e/tail bound for full or partial sums."""
     duration, gain = parameters[0], abs(parameters[4])
-    q, r, e, h = (
-        float(a @ np.array([1.0, gain]))
-        for a in (certificate.q, certificate.r, certificate.e, certificate.tail)
-    )
+    q, r, e, h = (float(a @ np.array([1.0, gain])) for a in terms)
     if r * duration > 700 or np.ptp(lam.real) * duration > 14:
         return np.inf
     growth = np.exp(r * duration)
@@ -294,6 +302,8 @@ def prepare(
     modes: Complex,
     inverse: Complex,
     parameters: Real,
+    *,
+    budget: float = np.inf,
 ) -> Frame:
     """Build immutable 2 MHz-bin certificates for the supplied parameter rows.
 
@@ -308,13 +318,18 @@ def prepare(
     Full physical-basis probe transforms and norms are shared across bins of
     each port, only for this call. Omitted transforms use full minus retained;
     this changes rounding, not the norm or omission formula.
-    Return a new Frame; never mutate the input.
+    budget optionally stops a bin once its partial nonnegative bound exceeds
+    0.95*budget for every supplied row in that bin. Such bins have no returned
+    certificate; incomplete data never enters the Frame. The default completes
+    all bins. Return a new Frame; never mutate the input.
     """
     if not len(parameters):
         return replace(frame, certificates=())
     condition = float(np.linalg.norm(modes, 2) * np.linalg.norm(inverse, 2))
     basis = (modes, inverse, condition)
-    bath = _certify(frame, lam, basis, 0.0, -1)
+    bath = _certify(frame, lam, basis, (-1, 0.0), (parameters, budget, None))
+    if bath is None:
+        return replace(frame, certificates=())
     certificates = []
     centers = probe_bin_center(parameters[:, 3])
     for port_value in np.unique(parameters[:, -1]):
@@ -324,8 +339,17 @@ def prepare(
             full = modes @ frame.coefficients[index] @ inverse
             probe_transforms[int(index)] = (full, _upper(full))
         for center in np.unique(centers[parameters[:, -1] == port]):
-            probe = _certify(frame, lam, basis, float(center), port, probe_transforms)
-            certificates.append((port, _with_bath(bath, probe)))
+            members = (parameters[:, -1] == port) & (centers == center)
+            probe = _certify(
+                frame,
+                lam,
+                basis,
+                (port, float(center)),
+                (parameters[members], budget, bath),
+                probe_transforms,
+            )
+            if probe is not None:
+                certificates.append((port, probe))
     return replace(frame, certificates=tuple(certificates))
 
 
@@ -375,7 +399,7 @@ def plan(
         selected.columns,
         values,
         exponents,
-        _bound(selected, lam, parameters),
+        _bound((selected.q, selected.r, selected.e, selected.tail), lam, parameters),
     )
 
 

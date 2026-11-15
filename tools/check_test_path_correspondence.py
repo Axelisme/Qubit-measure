@@ -15,6 +15,7 @@ matched" would let the rule decay into describing whatever the tree already is.
 
 from __future__ import annotations
 
+import argparse
 import json
 import sys
 from dataclasses import dataclass
@@ -103,7 +104,15 @@ def violations(root: Path) -> tuple[Violation, ...]:
     return tuple(found)
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    """Print JSON and stderr diagnostics for test directories without modules.
+
+    None reads sys.argv; argparse handles help and invalid syntax with SystemExit.
+    Scan this checkout. Return 1 for missing modules, otherwise 0. Reserved
+    segments follow RESERVED_SEGMENTS; source traversal errors propagate.
+    """
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.parse_args(argv)
     root = Path(__file__).resolve().parents[1]
     found = violations(root)
     receipt = {

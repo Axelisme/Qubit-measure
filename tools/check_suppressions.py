@@ -28,6 +28,7 @@ function named cast is not typing.cast.
 
 from __future__ import annotations
 
+import argparse
 import ast
 import contextlib
 import io
@@ -203,7 +204,15 @@ def suppressions(
     )
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    """Print suppression totals as JSON and the top 20 usage rows to stderr.
+
+    None reads sys.argv; argparse handles help and invalid syntax with SystemExit.
+    Scan this checkout and return 0; counts alone are not violations. Read/parse
+    failures propagate rather than being reported as empty usage.
+    """
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.parse_args(argv)
     root = Path(__file__).resolve().parents[1]
     found = suppressions(root)
     totals: dict[str, int] = {}

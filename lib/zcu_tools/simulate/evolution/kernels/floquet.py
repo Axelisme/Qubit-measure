@@ -62,6 +62,7 @@ from ._floquet_policy import (
     MAX_PHASE_SAMPLES,
     MAX_SAMPLING_RATIO,
     phase_sample_count,
+    probe_bin_center,
 )
 from ._secular import coherence_decay
 
@@ -110,12 +111,14 @@ class _Entry:
 
 @dataclass(frozen=True)
 class _Prepared:
-    entries: tuple[_Entry, ...]
+    entries: tuple[_Entry | None, ...]
     keys: NDArray[np.void]
 
     @property
     def nbytes(self) -> int:
-        return self.keys.nbytes + sum(entry.nbytes for entry in self.entries)
+        return self.keys.nbytes + sum(
+            entry.nbytes for entry in self.entries if entry is not None
+        )
 
 
 @dataclass(frozen=True)
@@ -329,7 +332,7 @@ def _build(
     amplitude: float,
     parameters: NDArray[np.float64],
     budget: float,
-) -> _Entry:
+) -> _Entry | None:
     if frequency <= 0:
         raise ValueError("Floquet Stark frequency must be positive")
     count = int(phase_sample_count(_sampling_extent(model, port, amplitude), frequency))
@@ -338,26 +341,22 @@ def _build(
     energies, rotations, residual, overlap = _frame_samples(
         model, (port, frequency, amplitude), count
     )
+    if not (residual <= 1e-9 and overlap >= 0.5):
+        return None
     bath, x, y, convergence = _averages(model, rotations)
     l0 = _comm(np.diag(energies).astype(complex)) + bath[0]
     decomposition = eig(l0)
     lam = np.asarray(decomposition[0], dtype=np.complex128)
     modes = np.asarray(decomposition[1], dtype=np.complex128)
     condition = np.linalg.cond(modes)
-    inverse = (
-        np.linalg.inv(modes) if condition <= 1e8 else np.linalg.pinv(modes)
-    ).astype(np.complex128)
+    if not (condition <= 1e8 and np.max(lam.real) <= 1e-10):
+        return None
+    inverse = np.linalg.inv(modes).astype(np.complex128)
     couplings = np.array(
         [
             [inverse @ _comm((xx - sign * 1j * yy) / 2) @ modes for sign in (-1, 1)]
             for xx, yy in zip(x[0], y[0], strict=True)
         ]
-    )
-    valid = (
-        residual <= 1e-9
-        and overlap >= 0.5
-        and condition <= 1e8
-        and np.max(lam.real) <= 1e-10
     )
     omitted = np.array(
         [
@@ -416,7 +415,7 @@ def _build(
         modes,
         inverse,
         couplings,
-        bool(valid),
+        True,
     )
     _, eligible = _admission(entry, parameters, budget)
     if eligible.any():
@@ -461,6 +460,8 @@ def _admission(
         (~legacy)
         & entry.valid
         & (entry.convergence * parameters[:, 0] + entry.frame_error <= budget / 40)
+        # This existing sideband refusal does not apply to legacy accepts.
+        & ~(np.ptp(entry.lam.real) * parameters[:, 0] > 14)
     )
     return legacy, sideband
 
@@ -485,6 +486,15 @@ def _entry_admission(
         for member, use_modal in zip(legacy, modal, strict=True)
     }
     for local in np.flatnonzero(eligible):
+        if entry.sidebands is None:
+            raise RuntimeError("Floquet sideband candidates were not prepared")
+        port = int(parameters[local, -1])
+        center = probe_bin_center(parameters[local, 3])
+        if not any(
+            p == port and c.center == center for p, c in entry.sidebands.certificates
+        ):
+            # Early certification stopped only after every current bin row failed.
+            continue
         selected_plan = _sideband_plan(entry, parameters[local])
         accepted[local] = selected_plan.bound <= budget * 0.95
         if accepted[local]:
@@ -646,6 +656,8 @@ class FloquetKernel:
             )
             members = np.flatnonzero(inverse == key_index)
             entry = prepared.entries[0]
+            if entry is None:
+                continue
             _, eligible = _admission(entry, params[members], budget)
             if eligible.any():
                 if entry.sidebands is None:
@@ -656,13 +668,15 @@ class FloquetKernel:
                     entry.modes,
                     entry.inverse,
                     params[members[eligible]],
+                    budget=budget,
                 )
-                prepared = _Prepared((replace(entry, sidebands=frame),), prepared.keys)
+                entry = replace(entry, sidebands=frame)
+                prepared = _Prepared((entry,), prepared.keys)
             preparations.append(
                 GuardPreparation(keys[key_index : key_index + 1], prepared)
             )
             passed, plans = _entry_admission(
-                prepared.entries[0], params[members], selected[members], budget
+                entry, params[members], selected[members], budget
             )
             accepted[positions[members]] = passed
             admissions.update(plans)
@@ -786,6 +800,10 @@ class FloquetKernel:
         for key in np.unique(key_index):
             positions = np.flatnonzero(key_index == key)
             entry = prepared.entries[int(key)]
+            if entry is None:
+                raise RuntimeError(
+                    f"Floquet invalid frame at segments {rows[positions]}"
+                )
             decisions = []
             for row in rows[positions]:
                 decision = plan.admissions.get(int(row))
