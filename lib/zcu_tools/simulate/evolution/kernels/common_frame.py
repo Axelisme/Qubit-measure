@@ -30,7 +30,11 @@ from ._rwa_numeric import RWAGuardMetric, RWAUncomputed
 from ._secular import secular_operators
 
 # These are calibrated indicators, not rigorous trace-distance certificates.
-_COHERENT_LIMIT, _BATH_LIMIT = 0.03, 0.01
+# The retained-grid coherent maximum is 0.00146942; the nearest known
+# >2e-3 density error starts at 0.00262360. A 0.0018 limit leaves 22.5%
+# headroom above retained inputs and 31.4% clearance below that failure.
+# This deliberately rejects five other qualified inputs; bath stays unchanged.
+_COHERENT_LIMIT, _BATH_LIMIT = 0.0018, 0.01
 _MAX_STEP_NS, _PHASE_CYCLES = 8.0, 0.08
 COMMON_FRAME_POLICY = (
     "common-frame-sw2-v1",

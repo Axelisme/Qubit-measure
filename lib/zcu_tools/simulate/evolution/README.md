@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-11-15, read-only common-frame guard diagnostics
+**Last updated:** 2026-11-15, narrower common-frame coherent guard
 
 **讀者：** framework-dev、agent。Segment evolution 的公開輸入、路由與數值邊界。
 
@@ -159,7 +159,7 @@ The comparisons do not depend on the Engine's per-segment budget.
 | Field | Value and units |
 | --- | --- |
 | `denominator_min_ghz` | Smallest absolute SW denominator, GHz. Must exceed 1e-10. |
-| `coherent` | `RWAGuardMetric` for the dimensionless sum of `second`, `third`, `fourth`, `tail` and `derivative`, required ≤ 0.03. |
+| `coherent` | `RWAGuardMetric` for the dimensionless sum of `second`, `third`, `fourth`, `tail` and `derivative`, required ≤ 0.0018. |
 | `bath` | `RWAGuardMetric` for dimensionless oscillatory bath dressing plus secular T·gamma·eta², required ≤ 0.01. |
 | `eta` | Maximum absolute peak-weighted SW generator matrix row sum, dimensionless. |
 | `second`, `third`, `fourth` | Omitted-channel integral indicators at each order, dimensionless. |
@@ -177,8 +177,9 @@ The [common-frame owner](kernels/common_frame.py) builds one temporary coefficie
 product and calls the same row-local admission used by the guard once.
 The query does not evolve a density, change inputs or routing history, retain
 preparations, or compute extra indicators. These calibrated proxies do not
-certify full-density accuracy. Guard thresholds and routing behaviour are
-unchanged.
+certify full-density accuracy. The coherent limit is 0.0018; the bath limit
+remains 0.01. A rejected pinned row raises `NoValidKernel`. Default dispatch
+compares the remaining admissible families by price.
 
 ## Joint-Fock prototype
 
@@ -337,10 +338,9 @@ are normalized by envelope peak. Retained real dimension counts populations
 and both real coordinates of within-component coherences.
 
 The matrix exercises all 17 families, including a numerical-guard edge for
-each guarded family. Three existing edge cases exceed `2e-3` and remain strict
-xfails: `gate_cache` at `9.296548e-3`, `common_frame` at `8.066669e-3`
-and `shaped_sambe` at `3.091554e-3`.
-The other 14 families pass. With endpoint kicks, the `single_tone_rwa`
+each guarded family. Two existing edge cases exceed `2e-3` and remain strict
+xfails: `gate_cache` at `9.296548e-3` and `shaped_sambe` at `3.091554e-3`.
+The other 15 families pass. With endpoint kicks, the `single_tone_rwa`
 guard-edge error is `7.745247e-4`. Representative inputs are pinned by
 [`test_pinned_family_density`](../../../../tests/simulate/evolution/contract/test_accuracy_matrix.py);
 [`test_guard_edge_density`](../../../../tests/simulate/evolution/contract/test_accuracy_matrix.py)
@@ -365,11 +365,31 @@ own the command and report format.
 | [`shaped_sambe`](kernels/shaped_sambe.py), frozen-envelope finite-Fourier periods | `shaped` | Nonzero peak, carrier magnitude ≥ 0.03 GHz, subdivisions m ≤ 32, envelope slope ≤ 2·peak·abs(f)·m and peak drive bound ≤ 0.5·abs(f)·m. Subdivision policy limits real/complex motion to 0.01/0.0025 and secular split to 0.01. Compare adjacent harmonic cutoffs 2/3 or 3/4 and use 4 or 8 amplitude nodes; accumulated spectral plus interpolation estimate must be ≤ B/2. | [`linear_shaped`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | FAIL at guard edge: 3.091554e-3; strict xfail |
 | [`gate_cache`](kernels/gate_cache.py), phase-interpolated full-carrier shaped gates | `shaped` | Four Hilbert subsegments with secular half-steps. Model-only secular split d³ΓV²/16 ≤ 0.01. For 0 < d ≤ 30 ns, dispatch tries 6 phase nodes with 2 probes and full-unitary defect ≤ min(1e-4, 0.1B); other keys or failed convergence use 16 nodes. Fixed-order playback does not certify arbitrary-drive error against B. | [`shaped_complex`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | FAIL at guard edge: 9.296548e-3; strict xfail |
 | [`period_table`](kernels/period_table.py), shaped amplitude-band period playback | `shaped` | 8 Chebyshev amplitude nodes and 16 phase samples. Guard requires envelope-motion indicator ≤ 0.05, amplitude-band bandwidth ≤ 0.5 and secular split ≤ 0.01. These calibrated limits do not scale with B. DC is guard-admissible with local direct integration, but default costs prefer terminal DOP853. | [`linear_shaped`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
-| [`common_frame`](kernels/common_frame.py), common-frame SW2 beat dynamics | `two` or two-tone `multiple` only | Fixed-flux common frame with second-order beat/two-photon terms, first-order endpoint dressing and CF4/secular playback. Absolute mean carrier must be ≥ 1e-10 GHz. CF4 steps are capped at 8 ns and 0.08 cycles of the fastest retained channel, with no lower cutoff. Dispatch prices first-order playback steps, so cost rises with active carrier spacing; numerical guards determine applicability. Fast-channel denominator must exceed 1e-10. Row-local coherent/bath indicators must be ≤ 0.03/0.01, independent of B. | [`nearby_carriers`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | FAIL at guard edge: 8.066669e-3; strict xfail |
+| [`common_frame`](kernels/common_frame.py), common-frame SW2 beat dynamics | `two` or two-tone `multiple` only | Fixed-flux common frame with second-order beat/two-photon terms, first-order endpoint dressing and CF4/secular playback. Absolute mean carrier must be ≥ 1e-10 GHz. CF4 steps are capped at 8 ns and 0.08 cycles of the fastest retained channel, with no lower cutoff. Dispatch prices first-order playback steps, so cost rises with active carrier spacing; numerical guards determine applicability. Fast-channel denominator must exceed 1e-10. Row-local coherent/bath indicators must be ≤ 0.0018/0.01, independent of B. | [`nearby_carriers`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS at the new coherent guard edge |
 | [`multitone_gate`](kernels/multitone_gate.py), reused simultaneous RWA gates | `multiple`, requires a sampled envelope | When comparing `multitone_rwa` and `multitone_gate`, cost preference selects the gate at complete canonical-key inventory ≥ 20 and retains multitone RWA at 19 uses. Pinning this family bypasses cost, so 19 uses is allowed. Numerical admission: Fixed flux, B ≥ 1e-3, real envelopes, slope ≤ 0.025/ns, curvature ≤ 0.003/ns², each carrier magnitude ≥ 50 MHz and absolute-carrier spacing ≥ 100 MHz. Full-operator/carrier ratio ≤ 0.25, retained-norm phase proxy ≤ 0.06 rad and pruning ≤ min(B, 1e-3). Adaptive split uses n ≥ 4 with d³ΓV²/n² ≤ 0.01. These gate policies differ from ordinary multitone RWA. | [`joint_gate_inventory`](../../../../tests/simulate/evolution/contract/accuracy_cases.py), 20 points; [19/20 boundary contract](../../../../tests/simulate/evolution/contract/test_routing_boundaries.py) | PASS |
 | [`multitone_rwa`](kernels/multitone_rwa.py), simultaneous omission-restored RWA | `two`, distinct ports only; `multiple`, requires a sampled envelope | Fixed flux, B ≥ 1e-3, real envelopes, slope ≤ 0.025/ns, curvature ≤ 0.003/ns² and each carrier magnitude ≥ 50 MHz. Start with 50 MHz edges, restore omitted paths until transfer proxy ≤ 0.0058 and residual phase ≤ 0.0045 rad; retained real dimension ≤ 256. No carrier-spacing, full-operator/carrier ratio or retained-norm phase cap. Apply step ceiling is 16 ns for constants, 4 ns for sampled controls. | [`joint_gate_inventory`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
 | [`floquet`](kernels/floquet.py), constant Stark tone plus probe | `two` | Larger absolute gain selects the Stark slot, with ties choosing the first; that slot requires positive carrier. Frame overlap ≥ 0.5, modal condition ≤ 1e8, maximum real eigenvalue ≤ 1e-10/ns and residual ≤ 1e-9; sampling extent ≤ 128 with at most 4096 phase samples. k=0 omission and convergence each fit B/3. Modal Dyson additionally uses r ≤ 0.1, r2 ≤ 0.05 when probe gain magnitude ≥ 0.1, Dyson norm-duration v ≤ 0.5, transfer indicator v + v²/2 ≤ 0.02 and higher-order remainder exp(v)·v³/6 ≤ B/3; otherwise use periodic channel playback. Retained-sideband admission instead requires convergence ≤ B/40 and bound ≤ 0.95B, retaining edges within 0.1/ns and averaging other harmonics through order 4. This finite-Fourier admission is not a density-error guarantee. | [`two_carriers`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
 | [`dop853`](kernels/dop853.py), full-drive direct density integration | `shaped`, `two`, `multiple`, terminal candidate | No RWA or fast-path admission threshold. Accepts valid rows with finite positive B, including complex sampled envelopes. Stops at active control knots. Local rtol = min(1e-4, 0.03B), atol = min(1e-6, 0.0003B), from the [shared solver](kernels/_dop853.py); these are not global error bounds. | [`shaped_complex`](../../../../tests/simulate/evolution/contract/accuracy_cases.py), [`two_carriers`](../../../../tests/simulate/evolution/contract/accuracy_cases.py), [`joint_gate_inventory`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
+
+The `common_frame` coherent limit is 0.0018. In the retained two-tone grid,
+14 admitted cells had coherent indicators at most 0.001469411 and historical
+full-density error at most 8.234e-4. The nearest known failure had coherent
+0.002623604 and density error 2.1542e-3. The limit leaves 22.5% headroom above
+the retained maximum and 31.4% clearance below that failure. These are calibrated
+proxies, not a proof for arbitrary models or durations. The bath limit stays
+0.01; no additional comparison is used.
+
+This also rejects five historically qualified cells: `A_x3.5_T400`,
+`B_f0.25_g0.038_T1000`, `B_f0.25_g0.038_T250`, `B_f0.45_eps0.029_T400`
+and `C_g0.1_T512`. Rejected rows use whichever remaining admissible family
+wins the default price comparison, not a forced `dop853` route.
+
+The common-frame matrix edge now uses the two-level linear-drive model at
+0.6/0.63 GHz, 6.5 ns, and gains 14.175938164450116/8.859961352781323.
+Its coherent indicator is 0.0017999982, one part per million inside the new
+limit. The matrix checks the complete complex density against a two-tolerance
+full-Hamiltonian Lindblad reference with the unchanged 2e-3 acceptance bound.
+The earlier 8.066669e-3 edge is replaced, not retained as an expected failure.
 
 ### Recorded real-workload evidence
 

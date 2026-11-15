@@ -10,6 +10,7 @@ import pytest
 from zcu_tools.simulate import evolution
 
 from .accuracy_cases import coherent_source, drive_track, linear_drive_model, timeline
+from .common_frame_cases import close_carrier_case
 from .guard_edge_cases import guard_edge_case
 
 
@@ -292,3 +293,27 @@ def test_low_carrier_reports_rejection_without_later_metrics(frequency: float) -
         pytest.raises(RuntimeError, match="domain (slow|plateau)"),
     ):
         engine.evolve(source, (batch,))
+
+
+@pytest.mark.sim
+def test_common_frame_rejects_close_six_level_carriers() -> None:
+    case = close_carrier_case()
+    model = case.source.model((0,))
+    with (
+        closing(case.source),
+        closing(evolution.Engine(1, families=("common_frame",))) as engine,
+        pytest.raises(evolution.NoValidKernel),
+    ):
+        engine.evolve(case.source, (case.batch,))
+    pump, probe = case.batch.tracks
+    diagnostic = evolution.common_frame_diagnostic(
+        model,
+        (pump.port, probe.port),
+        (float(pump.frequency_ghz[0]), float(probe.frequency_ghz[0])),
+        (float(pump.amplitude[0]), float(probe.amplitude[0])),
+        float(case.batch.end_ns[0]),
+    )
+    assert not diagnostic.accepted
+    assert diagnostic.reason == "coherent"
+    assert not expect_metric(diagnostic.coherent).passed
+    assert expect_metric(diagnostic.bath).passed
