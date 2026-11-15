@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-11-14, endpoint kicks, common-frame pricing, and remeasured DOP853 evidence
+**Last updated:** 2026-11-15, kappa2 admission and fixed-set density calibration
 
 **讀者：** framework-dev、agent。Segment evolution 的公開輸入、路由與數值邊界。
 
@@ -111,32 +111,45 @@ computed and pass. Low and zero carriers return `accepted=False`, not an excepti
 | --- | --- | --- |
 | `budget` | Per-segment allowance, dimensionless | ≥ 1e-3 |
 | `carrier_ghz` | Absolute carrier, GHz | ≥ 0.05 |
-| `omission_transfer` | Remaining first/second-order transfer proxy after adaptive edge restoration, dimensionless | ≤ 0.0058 |
+| `kappa2` | Spectral norm of the entrywise absolute omitted c/d coefficients summed over both Fourier signs after adaptive edge restoration, dimensionless | ≤ 0.08 |
 | `strength_ratio` | abs(gain) × sum of full quadrature spectral norms / abs(carrier), dimensionless | ≤ 0.25 |
 | `phase_rad` | 2π × duration × squared gain-weighted retained positive Fourier norm / abs(carrier), rad | ≤ 0.06 |
 | `pruning` | Phase-graph population omission bound, dimensionless | ≤ min(budget, 1e-3) |
 | `real_dimension` | Populations plus real within-component coherence coordinates, count | ≤ 64 |
 
 The [single constant RWA owner](kernels/single_tone_rwa.py) defines the query and
-graph comparisons. It shares the retention, transfer, strength and phase
-calculation with the guard through [RWA numerics](kernels/_rwa_numeric.py).
+graph comparisons. It shares retention, kappa2, strength and phase calculations with the guard
+through [RWA numerics](kernels/_rwa_numeric.py). `kappa2` replaces the public
+`omission_transfer` field without an alias. Its value is
+`||sum_sign abs(c/d)||_2`, where c includes gain and d is signed detuning in GHz.
+It uses the endpoint kick's omitted edges, including diagonal ±carrier terms,
+from the complement of the resolved retention mask. Phase-graph pruning does
+not change this edge set.
+
+Retention still starts with the 50 MHz window and restores forward edges and
+their adjoints using first/second-order population transfer and the existing
+5.8e-3 threshold. Kappa2 replaces only the final single-constant transfer
+comparison. The shared transfer constant and `multitone_rwa` are unchanged.
+
 The query preserves guard early returns. Budget always has a value. A failed
-budget leaves every later metric uncomputed. A failed carrier leaves transfer,
-strength, phase, pruning and dimension uncomputed. Transfer and strength have
+budget leaves every later metric uncomputed. A failed carrier leaves kappa2,
+strength, phase, pruning and dimension uncomputed. Kappa2 and strength have
 values after these domain checks. A failed strength ratio leaves the phase in
 radians uncomputed. Any base rejection leaves pruning and dimension uncomputed.
 A pruning rejection still returns dimension because the guard computes both.
 
-Transfer is computed during retention, before strength and phase comparisons.
-Its value and passed status remain visible even when either of those later
-comparisons rejects the row. The diagnostic is a numeric table, not a decision
-trace. A value and passed status do not mean that comparison participated in
-the particular rejection.
+Kappa2 is computed after retention, before strength and phase comparisons.
+Its value and passed status remain visible even when either later comparison
+rejects the row. The diagnostic is a numeric table, not a decision trace.
+A value and passed status do not mean that comparison participated in the
+particular rejection. `accepted` equals the guard result for the same row.
 
 The query does not diagnose sampled envelopes, multiple tones or moving flux.
 Carrier phase and initial density do not enter the comparisons. These metrics
 are admission proxies, not a certificate of final full-density accuracy.
-The guard thresholds, dispatch order and other families are unchanged.
+The 0.08 threshold has margin on the fixed acceptance set described below.
+It is not a maximum usable threshold or an accuracy guarantee for arbitrary
+inputs. Dispatch order and other families are unchanged.
 
 ## Joint-Fock prototype
 
@@ -298,8 +311,13 @@ The matrix exercises all 17 families, including a numerical-guard edge for
 each guarded family. Three existing edge cases exceed `2e-3` and remain strict
 xfails: `gate_cache` at `9.296548e-3`, `common_frame` at `8.066669e-3`
 and `shaped_sambe` at `3.091554e-3`.
-The other 14 families pass. With endpoint kicks, the `single_tone_rwa`
-guard-edge error is `7.745247e-4`. Representative inputs are pinned by
+The other 14 families pass in the recorded observations. The `single_tone_rwa`
+kappa2 inner-edge case has full-density error `3.061429e-13` and reference
+convergence difference `8.564902e-13`. Its two-level diagonal drive makes
+kappa2 equal to gain, set just below 0.08. The public diagnostic agrees with
+guard admission on both sides of that edge. This focused case replaces the
+older retained-phase edge and is separate from the real-workload calibration
+below. Broader post-change gate measurements are pending. Representative inputs are pinned by
 [`test_pinned_family_density`](../../../../tests/simulate/evolution/contract/test_accuracy_matrix.py);
 [`test_guard_edge_density`](../../../../tests/simulate/evolution/contract/test_accuracy_matrix.py)
 pins the [guard-edge inputs](../../../../tests/simulate/evolution/contract/guard_edge_cases.py).
@@ -316,7 +334,7 @@ own the command and report format.
 | [`flux_dop853`](kernels/flux_dop853.py), driven continuous flux | `flux` | Integrate full H(flux(t)) with a fixed quantized secular bath per row, stopping at active flux/envelope knots. Requires tones and waveform samples. Local rtol = min(1e-4, 0.03B), atol = min(1e-6, 0.0003B), from the [shared solver](kernels/_dop853.py). | [`continuous_flux`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
 | [`slow_envelope`](kernels/slow_envelope.py), low-carrier constant drive | `slow`, carrier magnitude strictly below 30 MHz | Midpoint-held full Hamiltonians with Strang bath half-steps, default 20 holds per period and one hold for DC. Dispatch and kernel guard share the strict absolute-carrier < 30 MHz comparison; exactly ±30 MHz belongs to plateau. No budget adaptation; historical population calibration is separate from this density measurement. | [`low_carrier`](../../../../tests/simulate/evolution/contract/accuracy_cases.py); [boundary contract](../../../../tests/simulate/evolution/contract/test_routing_boundaries.py) | PASS |
 | [`dyson`](kernels/dyson.py), weak constant drive | `plateau` | Second-order full-carrier modal Dyson. Calibrated guards require r ≤ min(0.1, 0.25B^(1/3)), r2 ≤ 0.05, and second-order population indicator B2 + B/8 ≤ min(0.02, (1.5B)^(2/3)). Certified shared no-drive prefixes omit the B2 check. B/8 reserves path pruning; this is not a multilevel remainder proof. | [`weak_plateau`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
-| [`single_tone_rwa`](kernels/single_tone_rwa.py), constant rotating-frame block evolution | `plateau` | Fixed flux, B ≥ 1e-3, carrier magnitude ≥ 50 MHz. Initial 50 MHz edge window with omission-driven restoration; transfer proxy ≤ 0.0058, full-operator/carrier ratio ≤ 0.25 and retained-norm phase proxy ≤ 0.06 rad. Phase-graph pruning ≤ min(B, 1e-3); real generator dimension ≤ 64. First-order endpoint kicks include every edge outside the resolved retention mask, including diagonal ±carrier terms; phase-graph pruning is separate. Cross-component density entries below 1e-5 after the initial kick are dropped. Uses the full secular bath without Strang splitting. | [`linear_plateau`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS at guard edge: 7.745247e-4 |
+| [`single_tone_rwa`](kernels/single_tone_rwa.py), constant rotating-frame block evolution | `plateau` | Fixed flux, B ≥ 1e-3, carrier magnitude ≥ 50 MHz. Initial 50 MHz edge window with first/second-order population-transfer restoration at 5.8e-3, including forward edges and adjoints. Final admission uses kappa2 = spectral norm of sum_sign abs(c/d) over the resolved omitted edges, ≤ 0.08, in place of the remaining transfer comparison. Full-operator/carrier ratio ≤ 0.25 and retained-norm phase proxy ≤ 0.06 rad. Phase-graph pruning ≤ min(B, 1e-3); real generator dimension ≤ 64. First-order endpoint kicks include every edge outside the resolved retention mask, including diagonal ±carrier terms; phase-graph pruning is separate. Cross-component density entries below 1e-5 after the initial kick are dropped. Uses the full secular bath without Strang splitting. | [`linear_plateau`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS at kappa2 inner edge: 3.061429e-13 |
 | [`floquet_period`](kernels/floquet_period.py), full-carrier constant-tone period reuse | `plateau` | Hilbert period trajectories with secular split playback. Requires carrier magnitude ≥ 0.03 GHz and some subdivision count m in 1..64 with dT²ΓV²/m² ≤ 1.0, using this owner's rad/ns drive bound. Below 1 GHz, CF4 or adjacent-cutoff Sambe uses endpoint defect ≤ min(1e-4, 0.1B). Higher carriers use DOP853 rtol min(1e-8, 1e-4B), max step T/4. These are calibrated local controls. | [`weak_plateau`](../../../../tests/simulate/evolution/contract/accuracy_cases.py), [`strong_plateau`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS; largest family error 1.375101e-3 |
 | [`t6`](kernels/t6.py), full dissipative constant-tone evolution | `plateau`, terminal candidate | One constant tone at any strength. Direct integrates each density in the H0 frame with the full secular bath and the shared dop853 policy: local rtol = min(1e-4, 0.03B), atol = min(1e-6, 0.0003B), without a fixed step ceiling. These are not whole-sequence error bounds. Channel retains its existing integration controls, powers complete periods and Fourier-interpolates phase, refining 16..512 nodes until off-grid defect and spectral tail are each ≤ B/16. Complete-key reuse selects the strategy as described below. Neither strategy does RWA or density repair; numerical failure raises rather than reroutes. | [`weak_plateau`](../../../../tests/simulate/evolution/contract/accuracy_cases.py), [`strong_plateau`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
 | [`single_tone_gate`](kernels/single_tone_gate.py), phase-covariant shaped RWA gates | `shaped` | Fixed flux, B ≥ 1e-3, real sampled envelope with at least 3 samples, slope ≤ 0.025/ns, curvature ≤ 0.003/ns², carrier magnitude ≥ 50 MHz. Omission restoration requires transfer ≤ 0.0058, residual phase ≤ 0.0045 rad and retained real dimension ≤ 256. Pruning ≤ min(B, 1e-3); adaptive secular split uses n ≥ 4 with d³ΓV²/n² ≤ 0.01. [Shared gate owner](kernels/_rwa_gate.py). | [`linear_shaped`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
@@ -330,6 +348,30 @@ own the command and report format.
 | [`dop853`](kernels/dop853.py), full-drive direct density integration | `shaped`, `two`, `multiple`, terminal candidate | No RWA or fast-path admission threshold. Accepts valid rows with finite positive B, including complex sampled envelopes. Stops at active control knots. Local rtol = min(1e-4, 0.03B), atol = min(1e-6, 0.0003B), from the [shared solver](kernels/_dop853.py); these are not global error bounds. | [`shaped_complex`](../../../../tests/simulate/evolution/contract/accuracy_cases.py), [`two_carriers`](../../../../tests/simulate/evolution/contract/accuracy_cases.py), [`joint_gate_inventory`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
 
 ### Recorded real-workload evidence
+
+A separate fixed-candidate acceptance run calibrated the single-constant
+kappa2 threshold of 0.08 with endpoint kicks. It covered 395 inputs and
+561 points with 136 references, including both eight-point RB workloads.
+Of the 561 pinned attempts, 512 admitted points met the full complex-density
+`2e-3` criterion. The 49 `NoValidKernel` refusals comprise 42 period points and
+seven nonzero shaped-RB points. Refusals have no density comparison and do not
+count as PASS or zero error. The 273 permitted `floquet_period` surrogate
+attempts admitted. There were no new A3 refusals and no default attempts, so
+this run supplies no new default-route observations.
+
+The worst admitted pinned point was `period/0.4/0.1/385.0`, point 0.
+Its full-density error was `0.00016965243421764126`, leaving
+`0.0018303475657823589` below `2e-3`. This is a real-workload point, not the
+synthetic guard-edge case. Both zero-segment RB points retained complete
+density/reference comparisons without invented route or kappa2 values.
+
+These results support 0.08 on this candidate and acceptance set, not a larger
+threshold or arbitrary-input accuracy. The parent reviewed source-generated
+reference identity, convergence and error metadata, and checked the saved
+densities' shape, complex dtype and finite values. That review did not solve
+references independently or repeat evolution. This accuracy run does not
+remeasure the timings or dominance counts in the historical tables below.
+Broader post-change gates and performance measurements remain pending.
 
 The [thirteen recorded summaries](../../../../tools/README.md#recorded-scenario-summaries)
 retain the final errors, three history modes, wall/process CPU medians, companions
@@ -350,7 +392,7 @@ evidence. These observations do not authorize deletion or guard changes.
 | `t6` | Directly retained, terminal plateau candidate | [N-long](../../../../tools/data/family_pareto/summaries/long_gate_sequence.md) qualifies; local budget controls are not a final-error guarantee. |
 | `dop853` | Directly retained, terminal shaped/two/multiple candidate | [A](../../../../tools/data/family_pareto/summaries/gain_sweep.md) qualifies at 4.14019e-6 on remeasurement; retained does not mean accurate on every input. |
 | `dyson` | No measured target | Offered plateau groups refuse; no dominance conclusion. |
-| `single_tone_rwa` | 4: L, I, N, N-long | [N-long](../../../../tools/data/family_pareto/summaries/long_gate_sequence.md) qualifies at 1.24701e-3 over 50/100/200 gates. F and both bias045 tables fail. Disposition remains pending, not approved for deletion. |
+| `single_tone_rwa` | 4: L, I, N, N-long | [N-long](../../../../tools/data/family_pareto/summaries/long_gate_sequence.md) qualifies at 1.24701e-3 over 50/100/200 gates. F and both bias045 tables fail in these historical measurements, not in the fixed-candidate calibration above. Timing and dominance remeasurement remains pending; no deletion is authorized. |
 | `floquet_period` | 4: F, I, F-bias045, N-bias045 | L, N and N-long are dominated by qualified `single_tone_rwa`; [F-bias045](../../../../tools/data/family_pareto/summaries/carrier_sweep_bias045.md) supplies a qualified alternative to RWA. |
 | `single_tone_gate` | No measured target | Shaped target groups refuse; no dominance conclusion. |
 | `shaped_sambe` | 3: A, S, S-long | [S-long](../../../../tools/data/family_pareto/summaries/long_shaped_gate_sequence.md) qualifies at 8.42157e-5; O2 is companion-blocked, not target-refused. |

@@ -63,8 +63,10 @@ class SingleToneRWADiagnostic:
     omitted Fourier edges after adaptive restoration, including diagonal +/-f
     edges. The coefficients include gain; d is signed detuning in GHz. This
     uses the endpoint kick's resolved mask, not the pruned phase graph. Its
-    candidate cap is 0.08, pending production calibration. strength_ratio is
-    abs(gain)*(||X||+||Y||)/abs(carrier), dimensionless, required <=0.25.
+    0.08 cap has full-density calibration with margin on the fixed candidate
+    acceptance set. This does not establish a maximum usable threshold or
+    arbitrary-input accuracy. strength_ratio is dimensionless,
+    abs(gain)*(||X||+||Y||)/abs(carrier), required <=0.25.
     phase_rad is 2*pi*duration*(gain*||retained positive Fourier operator||)^2 /
     abs(carrier), in rad, required <=0.06. pruning is the dimensionless phase-graph
     population omission bound, required <=min(budget,1e-3). real_dimension counts
@@ -157,10 +159,12 @@ def single_tone_rwa_diagnostic(
     Returns frozen metrics for computed values, and RWAUncomputed for work
     skipped by guard early returns. Low/zero carrier and positive budget below
     1e-3 return accepted=False. See SingleToneRWADiagnostic for each metric's
-    availability and the kappa2 candidate cap pending calibration. Raises
-    ValueError for an unknown port, nonfinite inputs,
-    negative duration or invalid budget. Numerical construction
-    failures propagate. No evolution, routing, history or preparation is changed;
+    availability and the 0.08 kappa2 cap, calibrated with full-density margin
+    on the fixed candidate acceptance set. This does not establish a maximum
+    usable threshold or arbitrary-input accuracy. Raises ValueError for an
+    unknown port, nonfinite inputs, negative duration or invalid budget.
+    Numerical construction failures propagate.
+    No evolution, routing, history or preparation is changed;
     temporary model-only facts are released before return. This query does not
     diagnose shaped, multitone or moving-flux rows and does not select a family.
     """
@@ -426,8 +430,11 @@ def _play(
 class SingleToneRWAKernel:
     """Single constant-tone C5 family with arbitrary complex density playback.
 
-    Uses the shared RWA omission, strength and 0.06 rad phase admission, budget
-    >=1e-3 and fixed flux. The retained graph must also pass the explicit
+    Uses final kappa2 <=0.08 admission, the shared strength comparison and
+    0.06 rad phase admission, budget >=1e-3 and fixed flux. The 0.08 cap has
+    full-density calibration with margin on the fixed candidate acceptance set.
+    This does not establish a maximum usable threshold or arbitrary-input
+    accuracy. The retained graph must also pass the explicit
     min(budget,1e-3) pruning bound. Preparation never sees density. Each key
     stores a constant rotating-frame Hamiltonian and full secular bath, with
     all populations and within-component coherences in one real generator

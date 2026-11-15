@@ -46,7 +46,8 @@ RWA_POLICY = (
 
 
 ADAPTIVE_RWA_POLICY = ("omission-strongest-parent-v2", CONSTANT_RWA_POLICY, RWA_POLICY)
-# Sample-supported candidate; production calibration is still pending.
+# Full-density calibration supports 0.08 with margin on the fixed candidate
+# acceptance set, not a maximum threshold or arbitrary-input accuracy bound.
 _MAX_KAPPA2 = 0.08
 SINGLE_CONSTANT_RWA_POLICY = (
     "single-constant-kappa2-v1",
@@ -123,7 +124,9 @@ class ConstantRWAAdmission:
     retention owns the final Fourier edge set. carrier_ghz is the absolute
     carrier in GHz, required >=0.05. kappa2 is the dimensionless spectral norm
     of the entrywise absolute omitted c/d coefficients summed over both signs,
-    after edge restoration. Its candidate cap awaits production calibration.
+    after edge restoration. Its 0.08 cap has full-density calibration with
+    margin on the fixed candidate acceptance set. This does not establish a
+    maximum usable threshold or arbitrary-input accuracy.
     strength_ratio is the full-quadrature strength divided by absolute carrier.
     phase_rad is the retained-norm phase proxy in radians, or RWAUncomputed
     when the strength-ratio comparison already rejected the row.
