@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-11-16, frozen numeric inputs, reference identity and dispatch scheduling cost naming
+**Last updated:** 2026-11-16, frozen numeric inputs, reference identity, dispatch scheduling cost naming and evolve-local exact-key Floquet frames
 
 **讀者：** framework-dev、agent。Segment evolution 的公開輸入、路由與數值邊界。
 
@@ -232,9 +232,11 @@ Full-map accuracy and wall measurements are separate validation work.
 `result.paths.routing`. The default is False, with no thread CPU clock reads and
 an empty mapping. Evolution never writes files. `paths.frontend_cpu_s` separately
 reports calling-thread geometry and WorkPlan CPU.
-Common-frame reports also count `prepare_builds` and `admission_rows`; other
-families currently leave these two instrumented-owner counters at zero. Telemetry does not change guards,
-routes, densities or cancellation.
+Common-frame reports also count `prepare_builds` and `admission_rows`.
+Floquet's `prepare_builds` counts exact-key frame construction attempts,
+including invalid frames and frames whose rows are all refused. Other families
+leave these counters at zero. Telemetry does not change guards, routes,
+densities or cancellation.
 
 `PathDiagnostics.duration_ns_by_kernel` always reports logical physical ns per
 family, even with telemetry off, without CPU clocks. Its immutable mapping
@@ -544,7 +546,8 @@ and projects usage for inspection, with the same inventory and cost formulas. Pr
 and timeline workers share it through `KernelContext` and `ApplyContext`. Engine
 drains its pool before closing the plan on success, cancellation or failure.
 The single `complete_table` field supplies full immutable geometry to common-frame,
-and multitone dispatch. Closing drops it along with the evolve-local facts.
+multitone dispatch and Floquet frame construction. Closing drops it along with
+the evolve-local facts.
 The registry kernels retain no evolve-local data.
 
 ### Facts and algorithm groups
@@ -563,9 +566,12 @@ The shared facts include envelope peak/slope/real flags, period split rates, pac
 DOP853 samples and covariant gate admissions. Gate admission facts use full canonical physics, budget and numerical
 policies. Each row still checks its own continuous flux support before borrowing an
 admission; only absolute start and covariant phase are omitted from the fact.
-Floquet consumes full Fourier averages during frame construction. Its compact
-frames and optional sideband candidates belong only to active preparations,
-never evolve-long facts. Model facts include the full
+Floquet consumes full Fourier averages during frame construction. WorkPlan
+publishes each compact frame and optional sideband candidates once per source
+instance, budget and complete prepare key. Prefix and deferred classifications
+share these facts, including invalid frames and frames whose rows are all
+refused. The complete evolve table determines sideband demand before the first
+build; row-local certificates and admissions are not facts. Model facts include the full
 physical coordinates in their identity. Table-indexed facts
 also include table identity, so renumbered prefix representatives cannot alias
 the complete table. DOP853 packing also distinguishes flux-inclusive samples.
@@ -634,7 +640,9 @@ timeline and row count. Shared preparations retain their separate evolve lifetim
 
 Single-use ordinary keys prepare at their apply wave.
 Accepted guard products go directly to apply, even when only a subset of rows
-accepts. Fully rejected products have no consumers and are released.
+accepts. Fully rejected guard products have no apply consumers and are released.
+Floquet's compact frame fact remains available to later classifications until
+WorkPlan closes; no frame or refusal list survives the evolve.
 Input-bound payloads, densities and dissipative preparations never cross evolves
 through Engine storage.
 
