@@ -14,7 +14,7 @@ Recipe 自動推導的 owner、async 協作及取消結果見 [[0075]]；MCP cal
 
 ## 分層與連線
 
-使用者在 2026-10-13 裁定：「mcp跑的腳本不要放scripts，這個資料夾是給用戶使用的。」因此 `scripts/` 只放使用者自己執行的入口。使用者選址「C」，即 repo root 的新資料夾 `mcp_servers/`，agent 的 measure MCP 組合根放在這裡。Workflow 工具由同一 measure server 提供，不保留獨立 workflow server。組合根同時知道 lab 定義與 framework，放在 lib 會反向依賴使用者套件，放在 `zcu_lab` 則混入框架啟動責任。`tools/` 只放 repo 品質檢查。三個 MCP 組合根都位於 `mcp_servers/`，各自委派 lib 的 stdio server。Repo 的三份 MCP client 設定使用同一組入口，各自保留既有啟動與曝光政策。Workflow 離線驗證使用 measure headless owner、RPC 與 MCP 的合成定義，不維護第二個 app 或獨立模擬腳本。
+使用者在 2026-10-13 裁定：「mcp跑的腳本不要放scripts，這個資料夾是給用戶使用的。」因此 `scripts/` 只放使用者自己執行的入口。使用者選址「C」，即 repo root 的新資料夾 `mcp_servers/`，agent 的 measure MCP 組合根放在這裡。Workflow 工具由同一 measure server 提供，不保留獨立 workflow server。組合根同時知道 lab 定義與 framework，放在 lib 會反向依賴使用者套件，放在 `zcu_lab` 則混入框架啟動責任。`tools/` 放 repo 內部開發工具：品質檢查、重運算執行器與模擬器量測工具。三個 MCP 組合根都位於 `mcp_servers/`，各自委派 lib 的 stdio server。Repo 的三份 MCP client 設定使用同一組入口，各自保留既有啟動與曝光政策。Workflow 離線驗證使用 measure headless owner、RPC 與 MCP 的合成定義，不維護第二個 app 或獨立模擬腳本。
 
 2026-10-25，使用者問：「為什麼mcp啟動app是靠script?」，並選擇「乙」，將 GUI 組合根搬到 repo root 的 `apps/`。`apps/measure.py`、`apps/fluxdep.py`、`apps/dispersive.py` 各提供可 import 的 `main(argv)`，擁有 CLI、startup 選擇、lab 注入與 runtime 接線。`scripts/app/` 只放使用者薄殼，`.bat` 在 repo root 執行 `uv run --directory . --extra gui -- python -m apps.<app>`。Measure 組合根注入實驗與 workflow，fluxdep、dispersive 組合根註冊 lab components。
 

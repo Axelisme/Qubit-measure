@@ -4,6 +4,13 @@ import ast
 from pathlib import Path, PurePosixPath
 
 import check_test_capabilities as checker
+import pytest
+
+
+def test_help_exits_successfully_without_scanning() -> None:
+    with pytest.raises(SystemExit) as caught:
+        checker.main(["-h"])
+    assert caught.value.code == 0
 
 
 def _write(root: Path, relative: str, source: str) -> None:

@@ -6,6 +6,12 @@ import check_test_path_correspondence as checker
 import pytest
 
 
+def test_help_exits_successfully_without_scanning() -> None:
+    with pytest.raises(SystemExit) as caught:
+        checker.main(["-h"])
+    assert caught.value.code == 0
+
+
 def _build(root: Path, *, test_dirs: tuple[str, ...], source_dirs: tuple[str, ...]):
     for relative in source_dirs:
         (root / relative).mkdir(parents=True, exist_ok=True)

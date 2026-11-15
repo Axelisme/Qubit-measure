@@ -210,14 +210,20 @@ def main(argv: list[str] | None = None) -> int:
     """Scan --root/zcu_lab and print a JSON receipt plus stderr diagnostics.
 
     --root defaults to this checkout. Exit 0 means no violations, 1 means rejected
-    expressions, and 2 means source could not be read or parsed. No imports run.
+    expressions, and 2 means root is missing or source could not be read or
+    parsed. No imports run. None reads sys.argv; argparse handles help and
+    invalid CLI syntax with SystemExit.
     """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--root", type=Path, default=Path(__file__).resolve().parents[1]
+        "--root",
+        type=Path,
+        default=Path(__file__).resolve().parents[1],
+        help="checkout containing zcu_lab (default: this checkout)",
     )
     root = parser.parse_args(argv).root
     try:
+        root = root.resolve(strict=True)
         sources = {
             path.relative_to(root).as_posix(): path.read_text(encoding="utf-8")
             for path in sorted((root / "zcu_lab").rglob("*.py"))
