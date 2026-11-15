@@ -1,6 +1,6 @@
 # tools/
 
-**Last updated:** 2026-11-15, fenced code examples excluded from link checks
+**Last updated:** 2026-11-16, probe snapshot writer and comparison
 
 **讀者：** framework-dev。Repo 品質檢查與重計算執行器的 CLI、輸出與比較機制。
 
@@ -89,6 +89,38 @@ uv run --directory <worktree> --no-sync -- \
   python tools/check_ratchet.py --base <ref> --detector pyright --full-pyright \
   > <per-task 目錄>/pyright-receipt.json
 ```
+
+## Probe snapshots
+
+| 命令 | Exit code | 是否在 gate |
+| --- | --- | --- |
+| `python tools/probe_snapshot.py compare A B [--rtol R] [--atol A]` | 0 相同或容差內且輸入相同；1 陣列、PNG 或 case 不同／缺漏；2 用法、讀寫或格式錯誤；3 輸出相同或容差內但輸入不同；`-h` 回 0 | 否，手動比較離線 probe 輸出 |
+
+在自己的 probe script 中 import writer。Caller 選擇要保存的陣列或 dataclass、PNG bytes 與輸入：
+
+```python
+from pathlib import Path
+from tools.probe_snapshot import write_snapshot
+
+write_snapshot(
+    Path("snapshots/before"), "t1.run", result,
+    pngs, inputs={"cfg": cfg, "seed": 7, "environment": environment_inputs},
+)
+```
+
+`inputs` 是必填 keyword-only，可明填 `None`。Caller 提供 cfg、analysis options、seed、
+環境設定或來源陣列；writer 不發現實驗或讀取環境私有狀態。
+每個 label 寫入新目錄，保存 `arrays.npz`、PNG 與 `inputs.json`。既存 label 拒絕寫入，
+重跑時選新 output root。輸入指紋包含陣列的 shape、dtype 與內容，不只記形狀。
+
+同一支 script 在兩個 worktree 各以自己的 `uv run --directory <worktree> --no-sync --`
+執行一次，分別寫 A、B，再執行上表 compare 命令。工具不啟動其他 worktree 或儀器。
+表格逐 case 列出陣列、圖與輸入的比較結果。預設要求 shape、dtype 與值完全相同，
+相同位置的 NaN 視為相等。PNG 比解碼後的 RGBA 像素，不比檔案 bytes 或 metadata。
+明示 `--rtol` 或 `--atol` 才容許浮點／複數誤差，未指定的一項為 0。
+符合容差但非完全相同時顯示 `WITHIN TOL`，PNG 仍須像素相同。
+輸出差異的 exit 1 優先於輸入差異的 exit 3。Exit 3 需要人工判讀，不表示通過或失敗。
+比較結果不宣稱是 regression；模擬器或環境改動本來就可能改變結果。仍須逐張看圖驗收。
 
 ## Simulator benchmark
 
