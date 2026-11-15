@@ -1,6 +1,6 @@
 # Explicit acquisition environments
 
-**Last updated:** 2026-11-14
+**Last updated:** 2026-11-16
 
 **讀者：** framework-dev。模擬 acquisition 的 request、round 與 raw source 契約。
 
@@ -282,7 +282,14 @@ finally:
 
 `SimulationEnvironment` returns `soc`, matching `soccfg`, `devices` and a public
 `description`. The builder owns cleanup before successful return. The caller
-owns cleanup after return. GUI registration transfers each accepted driver's
+owns cleanup after return. Standalone callers can use
+`with zcu_tools.experiment.simulation.closing_environment(env) as env:` after
+building the environment. On normal or exceptional exit, it releases the optional
+backend and then closes devices, even if backend release fails. Acquisition must
+have drained before exit. The helper does not change `SimulationEnvironment` into
+a context manager or transfer GUI ownership. See the
+[experiment environment API](../../../experiment/README.md#explicit-simulation-environments).
+GUI registration transfers each accepted driver's
 lifetime to DeviceService; rejected candidates remain caller-owned. The caller
 retains ownership of the board and other environment resources. Register their
 cleanup with the startup script's on-close hook when needed. After callbacks and
