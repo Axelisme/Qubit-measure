@@ -140,11 +140,11 @@ def guard_edge_case(family: str) -> AccuracyCase:
         # motion = 2*pi*gain*||X||*slope/f^2 = 0.04999995.
         gain = 0.05 * (1 - 1e-6) * frequency**2 / (2 * np.pi * 0.002 * 0.025)
     elif family == "common_frame":
-        # Public Engine admission brackets the scale boundary at
-        # [589.1080780029297 accepted, 589.1080799102783 rejected]. The same
-        # bracket holds with zero bath and 1000x bath, identifying coherent
-        # admission <= .03, rather than bath <= .01, as the limiting guard.
-        scale = 589.1080780029297 * (1 - 1e-6)
+        # Scalar two-level SW algebra gives coherent=0.0017999982 at this
+        # fixed scale, one part per million inside the 0.0018 limit.
+        # The constant-envelope terms are quadratic, cubic and quartic in
+        # scale plus the positive BCH tail. No test-time search is needed.
+        scale = 177.19922705562644
         batch = timeline(2, 6.5)
         batch = replace(
             batch,

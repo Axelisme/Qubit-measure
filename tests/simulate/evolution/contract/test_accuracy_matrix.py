@@ -5,7 +5,13 @@ from contextlib import closing
 from dataclasses import replace
 
 import pytest
-from zcu_tools.simulate.evolution import Engine, RoutingHistory, segment_spans
+from zcu_tools.simulate.evolution import (
+    Engine,
+    RoutingHistory,
+    RWAGuardMetric,
+    common_frame_diagnostic,
+    segment_spans,
+)
 
 from .accuracy import AccuracyMeasurement, measurement_property, require_families
 from .accuracy_cases import AccuracyCase, accuracy_case, history_case, multisegment_case
@@ -28,7 +34,6 @@ CASE_NAMES = (
 )
 KNOWN_EDGE_ERRORS = {
     "gate_cache": 0.00929654785179012,
-    "common_frame": 0.008066669226955314,
     "shaped_sambe": 0.0030915535285839482,
 }
 PINNED = tuple(
@@ -86,6 +91,23 @@ def test_guard_edge_density(
     matrix_reference: Callable[[AccuracyCase], ReferenceResult],
 ) -> None:
     case = guard_edge_case(family)
+    if family == "common_frame":
+        pump, probe = case.batch.tracks
+        diagnostic = common_frame_diagnostic(
+            case.source.model((0,)),
+            (pump.port, probe.port),
+            (float(pump.frequency_ghz[0]), float(probe.frequency_ghz[0])),
+            (float(pump.amplitude[0]), float(probe.amplitude[0])),
+            float(case.batch.end_ns[0]),
+        )
+        assert diagnostic.accepted
+        coherent = diagnostic.coherent
+        assert isinstance(coherent, RWAGuardMetric)
+        assert coherent.passed
+        assert 0.99 * coherent.threshold <= coherent.value <= coherent.threshold
+        request.node.user_properties.append(
+            ("common_frame_coherent", str(coherent.value))
+        )
     reference = matrix_reference(case)
     with closing(Engine(1, families=(family,))) as engine:
         result = engine.evolve(case.source, (case.batch,))
