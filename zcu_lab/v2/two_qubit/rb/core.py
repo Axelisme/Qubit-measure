@@ -392,7 +392,7 @@ class RBExp(Experiment[RBResult, RBCfg]):
     Options = RBOptions
 
     def run(self, config: RBCfg, *, context: RunContext) -> RBResult:
-        """Acquire optional reset → paired sequence → terminal class counts.
+        """Acquire optional reset → concurrent per-qubit sequence → terminal counts.
 
         Each host round acquires reps shots with rounds=1, not a host average.
         Return fixed raw count slots; cfg and saved sequence identities are unchanged.
@@ -436,6 +436,10 @@ class RBExp(Experiment[RBResult, RBCfg]):
                         if config.reset is not None:
                             builder.emit(Reset("reset", config.reset))
 
+                        # ADR-0083: join synchronizes ends without moving reference.
+                        # Each qubit advances independently until a common CZ boundary.
+                        timelines = ("rb_f1_time", "rb_f2_time")
+                        builder.fork("default", into=list(timelines))
                         # The recovery makes the net logical operation identity.
                         # Positive logical Z advances a frame; X uses base minus frame.
                         frames = [0.0, 0.0]
@@ -453,9 +457,11 @@ class RBExp(Experiment[RBResult, RBCfg]):
                                         pulse,
                                         phase=(float(pulse.phase) - frames[role])
                                         % 360.0,
-                                    )
+                                    ),
+                                    timeline=timelines[role],
                                 )
                             elif gate == TwoQubitGate.CZ:
+                                builder.join(*timelines, into="default")
                                 builder.fork(
                                     "default",
                                     into=[
@@ -476,6 +482,8 @@ class RBExp(Experiment[RBResult, RBCfg]):
                                     f"gate_{index}_cz_f2_time",
                                     into="default",
                                 )
+                                for timeline in timelines:
+                                    builder.join("default", into=timeline)
                                 frames[0] = (
                                     frames[0] + config.phase_pair.correction_f1_deg
                                 ) % 360.0
@@ -484,6 +492,7 @@ class RBExp(Experiment[RBResult, RBCfg]):
                                 ) % 360.0
                             else:
                                 raise ValueError(f"Unknown two-qubit gate: {gate!r}")
+                        builder.join(*timelines, into="default")
                         builder.emit(readout, tag="terminal")
                         prog = builder.build()
                         processor = shot_sums(
