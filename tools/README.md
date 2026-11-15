@@ -1,6 +1,6 @@
 # tools/
 
-**Last updated:** 2026-11-15, fenced code examples excluded from link checks
+**Last updated:** 2026-11-15, acquire benchmark retired
 
 **讀者：** framework-dev。Repo 品質檢查與重計算執行器的 CLI、輸出與比較機制。
 
@@ -92,74 +92,16 @@ uv run --directory <worktree> --no-sync -- \
 
 ## Simulator benchmark
 
-在目標 worktree 根目錄執行完整量測。先建立輸出目錄，再透過 `--exclusive` 取得兩個重計算 slot：
-
-```bash
-mkdir -p .agent_state/benchmark
-uv run --directory <worktree> --no-sync -- \
-  python tools/run_heavy.py --exclusive --log .agent_state/benchmark/run.log 1800 -- \
-  python tools/benchmark_simulator.py --output .agent_state/benchmark/results.json \
-  > .agent_state/benchmark/receipt.json
-```
-
-`benchmark_simulator_workloads.py` 擁有五個版本化合成 workload，並自帶 board profile、物理模型與 program 設定。
-它不讀 lab 實驗、預設 YAML 或測試 fixture。
-Const 工作負載的三個 gain 是 `0.08 → 0.12 → 0.16`。
-兩個 shaped 工作負載使用版本 2，gain 為 `0.16 → 0.24 → 0.32`，補回 product 輸出的約半刻度。
-`ftf_overlap_shaped` 的第二個 tone gain 由 0.1 改為 0.2。
-精確 product 係數是 `32766/65536`，加倍後的連續振幅比舊刻度低約 0.0061%，另有 gain-word 取整。
-每點 32 reps，seed 為 `20261112`。
-所有環境關閉 drift，並設定 `time_scale=0`。FTF 關閉 telemetry，以免計入其檔案 I/O。
-
-| Workload | 公開 acquire 的內容 |
-| --- | --- |
-| `single_drive_flux_ramp` | 常數 microwave drive 與 fast-flux pulse 同時掃 gain。Flux line 的 delay 與低通響應產生 ramp 和被動尾端。 |
-| `single_repeated_shaped` | 四個連續 Gaussian drive pulses，隨後 pulse readout。 |
-| `six_mux` | 依序驅動六個獨立 fluxonium，再用同一次 mux acquire 讀取六個 ADC。 |
-| `ftf_simultaneous_tones` | 不同 generator 的兩個常數 tone 同時驅動 FTF，隨後 pulse readout。 |
-| `ftf_overlap_shaped` | 不同 generator 的兩個 Gaussian tone 部分重疊，第二個晚 8 ns 開始。 |
-
-每個 workload 依序量三種模式，每種五次：
-
-- `first_acquire` 每次新建環境與 program，只量該環境的第一次 acquire。
-- `warm_clear_history` 在自己的環境中先跑兩次固定且不計時的 acquire，之後每次先 `history.clear()`，再量 acquire。
-- `warm_retain_history` 在另一個環境中先跑相同的兩次暖機，之後五次 acquire 都保留歷史。
-
-計時只包住 `program.acquire`，wall 使用 `perf_counter`，CPU 使用 `process_time`，單位都是秒。
-Imports、模型設定解析、環境建構、program compilation、暖機、清歷史與 cleanup 都不在計時區間內。
-Acquire 內部的 frontend preparation、按需編譯、演化與 ADC sampling 則包含在內。
-`first_acquire` **不是 fresh process 或空 disk Numba cache**。
-五次樣本共用目前 process，可能受前一個樣本或 workload 的程式碼與 disk cache 暖態影響。
-工具不刪除 cache，也不建立平行量測 process。
-
-JSON 保存完整 workload 設定、timeline 與設定版本、各自的 SHA-256、library 版本、量測模式定義、每次 wall/CPU 原始秒數，以及 median 和 MAD。
-MAD 是每個樣本與 median 的絕對差之 median，單位也是秒。
-版本或設定有變時應建立新的 baseline，不把不相容 workload 的數字合併比較。
-
-加 `--compare <before.json>` 會執行同一份完整量測，再逐 workload、模式和 wall/CPU 列出前後 median 與百分比：
-
-```bash
-uv run --directory <worktree> --no-sync -- \
-  python tools/run_heavy.py --exclusive --log .agent_state/benchmark/after.log 1800 -- \
-  python tools/benchmark_simulator.py --output .agent_state/benchmark/after.json \
-  --compare .agent_state/benchmark/results.json \
-  > .agent_state/benchmark/after-receipt.json
-```
-
-比較文字在 `after.log`，runner 收據在 `after-receipt.json`。
-百分比是 `100 * (after / before - 1)`，正值代表變慢。Before median 為零時顯示 `n/a`。
-工具拒絕不同的 workload、設定、hash、schema 或量測模式。Library 版本可不同，兩側各自保留版本供判讀。
-變慢本身仍回傳 0，不設效能門檻。
-Acquire、暖機或比較失敗時回傳非零，stderr 保留原因，不輸出部分量測 JSON，也不覆寫先前的結果檔。
-
-`main(argv)` 是 CLI 薄殼。`run_workload`、`run_benchmarks` 與 `compare_results` 可直接 import。
-測試注入小型 acquire session 與 clock，驗證計時和歷史模式，不在 pytest 中跑完整 benchmark。
+模擬器量測按層分開，不再提供 program → acquire 的端到端 benchmark。
+Kernel 量測在 `Engine.evolve` 上用 `families=` 固定候選，輸入只有一段。
+整體耗時改用多段 `TimelineBatch` 在 `Engine.evolve` 的序列層量測，不經 program compilation 或 ADC sampling。
+現有的 family 誤差與耗時量表見下節。
 
 ## Engine family Pareto table
 
 `family_pareto.py` compares every family on the same complete physical inputs.
-It times **Engine.evolve**, not `program.acquire`. The existing acquire benchmark
-above keeps its workloads and comparison contract.
+It times **Engine.evolve**, not `program.acquire`. The program-to-acquire
+benchmark is retired; sequence-level measurements exclude compilation and ADC sampling.
 
 The default inputs are fixed 24-point carrier, gain, length, idle and gate-sequence
 scans on the full 21-level single-fluxonium model, including constant and Gaussian
