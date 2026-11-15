@@ -21,7 +21,14 @@ status: accepted
 使用者於 2026-10-18 定案：「Q1A，是的，演化引擎黑盒子就是指simulate.evolution。」
 
 外部透過 `simulate.evolution` package root 匯出的名稱呼叫引擎及使用資料型別。
-Kernel、dispatch、scheduler 與 cache 是內部實作，不是第二套整合入口。
+Kernel、dispatch、scheduler 與 cache 維持內部實作。呼叫端經 `Engine.inspect_dispatch` 查詢選路，不直接呼叫內部 dispatcher。
+
+2026-11-16，使用者核可公開 dispatch 查詢的實作計畫：「1核可」；對 Floquet guard 選「B」，保留一週期 propagator 計算。
+`Engine.inspect_dispatch(source, batches, budget=...)` 與 evolve 共用 classifier 和 guard，不演化 density。
+查詢逐 split row 回傳 family、guard 判定與價格，或 deferred、short-circuit、needs-prefix 原因。
+查詢以投影的完整 inventory 使用次數計價，不修改 `RoutingHistory` 的 usage、content membership 或 generation，也不註冊 routing reuse facts。
+因此查詢的已決定路由等於相同初始 history 下 evolve 的路由，且不改變後續 evolve 的路由或 density。
+Guard preparation 在查詢返回時釋放，不留在 Engine；source model cache 與 shift registration 仍可被填入。
 呼叫端提供 numeric model source、timeline、初態與誤差預算，不逐段選算法。
 引擎回傳 readout 起點的量子態與 family 診斷。
 Environment 顯式組合 population 轉換與 ADC；readout 的樣本加總仍由 `simulate.adc` 擁有。

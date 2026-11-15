@@ -2,6 +2,7 @@
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
+from typing import Literal
 
 import numpy as np
 from joblib import delayed
@@ -11,6 +12,7 @@ from ._carrier_plan import populate_carrier_plan
 from ._common_frame_dispatch import preferred as common_frame_preferred
 from ._dop853_dispatch import direct_plans
 from ._gain_plan import plan_gain_groups
+from ._inspection import DispatchCandidate, GuardDecision, needs_prefix_input
 from ._multitone_dispatch import (
     gate_preferred,
     populate_gate_inventory,
@@ -52,6 +54,7 @@ def create_work_plan(
     *,
     telemetry: bool = False,
     content_key: bytes = b"",
+    history_mode: Literal["record", "project"] = "record",
 ) -> WorkPlan:
     """Create ownership for the complete evolve before prefix/worker planning.
 
@@ -60,8 +63,12 @@ def create_work_plan(
     Algorithm-specific group planners populate this plan before workers start;
     budget is the numerical admission budget for cold mixed gate plans.
     telemetry enables calling-thread CPU accounting before those plans build.
+    history_mode records complete usage for evolve or projects it without
+    changing history for dispatch queries. Neither mode changes cost formulas.
     """
-    plan = WorkPlan(content_key=content_key, complete_table=table)
+    plan = WorkPlan(
+        content_key=content_key, complete_table=table, history_mode=history_mode
+    )
     plan.routing.enabled = telemetry
     populate_carrier_plan(table, source, plan)
     plan_gain_groups(table, source, plan)
@@ -302,7 +309,9 @@ class _Classifier:
         context: KernelContext,
         pool: Executor | None = None,
         selection: Selection | None = None,
+        trace: dict[int, dict[str, DispatchCandidate]] | None = None,
     ):
+        self.trace = trace
         self.pool, self.selection = pool, selection
         self.geometry = geometry
         self.kernels = (
@@ -322,6 +331,9 @@ class _Classifier:
         self.costs = np.zeros(len(self.names))
         self.deferred = np.zeros(len(self.names), dtype=bool)
         self.scope = geometry.pending
+        if trace is not None:
+            # Query cannot evaluate a guard that needs an evolved prefix density.
+            self.scope &= ~needs_prefix_input(self.table)
         if selection is not None:
             self.scope &= np.isin(np.arange(len(self.names)), selection.rows)
         self.shaped = selection.shaped if selection is not None else None
@@ -332,6 +344,25 @@ class _Classifier:
         self.rejected: dict[str, NDArray[np.bool_]] = {}
         self.guard_plans: dict[str, list[RowPlan]] = {}
         self.plans: dict[str, RowPlan] = {}
+
+    def observe(
+        self, kernel: Kernel, rows: NDArray[np.int64], decision: GuardDecision
+    ) -> None:
+        """Record only query observations; ordinary evolve does no extra pricing."""
+        if self.trace is None or not len(rows):
+            return
+        prices = (
+            kernel.cost(self.table, rows)
+            if decision != "untested_after_short_circuit"
+            else [None] * len(rows)
+        )
+        for row, price in zip(rows, prices, strict=True):
+            candidates = self.trace.setdefault(int(row), {})
+            if decision == "untested_after_short_circuit" and kernel.name in candidates:
+                continue
+            candidates[kernel.name] = DispatchCandidate(
+                kernel.name, decision, None if price is None else float(price)
+            )
 
     def guard_keys(
         self, kernel: Kernel, rows: NDArray[np.int64]
@@ -352,6 +383,7 @@ class _Classifier:
         )
         local = rows[~caller_keys[groups.inverse]]
         self.deferred[local] = True
+        self.observe(kernel, local, "deferred")
         if len(local):
             self.costs[local] = kernel.cost(self.table, local)
         selections = (
@@ -411,6 +443,8 @@ class _Classifier:
             if result is None:
                 raise RuntimeError("guard job returned no decision")
             self.names[result.rows] = kernel.name
+            self.observe(kernel, result.rows, "accepted")
+            self.observe(kernel, result.rejected, "rejected")
             self.context.work_plan.routing.reject(kernel.name, len(result.rejected))
             if len(result.rejected):
                 self.rejected.setdefault(
@@ -447,8 +481,15 @@ class _Classifier:
                 for name in dict.fromkeys((*candidates, *cost_skipped))
                 if name in self.context.families
             )
-        for name in candidates:
+        for index, name in enumerate(candidates):
+            offered = rows
             rows = self.try_kernel(require(self.kernels, name, self.table, rows), rows)
+            if self.trace is not None:
+                stopped = offered[~np.isin(offered, rows)]
+                for later in candidates[index + 1 :]:
+                    kernel = self.kernels.get(later)
+                    if kernel is not None:
+                        self.observe(kernel, stopped, "untested_after_short_circuit")
             if not len(rows):
                 return
         points = np.unique(self.geometry.points[self.table.timeline[rows]]).tolist()
@@ -686,6 +727,8 @@ def classify(
     context: KernelContext,
     pool: Executor | None = None,
     selection: Selection | None = None,
+    *,
+    trace: dict[int, dict[str, DispatchCandidate]] | None = None,
 ) -> Dispatch:
     """Guard shared candidates now and resolve local candidates in their worker.
 
@@ -693,5 +736,9 @@ def classify(
     Smaller shared selections stay serial. Selection resolves one timeline's
     deferred rows without a nested pool, retaining guard products for apply.
     Both modes use the same acquire-wide cost plan and numerical guards.
+    trace=None keeps ordinary evolve behavior. A query supplies an empty mapping
+    to collect row/family observations and excludes rows that need an uncomputed
+    driven prefix density. The mapping receives immutable DispatchCandidate
+    records; no worker classification or prefix evolution runs for a query.
     """
-    return _Classifier(geometry, kernels, context, pool, selection).classify()
+    return _Classifier(geometry, kernels, context, pool, selection, trace).classify()
