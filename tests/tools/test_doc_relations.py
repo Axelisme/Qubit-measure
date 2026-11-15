@@ -16,6 +16,8 @@ from doc_relations import (
     search_terms,
 )
 
+pytestmark = pytest.mark.requires_subprocess
+
 _KERNEL = "lib/pkg/engine/kernels/t6.py"
 _SOURCES = {
     "lib/pkg/engine/README.md": "Engine notes, governed by ADR-0078.\n",

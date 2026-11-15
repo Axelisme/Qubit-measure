@@ -25,6 +25,12 @@ _HISTORY_NAME = re.compile(
 
 @dataclass(frozen=True)
 class Finding:
+    """One structural diagnostic at repo-relative path and one-based line.
+
+    rule identifies the check and message explains it. severity is blocking
+    (affects exit status) or advisory (reported without failing the check).
+    """
+
     path: str
     line: int
     rule: str
@@ -146,9 +152,18 @@ def findings(root: Path) -> tuple[Finding, ...]:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Scan --root/tests and print JSON plus stderr diagnostics.
+
+    None reads sys.argv; --root defaults to this checkout. Return 0 without
+    blocking findings, 1 with blocking findings, or 2 for invalid roots/read/parse
+    failures. argparse handles help and invalid CLI syntax with SystemExit.
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--root", type=Path, default=Path(__file__).resolve().parents[1]
+        "--root",
+        type=Path,
+        default=Path(__file__).resolve().parents[1],
+        help="checkout containing tests (default: this checkout)",
     )
     arguments = parser.parse_args(argv)
     try:

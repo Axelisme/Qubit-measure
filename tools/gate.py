@@ -1,13 +1,12 @@
 """Run the fast quality gates in one command.
 
-Fast means proportional to the change, not to the repository: formatting and
-linting the touched files, the import contracts, and the ratchet. Together they
-cost a couple of seconds, which is what a check has to cost to belong inside a
-writer's loop rather than at the end of one.
+With --base, run formatting on touched files, import contracts, script awaits,
+MCP text budgets and the ratchet. Some checks scan the whole repository or launch
+subprocesses, so runtime is not proportional only to the changed file count.
 
-The slow checks stay separate on purpose. tools/check_pytest_collection.py takes
-about 30 seconds and the suite about two minutes; folding them in here would turn
-a two-second command into a two-minute one and teach everyone to skip it.
+Collection and behavioral tests stay separate: this command does not establish
+that tests collect consistently or that the changed behavior passes. Runtime
+depends on the worktree, installed environment and selected checks.
 
 Order matters. Formatting runs first because it rewrites code, and measuring
 before it would report a state that no longer exists by the time anyone reads the
@@ -54,9 +53,8 @@ class Check:
     count_key: str | None = None
 
 
-# Measured over the whole tree, not against a base. Pyright is left out by
-# default: 41 seconds against 6 for everything else here, which would make the
-# status view something people stop running.
+# Measured over the whole tree, not against a base. Pyright is opt-in because
+# it adds a full-tree type-checking pass.
 STATUS_CHECKS: Final = (
     Check("import contracts", ("lint-imports",)),
     Check(
@@ -70,6 +68,20 @@ STATUS_CHECKS: Final = (
         "overage_count",
     ),
     Check("ruff", ("ruff", "check", "--output-format", "json", "."), "__len__"),
+    Check(
+        "docstring",
+        (
+            "ruff",
+            "check",
+            "--isolated",
+            "--select",
+            "D100,D101,D102,D103",
+            "--output-format",
+            "json",
+            "tools",
+        ),
+        "__len__",
+    ),
     Check(
         "file size",
         (sys.executable, str(_TOOLS_DIR / "check_file_size.py")),
@@ -114,6 +126,12 @@ class Step:
 
 @dataclass(frozen=True)
 class Outcome:
+    """Captured gate-step result.
+
+    name is the display label; command is the executed argv. returncode is the
+    process exit status. stdout and stderr are captured text, including failures.
+    """
+
     name: str
     command: tuple[str, ...]
     returncode: int
@@ -122,6 +140,7 @@ class Outcome:
 
     @property
     def ok(self) -> bool:
+        """Return whether the command exited with status zero."""
         return self.returncode == 0
 
 
@@ -201,6 +220,10 @@ def status(root: Path, *, with_pyright: bool) -> dict[str, str]:
 
 
 def run_step(step: Step, root: Path) -> Outcome:
+    """Run step.command in root and capture output without checking its status.
+
+    Return the labeled result; subprocess launch/IO failures propagate.
+    """
     completed = subprocess.run(
         step.command, cwd=root, check=False, capture_output=True, text=True
     )
@@ -233,6 +256,15 @@ def _ratchet_summary(outcome: Outcome) -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Report absolute counts, or run this checkout's gates against --base.
+
+    None reads sys.argv. Without --base, print counts and return 0, regardless
+    of findings; --with-pyright includes a full-tree type pass. With --base,
+    rewrite touched Python files unless --no-fix, then run the remaining gates.
+    Return 0 if all steps pass, 1 for a failed step, or 2 if the base cannot be
+    resolved. argparse handles help and invalid CLI syntax with SystemExit;
+    subprocess launch failures propagate.
+    """
     parser = argparse.ArgumentParser(
         description=__doc__,
         epilog="Run separately: " + "; ".join(SEPARATE_CHECKS),
@@ -251,7 +283,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--with-pyright",
         action="store_true",
-        help="include Pyright in the status report (adds about 40 seconds)",
+        help="include a whole-tree Pyright pass in the status report",
     )
     arguments = parser.parse_args(argv)
 
@@ -263,7 +295,7 @@ def main(argv: list[str] | None = None) -> int:
         for name, reading in readings.items():
             print(f"{name.ljust(width)}  {reading}")
         if not arguments.with_pyright:
-            print("\npyright omitted; --with-pyright adds it (about 40s)")
+            print("\npyright omitted; --with-pyright adds a full-tree type pass")
         print("These are absolute counts over the whole tree, not a verdict on any")
         print("change. Pass --base <ref> to judge a candidate against its base.")
         return 0
