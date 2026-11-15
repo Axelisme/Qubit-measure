@@ -47,7 +47,6 @@
 | `probe_snapshot.py` | `tools/probe_snapshot.py compare A B [--rtol R] [--atol A]` | 0 輸出相同或容差內且輸入相同；1 陣列、PNG 或 case 不同／缺漏，優先於 3；2 用法、讀寫或格式錯誤；3 輸出相同或容差內但輸入不同 | 否，手動比較離線 probe 輸出 |
 | `run_heavy.py` | `tools/run_heavy.py --log <file> <timeout> -- <command>` | 子程序狀態；2 啟動前失敗、70 runner 失敗、75 等待逾時、124 執行逾時 | 否，重計算外層 |
 | `analyze_routing_telemetry.py` | `tools/analyze_routing_telemetry.py <path> ...` | 0 完成，無法讀檔時非零 | 否 |
-| `benchmark_simulator.py` | `tools/benchmark_simulator.py --output <file>` | 0 完成，量測或比較失敗時非零 | 否 |
 | `family_pareto.py` | `-m tools.family_pareto --scenario <name>` | 0 完成，輸入或量測失敗時非零 | 否 |
 
 Usage 錯誤由 argparse 以 2 結束；未轉譯的 Git、讀檔或其他執行錯誤仍會傳出例外，不能當作檢查通過。
