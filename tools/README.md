@@ -1,6 +1,6 @@
 # tools/
 
-**Last updated:** 2026-11-14, no-evolution sample rejection and corrected DOP853 summaries
+**Last updated:** 2026-11-15，新增單 fluxonium STIRAP 型 workload
 
 **讀者：** framework-dev。Repo 品質檢查與重計算執行器的 CLI、輸出與比較機制。
 
@@ -102,10 +102,10 @@ uv run --directory <worktree> --no-sync -- \
   > .agent_state/benchmark/receipt.json
 ```
 
-`benchmark_simulator_workloads.py` 擁有五個版本化合成 workload，並自帶 board profile、物理模型與 program 設定。
+`benchmark_simulator_workloads.py` 擁有六個版本化合成 workload，並自帶 board profile、物理模型與 program 設定。
 它不讀 lab 實驗、預設 YAML 或測試 fixture。
 Const 工作負載的三個 gain 是 `0.08 → 0.12 → 0.16`。
-兩個 shaped 工作負載使用版本 2，gain 為 `0.16 → 0.24 → 0.32`，補回 product 輸出的約半刻度。
+原有的 `single_repeated_shaped` 與 `ftf_overlap_shaped` 使用版本 2，gain 為 `0.16 → 0.24 → 0.32`，補回 product 輸出的約半刻度。
 `ftf_overlap_shaped` 的第二個 tone gain 由 0.1 改為 0.2。
 精確 product 係數是 `32766/65536`，加倍後的連續振幅比舊刻度低約 0.0061%，另有 gain-word 取整。
 每點 32 reps，seed 為 `20261112`。
@@ -118,6 +118,16 @@ Const 工作負載的三個 gain 是 `0.08 → 0.12 → 0.16`。
 | `six_mux` | 依序驅動六個獨立 fluxonium，再用同一次 mux acquire 讀取六個 ADC。 |
 | `ftf_simultaneous_tones` | 不同 generator 的兩個常數 tone 同時驅動 FTF，隨後 pulse readout。 |
 | `ftf_overlap_shaped` | 不同 generator 的兩個 Gaussian tone 部分重疊，第二個晚 8 ns 開始。 |
+| `single_stirap_shaped` | 20 能階單 fluxonium 的相鄰 0↔1、1↔2 躍遷，Stokes 比 Pump 早 0.105 µs，兩個 Gaussian tone 部分重疊，掃三個 Pump gain。 |
+
+`single_stirap_shaped` 的 timeline 與設定版本都是 1。
+它沿用合成單 fluxonium 的 EJ/EC/EL=4/1/1 GHz、DC=0.45 Φ0，native cutoff 為 80，保留最低 20 態。
+兩條 charge drive 的係數都是 1 GHz/gain，沒有 fast-flux line。
+兩個 Gaussian 的 σ 都是 0.07 µs，support 都是 0.42 µs。
+Pump gain 掃 `0.0344 → 0.043 → 0.0516`，Stokes gain 固定為 `0.143`；這是未校準的 workload，不宣稱 STIRAP 轉移保真度。
+Carrier 分別為 `1433.4218883789758` 與 `2904.5631072147653` MHz。
+它們來自公開 `simulate.fluxonium.calculate_eigensystem` 在上述 DC、native cutoff 80 的 E1−E0 與 E2−E1，GHz 能量差乘 1000，不額外取整；編譯時由 QICK 量化至 DDS 格點。
+它保留既有公開 acquire 計時邊界與預設選路，不 pin family、不改 guard。
 
 每個 workload 依序量三種模式，每種五次：
 

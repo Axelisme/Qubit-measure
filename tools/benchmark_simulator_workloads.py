@@ -1,4 +1,4 @@
-"""Version 1 synthetic board, physical inputs and public-acquire timelines.
+"""Versioned synthetic board, physical inputs and public-acquire timelines.
 
 No lab definitions, default YAML or test fixtures are loaded. Change workload
 version when timeline semantics change, configuration_version when inputs change.
@@ -361,8 +361,63 @@ def _ftf() -> dict[str, JsonValue]:
     }
 
 
+def _stirap() -> Workload:
+    model = _single()
+    model["drive_lines"] = {
+        name: {
+            "name": name,
+            "gen_ch": ch,
+            "charge_drive_ghz_per_gain": {"real": 1.0, "imag": 0.0},
+        }
+        for name, ch in (("pump", 1), ("stokes", 2))
+    }
+    model["flux_line"] = None
+    model["numerics"] = {
+        "projection_prune_floor": 1e-9,
+        "slow_envelope_segments_per_period": 20,
+        "truncation": {"native_cutoff": 80, "levels": 20},
+        "solver": {
+            "rtol": 1e-8,
+            "atol": 1e-10,
+            "max_step_ns": 0.5,
+            "bath_segment_ns": 4,
+        },
+        "seed": 20261112,
+        "time_scale": 0,
+    }
+    return Workload(
+        name="single_stirap_shaped",
+        version=1,
+        configuration_version=1,
+        configuration={
+            "board": _board(mux=False),
+            "model": parse_single_fluxonium(model).model_dump(mode="json"),
+            "program": {
+                "reps": 32,
+                "gains": [0.0344, 0.043, 0.0516],
+                "drive_length_us": 0.42,
+                "readout_length_us": 0.032,
+                "shaped_repeats": 1,
+                "gaussian_sigma_us": 0.07,
+                # Native-80 EJ/EC/EL=4/1/1 GHz, flux=.45: E1-E0 and E2-E1.
+                "drive_frequency_mhz": 1433.4218883789758,
+                "second_frequency_mhz": 2904.5631072147653,
+                "readout_frequency_mhz": 7000,
+                "second_gain": 0.143,
+                "readout_gain": 0.1,
+                "mux_frequencies_mhz": [],
+                "mux_mixer_frequency_mhz": 0,
+                "initial_delay_us": 0,
+                "relax_delay_us": 0,
+                "first_tone_offset_us": 0.105,
+                "second_tone_offset_us": 0,
+            },
+        },
+    )
+
+
 def make_workloads() -> list[Workload]:
-    """Return the five versioned inputs in fixed single/six/FTF execution order.
+    """Return the versioned single/six/FTF inputs, then the STIRAP-shaped scan.
 
     Model parsers expand defaults into the retained configuration. Board and
     program values are synthetic and do not depend on repository YAML or caches.
@@ -409,7 +464,7 @@ def make_workloads() -> list[Workload]:
             ("ftf_simultaneous_tones", circuit),
             ("ftf_overlap_shaped", circuit),
         ]
-    ]
+    ] + [_stirap()]
 
 
 class _ProgramInputs(BaseModel):
@@ -418,6 +473,7 @@ class _ProgramInputs(BaseModel):
     drive_length_us: float
     readout_length_us: float
     shaped_repeats: int
+    first_tone_offset_us: float = 0
     second_tone_offset_us: float
     gaussian_sigma_us: float
     drive_frequency_mhz: float
@@ -458,7 +514,11 @@ def _program(workload: Workload, builder: TimelineBuilder) -> TimelineProgramV2:
         )
         builder.emit(readout.build("readout"))
     else:
-        shaped = workload.name in {"single_repeated_shaped", "ftf_overlap_shaped"}
+        shaped = workload.name in {
+            "single_repeated_shaped",
+            "ftf_overlap_shaped",
+            "single_stirap_shaped",
+        }
         waveform = (
             GaussWaveformCfg(
                 length=inputs.drive_length_us, sigma=inputs.gaussian_sigma_us
@@ -467,15 +527,25 @@ def _program(workload: Workload, builder: TimelineBuilder) -> TimelineProgramV2:
             else ConstWaveformCfg(length=inputs.drive_length_us)
         )
         first = PulseCfg(
-            ch=1, nqz=1, freq=inputs.drive_frequency_mhz, gain=gain, waveform=waveform
+            ch=1,
+            nqz=1,
+            freq=inputs.drive_frequency_mhz,
+            gain=gain,
+            pre_delay=inputs.first_tone_offset_us,
+            waveform=waveform,
         ).build("first")
-        if workload.name.startswith("ftf") or workload.name == "single_drive_flux_ramp":
+        if workload.name.startswith("ftf") or workload.name in {
+            "single_drive_flux_ramp",
+            "single_stirap_shaped",
+        }:
             builder.fork("default", into="second")
             second = PulseCfg(
                 ch=2,
                 nqz=1,
                 freq=inputs.second_frequency_mhz,
-                gain=inputs.second_gain if workload.name.startswith("ftf") else gain,
+                gain=gain
+                if workload.name == "single_drive_flux_ramp"
+                else inputs.second_gain,
                 pre_delay=inputs.second_tone_offset_us,
                 waveform=waveform,
             ).build("second")
