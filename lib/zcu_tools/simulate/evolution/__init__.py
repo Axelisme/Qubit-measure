@@ -22,6 +22,18 @@ from .engine import (
     segment_spans,
 )
 from .exceptions import NoValidKernel
+from .frozen import (
+    FrozenInput,
+    FrozenRecord,
+    canonical_json,
+    digest,
+    physical_input,
+    read_frozen_input,
+    read_frozen_manifest,
+    read_physical_input,
+    write_frozen_input,
+    write_frozen_manifest,
+)
 from .joint_fock import (
     JointFockDiagnostic,
     JointFockRequest,
@@ -34,6 +46,13 @@ from .kernels._rwa_numeric import (
     rwa_coefficients,
 )
 from .model import DriveSource, NumericModel
+from .reference_cache import (
+    ReferenceResult,
+    SolverTolerances,
+    load_reference,
+    reference_key,
+    write_reference,
+)
 from .routing_history import RoutingHistory
 from .secular import (
     FluxExpansion,

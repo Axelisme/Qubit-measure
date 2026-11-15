@@ -10,9 +10,9 @@ import numpy as np
 import pytest
 from zcu_tools.simulate.evolution import EvolutionResult, PathDiagnostics
 
-from tests.simulate.evolution.contract.accuracy_cases import AccuracyCase, accuracy_case
+from tests.tools.family_pareto_support import make_scene
 from tools.family_pareto import EngineSession, Sample, main, measure_family
-from tools.family_pareto_inputs import Input
+from tools.family_pareto_inputs import Input, Scene
 
 
 def test_observer_keeps_first_slow_sample_when_the_next_evolve_fails() -> None:
@@ -51,15 +51,15 @@ def test_partial_run_retains_samples_and_leaves_old_complete_outputs_untouched(
 ) -> None:
     builds = 0
 
-    def failing_later() -> AccuracyCase:
+    def failing_later() -> Scene:
         nonlocal builds
         builds += 1
         if builds == 3:
             raise RuntimeError("input collaborator failed")
-        return accuracy_case("idle_coherence")
+        return make_scene("idle_coherence")
 
     inputs = [
-        Input("good", lambda: accuracy_case("idle_coherence"), "small collaborator"),
+        Input("good", lambda: make_scene("idle_coherence"), "small collaborator"),
         Input("bad", failing_later, "controlled input failure"),
     ]
     manifest, output, summary, journal = (
@@ -101,12 +101,12 @@ def test_partial_run_retains_samples_and_leaves_old_complete_outputs_untouched(
 def test_cli_prepares_references_without_timing_or_a_summary(tmp_path: Path) -> None:
     builds = 0
 
-    def build() -> AccuracyCase:
+    def build() -> Scene:
         nonlocal builds
         builds += 1
         if builds > 3:
             raise RuntimeError("no policy sessions allowed during preparation")
-        return accuracy_case("idle_coherence")
+        return make_scene("idle_coherence")
 
     inputs = [Input("idle", build, "small preparation collaborator")]
     manifest, output, cache = (
@@ -135,9 +135,7 @@ def test_cli_prepares_references_without_timing_or_a_summary(tmp_path: Path) -> 
 
 
 def test_partial_attempt_never_reuses_an_old_journal(tmp_path: Path) -> None:
-    inputs = [
-        Input("idle", lambda: accuracy_case("idle_coherence"), "small collaborator")
-    ]
+    inputs = [Input("idle", lambda: make_scene("idle_coherence"), "small collaborator")]
     manifest, output, summary, journal = (
         tmp_path / name
         for name in ("inputs.json", "matrix.json", "summary.md", "attempt.jsonl")

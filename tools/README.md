@@ -170,9 +170,10 @@ A 24-point Gaussian relative-delay scan uses the fixed integer-fluxonium model
 with native cutoff 80 and 20 retained levels. Its two charge ports address the
 same qubit. A separate 24-point constant-tone carrier scan uses those same
 integer-model charge ports with equal support and complete overlap.
-Add `--include-synthetic` to also measure the unchanged accuracy inventory and
-twelve amplified synthetic workloads. Reports separate
-the two categories; deletion conclusions use real inputs only.
+Add `--include-synthetic` to also measure the explicitly declared three-level
+`idle_coherence` input. Accuracy/guard grids and amplified test workloads stay
+in the tests-side matrix. Reports separate the two categories; deletion
+conclusions use real inputs only.
 
 ### Recorded scenario summaries
 
@@ -368,20 +369,13 @@ families are unmeasured, not unavailable, and get no family conclusion.
 Dominance and timing equivalence compare only measured pinned families. Do not use
 a partial table to justify deleting a family.
 
-With `--include-synthetic`, `family_pareto_inputs.py` reuses the accuracy table's
-ordinary Python support. That inventory includes the original representatives, all guard edges, the complete
-gain/split sweeps and crossing brackets, shape bridges, history inputs and the
-complete multisegment sequence. Fallback cases share the same physical inputs as
-the unity gate and long split cases. Each input is tried with every family.
+`family_pareto_inputs.py` owns the producer's named `Scene` and `Input`
+records. `Input.build()` returns a fresh source that the caller closes.
+The synthetic inventory contains only the explicitly declared `idle_coherence`.
+The 115 other borrowed accuracy, guard, sweep, history and amplified-workload
+inputs are no longer measurement scenes. Their tests-side owners remain intact.
 Oracle caching excludes only the model's nonphysical identity namespace. Both
-full reconstruction hashes and oracle-sharing hashes are saved.
-
-Each original synthetic domain also has a 96-point workload. Three gain factors, `1, 1.5, 2`,
-correspond to the acquire benchmark's `.08, .12, .16` ratio. Each factor has 32
-complete timeline repetitions, preserving original point phases, envelopes,
-durations, bath and flux trajectories. This is the acquire benchmark's `3 x 32`
-scale, without ADC or readout. In particular, the joint-gate workload retains the
-full inventory rather than extrapolating from two points. The manifest records
+full reconstruction hashes and oracle-sharing hashes are saved, together with
 all arrays, models, initial density, optional flux expansion, expected families,
 point order and the reason for each input.
 
@@ -461,10 +455,12 @@ collaborators; the complete matrix runs outside pytest through the exclusive run
 
 ### Fixed scenarios, companions and reference cache
 
-`family_pareto_scenarios.py` owns curated core pulse sequences. It uses public
-program components, compiled requests, and the environment source's
-`model_facts`/`plan_template` to construct complete Engine inputs.
-`single_model_input(name, emit, manifest, families)` is the public single-model construction entry point.
+`family_pareto_scenarios.py` owns curated core pulse sequences and the scene
+producer CLI. `family_pareto_scene_builders.py` owns shared single/integer model
+construction, public program compilation, source detachment and support-based
+route declarations. The FTF scene retains its own joint-model composition.
+`single_model_input(name, emit, manifest, families)` in the builders module is
+the public single-model construction entry point.
 `family_pareto_settings.py` owns fixed single-fluxonium, integer-fluxonium, FTF and board inputs,
 copied from commit `303074e166d1a563addfab4fd94717d958a7dd56`. The manifest
 records their source commit and fixed values. Runtime construction does not import
@@ -604,8 +600,9 @@ The fixed target declarations assign all driven rows/ns to the target and the
 idle tail to `t4`, using public compiled supports before any Engine measurement.
 Default routing and its observed-union group keep their existing protocol.
 
-`integer_fluxonium_input(name, emit, manifest, families)` owns the shared fixed
-integer settings, board, environment, compilation and numeric-source detachment.
+`integer_fluxonium_input(name, emit, manifest, families)` in
+`family_pareto_scene_builders.py` owns the shared fixed integer settings, board,
+environment, compilation and numeric-source detachment.
 Its `emit(builder, dc_model)` callback receives a public `TimelineBuilder` and
 DC `SecularModel`. It can emit constant or Gaussian pulses on either charge line
 and use the model's GHz energies to choose carriers. The builder appends terminal
@@ -729,6 +726,51 @@ convergence contract. Model identity namespaces and routing history are excluded
 Files contain density and convergence error without pickle objects.
 Only equal physical hashes permit reuse across builder changes. Keep the cache
 outside Git. Reference solve/cache-load totals remain separate from Engine time.
+
+### Freeze numeric scenes
+
+The producer writes two simulator-owned gzip manifests. Their combined size
+must stay within 10 MiB, exactly 10,485,760 bytes. The current 10,374,837 bytes
+leave 110,923 bytes; a larger revision needs a size/schema decision first.
+The files are:
+`tools/data/family_pareto/frozen-synthetic.json.gz` and `frozen-real.json.gz`.
+Their ordered records contain complete numeric physics and both hashes; scene
+reason, target/companion declarations and provenance are opaque metadata owned
+by tools. `freeze_records` returns public `simulate.evolution.FrozenRecord`
+values. The codec owns versioning, unique names, hash verification and
+reproducible gzip, with mtime=0 and no filename. No solver identity is added.
+
+Run model construction only with an approved compute budget and the current
+heavy runner/lock policy. The producer entry point is:
+
+```bash
+uv run --directory "$PWD" --no-sync -- python -m tools.family_pareto_scenarios \
+  --output tools/data/family_pareto
+```
+
+`--scenario NAME` selects one declaration before model construction. The
+single-support `kernel_single_constant`, `kernel_single_sampled` and
+`kernel_multitone_sampled` scenes use public `SingleFluxoniumModel` directly.
+They are separate from the complete F/L/I/N sequences, which retain 24 points
+and 21 levels each. See the [data README](data/family_pareto/README.md).
+
+Independent reference preparation stays in tests. After separate solver-cost
+approval, the default manifest-to-solver mapping is:
+
+```bash
+uv run --directory "$PWD" --no-sync -- python -m tests.simulate.evolution.contract.family_pareto_reference_producer \
+  --converged tools/data/family_pareto/frozen-synthetic.json.gz \
+  --interaction tools/data/family_pareto/frozen-real.json.gz \
+  --cache /path/to/approved/reference-cache
+```
+
+The producer reads only record names and physics; callers select the solver,
+not metadata or a name list. Existing cache entries are read without solving;
+missing entries are solved only by this separately approved preparation step.
+The public solver-free `load_reference` fails on cache misses.
+The measurement reader migration is separate: until it migrates, the existing
+report-side `inputs.json` archive and `freeze_manifest` helper remain unchanged.
+They are transitional and are not a second reader for the new container.
 
 ### Partial attempts and failure handling
 

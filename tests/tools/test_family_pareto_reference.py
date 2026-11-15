@@ -8,11 +8,11 @@ import numpy as np
 import pytest
 from zcu_tools.simulate.evolution import ModelSource, TimelineBatch
 
-from tests.simulate.evolution.contract.accuracy_cases import accuracy_case
 from tests.simulate.evolution.contract.reference import (
     ReferenceResult,
     SolverTolerances,
 )
+from tests.tools.family_pareto_support import make_scene
 from tools.family_pareto import FamilyResult, run_table
 from tools.family_pareto_inputs import Input
 from tools.family_pareto_reference import ReferenceCache, solve_reference
@@ -36,7 +36,7 @@ def test_cache_reuses_density_but_invalidates_physics_and_tolerances(
             np.tile(source.initial_density, (len(batch.points), 1, 1)), 1e-9
         )
 
-    case = accuracy_case("idle_coherence")
+    case = make_scene("idle_coherence")
     with closing(case.source):
         first = solve_reference(case, solver=solver, cache_dir=tmp_path)
         second = solve_reference(case, solver=solver, cache_dir=tmp_path)
@@ -80,7 +80,7 @@ def test_cache_only_never_solves_on_missing_or_changed_keys(
             np.tile(source.initial_density, (len(batch.points), 1, 1)), 1e-9
         )
 
-    case = accuracy_case("idle_coherence")
+    case = make_scene("idle_coherence")
     with closing(case.source):
         if change != "missing":
             solve_reference(case, solver=solver, cache_dir=tmp_path)
@@ -115,7 +115,7 @@ def test_table_cache_only_stops_before_timing_an_uncached_input(tmp_path: Path) 
 
     with pytest.raises(FileNotFoundError, match="reference cache miss"):
         run_table(
-            [Input("idle", lambda: accuracy_case("idle_coherence"), "cache-only")],
+            [Input("idle", lambda: make_scene("idle_coherence"), "cache-only")],
             ("t4",),
             reference_cache=ReferenceCache(tmp_path, only=True),
             policy_runner=policy,

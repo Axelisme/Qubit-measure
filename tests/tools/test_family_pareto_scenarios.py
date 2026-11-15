@@ -2,6 +2,7 @@
 
 from collections.abc import Iterator
 from contextlib import ExitStack, closing
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -16,9 +17,39 @@ from zcu_tools.simulators.single_fluxonium.environment import (
     single_fluxonium,
 )
 
-from tools.family_pareto_inputs import canonical_json, freeze_manifest
-from tools.family_pareto_scenarios import make_real_inputs, single_model_input
+from tools import family_pareto_scenarios as scene_producer
+from tools.family_pareto_inputs import canonical_json, freeze_manifest, make_inputs
+from tools.family_pareto_scenarios import make_real_inputs
+from tools.family_pareto_scene_builders import single_model_input
 from tools.family_pareto_settings import BOARD_PROFILE, SINGLE_MODEL
+
+
+def test_producer_main_freezes_numeric_inputs_without_measurement(
+    tmp_path: Path,
+) -> None:
+    assert callable(getattr(scene_producer, "main", None)), (
+        "missing scene producer entry point"
+    )
+    from dataclasses import replace
+
+    from zcu_tools.simulate.evolution import read_frozen_manifest, read_physical_input
+
+    from tools import family_pareto_inputs
+
+    assert callable(getattr(family_pareto_inputs, "freeze_records", None)), (
+        "missing typed frozen scene producer"
+    )
+    declarations = make_inputs()
+    declarations.append(replace(declarations[0], name="caller-real", category="real"))
+    assert scene_producer.main(["--output", str(tmp_path)], inputs=declarations) == 0
+    synthetic = read_frozen_manifest(tmp_path / "frozen-synthetic.json.gz")
+    real = read_frozen_manifest(tmp_path / "frozen-real.json.gz")
+    assert [record.name for record in synthetic] == ["idle_coherence"]
+    assert [record.name for record in real] == ["caller-real"]
+    frozen = read_physical_input(synthetic[0].physical)
+    with closing(frozen.source):
+        np.testing.assert_array_equal(frozen.batch.points, [0, 1])
+        assert frozen.source.initial_density.shape == (3, 3)
 
 
 @pytest.fixture(scope="module")

@@ -1,16 +1,15 @@
 """Optional disk caching for converged, complete physical-input references."""
 
 from contextlib import closing
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from time import perf_counter, process_time
 from typing import Protocol
 
 import numpy as np
-from zcu_tools.simulate.evolution import ModelSource, TimelineBatch
+from zcu_tools.simulate.evolution import ModelSource, TimelineBatch, reference_key
 
-from tests.simulate.evolution.contract.accuracy_cases import AccuracyCase
 from tests.simulate.evolution.contract.interaction_reference import (
     interaction_reference,
 )
@@ -19,7 +18,7 @@ from tests.simulate.evolution.contract.reference import (
     SolverTolerances,
     converged_reference,
 )
-from tools.family_pareto_inputs import Input, digest, physical_input
+from tools.family_pareto_inputs import Input, Scene, digest, physical_input
 
 _COARSE = SolverTolerances(2e-10, 2e-12)
 _FINE = SolverTolerances(2e-12, 2e-14)
@@ -129,7 +128,7 @@ class ReferenceSolver(Protocol):
 
 
 def solve_reference(
-    case: AccuracyCase,
+    case: Scene,
     *,
     solver: ReferenceSolver = converged_reference,
     coarse: SolverTolerances = _COARSE,
@@ -150,15 +149,7 @@ def solve_reference(
         if cache_only:
             raise ValueError("cache-only reference requires a cache directory")
         return solver(case.source, case.batch, coarse=coarse, fine=fine)
-    key = digest(
-        {
-            "version": 1,
-            "physical": physical_input(case, include_identity=False),
-            "coarse": asdict(coarse),
-            "fine": asdict(fine),
-            "convergence_limit": 2e-6,
-        }
-    )
+    key = reference_key(case.source, case.batch, coarse=coarse, fine=fine)
     cache_dir.mkdir(parents=True, exist_ok=True)
     destination = cache_dir / f"{key}.npz"
     if destination.exists():

@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-11-15, two-tone pricing and per-row Floquet fallback
+**Last updated:** 2026-11-16, frozen numeric inputs and reference identity
 
 **讀者：** framework-dev、agent。Segment evolution 的公開輸入、路由與數值邊界。
 
@@ -12,6 +12,7 @@ boundary and the decision to keep algorithm knowledge in dispatch.
 ## Contents
 
 - [Public entry points](#public-entry-points)
+- [Frozen numeric inputs and references](#frozen-numeric-inputs-and-references)
 - [Joint-Fock prototype](#joint-fock-prototype)
 - [Routing telemetry](#routing-telemetry)
 - [Decision graph](#decision-graph)
@@ -44,6 +45,8 @@ The exports in [__init__.py](__init__.py) fall into these groups:
 | States and population conversion | `Basis`, `DensityState`, `Populations`, `populations`, `batch_populations` |
 | Explicit joint-Fock prototype | `JointFockRequest`, `JointFockDiagnostic`, `JointFockResult`, `joint_fock_spectrum` |
 | Shared RWA Hamiltonian coefficients | `RWACoefficients`, `rwa_coefficients`, `interaction_hamiltonian` |
+| Frozen numeric inputs | `FrozenInput`, `FrozenRecord`, `physical_input`, `canonical_json`, `digest`, `read_physical_input`, `read_frozen_input`, `write_frozen_input`, `read_frozen_manifest`, `write_frozen_manifest` |
+| Solver-free reference storage | `SolverTolerances`, `ReferenceResult`, `reference_key`, `load_reference`, `write_reference` |
 
 `Engine(workers, *, families=None, kernels=None, chunks_per_worker=None,
 routing_cache_bytes=4*1024**2)` owns immutable routing facts.
@@ -86,6 +89,58 @@ The environment explicitly converts them to populations, then calls ADC's
 normalization and sampling tools. Evolution neither imports ADC nor produces
 I/Q. ADC owns its probability tolerance and readout sums; see the
 [ADC README](../adc/README.md).
+
+## Frozen numeric inputs and references
+
+The public codec snapshots a `ModelSource` and one `TimelineBatch` without
+running an Engine or a solver. `write_frozen_input(path, source, batch)` writes
+version 1, a complete `physical` record and its `physical_sha256`.
+`read_frozen_input(path)` checks the version and hash, then returns a
+`FrozenInput(source, batch)`. The caller closes the returned source.
+
+`physical_input(source, batch)` returns the same numeric record in memory.
+`read_physical_input(record)` reconstructs it, including records from JSON.
+The record contains the initial density, scheduled models plus DC zero,
+continuous-flux expansion when used, slow-envelope subdivisions and complete
+batch data. Point order, complex128/float64/int64/bool record dtypes, segment
+corrections and continuation fields survive the round trip. The reconstructed
+source has a fresh owned history and a finite level-to-model mapping. Unlisted
+levels raise `KeyError`. Python builders, devices and registered source shifts
+are not serialized.
+
+`canonical_json` uses sorted keys, compact separators, nested array lists and
+real/imag objects for complex values. It rejects nonfinite values. `digest`
+returns its SHA-256. `physical_input(..., include_identity=False)` removes only
+model namespaces. Complete physical hashes include those namespaces;
+identity-free hashes allow oracle sharing. Neither hash is a reference key.
+
+`write_frozen_manifest(path, records)` writes ordered `FrozenRecord` values as
+version-1 canonical JSON inside stdlib gzip. `FrozenRecord(name, physical,
+metadata=None)` keeps caller metadata opaque. Its `physical_sha256` and
+`oracle_sha256` properties calculate the complete and identity-free hashes.
+The writer calculates both hashes; `read_frozen_manifest(path)` verifies them
+and returns a tuple in original order. Both reject duplicate names. The gzip
+header has mtime=0 and no filename, so identical records produce identical bytes
+at different paths. Reconstruct a source separately with
+`read_physical_input(record.physical)` and close it after use. The container
+neither interprets scene declarations nor selects a reference solver.
+
+`reference_key(source, batch)` preserves the historical key formula. It hashes
+version 1, identity-free physics, coarse tolerances 2e-10/2e-12, fine tolerances
+2e-12/2e-14 and convergence limit 2e-6. Callers can override both tolerance
+records. Solver identity and routing history do not enter the key.
+`load_reference(cache_dir, source, batch)` only reads the matching NPZ, without
+pickle or directory creation. A miss raises `FileNotFoundError`; it never solves.
+`write_reference` atomically publishes `density` and `convergence_error` under
+that same key. The producer certifies convergence, and measurement preflight
+checks the loaded result before evolution.
+
+The independent preparation entry point is
+[`family_pareto_reference_producer.py`](../../../../tests/simulate/evolution/contract/family_pareto_reference_producer.py).
+It reads only frozen record names and physics. The caller explicitly maps each
+manifest to the independent lab-frame or interaction-picture solver; metadata
+and scene names do not select it. Both solvers stay in tests. The codec imports neither tests nor tools.
+See [ADR-0078](../../../../docs/adr/0078-evolution-module-boundary.md).
 
 ## Joint-Fock prototype
 

@@ -127,6 +127,24 @@ ticket 內只跑受影響選集。只有變更觸及 `lib/zcu_tools/simulate/` �
 
 ### Evolution 精度矩陣
 
+凍結數值的讀寫與 reference cache miss 契約由 `tests/simulate/evolution/test_frozen.py` 和
+`test_reference_cache.py` 在公開 `simulate.evolution` 接縫驗證。
+`tests/simulate/evolution/contract/family_pareto_reference_producer.py` 讀凍結數值，呼叫既有獨立 solver，再經 codec 寫 NPZ。
+它不 import tools。工具單元測試可 import 受測工具，並用工具的公開 `Scene` 建 fixture。
+Guard edge、sweep、history 與 multisegment accuracy 案例仍由下面的精度矩陣擁有，不從工具 producer 反向取得。
+
+準備參考解時，由呼叫端明示每份 manifest 的 solver。預設場景的用法如下，必須先取得求解成本授權，並套用當次 heavy runner 與鎖的規則。這不是量測 preflight，也不保證既有 cache 已涵蓋全部場景。
+
+```bash
+uv run --directory "$PWD" --no-sync -- python -m tests.simulate.evolution.contract.family_pareto_reference_producer \
+  --converged tools/data/family_pareto/frozen-synthetic.json.gz \
+  --interaction tools/data/family_pareto/frozen-real.json.gz \
+  --cache /path/to/approved/reference-cache
+```
+
+`--converged` 與 `--interaction` 可重複指定。Producer 只讀 record 的 name、physical，既有 key 命中就讀取，只有 missing key 才用指定 solver 求解。
+它不讀 metadata、不維護場景名稱清單，也不在失敗後換 solver。
+
 從 worktree 執行下列指令。先建立 `<log-dir>`，把它換成此次執行的輸出目錄。
 
 ```bash

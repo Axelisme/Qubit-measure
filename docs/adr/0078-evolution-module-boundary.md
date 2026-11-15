@@ -32,6 +32,27 @@ Environment 顯式組合 population 轉換與 ADC；readout 的樣本加總仍�
 Builder 的 `families` 是整次 acquire 的候選白名單，不是逐段指定算法。每段仍由 dispatch 選路並驗證。固定候選可以略過成本捷徑，不能略過輸入前置條件或數值 guard。無可用候選時回報 domain 與受影響的點、段。
 這兩項控制不是物理 YAML、`AcquireRequest`、實驗 cfg 或 program binding 的欄位。不提供逐段 family 對照、callback、偏好順序或公開 kernel registry。詳細生命週期與失敗契約見 [evolution README](../../lib/zcu_tools/simulate/evolution/README.md#accuracy-failures-and-lifecycle)。
 
+### 凍結數值輸入與參考解交接
+
+`simulate.evolution` 公開通用數值 codec 與 solver-free reference cache I/O。
+Codec 保存 batch、initial density、各 scheduled level 與 DC 的 `SecularModel`、使用中的 flux expansion 和 slow-envelope 設定。
+讀回的是有限數值模型，不是 Python builder、裝置佈局或 mutable routing history。
+這些數值輸入不等於演化引擎私有的 preparation cache，後者仍不提供第二套入口。
+`FrozenRecord` 與 manifest 讀寫同樣歸 `simulate`，容器擁有 version、唯一 name、兩個 hash 與可重產 gzip。
+Caller 的 JSON metadata 對 codec 不透明，場景 reason、families、routes、companions 與 provenance 都由 tools 解讀。
+容器不放 solver 欄位。Tests 側入口由呼叫端明示 manifest-to-solver，只讀 name、physical，不讀 metadata 或場景名稱清單。
+
+`physical_input`、`canonical_json` 與 `digest` 擁有 canonical physical hash。
+完整 hash 包含 model identity，oracle-sharing hash 只排除這個 namespace。
+`reference_key` 再加入 coarse/fine tolerances、version 1 與 convergence limit 2e-6。
+沿用既有公式與 NPZ 的 `density`、`convergence_error` 欄位，不因搬移 owner 改 key，也不加入 solver identity。
+`load_reference` 永遠 cache-only，miss 就失敗。
+`write_reference` 只原子保存 producer 交來的數值，不求解或替它認證收斂。
+獨立 solver 與 reference producer 留在 tests 側，經數值檔交接。失敗不換 solver。
+
+場景 producer 與數值 codec 的分工見 [[0072]]。
+取捨與歷史 cache 缺資料時的驗證方式見[凍結輸入討論](../discussions/2026-11-16-frozen-simulator-inputs.md)。
+
 ### 歷史控制與精度驗收
 
 2026-11-12，使用者裁定：「B，只要為了優化速度可以損失一點一致性，只要誤差在容許範圍」，並要求「應該已正確的物理演化為誤差參考，而不是當前實作，否則誤差會累計」。
