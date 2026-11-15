@@ -56,7 +56,7 @@ def create_work_plan(
     """Create ownership for the complete evolve before prefix/worker planning.
 
     table is the full immutable geometry and source owns model identity.
-    The plan retains table for lazy inventories such as t6 strategy selection.
+    The plan retains table for lazy multitone and common-frame inventories.
     Algorithm-specific group planners populate this plan before workers start;
     budget is the numerical admission budget for cold mixed gate plans.
     telemetry enables calling-thread CPU accounting before those plans build.

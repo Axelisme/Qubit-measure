@@ -1,7 +1,7 @@
 ---
 date: 2026-11-14
-status: active
-superseded_by: null
+status: superseded
+superseded_by: 2026-11-15-t6-channel-removal.md
 related:
   - docs/adr/0078-evolution-module-boundary.md
   - lib/zcu_tools/simulate/evolution/README.md
@@ -169,6 +169,13 @@ Lazy 時點仍有避免無用掃描的理由，但不以那個差額宣稱收益
 
 - [t6 kernel](../../lib/zcu_tools/simulate/evolution/kernels/t6.py)。
 - [t6 dispatch helper](../../lib/zcu_tools/simulate/evolution/_t6_dispatch.py)。
+
+## 後記，2026-11-15
+
+使用者後來選擇移除 channel 與定價分支，保留 direct。
+本文的 direct 容差與共用 endpoint 決定未被推翻。
+Channel 去留的新比較見 [t6 只保留 direct](2026-11-15-t6-channel-removal.md)，
+現行決策見 [ADR-0078](../adr/0078-evolution-module-boundary.md#t6-只保留-direct)。
 - [dop853 共用積分 owner](../../lib/zcu_tools/simulate/evolution/kernels/dop853.py)。
 - [Evolution README](../../lib/zcu_tools/simulate/evolution/README.md)。
 - [Family Pareto 工具入口](../../tools/family_pareto.py)與同組 `tools/family_pareto*.py` 工具。

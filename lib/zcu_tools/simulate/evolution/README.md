@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-11-15, sampled multitone rejection and reference convergence scope
+**Last updated:** 2026-11-15, t6 direct-only evolution
 
 **讀者：** framework-dev、agent。Segment evolution 的公開輸入、路由與數值邊界。
 
@@ -205,7 +205,6 @@ thresholds and algorithm details live with their owners:
 | --- | --- |
 | Row domains, named candidate order and terminal routes | [dispatch](_dispatch.py); [kernel collection](kernels/__init__.py) instantiates implementations only |
 | Shaped and two-tone cold-cost choices | [shaped dispatch](_shaped_dispatch.py), [two-tone dispatch](_two_tone_dispatch.py) return family names, not positional indices or unnamed flags |
-| `t6` direct/channel pricing and complete-acquire key inventory | [t6 dispatch](_t6_dispatch.py), called lazily by [t6 preparation](kernels/t6.py) |
 | Multitone gate amortization | [multitone dispatch](_multitone_dispatch.py) owns the 20-use cost preference and complete-acquire canonical-key inventory |
 | Slow/plateau carrier boundary | [slow-envelope comparison](kernels/slow_envelope.py) owns the strict absolute-carrier comparison shared by dispatch and its guard |
 | Common-frame pricing and numerical construction | [common-frame dispatch](_common_frame_dispatch.py), [kernel](kernels/common_frame_kernel.py) |
@@ -275,7 +274,7 @@ routes and final densities. This does not force every sampled row to DOP853.
 | [`dyson`](kernels/dyson.py), weak constant drive | `plateau` | Second-order full-carrier modal Dyson. Calibrated guards require r ≤ min(0.1, 0.25B^(1/3)), r2 ≤ 0.05, and second-order population indicator B2 + B/8 ≤ min(0.02, (1.5B)^(2/3)). Certified shared no-drive prefixes omit the B2 check. B/8 reserves path pruning; this is not a multilevel remainder proof. | [`weak_plateau`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
 | [`single_tone_rwa`](kernels/single_tone_rwa.py), constant rotating-frame block evolution | `plateau` | Fixed flux, B ≥ 1e-3, carrier magnitude ≥ 50 MHz. Initial 50 MHz edge window with omission-driven restoration; transfer proxy ≤ 0.0058, full-operator/carrier ratio ≤ 0.25 and retained-norm phase proxy ≤ 0.06 rad. Phase-graph pruning ≤ min(B, 1e-3); real generator dimension ≤ 64. Uses the full secular bath without Strang splitting. | [`linear_plateau`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | FAIL at guard edge: 2.180208e-2; strict xfail |
 | [`floquet_period`](kernels/floquet_period.py), full-carrier constant-tone period reuse | `plateau` | Hilbert period trajectories with secular split playback. Requires carrier magnitude ≥ 0.03 GHz and some subdivision count m in 1..64 with dT²ΓV²/m² ≤ 1.0, using this owner's rad/ns drive bound. Below 1 GHz, CF4 or adjacent-cutoff Sambe uses endpoint defect ≤ min(1e-4, 0.1B). Higher carriers use DOP853 rtol min(1e-8, 1e-4B), max step T/4. These are calibrated local controls. | [`weak_plateau`](../../../../tests/simulate/evolution/contract/accuracy_cases.py), [`strong_plateau`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS; largest family error 1.375101e-3 |
-| [`t6`](kernels/t6.py), full dissipative constant-tone evolution | `plateau`, terminal candidate | One constant tone at any strength. Direct integrates each density in the H0 frame with the full secular bath and the shared dop853 policy: local rtol = min(1e-4, 0.03B), atol = min(1e-6, 0.0003B), without a fixed step ceiling. These are not whole-sequence error bounds. Channel retains its existing integration controls, powers complete periods and Fourier-interpolates phase, refining 16..512 nodes until off-grid defect and spectral tail are each ≤ B/16. Complete-key reuse selects the strategy as described below. Neither strategy does RWA or density repair; numerical failure raises rather than reroutes. | [`weak_plateau`](../../../../tests/simulate/evolution/contract/accuracy_cases.py), [`strong_plateau`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
+| [`t6`](kernels/t6.py), full dissipative constant-tone evolution | `plateau`, terminal candidate | One constant tone at any strength. Direct integrates each density in the H0 frame with the full secular bath and the shared dop853 policy: local rtol = min(1e-4, 0.03B), atol = min(1e-6, 0.0003B), without a fixed step ceiling. These are not whole-sequence error bounds. All rows use direct integration, irrespective of key reuse. It does not do RWA or density repair; numerical failure raises rather than reroutes. | [`weak_plateau`](../../../../tests/simulate/evolution/contract/accuracy_cases.py), [`strong_plateau`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
 | [`single_tone_gate`](kernels/single_tone_gate.py), phase-covariant shaped RWA gates | `shaped` | Fixed flux, B ≥ 1e-3, real sampled envelope with at least 3 samples, slope ≤ 0.025/ns, curvature ≤ 0.003/ns², carrier magnitude ≥ 50 MHz. Omission restoration requires transfer ≤ 0.0058, residual phase ≤ 0.0045 rad and retained real dimension ≤ 256. Pruning ≤ min(B, 1e-3); adaptive secular split uses n ≥ 4 with d³ΓV²/n² ≤ 0.01. [Shared gate owner](kernels/_rwa_gate.py). | [`linear_shaped`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
 | [`shaped_sambe`](kernels/shaped_sambe.py), frozen-envelope finite-Fourier periods | `shaped` | Nonzero peak, carrier magnitude ≥ 0.03 GHz, subdivisions m ≤ 32, envelope slope ≤ 2·peak·abs(f)·m and peak drive bound ≤ 0.5·abs(f)·m. Subdivision policy limits real/complex motion to 0.01/0.0025 and secular split to 0.01. Compare adjacent harmonic cutoffs 2/3 or 3/4 and use 4 or 8 amplitude nodes; accumulated spectral plus interpolation estimate must be ≤ B/2. | [`linear_shaped`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | FAIL at guard edge: 3.091554e-3; strict xfail |
 | [`gate_cache`](kernels/gate_cache.py), phase-interpolated full-carrier shaped gates | `shaped` | Four Hilbert subsegments with secular half-steps. Model-only secular split d³ΓV²/16 ≤ 0.01. For 0 < d ≤ 30 ns, dispatch tries 6 phase nodes with 2 probes and full-unitary defect ≤ min(1e-4, 0.1B); other keys or failed convergence use 16 nodes. Fixed-order playback does not certify arbitrary-drive error against B. | [`shaped_complex`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | FAIL at guard edge: 9.296548e-3; strict xfail |
@@ -324,40 +323,14 @@ coverage of every shaped workload. Cavity-drive, multiple-readout and continuous
 flux workloads remain outside these tables. Family removal still requires the
 relevant workload evidence and user approval.
 
-[t6 dispatch](_t6_dispatch.py) selects direct when
-`N * C_direct < C_channel`; otherwise [t6](kernels/t6.py) builds a channel.
-`N` counts that prepare key's rows in the complete acquire inventory, not a worker
-subset or routing history. This count does not account for channel
-rebuilds when a prepared prefix expires; the estimate does not model prefix
-lifetime. For `M` levels, duration `d` ns and absolute carrier `f` GHz, the
-estimates in seconds are
-`C_direct = 0.0012*d*max(1, f/0.582)*(M/21)^3` and
-`C_channel = 31*(M/21)^5`. Direct uses two 21-level aggregate apply-CPU
-measurements at budget `1e-3`, near 0.582 GHz: 48 rows totaling 960 ns took
-1.138655 s, and 24 rows totaling 5040.244 ns took 6.056137 s. Each is the second
-fresh-source/history/Engine sample in one process, not a repeated-history sample.
-A nonnegative affine least-squares fit gives zero intercept and 0.001201
-seconds/ns. The rounded price leaves actual-minus-estimated residuals of
--0.013345 and +0.007844 s. These nonexclusive probes set an initial price; they
-are not performance acceptance or an isolated measurement of cold-start cost.
-Channel's 31 s/build comes from earlier production aggregates; its numerical
-controls and accuracy are unchanged.
-
-Both direct calibration inputs have the same dimension and carrier. They do not
-identify the dimension powers, frequency factor or breakpoint, which retain the
-earlier heuristic. Different budgets can also change direct work without
-changing this estimate. These are coarse strategy-selection prices, not runtime
-guarantees. In particular, complete-inventory counts omit prefix-lifetime channel
-rebuilds. WorkPlan retains the complete table before prefix/worker planning.
-The first `t6.prepare` asks `_t6_dispatch.publish_inventory` to build key counts,
-dimensions and decisions from that table's inputs. Prefixes and workers share the
-publication through the existing single-flight fact, including builder failures.
-Plans without `t6.prepare` do not scan t6 candidate keys. Preparation rejects a
-missing published key rather than recounting its worker subset. Standalone Kernel
-calls without retained geometry or a publication must supply their complete table
-and source; explicit early publication remains supported.
-`cost(table, rows)` retains table-only chunk-interleaving weights, not the
-selected strategy's cold price. It does not determine candidate order.
+[t6](kernels/t6.py) always integrates each density directly in the H0 frame.
+Preparation packs model-only operators without scanning the complete acquire
+inventory. Prepare keys still contain flux level, shift content, port, signed
+carrier, signed gain and duration; phase and start time are apply-only.
+`cost(table, rows)` supplies table-only chunk-interleaving weights.
+It does not determine candidate order.
+[ADR-0078](../../../../docs/adr/0078-evolution-module-boundary.md#t6-只保留-direct)
+records why the reusable-channel strategy was removed.
 
 The matrix measures the maximum absolute difference over every complex density
 entry at readout, against an independent full-Hamiltonian Lindblad DOP853
@@ -468,7 +441,7 @@ evolve table before workers start. Prefix representatives, caller classification
 and timeline workers share it through `KernelContext` and `ApplyContext`. Engine
 drains its pool before closing the plan on success, cancellation or failure.
 The single `complete_table` field supplies full immutable geometry to common-frame,
-multitone and t6 dispatch. Closing drops it along with the evolve-local facts.
+and multitone dispatch. Closing drops it along with the evolve-local facts.
 The registry kernels retain no evolve-local data.
 
 ### Facts and algorithm groups

@@ -100,6 +100,21 @@ Shaped/callable 路徑、末態場與主分支選擇不進 memo。
 C12 穩定工具不依賴有狀態模組檢查。本決策不新增依賴方向，也不放寬 ignore_imports。
 Package root 的對外入口規則由介面與 caller review 維持；上述 contracts 不檢查內部子模組的匯入路徑。
 
+### t6 只保留 direct
+
+`t6` 保留 constant 單 tone 的適用域、guard、prepare-key 身分與失敗就 raise 的語意。
+每列 density 都經共享的 `dop853.advance_endpoints` 在 H0 旋轉座標積分，
+使用完整 secular bath 與同一套 budget-scaled 局部容差。
+移除 reusable channel 的建置、Fourier playback、價格比較與完整 acquire key inventory。
+其他 family 的 period channel 不受這項決定影響。
+
+2026-11-15，使用者對「保留並補價格」與「移除 channel、保留 direct」兩案答「2B」，
+選擇後者。Channel 算得準，但四個代表性場景與 benchmark 都沒有選到它。
+真實表格的相位幾乎每列不同，同一 key 要累積約 1.5 萬個載波週期才開始划算。
+因此不為目前未使用的高重用情境保留這條路徑。
+若日後出現這類工作負載，再依新證據評估，不保留相容性分支。
+比較、先例與被否決選項見 [移除 t6 channel 的討論](../discussions/2026-11-15-t6-channel-removal.md)。
+
 ### 損耗漂移下的結構與 preparation lifetime
 
 2026-10-27（UTC），advisor 的 before-accepted ruling：
