@@ -30,8 +30,9 @@ class FamilyRouting:
     estimated_cost: sum of relative scheduling units for executed segments.
     estimated_cpu_s: selected-plan CPU seconds, or None when any selected
         segment lacks a seconds estimate. Not inferred from scheduling units.
-    prepare_builds: coefficient products built by instrumented owners (currently
-        common_frame); zero for families without product instrumentation.
+    prepare_builds: coefficient products built by common_frame, or exact-key
+        frame construction attempts by floquet (including invalid frames).
+        Zero for families without product instrumentation.
     admission_rows: common-frame row indicator evaluations, excluding apply and
         caller-preparation hits. Other families currently leave this count zero.
     CPU values exclude dispatch, geometry, ADC and I/O. All values are

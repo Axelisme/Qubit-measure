@@ -83,3 +83,70 @@ def floquet_case(name: str) -> AccuracyCase:
             ),
         )
     return AccuracyCase(name, coherent_source(model), batch, ("floquet", "dop853"))
+
+
+def prefix_deferred_case(
+    name: str, *, prefix_duration_ns: float = 16.0
+) -> AccuracyCase:
+    """Repeat a Floquet frame across a shared prefix and two deferred suffixes.
+
+    name is sideband or bound-refusal, selecting the model's probe strength.
+    Two timelines share prefix_duration_ns of two-tone drive and a 1 ns weak
+    marker, then 16 ns suffixes. The suffixes retain natural absolute carrier
+    phases, with Stark gains 0.2 and 0.19. Two distinct frame inputs include
+    one shared by prefix and suffix. The source is caller-owned.
+    Unknown names raise ValueError. Durations must be positive ns.
+    """
+    if name not in ("sideband", "bound-refusal"):
+        raise ValueError(f"unknown prefix/deferred Floquet case: {name}")
+    case = floquet_case(name)
+    batch = timeline(2, prefix_duration_ns)
+    prefix = tuple(
+        replace(
+            track,
+            phase_rad=np.full(2, 0.17),
+        )
+        for track in (
+            drive_track(
+                batch,
+                EnvelopeSpec("constant"),
+                frequency=0.13,
+                gain=0.2,
+                port="stark",
+            ),
+            drive_track(
+                batch,
+                EnvelopeSpec("constant"),
+                frequency=0.11,
+                gain=float(case.batch.tracks[1].amplitude[0]),
+                port="probe",
+            ),
+        )
+    )
+    marker = replace(
+        prefix[0],
+        start_ns=np.full(2, prefix_duration_ns),
+        duration_ns=np.ones(2),
+        amplitude=np.full(2, 1e-5),
+    )
+    suffix = (
+        replace(
+            prefix[0],
+            start_ns=np.full(2, prefix_duration_ns + 1),
+            duration_ns=np.full(2, 16.0),
+            amplitude=np.array([0.2, 0.19]),
+        ),
+        replace(
+            prefix[1],
+            start_ns=np.full(2, prefix_duration_ns + 1),
+            duration_ns=np.full(2, 16.0),
+        ),
+    )
+    return replace(
+        case,
+        batch=replace(
+            batch,
+            tracks=(*prefix, marker, *suffix),
+            end_ns=np.full(2, prefix_duration_ns + 17),
+        ),
+    )
