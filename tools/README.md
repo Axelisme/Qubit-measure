@@ -1,13 +1,14 @@
 # tools/
 
-**Last updated:** 2026-11-15, fenced code examples excluded from link checks
+**Last updated:** 2026-11-16 (CLI contracts, tool inventory, probe snapshots, acquire benchmark retired)
 
-**讀者：** framework-dev。Repo 品質檢查與重計算執行器的 CLI、輸出與比較機制。
+**讀者：** framework-dev。查閱 repo 開發工具的 CLI、輸出與比較機制。
 
-`tools/` 放 repo 內部的品質檢查與重計算執行器。review 品質判準由 [程式碼品質](../docs/code-quality.md) 定義，環境與驗證流程依 [AGENTS.md](../AGENTS.md)。`scripts/` 放使用者自己執行的板端 server、GUI 啟動與資料工具。[`mcp_servers/`](../mcp_servers/README.md) 放 agent 的 MCP 組合根。
+`tools/` 放 repo 內部開發工具：品質檢查、重運算執行器與模擬器量測工具。review 品質判準由 [程式碼品質](../docs/code-quality.md) 定義，環境與驗證流程依 [AGENTS.md](../AGENTS.md)。`scripts/` 放使用者自己執行的板端 server、GUI 啟動與資料工具。[`mcp_servers/`](../mcp_servers/README.md) 放 agent 的 MCP 組合根。
 離線 Migration CLI 位於 `migrations/migrate_storage.py`，以 `python -m migrations.migrate_storage` 執行，不接量測啟動流程。執行 legacy 遷移、處理 pending／resume 或修改 component kind 前，讀 [Agent 離線遷移說明書](../docs/storage-migration.md)。
 
-品質檢查以純函式處理判準，由回傳 exit code 的 `main()` 把 JSON receipt 輸出到 stdout。
+每支有命令列入口的工具收 `argv`，`-h` 以 0 結束並印 usage。`argv=None` 讀取 `sys.argv`。
+品質檢查以純函式處理判準，由回傳 exit code 的 `main(argv)` 把 JSON receipt 輸出到 stdout。
 `run_heavy.py` 的 `main()` 管理排隊、子程序與清理，只有子程序啟動後才輸出 JSON receipt。
 `check_script_awaits.py`、`check_file_size.py`、`check_test_capabilities.py`、`check_test_path_correspondence.py`
 另把人類可讀的違規行輸出到 stderr；`check_suppressions.py` 只計量不判定，在 stderr 列出使用量最多的
@@ -20,6 +21,36 @@
 各支檢查自行定義判準。`check_experiment_imports.py` 是 `.importlinter` 註冊的 custom contract，依 `core.py` 自動辨認實驗目錄，檢查實驗間與跨家族 helper 的直接 import，違規時列出來源、目標與行號；它不 import 實驗定義。
 共用模組要求 `tools/` 在 `sys.path` 上。
 直接執行某支檢查、`load_tool` 載入另一支與 pytest 的 `pythonpath` 都滿足這項要求。
+
+## CLI 一覽
+
+下表命令省略共同前綴 `uv run --directory <worktree> --no-sync -- python`，並在目標 worktree 根目錄執行。
+「現況」只在省略 `--base` 時執行。「ratchet」表示比較時使用該 detector，不代表單支工具的絕對數字必須為零。
+支援模組沒有命令列入口，由表中工具或 `lint-imports` 呼叫。
+
+| 工具 | 命令 | Exit code | 是否在 gate |
+| --- | --- | --- | --- |
+| `gate.py` | `tools/gate.py [--base <ref>] [--no-fix]` | 現況 0；比較 0 全通過、1 有失敗、2 base 錯誤 | 入口 |
+| `check_ratchet.py` | `tools/check_ratchet.py --base <ref>` | 0 無上升、1 有上升、2 工具失敗 | 比較 |
+| `check_file_size.py` | `tools/check_file_size.py` | 0 未超標、1 有超標 | 現況、ratchet |
+| `check_test_path_correspondence.py` | `tools/check_test_path_correspondence.py` | 0 對應存在、1 有缺口 | 現況、ratchet |
+| `check_test_structure.py` | `tools/check_test_structure.py [--root <repo>]` | 0 無 blocking、1 有 blocking、2 讀取或解析失敗 | 現況、ratchet |
+| `check_test_capabilities.py` | `tools/check_test_capabilities.py` | 0 已宣告、1 有未宣告能力 | 現況、ratchet |
+| `check_suppressions.py` | `tools/check_suppressions.py` | 0，僅計量 | 現況、ratchet |
+| `check_script_awaits.py` | `tools/check_script_awaits.py [--root <repo>]` | 0 無違規、1 有違規、2 root／讀取／解析失敗 | 現況、比較 |
+| `check_mcp_text_budget.py` | `tools/check_mcp_text_budget.py [--timeout <seconds>]` | 0 預算內、1 超額、2 收集失敗 | 現況、比較 |
+| `check_experiment_imports.py` | `lint-imports`，不經 Python 前綴 | 由 lint-imports 回報 0 通過、1 失敗 | import contracts |
+| `check_doc_readers.py` | `tools/check_doc_readers.py [--root <repo>]` | 0 宣告完整、1 有缺口 | 否 |
+| `doc_relations.py` | `tools/doc_relations.py <base>` 或 `tools/doc_relations.py --check` | diff 0；check 0 連結存在、1 有違規 | 否 |
+| `check_pytest_collection.py` | `tools/check_pytest_collection.py` | 0 四組一致、1 收集失敗或不一致 | 否，另跑 |
+| `quality_report.py` | `tools/quality_report.py snapshot` 或 `tools/quality_report.py compare <before> <after>` | 0 報表完成、2 無法產生或比較 | 否 |
+| `probe_snapshot.py` | `tools/probe_snapshot.py compare A B [--rtol R] [--atol A]` | 0 輸出相同或容差內且輸入相同；1 陣列、PNG 或 case 不同／缺漏，優先於 3；2 用法、讀寫或格式錯誤；3 輸出相同或容差內但輸入不同 | 否，手動比較離線 probe 輸出 |
+| `run_heavy.py` | `tools/run_heavy.py --log <file> <timeout> -- <command>` | 子程序狀態；2 啟動前失敗、70 runner 失敗、75 等待逾時、124 執行逾時 | 否，重計算外層 |
+| `analyze_routing_telemetry.py` | `tools/analyze_routing_telemetry.py <path> ...` | 0 完成，無法讀檔時非零 | 否 |
+| `family_pareto.py` | `-m tools.family_pareto --scenario <name>` | 0 完成，輸入或量測失敗時非零 | 否 |
+
+Usage 錯誤由 argparse 以 2 結束；未轉譯的 Git、讀檔或其他執行錯誤仍會傳出例外，不能當作檢查通過。
+模擬器量測與重計算的授權、排隊和收據要求見後續各節。表中的命令不提供執行授權。
 
 ## 重計算執行器
 
@@ -90,76 +121,50 @@ uv run --directory <worktree> --no-sync -- \
   > <per-task 目錄>/pyright-receipt.json
 ```
 
+## Probe snapshots
+
+| 命令 | Exit code | 是否在 gate |
+| --- | --- | --- |
+| `python tools/probe_snapshot.py compare A B [--rtol R] [--atol A]` | 0 相同或容差內且輸入相同；1 陣列、PNG 或 case 不同／缺漏；2 用法、讀寫或格式錯誤；3 輸出相同或容差內但輸入不同；`-h` 回 0 | 否，手動比較離線 probe 輸出 |
+
+在自己的 probe script 中 import writer。Caller 選擇要保存的陣列或 dataclass、PNG bytes 與輸入：
+
+```python
+from pathlib import Path
+from tools.probe_snapshot import write_snapshot
+
+write_snapshot(
+    Path("snapshots/before"), "t1.run", result,
+    pngs, inputs={"cfg": cfg, "seed": 7, "environment": environment_inputs},
+)
+```
+
+`inputs` 是必填 keyword-only，可明填 `None`。Caller 提供 cfg、analysis options、seed、
+環境設定或來源陣列；writer 不發現實驗或讀取環境私有狀態。
+每個 label 寫入新目錄，保存 `arrays.npz`、PNG 與 `inputs.json`。既存 label 拒絕寫入，
+重跑時選新 output root。輸入指紋包含陣列的 shape、dtype 與內容，不只記形狀。
+
+同一支 script 在兩個 worktree 各以自己的 `uv run --directory <worktree> --no-sync --`
+執行一次，分別寫 A、B，再執行上表 compare 命令。工具不啟動其他 worktree 或儀器。
+表格逐 case 列出陣列、圖與輸入的比較結果。預設要求 shape、dtype 與值完全相同，
+相同位置的 NaN 視為相等。PNG 比解碼後的 RGBA 像素，不比檔案 bytes 或 metadata。
+明示 `--rtol` 或 `--atol` 才容許浮點／複數誤差，未指定的一項為 0。
+符合容差但非完全相同時顯示 `WITHIN TOL`，PNG 仍須像素相同。
+輸出差異的 exit 1 優先於輸入差異的 exit 3。Exit 3 需要人工判讀，不表示通過或失敗。
+比較結果不宣稱是 regression；模擬器或環境改動本來就可能改變結果。仍須逐張看圖驗收。
+
 ## Simulator benchmark
 
-在目標 worktree 根目錄執行完整量測。先建立輸出目錄，再透過 `--exclusive` 取得兩個重計算 slot：
-
-```bash
-mkdir -p .agent_state/benchmark
-uv run --directory <worktree> --no-sync -- \
-  python tools/run_heavy.py --exclusive --log .agent_state/benchmark/run.log 1800 -- \
-  python tools/benchmark_simulator.py --output .agent_state/benchmark/results.json \
-  > .agent_state/benchmark/receipt.json
-```
-
-`benchmark_simulator_workloads.py` 擁有五個版本化合成 workload，並自帶 board profile、物理模型與 program 設定。
-它不讀 lab 實驗、預設 YAML 或測試 fixture。
-Const 工作負載的三個 gain 是 `0.08 → 0.12 → 0.16`。
-兩個 shaped 工作負載使用版本 2，gain 為 `0.16 → 0.24 → 0.32`，補回 product 輸出的約半刻度。
-`ftf_overlap_shaped` 的第二個 tone gain 由 0.1 改為 0.2。
-精確 product 係數是 `32766/65536`，加倍後的連續振幅比舊刻度低約 0.0061%，另有 gain-word 取整。
-每點 32 reps，seed 為 `20261112`。
-所有環境關閉 drift，並設定 `time_scale=0`。FTF 關閉 telemetry，以免計入其檔案 I/O。
-
-| Workload | 公開 acquire 的內容 |
-| --- | --- |
-| `single_drive_flux_ramp` | 常數 microwave drive 與 fast-flux pulse 同時掃 gain。Flux line 的 delay 與低通響應產生 ramp 和被動尾端。 |
-| `single_repeated_shaped` | 四個連續 Gaussian drive pulses，隨後 pulse readout。 |
-| `six_mux` | 依序驅動六個獨立 fluxonium，再用同一次 mux acquire 讀取六個 ADC。 |
-| `ftf_simultaneous_tones` | 不同 generator 的兩個常數 tone 同時驅動 FTF，隨後 pulse readout。 |
-| `ftf_overlap_shaped` | 不同 generator 的兩個 Gaussian tone 部分重疊，第二個晚 8 ns 開始。 |
-
-每個 workload 依序量三種模式，每種五次：
-
-- `first_acquire` 每次新建環境與 program，只量該環境的第一次 acquire。
-- `warm_clear_history` 在自己的環境中先跑兩次固定且不計時的 acquire，之後每次先 `history.clear()`，再量 acquire。
-- `warm_retain_history` 在另一個環境中先跑相同的兩次暖機，之後五次 acquire 都保留歷史。
-
-計時只包住 `program.acquire`，wall 使用 `perf_counter`，CPU 使用 `process_time`，單位都是秒。
-Imports、模型設定解析、環境建構、program compilation、暖機、清歷史與 cleanup 都不在計時區間內。
-Acquire 內部的 frontend preparation、按需編譯、演化與 ADC sampling 則包含在內。
-`first_acquire` **不是 fresh process 或空 disk Numba cache**。
-五次樣本共用目前 process，可能受前一個樣本或 workload 的程式碼與 disk cache 暖態影響。
-工具不刪除 cache，也不建立平行量測 process。
-
-JSON 保存完整 workload 設定、timeline 與設定版本、各自的 SHA-256、library 版本、量測模式定義、每次 wall/CPU 原始秒數，以及 median 和 MAD。
-MAD 是每個樣本與 median 的絕對差之 median，單位也是秒。
-版本或設定有變時應建立新的 baseline，不把不相容 workload 的數字合併比較。
-
-加 `--compare <before.json>` 會執行同一份完整量測，再逐 workload、模式和 wall/CPU 列出前後 median 與百分比：
-
-```bash
-uv run --directory <worktree> --no-sync -- \
-  python tools/run_heavy.py --exclusive --log .agent_state/benchmark/after.log 1800 -- \
-  python tools/benchmark_simulator.py --output .agent_state/benchmark/after.json \
-  --compare .agent_state/benchmark/results.json \
-  > .agent_state/benchmark/after-receipt.json
-```
-
-比較文字在 `after.log`，runner 收據在 `after-receipt.json`。
-百分比是 `100 * (after / before - 1)`，正值代表變慢。Before median 為零時顯示 `n/a`。
-工具拒絕不同的 workload、設定、hash、schema 或量測模式。Library 版本可不同，兩側各自保留版本供判讀。
-變慢本身仍回傳 0，不設效能門檻。
-Acquire、暖機或比較失敗時回傳非零，stderr 保留原因，不輸出部分量測 JSON，也不覆寫先前的結果檔。
-
-`main(argv)` 是 CLI 薄殼。`run_workload`、`run_benchmarks` 與 `compare_results` 可直接 import。
-測試注入小型 acquire session 與 clock，驗證計時和歷史模式，不在 pytest 中跑完整 benchmark。
+模擬器量測按層分開，不再提供 program → acquire 的端到端 benchmark。
+Kernel 量測在 `Engine.evolve` 上用 `families=` 固定候選，輸入只有一段。
+整體耗時改用多段 `TimelineBatch` 在 `Engine.evolve` 的序列層量測，不經 program compilation 或 ADC sampling。
+現有的 family 誤差與耗時量表見下節。
 
 ## Engine family Pareto table
 
 `family_pareto.py` compares every family on the same complete physical inputs.
-It times **Engine.evolve**, not `program.acquire`. The existing acquire benchmark
-above keeps its workloads and comparison contract.
+It times **Engine.evolve**, not `program.acquire`. The program-to-acquire
+benchmark is retired; sequence-level measurements exclude compilation and ADC sampling.
 
 The default inputs are fixed 24-point carrier, gain, length, idle and gate-sequence
 scans on the full 21-level single-fluxonium model, including constant and Gaussian
@@ -821,6 +826,8 @@ uv run --directory <worktree> --no-sync -- python tools/doc_relations.py --check
 - `related: <path>  (<reason>)`：由引用關係找到的文件。包含每個改動路徑上各層的 `README.md`、
   這些 README 與改動檔案以 `ADR-NNNN` 或 `adr/NNNN-` 連結引用的 ADR，以及引用同一批 ADR 的其他文件。
   被超過 8 份其他文件引用的 ADR 只列它本身，原因欄註明略過的份數。
+  Changed 檔若不是有效 UTF-8，內容不提供 ADR 引用，路徑仍參與 README chain。
+  Markdown、Python 檔的解碼錯誤，以及 Git 與 I/O 錯誤仍會使命令失敗。
 - `hit: <path>:<line>: <term> (<source>): <text>`：文件中出現搜尋詞的行。搜尋詞來自改動的 `.py` 檔：
   被刪除或改名的公開頂層函式、類別與大寫常數（`removed name`），定義內容有變的（`changed name`），
   以及檔案路徑的最後兩段（`changed path`）。`--term` 可重複，補上文件實際使用的稱呼（`given`）。
@@ -858,8 +865,10 @@ uv run --directory <worktree> --no-sync -- python tools/gate.py --base <lane 起
 
 `gate.py` 是日常入口。它依序執行：受影響檔案的 ruff import 排序與 formatter、
 `lint-imports`、lab script await guardrail、measure MCP 文字預算、然後 ratchet。
+部分檢查會掃描全樹或啟動子程序，耗時不只由改動檔案數決定。Pyright 現況檢查另以 `--with-pyright` 啟用，不保證固定秒數。
 
-省略 `--base` 時回報現況，列出全樹的絕對數字：
+省略 `--base` 時回報現況，列出全樹的絕對數字。
+`docstring` 列執行 `ruff check --isolated --select D100,D101,D102,D103 --output-format json tools`，只報告缺少 docstring 的命中數，不影響 exit code，也不加入比較模式的硬性步驟：
 
 ```bash
 uv run --directory <worktree> --no-sync -- python tools/gate.py                  # 現況
@@ -897,7 +906,7 @@ FAIL ratchet
 想看某一項的完整輸出就直接跑那個 detector：
 
 ```bash
-uv run --no-sync -- python tools/check_ratchet.py --base <ref> --detector suppressions
+uv run --directory <worktree> --no-sync -- python tools/check_ratchet.py --base <ref> --detector suppressions
 ```
 
 `gate.py` 在失敗時印診斷細節。品質設定有變時，即使計數未增加，也會列出 `REVIEW` 與

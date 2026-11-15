@@ -8,6 +8,7 @@ implementation details, not a second integration interface.
 """
 
 from .. import _numba_cache  # Bootstrap before any dispatcher is created.
+from ._inspection import DispatchCandidate, DispatchInspection, DispatchRow, RowKey
 from .controls import ControlPulse, ControlSequence, Envelope, PhaseEvent, quantize_ns
 from .engine import (
     SEGMENT_NUMERIC_VERSION,

@@ -1,5 +1,6 @@
 """Document-relation behavior through synthetic source mappings and one real Git diff."""
 
+import gzip
 import subprocess
 from pathlib import Path
 
@@ -15,6 +16,8 @@ from doc_relations import (
     related_documents,
     search_terms,
 )
+
+pytestmark = pytest.mark.requires_subprocess
 
 _KERNEL = "lib/pkg/engine/kernels/t6.py"
 _SOURCES = {
@@ -243,6 +246,12 @@ def _git(repo: Path, *args: str) -> None:
     )
 
 
+def _commit_base(repo: Path) -> None:
+    _git(repo, "init", "-q")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "base")
+
+
 def test_main_lists_related_documents_and_hits_for_a_diff(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -255,9 +264,7 @@ def test_main_lists_related_documents_and_hits_for_a_diff(
     (tmp_path / "docs" / "guide.md").write_text(
         "The `Plan` is small.\n", encoding="utf-8"
     )
-    _git(tmp_path, "init", "-q")
-    _git(tmp_path, "add", "-A")
-    _git(tmp_path, "commit", "-q", "-m", "base")
+    _commit_base(tmp_path)
     (tmp_path / "pkg" / "plan.py").write_text(
         "class Plan:\n    size = 2\n", encoding="utf-8"
     )
@@ -270,14 +277,66 @@ def test_main_lists_related_documents_and_hits_for_a_diff(
     assert "hit: docs/guide.md:1: small (given): The `Plan` is small." in lines
 
 
+def test_main_keeps_binary_changed_paths_in_the_readme_chain(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (tmp_path / "pkg").mkdir()
+    (tmp_path / "pkg" / "README.md").write_text("Notes.\n", encoding="utf-8")
+    _commit_base(tmp_path)
+    (tmp_path / "pkg" / "scene.json.gz").write_bytes(
+        gzip.compress(b'{"value": 1}\n', mtime=0)
+    )
+    _git(tmp_path, "add", "-A")
+
+    assert main(["HEAD", "--root", str(tmp_path)]) == 0
+
+    assert (
+        "related: pkg/README.md  (README chain of pkg/scene.json.gz)"
+        in capsys.readouterr().out.splitlines()
+    )
+
+
+def test_main_reads_adr_citations_from_changed_utf8_data(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (tmp_path / "docs" / "adr").mkdir(parents=True)
+    (tmp_path / "docs" / "adr" / "0001-data.md").write_text(
+        "# Data\n", encoding="utf-8"
+    )
+    (tmp_path / "scene.data").write_text("old\n", encoding="utf-8")
+    _commit_base(tmp_path)
+    (tmp_path / "scene.data").write_text("ADR-0001\n", encoding="utf-8")
+
+    assert main(["HEAD", "--root", str(tmp_path)]) == 0
+
+    assert (
+        "related: docs/adr/0001-data.md  (ADR-0001 cited by scene.data)"
+        in capsys.readouterr().out.splitlines()
+    )
+
+
+@pytest.mark.parametrize(
+    ("filename", "mode"),
+    [("notes.md", "HEAD"), ("code.py", "HEAD"), ("notes.md", "--check")],
+)
+def test_main_rejects_non_utf8_markdown_and_python(
+    tmp_path: Path, filename: str, mode: str
+) -> None:
+    source = tmp_path / filename
+    source.write_text("", encoding="utf-8")
+    _commit_base(tmp_path)
+    source.write_bytes(b"\xff")
+
+    with pytest.raises(UnicodeDecodeError):
+        main([mode, "--root", str(tmp_path)])
+
+
 def test_main_replaces_the_hits_of_a_term_over_the_limit_with_a_count(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     (tmp_path / "notes.md").write_text("alpha\nalpha\nalpha\n", encoding="utf-8")
     (tmp_path / "a.py").write_text("X = 1\n", encoding="utf-8")
-    _git(tmp_path, "init", "-q")
-    _git(tmp_path, "add", "-A")
-    _git(tmp_path, "commit", "-q", "-m", "base")
+    _commit_base(tmp_path)
 
     assert (
         main(["HEAD", "--root", str(tmp_path), "--term", "alpha", "--max-hits", "2"])

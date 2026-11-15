@@ -67,6 +67,8 @@
 
 ## 測試與驗證
 
+- 2026-11-16 [Tools 標準化：補工具缺口，不搬目錄、不加硬閘](2026-11-16-tools-standardization.md)：工具標準化。品質工具補 `-h`／argv 與 docstring，加只報告的 docstring 現況列與 README 正向規則；不搬目錄、不加硬閘。
+- 2026-11-16 [實驗 probe 的 snapshot 保存與比較](2026-11-16-probe-snapshots.md)：工具範圍。保存與比較留在 tools，階段不寫 snapshot，環境清理由獨立 context manager 收尾。
 - 2026-11-15 [Doc relations 略過 fenced code 示例連結](2026-11-15-doc-relations-fenced-links.md)：檢查器誤報，修正 checker 對示例的判讀，保留正文連結與 ADR 檢查。
 - 2026-10-16 [Agent 自行做 UI e2e：元件驅動情境](2026-10-16-agent-ui-e2e.md)：Agent 經使用者可操作的元件驗證可見行為，使用者走查判品味。
 

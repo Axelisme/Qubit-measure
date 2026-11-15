@@ -253,7 +253,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     Lab declaration/import failures propagate; no registration or recipe runs here.
     """
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--timeout", type=_positive_seconds, default=60.0)
+    parser.add_argument(
+        "--timeout",
+        type=_positive_seconds,
+        default=60.0,
+        help="stdio subprocess timeout in seconds (default: 60)",
+    )
     args = parser.parse_args(argv)
 
     # Use the same lab assembly as the server, never a guessed recipe prefix.

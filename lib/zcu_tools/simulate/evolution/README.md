@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-11-16, frozen numeric inputs and reference identity
+**Last updated:** 2026-11-16, frozen numeric inputs, reference identity and dispatch scheduling cost naming
 
 **讀者：** framework-dev、agent。Segment evolution 的公開輸入、路由與數值邊界。
 
@@ -13,6 +13,7 @@ boundary and the decision to keep algorithm knowledge in dispatch.
 
 - [Public entry points](#public-entry-points)
 - [Frozen numeric inputs and references](#frozen-numeric-inputs-and-references)
+- [Dispatch inspection](#dispatch-inspection)
 - [Joint-Fock prototype](#joint-fock-prototype)
 - [Routing telemetry](#routing-telemetry)
 - [Decision graph](#decision-graph)
@@ -37,6 +38,7 @@ The exports in [__init__.py](__init__.py) fall into these groups:
 | Purpose | Exports |
 | --- | --- |
 | Execution and results | `Engine`, `EvolutionResult`, `PathDiagnostics`, `FamilyRouting`, `Cancelled`, `SEGMENT_NUMERIC_VERSION` |
+| Dispatch inspection | `DispatchInspection`, `DispatchRow`, `DispatchCandidate`, `RowKey` |
 | Engine model source and routing history | `ModelSource`, `SecularModel`, `SecularDrive`, `RoutingHistory` |
 | Flux description | `FluxExpansion`, `FluxTerm`, `FluxLevel`, `FluxSchedule`, `FluxWaveform` |
 | Batched timelines | `TimelineBatch`, `DriveTrack`, `EnvelopeSpec`, `SegmentShift`, `segment_spans` |
@@ -54,7 +56,8 @@ Numerical preparations live only within one evolve. `evolve(source, batches, *, 
 `ModelSource` and all `TimelineBatch` inputs for one acquire. `NumericModel` is a
 separate fixed-coordinate record, not an Engine input. Constructor and field
 contracts live with their types in [engine.py](engine.py), [secular.py](secular.py),
-[controls.py](controls.py), [model.py](model.py) and [state.py](state.py).
+[inspection records](_inspection.py), [controls.py](controls.py), [model.py](model.py)
+and [state.py](state.py).
 
 Units are ns, GHz and rad. `SecularModel` supplies energies, drive quadratures,
 directional rates and pure dephasing in each quantized flux level's energy
@@ -141,6 +144,45 @@ It reads only frozen record names and physics. The caller explicitly maps each
 manifest to the independent lab-frame or interaction-picture solver; metadata
 and scene names do not select it. Both solvers stay in tests. The codec imports neither tests nor tools.
 See [ADR-0078](../../../../docs/adr/0078-evolution-module-boundary.md).
+
+## Dispatch inspection
+
+`Engine.inspect_dispatch(source, batches, *, budget=1e-3, cancel=None)` returns a
+`DispatchInspection` without evolving density. It uses evolve's classifier,
+candidate ordering, guards and complete-inventory pricing. Floquet admission
+still computes its one-period propagator. This method is not a no-computation
+shortcut or a second dispatcher. Source, batch, budget, cancellation and failure
+contracts match `evolve`; an exhausted candidate round raises `NoValidKernel`.
+
+`rows` follows input batch order, point order, then split-span order.
+Each row's `RowKey` contains the zero-based batch index, caller point ID and
+zero-based chronological segment index. Segment indices include drive, flux,
+plateau and explicit boundary splits. Continuations number only retained spans
+at or after `start_ns`. Each row also reports absolute `start_ns` and `duration_ns`.
+
+A `selected` row's `family` matches evolve from the same initial history.
+A `deferred` row has a local prepare key whose guard belongs to its timeline
+worker. A `needs_prefix_input` row needs a driven prefix density that evolve
+would compute first. These unresolved rows return `family=None`; inspection
+neither runs timeline workers nor computes prefix densities.
+
+`candidates` records offered families and guard decisions in first-offer order.
+An evaluated guard reports `accepted` or `rejected`. A local key reports
+`deferred`. Candidates after a stopped round report
+`untested_after_short_circuit`, unless an earlier round already evaluated them.
+Structurally inapplicable and cost-skipped families are not listed unless
+actually offered. Candidate `scheduling_cost` is `Kernel.cost`'s nonnegative
+relative row work for chunk interleaving, not seconds or a numerical certificate;
+it cannot explain why a family was chosen. The cold-amortized estimate used to
+order candidates is not exposed. Short-circuited candidates have
+`scheduling_cost=None`; evaluated and deferred candidates include their value.
+
+Inspection does not modify routing history. It projects usage without writing
+counters, content membership or generation, and does not create routing-reuse
+snapshots. Querying A before evolving B leaves B's route and density unchanged.
+Guard preparations expire on return and do not enter Engine caches. Source
+model caches and shift registrations may be populated. Calls sharing a history
+must serialize, just as for evolve.
 
 ## Joint-Fock prototype
 
@@ -497,7 +539,8 @@ densities in place and returns a row-aligned boolean exceedance mask.
 ## WorkPlan and cache ownership
 
 [Dispatch](_dispatch.py) creates one [WorkPlan](workplan.py) from the complete
-evolve table before workers start. Prefix representatives, caller classification
+evolve table before workers start. Its history mode records usage for evolve
+and projects usage for inspection, with the same inventory and cost formulas. Prefix representatives, caller classification
 and timeline workers share it through `KernelContext` and `ApplyContext`. Engine
 drains its pool before closing the plan on success, cancellation or failure.
 The single `complete_table` field supplies full immutable geometry to common-frame,

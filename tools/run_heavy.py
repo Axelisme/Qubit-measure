@@ -45,15 +45,32 @@ class _Invocation:
 
 def _parse(argv: list[str] | None) -> _Invocation:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--log", required=True, type=Path)
-    parser.add_argument("--wait-limit", type=float)
-    parser.add_argument("--exclusive", action="store_true")
-    parser.add_argument("timeout", type=float)
+    parser.add_argument(
+        "--log",
+        required=True,
+        type=Path,
+        help="replace this file with combined command stdout/stderr",
+    )
+    parser.add_argument(
+        "--wait-limit",
+        type=float,
+        help="maximum admission wait in seconds (default: unlimited)",
+    )
+    parser.add_argument(
+        "--exclusive",
+        action="store_true",
+        help="reserve both CPU slots before starting the command",
+    )
+    parser.add_argument(
+        "timeout",
+        type=float,
+        help="positive execution timeout in seconds, excluding queue time",
+    )
     raw = sys.argv[1:] if argv is None else argv
-    if "--" not in raw:
-        parser.error("command must follow --")
-    separator = raw.index("--")
+    separator = raw.index("--") if "--" in raw else len(raw)
     args = parser.parse_args(raw[:separator])
+    if separator == len(raw):
+        parser.error("command must follow --")
     command = raw[separator + 1 :]
     if not command:
         parser.error("a command is required after --")

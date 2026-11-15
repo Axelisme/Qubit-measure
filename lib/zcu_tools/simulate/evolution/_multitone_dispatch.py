@@ -110,11 +110,14 @@ def populate_multitone_inventory(
             ).digest()
             keys.append(identity)
             inventory[identity] = inventory.get(identity, 0) + 1
-        usage = (
-            source.history.record_gate_usage(inventory, content=plan.content_key)
-            if inventory
-            else {}
-        )
+        history = source.history
+        usage: dict[bytes, int] = {}
+        if inventory:
+            usage = (
+                history.record_gate_usage(inventory, content=plan.content_key)
+                if plan.history_mode == "record"
+                else history.projected_gate_usage(inventory, content=plan.content_key)
+            )
         return MultitoneInventory(
             tuple(int(row) for row in admitted),
             tuple(cheap),

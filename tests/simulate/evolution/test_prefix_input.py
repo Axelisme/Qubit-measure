@@ -155,6 +155,15 @@ def test_plateau_routing_preserves_reusable_dyson_inputs(history):
     assert result.paths.segments_by_kernel == expected
 
 
+def test_dispatch_query_reports_uncomputed_driven_prefix_input():
+    with closing(source()) as src, closing(Engine(1)) as solver:
+        query = solver.inspect_dispatch(src, (batch(),))
+    dependent = [row for row in query.rows if row.start_ns == 3.0]
+    assert [row.key.point for row in dependent] == [0, 1]
+    assert all(row.status == "needs_prefix_input" for row in dependent)
+    assert all(row.family is None and row.candidates == () for row in dependent)
+
+
 def test_distinct_long_plateau_retains_dyson():
     src, b = source(), batch()
     pre = replace(b.tracks[0], phase_rad=np.array([0.0, 0.1]))

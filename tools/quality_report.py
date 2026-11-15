@@ -53,10 +53,21 @@ class ReportError(ValueError):
 
 
 class Record(BaseModel):
+    """Base for frozen, strictly typed records that reject unknown fields."""
+
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
 
 class Finding(Record):
+    """One detector observation at a canonical repo-relative POSIX ``path``.
+
+    ``rule`` identifies the diagnostic; ``count`` is its positive multiplicity.
+    ``line`` is a one-based source line or None; ``message`` is optional detail.
+    ``counted`` includes the finding in violation totals when true. ``details``
+    holds detector-specific integer/string measurements, not acceptance criteria.
+    Invalid paths or field values raise ValueError during model validation.
+    """
+
     path: str = Field(min_length=1)
     rule: str = Field(min_length=1)
     count: int = Field(default=1, ge=1)
@@ -67,6 +78,7 @@ class Finding(Record):
 
     @model_validator(mode="after")
     def relative_path(self) -> Self:
+        """Return self, or raise ValueError if path is not canonical and relative."""
         path = PurePosixPath(self.path)
         if path.is_absolute() or ".." in path.parts or "\\" in self.path:
             raise ValueError("finding path must be repo-relative POSIX")
@@ -76,6 +88,13 @@ class Finding(Record):
 
 
 class DetectorResult(Record):
+    """A completed, skipped or failed detector observation.
+
+    ``selection`` describes scanned inputs. ``findings`` may be empty on a
+    completed run. Skipped/error states require a nonblank ``reason`` and no
+    findings; completed states forbid a reason. Validation raises ValueError.
+    """
+
     state: Literal["completed", "skipped", "error"]
     selection: str = Field(min_length=1)
     findings: tuple[Finding, ...]
@@ -83,6 +102,7 @@ class DetectorResult(Record):
 
     @model_validator(mode="after")
     def consistent_state(self) -> Self:
+        """Return self, or raise ValueError for contradictory state/evidence."""
         if self.state == "completed" and self.reason is not None:
             raise ValueError("completed observations cannot carry a reason")
         if self.state != "completed" and (
@@ -93,11 +113,24 @@ class DetectorResult(Record):
 
 
 class GateResult(Record):
+    """Import-contract outcome: ``state`` is pass, fail or error.
+
+    ``detail`` preserves command output or the execution failure reason.
+    """
+
     state: Literal["pass", "fail", "error"]
     detail: str
 
 
 class Method(Record):
+    """Environment and scanner identity used to decide comparability.
+
+    ``python`` and ``platform`` identify the runtime. ``distributions`` maps
+    installed package names to versions; ``tool_versions`` maps CLI names to
+    normalized versions. ``configuration`` maps repo-relative configuration
+    paths to SHA-256 digests. ``implementation`` maps tool filenames to digests.
+    """
+
     python: str
     platform: str
     distributions: dict[str, str]
@@ -107,6 +140,12 @@ class Method(Record):
 
 
 class Candidate(Record):
+    """Observed worktree identity, including uncommitted content.
+
+    ``commit`` is HEAD and ``tree`` is HEAD's tree ID. ``status`` is Git porcelain
+    text. ``source_digest`` hashes scanned Python sources and configurations.
+    """
+
     commit: str
     tree: str
     status: str
@@ -114,6 +153,15 @@ class Candidate(Record):
 
 
 class Snapshot(Record):
+    """Version-2 quality observation, not an acceptance verdict.
+
+    ``captured_at`` is the UTC timestamp. ``candidate`` identifies the source;
+    ``method`` identifies the environment and scanners. ``detectors`` includes
+    every name in DETECTORS, including skipped/error outcomes. ``import_contracts``
+    records the separate gate result. ``notice`` explains count-only semantics.
+    Missing detector entries or invalid nested records raise ValueError.
+    """
+
     schema_version: Literal[2]
     captured_at: str
     candidate: Candidate
@@ -124,6 +172,7 @@ class Snapshot(Record):
 
     @model_validator(mode="after")
     def complete_inventory(self) -> Self:
+        """Return self, or raise ValueError unless every detector is accounted for."""
         if set(self.detectors) != set(DETECTORS):
             raise ValueError("snapshot must account for every detector")
         return self
@@ -138,18 +187,21 @@ def relative_path(filename: str, root: Path) -> str:
 
 
 def object_value(value: JsonValue) -> dict[str, JsonValue]:
+    """Return a JSON object unchanged; raise ReportError for other JSON values."""
     if not isinstance(value, dict):
         raise ReportError("expected a JSON object")
     return value
 
 
 def string_value(value: JsonValue) -> str:
+    """Return a nonempty JSON string; raise ReportError for other values."""
     if not isinstance(value, str) or not value:
         raise ReportError("expected a non-empty string")
     return value
 
 
 def integer_value(value: JsonValue) -> int:
+    """Return a JSON integer; raise ReportError for booleans or other values."""
     if type(value) is not int:
         raise ReportError("expected an integer")
     return value
@@ -302,6 +354,7 @@ def radon_findings(
 
 
 def scope_for(path: str) -> str:
+    """Classify a repo-relative path as production/tests/scripts/tools/configuration/other."""
     if path.startswith("pyproject.toml["):
         return "configuration"
     return {
@@ -315,6 +368,10 @@ def scope_for(path: str) -> str:
 def selected_findings(
     snapshot: Snapshot, parent: str | None
 ) -> list[tuple[str, Finding]]:
+    """Return counted (detector, finding) pairs, optionally below relative parent.
+
+    None selects every path. Absolute parents or '..' raise ReportError.
+    """
     prefix = PurePosixPath(parent) if parent else None
     if prefix and (prefix.is_absolute() or ".." in prefix.parts):
         raise ReportError("parent must be repo-relative")
@@ -328,6 +385,11 @@ def selected_findings(
 
 
 def module_for(detector: str, path: str) -> str:
+    """Return the grouping key for a detector's repo-relative finding path.
+
+    Configuration has its own group; test-paths use the path itself. Other
+    detectors group by the containing directory.
+    """
     if scope_for(path) == "configuration":
         return "configuration"
     return path if detector == "test-paths" else str(PurePosixPath(path).parent)
@@ -355,6 +417,7 @@ def summarize(
 
 
 def counts(snapshot: Snapshot) -> Counter[tuple[str, str, str]]:
+    """Sum counted findings by (detector, repo-relative path, rule)."""
     result: Counter[tuple[str, str, str]] = Counter()
     for detector, finding in selected_findings(snapshot, None):
         result[(detector, finding.path, finding.rule)] += finding.count
@@ -362,6 +425,10 @@ def counts(snapshot: Snapshot) -> Counter[tuple[str, str, str]]:
 
 
 def comparability_issues(before: Snapshot, after: Snapshot) -> list[str]:
+    """List method/selection/state differences and incomplete observations.
+
+    Empty means count comparison is supported; candidate identity may differ.
+    """
     issues = [
         f"method.{field} differs"
         for field in Method.model_fields
@@ -431,12 +498,20 @@ def compare(before: Snapshot, after: Snapshot) -> dict[str, JsonValue]:
 
 
 def command(root: Path, args: tuple[str, ...]) -> subprocess.CompletedProcess[str]:
+    """Run argv in root, capturing text without checking its exit status.
+
+    OS errors and the 180-second subprocess timeout propagate.
+    """
     return subprocess.run(
         args, cwd=root, capture_output=True, text=True, check=False, timeout=180
     )
 
 
 def git(root: Path, *args: str) -> str:
+    """Run Git arguments in root and return stripped stdout.
+
+    Nonzero exit raises ReportError with stderr; launch/timeout errors propagate.
+    """
     result = command(root, ("git", *args))
     if result.returncode:
         raise ReportError(result.stderr.strip())
@@ -444,10 +519,15 @@ def git(root: Path, *args: str) -> str:
 
 
 def digest(data: bytes) -> str:
+    """Return the SHA-256 hexadecimal digest of data."""
     return hashlib.sha256(data).hexdigest()
 
 
 def configuration_files(root: Path) -> dict[str, str]:
+    """Map tracked/nonignored quality configuration paths under root to digests.
+
+    Git, file-read and timeout failures propagate; absent files are omitted.
+    """
     names = git(
         root, "ls-files", "--cached", "--others", "--exclude-standard", "-z"
     ).split("\0")
@@ -468,6 +548,10 @@ def configuration_files(root: Path) -> dict[str, str]:
 
 
 def candidate(root: Path) -> Candidate:
+    """Read Git identity/status and hash scanned Python sources/configuration.
+
+    Return the worktree identity for root; Git and file-read failures propagate.
+    """
     sources = {
         str(path.relative_to(root)): digest(path.read_bytes())
         for path in _support.python_files(root)
@@ -496,6 +580,11 @@ def normalize_tool_version(tool: str, output: str) -> str:
 
 
 def measurement_method(root: Path) -> Method:
+    """Fingerprint this runtime, installed tools, configuration and tool sources.
+
+    Run version commands in root. Unidentifiable tools raise ReportError;
+    launch, file-read and timeout errors propagate.
+    """
     tools_dir = Path(__file__).resolve().parent
     versions: dict[str, str] = {}
     for name in ("ruff", "pyright", "lint-imports"):
@@ -520,6 +609,11 @@ def measurement_method(root: Path) -> Method:
 
 
 def local_findings(name: Detector, root: Path) -> tuple[Finding, ...]:
+    """Adapt file-size, test-paths/structure/capabilities or suppressions findings.
+
+    Scan root without importing scanned sources. Other detector names raise
+    ReportError; scanner errors propagate. Advisory structure findings are uncounted.
+    """
     if name == "file-size":
         return tuple(
             Finding(
@@ -571,6 +665,11 @@ def local_findings(name: Detector, root: Path) -> tuple[Finding, ...]:
 def external_findings(
     name: Literal["ruff", "pyright"], root: Path
 ) -> tuple[Finding, ...]:
+    """Run Ruff or Pyright over root and normalize captured JSON diagnostics.
+
+    ReportError rejects unexpected exit codes or exit 1 without counted findings.
+    Launch, timeout, JSON and diagnostic-validation errors propagate.
+    """
     args = (
         ("ruff", "check", "--output-format", "json", "--no-cache", ".")
         if name == "ruff"
@@ -590,6 +689,11 @@ def external_findings(
 def observe(
     selection: str, collect: Callable[[], tuple[Finding, ...]]
 ) -> DetectorResult:
+    """Call collect once for selection and return completed findings.
+
+    Import, IO, parsing, validation and subprocess failures become an error
+    result with their reason, never an empty completed observation.
+    """
     try:
         return DetectorResult(
             state="completed", selection=selection, findings=collect()
@@ -611,6 +715,10 @@ def observe(
 
 
 def import_contracts(root: Path) -> GateResult:
+    """Run lint-imports in root and preserve its output as pass/fail/error.
+
+    Exit 0 passes, 1 fails; other exits and launch/timeout failures are errors.
+    """
     try:
         result = command(root, ("lint-imports",))
         state: Literal["pass", "fail", "error"] = "error"
@@ -678,6 +786,10 @@ def collect_snapshot(
 
 
 def emit_summary(snapshot: Snapshot, top: int) -> None:
+    """Print detector states/counts and up to top hotspots per group to stderr.
+
+    Include separate Radon advisory ranks and the count-only comparison notice.
+    """
     for name, result in sorted(snapshot.detectors.items()):
         if name == "radon":
             continue
@@ -707,17 +819,36 @@ def emit_summary(snapshot: Snapshot, top: int) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Snapshot this checkout or compare two snapshot JSON paths from argv.
+
+    None reads sys.argv. Snapshot accepts --with-pyright/--with-radon and positive
+    --top (default 10); compare requires before and after paths. JSON goes to
+    stdout or a new --output file; summaries/notices go to stderr. Return 0 on
+    completion, 2 for observation, input, IO or comparability failures. Counts
+    and import-contract failures alone do not fail the report. argparse handles
+    help and invalid CLI syntax with SystemExit.
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="operation", required=True)
     snapshot_parser = sub.add_parser("snapshot")
-    snapshot_parser.add_argument("--with-pyright", action="store_true")
-    snapshot_parser.add_argument("--with-radon", action="store_true")
-    snapshot_parser.add_argument("--top", type=int, default=10)
+    snapshot_parser.add_argument(
+        "--with-pyright",
+        action="store_true",
+        help="include whole-tree Pyright diagnostics",
+    )
+    snapshot_parser.add_argument(
+        "--with-radon", action="store_true", help="include Radon complexity advisory"
+    )
+    snapshot_parser.add_argument(
+        "--top", type=int, default=10, help="hotspots per stderr group (default: 10)"
+    )
     compare_parser = sub.add_parser("compare")
-    compare_parser.add_argument("before", type=Path)
-    compare_parser.add_argument("after", type=Path)
+    compare_parser.add_argument("before", type=Path, help="baseline snapshot JSON")
+    compare_parser.add_argument("after", type=Path, help="candidate snapshot JSON")
     for child in (snapshot_parser, compare_parser):
-        child.add_argument("--output", type=Path)
+        child.add_argument(
+            "--output", type=Path, help="write JSON to a new file instead of stdout"
+        )
     args = parser.parse_args(argv)
     try:
         exit_code = 0

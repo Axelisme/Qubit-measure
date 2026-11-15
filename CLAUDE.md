@@ -126,7 +126,7 @@ Worktree 只隔離檔案，不隔離 ZCU／儀器、GUI subprocess 或固定 por
 依序完成：
 
 1. 執行 targeted tests 與 affected type and lint checks。
-2. 對受影響檔案執行 Ruff import sorting：`check --select I --fix`，再執行 formatter。
+2. 執行 `tools/gate.py --base <ref>`。預設會對受影響檔案執行 Ruff import sorting 與 formatter，再執行其餘 gate 檢查。
 3. Formatter 若改變程式碼，重跑受影響的 tests、type checks 與 lint checks。
 4. 依風險執行 broader Pyright 與 parallel pytest；全樹型別以 `tools/check_ratchet.py --base <ref> --detector pyright --full-pyright` 和 baseline 比較，原始全樹 Pyright 的既有錯誤照實列出即可，見 [tools/README.md](tools/README.md)。
 5. 執行 `git diff --check`。
