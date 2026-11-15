@@ -1,8 +1,8 @@
 """Constant Stark tone plus weak probe, in an extended-zone Floquet frame.
 
 The two tones may use different ports. The larger absolute gain is the Stark
-slot (ties choose the first slot). ModelSource identity namespaces engine
-caches; keys additionally encode flux level, Stark port, frequency and gain.
+slot (ties choose the first slot). Source instance and budget namespace the
+evolve-local frames; keys encode flux level, shift content, Stark port, frequency and gain.
 All probe parameters and both start phases remain excluded from frame keys.
 
 P8 probe limits are r <= .1, population transfer <= .02 and r2 <= .05
@@ -36,6 +36,7 @@ another kernel.
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, replace
+from functools import partial
 from types import MappingProxyType
 from typing import Literal
 
@@ -56,6 +57,7 @@ from ..kernel import (
     SegmentTable,
 )
 from ..secular import SecularModel
+from ..workplan import FactKey
 from . import _floquet_k0
 from . import _floquet_sidebands as sb
 from ._floquet_policy import (
@@ -721,8 +723,10 @@ class FloquetKernel:
         The complete table's same-key candidates decide whether construction
         needs sidebands. Full Fourier averages are consumed inside that build;
         only the compact immutable entry survives in the returned preparation.
-        Frame ownership follows resident admission or the current active binding,
-        never an evolve-long fact. Probe-bin certificates remain guard products.
+        WorkPlan owns the exact-source/budget/key frame until evolve exit,
+        including invalid frames and frames whose rows are all refused. Prefix
+        and deferred classifications borrow the same fact. Probe-bin
+        certificates remain row-local guard products, not shared decisions.
         """
         source, budget = context.source, context.budget
         if budget <= 0 or not np.array_equal(
@@ -731,31 +735,50 @@ class FloquetKernel:
             raise ValueError(
                 "Floquet requires positive budget and aligned representative rows"
             )
+        inventory = context.work_plan.complete_table
+        if inventory is None:
+            inventory = table
         entries = []
-        candidates = np.arange(len(table.timeline), dtype=np.int64)
-        candidates = candidates[_candidate_positions(table, candidates)]
-        candidate_keys = self.prepare_keys(table, candidates, context)
-        for key in keys:
-            model = source.shifted_model(
-                tuple(int(v) for v in key["level"]), bytes(key["shift"])
+        for index, key in enumerate(keys):
+            fact = FactKey(("floquet-frame", source, budget, key.tobytes()), _Prepared)
+            prepared = context.work_plan.fact(
+                fact,
+                partial(
+                    self._prepare_frame, keys[index : index + 1], inventory, context
+                ),
             )
-            parameters = _parameters(table, candidates[candidate_keys == key])
-            try:
-                entries.append(
-                    _build(
-                        model,
-                        int(key["port"]),
-                        float(key["frequency"]),
-                        float(key["gain"]),
-                        parameters,
-                        budget,
-                    )
-                )
-            except np.linalg.LinAlgError as error:
-                raise RuntimeError("Floquet modal construction failed") from error
+            entries.append(prepared.entries[0])
         owned_keys = keys.copy()
         owned_keys.setflags(write=False)
         return _Prepared(tuple(entries), owned_keys)
+
+    def _prepare_frame(
+        self, keys: NDArray[np.void], table: SegmentTable, context: KernelContext
+    ) -> _Prepared:
+        """Build one compact frame using the complete evolve's sideband demand."""
+        key = keys[0]
+        model = context.source.shifted_model(
+            tuple(int(v) for v in key["level"]), bytes(key["shift"])
+        )
+        candidates = np.arange(len(table.timeline), dtype=np.int64)
+        candidates = candidates[_candidate_positions(table, candidates)]
+        candidate_keys = self.prepare_keys(table, candidates, context)
+        parameters = _parameters(table, candidates[candidate_keys == key])
+        try:
+            context.work_plan.routing.built(self.name, 1)
+            entry = _build(
+                model,
+                int(key["port"]),
+                float(key["frequency"]),
+                float(key["gain"]),
+                parameters,
+                context.budget,
+            )
+        except np.linalg.LinAlgError as error:
+            raise RuntimeError("Floquet modal construction failed") from error
+        owned_keys = keys.copy()
+        owned_keys.setflags(write=False)
+        return _Prepared((entry,), owned_keys)
 
     def bind_input(
         self,
