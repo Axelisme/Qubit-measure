@@ -1,6 +1,6 @@
 # Numeric simulation tools
 
-**Last updated:** 2026-11-12, versioned simulator benchmark
+**Last updated:** 2026-11-15, acquire benchmark retired
 
 **讀者：** framework-dev、agent。查閱數值模擬的責任邊界、快取契約與實測效能。
 
@@ -44,16 +44,13 @@ the public experiment `run` and program acquire with production pacing and one
 native thread. Those historical measurement scripts are not part of the
 repository; the revisions and workloads above record those comparisons.
 
-The repository now provides [`tools/benchmark_simulator.py`](../../../tools/README.md#simulator-benchmark).
-It measures five versioned synthetic single, six and FTF workloads through public
-program acquire, with five samples per history mode. Wall and CPU timers exclude
-imports and environment construction. The first-acquire mode creates a new
-environment per sample in the same process; it does not empty the disk Numba
-cache. The other modes use two fixed warmup acquires, then either clear routing
-history before each sample or retain it. Run the CLI through `run_heavy.py
---exclusive` to reserve both repo compute slots. JSON retains raw seconds,
-medians, MAD, configurations, hashes and library versions. `--compare` rejects
-incompatible workloads or measurement modes; a slowdown alone does not fail.
+Simulator benchmarks run at the `Engine.evolve` boundary, not through program
+acquire. Kernel measurements use one segment with a fixed `families=` selection.
+Sequence measurements use multi-segment `TimelineBatch` inputs to measure total
+evolution time, excluding program compilation and ADC sampling. The
+[family Pareto table](../../../tools/README.md#engine-family-pareto-table) records
+family errors and timings. The acquisition comparisons above remain historical
+observations, not the current benchmark procedure.
 
 ## Numba machine-code cache
 

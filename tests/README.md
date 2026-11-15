@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-11-15，sampled multitone 拒收終態與模型尺寸
+**Last updated:** 2026-11-16，environment 測試分層
 
 **讀者：** framework-dev、agent。查閱測試的 owner、fixture、執行方式與搬遷驗收契約。
 
@@ -518,8 +518,12 @@ sampling tests live in the corresponding numeric owner directories.
 and public acquire/decimated composition. `test_ftf_templates.py` covers DC readout
 and the template engine contract.
 `tests/simulators/ftf/environment/test_projective_readout.py` covers public frontend mux heralding, retained
-outcome histories, pruning, partial ADC observations and elementwise terminal-only
-runtime parity against direct Engine/ADC composition. Cavity field continuation
+outcome histories, pruning, partial ADC observations and terminal-only density,
+point-order and sampling-identity handoff to ADC using an injected non-evolving Engine.
+The eight single/six/FTF acquire, projection and routing-control test files replace
+numeric propagation with Engine answers. Six keeps six independent model sources.
+Engine density accuracy stays in `tests/simulate/evolution/contract/`, rather than
+in program-to-acquire parity or fixed-I/Q numerical baselines. Cavity field continuation
 stays in the same directory's `test_cavity_continuation.py`; acquisition-frozen losses stay in
 `test_drift.py`. Repeated frontend readouts use `builder.repeat(...)` and the public
 `set_reads_per_shot` count, since QICK counts the trigger macro once.
