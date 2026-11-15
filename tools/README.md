@@ -843,6 +843,8 @@ uv run --directory <worktree> --no-sync -- python tools/doc_relations.py --check
 - `related: <path>  (<reason>)`：由引用關係找到的文件。包含每個改動路徑上各層的 `README.md`、
   這些 README 與改動檔案以 `ADR-NNNN` 或 `adr/NNNN-` 連結引用的 ADR，以及引用同一批 ADR 的其他文件。
   被超過 8 份其他文件引用的 ADR 只列它本身，原因欄註明略過的份數。
+  Changed 檔若不是有效 UTF-8，內容不提供 ADR 引用，路徑仍參與 README chain。
+  Markdown、Python 檔的解碼錯誤，以及 Git 與 I/O 錯誤仍會使命令失敗。
 - `hit: <path>:<line>: <term> (<source>): <text>`：文件中出現搜尋詞的行。搜尋詞來自改動的 `.py` 檔：
   被刪除或改名的公開頂層函式、類別與大寫常數（`removed name`），定義內容有變的（`changed name`），
   以及檔案路徑的最後兩段（`changed path`）。`--term` 可重複，補上文件實際使用的稱呼（`given`）。
