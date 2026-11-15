@@ -4,6 +4,13 @@ import ast
 from pathlib import Path, PurePosixPath
 
 import check_suppressions as checker
+import pytest
+
+
+def test_help_exits_successfully_without_scanning() -> None:
+    with pytest.raises(SystemExit) as caught:
+        checker.main(["-h"])
+    assert caught.value.code == 0
 
 
 def test_each_comment_silencer_is_counted() -> None:

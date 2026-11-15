@@ -14,6 +14,7 @@ oversize file does not add a file-size violation.
 
 from __future__ import annotations
 
+import argparse
 import json
 import sys
 from collections.abc import Iterable
@@ -66,7 +67,14 @@ def oversize_files(
     )
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    """Print JSON and stderr diagnostics for oversized Python files in this checkout.
+
+    None reads sys.argv; argparse handles help and invalid syntax with SystemExit.
+    Return 1 when any file exceeds LINE_LIMIT, otherwise 0. Read errors propagate.
+    """
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.parse_args(argv)
     root = Path(__file__).resolve().parents[1]
     found = oversize_files(root)
     receipt = {

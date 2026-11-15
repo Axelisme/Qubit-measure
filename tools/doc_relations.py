@@ -323,12 +323,31 @@ def main(argv: list[str] | None = None) -> int:
     argv=None reads sys.argv. Git and file-read errors propagate.
     """
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("base", nargs="?")
-    parser.add_argument("--check", action="store_true")
-    parser.add_argument("--term", action="append", default=[])
-    parser.add_argument("--max-hits", type=int, default=_DEFAULT_MAX_HITS)
     parser.add_argument(
-        "--root", type=Path, default=Path(__file__).resolve().parents[1]
+        "base", nargs="?", help="commit to compare with the working tree"
+    )
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="check tracked Markdown references instead of a diff",
+    )
+    parser.add_argument(
+        "--term",
+        action="append",
+        default=[],
+        help="additional literal search term; repeatable",
+    )
+    parser.add_argument(
+        "--max-hits",
+        type=int,
+        default=_DEFAULT_MAX_HITS,
+        help="summarize terms exceeding this hit count (default: 40)",
+    )
+    parser.add_argument(
+        "--root",
+        type=Path,
+        default=Path(__file__).resolve().parents[1],
+        help="checkout to inspect (default: this checkout)",
     )
     options = parser.parse_args(argv)
     root: Path = options.root
