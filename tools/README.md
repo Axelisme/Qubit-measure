@@ -1,6 +1,6 @@
 # tools/
 
-**Last updated:** 2026-11-14, no-evolution sample rejection and corrected DOP853 summaries
+**Last updated:** 2026-11-15, fenced code examples excluded from link checks
 
 **讀者：** framework-dev。Repo 品質檢查與重計算執行器的 CLI、輸出與比較機制。
 
@@ -789,6 +789,10 @@ uv run --directory <worktree> --no-sync -- python tools/doc_relations.py --check
 
 `doc_relations.py --check` 檢查所有 tracked Markdown：相對連結必須指到 tracked 檔案或含有 tracked 檔案的目錄，
 不得用 `.py#L<n>` 釘行號；`ADR-NNNN` 必須對應 `docs/adr/` 或 `docs/adr/retired/` 下的檔案。
+連結檢查略過 fenced code block 的示例，包括 fence 行本身。Fence 由行首最多三個空白後、
+至少三個連續 backtick 或 tilde 開啟；backtick fence 的附加文字不能含 backtick。
+結束行使用同一種字元，長度至少等於開啟行，後面只能有空白。未結束的 block 延續到該文件結尾。
+正文連結仍依原文件行號回報，`ADR-NNNN` 在 fenced code 內也照常檢查。
 每筆違規印一行 `<path>:<line>: <reason>`，有違規回傳 1。
 
 `--root <repo>` 指定另一個 checkout。`related_documents`、`search_terms`、`find_hits` 與 `check_references`

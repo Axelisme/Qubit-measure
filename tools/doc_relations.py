@@ -15,6 +15,7 @@ from typing import Final
 _RECORD: Final = re.compile(r"ADR-(\d{4})|adr/(?:retired/)?(\d{4})-")
 _RECORD_PATH: Final = re.compile(r"^docs/adr/(?:retired/)?(\d{4})-[^/]+\.md$")
 _LINK: Final = re.compile(r"\]\(([^)\s]+)\)")
+_FENCE: Final = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
 _LINE_ANCHOR: Final = re.compile(r"\.py#L\d+")
 _DEFAULT_MAX_HITS: Final = 40
 # A record cited by more documents than this governs the whole repository; its citers are
@@ -223,6 +224,23 @@ def find_hits(terms: Sequence[Term], documents: Mapping[str, str]) -> tuple[Hit,
     return tuple(hits)
 
 
+def _unfenced_links(text: str) -> dict[int, list[str]]:
+    """Extract link targets outside fenced code, keyed by original line number."""
+    links: dict[int, list[str]] = {}
+    fence = ""
+    for number, line in enumerate(text.splitlines(), 1):
+        marker = _FENCE.match(line)
+        if fence:
+            if marker and marker[1].startswith(fence) and not marker[2].strip():
+                fence = ""
+            continue
+        if marker and (marker[1].startswith("~") or "`" not in marker[2]):
+            fence = marker[1]
+            continue
+        links[number] = _LINK.findall(line)
+    return links
+
+
 def check_references(
     documents: Mapping[str, str], tracked: frozenset[str]
 ) -> tuple[Violation, ...]:
@@ -231,8 +249,9 @@ def check_references(
     documents maps repo-relative POSIX paths to Markdown text; tracked holds
     every tracked repo-relative POSIX path. A relative link must resolve to a
     tracked file or to a directory containing one, and must not pin a line
-    with a .py#L<n> anchor. Links with a URL scheme and in-page anchors are
-    skipped. Every ADR-NNNN must match a tracked docs/adr/NNNN-*.md, retired
+    with a .py#L<n> anchor. Links in fenced code blocks, with a URL scheme or
+    with in-page anchors are skipped. Every ADR-NNNN, including in fenced code,
+    must match a tracked docs/adr/NNNN-*.md, retired
     or not. Discussion snapshots and retired ADRs are skipped. Violations are
     ordered by path, line and position in the line.
     """
@@ -244,8 +263,9 @@ def check_references(
     for path, text in sorted(documents.items()):
         if _is_snapshot(path):
             continue
+        links = _unfenced_links(text)
         for number, line in enumerate(text.splitlines(), 1):
-            for target in _LINK.findall(line):
+            for target in links.get(number, ()):
                 if "://" in target or target.startswith(("#", "mailto:")):
                     continue
                 if _LINE_ANCHOR.search(target):
