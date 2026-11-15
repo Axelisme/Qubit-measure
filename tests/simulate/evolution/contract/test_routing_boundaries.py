@@ -1,7 +1,7 @@
 """Engine routing boundaries separate dispatch costs from numerical admission.
 
-The sampled multitone pause replaces the 19/20 cost split until sampled
-admission is restored; restore that split's tests with the numerical fix.
+Sampled multitone rejection applies on both sides of the 19/20 cost split.
+Pinned calls cannot restore admission; no numerical fix is assumed to reopen it.
 """
 
 from contextlib import closing
@@ -60,7 +60,7 @@ def test_whitelisted_multitone_gate_cost_boundary(count: int) -> None:
 
 
 def test_pinned_multitone_gate_below_cost_break_even() -> None:
-    """Pinning bypasses price, not the sampled pause, even after warm fallback."""
+    """Pinning bypasses price, not sampled rejection, even after warm fallback."""
     case = _joint_gate_case(19)
     with closing(Engine(1)) as engine:
         engine.evolve(case.source, (case.batch,))

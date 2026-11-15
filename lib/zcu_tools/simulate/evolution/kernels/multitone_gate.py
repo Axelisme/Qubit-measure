@@ -1,4 +1,4 @@
-"""Paused simultaneous covariant-gate family; the shared builder is retained."""
+"""Retained simultaneous covariant-gate family with no admitted rows."""
 
 import numpy as np
 from numpy.typing import NDArray
@@ -8,7 +8,7 @@ from ._rwa_gate import CovariantGateKernel
 
 
 class MultitoneGateKernel(CovariantGateKernel):
-    """Keep the family name while sampled multitone gates are paused.
+    """Retain the family name and reject every row.
 
     Every row is rejected, including pinned families and inventories at or
     above the 20-use cost preference. The existing shared numerical builder
@@ -20,6 +20,6 @@ class MultitoneGateKernel(CovariantGateKernel):
     def guard(
         self, table: SegmentTable, rows: NDArray[np.int64], context: KernelContext
     ) -> NDArray[np.bool_]:
-        """Return an all-False row mask while sampled multitone admission is paused."""
+        """Return an all-False row mask, including for pinned calls."""
         del table, context
         return np.zeros(len(rows), dtype=np.bool_)

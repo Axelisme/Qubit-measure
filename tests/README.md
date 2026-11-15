@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-11-15，sampled multitone 暫停驗收與模型尺寸
+**Last updated:** 2026-11-15，sampled multitone 拒收終態與模型尺寸
 
 **讀者：** framework-dev、agent。查閱測試的 owner、fixture、執行方式與搬遷驗收契約。
 
@@ -148,7 +148,7 @@ uv run --directory <worktree> --no-sync -- \
 矩陣用 `Engine(1, families=(family,)).evolve(...)` 固定可用 family，
 再從 `paths.segments_by_kernel` 確認實際路徑。
 16 個 active family 都有 pinned 案例，預期 family 沒有執行任何 segment 時獨立失敗。
-`multitone_gate` 暫停 admission，矩陣不替它建立 density 案例，表中顯示 `NOT EXERCISED`。
+`multitone_gate` 拒收所有列，矩陣不替它建立 density 案例，表中顯示 `NOT EXERCISED`。
 它的 sampled 拒收由 routing boundary 契約驗證，不填 error=0，也不報 PASS。
 Active family 的 guard 拒絕輸入會讓 density 測試失敗，不會產生誤差觀察值。
 各案例包含完整 complex coherence、relaxation 與 dephasing。模型尺寸依案例族區分：
@@ -168,8 +168,8 @@ Active family 的 guard 拒絕輸入會讓 density 測試失敗，不會產生�
 每個案例也保留預設選路的空歷史與暖歷史驗收。
 `joint_gate_inventory` 保留完整 20 點 sampled inventory，pinned density 改驗 `dop853`。
 `joint_constant` 用相同模型和 inventory 保護 `multitone_rwa` 的 distinct-port constant 路徑。
-19／20 次 inventory 與 pinned 的 sampled 暫停由
-[`test_routing_boundaries.py`](simulate/evolution/contract/test_routing_boundaries.py) 驗證，修法恢復 admission 時才恢復舊成本邊界測試。
+19／20 次 inventory 與 pinned 的 sampled 拒收由
+[`test_routing_boundaries.py`](simulate/evolution/contract/test_routing_boundaries.py) 驗證。19 與 20 次 inventory 都維持拒收，不預告恢復舊成本邊界測試。
 `cheap_sampled_nearby` 與 `cheap_sampled_separated` 使用非平坦 smooth samples，避免 planner 抽成 constant row。
 兩個案例分別驗證失去 cheap-RWA 豁免後的 `common_frame` 與 `dop853` 分支，包含空／暖 history 的路徑與完整 density。
 多段案例量整條 timeline 的最終誤差。混合路徑的每個 family 列出同一個最終誤差，

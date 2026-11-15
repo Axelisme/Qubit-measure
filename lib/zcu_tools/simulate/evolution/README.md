@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-11-15, sampled multitone pause and reference convergence scope
+**Last updated:** 2026-11-15, sampled multitone rejection and reference convergence scope
 
 **讀者：** framework-dev、agent。Segment evolution 的公開輸入、路由與數值邊界。
 
@@ -244,7 +244,7 @@ are normalized by envelope peak. Retained real dimension counts populations
 and both real coordinates of within-component coherences.
 
 The matrix exercises 16 active families, including a numerical-guard edge for
-each active guarded family. `multitone_gate` is paused and reports
+each active guarded family. `multitone_gate` rejects every row and reports
 `NOT EXERCISED`, with no density error. Four existing edge cases exceed `2e-3` and remain strict
 xfails: `gate_cache` at `9.296548e-3`, `common_frame` at `8.066669e-3`,
 `single_tone_rwa` at `2.180208e-2` and `shaped_sambe` at `3.091554e-3`.
@@ -258,7 +258,8 @@ those runs measure the families actually selected, not every candidate.
 The [matrix instructions](../../../../tests/README.md#evolution-精度矩陣)
 own the command and report format.
 
-The sampled-envelope pause leaves candidate order and common-frame pricing
+Sampled multitone rejection is the current admission contract, not a temporary
+route pending a numerical fix. It leaves candidate order and common-frame pricing
 unchanged. Rejected sampled rows fall back to the next admitted candidate,
 often `dop853`. Previously cheap sampled RWA graphs lose their exemption from
 common-frame pricing. The matrix's `cheap_sampled_nearby` and
@@ -280,8 +281,8 @@ routes and final densities. This does not force every sampled row to DOP853.
 | [`gate_cache`](kernels/gate_cache.py), phase-interpolated full-carrier shaped gates | `shaped` | Four Hilbert subsegments with secular half-steps. Model-only secular split d³ΓV²/16 ≤ 0.01. For 0 < d ≤ 30 ns, dispatch tries 6 phase nodes with 2 probes and full-unitary defect ≤ min(1e-4, 0.1B); other keys or failed convergence use 16 nodes. Fixed-order playback does not certify arbitrary-drive error against B. | [`shaped_complex`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | FAIL at guard edge: 9.296548e-3; strict xfail |
 | [`period_table`](kernels/period_table.py), shaped amplitude-band period playback | `shaped` | 8 Chebyshev amplitude nodes and 16 phase samples. Guard requires envelope-motion indicator ≤ 0.05, amplitude-band bandwidth ≤ 0.5 and secular split ≤ 0.01. These calibrated limits do not scale with B. DC is guard-admissible with local direct integration, but default costs prefer terminal DOP853. | [`linear_shaped`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
 | [`common_frame`](kernels/common_frame.py), common-frame SW2 beat dynamics | `two` or two-tone `multiple` only | Fixed-flux common frame with second-order beat/two-photon terms, first-order endpoint dressing and CF4/secular playback. Absolute mean carrier must be ≥ 1e-10 GHz. CF4 steps are capped at 8 ns and 0.08 cycles of the fastest retained channel, with no lower cutoff. Dispatch prices first-order playback steps, so cost rises with active carrier spacing; numerical guards determine applicability. Fast-channel denominator must exceed 1e-10. Row-local coherent/bath indicators must be ≤ 0.03/0.01, independent of B. | [`nearby_carriers`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | FAIL at guard edge: 8.066669e-3; strict xfail |
-| [`multitone_gate`](kernels/multitone_gate.py), retained simultaneous RWA gate family | `multiple`, paused | Rejects every row during the sampled-envelope pause. The retained 20-use inventory cost preference cannot restore numerical admission at 19 or 20 uses; pinning cannot bypass rejection. Shared single-tone gate numerics are unchanged. | [19/20 and pinned pause contract](../../../../tests/simulate/evolution/contract/test_routing_boundaries.py) | NOT EXERCISED, paused; no density error |
-| [`multitone_rwa`](kernels/multitone_rwa.py), simultaneous omission-restored RWA | `two`, distinct ports only | Exactly two constant envelopes, fixed flux, B ≥ 1e-3 and each carrier magnitude ≥ 50 MHz. Sampled rows are temporarily rejected. Start with 50 MHz edges, restore omitted paths until transfer proxy ≤ 0.0058 and residual phase ≤ 0.0045 rad; retained real dimension ≤ 256. No carrier-spacing, full-operator/carrier ratio or retained-norm phase cap. Apply step ceiling is 16 ns. | [`joint_constant`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
+| [`multitone_gate`](kernels/multitone_gate.py), retained simultaneous RWA gate family | `multiple`, disabled | Rejects every row. The retained 20-use inventory cost preference cannot restore numerical admission at 19 or 20 uses; pinning cannot bypass rejection. Shared single-tone gate numerics are unchanged. | [19/20 and pinned rejection contract](../../../../tests/simulate/evolution/contract/test_routing_boundaries.py) | NOT EXERCISED; no density error |
+| [`multitone_rwa`](kernels/multitone_rwa.py), simultaneous omission-restored RWA | `two`, distinct ports only | Exactly two constant envelopes, fixed flux, B ≥ 1e-3 and each carrier magnitude ≥ 50 MHz. Sampled rows are rejected. Start with 50 MHz edges, restore omitted paths until transfer proxy ≤ 0.0058 and residual phase ≤ 0.0045 rad; retained real dimension ≤ 256. No carrier-spacing, full-operator/carrier ratio or retained-norm phase cap. Apply step ceiling is 16 ns. | [`joint_constant`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
 | [`floquet`](kernels/floquet.py), constant Stark tone plus probe | `two` | Larger absolute gain selects the Stark slot, with ties choosing the first; that slot requires positive carrier. Frame overlap ≥ 0.5, modal condition ≤ 1e8, maximum real eigenvalue ≤ 1e-10/ns and residual ≤ 1e-9; sampling extent ≤ 128 with at most 4096 phase samples. k=0 omission and convergence each fit B/3. Modal Dyson additionally uses r ≤ 0.1, r2 ≤ 0.05 when probe gain magnitude ≥ 0.1, Dyson norm-duration v ≤ 0.5, transfer indicator v + v²/2 ≤ 0.02 and higher-order remainder exp(v)·v³/6 ≤ B/3; otherwise use periodic channel playback. Retained-sideband admission instead requires convergence ≤ B/40 and bound ≤ 0.95B, retaining edges within 0.1/ns and averaging other harmonics through order 4. This finite-Fourier admission is not a density-error guarantee. | [`two_carriers`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
 | [`dop853`](kernels/dop853.py), full-drive direct density integration | `shaped`, `two`, `multiple`, terminal candidate | No RWA or fast-path admission threshold. Accepts valid rows with finite positive B, including complex sampled envelopes. Stops at active control knots. Local rtol = min(1e-4, 0.03B), atol = min(1e-6, 0.0003B), from the [shared solver](kernels/_dop853.py); these are not global error bounds. | [`shaped_complex`](../../../../tests/simulate/evolution/contract/accuracy_cases.py), [`two_carriers`](../../../../tests/simulate/evolution/contract/accuracy_cases.py), [`joint_gate_inventory`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
 
@@ -448,8 +449,8 @@ or rejected rows. Returning `None` raises rather than retrying `guard`.
 When false, classification calls `guard` directly. Multitone dispatch owns the
 20-use gate cost preference; prefix and worker calls borrow the complete-acquire
 inventory, never subset counts or resident warmth. The kernel guard checks only
-numerical admission. During the sampled-envelope pause it rejects all
-`multitone_gate` rows, including pinned calls and inventories of 19 or 20 uses.
+numerical admission. The `multitone_gate` family rejects all rows, including
+pinned calls and inventories of 19 or 20 uses.
 Cross-timeline keys are guarded before shared preparation. Local builders run
 inside their timeline worker and retain the same handoff.
 

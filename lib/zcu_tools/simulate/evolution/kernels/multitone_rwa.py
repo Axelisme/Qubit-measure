@@ -229,8 +229,8 @@ class MultitoneRWAKernel:
 
     Admission requires exactly two constant envelopes on distinct ports,
     fixed flux, each |f|>=0.05 GHz and budget >=1e-3. Sampled envelopes are
-    temporarily rejected because omission bounds do not certify their final
-    whole-sequence density error. Carrier spacing
+    rejected because omission bounds do not certify their final whole-sequence
+    density error. Carrier spacing
     does not veto admission: close or equal carriers use the same joint
     omission solver and retained-dimension limit. Full-operator/carrier and
     retained-norm phase caps do not apply here. Single-constant RWA and

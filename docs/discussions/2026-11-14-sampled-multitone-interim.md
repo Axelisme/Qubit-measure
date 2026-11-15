@@ -44,3 +44,13 @@ Sampled 修法與 constant-tone guard 的後續設計不屬於這次變更。恢
 [Routing boundaries](../../tests/simulate/evolution/contract/test_routing_boundaries.py) 驗證 19／20 與 pinned 的暫停行為，保留 30 MHz 契約。[Accuracy matrix](../../tests/simulate/evolution/contract/test_accuracy_matrix.py) 對 active family 與 fallback 的完整 timeline 比較獨立 full-Hamiltonian Lindblad 參考解。它保留 paused family 的未執行狀態，不填零誤差。
 
 候選順序與定價分別由 [multitone dispatch](../../lib/zcu_tools/simulate/evolution/_multitone_dispatch.py) 與 [common-frame dispatch](../../lib/zcu_tools/simulate/evolution/_common_frame_dispatch.py) 擁有。這次沿用 [common-frame 成本歸 dispatch 的裁決](2026-11-14-common-frame-step-pricing.md)，不把性能出口寫成新的數值 guard。
+
+## 後記，2026-11-15
+
+使用者於 2026-11-15 追認 designer 的拒收終態與下述合併驗收方法，原話為「可以追认然后把优化任务安排下去。」`multitone_gate` 去留與 STIRAP 基準採縮短 Gaussian 的依據仍另問。這項變更不預告修好後恢復 sampled admission。`multitone_rwa` 只收既有 distinct-port constant pairs，`multitone_gate` 保留但拒收所有列。19／20 與 pinned 契約繼續驗證拒收。其餘候選沿用原定價，包含 cheap nearby 的 `common_frame` 與 separated 的 `dop853`。現行契約仍由 [evolution README](../../lib/zcu_tools/simulate/evolution/README.md#kernel-summary) 擁有，完整 density 標準與既有 strict xfail 不變。
+
+本次合併驗收的方法也改為單調性論證加公開 telemetry，而不是原先的 exclusive 計時。Guard 只收窄候選，因此 main 沒有把 sampled 多 tone 列交給這兩個 family 時，收窄不會改變選到的 family。四個非 overlap benchmark workload 由版本化設定、program 序列與 domain 分類確認不受影響。`ftf_overlap_shaped` 則由 [run_workload](../../tools/benchmark_simulator.py) 在 main 完整執行三個 mode，每側 19 次 acquire，包含暖機。Main 每次 acquire 的兩個 multitone family 選中 rows 均須為零，after 用同一驅動程式重播作佐證。這裡描述驗收方法，不代表量測已完成。
+
+此方法不以 family 彙總相等冒充逐 row 比對，也不把非 exclusive 計時當作正式 slowdown 數字。資料缺失、前提不成立或兩側不一致時，合併前停止，再提交所需 exclusive benchmark 的方法與作業時間額度。使用者已追認這項對原完整 benchmark 方法的區別。STIRAP 的本機模型未入庫，其選路與耗時推論不列入本次合併門檻；沒有 after 讀數的項目仍是推論。
+
+使用者於 2026-11-15 解除 4-core 上限並重新允許 exclusive timing。這不等於核准任何特定作業，也不重置既有 once／retry 額度。本次 gates、formatter、commit 與觀察仍須另授，不能因 CPU 解鎖而啟動舊申請。

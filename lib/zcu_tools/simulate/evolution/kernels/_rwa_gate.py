@@ -582,7 +582,7 @@ class CovariantGateKernel:
     Numerical guard checks shared calibrated RWA and bounded phase-graph pruning.
     Preparation refines secular splitting without relaxing its proxy threshold.
     The builder supports sampled slices and final sample hold within row support.
-    Family guards decide admission; the multitone wrapper is currently paused.
+    Family guards decide admission; the multitone wrapper rejects every row.
     All gates compile Hilbert integration through the shared DOP853 solver.
     Dispatch/family wrappers own acquire-wide cost and reuse decisions.
     """
