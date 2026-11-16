@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from hashlib import sha256
 from math import prod
 from pathlib import Path
+from time import monotonic
 from typing import Literal
 
 import numpy as np
@@ -23,6 +24,7 @@ from zcu_tools.core.simulation import (
 from zcu_tools.device import DeviceManager, FakeDevice, FakeDeviceInfo
 from zcu_tools.experiment.simulation import SimulationEnvironment
 from zcu_tools.program.v2.simulation import (
+    AcquireOutcome,
     IntegratedRound,
     SimulationBinding,
     SimulationCallbacks,
@@ -32,6 +34,7 @@ from zcu_tools.program.v2.simulation import (
 )
 from zcu_tools.resources.simulation_schema import Receiver
 from zcu_tools.simulate.adc import (
+    ChannelReadout,
     PreparedRawShots,
     ProjectionReadout,
     ReadoutModel,
@@ -42,6 +45,7 @@ from zcu_tools.simulate.evolution import (
     DriveSource,
     Engine,
     ModelSource,
+    PathDiagnostics,
     RoutingHistory,
     batch_populations,
 )
@@ -73,6 +77,7 @@ from zcu_tools.simulators.single_fluxonium.environment.template import (
     SingleFluxoniumPlan,
     plan_template,
 )
+from zcu_tools.simulators.telemetry import RoutingTelemetry
 
 
 @dataclass(frozen=True)
@@ -255,6 +260,11 @@ class SingleFluxoniumSource:
     None creates a standalone clock. runtime.truth_log selects a private JSONL
     file; None uses a fresh session directory. Only enabled drift writes truth.
     The caller owns devices, including after source close.
+    paths holds this acquire's Engine diagnostics, including completed spans
+    before failure and zero-CPU reports for reused preparations. evolve_wall_s
+    sums Engine calls; readout_wall_s sums ADC preparation and round sampling.
+    begin_acquire resets these counters. telemetry is the optional local writer;
+    only finish_acquire writes, using the binding's AcquireOutcome.
     """
 
     def __init__(
@@ -274,6 +284,19 @@ class SingleFluxoniumSource:
             raise ValueError("single-fluxonium private replay requires pulse readout")
         self._readout_kind: Literal["pulse", "mux"] = readout_kind
         self.settings = settings
+        policy = settings.numerics.telemetry
+        self.telemetry = (
+            RoutingTelemetry(
+                (Path(__file__).resolve().parents[5] / ".sim_telemetry")
+                if policy.directory is None
+                else policy.directory.resolve()
+            )
+            if policy.enabled
+            else None
+        )
+        self.paths: list[PathDiagnostics] = []
+        self.evolve_wall_s = 0.0
+        self.readout_wall_s = 0.0
         self.devices = devices
         self.private_replay = private_replay
         runtime = SingleFluxoniumRuntimeOptions() if runtime is None else runtime
@@ -341,7 +364,33 @@ class SingleFluxoniumSource:
                     truth_log=self._truth_log,
                 )
             self._effective_settings = self._drift.sample(self._clock.now())
+        self.paths.clear()
+        self.evolve_wall_s = self.readout_wall_s = 0.0
         self._pending_acquire = True
+
+    def finish_acquire(self, outcome: AcquireOutcome) -> None:
+        """Write one admitted acquire, including failure, from binding's outcome.
+
+        Uses captured attempts for points/rounds and accumulated Engine/ADC work.
+        Writer failures warn once without changing the outcome. Disabled policy
+        writes nothing. The binding is the sole authority for complete.
+        """
+        if self.telemetry is not None:
+            self.telemetry.write(
+                {
+                    "points": prod(outcome.rounds[0].acquire.point_dims)
+                    if outcome.rounds
+                    else 0,
+                    "rounds": len(outcome.rounds),
+                    "wall_s": outcome.wall_s,
+                    "compile_wall_s": outcome.compile_wall_s,
+                    "evolve_wall_s": self.evolve_wall_s,
+                    "readout_wall_s": self.readout_wall_s,
+                    "complete": outcome.complete,
+                    "extras": {},
+                },
+                paths=self.paths,
+            )
 
     def snapshot(self) -> EnvironmentSnapshot:
         """Capture the bound driver's current value, not startup initial, in A/V.
@@ -538,6 +587,42 @@ class SingleFluxoniumSource:
         """
         return self.prepare_readouts(self.preflight(request, snapshot), cancel=cancel)
 
+    def _prepare_adc(
+        self,
+        readout: ProjectionReadout,
+        facts: SingleFluxoniumFacts,
+        validated: SingleFluxoniumPreflight,
+    ) -> tuple[tuple[ChannelReadout, ...], PreparedRawShots]:
+        request = validated.request
+        started = monotonic()
+        try:
+            channels, batches = [], {}
+            for receiver, receiver_plans in zip(
+                validated.receivers, validated.plans, strict=True
+            ):
+                settings = self.settings.model_copy(
+                    update={
+                        "readout": self.settings.readout.model_copy(
+                            update={"adc": receiver}
+                        )
+                    }
+                )
+                channel, batch = prepare_readout(
+                    settings, facts.readout, receiver_plans, request
+                )
+                channels.append(channel)
+                batches[channel.channel] = batch
+            raw = PreparedRawShots(
+                readout,
+                batches,
+                reps=request.reps,
+                rtol=self.settings.numerics.solver.rtol,
+                atol=self.settings.numerics.solver.atol,
+            )
+            return tuple(channels), raw
+        finally:
+            self.readout_wall_s += monotonic() - started
+
     def prepare_readouts(
         self,
         validated: SingleFluxoniumPreflight,
@@ -600,6 +685,7 @@ class SingleFluxoniumSource:
                 )
             ):
                 self._prepared.paths.warn_exceeded()
+                self.paths.append(self._prepared.paths.for_reuse(telemetry=True))
                 return self._prepared
             plans = validated.plans[0]
             dc = facts.source.model((0,))
@@ -607,13 +693,18 @@ class SingleFluxoniumSource:
             diagnostics = None
             reuse_keys = (key,)
             if any(any(plan.projective_reads) for plan in plans):
-                projected = ProjectionRunner(
+                runner = ProjectionRunner(
                     self.engine,
                     facts.source,
                     basis,
                     self.settings.numerics.projection_prune_floor,
                     cancel,
-                ).prepare(plans, request.point_dims, key)
+                )
+                try:
+                    projected = runner.prepare(plans, request.point_dims, key)
+                finally:
+                    self.evolve_wall_s += runner.evolve_wall_s
+                    self.paths.extend(runner.paths)
                 readout = projected.readout
                 paths, reuse_keys = projected.paths, projected.reuse_keys
                 diagnostics = projected.diagnostics
@@ -621,12 +712,18 @@ class SingleFluxoniumSource:
                     readout.weights[..., None] * readout.populations[-1], axis=-2
                 )
             else:
-                evolved = self.engine.evolve(
-                    facts.source,
-                    tuple(plan.batch for plan in plans),
-                    cancel=cancel,
-                    reuse_key=key,
-                )
+                started = monotonic()
+                try:
+                    evolved = self.engine.evolve(
+                        facts.source,
+                        tuple(plan.batch for plan in plans),
+                        cancel=cancel,
+                        reuse_key=key,
+                        telemetry=True,
+                    )
+                finally:
+                    self.evolve_wall_s += monotonic() - started
+                self.paths.append(evolved.paths)
                 probabilities = np.empty((prod(request.point_dims), len(basis.labels)))
                 probabilities[evolved.points] = normalize_populations(
                     batch_populations(evolved.densities, basis, basis)
@@ -639,31 +736,9 @@ class SingleFluxoniumSource:
                     evolved.paths,
                 )
             probabilities.setflags(write=False)
-            channels, batches = [], {}
-            for receiver, receiver_plans in zip(
-                validated.receivers, validated.plans, strict=True
-            ):
-                settings = self.settings.model_copy(
-                    update={
-                        "readout": self.settings.readout.model_copy(
-                            update={"adc": receiver}
-                        )
-                    }
-                )
-                channel, batch = prepare_readout(
-                    settings, facts.readout, receiver_plans, request
-                )
-                channels.append(channel)
-                batches[channel.channel] = batch
-            raw = PreparedRawShots(
-                readout,
-                batches,
-                reps=request.reps,
-                rtol=self.settings.numerics.solver.rtol,
-                atol=self.settings.numerics.solver.atol,
-            )
+            channels, raw = self._prepare_adc(readout, facts, validated)
             self._prepared = SingleFluxoniumPreparation(
-                key, probabilities, tuple(channels), raw, paths, reuse_keys, diagnostics
+                key, probabilities, channels, raw, paths, reuse_keys, diagnostics
             )
             return self._prepared
         except Exception:
@@ -770,6 +845,10 @@ def single_fluxonium(  # noqa: PLR0913  # tolerated: independent optional inputs
     None uses all families. Unknown names raise at build; no applicable candidate
     raises at acquire without fallback or bypassing guards.
     Successful assembly is not MCP acceptance. No real hardware is opened.
+    numerics.telemetry defaults to enabled and writes one bounded routing JSONL
+    row per admitted acquire, including failures. directory=None selects project-root
+    .sim_telemetry; relative paths resolve at construction. Writer failures warn
+    once without changing results. Disabled policy suppresses writes.
     Invalid YAML/settings/profile/binding errors propagate. Builder failure closes
     its devices and preserves cleanup errors alongside the original failure.
     """
@@ -821,7 +900,8 @@ def single_fluxonium(  # noqa: PLR0913  # tolerated: independent optional inputs
                 time_scale=settings.numerics.time_scale, clock=sim_clock
             ),
             callbacks=SimulationCallbacks(
-                on_begin=lambda: source.begin_acquire(seed=binding.root_seed)
+                on_begin=lambda: source.begin_acquire(seed=binding.root_seed),
+                on_end=source.finish_acquire if source.telemetry is not None else None,
             ),
         )
         soc = SimulationSoc(soccfg, binding, routes=tuple((gen, adc) for gen in gens))

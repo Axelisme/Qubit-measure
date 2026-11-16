@@ -6,6 +6,7 @@ from dataclasses import replace
 from hashlib import sha256
 from math import isfinite, prod
 from pathlib import Path
+from time import monotonic
 from uuid import uuid4
 
 import numpy as np
@@ -23,6 +24,7 @@ from zcu_tools.core.simulation import (
 from zcu_tools.device import DeviceManager, FakeDevice, FakeDeviceInfo
 from zcu_tools.experiment.simulation import SimulationEnvironment
 from zcu_tools.program.v2.simulation import (
+    AcquireOutcome,
     IntegratedRound,
     SimulationBinding,
     SimulationCallbacks,
@@ -60,6 +62,7 @@ from zcu_tools.simulators.six_fluxonium.environment.routing import (
     RoutedGroup,
     route_request,
 )
+from zcu_tools.simulators.telemetry import RoutingTelemetry
 
 
 def _reduced_flux(
@@ -146,6 +149,10 @@ class SixFluxoniumSource:
     unknown names raise on construction, unavailable domains raise on acquire.
     workers selects each source Engine's parallel width across timelines (default 1).
     Values below 1 raise ValueError. Sources are still prepared serially.
+    readout_wall_s sums six-owner ADC sampling and result assembly seconds;
+    source-owned ADC preparation and Engine counters are added at finish_acquire.
+    begin_acquire resets all counters. telemetry is the optional writer used
+    only by finish_acquire, never by an individual source or routed group.
     """
 
     def __init__(  # noqa: PLR0913  # tolerated: independent optional controls retain caller-selected workers, clock, truth log and routing
@@ -160,6 +167,17 @@ class SixFluxoniumSource:
         families: Collection[str] | None = None,
     ) -> None:
         self.settings = settings
+        policy = settings.numerics.telemetry
+        self.telemetry = (
+            RoutingTelemetry(
+                (Path(__file__).resolve().parents[5] / ".sim_telemetry")
+                if policy.directory is None
+                else policy.directory.resolve()
+            )
+            if policy.enabled
+            else None
+        )
+        self.readout_wall_s = 0.0
         self._clock = SimulationClock() if clock is None else clock
         self._session = uuid4().hex
         self._truth_log = (
@@ -259,8 +277,38 @@ class SixFluxoniumSource:
             self._effective_settings = self.settings.model_copy(
                 update={"qubits": self.settings.qubits.model_copy(update=qubits)}
             )
+        for source in self.sources:
+            source.begin_acquire(seed=seed)
+        self.readout_wall_s = 0.0
         self._request = None
         self._pending_acquire = True
+
+    def finish_acquire(self, outcome: AcquireOutcome) -> None:
+        """Write one aggregate for all routed sources from binding's outcome.
+
+        Captured attempts supply points/rounds. Engine and ADC totals include
+        failed spans; binding alone supplies compile time and complete. Writer
+        failures warn once without changing results; disabled policy writes nothing.
+        """
+        if self.telemetry is not None:
+            self.telemetry.write(
+                {
+                    "points": prod(outcome.rounds[0].acquire.point_dims)
+                    if outcome.rounds
+                    else 0,
+                    "rounds": len(outcome.rounds),
+                    "wall_s": outcome.wall_s,
+                    "compile_wall_s": outcome.compile_wall_s,
+                    "evolve_wall_s": sum(
+                        source.evolve_wall_s for source in self.sources
+                    ),
+                    "readout_wall_s": self.readout_wall_s
+                    + sum(source.readout_wall_s for source in self.sources),
+                    "complete": outcome.complete,
+                    "extras": {},
+                },
+                paths=[path for source in self.sources for path in source.paths],
+            )
 
     def snapshot(self) -> EnvironmentSnapshot:
         """Capture seven live A values with full settings identity, without reset.
@@ -393,63 +441,85 @@ class SixFluxoniumSource:
             first_point = int(group.points[0])
             diagonal = cavity_sequence + first_point
             sequence = diagonal * (diagonal + 1) // 2 + first_point
-            if request.mode == "integrated":
-                statistics = round_statistics(
-                    readout,
-                    channels,
-                    reps=request.reps,
-                    seed=request.root_seed,
-                    acquire_sequence=sequence,
-                    round_index=index,
-                )
-                rounds.append(
-                    CavityRound(
-                        group,
-                        IntegratedRound(statistics, raw.bind(statistics.raw_identity)),
+            started = monotonic()
+            try:
+                if request.mode == "integrated":
+                    statistics = round_statistics(
+                        readout,
+                        channels,
+                        reps=request.reps,
+                        seed=request.root_seed,
+                        acquire_sequence=sequence,
+                        round_index=index,
                     )
-                )
-            else:
-                result = sample_traces(
-                    readout,
-                    dict(raw.batches),
-                    reps=request.reps,
-                    identity=SamplingIdentity(request.root_seed, (sequence, index, 0)),
-                    rtol=raw.rtol,
-                    atol=raw.atol,
-                )
-                for channel in result.channels:
-                    shape = channel.iq.shape[1:]
-                    if channel.channel not in traces:
-                        traces[channel.channel] = np.empty(
-                            (prod(request.point_dims), request.reps, *shape)
+                    rounds.append(
+                        CavityRound(
+                            group,
+                            IntegratedRound(
+                                statistics, raw.bind(statistics.raw_identity)
+                            ),
                         )
-                    traces[channel.channel][group.points] = channel.iq.reshape(
-                        len(group.points), request.reps, *shape
                     )
-        if request.mode == "integrated":
-            return combine_integrated(
-                request,
-                tuple(rounds),
-                tuple(
-                    q.numerics.truncation.levels for q in self.settings.qubits.ordered()
-                ),
-                index,
-            )
-        return RoundSignals(
-            tuple(
-                ChannelSignals(
-                    channel,
-                    np.moveaxis(
-                        values.reshape(
-                            *request.point_dims, request.reps, *values.shape[2:]
+                else:
+                    result = sample_traces(
+                        readout,
+                        dict(raw.batches),
+                        reps=request.reps,
+                        identity=SamplingIdentity(
+                            request.root_seed, (sequence, index, 0)
                         ),
-                        len(request.point_dims),
-                        request.avg_level,
-                    ).reshape(-1, *values.shape[2:]),
+                        rtol=raw.rtol,
+                        atol=raw.atol,
+                    )
+                    for channel in result.channels:
+                        shape = channel.iq.shape[1:]
+                        if channel.channel not in traces:
+                            traces[channel.channel] = np.empty(
+                                (prod(request.point_dims), request.reps, *shape)
+                            )
+                        traces[channel.channel][group.points] = channel.iq.reshape(
+                            len(group.points), request.reps, *shape
+                        )
+            finally:
+                self.readout_wall_s += monotonic() - started
+        return self._combine_round(round_request, tuple(rounds), traces)
+
+    def _combine_round(
+        self,
+        round_request: RoundRequest,
+        rounds: tuple[CavityRound, ...],
+        traces: dict[int, NDArray[np.float64]],
+    ) -> IntegratedRound | RoundSignals:
+        request, index = round_request.acquire, round_request.index
+        started = monotonic()
+        try:
+            if request.mode == "integrated":
+                return combine_integrated(
+                    request,
+                    rounds,
+                    tuple(
+                        q.numerics.truncation.levels
+                        for q in self.settings.qubits.ordered()
+                    ),
+                    index,
                 )
-                for channel, values in traces.items()
+            return RoundSignals(
+                tuple(
+                    ChannelSignals(
+                        channel,
+                        np.moveaxis(
+                            values.reshape(
+                                *request.point_dims, request.reps, *values.shape[2:]
+                            ),
+                            len(request.point_dims),
+                            request.avg_level,
+                        ).reshape(-1, *values.shape[2:]),
+                    )
+                    for channel, values in traces.items()
+                )
             )
-        )
+        finally:
+            self.readout_wall_s += monotonic() - started
 
     def close(self) -> None:
         """Release six numeric backends and reject later work, leaving DC untouched.
@@ -496,6 +566,10 @@ def six_fluxonium(  # noqa: PLR0913  # tolerated: independent optional controls 
     all families. Unknown names raise at build, unavailable domains at acquire.
     workers selects each cavity Engine's parallel width across timelines (default 1).
     Values below 1 raise ValueError; construction starts no worker pool.
+    numerics.telemetry defaults to enabled and writes one bounded routing JSONL
+    row per admitted acquire, including failures. directory=None selects project-root
+    .sim_telemetry; relative paths resolve at construction. Writer failures warn
+    once without changing results. Disabled policy suppresses writes.
     YAML, wiring, truth I/O and construction failures propagate with cleanup failures.
     """
     settings = (
@@ -544,7 +618,8 @@ def six_fluxonium(  # noqa: PLR0913  # tolerated: independent optional controls 
                 clock=sim_clock,
             ),
             callbacks=SimulationCallbacks(
-                on_begin=lambda: source.begin_acquire(seed=binding.root_seed)
+                on_begin=lambda: source.begin_acquire(seed=binding.root_seed),
+                on_end=source.finish_acquire if source.telemetry is not None else None,
             ),
         )
         mux_channels = tuple(q.readout.adc.ro_ch for q in settings.qubits.ordered())

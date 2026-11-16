@@ -30,6 +30,7 @@ from zcu_tools.resources.simulation_schema import (
     Solver,
     Values,
 )
+from zcu_tools.simulators.telemetry import TelemetrySettings
 
 
 class Chip(Values):
@@ -206,6 +207,9 @@ class Numerics(RoundPacing):
     default 1.0; zero disables pacing. These
     values do not guarantee convergence and do not specify any pulse sequence.
     """
+
+    telemetry: TelemetrySettings = TelemetrySettings()
+    """Acquire JSONL policy; enabled by default, with an optional output directory."""
 
     truncation: Truncation
     solver: Solver

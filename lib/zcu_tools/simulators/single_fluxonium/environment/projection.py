@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass, replace
 from hashlib import sha256
+from time import monotonic
 
 import numpy as np
 from numpy.typing import NDArray
@@ -74,6 +75,8 @@ class ProjectionRunner:
     One runner serves one preparation. Rank-1 continuations share a density only
     within the same plan/span and after Engine.reuse validates the current route.
     ADC CTMC jumps do not feed back into these density continuations.
+    paths retains completed span diagnostics even when prepare raises.
+    evolve_wall_s sums every Engine call's wall seconds, including a failed call.
     """
 
     def __init__(
@@ -87,6 +90,7 @@ class ProjectionRunner:
         self.engine, self.source, self.basis = engine, source, basis
         self.floor, self.cancel = floor, cancel
         self.paths: list[PathDiagnostics] = []
+        self.evolve_wall_s = 0.0
         self.keys: list[bytes] = []
 
     def _advance(
@@ -119,9 +123,17 @@ class ProjectionRunner:
                 digest.update(repr((array.dtype.str, array.shape)).encode())
                 digest.update(array.tobytes())
         reuse_key = digest.digest()
-        result = self.engine.evolve(
-            self.source, (batch,), cancel=self.cancel, reuse_key=reuse_key
-        )
+        started = monotonic()
+        try:
+            result = self.engine.evolve(
+                self.source,
+                (batch,),
+                cancel=self.cancel,
+                reuse_key=reuse_key,
+                telemetry=True,
+            )
+        finally:
+            self.evolve_wall_s += monotonic() - started
         self.keys.append(reuse_key)
         self.paths.append(result.paths)
         # Engine returns rows in its own point order, not necessarily batch order.

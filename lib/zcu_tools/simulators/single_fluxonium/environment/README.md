@@ -1,6 +1,6 @@
 # Single-fluxonium acquisition
 
-**Last updated:** 2026-11-16，caller-selected worker width
+**Last updated:** 2026-11-16，acquire telemetry
 
 **Readers:** framework-dev, lab-author, agent. Compose complete fluxonium timelines with one physical readout cavity.
 
@@ -34,6 +34,21 @@ pool. Empty work, one timeline or one worker runs serially. GUI startup explicit
 reserves one host CPU, using at least one worker, and does no numeric warmup.
 Tests, benchmarks, research and other direct callers keep the serial default.
 The startup policy is defined in [ADR-0069](../../../../../docs/adr/0069-experiment-core-and-frontends.md#顯式-cfg-與裝置環境).
+
+## Acquire telemetry
+
+`numerics.telemetry.enabled` defaults to true. The environment writes one
+bounded `routing-*.jsonl` row after each admitted acquire. Set `directory` to
+choose the output directory; null selects project-root `.sim_telemetry`.
+Direct evolution and every projective continuation enable Engine telemetry.
+The row contains binding compile time, summed Engine wall time and ADC/readout
+wall time. It includes failed calls through their failure and leaves unentered
+stages at `0.0`. No deferred raw materialization enters the row.
+`complete` comes from the binding's `AcquireOutcome`: normal partial Stop is true,
+while exceptions are false. Writer I/O failures warn once and do not change the
+acquire result. Disabling the policy suppresses writes; evolution still collects
+its per-call diagnostics. The shared fields and directory budget are described
+in the [telemetry contract](../../README.md#acquire-telemetry).
 
 ## Complete timelines
 

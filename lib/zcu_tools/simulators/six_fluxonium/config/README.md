@@ -1,6 +1,6 @@
 # Six-fluxonium material
 
-**Last updated:** 2026-11-14
+**Last updated:** 2026-11-16
 
 **Readers:** framework-dev, lab-author, agent. Load six circuit materials with local currents and one shared coil.
 
@@ -31,6 +31,12 @@ across the environment. Each source receives one sixth, rounded down.
 Zero disables routing retention. The value must be a strict nonnegative integer.
 The allowance excludes models, complete preparations, scratch and process RSS.
 Per-qubit `numerics` continues to hold solver, truncation, seed and pacing values.
+
+Optional top-level `numerics.telemetry` uses the shared `TelemetrySettings`.
+`enabled` defaults to true. `directory` defaults to null, selecting project-root
+`.sim_telemetry`; relative paths resolve at environment construction. This policy
+controls one row for the whole acquire. Nested qubit telemetry policies do not
+produce separate rows. Disabling the top-level policy suppresses JSONL writes.
 
 Each qubit also accepts optional `drift` with the single-fluxonium schema.
 Select `q_cap`, `xqp` or `aphi` with `sigma >= 0` in ln(loss) and

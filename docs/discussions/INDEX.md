@@ -18,6 +18,8 @@
 
 ## 模擬量測環境
 
+- 2026-11-16 [Single 與 six 的 acquire telemetry](2026-11-16-single-six-acquire-telemetry.md)：計時聚合。以 acquire 為寫入邊界，聚合各 source 與 projective span，直接沿用 binding 成敗。
+
 - 2026-11-16 [Acquire outcome 的作用域與編譯交接](2026-11-16-acquire-outcome-scope.md)：生命週期。Binding 以自身作用域判斷正常返回，mixin 只圈住 builder 計時，environment 接收同一結果物件。
 
 - 2026-11-16 [共用 acquire telemetry writer](2026-11-16-shared-acquire-telemetry.md)：資料契約。共用八欄必填 summary，writer 明列投影，FTF projection 只放 namespaced extras。
