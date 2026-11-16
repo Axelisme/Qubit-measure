@@ -15,6 +15,28 @@ from tools.dop853_segment import Dop853Coordinates, dop853_segment_input
 from tools.family_pareto_reference import solve_reference
 
 
+@pytest.mark.parametrize(
+    ("changes", "expected_name"),
+    [
+        ({}, "dop853_segment-gaussian-d20-l3-k9-r1-p1"),
+        ({"envelope": "sampled"}, "dop853_segment-sampled-d20-l3-k9-r1-p1"),
+        ({"duration_ns": 20.5}, "dop853_segment-gaussian-d20p5-l3-k9-r1-p1"),
+        ({"levels": 5}, "dop853_segment-gaussian-d20-l5-k9-r1-p1"),
+        ({"knots": 5}, "dop853_segment-gaussian-d20-l3-k5-r1-p1"),
+        ({"repeats": 2}, "dop853_segment-gaussian-d20-l3-k9-r2-p1"),
+        ({"points": 2}, "dop853_segment-gaussian-d20-l3-k9-r1-p2"),
+    ],
+)
+def test_segment_names_identify_coordinates_on_input_and_scene(
+    changes: dict[str, object], expected_name: str
+) -> None:
+    coordinates = Dop853Coordinates.model_validate({"levels": 3, **changes})
+    item = dop853_segment_input(coordinates)
+    with closing((scene := item.build()).source):
+        assert item.name == expected_name
+        assert scene.name == expected_name
+
+
 @pytest.mark.parametrize("envelope", ["gaussian", "sampled"])
 def test_dop853_segment_repeats_one_synchronous_pair_on_each_timeline(
     envelope: str,

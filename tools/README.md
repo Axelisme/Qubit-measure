@@ -494,9 +494,23 @@ The controls are benchmark inputs, not calibrated STIRAP transfer.
 `freeze_manifest([item])` records complete physical/oracle hashes and the
 versioned coordinates. `zcu_tools.simulate.evolution.reference_key(case.source,
 case.batch)` returns the persistent reference key without disk access or integration.
-This module does not freeze a default coordinate inventory. Freezing uses the
-producer's existing `main(argv, inputs=[item])` only after choosing output names
-and a destination; repeated declarations need distinct names.
+`Input.name` and its built `Scene.name` identify all coordinates:
+`dop853_segment-<envelope>-d<duration_ns>-l<levels>-k<knots>-r<repeats>-p<points>`.
+Integer durations omit the decimal part; 20.5 ns becomes `d20p5`. Names do not
+enter the physical, oracle or metadata hashes, or the reference key.
+
+`from tools.dop853_segment import profile_inputs` exposes the declared profile
+catalogue. Calling `profile_inputs()` builds seven Gaussian and seven sampled
+inputs. Each envelope has the d20/l8/k9/r1/p1 baseline, then single-axis variants
+for duration 40 ns, levels 20, knots 17, and repeats 2/20/100. The final input is
+`dop853_segment-gaussian-d20-l8-k9-r1-p64`, an uncalibrated workers candidate.
+Its 64 independent points have not been timed against the one-second wall
+threshold, and its reference is not prepared by this call. These declarations
+remain outside the default family-table inventory.
+
+The module does not freeze these inputs or update an index. Freezing uses the
+producer's existing `main(argv, inputs=[item])` only after choosing a destination
+under the applicable compute grant.
 Independent reference preparation belongs to the tests-side producer described
 below. Its interaction-picture oracle stops at knots and checks two tolerances.
 During measurement, use the public `load_reference(cache_dir, case.source,

@@ -2,6 +2,7 @@
 
 from contextlib import ExitStack, closing
 from dataclasses import asdict
+from decimal import Decimal
 from typing import Literal
 
 import numpy as np
@@ -50,12 +51,51 @@ class Dop853Coordinates(BaseModel):
     points: int = Field(default=1, ge=1, strict=True)
 
 
+_PROFILE_COORDINATES = (
+    Dop853Coordinates(envelope="gaussian"),
+    Dop853Coordinates(envelope="gaussian", duration_ns=40.0),
+    Dop853Coordinates(envelope="gaussian", levels=20),
+    Dop853Coordinates(envelope="gaussian", knots=17),
+    Dop853Coordinates(envelope="gaussian", repeats=2),
+    Dop853Coordinates(envelope="gaussian", repeats=20),
+    Dop853Coordinates(envelope="gaussian", repeats=100),
+    Dop853Coordinates(envelope="sampled"),
+    Dop853Coordinates(envelope="sampled", duration_ns=40.0),
+    Dop853Coordinates(envelope="sampled", levels=20),
+    Dop853Coordinates(envelope="sampled", knots=17),
+    Dop853Coordinates(envelope="sampled", repeats=2),
+    Dop853Coordinates(envelope="sampled", repeats=20),
+    Dop853Coordinates(envelope="sampled", repeats=100),
+)
+# This workers candidate is not wall-time calibrated or reference-prepared.
+_WORKERS_CANDIDATE = Dop853Coordinates(envelope="gaussian", points=64)
+
+
+def profile_inputs() -> list[Input]:
+    """Build the declared reduced-axis segments and one uncalibrated workers input.
+
+    Return Gaussian then sampled inputs, each with the baseline d20/l8/k9/r1/p1
+    and single-axis duration 40 ns, levels 20, knots 17, or repeats 2/20/100.
+    Append a Gaussian baseline with 64 independent points as a workers candidate.
+    This does not time, evolve, solve references, freeze scenes or register them
+    in the default family-table inventory. Model construction errors propagate.
+    Each returned Input.build() creates a source that its caller must close.
+    """
+    return [
+        dop853_segment_input(coordinates)
+        for coordinates in (*_PROFILE_COORDINATES, _WORKERS_CANDIDATE)
+    ]
+
+
 def dop853_segment_input(coordinates: Dop853Coordinates) -> Input:
     """Build a tool-owned two-tone segment without readout or idle companions.
 
     Coordinates select sampled envelopes, support, dimension and repetitions.
     Settings are validated before the public single-fluxonium owner rebuilds
     the model and Gibbs initial state. levels above native_cutoff raise ValueError.
+    Input and Scene share a coordinate-derived name containing envelope, duration
+    in ns, levels, knots, repeats and points. Integer durations omit the decimal
+    part; fractional durations replace the decimal point with "p".
     Every Input.build() returns a fresh owned source, which callers must close.
     Pin Engine(workers=N, families=("dop853",)); guards remain enabled. Same-dimension
     reference agreement does not establish retained-level convergence.
@@ -86,7 +126,12 @@ def dop853_segment_input(coordinates: Dop853Coordinates) -> Input:
     # model_copy does not validate nested updates; validate before any modeling.
     settings = type(settings).model_validate(settings.model_dump())
     env = single_fluxonium(settings, soccfg=build_soccfg(BOARD_PROFILE))
-    name = "dop853_segment"
+    duration = format(Decimal(str(coordinates.duration_ns)).normalize(), "f")
+    name = (
+        f"dop853_segment-{coordinates.envelope}-d{duration.replace('.', 'p')}"
+        f"-l{coordinates.levels}-k{coordinates.knots}"
+        f"-r{coordinates.repeats}-p{coordinates.points}"
+    )
     with ExitStack() as stack:
         stack.callback(env.devices.close_all_devices)
         if env.close_backend is not None:
