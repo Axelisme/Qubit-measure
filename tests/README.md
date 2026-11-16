@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-11-13，Evolution 精度矩陣與真實模型參考解
+**Last updated:** 2026-11-16，environment 測試分層
 
 **讀者：** framework-dev、agent。查閱測試的 owner、fixture、執行方式與搬遷驗收契約。
 
@@ -127,6 +127,24 @@ ticket 內只跑受影響選集。只有變更觸及 `lib/zcu_tools/simulate/` �
 
 ### Evolution 精度矩陣
 
+凍結數值的讀寫與 reference cache miss 契約由 `tests/simulate/evolution/test_frozen.py` 和
+`test_reference_cache.py` 在公開 `simulate.evolution` 接縫驗證。
+`tests/simulate/evolution/contract/family_pareto_reference_producer.py` 讀凍結數值，呼叫既有獨立 solver，再經 codec 寫 NPZ。
+它不 import tools。工具單元測試可 import 受測工具，並用工具的公開 `Scene` 建 fixture。
+Guard edge、sweep、history 與 multisegment accuracy 案例仍由下面的精度矩陣擁有，不從工具 producer 反向取得。
+
+準備參考解時，由呼叫端明示每份 manifest 的 solver。預設場景的用法如下，必須先取得求解成本授權，並套用當次 heavy runner 與鎖的規則。這不是量測 preflight，也不保證既有 cache 已涵蓋全部場景。
+
+```bash
+uv run --directory "$PWD" --no-sync -- python -m tests.simulate.evolution.contract.family_pareto_reference_producer \
+  --converged tools/data/family_pareto/frozen-synthetic.json.gz \
+  --interaction tools/data/family_pareto/frozen-real.json.gz \
+  --cache /path/to/approved/reference-cache
+```
+
+`--converged` 與 `--interaction` 可重複指定。Producer 只讀 record 的 name、physical，既有 key 命中就讀取，只有 missing key 才用指定 solver 求解。
+它不讀 metadata、不維護場景名稱清單，也不在失敗後換 solver。
+
 從 worktree 執行下列指令。先建立 `<log-dir>`，把它換成此次執行的輸出目錄。
 
 ```bash
@@ -147,9 +165,15 @@ uv run --directory <worktree> --no-sync -- \
 
 矩陣用 `Engine(1, families=(family,)).evolve(...)` 固定可用 family，
 再從 `paths.segments_by_kernel` 確認實際路徑。
-17 個 family 都有 pinned 案例，預期 family 沒有執行任何 segment 時獨立失敗。
-Guard 拒絕輸入會讓測試失敗，不會產生誤差觀察值。
-新增案例使用兩能階模型，包含完整 complex coherence、relaxation 與 dephasing。
+16 個 active family 都有 pinned 案例，預期 family 沒有執行任何 segment 時獨立失敗。
+`multitone_gate` 拒收所有列，矩陣不替它建立 density 案例，表中顯示 `NOT EXERCISED`。
+它的 sampled 拒收由 routing boundary 契約驗證，不填 error=0，也不報 PASS。
+Active family 的 guard 拒絕輸入會讓 density 測試失敗，不會產生誤差觀察值。
+各案例包含完整 complex coherence、relaxation 與 dephasing。模型尺寸依案例族區分：
+
+- 兩能階：`low_carrier`、`linear_shaped`、`linear_plateau`、`nearby_carriers`、`adiabatic_ramp` 與 `history_gate`。
+- 三能階：`idle_coherence`、`weak_plateau`、`strong_plateau`、`shaped_complex`、`two_carriers`、`continuous_flux`、`cheap_sampled_*` 與 `multisegment/final`。
+- 四能階：`joint_gate_inventory` 與 `joint_constant`。
 
 | 案例 | 固定的 family | 輸入 |
 | --- | --- | --- |
@@ -160,7 +184,12 @@ Guard 拒絕輸入會讓測試失敗，不會產生誤差觀察值。
 | `adiabatic_ramp` | `adiabatic_map` | 8 ns、無 tone、弱非對易 flux ramp |
 
 每個案例也保留預設選路的空歷史與暖歷史驗收。
-`joint_gate_inventory` 仍使用完整 20 點 inventory。
+`joint_gate_inventory` 保留完整 20 點 sampled inventory，pinned density 改驗 `dop853`。
+`joint_constant` 用相同模型和 inventory 保護 `multitone_rwa` 的 distinct-port constant 路徑。
+19／20 次 inventory 與 pinned 的 sampled 拒收由
+[`test_routing_boundaries.py`](simulate/evolution/contract/test_routing_boundaries.py) 驗證。19 與 20 次 inventory 都維持拒收，不預告恢復舊成本邊界測試。
+`cheap_sampled_nearby` 與 `cheap_sampled_separated` 使用非平坦 smooth samples，避免 planner 抽成 constant row。
+兩個案例分別驗證失去 cheap-RWA 豁免後的 `common_frame` 與 `dop853` 分支，包含空／暖 history 的路徑與完整 density。
 多段案例量整條 timeline 的最終誤差。混合路徑的每個 family 列出同一個最終誤差，
 不是各段的局部誤差。
 歷史案例另外驗證八點 inventory 的結果，並比較兩點輸入在歷史改變前後的實際路徑。
@@ -507,8 +536,12 @@ sampling tests live in the corresponding numeric owner directories.
 and public acquire/decimated composition. `test_ftf_templates.py` covers DC readout
 and the template engine contract.
 `tests/simulators/ftf/environment/test_projective_readout.py` covers public frontend mux heralding, retained
-outcome histories, pruning, partial ADC observations and elementwise terminal-only
-runtime parity against direct Engine/ADC composition. Cavity field continuation
+outcome histories, pruning, partial ADC observations and terminal-only density,
+point-order and sampling-identity handoff to ADC using an injected non-evolving Engine.
+The eight single/six/FTF acquire, projection and routing-control test files replace
+numeric propagation with Engine answers. Six keeps six independent model sources.
+Engine density accuracy stays in `tests/simulate/evolution/contract/`, rather than
+in program-to-acquire parity or fixed-I/Q numerical baselines. Cavity field continuation
 stays in the same directory's `test_cavity_continuation.py`; acquisition-frozen losses stay in
 `test_drift.py`. Repeated frontend readouts use `builder.repeat(...)` and the public
 `set_reads_per_shot` count, since QICK counts the trigger macro once.

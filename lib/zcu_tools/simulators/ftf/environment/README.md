@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-11-12，caller-owned routing controls
+**Last updated:** 2026-11-16，caller-owned routing controls
 
 **讀者：** framework-dev、agent。FTF 環境的組裝接縫、數值接線與 acquisition 契約。
 
@@ -80,8 +80,7 @@ CPU), `estimated_cost_unit` and `families`. Failed calls
 before a captured request have zero points and empty families. Family values are
 `rows`, `prepare_cpu_s`, `apply_cpu_s`, `actual_cpu_s`, `cache_hits`,
 `rejected_rows`, `prepare_builds`, `admission_rows`, `estimated_cost` and nullable
-`estimated_cpu_s`; common-frame instruments builds and admission evaluations,
-while other families currently leave those two counters zero; see the
+`estimated_cpu_s`; counter meanings and family-specific instrumentation follow the
 [evolution report contract](../../../simulate/evolution/README.md#routing-telemetry).
 Rows and hits sum across rounds. Noiseless reuse contributes logical rows and
 cache hits but zero kernel CPU, rejections and estimated work. Actual CPU excludes

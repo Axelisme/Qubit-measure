@@ -8,54 +8,14 @@ import numpy as np
 import pytest
 from zcu_tools.simulate.evolution import ModelSource, TimelineBatch
 
-from tests.simulate.evolution.contract.accuracy_cases import accuracy_case
 from tests.simulate.evolution.contract.reference import (
     ReferenceResult,
     SolverTolerances,
 )
+from tests.tools.family_pareto_support import make_scene
 from tools.family_pareto import FamilyResult, run_table
 from tools.family_pareto_inputs import Input
-from tools.family_pareto_reference import (
-    ReferenceCache,
-    reference_cache_key,
-    solve_reference,
-)
-from tools.family_pareto_scenarios import Dop853Coordinates, dop853_segment_input
-
-
-def test_segment_reference_key_predicts_cache_hit_and_separates_repeats_and_points(
-    tmp_path: Path,
-) -> None:
-    def solver(
-        source: ModelSource,
-        batch: TimelineBatch,
-        *,
-        coarse: SolverTolerances,
-        fine: SolverTolerances,
-    ) -> ReferenceResult:
-        return ReferenceResult(
-            np.tile(source.initial_density, (len(batch.points), 1, 1)), 1e-9
-        )
-
-    keys = []
-    for coordinates in (
-        Dop853Coordinates(levels=3),
-        Dop853Coordinates(levels=3, repeats=2),
-        Dop853Coordinates(levels=3, points=2),
-    ):
-        item = dop853_segment_input(coordinates)
-        with closing((case := item.build()).source):
-            key = reference_cache_key(case)
-            keys.append(key)
-            with pytest.raises(FileNotFoundError, match=key):
-                solve_reference(case, cache_dir=tmp_path, cache_only=True)
-            expected = solve_reference(case, solver=solver, cache_dir=tmp_path)
-            assert (tmp_path / f"{key}.npz").exists()
-        with closing((fresh := item.build()).source):
-            assert reference_cache_key(fresh) == key
-            actual = solve_reference(fresh, cache_dir=tmp_path, cache_only=True)
-            np.testing.assert_array_equal(actual.density, expected.density)
-    assert len(set(keys)) == 3
+from tools.family_pareto_reference import ReferenceCache, solve_reference
 
 
 def test_cache_reuses_density_but_invalidates_physics_and_tolerances(
@@ -76,7 +36,7 @@ def test_cache_reuses_density_but_invalidates_physics_and_tolerances(
             np.tile(source.initial_density, (len(batch.points), 1, 1)), 1e-9
         )
 
-    case = accuracy_case("idle_coherence")
+    case = make_scene("idle_coherence")
     with closing(case.source):
         first = solve_reference(case, solver=solver, cache_dir=tmp_path)
         second = solve_reference(case, solver=solver, cache_dir=tmp_path)
@@ -120,7 +80,7 @@ def test_cache_only_never_solves_on_missing_or_changed_keys(
             np.tile(source.initial_density, (len(batch.points), 1, 1)), 1e-9
         )
 
-    case = accuracy_case("idle_coherence")
+    case = make_scene("idle_coherence")
     with closing(case.source):
         if change != "missing":
             solve_reference(case, solver=solver, cache_dir=tmp_path)
@@ -155,7 +115,7 @@ def test_table_cache_only_stops_before_timing_an_uncached_input(tmp_path: Path) 
 
     with pytest.raises(FileNotFoundError, match="reference cache miss"):
         run_table(
-            [Input("idle", lambda: accuracy_case("idle_coherence"), "cache-only")],
+            [Input("idle", lambda: make_scene("idle_coherence"), "cache-only")],
             ("t4",),
             reference_cache=ReferenceCache(tmp_path, only=True),
             policy_runner=policy,

@@ -22,16 +22,13 @@ from zcu_tools.simulate.evolution import (
 )
 
 from tests.simulate.evolution.contract.accuracy import ALL_FAMILIES
-from tests.simulate.evolution.contract.accuracy_cases import (
-    AccuracyCase,
-    accuracy_case,
-    history_case,
-)
+from tests.simulate.evolution.contract.accuracy_cases import accuracy_case
 from tests.simulate.evolution.contract.guard_sweep_cost import measure_engine_cost
 from tests.simulate.evolution.contract.reference import (
     ReferenceResult,
     converged_reference,
 )
+from tests.tools.family_pareto_support import make_history_scene, make_scene
 from tools import family_pareto_report
 from tools.family_pareto import (
     ACCURACY_LIMIT,
@@ -50,7 +47,7 @@ from tools.family_pareto import (
     tested_state,
     timing_equivalents,
 )
-from tools.family_pareto_inputs import Input, canonical_json, freeze_manifest
+from tools.family_pareto_inputs import Input, Scene, canonical_json, freeze_manifest
 
 
 @pytest.mark.parametrize("measure_errors", [True, False])
@@ -217,7 +214,7 @@ def test_slow_policy_has_no_separate_probe_or_warmup() -> None:
         yield EngineSession(evolve, clear)
 
     result = measure_policy(
-        Input("idle", lambda: accuracy_case("idle_coherence"), "slow contract"),
+        Input("idle", lambda: make_scene("idle_coherence"), "slow contract"),
         "t4",
         ReferenceResult(density, 0),
         opener=session,
@@ -520,7 +517,7 @@ def test_family_status_owns_accuracy_and_companion_priority(
 
 @pytest.mark.sim
 def test_real_engine_pins_path_and_reports_domain_refusal_without_zero_values() -> None:
-    item = Input("idle", lambda: accuracy_case("idle_coherence"), "tiny Engine seam")
+    item = Input("idle", lambda: make_scene("idle_coherence"), "tiny Engine seam")
     case = item.build()
     try:
         reference = converged_reference(case.source, case.batch)
@@ -543,9 +540,7 @@ def test_real_engine_pins_path_and_reports_domain_refusal_without_zero_values() 
 def test_cli_freezes_then_measures_and_preserves_output_on_manifest_or_write_failure(
     tmp_path: Path,
 ) -> None:
-    inputs = [
-        Input("idle", lambda: accuracy_case("idle_coherence"), "tiny Engine seam")
-    ]
+    inputs = [Input("idle", lambda: make_scene("idle_coherence"), "tiny Engine seam")]
     manifest = tmp_path / "inputs.json"
     output = tmp_path / "result.json"
     summary = tmp_path / "summary.md"
@@ -591,12 +586,12 @@ def test_cli_freezes_then_measures_and_preserves_output_on_manifest_or_write_fai
 def test_cli_scenario_selects_before_build_and_freezes_in_the_same_command(
     tmp_path: Path,
 ) -> None:
-    def must_not_build() -> AccuracyCase:
+    def must_not_build() -> Scene:
         raise AssertionError("unselected input was built")
 
     inputs = [
         Input("unused", must_not_build, "must remain unbuilt"),
-        Input("idle", lambda: accuracy_case("idle_coherence"), "tiny scenario"),
+        Input("idle", lambda: make_scene("idle_coherence"), "tiny scenario"),
     ]
     cache = tmp_path / "cache"
     prepared = tmp_path / "prepared.json"
@@ -670,7 +665,7 @@ def test_cli_scenario_cache_miss_stops_without_solving_and_explains_rebuild(
                 "--partial-output",
                 str(tmp_path / "journal.jsonl"),
             ],
-            inputs=[Input("idle", lambda: accuracy_case("idle_coherence"), "tiny")],
+            inputs=[Input("idle", lambda: make_scene("idle_coherence"), "tiny")],
         )
         == 1
     )
@@ -684,7 +679,7 @@ def test_cli_scenario_cache_miss_stops_without_solving_and_explains_rebuild(
 def test_cli_scenario_unknown_name_does_not_build_and_lists_legal_names(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    def must_not_build() -> AccuracyCase:
+    def must_not_build() -> Scene:
         raise AssertionError("unknown selection must not build")
 
     assert (
@@ -700,7 +695,7 @@ def test_cli_scenario_unknown_name_does_not_build_and_lists_legal_names(
 def test_cli_summary_comparison_never_blocks_writing_current_measurement(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], baseline_kind: str
 ) -> None:
-    inputs = [Input("idle", lambda: accuracy_case("idle_coherence"), "tiny")]
+    inputs = [Input("idle", lambda: make_scene("idle_coherence"), "tiny")]
     cache = tmp_path / "cache"
     assert (
         main(
@@ -785,7 +780,7 @@ def test_cli_selects_families_without_changing_inputs_or_default_group(
     inputs = [
         Input(
             "plateau",
-            lambda: accuracy_case("weak_plateau"),
+            lambda: make_scene("weak_plateau"),
             "tiny Engine seam",
             category="real",
         )
@@ -896,7 +891,7 @@ def test_policy_classifies_only_the_reported_failing_group(
     )
     item = Input(
         "gates",
-        lambda: accuracy_case("shaped_complex"),
+        lambda: make_scene("shaped_complex"),
         "structured refusal",
         companions=("t4",),
     )
@@ -942,7 +937,7 @@ def test_policy_rejects_initial_density_only_when_reference_moved(
     reference_motion: float,
     reject: bool,
 ) -> None:
-    item = Input("shaped_no_op", lambda: accuracy_case("shaped_complex"), "no-op fake")
+    item = Input("shaped_no_op", lambda: make_scene("shaped_complex"), "no-op fake")
     with closing(item.build().source) as source:
         initial_density = source.initial_density
     density = np.repeat(initial_density[None], 2, axis=0)
@@ -994,7 +989,7 @@ def test_policy_does_not_disguise_other_runtime_errors_as_unavailable(
     message: str,
 ) -> None:
     error = RuntimeError(message)
-    item = Input("idle", lambda: accuracy_case("idle_coherence"), "synthetic failure")
+    item = Input("idle", lambda: make_scene("idle_coherence"), "synthetic failure")
 
     @contextmanager
     def broken_session(item: Input, family: str) -> Generator[EngineSession]:
@@ -1049,9 +1044,7 @@ def test_policy_attributes_companion_refusal_without_declaring_target_unavailabl
 
 def test_policy_does_not_allow_an_unpinned_fallback_to_masquerade_as_success() -> None:
     density = np.eye(2, dtype=np.complex128)[None] / 2
-    item = Input(
-        "idle", lambda: accuracy_case("idle_coherence"), "synthetic wrong route"
-    )
+    item = Input("idle", lambda: make_scene("idle_coherence"), "synthetic wrong route")
 
     @contextmanager
     def wrong_session(item: Input, family: str) -> Generator[EngineSession]:
@@ -1077,7 +1070,7 @@ def test_policy_uses_target_companions_instead_of_default_and_freezes_them() -> 
     assert companion_input().companions_by_target == {}
     item = Input(
         "idle",
-        lambda: accuracy_case("idle_coherence"),
+        lambda: make_scene("idle_coherence"),
         "target override excludes the otherwise declared driven companion",
         companions=("dop853",),
         companions_by_target={"t4": ()},
@@ -1097,7 +1090,7 @@ def test_policy_uses_target_companions_instead_of_default_and_freezes_them() -> 
 def companion_input() -> Input:
     return Input(
         "companion",
-        lambda: accuracy_case("linear_plateau"),
+        lambda: make_scene("linear_plateau"),
         "group route",
         companions=("t4",),
         expected_routes={
@@ -1391,10 +1384,10 @@ def test_table_shares_oracle_for_identical_physics_with_different_model_identiti
 ):
     calls = 0
     inputs = [
-        Input("linear", lambda: accuracy_case("linear_shaped"), "original"),
+        Input("linear", lambda: make_scene("linear_shaped"), "original"),
         Input(
             "history",
-            lambda: history_case(2, RoutingHistory()),
+            lambda: make_history_scene(2, RoutingHistory()),
             "same physics, different model identity",
         ),
     ]
@@ -1470,7 +1463,7 @@ def test_cleanup_error_is_never_an_availability_refusal_even_with_matching_messa
     error = RuntimeError(
         "no valid kernel for segment 0; domain idle: points [0], segments [0]"
     )
-    item = Input("idle", lambda: accuracy_case("idle_coherence"), "cleanup isolation")
+    item = Input("idle", lambda: make_scene("idle_coherence"), "cleanup isolation")
 
     @contextmanager
     def cleanup_fails(item: Input, family: str) -> Generator[EngineSession]:

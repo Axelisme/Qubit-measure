@@ -3,6 +3,13 @@ from __future__ import annotations
 from pathlib import Path, PurePosixPath
 
 import check_file_size as checker
+import pytest
+
+
+def test_help_exits_successfully_without_scanning() -> None:
+    with pytest.raises(SystemExit) as caught:
+        checker.main(["-h"])
+    assert caught.value.code == 0
 
 
 def _write(root: Path, relative: str, lines: int) -> Path:

@@ -25,6 +25,7 @@ report neither -- leaving the honest spelling as the only one that gets caught.
 
 from __future__ import annotations
 
+import argparse
 import ast
 import json
 import sys
@@ -151,7 +152,15 @@ def undeclared_capabilities(
     return tuple(found)
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    """Print JSON and stderr diagnostics for undeclared test capabilities.
+
+    None reads sys.argv; argparse handles help and invalid syntax with SystemExit.
+    Scan this checkout without importing tests. Return 1 for missing markers,
+    otherwise 0. Source read/parse failures propagate.
+    """
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.parse_args(argv)
     root = Path(__file__).resolve().parents[1]
     found = undeclared_capabilities(root)
     receipt = {

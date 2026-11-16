@@ -1,14 +1,13 @@
 """Tool-owned public-program scans over fixed models, without lab I/O."""
 
+import argparse
 import json
-from collections.abc import Callable
 from contextlib import ExitStack, closing
 from dataclasses import asdict, replace
 from pathlib import Path
-from typing import Literal, TypedDict
+from typing import TypedDict
 
 import numpy as np
-from pydantic import BaseModel, ConfigDict, Field
 from zcu_tools.program import build_soccfg
 from zcu_tools.program.v2 import Pulse, Readout, SweepCfg, TimelineBuilder
 from zcu_tools.program.v2.modules.pulse import PulseCfg
@@ -16,371 +15,34 @@ from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg, GaussWaveformCfg
 from zcu_tools.program.v2.simulation.compiled import build_compiled_request
 from zcu_tools.simulate.evolution import (
-    DriveTrack,
-    EnvelopeSpec,
-    FluxExpansion,
-    FluxSchedule,
-    ModelSource,
     SecularModel,
-    TimelineBatch,
     segment_spans,
+    write_frozen_manifest,
 )
 from zcu_tools.simulators.ftf.config import parse_ftf
 from zcu_tools.simulators.ftf.environment import FTFSource, ftf, plan_template
-from zcu_tools.simulators.single_fluxonium.config import parse_single_fluxonium
-from zcu_tools.simulators.single_fluxonium.environment import (
-    SingleFluxoniumSource,
-    single_fluxonium,
-)
 
-from tests.simulate.evolution.contract.accuracy_cases import AccuracyCase
-from tools.family_pareto_inputs import Input
+from tools.family_pareto_inputs import (
+    Input,
+    Scene,
+    freeze_records,
+    make_inputs,
+)
+from tools.family_pareto_kernel_scenes import KERNEL_SCENES, make_kernel_inputs
+from tools.family_pareto_scene_builders import (
+    declared_input,
+    integer_fluxonium_input,
+    numeric_builder,
+    single_model_input,
+)
 from tools.family_pareto_settings import (
     BOARD_PROFILE,
     FTF_MODEL,
-    INTEGER_MODEL,
-    SINGLE_MODEL,
     SOURCE_COMMIT,
 )
 
 _PLATEAU = ("dyson", "single_tone_rwa", "floquet_period", "t6")
 _SHAPED = ("single_tone_gate", "shaped_sambe", "gate_cache", "period_table", "dop853")
-
-
-def single_model_input(
-    name: str,
-    emit: Callable[[TimelineBuilder, float], None],
-    manifest: dict[str, object],
-    families: tuple[str, ...],
-    *,
-    dc_bias_phi0: float | None = None,
-) -> Input:
-    """Compile a caller's pulse sequence on the fixed 21-level single model.
-
-    name identifies the returned real Input and each built AccuracyCase.
-    emit(builder, center) runs once with a public TimelineBuilder and the DC
-    E1-E0 carrier center in MHz. Use public Pulse/TimelineBuilder operations
-    to emit the complete sequence or scan before terminal readout; the charge
-    drive uses generator 1. Pulse frequencies are MHz and durations are us.
-    This builder then appends generator 0/ADC 0 readout and compiles the input.
-    dc_bias_phi0 optionally replaces the fixed DC offset (.5 Phi0), without
-    changing the live DC source value. Drift is disabled and time_scale is zero.
-
-    manifest supplies caller provenance: pulse_sequence is required prose;
-    other JSON-compatible entries can describe axes, gains, carriers and units.
-    Generated model/settings, calibration, timing and route facts take precedence
-    over caller entries with the same keys. families is a tuple of evolution
-    family names, e.g. ("dyson", "single_tone_rwa"), to declare pinned targets
-    for driven spans, with t4 as the idle companion; it does not bypass guards.
-
-    Construction closes the environment, device and temporary source resources
-    before returning. Each Input.build() creates an AccuracyCase with a fresh
-    detached numeric source; the caller must close that case's source.
-    Callback, model, compilation and cleanup errors propagate. A missing
-    pulse_sequence raises KeyError; provenance serialization errors propagate
-    when the manifest is frozen.
-    """
-    settings = parse_single_fluxonium(SINGLE_MODEL)
-    if dc_bias_phi0 is not None:
-        settings = settings.model_copy(
-            update={
-                "dc_bias": settings.dc_bias.model_copy(
-                    update={"offset_phi0": dc_bias_phi0}
-                )
-            }
-        )
-    settings = settings.model_copy(
-        update={
-            "drift": None,
-            "numerics": settings.numerics.model_copy(update={"time_scale": 0.0}),
-        }
-    )
-    board = build_soccfg(BOARD_PROFILE)
-    env = single_fluxonium(settings, soccfg=board)
-    with ExitStack() as stack:
-        stack.callback(env.devices.close_all_devices)
-        if env.close_backend is not None:
-            stack.callback(env.close_backend)
-        owner = stack.enter_context(
-            closing(SingleFluxoniumSource(settings, env.devices))
-        )
-        snapshot = owner.snapshot()
-        numeric = stack.enter_context(closing(owner.model_facts(snapshot).source))
-        model = numeric.model((0,))
-        center_mhz = float((model.energies_ghz[1] - model.energies_ghz[0]) * 1000)
-        builder = TimelineBuilder(board, reps=1, relax_delay=1.0)
-        emit(builder, center_mhz)
-        builder.emit(
-            Readout(
-                "readout",
-                PulseReadoutCfg(
-                    gen_ch=0,
-                    ro_ch=0,
-                    nqz=1,
-                    freq=settings.readout.resonator.frequency_ghz * 1000,
-                    gain=0.1,
-                    waveform=ConstWaveformCfg(length=1.0),
-                    ro_length=1.0,
-                    trig_offset=settings.readout.adc.time_of_flight_ns / 1000,
-                ),
-            )
-        )
-        request = build_compiled_request(
-            builder.build(),
-            "integrated",
-            env.soc.binding,
-            0,
-            routes=env.soc.routes,
-        )
-        (template,) = request.templates
-        batch = owner.plan_template(
-            snapshot, template, time_base=request.time_base
-        ).batch
-        build = _numeric_builder(AccuracyCase(name, numeric, batch, families))
-
-    manifest = {
-        **manifest,
-        "source_commit": SOURCE_COMMIT,
-        "model_source": "fixed single-fluxonium physical parameters",
-        "effective_settings": settings.model_dump(mode="json"),
-        "board_configuration": BOARD_PROFILE,
-        "snapshot": asdict(snapshot),
-        "time_base": {
-            "ticks_per_us_numerator": request.time_base.ticks_per_us.numerator,
-            "ticks_per_us_denominator": request.time_base.ticks_per_us.denominator,
-        },
-        "compiled_carriers_ghz": [
-            track.frequency_ghz.tolist() for track in batch.tracks
-        ],
-        "calibration": {
-            "center_mhz": center_mhz,
-            "center_method": "DC model E1-E0",
-            "gain_method": "fixed uncalibrated benchmark gains",
-            "readout_method": "fixed bare cavity frequency and flight time; gain 0.1 and 1 us pulse/window",
-        },
-    }
-    return _declared_input(name, build, manifest)
-
-
-class Dop853Coordinates(BaseModel):
-    """Coordinates for simultaneous sampled tones, independent of Engine workers.
-
-    envelope selects Gaussian or deterministic non-Gaussian samples. duration_ns
-    is each segment's support in ns; knots includes both endpoints per envelope.
-    levels is the retained model dimension (3..native_cutoff). repeats joins
-    identical segments on one timeline, not independent rows. points creates
-    independent timelines with Pump gains from .8 to 1.2 times .043 (one point
-    uses .043). Change one coordinate at a time for reduced-axis comparisons.
-    """
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
-    envelope: Literal["gaussian", "sampled"] = "gaussian"
-    duration_ns: float = Field(default=20.0, gt=0, allow_inf_nan=False)
-    knots: int = Field(default=9, ge=3, strict=True)
-    levels: int = Field(default=8, ge=3, strict=True)
-    repeats: Literal[1, 2, 20, 100] = 1
-    points: int = Field(default=1, ge=1, strict=True)
-
-
-def dop853_segment_input(coordinates: Dop853Coordinates) -> Input:
-    """Build a tool-owned two-tone segment without readout or idle companions.
-
-    Coordinates select sampled envelopes, support, dimension and repetitions.
-    Settings are validated before the public single-fluxonium owner rebuilds
-    the model and Gibbs initial state. levels above native_cutoff raise ValueError.
-    Every Input.build() returns a fresh owned source, which callers must close.
-    Pin Engine(workers=1, families=("dop853",)); guards remain enabled. Same-dimension
-    reference agreement does not establish retained-level convergence.
-    """
-    settings = parse_single_fluxonium(
-        {
-            **{
-                key: value for key, value in SINGLE_MODEL.items() if key != "drive_line"
-            },
-            "drive_lines": INTEGER_MODEL["drive_lines"],
-            "flux_line": None,
-        }
-    )
-    settings = settings.model_copy(
-        update={
-            "dc_bias": settings.dc_bias.model_copy(update={"offset_phi0": 0.45}),
-            "drift": None,
-            "numerics": settings.numerics.model_copy(
-                update={
-                    "time_scale": 0.0,
-                    "truncation": settings.numerics.truncation.model_copy(
-                        update={"levels": coordinates.levels}
-                    ),
-                }
-            ),
-        }
-    )
-    # model_copy does not validate nested updates; validate before any modeling.
-    settings = type(settings).model_validate(settings.model_dump())
-    env = single_fluxonium(settings, soccfg=build_soccfg(BOARD_PROFILE))
-    name = "dop853_segment"
-    with ExitStack() as stack:
-        stack.callback(env.devices.close_all_devices)
-        if env.close_backend is not None:
-            stack.callback(env.close_backend)
-        owner = stack.enter_context(
-            closing(SingleFluxoniumSource(settings, env.devices))
-        )
-        snapshot = owner.snapshot()
-        numeric = stack.enter_context(closing(owner.model_facts(snapshot).source))
-        batch = _dop853_batch(coordinates, numeric.model((0,)))
-        build = _numeric_builder(AccuracyCase(name, numeric, batch, ("dop853",)))
-    return Input(
-        name,
-        build,
-        "Synchronous shaped two-tone segments without readout or idle tail",
-        category="real",
-        expected_routes={
-            "dop853": {
-                "dop853": (
-                    coordinates.points * coordinates.repeats,
-                    float(np.sum(batch.end_ns)),
-                )
-            }
-        },
-        manifest={
-            "scenario_version": 1,
-            "coordinates": coordinates.model_dump(mode="json"),
-            "effective_settings": settings.model_dump(mode="json"),
-            "snapshot": asdict(snapshot),
-            "source_commit": SOURCE_COMMIT,
-            "pulse_sequence": "Two simultaneous tones, repeated on each timeline",
-            "carrier_method": "DC E1-E0 and E2-E1, GHz, no hardware quantization",
-            "gain_method": "Pump .043, Stokes .143; uncalibrated benchmark controls",
-            "truncation_limit": "Same-dimension oracle agreement does not establish retained-level convergence",
-        },
-    )
-
-
-def _dop853_batch(coordinates: Dop853Coordinates, model: SecularModel) -> TimelineBatch:
-    times = np.linspace(0.0, coordinates.duration_ns, coordinates.knots)
-    local = times / coordinates.duration_ns
-    gains = (
-        np.ones(1)
-        if coordinates.points == 1
-        else np.linspace(0.8, 1.2, coordinates.points)
-    )
-    tracks = []
-    for repeat in range(coordinates.repeats):
-        start = repeat * coordinates.duration_ns
-        for tone, (port, gain, center) in enumerate(
-            (("Pump", 0.043, 0.65), ("Stokes", 0.143, 0.35))
-        ):
-            samples = (
-                np.exp(-0.5 * ((local - center) / (1 / 6)) ** 2)
-                if coordinates.envelope == "gaussian"
-                else np.sin(np.pi * local) ** 2
-                * (0.7 + 0.3 * np.cos((tone + 2) * np.pi * local + 0.2))
-            )
-            envelope = EnvelopeSpec("sampled", samples.astype(np.complex128), times)
-            frequency = float(model.energies_ghz[tone + 1] - model.energies_ghz[tone])
-            tracks.append(
-                DriveTrack(
-                    port=port,
-                    start_ns=np.full(coordinates.points, start),
-                    duration_ns=np.full(coordinates.points, coordinates.duration_ns),
-                    frequency_ghz=np.full(coordinates.points, frequency),
-                    phase_rad=np.full(
-                        coordinates.points, -2 * np.pi * frequency * start
-                    ),
-                    amplitude=gain
-                    * (gains if tone == 0 else np.ones(coordinates.points)),
-                    envelopes=(envelope,),
-                    envelope_index=np.zeros(coordinates.points, dtype=np.int64),
-                    active=np.ones(coordinates.points, dtype=np.bool_),
-                )
-            )
-    return TimelineBatch(
-        points=np.arange(coordinates.points, dtype=np.int64),
-        tracks=tuple(tracks),
-        flux=FluxSchedule(
-            offsets=np.arange(coordinates.points + 1, dtype=np.int64),
-            start_ns=np.zeros(coordinates.points),
-            level=np.zeros((coordinates.points, 1), dtype=np.int64),
-        ),
-        end_ns=np.full(
-            coordinates.points, coordinates.repeats * coordinates.duration_ns
-        ),
-    )
-
-
-def _numeric_builder(
-    case: AccuracyCase, *, expansion: FluxExpansion | None = None
-) -> Callable[[], AccuracyCase]:
-    """Detach public numeric inputs while their environment owner is still open."""
-    name, batch, families = case.name, case.batch, case.families
-    initial = case.source.initial_density
-    subdivisions = case.source.slow_envelope_segments_per_period
-    models: dict[tuple[int, ...], SecularModel] = {
-        (level := tuple(int(value) for value in row)): case.source.model(level)
-        for row in np.unique(batch.flux.level, axis=0)
-    }
-
-    def build() -> AccuracyCase:
-        return AccuracyCase(
-            name,
-            ModelSource(
-                initial,
-                models.__getitem__,
-                expansion,
-                slow_envelope_segments_per_period=subdivisions,
-            ),
-            batch,
-            families,
-        )
-
-    return build
-
-
-def _declared_input(
-    name: str, build: Callable[[], AccuracyCase], manifest: dict[str, object]
-) -> Input:
-    """Declare driven/idle logical work from input supports, not Engine telemetry."""
-    with closing((case := build()).source):
-        batch = case.batch
-        driven_count = idle_count = 0
-        driven_ns = idle_ns = 0.0
-        spans_per_point = []
-        for point, spans in enumerate(segment_spans(batch)):
-            spans_per_point.append(len(spans))
-            for start, end in spans:
-                playing = any(
-                    track.active[point]
-                    and track.start_ns[point] <= start
-                    and end <= track.start_ns[point] + track.duration_ns[point]
-                    for track in batch.tracks
-                )
-                if playing:
-                    driven_count += 1
-                    driven_ns += end - start
-                else:
-                    idle_count += 1
-                    idle_ns += end - start
-        expected = {
-            family: {family: (driven_count, driven_ns), "t4": (idle_count, idle_ns)}
-            for family in case.families
-        }
-    return Input(
-        name,
-        build,
-        str(manifest["pulse_sequence"]),
-        category="real",
-        companions=("t4",),
-        expected_routes=expected,
-        metadata={"sweep_type": name, "companions": ("t4",)},
-        manifest={
-            **manifest,
-            "points": len(batch.points),
-            "spans": driven_count + idle_count,
-            "spans_per_point": spans_per_point,
-            "expected_routes": expected,
-        },
-    )
 
 
 def carrier_sweep_input() -> Input:
@@ -955,11 +617,11 @@ def simultaneous_drive_input() -> Input:
             soccfg=board,
             facts=facts,
         ).batch
-        build = _numeric_builder(
-            AccuracyCase("simultaneous_drive", numeric, batch, families),
+        build = numeric_builder(
+            Scene("simultaneous_drive", numeric, batch, families),
             expansion=numeric.flux_expansion(),
         )
-    return _declared_input(
+    return declared_input(
         "simultaneous_drive",
         build,
         {
@@ -986,87 +648,6 @@ def simultaneous_drive_input() -> Input:
                 "center_method": "uncoupled local DC E1-E0 for F1 and F2",
                 "gain_method": "fixed uncalibrated benchmark gains shared by both ports",
                 "readout_method": "fixed bare r1 cavity frequency and flight time; gain 0.1 and 1 us pulse/window",
-            },
-        },
-    )
-
-
-def integer_fluxonium_input(
-    name: str,
-    emit: Callable[[TimelineBuilder, SecularModel], None],
-    manifest: dict[str, object],
-    families: tuple[str, ...],
-) -> Input:
-    """Compile a core sequence on the fixed 80-native/20-retained integer model.
-
-    emit receives a public TimelineBuilder and the DC SecularModel (GHz), and
-    emits the entire scan before readout. Pump uses gen1 and Stokes gen2; both
-    couple to the same charge operator at 1 GHz/gain. Constant or sampled
-    waveforms and public sweeps are supported. No drive is added by this builder.
-    manifest must include pulse_sequence prose and should describe requested
-    axes, gains, carriers and units. families lists admissible pinned targets.
-    The returned Input owns a fresh detached numeric source on each build;
-    callers close it. It declares each target for all driven spans plus t4 for
-    idle; mixed-domain callers replace expected_routes and companion declarations.
-    Compilation, model, resource cleanup and malformed manifest errors propagate.
-    """
-    settings = parse_single_fluxonium(INTEGER_MODEL)
-    board = build_soccfg(BOARD_PROFILE)
-    env = single_fluxonium(settings, soccfg=board)
-    with ExitStack() as stack:
-        stack.callback(env.devices.close_all_devices)
-        if env.close_backend is not None:
-            stack.callback(env.close_backend)
-        owner = stack.enter_context(
-            closing(SingleFluxoniumSource(settings, env.devices))
-        )
-        snapshot = owner.snapshot()
-        numeric = stack.enter_context(closing(owner.model_facts(snapshot).source))
-        builder = TimelineBuilder(board, reps=1, relax_delay=1.0)
-        emit(builder, numeric.model((0,)))
-        builder.emit(
-            Readout(
-                "readout",
-                PulseReadoutCfg(
-                    gen_ch=0,
-                    ro_ch=0,
-                    nqz=1,
-                    freq=settings.readout.resonator.frequency_ghz * 1000,
-                    gain=0.1,
-                    waveform=ConstWaveformCfg(length=1.0),
-                    ro_length=1.0,
-                    trig_offset=settings.readout.adc.time_of_flight_ns / 1000,
-                ),
-            )
-        )
-        request = build_compiled_request(
-            builder.build(), "integrated", env.soc.binding, 0, routes=env.soc.routes
-        )
-        (template,) = request.templates
-        batch = owner.plan_template(
-            snapshot, template, time_base=request.time_base
-        ).batch
-        build = _numeric_builder(AccuracyCase(name, numeric, batch, families))
-    return _declared_input(
-        name,
-        build,
-        {
-            **manifest,
-            "source_commit": SOURCE_COMMIT,
-            "model_source": "fixed integer-fluxonium physical parameters, native 80/retained 20",
-            "effective_settings": settings.model_dump(mode="json"),
-            "board_configuration": BOARD_PROFILE,
-            "snapshot": asdict(snapshot),
-            "time_base": {
-                "ticks_per_us_numerator": request.time_base.ticks_per_us.numerator,
-                "ticks_per_us_denominator": request.time_base.ticks_per_us.denominator,
-            },
-            "compiled_carriers_ghz": [
-                track.frequency_ghz.tolist() for track in batch.tracks
-            ],
-            "calibration": {
-                "gain_method": "uncalibrated benchmark gains, not acquired-IQ validation",
-                "readout_method": "bare cavity, gain 0.1, 1 us pulse/window, zero flight time",
             },
         },
     )
@@ -1282,3 +863,54 @@ def make_real_inputs(scenario: str | None = None) -> list[Input]:
             f"Unknown scenario: {scenario}. Legal names: {', '.join(builders)}"
         )
     return [builders[scenario]()]
+
+
+def main(argv: list[str] | None = None, *, inputs: list[Input] | None = None) -> int:
+    """Freeze two numeric manifests in --output without timing or solving.
+
+    argv omits the executable name. --scenario selects a single declared scene
+    before model construction; without it, freeze the complete declared set.
+    inputs optionally supplies caller-owned declarations instead of building
+    the default inventory. Sources returned by their builders are closed after
+    snapshotting. Write frozen-synthetic.json.gz and frozen-real.json.gz in the
+    output directory, replacing existing files. Their combined size must stay
+    within 10 MiB (10,485,760 bytes); otherwise raise ValueError for caller review.
+    argparse handles invalid options/help. Model, serialization and I/O failures
+    propagate; no Engine session or independent solver runs.
+    """
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=Path("tools/data/family_pareto"),
+        help="Directory for the synthetic and real frozen manifests",
+    )
+    parser.add_argument(
+        "--scenario", help="Freeze only this scene before constructing any other model"
+    )
+    args = parser.parse_args(argv)
+    if inputs is not None:
+        selected = inputs
+    elif args.scenario in KERNEL_SCENES:
+        selected = make_kernel_inputs(args.scenario)
+    elif args.scenario == "idle_coherence":
+        selected = make_inputs()
+    elif args.scenario:
+        selected = make_real_inputs(args.scenario)
+    else:
+        selected = [*make_inputs(), *make_real_inputs(), *make_kernel_inputs()]
+    paths = []
+    for category in ("synthetic", "real"):
+        path = args.output / f"frozen-{category}.json.gz"
+        records = freeze_records(
+            [item for item in selected if item.category == category]
+        )
+        write_frozen_manifest(path, records)
+        paths.append(path)
+    if sum(path.stat().st_size for path in paths) > 10_485_760:
+        raise ValueError("frozen manifests exceed the combined 10,485,760-byte limit")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

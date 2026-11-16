@@ -1,5 +1,8 @@
+"""Compare pytest node IDs across module/console and serial/parallel collection."""
+
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
 import os
@@ -28,17 +31,29 @@ class CollectionOracleError(RuntimeError):
 
 @dataclass(frozen=True)
 class CollectionResult:
+    """Validated pytest collection evidence.
+
+    command records executed argv. node_ids is the sorted tuple of unique test
+    identifiers. summary is pytest's selected-count/duration summary line.
+    """
+
     command: tuple[str, ...]
     node_ids: tuple[str, ...]
     summary: str
 
     @property
     def digest(self) -> str:
+        """Return SHA-256 of newline-joined node IDs, without a trailing newline."""
         payload = "\n".join(self.node_ids).encode("utf-8")
         return hashlib.sha256(payload).hexdigest()
 
 
 def configured_addopts(root: Path) -> tuple[str, ...]:
+    """Read root/pyproject.toml's pytest addopts as command-line tokens.
+
+    Accept a shell-style string or string list; other types raise
+    CollectionOracleError. File, TOML and missing-section errors propagate.
+    """
     with (root / "pyproject.toml").open("rb") as stream:
         raw = tomllib.load(stream)["tool"]["pytest"]["ini_options"].get("addopts", "")
     if isinstance(raw, str):
@@ -57,6 +72,11 @@ def console_script_path() -> Path:
 def build_command(
     root: Path, *, parallel: bool, entrypoint: PytestEntrypoint = "module"
 ) -> tuple[str, ...]:
+    """Build collect-only argv for root/tests using this interpreter/environment.
+
+    entrypoint selects python -m pytest or its adjacent console script;
+    parallel adds -n auto. Unknown entrypoints raise CollectionOracleError.
+    """
     tests = str(root / "tests")
     if entrypoint == "module":
         command = [sys.executable, "-m", "pytest", "--collect-only", "-q"]
@@ -119,6 +139,12 @@ def parse_collection(
 def collect(
     root: Path, *, parallel: bool, entrypoint: PytestEntrypoint = "module"
 ) -> CollectionResult:
+    """Run collect-only pytest in root and return validated node IDs.
+
+    parallel and entrypoint select build_command's invocation. Remove inherited
+    pytest/Python-path/color overrides. Invalid output or a nonzero exit raises
+    CollectionOracleError; subprocess launch failures propagate.
+    """
     command = build_command(root, parallel=parallel, entrypoint=entrypoint)
     environment = os.environ.copy()
     environment.pop("PYTEST_ADDOPTS", None)
@@ -144,6 +170,11 @@ def collect(
 
 
 def compare_collections(*results: CollectionResult) -> None:
+    """Require at least two results with identical sorted node IDs.
+
+    Return None on agreement; raise CollectionOracleError for too few results
+    or a mismatch, including up to three differing IDs from each side.
+    """
     if len(results) < 2:
         raise CollectionOracleError("at least two collection results are required")
     baseline = results[0]
@@ -159,7 +190,16 @@ def compare_collections(*results: CollectionResult) -> None:
         )
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    """Collect this checkout four ways and print a JSON consistency receipt.
+
+    None reads sys.argv; argparse handles help and invalid syntax with SystemExit.
+    Require importlib mode in configured addopts. Compare module/console and
+    serial/parallel node IDs. Return 0 on agreement, 1 with stderr diagnostics
+    for collection/configuration failures. File and subprocess errors propagate.
+    """
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.parse_args(argv)
     root = Path(__file__).resolve().parents[1]
     try:
         addopts = configured_addopts(root)

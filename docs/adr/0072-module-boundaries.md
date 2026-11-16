@@ -23,7 +23,7 @@ status: accepted
 | `program` | 控制 ZCU216 與底層 QICK 的工具和類別，包括由呼叫端 profile mapping 建 QickConfig 的 `build_soccfg` 與模擬 SoC binding；時脈、channel 型別與數量等硬體 profile 數值不留在 lib | 參數與資產的保存 |
 | `analysis` | 分析工具；模型自己的公開 renderer，使用與客製化由 caller 決定 | 檔案讀寫；實驗的圖形政策 |
 | `plotting` | 具名 Figure、owner 更新機制與共用診斷圖 | 分析計算；lab 的 live 工具與格式 |
-| `simulate` | 數值模擬 | 讀取資料容器；呼叫端傳入數值 |
+| `simulate` | 數值模擬、通用數值輸入與參考解 codec | 讀取量測資料容器、裝置佈局或使用者環境參數；模型數值由呼叫端提供 |
 | `simulators` | 具體物理模擬器（FTF、single_fluxonium、six_fluxonium）的模型、environment 與私有 replay | 通用演化、ADC、bath、元件 Hamiltonian 等機制，留在 `simulate` |
 | `resources` | 實驗領域資料容器與 YAML、JSON、CSV 的讀寫；waveform 資產的命名、formula 語意與 NPZ 實體 I/O | 量測資料檔；program 的執行機制；重複 waveform codec |
 | `core` | 共用的無狀態型別與格式。`core.waveform_format` 驗證 samples、編解碼 NPZ 與 opaque JSON recipe | 檔案 I/O、formula 語意、GUI、資源 scope 或硬體 |
@@ -231,8 +231,12 @@ GUI、MCP 組合根與開發工具需要 lab 宣告時，只直接 import `zcu_l
 使用者對 assembly 入口限制與 migrations 例外回答：「好，甲」。引文中的 `[zcu_lab]` 代替語音輸入的 lab 名稱。
 
 量表工具的場景是挑選過、固定的一組，核心 pulse 序列與模型參數放在工具內，不 import lab，也不讀可變的 lab YAML。
-例如 `tools/family_pareto_scenarios.py` 用公開 program 元件組序列，固定模型值由 `tools/family_pareto_settings.py` 持有。
-此處接受與 lab 重複，讓讀工具的人可以直接看懂場景；lab 序列改動不會自動更新量表。
+`tools/family_pareto_scenarios.py` 宣告固定序列，經 `tools/family_pareto_scene_builders.py` 的公開 program 編譯與資源生命週期，凍結完整 batch。
+固定裝置模型值由 `tools/family_pareto_settings.py` 持有。
+`tools/family_pareto_kernel_scenes.py` 則用公開 `SingleFluxoniumModel` 直接宣告單段數值控制，不經前端。
+通用 codec 歸 `simulate.evolution`，入庫數值資料放在 `tools/data/family_pareto/`，不包含 solver 或裝置 builder。
+Producer 自持具名 `Scene`，不依賴 tests 的案例型別或清單。獨立參考解 producer 留在 tests 側，經檔案交接，契約見 [[0078]]。
+此處接受與 lab 重複，讓讀工具的人可以直接看懂場景；lab 序列改動不會自動更新已凍結的量表輸入。
 這個取捨只適用於固定的 optimizer benchmark。需要真實 lab 宣告的品質檢查仍經 assembly 取得宣告，不複製一份。
 
 2026-11-12，使用者說：「我其實不樂意看到tool依賴zcu_lab，我認為你要測試，那就只複製最核心的pulse序列來模擬啊，又不需要整個experiment」。

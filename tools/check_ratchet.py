@@ -66,6 +66,7 @@ class Regression:
 
     @property
     def increase(self) -> int:
+        """Return candidate count minus base count for this path/rule."""
         return self.after - self.before
 
 
@@ -680,6 +681,13 @@ def run(
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Compare this checkout with --base and print a JSON regression receipt.
+
+    None reads sys.argv. The default base is merge-base HEAD main. --detector
+    restricts checks and is repeatable; --full-pyright includes unchanged callers.
+    Return 0 without increases, 1 with increases, or 2 if comparison fails.
+    argparse handles help and invalid CLI syntax with SystemExit.
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--base",

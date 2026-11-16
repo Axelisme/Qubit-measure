@@ -26,7 +26,7 @@ from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime import RunOptions, Schedule, SignalBuffer
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import Classify, Pulse, Reset, TimelineBuilder, shot_sums
+from zcu_tools.program.v2 import Classify, Reset, TimelineBuilder, shot_sums
 from zcu_tools.program.v2.modules import MuxReadout
 
 from zcu_lab.v2.support import live_line
@@ -45,7 +45,8 @@ from .core import (
     paired_means,
     validate_axes,
 )
-from .sequence import TwoQubitGate, make_paired_sequences
+from .scheduling import emit_sequence
+from .sequence import make_paired_sequences
 
 
 @dataclass(frozen=True)
@@ -246,7 +247,7 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
     Options = RBOptions
 
     def run(self, config: RBHeraldedCfg, *, context: RunContext) -> RBHeraldedResult:
-        """Acquire optional reset → herald → paired sequence → terminal.
+        """Acquire optional reset → herald → concurrent per-qubit sequence → terminal.
 
         Compile once per depth/seed/arm. Each host round acquires reps shots with
         rounds=1 and saves all 81 counts. Unfinished slots stay NaN; cfg remains
@@ -296,54 +297,15 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
                             builder.emit(Reset("reset", config.reset))
                         builder.emit(readout, tag="herald")
 
-                        # The recovery makes the net logical operation identity.
-                        # Positive logical Z advances a frame; X uses base minus frame.
-                        frames = [0.0, 0.0]
-                        pulses = (config.x90_f1, config.x90_f2)
-                        for index, gate in enumerate(sequence.gates):
-                            if gate in (TwoQubitGate.Z90_Q0, TwoQubitGate.Z90_Q1):
-                                role = 0 if gate == TwoQubitGate.Z90_Q0 else 1
-                                frames[role] = (frames[role] + 90.0) % 360.0
-                            elif gate in (TwoQubitGate.X90_Q0, TwoQubitGate.X90_Q1):
-                                role = 0 if gate == TwoQubitGate.X90_Q0 else 1
-                                pulse = pulses[role]
-                                builder.emit(
-                                    Pulse(
-                                        f"gate_{index}_x90_f{role + 1}",
-                                        pulse,
-                                        phase=(float(pulse.phase) - frames[role])
-                                        % 360.0,
-                                    )
-                                )
-                            elif gate == TwoQubitGate.CZ:
-                                builder.fork(
-                                    "default",
-                                    into=[
-                                        f"gate_{index}_cz_f1_time",
-                                        f"gate_{index}_cz_f2_time",
-                                    ],
-                                )
-                                builder.emit(
-                                    Pulse(f"gate_{index}_cz_f1", config.drive.f1),
-                                    timeline=f"gate_{index}_cz_f1_time",
-                                )
-                                builder.emit(
-                                    Pulse(f"gate_{index}_cz_f2", config.drive.f2),
-                                    timeline=f"gate_{index}_cz_f2_time",
-                                )
-                                builder.join(
-                                    f"gate_{index}_cz_f1_time",
-                                    f"gate_{index}_cz_f2_time",
-                                    into="default",
-                                )
-                                frames[0] = (
-                                    frames[0] + config.phase_pair.correction_f1_deg
-                                ) % 360.0
-                                frames[1] = (
-                                    frames[1] + config.phase_pair.correction_f2_deg
-                                ) % 360.0
-                            else:
-                                raise ValueError(f"Unknown two-qubit gate: {gate!r}")
+                        # Both arms keep per-role order, overlap X90s and meet at each CZ.
+                        emit_sequence(
+                            builder,
+                            sequence,
+                            x90_f1=config.x90_f1,
+                            x90_f2=config.x90_f2,
+                            drive=config.drive,
+                            phase_pair=config.phase_pair,
+                        )
                         builder.emit(readout, tag="terminal")
                         prog = builder.build()
                         processor = shot_sums(
