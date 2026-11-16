@@ -1,6 +1,6 @@
 # Numeric simulation tools
 
-**Last updated:** 2026-11-17, frozen scene storage and dressed resonator builder
+**Last updated:** 2026-11-17, simulator-owned cache root
 
 **讀者：** framework-dev、agent。查閱數值模擬的責任邊界、快取契約與實測效能。
 
@@ -75,9 +75,14 @@ its dispatchers or first compiles JIT code. Both entries import the same private
 bootstrap module. Python serializes its initialization and retains only a
 successful import, so multiple tools share one namespace without nesting it.
 A failed bootstrap propagates its error and is retried on the next tool import.
-Without `NUMBA_CACHE_DIR`, it uses `user_cache_root()/numba/<digest>/`.
-The shared root honors
-`ZCU_TOOLS_CACHE_DIR`. An existing `NUMBA_CACHE_DIR` becomes a parent:
+Without `NUMBA_CACHE_DIR`, it uses `<user-cache-root>/numba/<digest>/`.
+The simulator resolves this root without importing `utils.cache`.
+`ZCU_TOOLS_CACHE_DIR` must be a non-empty absolute path; invalid values raise
+`ValueError`. Without this override, the root is
+`platformdirs.user_cache_dir("zcu_tools", "zcu_tools")`. If platform lookup fails,
+it uses `<tempdir>/.zcu_tools`. These rules match `utils.cache.user_cache_root`,
+so GUI and session cache roots keep their existing locations.
+An existing `NUMBA_CACHE_DIR` becomes a parent:
 `<NUMBA_CACHE_DIR>/zcu-simulate-<digest>/`. Set overrides before the first
 Numba tool import. Changing them later requires a new process.
 
