@@ -60,7 +60,7 @@ ParameterWriteback 與 ParameterUpdate 可帶 `create_kind: str | None = None`�
 
 例如 R1、R2 的 dip 在 6012.3 與 6123.4 MHz，作用中 point 只有 R1，接受兩列後覆寫 R1.freq 並建立只指定 freq 的 resonator R2。名稱拼錯時會建立多餘元件，這是已接受的取捨，Apply 前可取消勾選。此政策只由 range_find 啟用，onetone/freq 與 mux adapters 維持 create_kind=None；其他實驗需要建立元件時須由其 adapter 明確指定。
 
-2026-11-16，使用者裁定「沒有就建立，有就複寫」，並對最終做法回答「可以，照這樣定」。使用者隨後要求 commit_parameter_updates 保持中立，反對為此擴大 add_component_to_draft 的參數型別，改由 EditView 提供 add_component。此段直接收錄裁決與適用邊界，原始工作檔未入庫，不另建討論快照。
+2026-11-16，使用者裁定「沒有就建立，有就複寫」，並對最終做法回答「可以，照這樣定」。使用者隨後要求 commit_parameter_updates 保持中立，反對為此擴大 add_component_to_draft 的參數型別，改由 EditView 提供 add_component。比較過的選項與被否決的理由見 [討論紀錄](../discussions/2026-11-16-range-find-writeback-upsert.md)。
 
 Host 的 busy、writable、result、context 與 [[0070]] holder admission 仍各自生效。可預期的 `LibraryEntryInvalid` 保留 dialog、row、selection 與 draft，供使用者修正；非預期錯誤向外傳遞。
 
