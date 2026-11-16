@@ -59,8 +59,7 @@ from .storage import (
     RunOutputBinding,
     StorageBinding,
     bind_run_outputs,
-    capture_entry_storage,
-    capture_point_storage,
+    capture_storage,
 )
 from .template import EntryTemplate, load_entry_template
 from .views import (
@@ -78,11 +77,10 @@ from .views import (
     source_path,
 )
 from .writeback import (
+    BoundDocumentWritebackTarget,
     CommittedWrite,
-    EntryWritebackTarget,
     ModuleWriteback,
     ParameterWriteback,
-    PointWritebackTarget,
     RecordWriteback,
     WaveformWriteback,
     WritebackApplyError,

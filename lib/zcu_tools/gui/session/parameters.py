@@ -31,8 +31,7 @@ from zcu_tools.resources.entry.aliases import AliasValue
 from zcu_tools.resources.entry.roles import resolve_names
 from zcu_tools.resources.entry.storage import (
     StorageBinding,
-    capture_entry_storage,
-    capture_point_storage,
+    capture_storage,
 )
 from zcu_tools.resources.projection import ProjectionPathError, projection_value
 
@@ -200,7 +199,7 @@ class ParameterContext:
             library=library.snapshot(),
             target=target,
             roles=roles,
-            storage=capture_point_storage(point),
+            storage=capture_storage(point),
         )
 
     @classmethod
@@ -225,7 +224,7 @@ class ParameterContext:
             library=library.snapshot(),
             target=target,
             roles=roles,
-            storage=capture_entry_storage(entry),
+            storage=capture_storage(entry.parameters()),
         )
 
     @classmethod

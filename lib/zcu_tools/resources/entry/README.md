@@ -1,6 +1,6 @@
 # `zcu_tools.resources.entry` result entry composition
 
-**Last updated:** 2026-11-16，ParameterView 與中性參數開檔入口
+**Last updated:** 2026-11-16，中性 storage capture 與綁定文件寫回
 
 **讀者：** framework-dev。Result entry、point、ledger 與輸出位置契約。
 
@@ -135,9 +135,9 @@ Accepted 不要求前序事件或 run。Producer 先 append accepted，再提交
 只用該項提案欄位建立元件，其餘使用 registered model defaults。既有元件只更新指定欄位。
 Kind 與欄位由 caller 註冊，框架不指定實驗 kind。任一筆驗證失敗，建立、值與 metadata 整組不寫，見 ADR-0008。
 
-`writeback` 提供共用 parameter／module／waveform／record 項目與 `apply_writeback`。RecordWriteback 接受具體元件名與 producer JSON 欄位，補上 captured run_id、目的地 point、accepted 時間與事件 source。Entry target 的 point 為 None，ledger 與 record row 都可保存 null。
+`writeback` 提供共用 parameter／module／waveform／record 項目與 `apply_writeback`。RecordWriteback 接受具體元件名與 producer JSON 欄位，補上 captured run_id、目的地 point、accepted 時間與事件 source。Global target 的 point 為 None，ledger 與 record row 都可保存 null。
 
-Writeback 入口遞迴將 dict／list 內的 numpy floating／integer scalar 轉為 Python float／int，不修改 producer 的資料。Float 沿用 Python rounding，integer 保留精確值；非有限結果與其他非 JSON 值仍在追加 accepted 前拒絕。Ledger 與 record sink 使用同一份正規化 JSON；dev 欄位選填，caller 單位不轉換。Caller 傳入固定文件的 write target、已解析的具體路徑，以及具名 evidence，包含 run_id、origin 與可選 source。`PointWritebackTarget(point, storage)` 綁 point 文件，`EntryWritebackTarget(entry.parameters(), capture_entry_storage(entry))` 綁 entry 文件，兩者共用同一套單檔批次提交。Entry target 的 point 為 None，參數與 library 編輯不改既有 point。ParameterWriteback 的 metadata 為 None 時保留該 path 既有 metadata，mapping 則在同筆 point commit 整份替換；executor 不加入事件、來源或時間。Module／waveform 項目只交 Spec 給 library owner，不保存 per-leaf stderr 或來源。流程追加一筆 accepted 後依序提交 point 參數一組、library module／waveform 一組與逐筆 records，組內保留供應順序。Point 與 library 各用一次 edit；任一項無效整組不寫，首錯停止。成功回 `WritebackResult(event_id, committed)`，每筆 committed value 由實際 setter 在逐項 draft 驗證後捕捉，只有整組 commit 成功才回傳，record 使用 append 回傳的完整 row。Committed 依實際提交順序，accepted payload writes 依供應順序；CommittedWrite.index 保留供應 tuple 的位置，重複 path 也可逐項關聯。項目失敗拋 `WritebackApplyError(result)`，同份 result 只保留已提交組的全部項目，event_id／applied 與原始 cause 仍可查，前組與事件保留。applied 仍計項目數，失敗組計零。GUI 不在整批後重讀目的地，因此父／子路徑後項覆寫不改首筆 receipt。Ledger append 失敗原樣傳播，不寫值。Library 在首次執行 library 項目時才開啟，key、family 與持久值驗證仍由 library owner 負責。流程不 import frontend 或 experiment，不建立跨文件交易或回復框架。Notebook 與 GUI 共用 executor。GUI context owner 綁定公開批次 setters，每個成功文件發布一次；GUI service 標記該前綴 applied 後原樣拋 cause，保持既有 wire 錯誤分類。
+Writeback 入口遞迴將 dict／list 內的 numpy floating／integer scalar 轉為 Python float／int，不修改 producer 的資料。Float 沿用 Python rounding，integer 保留精確值；非有限結果與其他非 JSON 值仍在追加 accepted 前拒絕。Ledger 與 record sink 使用同一份正規化 JSON；dev 欄位選填，caller 單位不轉換。Caller 傳入固定文件的 write target、已解析的具體路徑，以及具名 evidence，包含 run_id、origin 與可選 source。`BoundDocumentWritebackTarget(view, storage)` 綁一份 global／point 參數文件與相鄰 library。建構時比對完整來源與 Result／Database 路徑，不同 entry、scope 或 roots 皆報 ValueError。Global target 的 point 為 None，參數與 library 編輯不改既有 point。ParameterWriteback 的 metadata 為 None 時保留該 path 既有 metadata，mapping 則在同筆參數 commit 整份替換；executor 不加入事件、來源或時間。Module／waveform 項目只交 Spec 給 library owner，不保存 per-leaf stderr 或來源。流程追加一筆 accepted 後依序提交綁定參數文件一組、library module／waveform 一組與逐筆 records，組內保留供應順序。Parameters 與 library 各用一次 edit；任一項無效整組不寫，首錯停止。成功回 `WritebackResult(event_id, committed)`，每筆 committed value 由實際 setter 在逐項 draft 驗證後捕捉，只有整組 commit 成功才回傳，record 使用 append 回傳的完整 row。Committed 依實際提交順序，accepted payload writes 依供應順序；CommittedWrite.index 保留供應 tuple 的位置，重複 path 也可逐項關聯。項目失敗拋 `WritebackApplyError(result)`，同份 result 只保留已提交組的全部項目，event_id／applied 與原始 cause 仍可查，前組與事件保留。applied 仍計項目數，失敗組計零。GUI 不在整批後重讀目的地，因此父／子路徑後項覆寫不改首筆 receipt。Ledger append 失敗原樣傳播，不寫值。Library 在首次執行 library 項目時才開啟，key、family 與持久值驗證仍由 library owner 負責。流程不 import frontend 或 experiment，不建立跨文件交易或回復框架。Notebook 與 GUI 共用 executor。GUI context owner 綁定公開批次 setters，每個成功文件發布一次；GUI service 標記該前綴 applied 後原樣拋 cause，保持既有 wire 錯誤分類。
 
 ## 輸出位置
 
@@ -145,9 +145,9 @@ Writeback 入口遞迴將 dict／list 內的 numpy floating／integer scalar 轉
 
 `ResultEntry.dispersive_path` 回傳 Result 條目下的 `dispersive/` 目錄。屬性不建立目錄、不讀 component 或 ledger，並拒絕逃出條目的 symlink。Entry 不提供這些檔案的 codec，也不把它們複製到 point。Caller 以 component 名或自選名稱組成 JSON 檔名，再經 [resources 分析格式 owner](../README.md#entry-分析格式檔) 的具名 load/save 讀寫。
 
-`ResultEntry.result_path` 是唯讀的 Result 條目路徑，`database_path` 是唯讀的 Database 輸出位置，不是上層 roots，也不保證 Database 已存在。`SaveLayout` 接收這兩個 exact paths、caller 產生的 stem、可選 point 與帶 timezone 的 saved_at，集中計算輸出位置。Stem 原樣使用，框架不補前綴或 run_id；非法路徑段直接拒絕。它不建立目錄或檔案。共用 saver 使用這些輸出，entry 不編排保存。`capture_point_storage(view, roles=...)` 仍拒絕 global view。它從 bound point 的 constructor origin 與 cached snapshot 捕捉 entry 身分、名稱、point、description、exact paths 與 scoped ledger，不 refresh 或重開 ResultEntry。可選的 RoleView 必須綁同一 point source 與 Result／Database roots，另一個合法 handle 可以使用。錯誤來源即使 roles 為空也拒絕。回傳的 roles 是解析當下名稱的隔離唯讀 mapping，不重新解角色或查目前焦點；省略 roles 時回傳空 mapping。
+`ResultEntry.result_path` 是唯讀的 Result 條目路徑，`database_path` 是唯讀的 Database 輸出位置，不是上層 roots，也不保證 Database 已存在。`SaveLayout` 接收這兩個 exact paths、caller 產生的 stem、可選 point 與帶 timezone 的 saved_at，集中計算輸出位置。Stem 原樣使用，框架不補前綴或 run_id；非法路徑段直接拒絕。它不建立目錄或檔案。共用 saver 使用這些輸出，entry 不編排保存。`capture_storage(view, roles=None)` 從 global／point view 的 constructor origin 與 cached snapshot 捕捉 entry 名稱、point、description、exact paths 與 scoped ledger，不 refresh 或重開 ResultEntry。Global 的 point 為 None，point view 保留其 label。可選的 RoleView 必須綁同一 source 與 Result／Database roots，另一個合法 handle 可以使用。錯誤來源即使 roles 為空也拒絕。回傳的 roles 是解析當下名稱的隔離唯讀 mapping，不重新解角色或查目前焦點；省略 roles 時回傳空 mapping。
 
-`capture_entry_storage(entry)` 從已開啟 entry 捕捉 cached description、exact paths 與 scoped ledger，不重讀參數、不選 point。它與 capture_point_storage 都回傳 `StorageBinding`，point 在 entry scope 為 None。Entry capture 的 roles 為空 mapping。
+兩種 scope 都回傳 `StorageBinding`。Capture 不讀 library／aliases，不建立輸出或追加事件。
 
 `ArtifactKey` 用 section、artifact name 與 member kind 定位輸出。Figure 與 analysis 另需 member_name，保留同 artifact 的多成員身分。名稱不承載物理語意，安全路徑段規則共用 entry owner。Figure 圖名為 `<section>_<name>_<member_name>`，各 token 原樣保留底線與 percent。每次保存選集使用新的 SaveLayout；同一 instance 中，不同 figure key 算到相同輸出路徑時，會拋出 ValueError 並列出路徑與兩個 key，不自動改名。同 key 可重算。Analysis 使用安全的 member_name 作檔名，producer 傳入 pane 名稱；section／artifact name 不參與 JSON 路徑。同 pane 可以跨 artifact 共用目的地，保存依選集順序覆寫。Data 與 analysis 不套用 figure 的碰撞檢查，不做批次內容去重或路徑衝突預檢。Symlink 不能讓目的地離開 entry root。
 
@@ -196,7 +196,7 @@ Inspect 保存所選 Destination。選 point 時改 entry 表只更新 entry cac
 
 解析依序使用 explicit、匹配焦點、已解析元件的角色同名欄位或 via。Via 首段是已解析角色，其餘是元件內路徑。路徑的字串值視為目標元件名稱，缺少目標在 resolve 報錯，普通載入不預檢整圖引用。焦點只填一個角色。Notebook roles resolver 使用 RoleRegistry.default_focus 選取符合 focus kind patterns 的唯一候選。
 
-Explicit 的 None 明確不綁該角色，不改用焦點或 via；讀取時指名 RoleResolutionError。省略 explicit key 才允許自動推論。自動推論缺引用或多個候選時省略該角色；via 的來源角色未綁時也省略衍生角色。未知角色、多餘 explicit、明確指定不存在的元件、實際 dangling 引用或 kind 不符仍以 RoleResolutionError 回報。RoleView 保留同次宣告，讀取已宣告未綁角色（包括 hasattr）時指名 RoleResolutionError；未知 attribute 仍為 AttributeError。RoleResolutionError 是 ValueError，工具不能把未綁角色視為不存在的 attribute。它的訊息指名角色與原因，只在有要求 kind 或使用焦點時列出它們；raise 端有更合適的措辭時（例如 session alias 表）以 message 提供完整訊息，`reason` 仍是可比對的短分類。RoleView 固定解析當下的名稱映射與 owning global／point 來源，元件值仍跟隨 ParameterView，回傳映射不可修改。來源由 ParameterView.resolve 捕捉；存檔 caller 只交給 capture_point_storage 驗證，不比較 callback 或讀 private binding。
+Explicit 的 None 明確不綁該角色，不改用焦點或 via；讀取時指名 RoleResolutionError。省略 explicit key 才允許自動推論。自動推論缺引用或多個候選時省略該角色；via 的來源角色未綁時也省略衍生角色。未知角色、多餘 explicit、明確指定不存在的元件、實際 dangling 引用或 kind 不符仍以 RoleResolutionError 回報。RoleView 保留同次宣告，讀取已宣告未綁角色（包括 hasattr）時指名 RoleResolutionError；未知 attribute 仍為 AttributeError。RoleResolutionError 是 ValueError，工具不能把未綁角色視為不存在的 attribute。它的訊息指名角色與原因，只在有要求 kind 或使用焦點時列出它們；raise 端有更合適的措辭時（例如 session alias 表）以 message 提供完整訊息，`reason` 仍是可比對的短分類。RoleView 固定解析當下的名稱映射與 owning global／point 來源，元件值仍跟隨 ParameterView，回傳映射不可修改。來源由 ParameterView.resolve 捕捉；存檔 caller 只交給 capture_storage 驗證，不比較 callback 或讀 private binding。
 
 `rename_entry(old, new, *, result_root=...)` 只移動 Result，不改文件內容，不檢查或移動 Database。目的 Result 已存在就拒絕，I/O 錯誤直接傳遞，沒有雙目錄復原流程。既有 handles 仍綁原路徑，必須以新名重新 open；之後新 Run 的 Save 使用 `Database/<新名>/`，既有 Run 重存仍沿記錄名稱，舊輸出留在 `Database/<舊名>/`。
 
