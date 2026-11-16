@@ -14,49 +14,47 @@ import pytest
 from zcu_tools.simulate.evolution import (
     EvolutionResult,
     FamilyRouting,
-    ModelSource,
     NoValidKernel,
     PathDiagnostics,
+    ReferenceResult,
     RoutingHistory,
-    TimelineBatch,
+    write_reference,
 )
 
-from tests.simulate.evolution.contract.accuracy import ALL_FAMILIES
-from tests.simulate.evolution.contract.accuracy_cases import (
-    AccuracyCase,
-    accuracy_case,
-    history_case,
+from tests.tools.family_pareto_support import (
+    engine_reference,
+    make_history_scene,
+    make_scene,
+    write_test_cache,
+    write_test_index,
 )
-from tests.simulate.evolution.contract.guard_sweep_cost import measure_engine_cost
-from tests.simulate.evolution.contract.reference import (
-    ReferenceResult,
-    converged_reference,
-)
-from tools import family_pareto_report
+from tools import family_pareto, family_pareto_report
 from tools.family_pareto import (
-    ACCURACY_LIMIT,
     EngineSession,
+    main,
+    measure_family,
+    measure_policy,
+    render_summary,
+    run_table,
+)
+from tools.family_pareto import (
+    tested_state as read_tested_state,
+)
+from tools.family_pareto_inputs import Input, Scene, canonical_json, freeze_records
+from tools.family_pareto_results import (
+    ACCURACY_LIMIT,
+    ALL_FAMILIES,
     FamilyResult,
     InputResult,
     ModeResult,
     Refusal,
     Sample,
     dominance,
-    main,
-    measure_family,
-    measure_policy,
-    render_summary,
-    run_table,
-    tested_state,
     timing_equivalents,
 )
-from tools.family_pareto_inputs import Input, canonical_json, freeze_manifest
 
 
-@pytest.mark.parametrize("measure_errors", [True, False])
-def test_three_modes_time_five_samples_and_exclude_setup_warmup_clear(
-    measure_errors: bool,
-) -> None:
+def test_three_modes_time_five_samples_and_exclude_setup_warmup_clear() -> None:
     visits: list[list[int]] = []
     clock = count()
     density = np.eye(2, dtype=np.complex128)[None] / 2
@@ -90,7 +88,7 @@ def test_three_modes_time_five_samples_and_exclude_setup_warmup_clear(
 
     result = measure_family(
         session,
-        ReferenceResult(density, 0.0) if measure_errors else None,
+        ReferenceResult(density, 0.0),
         wall_clock=lambda: float(next(clock)),
         cpu_clock=lambda: float(next(clock)),
     )
@@ -113,8 +111,7 @@ def test_three_modes_time_five_samples_and_exclude_setup_warmup_clear(
         assert mode.wall_median == 3.0
         assert mode.cpu_median == 1.0
         assert all(sample.paths == {"t4": 1} for sample in mode.samples)
-        expected_error = 0 if measure_errors else None
-        assert all(sample.density_error == expected_error for sample in mode.samples)
+        assert all(sample.density_error == 0 for sample in mode.samples)
 
 
 @pytest.mark.parametrize("seconds", [60.0, 61.0])
@@ -148,7 +145,7 @@ def test_slow_family_uses_two_evolves_in_the_same_history(seconds: float) -> Non
 
     modes = measure_family(
         session,
-        None,
+        ReferenceResult(density, 0.0),
         wall_clock=lambda: float(next(wall_ticks)) * seconds,
         cpu_clock=lambda: 0.0,
     )
@@ -217,7 +214,7 @@ def test_slow_policy_has_no_separate_probe_or_warmup() -> None:
         yield EngineSession(evolve, clear)
 
     result = measure_policy(
-        Input("idle", lambda: accuracy_case("idle_coherence"), "slow contract"),
+        Input("idle", lambda: make_scene("idle_coherence"), "slow contract"),
         "t4",
         ReferenceResult(density, 0),
         opener=session,
@@ -463,29 +460,6 @@ def test_dominance_uses_final_qualification_and_excludes_directly_retained() -> 
     }
 
 
-@pytest.mark.sim
-def test_exclusion_estimator_preserves_policies_modes_and_observed_paths() -> None:
-    results = measure_engine_cost(
-        lambda: replace(accuracy_case("weak_plateau"), families=("t6",))
-    )
-    assert [(r.policy, r.mode) for r in results] == [
-        (policy, mode)
-        for policy in ("pinned", "excluded")
-        for mode in ("first_evolve", "warm_clear_history", "warm_retain_history")
-    ]
-    for result in results:
-        assert (
-            len(result.wall_seconds)
-            == len(result.cpu_seconds)
-            == len(result.paths)
-            == 5
-        )
-        if result.policy == "pinned":
-            assert all(path.get("t6", 0) == 2 for path in result.paths)
-        else:
-            assert all(path and "t6" not in path for path in result.paths)
-
-
 @pytest.mark.parametrize(
     ("error", "reason", "blocked", "expected"),
     [
@@ -520,10 +494,10 @@ def test_family_status_owns_accuracy_and_companion_priority(
 
 @pytest.mark.sim
 def test_real_engine_pins_path_and_reports_domain_refusal_without_zero_values() -> None:
-    item = Input("idle", lambda: accuracy_case("idle_coherence"), "tiny Engine seam")
+    item = Input("idle", lambda: make_scene("idle_coherence"), "tiny Engine seam")
     case = item.build()
     try:
-        reference = converged_reference(case.source, case.batch)
+        reference = engine_reference(case)
     finally:
         case.source.close()
     accepted = measure_policy(item, "t4", reference)
@@ -540,26 +514,29 @@ def test_real_engine_pins_path_and_reports_domain_refusal_without_zero_values() 
 
 
 @pytest.mark.sim
-def test_cli_freezes_then_measures_and_preserves_output_on_manifest_or_write_failure(
+def test_cli_measures_prepared_inputs_and_preserves_output_on_manifest_failure(
     tmp_path: Path,
 ) -> None:
-    inputs = [
-        Input("idle", lambda: accuracy_case("idle_coherence"), "tiny Engine seam")
-    ]
+    inputs = [Input("idle", lambda: make_scene("idle_coherence"), "tiny Engine seam")]
     manifest = tmp_path / "inputs.json"
     output = tmp_path / "result.json"
     summary = tmp_path / "summary.md"
-    assert main(["--freeze-inputs", str(manifest)], inputs=inputs) == 0
-    assert manifest.exists()
+    write_test_index(inputs, manifest)
+    cache = tmp_path / "cache"
+    write_test_cache(inputs, cache)
     argv = [
-        "--manifest",
+        "--reference-cache",
+        str(cache),
+        "--index",
         str(manifest),
+        "--scene-cache",
+        str(tmp_path / "scenes"),
         "--output",
         str(output),
         "--summary",
         str(summary),
     ]
-    assert main(argv, inputs=inputs) == 0
+    assert main(argv) == 0
     saved = json.loads(output.read_text())
     refused = next(
         policy
@@ -583,38 +560,24 @@ def test_cli_freezes_then_measures_and_preserves_output_on_manifest_or_write_fai
     assert "t4" in summary.read_text()
     complete = output.read_text()
     manifest.write_text("{}")
-    assert main(argv, inputs=inputs) == 1
+    assert main(argv) == 1
     assert output.read_text() == complete
-    assert main(["--freeze-inputs", str(tmp_path)], inputs=inputs) == 1
 
 
-def test_cli_scenario_selects_before_build_and_freezes_in_the_same_command(
+def test_cli_scenario_selects_exactly_one_before_build_with_a_manifest(
     tmp_path: Path,
 ) -> None:
-    def must_not_build() -> AccuracyCase:
+    def must_not_build() -> Scene:
         raise AssertionError("unselected input was built")
 
     inputs = [
         Input("unused", must_not_build, "must remain unbuilt"),
-        Input("idle", lambda: accuracy_case("idle_coherence"), "tiny scenario"),
+        Input("idle", lambda: make_scene("idle_coherence"), "tiny scenario"),
     ]
     cache = tmp_path / "cache"
-    prepared = tmp_path / "prepared.json"
-    assert (
-        main(
-            [
-                "--scenario",
-                "idle",
-                "--prepare-references",
-                "--reference-cache",
-                str(cache),
-                "--output",
-                str(prepared),
-            ],
-            inputs=inputs,
-        )
-        == 0
-    )
+    write_test_cache([inputs[1]], cache)
+    manifest = tmp_path / "inputs.json"
+    write_test_index([inputs[1]], manifest)
     matrix = tmp_path / "matrix.json"
     report = tmp_path / "report.md"
     assert (
@@ -622,6 +585,10 @@ def test_cli_scenario_selects_before_build_and_freezes_in_the_same_command(
             [
                 "--scenario",
                 "idle",
+                "--index",
+                str(manifest),
+                "--scene-cache",
+                str(tmp_path / "scenes"),
                 "--families",
                 "t4",
                 "--reference-cache",
@@ -634,15 +601,11 @@ def test_cli_scenario_selects_before_build_and_freezes_in_the_same_command(
                 "--partial-output",
                 str(tmp_path / "journal.jsonl"),
             ],
-            inputs=inputs,
         )
         == 0
     )
     saved = json.loads(matrix.read_text())
-    assert [item["name"] for item in saved["manifest"]["inputs"]] == ["idle"]
-    assert (
-        saved["manifest_sha256"] == json.loads(prepared.read_text())["manifest_sha256"]
-    )
+    assert [item["name"] for item in saved["records"]] == ["idle"]
     assert saved["measurement"]["reference_cache_only"] is True
     assert saved["exclusive"] is True
     assert datetime.fromisoformat(saved["started_at_utc"]).utcoffset() == timedelta(0)
@@ -654,6 +617,10 @@ def test_cli_scenario_cache_miss_stops_without_solving_and_explains_rebuild(
 ) -> None:
     matrix = tmp_path / "matrix.json"
     cache = tmp_path / "empty-cache"
+    manifest = tmp_path / "scenes.json.gz"
+    write_test_index(
+        [Input("idle", lambda: make_scene("idle_coherence"), "tiny")], manifest
+    )
     assert (
         main(
             [
@@ -663,6 +630,10 @@ def test_cli_scenario_cache_miss_stops_without_solving_and_explains_rebuild(
                 "t4",
                 "--reference-cache",
                 str(cache),
+                "--index",
+                str(manifest),
+                "--scene-cache",
+                str(tmp_path / "scenes"),
                 "--output",
                 str(matrix),
                 "--summary",
@@ -670,28 +641,53 @@ def test_cli_scenario_cache_miss_stops_without_solving_and_explains_rebuild(
                 "--partial-output",
                 str(tmp_path / "journal.jsonl"),
             ],
-            inputs=[Input("idle", lambda: accuracy_case("idle_coherence"), "tiny")],
         )
         == 1
     )
     assert not matrix.exists()
     assert not list(cache.glob("*.npz"))
     assert "reference cache miss" in caplog.text
-    assert "--prepare-references" in caplog.text
-    assert "native thread" in caplog.text
+    assert "tests-side reference producer" in caplog.text
 
 
 def test_cli_scenario_unknown_name_does_not_build_and_lists_legal_names(
+    tmp_path: Path,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    def must_not_build() -> AccuracyCase:
-        raise AssertionError("unknown selection must not build")
-
-    assert (
-        main(["--scenario", "unknown"], inputs=[Input("idle", must_not_build, "tiny")])
-        == 1
+    manifest = tmp_path / "scenes.json.gz"
+    write_test_index(
+        [Input("idle", lambda: make_scene("idle_coherence"), "tiny")], manifest
     )
+    assert main(["--scenario", "unknown", "--index", str(manifest)]) == 1
     assert "Unknown scenario: unknown. Legal names: idle" in caplog.text
+
+
+@pytest.mark.parametrize("selection", [[], ["--scenario", "idle"]])
+def test_cli_rejects_ambiguous_scenario_before_build_and_lists_sources(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+    selection: list[str],
+) -> None:
+    inputs = [Input("idle", lambda: make_scene("idle_coherence"), "tiny")]
+    paths = [tmp_path / "first.json.gz", tmp_path / "second.json.gz"]
+    for path in paths:
+        write_test_index(inputs, path)
+    calls: list[str] = []
+
+    def engine(*args: object, **kwargs: object) -> None:
+        calls.append("Engine")
+        raise AssertionError("ambiguous selection must not start Engine")
+
+    # CLI has one index option; substitute only default location discovery so
+    # the real global selection rule reads two independent valid fixture indexes.
+    monkeypatch.setattr(family_pareto, "scene_index_paths", lambda index: tuple(paths))
+    monkeypatch.setattr(family_pareto, "Engine", engine)
+    monkeypatch.setattr(family_pareto, "measure_policy", engine)
+    assert main(selection) == 1
+    assert "Ambiguous scenario: idle" in caplog.text
+    assert all(str(path) in caplog.text for path in paths)
+    assert calls == []
 
 
 @pytest.mark.parametrize(
@@ -700,23 +696,11 @@ def test_cli_scenario_unknown_name_does_not_build_and_lists_legal_names(
 def test_cli_summary_comparison_never_blocks_writing_current_measurement(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], baseline_kind: str
 ) -> None:
-    inputs = [Input("idle", lambda: accuracy_case("idle_coherence"), "tiny")]
+    inputs = [Input("idle", lambda: make_scene("idle_coherence"), "tiny")]
     cache = tmp_path / "cache"
-    assert (
-        main(
-            [
-                "--scenario",
-                "idle",
-                "--prepare-references",
-                "--reference-cache",
-                str(cache),
-                "--output",
-                str(tmp_path / "prepared.json"),
-            ],
-            inputs=inputs,
-        )
-        == 0
-    )
+    write_test_cache(inputs, cache)
+    manifest = tmp_path / "scenes.json.gz"
+    write_test_index(inputs, manifest)
     destination = tmp_path / "current.json"
     baseline = tmp_path / "baseline.json"
     if baseline_kind == "fingerprint_mismatch":
@@ -757,12 +741,15 @@ def test_cli_summary_comparison_never_blocks_writing_current_measurement(
                 str(tmp_path / "report.md"),
                 "--partial-output",
                 str(tmp_path / "journal.jsonl"),
+                "--index",
+                str(manifest),
+                "--scene-cache",
+                str(tmp_path / "scenes"),
                 "--summary-output",
                 str(destination),
                 "--compare-summary",
                 str(baseline),
             ],
-            inputs=inputs,
         )
         == 0
     )
@@ -770,7 +757,7 @@ def test_cli_summary_comparison_never_blocks_writing_current_measurement(
     assert saved["measured_families"] == ["t4"]
     assert saved["policies"]["t4"]["status"] == "qualified"
     assert saved["provenance"]["exclusive"] is False
-    assert saved["provenance"]["dirty"] == tested_state()["dirty"]
+    assert saved["provenance"]["dirty"] == read_tested_state()["dirty"]
     assert destination.with_suffix(".md").exists()
     assert (
         "Not comparable"
@@ -785,7 +772,7 @@ def test_cli_selects_families_without_changing_inputs_or_default_group(
     inputs = [
         Input(
             "plateau",
-            lambda: accuracy_case("weak_plateau"),
+            lambda: make_scene("weak_plateau"),
             "tiny Engine seam",
             category="real",
         )
@@ -793,22 +780,28 @@ def test_cli_selects_families_without_changing_inputs_or_default_group(
     manifest = tmp_path / "inputs.json"
     output = tmp_path / "matrix.json"
     summary = tmp_path / "summary.md"
-    assert main(["--freeze-inputs", str(manifest)], inputs=inputs) == 0
+    write_test_index(inputs, manifest)
+    cache = tmp_path / "cache"
+    write_test_cache(inputs, cache)
     frozen = manifest.read_bytes()
     argv = [
-        "--manifest",
+        "--reference-cache",
+        str(cache),
+        "--index",
         str(manifest),
+        "--scene-cache",
+        str(tmp_path / "scenes"),
         "--output",
         str(output),
         "--summary",
         str(summary),
     ]
-    assert main(argv, inputs=inputs) == 0
+    assert main(argv) == 0
     full = json.loads(output.read_text())
-    assert main([*argv, "--families", "t6,floquet_period"], inputs=inputs) == 0
+    assert main([*argv, "--families", "t6,floquet_period"]) == 0
     partial = json.loads(output.read_text())
     assert partial["measured_families"] == ["t6", "floquet_period"]
-    assert partial["manifest_sha256"] == full["manifest_sha256"]
+    assert partial["records"] == full["records"]
     assert manifest.read_bytes() == frozen
     row = partial["inputs"][0]
     assert row["physical_sha256"] == full["inputs"][0]["physical_sha256"]
@@ -846,41 +839,39 @@ def test_cli_rejects_unknown_families_with_legal_names(
     names: str,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    assert main(["--families", names], inputs=[]) == 1
+    assert main(["--families", names]) == 1
     assert "Unknown families" in caplog.text
     assert all(family in caplog.text for family in ALL_FAMILIES)
 
 
-@pytest.mark.parametrize("phase", ["--freeze-inputs", "--prepare-references"])
 def test_cli_rejects_family_selection_outside_measurement(
-    phase: str,
     tmp_path: Path,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     manifest = tmp_path / "inputs.json"
     output = tmp_path / "output.json"
-    assert main(["--freeze-inputs", str(manifest)], inputs=[]) == 0
+    write_test_index([], manifest)
     output.write_text("previous output")
-    phase_args = [phase, str(output)] if phase == "--freeze-inputs" else [phase]
     assert (
         main(
             [
                 "--families",
                 "t6",
-                "--manifest",
+                "--index",
                 str(manifest),
+                "--scene-cache",
+                str(tmp_path / "scenes"),
                 "--output",
                 str(output),
                 "--reference-cache",
                 str(tmp_path / "references"),
-                *phase_args,
+                "--check-references",
             ],
-            inputs=[],
         )
         == 1
     )
     assert "--families cannot be combined" in caplog.text
-    assert phase in caplog.text
+    assert "--check-references" in caplog.text
     assert output.read_text() == "previous output"
 
 
@@ -896,7 +887,7 @@ def test_policy_classifies_only_the_reported_failing_group(
     )
     item = Input(
         "gates",
-        lambda: accuracy_case("shaped_complex"),
+        lambda: make_scene("shaped_complex"),
         "structured refusal",
         companions=("t4",),
     )
@@ -942,7 +933,7 @@ def test_policy_rejects_initial_density_only_when_reference_moved(
     reference_motion: float,
     reject: bool,
 ) -> None:
-    item = Input("shaped_no_op", lambda: accuracy_case("shaped_complex"), "no-op fake")
+    item = Input("shaped_no_op", lambda: make_scene("shaped_complex"), "no-op fake")
     with closing(item.build().source) as source:
         initial_density = source.initial_density
     density = np.repeat(initial_density[None], 2, axis=0)
@@ -994,7 +985,7 @@ def test_policy_does_not_disguise_other_runtime_errors_as_unavailable(
     message: str,
 ) -> None:
     error = RuntimeError(message)
-    item = Input("idle", lambda: accuracy_case("idle_coherence"), "synthetic failure")
+    item = Input("idle", lambda: make_scene("idle_coherence"), "synthetic failure")
 
     @contextmanager
     def broken_session(item: Input, family: str) -> Generator[EngineSession]:
@@ -1049,9 +1040,7 @@ def test_policy_attributes_companion_refusal_without_declaring_target_unavailabl
 
 def test_policy_does_not_allow_an_unpinned_fallback_to_masquerade_as_success() -> None:
     density = np.eye(2, dtype=np.complex128)[None] / 2
-    item = Input(
-        "idle", lambda: accuracy_case("idle_coherence"), "synthetic wrong route"
-    )
+    item = Input("idle", lambda: make_scene("idle_coherence"), "synthetic wrong route")
 
     @contextmanager
     def wrong_session(item: Input, family: str) -> Generator[EngineSession]:
@@ -1077,27 +1066,28 @@ def test_policy_uses_target_companions_instead_of_default_and_freezes_them() -> 
     assert companion_input().companions_by_target == {}
     item = Input(
         "idle",
-        lambda: accuracy_case("idle_coherence"),
+        lambda: make_scene("idle_coherence"),
         "target override excludes the otherwise declared driven companion",
         companions=("dop853",),
         companions_by_target={"t4": ()},
     )
     with closing((case := item.build()).source):
-        reference = converged_reference(case.source, case.batch)
+        reference = engine_reference(case)
     result = measure_policy(item, "t4", reference)
     assert result.whitelist == ("t4",)
     assert result.attribution == "target"
     assert all(
         set(sample.paths) == {"t4"} for mode in result.modes for sample in mode.samples
     )
-    manifest = json.loads(canonical_json(freeze_manifest([item])))
-    assert manifest["inputs"][0]["companions_by_target"] == {"t4": []}
+    (record,) = freeze_records([item])
+    metadata = json.loads(canonical_json(record.metadata))
+    assert metadata["companions_by_target"] == {"t4": []}
 
 
 def companion_input() -> Input:
     return Input(
         "companion",
-        lambda: accuracy_case("linear_plateau"),
+        lambda: make_scene("linear_plateau"),
         "group route",
         companions=("t4",),
         expected_routes={
@@ -1386,27 +1376,32 @@ def test_late_warmup_failure_stops_measurement_without_partial_success() -> None
     assert calls == 6
 
 
-def test_table_shares_oracle_for_identical_physics_with_different_model_identities() -> (
-    None
-):
-    calls = 0
+def test_table_shares_oracle_for_identical_physics_with_different_model_identities(
+    tmp_path: Path,
+) -> None:
+    references: list[ReferenceResult] = []
     inputs = [
-        Input("linear", lambda: accuracy_case("linear_shaped"), "original"),
+        Input("linear", lambda: make_scene("linear_shaped"), "original"),
         Input(
             "history",
-            lambda: history_case(2, RoutingHistory()),
+            lambda: make_history_scene(2, RoutingHistory()),
             "same physics, different model identity",
         ),
     ]
 
-    def solve(source: ModelSource, batch: TimelineBatch) -> ReferenceResult:
-        nonlocal calls
-        calls += 1
-        return ReferenceResult(
-            np.tile(source.initial_density, (len(batch.points), 1, 1)), 0
+    case = inputs[0].build()
+    with closing(case.source):
+        write_reference(
+            tmp_path,
+            case.source,
+            case.batch,
+            ReferenceResult(
+                np.tile(case.source.initial_density, (len(case.batch.points), 1, 1)), 0
+            ),
         )
 
     def policy(item: Input, family: str, reference: ReferenceResult) -> FamilyResult:
+        references.append(reference)
         return FamilyResult(
             family,
             0,
@@ -1422,19 +1417,17 @@ def test_table_shares_oracle_for_identical_physics_with_different_model_identiti
         )
 
     rows = run_table(
-        inputs, ("single_tone_gate",), reference_solver=solve, policy_runner=policy
+        inputs, ("single_tone_gate",), reference_cache=tmp_path, policy_runner=policy
     )
     assert len(rows) == 2
-    assert calls == 1
+    assert len(references) == 4
+    assert all(reference is references[0] for reference in references)
 
 
-def test_table_times_the_defaults_exact_family_union_separately() -> None:
+def test_table_times_the_defaults_exact_family_union_separately(tmp_path: Path) -> None:
     paths = {"single_tone_rwa": 1, "t4": 1}
-
-    def solve(source: ModelSource, batch: TimelineBatch) -> ReferenceResult:
-        return ReferenceResult(
-            np.tile(source.initial_density, (len(batch.points), 1, 1)), 0
-        )
+    inputs = [replace(companion_input(), category="real")]
+    write_test_cache(inputs, tmp_path)
 
     def policy(item: Input, family: str, reference: ReferenceResult) -> FamilyResult:
         return FamilyResult(
@@ -1452,9 +1445,9 @@ def test_table_times_the_defaults_exact_family_union_separately() -> None:
         )
 
     (row,) = run_table(
-        [replace(companion_input(), category="real")],
+        inputs,
         ("single_tone_rwa",),
-        reference_solver=solve,
+        reference_cache=tmp_path,
         policy_runner=policy,
     )
     assert row.fixed_default_group is not None
@@ -1470,7 +1463,7 @@ def test_cleanup_error_is_never_an_availability_refusal_even_with_matching_messa
     error = RuntimeError(
         "no valid kernel for segment 0; domain idle: points [0], segments [0]"
     )
-    item = Input("idle", lambda: accuracy_case("idle_coherence"), "cleanup isolation")
+    item = Input("idle", lambda: make_scene("idle_coherence"), "cleanup isolation")
 
     @contextmanager
     def cleanup_fails(item: Input, family: str) -> Generator[EngineSession]:

@@ -1,187 +1,108 @@
-"""Optional disk caching for converged, complete physical-input references."""
+"""Cache-only reference preflight for a complete measurement selection."""
 
 from contextlib import closing
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
+from math import isfinite
 from pathlib import Path
-from tempfile import NamedTemporaryFile
 from time import perf_counter, process_time
-from typing import Protocol
 
-import numpy as np
-from zcu_tools.simulate.evolution import ModelSource, TimelineBatch
-
-from tests.simulate.evolution.contract.accuracy_cases import AccuracyCase
-from tests.simulate.evolution.contract.interaction_reference import (
-    interaction_reference,
-)
-from tests.simulate.evolution.contract.reference import (
+from zcu_tools.simulate.evolution import (
     ReferenceResult,
-    SolverTolerances,
-    converged_reference,
+    digest,
+    load_reference,
+    reference_key,
 )
-from tools.family_pareto_inputs import Input, digest, physical_input
 
-_COARSE = SolverTolerances(2e-10, 2e-12)
-_FINE = SolverTolerances(2e-12, 2e-14)
+from tools.family_pareto_inputs import Input, physical_input
 
 
 @dataclass(frozen=True)
 class ReferenceCache:
-    """Configure persistent reference caching and permission to solve cache misses.
+    """Select an existing reference directory; None is a missing configuration.
 
-    directory is the local cache directory, or None to disable persistent
-    caching. only=False allows solving on a miss; only=True requires a cache
-    hit and never solves. Construction does not validate these combinations.
-    solve_reference requires a directory when cache_only=True, while
-    prepare_references always requires a non-None directory.
+    Loading is always cache-only. No caller can enable solving or cache writes.
     """
 
     directory: Path | None
-    only: bool = False
 
 
 @dataclass(frozen=True)
 class PreparedReference:
-    """Describe one input's solved or cache-loaded reference.
+    """One input's ready reference and untimed loading facts.
 
-    name is the stable Input name. physical_sha256 is the SHA-256 digest of
-    the complete physical input excluding nonphysical model identity. It is
-    not the cache key, which also includes tolerances and convergence version.
-    density_shape gives the point-aligned density array dimensions as
-    (points, M, M), where M is the model dimension.
-    convergence_error is the dimensionless maximum absolute density difference
-    between the coarse and fine tolerance solves, over all points and entries.
-    wall_seconds is elapsed wall time and cpu_seconds is whole-process CPU
-    time, both in seconds, for solving or loading this reference. These times
-    exclude input construction and source cleanup.
+    name identifies the input. physical_sha256 includes model identity;
+    oracle_sha256 omits it. key is the simulator-owned reference cache key.
+    reference is shared by object identity for equal keys in the selection.
+    wall_seconds/cpu_seconds cover cache loading, not scene reconstruction.
+    Reused references report zero additional load time.
     """
 
     name: str
     physical_sha256: str
-    density_shape: tuple[int, ...]
-    convergence_error: float
+    oracle_sha256: str
+    key: str
+    reference: ReferenceResult
     wall_seconds: float
     cpu_seconds: float
 
 
-def prepare_references(
+def load_references(
     inputs: list[Input], cache: ReferenceCache
 ) -> list[PreparedReference]:
-    """Prepare each input's reference in a persistent cache without Engine timing.
+    """Load the whole selection before measurement, with no solver or Engine.
 
-    inputs supplies stable names and builders that each create a fresh owned
-    source. cache selects the directory and whether misses may be solved;
-    cache.directory must be non-None even when cache.only=False. Each input is
-    built in order, and its source is closed after solving or loading, including
-    on failure. Real inputs use the interaction-picture solver; other inputs
-    use the lab-frame solver, both with the default coarse and fine tolerances.
-    Return one PreparedReference per input in the same order, with its physical
-    hash, density shape, convergence error and solve/load times. No Engine
-    session or measurement starts.
-
-    Raise ValueError if cache.directory is None. A cache-only miss raises
-    FileNotFoundError without solving. Builder, solver and cache I/O errors
-    propagate; earlier cache writes remain if a later input fails.
+    Inputs are decoded in caller order and every owned source is closed.
+    Equal simulator cache keys share one ReferenceResult object. All missing
+    names/keys are collected into one FileNotFoundError, even after cache hits.
+    No cache directory is created. A missing directory configuration raises
+    ValueError. Loaded convergence errors must be finite and at most 2e-6;
+    invalid convergence and other codec/I/O errors propagate immediately.
+    Return ready references only when the entire selection succeeds. Both
+    check-references and run_table use this preflight.
     """
     if cache.directory is None:
-        raise ValueError("reference preparation requires a cache directory")
+        raise ValueError("cache-only reference loading requires --reference-cache DIR")
+    references: dict[str, ReferenceResult] = {}
+    missing: list[str] = []
     prepared = []
     for item in inputs:
         case = item.build()
         with closing(case.source):
-            physical_hash = digest(physical_input(case, include_identity=False))
-            wall, cpu = perf_counter(), process_time()
-            result = solve_reference(
-                case,
-                solver=interaction_reference
-                if item.category == "real"
-                else converged_reference,
-                cache_dir=cache.directory,
-                cache_only=cache.only,
-            )
-            elapsed_wall, elapsed_cpu = perf_counter() - wall, process_time() - cpu
+            physical_hash = digest(physical_input(case))
+            oracle_hash = digest(physical_input(case, include_identity=False))
+            key = reference_key(case.source, case.batch)
+            wall_seconds = cpu_seconds = 0.0
+            if key not in references:
+                wall, cpu = perf_counter(), process_time()
+                try:
+                    reference = load_reference(cache.directory, case.source, case.batch)
+                except FileNotFoundError:
+                    missing.append(f"{item.name}: {key}")
+                    continue
+                wall_seconds, cpu_seconds = perf_counter() - wall, process_time() - cpu
+                if (
+                    not isfinite(reference.convergence_error)
+                    or reference.convergence_error > 2e-6
+                ):
+                    raise ValueError(
+                        f"reference convergence failed: {item.name}: {key}: {reference.convergence_error}"
+                    )
+                references[key] = reference
             prepared.append(
                 PreparedReference(
                     item.name,
                     physical_hash,
-                    result.density.shape,
-                    result.convergence_error,
-                    elapsed_wall,
-                    elapsed_cpu,
+                    oracle_hash,
+                    key,
+                    references[key],
+                    wall_seconds,
+                    cpu_seconds,
                 )
             )
-    return prepared
-
-
-class ReferenceSolver(Protocol):
-    """Converged oracle consuming full physics and two local error controls."""
-
-    def __call__(
-        self,
-        source: ModelSource,
-        batch: TimelineBatch,
-        *,
-        coarse: SolverTolerances,
-        fine: SolverTolerances,
-    ) -> ReferenceResult:
-        """Return point-aligned density and convergence error; failures propagate."""
-        ...
-
-
-def solve_reference(
-    case: AccuracyCase,
-    *,
-    solver: ReferenceSolver = converged_reference,
-    coarse: SolverTolerances = _COARSE,
-    fine: SolverTolerances = _FINE,
-    cache_dir: Path | None = None,
-    cache_only: bool = False,
-) -> ReferenceResult:
-    """Solve the complete input, optionally reusing a converged on-disk reference.
-
-    The cache is off by default. Its key includes all physical inputs, both
-    tolerance levels and the convergence contract version. Solvers must compute
-    the same full-Lindblad equation. Nonphysical model identity is omitted.
-    The caller owns case.source. Solver and cache I/O failures propagate.
-    cache_only never solves: a missing directory/key raises FileNotFoundError,
-    and omitting cache_dir raises ValueError. Use it for exclusive timing runs.
-    """
-    if cache_dir is None:
-        if cache_only:
-            raise ValueError("cache-only reference requires a cache directory")
-        return solver(case.source, case.batch, coarse=coarse, fine=fine)
-    key = digest(
-        {
-            "version": 1,
-            "physical": physical_input(case, include_identity=False),
-            "coarse": asdict(coarse),
-            "fine": asdict(fine),
-            "convergence_limit": 2e-6,
-        }
-    )
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    destination = cache_dir / f"{key}.npz"
-    if destination.exists():
-        with np.load(destination, allow_pickle=False) as saved:
-            return ReferenceResult(saved["density"], float(saved["convergence_error"]))
-    if cache_only:
+    if missing:
         raise FileNotFoundError(
-            f"reference cache miss: {key}. Re-solving is required: obtain cost approval, "
-            "then run --prepare-references before measurement. Keep the same native thread "
-            "settings through run_heavy; native thread settings can change input fingerprints."
+            "reference cache miss:\n"
+            + "\n".join(missing)
+            + "\nObtain cost approval, then run the tests-side reference producer before measurement."
         )
-    result = solver(case.source, case.batch, coarse=coarse, fine=fine)
-    # Publish a complete file so concurrent readers never load a partial archive.
-    with NamedTemporaryFile(dir=cache_dir, suffix=".npz", delete=False) as temporary:
-        temporary_path = Path(temporary.name)
-        try:
-            np.savez(
-                temporary,
-                density=result.density,
-                convergence_error=result.convergence_error,
-            )
-            temporary.flush()
-            temporary_path.replace(destination)
-        finally:
-            temporary_path.unlink(missing_ok=True)
-    return result
+    return prepared

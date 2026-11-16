@@ -14,9 +14,11 @@ from zcu_tools.simulators.six_fluxonium.environment import runtime
 from zcu_tools.simulators.six_fluxonium.environment.routing import route_request
 
 from tests.program._profiles import profile_soccfg
+from tests.simulators._engine import controlled_engine
+from tests.simulators._sources import six_engines as six_engines
 from tests.simulators.six_fluxonium.config._data import six_document
 
-pytestmark = pytest.mark.sim
+pytestmark = [pytest.mark.sim, pytest.mark.usefixtures("six_engines")]
 
 
 def routing_settings():
@@ -50,7 +52,7 @@ def read_program(env):
     return program
 
 
-def test_source_routes_every_cavity_span_and_clear_resolves_again():
+def test_source_passes_cavity_spans_and_honors_engine_reuse_answer():
     config = routing_settings()
     history = RoutingHistory()
     env = runtime.six_fluxonium(config, soccfg=profile_soccfg("six_fluxonium"))
@@ -78,12 +80,16 @@ def test_source_routes_every_cavity_span_and_clear_resolves_again():
                 )
                 snapshot = single.snapshot()
                 first = single.prepare(subrequest, snapshot)
-                assert set(first.paths.segments_by_kernel) == {"t4"}
+                assert len(controlled_engine(single.engine).calls) >= 2
+                assert all(
+                    model.history is history
+                    for model, _ in controlled_engine(single.engine).calls
+                )
                 diagnostics = first.projection_diagnostics
                 assert diagnostics is not None
                 assert diagnostics.evolution_calls >= 2
                 assert single.prepare(subrequest, snapshot) is first
-                history.clear()
+                controlled_engine(single.engine).reuse_allowed = False
                 resolved = single.prepare(subrequest, snapshot)
                 assert resolved is not first
                 assert (
@@ -106,15 +112,23 @@ def test_builder_rejects_unknown_family_before_acquire():
         )
 
 
-def test_acquire_rejects_domain_without_an_allowed_family():
+def test_acquire_passes_family_policy_and_propagates_engine_failure(six_engines):
+    families = {"dop853"}
     env = runtime.six_fluxonium(
         routing_settings(),
         soccfg=profile_soccfg("six_fluxonium"),
-        families={"dop853"},
+        families=families,
     )
     try:
-        with pytest.raises(RuntimeError, match=r"domain idle: points \[0\], segments"):
+        error = RuntimeError("numeric backend rejected fixture")
+        for engine in six_engines:
+            assert engine.requested_families == families
+            engine.error = error
+        with pytest.raises(
+            RuntimeError, match="numeric backend rejected fixture"
+        ) as caught:
             read_program(env).acquire(env.soc, progress=False)
+        assert caught.value is error
     finally:
         if env.close_backend is not None:
             env.close_backend()
