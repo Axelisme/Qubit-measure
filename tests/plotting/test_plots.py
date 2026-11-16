@@ -42,12 +42,6 @@ class RecordingHost(NonPresentingHost):
             raise OSError("release failed")
 
 
-@pytest.fixture(autouse=True)
-def collect_plot_cycles():
-    yield
-    gc.collect()
-
-
 def test_subplots_accepts_matplotlib_dimensions_and_unique_optional_names() -> None:
     host = RecordingHost()
     plots = Plots(host)
