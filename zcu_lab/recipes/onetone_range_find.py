@@ -55,7 +55,7 @@ class OnetoneRangeFindInputs(RecipeInputs):
 
 
 class OnetoneRangeFindReport(RecipeReport):
-    """Frequency-ordered dip estimates and identity/writeback limitations."""
+    """Frequency-ordered dip estimates and pairing uncertainty."""
 
     resonators: list[ResonatorDipSummary] = Field(
         description="Each dip's optional name (null when unassigned), absolute MHz frequency and background-relative depth in a.u."
@@ -67,10 +67,6 @@ class OnetoneRangeFindReport(RecipeReport):
     identity_diagnostic: str | None = Field(
         default=None,
         description="Owner warning that dip/component pairing needs confirmation; null does not prove identity.",
-    )
-    writeback_diagnostic: str | None = Field(
-        default=None,
-        description="Owner reason that some frequency proposals were omitted.",
     )
 
 
@@ -136,7 +132,6 @@ async def onetone_range_find(
             resonators=list(fit.result.dips),
             prominence_factor=fit.result.prominence_factor,
             identity_diagnostic=fit.result.identity_diagnostic,
-            writeback_diagnostic=fit.result.diagnostic,
             writeback_applied=applied,
         )
     finally:

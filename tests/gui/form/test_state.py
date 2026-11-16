@@ -20,7 +20,7 @@ from zcu_tools.gui.form_adapter import LinRange
 from zcu_tools.gui.session.context_types import SavedPoint
 from zcu_tools.gui.session.parameters import ParameterContext
 from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
-from zcu_tools.resources.entry.schema import PointDocument, PointGeneral
+from zcu_tools.resources.entry.schema import ParameterDocument, ParameterGeneral
 
 from tests.gui._form_converters import RebuildingForm
 
@@ -239,11 +239,11 @@ def environment(
     """Capture a real point; context flags drive branch defaults and choices."""
     return FormEnv(
         parameters=ParameterContext(
-            point=PointDocument(
+            point=ParameterDocument(
                 format="zcu.parameter-container",
                 format_version="2.0",
                 schema_version=1,
-                general=PointGeneral(
+                general=ParameterGeneral(
                     created_at="2026-10-08T00:00:00Z",
                     ext={
                         "seed": seed,

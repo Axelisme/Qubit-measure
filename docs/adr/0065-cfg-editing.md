@@ -20,6 +20,14 @@ Library、Inspect 與 writeback 也使用 FormState／FormEditor，但各自持�
 
 使用者於 2026-10-25 裁定：「但我比较想是我改完就自动 apply，有隐式 apply。然后 revert 的话，感觉三个 panel 都可以有，只是 UI UX 怎么设计我还不确定。」「因为目前是 write through，所以我觉得好算了，就不做 reverse undo 功能了。」Inspect 三頁採隱式提交，不提供 revert 或 undo。
 
+### 表單錯誤的呈現
+
+2026-11-16，使用者指出：「我說的重複是UIUX的layout問題，比如說這張圖，應該只有兩個問題，但4個提示」，並選擇選項 B。可見的無效欄位各自保留 inline 紅字。共用 FormEditor 的底部摘要只顯示第一個沒有可見欄位呈現的錯誤及完整路徑，包含折疊、hidden 欄位及 model／group 錯誤。所有錯誤都由可見欄位呈現時，摘要隱藏。例如 Start 與 Stop 都無效且展開時只留兩行 inline 錯誤；收起後保留摘要，讓使用者找到錯誤。
+
+Measure 的 Run 區另顯示 `Config invalid: N fields`，單數使用 `Config invalid: 1 field`。N 是 resource model／lowering 與 editor-local 錯誤的 canonical FormPath 聯集大小，不按訊息去重。尚未提交的 parse errors 也計入。Run 訂閱 editor 的 `errors_changed`，錯誤數改變但 validity 不變時仍更新。Run tooltip 只提示修正標紅欄位，不複製第一項錯誤原文。Run 保持停用，全部修正後清空計數並恢復既有 admission。
+
+此規則只改錯誤呈現，不改驗證、提交或 domain admission。MainWindow 的 Ready、Saved 等狀態列訊息不變。無 Form 的歷史 tab 仍依 [[0073]] 顯示 factory 原因，不以欄位計數取代。Workflow、Inspect 與 writeback 共用摘要規則，保留各自的提交政策。這次小改動不另建討論快照，裁決與適用邊界記於本段。
+
 ## 共用機制與領域 owner
 
 2026-10-18 採用的欄位轉換、固定 list 與保存還原設計見 [[0079]]，實作尚待完成。以下相關條款描述目標契約，不代表目前程式已完成遷移。

@@ -42,7 +42,7 @@ YAML 不是通用 environment DSL。Launcher／runtime 不辨識 FTF 欄位，�
 
 FTF 範例先讀相鄰 `entry-template.yaml`，建立新 entry 與 setup components。接著建立第一個 `initial` point，以 `ctx.context.apply_alias_rows` 初始化該 point 的 aliases。最後組裝環境、install SoC、register devices，GUI 即可從 New Tab 開實驗。它不依賴 `create_entry` CLI。建 entry／component 與 alias Apply 都走既有資源 owner，不由腳本自行寫 entry 檔案。
 
-FTF startup 呼叫 `ftf(Path(__file__).with_name("ftf.yaml"), workers=1, warmup=False)`，設定按 script 位置定位，不在啟動時做數值 warmup 或 acquire。Notebook 明示工作副本 YAML 路徑，以 `workers=max(1, (os.cpu_count() or 1) - 2), warmup=True` 保留兩核並啟動背景預編譯。指定檔缺失或無效直接報錯，不 fallback。公開 `ftf()` 預設只用一個 worker 且不預編譯，兩個 caller 各自明示成本政策。
+FTF startup 呼叫 `ftf(Path(__file__).with_name("ftf.yaml"), workers=simulation_workers(os.cpu_count()), warmup=False)`，透過共用 GUI 策略保留一核，至少使用一個 worker。設定按 script 位置定位，不在啟動時做數值 warmup 或 acquire。Notebook 明示工作副本 YAML 路徑，以 `workers=max(1, (os.cpu_count() or 1) - 2), warmup=True` 保留兩核並啟動背景預編譯。指定檔缺失或無效直接報錯，不 fallback。公開 `ftf()` 預設只用一個 worker 且不預編譯，兩個 caller 各自明示成本政策。
 
 FTF、single_fluxonium 與 six_fluxonium 的 startup 都讀同目錄、不納入 Git 的工作副本，分別為 `ftf.yaml`、`single_fluxonium.yaml` 與 `six_fluxonium.yaml`。各環境的 `default.yaml` 是納入 Git 的樣板，不是 startup 的讀取來源。第一次使用先複製樣板；工作副本不存在時報錯並附上 `cp default.yaml <工作副本>` 指令，不退回樣板。2026-10-26，使用者對 single／six 比照 FTF 的方案確認：「亚某那个，我认同你采用你的方案」。
 

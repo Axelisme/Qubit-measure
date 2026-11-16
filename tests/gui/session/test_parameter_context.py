@@ -34,8 +34,8 @@ from zcu_tools.resources.entry import (
 )
 from zcu_tools.resources.entry.schema import (
     ParameterContent,
-    PointDocument,
-    PointGeneral,
+    ParameterDocument,
+    ParameterGeneral,
 )
 
 
@@ -50,7 +50,7 @@ class CaptureSensor(ComponentSchema):
 
 
 def test_component_projection_enforces_cross_field_checks_without_blocking_leaf_reads(
-    source: tuple[PointDocument, LibrarySnapshot],
+    source: tuple[ParameterDocument, LibrarySnapshot],
 ) -> None:
     class Bounded(ComponentSchema):
         low: float
@@ -85,7 +85,7 @@ def test_component_projection_enforces_cross_field_checks_without_blocking_leaf_
 
 
 @pytest.fixture
-def source() -> Generator[tuple[PointDocument, LibrarySnapshot]]:
+def source() -> Generator[tuple[ParameterDocument, LibrarySnapshot]]:
     before = component_registry.kinds()
     component_registry.register("capture/drive", CaptureDrive)
     component_registry.register("capture/sensor", CaptureSensor)
@@ -95,11 +95,11 @@ def source() -> Generator[tuple[PointDocument, LibrarySnapshot]]:
     )
     try:
         # No backing point file exists; every read must use the capture.
-        document = PointDocument(
+        document = ParameterDocument(
             format="zcu.parameter-container",
             format_version="2.0",
             schema_version=1,
-            general=PointGeneral(
+            general=ParameterGeneral(
                 created_at="2026-10-09T00:00:00Z",
                 ext={"nullable": None, "nested": {"number": 2.0}},
             ),
@@ -149,7 +149,7 @@ def source() -> Generator[tuple[PointDocument, LibrarySnapshot]]:
 
 
 def capture(
-    source: tuple[PointDocument, LibrarySnapshot],
+    source: tuple[ParameterDocument, LibrarySnapshot],
     *,
     roles: RoleBinding | None = None,
     faults: tuple[ContextSourceFault, ...] = (),
@@ -184,7 +184,7 @@ def test_empty_analysis_environment_has_no_persistent_identity_or_metadata() -> 
 
 
 def test_parameter_snapshot_round_trip_keeps_content_library_and_authored_aliases(
-    source: tuple[PointDocument, LibrarySnapshot],
+    source: tuple[ParameterDocument, LibrarySnapshot],
 ) -> None:
     from pydantic import TypeAdapter
 
@@ -207,7 +207,7 @@ def test_parameter_snapshot_round_trip_keeps_content_library_and_authored_aliase
 
 
 def test_snapshot_preserves_consumed_factory_defaults_without_validating_unused_fields(
-    source: tuple[PointDocument, LibrarySnapshot],
+    source: tuple[ParameterDocument, LibrarySnapshot],
 ) -> None:
     from itertools import count
 
@@ -259,7 +259,7 @@ def test_snapshot_preserves_consumed_factory_defaults_without_validating_unused_
 
 
 def test_snapshot_preserves_nested_factory_defaults_through_capture(
-    source: tuple[PointDocument, LibrarySnapshot],
+    source: tuple[ParameterDocument, LibrarySnapshot],
 ) -> None:
     from itertools import count
 
@@ -300,7 +300,7 @@ def test_snapshot_preserves_nested_factory_defaults_through_capture(
 
 @pytest.mark.parametrize("defect", ["missing", "different_format", "extra"])
 def test_snapshot_validates_only_values_actually_read(
-    source: tuple[PointDocument, LibrarySnapshot],
+    source: tuple[ParameterDocument, LibrarySnapshot],
     defect: str,
 ) -> None:
     import json
@@ -362,7 +362,7 @@ def test_snapshot_general_reads_do_not_require_component_or_alias_sections(
 
 
 def test_point_capture_is_detached_and_preserves_target(
-    source: tuple[PointDocument, LibrarySnapshot],
+    source: tuple[ParameterDocument, LibrarySnapshot],
 ) -> None:
     context = capture(source)
     source[0].general.ext.clear()
@@ -396,7 +396,7 @@ def test_point_capture_is_detached_and_preserves_target(
     ],
 )
 def test_manual_capture_reinfers_only_nonmanual_roles_from_fixed_focus(
-    source: tuple[PointDocument, LibrarySnapshot],
+    source: tuple[ParameterDocument, LibrarySnapshot],
     explicit: dict[str, str | None],
     expected: dict[str, str],
 ) -> None:
@@ -424,7 +424,7 @@ def test_manual_capture_reinfers_only_nonmanual_roles_from_fixed_focus(
 
 
 def test_bind_roles_uses_only_fixed_point_and_detaches_mappings(
-    source: tuple[PointDocument, LibrarySnapshot],
+    source: tuple[ParameterDocument, LibrarySnapshot],
 ) -> None:
     context = capture(source)
     declared = declarations()
@@ -453,7 +453,7 @@ def test_bind_roles_uses_only_fixed_point_and_detaches_mappings(
 
 @pytest.mark.parametrize("fault_document", [None, "point", "module_cfg"])
 def test_empty_role_binding_does_not_consume_components_or_sources(
-    source: tuple[PointDocument, LibrarySnapshot],
+    source: tuple[ParameterDocument, LibrarySnapshot],
     tmp_path: Path,
     fault_document: Literal["point", "module_cfg"] | None,
 ) -> None:
@@ -495,7 +495,7 @@ def test_empty_role_binding_does_not_consume_components_or_sources(
 
 
 def test_bind_roles_returns_partial_aliases_after_ambiguous_inference(
-    source: tuple[PointDocument, LibrarySnapshot],
+    source: tuple[ParameterDocument, LibrarySnapshot],
 ) -> None:
     context = capture(source)
     partial = context.bind_roles(declarations(), focus=None, explicit={})
@@ -511,7 +511,7 @@ def test_bind_roles_returns_partial_aliases_after_ambiguous_inference(
 
 @pytest.mark.parametrize("same_name_component", [False, True])
 def test_partial_capture_reports_unbound_role_only_when_read(
-    source: tuple[PointDocument, LibrarySnapshot], same_name_component: bool
+    source: tuple[ParameterDocument, LibrarySnapshot], same_name_component: bool
 ) -> None:
     point, library = source
     if same_name_component:
@@ -541,14 +541,14 @@ def test_partial_capture_reports_unbound_role_only_when_read(
     [{"extra": "Q1"}, {"capture_driver": "missing"}, {"capture_driver": "R1"}],
 )
 def test_bad_role_capture_preserves_entry_error(
-    source: tuple[PointDocument, LibrarySnapshot], explicit: dict[str, str]
+    source: tuple[ParameterDocument, LibrarySnapshot], explicit: dict[str, str]
 ) -> None:
     with pytest.raises(RoleResolutionError):
         capture(source).bind_roles(declarations(), focus="Q1", explicit=explicit)
 
 
 def test_captured_names_are_not_reinferred_and_targets_are_checked(
-    source: tuple[PointDocument, LibrarySnapshot],
+    source: tuple[ParameterDocument, LibrarySnapshot],
 ) -> None:
     roles = RoleBinding(
         "Q1", declarations(), {"capture_driver": "Q2", "capture_sensor": "R1"}
@@ -574,7 +574,9 @@ def test_captured_names_are_not_reinferred_and_targets_are_checked(
     ],
 )
 def test_point_lookup_preserves_absent_null_and_values(
-    source: tuple[PointDocument, LibrarySnapshot], path: str, expected: DocumentValue
+    source: tuple[ParameterDocument, LibrarySnapshot],
+    path: str,
+    expected: DocumentValue,
 ) -> None:
     context = capture(source)
     assert context.lookup_point(path) == expected
@@ -599,7 +601,7 @@ def test_point_lookup_preserves_absent_null_and_values(
     ],
 )
 def test_point_query_rejects_library_and_slot_namespaces(
-    source: tuple[PointDocument, LibrarySnapshot], path: str
+    source: tuple[ParameterDocument, LibrarySnapshot], path: str
 ) -> None:
     with pytest.raises(InvalidInputError) as error:
         capture(source).lookup_point(path)
@@ -612,14 +614,14 @@ def test_point_query_rejects_library_and_slot_namespaces(
     "path", ["", "Q1..rate", "missing.rate", "capture_driver.rate"]
 )
 def test_invalid_or_unknown_paths_do_not_become_missing(
-    source: tuple[PointDocument, LibrarySnapshot], path: str
+    source: tuple[ParameterDocument, LibrarySnapshot], path: str
 ) -> None:
     with pytest.raises((ValueError, RoleResolutionError)):
         capture(source).lookup_point(path)
 
 
 def test_library_and_slot_reads_use_same_fixed_role_binding(
-    source: tuple[PointDocument, LibrarySnapshot],
+    source: tuple[ParameterDocument, LibrarySnapshot],
 ) -> None:
     context = capture(source).bind_roles(declarations(), focus="Q1", explicit={})
     assert context.library_key("$capture_driver.pulses.pi") == "Q1.pulses.pi"
@@ -639,7 +641,7 @@ def test_library_and_slot_reads_use_same_fixed_role_binding(
 
 
 def test_general_fields_named_like_library_partitions_remain_point_reads(
-    source: tuple[PointDocument, LibrarySnapshot],
+    source: tuple[ParameterDocument, LibrarySnapshot],
 ) -> None:
     source[0].general.ext["pulses"] = {"pi": 3.0}
     assert capture(source).lookup_point("general.ext.pulses.pi") == DocumentValue(
@@ -648,13 +650,13 @@ def test_general_fields_named_like_library_partitions_remain_point_reads(
 
 
 def test_direct_library_roots_do_not_require_an_existing_entry(
-    source: tuple[PointDocument, LibrarySnapshot],
+    source: tuple[ParameterDocument, LibrarySnapshot],
 ) -> None:
     assert capture(source).library_key("Q1.pulses.future") == "Q1.pulses.future"
 
 
 def test_nested_library_failure_is_not_reported_as_missing(
-    source: tuple[PointDocument, LibrarySnapshot],
+    source: tuple[ParameterDocument, LibrarySnapshot],
 ) -> None:
     point, library = source
     broken = library.replaced_module(
@@ -666,7 +668,7 @@ def test_nested_library_failure_is_not_reported_as_missing(
 
 
 def test_point_consumers_ignore_unused_library_source_fault(
-    source: tuple[PointDocument, LibrarySnapshot], tmp_path: Path
+    source: tuple[ParameterDocument, LibrarySnapshot], tmp_path: Path
 ) -> None:
     fault = ContextSourceFault(
         "module_cfg", tmp_path / "library.yaml", "OSError", "unreadable"
@@ -691,7 +693,7 @@ def test_point_consumers_ignore_unused_library_source_fault(
 
 @pytest.mark.parametrize("method", ["lookup", "library_key", "has_library_key"])
 def test_library_consumers_report_their_own_source_fault(
-    source: tuple[PointDocument, LibrarySnapshot], tmp_path: Path, method: str
+    source: tuple[ParameterDocument, LibrarySnapshot], tmp_path: Path, method: str
 ) -> None:
     fault = ContextSourceFault(
         "module_cfg", tmp_path / "library.yaml", "OSError", "unreadable"
@@ -706,7 +708,7 @@ def test_library_consumers_report_their_own_source_fault(
 
 
 def test_parameter_capture_rejects_setup_diagnostics(
-    source: tuple[PointDocument, LibrarySnapshot],
+    source: tuple[ParameterDocument, LibrarySnapshot],
     tmp_path: Path,
 ) -> None:
     fault = ContextSourceFault(
@@ -732,7 +734,7 @@ def read_projection(context: ParameterContext, method: str) -> None:
 
 @pytest.mark.parametrize("document", ["point", "module_cfg"])
 def test_library_capture_checks_only_its_source_fault(
-    source: tuple[PointDocument, LibrarySnapshot],
+    source: tuple[ParameterDocument, LibrarySnapshot],
     tmp_path: Path,
     document: Literal["point", "module_cfg"],
 ) -> None:
@@ -766,7 +768,7 @@ def test_library_capture_checks_only_its_source_fault(
     ],
 )
 def test_fault_capture_refuses_data_but_keeps_diagnostics(
-    source: tuple[PointDocument, LibrarySnapshot], tmp_path: Path, method: str
+    source: tuple[ParameterDocument, LibrarySnapshot], tmp_path: Path, method: str
 ) -> None:
     fault = ContextSourceFault(
         "point", tmp_path / "parameters.yaml", "OSError", "unreadable"
@@ -784,7 +786,7 @@ def test_fault_capture_refuses_data_but_keeps_diagnostics(
 
 
 def test_authored_alias_reads_keep_the_fixed_point_and_distinct_concrete_namespace(
-    source: tuple[PointDocument, LibrarySnapshot],
+    source: tuple[ParameterDocument, LibrarySnapshot],
 ) -> None:
     point, _library = source
     point.components["capture_driver"] = point.components["Q2"].model_copy(deep=True)
@@ -808,7 +810,7 @@ def test_authored_alias_reads_keep_the_fixed_point_and_distinct_concrete_namespa
 
 
 def test_authored_aliases_can_remain_unbound_until_read(
-    source: tuple[PointDocument, LibrarySnapshot],
+    source: tuple[ParameterDocument, LibrarySnapshot],
 ) -> None:
     point, _library = source
     point.components["capture_driver"] = point.components["Q1"].model_copy(deep=True)
@@ -829,7 +831,7 @@ def test_authored_aliases_can_remain_unbound_until_read(
 
 
 def test_authored_aliases_route_library_and_point_provenance_from_one_capture(
-    source: tuple[PointDocument, LibrarySnapshot],
+    source: tuple[ParameterDocument, LibrarySnapshot],
 ) -> None:
     point, _library = source
     point.components["Q1"] = CaptureDrive(
@@ -848,7 +850,7 @@ def test_authored_aliases_route_library_and_point_provenance_from_one_capture(
 
 
 def test_wrong_kind_authored_alias_is_reported_only_when_consumed(
-    source: tuple[PointDocument, LibrarySnapshot],
+    source: tuple[ParameterDocument, LibrarySnapshot],
 ) -> None:
     context = capture(source).bind_aliases(
         (AliasRow("capture_driver", "R1"),), declarations()
@@ -863,7 +865,7 @@ def test_wrong_kind_authored_alias_is_reported_only_when_consumed(
 
 
 def test_alias_projection_is_fixed_and_ignores_consumer_kind_constraints(
-    source: tuple[PointDocument, LibrarySnapshot],
+    source: tuple[ParameterDocument, LibrarySnapshot],
 ) -> None:
     point, _ = source
     rows = (
@@ -892,7 +894,7 @@ def test_alias_projection_is_fixed_and_ignores_consumer_kind_constraints(
 
 
 def test_alias_projection_source_fault_fails_the_whole_read(
-    source: tuple[PointDocument, LibrarySnapshot],
+    source: tuple[ParameterDocument, LibrarySnapshot],
     tmp_path: Path,
 ) -> None:
     fault = ContextSourceFault(
@@ -912,7 +914,7 @@ def test_alias_projection_source_fault_fails_the_whole_read(
 @pytest.mark.parametrize("authored", [True, False], ids=["run", "load"])
 @pytest.mark.parametrize("role_target", ["coupler", "Q1"])
 def test_library_key_keeps_bare_component_distinct_from_same_named_role(
-    source: tuple[PointDocument, LibrarySnapshot], authored: bool, role_target: str
+    source: tuple[ParameterDocument, LibrarySnapshot], authored: bool, role_target: str
 ) -> None:
     point, library = source
     point.components["coupler"] = point.components["Q2"].model_copy(deep=True)

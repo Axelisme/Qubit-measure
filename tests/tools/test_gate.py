@@ -96,6 +96,38 @@ def test_main_status_reports_mcp_budget_overages_without_a_base(
     assert reading.split()[-1] == str(overage_count)
 
 
+def test_status_runs_a_shared_command_once_and_reads_each_count(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    command = ("external-quality-check", "all")
+    checks = (
+        gate.Check("file size", command, "file-size.violation_count"),
+        gate.Check("suppressions", command, "suppressions.total"),
+    )
+    calls: list[tuple[str, ...]] = []
+
+    def external_tool(
+        argv: tuple[str, ...], **_kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        calls.append(argv)
+        return subprocess.CompletedProcess(
+            argv,
+            1,
+            '{"file-size": {"violation_count": 2}, "suppressions": {"total": 7}}',
+            "diagnostics",
+        )
+
+    # status has no check-list injection; substitute its external-command plan.
+    monkeypatch.setattr(gate, "STATUS_CHECKS", checks)
+    monkeypatch.setattr(subprocess, "run", external_tool)
+
+    assert gate.status(tmp_path, with_pyright=False) == {
+        "file size": "2",
+        "suppressions": "7",
+    }
+    assert calls == [command]
+
+
 def test_formatting_runs_before_anything_measures_the_code() -> None:
     """Measuring first would report a state the formatter is about to replace."""
     names = [step.name for step in gate.steps("abc", ("lib/a.py",), fix=True)]

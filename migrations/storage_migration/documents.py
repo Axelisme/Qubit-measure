@@ -27,8 +27,7 @@ from zcu_tools.resources.entry import EditView, PointView, SetupView, source_pat
 from zcu_tools.resources.entry.schema import (
     PARAMETER_FORMAT,
     PARAMETER_VERSION,
-    PointDocument,
-    SetupDocument,
+    ParameterDocument,
 )
 from zcu_tools.resources.predictor_file import (
     encode_predictor_document,
@@ -54,22 +53,11 @@ def document_value(path: Path, kind: DocumentKind) -> JsonObject:
     Invalid/unreadable documents propagate their schema or I/O errors.
     """
     known: object
-    if kind == "setup":
+    if kind in ("setup", "point"):
         known = (
             DocumentStore(
                 path,
-                SetupDocument,
-                format=PARAMETER_FORMAT,
-                supported_version=PARAMETER_VERSION,
-            )
-            .snapshot()
-            .model_dump(mode="json")
-        )
-    elif kind == "point":
-        known = (
-            DocumentStore(
-                path,
-                PointDocument,
+                ParameterDocument,
                 format=PARAMETER_FORMAT,
                 supported_version=PARAMETER_VERSION,
             )
@@ -320,22 +308,13 @@ def edit_parameter(
     temporary = path.with_name(f".{path.name}.migration-edit-{uuid4().hex}.tmp")
     shutil.copyfile(path, temporary)
     try:
-        if kind == "setup":
-            with DocumentStore(
-                temporary,
-                SetupDocument,
-                format=PARAMETER_FORMAT,
-                supported_version=PARAMETER_VERSION,
-            ).edit() as draft:
-                yield EditView(draft)
-        else:
-            with DocumentStore(
-                temporary,
-                PointDocument,
-                format=PARAMETER_FORMAT,
-                supported_version=PARAMETER_VERSION,
-            ).edit() as point_draft:
-                yield EditView(point_draft)
+        with DocumentStore(
+            temporary,
+            ParameterDocument,
+            format=PARAMETER_FORMAT,
+            supported_version=PARAMETER_VERSION,
+        ).edit() as draft:
+            yield EditView(draft, source=path)
         publish_document(
             session,
             source,

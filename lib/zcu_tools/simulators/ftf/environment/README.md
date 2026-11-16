@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-11-16，caller-owned routing controls
+**Last updated:** 2026-11-17，caller-owned routing controls and GUI worker policy
 
 **讀者：** framework-dev、agent。FTF 環境的組裝接縫、數值接線與 acquisition 契約。
 
@@ -167,7 +167,12 @@ One source owns one `Engine` with a 4 MiB routing-facts allowance.
 Numerical preparations live within one evolve. The source's complete preparation
 LRU remains separate from Engine and does not retain noisy outputs.
 The keyword `workers` selects the engine's sole parallel width; direct callers
-use one worker by default. GUI and Notebook policy belongs to
+use one worker by default, including tests, benchmarks and research.
+GUI startup reserves one host CPU, with at least one worker, and keeps warmup off.
+Notebook still reserves two CPUs and opts into warmup. The shared GUI policy is
+`gui.app.measure.startup_context.simulation_workers(cpu_count)`, defined by
+[ADR-0069](../../../../../docs/adr/0069-experiment-core-and-frontends.md#顯式-cfg-與裝置環境).
+Startup instructions belong to
 [FTF startup](../../../../../zcu_lab/simulation_envs/FTF/README.md#演化與重播).
 Evolution limits
 native BLAS to one thread for the entire call. Overlapping evolves share a

@@ -19,7 +19,7 @@ from zcu_tools.gui.widgets import error_colour, reset_foreground, set_foreground
 from zcu_tools.resources.entry import FieldSpec, FieldValueKind, role_candidates
 
 if TYPE_CHECKING:
-    from zcu_tools.resources.entry.schema import PointDocument, SetupDocument
+    from zcu_tools.resources.entry.schema import ParameterDocument
 
 
 def parse_field_input(value_kind: FieldValueKind, raw: str) -> YamlValue:
@@ -62,9 +62,7 @@ def field_choices(
     return choices
 
 
-def edit_choices(
-    document: SetupDocument | PointDocument, spec: FieldSpec
-) -> tuple[str, ...]:
+def edit_choices(document: ParameterDocument, spec: FieldSpec) -> tuple[str, ...]:
     """Return a field's drop-down options, or () for a free-text editor.
 
     A role reference (spec.reference_role) offers document's components whose
@@ -75,9 +73,7 @@ def edit_choices(
     return field_choices(spec.value_kind, spec.choices)
 
 
-def edit_completions(
-    document: SetupDocument | PointDocument, spec: FieldSpec
-) -> tuple[str, ...]:
+def edit_completions(document: ParameterDocument, spec: FieldSpec) -> tuple[str, ...]:
     """Return component names a free-text "text" field completes, else ().
 
     Role references use a drop-down instead (see edit_choices), so they get

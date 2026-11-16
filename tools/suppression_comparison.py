@@ -3,7 +3,7 @@
 An unchanged AST statement in the same owner/branch keeps its identity through
 comment deletion and formatting. Existing unproven debt may also be retained by
 identical stripped ignore lines whose multiplicity does not increase. Other
-position and scope rules remain strict; check_suppressions owns raw usage counts.
+position and scope rules remain strict; check_quality owns raw usage counts.
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ from collections import Counter
 from dataclasses import dataclass
 from typing import Literal
 
-from check_suppressions import comment_directives
+from check_quality import comment_directives
 
 IgnoreKind = Literal["type-ignore", "pyright-ignore"]
 IgnoreReason = Literal[

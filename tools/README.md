@@ -10,9 +10,9 @@
 每支有命令列入口的工具收 `argv`，`-h` 以 0 結束並印 usage。`argv=None` 讀取 `sys.argv`。
 品質檢查以純函式處理判準，由回傳 exit code 的 `main(argv)` 把 JSON receipt 輸出到 stdout。
 `run_heavy.py` 的 `main()` 管理排隊、子程序與清理，只有子程序啟動後才輸出 JSON receipt。
-`check_script_awaits.py`、`check_file_size.py`、`check_test_capabilities.py`、`check_test_path_correspondence.py`
-另把人類可讀的違規行輸出到 stderr；`check_suppressions.py` 只計量不判定，在 stderr 列出使用量最多的
-抑制（最多 20 筆）並固定 exit 0；`check_ratchet.py` 與
+`check_script_awaits.py` 與 `check_quality.py` 另把人類可讀的違規行輸出到 stderr。
+`check_quality.py suppressions` 只計量不判定，在 stderr 列出使用量最多的抑制，最多 20 筆，並固定 exit 0。
+`check_ratchet.py` 與
 `check_pytest_collection.py` 只在工具本身失敗時寫 stderr。`run_heavy.py` 在 stderr 說明等待原因、啟動錯誤與清理失敗。
 `gate.py` 是給人看的入口，輸出純文字。
 它們可以被 import，`tools/check_ratchet.py` 就是這樣使用其他幾支的。
@@ -32,11 +32,7 @@
 | --- | --- | --- | --- |
 | `gate.py` | `tools/gate.py [--base <ref>] [--no-fix]` | 現況 0；比較 0 全通過、1 有失敗、2 base 錯誤 | 入口 |
 | `check_ratchet.py` | `tools/check_ratchet.py --base <ref>` | 0 無上升、1 有上升、2 工具失敗 | 比較 |
-| `check_file_size.py` | `tools/check_file_size.py` | 0 未超標、1 有超標 | 現況、ratchet |
-| `check_test_path_correspondence.py` | `tools/check_test_path_correspondence.py` | 0 對應存在、1 有缺口 | 現況、ratchet |
-| `check_test_structure.py` | `tools/check_test_structure.py [--root <repo>]` | 0 無 blocking、1 有 blocking、2 讀取或解析失敗 | 現況、ratchet |
-| `check_test_capabilities.py` | `tools/check_test_capabilities.py` | 0 已宣告、1 有未宣告能力 | 現況、ratchet |
-| `check_suppressions.py` | `tools/check_suppressions.py` | 0，僅計量 | 現況、ratchet |
+| `check_quality.py` | `tools/check_quality.py <subcommand>`，見[品質檢查](#品質檢查) | 0／1；`test-structure` 與 `all` 另有 2 | 現況、ratchet |
 | `check_script_awaits.py` | `tools/check_script_awaits.py [--root <repo>]` | 0 無違規、1 有違規、2 root／讀取／解析失敗 | 現況、比較 |
 | `check_mcp_text_budget.py` | `tools/check_mcp_text_budget.py [--timeout <seconds>]` | 0 預算內、1 超額、2 收集失敗 | 現況、比較 |
 | `check_experiment_imports.py` | `lint-imports`，不經 Python 前綴 | 由 lint-imports 回報 0 通過、1 失敗 | import contracts |
@@ -1269,7 +1265,7 @@ detector 名稱為 `ruff`、`pyright`、`radon`、`file-size`、`path-correspond
 
 File-size 對每個檔案只計是否超過 1000 行。超過計 1，否則計 0，不比較 raw 行數增長。
 1135 → 1137 是 1 → 1，不新增 regression；998 → 1003 與新檔 1001 行都是 0 → 1。
-恰好 1000 行未超標。`check_file_size.py` 仍列出實際行數，既有 oversize 檔案增長是
+恰好 1000 行未超標。`check_quality.py file-size` 仍列出實際行數，既有 oversize 檔案增長是
 非實質的大小變化，不會增加 file-size 計數。各檔獨立比較，刪除其他檔案不能抵銷新超標。
 
 Radon 對 `lib/` 與 `zcu_lab/` 全部 Python 來源計數，包括 recipes／workflows，
@@ -1297,7 +1293,7 @@ owner／branch 與 line role 識別位置，保留 comment 增刪與 formatter �
 
 這類 regression 的 rule 包含 kind、reason 與 candidate line。before 0／after 1 表示
 工具回報一個 escape-site 變化，不是該檔的 raw marker 總數。
-`check_suppressions.py` 與品質 snapshot 仍提供完整 usage counts，不清零抑制或換 baseline。
+`check_quality.py suppressions` 與品質 snapshot 仍提供完整 usage counts，不清零抑制或換 baseline。
 `check_ratchet.suppression_regressions` 負責 Git path／rename 與 source-pair 接線，
 其他 escape families 及 configuration 仍分別比較計數。
 
@@ -1342,13 +1338,32 @@ Candidate 仍每次執行 Pyright。Changed-files 模式不使用快取，行為
 
 實際規則和掃描範圍見 `pyproject.toml`、`.importlinter` 與各 detector。新增 lint 規則與 missing-import 檢查仍由 ratchet 判定；optional profile 未安裝時的 import 診斷保留可見，不為消除診斷而全域關閉 import 檢查。
 
-## 測試結構
+## 品質檢查
+
+`check_quality.py` 必須指定子命令。頂層與各子命令的 `-h` 列出用法，不掃描來源。
+下表命令沿用 CLI 一覽的 Python 前綴。
+
+| 子命令 | 命令 | Exit code |
+| --- | --- | --- |
+| `file-size` | `tools/check_quality.py file-size` | 0 未超標、1 有超標 |
+| `test-paths` | `tools/check_quality.py test-paths` | 0 對應存在、1 有缺口 |
+| `test-structure` | `tools/check_quality.py test-structure [--root <repo>]` | 0 無 blocking、1 有 blocking、2 root／讀取／解析失敗 |
+| `test-capabilities` | `tools/check_quality.py test-capabilities` | 0 已宣告、1 有未宣告能力 |
+| `suppressions` | `tools/check_quality.py suppressions` | 0，僅計量 |
+| `all` | `tools/check_quality.py all` | 五項 exit code 的最大值 |
+
+每個子命令的 stdout 是自己的 JSON receipt。`all` 依表列順序執行五項檢查，
+stdout 是以子命令名為鍵、receipt 為值的 JSON 物件。`test-structure` 失敗而沒有 receipt 時，
+該值是空物件。stderr 依序保留各項診斷。`gate.py` 現況表保留五列，
+但只呼叫一次 `all`，各列讀取自己的計數。
+
+### 測試結構
 
 歸屬、命名、fixture 與搬遷 policy 見 [tests/README.md](../tests/README.md)。先看完整診斷，
 再用 ratchet 判斷本次是否新增 blocking findings：
 
 ```bash
-uv run --directory <worktree> --no-sync -- python tools/check_test_structure.py
+uv run --directory <worktree> --no-sync -- python tools/check_quality.py test-structure
 uv run --directory <worktree> --no-sync -- python tools/check_ratchet.py --base <ref> --detector test-structure
 ```
 
@@ -1373,7 +1388,7 @@ assignment 或 pytest plugins 的收集行為。
 `test-file-name` 對 ticket、phase、part 加編號、歷史 B/C 編號及 misc 類名稱提醒人工審閱；
 不阻擋，也不把 `T1` / `T2` 當 ticket。命中不代表已確認歸屬錯誤。
 Fixture 依賴深度、setup 語意重複與責任混合仍由 review 判斷，不設 LOC 比或案例數硬門檻。
-既有 `check_file_size.py` 提供大小訊號，無須另設一套測試檔行數門檻。
+`check_quality.py file-size` 提供大小訊號，無須另設一套測試檔行數門檻。
 
 快速 gate 的 ratchet 只比較 blocking 的每檔每規則計數，兩側用 candidate checker 掃全 tests tree，
 讓新增目標檔造成既有 import 可解析的情況也被看見。無法由 Git 確認來源的新增檔仍從零計數，
@@ -1421,14 +1436,14 @@ Ruff 候選規則調查使用 `--extend-select` 保留原規則；`RUF100` 的�
 
 ## Suppression 計量
 
-`check_suppressions.py` 計量 `# noqa`、`# type: ignore`、`# pyright: ignore`、
+`check_quality.py suppressions` 計量 `# noqa`、`# type: ignore`、`# pyright: ignore`、
 `cast()`、per-file-ignore，以及 `pyproject.toml` 中停用的規則。它固定 exit 0，
 判定由 ratchet 與人工審查完成。例如 `# noqa: C901` 會降低 Ruff 診斷數，
 suppression 計數則讓這項改動保持可見。
 
 保留 suppression 的條件、指定 rule 與原地理由見
 [既有容忍項](../docs/code-quality.md#既有容忍項先嘗試修除理由留在原地)。
-`check_test_capabilities.py` 的 marker 記錄測試需要的能力，適用契約見
+`check_quality.py test-capabilities` 的 marker 記錄測試需要的能力，適用契約見
 [tests README](../tests/README.md)。
 
 計量涵蓋可辨識的註解、設定與 import。Reviewer 仍需審閱改名與拆檔的目的，

@@ -1,6 +1,6 @@
 # zcu_tools.analysis.fitting
 
-**Last updated:** 2026-11-13，ALLXY free g/e levels
+**Last updated:** 2026-11-16，頻譜局部選峰與六半寬窗口
 
 **讀者：** lab-author。擬合模型、數值輸入、結果與失敗契約速查。
 
@@ -99,8 +99,20 @@ Prominence 須同時超過相對 ptp 門檻與 `min_snr * σ`。
 `spectrum.fit_spectrum` 以純數值 `SpectrumFitOptions` 選候選並擬合 lor／sinc。
 它回傳 `SpectrumFit` 的 MHz 中心、FWHM、誤差、完整候選與隔離區間的觀測／擬合陣列。
 預設選最顯著候選，或選最靠近指定中心的候選，區間以相鄰候選中心的中點為界。
-沒有合格候選或隔離後不足六點時拋出 `AnalysisFailed`；其他數值與 optimizer 失敗直接傳出。
+預設沒有合格候選或隔離後不足六點時拋出 `AnalysisFailed`；其他數值與 optimizer 失敗直接傳出。
+`local_peak=True` 關閉相對 prominence、最小間距及最小取樣寬度門檻，只保留 `min_snr`。
+有指定中心時，取附近最高的局部極大值。附近指距離不超過兩個 median 掃頻步距或候選半寬的較大值。
+未指定中心時仍取最顯著候選。窗口以選中中心左右各六個半高寬為起點。
+`PeakCandidate.width` 是半 prominence 的全寬，因此窗口半徑為 `3 * width`。
+鄰峰中點裁切窗口後，補入離中心最近的六點，允許跨越中點，不因鄰峰過近拒絕擬合。
+輸入總數不足六點仍失敗。結果的 `freqs`、`observed`、`fitted` 給出實際窗口。
+局部 Lorentzian 的 baseline 允許低於窗口最小值，避免有限窗口的峰尾使線寬偏小。
+局部 sinc 從偵測到的主峰寬度初始化，避免以裁切後的 span 初始化到錯誤窄峰。
+無附近候選的 `AnalysisFailed` 列出候選數及門檻，不改擬合遠處的峰。
+只有 `twotone/freq` 選用此策略。`twotone/chain` 保留預設的最近候選與中點窗口。
+Notebook fluxdep 的同名 `fit_spectrum` 是另一個數值入口，不受影響。
 實驗各自宣告表單選項、轉換成數值 options，並在自己的 analyze 畫圖。
+選項與圖形政策的責任依 [ADR-0072](../../../../docs/adr/0072-module-boundaries.md#two-tone-廣掃的選峰與窗口)。
 
 ## Named fitting results
 

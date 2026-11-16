@@ -28,7 +28,7 @@ from zcu_tools.gui.expected_error import ExpectedErrorCategory, FailedPreconditi
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.operation_handles import OperationHandles
 from zcu_tools.gui.session.parameters import ParameterContext
-from zcu_tools.resources.entry.schema import PointDocument
+from zcu_tools.resources.entry.schema import ParameterDocument
 
 from tests.gui._completion_helpers import on_analyze_failed
 from tests.gui.app.measure._components import QubitSchema
@@ -104,7 +104,7 @@ def test_historical_analyze_uses_run_capture_after_alias_and_parameter_edits(
     qapp, has_run_source: bool
 ) -> None:
     original = make_parameters({})
-    point = PointDocument.model_construct(
+    point = ParameterDocument.model_construct(
         format="zcu.parameter-container",
         format_version="2.0",
         schema_version=1,

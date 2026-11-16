@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 from zcu_tools.resources.parameter_schema import ParameterSchemaPolicy
-from zcu_tools.resources.parameter_upgrade import ParameterDocument, UpgradePlan
+from zcu_tools.resources.parameter_upgrade import ParameterUpgradeDocument, UpgradePlan
 from zcu_tools.resources.predictor_file import load_predictor_file
 
 from scripts.upgrade_parameters import main
@@ -13,7 +13,7 @@ from scripts.upgrade_parameters import main
 
 @pytest.fixture
 def plan() -> UpgradePlan:
-    def validate(document: ParameterDocument, version: int) -> None:
+    def validate(document: ParameterUpgradeDocument, version: int) -> None:
         if document.data != {"schema_version": version}:
             raise ValueError("expected synthetic current component")
 

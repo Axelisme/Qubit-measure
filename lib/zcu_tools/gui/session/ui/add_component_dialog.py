@@ -42,7 +42,7 @@ from zcu_tools.resources.entry import (
 
 if TYPE_CHECKING:
     from zcu_tools.gui.session.context_control import ContextControlPort
-    from zcu_tools.resources.entry.schema import PointDocument, SetupDocument
+    from zcu_tools.resources.entry.schema import ParameterDocument
 
 
 logger = logging.getLogger(__name__)
@@ -248,7 +248,7 @@ class AddComponentDialog(QDialog):
             self._fit_to_screen()
 
     def _editor(
-        self, spec: FieldSpec, document: SetupDocument | PointDocument
+        self, spec: FieldSpec, document: ParameterDocument
     ) -> QLineEdit | QComboBox:
         choices = edit_choices(document, spec)
         editor: QLineEdit | QComboBox

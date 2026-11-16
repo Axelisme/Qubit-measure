@@ -737,6 +737,7 @@ def single_fluxonium(  # noqa: PLR0913  # tolerated: independent optional inputs
     configuration: SingleFluxoniumSettings | str | Path,
     *,
     soccfg: QickConfig,
+    workers: int = 1,
     private_replay: Path | None = None,
     clock: SimulationClock | None = None,
     truth_log: Path | None = None,
@@ -756,6 +757,8 @@ def single_fluxonium(  # noqa: PLR0913  # tolerated: independent optional inputs
     for transport admission. The planner still requires readout-generator ADC
     windows; transport routes do not enable microwave/fast-flux readout physics.
     The backend evolves complete timelines and uses one physical ADC cavity.
+    workers selects the Engine's parallel width across timelines (default 1).
+    Values below 1 raise ValueError; construction starts no worker pool.
     private_replay enables author-only detached round inputs at an absolute root.
     clock optionally injects a shared monotonic physical clock, otherwise a new
     clock is owned by this environment. truth_log selects a private JSONL file
@@ -797,7 +800,7 @@ def single_fluxonium(  # noqa: PLR0913  # tolerated: independent optional inputs
             devices,
             private_replay=private_replay,
             runtime=SingleFluxoniumRuntimeOptions(
-                engine=Engine(workers=1, families=families),
+                engine=Engine(workers=workers, families=families),
                 history=history,
                 clock=sim_clock,
                 truth_log=truth_log,

@@ -269,8 +269,11 @@ def test_invalid_cfg_enter_explains_run_block_and_repair_clears_reason(
     assert not blocked_run.enabled
     notice = flow.observe(object_name="run.cfg_error")
     assert notice.visible
-    assert "gain" in notice.text.lower()
-    assert notice.text == blocked_run.tooltip
+    assert notice.text == "Config invalid: 1 field"
+    assert blocked_run.tooltip == "Fix the fields marked in red"
+    inline_error = flow.observe(object_name="form.error.gain")
+    assert inline_error.visible
+    assert inline_error.text
     assert flow.status() == initial_status
     flow.enter_text(object_name="form.input.gain", value="2.0")
     flow.screenshot(shots / "04-repaired.png")

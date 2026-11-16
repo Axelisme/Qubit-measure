@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-import threading
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from zcu_tools.device.base import BaseDeviceInfo
 
@@ -14,40 +13,7 @@ if TYPE_CHECKING:
     from qtpy.QtWidgets import QWidget
 
     from zcu_tools.gui.session.parameters import ParameterContext
-
-
-@runtime_checkable
-class DeviceProtocol(Protocol):
-    """Structural contract a hardware driver must satisfy to be a GUI device.
-
-    pyright only checks the *shape* (these methods exist with these signatures).
-    The semantic invariants an implementer must also honour — and which a bug
-    silently violates — are:
-
-    - ``setup`` runs **off the main thread** (via ``BackgroundRunner``), never
-      the Qt main thread. It MUST poll ``stop_event`` during any long operation:
-      cancellation works by ``stop_event.set()``, and the worker reports
-      "cancelled" only if it returns with the event set. A ``setup`` that ignores
-      ``stop_event`` makes cancel a no-op (the worker blocks until natural
-      completion). ``progress`` may drive a pbar via the ambient pbar factory.
-    - ``get_info`` returns a fresh value snapshot. It is called on the worker
-      right after ``setup``, by the synchronous idle read path, and by the
-      off-main poll path that may refresh current values during setup/ramp. It
-      must not mutate device state.
-    - ``close`` releases the underlying resource and SHOULD be idempotent: it is
-      called on disconnect, and on any rollback where a driver was constructed
-      but never became the live registry entry.
-    """
-
-    def setup(
-        self,
-        cfg: Any,
-        *,
-        progress: bool = True,
-        stop_event: threading.Event | None = None,
-    ) -> None: ...
-    def get_info(self) -> BaseDeviceInfo: ...
-    def close(self) -> None: ...
+    from zcu_tools.gui.session.ports import DeviceProtocol
 
 
 @dataclass(frozen=True)
