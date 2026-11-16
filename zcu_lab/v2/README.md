@@ -2,7 +2,7 @@
 
 **讀者：** lab-author、agent。查找實驗的檔案分工、作者契約與各家族入口。
 
-**Last updated:** 2026-11-13，mux participants 與 generator 衝突檢查邊界
+**Last updated:** 2026-11-16，range find 分析名單預設 R1
 
 先從 [tutorial](../tutorial/README.md) 新增實驗，再按下列入口查契約與操作。
 實驗定義改動的驗收方式與命令範例見 [離線驗收](../README.md#實驗定義的離線驗收)。
@@ -137,7 +137,7 @@ Mux twotone spectrum 的 relax_delay 初值固定為 1.0 µs，不取 captured T
 Raw 是一維頻率與 complex IQ。
 單一 primary 入口為 Interactive，靜態找谷只提供初始猜測。預設不平滑，以 depth / FWHM 排序，
 剔除超過 25 MHz 的寬谷。分析名單只在 Analyze 參數，不進 cfg 或量測表單。
-名單預設空，探索無名凹陷；非空名單提供元件標籤，初始依頻率升序配對。
+名單預設 `["R1"]`，至少提供一個元件標籤，初始依頻率升序配對。
 Picker 可調五個找谷 controls、增刪選點與任意調整元件對應。按 Done 才提交最終結果，
 每個 capture 中存在的已指派名稱只提議一列 `freq`，不提出 module、kappa 或 edelay。
 最終 controls／選點／對應保存在分析 summary，parameters 仍是初始表單。

@@ -28,7 +28,7 @@ Stop 沿用 `onetone/freq` linear 的硬體掃頻語意，保留已完成 acquis
 
 ## Analyze 與判讀
 
-在 Analysis 檢查 Resonators (JSON)、Min separation、Smoothing sigma、Prominence noise factor 與 Max FWHM。這些值只設定 picker 的初始狀態。Run／Load 的名單初值都是 `["dip1"]`，不從 cfg、Form 或 alias 取名稱。名單至少要有一個名稱。還沒辨識的峰先用不在 library 的暫用名稱，預期有兩個峰時可填 `["dip1", "dip2"]`。已知元件時填入名稱，例如 `["R2", "R1"]`。名稱必須是非空白且不重複的字串。空名單、無效 JSON 或名稱會拒絕 Analyze。Prominence noise factor 預設留空，表示自動依名稱數求門檻。
+在 Analysis 檢查 Resonators (JSON)、Min separation、Smoothing sigma、Prominence noise factor 與 Max FWHM。這些值只設定 picker 的初始狀態。Run／Load 的名單初值都是 `["R1"]`，不從 cfg、Form 或 alias 取名稱。名單至少要有一個名稱。已知元件時填入實際名稱，預期有兩個峰時可填 `["R2", "R1"]`。還沒辨識的峰可手動改用暫用名稱；名稱不在 capture 時不提案寫回。名稱必須是非空白且不重複的字串。空名單、無效 JSON 或名稱會拒絕 Analyze。Prominence noise factor 預設留空，表示自動依名稱數求門檻。
 
 Picker 先把最顯著的 N 個候選依頻率升冪與名單配對，N 是名單長度。本次預期峰數固定為 N，改名單後須重新 Analyze。初始猜測不代表元件身分已確認。
 
@@ -55,7 +55,7 @@ Picker 顯示量測 magnitude 對絕對 MHz 的曲線，灰色圓點是自動候
 
 ## 審閱與 Apply
 
-只有 Done 後已指派元件的選點才提案寫回。每個 capture 中存在的已指派 resonator 各有一列 `<name>.freq` MHz proposal。Unassigned 不提案。沒有 Run／Load capture 時全部省略，名稱不在 capture 時省略該名稱的列，summary 說明原因。不讀目前 alias 猜目的地。
+只有 Done 後已指派元件的選點才提案寫回。每個 capture 中存在的已指派 resonator 各有一列 `<name>.freq` MHz proposal。Unassigned 不提案。沒有 Run／Load capture 時全部省略，名稱不在 capture 時省略該名稱的列，summary 說明原因。即使保留預設 `["R1"]`，capture 沒有 `R1` 時一樣是零列。不讀目前 alias 猜目的地。
 
 沒有頻率排序依據時，每列 writeback 候選的 description 也顯示「dip 與元件身分配對待確認」。這個提示不封鎖 Apply。先核對 dip 與元件身分，再決定接受哪些列。需要改對應時，重新 Analyze，在 picker 中調整 Component 並按 Done，候選才會更新。
 
@@ -91,7 +91,8 @@ Recipe 在同一個 Analyze operation 傳入必填名單與間距，間距省略
 
 1. With an empty kickstart project, Open the Form and inspect its required blanks.
    Enter absolute frequency bounds and check readout timing before the coarse survey.
-   Analyze with temporary labels such as `["dip1"]`, or supply known component labels.
+   Analysis starts with `["R1"]`. Replace it with the actual component labels, or temporary labels for unidentified dips.
+   Done proposes no rows if the capture does not contain the assigned names, including the default R1.
    Inspect and adjust the picker, then press Done. Cancel first if the label list must change.
    Nominal wiring and fallback values are candidates, not measured calibration.
 2. With frequencies but no module slots, Reset to recapture those values.
