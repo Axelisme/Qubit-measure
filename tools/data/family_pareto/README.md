@@ -11,7 +11,7 @@ Metadata hash 使用公開 `simulate.evolution.digest(record.metadata)`。
 數值不入庫。每筆 gzip 放在 `<git common dir 上層>/.agent_state/benchmark/family_pareto/scenes/v1`。
 檔名含 name、physical hash 前 16 碼及 metadata hash 前 16 碼。Task 清理不得刪除此共用快取。
 首次從既有兩份 gzip 遷移 19 筆，逐筆核三個 hash、point order 與 reference key 不變，沒有跑 builders 或 solver。
-Tip 刪檔不等於歷史清除。歷史 blob 清理與冷快取完整重建驗證是不同的後續義務。
+落地的歷史不含兩個舊 gzip。冷快取完整重建尚未驗證，需另取運算授權。
 公開 `family_pareto.select_inputs(index, scenario, *, scene_cache=...)` 集中來源與 report 身份。
 未指定 index 或 scenario 時，先讀這兩份清單，只選 `select_inputs` 旁宣告的 19 個 Pareto 名稱。
 缺少任何預設名稱就失敗，不讀其他列的 payload 或 reference。
@@ -65,3 +65,5 @@ Tests reference producer 的 `--scenario NAME` 在明確清單中要求恰好一
 冷快取重建尚未核對，不以首次 payload 遷移宣稱全部 builders 可逐位元重產。
 它不讀 metadata、不靠名稱清單選 solver，也不在失敗後換 solver。
 參考解準備與 cache-only 讀取的分工見 [tests README](../../../tests/README.md#evolution-精度矩陣) 與 [ADR-0078](../../../docs/adr/0078-evolution-module-boundary.md)。
+
+Native thread 設定會改模型的最後幾位浮點，因此改 physical hash 與 reference key。快取遺失且重建不能逐位元重現時，只能明確 `--update-index`，並重算受影響的參考解。

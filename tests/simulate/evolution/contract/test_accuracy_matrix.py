@@ -4,11 +4,24 @@ from collections.abc import Callable
 from contextlib import closing
 from dataclasses import replace
 
+import numpy as np
 import pytest
-from zcu_tools.simulate.evolution import Engine, RoutingHistory, segment_spans
+from zcu_tools.simulate.evolution import (
+    Engine,
+    NoValidKernel,
+    RoutingHistory,
+    segment_spans,
+)
 
 from .accuracy import AccuracyMeasurement, measurement_property, require_families
-from .accuracy_cases import AccuracyCase, accuracy_case, history_case, multisegment_case
+from .accuracy_cases import (
+    AccuracyCase,
+    accuracy_case,
+    coherent_source,
+    history_case,
+    multisegment_case,
+    multitone_phase_case,
+)
 from .guard_edge_cases import EDGE_FAMILIES, guard_edge_case
 from .reference import ReferenceResult, converged_reference, density_error
 
@@ -81,6 +94,50 @@ def test_pinned_family_density(
         )
     )
     assert error <= 2e-3, f"{name}/{family}: density error {error:.9g} > 2e-3"
+
+
+@pytest.mark.parametrize("shape", ["gaussian", "flat_top"])
+@pytest.mark.parametrize("repeats,varying_phases", [(1, True), (7, False), (7, True)])
+def test_multitone_gate_dual_phase_density(
+    shape: str,
+    repeats: int,
+    varying_phases: bool,
+    request: pytest.FixtureRequest,
+    matrix_reference: Callable[[AccuracyCase], ReferenceResult],
+) -> None:
+    """A checked full-drive key plays once or repeatedly at independent phases."""
+    case = multitone_phase_case(shape, repeats, varying_phases=varying_phases)
+    reference = matrix_reference(case)
+    with closing(Engine(1, families=("multitone_gate",))) as engine:
+        result = engine.evolve(case.source, (case.batch,))
+    require_families(result.paths, ("multitone_gate",))
+    error = density_error(result.densities, reference.density)
+    request.node.user_properties.append(
+        measurement_property(
+            AccuracyMeasurement(
+                case.name, "multitone_gate", error, reference.convergence_error
+            )
+        )
+    )
+    assert error <= 2e-3
+
+
+def test_multitone_gate_rejects_unresolved_dual_phase_key() -> None:
+    """Strong phase dependence fails validation even without a secular split error."""
+    case = multitone_phase_case("gaussian", 1, gain=20)
+    model = case.source.model((0,))
+    # Remove dissipation so the high-gain refusal is phase resolution, not D/U splitting.
+    source = coherent_source(
+        replace(model, rates_per_ns=np.zeros((3, 3)), dephasing_per_ns=np.zeros((3, 3)))
+    )
+    with (
+        closing(Engine(1, families=("multitone_gate",))) as engine,
+        pytest.raises(NoValidKernel) as rejected,
+    ):
+        engine.evolve(source, (case.batch,))
+    assert rejected.value.domain == "multiple"
+    assert rejected.value.attempted == ("multitone_gate",)
+    assert rejected.value.points == (0,)
 
 
 @pytest.mark.parametrize("family", EDGE_FAMILIES)

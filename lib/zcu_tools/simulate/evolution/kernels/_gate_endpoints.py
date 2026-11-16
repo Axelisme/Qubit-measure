@@ -118,3 +118,121 @@ def build_endpoints(
     # Retract the Hilbert endpoints, never the evolving density.
     left, _, right = np.linalg.svd(samples)
     return left @ right
+
+
+class _MultitoneContext(NamedTuple):
+    # Both carrier axes share time-only envelope/carrier evaluation.
+    h0: NDArray[np.complex128]
+    x: NDArray[np.complex128]
+    y: NDArray[np.complex128]
+    frequencies: NDArray[np.float64]
+    amplitudes: NDArray[np.float64]
+    offsets: NDArray[np.float64]
+    times: NDArray[np.float64]
+    samples: NDArray[np.complex128]
+    lengths: NDArray[np.int64]
+    origin: float
+    phase_factors: NDArray[np.complex128]
+
+
+@njit(nogil=True, cache=True)
+def _multitone_rhs(time, flat, context):
+    time += context.origin
+    size = len(context.h0)
+    states = flat.reshape((-1, size, size))
+    result = np.empty_like(states)
+    carriers = np.empty(2, dtype=np.complex128)
+    for tone in range(2):
+        length = context.lengths[tone]
+        carriers[tone] = (
+            context.amplitudes[tone]
+            * sample_value(
+                time + context.offsets[tone],
+                context.times[tone, :length],
+                context.samples[tone, :length],
+            )
+            * np.exp(2j * np.pi * context.frequencies[tone] * time)
+        )
+    for phase in range(len(states)):
+        h = context.h0.copy()
+        for tone in range(2):
+            z = carriers[tone] * context.phase_factors[phase, tone]
+            h += z.real * context.x[tone] + z.imag * context.y[tone]
+        result[phase] = (-2j * np.pi) * (h @ states[phase])
+    return result.ravel()
+
+
+def build_multitone_endpoints(
+    model: SecularModel,
+    table: SegmentTable,
+    row: int,
+    phases: NDArray[np.float64],
+    controls: Tolerances,
+) -> NDArray[np.complex128]:
+    """Integrate full-drive (4, phases, M, M) dual-tone Hilbert endpoints.
+
+    phases has shape (count,2), in radians at row-local zero. controls sets
+    local DOP853 error and step limits. Both ordered ports, signed gains and
+    complex envelopes come from the row. All nodes and independent probes
+    share one batch integration, with time-only factors evaluated once per RHS.
+    Restart at the union of envelope knots. Each quarter starts at identity
+    and is polar-retracted independently. No RWA, pruning or density is used.
+    Require two tones and positive duration; solver failures propagate.
+    """
+    if table.tones[row] != 2 or table.duration_ns[row] <= 0:
+        raise ValueError("full-drive endpoints require a positive dual-tone row")
+    if phases.ndim != 2 or phases.shape[1] != 2:
+        raise ValueError("dual-tone phases must have shape (count,2)")
+    envelopes = [table.envelopes[e] for e in table.tone_envelope[row, :2]]
+    lengths = np.array([len(env.samples) for env in envelopes], dtype=np.int64)
+    width = max(1, int(lengths.max()))
+    times = np.zeros((2, width), dtype=np.float64)
+    values = np.zeros((2, width), dtype=np.complex128)
+    for tone, env in enumerate(envelopes):
+        times[tone, : lengths[tone]] = env.sample_ns
+        values[tone, : lengths[tone]] = env.samples
+    energies = model.energies_ghz
+    h0 = np.diag(energies - (energies[0] + energies[-1]) / 2).astype(complex)
+    drives = [model.drives[p] for p in table.tone_port[row, :2]]
+    context = _MultitoneContext(
+        h0,
+        np.stack([drive.in_phase_ghz for drive in drives]),
+        np.stack([drive.quadrature_ghz for drive in drives]),
+        table.tone_frequency_ghz[row, :2].copy(),
+        table.tone_amplitude[row, :2].copy(),
+        table.tone_envelope_offset_ns[row, :2].copy(),
+        times,
+        values,
+        lengths,
+        0.0,
+        np.exp(1j * phases),
+    )
+    knots = np.unique(
+        np.concatenate(
+            [
+                env.sample_ns - context.offsets[tone]
+                for tone, env in enumerate(envelopes)
+            ]
+        )
+    )
+    size = len(energies)
+    identity = np.broadcast_to(np.eye(size, dtype=complex), (len(phases), size, size))
+    endpoints = np.empty((GATE_SUBSEGMENTS, *identity.shape), dtype=complex)
+    duration = float(table.duration_ns[row])
+    for segment in range(GATE_SUBSEGMENTS):
+        start = duration * segment / GATE_SUBSEGMENTS
+        end = duration * (segment + 1) / GATE_SUBSEGMENTS
+        boundaries = np.r_[start, knots[(knots > start) & (knots < end)], end]
+        unitary = identity.copy().ravel()
+        for left, right in zip(boundaries[:-1], boundaries[1:], strict=True):
+            unitary = integrate(
+                _multitone_rhs,
+                context._replace(origin=float(left)),
+                unitary,
+                float(right - left),
+                controls,
+                0.01,
+            )
+        left_u, _, right_u = np.linalg.svd(unitary.reshape(identity.shape))
+        endpoints[segment] = left_u @ right_u
+    return endpoints
