@@ -88,7 +88,7 @@ def test_schema_accepts_identifiers_but_view_binding_rejects_shadowing(
     before = source.read_bytes()
     if owner == "edit":
         with pytest.raises(ValueError, match="edit.*shadow.*view"):
-            EditView(candidate)
+            EditView(candidate, source=source)
     else:
         store = DocumentStore(
             source,

@@ -607,20 +607,33 @@ def _set_document_value(
 class EditView:
     """An isolated value/metadata draft whose components cannot shadow view members.
 
-    Component and general attributes, set and set_meta share one draft; the
-    enclosing SetupView/PointView edit() validates the complete document and
-    owns commit, conflict and publication. Value writes keep metadata.
+    Read or set component and general values, add registered components with
+    add_component, and replace metadata with set_meta in one edit session.
+    All operations share one draft. The enclosing edit validates the complete
+    document and commits only on normal exit. Value writes keep metadata.
     """
 
-    def __init__(self, draft: SetupDocument | PointDocument) -> None:
-        """Bind a typed setup/point draft, rejecting view-shadowing component names.
+    def __init__(self, draft: SetupDocument | PointDocument, *, source: Path) -> None:
+        """Bind an edit session to draft, rejecting view-shadowing component names.
 
-        Binding does not run model hooks, read disk, mutate the draft or commit;
-        the enclosing edit owns publication. Shadowing raises ValueError naming
-        the member.
+        source is the owning parameters.yaml path, used as the error origin
+        when adding a component. Binding does not run model hooks, read disk,
+        mutate the draft or commit; the enclosing edit owns publication.
+        Shadowing raises ValueError naming the member.
         """
+        self._source = source
         self._draft = draft
         register_view_read(self, draft, None)
+
+    def add_component(self, name: str, *, kind: str, **fields: YamlValue) -> None:
+        """Add a new named component to this edit session without committing.
+
+        kind must be registered by the caller. fields supplies working-unit
+        values; omitted fields use the registered model's defaults. Invalid
+        names, unknown kinds, duplicate names or invalid fields raise without
+        changing the draft. The enclosing edit commits all changes together.
+        """
+        add_component_to_draft(self._draft, name, kind, fields, self._source)
 
     @property
     def general(self) -> GeneralView:
@@ -739,7 +752,7 @@ class SetupView:
     def edit(self) -> Generator[EditView]:
         """Yield one value/metadata draft and commit only parameters.yaml on normal exit."""
         with self._edit_document() as draft:
-            yield EditView(draft)
+            yield EditView(draft, source=self._source)
 
     def meta(self, path: str) -> YamlMap | None:
         """Return isolated cached opaque metadata for a dotted path, or None."""

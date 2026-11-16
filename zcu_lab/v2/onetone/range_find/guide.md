@@ -28,7 +28,7 @@ Stop 沿用 `onetone/freq` linear 的硬體掃頻語意，保留已完成 acquis
 
 ## Analyze 與判讀
 
-在 Analysis 檢查 Resonators (JSON)、Min separation、Smoothing sigma、Prominence noise factor 與 Max FWHM。這些值只設定 picker 的初始狀態。Run／Load 的名單初值都是 `["R1"]`，不從 cfg、Form 或 alias 取名稱。名單至少要有一個名稱。已知元件時填入實際名稱，預期有兩個峰時可填 `["R2", "R1"]`。還沒辨識的峰可手動改用暫用名稱；名稱不在 capture 時不提案寫回。名稱必須是非空白且不重複的字串。空名單、無效 JSON 或名稱會拒絕 Analyze。Prominence noise factor 預設留空，表示自動依名稱數求門檻。
+在 Analysis 檢查 Resonators (JSON)、Min separation、Smoothing sigma、Prominence noise factor 與 Max FWHM。這些值只設定 picker 的初始狀態。Run／Load 的名單初值都是 `["R1"]`，不從 cfg、Form 或 alias 取名稱。名單至少要有一個名稱。已知元件時填入實際名稱，預期有兩個峰時可填 `["R2", "R1"]`。還沒辨識的峰可手動改用暫用名稱；接受其寫回會建立該名稱的 resonator。名稱必須是非空白且不重複的字串。空名單、無效 JSON 或名稱會拒絕 Analyze。Prominence noise factor 預設留空，表示自動依名稱數求門檻。
 
 Picker 先把最顯著的 N 個候選依頻率升冪與名單配對，N 是名單長度。本次預期峰數固定為 N，改名單後須重新 Analyze。初始猜測不代表元件身分已確認。
 
@@ -55,7 +55,11 @@ Picker 顯示量測 magnitude 對絕對 MHz 的曲線，灰色圓點是自動候
 
 ## 審閱與 Apply
 
-只有 Done 後已指派元件的選點才提案寫回。每個 capture 中存在的已指派 resonator 各有一列 `<name>.freq` MHz proposal。Unassigned 不提案。沒有 Run／Load capture 時全部省略，名稱不在 capture 時省略該名稱的列，summary 說明原因。即使保留預設 `["R1"]`，capture 沒有 `R1` 時一樣是零列。不讀目前 alias 猜目的地。
+Done 對每個有名字的 dip 提出一列 `<name>.freq` MHz proposal，不要求 Run／Load capture，也不要求該名稱已存在。Unassigned 不提案。列預設勾選，元件不存在時 Preview 現值照缺值顯示。不讀目前 alias 猜目的地。
+
+Apply 寫入當下作用中的文件組，GLOBAL 寫 entry，POINT 寫選定 point，不取 Run 的歷史來源。元件已存在就覆寫 freq，不改其他欄位。元件不存在就建立該名 resonator，只填 freq，其餘使用 registered model defaults。所有選定頻率列共用一次 edit，任一筆失敗整批不寫。
+
+例如名單 `["R1", "R2"]` 的 dip 在 6012.3 與 6123.4 MHz，作用中 point 只有 R1，仍顯示兩列。Apply 後 R1.freq 為 6012.3 MHz，新增的 R2.freq 為 6123.4 MHz。名稱打錯也會建立多餘元件，Apply 前可取消該列。
 
 沒有頻率排序依據時，每列 writeback 候選的 description 也顯示「dip 與元件身分配對待確認」。這個提示不封鎖 Apply。先核對 dip 與元件身分，再決定接受哪些列。需要改對應時，重新 Analyze，在 picker 中調整 Component 並按 Done，候選才會更新。
 
@@ -67,7 +71,7 @@ Save All 的 native 資料保存本次 acquisition cfg、量化頻率與 complex
 
 分析 JSON 的 `summary.prominence_factor` 與 `summary.selection.options` 保存實際倍率與最終數字 controls，`summary.selection.parameters` 保存要求的 controls，其中 null 倍率代表自動。`summary.selection.selected` 保存最終頻率、component 對應與可用的 estimate。`summary.selection.candidates` 保留同次候選 metrics。文件的 `parameters` 仍是初始 Analyze 表單，不代表最終 controls。只有 Done 後的已提交結果會保存，未完成的 picker 草稿不算分析成果。
 
-Labber 匯出包含絕對頻率與 complex IQ，不是 native Load 的替代來源。同 entry 且具有歷史 point 的 native Load 使用歷史 capture；沒有可用 capture 時仍可純分析，但不提議寫回。
+Labber 匯出包含絕對頻率與 complex IQ，不是 native Load 的替代來源。同 entry 且具有歷史 point 的 native Load 使用歷史 capture；沒有可用 capture 時仍可分析並提出所有具名 dip 的頻率列。
 
 ## MCP recipe
 
@@ -85,14 +89,14 @@ Recipe 在同一個 Analyze operation 傳入必填名單與間距，間距省略
 2. Agent 以 `tab_interact` 查詢目前 state 與 command schema。核對初始猜測，必要時送 `set_parameters`、`add_dip`、`remove_dip` 或 `assign_dip`。`set_parameters` 須帶四個 controls：`smoothing_sigma`、`prominence_factor`、`max_fwhm` 與 `min_separation`，其中 `prominence_factor: null` 表示自動。選點 index 為目前頻率升序的零起始位置，刪除或新增後須重新查詢。`assign_dip` 的 component 為提供的名稱或 null。
 3. Agent 確認後送 `tab_interact` 的 `done`。直接接受初始猜測也必須明送 done。取消使用既有 cancel 操作，不能以 writeback 回答代替 done。
 4. Done 成功後 recipe 才呼叫 `ask_writeback`。檢查最終 proposal 並回答選定項目或略過。空候選也不會寫入，不能靠初始 `resonators` 判斷最終寫回內容。
-5. Recipe 只接受回答選定的候選，最後保存 raw data 與分析。Report 回覆最終各 dip 的可選 name、freq、depth、fwhm、score，以及實際 `prominence_factor`、`identity_diagnostic`、`writeback_diagnostic`。分析失敗不詢問寫回，仍保存已取得的 raw data。
+5. Recipe 只接受回答選定的候選，最後保存 raw data 與分析。Report 回覆最終各 dip 的可選 name、freq、depth、fwhm、score，以及實際 `prominence_factor`與 `identity_diagnostic`。分析失敗不詢問寫回，仍保存已取得的 raw data。
 
 ## Four starting situations
 
 1. With an empty kickstart project, Open the Form and inspect its required blanks.
    Enter absolute frequency bounds and check readout timing before the coarse survey.
    Analysis starts with `["R1"]`. Replace it with the actual component labels, or temporary labels for unidentified dips.
-   Done proposes no rows if the capture does not contain the assigned names, including the default R1.
+   Done proposes a frequency row for every named dip, even without capture. Apply creates a missing resonator or overwrites its existing frequency.
    Inspect and adjust the picker, then press Done. Cancel first if the label list must change.
    Nominal wiring and fallback values are candidates, not measured calibration.
 2. With frequencies but no module slots, Reset to recapture those values.

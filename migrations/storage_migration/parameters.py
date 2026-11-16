@@ -520,7 +520,7 @@ def _convert_context(
         if not is_setup:
             _retain_point_slots(session, entry, label, mapping)
     dry_context = (
-        (dry_setup if is_setup else EditView(snapshot(dry_setup)))
+        (dry_setup if is_setup else EditView(snapshot(dry_setup), source=target))
         if dry_setup is not None
         else None
     )
@@ -607,7 +607,11 @@ def convert_parameters(
             session.manifest.report.destination.result_path / PARAMETERS_FILENAME,
             prepared.notes,
         )
-        dry_setup = EditView(prepared.document)
+        dry_setup = EditView(
+            prepared.document,
+            source=session.manifest.report.destination.result_path
+            / PARAMETERS_FILENAME,
+        )
     for candidate in _context_directories(source_root):
         _convert_context(session, entry, mapping, candidate, dry_setup)
     convert_samples(session, entry, mapping)

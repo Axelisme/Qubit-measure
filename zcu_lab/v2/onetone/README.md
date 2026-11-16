@@ -2,7 +2,7 @@
 
 **讀者：** lab-author。查閱 one-tone 表單的 readout timing 初值與共用來源。
 
-**Last updated:** 2026-11-16，range find 分析名單預設 R1
+**Last updated:** 2026-11-16，range find 具名 dip 頻率 upsert
 
 `freq`、`power_dep`、`flux_dep`、`range_find` 的 `make_form` 共用
 [`_form_shared.py`](_form_shared.py) 的 `initial_readout_timing`。
@@ -15,8 +15,9 @@ Recipe 等待 agent 經 `tab_interact` 確認並送出 done，才進入 writebac
 
 `range_find` 的分析名單預設由本模組維護，沒有專屬 ADR。
 2026-11-16 使用者裁決「那預設改R1」，Run／Load 的 Analysis 名單因此預設為 `["R1"]`。
-原先的暫名不在固定 capture 時，Done 不產生頻率寫回列。
-預設改名不改此規則：capture 內有 `R1` 才提議 `R1.freq`，沒有 `R1` 時仍為零列。
+Done 對每個具名 dip 提議 `<name>.freq` MHz，不要求 capture 或既有元件。
+Apply 寫入當下作用中的文件，元件存在就覆寫 freq，不存在就建立該名 resonator，只填 freq，其餘使用 model defaults。
+名稱拼錯也會建立新元件，Apply 前可取消該列。此 upsert 契約由 ADR-0008 管轄；`freq` 與 mux adapters 不採用。
 Unassigned 不提案。Recipe 的 `resonators` 仍為必填，不沿用 GUI 預設。
 
 Open／Reset 從固定 capture 讀取 resonator 校準，並以 `readout` Template 建立初值。
