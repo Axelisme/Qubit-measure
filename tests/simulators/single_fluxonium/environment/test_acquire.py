@@ -354,7 +354,12 @@ def test_round_replay_and_raw_outlive_source(tmp_path: Path, mode):
         assert result.channels[0].iq.shape == (16, 1, 8, 2)
     saved = read_replay(paths[0])
     incompatible = saved.acquire.model_copy(
-        update={"versions": (("backend", "obsolete"),)}
+        update={
+            "versions": tuple(
+                (name, "single-fluxonium-segment-v1" if name == "backend" else value)
+                for name, value in saved.acquire.versions
+            )
+        }
     )
     path = save_replay(tmp_path / "obsolete", incompatible, saved.round.snapshot, 2)
     with pytest.raises(ValueError, match="version mismatch"):
