@@ -8,7 +8,7 @@ from zcu_tools.datafile import JsonObject
 from zcu_tools.resources.document_names import PARAMETERS_FILENAME
 from zcu_tools.resources.document_store import YamlMap, YamlValue
 from zcu_tools.resources.entry import EditView, document_value, snapshot
-from zcu_tools.resources.parameter_upgrade import ParameterDocument
+from zcu_tools.resources.parameter_upgrade import ParameterUpgradeDocument
 
 from ._meta_info import preserve_meta_field
 from .evidence import has_legacy_expression
@@ -172,7 +172,7 @@ def _converted_updates(
         )
     )
     converted = prepare_parameter_batch(
-        ParameterDocument(
+        ParameterUpgradeDocument(
             raw,
             Path("points/context") / PARAMETERS_FILENAME
             if is_point

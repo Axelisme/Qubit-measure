@@ -10,7 +10,7 @@ from zcu_tools.format_version import FormatVersion, YamlMap, validate_header
 
 from .aliases import EntryAliases, parse_entry_aliases
 from .registry import component_registry
-from .schema import ComponentSchema, PointDocument
+from .schema import ComponentSchema, ParameterDocument
 
 
 @dataclass(frozen=True)
@@ -54,7 +54,7 @@ def load_entry_template(source: Path) -> EntryTemplate:
         if section not in document:
             raise ValueError(f"{source}: missing {section} section")
 
-    class TemplateComponents(PointDocument):
+    class TemplateComponents(ParameterDocument):
         _source = source
 
     components = TemplateComponents.validate_components(document["components"])

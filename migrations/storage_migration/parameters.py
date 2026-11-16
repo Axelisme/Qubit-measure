@@ -27,9 +27,9 @@ from zcu_tools.resources.entry import (
 from zcu_tools.resources.entry.schema import (
     PARAMETER_FORMAT,
     PARAMETER_VERSION,
-    SetupDocument,
+    ParameterDocument,
 )
-from zcu_tools.resources.parameter_upgrade import ParameterDocument
+from zcu_tools.resources.parameter_upgrade import ParameterUpgradeDocument
 
 from ._flux_units import apply_flux_groups, resolve_flux_units
 from ._meta_info import preserve_meta_field
@@ -68,7 +68,7 @@ def _seed_components(
     )
     data["components"] = _YAML_MAP.validate_python(mapping.components)
     seeded_document = prepare_parameter_batch(
-        ParameterDocument(data, entry.result_path / PARAMETERS_FILENAME),
+        ParameterUpgradeDocument(data, entry.result_path / PARAMETERS_FILENAME),
         transform=mapping.parameter_transform,
     )
     record_parameter_notes(
@@ -97,7 +97,7 @@ def _seed_components(
                 seeded = SetupView(
                     DocumentStore(
                         path,
-                        SetupDocument,
+                        ParameterDocument,
                         format=PARAMETER_FORMAT,
                         supported_version=PARAMETER_VERSION,
                     ),
@@ -588,7 +588,7 @@ def convert_parameters(
     dry_setup = None
     if session.dry_run:
         prepared = prepare_parameter_batch(
-            ParameterDocument(
+            ParameterUpgradeDocument(
                 {
                     "format": "zcu.parameter-container",
                     "format_version": "2.0",

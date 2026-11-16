@@ -34,7 +34,7 @@ from zcu_tools.resources.context.library import (
     LibrarySnapshot,
     ModuleLibraryDocument,
 )
-from zcu_tools.resources.entry.schema import PointDocument, PointGeneral
+from zcu_tools.resources.entry.schema import ParameterDocument, ParameterGeneral
 
 
 class NativeDefaultCore(ConfigBase):
@@ -116,11 +116,11 @@ def environment() -> FormEnv:
         )
     )
     parameters = ParameterContext(
-        point=PointDocument(
+        point=ParameterDocument(
             format="zcu.parameter-container",
             format_version="1.0",
             schema_version=1,
-            general=PointGeneral(created_at="2026-10-13T00:00:00Z"),
+            general=ParameterGeneral(created_at="2026-10-13T00:00:00Z"),
         ),
         library=library,
         target=SavedPoint(entry_name="synthetic", point="synthetic"),

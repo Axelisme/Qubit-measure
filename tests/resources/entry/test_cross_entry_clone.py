@@ -25,7 +25,7 @@ from zcu_tools.resources.entry import (
 from zcu_tools.resources.entry.schema import (
     PARAMETER_FORMAT,
     PARAMETER_VERSION,
-    PointDocument,
+    ParameterDocument,
 )
 
 
@@ -189,7 +189,7 @@ def test_clone_preserves_forward_minor_point_metadata(
     source_file = foreign.result_path / "points/source/parameters.yaml"
     source_store = DocumentStore(
         source_file,
-        PointDocument,
+        ParameterDocument,
         format=PARAMETER_FORMAT,
         supported_version=PARAMETER_VERSION,
     )
@@ -207,7 +207,7 @@ def test_clone_preserves_forward_minor_point_metadata(
 
     stored = DocumentStore(
         destination.result_path / "points/future-copy/parameters.yaml",
-        PointDocument,
+        ParameterDocument,
         format=PARAMETER_FORMAT,
         supported_version=PARAMETER_VERSION,
     ).snapshot()
@@ -343,7 +343,7 @@ def test_clone_accepts_point_identity_with_different_database_root(
         view = PointView(
             DocumentStore(
                 source,
-                PointDocument,
+                ParameterDocument,
                 format=PARAMETER_FORMAT,
                 supported_version=PARAMETER_VERSION,
             ),
@@ -398,7 +398,7 @@ def test_constructor_bound_view_clones_without_later_identity_registration(
     source = results / "other/points/source/parameters.yaml"
     store = DocumentStore(
         source,
-        PointDocument,
+        ParameterDocument,
         format=PARAMETER_FORMAT,
         supported_version=PARAMETER_VERSION,
     )
