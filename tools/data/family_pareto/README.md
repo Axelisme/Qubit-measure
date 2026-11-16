@@ -21,7 +21,10 @@ Profile 列不作 family 去留證據。`--scene-cache DIR` 接受絕對快取�
 接縫只讀已凍結數值，不重建裝置、前端或使用者設定。
 量測只在 `Engine.evolve` 上進行。
 
-場景控制由 `tools/family_pareto_scenarios.py`、`family_pareto_kernel_scenes.py` 與固定 settings 持有。
+固定 Pareto 場景控制由 `tools/family_pareto_scenarios.py`、`family_pareto_kernel_scenes.py` 與固定 settings 持有。
+`tools/dop853_segment.py` 持有 profile 座標與座標衍生名稱，透過 `profile_inputs()` 提供宣告。
+Producer 預設 inventory 包含這些 profile 宣告，但固定 Pareto 預設名稱集合不變。
+宣告與單列路由不會填入 index 或共用 cache。取得計算授權後，須顯式執行 producer 準備。
 Single/integer 編譯與數值 source 的生命週期由 `family_pareto_scene_builders.py` 持有。
 重產用法見 [tools README](../../README.md#freeze-numeric-scenes)，模型建構與求解須分別取得計算成本授權。
 這份資料不包含參考解，不表示所有 reference cache 都已準備好。
