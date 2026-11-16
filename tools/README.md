@@ -1,6 +1,6 @@
 # tools/
 
-**Last updated:** 2026-11-17 (Pareto default selection, single-scene preparation and dedicated simultaneous two-tone Engine inputs)
+**Last updated:** 2026-11-17 (Pareto default selection, single-scene preparation and DOP853 profile producer routing)
 
 **讀者：** framework-dev。查閱 repo 開發工具的 CLI、輸出與比較機制。
 
@@ -648,9 +648,23 @@ Its 64 independent points have not been timed against the one-second wall
 threshold, and its reference is not prepared by this call. These declarations
 remain outside the default family-table inventory.
 
-The module does not freeze these inputs or update an index. Freezing uses the
-producer's existing `main(argv, inputs=[item])` only after choosing a destination
-under the applicable compute grant.
+`profile_inputs(scenario=NAME)` selects one declared profile by its complete
+coordinate-derived name before constructing any model. Unknown names raise
+`ValueError` with legal profile names and construct no models. Omitting the
+argument retains the complete catalogue in the order above.
+
+The scene producer's `make_real_inputs()` includes these profiles after the fixed
+scans. Its existing `--scenario NAME` route constructs only the selected Input;
+fixed scan names keep their direct routes. `main(argv, inputs=[item])` still
+accepts caller-owned declarations. Neither this wiring nor `profile_inputs()`
+prepares scene files, reference entries or real-index rows. The workers candidate
+still needs wall-time calibration and its own reference.
+
+After separate compute approval, freeze a selected profile through the existing
+producer with `--update-index --scenario NAME`, choosing the shared real index
+and approved scene-cache destination. Until those explicit preparations finish,
+a complete prepare fails the exact-name-set check against indexes lacking the
+profile rows. No profile row is added to the Pareto default selection.
 Independent reference preparation belongs to the tests-side producer described
 below. Its interaction-picture oracle stops at knots and checks two tolerances.
 During measurement, use the public `load_reference(cache_dir, case.source,
@@ -959,7 +973,9 @@ uv run --directory "$PWD" --no-sync -- python -m tools.family_pareto_scenarios \
   --index-dir tools/data/family_pareto --scene-cache /absolute/scene-cache
 ```
 
-`main(argv, *, inputs=...)` retains explicit producer declarations.
+`main(argv, *, inputs=...)` retains explicit producer declarations. Its default
+inventory includes the [DOP853 profile catalogue](#dedicated-dop853-segments).
+Adding those declarations does not populate the tracked indexes or shared cache.
 `prepare_scenes(inputs, indexes, scene_cache, *, scenario=None, update_index=False)`
 owns preparation. `indexes` maps categories to explicit index paths.
 The producer fixes and logs OMP, OpenBLAS, MKL and Numba native thread settings

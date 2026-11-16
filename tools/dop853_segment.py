@@ -71,20 +71,44 @@ _PROFILE_COORDINATES = (
 _WORKERS_CANDIDATE = Dop853Coordinates(envelope="gaussian", points=64)
 
 
-def profile_inputs() -> list[Input]:
+def profile_inputs(scenario: str | None = None) -> list[Input]:
     """Build the declared reduced-axis segments and one uncalibrated workers input.
 
     Return Gaussian then sampled inputs, each with the baseline d20/l8/k9/r1/p1
     and single-axis duration 40 ns, levels 20, knots 17, or repeats 2/20/100.
     Append a Gaussian baseline with 64 independent points as a workers candidate.
+    scenario=None builds the whole catalogue. A coordinate-derived scenario name
+    selects only that Input before any model construction. An unknown name raises
+    ValueError listing legal profile names without constructing models.
     This does not time, evolve, solve references, freeze scenes or register them
     in the default family-table inventory. Model construction errors propagate.
     Each returned Input.build() creates a source that its caller must close.
     """
-    return [
-        dop853_segment_input(coordinates)
-        for coordinates in (*_PROFILE_COORDINATES, _WORKERS_CANDIDATE)
-    ]
+    coordinates: tuple[Dop853Coordinates, ...] = (
+        *_PROFILE_COORDINATES,
+        _WORKERS_CANDIDATE,
+    )
+    if scenario is not None:
+        selected = tuple(
+            item for item in coordinates if _segment_name(item) == scenario
+        )
+        if not selected:
+            raise ValueError(
+                f"Unknown scenario: {scenario}. Legal profile names: "
+                f"{', '.join(_segment_name(item) for item in coordinates)}"
+            )
+        coordinates = selected
+    return [dop853_segment_input(item) for item in coordinates]
+
+
+def _segment_name(coordinates: Dop853Coordinates) -> str:
+    """Derive the Input/Scene name without constructing a model."""
+    duration = format(Decimal(str(coordinates.duration_ns)).normalize(), "f")
+    return (
+        f"dop853_segment-{coordinates.envelope}-d{duration.replace('.', 'p')}"
+        f"-l{coordinates.levels}-k{coordinates.knots}"
+        f"-r{coordinates.repeats}-p{coordinates.points}"
+    )
 
 
 def dop853_segment_input(coordinates: Dop853Coordinates) -> Input:
@@ -126,12 +150,7 @@ def dop853_segment_input(coordinates: Dop853Coordinates) -> Input:
     # model_copy does not validate nested updates; validate before any modeling.
     settings = type(settings).model_validate(settings.model_dump())
     env = single_fluxonium(settings, soccfg=build_soccfg(BOARD_PROFILE))
-    duration = format(Decimal(str(coordinates.duration_ns)).normalize(), "f")
-    name = (
-        f"dop853_segment-{coordinates.envelope}-d{duration.replace('.', 'p')}"
-        f"-l{coordinates.levels}-k{coordinates.knots}"
-        f"-r{coordinates.repeats}-p{coordinates.points}"
-    )
+    name = _segment_name(coordinates)
     with ExitStack() as stack:
         stack.callback(env.devices.close_all_devices)
         if env.close_backend is not None:

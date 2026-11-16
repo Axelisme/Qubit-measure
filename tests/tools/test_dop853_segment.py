@@ -12,7 +12,9 @@ from zcu_tools.simulate.evolution import (
     write_reference,
 )
 
-from tools.dop853_segment import Dop853Coordinates, dop853_segment_input
+from tools import dop853_segment
+from tools.dop853_segment import Dop853Coordinates, dop853_segment_input, profile_inputs
+from tools.family_pareto_inputs import Input
 
 
 @pytest.mark.parametrize(
@@ -77,6 +79,23 @@ def test_dop853_segment_rebuilds_model_and_initial_state_at_requested_dimension(
         assert np.trace(case.source.initial_density) == pytest.approx(1.0)
         for drive in model.drives:
             assert drive.in_phase_ghz.shape == (levels, levels)
+
+
+def test_profile_unknown_name_fails_before_constructing_any_input(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    constructed: list[Dop853Coordinates] = []
+    factory = dop853_segment.dop853_segment_input
+
+    def observe(coordinates: Dop853Coordinates) -> Input:
+        constructed.append(coordinates)
+        return factory(coordinates)
+
+    # Returned inputs cannot reveal whether a rejected name constructed models.
+    monkeypatch.setattr(dop853_segment, "dop853_segment_input", observe)
+    with pytest.raises(ValueError, match="Unknown scenario: not-a-profile"):
+        profile_inputs("not-a-profile")
+    assert constructed == []
 
 
 def test_dop853_segment_rejects_dimension_above_native_cutoff() -> None:
