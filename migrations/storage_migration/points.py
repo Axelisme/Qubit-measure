@@ -220,7 +220,7 @@ def create_point(
             shutil.rmtree(staged)
         entry.new_point(item.temporary_label, mode="empty")
         entry.initialize_point_parameters(item.temporary_label)
-        create_empty_library(entry.module_library(item.temporary_label).source_path)
+        create_empty_library(entry.library(item.temporary_label).source_path)
         documents: dict[str, DocumentBaseline] = {}
         for name, kind in (
             (PARAMETERS_FILENAME, "point"),

@@ -54,7 +54,7 @@ Caller 可在 general.ext.flux_value／general.ext.flux_unit 記錄 global flux�
 
 `ParameterContent` 在 capture 與序列化時只移除直接的 `general.entry_id`，保留其他未使用或未知內容，包括 `general.ext`。這不驗證整份文件，也不改來源檔案。
 
-`ParameterView.refresh(strict=True)` 完整驗證候選後才安裝。ContextService 的明確 reload 與 watcher 使用這個入口，失敗保留已發布內容、revision 與 binding。一般 refresh 仍按需驗證，不因未使用的 component 欄位失敗。
+`ParameterView.refresh(*, strict=False)` 回傳文件內容是否改變，與 library 的 refresh 相同。`strict=True` 完整驗證候選後才安裝。ContextService 的明確 reload 與 watcher 使用這個入口，失敗保留已發布內容、revision 與 binding。一般 refresh 仍按需驗證，不因未使用的 component 欄位失敗。
 
 每個 `ParameterView` 綁一個 DocumentStore。屬性讀取只看記憶體快照。`edit()`、單行賦值與 `refresh()` 只讀寫自己的文件。修改多個 point 時逐筆提交，每筆各自成功或失敗。
 
@@ -66,7 +66,7 @@ Package functions `snapshot(view)`、`source_path(view)` 與 `document_value(doc
 
 `new_point(mode="clone", clone_from=...)` 接受同條目 label、`<entry>/<point>` 或相同 Result root 的 point `ParameterView`，Database root 可以不同。傳入 global view 會在建立目的地前報 ValueError，訊息指向 `mode="inherit"`。Clone 重讀來源位置當下已發布的 point 與 module_cfg，不用 view 的舊快照或 UUID，也不讀目的 global。目的 point 保留來源的其他 general 資料，更新 created_at。參數值與 metadata 原樣複製，不查 ledger、不匯入事件、不改寫 source，也不加 cloned_from。
 
-`module_library(label=None, assets=...)` 開啟 entry 層 library，傳入 label 時開啟該 point 的 library。Assets 只供 materialization 使用。它不讀 point、不選 active point、不查 ledger，也不建立缺失文件。Entry 與 point library 缺檔時都回空快照與 revision=None，第一次非空 edit 才建檔。若外部先建立，edit 報衝突且不覆寫。Caller 可用 refresh 明確安裝外部文件。
+`entry.library(point=None, *, assets=None)` 開啟 global library，傳入 point label 時開啟該 point 的 library。Assets 只供 materialization 使用。它不讀 point、不選 active point、不查 ledger，也不建立缺失文件。Entry 與 point library 缺檔時都回空快照與 revision=None，第一次非空 edit 才建檔。若外部先建立，edit 報衝突且不覆寫。Caller 可用 refresh 明確安裝外部文件。
 
 來源缺 library 時，inherit／clone 的目的也不建立 library。兩種模式都由 library owner 的 copy_library 複製合法 Specs 與 forward-minor 容器欄位，忽略舊 provenance，不改來源檔、不備份。跨 entry 不匯入事件或附件，同 entry 也不加來源標記。Data 與圖片不複製。Clone 不承諾 point 與 library 的跨檔 snapshot，失敗清理本次 point。
 

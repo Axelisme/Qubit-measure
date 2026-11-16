@@ -369,7 +369,7 @@ def test_global_writeback_and_library_commands_use_entry_files_and_publish_once(
     assert context.read_context().library.waveform_keys() == ("Q1.waveforms.base",)
     assert before.library.waveform_keys() == ()
     assert snapshot(session.entry.parameters()).general.ext["flux_value"] == 0.25
-    assert session.entry.module_library().snapshot().waveform_keys() == (
+    assert session.entry.library().snapshot().waveform_keys() == (
         "Q1.waveforms.base",
     )
     assert session.entry.list_points() == []
@@ -462,7 +462,7 @@ def test_read_target_missing_point_does_not_create_it(session: _Session) -> None
 def _persisted(entry: ResultEntry, target: SavedPoint, kind: Kind) -> YamlValue:
     if kind == "parameter":
         return snapshot(entry.parameters(target.point)).general.ext["flux_value"]
-    library = entry.module_library(
+    library = entry.library(
         target.point,
         assets=ArbWaveformDatabase.info_at(entry.database_path / "arb_waveforms"),
     ).snapshot()

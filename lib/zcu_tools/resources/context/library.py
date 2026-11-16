@@ -590,8 +590,17 @@ class LibraryEdit:
         self._install(candidate.document())
 
 
+def library_revision(library: ModuleLibrary) -> DocumentRevision:
+    """Return the installed library bytes' revision without reading disk.
+
+    Used by resources.entry.document_revision for the library owner adapter.
+    Missing libraries have revision=None until a refresh or edit installs bytes.
+    """
+    return library._store.document_revision
+
+
 class ModuleLibrary:
-    """Point-local DocumentStore handle; no live store or mutable cfg is exposed.
+    """Global or point DocumentStore handle; no mutable cfg is exposed.
 
     Snapshot is memory-only. edit/refresh use the existing single-file
     optimistic transaction and publication contract, never multi-file atomicity.
@@ -622,11 +631,6 @@ class ModuleLibrary:
     def source_path(self) -> Path:
         """Return the absolute library.yaml path for external watchers."""
         return self._path
-
-    @property
-    def document_revision(self) -> DocumentRevision:
-        """Return the installed library bytes' version without disk I/O."""
-        return self._store.document_revision
 
     def snapshot(self) -> LibrarySnapshot:
         """Return an isolated copy of the published document, without file I/O or notice."""

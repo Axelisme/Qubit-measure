@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 from pydantic import BaseModel, TypeAdapter
 
 from zcu_tools.format_version import YamlMap, YamlValue
+from zcu_tools.resources.context.library import ModuleLibrary, library_revision
 from zcu_tools.resources.document_store import DocumentRevision, DocumentStore
 from zcu_tools.resources.parameter_fields import stage_model
 from zcu_tools.resources.parameter_metadata import read_metadata, write_metadata
@@ -185,8 +186,13 @@ def cached_parameter_content(view: ParameterView) -> ParameterContent:
     return binding.content
 
 
-def document_revision(view: ParameterView) -> DocumentRevision:
-    """Return the view's installed YAML version without I/O; drafts have no version."""
+def document_revision(view: ParameterView | ModuleLibrary) -> DocumentRevision:
+    """Return a parameter or library handle's installed byte revision without I/O.
+
+    Missing libraries have revision=None. Edit drafts have no installed version.
+    """
+    if isinstance(view, ModuleLibrary):
+        return library_revision(view)
     document = _view_read(view).document
     if not isinstance(document, DocumentStore):
         raise TypeError("Edit drafts have no installed revision")

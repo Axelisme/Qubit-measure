@@ -92,10 +92,10 @@ def conflict_ui(
         "entry", result_root=tmp_path / "results", database_root=tmp_path / "Database"
     )
     entry.new_point("point")
-    with entry.module_library("point").edit() as draft:
+    with entry.library("point").edit() as draft:
         draft.set_waveform("Q1.waveforms.flat", ConstWaveformCfg(length=0.1))
     if request.param == "entry-library":
-        with entry.module_library().edit() as draft:
+        with entry.library().edit() as draft:
             draft.set_waveform("Q1.waveforms.flat", ConstWaveformCfg(length=0.1))
     bus = BaseEventBus()
     service = ContextService(

@@ -66,7 +66,7 @@ def test_new_empty_does_not_inherit_global_values(
     rich_entry: ResultEntry, context: ContextService
 ) -> None:
     rich_entry.save_aliases(EntryAliases(aliases={"driver": "Q1"}))
-    with rich_entry.module_library().edit() as draft:
+    with rich_entry.library().edit() as draft:
         draft.set_waveform("Q1.waveforms.base", ConstWaveformCfg(length=0.1))
     context.install_entry(rich_entry)
     context.new_point(
@@ -107,7 +107,7 @@ def test_point_and_global_switch_whole_sets_before_publishing_and_keep_captures(
     rich_entry: ResultEntry,
 ) -> None:
     rich_entry.save_aliases(EntryAliases(aliases={"driver": "Q1"}))
-    with rich_entry.module_library().edit() as draft:
+    with rich_entry.library().edit() as draft:
         draft.set_waveform("Q1.waveforms.base", ConstWaveformCfg(length=0.1))
     point = rich_entry.new_point("local", mode="empty")
     point.add_component("Q2", kind="fake/drive/a", rate=5200.0, sense="R2")

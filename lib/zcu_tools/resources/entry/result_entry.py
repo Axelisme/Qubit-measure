@@ -634,12 +634,12 @@ class ResultEntry:
             database_root=self._database_path.parent,
         )
 
-    def module_library(
-        self, label: str | None = None, *, assets: WaveformAssetInfo | None = None
+    def library(
+        self, point: str | None = None, *, assets: WaveformAssetInfo | None = None
     ) -> ModuleLibrary:
         """Open a global or point library without consulting the ledger.
 
-        None selects entry/library.yaml; a label selects its point library
+        point=None selects entry/library.yaml; a label selects its point library
         under parameters' safe path rules. assets is optional for Spec-only use.
         A missing library at either scope is empty with revision None; the
         first nonempty edit creates it. External creation conflicts with edits
@@ -652,8 +652,8 @@ class ResultEntry:
 
         directory = (
             self._result_path
-            if label is None
-            else _entry_path(self._result_path / "points", label)
+            if point is None
+            else _entry_path(self._result_path / "points", point)
         )
         return ModuleLibrary(
             directory / LIBRARY_FILENAME, assets=assets, allow_absent=True

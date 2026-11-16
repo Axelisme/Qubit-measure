@@ -115,7 +115,7 @@ def session(qapp: QApplication, tmp_path: Path) -> Generator[_Session]:
         "entry", result_root=tmp_path / "results", database_root=tmp_path / "Database"
     )
     entry.new_point("point")
-    with entry.module_library("point").edit() as draft:
+    with entry.library("point").edit() as draft:
         draft.set_waveform(WAVEFORM, ConstWaveformCfg(length=0.1))
         draft.set_module(
             PULSE,
@@ -212,7 +212,7 @@ def _group_fold(parent: QWidget, name: str) -> QLabel:
 
 
 def _library(session: _Session):
-    return session.entry.module_library("point").snapshot()
+    return session.entry.library("point").snapshot()
 
 
 def _pulse(session: _Session, name: str = PULSE) -> PulseSpec:

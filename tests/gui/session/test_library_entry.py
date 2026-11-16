@@ -171,7 +171,7 @@ def test_invalid_form_rejects_submission_with_field_paths(
         session.control.read_context().library.document() == capture.library.document()
     )
     assert (
-        session.entry.module_library("a").snapshot().document()
+        session.entry.library("a").snapshot().document()
         == capture.library.document()
     )
 
@@ -299,7 +299,7 @@ def test_submission_to_a_different_open_entry_writes_nothing(
         )
     assert error.value.reason_code == "entry_not_open"
     assert (
-        session.entry.module_library("a").snapshot().document()
+        session.entry.library("a").snapshot().document()
         == first.library.document()
     )
 

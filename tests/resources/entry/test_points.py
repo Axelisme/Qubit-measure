@@ -18,6 +18,7 @@ from zcu_tools.resources.entry import (
     ResultEntry,
     UnknownKindError,
     component_registry,
+    document_revision,
     snapshot,
 )
 from zcu_tools.resources.entry.views import FieldView
@@ -106,7 +107,7 @@ def test_empty_point_uses_owner_defaults_without_inheriting_global_values(
     assert content.general.created_at
     directory = entry.result_path / "points/blank"
     assert sorted(path.name for path in directory.iterdir()) == ["parameters.yaml"]
-    assert entry.module_library("blank").document_revision.revision is None
+    assert document_revision(entry.library("blank")).revision is None
     assert entry.load_aliases_with_revision(point="blank")[1].revision is None
     assert (entry.result_path / "parameters.yaml").read_bytes() == setup_bytes
 
@@ -472,12 +473,10 @@ def test_point_reload_uses_only_its_file_and_keeps_snapshot_on_failure(
     assert point.Q1.rate == 5000.0
     root = results / "entry"
     (root / "parameters.yaml").write_text("invalid: [", encoding="utf-8")
-    reload_point = (
-        point.refresh if operation == "refresh" else lambda: entry.parameters("a")
-    )
-    loaded = reload_point()
-    if loaded is not None:
-        point = loaded
+    if operation == "refresh":
+        assert point.refresh() is True
+    else:
+        point = entry.parameters("a")
     assert point.Q1.rate == 5100.0
     assert entry.parameters().Q1.rate == 5000.0
     point.Q1.duration = 12.0
@@ -487,9 +486,10 @@ def test_point_reload_uses_only_its_file_and_keeps_snapshot_on_failure(
     stored["components"]["Q1"]["rate"] = "invalid"
     write_yaml(source, stored)
     before = source.read_bytes()
-    loaded = reload_point()
-    if loaded is not None:
-        point = loaded
+    if operation == "refresh":
+        assert point.refresh() is True
+    else:
+        point = entry.parameters("a")
     assert point.Q1.duration == 12.0
     with pytest.raises(ValueError, match="rate"):
         _ = point.Q1.rate

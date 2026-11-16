@@ -126,7 +126,7 @@ def test_exps_child_becomes_complete_point_with_independent_meta_and_library(
     assert point.C1.frequency == (12.5 if metadata == "values" else 3.0)
     assert entry.parameters().C1.frequency == 3.0
     assert entry.parameters("direct").C1.frequency == 4.0
-    library_view = entry.module_library("070716_0.500").snapshot()
+    library_view = entry.library("070716_0.500").snapshot()
     assert library_view.waveform_keys() == ("C1.waveforms.constant",)
     assert library_view.get_waveform("C1.waveforms.constant").length == 0.125
     assert document_value(snapshot(point), "general.ext.legacy_module_cfg") == {

@@ -365,7 +365,7 @@ def convert_module_cfg(
         item.source == source for item in session.manifest.module_files
     ):
         # The recovery owner already verified the fixed document baseline.
-        return entry.module_library(label).snapshot()
+        return entry.library(label).snapshot()
     try:
         source_hash = session.baseline(source)
         with source.open("r", encoding="utf-8") as stream:
@@ -397,7 +397,7 @@ def convert_module_cfg(
             return candidate
         if entry is None:
             raise ValueError("A library commit requires its ResultEntry handle")
-        library = entry.module_library(label)
+        library = entry.library(label)
         candidate, retained = _prepare_library(
             session, source, values, mapping, library.source_path
         )

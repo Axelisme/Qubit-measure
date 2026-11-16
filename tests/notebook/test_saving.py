@@ -813,7 +813,7 @@ def test_accept_schema_failure_keeps_event_and_rolls_back_point_group(
         result_root=binding.result_path.parent,
         database_root=binding.database_path.parent,
     )
-    assert entry.module_library(binding.point).snapshot().module_keys() == ()
+    assert entry.library(binding.point).snapshot().module_keys() == ()
 
 
 def test_accept_commit_validator_error_propagates_and_keeps_event(
@@ -933,7 +933,7 @@ def test_accept_writes_parameter_module_waveform_with_one_event(
     entry = ResultEntry.open(
         "entry", result_root=tmp_path / "results", database_root=tmp_path / "Database"
     )
-    library = entry.module_library("sweet").snapshot()
+    library = entry.library("sweet").snapshot()
     assert library.module_spec("D1.pulses.pi") == pulse
     assert library.waveform_spec("D1.waveforms.base") == waveform
     assert accept_point.D1.rate == 1500.0
@@ -953,7 +953,7 @@ def test_accept_library_only_is_nonempty(
     entry = ResultEntry.open(
         "entry", result_root=tmp_path / "results", database_root=tmp_path / "Database"
     )
-    library = entry.module_library("sweet").snapshot()
+    library = entry.library("sweet").snapshot()
     if family == "module":
         assert library.module_keys() == ("D1.pulses.pi",)
     else:
@@ -990,7 +990,7 @@ def test_accept_library_failure_keeps_point_and_rolls_back_library_group(
     entry = ResultEntry.open(
         "entry", result_root=tmp_path / "results", database_root=tmp_path / "Database"
     )
-    library = entry.module_library("sweet").snapshot()
+    library = entry.library("sweet").snapshot()
     assert library.module_keys() == ()
     assert caught.value.event_id == ledger.events()[-1].id
     assert caught.value.applied == 1

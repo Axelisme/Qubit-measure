@@ -158,7 +158,7 @@ class ContextService:
         setup = entry.parameters()
         points = self._load_points(entry)
         assets = self._bind_assets(entry.database_path / "arb_waveforms")
-        library = entry.module_library(assets=assets)
+        library = entry.library(assets=assets)
         parameters = ParameterContext.from_entry(
             entry, library, SavedEntry(entry_name=entry.result_path.name)
         )
@@ -208,7 +208,7 @@ class ContextService:
         if active is None or self._library is None or self._aliases.revision is None:
             return ()
         parameters = document_revision(active)
-        library = self._library.document_revision
+        library = document_revision(self._library)
         aliases = self._aliases.revision
         return (
             FileRevision("parameters", parameters.path, parameters.revision),
@@ -235,7 +235,7 @@ class ContextService:
         if aliases is None:
             raise RuntimeError("Installed entry aliases have no owner revision")
         parameters = document_revision(self._setup)
-        library = self._entry_library.document_revision
+        library = document_revision(self._entry_library)
         return active + (
             FileRevision("parameters", parameters.path, parameters.revision),
             FileRevision("library", library.path, library.revision),
@@ -653,7 +653,7 @@ class ContextService:
         self._owner.assert_owner()
         entry = self._require_write_target(target)
         assets = self._bind_assets(entry.database_path / "arb_waveforms")
-        library = entry.module_library(target.point, assets=assets)
+        library = entry.library(target.point, assets=assets)
         if target.point is None:
             fresh = self._fresh_entry()
             return ParameterContext.from_entry(fresh, library, target, roles=roles)
@@ -955,7 +955,7 @@ class ContextService:
             return self._entry_library
         if target == parameters.target and self._library is not None:
             return self._library
-        return entry.module_library(target.point)
+        return entry.library(target.point)
 
     def _publish_write(self, parameters: ParameterContext, *, parameter: bool) -> None:
         """Install a committed projection/version before its single content fact."""
@@ -991,7 +991,7 @@ class ContextService:
         if self._setup is None:
             raise RuntimeError("Opened entry has no setup binding")
         assets = self._bind_assets(entry.database_path / "arb_waveforms")
-        library = entry.module_library(label, assets=assets)
+        library = entry.library(label, assets=assets)
         parameters = ParameterContext.from_point(
             point,
             library,

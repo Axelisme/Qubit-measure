@@ -103,7 +103,7 @@ def test_snapshot_returns_complete_native_documents_without_materializing_assets
     with point.edit() as draft:
         draft.set("general.ext.nested", {"trace": [1.0, 2.0], "unset": None})
         draft.set_meta("general.ext.nested.trace", {"stderr": [0.1, 0.2]})
-    library = entry.module_library("base")
+    library = entry.library("base")
     with library.edit() as draft:
         draft.set_waveform(
             "Q1.waveforms.arbitrary", ArbWaveformCfg(data="missing_asset")

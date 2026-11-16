@@ -159,7 +159,7 @@ def test_clone_skips_invalid_specs_without_rewriting_source(
 
     entry.new_point("filtered-copy", mode="clone", clone_from="other/source")
 
-    copied = entry.module_library("filtered-copy").snapshot()
+    copied = entry.library("filtered-copy").snapshot()
     assert copied.module_keys() == ()
     assert copied.waveform_spec("Q1.waveforms.base").length == 0.05
     assert source.read_bytes() == original

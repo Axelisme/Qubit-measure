@@ -165,15 +165,17 @@ class ParameterView:
         """
         return document_meta(cached_parameter_content(self), path)
 
-    def refresh(self, *, strict: bool = False) -> None:
-        """Reload parameters.yaml, validating the full candidate when strict=True.
+    def refresh(self, *, strict: bool = False) -> bool:
+        """Reload parameters.yaml and return whether document content changed.
+
+        strict=True validates the full candidate before installation.
 
         Ordinary refresh leaves unused fields unvalidated until projected.
         Watcher/reload installation must pass strict=True. Missing files,
         invalid YAML, incompatible headers and validation failures raise before
         publication, preserving the prior content and revision. No files are written.
         """
-        self._store.refresh(strict=strict)
+        return self._store.refresh(strict=strict)
 
     def add_component(self, name: str, *, kind: str, **fields: YamlValue) -> None:
         """Add a complete registered component to this bound document.

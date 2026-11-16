@@ -472,7 +472,7 @@ def _retain_point_slots(
 ) -> None:
     # New points copy setup YAML but deliberately start with an empty library.
     # Keep only references that this point's own published library can resolve.
-    published = entry.module_library(label).snapshot().module_keys()
+    published = entry.library(label).snapshot().module_keys()
     with edit_parameter(
         session, session.manifest.report.source.result_path, entry.parameters(label)
     ) as draft:

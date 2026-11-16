@@ -40,7 +40,7 @@ def test_root_library_populates_setup_slots_without_a_point(
         document_value(snapshot(entry.parameters()), "C1.module.chosen")
         == "C1.pulses.pi"
     )
-    library = entry.module_library()
+    library = entry.library()
     assert library.snapshot().module_keys() == ("C1.pulses.pi", "C1.readout.main")
     assert set(library.snapshot().waveform_keys()) == {
         "C1.waveforms.base",
@@ -106,7 +106,7 @@ def test_slots_only_reference_published_specs_in_partial_or_pending_library(
     view = entry.parameters() if point is None else entry.parameters(point)
     slots = document_value(snapshot(view), "C1.module")
     assert slots == ({"chosen": "C1.pulses.pi"} if has_success else {})
-    library = entry.module_library(point).snapshot()
+    library = entry.library(point).snapshot()
     assert library.module_keys() == (("C1.pulses.pi",) if has_success else ())
     if has_success:
         assert library.module_spec("C1.pulses.pi").type == "pulse"
@@ -166,7 +166,7 @@ def test_published_slots_preserve_point_inheritance_overrides_and_completed_edit
         assert document_value(snapshot(view), "C1.module") == (
             {"chosen": "C1.pulses.pi"} if has_spec else {}
         )
-        library = entry.module_library(label).snapshot()
+        library = entry.library(label).snapshot()
         if has_spec:
             assert library.module_spec("C1.pulses.pi").type == "pulse"
             assert library.value("C1.pulses.pi.gain") == (
@@ -180,7 +180,7 @@ def test_published_slots_preserve_point_inheritance_overrides_and_completed_edit
                 draft.set("C1.module.chosen", "C1.readout.main")
             elif has_spec:
                 draft.set("C1.module", {"user_choice": "C1.pulses.pi"})
-    assert entry.module_library().snapshot().value("C1.readout.main.ro_length") == 2.5
+    assert entry.library().snapshot().value("C1.readout.main.ro_length") == 2.5
     assert document_value(
         snapshot(entry.parameters("override")),
         "general.ext.legacy_module_cfg.modules.unsupported",
@@ -237,7 +237,7 @@ def test_slots_are_not_published_when_library_commit_fails(
     point = None if label is None else "context"
     view = entry.parameters() if point is None else entry.parameters(point)
     assert document_value(snapshot(view), "C1.module") == {}
-    assert entry.module_library(point).snapshot().module_keys() == ()
+    assert entry.library(point).snapshot().module_keys() == ()
     failure = next(
         item for item in _manifest(request).report.failures if item.source == source
     )
@@ -249,6 +249,6 @@ def test_slots_are_not_published_when_library_commit_fails(
     view = entry.parameters() if point is None else entry.parameters(point)
     assert document_value(snapshot(view), "C1.module.chosen") == "C1.pulses.pi"
     assert (
-        entry.module_library(point).snapshot().module_spec("C1.pulses.pi").type
+        entry.library(point).snapshot().module_spec("C1.pulses.pi").type
         == "pulse"
     )

@@ -177,7 +177,7 @@ def test_default_waveforms_publish_with_canonical_keys_and_only_unknown_raw(
     report = _convert(request, default_mapping)
     entry = _entry(request)
     point = "context" if label else None
-    library = entry.module_library(point).snapshot()
+    library = entry.library(point).snapshot()
     assert set(library.waveform_keys()) == planned
     for key, length in (
         ("Q1.waveforms.mist_waveform", 1.0),
@@ -223,7 +223,7 @@ def test_pi_scalars_deduplicate_only_their_explicit_candidate_and_report_actual_
     report = _convert(request, default_mapping)
     entry = _entry(request)
     point = "context" if label else None
-    library = entry.module_library(point)
+    library = entry.library(point)
     for result in (dry, report):
         assert not [item for item in result.pending if item.source == source]
         rows = {

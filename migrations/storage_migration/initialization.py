@@ -345,7 +345,7 @@ def _publish_entry(
             ),
         )
         setup = source_path(entry.parameters())
-        library = entry.module_library().source_path
+        library = entry.library().source_path
         inventory = inventory_paths(staged)
         document_paths: tuple[tuple[Path, Literal["setup", "library"]], ...] = (
             (setup, "setup"),

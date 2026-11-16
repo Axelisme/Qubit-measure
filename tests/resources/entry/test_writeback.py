@@ -159,9 +159,9 @@ def test_entry_writeback_commits_global_documents_without_changing_point(
     assert len(result.committed) == 2
     assert entry.parameters().Q1.rate == 6100.0
     assert entry.parameters().meta("Q1.rate") == {"note": "global edit"}
-    assert entry.module_library().snapshot().waveform_keys() == ("Q1.waveforms.pi",)
+    assert entry.library().snapshot().waveform_keys() == ("Q1.waveforms.pi",)
     assert point.Q1.rate == 5000.0
-    assert entry.module_library("independent").snapshot().waveform_keys() == ()
+    assert entry.library("independent").snapshot().waveform_keys() == ()
     assert writer.point is None
     accepted = entry.ledger.get(result.event_id).event
     assert accepted.kind == "accepted"
@@ -214,7 +214,7 @@ def test_library_writeback_creates_missing_file_only_when_touched(
         result_root=storage.result_path.parent,
         database_root=storage.database_path.parent,
     )
-    assert entry.module_library(storage.point).snapshot().waveform_keys() == (
+    assert entry.library(storage.point).snapshot().waveform_keys() == (
         "Q1.waveforms.pi",
     )
 
@@ -407,7 +407,7 @@ def test_invalid_library_rolls_back_mixed_family_group_and_keeps_point_prefix(
         "entry",
         result_root=storage.result_path.parent,
         database_root=storage.database_path.parent,
-    ).module_library("a")
+    ).library("a")
     assert library.snapshot().document().components == {}
     assert bind_record_table(storage.result_path, "Q1").latest("run-1") is None
     assert len(writer.ledger.events()) == 1

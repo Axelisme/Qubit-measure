@@ -15,6 +15,39 @@ from zcu_tools.resources.entry import (
 from zcu_tools.resources.entry.views import FieldView
 
 
+@pytest.mark.parametrize("point", [None, "one"])
+def test_parameters_opener_reads_only_its_selected_file(
+    entry: ResultEntry, point: str | None
+) -> None:
+    if point is not None:
+        entry.new_point(point)
+    directory = entry.result_path if point is None else entry.result_path / "points" / point
+    (directory / "library.yaml").write_text("invalid: [", encoding="utf-8")
+    (directory / "aliases.yaml").write_text("invalid: [", encoding="utf-8")
+
+    assert entry.parameters(point=point).description is None
+
+
+@pytest.mark.parametrize("point", [None, "one"])
+def test_parameter_refresh_reports_installed_content_changes(
+    entry: ResultEntry, point: str | None
+) -> None:
+    if point is not None:
+        entry.new_point(point)
+    view = entry.parameters(point)
+    assert view.refresh() is False
+    writer = ResultEntry.open(
+        entry.result_path.name,
+        result_root=entry.result_path.parent,
+        database_root=entry.database_path.parent,
+    ).parameters(point)
+    writer.description = "external edit"
+    assert view.description != "external edit"
+    assert view.refresh(strict=True) is True
+    assert view.description == "external edit"
+    assert view.refresh(strict=True) is False
+
+
 def test_strict_refresh_rejects_invalid_global_candidate_and_retains_publication(
     entry: ResultEntry,
 ) -> None:
