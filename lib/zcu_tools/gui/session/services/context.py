@@ -54,6 +54,7 @@ from zcu_tools.resources.entry import (
     DestinationExistsError,
     ResultEntry,
     document_revision,
+    parameter_content,
     snapshot,
     source_path,
     validate_path_segment,
@@ -619,17 +620,25 @@ class ContextService:
         point's independent views in the currently opened entry.
         Supplied role names stay fixed. Missing required parameter documents,
         cross-entry, schema, source and I/O failures propagate. This read publishes
-        no versions or events and does not follow live alias rows.
+        no versions or events. It opens only parameters/library, never aliases,
+        and does not follow live alias rows.
         """
         self._owner.assert_owner()
         entry = self._require_write_target(target)
         assets = self._bind_assets(entry.database_path / "arb_waveforms")
         library = entry.library(target.point, assets=assets)
-        if target.point is None:
-            fresh = self._fresh_entry()
-            return DocumentSetCapture.from_entry(fresh, library, target, roles=roles)
-        point = entry.parameters(target.point)
-        return DocumentSetCapture.from_point(point, library, target, roles=roles)
+        parameters = (
+            self._fresh_entry().parameters()
+            if target.point is None
+            else entry.parameters(target.point)
+        )
+        return DocumentSetCapture(
+            point=parameter_content(parameters),
+            library=library.snapshot(),
+            target=target,
+            roles=roles,
+            storage=capture_storage(parameters),
+        )
 
     def read_record(
         self, target: DocumentSetRef, component: str, run_id: str

@@ -10,8 +10,15 @@ from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_control import ContextControlPort
-from zcu_tools.gui.session.context_types import PointUseRequest
-from zcu_tools.gui.session.events import AliasesChangedPayload
+from zcu_tools.gui.session.context_types import DocumentSetRef, PointUseRequest
+from zcu_tools.gui.session.events import (
+    AliasesChangedPayload,
+    ContextSwitchedPayload,
+    EntryDocumentsChangedPayload,
+    FileChangedPayload,
+    MdChangedPayload,
+    MlChangedPayload,
+)
 from zcu_tools.gui.session.expression import evaluate_scalar_expr
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.state import SessionState
@@ -232,6 +239,68 @@ def test_read_target_preserves_historical_names_in_saved_reads(
     assert fixed.value("$sense.rate") == 6123.0
     control.use_point(PointUseRequest("second"))
     assert control.read_target(require_target(captured), roles=history).roles == history
+
+
+@pytest.mark.parametrize("point", [None, "second"], ids=["global", "other-point"])
+def test_read_target_reads_fresh_values_without_alias_io_or_publication(
+    session: CaptureSession, point: str | None
+) -> None:
+    control = session.control
+    history = control.read_context()
+    control.apply_alias_rows((AliasRow("driver", "Q2"), AliasRow("sense", "R2")))
+    target = DocumentSetRef(entry_name="entry", point=point)
+    external = ResultEntry.open(
+        "entry",
+        result_root=session.entry.result_path.parent,
+        database_root=session.entry.database_path.parent,
+    )
+    view = external.parameters(point)
+    view.Q1.rate = 4800.0
+    view.Q1.sense = "R2"
+    directory = source_path(view).parent
+    (directory / "library.yaml").write_text(
+        'format: zcu.module-library\nformat_version: "2.0"\n'
+        "components: {Q1: {waveforms: {fresh: {style: const, length: 0.25}}}}\n"
+    )
+    aliases = directory / "aliases.yaml"
+    aliases.unlink(missing_ok=True)
+    aliases.mkdir()
+    selected = control.read_context()
+    binding = control.get_source_binding()
+    environment = session.state.session_env
+    versions = session.state.version.snapshot()
+    revisions = control.get_installed_file_revisions()
+    events: list[object] = []
+    for payload in (
+        AliasesChangedPayload,
+        ContextSwitchedPayload,
+        EntryDocumentsChangedPayload,
+        FileChangedPayload,
+        MdChangedPayload,
+        MlChangedPayload,
+    ):
+        session.bus.subscribe(payload, events.append)
+
+    current = control.read_target(target, roles=history.roles)
+
+    assert current.target == target
+    assert current.value("$driver.rate") == 4800.0
+    assert current.value("$sense.rate") == 6123.0
+    assert current.library.waveform_spec("Q1.waveforms.fresh").length == 0.25
+    assert current.roles == history.roles
+    storage = current.capture_storage()
+    assert (storage.entry_name, storage.point) == ("entry", point)
+    assert dict(storage.roles) == {"driver": "Q1", "sense": "R1"}
+    assert history.value("$driver.rate") == 4300.0
+    assert history.library.waveform_keys() == ()
+    assert control.current_point_label() == "first"
+    assert control.get_source_binding() == binding
+    assert control.read_context().target == selected.target
+    assert control.read_context().value("$driver.rate") == 5100.0
+    assert session.state.session_env is environment
+    assert session.state.version.snapshot() == versions
+    assert control.get_installed_file_revisions() == revisions
+    assert events == []
 
 
 def test_empty_read_context_keeps_no_context_failure(session: CaptureSession) -> None:

@@ -105,10 +105,11 @@ class ContextControlPort(Protocol):
     ) -> DocumentSetCapture:
         """Read current values at a fixed target without selecting it.
 
-        target.point=None reads global files; a label reads that point's files.
-        Supplied roles stay fixed;
-        cross-entry, missing point (MissingPointError), schema and I/O errors propagate.
-        No versions or events are published.
+        target.point=None reads global parameters/library; a label opens that
+        point's independent views. Only parameters/library are opened, never
+        aliases. Supplied role names stay fixed, without following live aliases.
+        Cross-entry, missing point (MissingPointError), schema, source and I/O
+        errors propagate. No selection, versions or events change.
         """
         ...
 

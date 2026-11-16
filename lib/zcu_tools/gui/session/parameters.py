@@ -36,10 +36,7 @@ from zcu_tools.resources.entry import (
 )
 from zcu_tools.resources.entry.aliases import AliasValue
 from zcu_tools.resources.entry.roles import resolve_names
-from zcu_tools.resources.entry.storage import (
-    StorageBinding,
-    capture_storage,
-)
+from zcu_tools.resources.entry.storage import StorageBinding
 from zcu_tools.resources.projection import ProjectionPathError, projection_value
 
 _LIBRARY_PARTITIONS = ("pulses", "readout", "reset", "waveforms")
@@ -47,7 +44,7 @@ _LIBRARY_PARTITIONS = ("pulses", "readout", "reset", "waveforms")
 if TYPE_CHECKING:
     from zcu_tools.gui.session.context_types import ContextSourceFault, DocumentSetRef
     from zcu_tools.resources.context.library import ModuleLibrary
-    from zcu_tools.resources.entry import ParameterView, ResultEntry, RoleSpec
+    from zcu_tools.resources.entry import ParameterView, RoleSpec
     from zcu_tools.resources.entry.aliases import AliasFile
     from zcu_tools.resources.entry.schema import ParameterDocument
 
@@ -258,57 +255,6 @@ class DocumentSetCapture:
             target=target,
             roles=roles,
             storage=storage,
-        )
-
-    @classmethod
-    def from_point(
-        cls,
-        point: ParameterView,
-        library: ModuleLibrary,
-        target: DocumentSetRef,
-        *,
-        roles: RoleBinding | None = None,
-    ) -> DocumentSetCapture:
-        """Capture cached point content, library and saved-point storage.
-
-        point and library are already opened resource views. target must match
-        point's saved origin; a mismatch raises ValueError. roles optionally
-        supplies fixed consumer names, subject to the constructor's validation.
-        Content and roles are detached. No view is refreshed, no files are
-        written and no session selection or events change. Resource snapshot
-        and storage-origin failures propagate.
-        """
-        return cls(
-            point=parameter_content(point),
-            library=library.snapshot(),
-            target=target,
-            roles=roles,
-            storage=capture_storage(point),
-        )
-
-    @classmethod
-    def from_entry(
-        cls,
-        entry: ResultEntry,
-        library: ModuleLibrary,
-        target: DocumentSetRef,
-        *,
-        roles: RoleBinding | None = None,
-    ) -> DocumentSetCapture:
-        """Capture cached global parameters, library and entry storage.
-
-        entry and library must already be opened. target must identify this
-        entry with point=None, otherwise construction raises ValueError.
-        roles follows the constructor's fixed binding contract. Inputs are
-        detached; no refresh, file writes, selection changes or events occur.
-        Snapshot and storage failures propagate.
-        """
-        return cls(
-            point=parameter_content(entry.parameters()),
-            library=library.snapshot(),
-            target=target,
-            roles=roles,
-            storage=capture_storage(entry.parameters()),
         )
 
     @classmethod
