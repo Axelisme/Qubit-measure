@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure`
 
-**Last updated:** 2026-11-16, GUI simulation worker policy
+**Last updated:** 2026-11-16, GUI simulation worker policy and form error presentation
 
 **讀者：** framework-dev。量測 GUI 的組裝、分頁、tab admission 與 Run／Load／Save 分工。
 
@@ -463,8 +463,11 @@ Run facet 只呼叫 `capture_run_inputs`，由 capture 呼叫一次 admit，inva
 這個唯讀查詢不接受或發布 cfg、不捕捉來源，可在 notification 中呼叫。
 Resource revocation 與 author lower-hook 例外仍傳出，不偽裝成放行。
 
-UI 的 domain 拒絕停用按鈕並顯示 decision.message。
-Run admission 放行後，UI 仍依序顯示尚未寫入 resource 的 editor parse 錯誤、startup、其他 tab Run 的阻擋訊息。
+UI 的 domain 拒絕停用按鈕並顯示 decision.message，Run 的欄位錯誤 tooltip 除外。
+Run 區的 `run.cfg_error` 顯示 `Config invalid: N fields`，單數用 `Config invalid: 1 field`。N 計算 resource model／lowering 與 editor-local 錯誤的 canonical FormPath 聯集，包含尚未提交的 parse errors，不按訊息去重，也不從 `run_invalid_reason()` 的後綴推算。
+Run tooltip 只提示修正標紅欄位，不複製首項錯誤。每次 editor `errors_changed` 都更新計數；全部修正後清空提示並恢復既有 admission。
+共用 FormEditor 保留 inline 紅字，底部摘要只呈現折疊、hidden 欄位或 model／group 等沒有可見欄位承接的錯誤。MainWindow 的 Ready、Saved 等狀態列訊息不變。呈現裁決見 ADR-0065。
+Run admission 放行後，UI 仍依序以 editor-local 錯誤、startup、其他 tab Run 阻擋 Run。
 Admission 不取得 lease，hardware exclusion 仍由 operation gate 在啟動時裁決，放行不保證啟動成功。
 Remote 也讀取 decision；只有 `unknown_tab` 投影成既有 `INVALID_PARAMS` 與空 reason，其餘拒絕保留 decision 的 reason/message。
 Run aliases 檢查仍在 admission 前，admission 則先於 source provenance 檢查。
