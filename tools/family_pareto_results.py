@@ -7,6 +7,8 @@ these records. Comparison rules never construct a source or read a clock.
 from dataclasses import dataclass, field
 from typing import Literal
 
+import numpy as np
+from numpy.typing import NDArray
 from zcu_tools.simulate.evolution import FamilyRouting
 
 ALL_FAMILIES = (
@@ -28,6 +30,27 @@ ALL_FAMILIES = (
     "floquet",
     "dop853",
 )
+
+
+def density_error(
+    actual: NDArray[np.complex128], expected: NDArray[np.complex128]
+) -> float:
+    """Return max(abs(actual-expected)) over the complete complex density.
+
+    Arrays must have identical nonempty (...,M,M) shapes and finite values.
+    Invalid shapes or nonfinite entries raise ValueError. No population-only
+    projection or truncated density block participates in qualification.
+    """
+    if (
+        actual.shape != expected.shape
+        or actual.ndim < 2
+        or not actual.size
+        or actual.shape[-1] != actual.shape[-2]
+    ):
+        raise ValueError("densities must have identical nonempty (...,M,M) shapes")
+    if not np.isfinite(actual).all() or not np.isfinite(expected).all():
+        raise ValueError("densities must be finite")
+    return float(np.max(np.abs(actual - expected)))
 
 
 @dataclass(frozen=True)

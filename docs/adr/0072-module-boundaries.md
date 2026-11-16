@@ -234,7 +234,9 @@ GUI、MCP 組合根與開發工具需要 lab 宣告時，只直接 import `zcu_l
 `tools/family_pareto_scenarios.py` 宣告固定序列，經 `tools/family_pareto_scene_builders.py` 的公開 program 編譯與資源生命週期，凍結完整 batch。
 固定裝置模型值由 `tools/family_pareto_settings.py` 持有。
 `tools/family_pareto_kernel_scenes.py` 則用公開 `SingleFluxoniumModel` 直接宣告單段數值控制，不經前端。
-通用 codec 歸 `simulate.evolution`，入庫數值資料放在 `tools/data/family_pareto/`，不包含 solver 或裝置 builder。
+通用 codec 歸 `simulate.evolution`，數值資料不包含 solver 或裝置 builder。
+2026-11-16 的存放方向是不將凍結場景入庫，Git 只留名稱與 hash 小清單。
+既有兩份 gzip 的搬遷、預設來源與 report 身份仍待存放契約，不以原資料路徑作終態。
 Producer 自持具名 `Scene`，不依賴 tests 的案例型別或清單。獨立參考解 producer 留在 tests 側，經檔案交接，契約見 [[0078]]。
 此處接受與 lab 重複，讓讀工具的人可以直接看懂場景；lab 序列改動不會自動更新已凍結的量表輸入。
 這個取捨只適用於固定的 optimizer benchmark。需要真實 lab 宣告的品質檢查仍經 assembly 取得宣告，不複製一份。
@@ -242,6 +244,23 @@ Producer 自持具名 `Scene`，不依賴 tests 的案例型別或清單。獨�
 2026-11-12，使用者說：「我其實不樂意看到tool依賴zcu_lab，我認為你要測試，那就只複製最核心的pulse序列來模擬啊，又不需要整個experiment」。
 對工具內建場景的方案，使用者回答：「你這個工具的目的是對優化器做benchmark吧？那場景自然是挑選過的」，並補充：「而且這樣tool也能提高可讀性，我寧可重複也要提高可讀性」。
 兩次裁決的比較與先例立場見 [Lab 依賴邊界討論](../discussions/2026-11-14-lab-dependency-boundary.md)。
+
+### 開發工具的數值交接
+
+`tools.family_pareto_reference` 持有量表選定輸入的整批 cache-only preflight。
+它呼叫 `simulate.evolution.reference_key` 與 `load_reference`，不另寫 key 公式，也不求解 miss。
+每筆缺失的名稱與 key 一次列出，全部載入成功前不開始 policy 或 Engine。
+`family_pareto` 的 check 與量測共用此載入函式。獨立 solver 與 cache 生產留在 tests 側，見 [[0078]]。
+
+`tools.family_pareto_results` 持有結果型別、誤差、資格與 dominance 規則。
+Runner、report 與 summary 讀同一個 owner，不由 report 反向 import 執行入口。
+選取、reference preflight 與 check 的結束點留在 caller，計時協定只消費已備好的 session。
+這個分工不表示量測計時已切換到新的共同 owner。
+
+預設來源與舊 archive 的遷移尚未完成，集中在 `family_pareto` 的選取／身份接縫。
+工具的 reference 路徑已不 import tests solver；測試側 exclusion estimator 的反向依賴仍待歸屬裁決。
+此段不宣稱所有量測 consumer 依賴已清除，也不宣稱 `simulate` 已封閉。
+取捨與介面退休見 [量表 cache-only 遷移](../discussions/2026-11-16-family-pareto-cache-only.md)。
 
 ### Lab 定義與組合根
 

@@ -87,3 +87,10 @@ Kernel 單段與完整序列是不同場景，不能用裁切後的段冒充原�
 當時的工作紀錄與原始補驗證據未入庫。
 本篇保留取捨與必要事實，現行用法由 [tools README](../../tools/README.md) 與 [evolution README](../../lib/zcu_tools/simulate/evolution/README.md) 擁有。
 固定模型參數與場景控制由 tracked producer 持有。
+
+## 2026-11-16 存放補充
+
+後續使用者要求所有凍結場景不入庫，Git 只留名稱與 hash 小清單。
+上文的 gzip 入庫與 report 歸檔選項不再是終態；存放、預設來源與 report 身份仍待裁定。
+既有兩份 gzip 與歷史尚未遷移，不依原大小上限新增資料。
+Reference consumer 的已放行變更與未完成邊界見[整批 cache-only 遷移](2026-11-16-family-pareto-cache-only.md)。

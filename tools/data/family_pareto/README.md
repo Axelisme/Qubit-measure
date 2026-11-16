@@ -7,10 +7,13 @@
 `frozen-synthetic.json.gz` 保存 1 個重新宣告的 synthetic 場景。
 `frozen-real.json.gz` 保存 15 個完整 real 場景，以及 3 個單段 kernel 場景。
 兩份檔案分別為 730 與 10,374,107 bytes，合計 10,374,837 bytes。
-合計上限為 10 MiB，即 10,485,760 bytes，目前只剩 110,923 bytes 餘量。
-後續加場景超過上限時先停下討論，不自行放寬、去重或改 schema/key。
+這些是尚未遷移的既有檔案，不是後續場景入庫的許可。
+凍結場景不入庫，Git 只留名稱與 hash 小清單。存放位置、預設來源、report 身份與既有歷史的處置仍待定。
+不再以舊 10 MiB 上限判定可否入庫，也不在此指定替代 cache 或重建規則。
 它們保存完整數值，不在讀取時重建裝置、前端或使用者設定。
-讀端從兩份檔案選取 record，量測只在 `Engine.evolve` 上進行。
+公開 `read_inputs(manifests)` 可從 caller 指定的檔案選取 record。
+量測 CLI 的預設來源接線尚未遷移完成，不能把這兩份檔案當成已定案的預設來源。
+量測只在 `Engine.evolve` 上進行。
 
 場景控制由 `tools/family_pareto_scenarios.py`、`family_pareto_kernel_scenes.py` 與固定 settings 持有。
 Single/integer 編譯與數值 source 的生命週期由 `family_pareto_scene_builders.py` 持有。

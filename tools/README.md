@@ -166,19 +166,17 @@ Kernel 量測在 `Engine.evolve` 上用 `families=` 固定候選，輸入只有�
 It times **Engine.evolve**, not `program.acquire`. The program-to-acquire
 benchmark is retired; sequence-level measurements exclude compilation and ADC sampling.
 
-The default inputs are fixed 24-point carrier, gain, length, idle and gate-sequence
-scans on the full 21-level single-fluxonium model, including constant and Gaussian
-gate-sequence scans. Separate F and N scans use that same model at 0.45 Φ0.
-The inputs also include a synchronous dual-port
-scan on the fixed FTF model with 32 retained joint states and local 4×4×4.
-A 24-point Gaussian relative-delay scan uses the fixed integer-fluxonium model
-with native cutoff 80 and 20 retained levels. Its two charge ports address the
-same qubit. A separate 24-point constant-tone carrier scan uses those same
-integer-model charge ports with equal support and complete overlap.
-Add `--include-synthetic` to also measure the explicitly declared three-level
-`idle_coherence` input. Accuracy/guard grids and amplified test workloads stay
-in the tests-side matrix. Reports separate the two categories; deletion
-conclusions use real inputs only.
+The producer declares fixed carrier, gain, length, idle and gate-sequence scans,
+including Gaussian gates, biased inputs, overlapping tones and a joint FTF scene.
+The synthetic inventory contains the three-level `idle_coherence` scene.
+Accuracy/guard grids and amplified test workloads stay in tests.
+
+The frozen-storage source and report-identity migration is pending. The command
+still has its original builder/archive selection path. Do not treat it as a
+completed frozen-input consumer. `read_inputs(manifests)` already reads frozen
+records through the public codec, and in-process callers can supply prepared
+`Input` declarations to `main(argv, inputs=...)` or `run_table`.
+Reference loading is cache-only for every prepared selection.
 
 ### Recorded scenario summaries
 
@@ -240,52 +238,34 @@ preparation after cost approval.
 
 ### Single-scenario remeasurement
 
-Select a scenario by its `Input.name` from the table below. The tool selects the
-builder before constructing any model, freezes that input and measures it in the
-same command. An unknown name fails with the legal names. Do not supply a manifest.
-After obtaining the timing budget, run from the worktree root:
+`--scenario NAME` requires exactly one matching input in the selected records.
+An unknown name fails with legal names; duplicate names fail with their source
+declarations. Selection failure starts no policy or Engine. The option can be
+combined with `--manifest`. Source selection and report identity are still
+awaiting the frozen-storage contract, so this section does not prescribe new
+default inputs or a replacement manifest layout.
 
-```bash
-uv run --directory <worktree> --no-sync -- \
-  python tools/run_heavy.py --exclusive --log <results>/run.log <timing-timeout-seconds> -- \
-  python -m tools.family_pareto --scenario shaped_gate_sequence --exclusive \
-  --summary-output tools/data/family_pareto/summaries/shaped_gate_sequence.json \
-  > <results>/receipt.json
-```
+Every measurement first loads all references from `--reference-cache DIR`.
+A miss lists every missing input name and oracle key, then fails the whole batch.
+No already-cached input starts timing before that preflight succeeds.
+`--check-references` uses the same loader and writes a JSON report to `--output`.
+Each entry records `name`, `key`, `convergence_error`, `wall_seconds` and
+`cpu_seconds`. Success returns 0 without measurement; a miss returns nonzero.
+The checker neither solves references nor fills the cache.
 
-The runner's `--exclusive` acquires the lock. The inner `--exclusive` only records
-the caller's declaration. The tool neither verifies the lock nor reads the receipt.
-It records its own UTC start time, HEAD, tree and dirty state in the matrix and
-summary. Dates and exclusive annotations do not determine accuracy or eligibility.
+Reference production belongs to the tests-side entry point described under
+[Freeze numeric scenes](#freeze-numeric-scenes). Solver work needs separate
+cost approval. The consumer has no `--prepare-references`, `--freeze-inputs`,
+`--include-synthetic` or `--reference-cache-only` compatibility flags.
+Cache-only loading is unconditional, not an option that callers can disable.
+`run_table` has no solver injection.
 
-By default, references live in
-`<main repo>/.agent_state/benchmark/family_pareto/references/`. The tool locates the
-main repository with Git's absolute common directory, so all worktrees share the
-cache. It creates missing directories. Complete matrices, diagnostic reports and
-journals default to `<main repo>/.agent_state/benchmark/family_pareto/<Input.name>/<run-id>/`.
-These files stay local and survive task cleanup. `--output`, `--summary` and
-`--partial-output` override the matrix, diagnostic report and journal paths.
-The command prints their destinations. Do not add references or full matrices to Git.
-
-Single-scenario measurement is cache-only. A missing key stops without solving.
-The diagnostic names the key and explains reference preparation. Native thread
-settings can change the final floating-point bits of model inputs and their hashes.
-Always use `run_heavy.py` for preparation, freezing and measurement so these settings
-match. Clearing local data or moving to another machine requires preparing references
-again. A cache miss does not grant permission to solve. After cost approval, rebuild
-one scenario's references nonexclusively with:
-
-```bash
-uv run --directory <worktree> --no-sync -- \
-  python tools/run_heavy.py --log <results>/reference.log <reference-timeout-seconds> -- \
-  python -m tools.family_pareto --scenario shaped_gate_sequence --prepare-references \
-  --output <results>/reference.json > <results>/reference-receipt.json
-```
-
-Preparation uses the existing reference owner and its physical-input/tolerance key.
-It loads valid cache entries and solves only misses. Add `--reference-cache-only`
-to preparation to forbid solving. `--reference-cache <directory>` overrides the
-shared reference location without changing the key or solver contract.
+For a supplied scenario, existing output-path defaults, summary publication and
+comparison remain unchanged. This transition does not define new cache roots,
+sharing rules, rebuilding or invalidation policy. The runner's `--exclusive`
+acquires the lock; the inner `--exclusive` only records the caller's declaration.
+The tool records UTC start time, HEAD, tree and dirty state without checking the
+lock or reading the runner receipt. These annotations do not decide accuracy.
 
 `--summary-output <path>.json` writes one current-run summary and a generated sibling
 `.md`, creating parents as needed. Without it, the tool writes `summary.json` beside
@@ -326,53 +306,37 @@ requires the corresponding cost approval.
 
 ### Inventory-wide manifest workflow
 
-Without `--scenario`, freeze the versioned input manifest before measuring. From
-the lane root, replace `<worktree>` with its absolute path and choose a new
-`<results>` directory:
+The command sequence is check first, measure second. Source selection and report
+identity remain pending; use a previously selected matching manifest for the
+existing CLI path, or prepared inputs at the importable seam. These commands do
+not introduce a frozen-storage location or promise a new manifest format.
+From the worktree root, after obtaining the relevant cost approval:
 
 ```bash
-mkdir -p <results>
 uv run --directory <worktree> --no-sync -- \
-  python tools/run_heavy.py --log <results>/freeze.log 120 -- \
-  python -m tools.family_pareto --freeze-inputs <results>/inputs.json \
-  > <results>/freeze-receipt.json
-uv run --directory <worktree> --no-sync -- \
-  python tools/run_heavy.py --log <results>/reference.log <reference-timeout-seconds> -- \
-  python -m tools.family_pareto --manifest <results>/inputs.json \
-  --prepare-references --reference-cache <results>/reference-cache \
-  --output <results>/reference.json > <results>/reference-receipt.json
+  python tools/run_heavy.py --log <results>/check.log <check-timeout-seconds> -- \
+  python -m tools.family_pareto --manifest <selected-manifest> \
+  --reference-cache <reference-cache> --check-references \
+  --output <results>/reference-check.json > <results>/check-receipt.json
 uv run --directory <worktree> --no-sync -- \
   python tools/run_heavy.py --exclusive --log <results>/run.log <timing-timeout-seconds> -- \
-  python -m tools.family_pareto --manifest <results>/inputs.json \
-  --reference-cache <results>/reference-cache --reference-cache-only \
-  --partial-output <results>/attempt.jsonl \
+  python -m tools.family_pareto --manifest <selected-manifest> \
+  --reference-cache <reference-cache> --partial-output <results>/attempt.jsonl \
   --output <results>/matrix.json --summary <results>/summary.md \
   > <results>/receipt.json
 ```
 
-Choose reference and timing timeouts from the approved batch budget. These commands
-do not grant a timing allowance. The earlier carrier-only 9000-second allowance
-does not apply to new scenarios. Freeze through the nonexclusive runner too, so
-native thread settings match reference preparation and timing. Different native
-thread widths can change model bath rates in their final floating-point bits and
-therefore change the exact manifest/cache hashes.
+Measurement repeats the complete preflight; the earlier check is not permission
+to skip cache loading. Neither command solves a miss. Use the separately approved
+tests-side producer to prepare references. The commands grant no compute budget.
 
-The measured command rejects a manifest that differs from the tracked builders.
-Do not adjust inputs in response to measured dominance. After an intentional input
-version change, freeze a new manifest and retain earlier results separately.
-No existing local artifacts, mutable lab YAML, GUI or hardware are required.
-
-Add `--families single_tone_rwa,floquet_period` to the measurement command to
-measure only those pinned families. Default routing and its fixed observed family
-group are still measured. Without the option, all 17 pinned families are measured.
-Unknown names return nonzero and list the legal names. The option changes neither
-physical inputs nor the manifest, reference solutions or their hashes. It cannot
-be combined with `--freeze-inputs` or `--prepare-references`.
-The matrix JSON records `measured_families`; the summary lists the same names and
-opens with a partial-measurement warning when any families are omitted. Omitted
-families are unmeasured, not unavailable, and get no family conclusion.
-Dominance and timing equivalence compare only measured pinned families. Do not use
-a partial table to justify deleting a family.
+`--families single_tone_rwa,floquet_period` selects pinned policies while retaining
+default routing and its fixed observed family group. Omitting it measures all 17
+families. Unknown names fail with legal names. The option changes neither physics
+nor reference keys. It cannot be combined with `--check-references`.
+The matrix records `measured_families`; partial reports identify omitted families
+as unmeasured, not unavailable. Dominance compares only measured pinned policies.
+A partial table does not justify deleting a family.
 
 `family_pareto_inputs.py` owns the producer's named `Scene` and `Input`
 records. `Input.build()` returns a fresh source that the caller closes.
@@ -714,36 +678,33 @@ justify deleting a target. Family conclusions compare equal-companion groups.
 The summary reports each family's prepare/apply thread CPU and its fraction of
 summed reported thread CPU. These fractions are not wall or process-CPU shares.
 
-In the inventory-wide manifest workflow, `--reference-cache <directory>` enables
-a local disk cache, off by default. Single-scenario commands use the shared cache
-and default to cache-only measurement as described above.
-`--prepare-references` with `--manifest`, `--reference-cache` and `--output`
-prepares it without Engine timing or a summary. Run that phase nonexclusive.
-Its report records physical hashes, density shapes, convergence and solve/cache
-load times. Real inputs use the exact interaction-picture oracle; synthetic
-inputs retain the lab-frame oracle. The exclusive timing phase must use
-`--reference-cache-only`; a missing or changed key stops before that input's
-timing and never runs a solver. Cache-only mode requires a cache directory and
-forbids an injected solver.
+`family_pareto_reference.load_references` loads the complete selected batch with
+the simulator's public `reference_key` and `load_reference`. Equal keys share one
+reference object, including inputs whose model identity differs. It checks loaded
+convergence errors before policy execution and lists all missing names/keys.
+`run_table` and `--check-references` use this same preflight.
 
-Cache keys include complete physical input, both tolerance levels and the
-convergence contract. Model identity namespaces and routing history are excluded.
-Files contain density and convergence error without pickle objects.
-Only equal physical hashes permit reuse across builder changes. Keep the cache
-outside Git. Reference solve/cache-load totals remain separate from Engine time.
+`--reference-cache DIR` selects an existing cache. Loading does not create the
+directory or write NPZ files. Keys include complete identity-free physics, both
+tolerance levels and the convergence contract. Files retain density and convergence
+error without pickle. Keep the cache outside Git. Reference load totals remain
+separate from Engine time. This change does not choose storage or sharing policy.
 
 ### Freeze numeric scenes
 
-The producer writes two simulator-owned gzip manifests. Their combined size
-must stay within 10 MiB, exactly 10,485,760 bytes. The current 10,374,837 bytes
-leave 110,923 bytes; a larger revision needs a size/schema decision first.
-The files are:
-`tools/data/family_pareto/frozen-synthetic.json.gz` and `frozen-real.json.gz`.
-Their ordered records contain complete numeric physics and both hashes; scene
-reason, target/companion declarations and provenance are opaque metadata owned
-by tools. `freeze_records` returns public `simulate.evolution.FrozenRecord`
-values. The codec owns versioning, unique names, hash verification and
-reproducible gzip, with mtime=0 and no filename. No solver identity is added.
+The producer writes simulator-owned gzip manifests containing complete numeric
+physics and both hashes. Scene reason, target/companion declarations and provenance
+are opaque metadata owned by tools. `freeze_records` returns public
+`simulate.evolution.FrozenRecord` values. The codec owns versioning, unique names,
+hash verification and reproducible gzip with mtime=0 and no filename.
+No solver identity is added.
+
+Frozen scenes are not to be committed; Git will retain a small name/hash list.
+The storage contract, default source and report identity remain unsettled.
+The existing `frozen-synthetic.json.gz` and `frozen-real.json.gz` bytes and history
+have not yet been migrated. Their former 10 MiB cap is not permission to commit
+future frozen scenes. The paths below describe existing producer artifacts,
+not the final consumer source.
 
 Run model construction only with an approved compute budget and the current
 heavy runner/lock policy. The producer entry point is:
@@ -773,9 +734,10 @@ The producer reads only record names and physics; callers select the solver,
 not metadata or a name list. Existing cache entries are read without solving;
 missing entries are solved only by this separately approved preparation step.
 The public solver-free `load_reference` fails on cache misses.
-The measurement reader migration is separate: until it migrates, the existing
-report-side `inputs.json` archive and `freeze_manifest` helper remain unchanged.
-They are transitional and are not a second reader for the new container.
+The default source/report migration is still pending. The existing internal
+`inputs.json` archive construction and `freeze_manifest` caller remain at one
+selection/identity seam. The consumer no longer exposes a freeze command. Do not
+use this transition as a second reader for the new container.
 
 ### Partial attempts and failure handling
 

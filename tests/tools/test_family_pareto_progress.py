@@ -2,15 +2,20 @@
 
 import json
 from collections.abc import Generator
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from itertools import count
 from pathlib import Path
 
 import numpy as np
 import pytest
-from zcu_tools.simulate.evolution import EvolutionResult, PathDiagnostics
+from zcu_tools.simulate.evolution import EvolutionResult, PathDiagnostics, reference_key
 
-from tests.tools.family_pareto_support import make_scene
+from tests.tools.family_pareto_support import (
+    make_scene,
+    write_legacy_manifest,
+    write_test_cache,
+)
+from tools import family_pareto
 from tools.family_pareto import EngineSession, main, measure_family
 from tools.family_pareto_inputs import Input, Scene
 from tools.family_pareto_results import Sample
@@ -67,7 +72,10 @@ def test_partial_run_retains_samples_and_leaves_old_complete_outputs_untouched(
         tmp_path / name
         for name in ("inputs.json", "matrix.json", "summary.md", "attempt.jsonl")
     )
-    assert main(["--freeze-inputs", str(manifest)], inputs=inputs) == 0
+    write_legacy_manifest(inputs, manifest)
+    cache = tmp_path / "cache"
+    write_test_cache(inputs, cache)
+    builds = 0
     output.write_text("previous complete output")
     summary.write_text("previous complete summary")
     assert (
@@ -75,6 +83,8 @@ def test_partial_run_retains_samples_and_leaves_old_complete_outputs_untouched(
             [
                 "--manifest",
                 str(manifest),
+                "--reference-cache",
+                str(cache),
                 "--output",
                 str(output),
                 "--summary",
@@ -99,27 +109,35 @@ def test_partial_run_retains_samples_and_leaves_old_complete_outputs_untouched(
     assert events[-1]["error"] == "input collaborator failed"
 
 
-def test_cli_prepares_references_without_timing_or_a_summary(tmp_path: Path) -> None:
-    builds = 0
-
-    def build() -> Scene:
-        nonlocal builds
-        builds += 1
-        if builds > 3:
-            raise RuntimeError("no policy sessions allowed during preparation")
-        return make_scene("idle_coherence")
-
-    inputs = [Input("idle", build, "small preparation collaborator")]
+def test_cli_checks_references_without_policies_engine_or_a_summary(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    inputs = [
+        Input("idle", lambda: make_scene("idle_coherence"), "small check collaborator"),
+        Input("alias", lambda: make_scene("idle_coherence"), "same reference"),
+    ]
     manifest, output, cache = (
         tmp_path / name for name in ("inputs.json", "references.json", "cache")
     )
-    assert main(["--freeze-inputs", str(manifest)], inputs=inputs) == 0
+    write_legacy_manifest(inputs, manifest)
+    write_test_cache(inputs, cache)
+    scene = inputs[0].build()
+    with closing(scene.source):
+        key = reference_key(scene.source, scene.batch)
+
+    def forbidden_measurement(*args: object, **kwargs: object) -> None:
+        raise AssertionError("check must not start measurement or Engine")
+
+    # main has no policy/session injection; trap the external measurement effects.
+    monkeypatch.setattr(family_pareto, "run_table", forbidden_measurement)
+    monkeypatch.setattr(family_pareto, "Engine", forbidden_measurement)
     assert (
         main(
             [
                 "--manifest",
                 str(manifest),
-                "--prepare-references",
+                "--check-references",
                 "--reference-cache",
                 str(cache),
                 "--output",
@@ -129,10 +147,13 @@ def test_cli_prepares_references_without_timing_or_a_summary(tmp_path: Path) -> 
         )
         == 0
     )
-    prepared = json.loads(output.read_text())
-    assert prepared["inputs"][0]["convergence_error"] <= 2e-6
-    assert prepared["inputs"][0]["density_shape"] == [2, 3, 3]
-    assert prepared["inputs"][0]["physical_sha256"]
+    entries = json.loads(output.read_text())["inputs"]
+    assert [entry["name"] for entry in entries] == ["idle", "alias"]
+    assert [entry["key"] for entry in entries] == [key, key]
+    assert [entry["convergence_error"] for entry in entries] == [0.0, 0.0]
+    assert all(
+        entry["wall_seconds"] >= 0 and entry["cpu_seconds"] >= 0 for entry in entries
+    )
 
 
 def test_partial_attempt_never_reuses_an_old_journal(tmp_path: Path) -> None:
@@ -141,7 +162,7 @@ def test_partial_attempt_never_reuses_an_old_journal(tmp_path: Path) -> None:
         tmp_path / name
         for name in ("inputs.json", "matrix.json", "summary.md", "attempt.jsonl")
     )
-    assert main(["--freeze-inputs", str(manifest)], inputs=inputs) == 0
+    write_legacy_manifest(inputs, manifest)
     journal.write_text("earlier attempt")
     assert (
         main(

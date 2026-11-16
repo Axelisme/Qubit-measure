@@ -23,31 +23,19 @@ from numpy.typing import NDArray
 from zcu_tools.simulate.evolution import (
     Engine,
     EvolutionResult,
-    ModelSource,
     NoValidKernel,
-    TimelineBatch,
+    ReferenceResult,
 )
 
-from tests.simulate.evolution.contract.interaction_reference import (
-    interaction_reference,
-)
-from tests.simulate.evolution.contract.reference import (
-    ReferenceResult,
-    converged_reference,
-    density_error,
-)
 from tools.family_pareto_inputs import (
     Input,
     canonical_json,
     digest,
     freeze_manifest,
-    make_inputs,
-    physical_input,
 )
 from tools.family_pareto_reference import (
     ReferenceCache,
-    prepare_references,
-    solve_reference,
+    load_references,
 )
 from tools.family_pareto_report import render_summary as render_summary
 from tools.family_pareto_results import (
@@ -59,6 +47,7 @@ from tools.family_pareto_results import (
     ModeResult,
     Refusal,
     Sample,
+    density_error,
     dominance,
     timing_equivalents,
 )
@@ -479,8 +468,6 @@ def run_table(
     inputs: list[Input],
     families: tuple[str, ...] = ALL_FAMILIES,
     *,
-    reference_solver: Callable[[ModelSource, TimelineBatch], ReferenceResult]
-    | None = None,
     reference_cache: Path | ReferenceCache | None = None,
     policy_runner: Callable[
         [Input, str, ReferenceResult], FamilyResult
@@ -489,14 +476,11 @@ def run_table(
 ) -> list[InputResult]:
     """Measure every family and default for each input, sharing identical oracles.
 
-    Inputs stay in caller order. Independent two-level full-Lindblad references
-    are cached by complete physical content, not family or input alias. All
-    failures except an initial NoValidKernel stop the whole table.
-    Real inputs use the exact interaction-picture solver; synthetic inputs keep
-    the lab-frame solver. reference_cache optionally persists complete references;
-    an injected reference_solver owns its own caching and tolerance contract.
-    ReferenceCache(only=True) requires a disk hit before any timing, never solving
-    inside the batch. It cannot be combined with an injected reference_solver.
+    Inputs stay in caller order. All references must load from reference_cache
+    before any policy or Engine starts. Missing names and simulator cache keys
+    are reported together. Equal physics shares one reference object, excluding
+    only model identity. No solver runs and no cache entries are written.
+    All failures except an initial NoValidKernel stop the whole table.
     Real default paths are also timed with their observed family union pinned,
     separately from dominance. progress receives untimed policy/sample events,
     including explicit skipped modes, before later failures can discard them.
@@ -506,33 +490,13 @@ def run_table(
         if isinstance(reference_cache, ReferenceCache)
         else ReferenceCache(reference_cache)
     )
-    if cache.only and reference_solver is not None:
-        raise ValueError("cache-only timing cannot use an injected reference solver")
-    references: dict[str, ReferenceResult] = {}
+    prepared = load_references(inputs, cache)
     rows = []
-    for index, item in enumerate(inputs):
+    for index, (item, ready) in enumerate(zip(inputs, prepared, strict=True)):
         _emit(progress, event="input_start", input=item.name)
-        case = item.build()
-        with closing(case.source):
-            key = digest(physical_input(case))
-            oracle_key = digest(physical_input(case, include_identity=False))
-            oracle_wall = oracle_cpu = 0.0
-            if oracle_key not in references:
-                wall, cpu = perf_counter(), process_time()
-                references[oracle_key] = (
-                    reference_solver(case.source, case.batch)
-                    if reference_solver is not None
-                    else solve_reference(
-                        case,
-                        solver=interaction_reference
-                        if item.category == "real"
-                        else converged_reference,
-                        cache_dir=cache.directory,
-                        cache_only=cache.only,
-                    )
-                )
-                oracle_wall, oracle_cpu = perf_counter() - wall, process_time() - cpu
-        reference = references[oracle_key]
+        key, oracle_key = ready.physical_sha256, ready.oracle_sha256
+        oracle_wall, oracle_cpu = ready.wall_seconds, ready.cpu_seconds
+        reference = ready.reference
         _emit(
             progress,
             event="reference_ready",
@@ -633,14 +597,12 @@ def local_data_directory() -> Path:
 
 
 def _selected_families(
-    names: str | None, *, freezing: bool, preparing_references: bool
+    names: str | None, *, checking_references: bool
 ) -> tuple[str, ...]:
     if names is None:
         return ALL_FAMILIES
-    if freezing or preparing_references:
-        raise ValueError(
-            "--families cannot be combined with --freeze-inputs or --prepare-references"
-        )
+    if checking_references:
+        raise ValueError("--families cannot be combined with --check-references")
     families = tuple(dict.fromkeys(names.split(",")))
     unknown = [name for name in families if name not in ALL_FAMILIES]
     if unknown:
@@ -652,36 +614,44 @@ def _selected_families(
 
 def _command_inputs(
     args: argparse.Namespace, inputs: list[Input] | None
-) -> list[Input]:
-    if args.scenario is not None and args.include_synthetic:
-        raise ValueError("--scenario cannot be combined with --include-synthetic")
+) -> tuple[list[Input], dict[str, object]]:
+    # Source/report identity stay together until their storage contract is settled.
+    # Preserve the existing builder/archive behavior here; do not select a new default.
     if args.scenario is None and (
         args.summary_output is not None or args.compare_summary is not None
     ):
         raise ValueError("--summary-output and --compare-summary require --scenario")
     items = make_real_inputs(args.scenario) if inputs is None else inputs
-    if inputs is not None and args.scenario is not None:
+    if args.scenario is not None:
         legal = [item.name for item in items]
-        items = [item for item in items if item.name == args.scenario]
-        if not items:
+        matches = [
+            (index, item)
+            for index, item in enumerate(items)
+            if item.name == args.scenario
+        ]
+        if not matches:
             raise ValueError(
                 f"Unknown scenario: {args.scenario}. Legal names: {', '.join(legal)}"
             )
-    return [*make_inputs(), *items] if args.include_synthetic else items
+        if len(matches) != 1:
+            sources = [
+                f"input[{index}]: {args.manifest or canonical_json(item.manifest)}"
+                for index, item in matches
+            ]
+            raise ValueError(
+                f"Ambiguous scenario: {args.scenario}. Sources: {'; '.join(sources)}"
+            )
+        items = [matches[0][1]]
+    return items, freeze_manifest(items)
 
 
 def _scenario_paths(args: argparse.Namespace, run_id: str) -> None:
     if args.scenario is None:
         return
-    if args.manifest is not None:
-        raise ValueError(
-            "--scenario freezes its own manifest; do not supply --manifest"
-        )
     if args.reference_cache is None:
         args.reference_cache = local_data_directory() / "references"
-    args.reference_cache_only = args.reference_cache_only or not args.prepare_references
     if args.output is None or (
-        not args.prepare_references
+        not args.check_references
         and (args.summary is None or args.partial_output is None)
     ):
         directory = local_data_directory() / args.scenario / run_id
@@ -708,10 +678,7 @@ def _parse_command(argv: list[str] | None) -> argparse.Namespace:
         help="annotation only; does not acquire a lock",
     )
     parser.add_argument("--reference-cache", type=Path)
-    parser.add_argument("--reference-cache-only", action="store_true")
-    parser.add_argument("--prepare-references", action="store_true")
-    parser.add_argument("--include-synthetic", action="store_true")
-    parser.add_argument("--freeze-inputs", type=Path)
+    parser.add_argument("--check-references", action="store_true")
     parser.add_argument("--manifest", type=Path)
     parser.add_argument("--output", type=Path)
     parser.add_argument("--summary", type=Path)
@@ -729,7 +696,7 @@ def _write_scenario_summary(
     started_at_utc: str,
     manifest_sha256: str,
 ) -> None:
-    # Delay import because the summary owner consumes the result types above.
+    # Summary publication is optional for inventory-wide runs.
     from pydantic import TypeAdapter
 
     from tools.family_pareto_summary import Provenance, build_summary, publish_summary
@@ -744,9 +711,7 @@ def _write_scenario_summary(
     summary = build_summary(
         rows[0],
         manifest_sha256=manifest_sha256,
-        measured_families=_selected_families(
-            args.families, freezing=False, preparing_references=False
-        ),
+        measured_families=_selected_families(args.families, checking_references=False),
         provenance=provenance,
     )
     publish_summary(summary, args.summary_output, args.compare_summary)
@@ -754,62 +719,44 @@ def _write_scenario_summary(
 
 
 def main(argv: list[str] | None = None, *, inputs: list[Input] | None = None) -> int:
-    """Freeze inputs or measure a matching manifest; output failures return nonzero.
+    """Check all references or measure prepared inputs; failures return nonzero.
 
-    --scenario NAME selects before construction, freezes in this command and
-    measures cache-only without --manifest. Missing paths default to shared
-    local Git-common-dir benchmark storage. --prepare-references explicitly
-    permits solving misses, using the same scenario workflow without timing.
-    --summary-output writes current-schema JSON plus sibling Markdown, and
-    --compare-summary overrides the tracked scenario baseline. Comparison
-    failure/mismatch does not block writes. --exclusive is an annotation only.
+    inputs optionally supplies already selected declarations for in-process
+    callers. --scenario requires exactly one matching name before construction;
+    unknown names list legal names and ambiguous names list source declarations.
+    It can be combined with --manifest. Source selection and report identity
+    remain in _command_inputs; their frozen-storage migration is not complete.
 
-    Without --scenario, the inventory workflow below remains explicit.
-    --freeze-inputs writes inputs before any oracle or timing.
-    --prepare-references requires --manifest, --output and --reference-cache.
-    It solves or loads cached references and writes a reference report without
-    Engine measurement or a required --summary. Run preparation nonexclusive.
-    --reference-cache-only forbids solving and fails on a cache miss.
-    --families NAME[,NAME...] measures only those pinned families, plus default
-    routing and its fixed observed family group. Omitting it measures all families.
-    It leaves physical inputs, the manifest and reference hashes unchanged.
-    Unknown names return 1 with the legal family names in the traceback.
-    Combining --families with --freeze-inputs or --prepare-references returns 1
-    before writing any output or building inputs.
-    Measurement requires --manifest, --output and --summary. A missing required
-    path, manifest mismatch, or preparation or measurement failure returns 1
-    with the original traceback and leaves output untouched. Output write
-    failures also return 1 but can leave partial files. Run measurement through
-    run_heavy --exclusive; CLI never starts per-sample processes. Optional
-    inputs replace only physical input construction for small in-process seam
-    tests.
+    --check-references loads the complete selection cache-only, writes each
+    name/key/convergence error/load time to --output and returns without policies
+    or Engine timing. Measurement uses the same preflight and requires --summary.
+    Any misses fail the batch before any timing. --reference-cache selects the
+    existing directory; this consumer never solves or writes references.
+    --families selects pinned families plus default and its fixed observed group.
+    --summary-output and --compare-summary retain single-scenario publication
+    and comparison; comparison failures do not block current summary writes.
+    --exclusive is annotation only. Journals preserve completed samples on later
+    failure. Preparation or measurement errors return 1 and preserve existing
+    complete reports; write failures may leave partial destination files.
     """
     args = _parse_command(argv)
     progress = None
     try:
         families = _selected_families(
             args.families,
-            freezing=args.freeze_inputs is not None,
-            preparing_references=args.prepare_references,
+            checking_references=args.check_references,
         )
         started_at_utc = datetime.now(timezone.utc).isoformat()
-        items = _command_inputs(args, inputs)
+        items, manifest = _command_inputs(args, inputs)
         run_id = uuid4().hex
         _scenario_paths(args, run_id)
-        manifest = freeze_manifest(items)
-        if args.freeze_inputs is not None:
-            args.freeze_inputs.write_text(
-                canonical_json(manifest) + "\n", encoding="utf-8"
-            )
-            print(f"Frozen {len(items)} inputs; manifest sha256={digest(manifest)}")
-            return 0
         if (
             (args.manifest is None and args.scenario is None)
             or args.output is None
-            or (not args.prepare_references and args.summary is None)
+            or (not args.check_references and args.summary is None)
         ):
             raise ValueError(
-                "requires --manifest, --output and --summary (except reference preparation)"
+                "requires --manifest, --output and --summary (except reference checking)"
             )
         if args.manifest is not None:
             frozen = json.loads(args.manifest.read_text(encoding="utf-8"))
@@ -818,17 +765,23 @@ def main(argv: list[str] | None = None, *, inputs: list[Input] | None = None) ->
                     "frozen manifest differs from current inputs; do not tune inputs after measurement"
                 )
         state = tested_state()
-        if args.prepare_references:
-            prepared = prepare_references(
-                items,
-                ReferenceCache(args.reference_cache, only=args.reference_cache_only),
-            )
+        if args.check_references:
+            prepared = load_references(items, ReferenceCache(args.reference_cache))
             args.output.write_text(
                 canonical_json(
                     {
                         "manifest_sha256": digest(manifest),
                         "tested_state": state,
-                        "inputs": [asdict(entry) for entry in prepared],
+                        "inputs": [
+                            {
+                                "name": entry.name,
+                                "key": entry.key,
+                                "convergence_error": entry.reference.convergence_error,
+                                "wall_seconds": entry.wall_seconds,
+                                "cpu_seconds": entry.cpu_seconds,
+                            }
+                            for entry in prepared
+                        ],
                         "reference_total_wall_seconds": sum(
                             entry.wall_seconds for entry in prepared
                         ),
@@ -862,9 +815,7 @@ def main(argv: list[str] | None = None, *, inputs: list[Input] | None = None) ->
         rows = run_table(
             items,
             families,
-            reference_cache=ReferenceCache(
-                args.reference_cache, only=args.reference_cache_only
-            ),
+            reference_cache=ReferenceCache(args.reference_cache),
             progress=progress,
         )
         result = {
@@ -909,7 +860,7 @@ def main(argv: list[str] | None = None, *, inputs: list[Input] | None = None) ->
                 "slow_first_evolve_wall_seconds": 60,
                 "slow_clear_history": "unmeasured; n=0; no median or dominance",
                 "slow_retain_history": "same session immediately after first evolve; n=1",
-                "reference_cache_only": args.reference_cache_only,
+                "reference_cache_only": True,
                 "reference_cache": str(args.reference_cache)
                 if args.reference_cache
                 else None,
