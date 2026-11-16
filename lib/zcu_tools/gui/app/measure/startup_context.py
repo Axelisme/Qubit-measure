@@ -41,6 +41,17 @@ from zcu_tools.gui.session.setup_control import SetupControlPort
 from zcu_tools.gui.session.types import SocCfgHandle, SocHandle
 
 
+def simulation_workers(cpu_count: int | None) -> int:
+    """Choose GUI simulation workers, reserving one CPU and using at least one.
+
+    cpu_count is the caller's os.cpu_count() result; None or zero means unknown.
+    This policy applies only to GUI startup, not simulator factory defaults.
+    No CPU query, environment construction or numeric warmup runs here.
+    """
+    # ADR-0069: normal GUI use reserves one CPU; direct callers stay serial.
+    return max(1, (cpu_count or 1) - 1)
+
+
 @dataclass(frozen=True)
 class OwnerCalls:
     """Dispatch script commands synchronously using scheduler, the session owner.

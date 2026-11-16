@@ -2,7 +2,7 @@
 
 **Readers:** operator, lab-author. Start an offline single-fluxonium environment and supply a one-point twotone input.
 
-**Last updated:** 2026-11-02, caller-owned shared board inventory
+**Last updated:** 2026-11-16, GUI simulation workers
 
 This environment has one fluxonium, one DC source, one microwave line,
 one fast-flux line and one readout cavity. It has no coupler, second qubit or mux.
@@ -51,6 +51,9 @@ connect(launch="new", script="<checkout>/zcu_lab/simulation_envs/single_fluxoniu
 mock SoC and one fixed-unit DC FakeDevice through normal startup facets.
 It reads adjacent files, not files relative to the shell cwd. No acquisition,
 numeric warmup or real hardware access occurs during startup.
+The script selects `max(1, (os.cpu_count() or 1) - 1)` workers through the shared
+GUI startup policy. Eight CPUs select seven workers. Direct factory calls keep
+`workers=1`; evolution only parallelizes when there are multiple timelines.
 
 A new entry contains Q1 as `qubit/fluxonium`, R1 as `resonator`, and `flux_bias`
 as `device/current_source`. Q1 uses generators 1 and 2. R1 uses generator 0 and

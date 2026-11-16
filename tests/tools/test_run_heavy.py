@@ -32,6 +32,10 @@ from tests.tools._run_heavy_support import (
 pytestmark = pytest.mark.requires_subprocess
 
 
+def test_help_returns_success_without_launching_a_command() -> None:
+    assert main(["-h"]) == 0
+
+
 @pytest.fixture
 def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)

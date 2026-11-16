@@ -1,6 +1,6 @@
 # gui/widgets/form — Form draft view
 
-**Last updated:** 2026-10-27
+**Last updated:** 2026-11-16
 
 **讀者：** framework-dev。Form 草稿的 Qt 呈現、輸入與錯誤處理契約。
 
@@ -24,7 +24,7 @@ Host 必須同時傳入 `write=`、`select=` 與 `run_command=`，或全部省�
 
 `set_editing_enabled(enabled=False)` 保持表單可讀，不停用整個 widget。文字可選取與複製，fold titles 可展開、折疊與捲動；寫入與 commands 不可用。唯讀時第一次展開的 controls 也遵守這項限制。`refresh(env)` 使用新 capture 重讀已建層的 descriptions，不沿用舊 choices 或 active branch。Detach 與 close 關閉 editor 的 LifetimeScope，先停用回呼，再解除訂閱、row timer 與 eventFilter，最後停用 controls 並丟棄 local text。換 row 前也先關閉 row 的 scope。這些動作不提交文字，不關閉 caller 的 state。
 
-欄位錯誤在控制項下方的 `form.error.<path>` 顯示可選取的文字。底部的 `form.error.summary` 顯示第一條錯誤及完整路徑，包含折疊與 hidden 欄位。無錯誤時兩者隱藏。Direct 文字與 dropdown 以目前 palette 的 Base 混合淡紅底色，checkbox 與 model section 的名稱標紅。Expression 保留原底色，改以紅色邊框標示錯誤。帶色控制項或名稱標籤的 `formError` property 反映錯誤狀態，tooltip 先顯示錯誤再保留說明。錯誤消失時還原顏色與 tooltip；form-wide error label 與 group 的錯誤子欄位提示仍保留。Expression 的求值結果以 `= ` 前綴顯示，字串用 JSON 引號。Direct 數值的 authored input 與 preview value 不同時，旁邊以 `Effective: ` 明示有效值；相同時不重複顯示。Step 不整除後的 stop／center／span 使用這條路徑，Qt 不重做採樣公式。
+欄位錯誤在控制項下方的 `form.error.<path>` 顯示可選取的文字。底部的 `form.error.summary` 只顯示第一條沒有可見欄位呈現的錯誤及完整路徑，包含折疊、hidden 欄位與 model／group 錯誤。錯誤都已由可見欄位呈現時隱藏摘要，展開或折疊後立即更新。無錯誤時兩者隱藏。此呈現分工見 ADR-0065。Direct 文字與 dropdown 以目前 palette 的 Base 混合淡紅底色，checkbox 與 model section 的名稱標紅。Expression 保留原底色，改以紅色邊框標示錯誤。帶色控制項或名稱標籤的 `formError` property 反映錯誤狀態，tooltip 先顯示錯誤再保留說明。錯誤消失時還原顏色與 tooltip；form-wide error label 與 group 的錯誤子欄位提示仍保留。Expression 的求值結果以 `= ` 前綴顯示，字串用 JSON 引號。Direct 數值的 authored input 與 preview value 不同時，旁邊以 `Effective: ` 明示有效值；相同時不重複顯示。Step 不整除後的 stop／center／span 使用這條路徑，Qt 不重做採樣公式。
 
 Measure Run panel 使用 tab resource 的 guarded callbacks。Workflows 使用自己的 FormState 與 Apply／Discard／Start policy。Inspect 停用文字 idle commit，明確完成編輯後由 host 寫入有效 Spec。New Entry 與 writeback 編輯器保留各自的 entry capture、Apply／Cancel 與 destination guard。共用 editor 不接管這些 lifetime 或提交政策。公開 control object names、keyboard 與 Expression 細節見 `FormEditor` docstring。
 

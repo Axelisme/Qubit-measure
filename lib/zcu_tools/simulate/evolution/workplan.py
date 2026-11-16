@@ -299,14 +299,23 @@ class WorkPlan:
     drain on success, cancellation or failure. Acquiring after close raises
     RuntimeError. complete_table retains the full immutable evolve geometry for
     lazy inventories until close; None lets standalone callers supply geometry.
+    history_mode selects record for real evolves, project for read-only routing
+    queries. Both modes price the complete content's inventory against current
+    history. Projection does not mutate usage, content membership or generation.
     Model-only resident cache ownership is separate.
     """
 
     def __init__(
-        self, *, content_key: bytes = b"", complete_table: SegmentTable | None = None
+        self,
+        *,
+        content_key: bytes = b"",
+        complete_table: SegmentTable | None = None,
+        history_mode: Literal["record", "project"] = "record",
     ) -> None:
         # Engine supplies the whole numerical input digest, independent of caches.
         self.content_key = content_key
+        # Query pricing projects the same totals without counting an acquire.
+        self.history_mode = history_mode
         self.routing = RoutingCollector()
         self._complete_table = complete_table
         self._facts: dict[Hashable, _Resource] = {}

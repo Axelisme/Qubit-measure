@@ -6,7 +6,7 @@ from zcu_tools.gui.session.context_types import SavedPoint
 from zcu_tools.gui.session.types import ParameterContext
 from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
 from zcu_tools.resources.entry.registry import component_registry
-from zcu_tools.resources.entry.schema import ComponentSchema, PointDocument
+from zcu_tools.resources.entry.schema import ComponentSchema, ParameterDocument
 
 
 def parameter_capture(
@@ -34,7 +34,7 @@ def parameter_capture(
                 raise ValueError(
                     f"Different model already registered for {component.kind!r}"
                 )
-        point = PointDocument.model_validate(
+        point = ParameterDocument.model_validate(
             {
                 "format": "zcu.parameter-container",
                 "format_version": "2.0",

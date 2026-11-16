@@ -2,7 +2,7 @@
 
 **讀者：** operator、lab-author、agent。準備 FTF 模擬參數與 entry，並從 GUI 或 Notebook 啟動模擬環境。
 
-**Last updated:** 2026-11-02，共用 v2 板子與手動遷移
+**Last updated:** 2026-11-16，GUI 模擬保留一核
 
 既有 entry 把 resonator 與 mux group 的 `ext.time_of_fly` 搬到頂層 `time_of_fly`。程式不自動搬移。
 
@@ -55,7 +55,8 @@ Script 用 `ctx.context.apply_alias_rows` 初始化該 point 的 alias，框架�
 Script 接著建立離線 FTF 環境，安裝 SoC，登記 f1_bias、coupler_bias、
 f2_bias 三個 live device，GUI 即可從 New Tab 開實驗。毋須手動 Open 或選 point。
 Template 不含 module library 或校準值；tab 可編輯，但執行量測前仍須設定有效輸入。
-Script 用 `workers=1, warmup=False`，不在啟動時預編譯或執行 acquisition。
+Script 透過共用 GUI 策略選擇 `workers=max(1, (os.cpu_count() or 1) - 1)`，保留一核。
+`warmup=False` 不變，不在啟動時預編譯或執行 acquisition。
 
 MCP 的等效入口是
 `connect(launch="new", script="/absolute/path/startup.py", project_root="/absolute/new-ftf-project")`。
@@ -144,7 +145,9 @@ F1／F2 可選 `q_cap`、`xqp`、`aphi`；coupler 只有 `q_cap`、`aphi`，`q_i
 
 ## 演化與重播
 
-FTF 預設使用分段引擎的快速算法。GUI startup 明確傳 `workers=1, warmup=False`，不啟動數值預編譯。Notebook 明確傳 `workers=max(1, (os.cpu_count() or 1) - 2), warmup=True`，保留兩核並在建立環境後啟動單一背景 worker 預編譯常用數值路徑。核心數未知時使用 1 個 worker，八核主機使用 6 個 Notebook workers。公開 `ftf()` 的預設是 `workers=1, warmup=False`；`workers` 必須為正整數。
+FTF 預設使用分段引擎的快速算法。GUI startup 透過共用策略明確傳 `workers=max(1, (os.cpu_count() or 1) - 1)`，保留一核，至少使用 1 個 worker。GUI 保持 `warmup=False`，不啟動數值預編譯。核心數未知時使用 1 個 worker，八核主機使用 7 個 GUI workers。
+
+Notebook 明確傳 `workers=max(1, (os.cpu_count() or 1) - 2), warmup=True`，仍保留兩核。建立環境後，它啟動單一背景 worker 預編譯常用數值路徑。核心數未知時使用 1 個 worker，八核主機使用 6 個 Notebook workers。公開 `ftf()` 的預設仍是 `workers=1, warmup=False`；`workers` 必須為正整數。測試、benchmark、研究與其他直接呼叫不套用 GUI 策略。
 
 預編譯會占用 CPU 與記憶體，只把編譯時間與其他工作重疊，不縮短總編譯成本。同一個 process 內啟用 warmup 的環境共用同一個 future。
 

@@ -22,6 +22,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from ._envelope import sample_values
+from ._inspection import DispatchCandidate, DispatchInspection
 from ._parallel import execution_pool, native_limit
 from ._validation import density, integers, owned, shape
 from .secular import FluxSchedule, FluxWaveform, ModelSource, SegmentShift
@@ -751,6 +752,61 @@ class Engine:
             result.paths.warn_exceeded(stacklevel=3)
             self._routing_reuse.add(reuse_key, reuse_snapshot)
             return result
+
+    def inspect_dispatch(
+        self,
+        source: ModelSource,
+        batches: Sequence[TimelineBatch],
+        *,
+        budget: float = 1e-3,
+        cancel: CancellationQuery | None = None,
+    ) -> DispatchInspection:
+        """Inspect the shared classifier without evolving density.
+
+        source, batches and budget have the same meaning as evolve. Rows use
+        batch/point/split-segment coordinates documented by RowKey. Only selected
+        rows have a final family; local guards remain deferred. Rows requiring
+        a driven prefix density report needs_prefix_input instead of computing
+        the prefix. Floquet guards still integrate their one-period propagator.
+        Numerical preparation and
+        model errors propagate, as in evolve. A closed Engine or invalid budget
+        raises before planning; cancellation raises Cancelled without a result.
+        Callers serialize operations sharing a source/history, as for evolve.
+        Does not modify routing history: usage, content membership and
+        generation stay unchanged. Pricing projects the totals that evolve
+        would record from the same starting history. Does not register or
+        change routing-reuse facts. Guard preparations expire on return, not retained
+        in Engine caches. Subsequent evolve routing and densities are unchanged.
+        Source model caches and shift registrations may be populated.
+        """
+        from ._dispatch import classify, create_work_plan
+        from ._input_key import input_key
+        from ._inspection import report
+        from ._planning import plan
+        from .kernel import KernelContext
+
+        cancel = Event() if cancel is None else cancel
+        with self._lock, native_limit.acquire():
+            self._check_evolve_ready(budget, cancel)
+            if not batches or not any(len(batch.points) for batch in batches):
+                return DispatchInspection(())
+            geometry = plan(source, batches)
+            trace: dict[int, dict[str, DispatchCandidate]] = {}
+            with closing(
+                create_work_plan(
+                    geometry.table,
+                    source,
+                    budget,
+                    content_key=input_key(source, batches, budget),
+                    history_mode="project",
+                )
+            ) as work_plan:
+                # ADR-0078: expose observations, not a second dispatch entry point.
+                context = KernelContext(source, budget, work_plan, self._families)
+                dispatch = classify(geometry, self._kernels, context, trace=trace)
+                if cancel.is_set():
+                    raise Cancelled()
+                return report(geometry, batches, dispatch, trace)
 
     def _check_evolve_ready(self, budget: float, cancel: CancellationQuery) -> None:
         """Check evolve preconditions without side effects under caller-held resources.

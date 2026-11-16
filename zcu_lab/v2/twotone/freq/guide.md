@@ -2,7 +2,7 @@
 
 **Readers:** operator, agent. Two-tone qubit spectroscopy: drives a qubit probe tone while reading out the resonator, sweeps the drive frequency, and fits the qubit response (Lorentzian or sinc) to extract the qubit transition frequency and its linewidth. Runs on the configured SoC, including an explicitly launched offline environment. In hardware first bring-up, run it after onetone/flux_dep has found the scanned device's integer reference in `$qubit.flux` and onetone/freq has re-calibrated the resonator at that flux.
 
-**Last updated:** 2026-10-29, optional preparation pulse
+**Last updated:** 2026-11-16, local peak selection and fit window
 
 After changing the parameter source, use Reset to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Reset can overwrite unsaved inputs.
 
@@ -36,29 +36,45 @@ for offline settings, units and reference-only limits.
 
 ## Peak selection
 
-Analysis lists all candidates in `peaks`, ordered by prominence.
-Set `expected_center_mhz` to fit the nearest candidate. Leave it blank to fit the
-most prominent candidate. `min_prominence` defaults to 0.2 of projected signal
-peak-to-peak, and `min_distance_mhz` defaults to zero.
-`min_snr` defaults to 5. Both prominence and height above the signal median
-must reach this multiple of first-difference MAD noise sigma.
-`min_width_samples` defaults to 0, disabling the observable half-prominence
-width gate. Raise it only for fine scans. When a line occupies only 1–2 samples,
-its center frequency can still locate the transition, but its FWHM cannot be
-resolved. To measure linewidth, scan finely around that line.
+Analysis has three controls: Model type, Expected center and Min SNR.
+Model type selects `lor` or `sinc`.
+Set Expected center, `expected_center_mhz`, to select the highest local maximum
+near that frequency. A candidate is nearby within two median scan steps or
+half its observable half-prominence width, whichever is larger.
+Leave Expected center blank to select the most prominent candidate.
+Analysis lists SNR-qualified candidates in `peaks`, ordered by prominence.
+It does not apply a threshold relative to the full signal range, so a strong
+transition elsewhere in a wide scan does not suppress a weak target.
+Minimum width and minimum separation gates are fixed at zero.
+Min SNR, `min_snr`, defaults to 5. Both prominence and height above the signal
+median must reach this multiple of first-difference MAD noise sigma.
+When a line occupies only 1–2 samples, its center frequency can still locate
+the transition, but its FWHM cannot be resolved.
+To measure linewidth, scan finely around that line.
 Each candidate's `snr` is height above the median divided by noise sigma,
 not prominence divided by sigma. These are statistical gates, not proof that
 a candidate is a physical transition. Lowering `min_snr` can recover weak lines
 and also admit more noise. See the fitting README for the estimator and limits.
-Analysis fits the selected interval bounded halfway to neighbouring candidates.
+Analysis starts with a window extending six half-widths on each side of the
+selected peak. A candidate's width is the full width at half prominence, so
+this radius is three times its reported width. For an isolated peak on a flat
+background, that is six HWHM on each side.
+Neighbouring candidate midpoints clip the window. Analysis then includes at
+least the six samples nearest the selected center, even if that crosses a
+midpoint. Close peaks no longer fail just because isolation leaves too few
+samples. Overlapping transitions can still bias a single-peak fit.
 The Lorentzian fit starts from the detected positive peak's center and width.
-This avoids treating a broad peak's local median as background and fitting a dip.
-Analysis always draws the fitted curve and the red line at the fitted center.
+Its baseline may lie below the window minimum because the edges still contain
+peak tails.
+Analysis shades the actual fitted interval and labels its bounds in MHz.
+It draws the fitted curve and the red line at the fitted center.
 Dotted gray lines mark other candidates.
 Candidate center and width are sampled estimates, not fitted frequency or FWHM.
 `truncated=True` means the scan clips a half-prominence crossing.
 Widen or recenter that scan before using its linewidth.
-No detected candidate produces an analysis failure, not a frequency estimate.
+No SNR-qualified candidate near Expected center produces `AnalysisFailed`,
+not a fit to a distant transition. The message reports the selected candidate
+count and thresholds. A scan with fewer than six acquired samples also fails.
 
 ## Typical writeback
 

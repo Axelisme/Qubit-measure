@@ -35,8 +35,8 @@ from zcu_tools.resources.context.library import (
 from zcu_tools.resources.entry import component_registry, role_registry
 from zcu_tools.resources.entry.schema import (
     ComponentSchema,
-    PointDocument,
-    PointGeneral,
+    ParameterDocument,
+    ParameterGeneral,
 )
 
 from tests.gui.form_adapter._indexed_models import NativeGroup, NativeTone, indexed_tree
@@ -230,11 +230,11 @@ def captured_env(amount: float) -> FormEnv:
         ModuleLibraryDocument(format="zcu.module-library", format_version="2.0")
     )
     parameters = ParameterContext(
-        point=PointDocument(
+        point=ParameterDocument(
             format="zcu.parameter-container",
             format_version="1.0",
             schema_version=1,
-            general=PointGeneral(
+            general=ParameterGeneral(
                 created_at="2026-10-13T00:00:00Z", ext={"amount": amount}
             ),
         ),
@@ -276,7 +276,7 @@ def factory_env(amount: float, *, library: LibrarySnapshot | None = None) -> For
     env = captured_env(amount)
     parameters = env.parameters
     assert parameters is not None
-    point = PointDocument.model_validate(
+    point = ParameterDocument.model_validate(
         {
             "format": "zcu.parameter-container",
             "format_version": "2.0",

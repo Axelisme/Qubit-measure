@@ -209,11 +209,13 @@ def test_run_blocker_counts_resource_errors_with_component_driver(
     ui = ComponentDriver(view.tab)
     capture_step(ui, tmp_path, "cfg-two-errors")
     assert not ui.observe("Run").enabled
-    assert ui.observe("Run").tooltip == "first: Field required (+1 more)"
+    assert ui.observe("Run").tooltip == "Fix the fields marked in red"
+    assert ui.observe(object_name="run.cfg_error").text == "Config invalid: 2 fields"
     ui.enter_text(object_name="form.input.first", value="1")
     capture_step(ui, tmp_path, "cfg-one-error")
     assert not ui.observe("Run").enabled
-    assert ui.observe("Run").tooltip == "second: Field required"
+    assert ui.observe("Run").tooltip == "Fix the fields marked in red"
+    assert ui.observe(object_name="run.cfg_error").text == "Config invalid: 1 field"
     ui.enter_text(object_name="form.input.second", value="2")
     capture_step(ui, tmp_path, "cfg-valid")
     assert ui.observe("Run").enabled
@@ -246,7 +248,7 @@ def test_run_shows_domain_decision_before_hardware_gate(
     ui = ComponentDriver(view.tab)
     capture_step(ui, tmp_path, "domain-before-startup")
     assert not ui.observe("Run").enabled
-    assert ui.observe("Run").tooltip == "value: Field required"
+    assert ui.observe("Run").tooltip == "Fix the fields marked in red"
 
     ui.enter_text(object_name="form.input.value", value="1")
     capture_step(ui, tmp_path, "startup-after-admission")
@@ -276,7 +278,7 @@ def test_run_retains_editor_local_parse_before_hardware_gate(
     capture_step(ui, tmp_path, "parse-local-error")
     assert not ui.observe("Run").enabled
     assert ui.observe(object_name="form.input.reps").text == "many"
-    assert ui.observe("Run").tooltip.startswith("Config invalid: reps: ")
+    assert ui.observe("Run").tooltip == "Fix the fields marked in red"
     ui.enter_text(object_name="form.input.reps", value="7")
     capture_step(ui, tmp_path, "parse-repaired-startup")
     assert not ui.observe("Run").enabled
@@ -305,7 +307,7 @@ def test_editor_input_reaches_the_resource_and_validity_gates_run(
     assert view.resource.input.data["reps"] == 100
     assert field_error(view.tab, "reps") != ""
     assert not view.tab.run_btn.isEnabled()
-    assert view.tab.run_btn.toolTip().startswith("Config invalid")
+    assert view.tab.run_btn.toolTip() == "Fix the fields marked in red"
     reason = view.tab.cfg_invalid_reason()
     assert reason is not None and "reps" in reason
 

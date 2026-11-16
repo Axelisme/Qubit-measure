@@ -144,13 +144,16 @@ class SixFluxoniumSource:
     history is borrowed by all six sources; None gives each ModelSource its own.
     families restricts every source's Engine, including projection continuations;
     unknown names raise on construction, unavailable domains raise on acquire.
+    workers selects each source Engine's parallel width across timelines (default 1).
+    Values below 1 raise ValueError. Sources are still prepared serially.
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0913  # tolerated: independent optional controls retain caller-selected workers, clock, truth log and routing
         self,
         settings: SixFluxoniumSettings,
         devices: DeviceManager,
         *,
+        workers: int = 1,
         clock: SimulationClock | None = None,
         truth_log: Path | None = None,
         history: RoutingHistory | None = None,
@@ -195,7 +198,7 @@ class SixFluxoniumSource:
                 readout_kind="mux",
                 runtime=SingleFluxoniumRuntimeOptions(
                     engine=Engine(
-                        workers=1,
+                        workers=workers,
                         routing_cache_bytes=settings.numerics.routing_cache_bytes // 6,
                         families=families,
                     ),
@@ -459,10 +462,11 @@ class SixFluxoniumSource:
         self._closed = True
 
 
-def six_fluxonium(
+def six_fluxonium(  # noqa: PLR0913  # tolerated: independent optional controls retain caller-selected workers, clock, truth log and routing
     configuration: SixFluxoniumSettings | str | Path,
     *,
     soccfg: QickConfig,
+    workers: int = 1,
     clock: SimulationClock | None = None,
     truth_log: Path | None = None,
     history: RoutingHistory | None = None,
@@ -490,6 +494,8 @@ def six_fluxonium(
     clear() forces fresh solves without resetting sampling or clocks. families is
     the whitelist for every span, including projective continuations; None permits
     all families. Unknown names raise at build, unavailable domains at acquire.
+    workers selects each cavity Engine's parallel width across timelines (default 1).
+    Values below 1 raise ValueError; construction starts no worker pool.
     YAML, wiring, truth I/O and construction failures propagate with cleanup failures.
     """
     settings = (
@@ -520,6 +526,7 @@ def six_fluxonium(
         source = SixFluxoniumSource(
             settings,
             devices,
+            workers=workers,
             clock=sim_clock,
             truth_log=truth_log,
             history=history,

@@ -10,6 +10,7 @@ import numpy as np
 import zcu_tools.simulate.evolution as evolution
 from numpy.typing import NDArray
 from scipy.integrate import solve_ivp
+from zcu_tools.simulate.evolution import ReferenceResult, SolverTolerances
 
 if TYPE_CHECKING:
     from .kernel_suite import KernelCase
@@ -34,22 +35,6 @@ def density_error(
     if not np.isfinite(actual).all() or not np.isfinite(expected).all():
         raise ValueError("densities must be finite")
     return float(np.max(np.abs(actual - expected)))
-
-
-@dataclass(frozen=True)
-class SolverTolerances:
-    """DOP853 local error controls: positive relative rtol and absolute atol."""
-
-    rtol: float
-    atol: float
-
-
-@dataclass(frozen=True)
-class ReferenceResult:
-    """Validated reference: fine density (...,M,M) and max coarse/fine error."""
-
-    density: NDArray[np.complex128]
-    convergence_error: float
 
 
 _COARSE = SolverTolerances(2e-10, 2e-12)

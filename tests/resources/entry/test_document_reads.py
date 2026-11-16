@@ -16,7 +16,7 @@ from zcu_tools.resources.entry import (
     snapshot,
     source_path,
 )
-from zcu_tools.resources.entry.schema import PointDocument, SetupDocument
+from zcu_tools.resources.entry.schema import ParameterDocument
 
 from .view_support import create_entry, registered_model
 
@@ -129,9 +129,7 @@ def test_public_snapshot_and_source_path_preserve_cached_binding_and_isolation(
         )
         assert source_path(view) == expected
         captured = snapshot(view)
-        assert isinstance(
-            captured, SetupDocument if owner == "setup" else PointDocument
-        )
+        assert isinstance(captured, ParameterDocument)
         assert view.snapshot.values == [2, 3]
         assert view.source_path.values == [2, 3]
         assert view.path.values == [2, 3]

@@ -226,7 +226,7 @@ numerics:
     f2:
       native_cutoff: 24
       levels: 4
-    retained_levels: 16
+    retained_levels: 24
   solver:
     rtol: 0.00000001
     atol: 0.0000000001

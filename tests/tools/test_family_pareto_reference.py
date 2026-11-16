@@ -1,4 +1,4 @@
-"""Disk reference reuse at the solver seam, without expensive integration."""
+"""Cache-only batch preflight at the public measurement seam."""
 
 from contextlib import closing
 from dataclasses import replace
@@ -6,118 +6,67 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from zcu_tools.simulate.evolution import ModelSource, TimelineBatch
+from zcu_tools.simulate.evolution import ReferenceResult, reference_key, write_reference
 
-from tests.simulate.evolution.contract.accuracy_cases import accuracy_case
-from tests.simulate.evolution.contract.reference import (
-    ReferenceResult,
-    SolverTolerances,
-)
-from tools.family_pareto import FamilyResult, run_table
-from tools.family_pareto_inputs import Input
-from tools.family_pareto_reference import ReferenceCache, solve_reference
+from tests.tools.family_pareto_support import make_scene
+from tools import family_pareto
+from tools.family_pareto import run_table
+from tools.family_pareto_inputs import Input, Scene
+from tools.family_pareto_reference import ReferenceCache
+from tools.family_pareto_results import FamilyResult
 
 
-def test_cache_reuses_density_but_invalidates_physics_and_tolerances(
-    tmp_path: Path,
+def test_table_reports_all_misses_before_any_policy_or_engine(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    calls = 0
+    calls: list[str] = []
 
-    def solver(
-        source: ModelSource,
-        batch: TimelineBatch,
-        *,
-        coarse: SolverTolerances,
-        fine: SolverTolerances,
-    ) -> ReferenceResult:
-        nonlocal calls
-        calls += 1
-        return ReferenceResult(
-            np.tile(source.initial_density, (len(batch.points), 1, 1)), 1e-9
+    def build(offset: float) -> Scene:
+        scene = make_scene("idle_coherence")
+        return replace(
+            scene, batch=replace(scene.batch, end_ns=scene.batch.end_ns + offset)
         )
 
-    case = accuracy_case("idle_coherence")
-    with closing(case.source):
-        first = solve_reference(case, solver=solver, cache_dir=tmp_path)
-        second = solve_reference(case, solver=solver, cache_dir=tmp_path)
-        np.testing.assert_array_equal(second.density, first.density)
-        assert second.convergence_error == 1e-9
-        assert calls == 1
-
-        changed = replace(case, batch=replace(case.batch, end_ns=case.batch.end_ns + 1))
-        solve_reference(changed, solver=solver, cache_dir=tmp_path)
-        assert calls == 2
-
-        solve_reference(
-            case,
-            solver=solver,
-            cache_dir=tmp_path,
-            fine=SolverTolerances(1e-12, 1e-14),
+    inputs = [
+        Input("hit", lambda: build(0), "cached"),
+        Input("missing-second", lambda: build(1), "missing"),
+        Input("missing-third", lambda: build(2), "missing"),
+    ]
+    scene = inputs[0].build()
+    with closing(scene.source):
+        write_reference(
+            tmp_path,
+            scene.source,
+            scene.batch,
+            ReferenceResult(
+                np.tile(scene.source.initial_density, (len(scene.batch.points), 1, 1)),
+                1e-9,
+            ),
         )
-        assert calls == 3
-
-        solve_reference(case, solver=solver)
-        solve_reference(case, solver=solver)
-        assert calls == 5
-
-
-@pytest.mark.parametrize("change", ["missing", "physics", "tolerance"])
-def test_cache_only_never_solves_on_missing_or_changed_keys(
-    tmp_path: Path, change: str
-) -> None:
-    calls = 0
-
-    def solver(
-        source: ModelSource,
-        batch: TimelineBatch,
-        *,
-        coarse: SolverTolerances,
-        fine: SolverTolerances,
-    ) -> ReferenceResult:
-        nonlocal calls
-        calls += 1
-        return ReferenceResult(
-            np.tile(source.initial_density, (len(batch.points), 1, 1)), 1e-9
-        )
-
-    case = accuracy_case("idle_coherence")
-    with closing(case.source):
-        if change != "missing":
-            solve_reference(case, solver=solver, cache_dir=tmp_path)
-            hit = solve_reference(
-                case, solver=solver, cache_dir=tmp_path, cache_only=True
-            )
-            assert hit.convergence_error == 1e-9
-        before = calls
-        changed = (
-            replace(case, batch=replace(case.batch, end_ns=case.batch.end_ns + 1))
-            if change == "physics"
-            else case
-        )
-        fine = (
-            SolverTolerances(1e-12, 1e-14)
-            if change == "tolerance"
-            else SolverTolerances(2e-12, 2e-14)
-        )
-        with pytest.raises(FileNotFoundError, match="reference cache miss"):
-            solve_reference(
-                changed, solver=solver, cache_dir=tmp_path, cache_only=True, fine=fine
-            )
-        assert calls == before
-
-
-def test_table_cache_only_stops_before_timing_an_uncached_input(tmp_path: Path) -> None:
-    timed: list[str] = []
+    missing_keys = []
+    for item in inputs[1:]:
+        scene = item.build()
+        with closing(scene.source):
+            missing_keys.append(reference_key(scene.source, scene.batch))
 
     def policy(item: Input, family: str, reference: ReferenceResult) -> FamilyResult:
-        timed.append(family)
+        calls.append("policy")
         return FamilyResult(family, None, "unused", [])
 
-    with pytest.raises(FileNotFoundError, match="reference cache miss"):
+    def engine(*args: object, **kwargs: object) -> None:
+        calls.append("Engine")
+        raise AssertionError("Engine must not start before complete cache preflight")
+
+    # No public observer covers Engine construction; trap this external effect.
+    monkeypatch.setattr(family_pareto, "Engine", engine)
+    with pytest.raises(FileNotFoundError, match="reference cache miss") as failure:
         run_table(
-            [Input("idle", lambda: accuracy_case("idle_coherence"), "cache-only")],
+            inputs,
             ("t4",),
-            reference_cache=ReferenceCache(tmp_path, only=True),
+            reference_cache=ReferenceCache(tmp_path),
             policy_runner=policy,
         )
-    assert timed == []
+    assert calls == []
+    for item, key in zip(inputs[1:], missing_keys, strict=True):
+        assert item.name in str(failure.value)
+        assert key in str(failure.value)

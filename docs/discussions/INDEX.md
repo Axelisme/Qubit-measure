@@ -18,6 +18,31 @@
 
 ## 模擬量測環境
 
+- 2026-11-17 [共用清單的 Pareto 選集與明確新增場景](2026-11-17-pareto-selection-and-scene-append.md)：選取契約。Pareto 自持預設名稱，明確更新才新增列，reference producer 只讀解所選單列。
+
+- 2026-11-16 [凍結場景改為共用快取，Git 只留名稱與 hash 清單](2026-11-16-frozen-scene-storage.md)：資料入庫。數值不入庫，每筆單筆 gzip，Git 只留兩份小清單，重建不符就停。
+
+- 2026-11-16 [Exclusion estimator 退休](2026-11-16-exclusion-estimator-retirement.md)：刪除或收窄。退休沒有非測試 caller 的 helper，收窄 guard 的耗時影響改量實際改動。
+
+- 2026-11-16 [量測樣本時間的值域與成對比值檢查](2026-11-16-measurement-sample-durations.md)：值域取捨。Owner 原樣記錄有限非負秒數，成對區塊比值要求兩側總和為正。
+
+- 2026-11-16 [成對 Engine 計時的 process、身份與統計](2026-11-16-paired-engine-timing.md)：跨 process 計時。Warm 長駐、first/cold 每筆新 child，四項 telemetry 校準共用一個模式。
+
+- 2026-11-16 [共用模擬器計時與 reference 必填](2026-11-16-shared-simulator-measurement.md)：計時歸屬。Session、history 與 clock 共用 owner，consumer 保留 reference 與結果 schema，0 elapsed 原樣記錄。
+
+- 2026-11-16 [Family 量表改為整批 cache-only](2026-11-16-family-pareto-cache-only.md)：介面退休。Consumer 整批載入後才量測，check 不求解；公開接縫提供穩定的每筆 record 身份，存放已遷移到共用快取與小清單。
+
+- 2026-11-16 [模擬器場景凍結與參考解數值交接](2026-11-16-frozen-simulator-inputs.md)：資料交接。場景 producer 自持控制與模型，通用 codec 保留既有 key，獨立 solver 留在 tests 側。
+
+- 2026-11-16 [Floquet 的保留與價格重校](2026-11-16-floquet-kept-price.md)：保留或刪除。Committed 批次上 `floquet` 快 1.65–1.81 倍，保留並重校價格；三 family 排序等 `multitone_rwa` 修好。
+- 2026-11-16 [Floquet 的拒絕成本與單次 evolve 內的 frame 重用](2026-11-16-floquet-refusal-cost.md)：拒絕成本。既有拒絕條件提前，一次 evolve 內 exact-key frame 只建一次；不把拒絕機率算進價格，不跨 key 或跨 evolve 保留 frame，不做建 frame 前的 trace 下界。
+
+- 2026-11-15 [模擬器測試與量測的分層](2026-11-15-simulator-test-measurement-layering.md)：分層。Kernel、dispatch、序列、前端與 environment 分開驗，退休 acquire e2e 量測，決策見 [ADR-0078](../adr/0078-evolution-module-boundary.md#模擬器的測試與量測分層不做-e2e)。
+
+- 2026-11-15 [t6 只保留 direct](2026-11-15-t6-channel-removal.md)：刪除或收窄。移除代表性工作負載未選用的 channel 做法與價格分支，保留 direct 與既有 family。
+
+- 2026-11-14 [Sampled multitone 的過渡期拒收](2026-11-14-sampled-multitone-interim.md)：收窄 admission。兩個 multitone family 暫停 sampled 列，保留 constant pairs 與既有 fallback 定價。
+
 - 2026-11-14 [RB 型相位序列作為固定量表輸入](2026-11-14-random-gate-sequence-workloads.md)：場景擴充。離線固定 phase prefix 與 recovery，constant／Gaussian 共用，不加入 runtime RB 代數。
 
 - 2026-11-14 [common_frame 的步長成本歸 dispatch](2026-11-14-common-frame-step-pricing.md)：成本歸屬。移除 kernel 的 2 ns 下限，dispatch 依 first-order 步數比較成本，數值 guard 決定適用域。
@@ -61,12 +86,16 @@
 
 ## 測試與驗證
 
+- 2026-11-16 [Tools 標準化：補工具缺口，不搬目錄、不加硬閘](2026-11-16-tools-standardization.md)：工具標準化。品質工具補 `-h`／argv 與 docstring，加只報告的 docstring 現況列與 README 正向規則；不搬目錄、不加硬閘。
+- 2026-11-16 [實驗 probe 的 snapshot 保存與比較](2026-11-16-probe-snapshots.md)：工具範圍。保存與比較留在 tools，階段不寫 snapshot，環境清理由獨立 context manager 收尾。
+- 2026-11-15 [Doc relations 略過 fenced code 示例連結](2026-11-15-doc-relations-fenced-links.md)：檢查器誤報，修正 checker 對示例的判讀，保留正文連結與 ADR 檢查。
 - 2026-10-16 [Agent 自行做 UI e2e：元件驅動情境](2026-10-16-agent-ui-e2e.md)：Agent 經使用者可操作的元件驗證可見行為，使用者走查判品味。
 
 ## 存檔與資料格式
 
 - 2026-10-14 [量測成果 Artifact、設定快照與讀回的推導](2026-10-14-artifact-persistence.md)：設定快照正本只在 data.h5，保存與讀回決策見 [ADR-0063](../adr/0063-persistence-ownership.md)、[ADR-0069](../adr/0069-experiment-core-and-frontends.md) 與 [ADR-0067](../adr/0067-gui-application.md)。
 - 2026-10-23 [Store 讀取效率與寫入慣例](2026-10-23-store-read-efficiency.md)：保留分組提交，以增量讀和內容 hash 快照減少重複驗證。
+- 2026-11-16 [range_find 的 writeback：沒有就建立，有就覆寫](2026-11-16-range-find-writeback-upsert.md)：寫回目標缺元件。參數列帶選填 create_kind，Apply 在同一次 edit 先建元件再設值；不加列種類或入口，決策見 [ADR-0008](../adr/0008-cfg-editor-session.md)。
 
 ## 量測策略
 
@@ -77,3 +106,4 @@
 - 2026-11-03 [重複（A + readout）讀出鏈：效率、讀出 MIST 與三視角分解](2026-11-03-repeated-readout-chain.md)：重複讀出讓精度約隨 √N 提高，讀出 MIST 沿鏈累積限制 N；三視角分解遇讀出躍遷時沒有優勢。
 - 2026-11-03 [讀出鏈的 trace 不變量：低 SNR 下比較 A 變化的通用指標](2026-11-03-readout-chain-trace-invariant.md)：連續讀出鏈存 lag 0…L 共變異，每點以 tr(C₀⁻¹C_ℓ) 的非迭代等比擬合輸出 Â 與 λ̂，不需校準、態數、參考或門檻；多態分析只留給 MIST 類特殊需求。指標形式已由 [讀出鏈的資訊上限](2026-11-04-readout-chain-information-limits.md) 取代。
 - 2026-11-04 [讀出鏈的資訊上限：λ 指標、記錄層與分析層的損失、自校準](2026-11-04-readout-chain-information-limits.md)：顯示只畫 λ；讀出已知時讀出鏈在等時間下全面勝過 relax 實驗，存 lag 0…4 只損失 ≤ 18%，損失集中在分析層；改走全域兩態、兩通道的自校準估計。
+- 2026-11-15 [Two-qubit RB 的兩組都同時打單 qubit gates](2026-11-15-two-qubit-rb-simultaneous-gates.md)：並行排程。普通與heralded兩版的reference／interleaved都用每qubit時間線，在CZ共同同步，保留原frame與reset政策。

@@ -2,6 +2,8 @@
 
 **Readers:** operator, agent. Run heralded paired two-qubit RB and interpret gg/ee return survival alongside CZ-interleaved decay fits.
 
+**Last updated:** 2026-11-15
+
 Cfg sweep fields use `depth` / `seed`. This experiment uses cfg schema 2.0. Loading a run from an older major version retains Result and metadata, sets cfg to None and emits `CfgUnavailableWarning`. These old runs cannot be reanalyzed. No cfg migration or field alias is provided.
 
 Select `two_qubit/rb_heralded`. Calibrate the X90 pulses, full mux readout,
@@ -24,6 +26,32 @@ Both F1 and F2 tones require circle classifiers with radius from GE Post.
 Missing calibration, missing radius or linear classification fails before Run.
 Repeat GE and Post after changing readout settings. Classification happens
 during acquisition for both tagged reads, with g, e and other outcomes.
+
+## Sequences and cost
+
+Since 2026-11-15, both the reference and interleaved arms use the same
+concurrent single-qubit schedule as ordinary RB. Each qubit keeps its X90
+and virtual Z order. Its next X90 starts as soon as its own preceding pulse
+and configured delays finish, without waiting for the other qubit.
+With zero X90 delays, `X90_Q0, Z90_Q1, X90_Q1, X90_Q0, CZ` starts the first
+Q0 and Q1 X90s together; Q0's second X90 follows its first.
+CZ waits for both qubits, then starts both charge-line pulses together.
+After both CZ pulses and their delays finish, both qubits resume from that
+common boundary. Terminal readout waits for both qubits.
+
+Virtual Z still advances only its own logical frame. X90 phase remains the
+configured phase minus that frame. CZ keeps its physical charge phases fixed
+and applies the same local-Z frame corrections afterward. Each arm retains
+its own full-product recovery. Clifford depth and random seed identities do
+not change with the schedule.
+
+Both arms use this schedule so the interleaved comparison does not mix CZ
+insertion with a change in single-qubit concurrency or idle duration.
+Overlapping X90 crosstalk contributes to both arms; the comparison does not
+prove that all crosstalk cancels. Do not directly combine the new error
+estimates with data acquired before this date under the serial schedule.
+Herald filtering and optional reset are unchanged. Post-selection is not
+physical reset and does not prove a particular initial-state purity.
 
 ## Counts and complete rounds
 

@@ -21,7 +21,7 @@ from zcu_tools.resources.context.library import (
 from zcu_tools.resources.entry import component_registry, role_registry
 from zcu_tools.resources.entry.schema import (
     ComponentSchema,
-    PointDocument,
+    ParameterDocument,
 )
 
 
@@ -56,7 +56,7 @@ def synthetic_component() -> Generator[None]:
 def parameters(*, faults: tuple[ContextSourceFault, ...] = ()) -> ParameterContext:
     """Capture a Spec with an unresolved child, so existence needs no expansion."""
     return ParameterContext(
-        point=PointDocument.model_validate(
+        point=ParameterDocument.model_validate(
             {
                 "format": "zcu.parameter-container",
                 "format_version": "2.0",

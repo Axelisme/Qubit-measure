@@ -4,6 +4,7 @@ from collections.abc import Mapping
 from typing import Annotated, Literal
 
 from pydantic import Field, JsonValue
+from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.gui.form import (
     Display,
     FormCommandContext,
@@ -17,9 +18,9 @@ from zcu_tools.gui.form import (
 )
 from zcu_tools.gui.form.commands import ReadonlyFormInput
 from zcu_tools.gui.form_adapter import Form, FormContext
+from zcu_tools.program.v2 import PulseReadoutCfg, ResetCfg, SweepCfg
 
 from zcu_lab.v2.onetone._form_shared import initial_spectrum_tree
-from zcu_lab.v2.onetone._shared import LinearFreqCfg
 from zcu_lab.v2.onetone.freq.core import HomophasalSamplingCfg
 from zcu_lab.v2.support.measure.seed_metadata import (
     pulse_readout_seed_metadata,
@@ -88,13 +89,46 @@ class SamplingInput(FormModel):
         return {("sampling",): InputConverter(convert)}
 
 
-class FreqInput(LinearFreqCfg, SamplingInput):
+class FreqInput(ConfigBase, SamplingInput):
     """One-tone acquisition inputs with the selected sampling branch.
 
     Linear has no calibration fields. Homophasal requires resonance frequency
     and linewidth in MHz and phase offset in radians. Run records the resulting
     core cfg rather than this operator input.
     """
+
+    reset: Annotated[ResetCfg | None, FieldMeta(label="Reset")] = None
+    readout: Annotated[
+        PulseReadoutCfg,
+        FieldMeta(
+            label="Readout",
+            description="Resonator readout 設定與 timing（us）。",
+        ),
+    ]
+    freq: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="Frequency",
+            unit="MHz",
+            description="Absolute MHz 掃描起訖值。",
+        ),
+    ]
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ]
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
+        ),
+    ]
 
 
 def make_form(ctx: FormContext) -> Form[FreqInput]:
