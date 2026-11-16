@@ -1,6 +1,6 @@
 # Six independent fluxonium cavities
 
-**Last updated:** 2026-11-16，caller-selected worker width
+**Last updated:** 2026-11-17，integrated category contract
 
 **Readers:** framework-dev, lab-author, agent. Build and acquire six independent cavities through the normal simulation SoC.
 
@@ -156,12 +156,14 @@ Single-fluxonium's pulse-only private replay contract is unchanged.
 
 The backend partitions only routing patterns present in the request. It prepares
 independent cavity histories and ADC responses on those point subsets.
-Integrated mode flattens each cavity's history and terminal state into one
-marginal axis. Sorted cumulative-count boundaries preserve each sampled
-marginal count in at most `1 + sum(axis_sizes - 1)` bins. Each axis size is the
-maximum flattened count width for that cavity, with its retained level count
-as the minimum. Without projections, six 21-level circuits still use 121 bins,
-rather than `21**6` joint states. This summary represents marginal moments,
+Integrated mode represents each cavity with a marginal category axis whose
+counts sum to reps. Categories need not represent physical shot paths.
+The ADC owner's `cumulative_count_bins` preserves each sampled marginal count
+on shared sorted cumulative-count boundaries in at most
+`1 + sum(axis_sizes - 1)` bins. Each axis size is the maximum category count
+width for that cavity, with its retained level count as the minimum.
+Without projections, six 21-level circuits still use 121 bins, rather than
+`21**6` joint states. This summary represents marginal moments,
 not a cross-cavity joint quantum state or a physical joint-shot sample.
 Raw retains the complete independent sources through `IndependentRawShots`.
 Raw and decimated draws use the ADC owner's physical samplers, not that histogram.
