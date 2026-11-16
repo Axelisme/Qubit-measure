@@ -1,6 +1,6 @@
 # `gui.app.measure.writeback`
 
-**Last updated:** 2026-11-02
+**Last updated:** 2026-11-16，parameter create_kind 與作用中目的地 upsert
 
 **讀者：** framework-dev。寫回提案、review widget 與逐項 Apply 契約。
 
@@ -82,6 +82,10 @@ Preview 與 Apply 取當下作用中的文件組，global 寫 entry 層，point 
 Preview 的位置只含 entry_name 與 point，global 的 point 為 null。
 未開 entry 仍可預覽，位置兩欄與 current 值皆為 null，但 Apply 以 no_context 拒絕。
 缺少歷史來源不阻擋 concrete parameter／record 提案。
+`ParameterWriteback.create_kind` 預設為 None，元件不存在時仍報錯。
+Adapter 可指定 registered kind，Apply 才建立缺少的元件，填入提案欄位，其餘使用 model defaults。
+元件已存在時只寫提案欄位，不改 kind 或其他欄位。建立與覆寫共用同一個 parameter edit，任一項失敗整組不寫。
+Preview 的 current 缺值維持 None，remote parameter 列另回傳 create_kind；勾選與 item ID 規則不變，見 ADR-0008。
 Record 的 point 跟隨提交位置，global 樣本保存 null。
 全部提案通過輸入驗證後，共用 executor 先追加一筆 accepted
 ledger event，再依序提交 point 參數組、library 組與逐筆 Record，組內保留提案順序。

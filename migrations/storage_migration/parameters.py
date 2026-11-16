@@ -27,9 +27,9 @@ from zcu_tools.resources.entry import (
 from zcu_tools.resources.entry.schema import (
     PARAMETER_FORMAT,
     PARAMETER_VERSION,
-    SetupDocument,
+    ParameterDocument,
 )
-from zcu_tools.resources.parameter_upgrade import ParameterDocument
+from zcu_tools.resources.parameter_upgrade import ParameterUpgradeDocument
 
 from ._flux_units import apply_flux_groups, resolve_flux_units
 from ._meta_info import preserve_meta_field
@@ -68,7 +68,7 @@ def _seed_components(
     )
     data["components"] = _YAML_MAP.validate_python(mapping.components)
     seeded_document = prepare_parameter_batch(
-        ParameterDocument(data, entry.result_path / PARAMETERS_FILENAME),
+        ParameterUpgradeDocument(data, entry.result_path / PARAMETERS_FILENAME),
         transform=mapping.parameter_transform,
     )
     record_parameter_notes(
@@ -97,7 +97,7 @@ def _seed_components(
                 seeded = SetupView(
                     DocumentStore(
                         path,
-                        SetupDocument,
+                        ParameterDocument,
                         format=PARAMETER_FORMAT,
                         supported_version=PARAMETER_VERSION,
                     ),
@@ -520,7 +520,7 @@ def _convert_context(
         if not is_setup:
             _retain_point_slots(session, entry, label, mapping)
     dry_context = (
-        (dry_setup if is_setup else EditView(snapshot(dry_setup)))
+        (dry_setup if is_setup else EditView(snapshot(dry_setup), source=target))
         if dry_setup is not None
         else None
     )
@@ -588,7 +588,7 @@ def convert_parameters(
     dry_setup = None
     if session.dry_run:
         prepared = prepare_parameter_batch(
-            ParameterDocument(
+            ParameterUpgradeDocument(
                 {
                     "format": "zcu.parameter-container",
                     "format_version": "2.0",
@@ -607,7 +607,11 @@ def convert_parameters(
             session.manifest.report.destination.result_path / PARAMETERS_FILENAME,
             prepared.notes,
         )
-        dry_setup = EditView(prepared.document)
+        dry_setup = EditView(
+            prepared.document,
+            source=session.manifest.report.destination.result_path
+            / PARAMETERS_FILENAME,
+        )
     for candidate in _context_directories(source_root):
         _convert_context(session, entry, mapping, candidate, dry_setup)
     convert_samples(session, entry, mapping)

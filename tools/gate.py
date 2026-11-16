@@ -84,28 +84,28 @@ STATUS_CHECKS: Final = (
     ),
     Check(
         "file size",
-        (sys.executable, str(_TOOLS_DIR / "check_file_size.py")),
-        "violation_count",
+        (sys.executable, str(_TOOLS_DIR / "check_quality.py"), "all"),
+        "file-size.violation_count",
     ),
     Check(
         "test paths",
-        (sys.executable, str(_TOOLS_DIR / "check_test_path_correspondence.py")),
-        "violation_count",
+        (sys.executable, str(_TOOLS_DIR / "check_quality.py"), "all"),
+        "test-paths.violation_count",
     ),
     Check(
         "test structure",
-        (sys.executable, str(_TOOLS_DIR / "check_test_structure.py")),
-        "violation_count",
+        (sys.executable, str(_TOOLS_DIR / "check_quality.py"), "all"),
+        "test-structure.violation_count",
     ),
     Check(
         "test capabilities",
-        (sys.executable, str(_TOOLS_DIR / "check_test_capabilities.py")),
-        "violation_count",
+        (sys.executable, str(_TOOLS_DIR / "check_quality.py"), "all"),
+        "test-capabilities.violation_count",
     ),
     Check(
         "suppressions",
-        (sys.executable, str(_TOOLS_DIR / "check_suppressions.py")),
-        "total",
+        (sys.executable, str(_TOOLS_DIR / "check_quality.py"), "all"),
+        "suppressions.total",
     ),
 )
 
@@ -198,6 +198,10 @@ def measure(check: Check, root: Path) -> str:
     completed = subprocess.run(
         check.command, cwd=root, check=False, capture_output=True, text=True
     )
+    return _reading(check, completed)
+
+
+def _reading(check: Check, completed: subprocess.CompletedProcess[str]) -> str:
     if check.count_key is None:
         return "green" if completed.returncode == 0 else "RED"
     try:
@@ -216,7 +220,15 @@ def measure(check: Check, root: Path) -> str:
 def status(root: Path, *, with_pyright: bool) -> dict[str, str]:
     """Return each check's absolute reading over the whole tree."""
     checks = (*STATUS_CHECKS, PYRIGHT_CHECK) if with_pyright else STATUS_CHECKS
-    return {check.name: measure(check, root) for check in checks}
+    completed: dict[tuple[str, ...], subprocess.CompletedProcess[str]] = {}
+    readings: dict[str, str] = {}
+    for check in checks:
+        if check.command not in completed:
+            completed[check.command] = subprocess.run(
+                check.command, cwd=root, check=False, capture_output=True, text=True
+            )
+        readings[check.name] = _reading(check, completed[check.command])
+    return readings
 
 
 def run_step(step: Step, root: Path) -> Outcome:

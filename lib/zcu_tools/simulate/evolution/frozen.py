@@ -27,6 +27,14 @@ from .secular import (
     SegmentShift,
 )
 
+FROZEN_PHYSICAL_VERSION = 1
+"""Physical decoding contract shared by manifests and standalone inputs.
+
+Bump when fields, units, dtypes, defaults or Engine-input reconstruction change.
+This is not SEGMENT_NUMERIC_VERSION: numerical algorithm changes alone do not
+change the serialized input contract. Producers own migration after a bump.
+"""
+
 
 @dataclass(frozen=True)
 class FrozenInput:
@@ -149,16 +157,27 @@ def _track(value: dict[str, Any]) -> DriveTrack:
     )
 
 
-def _batch(value: dict[str, Any]) -> TimelineBatch:
+def _batch(value: dict[str, Any], loops: int, size: int) -> TimelineBatch:
     flux = value["flux"]
     waveform = value["flux_waveform"]
+    # Empty JSON lists lose dtype and trailing dimensions; DC model levels
+    # retain the loop count even when the batch has no scheduled segments.
+    # The source density retains M for empty continuation densities (0,M,M).
+    points = np.asarray(
+        value["points"], dtype=np.int64 if value["points"] == [] else None
+    )
+    levels = (
+        np.empty((0, loops), dtype=np.int64)
+        if value["points"] == [] and flux["level"] == []
+        else np.asarray(flux["level"])
+    )
     return TimelineBatch(
-        np.asarray(value["points"]),
+        points,
         tuple(_track(track) for track in value["tracks"]),
         FluxSchedule(
             np.asarray(flux["offsets"]),
             np.asarray(flux["start_ns"]),
-            np.asarray(flux["level"]),
+            levels,
         ),
         np.asarray(value["end_ns"]),
         None
@@ -166,7 +185,9 @@ def _batch(value: dict[str, Any]) -> TimelineBatch:
         else FluxWaveform(
             np.asarray(waveform["offsets"]),
             np.asarray(waveform["time_ns"]),
-            np.asarray(waveform["flux"]),
+            np.empty((0, loops), dtype=np.float64)
+            if value["points"] == [] and waveform["flux"] == []
+            else np.asarray(waveform["flux"]),
         ),
         tuple(tuple(times) for times in value["segment_boundaries"]),
         tuple(
@@ -176,6 +197,8 @@ def _batch(value: dict[str, Any]) -> TimelineBatch:
         None if value["start_ns"] is None else np.asarray(value["start_ns"]),
         None
         if value["initial_densities"] is None
+        else np.empty((0, size, size), dtype=np.complex128)
+        if value["points"] == [] and value["initial_densities"] == []
         else np.asarray(value["initial_densities"], complex),
     )
 
@@ -230,7 +253,11 @@ def read_physical_input(value: dict[str, object]) -> FrozenInput:
                 "slow_envelope_segments_per_period"
             ],
         ),
-        _batch(decoded["batch"]),
+        _batch(
+            decoded["batch"],
+            len(decoded["models"][0]["level"]),
+            len(decoded["initial_density"]),
+        ),
     )
 
 
@@ -244,7 +271,7 @@ def _unique_names(records: tuple[FrozenRecord, ...]) -> None:
 
 
 def write_frozen_manifest(path: Path, records: Iterable[FrozenRecord]) -> None:
-    """Write ordered records as canonical version-1 JSON inside stdlib gzip.
+    """Write records with FROZEN_PHYSICAL_VERSION inside canonical stdlib gzip.
 
     Calculate both physical hashes, reject duplicate/non-string names and keep
     caller metadata opaque. gzip has mtime=0 and no filename, so identical inputs
@@ -254,7 +281,7 @@ def write_frozen_manifest(path: Path, records: Iterable[FrozenRecord]) -> None:
     records = tuple(records)
     _unique_names(records)
     payload = {
-        "version": 1,
+        "version": FROZEN_PHYSICAL_VERSION,
         "inputs": [
             {
                 "name": record.name,
@@ -274,13 +301,13 @@ def write_frozen_manifest(path: Path, records: Iterable[FrozenRecord]) -> None:
 def read_frozen_manifest(path: Path) -> tuple[FrozenRecord, ...]:
     """Read a gzip manifest, preserving order and opaque JSON metadata.
 
-    Check version 1, unique string names and both physical hashes before
+    Check FROZEN_PHYSICAL_VERSION, unique names and both physical hashes before
     returning numeric records. Bad versions/hashes/duplicates raise ValueError.
     Missing fields, invalid JSON/gzip and I/O errors propagate. Reconstruct a
     caller-owned source separately with read_physical_input(record.physical).
     """
     payload = json.loads(gzip.decompress(path.read_bytes()))
-    if payload["version"] != 1:
+    if payload["version"] != FROZEN_PHYSICAL_VERSION:
         raise ValueError("unsupported frozen manifest version")
     records = tuple(
         FrozenRecord(record["name"], record["physical"], record["metadata"])
@@ -296,7 +323,7 @@ def read_frozen_manifest(path: Path) -> tuple[FrozenRecord, ...]:
 
 
 def write_frozen_input(path: Path, source: ModelSource, batch: TimelineBatch) -> None:
-    """Write one version-1 numeric input and its full physical hash to path.
+    """Write a FROZEN_PHYSICAL_VERSION input and its physical hash to path.
 
     Parent directories are created and an existing file is replaced. Serialization
     and I/O errors propagate. No solver or Engine work runs.
@@ -305,7 +332,11 @@ def write_frozen_input(path: Path, source: ModelSource, batch: TimelineBatch) ->
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         canonical_json(
-            {"version": 1, "physical_sha256": digest(physical), "physical": physical}
+            {
+                "version": FROZEN_PHYSICAL_VERSION,
+                "physical_sha256": digest(physical),
+                "physical": physical,
+            }
         )
         + "\n",
         encoding="utf-8",
@@ -313,14 +344,14 @@ def write_frozen_input(path: Path, source: ModelSource, batch: TimelineBatch) ->
 
 
 def read_frozen_input(path: Path) -> FrozenInput:
-    """Read write_frozen_input output, checking schema version and content hash.
+    """Read a standalone input, checking FROZEN_PHYSICAL_VERSION and content hash.
 
     Raise ValueError for unknown versions or altered content. Missing/malformed
     files and invalid numeric records fail without building a model or evolving.
     The returned source is caller-owned and must be closed.
     """
     record = json.loads(path.read_text(encoding="utf-8"))
-    if record["version"] != 1:
+    if record["version"] != FROZEN_PHYSICAL_VERSION:
         raise ValueError("unsupported frozen input version")
     if digest(record["physical"]) != record["physical_sha256"]:
         raise ValueError("frozen input physical hash mismatch")

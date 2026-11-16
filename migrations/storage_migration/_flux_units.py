@@ -8,7 +8,7 @@ from zcu_tools.datafile import JsonObject
 from zcu_tools.resources.document_names import PARAMETERS_FILENAME
 from zcu_tools.resources.document_store import YamlMap, YamlValue
 from zcu_tools.resources.entry import EditView, document_value, snapshot
-from zcu_tools.resources.parameter_upgrade import ParameterDocument
+from zcu_tools.resources.parameter_upgrade import ParameterUpgradeDocument
 
 from ._meta_info import preserve_meta_field
 from .evidence import has_legacy_expression
@@ -172,7 +172,7 @@ def _converted_updates(
         )
     )
     converted = prepare_parameter_batch(
-        ParameterDocument(
+        ParameterUpgradeDocument(
             raw,
             Path("points/context") / PARAMETERS_FILENAME
             if is_point
@@ -217,9 +217,11 @@ def _stage_group(
     units: ResolvedFluxUnits,
     *,
     is_point: bool,
+    source: Path,
 ) -> tuple[list[tuple[str, YamlValue]], list[str], tuple[str, ...]]:
+    """Stage one flux group; source names its destination parameter file in errors."""
     rules = [rule for rule in mapping.rules if unit_rule.old_key in rule.requires_keys]
-    candidate = EditView(snapshot(view))
+    candidate = EditView(snapshot(view), source=source)
     updates: list[tuple[str, YamlValue]] = []
     cleared: list[str] = []
     unit_path = unit_rule.target_path
@@ -289,7 +291,7 @@ def apply_flux_groups(
         if error is None:
             try:
                 updates, cleared, notes = _stage_group(
-                    view, mapping, unit_rule, units, is_point=is_point
+                    view, mapping, unit_rule, units, is_point=is_point, source=target
                 )
             except ValueError as exc:
                 # Isolate owner-invalid legacy groups; accepted unrelated values remain usable.

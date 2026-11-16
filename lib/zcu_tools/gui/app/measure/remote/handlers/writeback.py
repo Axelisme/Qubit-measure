@@ -66,6 +66,7 @@ def _writeback_item_wire(item: WritebackItem) -> dict[str, object]:
         base["element"] = item.element.copy()
     if isinstance(item, ParameterWriteback):
         base["kind"] = "parameter"
+        base["create_kind"] = item.create_kind
         base["proposed_value"] = _writeback_wire_value(item.proposed_value)
     elif isinstance(item, RecordWriteback):
         base["kind"] = "record"

@@ -58,7 +58,7 @@ class RangeFindParams:
     to_options rejects invalid JSON and delegates the domain checks to core.
     """
 
-    resonators: Annotated[str, ParamMeta(label="Resonators (JSON)")] = '["dip1"]'
+    resonators: Annotated[str, ParamMeta(label="Resonators (JSON)")] = '["R1"]'
     min_separation: Annotated[float, ParamMeta(label="Min separation (MHz)")] = (
         DEFAULT_MIN_SEPARATION_MHZ
     )
@@ -107,7 +107,7 @@ class ResonatorDipSummary(BaseModel):
 
 
 class RangeFindSummary(BaseModel):
-    """Decode accepted dips, final picker state and captured writeback limitations."""
+    """Decode accepted dips, final picker state and pairing uncertainty."""
 
     dips: list[ResonatorDipSummary] = Field(
         description="Dips in ascending frequency order."
@@ -118,10 +118,6 @@ class RangeFindSummary(BaseModel):
     prominence_factor: float = Field(
         description="Actual prominence noise multiplier used for selection."
     )
-    writable: list[str] = Field(description="Names present in the analysis capture.")
-    diagnostic: str | None = Field(
-        description="Reason frequency proposals were omitted."
-    )
     identity_diagnostic: str | None = Field(
         description="Pairing uncertainty; null is not proof of identity."
     )
@@ -129,16 +125,15 @@ class RangeFindSummary(BaseModel):
 
 @dataclass
 class RangeFindAnalysis:
-    """Accepted frequency-ordered dips, final state and writeback eligibility.
+    """Accepted frequency-ordered dips, final state and pairing uncertainty.
 
     selection retains the final controls, selected samples and component mapping.
     dips contains optional name, absolute MHz, magnitude prominence depth,
     half-prominence FWHM in MHz and depth / FWHM score in a.u./MHz.
     Manual points outside the current candidates have null depth/FWHM/score.
     prominence_factor is the actual noise multiplier used for the final guess.
-    Unassigned selections have no writable names or identity diagnostic.
-    writable contains only names present in the analysis capture. diagnostic
-    explains omitted frequency proposals; None means every dip is writable.
+    Every named selection proposes a frequency; unassigned selections do not.
+    Unassigned selections have no identity diagnostic.
     identity_diagnostic warns that dip/component pairing needs confirmation when
     captured frequencies do not establish strictly ascending name order. None
     means that ordering has a finite captured frequency basis, not proven identity.
@@ -146,17 +141,15 @@ class RangeFindAnalysis:
 
     dips: tuple[ResonatorDipSummary, ...]
     selection: RangeFindState
-    writable: tuple[str, ...]
-    diagnostic: str | None
     identity_diagnostic: str | None
     prominence_factor: float
 
 
 def _get_analyze_params(result: RangeFindRun, ctx: SessionEnv) -> RangeFindParams:
-    """Start Run/Load analysis with one temporary name and automatic threshold.
+    """Start Run/Load analysis with R1 and automatic threshold.
 
-    result and ctx do not seed names. The operator can replace the temporary
-    names before Analyze without changing the acquisition cfg.
+    result and ctx do not seed names. The operator can replace the name list
+    before Analyze without changing the acquisition cfg.
     """
     del result, ctx
     return RangeFindParams()
@@ -218,20 +211,17 @@ def _summarize_dip(dip: DipSelection) -> ResonatorDipSummary:
 def _build_analysis(
     req: AnalyzeRequest[RangeFindRun, RangeFindParams], state: RangeFindState
 ) -> RangeFindAnalysis:
-    """Project accepted selections and resolve eligibility from the fixed capture."""
+    """Project accepted selections, using capture only for pairing uncertainty."""
     dips = tuple(_summarize_dip(dip) for dip in state.selected)
     names = [dip.name for dip in dips if dip.name is not None]
     if not names:
-        return RangeFindAnalysis(
-            dips, state, (), None, None, state.options.prominence_factor
-        )
-    components = (
+        return RangeFindAnalysis(dips, state, None, state.options.prominence_factor)
+    captured_names = (
         req.parameters.document().components if req.parameters is not None else {}
     )
     frequencies = (
         resonator_frequencies(
-            req.parameters,
-            [name for name in names if name in components],
+            req.parameters, [name for name in names if name in captured_names]
         )
         if req.parameters is not None
         else None
@@ -246,34 +236,9 @@ def _build_analysis(
         )
         else None
     )
-    if req.parameters is None:
-        return RangeFindAnalysis(
-            dips,
-            state,
-            (),
-            "No Run/Load parameter capture; no frequency proposals",
-            identity_diagnostic,
-            state.options.prominence_factor,
-        )
-    writable: list[str] = []
-    missing: list[str] = []
-    for dip in dips:
-        if dip.name is None:
-            continue
-        if dip.name in components:
-            writable.append(dip.name)
-        else:
-            missing.append(dip.name)
-    diagnostic = (
-        f"Names absent from capture: {', '.join(missing)}; their proposals omitted"
-        if missing
-        else None
-    )
     return RangeFindAnalysis(
         dips,
         state,
-        tuple(writable),
-        diagnostic,
         identity_diagnostic,
         state.options.prominence_factor,
     )
@@ -282,15 +247,16 @@ def _build_analysis(
 def _get_writeback_items(
     req: WritebackRequest[RangeFindRun, RangeFindAnalysis],
 ) -> Sequence[WritebackItem]:
-    """Propose one independently selectable <name>.freq MHz row per captured dip.
+    """Propose one independently selectable <name>.freq MHz row per named dip.
 
     req pairs the accepted analysis with its fixed source. No module, kappa
     or electrical-delay rows are produced. Unconfirmed dip/component pairing
     is carried from the analysis into every row description. The warning does
-    not disable selection or Apply. This method never applies changes.
+    not disable selection or Apply. No capture or existing component is required.
+    Apply creates a missing resonator with this frequency and model defaults,
+    or updates only the existing component's frequency (ADR-0008).
+    This method never applies changes.
     """
-    if req.ctx.parameters is None:
-        return []
     return [
         ParameterWriteback(
             target_name=f"{dip.name}.freq",
@@ -308,9 +274,10 @@ def _get_writeback_items(
                 )
             ),
             proposed_value=dip.freq,
+            create_kind="resonator",
         )
         for dip in req.analyze_result.dips
-        if dip.name is not None and dip.name in req.analyze_result.writable
+        if dip.name is not None
     ]
 
 

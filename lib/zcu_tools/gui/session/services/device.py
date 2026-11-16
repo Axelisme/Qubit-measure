@@ -31,7 +31,6 @@ from zcu_tools.gui.session.device_models import (
     SetupDeviceRequest,
 )
 from zcu_tools.gui.session.devices import device_adapters, get_device_adapter
-from zcu_tools.gui.session.devices.base import DeviceProtocol
 from zcu_tools.gui.session.events import (
     DeviceChangedPayload,
     DeviceOperationFinishedPayload,
@@ -50,6 +49,7 @@ from zcu_tools.gui.session.ports import (
     BackgroundAdmissionClosedError,
     BackgroundError,
     DeviceMemoryInfo,
+    DeviceProtocol,
     DeviceRegistryPort,
     DriverFactoryPort,
     OperationConflictError,

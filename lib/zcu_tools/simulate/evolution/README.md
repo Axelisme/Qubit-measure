@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-11-16, frozen numeric inputs, reference identity, dispatch scheduling cost naming and evolve-local exact-key Floquet frames
+**Last updated:** 2026-11-17, reference producer single-row selection
 
 **讀者：** framework-dev、agent。Segment evolution 的公開輸入、路由與數值邊界。
 
@@ -47,7 +47,8 @@ The exports in [__init__.py](__init__.py) fall into these groups:
 | States and population conversion | `Basis`, `DensityState`, `Populations`, `populations`, `batch_populations` |
 | Explicit joint-Fock prototype | `JointFockRequest`, `JointFockDiagnostic`, `JointFockResult`, `joint_fock_spectrum` |
 | Shared RWA Hamiltonian coefficients | `RWACoefficients`, `rwa_coefficients`, `interaction_hamiltonian` |
-| Frozen numeric inputs | `FrozenInput`, `FrozenRecord`, `physical_input`, `canonical_json`, `digest`, `read_physical_input`, `read_frozen_input`, `write_frozen_input`, `read_frozen_manifest`, `write_frozen_manifest` |
+| Indexed scene cache | `SCENE_CACHE_VERSION`, `FrozenIndexEntry`, `read_frozen_index`, `write_frozen_index`, `read_scene_records`, `write_scene_record` |
+| Frozen numeric inputs | `FROZEN_PHYSICAL_VERSION`, `FrozenInput`, `FrozenRecord`, `physical_input`, `canonical_json`, `digest`, `read_physical_input`, `read_frozen_input`, `write_frozen_input`, `read_frozen_manifest`, `write_frozen_manifest` |
 | Solver-free reference storage | `SolverTolerances`, `ReferenceResult`, `reference_key`, `load_reference`, `write_reference` |
 
 `Engine(workers, *, families=None, kernels=None, chunks_per_worker=None,
@@ -95,6 +96,13 @@ I/Q. ADC owns its probability tolerance and readout sums; see the
 
 ## Frozen numeric inputs and references
 
+`FROZEN_PHYSICAL_VERSION` owns the physical decoding contract for manifests
+and standalone inputs. It changes when fields, units, dtypes, defaults or
+Engine-input reconstruction change. `SCENE_CACHE_VERSION` owns the index JSON
+and cache-directory revision. Both are currently 1. Consumers compare both
+without parsing storage layout. `SEGMENT_NUMERIC_VERSION` records numerical
+algorithm semantics, not input-format compatibility.
+
 The public codec snapshots a `ModelSource` and one `TimelineBatch` without
 running an Engine or a solver. `write_frozen_input(path, source, batch)` writes
 version 1, a complete `physical` record and its `physical_sha256`.
@@ -128,6 +136,24 @@ at different paths. Reconstruct a source separately with
 `read_physical_input(record.physical)` and close it after use. The container
 neither interprets scene declarations nor selects a reference solver.
 
+`FrozenIndexEntry.from_record(record)` pins the name and physical, oracle and
+metadata digests. Metadata uses the public `digest` without caller interpretation.
+`write_frozen_index(path, entries)` atomically publishes version 1 and ordered
+identity rows; `read_frozen_index(path)` validates them. Unknown versions fail.
+`write_scene_record(directory, record)` returns its entry after publishing a
+single-record manifest. Filenames contain the name and physical/metadata hash
+prefixes of 16 characters. `entry.cache_path(directory)` exposes that path when
+needed for explicit cache maintenance. Valid existing files are reused; conflicting
+files fail validation. Both writers stage files in the destination directory and
+publish with replace, preserving existing pins on a pre-publication failure.
+`read_scene_records(directory, entries)` reads only the indexed files in entry
+order and verifies their full identities, including opaque metadata. A missing
+file raises FileNotFoundError with the record name and hashes. None of these APIs
+constructs a model, runs an Engine/solver, resolves Git or deletes old cache files.
+Callers own cache locations and producer instructions. `SCENE_CACHE_VERSION` is
+1; callers negotiating a shared numeric format can compare it without parsing
+cache filenames or containers.
+
 `reference_key(source, batch)` preserves the historical key formula. It hashes
 version 1, identity-free physics, coarse tolerances 2e-10/2e-12, fine tolerances
 2e-12/2e-14 and convergence limit 2e-6. Callers can override both tolerance
@@ -141,8 +167,12 @@ checks the loaded result before evolution.
 The independent preparation entry point is
 [`family_pareto_reference_producer.py`](../../../../tests/simulate/evolution/contract/family_pareto_reference_producer.py).
 It reads only frozen record names and physics. The caller explicitly maps each
-manifest to the independent lab-frame or interaction-picture solver; metadata
-and scene names do not select it. Both solvers stay in tests. The codec imports neither tests nor tools.
+index to the independent lab-frame or interaction-picture solver and supplies
+an explicit scene cache. `--scenario NAME` requires one matching row across the
+supplied indexes before reading payloads. Zero or multiple matches fail without
+solving; other rows need no payload. Without a scenario, all indexed rows remain
+selected. All selected numeric files load before any solver runs. Metadata
+and scene names do not select the solver. Both solvers stay in tests. The codec imports neither tests nor tools.
 See [ADR-0078](../../../../docs/adr/0078-evolution-module-boundary.md).
 
 ## Dispatch inspection

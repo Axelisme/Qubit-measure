@@ -1,6 +1,6 @@
 # Measure Qt views
 
-**Last updated:** 2026-11-02
+**Last updated:** 2026-11-16
 
 **讀者：** framework-dev。量測 Qt views、對話框與呈現生命週期。
 
@@ -98,10 +98,19 @@ form/action builders live in `experiment_ledger.py`.
 describes how `ExpTabWidget` and `ExperimentFigureArea` divide presentation
 responsibilities. `ExperimentFigureArea` is not a second application controller.
 
-Cfg invalid reasons stay in the form area. Run, Analyze, Post-Analyze and
-writeback project the domain decision from `Controller.admit`; a denied action
-shows its shared message. After admission, local uncommitted parse errors and
-hardware exclusion still disable Run. Authority remains a separate UI gate. Edits, interaction
+Cfg invalid reasons stay inline in the form area. The FormEditor bottom summary
+appears only for errors without their own visible field, including folded/hidden
+fields and model/group errors. Run shows `Config invalid: N fields`, with
+`Config invalid: 1 field` for one error path. It counts the union of canonical
+FormPaths from resource model/lowering errors and editor-local errors, including
+uncommitted parse failures. `errors_changed` refreshes the count even while
+validity stays false. Repairing every field clears the notice and restores the
+existing Run admission. The Run tooltip says to fix fields marked in red rather
+than repeating the first error. MainWindow bottom-status messages do not change.
+This presentation policy follows ADR-0065.
+Run, Analyze, Post-Analyze and writeback project the domain decision from
+`Controller.admit`; non-field denials retain their shared message. After admission,
+local uncommitted parse errors and hardware exclusion still disable Run. Authority remains a separate UI gate. Edits, interaction
 refreshes and tab selection preserve unrelated bottom-status messages. They do
 not cover the tab or figure area with a cfg diagnostic. Load behavior is unchanged.
 

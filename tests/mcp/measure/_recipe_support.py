@@ -36,8 +36,8 @@ from zcu_tools.resources.context.library import (
 )
 from zcu_tools.resources.entry.schema import (
     ComponentSchema,
-    PointDocument,
-    PointGeneral,
+    ParameterDocument,
+    ParameterGeneral,
 )
 
 
@@ -169,11 +169,11 @@ class LookbackGui:
             }
         )
         parameters = ParameterContext(
-            point=PointDocument.model_construct(
+            point=ParameterDocument.model_construct(
                 format="zcu.parameter-container",
                 format_version="2.0",
                 schema_version=1,
-                general=PointGeneral(created_at="2026-10-09T00:00:00Z"),
+                general=ParameterGeneral(created_at="2026-10-09T00:00:00Z"),
                 components={
                     "R1": resonator,
                     "R2": resonator,

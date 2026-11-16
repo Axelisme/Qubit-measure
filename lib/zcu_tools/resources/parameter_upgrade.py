@@ -26,7 +26,7 @@ from zcu_tools.utils import atomic_replace
 
 
 @dataclass(frozen=True)
-class ParameterDocument:
+class ParameterUpgradeDocument:
     """Detached complete YAML mapping passed between pure upgrade callbacks.
 
     data includes container headers, schema_version and every authored section.
@@ -53,7 +53,7 @@ class UpgradeStep:
     """
 
     source_version: int
-    transform: Callable[[ParameterDocument], ParameterDocument]
+    transform: Callable[[ParameterUpgradeDocument], ParameterUpgradeDocument]
 
 
 @dataclass(frozen=True)
@@ -75,8 +75,8 @@ class UpgradePlan:
 
     policy: ParameterSchemaPolicy
     steps: tuple[UpgradeStep, ...]
-    validate: Callable[[ParameterDocument, int], None]
-    classify_legacy: Callable[[ParameterDocument], bool]
+    validate: Callable[[ParameterUpgradeDocument, int], None]
+    classify_legacy: Callable[[ParameterUpgradeDocument], bool]
     notes: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
@@ -93,8 +93,8 @@ class UpgradePlan:
 
 
 def upgrade_document(
-    document: ParameterDocument, *, plan: UpgradePlan
-) -> ParameterDocument:
+    document: ParameterUpgradeDocument, *, plan: UpgradePlan
+) -> ParameterUpgradeDocument:
     """Return a detached current document, or raise ValueError without I/O.
 
     Validate every version with caller checks, classify unversioned input only
@@ -120,7 +120,7 @@ def upgrade_document(
         if step is None:
             raise ValueError(f"missing upgrade step v{version} -> v{version + 1}")
         transformed = step.transform(deepcopy(candidate))
-        candidate = ParameterDocument(
+        candidate = ParameterUpgradeDocument(
             deepcopy(transformed.data), document.source_path, transformed.notes
         )
         next_version = candidate.data.get("schema_version")
@@ -268,7 +268,7 @@ def _upgrade_file(
         with lock:
             original = path.read_bytes()
             decoded = YAML(typ="safe").load(original.decode("utf-8"))
-            document = ParameterDocument(
+            document = ParameterUpgradeDocument(
                 TypeAdapter(YamlMap).validate_python(decoded, strict=True), path
             )
             candidate = upgrade_document(document, plan=plan)

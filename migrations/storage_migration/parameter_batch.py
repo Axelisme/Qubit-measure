@@ -5,8 +5,8 @@ from copy import deepcopy
 from dataclasses import dataclass
 
 from zcu_tools.format_version import YamlMap, YamlValue
-from zcu_tools.resources.entry.schema import PointDocument, SetupDocument
-from zcu_tools.resources.parameter_upgrade import ParameterDocument
+from zcu_tools.resources.entry.schema import ParameterDocument
+from zcu_tools.resources.parameter_upgrade import ParameterUpgradeDocument
 
 
 @dataclass(frozen=True)
@@ -29,21 +29,21 @@ class PreparedParameterBatch:
     migration owner attaches the actual destination path when reporting them.
     """
 
-    document: SetupDocument | PointDocument
+    document: ParameterDocument
     notes: tuple[str, ...]
 
 
 def prepare_parameter_batch(
-    document: ParameterDocument,
+    document: ParameterUpgradeDocument,
     *,
-    transform: Callable[[ParameterDocument], ParameterDocument] | None,
+    transform: Callable[[ParameterUpgradeDocument], ParameterUpgradeDocument] | None,
     values: Sequence[ParameterValue] = (),
 ) -> PreparedParameterBatch:
     """Convert a detached full seed/value batch and validate the current schema.
 
     document contains a complete parameter-container mapping, including general,
-    components and schema_version. source_path under points/<label>/ selects a
-    point; another supplied path selects setup. An absent path selects a point. transform is the caller-owned pure conversion,
+    components and schema_version. source_path supplies diagnostic context only.
+    transform is the caller-owned pure conversion,
     or None for an already current batch. It must preserve unrelated fields and
     must not perform I/O. Validate only its output, so historical fields need
     not be accepted by current component models. Return a detached typed model
@@ -68,11 +68,5 @@ def prepare_parameter_batch(
         node[segments[-1]] = deepcopy(update.value)
     if transform is not None:
         candidate = transform(candidate)
-    model = (
-        SetupDocument
-        if document.source_path is not None
-        and document.source_path.parent.parent.name != "points"
-        else PointDocument
-    )
-    validated = model.model_validate(deepcopy(candidate.data))
+    validated = ParameterDocument.model_validate(deepcopy(candidate.data))
     return PreparedParameterBatch(validated, candidate.notes)

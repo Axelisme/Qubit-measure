@@ -1,5 +1,6 @@
 """Open or create the FTF entry and install offline resources in a measure GUI."""
 
+import os
 from pathlib import Path
 
 import yaml
@@ -8,7 +9,7 @@ from zcu_tools.analysis.flux import DevicePeriod, offset_for_flux
 from zcu_tools.device import DeviceManager
 from zcu_tools.device.fake import FakeDeviceInfo
 from zcu_tools.format_version import YamlMap
-from zcu_tools.gui.app.measure.startup_context import StartupContext
+from zcu_tools.gui.app.measure.startup_context import StartupContext, simulation_workers
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.program import build_soccfg
 from zcu_tools.resources.entry import (
@@ -50,9 +51,10 @@ def startup(ctx: StartupContext) -> None:
     Template, entry, environment and binding failures propagate to
     the startup runner, which retains completed work and registered cleanup.
 
-    Build with one worker and no numeric warmup; this script never acquires or
-    controls hardware. Successfully registered drivers become GUI-owned. The
-    close callback releases borrowed references and closes only untransferred
+    Build with one fewer worker than host CPUs, at least one, and no numeric
+    warmup. This script never acquires or controls hardware. Successfully
+    registered drivers become GUI-owned. The close callback releases borrowed
+    references and closes only untransferred
     drivers, after background work drains and before GUI driver cleanup.
     """
     settings = load_ftf(Path(__file__).with_name("ftf.yaml"))
@@ -79,7 +81,12 @@ def startup(ctx: StartupContext) -> None:
 
     ctx.progress("Building offline FTF resources")
     soccfg = build_soccfg(yaml.safe_load(PROFILE_PATH.read_text()))
-    environment = ftf(settings, workers=1, warmup=False, soccfg=soccfg)
+    environment = ftf(
+        settings,
+        workers=simulation_workers(os.cpu_count()),
+        warmup=False,
+        soccfg=soccfg,
+    )
     transferred: set[str] = set()
 
     def close_environment() -> None:

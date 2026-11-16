@@ -27,6 +27,7 @@ Kernel、dispatch、scheduler 與 cache 維持內部實作。呼叫端經 `Engin
 `Engine.inspect_dispatch(source, batches, budget=...)` 與 evolve 共用 classifier 和 guard，不演化 density。
 查詢逐 split row 回傳 family、guard 判定與相對排程工作量 `scheduling_cost`，或 deferred、short-circuit、needs-prefix 原因。
 查詢以投影的完整 inventory 使用次數計價，不修改 `RoutingHistory` 的 usage、content membership 或 generation，也不註冊 routing reuse facts。
+查詢不記錄 history，因為記錄會讓觀察介面改變之後其他輸入的選路，呼叫端還得記得這個副作用。`scheduling_cost` 是 chunk interleaving 的相對工作量，不是秒，也不是排序用的冷攤提估價。2026-11-16，使用者對「查詢不改 routing history」與「欄位只回報既有排程工作量」兩項答「追認」。
 因此查詢的已決定路由等於相同初始 history 下 evolve 的路由，且不改變後續 evolve 的路由或 density。
 Guard preparation 在查詢返回時釋放，不留在 Engine；source model cache 與 shift registration 仍可被填入。
 呼叫端提供 numeric model source、timeline、初態與誤差預算，不逐段選算法。
@@ -49,6 +50,15 @@ Codec 保存 batch、initial density、各 scheduled level 與 DC 的 `SecularMo
 Caller 的 JSON metadata 對 codec 不透明，場景 reason、families、routes、companions 與 provenance 都由 tools 解讀。
 容器不放 solver 欄位。Tests 側入口由呼叫端明示 manifest-to-solver，只讀 name、physical，不讀 metadata 或場景名稱清單。
 
+2026-11-16，使用者以「1核可」核可分層實作計畫，凍結數值格式與 key 公式因此歸 `simulate`，參考解 solver 留在 tests 側。凍結數值不入庫，存放與讀寫分工見 [[0072]] 的開發工具段；`simulate` 只收顯式路徑，不解析 Git 位置。
+
+`FROZEN_PHYSICAL_VERSION` 擁有 manifest 與 standalone input 的 physical 解碼契約。
+欄位、單位、dtype、預設或還原 Engine 輸入的方式改變時 bump，由 producer 處理遷移。
+`SCENE_CACHE_VERSION` 擁有 index JSON 與 cache 目錄版次，tools 由它推導路徑。
+兩者目前都是 1。`SEGMENT_NUMERIC_VERSION` 只記演算法數值語義，不是輸入相容性 gate。
+成對工具比較兩個格式版本與每筆完整 record 身份，不因數值優化的版本變更而拒絕候選。
+跨 process 計時規則歸 [[0072]]，不進 codec 或 Engine。
+
 `physical_input`、`canonical_json` 與 `digest` 擁有 canonical physical hash。
 完整 hash 包含 model identity，oracle-sharing hash 只排除這個 namespace。
 `reference_key` 再加入 coarse/fine tolerances、version 1 與 convergence limit 2e-6。
@@ -56,9 +66,29 @@ Caller 的 JSON metadata 對 codec 不透明，場景 reason、families、routes
 `load_reference` 永遠 cache-only，miss 就失敗。
 `write_reference` 只原子保存 producer 交來的數值，不求解或替它認證收斂。
 獨立 solver 與 reference producer 留在 tests 側，經數值檔交接。失敗不換 solver。
+Tests reference producer 的 `--scenario NAME` 要求在呼叫端明示的清單中恰好一列同名，選取後才讀 payload 或呼叫 solver。
+零筆列合法名稱，多筆列來源並失敗。其他列不讀不解，不帶 scenario 時仍整批準備。
+Solver 由清單與 solver 的顯式對應決定，不讀 tools metadata，也不 import tools。
+單列準備的取捨見[共用清單與 Pareto 選集討論](../discussions/2026-11-17-pareto-selection-and-scene-append.md)。
 
 場景 producer 與數值 codec 的分工見 [[0072]]。
 取捨與歷史 cache 缺資料時的驗證方式見[凍結輸入討論](../discussions/2026-11-16-frozen-simulator-inputs.md)。
+
+### 模擬器的測試與量測分層，不做 e2e
+
+模擬器的測試與量測工具只依賴模擬器，按層分開驗證：
+- Kernel：一段輸入，`Engine.evolve` 以 `families=` 固定候選，對獨立參考解量誤差與耗時。
+- Dispatch：rows → 選中的 family、guard 判定與排程工作量，不演化 density。Guard 走與 evolve 相同的路徑，包括它自己需要的 ODE，所以測試用小模型。入口是 `Engine.inspect_dispatch`。
+- 序列：手寫多段 `TimelineBatch`，在 `Engine.evolve` 上量最終 density 誤差與總耗時。「合格只比耗時」用的最終誤差、整體沒變慢與 family 去留都在這一層量。序列場景照約化軸（gate 種類 × 個數）宣告，不逐實驗加。
+- 前端：program → 編譯後的訊號，不演化。
+- Environment：給定 density，驗讀出。
+
+不做 program → 編譯 → 演化 → I/Q 一次跑完的測試或量測，入庫的 program → acquire benchmark 因此退休，計時只包 `Engine.evolve`。
+例：成對計時在序列層比兩個 checkout 的 `Engine.evolve`，不經 acquire；FTF environment 測試注入不演化的 Engine 替身驗讀出交接，演化精度只在 evolution 的契約測試驗。
+邊界：除錯例外。使用者回報的錯在各層都重現不出來時，可以跑一次 e2e 定位；腳本不入庫，也不當驗收門檻。
+
+2026-11-15，使用者說：「我會預期模擬器測試腳本只會依賴模擬器模塊，後端與前端分開測，kernel與dispatch也分開測，不該有e2e的測試需求」。對「整條序列的最終誤差放哪一層」答「A」，即加序列層，不只留 kernel 與 dispatch，也不保留 acquire e2e 只記耗時；對除錯邊界答「我選B」，即除錯時可以跑 e2e，腳本不入庫、不當門檻。
+選項比較見[模擬器測試與量測的分層](../discussions/2026-11-15-simulator-test-measurement-layering.md)。
 
 ### 歷史控制與精度驗收
 

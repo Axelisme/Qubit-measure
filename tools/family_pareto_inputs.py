@@ -4,11 +4,14 @@ Accuracy/guard matrices stay in tests. The retained synthetic idle scene is
 explicitly declared here, independently of those mutable test inventories.
 """
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from contextlib import closing
 from dataclasses import dataclass, field, replace
+from functools import partial
+from pathlib import Path
 
 import numpy as np
+from pydantic import TypeAdapter
 from zcu_tools.simulate.evolution import (
     FluxSchedule,
     FrozenRecord,
@@ -16,7 +19,8 @@ from zcu_tools.simulate.evolution import (
     SecularDrive,
     SecularModel,
     TimelineBatch,
-    digest,
+    read_physical_input,
+    read_scene_records,
 )
 from zcu_tools.simulate.evolution import (
     canonical_json as canonical_json,
@@ -68,6 +72,53 @@ class Input:
     def companions_for(self, target: str) -> tuple[str, ...]:
         """Return the target override, or shared companions when absent."""
         return self.companions_by_target.get(target, self.companions)
+
+
+def _read_scene(record: FrozenRecord, families: tuple[str, ...]) -> Scene:
+    frozen = read_physical_input(record.physical)
+    return Scene(record.name, frozen.source, frozen.batch, families)
+
+
+def read_inputs(indexes: Sequence[Path], scene_cache: Path) -> list[Input]:
+    """Read ordered frozen records and decode the tools-owned scene declarations.
+
+    indexes supplies versioned identity lists in caller order; scene_cache is an
+    explicit numeric cache directory. Cross-index duplicate names fail. Each
+    returned Input keeps its record name, reason, targets, companions, routes
+    and provenance. No source is built while reading the declarations. Every
+    Input.build() reconstructs a fresh Scene through read_physical_input; the
+    caller must close its source. Sources do not share routing history.
+    File/container errors, missing declarations and invalid metadata propagate;
+    no producer, solver or legacy reader is used.
+    """
+    from tools.family_pareto_storage import indexed_scenes, missing_scene_command
+
+    entries = indexed_scenes(indexes)
+    try:
+        records = read_scene_records(scene_cache, (entry for _, entry in entries))
+    except FileNotFoundError as error:
+        raise missing_scene_command(error, scene_cache) from error
+    return [input_from_record(record) for record in records]
+
+
+def input_from_record(record: FrozenRecord) -> Input:
+    """Decode one codec record's tools metadata, without building a source.
+
+    Return an Input whose build creates a fresh caller-owned Scene and history.
+    Missing or invalid tools declarations fail through their typed decoder.
+    The record's numeric content has already been validated by its codec owner.
+    """
+    metadata = TypeAdapter(dict[str, object]).validate_python(record.metadata)
+    families = TypeAdapter(tuple[str, ...]).validate_python(
+        metadata.pop("expected_families")
+    )
+    return TypeAdapter(Input).validate_python(
+        {
+            **metadata,
+            "name": record.name,
+            "build": partial(_read_scene, record, families),
+        }
+    )
 
 
 def idle_coherence_scene() -> Scene:
@@ -168,32 +219,3 @@ def freeze_records(inputs: list[Input]) -> tuple[FrozenRecord, ...]:
                 )
             )
     return tuple(records)
-
-
-def freeze_manifest(inputs: list[Input]) -> dict[str, object]:
-    """Build ordered inputs and close each source after copying complete physics.
-
-    Transitional report archive only; remove when the report caller migrates
-    to the simulator-owned manifest writer. No compatibility reader is provided.
-    Return the version-1 numeric manifest with unchanged hash meanings:
-    physical_sha256 includes model identity, oracle_sha256 excludes it. Store
-    caller provenance, target and companion declarations without interpreting
-    dispatch. Builder/serialization failures propagate; no Engine work runs.
-    """
-    records = []
-    for item in inputs:
-        case = item.build()
-        with closing(case.source):
-            physical = physical_input(case)
-            records.append(
-                {
-                    "name": item.name,
-                    **_scene_metadata(item, case),
-                    "physical_sha256": digest(physical),
-                    "oracle_sha256": digest(
-                        physical_input(case, include_identity=False)
-                    ),
-                    "physical": physical,
-                }
-            )
-    return {"version": 1, "inputs": records}

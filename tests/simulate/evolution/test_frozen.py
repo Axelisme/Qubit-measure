@@ -60,6 +60,246 @@ def test_manifest_round_trip_is_deterministic_and_rejects_invalid_identity(
         evolution.read_frozen_manifest(other)
 
 
+def test_index_cache_round_trip_preserves_order_and_metadata(tmp_path: Path) -> None:
+    write_record = getattr(evolution, "write_scene_record", None)
+    assert callable(write_record), "missing public single-record scene cache writer"
+    case = accuracy_case("idle_coherence")
+    with closing(case.source):
+        physical = evolution.physical_input(case.source, case.batch)
+    records = (
+        evolution.FrozenRecord("second", physical, {"opaque": 2}),
+        evolution.FrozenRecord("first", physical, None),
+    )
+    cache, index = tmp_path / "cache", tmp_path / "index.json"
+    entries = tuple(evolution.write_scene_record(cache, record) for record in records)
+    evolution.write_frozen_index(index, entries)
+    restored = evolution.read_scene_records(cache, evolution.read_frozen_index(index))
+    assert [record.name for record in restored] == ["second", "first"]
+    assert [record.metadata for record in restored] == [{"opaque": 2}, None]
+    assert [record.physical_sha256 for record in restored] == [
+        record.physical_sha256 for record in records
+    ]
+    assert entries[0].metadata_sha256 == evolution.digest({"opaque": 2})
+
+
+def test_scene_index_rejects_version_missing_and_mismatched_records(
+    tmp_path: Path,
+) -> None:
+    case = accuracy_case("idle_coherence")
+    with closing(case.source):
+        record = evolution.FrozenRecord(
+            "pinned",
+            evolution.physical_input(case.source, case.batch),
+            {"opaque": True},
+        )
+    entry = evolution.FrozenIndexEntry.from_record(record)
+    cache, index = tmp_path / "cache", tmp_path / "index.json"
+    evolution.write_frozen_index(index, (entry,))
+    payload = json.loads(index.read_text())
+    payload["version"] = 99
+    index.write_text(json.dumps(payload))
+    with pytest.raises(ValueError, match="version"):
+        evolution.read_frozen_index(index)
+    with pytest.raises(FileNotFoundError, match=f"pinned.*{entry.physical_sha256}"):
+        evolution.read_scene_records(cache, (entry,))
+    evolution.write_scene_record(cache, record)
+    wrong = replace(entry, oracle_sha256="0" * 64)
+    with pytest.raises(ValueError, match="hash/name mismatch.*pinned"):
+        evolution.read_scene_records(cache, (wrong,))
+    # The filename identity cannot hide a modified opaque metadata payload.
+    evolution.write_frozen_manifest(
+        entry.cache_path(cache), (replace(record, metadata={"opaque": False}),)
+    )
+    with pytest.raises(ValueError, match="hash/name mismatch.*pinned"):
+        evolution.read_scene_records(cache, (entry,))
+    evolution.write_frozen_manifest(
+        entry.cache_path(cache), (record, replace(record, name="extra"))
+    )
+    with pytest.raises(ValueError, match="hash/name mismatch.*pinned"):
+        evolution.read_scene_records(cache, (entry,))
+
+
+def test_atomic_scene_publication_preserves_pins_on_replace_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import os
+
+    case = accuracy_case("idle_coherence")
+    with closing(case.source):
+        record = evolution.FrozenRecord(
+            "pinned", evolution.physical_input(case.source, case.batch)
+        )
+    entry = evolution.write_scene_record(tmp_path / "cache", record)
+    index = tmp_path / "index.json"
+    evolution.write_frozen_index(index, (entry,))
+    changed = replace(entry, metadata_sha256="0" * 64)
+
+    def fail_replace(source: object, destination: object) -> None:
+        # Atomic replace is the filesystem boundary, not codec internals.
+        assert evolution.read_frozen_index(index) == (entry,)
+        raise OSError("injected publication failure")
+
+    monkeypatch.setattr(os, "replace", fail_replace)
+    with pytest.raises(OSError, match="publication failure"):
+        evolution.write_frozen_index(index, (changed,))
+    assert evolution.read_frozen_index(index) == (entry,)
+    with pytest.raises(OSError, match="publication failure"):
+        evolution.write_scene_record(
+            tmp_path / "cache", replace(record, metadata="new")
+        )
+    assert (
+        evolution.read_scene_records(tmp_path / "cache", (entry,))[0].name == "pinned"
+    )
+    with pytest.raises(FileNotFoundError):
+        evolution.read_scene_records(
+            tmp_path / "cache",
+            (evolution.FrozenIndexEntry.from_record(replace(record, metadata="new")),),
+        )
+
+
+@pytest.mark.parametrize("loops", [1, 2])
+def test_zero_point_round_trip_preserves_empty_array_dtypes_and_loop_shape(
+    tmp_path: Path, loops: int
+) -> None:
+    case = accuracy_case("idle_coherence")
+    batch = evolution.TimelineBatch(
+        np.empty(0, dtype=np.int64),
+        (),
+        evolution.FluxSchedule(
+            np.array([0], dtype=np.int64),
+            np.empty(0),
+            np.empty((0, loops), dtype=np.int64),
+        ),
+        np.empty(0),
+    )
+    with closing(case.source):
+        path = tmp_path / "empty.json"
+        evolution.write_frozen_input(path, case.source, batch)
+        restored = evolution.read_frozen_input(path)
+        with closing(restored.source):
+            assert_array_equal(restored.batch.points, batch.points)
+            assert restored.batch.points.dtype == np.int64
+            assert_array_equal(restored.batch.flux.offsets, batch.flux.offsets)
+            assert restored.batch.flux.offsets.dtype == np.int64
+            assert_array_equal(restored.batch.flux.start_ns, batch.flux.start_ns)
+            assert restored.batch.flux.start_ns.dtype == np.float64
+            assert restored.batch.flux.level.shape == (0, loops)
+            assert restored.batch.flux.level.dtype == np.int64
+            assert_array_equal(restored.batch.end_ns, batch.end_ns)
+            assert restored.batch.end_ns.dtype == np.float64
+            assert evolution.canonical_json(
+                evolution.physical_input(restored.source, restored.batch)
+            ) == evolution.canonical_json(evolution.physical_input(case.source, batch))
+
+
+def _empty_numeric_input(loops: int, size: int = 2) -> evolution.FrozenInput:
+    model = evolution.SecularModel(
+        (0,) * loops,
+        "empty-numeric-model",
+        np.arange(size, dtype=np.float64),
+        np.eye(size, dtype=np.complex128),
+        (),
+        np.zeros((size, size)),
+        np.zeros((size, size)),
+    )
+    source = evolution.ModelSource(
+        np.eye(size, dtype=np.complex128) / size,
+        lambda level: model,
+        evolution.FluxExpansion(np.diag(model.energies_ghz).astype(complex), ()),
+    )
+    batch = evolution.TimelineBatch(
+        np.empty(0, dtype=np.int64),
+        (),
+        evolution.FluxSchedule(
+            np.array([0], dtype=np.int64),
+            np.empty(0),
+            np.empty((0, loops), dtype=np.int64),
+        ),
+        np.empty(0),
+    )
+    return evolution.FrozenInput(source, batch)
+
+
+@pytest.mark.parametrize("loops", [1, 2])
+def test_zero_point_waveform_round_trip_preserves_loop_shape(
+    tmp_path: Path, loops: int
+) -> None:
+    original = _empty_numeric_input(loops)
+    with closing(original.source):
+        batch = replace(
+            original.batch,
+            flux_waveform=evolution.FluxWaveform(
+                np.array([0], dtype=np.int64), np.empty(0), np.empty((0, loops))
+            ),
+        )
+        path = tmp_path / "empty-waveform.json"
+        evolution.write_frozen_input(path, original.source, batch)
+        restored = evolution.read_frozen_input(path)
+        with closing(restored.source):
+            waveform = restored.batch.flux_waveform
+            assert waveform is not None
+            assert waveform.flux.shape == (0, loops)
+            assert waveform.flux.dtype == np.float64
+            assert_array_equal(waveform.offsets, [0])
+            assert waveform.offsets.dtype == np.int64
+            assert waveform.time_ns.shape == (0,)
+            assert waveform.time_ns.dtype == np.float64
+            assert restored.batch.start_ns is None
+            assert restored.batch.initial_densities is None
+            assert evolution.canonical_json(
+                evolution.physical_input(restored.source, restored.batch)
+            ) == evolution.canonical_json(
+                evolution.physical_input(original.source, batch)
+            )
+
+
+@pytest.mark.parametrize(("loops", "size"), [(1, 2), (2, 3)])
+@pytest.mark.parametrize("with_waveform", [False, True])
+def test_zero_point_continuation_round_trip_preserves_density_shape(
+    tmp_path: Path, loops: int, size: int, *, with_waveform: bool
+) -> None:
+    original = _empty_numeric_input(loops, size)
+    with closing(original.source):
+        batch = replace(
+            original.batch,
+            start_ns=np.empty(0),
+            initial_densities=np.empty((0, size, size), dtype=np.complex128),
+            flux_waveform=evolution.FluxWaveform(
+                np.array([0], dtype=np.int64), np.empty(0), np.empty((0, loops))
+            )
+            if with_waveform
+            else None,
+        )
+        path = tmp_path / "empty-continuation.json"
+        evolution.write_frozen_input(path, original.source, batch)
+        restored = evolution.read_frozen_input(path)
+        with closing(restored.source):
+            starts = restored.batch.start_ns
+            densities = restored.batch.initial_densities
+            assert starts is not None
+            assert starts.shape == (0,)
+            assert starts.dtype == np.float64
+            assert densities is not None
+            assert densities.shape == (0, size, size)
+            assert densities.dtype == np.complex128
+            assert_array_equal(
+                restored.source.initial_density, original.source.initial_density
+            )
+            if with_waveform:
+                waveform = restored.batch.flux_waveform
+                assert waveform is not None
+                assert waveform.flux.shape == (0, loops)
+                assert waveform.flux.dtype == np.float64
+            else:
+                assert restored.batch.flux_waveform is None
+            assert evolution.canonical_json(
+                evolution.physical_input(restored.source, restored.batch)
+            ) == evolution.canonical_json(
+                evolution.physical_input(original.source, batch)
+            )
+
+
 def test_numeric_round_trip_preserves_models_tracks_flux_and_point_order(
     tmp_path: Path,
 ) -> None:

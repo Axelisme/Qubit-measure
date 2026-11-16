@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 from pydantic import TypeAdapter
 from zcu_tools.format_version import YamlValue
+from zcu_tools.gui.app.measure.writeback import ParameterWriteback
 from zcu_tools.gui.app.measure.writeback.submissions import WritebackCompleted
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.mcp.measure.recipe_api import (
@@ -295,6 +296,86 @@ def test_accept_writes_current_post_draft_after_question(
             )
         assert [item.stage for item in receipts[0].items] == ["primary", "post"]
         assert receipts[0].error is None
+    finally:
+        client.context.session.close()
+
+
+@pytest.mark.parametrize("interface", ["recipe", "mcp"])
+@pytest.mark.parametrize("scope", ["point", "global"])
+def test_accept_upserts_at_active_target_with_original_item_ids(
+    tmp_path: Path,
+    writeback_gui: Callable[[bool, bool], WritebackGui],
+    interface: str,
+    scope: str,
+) -> None:
+    gui = writeback_gui(False, False)
+
+    def prepare() -> None:
+        target = gui.context.read_context().target
+        assert target is not None
+        gui.context.set_parameter(target, "Q1.rate", 5000.0)
+        draft = gui.service.create_draft(
+            [
+                ParameterWriteback(
+                    "Q1.rate", "Existing", 6012.3, create_kind="fake/drive/a"
+                ),
+                ParameterWriteback(
+                    "Q2.rate", "Missing", 6123.4, create_kind="fake/drive/a"
+                ),
+            ],
+            parameters=gui.context.read_context(),
+            experiment_name="synthetic",
+        )
+        gui.drafts["analysis"] = draft
+        gui.state.get_tab("tab-1").analysis.writeback_draft = draft
+        if scope == "global":
+            gui.context.use_global()
+
+    gui.owner.submit(prepare).result()
+    preview = gui.respond(
+        "tab.writeback_preview", {"tab_id": "tab-1", "subtab_id": "analysis"}
+    )
+    rows = TypeAdapter(list[dict[str, object]]).validate_python(preview["items"])
+    assert rows[1]["current"] is None
+    assert rows[1]["create_kind"] == "fake/drive/a"
+    receipts: list[WritebackReceipt] = []
+
+    @recipe("synthetic", "Upsert selected parameter proposals")
+    async def synthetic(session: RecipeSession, inputs: Inputs) -> Report:
+        tab = session.open_tab("synthetic")
+        await tab.run()
+        await tab.analyze("primary", result=Fit)
+        answer = await tab.ask_writeback()
+        receipts.append(tab.accept_writeback(answer.items))
+        receipts[-1].raise_for_error()
+        return Report(count=inputs.count)
+
+    client = make_client(tmp_path, gui.respond, recipes=(synthetic,))
+    try:
+        if interface == "recipe":
+            execution = start(client, "synthetic")
+            answer_writeback(execution)
+            assert execution.snapshot().status == "completed"
+            native = gui.respond(
+                "tab.writeback_receipt", {"submission_id": receipts[0].submission_id}
+            )
+            completed = TypeAdapter(list[WritebackCompleted]).validate_python(
+                native["completed"]
+            )
+            assert [row.item.id for row in completed] == ["param-1", "param-2"]
+        else:
+            result = client.call(
+                "apply_writeback", {"tab": "tab-1", "stage": "primary"}
+            )
+            assert result["status"] == "finished"
+            written = result["completed"][0]["written"]
+            assert [item["id"] for item in written] == ["param-1", "param-2"]
+        current = gui.read_context()
+        assert current.value("Q1.rate") == 6012.3
+        assert current.value("Q2.rate") == 6123.4
+        assert current.value("Q2.kind") == "fake/drive/a"
+        assert current.target is not None
+        assert current.target.point == (None if scope == "global" else "point")
     finally:
         client.context.session.close()
 

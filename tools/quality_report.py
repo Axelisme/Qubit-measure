@@ -18,11 +18,7 @@ from pathlib import Path, PurePosixPath
 from typing import Literal, Self
 
 import _support
-import check_file_size
-import check_suppressions
-import check_test_capabilities
-import check_test_path_correspondence
-import check_test_structure
+import check_quality
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
 Detector = Literal[
@@ -619,9 +615,9 @@ def local_findings(name: Detector, root: Path) -> tuple[Finding, ...]:
             Finding(
                 path=str(item.path),
                 rule="file-size",
-                details={"lines": item.lines, "limit": check_file_size.LINE_LIMIT},
+                details={"lines": item.lines, "limit": check_quality.LINE_LIMIT},
             )
-            for item in check_file_size.oversize_files(root)
+            for item in check_quality.oversize_files(root)
         )
     if name == "test-paths":
         return tuple(
@@ -630,7 +626,7 @@ def local_findings(name: Detector, root: Path) -> tuple[Finding, ...]:
                 rule="test-path",
                 message=f"No module at {item.expected_source_dir}",
             )
-            for item in check_test_path_correspondence.violations(root)
+            for item in check_quality.path_violations(root)
         )
     if name == "test-structure":
         return tuple(
@@ -641,7 +637,7 @@ def local_findings(name: Detector, root: Path) -> tuple[Finding, ...]:
                 message=item.message,
                 counted=item.severity == "blocking",
             )
-            for item in check_test_structure.findings(root)
+            for item in check_quality.structure_findings(root)
         )
     if name == "test-capabilities":
         return tuple(
@@ -651,12 +647,12 @@ def local_findings(name: Detector, root: Path) -> tuple[Finding, ...]:
                 message=f"Missing {item.marker}",
                 details={"uses": item.uses},
             )
-            for item in check_test_capabilities.undeclared_capabilities(root)
+            for item in check_quality.undeclared_capabilities(root)
         )
     if name == "suppressions":
         return tuple(
             Finding(path=str(item.path), rule=item.kind, count=item.count)
-            for item in check_suppressions.suppressions(root)
+            for item in check_quality.suppressions(root)
             if item.count
         )
     raise ReportError(f"not a local detector: {name}")

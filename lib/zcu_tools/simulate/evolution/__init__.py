@@ -24,6 +24,7 @@ from .engine import (
 )
 from .exceptions import NoValidKernel
 from .frozen import (
+    FROZEN_PHYSICAL_VERSION,
     FrozenInput,
     FrozenRecord,
     canonical_json,
@@ -55,6 +56,14 @@ from .reference_cache import (
     write_reference,
 )
 from .routing_history import RoutingHistory
+from .scene_cache import (
+    SCENE_CACHE_VERSION,
+    FrozenIndexEntry,
+    read_frozen_index,
+    read_scene_records,
+    write_frozen_index,
+    write_scene_record,
+)
 from .secular import (
     FluxExpansion,
     FluxLevel,

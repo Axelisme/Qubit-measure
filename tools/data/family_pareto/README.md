@@ -4,13 +4,22 @@
 
 ## Owner 與用途
 
-`frozen-synthetic.json.gz` 保存 1 個重新宣告的 synthetic 場景。
-`frozen-real.json.gz` 保存 15 個完整 real 場景，以及 3 個單段 kernel 場景。
-兩份檔案分別為 730 與 10,374,107 bytes，合計 10,374,837 bytes。
-合計上限為 10 MiB，即 10,485,760 bytes，目前只剩 110,923 bytes 餘量。
-後續加場景超過上限時先停下討論，不自行放寬、去重或改 schema/key。
-它們保存完整數值，不在讀取時重建裝置、前端或使用者設定。
-讀端從兩份檔案選取 record，量測只在 `Engine.evolve` 上進行。
+Pareto 集合包含 1 個重新宣告的 synthetic 場景、15 個完整 real 場景與 3 個單段 kernel 場景。
+`frozen-synthetic.index.json` 與 `frozen-real.index.json` 依 category 保存這些身份，也可容納其他已宣告的場景。
+兩份 version 1 清單只存每筆 name、physical_sha256、oracle_sha256 與 metadata_sha256。
+Metadata hash 使用公開 `simulate.evolution.digest(record.metadata)`。
+數值不入庫。每筆 gzip 放在 `<git common dir 上層>/.agent_state/benchmark/family_pareto/scenes/v1`。
+檔名含 name、physical hash 前 16 碼及 metadata hash 前 16 碼。Task 清理不得刪除此共用快取。
+首次從既有兩份 gzip 遷移 19 筆，逐筆核三個 hash、point order 與 reference key 不變，沒有跑 builders 或 solver。
+落地的歷史不含兩個舊 gzip。冷快取完整重建尚未驗證，需另取運算授權。
+公開 `family_pareto.select_inputs(index, scenario, *, scene_cache=...)` 集中來源與 report 身份。
+未指定 index 或 scenario 時，先讀這兩份清單，只選 `select_inputs` 旁宣告的 19 個 Pareto 名稱。
+缺少任何預設名稱就失敗，不讀其他列的 payload 或 reference。
+`--index PATH` 不帶 scenario 時全選該份清單，`--scenario NAME` 可嚴格單選非 Pareto 列。
+Profile 列不作 family 去留證據。`--scene-cache DIR` 接受絕對快取路徑。
+跨兩份清單重名一律失敗，未選 scenario 也相同。缺檔列名稱、hash 與 producer 指令，不補建。
+接縫只讀已凍結數值，不重建裝置、前端或使用者設定。
+量測只在 `Engine.evolve` 上進行。
 
 場景控制由 `tools/family_pareto_scenarios.py`、`family_pareto_kernel_scenes.py` 與固定 settings 持有。
 Single/integer 編譯與數值 source 的生命週期由 `family_pareto_scene_builders.py` 持有。
@@ -31,7 +40,10 @@ Multitone 在同一個 port 加上 1.25 倍 DC E1−E0 的第二個 carrier。
 
 ## 數值與容器契約
 
-`simulate.evolution.read_frozen_manifest(path)` 讀回依序排列的 `FrozenRecord` tuple，先核對 version、唯一 name 與兩個 hash。
+`simulate.evolution.read_frozen_index(path)` 讀回有序 `FrozenIndexEntry`。
+`read_scene_records(cache, entries)` 依清單讀取單筆檔，核對 version、name 與完整三個 hash。
+單筆檔沿用 `write_frozen_manifest`／`read_frozen_manifest`，只容納一個 `FrozenRecord`。
+`write_scene_record` 與 `write_frozen_index` 用同目錄暫存檔加 replace 原子發布。
 `read_physical_input(record.physical)` 建立 caller-owned source 和 batch，使用完畢要關閉 source。
 Codec 用 canonical JSON 和 stdlib gzip，mtime 固定為 0，不寫檔名。
 同輸入寫到不同路徑仍得到相同 bytes。
@@ -44,6 +56,14 @@ Codec 用 canonical JSON 和 stdlib gzip，mtime 固定為 0，不寫檔名。
 
 場景 reason、expected families、companions、routes 與 provenance 放在 `record.metadata`，只有 tools 解讀。
 原有 real 場景的業務 `metadata` 欄位仍位於這個 opaque object 內，沒有展平或刪除。
-Tests 側 producer 只讀 record name 和 physical。呼叫端以 `--converged` 指定 synthetic manifest，以 `--interaction` 指定 real manifest。
+Tests 側 producer 只讀 record name 和 physical。呼叫端以 `--converged` 指定 synthetic index，以 `--interaction` 指定 real index，另傳顯式 `--scene-cache`。
+Prepare 重建並比對清單，hash 不符就停。只有明確 `--update-index` 會在所有選定建構成功後改所選列。
+已在 inventory 宣告、兩份清單皆無的新名稱，須以 `--update-index --scenario NEW` 建構並寫快取後，才加到該 category 清單尾端。
+既有列更新保留其他列與順序。完整 prepare 仍嚴格核對名稱集合，不同步新增或刪列。
+Tests reference producer 的 `--scenario NAME` 在明確清單中要求恰好一列，選取後才讀 payload 與求解。
+刪列或換組須明確編輯 tracked builder 與清單，不從名稱缺失自動推導。
+冷快取重建尚未核對，不以首次 payload 遷移宣稱全部 builders 可逐位元重產。
 它不讀 metadata、不靠名稱清單選 solver，也不在失敗後換 solver。
 參考解準備與 cache-only 讀取的分工見 [tests README](../../../tests/README.md#evolution-精度矩陣) 與 [ADR-0078](../../../docs/adr/0078-evolution-module-boundary.md)。
+
+Native thread 設定會改模型的最後幾位浮點，因此改 physical hash 與 reference key。快取遺失且重建不能逐位元重現時，只能明確 `--update-index`，並重算受影響的參考解。
