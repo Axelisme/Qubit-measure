@@ -9,7 +9,11 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from zcu_tools.core.simulation import (
+from zcu_tools.program.v2.modules.pulse import PulseCfg
+from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
+from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
+from zcu_tools.program.v2.simulation import IntegratedRound
+from zcu_tools.simulate.boundary import (
     AcquireRequest,
     AcquisitionMode,
     ChargeDriveRequirement,
@@ -18,10 +22,6 @@ from zcu_tools.core.simulation import (
     RoundRequest,
     TimelineTemplate,
 )
-from zcu_tools.program.v2.modules.pulse import PulseCfg
-from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
-from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
-from zcu_tools.program.v2.simulation import IntegratedRound
 from zcu_tools.simulate.evolution import EvolutionResult, PathDiagnostics
 from zcu_tools.simulators.replay import (
     ReplayAcquire,
@@ -402,7 +402,7 @@ def test_program_acquire_raw_decimated_and_live_round_refresh():
 def test_replay_rejects_other_backend_settings_before_numeric_work(
     tmp_path: Path, target
 ):
-    from zcu_tools.core.simulation import EnvironmentSnapshot
+    from zcu_tools.simulate.boundary import EnvironmentSnapshot
     from zcu_tools.simulators.ftf.config import parse_ftf
     from zcu_tools.simulators.ftf.environment import replay as ftf_replay
     from zcu_tools.simulators.single_fluxonium.environment import (

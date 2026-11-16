@@ -2,8 +2,8 @@
 
 import numpy as np
 import pytest
-from zcu_tools.core.simulation import AcquireRequest, ReadoutWindow
 from zcu_tools.simulate.adc import BackgroundRoughness, ReadoutModel
+from zcu_tools.simulate.boundary import AcquireRequest, ReadoutWindow
 from zcu_tools.simulators.single_fluxonium.config import parse_single_fluxonium
 from zcu_tools.simulators.single_fluxonium.environment.readout import prepare_readout
 from zcu_tools.simulators.single_fluxonium.environment.template import plan_template

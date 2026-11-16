@@ -1,7 +1,6 @@
 """Multiple ADC windows retain one joint-initial draw per independent shot."""
 
 import numpy as np
-from zcu_tools.core.simulation import SamplingIdentity
 from zcu_tools.simulate.adc import (
     ADC,
     PopulationInput,
@@ -10,6 +9,7 @@ from zcu_tools.simulate.adc import (
     Receiver,
     SampleGrid,
 )
+from zcu_tools.simulate.boundary import SamplingIdentity
 
 
 def test_windows_share_initial_state_but_not_receiver_noise() -> None:

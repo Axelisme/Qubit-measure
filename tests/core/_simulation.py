@@ -4,7 +4,7 @@ from collections.abc import Iterable
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
-from zcu_tools.core.simulation import (
+from zcu_tools.simulate.boundary import (
     EventSlot,
     PointTimeline,
     ReadoutSlot,
