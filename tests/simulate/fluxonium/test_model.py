@@ -5,6 +5,45 @@ import pytest
 from numpy.testing import assert_allclose
 from zcu_tools.simulate import fluxonium
 from zcu_tools.simulate.evolution import DriveSource
+from zcu_tools.simulate.resonator_mode import ResonatorModeInput, build_resonator_mode
+
+
+def test_joint_resonator_uses_native_cutoff_and_public_labels():
+    params = (4.0, 1.0, 1.0)
+    circuit = fluxonium.SingleFluxoniumModel(
+        params, 0.5, cutoff=12, retained_levels=3, temperature_k=0
+    )
+    resonator = fluxonium.DispersiveResonator(6.0, 0.08, 2 * np.pi * 0.005)
+    native = fluxonium.calculate_oscillator_operators(params, cutoff=12)
+    drives = {"xy": native.charge}
+    expected = build_resonator_mode(
+        ResonatorModeInput(
+            hamiltonian_ghz=native.static_ghz - native.cosine_ghz,
+            coupling_ghz=0.08 * native.charge,
+            drive_operators_ghz=drives,
+            retained_labels=tuple((q, k) for q in range(3) for k in range(3)),
+            frequency_ghz=6.0,
+            decay_per_ns=2 * np.pi * 0.005,
+            qubit_rates_per_ns=np.zeros((12, 12)),
+            level=(0,),
+        )
+    )
+    joint = circuit.joint_resonator_model(
+        (0,), resonator, drive_operators_ghz=drives
+    )
+    assert joint.label_to_index == expected.label_to_index
+    assert joint.index_to_label == expected.index_to_label
+    assert set(joint.label_to_index) == {(q, k) for q in range(3) for k in range(3)}
+    assert joint.model.energies_ghz.shape == (9,)
+    assert_allclose(joint.model.energies_ghz, expected.model.energies_ghz, atol=1e-12)
+    assert joint.model.drives[0].name == "xy"
+    assert_allclose(
+        joint.model.drives[0].in_phase_ghz,
+        expected.model.drives[0].in_phase_ghz,
+        atol=1e-12,
+    )
+    assert_allclose(joint.model.rates_per_ns, expected.model.rates_per_ns, atol=1e-12)
+    assert_allclose(joint.model.eigenvectors, np.eye(9), atol=1e-12)
 
 
 @pytest.mark.parametrize(("flux", "frequency"), [(0.5, 0.58), (0.0, 5.4)])
