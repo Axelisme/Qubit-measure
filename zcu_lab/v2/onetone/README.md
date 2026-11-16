@@ -2,12 +2,13 @@
 
 **讀者：** lab-author。查閱 one-tone 表單的 readout timing 初值與共用來源。
 
-**Last updated:** 2026-11-16，range find 具名 dip 頻率 upsert
+**Last updated:** 2026-11-16，freq 表單欄位歸回 FreqInput
 
 `freq`、`power_dep`、`flux_dep`、`range_find` 的 `make_form` 共用
 [`_form_shared.py`](_form_shared.py) 的 `initial_readout_timing`。
 `freq` 與 `range_find` 另共用 `initial_spectrum_tree`，集中 readout、linear sweep 與平均次數的初值。
-[`_shared.py`](_shared.py) 保存不依賴 GUI 的 cfg 與頻率格點。
+[`_shared.py`](_shared.py) 保存不依賴 GUI 的結果型別與頻率格點。
+`freq/form.py` 的 `FreqInput` 直接宣告表單欄位；兩個 core 各自擁有 cfg。
 兩個 core 的 `run` 各自列出 reset → PulseReadout → declare_sweep → acquire 序列。
 [`range_find`](range_find/guide.md) 掃大範圍絕對 MHz，單一 Analyze 入口開啟互動選谷。
 靜態找谷提供初始猜測，operator 可調參、增刪與重新對應元件，Done 後才提議各 resonator 的 `freq`。
