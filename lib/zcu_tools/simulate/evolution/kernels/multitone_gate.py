@@ -26,9 +26,14 @@ from ._workload_facts import envelope_bounds, fixed_flux
 
 @dataclass(frozen=True)
 class _Prepared:
-    """Read-only key-aligned Fourier U and half-quarter secular D maps."""
+    """Read-only key-aligned Fourier U and half-quarter secular D maps.
+
+    coefficients may pad either Fourier axis for batch storage. grid_sizes
+    contains each key's active (Na,Nb); padding never defines Fourier modes.
+    """
 
     coefficients: NDArray[np.complex128]
+    grid_sizes: NDArray[np.int64]
     populations: NDArray[np.float64]
     coherences: NDArray[np.float64]
 
@@ -36,17 +41,22 @@ class _Prepared:
     def nbytes(self) -> int:
         return sum(
             array.nbytes
-            for array in (self.coefficients, self.populations, self.coherences)
+            for array in (
+                self.coefficients,
+                self.grid_sizes,
+                self.populations,
+                self.coherences,
+            )
         )
 
 
 @njit(nogil=True, cache=True)
-def _play(coefficients, baths, key_index, phases, states):
+def _play(coefficients, grid_sizes, baths, key_index, phases, states):
     populations, coherences = baths
-    count_a, count_b = coefficients.shape[2:4]
     size = states.shape[-1]
     for row in range(len(states)):
         key = key_index[row]
+        count_a, count_b = grid_sizes[key]
         rho = states[row].copy()
         for segment in range(GATE_SUBSEGMENTS):
             unitary = np.zeros((size, size), dtype=np.complex128)
@@ -91,6 +101,7 @@ def _build(table: SegmentTable, row: int, context: KernelContext) -> _Prepared |
     half = float(table.duration_ns[row]) / (2 * GATE_SUBSEGMENTS)
     arrays = (
         coefficient[None],
+        np.array([coefficient.shape[1:3]], dtype=np.int64),
         np.asarray(
             expm(half * population_generator(model.rates_per_ns)), dtype=np.float64
         )[None],
@@ -106,9 +117,10 @@ class MultitoneGateKernel:
 
     Require two tones, at least one sampled envelope, fixed flux and positive
     duration. A model-only four-way secular split proxy must be <=0.01. Build
-    a 9x9 Fourier grid and 64 independent validation points together. Admit only
-    keys whose every quarter has full-unitary Frobenius defect <=1.9e-7.
-    Failed validation refuses the key; integration failures propagate.
+    a 9x10 Fourier grid and 64 independent validation points together, at
+    rtol/atol 2.75e-7/2.75e-9. Failed validation rebuilds once at 13x13 and
+    1e-8/1e-10. Admit only keys whose every quarter has full-unitary Frobenius
+    defect <=1.9e-7. Two failed stages refuse the key; solver failures propagate.
     Phase and absolute start are apply-only, not key fields. Guard preparations
     are handed to the scheduler and live only within one evolve (ADR-0078).
     No RWA or graph pruning is performed. The empirical validation and split
@@ -202,8 +214,27 @@ class MultitoneGateKernel:
                 raise TypeError("full-drive gate requires its own preparation")
             by_key[entry.keys[0].tobytes()] = entry.prepared
         ordered = [by_key[key.tobytes()] for key in keys]
+        grid_sizes = np.concatenate([product.grid_sizes for product in ordered])
+        width_a, width_b = grid_sizes.max(axis=0)
+        coefficients = np.concatenate(
+            [
+                np.pad(
+                    product.coefficients,
+                    (
+                        (0, 0),
+                        (0, 0),
+                        (0, width_a - product.grid_sizes[0, 0]),
+                        (0, width_b - product.grid_sizes[0, 1]),
+                        (0, 0),
+                        (0, 0),
+                    ),
+                )
+                for product in ordered
+            ]
+        )
         arrays = (
-            np.concatenate([product.coefficients for product in ordered]),
+            coefficients,
+            grid_sizes,
             np.concatenate([product.populations for product in ordered]),
             np.concatenate([product.coherences for product in ordered]),
         )
@@ -249,6 +280,7 @@ class MultitoneGateKernel:
             raise ValueError("full-drive gate state/index shape mismatch")
         _play(
             prepared.coefficients,
+            prepared.grid_sizes,
             (prepared.populations, prepared.coherences),
             key_index,
             table.tone_theta_rad[rows, :2],

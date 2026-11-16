@@ -96,7 +96,7 @@ def test_pinned_family_density(
     assert error <= 2e-3, f"{name}/{family}: density error {error:.9g} > 2e-3"
 
 
-@pytest.mark.parametrize("shape", ["gaussian", "flat_top"])
+@pytest.mark.parametrize("shape", ["gaussian", "flat_top", "drag"])
 @pytest.mark.parametrize("repeats,varying_phases", [(1, True), (7, False), (7, True)])
 def test_multitone_gate_dual_phase_density(
     shape: str,
@@ -120,6 +120,40 @@ def test_multitone_gate_dual_phase_density(
         )
     )
     assert error <= 2e-3
+
+
+def test_multitone_gate_sampled_upgrade_density() -> None:
+    """A phase-demanding sampled key remains accurate across seven dual phases."""
+    case = multitone_phase_case("sampled", 7, gain=2.0)
+    with closing(Engine(1, families=("multitone_gate",))) as engine:
+        result = engine.evolve(case.source, (case.batch,))
+    require_families(result.paths, ("multitone_gate",))
+    reference = converged_reference(case.source, case.batch)
+    assert density_error(result.densities, reference.density) <= 2e-3
+
+
+def test_multitone_gate_mixed_phase_keys_density(
+    matrix_reference: Callable[[AccuracyCase], ReferenceResult],
+) -> None:
+    """One evolve plays easy, phase-demanding and constant+sampled keys together."""
+    cases = (
+        multitone_phase_case("gaussian", 7),
+        multitone_phase_case("sampled", 7, gain=2.0),
+        multitone_phase_case("constant_sampled", 7),
+    )
+    batches = tuple(
+        replace(case.batch, points=np.array([point]))
+        for point, case in enumerate(cases)
+    )
+    with closing(Engine(1, families=("multitone_gate",))) as engine:
+        result = engine.evolve(cases[0].source, batches)
+    require_families(result.paths, ("multitone_gate",))
+    for point, case in enumerate(cases):
+        reference = matrix_reference(case)
+        assert (
+            density_error(result.densities[point : point + 1], reference.density)
+            <= 2e-3
+        )
 
 
 def test_multitone_gate_rejects_unresolved_dual_phase_key() -> None:

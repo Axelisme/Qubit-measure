@@ -1,6 +1,6 @@
 # Evolution kernels
 
-**Last updated:** 2026-11-17，雙相位完整 drive gate
+**Last updated:** 2026-11-17，雙相位 gate 的有限升級
 
 **讀者：** framework-dev、agent。查找演化算法的數值 owner，以及 kernel 與 dispatch、scheduler 的接縫。
 
@@ -17,7 +17,10 @@
 `multitone_rwa` 的 family guard 只收 distinct-port constant pairs，拒收 sampled 多 tone 列。
 `multitone_gate` 用完整 drive 建四個 Hilbert 子段，在兩個起始相位上做 raw Fourier 展開。
 `_multitone_gate_phase.py` 擁有網格與非格點驗證，`_gate_endpoints.py` 擁有批次積分與 polar retraction。
-Guard 只放行每子段 full-unitary defect ≤ 1.9e-7 的 key，失敗就拒收，不升級。
+所有 key 從 9×10、rtol/atol 2.75e-7/2.75e-9 起跳，不按包絡形狀或虛部分類。
+第一階驗證失敗才升到 13×13、1e-8/1e-10。每階節點與兩組共 64 個獨立 probe 同批積分。
+Guard 只放行每子段 full-unitary defect ≤ 1.9e-7 的 key，第二階仍失敗就拒收。
+每個 key 保留自己的 active grid，混合階數的係數 padding 不參與 Fourier modes。
 Guard 將通過的數值產品交給 scheduler，只活一次 evolve。單 tone 的數值分支不變。
 其餘候選沿用既有定價，可能選到 `common_frame` 或 `dop853`。
 Fourier 數值、phase graph 與 covariant gate builder 分別留在 `_rwa_fourier.py`、`_rwa_graph.py` 與 `_rwa_gate.py`。
