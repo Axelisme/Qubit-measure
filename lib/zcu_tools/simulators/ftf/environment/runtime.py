@@ -22,6 +22,7 @@ from zcu_tools.device import DeviceManager
 from zcu_tools.device.fake import FakeDevice, FakeDeviceInfo
 from zcu_tools.experiment.simulation import EnvironmentWarmup, SimulationEnvironment
 from zcu_tools.program.v2.simulation import (
+    AcquireOutcome,
     IntegratedRound,
     SimulationBinding,
     SimulationCallbacks,
@@ -723,16 +724,17 @@ class FTFSource:
             request.snapshot, request.index, cancel=request.cancel
         )
 
-    def finish_acquire(self, rounds: tuple[RoundRequest, ...], wall_s: float) -> None:
-        """Write one best-effort summary at the binding's completion boundary.
+    def finish_acquire(self, outcome: AcquireOutcome) -> None:
+        """Write the binding outcome as one best-effort acquire summary.
 
-        rounds includes failed captured attempts, and may be empty if request
-        construction failed. wall_s is admitted acquire wall time including
-        pacing. Only the matching current session contributes routing work.
-        Direct execute users may call this explicitly after their final round.
+        outcome retains captured round inputs (including failed attempts), wall
+        seconds including pacing, builder seconds and normal-return status.
+        Only the matching current session contributes routing work. Direct execute
+        users may supply their own outcome after the final round and cleanup.
         """
         if self.telemetry is None:
             return
+        rounds = outcome.rounds
         request = rounds[0].acquire if rounds else None
         session = self._session
         paths = (
@@ -744,12 +746,11 @@ class FTFSource:
             {
                 "points": prod(request.point_dims) if request is not None else 0,
                 "rounds": len(rounds),
-                "wall_s": wall_s,
-                # Stage timing and completion are wired by the acquire observers.
-                "compile_wall_s": None,
+                "wall_s": outcome.wall_s,
+                "compile_wall_s": outcome.compile_wall_s,
                 "evolve_wall_s": None,
                 "readout_wall_s": None,
-                "complete": True,
+                "complete": outcome.complete,
                 "extras": {
                     "ftf.projection_outcomes": list(
                         self.evaluations[-1].projection_outcomes

@@ -6,13 +6,45 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from zcu_tools.device import DeviceManager
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
+from zcu_tools.program.v2.simulation import AcquireOutcome
 from zcu_tools.simulators.ftf.environment import ftf
+from zcu_tools.simulators.ftf.environment.runtime import FTFSource
+from zcu_tools.simulators.telemetry import RoutingTelemetry
 
 from tests.program._profiles import profile_soccfg
 from tests.program._timeline import compile_modules
 from tests.simulators.ftf.environment._templates import settings
+
+
+@pytest.mark.parametrize("complete", [False, True])
+def test_finish_acquire_projects_binding_outcome_without_numeric_work(
+    tmp_path, complete
+):
+    devices = DeviceManager()
+    source = FTFSource(
+        settings(),
+        devices,
+        soccfg=profile_soccfg("ftf"),
+        telemetry=RoutingTelemetry(tmp_path),
+    )
+    try:
+        source.finish_acquire(AcquireOutcome((), 7.0, 2.0, complete))
+        files = list(tmp_path.glob("routing-*.jsonl"))
+        assert len(files) == 1
+        rows = [json.loads(line) for line in files[0].read_text().splitlines()]
+        assert len(rows) == 1
+        assert rows[0]["wall_s"] == 7.0
+        assert rows[0]["compile_wall_s"] == 2.0
+        assert rows[0]["complete"] is complete
+        assert rows[0]["points"] == 0
+        assert rows[0]["rounds"] == 0
+        assert rows[0]["families"] == {}
+    finally:
+        source.close()
+        devices.close_all_devices()
 
 
 @pytest.mark.sim

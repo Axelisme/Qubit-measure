@@ -90,7 +90,11 @@ Numeric templates contain no program/experiment identifier, so `experiment` is
 omitted rather than guessed from controls or caller frames.
 
 The shared [acquire writer](../../README.md#acquire-telemetry) supplies the common
-summary fields. Projection values live only in `extras`:
+summary fields. `FTFSource.finish_acquire(outcome)` receives the binding's
+`AcquireOutcome` and projects its builder-only `compile_wall_s` and `complete`.
+`complete` means the acquire body and cleanup returned normally, including partial
+Stop results. An escaping error is false; evolve/readout timing remains unmeasured.
+Projection values live only in `extras`:
 `ftf.projection_outcomes` counts retained outcome histories per C-order point in the
 latest solved round. `ftf.projection_pruned_weight` gives each point's cumulative
 removed probability before redistribution. Both arrays are empty for

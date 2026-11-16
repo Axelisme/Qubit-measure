@@ -3,7 +3,7 @@
 import logging
 import time
 import warnings
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from threading import Lock
@@ -79,8 +79,9 @@ class SimulationCallbacks:
         errors release admission and propagate. on_end: completed-acquire observer
         receiving an AcquireOutcome, including failed rounds and pacing.
         Its ordinary Exceptions warn once without masking execution errors;
-        BaseExceptions propagate with the acquire error retained as context. on_begin: no-argument preparation after wait_ready, before request
-        construction; errors release admission and propagate. All default None
+        BaseExceptions propagate with the acquire error retained as context.
+    on_begin: no-argument preparation after wait_ready, before request construction;
+        errors release admission and propagate. All default None
         and must not reenter acquisition.
     """
 
@@ -96,8 +97,8 @@ class SimulationBinding:
     receives only a RoundRequest and returns all ADCs together. Neither callback
     owns averaging. Calls are synchronous; acquire rejects simultaneous/reentrant
     acquisition before changing active state. The acquisition adapter places
-    request construction, execution and cleanup inside the acquire scope. This binding owns no drivers
-    and does not close callback resources.
+    request construction, execution and cleanup inside the acquire scope.
+    This binding owns no drivers and does not close callback resources.
 
     Attributes:
         capture_snapshot: Environment-owned, no-argument callable returning the
@@ -208,7 +209,7 @@ class SimulationBinding:
         self._admission = Lock()
 
     @contextmanager
-    def acquire(self) -> Iterator[int]:
+    def acquire(self) -> Generator[int]:
         """Admit one synchronous acquire and yield its zero-based int sequence.
 
         Place request construction, execution and cleanup inside this scope.
@@ -243,7 +244,7 @@ class SimulationBinding:
             self._admission.release()
 
     @contextmanager
-    def compiling(self) -> Iterator[None]:
+    def compiling(self) -> Generator[None]:
         """Measure builder wall seconds inside an acquire scope, including failure.
 
         Use only around request construction, not installation or execution.

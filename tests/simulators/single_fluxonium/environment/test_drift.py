@@ -110,15 +110,13 @@ def test_acquisition_freezes_loss_at_admission_and_replays_after_drift(tmp_path:
         binding = env.soc.binding
         results = []
         for sequence in range(2):
-            binding.begin()
-            admitted_time = now[0]
-            now[0] += 20.0  # Request construction must not move the sampling time.
-            try:
+            with binding.acquire() as admitted_sequence:
+                assert admitted_sequence == sequence
+                admitted_time = now[0]
+                now[0] += 20.0  # Request construction must not move the sampling time.
                 request = request_for(binding, sequence)
                 results.append(integrated(binding.sample_round(request, 0)))
                 binding.sample_round(request, 1)
-            finally:
-                binding.end()
             truth = tmp_path / "truth.jsonl"
             assert truth.exists(), (
                 "admission must write simulation-owned acquisition truth"
@@ -256,5 +254,5 @@ def test_truth_io_failure_releases_binding_admission(tmp_path: Path):
     clock = SimulationClock(monotonic=lambda: 0.0)
     with environment(drift_settings(), blocked, clock) as env:
         for _ in range(2):
-            with pytest.raises(FileExistsError):
-                env.soc.binding.begin()
+            with pytest.raises(FileExistsError), env.soc.binding.acquire():
+                pytest.fail("truth I/O must fail before entering acquire")

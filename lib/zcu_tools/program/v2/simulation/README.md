@@ -12,10 +12,12 @@
 `SimulationAcquireMixin` enters once through `MyProgramV2`. With a
 `SimulationSoc`, it admits a synchronous call, builds one `AcquireRequest`,
 and supplies numeric round data to the existing QICK acquisition pipeline.
-`SimulationBinding` optionally accepts `SimulationCallbacks(wait_ready=callback)`. Admission calls
-it before consuming the acquire sequence or constructing a request. Failure
-releases admission and propagates; the environment callback owns any optional
-startup-compilation fallback. External timers must wait at the environment's
+`with binding.acquire() as sequence:` admits one call and yields its zero-based
+integer sequence. Reentry or concurrent entry raises before consuming a sequence.
+`SimulationBinding` optionally accepts `SimulationCallbacks(wait_ready=callback)`.
+Admission calls readiness, then `on_begin`, before consuming the sequence or
+constructing a request. Either failure releases admission and propagates without
+calling `on_end`; the environment callback owns any optional startup-compilation fallback. External timers must wait at the environment's
 ready interface before starting if startup time should be excluded.
 `SimulationBinding(..., timing=SimulationTiming(time_scale=0.0))` optionally paces each round to
 `time_scale × program.request_round_time_s(request)` seconds. That owner sums
@@ -38,11 +40,25 @@ builder owns this policy, not the GUI. For a 2 us timeline with zero relaxation,
 the target when numeric work dominates.
 `SimulationBinding(..., callbacks=SimulationCallbacks(on_end=callback))` optionally observes each admitted
 acquire after all software rounds, including partial or failed acquisitions.
-The callback receives captured `RoundRequest` records and admitted wall seconds,
-including pacing. It runs before admission releases. Observer errors warn at
-most once and cannot mask acquisition failures, even under warning-as-error
-filters. An omitted on_end avoids this observer and its acquire-level clocks. FTF uses the
-callback to persist its own local routing reports; program knows no file format.
+The callback receives one frozen `AcquireOutcome(rounds, wall_s, compile_wall_s,
+complete)`. `rounds` contains captured inputs in execution order, including a
+failed round's input. `wall_s` includes pacing and mixin cleanup, but excludes
+readiness, `on_begin` and observer work. The mixin wraps only
+`build_compiled_request` in `binding.compiling()`; its elapsed seconds accumulate
+in `compile_wall_s` even if construction raises. Installation and execution do
+not contribute to compile time. No entered compile scope means `0.0`.
+
+The binding's acquire body includes request release and active-marker cleanup.
+It sets `complete=True` only when that body returns normally. A Stop that returns
+partial results is true; zero completed rounds that raise
+`StoppedPartialAcquireError` are false. This field does not certify that every
+requested round ran. An outer exception handler does not affect the result.
+The observer runs after this decision and before admission releases. Ordinary
+observer `Exception`s warn at most once and cannot mask acquisition failures,
+even under warning-as-error filters. Observer `BaseException`s propagate and
+retain an original acquire error as context. Admission releases in either case.
+An omitted `on_end` avoids acquire and compiling clock reads. FTF projects this
+outcome into its local routing report; program knows no writer or file format.
 Integrated `acquire(..., charge_requirements=(ChargeDriveRequirement(name, gen_ch), ...))`
 passes named physical charge requirements through the simulation request. The
 record lives in `core.simulation`; names are diagnostics, not dispatch keys.
