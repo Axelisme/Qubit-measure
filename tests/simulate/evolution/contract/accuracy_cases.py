@@ -30,16 +30,19 @@ from .synthetic_models import synthetic_model
 
 @dataclass(frozen=True)
 class AccuracyCase:
-    """Named physical input and families expected to accept its complete timeline.
+    """Named physical input and independently pinned accuracy targets.
 
     source owns model/history state; batch contains all points. families lists
-    independently pinnable routes, not a per-segment algorithm preference.
+    independent pinned targets. idle_family names the undriven companion needed
+    alongside each target; None means no idle companion. These declarations are
+    test expectations, not per-segment Engine routing.
     """
 
     name: str
     source: ModelSource
     batch: TimelineBatch
     families: tuple[str, ...]
+    idle_family: str | None = None
 
 
 def coherent_source(model: SecularModel) -> ModelSource:
@@ -287,6 +290,7 @@ def single_tone_sideband_case() -> AccuracyCase:
     three photons. Flux is 0.40, fr=6 GHz, g=0.08 GHz, kappa/(2*pi)=5 MHz.
     The charge tone drives dressed |e,0> to |g,1> at g_sb=1 MHz; the initial
     state is |e,0>. Intrinsic capacitive Q=1e6 loss remains active at zero K.
+    Plateau targets are floquet_period and t6, each with the t4 idle companion.
     """
     circuit = SingleFluxoniumModel(
         (4.0, 1.0, 1.0), 0.40, cutoff=30, retained_levels=6, temperature_k=0
@@ -313,7 +317,13 @@ def single_tone_sideband_case() -> AccuracyCase:
         gain=2 * 0.001 / abs(model.drives[0].in_phase_ghz[photon, excited]),
     )
     batch = replace(batch, tracks=(replace(track, duration_ns=np.array([600.0])),))
-    return AccuracyCase("single_tone_sideband", source, batch, ("dop853",))
+    return AccuracyCase(
+        "single_tone_sideband",
+        source,
+        batch,
+        ("floquet_period", "t6"),
+        idle_family="t4",
+    )
 
 
 def accuracy_case(name: str) -> AccuracyCase:

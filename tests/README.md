@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-11-17，reference producer 單列選取
+**Last updated:** 2026-11-17，sideband plateau 與 idle 精度宣告
 
 **讀者：** framework-dev、agent。查閱測試的 owner、fixture、執行方式與搬遷驗收契約。
 
@@ -200,7 +200,10 @@ Active family 的 guard 拒絕輸入會讓 density 測試失敗，不會產生�
 native cutoff=30、retained=6、N=3 的 d=18 joint 模型。初態是 dressed |e,0⟩，
 600 ns 方波驅動 |e,0⟩→|g,1⟩，g_sb=1 MHz，之後等待五個 cavity lifetimes。
 κ/(2π)=5 MHz，intrinsic capacitive Q=1e6 的 T1 仍在模型內。
-它固定驗 `dop853`，並以預設選路的空／暖歷史對雙容差 oracle 比完整 density。
+它宣告 plateau targets 為 `floquet_period` 與 `t6`，idle companion 為 `t4`。
+各 target 以 `families=("t4", target)` 固定，實際執行的 family 集合須正好是兩者。
+另以預設選路的空／暖歷史對雙容差 oracle 比完整 density，reference 在同一 pytest worker 內共用。
+`t6` 是 plateau 的直接積分 family，不代表 `dop853` family 通過。
 
 每個案例也保留預設選路的空歷史與暖歷史驗收。
 `joint_gate_inventory` 保留完整 20 點 sampled inventory，pinned density 改驗 `dop853`。
