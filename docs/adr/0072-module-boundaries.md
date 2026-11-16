@@ -236,7 +236,8 @@ GUI、MCP 組合根與開發工具需要 lab 宣告時，只直接 import `zcu_l
 `tools/family_pareto_kernel_scenes.py` 則用公開 `SingleFluxoniumModel` 直接宣告單段數值控制，不經前端。
 通用 codec 歸 `simulate.evolution`，數值資料不包含 solver 或裝置 builder。
 2026-11-16 的存放方向是不將凍結場景入庫，Git 只留名稱與 hash 小清單。
-既有兩份 gzip 的搬遷、預設來源與 report 身份仍待存放契約，不以原資料路徑作終態。
+既有兩份 gzip 與預設來源尚待存放遷移，不以原資料路徑作終態。
+Report 身份使用每筆 name、physical_sha256、oracle_sha256 與 metadata_sha256，不隨存放方式改變。
 Producer 自持具名 `Scene`，不依賴 tests 的案例型別或清單。獨立參考解 producer 留在 tests 側，經檔案交接，契約見 [[0078]]。
 此處接受與 lab 重複，讓讀工具的人可以直接看懂場景；lab 序列改動不會自動更新已凍結的量表輸入。
 這個取捨只適用於固定的 optimizer benchmark。需要真實 lab 宣告的品質檢查仍經 assembly 取得宣告，不複製一份。
@@ -257,9 +258,14 @@ Runner、report 與 summary 讀同一個 owner，不由 report 反向 import 執
 選取、reference preflight 與 check 的結束點留在 caller，計時協定只消費已備好的 session。
 這個分工不表示量測計時已切換到新的共同 owner。
 
-預設來源與舊 archive 的遷移尚未完成，集中在 `family_pareto` 的選取／身份接縫。
-工具的 reference 路徑已不 import tests solver；測試側 exclusion estimator 的反向依賴仍待歸屬裁決。
-此段不宣稱所有量測 consumer 依賴已清除，也不宣稱 `simulate` 已封閉。
+`family_pareto.select_inputs` 是公開來源／身份接縫，回傳工具的 `Input` 與原 `FrozenRecord`。
+它用 `simulate.evolution.digest(record.metadata)` 算 metadata hash，不另寫 hash 公式。
+目前接縫暫讀現行 tools/data 來源，只供 integration，後續存放遷移只替換來源與用法文件。
+量測 consumer 不再寫 records 副本，也不保留舊 freeze helper 或 producer import。
+計時 owner 只接已備好的 session；paired caller 透過這個接縫取得同一組每筆身份。
+
+測試側 exclusion estimator 的反向依賴由獨立後續工作承接，仍待歸屬裁決。
+這不表示已封閉 `simulate`，也不把尚未移除的反向依賴當成完成。
 取捨與介面退休見 [量表 cache-only 遷移](../discussions/2026-11-16-family-pareto-cache-only.md)。
 
 ### Lab 定義與組合根

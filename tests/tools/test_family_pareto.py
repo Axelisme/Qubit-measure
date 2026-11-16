@@ -14,10 +14,12 @@ import pytest
 from zcu_tools.simulate.evolution import (
     EvolutionResult,
     FamilyRouting,
+    FrozenRecord,
     NoValidKernel,
     PathDiagnostics,
     ReferenceResult,
     RoutingHistory,
+    read_frozen_manifest,
     write_reference,
 )
 
@@ -27,10 +29,10 @@ from tests.tools.family_pareto_support import (
     engine_reference,
     make_history_scene,
     make_scene,
-    write_legacy_manifest,
     write_test_cache,
+    write_test_manifest,
 )
-from tools import family_pareto_report
+from tools import family_pareto, family_pareto_report
 from tools.family_pareto import (
     EngineSession,
     main,
@@ -38,9 +40,11 @@ from tools.family_pareto import (
     measure_policy,
     render_summary,
     run_table,
-    tested_state,
 )
-from tools.family_pareto_inputs import Input, Scene, canonical_json, freeze_manifest
+from tools.family_pareto import (
+    tested_state as read_tested_state,
+)
+from tools.family_pareto_inputs import Input, Scene, canonical_json, freeze_records
 from tools.family_pareto_results import (
     ACCURACY_LIMIT,
     ALL_FAMILIES,
@@ -548,7 +552,7 @@ def test_cli_measures_prepared_inputs_and_preserves_output_on_manifest_failure(
     manifest = tmp_path / "inputs.json"
     output = tmp_path / "result.json"
     summary = tmp_path / "summary.md"
-    write_legacy_manifest(inputs, manifest)
+    write_test_manifest(inputs, manifest)
     cache = tmp_path / "cache"
     write_test_cache(inputs, cache)
     argv = [
@@ -561,7 +565,7 @@ def test_cli_measures_prepared_inputs_and_preserves_output_on_manifest_failure(
         "--summary",
         str(summary),
     ]
-    assert main(argv, inputs=inputs) == 0
+    assert main(argv) == 0
     saved = json.loads(output.read_text())
     refused = next(
         policy
@@ -585,7 +589,7 @@ def test_cli_measures_prepared_inputs_and_preserves_output_on_manifest_failure(
     assert "t4" in summary.read_text()
     complete = output.read_text()
     manifest.write_text("{}")
-    assert main(argv, inputs=inputs) == 1
+    assert main(argv) == 1
     assert output.read_text() == complete
 
 
@@ -602,7 +606,7 @@ def test_cli_scenario_selects_exactly_one_before_build_with_a_manifest(
     cache = tmp_path / "cache"
     write_test_cache([inputs[1]], cache)
     manifest = tmp_path / "inputs.json"
-    write_legacy_manifest([inputs[1]], manifest)
+    write_test_manifest([inputs[1]], manifest)
     matrix = tmp_path / "matrix.json"
     report = tmp_path / "report.md"
     assert (
@@ -624,12 +628,11 @@ def test_cli_scenario_selects_exactly_one_before_build_with_a_manifest(
                 "--partial-output",
                 str(tmp_path / "journal.jsonl"),
             ],
-            inputs=inputs,
         )
         == 0
     )
     saved = json.loads(matrix.read_text())
-    assert [item["name"] for item in saved["manifest"]["inputs"]] == ["idle"]
+    assert [item["name"] for item in saved["records"]] == ["idle"]
     assert saved["measurement"]["reference_cache_only"] is True
     assert saved["exclusive"] is True
     assert datetime.fromisoformat(saved["started_at_utc"]).utcoffset() == timedelta(0)
@@ -641,6 +644,10 @@ def test_cli_scenario_cache_miss_stops_without_solving_and_explains_rebuild(
 ) -> None:
     matrix = tmp_path / "matrix.json"
     cache = tmp_path / "empty-cache"
+    manifest = tmp_path / "scenes.json.gz"
+    write_test_manifest(
+        [Input("idle", lambda: make_scene("idle_coherence"), "tiny")], manifest
+    )
     assert (
         main(
             [
@@ -650,6 +657,8 @@ def test_cli_scenario_cache_miss_stops_without_solving_and_explains_rebuild(
                 "t4",
                 "--reference-cache",
                 str(cache),
+                "--manifest",
+                str(manifest),
                 "--output",
                 str(matrix),
                 "--summary",
@@ -657,7 +666,6 @@ def test_cli_scenario_cache_miss_stops_without_solving_and_explains_rebuild(
                 "--partial-output",
                 str(tmp_path / "journal.jsonl"),
             ],
-            inputs=[Input("idle", lambda: make_scene("idle_coherence"), "tiny")],
         )
         == 1
     )
@@ -668,32 +676,47 @@ def test_cli_scenario_cache_miss_stops_without_solving_and_explains_rebuild(
 
 
 def test_cli_scenario_unknown_name_does_not_build_and_lists_legal_names(
+    tmp_path: Path,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    def must_not_build() -> Scene:
-        raise AssertionError("unknown selection must not build")
-
-    assert (
-        main(["--scenario", "unknown"], inputs=[Input("idle", must_not_build, "tiny")])
-        == 1
+    manifest = tmp_path / "scenes.json.gz"
+    write_test_manifest(
+        [Input("idle", lambda: make_scene("idle_coherence"), "tiny")], manifest
     )
+    assert main(["--scenario", "unknown", "--manifest", str(manifest)]) == 1
     assert "Unknown scenario: unknown. Legal names: idle" in caplog.text
 
 
 def test_cli_rejects_ambiguous_scenario_before_build_and_lists_sources(
+    tmp_path: Path,
     caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def must_not_build() -> Scene:
-        raise AssertionError("ambiguous selection must not build")
+    inputs = [Input("idle", lambda: make_scene("idle_coherence"), "tiny")]
+    paths = [tmp_path / "first.json.gz", tmp_path / "second.json.gz"]
+    for path in paths:
+        write_test_manifest(inputs, path)
+    decoded = iter(read_frozen_manifest(path) for path in paths)
+    sources: list[str] = []
+    calls: list[str] = []
 
-    inputs = [
-        Input("idle", must_not_build, "first", manifest={"source": "first-source"}),
-        Input("idle", must_not_build, "second", manifest={"source": "second-source"}),
-    ]
-    assert main(["--scenario", "idle"], inputs=inputs) == 1
+    def read(path: Path) -> tuple[FrozenRecord, ...]:
+        sources.append(str(path))
+        return next(decoded)
+
+    def engine(*args: object, **kwargs: object) -> None:
+        calls.append("Engine")
+        raise AssertionError("ambiguous selection must not start Engine")
+
+    # CLI has one manifest option. Delegate its default reads to two valid
+    # codec fixtures without coupling this behavior test to storage locations.
+    monkeypatch.setattr(family_pareto, "read_frozen_manifest", read)
+    monkeypatch.setattr(family_pareto, "Engine", engine)
+    assert main(["--scenario", "idle"]) == 1
     assert "Ambiguous scenario: idle" in caplog.text
-    assert "first-source" in caplog.text
-    assert "second-source" in caplog.text
+    assert len(sources) == 2
+    assert all(source in caplog.text for source in sources)
+    assert calls == []
 
 
 @pytest.mark.parametrize(
@@ -705,6 +728,8 @@ def test_cli_summary_comparison_never_blocks_writing_current_measurement(
     inputs = [Input("idle", lambda: make_scene("idle_coherence"), "tiny")]
     cache = tmp_path / "cache"
     write_test_cache(inputs, cache)
+    manifest = tmp_path / "scenes.json.gz"
+    write_test_manifest(inputs, manifest)
     destination = tmp_path / "current.json"
     baseline = tmp_path / "baseline.json"
     if baseline_kind == "fingerprint_mismatch":
@@ -745,12 +770,13 @@ def test_cli_summary_comparison_never_blocks_writing_current_measurement(
                 str(tmp_path / "report.md"),
                 "--partial-output",
                 str(tmp_path / "journal.jsonl"),
+                "--manifest",
+                str(manifest),
                 "--summary-output",
                 str(destination),
                 "--compare-summary",
                 str(baseline),
             ],
-            inputs=inputs,
         )
         == 0
     )
@@ -758,7 +784,7 @@ def test_cli_summary_comparison_never_blocks_writing_current_measurement(
     assert saved["measured_families"] == ["t4"]
     assert saved["policies"]["t4"]["status"] == "qualified"
     assert saved["provenance"]["exclusive"] is False
-    assert saved["provenance"]["dirty"] == tested_state()["dirty"]
+    assert saved["provenance"]["dirty"] == read_tested_state()["dirty"]
     assert destination.with_suffix(".md").exists()
     assert (
         "Not comparable"
@@ -781,7 +807,7 @@ def test_cli_selects_families_without_changing_inputs_or_default_group(
     manifest = tmp_path / "inputs.json"
     output = tmp_path / "matrix.json"
     summary = tmp_path / "summary.md"
-    write_legacy_manifest(inputs, manifest)
+    write_test_manifest(inputs, manifest)
     cache = tmp_path / "cache"
     write_test_cache(inputs, cache)
     frozen = manifest.read_bytes()
@@ -795,12 +821,12 @@ def test_cli_selects_families_without_changing_inputs_or_default_group(
         "--summary",
         str(summary),
     ]
-    assert main(argv, inputs=inputs) == 0
+    assert main(argv) == 0
     full = json.loads(output.read_text())
-    assert main([*argv, "--families", "t6,floquet_period"], inputs=inputs) == 0
+    assert main([*argv, "--families", "t6,floquet_period"]) == 0
     partial = json.loads(output.read_text())
     assert partial["measured_families"] == ["t6", "floquet_period"]
-    assert partial["manifest_sha256"] == full["manifest_sha256"]
+    assert partial["records"] == full["records"]
     assert manifest.read_bytes() == frozen
     row = partial["inputs"][0]
     assert row["physical_sha256"] == full["inputs"][0]["physical_sha256"]
@@ -838,7 +864,7 @@ def test_cli_rejects_unknown_families_with_legal_names(
     names: str,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    assert main(["--families", names], inputs=[]) == 1
+    assert main(["--families", names]) == 1
     assert "Unknown families" in caplog.text
     assert all(family in caplog.text for family in ALL_FAMILIES)
 
@@ -849,7 +875,7 @@ def test_cli_rejects_family_selection_outside_measurement(
 ) -> None:
     manifest = tmp_path / "inputs.json"
     output = tmp_path / "output.json"
-    write_legacy_manifest([], manifest)
+    write_test_manifest([], manifest)
     output.write_text("previous output")
     assert (
         main(
@@ -864,7 +890,6 @@ def test_cli_rejects_family_selection_outside_measurement(
                 str(tmp_path / "references"),
                 "--check-references",
             ],
-            inputs=[],
         )
         == 1
     )
@@ -1077,8 +1102,9 @@ def test_policy_uses_target_companions_instead_of_default_and_freezes_them() -> 
     assert all(
         set(sample.paths) == {"t4"} for mode in result.modes for sample in mode.samples
     )
-    manifest = json.loads(canonical_json(freeze_manifest([item])))
-    assert manifest["inputs"][0]["companions_by_target"] == {"t4": []}
+    (record,) = freeze_records([item])
+    metadata = json.loads(canonical_json(record.metadata))
+    assert metadata["companions_by_target"] == {"t4": []}
 
 
 def companion_input() -> Input:

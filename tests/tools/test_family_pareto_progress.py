@@ -1,23 +1,29 @@
 """Partial-run progress preserves completed samples without replacing reports."""
 
 import json
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from contextlib import closing, contextmanager
 from itertools import count
 from pathlib import Path
 
 import numpy as np
 import pytest
-from zcu_tools.simulate.evolution import EvolutionResult, PathDiagnostics, reference_key
+from zcu_tools.simulate.evolution import (
+    Engine,
+    EvolutionResult,
+    PathDiagnostics,
+    reference_key,
+    write_frozen_manifest,
+)
 
 from tests.tools.family_pareto_support import (
     make_scene,
-    write_legacy_manifest,
     write_test_cache,
+    write_test_manifest,
 )
 from tools import family_pareto
 from tools.family_pareto import EngineSession, main, measure_family
-from tools.family_pareto_inputs import Input, Scene
+from tools.family_pareto_inputs import Input, freeze_records
 from tools.family_pareto_results import Sample
 
 
@@ -54,28 +60,31 @@ def test_observer_keeps_first_slow_sample_when_the_next_evolve_fails() -> None:
 
 def test_partial_run_retains_samples_and_leaves_old_complete_outputs_untouched(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    builds = 0
+    calls = 0
 
-    def failing_later() -> Scene:
-        nonlocal builds
-        builds += 1
-        if builds == 3:
-            raise RuntimeError("input collaborator failed")
-        return make_scene("idle_coherence")
+    def fail_later[**P, R](evolve: Callable[P, R]) -> Callable[P, R]:
+        def call(*args: P.args, **kwargs: P.kwargs) -> R:
+            nonlocal calls
+            calls += 1
+            if calls == 3:
+                raise RuntimeError("Engine collaborator failed")
+            return evolve(*args, **kwargs)
 
-    inputs = [
-        Input("good", lambda: make_scene("idle_coherence"), "small collaborator"),
-        Input("bad", failing_later, "controlled input failure"),
-    ]
+        return call
+
+    inputs = [Input("good", lambda: make_scene("idle_coherence"), "small collaborator")]
     manifest, output, summary, journal = (
         tmp_path / name
         for name in ("inputs.json", "matrix.json", "summary.md", "attempt.jsonl")
     )
-    write_legacy_manifest(inputs, manifest)
+    write_test_manifest(inputs, manifest)
     cache = tmp_path / "cache"
     write_test_cache(inputs, cache)
-    builds = 0
+    # main no longer exposes builder injection. Delegate real Engine calls and
+    # fail only after earlier samples have reached the public progress journal.
+    monkeypatch.setattr(Engine, "evolve", fail_later(Engine.evolve))
     output.write_text("previous complete output")
     summary.write_text("previous complete summary")
     assert (
@@ -92,7 +101,6 @@ def test_partial_run_retains_samples_and_leaves_old_complete_outputs_untouched(
                 "--partial-output",
                 str(journal),
             ],
-            inputs=inputs,
         )
         == 1
     )
@@ -106,7 +114,7 @@ def test_partial_run_retains_samples_and_leaves_old_complete_outputs_untouched(
         event["event"] == "sample" and event["input"] == "good" for event in events
     )
     assert events[-1]["event"] == "run_failed"
-    assert events[-1]["error"] == "input collaborator failed"
+    assert events[-1]["error"] == "Engine collaborator failed"
 
 
 def test_cli_checks_references_without_policies_engine_or_a_summary(
@@ -120,7 +128,7 @@ def test_cli_checks_references_without_policies_engine_or_a_summary(
     manifest, output, cache = (
         tmp_path / name for name in ("inputs.json", "references.json", "cache")
     )
-    write_legacy_manifest(inputs, manifest)
+    write_test_manifest(inputs, manifest)
     write_test_cache(inputs, cache)
     scene = inputs[0].build()
     with closing(scene.source):
@@ -143,7 +151,6 @@ def test_cli_checks_references_without_policies_engine_or_a_summary(
                 "--output",
                 str(output),
             ],
-            inputs=inputs,
         )
         == 0
     )
@@ -156,13 +163,42 @@ def test_cli_checks_references_without_policies_engine_or_a_summary(
     )
 
 
+def test_cli_reads_a_frozen_scenario_for_reference_check(tmp_path: Path) -> None:
+    inputs = [Input("idle", lambda: make_scene("idle_coherence"), "frozen check")]
+    manifest, output, cache = (
+        tmp_path / name for name in ("inputs.json.gz", "references.json", "cache")
+    )
+    write_frozen_manifest(manifest, freeze_records(inputs))
+    write_test_cache(inputs, cache)
+
+    assert (
+        main(
+            [
+                "--manifest",
+                str(manifest),
+                "--scenario",
+                "idle",
+                "--check-references",
+                "--reference-cache",
+                str(cache),
+                "--output",
+                str(output),
+            ]
+        )
+        == 0
+    )
+    report = json.loads(output.read_text())
+    assert [entry["name"] for entry in report["inputs"]] == ["idle"]
+    assert report["inputs"][0]["convergence_error"] == 0.0
+
+
 def test_partial_attempt_never_reuses_an_old_journal(tmp_path: Path) -> None:
     inputs = [Input("idle", lambda: make_scene("idle_coherence"), "small collaborator")]
     manifest, output, summary, journal = (
         tmp_path / name
         for name in ("inputs.json", "matrix.json", "summary.md", "attempt.jsonl")
     )
-    write_legacy_manifest(inputs, manifest)
+    write_test_manifest(inputs, manifest)
     journal.write_text("earlier attempt")
     assert (
         main(
@@ -176,7 +212,6 @@ def test_partial_attempt_never_reuses_an_old_journal(tmp_path: Path) -> None:
                 "--partial-output",
                 str(journal),
             ],
-            inputs=inputs,
         )
         == 1
     )

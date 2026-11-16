@@ -18,7 +18,7 @@ from zcu_tools.simulators.single_fluxonium.environment import (
 )
 
 from tools import family_pareto_scenarios as scene_producer
-from tools.family_pareto_inputs import canonical_json, freeze_manifest, make_inputs
+from tools.family_pareto_inputs import freeze_records, make_inputs
 from tools.family_pareto_scenarios import make_real_inputs
 from tools.family_pareto_scene_builders import single_model_input
 from tools.family_pareto_settings import BOARD_PROFILE, SINGLE_MODEL
@@ -244,18 +244,22 @@ def test_random_gate_scan_preserves_model_pulses_and_companions(
 @pytest.mark.parametrize(
     "scenario", ["random_gate_sequence", "random_shaped_gate_sequence"]
 )
-def test_random_gate_scan_freezes_byte_identically(scenario: str) -> None:
-    first = canonical_json(freeze_manifest(make_real_inputs(scenario))) + "\n"
-    second = canonical_json(freeze_manifest(make_real_inputs(scenario))) + "\n"
-    assert first.encode() == second.encode()
+def test_random_gate_scan_reproduces_physical_and_oracle_hashes(scenario: str) -> None:
+    first = freeze_records(make_real_inputs(scenario))
+    second = freeze_records(make_real_inputs(scenario))
+    assert [(record.physical_sha256, record.oracle_sha256) for record in first] == [
+        (record.physical_sha256, record.oracle_sha256) for record in second
+    ]
 
 
-def test_fixed_scenarios_freeze_byte_identically_from_fresh_construction() -> None:
-    first_inputs = make_real_inputs()
-    assert first_inputs, "fixed-scenario construction must yield usable numeric inputs"
-    first = canonical_json(freeze_manifest(first_inputs)) + "\n"
-    second = canonical_json(freeze_manifest(make_real_inputs())) + "\n"
-    assert first.encode() == second.encode()
+def test_fixed_scenario_reproduces_hashes_from_fresh_construction() -> None:
+    # Full-inventory reconstruction belongs to the storage prepare checklist.
+    first = freeze_records(make_real_inputs("carrier_sweep"))
+    second = freeze_records(make_real_inputs("carrier_sweep"))
+    assert len(first) == len(second) == 1
+    assert [(record.physical_sha256, record.oracle_sha256) for record in first] == [
+        (record.physical_sha256, record.oracle_sha256) for record in second
+    ]
 
 
 def test_single_model_input_compiles_callback_with_fresh_sources() -> None:

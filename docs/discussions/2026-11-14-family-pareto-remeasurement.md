@@ -64,3 +64,4 @@ Provenance 使用工具自己的 UTC 開始時間與命令旗標宣告的 exclus
 Consumer 的求解介面與逐筆載入流程已由[整批 cache-only 遷移](2026-11-16-family-pareto-cache-only.md)取代。
 工具不再接受 prepare 或 freeze 命令。預設來源、report 身份與凍結場景存放仍待定，本文記錄的同命令建構與凍結不是新的來源終態。
 摘要 schema、比較與 annotation 的取捨保留。
+同日的後續裁決已固定每筆 record 身份，並退休量測 main 的 builder 注入與舊 archive；接縫、身份與存放遷移的分工見上列新討論的補充段。

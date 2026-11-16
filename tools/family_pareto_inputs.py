@@ -19,7 +19,6 @@ from zcu_tools.simulate.evolution import (
     SecularDrive,
     SecularModel,
     TimelineBatch,
-    digest,
     read_frozen_manifest,
     read_physical_input,
 )
@@ -91,23 +90,31 @@ def read_inputs(manifests: Sequence[Path]) -> list[Input]:
     File/container errors, missing declarations and invalid metadata propagate;
     no producer, solver or legacy reader is used.
     """
-    inputs = []
-    for path in manifests:
-        for record in read_frozen_manifest(path):
-            metadata = TypeAdapter(dict[str, object]).validate_python(record.metadata)
-            families = TypeAdapter(tuple[str, ...]).validate_python(
-                metadata.pop("expected_families")
-            )
-            inputs.append(
-                TypeAdapter(Input).validate_python(
-                    {
-                        **metadata,
-                        "name": record.name,
-                        "build": partial(_read_scene, record, families),
-                    }
-                )
-            )
-    return inputs
+    return [
+        input_from_record(record)
+        for path in manifests
+        for record in read_frozen_manifest(path)
+    ]
+
+
+def input_from_record(record: FrozenRecord) -> Input:
+    """Decode one codec record's tools metadata, without building a source.
+
+    Return an Input whose build creates a fresh caller-owned Scene and history.
+    Missing or invalid tools declarations fail through their typed decoder.
+    The record's numeric content has already been validated by its codec owner.
+    """
+    metadata = TypeAdapter(dict[str, object]).validate_python(record.metadata)
+    families = TypeAdapter(tuple[str, ...]).validate_python(
+        metadata.pop("expected_families")
+    )
+    return TypeAdapter(Input).validate_python(
+        {
+            **metadata,
+            "name": record.name,
+            "build": partial(_read_scene, record, families),
+        }
+    )
 
 
 def idle_coherence_scene() -> Scene:
@@ -208,32 +215,3 @@ def freeze_records(inputs: list[Input]) -> tuple[FrozenRecord, ...]:
                 )
             )
     return tuple(records)
-
-
-def freeze_manifest(inputs: list[Input]) -> dict[str, object]:
-    """Build ordered inputs and close each source after copying complete physics.
-
-    Transitional report archive only; remove when the report caller migrates
-    to the simulator-owned manifest writer. No compatibility reader is provided.
-    Return the version-1 numeric manifest with unchanged hash meanings:
-    physical_sha256 includes model identity, oracle_sha256 excludes it. Store
-    caller provenance, target and companion declarations without interpreting
-    dispatch. Builder/serialization failures propagate; no Engine work runs.
-    """
-    records = []
-    for item in inputs:
-        case = item.build()
-        with closing(case.source):
-            physical = physical_input(case)
-            records.append(
-                {
-                    "name": item.name,
-                    **_scene_metadata(item, case),
-                    "physical_sha256": digest(physical),
-                    "oracle_sha256": digest(
-                        physical_input(case, include_identity=False)
-                    ),
-                    "physical": physical,
-                }
-            )
-    return {"version": 1, "inputs": records}

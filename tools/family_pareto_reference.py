@@ -6,9 +6,14 @@ from math import isfinite
 from pathlib import Path
 from time import perf_counter, process_time
 
-from zcu_tools.simulate.evolution import ReferenceResult, load_reference, reference_key
+from zcu_tools.simulate.evolution import (
+    ReferenceResult,
+    digest,
+    load_reference,
+    reference_key,
+)
 
-from tools.family_pareto_inputs import Input, digest, physical_input
+from tools.family_pareto_inputs import Input, physical_input
 
 
 @dataclass(frozen=True)

@@ -8,11 +8,12 @@
 `frozen-real.json.gz` 保存 15 個完整 real 場景，以及 3 個單段 kernel 場景。
 兩份檔案分別為 730 與 10,374,107 bytes，合計 10,374,837 bytes。
 這些是尚未遷移的既有檔案，不是後續場景入庫的許可。
-凍結場景不入庫，Git 只留名稱與 hash 小清單。存放位置、預設來源、report 身份與既有歷史的處置仍待定。
+凍結場景不入庫，Git 只留名稱與 hash 小清單。存放、預設來源與既有歷史的遷移由後續工作完成。
+Report 身份已固定為每筆 name、physical_sha256、oracle_sha256 與 metadata_sha256，不隨來源遷移改變。
 不再以舊 10 MiB 上限判定可否入庫，也不在此指定替代 cache 或重建規則。
 它們保存完整數值，不在讀取時重建裝置、前端或使用者設定。
-公開 `read_inputs(manifests)` 可從 caller 指定的檔案選取 record。
-量測 CLI 的預設來源接線尚未遷移完成，不能把這兩份檔案當成已定案的預設來源。
+公開 `family_pareto.select_inputs(manifest, scenario)` 集中來源選取與 report 身份。
+接縫目前暫讀這兩份檔案，只供 integration；存放遷移將替換來源，不把這兩份檔案當永久入庫來源。
 量測只在 `Engine.evolve` 上進行。
 
 場景控制由 `tools/family_pareto_scenarios.py`、`family_pareto_kernel_scenes.py` 與固定 settings 持有。

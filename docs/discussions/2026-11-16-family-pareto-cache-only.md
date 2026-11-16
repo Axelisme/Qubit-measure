@@ -57,3 +57,19 @@ basis:
 - [原單場景討論](2026-11-14-family-pareto-remeasurement.md) 保留當時的求解與建構流程；本篇只取代 consumer 求解介面，不重定摘要 schema。
 
 原始工作紀錄未入庫。採用的行為、被否決的替代方案與未完成邊界已寫在本文，不需要讀取本機工作檔才能理解。
+
+## 2026-11-16 接縫與身份補充
+
+後續裁決將 report 身份固定為每筆 `{name, physical_sha256, oracle_sha256, metadata_sha256}`，加既有 HEAD／tree／dirty provenance。
+Metadata hash 只用公開 `simulate.evolution.digest(record.metadata)`。
+`family_pareto.select_inputs` 集中凍結來源、嚴格 scenario 選取與這組身份，目前暫讀現行 tools/data，只供 integration。
+存放遷移將替換接縫來源與 README，不改這組身份，也不要求成對 adapter 解析存放版面。
+
+本次因此退休 `freeze_manifest`、其 caller 與量測 `main` 的 `inputs` keyword，不保留舊 archive。
+CLI 測試經臨時凍結 manifest 與同一公開接縫提供來源。Producer 的 `main(argv, inputs=...)` 不受此變更影響。
+三個原 producer 可重現 cases 改用公開 seam 的兩次全新建構，比較 codec 提供的 physical／oracle hash。
+Pytest 涵蓋兩種 random gate 與一個固定 carrier 場景，不執行整批重建。其餘場景由存放 prepare 的清單比對把關。
+
+Exclusion estimator 與其唯一測試、反向 import 正式交由後續工作承接，原歸屬裁決與不執行的限制仍在。
+前文的 partial 停點不再阻擋本次 consumer 收斂，但存放與大檔歷史處理仍必須在 landing 前完成。
+量測結果與摘要 schema、mode transition 及 clock 不變；摘要舊欄名 `manifest_sha256` 改記有序 record 身份的 digest。

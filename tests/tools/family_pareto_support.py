@@ -7,11 +7,12 @@ from zcu_tools.simulate.evolution import (
     Engine,
     ReferenceResult,
     RoutingHistory,
+    write_frozen_manifest,
     write_reference,
 )
 
 from tests.simulate.evolution.contract.accuracy_cases import accuracy_case, history_case
-from tools.family_pareto_inputs import Input, Scene, canonical_json, freeze_manifest
+from tools.family_pareto_inputs import Input, Scene, freeze_records
 
 
 def make_scene(name: str) -> Scene:
@@ -46,13 +47,9 @@ def write_test_cache(inputs: list[Input], directory: Path) -> None:
             )
 
 
-def write_legacy_manifest(inputs: list[Input], path: Path) -> None:
-    """Supply the existing main identity fixture until frozen-source cutover.
-
-    Retire this setup helper with the legacy archive caller. This is not the
-    intended frozen-storage/report format and adds no compatibility reader.
-    """
-    path.write_text(canonical_json(freeze_manifest(inputs)) + "\n", encoding="utf-8")
+def write_test_manifest(inputs: list[Input], path: Path) -> None:
+    """Write tiny test-owned numeric records through the public manifest codec."""
+    write_frozen_manifest(path, freeze_records(inputs))
 
 
 def make_history_scene(count: int, history: RoutingHistory) -> Scene:

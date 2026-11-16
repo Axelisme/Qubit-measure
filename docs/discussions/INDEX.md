@@ -18,7 +18,7 @@
 
 ## 模擬量測環境
 
-- 2026-11-16 [Family 量表改為整批 cache-only](2026-11-16-family-pareto-cache-only.md)：介面退休。Consumer 整批載入後才量測，check 不求解；預設來源與 report 身份仍待存放契約。
+- 2026-11-16 [Family 量表改為整批 cache-only](2026-11-16-family-pareto-cache-only.md)：介面退休。Consumer 整批載入後才量測，check 不求解；公開接縫提供穩定的每筆 record 身份，存放另行遷移。
 
 - 2026-11-16 [模擬器場景凍結與參考解數值交接](2026-11-16-frozen-simulator-inputs.md)：資料交接。場景 producer 自持控制與模型，通用 codec 保留既有 key，獨立 solver 留在 tests 側。
 

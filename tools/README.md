@@ -171,12 +171,18 @@ including Gaussian gates, biased inputs, overlapping tones and a joint FTF scene
 The synthetic inventory contains the three-level `idle_coherence` scene.
 Accuracy/guard grids and amplified test workloads stay in tests.
 
-The frozen-storage source and report-identity migration is pending. The command
-still has its original builder/archive selection path. Do not treat it as a
-completed frozen-input consumer. `read_inputs(manifests)` already reads frozen
-records through the public codec, and in-process callers can supply prepared
-`Input` declarations to `main(argv, inputs=...)` or `run_table`.
-Reference loading is cache-only for every prepared selection.
+`select_inputs(manifest=None, scenario=None)` is the single public source and
+report-identity seam. It reads numeric records through the simulator codec,
+without importing the scene producer or rebuilding device models. Each returned
+`SelectedInput` contains an `Input`, its `FrozenRecord` and the metadata digest.
+`Input.build()` creates a fresh source that the caller closes.
+
+For integration only, an omitted manifest currently reads the two existing
+`tools/data/family_pareto/frozen-{synthetic,real}.json.gz` artifacts. A supplied
+`--manifest` selects one codec manifest. Storage migration will replace this
+source inside the same function; the paths are not the final storage contract.
+No caller should infer scene identity from a manifest location or file hash.
+Reference loading is cache-only for every selection.
 
 ### Recorded scenario summaries
 
@@ -241,16 +247,16 @@ preparation after cost approval.
 `--scenario NAME` requires exactly one matching input in the selected records.
 An unknown name fails with legal names; duplicate names fail with their source
 declarations. Selection failure starts no policy or Engine. The option can be
-combined with `--manifest`. Source selection and report identity are still
-awaiting the frozen-storage contract, so this section does not prescribe new
-default inputs or a replacement manifest layout.
+combined with `--manifest`. Selection reads frozen records, not builders.
+Source storage is still awaiting its implementation cutover; the record identity
+contract below does not change when that location changes.
 
 Every measurement first loads all references from `--reference-cache DIR`.
 A miss lists every missing input name and oracle key, then fails the whole batch.
 No already-cached input starts timing before that preflight succeeds.
 `--check-references` uses the same loader and writes a JSON report to `--output`.
-Each entry records `name`, `key`, `convergence_error`, `wall_seconds` and
-`cpu_seconds`. Success returns 0 without measurement; a miss returns nonzero.
+Each entry records `name`, `physical_sha256`, `oracle_sha256`, `metadata_sha256`,
+`key`, `convergence_error`, `wall_seconds` and `cpu_seconds`. Success returns 0 without measurement; a miss returns nonzero.
 The checker neither solves references nor fills the cache.
 
 Reference production belongs to the tests-side entry point described under
@@ -306,10 +312,10 @@ requires the corresponding cost approval.
 
 ### Inventory-wide manifest workflow
 
-The command sequence is check first, measure second. Source selection and report
-identity remain pending; use a previously selected matching manifest for the
-existing CLI path, or prepared inputs at the importable seam. These commands do
-not introduce a frozen-storage location or promise a new manifest format.
+The command sequence is check first, measure second. Frozen-scene storage
+is still in transition. Supply an existing frozen codec manifest, or
+use the temporary integration defaults. The commands do not choose the final
+storage location.
 From the worktree root, after obtaining the relevant cost approval:
 
 ```bash
@@ -343,10 +349,14 @@ records. `Input.build()` returns a fresh source that the caller closes.
 The synthetic inventory contains only the explicitly declared `idle_coherence`.
 The 115 other borrowed accuracy, guard, sweep, history and amplified-workload
 inputs are no longer measurement scenes. Their tests-side owners remain intact.
-Oracle caching excludes only the model's nonphysical identity namespace. Both
-full reconstruction hashes and oracle-sharing hashes are saved, together with
-all arrays, models, initial density, optional flux expansion, expected families,
-point order and the reason for each input.
+Oracle caching excludes only the model's nonphysical identity namespace.
+Reports store each selected record's `{name, physical_sha256, oracle_sha256,
+metadata_sha256}` plus HEAD/tree/dirty provenance, not a copy of numeric records.
+The public codec computes both physics hashes and `digest(record.metadata)`.
+`SelectedInput.identity` exposes those same fields to paired consumers, so source
+migration does not change the handshake. Full argv remains execution provenance,
+not scene identity. The unchanged summary schema retains its `manifest_sha256`
+field name; its value is now the digest of the ordered record identities.
 
 Each pinned family and the separately listed default policy has three modes.
 Normal modes keep five samples. If a family's first empty-history evolve
@@ -700,8 +710,8 @@ hash verification and reproducible gzip with mtime=0 and no filename.
 No solver identity is added.
 
 Frozen scenes are not to be committed; Git will retain a small name/hash list.
-The storage contract, default source and report identity remain unsettled.
-The existing `frozen-synthetic.json.gz` and `frozen-real.json.gz` bytes and history
+The storage and default-source migration is separate from this consumer change.
+The per-record report identity is already fixed. The existing `frozen-synthetic.json.gz` and `frozen-real.json.gz` bytes and history
 have not yet been migrated. Their former 10 MiB cap is not permission to commit
 future frozen scenes. The paths below describe existing producer artifacts,
 not the final consumer source.
@@ -734,10 +744,11 @@ The producer reads only record names and physics; callers select the solver,
 not metadata or a name list. Existing cache entries are read without solving;
 missing entries are solved only by this separately approved preparation step.
 The public solver-free `load_reference` fails on cache misses.
-The default source/report migration is still pending. The existing internal
-`inputs.json` archive construction and `freeze_manifest` caller remain at one
-selection/identity seam. The consumer no longer exposes a freeze command. Do not
-use this transition as a second reader for the new container.
+The consumer's old `freeze_manifest` helper and archive caller are retired.
+It never writes a second copy of the selected records. `main(argv)` takes CLI
+arguments only; small tests supply temporary codec manifests through the same
+selection seam as other callers. The scene producer retains its separate
+`main(argv, inputs=...)` fixture interface.
 
 ### Partial attempts and failure handling
 

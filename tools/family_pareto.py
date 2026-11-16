@@ -1,7 +1,6 @@
 """Measure Engine.evolve families, not program.acquire latency."""
 
 import argparse
-import json
 import logging
 import os
 import platform
@@ -23,15 +22,17 @@ from numpy.typing import NDArray
 from zcu_tools.simulate.evolution import (
     Engine,
     EvolutionResult,
+    FrozenRecord,
     NoValidKernel,
     ReferenceResult,
+    digest,
+    read_frozen_manifest,
 )
 
 from tools.family_pareto_inputs import (
     Input,
     canonical_json,
-    digest,
-    freeze_manifest,
+    input_from_record,
 )
 from tools.family_pareto_reference import (
     ReferenceCache,
@@ -52,7 +53,75 @@ from tools.family_pareto_results import (
     timing_equivalents,
 )
 from tools.family_pareto_results import mode_error as _mode_error
-from tools.family_pareto_scenarios import make_real_inputs
+
+
+@dataclass(frozen=True)
+class SelectedInput:
+    """A selected numeric record, its tools declaration and metadata identity.
+
+    input builds a fresh caller-owned Scene; close each Scene.source after use.
+    record is the simulator-owned frozen input, including physical/oracle hashes.
+    metadata_sha256 is computed by select_inputs with the public codec digest.
+    No source or Engine is created by selection itself.
+    """
+
+    input: Input
+    record: FrozenRecord
+    metadata_sha256: str
+
+    @property
+    def identity(self) -> dict[str, str]:
+        """Return the storage-independent report/handshake identity for this record."""
+        return {
+            "name": self.record.name,
+            "physical_sha256": self.record.physical_sha256,
+            "oracle_sha256": self.record.oracle_sha256,
+            "metadata_sha256": self.metadata_sha256,
+        }
+
+
+def select_inputs(
+    manifest: Path | None = None,
+    scenario: str | None = None,
+) -> tuple[SelectedInput, ...]:
+    """Select frozen records and their report identity without producer work.
+
+    manifest selects one public codec manifest. None temporarily reads the two
+    existing tools/data manifests, only for integration until storage migration.
+    scenario=None keeps file/record order; a name requires exactly one match.
+    Unknown names raise ValueError listing legal names; ambiguous names list
+    their source files. File/codec/metadata failures propagate. No references,
+    Engine or source are created here. Each returned input.build() creates a
+    fresh Scene whose source the caller must close. identity excludes source
+    paths and file hashes; main and paired consumers use the same record fields.
+    """
+    directory = Path(__file__).parent / "data" / "family_pareto"
+    paths = (
+        [manifest]
+        if manifest is not None
+        else [
+            directory / "frozen-synthetic.json.gz",
+            directory / "frozen-real.json.gz",
+        ]
+    )
+    records = [
+        (path, record) for path in paths for record in read_frozen_manifest(path)
+    ]
+    if scenario is not None:
+        matches = [
+            (path, record) for path, record in records if record.name == scenario
+        ]
+        if not matches:
+            legal = ", ".join(record.name for _, record in records)
+            raise ValueError(f"Unknown scenario: {scenario}. Legal names: {legal}")
+        if len(matches) != 1:
+            sources = ", ".join(str(path) for path, _ in matches)
+            raise ValueError(f"Ambiguous scenario: {scenario}. Sources: {sources}")
+        records = matches
+    return tuple(
+        SelectedInput(input_from_record(record), record, digest(record.metadata))
+        for _, record in records
+    )
 
 
 @dataclass
@@ -612,39 +681,6 @@ def _selected_families(
     return families
 
 
-def _command_inputs(
-    args: argparse.Namespace, inputs: list[Input] | None
-) -> tuple[list[Input], dict[str, object]]:
-    # Source/report identity stay together until their storage contract is settled.
-    # Preserve the existing builder/archive behavior here; do not select a new default.
-    if args.scenario is None and (
-        args.summary_output is not None or args.compare_summary is not None
-    ):
-        raise ValueError("--summary-output and --compare-summary require --scenario")
-    items = make_real_inputs(args.scenario) if inputs is None else inputs
-    if args.scenario is not None:
-        legal = [item.name for item in items]
-        matches = [
-            (index, item)
-            for index, item in enumerate(items)
-            if item.name == args.scenario
-        ]
-        if not matches:
-            raise ValueError(
-                f"Unknown scenario: {args.scenario}. Legal names: {', '.join(legal)}"
-            )
-        if len(matches) != 1:
-            sources = [
-                f"input[{index}]: {args.manifest or canonical_json(item.manifest)}"
-                for index, item in matches
-            ]
-            raise ValueError(
-                f"Ambiguous scenario: {args.scenario}. Sources: {'; '.join(sources)}"
-            )
-        items = [matches[0][1]]
-    return items, freeze_manifest(items)
-
-
 def _scenario_paths(args: argparse.Namespace, run_id: str) -> None:
     if args.scenario is None:
         return
@@ -718,14 +754,14 @@ def _write_scenario_summary(
     print(f"Scenario summary: {args.summary_output}")
 
 
-def main(argv: list[str] | None = None, *, inputs: list[Input] | None = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     """Check all references or measure prepared inputs; failures return nonzero.
 
-    inputs optionally supplies already selected declarations for in-process
-    callers. --scenario requires exactly one matching name before construction;
-    unknown names list legal names and ambiguous names list source declarations.
-    It can be combined with --manifest. Source selection and report identity
-    remain in _command_inputs; their frozen-storage migration is not complete.
+    select_inputs owns frozen source selection and storage-independent record
+    identity. --scenario requires exactly one matching record before construction;
+    unknown names list legal names and ambiguous names list source files.
+    It can be combined with --manifest. Default tools/data sources are temporary
+    integration inputs, not the final storage location.
 
     --check-references loads the complete selection cache-only, writes each
     name/key/convergence error/load time to --output and returns without policies
@@ -747,40 +783,42 @@ def main(argv: list[str] | None = None, *, inputs: list[Input] | None = None) ->
             checking_references=args.check_references,
         )
         started_at_utc = datetime.now(timezone.utc).isoformat()
-        items, manifest = _command_inputs(args, inputs)
-        run_id = uuid4().hex
-        _scenario_paths(args, run_id)
-        if (
-            (args.manifest is None and args.scenario is None)
-            or args.output is None
-            or (not args.check_references and args.summary is None)
+        if args.scenario is None and (
+            args.summary_output is not None or args.compare_summary is not None
         ):
             raise ValueError(
-                "requires --manifest, --output and --summary (except reference checking)"
+                "--summary-output and --compare-summary require --scenario"
             )
-        if args.manifest is not None:
-            frozen = json.loads(args.manifest.read_text(encoding="utf-8"))
-            if digest(frozen) != digest(manifest):
-                raise ValueError(
-                    "frozen manifest differs from current inputs; do not tune inputs after measurement"
-                )
+        selected = select_inputs(args.manifest, args.scenario)
+        items = [entry.input for entry in selected]
+        identities = [entry.identity for entry in selected]
+        # Keep the summary field name, but hash record identities, not file paths.
+        identity_sha256 = digest(identities)
+        run_id = uuid4().hex
+        _scenario_paths(args, run_id)
+        if args.output is None or (not args.check_references and args.summary is None):
+            raise ValueError(
+                "requires --output and --summary (except reference checking)"
+            )
         state = tested_state()
         if args.check_references:
             prepared = load_references(items, ReferenceCache(args.reference_cache))
             args.output.write_text(
                 canonical_json(
                     {
-                        "manifest_sha256": digest(manifest),
+                        "records": identities,
                         "tested_state": state,
                         "inputs": [
                             {
-                                "name": entry.name,
+                                **identity,
                                 "key": entry.key,
                                 "convergence_error": entry.reference.convergence_error,
                                 "wall_seconds": entry.wall_seconds,
                                 "cpu_seconds": entry.cpu_seconds,
                             }
-                            for entry in prepared
+                            for entry, identity in zip(
+                                prepared, identities, strict=True
+                            )
                         ],
                         "reference_total_wall_seconds": sum(
                             entry.wall_seconds for entry in prepared
@@ -808,7 +846,7 @@ def main(argv: list[str] | None = None, *, inputs: list[Input] | None = None) ->
                     "event": "run_start",
                     "status": "partial",
                     "run_id": run_id,
-                    "manifest_sha256": digest(manifest),
+                    "records": identities,
                     "tested_state": state,
                 },
             )
@@ -824,8 +862,7 @@ def main(argv: list[str] | None = None, *, inputs: list[Input] | None = None) ->
             "exclusive": args.exclusive,
             "run_id": run_id,
             "measured_families": families,
-            "manifest": manifest,
-            "manifest_sha256": digest(manifest),
+            "records": identities,
             "tested_state": state,
             "argv": [
                 sys.executable,
@@ -900,7 +937,7 @@ def main(argv: list[str] | None = None, *, inputs: list[Input] | None = None) ->
             f"Complete matrix: {args.output}; report: {args.summary}; journal: {args.partial_output}"
         )
         if args.scenario is not None:
-            _write_scenario_summary(args, rows, state, started_at_utc, digest(manifest))
+            _write_scenario_summary(args, rows, state, started_at_utc, identity_sha256)
         _emit(progress, event="run_complete", run_id=run_id)
     except Exception as error:
         try:

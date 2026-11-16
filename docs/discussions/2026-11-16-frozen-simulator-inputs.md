@@ -94,3 +94,5 @@ Kernel 單段與完整序列是不同場景，不能用裁切後的段冒充原�
 上文的 gzip 入庫與 report 歸檔選項不再是終態；存放、預設來源與 report 身份仍待裁定。
 既有兩份 gzip 與歷史尚未遷移，不依原大小上限新增資料。
 Reference consumer 的已放行變更與未完成邊界見[整批 cache-only 遷移](2026-11-16-family-pareto-cache-only.md)。
+同日後續裁決已固定每筆 record 的 name、physical_sha256、oracle_sha256 與 metadata_sha256 身份，退休舊 archive 與 helper。
+存放遷移只換來源，不再改這組身份。

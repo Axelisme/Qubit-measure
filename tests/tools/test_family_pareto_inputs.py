@@ -12,7 +12,34 @@ from zcu_tools.simulate.evolution import (
 )
 
 from tests.tools.family_pareto_support import make_scene
-from tools import family_pareto_inputs
+from tools import family_pareto, family_pareto_inputs
+
+
+def test_select_inputs_reads_one_frozen_scenario_without_producer_building(
+    tmp_path: Path,
+) -> None:
+    scene = make_scene("idle_coherence")
+    with closing(scene.source):
+        physical = physical_input(scene.source, scene.batch)
+    records = (
+        FrozenRecord(
+            "first", physical, {"reason": "first", "expected_families": ["t4"]}
+        ),
+        FrozenRecord(
+            "second", physical, {"reason": "second", "expected_families": ["t4"]}
+        ),
+    )
+    path = tmp_path / "scenes.json.gz"
+    write_frozen_manifest(path, records)
+
+    (selected,) = family_pareto.select_inputs(path, "second")
+
+    assert selected.input.name == "second"
+    assert selected.record.name == "second"
+    scene = selected.input.build()
+    with closing(scene.source):
+        np.testing.assert_array_equal(scene.batch.points, [0, 1])
+        assert scene.families == ("t4",)
 
 
 def test_read_inputs_combines_manifests_and_builds_fresh_owned_scenes(
