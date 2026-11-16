@@ -303,8 +303,8 @@ def test_mux_herald_postselection_retains_joint_ground_and_reports_outcomes(
         record = json.loads(
             next(tmp_path.glob("routing-*.jsonl")).read_text().splitlines()[-1]
         )
-        assert record["projection_outcomes"] == [4]
-        assert record["projection_pruned_weight"] == [0.0]
+        assert record["extras"]["ftf.projection_outcomes"] == [4]
+        assert record["extras"]["ftf.projection_pruned_weight"] == [0.0]
     finally:
         env.devices.close_all_devices()
 

@@ -1,5 +1,7 @@
 """Best-effort local JSONL persistence for acquire-level routing reports."""
 
+from __future__ import annotations
+
 import json
 import warnings
 from collections.abc import Sequence
@@ -8,12 +10,43 @@ from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import Lock
-from typing import TypedDict
+from typing import TYPE_CHECKING, TypedDict
 
-from zcu_tools.simulate.evolution import FamilyRouting, PathDiagnostics
+from pydantic import JsonValue
+
+from zcu_tools.resources.simulation_schema import Values
+
+if TYPE_CHECKING:
+    from zcu_tools.simulate.evolution import PathDiagnostics
 
 
-class _Record(TypedDict):
+class TelemetrySettings(Values):
+    """Local routing logging policy, separate from numerical accuracy.
+
+    enabled: write one acquire summary, default True. directory: optional output
+    path; None uses project-root .sim_telemetry. Relative paths resolve against
+    the working directory when the environment is built. No I/O occurs here.
+    """
+
+    enabled: bool = True
+    directory: Path | None = None
+
+
+class RoutingRecord(TypedDict):
+    """One acquire's persisted summary, without numerical inputs.
+
+    timestamp: UTC ISO timestamp. points: grid size excluding shots and rounds.
+    rounds: captured attempts. wall_s: admitted acquire seconds including pacing,
+    excluding writer I/O. compile_wall_s, evolve_wall_s and readout_wall_s:
+    accumulated wall seconds in each stage, or None when not measured.
+    frontend_cpu_s: calling-thread geometry and work-plan CPU seconds.
+    estimated_cost_unit: label for relative family scheduling costs.
+    families: family name to summed Engine routing counters and CPU seconds;
+    estimated_cpu_s is None when any contributing estimate is unavailable.
+    complete: whether the acquire completed successfully.
+    extras: simulator-prefixed keys (for example ftf.projection_outcomes) mapped
+    to JSON values. Consumers requiring an extra must index it directly.
+    """
     timestamp: str
     points: int
     rounds: int
@@ -21,13 +54,19 @@ class _Record(TypedDict):
     frontend_cpu_s: float
     estimated_cost_unit: str
     families: dict[str, dict[str, int | float | None]]
-    projection_outcomes: list[int]
-    projection_pruned_weight: list[float]
+    compile_wall_s: float | None
+    evolve_wall_s: float | None
+    readout_wall_s: float | None
+    complete: bool
+    extras: dict[str, JsonValue]
 
 
 def _families(
     paths: Sequence[PathDiagnostics],
 ) -> dict[str, dict[str, int | float | None]]:
+    # Keep configuration imports independent of the numerical runtime.
+    from zcu_tools.simulate.evolution import FamilyRouting
+
     grouped: dict[str, list[FamilyRouting]] = {}
     for report in paths:
         for name, family in report.routing.items():
@@ -82,8 +121,11 @@ class RoutingTelemetry:
         wall_s: float,
         rounds: int,
         paths: Sequence[PathDiagnostics],
-        projection_outcomes: Sequence[int] = (),
-        projection_pruned_weight: Sequence[float] = (),
+        complete: bool = True,
+        compile_wall_s: float | None = None,
+        evolve_wall_s: float | None = None,
+        readout_wall_s: float | None = None,
+        extras: dict[str, JsonValue] | None = None,
     ) -> None:
         """Append an acquire summary; paths contains this acquire's round work.
 
@@ -91,14 +133,15 @@ class RoutingTelemetry:
         measures admitted acquire wall time including pacing, excluding this I/O.
         paths may be empty after a failure before evolution. Templates currently
         carry no experiment/program identifier, so no name is synthesized.
-        projection_outcomes and projection_pruned_weight describe the latest
-        round's retained histories and cumulative removed probability per C-order
-        point. Empty sequences mean no projective reads or no completed solve.
+        complete marks successful completion; callers reporting failed partial work
+        pass False. Stage wall seconds may be None when not measured. extras uses
+        simulator-prefixed keys and JSON values; omitted extras writes an empty map.
+        Fields and family aggregation are described by RoutingRecord.
         """
         with self._lock:
             try:
                 now = datetime.now(timezone.utc)
-                record: _Record = {
+                record: RoutingRecord = {
                     "timestamp": now.isoformat(),
                     "points": points,
                     "rounds": rounds,
@@ -106,8 +149,11 @@ class RoutingTelemetry:
                     "frontend_cpu_s": sum(p.frontend_cpu_s for p in paths),
                     "estimated_cost_unit": "relative scheduling units",
                     "families": _families(paths),
-                    "projection_outcomes": list(projection_outcomes),
-                    "projection_pruned_weight": list(projection_pruned_weight),
+                    "compile_wall_s": compile_wall_s,
+                    "evolve_wall_s": evolve_wall_s,
+                    "readout_wall_s": readout_wall_s,
+                    "complete": complete,
+                    "extras": extras if extras is not None else {},
                 }
                 line = (
                     json.dumps(record, allow_nan=False, separators=(",", ":")) + "\n"

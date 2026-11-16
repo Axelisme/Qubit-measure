@@ -67,7 +67,7 @@ from zcu_tools.simulators.ftf.environment.readout import (
     readout_configuration,
 )
 from zcu_tools.simulators.ftf.environment.replay import BACKEND_VERSION, replay_versions
-from zcu_tools.simulators.ftf.environment.telemetry import RoutingTelemetry
+from zcu_tools.simulators.telemetry import RoutingTelemetry
 from zcu_tools.simulators.ftf.environment.template import (
     FTFModelFacts,
     FTFTemplatePlan,
@@ -745,12 +745,18 @@ class FTFSource:
             rounds=len(rounds),
             wall_s=wall_s,
             paths=paths,
-            projection_outcomes=self.evaluations[-1].projection_outcomes
-            if paths and self.evaluations
-            else (),
-            projection_pruned_weight=self.evaluations[-1].projection_pruned_weight
-            if paths and self.evaluations
-            else (),
+            extras={
+                "ftf.projection_outcomes": list(
+                    self.evaluations[-1].projection_outcomes
+                    if paths and self.evaluations
+                    else ()
+                ),
+                "ftf.projection_pruned_weight": list(
+                    self.evaluations[-1].projection_pruned_weight
+                    if paths and self.evaluations
+                    else ()
+                ),
+            },
         )
 
     def close(self) -> None:

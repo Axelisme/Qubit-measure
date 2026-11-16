@@ -38,6 +38,8 @@ from zcu_tools.simulators.single_fluxonium.config.schema import (
     FluxLine,
 )
 
+from zcu_tools.simulators.telemetry import TelemetrySettings
+
 LoopValue = TypeVar("LoopValue")
 
 SourceValue = TypeVar("SourceValue")
@@ -374,18 +376,6 @@ class Truncation(Values):
         if self.retained_levels > self.f1.levels * self.coupler.levels * self.f2.levels:
             raise ValueError("retained_levels exceeds local product")
         return self
-
-
-class TelemetrySettings(Values):
-    """Local routing logging policy, separate from numerical accuracy.
-
-    enabled: write one acquire summary, default True. directory: optional output
-    path; None uses project-root .sim_telemetry. Relative paths resolve against
-    the working directory when the environment is built. No I/O occurs here.
-    """
-
-    enabled: bool = True
-    directory: Path | None = None
 
 
 class Numerics(RoundPacing):
