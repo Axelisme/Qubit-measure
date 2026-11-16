@@ -9,8 +9,8 @@ from pathlib import Path
 
 from pydantic import TypeAdapter
 
-from tools.family_pareto import FamilyResult, FamilyStatus, InputResult
 from tools.family_pareto_inputs import canonical_json
+from tools.family_pareto_results import FamilyResult, FamilyStatus, InputResult
 
 
 @dataclass(frozen=True)

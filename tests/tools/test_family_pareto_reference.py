@@ -13,9 +13,10 @@ from tests.simulate.evolution.contract.reference import (
     SolverTolerances,
 )
 from tests.tools.family_pareto_support import make_scene
-from tools.family_pareto import FamilyResult, run_table
+from tools.family_pareto import run_table
 from tools.family_pareto_inputs import Input
 from tools.family_pareto_reference import ReferenceCache, solve_reference
+from tools.family_pareto_results import FamilyResult
 
 
 def test_cache_reuses_density_but_invalidates_physics_and_tolerances(

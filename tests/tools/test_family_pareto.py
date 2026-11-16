@@ -21,7 +21,6 @@ from zcu_tools.simulate.evolution import (
     TimelineBatch,
 )
 
-from tests.simulate.evolution.contract.accuracy import ALL_FAMILIES
 from tests.simulate.evolution.contract.accuracy_cases import accuracy_case
 from tests.simulate.evolution.contract.guard_sweep_cost import measure_engine_cost
 from tests.simulate.evolution.contract.reference import (
@@ -31,23 +30,26 @@ from tests.simulate.evolution.contract.reference import (
 from tests.tools.family_pareto_support import make_history_scene, make_scene
 from tools import family_pareto_report
 from tools.family_pareto import (
-    ACCURACY_LIMIT,
     EngineSession,
-    FamilyResult,
-    InputResult,
-    ModeResult,
-    Refusal,
-    Sample,
-    dominance,
     main,
     measure_family,
     measure_policy,
     render_summary,
     run_table,
     tested_state,
-    timing_equivalents,
 )
 from tools.family_pareto_inputs import Input, Scene, canonical_json, freeze_manifest
+from tools.family_pareto_results import (
+    ACCURACY_LIMIT,
+    ALL_FAMILIES,
+    FamilyResult,
+    InputResult,
+    ModeResult,
+    Refusal,
+    Sample,
+    dominance,
+    timing_equivalents,
+)
 
 
 @pytest.mark.parametrize("measure_errors", [True, False])

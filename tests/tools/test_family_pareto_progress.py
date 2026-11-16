@@ -11,8 +11,9 @@ import pytest
 from zcu_tools.simulate.evolution import EvolutionResult, PathDiagnostics
 
 from tests.tools.family_pareto_support import make_scene
-from tools.family_pareto import EngineSession, Sample, main, measure_family
+from tools.family_pareto import EngineSession, main, measure_family
 from tools.family_pareto_inputs import Input, Scene
+from tools.family_pareto_results import Sample
 
 
 def test_observer_keeps_first_slow_sample_when_the_next_evolve_fails() -> None:
