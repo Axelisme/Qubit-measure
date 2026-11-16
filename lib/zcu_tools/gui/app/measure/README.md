@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure`
 
-**Last updated:** 2026-11-02, analysis summary size limit, native tab overflow navigation and automatic range selection threshold
+**Last updated:** 2026-11-16, GUI simulation worker policy
 
 **讀者：** framework-dev。量測 GUI 的組裝、分頁、tab admission 與 Run／Load／Save 分工。
 
@@ -237,6 +237,11 @@ retry. View disposal finishes hidden named dialogs through `QDialog.done()` so
 their owners release subscriptions, detaches tabs, then explicitly delivers the
 window's DeferredDelete even when the main event loop has already returned.
 Successful disposal is idempotent; closing/hiding a window alone is not disposal.
+
+`startup_context.simulation_workers(cpu_count)` selects GUI simulation parallelism
+from a caller-supplied `os.cpu_count()` result. It reserves one CPU and returns at
+least one worker, including when the count is unknown. It does not construct an
+environment or change factory defaults. See [ADR-0069](../../../../../docs/adr/0069-experiment-core-and-frontends.md#顯式-cfg-與裝置環境).
 
 [`StartupContext`](startup_context.py) exposes typed soc, device, setup, context
 and tab commands. Public signatures, thread restrictions and failure semantics
