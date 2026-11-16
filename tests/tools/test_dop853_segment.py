@@ -7,7 +7,10 @@ import numpy as np
 import pytest
 from zcu_tools.simulate.evolution import ModelSource, TimelineBatch, reference_key
 
-from tests.simulate.evolution.contract.reference import ReferenceResult, SolverTolerances
+from tests.simulate.evolution.contract.reference import (
+    ReferenceResult,
+    SolverTolerances,
+)
 from tools.dop853_segment import Dop853Coordinates, dop853_segment_input
 from tools.family_pareto_reference import solve_reference
 
