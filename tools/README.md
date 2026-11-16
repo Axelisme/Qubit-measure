@@ -868,7 +868,39 @@ cache hits, rejections and measured prepare/apply CPU seconds. It reports CPU
 seconds per relative scheduling cost unit. For records with seconds estimates,
 it also reports weighted `(actual - estimated) / estimated`; unknown estimates
 remain excluded. Malformed lines produce file/line warnings and a skipped count.
-Files and directories can be mixed; nothing is rewritten.
+Files and directories can be mixed; nothing is rewritten. All inputs merge into
+one report. The analyzer never infers simulator identity from paths, filenames,
+families or backend versions.
+
+`wall_by_complete` groups `complete=true` as `normal_return`, `false` as `raised`,
+and missing or null as `unknown`. Normal return includes a partial Stop result;
+it does not mean every requested round ran. Only observed groups appear.
+Each group reports `included`, `excluded`, and sums of `wall_s`, `compile_wall_s`,
+`evolve_wall_s`, `readout_wall_s` and `remainder_s`. The remainder is total wall
+minus the three stages, including environment preparation and pacing outside
+those stages. Raw materialization requested after acquire is outside the row.
+
+A row contributes wall totals only when all four wall fields are JSON numbers.
+Missing or null wall fields make it excluded from wall totals, including in the
+unknown group. Included plus excluded across groups equals `records`.
+All valid rows still count toward family statistics. Non-null `complete` accepts
+only JSON booleans. Non-null wall fields accept only JSON numbers, not booleans or
+numeric strings. Wrong types skip the whole row, including family work, and emit
+the same file/line warning as other malformed records.
+
+FTF, single and six default to the same project-root `.sim_telemetry` directory;
+the rows contain no simulator identity. To inspect them separately, set distinct
+`numerics.telemetry.directory` values and run once per directory:
+
+```bash
+uv run --directory <worktree> --no-sync -- python tools/analyze_routing_telemetry.py <ftf-directory>
+uv run --directory <worktree> --no-sync -- python tools/analyze_routing_telemetry.py <single-directory>
+uv run --directory <worktree> --no-sync -- python tools/analyze_routing_telemetry.py <six-directory>
+```
+
+One invocation with all three directories instead merges their rows.
+The [shared telemetry contract](../lib/zcu_tools/simulators/README.md#acquire-telemetry)
+defines fields, extras prefixes, failure behavior and the writer's file budget.
 
 ## 怎麼跑
 

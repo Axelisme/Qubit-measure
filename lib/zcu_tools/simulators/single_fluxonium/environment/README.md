@@ -47,8 +47,9 @@ stages at `0.0`. No deferred raw materialization enters the row.
 `complete` comes from the binding's `AcquireOutcome`: normal partial Stop is true,
 while exceptions are false. Writer I/O failures warn once and do not change the
 acquire result. Disabling the policy suppresses writes; evolution still collects
-its per-call diagnostics. The shared fields and directory budget are described
-in the [telemetry contract](../../README.md#acquire-telemetry).
+its per-call diagnostics. The shared fields, common default directory, separate
+analysis setup and file budget are described in the
+[telemetry contract](../../README.md#acquire-telemetry).
 
 ## Complete timelines
 

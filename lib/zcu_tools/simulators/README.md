@@ -60,29 +60,65 @@ writes one row, including numeric failures. Six aggregates all sources and route
 groups before writing; individual sources do not write rows.
 
 Call `RoutingTelemetry(directory).write(summary, paths=paths)` once at the acquire
-boundary. `summary: AcquireTelemetry` requires `points`, `rounds`, `wall_s`,
-`compile_wall_s`, `evolve_wall_s`, `readout_wall_s`, `complete` and `extras`.
-Times are wall seconds; the three stages accept `None` when not measured.
-Each environment projects `compile_wall_s` and `complete` from the binding's frozen
-`AcquireOutcome`. Completion means normal return, including a partial Stop result,
-not completion of every requested round. FTF, single and six fill all stage values
-with floats. FTF measures every `Engine.evolve` and ADC/readout call across rounds,
-cavity-memory spans and projective continuations. Single and six evolve totals
-include projective prefixes and continuations. ADC preparation, integrated sampling
-and decimated sampling contribute to readout.
-Failed calls retain elapsed stage time; stages not entered remain `0.0`.
-Deferred raw materialization after acquire is outside these totals.
-The shared stage annotations still allow `float | None`; unmeasured stages in
-other callers can use `None`.
-Use simulator-prefixed extras keys and JSON values, or `{}` when absent.
-The writer projects only the declared fields and does not modify the caller's
-summary. `RoutingRecord` inherits them and adds a UTC timestamp, frontend CPU
-seconds, the cost-unit label and aggregated Engine family counters.
-No numerical inputs enter the record.
+boundary. `AcquireTelemetry` requires the first eight fields below.
+`RoutingRecord` inherits them and adds the four writer-generated fields.
 
-The writer retains the `routing-*.jsonl` filenames, 50 MiB directory budget,
-per-instance lock and warning-once I/O policy described in the
-[FTF telemetry contract](ftf/environment/README.md#routing-telemetry).
+| Field | Meaning |
+| --- | --- |
+| `points` | Request grid size, excluding shots and rounds. |
+| `rounds` | Captured attempts, including failed attempts. |
+| `wall_s` | Admitted acquire wall seconds, including pacing and excluding telemetry I/O. |
+| `compile_wall_s` | Compilation wall seconds from the binding's frozen `AcquireOutcome`. |
+| `evolve_wall_s` | Sum of every `Engine.evolve` call's wall seconds across rounds and continuations. |
+| `readout_wall_s` | Sum of ADC/readout wall seconds, including preparation and integrated or decimated sampling. |
+| `complete` | `true` when the acquire body and cleanup returned normally, including a partial Stop result. `false` when an exception escaped. |
+| `extras` | Simulator-prefixed keys with JSON values, or `{}` when absent. |
+| `timestamp` | Writer-generated UTC ISO timestamp. |
+| `frontend_cpu_s` | Geometry and work-plan calling-thread CPU seconds. |
+| `estimated_cost_unit` | `relative scheduling units`, the label for family scheduling costs. |
+| `families` | Engine family names mapped to aggregated counters and CPU seconds. |
+
+All four wall fields are floats. A failed call retains elapsed time through its
+exception; a stage not entered contributes `0.0`. `complete` comes from the binding
+and does not mean every requested round ran. FTF measures cavity-memory spans and
+projective continuations. Single and six also include projective prefixes and
+continuations. The remainder, `wall_s - compile_wall_s - evolve_wall_s - readout_wall_s`,
+contains environment preparation and pacing outside the measured stages.
+Raw materialization requested after acquire is outside the row.
+
+Use extras keys such as `ftf.projection_outcomes`; the prefix names the simulator's
+extension, not a row identity. Required extras keys are indexed directly by their
+consumer. The writer projects only declared fields and never modifies the caller's
+summary. It stores no numerical inputs or simulator identity.
+Family counters retain the [Engine report contract](../simulate/evolution/README.md#routing-telemetry).
+Family CPU excludes ADC, sampling and routing bookkeeping. It is not wall time.
+
+`numerics.telemetry.enabled` defaults to true in all three environments.
+Their default `numerics.telemetry.directory=null` selects the same project-root
+`.sim_telemetry` directory. To analyze environments separately, set a different
+`telemetry.directory` under each environment's `numerics`, then run the analyzer
+once per directory. Passing multiple directories to one invocation merges them
+into one report. No path, filename, family or backend version identifies a row's
+simulator.
+
+Files use UTC dates in `routing-YYYYMMDD.jsonl`. Before appending, the writer deletes
+oldest owned files by modification time, breaking ties by filename, until the new
+line fits within the 50 MiB directory budget. It may remove and recreate today's
+file. It leaves unrelated files alone and does not write a line larger than the
+budget. Each writer instance serializes its writes. Filesystem or serialization
+failure emits at most one `RuntimeWarning` per instance and never changes the
+acquire result, even when warnings are configured as errors.
+
+The [routing analyzer](../../../tools/README.md#routing-telemetry-analysis) reports
+wall totals under `normal_return`, `raised` and `unknown`, using only `complete`.
+Missing or null `complete` is unknown. Missing or null wall fields are unmeasured.
+Only rows with numeric `wall_s` and all three numeric stages contribute wall totals
+and the remainder, including unknown rows. Each observed group reports `included`
+and `excluded`; their sum across groups equals `records`. Absent groups mean zero
+rows. Every valid row still contributes family statistics. Non-null `complete`
+must be a JSON boolean. Non-null wall fields must be JSON numbers, not booleans or
+numeric strings. Wrong types skip the entire row, including its family counters,
+and produce a file/line warning and a `skipped` count.
 
 ## Private replay
 

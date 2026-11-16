@@ -89,8 +89,8 @@ ADC, sampling and routing bookkeeping; wall includes those operations.
 Numeric templates contain no program/experiment identifier, so `experiment` is
 omitted rather than guessed from controls or caller frames.
 
-The shared [acquire writer](../../README.md#acquire-telemetry) supplies the common
-summary fields. `FTFSource.finish_acquire(outcome)` receives the binding's
+The shared [telemetry contract](../../README.md#acquire-telemetry) defines common
+summary fields, the shared default directory and separate-analysis setup. `FTFSource.finish_acquire(outcome)` receives the binding's
 `AcquireOutcome` and projects its builder-only `compile_wall_s` and `complete`.
 `complete` means the acquire body and cleanup returned normally, including partial
 Stop results. An escaping error is false.
@@ -115,8 +115,9 @@ line fits. Today's file can be removed and recreated. Unrelated files remain.
 A filesystem or serialization failure emits at most one warning per environment
 and never aborts acquire, even with warnings configured as errors. Local files
 are gitignored. `tools/analyze_routing_telemetry.py <directory or files...>` reports
-family usage shares, rejection counts, CPU per relative cost unit, and weighted
-`(actual - estimated) / estimated` error where CPU estimates exist.
+wall stages and their remainder by normal return, escaping error or unknown
+outcome, family usage shares, rejection counts, CPU per relative cost unit, and
+weighted `(actual - estimated) / estimated` error where CPU estimates exist.
 
 ## Numeric source
 

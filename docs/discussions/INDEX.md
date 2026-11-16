@@ -18,6 +18,7 @@
 
 ## 模擬量測環境
 
+- 2026-11-16 [Acquire wall 的分組與未量測資料](2026-11-16-acquire-wall-analysis.md)：彙總契約。只按 complete 分組，四個 wall 俱為數字才計入耗時，所有有效行保留 family 統計。
 - 2026-11-16 [Single 與 six 的 acquire telemetry](2026-11-16-single-six-acquire-telemetry.md)：計時聚合。以 acquire 為寫入邊界，聚合各 source 與 projective span，直接沿用 binding 成敗。
 - 2026-11-16 [FTF acquire 的演化與讀出 wall](2026-11-16-ftf-layer-walls.md)：分層計時。每次 Engine 與 ADC 工作各自累積 wall，跨 round 與 continuation 加總，失敗段保留已耗時間。
 

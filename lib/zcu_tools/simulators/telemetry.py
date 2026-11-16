@@ -38,10 +38,13 @@ class AcquireTelemetry(TypedDict):
     points: request grid size excluding shots and rounds.
     rounds: number of captured attempts, including failed attempts.
     wall_s: admitted acquire wall seconds including pacing, excluding writer I/O.
-    compile_wall_s: compilation wall seconds, or None when not measured.
-    evolve_wall_s: sum of Engine.evolve wall seconds, or None when not measured.
-    readout_wall_s: ADC/readout wall seconds, or None when not measured.
-    complete: whether the acquire completed without an exception.
+    compile_wall_s: compilation wall seconds, through failure if it raises.
+    evolve_wall_s: sum of Engine.evolve wall seconds, including failed calls.
+    readout_wall_s: summed ADC/readout wall seconds, including failed calls.
+    Stages not entered contribute 0.0; no stage may be unmeasured.
+    complete: True if the acquire body and cleanup returned normally, including
+    a partial Stop result; False if an exception escaped. It does not mean all
+    requested rounds completed.
     extras: simulator-prefixed keys (for example ftf.projection_outcomes) mapped
     to JSON values; pass {} when absent. Consumers index required keys directly.
     """
@@ -49,9 +52,9 @@ class AcquireTelemetry(TypedDict):
     points: int
     rounds: int
     wall_s: float
-    compile_wall_s: float | None
-    evolve_wall_s: float | None
-    readout_wall_s: float | None
+    compile_wall_s: float
+    evolve_wall_s: float
+    readout_wall_s: float
     complete: bool
     extras: dict[str, JsonValue]
 
