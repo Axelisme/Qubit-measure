@@ -127,7 +127,7 @@ class PointView:
         a same-leaf conflict. No other point or setup file is read or written.
         """
         with self._store.edit() as draft:
-            yield EditView(draft)
+            yield EditView(draft, source=self._source)
 
     def resolve(
         self,

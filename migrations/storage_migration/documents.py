@@ -327,7 +327,7 @@ def edit_parameter(
                 format=PARAMETER_FORMAT,
                 supported_version=PARAMETER_VERSION,
             ).edit() as draft:
-                yield EditView(draft)
+                yield EditView(draft, source=path)
         else:
             with DocumentStore(
                 temporary,
@@ -335,7 +335,7 @@ def edit_parameter(
                 format=PARAMETER_FORMAT,
                 supported_version=PARAMETER_VERSION,
             ).edit() as point_draft:
-                yield EditView(point_draft)
+                yield EditView(point_draft, source=path)
         publish_document(
             session,
             source,
