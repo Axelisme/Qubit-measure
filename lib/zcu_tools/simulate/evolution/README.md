@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-11-17, bounded dual-phase gate refinement
+**Last updated:** 2026-11-17, per-key full-drive gate pricing
 
 **讀者：** framework-dev、agent。Segment evolution 的公開輸入、路由與數值邊界。
 
@@ -200,9 +200,13 @@ neither runs timeline workers nor computes prefix densities.
 An evaluated guard reports `accepted` or `rejected`. A local key reports
 `deferred`. Candidates after a stopped round report
 `untested_after_short_circuit`, unless an earlier round already evaluated them.
-Structurally inapplicable and cost-skipped families are not listed unless
-actually offered. Candidate `scheduling_cost` is `Kernel.cost`'s nonnegative
-relative row work for chunk interleaving, not seconds or a numerical certificate;
+A gate that loses the pre-build price comparison is not offered, so inspection
+does not run its table-building guard. Without `families=`, that skipped gate
+is absent from `candidates`. With an allowlist, a later fallback round can name
+it after another family has stopped the row; it then reports
+`untested_after_short_circuit`, not a guard rejection. Structurally inapplicable
+families remain absent unless offered. Candidate `scheduling_cost` is
+`Kernel.cost`'s nonnegative relative row work for chunk interleaving, not seconds or a numerical certificate;
 it cannot explain why a family was chosen. The cold-amortized estimate used to
 order candidates is not exposed. Short-circuited candidates have
 `scheduling_cost=None`; evaluated and deferred candidates include their value.
@@ -339,7 +343,7 @@ thresholds and algorithm details live with their owners:
 | --- | --- |
 | Row domains, named candidate order and terminal routes | [dispatch](_dispatch.py); [kernel collection](kernels/__init__.py) instantiates implementations only |
 | Shaped and two-tone cold-cost choices | [shaped dispatch](_shaped_dispatch.py), [two-tone dispatch](_two_tone_dispatch.py) return family names, not positional indices or unnamed flags |
-| Multitone gate amortization | [multitone dispatch](_multitone_dispatch.py) owns the 20-use cost preference and complete-acquire canonical-key inventory |
+| Multitone gate amortization | [multitone dispatch](_multitone_dispatch.py) compares cold per-key gate prices with eligible direct/RWA alternatives, using complete-acquire canonical-key counts |
 | Slow/plateau carrier boundary | [slow-envelope comparison](kernels/slow_envelope.py) owns the strict absolute-carrier comparison shared by dispatch and its guard |
 | Common-frame pricing and numerical construction | [common-frame dispatch](_common_frame_dispatch.py), [kernel](kernels/common_frame_kernel.py) |
 | Constant and shaped period builders | [Floquet period](kernels/floquet_period.py), [period table](kernels/period_table.py), [shaped Sambe](kernels/shaped_sambe.py), [gate cache](kernels/gate_cache.py) |
@@ -350,8 +354,20 @@ thresholds and algorithm details live with their owners:
 | Direct integration and chronological chains | [DOP853 planning](_dop853_dispatch.py), [DOP853](kernels/dop853.py), [flux DOP853](kernels/flux_dop853.py) |
 
 Cold-cost choices use the complete acquire inventory rather than resident cache
-warmth. Prefix and worker subsets share those choices. Numerical approximations
-retain their own admission limits; they do not certify arbitrary-input or
+warmth. Prefix and worker subsets share those choices. `multitone_gate` pays
+guard + first-stage construction/current-acquire key uses + apply. Construction
+includes the 9×10 nodes, 64 validation probes and Fourier fitting. A validation
+upgrade is not prepaid. The gate must beat the eligible direct/RWA alternatives
+before its numerical guard builds anything. RWA keeps its existing history-based
+cold price; gate amortization never reads history.
+
+Gate construction expires after each evolve. A fixed 20-use preference would
+become stale when construction costs or `dop853` speed change. The price now
+follows their work estimates. First-stage construction uses a coefficient fitted
+to four fixed-FTF X90/CZ keys at 32 states. Estimated build times differ from
+measured CPU times by about -16% to +16%. Guard and playback terms remain work
+assumptions, not separately measured FTF timings. Numerical approximations
+retain their own admission limits. They do not certify arbitrary-input or
 whole-sequence accuracy.
 
 Historical calibration note for [slow-envelope propagation](kernels/slow_envelope.py):
@@ -418,7 +434,7 @@ routes and final densities. This does not force every sampled row to DOP853.
 | [`gate_cache`](kernels/gate_cache.py), phase-interpolated full-carrier shaped gates | `shaped` | Four Hilbert subsegments with secular half-steps. Model-only secular split d³ΓV²/16 ≤ 0.01. For 0 < d ≤ 30 ns, dispatch tries 6 phase nodes with 2 probes and full-unitary defect ≤ min(1e-4, 0.1B); other keys or failed convergence use 16 nodes. Fixed-order playback does not certify arbitrary-drive error against B. | [`shaped_complex`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | FAIL at guard edge: 9.296548e-3; strict xfail |
 | [`period_table`](kernels/period_table.py), shaped amplitude-band period playback | `shaped` | 8 Chebyshev amplitude nodes and 16 phase samples. Guard requires envelope-motion indicator ≤ 0.05, amplitude-band bandwidth ≤ 0.5 and secular split ≤ 0.01. These calibrated limits do not scale with B. DC is guard-admissible with local direct integration, but default costs prefer terminal DOP853. | [`linear_shaped`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
 | [`common_frame`](kernels/common_frame.py), common-frame SW2 beat dynamics | `two` or two-tone `multiple` only | Fixed-flux common frame with second-order beat/two-photon terms, first-order endpoint dressing and CF4/secular playback. Absolute mean carrier must be ≥ 1e-10 GHz. CF4 steps are capped at 8 ns and 0.08 cycles of the fastest retained channel, with no lower cutoff. Dispatch prices first-order playback steps, so cost rises with active carrier spacing; numerical guards determine applicability. Fast-channel denominator must exceed 1e-10. Row-local coherent/bath indicators must be ≤ 0.03/0.01, independent of B. | [`nearby_carriers`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | FAIL at guard edge: 8.066669e-3; strict xfail |
-| [`multitone_gate`](kernels/multitone_gate.py), full-drive dual-phase gates | `multiple` | Two tones, fixed flux, positive duration, at least one sampled envelope. Four D(h/2)·U·D(h/2) quarters with complete drive, no RWA or pruning. Secular split proxy d³ΓV²/16 ≤ 0.01. All keys start with a 9×10 raw phase grid at rtol/atol 2.75e-7/2.75e-9, regardless of envelope shape or imaginary samples. Each stage integrates its nodes and two independent sets of 32 off-grid probes together, then polar-retracts endpoints. Every quarter requires full-unitary Frobenius defect ≤ 1.9e-7. Failed validation rebuilds once at 13×13 and 1e-8/1e-10; another failure rejects the key. Keys omit start and both phases because Fourier playback absorbs them. The legacy 20-use preference remains; pinning bypasses price, never validation. | Gaussian/flat-top/DRAG, sampled refinement, mixed keys and [terminal refusal](../../../../tests/simulate/evolution/contract/test_accuracy_matrix.py), [pinned routing](../../../../tests/simulate/evolution/contract/test_routing_boundaries.py) | PASS on small-model contract cases; long-sequence qualification separate |
+| [`multitone_gate`](kernels/multitone_gate.py), full-drive dual-phase gates | `multiple` | Two tones, fixed flux, positive duration, at least one sampled envelope. Four D(h/2)·U·D(h/2) quarters with complete drive, no RWA or pruning. Secular split proxy d³ΓV²/16 ≤ 0.01. All keys start with a 9×10 raw phase grid at rtol/atol 2.75e-7/2.75e-9, regardless of envelope shape or imaginary samples. Each stage integrates its nodes and two independent sets of 32 off-grid probes together, then polar-retracts endpoints. Every quarter requires full-unitary Frobenius defect ≤ 1.9e-7. Failed validation rebuilds once at 13×13 and 1e-8/1e-10; another failure rejects the key. Keys omit start and both phases because Fourier playback absorbs them. Per-key cold pricing compares first-stage build/current-acquire uses plus apply against eligible alternatives before construction. The build coefficient uses fixed-FTF X90/CZ first-stage measurements; guard/playback terms remain work estimates. Pinning bypasses price, never validation. | Gaussian/flat-top/DRAG, sampled refinement, mixed keys and [terminal refusal](../../../../tests/simulate/evolution/contract/test_accuracy_matrix.py), [pinned routing](../../../../tests/simulate/evolution/contract/test_routing_boundaries.py) | PASS on small-model contract cases; long-sequence qualification separate |
 | [`multitone_rwa`](kernels/multitone_rwa.py), simultaneous omission-restored RWA | `two`, distinct ports only | Exactly two constant envelopes, fixed flux, B ≥ 1e-3 and each carrier magnitude ≥ 50 MHz. Sampled rows are rejected. Start with 50 MHz edges, restore omitted paths until transfer proxy ≤ 0.0058 and residual phase ≤ 0.0045 rad; retained real dimension ≤ 256. No carrier-spacing, full-operator/carrier ratio or retained-norm phase cap. Apply step ceiling is 16 ns. | [`joint_constant`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
 | [`floquet`](kernels/floquet.py), constant Stark tone plus probe | `two` | Larger absolute gain selects the Stark slot, with ties choosing the first; that slot requires positive carrier. Frame overlap ≥ 0.5, modal condition ≤ 1e8, maximum real eigenvalue ≤ 1e-10/ns and residual ≤ 1e-9; sampling extent ≤ 128 with at most 4096 phase samples. k=0 omission and convergence each fit B/3. Modal Dyson additionally uses r ≤ 0.1, r2 ≤ 0.05 when probe gain magnitude ≥ 0.1, Dyson norm-duration v ≤ 0.5, transfer indicator v + v²/2 ≤ 0.02 and higher-order remainder exp(v)·v³/6 ≤ B/3; otherwise use periodic channel playback. Retained-sideband admission instead requires convergence ≤ B/40 and bound ≤ 0.95B, retaining edges within 0.1/ns and averaging other harmonics through order 4. Admission is per row; refused rows continue to other allowed candidates. This finite-Fourier admission is not a density-error guarantee. | [`two_carriers`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
 | [`dop853`](kernels/dop853.py), full-drive direct density integration | `shaped`, `two`, `multiple`, terminal candidate | No RWA or fast-path admission threshold. Accepts valid rows with finite positive B, including complex sampled envelopes. Stops at active control knots. Local rtol = min(1e-4, 0.03B), atol = min(1e-6, 0.0003B), from the [shared solver](kernels/_dop853.py); these are not global error bounds. | [`shaped_complex`](../../../../tests/simulate/evolution/contract/accuracy_cases.py), [`two_carriers`](../../../../tests/simulate/evolution/contract/accuracy_cases.py), [`joint_gate_inventory`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
@@ -558,9 +574,9 @@ Guards do not evolve density. `guard_builds` identifies table-building guards;
 When `guard_builds` is true, the hook must return `GuardResult`, even for empty
 or rejected rows. Returning `None` raises rather than retrying `guard`.
 When false, classification calls `guard` directly. Multitone dispatch owns the
-20-use gate cost preference; prefix and worker calls borrow the complete-acquire
-inventory, never subset counts or resident warmth. The kernel guard checks only
-numerical admission. `multitone_gate` hands validated model-only Fourier
+per-key gate price comparison; prefix and worker calls borrow the complete-acquire
+inventory, never subset counts, routing history or resident warmth. The kernel
+guard checks only numerical admission. `multitone_gate` hands validated model-only Fourier
 products to apply without rebuilding. Pinning admits validated keys even once;
 unresolved phase dependence rejects a key regardless of its use count.
 Cross-timeline keys are guarded before shared preparation. Local builders run

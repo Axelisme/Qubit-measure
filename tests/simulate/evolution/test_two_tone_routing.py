@@ -95,7 +95,7 @@ def test_multitone_optional_families_are_independent(
     src = source()
     # Gate amortization is dispatch policy, so its injected guard needs a
     # cost-eligible sampled inventory. Constant three-tone rows still skip it.
-    count = 20 if shaped and optional == "multitone_gate" else 1
+    count = 4096 if shaped and optional == "multitone_gate" else 1
     gate_skipped = optional == "multitone_gate" and not shaped
     if gate_skipped:
         expected = "dop853"
