@@ -23,8 +23,6 @@ from zcu_tools.simulate.evolution import (
     write_reference,
 )
 
-from tests.simulate.evolution.contract.accuracy_cases import accuracy_case
-from tests.simulate.evolution.contract.guard_sweep_cost import measure_engine_cost
 from tests.tools.family_pareto_support import (
     engine_reference,
     make_history_scene,
@@ -466,29 +464,6 @@ def test_dominance_uses_final_qualification_and_excludes_directly_retained() -> 
         "warm_retain_history/wall": [],
         "warm_retain_history/cpu": [],
     }
-
-
-@pytest.mark.sim
-def test_exclusion_estimator_preserves_policies_modes_and_observed_paths() -> None:
-    results = measure_engine_cost(
-        lambda: replace(accuracy_case("weak_plateau"), families=("t6",))
-    )
-    assert [(r.policy, r.mode) for r in results] == [
-        (policy, mode)
-        for policy in ("pinned", "excluded")
-        for mode in ("first_evolve", "warm_clear_history", "warm_retain_history")
-    ]
-    for result in results:
-        assert (
-            len(result.wall_seconds)
-            == len(result.cpu_seconds)
-            == len(result.paths)
-            == 5
-        )
-        if result.policy == "pinned":
-            assert all(path.get("t6", 0) == 2 for path in result.paths)
-        else:
-            assert all(path and "t6" not in path for path in result.paths)
 
 
 @pytest.mark.parametrize(

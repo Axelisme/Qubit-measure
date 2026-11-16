@@ -426,9 +426,7 @@ write failures return nonzero and may leave a partial destination file.
 and `main(argv)` are importable. Comparators pair modes by name, not list order;
 every available pinned row must have all three unique modes and measured sample
 errors. Missing mode/error information raises ValueError. Unavailable and default
-rows are not competitors. `measure_family` owns the Engine-only timing protocol;
-the family-exclusion estimator reuses it with an explicit `reference=None` to
-measure only time and paths (`Sample.density_error=None`), without an oracle.
+rows are not competitors. `measure_family` owns the Engine-only timing protocol.
 Pareto policies always supply a real reference. Tests use controlled clocks and small
 collaborators; the complete matrix runs outside pytest through the exclusive runner.
 

@@ -264,8 +264,8 @@ Runner、report 與 summary 讀同一個 owner，不由 report 反向 import 執
 量測 consumer 不再寫 records 副本，也不保留舊 freeze helper 或 producer import。
 計時 owner 只接已備好的 session；paired caller 透過這個接縫取得同一組每筆身份。
 
-測試側 exclusion estimator 的反向依賴由獨立後續工作承接，仍待歸屬裁決。
-這不表示已封閉 `simulate`，也不把尚未移除的反向依賴當成完成。
+測試側 exclusion estimator 與唯一 caller 測試已退休，不保留替代 module 或相容層。
+其 tests → tools 反向 import 隨之移除，這不表示已封閉 `simulate`。
 取捨與介面退休見 [量表 cache-only 遷移](../discussions/2026-11-16-family-pareto-cache-only.md)。
 
 ### Lab 定義與組合根
