@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-11-17，reference producer 單列選取
+**Last updated:** 2026-11-17，interaction reference 的靜態 schedule 分段
 
 **讀者：** framework-dev、agent。查閱測試的 owner、fixture、執行方式與搬遷驗收契約。
 
@@ -149,6 +149,16 @@ uv run --directory "$PWD" --no-sync -- python -m tests.simulate.evolution.contra
 
 `--converged` 與 `--interaction` 可重複指定。Producer 只讀 record 的 name、physical，既有 key 命中就讀取，只有 missing key 才用指定 solver 求解。
 它不讀 metadata、不維護場景名稱清單，也不在失敗後換 solver。
+
+Interaction solver 適用於每個 shot 只有一個 schedule level 的靜態 schedule，各 point 的 level 可以不同。
+它在明示的 schedule 段邊界、drive 起訖與 sampled envelope knots 分段積分，以上一段的終點 density 繼續下一段。
+各段保留絕對 carrier phase 與 pulse-local envelope time，不在邊界重設載波或包絡。
+它用完整 drive 與精確 H0 interaction transform，不做 RWA。
+兩次求解沿用 `rtol/atol=2e-10/2e-12` 與 `2e-12/2e-14`，完整 density 的最大絕對差須不超過 `2e-6`。
+Solver 拒絕 continuous flux waveform、shot 內 schedule level 改變與 segment shifts。
+分段是 solver 的內部做法，不需要另一份清單、producer 入口或旗標。
+Reference key 不含 solver 身份，分段不改 key，既有 cache 命中時仍直接讀取。
+
 加 `--scenario NAME` 時，producer 先在所有明確提供的清單中選取恰好一筆同名列，再讀該列 payload。
 零筆會列合法名稱，多筆會列來源，兩者都在讀 payload 或呼叫 solver 前失敗。
 未選列不需要 payload，也不會求解。不帶 scenario 時維持整批處理。
