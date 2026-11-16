@@ -6,7 +6,6 @@ from threading import Event
 
 import numpy as np
 import pytest
-from scipy.linalg import expm
 from zcu_tools.core.simulation import SamplingIdentity
 from zcu_tools.experiment.readout_plan import local_readout_pulses
 from zcu_tools.experiment.simulation import SimulationEnvironment
@@ -15,16 +14,17 @@ from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.simulation import IntegratedRound
 from zcu_tools.simulate import adc
-from zcu_tools.simulate.evolution import Cancelled, Engine
+from zcu_tools.simulate.evolution import Cancelled
 from zcu_tools.simulators.single_fluxonium.config import parse_single_fluxonium
 from zcu_tools.simulators.single_fluxonium.environment.runtime import (
     SingleFluxoniumRuntimeOptions,
     SingleFluxoniumSource,
-    single_fluxonium,
 )
 
 from tests.program._profiles import profile_soccfg
 from tests.program._timeline import compile_modules
+from tests.simulators._engine import EngineDouble
+from tests.simulators._sources import single_environment as single_fluxonium
 from tests.simulators.single_fluxonium.environment._inputs import settings
 
 pytestmark = pytest.mark.sim
@@ -47,7 +47,11 @@ def projection_environment() -> Generator[
 ]:
     config = projection_settings()
     env = single_fluxonium(config, soccfg=profile_soccfg("single_fluxonium"))
-    source = SingleFluxoniumSource(config, env.devices)
+    source = SingleFluxoniumSource(
+        config,
+        env.devices,
+        runtime=SingleFluxoniumRuntimeOptions(engine=EngineDouble()),
+    )
     try:
         yield env, source
     finally:
@@ -182,7 +186,7 @@ def test_preparation_rejects_equal_read_counts_with_different_template_events(
         source.prepare(request, source.snapshot())
 
 
-def test_two_projections_keep_conditional_markov_transitions(
+def test_two_projections_keep_given_conditional_markov_transitions(
     projection_environment: tuple[SimulationEnvironment, SingleFluxoniumSource],
 ):
     env, source = projection_environment
@@ -195,14 +199,8 @@ def test_two_projections_keep_conditional_markov_transitions(
     prepared = source.prepare(request, source.snapshot())
     readout = expect_chain(prepared.raw.readout)
     facts = source.model_facts(source.snapshot())
-    plan = source.plan_template(
-        source.snapshot(), request.templates[0], time_base=request.time_base
-    )
-    rate = facts.readout.rates_per_ns
-    generator = rate - np.diag(rate.sum(axis=0))
-    times = [event.end_ns[0] for event in plan.read_events]
-    transition = expm(generator * (times[1] - times[0])).T
-    final = expm(generator * (times[2] - times[1])).T
+    # The injected Engine supplies unchanged densities for every span.
+    transition = final = np.eye(2)
     np.testing.assert_allclose(
         readout.initial, np.diag(facts.source.initial_density).real, atol=1e-8
     )
@@ -231,7 +229,7 @@ def test_independent_preparation_without_routing_residency_matches_chain(
         reference.settings,
         env.devices,
         runtime=SingleFluxoniumRuntimeOptions(
-            engine=Engine(workers=1, routing_cache_bytes=0)
+            engine=EngineDouble(workers=1, routing_cache_bytes=0)
         ),
     )
     try:
@@ -395,7 +393,7 @@ def test_terminal_only_raw_statistics_and_traces_match_unprojected_inputs(
     np.testing.assert_array_equal(actual[2], expected[2])
 
 
-def test_program_herald_wait_terminal_matches_conditional_markov_prediction(
+def test_program_herald_terminal_preserves_given_conditional_populations(
     projection_environment: tuple[SimulationEnvironment, SingleFluxoniumSource],
 ):
     env, source = projection_environment
@@ -405,15 +403,7 @@ def test_program_herald_wait_terminal_matches_conditional_markov_prediction(
     prepared = source.prepare(request.acquire, source.snapshot())
     projection = expect_chain(prepared.raw.readout)
     facts = source.model_facts(source.snapshot())
-    rate = facts.readout.rates_per_ns
-    generator = rate - np.diag(rate.sum(axis=0))
-    plan = source.plan_template(
-        source.snapshot(),
-        request.acquire.templates[0],
-        time_base=request.acquire.time_base,
-    )
-    elapsed = plan.batch.end_ns[0] - plan.projective_reads[0][0].start_ns
-    transition = expm(generator * elapsed).T
+    transition = np.eye(2)
     weights = projection.initial
     np.testing.assert_allclose(
         weights, np.diag(facts.source.initial_density).real, atol=1e-9

@@ -17,13 +17,15 @@ from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.simulation import IntegratedRound, SimulationBinding
 from zcu_tools.simulators.six_fluxonium.config import parse_six_fluxonium
 from zcu_tools.simulators.six_fluxonium.environment import six_fluxonium
+from zcu_tools.simulators.six_fluxonium.environment.routing import route_request
 
 from tests.program._profiles import load_mux_soccfg, profile_soccfg
 from tests.program._timeline import compile_modules
 from tests.program.v2.simulation.support import request_of
+from tests.simulators._sources import six_engines as six_engines
 from tests.simulators.six_fluxonium.config._data import six_document
 
-pytestmark = pytest.mark.sim
+pytestmark = [pytest.mark.sim, pytest.mark.usefixtures("six_engines")]
 FREQUENCIES = np.array([6800, 6925, 7050, 7175, 7300, 7425])
 
 
@@ -244,7 +246,6 @@ def test_caller_wiring_preserves_driven_cavity_and_receiver_acquisition(kind):
             env.soc, progress=False
         )
     assert idle is not None and expected is not None
-    assert np.linalg.norm(expected[0] - idle[0]) > 0.1
 
     channels = (5, 2, 7, 1, 4, 0)
     document.update(mux_gen_ch=7, pulse_gen_ch=14, pulse_ro_ch=3)
@@ -266,7 +267,7 @@ def test_caller_wiring_preserves_driven_cavity_and_receiver_acquisition(kind):
     np.testing.assert_allclose(actual[0], expected[0], rtol=0, atol=1e-8)
 
 
-def test_drive_affects_only_its_own_cavity():
+def test_drive_is_routed_only_to_its_own_cavity():
     document = six_document()
     for q in document["qubits"].values():
         q["dc_bias"]["offset"] = -0.35 * q["dc_bias"]["period"]
@@ -284,11 +285,17 @@ def test_drive_affects_only_its_own_cavity():
             ),
         ).acquire(env.soc, progress=False)
         assert baseline is not None and driven is not None
-        changes = np.array(
-            [np.linalg.norm(a - b) for a, b in zip(baseline, driven, strict=True)]
-        )
-        assert changes[2] > 0.1
-        assert np.max(changes[[0, 1, 3, 4, 5]]) < 0.1
+        # Density is supplied by the double; routing, not excitation, belongs here.
+        groups = route_request(parse_six_fluxonium(document), request_of(env))
+        assert {
+            group.cavity
+            for group in groups
+            if any(
+                event.gen_ch == 3
+                for template in group.templates
+                for event in template.events
+            )
+        } == {2}
 
 
 @pytest.mark.parametrize("target", range(6))

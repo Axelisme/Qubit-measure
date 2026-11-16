@@ -23,7 +23,7 @@ status: accepted
 | `program` | 控制 ZCU216 與底層 QICK 的工具和類別，包括由呼叫端 profile mapping 建 QickConfig 的 `build_soccfg` 與模擬 SoC binding；時脈、channel 型別與數量等硬體 profile 數值不留在 lib | 參數與資產的保存 |
 | `analysis` | 分析工具；模型自己的公開 renderer，使用與客製化由 caller 決定 | 檔案讀寫；實驗的圖形政策 |
 | `plotting` | 具名 Figure、owner 更新機制與共用診斷圖 | 分析計算；lab 的 live 工具與格式 |
-| `simulate` | 數值模擬 | 讀取資料容器；呼叫端傳入數值 |
+| `simulate` | 數值模擬、通用數值輸入與參考解 codec | 讀取量測資料容器、裝置佈局或使用者環境參數；模型數值由呼叫端提供 |
 | `simulators` | 具體物理模擬器（FTF、single_fluxonium、six_fluxonium）的模型、environment 與私有 replay | 通用演化、ADC、bath、元件 Hamiltonian 等機制，留在 `simulate` |
 | `resources` | 實驗領域資料容器與 YAML、JSON、CSV 的讀寫；waveform 資產的命名、formula 語意與 NPZ 實體 I/O | 量測資料檔；program 的執行機制；重複 waveform codec |
 | `core` | 共用的無狀態型別與格式。`core.waveform_format` 驗證 samples、編解碼 NPZ 與 opaque JSON recipe | 檔案 I/O、formula 語意、GUI、資源 scope 或硬體 |
@@ -251,13 +251,68 @@ GUI、MCP 組合根與開發工具需要 lab 宣告時，只直接 import `zcu_l
 使用者對 assembly 入口限制與 migrations 例外回答：「好，甲」。引文中的 `[zcu_lab]` 代替語音輸入的 lab 名稱。
 
 量表工具的場景是挑選過、固定的一組，核心 pulse 序列與模型參數放在工具內，不 import lab，也不讀可變的 lab YAML。
-例如 `tools/family_pareto_scenarios.py` 用公開 program 元件組序列，固定模型值由 `tools/family_pareto_settings.py` 持有。
-此處接受與 lab 重複，讓讀工具的人可以直接看懂場景；lab 序列改動不會自動更新量表。
+`tools/family_pareto_scenarios.py` 宣告固定序列，經 `tools/family_pareto_scene_builders.py` 的公開 program 編譯與資源生命週期，凍結完整 batch。
+固定裝置模型值由 `tools/family_pareto_settings.py` 持有。
+`tools/family_pareto_kernel_scenes.py` 則用公開 `SingleFluxoniumModel` 直接宣告單段數值控制，不經前端。
+通用 codec 歸 `simulate.evolution`，數值資料不包含 solver 或裝置 builder。
+凍結場景的數值不入庫。2026-11-16，使用者要求：「檔案大就請不要入庫，用類似快取的方式來減少重複計算，記得考慮跨worktree也能復用的方案」；對範圍與釘住方式答「1a 2a」，即所有凍結場景都不入庫，Git 只留名稱與 hash 的小清單，重建結果與清單不符就停，只有明確更新清單才算數；對存放提案答「R」。
+數值放在 repo 共用快取，每筆 record 一個單筆檔，各 worktree 共用，位置與檔名見 [Tools README](../../tools/README.md#freeze-numeric-scenes)。`simulate` 擁有清單與單筆檔的讀寫、hash 核對與原子發布，只收顯式路徑；Git 位置的解析與覆寫留在 tools。Git 只留 `tools/data/family_pareto/frozen-synthetic.index.json` 與 `frozen-real.index.json` 兩份清單。
+量測工具與 tests 側參考解 producer 只讀清單與快取，缺檔就列出 producer 指令後失敗，不自建，因為自建會讓量測工具 import 場景 producer 與 `program`。每個凍結場景都要有入庫的 builder。
+Native thread 設定會改浮點末位，所以快取遺失而重建無法逐位元重現時，只能明確更新清單並重算受影響的參考解。
+選項比較見[凍結場景存放](../discussions/2026-11-16-frozen-scene-storage.md)。
+Report 身份使用每筆 name、physical_sha256、oracle_sha256 與 metadata_sha256，不隨存放方式改變。
+Producer 自持具名 `Scene`，不依賴 tests 的案例型別或清單。獨立參考解 producer 留在 tests 側，經檔案交接，契約見 [[0078]]。
+此處接受與 lab 重複，讓讀工具的人可以直接看懂場景；lab 序列改動不會自動更新已凍結的量表輸入。
 這個取捨只適用於固定的 optimizer benchmark。需要真實 lab 宣告的品質檢查仍經 assembly 取得宣告，不複製一份。
 
 2026-11-12，使用者說：「我其實不樂意看到tool依賴zcu_lab，我認為你要測試，那就只複製最核心的pulse序列來模擬啊，又不需要整個experiment」。
 對工具內建場景的方案，使用者回答：「你這個工具的目的是對優化器做benchmark吧？那場景自然是挑選過的」，並補充：「而且這樣tool也能提高可讀性，我寧可重複也要提高可讀性」。
+2026-11-15，使用者進一步說：「但腳本也不應該依賴於我的模擬器環境參數設定，而是自己為每個場景設定的固定環境」，並界定範圍：「研究的话就没差，都可以用。但是如果你要持久的工具的话，麻烦请不要依赖于作者可能会改到的东西。」
+因此入庫、會持續使用的模擬器量測工具與測試不讀 `zcu_lab/simulation_envs/` 下的環境參數，每個場景的模型值由工具或測試自己固定持有；一次性研究可以讀已提交的環境參數。這條只管入庫的工具與測試，不改「Lab 只經 assembly 入口被依賴」的規則。
 兩次裁決的比較與先例立場見 [Lab 依賴邊界討論](../discussions/2026-11-14-lab-dependency-boundary.md)。
+
+### 開發工具的數值交接
+
+`tools.family_pareto_reference` 持有量表選定輸入的整批 cache-only preflight。
+它呼叫 `simulate.evolution.reference_key` 與 `load_reference`，不另寫 key 公式，也不求解 miss。
+每筆缺失的名稱與 key 一次列出，全部載入成功前不開始 policy 或 Engine。
+`family_pareto` 的 check 與量測共用此載入函式。獨立 solver 與 cache 生產留在 tests 側，見 [[0078]]。
+
+`tools.family_pareto_results` 持有結果型別、誤差、資格與 dominance 規則。
+Runner、report 與 summary 讀同一個 owner，不由 report 反向 import 執行入口。
+選取、reference preflight 與 check 的結束點留在 caller，計時協定只消費已備好的 session。
+`tools.simulator_measurement` 是 mode transition、暖機、history 策略與 wall/process clock 的共同 owner。
+它只接 caller 準備好的 session callbacks，不 import 場景 producer、solver 或 tests。
+`family_pareto.measure_family` 必須提供獨立 reference，並將 owner 的 observations 轉回既有量表 schema。
+計時只包一次 `Engine.evolve`，建構、history reset、暖機、誤差與 telemetry 整理都在 timer 外。
+Elapsed 秒數須有限且非負。Clock 未在解析度內前進時，0 是合法讀數，原樣記錄，不補 epsilon 或重取。
+負值、NaN 與 infinity 在 sample 建構時失敗，process CPU 不必小於 wall。
+共同 owner 不處理跨 worktree 協定或統計，兩側比較須先含相同 committed 工具。
+`tools.paired_benchmark` 擁有 controller、child、ABBA 統計及 telemetry 校準。
+它直接管理 child，每側 warm 長駐，first/cold 每筆新 process，不設轉送層。
+每個 first child 只量一筆，不套 Pareto 的慢 family 協定，也不增加 owner API。
+Controller 經公開來源接縫與 solver-free codec 取得輸入，重用 prepared-session owner。
+Child 沿用外層獨占 runner 的 process group 與鎖，不另取鎖。
+兩側、兩個 clock 的 telemetry overhead 都在各自 noise IQR 閉區間內才共同開啟。
+輸出保留原始區塊、reference 證據及完整 density 誤差，額外診斷不混入計時比值。
+統計與 process 取捨見[成對 Engine 計時討論](../discussions/2026-11-16-paired-engine-timing.md)。
+取捨與介面收窄見[共用計時討論](../discussions/2026-11-16-shared-simulator-measurement.md)。
+
+`family_pareto.select_inputs` 是公開來源／身份接縫，回傳工具的 `Input` 與原 `FrozenRecord`。
+它用 `simulate.evolution.digest(record.metadata)` 算 metadata hash，不另寫 hash 公式。
+接縫經公開 codec 讀入庫 index 與 repo 共用 scene cache，存放位置不參與 record 身份。
+共用清單的成員不等於 Pareto 決策集合。未指定 index 或 scenario 時，接縫要求並選取旁邊宣告的 19 個 Pareto 名稱。
+它先核對跨清單重名與必要名稱，再讀選定 payload。顯式 index 不帶 scenario 時全選，scenario 可嚴格單選非 Pareto 列。
+Profile 列不作 family 去留證據。新增 Pareto 場景須同時加名稱宣告與清單列。
+場景 producer 只在明確 `--update-index --scenario NEW` 時，接受 inventory 已宣告且所有清單皆無的新列。
+它先建構及寫快取，再加到該 category 尾端，保留其他列與順序。完整 prepare 仍核對 exact name set，不推導刪列或換組。
+選取與新增列的取捨見[共用清單與 Pareto 選集討論](../discussions/2026-11-17-pareto-selection-and-scene-append.md)。
+量測 consumer 不再寫 records 副本，也不保留舊 freeze helper 或 producer import。
+計時 owner 只接已備好的 session；paired caller 透過這個接縫取得同一組每筆身份。
+
+測試側 exclusion estimator 與唯一 caller 測試已退休，不保留替代 module 或相容層。
+其 tests → tools 反向 import 隨之移除，這不表示已封閉 `simulate`。
+取捨與介面退休見 [量表 cache-only 遷移](../discussions/2026-11-16-family-pareto-cache-only.md) 與 [Exclusion estimator 退休](../discussions/2026-11-16-exclusion-estimator-retirement.md)。
 
 ### Lab 定義與組合根
 

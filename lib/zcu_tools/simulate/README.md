@@ -1,12 +1,23 @@
 # Numeric simulation tools
 
-**Last updated:** 2026-11-16, dressed resonator builder
+**Last updated:** 2026-11-17, frozen scene storage and dressed resonator builder
 
 **讀者：** framework-dev、agent。查閱數值模擬的責任邊界、快取契約與實測效能。
 
 `evolution` and `adc` are independent numeric tools. Neither imports QICK,
 DeviceManager, resources, GUI, YAML or an environment. The existing fluxonium
 prediction tools remain separate. ADR-0072 defines the package dependency rules.
+
+## Frozen scene storage
+
+`evolution` owns the versioned index and single-record numeric cache codec.
+`FROZEN_PHYSICAL_VERSION` identifies physical decoding semantics.
+`SCENE_CACHE_VERSION` identifies index and cache-directory format.
+Its public APIs take explicit paths and verify complete record identities.
+They do not discover Git roots, build device models or solve references.
+Tools choose the repository-shared cache; tests-side producers select independent
+solvers. See [frozen numeric inputs and references](evolution/README.md#frozen-numeric-inputs-and-references).
+This I/O boundary does not claim the whole simulate package is dependency-closed.
 
 ## Numeric parameter drift
 
@@ -44,16 +55,13 @@ the public experiment `run` and program acquire with production pacing and one
 native thread. Those historical measurement scripts are not part of the
 repository; the revisions and workloads above record those comparisons.
 
-The repository now provides [`tools/benchmark_simulator.py`](../../../tools/README.md#simulator-benchmark).
-It measures five versioned synthetic single, six and FTF workloads through public
-program acquire, with five samples per history mode. Wall and CPU timers exclude
-imports and environment construction. The first-acquire mode creates a new
-environment per sample in the same process; it does not empty the disk Numba
-cache. The other modes use two fixed warmup acquires, then either clear routing
-history before each sample or retain it. Run the CLI through `run_heavy.py
---exclusive` to reserve both repo compute slots. JSON retains raw seconds,
-medians, MAD, configurations, hashes and library versions. `--compare` rejects
-incompatible workloads or measurement modes; a slowdown alone does not fail.
+Simulator benchmarks run at the `Engine.evolve` boundary, not through program
+acquire. Kernel measurements use one segment with a fixed `families=` selection.
+Sequence measurements use multi-segment `TimelineBatch` inputs to measure total
+evolution time, excluding program compilation and ADC sampling. The
+[family Pareto table](../../../tools/README.md#engine-family-pareto-table) records
+family errors and timings. The acquisition comparisons above remain historical
+observations, not the current benchmark procedure.
 
 ## Numba machine-code cache
 
