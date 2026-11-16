@@ -24,6 +24,7 @@ from zcu_tools.simulate.evolution import (
 from zcu_tools.simulators.ftf.config import parse_ftf
 from zcu_tools.simulators.ftf.environment import FTFSource, ftf, plan_template
 
+from tools.family_pareto_gate_scenes import GATE_SCENES, make_gate_inputs
 from tools.family_pareto_inputs import (
     Input,
     Scene,
@@ -842,6 +843,8 @@ def make_real_inputs(scenario: str | None = None) -> list[Input]:
     Returned inputs own detached fresh-source factories. An unknown scenario
     raises ValueError listing legal Input names without constructing models.
     """
+    if scenario in GATE_SCENES:
+        return make_gate_inputs(scenario)
     builders = {
         "carrier_sweep": carrier_sweep_input,
         "gain_sweep": gain_sweep_input,
@@ -860,10 +863,10 @@ def make_real_inputs(scenario: str | None = None) -> list[Input]:
         "random_shaped_gate_sequence": random_shaped_gate_sequence_input,
     }
     if scenario is None:
-        return [build() for build in builders.values()]
+        return [*[build() for build in builders.values()], *make_gate_inputs()]
     if scenario not in builders:
         raise ValueError(
-            f"Unknown scenario: {scenario}. Legal names: {', '.join(builders)}"
+            f"Unknown scenario: {scenario}. Legal names: {', '.join((*builders, *GATE_SCENES))}"
         )
     return [builders[scenario]()]
 

@@ -1,6 +1,6 @@
 # tools/
 
-**Last updated:** 2026-11-17 (Pareto default selection and single-scene preparation)
+**Last updated:** 2026-11-17 (Pareto selection, single-scene preparation and numeric FTF gate declarations)
 
 **讀者：** framework-dev。查閱 repo 開發工具的 CLI、輸出與比較機制。
 
@@ -603,7 +603,15 @@ collaborators; the complete matrix runs outside pytest through the exclusive run
 `family_pareto_scenarios.py` owns curated core pulse sequences and the scene
 producer CLI. `family_pareto_scene_builders.py` owns shared single/integer model
 construction, public program compilation, source detachment and support-based
-route declarations. The FTF scene retains its own joint-model composition.
+route declarations. The compiled FTF scene retains its own joint-model composition.
+`family_pareto_gate_scenes.py` owns numeric FTF gate templates and contiguous
+sequences, separately from program compilation. Its `numeric_gate_sequence`
+accepts a source, named ordered DriveTrack tuples, playback order and a constant
+flux level. It preserves absolute carrier phase and pulse-local envelope times.
+`make_gate_inputs` supplies fixed-model repeated pairs and depth500 declarations;
+the scene producer CLI selects these through `make_real_inputs`. Source
+snapshots reuse `numeric_builder`; cache/index handling stays in the existing
+producer and storage owners.
 `single_model_input(name, emit, manifest, families)` in the builders module is
 the public single-model construction entry point.
 `family_pareto_settings.py` owns fixed single-fluxonium, integer-fluxonium, FTF and board inputs,
@@ -644,6 +652,26 @@ not at the end of that window.
 | S-long `long_shaped_gate_sequence` | S's Gaussian X,Y,-X,-Y prefixes, terminal readout | Gate counts 50, 100, 200 (three points) | Same Gaussian 100 ns gates, sigma 20 ns and gain .1 as S | Public compiled support partition, including alignment gaps and readout lead | Checks shaped-gate reuse at long sequence lengths without replacing S. |
 | O1 `overlapping_constant_tones` | Fully overlapping constant Pump/Stokes pair, terminal readout | Pump fixed at DC E1−E0; Stokes scans that center ±50 MHz | Both 1000 ns; gains .02/.002 | 2 | A carrier slice of the dual-tone reset scan on one qubit, without a cavity drive. |
 | O2 `overlapping_shaped_tones` | Stokes-first Gaussian pair on one qubit, terminal readout | Stokes lead .3 to 0 us | Both supports .3 us, sigma .05 us; Pump 7241.848921606473 MHz/gain .030001831166453; Stokes 3111.1686681315896 MHz/gain .100006103888177 | Public support partition includes single-tone, overlap and idle spans | Uses the STIRAP delay sequence without artificial inventory repeats. |
+
+The numeric FTF gate declarations use the same fixed model at flux
+F1/coupler/F2 = .48/.20/.49 Phi0, local4x4x4 and 32 retained joint states.
+Gaussian and sampled X90 pairs last 100 ns. A tail uses the same role's pulse.
+`multitone_gate_{gaussian,sampled}_n{1,21,100}` repeats one aligned pair.
+`multitone_depth500_{gaussian,sampled}_{min_pairs,max_pairs}` mixes aligned pairs,
+alternating-role single-tone tails and 200 ns dual-charge-line CZ representatives
+with a fixed seed0 permutation. The two inventories contain respectively
+537/1232/1436 and 661/988/932 pair/tail/CZ supports. They represent the minimum
+and maximum aligned-pair counts from a three-seed, two-arm simultaneous RB
+inventory, rather than replaying a lab experiment.
+
+The gate producer records complete envelope recipes and calibrated Gaussian/
+sampled gains in its source. The original spike working files were not
+committed. The CZ scale comes only from the public drive operators' coherent
+matrix element and the actual flat-top area. It is not a calibrated CZ and makes
+no conditional-phase or fidelity claim. Builder availability does not imply
+reference convergence, index admission, numerical qualification or speedup.
+New rows still require explicit per-scenario index updates and approved
+independent reference production below.
 
 `carrier_sweep_bias045_input()` and `gate_sequence_bias045_input()` keep the
 fixed single-fluxonium physical and board values from the source commit above.

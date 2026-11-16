@@ -21,7 +21,8 @@ Profile 列不作 family 去留證據。`--scene-cache DIR` 接受絕對快取�
 接縫只讀已凍結數值，不重建裝置、前端或使用者設定。
 量測只在 `Engine.evolve` 上進行。
 
-場景控制由 `tools/family_pareto_scenarios.py`、`family_pareto_kernel_scenes.py` 與固定 settings 持有。
+場景控制由 `tools/family_pareto_scenarios.py`、`family_pareto_kernel_scenes.py`、`family_pareto_gate_scenes.py` 與固定 settings 持有。
+Gate producer 直接組成 FTF 數值序列，不經 program 編譯。Builder 宣告不等於已加入清單或已產生參考解。
 Single/integer 編譯與數值 source 的生命週期由 `family_pareto_scene_builders.py` 持有。
 重產用法見 [tools README](../../README.md#freeze-numeric-scenes)，模型建構與求解須分別取得計算成本授權。
 這份資料不包含參考解，不表示所有 reference cache 都已準備好。

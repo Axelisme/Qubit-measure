@@ -254,6 +254,7 @@ GUI、MCP 組合根與開發工具需要 lab 宣告時，只直接 import `zcu_l
 `tools/family_pareto_scenarios.py` 宣告固定序列，經 `tools/family_pareto_scene_builders.py` 的公開 program 編譯與資源生命週期，凍結完整 batch。
 固定裝置模型值由 `tools/family_pareto_settings.py` 持有。
 `tools/family_pareto_kernel_scenes.py` 則用公開 `SingleFluxoniumModel` 直接宣告單段數值控制，不經前端。
+`tools/family_pareto_gate_scenes.py` 用公開 FTF 數值模型宣告固定 gate 模板與多段 `TimelineBatch`，由同一 producer CLI 選取，不經 program 編譯。它沿用 `numeric_builder` 分離 source 生命週期，不另設快取或清單。
 通用 codec 歸 `simulate.evolution`，數值資料不包含 solver 或裝置 builder。
 凍結場景的數值不入庫。2026-11-16，使用者要求：「檔案大就請不要入庫，用類似快取的方式來減少重複計算，記得考慮跨worktree也能復用的方案」；對範圍與釘住方式答「1a 2a」，即所有凍結場景都不入庫，Git 只留名稱與 hash 的小清單，重建結果與清單不符就停，只有明確更新清單才算數；對存放提案答「R」。
 數值放在 repo 共用快取，每筆 record 一個單筆檔，各 worktree 共用，位置與檔名見 [Tools README](../../tools/README.md#freeze-numeric-scenes)。`simulate` 擁有清單與單筆檔的讀寫、hash 核對與原子發布，只收顯式路徑；Git 位置的解析與覆寫留在 tools。Git 只留 `tools/data/family_pareto/frozen-synthetic.index.json` 與 `frozen-real.index.json` 兩份清單。
