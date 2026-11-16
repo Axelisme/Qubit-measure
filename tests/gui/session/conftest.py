@@ -27,7 +27,9 @@ def selected(
             result_root=tmp_path / "result",
             database_root=tmp_path / "database",
         )
-        entry.setup.add_component("Q1", kind="fake/drive/a", rate=4300.0, sense="R1")
+        entry.parameters().add_component(
+            "Q1", kind="fake/drive/a", rate=4300.0, sense="R1"
+        )
         entry.new_point("first")
         bus = BaseEventBus()
         context = ContextService(

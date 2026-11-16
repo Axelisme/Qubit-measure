@@ -51,14 +51,14 @@ class ExportService:
         )
         target.resource.dispersive_path.mkdir(parents=True, exist_ok=True)
         save_dispersive_file(path, document)
-        component = snapshot(target.resource.setup).components[target.component]
+        component = snapshot(target.resource.parameters()).components[target.component]
         updates = {
             field: value
             for field, value in (("g", fit.g), ("bare_rf", fit.bare_rf))
             if field in type(component).model_fields
         }
         if updates:
-            with target.resource.setup.edit() as draft:
+            with target.resource.parameters().edit() as draft:
                 for field, value in updates.items():
                     draft.set(f"{target.component}.{field}", value)
         return str(path)

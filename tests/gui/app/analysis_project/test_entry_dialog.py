@@ -27,11 +27,11 @@ def dialog(qapp, tmp_path: Path, request) -> Iterator[ComponentDriver]:
             result_root=tmp_path / "result",
             database_root=tmp_path / "Database",
         )
-        resource.setup.add_component("R1", kind="resonator")
+        resource.parameters().add_component("R1", kind="resonator")
         alias = request.param
         if alias != "no_components":
-            resource.setup.add_component("Q1", kind="qubit/fluxonium")
-            resource.setup.add_component("Q2", kind="qubit/fluxonium")
+            resource.parameters().add_component("Q1", kind="qubit/fluxonium")
+            resource.parameters().add_component("Q2", kind="qubit/fluxonium")
         aliases = {} if alias in (None, "no_components") else {"qubit": alias}
         resource.save_aliases(EntryAliases(aliases=aliases))
         view = EntryDialog(None, project_root=tmp_path)

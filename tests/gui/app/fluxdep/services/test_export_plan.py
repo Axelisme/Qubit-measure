@@ -36,7 +36,9 @@ class CalibratedComponent(ComponentSchema):
 def export_target(fluxonium_entry: ResultEntry) -> Iterator[AnalysisTarget]:
     component_registry.register("qubit/fluxonium/export", CalibratedComponent)
     try:
-        fluxonium_entry.setup.add_component("Qcal", kind="qubit/fluxonium/export")
+        fluxonium_entry.parameters().add_component(
+            "Qcal", kind="qubit/fluxonium/export"
+        )
         yield AnalysisTarget.open(
             AnalysisSelection(
                 fluxonium_entry.result_path.parent.parent, "synthetic", "Qcal"
@@ -138,7 +140,9 @@ def test_predictor_skip_retains_component_plan_and_ledger(
     }[case] in reason
     assert receipt.flux_writeback == FluxWritebackReceipt("written", "swept", None)
     assert not export_target.predictor_path.exists()
-    model = snapshot(export_target.resource.setup).components["Qcal"].model_dump()
+    model = (
+        snapshot(export_target.resource.parameters()).components["Qcal"].model_dump()
+    )
     assert (model["EJ"], model["EC"], model["EL"], model["calibration"]) == (
         5.0,
         1.2,
@@ -199,7 +203,9 @@ def test_used_snapshot_unit_mismatch_fails_before_export(
 
     assert not export_target.predictor_path.exists()
     assert (
-        snapshot(export_target.resource.setup).components["Qcal"].model_dump()["EJ"]
+        snapshot(export_target.resource.parameters())
+        .components["Qcal"]
+        .model_dump()["EJ"]
         is None
     )
     assert export_target.resource.ledger.read_events_snapshot() == ()
@@ -246,7 +252,9 @@ def test_component_period_rejects_axis_unit_mismatch_even_when_predictor_skips(
     ):
         service.export_params_receipt()
 
-    model = snapshot(export_target.resource.setup).components["Qcal"].model_dump()
+    model = (
+        snapshot(export_target.resource.parameters()).components["Qcal"].model_dump()
+    )
     assert (model["calibration"], model["EJ"]) == (0.0, None)
     assert not export_target.predictor_path.exists()
     assert export_target.resource.ledger.read_events_snapshot() == ()
@@ -276,7 +284,9 @@ def test_invalid_present_other_scalar_fails_before_any_export_output(
 
     assert not export_target.predictor_path.exists()
     assert (
-        snapshot(export_target.resource.setup).components["Qcal"].model_dump()["EJ"]
+        snapshot(export_target.resource.parameters())
+        .components["Qcal"]
+        .model_dump()["EJ"]
         is None
     )
 
@@ -331,7 +341,9 @@ def test_context_provider_failure_precedes_output(
 
     assert not export_target.predictor_path.exists()
     assert (
-        snapshot(export_target.resource.setup).components["Qcal"].model_dump()["EJ"]
+        snapshot(export_target.resource.parameters())
+        .components["Qcal"]
+        .model_dump()["EJ"]
         is None
     )
 
@@ -356,9 +368,11 @@ def test_export_applies_injected_calibration_and_retains_predictor_and_ledger(
     service.configure_export(plan)
     service.configure_flux_context(synthetic_flux_context)
     receipt = service.export_params_receipt()
-    target.resource.setup.refresh()
+    target.resource.parameters().refresh()
     assert (
-        snapshot(target.resource.setup).components["Qcal"].model_dump()["calibration"]
+        snapshot(target.resource.parameters())
+        .components["Qcal"]
+        .model_dump()["calibration"]
         == 1.7
     )
     assert calls == [
@@ -385,7 +399,9 @@ def test_export_skip_keeps_calibration_and_writes_energies_and_predictor(
     service.configure_export(skip_calibration)
     service.configure_flux_context(synthetic_flux_context)
     receipt = service.export_params_receipt()
-    model = snapshot(export_target.resource.setup).components["Qcal"].model_dump()
+    model = (
+        snapshot(export_target.resource.parameters()).components["Qcal"].model_dump()
+    )
     assert model["calibration"] == 0.0
     assert (model["EJ"], model["EC"], model["EL"]) == (5.0, 1.2, 0.4)
     assert receipt.flux_writeback.status == "skipped"
@@ -415,6 +431,8 @@ def test_export_policy_failure_precedes_output(
         service.export_params_receipt()
     assert not export_target.predictor_path.exists()
     assert (
-        snapshot(export_target.resource.setup).components["Qcal"].model_dump()["EJ"]
+        snapshot(export_target.resource.parameters())
+        .components["Qcal"]
+        .model_dump()["EJ"]
         is None
     )

@@ -34,9 +34,12 @@ def test_root_library_populates_setup_slots_without_a_point(
     report = _convert(request, library_mapping)
     entry = _entry(request)
     assert not entry.list_points()
-    assert entry.setup.C1.frequency == 12.5
+    assert entry.parameters().C1.frequency == 12.5
     assert any(item.source == source for item in report.converted_files)
-    assert document_value(snapshot(entry.setup), "C1.module.chosen") == "C1.pulses.pi"
+    assert (
+        document_value(snapshot(entry.parameters()), "C1.module.chosen")
+        == "C1.pulses.pi"
+    )
     library = entry.module_library()
     assert library.snapshot().module_keys() == ("C1.pulses.pi", "C1.readout.main")
     assert set(library.snapshot().waveform_keys()) == {
@@ -100,7 +103,7 @@ def test_slots_only_reference_published_specs_in_partial_or_pending_library(
     report = _convert(request, slot_mapping)
     entry = _entry(request)
     point = None if label is None else "context"
-    view = entry.setup if point is None else entry.use_point(point)
+    view = entry.parameters() if point is None else entry.parameters(point)
     slots = document_value(snapshot(view), "C1.module")
     assert slots == ({"chosen": "C1.pulses.pi"} if has_success else {})
     library = entry.module_library(point).snapshot()
@@ -158,7 +161,7 @@ def test_published_slots_preserve_point_inheritance_overrides_and_completed_edit
     report = _convert(request, slot_mapping)
     entry = _entry(request)
     for label in (None, "inherited", "override"):
-        view = entry.setup if label is None else entry.use_point(label)
+        view = entry.parameters() if label is None else entry.parameters(label)
         has_spec = label is None or (label == "override" and override_success)
         assert document_value(snapshot(view), "C1.module") == (
             {"chosen": "C1.pulses.pi"} if has_spec else {}
@@ -179,7 +182,7 @@ def test_published_slots_preserve_point_inheritance_overrides_and_completed_edit
                 draft.set("C1.module", {"user_choice": "C1.pulses.pi"})
     assert entry.module_library().snapshot().value("C1.readout.main.ro_length") == 2.5
     assert document_value(
-        snapshot(entry.use_point("override")),
+        snapshot(entry.parameters("override")),
         "general.ext.legacy_module_cfg.modules.unsupported",
     ) == {"type": "unknown"}
     assert any(
@@ -198,7 +201,7 @@ def test_published_slots_preserve_point_inheritance_overrides_and_completed_edit
     )
     entry = _entry(request)
     for label in (None, "inherited", "override"):
-        view = entry.setup if label is None else entry.use_point(label)
+        view = entry.parameters() if label is None else entry.parameters(label)
         expected = (
             {"chosen": "C1.readout.main"}
             if label is None
@@ -232,7 +235,7 @@ def test_slots_are_not_published_when_library_commit_fails(
             _convert(request, library_mapping)
     entry = _entry(request)
     point = None if label is None else "context"
-    view = entry.setup if point is None else entry.use_point(point)
+    view = entry.parameters() if point is None else entry.parameters(point)
     assert document_value(snapshot(view), "C1.module") == {}
     assert entry.module_library(point).snapshot().module_keys() == ()
     failure = next(
@@ -243,7 +246,7 @@ def test_slots_are_not_published_when_library_commit_fails(
     resumed = _convert(replace(request, resume=True), library_mapping)
     assert resumed.failures == ()
     entry = _entry(request)
-    view = entry.setup if point is None else entry.use_point(point)
+    view = entry.parameters() if point is None else entry.parameters(point)
     assert document_value(snapshot(view), "C1.module.chosen") == "C1.pulses.pi"
     assert (
         entry.module_library(point).snapshot().module_spec("C1.pulses.pi").type

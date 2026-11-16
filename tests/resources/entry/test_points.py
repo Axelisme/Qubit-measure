@@ -14,7 +14,7 @@ from zcu_tools.format_version import YamlMap
 from zcu_tools.resources.document_store import ConflictError
 from zcu_tools.resources.entry import (
     ComponentSchema,
-    PointView,
+    ParameterView,
     ResultEntry,
     UnknownKindError,
     component_registry,
@@ -75,8 +75,8 @@ def notebook_kind(registry_state_guard: None) -> Generator[str]:
 
 
 @pytest.fixture
-def working_point(entry: ResultEntry) -> PointView:
-    entry.setup.add_component("Q1", kind="fake/drive/a", rate=5000.0)
+def working_point(entry: ResultEntry) -> ParameterView:
+    entry.parameters().add_component("Q1", kind="fake/drive/a", rate=5000.0)
     point = entry.new_point("a")
     point.Q1.duration = 12.0
     return point
@@ -90,8 +90,8 @@ def write_yaml(source: Path, document: object) -> None:
 def test_empty_point_uses_owner_defaults_without_inheriting_global_values(
     entry: ResultEntry,
 ) -> None:
-    entry.setup.add_component("Q1", kind="fake/drive/a", rate=5000.0)
-    with entry.setup.edit() as draft:
+    entry.parameters().add_component("Q1", kind="fake/drive/a", rate=5000.0)
+    with entry.parameters().edit() as draft:
         draft.description = "global description"
         draft.set("general.ext", {"operator": "global"})
         draft.set_meta("Q1.rate", {"note": "global"})
@@ -129,7 +129,7 @@ def test_new_point_rejects_mode_source_mismatch_before_creating_destination(
 def test_point_reads_only_requested_leaf_and_rejects_invalid_document_edits(
     entry: ResultEntry, range_kind: str
 ) -> None:
-    entry.setup.add_component("sensor", kind=range_kind, low=1.0, high=2.0)
+    entry.parameters().add_component("sensor", kind=range_kind, low=1.0, high=2.0)
     entry.new_point("partial")
     path = entry.result_path / "points" / "partial" / "parameters.yaml"
     raw = YAML(typ="safe").load(path)
@@ -137,7 +137,7 @@ def test_point_reads_only_requested_leaf_and_rejects_invalid_document_edits(
     write_yaml(path, raw)
     before = path.read_bytes()
 
-    point = entry.use_point("partial")
+    point = entry.parameters("partial")
 
     assert point.sensor.low == 1.0
     assert path.read_bytes() == before
@@ -151,7 +151,9 @@ def test_point_reads_only_requested_leaf_and_rejects_invalid_document_edits(
 def test_leaf_reads_keep_field_normalization_and_stable_defaults_without_model_checks(
     entry: ResultEntry, notebook_kind: str
 ) -> None:
-    entry.setup.add_component("sensor", kind=notebook_kind, gain=1.0, title="seed")
+    entry.parameters().add_component(
+        "sensor", kind=notebook_kind, gain=1.0, title="seed"
+    )
     entry.new_point("defaults")
     path = entry.result_path / "points" / "defaults" / "parameters.yaml"
     raw = YAML(typ="safe").load(path)
@@ -160,7 +162,7 @@ def test_leaf_reads_keep_field_normalization_and_stable_defaults_without_model_c
     del raw["components"]["sensor"]["token"]
     write_yaml(path, raw)
 
-    point = entry.use_point("defaults")
+    point = entry.parameters("defaults")
 
     assert point.sensor.title == "mixed case"
     first = point.sensor.token
@@ -176,7 +178,7 @@ def test_use_point_classifies_required_document_absence(
     entry.new_point("incomplete")
     (entry.result_path / "points" / "incomplete" / missing).unlink()
     with pytest.raises(FileNotFoundError) as caught:
-        entry.use_point("incomplete")
+        entry.parameters("incomplete")
     assert type(caught.value).__name__ == "MissingPointError"
     assert missing in str(caught.value)
 
@@ -184,8 +186,8 @@ def test_use_point_classifies_required_document_absence(
 def test_new_point_copies_complete_components_and_keeps_independent_values(
     entry: ResultEntry, entry_roots: tuple[Path, Path]
 ) -> None:
-    entry.setup.add_component("R1", kind="fake/sensor", rate=6000.0)
-    entry.setup.add_component(
+    entry.parameters().add_component("R1", kind="fake/sensor", rate=6000.0)
+    entry.parameters().add_component(
         "Q1",
         kind="fake/drive/a",
         rate=5000.0,
@@ -206,18 +208,20 @@ def test_new_point_copies_complete_components_and_keeps_independent_values(
     assert document["components"]["R1"]["kind"] == "fake/sensor"
     assert document["general"]["created_at"].endswith("Z")
 
-    entry.setup.Q1.rate = 5100.0
-    field_view(entry.setup.Q1.wiring).bias_ch = 4
-    field_view(entry.setup.Q1.ext).nested = {"note": "new template"}
+    entry.parameters().Q1.rate = 5100.0
+    field_view(entry.parameters().Q1.wiring).bias_ch = 4
+    field_view(entry.parameters().Q1.ext).nested = {"note": "new template"}
     assert point.Q1.rate == 5000.0
     assert field_view(point.Q1.wiring).bias_ch == 3
     assert field_view(field_view(point.Q1.ext).nested).note == "seed"
     point.Q1.rate = 5200.0
     field_view(point.Q1.ext).nested = {"note": "point"}
-    assert entry.setup.Q1.rate == 5100.0
-    assert field_view(field_view(entry.setup.Q1.ext).nested).note == "new template"
+    assert entry.parameters().Q1.rate == 5100.0
+    assert (
+        field_view(field_view(entry.parameters().Q1.ext).nested).note == "new template"
+    )
     assert entry.new_point("later").Q1.rate == 5100.0
-    assert entry.use_point("stable (cold)").Q1.rate == 5200.0
+    assert entry.parameters("stable (cold)").Q1.rate == 5200.0
     source.unlink()
     assert point.Q1.rate == 5200.0
 
@@ -225,7 +229,7 @@ def test_new_point_copies_complete_components_and_keeps_independent_values(
 def test_new_point_inherits_setup_general_with_fresh_creation_time(
     entry: ResultEntry,
 ) -> None:
-    with entry.setup.edit() as draft:
+    with entry.parameters().edit() as draft:
         draft.set("general.created_at", "2000-01-01T00:00:00Z")
         draft.set("general.ext", {"flux_value": 0.5, "flux_unit": "mA"})
     source = entry.result_path / "parameters.yaml"
@@ -241,15 +245,15 @@ def test_new_point_inherits_setup_general_with_fresh_creation_time(
     assert stored["general"]["created_at"] > "2000-01-01T00:00:00Z"
     assert source.read_bytes() == before
     point.general.ext["flux_unit"] = "A"
-    assert entry.setup.general.ext.flux_unit == "mA"
+    assert entry.parameters().general.ext.flux_unit == "mA"
 
 
 @pytest.mark.parametrize("creation", ["inherit", "clone", "parameters_only"])
 def test_new_point_copies_forward_minor_source_yaml(
     entry: ResultEntry, creation: str
 ) -> None:
-    entry.setup.add_component("Q1", kind="fake/drive/a", rate=5000.0)
-    with entry.setup.edit() as draft:
+    entry.parameters().add_component("Q1", kind="fake/drive/a", rate=5000.0)
+    with entry.parameters().edit() as draft:
         draft.set_meta("Q1.rate", {"comment": "source value", "stderr": 1.0})
     if creation == "clone":
         entry.new_point("source")
@@ -298,11 +302,11 @@ def test_seed_accepts_omitted_components_without_rewriting_setup(
     before = source.read_bytes()
 
     reopened = ResultEntry.open("entry", result_root=results, database_root=database)
-    reopened.setup.refresh()
+    reopened.parameters().refresh()
     point = reopened.new_point("empty")
 
     assert point.description is None
-    assert reopened.use_point("empty").description is None
+    assert reopened.parameters("empty").description is None
     assert reopened.list_points() == ["empty"]
     point_root = results / "entry/points/empty"
     stored = YAML(typ="safe").load((point_root / "parameters.yaml").read_text())
@@ -323,7 +327,7 @@ def test_list_points_sorts_parameter_documents_without_requiring_library(
     (partial / "parameters.yaml").touch()
     assert entry.list_points() == ["a (warm)", "partial", "z (cold)"]
     with pytest.raises(ValueError, match="parameters.yaml"):
-        entry.use_point("partial")
+        entry.parameters("partial")
     assert entry.list_points() == ["a (warm)", "partial", "z (cold)"]
 
 
@@ -332,7 +336,7 @@ def test_list_points_sorts_parameter_documents_without_requiring_library(
 def test_point_labels_reject_unsafe_path_segments(
     entry: ResultEntry, label: str, operation: Literal["new_point", "use_point"]
 ) -> None:
-    create_or_open = entry.new_point if operation == "new_point" else entry.use_point
+    create_or_open = entry.new_point if operation == "new_point" else entry.parameters
     with pytest.raises(ValueError, match="single path component"):
         create_or_open(label)
     assert entry.list_points() == []
@@ -342,7 +346,7 @@ def test_point_labels_reject_unsafe_path_segments(
 def test_add_component_requires_complete_values_and_runs_original_model(
     entry: ResultEntry, entry_roots: tuple[Path, Path], notebook_kind: str, target: str
 ) -> None:
-    view = entry.setup if target == "setup" else entry.new_point("a")
+    view = entry.parameters() if target == "setup" else entry.new_point("a")
     source = (
         entry_roots[0]
         / "entry"
@@ -379,7 +383,9 @@ def test_seed_keeps_generated_default_values_across_independent_edits_and_reload
     stored_defaults: bool,
     parameters_only: bool,
 ) -> None:
-    entry.setup.add_component("C1", kind=notebook_kind, gain=1.0, title="template")
+    entry.parameters().add_component(
+        "C1", kind=notebook_kind, gain=1.0, title="template"
+    )
     if not stored_defaults:
         source = entry_roots[0] / "entry/parameters.yaml"
         template = YAML(typ="rt").load(source.read_text())
@@ -392,14 +398,14 @@ def test_seed_keeps_generated_default_values_across_independent_edits_and_reload
     else:
         point = entry.new_point("a")
     token = point.C1.token
-    assert token == entry.setup.C1.token
-    entry.setup.C1.title = "new template"
+    assert token == entry.parameters().C1.token
+    entry.parameters().C1.title = "new template"
     point.C1.gain = 2.0
     point.refresh()
     assert point.C1.token == token
     assert point.C1.title == "template"
-    assert entry.setup.C1.gain == 1.0
-    assert entry.use_point("a").C1.token == token
+    assert entry.parameters().C1.gain == 1.0
+    assert entry.parameters("a").C1.token == token
     cloned = entry.new_point("b", mode="clone", clone_from=point)
     assert cloned.C1.token == token
     assert field_view(cloned.C1.timing).width == field_view(point.C1.timing).width
@@ -414,7 +420,7 @@ def test_point_add_component_only_changes_its_own_document(
     entry: ResultEntry, entry_roots: tuple[Path, Path]
 ) -> None:
     point = entry.new_point("a")
-    entry.setup.add_component("R1", kind="fake/sensor")
+    entry.parameters().add_component("R1", kind="fake/sensor")
     source = entry_roots[0] / "entry/points/a/parameters.yaml"
     setup_source = entry_roots[0] / "entry/parameters.yaml"
     before = setup_source.read_bytes()
@@ -422,15 +428,15 @@ def test_point_add_component_only_changes_its_own_document(
     assert YAML(typ="safe").load(source)["components"]["Q1"]["sense"] == "R1"
     assert setup_source.read_bytes() == before
     assert point.Q1.sense == "R1"
-    assert entry.use_point("a").Q1.rate == 5000.0
+    assert entry.parameters("a").Q1.rate == 5000.0
     with pytest.raises(AttributeError):
-        _ = entry.setup.Q1
+        _ = entry.parameters().Q1
 
 
 def test_point_edit_only_changes_its_document(
     entry: ResultEntry, entry_roots: tuple[Path, Path]
 ) -> None:
-    entry.setup.add_component("Q1", kind="fake/drive/a", rate=5000.0)
+    entry.parameters().add_component("Q1", kind="fake/drive/a", rate=5000.0)
     point = entry.new_point("a")
     setup_source = entry_roots[0] / "entry/parameters.yaml"
     before = setup_source.read_bytes()
@@ -440,13 +446,13 @@ def test_point_edit_only_changes_its_document(
         draft.description = "point note"
     assert point.Q1.rate == 5100.0
     assert point.Q1.duration == 12.0
-    assert entry.setup.Q1.rate == 5000.0
+    assert entry.parameters().Q1.rate == 5000.0
     assert point.description == "point note"
-    assert entry.setup.description is None
+    assert entry.parameters().description is None
     assert setup_source.read_bytes() == before
     results, database = entry_roots
     reloaded = ResultEntry.open("entry", result_root=results, database_root=database)
-    assert reloaded.use_point("a").Q1.duration == 12.0
+    assert reloaded.parameters("a").Q1.duration == 12.0
     stored = YAML(typ="safe").load(
         (results / "entry/points/a/parameters.yaml").read_text()
     )
@@ -458,22 +464,22 @@ def test_point_edit_only_changes_its_document(
 def test_point_reload_uses_only_its_file_and_keeps_snapshot_on_failure(
     entry: ResultEntry, entry_roots: tuple[Path, Path], operation: str
 ) -> None:
-    entry.setup.add_component("Q1", kind="fake/drive/a", rate=5000.0)
+    entry.parameters().add_component("Q1", kind="fake/drive/a", rate=5000.0)
     point = entry.new_point("a")
     results, database = entry_roots
     other = ResultEntry.open("entry", result_root=results, database_root=database)
-    other.use_point("a").Q1.rate = 5100.0
+    other.parameters("a").Q1.rate = 5100.0
     assert point.Q1.rate == 5000.0
     root = results / "entry"
     (root / "parameters.yaml").write_text("invalid: [", encoding="utf-8")
     reload_point = (
-        point.refresh if operation == "refresh" else lambda: entry.use_point("a")
+        point.refresh if operation == "refresh" else lambda: entry.parameters("a")
     )
     loaded = reload_point()
     if loaded is not None:
         point = loaded
     assert point.Q1.rate == 5100.0
-    assert entry.setup.Q1.rate == 5000.0
+    assert entry.parameters().Q1.rate == 5000.0
     point.Q1.duration = 12.0
     assert point.Q1.duration == 12.0
     source = root / "points/a/parameters.yaml"
@@ -495,7 +501,7 @@ def test_point_reload_uses_only_its_file_and_keeps_snapshot_on_failure(
 def test_point_edit_rejects_invalid_reload_before_exposing_draft(
     entry: ResultEntry, entry_roots: tuple[Path, Path], range_kind: str
 ) -> None:
-    entry.setup.add_component("R1", kind=range_kind, low=1.0, high=2.0)
+    entry.parameters().add_component("R1", kind=range_kind, low=1.0, high=2.0)
     point = entry.new_point("a")
     point_source = entry_roots[0] / "entry/points/a/parameters.yaml"
     stored = YAML(typ="rt").load(point_source.read_text())
@@ -514,7 +520,7 @@ def test_point_edit_rejects_invalid_reload_before_exposing_draft(
 @pytest.mark.parametrize("operation", ["use", "refresh", "edit"])
 def test_point_unknown_kind_reports_own_source_without_publishing(
     entry: ResultEntry,
-    working_point: PointView,
+    working_point: ParameterView,
     entry_roots: tuple[Path, Path],
     operation: str,
 ) -> None:
@@ -534,9 +540,9 @@ def test_point_unknown_kind_reports_own_source_without_publishing(
         reload_point = (
             working_point.refresh
             if operation == "refresh"
-            else lambda: entry.use_point("a")
+            else lambda: entry.parameters("a")
         )
-        loaded = entry.use_point("a") if operation == "use" else working_point
+        loaded = entry.parameters("a") if operation == "use" else working_point
         if operation == "refresh":
             reload_point()
         with pytest.raises(UnknownKindError) as error:
@@ -561,7 +567,7 @@ def test_point_unknown_kind_reports_own_source_without_publishing(
 @pytest.mark.parametrize("operation", ["use", "refresh", "edit"])
 def test_point_invalid_component_name_reports_own_source_without_publishing(
     entry: ResultEntry,
-    working_point: PointView,
+    working_point: ParameterView,
     entry_roots: tuple[Path, Path],
     operation: str,
 ) -> None:
@@ -581,7 +587,7 @@ def test_point_invalid_component_name_reports_own_source_without_publishing(
         reload_point = (
             working_point.refresh
             if operation == "refresh"
-            else lambda: entry.use_point("a")
+            else lambda: entry.parameters("a")
         )
         with pytest.raises(ValueError, match="edit") as error:
             reload_point()
@@ -596,12 +602,12 @@ def test_point_invalid_component_name_reports_own_source_without_publishing(
 
 
 def test_setup_commit_does_not_validate_or_modify_existing_points(
-    working_point: PointView, entry: ResultEntry, entry_roots: tuple[Path, Path]
+    working_point: ParameterView, entry: ResultEntry, entry_roots: tuple[Path, Path]
 ) -> None:
     point_source = entry_roots[0] / "entry/points/a/parameters.yaml"
     point_source.write_text("invalid: [", encoding="utf-8")
     before = point_source.read_bytes()
-    with entry.setup.edit() as draft:
+    with entry.parameters().edit() as draft:
         draft.Q1.rate = 5300.0
     assert point_source.read_bytes() == before
     assert working_point.Q1.rate == 5000.0
@@ -612,7 +618,7 @@ def test_setup_commit_does_not_validate_or_modify_existing_points(
 def test_clone_copies_only_complete_point_and_module_without_reading_setup(
     entry: ResultEntry, entry_roots: tuple[Path, Path], source_mode: str
 ) -> None:
-    entry.setup.add_component("Q1", kind="fake/drive/a", rate=5000.0)
+    entry.parameters().add_component("Q1", kind="fake/drive/a", rate=5000.0)
     point = entry.new_point("source")
     with point.edit() as draft:
         draft.Q1.duration = 12.0
@@ -655,7 +661,7 @@ def test_yaml_extensions_survive_seed_clone_reload_and_keep_metadata_units(
         "empty-value": None,
         "slash/key": [True, "opaque", {"rate": "not a physical field"}, 1.25],
     }
-    entry.setup.add_component(
+    entry.parameters().add_component(
         "R1", kind="fake/sensor", ext={"blob": payload, "noise": 11.0}
     )
     point = entry.new_point("a")
@@ -679,8 +685,8 @@ def test_yaml_extensions_survive_seed_clone_reload_and_keep_metadata_units(
     reopened = ResultEntry.open(
         "entry", result_root=entry_roots[0], database_root=entry_roots[1]
     )
-    original = reopened.use_point("a")
-    copied = reopened.use_point("b")
+    original = reopened.parameters("a")
+    copied = reopened.parameters("b")
     assert field_view(field_view(original.R1.ext).blob)["slash/key"] == expected
     assert field_view(original.general.ext["_misc-key"])["slash/key"] == expected
     assert field_view(field_view(copied.R1.ext).blob).independent is False
@@ -688,11 +694,11 @@ def test_yaml_extensions_survive_seed_clone_reload_and_keep_metadata_units(
     assert copied.meta("R1.ext.noise") == {"stderr": 2.0}
     field_view(copied.R1.ext).noise = 13.0
     assert copied.meta("R1.ext.noise") == {"stderr": 2.0}
-    assert field_view(entry.setup.R1.ext).noise == 11.0
+    assert field_view(entry.parameters().R1.ext).noise == 11.0
 
 
 def test_clone_copy_failure_cleans_new_directory_and_keeps_source(
-    working_point: PointView,
+    working_point: ParameterView,
     entry: ResultEntry,
     entry_roots: tuple[Path, Path],
     monkeypatch: pytest.MonkeyPatch,
@@ -727,30 +733,30 @@ def test_clone_copy_failure_cleans_new_directory_and_keeps_source(
 
 
 def test_independent_handles_merge_different_leaves_in_one_point(
-    working_point: PointView, entry_roots: tuple[Path, Path]
+    working_point: ParameterView, entry_roots: tuple[Path, Path]
 ) -> None:
     results, database = entry_roots
     other = ResultEntry.open("entry", result_root=results, database_root=database)
     with working_point.edit() as draft:
         draft.Q1.rate = 5100.0
-        other.use_point("a").Q1.duration = 14.0
+        other.parameters("a").Q1.duration = 14.0
     assert working_point.Q1.rate == 5100.0
     assert working_point.Q1.duration == 14.0
     reopened = ResultEntry.open(
         "entry", result_root=results, database_root=database
-    ).use_point("a")
+    ).parameters("a")
     assert reopened.Q1.rate == 5100.0
     assert reopened.Q1.duration == 14.0
 
 
 @pytest.mark.parametrize("conflict", ["rate", "duration"])
 def test_same_leaf_conflict_rejects_whole_point_transaction(
-    working_point: PointView, entry_roots: tuple[Path, Path], conflict: str
+    working_point: ParameterView, entry_roots: tuple[Path, Path], conflict: str
 ) -> None:
     results, database = entry_roots
     other = ResultEntry.open(
         "entry", result_root=results, database_root=database
-    ).use_point("a")
+    ).parameters("a")
     source = results / "entry/points/a/parameters.yaml"
     with ExitStack() as transaction:
         draft = transaction.enter_context(working_point.edit())
@@ -779,7 +785,7 @@ def test_point_description_is_set_within_create_and_preserves_source(
     clone_from: str | None,
     description: str | None,
 ) -> None:
-    entry.setup.description = "setup description"
+    entry.parameters().description = "setup description"
     source = entry.new_point("source")
     source.description = "source description"
     created = entry.new_point(
@@ -794,5 +800,5 @@ def test_point_description_is_set_within_create_and_preserves_source(
         else ("source description" if clone_from is not None else "setup description")
     )
     assert snapshot(created).general.description == expected
-    assert snapshot(entry.use_point("destination")).general.description == expected
-    assert entry.use_point("source").description == "source description"
+    assert snapshot(entry.parameters("destination")).general.description == expected
+    assert entry.parameters("source").description == "source description"

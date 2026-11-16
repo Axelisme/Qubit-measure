@@ -30,7 +30,7 @@ def test_set_creates_only_freeform_mapping_paths_atomically(tmp_path: Path) -> N
 
     with registered_model("notebook/freeform-path", Measured) as kind:
         entry, _, _ = create_entry(tmp_path)
-        entry.setup.add_component("N1", kind=kind)
+        entry.parameters().add_component("N1", kind=kind)
         point = entry.new_point("working")
         with point.edit() as draft:
             draft.set_meta("N1.ext.cal.sigma", {"comment": "keep"})
@@ -62,7 +62,7 @@ def test_set_creates_only_freeform_mapping_paths_atomically(tmp_path: Path) -> N
             "cal": {"sigma": 5.0},
             "blocked": 3,
         }
-        assert document_value(snapshot(entry.setup), "N1.ext") == {}
+        assert document_value(snapshot(entry.parameters()), "N1.ext") == {}
 
 
 @pytest.mark.parametrize("owner", ["setup", "point"])
@@ -76,10 +76,10 @@ def test_complex_view_reads_decode_leaves_while_document_reads_remain_raw(
     tag: YamlMap = {"__complex__": [1.25, -2.5]}
     with registered_model("notebook/complex-read", Measured) as kind:
         entry, _, _ = create_entry(tmp_path)
-        entry.setup.add_component(
+        entry.parameters().add_component(
             "N1", kind=kind, center=tag, ext={"cal": {"center": tag}, "samples": [tag]}
         )
-        view = entry.setup if owner == "setup" else entry.new_point("working")
+        view = entry.parameters() if owner == "setup" else entry.new_point("working")
         view.general.ext["center"] = tag
         cal = field_view(field_view(view.N1.ext).cal)
         assert view.N1.center == 1.25 - 2.5j
@@ -99,7 +99,7 @@ def test_complex_view_reads_decode_leaves_while_document_reads_remain_raw(
         assert rows["N1.center.__complex__"] == [1.25, -2.5]
         assert rows["general.ext.center.__complex__"] == [1.25, -2.5]
         if owner == "point":
-            point = entry.use_point("working")
+            point = entry.parameters("working")
             roles = point.resolve({"sense": RoleSpec(kind=kind)}, sense="N1")
             assert roles.sense.center == 1.25 - 2.5j
 
@@ -114,10 +114,10 @@ def test_manual_complex_writes_encode_and_keep_validation_and_metadata(
 
     with registered_model("notebook/complex-write", Measured) as kind:
         entry, results, database = create_entry(tmp_path)
-        entry.setup.add_component(
+        entry.parameters().add_component(
             "N1", kind=kind, freq=10.0, ext={"cal": {"center": {"__complex__": [1, 2]}}}
         )
-        view = entry.setup if owner == "setup" else entry.new_point("working")
+        view = entry.parameters() if owner == "setup" else entry.new_point("working")
         cal = field_view(field_view(view.N1.ext).cal)
         cal.center = 3 - 4j
         assert cal.center == 3 - 4j
@@ -141,7 +141,11 @@ def test_manual_complex_writes_encode_and_keep_validation_and_metadata(
         reopened = ResultEntry.open(
             "entry", result_root=results, database_root=database
         )
-        loaded = reopened.setup if owner == "setup" else reopened.use_point("working")
+        loaded = (
+            reopened.parameters()
+            if owner == "setup"
+            else reopened.parameters("working")
+        )
         assert field_view(field_view(loaded.N1.ext).cal).center == 7 - 8j
         assert loaded.general.ext.center == 9 + 10j
         assert document_value(snapshot(loaded), "N1.ext.cal.center") == {
@@ -166,11 +170,11 @@ def test_malformed_complex_view_leaf_raises_without_mutating_document(
 
     with registered_model("notebook/complex-invalid", Measured) as kind:
         entry, _, _ = create_entry(tmp_path)
-        entry.setup.add_component("N1", kind=kind, ext={"center": tag})
-        before = snapshot(entry.setup)
+        entry.parameters().add_component("N1", kind=kind, ext={"center": tag})
+        before = snapshot(entry.parameters())
         with pytest.raises(ValueError, match="Complex"):
-            _ = field_view(entry.setup.N1.ext).center
-        assert snapshot(entry.setup) == before
+            _ = field_view(entry.parameters().N1.ext).center
+        assert snapshot(entry.parameters()) == before
         assert document_value(before, "N1.ext.center") == tag
 
 
@@ -188,8 +192,8 @@ def test_allow_extras_support_child_views_set_meta_seed_and_reload(
 
     with registered_model("notebook/extensible", Extensible) as kind:
         entry, results, database = create_entry(tmp_path)
-        entry.setup.add_component("N1", kind=kind, title="ready", gain=2)
-        view = entry.setup if owner == "setup" else entry.new_point("working")
+        entry.parameters().add_component("N1", kind=kind, title="ready", gain=2)
+        view = entry.parameters() if owner == "setup" else entry.new_point("working")
         source = (
             results / "entry/parameters.yaml"
             if owner == "setup"
@@ -229,11 +233,15 @@ def test_allow_extras_support_child_views_set_meta_seed_and_reload(
             field_view(seeded.N1.future).level = 9
             assert future.level == 7
         else:
-            assert entry.setup.N1.gain == 2
+            assert entry.parameters().N1.gain == 2
         reopened = ResultEntry.open(
             "entry", result_root=results, database_root=database
         )
-        loaded = reopened.setup if owner == "setup" else reopened.use_point("working")
+        loaded = (
+            reopened.parameters()
+            if owner == "setup"
+            else reopened.parameters("working")
+        )
         assert loaded.N1.gain == 8
         assert field_view(loaded.N1.future).level == 7
         assert loaded.meta("N1.future.level") == accepted
@@ -256,27 +264,27 @@ def test_nested_model_views_follow_commit_and_refresh_without_leaking_drafts(
 
     with registered_model("notebook/wired", Wired) as kind:
         entry, results, database = create_entry(tmp_path)
-        entry.setup.add_component("N1", kind=kind, wiring={"link": {"index": 2}})
-        wiring = entry.setup.N1.wiring
+        entry.parameters().add_component("N1", kind=kind, wiring={"link": {"index": 2}})
+        wiring = entry.parameters().N1.wiring
         assert isinstance(wiring, FieldView)
         pin = field_view(wiring.link)
         assert pin.index == 2
-        with entry.setup.edit() as draft:
+        with entry.parameters().edit() as draft:
             draft_wiring = field_view(draft.N1.wiring)
             draft_pin = field_view(draft_wiring.link)
             draft_pin.index = 5
             assert draft_pin.index == 5
             assert pin.index == 2
         assert pin.index == 5
-        with entry.setup.edit() as metadata_draft:
+        with entry.parameters().edit() as metadata_draft:
             metadata_draft.set_meta("N1.wiring.link.index", {"comment": "caller"})
-        source = entry.setup.meta("N1.wiring.link.index")
+        source = entry.parameters().meta("N1.wiring.link.index")
         assert source == {"comment": "caller"}
         other = ResultEntry.open("entry", result_root=results, database_root=database)
-        with other.setup.edit() as draft:
+        with other.parameters().edit() as draft:
             draft.set("N1.wiring.link.index", 8)
         assert pin.index == 5
-        entry.setup.refresh()
+        entry.parameters().refresh()
         assert pin.index == 8
 
 
@@ -288,10 +296,10 @@ def test_plain_typed_dict_views_edit_seed_and_reload_without_resolving_paths(
 
     with registered_model("notebook/programmed", Programmed) as kind:
         entry, results, database = create_entry(tmp_path)
-        entry.setup.add_component(
+        entry.parameters().add_component(
             "N1", kind=kind, programs={"drive": "unresolved.drive"}
         )
-        slots = entry.setup.N1.programs
+        slots = entry.parameters().N1.programs
         assert isinstance(slots, FieldView)
         assert slots.drive == "unresolved.drive"
         slots.drive = "another.path"
@@ -311,7 +319,7 @@ def test_plain_typed_dict_views_edit_seed_and_reload_without_resolving_paths(
         reopened = ResultEntry.open(
             "entry", result_root=results, database_root=database
         )
-        reopened_slots = reopened.use_point("working").N1.programs
+        reopened_slots = reopened.parameters("working").N1.programs
         assert isinstance(reopened_slots, FieldView)
         assert reopened_slots.sense == "unresolved.sense"
         assert slots.drive == "another.path"
@@ -338,13 +346,13 @@ def test_recursive_dict_views_preserve_models_constraints_and_sources(
 
     with registered_model("notebook/routed", Routed) as kind:
         entry, results, database = create_entry(tmp_path)
-        entry.setup.add_component(
+        entry.parameters().add_component(
             "N1",
             kind=kind,
             routes={"drive": {"pin": {"index": 2}}},
             levels={"gain": {"left": 1, "right": 2}},
         )
-        view = entry.setup if owner == "setup" else entry.new_point("working")
+        view = entry.parameters() if owner == "setup" else entry.new_point("working")
         routes = field_view(view.N1.routes)
         route = field_view(routes["drive"])
         pin = field_view(route.pin)
@@ -373,14 +381,18 @@ def test_recursive_dict_views_preserve_models_constraints_and_sources(
         gain_source = view.meta("N1.levels.gain.left")
         assert gain_source == {"comment": "caller"}
         if owner == "point":
-            setup_routes = field_view(entry.setup.N1.routes)
+            setup_routes = field_view(entry.parameters().N1.routes)
             setup_route = field_view(setup_routes.drive)
             setup_pin = field_view(setup_route.pin)
             assert setup_pin.index == 2
         reopened = ResultEntry.open(
             "entry", result_root=results, database_root=database
         )
-        loaded = reopened.setup if owner == "setup" else reopened.use_point("working")
+        loaded = (
+            reopened.parameters()
+            if owner == "setup"
+            else reopened.parameters("working")
+        )
         with loaded.edit() as draft:
             draft.set("N1.routes.drive.pin.index", 6)
         loaded_routes = field_view(loaded.N1.routes)
@@ -404,11 +416,15 @@ def test_collision_extra_edit_abort_preserves_both_components(
     try:
         with registered_model("notebook/collision", Colliding) as kind:
             entry, results, database = create_entry(tmp_path)
-            entry.setup.add_component("N1", kind=kind, model_config={"marker": "first"})
-            entry.setup.add_component(
+            entry.parameters().add_component(
+                "N1", kind=kind, model_config={"marker": "first"}
+            )
+            entry.parameters().add_component(
                 "N2", kind=kind, model_config={"marker": "second"}
             )
-            view = entry.setup if owner == "setup" else entry.new_point("working")
+            view = (
+                entry.parameters() if owner == "setup" else entry.new_point("working")
+            )
             source = (
                 results / "entry/parameters.yaml"
                 if owner == "setup"
@@ -435,7 +451,9 @@ def test_collision_extra_edit_abort_preserves_both_components(
                 "entry", result_root=results, database_root=database
             )
             loaded = (
-                reopened.setup if owner == "setup" else reopened.use_point("working")
+                reopened.parameters()
+                if owner == "setup"
+                else reopened.parameters("working")
             )
             assert field_view(loaded.N1.model_config).marker == "first"
             assert field_view(loaded.N2.model_config).marker == "second"
@@ -462,10 +480,10 @@ def test_model_mapping_replacement_accepts_values_and_keeps_metadata(
 
     with registered_model("notebook/container", Routed) as kind:
         entry, results, database = create_entry(tmp_path)
-        entry.setup.add_component(
+        entry.parameters().add_component(
             "N1", kind=kind, routes={"drive": {"pin": {"index": 2}}}
         )
-        view = entry.setup if owner == "setup" else entry.new_point("working")
+        view = entry.parameters() if owner == "setup" else entry.new_point("working")
         if write == "set":
             with view.edit() as draft:
                 draft.set("N1.routes", {"drive": {"pin": {"index": 6}}})
@@ -491,7 +509,11 @@ def test_model_mapping_replacement_accepts_values_and_keeps_metadata(
         reopened = ResultEntry.open(
             "entry", result_root=results, database_root=database
         )
-        loaded = reopened.setup if owner == "setup" else reopened.use_point("working")
+        loaded = (
+            reopened.parameters()
+            if owner == "setup"
+            else reopened.parameters("working")
+        )
         loaded_route = field_view(field_view(loaded.N1.routes).drive)
         assert field_view(loaded_route.pin).index == 6
         assert loaded.meta("N1.routes.drive.pin.index") == accepted
@@ -513,8 +535,10 @@ def test_model_list_replacement_accepts_values_and_keeps_metadata(
 
     with registered_model("notebook/list-container", Routed) as kind:
         entry, results, database = create_entry(tmp_path)
-        entry.setup.add_component("N1", kind=kind, routes=[{"pin": {"index": 2}}])
-        view = entry.setup if owner == "setup" else entry.new_point("working")
+        entry.parameters().add_component(
+            "N1", kind=kind, routes=[{"pin": {"index": 2}}]
+        )
+        view = entry.parameters() if owner == "setup" else entry.new_point("working")
         if write == "set":
             with view.edit() as draft:
                 draft.set("N1.routes", [{"pin": {"index": 6}}])
@@ -537,7 +561,11 @@ def test_model_list_replacement_accepts_values_and_keeps_metadata(
         reopened = ResultEntry.open(
             "entry", result_root=results, database_root=database
         )
-        loaded = reopened.setup if owner == "setup" else reopened.use_point("working")
+        loaded = (
+            reopened.parameters()
+            if owner == "setup"
+            else reopened.parameters("working")
+        )
         assert loaded.N1.routes == [{"pin": {"index": 6}}]
         assert loaded.meta("N1.routes") == accepted
 
@@ -554,13 +582,15 @@ def test_collision_extras_read_write_meta_and_reload(
     try:
         with registered_model("notebook/collision-values", Colliding) as kind:
             entry, results, database = create_entry(tmp_path)
-            entry.setup.add_component(
+            entry.parameters().add_component(
                 "N1", kind=kind, model_config={"marker": "first"}, model_dump="first"
             )
-            entry.setup.add_component(
+            entry.parameters().add_component(
                 "N2", kind=kind, model_config={"marker": "second"}
             )
-            view = entry.setup if owner == "setup" else entry.new_point("working")
+            view = (
+                entry.parameters() if owner == "setup" else entry.new_point("working")
+            )
             source = (
                 results / "entry/parameters.yaml"
                 if owner == "setup"
@@ -600,7 +630,9 @@ def test_collision_extras_read_write_meta_and_reload(
                 "entry", result_root=results, database_root=database
             )
             loaded = (
-                reopened.setup if owner == "setup" else reopened.use_point("working")
+                reopened.parameters()
+                if owner == "setup"
+                else reopened.parameters("working")
             )
             assert field_view(loaded.N1.model_config).marker == "accepted"
             assert loaded.N1.model_dump == "accepted"

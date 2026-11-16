@@ -1,4 +1,4 @@
-"""Setup and transaction views over one typed document store.
+"""Parameter document reads and transaction views over one typed store.
 
 Copy incoming values before assignment: notebook models can validate assignment.
 """
@@ -20,7 +20,7 @@ from zcu_tools.resources.document_store import DocumentRevision, DocumentStore
 from zcu_tools.resources.parameter_fields import stage_model
 from zcu_tools.resources.parameter_metadata import read_metadata, write_metadata
 
-from ._point_origin import PointOrigin
+from ._parameter_origin import ParameterOrigin
 from .aliases import AliasValue
 from .errors import RoleResolutionError
 from .field_views import (
@@ -48,7 +48,7 @@ from .schema import (
 from .schema_fields import declared_unit
 
 if TYPE_CHECKING:
-    from .points import PointView
+    from .parameter_view import ParameterView
 
 
 type _ViewDocument = DocumentStore[ParameterDocument] | ParameterDocument
@@ -56,27 +56,27 @@ type _ViewDocument = DocumentStore[ParameterDocument] | ParameterDocument
 
 @dataclass
 class _ViewRead:
-    """Package-owned access for three view types without reserving method names.
+    """Package-owned access for parameter and edit views without reserving method names.
 
     document is the store/draft owned by this view.
     source is the bound YAML path, or None for an edit draft with no source getter.
-    origin is a point's constructor identity, or None for setup/edit views.
+    origin is the parameter view's constructor identity, or None for edit drafts.
     """
 
     document: _ViewDocument
     source: Path | None
-    origin: PointOrigin | None
+    origin: ParameterOrigin | None
     content: ParameterContent | None = None
     revision: DocumentRevision | None = None
 
 
 def _validate_view_component_name(name: str, *, source: Path | None) -> None:
-    # Local import avoids a cycle: PointView uses the shared view machinery.
-    from .points import PointView
+    # Local import avoids a cycle: ParameterView uses the shared view machinery.
+    from .parameter_view import ParameterView
 
     if any(
         name in dir(view_type) and not name.startswith("_")
-        for view_type in (SetupView, PointView, EditView)
+        for view_type in (ParameterView, EditView)
     ):
         raise ValueError(
             f"{source}: invalid component name {name!r}; would shadow a view member {name!r}"
@@ -86,7 +86,7 @@ def _validate_view_component_name(name: str, *, source: Path | None) -> None:
 def validate_view_components(
     document: ParameterDocument | ParameterContent, *, source: Path | None
 ) -> None:
-    """Reject components that shadow any SetupView/PointView/EditView public member.
+    """Reject components that shadow any ParameterView/EditView public member.
 
     Entry-internal helper, not a package export. document is a typed cached
     document or store validation candidate; source identifies its YAML path,
@@ -109,13 +109,13 @@ def register_view_read(
     document: _ViewDocument,
     source: Path | None,
     *,
-    origin: PointOrigin | None = None,
+    origin: ParameterOrigin | None = None,
 ) -> None:
     """Bind one entry-internal read record during view construction, without I/O.
 
     Not a package export. document is the view's validated store/draft, source
-    its YAML path (None for EditView), and origin its full point identity (None
-    for setup/edit). The private attribute cannot collide with legal components.
+    its YAML path (None for EditView), and origin its full parameter identity
+    (None for edit drafts). The private attribute cannot collide with legal components.
     Already bound handles or components shadowing any public view member raise
     ValueError; objects without an instance dictionary raise TypeError.
     Validate the cached document without I/O before binding. No model hook runs.
@@ -138,20 +138,20 @@ def _view_read(view: object) -> _ViewRead:
     return binding
 
 
-def point_origin(view: PointView) -> PointOrigin:
-    """Return the point's immutable constructor identity without I/O.
+def parameter_origin(view: ParameterView) -> ParameterOrigin:
+    """Return a global or point view's immutable constructor identity without I/O.
 
-    Entry-internal helper, not a package export. A non-point binding raises
+    Entry-internal helper, not a package export. An edit draft binding raises
     ValueError; no destination identity is used to fill missing information.
     """
     origin = _view_read(view).origin
     if origin is None:
-        raise ValueError("View has no point origin")
+        raise ValueError("View has no parameter origin")
     return origin
 
 
 def snapshot(
-    view: PointView | SetupView | EditView,
+    view: ParameterView | EditView,
 ) -> ParameterDocument:
     """Project the complete cached document or edit draft without I/O.
 
@@ -166,12 +166,12 @@ def snapshot(
     return document.model_copy(deep=True)
 
 
-def parameter_content(view: PointView | SetupView) -> ParameterContent:
+def parameter_content(view: ParameterView) -> ParameterContent:
     """Copy cached resource content without validating unused component fields."""
     return cached_parameter_content(view).model_copy(deep=True)
 
 
-def cached_parameter_content(view: PointView | SetupView) -> ParameterContent:
+def cached_parameter_content(view: ParameterView) -> ParameterContent:
     """Owner-internal cached content; defaults stay stable until the file changes."""
     binding = _view_read(view)
     document = binding.document
@@ -185,7 +185,7 @@ def cached_parameter_content(view: PointView | SetupView) -> ParameterContent:
     return binding.content
 
 
-def document_revision(view: PointView | SetupView) -> DocumentRevision:
+def document_revision(view: ParameterView) -> DocumentRevision:
     """Return the view's installed YAML version without I/O; drafts have no version."""
     document = _view_read(view).document
     if not isinstance(document, DocumentStore):
@@ -193,7 +193,7 @@ def document_revision(view: PointView | SetupView) -> DocumentRevision:
     return document.document_revision
 
 
-def source_path(view: PointView | SetupView) -> Path:
+def source_path(view: ParameterView) -> Path:
     """Return the YAML path bound to this handle, without I/O.
 
     EditView has no source getter; its caller captures the owning handle's path.
@@ -659,100 +659,4 @@ class EditView:
     @contextmanager
     def _edit_component(self, name: str, _field: str) -> Generator[ComponentSchema]:
         with stage_component(self._draft, name) as candidate:
-            yield candidate
-
-
-class SetupView:
-    def __init__(
-        self,
-        store: DocumentStore[ParameterDocument],
-        source: Path,
-    ) -> None:
-        """Bind one complete template Store and its source path without I/O.
-
-        Reads use the cached working-unit snapshot. All edits commit only this
-        template; existing points neither change nor participate in validation.
-        ResultEntry supplies the validated store and source.
-        Components shadowing any SetupView/PointView/EditView public member raise
-        ValueError naming the member before this handle is bound.
-        ResultEntry's store callback also rejects collisions on refresh/mutation
-        before publication. A caller-provided store must supply its own validate
-        callback for that subsequent lifecycle. Without it, refresh/mutation can
-        publish shadowing names: those components cannot be accessed as view
-        attributes and must be read through snapshot/document_value instead.
-        """
-        self._store = store
-        self._source = source
-        self._edit_document = store.edit
-        register_view_read(self, store, source)
-
-    @property
-    def general(self) -> GeneralView:
-        return GeneralView(
-            lambda: self._store.snapshot().general,
-            self._edit_general,
-            content=lambda: cached_parameter_content(self),
-        )
-
-    @contextmanager
-    def _edit_general(self, _field: str) -> Generator[ParameterGeneral]:
-        with self._edit_document() as draft, stage_general(draft) as candidate:
-            yield candidate
-
-    @property
-    def description(self) -> str | None:
-        return self.general.description
-
-    @description.setter
-    def description(self, value: str | None) -> None:
-        with self.edit() as draft:
-            draft.description = value
-
-    @contextmanager
-    def edit(self) -> Generator[EditView]:
-        """Yield one value/metadata draft and commit only parameters.yaml on normal exit."""
-        with self._edit_document() as draft:
-            yield EditView(draft, source=self._source)
-
-    def meta(self, path: str) -> YamlMap | None:
-        """Return isolated cached opaque metadata for a dotted path, or None."""
-        return document_meta(cached_parameter_content(self), path)
-
-    def refresh(self, *, strict: bool = False) -> None:
-        """Reload entry parameters, validating the whole candidate when strict.
-
-        Ordinary refresh defers unused field validation until projection.
-        Watcher/reload callers must pass strict=True. Missing files, invalid
-        YAML, headers or schema raise without publishing content or revision.
-        This operation never writes or repairs the candidate on disk.
-        """
-        self._store.refresh(strict=strict)
-
-    def add_component(self, name: str, *, kind: str, **fields: YamlValue) -> None:
-        """Add a registered component with working-unit fields to this template.
-
-        name must be a public identifier, not a keyword or a public member of
-        SetupView, PointView or EditView. Shadowing raises ValueError naming the
-        member. Unknown kind, duplicate or original model validation errors
-        propagate without publishing values or file changes. No metadata is added.
-        """
-        with self._edit_document() as draft:
-            add_component_to_draft(draft, name, kind, fields, self._source)
-
-    def __getattr__(self, name: str) -> ComponentView:
-        if name not in cached_parameter_content(self).component_names():
-            raise AttributeError(f"Unknown component {name!r}")
-        return ComponentView(
-            lambda: self._store.snapshot().components[name],
-            lambda field: self._edit_component(name, field),
-            name,
-            content=lambda: cached_parameter_content(self),
-        )
-
-    @contextmanager
-    def _edit_component(self, name: str, _field: str) -> Generator[ComponentSchema]:
-        with (
-            self._edit_document() as draft,
-            stage_component(draft, name) as candidate,
-        ):
             yield candidate

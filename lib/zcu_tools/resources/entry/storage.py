@@ -15,10 +15,10 @@ from zcu_tools.resources.record_table import JsonlRecordTable
 from ._path_segments import validate_path_segment
 from .aliases import AliasValue
 from .ledger import RecordsLedger
-from .points import PointView
+from .parameter_view import ParameterView
 from .roles import RoleView, capture_role_components
 from .save_layout import SaveLayout
-from .views import point_origin
+from .views import parameter_origin
 
 if TYPE_CHECKING:
     from .result_entry import ResultEntry
@@ -136,14 +136,14 @@ def capture_entry_storage(entry: ResultEntry) -> StorageBinding:
 
     entry is an already-open ResultEntry. Capture point=None and empty roles;
     no point, aliases or library is selected or read. Paths are absolute entry
-    directories, not roots. The description comes from entry.setup's installed
+    directories, not roots. The description comes from entry.parameters()'s installed
     snapshot; no refresh, reopen, output creation or event append occurs.
     Source validation errors propagate. No hardware is read.
     """
     return StorageBinding(
         entry_name=entry.result_path.name,
         point=None,
-        description=entry.setup.description,
+        description=entry.parameters().description,
         result_path=entry.result_path.resolve(),
         database_path=entry.database_path.resolve(),
         ledger=entry.ledger,
@@ -152,11 +152,11 @@ def capture_entry_storage(entry: ResultEntry) -> StorageBinding:
 
 
 def capture_point_storage(
-    view: PointView, *, roles: RoleView | None = None
+    view: ParameterView, *, roles: RoleView | None = None
 ) -> StorageBinding:
     """Capture this bound point's identity, description and optional fixed roles.
 
-    roles must come from PointView.resolve on this same entry/point with the
+    roles must come from ParameterView.resolve on this same entry/point with the
     same owning roots. Another handle of that point is accepted; other origins
     raise ValueError, including for empty roles. None captures an empty mapping.
     Names are copied without re-resolving focus, references or changed values.
@@ -165,7 +165,7 @@ def capture_point_storage(
     RecordsLedger permits a missing records directory; other I/O errors and
     invalid source locations propagate. No hardware is read.
     """
-    origin = point_origin(view)
+    origin = parameter_origin(view)
     names = (
         MappingProxyType({})
         if roles is None

@@ -304,7 +304,7 @@ def _set_slots(
 ) -> None:
     modules = published.module_keys()
     slots: set[str] = set()
-    view = entry.setup if label is None else entry.use_point(label)
+    view = entry.parameters() if label is None else entry.parameters(label)
     with edit_parameter(
         session, session.manifest.report.source.result_path, view
     ) as draft:
@@ -420,7 +420,7 @@ def convert_module_cfg(
         else:
             candidate = library.snapshot()
         _set_slots(session, entry, label, candidate, mapping)
-        view = entry.setup if label is None else entry.use_point(label)
+        view = entry.parameters() if label is None else entry.parameters(label)
         with edit_parameter(session, source, view) as draft:
             _preserve_in_context(draft, retained)
         _record_preserved(session, source, values, retained, context_target)

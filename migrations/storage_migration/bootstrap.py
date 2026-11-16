@@ -229,7 +229,7 @@ def _resume_session(
     }
     for label in entry.list_points():
         if label not in ignored:
-            entry.use_point(label)
+            entry.parameters(label)
     union = request.part if manifest.report.part == request.part else "all"
     return replace(manifest, report=replace(manifest.report, part=union)), entry
 
@@ -453,7 +453,7 @@ def prepare_session(
     recover_documents(session)
     recover_points(session)
     if refresh_setup and entry is not None and not session.dry_run:
-        entry.setup.refresh()
+        entry.parameters().refresh()
     session.checkpoint()
     publish_report(session)
     return session, entry

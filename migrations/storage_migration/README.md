@@ -1,6 +1,6 @@
 # `migrations.storage_migration` 離線遷移
 
-**Last updated:** 2026-11-16，共用 ParameterDocument schema
+**Last updated:** 2026-11-16，共用 ParameterView 與按路徑分類的 manifest
 
 **讀者：** framework-dev、agent。維護離線遷移的來源 mapping、owner 接縫與可續跑 publication。
 
@@ -217,6 +217,6 @@ RunMetadata、RunSnapshot 與 SoftwareProvenance 由 [experiment](../../lib/zcu_
 
 文件 baseline 保存 owner normalized 值、unknown raw、來源／目的與 prepared 狀態。Report 與 manifest 的 forward-minor unknown 欄位仍保留，內容值不從舊 raw 合併回已移除的 keys。完成重跑只回傳新的 skipped 快照，不重寫原 manifest／報告。
 
-`state.py` 集中 report／manifest encoding 與 copy、native、samples、processed spectrums、move 的 publication recovery。`documents.py` 用 owner 在 sibling temp 完成 setup／point／library／分析 JSON，固定 typed expected 與 previous 後才發布。重跑只接受 expected，或 prepared 階段的 previous，不接受第三值。`points.py` 在 manifest 指名暫存 label，以公開 new_point 建完整 point，固定 baseline 與完整 inventory 後 rename，再以 use_point 取得正式 bound view。未 prepared 只清工具指名的暫存，prepared 後不重生 created_at。本 package 不提供掉電保證、硬體操作或多程序 writer 協調。
+`state.py` 集中 report／manifest encoding 與 copy、native、samples、processed spectrums、move 的 publication recovery。`documents.py` 用 owner 在 sibling temp 完成 global／point／library／分析 JSON，固定 typed expected 與 previous 後才發布。參數 handle 共用 `ParameterView`，manifest 的 setup／point DocumentKind 依來源文件路徑分類，不依 view 型別。重跑只接受 expected，或 prepared 階段的 previous，不接受第三值。`points.py` 在 manifest 指名暫存 label，以公開 new_point 建完整 point，固定 baseline 與完整 inventory 後 rename，再以 `parameters(point=label)` 取得正式 bound `ParameterView`。未 prepared 只清工具指名的暫存，prepared 後不重生 created_at。本 package 不提供掉電保證、硬體操作或多程序 writer 協調。
 
 `migrations/migrate_storage.py` 是離線組合根。具體 mapping 與固定 native declarations 位於同目錄上層的 `migrations/storage_mapping.py` 與 `migrations/migration_experiments.py`，沒有動態 discovery 或新 runtime registry。單獨 Parameters 模式不執行 data 搬移；只有同一 manifest 的兩部分都完成才可清理，包含第二部分以 parameters resume 的情況。操作授權、來源保全與 pending／resume 步驟見 [operator CLI 指南](../../docs/storage-migration.md)。

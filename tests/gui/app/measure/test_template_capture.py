@@ -40,13 +40,13 @@ def session(qapp, tmp_path: Path) -> Generator[TemplateSession]:
             result_root=tmp_path / "result",
             database_root=tmp_path / "Database",
         )
-        entry.setup.add_component(
+        entry.parameters().add_component(
             "R1", kind="resonator", freq=6123.0, wiring={"ch": 1, "ro_ch": 2}
         )
-        entry.setup.add_component(
+        entry.parameters().add_component(
             "R2", kind="resonator", freq=7200.0, wiring={"ch": 3, "ro_ch": 4}
         )
-        entry.setup.add_component("Empty", kind="resonator")
+        entry.parameters().add_component("Empty", kind="resonator")
         entry.new_point("first")
         entry.new_point("second")
         state = State(SessionEnv(parameters=None, soc=None, soccfg=None))

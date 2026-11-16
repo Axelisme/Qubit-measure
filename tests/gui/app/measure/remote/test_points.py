@@ -115,7 +115,7 @@ def test_list_empty_and_refresh_persisted_metadata(
     info = application.open_entry()
     opened_resource(info).new_point("base", description="original")
     # A separate resource writer changes disk state after the GUI's cached list.
-    with opened_resource(info).use_point("base").edit() as draft:
+    with opened_resource(info).parameters("base").edit() as draft:
         draft.set("general.description", "external edit")
     assert application.result("point.list", {}) == {
         "entry": {
@@ -254,7 +254,7 @@ def test_list_isolates_unreadable_point_and_refreshes_its_error(
     context = application.controller.context_control
     opened_resource(info).new_point("good", description="usable")
     context.list_points(refresh=True)
-    source = source_path(opened_resource(info).use_point("base"))
+    source = source_path(opened_resource(info).parameters("base"))
     source.write_text("[invalid YAML", encoding="utf-8")
     reply = TypeAdapter(PointListReply).validate_python(
         application.result("point.list", {})

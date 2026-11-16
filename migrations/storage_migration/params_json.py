@@ -9,8 +9,8 @@ from zcu_tools.datafile import JsonObject, json_values_equal
 from zcu_tools.resources.document_names import PARAMETERS_FILENAME
 from zcu_tools.resources.document_store import YamlMap, YamlValue
 from zcu_tools.resources.entry import (
+    ParameterView,
     ResultEntry,
-    SetupView,
     component_registry,
     document_value,
     snapshot,
@@ -41,7 +41,7 @@ class _Context:
     target: Path
     session: MigrationSession
     source: Path
-    view: SetupView | None
+    view: ParameterView | None
     values: YamlMap
 
     def value(self, path: str) -> YamlValue:
@@ -74,7 +74,7 @@ def _setup_context(
         target=session.manifest.report.destination.result_path / PARAMETERS_FILENAME,
         session=session,
         source=session.manifest.report.source.result_path / "params.json",
-        view=entry.setup if entry is not None and not session.dry_run else None,
+        view=entry.parameters() if entry is not None and not session.dry_run else None,
         values={
             f"{name}.{key}": _YAML.validate_python(value, strict=True)
             for key, value in model.model_dump().items()

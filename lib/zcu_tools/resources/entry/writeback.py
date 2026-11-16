@@ -32,10 +32,9 @@ from .ledger_models import (
     Origin,
     SourceReference,
 )
-from .points import PointView
+from .parameter_view import ParameterView
 from .storage import StorageBinding, bind_record_table
 from .views import (
-    SetupView,
     document_value,
     snapshot,
     source_path,
@@ -275,11 +274,11 @@ class WritebackTarget(Protocol):
 
 
 def commit_parameter_updates(
-    point: PointView | SetupView, updates: tuple[ParameterUpdate, ...]
+    view: ParameterView, updates: tuple[ParameterUpdate, ...]
 ) -> tuple[YamlValue, ...]:
     """Commit ordered updates through a bound entry/point view's single edit.
 
-    point is the caller's existing PointView or SetupView; do not reopen it
+    view is the caller's existing ParameterView; do not reopen it
     or select a GUI target. updates must be nonempty. ParameterUpdate defines
     concrete paths, working-unit YAML values, optional metadata replacement
     and opt-in creation with registered model defaults (ADR-0008).
@@ -292,7 +291,7 @@ def commit_parameter_updates(
     if not updates:
         raise ValueError("parameter updates must be nonempty")
     actual: list[YamlValue] = []
-    with point.edit() as draft:
+    with view.edit() as draft:
         for update in updates:
             if update.create_kind is not None:
                 name, *segments = update.path.split(".")
@@ -341,7 +340,7 @@ def commit_library_updates(
 class _DocumentWritebackTarget:
     """Share single-file batch commits and lazy library binding across scopes."""
 
-    def __init__(self, point: PointView | SetupView, storage: StorageBinding) -> None:
+    def __init__(self, point: ParameterView, storage: StorageBinding) -> None:
         self._point = point
         self._storage = storage
         self.ledger = storage.ledger
@@ -410,14 +409,14 @@ class PointWritebackTarget(_DocumentWritebackTarget):
     Record methods append through the entry record owner.
     """
 
-    def __init__(self, point: PointView, storage: StorageBinding) -> None:
+    def __init__(self, point: ParameterView, storage: StorageBinding) -> None:
         super().__init__(point, storage)
 
 
 class EntryWritebackTarget(_DocumentWritebackTarget):
     """Bind global parameter/library documents and captured entry storage.
 
-    setup is the owning ResultEntry.setup; storage comes from
+    setup is the owning ResultEntry.parameters(); storage comes from
     capture_entry_storage on that entry. Construction does no I/O and requires
     storage.point=None, otherwise raises ValueError. ledger is that entry's
     captured ledger and point is None. Each nonempty parameter/library batch
@@ -427,7 +426,7 @@ class EntryWritebackTarget(_DocumentWritebackTarget):
     propagate; accepted events and earlier groups are not rolled back.
     """
 
-    def __init__(self, setup: SetupView, storage: StorageBinding) -> None:
+    def __init__(self, setup: ParameterView, storage: StorageBinding) -> None:
         if storage.point is not None:
             raise ValueError("Entry writeback requires entry-level storage")
         super().__init__(setup, storage)

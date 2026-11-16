@@ -56,7 +56,7 @@ def test_unknown_meta_has_literal_preservation_rows_and_survives_resume(
     assert {p: p.read_bytes() for p in root.rglob("*") if p.is_file()} == before
     report = migrate(request_data, metadata_mapping)
     entry = open_entry(request_data)
-    view = entry.use_point("bias") if context else entry.setup
+    view = entry.parameters("bias") if context else entry.parameters()
     target = entry.result_path / (
         "points/bias/parameters.yaml" if context else "parameters.yaml"
     )
@@ -118,10 +118,10 @@ def test_blocked_flux_preserves_actual_source_without_activating_units(
     source = write_meta(request_data, "", {**values, "qub_ch": 4})
     dry = migrate(replace(request_data, dry_run=True), metadata_mapping)
     report = migrate(request_data, metadata_mapping)
-    setup = snapshot(open_entry(request_data).setup)
+    setup = snapshot(open_entry(request_data).parameters())
     assert document_value(setup, "general.ext") == {"legacy_meta_info": values}
     assert document_value(setup, "Q1.wiring.ch") == 4
-    view = open_entry(request_data).setup
+    view = open_entry(request_data).parameters()
     assert getattr(view.Q1, "flux_half", None) is None
     assert getattr(view.J1, "flux_unit", None) is None
     assert getattr(view.J1, "flux", None) is None
@@ -147,7 +147,7 @@ def test_qubit_channel_alias_is_deduplicated_only_against_selected_wiring(
 ) -> None:
     source = write_meta(request_data, "", {"qub_ch": 2 if same else 4, "qub_0_1_ch": 2})
     report = migrate(request_data, metadata_mapping)
-    setup = snapshot(open_entry(request_data).setup)
+    setup = snapshot(open_entry(request_data).parameters())
     assert document_value(setup, "Q1.wiring.ch") == 2
     assert document_value(setup, "general.ext") == (
         {} if same else {"legacy_meta_info": {"qub_ch": 4}}
@@ -192,7 +192,9 @@ def test_removed_meta_keys_preserve_unmatched_values_and_report_proven_duplicate
     if canonical == 1.0:
         expected.pop("readout_f")
         expected.pop("flx_bias")
-    assert document_value(snapshot(open_entry(request_data).setup), "general.ext") == {
+    assert document_value(
+        snapshot(open_entry(request_data).parameters()), "general.ext"
+    ) == {
         "flux_unit": "V",
         "legacy_meta_info": expected,
     }
@@ -222,7 +224,7 @@ def test_removed_alias_does_not_deduplicate_against_inherited_formal_value(
     write_meta(request_data, "", {"r_f": 1.0, "flux_unit": "V", "flux_bias": 1.0})
     write_meta(request_data, "exps/bias", {"readout_f": 1.0, "flx_bias": 1.0})
     migrate(request_data, metadata_mapping)
-    point = snapshot(open_entry(request_data).use_point("bias"))
+    point = snapshot(open_entry(request_data).parameters("bias"))
     assert document_value(point, "general.ext") == {
         "flux_unit": "V",
         "legacy_meta_info": {"readout_f": 1.0, "flx_bias": 1.0},
@@ -245,7 +247,7 @@ def test_unknown_meta_collision_keeps_formal_value_and_reports_exact_destination
     dry = migrate(replace(request_data, dry_run=True), metadata_mapping)
     report = migrate(request_data, metadata_mapping)
     entry = open_entry(request_data)
-    view = entry.use_point("bias") if context else entry.setup
+    view = entry.parameters("bias") if context else entry.parameters()
     target = entry.result_path / (
         "points/bias/parameters.yaml" if context else "parameters.yaml"
     )
@@ -286,7 +288,7 @@ def test_unknown_expression_collision_preserves_pending_and_formal_value(
         {"cur_A": 0.4, "flux_unit": "V", "flux_value": "=md.other"},
     )
     report = migrate(request_data, metadata_mapping)
-    setup = snapshot(open_entry(request_data).setup)
+    setup = snapshot(open_entry(request_data).parameters())
     assert document_value(setup, "general.ext.flux_value") == 0.4
     assert document_value(setup, "general.ext.legacy_meta_info") == {
         "flux_value": "=md.other"
@@ -321,8 +323,8 @@ def test_point_unknown_collision_protects_only_successful_setup_projection(
     dry = migrate(replace(request_data, dry_run=True), metadata_mapping)
     report = migrate(request_data, metadata_mapping)
     entry = open_entry(request_data)
-    setup = snapshot(entry.setup)
-    point = snapshot(entry.use_point("bias"))
+    setup = snapshot(entry.parameters())
+    point = snapshot(entry.parameters("bias"))
     assert document_value(setup, "general.ext.flux_value") == 0.4
     assert document_value(point, "general.ext.flux_value") == 0.4
     assert document_value(point, "general.ext.arbitrary") == raw_value
@@ -427,7 +429,7 @@ def test_raw_params_preservation_is_typed_located_and_durable(
     assert report.key_mappings == dry.key_mappings
     assert report.pending == dry.pending
     entry = open_entry(request_data)
-    for view in (entry.setup, entry.use_point("bias")):
+    for view in (entry.parameters(), entry.parameters("bias")):
         assert document_value(snapshot(view), "Qlegacy.ext.legacy_params") == {
             "dispersive": {"timestamp": "unproven", "future": [1, None]},
             "fluxdep_fit": {
@@ -460,7 +462,7 @@ def test_raw_params_preservation_is_typed_located_and_durable(
     assert restored.key_mappings == report.key_mappings
     manifest = read_manifest(manifest_path(request_data))
     assert manifest.report.key_mappings == report.key_mappings
-    for view in (entry.setup, entry.use_point("bias")):
+    for view in (entry.parameters(), entry.parameters("bias")):
         with view.edit() as draft:
             draft.set("Qlegacy.ext.legacy_params", {"user.edit": ["keep"]})
     paths = [
@@ -514,7 +516,7 @@ def test_formal_analysis_values_leave_only_unconverted_raw_leaves(
         "dispersive": {"future.key": {"g": 0.03, "empty": {}, "list": []}},
         "metadata": {"EJ": 6.0},
     }
-    for view in (entry.setup, entry.use_point("bias")):
+    for view in (entry.parameters(), entry.parameters("bias")):
         assert (
             document_value(snapshot(view), "Qlegacy.ext.legacy_params") == expected
         ), (
@@ -564,7 +566,9 @@ def test_successful_empty_analysis_containers_are_not_preserved_twice(
     source = write_params(request_data, values)
     report = migrate(request_data, analysis_mapping)
     entry = open_entry(request_data)
-    assert document_value(snapshot(entry.setup), "Qlegacy.ext.legacy_params") == {
+    assert document_value(
+        snapshot(entry.parameters()), "Qlegacy.ext.legacy_params"
+    ) == {
         "unknown.empty": {},
         "unknown_list": [],
     }, "Only successfully transferred known empty containers should leave raw storage"
@@ -599,7 +603,7 @@ def test_lossless_sections_are_inherited_before_point_meta_overrides(
     before = source.read_bytes()
     report = migrate(request_data, analysis_mapping)
     entry = open_entry(request_data)
-    for view, energy in ((entry.setup, 9.0), (entry.use_point("bias"), 11.0)):
+    for view, energy in ((entry.parameters(), 9.0), (entry.parameters("bias"), 11.0)):
         doc = snapshot(view)
         assert document_value(doc, "Qlegacy.EJ") == energy
         assert document_value(doc, "Qlegacy.ext.keep") == 7
@@ -656,8 +660,8 @@ def test_completed_resume_reports_user_edits_without_overwriting(
     write_params(request_data, {"dispersive": {"g": 0.03}})
     migrate(request_data, analysis_mapping)
     entry = open_entry(request_data)
-    entry.setup.Qlegacy.EJ = 12.0
-    entry.use_point("bias").Qlegacy.EJ = 13.0
+    entry.parameters().Qlegacy.EJ = 12.0
+    entry.parameters("bias").Qlegacy.EJ = 13.0
     paths = [
         entry.result_path / "parameters.yaml",
         entry.result_path / "points/bias/parameters.yaml",

@@ -84,7 +84,7 @@ def require_alignment_export_unit(
     """
     if target is None or planner is None:
         return
-    model = snapshot(target.resource.setup).components[target.component]
+    model = snapshot(target.resource.parameters()).components[target.component]
     receipt = planner(model, alignment).flux_writeback
     if receipt.status == "written" and receipt.device is not None:
         context = component_flux_context(target, provider)

@@ -54,8 +54,8 @@ def entry_at(root: Path, name: str = "entry") -> ResultEntry:
     entry = ResultEntry.create(
         name, result_root=root / "result", database_root=root / "Database"
     )
-    entry.setup.add_component("Q1", kind="fake/drive/a", rate=4300.0, sense="R1")
-    entry.setup.add_component("R1", kind="fake/sensor", rate=6500.0)
+    entry.parameters().add_component("Q1", kind="fake/drive/a", rate=4300.0, sense="R1")
+    entry.parameters().add_component("R1", kind="fake/sensor", rate=6500.0)
     entry.new_point("first")
     return entry
 

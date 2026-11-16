@@ -8,7 +8,7 @@ from pydantic import ValidationError
 from ruamel.yaml import YAML
 from zcu_tools.format_version import YamlMap
 from zcu_tools.resources.document_store import ConflictError
-from zcu_tools.resources.entry import PointView, ResultEntry, SetupView
+from zcu_tools.resources.entry import ParameterView, ResultEntry, source_path
 
 from .view_support import field_view
 
@@ -16,24 +16,26 @@ from .view_support import field_view
 @pytest.fixture(params=["setup", "point"])
 def container(
     request: pytest.FixtureRequest, tmp_path: Path
-) -> tuple[ResultEntry, SetupView | PointView, Path]:
+) -> tuple[ResultEntry, ParameterView, Path]:
     root = tmp_path / "results"
     entry = ResultEntry.create("entry", result_root=root, database_root=tmp_path / "db")
-    entry.setup.add_component("Q1", kind="fake/drive/a", rate=5000.0)
+    entry.parameters().add_component("Q1", kind="fake/drive/a", rate=5000.0)
     if request.param == "setup":
-        return entry, entry.setup, root / "entry/parameters.yaml"
+        return entry, entry.parameters(), root / "entry/parameters.yaml"
     return entry, entry.new_point("a"), root / "entry/points/a/parameters.yaml"
 
 
-def reopen(tmp_path: Path, view: SetupView | PointView) -> SetupView | PointView:
+def reopen(tmp_path: Path, view: ParameterView) -> ParameterView:
     entry = ResultEntry.open(
         "entry", result_root=tmp_path / "results", database_root=tmp_path / "db"
     )
-    return entry.use_point("a") if isinstance(view, PointView) else entry.setup
+    source = source_path(view)
+    point = None if source.parent == entry.result_path else source.parent.name
+    return entry.parameters(point=point)
 
 
 def test_values_and_metadata_commit_together_and_reopen(
-    container: tuple[ResultEntry, SetupView | PointView, Path], tmp_path: Path
+    container: tuple[ResultEntry, ParameterView, Path], tmp_path: Path
 ) -> None:
     _entry, view, source = container
     metadata: YamlMap = {
@@ -70,7 +72,7 @@ def test_values_and_metadata_commit_together_and_reopen(
     ],
 )
 def test_value_writes_keep_existing_metadata(
-    container: tuple[ResultEntry, SetupView | PointView, Path], write: str, path: str
+    container: tuple[ResultEntry, ParameterView, Path], write: str, path: str
 ) -> None:
     _entry, view, source = container
     metadata: YamlMap = {"stderr": 0.4, "note": "caller policy"}
@@ -100,7 +102,7 @@ def test_value_writes_keep_existing_metadata(
 
 @pytest.mark.parametrize("key", ["stderr", "source", "comment", "caller_note"])
 def test_metadata_replacement_and_clear_keep_values_and_detach_reads(
-    container: tuple[ResultEntry, SetupView | PointView, Path], key: str
+    container: tuple[ResultEntry, ParameterView, Path], key: str
 ) -> None:
     _entry, view, _source = container
     metadata: YamlMap = {key: {"values": [-9, None, True], "external": "missing/run"}}
@@ -127,7 +129,7 @@ def test_metadata_replacement_and_clear_keep_values_and_detach_reads(
     "metadata", [{"bad": object()}, {1: "non-string key"}, {"bad": (1, 2)}]
 )
 def test_invalid_metadata_representation_rejects_whole_edit(
-    container: tuple[ResultEntry, SetupView | PointView, Path], metadata: object
+    container: tuple[ResultEntry, ParameterView, Path], metadata: object
 ) -> None:
     _entry, view, source = container
     before = source.read_bytes()
@@ -146,7 +148,7 @@ def test_invalid_metadata_representation_rejects_whole_edit(
 
 @pytest.mark.parametrize("failure", ["body", "schema"])
 def test_failed_value_transaction_discards_its_metadata(
-    container: tuple[ResultEntry, SetupView | PointView, Path], failure: str
+    container: tuple[ResultEntry, ParameterView, Path], failure: str
 ) -> None:
     _entry, view, source = container
     before = source.read_bytes()
@@ -168,7 +170,7 @@ def test_failed_value_transaction_discards_its_metadata(
 
 
 def test_conflict_keeps_the_winning_value_and_metadata_together(
-    container: tuple[ResultEntry, SetupView | PointView, Path], tmp_path: Path
+    container: tuple[ResultEntry, ParameterView, Path], tmp_path: Path
 ) -> None:
     _entry, view, source = container
     other = reopen(tmp_path, view)
@@ -192,17 +194,17 @@ def test_seed_copies_setup_metadata_into_an_independent_point(tmp_path: Path) ->
     entry = ResultEntry.create(
         "entry", result_root=tmp_path / "results", database_root=tmp_path / "db"
     )
-    entry.setup.add_component("Q1", kind="fake/drive/a", rate=5000.0)
-    with entry.setup.edit() as draft:
+    entry.parameters().add_component("Q1", kind="fake/drive/a", rate=5000.0)
+    with entry.parameters().edit() as draft:
         draft.set_meta("Q1.rate", {"stderr": 0.1, "cloned_from": "caller text"})
     point = entry.new_point("seed")
     assert point.meta("Q1.rate") == {"stderr": 0.1, "cloned_from": "caller text"}
-    with entry.setup.edit() as draft:
+    with entry.parameters().edit() as draft:
         draft.set_meta("Q1.rate", {"stderr": 0.9})
     assert point.meta("Q1.rate") == {"stderr": 0.1, "cloned_from": "caller text"}
     with point.edit() as draft:
         draft.set_meta("Q1.rate", {"comment": "point only"})
-    assert entry.setup.meta("Q1.rate") == {"stderr": 0.9}
+    assert entry.parameters().meta("Q1.rate") == {"stderr": 0.9}
 
 
 @pytest.mark.parametrize("clone_from", ["label", "view"])
@@ -212,7 +214,7 @@ def test_same_entry_clone_copies_values_and_metadata_verbatim(
     entry = ResultEntry.create(
         "entry", result_root=tmp_path / "results", database_root=tmp_path / "db"
     )
-    entry.setup.add_component("Q1", kind="fake/drive/a", rate=5000.0)
+    entry.parameters().add_component("Q1", kind="fake/drive/a", rate=5000.0)
     original = entry.new_point("original")
     metadata: dict[str, YamlMap] = {
         "Q1.rate": {"source": "outside/run", "stderr": 0.2},
@@ -270,7 +272,7 @@ def test_old_parameter_documents_are_rejected_with_path_and_versions(
         reopened = ResultEntry.open(
             "entry", result_root=tmp_path / "results", database_root=tmp_path / "db"
         )
-        reopened.use_point("a")
+        reopened.parameters("a")
 
     with pytest.raises(ValueError, match="2.0") as rejected:
         reopen_point()

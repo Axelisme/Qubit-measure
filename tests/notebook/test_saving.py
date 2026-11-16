@@ -30,7 +30,7 @@ from zcu_tools.resources.entry import (
     JsonObject,
     JsonValue,
     LedgerEvent,
-    PointView,
+    ParameterView,
     RecordsLedger,
     ResultEntry,
     RoleSpec,
@@ -78,14 +78,14 @@ def accept_registry_guard(request: pytest.FixtureRequest) -> Generator[None]:
 
 
 @pytest.fixture
-def accept_point(point: PointView) -> PointView:
+def accept_point(point: ParameterView) -> ParameterView:
     point.add_component("D1", kind="notebook/accept-driver", rate=1000.0)
     point.add_component("D2", kind="notebook/accept-driver", rate=2000.0)
     return point
 
 
 @pytest.fixture
-def ledger(point: PointView, tmp_path: Path) -> RecordsLedger:
+def ledger(point: ParameterView, tmp_path: Path) -> RecordsLedger:
     return ResultEntry.open(
         "entry",
         result_root=tmp_path / "results",
@@ -103,7 +103,7 @@ def experiment() -> NotebookExperiment[SavingCore]:
 
 
 @pytest.fixture
-def point(tmp_path: Path) -> PointView:
+def point(tmp_path: Path) -> ParameterView:
     entry = ResultEntry.create(
         "entry",
         result_root=tmp_path / "results",
@@ -113,7 +113,7 @@ def point(tmp_path: Path) -> PointView:
 
 
 def test_saved_run_keeps_its_device_snapshot_across_later_acquisitions(
-    point: PointView,
+    point: ParameterView,
 ) -> None:
     manager = DeviceManager()
     flux = SnapshotDevice()
@@ -145,7 +145,7 @@ def test_saved_run_keeps_its_device_snapshot_across_later_acquisitions(
 
 
 def test_saved_run_without_connected_devices_writes_empty_snapshot(
-    point: PointView,
+    point: ParameterView,
 ) -> None:
     exp = experiment()
     record = exp.run(SavingCfg())
@@ -215,7 +215,7 @@ def test_producer_failure_preserves_previous_notebook_record_and_evidence() -> N
 
 @pytest.mark.parametrize("mode", ["software", "program", "program-round"])
 def test_sigint_cooperative_acquisition_preserves_saveable_result(
-    point: PointView, mode: Literal["software", "program", "program-round"]
+    point: ParameterView, mode: Literal["software", "program", "program-round"]
 ) -> None:
     core = InterruptedCore(mode)
     exp = NotebookAdapter(
@@ -282,7 +282,7 @@ def test_device_operation_interrupt_escapes_and_preserves_previous_record() -> N
 
 
 def test_preparation_failure_retains_partial_handle_and_saves_files(
-    point: PointView, ledger: RecordsLedger
+    point: ParameterView, ledger: RecordsLedger
 ) -> None:
     exp = experiment()
     source = exp.run(SavingCfg())
@@ -312,7 +312,7 @@ def test_preparation_failure_retains_partial_handle_and_saves_files(
 
 
 def test_real_caller_writes_all_formats_and_retains_acquisition(
-    point: PointView,
+    point: ParameterView,
     tmp_path: Path,
 ) -> None:
     exp = experiment()
@@ -370,7 +370,7 @@ def test_real_caller_writes_all_formats_and_retains_acquisition(
 
 
 def test_resave_rewrites_fixed_outputs_and_uses_new_labber_file(
-    point: PointView,
+    point: ParameterView,
 ) -> None:
     exp = experiment()
     source = exp.run(SavingCfg(gain=2.0))
@@ -428,7 +428,7 @@ def test_resave_rewrites_fixed_outputs_and_uses_new_labber_file(
     ],
 )
 def test_save_and_resave_use_host_local_labber_date(
-    point: PointView,
+    point: ParameterView,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     offset_hours: int,
@@ -505,7 +505,7 @@ def test_save_and_resave_use_host_local_labber_date(
 
 
 def test_partial_error_retains_handle_and_explicit_resave_reuses_directory(
-    point: PointView,
+    point: ParameterView,
     tmp_path: Path,
 ) -> None:
     exp = experiment()
@@ -535,7 +535,7 @@ def test_partial_error_retains_handle_and_explicit_resave_reuses_directory(
 
 
 def test_analysis_encoding_failure_retains_handle_and_saves_other_members(
-    point: PointView,
+    point: ParameterView,
 ) -> None:
     exp = experiment()
     source = exp.run(SavingCfg())
@@ -564,7 +564,7 @@ def test_analysis_encoding_failure_retains_handle_and_saves_other_members(
     assert all(item.status == "saved" for item in rewritten.outputs)
 
 
-def test_failed_new_labber_retains_native_historical_link(point: PointView) -> None:
+def test_failed_new_labber_retains_native_historical_link(point: ParameterView) -> None:
     exp = experiment()
     source = exp.run(SavingCfg())
     saved = exp.save_run(point, source=source)
@@ -587,7 +587,7 @@ def test_failed_new_labber_retains_native_historical_link(point: PointView) -> N
 
 
 def test_stale_or_unowned_source_fails_before_creating_run_outputs(
-    point: PointView,
+    point: ParameterView,
     tmp_path: Path,
 ) -> None:
     exp = experiment()
@@ -602,7 +602,7 @@ def test_stale_or_unowned_source_fails_before_creating_run_outputs(
 
 
 def test_save_run_rejects_cross_point_roles_before_outputs_and_events(
-    accept_point: PointView,
+    accept_point: ParameterView,
     ledger: RecordsLedger,
     tmp_path: Path,
 ) -> None:
@@ -626,7 +626,7 @@ def test_save_run_rejects_cross_point_roles_before_outputs_and_events(
 
 
 def test_ledger_append_failure_propagates_after_files_are_written(
-    point: PointView,
+    point: ParameterView,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -665,7 +665,7 @@ def test_ledger_append_failure_propagates_after_files_are_written(
     "metadata", [{"stderr": 0.25}, {}, {"stderr": -1, "comment": ["caller", None]}]
 )
 def test_accept_writes_role_values_and_caller_metadata(
-    accept_point: PointView, ledger: RecordsLedger, metadata: YamlMap
+    accept_point: ParameterView, ledger: RecordsLedger, metadata: YamlMap
 ) -> None:
     with accept_point.edit() as draft:
         draft.set_meta("D1.rate", {"stderr": 9.0, "stale": True})
@@ -706,7 +706,7 @@ def test_accept_writes_role_values_and_caller_metadata(
 
 
 def test_accept_preserves_json_containers_and_existing_metadata(
-    point: PointView, ledger: RecordsLedger
+    point: ParameterView, ledger: RecordsLedger
 ) -> None:
     exp = experiment()
     source = exp.run(SavingCfg())
@@ -726,7 +726,7 @@ def test_accept_preserves_json_containers_and_existing_metadata(
 
 
 def test_accept_keeps_original_point_roles_and_run_after_later_acquisition(
-    accept_point: PointView, tmp_path: Path, ledger: RecordsLedger
+    accept_point: ParameterView, tmp_path: Path, ledger: RecordsLedger
 ) -> None:
     exp = experiment()
     source = exp.run(SavingCfg())
@@ -762,7 +762,7 @@ def test_accept_keeps_original_point_roles_and_run_after_later_acquisition(
     ],
 )
 def test_accept_rejects_invalid_input_without_point_writes(
-    point: PointView,
+    point: ParameterView,
     ledger: RecordsLedger,
     values: Mapping[str, JsonValue | tuple[JsonValue, YamlMap]],
     message: str,
@@ -780,7 +780,7 @@ def test_accept_rejects_invalid_input_without_point_writes(
 
 
 def test_accept_schema_failure_keeps_event_and_rolls_back_point_group(
-    accept_point: PointView, ledger: RecordsLedger
+    accept_point: ParameterView, ledger: RecordsLedger
 ) -> None:
     exp = experiment()
     source = exp.run(SavingCfg())
@@ -817,7 +817,7 @@ def test_accept_schema_failure_keeps_event_and_rolls_back_point_group(
 
 
 def test_accept_commit_validator_error_propagates_and_keeps_event(
-    point: PointView, tmp_path: Path, ledger: RecordsLedger
+    point: ParameterView, tmp_path: Path, ledger: RecordsLedger
 ) -> None:
     failure = RuntimeError("point validation rejected the fit")
 
@@ -827,7 +827,7 @@ def test_accept_commit_validator_error_propagates_and_keeps_event(
 
     path = source_path(point)
 
-    bound = PointView(
+    bound = ParameterView(
         DocumentStore(
             path,
             ParameterDocument,
@@ -856,7 +856,7 @@ def test_accept_commit_validator_error_propagates_and_keeps_event(
 
 @pytest.mark.parametrize("failure_type", [IsADirectoryError, PermissionError])
 def test_accept_ledger_error_propagates_without_point_writes(
-    point: PointView, tmp_path: Path, failure_type: type[OSError]
+    point: ParameterView, tmp_path: Path, failure_type: type[OSError]
 ) -> None:
     exp = experiment()
     source = exp.run(SavingCfg())
@@ -899,7 +899,7 @@ def pulse_spec(*, gain: float = 0.25) -> PulseSpec:
 
 
 def test_accept_writes_parameter_module_waveform_with_one_event(
-    accept_point: PointView, tmp_path: Path, ledger: RecordsLedger
+    accept_point: ParameterView, tmp_path: Path, ledger: RecordsLedger
 ) -> None:
     exp = experiment()
     source = exp.run(SavingCfg())
@@ -942,7 +942,7 @@ def test_accept_writes_parameter_module_waveform_with_one_event(
 
 @pytest.mark.parametrize("family", ["module", "waveform"])
 def test_accept_library_only_is_nonempty(
-    accept_point: PointView, tmp_path: Path, family: str
+    accept_point: ParameterView, tmp_path: Path, family: str
 ) -> None:
     exp = experiment()
     saved = exp.save_run(accept_point, source=exp.run(SavingCfg()))
@@ -961,7 +961,7 @@ def test_accept_library_only_is_nonempty(
 
 
 def test_accept_library_failure_keeps_point_and_rolls_back_library_group(
-    accept_point: PointView, tmp_path: Path, ledger: RecordsLedger
+    accept_point: ParameterView, tmp_path: Path, ledger: RecordsLedger
 ) -> None:
     exp = experiment()
     saved = exp.save_run(accept_point, source=exp.run(SavingCfg()))
@@ -1014,7 +1014,7 @@ def test_accept_library_failure_keeps_point_and_rolls_back_library_group(
 
 
 def test_accept_rejects_empty_writeback_before_ledger(
-    point: PointView, ledger: RecordsLedger
+    point: ParameterView, ledger: RecordsLedger
 ) -> None:
     exp = experiment()
     saved = exp.save_run(point, source=exp.run(SavingCfg()))

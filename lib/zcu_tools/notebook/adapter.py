@@ -36,7 +36,7 @@ from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.notebook.plotting import NotebookPlotHost, finish_failed_plots
 from zcu_tools.notebook.saving import SavedRun
 from zcu_tools.plotting.plots import PlotHost, Plots
-from zcu_tools.resources.entry import PointView, RoleView
+from zcu_tools.resources.entry import ParameterView, RoleView
 
 CoreT = TypeVar("CoreT", bound=Experiment[Any, Any], covariant=True)
 CfgT = TypeVar("CfgT", bound=ConfigBase)
@@ -340,7 +340,7 @@ class NotebookExperiment(Generic[CoreT]):
 
     def save_run(
         self: NotebookExperiment[Experiment[ResultT, CfgT]],
-        ctx: PointView,
+        ctx: ParameterView,
         *,
         source: RunRecord[CfgT, ResultT],
         roles: RoleView | None = None,

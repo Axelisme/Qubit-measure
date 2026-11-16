@@ -87,8 +87,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.state import SessionState
     from zcu_tools.gui.session.types import SessionEnv
     from zcu_tools.resources.entry import (
-        PointView,
-        SetupView,
+        ParameterView,
     )
     from zcu_tools.resources.entry.ledger import RecordsLedger
 
@@ -129,8 +128,8 @@ class ContextService:
         self._values = values if values is not None else state.session_env.values
         self._entry: ResultEntry | None = None
         self._entry_info: EntryInfo | None = None
-        self._setup: SetupView | None = None
-        self._point: PointView | None = None
+        self._setup: ParameterView | None = None
+        self._point: ParameterView | None = None
         self._library: ModuleLibrary | None = None
         self._entry_library: ModuleLibrary | None = None
         self._entry_aliases = AliasSnapshot(AliasTable())
@@ -156,7 +155,7 @@ class ContextService:
         SoC, device and predictor capabilities remain with their own owners.
         """
         self._owner.assert_owner()
-        setup = entry.setup
+        setup = entry.parameters()
         points = self._load_points(entry)
         assets = self._bind_assets(entry.database_path / "arb_waveforms")
         library = entry.module_library(assets=assets)
@@ -368,7 +367,7 @@ class ContextService:
         """
         self._owner.assert_owner()
         entry = self._require_open_entry()
-        point = entry.use_point(request.label)
+        point = entry.parameters(request.label)
         parameters, library, sources, info, aliases = self._prepare_point(
             entry, request.label, point
         )
@@ -412,7 +411,7 @@ class ContextService:
                 str(exc), reason_code="point_label_invalid"
             ) from exc
         clone = (
-            entry.use_point(request.clone_from)
+            entry.parameters(request.clone_from)
             if request.clone_from is not None
             else None
         )
@@ -658,7 +657,7 @@ class ContextService:
         if target.point is None:
             fresh = self._fresh_entry()
             return ParameterContext.from_entry(fresh, library, target, roles=roles)
-        point = entry.use_point(target.point)
+        point = entry.parameters(target.point)
         return ParameterContext.from_point(point, library, target, roles=roles)
 
     def read_record(
@@ -706,7 +705,7 @@ class ContextService:
         if target.point is None:
             self._fresh_entry()
         else:
-            entry.use_point(target.point)
+            entry.parameters(target.point)
         return apply_writeback(
             items,
             target=ContextWritebackTarget(self, target, entry),
@@ -760,7 +759,7 @@ class ContextService:
         elif target == parameters.target and self._point is not None:
             point = self._point
         else:
-            point = entry.use_point(target.point)
+            point = entry.parameters(target.point)
         actual = commit_parameter_updates(point, updates)
         document = snapshot(point)
         self._points = tuple(
@@ -981,7 +980,7 @@ class ContextService:
         return tuple(points)
 
     def _prepare_point(
-        self, entry: ResultEntry, label: str, point: PointView
+        self, entry: ResultEntry, label: str, point: ParameterView
     ) -> tuple[
         ParameterContext,
         ModuleLibrary,
@@ -1009,7 +1008,7 @@ class ContextService:
 
     def _install_point(
         self,
-        point: PointView,
+        point: ParameterView,
         library: ModuleLibrary,
         parameters: ParameterContext,
         sources: tuple[ContextSource, ...],

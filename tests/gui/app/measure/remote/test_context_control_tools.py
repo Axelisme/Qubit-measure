@@ -198,7 +198,7 @@ def test_parameter_set_commits_current_point_preserving_metadata_and_captures(
         "context.set_parameter", {"path": "Q1.rate", "value": 25.0}
     ) == {"path": "Q1.rate", "before": 12.0, "value": 25.0}
     after = control.read_context()
-    persisted = snapshot(entry_resource(info).use_point("selected"))
+    persisted = snapshot(entry_resource(info).parameters("selected"))
     assert after.target == selected.target
     assert document_value(persisted, "Q1.rate") == 25.0
     assert document_meta(persisted, "Q1.rate") == metadata
@@ -206,7 +206,9 @@ def test_parameter_set_commits_current_point_preserving_metadata_and_captures(
     assert (
         control.read_target(require_target(first)).lookup_point("Q1.rate").value == 10.0
     )
-    assert document_value(snapshot(entry_resource(info).setup), "Q1.rate") == 10.0
+    assert (
+        document_value(snapshot(entry_resource(info).parameters()), "Q1.rate") == 10.0
+    )
     assert entry_resource(info).ledger.events() == ()
 
 
@@ -269,7 +271,7 @@ def test_parameter_set_rejects_nonconcrete_parameter_path(
     )
     assert error["code"] == ErrorCode.INVALID_PARAMS
     assert control.read_context().document() == before.document()
-    assert snapshot(entry_resource(info).use_point("base")).model_dump(
+    assert snapshot(entry_resource(info).parameters("base")).model_dump(
         mode="python", serialize_as_any=True
     ) == before.whole_document().model_dump(mode="python", serialize_as_any=True)
 
@@ -344,7 +346,7 @@ def test_parameter_set_rejects_malformed_payload_before_effects(
     before = application.controller.context_control.read_context()
     error = rpc_error(application, "context.set_parameter", params)
     assert error["code"] == ErrorCode.INVALID_PARAMS
-    assert snapshot(entry_resource(info).use_point("base")).model_dump(
+    assert snapshot(entry_resource(info).parameters("base")).model_dump(
         mode="python", serialize_as_any=True
     ) == before.whole_document().model_dump(mode="python", serialize_as_any=True)
     assert entry_resource(info).ledger.events() == ()
@@ -364,7 +366,7 @@ def test_parameter_set_preserves_schema_failure_and_old_point(
     assert error["code"] == ErrorCode.CONTROLLER_ERROR
     assert "validation error" in str(error["message"])
     assert control.read_context().document() == before.document()
-    assert snapshot(entry_resource(info).use_point("base")).model_dump(
+    assert snapshot(entry_resource(info).parameters("base")).model_dump(
         mode="python", serialize_as_any=True
     ) == before.whole_document().model_dump(mode="python", serialize_as_any=True)
 

@@ -37,8 +37,8 @@ from zcu_tools.resources.entry import (
     JsonValue,
     LedgerEvent,
     ModuleWriteback,
+    ParameterView,
     ParameterWriteback,
-    PointView,
     PointWritebackTarget,
     RecordWriteback,
     RoleView,
@@ -81,7 +81,7 @@ class SavedRun(Generic[CfgT, ResultT]):
 
     def __init__(
         self,
-        ctx: PointView,
+        ctx: ParameterView,
         *,
         source: RunRecord[CfgT, ResultT],
         spec: AxesSpec[ResultT, CfgT] | GroupedAxesSpec[ResultT, CfgT],

@@ -10,7 +10,7 @@ from zcu_tools.resources.entry import (
     AcquiredPayload,
     ArtifactKey,
     LedgerEvent,
-    PointView,
+    ParameterView,
     ResultEntry,
     bind_run_outputs,
     capture_entry_storage,
@@ -85,16 +85,21 @@ def test_recorded_output_binding_rejects_unsafe_names_without_writes(
     assert tuple(tmp_path.iterdir()) == ()
 
 
+def test_capture_point_storage_rejects_global_view(entry: ResultEntry) -> None:
+    with pytest.raises(ValueError, match="Point origin"):
+        capture_point_storage(entry.parameters())
+
+
 def test_capture_entry_storage_retains_cached_global_context_without_io(
     entry: ResultEntry,
 ) -> None:
-    entry.setup.description = "cached global"
+    entry.parameters().description = "cached global"
     newer = ResultEntry.open(
         "entry",
         result_root=entry.result_path.parent,
         database_root=entry.database_path.parent,
     )
-    newer.setup.description = "published later"
+    newer.parameters().description = "published later"
     before = _published_state(entry.result_path)
     captured = capture_entry_storage(entry)
     assert captured.entry_name == "entry"
@@ -136,7 +141,7 @@ def test_capture_retains_cached_context_and_exact_entry_attribution(
         database_root=tmp_path / "Database",
     )
     point = entry.new_point("sweet", description="cached")
-    newer = entry.use_point("sweet")
+    newer = entry.parameters("sweet")
     newer.description = "published later"
     before = tuple(sorted(tmp_path.rglob("*")))
     captured = capture_point_storage(point)
@@ -165,11 +170,11 @@ def test_capture_retains_cached_context_and_exact_entry_attribution(
     assert entry.ledger.get(event.id).event == event
 
 
-def _role_point(entry: ResultEntry) -> PointView:
-    entry.setup.add_component("R1", kind="fake/sensor", rate=6500.0)
-    entry.setup.add_component("R2", kind="fake/sensor", rate=7100.0)
-    entry.setup.add_component("Q1", kind="fake/drive/a", rate=4300.0, sense="R1")
-    entry.setup.add_component("Q2", kind="fake/drive/a", rate=5100.0, sense="R2")
+def _role_point(entry: ResultEntry) -> ParameterView:
+    entry.parameters().add_component("R1", kind="fake/sensor", rate=6500.0)
+    entry.parameters().add_component("R2", kind="fake/sensor", rate=7100.0)
+    entry.parameters().add_component("Q1", kind="fake/drive/a", rate=4300.0, sense="R1")
+    entry.parameters().add_component("Q2", kind="fake/drive/a", rate=5100.0, sense="R2")
     return entry.new_point("working")
 
 
@@ -215,7 +220,7 @@ def test_capture_accepts_roles_from_another_handle_of_the_same_point(
         "entry",
         result_root=entry.result_path.parent,
         database_root=entry.database_path.parent,
-    ).use_point("working")
+    ).parameters("working")
     other.description = "other handle"
     other.Q1.sense = "R2"
     assert entry.ledger.events() == ()
@@ -276,7 +281,7 @@ def test_capture_rejects_roles_from_another_owner_without_saving(
         other_entry = ResultEntry.open(
             "entry", result_root=result_root, database_root=database_root
         )
-        other = other_entry.use_point("working")
+        other = other_entry.parameters("working")
     assert entry.ledger.events() == ()
     before = _published_state(tmp_path)
 

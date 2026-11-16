@@ -56,7 +56,7 @@ Save 保存 sums、全部座標與本次 cfg。Native Load 不改目前表單。
 ## Notebook
 
 `cfg` 使用與表單相同的 IdleZZCfg。經 NotebookAdapter 保留 RunRecord 與保存流程。
-`point_view` 是儲存目的地已綁定的 `PointView`。保存時以本次 `run()` 回傳的 `record` 作為 `source`。
+`point_view` 是儲存目的地已綁定的 `ParameterView`。保存時以本次 `run()` 回傳的 `record` 作為 `source`。
 
 ```python
 from zcu_tools.notebook import NotebookAdapter

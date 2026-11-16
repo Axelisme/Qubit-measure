@@ -3,7 +3,7 @@
 from pathlib import Path
 
 import pytest
-from zcu_tools.resources.entry import PointView, ResultEntry
+from zcu_tools.resources.entry import ParameterView, ResultEntry
 from zcu_tools.resources.entry.aliases import (
     EntryAliases,
     load_entry_aliases,
@@ -185,7 +185,7 @@ def test_clone_copies_published_source_point_aliases_not_either_setup(
     save_entry_aliases(source_aliases, authored)
     source_entry.save_aliases(EntryAliases(aliases={"drive": "source setup"}))
     entry.save_aliases(EntryAliases(aliases={"drive": "destination setup"}))
-    clone_from: str | PointView = (
+    clone_from: str | ParameterView = (
         source_view if via_view else ("source/original" if foreign else "original")
     )
     entry.new_point("cloned", mode="clone", clone_from=clone_from)

@@ -35,7 +35,7 @@ def _bare_rf_seed(target: AnalysisTarget) -> float:
     aliases = AliasTable(
         [AliasRow(k, v) for k, v in target.resource.load_aliases().aliases.items()]
     )
-    document = snapshot(target.resource.setup)
+    document = snapshot(target.resource.parameters())
     try:
         resonator = aliases.resolve("resonator", document)
     except RoleResolutionError as exc:

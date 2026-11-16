@@ -48,13 +48,14 @@ def test_create_accepts_a_fixed_identity_without_changing_default_creation(
     reopened = ResultEntry.open("fixed", result_root=result, database_root=database)
     assert fixed.result_path == reopened.result_path == result / "fixed"
     assert (
-        entry_api.snapshot(reopened.setup).general.created_at == "2026-10-20T01:02:03Z"
+        entry_api.snapshot(reopened.parameters()).general.created_at
+        == "2026-10-20T01:02:03Z"
     )
     fresh = ResultEntry.create("fresh", result_root=result, database_root=database)
     assert fresh.result_path == result / "fresh"
     assert (
         datetime.fromisoformat(
-            entry_api.snapshot(fresh.setup).general.created_at
+            entry_api.snapshot(fresh.parameters()).general.created_at
         ).tzinfo
         is not None
     )
@@ -99,18 +100,18 @@ def test_legacy_entry_identity_is_ignored_until_explicit_write(
     opened = ResultEntry.open(
         "entry", result_root=entry_roots[0], database_root=entry_roots[1]
     )
-    point = opened.use_point("working")
-    assert opened.setup.description is None
+    point = opened.parameters("working")
+    assert opened.parameters().description is None
     assert point.description is None
     assert {path: path.read_bytes() for path in paths} == before
 
-    opened.setup.description = "template annotation"
+    opened.parameters().description = "template annotation"
     point.description = "point annotation"
     assert [
         yaml.load(path.read_text(encoding="utf-8"))["general"] for path in paths
     ] == [
         {
-            "created_at": entry_api.snapshot(opened.setup).general.created_at,
+            "created_at": entry_api.snapshot(opened.parameters()).general.created_at,
             "description": "template annotation",
             "ext": {"note": "kept"},
         },
@@ -146,38 +147,38 @@ def test_setup_reads_use_memory_even_when_the_file_is_unavailable(
     entry_roots: tuple[Path, Path], entry: ResultEntry
 ) -> None:
     results, _database = entry_roots
-    entry.setup.description = "cached annotation"
+    entry.parameters().description = "cached annotation"
     setup_path = results / "entry" / "parameters.yaml"
     setup_path.unlink()
 
-    assert entry.setup.description == "cached annotation"
+    assert entry.parameters().description == "cached annotation"
     with pytest.raises(FileNotFoundError) as failure:
-        entry.setup.refresh()
+        entry.parameters().refresh()
     assert failure.value.filename == str(setup_path)
-    assert entry.setup.description == "cached annotation"
+    assert entry.parameters().description == "cached annotation"
 
 
 def test_setup_edit_discards_body_failure_and_allows_the_next_transaction(
     entry_roots: tuple[Path, Path], entry: ResultEntry
 ) -> None:
     results, _database = entry_roots
-    entry.setup.description = "committed annotation"
+    entry.parameters().description = "committed annotation"
     setup_path = results / "entry" / "parameters.yaml"
     before = setup_path.read_bytes()
 
     def abort_transaction() -> None:
-        with entry.setup.edit() as draft:
+        with entry.parameters().edit() as draft:
             draft.description = "discarded annotation"
-            assert entry.setup.description == "committed annotation"
+            assert entry.parameters().description == "committed annotation"
             raise RuntimeError("abort sentinel")
 
     with pytest.raises(RuntimeError, match="abort sentinel"):
         abort_transaction()
-    assert entry.setup.description == "committed annotation"
+    assert entry.parameters().description == "committed annotation"
     assert setup_path.read_bytes() == before
 
-    entry.setup.description = "next annotation"
-    assert entry.setup.description == "next annotation"
+    entry.parameters().description = "next annotation"
+    assert entry.parameters().description == "next annotation"
 
 
 @pytest.mark.parametrize(
@@ -187,7 +188,7 @@ def test_setup_refresh_publishes_replacement_content_ignoring_legacy_identity(
     entry_roots: tuple[Path, Path], entry: ResultEntry, legacy: str | dict[str, str]
 ) -> None:
     results, _database = entry_roots
-    entry.setup.description = "original annotation"
+    entry.parameters().description = "original annotation"
     setup_path = results / "entry" / "parameters.yaml"
     yaml = YAML(typ="safe")
     document = yaml.load(setup_path.read_text(encoding="utf-8"))
@@ -197,18 +198,20 @@ def test_setup_refresh_publishes_replacement_content_ignoring_legacy_identity(
         yaml.dump(document, stream)
     before = setup_path.read_bytes()
 
-    entry.setup.refresh()
+    entry.parameters().refresh()
 
-    assert entry.setup.description == "external annotation"
+    assert entry.parameters().description == "external annotation"
     assert setup_path.read_bytes() == before
     seeded = entry.new_point("after-replacement")
     assert seeded.description == "external annotation"
-    entry.setup.description = "allowed edit after replacement"
-    assert entry.setup.description == "allowed edit after replacement"
+    entry.parameters().description = "allowed edit after replacement"
+    assert entry.parameters().description == "allowed edit after replacement"
     assert (
         ResultEntry.open(
             "entry", result_root=results, database_root=entry.database_path.parent
-        ).setup.description
+        )
+        .parameters()
+        .description
         == "allowed edit after replacement"
     )
 
@@ -217,15 +220,15 @@ def test_setup_description_uses_one_transaction_for_direct_and_edit_writes(
     entry_roots: tuple[Path, Path], entry: ResultEntry
 ) -> None:
     results, database = entry_roots
-    assert entry.setup.description is None
+    assert entry.parameters().description is None
 
-    entry.setup.description = "chip annotation"
-    with entry.setup.edit() as draft:
+    entry.parameters().description = "chip annotation"
+    with entry.parameters().edit() as draft:
         draft.description = "updated annotation"
 
-    assert entry.setup.description == "updated annotation"
+    assert entry.parameters().description == "updated annotation"
     reopened = ResultEntry.open("entry", result_root=results, database_root=database)
-    assert reopened.setup.description == "updated annotation"
+    assert reopened.parameters().description == "updated annotation"
     with (results / "entry" / "parameters.yaml").open(encoding="utf-8") as stream:
         document = YAML(typ="safe").load(stream)
     assert document["general"]["description"] == "updated annotation"
@@ -264,7 +267,7 @@ def test_created_at_is_validated_on_use_without_rewriting_parameters(
     before = setup_path.read_bytes()
 
     opened = ResultEntry.open("entry", result_root=results, database_root=database)
-    view = opened.setup if point is None else opened.use_point(point)
+    view = opened.parameters() if point is None else opened.parameters(point)
     with pytest.raises(ValueError, match=field) as failure:
         entry_api.document_value(entry_api.parameter_content(view), f"general.{field}")
 

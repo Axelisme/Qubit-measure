@@ -294,12 +294,12 @@ def test_apply_uses_current_document_set_and_records_nullable_point(
     session.control.add_component("Q1", "fake/drive/a", {})
     session.control.apply_alias_rows((AliasRow("qubit", "Q1"),))
     global_source = session.control.read_context()
-    session.entry.setup.refresh()
+    session.entry.parameters().refresh()
     untouched_before = document_value(
         snapshot(
-            session.entry.use_point("working")
+            session.entry.parameters("working")
             if destination == "global"
-            else session.entry.setup
+            else session.entry.parameters()
         ),
         "Q1",
     )
@@ -331,9 +331,9 @@ def test_apply_uses_current_document_set_and_records_nullable_point(
         {"entry_name": "entry", "point": point},
         {"entry_name": "entry", "point": point},
     ]
-    session.entry.setup.refresh()
-    global_doc = snapshot(session.entry.setup)
-    point_doc = snapshot(session.entry.use_point("working"))
+    session.entry.parameters().refresh()
+    global_doc = snapshot(session.entry.parameters())
+    point_doc = snapshot(session.entry.parameters("working"))
     written_doc, untouched_doc = (
         (global_doc, point_doc) if destination == "global" else (point_doc, global_doc)
     )
@@ -382,10 +382,11 @@ def test_preview_and_apply_use_current_gui_point_not_analysis_origin(
         "point": "other",
     }
     assert (
-        document_value(snapshot(session.entry.use_point("other")), "Q1.ext.gain") == 0.8
+        document_value(snapshot(session.entry.parameters("other")), "Q1.ext.gain")
+        == 0.8
     )
     assert (
-        document_value(snapshot(session.entry.use_point("working")), "Q1.ext.gain")
+        document_value(snapshot(session.entry.parameters("working")), "Q1.ext.gain")
         == 0.1
     )
 
@@ -897,7 +898,7 @@ def test_complex_writeback_keeps_captured_role_path_but_writes_selected_point(
         result_root=session.entry.result_path.parent,
         database_root=session.entry.database_path.parent,
     )
-    document = snapshot(reopened.use_point("b"))
+    document = snapshot(reopened.parameters("b"))
     assert [document_value(document, path) for path in paths] == tags
 
 

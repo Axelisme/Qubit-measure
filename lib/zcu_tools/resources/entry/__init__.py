@@ -28,7 +28,7 @@ from .ledger_models import (
     SavedPayload,
     SourceReference,
 )
-from .points import PointView
+from .parameter_view import ParameterView
 from .registry import ComponentRegistry, RoleRegistry, RoleSpec, component_registry
 from .result_entry import (
     EntryIdentity,
@@ -67,7 +67,6 @@ from .views import (
     ComponentView,
     DocumentField,
     EditView,
-    SetupView,
     document_fields,
     document_meta,
     document_revision,

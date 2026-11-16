@@ -43,7 +43,7 @@ if dispersive is None:
     raise ValueError("This branch analysis requires a dispersive fit")
 
 point_label = "1.800mA"
-point = entry.use_point(point_label)
+point = entry.parameters(point=point_label)
 roles = point.resolve(["qubit", "resonator"], focus="Q1")
 flux = value2flux(
     point.general.ext.flux_value,

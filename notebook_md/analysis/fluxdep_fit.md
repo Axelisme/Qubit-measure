@@ -66,7 +66,7 @@ entry = ResultEntry.open(
     result_root=project_root / "result",
     database_root=project_root / "Database",
 )
-component_model = snapshot(entry.setup).components[component]
+component_model = snapshot(entry.parameters()).components[component]
 if component_model.kind != "qubit/fluxonium":
     raise ValueError(f"Expected qubit/fluxonium, got {component_model.kind!r}")
 
@@ -370,13 +370,13 @@ save_predictor_file(
         source=PredictorSource(run_id=None, created_at=None),
     ),
 )
-entry.setup.refresh()
-component_model = snapshot(entry.setup).components[component]
+entry.parameters().refresh()
+component_model = snapshot(entry.parameters()).components[component]
 values = dict(
     EJ=sp_params[0], EC=sp_params[1], EL=sp_params[2],
     flux_half=flux_half, flux_int=flux_int, flux_period=flux_period,
 )
-with entry.setup.edit() as draft:
+with entry.parameters().edit() as draft:
     for field, value in values.items():
         if field in type(component_model).model_fields:
             draft.set(f"{component}.{field}", float(value))

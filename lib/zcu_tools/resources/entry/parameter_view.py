@@ -1,4 +1,4 @@
-"""Working-point views over one complete parameter document."""
+"""Global and point views over one complete parameter document."""
 
 from collections.abc import Generator, Mapping, Sequence
 from contextlib import contextmanager
@@ -7,7 +7,7 @@ from pathlib import Path
 from zcu_tools.format_version import YamlMap, YamlValue
 from zcu_tools.resources.document_store import DocumentStore
 
-from . import _point_origin
+from . import _parameter_origin
 from .roles import RoleSpec, RoleView, resolve_names
 from .schema import ComponentSchema, ParameterDocument, ParameterGeneral
 from .views import (
@@ -17,22 +17,22 @@ from .views import (
     add_component_to_draft,
     cached_parameter_content,
     document_meta,
-    point_origin,
+    parameter_origin,
     register_view_read,
     stage_component,
     stage_general,
 )
 
 
-class PointView:
-    """A bound point's cached working-unit values, independent of setup.
+class ParameterView:
+    """Cached working-unit values bound to one global or point parameter document.
 
-    Obtain a view from ResultEntry.use_point or new_point. Component and general
+    Obtain a view from ResultEntry.parameters or new_point. Component and general
     reads do no I/O. Complex tags read as native complex scalars; manual
     scalar writes encode through the core codec before schema validation.
     Package snapshot/document reads retain raw YAML tags. Malformed tag reads
     propagate the core codec error. Unknown components or unset fields raise AttributeError.
-    Assignments and edit() commit only this point's document. Value writes
+    Assignments and edit() commit only this bound document. Value writes
     keep opaque metadata; edit().set_meta replaces it explicitly. Call refresh()
     to observe disk edits; another view does not change this view's binding.
     """
@@ -47,11 +47,11 @@ class PointView:
     ) -> None:
         """Bind one validated working-unit store without I/O.
 
-        source is store's parameters.yaml path under the owning entry's points/label.
+        source is store's parameters.yaml path at global or point scope.
         The store owns single-file validation, conflict checks and persistence.
         ResultEntry supplies these dependencies; construction does not reload or
         revalidate field values. Binding rejects components shadowing any public
-        SetupView/PointView/EditView member with ValueError naming the member.
+        ParameterView/EditView member with ValueError naming the member.
         result_root and database_root are resolved once.
         Clone identity binds source and result_root,
         including for directly constructed views. database_root only configures
@@ -66,7 +66,7 @@ class PointView:
         """
         self._store = store
         self._source = source
-        origin = _point_origin.PointOrigin(
+        origin = _parameter_origin.ParameterOrigin(
             source=source,
             result_root=result_root.resolve(),
             database_root=database_root.resolve(),
@@ -124,7 +124,7 @@ class PointView:
         model hooks must validate. Body, schema, metadata representation, custom
         validation, conflict or I/O failures keep the previous file and snapshot.
         Independent handles merge disjoint leaves or reject the entire edit on
-        a same-leaf conflict. No other point or setup file is read or written.
+        a same-leaf conflict. No other global or point file is read or written.
         """
         with self._store.edit() as draft:
             yield EditView(draft, source=self._source)
@@ -136,7 +136,7 @@ class PointView:
         focus: str | None = None,
         **explicit: str | None,
     ) -> RoleView:
-        """Resolve only declared roles from this point's cached components.
+        """Resolve only declared roles from this document's cached components.
 
         Explicit choices precede one matching focus, then RoleSpec.via or a
         role-name string field on already resolved components. An explicit None
@@ -146,12 +146,16 @@ class PointView:
         with zero/multiple choices omits the role; its use then raises
         RoleResolutionError. Explicit invalid choices and dangling/wrong-kind
         targets fail here. Errors identify role, focus, kind and reason. The returned name mapping stays fixed while
-        values follow this bound point's working-unit snapshot and edits. Its
-        constructor origin also binds the returned roles to this entry/point.
+        values follow this bound document's working-unit snapshot and edits. Its
+        constructor origin binds the returned roles to this global or point source.
         """
         names = resolve_names(self._store.snapshot().components, roles, focus, explicit)
         return RoleView(
-            names, self.__getattr__, origin=point_origin(self), roles=roles, focus=focus
+            names,
+            self.__getattr__,
+            origin=parameter_origin(self),
+            roles=roles,
+            focus=focus,
         )
 
     def meta(self, path: str) -> YamlMap | None:
@@ -172,14 +176,14 @@ class PointView:
         self._store.refresh(strict=strict)
 
     def add_component(self, name: str, *, kind: str, **fields: YamlValue) -> None:
-        """Add a complete registered component to this point, not its template.
+        """Add a complete registered component to this bound document.
 
         name is a public identifier, not a keyword or a public member of
-        SetupView, PointView or EditView. Shadowing raises ValueError naming the
+        ParameterView or EditView. Shadowing raises ValueError naming the
         member. kind is a registered kind.
         fields are working-unit YAML values, including all required model fields.
         Original field validators and defaults run; references resolve only in
-        this point, when resolve is called. Invalid names, schema values or
+        this document, when resolve is called. Invalid names, schema values or
         duplicate components raise without publishing a value. No metadata is added.
         Failure keeps the file and cached snapshot; success commits one edit.
         """

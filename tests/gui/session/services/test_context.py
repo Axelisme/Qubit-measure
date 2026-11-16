@@ -302,9 +302,11 @@ def registry_guard(request: pytest.FixtureRequest) -> Generator[None]:
 def rich_entry(tmp_path: Path) -> ResultEntry:
     entry = _entry(tmp_path)
     for name, rate, sense in (("Q1", 4300.0, "R1"), ("Q2", 5100.0, "R2")):
-        entry.setup.add_component(name, kind="fake/drive/a", rate=rate, sense=sense)
+        entry.parameters().add_component(
+            name, kind="fake/drive/a", rate=rate, sense=sense
+        )
     for name in ("R1", "R2"):
-        entry.setup.add_component(name, kind="fake/sensor", rate=6500.0)
+        entry.parameters().add_component(name, kind="fake/sensor", rate=6500.0)
     return entry
 
 
@@ -597,7 +599,7 @@ def test_install_entry_isolates_bad_point_parameters_without_reading_other_files
         assert points["bad"].available
         assert points["bad"].error is None
         with pytest.raises(ValueError, match=reason):
-            snapshot(entry.use_point("bad"))
+            snapshot(entry.parameters("bad"))
     else:
         assert not points["bad"].available
         assert points["bad"].error is not None

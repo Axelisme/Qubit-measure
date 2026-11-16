@@ -17,7 +17,7 @@ def fluxonium_components(entry: ResultEntry) -> tuple[str, ...]:
     """List setup fluxonium qubits in document order, without changing the entry."""
     return tuple(
         name
-        for name, model in snapshot(entry.setup).components.items()
+        for name, model in snapshot(entry.parameters()).components.items()
         if model.kind == "qubit/fluxonium" or model.kind.startswith("qubit/fluxonium/")
     )
 
@@ -69,7 +69,7 @@ class AnalysisEntry:
         and non-fluxonium kinds raise InvalidInputError before publication.
         No default is substituted for an absent or invalid alias.
         """
-        document = snapshot(self.resource.setup)
+        document = snapshot(self.resource.parameters())
         if component is None:
             aliases = self.resource.load_aliases().aliases
             component = AliasTable(

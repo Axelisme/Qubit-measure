@@ -257,7 +257,7 @@ def test_invalid_context_source_and_occupied_directory_preserve_selection(
             result_root=Path(info["result_path"]).parent,
             database_root=Path(info["database_path"]).parent,
         )
-        point_source = source_path(entry.use_point("source"))
+        point_source = source_path(entry.parameters("source"))
         library_source = entry.module_library("source").source_path
         exp_dir = point_source.parent.parent
         occupied = exp_dir / "occupied"

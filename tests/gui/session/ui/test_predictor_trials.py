@@ -308,7 +308,9 @@ def component_context(tmp_path: Path):
             result_root=tmp_path / "result",
             database_root=tmp_path / "Database",
         )
-        entry.setup.add_component("Q1", kind="qubit/fluxonium", EJ=5.0, EC=1.0, EL=0.5)
+        entry.parameters().add_component(
+            "Q1", kind="qubit/fluxonium", EJ=5.0, EC=1.0, EL=0.5
+        )
         context = ContextService(
             SessionState(SessionEnv(parameters=None, soc=None, soccfg=None)),
             BaseEventBus(),

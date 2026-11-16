@@ -296,7 +296,7 @@ def test_record_preview_selection_and_apply_preserve_adapter_json(
     )
     written = TypeAdapter(list[dict[str, object]]).validate_python(receipt["written"])
     assert [item["id"] for item in written] == ["record-1"]
-    assert entry.use_point("a").description is None
+    assert entry.parameters("a").description is None
     row = entry.records("Q1").read().iloc[0].to_dict()
     event = entry.ledger.events()[-1]
     assert datetime.fromisoformat(row["at"]) == datetime.fromisoformat(event.at)
@@ -364,7 +364,7 @@ def test_partial_failure_preserves_expected_cause_wire_category(tmp_path: Path) 
         experiment_name="test/expected",
     )
     harness = WritebackHarness(context, service, draft)
-    before_description = entry.use_point("a").description
+    before_description = entry.parameters("a").description
     with pytest.raises(RemoteError) as caught:
         dispatch_handler(
             harness,
@@ -387,7 +387,7 @@ def test_partial_failure_preserves_expected_cause_wire_category(tmp_path: Path) 
         "param-2": False,
         "param-3": False,
     }
-    assert entry.use_point("a").description == before_description
+    assert entry.parameters("a").description == before_description
     assert not context.read_context().lookup("general.ext.rejected").present
     assert not context.read_context().lookup("general.ext.later").present
     assert entry.ledger.events()[-1].kind == "accepted"

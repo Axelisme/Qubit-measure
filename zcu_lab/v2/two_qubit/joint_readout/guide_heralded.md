@@ -35,7 +35,7 @@ Compile-only checks do not verify acquisition, save/restore, physical population
 ## Notebook
 
 Use a validated `JointReadoutHeraldedCfg` as `cfg`. Supply the notebook's existing
-hardware handles and device manager. `point_view` is the bound PointView for the
+hardware handles and device manager. `point_view` is the bound ParameterView for the
 save destination. Run requires that environment; analyze uses the saved counts.
 
 ```python

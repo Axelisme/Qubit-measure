@@ -45,9 +45,11 @@ def session(tmp_path: Path) -> Generator[CaptureSession]:
             database_root=tmp_path / "Database",
         )
         for name, rate, sense in (("Q1", 4300.0, "R1"), ("Q2", 5100.0, "R2")):
-            entry.setup.add_component(name, kind="fake/drive/a", rate=rate, sense=sense)
+            entry.parameters().add_component(
+                name, kind="fake/drive/a", rate=rate, sense=sense
+            )
         for name, rate in (("R1", 6123.0), ("R2", 7200.0), ("driver", 123.0)):
-            entry.setup.add_component(name, kind="fake/sensor", rate=rate)
+            entry.parameters().add_component(name, kind="fake/sensor", rate=rate)
         entry.new_point("first")
         entry.new_point("second")
         state = SessionState(SessionEnv(parameters=None, soc=None, soccfg=None))
@@ -94,8 +96,8 @@ def test_capture_keeps_point_library_storage_and_rows_after_later_changes(
         EntryAliases(aliases={"driver": "Q2", "sense": "$driver.sense"}), point="second"
     )
     control.use_point(PointUseRequest("second"))
-    source_path(session.entry.use_point("first")).unlink()
-    source_path(session.entry.use_point("second")).unlink()
+    source_path(session.entry.parameters("first")).unlink()
+    source_path(session.entry.parameters("second")).unlink()
     assert captured.value("$driver.rate") == 4300.0
     assert captured.value("$sense.rate") == 6123.0
     assert captured.library.waveform_spec("Q1.waveforms.base").length == 0.05
@@ -237,8 +239,8 @@ def test_named_published_reads_keep_fixed_names_and_values_without_source_io(
     current_value: float,
 ) -> None:
     control = session.control
-    first = session.entry.use_point("first")
-    second = session.entry.use_point("second")
+    first = session.entry.parameters("first")
+    second = session.entry.parameters("second")
     with second.edit() as edit:
         edit.set("Q1.rate", 4700.0)
     ledger = session.entry.ledger.events()

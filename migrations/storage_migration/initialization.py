@@ -344,7 +344,7 @@ def _publish_entry(
                 created_at=ownership.created_at,
             ),
         )
-        setup = source_path(entry.setup)
+        setup = source_path(entry.parameters())
         library = entry.module_library().source_path
         inventory = inventory_paths(staged)
         document_paths: tuple[tuple[Path, Literal["setup", "library"]], ...] = (

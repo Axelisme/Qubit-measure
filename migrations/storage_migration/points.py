@@ -8,7 +8,7 @@ from uuid import uuid4
 
 from zcu_tools.resources.context.library_store import create_empty_library
 from zcu_tools.resources.document_names import LIBRARY_FILENAME, PARAMETERS_FILENAME
-from zcu_tools.resources.entry import PointView, ResultEntry
+from zcu_tools.resources.entry import ParameterView, ResultEntry
 
 from .backup import inventory_paths
 from .documents import difference, document_value, validate_document
@@ -187,7 +187,7 @@ def recover_points(session: MigrationSession) -> None:
 
 def create_point(
     session: MigrationSession, entry: ResultEntry, label: str, source: Path
-) -> PointView:
+) -> ParameterView:
     """Create/recover an owned point via new_point, prepared baseline, then rename.
 
     Fix the staging label in the manifest before owner creation. Only its exact
@@ -254,4 +254,4 @@ def create_point(
         )
         session.checkpoint()
     recover_points(session)
-    return entry.use_point(label)
+    return entry.parameters(label)

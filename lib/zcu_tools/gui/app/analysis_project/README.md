@@ -1,6 +1,6 @@
 # Analysis entry selection
 
-**Last updated:** 2026-10-28
+**Last updated:** 2026-11-16，global ParameterView
 
 **讀者：** framework-dev、agent。兩個分析 GUI 共用的 entry/component 選擇與 native 光譜載入接口。
 
@@ -17,7 +17,7 @@ Component 省略時，以 AliasTable 解析 setup 的 qubit alias。
 
 AnalysisTarget 保留 absolute result_root、entry、component 與 ResultEntry resource。
 `predictor_path` 回傳選定 component 的 predictor JSON 路徑。
-分析只使用 setup、predictor/dispersive 路徑與 ledger，不呼叫 Database Save。
+分析透過 `entry.parameters()` 取得 global 參數，並使用 predictor/dispersive 路徑與 ledger，不呼叫 Database Save。
 `target_payload` 產生 entry/component/Result 路徑投影，未開 entry 時欄位為 null。
 `require_target` 在未開 entry 時以 no_entry 拒絕寫入。
 

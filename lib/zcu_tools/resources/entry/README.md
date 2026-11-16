@@ -1,38 +1,38 @@
 # `zcu_tools.resources.entry` result entry composition
 
-**Last updated:** 2026-11-16，global／point 共用參數文件型別
+**Last updated:** 2026-11-16，ParameterView 與中性參數開檔入口
 
 **讀者：** framework-dev。Result entry、point、ledger 與輸出位置契約。
 
-`ResultEntry` 只以 `result/<name>/` 構成條目。Caller 明確傳入 Result root 與 Database 輸出 root，Database 不參與條目的存在判定。條目名稱與 point label 是安全的單一路徑段，不代表物理量。同一 Result root 下以資料夾名稱判斷 entry 歸屬。Entry 不使用 UUID。舊 setup／point 的 entry_id 不參與讀取或歸屬判斷，UTC 建立時間仍在使用時驗證。
+`ResultEntry` 只以 `result/<name>/` 構成條目。Caller 明確傳入 Result root 與 Database 輸出 root，Database 不參與條目的存在判定。條目名稱與 point label 是安全的單一路徑段，不代表物理量。同一 Result root 下以資料夾名稱判斷 entry 歸屬。Entry 不使用 UUID。舊 global／point 的 entry_id 不參與讀取或歸屬判斷，UTC 建立時間仍在使用時驗證。
 
 檔名由 `resources.document_names` 擁有。Entry 與 point 都使用 `parameters.yaml`、`library.yaml`、`aliases.yaml`。
-只有舊 setup 檔的 entry 開啟時，錯誤列出舊路徑與 `scripts/upgrade_parameters.py --scope filenames`。
+只有舊 `setup.yaml` 檔的 entry 開啟時，錯誤列出舊路徑與 `scripts/upgrade_parameters.py --scope filenames`。
 Runtime 不讀舊名。需要內容升級時先改名，再跑 components，見[升級指南](../../../../docs/parameter-upgrades.md#先改檔名再升級內容)。
 
-`create` 只在 Result 建立 setup、entry 層只有標頭的 `library.yaml`、points 與 records。預設產生 UTC 建立時間。傳入 `identity=EntryIdentity(created_at=<UTC datetime>)` 可固定時間，非 UTC 或無時區時間會拒絕。這個參數不授權認領、覆寫或修復既有 entry，Result 目的地已存在仍拒絕。失敗只清理本次建立的條目，不刪 caller 的根目錄或既有資料。`open` 只要求 Result 目錄與合法 `parameters.yaml`，不猜測 legacy 格式。缺 `points/` 時 `list_points` 回空清單，缺 `records/` 時 `read_events_snapshot` 回空 tuple。這些讀取不建目錄。`open`／`use_point` 在 setup／point 首次讀檔時，將 Pydantic ValidationError 轉為 ValueError，訊息含文件完整路徑與原始驗證文字，cause 保留原錯誤。既有 view 的 edit／refresh 仍回報原本的 schema 錯誤。
+`create` 只在 Result 建立 global、entry 層只有標頭的 `library.yaml`、points 與 records。預設產生 UTC 建立時間。傳入 `identity=EntryIdentity(created_at=<UTC datetime>)` 可固定時間，非 UTC 或無時區時間會拒絕。這個參數不授權認領、覆寫或修復既有 entry，Result 目的地已存在仍拒絕。失敗只清理本次建立的條目，不刪 caller 的根目錄或既有資料。`open` 只要求 Result 目錄與合法 `parameters.yaml`，不猜測 legacy 格式。缺 `points/` 時 `list_points` 回空清單，缺 `records/` 時 `read_events_snapshot` 回空 tuple。這些讀取不建目錄。`open`／`parameters(point=...)` 在 global／point 首次讀檔時，將 Pydantic ValidationError 轉為 ValueError，訊息含文件完整路徑與原始驗證文字，cause 保留原錯誤。既有 view 的 edit／refresh 仍回報原本的 schema 錯誤。
 
-`ResultEntry.read_identity(name, *, result_root)` 只驗 setup header 與 general 的 UTC 建立時間，回 `EntryIdentity`。它不解析 component schema、不要求註冊歷史 component kind，也不要求 points 或 records 目錄。讀取不建立檔案或鎖，格式與 I/O 錯誤傳遞。
+`ResultEntry.read_identity(name, *, result_root)` 只驗 global header 與 general 的 UTC 建立時間，回 `EntryIdentity`。它不解析 component schema、不要求註冊歷史 component kind，也不要求 points 或 records 目錄。讀取不建立檔案或鎖，格式與 I/O 錯誤傳遞。
 
 `list_points` 依 `parameters.yaml` 列出 label，不要求 library 或 aliases。`point_description` 只讀 `general.description`，不解讀其他欄位。`validate_point_parameters` 只要求可讀的 YAML mapping、參數 header 與目前 schema version。局部 component 或 leaf 格式錯誤不使 point 不可用，使用該值或寫入時才報錯。解析與 I/O 錯誤仍交 caller 逐 point 隔離，不讀 library 或 aliases。
 
-`use_point` 只要求 `parameters.yaml`。缺少它時回報公開 `MissingPointError`，它保留 `FileNotFoundError` 繼承關係。缺少 `library.yaml` 不阻擋選取，point library 為空且 revision=None，讀取不建檔。Schema、permission、其他 I/O 與額外引用檔缺失不歸類為 point 缺失。
+`parameters(point=...)` 只要求 `parameters.yaml`。缺少它時回報公開 `MissingPointError`，它保留 `FileNotFoundError` 繼承關係。缺少 `library.yaml` 不阻擋選取，point library 為空且 revision=None，讀取不建檔。Schema、permission、其他 I/O 與額外引用檔缺失不歸類為 point 缺失。
 
 兩個入口都不檢查或建立 Database，只有 Result 也能開啟。第一次 Save 才建立所需輸出目錄；既有同名 Database 照用，混雜不另處理，見 [ADR-0063](../../../../docs/adr/0063-persistence-ownership.md#run-輸出位置與-writer-權責)。
 
 `predictors_path` 是 Result 條目下 `predictors/` 的唯讀路徑。讀取 property 不建立目錄，也不列檔或驗證內容。`resources.predictor_file` 擁有其中 predictor JSON 的格式與讀寫。
 
-## Setup 與 point alias 表
+## Global 與 point alias 表
 
-Setup 的 alias 存在 `<entry>/aliases.yaml`。每個 point 的 alias 存在 `<entry>/points/<label>/aliases.yaml`，與 `parameters.yaml`、`library.yaml` 並列。各表獨立，既有 point 缺檔時使用空表。
+Global 的 alias 存在 `<entry>/aliases.yaml`。每個 point 的 alias 存在 `<entry>/points/<label>/aliases.yaml`，與 `parameters.yaml`、`library.yaml` 並列。各表獨立，既有 point 缺檔時使用空表。
 
-`ResultEntry.load_aliases(*, point=None)` 回傳具名 `EntryAliases`。`point=None` 選 setup；`point="label"` 選該 point。缺 alias 檔回 `EntryAliases(aliases={})`，磁碟保持原狀。`save_aliases(aliases, *, point=None)` 使用相同選擇規則，只替換選定的表。Point label 必須是安全的單一路徑段，否則報 ValueError。Load 只讀選定的 alias 表，不要求 `parameters.yaml` 或 `library.yaml` 存在。Save 仍要求 `parameters.yaml` 存在，不要求 library 檔；沒有參數文件時拒絕建立孤立 aliases。Alias I/O 不解析或修改參數與 library。
+`ResultEntry.load_aliases(*, point=None)` 回傳具名 `EntryAliases`。`point=None` 選 global；`point="label"` 選該 point。缺 alias 檔回 `EntryAliases(aliases={})`，磁碟保持原狀。`save_aliases(aliases, *, point=None)` 使用相同選擇規則，只替換選定的表。Point label 必須是安全的單一路徑段，否則報 ValueError。Load 只讀選定的 alias 表，不要求 `parameters.yaml` 或 `library.yaml` 存在。Save 仍要求 `parameters.yaml` 存在，不要求 library 檔；沒有參數文件時拒絕建立孤立 aliases。Alias I/O 不解析或修改參數與 library。
 
 `aliases.yaml` 使用 `format: zcu.aliases`，寫固定 `format_version: "1.0"`，讀接受 major 1 的 forward minor。`AliasValue = str | list[str]` 表達單一名稱、`$` link 或有序名稱／link 清單。Mapping 保留空字串、空清單、原始 `$` link 與元素順序。清單以 YAML list 保存，不編碼成字串。格式、結構、非字串元素與 I/O 錯誤直接回報，不退回 preset。Resources 只保存與驗證資料表示，Session 的 AliasTable 擁有語法、backward-link 與使用時解析。Run snapshot、storage 與 acquired payload 也保留有序名稱清單；普通元件路徑解析只接受單一名稱，拒絕清單。Alias 工作焦點與 parameters 元件事實分開，見 ADR-0063。儲存先寫 sibling temporary，再原子 replace；失敗保舊檔並清 temporary。不提供跨檔交易、multiwriter merge 或掉電恢復。
 
 `read_aliases(*, point=None)` 回傳 `AliasReadResult`，一次讀取固定 alias 表、原始內容錯誤與 observed bytes SHA-256。缺檔回空表與 revision=None。格式、版本、YAML 或結構錯誤保留原 exception 與當次 bytes hash，不代表有效空表；其他 I/O 錯誤傳遞。Session 可先安裝參數與 library，實際 alias consumer 才報該錯。`load_aliases` 與 `load_aliases_with_revision` 仍直接拋出內容錯誤。
 
-`new_point(mode="inherit")` 從 setup 複製已有的 alias 檔。`mode="clone"` 只複製來源 point 的 alias 檔，適用同 entry label、跨 entry 路徑與 PointView。來源缺檔就保持缺檔，clone 不讀目的 setup 的 alias。`mode="empty"` 不建立 aliases。之後改 setup、來源或目的表都不影響其他表。
+`new_point(mode="inherit")` 從 global 複製已有的 alias 檔。`mode="clone"` 只複製來源 point 的 alias 檔，適用同 entry label、跨 entry 路徑與 ParameterView。來源缺檔就保持缺檔，clone 不讀目的 global 的 alias。`mode="empty"` 不建立 aliases。之後改 global、來源或目的表都不影響其他表。
 
 ## 可攜 entry 範本
 
@@ -42,29 +42,29 @@ Setup 的 alias 存在 `<entry>/aliases.yaml`。每個 point 的 alias 存在 `<
 
 ## 文件與 seed
 
-Global 與 point 的完整參數文件共用 `schema.ParameterDocument`，general 欄位共用 `ParameterGeneral`。兩個 model 不攜帶 scope 身分。`SetupView` 與 `PointView` 仍各綁自己的 `DocumentStore[ParameterDocument]`，由綁定位置選擇文件，磁碟格式不變。
+Global 與 point 的完整參數文件共用 `schema.ParameterDocument`，general 欄位共用 `ParameterGeneral`。兩個 model 不攜帶 scope 身分。`entry.parameters()` 開 global，`entry.parameters(point="P1")` 開 P1，兩者都回傳 `ParameterView`。每個 view 綁自己的 `DocumentStore[ParameterDocument]`，磁碟格式不變。入口只讀選定 scope 的 parameters，不讀 library 或 aliases。
 
-Entry 的 setup 參數既供 global 工作，也供新 point 繼承。Point 自帶 kind、元件、metadata 與 general。General 的固定欄位只有 created_at、description 與 ext。舊 entry_id 即使格式不合法也忽略。Read／refresh 不改 bytes，明確修改時移除這個欄位。Setup 同名換檔後，公開 refresh 或 new_point 會使用新內容，不因 UUID 拒絕。GUI 的 ContextService 使用同一批次 watcher 監看 entry 與 point 已安裝文件，resources 本身不建立 watcher，見 [ADR-0081](../../../../docs/adr/0081-point-data-disk-sync.md)。
+Entry 的 global 參數既供 global 工作，也供新 point 繼承。Point 自帶 kind、元件、metadata 與 general。General 的固定欄位只有 created_at、description 與 ext。舊 entry_id 即使格式不合法也忽略。Read／refresh 不改 bytes，明確修改時移除這個欄位。Global 同名換檔後，公開 refresh 或 new_point 會使用新內容，不因 UUID 拒絕。GUI 的 ContextService 使用同一批次 watcher 監看 entry 與 point 已安裝文件，resources 本身不建立 watcher，見 [ADR-0081](../../../../docs/adr/0081-point-data-disk-sync.md)。
 
 Caller 可在 general.ext.flux_value／general.ext.flux_unit 記錄 global flux，ext 沿既有 YAML 值契約保存原值，不提供 flux 專用型別、驗證或單位換算。
 
-`new_point` 的 mode 預設為 `"inherit"`，複製建立當下的 entry 參數、library 與 aliases。參數保留 general.ext、metadata 與可接受的 forward-minor 未知欄位，再更新 created_at。`mode="clone"` 必須帶 clone_from，從已發布 point 複製文件。inherit 與 empty 禁止帶 clone_from，不提供隱含 clone。`mode="empty"` 只建最小有效 parameters，包含標頭、目前 schema_version 與新的 general，不繼承任何使用者值，不建 library 或 aliases。New point 的 description=None 保留 inherit／clone 描述，empty 則沒有描述。字串明確設定描述，包括空字串。設定在本次建立與失敗清理範圍內完成。Setup 與 point 的修改、引用與快照互不影響。
+`new_point` 的 mode 預設為 `"inherit"`，複製建立當下的 entry 參數、library 與 aliases。參數保留 general.ext、metadata 與可接受的 forward-minor 未知欄位，再更新 created_at。`mode="clone"` 必須帶 clone_from，從已發布 point 複製文件。inherit 與 empty 禁止帶 clone_from，不提供隱含 clone。`mode="empty"` 只建最小有效 parameters，包含標頭、目前 schema_version 與新的 general，不繼承任何使用者值，不建 library 或 aliases。New point 的 description=None 保留 inherit／clone 描述，empty 則沒有描述。字串明確設定描述，包括空字串。設定在本次建立與失敗清理範圍內完成。Global 與 point 的修改、引用與快照互不影響。
 
-`initialize_point_parameters(label)` 將既有 point 的參數重新初始化為當下 setup，供離線遷移在自有、未發布的 empty point 使用。它與 inherit 共用鎖內 refresh、驗證、原始 YAML 與未知欄位保真、component defaults 和新 created_at。它不複製 library 或 aliases，呼叫端擁有失敗清理與後續發布。
+`initialize_point_parameters(label)` 將既有 point 的參數重新初始化為當下 global，供離線遷移在自有、未發布的 empty point 使用。它與 inherit 共用鎖內 refresh、驗證、原始 YAML 與未知欄位保真、component defaults 和新 created_at。它不複製 library 或 aliases，呼叫端擁有失敗清理與後續發布。
 
 `ParameterContent` 在 capture 與序列化時只移除直接的 `general.entry_id`，保留其他未使用或未知內容，包括 `general.ext`。這不驗證整份文件，也不改來源檔案。
 
-`SetupView.refresh(strict=True)` 與 `PointView.refresh(strict=True)` 完整驗證候選後才安裝。ContextService 的明確 reload 與 watcher 使用這個入口，失敗保留已發布內容、revision 與 binding。一般 refresh 仍按需驗證，不因未使用的 component 欄位失敗。
+`ParameterView.refresh(strict=True)` 完整驗證候選後才安裝。ContextService 的明確 reload 與 watcher 使用這個入口，失敗保留已發布內容、revision 與 binding。一般 refresh 仍按需驗證，不因未使用的 component 欄位失敗。
 
-`SetupView` 與 `PointView` 各綁一個 DocumentStore。屬性讀取只看記憶體快照。`edit()`、單行賦值與 `refresh()` 只讀寫自己的文件。修改多個 point 時逐筆提交，每筆各自成功或失敗。
+每個 `ParameterView` 綁一個 DocumentStore。屬性讀取只看記憶體快照。`edit()`、單行賦值與 `refresh()` 只讀寫自己的文件。修改多個 point 時逐筆提交，每筆各自成功或失敗。
 
 Package functions `snapshot(view)`、`source_path(view)` 與 `document_value(document, path)` 提供完整 typed 投影、綁定文件位置與 logical YAML 值，不讀檔。Snapshot 對 bound content 執行完整文件的 model validation。Snapshot 也接受 EditView，只複製尚未提交的 draft。Document_value 只讀實際元件或 general 路徑，不展開角色，區分 explicit null 與缺值。`document_meta(document, path)` 回傳本文件該路徑的隔離 opaque metadata，不查值是否存在。`document_unit(document, path)` 只讀固定欄位既有的靜態 schema unit，包含尚未 set 的 optional leaf。直接指向已宣告欄位時，list、mapping 或 null 值不影響 label。Ext、mapping/list 內的子路徑、缺失路徑或無 metadata 的欄位沒有單位。查詢不讀 leaf 值、不執行 schema callback、不推導可變單位，也不換算值。`resolve_path(document, path, roles=..., reserved_names=...)` 只展開已捕捉角色的首段，不檢查後續 leaf 或 library key。Role、component、general 欄位和 expression 保留名稱碰撞時明確報錯，general 欄位必須使用 general namespace。這些能力不加成 view method，保留 snapshot、path 等合法元件名稱。
 
 `document_fields(document)` 列舉 logical data 的隔離 DocumentField。Models／mapping 展開為葉列，list、null 與空 mapping 是單列。Segments 保留 literal keys；有空字串或點號的 row 沒有 editable_path，不以另一條 dotted path 冒充它。Row 的 metadata 是該 editable_path 的隔離 mapping，無法定址的列為 None。列舉不執行 serializers/model hooks、不讀檔或顯示 opaque forward-minor 資料。
 
-PointView 的公開 constructor 必須提供 result_root 與 source，在建構時捕捉 clone 的位置。database_root 仍須提供，但只設定 Save 輸出位置，不作為 clone 邊界。SetupView 只需 store 與 source。直接建構的 view 與 ResultEntry 回傳的 view 使用相同 clone 規則，不依靠事後補登記。
+`ParameterView(store, source, *, result_root, database_root)` 在建構時捕捉完整來源。Global 與 point 都必須提供 source 與兩個 roots。私有 binding 保存這些位置，不增加 view 公開成員。Clone 只比較 Result root，Database root 只設定 Save 輸出位置。直接建構與 ResultEntry 回傳的 view 使用相同規則。
 
-`new_point(mode="clone", clone_from=...)` 接受同條目 label、`<entry>/<point>` 或相同 Result root 的 PointView，Database root 可以不同。Clone 重讀來源位置當下已發布的 point 與 module_cfg，不用 view 的舊快照或 UUID，也不讀目的 setup。目的 point 保留來源的其他 general 資料，更新 created_at。參數值與 metadata 原樣複製，不查 ledger、不匯入事件、不改寫 source，也不加 cloned_from。
+`new_point(mode="clone", clone_from=...)` 接受同條目 label、`<entry>/<point>` 或相同 Result root 的 point `ParameterView`，Database root 可以不同。傳入 global view 會在建立目的地前報 ValueError，訊息指向 `mode="inherit"`。Clone 重讀來源位置當下已發布的 point 與 module_cfg，不用 view 的舊快照或 UUID，也不讀目的 global。目的 point 保留來源的其他 general 資料，更新 created_at。參數值與 metadata 原樣複製，不查 ledger、不匯入事件、不改寫 source，也不加 cloned_from。
 
 `module_library(label=None, assets=...)` 開啟 entry 層 library，傳入 label 時開啟該 point 的 library。Assets 只供 materialization 使用。它不讀 point、不選 active point、不查 ledger，也不建立缺失文件。Entry 與 point library 缺檔時都回空快照與 revision=None，第一次非空 edit 才建檔。若外部先建立，edit 報衝突且不覆寫。Caller 可用 refresh 明確安裝外部文件。
 
@@ -92,13 +92,13 @@ EditView 的 source 由 owning view 傳入，用於新增元件的錯誤來源�
 
 ## 視圖與 metadata
 
-SetupView、PointView 與 EditView 共用的 FieldView 將 `{"__complex__": [re, im]}` 葉值讀成 Python complex，RoleView 也沿同一讀取路徑。其他 dict 與巢狀 BaseModel 欄位回傳 FieldView。子 view 保留完整路徑，每次讀取都跟隨 owning view 的最新快照。Scalar、null 與 list 回傳獨立 YAML 值，沒有 list index 子 view，list 內保留原始 YAML 元素。Malformed tag 由唯一的 core.complex_codec 拒絕，不當作一般子 view。Item access 使用單一 literal key，set／meta 使用點分路徑。空 key 或含點號的 key 無法以點分路徑定址，框架不拒絕這些 key，也不提供 escaping。
+ParameterView 與 EditView 共用的 FieldView 將 `{"__complex__": [re, im]}` 葉值讀成 Python complex，RoleView 也沿同一讀取路徑。其他 dict 與巢狀 BaseModel 欄位回傳 FieldView。子 view 保留完整路徑，每次讀取都跟隨 owning view 的最新快照。Scalar、null 與 list 回傳獨立 YAML 值，沒有 list index 子 view，list 內保留原始 YAML 元素。Malformed tag 由唯一的 core.complex_codec 拒絕，不當作一般子 view。Item access 使用單一 literal key，set／meta 使用點分路徑。空 key 或含點號的 key 無法以點分路徑定址，框架不拒絕這些 key，也不提供 escaping。
 
-手動 scalar 賦值與 EditView.set 將 native complex 委派 core.complex_codec 編回既有 tag，再走原本的 schema 驗證。Container assignments 仍使用既有 YAML/model 契約。Snapshot、document_value、document_fields 與 ParameterContext 等 non-view 路徑保留 raw tag，文件格式不變。每次寫入複製完整父元件 candidate，保留 dict 內的 model 型別，再由 resources 共用的 stage_model 以原完整 model 驗證。Schema 或 body 失敗不污染 draft、metadata 或磁碟。EditView 的元件、general、子 view 與 set 共用同一份 draft。元件名稱必須是 public identifier，不以底線開頭，也不是 Python keyword。Schema 只檢查這些 identifier 規則。View 綁定與 add_component 另拒絕會遮蔽 SetupView、PointView 或 EditView 公開成員的名稱，錯誤指名衝突成員。公開成員聯集由三個 class 自動取得，不維護保留字表。元件的欄位名不受框架保留，因此 wiring、ext、kind、components、entry_id 與 created_at 都可作元件名。
+手動 scalar 賦值與 EditView.set 將 native complex 委派 core.complex_codec 編回既有 tag，再走原本的 schema 驗證。Container assignments 仍使用既有 YAML/model 契約。Snapshot、document_value、document_fields 與 ParameterContext 等 non-view 路徑保留 raw tag，文件格式不變。每次寫入複製完整父元件 candidate，保留 dict 內的 model 型別，再由 resources 共用的 stage_model 以原完整 model 驗證。Schema 或 body 失敗不污染 draft、metadata 或磁碟。EditView 的元件、general、子 view 與 set 共用同一份 draft。元件名稱必須是 public identifier，不以底線開頭，也不是 Python keyword。Schema 只檢查這些 identifier 規則。View 綁定與 add_component 另拒絕會遮蔽 ParameterView 或 EditView 公開成員的名稱，錯誤指名衝突成員。公開成員聯集由兩個 class 自動取得，不維護保留字表。元件的欄位名不受框架保留，因此 wiring、ext、kind、components、entry_id 與 created_at 都可作元件名。
 
-ResultEntry 管理的 store 在 use、refresh 與 edit 時也檢查遮蔽，失敗不發布快照、值或 metadata。直接建構 SetupView／PointView 時，constructor 檢查初次綁定的快照。Caller 自建 store 時，後續 refresh／mutation 的檢查由 caller 的 store validate callback 負責。沒有 callback 的 store 可能發布遮蔽名稱，該元件無法以 view 屬性存取，需用 snapshot 與 document_value 讀取。
+ResultEntry 管理的 store 在 use、refresh 與 edit 時也檢查遮蔽，失敗不發布快照、值或 metadata。直接建構 ParameterView 時，constructor 檢查初次綁定的快照。Caller 自建 store 時，後續 refresh／mutation 的檢查由 caller 的 store validate callback 負責。沒有 callback 的 store 可能發布遮蔽名稱，該元件無法以 view 屬性存取，需用 snapshot 與 document_value 讀取。
 
-Setup 與 point 文件使用 `format: zcu.parameter-container`、`format_version: '2.0'`，值在 components，`metadata` 是 dotted path 到 opaque YAML mapping 的旁表，與 [獨立參數](../README.md#獨立參數) 共用 header、metadata 讀寫與 value staging。舊 major 或含 `provenance` 旁表的文件在 open／use_point 直接拒絕，錯誤含路徑、讀到版本與期望版本；不轉換、不雙讀。
+Global 與 point 文件使用 `format: zcu.parameter-container`、`format_version: '2.0'`，值在 components，`metadata` 是 dotted path 到 opaque YAML mapping 的旁表，與 [獨立參數](../README.md#獨立參數) 共用 header、metadata 讀寫與 value staging。舊 major 或含 `provenance` 旁表的文件在 open／parameters 直接拒絕，錯誤含路徑、讀到版本與期望版本；不轉換、不雙讀。
 
 值與 metadata 在同一文件、同一交易提交。普通賦值、draft set、加入元件與子 view 寫入都保留既有 metadata，不產生來源、時間或 clone 標記。`edit().set_meta(path, mapping)` 整份替換該 path 的 metadata，`{}` 清空；不查值、不 deep merge、不解釋 stderr、source 或 comment 等 key。`meta` 回隔離 mapping，缺項回 None。Metadata 的領域意義與更新政策由 caller 擁有，Entry 不查 ledger。
 
@@ -116,7 +116,7 @@ Acquired 只保存 run 身分、experiment、point、roles 與事件時間，不
 
 `RecordsLedger.read_events_snapshot()` 供唯讀瀏覽完整事件清單，不取得或建立 lock file。它沿用 events 的 schema、重複 ID 與完整尾行驗證，不讀附檔，也不更新 handle 的增量索引。並行 append 的未完成尾行會報錯，caller 可稍後重新查詢。
 
-`ResultEntry.read_contents_snapshot(name, result_root=...)` 與 `RecordsLedger.read_contents_snapshot()` 提供相同無 lock、無寫入的部分讀取。前者保留 setup identity 與 root／entry／records／ledger 的 containment 驗證。兩者驗 JSON、版本、event／run ID、duplicate 與完整尾行，再回傳 detached `LedgerEventContent`。Results index 使用 `acquisition()` 取得時間與 acquired 身分，使用 `saved_paths()` 取得 run ID 與成功輸出的路徑字串。未使用的 origin、attachment、analyzed summary、Labber 路徑與 output metadata 不預驗。Saved paths 不授權開檔，讀檔 consumer 仍先驗 containment。實際消費的壞欄位指名 ledger 行與欄位；整筆 events／snapshot／project 仍完整驗證。
+`ResultEntry.read_contents_snapshot(name, result_root=...)` 與 `RecordsLedger.read_contents_snapshot()` 提供相同無 lock、無寫入的部分讀取。前者保留 global identity 與 root／entry／records／ledger 的 containment 驗證。兩者驗 JSON、版本、event／run ID、duplicate 與完整尾行，再回傳 detached `LedgerEventContent`。Results index 使用 `acquisition()` 取得時間與 acquired 身分，使用 `saved_paths()` 取得 run ID 與成功輸出的路徑字串。未使用的 origin、attachment、analyzed summary、Labber 路徑與 output metadata 不預驗。Saved paths 不授權開檔，讀檔 consumer 仍先驗 containment。實際消費的壞欄位指名 ledger 行與欄位；整筆 events／snapshot／project 仍完整驗證。
 
 其餘讀取與追加都持同一 resolved path 對應的 per-user runtime lock，位置見 [resources owner](../README.md#檔案鎖)。每個 RecordsLedger handle 保存已驗證的 byte offset 與 event_id 索引，正常追加只解析新尾段。前 4096 bytes、上次 offset 前最後一行或檔案身分改變、檔案縮短，以及同大小但修改時間改變時，重新驗證整份 ledger。Ledger 的契約是 append-only。同 inode、相同頭部與前次尾行下，中段原地改寫並增長不在增量偵測範圍；`reload()` 明確從頭驗證並更新索引。回傳的事件互相隔離，附檔內容不快取。
 
@@ -126,7 +126,7 @@ Acquired 只保存 run 身分、experiment、point、roles 與事件時間，不
 
 讀取 1.0 與較新 1.x 時，envelope 與 kind-specific payload 忽略不支援欄位，包括舊 cfg_summary。歷史 ImportPayload 只保留 source_event_id 與 source_event_json，不解讀 source_entry_id。`get` 的 raw event_json 保留原行，讀取不改寫行或附檔。Index 不驗未使用的 attachment reference。`get` 真正讀附件前，先驗 `records/<event-id>.json` canonical reference，再確認實體路徑未經 symlink 逃出 records。帶 record 的 append 先發布新 JSON 附檔，再追加事件，不修改 caller model 或既有附檔。失敗可以留下孤兒附檔或不完整尾行，不提供 crash recovery。
 
-`ResultEntry.record_analysis(analysis_kind, *, run_ids, summary, record=None)` 記錄跨 run 分析，回傳可供 `ledger.get(id)` 查詢的事件 UUID。事件保留 caller 的分析種類、輸入 runs 順序與 JSON 摘要，origin 為 notebook；不查 run 資料，也不要求工作點。非 None 的 record 交給 ledger 保存與引用，內容格式由 caller 決定。入口只記錄分析，不寫回值；使用者以一般 point 或 setup 編輯寫入值，需要時自行寫 metadata，Entry 不自動連回分析事件。
+`ResultEntry.record_analysis(analysis_kind, *, run_ids, summary, record=None)` 記錄跨 run 分析，回傳可供 `ledger.get(id)` 查詢的事件 UUID。事件保留 caller 的分析種類、輸入 runs 順序與 JSON 摘要，origin 為 notebook；不查 run 資料，也不要求工作點。非 None 的 record 交給 ledger 保存與引用，內容格式由 caller 決定。入口只記錄分析，不寫回值；使用者以一般 point 或 global 編輯寫入值，需要時自行寫 metadata，Entry 不自動連回分析事件。
 
 Accepted 不要求前序事件或 run。Producer 先 append accepted，再提交值與 metadata。Point commit 失敗時 accepted 可以保留，值與 metadata 仍由 DocumentStore 單檔交易控制。Ledger 鎖不延伸到 point；兩者不是跨檔交易。
 
@@ -137,7 +137,7 @@ Kind 與欄位由 caller 註冊，框架不指定實驗 kind。任一筆驗證�
 
 `writeback` 提供共用 parameter／module／waveform／record 項目與 `apply_writeback`。RecordWriteback 接受具體元件名與 producer JSON 欄位，補上 captured run_id、目的地 point、accepted 時間與事件 source。Entry target 的 point 為 None，ledger 與 record row 都可保存 null。
 
-Writeback 入口遞迴將 dict／list 內的 numpy floating／integer scalar 轉為 Python float／int，不修改 producer 的資料。Float 沿用 Python rounding，integer 保留精確值；非有限結果與其他非 JSON 值仍在追加 accepted 前拒絕。Ledger 與 record sink 使用同一份正規化 JSON；dev 欄位選填，caller 單位不轉換。Caller 傳入固定文件的 write target、已解析的具體路徑，以及具名 evidence，包含 run_id、origin 與可選 source。`PointWritebackTarget(point, storage)` 綁 point 文件，`EntryWritebackTarget(entry.setup, capture_entry_storage(entry))` 綁 entry 文件，兩者共用同一套單檔批次提交。Entry target 的 point 為 None，參數與 library 編輯不改既有 point。ParameterWriteback 的 metadata 為 None 時保留該 path 既有 metadata，mapping 則在同筆 point commit 整份替換；executor 不加入事件、來源或時間。Module／waveform 項目只交 Spec 給 library owner，不保存 per-leaf stderr 或來源。流程追加一筆 accepted 後依序提交 point 參數一組、library module／waveform 一組與逐筆 records，組內保留供應順序。Point 與 library 各用一次 edit；任一項無效整組不寫，首錯停止。成功回 `WritebackResult(event_id, committed)`，每筆 committed value 由實際 setter 在逐項 draft 驗證後捕捉，只有整組 commit 成功才回傳，record 使用 append 回傳的完整 row。Committed 依實際提交順序，accepted payload writes 依供應順序；CommittedWrite.index 保留供應 tuple 的位置，重複 path 也可逐項關聯。項目失敗拋 `WritebackApplyError(result)`，同份 result 只保留已提交組的全部項目，event_id／applied 與原始 cause 仍可查，前組與事件保留。applied 仍計項目數，失敗組計零。GUI 不在整批後重讀目的地，因此父／子路徑後項覆寫不改首筆 receipt。Ledger append 失敗原樣傳播，不寫值。Library 在首次執行 library 項目時才開啟，key、family 與持久值驗證仍由 library owner 負責。流程不 import frontend 或 experiment，不建立跨文件交易或回復框架。Notebook 與 GUI 共用 executor。GUI context owner 綁定公開批次 setters，每個成功文件發布一次；GUI service 標記該前綴 applied 後原樣拋 cause，保持既有 wire 錯誤分類。
+Writeback 入口遞迴將 dict／list 內的 numpy floating／integer scalar 轉為 Python float／int，不修改 producer 的資料。Float 沿用 Python rounding，integer 保留精確值；非有限結果與其他非 JSON 值仍在追加 accepted 前拒絕。Ledger 與 record sink 使用同一份正規化 JSON；dev 欄位選填，caller 單位不轉換。Caller 傳入固定文件的 write target、已解析的具體路徑，以及具名 evidence，包含 run_id、origin 與可選 source。`PointWritebackTarget(point, storage)` 綁 point 文件，`EntryWritebackTarget(entry.parameters(), capture_entry_storage(entry))` 綁 entry 文件，兩者共用同一套單檔批次提交。Entry target 的 point 為 None，參數與 library 編輯不改既有 point。ParameterWriteback 的 metadata 為 None 時保留該 path 既有 metadata，mapping 則在同筆 point commit 整份替換；executor 不加入事件、來源或時間。Module／waveform 項目只交 Spec 給 library owner，不保存 per-leaf stderr 或來源。流程追加一筆 accepted 後依序提交 point 參數一組、library module／waveform 一組與逐筆 records，組內保留供應順序。Point 與 library 各用一次 edit；任一項無效整組不寫，首錯停止。成功回 `WritebackResult(event_id, committed)`，每筆 committed value 由實際 setter 在逐項 draft 驗證後捕捉，只有整組 commit 成功才回傳，record 使用 append 回傳的完整 row。Committed 依實際提交順序，accepted payload writes 依供應順序；CommittedWrite.index 保留供應 tuple 的位置，重複 path 也可逐項關聯。項目失敗拋 `WritebackApplyError(result)`，同份 result 只保留已提交組的全部項目，event_id／applied 與原始 cause 仍可查，前組與事件保留。applied 仍計項目數，失敗組計零。GUI 不在整批後重讀目的地，因此父／子路徑後項覆寫不改首筆 receipt。Ledger append 失敗原樣傳播，不寫值。Library 在首次執行 library 項目時才開啟，key、family 與持久值驗證仍由 library owner 負責。流程不 import frontend 或 experiment，不建立跨文件交易或回復框架。Notebook 與 GUI 共用 executor。GUI context owner 綁定公開批次 setters，每個成功文件發布一次；GUI service 標記該前綴 applied 後原樣拋 cause，保持既有 wire 錯誤分類。
 
 ## 輸出位置
 
@@ -145,7 +145,7 @@ Writeback 入口遞迴將 dict／list 內的 numpy floating／integer scalar 轉
 
 `ResultEntry.dispersive_path` 回傳 Result 條目下的 `dispersive/` 目錄。屬性不建立目錄、不讀 component 或 ledger，並拒絕逃出條目的 symlink。Entry 不提供這些檔案的 codec，也不把它們複製到 point。Caller 以 component 名或自選名稱組成 JSON 檔名，再經 [resources 分析格式 owner](../README.md#entry-分析格式檔) 的具名 load/save 讀寫。
 
-`ResultEntry.result_path` 是唯讀的 Result 條目路徑，`database_path` 是唯讀的 Database 輸出位置，不是上層 roots，也不保證 Database 已存在。`SaveLayout` 接收這兩個 exact paths、caller 產生的 stem、可選 point 與帶 timezone 的 saved_at，集中計算輸出位置。Stem 原樣使用，框架不補前綴或 run_id；非法路徑段直接拒絕。它不建立目錄或檔案。共用 saver 使用這些輸出，entry 不編排保存。`capture_point_storage(view, roles=...)` 從 bound point 的 constructor origin 與 cached snapshot 捕捉 entry 身分、名稱、point、description、exact paths 與 scoped ledger，不 refresh 或重開 ResultEntry。可選的 RoleView 必須綁同一 point source 與 Result／Database roots，另一個合法 handle 可以使用。錯誤來源即使 roles 為空也拒絕。回傳的 roles 是解析當下名稱的隔離唯讀 mapping，不重新解角色或查目前焦點；省略 roles 時回傳空 mapping。
+`ResultEntry.result_path` 是唯讀的 Result 條目路徑，`database_path` 是唯讀的 Database 輸出位置，不是上層 roots，也不保證 Database 已存在。`SaveLayout` 接收這兩個 exact paths、caller 產生的 stem、可選 point 與帶 timezone 的 saved_at，集中計算輸出位置。Stem 原樣使用，框架不補前綴或 run_id；非法路徑段直接拒絕。它不建立目錄或檔案。共用 saver 使用這些輸出，entry 不編排保存。`capture_point_storage(view, roles=...)` 仍拒絕 global view。它從 bound point 的 constructor origin 與 cached snapshot 捕捉 entry 身分、名稱、point、description、exact paths 與 scoped ledger，不 refresh 或重開 ResultEntry。可選的 RoleView 必須綁同一 point source 與 Result／Database roots，另一個合法 handle 可以使用。錯誤來源即使 roles 為空也拒絕。回傳的 roles 是解析當下名稱的隔離唯讀 mapping，不重新解角色或查目前焦點；省略 roles 時回傳空 mapping。
 
 `capture_entry_storage(entry)` 從已開啟 entry 捕捉 cached description、exact paths 與 scoped ledger，不重讀參數、不選 point。它與 capture_point_storage 都回傳 `StorageBinding`，point 在 entry scope 為 None。Entry capture 的 roles 為空 mapping。
 
@@ -153,7 +153,7 @@ Writeback 入口遞迴將 dict／list 內的 numpy floating／integer scalar 轉
 
 `SaveLayout.run_path` 回傳 exact absolute run 目錄，不建立檔案。完整 run_id 由 native metadata 或 ledger 證據識別，不從 stem 推論。
 
-`bind_run_outputs(result_root=..., database_root=..., entry_name=..., point=...)` 綁定目前 roots 與記錄的名稱，不開 ResultEntry、不讀參數，也不要求 entry／point 存在。只有 None 名稱使用 unnamed_entry。None point 保持 None，Result 圖副本使用 entry 層 figures。顯式空字串與其他非法路徑段會拒絕，不建立輸出。回傳的 RunOutputBinding 透過 layout 計算 SaveLayout，prepare_ledger 只建立 Result 輸出目錄並綁定 ledger，不製造 setup 或 point 文件。Entry 名稱、point 與 symlink 邊界仍由 resources 驗證。
+`bind_run_outputs(result_root=..., database_root=..., entry_name=..., point=...)` 綁定目前 roots 與記錄的名稱，不開 ResultEntry、不讀參數，也不要求 entry／point 存在。只有 None 名稱使用 unnamed_entry。None point 保持 None，Result 圖副本使用 entry 層 figures。顯式空字串與其他非法路徑段會拒絕，不建立輸出。回傳的 RunOutputBinding 透過 layout 計算 SaveLayout，prepare_ledger 只建立 Result 輸出目錄並綁定 ledger，不製造 global 或 point 文件。Entry 名稱、point 與 symlink 邊界仍由 resources 驗證。
 
 Run 目錄為 `Database/<name>/runs/<stem>/`。Data 回傳其中的 data.h5 與當地日期樹 `Labber/YYYY/MM/Data_MMDD/<stem>.hdf5`。只有 Labber 初始目的已存在時才交既有 helper 取 numeric suffix，不作跨程序原子保留。
 
@@ -169,15 +169,15 @@ Figure 回傳 run 的 `figures/<圖名>.png` 與 Result 的 point 或全域 figu
 
 DocumentStore 擁有單檔衝突檢查與 atomic replace。檔案、快照與視圖使用相同工作單位。不同 leaf 可合併，同 leaf 衝突拒絕整筆交易。Entry 不提供條目鎖或多檔交易。
 
-Model 的 before validator 可把舊欄位改成新欄位。Setup／point 的 open、refresh 與空 edit 不寫檔。Library 讀取同樣不改檔，無效 Spec 略過並透過 snapshot.invalid_entries() 回報原因。非空 commit 在最新 normalized tree 合併與完整驗證，再把序列化差異套回 raw YAML，保留未改節點的引號、註解與順序。保存消費 actual model_dump 輸出，不用原欄位值繞過 serializer。格式轉換不生成 metadata。
+Model 的 before validator 可把舊欄位改成新欄位。Global／point 的 open、refresh 與空 edit 不寫檔。Library 讀取同樣不改檔，無效 Spec 略過並透過 snapshot.invalid_entries() 回報原因。非空 commit 在最新 normalized tree 合併與完整驗證，再把序列化差異套回 raw YAML，保留未改節點的引號、註解與順序。保存消費 actual model_dump 輸出，不用原欄位值繞過 serializer。格式轉換不生成 metadata。
 
 Format 與 format_version 只描述容器結構。檔頭不符或 major 不同時拒絕載入。較新 2.x minor 保留容器層的未知欄位與 metadata 內容，不覆寫元件或 nested model 的 extra 策略。任何 minor 的完整投影與 edit 都由原 model 驗證完整元件 input：forbid 拒絕未知欄位，ignore 丟棄它們，allow 保留並公開它們。Ignore 丟棄的欄位在非空 commit 時移除。元件的 defaults、validators 與舊寫法演進由定義者決定，不綁容器版本號。Load 與一般 refresh 保留未使用的 component 內容。實際 leaf 讀取、完整 component 投影與 edit 各按自己的驗證邊界報錯。Edit 與 strict refresh 仍驗證完整文件，失敗不提交值或 metadata。
 
 容器層剩餘未知欄位的 serialization 位置若不再是 mapping，或 key 已被 serializer 佔用，直接 raise，不猜重塑後的位置。
 
-Setup、point 與 entry template 另有整份文件的 `schema_version: N`，不取代 `format_version`。Caller 與 models 一起呼叫 `component_registry.configure_schema(ParameterSchemaPolicy(current_version, upgrade_command))`。未配置時拒絕使用，不採框架預設版本。讀取、refresh 與 commit 只接受目前版本，缺版或不同版本的錯誤列出來源、文件版本與目前版本，不改檔。錯誤的 Preview 與 Apply 指令以整個 entry 目錄為目標，template 則以該檔案為目標。Apply 含 `--apply`，複製執行會先備份再改檔。`create` 寫 caller 的目前版本，seed／clone 複製已驗證來源的版本。`read_identity` 仍只讀建立時間，不解析 component schema。
+Global、point 與 entry template 另有整份文件的 `schema_version: N`，不取代 `format_version`。Caller 與 models 一起呼叫 `component_registry.configure_schema(ParameterSchemaPolicy(current_version, upgrade_command))`。未配置時拒絕使用，不採框架預設版本。讀取、refresh 與 commit 只接受目前版本，缺版或不同版本的錯誤列出來源、文件版本與目前版本，不改檔。錯誤的 Preview 與 Apply 指令以整個 entry 目錄為目標，template 則以該檔案為目標。Apply 含 `--apply`，複製執行會先備份再改檔。`create` 寫 caller 的目前版本，seed／clone 複製已驗證來源的版本。`read_identity` 仍只讀建立時間，不解析 component schema。
 
-優先加有預設值的欄位，不為新增 optional 欄位升版。結構變更才新增純函式步驟。`entry_component_paths(entry_root)` 不解析 schema，回傳 setup 與排序後的所有 point YAML 路徑，供離線升級使用。它以 `parameters.yaml` 識別 entry，不要求 point 的 `library.yaml` 存在。`resources.parameter_upgrade` 擁有通用升級鏈、逐檔 dry-run、備份與 apply；lab 擁有版本、完整分類與步驟。它不是 runtime 相容 loader，也不依賴可刪的 migrations。公開型別與 callback 契約見該模組 docstring，設計依據見 ADR-0063。
+優先加有預設值的欄位，不為新增 optional 欄位升版。結構變更才新增純函式步驟。`entry_component_paths(entry_root)` 不解析 schema，回傳 global 與排序後的所有 point YAML 路徑，供離線升級使用。它以 `parameters.yaml` 識別 entry，不要求 point 的 `library.yaml` 存在。`resources.parameter_upgrade` 擁有通用升級鏈、逐檔 dry-run、備份與 apply；lab 擁有版本、完整分類與步驟。它不是 runtime 相容 loader，也不依賴可刪的 migrations。公開型別與 callback 契約見該模組 docstring，設計依據見 ADR-0063。
 
 List 是整欄衝突與通知單位。等長編輯按位置保留未改資料。Resize 保留 typed base／draft 的最長相等前綴，替換後綴不沿用舊位置的 future keys。框架不推測元素身分。
 
@@ -192,11 +192,11 @@ Inspect 保存所選 Destination。選 point 時改 entry 表只更新 entry cac
 捕捉作用中文件組與 alias 表，Run 使用固定 capture。GUI 不自動初始化 point alias，
 也不使用 Notebook 的 focus／via 推論。Notebook 不讀 aliases.yaml，MCP temporary overrides 不寫它。
 
-`PointView.resolve` 只使用 bound point 的快照。Sequence 取 role registry 的 RoleSpec，Mapping 可覆寫 kind pattern 與 via。未傳角色表時使用 caller 設定的有序 shorthand，沒有設定就報錯。
+`ParameterView.resolve` 使用 bound global 或 point 的快照。Sequence 取 role registry 的 RoleSpec，Mapping 可覆寫 kind pattern 與 via。未傳角色表時使用 caller 設定的有序 shorthand，沒有設定就報錯。
 
 解析依序使用 explicit、匹配焦點、已解析元件的角色同名欄位或 via。Via 首段是已解析角色，其餘是元件內路徑。路徑的字串值視為目標元件名稱，缺少目標在 resolve 報錯，普通載入不預檢整圖引用。焦點只填一個角色。Notebook roles resolver 使用 RoleRegistry.default_focus 選取符合 focus kind patterns 的唯一候選。
 
-Explicit 的 None 明確不綁該角色，不改用焦點或 via；讀取時指名 RoleResolutionError。省略 explicit key 才允許自動推論。自動推論缺引用或多個候選時省略該角色；via 的來源角色未綁時也省略衍生角色。未知角色、多餘 explicit、明確指定不存在的元件、實際 dangling 引用或 kind 不符仍以 RoleResolutionError 回報。RoleView 保留同次宣告，讀取已宣告未綁角色（包括 hasattr）時指名 RoleResolutionError；未知 attribute 仍為 AttributeError。RoleResolutionError 是 ValueError，工具不能把未綁角色視為不存在的 attribute。它的訊息指名角色與原因，只在有要求 kind 或使用焦點時列出它們；raise 端有更合適的措辭時（例如 session alias 表）以 message 提供完整訊息，`reason` 仍是可比對的短分類。RoleView 固定解析當下的名稱映射與 owning point 來源，元件值仍跟隨 PointView，回傳映射不可修改。來源由 PointView.resolve 捕捉；存檔 caller 只交給 capture_point_storage 驗證，不比較 callback 或讀 private binding。
+Explicit 的 None 明確不綁該角色，不改用焦點或 via；讀取時指名 RoleResolutionError。省略 explicit key 才允許自動推論。自動推論缺引用或多個候選時省略該角色；via 的來源角色未綁時也省略衍生角色。未知角色、多餘 explicit、明確指定不存在的元件、實際 dangling 引用或 kind 不符仍以 RoleResolutionError 回報。RoleView 保留同次宣告，讀取已宣告未綁角色（包括 hasattr）時指名 RoleResolutionError；未知 attribute 仍為 AttributeError。RoleResolutionError 是 ValueError，工具不能把未綁角色視為不存在的 attribute。它的訊息指名角色與原因，只在有要求 kind 或使用焦點時列出它們；raise 端有更合適的措辭時（例如 session alias 表）以 message 提供完整訊息，`reason` 仍是可比對的短分類。RoleView 固定解析當下的名稱映射與 owning global／point 來源，元件值仍跟隨 ParameterView，回傳映射不可修改。來源由 ParameterView.resolve 捕捉；存檔 caller 只交給 capture_point_storage 驗證，不比較 callback 或讀 private binding。
 
 `rename_entry(old, new, *, result_root=...)` 只移動 Result，不改文件內容，不檢查或移動 Database。目的 Result 已存在就拒絕，I/O 錯誤直接傳遞，沒有雙目錄復原流程。既有 handles 仍綁原路徑，必須以新名重新 open；之後新 Run 的 Save 使用 `Database/<新名>/`，既有 Run 重存仍沿記錄名稱，舊輸出留在 `Database/<舊名>/`。
 

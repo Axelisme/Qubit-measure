@@ -51,8 +51,8 @@ def test_static_units_follow_declared_fields_without_reading_values(
 
     with registered_model("notebook/static-units", Measured) as kind:
         entry, _, _ = create_entry(tmp_path)
-        entry.setup.add_component("N1", kind=kind, ext={"frequency": 5.0})
-        view = entry.setup if owner == "setup" else entry.new_point("working")
+        entry.parameters().add_component("N1", kind=kind, ext={"frequency": 5.0})
+        view = entry.parameters() if owner == "setup" else entry.new_point("working")
         document = snapshot(view)
         assert document_unit(document, "N1.frequency") == "MHz"
         assert document_unit(document, "N1.unset") == "us"
@@ -87,7 +87,7 @@ def test_static_units_reject_unaddressable_dotted_paths(
 ) -> None:
     entry, _, _ = create_entry(tmp_path)
     with pytest.raises(ValueError, match="dotted path"):
-        document_unit(snapshot(entry.setup), path)
+        document_unit(snapshot(entry.parameters()), path)
 
 
 @pytest.mark.parametrize("unit", ["", 3, None])
@@ -99,9 +99,9 @@ def test_static_units_reject_malformed_metadata(
 
     with registered_model("notebook/invalid-unit", Measured) as kind:
         entry, _, _ = create_entry(tmp_path)
-        entry.setup.add_component("N1", kind=kind)
+        entry.parameters().add_component("N1", kind=kind)
         with pytest.raises(ValueError, match="unit"):
-            document_unit(snapshot(entry.setup), "N1.value")
+            document_unit(snapshot(entry.parameters()), "N1.value")
 
 
 @pytest.mark.parametrize("owner", ["setup", "point"])
@@ -114,8 +114,8 @@ def test_public_snapshot_and_source_path_preserve_cached_binding_and_isolation(
     with registered_model("notebook/read-snapshot", Measured) as kind:
         entry, results, database = create_entry(tmp_path)
         for name in ("N1", "snapshot", "source_path", "path", "accept_source"):
-            entry.setup.add_component(name, kind=kind, values=[2, 3])
-        view = entry.setup if owner == "setup" else entry.new_point("working")
+            entry.parameters().add_component(name, kind=kind, values=[2, 3])
+        view = entry.parameters() if owner == "setup" else entry.new_point("working")
         with view.edit() as draft:
             draft.set_meta("N1.values", {"source": "kept"})
         expected = (
@@ -145,7 +145,9 @@ def test_public_snapshot_and_source_path_preserve_cached_binding_and_isolation(
         assert document_value(snapshot(view), "N1.values") == [2, 3]
         assert snapshot(view).general.ext == {}
         other = ResultEntry.open("entry", result_root=results, database_root=database)
-        other_view = other.setup if owner == "setup" else other.use_point("working")
+        other_view = (
+            other.parameters() if owner == "setup" else other.parameters("working")
+        )
         other_view.N1.values = [7]
         assert document_value(snapshot(view), "N1.values") == [2, 3]
         view.refresh()
@@ -165,8 +167,8 @@ def test_public_edit_snapshot_isolates_uncommitted_values_and_metadata(
 
     with registered_model("notebook/read-draft", Measured) as kind:
         entry, _, _ = create_entry(tmp_path)
-        entry.setup.add_component("N1", kind=kind, freq=10.0)
-        view = entry.setup if owner == "setup" else entry.new_point("working")
+        entry.parameters().add_component("N1", kind=kind, freq=10.0)
+        view = entry.parameters() if owner == "setup" else entry.new_point("working")
         before = source_path(view).read_bytes()
 
         def abort_edit() -> None:
@@ -217,7 +219,7 @@ def test_document_value_reads_logical_fields_extras_and_containers_without_hooks
 
     with registered_model("notebook/read-logical", Measured) as kind:
         entry, _, _ = create_entry(tmp_path)
-        entry.setup.add_component(
+        entry.parameters().add_component(
             "N1",
             kind=kind,
             freq=10.0,
@@ -227,7 +229,7 @@ def test_document_value_reads_logical_fields_extras_and_containers_without_hooks
             model_config={"marker": "data"},
             model_dump="extra",
         )
-        view = entry.setup if owner == "setup" else entry.new_point("working")
+        view = entry.parameters() if owner == "setup" else entry.new_point("working")
         view.general.ext["temperature"] = 0.03
         document = snapshot(view)
         before_calls = calls.copy()
@@ -277,7 +279,7 @@ def test_document_fields_preserve_logical_rows_metadata_and_literal_keys(
 
     with registered_model("notebook/fields", Measured) as kind:
         entry, _, _ = create_entry(tmp_path)
-        entry.setup.add_component(
+        entry.parameters().add_component(
             "N1",
             kind=kind,
             freq=10.0,
@@ -286,10 +288,10 @@ def test_document_fields_preserve_logical_rows_metadata_and_literal_keys(
             empty={},
             nullable=None,
         )
-        with entry.setup.edit() as draft:
+        with entry.parameters().edit() as draft:
             draft.set_meta("N1.freq", {"stderr": 0.25, "note": ["caller"]})
         if owner == "setup":
-            view = entry.setup
+            view = entry.parameters()
         else:
             entry.new_point("seed")
             view = entry.new_point("working", mode="clone", clone_from="seed")
@@ -338,7 +340,7 @@ def test_document_read_and_meta_reject_unaddressable_paths(
     tmp_path: Path, path: str
 ) -> None:
     entry, _, _ = create_entry(tmp_path)
-    document = snapshot(entry.setup)
+    document = snapshot(entry.parameters())
     for read in (document_value, document_meta):
         with pytest.raises(ValueError, match="path"):
             read(document, path)
@@ -351,7 +353,7 @@ def test_document_value_missing_is_distinct_from_metadata_absence(
     tmp_path: Path, path: str
 ) -> None:
     entry, _, _ = create_entry(tmp_path)
-    document = snapshot(entry.setup)
+    document = snapshot(entry.parameters())
     with pytest.raises(AttributeError, match=path):
         document_value(document, path)
     assert document_meta(document, path) is None
@@ -373,8 +375,8 @@ def test_public_document_read_preserves_forward_minor_visibility(
     Measured.model_rebuild(force=True)
     with registered_model("notebook/read-forward", Measured) as kind:
         entry, _, _ = create_entry(tmp_path)
-        entry.setup.add_component("N1", kind=kind, freq=10.0)
-        path = source_path(entry.setup)
+        entry.parameters().add_component("N1", kind=kind, freq=10.0)
+        path = source_path(entry.parameters())
         yaml = YAML(typ="rt")
         stored = yaml.load(path)
         stored["format_version"] = "2.2"
@@ -383,14 +385,14 @@ def test_public_document_read_preserves_forward_minor_visibility(
         yaml.dump(stored, path)
         before = path.read_bytes()
         if extra_policy == "forbid":
-            entry.setup.refresh()
-            assert entry.setup.N1.freq == 10.0
+            entry.parameters().refresh()
+            assert entry.parameters().N1.freq == 10.0
             with pytest.raises(ValidationError, match="future"):
-                snapshot(entry.setup)
+                snapshot(entry.parameters())
             assert path.read_bytes() == before
             return
-        entry.setup.refresh()
-        document = snapshot(entry.setup)
+        entry.parameters().refresh()
+        document = snapshot(entry.parameters())
         if extra_policy == "allow":
             assert document_value(document, "N1.future.count") == 2
         else:

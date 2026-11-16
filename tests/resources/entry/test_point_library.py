@@ -232,7 +232,7 @@ def test_point_without_library_can_be_selected_without_creating_files(
     path.unlink()
     before = sorted(entry.result_path.rglob("*"))
 
-    point = entry.use_point("portable")
+    point = entry.parameters("portable")
     library = entry.module_library("portable")
 
     assert point.description is None

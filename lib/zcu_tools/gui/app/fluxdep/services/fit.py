@@ -406,8 +406,8 @@ class FitService:
             )
 
         target = require_target(self._state.project)
-        target.resource.setup.refresh()
-        model = snapshot(target.resource.setup).components[target.component]
+        target.resource.parameters().refresh()
+        model = snapshot(target.resource.parameters()).components[target.component]
         if self._export_planner is None:
             raise FailedPreconditionError(
                 "Component export planner is not configured",
@@ -446,7 +446,7 @@ class FitService:
             "EC": EC,
             "EL": EL,
         }
-        with target.resource.setup.edit() as draft:
+        with target.resource.parameters().edit() as draft:
             for field, value in values.items():
                 if field in type(model).model_fields:
                     draft.set(f"{target.component}.{field}", value)

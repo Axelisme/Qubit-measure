@@ -40,7 +40,7 @@ def test_seed_batch_converts_before_current_schema_validation(
     if dry_run:
         assert not (request_data.results_root / request_data.name).exists()
     else:
-        setup = snapshot(open_entry(request_data).setup)
+        setup = snapshot(open_entry(request_data).parameters())
         assert document_value(setup, "C1.frequency") == 3.0
 
 
@@ -102,7 +102,7 @@ def test_value_batch_converts_whole_group_before_current_validation(
     if dry_run:
         assert not (request_data.results_root / request_data.name).exists()
     else:
-        setup = snapshot(open_entry(request_data).setup)
+        setup = snapshot(open_entry(request_data).parameters())
         assert document_value(setup, "C1.frequency") == 9.0
         assert document_value(setup, "general.ext.unit") == "V"
 
@@ -211,7 +211,7 @@ def test_batch_preserves_omitted_setting_without_dropping_explicit_null(
     component_registry.register("migration_optional_probe", OptionalSettingProbe)
     try:
         report = migrate(request_data, mapping)
-        setup = snapshot(open_entry(request_data).setup)
+        setup = snapshot(open_entry(request_data).parameters())
         if explicit_null:
             assert report.pending
             assert "optional_setting cannot be null" in report.pending[0].reason

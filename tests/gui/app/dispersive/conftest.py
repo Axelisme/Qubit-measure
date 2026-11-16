@@ -72,13 +72,15 @@ def analysis_entry(tmp_path):
             result_root=tmp_path / "result",
             database_root=tmp_path / "Database",
         )
-        entry.setup.add_component(
+        entry.parameters().add_component(
             "q1", kind="qubit/fluxonium/test_plain", EJ=4.0, EC=1.0, EL=0.5
         )
-        entry.setup.add_component(
+        entry.parameters().add_component(
             "q2", kind="qubit/fluxonium/test_coupled", EJ=6.0, EC=1.5, EL=0.7
         )
-        entry.setup.add_component("r1", kind="resonator/test_dispersive", freq=5750.0)
+        entry.parameters().add_component(
+            "r1", kind="resonator/test_dispersive", freq=5750.0
+        )
         entry.save_aliases(EntryAliases(aliases={"qubit": "q1", "resonator": "r1"}))
         entry.predictors_path.mkdir()
         entry.dispersive_path.mkdir()

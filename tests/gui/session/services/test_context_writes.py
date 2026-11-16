@@ -36,7 +36,7 @@ from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.resources.document_store import ConflictError
 from zcu_tools.resources.entry import (
     EditView,
-    PointView,
+    ParameterView,
     ResultEntry,
     document_meta,
     snapshot,
@@ -307,7 +307,7 @@ def test_global_component_add_and_template_edit_update_only_future_captures(
         assert session.control.read_context().target == old.target
         assert "Q1" not in old.whole_document().components
         assert (
-            snapshot(session.entry.setup).components["Q1"].model_dump()["rate"]
+            snapshot(session.entry.parameters()).components["Q1"].model_dump()["rate"]
             == 5250.0
         )
     finally:
@@ -328,7 +328,7 @@ def test_global_parameter_writes_commit_once_and_detached_reads_do_not_select(
 
     assert session.control.read_context().value("general.ext.flux_value") == 0.2
     assert old.value("general.ext") == {}
-    assert snapshot(session.entry.setup).general.ext["flux_value"] == 0.2
+    assert snapshot(session.entry.parameters()).general.ext["flux_value"] == 0.2
     assert session.control.get_source_binding() == binding
     assert len(facts) == 1
     selected = _select(session, "local")
@@ -368,7 +368,7 @@ def test_global_writeback_and_library_commands_use_entry_files_and_publish_once(
     assert context.read_context().value("general.ext.flux_value") == 0.25
     assert context.read_context().library.waveform_keys() == ("Q1.waveforms.base",)
     assert before.library.waveform_keys() == ()
-    assert snapshot(session.entry.setup).general.ext["flux_value"] == 0.25
+    assert snapshot(session.entry.parameters()).general.ext["flux_value"] == 0.25
     assert session.entry.module_library().snapshot().waveform_keys() == (
         "Q1.waveforms.base",
     )
@@ -426,7 +426,7 @@ def test_rejected_global_writeback_does_not_publish_external_parameter_revision(
         result_root=session.entry.result_path.parent,
         database_root=session.entry.database_path.parent,
     )
-    with external.setup.edit() as draft:
+    with external.parameters().edit() as draft:
         draft.set("general.ext.external", 7.0)
     path = session.entry.result_path / "parameters.yaml"
     candidate = path.read_bytes()
@@ -461,7 +461,7 @@ def test_read_target_missing_point_does_not_create_it(session: _Session) -> None
 
 def _persisted(entry: ResultEntry, target: SavedPoint, kind: Kind) -> YamlValue:
     if kind == "parameter":
-        return snapshot(entry.use_point(target.point)).general.ext["flux_value"]
+        return snapshot(entry.parameters(target.point)).general.ext["flux_value"]
     library = entry.module_library(
         target.point,
         assets=ArbWaveformDatabase.info_at(entry.database_path / "arb_waveforms"),
@@ -476,7 +476,7 @@ def test_parameter_setter_commits_caller_metadata_and_keeps_old_capture(
     session: _Session, metadata: YamlMap | None
 ) -> None:
     target = _select(session, "a")
-    with session.entry.use_point("a").edit() as draft:
+    with session.entry.parameters("a").edit() as draft:
         draft.set_meta("general.ext.flux_value", {"comment": "old"})
     capture = session.control.read_context()
     old_document = capture.document()
@@ -485,7 +485,7 @@ def test_parameter_setter_commits_caller_metadata_and_keeps_old_capture(
     assert _value(current, "parameter") == pytest.approx(0.2)
     expected = {"comment": "old"} if metadata is None else metadata
     assert document_meta(current.document(), "general.ext.flux_value") == expected
-    stored = snapshot(session.entry.use_point("a"))
+    stored = snapshot(session.entry.parameters("a"))
     assert document_meta(stored, "general.ext.flux_value") == expected
     assert capture.document() == old_document
 
@@ -628,7 +628,7 @@ def test_detached_description_write_updates_cache_without_changing_selected_sour
     }
     assert after_descriptions == {**descriptions, "a": "changed while detached"}
     assert (
-        snapshot(session.entry.use_point("a")).general.description
+        snapshot(session.entry.parameters("a")).general.description
         == "changed while detached"
     )
     after = session.control.read_context()
@@ -675,22 +675,22 @@ def test_parameter_conflict_propagates_without_publishing_candidate(
     session.control.set_parameter(target, "general.ext.flux_value", 0.1)
     capture = session.control.read_context()
     version = session.state.version.get("context")
-    other = session.entry.use_point("a")
-    original = PointView.edit
+    other = session.entry.parameters("a")
+    original = ParameterView.edit
 
     @contextmanager
-    def interleaved(view: PointView) -> Generator[EditView]:
+    def interleaved(view: ParameterView) -> Generator[EditView]:
         with original(view) as draft:
             yield draft
             with original(other) as external:
                 external.set("general.ext.flux_value", 0.3)
 
-    monkeypatch.setattr(PointView, "edit", interleaved)
+    monkeypatch.setattr(ParameterView, "edit", interleaved)
     with pytest.raises(ConflictError):
         session.control.set_parameter(target, "general.ext.flux_value", 0.2)
     assert session.control.read_context().document() == capture.document()
     assert session.state.version.get("context") == version
-    assert snapshot(session.entry.use_point("a")).general.ext["flux_value"] == 0.3
+    assert snapshot(session.entry.parameters("a")).general.ext["flux_value"] == 0.3
 
 
 @pytest.mark.parametrize("kind", KINDS)
@@ -767,7 +767,7 @@ def test_shared_writeback_entry_retains_order_metadata_and_failure_prefix(
     assert document_meta(current.document(), "general.description") is None
     assert events == []
     assert session.state.version.get("context") == before
-    assert session.entry.use_point("a").description is None
+    assert session.entry.parameters("a").description is None
 
 
 def test_grouped_writeback_publishes_one_fact_per_committed_document(
@@ -818,7 +818,7 @@ def test_shared_writeback_entry_uses_detached_saved_target(
     assert [(item.path, item.value) for item in result.committed] == [
         ("general.description", "detached")
     ]
-    assert session.entry.use_point("a").description == "detached"
+    assert session.entry.parameters("a").description == "detached"
     assert session.control.read_context().target == second
     assert session.state.version.get("context") == version
     assert session.entry.ledger.get(event_id).event.origin == "mcp"
@@ -837,7 +837,7 @@ def test_sample_only_writeback_rejects_invalid_saved_point_before_acceptance(
     selected = _select(session, "a")
     capture = session.control.read_context()
     points = session.entry.list_points()
-    point_before = snapshot(session.entry.use_point("a")).model_dump(mode="json")
+    point_before = snapshot(session.entry.parameters("a")).model_dump(mode="json")
     version = session.state.version.get("context")
     target = SavedPoint(entry_name=session.entry.result_path.name, point=label)
 
@@ -856,7 +856,7 @@ def test_sample_only_writeback_rejects_invalid_saved_point_before_acceptance(
     assert current.document() == capture.document()
     assert current.library.document() == capture.library.document()
     assert (
-        snapshot(session.entry.use_point("a")).model_dump(mode="json") == point_before
+        snapshot(session.entry.parameters("a")).model_dump(mode="json") == point_before
     )
     assert session.state.version.get("context") == version
 

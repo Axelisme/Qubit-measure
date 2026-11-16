@@ -41,7 +41,7 @@ _LIBRARY_PARTITIONS = ("pulses", "readout", "reset", "waveforms")
 if TYPE_CHECKING:
     from zcu_tools.gui.session.context_types import ContextSourceFault, ContextTarget
     from zcu_tools.resources.context.library import ModuleLibrary
-    from zcu_tools.resources.entry import PointView, ResultEntry, RoleSpec
+    from zcu_tools.resources.entry import ParameterView, ResultEntry, RoleSpec
     from zcu_tools.resources.entry.schema import ParameterDocument
 
 
@@ -180,7 +180,7 @@ class ParameterContext:
     @classmethod
     def from_point(
         cls,
-        point: PointView,
+        point: ParameterView,
         library: ModuleLibrary,
         target: ContextTarget,
         *,
@@ -221,7 +221,7 @@ class ParameterContext:
         Snapshot and storage failures propagate.
         """
         return cls(
-            point=parameter_content(entry.setup),
+            point=parameter_content(entry.parameters()),
             library=library.snapshot(),
             target=target,
             roles=roles,

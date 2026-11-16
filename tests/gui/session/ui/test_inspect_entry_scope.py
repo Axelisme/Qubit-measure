@@ -45,8 +45,8 @@ def entry_ui(
             result_root=tmp_path / "results",
             database_root=tmp_path / "Database",
         )
-        entry.setup.add_component("Q1", kind="fake/drive/a", rate=1200.0)
-        entry.setup.add_component("Q2", kind="fake/drive/a", rate=6500.0)
+        entry.parameters().add_component("Q1", kind="fake/drive/a", rate=1200.0)
+        entry.parameters().add_component("Q2", kind="fake/drive/a", rate=6500.0)
         with entry.module_library().edit() as draft:
             draft.set_waveform("Q1.waveforms.base", ConstWaveformCfg(length=0.1))
         bus = BaseEventBus()

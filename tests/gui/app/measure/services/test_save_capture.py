@@ -55,8 +55,8 @@ def session(tmp_path: Path) -> Generator[SaveSession]:
             result_root=tmp_path / "Result",
             database_root=tmp_path / "Database",
         )
-        entry.setup.add_component("Q1", kind="fake/drive/a")
-        entry.setup.add_component("Q2", kind="fake/drive/a")
+        entry.parameters().add_component("Q1", kind="fake/drive/a")
+        entry.parameters().add_component("Q2", kind="fake/drive/a")
         entry.new_point("p")
         state = State(SessionEnv(parameters=None, soc=None, soccfg=None))
         bus = BaseEventBus()

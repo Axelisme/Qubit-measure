@@ -1,6 +1,6 @@
 # gui/session/ — 量測 session core
 
-**Last updated:** 2026-11-16，DeviceProtocol 共用 port
+**Last updated:** 2026-11-16，global／point 共用 ParameterView
 
 **讀者：** framework-dev。Session 層的資源綁定、operation 與共用對話框分工。
 
@@ -9,7 +9,7 @@ app保留帶領域context的錯誤文字與unsupported-target轉譯。
 
 measure-gui 的「量測 session core」（context 系統 + SoC 連線 + 多 device + setup/soc/device/inspect/predictor dialog）由此共用層提供。對標 `gui/remote`、`gui/plotting`。每個 measurement-session app 注入自己的 app-local infra（gate + background）複用這層；session 模組**永不**反向 import `gui.app.*`。
 
-`ContextService` 私下持有 `ResultEntry` 與參數、library handles。未開 entry 時 readiness=EMPTY、parameters=None，沒有 metadata 或 source binding，point list 為空。開啟或建立 entry 後發布 GLOBAL，作用中的是 entry 層參數、library、aliases 與 storage，point label 為 None。`use_point` 或 `new_point` 發布 POINT，整組換成 point 文件，不逐名稱回退。`use_global()` 重讀 entry 文件並切回 GLOBAL。每次切換先準備全部資源與 asset capability，再一次替換 binding、版本與 fact。準備失敗保留原 binding。point 已建立但安裝失敗時回報 `PointBindingError`，保留合法 point。SoC、device 與獨立 predictor 保留各自能力。
+`ContextService` 私下持有 `ResultEntry` 與參數、library handles。Global 與 point 的參數 handle 都是 resources 的 `ParameterView`，分別由 `entry.parameters()` 與 `entry.parameters(point=label)` 開啟。未開 entry 時 readiness=EMPTY、parameters=None，沒有 metadata 或 source binding，point list 為空。開啟或建立 entry 後發布 GLOBAL，作用中的是 entry 層參數、library、aliases 與 storage，point label 為 None。`use_point` 或 `new_point` 發布 POINT，整組換成 point 文件，不逐名稱回退。`use_global()` 重讀 entry 文件並切回 GLOBAL。每次切換先準備全部資源與 asset capability，再一次替換 binding、版本與 fact。準備失敗保留原 binding。point 已建立但安裝失敗時回報 `PointBindingError`，保留合法 point。SoC、device 與獨立 predictor 保留各自能力。
 
 列 point 時只投影 description，availability 另判參數文件可讀且能解析成 owner 文件結構，保留 header 與目前 schema version 檢查，不讀 library 或 aliases。
 局部 leaf／component 格式問題在使用或寫入時報錯，不讓整個 point 不可用。

@@ -19,7 +19,7 @@ from zcu_tools.resources.entry import (
     AcceptedPayload,
     AcceptedWrite,
     LedgerEvent,
-    PointView,
+    ParameterView,
     ResultEntry,
 )
 from zcu_tools.resources.entry.schema import (
@@ -29,13 +29,19 @@ from zcu_tools.resources.entry.schema import (
 )
 
 
+def test_clone_rejects_global_view_with_inherit_guidance(entry: ResultEntry) -> None:
+    with pytest.raises(ValueError, match='mode="inherit"'):
+        entry.new_point("copy", mode="clone", clone_from=entry.parameters())
+    assert entry.list_points() == []
+
+
 @pytest.fixture
 def foreign_recorded_point(
     entry_roots: tuple[Path, Path],
-) -> tuple[ResultEntry, PointView, LedgerEvent]:
+) -> tuple[ResultEntry, ParameterView, LedgerEvent]:
     results, database = entry_roots
     foreign = ResultEntry.create("other", result_root=results, database_root=database)
-    foreign.setup.add_component("Q1", kind="fake/drive/a", rate=5000.0)
+    foreign.parameters().add_component("Q1", kind="fake/drive/a", rate=5000.0)
     point = foreign.new_point("source")
     event = LedgerEvent(
         id=str(uuid4()),
@@ -105,7 +111,7 @@ def write_source_library(
 @pytest.mark.parametrize("same_entry", [True, False])
 def test_clone_copies_values_without_importing_library_events(
     entry: ResultEntry,
-    foreign_recorded_point: tuple[ResultEntry, PointView, LedgerEvent],
+    foreign_recorded_point: tuple[ResultEntry, ParameterView, LedgerEvent],
     source_mode: str,
     same_entry: bool,
 ) -> None:
@@ -141,7 +147,7 @@ def test_clone_copies_values_without_importing_library_events(
 
 def test_clone_skips_invalid_specs_without_rewriting_source(
     entry: ResultEntry,
-    foreign_recorded_point: tuple[ResultEntry, PointView, LedgerEvent],
+    foreign_recorded_point: tuple[ResultEntry, ParameterView, LedgerEvent],
 ) -> None:
     foreign, _point, event = foreign_recorded_point
     write_source_library(foreign, event)
@@ -163,7 +169,7 @@ def test_clone_skips_invalid_specs_without_rewriting_source(
 
 def test_library_clone_failure_cleans_destination_and_keeps_source(
     entry: ResultEntry,
-    foreign_recorded_point: tuple[ResultEntry, PointView, LedgerEvent],
+    foreign_recorded_point: tuple[ResultEntry, ParameterView, LedgerEvent],
 ) -> None:
     foreign, _point, event = foreign_recorded_point
     write_source_library(foreign, event)
@@ -182,7 +188,7 @@ def test_library_clone_failure_cleans_destination_and_keeps_source(
 @pytest.mark.parametrize("same_entry", [False, True])
 def test_clone_preserves_forward_minor_point_metadata(
     entry: ResultEntry,
-    foreign_recorded_point: tuple[ResultEntry, PointView, LedgerEvent],
+    foreign_recorded_point: tuple[ResultEntry, ParameterView, LedgerEvent],
     same_entry: bool,
 ) -> None:
     foreign, source_point, _event = foreign_recorded_point
@@ -222,12 +228,12 @@ def test_clone_preserves_forward_minor_point_metadata(
 def test_cross_entry_clone_uses_published_values_and_copies_metadata(
     entry: ResultEntry,
     entry_roots: tuple[Path, Path],
-    foreign_recorded_point: tuple[ResultEntry, PointView, LedgerEvent],
+    foreign_recorded_point: tuple[ResultEntry, ParameterView, LedgerEvent],
     source_mode: str,
 ) -> None:
     results, _database = entry_roots
     foreign, stale_point, _event = foreign_recorded_point
-    fresh = foreign.use_point("source")
+    fresh = foreign.parameters("source")
     with fresh.edit() as draft:
         draft.set("Q1.rate", 5400.0)
         draft.set_meta("general.description", {"comment": "fresh only"})
@@ -250,14 +256,14 @@ def test_cross_entry_clone_uses_published_values_and_copies_metadata(
     for path in ("Q1.rate", "Q1.duration", "general.description"):
         assert clone.meta(path) == fresh.meta(path)
     assert {name: (source_path / name).read_bytes() for name in before} == before
-    assert entry.use_point("target").meta("Q1.rate") == fresh.meta("Q1.rate")
+    assert entry.parameters("target").meta("Q1.rate") == fresh.meta("Q1.rate")
 
 
 @pytest.mark.parametrize("failure", ["point"])
 def test_foreign_source_failure_does_not_publish_destination_or_modify_source(
     entry: ResultEntry,
     entry_roots: tuple[Path, Path],
-    foreign_recorded_point: tuple[ResultEntry, PointView, LedgerEvent],
+    foreign_recorded_point: tuple[ResultEntry, ParameterView, LedgerEvent],
     failure: str,
 ) -> None:
     results, _database = entry_roots
@@ -284,19 +290,19 @@ def test_clone_stale_view_reads_current_contents_at_source_location(
 ) -> None:
     results, database = entry_roots
     original = ResultEntry.create("other", result_root=results, database_root=database)
-    original.setup.add_component("Q1", kind="fake/drive/a", rate=5000.0)
+    original.parameters().add_component("Q1", kind="fake/drive/a", rate=5000.0)
     stale = original.new_point("source")
     original.result_path.rename(tmp_path / "retired")
     replacement = ResultEntry.create(
         "other", result_root=results, database_root=database
     )
-    replacement.setup.add_component("Q1", kind="fake/drive/a", rate=6100.0)
+    replacement.parameters().add_component("Q1", kind="fake/drive/a", rate=6100.0)
     replacement.new_point("source")
 
     cloned = entry.new_point("current-copy", mode="clone", clone_from=stale)
 
     assert cloned.Q1.rate == 6100.0
-    assert replacement.use_point("source").Q1.rate == 6100.0
+    assert replacement.parameters("source").Q1.rate == 6100.0
     assert entry.ledger.events() == ()
 
 
@@ -335,12 +341,12 @@ def test_clone_accepts_point_identity_with_different_database_root(
             "other", result_root=results, database_root=tmp_path / "source-output"
         )
     )
-    source_entry.setup.add_component("Q1", kind="fake/drive/a", rate=5300.0)
+    source_entry.parameters().add_component("Q1", kind="fake/drive/a", rate=5300.0)
     source_entry.new_point("source")
     other_output = tmp_path / "different-output"
     if constructor_bound:
         source = source_entry.result_path / "points/source/parameters.yaml"
-        view = PointView(
+        view = ParameterView(
             DocumentStore(
                 source,
                 ParameterDocument,
@@ -357,7 +363,7 @@ def test_clone_accepts_point_identity_with_different_database_root(
             source_entry.result_path.name,
             result_root=results,
             database_root=other_output,
-        ).use_point("source")
+        ).parameters("source")
 
     try:
         cloned = entry.new_point("copy", mode="clone", clone_from=view)
@@ -365,16 +371,16 @@ def test_clone_accepts_point_identity_with_different_database_root(
         pytest.fail(f"Database root is not a Point clone identity boundary: {error}")
 
     assert cloned.Q1.rate == 5300.0
-    assert entry.use_point("copy").Q1.rate == 5300.0
+    assert entry.parameters("copy").Q1.rate == 5300.0
     cloned.Q1.rate = 5400.0
-    assert source_entry.use_point("source").Q1.rate == 5300.0
+    assert source_entry.parameters("source").Q1.rate == 5300.0
     assert entry.ledger.events() == ()
 
 
 def test_existing_cross_entry_destination_is_not_merged(
     entry: ResultEntry,
     entry_roots: tuple[Path, Path],
-    foreign_recorded_point: tuple[ResultEntry, PointView, LedgerEvent],
+    foreign_recorded_point: tuple[ResultEntry, ParameterView, LedgerEvent],
 ) -> None:
     results, _database = entry_roots
     entry.new_point("target")
@@ -390,7 +396,7 @@ def test_existing_cross_entry_destination_is_not_merged(
 def test_constructor_bound_view_clones_without_later_identity_registration(
     entry: ResultEntry,
     entry_roots: tuple[Path, Path],
-    foreign_recorded_point: tuple[ResultEntry, PointView, LedgerEvent],
+    foreign_recorded_point: tuple[ResultEntry, ParameterView, LedgerEvent],
     same_entry: bool,
 ) -> None:
     foreign, view, _event = foreign_recorded_point
@@ -402,7 +408,7 @@ def test_constructor_bound_view_clones_without_later_identity_registration(
         format=PARAMETER_FORMAT,
         supported_version=PARAMETER_VERSION,
     )
-    manual = PointView(
+    manual = ParameterView(
         store,
         source,
         result_root=results,

@@ -18,8 +18,8 @@ from zcu_tools.resources.document_names import (
 from zcu_tools.resources.document_store import DocumentStore, YamlMap, YamlValue
 from zcu_tools.resources.entry import (
     EditView,
+    ParameterView,
     ResultEntry,
-    SetupView,
     component_registry,
     document_value,
     snapshot,
@@ -64,7 +64,7 @@ def _seed_components(
     session: MigrationSession, entry: ResultEntry, mapping: MigrationMapping
 ) -> None:
     data = _YAML_MAP.validate_python(
-        snapshot(entry.setup).model_dump(mode="python", serialize_as_any=True)
+        snapshot(entry.parameters()).model_dump(mode="python", serialize_as_any=True)
     )
     data["components"] = _YAML_MAP.validate_python(mapping.components)
     seeded_document = prepare_parameter_batch(
@@ -83,7 +83,7 @@ def _seed_components(
             raise MigrationInputError(f"{name}: seed requires kind")
         # Interrupted parameter work can already have published this seed.
         try:
-            getattr(entry.setup, name)
+            getattr(entry.parameters(), name)
         except AttributeError:
 
             def build(
@@ -94,7 +94,7 @@ def _seed_components(
                 fields: YamlMap = fields,
             ) -> None:
                 shutil.copyfile(entry.result_path / PARAMETERS_FILENAME, path)
-                seeded = SetupView(
+                seeded = ParameterView(
                     DocumentStore(
                         path,
                         ParameterDocument,
@@ -102,6 +102,8 @@ def _seed_components(
                         supported_version=PARAMETER_VERSION,
                     ),
                     path,
+                    result_root=entry.result_path.parent,
+                    database_root=entry.database_path.parent,
                 )
                 seeded.add_component(name, kind=kind, **fields)
 
@@ -112,7 +114,7 @@ def _seed_components(
                 "setup",
                 build,
             )
-            entry.setup.refresh()
+            entry.parameters().refresh()
 
 
 def _missing_evidence(rule: KeyRule, values: JsonObject) -> tuple[str, ...]:
@@ -472,7 +474,7 @@ def _retain_point_slots(
     # Keep only references that this point's own published library can resolve.
     published = entry.module_library(label).snapshot().module_keys()
     with edit_parameter(
-        session, session.manifest.report.source.result_path, entry.use_point(label)
+        session, session.manifest.report.source.result_path, entry.parameters(label)
     ) as draft:
         document = snapshot(draft)
         for name in mapping.components:
@@ -511,9 +513,9 @@ def _convert_context(
     view = None
     if entry is not None and not session.dry_run:
         view = (
-            entry.setup
+            entry.parameters()
             if is_setup
-            else entry.use_point(label)
+            else entry.parameters(label)
             if label in entry.list_points()
             else create_point(session, entry, label, candidate)
         )

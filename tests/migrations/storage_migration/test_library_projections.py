@@ -186,7 +186,7 @@ def test_default_waveforms_publish_with_canonical_keys_and_only_unknown_raw(
         ("R1.waveforms.ro_waveform", 4.0),
     ):
         assert library.get_waveform(key).length == length
-    view = entry.setup if point is None else entry.use_point(point)
+    view = entry.parameters() if point is None else entry.parameters(point)
     assert document_value(snapshot(view), "Q1.module") == {
         "x180": "Q1.pulses.pi_amp",
         "x90": "Q1.pulses.pi2_amp",
@@ -238,7 +238,7 @@ def test_pi_scalars_deduplicate_only_their_explicit_candidate_and_report_actual_
             assert row.library_kind == "module"
             assert row.source_keys == (key,)
             assert library.snapshot().value(leaf) == _SCALARS[key]
-    view = entry.setup if point is None else entry.use_point(point)
+    view = entry.parameters() if point is None else entry.parameters(point)
     assert document_value(snapshot(view), "Q1.ext") == {}
     # The runtime lock protects reads too; only its empty bytes are stable.
     sidecar = lock_path_for(library.source_path)
@@ -293,7 +293,7 @@ def test_unmatched_pi_scalars_keep_original_values_in_their_context(
         _library(source, payload)
     dry = _convert(replace(request, dry_run=True), default_mapping)
     report = _convert(request, default_mapping)
-    view = _entry(request).use_point("context")
+    view = _entry(request).parameters("context")
     ext = document_value(snapshot(view), "Q1.ext")
     assert ext == values
     for result in (dry, report):

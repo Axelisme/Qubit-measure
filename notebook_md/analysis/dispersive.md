@@ -81,7 +81,7 @@ entry = ResultEntry.open(
     result_root=project_root / "result",
     database_root=project_root / "Database",
 )
-component_model = snapshot(entry.setup).components[component]
+component_model = snapshot(entry.parameters()).components[component]
 if component_model.kind != "qubit/fluxonium":
     raise ValueError(f"Expected qubit/fluxonium, got {component_model.kind!r}")
 result_dir = entry.result_path
@@ -287,9 +287,9 @@ save_dispersive_file(
         ),
     ),
 )
-entry.setup.refresh()
-component_model = snapshot(entry.setup).components[component]
-with entry.setup.edit() as draft:
+entry.parameters().refresh()
+component_model = snapshot(entry.parameters()).components[component]
+with entry.parameters().edit() as draft:
     for field, value in (("g", best_g), ("bare_rf", bare_rf)):
         if field in type(component_model).model_fields:
             draft.set(f"{component}.{field}", float(value))
