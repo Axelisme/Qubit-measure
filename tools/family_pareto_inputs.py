@@ -4,11 +4,14 @@ Accuracy/guard matrices stay in tests. The retained synthetic idle scene is
 explicitly declared here, independently of those mutable test inventories.
 """
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from contextlib import closing
 from dataclasses import dataclass, field, replace
+from functools import partial
+from pathlib import Path
 
 import numpy as np
+from pydantic import TypeAdapter
 from zcu_tools.simulate.evolution import (
     FluxSchedule,
     FrozenRecord,
@@ -17,6 +20,8 @@ from zcu_tools.simulate.evolution import (
     SecularModel,
     TimelineBatch,
     digest,
+    read_frozen_manifest,
+    read_physical_input,
 )
 from zcu_tools.simulate.evolution import (
     canonical_json as canonical_json,
@@ -68,6 +73,41 @@ class Input:
     def companions_for(self, target: str) -> tuple[str, ...]:
         """Return the target override, or shared companions when absent."""
         return self.companions_by_target.get(target, self.companions)
+
+
+def _read_scene(record: FrozenRecord, families: tuple[str, ...]) -> Scene:
+    frozen = read_physical_input(record.physical)
+    return Scene(record.name, frozen.source, frozen.batch, families)
+
+
+def read_inputs(manifests: Sequence[Path]) -> list[Input]:
+    """Read ordered frozen records and decode the tools-owned scene declarations.
+
+    manifests supplies simulator-owned gzip containers in caller order. Each
+    returned Input keeps its record name, reason, targets, companions, routes
+    and provenance. No source is built while reading the declarations. Every
+    Input.build() reconstructs a fresh Scene through read_physical_input; the
+    caller must close its source. Sources do not share routing history.
+    File/container errors, missing declarations and invalid metadata propagate;
+    no producer, solver or legacy reader is used.
+    """
+    inputs = []
+    for path in manifests:
+        for record in read_frozen_manifest(path):
+            metadata = TypeAdapter(dict[str, object]).validate_python(record.metadata)
+            families = TypeAdapter(tuple[str, ...]).validate_python(
+                metadata.pop("expected_families")
+            )
+            inputs.append(
+                TypeAdapter(Input).validate_python(
+                    {
+                        **metadata,
+                        "name": record.name,
+                        "build": partial(_read_scene, record, families),
+                    }
+                )
+            )
+    return inputs
 
 
 def idle_coherence_scene() -> Scene:
