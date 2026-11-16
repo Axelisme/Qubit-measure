@@ -10,9 +10,9 @@ from zcu_tools.cfg_model import validate_device_name
 from zcu_tools.format_version import FormatVersion, YamlMap, validate_header
 from zcu_tools.resources.document_names import PARAMETERS_FILENAME
 from zcu_tools.resources.entry.aliases import parse_entry_aliases
-from zcu_tools.resources.entry.schema import PointDocument, PointGeneral, SetupGeneral
+from zcu_tools.resources.entry.schema import ParameterDocument, ParameterGeneral
 from zcu_tools.resources.parameter_metadata import validate_parameter_header
-from zcu_tools.resources.parameter_upgrade import ParameterDocument
+from zcu_tools.resources.parameter_upgrade import ParameterUpgradeDocument
 
 from .qubit import QubitFluxCalibration, QubitFluxSchema
 
@@ -67,7 +67,7 @@ def _source(fields: YamlMap, path: str) -> str:
 
 
 def _validate_container(
-    document: ParameterDocument, components: dict[str, YamlMap]
+    document: ParameterUpgradeDocument, components: dict[str, YamlMap]
 ) -> None:
     source = document.source_path or Path(PARAMETERS_FILENAME)
     if document.data.get("format") == "zcu.entry-template":
@@ -83,10 +83,7 @@ def _validate_container(
     else:
         version = validate_parameter_header(document.data, source=source)
         general = document.data.get("general")
-        if source.parent.parent.name != "points":
-            SetupGeneral.model_validate(general)
-        else:
-            PointGeneral.model_validate(general)
+        ParameterGeneral.model_validate(general)
         allowed = {
             "format",
             "format_version",
@@ -102,7 +99,7 @@ def _validate_container(
         )
     # Historical flux is already projected to v3; validate all other fields with
     # the registered current models, without teaching runtime about old shapes.
-    PointDocument.validate_components(components)
+    ParameterDocument.validate_components(components)
 
 
 @dataclass
@@ -332,7 +329,7 @@ def _shape(components: dict[str, YamlMap], version: int) -> None:
                 )
 
 
-def classify_flux_document(document: ParameterDocument) -> FluxClassification:
+def classify_flux_document(document: ParameterUpgradeDocument) -> FluxClassification:
     """Classify detached v1/v2/v3 setup, point or template without mutation/I/O.
 
     Validate container, aliases, registered components, calibration completeness,
@@ -364,7 +361,9 @@ def classify_flux_document(document: ParameterDocument) -> FluxClassification:
     return FluxClassification("current" if version == 3 else "legacy", ())
 
 
-def convert_flux_v1_to_v2(document: ParameterDocument) -> ParameterDocument:
+def convert_flux_v1_to_v2(
+    document: ParameterUpgradeDocument,
+) -> ParameterUpgradeDocument:
     """Return detached main-v2 per-device half/integer/period from v1 input.
 
     Keep flux_source and the local calibration unchanged. Coils retain signed
@@ -388,7 +387,9 @@ def convert_flux_v1_to_v2(document: ParameterDocument) -> ParameterDocument:
     return result
 
 
-def convert_flux_v2_to_v3(document: ParameterDocument) -> ParameterDocument:
+def convert_flux_v2_to_v3(
+    document: ParameterUpgradeDocument,
+) -> ParameterUpgradeDocument:
     """Return detached offset/period v3 from completely validated main-v2 data.
 
     Rename qubit/mux/JPA flux_source to flux_dev. With a main entry, offset is
@@ -413,7 +414,9 @@ def convert_flux_v2_to_v3(document: ParameterDocument) -> ParameterDocument:
     return result
 
 
-def convert_storage_flux_batch(document: ParameterDocument) -> ParameterDocument:
+def convert_storage_flux_batch(
+    document: ParameterUpgradeDocument,
+) -> ParameterUpgradeDocument:
     """Convert a legacy-import overlay to v3 before current schema validation.
 
     Effective flux_source/flux_dev includes setup/mapping inheritance. Complete

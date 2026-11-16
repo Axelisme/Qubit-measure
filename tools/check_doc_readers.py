@@ -82,13 +82,16 @@ def check_sources(sources: Mapping[str, str]) -> tuple[Violation, ...]:
 def main(argv: list[str] | None = None) -> int:
     """Scan tracked Markdown under --root, defaulting to this checkout.
 
-    Print a check_file_size-style JSON receipt to stdout and path/reason lines
+    Print a `check_quality file-size`-style JSON receipt to stdout and path/reason lines
     to stderr. Return 0 for PASS or 1 for violations. argv=None reads sys.argv;
     Git, decoding and file-read errors propagate rather than reporting PASS.
     """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--root", type=Path, default=Path(__file__).resolve().parents[1]
+        "--root",
+        type=Path,
+        default=Path(__file__).resolve().parents[1],
+        help="checkout to scan (default: this checkout)",
     )
     root = parser.parse_args(argv).root
     tracked = subprocess.run(

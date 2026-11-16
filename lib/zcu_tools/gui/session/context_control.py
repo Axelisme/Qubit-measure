@@ -27,7 +27,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.types import ParameterContext, RoleBinding
     from zcu_tools.gui.session.value_lookup import ScalarValue, ValueInfo
     from zcu_tools.resources.entry.ledger_models import JsonObject
-    from zcu_tools.resources.entry.schema import PointDocument, SetupDocument
+    from zcu_tools.resources.entry.schema import ParameterDocument
     from zcu_tools.resources.entry.storage import StorageBinding
     from zcu_tools.resources.entry.writeback import (
         WritebackEvidence,
@@ -45,7 +45,7 @@ class ContextControlPort(Protocol):
     the binding; a created-but-unbound point raises PointBindingError.
     """
 
-    def inspect_document(self, *, setup: bool = False) -> SetupDocument | PointDocument:
+    def inspect_document(self, *, setup: bool = False) -> ParameterDocument:
         """Return the cached setup template or current point document without I/O.
 
         setup=True reads the opened entry template; False reads the published

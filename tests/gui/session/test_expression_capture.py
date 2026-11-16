@@ -13,7 +13,7 @@ from zcu_tools.gui.session.expression import (
 from zcu_tools.gui.session.types import ParameterContext, RoleBinding
 from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
 from zcu_tools.resources.entry import ComponentSchema, RoleSpec, component_registry
-from zcu_tools.resources.entry.schema import PointDocument
+from zcu_tools.resources.entry.schema import ParameterDocument
 
 
 class Driver(ComponentSchema):
@@ -29,7 +29,7 @@ def parameters() -> Generator[ParameterContext]:
     before = component_registry.kinds()
     component_registry.register("lowering/driver", Driver)
     try:
-        point = PointDocument.model_validate(
+        point = ParameterDocument.model_validate(
             {
                 "format": "zcu.parameter-container",
                 "format_version": "2.0",

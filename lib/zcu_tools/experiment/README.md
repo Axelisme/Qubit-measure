@@ -1,6 +1,6 @@
 # `zcu_tools.experiment` — 實驗層
 
-**Last updated:** 2026-11-01
+**Last updated:** 2026-11-16
 
 **讀者：** framework-dev。實驗介面、Run 資料、持久化映射與裝置操作邊界。
 
@@ -30,8 +30,8 @@ Recipe 與 workflow 都使用此 host，作者以原生 async／await 等待，�
 
 ## Explicit simulation environments
 
-`simulation.py` provides `SimulationEnvironment`, `white_noise` and
-`load_environment`. A trusted Python file defines zero-argument `build_environment`.
+`simulation.py` provides `SimulationEnvironment`, `white_noise`,
+`load_environment` and `closing_environment`. A trusted Python file defines zero-argument `build_environment`.
 It returns a bound SoC, its matching compile config, the exact populated
 `DeviceManager` and a public description. GUI and Notebook share this bundle;
 there is no controller argument, registry discovery or runtime mode switch.
@@ -146,6 +146,12 @@ Key 是 `live-`／`analysis-` 加 URL-escaped 圖名與 `.png`。
 Caller 自行保存 bytes 並逐張看圖。建立 Plots 前套用[共用樣式](../plotting/README.md#預設外觀)，
 實驗的原生 Matplotlib 參數與 style context 可覆寫外觀。
 Caller 負責環境 backend 與 devices 的清理，階段不更改 seed 或接線。
+以 `with closing_environment(env) as env:` 借用已建好的環境。離開時先呼叫可選的
+`close_backend`，再關閉所有 devices；正常返回與例外離開都清理，backend 清理失敗仍關閉 devices。
+進入前須已完成 builder，離開前須 drain acquisition。清理錯誤傳出，不自動重試。
+既有手寫關閉區塊可維持原樣，frozen `SimulationEnvironment` 不實作 `with env`。
+Snapshot 檔案與比較由 [`tools/probe_snapshot.py`](../../../tools/README.md#probe-snapshots) 擁有，
+不放進 stage 結果或 `experiment` 的檔案格式。
 
 `probe` 按公開名稱載入 stage owner。單獨 import `probe.generators` 不載入 acquisition 或 simulation。
 `probe.generators` 提供兩個資料生成機制，所有參數都由 caller 明填。

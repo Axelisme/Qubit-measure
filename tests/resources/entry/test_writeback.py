@@ -21,6 +21,7 @@ from zcu_tools.resources.entry import (
 from zcu_tools.resources.entry.storage import bind_record_table
 from zcu_tools.resources.entry.writeback import (
     ModuleWriteback,
+    ParameterUpdate,
     ParameterWriteback,
     PointWritebackTarget,
     RecordWriteback,
@@ -28,6 +29,7 @@ from zcu_tools.resources.entry.writeback import (
     WritebackApplyError,
     WritebackEvidence,
     apply_writeback,
+    commit_parameter_updates,
 )
 
 
@@ -42,6 +44,63 @@ def point(tmp_path: Path) -> PointView:
         draft.set_meta("Q1.duration", {"stderr": 0.5, "comment": "kept"})
         draft.set_meta("Q1.rate", {"stderr": 9.0, "source": "old run"})
     return point
+
+
+def test_add_component_in_edit_view_commits_registered_defaults(
+    point: PointView,
+) -> None:
+    with point.edit() as draft:
+        draft.add_component("Q2", kind="fake/drive/a", rate=6123.4)
+        with pytest.raises(ValueError, match="already exists"):
+            draft.add_component("Q2", kind="fake/drive/a", rate=1.0)
+        with pytest.raises(ValueError, match="missing-kind"):
+            draft.add_component("Q3", kind="missing-kind", rate=1.0)
+        draft.set("Q2.duration", 12.0)
+    assert point.Q2.rate == 6123.4
+    assert point.Q2.duration == 12.0
+    assert document_value(snapshot(point), "Q2.ext") == {}
+
+
+@pytest.mark.parametrize("scope", ["point", "global"])
+@pytest.mark.parametrize(
+    "failure", [None, "no-create", "invalid-kind", "invalid-value"]
+)
+def test_parameter_batch_upserts_only_when_requested_and_commits_atomically(
+    entry: ResultEntry, scope: str, failure: str | None
+) -> None:
+    entry.setup.add_component("Q1", kind="fake/drive/a", rate=5000.0, duration=10.0)
+    point = entry.new_point("upsert")
+    view = point if scope == "point" else entry.setup
+    before = source_path(view).read_bytes()
+    updates = (
+        ParameterUpdate("Q1.rate", 6012.3, create_kind="unused-kind-for-existing"),
+        ParameterUpdate(
+            "Q2.rate",
+            6123.4,
+            {"note": "new"},
+            create_kind=None if failure == "no-create" else "fake/drive/a",
+        ),
+    )
+    if failure == "invalid-kind":
+        updates += (ParameterUpdate("Q3.rate", 1.0, create_kind="missing-kind"),)
+    elif failure == "invalid-value":
+        updates += (ParameterUpdate("Q1.duration", "invalid"),)
+    if failure is not None:
+        with pytest.raises((AttributeError, ValueError)):
+            commit_parameter_updates(view, updates)
+        assert source_path(view).read_bytes() == before
+        assert tuple(snapshot(view).components) == ("Q1",)
+    else:
+        assert commit_parameter_updates(view, updates) == (6012.3, 6123.4)
+        assert document_value(snapshot(view), "Q1.duration") == 10.0
+        assert document_value(snapshot(view), "Q2.kind") == "fake/drive/a"
+        assert document_value(snapshot(view), "Q2.rate") == 6123.4
+        assert snapshot(view).components["Q2"].model_dump()["duration"] is None
+        assert document_value(snapshot(view), "Q2.ext") == {}
+        assert view.meta("Q2.rate") == {"note": "new"}
+        assert tuple(
+            snapshot(entry.setup if scope == "point" else point).components
+        ) == ("Q1",)
 
 
 def target(point: PointView) -> PointWritebackTarget:

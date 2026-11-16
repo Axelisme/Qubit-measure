@@ -155,12 +155,130 @@ def linear_case(*, shaped: bool) -> AccuracyCase:
     )
 
 
+def cheap_sampled_case(*, nearby: bool) -> AccuracyCase:
+    """Build a smooth sampled three-level case with cheap unexpanded RWA.
+
+    nearby=True uses 0.6/0.6001 GHz carriers; False uses 0.6/0.73 GHz.
+    Each case has two 384 ns points, complex coherence and a secular bath.
+    Nonflat samples prevent constant-plateau extraction. Return a fresh source
+    and history, with the expected post-pause family for the pricing branch.
+    """
+    name = "cheap_sampled_nearby" if nearby else "cheap_sampled_separated"
+    # Circular adjacent transitions retain one three-state component (real
+    # dimension 9), with no omitted edges to restore. Both rows previously
+    # qualified for the cheap-RWA exemption from common-frame pricing.
+    positive = np.diag(np.full(2, 0.001), 1).astype(complex)
+    drive = SecularDrive("a", positive + positive.T, 1j * (positive - positive.T))
+    model = SecularModel(
+        (0,),
+        "cheap-sampled-three-level",
+        np.array([0.0, 0.6, 1.2]),
+        np.eye(3, dtype=complex),
+        (drive, replace(drive, name="b")),
+        np.array([[0.0, 1e-5, 0.0], [0.0, 0.0, 2e-5], [0.0, 0.0, 0.0]]),
+        (np.ones((3, 3)) - np.eye(3)) * 1e-5,
+    )
+    batch = timeline(2, 384.0)
+    envelope = EnvelopeSpec(
+        "sampled", np.array([0.8, 1.0, 0.9], complex), np.array([0.0, 192.0, 384.0])
+    )
+    batch = replace(
+        batch,
+        tracks=(
+            drive_track(batch, envelope, frequency=0.6, gain=0.08, port="a"),
+            drive_track(
+                batch,
+                envelope,
+                frequency=0.6001 if nearby else 0.73,
+                gain=0.05,
+                port="b",
+            ),
+        ),
+    )
+    families = ("common_frame",) if nearby else ("dop853",)
+    return AccuracyCase(name, coherent_source(model), batch, families)
+
+
+def joint_case(*, constant: bool) -> AccuracyCase:
+    """Build a four-level two-port case with a complete 20-point inventory.
+
+    constant=True uses constant envelopes and permits multitone_rwa/dop853.
+    False uses short sampled envelopes and permits only dop853 during the pause.
+    Return a fresh source/history with coherence, relaxation and dephasing.
+    """
+    name = "joint_constant" if constant else "joint_gate_inventory"
+    a, b = np.zeros((4, 4), complex), np.zeros((4, 4), complex)
+    a[0, 2] = a[1, 3] = 0.002
+    b[0, 1] = b[2, 3] = 0.002
+    model = SecularModel(
+        (0,),
+        "accuracy-joint-gate",
+        np.array([0.0, 0.3, 0.6, 0.9]),
+        np.eye(4, dtype=complex),
+        (
+            SecularDrive("a", a + a.T, np.zeros_like(a)),
+            SecularDrive("b", b + b.T, np.zeros_like(b)),
+        ),
+        np.array([[0, 1e-5, 2e-5, 0], [0, 0, 0, 2e-5], [0, 0, 0, 1e-5], [0, 0, 0, 0]]),
+        (np.ones((4, 4)) - np.eye(4)) * 1e-5,
+    )
+    batch = timeline(20, 1.5)
+    shaped = EnvelopeSpec("sampled", np.ones(3, complex), np.array([0.0, 0.75, 1.5]))
+    batch = replace(
+        batch,
+        tracks=(
+            drive_track(batch, shaped, frequency=0.6, gain=0.08, port="a"),
+            drive_track(batch, shaped, frequency=0.3, gain=0.08, port="b"),
+        ),
+    )
+    if constant:
+        batch = replace(
+            batch,
+            tracks=tuple(
+                replace(track, envelopes=(EnvelopeSpec("constant"),))
+                for track in batch.tracks
+            ),
+        )
+        families = ("multitone_rwa", "dop853")
+    else:
+        # Sampled multitone families are paused, not failed density samples.
+        families = ("dop853",)
+    return AccuracyCase(name, coherent_source(model), batch, families)
+
+
+def common_frame_case(name: str) -> AccuracyCase:
+    """Build nearby_carriers or either cheap_sampled_* pricing input.
+
+    nearby_carriers uses two short constant X-only tones. The two
+    cheap_sampled names use cheap_sampled_case with its near/far carriers.
+    All return fresh source/history and coherent dissipative models.
+    Unknown names raise ValueError.
+    """
+    if name in ("cheap_sampled_nearby", "cheap_sampled_separated"):
+        return cheap_sampled_case(nearby=name == "cheap_sampled_nearby")
+    if name != "nearby_carriers":
+        raise ValueError(f"unknown common-frame case: {name}")
+    constant = EnvelopeSpec("constant")
+    model = linear_drive_model()
+    batch = timeline(2, 6.5)
+    batch = replace(
+        batch,
+        tracks=(
+            drive_track(batch, constant, frequency=0.6, gain=0.08),
+            drive_track(batch, constant, frequency=0.63, gain=0.05),
+        ),
+    )
+    families = ("common_frame",)
+    return AccuracyCase(name, coherent_source(model), batch, families)
+
+
 def accuracy_case(name: str) -> AccuracyCase:
     """Build an isolated matrix input; unknown names raise ValueError.
 
     Names: idle_coherence, weak_plateau, strong_plateau, shaped_complex,
-    two_carriers, continuous_flux, joint_gate_inventory, low_carrier,
-    linear_shaped, linear_plateau, nearby_carriers and adiabatic_ramp. Each call
+    two_carriers, continuous_flux, joint_gate_inventory, joint_constant, low_carrier,
+    linear_shaped, linear_plateau, nearby_carriers, cheap_sampled_nearby,
+    cheap_sampled_separated and adiabatic_ramp. Each call
     owns a fresh source/history. The joint gate keeps its 20-point inventory.
     """
     model = synthetic_model()
@@ -229,49 +347,12 @@ def accuracy_case(name: str) -> AccuracyCase:
         families = ("slow_envelope",)
     elif name in ("linear_shaped", "linear_plateau"):
         return linear_case(shaped=name == "linear_shaped")
-    elif name == "nearby_carriers":
-        model = linear_drive_model()
-        batch = timeline(2, 6.5)
-        batch = replace(
-            batch,
-            tracks=(
-                drive_track(batch, constant, frequency=0.6, gain=0.08),
-                drive_track(batch, constant, frequency=0.63, gain=0.05),
-            ),
-        )
-        families = ("common_frame",)
+    elif name in ("nearby_carriers", "cheap_sampled_nearby", "cheap_sampled_separated"):
+        return common_frame_case(name)
     elif name == "adiabatic_ramp":
         return adiabatic_case()
-    elif name == "joint_gate_inventory":
-        a, b = np.zeros((4, 4), complex), np.zeros((4, 4), complex)
-        a[0, 2] = a[1, 3] = 0.002
-        b[0, 1] = b[2, 3] = 0.002
-        model = SecularModel(
-            (0,),
-            "accuracy-joint-gate",
-            np.array([0.0, 0.3, 0.6, 0.9]),
-            np.eye(4, dtype=complex),
-            (
-                SecularDrive("a", a + a.T, np.zeros_like(a)),
-                SecularDrive("b", b + b.T, np.zeros_like(b)),
-            ),
-            np.array(
-                [[0, 1e-5, 2e-5, 0], [0, 0, 0, 2e-5], [0, 0, 0, 1e-5], [0, 0, 0, 0]]
-            ),
-            (np.ones((4, 4)) - np.eye(4)) * 1e-5,
-        )
-        batch = timeline(20, 1.5)
-        shaped = EnvelopeSpec(
-            "sampled", np.ones(3, complex), np.array([0.0, 0.75, 1.5])
-        )
-        batch = replace(
-            batch,
-            tracks=(
-                drive_track(batch, shaped, frequency=0.6, gain=0.08, port="a"),
-                drive_track(batch, shaped, frequency=0.3, gain=0.08, port="b"),
-            ),
-        )
-        families = ("multitone_gate", "multitone_rwa", "dop853")
+    elif name in ("joint_gate_inventory", "joint_constant"):
+        return joint_case(constant=name == "joint_constant")
     else:
         raise ValueError(f"unknown accuracy case: {name}")
     return AccuracyCase(name, coherent_source(model), batch, families)

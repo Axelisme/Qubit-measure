@@ -3,9 +3,69 @@
 from dataclasses import replace
 
 import pytest
+from zcu_tools.device import FakeDevice
+from zcu_tools.experiment import simulation
 from zcu_tools.experiment.simulation import load_environment, white_noise
 
 from tests.program._profiles import load_soccfg
+
+
+def test_closing_environment_releases_backend_and_devices():
+    calls: list[str] = []
+    env = replace(
+        white_noise(load_soccfg(), std_adc=0, seed=7, routes="all"),
+        close_backend=lambda: calls.append("backend"),
+    )
+    env.devices.register_device("memory", FakeDevice())
+    try:
+        with simulation.closing_environment(env) as borrowed:
+            assert borrowed is env
+            assert env.devices.get_all_devices()
+            assert not calls
+        assert calls == ["backend"]
+        assert env.devices.get_all_devices() == {}
+    finally:
+        env.devices.close_all_devices()
+
+
+@pytest.mark.parametrize("failure", ["body", "backend"])
+def test_closing_environment_cleans_devices_on_errors(failure):
+    calls: list[str] = []
+
+    def close_backend() -> None:
+        calls.append("backend")
+        if failure == "backend":
+            raise RuntimeError("backend failed")
+
+    env = replace(
+        white_noise(load_soccfg(), std_adc=0, seed=7, routes="all"),
+        close_backend=close_backend,
+    )
+    env.devices.register_device("memory", FakeDevice())
+
+    def use_environment() -> None:
+        with simulation.closing_environment(env):
+            if failure == "body":
+                raise RuntimeError("body failed")
+
+    try:
+        with pytest.raises(RuntimeError, match=f"{failure} failed"):
+            use_environment()
+        assert calls == ["backend"]
+        assert env.devices.get_all_devices() == {}
+    finally:
+        env.devices.close_all_devices()
+
+
+def test_closing_environment_without_backend_closes_devices():
+    env = white_noise(load_soccfg(), std_adc=0, seed=7, routes="all")
+    env.devices.register_device("memory", FakeDevice())
+    try:
+        with simulation.closing_environment(env):
+            assert env.devices.get_all_devices()
+        assert env.devices.get_all_devices() == {}
+    finally:
+        env.devices.close_all_devices()
 
 
 def test_environment_builder_can_resolve_its_own_postponed_annotations(tmp_path):

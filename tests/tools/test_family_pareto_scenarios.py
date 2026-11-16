@@ -1,8 +1,11 @@
 """Public fixed-scenario construction and reproducible manifest freezing."""
 
+import os
 from collections.abc import Iterator
 from contextlib import ExitStack, closing
+from pathlib import Path
 
+import numba
 import numpy as np
 import pytest
 from zcu_tools.program import build_soccfg
@@ -16,9 +19,330 @@ from zcu_tools.simulators.single_fluxonium.environment import (
     single_fluxonium,
 )
 
-from tools.family_pareto_inputs import canonical_json, freeze_manifest
-from tools.family_pareto_scenarios import make_real_inputs, single_model_input
+from tools import family_pareto_scenarios as scene_producer
+from tools.family_pareto_inputs import Input, Scene, freeze_records, make_inputs
+from tools.family_pareto_scenarios import make_real_inputs
+from tools.family_pareto_scene_builders import single_model_input
 from tools.family_pareto_settings import BOARD_PROFILE, SINGLE_MODEL
+
+PinnedInventory = tuple[list[Input], dict[str, Path], Path]
+NATIVE_THREAD_VARIABLES = (
+    "OMP_NUM_THREADS",
+    "OPENBLAS_NUM_THREADS",
+    "MKL_NUM_THREADS",
+    "NUMBA_NUM_THREADS",
+)
+
+
+def native_thread_state() -> tuple[dict[str, str | None], int]:
+    return (
+        {name: os.environ.get(name) for name in NATIVE_THREAD_VARIABLES},
+        numba.get_num_threads(),
+    )
+
+
+@pytest.fixture(scope="module", autouse=True)
+def native_threads_module_guard() -> Iterator[None]:
+    before = native_thread_state()
+    yield
+    assert native_thread_state() == before, "scenario module leaked native threads"
+
+
+@pytest.fixture(autouse=True)
+def native_threads_guard(
+    native_threads_module_guard: None, request: pytest.FixtureRequest
+) -> Iterator[None]:
+    before = native_thread_state()
+    yield
+    assert native_thread_state() == before, (
+        f"{request.node.nodeid} leaked native thread state"
+    )
+
+
+@pytest.fixture
+def restore_native_threads(native_threads_guard: None) -> Iterator[None]:
+    environment, mask = native_thread_state()
+    try:
+        yield
+    finally:
+        for name, value in environment.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+        numba.set_num_threads(mask)
+
+
+def test_prepare_checks_pinned_identity_and_keeps_valid_cache(tmp_path: Path) -> None:
+    prepare = getattr(scene_producer, "prepare_scenes", None)
+    assert callable(prepare), "missing public pinned scene preparer"
+    from dataclasses import replace
+
+    from zcu_tools.simulate.evolution import (
+        FrozenIndexEntry,
+        digest,
+        read_frozen_index,
+        read_scene_records,
+        write_frozen_index,
+        write_scene_record,
+    )
+
+    declarations = make_inputs()
+    (original,) = freeze_records(declarations)
+    cache = tmp_path / "scenes"
+    index = tmp_path / "synthetic.index.json"
+    pinned = write_scene_record(cache, original)
+    write_frozen_index(index, (pinned,))
+    assert prepare(declarations, {"synthetic": index}, cache) == (pinned,)
+    changed = [replace(declarations[0], reason="changed metadata")]
+    with pytest.raises(ValueError, match="hash mismatch.*idle_coherence"):
+        prepare(changed, {"synthetic": index}, cache)
+    assert read_frozen_index(index) == (pinned,)
+    assert digest(read_scene_records(cache, (pinned,))[0].metadata) == digest(
+        original.metadata
+    )
+    updated = prepare(changed, {"synthetic": index}, cache, update_index=True)
+    assert updated != (pinned,)
+    assert read_frozen_index(index) == updated
+    assert updated == tuple(
+        FrozenIndexEntry.from_record(record) for record in freeze_records(changed)
+    )
+    # Old pinned numeric data remains usable after an intentional identity update.
+    assert digest(read_scene_records(cache, (pinned,))[0].metadata) == digest(
+        original.metadata
+    )
+
+
+@pytest.mark.parametrize("change", ["missing", "extra", "renamed", "moved"])
+@pytest.mark.parametrize("update_index", [False, True])
+def test_prepare_rejects_inventory_drift_before_building(
+    tmp_path: Path,
+    change: str,
+    update_index: bool,
+) -> None:
+    from dataclasses import replace
+
+    from zcu_tools.simulate.evolution import FrozenIndexEntry, write_frozen_index
+
+    declarations = make_inputs()
+    (record,) = freeze_records(declarations)
+    index = tmp_path / "synthetic.index.json"
+    write_frozen_index(index, (FrozenIndexEntry.from_record(record),))
+    built: list[str] = []
+
+    def forbidden_build() -> Scene:
+        built.append("built")
+        raise AssertionError("inventory mismatch must fail before model work")
+
+    original = replace(declarations[0], build=forbidden_build)
+    altered = {
+        "missing": [],
+        "extra": [original, replace(original, name="extra")],
+        "renamed": [replace(original, name="renamed")],
+        "moved": [replace(original, category="real")],
+    }[change]
+    with pytest.raises(ValueError, match="inventory.*(missing|unexpected|category)"):
+        scene_producer.prepare_scenes(
+            altered, {"synthetic": index}, tmp_path / "cache", update_index=update_index
+        )
+    assert built == []
+
+
+@pytest.fixture
+def pinned_inventory(tmp_path: Path) -> PinnedInventory:
+    from dataclasses import replace
+
+    from zcu_tools.simulate.evolution import FrozenIndexEntry, write_frozen_index
+
+    first = make_inputs()[0]
+    declarations = [first, replace(first, name="other", category="real")]
+    indexes = {
+        category: tmp_path / f"frozen-{category}.index.json"
+        for category in ("synthetic", "real")
+    }
+    for category, path in indexes.items():
+        write_frozen_index(
+            path,
+            (
+                FrozenIndexEntry.from_record(record)
+                for record in freeze_records(
+                    [item for item in declarations if item.category == category]
+                )
+            ),
+        )
+    return declarations, indexes, tmp_path / "scenes"
+
+
+def test_prepare_single_scenario_updates_only_its_row(
+    pinned_inventory: PinnedInventory,
+    tmp_path: Path,
+    restore_native_threads: None,
+) -> None:
+    from dataclasses import replace
+
+    from zcu_tools.simulate.evolution import read_frozen_index, read_scene_records
+
+    declarations, indexes, cache = pinned_inventory
+    original = {category: read_frozen_index(path) for category, path in indexes.items()}
+
+    def forbidden_build() -> Scene:
+        raise AssertionError("single scenario must not build another scene")
+
+    inputs = [
+        replace(declarations[0], reason="new reason"),
+        replace(declarations[1], build=forbidden_build),
+    ]
+    assert (
+        scene_producer.main(
+            [
+                "--index-dir",
+                str(tmp_path),
+                "--scene-cache",
+                str(cache),
+                "--scenario",
+                declarations[0].name,
+                "--update-index",
+            ],
+            inputs=inputs,
+        )
+        == 0
+    )
+    updated = read_frozen_index(indexes["synthetic"])
+    assert updated != original["synthetic"]
+    assert read_frozen_index(indexes["real"]) == original["real"]
+    assert read_scene_records(cache, updated)[0].name == declarations[0].name
+
+
+def test_prepare_publishes_no_indexes_until_all_selected_builders_succeed(
+    pinned_inventory: PinnedInventory,
+) -> None:
+    from dataclasses import replace
+
+    from zcu_tools.simulate.evolution import read_frozen_index
+
+    declarations, indexes, cache = pinned_inventory
+    original = {category: read_frozen_index(path) for category, path in indexes.items()}
+
+    def failed_build() -> Scene:
+        raise RuntimeError("second builder failed")
+
+    inputs = [
+        replace(declarations[0], reason="new reason"),
+        replace(declarations[1], build=failed_build),
+    ]
+    with pytest.raises(RuntimeError, match="second builder failed"):
+        scene_producer.prepare_scenes(inputs, indexes, cache, update_index=True)
+    assert {
+        category: read_frozen_index(path) for category, path in indexes.items()
+    } == original
+
+
+@pytest.mark.parametrize("category", ["synthetic", "real"])
+def test_prepare_explicit_new_scenario_appends_once_after_caching(
+    pinned_inventory: PinnedInventory,
+    tmp_path: Path,
+    category: str,
+    restore_native_threads: None,
+) -> None:
+    from dataclasses import replace
+
+    from zcu_tools.simulate.evolution import read_frozen_index, read_scene_records
+
+    declarations, indexes, cache = pinned_inventory
+    original = {key: read_frozen_index(path) for key, path in indexes.items()}
+    new = replace(declarations[0], name="declared-new", category=category)
+
+    def forbidden_build() -> Scene:
+        raise AssertionError("append must not build unselected declarations")
+
+    inputs = [replace(item, build=forbidden_build) for item in declarations] + [new]
+    argv = [
+        "--index-dir",
+        str(tmp_path),
+        "--scene-cache",
+        str(cache),
+        "--update-index",
+        "--scenario",
+        new.name,
+    ]
+    assert scene_producer.main(argv, inputs=inputs) == 0
+    updated = read_frozen_index(indexes[category])
+    assert updated[:-1] == original[category]
+    assert updated[-1].name == new.name
+    assert read_scene_records(cache, updated[-1:])[0].name == new.name
+    for other, path in indexes.items():
+        if other != category:
+            assert read_frozen_index(path) == original[other]
+    assert scene_producer.main(argv, inputs=inputs) == 0
+    assert read_frozen_index(indexes[category]) == updated
+
+
+@pytest.mark.parametrize(
+    "selection", ["no-update", "unknown", "duplicate", "moved", "category"]
+)
+def test_prepare_invalid_single_scenario_does_not_build_or_publish(
+    pinned_inventory: PinnedInventory, selection: str
+) -> None:
+    from dataclasses import replace
+
+    from zcu_tools.simulate.evolution import read_frozen_index
+
+    declarations, indexes, cache = pinned_inventory
+    original = {key: read_frozen_index(path) for key, path in indexes.items()}
+    calls: list[str] = []
+
+    def forbidden_build() -> Scene:
+        calls.append("builder")
+        raise AssertionError("invalid selection must fail before building")
+
+    new = replace(declarations[0], name="declared-new", build=forbidden_build)
+    inputs = [new]
+    scenario = new.name
+    if selection == "unknown":
+        scenario = "not-declared"
+    elif selection == "duplicate":
+        inputs.append(new)
+    elif selection == "moved":
+        inputs = [replace(new, name=declarations[1].name)]
+        scenario = declarations[1].name
+    elif selection == "category":
+        inputs = [replace(new, category="not-a-category")]
+    with pytest.raises(ValueError, match="inventory.*(missing|ambiguous|category)"):
+        scene_producer.prepare_scenes(
+            inputs,
+            indexes,
+            cache,
+            scenario=scenario,
+            update_index=selection != "no-update",
+        )
+    assert calls == []
+    assert {key: read_frozen_index(path) for key, path in indexes.items()} == original
+
+
+def test_prepare_failed_new_builder_keeps_indexes_and_existing_numeric_data(
+    pinned_inventory: PinnedInventory,
+) -> None:
+    from dataclasses import replace
+
+    from zcu_tools.simulate.evolution import read_frozen_index, read_scene_records
+
+    declarations, indexes, cache = pinned_inventory
+    scene_producer.prepare_scenes(declarations, indexes, cache)
+    original = {key: read_frozen_index(path) for key, path in indexes.items()}
+
+    def failed_build() -> Scene:
+        raise RuntimeError("new builder failed")
+
+    new = replace(declarations[0], name="declared-new", build=failed_build)
+    with pytest.raises(RuntimeError, match="new builder failed"):
+        scene_producer.prepare_scenes(
+            [*declarations, new], indexes, cache, scenario=new.name, update_index=True
+        )
+    assert {key: read_frozen_index(path) for key, path in indexes.items()} == original
+    for entries in original.values():
+        assert [record.name for record in read_scene_records(cache, entries)] == [
+            entry.name for entry in entries
+        ]
 
 
 @pytest.fixture(scope="module")
@@ -213,18 +537,22 @@ def test_random_gate_scan_preserves_model_pulses_and_companions(
 @pytest.mark.parametrize(
     "scenario", ["random_gate_sequence", "random_shaped_gate_sequence"]
 )
-def test_random_gate_scan_freezes_byte_identically(scenario: str) -> None:
-    first = canonical_json(freeze_manifest(make_real_inputs(scenario))) + "\n"
-    second = canonical_json(freeze_manifest(make_real_inputs(scenario))) + "\n"
-    assert first.encode() == second.encode()
+def test_random_gate_scan_reproduces_physical_and_oracle_hashes(scenario: str) -> None:
+    first = freeze_records(make_real_inputs(scenario))
+    second = freeze_records(make_real_inputs(scenario))
+    assert [(record.physical_sha256, record.oracle_sha256) for record in first] == [
+        (record.physical_sha256, record.oracle_sha256) for record in second
+    ]
 
 
-def test_fixed_scenarios_freeze_byte_identically_from_fresh_construction() -> None:
-    first_inputs = make_real_inputs()
-    assert first_inputs, "fixed-scenario construction must yield usable numeric inputs"
-    first = canonical_json(freeze_manifest(first_inputs)) + "\n"
-    second = canonical_json(freeze_manifest(make_real_inputs())) + "\n"
-    assert first.encode() == second.encode()
+def test_fixed_scenario_reproduces_hashes_from_fresh_construction() -> None:
+    # Full-inventory reconstruction belongs to the storage prepare checklist.
+    first = freeze_records(make_real_inputs("carrier_sweep"))
+    second = freeze_records(make_real_inputs("carrier_sweep"))
+    assert len(first) == len(second) == 1
+    assert [(record.physical_sha256, record.oracle_sha256) for record in first] == [
+        (record.physical_sha256, record.oracle_sha256) for record in second
+    ]
 
 
 def test_single_model_input_compiles_callback_with_fresh_sources() -> None:

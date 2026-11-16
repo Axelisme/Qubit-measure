@@ -1,13 +1,14 @@
 """Assemble the integer-fluxonium demo entry and offline measure-GUI resources."""
 
 import logging
+import os
 from pathlib import Path
 from shlex import quote
 
 import yaml
 from pydantic import TypeAdapter
 from zcu_tools.format_version import YamlMap
-from zcu_tools.gui.app.measure.startup_context import StartupContext
+from zcu_tools.gui.app.measure.startup_context import StartupContext, simulation_workers
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.program import build_soccfg
 from zcu_tools.resources.entry import DestinationExistsError, load_entry_template
@@ -25,7 +26,8 @@ def startup(ctx: StartupContext) -> None:
     values come only from adjacent integer_fluxonium.yaml. If it is missing,
     raise FileNotFoundError with a template copy command before creating an entry.
     No hardware, acquire or numeric warmup runs during startup. The mock SoC runs
-    complete-timeline evolution and single-cavity acquisition on demand.
+    complete-timeline evolution and single-cavity acquisition on demand, with
+    one fewer worker than host CPUs, at least one.
 
     Successfully registered drivers become GUI-owned. The on-close callback
     closes the backend after acquire drain, then drops borrowed driver references
@@ -59,7 +61,9 @@ def startup(ctx: StartupContext) -> None:
 
     ctx.progress("Building offline integer-fluxonium resources")
     soccfg = build_soccfg(yaml.safe_load(PROFILE_PATH.read_text()))
-    environment = single_fluxonium(settings_path, soccfg=soccfg)
+    environment = single_fluxonium(
+        settings_path, workers=simulation_workers(os.cpu_count()), soccfg=soccfg
+    )
     transferred: set[str] = set()
 
     def close_environment() -> None:

@@ -16,7 +16,7 @@ from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_types import SavedPoint
 from zcu_tools.gui.session.parameters import ParameterContext
 from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
-from zcu_tools.resources.entry.schema import PointDocument, PointGeneral
+from zcu_tools.resources.entry.schema import ParameterDocument, ParameterGeneral
 
 
 class NameSection(FormModel):
@@ -39,11 +39,11 @@ class NamesForm(FormModel):
 def name_env() -> FormEnv:
     """Capture authored aliases without requiring devices or live sources."""
     context = ParameterContext(
-        point=PointDocument(
+        point=ParameterDocument(
             format="zcu.parameter-container",
             format_version="2.0",
             schema_version=1,
-            general=PointGeneral(created_at="2026-10-11T00:00:00Z"),
+            general=ParameterGeneral(created_at="2026-10-11T00:00:00Z"),
         ),
         library=LibrarySnapshot(
             ModuleLibraryDocument(format="zcu.module-library", format_version="2.0")

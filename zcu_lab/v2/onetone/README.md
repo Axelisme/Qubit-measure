@@ -2,16 +2,25 @@
 
 **讀者：** lab-author。查閱 one-tone 表單的 readout timing 初值與共用來源。
 
-**Last updated:** 2026-11-12，共用 cfg 與頻率格點，繪圖由各 core 持有
+**Last updated:** 2026-11-16，freq 表單欄位歸回 FreqInput
 
 `freq`、`power_dep`、`flux_dep`、`range_find` 的 `make_form` 共用
 [`_form_shared.py`](_form_shared.py) 的 `initial_readout_timing`。
 `freq` 與 `range_find` 另共用 `initial_spectrum_tree`，集中 readout、linear sweep 與平均次數的初值。
-[`_shared.py`](_shared.py) 保存不依賴 GUI 的 cfg 與頻率格點。
+[`_shared.py`](_shared.py) 保存不依賴 GUI 的結果型別與頻率格點。
+`freq/form.py` 的 `FreqInput` 直接宣告表單欄位；兩個 core 各自擁有 cfg。
 兩個 core 的 `run` 各自列出 reset → PulseReadout → declare_sweep → acquire 序列。
 [`range_find`](range_find/guide.md) 掃大範圍絕對 MHz，單一 Analyze 入口開啟互動選谷。
 靜態找谷提供初始猜測，operator 可調參、增刪與重新對應元件，Done 後才提議各 resonator 的 `freq`。
 Recipe 等待 agent 經 `tab_interact` 確認並送出 done，才進入 writeback 問答。
+
+`range_find` 的分析名單預設由本模組維護，沒有專屬 ADR。
+2026-11-16 使用者裁決「那預設改R1」，Run／Load 的 Analysis 名單因此預設為 `["R1"]`。
+Done 對每個具名 dip 提議 `<name>.freq` MHz，不要求 capture 或既有元件。
+Apply 寫入當下作用中的文件，元件存在就覆寫 freq，不存在就建立該名 resonator，只填 freq，其餘使用 model defaults。
+名稱拼錯也會建立新元件，Apply 前可取消該列。此 upsert 契約由 ADR-0008 管轄；`freq` 與 mux adapters 不採用。
+Unassigned 不提案。Recipe 的 `resonators` 仍為必填，不沿用 GUI 預設。
+
 Open／Reset 從固定 capture 讀取 resonator 校準，並以 `readout` Template 建立初值。
 
 - `kappa` 使用 MHz，時間使用 us。TOF 讀 resonator 頂層 `$resonator.time_of_fly`，不從 ext 讀取。缺失或 null 時，trigger 與 pulse length 留空必填。

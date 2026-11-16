@@ -91,6 +91,6 @@ def test_named_paths_narrow_the_walk_and_tolerate_absence(tmp_path: Path):
 
 
 def test_a_sibling_check_loads_by_name() -> None:
-    module = _support.load_tool("check_file_size")
+    module = _support.load_tool("check_quality")
 
     assert module.LINE_LIMIT == 1000

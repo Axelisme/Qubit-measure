@@ -82,7 +82,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     Returns zero after a readable run. argparse handles invalid CLI arguments.
     """
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("paths", type=Path, nargs="+")
+    parser.add_argument(
+        "paths",
+        type=Path,
+        nargs="+",
+        help="routing JSONL files or directories containing routing-*.jsonl",
+    )
     args = parser.parse_args(argv)
     files: set[Path] = set()
     for path in args.paths:

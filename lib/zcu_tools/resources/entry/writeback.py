@@ -34,7 +34,12 @@ from .ledger_models import (
 )
 from .points import PointView
 from .storage import StorageBinding, bind_record_table
-from .views import SetupView, document_value, snapshot, source_path
+from .views import (
+    SetupView,
+    document_value,
+    snapshot,
+    source_path,
+)
 
 if TYPE_CHECKING:
     from zcu_tools.resources.context.library import ModuleLibrary
@@ -48,12 +53,16 @@ class ParameterWriteback:
     native complex, encoded by AcceptedWrite. metadata is None to keep the
     path's existing opaque metadata, or a string-keyed YAML mapping that
     replaces it in the same point commit ({} clears it). The executor neither
-    interprets its keys nor adds source, time or event fields.
+    interprets its keys nor adds source, time or event fields. create_kind is
+    the registered kind used only if the component is missing; None does not
+    create it. Only the proposed field seeds creation, with model defaults for
+    other fields. Existing components retain their kind and other fields.
     """
 
     path: str
     value: JsonValue | complex
     metadata: YamlMap | None = None
+    create_kind: str | None = None
 
 
 @dataclass(frozen=True)
@@ -156,13 +165,18 @@ class ParameterUpdate:
 
     path is dotted and role-resolved. value uses the point owner's YAML value
     representation. metadata=None preserves existing metadata; a mapping
-    replaces it, including {} to clear it. The point owner validates each draft
+    replaces it, including {} to clear it. create_kind optionally names the
+    registered kind to create when the component is absent; None keeps missing
+    component errors. Only this update's fields seed creation; all other fields
+    use registered model defaults. Existing components keep their kind and other
+    fields. Values use working units. The point owner validates each draft
     change and commits the entire batch only when every change succeeds.
     """
 
     path: str
     value: YamlValue
     metadata: YamlMap | None = None
+    create_kind: str | None = None
 
 
 @dataclass(frozen=True)
@@ -267,7 +281,8 @@ def commit_parameter_updates(
 
     point is the caller's existing PointView or SetupView; do not reopen it
     or select a GUI target. updates must be nonempty. ParameterUpdate defines
-    concrete paths, YAML values and optional metadata replacement.
+    concrete paths, working-unit YAML values, optional metadata replacement
+    and opt-in creation with registered model defaults (ADR-0008).
     Return one detached actual value per update in supplied order, captured
     immediately after its draft validation, only after the whole edit commits.
     Later updates cannot change earlier receipts. Empty input raises ValueError.
@@ -279,6 +294,13 @@ def commit_parameter_updates(
     actual: list[YamlValue] = []
     with point.edit() as draft:
         for update in updates:
+            if update.create_kind is not None:
+                name, *segments = update.path.split(".")
+                if not hasattr(draft, name):
+                    fields: YamlMap = {segments[-1]: update.value}
+                    for segment in reversed(segments[:-1]):
+                        fields = {segment: fields}
+                    draft.add_component(name, kind=update.create_kind, **fields)
             draft.set(update.path, update.value)
             if update.metadata is not None:
                 draft.set_meta(update.path, update.metadata)
@@ -493,7 +515,11 @@ def apply_writeback(
     record_indices: list[int] = []
     for index, (item, write) in enumerate(zip(items, writes, strict=True)):
         if isinstance(item, ParameterWriteback):
-            parameters.append(ParameterUpdate(write.path, write.value, item.metadata))
+            parameters.append(
+                ParameterUpdate(
+                    write.path, write.value, item.metadata, item.create_kind
+                )
+            )
             parameter_indices.append(index)
         elif isinstance(item, RecordWriteback):
             record_indices.append(index)

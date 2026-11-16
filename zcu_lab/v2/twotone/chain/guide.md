@@ -2,7 +2,7 @@
 
 **Readers:** operator, agent. Run the readout-chain qubit frequency sweep from the GUI or MCP and read its sigma curve and peak fit.
 
-**Last updated:** 2026-11-09
+**Last updated:** 2026-11-16, independent peak options and midpoint window
 
 After changing the parameter source, use Reset to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Reset can overwrite unsaved inputs.
 
@@ -44,8 +44,10 @@ Stop the run when the peaks are clear. Stop keeps the sums of completed rounds. 
 
 ## Analysis
 
-Analysis recomputes the sigma curve from the saved sums and fits one peak with the `twotone/freq` peak fit.
-The options are those of `twotone/freq`: `expected_center_mhz` selects the nearest candidate, blank selects the most prominent, and `min_prominence`, `min_snr`, `min_width_samples` and `min_distance_mhz` gate the candidates.
+Analysis recomputes the sigma curve from the saved sums and fits one peak with the shared numerical spectrum fitter.
+This experiment retains its own options: `expected_center_mhz` selects the nearest candidate, blank selects the most prominent, and `min_prominence`, `min_snr`, `min_width_samples` and `min_distance_mhz` gate the candidates.
+The fit window ends halfway to neighbouring candidates and needs at least six samples.
+The local-maximum selection and six-half-width window of `twotone/freq` do not apply here.
 Keep `model_type` at `lor`; the sigma curve is never negative, so it cannot show the opposite-signed sidelobes that the `sinc` model fits.
 The `fit` plot shows the sigma curve, the dashed level, the fitted peak, the fitted centre in red and the other candidates in dotted gray.
 The summary reports `freq`, `freq_err`, `fwhm`, `fwhm_err` in MHz, the `level` in sigma and the candidates in `peaks`.

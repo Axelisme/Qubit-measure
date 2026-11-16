@@ -16,7 +16,7 @@ from pydantic import BaseModel
 from pydantic.fields import FieldInfo
 
 from .registry import component_registry
-from .schema import PointDocument, SetupDocument
+from .schema import ParameterDocument
 
 type FieldValueKind = Literal[
     "text", "integer", "number", "boolean", "choice", "mapping", "group", "yaml"
@@ -78,9 +78,7 @@ def component_field_specs(kind: str) -> tuple[FieldSpec, ...]:
     return tuple(_project(model, (), (model,)))
 
 
-def role_candidates(
-    document: SetupDocument | PointDocument, role: str
-) -> tuple[str, ...]:
+def role_candidates(document: ParameterDocument, role: str) -> tuple[str, ...]:
     """Return document component names whose kind matches role's kind pattern.
 
     Names keep document order. Unknown roles raise ValueError from the role

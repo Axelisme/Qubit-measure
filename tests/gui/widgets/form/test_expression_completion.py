@@ -20,8 +20,8 @@ from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDo
 from zcu_tools.resources.entry import ComponentSchema
 from zcu_tools.resources.entry.schema import (
     ParameterContent,
-    PointDocument,
-    PointGeneral,
+    ParameterDocument,
+    ParameterGeneral,
 )
 
 from tests.gui._user_input import ComponentDriver
@@ -47,7 +47,7 @@ class CountingContext(ParameterContext):
         self.alias_reads += 1
         return super().resolved_aliases()
 
-    def document(self) -> PointDocument | ParameterContent:
+    def document(self) -> ParameterDocument | ParameterContent:
         self.document_reads += 1
         return super().document()
 
@@ -55,11 +55,11 @@ class CountingContext(ParameterContext):
 def capture(alias: str = "qubit") -> CountingContext:
     """Build an isolated fixed point with two components and one device alias."""
     return CountingContext(
-        point=PointDocument.model_construct(
+        point=ParameterDocument.model_construct(
             format="zcu.parameter-container",
             format_version="2.0",
             schema_version=1,
-            general=PointGeneral(created_at="2026-10-20T00:00:00Z"),
+            general=ParameterGeneral(created_at="2026-10-20T00:00:00Z"),
             components={"Q1": Qubit(kind="completion/test")},
         ),
         library=LibrarySnapshot(

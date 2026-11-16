@@ -37,14 +37,14 @@ class FreqResult:
 
 @validated_dataclass(frozen=True)
 class FreqAnalyzeOptions:
-    """Select lor/sinc and a candidate near expected_center_mhz (None: strongest).
+    """Choose model_type (lor/sinc), expected_center_mhz and min_snr.
 
-    min_prominence is relative to projected signal ptp; min_distance_mhz is the
-    minimum candidate separation. min_snr gates prominence and height above
-    the median in first-difference MAD noise units. min_width_samples gates
-    observable half-prominence width in sample intervals; 0 disables this gate.
-    Raise it only for fine scans. peaks reports height SNR, not prominence SNR.
-    The fitted overlay is always drawn.
+    None expected center selects the most prominent peak; a finite MHz center
+    selects the highest nearby local maximum, within two median scan steps or
+    one candidate half-width, whichever is larger. min_snr (default 5) gates
+    both prominence and height above median in first-difference MAD noise units.
+    Relative prominence, minimum width and minimum separation gates are off.
+    The fitted overlay and actual fit window are always drawn.
     """
 
     model_type: Annotated[Literal["lor", "sinc"], FieldMeta(label="Model type")] = "lor"
@@ -53,24 +53,14 @@ class FreqAnalyzeOptions:
         FieldMeta(label="Expected center", unit="MHz"),
         Field(allow_inf_nan=False),
     ] = None
-    min_prominence: Annotated[
-        float, FieldMeta(label="Minimum prominence / signal range"), Field(ge=0, le=1)
-    ] = 0.2
     min_snr: Annotated[
         float,
-        FieldMeta(label="Minimum height above median / noise sigma"),
+        FieldMeta(
+            label="Min SNR",
+            description="Minimum prominence and height above median / noise sigma.",
+        ),
         Field(ge=0, allow_inf_nan=False),
     ] = 5.0
-    min_width_samples: Annotated[
-        float,
-        FieldMeta(label="Minimum half-prominence width", unit="samples"),
-        Field(ge=0, allow_inf_nan=False),
-    ] = 0.0
-    min_distance_mhz: Annotated[
-        float,
-        FieldMeta(label="Minimum peak separation", unit="MHz"),
-        Field(ge=0, allow_inf_nan=False),
-    ] = 0.0
 
 
 @dataclass(frozen=True)
@@ -273,11 +263,14 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         ``lor`` uses background-subtracted magnitude; ``sinc`` uses a signed
         principal-axis projection to preserve sidelobes. Unlike Run's magnitude
         preview, the plotted observations follow the selected analysis model.
-        Ignore unacquired NaN points. Select the nearest expected center or the
-        most prominent candidate, fit only its interval between neighbouring
-        candidates, and mark the other candidates. Return all candidates,
-        transition frequency, FWHM and
-        their fit uncertainties in MHz, and publish the spectrum as ``fit``.
+        Ignore unacquired NaN points. Select the highest local maximum near the
+        expected center, or the most prominent candidate when blank. Fit within
+        six half-prominence half-widths on each side, clipped at neighbouring
+        midpoints but expanded to at least six nearest samples. Shade the actual
+        fit window and mark the other candidates. No nearby SNR-qualified peak
+        raises AnalysisFailed with candidate count and thresholds. Return all
+        candidates, transition frequency, FWHM and their fit uncertainties in
+        MHz, and publish the spectrum as ``fit``.
         The source cfg may be None; only the acquired data enter the fit.
         Invalid projection inputs raise ValueError; fitting/plotting errors and
         optimizer warnings propagate.
@@ -301,11 +294,12 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
             SpectrumFitOptions(
                 model_type=options.model_type,
                 expected_center_mhz=options.expected_center_mhz,
-                min_prominence=options.min_prominence,
+                min_prominence=0.0,
                 min_snr=options.min_snr,
-                min_width_samples=options.min_width_samples,
-                min_distance_mhz=options.min_distance_mhz,
+                min_width_samples=0.0,
+                min_distance_mhz=0.0,
             ),
+            local_peak=True,
         )
         freq, freq_err, fwhm, fwhm_err = fit.freq, fit.freq_err, fit.fwhm, fit.fwhm_err
 
@@ -321,6 +315,13 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
                     ls=":",
                     label=f"candidate {peak.center:.5g} MHz",
                 )
+        ax.axvspan(
+            float(fit.freqs.min()),
+            float(fit.freqs.max()),
+            color="tab:blue",
+            alpha=0.12,
+            label=f"fit window {fit.freqs.min():.6g}–{fit.freqs.max():.6g} MHz",
+        )
         ax.plot(fit.freqs, fit.fitted, label=f"fit, FWHM={fwhm:.1g} MHz")
         label = f"f_q = {freq:.5g} ± {freq_err:.1g} MHz"
         ax.axvline(freq, color="r", ls="--", label=label)

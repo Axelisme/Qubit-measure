@@ -257,6 +257,10 @@ def test_circular_reexports_terminate_as_rejections() -> None:
     assert len(check_script_awaits.check_sources(sources)) == 1
 
 
+def test_cli_rejects_a_nonexistent_root(tmp_path: Path) -> None:
+    assert check_script_awaits.main(["--root", str(tmp_path / "missing")]) == 2
+
+
 def test_cli_checks_fixture_sources_and_reports_rejections(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

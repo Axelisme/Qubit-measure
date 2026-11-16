@@ -4,13 +4,13 @@ from zcu_tools.format_version import YamlMap
 from zcu_tools.gui.session.context_types import SavedPoint
 from zcu_tools.gui.session.parameters import ParameterContext
 from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
-from zcu_tools.resources.entry.schema import PointDocument
+from zcu_tools.resources.entry.schema import ParameterDocument
 
 
 def make_parameters(values: YamlMap) -> ParameterContext:
     """Capture numeric test values under general.ext in a memory-only entry draft."""
     return ParameterContext(
-        point=PointDocument.model_validate(
+        point=ParameterDocument.model_validate(
             {
                 "format": "zcu.parameter-container",
                 "format_version": "2.0",

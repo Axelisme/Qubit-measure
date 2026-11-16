@@ -37,7 +37,7 @@ from zcu_tools.gui.app.measure.artifacts import ArtifactSaveCenter
 from zcu_tools.gui.app.measure.services import TabAction
 from zcu_tools.gui.app.measure.ui.interactive_frontend import InteractiveFrontend
 from zcu_tools.gui.expected_error import ExpectedError
-from zcu_tools.gui.form import FormModel, FormState
+from zcu_tools.gui.form import FormErrors, FormModel, FormState
 from zcu_tools.gui.lifetime import LifetimeScope
 from zcu_tools.gui.plotting import FigureContainer
 from zcu_tools.gui.session.library_entry import LibraryEntryInvalid
@@ -839,6 +839,7 @@ class ExpTabWidget(QWidget):
         self._editor_scope.connect(
             editor.validity_changed, self._on_cfg_validity_changed
         )
+        self._editor_scope.connect(editor.errors_changed, self._on_cfg_validity_changed)
         editor.set_editing_enabled(enabled=self._editing_enabled)
         self._editor = editor
         self._editor_state = state
@@ -1015,20 +1016,27 @@ class ExpTabWidget(QWidget):
         *,
         writable: bool,
     ) -> None:
-        """Show domain denial before local parse errors and hardware exclusion."""
-        invalid_reason = self.cfg_invalid_reason()
-        cfg_valid = invalid_reason is None
-        self._run_cfg_notice.setText(
-            "" if cfg_valid else f"Config invalid: {invalid_reason}"
-        )
-        self._run_cfg_notice.setVisible(
-            not cfg_valid and self._cfg.unavailable_reason is None
-        )
+        """Show ``Config invalid: N fields`` (``1 field`` for one canonical path).
+
+        Count resource and editor-local errors by FormPath, not message text.
+        ADR-0065 keeps details at the fields and a repair hint in the tooltip.
+        Other domain denials precede local errors and hardware exclusion;
+        unavailable form factories retain their original preparation reason.
+        """
+        count = self._cfg_error_count()
+        noun = "field" if count == 1 else "fields"
+        self._run_cfg_notice.setText(f"Config invalid: {count} {noun}" if count else "")
+        self._run_cfg_notice.setVisible(count > 0)
         decision = self._ctrl.admit(self.tab_id, TabAction.RUN)
+        repair_hint = "Fix the fields marked in red"
         if not decision.allowed:
-            reason = decision.message
-        elif (local_reason := self._local_cfg_invalid_reason()) is not None:
-            reason = f"Config invalid: {local_reason}"
+            reason = (
+                repair_hint
+                if decision.reason == "not_valid" and count
+                else decision.message
+            )
+        elif count:
+            reason = repair_hint
         elif state.startup_active:
             reason = "Startup script is running"
         elif state.global_run_active:
@@ -1037,6 +1045,17 @@ class ExpTabWidget(QWidget):
             reason = ""
         self.run_btn.setEnabled(writable and decision.allowed and not reason)
         self.run_btn.setToolTip(reason)
+
+    def _cfg_error_count(self) -> int:
+        """Count canonical resource/visible-draft error paths, including local text."""
+        if self._cfg.unavailable_reason is not None:
+            return 0
+        result = self._cfg.result()
+        paths = set(result.messages) if isinstance(result, FormErrors) else set()
+        errors = self._editor.errors() if self._editor is not None else None
+        if errors is not None:
+            paths.update(errors.messages)
+        return len(paths)
 
     def _bind_to_controller(self, actions: TabActions) -> None:
         tab_id = self.tab_id
