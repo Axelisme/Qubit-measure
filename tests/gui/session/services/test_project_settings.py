@@ -5,9 +5,9 @@ from pathlib import Path
 import pytest
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.session.context_types import (
+    DocumentSetRef,
     EntryRequest,
     PointUseRequest,
-    SavedPoint,
 )
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.services.project_settings import (
@@ -104,7 +104,7 @@ def test_open_entry_then_use_point_publishes_active_target(
 
     target = context.use_point(PointUseRequest("working"))
 
-    assert target == SavedPoint(entry_name=info.name, point="working")
+    assert target == DocumentSetRef(entry_name=info.name, point="working")
     assert state.session_env.readiness is ContextReadiness.POINT
     assert context.read_context().target == target
     assert context.list_points()[0].description == "saved calibration"

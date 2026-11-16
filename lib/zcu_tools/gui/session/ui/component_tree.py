@@ -32,7 +32,7 @@ from qtpy.QtWidgets import (
 from zcu_tools.format_version import YamlMap, YamlValue
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.lifetime import LifetimeScope
-from zcu_tools.gui.session.context_types import ContextTarget, FileRevision
+from zcu_tools.gui.session.context_types import DocumentSetRef, FileRevision
 from zcu_tools.gui.session.ui.add_component_dialog import AddComponentDialog
 from zcu_tools.gui.session.ui.component_editing import (
     edit_choices,
@@ -90,7 +90,7 @@ class _EditTarget:
     revision: FileRevision | None = None
     setup: bool = False
     entry_name: str | None = None
-    point: ContextTarget | None = None
+    point: DocumentSetRef | None = None
     draft: str | None = None
 
 
@@ -292,7 +292,7 @@ class ComponentTreeWidget(QWidget):
         value: YamlValue,
         *,
         setup: bool = False,
-        target: ContextTarget | None = None,
+        target: DocumentSetRef | None = None,
     ) -> bool:
         """Edit a concrete field through its owner; report errors as for Add.
 

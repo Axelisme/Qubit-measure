@@ -10,8 +10,8 @@ from pydantic import ConfigDict
 from zcu_tools.cfg_model import ArbWaveformCfg, PulseSpec
 from zcu_tools.gui.remote.errors import ErrorCode
 from zcu_tools.gui.session.aliases import AliasRow
-from zcu_tools.gui.session.context_types import ContextSourceFault, SavedPoint
-from zcu_tools.gui.session.parameters import ParameterContext, RoleBinding
+from zcu_tools.gui.session.context_types import ContextSourceFault, DocumentSetRef
+from zcu_tools.gui.session.parameters import DocumentSetCapture, RoleBinding
 from zcu_tools.resources.context.library import LibraryContent, LibrarySnapshot
 from zcu_tools.resources.entry import ComponentSchema, ResultEntry, component_registry
 from zcu_tools.resources.waveform_assets import ArbWaveformError
@@ -164,7 +164,7 @@ def test_source_unavailable_snapshot_does_not_unlock_context(
     fault = ContextSourceFault(
         document, tmp_path / f"{document}.yaml", "OSError", "source fault"
     )
-    unavailable = ParameterContext(
+    unavailable = DocumentSetCapture(
         point=captured.document(),
         library=captured.library,
         target=captured.target,
@@ -212,7 +212,7 @@ def test_snapshot_path_validates_only_the_selected_parameter_subtree(
     components = snapshot_mapping(raw["components"])
     components["Q1"] = {"kind": "fake/drive/a", "rate": 10.0}
     components["Broken"] = {"kind": "fake/drive/a", "rate": bad}
-    restored = ParameterContext.from_content(
+    restored = DocumentSetCapture.from_content(
         point=content, library=captured.library, aliases=None, names={}
     )
     application.state.set_context(
@@ -294,7 +294,7 @@ def test_snapshot_summary_checks_fields_it_outputs_not_list_item_schemas(
         application.state.set_context(
             replace(
                 application.state.session_env,
-                parameters=ParameterContext.from_content(
+                parameters=DocumentSetCapture.from_content(
                     point=content, library=captured.library, aliases=None, names={}
                 ),
             )
@@ -329,7 +329,7 @@ def test_snapshot_path_reads_a_leaf_without_validating_same_component_sibling(
     application.state.set_context(
         replace(
             application.state.session_env,
-            parameters=ParameterContext.from_content(
+            parameters=DocumentSetCapture.from_content(
                 point=content, library=captured.library, aliases=None, names={}
             ),
         )
@@ -384,7 +384,7 @@ def test_snapshot_library_path_reads_only_selected_spec_fields(
     application.state.set_context(
         replace(
             application.state.session_env,
-            parameters=ParameterContext.from_content(
+            parameters=DocumentSetCapture.from_content(
                 point=captured.point_content(), library=library, aliases=None, names={}
             ),
         )
@@ -421,7 +421,7 @@ def test_snapshot_point_path_does_not_consume_unselected_library_source_fault(
     application.open_entry()
     application.result("point.new", {"label": "working", "description": "available"})
     captured = application.controller.context_control.read_context()
-    unavailable = ParameterContext(
+    unavailable = DocumentSetCapture(
         point=captured.document(),
         library=captured.library,
         target=captured.target,
@@ -457,7 +457,7 @@ def test_invalid_snapshot_target_path_precedes_unselected_point_source_fault(
     application.open_entry()
     application.result("point.new", {"label": "working"})
     captured = application.controller.context_control.read_context()
-    unavailable = ParameterContext(
+    unavailable = DocumentSetCapture(
         point=captured.document(),
         library=captured.library,
         target=captured.target,
@@ -488,7 +488,7 @@ def test_snapshot_path_reports_malformed_required_ancestor_as_schema_error(
     content = captured.point_content()
     components = snapshot_mapping(snapshot_mapping(content.root)["components"])
     components["Q1"] = {"kind": "fake/drive/a", "rate": 10.0, "wiring": wiring}
-    restored = ParameterContext.from_content(
+    restored = DocumentSetCapture.from_content(
         point=content, library=captured.library, aliases=None, names={}
     )
     application.state.set_context(
@@ -512,9 +512,9 @@ def test_snapshot_path_reports_malformed_required_ancestor_as_schema_error(
         restored.value("Q1.wiring.ch")
 
 
-def saved_target(parameters: ParameterContext) -> SavedPoint:
+def saved_target(parameters: DocumentSetCapture) -> DocumentSetRef:
     target = parameters.target
-    assert isinstance(target, SavedPoint)
+    assert isinstance(target, DocumentSetRef)
     return target
 
 
@@ -583,7 +583,7 @@ def test_snapshot_summary_preserves_native_array_shape_and_numpy_scalars(
                 }
             }
         )
-        native = ParameterContext(
+        native = DocumentSetCapture(
             point=point,
             library=captured.library,
             target=captured.target,
@@ -677,7 +677,7 @@ def test_snapshot_summary_keeps_scalars_and_complete_aliases(
         ),
         ("point.general.ext.browse.matrix.1", [3, 4]),
         ("point.components.Q1.rate", 10.0),
-        ("target.kind", "saved_point"),
+        ("target.point", "working"),
         ("library.components", {}),
         ("aliases.1.resolved", "S1"),
     ],

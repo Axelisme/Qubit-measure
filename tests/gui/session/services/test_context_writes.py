@@ -17,10 +17,9 @@ from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_control import ContextControlPort
 from zcu_tools.gui.session.context_types import (
-    ContextTarget,
+    DocumentSetRef,
     LibraryChange,
     PointUseRequest,
-    SavedPoint,
 )
 from zcu_tools.gui.session.events import (
     ContextSwitchedPayload,
@@ -29,7 +28,7 @@ from zcu_tools.gui.session.events import (
     MdChangedPayload,
     MlChangedPayload,
 )
-from zcu_tools.gui.session.parameters import ParameterContext
+from zcu_tools.gui.session.parameters import DocumentSetCapture
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.state import SessionState
 from zcu_tools.gui.session.types import SessionEnv
@@ -75,7 +74,7 @@ def session(tmp_path: Path) -> _Session:
 
 def _write(
     control: ContextControlPort,
-    target: ContextTarget,
+    target: DocumentSetRef,
     kind: Kind,
     number: float,
     *,
@@ -105,7 +104,7 @@ def _write(
         control.set_waveform(target, destination, ConstWaveformCfg(length=number))
 
 
-def _value(capture: ParameterContext, kind: Kind) -> YamlValue:
+def _value(capture: DocumentSetCapture, kind: Kind) -> YamlValue:
     if kind == "parameter":
         return capture.value("general.ext.flux_value")
     if kind == "module":
@@ -113,7 +112,7 @@ def _value(capture: ParameterContext, kind: Kind) -> YamlValue:
     return capture.library.entry_value("Q1.waveforms.base", kind="waveform")["length"]
 
 
-def _select(session: _Session, label: str) -> SavedPoint:
+def _select(session: _Session, label: str) -> DocumentSetRef:
     session.entry.new_point(label)
     return session.control.use_point(PointUseRequest(label))
 
@@ -175,7 +174,7 @@ def test_entry_writes_install_before_notification_and_leave_active_capture_fixed
     active = session.control.read_context()
     active_files = session.control.get_file_revisions()
     version = session.state.version.get("context")
-    observed: list[ParameterContext] = []
+    observed: list[DocumentSetCapture] = []
     other_events: list[object] = []
     session.bus.subscribe(
         EntryDocumentsChangedPayload,
@@ -244,7 +243,7 @@ def test_entry_structure_writes_notify_after_cache_installation(
     captured = session.control.read_context(setup=True)
     active = session.control.read_context()
     version = session.state.version.get("context")
-    observed: list[ParameterContext] = []
+    observed: list[DocumentSetCapture] = []
     session.bus.subscribe(
         EntryDocumentsChangedPayload,
         lambda _: observed.append(session.control.read_context(setup=True)),
@@ -442,7 +441,7 @@ def test_rejected_global_writeback_does_not_publish_external_parameter_revision(
 
 
 def test_read_target_rejects_other_entries(session: _Session) -> None:
-    target = SavedPoint(entry_name="other", point="a")
+    target = DocumentSetRef(entry_name="other", point="a")
     before = session.state.session_env
     with pytest.raises(FailedPreconditionError) as error:
         session.control.read_target(target)
@@ -451,13 +450,13 @@ def test_read_target_rejects_other_entries(session: _Session) -> None:
 
 
 def test_read_target_missing_point_does_not_create_it(session: _Session) -> None:
-    target = SavedPoint(entry_name=session.entry.result_path.name, point="missing")
+    target = DocumentSetRef(entry_name=session.entry.result_path.name, point="missing")
     with pytest.raises(FileNotFoundError):
         session.control.read_target(target)
     assert session.entry.list_points() == []
 
 
-def _persisted(entry: ResultEntry, target: SavedPoint, kind: Kind) -> YamlValue:
+def _persisted(entry: ResultEntry, target: DocumentSetRef, kind: Kind) -> YamlValue:
     if kind == "parameter":
         return snapshot(entry.parameters(target.point)).general.ext["flux_value"]
     library = entry.library(
@@ -697,7 +696,7 @@ def test_missing_saved_point_is_not_created_by_setter(
     kind: Kind,
 ) -> None:
     _select(session, "selected")
-    target = SavedPoint(entry_name=session.entry.result_path.name, point="missing")
+    target = DocumentSetRef(entry_name=session.entry.result_path.name, point="missing")
     capture = session.control.read_context()
     with pytest.raises(FileNotFoundError):
         _write(session.control, target, kind, 0.2)
@@ -837,7 +836,7 @@ def test_sample_only_writeback_rejects_invalid_saved_point_before_acceptance(
     points = session.entry.list_points()
     point_before = snapshot(session.entry.parameters("a")).model_dump(mode="json")
     version = session.state.version.get("context")
-    target = SavedPoint(entry_name=session.entry.result_path.name, point=label)
+    target = DocumentSetRef(entry_name=session.entry.result_path.name, point=label)
 
     with pytest.raises(error_type):
         session.service.apply_writeback(

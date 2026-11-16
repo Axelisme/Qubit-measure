@@ -12,7 +12,7 @@ from zcu_tools.gui.app.measure.services.pane_commit import commit_run
 from zcu_tools.gui.app.measure.state import RunPaneState
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.parameter_capture import restore_parameters
-from zcu_tools.gui.session.parameters import ParameterContext
+from zcu_tools.gui.session.parameters import DocumentSetCapture
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.artifacts import LayoutPlanner
@@ -108,7 +108,7 @@ class LoadService:
                 raise ValueError("restored record has no metadata")
             snapshot = RunMetadataContent(metadata).parameter_snapshot
             parameters = (
-                ParameterContext.empty()
+                DocumentSetCapture.empty()
                 if snapshot is None
                 else restore_parameters(snapshot)
             )

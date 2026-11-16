@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 from zcu_tools.format_version import YamlValue
-from zcu_tools.gui.session.parameters import ParameterContext
+from zcu_tools.gui.session.parameters import DocumentSetCapture
 from zcu_tools.mcp.measure.session import GuiRpcError
 
 from tests.gui.app.measure._record_support import require_target
@@ -99,7 +99,7 @@ def test_md_rpc_shares_gui_values_and_rejects_reserved_keys(
         general = point.general.model_copy(
             update={"ext": {**point.general.ext, "complex": 1 + 2j}}
         )
-        parameters = ParameterContext(
+        parameters = DocumentSetCapture(
             point=point.model_copy(update={"general": general}),
             library=captured.library,
             target=captured.target,

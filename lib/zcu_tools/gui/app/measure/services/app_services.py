@@ -27,7 +27,7 @@ from zcu_tools.gui.session.operation_runner import (
 )
 from zcu_tools.gui.session.services.build import SessionServices, build_session_services
 from zcu_tools.gui.session.services.progress import ProgressService
-from zcu_tools.gui.session.types import ParameterContext
+from zcu_tools.gui.session.types import DocumentSetCapture
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
 from ..writeback import WritebackControlFacet, WritebackService
@@ -172,7 +172,7 @@ def build_app_services(  # noqa: PLR0913
 
     def captured_parameters(
         aliases: Mapping[str, str] | None,
-    ) -> ParameterContext | None:
+    ) -> DocumentSetCapture | None:
         if state.session_env.parameters is None and not aliases:
             return None
         return context.read_context(aliases=aliases)

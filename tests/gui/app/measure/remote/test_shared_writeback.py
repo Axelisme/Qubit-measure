@@ -19,9 +19,8 @@ from zcu_tools.gui.expected_error import InvalidInputError
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_types import (
-    ContextTarget,
+    DocumentSetRef,
     PointUseRequest,
-    SavedPoint,
 )
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.state import SessionState
@@ -37,7 +36,7 @@ class RejectingContext(ContextService):
     """A producer opt-in expected failure of the entire point group."""
 
     def set_parameters(
-        self, target: ContextTarget, updates: tuple[ParameterUpdate, ...]
+        self, target: DocumentSetRef, updates: tuple[ParameterUpdate, ...]
     ) -> tuple[YamlValue, ...]:
         if any(update.path == "general.ext.rejected" for update in updates):
             raise InvalidInputError("rejected fit", reason_code="fit_rejected")
@@ -225,7 +224,7 @@ def test_sample_write_receipt_reads_latest_jsonl_at_current_point(
         "source": entry.ledger.events()[-1].id,
     }
     assert updated["source"] != row["source"]
-    assert context.read_context().target == SavedPoint(
+    assert context.read_context().target == DocumentSetRef(
         entry_name=entry.result_path.name, point="b"
     )
     assert draft.get_all_applied() == {"record-1": True}
@@ -307,7 +306,7 @@ def test_record_preview_selection_and_apply_preserve_adapter_json(
         "at": row["at"],
         "source": event.id,
     }
-    assert context.read_context().target == SavedPoint(
+    assert context.read_context().target == DocumentSetRef(
         entry_name=entry.result_path.name, point="b"
     )
     assert draft.get_all_applied() == {"param-1": False, "record-1": True}

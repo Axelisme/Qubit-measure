@@ -40,7 +40,7 @@ from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.gui.session.context_types import CommandOrigin, PointUseRequest
 from zcu_tools.gui.session.operation_handles import OperationHandles
-from zcu_tools.gui.session.parameters import ParameterContext
+from zcu_tools.gui.session.parameters import DocumentSetCapture
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.resources.entry import ResultEntry
@@ -151,7 +151,7 @@ class NativeSaveSession:
 
     def capture_parameters(
         self, aliases: Mapping[str, str] | None
-    ) -> ParameterContext | None:
+    ) -> DocumentSetCapture | None:
         """Use current aliases, retaining EMPTY deferred reads without overrides."""
         if self.state.session_env.parameters is None and not aliases:
             return None

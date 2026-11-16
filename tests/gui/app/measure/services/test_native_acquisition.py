@@ -38,7 +38,7 @@ from zcu_tools.gui.session.context_types import (
     PointUseRequest,
 )
 from zcu_tools.gui.session.operation_runner import OperationRunner
-from zcu_tools.gui.session.parameters import ParameterContext
+from zcu_tools.gui.session.parameters import DocumentSetCapture
 from zcu_tools.gui.session.services.progress import ProgressService
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.resources.entry import (
@@ -422,7 +422,7 @@ def test_native_run_without_storage_reports_missing_acquired_destination(
     session.state.set_context(
         replace(
             session.state.session_env,
-            parameters=ParameterContext(
+            parameters=DocumentSetCapture(
                 point=captured.document(),
                 library=captured.library,
                 target=captured.target,

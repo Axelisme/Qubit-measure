@@ -23,12 +23,11 @@ from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_control import ContextControlPort
 from zcu_tools.gui.session.context_types import (
     CommandOrigin,
+    DocumentSetRef,
     EntryInfo,
     EntryRequest,
     PointCreateRequest,
     PointUseRequest,
-    SavedEntry,
-    SavedPoint,
 )
 from zcu_tools.gui.session.operation_handles import OperationHandles
 from zcu_tools.gui.session.ports import OwnerScheduler
@@ -251,7 +250,7 @@ class StartupSetup:
         mode: Literal["inherit", "empty", "clone"] = "inherit",
         clone_from: str | None = None,
         description: str = "",
-    ) -> SavedPoint:
+    ) -> DocumentSetRef:
         """Create and select a point using the opened entry on-owner.
 
         label is one safe path segment. inherit copies global documents; empty
@@ -276,7 +275,7 @@ class StartupSetup:
         """
         return self.calls.call(lambda: self.control.open_entry(EntryRequest(name)))
 
-    def use_point(self, label: str) -> SavedPoint:
+    def use_point(self, label: str) -> DocumentSetRef:
         """Select an existing label in the opened entry on-owner.
 
         Missing entry/point and resource errors propagate, preserving the old
@@ -284,7 +283,7 @@ class StartupSetup:
         """
         return self.calls.call(lambda: self.control.use_point(PointUseRequest(label)))
 
-    def use_global(self) -> SavedEntry:
+    def use_global(self) -> DocumentSetRef:
         """Select the opened entry global documents on-owner without creating a point.
 
         Missing entry or preparation failure propagates and preserves selection.

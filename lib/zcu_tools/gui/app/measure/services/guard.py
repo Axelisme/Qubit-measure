@@ -14,7 +14,7 @@ from zcu_tools.gui.app.measure.adapter import (
 from zcu_tools.gui.app.measure.catalog import ExperimentAccess
 from zcu_tools.gui.app.measure.registry import RegisteredAdapter
 from zcu_tools.gui.expected_error import FailedPreconditionError
-from zcu_tools.gui.session.types import ParameterContext
+from zcu_tools.gui.session.types import DocumentSetCapture
 from zcu_tools.resources.entry import StorageBinding
 
 from .tab_form import AcceptedFormConfig
@@ -96,7 +96,7 @@ class RunInputs:
     snapshot: RunSnapshot | None = None
     experiment_tag: str | None = None
     storage: StorageBinding | None = None
-    parameters: ParameterContext | None = None
+    parameters: DocumentSetCapture | None = None
 
 
 class GuardService:
@@ -319,6 +319,6 @@ class GuardService:
         This shared check does not select, apply or tear down a draft. The
         writeback owner requires a captured destination in the still-open entry
         before nonempty writes. Selection admits the command but never replaces
-        its captured SavedPoint destination with the currently selected point.
+        its captured DocumentSetRef destination with the currently selected point.
         """
         self.require_admission(tab_id, TabAction.WRITEBACK)

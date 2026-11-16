@@ -13,9 +13,15 @@ from pydantic import TypeAdapter
 
 from zcu_tools.format_version import YamlValue
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
-from zcu_tools.gui.session.aliases import AliasRow, AliasTable, ResolvedAliasRow
+from zcu_tools.gui.session.aliases import (
+    AliasRow,
+    AliasSnapshot,
+    AliasTable,
+    ResolvedAliasRow,
+)
 from zcu_tools.gui.session.context_types import (
     ContextSourceUnavailableError,
+    FileRevision,
 )
 from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
 from zcu_tools.resources.document_store import DocumentValue
@@ -23,6 +29,7 @@ from zcu_tools.resources.entry import (
     ComponentSchema,
     ParameterContent,
     RoleResolutionError,
+    document_revision,
     document_value,
     parameter_content,
     resolve_path,
@@ -38,10 +45,60 @@ from zcu_tools.resources.projection import ProjectionPathError, projection_value
 _LIBRARY_PARTITIONS = ("pulses", "readout", "reset", "waveforms")
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.session.context_types import ContextSourceFault, ContextTarget
+    from zcu_tools.gui.session.context_types import ContextSourceFault, DocumentSetRef
     from zcu_tools.resources.context.library import ModuleLibrary
     from zcu_tools.resources.entry import ParameterView, ResultEntry, RoleSpec
+    from zcu_tools.resources.entry.aliases import AliasFile
     from zcu_tools.resources.entry.schema import ParameterDocument
+
+
+@dataclass
+class DocumentSet:
+    """One scope's installed resource handles and admitted alias observation.
+
+    parameters is the bound global or point ParameterView. library is that
+    scope's opened ModuleLibrary, including its asset capability. alias_file
+    is its opened AliasFile; aliases retains its session-validated table,
+    revision and deferred error. Construction reads only cached observations
+    and defers alias format/syntax errors to consumers.
+
+    The owning ContextService replaces alias_file and aliases together only
+    after admission or save succeeds. Queries copy installed content without
+    opening, refreshing or writing files. This groups selection and revision
+    queries for ContextService, watcher and fixed captures; it is not a
+    multi-file transaction or a resources-level opener.
+    """
+
+    parameters: ParameterView
+    library: ModuleLibrary
+    alias_file: AliasFile
+    aliases: AliasSnapshot = field(init=False)
+
+    def __post_init__(self) -> None:
+        self.aliases = AliasSnapshot.from_read(self.alias_file.read())
+
+    def content(self) -> ParameterContent:
+        """Copy installed parameters without I/O; deferred field errors remain lazy."""
+        return parameter_content(self.parameters)
+
+    def library_content(self) -> LibrarySnapshot:
+        """Return the installed immutable library projection without I/O."""
+        return self.library.snapshot()
+
+    def revisions(self) -> tuple[FileRevision, ...]:
+        """Read parameters/library/aliases versions in order without I/O.
+
+        Paths are absolute owner paths. Missing library/aliases have revision
+        None; an alias revision may describe bytes with a deferred error.
+        """
+        parameters = document_revision(self.parameters)
+        library = document_revision(self.library)
+        aliases = document_revision(self.alias_file)
+        return (
+            FileRevision("parameters", parameters.path, parameters.revision),
+            FileRevision("library", library.path, library.revision),
+            FileRevision("aliases", aliases.path, aliases.revision),
+        )
 
 
 class ModuleSlotError(AttributeError):
@@ -65,9 +122,9 @@ class RoleBinding:
     explicitly leaves it unbound, and an absent key allows inference. It is
     process-local capture state, not storage or ledger metadata.
     aliases optionally retains immutable authored alias rows. When present,
-    ParameterContext resolves names from these rows rather than focus or via;
+    DocumentSetCapture resolves names from these rows rather than focus or via;
     None denotes an already resolved binding without authored alias rows.
-    Construction detaches mappings. ParameterContext also detaches returned
+    Construction detaches mappings. DocumentSetCapture also detaches returned
     bindings, so consumer edits do not change another capture.
     """
 
@@ -83,15 +140,15 @@ class RoleBinding:
         object.__setattr__(self, "explicit", dict(self.explicit))
 
 
-class ParameterContext:
+class DocumentSetCapture:
     """An isolated working-unit point/library capture with an explicit target.
 
-    Construction accepts parameter and library snapshots, a SavedEntry or SavedPoint
+    Construction accepts parameter and library snapshots, a DocumentSetRef
     destination, and an optional fixed consumer RoleBinding.
     Binding declarations may omit names for unbound roles. Their $role reads
     raise RoleResolutionError naming the role; bare paths always name concrete
     components or general fields, for both Run and Load captures.
-    source_faults contains only point/module_cfg diagnostics, not setup faults.
+    source_faults contains only point/module_cfg diagnostics, not global faults.
     The target, authored alias rows, diagnostics and already resolved bindings
     remain readable on an unavailable capture. Data reads and alias-derived
     names then raise ContextSourceUnavailableError.
@@ -108,7 +165,7 @@ class ParameterContext:
         *,
         point: ParameterDocument | ParameterContent,
         library: LibrarySnapshot,
-        target: ContextTarget | None,
+        target: DocumentSetRef | None,
         roles: RoleBinding | None,
         source_faults: tuple[ContextSourceFault, ...] = (),
         storage: StorageBinding | None = None,
@@ -118,7 +175,7 @@ class ParameterContext:
         RoleResolutionError reports missing or wrong-kind destinations for
         declared component consumers. Undeclared names may identify devices.
         Declared roles absent from names are unbound, not constructor failures.
-        A setup diagnostic is outside this capture contract and raises
+        A global diagnostic is outside this capture contract and raises
         ValueError. storage optionally retains a resource-owned entry/point
         capability with matching target identity; omit it for synthetic
         captures. Mismatched storage origins also raise ValueError.
@@ -128,7 +185,7 @@ class ParameterContext:
         InvalidInputError. Empty aliases do not prevent constructing a capture.
         No session selection generation is accepted or compared.
         """
-        if any(fault.document == "setup" for fault in source_faults):
+        if any(fault.document == "global" for fault in source_faults):
             raise ValueError("Parameter captures accept only point/module_cfg faults")
         if storage is not None and (
             target is None
@@ -177,14 +234,41 @@ class ParameterContext:
                     )
 
     @classmethod
+    def from_set(
+        cls,
+        documents: DocumentSet,
+        *,
+        target: DocumentSetRef,
+        roles: RoleBinding | None = None,
+        storage: StorageBinding | None = None,
+    ) -> DocumentSetCapture:
+        """Detach installed parameters/library with explicit destination and storage.
+
+        documents is an already installed global or point set; no resource is
+        opened or refreshed. target identifies that scope. roles supplies fixed
+        consumer names, following the constructor's validation. storage retains
+        the resource-owned capability captured by the caller; mismatched target
+        identity raises ValueError. Omit storage for a synthetic read capture.
+        Alias rows are attached by the caller using bind_aliases, so historical
+        fixed role names are never re-expanded against live aliases.
+        """
+        return cls(
+            point=documents.content(),
+            library=documents.library_content(),
+            target=target,
+            roles=roles,
+            storage=storage,
+        )
+
+    @classmethod
     def from_point(
         cls,
         point: ParameterView,
         library: ModuleLibrary,
-        target: ContextTarget,
+        target: DocumentSetRef,
         *,
         roles: RoleBinding | None = None,
-    ) -> ParameterContext:
+    ) -> DocumentSetCapture:
         """Capture cached point content, library and saved-point storage.
 
         point and library are already opened resource views. target must match
@@ -207,10 +291,10 @@ class ParameterContext:
         cls,
         entry: ResultEntry,
         library: ModuleLibrary,
-        target: ContextTarget,
+        target: DocumentSetRef,
         *,
         roles: RoleBinding | None = None,
-    ) -> ParameterContext:
+    ) -> DocumentSetCapture:
         """Capture cached global parameters, library and entry storage.
 
         entry and library must already be opened. target must identify this
@@ -228,7 +312,7 @@ class ParameterContext:
         )
 
     @classmethod
-    def empty(cls) -> ParameterContext:
+    def empty(cls) -> DocumentSetCapture:
         """Create a readable empty environment with no target, metadata or storage."""
         return cls(
             point=ParameterContent(),
@@ -274,7 +358,7 @@ class ParameterContext:
         library: LibrarySnapshot,
         aliases: YamlValue,
         names: YamlValue,
-    ) -> ParameterContext:
+    ) -> DocumentSetCapture:
         """Restore detached content without granting a persistent target or storage.
 
         Sections stay opaque until a read requests their value or binding.
@@ -290,7 +374,7 @@ class ParameterContext:
         return restored
 
     @property
-    def target(self) -> ContextTarget | None:
+    def target(self) -> DocumentSetRef | None:
         """Return a detached persistent target, or None for stored/empty content."""
         return None if self._target is None else self._target.model_copy(deep=True)
 
@@ -489,7 +573,7 @@ class ParameterContext:
         declarations: Mapping[str, RoleSpec],
         *,
         alias_error: Exception | None = None,
-    ) -> ParameterContext:
+    ) -> DocumentSetCapture:
         """Return a fixed capture of authored aliases and consumer kind rules.
 
         Validate syntax/order, not bindings. Empty or missing rows are legal
@@ -500,7 +584,7 @@ class ParameterContext:
         only; concrete reads remain available. Source faults stay fixed for
         actual-use checks. Invalid rows raise without producing a capture.
         """
-        captured = ParameterContext(
+        captured = DocumentSetCapture(
             point=self._point,
             library=self._library,
             target=self._target,
@@ -517,7 +601,7 @@ class ParameterContext:
         *,
         focus: str | None,
         explicit: Mapping[str, str | None],
-    ) -> ParameterContext:
+    ) -> DocumentSetCapture:
         """Resolve roles on this fixed point and return an independent capture.
 
         Declarations are ordered kind/via rules. Explicit concrete names win
@@ -538,7 +622,7 @@ class ParameterContext:
         else:
             components = {}
         names = resolve_names(components, declarations, focus, explicit)
-        return ParameterContext(
+        return DocumentSetCapture(
             point=self._point,
             library=self._library,
             target=self._target,

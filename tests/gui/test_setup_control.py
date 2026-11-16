@@ -8,11 +8,11 @@ from pathlib import Path
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.session.context_types import (
     CommandOrigin,
+    DocumentSetRef,
     EntryInfo,
     EntryRequest,
     PointCreateRequest,
     PointUseRequest,
-    SavedPoint,
     WorkingPointInfo,
 )
 from zcu_tools.gui.session.device_control import DeviceControlFacet
@@ -75,13 +75,13 @@ class RecordingContext(ContextService):
         )
         self._log = log
 
-    def use_point(self, request: PointUseRequest) -> SavedPoint:
+    def use_point(self, request: PointUseRequest) -> DocumentSetRef:
         self._log.add("context", "use_point", request)
-        return SavedPoint(entry_name="entry", point=request.label)
+        return DocumentSetRef(entry_name="entry", point=request.label)
 
-    def new_point(self, request: PointCreateRequest) -> SavedPoint:
+    def new_point(self, request: PointCreateRequest) -> DocumentSetRef:
         self._log.add("context", "new_point", request)
-        return SavedPoint(entry_name="entry", point=request.label)
+        return DocumentSetRef(entry_name="entry", point=request.label)
 
     def list_points(self, *, refresh: bool = False) -> tuple[WorkingPointInfo, ...]:
         self._log.add("context", "list_points", refresh=refresh)
@@ -149,7 +149,7 @@ def test_setup_control_facet_forwards_deliberate_setup_dialog_contract() -> None
     point = PointCreateRequest(
         "new", "", CommandOrigin("gui"), clone_from="base", mode="clone"
     )
-    saved = SavedPoint(entry_name="entry", point="base")
+    saved = DocumentSetRef(entry_name="entry", point="base")
     info = EntryInfo("chip", Path("/tmp/result/chip"), Path("/tmp/Database/chip"))
     cases: tuple[tuple[str, Callable[[], object], object, RecordedCall], ...] = (
         (
@@ -191,7 +191,7 @@ def test_setup_control_facet_forwards_deliberate_setup_dialog_contract() -> None
         (
             "new_point",
             lambda: facet.new_point(point),
-            SavedPoint(entry_name="entry", point="new"),
+            DocumentSetRef(entry_name="entry", point="new"),
             call("context", "new_point", point),
         ),
         (

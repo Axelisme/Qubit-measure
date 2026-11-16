@@ -62,7 +62,7 @@ def scalar_alias_bindings(
 ) -> dict[str, str]:
     """Admit scalar bindings from a fixed resolved-alias projection.
 
-    rows comes from ParameterContext.resolved_aliases(); required contains the
+    rows comes from DocumentSetCapture.resolved_aliases(); required contains the
     consumer's placeholder names. Return all resolved scalar rows, without
     mutating the projection. Required lists raise InvalidInputError before
     missing checks. Absent, unbound and failed rows count as missing.

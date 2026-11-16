@@ -14,7 +14,7 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 from zcu_tools.gui.session.expression import EvalRef
-from zcu_tools.gui.session.parameters import ParameterContext
+from zcu_tools.gui.session.parameters import DocumentSetCapture
 from zcu_tools.gui.session.ui.eval_field import EvalNumericField
 from zcu_tools.gui.widgets import error_colour, mixed_colour
 
@@ -22,7 +22,7 @@ from tests.gui.session.ui._parameter_fakes import make_parameters
 
 
 def _field(
-    parameters: ParameterContext | None = None,
+    parameters: DocumentSetCapture | None = None,
     *,
     decimals: int = 6,
     minimum: float = -1e9,
@@ -200,7 +200,7 @@ def test_load_expression_switches_to_eval_mode(qapp):
 
 
 def test_no_context_parameter_provider_shows_red_ghost(qapp):
-    def provider() -> ParameterContext:
+    def provider() -> DocumentSetCapture:
         raise RuntimeError("no active context")
 
     field = EvalNumericField(

@@ -22,7 +22,7 @@ from zcu_tools.gui.app.measure.writeback import (
 from zcu_tools.gui.app.measure.writeback.control import WritebackControlFacet
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import InvalidInputError
-from zcu_tools.gui.session.context_types import ContextTarget, PointUseRequest
+from zcu_tools.gui.session.context_types import DocumentSetRef, PointUseRequest
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.state import SessionState
 from zcu_tools.gui.session.types import SessionEnv
@@ -39,7 +39,7 @@ class RejectingContext(ContextService):
     """Reject the Post point group after the Primary pane has committed."""
 
     def set_parameters(
-        self, target: ContextTarget, updates: tuple[ParameterUpdate, ...]
+        self, target: DocumentSetRef, updates: tuple[ParameterUpdate, ...]
     ) -> tuple[YamlValue, ...]:
         if any(update.path == "general.ext.rejected" for update in updates):
             raise InvalidInputError("synthetic setter refused the value")

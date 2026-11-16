@@ -29,7 +29,7 @@ from zcu_tools.gui.session.context_types import (
     EntryRequest,
     PointCreateRequest,
 )
-from zcu_tools.gui.session.parameters import ParameterContext
+from zcu_tools.gui.session.parameters import DocumentSetCapture
 from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.resources.entry import AcquiredPayload, ComponentSchema, ResultEntry
@@ -58,7 +58,7 @@ class EnvironmentSummary:
     gain: float | None
 
 
-def inspect_environment(parameters: ParameterContext | None) -> EnvironmentSummary:
+def inspect_environment(parameters: DocumentSetCapture | None) -> EnvironmentSummary:
     assert parameters is not None
     if not parameters.document().components:
         return EnvironmentSummary(-1.0, None)

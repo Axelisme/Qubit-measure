@@ -31,7 +31,7 @@ from zcu_tools.gui.app.measure.services.pane_commit import (
 )
 from zcu_tools.gui.app.measure.state import RunPaneState
 from zcu_tools.gui.session.context_types import EntryRequest, PointUseRequest
-from zcu_tools.gui.session.parameters import ParameterContext
+from zcu_tools.gui.session.parameters import DocumentSetCapture
 from zcu_tools.resources.entry import AcquiredPayload
 
 from tests.experiment._saving_support import SavingCfg, SavingResult
@@ -229,7 +229,7 @@ def install_unbound_saved_capture(session: NativeSaveSession) -> None:
     """Keep the selected point's fixed names and values without storage capability."""
     captured = session.state.session_env.parameters
     assert captured is not None
-    unbound = ParameterContext(
+    unbound = DocumentSetCapture(
         point=captured.document(),
         library=captured.library,
         target=captured.target,

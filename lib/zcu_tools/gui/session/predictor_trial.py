@@ -34,7 +34,7 @@ from zcu_tools.simulate.transmon import TransmonParams
 
 if TYPE_CHECKING:
     from zcu_tools.gui.session.predictor_control import PredictorControlPort
-    from zcu_tools.gui.session.types import ParameterContext
+    from zcu_tools.gui.session.types import DocumentSetCapture
 
 
 @dataclass(frozen=True)
@@ -343,7 +343,7 @@ class PredictorTrial:
         live_mode: bool,
         selected: Sequence[tuple[int, int]],
         frequency: float | EvalRef,
-        parameter_provider: Callable[[], ParameterContext | None] | None = None,
+        parameter_provider: Callable[[], DocumentSetCapture | None] | None = None,
     ) -> CalibrationReadiness | None:
         """Return the first calibration blocker, or None when ready, without changes.
 
@@ -374,7 +374,7 @@ class PredictorTrial:
     def resolve_calibration_frequency_mhz(
         self,
         frequency: float | EvalRef,
-        parameter_provider: Callable[[], ParameterContext | None] | None = None,
+        parameter_provider: Callable[[], DocumentSetCapture | None] | None = None,
     ) -> CalibrationFrequency:
         """Resolve measured MHz or a bounded MHz EvalRef without changing drafts.
 

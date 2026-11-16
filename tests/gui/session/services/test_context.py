@@ -14,18 +14,17 @@ from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_types import (
     CommandOrigin,
     ContextSourceBinding,
+    DocumentSetRef,
     EntryInfo,
     PointBindingError,
     PointCreateRequest,
     PointUseRequest,
-    SavedEntry,
-    SavedPoint,
 )
 from zcu_tools.gui.session.events import (
     AliasesChangedPayload,
     ContextSwitchedPayload,
 )
-from zcu_tools.gui.session.parameters import ParameterContext
+from zcu_tools.gui.session.parameters import DocumentSetCapture
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.state import SessionState
 from zcu_tools.gui.session.types import ContextReadiness, SessionEnv
@@ -187,7 +186,7 @@ def test_global_preparation_failure_keeps_selected_point_and_publishes_no_fact(
 
 def test_current_point_label_for_storage_free_content_has_no_persistent_point() -> None:
     state = SessionState(
-        SessionEnv(parameters=ParameterContext.empty(), soc=None, soccfg=None)
+        SessionEnv(parameters=DocumentSetCapture.empty(), soc=None, soccfg=None)
     )
     owner = ContextService(
         state, BaseEventBus(), bind_assets=ArbWaveformDatabase.info_at
@@ -628,7 +627,7 @@ def test_use_point_detaches_capture_and_uses_same_entry_library(
     context.install_entry(entry)
     target = context.use_point(PointUseRequest("first"))
     capture = context.read_context()
-    assert target == SavedPoint(entry_name=entry.result_path.name, point="first")
+    assert target == DocumentSetRef(entry_name=entry.result_path.name, point="first")
     assert capture.whole_document().general.description == "first point"
     with first.edit() as edit:
         edit.general.description = "changed outside publication"
@@ -699,7 +698,9 @@ def test_new_point_uses_seed_or_clone_and_request_description(
         edit.set("general.ext.marker", 7.0)
     context.install_entry(entry)
     target = context.new_point(_new_request("destination", clone=clone))
-    assert target == SavedPoint(entry_name=entry.result_path.name, point="destination")
+    assert target == DocumentSetRef(
+        entry_name=entry.result_path.name, point="destination"
+    )
     document = context.read_context().whole_document()
     assert document.general.description == "session description"
     assert document.general.ext.get("marker") == (None if clone is None else 7.0)
@@ -924,10 +925,10 @@ def test_publication_facts_observe_installed_state_and_one_context_bump(
             assert entry_info == info
             if version == 1:
                 assert env.parameters is not None
-                assert env.parameters.target == SavedEntry(entry_name=info.name)
+                assert env.parameters.target == DocumentSetRef(entry_name=info.name)
             else:
                 assert env.parameters is not None
-                assert env.parameters.target == SavedPoint(
+                assert env.parameters.target == DocumentSetRef(
                     entry_name=info.name, point="first" if version == 2 else "second"
                 )
             assert sources is not None and sources.sources

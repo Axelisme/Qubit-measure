@@ -32,7 +32,7 @@ if TYPE_CHECKING:
     from zcu_tools.device import DeviceActivity
     from zcu_tools.device.base import BaseDeviceInfo
     from zcu_tools.gui.session.context_types import EntryInfo
-    from zcu_tools.gui.session.types import ParameterContext
+    from zcu_tools.gui.session.types import DocumentSetCapture
     from zcu_tools.progress_bar.base import ProgressTotal, ProgressValue
     from zcu_tools.resources.entry import ResultEntry
 
@@ -286,7 +286,7 @@ class ContextReadPort(Protocol):
 
     def read_context(
         self, *, aliases: Mapping[str, str] | None = None
-    ) -> ParameterContext:
+    ) -> DocumentSetCapture:
         """Fix published point/library/storage and all current authored aliases.
 
         aliases optionally maps alias names to temporary concrete components;

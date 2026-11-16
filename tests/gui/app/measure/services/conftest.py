@@ -9,9 +9,9 @@ from qtpy.QtWidgets import QApplication
 from zcu_tools.gui.app.measure.services.pane_commit import commit_run
 from zcu_tools.gui.app.measure.state import RunPaneState
 from zcu_tools.gui.session.aliases import AliasRow
-from zcu_tools.gui.session.context_types import SavedPoint
+from zcu_tools.gui.session.context_types import DocumentSetRef
 from zcu_tools.gui.session.parameter_capture import capture_parameters
-from zcu_tools.gui.session.types import ParameterContext
+from zcu_tools.gui.session.types import DocumentSetCapture
 from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
 from zcu_tools.resources.entry import (
     ComponentSchema,
@@ -35,13 +35,13 @@ class SourceQubit(ComponentSchema):
 
 
 @pytest.fixture
-def result_sources() -> Iterator[tuple[ParameterContext, ParameterContext]]:
+def result_sources() -> Iterator[tuple[DocumentSetCapture, DocumentSetCapture]]:
     """Yield Q1/Q2 bindings on one fixed point, restoring kind registration."""
     before = component_registry.kinds()
     component_registry.register("run-source/qubit", SourceQubit)
     role_registry.register("source_qubit", RoleSpec("run-source/qubit"))
     try:
-        source = ParameterContext(
+        source = DocumentSetCapture(
             point=ParameterDocument.model_validate(
                 {
                     "format": "zcu.parameter-container",
@@ -57,7 +57,7 @@ def result_sources() -> Iterator[tuple[ParameterContext, ParameterContext]]:
             library=LibrarySnapshot(
                 ModuleLibraryDocument(format="zcu.module-library", format_version="2.0")
             ),
-            target=SavedPoint(entry_name="entry", point="working"),
+            target=DocumentSetRef(entry_name="entry", point="working"),
             roles=None,
         )
         declarations = {"source_qubit": RoleSpec("run-source/qubit")}
@@ -75,7 +75,7 @@ def result_sources() -> Iterator[tuple[ParameterContext, ParameterContext]]:
 def role_load_session(
     tmp_path: Path,
     qapp: QApplication,
-    result_sources: tuple[ParameterContext, ParameterContext],
+    result_sources: tuple[DocumentSetCapture, DocumentSetCapture],
     monkeypatch: pytest.MonkeyPatch,
 ) -> Iterator[NativeSaveSession]:
     """Save Q1 roles at p, then update persisted Q1.rate before native Load."""

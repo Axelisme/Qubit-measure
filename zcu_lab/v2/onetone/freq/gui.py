@@ -19,7 +19,7 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackItem,
     WritebackRequest,
 )
-from zcu_tools.gui.session.parameters import ParameterContext
+from zcu_tools.gui.session.parameters import DocumentSetCapture
 from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2.onetone.freq.core import (
@@ -132,7 +132,7 @@ def _readout_route(result: OneToneFreqRunResult) -> tuple[int, int] | None:
 
 
 def _route_matched_prior(
-    parameters: ParameterContext | None, route: tuple[int, int] | None
+    parameters: DocumentSetCapture | None, route: tuple[int, int] | None
 ) -> float | None:
     if parameters is None or route is None:
         return None
@@ -142,7 +142,7 @@ def _route_matched_prior(
 
 def _resolve_edelay_seed(
     params: OneToneFreqAnalyzeParams,
-    parameters: ParameterContext | None,
+    parameters: DocumentSetCapture | None,
     route: tuple[int, int] | None,
 ) -> tuple[float | None, EDelaySource]:
     if params.edelay is not None:

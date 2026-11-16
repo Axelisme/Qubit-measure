@@ -41,8 +41,8 @@ from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_control import ContextControlPort
 from zcu_tools.gui.session.context_types import (
     CommandOrigin,
+    DocumentSetRef,
     PointUseRequest,
-    SavedPoint,
 )
 from zcu_tools.gui.session.expression import evaluate_scalar_expr
 from zcu_tools.gui.session.operation_runner import OperationRunner
@@ -52,7 +52,7 @@ from zcu_tools.gui.session.parameter_capture import (
 )
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.state import SessionState
-from zcu_tools.gui.session.types import ParameterContext, SessionEnv
+from zcu_tools.gui.session.types import DocumentSetCapture, SessionEnv
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.resources.entry import (
     JsonObject,
@@ -77,10 +77,10 @@ from tests.gui.app.measure._record_support import require_metadata, require_reco
 from tests.resources.entry.fakes import register_fakes, registry_state, restore_registry
 
 
-def saved_target(parameters: ParameterContext) -> SavedPoint:
+def saved_target(parameters: DocumentSetCapture) -> DocumentSetRef:
     """Require a saved-point fixture capture for setup writes."""
     target = parameters.target
-    if not isinstance(target, SavedPoint):
+    if not isinstance(target, DocumentSetRef):
         raise AssertionError("Fixture capture has no saved point")
     return target
 
@@ -360,7 +360,7 @@ def test_preview_and_apply_use_current_gui_point_not_analysis_origin(
     if source == "snapshot":
         parameters = restore_parameters(capture_parameters(original))
     elif source == "empty":
-        parameters = ParameterContext.empty()
+        parameters = DocumentSetCapture.empty()
     elif source == "absent":
         parameters = None
     draft = session.service.create_draft(

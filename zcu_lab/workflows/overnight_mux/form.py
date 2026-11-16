@@ -16,7 +16,7 @@ from zcu_tools.gui.form import (
     Option,
 )
 from zcu_tools.gui.form_adapter import ModuleInput, ModuleInputField
-from zcu_tools.gui.session.parameters import ModuleSlotError, ParameterContext
+from zcu_tools.gui.session.parameters import DocumentSetCapture, ModuleSlotError
 from zcu_tools.program.v2.modules import ModuleCfgFactory as NativeModuleCfgFactory
 from zcu_tools.resources.entry import RoleResolutionError
 
@@ -40,7 +40,7 @@ else:
     ResetInput = RESET.annotation
 
 
-def _slot(parameters: ParameterContext, path: str) -> JsonValue:
+def _slot(parameters: DocumentSetCapture, path: str) -> JsonValue:
     """Return a captured module ref or blank when its optional slot is absent."""
     try:
         return {"kind": "ref", "name": parameters.library_key(path)}

@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Protocol, TypeAlias
 
-from zcu_tools.gui.session.parameters import ParameterContext as ParameterContext
+from zcu_tools.gui.session.parameters import DocumentSetCapture as DocumentSetCapture
 from zcu_tools.gui.session.parameters import RoleBinding as RoleBinding
 from zcu_tools.gui.session.value_lookup import EmptyValueLookup, ValueLookup
 
@@ -79,7 +79,7 @@ class SessionEnv:
     """Published parameters plus independent live session capabilities.
 
     parameters is None for EMPTY, otherwise a fixed capture without consumer
-    roles targeting SavedEntry or SavedPoint. soc/soccfg remain live capabilities,
+    roles targeting DocumentSetRef. soc/soccfg remain live capabilities,
     not Run evidence. result_dir/database_path cache opened entry paths, empty
     without an entry. active_label is the saved point label in POINT and None in
     EMPTY/GLOBAL. readiness distinguishes those three scopes; GLOBAL and POINT
@@ -87,7 +87,7 @@ class SessionEnv:
     Retaining an environment does not update its parameter capture.
     """
 
-    parameters: ParameterContext | None
+    parameters: DocumentSetCapture | None
     soc: SocHandle | None
     soccfg: SocCfgHandle | None
     result_dir: str = ""

@@ -223,7 +223,7 @@ class ViewSnapshot(TypedDict):
     active_tab_id is the focused State-owned tab ID, or None.
     tab_ids lists State-owned IDs in State order, excluding ghost widgets.
     entry_label is the visible entry name, or "No entry open".
-    point_label is the visible SavedPoint label, "Draft (in-memory)", or
+    point_label is the visible DocumentSetRef label, "Draft (in-memory)", or
     "No point selected". It never derives from component focus.
     status is the visible status-bar text.
     open_dialogs lists the named dialogs currently open, using wire names.

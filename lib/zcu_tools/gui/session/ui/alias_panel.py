@@ -27,9 +27,7 @@ from zcu_tools.gui.session.aliases import AliasRow, AliasTable
 from zcu_tools.gui.session.context_control import ContextControlPort
 from zcu_tools.gui.session.context_types import (
     ContextSourceUnavailableError,
-    ContextTarget,
-    SavedEntry,
-    SavedPoint,
+    DocumentSetRef,
 )
 from zcu_tools.gui.session.ui.file_banner import FileBanner
 from zcu_tools.gui.widgets import error_colour, secondary_colour
@@ -73,7 +71,7 @@ class AliasPanel(QWidget):
         self._scope = LifetimeScope(self)
         self._control = control
         self._base: tuple[AliasRow, ...] = ()
-        self._target: ContextTarget | None = None
+        self._target: DocumentSetRef | None = None
         self._applying = False
         self._read_only = False
         layout = QVBoxLayout(self)
@@ -195,14 +193,14 @@ class AliasPanel(QWidget):
     def _is_setup(self) -> bool:
         return self._destination.currentIndex() == 1
 
-    def _current_target(self) -> ContextTarget | None:
+    def _current_target(self) -> DocumentSetRef | None:
         info = self._control.get_entry_info()
         label = self._control.current_point_label()
         if info is None:
             return None
         if self._is_setup() or label is None:
-            return SavedEntry(entry_name=info.name)
-        return SavedPoint(entry_name=info.name, point=label)
+            return DocumentSetRef(entry_name=info.name)
+        return DocumentSetRef(entry_name=info.name, point=label)
 
     def set_read_only(self, *, read_only: bool) -> None:
         """Lock or unlock edits while keeping the rows selectable and scrollable.

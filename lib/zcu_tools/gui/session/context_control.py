@@ -13,18 +13,16 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.aliases import AliasRow
     from zcu_tools.gui.session.context_types import (
         ContextSourceBinding,
-        ContextTarget,
+        DocumentSetRef,
         EntryInfo,
         FileRevision,
         FileSyncStatus,
         LibraryChange,
         PointCreateRequest,
         PointUseRequest,
-        SavedEntry,
-        SavedPoint,
         WorkingPointInfo,
     )
-    from zcu_tools.gui.session.types import ParameterContext, RoleBinding
+    from zcu_tools.gui.session.types import DocumentSetCapture, RoleBinding
     from zcu_tools.gui.session.value_lookup import ScalarValue, ValueInfo
     from zcu_tools.resources.entry.ledger_models import JsonObject
     from zcu_tools.resources.entry.schema import ParameterDocument
@@ -80,7 +78,7 @@ class ContextControlPort(Protocol):
 
     def read_context(
         self, *, aliases: Mapping[str, str] | None = None, setup: bool = False
-    ) -> ParameterContext:
+    ) -> DocumentSetCapture:
         """Fix installed documents/storage and aliases without I/O or kind checks.
 
         setup=True selects the entry cache, even with a selected point; False
@@ -94,7 +92,7 @@ class ContextControlPort(Protocol):
         """
         ...
 
-    def capture_storage(self, parameters: ParameterContext) -> StorageBinding:
+    def capture_storage(self, parameters: DocumentSetCapture) -> StorageBinding:
         """Return historical origin/roles on the owner thread without I/O.
 
         Source faults propagate. Unbound captures raise
@@ -103,11 +101,11 @@ class ContextControlPort(Protocol):
         ...
 
     def read_target(
-        self, target: ContextTarget, *, roles: RoleBinding | None = None
-    ) -> ParameterContext:
+        self, target: DocumentSetRef, *, roles: RoleBinding | None = None
+    ) -> DocumentSetCapture:
         """Read current values at a fixed target without selecting it.
 
-        SavedEntry reads global files; SavedPoint reads point/library files in the opened entry.
+        target.point=None reads global files; a label reads that point's files.
         Supplied roles stay fixed;
         cross-entry, missing point (MissingPointError), schema and I/O errors propagate.
         No versions or events are published.
@@ -115,26 +113,26 @@ class ContextControlPort(Protocol):
         ...
 
     def read_record(
-        self, target: ContextTarget, component: str, run_id: str
+        self, target: DocumentSetRef, component: str, run_id: str
     ) -> JsonObject | None:
         """Read the latest entry record for a run through the record owner.
 
         No selection/publication changes occur. Target admission, unsafe names,
         invalid run_id, corrupt history and I/O failures propagate. A missing row
-        returns None. SavedPoint reads entry JSONL history.
+        returns None. DocumentSetRef reads entry JSONL history.
         """
         ...
 
     def apply_writeback(
         self,
-        target: ContextTarget,
+        target: DocumentSetRef,
         items: tuple[WritebackItem, ...],
         *,
         evidence: WritebackEvidence,
     ) -> WritebackResult:
         """Accept at the fixed target through the context owner and shared loop.
 
-        Nonempty writes require a captured SavedEntry or SavedPoint in the opened entry.
+        Nonempty writes require a captured DocumentSetRef in the opened entry.
         Parameter/library values persist in that target's files; records append to entry
         JSONL. Successful prefix writes publish before later failures. Item failure raises
         WritebackApplyError with the event ID, committed values, applied count and original
@@ -146,7 +144,7 @@ class ContextControlPort(Protocol):
 
     def set_parameter(
         self,
-        target: ContextTarget,
+        target: DocumentSetRef,
         path: str,
         value: YamlValue,
         *,
@@ -157,14 +155,14 @@ class ContextControlPort(Protocol):
         Runs on the owner thread. metadata=None keeps the path's opaque
         metadata; a mapping replaces it in the same point commit ({} clears).
         Cross-entry/missing-selection/schema/metadata representation/conflict/
-        I/O failures propagate. Nonselected SavedPoint writes do not select it.
+        I/O failures propagate. Nonselected DocumentSetRef writes do not select it.
         Return the detached actual value after resource validation/commit, without I/O.
         """
         ...
 
     def set_module(
         self,
-        target: ContextTarget,
+        target: DocumentSetRef,
         path: str,
         value: ModuleSpec,
     ) -> YamlMap:
@@ -173,7 +171,7 @@ class ContextControlPort(Protocol):
 
     def set_waveform(
         self,
-        target: ContextTarget,
+        target: DocumentSetRef,
         path: str,
         value: WaveformSpec,
     ) -> YamlMap:
@@ -181,16 +179,16 @@ class ContextControlPort(Protocol):
         ...
 
     def apply_library_change(
-        self, parameters: ParameterContext, change: LibraryChange
+        self, parameters: DocumentSetCapture, change: LibraryChange
     ) -> None:
         """Commit one fixed-target structure command via ContextService.
 
         Put/replace write the change's persistent Spec as given; rename/delete
         move or remove an existing root. The command runs in one library
-        transaction. Writes require an opened entry. SavedEntry uses installed
+        transaction. Writes require an opened entry. DocumentSetRef uses installed
         entry handles and notifies nonactive entry consumers without changing the
         active point or its version. Detached
-        SavedPoint writes do not select or publish. Invalid target, Spec
+        DocumentSetRef writes do not select or publish. Invalid target, Spec
         family, conflict and I/O failures write and publish nothing.
         """
         ...
@@ -245,11 +243,11 @@ class ContextControlPort(Protocol):
         """Read cached point descriptions; True refreshes via the owner."""
         ...
 
-    def use_point(self, request: PointUseRequest) -> SavedPoint:
+    def use_point(self, request: PointUseRequest) -> DocumentSetRef:
         """Prepare/select a saved point in the opened entry."""
         ...
 
-    def use_global(self) -> SavedEntry:
+    def use_global(self) -> DocumentSetRef:
         """Prepare/select the entry's global documents; errors preserve binding.
 
         No opened entry raises no_entry. Success publishes GLOBAL and a None
@@ -257,7 +255,7 @@ class ContextControlPort(Protocol):
         """
         ...
 
-    def new_point(self, request: PointCreateRequest) -> SavedPoint:
+    def new_point(self, request: PointCreateRequest) -> DocumentSetRef:
         """Create from setup/clone and select, preserving attribution/errors.
 
         Existing destination raises InvalidInputError with the entry owner's

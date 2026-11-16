@@ -17,7 +17,7 @@ def selection(invoke):
         "rpc_call", {"method": "context.snapshot", "params": {"path": "target"}}
     )["value"]
     return {
-        "active": target["point"] if target["kind"] == "saved_point" else None,
+        "active": target["point"],
         "labels": invoke("rpc_call", {"method": "context.labels"})["labels"],
     }
 

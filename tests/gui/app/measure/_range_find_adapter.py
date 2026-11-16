@@ -41,7 +41,7 @@ from zcu_tools.gui.session.context_types import (
     EntryRequest,
     PointCreateRequest,
 )
-from zcu_tools.gui.session.parameters import ParameterContext
+from zcu_tools.gui.session.parameters import DocumentSetCapture
 from zcu_tools.plotting.plots import Plots
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
@@ -123,7 +123,7 @@ RangeAdapter = Adapter(
 
 
 def _spectrum_record(
-    parameters: ParameterContext,
+    parameters: DocumentSetCapture,
     data: SpectrumData | None = None,
 ) -> RunRecord[SpectrumCfg, SpectrumData]:
     storage = parameters.capture_storage()

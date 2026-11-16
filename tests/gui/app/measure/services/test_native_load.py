@@ -54,7 +54,6 @@ from zcu_tools.gui.session.context_control import ContextControlPort
 from zcu_tools.gui.session.context_types import (
     CommandOrigin,
     PointUseRequest,
-    SavedPoint,
 )
 from zcu_tools.gui.session.operation_runner import OperationRunner
 from zcu_tools.gui.session.parameter_capture import capture_parameters
@@ -521,7 +520,8 @@ def test_public_writeback_targets_current_entry_not_historical_source(
     control = session.context
     tab = session.state.get_tab("tab")
     parameters = tab.run.parameters
-    assert parameters is not None and isinstance(parameters.target, SavedPoint)
+    assert parameters is not None and parameters.target is not None
+    assert parameters.target.point == "p"
     writeback = WritebackService(control, arb_names=lambda: ())
     _, wb = _native_controls(session, writeback, control)
     draft = writeback.create_draft(

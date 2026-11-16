@@ -26,7 +26,7 @@ from zcu_tools.gui.session.library_entry import (
 )
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.state import SessionState
-from zcu_tools.gui.session.types import ParameterContext, SessionEnv
+from zcu_tools.gui.session.types import DocumentSetCapture, SessionEnv
 from zcu_tools.resources.entry import ResultEntry
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
@@ -62,7 +62,9 @@ def _select(session: LibrarySession, label: str) -> None:
     session.control.use_point(PointUseRequest(label))
 
 
-def _seed(session: LibrarySession, pulse: PulseSpec | None = None) -> ParameterContext:
+def _seed(
+    session: LibrarySession, pulse: PulseSpec | None = None
+) -> DocumentSetCapture:
     """Select point a with flux 2.0, a const waveform and a pulse using its key."""
     _select(session, "a")
     capture = session.control.read_context()

@@ -9,11 +9,11 @@ from zcu_tools.gui.app.measure.remote.handlers.point import PointListReply, h_po
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.session.context_types import (
+    DocumentSetRef,
     EntryInfo,
     EntryRequest,
     PointBindingError,
     PointUseRequest,
-    SavedPoint,
 )
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.resources.entry import ResultEntry, source_path
@@ -53,7 +53,7 @@ def test_use_selects_point_or_global_with_destination_projection(
         "global" if label is None else "point"
     )
     assert context.read_context().target is not None
-    assert capture.target == SavedPoint(entry_name=info.name, point="seed")
+    assert capture.target == DocumentSetRef(entry_name=info.name, point="seed")
 
 
 @pytest.mark.parametrize("params", [{}, {"label": False}, {"label": ""}])
@@ -148,7 +148,7 @@ def test_new_uses_setup_and_clone_replaces_description(
         == expected
     )
     captured = context.read_context()
-    assert captured.target == SavedPoint(entry_name=info.name, point="seed")
+    assert captured.target == DocumentSetRef(entry_name=info.name, point="seed")
     assert captured.lookup("Q1.rate").value == 10.0
     context.set_parameter(require_target(captured), "Q1.rate", 20.0)
     assert application.result(
@@ -224,8 +224,9 @@ def test_mutations_use_current_entry_after_switch(
         "entry_name": current.name,
         "point": "selected",
     }
-    assert application.controller.context_control.read_context().target == SavedPoint(
-        entry_name=current.name, point="selected"
+    assert (
+        application.controller.context_control.read_context().target
+        == DocumentSetRef(entry_name=current.name, point="selected")
     )
     assert opened_resource(previous).list_points() == ["selected"]
     assert opened_resource(current).list_points() == ["selected"]

@@ -32,8 +32,9 @@ from __future__ import annotations
 # Workflow Pause/Resume controls are removed; Ask uses waiting in workflow/recipe status.
 # Workflow operation facts carry control evidence; device snapshots live in RunRecord metadata.
 # Parameter previews expose optional registered create_kind for upsert on Apply.
-WIRE_VERSION = 138
+# Context targets use entry_name/nullable point; source kinds use global, not setup.
+WIRE_VERSION = 139
 
 # Bump for meaningful GUI code changes that need a reload signal.
 # Wire-contract changes bump both versions.
-GUI_VERSION = 171
+GUI_VERSION = 172

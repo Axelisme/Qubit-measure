@@ -14,12 +14,11 @@ if TYPE_CHECKING:
     from zcu_tools.gui.event_bus import BaseEventBus
     from zcu_tools.gui.session.context_control import ContextControlPort
     from zcu_tools.gui.session.context_types import (
+        DocumentSetRef,
         EntryInfo,
         EntryRequest,
         PointCreateRequest,
         PointUseRequest,
-        SavedEntry,
-        SavedPoint,
         WorkingPointInfo,
     )
     from zcu_tools.gui.session.device_control import DeviceControlPort
@@ -71,15 +70,15 @@ class SetupControlPort(Protocol):
         """Read cached point descriptions; True explicitly refreshes through owner."""
         ...
 
-    def use_point(self, request: PointUseRequest) -> SavedPoint:
+    def use_point(self, request: PointUseRequest) -> DocumentSetRef:
         """Prepare/select a point in the opened entry; failure preserves binding."""
         ...
 
-    def use_global(self) -> SavedEntry:
+    def use_global(self) -> DocumentSetRef:
         """Select fresh entry-level documents; no_entry or preparation errors preserve binding."""
         ...
 
-    def new_point(self, request: PointCreateRequest) -> SavedPoint:
+    def new_point(self, request: PointCreateRequest) -> DocumentSetRef:
         """Create with inherit/empty/clone then select; binding failure retains destination."""
         ...
 
@@ -124,14 +123,14 @@ class SetupControlFacet(SetupControlPort):
     def list_points(self, *, refresh: bool = False) -> tuple[WorkingPointInfo, ...]:
         return self._context.list_points(refresh=refresh)
 
-    def use_point(self, request: PointUseRequest) -> SavedPoint:
+    def use_point(self, request: PointUseRequest) -> DocumentSetRef:
         return self._context.use_point(request)
 
-    def use_global(self) -> SavedEntry:
+    def use_global(self) -> DocumentSetRef:
         """Select global through the context owner; propagate preparation failures."""
         return self._context.use_global()
 
-    def new_point(self, request: PointCreateRequest) -> SavedPoint:
+    def new_point(self, request: PointCreateRequest) -> DocumentSetRef:
         return self._context.new_point(request)
 
 

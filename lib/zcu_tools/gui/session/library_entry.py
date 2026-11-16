@@ -48,7 +48,7 @@ from zcu_tools.gui.form import (
 )
 from zcu_tools.gui.form_adapter import module_form
 from zcu_tools.gui.session.context_types import LibraryChange
-from zcu_tools.gui.session.parameters import ParameterContext
+from zcu_tools.gui.session.parameters import DocumentSetCapture
 
 type LibraryKind = Literal["module", "waveform"]
 
@@ -93,7 +93,7 @@ class LibraryEntryForm[S: ConfigBase](ABC):
     kind: ClassVar[LibraryKind]
 
     def __init__(
-        self, spec: S, parameters: ParameterContext, *, arb_names: Sequence[str]
+        self, spec: S, parameters: DocumentSetCapture, *, arb_names: Sequence[str]
     ) -> None:
         """Project spec into a new form that evaluates against parameters.
 
@@ -119,7 +119,7 @@ class LibraryEntryForm[S: ConfigBase](ABC):
         spec_type: type[S],
         template: Template,
         catalog: Mapping[str, TemplateDef],
-        parameters: ParameterContext,
+        parameters: DocumentSetCapture,
         *,
         arb_names: Sequence[str],
     ) -> Self:
@@ -148,7 +148,7 @@ class LibraryEntryForm[S: ConfigBase](ABC):
         return entry
 
     @property
-    def parameters(self) -> ParameterContext:
+    def parameters(self) -> DocumentSetCapture:
         """Return the capture that fixes expression values and the write target."""
         return self._parameters
 
@@ -258,7 +258,7 @@ def library_entry_kind(spec_type: type[ConfigBase]) -> LibraryKind:
 
 
 def new_library_entry(
-    parameters: ParameterContext,
+    parameters: DocumentSetCapture,
     template: Template,
     catalog: Mapping[str, TemplateDef],
     *,
@@ -297,7 +297,7 @@ def new_library_entry(
 
 
 def open_library_entry(
-    parameters: ParameterContext,
+    parameters: DocumentSetCapture,
     kind: LibraryKind,
     name: str,
     *,

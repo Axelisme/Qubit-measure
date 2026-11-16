@@ -6,7 +6,7 @@ import pytest
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.session.aliases import AliasRow
-from zcu_tools.gui.session.context_types import SavedPoint
+from zcu_tools.gui.session.context_types import DocumentSetRef
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.state import SessionState
 from zcu_tools.gui.session.types import SessionEnv
@@ -79,6 +79,6 @@ def test_empty_owner_capture_and_write_fail_explicitly(
     assert capture.value.reason_code == "no_context"
     with pytest.raises(FailedPreconditionError) as write:
         control.set_parameter(
-            SavedPoint(entry_name="entry", point="a"), "Q1.rate", 4300.0
+            DocumentSetRef(entry_name="entry", point="a"), "Q1.rate", 4300.0
         )
     assert write.value.reason_code == "no_entry"

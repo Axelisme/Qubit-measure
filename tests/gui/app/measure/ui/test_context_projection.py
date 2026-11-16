@@ -1,7 +1,10 @@
 """Existing tab views follow the current session source without changing identity."""
 
+import os
+from pathlib import Path
 from typing import NoReturn
 
+import pytest
 from qtpy.QtGui import QColor, QPalette
 from qtpy.QtWidgets import QTabWidget, QWidget
 from zcu_tools.experiment.context import RunContext
@@ -22,6 +25,7 @@ from zcu_tools.gui.session.types import SessionEnv
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
 from tests.gui._progress_fakes import DirectProgressTransport
+from tests.gui._user_input import ComponentDriver
 from tests.gui.app.measure._synthetic import SampleAdapter, SampleCfg
 
 
@@ -37,6 +41,52 @@ ProjectionAdapter = Adapter(
     analysis=SampleAdapter.analysis,
     post_analysis=SampleAdapter.post_analysis,
 )
+
+
+@pytest.mark.parametrize("point", [None, "working"])
+def test_document_set_scope_is_visible_when_opening_inspect(
+    qapp, tmp_path, point: str | None
+) -> None:
+    ctrl = Controller(
+        State(SessionEnv(parameters=None, soc=None, soccfg=None)),
+        Registry(),
+        None,
+        BaseEventBus(),
+        progress_transport=DirectProgressTransport(),
+        project_root=str(tmp_path),
+    )
+    ctrl.setup_control.new_entry(EntryRequest("entry"))
+    if point is not None:
+        ctrl.setup_control.new_point(
+            PointCreateRequest(point, "", CommandOrigin("gui"))
+        )
+    window = MainWindow(ctrl, templates=lambda: {})
+    ctrl.add_view(window)
+    window.refresh_context_panel()
+    window.resize(1300, 850)
+    window.show()
+    evidence = Path(os.environ.get("CONTEXT_PROJECTION_EVIDENCE", str(tmp_path)))
+    scope = "global" if point is None else "point"
+    driver = ComponentDriver(window)
+    try:
+        qapp.processEvents()
+        assert driver.observe(object_name="current_entry").text == "entry"
+        assert driver.observe(object_name="current_point").text == (
+            "Global" if point is None else point
+        )
+        driver.screenshot(evidence / scope / "01-scope.png")
+        driver.click("Inspect…")
+        assert driver.dialogs()
+        driver.screenshot(evidence / scope / "02-inspect.png")
+        driver.click("Close")
+        assert driver.observe(object_name="current_point").text == (
+            "Global" if point is None else point
+        )
+        driver.screenshot(evidence / scope / "03-returned.png")
+    finally:
+        ctrl.close()
+        window.deleteLater()
+        qapp.processEvents()
 
 
 def _set_window_colours(widget: QWidget, background: str, text: str) -> None:

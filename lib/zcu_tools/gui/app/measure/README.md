@@ -396,7 +396,7 @@ Recipe 的 logical read/edit/selector 命令也由 `TabFormResource` 擁有。Ad
 
 RunService 在 run 終局後請 DeviceService 背景讀回已連線儀器。成功台更新觀察 cache，失敗台保留既有值。這項讀回不改變 run 終局、settlement、lease 或 run 前固定的 acquisition snapshot。
 
-RunInputs 固定 admission 的 ParameterContext，RunPaneState 隨 result 保存同一引用。
+RunInputs 固定 admission 的 DocumentSetCapture，RunPaneState 隨 result 保存同一引用。
 `stop_requested` 表示前端在這次 Run 發出過 Stop 或成功的 selector cancel，包含只取消子層。
 Core 自己設 stop 不改這個欄位。Snapshot 與 wire 的 result_state 交付同一 bool。
 New Run 或非 acquisition replacement 重設為 False。

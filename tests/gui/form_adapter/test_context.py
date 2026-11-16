@@ -10,9 +10,9 @@ from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_types import (
     ContextSourceFault,
     ContextSourceUnavailableError,
-    SavedPoint,
+    DocumentSetRef,
 )
-from zcu_tools.gui.session.parameters import ParameterContext
+from zcu_tools.gui.session.parameters import DocumentSetCapture
 from zcu_tools.resources.context.library import (
     ComponentLibrary,
     LibrarySnapshot,
@@ -53,9 +53,9 @@ def synthetic_component() -> Generator[None]:
         )
 
 
-def parameters(*, faults: tuple[ContextSourceFault, ...] = ()) -> ParameterContext:
+def parameters(*, faults: tuple[ContextSourceFault, ...] = ()) -> DocumentSetCapture:
     """Capture a Spec with an unresolved child, so existence needs no expansion."""
-    return ParameterContext(
+    return DocumentSetCapture(
         point=ParameterDocument.model_validate(
             {
                 "format": "zcu.parameter-container",
@@ -93,7 +93,7 @@ def parameters(*, faults: tuple[ContextSourceFault, ...] = ()) -> ParameterConte
                 },
             )
         ),
-        target=SavedPoint(entry_name="synthetic", point="working"),
+        target=DocumentSetRef(entry_name="synthetic", point="working"),
         roles=None,
         source_faults=faults,
     )

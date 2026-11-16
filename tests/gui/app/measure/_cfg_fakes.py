@@ -2,8 +2,8 @@
 
 from collections.abc import Mapping
 
-from zcu_tools.gui.session.context_types import SavedPoint
-from zcu_tools.gui.session.types import ParameterContext
+from zcu_tools.gui.session.context_types import DocumentSetRef
+from zcu_tools.gui.session.types import DocumentSetCapture
 from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
 from zcu_tools.resources.entry.registry import component_registry
 from zcu_tools.resources.entry.schema import ComponentSchema, ParameterDocument
@@ -14,7 +14,7 @@ def parameter_capture(
     library: LibrarySnapshot | None = None,
     /,
     **values: float,
-) -> ParameterContext:
+) -> DocumentSetCapture:
     """Capture original component models and optional general.ext numeric values.
 
     components maps native names such as R1/Q1 to existing ComponentSchema
@@ -56,9 +56,9 @@ def parameter_capture(
         library = LibrarySnapshot(
             ModuleLibraryDocument(format="zcu.module-library", format_version="2.0")
         )
-    return ParameterContext(
+    return DocumentSetCapture(
         point=point,
         library=library,
-        target=SavedPoint(entry_name="entry", point="working"),
+        target=DocumentSetRef(entry_name="entry", point="working"),
         roles=None,
     )

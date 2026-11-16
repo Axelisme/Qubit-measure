@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 
-from zcu_tools.gui.session.parameters import ParameterContext
+from zcu_tools.gui.session.parameters import DocumentSetCapture
 
 
 @dataclass(frozen=True)
@@ -14,7 +14,7 @@ class FormContext:
     or mutated. No adapter identity or live session state is retained.
     """
 
-    parameters: ParameterContext | None
+    parameters: DocumentSetCapture | None
 
     def has(self, ref: str) -> bool:
         """Report whether a captured library root or module slot exists.

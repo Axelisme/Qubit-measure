@@ -13,7 +13,7 @@ from zcu_tools.gui.session.expression import (
     evaluate_numeric_expr,
     evaluate_scalar_expr,
 )
-from zcu_tools.gui.session.types import ParameterContext, RoleBinding
+from zcu_tools.gui.session.types import DocumentSetCapture, RoleBinding
 from zcu_tools.resources.entry import ComponentSchema, RoleResolutionError
 
 from tests.gui.app.measure._cfg_fakes import parameter_capture
@@ -98,7 +98,7 @@ def test_changed_table_and_temporary_override_leave_old_name_capture_fixed() -> 
 
 def test_historical_names_remain_readable_without_point_membership() -> None:
     base = parameter_capture()
-    historical = ParameterContext(
+    historical = DocumentSetCapture(
         point=base.document(),
         library=base.library,
         target=base.target,
@@ -117,7 +117,7 @@ def test_unavailable_name_capture_propagates_source_fault_instead_of_old_names()
     fault = ContextSourceFault(
         "point", Path("parameters.yaml"), "OSError", "Unreadable point"
     )
-    captured = ParameterContext(
+    captured = DocumentSetCapture(
         point=base.document(),
         library=base.library,
         target=base.target,

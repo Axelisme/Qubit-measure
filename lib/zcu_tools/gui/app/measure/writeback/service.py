@@ -13,9 +13,9 @@ from zcu_tools.format_version import YamlMap
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.form import FormWritePath
 from zcu_tools.gui.session.context_control import ContextControlPort
-from zcu_tools.gui.session.context_types import CommandOrigin, ContextTarget
+from zcu_tools.gui.session.context_types import CommandOrigin, DocumentSetRef
 from zcu_tools.gui.session.library_entry import ModuleEntryForm
-from zcu_tools.gui.session.types import ParameterContext
+from zcu_tools.gui.session.types import DocumentSetCapture
 from zcu_tools.resources.entry import document_unit
 from zcu_tools.resources.entry import writeback as concrete
 from zcu_tools.resources.entry.ledger_models import AcceptedWrite, JsonObject
@@ -136,7 +136,7 @@ class WritebackDraft:
         owner: WritebackService,
         write_port: ContextControlPort,
         items: Iterable[WritebackItem],
-        parameters: ParameterContext | None,
+        parameters: DocumentSetCapture | None,
         *,
         arb_names: Sequence[str],
         run_source: _RunSource,
@@ -161,7 +161,7 @@ class WritebackDraft:
             self._entries.append(entry)
 
     @property
-    def parameters(self) -> ParameterContext | None:
+    def parameters(self) -> DocumentSetCapture | None:
         """Fixed creation capture, or None for a context-free empty draft.
 
         This read-only source fixes role bindings and library values, not the
@@ -298,11 +298,11 @@ class WritebackDraft:
             )
         return values
 
-    def _require_parameters(self) -> ParameterContext:
+    def _require_parameters(self) -> DocumentSetCapture:
         parameters = self.parameters
-        return ParameterContext.empty() if parameters is None else parameters
+        return DocumentSetCapture.empty() if parameters is None else parameters
 
-    def _current_target(self) -> ContextTarget:
+    def _current_target(self) -> DocumentSetRef:
         target = self._write.read_context().target
         if target is None:
             raise FailedPreconditionError(
@@ -645,7 +645,7 @@ class WritebackDraft:
         self,
         entry: _DraftEntry,
         proposal: ModuleSpec,
-        parameters: ParameterContext,
+        parameters: DocumentSetCapture,
         arb_names: Sequence[str],
     ) -> ModuleEntryForm:
         form = ModuleEntryForm(proposal, parameters, arb_names=arb_names)
@@ -704,7 +704,7 @@ class WritebackDraft:
         return f"list[{len(value)}]"
 
     def _capture_baseline(
-        self, entry: _DraftEntry, parameters: ParameterContext | None
+        self, entry: _DraftEntry, parameters: DocumentSetCapture | None
     ) -> None:
         """Capture display-only summaries from the creation context."""
         item = entry.item
@@ -798,7 +798,7 @@ class WritebackService:
         self,
         items: Iterable[WritebackItem],
         *,
-        parameters: ParameterContext | None,
+        parameters: DocumentSetCapture | None,
         experiment_name: str,
         run_id: str | None = None,
         device_snapshot: (

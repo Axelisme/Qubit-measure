@@ -70,7 +70,7 @@ Frame 中有 period 但 snapshot 缺值的儀器不貢獻，period 保留。明�
 未校準 frame 合法，整個 snapshot 缺席時保留各 writer 原有政策。這些 helper 不讀目前 point、setup catalog 或裝置。
 `support.flux.snapshot_numeric_values(snapshot, names)` 集中 numeric 非 bool 的機械提取，picker 與 writeback caller 仍決定目標及 contributors。
 
-`mux_bindings` 擁有固定 ParameterContext 的 qubit／resonator 對應驗證。
+`mux_bindings` 擁有固定 DocumentSetCapture 的 qubit／resonator 對應驗證。
 Onetone 的缺 qubits bring-up 政策與 qubit 實驗的完整綁定要求分開，兩者不讀 live 來源。
 Group model 仍擁有長度與重複 qubit 的結構規則。
 
@@ -107,11 +107,11 @@ Nested waveform key 的複製由 Form adapter 負責。來源與其他欄位不�
 Mux readout 初值與 `require_mux_qubits` 共用此查詢。缺 capture、alias 未綁或 target 非 group 時，錯誤指出需要 `group/mux` 與 alias `mux`。
 此要求不改變下列可選 qubit 配對驗證的 bring-up 政策。
 
-`mux_bindings.validate_mux_bindings(parameters: ParameterContext | None) -> None`
+`mux_bindings.validate_mux_bindings(parameters: DocumentSetCapture | None) -> None`
 集中 onetone、mux qubit 與 FTF two-qubit Forms 共用的跨 component 驗證。
 它只讀借用的固定 capture，不刷新來源、不讀 live 檔案或裝置，也不 materialize library assets。
 有 qubits 時，它驗證完整有序清單的 component 存在、kind 與逐項 qubit.resonator 對應。
-錯誤保留欄位、原始 index 及實際值。`require_mux_group` 與 `validate_mux_bindings` 經 `ParameterContext.component()` 完整投影指定 group，執行 MuxGroup 的名稱、等長與重複 qubit 檢查。FTF `captured_roles` 也用這個投影讀 group。Kind 與 resonator 關係讀取只要求對應 leaf，不預驗其他元件。
+錯誤保留欄位、原始 index 及實際值。`require_mux_group` 與 `validate_mux_bindings` 經 `DocumentSetCapture.component()` 完整投影指定 group，執行 MuxGroup 的名稱、等長與重複 qubit 檢查。FTF `captured_roles` 也用這個投影讀 group。Kind 與 resonator 關係讀取只要求對應 leaf，不預驗其他元件。
 
 None、未綁 mux、不存在或非 MuxGroup 的 target、沒有 qubits 都不增加 bring-up 門檻。
 其他 alias 錯誤與來源故障照常傳遞。FTF caller 自行要求 group、qubits 及 F1/F2；
@@ -170,7 +170,7 @@ Point proposal 保存新的 period 與 offset，record 不重複保存它們。�
 
 ## 其他 measure helpers
 
-`singleshot_shared.py` 從固定 Run ParameterContext 讀取 chi/kappa 與可選 scalar 分析校準。
+`singleshot_shared.py` 從固定 Run DocumentSetCapture 讀取 chi/kappa 與可選 scalar 分析校準。
 缺 capture 明示失敗；可選 leaf 缺少或 null 時交給 core 的既有預設。
 分類與 confusion matrix 只讀 saved readout cfg，不讀 point 校準。
 `singleshot_rabi.rabi_calibration_writeback` 將兩種 Rabi 的有效聯合 fit 交給中立 builder，

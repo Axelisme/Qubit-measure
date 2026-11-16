@@ -26,7 +26,7 @@ Ledger 讀取使用 resources 的無 lock typed partial snapshot，只消費 acq
 以 `ResultsIndex.issues` 回報 entry、路徑與原因，不偽造 run；可列出的 run
 則沿用 `ResultRun.issues`。Symlink escape 項目不讀、不跟隨。
 
-`RunService` 在提交 worker 前固定 ParameterContext 的參數快照。Worker 以 RunMetadata 組內容並將 JSON dump 放入 record.metadata，後續切換 point 不改這份分析環境。
+`RunService` 在提交 worker 前固定 DocumentSetCapture 的參數快照。Worker 以 RunMetadata 組內容並將 JSON dump 放入 record.metadata，後續切換 point 不改這份分析環境。
 RunService 自己記錄 Stop 與成功的 selector cancel，交付 stop_requested。
 Core 正常回傳就發布並標 finished，不區分 root 或子孫停止。拋錯就 failed 並顯示錯誤。
 Stop 與被接受的 selector cancel 以 stop_requested 記錄。

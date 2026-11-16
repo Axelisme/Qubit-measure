@@ -1,7 +1,7 @@
 """EvalNumericField — numeric input widget with right-click direct/eval toggle.
 
 Standalone; no LiveField / LiveModel dependency. Designed for the device dialog
-where eval expressions are resolved once at apply time against the current ParameterContext
+where eval expressions are resolved once at apply time against the current DocumentSetCapture
 (Design 1 in ADR for device-dialog eval). The ghost label is informational only.
 """
 
@@ -32,7 +32,7 @@ from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 from zcu_tools.gui.widgets.spinbox import TrimDoubleSpinBox
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.session.parameters import ParameterContext
+    from zcu_tools.gui.session.parameters import DocumentSetCapture
 
 
 class EvalNumericField(QWidget):
@@ -62,7 +62,7 @@ class EvalNumericField(QWidget):
         minimum: float,
         maximum: float,
         decimals: int,
-        parameter_provider: Callable[[], ParameterContext | None],
+        parameter_provider: Callable[[], DocumentSetCapture | None],
         type_: type = float,
         parent: QWidget | None = None,
     ) -> None:

@@ -66,6 +66,51 @@ def session(tmp_path: Path) -> Generator[CaptureSession]:
         restore_registry(before)
 
 
+def test_global_library_watcher_updates_only_global_inspect_and_revision(
+    qapp,
+    session: CaptureSession,
+) -> None:
+    from zcu_tools.gui.session.adapters import FileWatcher
+
+    control = session.control
+    active = control.read_context()
+    old_global = control.read_context(setup=True)
+    environment = session.state.session_env
+    version = session.state.version.get("context")
+    before = control.get_installed_file_revisions()
+    assert len(before) == 6
+    path = session.entry.result_path / "library.yaml"
+    watcher = FileWatcher(session.service, session.bus, admit_reload=lambda: True)
+    try:
+        path.write_text(
+            'format: zcu.module-library\nformat_version: "2.0"\n'
+            "components: {Q1: {waveforms: {global: {style: const, length: 0.2}}}}\n"
+        )
+        watcher.flush()
+        assert (
+            control.read_context(setup=True)
+            .library.waveform_spec("Q1.waveforms.global")
+            .length
+            == 0.2
+        )
+        assert control.read_context().library.waveform_keys() == ()
+        assert active.library.waveform_keys() == ()
+        assert old_global.library.waveform_keys() == ()
+        assert session.state.session_env is environment
+        assert session.state.version.get("context") == version
+        after = control.get_installed_file_revisions()
+        assert len(after) == 6
+        assert control.get_file_revisions() == before[:3]
+        assert [new.path for new in after] == [old.path for old in before]
+        assert [
+            new.path for old, new in zip(before, after, strict=True) if old != new
+        ] == [path]
+        assert next(file for file in after if file.path == path).revision is not None
+        assert control.get_file_sync_status()[0].state == "reloaded"
+    finally:
+        watcher.close()
+
+
 def test_default_capture_reads_all_aliases_without_kind_declarations(
     session: CaptureSession,
 ) -> None:

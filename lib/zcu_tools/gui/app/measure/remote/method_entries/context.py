@@ -175,7 +175,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "Read the published parameter context: {target, point, library, aliases}. "
             "aliases contains ordered {alias, value, resolved} rows; failed rows have "
             "resolved=null and error. All come from one fixed capture without kind checks. "
-            "target is the existing saved_point locator. "
+            "target is the document-set locator with entry_name and nullable point. "
             "point and library are complete working-unit native documents: point includes "
             "components and metadata; library contains Specs without asset "
             "materialization. "

@@ -30,7 +30,7 @@ from zcu_tools.gui.app.measure.writeback import WritebackService
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.expected_error import ExpectedErrorCategory, FailedPreconditionError
 from zcu_tools.gui.form_adapter import Form
-from zcu_tools.gui.session.types import ParameterContext
+from zcu_tools.gui.session.types import DocumentSetCapture
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
 from tests.gui.app.measure._form_fakes import make_form
@@ -76,7 +76,7 @@ def _service(state: State) -> tuple[LoadService, MagicMock]:
 
 @pytest.mark.parametrize("context_free", [False, True])
 def test_load_retains_history_without_foreign_analysis_fallback(
-    result_sources: tuple[ParameterContext, ParameterContext],
+    result_sources: tuple[DocumentSetCapture, DocumentSetCapture],
     context_free: bool,
     native_path: str,
 ) -> None:

@@ -12,8 +12,8 @@ from zcu_tools import cfg_model as nodes
 from zcu_tools.cfg_model import ConfigBase, Expr, FieldMeta
 from zcu_tools.gui import form_adapter
 from zcu_tools.gui.form import FormEnv, FormErrors, FormInput, FormModel, FormState
-from zcu_tools.gui.session.context_types import SavedPoint
-from zcu_tools.gui.session.parameters import ParameterContext
+from zcu_tools.gui.session.context_types import DocumentSetRef
+from zcu_tools.gui.session.parameters import DocumentSetCapture
 from zcu_tools.program.v2.sweep import SweepCfg
 from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
 from zcu_tools.resources.entry.schema import ParameterDocument, ParameterGeneral
@@ -318,7 +318,7 @@ def test_successful_expression_defaults_keep_text_and_lower_to_native_values() -
 def indexed_expression_env() -> FormEnv:
     """Capture list values, mapping values and their index/key sources."""
     return FormEnv(
-        parameters=ParameterContext(
+        parameters=DocumentSetCapture(
             point=ParameterDocument(
                 format="zcu.parameter-container",
                 format_version="2.0",
@@ -336,7 +336,7 @@ def indexed_expression_env() -> FormEnv:
             library=LibrarySnapshot(
                 ModuleLibraryDocument(format="zcu.module-library", format_version="2.0")
             ),
-            target=SavedPoint(entry_name="entry", point="synthetic"),
+            target=DocumentSetRef(entry_name="entry", point="synthetic"),
             roles=None,
         )
     )

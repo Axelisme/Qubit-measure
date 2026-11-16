@@ -22,7 +22,7 @@ from zcu_tools.gui.session.context_types import (
     ContextSourceUnavailableError,
     PointUseRequest,
 )
-from zcu_tools.gui.session.parameters import ParameterContext
+from zcu_tools.gui.session.parameters import DocumentSetCapture
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.resources.entry import ResultEntry, RoleSpec
@@ -70,7 +70,7 @@ def session(tmp_path: Path) -> Generator[SaveSession]:
         restore_registry(before)
 
 
-def _bound(session: SaveSession) -> ParameterContext:
+def _bound(session: SaveSession) -> DocumentSetCapture:
     return session.control.read_context().bind_roles(
         {"driver": RoleSpec("fake/drive/*")}, focus="Q1", explicit={}
     )
@@ -155,7 +155,7 @@ def test_storage_requires_saved_origin_and_readable_sources(
     fault = ContextSourceFault(
         "point", Path("/unavailable/parameters.yaml"), "ValueError", "broken"
     )
-    unavailable = ParameterContext(
+    unavailable = DocumentSetCapture(
         point=saved.document(),
         library=saved.library,
         target=saved.target,
@@ -165,7 +165,7 @@ def test_storage_requires_saved_origin_and_readable_sources(
     )
     with pytest.raises(ContextSourceUnavailableError):
         session.control.capture_storage(unavailable)
-    unbound = ParameterContext(
+    unbound = DocumentSetCapture(
         point=saved.document(), library=saved.library, target=saved.target, roles=None
     )
     with pytest.raises(FailedPreconditionError, match="saved-point storage"):
@@ -182,7 +182,7 @@ def test_storage_rejects_mismatched_target(session: SaveSession) -> None:
     session.control.use_point(PointUseRequest("q"))
     other = session.control.read_context()
     with pytest.raises(ValueError, match="origin"):
-        ParameterContext(
+        DocumentSetCapture(
             point=saved.document(),
             library=saved.library,
             target=other.target,

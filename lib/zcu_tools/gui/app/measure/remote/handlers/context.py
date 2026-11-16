@@ -12,7 +12,6 @@ from pydantic import TypeAdapter, ValidationError
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.session.aliases import AliasRow
-from zcu_tools.gui.session.context_types import SavedPoint
 from zcu_tools.gui.session.library_entry import LibraryEntryInvalid
 from zcu_tools.gui.session.value_lookup import MissingValue, ValueInfo
 from zcu_tools.resources.entry import document_value
@@ -179,7 +178,7 @@ def h_context_active(
     del params
     parameters = adapter.ctrl.get_session_env().parameters
     target = parameters.target if parameters is not None else None
-    return {"label": target.point if isinstance(target, SavedPoint) else None}
+    return {"label": target.point if target is not None else None}
 
 
 def h_context_snapshot(

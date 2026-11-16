@@ -13,7 +13,7 @@ from zcu_tools.gui.app.measure.state import State
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import InvalidInputError
 from zcu_tools.gui.form import FormWritePath, field_error
-from zcu_tools.gui.session.parameters import ParameterContext
+from zcu_tools.gui.session.parameters import DocumentSetCapture
 from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
 
@@ -82,7 +82,7 @@ def library_provider_app(library_app, tmp_path: Path):
 
     def build(failure: Exception) -> Controller:
         source = library_app.context_control.read_context()
-        parameters = ParameterContext(
+        parameters = DocumentSetCapture(
             point=source.document(),
             library=_FailingLibraryProvider(source.library.document(), failure),
             target=source.target,

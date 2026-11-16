@@ -19,8 +19,8 @@ from zcu_tools.gui.app.measure.writeback import WritebackControlFacet, Writeback
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.remote.errors import ErrorCode
-from zcu_tools.gui.session.context_types import EntryRequest, SavedEntry
-from zcu_tools.gui.session.parameters import ParameterContext
+from zcu_tools.gui.session.context_types import DocumentSetRef, EntryRequest
+from zcu_tools.gui.session.parameters import DocumentSetCapture
 from zcu_tools.gui.session.types import ContextReadiness
 from zcu_tools.gui.session.ui.component_tree import ComponentTreeWidget
 from zcu_tools.resources.entry import ResultEntry
@@ -62,10 +62,10 @@ def test_entry_commands_activate_global_for_application_and_wire_reads(
         ]
     )
     control = application.controller.context_control
-    assert control.read_context().target == SavedEntry(entry_name="entry")
+    assert control.read_context().target == DocumentSetRef(entry_name="entry")
     control.add_component("Q1", "fake/drive/a", {})
     snapshot = application.result("context.snapshot", {})
-    assert snapshot["target"] == SavedEntry(entry_name="entry").model_dump()
+    assert snapshot["target"] == DocumentSetRef(entry_name="entry").model_dump()
     assert control.read_context().component("Q1").kind == "fake/drive/a"
     tab_id = application.controller.tab_control.new_tab("pointed")
     with pytest.raises(FailedPreconditionError) as caught:
@@ -210,7 +210,7 @@ def test_writeback_uses_global_after_reopen_then_current_selected_destination(
                 },
             )
             assert reply["ok"] is True, reply
-        assert control.read_context().target == SavedEntry(entry_name="entry")
+        assert control.read_context().target == DocumentSetRef(entry_name="entry")
         assert control.read_context().value("general.ext.flux_value") == 2.0
         assert len(entry_resource(application).ledger.events()) == len(before) + 1
         application.result("point.new", {"label": "b", "mode": "empty"})
@@ -238,7 +238,7 @@ def test_writeback_uses_global_after_reopen_then_current_selected_destination(
 @pytest.mark.parametrize("frontend", ["application", "wire"])
 def test_writeback_without_entry_rejects_before_appending_ledger(
     application: PointApplication,
-    parameter_writeback_pane: tuple[str, ParameterContext],
+    parameter_writeback_pane: tuple[str, DocumentSetCapture],
     frontend: str,
 ) -> None:
     tab_id, _ = parameter_writeback_pane
@@ -274,7 +274,7 @@ def test_writeback_without_entry_rejects_before_appending_ledger(
 @pytest.fixture
 def parameter_writeback_pane(
     application: PointApplication,
-) -> Iterator[tuple[str, ParameterContext]]:
+) -> Iterator[tuple[str, DocumentSetCapture]]:
     application.open_entry()
     application.result("point.new", {"label": "a"})
     control = application.controller.context_control
