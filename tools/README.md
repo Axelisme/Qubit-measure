@@ -1,6 +1,6 @@
 # tools/
 
-**Last updated:** 2026-11-16 (CLI contracts, tool inventory, probe snapshots, acquire benchmark retired)
+**Last updated:** 2026-11-16 (paired Engine comparison and public input-format versions)
 
 **讀者：** framework-dev。查閱 repo 開發工具的 CLI、輸出與比較機制。
 
@@ -48,6 +48,7 @@
 | `run_heavy.py` | `tools/run_heavy.py --log <file> <timeout> -- <command>` | 子程序狀態；2 啟動前失敗、70 runner 失敗、75 等待逾時、124 執行逾時 | 否，重計算外層 |
 | `analyze_routing_telemetry.py` | `tools/analyze_routing_telemetry.py <path> ...` | 0 完成，無法讀檔時非零 | 否 |
 | `family_pareto.py` | `-m tools.family_pareto --scenario <name>` | 0 完成，輸入或量測失敗時非零 | 否 |
+| `paired_benchmark.py` | `-m tools.paired_benchmark run --baseline A --candidate B --scenario NAME --reference-cache DIR --blocks K --exclusive --output FILE` | 0 完成；1 輸入、cache 或 child 失敗；2 用法錯誤 | 否，需外層 exclusive runner |
 
 Usage 錯誤由 argparse 以 2 結束；未轉譯的 Git、讀檔或其他執行錯誤仍會傳出例外，不能當作檢查通過。
 模擬器量測與重計算的授權、排隊和收據要求見後續各節。表中的命令不提供執行授權。
@@ -199,7 +200,122 @@ observations to the existing report schema. Selection, whole-batch reference
 preflight and the check-only exit remain in the consumer.
 Neither API resets the process or Numba disk cache.
 Cross-worktree comparisons require the same committed measurement tools on
-both sides. This module does not provide a controller or ABBA statistics.
+both sides. Cross-worktree coordination and ABBA statistics belong to
+[`paired_benchmark`](#paired-engine-benchmark), not this owner.
+
+## Paired Engine benchmark
+
+`tools.paired_benchmark` compares one indexed frozen scenario in two worktrees.
+Both sides must contain committed copies of the common measurement tools and
+codecs. Each side needs its own bootstrapped uv environment. The tool does not
+copy uncommitted scripts into older commits or synchronize dependencies.
+Use a common committed tool baseline for both versions being compared.
+`run` is the only comparison entry point. `child` is its internal JSON service.
+There is no acquire adapter or program-to-acquire timing path.
+
+Freeze the scenario, mode, worker width, budget and K in the execution plan.
+Obtain compute approval before running. The following example uses K=3 for
+both calibration and timing; it is not an execution grant.
+Set A, B, REF and OUT to absolute paths, then create the output directory.
+
+```bash
+mkdir -p "$OUT"
+uv run --directory "$A" --no-sync -- python tools/run_heavy.py \
+  --exclusive --wait-limit 120 --log "$OUT/controller.log" 600 -- \
+  uv run --directory "$A" --no-sync -- python -m tools.paired_benchmark run \
+    --baseline "$A" --candidate "$B" --scenario idle_coherence \
+    --reference-cache "$REF" --mode warm_clear_history --workers 1 \
+    --blocks 3 --exclusive --output "$OUT/report.json"
+```
+
+Only the outer runner takes resource locks. The CLI's `--exclusive` records
+that caller-owned admission; it does not acquire another lock or verify it.
+Every child uses its own `uv run --directory <side> --no-sync` and inherits the
+outer process group and inheritable slot descriptors. Requests run serially.
+A failed child stops the comparison without retry. The CLI prints the cause
+and returns 1. It publishes JSON only after success, using an atomic replace,
+so a failed comparison does not overwrite an earlier report.
+
+`--index PATH` chooses one index for both sides. Without it, each side uses its
+tracked default indexes. `--scene-cache DIR` supplies an absolute numeric-cache
+override; otherwise the tools storage owner resolves the repository-shared
+cache. `select_inputs` supplies the original `SelectedInput` identity.
+Reference preflight uses the public solver-free codec. A miss fails before any
+Engine construction or evolve. This command never builds a scenario, solves a
+reference, fills a missing numeric cache or rewrites a reference key.
+
+The handshake compares `PROTOCOL_VERSION`, `FROZEN_PHYSICAL_VERSION`,
+`SCENE_CACHE_VERSION` and the ordered per-record identity of name, physical hash,
+oracle hash and metadata hash. The protocol version covers the wire format and
+tools declaration interpretation. The physical version covers decoding fields,
+units, dtypes, defaults and Engine-input reconstruction. The cache version
+covers index JSON and the cache-directory revision. `SEGMENT_NUMERIC_VERSION`
+is provenance only, so numerical optimizations can change it. Every fresh
+child must match that side's first handshake before its first sample.
+
+`--families NAME ...` fixes the Engine candidate whitelist exactly as supplied.
+Omitting it keeps default routing. The tool does not infer a different physical
+workload or append companions. `--budget` defaults to 1e-3 and `--workers` to 1.
+Worker width changes execution, not the reference key. Different point counts
+or dimensions require separately frozen records and separate comparisons.
+
+Modes describe process state as well as session history:
+
+- `warm_clear_history` keeps one child per side, performs two untimed warmups
+  when its session opens, and clears history before each timed sample.
+- `warm_retain_history` keeps one child per side with the same warmup count,
+  then retains history between samples. Calibration groups and final timing
+  open fresh sessions within that child.
+- `first` primes each side's Numba namespace in a discarded same-workload child.
+  Every measured sample then opens a new child and a new session. It measures
+  the first evolve in that process with disk-cache loading, not process import.
+  Each first child returns one sample regardless of its duration. Pareto's
+  slow-family extra warm sample applies only to the table protocol.
+- `cold` does not prime. Each measured child gets a new empty `NUMBA_CACHE_DIR`
+  parent. The controller deletes that parent after the child exits, including
+  on failure. It never deletes an existing user cache.
+
+All modes delegate session transitions and wall/process clocks to
+`simulator_measurement`. Only one `Engine.evolve` is timed per sample.
+Process startup, imports, source/Engine construction, reference I/O, warmup,
+history reset, density errors and telemetry conversion stay outside the timers.
+Disk-cache priming and owner warmups are separate operations.
+The timed call includes Engine dispatch, scheduling and worker management;
+it is not bare-kernel timing.
+
+Each cross-side block completes A1, B1, B2, A2. A is baseline and B is candidate.
+For wall and process CPU separately, its ratio is `(B1+B2)/(A1+A2)`.
+A ratio below 1 means B is faster. Zero elapsed readings remain raw samples.
+If either side's block sum is nonpositive, statistics raise ValueError naming
+the block, clock and both totals. No epsilon, resampling or dropped block hides
+clock-resolution limits. Summaries report the median and linear Q1/Q3 at
+indices `(K-1)*0.25` and `(K-1)*0.75`.
+
+Each side first runs off/off noise-floor blocks and off/on overhead blocks.
+Calibration uses the same ratio, with A=off and B=on. Only when both sides'
+wall and process overhead medians lie in their own off/off IQR closed intervals
+does final timing enable telemetry on both sides. K must exceed 2. Otherwise
+both timing sides disable telemetry and each adds one empty-history telemetry-on
+diagnostic in the same execution. Those diagnostics never enter timing ratios.
+At K=3, calibration plus comparison requests 60 samples before optional extra
+diagnostics. Warm sessions also run 12 untimed warmups in total.
+
+`BenchmarkReport` schema 1 preserves both sides' HEAD/tree/dirty facts,
+interpreter and effective Numba cache, all raw blocks, calibration decisions,
+worker/budget/family coordinates, observed CPU affinity/native-thread settings
+and the caller's exclusive declaration. Every observation includes ordered
+points, the complete complex density, same-coordinate oracle error, reference
+key and convergence error. `density_errors` compares complete cross-side
+matrices per block, never only populations or a truncated block. A same-dimension
+oracle does not establish truncation convergence.
+
+Available family routing reports retain aggregate `prepare_cpu_s`,
+`apply_cpu_s`, logical `rows` and `cache_hits`. These are calling-thread CPU,
+not Engine wall or process CPU. Missing accounting remains unavailable, not zero.
+Across different frozen N coordinates, time differences estimate marginal cost.
+Keep nonlinear points separate. `apply_cpu_s/rows` is a logical-row amortization,
+not the cost of one apply call. Diagnostics from an extra sample are not a
+breakdown of a telemetry-disabled timing sample.
 
 ## Engine family Pareto table
 

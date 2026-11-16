@@ -49,6 +49,13 @@ Codec 保存 batch、initial density、各 scheduled level 與 DC 的 `SecularMo
 Caller 的 JSON metadata 對 codec 不透明，場景 reason、families、routes、companions 與 provenance 都由 tools 解讀。
 容器不放 solver 欄位。Tests 側入口由呼叫端明示 manifest-to-solver，只讀 name、physical，不讀 metadata 或場景名稱清單。
 
+`FROZEN_PHYSICAL_VERSION` 擁有 manifest 與 standalone input 的 physical 解碼契約。
+欄位、單位、dtype、預設或還原 Engine 輸入的方式改變時 bump，由 producer 處理遷移。
+`SCENE_CACHE_VERSION` 擁有 index JSON 與 cache 目錄版次，tools 由它推導路徑。
+兩者目前都是 1。`SEGMENT_NUMERIC_VERSION` 只記演算法數值語義，不是輸入相容性 gate。
+成對工具比較兩個格式版本與每筆完整 record 身份，不因數值優化的版本變更而拒絕候選。
+跨 process 計時規則歸 [[0072]]，不進 codec 或 Engine。
+
 `physical_input`、`canonical_json` 與 `digest` 擁有 canonical physical hash。
 完整 hash 包含 model identity，oracle-sharing hash 只排除這個 namespace。
 `reference_key` 再加入 coarse/fine tolerances、version 1 與 convergence limit 2e-6。

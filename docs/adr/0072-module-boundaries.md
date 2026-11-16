@@ -263,6 +263,14 @@ Runner、report 與 summary 讀同一個 owner，不由 report 反向 import 執
 Elapsed 秒數須有限且非負。Clock 未在解析度內前進時，0 是合法讀數，原樣記錄，不補 epsilon 或重取。
 負值、NaN 與 infinity 在 sample 建構時失敗，process CPU 不必小於 wall。
 共同 owner 不處理跨 worktree 協定或統計，兩側比較須先含相同 committed 工具。
+`tools.paired_benchmark` 擁有 controller、child、ABBA 統計及 telemetry 校準。
+它直接管理 child，每側 warm 長駐，first/cold 每筆新 process，不設轉送層。
+每個 first child 只量一筆，不套 Pareto 的慢 family 協定，也不增加 owner API。
+Controller 經公開來源接縫與 solver-free codec 取得輸入，重用 prepared-session owner。
+Child 沿用外層獨占 runner 的 process group 與鎖，不另取鎖。
+兩側、兩個 clock 的 telemetry overhead 都在各自 noise IQR 閉區間內才共同開啟。
+輸出保留原始區塊、reference 證據及完整 density 誤差，額外診斷不混入計時比值。
+統計與 process 取捨見[成對 Engine 計時討論](../discussions/2026-11-16-paired-engine-timing.md)。
 取捨與介面收窄見[共用計時討論](../discussions/2026-11-16-shared-simulator-measurement.md)。
 
 `family_pareto.select_inputs` 是公開來源／身份接縫，回傳工具的 `Input` 與原 `FrozenRecord`。

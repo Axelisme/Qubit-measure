@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-11-16, frozen numeric inputs, reference identity, dispatch scheduling cost naming and evolve-local exact-key Floquet frames
+**Last updated:** 2026-11-16, public physical decoding and scene-cache versions
 
 **讀者：** framework-dev、agent。Segment evolution 的公開輸入、路由與數值邊界。
 
@@ -48,7 +48,7 @@ The exports in [__init__.py](__init__.py) fall into these groups:
 | Explicit joint-Fock prototype | `JointFockRequest`, `JointFockDiagnostic`, `JointFockResult`, `joint_fock_spectrum` |
 | Shared RWA Hamiltonian coefficients | `RWACoefficients`, `rwa_coefficients`, `interaction_hamiltonian` |
 | Indexed scene cache | `SCENE_CACHE_VERSION`, `FrozenIndexEntry`, `read_frozen_index`, `write_frozen_index`, `read_scene_records`, `write_scene_record` |
-| Frozen numeric inputs | `FrozenInput`, `FrozenRecord`, `physical_input`, `canonical_json`, `digest`, `read_physical_input`, `read_frozen_input`, `write_frozen_input`, `read_frozen_manifest`, `write_frozen_manifest` |
+| Frozen numeric inputs | `FROZEN_PHYSICAL_VERSION`, `FrozenInput`, `FrozenRecord`, `physical_input`, `canonical_json`, `digest`, `read_physical_input`, `read_frozen_input`, `write_frozen_input`, `read_frozen_manifest`, `write_frozen_manifest` |
 | Solver-free reference storage | `SolverTolerances`, `ReferenceResult`, `reference_key`, `load_reference`, `write_reference` |
 
 `Engine(workers, *, families=None, kernels=None, chunks_per_worker=None,
@@ -95,6 +95,13 @@ I/Q. ADC owns its probability tolerance and readout sums; see the
 [ADC README](../adc/README.md).
 
 ## Frozen numeric inputs and references
+
+`FROZEN_PHYSICAL_VERSION` owns the physical decoding contract for manifests
+and standalone inputs. It changes when fields, units, dtypes, defaults or
+Engine-input reconstruction change. `SCENE_CACHE_VERSION` owns the index JSON
+and cache-directory revision. Both are currently 1. Consumers compare both
+without parsing storage layout. `SEGMENT_NUMERIC_VERSION` records numerical
+algorithm semantics, not input-format compatibility.
 
 The public codec snapshots a `ModelSource` and one `TimelineBatch` without
 running an Engine or a solver. `write_frozen_input(path, source, batch)` writes

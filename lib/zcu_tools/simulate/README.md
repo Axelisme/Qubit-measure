@@ -11,6 +11,8 @@ prediction tools remain separate. ADR-0072 defines the package dependency rules.
 ## Frozen scene storage
 
 `evolution` owns the versioned index and single-record numeric cache codec.
+`FROZEN_PHYSICAL_VERSION` identifies physical decoding semantics.
+`SCENE_CACHE_VERSION` identifies index and cache-directory format.
 Its public APIs take explicit paths and verify complete record identities.
 They do not discover Git roots, build device models or solve references.
 Tools choose the repository-shared cache; tests-side producers select independent

@@ -24,6 +24,7 @@ from .engine import (
 )
 from .exceptions import NoValidKernel
 from .frozen import (
+    FROZEN_PHYSICAL_VERSION,
     FrozenInput,
     FrozenRecord,
     canonical_json,

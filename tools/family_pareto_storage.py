@@ -4,11 +4,15 @@ import subprocess
 from collections.abc import Sequence
 from pathlib import Path
 
-from zcu_tools.simulate.evolution import FrozenIndexEntry, read_frozen_index
+from zcu_tools.simulate.evolution import (
+    SCENE_CACHE_VERSION,
+    FrozenIndexEntry,
+    read_frozen_index,
+)
 
 
 def scene_cache_directory(override: Path | None = None) -> Path:
-    """Resolve the repository-shared v1 cache or an absolute explicit override.
+    """Resolve the current versioned shared cache or an absolute explicit override.
 
     Git is queried only without an override, from this tool's worktree. Invalid
     relative overrides raise ValueError; Git lookup errors propagate. No cache
@@ -23,7 +27,11 @@ def scene_cache_directory(override: Path | None = None) -> Path:
         cwd=Path(__file__).parent,
         text=True,
     ).strip()
-    return Path(common).parent / ".agent_state/benchmark/family_pareto/scenes/v1"
+    return (
+        Path(common).parent
+        / ".agent_state/benchmark/family_pareto/scenes"
+        / f"v{SCENE_CACHE_VERSION}"
+    )
 
 
 def scene_index_paths(index: Path | None = None) -> tuple[Path, ...]:

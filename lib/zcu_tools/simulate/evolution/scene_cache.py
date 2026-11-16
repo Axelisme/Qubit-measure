@@ -21,6 +21,12 @@ from .frozen import (
 )
 
 SCENE_CACHE_VERSION = 1
+"""Index JSON and scene-cache directory revision, independent of physical decoding.
+
+Callers derive versioned cache locations from this constant. Bump when the index
+format or directory layout changes; FROZEN_PHYSICAL_VERSION owns numeric input
+fields, units, dtypes, defaults and reconstruction semantics instead.
+"""
 
 
 @dataclass(frozen=True)
