@@ -26,8 +26,9 @@ def cumulative_count_bins(histograms: tuple[NDArray[np.int64], ...]) -> Histogra
 
     histograms is a nonempty tuple of nonnegative int64 (*points, categories)
     arrays, with identical point shapes, positive category counts and equal
-    totals per point. Totals may be zero or differ between points. Inputs are
-    not mutated. Invalid dtype, counts, shapes or totals raise ValueError.
+    totals per point. Each total must be in [0, 2**63-1], inclusive, and may
+    differ between points. Inputs are not mutated. Invalid dtype, counts,
+    shapes or totals (including totals above the int64 maximum) raise ValueError.
 
     Return owned counts and per-histogram category indices on exactly
     1+sum(categories-1) bins. Keep repeated boundaries as zero-count bins; the
@@ -52,7 +53,11 @@ def cumulative_count_bins(histograms: tuple[NDArray[np.int64], ...]) -> Histogra
             raise ValueError(
                 "histograms must be nonnegative int64 with matching points"
             )
-        cumulative.append(np.cumsum(values, axis=-1))
+        prefix_counts = np.cumsum(values, axis=-1)
+        # The first int64 overflow is negative, even if later sums wrap positive.
+        if np.any(prefix_counts < 0):
+            raise ValueError("histogram total must fit in nonnegative int64")
+        cumulative.append(prefix_counts)
     total = cumulative[0][..., -1:]
     if any(np.any(values[..., -1:] != total) for values in cumulative):
         raise ValueError("histogram totals must agree per point")

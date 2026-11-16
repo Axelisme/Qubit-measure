@@ -282,9 +282,11 @@ then sums the incoming flows to obtain that event's histogram. No shot array
 or outcome history is constructed. `cumulative_count_bins(histograms)` encodes
 these histograms on sorted cumulative-count boundaries. It returns
 `HistogramBins.counts` and a tuple of per-histogram category `indices`.
-All histograms use the same point shape and total per point. The shared width
-is `1+sum(S_e-1)`, independent of reps; duplicate boundaries remain zero-count
-bins. Each read uses its `event_indices` entry and content-specific
+All histograms use the same point shape and total per point. Each total must
+be in `[0, 2**63-1]`, inclusive; larger totals raise `ValueError` before boundary
+encoding. Counts and indices remain int64, without clipping or normalization.
+The shared width is `1+sum(S_e-1)`, independent of reps; duplicate boundaries
+remain zero-count bins. Each read uses its `event_indices` entry and content-specific
 `column_order` to select means on these bins. These categories preserve marginal
 moments, not a joint state distribution or real shot paths. The same encoder
 can combine independent cavity histograms with different category counts.
