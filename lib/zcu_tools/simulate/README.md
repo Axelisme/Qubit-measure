@@ -1,6 +1,6 @@
 # Numeric simulation tools
 
-**Last updated:** 2026-11-17, boundary expand and simulator-owned cache root
+**Last updated:** 2026-11-17, simulator-owned boundary and dependency closure
 
 **讀者：** framework-dev、agent。查閱數值模擬的責任邊界、快取契約與實測效能。
 
@@ -8,19 +8,23 @@
 DeviceManager, resources, GUI, YAML or an environment. The existing fluxonium
 prediction tools remain separate. ADR-0072 defines the package dependency rules.
 
-## Acquisition boundary migration
+## Acquisition boundary
 
-Simulator internals import shared acquisition records from
-`zcu_tools.simulate.boundary`. During the expand step, this module explicitly
-re-exports 19 public names from `zcu_tools.core.simulation`, where their
-definitions still live. External callers and tests can keep using the old path
-until their imports migrate. The contract step replaces the re-exports with the
-definitions and removes the old module.
+`zcu_tools.simulate.boundary` owns the immutable numeric acquisition records
+shared by the frontend and environments. Import `TimeBase`, `AcquireRequest`,
+`RoundRequest`, timeline slots, signals and statistics from this module.
+`TimeBase` owns the rational common clock and integer-tick conversion.
+`ChargeDriveRequirement` carries caller-supplied charge-line requirements;
+physical environments validate membership. Records define units, array shapes
+and borrow lifetimes without importing drivers, Module objects or GUI code.
+See the [program simulation contract](../program/v2/simulation/README.md) for
+frontend admission, round execution and ADC transport.
 
-The package is not yet dependency-closed: `boundary` still imports
-`core.simulation`. No other simulator module imports another `zcu_tools` package.
-The existing C19 contract continues to forbid `core` from depending on `simulate`.
-A simulator-closure contract follows in the contract step; it is not active yet.
+`simulate` does not import any other `zcu_tools` package.
+The `.importlinter` contract `simulate-closed` forbids these dependencies,
+including indirect imports, without exceptions. C19 continues to forbid
+`core` from depending on `simulate`. Boundary records have no compatibility
+re-export at their former location.
 
 ## Frozen scene storage
 
@@ -31,7 +35,7 @@ Its public APIs take explicit paths and verify complete record identities.
 They do not discover Git roots, build device models or solve references.
 Tools choose the repository-shared cache; tests-side producers select independent
 solvers. See [frozen numeric inputs and references](evolution/README.md#frozen-numeric-inputs-and-references).
-This I/O boundary does not claim the whole simulate package is dependency-closed.
+This I/O boundary stays within the package's dependency-closure contract.
 
 ## Numeric parameter drift
 

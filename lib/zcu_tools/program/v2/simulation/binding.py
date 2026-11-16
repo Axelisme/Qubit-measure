@@ -116,7 +116,7 @@ class SimulationBinding:
 
         capture_snapshot takes no arguments and returns current numeric device
         inputs and model identity. execute takes those inputs in a RoundRequest
-        and returns all ADC statistics/signals under the core.simulation
+        and returns all ADC statistics/signals under the simulate.boundary
         layout/borrow contract. The environment retains ownership of both callbacks and their
         resources; neither callback performs QICK averaging. Raw sources own rounding.
         backend_version is an author-defined private implementation version

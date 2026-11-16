@@ -243,7 +243,7 @@ def drive_track(
 ) -> DriveTrack:
     """Detach one QICK drive slot into an evolution track in ns/GHz/radians.
 
-    event has the aligned per-point arrays defined by core.simulation.EventSlot
+    event has the aligned per-point arrays defined by simulate.boundary.EventSlot
     in ticks/MHz/degrees, interpreted with the request's time_base. port is a nonempty numeric SecularDrive name, not a
     generator index. memo follows envelope_specs' template-local lifetime.
     Absolute support endpoints round independently to nearest 2 ns, ties even.
@@ -282,7 +282,7 @@ def classify_readout(
     """Partition readout blocks into terminal, projective and cavity drives.
 
     time_base is the originating request's clock for every integer tick field.
-    template uses core.simulation units and aligned per-point arrays; drive
+    template uses simulate.boundary units and aligned per-point arrays; drive
     selects the generator and signed field calibration. memo follows
     envelope_specs' lifetime contract. The latest active start is terminal.
     Earlier blocks with their own ADC triggers are projective reads; other
@@ -656,7 +656,7 @@ def readout_contents(
     time_base is the originating request's clock. Its ns range/type errors
     propagate for invalid tick fields. template contains only terminal readout
     events on drive.gen_ch; other
-    generators are ignored. window has aligned core.simulation ADC trigger arrays.
+    generators are ignored. window has aligned simulate.boundary ADC trigger arrays.
     memo follows envelope_specs' lifetime contract. Signed gains and complex
     envelopes are preserved. Pulses use ns/GHz and common-origin radians; call
     local_readout_pulses once the ADC reference frequency is selected. Grids use

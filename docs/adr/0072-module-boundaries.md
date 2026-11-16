@@ -51,7 +51,7 @@ status: accepted
 
 真實硬體的 acquire 路徑不執行任何模擬模組，包含 `simulate` 與 `program.v2.simulation` 的排程器。共用時間成本計算放在中性的 `program` 工具，不讓真實 acquire 為了估時走模擬排程。2026-10-26，使用者裁決：「我不太希望真实 acquire 还会走模拟的模块。」
 
-Charge admission 是 caller 對 generator 必須綁定 charge drive line 的明確要求。Caller 以 `core.simulation.ChargeDriveRequirement` 傳入診斷名稱與 generator index，不查 environment settings 或判斷 physical membership。名稱不是 role registry 的 key。Program 的模擬入口只把需求放進 `AcquireRequest.charge_requirements`；resources 的 replay 保存同一個 core record，不重做物理驗證。
+Charge admission 是 caller 對 generator 必須綁定 charge drive line 的明確要求。Caller 以 `simulate.boundary.ChargeDriveRequirement` 傳入診斷名稱與 generator index，不查 environment settings 或判斷 physical membership。名稱不是 role registry 的 key。Program 的模擬入口只把需求放進 `AcquireRequest.charge_requirements`；resources 的 replay 保存同一個 boundary record，不重做物理驗證。
 
 知道實體線路的 environment 擁有驗證。Single-fluxonium 每次 acquire 都在 preflight 檢查 `drive_lines`，早於 waveform 建構、preparation reuse 與 evolution。Generator 已綁 flux 或 readout 也不能滿足 charge 需求。這不改變其他合法 fast-flux 事件的路由。
 

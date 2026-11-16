@@ -221,8 +221,8 @@ FTF 與 single 不同，不拆損耗無關結構。漂移開啟時，每次 acqu
 `program.v2.simulation.RawShots` 定義延遲產生完整單發 ADC sums 的介面。
 環境以 `IntegratedRound` 一起交付純統計資料和 raw source。
 Program 只在單發 processing 或 getter 需要資料時呼叫 source，不重跑 backend。
-`core.simulation.RoundStatistics` 只有資料，不定義 materializer、Protocol 或 callback。
-Core 的 no-callback 邊界不變。
+`simulate.boundary.RoundStatistics` 只有資料，不定義 materializer、Protocol 或 callback。
+統計資料的 no-callback 邊界不變。
 
 ADC 和 white_noise 各自生成完整 raw，包含物理訊號、receiver noise、nearest-even int64 轉換和排列。
 兩者以結構型別符合 RawShots，不 import program。
