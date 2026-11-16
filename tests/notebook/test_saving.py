@@ -34,7 +34,7 @@ from zcu_tools.resources.entry import (
     RecordsLedger,
     ResultEntry,
     RoleSpec,
-    capture_point_storage,
+    capture_storage,
     component_registry,
     role_registry,
     snapshot,
@@ -367,6 +367,64 @@ def test_real_caller_writes_all_formats_and_retains_acquisition(
     ).ledger
     assert [event.kind for event in ledger.events()] == ["acquired", "saved"]
     assert acquired_payload(ledger).roles == {}
+
+
+def test_global_run_saves_entry_figures_and_accepts_into_global_documents(
+    point: ParameterView, tmp_path: Path
+) -> None:
+    entry = ResultEntry.open(
+        "entry", result_root=tmp_path / "results", database_root=tmp_path / "Database"
+    )
+    view = entry.parameters()
+    view.add_component("D1", kind="notebook/accept-driver", rate=1000.0)
+    roles = view.resolve(("notebook_target",), notebook_target="D1")
+    point_parameters = source_path(point).read_bytes()
+    point_library = (source_path(point).parent / "library.yaml").read_bytes()
+    exp = experiment()
+    saved = exp.save_run(
+        view, source=exp.run(SavingCfg()), roles=roles, figures={"fit": saving_figure()}
+    )
+    native = next(
+        item.output.path
+        for item in saved.report.outputs
+        if item.output.format == "data_h5"
+    )
+    assert native.parent.parent == entry.database_path / "runs"
+    metadata = metadata_from_container(load(native))
+    assert metadata.snapshot.entry_name == "entry"
+    assert metadata.snapshot.point is None
+    assert metadata.snapshot.roles == {"notebook_target": "D1"}
+    figures = [
+        item.output.path for item in saved.report.outputs if item.output.format == "png"
+    ]
+    assert len(figures) == 2
+    assert {path.parent for path in figures} == {
+        native.parent / "figures",
+        entry.result_path / "figures",
+    }
+    assert figures[0].read_bytes() == figures[1].read_bytes()
+    pulse = pulse_spec()
+    waveform = ConstWaveformCfg(length=0.075)
+    event_id = saved.accept(
+        parameter={"notebook_target.rate": (1500.0, {"stderr": 0.5})},
+        module={"notebook_target.pulses.pi": pulse},
+        waveform={"notebook_target.waveforms.base": waveform},
+    )
+    reopened = ResultEntry.open(
+        "entry", result_root=tmp_path / "results", database_root=tmp_path / "Database"
+    )
+    assert reopened.parameters().D1.rate == 1500.0
+    assert reopened.parameters().meta("D1.rate") == {"stderr": 0.5}
+    library = reopened.module_library().snapshot()
+    assert library.module_spec("D1.pulses.pi") == pulse
+    assert library.waveform_spec("D1.waveforms.base") == waveform
+    assert source_path(point).read_bytes() == point_parameters
+    assert (source_path(point).parent / "library.yaml").read_bytes() == point_library
+    accepted = reopened.ledger.get(event_id).event
+    assert accepted.kind == "accepted"
+    assert isinstance(accepted.payload, AcceptedPayload)
+    assert accepted.payload.run_id == saved.run_id
+    assert acquired_payload(reopened.ledger).point is None
 
 
 def test_resave_rewrites_fixed_outputs_and_uses_new_labber_file(
@@ -807,7 +865,7 @@ def test_accept_schema_failure_keeps_event_and_rolls_back_point_group(
     assert "rate" in str(caught.value.__cause__)
     accept_point.refresh()
     assert snapshot(accept_point) == before_point
-    binding = capture_point_storage(accept_point)
+    binding = capture_storage(accept_point)
     entry = ResultEntry.open(
         binding.entry_name,
         result_root=binding.result_path.parent,

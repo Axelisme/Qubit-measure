@@ -1,6 +1,6 @@
 # `zcu_tools.notebook`
 
-**Last updated:** 2026-11-16，ParameterView 參數 handle
+**Last updated:** 2026-11-16，global／point run 保存與寫回
 
 **讀者：** lab-author。Notebook 實驗入口、互動分析與支援模組導覽。
 
@@ -34,16 +34,17 @@ Core 正常回傳就發布 RunRecord。StopSignal 只表達停止請求，不攜
 
 `load(Path(...))` 透過 `load_run_with_metadata(path, spec=core.AXES_SPEC)` 讀取與 GUI 相同的 `data.h5`，回傳 `RunRecord`。Single 與 grouped 資料共用 restore；歷史 cfg 不相容時保留有效資料、回傳 cfg=None 並發出 `CfgUnavailableWarning`。成功載入會清除目前分析與 acquisition evidence，失敗保留舊成果。只有 Labber 的舊資料必須先用既有 `migrations/` 工具離線轉成 native，不提供執行期 fallback。本機單檔 `save` 仍是明示的 Labber 匯出，不與 `load` 構成格式對稱。
 
-`save_run(ctx, source=record, ...)` 是綁定 ParameterView 的 run 保存入口，與本機單檔 `save` 分開。Source 必須是此 adapter 最近成功 run 返回的同一 record。入口從 bound point 捕捉 cached context 與 storage capability，量測身分、時間與 provenance 沿 adapter 的 acquisition evidence。可選的 RoleView 必須來自同一 point，省略代表沒有角色對應。入口保存正規 `data.h5`、Labber 衍生輸出、具名 PNG／副本及窗格 JSON。`SavedRun.save()` 明確重存同一 run，固定輸出覆寫，Labber 每次取新檔；後續 adapter 操作不使此 handle 失效。
+`save_run(ctx, source=record, ...)` 是綁定 ParameterView 的 run 保存入口，與本機單檔 `save` 分開。Source 必須是此 adapter 最近成功 run 返回的同一 record。入口以 `capture_storage(ctx, roles)` 從綁定的 global／point view 捕捉 cached context 與 storage capability，量測身分、時間與 provenance 沿 adapter 的 acquisition evidence。可選的 RoleView 必須來自同一份參數來源與兩個 roots，省略代表沒有角色對應。入口保存正規 `data.h5`、Labber 衍生輸出、具名 PNG／副本及窗格 JSON。`SavedRun.save()` 明確重存同一 run，固定輸出覆寫，Labber 每次取新檔；後續 adapter 操作不使此 handle 失效。
 
 Run 命名沿 core.AXES_SPEC 的 `save_stem(SaveContext) -> str`。Caller 可在自己的 spec 指定 callback，框架不補任何名稱。
 Context 包含 tag、run_id、point、roles、cfg values 與帶 timezone 的 saved_at。預設 stem 為 dotted tag、hyphen-joined roles 與完整 run_id，例如 `twotone.time_domain.t1_Q1-R1_20261027T120000Z-a1b2c3`。
+Global view 的 snapshot.point 為 None，圖副本寫 entry 層 `figures/`。Point view 的圖副本寫 `points/<point>/figures/`。保存契約見 ADR-0063。
 Native 寫 `runs/<stem>/data.h5`，Labber 寫日期樹內的 `<stem>.hdf5`。只有 Labber 碰撞才加 numeric suffix；native 同名仍覆寫。
 每次保存都呼叫 callback，自訂名若依保存時間改變，也會改變 native 目的地。Labber comment 同時保存歷史 snapshot.point 與 snapshot.roles。
 
 `SavedRun.report` 與 `paths` 只表示最新一次保存結果。輸出或編碼失敗時，`PartialSaveError` 保留同一 SavedRun 及 report，caller 修正內容後可明確再存。Ledger 失敗直接傳播，不轉成 PartialSaveError，也不自動 retry。Figures／analysis 為 None 時保留上一組，空 mapping／tuple 清除該組。Run 身分、量測時間與 captured context 不因重存改變。
 
-`SavedRun.accept(parameter=..., module=..., waveform=..., records=...)` 共用 entry 的寫回流程。Parameter 接受普通點分路徑的工作單位 JSON／complex 值，可用 `(value, metadata)` 以 mapping 整份替換該路徑的 opaque metadata，例如 `{"stderr": 0.8}`。只給 value 時保留既有 metadata；舊 `(value, float)` 形狀報錯。Module 與 waveform 接受 library key 到具名持久 Spec 的 mapping，不接受 raw dict。各類至少一個非空。Records 是具體元件名到 JSON 欄位 dict 的 mapping。流程補上 run_id、point、at、accepted source 與 component。Component 取自 records mapping 中該筆資料綁定的具體元件名，不由 Notebook 推測或計算。Caller 提供的 dev 或其他儀器欄位原樣保留，缺 dev 也成功，資料一致性由 caller 保證。Notebook 不捕捉 alias，也不從 live device、cfg 或 snapshot 推論樣本值。Parameter／library 的 role 首段沿保存時固定的映射展開，records 不解析角色。Accepted 事件保留 run_id 與寫入值供稽核。Module 與 waveform 只保存 Spec，不保存 leaf 來源。
+`SavedRun.accept(parameter=..., module=..., waveform=..., records=...)` 透過 `BoundDocumentWritebackTarget(view, storage)` 寫回保存時綁定的文件。Global view 寫 entry 層 `parameters.yaml` 與 `library.yaml`，不改既有 point。Point view 只寫該 point 的文件。Target 建構時拒絕不同 source、entry 或 Result／Database root 的 storage。Parameter 接受普通點分路徑的工作單位 JSON／complex 值，可用 `(value, metadata)` 以 mapping 整份替換該路徑的 opaque metadata，例如 `{"stderr": 0.8}`。只給 value 時保留既有 metadata；舊 `(value, float)` 形狀報錯。Module 與 waveform 接受 library key 到具名持久 Spec 的 mapping，不接受 raw dict。各類至少一個非空。Records 是具體元件名到 JSON 欄位 dict 的 mapping。流程補上 run_id、point、at、accepted source 與 component。Component 取自 records mapping 中該筆資料綁定的具體元件名，不由 Notebook 推測或計算。Caller 提供的 dev 或其他儀器欄位原樣保留，缺 dev 也成功，資料一致性由 caller 保證。Notebook 不捕捉 alias，也不從 live device、cfg 或 snapshot 推論樣本值。Parameter／library 的 role 首段沿保存時固定的映射展開，records 不解析角色。Accepted 事件保留 run_id 與寫入值供稽核。Module 與 waveform 只保存 Spec，不保存 leaf 來源。
 
 Record 的校準欄位由 caller 在量測前捕捉。接受時明傳當時的副本，不重新讀目前 point。
 以下例子的 `parameters` 是作者建立本次 cfg 時使用的固定 ParameterContext，`point` 是保存目的地。
@@ -79,7 +80,7 @@ if acquisition.device_snapshot is not None:
 作者有自己的 flux 定義時，直接傳入自己捕捉的 JSON 欄位。Mux 逐 participant 捕捉各自 qubit 的 frame。
 `SavedRun.accept` 不從 live point、alias、cfg 或 devices 推測校準。
 
-流程先追加一筆 typed accepted 事件，再依目的地文件分組提交。Parameter 為 point 一組，module 與 waveform 共用 library 一組，records 逐筆提交。提交順序為 point、library、records，組內保留各 mapping 的迭代順序。Point 與 library 各使用一次 edit，任一項無效整組不寫，並停止後組。`WritebackApplyError` 保留 accepted `event_id`、已成功組的項目數 `applied`、逐項實際值的 `result.committed` 與原始 `__cause__`。已成功組及事件保留，不提供跨文件回復、retry 或恢復流程。單項 parameter／library setter 仍可獨立使用，accept 的整組提交不逐項呼叫它們。Ledger append 失敗在寫入值之前，錯誤原樣傳播。成功回傳 event ID。後續 adapter run 或保存其他 point 不改這個 handle 的 point、roles 與 run_id。GUI 使用同一 executor，proposal 與 applied 狀態仍由 GUI 管理。
+流程先追加一筆 typed accepted 事件，再依目的地文件分組提交。Parameter 為綁定參數文件一組，module 與 waveform 共用 library 一組，records 逐筆提交。提交順序為 parameters、library、records，組內保留各 mapping 的迭代順序。Parameters 與 library 各使用一次 edit，任一項無效整組不寫，並停止後組。`WritebackApplyError` 保留 accepted `event_id`、已成功組的項目數 `applied`、逐項實際值的 `result.committed` 與原始 `__cause__`。已成功組及事件保留，不提供跨文件回復、retry 或恢復流程。單項 parameter／library setter 仍可獨立使用，accept 的整組提交不逐項呼叫它們。Ledger append 失敗在寫入值之前，錯誤原樣傳播。成功回傳 event ID。後續 adapter run 或保存其他 point 不改這個 handle 的 point、roles 與 run_id。GUI 使用同一 executor，proposal 與 applied 狀態仍由 GUI 管理。
 
 Caller 明確提供 Notebook 自己的 bindings，RoleView 保留顯式 kind／via 契約。
 GUI 的 `aliases.yaml` 與 Measure alias preset 由 GUI 使用。

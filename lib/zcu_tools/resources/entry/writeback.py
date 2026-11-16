@@ -20,7 +20,7 @@ from zcu_tools.cfg_model import (
 )
 from zcu_tools.core.numeric_scalar import normalize_numpy_scalar
 from zcu_tools.format_version import YamlMap, YamlValue
-from zcu_tools.resources.document_names import LIBRARY_FILENAME
+from zcu_tools.resources.document_names import LIBRARY_FILENAME, PARAMETERS_FILENAME
 
 from .ledger import RecordsLedger
 from .ledger_models import (
@@ -36,6 +36,7 @@ from .parameter_view import ParameterView
 from .storage import StorageBinding, bind_record_table
 from .views import (
     document_value,
+    parameter_origin,
     snapshot,
     source_path,
 )
@@ -337,11 +338,33 @@ def commit_library_updates(
     return tuple(actual)
 
 
-class _DocumentWritebackTarget:
-    """Share single-file batch commits and lazy library binding across scopes."""
+class BoundDocumentWritebackTarget:
+    """Write to one bound view's parameter document and adjacent library.
 
-    def __init__(self, point: ParameterView, storage: StorageBinding) -> None:
-        self._point = point
+    view is a global or point ParameterView; storage is its capture_storage
+    binding. Construction compares the complete source and both output roots,
+    rejecting other entries, scopes or roots with ValueError before any write.
+    No document is opened or refreshed. ledger is storage.ledger; point is the
+    captured label, or None for global. Parameter/library batches each validate
+    and commit one file and return detached actual values. The adjacent library
+    opens lazily, creating a missing file only on its first nonempty edit.
+    Records append through the captured entry owner. Schema, conflict and I/O
+    failures propagate; accepted events and earlier groups are not rolled back.
+    """
+
+    def __init__(self, view: ParameterView, storage: StorageBinding) -> None:
+        origin = parameter_origin(view)
+        document_dir = storage.result_path
+        if storage.point is not None:
+            document_dir = document_dir / "points" / storage.point
+        if (
+            (document_dir / PARAMETERS_FILENAME).resolve() != origin.source.resolve()
+            or storage.result_path.resolve() != origin.result_root / storage.entry_name
+            or storage.database_path.resolve()
+            != origin.database_root / storage.entry_name
+        ):
+            raise ValueError("View and storage must belong to the same bound document")
+        self._view = view
         self._storage = storage
         self.ledger = storage.ledger
         self.point = storage.point
@@ -357,14 +380,14 @@ class _DocumentWritebackTarget:
         self, updates: tuple[ParameterUpdate, ...]
     ) -> tuple[YamlValue, ...]:
         """Commit one nonempty parameter batch under WritebackTarget's contract."""
-        return commit_parameter_updates(self._point, updates)
+        return commit_parameter_updates(self._view, updates)
 
     def _library(self) -> ModuleLibrary:
         from zcu_tools.resources.context.library import ModuleLibrary
 
         if self._library_handle is None:
             self._library_handle = ModuleLibrary(
-                source_path(self._point).parent / LIBRARY_FILENAME,
+                source_path(self._view).parent / LIBRARY_FILENAME,
                 allow_absent=True,
             )
         return self._library_handle
@@ -396,40 +419,6 @@ class _DocumentWritebackTarget:
         return bind_record_table(self._storage.result_path, component).append(
             run_id=run_id, point=self.point, at=at, source=source, **fields
         )
-
-
-class PointWritebackTarget(_DocumentWritebackTarget):
-    """Bind point documents and captured storage for persistent writeback.
-
-    point and storage must describe the same captured point. Construction does
-    no I/O. Parameter and library setters each commit one validated file and
-    return detached receipts. Library opening is lazy and permits absent files.
-    Owner path, schema, conflict and I/O failures propagate; no cross-file
-    rollback occurs. ledger is the storage ledger; point is its bound label.
-    Record methods append through the entry record owner.
-    """
-
-    def __init__(self, point: ParameterView, storage: StorageBinding) -> None:
-        super().__init__(point, storage)
-
-
-class EntryWritebackTarget(_DocumentWritebackTarget):
-    """Bind global parameter/library documents and captured entry storage.
-
-    setup is the owning ResultEntry.parameters(); storage comes from
-    capture_entry_storage on that entry. Construction does no I/O and requires
-    storage.point=None, otherwise raises ValueError. ledger is that entry's
-    captured ledger and point is None. Each nonempty parameter/library batch
-    validates and commits one file, returning detached receipts. A missing
-    library is created only by its first nonempty edit. Existing points and
-    captured contexts remain unchanged. Owner schema, conflict and I/O errors
-    propagate; accepted events and earlier groups are not rolled back.
-    """
-
-    def __init__(self, setup: ParameterView, storage: StorageBinding) -> None:
-        if storage.point is not None:
-            raise ValueError("Entry writeback requires entry-level storage")
-        super().__init__(setup, storage)
 
 
 def _append_accepted_record(

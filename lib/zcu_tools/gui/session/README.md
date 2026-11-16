@@ -1,6 +1,6 @@
 # gui/session/ — 量測 session core
 
-**Last updated:** 2026-11-16，global／point 共用 ParameterView
+**Last updated:** 2026-11-16，global／point 共用 ParameterView 與 storage capture
 
 **讀者：** framework-dev。Session 層的資源綁定、operation 與共用對話框分工。
 
@@ -28,7 +28,7 @@ Inspect 的 New 使用所選 Destination 的固定 capture，以其中的同名 
 ## Context、session environment 與 Run snapshot
 
 - **Entry 與 point** 的持久資源由 [`resources.entry`](../../resources/entry/README.md) 管理，module library 由 [`resources.context`](../../resources/context/README.md) 管理。Session 不重建文件版面，也不在清除選取時刪除資源。
-- **ParameterContext** 是隔離的參數／library／storage 投影。`from_entry(entry, library, target)` 與 `from_point(point, library, target)` 捕捉各自 scope 的內容與 storage。`SavedEntry`／`SavedPoint` 以目前 Result root 內的資料夾名稱標識來源，不以 UUID 判斷歸屬。`bind_aliases` 固定當次有序 rows。GUI callers 使用空 declarations，Notebook 保留自己的 role kind 契約。`lookup`／`lookup_point`／`value` 讀裸 `$alias` 時回傳名稱字串或有序名稱清單。`resolve_path` 與 `$alias.path` 只接受單一名稱，遇清單明確拒絕。Bare concrete paths 使用獨立 namespace。名稱不參與數值算術或插值。未綁 alias 可留在 capture；實際讀取才指名失敗，不代用同名元件。讀取不 refresh、不讀 YAML，也不跟隨後續全域修改。Run／storage 的 names 投影包含表中所有已綁 rows，也包含自訂 alias。空列略過。Device 名稱不必在 `point.components` 或裝置表中。歷史 fixed names 不重新展開 alias；元件欄位的有效性仍由其讀取 owner 檢查。
+- **ParameterContext** 是隔離的參數／library／storage 投影。`from_entry(entry, library, target)` 與 `from_point(point, library, target)` 捕捉各自 scope 的內容，storage 一律由 `capture_storage(view)` 從綁定的參數來源取得。`SavedEntry`／`SavedPoint` 以目前 Result root 內的資料夾名稱標識來源，不以 UUID 判斷歸屬。`bind_aliases` 固定當次有序 rows。GUI callers 使用空 declarations，Notebook 保留自己的 role kind 契約。`lookup`／`lookup_point`／`value` 讀裸 `$alias` 時回傳名稱字串或有序名稱清單。`resolve_path` 與 `$alias.path` 只接受單一名稱，遇清單明確拒絕。Bare concrete paths 使用獨立 namespace。名稱不參與數值算術或插值。未綁 alias 可留在 capture；實際讀取才指名失敗，不代用同名元件。讀取不 refresh、不讀 YAML，也不跟隨後續全域修改。Run／storage 的 names 投影包含表中所有已綁 rows，也包含自訂 alias。空列略過。Device 名稱不必在 `point.components` 或裝置表中。歷史 fixed names 不重新展開 alias；元件欄位的有效性仍由其讀取 owner 檢查。
 - `ParameterContext.empty()` 提供沒有 target、storage 或 general 的空分析內容。獨立 `parameter_capture.capture_parameters()` adapter 將內容交給 experiment 的具名 `ParameterSnapshot` 保存 point、library 與 alias，底層 Form 使用的 ParameterContext 不依賴 experiment。`restore_parameters()` 不讀 live 檔案，也不授予持久寫入能力。Snapshot 中未使用的欄位保持 opaque，資源與 alias owner 在讀取時才驗證請求的部分。
 - `ParameterContext.component(name_or_alias)` 完整投影單一 component，執行 model validators 與跨欄位檢查。普通 leaf read 不執行 model validators，欄位 default 與 field validators 仍適用。Mux 與 FTF 的 group consumer 使用完整投影檢查接線與成員長度，不驗其他未用元件。
 - **Module slot 錯誤** 由 `parameters.ModuleSlotError(AttributeError)` 區分 unset／dangling slot 與 source 故障。`ParameterContext.library_key` 與沿 slot 的 leaf lookup 保留 slot 路徑和原因。`has_library_key(path)` 對固定來源查詢 root 或 slot 是否存在，不 materialize；缺 root、unset／dangling slot 或缺／未綁 alias 回 False，語法、其他 alias 錯誤與來源故障仍 raise。Form factory 的 `ctx.has(ref)` 共用這個 owner 查詢。Expression 只轉譯這個明確型別為 `ExpressionError`。Tab 保留 Invalid cfg 並停用 Run，ordinary `AttributeError` 與其他 source 故障仍向外傳遞。

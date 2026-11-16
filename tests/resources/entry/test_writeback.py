@@ -9,21 +9,19 @@ from pydantic import ValidationError
 from zcu_tools.cfg_model import ConstWaveformCfg, PulseSpec
 from zcu_tools.resources.entry import (
     AcceptedPayload,
-    EntryWritebackTarget,
     ParameterView,
     ResultEntry,
-    capture_entry_storage,
-    capture_point_storage,
+    capture_storage,
     document_value,
     snapshot,
     source_path,
 )
 from zcu_tools.resources.entry.storage import bind_record_table
 from zcu_tools.resources.entry.writeback import (
+    BoundDocumentWritebackTarget,
     ModuleWriteback,
     ParameterUpdate,
     ParameterWriteback,
-    PointWritebackTarget,
     RecordWriteback,
     WaveformWriteback,
     WritebackApplyError,
@@ -133,8 +131,51 @@ def test_parameter_updates_write_only_the_bound_scope(
     assert reopened.parameters("P1" if scope is None else None).Q1.rate == 5000.0
 
 
-def target(point: ParameterView) -> PointWritebackTarget:
-    return PointWritebackTarget(point, capture_point_storage(point))
+def target(point: ParameterView) -> BoundDocumentWritebackTarget:
+    return BoundDocumentWritebackTarget(point, capture_storage(point))
+
+
+@pytest.mark.parametrize("scope", [None, "P1"])
+@pytest.mark.parametrize(
+    "mismatch", ["entry", "result-root", "database-root", "scope", "point"]
+)
+def test_writeback_target_rejects_storage_from_another_location(
+    entry: ResultEntry, tmp_path: Path, scope: str | None, mismatch: str
+) -> None:
+    entry.new_point("P1")
+    view = entry.parameters(scope)
+    other_name = "other" if mismatch == "entry" else "entry"
+    other_results = (
+        tmp_path / "other-results"
+        if mismatch == "result-root"
+        else entry.result_path.parent
+    )
+    other_database = (
+        tmp_path / "other-database"
+        if mismatch == "database-root"
+        else entry.database_path.parent
+    )
+    if mismatch in ("database-root", "scope", "point"):
+        other = ResultEntry.open(
+            other_name, result_root=other_results, database_root=other_database
+        )
+    else:
+        other = ResultEntry.create(
+            other_name, result_root=other_results, database_root=other_database
+        )
+        other.new_point("P1")
+    other_scope = ("P1" if scope is None else None) if mismatch == "scope" else scope
+    if mismatch == "point":
+        other.new_point("P2")
+        other_scope = "P2"
+    storage = capture_storage(other.parameters(other_scope))
+    before = source_path(view).read_bytes()
+
+    with pytest.raises(ValueError, match="same bound document"):
+        BoundDocumentWritebackTarget(view, storage)
+
+    assert source_path(view).read_bytes() == before
+    assert entry.ledger.events() == other.ledger.events() == ()
 
 
 def evidence() -> WritebackEvidence:
@@ -147,7 +188,9 @@ def test_entry_writeback_commits_global_documents_without_changing_point(
     entry.parameters().add_component("Q1", kind="fake/drive/a", rate=5000.0)
     point = entry.new_point("independent")
     (entry.result_path / "library.yaml").unlink()
-    writer = EntryWritebackTarget(entry.parameters(), capture_entry_storage(entry))
+    writer = BoundDocumentWritebackTarget(
+        entry.parameters(), capture_storage(entry.parameters())
+    )
     result = apply_writeback(
         (
             ParameterWriteback("Q1.rate", 6100.0, {"note": "global edit"}),
@@ -191,7 +234,7 @@ def test_library_acceptance_keeps_audit_event_without_leaf_sources(
 def test_library_writeback_creates_missing_file_only_when_touched(
     point: ParameterView,
 ) -> None:
-    storage = capture_point_storage(point)
+    storage = capture_storage(point)
     path = source_path(point).parent / "library.yaml"
     path.unlink()
     writer = target(point)
@@ -402,7 +445,7 @@ def test_invalid_library_rolls_back_mixed_family_group_and_keeps_point_prefix(
     ]
     point.refresh()
     assert (point.Q1.rate, point.Q1.duration) == (5300.0, 12.0)
-    storage = capture_point_storage(point)
+    storage = capture_storage(point)
     library = ResultEntry.open(
         "entry",
         result_root=storage.result_path.parent,
@@ -416,8 +459,8 @@ def test_invalid_library_rolls_back_mixed_family_group_and_keeps_point_prefix(
 def test_record_numpy_producer_values_reach_ledger_and_record_history(
     point: ParameterView,
 ) -> None:
-    storage = capture_point_storage(point)
-    writer = PointWritebackTarget(point, storage)
+    storage = capture_storage(point)
+    writer = BoundDocumentWritebackTarget(point, storage)
     fit = {
         "stderr": np.float32(0.125),
         "counts": [np.int64(-9223372036854775808), np.uint64(18446744073709551615)],
@@ -498,8 +541,8 @@ def test_record_numpy_producer_values_reach_ledger_and_record_history(
 def test_record_invalid_producer_value_rejects_before_any_write(
     point: ParameterView, value: object
 ) -> None:
-    storage = capture_point_storage(point)
-    writer = PointWritebackTarget(point, storage)
+    storage = capture_storage(point)
+    writer = BoundDocumentWritebackTarget(point, storage)
     with pytest.raises(ValueError, match="strict JSON"):
         apply_writeback(
             (

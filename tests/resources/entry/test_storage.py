@@ -13,8 +13,7 @@ from zcu_tools.resources.entry import (
     ParameterView,
     ResultEntry,
     bind_run_outputs,
-    capture_entry_storage,
-    capture_point_storage,
+    capture_storage,
 )
 
 from tests._filesystem import symlink_or_skip
@@ -85,12 +84,7 @@ def test_recorded_output_binding_rejects_unsafe_names_without_writes(
     assert tuple(tmp_path.iterdir()) == ()
 
 
-def test_capture_point_storage_rejects_global_view(entry: ResultEntry) -> None:
-    with pytest.raises(ValueError, match="Point origin"):
-        capture_point_storage(entry.parameters())
-
-
-def test_capture_entry_storage_retains_cached_global_context_without_io(
+def test_capture_storage_retains_cached_global_context_without_io(
     entry: ResultEntry,
 ) -> None:
     entry.parameters().description = "cached global"
@@ -101,7 +95,7 @@ def test_capture_entry_storage_retains_cached_global_context_without_io(
     )
     newer.parameters().description = "published later"
     before = _published_state(entry.result_path)
-    captured = capture_entry_storage(entry)
+    captured = capture_storage(entry.parameters())
     assert captured.entry_name == "entry"
     assert captured.point is None
     assert captured.description == "cached global"
@@ -144,7 +138,7 @@ def test_capture_retains_cached_context_and_exact_entry_attribution(
     newer = entry.parameters("sweet")
     newer.description = "published later"
     before = tuple(sorted(tmp_path.rglob("*")))
-    captured = capture_point_storage(point)
+    captured = capture_storage(point)
 
     assert captured.entry_name == "entry"
     assert captured.point == "sweet"
@@ -194,7 +188,7 @@ def test_capture_keeps_resolved_roles_after_input_and_point_changes(
     assert entry.ledger.events() == ()
     before = _published_state(tmp_path)
 
-    captured = capture_point_storage(point, roles=resolved)
+    captured = capture_storage(point, roles=resolved)
 
     assert captured.roles == {"driver": "Q2", "sense": "R2"}
     assert _published_state(tmp_path) == before
@@ -204,29 +198,31 @@ def test_capture_keeps_resolved_roles_after_input_and_point_changes(
     point.Q2.sense = "R1"
     point.resolve(["driver", "sense"], focus="Q1")
     assert captured.roles == {"driver": "Q2", "sense": "R2"}
-    assert capture_point_storage(point, roles=resolved).roles == captured.roles
-    assert capture_point_storage(
+    assert capture_storage(point, roles=resolved).roles == captured.roles
+    assert capture_storage(
         point, roles=point.resolve(["driver", "sense"], focus="Q2")
     ).roles == {"driver": "Q2", "sense": "R1"}
 
 
+@pytest.mark.parametrize("scope", [None, "working"])
 @pytest.mark.parametrize("empty", [False, True])
-def test_capture_accepts_roles_from_another_handle_of_the_same_point(
-    entry: ResultEntry, tmp_path: Path, empty: bool
+def test_capture_accepts_roles_from_another_handle_of_the_same_document(
+    entry: ResultEntry, tmp_path: Path, empty: bool, scope: str | None
 ) -> None:
-    point = _role_point(entry)
+    _role_point(entry)
+    point = entry.parameters(scope)
     resolved = point.resolve([] if empty else ["driver", "sense"], focus="Q1")
     other = ResultEntry.open(
         "entry",
         result_root=entry.result_path.parent,
         database_root=entry.database_path.parent,
-    ).parameters("working")
+    ).parameters(scope)
     other.description = "other handle"
     other.Q1.sense = "R2"
     assert entry.ledger.events() == ()
     before = _published_state(tmp_path)
 
-    captured = capture_point_storage(other, roles=resolved)
+    captured = capture_storage(other, roles=resolved)
 
     assert captured.description == "other handle"
     assert captured.roles == ({} if empty else {"driver": "Q1", "sense": "R1"})
@@ -247,18 +243,20 @@ def test_role_capture_accepts_current_point_at_same_location_after_replacement(
     )
     current = _role_point(replacement)
 
-    captured = capture_point_storage(current, roles=resolved)
+    captured = capture_storage(current, roles=resolved)
 
     assert captured.entry_name == "entry"
     assert captured.roles == {"driver": "Q1", "sense": "R1"}
 
 
+@pytest.mark.parametrize("scope", [None, "working"])
 @pytest.mark.parametrize("empty", [False, True])
 @pytest.mark.parametrize("mismatch", ["point", "entry", "result-root", "database-root"])
 def test_capture_rejects_roles_from_another_owner_without_saving(
-    entry: ResultEntry, tmp_path: Path, empty: bool, mismatch: str
+    entry: ResultEntry, tmp_path: Path, empty: bool, mismatch: str, scope: str | None
 ) -> None:
-    point = _role_point(entry)
+    _role_point(entry)
+    point = entry.parameters(scope)
     resolved = point.resolve([] if empty else ["driver", "sense"], focus="Q1")
     if mismatch == "point":
         other = entry.new_point("other")
@@ -268,7 +266,8 @@ def test_capture_rejects_roles_from_another_owner_without_saving(
             result_root=entry.result_path.parent,
             database_root=entry.database_path.parent,
         )
-        other = _role_point(other_entry)
+        _role_point(other_entry)
+        other = other_entry.parameters(scope)
     else:
         result_root = entry.result_path.parent
         database_root = entry.database_path.parent
@@ -281,12 +280,12 @@ def test_capture_rejects_roles_from_another_owner_without_saving(
         other_entry = ResultEntry.open(
             "entry", result_root=result_root, database_root=database_root
         )
-        other = other_entry.parameters("working")
+        other = other_entry.parameters(scope)
     assert entry.ledger.events() == ()
     before = _published_state(tmp_path)
 
     with pytest.raises(ValueError, match="same bound point"):
-        capture_point_storage(other, roles=resolved)
+        capture_storage(other, roles=resolved)
 
     assert _published_state(tmp_path) == before
     assert entry.ledger.events() == ()
