@@ -12,6 +12,7 @@ from zcu_tools.simulate.evolution import (
     Engine,
     EvolutionResult,
     PathDiagnostics,
+    ReferenceResult,
     reference_key,
 )
 
@@ -48,7 +49,7 @@ def test_observer_keeps_first_slow_sample_when_the_next_evolve_fails() -> None:
     with pytest.raises(RuntimeError, match="second evolve failed"):
         measure_family(
             session,
-            None,
+            ReferenceResult(density, 0.0),
             wall_clock=lambda: float(next(ticks)) * 61,
             cpu_clock=lambda: 0.0,
         )

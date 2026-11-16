@@ -58,8 +58,9 @@ class Sample:
     """One timed evolve, inspected after the clocks stop.
 
     wall_seconds and cpu_seconds are elapsed wall/process CPU seconds.
-    density_error is the maximum absolute complex density difference to oracle,
-    or None when measure_family receives reference=None for timing/path only.
+    density_error is the maximum absolute complex density difference to oracle.
+    None marks missing accuracy data; available measured rows cannot use it in
+    comparisons. measure_family always supplies an independent reference error.
     paths maps executed family names to segment counts.
     """
 

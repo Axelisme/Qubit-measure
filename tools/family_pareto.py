@@ -1,5 +1,7 @@
 """Measure Engine.evolve families, not program.acquire latency."""
 
+from __future__ import annotations
+
 import argparse
 import logging
 import os
@@ -59,6 +61,8 @@ from tools.family_pareto_storage import (
     scene_cache_directory,
     scene_index_paths,
 )
+from tools.simulator_measurement import Sample as MeasurementSample
+from tools.simulator_measurement import Session, measure_modes
 
 
 @dataclass(frozen=True)
@@ -132,30 +136,28 @@ class EngineSession:
 
     evolve: Callable[[], EvolutionResult]
     clear_history: Callable[[], None]
-    on_sample: Callable[[str, "Sample | None"], None] | None = None
+    on_sample: Callable[[str, Sample | None], None] | None = None
     """Optional untimed observer after each sample; None sample marks a skipped mode."""
     initial_density: NDArray[np.complex128] | None = None
-    """DC initial density (M,M); None is timing-only and skips no-evolution checks."""
+    """DC initial density (M,M); None skips only the no-evolution check."""
 
 
 SessionOpener = Callable[[], AbstractContextManager[EngineSession]]
 
 
-def _timed_sample(
+@dataclass(frozen=True)
+class _FamilyObservation:
+    result: EvolutionResult
+    density_error: float
+
+
+def _inspect_evolution(
     session: EngineSession,
-    reference: ReferenceResult | None,
-    wall_clock: Callable[[], float],
-    cpu_clock: Callable[[], float],
-) -> Sample:
-    wall, cpu = wall_clock(), cpu_clock()
-    result = session.evolve()
-    cpu_elapsed, wall_elapsed = cpu_clock() - cpu, wall_clock() - wall
-    oracle_error = (
-        None
-        if reference is None
-        else density_error(result.densities, reference.density)
-    )
-    if reference is not None and session.initial_density is not None:
+    reference: ReferenceResult,
+    result: EvolutionResult,
+) -> _FamilyObservation:
+    oracle_error = density_error(result.densities, reference.density)
+    if session.initial_density is not None:
         for point, actual, expected in zip(
             result.points, result.densities, reference.density, strict=True
         ):
@@ -166,10 +168,15 @@ def _timed_sample(
                     f"point {point}: result moved {result_motion:.1e} from the initial "
                     f"density while the reference moved {reference_motion:.3g}"
                 )
+    return _FamilyObservation(result, oracle_error)
+
+
+def _family_sample(measured: MeasurementSample[_FamilyObservation]) -> Sample:
+    result = measured.observation.result
     return Sample(
-        wall_elapsed,
-        cpu_elapsed,
-        oracle_error,
+        measured.wall_seconds,
+        measured.process_seconds,
+        measured.observation.density_error,
         dict(result.paths.segments_by_kernel),
         routing=dict(result.paths.routing),
         family_cpu_s={
@@ -178,70 +185,63 @@ def _timed_sample(
     )
 
 
-def _measured_mode(name: str, samples: list[Sample]) -> ModeResult:
-    return ModeResult(
-        name,
-        samples,
-        median(s.wall_seconds for s in samples),
-        median(s.cpu_seconds for s in samples),
-    )
-
-
 def measure_family(
     open_session: SessionOpener,
-    reference: ReferenceResult | None,
+    reference: ReferenceResult,
     *,
     wall_clock: Callable[[], float] = perf_counter,
     cpu_clock: Callable[[], float] = process_time,
 ) -> list[ModeResult]:
-    """Time public evolves only, with fresh sessions and an optional real oracle.
+    """Measure prepared Engine sessions against a required independent reference.
 
-    The first empty-history evolve is a sample, never a separate probe. Above
-    60 wall seconds retain it, immediately time one more evolve in that same
-    history, and leave warm_clear_history unmeasured with explicit None times.
-    Otherwise collect five samples per mode, with two untimed warmups before
-    each warm mode. Setup, cleanup, history clearing and inspection are untimed.
-    With a reference and session.initial_density, a point staying within 1e-9
-    of its initial density while the reference moves beyond ACCURACY_LIMIT
-    raises RuntimeError before recording the sample. This inspection is untimed.
-    No process or disk-cache reset occurs here. Failures always propagate.
+    open_session returns a fresh owned EngineSession context per request; its
+    context releases the source and Engine even on failure. reference contains
+    density for the same ordered points. Floating-point second clocks default
+    to perf_counter and whole-process process_time, and may validly read zero.
+    The shared measure_modes owner controls sessions, warmups, history and clocks.
+    It retains five samples per mode, or two total for a first sample above 60s.
+    Density error, telemetry conversion and on_sample callbacks run untimed.
+    With initial_density, a point staying within 1e-9 of that density while the
+    reference moves beyond ACCURACY_LIMIT raises RuntimeError before recording.
+    All setup/evolve/inspection/observer/cleanup failures propagate. Completed
+    observer notifications remain available, but no partial list is returned.
+    No process or disk-cache reset occurs here.
     """
 
-    def sample(session: EngineSession, mode: str) -> Sample:
-        measured = _timed_sample(session, reference, wall_clock, cpu_clock)
-        if session.on_sample is not None:
-            session.on_sample(mode, measured)
-        return measured
+    @contextmanager
+    def prepared_session() -> Generator[Session[EvolutionResult, _FamilyObservation]]:
+        with open_session() as session:
 
-    with open_session() as session:
-        first = sample(session, "first_evolve")
-        if first.wall_seconds > 60:
-            if session.on_sample is not None:
-                session.on_sample("warm_clear_history", None)
-            retained = sample(session, "warm_retain_history")
-            return [
-                _measured_mode("first_evolve", [first]),
-                ModeResult(
-                    "warm_clear_history", [], None, None, "slow family not measured"
+            def observed(
+                mode: str, measured: MeasurementSample[_FamilyObservation] | None
+            ) -> None:
+                if session.on_sample is not None:
+                    session.on_sample(
+                        mode, None if measured is None else _family_sample(measured)
+                    )
+
+            yield Session(
+                lambda _telemetry: session.evolve(),
+                lambda result, _telemetry: _inspect_evolution(
+                    session, reference, result
                 ),
-                _measured_mode("warm_retain_history", [retained]),
-            ]
-    samples = [first]
-    for _ in range(4):
-        with open_session() as session:
-            samples.append(sample(session, "first_evolve"))
-    modes = [_measured_mode("first_evolve", samples)]
-    for name in ("warm_clear_history", "warm_retain_history"):
-        with open_session() as session:
-            session.evolve()
-            session.evolve()
-            samples = []
-            for _ in range(5):
-                if name == "warm_clear_history":
-                    session.clear_history()
-                samples.append(sample(session, name))
-        modes.append(_measured_mode(name, samples))
-    return modes
+                session.clear_history,
+                observed,
+            )
+
+    measured_modes = measure_modes(
+        prepared_session, wall_clock=wall_clock, process_clock=cpu_clock
+    )
+    return [
+        ModeResult(
+            mode.mode,
+            [_family_sample(sample) for sample in mode.samples],
+            median(s.wall_seconds for s in mode.samples) if mode.samples else None,
+            median(s.process_seconds for s in mode.samples) if mode.samples else None,
+            mode.unmeasured_reason,
+        )
+        for mode in measured_modes
+    ]
 
 
 def _policy_whitelist(item: Input, family: str) -> tuple[str, ...] | None:

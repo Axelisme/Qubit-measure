@@ -54,10 +54,7 @@ from tools.family_pareto_results import (
 )
 
 
-@pytest.mark.parametrize("measure_errors", [True, False])
-def test_three_modes_time_five_samples_and_exclude_setup_warmup_clear(
-    measure_errors: bool,
-) -> None:
+def test_three_modes_time_five_samples_and_exclude_setup_warmup_clear() -> None:
     visits: list[list[int]] = []
     clock = count()
     density = np.eye(2, dtype=np.complex128)[None] / 2
@@ -91,7 +88,7 @@ def test_three_modes_time_five_samples_and_exclude_setup_warmup_clear(
 
     result = measure_family(
         session,
-        ReferenceResult(density, 0.0) if measure_errors else None,
+        ReferenceResult(density, 0.0),
         wall_clock=lambda: float(next(clock)),
         cpu_clock=lambda: float(next(clock)),
     )
@@ -114,8 +111,7 @@ def test_three_modes_time_five_samples_and_exclude_setup_warmup_clear(
         assert mode.wall_median == 3.0
         assert mode.cpu_median == 1.0
         assert all(sample.paths == {"t4": 1} for sample in mode.samples)
-        expected_error = 0 if measure_errors else None
-        assert all(sample.density_error == expected_error for sample in mode.samples)
+        assert all(sample.density_error == 0 for sample in mode.samples)
 
 
 @pytest.mark.parametrize("seconds", [60.0, 61.0])
@@ -149,7 +145,7 @@ def test_slow_family_uses_two_evolves_in_the_same_history(seconds: float) -> Non
 
     modes = measure_family(
         session,
-        None,
+        ReferenceResult(density, 0.0),
         wall_clock=lambda: float(next(wall_ticks)) * seconds,
         cpu_clock=lambda: 0.0,
     )

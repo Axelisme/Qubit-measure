@@ -160,6 +160,47 @@ Kernel 量測在 `Engine.evolve` 上用 `families=` 固定候選，輸入只有�
 整體耗時改用多段 `TimelineBatch` 在 `Engine.evolve` 的序列層量測，不經 program compilation 或 ADC sampling。
 現有的 family 誤差與耗時量表見下節。
 
+## Shared simulator measurement
+
+`tools.simulator_measurement` owns the session modes and wall/process clocks.
+Callers provide a context factory yielding a prepared `Session(invoke, inspect,
+clear_history, on_sample=None)`. `invoke(telemetry)` performs one
+`Engine.evolve`. `inspect(result, telemetry)` returns caller-defined diagnostics.
+The context releases its Engine and source on normal exit and on failure.
+The owner does not select scenes, load references or construct models.
+
+For serial requests, use `SampleRunner(open_prepared_session,
+mode="warm_clear_history", warmups=2)` as a context manager, then call
+`runner.sample(telemetry=True)`. The factory must open a fresh prepared session
+on each call. Mode `first` opens and closes one session per sample without
+warmup. Both warm modes retain their session and discard the initial warmups.
+`warm_clear_history` clears history before each sample.
+`warm_retain_history` keeps it. A request with `empty_history=True` clears once
+for a diagnostic without rewarming or changing later requests' policy.
+`close()` releases retained resources; a later sample opens and warms anew.
+
+`measure_sample` times one already-prepared session without opening, warming,
+clearing or closing it. It reads each clock immediately around one invocation.
+Setup, warmup, history clearing, reference I/O, inspection, telemetry conversion
+and sample observers stay outside both timers.
+`Sample.wall_seconds` and `Sample.process_seconds` are finite, non-negative
+elapsed seconds. Zero is a valid reading when a clock does not advance within
+its resolution. Negative values, NaN and infinity raise Pydantic ValidationError,
+a ValueError subclass. The owner records zero unchanged, without epsilon,
+dropping or resampling. Whole-process CPU may exceed wall time.
+These readings do not establish speed differences below clock resolution.
+`Sample.observation` contains the untimed inspection result.
+
+`measure_modes` collects the family table's five samples per mode, including
+its slow-family exception, and returns `ModeMeasurements` with samples and an
+optional unmeasured reason. `family_pareto.measure_family` adapts
+`EngineSession` to this owner, requires a `ReferenceResult`, and converts
+observations to the existing report schema. Selection, whole-batch reference
+preflight and the check-only exit remain in the consumer.
+Neither API resets the process or Numba disk cache.
+Cross-worktree comparisons require the same committed measurement tools on
+both sides. This module does not provide a controller or ABBA statistics.
+
 ## Engine family Pareto table
 
 `family_pareto.py` compares every family on the same complete physical inputs.
@@ -426,8 +467,9 @@ write failures return nonzero and may leave a partial destination file.
 and `main(argv)` are importable. Comparators pair modes by name, not list order;
 every available pinned row must have all three unique modes and measured sample
 errors. Missing mode/error information raises ValueError. Unavailable and default
-rows are not competitors. `measure_family` owns the Engine-only timing protocol.
-Pareto policies always supply a real reference. Tests use controlled clocks and small
+rows are not competitors. `measure_family` delegates the Engine-only timing protocol
+to `simulator_measurement.measure_modes`. It requires a real reference.
+Tests use controlled clocks and small
 collaborators; the complete matrix runs outside pytest through the exclusive runner.
 
 ### Fixed scenarios, companions and reference cache

@@ -256,11 +256,18 @@ Producer 自持具名 `Scene`，不依賴 tests 的案例型別或清單。獨�
 `tools.family_pareto_results` 持有結果型別、誤差、資格與 dominance 規則。
 Runner、report 與 summary 讀同一個 owner，不由 report 反向 import 執行入口。
 選取、reference preflight 與 check 的結束點留在 caller，計時協定只消費已備好的 session。
-這個分工不表示量測計時已切換到新的共同 owner。
+`tools.simulator_measurement` 是 mode transition、暖機、history 策略與 wall/process clock 的共同 owner。
+它只接 caller 準備好的 session callbacks，不 import 場景 producer、solver 或 tests。
+`family_pareto.measure_family` 必須提供獨立 reference，並將 owner 的 observations 轉回既有量表 schema。
+計時只包一次 `Engine.evolve`，建構、history reset、暖機、誤差與 telemetry 整理都在 timer 外。
+Elapsed 秒數須有限且非負。Clock 未在解析度內前進時，0 是合法讀數，原樣記錄，不補 epsilon 或重取。
+負值、NaN 與 infinity 在 sample 建構時失敗，process CPU 不必小於 wall。
+共同 owner 不處理跨 worktree 協定或統計，兩側比較須先含相同 committed 工具。
+取捨與介面收窄見[共用計時討論](../discussions/2026-11-16-shared-simulator-measurement.md)。
 
 `family_pareto.select_inputs` 是公開來源／身份接縫，回傳工具的 `Input` 與原 `FrozenRecord`。
 它用 `simulate.evolution.digest(record.metadata)` 算 metadata hash，不另寫 hash 公式。
-目前接縫暫讀現行 tools/data 來源，只供 integration，後續存放遷移只替換來源與用法文件。
+接縫經公開 codec 讀入庫 index 與 repo 共用 scene cache，存放位置不參與 record 身份。
 量測 consumer 不再寫 records 副本，也不保留舊 freeze helper 或 producer import。
 計時 owner 只接已備好的 session；paired caller 透過這個接縫取得同一組每筆身份。
 
