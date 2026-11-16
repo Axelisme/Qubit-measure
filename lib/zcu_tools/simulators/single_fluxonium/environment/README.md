@@ -1,6 +1,6 @@
 # Single-fluxonium acquisition
 
-**Last updated:** 2026-11-16，caller-selected worker width
+**Last updated:** 2026-11-16，last-state projection sharing and memory budget
 
 **Readers:** framework-dev, lab-author, agent. Compose complete fluxonium timelines with one physical readout cavity.
 
@@ -84,8 +84,12 @@ when flux has not returned to DC.
 
 `SingleFluxoniumSource.prepare` projects each density into rank-1 outcomes in the
 retained DC energy basis. It keeps each outcome's full history across later
-reads and continues from that read's start through `Engine.evolve`. ADC CTMC
-jumps during an earlier read affect its IQ only, not later density evolution.
+reads. Outcomes store only weights and chronological state histories. Within
+one plan and span, densities are indexed by the last projected DC state, so at
+most `levels` densities continue through `Engine.evolve`. The next projection
+computes probabilities once per last state. Candidate weights keep parent/state
+order, and pruning precedes allocation of surviving histories. ADC CTMC jumps
+during an earlier read affect its IQ only, not later density evolution.
 This approximation does not group outcomes by IQ distinguishability and does
 not add MIST or active reset. Within one preparation, templates must have equal
 projective counts and per-event grid counts. Conflicts raise `ValueError` naming
@@ -101,6 +105,24 @@ original distribution, and evolution call count. Summing a point's discarded
 weights gives its cumulative loss without recounting earlier pruning.
 Span reuse digests include continuation densities and absolute time bounds.
 Every span must pass the engine's routing validation before preparation reuse.
+`projection.PROJECTION_MEMORY_BUDGET_BYTES` fixes the projection-array allowance
+at 2 GiB on every machine. Before allocation, the runner estimates shared
+densities, candidate weight matrices and masks, surviving histories, retained
+plans, diagnostics, and padded event populations. The estimate includes the
+second copy owned by immutable `ProjectionReadout` and validation scratch.
+With pruning disabled, the exact exponential outcome count is checked before
+evolution. With pruning enabled, checks use actual counts at each split and
+before constructing the readout. Over-budget preparation raises `ValueError`
+with `projection memory budget exceeded`, estimated and budget bytes, levels,
+points, outcomes and event count. Reduce levels or points per batch, or increase
+`projection_prune_floor` to discard more low-weight histories. No config or GUI
+field changes this budget. The allowance leaves 6 GiB under an 8 GiB process
+cap for other owners and allocator overhead. It does not bound engine or ADC
+workspace, or guarantee a total process RSS limit. Sharing stays within the
+preparation lifetime defined by ADR-0078. Six-fluxonium sources use this same
+runner independently; the allowance is per source preparation, not six-source
+aggregate admission.
+
 Without projective reads the source keeps its terminal-only evolution and ADC
 sampling path, including RNG consumption.
 
