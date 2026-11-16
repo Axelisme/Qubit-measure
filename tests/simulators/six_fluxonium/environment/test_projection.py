@@ -23,6 +23,7 @@ from zcu_tools.experiment.simulation import SimulationEnvironment
 from zcu_tools.program.v2 import TimelineBuilder
 from zcu_tools.program.v2.modules.readout import MuxReadoutCfg
 from zcu_tools.program.v2.simulation import IntegratedRound
+from zcu_tools.simulate import adc
 from zcu_tools.simulators.six_fluxonium.config import parse_six_fluxonium
 from zcu_tools.simulators.six_fluxonium.environment import six_fluxonium
 from zcu_tools.simulators.six_fluxonium.environment.routing import route_request
@@ -148,8 +149,11 @@ def test_two_cavity_heralds_keep_conditional_and_independent_shot_histories(
         facts = single.model_facts(single.snapshot())
         transition = np.eye(2)
         expected = np.real(np.diag(facts.source.initial_density))[:, None] * transition
+        readout = prepared.raw.readout
+        if not isinstance(readout, adc.ProjectionChain):
+            raise AssertionError("projective preparation must return a chain")
         np.testing.assert_allclose(
-            prepared.raw.readout.weights.reshape(-1, 2)[0],
+            readout.initial,
             expected.sum(axis=1),
             atol=1e-8,
         )
@@ -180,9 +184,11 @@ def test_two_cavity_heralds_keep_conditional_and_independent_shot_histories(
             ),
             axis=-1,
         )
-        observed_joint = np.zeros((2, 2), dtype=np.int64)
-        np.add.at(observed_joint, (bins[0], bins[1]), result.statistics.state_counts)
-        np.testing.assert_allclose(observed_joint / request.reps, expected, atol=0.025)
+        for event, marginal in enumerate((expected.sum(axis=1), expected.sum(axis=0))):
+            observed = np.bincount(
+                bins[event], weights=result.statistics.state_counts, minlength=2
+            )
+            np.testing.assert_allclose(observed / request.reps, marginal, atol=0.025)
     first, second = selected_ground
     assert np.mean(first & second) == pytest.approx(
         np.mean(first) * np.mean(second), abs=0.025
@@ -254,7 +260,10 @@ def test_partial_adc_observation_shares_terminal_paths_in_raw_integrated_and_dec
     assert tuple(
         channel.conditional.event_indices for channel in prepared.channels
     ) == ((0, 1), (1,))
-    assert len(prepared.raw.readout.populations) == 2
+    readout = prepared.raw.readout
+    if not isinstance(readout, adc.ProjectionChain):
+        raise AssertionError("projective preparation must return a chain")
+    assert len(readout.transitions) == 1
     a, b = traces.channels
     assert a.iq.shape[-3] == 2 and b.iq.shape[-3] == 1
     np.testing.assert_array_equal(a.iq[..., 1, :, :], b.iq[..., 0, :, :])
