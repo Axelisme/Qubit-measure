@@ -801,7 +801,7 @@ def run_table(
     *,
     reference_solver: Callable[[ModelSource, TimelineBatch], ReferenceResult]
     | None = None,
-    reference_cache: Path | ReferenceCache | None = None,
+    reference_cache: ReferenceCache | None = None,
     policy_runner: Callable[
         [Input, str, ReferenceResult], FamilyResult
     ] = measure_policy,
@@ -821,11 +821,7 @@ def run_table(
     separately from dominance. progress receives untimed policy/sample events,
     including explicit skipped modes, before later failures can discard them.
     """
-    cache = (
-        reference_cache
-        if isinstance(reference_cache, ReferenceCache)
-        else ReferenceCache(reference_cache)
-    )
+    cache = ReferenceCache(None) if reference_cache is None else reference_cache
     if cache.only and reference_solver is not None:
         raise ValueError("cache-only timing cannot use an injected reference solver")
     references: dict[str, ReferenceResult] = {}
