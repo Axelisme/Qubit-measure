@@ -5,14 +5,14 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from zcu_tools.simulate.evolution import ModelSource, TimelineBatch, reference_key
-
-from tests.simulate.evolution.contract.reference import (
+from zcu_tools.simulate.evolution import (
     ReferenceResult,
-    SolverTolerances,
+    load_reference,
+    reference_key,
+    write_reference,
 )
+
 from tools.dop853_segment import Dop853Coordinates, dop853_segment_input
-from tools.family_pareto_reference import solve_reference
 
 
 @pytest.mark.parametrize("envelope", ["gaussian", "sampled"])
@@ -65,17 +65,6 @@ def test_dop853_segment_rejects_dimension_above_native_cutoff() -> None:
 def test_segment_reference_key_predicts_cache_hit_and_separates_repeats_and_points(
     tmp_path: Path,
 ) -> None:
-    def solver(
-        source: ModelSource,
-        batch: TimelineBatch,
-        *,
-        coarse: SolverTolerances,
-        fine: SolverTolerances,
-    ) -> ReferenceResult:
-        return ReferenceResult(
-            np.tile(source.initial_density, (len(batch.points), 1, 1)), 1e-9
-        )
-
     keys = []
     for coordinates in (
         Dop853Coordinates(levels=3),
@@ -87,11 +76,16 @@ def test_segment_reference_key_predicts_cache_hit_and_separates_repeats_and_poin
             key = reference_key(case.source, case.batch)
             keys.append(key)
             with pytest.raises(FileNotFoundError, match=key):
-                solve_reference(case, cache_dir=tmp_path, cache_only=True)
-            expected = solve_reference(case, solver=solver, cache_dir=tmp_path)
-            assert (tmp_path / f"{key}.npz").exists()
+                load_reference(tmp_path, case.source, case.batch)
+            # Synthetic codec payload only; no reference integration is needed.
+            expected = ReferenceResult(
+                np.tile(case.source.initial_density, (len(case.batch.points), 1, 1)),
+                1e-9,
+            )
+            assert write_reference(tmp_path, case.source, case.batch, expected) == key
         with closing((fresh := item.build()).source):
             assert reference_key(fresh.source, fresh.batch) == key
-            actual = solve_reference(fresh, cache_dir=tmp_path, cache_only=True)
+            actual = load_reference(tmp_path, fresh.source, fresh.batch)
             np.testing.assert_array_equal(actual.density, expected.density)
+            assert actual.convergence_error == expected.convergence_error
     assert len(set(keys)) == 3
