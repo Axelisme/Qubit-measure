@@ -251,8 +251,10 @@ def multitone_phase_case(
 ) -> AccuracyCase:
     """Build repeated 4 ns dual-tone gates on a coherent three-level model.
 
-    Gaussian and flat-top samples use distinct ports with noncircular,
-    cross-coupled quadratures. Every pulse shares envelope content and offsets;
+    Gaussian, flat-top, arbitrary real samples and Gaussian-plus-derivative
+    DRAG use distinct ports with noncircular, cross-coupled quadratures.
+    constant_sampled uses the arbitrary samples on one port and a constant
+    envelope on the other. Every pulse shares envelope content and offsets;
     varying_phases changes both common-origin carrier phases independently.
     A nonzero bath exercises the four-way secular split on full densities.
     """
@@ -262,6 +264,11 @@ def multitone_phase_case(
         samples = np.exp(-0.5 * ((times - 2) / 0.8) ** 2)
     elif shape == "flat_top":
         samples = np.minimum(1.0, np.minimum(times, duration - times))
+    elif shape in ("sampled", "constant_sampled"):
+        samples = np.array([0.12, 0.8, 0.35, 1.0, 0.62, 0.9, 0.25, 0.55, 0.08])
+    elif shape == "drag":
+        gaussian = np.exp(-0.5 * ((times - 2) / 0.8) ** 2)
+        samples = gaussian * (1 - 0.6j * (times - 2) / 0.8**2)
     else:
         raise ValueError(f"unknown gate shape: {shape}")
     envelope = EnvelopeSpec("sampled", samples.astype(complex), times)
@@ -288,7 +295,9 @@ def multitone_phase_case(
                 phase += pulse * (0.739, -1.117)[slot]
             track = drive_track(
                 timeline(1, duration),
-                envelope,
+                EnvelopeSpec("constant")
+                if shape == "constant_sampled" and slot == 0
+                else envelope,
                 frequency=frequency,
                 gain=gain * (1 if slot == 0 else -0.8),
                 port=("a", "b")[slot],
