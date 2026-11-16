@@ -24,19 +24,13 @@ from zcu_tools.resources.document_names import (
     LIBRARY_FILENAME,
     PARAMETERS_FILENAME,
 )
-from zcu_tools.resources.document_store import DocumentRevision, DocumentStore
+from zcu_tools.resources.document_store import DocumentStore
 from zcu_tools.resources.parameter_metadata import validate_parameter_header
 from zcu_tools.resources.record_table import JsonlRecordTable
 
 from . import _parameter_origin
 from ._path_segments import validate_path_segment
-from .aliases import (
-    AliasReadResult,
-    EntryAliases,
-    load_entry_aliases_with_revision,
-    read_entry_aliases,
-    save_entry_aliases,
-)
+from .aliases import AliasFile
 from .errors import DestinationExistsError, MissingPointError
 from .ledger import RecordsLedger
 from .ledger_models import (
@@ -248,65 +242,21 @@ class ResultEntry:
             raise ValueError(f"{path}: dispersive directory escapes its entry")
         return path
 
-    def load_aliases(self, *, point: str | None = None) -> EntryAliases:
-        """Read global aliases, or one existing point's aliases when point is set.
+    def aliases(self, point: str | None = None) -> AliasFile:
+        """Observe only global aliases, or the safe single-segment point's file.
 
-        point=None selects <entry>/aliases.yaml. Otherwise point is a safe
-        single-segment label selecting <entry>/points/<point>/aliases.yaml;
-        invalid labels raise ValueError. Only aliases.yaml is read; neither
-        parameters.yaml nor library.yaml needs to exist or is parsed or changed.
-        A missing alias file returns an empty EntryAliases, without copying or
-        falling back to global. Preserve order, empty bindings and raw $ links.
-        Accept zcu.aliases 1.x; header/schema/YAML and I/O errors propagate.
-        No component lookup or writes occur. Syntax validation belongs to the
-        caller's alias table owner.
+        Missing files yield an empty cached observation, without creating files.
+        Format errors are deferred in read().error; other I/O errors raise.
+        Neither parameters nor library is read. Point save requires its
+        parameters.yaml to exist. Session syntax admission belongs to the caller.
         """
-        aliases, _ = self.load_aliases_with_revision(point=point)
-        return aliases
-
-    def load_aliases_with_revision(
-        self, *, point: str | None = None
-    ) -> tuple[EntryAliases, DocumentRevision]:
-        """Read aliases and their exact validated byte revision together.
-
-        Selection and failures follow load_aliases. A missing aliases file
-        returns an empty table with revision=None, never a global fallback.
-        """
-        aliases, revision = load_entry_aliases_with_revision(self._aliases_path(point))
-        return (EntryAliases(aliases={}) if aliases is None else aliases), revision
-
-    def read_aliases(self, *, point: str | None = None) -> AliasReadResult:
-        """Observe aliases once with their raw revision and deferred content error.
-
-        Selection follows load_aliases. The result retains invalid bytes' hash
-        and original error, not a valid empty fallback. Missing files are empty
-        with revision=None; other filesystem errors propagate. No writes occur.
-        """
-        return read_entry_aliases(self._aliases_path(point))
-
-    def save_aliases(
-        self, aliases: EntryAliases, *, point: str | None = None
-    ) -> DocumentRevision:
-        """Atomically replace global or point aliases with the named raw table.
-
-        aliases is an EntryAliases containing ordered scalar/list bindings, not
-        resolved names. point=None selects global; a safe single-segment point
-        label selects only that point's aliases.yaml. Invalid labels raise
-        ValueError; missing parameters.yaml raises FileNotFoundError. library.yaml
-        need not exist. Neither parameter document is parsed or changed.
-        Write zcu.aliases 1.0 after strict string validation, using sibling-temp
-        replacement. Schema,
-        YAML and I/O errors propagate; failed replacement retains the old file.
-        Other alias tables, parameters, library, ledger and preferences do not
-        change. Return the exact written bytes' revision. No multiwriter merge
-        or crash guarantee is offered.
-        """
-        destination = self._aliases_path(point)
-        if point is not None:
-            source = destination.parent / PARAMETERS_FILENAME
-            if not source.is_file():
-                raise FileNotFoundError(source)
-        return save_entry_aliases(destination, aliases)
+        source = self._aliases_path(point)
+        return AliasFile(
+            source,
+            required_parameters=source.with_name(PARAMETERS_FILENAME)
+            if point is not None
+            else None,
+        )
 
     def _aliases_path(self, point: str | None) -> Path:
         if point is None:

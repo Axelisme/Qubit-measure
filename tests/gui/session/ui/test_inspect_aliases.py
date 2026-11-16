@@ -296,7 +296,7 @@ def test_clean_alias_draft_follows_selected_point(entry_session) -> None:
     entry = entry_session.entry
     assert entry is not None
     entry.new_point("other")
-    entry.save_aliases(EntryAliases(aliases={"other_alias": "R2"}), point="other")
+    entry.aliases(point="other").save(EntryAliases(aliases={"other_alias": "R2"}))
     page = _aliases_page(_open(entry_session))
     entry_session.control.use_point(PointUseRequest("other"))
     assert _shown_rows(_table(page)) == [("other_alias", "R2")]

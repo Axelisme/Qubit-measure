@@ -77,9 +77,7 @@ def test_first_edit_creates_absent_library(
     with library.edit() as draft:
         draft.set_waveform("Q1.waveforms.base", ConstWaveformCfg(length=0.05))
     assert document_revision(library).revision == sha256(path.read_bytes()).hexdigest()
-    assert entry.library(label).snapshot().waveform_keys() == (
-        "Q1.waveforms.base",
-    )
+    assert entry.library(label).snapshot().waveform_keys() == ("Q1.waveforms.base",)
 
 
 @pytest.mark.parametrize("label", [None, "portable"])
@@ -153,13 +151,9 @@ def test_new_point_inherits_global_library_independently(
         result_root=entry.result_path.parent,
         database_root=entry.database_path.parent,
     )
-    assert reopened.library().snapshot().waveform_keys() == (
-        "Q1.waveforms.base",
-    )
+    assert reopened.library().snapshot().waveform_keys() == ("Q1.waveforms.base",)
     entry.new_point("a")
-    assert entry.library("a").snapshot().waveform_keys() == (
-        "Q1.waveforms.base",
-    )
+    assert entry.library("a").snapshot().waveform_keys() == ("Q1.waveforms.base",)
     with library.edit() as draft:
         draft.set_waveform("Q1.waveforms.base", ConstWaveformCfg(length=0.1))
     assert entry.library("a").snapshot().waveform_spec(
@@ -173,7 +167,9 @@ def test_library_opener_reads_only_its_selected_file(
 ) -> None:
     if point is not None:
         entry.new_point(point)
-    directory = entry.result_path if point is None else entry.result_path / "points" / point
+    directory = (
+        entry.result_path if point is None else entry.result_path / "points" / point
+    )
     (directory / "parameters.yaml").write_text("invalid: [", encoding="utf-8")
     (directory / "aliases.yaml").write_text("invalid: [", encoding="utf-8")
 
@@ -207,9 +203,7 @@ def test_point_local_library_uses_entry_scope_without_reading_point_or_assets(
     copied = reopened.snapshot().module_spec("Q1.pulses.pi")
     assert isinstance(copied, PulseSpec)
     assert copied.waveform == "Q1.waveforms.missing"
-    assert (
-        entry.library("b", assets=library_assets).snapshot().module_keys() == ()
-    )
+    assert entry.library("b", assets=library_assets).snapshot().module_keys() == ()
     assert (source / "parameters.yaml").read_text(encoding="utf-8") == "invalid: ["
 
 

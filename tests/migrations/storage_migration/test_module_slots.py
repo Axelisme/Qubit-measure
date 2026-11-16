@@ -248,7 +248,4 @@ def test_slots_are_not_published_when_library_commit_fails(
     entry = _entry(request)
     view = entry.parameters() if point is None else entry.parameters(point)
     assert document_value(snapshot(view), "C1.module.chosen") == "C1.pulses.pi"
-    assert (
-        entry.library(point).snapshot().module_spec("C1.pulses.pi").type
-        == "pulse"
-    )
+    assert entry.library(point).snapshot().module_spec("C1.pulses.pi").type == "pulse"

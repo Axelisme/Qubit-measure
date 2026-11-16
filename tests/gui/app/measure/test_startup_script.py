@@ -351,7 +351,9 @@ def test_startup_persists_aliases_in_the_active_document_set(
             result_root=tmp_path / "result",
             database_root=tmp_path / "Database",
         )
-        assert entry.load_aliases(point=point).aliases == {"qubit": "Q1"}
+        assert entry.aliases(point=point).read().require_valid().aliases == {
+            "qubit": "Q1"
+        }
         ctrl.setup_control.open_entry(EntryRequest("synthetic"))
         ctrl.setup_control.open_entry(EntryRequest("created"))
         if point is not None:

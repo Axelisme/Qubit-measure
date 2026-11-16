@@ -119,7 +119,7 @@ def test_clone_copies_values_without_importing_library_events(
     from zcu_tools.resources.entry.aliases import EntryAliases
 
     aliases = EntryAliases(aliases={"drive": "Q1", "copy": "$drive"})
-    foreign.save_aliases(aliases, point="source")
+    foreign.aliases(point="source").save(aliases)
     source_document = write_source_library(foreign, event)
     source_file = foreign.result_path / "points/source/library.yaml"
     before = source_file.read_bytes()
@@ -140,7 +140,7 @@ def test_clone_copies_values_without_importing_library_events(
     assert isinstance(spec, PulseSpec)
     assert spec.waveform == "Q1.waveforms.missing"
     assert cloned.meta("Q1.rate") == point.meta("Q1.rate")
-    assert destination.load_aliases(point="library-copy") == aliases
+    assert destination.aliases(point="library-copy").read().require_valid() == aliases
     assert len(destination.ledger.events()) == (1 if same_entry else 0)
     assert source_file.read_bytes() == before
 

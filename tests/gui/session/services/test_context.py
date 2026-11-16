@@ -65,7 +65,7 @@ def test_new_rejects_incompatible_mode_and_source_before_reads(
 def test_new_empty_does_not_inherit_global_values(
     rich_entry: ResultEntry, context: ContextService
 ) -> None:
-    rich_entry.save_aliases(EntryAliases(aliases={"driver": "Q1"}))
+    rich_entry.aliases().save(EntryAliases(aliases={"driver": "Q1"}))
     with rich_entry.library().edit() as draft:
         draft.set_waveform("Q1.waveforms.base", ConstWaveformCfg(length=0.1))
     context.install_entry(rich_entry)
@@ -84,7 +84,7 @@ def test_new_empty_does_not_inherit_global_values(
 def test_open_entry_captures_global_parameters_library_aliases_and_storage(
     rich_entry: ResultEntry, context: ContextService
 ) -> None:
-    rich_entry.save_aliases(EntryAliases(aliases={"driver": "Q1"}))
+    rich_entry.aliases().save(EntryAliases(aliases={"driver": "Q1"}))
     context.install_entry(rich_entry)
 
     capture = context.read_context()
@@ -106,7 +106,7 @@ def test_open_entry_captures_global_parameters_library_aliases_and_storage(
 def test_point_and_global_switch_whole_sets_before_publishing_and_keep_captures(
     rich_entry: ResultEntry,
 ) -> None:
-    rich_entry.save_aliases(EntryAliases(aliases={"driver": "Q1"}))
+    rich_entry.aliases().save(EntryAliases(aliases={"driver": "Q1"}))
     with rich_entry.library().edit() as draft:
         draft.set_waveform("Q1.waveforms.base", ConstWaveformCfg(length=0.1))
     point = rich_entry.new_point("local", mode="empty")

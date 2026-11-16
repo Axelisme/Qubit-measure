@@ -88,7 +88,9 @@ def test_list_apply_reopen_capture_storage_and_failed_save(
     assert captured.resolved_aliases()[1].resolved == ["R1", "Q1"]
     context.use_point(PointUseRequest("first"))
     assert context.get_alias_rows() == rows
-    assert entry.load_aliases(point="first").aliases["participants"] == [
+    assert entry.aliases(point="first").read().require_valid().aliases[
+        "participants"
+    ] == [
         "$driver.sense",
         "Q1",
     ]
@@ -116,7 +118,9 @@ def test_list_apply_reopen_capture_storage_and_failed_save(
     assert captured.value("$participants") == ["R1", "Q1"]
     context.use_point(PointUseRequest("first"))
     assert context.get_alias_rows() == (AliasRow("participants", []),)
-    assert entry.load_aliases(point="first").aliases == {"participants": []}
+    assert entry.aliases(point="first").read().require_valid().aliases == {
+        "participants": []
+    }
 
 
 def test_file_revisions_are_installed_snapshots_and_alias_writes_publish_after_disk(
@@ -139,7 +143,7 @@ def test_file_revisions_are_installed_snapshots_and_alias_writes_publish_after_d
     installed = context.get_file_revisions()
     assert installed[:2] == files[:2]
     assert installed[2].revision == sha256(installed[2].path.read_bytes()).hexdigest()
-    assert entry.load_aliases(point="first").aliases["driver"] == "Q1"
+    assert entry.aliases(point="first").read().require_valid().aliases["driver"] == "Q1"
     write_table(entry, "{}")
     assert context.get_file_revisions() == installed
     context.use_point(PointUseRequest("first"))
@@ -169,8 +173,8 @@ def test_entry_alias_apply_updates_installed_revision_without_changing_point(
     installed = context.get_installed_file_revisions()
     assert installed[:5] == files[:5]
     assert installed[5].revision == sha256(installed[5].path.read_bytes()).hexdigest()
-    assert entry.load_aliases().aliases["driver"] == "Q1"
-    assert entry.load_aliases(point="first").aliases == {}
+    assert entry.aliases().read().require_valid().aliases["driver"] == "Q1"
+    assert entry.aliases(point="first").read().require_valid().aliases == {}
 
 
 def test_entry_alias_first_write_rejects_external_creation_without_success_fact(
@@ -183,7 +187,7 @@ def test_entry_alias_first_write_rejects_external_creation_without_success_fact(
     context.install_entry(entry)
     context.use_point(PointUseRequest("first"))
     bus.subscribe(EntryDocumentsChangedPayload, events.append)
-    entry.save_aliases(EntryAliases(aliases={"external": "R1"}))
+    entry.aliases().save(EntryAliases(aliases={"external": "R1"}))
 
     with pytest.raises(FailedPreconditionError) as failure:
         context.apply_alias_rows(AUTHORED, setup=True)
@@ -192,7 +196,7 @@ def test_entry_alias_first_write_rejects_external_creation_without_success_fact(
     assert events == []
     assert context.get_alias_rows(setup=True) == ()
     assert context.get_installed_file_revisions()[5].revision is None
-    assert entry.load_aliases().aliases == {"external": "R1"}
+    assert entry.aliases().read().require_valid().aliases == {"external": "R1"}
 
 
 def test_saved_table_loads_in_order_without_filling_empty_rows(tmp_path: Path) -> None:
@@ -219,8 +223,8 @@ def test_switch_point_reloads_local_table_without_setup_or_preset_fallback(
 ) -> None:
     entry = entry_at(tmp_path)
     entry.new_point("second")
-    entry.save_aliases(EntryAliases(aliases={"setup_only": "Q1"}))
-    entry.save_aliases(EntryAliases(aliases={"driver": "R1"}), point="second")
+    entry.aliases().save(EntryAliases(aliases={"setup_only": "Q1"}))
+    entry.aliases(point="second").save(EntryAliases(aliases={"driver": "R1"}))
     context = service()
     context.install_entry(entry)
     assert context.get_alias_rows() == (AliasRow("setup_only", "Q1"),)
@@ -271,14 +275,14 @@ def test_bad_alias_file_isolated_until_consumed_and_repaired(
     invalid_bytes = source.read_bytes()
     revision = context.get_file_revisions()[2]
     assert revision.revision == sha256(invalid_bytes).hexdigest()
-    entry.save_aliases(EntryAliases(aliases={"driver": "Q1"}), point="second")
+    entry.aliases(point="second").save(EntryAliases(aliases={"driver": "Q1"}))
     repaired = context.reload_file(source.resolve(), revision.revision)
     assert repaired.revision == sha256(source.read_bytes()).hexdigest()
     assert context.read_context().resolve_path("$driver.rate") == "Q1.rate"
     with pytest.raises(expected_error) as fixed_failure:
         captured.resolve_path("$driver.rate")
     assert fixed_failure.value is failure.value
-    entry.save_aliases(EntryAliases(aliases={"driver": "R1"}), point="second")
+    entry.aliases(point="second").save(EntryAliases(aliases={"driver": "R1"}))
     external = source.read_bytes()
     with pytest.raises(FailedPreconditionError) as conflict:
         context.reload_file(source.resolve(), revision.revision)
@@ -293,14 +297,16 @@ def test_apply_round_trip_entry_isolation_and_write_through_set(tmp_path: Path) 
     context.install_entry(first)
     context.use_point(PointUseRequest("first"))
     context.apply_alias_rows(AUTHORED)
-    saved = first.load_aliases(point="first")
+    saved = first.aliases(point="first").read().require_valid()
     assert list(saved.aliases.items()) == [
         ("driver", "Q1"),
         ("sense", "$driver.sense"),
         ("spare", ""),
     ]
     context.apply_alias_rows((AliasRow("transient", "Q1"),))
-    assert first.load_aliases(point="first").aliases == {"transient": "Q1"}
+    assert first.aliases(point="first").read().require_valid().aliases == {
+        "transient": "Q1"
+    }
     reopened = ResultEntry.open(
         "one", result_root=tmp_path / "result", database_root=tmp_path / "Database"
     )
@@ -311,8 +317,8 @@ def test_apply_round_trip_entry_isolation_and_write_through_set(tmp_path: Path) 
     fresh.install_entry(second)
     fresh.use_point(PointUseRequest("first"))
     fresh.apply_alias_rows(())
-    assert second.load_aliases(point="first").aliases == {}
-    assert first.load_aliases().aliases == {}
+    assert second.aliases(point="first").read().require_valid().aliases == {}
+    assert first.aliases().read().require_valid().aliases == {}
     fresh.install_entry(reopened)
     fresh.use_point(PointUseRequest("first"))
     assert fresh.get_alias_rows() == (AliasRow("transient", "Q1"),)
@@ -356,12 +362,12 @@ def test_apply_without_entry_fails_without_changing_rows_or_an_unopened_entry(
 ) -> None:
     context = service()
     entry = entry_at(tmp_path)
-    entry.save_aliases(EntryAliases(aliases={"setup": "Q1"}))
+    entry.aliases().save(EntryAliases(aliases={"setup": "Q1"}))
     with pytest.raises(FailedPreconditionError) as failure:
         context.apply_alias_rows(AUTHORED)
     assert failure.value.reason_code == "no_context"
     assert context.get_alias_rows() == ()
-    assert entry.load_aliases().aliases == {"setup": "Q1"}
+    assert entry.aliases().read().require_valid().aliases == {"setup": "Q1"}
     context.clear_context()
     assert context.get_alias_rows() == ()
 
@@ -373,7 +379,7 @@ def test_invalid_apply_preserves_point_table(tmp_path: Path) -> None:
     context.use_point(PointUseRequest("first"))
     with pytest.raises(InvalidInputError):
         context.apply_alias_rows((AliasRow("driver", "$later.rate"),))
-    assert entry.load_aliases(point="first").aliases == {}
+    assert entry.aliases(point="first").read().require_valid().aliases == {}
     assert context.get_alias_rows() == ()
 
 

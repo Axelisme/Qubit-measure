@@ -34,7 +34,7 @@ from zcu_tools.simulate.fluxonium.predict import FluxoniumParams
 def test_bare_rf_seed_priority(analysis_target, bare_rf, r_f, resonator, expected):
     resource = analysis_target.resource
     if not resonator:
-        resource.save_aliases(EntryAliases(aliases={"qubit": "q1"}))
+        resource.aliases().save(EntryAliases(aliases={"qubit": "q1"}))
     save_dispersive_file(
         resource.dispersive_path / "q1.json",
         DispersiveFile(

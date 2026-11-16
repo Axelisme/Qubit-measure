@@ -46,7 +46,6 @@ from zcu_tools.gui.session.value_lookup import (
     resolve_value_ref,
 )
 from zcu_tools.resources.context.library import ModuleLibrary
-from zcu_tools.resources.document_store import DocumentRevision
 from zcu_tools.resources.entry import (
     DestinationExistsError,
     ResultEntry,
@@ -56,7 +55,7 @@ from zcu_tools.resources.entry import (
     source_path,
     validate_path_segment,
 )
-from zcu_tools.resources.entry.aliases import EntryAliases
+from zcu_tools.resources.entry.aliases import AliasFile, EntryAliases
 from zcu_tools.resources.entry.ledger_models import JsonObject
 from zcu_tools.resources.entry.schema import (
     ParameterDocument,
@@ -133,6 +132,8 @@ class ContextService:
         self._library: ModuleLibrary | None = None
         self._entry_library: ModuleLibrary | None = None
         self._entry_aliases = AliasSnapshot(AliasTable())
+        self._entry_alias_file: AliasFile | None = None
+        self._alias_file: AliasFile | None = None
         self._points: tuple[WorkingPointInfo, ...] = ()
         self._source_binding: ContextSourceBinding | None = None
         self._binding_id = 0
@@ -162,7 +163,8 @@ class ContextService:
         parameters = ParameterContext.from_entry(
             entry, library, SavedEntry(entry_name=entry.result_path.name)
         )
-        aliases = AliasSnapshot.from_read(entry.read_aliases())
+        alias_file = entry.aliases()
+        aliases = AliasSnapshot.from_read(alias_file.read())
         info = EntryInfo(
             entry.result_path.name,
             entry.result_path,
@@ -179,6 +181,8 @@ class ContextService:
         self._library = library
         self._entry_library = library
         self._entry_aliases = aliases
+        self._entry_alias_file = alias_file
+        self._alias_file = alias_file
         self._points = points
         self._aliases = aliases
         self._publish(parameters, sources, ContextReadiness.GLOBAL, active_label=None)
@@ -273,13 +277,12 @@ class ContextService:
         if active is None or self._library is None or target is None:
             raise RuntimeError("Active document resources disappeared")
         if file.document == "aliases":
-            saved, revision = self._require_open_entry().load_aliases_with_revision(
-                point=target.point
-            )
+            alias_file = self._require_open_entry().aliases(target.point)
+            saved = alias_file.read().require_valid()
             candidate = AliasTable(
                 tuple(AliasRow(name, value) for name, value in saved.aliases.items())
             )
-            self._install_alias_rows(candidate, revision)
+            self._install_alias_rows(candidate, alias_file)
         else:
             if file.document == "parameters":
                 active.refresh(strict=True)
@@ -306,11 +309,13 @@ class ContextService:
         elif file.document == "library":
             self._entry_library.refresh(strict=True)
         else:
-            saved, revision = self._require_open_entry().load_aliases_with_revision()
+            alias_file = self._require_open_entry().aliases()
+            saved = alias_file.read().require_valid()
             table = AliasTable(
                 tuple(AliasRow(name, value) for name, value in saved.aliases.items())
             )
-            self._entry_aliases = AliasSnapshot(table, revision)
+            self._entry_alias_file = alias_file
+            self._entry_aliases = AliasSnapshot(table, document_revision(alias_file))
         return next(
             item
             for item in self.get_installed_file_revisions()
@@ -371,7 +376,8 @@ class ContextService:
         parameters, library, sources, info, aliases = self._prepare_point(
             entry, request.label, point
         )
-        self._aliases = aliases
+        self._alias_file = aliases
+        self._aliases = AliasSnapshot.from_read(aliases.read())
         self._install_point(point, library, parameters, sources, info)
         return SavedPoint(entry_name=entry.result_path.name, point=request.label)
 
@@ -433,7 +439,8 @@ class ContextService:
             raise PointBindingError(
                 entry_name=entry.result_path.name, point=request.label
             ) from exc
-        self._aliases = aliases
+        self._alias_file = aliases
+        self._aliases = AliasSnapshot.from_read(aliases.read())
         self._install_point(point, library, parameters, sources, info)
         return SavedPoint(entry_name=entry.result_path.name, point=request.label)
 
@@ -450,6 +457,8 @@ class ContextService:
         self._library = None
         self._entry_library = None
         self._entry_aliases = AliasSnapshot(AliasTable())
+        self._entry_alias_file = None
+        self._alias_file = None
         self._points = ()
         self._aliases = AliasSnapshot(AliasTable())
         self._publish(None, (), ContextReadiness.EMPTY, active_label=None)
@@ -577,13 +586,13 @@ class ContextService:
         self._owner.assert_owner()
         return (self._entry_aliases if setup else self._aliases).rows
 
-    def _install_alias_rows(
-        self, candidate: AliasTable, revision: DocumentRevision | None = None
-    ) -> None:
+    def _install_alias_rows(self, candidate: AliasTable, alias_file: AliasFile) -> None:
         previous = self._aliases.table.rows
         had_error = self._aliases.error is not None
-        self._aliases = AliasSnapshot(candidate, revision)
+        self._alias_file = alias_file
+        self._aliases = AliasSnapshot(candidate, document_revision(alias_file))
         if self._point is None:
+            self._entry_alias_file = alias_file
             self._entry_aliases = self._aliases
         if candidate.rows != previous or had_error:
             self._state.version.bump("context")
@@ -608,7 +617,6 @@ class ContextService:
         overwriting it. No ledger or other document is written.
         """
         self._owner.assert_owner()
-        label = None if setup else self._state.session_env.active_label
         if self._entry is None:
             raise FailedPreconditionError(
                 "Open an entry first", reason_code="no_context"
@@ -619,15 +627,17 @@ class ContextService:
             self.check_file_revision(
                 FileRevision("aliases", installed.revision.path, None)
             )
-        revision = self._entry.save_aliases(
-            EntryAliases(aliases={row.alias: row.value for row in candidate.rows}),
-            point=label,
+        alias_file = self._entry_alias_file if setup else self._alias_file
+        if alias_file is None:
+            raise RuntimeError("Installed aliases handle disappeared")
+        revision = alias_file.save(
+            EntryAliases(aliases={row.alias: row.value for row in candidate.rows})
         )
         if setup and self._point is not None:
             self._entry_aliases = AliasSnapshot(candidate, revision)
             self._bus.emit(EntryDocumentsChangedPayload())
         else:
-            self._install_alias_rows(candidate, revision)
+            self._install_alias_rows(candidate, alias_file)
 
     def capture_storage(self, parameters: ParameterContext) -> StorageBinding:
         """Return historical storage for a fixed capture on the owner sequence.
@@ -986,7 +996,7 @@ class ContextService:
         ModuleLibrary,
         tuple[ContextSource, ...],
         WorkingPointInfo,
-        AliasSnapshot,
+        AliasFile,
     ]:
         if self._setup is None:
             raise RuntimeError("Opened entry has no setup binding")
@@ -1003,7 +1013,7 @@ class ContextService:
             ContextSource("module_cfg", library.source_path, None),
         )
         info = WorkingPointInfo(label, point.description or "")
-        aliases = AliasSnapshot.from_read(entry.read_aliases(point=label))
+        aliases = entry.aliases(label)
         return parameters, library, sources, info, aliases
 
     def _install_point(

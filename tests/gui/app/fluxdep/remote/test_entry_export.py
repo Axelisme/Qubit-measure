@@ -32,7 +32,7 @@ def analysis_entry(tmp_path: Path) -> Iterator[ResultEntry]:
         )
         resource.parameters().add_component("Q1", kind="qubit/fluxonium")
         resource.parameters().add_component("Q2", kind="qubit/fluxonium", EJ=9.0)
-        resource.save_aliases(EntryAliases(aliases={"qubit": "Q2"}))
+        resource.aliases().save(EntryAliases(aliases={"qubit": "Q2"}))
         yield resource
     finally:
         component_registry.unregister("qubit/fluxonium")
@@ -247,7 +247,7 @@ def test_invalid_entry_target_reports_the_cause_and_preserves_selection(
     try:
         analysis_entry.parameters().add_component("R1", kind="resonator")
         if failure == "alias":
-            analysis_entry.save_aliases(EntryAliases(aliases={}))
+            analysis_entry.aliases().save(EntryAliases(aliases={}))
         entry = "missing-entry" if failure == "entry" else "synthetic"
         component = {"component": "missing-component", "kind": "R1"}.get(failure)
         rejected = route_harness.request(

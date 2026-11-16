@@ -22,7 +22,7 @@ from zcu_tools.resources.parameter_fields import stage_model
 from zcu_tools.resources.parameter_metadata import read_metadata, write_metadata
 
 from ._parameter_origin import ParameterOrigin
-from .aliases import AliasValue
+from .aliases import AliasFile, AliasValue
 from .errors import RoleResolutionError
 from .field_views import (
     ComponentView as ComponentView,
@@ -186,13 +186,19 @@ def cached_parameter_content(view: ParameterView) -> ParameterContent:
     return binding.content
 
 
-def document_revision(view: ParameterView | ModuleLibrary) -> DocumentRevision:
-    """Return a parameter or library handle's installed byte revision without I/O.
+def document_revision(
+    view: ParameterView | ModuleLibrary | AliasFile,
+) -> DocumentRevision:
+    """Return a parameter, library or aliases handle's held revision without I/O.
 
-    Missing libraries have revision=None. Edit drafts have no installed version.
+    Missing library/aliases files have revision=None. An aliases revision can
+    identify invalid bytes; it does not imply format or session syntax validity.
+    Edit drafts have no installed version.
     """
     if isinstance(view, ModuleLibrary):
         return library_revision(view)
+    if isinstance(view, AliasFile):
+        return view.read().revision
     document = _view_read(view).document
     if not isinstance(document, DocumentStore):
         raise TypeError("Edit drafts have no installed revision")

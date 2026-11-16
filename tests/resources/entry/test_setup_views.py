@@ -21,7 +21,9 @@ def test_parameters_opener_reads_only_its_selected_file(
 ) -> None:
     if point is not None:
         entry.new_point(point)
-    directory = entry.result_path if point is None else entry.result_path / "points" / point
+    directory = (
+        entry.result_path if point is None else entry.result_path / "points" / point
+    )
     (directory / "library.yaml").write_text("invalid: [", encoding="utf-8")
     (directory / "aliases.yaml").write_text("invalid: [", encoding="utf-8")
 

@@ -108,7 +108,7 @@ def test_empty_point_uses_owner_defaults_without_inheriting_global_values(
     directory = entry.result_path / "points/blank"
     assert sorted(path.name for path in directory.iterdir()) == ["parameters.yaml"]
     assert document_revision(entry.library("blank")).revision is None
-    assert entry.load_aliases_with_revision(point="blank")[1].revision is None
+    assert entry.aliases("blank").read().revision.revision is None
     assert (entry.result_path / "parameters.yaml").read_bytes() == setup_bytes
 
 

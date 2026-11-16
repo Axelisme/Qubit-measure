@@ -315,10 +315,7 @@ def test_missing_discriminator_requires_complete_historical_pulse_shape(
     report = _convert(request, historical_mapping)
     entry = _entry(request)
     assert entry.library().snapshot().module_keys() == ("C1.pulses.pi_amp",)
-    assert (
-        entry.library().snapshot().module_spec("C1.pulses.pi_amp").type
-        == "pulse"
-    )
+    assert entry.library().snapshot().module_spec("C1.pulses.pi_amp").type == "pulse"
     assert document_value(
         snapshot(entry.parameters()), "general.ext.legacy_module_cfg"
     ) == {"modules": {"pi2_amp": {"waveform": "unknown"}}}

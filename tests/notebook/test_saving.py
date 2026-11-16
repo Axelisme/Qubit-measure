@@ -415,7 +415,7 @@ def test_global_run_saves_entry_figures_and_accepts_into_global_documents(
     )
     assert reopened.parameters().D1.rate == 1500.0
     assert reopened.parameters().meta("D1.rate") == {"stderr": 0.5}
-    library = reopened.module_library().snapshot()
+    library = reopened.library().snapshot()
     assert library.module_spec("D1.pulses.pi") == pulse
     assert library.waveform_spec("D1.waveforms.base") == waveform
     assert source_path(point).read_bytes() == point_parameters

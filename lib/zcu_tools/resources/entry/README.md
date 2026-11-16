@@ -1,6 +1,6 @@
 # `zcu_tools.resources.entry` result entry composition
 
-**Last updated:** 2026-11-16，中性 storage capture 與綁定文件寫回
+**Last updated:** 2026-11-17，三檔開檔與 aliases 快取觀察
 
 **讀者：** framework-dev。Result entry、point、ledger 與輸出位置契約。
 
@@ -26,11 +26,15 @@ Runtime 不讀舊名。需要內容升級時先改名，再跑 components，見[
 
 Global 的 alias 存在 `<entry>/aliases.yaml`。每個 point 的 alias 存在 `<entry>/points/<label>/aliases.yaml`，與 `parameters.yaml`、`library.yaml` 並列。各表獨立，既有 point 缺檔時使用空表。
 
-`ResultEntry.load_aliases(*, point=None)` 回傳具名 `EntryAliases`。`point=None` 選 global；`point="label"` 選該 point。缺 alias 檔回 `EntryAliases(aliases={})`，磁碟保持原狀。`save_aliases(aliases, *, point=None)` 使用相同選擇規則，只替換選定的表。Point label 必須是安全的單一路徑段，否則報 ValueError。Load 只讀選定的 alias 表，不要求 `parameters.yaml` 或 `library.yaml` 存在。Save 仍要求 `parameters.yaml` 存在，不要求 library 檔；沒有參數文件時拒絕建立孤立 aliases。Alias I/O 不解析或修改參數與 library。
+`entry.aliases(point=None)` 回傳綁單一檔案的 `AliasFile`。None 選 global，安全的單一路徑段 label 選該 point。Opener 只讀自己的檔一次，不要求 parameters 或 library 存在。缺檔得到空表與 revision=None，不建檔。`read()` 回傳持有的 `AliasReadResult`，表的 dict 與 list 都是深拷貝。`document_revision(handle)` 讀取同一份觀察的 revision，兩者都不做 I/O。
 
-`aliases.yaml` 使用 `format: zcu.aliases`，寫固定 `format_version: "1.0"`，讀接受 major 1 的 forward minor。`AliasValue = str | list[str]` 表達單一名稱、`$` link 或有序名稱／link 清單。Mapping 保留空字串、空清單、原始 `$` link 與元素順序。清單以 YAML list 保存，不編碼成字串。格式、結構、非字串元素與 I/O 錯誤直接回報，不退回 preset。Resources 只保存與驗證資料表示，Session 的 AliasTable 擁有語法、backward-link 與使用時解析。Run snapshot、storage 與 acquired payload 也保留有序名稱清單；普通元件路徑解析只接受單一名稱，拒絕清單。Alias 工作焦點與 parameters 元件事實分開，見 ADR-0063。儲存先寫 sibling temporary，再原子 replace；失敗保舊檔並清 temporary。不提供跨檔交易、multiwriter merge 或掉電恢復。
+`aliases.yaml` 使用 `format: zcu.aliases`，寫固定 `format_version: "1.0"`，讀接受 major 1 的 forward minor。`AliasValue = str | list[str]` 表達單一名稱、`$` link 或有序名稱／link 清單。Mapping 保留空字串、空清單、原始 `$` link 與元素順序。清單以 YAML list 保存，不編碼成字串。格式、結構與非字串元素錯誤延後存入觀察的 error，其他 I/O 錯誤直接拋出，不退回 preset。Resources 只保存與驗證資料表示，Session 的 AliasTable 擁有語法、backward-link 與使用時解析。Run snapshot、storage 與 acquired payload 也保留有序名稱清單；普通元件路徑解析只接受單一名稱，拒絕清單。Alias 工作焦點與 parameters 元件事實分開，見 ADR-0063。儲存先寫 sibling temporary，再原子 replace；失敗保舊檔並清 temporary。不提供跨檔交易、multiwriter merge 或掉電恢復。
 
-`read_aliases(*, point=None)` 回傳 `AliasReadResult`，一次讀取固定 alias 表、原始內容錯誤與 observed bytes SHA-256。缺檔回空表與 revision=None。格式、版本、YAML 或結構錯誤保留原 exception 與當次 bytes hash，不代表有效空表；其他 I/O 錯誤傳遞。Session 可先安裝參數與 library，實際 alias consumer 才報該錯。`load_aliases` 與 `load_aliases_with_revision` 仍直接拋出內容錯誤。
+`AliasReadResult.require_valid()` 在有延後格式錯誤時拋出原錯，否則回表。一次性讀取者先呼叫它再用表。無效 bytes 仍有 SHA-256，不代表有效空表。Session 可先安裝參數與 library，實際 alias consumer 才報該錯。
+
+`AliasFile.refresh(*, strict=False)` 重讀自己的檔。寬鬆模式安裝包含格式錯誤的新觀察；strict 遇格式錯誤拋出並保留原觀察。其他 I/O 錯誤一律保留原觀察。回傳值比較有序表與格式有效性，兩次無效則比較 bytes hash。只改註解、排版或可接受 minor 版號，以及缺檔與有效空表互換，回 False，但仍更新 revision。Session 語法由 caller 驗證，需額外准入時用 opener 開候選，不對已安裝 handle refresh。
+
+`AliasFile.save(aliases)` 無樂觀鎖，不先讀舊檔，可覆寫壞檔。成功後保存輸入的深拷貝與 writer revision，不事後 refresh。失敗保留檔案與觀察。Point save 仍要求 parameters.yaml 存在，但不解析它；global save 沒有這個檢查。
 
 `new_point(mode="inherit")` 從 global 複製已有的 alias 檔。`mode="clone"` 只複製來源 point 的 alias 檔，適用同 entry label、跨 entry 路徑與 ParameterView。來源缺檔就保持缺檔，clone 不讀目的 global 的 alias。`mode="empty"` 不建立 aliases。之後改 global、來源或目的表都不影響其他表。
 
@@ -54,7 +58,7 @@ Caller 可在 general.ext.flux_value／general.ext.flux_unit 記錄 global flux�
 
 `ParameterContent` 在 capture 與序列化時只移除直接的 `general.entry_id`，保留其他未使用或未知內容，包括 `general.ext`。這不驗證整份文件，也不改來源檔案。
 
-`ParameterView.refresh(*, strict=False)` 回傳文件內容是否改變，與 library 的 refresh 相同。`strict=True` 完整驗證候選後才安裝。ContextService 的明確 reload 與 watcher 使用這個入口，失敗保留已發布內容、revision 與 binding。一般 refresh 仍按需驗證，不因未使用的 component 欄位失敗。
+`document_revision(handle)` 接受 ParameterView、ModuleLibrary 與 AliasFile，不讀磁碟。`ParameterView.refresh(*, strict=False)` 回傳文件內容是否改變，與 library 的 refresh 相同。`strict=True` 完整驗證候選後才安裝。ContextService 的明確 reload 與 watcher 使用這個入口，失敗保留已發布內容、revision 與 binding。一般 refresh 仍按需驗證，不因未使用的 component 欄位失敗。
 
 每個 `ParameterView` 綁一個 DocumentStore。屬性讀取只看記憶體快照。`edit()`、單行賦值與 `refresh()` 只讀寫自己的文件。修改多個 point 時逐筆提交，每筆各自成功或失敗。
 

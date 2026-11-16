@@ -33,7 +33,7 @@ def dialog(qapp, tmp_path: Path, request) -> Iterator[ComponentDriver]:
             resource.parameters().add_component("Q1", kind="qubit/fluxonium")
             resource.parameters().add_component("Q2", kind="qubit/fluxonium")
         aliases = {} if alias in (None, "no_components") else {"qubit": alias}
-        resource.save_aliases(EntryAliases(aliases=aliases))
+        resource.aliases().save(EntryAliases(aliases=aliases))
         view = EntryDialog(None, project_root=tmp_path)
         try:
             view.show()

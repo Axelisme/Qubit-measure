@@ -81,7 +81,7 @@ def analysis_entry(tmp_path):
         entry.parameters().add_component(
             "r1", kind="resonator/test_dispersive", freq=5750.0
         )
-        entry.save_aliases(EntryAliases(aliases={"qubit": "q1", "resonator": "r1"}))
+        entry.aliases().save(EntryAliases(aliases={"qubit": "q1", "resonator": "r1"}))
         entry.predictors_path.mkdir()
         entry.dispersive_path.mkdir()
         save_predictor_file(

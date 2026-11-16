@@ -171,8 +171,7 @@ def test_invalid_form_rejects_submission_with_field_paths(
         session.control.read_context().library.document() == capture.library.document()
     )
     assert (
-        session.entry.library("a").snapshot().document()
-        == capture.library.document()
+        session.entry.library("a").snapshot().document() == capture.library.document()
     )
 
 
@@ -298,10 +297,7 @@ def test_submission_to_a_different_open_entry_writes_nothing(
             entry.parameters, entry.put("Q1.waveforms.copy")
         )
     assert error.value.reason_code == "entry_not_open"
-    assert (
-        session.entry.library("a").snapshot().document()
-        == first.library.document()
-    )
+    assert session.entry.library("a").snapshot().document() == first.library.document()
 
 
 def test_opening_an_unknown_entry_is_rejected(session: LibrarySession) -> None:

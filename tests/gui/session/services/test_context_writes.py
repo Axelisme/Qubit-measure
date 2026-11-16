@@ -151,7 +151,7 @@ def test_global_alias_edits_persist_and_keep_the_active_three_file_versions(
 
     session.control.apply_alias_rows(rows)
 
-    assert session.entry.load_aliases().aliases == {"driver": "Q1"}
+    assert session.entry.aliases().read().require_valid().aliases == {"driver": "Q1"}
     assert session.control.get_alias_rows() == rows
     assert session.control.read_context().value("$driver") == "Q1"
     assert before.resolved_aliases() == ()
@@ -369,9 +369,7 @@ def test_global_writeback_and_library_commands_use_entry_files_and_publish_once(
     assert context.read_context().library.waveform_keys() == ("Q1.waveforms.base",)
     assert before.library.waveform_keys() == ()
     assert snapshot(session.entry.parameters()).general.ext["flux_value"] == 0.25
-    assert session.entry.library().snapshot().waveform_keys() == (
-        "Q1.waveforms.base",
-    )
+    assert session.entry.library().snapshot().waveform_keys() == ("Q1.waveforms.base",)
     assert session.entry.list_points() == []
     context.apply_library_change(
         context.read_context(),

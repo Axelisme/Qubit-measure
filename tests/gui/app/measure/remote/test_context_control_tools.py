@@ -85,7 +85,9 @@ def test_alias_apply_returns_authored_rows_without_requiring_resolution(
     )
     if info is not None:
         entry = entry_resource(info)
-        stored = entry.load_aliases(point=control.current_point_label())
+        stored = (
+            entry.aliases(point=control.current_point_label()).read().require_valid()
+        )
         assert list(stored.aliases.items()) == [
             ("driver", "missing"),
             ("control", "$driver.sense"),
@@ -95,7 +97,12 @@ def test_alias_apply_returns_authored_rows_without_requiring_resolution(
     assert application.result("context.aliases_set", {"rows": []}) == {"rows": []}
     assert control.get_alias_rows() == ()
     if info is not None:
-        stored = entry_resource(info).load_aliases(point=control.current_point_label())
+        stored = (
+            entry_resource(info)
+            .aliases(point=control.current_point_label())
+            .read()
+            .require_valid()
+        )
         assert stored.aliases == {}
 
 
@@ -177,8 +184,12 @@ def test_open_and_reset_capture_selected_point_aliases(
         "$driver.rate": 20.0
     }
     entry = entry_resource(info)
-    assert entry.load_aliases(point="first").aliases == {"driver": "Q1"}
-    assert entry.load_aliases(point="second").aliases == {"driver": "Q2"}
+    assert entry.aliases(point="first").read().require_valid().aliases == {
+        "driver": "Q1"
+    }
+    assert entry.aliases(point="second").read().require_valid().aliases == {
+        "driver": "Q2"
+    }
 
 
 def test_parameter_set_commits_current_point_preserving_metadata_and_captures(

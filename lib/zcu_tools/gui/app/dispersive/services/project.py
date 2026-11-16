@@ -33,7 +33,10 @@ def _bare_rf_seed(target: AnalysisTarget) -> float:
             if params.plot_transitions.r_f is not None:
                 return params.plot_transitions.r_f
     aliases = AliasTable(
-        [AliasRow(k, v) for k, v in target.resource.load_aliases().aliases.items()]
+        [
+            AliasRow(k, v)
+            for k, v in target.resource.aliases().read().require_valid().aliases.items()
+        ]
     )
     document = snapshot(target.resource.parameters())
     try:

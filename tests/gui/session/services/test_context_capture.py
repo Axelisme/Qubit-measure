@@ -92,8 +92,8 @@ def test_capture_keeps_point_library_storage_and_rows_after_later_changes(
     control.apply_alias_rows(
         (AliasRow("driver", "Q2"), AliasRow("sense", "$driver.sense"))
     )
-    session.entry.save_aliases(
-        EntryAliases(aliases={"driver": "Q2", "sense": "$driver.sense"}), point="second"
+    session.entry.aliases(point="second").save(
+        EntryAliases(aliases={"driver": "Q2", "sense": "$driver.sense"})
     )
     control.use_point(PointUseRequest("second"))
     source_path(session.entry.parameters("first")).unlink()

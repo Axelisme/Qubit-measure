@@ -1,6 +1,6 @@
 # gui/session/ — 量測 session core
 
-**Last updated:** 2026-11-16，global／point 共用 ParameterView 與 storage capture
+**Last updated:** 2026-11-17，aliases 候選准入與綁檔 handle
 
 **讀者：** framework-dev。Session 層的資源綁定、operation 與共用對話框分工。
 
@@ -9,7 +9,7 @@ app保留帶領域context的錯誤文字與unsupported-target轉譯。
 
 measure-gui 的「量測 session core」（context 系統 + SoC 連線 + 多 device + setup/soc/device/inspect/predictor dialog）由此共用層提供。對標 `gui/remote`、`gui/plotting`。每個 measurement-session app 注入自己的 app-local infra（gate + background）複用這層；session 模組**永不**反向 import `gui.app.*`。
 
-`ContextService` 私下持有 `ResultEntry` 與參數、library handles。Global 與 point 的參數 handle 都是 resources 的 `ParameterView`，分別由 `entry.parameters()` 與 `entry.parameters(point=label)` 開啟。未開 entry 時 readiness=EMPTY、parameters=None，沒有 metadata 或 source binding，point list 為空。開啟或建立 entry 後發布 GLOBAL，作用中的是 entry 層參數、library、aliases 與 storage，point label 為 None。`use_point` 或 `new_point` 發布 POINT，整組換成 point 文件，不逐名稱回退。`use_global()` 重讀 entry 文件並切回 GLOBAL。每次切換先準備全部資源與 asset capability，再一次替換 binding、版本與 fact。準備失敗保留原 binding。point 已建立但安裝失敗時回報 `PointBindingError`，保留合法 point。SoC、device 與獨立 predictor 保留各自能力。
+`ContextService` 私下持有 `ResultEntry` 與參數、library、aliases handles。Global 與 point 的參數 handle 都是 resources 的 `ParameterView`，分別由 `entry.parameters()` 與 `entry.parameters(point=label)` 開啟。未開 entry 時 readiness=EMPTY、parameters=None，沒有 metadata 或 source binding，point list 為空。開啟或建立 entry 後發布 GLOBAL，作用中的是 entry 層參數、library、aliases 與 storage，point label 為 None。`use_point` 或 `new_point` 發布 POINT，整組換成 point 文件，不逐名稱回退。`use_global()` 重讀 entry 文件並切回 GLOBAL。每次切換先準備全部資源與 asset capability，再一次替換 binding、版本與 fact。準備失敗保留原 binding。point 已建立但安裝失敗時回報 `PointBindingError`，保留合法 point。SoC、device 與獨立 predictor 保留各自能力。
 
 列 point 時只投影 description，availability 另判參數文件可讀且能解析成 owner 文件結構，保留 header 與目前 schema version 檢查，不讀 library 或 aliases。
 局部 leaf／component 格式問題在使用或寫入時報錯，不讓整個 point 不可用。
@@ -38,6 +38,7 @@ Inspect 的 New 使用所選 Destination 的固定 capture，以其中的同名 
 - 作用中文件組的 alias 表由 `ContextService` 持有。`AliasTable` 原子驗證整批語法與重名，拒絕引用自身或後列。元件與 device 使用同一張表，GUI 不做 kind 或裝置可用性檢查。Notebook 的顯式元件 consumer 仍可要求 kind。
   解析失敗的 `RoleResolutionError` 訊息以 `$alias` 指名：未定義時請使用者在 Aliases 新增，未綁定時請使用者綁定，link 鏈停在空列時指名該列。Link 欄位缺失、目標不是名稱與 kind 不符也各自說明原因。`reason` 維持 `Unknown alias`、`Alias is not bound` 等短分類，供 caller 比對；只有訊息文字給使用者看。Expression 的裸 `$alias` 讀取直接沿用這段訊息，原樣呈現。
   `apply_alias_rows(rows)` 先驗整表，再原子保存作用中的 aliases.yaml。GLOBAL 寫 entry 層，POINT 寫選定 point。`setup=True` 固定寫 entry 層。成功後安裝 rows 與確切 revision，再發布 fact。未開 entry 時以 `FailedPreconditionError(no_context)` 拒絕，不暫存 rows，也不自動開 entry。Startup 先開 entry，再呼叫 `ctx.context.apply_alias_rows(rows)`。建構參數不提供 alias 初值或 presets。
+  Install、point 切換與 strict reload 以 `entry.aliases(point)` 開候選，不 refresh 已安裝 handle。Strict reload 先驗檔案格式與 AliasTable 語法，通過才一起安裝 handle、表與 revision，再發布 fact。失敗丟棄候選，不改已安裝組。Save 重用已安裝 handle，保留缺檔衝突與 Inspect dirty draft 檢查。非作用中 global reload 不改 point 或既有 capture，只發 file status。
   開 entry 載入 global alias，clear 清空 alias；每次選取或建立 point 都載入該 point 的表。缺檔、空表與空列不自填，也不回退 entry 表。格式、版本、結構與 alias 語法錯誤不擋 point 選取或裸參數／library 讀寫。Session 保存當次原錯與 observed bytes hash，固定 capture 的 alias 讀取與投影才報原錯。修正後 reload 或 Apply 可安裝有效表，既有 capture 仍保留舊錯。Inspect 完成有效儲存格編輯後自動保存。失敗保留輸入與舊表，切換條目或關閉直接丟棄未提交輸入。
   公開 `read_context(aliases=None)` 每次固定 point/library/storage 與全表，GUI 不要求 consumer declarations 或 kind 檢查。`aliases={"qubit": "Q2"}` 只覆寫該次 capture 的具名列，保留 dependent authored links，不改全域 rows、版本或 selection。EMPTY 沿 `no_context` 失敗，缺或未綁定的 `$alias` 在讀取時指名報錯。
   歷史 `read_target(target, roles=...)` 使用已固定的 names，不展開目前全表。GUI adapter 不宣告角色，Tab、Run 與 Load 直接使用 alias-aware capture。App 的 EMPTY 無 override 讀取回 None，保留 context-free 與 deferred 路徑。非空 overrides 仍拒絕 no_context。省略 overrides、None 與 {} 等價。Notebook 的 role resolver 與 via 保留原契約。

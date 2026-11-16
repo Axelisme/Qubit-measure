@@ -30,7 +30,7 @@ def fluxonium_entry(tmp_path: Path) -> Iterator[ResultEntry]:
         )
         resource.parameters().add_component("Q1", kind="qubit/fluxonium")
         resource.parameters().add_component("Q2", kind="qubit/fluxonium")
-        resource.save_aliases(EntryAliases(aliases={"qubit": "Q2"}))
+        resource.aliases().save(EntryAliases(aliases={"qubit": "Q2"}))
         yield resource
     finally:
         component_registry.unregister("qubit/fluxonium")

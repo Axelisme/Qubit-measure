@@ -181,9 +181,26 @@ def test_reload_installs_before_fact_and_keeps_old_capture(selected) -> None:
 
 
 @pytest.mark.parametrize("scope", ["point", "global", "entry"])
-@pytest.mark.parametrize("document", ["parameters", "library", "aliases"])
+@pytest.mark.parametrize(
+    ("document", "body"),
+    [
+        (
+            "parameters",
+            'format: zcu.parameter-container\nformat_version: "2.0"\ncomponents: {Q1: {kind: nonexistent}}\n',
+        ),
+        (
+            "library",
+            'format: zcu.module-library\nformat_version: "2.0"\ncomponents: {Q1: {pulses: {bad: {type: nonexistent}}}}\n',
+        ),
+        (
+            "aliases",
+            'format: zcu.aliases\nformat_version: "1.0"\naliases: {driver: "$later.rate", later: Q1}\n',
+        ),
+        ("aliases", 'format: wrong\nformat_version: "1.0"\naliases: {}\n'),
+    ],
+)
 def test_invalid_candidate_retains_memory_revision_and_bytes(
-    selected, document: str, scope: str
+    selected, document: str, body: str, scope: str
 ) -> None:
     context, bus, _ = selected
     assert hasattr(context, "reload_file"), (
@@ -199,11 +216,6 @@ def test_invalid_candidate_retains_memory_revision_and_bytes(
     facts: list[object] = []
     for payload in (MdChangedPayload, MlChangedPayload, AliasesChangedPayload):
         bus.subscribe(payload, facts.append)
-    body = {
-        "parameters": 'format: zcu.parameter-container\nformat_version: "2.0"\ncomponents: {Q1: {kind: nonexistent}}\n',
-        "library": 'format: zcu.module-library\nformat_version: "2.0"\ncomponents: {Q1: {pulses: {bad: {type: nonexistent}}}}\n',
-        "aliases": 'format: zcu.aliases\nformat_version: "1.0"\naliases: {driver: "$later.rate", later: Q1}\n',
-    }[document]
     file.path.write_text(body)
     siblings = set(file.path.parent.iterdir())
     with pytest.raises(InvalidInputError, match=str(file.path)):

@@ -71,7 +71,7 @@ class AnalysisEntry:
         """
         document = snapshot(self.resource.parameters())
         if component is None:
-            aliases = self.resource.load_aliases().aliases
+            aliases = self.resource.aliases().read().require_valid().aliases
             component = AliasTable(
                 [AliasRow(k, v) for k, v in aliases.items()]
             ).resolve("qubit", document)
