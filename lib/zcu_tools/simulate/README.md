@@ -1,6 +1,6 @@
 # Numeric simulation tools
 
-**Last updated:** 2026-11-12, versioned simulator benchmark
+**Last updated:** 2026-11-16, dressed resonator builder
 
 **讀者：** framework-dev、agent。查閱數值模擬的責任邊界、快取契約與實測效能。
 
@@ -132,6 +132,44 @@ continuous-flux and model tools. They do not define an acquisition backend.
 Call `populations(state, target_basis)` explicitly before readout. Basis vectors
 are ordered columns in common ambient coordinates. The result preserves target
 state labels and can be recorded independently of ADC generation. For engine\nbatches, call `batch_populations(densities, source_basis, target_basis)`; it\nreturns a real array in target state order without clipping solver residuals.
+
+## Quantum resonator mode
+
+Import `ResonatorModeInput`, `ResonatorModeResult` and `build_resonator_mode` from
+`zcu_tools.simulate.resonator_mode`. The builder diagonalizes the full native
+qubit Hamiltonian with one Fock-truncated resonator before retaining states.
+Supply the qubit H/h in GHz, the already weighted charge coupling in GHz,
+and named Hermitian qubit drive operators in the same fixed coordinates.
+Drive operators act per real envelope unit; imaginary quadratures are zero.
+Also supply the resonator frequency in GHz, its energy-loss rate kappa in 1/ns,
+parent-eigenbasis directional qubit rates in 1/ns, and a `FluxLevel`.
+The photon cutoff defaults to N=3, with occupations 0 through N-1.
+
+`retained_labels` explicitly lists bare `(q, k)` pairs.
+Here q indexes the ascending parent eigenstates and k is photon occupation.
+Each retained label must identify one dressed state with overlap probability
+strictly greater than 0.5. Missing, repeated or insufficient-overlap labels
+raise `ValueError` naming the label and overlap.
+Invalid matrix shapes, nonfinite values, non-Hermitian operators and invalid
+rates also raise `ValueError`.
+
+The result's `model` is a joint `SecularModel` in ascending dressed energy order.
+Its fixed coordinates are that dressed basis, so `eigenvectors` is identity.
+`label_to_index[(q, k)]` locates an initial state or an energy;
+`index_to_label[i]` gives the inverse.
+For example, subtract the energies at `(2, 0)` and `(1, 0)` to get their
+dressed transition frequency.
+Resonator loss keeps only energy-lowering matrix elements of a.
+Qubit loss projects each parent jump into the joint basis.
+Pure dephasing is zero.
+The model identity hashes all numeric inputs, port names, retained labels,
+cutoff and flux level, with canonical matrix bytes and sorted drive ports.
+
+Use this builder only when the caller explicitly needs photons in the evolution
+space. `SingleFluxoniumModel` with `DispersiveResonator` instead supplies the
+dispersive shifts for a semiclassical cavity; it adds no photon states to
+evolution. The builder does not choose a model adapter, remove duplicate loss
+terms or connect readout and acquisition environments.
 
 ## ADC readout
 
