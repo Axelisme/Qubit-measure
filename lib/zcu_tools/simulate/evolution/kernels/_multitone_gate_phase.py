@@ -8,13 +8,14 @@ from ..secular import SecularModel
 from ._dop853 import Tolerances
 from ._gate_endpoints import build_multitone_endpoints
 
-PHASE_GRID = (9, 9)
-PHASE_RTOL = 4e-7
+PHASE_GRID = (9, 10)
+PHASE_RTOL = 2.75e-7
+PHASE_STAGES = ((PHASE_GRID, PHASE_RTOL), ((13, 13), 1e-8))
 PHASE_DEFECT = 1.9e-7
 FULL_DRIVE_GATE_POLICY = (
-    "dual-phase-full-drive-v1",
-    PHASE_GRID,
-    PHASE_RTOL,
+    "dual-phase-full-drive-v2",
+    PHASE_STAGES,
+    0.01,  # atol/rtol
     PHASE_DEFECT,
     4,
     64,
@@ -24,16 +25,35 @@ FULL_DRIVE_GATE_POLICY = (
 def build(
     model: SecularModel, table: SegmentTable, row: int
 ) -> NDArray[np.complex128] | None:
-    """Return checked (4,9,9,M,M) Fourier coefficients, else reject with None.
+    """Return checked (4,Na,Nb,M,M) coefficients, or None after two refusals.
 
-    Integrate a 9x9 raw phase grid and two sets of 32 independent off-grid
-    phase pairs in the same batch, at rtol 4e-7 and atol 4e-9. Require every
-    quarter's full-unitary Frobenius interpolation defect <=1.9e-7 before
-    playback. This depth-500 error allocation is empirical, not a global bound
-    on unobserved phases. No upgrade is attempted after failed validation.
-    Numerical integration failures propagate rather than masquerade as refusal.
+    All envelopes start at 9x10, rtol/atol 2.75e-7/2.75e-9. Failed validation
+    rebuilds once at 13x13, 1e-8/1e-10. On the three-level 4 ns sampled case
+    at gain 2, the maximum quarter defect falls from 1.413e-5 to 1.534e-8.
+    The larger grid resolves higher phase harmonics; tighter integration leaves
+    margin below 1.9e-7 rather than spending that margin on solver error.
+    This bounded route is independent of envelope shape or imaginary samples.
+    Each stage integrates its nodes and two independent sets of 32 off-grid
+    phase pairs together, then checks every quarter's full-unitary Frobenius
+    defect <=1.9e-7. The depth-500 allocation is empirical, not a global bound
+    on unobserved phases. Numerical failures propagate, never trigger upgrades.
     """
-    axes = [np.arange(count) * (2 * np.pi / count) for count in PHASE_GRID]
+    for grid, rtol in PHASE_STAGES:
+        coefficients = _build_stage(model, table, row, grid, rtol)
+        if coefficients is not None:
+            return coefficients
+    return None
+
+
+def _build_stage(
+    model: SecularModel,
+    table: SegmentTable,
+    row: int,
+    grid: tuple[int, int],
+    rtol: float,
+) -> NDArray[np.complex128] | None:
+    """Fit and validate one full-drive grid; None means interpolation refusal."""
+    axes = [np.arange(count) * (2 * np.pi / count) for count in grid]
     nodes = np.stack(np.meshgrid(*axes, indexing="ij"), axis=-1).reshape(-1, 2)
     # Irrational sequences avoid the integration nodes and rational-grid aliases.
     indices = np.arange(1, 33)[:, None]
@@ -50,7 +70,7 @@ def build(
             1,
         )
     )
-    controls = Tolerances(PHASE_RTOL, PHASE_RTOL * 0.01, np.inf, np.inf, 0)
+    controls = Tolerances(rtol, rtol * 0.01, np.inf, np.inf, 0)
     endpoints = build_multitone_endpoints(
         model,
         table,
@@ -59,9 +79,9 @@ def build(
         controls,
     )
     size = len(model.energies_ghz)
-    samples = endpoints[:, : len(nodes)].reshape(4, *PHASE_GRID, size, size)
+    samples = endpoints[:, : len(nodes)].reshape(4, *grid, size, size)
     coefficients = np.fft.fftn(samples, axes=(1, 2)) / len(nodes)
-    modes = [np.fft.fftfreq(count) * count for count in PHASE_GRID]
+    modes = [np.fft.fftfreq(count) * count for count in grid]
     predicted = np.einsum(
         "pa,pb,sabij->spij",
         np.exp(1j * probes[:, :1] * modes[0]),
