@@ -74,7 +74,7 @@ def arb_driver(app: LaunchedMeasureApp) -> ComponentDriver:
 @pytest.mark.parametrize(
     ("opening", "action", "run_editable"),
     [
-        ("Setup…", "New entry…", False),
+        ("Entry…", "New entry…", False),
         ("SoC…", "Connect", False),
         ("Devices…", "Add Device", True),
         ("Inspect…", "New", True),
@@ -185,8 +185,8 @@ def test_toolbar_soc_reopens_and_both_dialogs_follow_run_lock(
     assert not ui.observe("Connect").enabled
     ui.screenshot(shots / "07-running-soc-reopened.png")
     ui.click("Close")
-    ui.click("Setup…")
-    assert ui.dialogs()[0].title == "Setup"
+    ui.click("Entry…")
+    assert ui.dialogs()[0].title == "Entry"
     assert "IP address:" not in ui.dialogs()[0].texts
     assert all(
         not ui.observe(caption).enabled for caption in ("New entry…", "Open", "Create")

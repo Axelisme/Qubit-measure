@@ -1,4 +1,4 @@
-"""Export dispersive fits to the entry artifact and declared setup fields."""
+"""Export dispersive fits to the entry artifact and declared global fields."""
 
 from __future__ import annotations
 

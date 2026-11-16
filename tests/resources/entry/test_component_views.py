@@ -65,7 +65,7 @@ def test_set_creates_only_freeform_mapping_paths_atomically(tmp_path: Path) -> N
         assert document_value(snapshot(entry.parameters()), "N1.ext") == {}
 
 
-@pytest.mark.parametrize("owner", ["setup", "point"])
+@pytest.mark.parametrize("owner", ["global", "point"])
 def test_complex_view_reads_decode_leaves_while_document_reads_remain_raw(
     tmp_path: Path, registry_state_guard: None, owner: str
 ) -> None:
@@ -79,7 +79,7 @@ def test_complex_view_reads_decode_leaves_while_document_reads_remain_raw(
         entry.parameters().add_component(
             "N1", kind=kind, center=tag, ext={"cal": {"center": tag}, "samples": [tag]}
         )
-        view = entry.parameters() if owner == "setup" else entry.new_point("working")
+        view = entry.parameters() if owner == "global" else entry.new_point("working")
         view.general.ext["center"] = tag
         cal = field_view(field_view(view.N1.ext).cal)
         assert view.N1.center == 1.25 - 2.5j
@@ -104,7 +104,7 @@ def test_complex_view_reads_decode_leaves_while_document_reads_remain_raw(
             assert roles.sense.center == 1.25 - 2.5j
 
 
-@pytest.mark.parametrize("owner", ["setup", "point"])
+@pytest.mark.parametrize("owner", ["global", "point"])
 def test_manual_complex_writes_encode_and_keep_validation_and_metadata(
     tmp_path: Path, registry_state_guard: None, owner: str
 ) -> None:
@@ -117,7 +117,7 @@ def test_manual_complex_writes_encode_and_keep_validation_and_metadata(
         entry.parameters().add_component(
             "N1", kind=kind, freq=10.0, ext={"cal": {"center": {"__complex__": [1, 2]}}}
         )
-        view = entry.parameters() if owner == "setup" else entry.new_point("working")
+        view = entry.parameters() if owner == "global" else entry.new_point("working")
         cal = field_view(field_view(view.N1.ext).cal)
         cal.center = 3 - 4j
         assert cal.center == 3 - 4j
@@ -143,7 +143,7 @@ def test_manual_complex_writes_encode_and_keep_validation_and_metadata(
         )
         loaded = (
             reopened.parameters()
-            if owner == "setup"
+            if owner == "global"
             else reopened.parameters("working")
         )
         assert field_view(field_view(loaded.N1.ext).cal).center == 7 - 8j
@@ -178,7 +178,7 @@ def test_malformed_complex_view_leaf_raises_without_mutating_document(
         assert document_value(before, "N1.ext.center") == tag
 
 
-@pytest.mark.parametrize("owner", ["setup", "point"])
+@pytest.mark.parametrize("owner", ["global", "point"])
 @pytest.mark.parametrize("version", ["2.0", "2.2"])
 def test_allow_extras_support_child_views_set_meta_seed_and_reload(
     tmp_path: Path,
@@ -193,10 +193,10 @@ def test_allow_extras_support_child_views_set_meta_seed_and_reload(
     with registered_model("notebook/extensible", Extensible) as kind:
         entry, results, database = create_entry(tmp_path)
         entry.parameters().add_component("N1", kind=kind, title="ready", gain=2)
-        view = entry.parameters() if owner == "setup" else entry.new_point("working")
+        view = entry.parameters() if owner == "global" else entry.new_point("working")
         source = (
             results / "entry/parameters.yaml"
-            if owner == "setup"
+            if owner == "global"
             else results / "entry/points/working/parameters.yaml"
         )
         yaml = YAML(typ="rt")
@@ -226,7 +226,7 @@ def test_allow_extras_support_child_views_set_meta_seed_and_reload(
         gain_source = view.meta("N1.gain")
         assert gain_source == {"comment": "caller"}
         assert future.level == 7 and future.untouched == 4
-        if owner == "setup":
+        if owner == "global":
             seeded = entry.new_point("seeded")
             assert seeded.N1.gain == 8
             assert seeded.meta("N1.future.level") == accepted
@@ -239,7 +239,7 @@ def test_allow_extras_support_child_views_set_meta_seed_and_reload(
         )
         loaded = (
             reopened.parameters()
-            if owner == "setup"
+            if owner == "global"
             else reopened.parameters("working")
         )
         assert loaded.N1.gain == 8
@@ -325,7 +325,7 @@ def test_plain_typed_dict_views_edit_seed_and_reload_without_resolving_paths(
         assert slots.drive == "another.path"
 
 
-@pytest.mark.parametrize("owner", ["setup", "point"])
+@pytest.mark.parametrize("owner", ["global", "point"])
 @pytest.mark.parametrize("invalid", [-1, None, True, "3", 3.5])
 def test_recursive_dict_views_preserve_models_constraints_and_sources(
     tmp_path: Path,
@@ -352,7 +352,7 @@ def test_recursive_dict_views_preserve_models_constraints_and_sources(
             routes={"drive": {"pin": {"index": 2}}},
             levels={"gain": {"left": 1, "right": 2}},
         )
-        view = entry.parameters() if owner == "setup" else entry.new_point("working")
+        view = entry.parameters() if owner == "global" else entry.new_point("working")
         routes = field_view(view.N1.routes)
         route = field_view(routes["drive"])
         pin = field_view(route.pin)
@@ -381,16 +381,16 @@ def test_recursive_dict_views_preserve_models_constraints_and_sources(
         gain_source = view.meta("N1.levels.gain.left")
         assert gain_source == {"comment": "caller"}
         if owner == "point":
-            setup_routes = field_view(entry.parameters().N1.routes)
-            setup_route = field_view(setup_routes.drive)
-            setup_pin = field_view(setup_route.pin)
-            assert setup_pin.index == 2
+            global_routes = field_view(entry.parameters().N1.routes)
+            global_route = field_view(global_routes.drive)
+            global_pin = field_view(global_route.pin)
+            assert global_pin.index == 2
         reopened = ResultEntry.open(
             "entry", result_root=results, database_root=database
         )
         loaded = (
             reopened.parameters()
-            if owner == "setup"
+            if owner == "global"
             else reopened.parameters("working")
         )
         with loaded.edit() as draft:
@@ -404,7 +404,7 @@ def test_recursive_dict_views_preserve_models_constraints_and_sources(
         assert loaded_gain.left == 5
 
 
-@pytest.mark.parametrize("owner", ["setup", "point"])
+@pytest.mark.parametrize("owner", ["global", "point"])
 @pytest.mark.parametrize("version", ["2.0", "2.2"])
 def test_collision_extra_edit_abort_preserves_both_components(
     tmp_path: Path, registry_state_guard: None, owner: str, version: str
@@ -423,11 +423,11 @@ def test_collision_extra_edit_abort_preserves_both_components(
                 "N2", kind=kind, model_config={"marker": "second"}
             )
             view = (
-                entry.parameters() if owner == "setup" else entry.new_point("working")
+                entry.parameters() if owner == "global" else entry.new_point("working")
             )
             source = (
                 results / "entry/parameters.yaml"
-                if owner == "setup"
+                if owner == "global"
                 else results / "entry/points/working/parameters.yaml"
             )
             yaml = YAML(typ="rt")
@@ -452,7 +452,7 @@ def test_collision_extra_edit_abort_preserves_both_components(
             )
             loaded = (
                 reopened.parameters()
-                if owner == "setup"
+                if owner == "global"
                 else reopened.parameters("working")
             )
             assert field_view(loaded.N1.model_config).marker == "first"
@@ -462,7 +462,7 @@ def test_collision_extra_edit_abort_preserves_both_components(
         Colliding.model_config = original_config
 
 
-@pytest.mark.parametrize("owner", ["setup", "point"])
+@pytest.mark.parametrize("owner", ["global", "point"])
 @pytest.mark.parametrize("write", ["set", "property"])
 def test_model_mapping_replacement_accepts_values_and_keeps_metadata(
     tmp_path: Path, registry_state_guard: None, owner: str, write: str
@@ -483,7 +483,7 @@ def test_model_mapping_replacement_accepts_values_and_keeps_metadata(
         entry.parameters().add_component(
             "N1", kind=kind, routes={"drive": {"pin": {"index": 2}}}
         )
-        view = entry.parameters() if owner == "setup" else entry.new_point("working")
+        view = entry.parameters() if owner == "global" else entry.new_point("working")
         if write == "set":
             with view.edit() as draft:
                 draft.set("N1.routes", {"drive": {"pin": {"index": 6}}})
@@ -511,7 +511,7 @@ def test_model_mapping_replacement_accepts_values_and_keeps_metadata(
         )
         loaded = (
             reopened.parameters()
-            if owner == "setup"
+            if owner == "global"
             else reopened.parameters("working")
         )
         loaded_route = field_view(field_view(loaded.N1.routes).drive)
@@ -519,7 +519,7 @@ def test_model_mapping_replacement_accepts_values_and_keeps_metadata(
         assert loaded.meta("N1.routes.drive.pin.index") == accepted
 
 
-@pytest.mark.parametrize("owner", ["setup", "point"])
+@pytest.mark.parametrize("owner", ["global", "point"])
 @pytest.mark.parametrize("write", ["set", "property"])
 def test_model_list_replacement_accepts_values_and_keeps_metadata(
     tmp_path: Path, registry_state_guard: None, owner: str, write: str
@@ -538,7 +538,7 @@ def test_model_list_replacement_accepts_values_and_keeps_metadata(
         entry.parameters().add_component(
             "N1", kind=kind, routes=[{"pin": {"index": 2}}]
         )
-        view = entry.parameters() if owner == "setup" else entry.new_point("working")
+        view = entry.parameters() if owner == "global" else entry.new_point("working")
         if write == "set":
             with view.edit() as draft:
                 draft.set("N1.routes", [{"pin": {"index": 6}}])
@@ -563,14 +563,14 @@ def test_model_list_replacement_accepts_values_and_keeps_metadata(
         )
         loaded = (
             reopened.parameters()
-            if owner == "setup"
+            if owner == "global"
             else reopened.parameters("working")
         )
         assert loaded.N1.routes == [{"pin": {"index": 6}}]
         assert loaded.meta("N1.routes") == accepted
 
 
-@pytest.mark.parametrize("owner", ["setup", "point"])
+@pytest.mark.parametrize("owner", ["global", "point"])
 @pytest.mark.parametrize("version", ["2.0", "2.2"])
 def test_collision_extras_read_write_meta_and_reload(
     tmp_path: Path, registry_state_guard: None, owner: str, version: str
@@ -589,11 +589,11 @@ def test_collision_extras_read_write_meta_and_reload(
                 "N2", kind=kind, model_config={"marker": "second"}
             )
             view = (
-                entry.parameters() if owner == "setup" else entry.new_point("working")
+                entry.parameters() if owner == "global" else entry.new_point("working")
             )
             source = (
                 results / "entry/parameters.yaml"
-                if owner == "setup"
+                if owner == "global"
                 else results / "entry/points/working/parameters.yaml"
             )
             yaml = YAML(typ="rt")
@@ -631,7 +631,7 @@ def test_collision_extras_read_write_meta_and_reload(
             )
             loaded = (
                 reopened.parameters()
-                if owner == "setup"
+                if owner == "global"
                 else reopened.parameters("working")
             )
             assert field_view(loaded.N1.model_config).marker == "accepted"

@@ -243,7 +243,7 @@ def test_cross_entry_clone_uses_published_values_and_copies_metadata(
         name: (source_path / name).read_bytes()
         for name in ("parameters.yaml", "library.yaml")
     }
-    # Clone does not depend on the destination setup.
+    # Clone does not depend on the destination global.
     (results / "entry/parameters.yaml").write_text("invalid: [", encoding="utf-8")
     source_arg = "other/source" if source_mode == "label" else stale_point
     clone = entry.new_point("target", mode="clone", clone_from=source_arg)

@@ -1,6 +1,6 @@
 # `zcu_tools.resources.entry` result entry composition
 
-**Last updated:** 2026-11-17，三檔開檔與 aliases 快取觀察
+**Last updated:** 2026-11-17，global／point 文件選擇
 
 **讀者：** framework-dev。Result entry、point、ledger 與輸出位置契約。
 
@@ -188,7 +188,7 @@ List 是整欄衝突與通知單位。等長編輯按位置保留未改資料。
 ## 角色與失敗
 
 GUI 透過 ContextService 讀取作用中文件組的元件／device 共用 alias 表。
-`apply_alias_rows` 一律 write-through，GLOBAL 寫 entry，POINT 寫選定 point，`setup=True` 固定寫 entry。
+`apply_alias_rows(rows, point=None)` 一律 write-through，預設寫 global，明確傳 focus label 才寫該 point；其他 label 在讀寫前拒絕。
 未開 entry 時以 no_context 拒絕，不保存 memory-only rows 或 presets。Startup 先開 entry，再明確套用 rows。
 Inspect 保存所選 Destination。選 point 時改 entry 表只更新 entry cache 與 revision，不改作用中 point 或舊 capture。
 兩層檔案同步見 [ADR-0081](../../../../docs/adr/0081-point-data-disk-sync.md)。

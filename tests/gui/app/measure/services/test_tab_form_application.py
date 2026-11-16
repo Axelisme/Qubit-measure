@@ -15,6 +15,7 @@ from zcu_tools.gui.app.measure.events.run import RunFinishedPayload
 from zcu_tools.gui.form import FormValue
 from zcu_tools.gui.form_adapter import Form, FormContext
 
+from tests.gui._context_reads import capture_focus
 from tests.gui._qt_waits import qt_until
 from tests.gui.app.measure._record_support import require_record, require_target
 from tests.gui.app.measure.remote._helpers import Fixture
@@ -148,7 +149,7 @@ def test_open_edit_run_and_reset_use_public_form_authority(
 ) -> None:
     application = Fixture(headless=True, project_root=str(tmp_path / "project"))
     application.registry.register("trace", TraceAdapter)
-    parameters = application.ctrl.context_control.read_context()
+    parameters = capture_focus(application.ctrl.context_control)
     application.ctrl.context_control.set_parameter(
         require_target(parameters), "general.ext.amount", 2.0
     )

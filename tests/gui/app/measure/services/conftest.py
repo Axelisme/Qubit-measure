@@ -21,6 +21,7 @@ from zcu_tools.resources.entry import (
 )
 from zcu_tools.resources.entry.schema import ParameterDocument
 
+from tests.gui._context_reads import capture_focus
 from tests.gui.app.measure._native_save_support import (
     NativeSaveSession,
     native_save_session,
@@ -83,15 +84,20 @@ def role_load_session(
     with native_save_session(tmp_path, qapp) as session:
         control = session.context
         tab = session.state.get_tab("tab")
-        control.add_component("Q1", "run-source/qubit", {"rate": 1.0})
-        control.add_component("Q2", "run-source/qubit", {"rate": 2.0})
+        control.add_component(
+            "Q1", "run-source/qubit", {"rate": 1.0}, point=control.current_point_label()
+        )
+        control.add_component(
+            "Q2", "run-source/qubit", {"rate": 2.0}, point=control.current_point_label()
+        )
         session.context.apply_alias_rows(
             (
                 AliasRow("source_qubit", "Q1"),
                 AliasRow("custom", "Q2"),
-            )
+            ),
+            point=session.context.current_point_label(),
         )
-        captured = session.context.read_context()
+        captured = capture_focus(session.context)
         assert captured is not None and captured.roles is not None
         session.metadata = session.metadata.model_copy(
             update={

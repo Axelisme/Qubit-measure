@@ -4,6 +4,7 @@ from hashlib import sha256
 from pathlib import Path
 
 import pytest
+from tests.gui._context_reads import capture_focus
 from zcu_tools.gui.session.context_types import EntryInfo, EntryRequest
 from zcu_tools.gui.session.types import ContextReadiness
 from zcu_tools.resources.entry import ResultEntry
@@ -128,12 +129,12 @@ def test_rejected_entry_request_preserves_selected_point(
 ) -> None:
     application.result("entry.new", {"name": "first"})
     application.result("point.new", {"label": "selected"})
-    before = application.controller.context_control.read_context()
+    before = capture_focus(application.controller.context_control)
     info = application.result("entry.info", {})
     rejected = application.rpc(method, params)
     assert rejected["ok"] is False, rejected
     assert application.result("entry.info", {}) == info
-    assert application.controller.context_control.read_context().target == before.target
+    assert capture_focus(application.controller.context_control).target == before.target
     assert application.state.session_env.readiness == ContextReadiness.POINT
     assert application.result("entry.list", {}) == {"entries": ["first"]}
 

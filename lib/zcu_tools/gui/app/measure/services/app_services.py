@@ -139,7 +139,7 @@ def build_app_services(  # noqa: PLR0913
     hardware factory; tests may inject a hardware-free constructor.
 
     Aliases are file-backed. Startup scripts open an entry, then call
-    ctx.context.apply_alias_rows to initialize the active table explicitly.
+    ctx.context.apply_alias_rows to initialize global aliases, or pass the focused point label.
     """
     access = ExperimentAccess()
     operation_gate = OperationGate(bus)
@@ -175,7 +175,9 @@ def build_app_services(  # noqa: PLR0913
     ) -> DocumentSetCapture | None:
         if state.session_env.parameters is None and not aliases:
             return None
-        return context.read_context(aliases=aliases)
+        return context.read_context(
+            point=context.current_point_label(), aliases=aliases
+        )
 
     def form_sources(aliases: Mapping[str, str] | None) -> TabFormSources:
         parameters = captured_parameters(aliases)

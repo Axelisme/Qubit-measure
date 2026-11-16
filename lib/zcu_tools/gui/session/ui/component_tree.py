@@ -42,6 +42,7 @@ from zcu_tools.gui.session.ui.component_editing import (
     set_error_foreground,
     show_error,
 )
+from zcu_tools.gui.session.ui.document_destination import DocumentDestination
 from zcu_tools.gui.session.ui.file_banner import FileBanner
 from zcu_tools.gui.session.ui.tree_filter import TreeFilter
 from zcu_tools.gui.widgets.selectable_text import make_label_selectable
@@ -88,7 +89,7 @@ class _EditTarget:
     initial: str
     write_depth: int
     revision: FileRevision | None = None
-    setup: bool = False
+    selected_point: str | None = None
     entry_name: str | None = None
     point: DocumentSetRef | None = None
     draft: str | None = None
@@ -122,7 +123,7 @@ class ComponentTreeWidget(QWidget):
     advances its baseline. Other validation failures restore the original cell.
     Reload discards
     retained text only after the owner validates and installs the source.
-    A setup/current
+    A Global/point
     selector controls the editing destination; "Add component…" opens an
     AddComponentDialog for that destination.
     """
@@ -136,7 +137,7 @@ class ComponentTreeWidget(QWidget):
 
         Without an entry or parameter context the tree is empty, the owner's
         message shows as a hint and "Add component…" is disabled. Field edits
-        go through the source owner; setup mode edits only the entry template.
+        go through the source owner; Global edits only the global documents.
         set_read_only disables writes while retaining tree browsing.
         """
         super().__init__(parent)
@@ -152,9 +153,8 @@ class ComponentTreeWidget(QWidget):
         layout.addWidget(self._sync)
         toolbar = QHBoxLayout()
         toolbar.addWidget(QLabel("Destination:"))
-        self._destination = QComboBox()
+        self._destination = DocumentDestination()
         self._destination.setObjectName("inspect.parameters.destination")
-        self._destination.addItems(["Active documents", "Entry template"])
         self._scope.connect(
             self._destination.currentIndexChanged, self._destination_changed
         )
@@ -216,6 +216,8 @@ class ComponentTreeWidget(QWidget):
         error text is cleared. FailedPreconditionError (no entry or no parameter context)
         empties the tree, shows the owner's message as a hint and disables Add.
         """
+        self._destination.refresh(self._control.current_point_label())
+        self._sync.set_point(self._destination.point())
         self.refresh_file_status()
         if self._drafts:
             return
@@ -226,7 +228,7 @@ class ComponentTreeWidget(QWidget):
         self._clear_error()
         self._add_btn.setEnabled(False)
         try:
-            document = self._control.inspect_document(setup=self._is_setup())
+            document = self._control.inspect_document(point=self._destination.point())
         except FailedPreconditionError as exc:
             self._show_hint(str(exc))
             return
@@ -260,7 +262,7 @@ class ComponentTreeWidget(QWidget):
         """
         dialog = AddComponentDialog(
             self._control,
-            setup=self._is_setup(),
+            point=self._destination.point(),
             on_added=self._show_added,
             parent=self,
         )
@@ -269,7 +271,7 @@ class ComponentTreeWidget(QWidget):
         return dialog
 
     def add_component(
-        self, name: str, kind: str, fields: YamlMap, *, setup: bool = False
+        self, name: str, kind: str, fields: YamlMap, *, point: str | None = None
     ) -> bool:
         """Add a component through the owner without the dialog; True on success.
 
@@ -278,7 +280,7 @@ class ComponentTreeWidget(QWidget):
         QLabel and return False; no default or empty value hides the failure.
         """
         try:
-            self._control.add_component(name, kind, fields, setup=setup)
+            self._control.add_component(name, kind, fields, point=point)
         except Exception as exc:
             logger.exception("Component addition failed")
             show_error(self._error, exc)
@@ -291,25 +293,21 @@ class ComponentTreeWidget(QWidget):
         path: str,
         value: YamlValue,
         *,
-        setup: bool = False,
+        point: str | None = None,
         target: DocumentSetRef | None = None,
     ) -> bool:
         """Edit a concrete field through its owner; report errors as for Add.
 
         target pins a point edit to its original destination. When omitted,
-        capture the currently selected point. setup edits the entry template.
+        use point=None for global or the focused label for point documents.
         """
         try:
-            if setup:
-                self._control.set_setup_parameter(path, value)
-            else:
-                point = target or self._control.read_context().target
-                if point is None:
-                    raise FailedPreconditionError(
-                        "Select a working point before editing parameters",
-                        reason_code="no_context",
-                    )
-                self._control.set_parameter(point, path, value)
+            destination = target or self._control.read_context(point=point).target
+            if destination is None:
+                raise FailedPreconditionError(
+                    "Open an entry before editing parameters", reason_code="no_context"
+                )
+            self._control.set_parameter(destination, path, value)
         except Exception as exc:
             logger.exception("Parameter edit failed")
             show_error(self._error, exc)
@@ -318,16 +316,13 @@ class ComponentTreeWidget(QWidget):
         return True
 
     def _destination_changed(self) -> None:
-        self._sync.set_setup(setup=self._is_setup())
+        self._sync.set_point(self._destination.point())
         self.refresh()
         if self._drafts:
             self._sync.show_conflict(
                 "Parameter draft retains its original destination and revision. "
                 "Reload to discard it and load this destination."
             )
-
-    def _is_setup(self) -> bool:
-        return self._destination.currentIndex() == 1
 
     def _show_added(self, name: str) -> None:
         self.refresh()
@@ -554,13 +549,13 @@ class ComponentTreeWidget(QWidget):
         key = _row_key(item)
         target = self._edit_targets[key]
         if key not in self._drafts:
-            setup = self._is_setup()
+            point = self._destination.point()
             entry = self._control.get_entry_info()
             target = replace(
                 target,
-                setup=setup,
+                selected_point=point,
                 entry_name=None if entry is None else entry.name,
-                point=None if setup else self._control.read_context().target,
+                point=self._control.read_context(point=point).target,
                 revision=self._sync.capture(),
             )
             self._edit_targets[key] = target
@@ -588,10 +583,10 @@ class ComponentTreeWidget(QWidget):
             entry = self._control.get_entry_info()
             current_revision = self._sync.capture()
             if (
-                target.setup != self._is_setup()
+                target.selected_point != self._destination.point()
                 or target.entry_name != (None if entry is None else entry.name)
                 or (
-                    not target.setup
+                    target.selected_point is not None
                     and (
                         current_revision is None
                         or target.revision is None
@@ -620,7 +615,9 @@ class ComponentTreeWidget(QWidget):
             nested: YamlMap = {segment: value}
             value = nested
         path = ".".join((target.component, *target.segments[: target.write_depth]))
-        if self.edit_parameter(path, value, setup=target.setup, target=target.point):
+        if self.edit_parameter(
+            path, value, point=target.selected_point, target=target.point
+        ):
             self._drafts.pop(key, None)
             self.refresh()
         else:

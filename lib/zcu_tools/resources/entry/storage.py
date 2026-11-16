@@ -74,7 +74,7 @@ class RunOutputBinding:
     def prepare_ledger(self) -> RecordsLedger:
         """Create the Result output directory and bind its append-only ledger.
 
-        No setup or point is opened or manufactured. Reject a records symlink
+        No global or point is opened or manufactured. Reject a records symlink
         escaping this entry before creating directories or appending evidence.
         """
         records = self.result_path / "records"

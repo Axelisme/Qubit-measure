@@ -299,30 +299,33 @@ class StartupParameters:
     calls: OwnerCalls
     control: ContextControlPort
 
-    def apply_alias_rows(self, rows: tuple[AliasRow, ...]) -> None:
+    def apply_alias_rows(
+        self, rows: tuple[AliasRow, ...], *, point: str | None = None
+    ) -> None:
         """Validate and persist ordered authored rows, then publish them in memory.
 
-        Save the active aliases.yaml (entry when global, otherwise the selected
-        point), then install its revision and rows. Without an opened entry
+        None writes global aliases.yaml; a label must be the focused point.
+        Save then install its revision and rows. Without an opened entry
         raise FailedPreconditionError(no_context) before validation or I/O.
         Invalid rows and storage errors preserve the prior table/file.
         The context owner manages validation and atomic file replacement.
         Synchronous from a worker or owner callback.
         """
-        self.calls.call(lambda: self.control.apply_alias_rows(rows))
+        self.calls.call(lambda: self.control.apply_alias_rows(rows, point=point))
 
     def add_component(
-        self, name: str, kind: str, fields: YamlMap, *, setup: bool = False
+        self, name: str, kind: str, fields: YamlMap, *, point: str | None = None
     ) -> None:
-        """Add registered kind with working-unit fields to point or setup template.
+        """Add registered kind with working-unit fields to global or focused point documents.
 
-        setup=True targets the opened entry template, otherwise the selected
-        point. The owner validates and commits one transaction. Schema, context,
+        None targets global documents; a label must equal the focused point.
+        Other labels raise InvalidInputError(point_not_focused) before I/O.
+        The owner validates and commits one transaction. Schema, context,
         conflict and I/O errors propagate without rollback of earlier commands.
         Caller must not mutate fields until return. Worker/owner safe.
         """
         self.calls.call(
-            lambda: self.control.add_component(name, kind, fields, setup=setup)
+            lambda: self.control.add_component(name, kind, fields, point=point)
         )
 
 

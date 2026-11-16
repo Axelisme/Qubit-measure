@@ -66,6 +66,7 @@ from zcu_tools.resources.entry.ledger_models import AcceptedPayload, LedgerEvent
 from zcu_tools.resources.entry.registry import RoleSpec
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
+from tests.gui._context_reads import capture_focus
 from tests.experiment._saving_support import SavingCfg, SavingResult
 from tests.gui.app.measure._native_save_support import (
     AnalysisSavingAdapter,
@@ -113,7 +114,9 @@ def session(tmp_path: Path) -> Generator[WritebackSession]:
         context.install_entry(entry)
         context.use_point(PointUseRequest("working"))
         control = context
-        control.add_component("Q1", "fake/drive/a", {})
+        control.add_component(
+            "Q1", "fake/drive/a", {}, point=control.current_point_label()
+        )
         service = WritebackService(control, arb_names=lambda: ())
         yield WritebackSession(entry, control, service)
         assert registry_state() == installed
@@ -125,7 +128,9 @@ def session(tmp_path: Path) -> Generator[WritebackSession]:
 def saved_session(session: WritebackSession) -> WritebackSession:
     session.entry.new_point("saved")
     session.control.use_point(PointUseRequest("saved"))
-    session.control.add_component("Q1", "fake/drive/a", {})
+    session.control.add_component(
+        "Q1", "fake/drive/a", {}, point=session.control.current_point_label()
+    )
     return session
 
 
@@ -133,7 +138,7 @@ def saved_session(session: WritebackSession) -> WritebackSession:
 def test_acceptance_retains_actual_values_and_fixed_destination_for_confirmed_prefix(
     session: WritebackSession, fails: bool
 ) -> None:
-    captured = session.control.read_context()
+    captured = capture_focus(session.control)
     proposals = [ParameterWriteback("Q1.ext.gain", "Gain", proposed_value=0.4)]
     if fails:
         proposals.extend(
@@ -170,15 +175,17 @@ def test_acceptance_retains_actual_values_and_fixed_destination_for_confirmed_pr
     draft.edit("param-1", proposed_value=0.9)
     session.control.set_parameter(saved_target(captured), "Q1.ext.accepted", 0.7)
     assert asdict(result)["written"] == expected
-    assert not session.control.read_context().lookup("Q1.ext.later").present
+    assert not capture_focus(session.control).lookup("Q1.ext.later").present
 
 
 @pytest.mark.parametrize("fails", [False, True])
 def test_mixed_submission_receipts_and_applied_flags_follow_committed_indices(
     session: WritebackSession, fails: bool
 ) -> None:
-    session.control.apply_alias_rows((AliasRow("coordinate", "device"),))
-    captured = session.control.read_context()
+    session.control.apply_alias_rows(
+        (AliasRow("coordinate", "device"),), point=session.control.current_point_label()
+    )
+    captured = capture_focus(session.control)
     draft = session.service.create_draft(
         [
             ModuleWriteback(
@@ -221,8 +228,8 @@ def test_mixed_submission_receipts_and_applied_flags_follow_committed_indices(
     }
     assert [item.value for item in result.values[:2]] == [0.4, 5000.0]
     assert result.values[2].kind == "module"
-    assert session.control.read_context().value("Q1.ext.gain") == 0.4
-    assert session.control.read_context().value("Q1.ext.rate") == 5000.0
+    assert capture_focus(session.control).value("Q1.ext.gain") == 0.4
+    assert capture_focus(session.control).value("Q1.ext.rate") == 5000.0
     assert session.entry.ledger.events()[-1].kind == "accepted"
     assert (result.error is not None) == fails
 
@@ -230,7 +237,9 @@ def test_mixed_submission_receipts_and_applied_flags_follow_committed_indices(
 def test_write_draft_associates_before_and_after_values_after_group_reordering(
     session: WritebackSession,
 ) -> None:
-    session.control.apply_alias_rows((AliasRow("coordinate", "device"),))
+    session.control.apply_alias_rows(
+        (AliasRow("coordinate", "device"),), point=session.control.current_point_label()
+    )
     draft = session.service.create_draft(
         [
             RecordWriteback(
@@ -240,7 +249,7 @@ def test_write_draft_associates_before_and_after_values_after_group_reordering(
             ),
             ParameterWriteback("Q1.ext.gain", "Gain", proposed_value=0.4),
         ],
-        parameters=session.control.read_context(),
+        parameters=capture_focus(session.control),
         experiment_name="synthetic",
         run_id="run-1",
         device_snapshot={"device": {"value": 0.1, "value_unit": "V"}},
@@ -259,7 +268,7 @@ def test_write_draft_associates_before_and_after_values_after_group_reordering(
 def test_acceptance_keeps_per_item_values_without_postcommit_readback(
     session: WritebackSession, readback_fails: bool, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    captured = session.control.read_context()
+    captured = capture_focus(session.control)
     draft = session.service.create_draft(
         [
             ParameterWriteback("Q1.ext.fit", "Fit", proposed_value={"gain": 0.1}),
@@ -288,12 +297,18 @@ def test_acceptance_keeps_per_item_values_without_postcommit_readback(
 def test_apply_uses_current_document_set_and_records_nullable_point(
     session: WritebackSession, destination: str
 ) -> None:
-    session.control.apply_alias_rows((AliasRow("qubit", "Q1"),))
-    point_source = session.control.read_context()
+    session.control.apply_alias_rows(
+        (AliasRow("qubit", "Q1"),), point=session.control.current_point_label()
+    )
+    point_source = capture_focus(session.control)
     session.control.use_global()
-    session.control.add_component("Q1", "fake/drive/a", {})
-    session.control.apply_alias_rows((AliasRow("qubit", "Q1"),))
-    global_source = session.control.read_context()
+    session.control.add_component(
+        "Q1", "fake/drive/a", {}, point=session.control.current_point_label()
+    )
+    session.control.apply_alias_rows(
+        (AliasRow("qubit", "Q1"),), point=session.control.current_point_label()
+    )
+    global_source = capture_focus(session.control)
     session.entry.parameters().refresh()
     untouched_before = document_value(
         snapshot(
@@ -321,7 +336,9 @@ def test_apply_uses_current_document_set_and_records_nullable_point(
     else:
         session.control.use_global()
     # A different live alias must not redirect the captured proposal.
-    session.control.apply_alias_rows((AliasRow("qubit", "Q2"),))
+    session.control.apply_alias_rows(
+        (AliasRow("qubit", "Q2"),), point=session.control.current_point_label()
+    )
     result = session.service.accept_drafts(
         (WritebackSelection(draft, ("param-1", "record-1")),)
     )
@@ -354,7 +371,7 @@ def test_preview_and_apply_use_current_gui_point_not_analysis_origin(
     session: WritebackSession,
     source: str,
 ) -> None:
-    original = session.control.read_context()
+    original = capture_focus(session.control)
     session.control.set_parameter(saved_target(original), "Q1.ext.gain", 0.1)
     parameters = original
     if source == "snapshot":
@@ -370,8 +387,10 @@ def test_preview_and_apply_use_current_gui_point_not_analysis_origin(
     )
     session.entry.new_point("other")
     session.control.use_point(PointUseRequest("other"))
-    session.control.add_component("Q1", "fake/drive/a", {})
-    selected = session.control.read_context()
+    session.control.add_component(
+        "Q1", "fake/drive/a", {}, point=session.control.current_point_label()
+    )
+    selected = capture_focus(session.control)
     session.control.set_parameter(saved_target(selected), "Q1.ext.gain", 0.2)
     values = draft.preview_values()
     assert values["param-1"].current == 0.2
@@ -398,7 +417,7 @@ def test_draft_detaches_author_element_identity(session: WritebackSession) -> No
     )
     draft = session.service.create_draft(
         [proposal],
-        parameters=session.control.read_context(),
+        parameters=capture_focus(session.control),
         experiment_name="synthetic",
     )
     try:
@@ -420,7 +439,7 @@ def test_accepted_retains_run_identity_with_or_without_save(
         control = native.context
         service = WritebackService(control, arb_names=lambda: ())
         tab = native.state.get_tab("tab")
-        captured = control.read_context()
+        captured = capture_focus(control)
         source_run_id = require_metadata(tab.run).run_id
         draft = service.create_draft(
             [ParameterWriteback("general.ext.flux_value", "Flux", proposed_value=2.0)],
@@ -566,7 +585,7 @@ def test_analysis_draft_uses_start_run_identity(
             native.state, runner, native.bus, writeback, native.handles
         )
         plots = Plots(NonPresentingHost())
-        current = control.read_context() if captured is None else None
+        current = capture_focus(control) if captured is None else None
         native.state.set_context(replace(native.state.session_env, parameters=current))
         if interactive:
             plugin = PluginDefinition(
@@ -731,7 +750,7 @@ def test_post_analysis_draft_retains_primary_identity(
         )
         native.entry.new_point("later-point")
         control.use_point(PointUseRequest("later-point"))
-        current = control.read_context()
+        current = capture_focus(control)
         assert current is not captured
         service.start_post_analyze("tab", object(), plots=Plots(NonPresentingHost()))
         # Terminal delivery must use the operation-start identity and context.
@@ -762,9 +781,9 @@ def test_writeback_evaluates_module_expression_from_creation_capture(
     saved_session: WritebackSession, destination: str
 ) -> None:
     session = saved_session
-    initial = session.control.read_context()
+    initial = capture_focus(session.control)
     session.control.set_parameter(saved_target(initial), "general.ext.flux_value", 0.5)
-    captured = session.control.read_context()
+    captured = capture_focus(session.control)
     draft = session.service.create_draft(
         [
             ModuleWriteback(
@@ -786,10 +805,14 @@ def test_writeback_evaluates_module_expression_from_creation_capture(
     session.control.set_parameter(saved_target(captured), "general.ext.flux_value", 0.9)
     if destination == "global":
         session.control.use_global()
-        session.control.add_component("Q1", "fake/drive/a", {})
-        session.control.set_setup_parameter("general.ext.flux_value", 0.9)
+        session.control.add_component(
+            "Q1", "fake/drive/a", {}, point=session.control.current_point_label()
+        )
+        session.control.set_parameter(
+            saved_target(session.control.read_context()), "general.ext.flux_value", 0.9
+        )
     draft.apply()
-    current = session.control.read_context()
+    current = capture_focus(session.control)
     written = current.library.module_spec("Q1.pulses.pi")
     assert isinstance(written, PulseSpec) and written.gain == 0.5
     event = session.entry.ledger.events()[-1]
@@ -802,7 +825,7 @@ def test_append_failure_leaves_parameter_untouched(
     saved_session: WritebackSession, monkeypatch
 ) -> None:
     session = saved_session
-    captured = session.control.read_context()
+    captured = capture_focus(session.control)
     draft = session.service.create_draft(
         [ParameterWriteback("general.ext.flux_value", "Value", proposed_value=2.0)],
         parameters=captured,
@@ -815,7 +838,7 @@ def test_append_failure_leaves_parameter_untouched(
     monkeypatch.setattr(RecordsLedger, "append", fail_append)
     with pytest.raises(OSError, match="ledger unavailable"):
         draft.apply()
-    assert not session.control.read_context().lookup("general.ext.flux_value").present
+    assert not capture_focus(session.control).lookup("general.ext.flux_value").present
     assert session.entry.ledger.events() == ()
 
 
@@ -828,8 +851,9 @@ def test_complex_writeback_keeps_captured_role_path_but_writes_selected_point(
         "Q1",
         "fake/drive/a",
         {"ext": {"response": {"origin": {"__complex__": [0.2, -0.1]}}}},
+        point=session.control.current_point_label(),
     )
-    captured = session.control.read_context().bind_roles(
+    captured = capture_focus(session.control).bind_roles(
         {"driver": RoleSpec("fake/drive/*")}, focus="Q1", explicit={}
     )
     centers = (complex(3.125, -1.625), complex(-0.4, 0.1))
@@ -857,13 +881,16 @@ def test_complex_writeback_keeps_captured_role_path_but_writes_selected_point(
     )
     session.entry.new_point("b")
     second = session.control.use_point(PointUseRequest("b"))
-    session.control.add_component("Q2", "fake/drive/a", {})
+    session.control.add_component(
+        "Q2", "fake/drive/a", {}, point=session.control.current_point_label()
+    )
     session.control.add_component(
         "Q1",
         "fake/drive/a",
         {
             "ext": {"response": {"origin": {"__complex__": [0.7, 0.2]}}},
         },
+        point=session.control.current_point_label(),
     )
     preview = draft.preview_values()
     assert preview["param-1"].current == {"__complex__": [0.7, 0.2]}
@@ -883,7 +910,7 @@ def test_complex_writeback_keeps_captured_role_path_but_writes_selected_point(
     assert [current.value(path) for path in paths] == tags
     assert evaluate_scalar_expr("$driver.ext.response.origin", current) == centers[0]
     assert captured.value("$driver.ext.response.origin") == {"__complex__": [0.2, -0.1]}
-    assert session.control.read_context().target == second
+    assert capture_focus(session.control).target == second
     event = session.entry.ledger.events()[-1]
     assert event.origin == "mcp"
     assert isinstance(event.payload, AcceptedPayload)
@@ -907,8 +934,10 @@ def test_receipt_reads_actual_role_target_after_point_change(
 ) -> None:
     session.entry.new_point("a")
     first = session.control.use_point(PointUseRequest("a"))
-    session.control.add_component("Q1", "fake/drive/a", {"rate": 0.1})
-    captured = session.control.read_context().bind_roles(
+    session.control.add_component(
+        "Q1", "fake/drive/a", {"rate": 0.1}, point=session.control.current_point_label()
+    )
+    captured = capture_focus(session.control).bind_roles(
         {"driver": RoleSpec("fake/drive/*")}, focus="Q1", explicit={}
     )
     draft = session.service.create_draft(
@@ -920,8 +949,12 @@ def test_receipt_reads_actual_role_target_after_point_change(
     session.control.set_parameter(first, "Q1.rate", 0.6)
     session.entry.new_point("b")
     second = session.control.use_point(PointUseRequest("b"))
-    session.control.add_component("Q2", "fake/drive/a", {"rate": 0.9})
-    session.control.add_component("Q1", "fake/drive/a", {"rate": 0.8})
+    session.control.add_component(
+        "Q2", "fake/drive/a", {"rate": 0.9}, point=session.control.current_point_label()
+    )
+    session.control.add_component(
+        "Q1", "fake/drive/a", {"rate": 0.8}, point=session.control.current_point_label()
+    )
     assert draft.preview_values()["param-1"].current == 0.8
     draft.edit("param-1", selected=False)
     written = draft.writeback_write(
@@ -929,8 +962,8 @@ def test_receipt_reads_actual_role_target_after_point_change(
     )
     assert written == [WritebackWritten("param-1", "parameter", "Q1.rate", 0.8, 0.2)]
     assert captured.value("$driver.rate") == 0.1
-    assert session.control.read_context().target == second
-    assert session.control.read_context().value("Q1.rate") == 0.2
+    assert capture_focus(session.control).target == second
+    assert capture_focus(session.control).value("Q1.rate") == 0.2
     assert session.control.read_target(first).value("Q1.rate") == 0.6
     assert not draft.items[0].selected
     assert draft.get_all_applied() == {"param-1": True}
@@ -946,9 +979,9 @@ def test_library_receipt_reads_actual_raw_entry_and_uses_capture_for_proposal(
     saved_session: WritebackSession,
 ) -> None:
     session = saved_session
-    initial = session.control.read_context()
+    initial = capture_focus(session.control)
     session.control.set_parameter(saved_target(initial), "general.ext.flux_value", 0.2)
-    captured = session.control.read_context()
+    captured = capture_focus(session.control)
     cfg = PulseSpec(
         ch=0, nqz=1, freq=100.0, gain=0.2, waveform=ConstWaveformCfg(length=0.1)
     )
@@ -981,12 +1014,12 @@ def test_each_parameter_write_replaces_metadata_with_its_own_stderr(
     saved_session: WritebackSession,
 ) -> None:
     session = saved_session
-    target = saved_target(session.control.read_context())
+    target = saved_target(capture_focus(session.control))
     for path in ("Q1.rate", "Q1.coherence"):
         session.control.set_parameter(
             target, path, 1.0, metadata={"stderr": 9.0, "comment": "old"}
         )
-    captured = session.control.read_context()
+    captured = capture_focus(session.control)
     draft = session.service.create_draft(
         [
             ParameterWriteback("Q1.rate", "Rate", proposed_value=0.2, stderr=0.01),
@@ -999,7 +1032,7 @@ def test_each_parameter_write_replaces_metadata_with_its_own_stderr(
         experiment_name="test/writeback",
     )
     draft.apply()
-    document = session.control.read_context().document()
+    document = capture_focus(session.control).document()
     assert [
         document_meta(document, path)
         for path in ("Q1.rate", "Q1.duration", "Q1.coherence")
@@ -1013,8 +1046,8 @@ def test_each_parameter_write_replaces_metadata_with_its_own_stderr(
 def test_duplicate_concrete_role_destinations_fail_before_accepted(
     session: WritebackSession,
 ) -> None:
-    before = session.control.read_context().lookup("Q1.rate")
-    captured = session.control.read_context().bind_roles(
+    before = capture_focus(session.control).lookup("Q1.rate")
+    captured = capture_focus(session.control).bind_roles(
         {"driver": RoleSpec("fake/drive/*")}, focus="Q1", explicit={}
     )
     draft = session.service.create_draft(
@@ -1028,7 +1061,7 @@ def test_duplicate_concrete_role_destinations_fail_before_accepted(
     with pytest.raises(InvalidInputError, match="duplicate writeback destination"):
         draft.apply()
     assert session.entry.ledger.events() == ()
-    assert session.control.read_context().lookup("Q1.rate") == before
+    assert capture_focus(session.control).lookup("Q1.rate") == before
 
 
 def test_empty_draft_reads_and_writes_without_context(
@@ -1048,7 +1081,7 @@ def test_preview_proposed_data_is_isolated_at_validation_boundary(
 ) -> None:
     draft = session.service.create_draft(
         [ParameterWriteback("Q1.ext.samples", "Samples", proposed_value=[1, 2])],
-        parameters=session.control.read_context(),
+        parameters=capture_focus(session.control),
         experiment_name="test/writeback",
     )
     preview = draft.preview_values()["param-1"]

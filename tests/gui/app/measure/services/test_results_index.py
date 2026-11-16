@@ -537,18 +537,18 @@ def test_entry_selection_rejects_traversal(project: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    "damage", ["missing_setup", "foreign_setup", "partial_ledger", "foreign_ledger"]
+    "damage", ["missing_setup", "foreign_global", "partial_ledger", "foreign_ledger"]
 )
 def test_entry_read_failures_do_not_hide_other_results(
     project: Path, damage: str
 ) -> None:
     entry = project / "result" / "alpha"
-    setup = entry / "parameters.yaml"
+    global_path = entry / "parameters.yaml"
     ledger = entry / "records" / "ledger.jsonl"
     if damage == "missing_setup":
-        setup.unlink()
-    elif damage == "foreign_setup":
-        setup.write_text("format: foreign\n", encoding="utf-8")
+        global_path.unlink()
+    elif damage == "foreign_global":
+        global_path.write_text("format: foreign\n", encoding="utf-8")
     elif damage == "partial_ledger":
         with ledger.open("a", encoding="utf-8") as stream:
             stream.write('{"unfinished":')
@@ -566,7 +566,7 @@ def test_entry_read_failures_do_not_hide_other_results(
     if damage == "missing_setup":
         assert all(not run.issues for run in alpha)
     else:
-        failed_path = setup if damage == "foreign_setup" else ledger
+        failed_path = global_path if damage == "foreign_global" else ledger
         assert all(
             any(str(failed_path) in issue for issue in run.issues) for run in alpha
         )

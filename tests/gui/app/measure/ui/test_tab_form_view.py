@@ -59,6 +59,7 @@ from zcu_tools.resources.context.library import (
     ModuleLibraryDocument,
 )
 
+from tests.gui._context_reads import capture_focus
 from tests.gui._dialog_fakes import RecordingDialogPresenter
 from tests.gui._qt_waits import qt_until
 from tests.gui._user_input import ComponentDriver, key_click, type_text
@@ -496,7 +497,7 @@ def source_window(tmp_path, qapp: QApplication) -> Iterator[MainWindow]:
     application = Fixture(headless=True, project_root=str(tmp_path / "project"))
     application.registry.register("source", SourceAdapter)
     ctrl = application.ctrl
-    target = require_target(ctrl.context_control.read_context())
+    target = require_target(capture_focus(ctrl.context_control))
     ctrl.context_control.set_parameter(target, "general.ext.amount", 0.2)
     window = MainWindow(ctrl, templates=lambda: {})
     ctrl.add_view(window)

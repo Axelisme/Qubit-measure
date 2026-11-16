@@ -49,6 +49,7 @@ from zcu_tools.gui.session.ui.inspect_dialog import InspectDialog
 from zcu_tools.resources.entry import ResultEntry
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
+from tests.gui._context_reads import capture_focus
 from tests.gui._dialog_fakes import RecordingDialogPresenter
 from tests.gui._user_input import ComponentDriver, key_click
 from tests.gui.app.measure._record_support import require_target
@@ -331,7 +332,7 @@ def test_reopened_module_preserves_full_frequency_precision_on_commit(
     session: _Session,
 ) -> None:
     session.control.set_module(
-        require_target(session.control.read_context()),
+        require_target(capture_focus(session.control)),
         PULSE,
         PulseSpec(ch=0, nqz=1, freq=5000.1234, gain=0.25, waveform=WAVEFORM),
     )
@@ -349,7 +350,7 @@ def test_reopened_module_preserves_full_frequency_precision_on_commit(
 def test_child_waveform_key_stays_a_key_after_apply(session: _Session) -> None:
     # A is a separate public capture. Inspect's capture/state have no public
     # read seam; B below observes only the actual host's Qt controls and Apply.
-    capture = session.control.read_context()
+    capture = capture_focus(session.control)
     assert WAVEFORM in capture.library.waveform_keys()
     opened = open_library_entry(capture, "module", PULSE, arb_names=())
     try:
@@ -403,7 +404,7 @@ def test_name_enter_renames_and_a_taken_name_keeps_input_inline(
     tmp_path: Path,
 ) -> None:
     session.control.set_module(
-        require_target(session.control.read_context()),
+        require_target(capture_focus(session.control)),
         f"{PULSE}_v2",
         PulseSpec(ch=0, nqz=1, freq=1.0, gain=0.1, waveform=WAVEFORM),
     )
@@ -575,7 +576,7 @@ def test_new_entry_suggests_names_until_the_user_types_one(
     session: _Session,
 ) -> None:
     session.control.set_module(
-        require_target(session.control.read_context()),
+        require_target(capture_focus(session.control)),
         "Q1.pulses.probe",
         PulseSpec(ch=0, nqz=1, freq=1.0, gain=0.1, waveform=WAVEFORM),
     )
@@ -704,7 +705,7 @@ def test_new_entry_uses_point_aliases_and_recovers_after_missing_bindings(
     rows: tuple[AliasRow, ...],
     loaded: bool,
 ) -> None:
-    session.control.apply_alias_rows(rows)
+    session.control.apply_alias_rows(rows, point=session.control.current_point_label())
     templates = {
         "aliased": TemplateDef(
             PulseSpec,

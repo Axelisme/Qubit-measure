@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 from pydantic import TypeAdapter
+from tests.gui._context_reads import capture_focus
 from zcu_tools.format_version import YamlValue
 from zcu_tools.gui.app.measure import adapter as proposals
 from zcu_tools.gui.app.measure.services import AdmissionDecision, TabAction
@@ -125,7 +126,7 @@ def test_preview_projects_current_location_without_authorizing_apply(
                 "general.description", "Description", proposed_value="new"
             )
         ],
-        parameters=context.read_context(),
+        parameters=capture_focus(context),
         experiment_name="synthetic",
     )
     if scope == "global":
@@ -162,7 +163,9 @@ def test_sample_write_receipt_reads_latest_jsonl_at_current_point(
     tmp_path: Path,
 ) -> None:
     entry, context = context_at(tmp_path)
-    context.apply_alias_rows((AliasRow("flux_dev", "bias_at_run"),))
+    context.apply_alias_rows(
+        (AliasRow("flux_dev", "bias_at_run"),), point=context.current_point_label()
+    )
     service = WritebackService(context, arb_names=lambda: ())
     draft = service.create_draft(
         [
@@ -172,7 +175,7 @@ def test_sample_write_receipt_reads_latest_jsonl_at_current_point(
                 record={"t1_us": 20.09},
             )
         ],
-        parameters=context.read_context(),
+        parameters=capture_focus(context),
         experiment_name="test/t1",
         run_id="run-fixed",
         device_snapshot={"bias_at_run": {"value": 0.00125, "value_unit": "A"}},
@@ -224,7 +227,7 @@ def test_sample_write_receipt_reads_latest_jsonl_at_current_point(
         "source": entry.ledger.events()[-1].id,
     }
     assert updated["source"] != row["source"]
-    assert context.read_context().target == DocumentSetRef(
+    assert capture_focus(context).target == DocumentSetRef(
         entry_name=entry.result_path.name, point="b"
     )
     assert draft.get_all_applied() == {"record-1": True}
@@ -234,8 +237,10 @@ def test_record_preview_selection_and_apply_preserve_adapter_json(
     tmp_path: Path,
 ) -> None:
     entry, context = context_at(tmp_path)
-    context.apply_alias_rows((AliasRow("flux_dev", "bias_at_run"),))
-    capture = context.read_context()
+    context.apply_alias_rows(
+        (AliasRow("flux_dev", "bias_at_run"),), point=context.current_point_label()
+    )
+    capture = capture_focus(context)
     service = WritebackService(context, arb_names=lambda: ())
     draft = service.create_draft(
         [
@@ -253,7 +258,9 @@ def test_record_preview_selection_and_apply_preserve_adapter_json(
         run_id="run-fixed",
         device_snapshot={"bias_at_run": {"value": 0.00125, "value_unit": "A"}},
     )
-    context.apply_alias_rows((AliasRow("flux_dev", "later_device"),))
+    context.apply_alias_rows(
+        (AliasRow("flux_dev", "later_device"),), point=context.current_point_label()
+    )
     entry.new_point("b")
     context.use_point(PointUseRequest("b"))
     harness = WritebackHarness(context, service, draft)
@@ -306,7 +313,7 @@ def test_record_preview_selection_and_apply_preserve_adapter_json(
         "at": row["at"],
         "source": event.id,
     }
-    assert context.read_context().target == DocumentSetRef(
+    assert capture_focus(context).target == DocumentSetRef(
         entry_name=entry.result_path.name, point="b"
     )
     assert draft.get_all_applied() == {"param-1": False, "record-1": True}
@@ -326,7 +333,7 @@ def test_preview_displays_adapter_note_and_current_manual_selection(
     service = WritebackService(context, arb_names=lambda: ())
     draft = service.create_draft(
         [original],
-        parameters=context.read_context(),
+        parameters=capture_focus(context),
         experiment_name="test/review",
     )
     harness = WritebackHarness(context, service, draft)
@@ -359,7 +366,7 @@ def test_partial_failure_preserves_expected_cause_wire_category(tmp_path: Path) 
             ),
             proposals.ParameterWriteback("general.ext.later", "last", proposed_value=2),
         ],
-        parameters=context.read_context(),
+        parameters=capture_focus(context),
         experiment_name="test/expected",
     )
     harness = WritebackHarness(context, service, draft)
@@ -387,6 +394,6 @@ def test_partial_failure_preserves_expected_cause_wire_category(tmp_path: Path) 
         "param-3": False,
     }
     assert entry.parameters("a").description == before_description
-    assert not context.read_context().lookup("general.ext.rejected").present
-    assert not context.read_context().lookup("general.ext.later").present
+    assert not capture_focus(context).lookup("general.ext.rejected").present
+    assert not capture_focus(context).lookup("general.ext.later").present
     assert entry.ledger.events()[-1].kind == "accepted"

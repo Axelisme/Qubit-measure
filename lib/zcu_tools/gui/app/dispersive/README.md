@@ -63,7 +63,7 @@ Export dispersive 經 `resources.dispersive_file.save_dispersive_file` 寫入
 entry.dispersive_path/<component>.json，保存 GHz 的 g、bare_rf 與 UTC created_at。
 未知 source.run_id 寫 null。已有 plot_transitions annotations 保留。
 `entry.parameters()` 僅更新 global 該 kind 已宣告的 g/bare_rf，不新增欄位。
-Artifact 與 setup 是分開的寫入，沒有跨檔原子性或 rollback。
+Artifact 與 global 是分開的寫入，沒有跨檔原子性或 rollback。
 切換 entry/component 會清空舊 pipeline，避免把舊結果匯出到新 target。
 
 ## Owners and background work

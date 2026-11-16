@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -14,11 +15,12 @@ from qtpy.QtWidgets import (
     QPushButton,
 )
 from zcu_tools.gui.app.measure.remote.dialogs import DialogName
-from zcu_tools.gui.session.context_types import DocumentSetRef
+from zcu_tools.gui.session.context_types import DocumentSetRef, EntryRequest
 from zcu_tools.gui.session.ui.setup_dialog import SetupDialog
 from zcu_tools.mcp.core.rpc import GuiInvocationError
 from zcu_tools.mcp.measure.session import GuiRpcError
 
+from tests.gui._context_reads import capture_focus
 from tests.gui._user_input import ComponentDriver
 from tests.gui.app.measure._app_launch import (
     LaunchedMeasureApp,
@@ -126,11 +128,11 @@ def test_entry_point_commands_show_in_reopened_setup_and_failures_keep_the_conte
             "rpc_call", {"method": "point.new", "params": {"label": "q1"}}
         )
         target = DocumentSetRef(entry_name=entry["name"], point=point["point"])
-        assert control.read_context().target == target
+        assert capture_focus(control).target == target
 
         # Selecting the same point keeps the selected resource identity.
         app.invoke("rpc_call", {"method": "point.use", "params": {"label": "q1"}})
-        assert control.read_context().target == target
+        assert capture_focus(control).target == target
         check_setup_entry("chip-a")
 
         # A missing entry leaves the entry, selected point and Setup unchanged.
@@ -143,7 +145,7 @@ def test_entry_point_commands_show_in_reopened_setup_and_failures_keep_the_conte
             app.invoke("rpc_call", {"method": "entry.info"})["entry"]["name"]
             == "chip-a"
         )
-        assert control.read_context().target == target
+        assert capture_focus(control).target == target
         assert control.get_source_binding() == binding
         app.invoke("rpc_call", {"method": "control.release"})
         failed_setup = _reopen_setup(app, qapp)
@@ -159,7 +161,7 @@ def test_entry_point_commands_show_in_reopened_setup_and_failures_keep_the_conte
         assert changed["name"] == "chip-b"
         info = control.get_entry_info()
         assert info is not None and info.name == changed["name"]
-        assert control.read_context().target == DocumentSetRef(entry_name="chip-b")
+        assert capture_focus(control).target == DocumentSetRef(entry_name="chip-b")
         check_setup_entry("chip-b")
 
 
@@ -208,12 +210,15 @@ def test_observation_controls_recover_via_real_user_input(qapp, tmp_path, name):
     with launched_measure_app(qapp, tmp_path) as app:
         driver = ComponentDriver(app.window)
         captions = {
-            DialogName.SETUP: ("Setup…", "New entry…"),
+            DialogName.SETUP: ("Entry…", "New entry…"),
             DialogName.DEVICE: ("Devices…", "Add Device"),
             DialogName.INSPECT: ("Inspect…", "New"),
         }
         opener, action = captions[name]
-        driver.screenshot(tmp_path / f"{name.value}-01-local.png")
+        evidence = Path(os.environ.get("ENTRY_TITLE_EVIDENCE", str(tmp_path)))
+        if name is DialogName.SETUP:
+            assert driver.dialogs()[0].title == "Entry"
+        driver.screenshot(evidence / f"{name.value}-01-local.png")
         # Isolate toolbar reopening from the separately tested startup handoff.
         driver.click("Close")
         app.invoke("connect", {"port": app.remote.port, "mode": "owner"})
@@ -222,22 +227,54 @@ def test_observation_controls_recover_via_real_user_input(qapp, tmp_path, name):
         if name is DialogName.INSPECT:
             driver.select_tab("Modules")
         assert not driver.observe(action).enabled
-        driver.screenshot(tmp_path / f"{name.value}-02-remote.png")
+        driver.screenshot(evidence / f"{name.value}-02-remote.png")
         created = app.invoke(
             "rpc_call", {"method": "entry.new", "params": {"name": "observed-entry"}}
         )
         assert created["name"] == "observed-entry"
-        driver.screenshot(tmp_path / f"{name.value}-03-agent-command.png")
+        driver.screenshot(evidence / f"{name.value}-03-agent-command.png")
         driver.click(object_name="control_indicator")
         assert driver.observe(action).enabled
         assert driver.observe(object_name="control_indicator").text == "Local locked"
-        driver.screenshot(tmp_path / f"{name.value}-04-local-reclaim.png")
+        driver.screenshot(evidence / f"{name.value}-04-local-reclaim.png")
         driver.click("Close")
         assert driver.dialogs() == ()
-        driver.screenshot(tmp_path / f"{name.value}-05-closed.png")
+        driver.screenshot(evidence / f"{name.value}-05-closed.png")
         driver.click(opener)
         if name is DialogName.INSPECT:
             driver.select_tab("Modules")
         assert driver.observe(action).enabled
-        driver.screenshot(tmp_path / f"{name.value}-06-reopened.png")
+        driver.screenshot(evidence / f"{name.value}-06-reopened.png")
         driver.click("Close")
+
+
+@pytest.fixture
+def entry_title_ui(qapp, tmp_path):
+    with launched_measure_app(qapp, tmp_path) as app:
+        app.controller.setup_control.new_entry(EntryRequest("entry"))
+        yield ComponentDriver(app.window)
+
+
+def test_entry_toolbar_opens_the_entry_window_via_real_user_input(entry_title_ui, tmp_path):
+    driver = entry_title_ui
+    evidence = Path(os.environ.get("ENTRY_TITLE_EVIDENCE", str(tmp_path)))
+    assert driver.dialogs()[0].title == "Entry"
+    driver.screenshot(evidence / "entry-title-01-startup.png")
+    driver.click("Close")
+    driver.screenshot(evidence / "entry-title-02-toolbar.png")
+    driver.click("Entry…")
+    assert driver.dialogs()[0].title == "Entry"
+    driver.screenshot(evidence / "entry-title-03-reopened.png")
+    driver.enter_text(object_name="point_label", value="title-point", commit=False)
+    driver.screenshot(evidence / "entry-title-04-point-label.png")
+    driver.click("Create")
+    assert driver.dialogs()[0].title == "Entry"
+    assert [row.text for row in driver.list_rows()] == ["Global", "● title-point"]
+    driver.screenshot(evidence / "entry-title-05-point-created.png")
+    driver.select_list_row("Global")
+    driver.screenshot(evidence / "entry-title-06-global-selected.png")
+    driver.click("Switch to selected")
+    assert driver.dialogs()[0].title == "Entry"
+    assert [row.text for row in driver.list_rows()] == ["● Global", "title-point"]
+    driver.screenshot(evidence / "entry-title-07-global-focused.png")
+    driver.click("Close")

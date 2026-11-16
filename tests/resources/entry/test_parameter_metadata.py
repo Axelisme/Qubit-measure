@@ -1,4 +1,4 @@
-"""Entry setup/point values with opaque caller metadata in one parameter document."""
+"""Entry global/point values with opaque caller metadata in one parameter document."""
 
 from contextlib import ExitStack
 from pathlib import Path
@@ -13,14 +13,14 @@ from zcu_tools.resources.entry import ParameterView, ResultEntry, source_path
 from .view_support import field_view
 
 
-@pytest.fixture(params=["setup", "point"])
+@pytest.fixture(params=["global", "point"])
 def container(
     request: pytest.FixtureRequest, tmp_path: Path
 ) -> tuple[ResultEntry, ParameterView, Path]:
     root = tmp_path / "results"
     entry = ResultEntry.create("entry", result_root=root, database_root=tmp_path / "db")
     entry.parameters().add_component("Q1", kind="fake/drive/a", rate=5000.0)
-    if request.param == "setup":
+    if request.param == "global":
         return entry, entry.parameters(), root / "entry/parameters.yaml"
     return entry, entry.new_point("a"), root / "entry/points/a/parameters.yaml"
 
@@ -190,7 +190,7 @@ def test_conflict_keeps_the_winning_value_and_metadata_together(
     assert view.meta("Q1.rate") == {"stderr": 0.3}
 
 
-def test_seed_copies_setup_metadata_into_an_independent_point(tmp_path: Path) -> None:
+def test_seed_copies_global_metadata_into_an_independent_point(tmp_path: Path) -> None:
     entry = ResultEntry.create(
         "entry", result_root=tmp_path / "results", database_root=tmp_path / "db"
     )
@@ -243,7 +243,7 @@ def test_same_entry_clone_copies_values_and_metadata_verbatim(
     assert original.meta("Q1.rate") == metadata["Q1.rate"]
 
 
-@pytest.mark.parametrize("document", ["setup", "point"])
+@pytest.mark.parametrize("document", ["global", "point"])
 @pytest.mark.parametrize(
     ("version", "old_table"),
     [("1.0", False), ("1.9", True), ("2.0", True), ("2.8", True)],
@@ -257,7 +257,7 @@ def test_old_parameter_documents_are_rejected_with_path_and_versions(
     entry.new_point("a")
     source = tmp_path / (
         "results/entry/parameters.yaml"
-        if document == "setup"
+        if document == "global"
         else "results/entry/points/a/parameters.yaml"
     )
     stored = YAML(typ="safe").load(source.read_text())

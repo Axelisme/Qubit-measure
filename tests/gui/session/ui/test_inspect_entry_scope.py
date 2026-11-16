@@ -56,12 +56,16 @@ def entry_ui(
             bind_assets=ArbWaveformDatabase.info_at,
         )
         context.install_entry(entry)
-        context.apply_alias_rows((AliasRow("driver", "Q1"),))
+        context.apply_alias_rows(
+            (AliasRow("driver", "Q1"),), point=context.current_point_label()
+        )
         if request.param == "point":
             entry.new_point("working")
             target = context.use_point(PointUseRequest("working"))
             context.set_parameter(target, "Q1.rate", 4300.0)
-            context.apply_alias_rows((AliasRow("driver", "Q2"),))
+            context.apply_alias_rows(
+                (AliasRow("driver", "Q2"),), point=context.current_point_label()
+            )
         templates = {
             "aliased": TemplateDef(
                 PulseSpec,
@@ -112,9 +116,7 @@ def _parameter(ui: ComponentDriver) -> str:
 
 def _parameters(ui: ComponentDriver) -> None:
     ui.select_tab("Parameters")
-    ui.choose_option(
-        object_name="inspect.parameters.destination", value="Entry template"
-    )
+    ui.choose_option(object_name="inspect.parameters.destination", value="Global")
     ui.enter_text(
         object_name="inspect.parameters.filter", value="Q1.rate", commit=False
     )
@@ -122,7 +124,7 @@ def _parameters(ui: ComponentDriver) -> None:
 
 def _waveform(ui: ComponentDriver) -> None:
     ui.select_tab("Modules")
-    ui.choose_option(object_name="inspect.library.destination", value="Entry template")
+    ui.choose_option(object_name="inspect.library.destination", value="Global")
     ui.enter_text(
         object_name="inspect.library.filter", value="Q1.waveforms.base", commit=False
     )
@@ -133,6 +135,23 @@ def _waveform(ui: ComponentDriver) -> None:
 
 def test_entry_destinations_commit_and_notify_clean_inspectors(entry_ui) -> None:
     ui, observer, evidence, scope = entry_ui
+    expected = "working" if scope == "point" else "Global"
+    for tab, document in (
+        ("Parameters", "parameters"),
+        ("Modules", "library"),
+        ("Aliases", "aliases"),
+    ):
+        ui.select_tab(tab)
+        selector = f"inspect.{document}.destination"
+        ui.press_key(Qt.Key.Key_Home, object_name=selector)
+        assert ui.observe(object_name=selector).text == "Global"
+        ui.screenshot(evidence / f"destination-{document}-01-global.png")
+        ui.press_key(Qt.Key.Key_Down, object_name=selector)
+        assert ui.observe(object_name=selector).text == expected
+        ui.screenshot(evidence / f"destination-{document}-02-next.png")
+        ui.press_key(Qt.Key.Key_End, object_name=selector)
+        assert ui.observe(object_name=selector).text == expected
+        ui.screenshot(evidence / f"destination-{document}-03-last.png")
     _parameters(ui)
     _parameters(observer)
     ui.screenshot(evidence / "01-parameters-entry.png")
@@ -144,7 +163,8 @@ def test_entry_destinations_commit_and_notify_clean_inspectors(entry_ui) -> None
     assert observer.observe(object_name="inspect.saved").text.startswith("Saved")
     assert _parameter(observer) == "1250.0"
     ui.choose_option(
-        object_name="inspect.parameters.destination", value="Active documents"
+        object_name="inspect.parameters.destination",
+        value="Global" if scope == "global" else "working",
     )
     ui.screenshot(evidence / "04-parameters-active.png")
     assert _parameter(ui) == ("4300.0" if scope == "point" else "1250.0")
@@ -168,9 +188,7 @@ def test_entry_destinations_commit_and_notify_clean_inspectors(entry_ui) -> None
 
     for driver in (ui, observer):
         driver.select_tab("Aliases")
-        driver.choose_option(
-            object_name="inspect.aliases.destination", value="Entry template"
-        )
+        driver.choose_option(object_name="inspect.aliases.destination", value="Global")
     ui.edit_table_value("Q1", "Q2", object_name="inspect.aliases.table", column="Value")
     ui.screenshot(evidence / "09-aliases-saved.png")
     observer.screenshot(evidence / "10-aliases-observer.png")
@@ -185,9 +203,7 @@ def test_entry_notifications_preserve_dirty_alias_draft(entry_ui) -> None:
     ui, observer, evidence, _ = entry_ui
     for driver in (ui, observer):
         driver.select_tab("Aliases")
-        driver.choose_option(
-            object_name="inspect.aliases.destination", value="Entry template"
-        )
+        driver.choose_option(object_name="inspect.aliases.destination", value="Global")
     observer.edit_table_value(
         "driver", "invalid name", object_name="inspect.aliases.table", column="Alias"
     )

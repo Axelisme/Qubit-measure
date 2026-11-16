@@ -110,7 +110,9 @@ class MainDialogRegistry:
 
             dialog = DeviceDialog(
                 self._ctrl.device_control,
-                parameter_provider=self._ctrl.context_control.read_context,
+                parameter_provider=lambda: self._ctrl.context_control.read_context(
+                    point=self._ctrl.context_control.current_point_label()
+                ),
                 parent=self._parent,
                 before_stop=self._reclaim_for_stop,
             )
@@ -123,7 +125,9 @@ class MainDialogRegistry:
                 self._ctrl.predictor_control,
                 parent=self._parent,
                 device=self._ctrl.device_control,
-                parameter_provider=self._ctrl.context_control.read_context,
+                parameter_provider=lambda: self._ctrl.context_control.read_context(
+                    point=self._ctrl.context_control.current_point_label()
+                ),
                 persistent_on_close=True,
             )
             dialog.enable_parameter_cache()

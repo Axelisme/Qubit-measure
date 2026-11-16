@@ -58,7 +58,7 @@ def _bare_rf_seed(target: AnalysisTarget) -> float:
 
 
 class ProjectService:
-    """Read selected predictor files without changing setup or Database."""
+    """Read selected predictor files without changing global or Database."""
 
     def __init__(self, state: DispersiveState) -> None:
         self._state = state

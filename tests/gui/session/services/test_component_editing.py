@@ -1,4 +1,4 @@
-"""Component commands use the owning session and independent setup template."""
+"""Component commands use the owning session and independent global documents."""
 
 from collections.abc import Generator
 from pathlib import Path
@@ -15,6 +15,7 @@ from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.resources.entry import ComponentSchema, ResultEntry, component_registry
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
+from tests.gui._context_reads import capture_focus, inspect_focus
 from tests.resources.entry.fakes import register_fakes, registry_state, restore_registry
 
 
@@ -51,49 +52,62 @@ def component_session(
 def test_add_saved_component_and_invalid_required_fields_are_atomic(component_session):
     control, entry = component_session
     control.new_point(PointCreateRequest("a", "", CommandOrigin("gui")))
-    control.add_component("Q1", "fake/drive/a", {"rate": 4300.0})
-    assert control.read_context().value("Q1.rate") == 4300.0
+    control.add_component(
+        "Q1", "fake/drive/a", {"rate": 4300.0}, point=control.current_point_label()
+    )
+    assert capture_focus(control).value("Q1.rate") == 4300.0
     assert entry.list_points() == ["a"]
     with pytest.raises(ValidationError, match="reference"):
-        control.add_component("Invalid", "test/required", {})
-    assert "Invalid" not in control.inspect_document().components
+        control.add_component(
+            "Invalid", "test/required", {}, point=control.current_point_label()
+        )
+    assert "Invalid" not in inspect_focus(control).components
 
 
 def test_component_reference_is_an_ordinary_string(component_session):
     control, _ = component_session
     control.new_point(PointCreateRequest("a", "", CommandOrigin("gui")))
-    control.add_component("Ref", "test/required", {"reference": "not-yet-created"})
-    assert control.read_context().value("Ref.reference") == "not-yet-created"
-    capture = control.read_context()
+    control.add_component(
+        "Ref",
+        "test/required",
+        {"reference": "not-yet-created"},
+        point=control.current_point_label(),
+    )
+    assert capture_focus(control).value("Ref.reference") == "not-yet-created"
+    capture = capture_focus(control)
     control.set_parameter(capture.target, "Ref.reference", "another-name")
-    assert control.read_context().value("Ref.reference") == "another-name"
+    assert capture_focus(control).value("Ref.reference") == "another-name"
 
 
 def test_setup_edits_do_not_change_existing_points(component_session):
     control, entry = component_session
-    control.add_component("Q1", "fake/drive/a", {"rate": 4300.0}, setup=True)
+    control.add_component("Q1", "fake/drive/a", {"rate": 4300.0}, point=None)
     target = control.new_point(PointCreateRequest("a", "", CommandOrigin("gui")))
-    capture = control.read_context()
-    control.set_setup_parameter("Q1.rate", 5100.0)
+    capture = capture_focus(control)
+    control.set_parameter(control.read_context().target, "Q1.rate", 5100.0)
     assert (
-        control.inspect_document(setup=True).components["Q1"].model_dump()["rate"]
+        control.inspect_document(point=None).components["Q1"].model_dump()["rate"]
         == 5100.0
     )
-    assert control.read_context().value("Q1.rate") == 4300.0
+    assert capture_focus(control).value("Q1.rate") == 4300.0
     assert capture.value("Q1.rate") == 4300.0
-    assert control.read_context().target == target
+    assert capture_focus(control).target == target
     assert entry.parameters("a").Q1.rate == 4300.0
 
 
 def test_add_saved_component_persists_and_can_bind_global_alias(component_session):
     control, entry = component_session
     control.new_point(PointCreateRequest("a", "", CommandOrigin("gui")))
-    control.add_component("Q1", "fake/drive/a", {"rate": 4300.0})
+    control.add_component(
+        "Q1", "fake/drive/a", {"rate": 4300.0}, point=control.current_point_label()
+    )
     assert entry.parameters("a").Q1.rate == 4300.0
-    control.apply_alias_rows((AliasRow("driver", "Q1"),))
+    control.apply_alias_rows(
+        (AliasRow("driver", "Q1"),), point=control.current_point_label()
+    )
     assert (
-        control.read_context()
-        .bind_aliases(control.get_alias_rows(), {})
+        capture_focus(control)
+        .bind_aliases(control.get_alias_rows(point=control.current_point_label()), {})
         .value("$driver.rate")
         == 4300.0
     )

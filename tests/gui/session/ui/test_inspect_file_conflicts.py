@@ -24,6 +24,7 @@ from zcu_tools.gui.session.ui.inspect_dialog import InspectDialog
 from zcu_tools.resources.entry import ResultEntry
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
+from tests.gui._context_reads import capture_focus
 from tests.gui._dialog_fakes import RecordingDialogPresenter
 from tests.gui._user_input import ComponentDriver
 from tests.gui.app.measure._record_support import require_target
@@ -106,16 +107,24 @@ def conflict_ui(
     service.install_entry(entry)
     service.use_point(PointUseRequest("point"))
     control = service
-    control.add_component("Q1", "fake/drive/a", {"rate": 4300.0})
-    control.add_component("Q1", "fake/drive/a", {"rate": 1200.0}, setup=True)
+    control.add_component(
+        "Q1", "fake/drive/a", {"rate": 4300.0}, point=control.current_point_label()
+    )
+    control.add_component("Q1", "fake/drive/a", {"rate": 1200.0}, point=None)
     entry.new_point("second")
     service.use_point(PointUseRequest("second"))
-    control.set_parameter(require_target(control.read_context()), "Q1.rate", 5300.0)
+    control.set_parameter(
+        require_target(capture_focus(control)),
+        "Q1.rate",
+        5300.0,
+    )
     service.use_point(PointUseRequest("point"))
     # The missing-file case deliberately leaves aliases revision=None.
     document = request.param.removeprefix("entry-")
     if document != "aliases-missing":
-        control.apply_alias_rows((AliasRow("qubit", "Q1"),))
+        control.apply_alias_rows(
+            (AliasRow("qubit", "Q1"),), point=control.current_point_label()
+        )
     path = next(
         file.path
         for file in (
@@ -151,9 +160,7 @@ def conflict_ui(
 def _select_entry_file(ui: ComponentDriver, document: str, evidence: Path) -> None:
     ui.select_tab("Parameters" if document == "parameters" else "Modules")
     ui.screenshot(evidence / "01-active.png")
-    ui.choose_option(
-        object_name=f"inspect.{document}.destination", value="Entry template"
-    )
+    ui.choose_option(object_name=f"inspect.{document}.destination", value="Global")
     ui.screenshot(evidence / "02-entry.png")
     if document == "parameters":
         ui.enter_text(
@@ -432,7 +439,7 @@ def test_parameter_rejection_retains_visible_draft(conflict_ui, submit: str) -> 
     if submit == "enter":
         ui.press_key(Qt.Key.Key_Return)
     else:
-        ui.choose_option("Active documents", value="Active documents")
+        ui.choose_option("point", value="point")
     assert ui.observe(object_name="component_error").text
     rows = ui.visible().tree_rows
     assert any(row.path == ("Q1", "rate") and row.columns[1] == "9" for row in rows)
@@ -466,7 +473,7 @@ def test_parameter_draft_cannot_follow_destination(conflict_ui) -> None:
     ui.screenshot(evidence / "01-rejected.png")
     # Restore the source baseline so only target pinning can prevent redirection.
     path.write_bytes(original)
-    ui.choose_option("Active documents", value="Entry template")
+    ui.choose_option("point", value="Global")
     ui.edit_tree_value(("Q1", "rate"), object_name="component_tree", value="8")
     assert ui.observe(object_name="component_error").text
     assert any(
@@ -474,14 +481,14 @@ def test_parameter_draft_cannot_follow_destination(conflict_ui) -> None:
         for row in ui.visible().tree_rows
     )
     ui.screenshot(evidence / "02-target-rejected.png")
-    ui.choose_option("Entry template", value="Active documents")
+    ui.choose_option("Global", value="point")
     ui.click(object_name="inspect.parameters.sync.reload")
     ui.screenshot(evidence / "reload-active.png")
     assert any(
         row.path == ("Q1", "rate") and row.columns[1] == "4300.0"
         for row in ui.visible().tree_rows
     )
-    ui.choose_option("Active documents", value="Entry template")
+    ui.choose_option("point", value="Global")
     assert any(
         row.path == ("Q1", "rate") and row.columns[1] == "1200.0"
         for row in ui.visible().tree_rows

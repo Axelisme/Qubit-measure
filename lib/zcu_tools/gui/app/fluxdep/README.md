@@ -30,7 +30,7 @@ app 自帶（version table、worker 模式等仍 per-app）。
   → [累積多張 spectrum 進集合]
   → 跨譜篩選(Selector)     → 每張譜的 Filter 遮罩 + min_distance
   → 匯出 spectrums.hdf5
-  → 搜資料庫(FitPanel) → (EJ,EC,EL) + 視覺化 + 診斷圖 → 匯出 component predictor 與 setup
+  → 搜資料庫(FitPanel) → (EJ,EC,EL) + 視覺化 + 診斷圖 → 匯出 component predictor 與 global
 ```
 
 與 measure 的根本差異（為何領域全新寫、不套 adapter/tab/run）：fluxdep 是
@@ -42,7 +42,7 @@ app 自帶（version table、worker 模式等仍 per-app）。
 ## Entry and export
 
 Project… 使用共用 EntryDialog 開啟 `project_root/result/<entry>`。CLI 使用 `--project-root`、`--entry`、
-`--component`。未指定 component 時，app 解析 setup 的 `qubit` alias。
+`--component`。未指定 component 時，app 解析 global 的 `qubit` alias。
 目標必須是 `qubit/fluxonium` 或其子 kind。共用 owner 回報不存在的 entry/component 或無效的 alias。
 CLI 未指定 entry 時，GUI 保持未開啟。
 Dialog 列出全部合法 component，有效 qubit alias 只作預選。

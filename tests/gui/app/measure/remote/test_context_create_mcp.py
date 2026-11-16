@@ -6,6 +6,7 @@ import pytest
 from zcu_tools.mcp.measure.session import GuiRpcError
 from zcu_tools.resources.entry import ResultEntry, source_path
 
+from tests.gui._context_reads import capture_focus
 from tests.gui.app.measure._record_support import require_target
 
 from ._helpers import Fixture, call, mcp_client, open_client
@@ -41,7 +42,9 @@ def test_context_create_named_clone_and_invalid_source_do_not_change_active(
         ) == {"entry_name": entry["name"], "point": "base"}
         context = fx.ctrl.context_control
         context.set_parameter(
-            require_target(context.read_context()), "general.ext.freq", 5.0
+            require_target(capture_focus(context)),
+            "general.ext.freq",
+            5.0,
         )
         assert invoke(
             "rpc_call",
@@ -401,7 +404,9 @@ def test_context_create_default_without_active_is_empty_and_explicit_null_skips_
         )
         context = fx.ctrl.context_control
         context.set_parameter(
-            require_target(context.read_context()), "general.ext.freq", 5.0
+            require_target(capture_focus(context)),
+            "general.ext.freq",
+            5.0,
         )
         assert invoke(
             "rpc_call",

@@ -3,6 +3,7 @@
 from pathlib import Path
 
 import pytest
+from tests.gui._context_reads import capture_focus
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.session.context_types import (
     DocumentSetRef,
@@ -106,7 +107,7 @@ def test_open_entry_then_use_point_publishes_active_target(
 
     assert target == DocumentSetRef(entry_name=info.name, point="working")
     assert state.session_env.readiness is ContextReadiness.POINT
-    assert context.read_context().target == target
+    assert capture_focus(context).target == target
     assert context.list_points()[0].description == "saved calibration"
 
 

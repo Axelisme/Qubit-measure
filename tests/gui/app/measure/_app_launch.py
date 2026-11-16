@@ -40,7 +40,7 @@ def click_toolbar_setup(window: MainWindow) -> None:
     button = next(
         button
         for button in window.findChildren(QPushButton)
-        if button.text() == "Setup…"
+        if button.text() == "Entry…"
     )
     button.click()
 

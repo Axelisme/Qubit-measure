@@ -144,7 +144,7 @@ class ContextService:
     def install_entry(self, entry: ResultEntry) -> EntryInfo:
         """Install an opened entry's global document set without selecting a point.
 
-        Prepare cached setup content, global library/aliases, entry storage,
+        Prepare cached global content, global library/aliases, entry storage,
         point summaries and assets before publication. Each bad point becomes
         an unavailable row. Alias syntax/content faults remain lazy in captures;
         other preparation failures retain the old binding and any created entry.
@@ -153,15 +153,15 @@ class ContextService:
         SoC, device and predictor capabilities remain with their own owners.
         """
         self._owner.assert_owner()
-        setup = entry.parameters()
+        global_parameters = entry.parameters()
         points = self._load_points(entry)
         assets = self._bind_assets(entry.database_path / "arb_waveforms")
         library = entry.library(assets=assets)
-        documents = DocumentSet(setup, library, entry.aliases())
+        documents = DocumentSet(global_parameters, library, entry.aliases())
         parameters = DocumentSetCapture.from_set(
             documents,
             target=DocumentSetRef(entry_name=entry.result_path.name),
-            storage=capture_storage(setup),
+            storage=capture_storage(global_parameters),
         )
         info = EntryInfo(
             entry.result_path.name,
@@ -169,7 +169,7 @@ class ContextService:
             entry.database_path,
         )
         sources = (
-            ContextSource("global", source_path(setup), None),
+            ContextSource("global", source_path(global_parameters), None),
             ContextSource("module_cfg", library.source_path, None),
         )
         self._entry = entry
@@ -332,7 +332,7 @@ class ContextService:
         """Prepare point/library/assets/aliases, then install POINT and publish facts.
 
         Load point-local aliases, including an empty table for a missing file.
-        No setup or preset fallback is used. Alias content/syntax errors are
+        No global or preset fallback is used. Alias content/syntax errors are
         captured with the observed bytes hash, not raised during selection.
         Alias consumers raise that original error; concrete parameter/library
         reads remain available. Other storage errors propagate before replacing
@@ -425,29 +425,23 @@ class ContextService:
         self._points = ()
         self._publish(None, (), ContextReadiness.EMPTY, active_label=None)
 
-    def inspect_document(self, *, setup: bool = False) -> ParameterDocument:
-        """Return the cached setup template or current point document without I/O.
+    def inspect_document(self, *, point: str | None = None) -> ParameterDocument:
+        """Return isolated installed global or focused point content without I/O.
 
-        setup=True reads the opened entry template; False reads the published
-        active GLOBAL or POINT document. No entry raises FailedPreconditionError.
-        Returned data is isolated; changing it does not write.
+        None selects global. A label must equal the focused point, otherwise
+        raise InvalidInputError(point_not_focused). No entry raises
+        FailedPreconditionError. Changing returned data does not write.
         """
         self._owner.assert_owner()
-        if setup:
-            if self._global_set is None:
-                raise FailedPreconditionError(
-                    "No entry is opened", reason_code="no_entry"
-                )
-            return snapshot(self._global_set.parameters)
-        return self.read_context().whole_document()
+        return self.read_context(point=point).whole_document()
 
     def add_component(
-        self, name: str, kind: str, fields: YamlMap, *, setup: bool = False
+        self, name: str, kind: str, fields: YamlMap, *, point: str | None = None
     ) -> None:
         """Add one component with working-unit fields using its registered kind.
 
-        setup=True edits only the opened entry template. Otherwise edit the
-        active GLOBAL or POINT documents in one resource transaction.
+        None edits global. A label must equal the focused point, otherwise
+        raise InvalidInputError(point_not_focused) before validation or I/O.
         Invalid names/kinds/required fields/duplicates leave content unchanged.
         Success on the current point installs its source before publishing one
         parameter change. A nonactive entry edit installs cache/revision before
@@ -458,46 +452,29 @@ class ContextService:
         self._owner.assert_owner()
         if self._entry is None:
             raise FailedPreconditionError("No entry is opened", reason_code="no_entry")
-        if setup and self._active_set is not self._global_set:
-            if self._global_set is None:
-                raise FailedPreconditionError(
-                    "No setup is opened", reason_code="no_entry"
-                )
-            self._global_set.parameters.add_component(name, kind=kind, **fields)
+        documents = self._documents_at(point)
+        if documents is None:
+            raise FailedPreconditionError("No entry is opened", reason_code="no_entry")
+        if documents is not self._active_set:
+            documents.parameters.add_component(name, kind=kind, **fields)
             self._bus.emit(EntryDocumentsChangedPayload())
             return
         parameters = self._published_parameters()
-        documents = self._active_set
-        if documents is None:
-            raise RuntimeError("Active parameter resource disappeared")
         documents.parameters.add_component(name, kind=kind, **fields)
         self._publish_write(
             parameters.storage,
             parameter=True,
         )
 
-    def set_setup_parameter(self, path: str, value: YamlValue) -> None:
-        """Edit an existing concrete setup field in working units.
-
-        Commit through the setup resource, never an existing point. No entry,
-        invalid path/schema, conflict and I/O failures propagate; no retry.
-        """
-        self._owner.assert_owner()
-        if self._global_set is None:
-            raise FailedPreconditionError("No entry is opened", reason_code="no_entry")
-        entry = self._require_open_entry()
-        self.set_parameter(
-            DocumentSetRef(entry_name=entry.result_path.name), path, value
-        )
-
     def read_context(
-        self, *, aliases: Mapping[str, str] | None = None, setup: bool = False
+        self, *, aliases: Mapping[str, str] | None = None, point: str | None = None
     ) -> DocumentSetCapture:
         """Capture installed documents/storage and all alias rows without I/O.
 
-        setup=True captures the entry set even with a selected point. False
-        captures the active set. Entry captures use the installed owner handles,
-        never disk candidates, and do not change selection or bypass pending.
+        point=None captures global documents. A label must equal the focused
+        point, otherwise InvalidInputError(point_not_focused) is raised before
+        reading sources. Captures use installed handles, never disk candidates,
+        and do not change selection or bypass pending.
 
         aliases maps temporary component/device names to authored rows for this
         capture only, retaining dependent links. Names need not exist in catalogs.
@@ -512,11 +489,11 @@ class ContextService:
         """
         self._owner.assert_owner()
         parameters = self._state.session_env.parameters
-        documents = self._global_set if setup else self._active_set
+        documents = self._documents_at(point)
         saved_aliases = (
             AliasSnapshot(AliasTable()) if documents is None else documents.aliases
         )
-        if setup:
+        if point is None:
             if self._entry is None or documents is None:
                 raise FailedPreconditionError(
                     "No entry is opened", reason_code="no_context"
@@ -535,22 +512,22 @@ class ContextService:
             table = table.with_override(alias, component)
         return parameters.bind_aliases(table.rows, {}, alias_error=saved_aliases.error)
 
-    def get_alias_rows(self, *, setup: bool = False) -> tuple[AliasRow, ...]:
+    def get_alias_rows(self, *, point: str | None = None) -> tuple[AliasRow, ...]:
         """Read installed authored rows without expansion or I/O.
 
-        setup=True selects the installed entry table, even with a selected point;
-        False selects the active table. Pending external candidates are not read.
+        None selects global. A label must equal the focused point, otherwise
+        raise InvalidInputError(point_not_focused). Pending candidates are not read.
         No entry returns empty rows. Invalid aliases raise their captured error.
         Missing files supply empty rows without fallback.
         """
         self._owner.assert_owner()
-        documents = self._global_set if setup else self._active_set
+        documents = self._documents_at(point)
         return () if documents is None else documents.aliases.rows
 
     def _install_alias_rows(self, candidate: AliasTable, alias_file: AliasFile) -> None:
         documents = self._active_set
         if documents is None:
-            raise RuntimeError("Active documents disappeared")
+            raise RuntimeError("Active document set disappeared")
         previous = documents.aliases.table.rows
         had_error = documents.aliases.error is not None
         documents.alias_file = alias_file
@@ -560,15 +537,15 @@ class ContextService:
             self._bus.emit(AliasesChangedPayload(rows=candidate.rows))
 
     def apply_alias_rows(
-        self, rows: tuple[AliasRow, ...], *, setup: bool = False
+        self, rows: tuple[AliasRow, ...], *, point: str | None = None
     ) -> None:
-        """Validate and atomically save rows to the active aliases.yaml.
+        """Validate and atomically save rows to the chosen aliases.yaml.
 
         Runs on the owner thread. Without an opened entry raise
-        FailedPreconditionError(no_context) before validation or I/O. GLOBAL
-        writes entry aliases; POINT writes only the selected point's aliases.
-        setup=True always writes entry aliases, updating its installed cache and
-        revision without changing an active point or existing captures.
+        FailedPreconditionError(no_context) before validation or I/O. None writes
+        global aliases. A label must equal the focused point,
+        otherwise raise InvalidInputError(point_not_focused) before validation
+        or I/O. Global writes do not change an active point or existing captures.
         Validate syntax/order, save, then install the exact revision and publish
         changed rows. InvalidInputError(alias_invalid) and storage errors retain
         rows, versions and the old file. Identical active rows save without an
@@ -582,8 +559,8 @@ class ContextService:
             raise FailedPreconditionError(
                 "Open an entry first", reason_code="no_context"
             )
+        documents = self._documents_at(point)
         candidate = AliasTable(rows)
-        documents = self._global_set if setup else self._active_set
         if documents is None:
             raise RuntimeError("Installed documents disappeared")
         installed = documents.aliases
@@ -868,6 +845,14 @@ class ContextService:
         self._owner.assert_owner()
         return self._require_entry(entry_name).ledger
 
+    def _documents_at(self, point: str | None) -> DocumentSet | None:
+        if point is not None and point != self.current_point_label():
+            raise InvalidInputError(
+                f"Point {point!r} is not the focused point",
+                reason_code="point_not_focused",
+            )
+        return self._global_set if point is None else self._active_set
+
     def _require_open_entry(self) -> ResultEntry:
         if self._entry is None:
             raise FailedPreconditionError("No entry is opened", reason_code="no_entry")
@@ -953,7 +938,7 @@ class ContextService:
         WorkingPointInfo,
     ]:
         if self._global_set is None:
-            raise RuntimeError("Opened entry has no setup binding")
+            raise RuntimeError("Opened entry has no global binding")
         assets = self._bind_assets(entry.database_path / "arb_waveforms")
         library = entry.library(label, assets=assets)
         documents = DocumentSet(point, library, entry.aliases(label))

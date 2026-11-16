@@ -46,6 +46,7 @@ from zcu_tools.gui.session.context_types import (
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.resources.entry import ArtifactKey
 
+from tests.gui._context_reads import capture_focus
 from tests.experiment._saving_support import SavingCfg, SavingCore, SavingResult
 from tests.gui._dialog_fakes import RecordingDialogPresenter
 from tests.gui._qt_waits import qt_until
@@ -255,7 +256,7 @@ def host(tmp_path: Path, qapp, request) -> Iterator[Host]:
     controller.setup_control.new_point(
         PointCreateRequest("p", "", CommandOrigin("gui"))
     )
-    captured = controller.context_control.read_context()
+    captured = capture_focus(controller.context_control)
     storage = captured.capture_storage()
     metadata = RunMetadata(
         run_id="20261008T000000Z-a1b2c3",

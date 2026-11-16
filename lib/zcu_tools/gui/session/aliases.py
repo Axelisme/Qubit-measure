@@ -206,7 +206,7 @@ class AliasTable:
         *,
         kind: str | None = None,
     ) -> str:
-        """Read an alias's component or device name from a fixed setup or point.
+        """Read an alias's component or device name from a fixed global or point.
 
         Concrete names need not belong to point.components or a device catalog.
         Follow only this row's earlier-row dependency chain. kind optionally

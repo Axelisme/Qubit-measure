@@ -21,7 +21,7 @@ from zcu_tools.resources.entry.schema import ParameterDocument
 from .view_support import create_entry, registered_model
 
 
-@pytest.mark.parametrize("owner", ["setup", "point"])
+@pytest.mark.parametrize("owner", ["global", "point"])
 def test_static_units_follow_declared_fields_without_reading_values(
     tmp_path: Path, registry_state_guard: None, owner: str
 ) -> None:
@@ -52,7 +52,7 @@ def test_static_units_follow_declared_fields_without_reading_values(
     with registered_model("notebook/static-units", Measured) as kind:
         entry, _, _ = create_entry(tmp_path)
         entry.parameters().add_component("N1", kind=kind, ext={"frequency": 5.0})
-        view = entry.parameters() if owner == "setup" else entry.new_point("working")
+        view = entry.parameters() if owner == "global" else entry.new_point("working")
         document = snapshot(view)
         assert document_unit(document, "N1.frequency") == "MHz"
         assert document_unit(document, "N1.unset") == "us"
@@ -104,7 +104,7 @@ def test_static_units_reject_malformed_metadata(
             document_unit(snapshot(entry.parameters()), "N1.value")
 
 
-@pytest.mark.parametrize("owner", ["setup", "point"])
+@pytest.mark.parametrize("owner", ["global", "point"])
 def test_public_snapshot_and_source_path_preserve_cached_binding_and_isolation(
     tmp_path: Path, owner: str
 ) -> None:
@@ -115,7 +115,7 @@ def test_public_snapshot_and_source_path_preserve_cached_binding_and_isolation(
         entry, results, database = create_entry(tmp_path)
         for name in ("N1", "snapshot", "source_path", "path", "accept_source"):
             entry.parameters().add_component(name, kind=kind, values=[2, 3])
-        view = entry.parameters() if owner == "setup" else entry.new_point("working")
+        view = entry.parameters() if owner == "global" else entry.new_point("working")
         with view.edit() as draft:
             draft.set_meta("N1.values", {"source": "kept"})
         expected = (
@@ -123,7 +123,7 @@ def test_public_snapshot_and_source_path_preserve_cached_binding_and_isolation(
             / "entry"
             / (
                 "parameters.yaml"
-                if owner == "setup"
+                if owner == "global"
                 else "points/working/parameters.yaml"
             )
         )
@@ -146,7 +146,7 @@ def test_public_snapshot_and_source_path_preserve_cached_binding_and_isolation(
         assert snapshot(view).general.ext == {}
         other = ResultEntry.open("entry", result_root=results, database_root=database)
         other_view = (
-            other.parameters() if owner == "setup" else other.parameters("working")
+            other.parameters() if owner == "global" else other.parameters("working")
         )
         other_view.N1.values = [7]
         assert document_value(snapshot(view), "N1.values") == [2, 3]
@@ -158,7 +158,7 @@ def test_public_snapshot_and_source_path_preserve_cached_binding_and_isolation(
         assert expected.read_text(encoding="utf-8") == "invalid: ["
 
 
-@pytest.mark.parametrize("owner", ["setup", "point"])
+@pytest.mark.parametrize("owner", ["global", "point"])
 def test_public_edit_snapshot_isolates_uncommitted_values_and_metadata(
     tmp_path: Path, owner: str
 ) -> None:
@@ -168,7 +168,7 @@ def test_public_edit_snapshot_isolates_uncommitted_values_and_metadata(
     with registered_model("notebook/read-draft", Measured) as kind:
         entry, _, _ = create_entry(tmp_path)
         entry.parameters().add_component("N1", kind=kind, freq=10.0)
-        view = entry.parameters() if owner == "setup" else entry.new_point("working")
+        view = entry.parameters() if owner == "global" else entry.new_point("working")
         before = source_path(view).read_bytes()
 
         def abort_edit() -> None:
@@ -192,7 +192,7 @@ def test_public_edit_snapshot_isolates_uncommitted_values_and_metadata(
         assert source_path(view).read_bytes() == before
 
 
-@pytest.mark.parametrize("owner", ["setup", "point"])
+@pytest.mark.parametrize("owner", ["global", "point"])
 def test_document_value_reads_logical_fields_extras_and_containers_without_hooks(
     tmp_path: Path, owner: str
 ) -> None:
@@ -229,7 +229,7 @@ def test_document_value_reads_logical_fields_extras_and_containers_without_hooks
             model_config={"marker": "data"},
             model_dump="extra",
         )
-        view = entry.parameters() if owner == "setup" else entry.new_point("working")
+        view = entry.parameters() if owner == "global" else entry.new_point("working")
         view.general.ext["temperature"] = 0.03
         document = snapshot(view)
         before_calls = calls.copy()
@@ -255,7 +255,7 @@ def test_document_value_reads_logical_fields_extras_and_containers_without_hooks
         assert calls == before_calls
 
 
-@pytest.mark.parametrize("owner", ["setup", "point"])
+@pytest.mark.parametrize("owner", ["global", "point"])
 def test_document_fields_preserve_logical_rows_metadata_and_literal_keys(
     tmp_path: Path, owner: str
 ) -> None:
@@ -290,7 +290,7 @@ def test_document_fields_preserve_logical_rows_metadata_and_literal_keys(
         )
         with entry.parameters().edit() as draft:
             draft.set_meta("N1.freq", {"stderr": 0.25, "note": ["caller"]})
-        if owner == "setup":
+        if owner == "global":
             view = entry.parameters()
         else:
             entry.new_point("seed")

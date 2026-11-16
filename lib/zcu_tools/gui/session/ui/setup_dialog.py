@@ -131,7 +131,7 @@ class SetupDialog(QDialog):
         super().__init__(parent)
         self._ctrl = controller
         self._read_only = False
-        self.setWindowTitle("Setup")
+        self.setWindowTitle("Entry")
         self.resize(620, 640)
 
         root_layout = QVBoxLayout(self)

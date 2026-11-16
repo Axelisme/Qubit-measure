@@ -56,7 +56,7 @@ def test_strict_refresh_rejects_invalid_global_candidate_and_retains_publication
     entry.parameters().add_component("R1", kind="fake/sensor", rate=6500.0)
     source = entry.result_path / "parameters.yaml"
     installed = document_revision(entry.parameters())
-    write_setup_component(source, "R1", {"kind": "fake/sensor", "rate": "bad"})
+    write_global_component(source, "R1", {"kind": "fake/sensor", "rate": "bad"})
     candidate = source.read_bytes()
 
     with pytest.raises(ValidationError, match="rate"):
@@ -65,7 +65,7 @@ def test_strict_refresh_rejects_invalid_global_candidate_and_retains_publication
     assert entry.parameters().R1.rate == 6500.0
     assert document_revision(entry.parameters()) == installed
     assert source.read_bytes() == candidate
-    write_setup_component(source, "R1", {"kind": "fake/sensor", "rate": 6600.0})
+    write_global_component(source, "R1", {"kind": "fake/sensor", "rate": 6600.0})
     entry.parameters().refresh(strict=True)
     assert entry.parameters().R1.rate == 6600.0
     assert document_revision(entry.parameters()) != installed
@@ -81,14 +81,14 @@ def test_newer_minor_preserves_unknown_fields_while_known_values_use_working_uni
     entry_roots: tuple[Path, Path], entry: ResultEntry
 ) -> None:
     results, database = entry_roots
-    setup_path = results / "entry" / "parameters.yaml"
+    global_path = results / "entry" / "parameters.yaml"
     entry.parameters().add_component("R1", kind="fake/sensor", rate=6500.0)
-    write_forward_setup(setup_path)
-    document = YAML(typ="safe").load(setup_path)
-    before = setup_path.read_bytes()
+    write_forward_global(global_path)
+    document = YAML(typ="safe").load(global_path)
+    before = global_path.read_bytes()
 
     reopened = ResultEntry.open("entry", result_root=results, database_root=database)
-    assert setup_path.read_bytes() == before
+    assert global_path.read_bytes() == before
     assert reopened.parameters().R1.rate == pytest.approx(6500.0)
     assert field_view(reopened.parameters().R1.wiring).delay == pytest.approx(1.2)
     reopened.parameters().R1.rate = 6600.0
@@ -99,7 +99,7 @@ def test_newer_minor_preserves_unknown_fields_while_known_values_use_working_uni
     document["components"]["R1"]["rate"] = 6600.0
     document["components"]["R1"]["wiring"]["delay"] = 1.5
     document["general"]["description"] = "edited with the older reader"
-    stored = YAML(typ="safe").load(setup_path)
+    stored = YAML(typ="safe").load(global_path)
     assert stored == document
     again = ResultEntry.open("entry", result_root=results, database_root=database)
     assert again.parameters().R1.rate == pytest.approx(6600.0)
@@ -122,11 +122,11 @@ def test_newer_minor_keeps_unknown_fields_outside_the_public_typed_interface(
     entry_roots: tuple[Path, Path], entry: ResultEntry, operation: str, path: str
 ) -> None:
     results, database = entry_roots
-    setup_path = results / "entry" / "parameters.yaml"
+    global_path = results / "entry" / "parameters.yaml"
     entry.parameters().add_component("R1", kind="fake/sensor", rate=6500.0)
-    write_forward_setup(setup_path)
+    write_forward_global(global_path)
     reopened = ResultEntry.open("entry", result_root=results, database_root=database)
-    before = setup_path.read_bytes()
+    before = global_path.read_bytes()
 
     def perform_operation() -> None:
         if operation == "read":
@@ -148,7 +148,7 @@ def test_newer_minor_keeps_unknown_fields_outside_the_public_typed_interface(
     error = AttributeError if operation == "read" else ValidationError
     with pytest.raises(error):
         perform_operation()
-    assert setup_path.read_bytes() == before
+    assert global_path.read_bytes() == before
     assert reopened.parameters().R1.rate == pytest.approx(6500.0)
 
 
@@ -170,14 +170,14 @@ def test_newer_minor_still_validates_known_values_and_kinds(
     error: type[Exception],
 ) -> None:
     results, database = entry_roots
-    setup_path = results / "entry" / "parameters.yaml"
+    global_path = results / "entry" / "parameters.yaml"
     entry.parameters().add_component("R1", kind="fake/sensor", rate=6500.0)
-    write_forward_setup(setup_path)
-    document = YAML(typ="safe").load(setup_path)
+    write_forward_global(global_path)
+    document = YAML(typ="safe").load(global_path)
     document["components"]["R1"][field] = value
-    with setup_path.open("w", encoding="utf-8") as stream:
+    with global_path.open("w", encoding="utf-8") as stream:
         YAML(typ="rt").dump(document, stream)
-    before = setup_path.read_bytes()
+    before = global_path.read_bytes()
 
     def perform_operation() -> None:
         if operation == "refresh":
@@ -193,7 +193,7 @@ def test_newer_minor_still_validates_known_values_and_kinds(
     expected_error = UnknownKindError if error is UnknownKindError else ValidationError
     with pytest.raises(expected_error):
         perform_operation()
-    assert setup_path.read_bytes() == before
+    assert global_path.read_bytes() == before
     assert entry.parameters().description is None
 
 
@@ -226,15 +226,15 @@ def test_dotted_path_typos_preserve_the_draft_and_sources(
 ) -> None:
     results, _database = entry_roots
     entry.parameters().add_component("R1", kind="fake/sensor", rate=6500.0)
-    setup_path = results / "entry" / "parameters.yaml"
-    before = setup_path.read_bytes()
+    global_path = results / "entry" / "parameters.yaml"
+    before = global_path.read_bytes()
     previous = entry.parameters().meta("R1.rate")
     with entry.parameters().edit() as draft:
         with pytest.raises(ValidationError):
             draft.set(path, 1.0)
         assert draft.R1.rate == 6500.0
         assert entry.parameters().meta("R1.rate") == previous
-    assert setup_path.read_bytes() == before
+    assert global_path.read_bytes() == before
     assert entry.parameters().meta("R1.rate") == previous
 
 
@@ -273,11 +273,11 @@ def test_path_set_and_attribute_edits_use_the_same_shared_draft(
     entry_roots: tuple[Path, Path], entry: ResultEntry
 ) -> None:
     results, database = entry_roots
-    setup_path = results / "entry" / "parameters.yaml"
+    global_path = results / "entry" / "parameters.yaml"
     entry.parameters().add_component(
         "R1", kind="fake/sensor", rate=6500.0, wiring={"ch": 1}
     )
-    before = setup_path.read_bytes()
+    before = global_path.read_bytes()
     with entry.parameters().edit() as draft:
         draft.set("R1.rate", 6550.0)
         draft.set("R1.wiring.ch", 2)
@@ -286,7 +286,7 @@ def test_path_set_and_attribute_edits_use_the_same_shared_draft(
         draft.set("general.description", "prepared")
         assert draft.R1.rate == pytest.approx(6550.0)
         assert draft.general.ext.temperature == 0.03
-        assert setup_path.read_bytes() == before
+        assert global_path.read_bytes() == before
 
     reopened = ResultEntry.open("entry", result_root=results, database_root=database)
     assert reopened.parameters().R1.rate == pytest.approx(6550.0)
@@ -294,14 +294,14 @@ def test_path_set_and_attribute_edits_use_the_same_shared_draft(
     assert field_view(reopened.parameters().R1.ext).note == "same draft"
     assert reopened.parameters().general.ext.temperature == 0.03
     assert reopened.parameters().description == "prepared"
-    assert YAML(typ="safe").load(setup_path)["components"]["R1"]["rate"] == 6550.0
+    assert YAML(typ="safe").load(global_path)["components"]["R1"]["rate"] == 6550.0
 
 
 def test_general_extensions_support_direct_and_shared_draft_writes_without_scaling(
     entry_roots: tuple[Path, Path], entry: ResultEntry
 ) -> None:
     results, database = entry_roots
-    setup_path = results / "entry" / "parameters.yaml"
+    global_path = results / "entry" / "parameters.yaml"
     assert entry.parameters().general.description is None
     entry.parameters().general.description = "prepared metadata"
     assert entry.parameters().description == "prepared metadata"
@@ -310,7 +310,7 @@ def test_general_extensions_support_direct_and_shared_draft_writes_without_scali
         "rate": 12.3,
         "flags": [True, None],
     }
-    before = setup_path.read_bytes()
+    before = global_path.read_bytes()
     with entry.parameters().edit() as draft:
         draft.general.ext.temperature = 0.03
         draft.general.ext.note = "cooldown"
@@ -318,7 +318,7 @@ def test_general_extensions_support_direct_and_shared_draft_writes_without_scali
         assert draft.general.description == draft.description
         assert draft.general.ext.temperature == 0.03
         assert entry.parameters().general.ext.temperature == 0.02
-        assert setup_path.read_bytes() == before
+        assert global_path.read_bytes() == before
 
     reopened = ResultEntry.open("entry", result_root=results, database_root=database)
     assert reopened.parameters().general.ext.temperature == 0.03
@@ -332,7 +332,7 @@ def test_general_extensions_support_direct_and_shared_draft_writes_without_scali
         reopened.parameters().description
         == "physical environment is not encoded in the name"
     )
-    document = YAML(typ="safe").load(setup_path)
+    document = YAML(typ="safe").load(global_path)
     assert document["general"]["ext"]["temperature"] == 0.03
 
 
@@ -340,12 +340,12 @@ def test_component_draft_edits_publish_together_only_after_context_exit(
     entry_roots: tuple[Path, Path], entry: ResultEntry
 ) -> None:
     results, database = entry_roots
-    setup_path = results / "entry" / "parameters.yaml"
+    global_path = results / "entry" / "parameters.yaml"
     entry.parameters().add_component(
         "R1", kind="fake/sensor", rate=6500.0, wiring={"ch": 1}
     )
     entry.parameters().add_component("R2", kind="fake/sensor", rate=6600.0)
-    before = setup_path.read_bytes()
+    before = global_path.read_bytes()
     with entry.parameters().edit() as draft:
         draft.R1.rate = 6550.0
         field_view(draft.R1.wiring).ch = 2
@@ -354,7 +354,7 @@ def test_component_draft_edits_publish_together_only_after_context_exit(
         assert draft.R1.rate == pytest.approx(6550.0)
         assert entry.parameters().R1.rate == pytest.approx(6500.0)
         assert entry.parameters().R2.rate == pytest.approx(6600.0)
-        assert setup_path.read_bytes() == before
+        assert global_path.read_bytes() == before
 
     reopened = ResultEntry.open("entry", result_root=results, database_root=database)
     assert reopened.parameters().R1.rate == pytest.approx(6550.0)
@@ -410,7 +410,7 @@ def test_component_extensions_preserve_arbitrary_yaml_values_without_unit_conver
     entry_roots: tuple[Path, Path], entry: ResultEntry
 ) -> None:
     results, database = entry_roots
-    setup_path = results / "entry" / "parameters.yaml"
+    global_path = results / "entry" / "parameters.yaml"
     entry.parameters().add_component(
         "R1", kind="fake/sensor", rate=6500.0, ext={"rate": 12.3}
     )
@@ -427,7 +427,7 @@ def test_component_extensions_preserve_arbitrary_yaml_values_without_unit_conver
     assert restored.rate == 321.0
     assert restored.optional is None
     assert restored.flags == [True, "cold"]
-    document = YAML(typ="safe").load(setup_path)["components"]["R1"]
+    document = YAML(typ="safe").load(global_path)["components"]["R1"]
     assert document["rate"] == 6500.0
     assert document["ext"] == {
         "rate": 12.3,
@@ -442,13 +442,13 @@ def test_wiring_channels_reject_explicit_null_without_losing_the_valid_snapshot(
     entry_roots: tuple[Path, Path], entry: ResultEntry, field: str, operation: str
 ) -> None:
     results, database = entry_roots
-    setup_path = results / "entry" / "parameters.yaml"
+    global_path = results / "entry" / "parameters.yaml"
     entry.parameters().add_component("R1", kind="fake/sensor", wiring={field: 2})
     if operation == "open":
-        write_setup_component(
-            setup_path, "R1", {"kind": "fake/sensor", "wiring": {field: None}}
+        write_global_component(
+            global_path, "R1", {"kind": "fake/sensor", "wiring": {field: None}}
         )
-    before = setup_path.read_bytes()
+    before = global_path.read_bytes()
 
     def perform_operation() -> None:
         if operation == "add":
@@ -468,7 +468,7 @@ def test_wiring_channels_reject_explicit_null_without_losing_the_valid_snapshot(
     with pytest.raises(error, match=field) as failure:
         perform_operation()
     assert field in str(failure.value)
-    assert setup_path.read_bytes() == before
+    assert global_path.read_bytes() == before
     assert getattr(entry.parameters().R1.wiring, field) == 2
 
 
@@ -476,7 +476,7 @@ def test_wiring_fields_stay_separate_and_use_their_declared_working_units(
     entry_roots: tuple[Path, Path], entry: ResultEntry
 ) -> None:
     results, database = entry_roots
-    setup_path = results / "entry" / "parameters.yaml"
+    global_path = results / "entry" / "parameters.yaml"
     entry.parameters().add_component(
         "R1",
         kind="fake/sensor",
@@ -489,7 +489,7 @@ def test_wiring_fields_stay_separate_and_use_their_declared_working_units(
     field_view(sensor.wiring).bias_ch = 3
     field_view(sensor.wiring).delay = 0.5
 
-    document = YAML(typ="safe").load(setup_path)["components"]["R1"]
+    document = YAML(typ="safe").load(global_path)["components"]["R1"]
     assert document["wiring"]["delay"] == pytest.approx(0.5)
     assert document["wiring"]["bias_ch"] == 3
     assert "ch" not in document and "bias_ch" not in document
@@ -504,10 +504,10 @@ def test_component_names_cannot_shadow_public_view_members(
     entry_roots: tuple[Path, Path], entry: ResultEntry, name: str, operation: str
 ) -> None:
     results, database = entry_roots
-    setup_path = results / "entry" / "parameters.yaml"
+    global_path = results / "entry" / "parameters.yaml"
     if operation == "open":
-        write_setup_component(setup_path, name, {"kind": "fake/sensor"})
-    before = setup_path.read_bytes()
+        write_global_component(global_path, name, {"kind": "fake/sensor"})
+    before = global_path.read_bytes()
 
     def perform_operation() -> None:
         if operation == "add":
@@ -517,7 +517,7 @@ def test_component_names_cannot_shadow_public_view_members(
 
     with pytest.raises(ValueError, match="component name"):
         perform_operation()
-    assert setup_path.read_bytes() == before
+    assert global_path.read_bytes() == before
 
 
 def test_absent_optional_physical_fields_use_the_declared_default_without_writes(
@@ -535,13 +535,13 @@ def test_forbidden_component_fields_preserve_values_sources_and_disk(
     entry_roots: tuple[Path, Path], entry: ResultEntry, operation: str
 ) -> None:
     results, database = entry_roots
-    setup_path = results / "entry" / "parameters.yaml"
+    global_path = results / "entry" / "parameters.yaml"
     entry.parameters().add_component("R1", kind="fake/sensor", rate=6500.0)
     if operation == "open":
-        write_setup_component(
-            setup_path, "R1", {"kind": "fake/sensor", "rate": 6.5e9, "raet": 6.6e9}
+        write_global_component(
+            global_path, "R1", {"kind": "fake/sensor", "rate": 6.5e9, "raet": 6.6e9}
         )
-    before = setup_path.read_bytes()
+    before = global_path.read_bytes()
 
     def perform_operation() -> None:
         if operation == "add":
@@ -562,7 +562,7 @@ def test_forbidden_component_fields_preserve_values_sources_and_disk(
 
     with pytest.raises(error):
         perform_operation()
-    assert setup_path.read_bytes() == before
+    assert global_path.read_bytes() == before
     assert entry.parameters().R1.rate == 6500.0
     assert entry.parameters().meta("R1.rate") == previous
 
@@ -572,10 +572,10 @@ def test_unknown_kinds_report_the_source_component_and_a_close_name(
     entry_roots: tuple[Path, Path], entry: ResultEntry, operation: str
 ) -> None:
     results, database = entry_roots
-    setup_path = results / "entry" / "parameters.yaml"
+    global_path = results / "entry" / "parameters.yaml"
     if operation == "open":
-        write_setup_component(setup_path, "R1", {"kind": "fake/sensr"})
-    before = setup_path.read_bytes()
+        write_global_component(global_path, "R1", {"kind": "fake/sensr"})
+    before = global_path.read_bytes()
 
     def perform_operation() -> None:
         if operation == "add":
@@ -589,28 +589,28 @@ def test_unknown_kinds_report_the_source_component_and_a_close_name(
     with pytest.raises(UnknownKindError) as failure:
         perform_operation()
 
-    assert failure.value.source == setup_path
+    assert failure.value.source == global_path
     assert failure.value.component == "R1"
     assert failure.value.kind == "fake/sensr"
     assert "fake/sensor" in failure.value.suggestions
-    assert setup_path.read_bytes() == before
+    assert global_path.read_bytes() == before
 
 
 def test_component_frequency_round_trips_in_working_units(
     entry_roots: tuple[Path, Path], entry: ResultEntry
 ) -> None:
     results, database = entry_roots
-    setup_path = results / "entry" / "parameters.yaml"
+    global_path = results / "entry" / "parameters.yaml"
     entry.parameters().add_component("R1", kind="fake/sensor", rate=6500.0)
     sensor = entry.parameters().R1
     assert sensor.rate == 6500.0
-    assert YAML(typ="safe").load(setup_path)["components"]["R1"]["rate"] == 6500.0
+    assert YAML(typ="safe").load(global_path)["components"]["R1"]["rate"] == 6500.0
 
     sensor.rate = 6550.0
     assert sensor.rate == 6550.0
     reopened = ResultEntry.open("entry", result_root=results, database_root=database)
     assert reopened.parameters().R1.rate == 6550.0
-    assert YAML(typ="safe").load(setup_path)["components"]["R1"]["rate"] == 6550.0
+    assert YAML(typ="safe").load(global_path)["components"]["R1"]["rate"] == 6550.0
 
 
 def test_added_component_survives_reopening_with_its_declared_kind(
@@ -627,7 +627,7 @@ def test_added_component_survives_reopening_with_its_declared_kind(
     assert document["components"]["R1"]["ext"]["note"] == "sense line"
 
 
-def write_forward_setup(path: Path) -> None:
+def write_forward_global(path: Path) -> None:
     document = YAML(typ="safe").load(path)
     document["format_version"] = "2.7"
     document["future_top"] = {"next": [1, "two"]}
@@ -637,7 +637,7 @@ def write_forward_setup(path: Path) -> None:
         YAML(typ="rt").dump(document, stream)
 
 
-def write_setup_component(path: Path, name: str, fields: YamlMap) -> None:
+def write_global_component(path: Path, name: str, fields: YamlMap) -> None:
     document = YAML(typ="safe").load(path)
     document["components"][name] = fields
     with path.open("w", encoding="utf-8") as stream:

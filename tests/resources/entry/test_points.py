@@ -96,7 +96,7 @@ def test_empty_point_uses_owner_defaults_without_inheriting_global_values(
         draft.description = "global description"
         draft.set("general.ext", {"operator": "global"})
         draft.set_meta("Q1.rate", {"note": "global"})
-    setup_bytes = (entry.result_path / "parameters.yaml").read_bytes()
+    global_bytes = (entry.result_path / "parameters.yaml").read_bytes()
     point = entry.new_point("blank", mode="empty", description="new description")
 
     content = snapshot(point)
@@ -109,7 +109,7 @@ def test_empty_point_uses_owner_defaults_without_inheriting_global_values(
     assert sorted(path.name for path in directory.iterdir()) == ["parameters.yaml"]
     assert document_revision(entry.library("blank")).revision is None
     assert entry.aliases("blank").read().revision.revision is None
-    assert (entry.result_path / "parameters.yaml").read_bytes() == setup_bytes
+    assert (entry.result_path / "parameters.yaml").read_bytes() == global_bytes
 
 
 @pytest.mark.parametrize(
@@ -227,7 +227,7 @@ def test_new_point_copies_complete_components_and_keeps_independent_values(
     assert point.Q1.rate == 5200.0
 
 
-def test_new_point_inherits_setup_general_with_fresh_creation_time(
+def test_new_point_inherits_global_general_with_fresh_creation_time(
     entry: ResultEntry,
 ) -> None:
     with entry.parameters().edit() as draft:
@@ -292,7 +292,7 @@ def test_new_point_copies_forward_minor_source_yaml(
     assert source.read_bytes() == before
 
 
-def test_seed_accepts_omitted_components_without_rewriting_setup(
+def test_seed_accepts_omitted_components_without_rewriting_global(
     entry: ResultEntry, entry_roots: tuple[Path, Path]
 ) -> None:
     results, database = entry_roots
@@ -343,15 +343,15 @@ def test_point_labels_reject_unsafe_path_segments(
     assert entry.list_points() == []
 
 
-@pytest.mark.parametrize("target", ["setup", "point"])
+@pytest.mark.parametrize("target", ["global", "point"])
 def test_add_component_requires_complete_values_and_runs_original_model(
     entry: ResultEntry, entry_roots: tuple[Path, Path], notebook_kind: str, target: str
 ) -> None:
-    view = entry.parameters() if target == "setup" else entry.new_point("a")
+    view = entry.parameters() if target == "global" else entry.new_point("a")
     source = (
         entry_roots[0]
         / "entry"
-        / ("parameters.yaml" if target == "setup" else "points/a/parameters.yaml")
+        / ("parameters.yaml" if target == "global" else "points/a/parameters.yaml")
     )
     before = source.read_bytes()
     with pytest.raises(ValidationError, match="gain"):
@@ -423,11 +423,11 @@ def test_point_add_component_only_changes_its_own_document(
     point = entry.new_point("a")
     entry.parameters().add_component("R1", kind="fake/sensor")
     source = entry_roots[0] / "entry/points/a/parameters.yaml"
-    setup_source = entry_roots[0] / "entry/parameters.yaml"
-    before = setup_source.read_bytes()
+    global_source = entry_roots[0] / "entry/parameters.yaml"
+    before = global_source.read_bytes()
     point.add_component("Q1", kind="fake/drive/a", sense="R1", rate=5000.0)
     assert YAML(typ="safe").load(source)["components"]["Q1"]["sense"] == "R1"
-    assert setup_source.read_bytes() == before
+    assert global_source.read_bytes() == before
     assert point.Q1.sense == "R1"
     assert entry.parameters("a").Q1.rate == 5000.0
     with pytest.raises(AttributeError):
@@ -439,8 +439,8 @@ def test_point_edit_only_changes_its_document(
 ) -> None:
     entry.parameters().add_component("Q1", kind="fake/drive/a", rate=5000.0)
     point = entry.new_point("a")
-    setup_source = entry_roots[0] / "entry/parameters.yaml"
-    before = setup_source.read_bytes()
+    global_source = entry_roots[0] / "entry/parameters.yaml"
+    before = global_source.read_bytes()
     with point.edit() as draft:
         draft.Q1.rate = 5100.0
         draft.Q1.duration = 12.0
@@ -450,7 +450,7 @@ def test_point_edit_only_changes_its_document(
     assert entry.parameters().Q1.rate == 5000.0
     assert point.description == "point note"
     assert entry.parameters().description is None
-    assert setup_source.read_bytes() == before
+    assert global_source.read_bytes() == before
     results, database = entry_roots
     reloaded = ResultEntry.open("entry", result_root=results, database_root=database)
     assert reloaded.parameters("a").Q1.duration == 12.0
@@ -525,12 +525,12 @@ def test_point_unknown_kind_reports_own_source_without_publishing(
     operation: str,
 ) -> None:
     source = entry_roots[0] / "entry/points/a/parameters.yaml"
-    setup_source = entry_roots[0] / "entry/parameters.yaml"
+    global_source = entry_roots[0] / "entry/parameters.yaml"
     stored = YAML(typ="rt").load(source.read_text())
     stored["components"]["Q1"]["kind"] = "missing/point-kind"
     write_yaml(source, stored)
     before = source.read_bytes()
-    setup_before = setup_source.read_bytes()
+    global_before = global_source.read_bytes()
     entered: list[bool] = []
 
     if operation == "edit":
@@ -552,7 +552,7 @@ def test_point_unknown_kind_reports_own_source_without_publishing(
     assert error.value.component == "Q1"
     assert error.value.kind == "missing/point-kind"
     assert str(source) in str(error.value)
-    assert str(setup_source) not in str(error.value)
+    assert str(global_source) not in str(error.value)
     assert entered == []
     if operation != "refresh":
         assert working_point.Q1.rate == 5000.0
@@ -561,7 +561,7 @@ def test_point_unknown_kind_reports_own_source_without_publishing(
         entered.append(True)
     assert entered == []
     assert source.read_bytes() == before
-    assert setup_source.read_bytes() == setup_before
+    assert global_source.read_bytes() == global_before
 
 
 @pytest.mark.parametrize("operation", ["use", "refresh", "edit"])
@@ -572,12 +572,12 @@ def test_point_invalid_component_name_reports_own_source_without_publishing(
     operation: str,
 ) -> None:
     source = entry_roots[0] / "entry/points/a/parameters.yaml"
-    setup_source = entry_roots[0] / "entry/parameters.yaml"
+    global_source = entry_roots[0] / "entry/parameters.yaml"
     stored = YAML(typ="rt").load(source.read_text())
     stored["components"]["edit"] = stored["components"].pop("Q1")
     write_yaml(source, stored)
     before = source.read_bytes()
-    setup_before = setup_source.read_bytes()
+    global_before = global_source.read_bytes()
     entered: list[bool] = []
 
     if operation == "edit":
@@ -593,15 +593,15 @@ def test_point_invalid_component_name_reports_own_source_without_publishing(
             reload_point()
 
     assert str(source) in str(error.value)
-    assert str(setup_source) not in str(error.value)
+    assert str(global_source) not in str(error.value)
     assert entered == []
     assert working_point.Q1.rate == 5000.0
     assert working_point.Q1.duration == 12.0
     assert source.read_bytes() == before
-    assert setup_source.read_bytes() == setup_before
+    assert global_source.read_bytes() == global_before
 
 
-def test_setup_commit_does_not_validate_or_modify_existing_points(
+def test_global_commit_does_not_validate_or_modify_existing_points(
     working_point: ParameterView, entry: ResultEntry, entry_roots: tuple[Path, Path]
 ) -> None:
     point_source = entry_roots[0] / "entry/points/a/parameters.yaml"
@@ -615,7 +615,7 @@ def test_setup_commit_does_not_validate_or_modify_existing_points(
 
 
 @pytest.mark.parametrize("source_mode", ["label", "view"])
-def test_clone_copies_only_complete_point_and_module_without_reading_setup(
+def test_clone_copies_only_complete_point_and_module_without_reading_global(
     entry: ResultEntry, entry_roots: tuple[Path, Path], source_mode: str
 ) -> None:
     entry.parameters().add_component("Q1", kind="fake/drive/a", rate=5000.0)
@@ -785,7 +785,7 @@ def test_point_description_is_set_within_create_and_preserves_source(
     clone_from: str | None,
     description: str | None,
 ) -> None:
-    entry.parameters().description = "setup description"
+    entry.parameters().description = "global description"
     source = entry.new_point("source")
     source.description = "source description"
     created = entry.new_point(
@@ -797,7 +797,7 @@ def test_point_description_is_set_within_create_and_preserves_source(
     expected = (
         description
         if description is not None
-        else ("source description" if clone_from is not None else "setup description")
+        else ("source description" if clone_from is not None else "global description")
     )
     assert snapshot(created).general.description == expected
     assert snapshot(entry.parameters("destination")).general.description == expected

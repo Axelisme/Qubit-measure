@@ -16,7 +16,7 @@ def authored() -> EntryAliases:
     return EntryAliases(aliases={"spare": "", "drive": "Q1", "sense": "$drive.sense"})
 
 
-def test_missing_setup_aliases_are_empty_until_first_explicit_save(
+def test_missing_global_aliases_are_empty_until_first_explicit_save(
     entry: ResultEntry, authored: EntryAliases
 ) -> None:
     source = entry.result_path / "aliases.yaml"
@@ -38,7 +38,7 @@ def test_missing_setup_aliases_are_empty_until_first_explicit_save(
     assert installed.revision is not None
 
 
-def test_missing_point_aliases_do_not_fall_back_to_setup(
+def test_missing_point_aliases_do_not_fall_back_to_global(
     entry: ResultEntry, authored: EntryAliases
 ) -> None:
     entry.new_point("legacy")
@@ -49,7 +49,7 @@ def test_missing_point_aliases_do_not_fall_back_to_setup(
     assert entry.aliases().read().require_valid() == authored
 
 
-def test_alias_round_trip_keeps_setup_and_points_independent(
+def test_alias_round_trip_keeps_global_and_points_independent(
     entry: ResultEntry, entry_roots: tuple[Path, Path], authored: EntryAliases
 ) -> None:
     entry.new_point("one")
@@ -145,7 +145,7 @@ def test_point_aliases_accept_forward_minor_and_preserve_raw_rows(
     "version,body",
     [("2.0", "{}"), ("1.0", "[]"), ("1.0", "{drive: null}"), ("1.0", "{drive: 7}")],
 )
-def test_point_aliases_reject_invalid_documents_without_setup_fallback(
+def test_point_aliases_reject_invalid_documents_without_global_fallback(
     entry: ResultEntry, authored: EntryAliases, version: str, body: str
 ) -> None:
     entry.aliases().save(authored)
@@ -160,7 +160,7 @@ def test_point_aliases_reject_invalid_documents_without_setup_fallback(
     assert entry.aliases().read().require_valid() == authored
 
 
-def test_new_point_copies_setup_aliases_only_at_creation(
+def test_new_point_copies_global_aliases_only_at_creation(
     entry: ResultEntry, authored: EntryAliases
 ) -> None:
     entry.new_point("unseeded")
@@ -183,7 +183,7 @@ def test_new_point_copies_setup_aliases_only_at_creation(
 
 @pytest.mark.parametrize("foreign", [False, True], ids=["same-entry", "cross-entry"])
 @pytest.mark.parametrize("via_view", [False, True], ids=["label", "view"])
-def test_clone_copies_published_source_point_aliases_not_either_setup(
+def test_clone_copies_published_source_point_aliases_not_either_global(
     entry: ResultEntry,
     entry_roots: tuple[Path, Path],
     authored: EntryAliases,
@@ -199,8 +199,8 @@ def test_clone_copies_published_source_point_aliases_not_either_setup(
     source_view = source_entry.new_point("original")
     source_aliases = source_entry.result_path / "points/original/aliases.yaml"
     save_entry_aliases(source_aliases, authored)
-    source_entry.aliases().save(EntryAliases(aliases={"drive": "source setup"}))
-    entry.aliases().save(EntryAliases(aliases={"drive": "destination setup"}))
+    source_entry.aliases().save(EntryAliases(aliases={"drive": "source global"}))
+    entry.aliases().save(EntryAliases(aliases={"drive": "destination global"}))
     clone_from: str | ParameterView = (
         source_view if via_view else ("source/original" if foreign else "original")
     )
@@ -217,5 +217,5 @@ def test_clone_copies_published_source_point_aliases_not_either_setup(
     entry.new_point("missing", mode="clone", clone_from=clone_from)
     assert load_entry_aliases(entry.result_path / "points/missing/aliases.yaml") is None
     assert entry.aliases().read().require_valid() == EntryAliases(
-        aliases={"drive": "destination setup"}
+        aliases={"drive": "destination global"}
     )

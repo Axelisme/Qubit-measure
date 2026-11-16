@@ -30,6 +30,7 @@ from zcu_tools.gui.session.types import DocumentSetCapture, SessionEnv
 from zcu_tools.resources.entry import ResultEntry
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
+from tests.gui._context_reads import capture_focus
 from tests.gui.app.measure._record_support import require_target
 
 PULSE = "Q1.pulses.pi"
@@ -67,7 +68,7 @@ def _seed(
 ) -> DocumentSetCapture:
     """Select point a with flux 2.0, a const waveform and a pulse using its key."""
     _select(session, "a")
-    capture = session.control.read_context()
+    capture = capture_focus(session.control)
     session.control.set_parameter(
         require_target(capture), "general.ext.flux_value", 2.0
     )
@@ -79,7 +80,7 @@ def _seed(
         PULSE,
         pulse or PulseSpec(ch=0, nqz=1, freq=100.0, gain=0.2, waveform=WAVEFORM),
     )
-    return session.control.read_context()
+    return capture_focus(session.control)
 
 
 def test_numeric_edit_keeps_the_child_waveform_key(session: LibrarySession) -> None:
@@ -88,7 +89,7 @@ def test_numeric_edit_keeps_the_child_waveform_key(session: LibrarySession) -> N
     assert entry.state.input.data["waveform"] == {"kind": "ref", "name": WAVEFORM}
     entry.state.write({("gain",): 0.5}, entry.env)
     session.control.apply_library_change(entry.parameters, entry.put(PULSE))
-    written = session.control.read_context().library.module_spec(PULSE)
+    written = capture_focus(session.control).library.module_spec(PULSE)
     assert isinstance(written, PulseSpec)
     assert written.waveform == WAVEFORM
     assert written.gain == 0.5
@@ -132,7 +133,7 @@ def test_expression_stores_the_number_from_the_open_capture(
     session.control.set_parameter(
         require_target(capture), "general.ext.flux_value", 9.0
     )
-    written = session.control.read_context().library.module_spec(PULSE)
+    written = capture_focus(session.control).library.module_spec(PULSE)
     assert isinstance(written, PulseSpec)
     assert written.gain == pytest.approx(0.2)
 
@@ -147,7 +148,7 @@ def test_root_tag_is_fixed_to_the_entry_family(session: LibrarySession) -> None:
         entry.put(PULSE)
     assert ("type",) in error.value.errors.messages
     assert (
-        session.control.read_context().library.document() == capture.library.document()
+        capture_focus(session.control).library.document() == capture.library.document()
     )
 
 
@@ -170,7 +171,7 @@ def test_invalid_form_rejects_submission_with_field_paths(
     assert isinstance(error.value, InvalidInputError)
     assert set(error.value.errors.messages) == {("gain",)}
     assert (
-        session.control.read_context().library.document() == capture.library.document()
+        capture_focus(session.control).library.document() == capture.library.document()
     )
     assert (
         session.entry.library("a").snapshot().document() == capture.library.document()
@@ -189,7 +190,7 @@ def test_replace_renames_and_writes_in_one_library_change(
     session.control.apply_library_change(
         entry.parameters, entry.replace(PULSE, "Q1.pulses.renamed")
     )
-    library = session.control.read_context().library
+    library = capture_focus(session.control).library
     assert library.module_keys() == ("Q1.pulses.renamed",)
     written = library.module_spec("Q1.pulses.renamed")
     assert isinstance(written, PulseSpec)
@@ -205,25 +206,25 @@ def test_replace_onto_an_existing_name_is_rejected(session: LibrarySession) -> N
         "Q1.pulses.occupied",
         PulseSpec(ch=1, nqz=1, freq=50.0, gain=0.1, waveform=WAVEFORM),
     )
-    before = session.control.read_context().library.document()
+    before = capture_focus(session.control).library.document()
     entry = open_library_entry(capture, "module", PULSE, arb_names=())
     entry.state.write({("gain",): 0.3}, entry.env)
     with pytest.raises(ValueError, match="already exists"):
         session.control.apply_library_change(
             entry.parameters, entry.replace(PULSE, "Q1.pulses.occupied")
         )
-    assert session.control.read_context().library.document() == before
+    assert capture_focus(session.control).library.document() == before
 
 
 def test_arb_data_options_are_the_names_captured_at_open(
     session: LibrarySession,
 ) -> None:
     _select(session, "a")
-    capture = session.control.read_context()
+    capture = capture_focus(session.control)
     session.control.set_waveform(
         require_target(capture), "Q1.waveforms.arb", ArbWaveformCfg(data="first")
     )
-    capture = session.control.read_context()
+    capture = capture_focus(session.control)
     entry = open_library_entry(
         capture, "waveform", "Q1.waveforms.arb", arb_names=("first", "second")
     )
@@ -237,7 +238,7 @@ def test_arb_data_options_are_the_names_captured_at_open(
     session.control.apply_library_change(
         entry.parameters, entry.put("Q1.waveforms.arb")
     )
-    written = session.control.read_context().library.waveform_spec("Q1.waveforms.arb")
+    written = capture_focus(session.control).library.waveform_spec("Q1.waveforms.arb")
     assert isinstance(written, ArbWaveformCfg) and written.data == "second"
 
 
@@ -266,7 +267,7 @@ def test_unsupported_fields_return_to_spec_defaults(session: LibrarySession) -> 
     )
     entry = open_library_entry(capture, "module", PULSE, arb_names=())
     session.control.apply_library_change(entry.parameters, entry.put(PULSE))
-    written = session.control.read_context().library.module_spec(PULSE)
+    written = capture_focus(session.control).library.module_spec(PULSE)
     assert isinstance(written, PulseSpec) and written.desc is None
 
 
@@ -282,7 +283,7 @@ def test_submission_after_a_point_switch_writes_the_open_target(
     )
     original = session.control.read_target(require_target(first)).library
     assert original.waveform_spec("Q1.waveforms.copy").length == 3.0
-    assert session.control.read_context().library.waveform_keys() == ()
+    assert capture_focus(session.control).library.waveform_keys() == ()
 
 
 def test_submission_to_a_different_open_entry_writes_nothing(
@@ -326,7 +327,7 @@ def test_new_mux_kind_requires_tones_and_saves_labels(session: LibrarySession) -
         pytest.fail(f"MuxReadoutSpec must be a creatable module library kind: {exc}")
     assert kind == "module"
     _select(session, "mux")
-    capture = session.control.read_context()
+    capture = capture_focus(session.control)
     catalog = {
         "synthetic_mux": TemplateDef(
             MuxReadoutSpec,
@@ -356,7 +357,10 @@ def test_new_mux_kind_requires_tones_and_saves_labels(session: LibrarySession) -
     )
     session.control.apply_library_change(entry.parameters, entry.put("MG.readout.rf"))
     reopened = open_library_entry(
-        session.control.read_context(), "module", "MG.readout.rf", arb_names=()
+        capture_focus(session.control),
+        "module",
+        "MG.readout.rf",
+        arb_names=(),
     )
     spec = reopened.spec()
     assert isinstance(spec, MuxReadoutSpec)

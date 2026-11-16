@@ -18,6 +18,7 @@ from zcu_tools.gui.session.context_types import (
 from zcu_tools.gui.session.ports import OperationConflictError
 from zcu_tools.resources.entry import ResultEntry
 
+from tests.gui._context_reads import capture_focus
 from tests.program._profiles import load_soccfg
 
 from ._workflow_harness import StartHarness
@@ -116,7 +117,7 @@ def test_same_name_tabs_keep_independent_drafts_and_close_without_session_shutdo
     assert control.close(two)
     assert control.tabs() == ()
     assert harness.state.session_env.soc is not None
-    assert harness.services.context.read_context().capture_storage().point == "source"
+    assert capture_focus(harness.services.context).capture_storage().point == "source"
     # Closing the last borrower does not stop admission on the session runner.
     third = control.open("synthetic")
     token = control.start(third, RUN_ID)

@@ -285,9 +285,12 @@ class ContextReadPort(Protocol):
     """Fixed parameter capture, without file I/O or writable resource handles."""
 
     def read_context(
-        self, *, aliases: Mapping[str, str] | None = None
+        self, *, aliases: Mapping[str, str] | None = None, point: str | None = None
     ) -> DocumentSetCapture:
-        """Fix published point/library/storage and all current authored aliases.
+        """Fix installed global/point documents, storage and authored aliases.
+
+        None selects global; a label must equal the focused point. Other labels
+        raise InvalidInputError(point_not_focused) without changing selection.
 
         aliases optionally maps alias names to temporary concrete components;
         dependent links remain authored and no global state changes. Reads use

@@ -25,8 +25,8 @@ from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 class FileBanner(QWidget):
     """Show one installed document's pending/reloaded/error projection.
 
-    setup=False selects the active document group (entry in GLOBAL, point in
-    POINT); setup=True selects the installed entry group in either state.
+    point=None selects global documents; a label selects the focused point.
+    Nonfocused labels are rejected by the context owner.
     control owns revision checks and reload validation. document selects the
     owner file; children are named 'inspect.<document>.sync.message',
     'inspect.<document>.sync.reload' and 'inspect.<document>.sync.keep'.
@@ -42,20 +42,20 @@ class FileBanner(QWidget):
         document: Literal["parameters", "library", "aliases"],
         on_reloaded: Callable[[], None],
         *,
-        setup: bool = False,
+        point: str | None = None,
         parent: QWidget | None = None,
     ) -> None:
         """Bind document notices and reload actions to the selected installed group.
 
-        setup=False uses active documents; setup=True uses entry documents,
-        including while a point is active. on_reloaded runs after a successful
+        None uses global documents; a label uses focused point documents.
+        on_reloaded runs after a successful
         reload so the host can discard its draft. parent owns the Qt widget.
         """
         super().__init__(parent)
         self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
         self._control = control
         self._document = document
-        self._setup = setup
+        self._point = point
         self._on_reloaded = on_reloaded
         self._notice_file: FileRevision | None = None
         layout = QVBoxLayout(self)
@@ -89,17 +89,14 @@ class FileBanner(QWidget):
         """
         files = (
             self._control.get_installed_file_revisions()[-3:]
-            if self._setup
+            if self._point is None
             else self._control.get_file_revisions()
         )
         return next((file for file in files if file.document == self._document), None)
 
-    def set_setup(self, *, setup: bool) -> None:
-        """Select entry scope when True; False uses the active document group.
-
-        The next capture/refresh uses the new scope without reading disk.
-        """
-        self._setup = setup
+    def set_point(self, point: str | None) -> None:
+        """Select global (None) or focused point notices without reading disk."""
+        self._point = point
 
     def check(self, expected: FileRevision | None) -> None:
         """Check a loaded draft's disk revision; show and rethrow owner rejection.

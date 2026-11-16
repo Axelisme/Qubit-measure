@@ -4,6 +4,7 @@ from zcu_tools.gui.session import adapters
 from zcu_tools.gui.session.context_types import PointUseRequest
 from zcu_tools.gui.session.events import MdChangedPayload
 
+from tests.gui._context_reads import capture_focus
 from tests.gui._qt_waits import qt_until
 
 
@@ -13,16 +14,16 @@ def test_watcher_follows_point_to_global_directory_and_keeps_old_captures(
     from zcu_tools.gui.session.adapters import FileWatcher
 
     context, bus, entry = selected
-    old = context.read_context()
+    old = capture_focus(context)
     point_path = context.get_file_revisions()[0].path
     watcher = FileWatcher(context, bus, admit_reload=lambda: True)
     try:
         context.use_global()
-        global_capture = context.read_context()
+        global_capture = capture_focus(context)
         path = entry.result_path / "parameters.yaml"
         path.write_text(path.read_text().replace("4300.0", "5500.0"))
         watcher.flush()
-        assert context.read_context().value("Q1.rate") == 5500.0
+        assert capture_focus(context).value("Q1.rate") == 5500.0
         assert global_capture.value("Q1.rate") == 4300.0
         assert old.value("Q1.rate") == 4300.0
         point_path.write_text("invalid: true")
@@ -30,7 +31,7 @@ def test_watcher_follows_point_to_global_directory_and_keeps_old_captures(
         replacement.write_text(path.read_text().replace("5500.0", "5600.0"))
         replacement.replace(path)
         qt_until(
-            lambda: context.read_context().value("Q1.rate") == 5600.0,
+            lambda: capture_focus(context).value("Q1.rate") == 5600.0,
             label="global directory reload after scope switch",
         )
         assert all(
@@ -47,7 +48,7 @@ def test_watcher_observes_entry_directory_while_point_stays_active(
     from zcu_tools.gui.session.adapters import FileWatcher
 
     context, bus, entry = selected
-    captured = context.read_context()
+    captured = capture_focus(context)
     path = entry.result_path / "parameters.yaml"
     watcher = FileWatcher(context, bus, admit_reload=lambda: True)
     try:
@@ -63,7 +64,7 @@ def test_watcher_observes_entry_directory_while_point_stays_active(
             watchdog_ms=2000,
         )
         assert context.current_point_label() == "first"
-        assert context.read_context().value("Q1.rate") == 4300.0
+        assert capture_focus(context).value("Q1.rate") == 4300.0
         assert captured.value("Q1.rate") == 4300.0
         assert all(
             file.path.parent != entry.result_path
@@ -91,19 +92,19 @@ def test_flush_uses_current_admission_and_ignores_own_writes(qapp, selected) -> 
     try:
         file.path.write_text(file.path.read_text().replace("4300.0", "5100.0"))
         watcher.flush()
-        assert context.read_context().value("Q1.rate") == 4300.0
+        assert capture_focus(context).value("Q1.rate") == 4300.0
         assert facts[-1].status.state == "pending"
         assert changes == []
         watcher.flush()
         assert len(facts) == 1
         admitted = True
         watcher.flush()
-        assert context.read_context().value("Q1.rate") == 5100.0
+        assert capture_focus(context).value("Q1.rate") == 5100.0
         assert facts[-1].status.state == "reloaded"
         assert len(changes) == 1
         watcher.flush()
         assert len(facts) == 2
-        target = context.read_context().target
+        target = capture_focus(context).target
         context.set_parameter(target, "Q1.rate", 6100.0)
         watcher.flush()
         assert len(facts) == 2
@@ -111,7 +112,7 @@ def test_flush_uses_current_admission_and_ignores_own_writes(qapp, selected) -> 
         watcher.close()
     file.path.write_text(file.path.read_text().replace("6100.0", "7100.0"))
     watcher.flush()
-    assert context.read_context().value("Q1.rate") == 6100.0
+    assert capture_focus(context).value("Q1.rate") == 6100.0
 
 
 def test_directory_event_installs_new_library_after_absent_selection(
@@ -123,7 +124,7 @@ def test_directory_event_installs_new_library_after_absent_selection(
     path = entry.result_path / "points/first/library.yaml"
     path.unlink()
     context.use_point(PointUseRequest("first"))
-    captured = context.read_context()
+    captured = capture_focus(context)
     watcher = FileWatcher(context, bus, admit_reload=lambda: True)
     try:
         path.write_text(
@@ -132,7 +133,7 @@ def test_directory_event_installs_new_library_after_absent_selection(
         )
         qt_until(
             lambda: (
-                context.read_context().library.waveform_keys() == ("Q1.waveforms.base",)
+                capture_focus(context).library.waveform_keys() == ("Q1.waveforms.base",)
             ),
             label="new library file reload",
         )
@@ -158,7 +159,7 @@ def test_directory_events_follow_atomic_replace_point_switch_and_missing_aliases
         replacement.write_text(file.path.read_text().replace("4300.0", "5100.0"))
         replacement.replace(file.path)
         qt_until(
-            lambda: context.read_context().value("Q1.rate") == 5100.0,
+            lambda: capture_focus(context).value("Q1.rate") == 5100.0,
             label="point file reload",
         )
         entry.new_point("second")
@@ -168,7 +169,8 @@ def test_directory_events_follow_atomic_replace_point_switch_and_missing_aliases
             'format: zcu.aliases\nformat_version: "1.0"\naliases: {driver: Q1}\n'
         )
         qt_until(
-            lambda: bool(context.get_alias_rows()), label="new aliases file reload"
+            lambda: bool(context.get_alias_rows(point=context.current_point_label())),
+            label="new aliases file reload",
         )
         file.path.write_text("invalid: true")
         watcher.flush()

@@ -265,7 +265,7 @@ class WritebackDraft:
             return {}
         parameters = self._require_parameters()
         target = (
-            self._write.read_context().target
+            self._write.read_context(point=self._write.current_point_label()).target
             if self._write.get_entry_info() is not None
             else None
         )
@@ -303,7 +303,9 @@ class WritebackDraft:
         return DocumentSetCapture.empty() if parameters is None else parameters
 
     def _current_target(self) -> DocumentSetRef:
-        target = self._write.read_context().target
+        target = self._write.read_context(
+            point=self._write.current_point_label()
+        ).target
         if target is None:
             raise FailedPreconditionError(
                 "Open an entry first", reason_code="no_context"

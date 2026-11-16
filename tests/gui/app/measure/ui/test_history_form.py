@@ -15,6 +15,7 @@ from zcu_tools.gui.session.context_types import (
     PointCreateRequest,
 )
 
+from tests.gui._context_reads import capture_focus
 from tests.gui._dialog_fakes import RecordingDialogPresenter
 from tests.gui._user_input import ComponentDriver
 from tests.gui.app.measure._history_form_support import history_controller
@@ -36,8 +37,13 @@ def history_ui(
         ctrl.setup_control.new_entry(EntryRequest("current"))
         ctrl.setup_control.new_point(PointCreateRequest("p", "", CommandOrigin("gui")))
         ctrl.session_services.soc_connection.install_soc(MagicMock(), load_soccfg())
-        ctrl.context_control.add_component("Q1", "history/source", {})
-        ctrl.context_control.apply_alias_rows((AliasRow("history", "Q1"),))
+        ctrl.context_control.add_component(
+            "Q1", "history/source", {}, point=ctrl.context_control.current_point_label()
+        )
+        ctrl.context_control.apply_alias_rows(
+            (AliasRow("history", "Q1"),),
+            point=ctrl.context_control.current_point_label(),
+        )
         window.show()
         qapp.processEvents()
         ctrl.tab_control.open_tab_from_file("history", str(path))
@@ -47,7 +53,7 @@ def history_ui(
             "binding": "Q1.pulses.template",
         }[request.param]
         ctrl.context_control.set_module(
-            require_target(ctrl.context_control.read_context()),
+            require_target(capture_focus(ctrl.context_control)),
             key,
             PulseSpec(ch=0, nqz=1, freq=100.0, gain=0.25, waveform="Q1.waveforms.flat"),
         )

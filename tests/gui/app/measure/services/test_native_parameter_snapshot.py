@@ -16,6 +16,7 @@ from zcu_tools.gui.session.operation_runner import OperationRunner
 from zcu_tools.gui.session.parameter_capture import capture_parameters
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
+from tests.gui._context_reads import capture_focus
 from tests.gui.app.measure._native_save_support import (
     AnalysisSavingAdapter,
     NativeSaveSession,
@@ -41,7 +42,7 @@ def test_native_save_load_uses_captured_environment_after_source_removal(
 
     session = role_load_session
     control = session.context
-    target = require_target(control.read_context())
+    target = require_target(capture_focus(control))
     assert target.point is not None, "Fixture must select a point before reloading it"
     control.set_module(
         target,
@@ -68,7 +69,7 @@ def test_native_save_load_uses_captured_environment_after_source_removal(
     )
     source_bytes = parameter_file.read_bytes()
     control.use_point(PointUseRequest(target.point))
-    captured = control.read_context()
+    captured = capture_focus(control)
     tab = session.state.get_tab("tab")
     record = require_record(tab.run)
     metadata = require_metadata(tab.run).model_copy(

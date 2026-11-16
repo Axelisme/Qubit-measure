@@ -4,6 +4,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+from tests.gui._context_reads import capture_focus
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.session.context_types import (
     CommandOrigin,
@@ -81,7 +82,7 @@ def test_shared_build_routes_entry_and_point_commands_to_real_owners(
     )
 
     assert state.session_env.readiness is ContextReadiness.POINT
-    assert services.context_control.read_context().target == target
+    assert capture_focus(services.context_control).target == target
     assert (
         services.setup_control.list_points()[0].description == "created through Setup"
     )

@@ -75,7 +75,7 @@ def require_alignment_export_unit(
 ) -> None:
     """Reject an axis unit that cannot calibrate the planner's actual device.
 
-    Query the injected planner with detached setup and real native alignment,
+    Query the injected planner with detached global and real native alignment,
     without writing its fields. Only a written receipt selects a device for
     exact context-unit comparison; absent context units mean native. No target,
     no planner or a skipped receipt leaves alignment unrestricted. Planner and

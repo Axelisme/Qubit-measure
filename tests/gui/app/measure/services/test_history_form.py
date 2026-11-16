@@ -20,6 +20,7 @@ from zcu_tools.gui.session.context_types import (
     PointCreateRequest,
 )
 
+from tests.gui._context_reads import capture_focus
 from tests.experiment._saving_support import SavingCfg, SavingResult
 from tests.gui.app.measure._history_form_support import (
     SourceDependentAdapter,
@@ -73,9 +74,14 @@ def test_unavailable_reset_updates_nonfactory_error_and_reraises_without_a_form(
         resource = ctrl.cfg_resources.lookup(tab_id)
         ctrl.setup_control.new_entry(EntryRequest("current"))
         ctrl.setup_control.new_point(PointCreateRequest("p", "", CommandOrigin("gui")))
-        ctrl.context_control.add_component("Q1", "history/source", {})
-        ctrl.context_control.apply_alias_rows((AliasRow("history", "Q1"),))
-        target = ctrl.context_control.read_context().target
+        ctrl.context_control.add_component(
+            "Q1", "history/source", {}, point=ctrl.context_control.current_point_label()
+        )
+        ctrl.context_control.apply_alias_rows(
+            (AliasRow("history", "Q1"),),
+            point=ctrl.context_control.current_point_label(),
+        )
+        target = capture_focus(ctrl.context_control).target
         assert target is not None
         ctrl.context_control.set_module(
             target,

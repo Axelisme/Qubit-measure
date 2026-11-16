@@ -318,7 +318,7 @@ class Controller:
         supplies registered drivers, which close_hardware eventually closes.
 
         Aliases are file-backed. Startup scripts open an entry, then call
-        ctx.context.apply_alias_rows to initialize the active table explicitly.
+        ctx.context.apply_alias_rows to initialize global aliases, or pass the focused point label.
         """
         self.control_identity = ControlIdentity()
         self._state = state
@@ -1021,7 +1021,9 @@ class Controller:
                 f"Name {name!r} must use component.partition.name for {item_kind}. "
                 "Module partitions: pulses, readout, reset; waveform partition: waveforms."
             )
-        parameters = self._context_control.read_context()
+        parameters = self._context_control.read_context(
+            point=self._context_control.current_point_label()
+        )
         keys = (
             parameters.library.module_keys()
             if item_kind == "module"
@@ -1078,7 +1080,9 @@ class Controller:
         controller call.
         """
         return open_library_entry(
-            self._context_control.read_context(),
+            self._context_control.read_context(
+                point=self._context_control.current_point_label()
+            ),
             item_kind,
             name,
             arb_names=self._arb_waveform_svc.list_data_keys(),

@@ -70,7 +70,7 @@ def nested_kind(registry_state_guard: None) -> Generator[str]:
         yield kind
 
 
-@pytest.mark.parametrize("owner", ["setup", "point"])
+@pytest.mark.parametrize("owner", ["global", "point"])
 def test_open_invalid_component_reports_source_and_original_validation(
     tmp_path: Path, required_kind: str, owner: str
 ) -> None:
@@ -87,7 +87,7 @@ def test_open_invalid_component_reports_source_and_original_validation(
     before = source.read_bytes()
 
     def open_document() -> None:
-        if owner == "setup":
+        if owner == "global":
             view = ResultEntry.open(
                 "entry", result_root=results, database_root=database
             ).parameters()
@@ -107,7 +107,7 @@ def test_open_invalid_component_reports_source_and_original_validation(
     assert source.read_bytes() == before
 
 
-@pytest.mark.parametrize("owner", ["setup", "point"])
+@pytest.mark.parametrize("owner", ["global", "point"])
 @pytest.mark.parametrize("version", ["2.0", "2.2"])
 def test_registered_legacy_rename_preserves_metadata_until_explicit_replacement(
     tmp_path: Path,
@@ -130,10 +130,10 @@ def test_registered_legacy_rename_preserves_metadata_until_explicit_replacement(
     with registered_model("notebook/renamed", Renamed) as kind:
         entry, results, database = create_entry(tmp_path)
         entry.parameters().add_component("N1", kind=kind, modern=7)
-        view = entry.parameters() if owner == "setup" else entry.new_point("working")
+        view = entry.parameters() if owner == "global" else entry.new_point("working")
         source = (
             results / "entry/parameters.yaml"
-            if owner == "setup"
+            if owner == "global"
             else results / "entry/points/working/parameters.yaml"
         )
         with view.edit() as draft:
@@ -154,7 +154,7 @@ def test_registered_legacy_rename_preserves_metadata_until_explicit_replacement(
         )
         loaded = (
             reopened.parameters()
-            if owner == "setup"
+            if owner == "global"
             else reopened.parameters("working")
         )
         with pytest.raises(AttributeError, match=r"N1\.modern"):
@@ -187,7 +187,7 @@ def test_registered_legacy_rename_preserves_metadata_until_explicit_replacement(
         assert loaded.meta("N1.modern") == accepted
 
 
-@pytest.mark.parametrize("owner", ["setup", "point"])
+@pytest.mark.parametrize("owner", ["global", "point"])
 def test_child_writes_validate_the_complete_parent_and_preserve_rejected_metadata(
     tmp_path: Path,
     owner: str,
@@ -213,7 +213,7 @@ def test_child_writes_validate_the_complete_parent_and_preserve_rejected_metadat
     with registered_model("notebook/bounded", Bounded) as kind:
         entry, results, database = create_entry(tmp_path)
         entry.parameters().add_component("N1", kind=kind, box={"low": 1, "high": 5})
-        view = entry.parameters() if owner == "setup" else entry.new_point("working")
+        view = entry.parameters() if owner == "global" else entry.new_point("working")
         assert view.N1.initialized is True
         box = field_view(view.N1.box)
         with view.edit() as draft:
@@ -239,7 +239,7 @@ def test_child_writes_validate_the_complete_parent_and_preserve_rejected_metadat
         )
         loaded = (
             reopened.parameters()
-            if owner == "setup"
+            if owner == "global"
             else reopened.parameters("working")
         )
         loaded_box = field_view(loaded.N1.box)
@@ -657,11 +657,11 @@ def test_optional_container_does_not_make_a_supplied_required_leaf_nullable(
         entry.parameters().add_component(
             "N1", kind=kind, timing={"label": "prepared", "width": 1.0}
         )
-        setup_path = results / "entry" / "parameters.yaml"
-        before = setup_path.read_bytes()
+        global_path = results / "entry" / "parameters.yaml"
+        before = global_path.read_bytes()
         with pytest.raises(ValidationError, match="width"):
             entry.parameters().N1.timing = {"label": "prepared", "width": value}
-        assert setup_path.read_bytes() == before
+        assert global_path.read_bytes() == before
         assert (
             field_view(entry.parameters().N1.timing).label == "prepared"
             and field_view(entry.parameters().N1.timing).width == 1.0
@@ -713,8 +713,8 @@ def test_optional_nested_typos_preserve_values_metadata_and_disk(
         )
         with entry.parameters().edit() as draft:
             draft.set_meta("N1.timing.width", {"stderr": 0.1})
-        setup_path = results / "entry" / "parameters.yaml"
-        before = setup_path.read_bytes()
+        global_path = results / "entry" / "parameters.yaml"
+        before = global_path.read_bytes()
         accepted = entry.parameters().meta("N1.timing.width")
         assert accepted == {"stderr": 0.1}
 
@@ -731,7 +731,7 @@ def test_optional_nested_typos_preserve_values_metadata_and_disk(
 
         with pytest.raises(ValidationError):
             perform_operation()
-        assert setup_path.read_bytes() == before
+        assert global_path.read_bytes() == before
         timing = field_view(entry.parameters().N1.timing)
         assert timing.label == "prepared" and timing.width == 1.0
         assert entry.parameters().meta("N1.timing.width") == accepted
@@ -756,8 +756,8 @@ def test_optional_nested_complete_values_round_trip_in_working_units(
                 and field_view(draft.N1.timing).width == 10.0
             )
 
-        setup_path = results / "entry" / "parameters.yaml"
-        assert YAML(typ="safe").load(setup_path)["components"]["N1"]["timing"][
+        global_path = results / "entry" / "parameters.yaml"
+        assert YAML(typ="safe").load(global_path)["components"]["N1"]["timing"][
             "width"
         ] == pytest.approx(10.0)
         reopened = ResultEntry.open(
@@ -768,7 +768,7 @@ def test_optional_nested_complete_values_round_trip_in_working_units(
             and field_view(reopened.parameters().N1.timing).width == 10.0
         )
         reopened.parameters().N1.timing = {"label": "updated", "width": 20.0}
-        assert YAML(typ="safe").load(setup_path)["components"]["N1"]["timing"][
+        assert YAML(typ="safe").load(global_path)["components"]["N1"]["timing"][
             "width"
         ] == pytest.approx(20.0)
         again = ResultEntry.open("entry", result_root=results, database_root=database)
@@ -785,8 +785,8 @@ def test_nested_model_views_and_dotted_edits_preserve_draft_isolation(
     entry.parameters().add_component(
         "N1", kind=nested_kind, timing={"label": "prepared", "width": 1.0}
     )
-    setup_path = results / "entry" / "parameters.yaml"
-    before = setup_path.read_bytes()
+    global_path = results / "entry" / "parameters.yaml"
+    before = global_path.read_bytes()
     with entry.parameters().edit() as draft:
         draft.set("N1.timing.width", 10.0)
         assert (
@@ -797,14 +797,14 @@ def test_nested_model_views_and_dotted_edits_preserve_draft_isolation(
             field_view(entry.parameters().N1.timing).label == "prepared"
             and field_view(entry.parameters().N1.timing).width == 1.0
         )
-        assert setup_path.read_bytes() == before
+        assert global_path.read_bytes() == before
 
     reopened = ResultEntry.open("entry", result_root=results, database_root=database)
     assert (
         field_view(reopened.parameters().N1.timing).width == 10.0
         and field_view(reopened.parameters().N1.timing).label == "prepared"
     )
-    assert YAML(typ="safe").load(setup_path)["components"]["N1"]["timing"]["width"] == (
+    assert YAML(typ="safe").load(global_path)["components"]["N1"]["timing"]["width"] == (
         pytest.approx(10.0)
     )
 
@@ -819,9 +819,9 @@ def test_required_component_values_reject_invalid_edits(
     entry.parameters().add_component(
         "N1", kind=required_kind, rate=5000.0, title="initial"
     )
-    setup_file = results / "entry" / "parameters.yaml"
-    before = setup_file.read_bytes()
+    global_file = results / "entry" / "parameters.yaml"
+    before = global_file.read_bytes()
     with pytest.raises(ValidationError, match="rate"):
         entry.parameters().N1.rate = value
-    assert setup_file.read_bytes() == before
+    assert global_file.read_bytes() == before
     assert entry.parameters().N1.rate == 5000.0

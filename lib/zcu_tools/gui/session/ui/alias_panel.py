@@ -8,7 +8,6 @@ from pydantic import TypeAdapter, ValidationError
 from qtpy.QtCore import QSignalBlocker, Qt
 from qtpy.QtWidgets import (
     QAbstractItemView,
-    QComboBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -29,6 +28,7 @@ from zcu_tools.gui.session.context_types import (
     ContextSourceUnavailableError,
     DocumentSetRef,
 )
+from zcu_tools.gui.session.ui.document_destination import DocumentDestination
 from zcu_tools.gui.session.ui.file_banner import FileBanner
 from zcu_tools.gui.widgets import error_colour, secondary_colour
 from zcu_tools.gui.widgets.selectable_text import make_label_selectable
@@ -75,9 +75,8 @@ class AliasPanel(QWidget):
         self._applying = False
         self._read_only = False
         layout = QVBoxLayout(self)
-        self._destination = QComboBox()
+        self._destination = DocumentDestination()
         self._destination.setObjectName("inspect.aliases.destination")
-        self._destination.addItems(["Active documents", "Entry template"])
         toolbar = QHBoxLayout()
         toolbar.addWidget(QLabel("Destination:"))
         toolbar.addWidget(self._destination)
@@ -121,6 +120,7 @@ class AliasPanel(QWidget):
         self._error.setWordWrap(True)
         make_label_selectable(self._error)
         layout.addWidget(self._error)
+        self._destination.refresh(self._control.current_point_label())
         self._load()
         self._scope.connect(self._table.cellChanged, self._cell_finished)
         self._scope.connect(self._destination.currentIndexChanged, self._load)
@@ -149,7 +149,7 @@ class AliasPanel(QWidget):
         try:
             rows = self._validated_rows()
             self._sync.check(self._revision)
-            self._control.apply_alias_rows(rows, setup=self._is_setup())
+            self._control.apply_alias_rows(rows, point=self._destination.point())
         except (FailedPreconditionError, InvalidInputError, OSError) as error:
             if not self._scope.closed:
                 self._error.setText(str(error))
@@ -165,9 +165,9 @@ class AliasPanel(QWidget):
 
     def _load(self) -> None:
         """Discard local input and load the selected destination."""
-        self._sync.set_setup(setup=self._is_setup())
+        self._sync.set_point(self._destination.point())
         self._target = self._current_target()
-        self._base = self._control.get_alias_rows(setup=self._is_setup())
+        self._base = self._control.get_alias_rows(point=self._destination.point())
         self._revision = self._sync.capture()
         self._show_rows(self._base)
         self._refresh_resolutions()
@@ -186,19 +186,17 @@ class AliasPanel(QWidget):
         """
         if self._applying:
             return
+        self._destination.refresh(self._control.current_point_label())
         if self._current_target() != self._target or not self._has_draft():
             self._load()
         self._sync.refresh(has_draft=self._has_draft())
-
-    def _is_setup(self) -> bool:
-        return self._destination.currentIndex() == 1
 
     def _current_target(self) -> DocumentSetRef | None:
         info = self._control.get_entry_info()
         label = self._control.current_point_label()
         if info is None:
             return None
-        if self._is_setup() or label is None:
+        if self._destination.point() is None:
             return DocumentSetRef(entry_name=info.name)
         return DocumentSetRef(entry_name=info.name, point=label)
 
@@ -314,7 +312,9 @@ class AliasPanel(QWidget):
             item.setToolTip("")
             item.setForeground(self._table.palette().text())
         try:
-            rows = self._control.read_context(setup=self._is_setup()).resolved_aliases()
+            rows = self._control.read_context(
+                point=self._destination.point()
+            ).resolved_aliases()
         except ContextSourceUnavailableError as error:
             # A source fault prevents the whole projection; keep it visible.
             for index in range(self._table.rowCount()):

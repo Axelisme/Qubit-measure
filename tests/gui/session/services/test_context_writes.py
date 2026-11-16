@@ -43,6 +43,7 @@ from zcu_tools.resources.entry import (
 )
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
+from tests.gui._context_reads import capture_focus
 from tests.gui.app.measure._record_support import require_target
 from tests.resources.entry.fakes import register_fakes, registry_state, restore_registry
 
@@ -123,10 +124,10 @@ def test_read_target_observes_detached_writes_without_selecting_or_publishing(
 ) -> None:
     first = _select(session, "a")
     _write(session.control, first, kind, 0.2)
-    capture = session.control.read_context()
+    capture = capture_focus(session.control)
     second = _select(session, "b")
     _write(session.control, first, kind, 0.3)
-    selected = session.control.read_context()
+    selected = capture_focus(session.control)
     version = session.state.version.get("context")
     events: list[object] = []
     session.bus.subscribe(MdChangedPayload, events.append)
@@ -135,8 +136,8 @@ def test_read_target_observes_detached_writes_without_selecting_or_publishing(
     assert current.target == first
     assert _value(current, kind) == pytest.approx(0.3)
     assert _value(capture, kind) == pytest.approx(0.2)
-    assert session.control.read_context().target == second
-    assert session.control.read_context().document() == selected.document()
+    assert capture_focus(session.control).target == second
+    assert capture_focus(session.control).document() == selected.document()
     assert session.state.version.get("context") == version
     assert events == []
 
@@ -144,15 +145,18 @@ def test_read_target_observes_detached_writes_without_selecting_or_publishing(
 def test_global_alias_edits_persist_and_keep_the_active_three_file_versions(
     session: _Session,
 ) -> None:
-    before = session.control.read_context()
+    before = capture_focus(session.control)
     files = session.control.get_file_revisions()
     rows = (AliasRow("driver", "Q1"),)
 
-    session.control.apply_alias_rows(rows)
+    session.control.apply_alias_rows(rows, point=session.control.current_point_label())
 
     assert session.entry.aliases().read().require_valid().aliases == {"driver": "Q1"}
-    assert session.control.get_alias_rows() == rows
-    assert session.control.read_context().value("$driver") == "Q1"
+    assert (
+        session.control.get_alias_rows(point=session.control.current_point_label())
+        == rows
+    )
+    assert capture_focus(session.control).value("$driver") == "Q1"
     assert before.resolved_aliases() == ()
     installed = session.control.get_file_revisions()
     assert [item.document for item in installed] == ["parameters", "library", "aliases"]
@@ -160,25 +164,28 @@ def test_global_alias_edits_persist_and_keep_the_active_three_file_versions(
     assert installed[2].revision is not None
     assert installed[2].path == (session.entry.result_path / "aliases.yaml").resolve()
     session.service.install_entry(session.entry)
-    assert session.control.get_alias_rows() == rows
+    assert (
+        session.control.get_alias_rows(point=session.control.current_point_label())
+        == rows
+    )
 
 
 @pytest.mark.parametrize("kind", KINDS)
 def test_entry_writes_install_before_notification_and_leave_active_capture_fixed(
     session: _Session, kind: Kind
 ) -> None:
-    entry_target = require_target(session.control.read_context())
+    entry_target = require_target(capture_focus(session.control))
     _write(session.control, entry_target, kind, 0.2)
     selected = _select(session, "a")
-    captured = session.control.read_context(setup=True)
-    active = session.control.read_context()
+    captured = session.control.read_context(point=None)
+    active = capture_focus(session.control)
     active_files = session.control.get_file_revisions()
     version = session.state.version.get("context")
     observed: list[DocumentSetCapture] = []
     other_events: list[object] = []
     session.bus.subscribe(
         EntryDocumentsChangedPayload,
-        lambda _: observed.append(session.control.read_context(setup=True)),
+        lambda _: observed.append(session.control.read_context(point=None)),
     )
     for event in (MdChangedPayload, MlChangedPayload, FileChangedPayload):
         session.bus.subscribe(event, other_events.append)
@@ -186,11 +193,11 @@ def test_entry_writes_install_before_notification_and_leave_active_capture_fixed
     _write(session.control, entry_target, kind, 0.3)
 
     assert [_value(item, kind) for item in observed] == [pytest.approx(0.3)]
-    assert _value(session.control.read_context(setup=True), kind) == pytest.approx(0.3)
+    assert _value(session.control.read_context(point=None), kind) == pytest.approx(0.3)
     assert _value(captured, kind) == pytest.approx(0.2)
     assert _value(active, kind) == pytest.approx(0.2)
-    assert _value(session.control.read_context(), kind) == pytest.approx(0.2)
-    assert session.control.read_context().target == selected
+    assert _value(capture_focus(session.control), kind) == pytest.approx(0.2)
+    assert capture_focus(session.control).target == selected
     assert session.control.get_file_revisions() == active_files
     assert session.state.version.get("context") == version
     assert other_events == []
@@ -207,10 +214,10 @@ def test_entry_writes_install_before_notification_and_leave_active_capture_fixed
 def test_pending_entry_candidates_leave_captures_fixed_and_fail_explicit_guards(
     session: _Session, kind: Kind
 ) -> None:
-    target = require_target(session.control.read_context())
+    target = require_target(capture_focus(session.control))
     _write(session.control, target, kind, 0.2)
     _select(session, "a")
-    captured = session.control.read_context(setup=True)
+    captured = session.control.read_context(point=None)
     document = "parameters" if kind == "parameter" else "library"
     file = next(
         file
@@ -222,7 +229,7 @@ def test_pending_entry_candidates_leave_captures_fixed_and_fail_explicit_guards(
     session.service.synchronize_files(admit_reload=False)
     observed: list[EntryDocumentsChangedPayload] = []
     session.bus.subscribe(EntryDocumentsChangedPayload, observed.append)
-    assert _value(session.control.read_context(setup=True), kind) == pytest.approx(0.2)
+    assert _value(session.control.read_context(point=None), kind) == pytest.approx(0.2)
 
     with pytest.raises(FailedPreconditionError) as failure:
         session.control.check_file_revision(file)
@@ -230,7 +237,7 @@ def test_pending_entry_candidates_leave_captures_fixed_and_fail_explicit_guards(
 
     assert observed == []
     assert file.path.read_text() == candidate
-    assert _value(session.control.read_context(setup=True), kind) == pytest.approx(0.2)
+    assert _value(session.control.read_context(point=None), kind) == pytest.approx(0.2)
     assert _value(captured, kind) == pytest.approx(0.2)
     assert file in session.control.get_installed_file_revisions()
 
@@ -240,20 +247,20 @@ def test_entry_structure_writes_notify_after_cache_installation(
     session: _Session, operation: str
 ) -> None:
     _select(session, "a")
-    captured = session.control.read_context(setup=True)
-    active = session.control.read_context()
+    captured = session.control.read_context(point=None)
+    active = capture_focus(session.control)
     version = session.state.version.get("context")
     observed: list[DocumentSetCapture] = []
     session.bus.subscribe(
         EntryDocumentsChangedPayload,
-        lambda _: observed.append(session.control.read_context(setup=True)),
+        lambda _: observed.append(session.control.read_context(point=None)),
     )
     before = registry_state()
     try:
         register_fakes()
         if operation == "component":
             session.control.add_component(
-                "Q1", "fake/drive/a", {"rate": 4300.0}, setup=True
+                "Q1", "fake/drive/a", {"rate": 4300.0}, point=None
             )
         elif operation == "library":
             session.control.apply_library_change(
@@ -266,7 +273,7 @@ def test_entry_structure_writes_notify_after_cache_installation(
                 ),
             )
         else:
-            session.control.apply_alias_rows((AliasRow("driver", "Q1"),), setup=True)
+            session.control.apply_alias_rows((AliasRow("driver", "Q1"),), point=None)
         assert len(observed) == 1
         if operation == "component":
             assert observed[0].value("Q1.rate") == 4300.0
@@ -277,33 +284,41 @@ def test_entry_structure_writes_notify_after_cache_installation(
         else:
             assert observed[0].value("$driver") == "Q1"
             assert captured.resolved_aliases() == ()
-        assert session.control.read_context().document() == active.document()
+        assert capture_focus(session.control).document() == active.document()
         assert (
-            session.control.read_context().library.document()
+            capture_focus(session.control).library.document()
             == active.library.document()
         )
-        assert session.control.get_alias_rows() == ()
+        assert (
+            session.control.get_alias_rows(point=session.control.current_point_label())
+            == ()
+        )
         assert session.state.version.get("context") == version
     finally:
         restore_registry(before)
 
 
-@pytest.mark.parametrize("setup", [False, True], ids=["active", "entry-template"])
+@pytest.mark.parametrize("global_destination", [False, True], ids=["point", "global"])
 def test_global_component_add_and_template_edit_update_only_future_captures(
     session: _Session,
-    setup: bool,
+    global_destination: bool,
 ) -> None:
-    old = session.control.read_context()
+    old = capture_focus(session.control)
     before = registry_state()
     try:
         register_fakes()
         session.control.add_component(
-            "Q1", "fake/drive/a", {"rate": 4300.0}, setup=setup
+            "Q1",
+            "fake/drive/a",
+            {"rate": 4300.0},
+            point=None if global_destination else session.control.current_point_label(),
         )
-        assert session.control.read_context().value("Q1.rate") == 4300.0
-        session.control.set_setup_parameter("Q1.rate", 5250.0)
-        assert session.control.read_context().value("Q1.rate") == 5250.0
-        assert session.control.read_context().target == old.target
+        assert capture_focus(session.control).value("Q1.rate") == 4300.0
+        session.control.set_parameter(
+            require_target(session.control.read_context()), "Q1.rate", 5250.0
+        )
+        assert capture_focus(session.control).value("Q1.rate") == 5250.0
+        assert capture_focus(session.control).target == old.target
         assert "Q1" not in old.whole_document().components
         assert (
             snapshot(session.entry.parameters()).components["Q1"].model_dump()["rate"]
@@ -316,16 +331,16 @@ def test_global_component_add_and_template_edit_update_only_future_captures(
 def test_global_parameter_writes_commit_once_and_detached_reads_do_not_select(
     session: _Session,
 ) -> None:
-    target = session.control.read_context().target
+    target = capture_focus(session.control).target
     assert target is not None
-    old = session.control.read_context()
+    old = capture_focus(session.control)
     binding = session.control.get_source_binding()
     facts: list[MdChangedPayload] = []
     session.bus.subscribe(MdChangedPayload, facts.append)
 
     session.control.set_parameter(target, "general.ext.flux_value", 0.2)
 
-    assert session.control.read_context().value("general.ext.flux_value") == 0.2
+    assert capture_focus(session.control).value("general.ext.flux_value") == 0.2
     assert old.value("general.ext") == {}
     assert snapshot(session.entry.parameters()).general.ext["flux_value"] == 0.2
     assert session.control.get_source_binding() == binding
@@ -336,8 +351,8 @@ def test_global_parameter_writes_commit_once_and_detached_reads_do_not_select(
     current = session.control.read_target(target)
     assert current.value("general.ext.flux_value") == 0.4
     assert current.capture_storage().point is None
-    assert session.control.read_context().target == selected
-    assert session.control.read_context().value("general.ext.flux_value") == 0.2
+    assert capture_focus(session.control).target == selected
+    assert capture_focus(session.control).value("general.ext.flux_value") == 0.2
     assert session.state.version.get("context") == version
     assert len(facts) == 1
 
@@ -346,7 +361,7 @@ def test_global_writeback_and_library_commands_use_entry_files_and_publish_once(
     session: _Session,
 ) -> None:
     context = session.service
-    before = context.read_context()
+    before = capture_focus(context)
     target = before.target
     assert target is not None
     facts: list[object] = []
@@ -364,19 +379,19 @@ def test_global_writeback_and_library_commands_use_entry_files_and_publish_once(
     )
     assert len(result.committed) == 2
     assert len(facts) == 2
-    assert context.read_context().value("general.ext.flux_value") == 0.25
-    assert context.read_context().library.waveform_keys() == ("Q1.waveforms.base",)
+    assert capture_focus(context).value("general.ext.flux_value") == 0.25
+    assert capture_focus(context).library.waveform_keys() == ("Q1.waveforms.base",)
     assert before.library.waveform_keys() == ()
     assert snapshot(session.entry.parameters()).general.ext["flux_value"] == 0.25
     assert session.entry.library().snapshot().waveform_keys() == ("Q1.waveforms.base",)
     assert session.entry.list_points() == []
     context.apply_library_change(
-        context.read_context(),
+        capture_focus(context),
         LibraryChange(
             "waveform", "rename", "Q1.waveforms.base", new_path="Q1.waveforms.next"
         ),
     )
-    assert context.read_context().library.waveform_keys() == ("Q1.waveforms.next",)
+    assert capture_focus(context).library.waveform_keys() == ("Q1.waveforms.next",)
     assert len(facts) == 3
     selected = _select(session, "local")
     version = session.state.version.get("context")
@@ -385,8 +400,8 @@ def test_global_writeback_and_library_commands_use_entry_files_and_publish_once(
         "Q1.waveforms.next",
         "Q1.waveforms.detached",
     }
-    assert context.read_context().target == selected
-    assert context.read_context().library.waveform_keys() == ("Q1.waveforms.next",)
+    assert capture_focus(context).target == selected
+    assert capture_focus(context).library.waveform_keys() == ("Q1.waveforms.next",)
     assert session.state.version.get("context") == version
     assert len(facts) == 3
 
@@ -394,7 +409,7 @@ def test_global_writeback_and_library_commands_use_entry_files_and_publish_once(
 def test_global_writeback_rejects_unreadable_parameters_before_acceptance(
     session: _Session,
 ) -> None:
-    target = session.control.read_context().target
+    target = capture_focus(session.control).target
     assert target is not None
     before = session.state.session_env
     ledger = session.entry.ledger.events()
@@ -414,7 +429,7 @@ def test_global_writeback_rejects_unreadable_parameters_before_acceptance(
 def test_rejected_global_writeback_does_not_publish_external_parameter_revision(
     session: _Session,
 ) -> None:
-    target = session.control.read_context().target
+    target = capture_focus(session.control).target
     assert target is not None
     before = session.state.session_env
     revisions = session.control.get_file_revisions()
@@ -475,10 +490,10 @@ def test_parameter_setter_commits_caller_metadata_and_keeps_old_capture(
     target = _select(session, "a")
     with session.entry.parameters("a").edit() as draft:
         draft.set_meta("general.ext.flux_value", {"comment": "old"})
-    capture = session.control.read_context()
+    capture = capture_focus(session.control)
     old_document = capture.document()
     _write(session.control, target, "parameter", 0.2, metadata=metadata)
-    current = session.control.read_context()
+    current = capture_focus(session.control)
     assert _value(current, "parameter") == pytest.approx(0.2)
     expected = {"comment": "old"} if metadata is None else metadata
     assert document_meta(current.document(), "general.ext.flux_value") == expected
@@ -490,12 +505,12 @@ def test_parameter_setter_commits_caller_metadata_and_keeps_old_capture(
 @pytest.mark.parametrize("kind", ["module", "waveform"])
 def test_library_setters_preserve_old_capture(session: _Session, kind: Kind) -> None:
     target = _select(session, "a")
-    capture = session.control.read_context()
+    capture = capture_focus(session.control)
     old_document = capture.document()
     old_library = capture.library.document()
     created_at = capture.whole_document().general.created_at
     _write(session.control, target, kind, 0.2)
-    current = session.control.read_context()
+    current = capture_focus(session.control)
     assert _value(current, kind) == pytest.approx(0.2)
     assert current.whole_document().general.created_at == created_at
     assert capture.document() == old_document
@@ -509,24 +524,24 @@ def test_detached_saved_point_write_keeps_current_point_and_publication(
 ) -> None:
     first = _select(session, "a")
     second = _select(session, "b")
-    capture = session.control.read_context()
+    capture = capture_focus(session.control)
     before_version = session.state.version.get("context")
     events: list[object] = []
     session.bus.subscribe(MdChangedPayload, events.append)
     session.bus.subscribe(MlChangedPayload, events.append)
     _write(session.control, first, kind, 0.2)
     assert _persisted(session.entry, first, kind) == pytest.approx(0.2)
-    assert session.control.read_context().target == second
-    assert session.control.read_context().document() == capture.document()
+    assert capture_focus(session.control).target == second
+    assert capture_focus(session.control).document() == capture.document()
     assert (
-        session.control.read_context().library.document() == capture.library.document()
+        capture_focus(session.control).library.document() == capture.library.document()
     )
     assert session.state.version.get("context") == before_version
     assert events == []
     session.control.use_point(PointUseRequest("a"))
-    assert _value(session.control.read_context(), kind) == pytest.approx(0.2)
+    assert _value(capture_focus(session.control), kind) == pytest.approx(0.2)
     _write(session.control, first, kind, 0.3)
-    assert _value(session.control.read_context(), kind) == pytest.approx(0.3)
+    assert _value(capture_focus(session.control), kind) == pytest.approx(0.3)
 
 
 @pytest.mark.parametrize("kind", KINDS)
@@ -562,10 +577,10 @@ def test_cross_entry_target_rejected_before_any_write(
 
 def test_invalid_parameter_schema_is_not_published(session: _Session) -> None:
     target = _select(session, "a")
-    capture = session.control.read_context()
+    capture = capture_focus(session.control)
     with pytest.raises(ValidationError, match="created_at"):
         session.control.set_parameter(target, "general.created_at", "bad-time")
-    assert session.control.read_context().document() == capture.document()
+    assert capture_focus(session.control).document() == capture.document()
 
 
 @pytest.mark.parametrize("kind", KINDS)
@@ -581,7 +596,10 @@ def test_current_write_notifies_after_installation_without_switching_binding(
         observed.append(
             (
                 payload,
-                _value(session.control.read_context(), kind),
+                _value(
+                    capture_focus(session.control),
+                    kind,
+                ),
                 session.state.version.get("context"),
             )
         )
@@ -605,10 +623,10 @@ def test_detached_description_write_updates_cache_without_changing_selected_sour
 ) -> None:
     first = _select(session, "a")
     _select(session, "b")
-    before = session.control.read_context()
+    before = capture_focus(session.control)
     version = session.state.version.get("context")
     binding = session.control.get_source_binding()
-    rows = session.control.get_alias_rows()
+    rows = session.control.get_alias_rows(point=session.control.current_point_label())
     descriptions = {
         info.label: info.description for info in session.control.list_points()
     }
@@ -628,13 +646,16 @@ def test_detached_description_write_updates_cache_without_changing_selected_sour
         snapshot(session.entry.parameters("a")).general.description
         == "changed while detached"
     )
-    after = session.control.read_context()
+    after = capture_focus(session.control)
     assert after.target == before.target
     assert after.document() == before.document()
     assert after.library.document() == before.library.document()
     assert session.state.version.get("context") == version
     assert session.control.get_source_binding() == binding
-    assert session.control.get_alias_rows() == rows
+    assert (
+        session.control.get_alias_rows(point=session.control.current_point_label())
+        == rows
+    )
     assert events == []
 
 
@@ -649,7 +670,7 @@ def test_saved_setter_io_failure_keeps_publication(
     session: _Session, monkeypatch: pytest.MonkeyPatch, kind: Kind
 ) -> None:
     target = _select(session, "a")
-    capture = session.control.read_context()
+    capture = capture_focus(session.control)
     version = session.state.version.get("context")
 
     def fail_replace(self: Path, target: str | Path) -> Path:
@@ -658,9 +679,9 @@ def test_saved_setter_io_failure_keeps_publication(
     monkeypatch.setattr(Path, "replace", fail_replace)
     with pytest.raises(OSError, match="synthetic replace failure"):
         _write(session.control, target, kind, 0.2)
-    assert session.control.read_context().document() == capture.document()
+    assert capture_focus(session.control).document() == capture.document()
     assert (
-        session.control.read_context().library.document() == capture.library.document()
+        capture_focus(session.control).library.document() == capture.library.document()
     )
     assert session.state.version.get("context") == version
 
@@ -670,7 +691,7 @@ def test_parameter_conflict_propagates_without_publishing_candidate(
 ) -> None:
     target = _select(session, "a")
     session.control.set_parameter(target, "general.ext.flux_value", 0.1)
-    capture = session.control.read_context()
+    capture = capture_focus(session.control)
     version = session.state.version.get("context")
     other = session.entry.parameters("a")
     original = ParameterView.edit
@@ -685,7 +706,7 @@ def test_parameter_conflict_propagates_without_publishing_candidate(
     monkeypatch.setattr(ParameterView, "edit", interleaved)
     with pytest.raises(ConflictError):
         session.control.set_parameter(target, "general.ext.flux_value", 0.2)
-    assert session.control.read_context().document() == capture.document()
+    assert capture_focus(session.control).document() == capture.document()
     assert session.state.version.get("context") == version
     assert snapshot(session.entry.parameters("a")).general.ext["flux_value"] == 0.3
 
@@ -697,13 +718,13 @@ def test_missing_saved_point_is_not_created_by_setter(
 ) -> None:
     _select(session, "selected")
     target = DocumentSetRef(entry_name=session.entry.result_path.name, point="missing")
-    capture = session.control.read_context()
+    capture = capture_focus(session.control)
     with pytest.raises(FileNotFoundError):
         _write(session.control, target, kind, 0.2)
     assert session.entry.list_points() == ["selected"]
-    assert session.control.read_context().document() == capture.document()
+    assert capture_focus(session.control).document() == capture.document()
     assert (
-        session.control.read_context().library.document() == capture.library.document()
+        capture_focus(session.control).library.document() == capture.library.document()
     )
 
 
@@ -713,7 +734,7 @@ def test_wrong_path_or_library_partition_keeps_publication(
     kind: Kind,
 ) -> None:
     target = _select(session, "a")
-    capture = session.control.read_context()
+    capture = capture_focus(session.control)
     path = {
         "parameter": "unknown.field",
         "module": "Q1.waveforms.pi",
@@ -721,9 +742,9 @@ def test_wrong_path_or_library_partition_keeps_publication(
     }[kind]
     with pytest.raises((ValueError, AttributeError)):
         _write(session.control, target, kind, 0.2, path=path)
-    assert session.control.read_context().document() == capture.document()
+    assert capture_focus(session.control).document() == capture.document()
     assert (
-        session.control.read_context().library.document() == capture.library.document()
+        capture_focus(session.control).library.document() == capture.library.document()
     )
 
 
@@ -797,7 +818,7 @@ def test_grouped_writeback_publishes_one_fact_per_committed_document(
     assert [type(event) for event in events] == [MdChangedPayload, MlChangedPayload]
     assert session.state.version.get("context") == before + 2
     assert [item.value for item in result.committed[:2]] == [{"gain": 0.1}, 0.2]
-    assert session.control.read_context().value("general.ext.fit.gain") == 0.2
+    assert capture_focus(session.control).value("general.ext.fit.gain") == 0.2
 
 
 def test_shared_writeback_entry_uses_detached_saved_target(
@@ -816,7 +837,7 @@ def test_shared_writeback_entry_uses_detached_saved_target(
         ("general.description", "detached")
     ]
     assert session.entry.parameters("a").description == "detached"
-    assert session.control.read_context().target == second
+    assert capture_focus(session.control).target == second
     assert session.state.version.get("context") == version
     assert session.entry.ledger.get(event_id).event.origin == "mcp"
 
@@ -832,7 +853,7 @@ def test_sample_only_writeback_rejects_invalid_saved_point_before_acceptance(
     from zcu_tools.resources.entry import writeback
 
     selected = _select(session, "a")
-    capture = session.control.read_context()
+    capture = capture_focus(session.control)
     points = session.entry.list_points()
     point_before = snapshot(session.entry.parameters("a")).model_dump(mode="json")
     version = session.state.version.get("context")
@@ -848,7 +869,7 @@ def test_sample_only_writeback_rejects_invalid_saved_point_before_acceptance(
     assert session.entry.ledger.events() == ()
     assert session.entry.records("Q1").read().empty
     assert session.entry.list_points() == points
-    current = session.control.read_context()
+    current = capture_focus(session.control)
     assert current.target == selected
     assert current.document() == capture.document()
     assert current.library.document() == capture.library.document()
@@ -893,7 +914,7 @@ def test_saved_point_samples_persist_and_replace_latest_run_row(
     assert session.control.read_record(target, "Q1", "run-1") == expected
     assert session.control.read_record(target, "Q1", "missing") is None
     second = session.control.apply_writeback(
-        require_target(session.control.read_context()),
+        require_target(capture_focus(session.control)),
         (writeback.RecordWriteback("Q1", {"t1_us": 31.7}),),
         evidence=writeback.WritebackEvidence(origin="gui", run_id="run-1"),
     )
@@ -903,7 +924,9 @@ def test_saved_point_samples_persist_and_replace_latest_run_row(
         session.entry.ledger.get(second_id).event.at
     )
     assert session.control.read_record(
-        require_target(session.control.read_context()), "Q1", "run-1"
+        require_target(capture_focus(session.control)),
+        "Q1",
+        "run-1",
     ) == {
         "component": "Q1",
         "t1_us": 31.7,

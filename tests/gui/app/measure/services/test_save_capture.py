@@ -29,6 +29,7 @@ from zcu_tools.resources.entry import ResultEntry, RoleSpec
 from zcu_tools.resources.entry.save_layout import ArtifactKey, SaveLayout
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
+from tests.gui._context_reads import capture_focus
 from tests.gui.app.measure._form_fakes import form_resources, form_sources
 from tests.gui.app.measure._native_save_support import GUI_ORIGIN, native_save_session
 from tests.gui.app.measure._record_support import require_record, require_target
@@ -71,7 +72,7 @@ def session(tmp_path: Path) -> Generator[SaveSession]:
 
 
 def _bound(session: SaveSession) -> DocumentSetCapture:
-    return session.control.read_context().bind_roles(
+    return capture_focus(session.control).bind_roles(
         {"driver": RoleSpec("fake/drive/*")}, focus="Q1", explicit={}
     )
 
@@ -79,11 +80,13 @@ def _bound(session: SaveSession) -> DocumentSetCapture:
 def test_storage_retains_entry_point_description_and_roles_after_switch(
     session: SaveSession, tmp_path: Path
 ) -> None:
-    target = require_target(session.control.read_context())
+    target = require_target(capture_focus(session.control))
     session.control.set_parameter(target, "general.description", "original")
     capture = _bound(session)
     session.control.set_parameter(target, "general.description", "edited")
-    session.control.apply_alias_rows((AliasRow("driver", "Q2"),))
+    session.control.apply_alias_rows(
+        (AliasRow("driver", "Q2"),), point=session.control.current_point_label()
+    )
     session.entry.new_point("q")
     session.control.use_point(PointUseRequest("q"))
     other = ResultEntry.create(
@@ -116,9 +119,9 @@ def test_storage_retains_entry_point_description_and_roles_after_switch(
 def test_current_storage_description_updates_without_rewriting_old_capture(
     session: SaveSession,
 ) -> None:
-    old = session.control.read_context()
+    old = capture_focus(session.control)
     session.control.set_parameter(require_target(old), "general.description", "new")
-    fresh = session.control.read_context()
+    fresh = capture_focus(session.control)
     assert session.control.capture_storage(fresh).description == "new"
     assert session.control.capture_storage(old).description != "new"
     assert (
@@ -133,7 +136,7 @@ def test_current_storage_description_updates_without_rewriting_old_capture(
 def test_library_publication_preserves_storage_origin(
     session: SaveSession, kind: str
 ) -> None:
-    original = session.control.read_context()
+    original = capture_focus(session.control)
     if kind == "module":
         session.control.set_module(
             require_target(original),
@@ -144,14 +147,14 @@ def test_library_publication_preserves_storage_origin(
         session.control.set_waveform(
             require_target(original), "Q1.waveforms.base", ConstWaveformCfg(length=1.0)
         )
-    storage = session.control.capture_storage(session.control.read_context())
+    storage = session.control.capture_storage(capture_focus(session.control))
     assert storage == session.control.capture_storage(original)
 
 
 def test_storage_requires_saved_origin_and_readable_sources(
     session: SaveSession,
 ) -> None:
-    saved = session.control.read_context()
+    saved = capture_focus(session.control)
     fault = ContextSourceFault(
         "point", Path("/unavailable/parameters.yaml"), "ValueError", "broken"
     )
@@ -171,16 +174,16 @@ def test_storage_requires_saved_origin_and_readable_sources(
     with pytest.raises(FailedPreconditionError, match="saved-point storage"):
         session.control.capture_storage(unbound)
     session.context.install_entry(session.entry)
-    global_storage = session.control.capture_storage(session.control.read_context())
+    global_storage = session.control.capture_storage(capture_focus(session.control))
     assert global_storage.point is None
     assert global_storage.result_path == session.entry.result_path
 
 
 def test_storage_rejects_mismatched_target(session: SaveSession) -> None:
-    saved = session.control.read_context()
+    saved = capture_focus(session.control)
     session.entry.new_point("q")
     session.control.use_point(PointUseRequest("q"))
-    other = session.control.read_context()
+    other = capture_focus(session.control)
     with pytest.raises(ValueError, match="origin"):
         DocumentSetCapture(
             point=saved.document(),

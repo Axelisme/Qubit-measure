@@ -65,6 +65,7 @@ from zcu_tools.resources.entry import (
     SavedPayload,
 )
 
+from tests.gui._context_reads import capture_focus
 from tests.experiment._saving_support import SavingCfg, SavingResult
 from tests.gui.app.measure._form_fakes import form_resources, form_sources
 from tests.gui.app.measure._native_save_support import (
@@ -161,7 +162,7 @@ def test_native_load_uses_recorded_parameters_without_prevalidating_unused_metad
     stored = load(path)
     metadata = stored.docs["metadata"]
     metadata["parameter_snapshot"] = capture_parameters(
-        session.context.read_context()
+        capture_focus(session.context)
     ).model_dump(mode="json")
     metadata[defect] = "malformed-unused"
     save(path, stored, replace=True)
@@ -213,19 +214,24 @@ def test_native_load_analysis_and_writeback_keep_historical_point_aliases_and_id
     session = role_load_session
     control = session.context
     tab = session.state.get_tab("tab")
-    target = require_target(control.read_context())
+    target = require_target(capture_focus(control))
     path = session.native_data_path
     session.entry.new_point("other")
     other = control.use_point(PointUseRequest("other"))
-    control.add_component("Q1", "run-source/qubit", {"rate": 40.0})
-    control.add_component("Q2", "run-source/qubit", {"rate": 50.0})
+    control.add_component(
+        "Q1", "run-source/qubit", {"rate": 40.0}, point=control.current_point_label()
+    )
+    control.add_component(
+        "Q2", "run-source/qubit", {"rate": 50.0}, point=control.current_point_label()
+    )
     session.context.apply_alias_rows(
         (
             AliasRow("source_qubit", "Q2"),
             AliasRow("custom", "Q1"),
-        )
+        ),
+        point=session.context.current_point_label(),
     )
-    rows = session.context.get_alias_rows()
+    rows = session.context.get_alias_rows(point=session.context.current_point_label())
     service = LoadService(session.state, plan_layout=session.save_service.plan_layout)
 
     service.load_result("tab", str(path))
@@ -238,7 +244,7 @@ def test_native_load_analysis_and_writeback_keep_historical_point_aliases_and_id
         "custom": "Q2",
     }
     assert tab.run.storage is None
-    assert control.read_context().target == other
+    assert capture_focus(control).target == other
     control.set_parameter(target, "Q1.rate", 10.0)
     seen: list[AnalyzeRequest[RunRecord[SavingCfg, SavingResult], object]] = []
 
@@ -290,11 +296,14 @@ def test_native_load_analysis_and_writeback_keep_historical_point_aliases_and_id
         isinstance(event.payload, AcceptedPayload)
         and event.payload.run_id == session.metadata.run_id
     )
-    assert control.read_context().target == other
-    assert control.read_context().value("Q1.rate") == 12.0
-    assert control.read_context().value("Q2.rate") == 50.0
+    assert capture_focus(control).target == other
+    assert capture_focus(control).value("Q1.rate") == 12.0
+    assert capture_focus(control).value("Q2.rate") == 50.0
     assert control.read_target(target).value("Q1.rate") == 10.0
-    assert session.context.get_alias_rows() == rows
+    assert (
+        session.context.get_alias_rows(point=session.context.current_point_label())
+        == rows
+    )
     draft.teardown()
 
 
@@ -364,7 +373,7 @@ def test_native_load_uses_parameter_snapshot_names_not_history_summary(
     session.save()
     saved_metadata = require_metadata(tab.run)
     events = session.entry.ledger.events()
-    rows = session.context.get_alias_rows()
+    rows = session.context.get_alias_rows(point=session.context.current_point_label())
     service = LoadService(session.state, plan_layout=session.save_service.plan_layout)
 
     service.load_result(
@@ -382,7 +391,10 @@ def test_native_load_uses_parameter_snapshot_names_not_history_summary(
     assert previous.parameters is not None
     assert previous.parameters.value("$source_qubit.rate") == 1.0
     assert loaded.value("Q1.rate") == 1.0
-    assert session.context.get_alias_rows() == rows
+    assert (
+        session.context.get_alias_rows(point=session.context.current_point_label())
+        == rows
+    )
     assert session.entry.ledger.events() == events
 
 
@@ -506,7 +518,7 @@ def test_native_load_without_readable_source_allows_context_free_analysis(
             )
         else:
             wb.apply_writeback_for_pane("tab", "analysis")
-            assert control.read_context().value("Q1.rate") == 99.0
+            assert capture_focus(control).value("Q1.rate") == 99.0
         assert control.get_source_binding() == selection
         assert rejected.is_active
     finally:
@@ -549,13 +561,15 @@ def test_public_writeback_targets_current_entry_not_historical_source(
     selected.add_component("Q1", kind="run-source/qubit", rate=5.0)
     session.context.install_entry(other)
     control.use_point(PointUseRequest("other"))
-    session.context.apply_alias_rows((AliasRow("source_qubit", "Q1"),))
+    session.context.apply_alias_rows(
+        (AliasRow("source_qubit", "Q1"),), point=session.context.current_point_label()
+    )
     original_events = session.entry.ledger.events()
     foreign_events = other.ledger.events()
     selection = control.get_source_binding()
     try:
         wb.apply_writeback_for_pane("tab", "analysis")
-        assert control.read_context().value("Q1.rate") == 99.0
+        assert capture_focus(control).value("Q1.rate") == 99.0
         assert session.entry.ledger.events() == original_events
         assert other.ledger.events()[:-1] == foreign_events
         assert other.ledger.events()[-1].kind == "accepted"
@@ -564,7 +578,7 @@ def test_public_writeback_targets_current_entry_not_historical_source(
         assert all(wb.get_writeback_applied_for_pane("tab", "analysis").values())
         session.context.install_entry(session.entry)
         control.use_point(PointUseRequest(parameters.target.point))
-        assert control.read_context().lookup("Q1.rate").value == 7.0
+        assert capture_focus(control).lookup("Q1.rate").value == 7.0
     finally:
         draft.teardown()
 
@@ -749,7 +763,7 @@ def test_loaded_foreign_selection_saves_recorded_names_and_historical_metadata(
         control = session.context
         control.use_point(PointUseRequest("destination-point"))
         tab = session.state.get_tab("tab")
-        captured = control.read_context().capture_storage()
+        captured = capture_focus(control).capture_storage()
         assert captured.point == "destination-point"
         service = LoadService(
             session.state, plan_layout=session.save_service.plan_layout

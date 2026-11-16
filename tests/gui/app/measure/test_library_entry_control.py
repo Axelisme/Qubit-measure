@@ -17,6 +17,7 @@ from zcu_tools.gui.session.parameters import DocumentSetCapture
 from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
 
+from tests.gui._context_reads import capture_focus
 from tests.gui._qt_waits import qt_until
 from tests.gui.app.measure._record_support import require_target
 from tests.gui.app.measure.remote._helpers import Fixture
@@ -35,8 +36,10 @@ def library_app(qapp, tmp_path: Path):
         installed = registry_state()
         fx = Fixture(active_label="ctx001", project_root=str(tmp_path))
         control = fx.ctrl.context_control
-        control.add_component("Q1", "fake/drive/a", {})
-        parameters = control.read_context()
+        control.add_component(
+            "Q1", "fake/drive/a", {}, point=control.current_point_label()
+        )
+        parameters = capture_focus(control)
         control.set_waveform(
             require_target(parameters), WAVEFORM, ConstWaveformCfg(length=0.1)
         )
@@ -81,7 +84,7 @@ def library_provider_app(library_app, tmp_path: Path):
     controllers: list[Controller] = []
 
     def build(failure: Exception) -> Controller:
-        source = library_app.context_control.read_context()
+        source = capture_focus(library_app.context_control)
         parameters = DocumentSetCapture(
             point=source.document(),
             library=_FailingLibraryProvider(source.library.document(), failure),
@@ -115,22 +118,22 @@ def test_library_edit_preserves_unexpected_provider_failure(
     library_provider_app, failure: Exception
 ) -> None:
     controller = library_provider_app(failure)
-    before = controller.context_control.read_context().library.document()
+    before = capture_focus(controller.context_control).library.document()
     with pytest.raises((ValueError, InvalidInputError)) as caught:
         controller.edit_library_entry("module", PULSE, {("gain",): 0.4})
     assert caught.value is failure
-    assert controller.context_control.read_context().library.document() == before
+    assert capture_focus(controller.context_control).library.document() == before
 
 
 def test_library_edit_translates_directed_source_refusal(library_provider_app) -> None:
     failure = field_error(("waveform",), "Missing captured waveform source")
     controller = library_provider_app(failure)
-    before = controller.context_control.read_context().library.document()
+    before = capture_focus(controller.context_control).library.document()
     with pytest.raises(InvalidInputError) as caught:
         controller.edit_library_entry("module", PULSE, {("gain",): 0.4})
     assert caught.value.reason_code == "form_errors"
     assert caught.value.__cause__ is failure
-    assert controller.context_control.read_context().library.document() == before
+    assert capture_focus(controller.context_control).library.document() == before
 
 
 @pytest.mark.parametrize(
@@ -148,11 +151,11 @@ def test_library_edit_translates_directed_source_refusal(library_provider_app) -
 def test_library_edit_translates_owner_request_errors(
     library_app, batch: Mapping[FormWritePath, JsonValue]
 ) -> None:
-    before = library_app.context_control.read_context().library.document()
+    before = capture_focus(library_app.context_control).library.document()
     with pytest.raises(InvalidInputError) as caught:
         library_app.edit_library_entry("module", PULSE, batch)
     assert caught.value.reason_code == "form_errors"
-    assert library_app.context_control.read_context().library.document() == before
+    assert capture_focus(library_app.context_control).library.document() == before
 
 
 def test_commit_writes_a_new_destination_and_keeps_the_source(library_app) -> None:
@@ -163,15 +166,15 @@ def test_commit_writes_a_new_destination_and_keeps_the_source(library_app) -> No
         )
         is None
     )
-    library = ctrl.context_control.read_context().library
+    library = capture_focus(ctrl.context_control).library
     assert library.waveform_spec("Q1.waveforms.copy").length == 0.25
     assert library.waveform_spec(WAVEFORM).length == 0.1
 
 
 def test_invalid_entry_is_not_committed(library_app) -> None:
     ctrl = library_app
-    before = ctrl.context_control.read_context().library.document()
+    before = capture_focus(ctrl.context_control).library.document()
     errors = ctrl.edit_library_entry("module", PULSE, {("freq",): "bad"})
     assert errors is not None
     assert ("freq",) in errors.messages
-    assert ctrl.context_control.read_context().library.document() == before
+    assert capture_focus(ctrl.context_control).library.document() == before

@@ -188,9 +188,9 @@ class Controller(BaseController[FluxDepState, EventBus]):
     def setup_project(
         self, project_root: str, entry: str, component: str | None = None
     ) -> None:
-        """Open an existing entry and select a fluxonium setup component.
+        """Open an existing entry and select a fluxonium global component.
 
-        Omitted component resolves the setup qubit alias. Invalid targets fail
+        Omitted component resolves the global qubit alias. Invalid targets fail
         before publication. Database is bound for API completeness, never saved.
         """
         project = AnalysisTarget.open(AnalysisSelection(project_root, entry, component))
@@ -572,7 +572,7 @@ class Controller(BaseController[FluxDepState, EventBus]):
 
         Composition calls this after construction and before creating views or
         remote adapters. Replaces any previous policy. The callback supplies
-        calibration writes and a receipt from detached setup/native positions;
+        calibration writes and a receipt from detached global/native positions;
         alignment and processed restore also query its receipt before publishing,
         so incompatible axis units fail before fitting. Its failures propagate
         before publication or export output. Raises RuntimeError
@@ -595,14 +595,14 @@ class Controller(BaseController[FluxDepState, EventBus]):
     def export_params(self) -> str | None:
         """Export to the selected entry/component and return the predictor path.
 
-        None means predictor skipped, not setup/ledger skipped.
+        None means predictor skipped, not global/ledger skipped.
         Same owner-thread, validation and partial-failure contract as
         export_params_receipt.
         """
         return self._fit.export_params()
 
     def export_params_receipt(self) -> FitExportReceipt:
-        """Write predictor, declared setup fields and analysis ledger on owner.
+        """Write predictor, declared global fields and analysis ledger on owner.
 
         Requires an opened entry/component, fresh fit and aligned source. Uses
         the first aligned spectrum, even with zero sampled points. Receipt holds

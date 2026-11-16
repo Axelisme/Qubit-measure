@@ -27,8 +27,15 @@ def test_remote_creation_allows_empty_source_without_recapturing_later_aliases(
         interaction = ctrl.tab_control.get_tab_snapshot(tab_id).interaction
         assert interaction is not None and not interaction.has_context
         ctrl.setup_control.new_entry(EntryRequest("entry"))
-        ctrl.context_control.apply_alias_rows(rows)
-        assert ctrl.context_control.get_alias_rows() == rows
+        ctrl.context_control.apply_alias_rows(
+            rows, point=ctrl.context_control.current_point_label()
+        )
+        assert (
+            ctrl.context_control.get_alias_rows(
+                point=ctrl.context_control.current_point_label()
+            )
+            == rows
+        )
         interaction = ctrl.tab_control.get_tab_snapshot(tab_id).interaction
         assert interaction is not None and interaction.has_context
         # Live readiness changes, but the tab keeps its empty captured source.

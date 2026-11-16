@@ -14,7 +14,7 @@ from .selection import AnalysisSelection
 
 
 def fluxonium_components(entry: ResultEntry) -> tuple[str, ...]:
-    """List setup fluxonium qubits in document order, without changing the entry."""
+    """List global fluxonium qubits in document order, without changing the entry."""
     return tuple(
         name
         for name, model in snapshot(entry.parameters()).components.items()
@@ -59,7 +59,7 @@ class AnalysisEntry:
 
     @property
     def components(self) -> tuple[str, ...]:
-        """Legal fluxonium choices in setup order, without any default selection."""
+        """Legal fluxonium choices in global order, without any default selection."""
         return fluxonium_components(self.resource)
 
     def select(self, component: str | None = None) -> AnalysisTarget:
@@ -91,10 +91,10 @@ class AnalysisEntry:
 
 @dataclass(frozen=True)
 class AnalysisTarget:
-    """Existing entry and concrete setup target; analysis never performs Save.
+    """Existing entry and concrete global target; analysis never performs Save.
 
     result_root is the absolute Result root; entry is its single-segment name.
-    component is a validated fluxonium qubit name. resource owns setup, predictor
+    component is a validated fluxonium qubit name. resource owns global, predictor
     paths and analysis ledger. Its Database binding is unused by analysis.
     """
 
@@ -108,7 +108,7 @@ class AnalysisTarget:
         cls,
         selection: AnalysisSelection,
     ) -> AnalysisTarget:
-        """Open an existing entry, defaulting to its setup qubit alias.
+        """Open an existing entry, defaulting to its global qubit alias.
 
         selection names the project root, entry and optional component.
         An empty entry is invalid here; GUI composition leaves it unopened.

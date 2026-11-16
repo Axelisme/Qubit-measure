@@ -27,6 +27,7 @@ from zcu_tools.resources.entry import ResultEntry, RoleResolutionError, source_p
 from zcu_tools.resources.entry.aliases import EntryAliases
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
+from tests.gui._context_reads import capture_focus
 from tests.gui.app.measure._record_support import require_target
 from tests.resources.entry.fakes import register_fakes, registry_state, restore_registry
 
@@ -65,7 +66,8 @@ def session(tmp_path: Path) -> Generator[CaptureSession]:
         service.install_entry(entry)
         service.use_point(PointUseRequest("first"))
         service.apply_alias_rows(
-            (AliasRow("driver", "Q1"), AliasRow("sense", "$driver.sense"))
+            (AliasRow("driver", "Q1"), AliasRow("sense", "$driver.sense")),
+            point=service.current_point_label(),
         )
         yield CaptureSession(entry, service, service, state, bus)
         assert registry_state() == installed, "capture tests polluted registries"
@@ -80,8 +82,8 @@ def test_global_library_watcher_updates_only_global_inspect_and_revision(
     from zcu_tools.gui.session.adapters import FileWatcher
 
     control = session.control
-    active = control.read_context()
-    old_global = control.read_context(setup=True)
+    active = capture_focus(control)
+    old_global = control.read_context(point=None)
     environment = session.state.session_env
     version = session.state.version.get("context")
     before = control.get_installed_file_revisions()
@@ -95,12 +97,12 @@ def test_global_library_watcher_updates_only_global_inspect_and_revision(
         )
         watcher.flush()
         assert (
-            control.read_context(setup=True)
+            control.read_context(point=None)
             .library.waveform_spec("Q1.waveforms.global")
             .length
             == 0.2
         )
-        assert control.read_context().library.waveform_keys() == ()
+        assert capture_focus(control).library.waveform_keys() == ()
         assert active.library.waveform_keys() == ()
         assert old_global.library.waveform_keys() == ()
         assert session.state.session_env is environment
@@ -122,8 +124,8 @@ def test_default_capture_reads_all_aliases_without_kind_declarations(
     session: CaptureSession,
 ) -> None:
     rows = (AliasRow("driver", "R1"), AliasRow("custom", "Q2"))
-    session.control.apply_alias_rows(rows)
-    captured = session.control.read_context()
+    session.control.apply_alias_rows(rows, point=session.control.current_point_label())
+    captured = capture_focus(session.control)
     assert captured.aliases == rows
     assert captured.value("$driver.rate") == 6123.0
     assert evaluate_scalar_expr("$driver.rate + driver.rate", captured) == 6246.0
@@ -135,14 +137,17 @@ def test_capture_keeps_point_library_storage_and_rows_after_later_changes(
     session: CaptureSession,
 ) -> None:
     control = session.control
-    target = require_target(control.read_context())
+    target = require_target(capture_focus(control))
     control.set_waveform(target, "Q1.waveforms.base", ConstWaveformCfg(length=0.05))
-    captured = control.read_context()
-    assert captured.aliases == control.get_alias_rows()
+    captured = capture_focus(control)
+    assert captured.aliases == control.get_alias_rows(
+        point=control.current_point_label()
+    )
     control.set_parameter(target, "Q1.rate", 4700.0)
     control.set_waveform(target, "Q1.waveforms.base", ConstWaveformCfg(length=0.10))
     control.apply_alias_rows(
-        (AliasRow("driver", "Q2"), AliasRow("sense", "$driver.sense"))
+        (AliasRow("driver", "Q2"), AliasRow("sense", "$driver.sense")),
+        point=control.current_point_label(),
     )
     session.entry.aliases(point="second").save(
         EntryAliases(aliases={"driver": "Q2", "sense": "$driver.sense"})
@@ -155,16 +160,16 @@ def test_capture_keeps_point_library_storage_and_rows_after_later_changes(
     assert captured.library.waveform_spec("Q1.waveforms.base").length == 0.05
     assert captured.capture_storage().point == "first"
     assert dict(captured.capture_storage().roles) == {"driver": "Q1", "sense": "R1"}
-    assert control.read_context().value("$driver.rate") == 5100.0
-    assert control.read_context().target != target
+    assert capture_focus(control).value("$driver.rate") == 5100.0
+    assert capture_focus(control).target != target
 
 
 def test_named_override_keeps_dependent_links_without_global_side_effects(
     session: CaptureSession,
 ) -> None:
     control = session.control
-    original = control.read_context()
-    rows = control.get_alias_rows()
+    original = capture_focus(control)
+    rows = control.get_alias_rows(point=control.current_point_label())
     assert original.aliases == rows
     environment = session.state.session_env
     binding = control.get_source_binding()
@@ -172,7 +177,9 @@ def test_named_override_keeps_dependent_links_without_global_side_effects(
     ledger = session.entry.ledger.events()
     events: list[AliasesChangedPayload] = []
     session.bus.subscribe(AliasesChangedPayload, events.append)
-    captured = control.read_context(aliases={"driver": "Q2", "extra": "R1"})
+    captured = control.read_context(
+        aliases={"driver": "Q2", "extra": "R1"}, point=control.current_point_label()
+    )
     assert captured.aliases == (
         AliasRow("driver", "Q2"),
         AliasRow("sense", "$driver.sense"),
@@ -181,7 +188,7 @@ def test_named_override_keeps_dependent_links_without_global_side_effects(
     assert captured.value("$sense.rate") == 7200.0
     assert captured.value("$extra.rate") == 6123.0
     assert original.value("$sense.rate") == 6123.0
-    assert control.get_alias_rows() == rows
+    assert control.get_alias_rows(point=control.current_point_label()) == rows
     assert session.state.session_env is environment
     assert control.get_source_binding() == binding
     assert session.state.version.get("context") == version
@@ -201,8 +208,8 @@ def test_named_override_keeps_dependent_links_without_global_side_effects(
 def test_alias_failures_name_requested_alias_without_concrete_fallback(
     session: CaptureSession, rows: tuple[AliasRow, ...], alias: str
 ) -> None:
-    session.control.apply_alias_rows(rows)
-    captured = session.control.read_context()
+    session.control.apply_alias_rows(rows, point=session.control.current_point_label())
+    captured = capture_focus(session.control)
     assert captured.aliases == rows
     assert captured.value("driver.rate") == 123.0
     with pytest.raises(RoleResolutionError) as error:
@@ -214,8 +221,8 @@ def test_unknown_alias_name_is_readable_but_its_component_field_is_not(
     session: CaptureSession,
 ) -> None:
     rows = (AliasRow("driver", "absent"),)
-    session.control.apply_alias_rows(rows)
-    captured = session.control.read_context()
+    session.control.apply_alias_rows(rows, point=session.control.current_point_label())
+    captured = capture_focus(session.control)
     assert captured.aliases == rows
     assert captured.value("driver.rate") == 123.0
     assert captured.value("$driver") == "absent"
@@ -228,11 +235,14 @@ def test_read_target_preserves_historical_names_in_saved_reads(
     session: CaptureSession,
 ) -> None:
     control = session.control
-    captured = control.read_context()
-    assert captured.aliases == control.get_alias_rows()
+    captured = capture_focus(control)
+    assert captured.aliases == control.get_alias_rows(
+        point=control.current_point_label()
+    )
     history = captured.roles
     control.apply_alias_rows(
-        (AliasRow("driver", "Q2"), AliasRow("sense", "$driver.sense"))
+        (AliasRow("driver", "Q2"), AliasRow("sense", "$driver.sense")),
+        point=control.current_point_label(),
     )
     fixed = control.read_target(require_target(captured), roles=history)
     assert fixed.value("$driver.rate") == 4300.0
@@ -246,8 +256,11 @@ def test_read_target_reads_fresh_values_without_alias_io_or_publication(
     session: CaptureSession, point: str | None
 ) -> None:
     control = session.control
-    history = control.read_context()
-    control.apply_alias_rows((AliasRow("driver", "Q2"), AliasRow("sense", "R2")))
+    history = capture_focus(control)
+    control.apply_alias_rows(
+        (AliasRow("driver", "Q2"), AliasRow("sense", "R2")),
+        point=control.current_point_label(),
+    )
     target = DocumentSetRef(entry_name="entry", point=point)
     external = ResultEntry.open(
         "entry",
@@ -265,7 +278,7 @@ def test_read_target_reads_fresh_values_without_alias_io_or_publication(
     aliases = directory / "aliases.yaml"
     aliases.unlink(missing_ok=True)
     aliases.mkdir()
-    selected = control.read_context()
+    selected = capture_focus(control)
     binding = control.get_source_binding()
     environment = session.state.session_env
     versions = session.state.version.snapshot()
@@ -295,8 +308,8 @@ def test_read_target_reads_fresh_values_without_alias_io_or_publication(
     assert history.library.waveform_keys() == ()
     assert control.current_point_label() == "first"
     assert control.get_source_binding() == binding
-    assert control.read_context().target == selected.target
-    assert control.read_context().value("$driver.rate") == 5100.0
+    assert capture_focus(control).target == selected.target
+    assert capture_focus(control).value("$driver.rate") == 5100.0
     assert session.state.session_env is environment
     assert session.state.version.snapshot() == versions
     assert control.get_installed_file_revisions() == revisions
@@ -306,7 +319,7 @@ def test_read_target_reads_fresh_values_without_alias_io_or_publication(
 def test_empty_read_context_keeps_no_context_failure(session: CaptureSession) -> None:
     session.service.clear_context()
     with pytest.raises(FailedPreconditionError) as error:
-        session.control.read_context()
+        capture_focus(session.control)
     assert error.value.reason_code == "no_context"
 
 
@@ -324,10 +337,12 @@ def test_manual_history_keeps_fixed_names_storage_and_unbound_errors(
     names: dict[str, str],
 ) -> None:
     ledger = session.entry.ledger.events()
-    target = require_target(session.control.read_context())
+    target = require_target(capture_focus(session.control))
     binding = RoleBinding(None, {}, names, explicit)
     fixed = session.control.read_target(target, roles=binding)
-    session.control.apply_alias_rows((AliasRow("driver", "Q1"),))
+    session.control.apply_alias_rows(
+        (AliasRow("driver", "Q1"),), point=session.control.current_point_label()
+    )
     assert fixed.roles == binding
     assert dict(binding.explicit) == explicit
     assert dict(fixed.capture_storage().roles) == names
@@ -358,20 +373,31 @@ def test_named_published_reads_keep_fixed_names_and_values_without_source_io(
     with second.edit() as edit:
         edit.set("Q1.rate", 4700.0)
     ledger = session.entry.ledger.events()
-    assert control.read_context().aliases == control.get_alias_rows()
-    captured = control.read_context(aliases=names)
+    assert capture_focus(control).aliases == control.get_alias_rows(
+        point=control.current_point_label()
+    )
+    captured = control.read_context(aliases=names, point=control.current_point_label())
     original_target = captured.target
     assert dict(captured.capture_storage().roles) == names
     assert captured.resolve_path("$driver.rate") == f"{names['driver']}.rate"
     assert captured.value("$driver.rate") == old_value
-    control.apply_alias_rows((AliasRow("driver", "R2"),))
-    assert dict(control.read_context(aliases=names).capture_storage().roles) == names
+    control.apply_alias_rows(
+        (AliasRow("driver", "R2"),), point=control.current_point_label()
+    )
+    assert (
+        dict(
+            control.read_context(aliases=names, point=control.current_point_label())
+            .capture_storage()
+            .roles
+        )
+        == names
+    )
     control.use_point(PointUseRequest("second"))
     source_path(first).unlink()
     source_path(second).unlink()
     assert captured.target == original_target
     assert captured.value("$driver.rate") == old_value
-    current = control.read_context(aliases=names)
+    current = control.read_context(aliases=names, point=control.current_point_label())
     assert dict(current.capture_storage().roles) == names
     assert current.value("$driver.rate") == current_value
     assert current.target != captured.target

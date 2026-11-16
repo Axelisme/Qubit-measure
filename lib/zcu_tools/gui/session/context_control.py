@@ -43,22 +43,22 @@ class ContextControlPort(Protocol):
     the binding; a created-but-unbound point raises PointBindingError.
     """
 
-    def inspect_document(self, *, setup: bool = False) -> ParameterDocument:
-        """Return the cached setup template or current point document without I/O.
+    def inspect_document(self, *, point: str | None = None) -> ParameterDocument:
+        """Return isolated installed global or focused point content without I/O.
 
-        setup=True reads the opened entry template; False reads the published
-        active GLOBAL or POINT document. No entry raises FailedPreconditionError.
-        Returned data is isolated; changing it does not write.
+        None selects global. A label must equal the focused point, otherwise
+        raise InvalidInputError(point_not_focused). No entry raises
+        FailedPreconditionError. Changing returned data does not write.
         """
         ...
 
     def add_component(
-        self, name: str, kind: str, fields: YamlMap, *, setup: bool = False
+        self, name: str, kind: str, fields: YamlMap, *, point: str | None = None
     ) -> None:
         """Add one component with working-unit fields using its registered kind.
 
-        setup=True edits only the opened entry template. Otherwise edit the
-        active GLOBAL or POINT documents in one resource transaction.
+        None edits global. A label must equal the focused point, otherwise
+        raise InvalidInputError(point_not_focused) before validation or I/O.
         Invalid names/kinds/required fields/duplicates leave content unchanged.
         Success on the current point installs its source before publishing one
         parameter change. A nonactive entry edit installs cache/revision before
@@ -68,27 +68,26 @@ class ContextControlPort(Protocol):
         """
         ...
 
-    def set_setup_parameter(self, path: str, value: YamlValue) -> None:
-        """Edit an existing concrete setup field in working units.
-
-        Commit through the setup resource, never an existing point. No entry,
-        invalid path/schema, conflict and I/O failures propagate; no retry.
-        """
-        ...
-
     def read_context(
-        self, *, aliases: Mapping[str, str] | None = None, setup: bool = False
+        self, *, aliases: Mapping[str, str] | None = None, point: str | None = None
     ) -> DocumentSetCapture:
-        """Fix installed documents/storage and aliases without I/O or kind checks.
+        """Capture installed documents/storage and all alias rows without I/O.
 
-        setup=True selects the entry cache, even with a selected point; False
-        uses the active set. Pending disk candidates are never read.
+        point=None captures global documents. A label must equal the focused
+        point, otherwise InvalidInputError(point_not_focused) is raised before
+        reading sources. Captures use installed handles, never disk candidates,
+        and do not change selection or bypass pending.
 
-        aliases maps alias names to temporary concrete components, preserving
-        dependent links without changing global state. Later edits do not change
-        the capture. Missing/unbound $ aliases fail by name when read, never
-        falling back to bare concrete paths. EMPTY/source/invalid override errors
-        propagate; see ContextService.read_context for the full contract.
+        aliases maps temporary component/device names to authored rows for this
+        capture only, retaining dependent links. Names need not exist in catalogs.
+        Overrides do not change global rows, versions or selection; invalid names
+        raise InvalidInputError(alias_invalid). $alias returns a name string and
+        $alias.path resolves lazily without kind checks or concrete-name fallback.
+        Missing/unbound aliases raise RoleResolutionError by name. Bare paths are
+        independent. Reads do not perform I/O or follow later source/alias edits.
+        Alias-file faults remain fixed and affect only alias reads/projections.
+        EMPTY raises FailedPreconditionError(no_context). Necessary source faults
+        raise ContextSourceUnavailableError, never returning old values.
         """
         ...
 
@@ -257,7 +256,7 @@ class ContextControlPort(Protocol):
         ...
 
     def new_point(self, request: PointCreateRequest) -> DocumentSetRef:
-        """Create from setup/clone and select, preserving attribution/errors.
+        """Create from global/clone and select, preserving attribution/errors.
 
         Existing destination raises InvalidInputError with the entry owner's
         exists message before writes, preserving binding, files and versions.
@@ -273,32 +272,33 @@ class ContextControlPort(Protocol):
         """Read detached source facts without I/O."""
         ...
 
-    def get_alias_rows(self, *, setup: bool = False) -> tuple[AliasRow, ...]:
-        """Read installed authored rows on the owner thread without I/O.
+    def get_alias_rows(self, *, point: str | None = None) -> tuple[AliasRow, ...]:
+        """Read installed authored rows without expansion or I/O.
 
-        setup=True selects the entry cache, otherwise the active table.
-        Pending disk candidates never replace the installed rows.
-
-        Links remain authored strings, not resolved component names. No entry
-        returns (). Entry/point selection loads its own table without fallback.
+        None selects global. A label must equal the focused point, otherwise
+        raise InvalidInputError(point_not_focused). Pending candidates are not read.
+        No entry returns empty rows. Invalid aliases raise their captured error.
+        Missing files supply empty rows without fallback.
         """
         ...
 
     def apply_alias_rows(
-        self, rows: tuple[AliasRow, ...], *, setup: bool = False
+        self, rows: tuple[AliasRow, ...], *, point: str | None = None
     ) -> None:
-        """Confirm the ordered table on the owner thread.
+        """Validate and atomically save rows to the chosen aliases.yaml.
 
-        No opened entry raises FailedPreconditionError(no_context) before
-        validation or I/O. Validate syntax/order, then atomically save active
-        aliases.yaml (entry in GLOBAL, selected point in POINT) before installing
-        memory and revision. setup=True always selects entry aliases, updating
-        its installed cache/revision without changing an active point or existing
-        captures. InvalidInputError or storage errors propagate,
-        retaining old rows, versions and file. Empty rows are authoritative.
-        Identical active rows still save but emit no change. Nonactive entry
-        commits publish EntryDocumentsChangedPayload after cache installation. No other point container,
-        ledger or preferences write occurs.
+        Runs on the owner thread. Without an opened entry raise
+        FailedPreconditionError(no_context) before validation or I/O. None writes
+        global aliases. A label must equal the focused point,
+        otherwise raise InvalidInputError(point_not_focused) before validation
+        or I/O. Global writes do not change an active point or existing captures.
+        Validate syntax/order, save, then install the exact revision and publish
+        changed rows. InvalidInputError(alias_invalid) and storage errors retain
+        rows, versions and the old file. Identical active rows save without an
+        active content event. Nonactive entry commits publish
+        EntryDocumentsChangedPayload after cache installation. An installed
+        missing file created externally raises revision_mismatch rather than
+        overwriting it. No ledger or other document is written.
         """
         ...
 

@@ -41,6 +41,7 @@ from zcu_tools.gui.session.types import ContextReadiness, SessionEnv
 from zcu_tools.gui.session.ui.setup_dialog import SetupDialog
 from zcu_tools.gui.widgets import error_colour
 
+from tests.gui._context_reads import capture_focus
 from tests.gui._user_input import ComponentDriver
 
 
@@ -282,7 +283,7 @@ def test_entry_show_and_reopen_prefill_without_changing_active_point(
     dialog.show()
     qapp.processEvents()
     assert entry_selector(dialog).currentText() == "remembered"
-    assert controller.context_control.read_context().target == selected
+    assert capture_focus(controller.context_control).target == selected
     assert state.session_env.readiness == ContextReadiness.POINT
     assert state.session_env.soc is None
     assert state.session_env.soccfg is None
@@ -339,7 +340,7 @@ def test_entry_rejected_new_shows_error_and_keeps_active_point(
 
     monkeypatch.setattr(QInputDialog, "getText", duplicate_name)
     entry_button(dialog, "New entry…").click()
-    assert controller.context_control.read_context().target == selected
+    assert capture_focus(controller.context_control).target == selected
     assert state.session_env.readiness == ContextReadiness.POINT
     labels = "\n".join(label.text() for label in dialog.findChildren(QLabel))
     assert "exists" in labels.lower()
@@ -463,7 +464,7 @@ def test_working_point_switch_uses_label_and_displays_description(
     assert second_item.toolTip() == "away from sweet spot"
     listing.setCurrentRow(1)
     entry_button(dialog, "Switch to selected").click()
-    assert controller.context_control.read_context().target == first
+    assert capture_focus(controller.context_control).target == first
     assert state.session_env.readiness == ContextReadiness.POINT
 
 
@@ -485,7 +486,7 @@ def test_working_point_create_clones_source_and_replaces_description(
     point_field(dialog, "point_label").setText("cloned")
     point_field(dialog, "point_description").setText(description)
     entry_button(dialog, "Create").click()
-    capture = controller.context_control.read_context()
+    capture = capture_focus(controller.context_control)
     assert capture.target != source
     assert capture.value("general.ext.flux_value") == 0.27
     assert capture.whole_document().general.description == description
@@ -504,7 +505,7 @@ def test_working_point_inherit_create_uses_global(
     assert point_combo(dialog, "point_mode").currentText() == "Inherit Global"
     point_field(dialog, "point_label").setText("fresh")
     entry_button(dialog, "Create").click()
-    capture = controller.context_control.read_context()
+    capture = capture_focus(controller.context_control)
     assert not capture.lookup("general.ext.flux_value").present
     assert capture.whole_document().general.description == ""
     assert capture.whole_document().components == {}
@@ -523,7 +524,7 @@ def test_working_point_create_owner_rejection_preserves_binding(
     before = controller.setup_control.list_points()
     point_field(dialog, "point_label").setText(label)
     entry_button(dialog, "Create").click()
-    assert controller.context_control.read_context().target == selected
+    assert capture_focus(controller.context_control).target == selected
     assert controller.setup_control.list_points() == before
     assert state.session_env.readiness == ContextReadiness.POINT
     assert "Failed" in setup_status(dialog)
@@ -542,7 +543,7 @@ def test_working_point_missing_clone_preserves_binding(
     clone.setCurrentIndex(clone.count() - 1)
     point_field(dialog, "point_label").setText("not-created")
     entry_button(dialog, "Create").click()
-    assert controller.context_control.read_context().target == selected
+    assert capture_focus(controller.context_control).target == selected
     assert [p.label for p in controller.setup_control.list_points()] == ["kept"]
     assert "Failed" in setup_status(dialog)
 
@@ -563,7 +564,7 @@ def test_working_point_switch_missing_source_preserves_binding(
     item.setData(Qt.ItemDataRole.UserRole, "removed")
     listing.setCurrentRow(1)
     entry_button(dialog, "Switch to selected").click()
-    assert controller.context_control.read_context().target == selected
+    assert capture_focus(controller.context_control).target == selected
     assert "Failed" in setup_status(dialog)
 
 

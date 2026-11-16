@@ -166,7 +166,7 @@ def test_toolbar_dialog_buttons_and_more_menu_route_commands(
 ) -> None:
     _, host, driver = toolbar_ui
     for caption in (
-        "Setup…",
+        "Entry…",
         "SoC…",
         "Devices…",
         "Inspect…",
@@ -400,7 +400,9 @@ def test_run_with_alias_overrides_is_rejected_without_effects(
     before = cfg.input.data
     publications: list[object] = []
     remove = cfg.subscribe(lambda: publications.append(cfg.input.data))
-    rows = ui.controller.context_control.get_alias_rows()
+    rows = ui.controller.context_control.get_alias_rows(
+        point=ui.controller.context_control.current_point_label()
+    )
     ui.connect()
     try:
         rejected = ui.rpc(
@@ -413,6 +415,11 @@ def test_run_with_alias_overrides_is_rejected_without_effects(
         assert ui.controller.operation_control.active_operations() == ()
         assert cfg.input.data == before
         assert publications == []
-        assert ui.controller.context_control.get_alias_rows() == rows
+        assert (
+            ui.controller.context_control.get_alias_rows(
+                point=ui.controller.context_control.current_point_label()
+            )
+            == rows
+        )
     finally:
         remove()

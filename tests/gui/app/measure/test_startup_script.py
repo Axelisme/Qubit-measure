@@ -28,6 +28,7 @@ from zcu_tools.gui.session.context_types import (
 from zcu_tools.gui.session.ports import OperationConflictError
 from zcu_tools.resources.entry import ResultEntry, component_registry
 
+from tests.gui._context_reads import capture_focus, inspect_focus
 from tests._lab import synthetic_lab
 from tests.gui._qt_waits import qt_until
 from tests.gui._user_input import ComponentDriver
@@ -174,7 +175,7 @@ def test_background_facets_lock_run_and_keep_completed_work(startup_app, tmp_pat
     _behavior, _assembly, ctrl, _window, probe = startup_app
     path = write_script(
         tmp_path,
-        "    p.worker_ids.append(threading.get_ident())\n    ctx.soc.install(p.soccfg, p.soccfg)\n    ctx.devices.register('synthetic', p.driver)\n    ctx.setup.open_entry('synthetic')\n    ctx.setup.use_point('first')\n    ctx.context.apply_alias_rows(())\n    p.tab = ctx.tabs.new_tab('sample')\n    ctx.progress('Waiting for synthetic source')\n    p.started.set()\n    p.release.wait()\n",
+        "    p.worker_ids.append(threading.get_ident())\n    ctx.soc.install(p.soccfg, p.soccfg)\n    ctx.devices.register('synthetic', p.driver)\n    ctx.setup.open_entry('synthetic')\n    ctx.setup.use_point('first')\n    ctx.context.apply_alias_rows((), point=ctx.setup.current().point_label)\n    p.tab = ctx.tabs.new_tab('sample')\n    ctx.progress('Waiting for synthetic source')\n    p.started.set()\n    p.release.wait()\n",
     )
     token = ctrl.start_startup(path)
     try:
@@ -229,7 +230,7 @@ def test_close_drains_startup_owner_delivery_before_callbacks_and_hardware(
     window.destroyed.connect(lambda: probe.calls.append("view released"))
     path = write_script(
         tmp_path,
-        "    ctx.devices.register('synthetic', p.driver)\n    ctx.on_close(lambda: (ctx.context.apply_alias_rows(()), p.calls.append('callback')))\n    p.started.set()\n    p.release.wait()\n    ctx.context.apply_alias_rows(())\n    p.calls.append('worker finished')\n",
+        "    ctx.devices.register('synthetic', p.driver)\n    ctx.on_close(lambda: (ctx.context.apply_alias_rows((), point=ctx.setup.current().point_label), p.calls.append('callback')))\n    p.started.set()\n    p.release.wait()\n    ctx.context.apply_alias_rows((), point=ctx.setup.current().point_label)\n    p.calls.append('worker finished')\n",
     )
     ctrl.start_startup(path)
     qt_until(probe.started.is_set, label="startup waiting")
@@ -331,9 +332,9 @@ def test_startup_persists_aliases_in_the_active_document_set(
             tmp_path,
             "    from zcu_tools.gui.session.aliases import AliasRow\n"
             "    ctx.setup.new_entry('created')\n"
-            "    ctx.context.add_component('Q1', 'startup/qubit', {'freq': 5.25}, setup=True)\n"
+            "    ctx.context.add_component('Q1', 'startup/qubit', {'freq': 5.25}, point=None)\n"
             + ("    ctx.setup.new_point('initial')\n" if point is not None else "")
-            + "    ctx.context.apply_alias_rows((AliasRow('qubit', 'Q1'),))\n",
+            + "    ctx.context.apply_alias_rows((AliasRow('qubit', 'Q1'),), point=ctx.setup.current().point_label)\n",
         )
         token = ctrl.start_startup(path)
         qt_until(
@@ -345,7 +346,7 @@ def test_startup_persists_aliases_in_the_active_document_set(
         outcome = ctrl.operation_control.await_operation(token, 0).outcome
         assert outcome is not None and outcome.status == "finished"
         assert ctrl.context_control.current_point_label() == point
-        assert ctrl.context_control.read_context().value("$qubit.freq") == 5.25
+        assert capture_focus(ctrl.context_control).value("$qubit.freq") == 5.25
         entry = ResultEntry.open(
             "created",
             result_root=tmp_path / "result",
@@ -358,7 +359,7 @@ def test_startup_persists_aliases_in_the_active_document_set(
         ctrl.setup_control.open_entry(EntryRequest("created"))
         if point is not None:
             ctrl.setup_control.use_point(PointUseRequest(point))
-        assert ctrl.context_control.read_context().value("$qubit.freq") == 5.25
+        assert capture_focus(ctrl.context_control).value("$qubit.freq") == 5.25
     finally:
         restore_registry(before)
         assert registry_state() == before
@@ -372,8 +373,8 @@ def test_component_and_alias_facets_commit_through_context_owner(startup_app, tm
         path = write_script(
             tmp_path,
             "    from zcu_tools.gui.session.aliases import AliasRow\n"
-            "    ctx.context.add_component('Q1', 'startup/qubit', {'freq': 5.25})\n"
-            "    ctx.context.apply_alias_rows((AliasRow('qubit', 'Q1'),))\n",
+            "    ctx.context.add_component('Q1', 'startup/qubit', {'freq': 5.25}, point=ctx.setup.current().point_label)\n"
+            "    ctx.context.apply_alias_rows((AliasRow('qubit', 'Q1'),), point=ctx.setup.current().point_label)\n",
         )
         token = ctrl.start_startup(path)
         qt_until(
@@ -384,8 +385,8 @@ def test_component_and_alias_facets_commit_through_context_owner(startup_app, tm
         )
         outcome = ctrl.operation_control.await_operation(token, 0).outcome
         assert outcome is not None and outcome.status == "finished"
-        assert ctrl.context_control.read_context().value("$qubit.freq") == 5.25
-        assert "Q1" in ctrl.context_control.inspect_document().components
+        assert capture_focus(ctrl.context_control).value("$qubit.freq") == 5.25
+        assert "Q1" in inspect_focus(ctrl.context_control).components
     finally:
         restore_registry(before)
         assert registry_state() == before

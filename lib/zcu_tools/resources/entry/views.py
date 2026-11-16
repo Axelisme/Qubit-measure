@@ -504,7 +504,7 @@ def document_meta(
 def stage_component(draft: ParameterDocument, name: str) -> Generator[ComponentSchema]:
     """Yield an independent working-unit component candidate for a draft edit.
 
-    draft is a complete setup or point draft. name identifies an existing
+    draft is a complete global or point draft. name identifies an existing
     component; an unknown name raises KeyError. Normal exit validates the
     original complete model and replaces the draft component. Metadata is
     neither read nor changed. A body exception or validation failure leaves the

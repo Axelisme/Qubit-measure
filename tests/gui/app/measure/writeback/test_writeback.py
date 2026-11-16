@@ -36,6 +36,7 @@ from zcu_tools.resources.entry import ResultEntry, document_meta
 from zcu_tools.resources.entry.ledger_models import JsonObject
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
+from tests.gui._context_reads import capture_focus
 from tests.gui.app.measure._record_support import require_target
 from tests.resources.entry.fakes import register_fakes, registry_state, restore_registry
 
@@ -69,8 +70,10 @@ def session(tmp_path: Path):
         context.install_entry(entry)
         control = context
         control.use_point(PointUseRequest("a"))
-        control.add_component("Q1", "fake/drive/a", {})
-        target = require_target(control.read_context())
+        control.add_component(
+            "Q1", "fake/drive/a", {}, point=control.current_point_label()
+        )
+        target = require_target(capture_focus(control))
         control.set_waveform(target, WAVEFORM, ConstWaveformCfg(length=0.1))
         control.set_parameter(target, "general.ext.flux_value", 2.0)
         service = WritebackService(control, arb_names=lambda: ())
@@ -83,7 +86,7 @@ def session(tmp_path: Path):
 @pytest.fixture
 def readout_source(session):
     _entry, control, _service = session
-    captured = control.read_context()
+    captured = capture_focus(control)
     target = require_target(captured)
     control.set_module(
         target,
@@ -98,7 +101,7 @@ def readout_source(session):
             waveform=WAVEFORM,
         ),
     )
-    captured = control.read_context()
+    captured = capture_focus(control)
     tested = ModuleCfgFactory.from_core(
         captured.library.get_module("Q1.readout.main"), context=None
     )
@@ -132,7 +135,7 @@ def test_calibration_proposal_preserves_library_children_and_ignores_replaced_fi
         [item], parameters=captured, experiment_name="synthetic"
     )
     draft.apply()
-    actual = control.read_context().library.module_spec("Q1.readout.main")
+    actual = capture_focus(control).library.module_spec("Q1.readout.main")
     assert isinstance(actual, PulseReadoutSpec)
     assert actual.waveform == WAVEFORM
     assert actual.classifier == calibration
@@ -197,7 +200,7 @@ def test_complete_classifier_replacements_follow_apply_order(
     else:
         for index in (0, 1) if mode == "primary-post" else (1, 0):
             drafts[index].apply()
-    actual = control.read_context().library.module_spec("Q1.readout.main")
+    actual = capture_focus(control).library.module_spec("Q1.readout.main")
     assert isinstance(actual, PulseReadoutSpec)
     assert actual.classifier == (primary if mode == "post-primary" else post)
     assert actual.waveform == WAVEFORM
@@ -214,13 +217,13 @@ def test_indexed_proposal_changes_only_selected_element_and_checks_its_siblings(
     tested = native_mux((4, 1))
     original = CircleClassifier(g_center=2 + 0j, e_center=3 + 0j, radius=0.5)
     tested.tones[1].classifier = original
-    capture = control.read_context()
+    capture = capture_focus(control)
     control.set_module(
         require_target(capture),
         "Q1.readout.mux",
         MuxReadoutSpec.model_validate(tested.to_dict()),
     )
-    capture = control.read_context()
+    capture = capture_focus(control)
     updated = CircleClassifier(g_center=0j, e_center=1 + 0j, radius=0.5)
     item = writeback.calibrated_module_writeback(
         capture,
@@ -245,7 +248,9 @@ def test_indexed_proposal_changes_only_selected_element_and_checks_its_siblings(
 @pytest.mark.parametrize("kind", ["parameter", "module", "record"])
 def test_proposal_initial_selection_and_note_survive_manual_review(session, kind):
     _entry, control, service = session
-    control.apply_alias_rows((AliasRow("flux_dev", "bias"),))
+    control.apply_alias_rows(
+        (AliasRow("flux_dev", "bias"),), point=control.current_point_label()
+    )
     proposals = {
         "parameter": ParameterWriteback("general.ext.value", "fit", 5.0),
         "module": ModuleWriteback(PULSE, "fit", pulse_proposal()),
@@ -260,7 +265,7 @@ def test_proposal_initial_selection_and_note_survive_manual_review(session, kind
     original.note = "Fit needs manual review"
     draft = service.create_draft(
         [original],
-        parameters=control.read_context(),
+        parameters=capture_focus(control),
         experiment_name="test/review",
         run_id="review-run",
         device_snapshot={"bias": {"value": 0.1, "value_unit": "V"}},
@@ -288,7 +293,7 @@ def test_drafts_keep_ordered_entries_forms_and_applied_state_independent(session
         ParameterWriteback("general.ext.value", "fit", [1, 2]),
         record_proposal,
     ]
-    captured = control.read_context()
+    captured = capture_focus(control)
     evidence: dict[str, JsonObject] = {"bias": {"value": 0.1}}
     first, second = (
         service.create_draft(
@@ -319,7 +324,7 @@ def test_drafts_keep_ordered_entries_forms_and_applied_state_independent(session
     assert first.experiment_name == second.experiment_name == "synthetic/independent"
     assert second.get_summaries("param-1")[1] == "list[2]"
     assert first.apply(item_ids=("ml-1",))["applied_ids"] == ["ml-1"]
-    assert control.read_context().library.module_spec(PULSE).gain == 0.5
+    assert capture_focus(control).library.module_spec(PULSE).gain == 0.5
     assert first.get_all_applied()["ml-1"]
     assert second.get_all_applied() == {
         "ml-1": False,
@@ -328,7 +333,7 @@ def test_drafts_keep_ordered_entries_forms_and_applied_state_independent(session
     }
     first.teardown()
     assert second.apply(item_ids=("ml-1",))["applied_ids"] == ["ml-1"]
-    assert control.read_context().library.module_spec(PULSE).gain == 0.2
+    assert capture_focus(control).library.module_spec(PULSE).gain == 0.2
 
 
 @pytest.mark.parametrize("bad_ids", [("missing",), ("param-1", "param-1")])
@@ -336,7 +341,7 @@ def test_repeated_draft_precedes_bad_ids_without_any_write(session, bad_ids):
     entry, control, service = session
     draft = service.create_draft(
         [ParameterWriteback("general.ext.value", "fit", 5.0)],
-        parameters=control.read_context(),
+        parameters=capture_focus(control),
         experiment_name="synthetic",
     )
     before = entry.ledger.events()
@@ -348,7 +353,7 @@ def test_repeated_draft_precedes_bad_ids_without_any_write(session, bad_ids):
             )
         )
     assert entry.ledger.events() == before
-    assert not control.read_context().lookup("general.ext.value").present
+    assert not capture_focus(control).lookup("general.ext.value").present
     assert draft.get_all_applied() == {"param-1": False}
 
 
@@ -358,7 +363,7 @@ def test_acceptance_rejects_closed_or_foreign_draft_before_writing(session, fore
     factory = WritebackService(control, arb_names=lambda: ()) if foreign else service
     draft = factory.create_draft(
         [ParameterWriteback("general.ext.value", "fit", 5.0)],
-        parameters=control.read_context(),
+        parameters=capture_focus(control),
         experiment_name="synthetic",
     )
     draft.teardown()
@@ -368,7 +373,7 @@ def test_acceptance_rejects_closed_or_foreign_draft_before_writing(session, fore
     with pytest.raises(expected, match=message):
         service.accept_drafts((WritebackSelection(draft, ("param-1",)),))
     assert entry.ledger.events() == before
-    assert not control.read_context().lookup("general.ext.value").present
+    assert not capture_focus(control).lookup("general.ext.value").present
 
 
 def test_record_append_preserves_adapter_json_without_coordinate_policy(session):
@@ -380,7 +385,7 @@ def test_record_append_preserves_adapter_json_without_coordinate_policy(session)
     original = RecordWriteback("Q1", "Record", record)
     draft = service.create_draft(
         [original],
-        parameters=control.read_context(),
+        parameters=capture_focus(control),
         experiment_name="synthetic/record",
         run_id="record-run",
     )
@@ -405,7 +410,7 @@ def test_default_proposal_selection_and_optional_note(session):
     original = ParameterWriteback("general.ext.value", "legacy", 5.0)
     draft = service.create_draft(
         [original],
-        parameters=control.read_context(),
+        parameters=capture_focus(control),
         experiment_name="test/review",
     )
     (item,) = draft.preview()
@@ -416,7 +421,7 @@ def test_default_proposal_selection_and_optional_note(session):
     )
     review = service.create_draft(
         [explicit],
-        parameters=control.read_context(),
+        parameters=capture_focus(control),
         experiment_name="test/review",
     )
     (row,) = review.preview()
@@ -429,11 +434,11 @@ def test_default_proposal_selection_and_optional_note(session):
     )
     assert row.note == "Check fit"
     assert review.apply()["applied_ids"] == ["param-1"]
-    assert control.read_context().value("general.ext.edited") == 7.0
+    assert capture_focus(control).value("general.ext.edited") == 7.0
     assert row.note == "Check fit"
     fresh = service.create_draft(
         [explicit],
-        parameters=control.read_context(),
+        parameters=capture_focus(control),
         experiment_name="test/review",
     )
     assert not fresh.preview()[0].selected
@@ -441,8 +446,12 @@ def test_default_proposal_selection_and_optional_note(session):
 
 def test_module_preview_proposes_the_spec_in_the_current_shape(session):
     _entry, control, service = session
-    control.set_module(require_target(control.read_context()), PULSE, pulse_proposal())
-    capture = control.read_context()
+    control.set_module(
+        require_target(capture_focus(control)),
+        PULSE,
+        pulse_proposal(),
+    )
+    capture = capture_focus(control)
     draft = service.create_draft(
         [ModuleWriteback(PULSE, "pulse", pulse_proposal(gain=0.4))],
         parameters=capture,
@@ -461,7 +470,7 @@ def test_module_preview_proposes_the_spec_in_the_current_shape(session):
 
 def test_module_form_edits_apply_the_edited_spec_and_keep_child_keys(session):
     _entry, control, service = session
-    capture = control.read_context()
+    capture = capture_focus(control)
     draft = service.create_draft(
         [ModuleWriteback(PULSE, "pulse", pulse_proposal())],
         parameters=capture,
@@ -476,7 +485,7 @@ def test_module_form_edits_apply_the_edited_spec_and_keep_child_keys(session):
     )
     control.set_parameter(require_target(capture), "general.ext.flux_value", 8.0)
     assert draft.apply()["applied_ids"] == ["ml-1"]
-    written = control.read_context().library.module_spec(PULSE)
+    written = capture_focus(control).library.module_spec(PULSE)
     assert isinstance(written, PulseSpec)
     assert written.waveform == WAVEFORM
     assert written.freq == 5100.0
@@ -488,7 +497,7 @@ def test_invalid_module_edit_rejects_apply_with_field_paths(session):
     entry, control, service = session
     draft = service.create_draft(
         [ModuleWriteback(PULSE, "pulse", pulse_proposal())],
-        parameters=control.read_context(),
+        parameters=capture_focus(control),
         experiment_name="test/writeback",
     )
     draft.edit("ml-1", edits={("gain",): "bad"})
@@ -499,7 +508,7 @@ def test_invalid_module_edit_rejects_apply_with_field_paths(session):
     with pytest.raises(LibraryEntryInvalid):
         draft.preview_values()
     assert len(entry.ledger.events()) == count
-    assert PULSE not in control.read_context().library.module_keys()
+    assert PULSE not in capture_focus(control).library.module_keys()
     assert draft.get_all_applied() == {"ml-1": False}
 
 
@@ -507,7 +516,7 @@ def test_structural_module_edit_is_rejected_without_changing_the_form(session):
     _entry, control, service = session
     draft = service.create_draft(
         [ModuleWriteback(PULSE, "pulse", pulse_proposal())],
-        parameters=control.read_context(),
+        parameters=capture_focus(control),
         experiment_name="test/writeback",
     )
     before = draft.preview_values()
@@ -520,7 +529,7 @@ def test_edits_require_a_module_item(session):
     _entry, control, service = session
     draft = service.create_draft(
         [ParameterWriteback("general.ext.value", "value", proposed_value=1)],
-        parameters=control.read_context(),
+        parameters=capture_focus(control),
         experiment_name="test/writeback",
     )
     with pytest.raises(InvalidInputError, match="not a module item"):
@@ -546,7 +555,7 @@ def test_item_form_is_the_shared_draft_and_its_changes_mark_unapplied(session):
     _entry, control, service = session
     draft = service.create_draft(
         [ModuleWriteback(PULSE, "pulse", pulse_proposal())],
-        parameters=control.read_context(),
+        parameters=capture_focus(control),
         experiment_name="test/writeback",
     )
     draft.apply()
@@ -570,7 +579,7 @@ def test_arb_names_are_captured_when_the_draft_is_created(session):
     )
     draft = service.create_draft(
         [ModuleWriteback(PULSE, "pulse", proposal)],
-        parameters=control.read_context(),
+        parameters=capture_focus(control),
         experiment_name="test/writeback",
     )
     names.clear()
@@ -586,22 +595,26 @@ def test_ordered_write_rejects_invalid_module_before_context_apply(session):
     entry, control, service = session
     draft = service.create_draft(
         [ModuleWriteback(PULSE, "pulse", pulse_proposal())],
-        parameters=control.read_context(),
+        parameters=capture_focus(control),
         experiment_name="test/writeback",
     )
     count = len(entry.ledger.events())
     with pytest.raises(LibraryEntryInvalid, match="gain"):
         draft.writeback_write((WritebackEdit("ml-1", edits={("gain",): "invalid"}),))
     assert len(entry.ledger.events()) == count
-    assert PULSE not in control.read_context().library.module_keys()
+    assert PULSE not in capture_focus(control).library.module_keys()
 
 
 def test_ordered_module_write_returns_spec_values(session):
     _entry, control, service = session
-    control.set_module(require_target(control.read_context()), PULSE, pulse_proposal())
+    control.set_module(
+        require_target(capture_focus(control)),
+        PULSE,
+        pulse_proposal(),
+    )
     draft = service.create_draft(
         [ModuleWriteback(PULSE, "pulse", pulse_proposal())],
-        parameters=control.read_context(),
+        parameters=capture_focus(control),
         experiment_name="test/writeback",
     )
     result = draft.writeback_write((WritebackEdit("ml-1", edits={("gain",): 0.7}),))
@@ -629,7 +642,7 @@ def test_apply_shared_flow_keeps_gui_selection_edits_and_failure_prefix(session)
             ParameterWriteback("general.description", "invalid", proposed_value=42),
             ParameterWriteback("general.ext.after", "later", proposed_value=2.0),
         ],
-        parameters=control.read_context(),
+        parameters=capture_focus(control),
         experiment_name="test/gui-fit",
         run_id="run-fixed",
     )
@@ -645,7 +658,7 @@ def test_apply_shared_flow_keeps_gui_selection_edits_and_failure_prefix(session)
         "param-2": False,
         "param-3": False,
     }
-    current = control.read_context()
+    current = capture_focus(control)
     assert not current.lookup("general.ext.tuned").present
     assert not current.lookup("general.ext.after").present
     assert PULSE not in current.library.module_keys()
@@ -662,7 +675,7 @@ def test_draft_teardown_is_idempotent(session):
     _entry, control, service = session
     draft = service.create_draft(
         [ModuleWriteback(PULSE, "pulse", pulse_proposal())],
-        parameters=control.read_context(),
+        parameters=capture_focus(control),
         experiment_name="test/writeback",
     )
     draft.teardown()
@@ -676,7 +689,9 @@ def test_non_scalar_current_and_proposed_summaries_use_the_same_bounded_shape(se
     _entry, control, service = session
     matrix = [[0.95, 0.03, 0.02], [0.03, 0.95, 0.02], [0.0, 0.0, 1.0]]
     control.set_parameter(
-        require_target(control.read_context()), "general.ext.confusion_matrix", matrix
+        require_target(capture_focus(control)),
+        "general.ext.confusion_matrix",
+        matrix,
     )
     draft = service.create_draft(
         [
@@ -684,7 +699,7 @@ def test_non_scalar_current_and_proposed_summaries_use_the_same_bounded_shape(se
                 "general.ext.confusion_matrix", "d", proposed_value=matrix
             )
         ],
-        parameters=control.read_context(),
+        parameters=capture_focus(control),
         experiment_name="test/writeback",
     )
     assert draft.get_summaries("param-1") == ("3 × 3 matrix", "3 × 3 matrix")
@@ -705,7 +720,7 @@ def test_sequence_proposals_have_bounded_shape_summaries(session, value, summary
     _entry, control, service = session
     draft = service.create_draft(
         [ParameterWriteback("general.ext.sequence", "sequence", proposed_value=value)],
-        parameters=control.read_context(),
+        parameters=capture_focus(control),
         experiment_name="test/writeback",
     )
     assert draft.get_summaries("param-1")[1] == summary
@@ -719,7 +734,7 @@ def test_applied_state_follows_successful_writes_and_content_edits(session):
             ParameterWriteback("general.ext.r_f", "d", proposed_value=1.0),
             ParameterWriteback("general.ext.skip", "d", proposed_value=2.0),
         ],
-        parameters=control.read_context(),
+        parameters=capture_focus(control),
         experiment_name="test/writeback",
     )
     assert draft.get_all_applied() == {"param-1": False, "param-2": False}
@@ -741,14 +756,14 @@ def test_duplicate_selected_destination_is_rejected_before_write(session):
             ParameterWriteback("general.ext.same", "first", proposed_value=1.0),
             ParameterWriteback("general.ext.same", "second", proposed_value=2.0),
         ],
-        parameters=control.read_context(),
+        parameters=capture_focus(control),
         experiment_name="test/writeback",
     )
     count = len(entry.ledger.events())
     with pytest.raises(InvalidInputError, match="duplicate writeback destination"):
         draft.apply()
     assert len(entry.ledger.events()) == count
-    assert not control.read_context().lookup("general.ext.same").present
+    assert not capture_focus(control).lookup("general.ext.same").present
     assert draft.get_all_applied() == {"param-1": False, "param-2": False}
 
 
@@ -756,7 +771,7 @@ def test_failed_and_empty_apply_do_not_mark_items_applied(session):
     _entry, control, service = session
     draft = service.create_draft(
         [ParameterWriteback("general.description", "d", proposed_value=42)],
-        parameters=control.read_context(),
+        parameters=capture_focus(control),
         experiment_name="test/writeback",
     )
     with pytest.raises(ValueError, match="description"):
@@ -774,13 +789,13 @@ def test_explicit_apply_ignores_selection_without_changing_checkboxes(session):
             ParameterWriteback("general.ext.a", "d", proposed_value=1.0),
             ParameterWriteback("general.ext.b", "d", proposed_value=2.0),
         ],
-        parameters=control.read_context(),
+        parameters=capture_focus(control),
         experiment_name="test/writeback",
     )
     draft.edit("param-1", selected=False)
     selection = [item.selected for item in draft.items]
     assert draft.apply(item_ids=("param-1",))["applied_ids"] == ["param-1"]
-    current = control.read_context()
+    current = capture_focus(control)
     assert current.value("general.ext.a") == 1.0
     assert not current.lookup("general.ext.b").present
     assert [item.selected for item in draft.items] == selection
@@ -792,14 +807,14 @@ def test_explicit_apply_rejects_invalid_ids_before_any_write(session, item_ids):
     entry, control, service = session
     draft = service.create_draft(
         [ParameterWriteback("general.ext.a", "d", proposed_value=1.0)],
-        parameters=control.read_context(),
+        parameters=capture_focus(control),
         experiment_name="test/writeback",
     )
     count = len(entry.ledger.events())
     with pytest.raises(InvalidInputError):
         draft.apply(item_ids=item_ids)
     assert len(entry.ledger.events()) == count
-    assert not control.read_context().lookup("general.ext.a").present
+    assert not capture_focus(control).lookup("general.ext.a").present
     assert draft.get_all_applied() == {"param-1": False}
 
 
@@ -807,27 +822,29 @@ def test_explicit_empty_apply_does_not_fall_back_to_selected_items(session):
     entry, control, service = session
     draft = service.create_draft(
         [ParameterWriteback("general.ext.a", "d", proposed_value=1.0)],
-        parameters=control.read_context(),
+        parameters=capture_focus(control),
         experiment_name="test/writeback",
     )
     count = len(entry.ledger.events())
     assert draft.apply(item_ids=())["applied_ids"] == []
     assert len(entry.ledger.events()) == count
-    assert not control.read_context().lookup("general.ext.a").present
+    assert not capture_focus(control).lookup("general.ext.a").present
     assert draft.get_all_applied() == {"param-1": False}
 
 
 def test_ordered_write_returns_actual_values_and_leaves_selection_alone(session):
     _entry, control, service = session
     control.set_parameter(
-        require_target(control.read_context()), "general.ext.dest", [1]
+        require_target(capture_focus(control)),
+        "general.ext.dest",
+        [1],
     )
     draft = service.create_draft(
         [
             ParameterWriteback("general.ext.a", "d", proposed_value=2),
             ParameterWriteback("general.ext.b", "d", proposed_value=3),
         ],
-        parameters=control.read_context(),
+        parameters=capture_focus(control),
         experiment_name="test/writeback",
     )
     draft.edit("param-1", selected=False)
@@ -841,7 +858,7 @@ def test_ordered_write_returns_actual_values_and_leaves_selection_alone(session)
     assert result == [
         WritebackWritten("param-1", "parameter", "general.ext.dest", [1], None)
     ]
-    current = control.read_context()
+    current = capture_focus(control)
     assert current.value("general.ext.dest") is None
     assert not current.lookup("general.ext.b").present
     assert [item.selected for item in draft.items] == [False, True]
@@ -855,7 +872,7 @@ def test_ordered_write_stops_on_unknown_item_and_preserves_draft_prefix(session)
             ParameterWriteback("general.ext.a", "d", proposed_value=1),
             ParameterWriteback("general.ext.b", "d", proposed_value=2),
         ],
-        parameters=control.read_context(),
+        parameters=capture_focus(control),
         experiment_name="test/writeback",
     )
     count = len(entry.ledger.events())
@@ -873,5 +890,5 @@ def test_ordered_write_stops_on_unknown_item_and_preserves_draft_prefix(session)
         values.append(item.proposed_value)
     assert values == [11, 2]
     assert len(entry.ledger.events()) == count
-    assert not control.read_context().lookup("general.ext.a").present
+    assert not capture_focus(control).lookup("general.ext.a").present
     assert draft.get_all_applied() == {"param-1": False, "param-2": False}

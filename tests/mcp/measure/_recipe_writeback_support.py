@@ -30,6 +30,7 @@ from zcu_tools.resources.entry import ResultEntry
 from zcu_tools.resources.entry.writeback import ParameterUpdate
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
+from tests.gui._context_reads import capture_focus
 from tests.gui.app.measure.remote._helpers import dispatch_handler
 
 from ._script_recipe_support import SyntheticGui
@@ -79,12 +80,14 @@ class WritebackGui(SyntheticGui):
         self.context.install_entry(entry)
         self.context.use_point(PointUseRequest("point"))
         control = self.context
-        control.add_component("Q1", "fake/drive/a", {})
+        control.add_component(
+            "Q1", "fake/drive/a", {}, point=control.current_point_label()
+        )
         self.service = WritebackService(control, arb_names=lambda: ())
         self.drafts = {
             "analysis": self.service.create_draft(
                 [ParameterWriteback("general.ext.first", "first", 20.0)],
-                parameters=self.context.read_context(),
+                parameters=capture_focus(self.context),
                 experiment_name="synthetic",
             ),
             "post_analysis": self.service.create_draft(
@@ -109,7 +112,7 @@ class WritebackGui(SyntheticGui):
                 ]
                 if partial
                 else [ParameterWriteback("general.ext.second", "second", 30.0)],
-                parameters=self.context.read_context(),
+                parameters=capture_focus(self.context),
                 experiment_name="synthetic",
             ),
         }
@@ -139,7 +142,7 @@ class WritebackGui(SyntheticGui):
         return super().respond(method, params)
 
     def read_context(self):
-        return self.owner.submit(self.context.read_context).result()
+        return self.owner.submit(lambda: capture_focus(self.context)).result()
 
     def replace_post(self) -> None:
         def replace() -> None:

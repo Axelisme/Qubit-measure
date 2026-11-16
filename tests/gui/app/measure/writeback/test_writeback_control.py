@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+from tests.gui._context_reads import capture_focus
 from zcu_tools.cfg_model import ConstWaveformCfg, PulseSpec
 from zcu_tools.gui.app.measure.adapter import SessionEnv
 from zcu_tools.gui.app.measure.catalog import ExperimentAccess
@@ -88,13 +89,13 @@ def control_session(tmp_path: Path) -> ControlSession:
         ),
     ]
     draft = service.create_draft(
-        proposals, parameters=contexts[0].read_context(), experiment_name="synthetic"
+        proposals, parameters=capture_focus(contexts[0]), experiment_name="synthetic"
     )
     foreign = other.create_draft(
-        proposals, parameters=contexts[1].read_context(), experiment_name="synthetic"
+        proposals, parameters=capture_focus(contexts[1]), experiment_name="synthetic"
     )
     state = State(
-        SessionEnv(parameters=contexts[0].read_context(), soc=None, soccfg=None)
+        SessionEnv(parameters=capture_focus(contexts[0]), soc=None, soccfg=None)
     )
     state.add_tab(
         "tab-1", Session(adapter_name="synthetic", adapter=MagicMock(), cfg=MagicMock())
@@ -167,7 +168,7 @@ def test_foreign_pane_draft_is_rejected_without_effects(
     assert not any(session.foreign.get_all_applied().values())
     assert [entry.ledger.events() for entry in session.entries] == before
     assert all(
-        not context.read_context().lookup("general.ext.a").present
+        not capture_focus(context).lookup("general.ext.a").present
         for context in session.contexts
     )
     assert [event.fact for event in events] == (
@@ -192,7 +193,7 @@ def test_pane_writeback_reads_edits_and_applies_its_own_draft(
     session = control_session
     post = session.service.create_draft(
         [ParameterWriteback("general.ext.a", "post", proposed_value=2)],
-        parameters=session.contexts[0].read_context(),
+        parameters=capture_focus(session.contexts[0]),
         experiment_name="synthetic",
     )
     session.state.get_tab("tab-1").post_analysis.writeback_draft = post
@@ -204,7 +205,7 @@ def test_pane_writeback_reads_edits_and_applies_its_own_draft(
     facet.set_writeback_item_for_pane("tab-1", pane, "param-1", proposed_value=9)
     result = facet.apply_writeback_for_pane("tab-1", pane, item_ids=("param-1",))
     assert result["applied_ids"] == ["param-1"]
-    assert session.contexts[0].read_context().value("general.ext.a") == 9
+    assert capture_focus(session.contexts[0]).value("general.ext.a") == 9
     assert session.draft.preview_values(session_id="param-1")["param-1"].proposed == (
         9 if pane == "analysis" else 1
     )
@@ -359,7 +360,7 @@ def test_batch_write_publishes_shared_draft_even_after_partial_failure(
     context_service.install_entry(entry)
     control = context_service
     control.use_point(PointUseRequest("a"))
-    parameters = control.read_context()
+    parameters = capture_focus(control)
     state = State(SessionEnv(parameters=parameters, soc=None, soccfg=None))
     state.add_tab(
         "tab-1",
@@ -409,12 +410,12 @@ def test_batch_write_publishes_shared_draft_even_after_partial_failure(
                 (*changes, WritebackEdit("missing")),
             )
         assert len(entry.ledger.events()) == accepted_before
-        assert not control.read_context().lookup("general.ext.a").present
+        assert not capture_focus(control).lookup("general.ext.a").present
     else:
         result = facet.write_writeback_for_pane("tab-1", pane, changes)
         assert [item.id for item in result] == ["param-1"]
         assert len(entry.ledger.events()) == accepted_before + 1
-        assert control.read_context().value("general.ext.a") == 11
+        assert capture_focus(control).value("general.ext.a") == 11
     guard.admit.assert_called_once_with("tab-1", TabAction.WRITEBACK)
     assert observed == [
         ("tab-1", TabInteractionFact.WRITEBACK_DRAFT_CHANGED, 11),

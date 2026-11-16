@@ -25,6 +25,7 @@ from zcu_tools.gui.session.types import ContextReadiness
 from zcu_tools.gui.session.ui.component_tree import ComponentTreeWidget
 from zcu_tools.resources.entry import ResultEntry
 
+from tests.gui._context_reads import capture_focus
 from tests.gui._dialog_fakes import RecordingDialogPresenter
 from tests.gui.app.measure._form_fakes import form_resources, form_sources
 from tests.gui.app.measure._record_support import require_target
@@ -62,11 +63,11 @@ def test_entry_commands_activate_global_for_application_and_wire_reads(
         ]
     )
     control = application.controller.context_control
-    assert control.read_context().target == DocumentSetRef(entry_name="entry")
-    control.add_component("Q1", "fake/drive/a", {})
+    assert capture_focus(control).target == DocumentSetRef(entry_name="entry")
+    control.add_component("Q1", "fake/drive/a", {}, point=control.current_point_label())
     snapshot = application.result("context.snapshot", {})
     assert snapshot["target"] == DocumentSetRef(entry_name="entry").model_dump()
-    assert control.read_context().component("Q1").kind == "fake/drive/a"
+    assert capture_focus(control).component("Q1").kind == "fake/drive/a"
     tab_id = application.controller.tab_control.new_tab("pointed")
     with pytest.raises(FailedPreconditionError) as caught:
         application.controller.run_analyze_control.start_run(tab_id)
@@ -81,7 +82,7 @@ def test_entry_commands_activate_global_for_application_and_wire_reads(
         "point.new" if command == "new" else "point.use",
         {"label": "selected" if command == "new" else "existing"},
     )
-    capture = control.read_context()
+    capture = capture_focus(control)
     control.set_parameter(require_target(capture), "general.ext.flux_value", 2.0)
     assert (
         control.read_target(require_target(capture)).value("general.ext.flux_value")
@@ -163,7 +164,7 @@ def test_writeback_uses_global_after_reopen_then_current_selected_destination(
     application.open_entry()
     application.result("point.new", {"label": "a"})
     control = application.controller.context_control
-    captured = control.read_context()
+    captured = capture_focus(control)
     bus = BaseEventBus()
     service = WritebackService(control, arb_names=lambda: ())
     guard = GuardService(application.state, access=ExperimentAccess())
@@ -210,8 +211,8 @@ def test_writeback_uses_global_after_reopen_then_current_selected_destination(
                 },
             )
             assert reply["ok"] is True, reply
-        assert control.read_context().target == DocumentSetRef(entry_name="entry")
-        assert control.read_context().value("general.ext.flux_value") == 2.0
+        assert capture_focus(control).target == DocumentSetRef(entry_name="entry")
+        assert capture_focus(control).value("general.ext.flux_value") == 2.0
         assert len(entry_resource(application).ledger.events()) == len(before) + 1
         application.result("point.new", {"label": "b", "mode": "empty"})
         facet.apply_writeback_for_pane(tab_id, "analysis")
@@ -220,15 +221,15 @@ def test_writeback_uses_global_after_reopen_then_current_selected_destination(
             .lookup("general.ext.flux_value")
             .present
         )
-        selected = control.read_context()
+        selected = capture_focus(control)
         assert selected.value("general.ext.flux_value") == 2.0
         assert require_target(selected).point == "b"
         assert len(entry_resource(application).ledger.events()) == len(before) + 2
         application.controller.setup_control.new_entry(EntryRequest("other"))
         application.result("point.new", {"label": "c"})
         facet.apply_writeback_for_pane(tab_id, "analysis")
-        assert control.read_context().value("general.ext.flux_value") == 2.0
-        assert require_target(control.read_context()).point == "c"
+        assert capture_focus(control).value("general.ext.flux_value") == 2.0
+        assert require_target(capture_focus(control)).point == "c"
         assert len(entry_resource(application).ledger.events()) == 1
     finally:
         draft.teardown()
@@ -278,7 +279,7 @@ def parameter_writeback_pane(
     application.open_entry()
     application.result("point.new", {"label": "a"})
     control = application.controller.context_control
-    captured = control.read_context()
+    captured = capture_focus(control)
     control.set_parameter(require_target(captured), "general.ext.a", 1.0)
     control.set_parameter(require_target(captured), "general.ext.b", 2.0)
     bus = BaseEventBus()

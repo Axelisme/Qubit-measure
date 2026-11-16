@@ -20,6 +20,7 @@ from zcu_tools.simulate.predictor import PredictorInputError
 from zcu_tools.simulate.transmon import TransmonParams
 
 import tests.gui._component_fakes as components
+from tests.gui._context_reads import capture_focus
 from tests.gui._predictor_fakes import FailingPredictorService
 from tests.gui._qt_waits import qt_until
 from tests.gui._user_input import ComponentDriver
@@ -363,7 +364,7 @@ def test_dialog_displays_actual_calibration_and_clamping_without_point_writes(
     from qtpy.QtWidgets import QLabel
 
     query = PredictorService(component_context)
-    before = component_context.read_context().document()
+    before = capture_focus(component_context).document()
     dialog = PredictorDialog(query, params=TransmonParams(20.0, 0.3, 0.0))
     try:
         dialog.set_flux(PredictorFlux(0.2, {"coil": 2.0}, {"coil": "A"}), {"coil": 0.1})
@@ -373,7 +374,7 @@ def test_dialog_displays_actual_calibration_and_clamping_without_point_writes(
         assert f"clamped={str(clamped).lower()}" in text
         assert f"{actual:.6g} MHz" in text
         assert dialog.flux().offset == pytest.approx(0.2 + result.offset_correction)
-        assert component_context.read_context().document() == before
+        assert capture_focus(component_context).document() == before
     finally:
         dialog.close()
         dialog.deleteLater()

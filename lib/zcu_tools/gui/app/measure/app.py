@@ -71,7 +71,7 @@ class MeasureGuiBehavior[C](GuiRuntimeBehavior):
         commands and show path/line diagnostics. Callback teardown runs on-owner.
         ``project_root`` anchors default paths, or uses the working directory.
         Aliases are file-backed. Startup scripts open an entry, then call
-        ctx.context.apply_alias_rows to initialize the active table explicitly.
+        ctx.context.apply_alias_rows to initialize global aliases, or pass the focused point label.
         """
         from zcu_tools.gui.app.measure.ui.error_handler import show_error_dialog
         from zcu_tools.gui.app.measure.utils.error_handler import (

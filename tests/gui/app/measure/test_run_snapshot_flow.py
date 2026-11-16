@@ -34,6 +34,7 @@ from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.resources.entry import AcquiredPayload, ComponentSchema, ResultEntry
 
+from tests.gui._context_reads import capture_focus
 from tests.experiment._saving_support import SavingCfg, SavingResult
 from tests.gui._qt_waits import qt_until
 from tests.gui.app.measure._native_save_support import PaneParams, SavingAdapter
@@ -127,12 +128,15 @@ def snapshot_controller(
             )
         context = controller.context_control
         context.add_component(
-            "Q1", "snapshot-flow/environment", {"rate": 7.0}, setup=global_context
+            "Q1",
+            "snapshot-flow/environment",
+            {"rate": 7.0},
+            point=None if global_context else context.current_point_label(),
         )
         if global_context:
             controller.setup_control.open_entry(EntryRequest("recorded"))
         context.set_module(
-            require_target(context.read_context()),
+            require_target(capture_focus(context)),
             "Q1.pulses.pi",
             PulseSpec(
                 ch=0,
@@ -142,7 +146,9 @@ def snapshot_controller(
                 waveform="const",
             ),
         )
-        context.apply_alias_rows((AliasRow("driver", "Q1"),))
+        context.apply_alias_rows(
+            (AliasRow("driver", "Q1"),), point=context.current_point_label()
+        )
         controller.session_services.soc_connection.install_soc(
             MagicMock(), load_soccfg()
         )
@@ -181,7 +187,9 @@ def test_global_controller_run_analyze_and_save_preserve_entry_capture(
     assert events[0].payload.point is None
     assert events[0].payload.run_id == metadata.run_id
     controller.context_control.set_parameter(
-        require_target(controller.context_control.read_context()), "Q1.rate", 99.0
+        require_target(capture_focus(controller.context_control)),
+        "Q1.rate",
+        99.0,
     )
     finish(
         controller,
@@ -231,7 +239,9 @@ def test_controller_run_save_load_analyze_and_post_need_no_original_point(
     assert metadata.parameter_snapshot is not None
     assert metadata.snapshot.entry_name == "recorded" and metadata.snapshot.point == "p"
     controller.context_control.set_parameter(
-        require_target(controller.context_control.read_context()), "Q1.rate", 99.0
+        require_target(capture_focus(controller.context_control)),
+        "Q1.rate",
+        99.0,
     )
     report = controller.save_control.save_data(tab_id, origin=CommandOrigin("gui"))
     native = next(item for item in report.outputs if item.output.format == "data_h5")

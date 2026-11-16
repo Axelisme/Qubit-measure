@@ -46,6 +46,7 @@ from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.resources.entry import ResultEntry
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
+from tests.gui._context_reads import capture_focus
 from tests.experiment._saving_support import SavingCfg, SavingCore, SavingResult
 from tests.gui.app.measure._form_fakes import make_form
 
@@ -155,7 +156,9 @@ class NativeSaveSession:
         """Use current aliases, retaining EMPTY deferred reads without overrides."""
         if self.state.session_env.parameters is None and not aliases:
             return None
-        return self.context.read_context(aliases=aliases)
+        return self.context.read_context(
+            aliases=aliases, point=self.context.current_point_label()
+        )
 
     def save(self, *, origin: CommandOrigin = GUI_ORIGIN) -> SaveReport:
         """Observe native writes and State publication before the public call returns."""
@@ -186,7 +189,7 @@ def native_save_session(
     context.install_entry(entry)
     context_control = context
     context_control.use_point(PointUseRequest("p"))
-    captured = context_control.read_context()
+    captured = capture_focus(context_control)
     storage = captured.capture_storage()
     cfg = SavingCfg()
     record = RunRecord(cfg, SavingCore().run(cfg, context=None))

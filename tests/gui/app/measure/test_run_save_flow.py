@@ -123,7 +123,12 @@ def measure_window(
                 )
             )
         app.controller.context_control.add_component(
-            "calibration", "synthetic/calibration", {}, setup=global_context
+            "calibration",
+            "synthetic/calibration",
+            {},
+            point=None
+            if global_context
+            else app.controller.context_control.current_point_label(),
         )
         if global_context:
             app.controller.setup_control.open_entry(EntryRequest("component-flow"))
@@ -192,7 +197,7 @@ def test_run_curve_then_save_all_reports_native_save_in_bottom_status(
     flow = _user_input.ComponentDriver(measure_window)
     shots = tmp_path / "run-save"
     flow.screenshot(shots / "01-setup.png")
-    assert flow.dialogs()[0].title == "Setup"
+    assert flow.dialogs()[0].title == "Entry"
     flow.click("Close")
     flow.screenshot(shots / "02-ready.png")
     assert flow.observe("Run").enabled

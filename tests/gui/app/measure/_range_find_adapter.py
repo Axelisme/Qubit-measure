@@ -44,6 +44,7 @@ from zcu_tools.gui.session.context_types import (
 from zcu_tools.gui.session.parameters import DocumentSetCapture
 from zcu_tools.plotting.plots import Plots
 
+from tests.gui._context_reads import capture_focus
 from tests.gui._dialog_fakes import RecordingDialogPresenter
 
 
@@ -191,7 +192,7 @@ def range_application(
     )
     ctrl.add_view(window)
     tab_id = ctrl.tab_control.new_tab("spectrum")
-    capture = ctrl.context_control.read_context()
+    capture = capture_focus(ctrl.context_control)
     commit_run(
         state,
         tab_id,

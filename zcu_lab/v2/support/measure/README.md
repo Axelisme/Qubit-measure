@@ -67,7 +67,7 @@ helper 留在群組內 `_shared.py`。
 GUI record writers 與 workflow Plan 接線共用這個查詢。缺 capture 或非 qubit 會報錯，不以未校準形狀代替。尚未校準的 qubit 回傳 `{offset: null, period: {}}`。
 `support.flux.qubit_flux_frame` 只複製校準。Record writers 用 `record_flux_frame(flux, snapshot)` 將固定 frame 與同次 Run snapshot 配對。
 Frame 中有 period 但 snapshot 缺值的儀器不貢獻，period 保留。明寫無效或 bool 值時，在 proposal 產生處以 `ValueError` 指名 device。
-未校準 frame 合法，整個 snapshot 缺席時保留各 writer 原有政策。這些 helper 不讀目前 point、setup catalog 或裝置。
+未校準 frame 合法，整個 snapshot 缺席時保留各 writer 原有政策。這些 helper 不讀目前 point、parameter documents 或裝置。
 `support.flux.snapshot_numeric_values(snapshot, names)` 集中 numeric 非 bool 的機械提取，picker 與 writeback caller 仍決定目標及 contributors。
 
 `mux_bindings` 擁有固定 DocumentSetCapture 的 qubit／resonator 對應驗證。
@@ -140,7 +140,7 @@ def make_form(ctx: FormContext) -> Form[TwoQubitCfg]:
 它經 Form 的 `initial_values` 接縫讀固定 FormEnv，預設 device 保持 qubit.flux_dev。
 `captured_flux_seed` 從這次 Form 的 device 選項取得 selected device。
 名稱規則委派共用 owner，實際 half／integer 由 `support.flux` 經 `device_value_at_flux` 投影。
-其他 contributor 的值與 selected device 單位只取 detached DC device info，不查 setup catalog 或 live driver。
+其他 contributor 的值與 selected device 單位只取 detached DC device info，不查 parameter documents 或 live driver。
 缺席儀器不貢獻，period 保留；明寫無效值仍報錯。
 缺 flux_dev、offset 或 selected period 時，對應必填欄位留空，不猜數字。
 Onetone／twotone 將實際 integer→half 範圍向兩側各擴 10%，MIST 不擴。
@@ -160,7 +160,7 @@ Offset 以本次擬合 half 對應 flux 0.5，扣除其他有 period 且 snapsho
 Note 列出每台其他儀器的名稱、Run-start 值、原生單位與 value／period 貢獻，包含值為 0 者。
 沒有其他儀器時 note 為 None。缺值不貢獻，也不列入 note；明寫無效值仍報錯。
 同 Run 同步掃描其他線不阻擋 proposal。
-缺 Run snapshot 不能換算，不以 live device 補值。Snapshot 只代表全部已連線裝置，不代表完整 setup catalog。
+缺 Run snapshot 不能換算，不以 live device 補值。Snapshot 只代表全部已連線裝置，不代表完整 parameter documents。
 
 同次 ordinary RecordWriteback 的 `device` 是實際被掃名稱，`half`、`integer` 與正的 `period` 是原始擬合值，使用該 device 的 native unit。
 `devices` 保存完整 Run snapshot，包含非 contributing RF 與 DC 裝置。
