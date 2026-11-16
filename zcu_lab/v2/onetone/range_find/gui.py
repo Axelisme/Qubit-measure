@@ -58,7 +58,7 @@ class RangeFindParams:
     to_options rejects invalid JSON and delegates the domain checks to core.
     """
 
-    resonators: Annotated[str, ParamMeta(label="Resonators (JSON)")] = '["dip1"]'
+    resonators: Annotated[str, ParamMeta(label="Resonators (JSON)")] = '["R1"]'
     min_separation: Annotated[float, ParamMeta(label="Min separation (MHz)")] = (
         DEFAULT_MIN_SEPARATION_MHZ
     )
@@ -153,10 +153,10 @@ class RangeFindAnalysis:
 
 
 def _get_analyze_params(result: RangeFindRun, ctx: SessionEnv) -> RangeFindParams:
-    """Start Run/Load analysis with one temporary name and automatic threshold.
+    """Start Run/Load analysis with R1 and automatic threshold.
 
-    result and ctx do not seed names. The operator can replace the temporary
-    names before Analyze without changing the acquisition cfg.
+    result and ctx do not seed names. The operator can replace the name list
+    before Analyze without changing the acquisition cfg.
     """
     del result, ctx
     return RangeFindParams()

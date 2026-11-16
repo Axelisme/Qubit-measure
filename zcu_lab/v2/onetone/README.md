@@ -2,7 +2,7 @@
 
 **讀者：** lab-author。查閱 one-tone 表單的 readout timing 初值與共用來源。
 
-**Last updated:** 2026-11-12，共用 cfg 與頻率格點，繪圖由各 core 持有
+**Last updated:** 2026-11-16，range find 分析名單預設 R1
 
 `freq`、`power_dep`、`flux_dep`、`range_find` 的 `make_form` 共用
 [`_form_shared.py`](_form_shared.py) 的 `initial_readout_timing`。
@@ -12,6 +12,13 @@
 [`range_find`](range_find/guide.md) 掃大範圍絕對 MHz，單一 Analyze 入口開啟互動選谷。
 靜態找谷提供初始猜測，operator 可調參、增刪與重新對應元件，Done 後才提議各 resonator 的 `freq`。
 Recipe 等待 agent 經 `tab_interact` 確認並送出 done，才進入 writeback 問答。
+
+`range_find` 的分析名單預設由本模組維護，沒有專屬 ADR。
+2026-11-16 使用者裁決「那預設改R1」，Run／Load 的 Analysis 名單因此預設為 `["R1"]`。
+原先的暫名不在固定 capture 時，Done 不產生頻率寫回列。
+預設改名不改此規則：capture 內有 `R1` 才提議 `R1.freq`，沒有 `R1` 時仍為零列。
+Unassigned 不提案。Recipe 的 `resonators` 仍為必填，不沿用 GUI 預設。
+
 Open／Reset 從固定 capture 讀取 resonator 校準，並以 `readout` Template 建立初值。
 
 - `kappa` 使用 MHz，時間使用 us。TOF 讀 resonator 頂層 `$resonator.time_of_fly`，不從 ext 讀取。缺失或 null 時，trigger 與 pulse length 留空必填。
