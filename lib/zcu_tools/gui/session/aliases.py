@@ -19,7 +19,7 @@ from zcu_tools.resources.entry.schema import ParameterContent
 
 if TYPE_CHECKING:
     from zcu_tools.resources.entry import RoleSpec
-    from zcu_tools.resources.entry.schema import PointDocument, SetupDocument
+    from zcu_tools.resources.entry.schema import ParameterDocument
 
 
 @dataclass(frozen=True)
@@ -89,7 +89,7 @@ class AliasTable:
 
     Construction and replace validate the complete authored table without
     reading components. InvalidInputError(alias_invalid) leaves the old table
-    unchanged. Reads use only the supplied fixed SetupDocument or PointDocument, not a provider,
+    unchanged. Reads use only the supplied fixed ParameterDocument, not a provider,
     file, registry, or hardware. Empty bindings remain legal until read. No
     persistence, default policy or event publication belongs to this owner.
     """
@@ -202,7 +202,7 @@ class AliasTable:
     def resolve(
         self,
         alias: str,
-        point: SetupDocument | PointDocument | ParameterContent,
+        point: ParameterDocument | ParameterContent,
         *,
         kind: str | None = None,
     ) -> str:
@@ -230,7 +230,7 @@ class AliasTable:
     def resolve_value(
         self,
         alias: str,
-        point: SetupDocument | PointDocument | ParameterContent,
+        point: ParameterDocument | ParameterContent,
         *,
         kind: str | None = None,
     ) -> AliasValue:
@@ -262,7 +262,7 @@ class AliasTable:
 
     def names(
         self,
-        point: SetupDocument | PointDocument | ParameterContent,
+        point: ParameterDocument | ParameterContent,
         declarations: Mapping[str, RoleSpec],
     ) -> dict[str, AliasValue]:
         """Capture all bound rows as concrete names for Run/storage records.
@@ -293,7 +293,7 @@ class AliasTable:
     def _resolve_name(
         self,
         alias: str,
-        point: SetupDocument | PointDocument | ParameterContent,
+        point: ParameterDocument | ParameterContent,
         *,
         kind: str | None = None,
     ) -> AliasValue | None:
@@ -336,7 +336,7 @@ class AliasTable:
     def _scalar_name(
         self,
         alias: str,
-        point: SetupDocument | PointDocument | ParameterContent,
+        point: ParameterDocument | ParameterContent,
         *,
         value: str,
         kind: str | None,

@@ -51,9 +51,8 @@ from .schema import (
     PARAMETER_FORMAT,
     PARAMETER_VERSION,
     ParameterContent,
-    PointDocument,
-    SetupDocument,
-    SetupGeneral,
+    ParameterDocument,
+    ParameterGeneral,
 )
 from .storage import bind_record_table
 from .views import (
@@ -190,12 +189,12 @@ class ResultEntry:
         source = result_path / PARAMETERS_FILENAME
 
         # Bind diagnostics to this handle without shared mutable model context.
-        class EntrySetupDocument(SetupDocument):
+        class EntrySetupDocument(ParameterDocument):
             _source = source
             _upgrade_target = result_path
 
         try:
-            self._setup_store = DocumentStore[SetupDocument](
+            self._setup_store = DocumentStore[ParameterDocument](
                 source,
                 EntrySetupDocument,
                 format=PARAMETER_FORMAT,
@@ -209,7 +208,7 @@ class ResultEntry:
             raise ValueError(f"{source.resolve()}: {exc}") from exc
         self._setup = SetupView(self._setup_store, source)
 
-    def _validate_setup(self, document: SetupDocument) -> None:
+    def _validate_setup(self, document: ParameterDocument) -> None:
         validate_view_components(
             document, source=self._result_path / PARAMETERS_FILENAME
         )
@@ -653,13 +652,13 @@ class ResultEntry:
             document, source=source, upgrade_target=self._result_path
         )
 
-    def _point_store(self, source: Path) -> DocumentStore[PointDocument]:
-        class EntryPointDocument(PointDocument):
+    def _point_store(self, source: Path) -> DocumentStore[ParameterDocument]:
+        class EntryPointDocument(ParameterDocument):
             _source = source
             _upgrade_target = self._result_path
 
         try:
-            return DocumentStore[PointDocument](
+            return DocumentStore[ParameterDocument](
                 source,
                 EntryPointDocument,
                 format=PARAMETER_FORMAT,
@@ -743,7 +742,7 @@ class ResultEntry:
                     YAML(typ="safe").load(stream)
                 )
             validate_parameter_header(document, source=source)
-            general = SetupGeneral.model_validate(document.get("general"))
+            general = ParameterGeneral.model_validate(document.get("general"))
         except (ValueError, YAMLError) as error:
             raise ValueError(f"{source}: {error}") from error
         return EntryIdentity(

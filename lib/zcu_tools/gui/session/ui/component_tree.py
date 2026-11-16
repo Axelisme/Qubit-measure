@@ -55,7 +55,7 @@ from zcu_tools.resources.entry import (
 
 if TYPE_CHECKING:
     from zcu_tools.gui.session.context_control import ContextControlPort
-    from zcu_tools.resources.entry.schema import PointDocument, SetupDocument
+    from zcu_tools.resources.entry.schema import ParameterDocument
 
 
 logger = logging.getLogger(__name__)
@@ -375,7 +375,7 @@ class ComponentTreeWidget(QWidget):
 
     def _render_general_ext(
         self,
-        document: SetupDocument | PointDocument,
+        document: ParameterDocument,
         items: dict[_RowKey, QTreeWidgetItem],
     ) -> None:
         """Render general extensions without treating general as a component kind."""
@@ -416,7 +416,7 @@ class ComponentTreeWidget(QWidget):
 
     def _render_declared(
         self,
-        document: SetupDocument | PointDocument,
+        document: ParameterDocument,
         name: str,
         kind: str,
         items: dict[_RowKey, QTreeWidgetItem],
@@ -457,7 +457,7 @@ class ComponentTreeWidget(QWidget):
 
     def _render_undeclared(
         self,
-        document: SetupDocument | PointDocument,
+        document: ParameterDocument,
         name: str,
         kind: str,
         items: dict[_RowKey, QTreeWidgetItem],

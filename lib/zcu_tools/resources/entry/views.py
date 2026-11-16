@@ -11,7 +11,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from operator import is_
 from pathlib import Path
-from typing import TYPE_CHECKING, overload
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, TypeAdapter
 
@@ -41,10 +41,8 @@ from .registry import component_registry
 from .schema import (
     ComponentSchema,
     ParameterContent,
-    PointDocument,
-    PointGeneral,
-    SetupDocument,
-    SetupGeneral,
+    ParameterDocument,
+    ParameterGeneral,
     validate_component_name,
 )
 from .schema_fields import declared_unit
@@ -53,12 +51,7 @@ if TYPE_CHECKING:
     from .points import PointView
 
 
-type _ViewDocument = (
-    DocumentStore[SetupDocument]
-    | DocumentStore[PointDocument]
-    | SetupDocument
-    | PointDocument
-)
+type _ViewDocument = DocumentStore[ParameterDocument] | ParameterDocument
 
 
 @dataclass
@@ -91,7 +84,7 @@ def _validate_view_component_name(name: str, *, source: Path | None) -> None:
 
 
 def validate_view_components(
-    document: SetupDocument | PointDocument | ParameterContent, *, source: Path | None
+    document: ParameterDocument | ParameterContent, *, source: Path | None
 ) -> None:
     """Reject components that shadow any SetupView/PointView/EditView public member.
 
@@ -157,21 +150,9 @@ def point_origin(view: PointView) -> PointOrigin:
     return origin
 
 
-@overload
-def snapshot(view: PointView) -> PointDocument: ...
-
-
-@overload
-def snapshot(view: SetupView) -> SetupDocument: ...
-
-
-@overload
-def snapshot(view: EditView) -> SetupDocument | PointDocument: ...
-
-
 def snapshot(
     view: PointView | SetupView | EditView,
-) -> SetupDocument | PointDocument:
+) -> ParameterDocument:
     """Project the complete cached document or edit draft without I/O.
 
     Bound content is validated as the complete document, including model-level
@@ -241,7 +222,7 @@ class DocumentField:
 
 
 def document_fields(
-    document: SetupDocument | PointDocument | ParameterContent,
+    document: ParameterDocument | ParameterContent,
 ) -> tuple[DocumentField, ...]:
     """List isolated logical rows without I/O, validation or serialization hooks.
 
@@ -273,7 +254,7 @@ def document_fields(
 
 
 def document_unit(
-    document: SetupDocument | PointDocument | ParameterContent, path: str
+    document: ParameterDocument | ParameterContent, path: str
 ) -> str | None:
     """Read a fixed field's static schema unit at an actual dotted path.
 
@@ -304,7 +285,7 @@ def document_unit(
 
 
 def document_value(
-    document: SetupDocument | PointDocument | ParameterContent, path: str
+    document: ParameterDocument | ParameterContent, path: str
 ) -> YamlValue:
     """Read an actual dotted component/general path from this document only.
 
@@ -349,7 +330,7 @@ def _content_path(
 
 
 def resolve_path(
-    document: PointDocument | ParameterContent,
+    document: ParameterDocument | ParameterContent,
     path: str,
     *,
     roles: Mapping[str, AliasValue],
@@ -373,7 +354,7 @@ def resolve_path(
 
 
 def _typed_path(
-    document: PointDocument,
+    document: ParameterDocument,
     parts: list[str],
     roles: Mapping[str, AliasValue],
     reserved_names: Collection[str],
@@ -471,7 +452,7 @@ def _retain_component_defaults(model: BaseModel) -> None:
 
 
 def add_component_to_draft(
-    draft: SetupDocument | PointDocument,
+    draft: ParameterDocument,
     name: str,
     kind: str,
     fields: YamlMap,
@@ -494,7 +475,7 @@ def add_component_to_draft(
 
 
 def document_meta(
-    document: SetupDocument | PointDocument | ParameterContent, path: str
+    document: ParameterDocument | ParameterContent, path: str
 ) -> YamlMap | None:
     """Return this document's isolated opaque metadata for a dotted path, or None.
 
@@ -508,9 +489,7 @@ def document_meta(
 
 
 @contextmanager
-def stage_component(
-    draft: SetupDocument | PointDocument, name: str
-) -> Generator[ComponentSchema]:
+def stage_component(draft: ParameterDocument, name: str) -> Generator[ComponentSchema]:
     """Yield an independent working-unit component candidate for a draft edit.
 
     draft is a complete setup or point draft. name identifies an existing
@@ -527,43 +506,24 @@ def stage_component(
         yield candidate
 
 
-@overload
-def stage_general(draft: SetupDocument) -> AbstractContextManager[SetupGeneral]: ...
-
-
-@overload
-def stage_general(draft: PointDocument) -> AbstractContextManager[PointGeneral]: ...
-
-
 @contextmanager
-def stage_general(
-    draft: SetupDocument | PointDocument,
-) -> Generator[SetupGeneral | PointGeneral]:
+def stage_general(draft: ParameterDocument) -> Generator[ParameterGeneral]:
     """Yield independent general fields, accepting them into draft on normal exit.
 
-    draft is a complete setup or point draft. The candidate is SetupGeneral for
-    setup, PointGeneral for a point. Successful validation replaces the draft's
+    draft is a complete parameter draft. Successful validation replaces its
     general fields; a body exception or ValidationError leaves it unchanged.
     Metadata is untouched. This does no I/O and does not enforce entry identity.
     """
-    if isinstance(draft, SetupDocument):
 
-        def publish_setup(accepted: SetupGeneral) -> None:
-            draft.general = accepted
+    def publish(accepted: ParameterGeneral) -> None:
+        draft.general = accepted
 
-        with stage_model(draft.general, publish_setup) as setup_candidate:
-            yield setup_candidate
-    else:
-
-        def publish_point(accepted: PointGeneral) -> None:
-            draft.general = accepted
-
-        with stage_model(draft.general, publish_point) as point_candidate:
-            yield point_candidate
+    with stage_model(draft.general, publish) as candidate:
+        yield candidate
 
 
 def _set_document_value(
-    draft: SetupDocument | PointDocument,
+    draft: ParameterDocument,
     path: str,
     value: YamlValue | complex,
 ) -> None:
@@ -607,27 +567,40 @@ def _set_document_value(
 class EditView:
     """An isolated value/metadata draft whose components cannot shadow view members.
 
-    Component and general attributes, set and set_meta share one draft; the
-    enclosing SetupView/PointView edit() validates the complete document and
-    owns commit, conflict and publication. Value writes keep metadata.
+    Read or set component and general values, add registered components with
+    add_component, and replace metadata with set_meta in one edit session.
+    All operations share one draft. The enclosing edit validates the complete
+    document and commits only on normal exit. Value writes keep metadata.
     """
 
-    def __init__(self, draft: SetupDocument | PointDocument) -> None:
-        """Bind a typed setup/point draft, rejecting view-shadowing component names.
+    def __init__(self, draft: ParameterDocument, *, source: Path) -> None:
+        """Bind an edit session to draft, rejecting view-shadowing component names.
 
-        Binding does not run model hooks, read disk, mutate the draft or commit;
-        the enclosing edit owns publication. Shadowing raises ValueError naming
-        the member.
+        source is the owning parameters.yaml path, used as the error origin
+        when adding a component. Binding does not run model hooks, read disk,
+        mutate the draft or commit; the enclosing edit owns publication.
+        Shadowing raises ValueError naming the member.
         """
+        self._source = source
         self._draft = draft
         register_view_read(self, draft, None)
+
+    def add_component(self, name: str, *, kind: str, **fields: YamlValue) -> None:
+        """Add a new named component to this edit session without committing.
+
+        kind must be registered by the caller. fields supplies working-unit
+        values; omitted fields use the registered model's defaults. Invalid
+        names, unknown kinds, duplicate names or invalid fields raise without
+        changing the draft. The enclosing edit commits all changes together.
+        """
+        add_component_to_draft(self._draft, name, kind, fields, self._source)
 
     @property
     def general(self) -> GeneralView:
         return GeneralView(lambda: self._draft.general, self._edit_general)
 
     @contextmanager
-    def _edit_general(self, _field: str) -> Generator[SetupGeneral | PointGeneral]:
+    def _edit_general(self, _field: str) -> Generator[ParameterGeneral]:
         with stage_general(self._draft) as candidate:
             yield candidate
 
@@ -692,7 +665,7 @@ class EditView:
 class SetupView:
     def __init__(
         self,
-        store: DocumentStore[SetupDocument],
+        store: DocumentStore[ParameterDocument],
         source: Path,
     ) -> None:
         """Bind one complete template Store and its source path without I/O.
@@ -722,7 +695,7 @@ class SetupView:
         )
 
     @contextmanager
-    def _edit_general(self, _field: str) -> Generator[SetupGeneral]:
+    def _edit_general(self, _field: str) -> Generator[ParameterGeneral]:
         with self._edit_document() as draft, stage_general(draft) as candidate:
             yield candidate
 
@@ -739,7 +712,7 @@ class SetupView:
     def edit(self) -> Generator[EditView]:
         """Yield one value/metadata draft and commit only parameters.yaml on normal exit."""
         with self._edit_document() as draft:
-            yield EditView(draft)
+            yield EditView(draft, source=self._source)
 
     def meta(self, path: str) -> YamlMap | None:
         """Return isolated cached opaque metadata for a dotted path, or None."""

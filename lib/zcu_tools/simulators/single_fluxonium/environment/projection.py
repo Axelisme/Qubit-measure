@@ -1,7 +1,15 @@
-"""DC rank-1 outcome expansion and continuation through the evolution seam."""
+"""DC rank-1 histories with last-state density sharing.
+
+PROJECTION_MEMORY_BUDGET_BYTES is a deterministic 2 GiB allowance for projection
+arrays, including split temporaries, histories, retained plans and padded event
+populations. Checks precede their allocation and raise ValueError. The allowance
+leaves 6 GiB of an 8 GiB process cap for the engine, ADC, imports and allocator;
+it is not a bound on those other owners or on total process RSS.
+"""
 
 from dataclasses import dataclass, replace
 from hashlib import sha256
+from math import prod
 
 import numpy as np
 from numpy.typing import NDArray
@@ -19,6 +27,8 @@ from zcu_tools.simulate.evolution import (
 from zcu_tools.simulators.single_fluxonium.environment.template import (
     SingleFluxoniumPlan,
 )
+
+PROJECTION_MEMORY_BUDGET_BYTES = 2 * 1024**3
 
 
 @dataclass(frozen=True)
@@ -59,21 +69,43 @@ class ProjectionEvolution:
 
 
 @dataclass(frozen=True)
-class _Outcome:
-    weights: NDArray[np.float64]
-    history: tuple[int, ...]
-    densities: NDArray[np.complex128]
+class _Outcomes:
+    # History-major order is unchanged: parent first, then ascending new state.
+    weights: NDArray[np.float64]  # (points, histories)
+    history: NDArray[np.int64]  # (histories, projections)
+
+    @property
+    def nbytes(self) -> int:
+        return self.weights.nbytes + self.history.nbytes
+
+
+@dataclass(frozen=True)
+class _PlanResult:
+    outcomes: _Outcomes
+    terminal: dict[int, NDArray[np.float64]]
+    counts: NDArray[np.int64]
+    pruned: NDArray[np.float64]
+
+    @property
+    def nbytes(self) -> int:
+        return (
+            self.outcomes.nbytes
+            + self.counts.nbytes
+            + self.pruned.nbytes
+            + sum(values.nbytes for values in self.terminal.values())
+        )
 
 
 class ProjectionRunner:
-    """Expand DC-energy outcomes while keeping the engine's routing policy intact.
+    """Expand DC-energy histories with at most one density per last state/span.
 
     engine/source are the source-owned evolution resources. basis is the same
     retained DC energy basis as source densities and ADC labels. floor is the
     nonnegative outcome probability threshold; cancel is forwarded unchanged.
-    One runner serves one preparation. Rank-1 continuations share a density only
-    within the same plan/span and after Engine.reuse validates the current route.
+    One runner serves one preparation. Densities never cross a plan or span;
     ADC CTMC jumps do not feed back into these density continuations.
+    Projection arrays exceeding PROJECTION_MEMORY_BUDGET_BYTES raise ValueError
+    before allocation, with dimensions and suggested workload reductions.
     """
 
     def __init__(
@@ -88,19 +120,34 @@ class ProjectionRunner:
         self.floor, self.cancel = floor, cancel
         self.paths: list[PathDiagnostics] = []
         self.keys: list[bytes] = []
+        self._retained_bytes = 0
+        self._plan_bytes = 0
+
+    def _check_budget(
+        self, points: int, outcomes: int, events: int, arrays: int
+    ) -> None:
+        states = len(self.basis.labels)
+        # Old/new densities, TimelineBatch's owned copy and engine return/reorder
+        # can overlap. Probability conversion also owns temporary dense arrays.
+        shared = points * states**3 * 16 * 6
+        estimated = self._retained_bytes + self._plan_bytes + shared + arrays
+        if estimated > PROJECTION_MEMORY_BUDGET_BYTES:
+            raise ValueError(
+                "projection memory budget exceeded: "
+                f"estimated_bytes={estimated}, budget_bytes={PROJECTION_MEMORY_BUDGET_BYTES}, "
+                f"levels={states}, points={points}, outcomes={outcomes}, events={events}; "
+                "reduce levels, increase projection_prune_floor, or reduce points/batch size"
+            )
 
     def _advance(
         self,
         plan: SingleFluxoniumPlan,
-        end: NDArray[np.float64],
-        outcome: _Outcome | None,
+        event: int,
+        densities: NDArray[np.complex128] | None,
         key: bytes,
-    ) -> tuple[NDArray[np.complex128], bytes]:
-        start = None
-        densities = None
-        if outcome is not None:
-            start = plan.read_events[len(outcome.history) - 1].end_ns
-            densities = outcome.densities
+    ) -> NDArray[np.complex128]:
+        end = plan.read_events[event].end_ns
+        start = None if densities is None else plan.read_events[event - 1].end_ns
         batch = replace(
             plan.batch,
             end_ns=end,
@@ -124,52 +171,55 @@ class ProjectionRunner:
         )
         self.keys.append(reuse_key)
         self.paths.append(result.paths)
-        # Engine returns rows in its own point order, not necessarily batch order.
         indices = {int(point): index for index, point in enumerate(result.points)}
         order = [indices[int(point)] for point in plan.batch.points]
-        return result.densities[order], reuse_key
+        return result.densities[order]
 
     def _continue(
-        self,
-        plan: SingleFluxoniumPlan,
-        end: NDArray[np.float64],
-        outcomes: list[_Outcome],
-        key: bytes,
-    ) -> list[_Outcome]:
-        # Each input was just projected, so its last state fully specifies its
-        # rank-1 density. Absolute controls and point order are fixed by this
-        # plan/span. Keep full histories; only the continuation solve is shared.
-        continuations: dict[int, tuple[NDArray[np.complex128], bytes]] = {}
-        advanced = []
-        for outcome in outcomes:
-            state = outcome.history[-1]
-            cached = continuations.get(state)
-            if cached is None or not self.engine.reuse(
-                self.source, cached[1], cancel=self.cancel
-            ):
-                cached = self._advance(plan, end, outcome, key)
-                continuations[state] = cached
-            advanced.append(replace(outcome, densities=cached[0]))
-        return advanced
+        self, plan: SingleFluxoniumPlan, event: int, outcomes: _Outcomes, key: bytes
+    ) -> dict[int, NDArray[np.complex128]]:
+        # Solve each distinct last state once, in its first history occurrence
+        # order. There is no cached solve to validate within this span. The caller
+        # still validates all reuse keys before reusing a complete preparation
+        # (ADR-0078); every new span goes through Engine.evolve's routing policy.
+        densities = {}
+        shape = (len(plan.batch.points), len(self.basis.labels), len(self.basis.labels))
+        for state in dict.fromkeys(int(s) for s in outcomes.history[:, -1]):
+            projected = np.zeros(shape, dtype=np.complex128)
+            projected[:, state, state] = 1
+            densities[state] = self._advance(plan, event, projected, key)
+        return densities
+
+    def _probabilities(
+        self, densities: dict[int, NDArray[np.complex128]]
+    ) -> dict[int, NDArray[np.float64]]:
+        return {
+            state: normalize_populations(
+                batch_populations(density, self.basis, self.basis)
+            )
+            for state, density in densities.items()
+        }
 
     def _split(
         self,
-        outcomes: list[_Outcome],
+        outcomes: _Outcomes,
+        probabilities: dict[int, NDArray[np.float64]],
         points: NDArray[np.int64],
-    ) -> tuple[list[_Outcome], NDArray[np.float64]]:
-        candidates = []
-        for outcome in outcomes:
-            probabilities = normalize_populations(
-                batch_populations(outcome.densities, self.basis, self.basis)
+    ) -> tuple[_Outcomes, NDArray[np.float64]]:
+        states = len(self.basis.labels)
+        count = outcomes.weights.shape[1] * states
+        events = outcomes.history.shape[1] + 1
+        # Account for weights, retained, normalized, where/reduction scratch and
+        # boolean masks, all in original parent/state order. No candidate density
+        # or Python object is created for a history that pruning will discard.
+        workspace = outcomes.nbytes + len(points) * count * 48
+        self._check_budget(len(points), count, events, workspace)
+        weights = np.empty((len(points), count))
+        for parent in range(outcomes.weights.shape[1]):
+            state = int(outcomes.history[parent, -1]) if events > 1 else -1
+            weights[:, parent * states : (parent + 1) * states] = (
+                outcomes.weights[:, parent, None] * probabilities[state]
             )
-            for state in range(probabilities.shape[-1]):
-                weights = outcome.weights * probabilities[:, state]
-                densities = np.zeros_like(outcome.densities)
-                densities[:, state, state] = 1
-                candidates.append(
-                    _Outcome(weights, (*outcome.history, state), densities)
-                )
-        weights = np.stack([outcome.weights for outcome in candidates], axis=-1)
         keep = weights >= self.floor
         dropped = np.where(keep, 0, weights).sum(axis=-1)
         retained = np.where(keep, weights, 0)
@@ -180,46 +230,41 @@ class ProjectionRunner:
                 f"point {point}: projection pruning removed all outcomes at floor {self.floor}"
             )
         normalized = retained / totals[:, None]
-        return [
-            replace(outcome, weights=normalized[:, index])
-            for index, outcome in enumerate(candidates)
-            if np.any(keep[:, index])
-        ], dropped
-
-    def _plan(
-        self,
-        plan: SingleFluxoniumPlan,
-        key: bytes,
-    ) -> tuple[
-        list[_Outcome], tuple[tuple[int, ...], ...], tuple[tuple[float, ...], ...]
-    ]:
-        points = len(plan.batch.points)
-        density, _ = self._advance(plan, plan.read_events[0].end_ns, None, key)
-        outcomes = [_Outcome(np.ones(points), (), density)]
-        survival = np.ones(points)
-        counts, pruned = [], []
-        for event in range(len(plan.read_events) - 1):
-            outcomes, dropped = self._split(outcomes, plan.batch.points)
-            counts.append(
-                np.full(points, len(outcomes))
-                if self.floor == 0
-                else np.count_nonzero([outcome.weights for outcome in outcomes], axis=0)
-            )
-            pruned.append(survival * dropped)
-            survival *= 1 - dropped
-            outcomes = self._continue(
-                plan, plan.read_events[event + 1].end_ns, outcomes, key
-            )
-        return (
-            outcomes,
-            tuple(
-                tuple(int(count[point]) for count in counts) for point in range(points)
-            ),
-            tuple(
-                tuple(float(weight[point]) for weight in pruned)
-                for point in range(points)
-            ),
+        selected = np.flatnonzero(np.any(keep, axis=0))
+        survivor_bytes = len(selected) * (len(points) * 8 + events * 16 + 32)
+        self._check_budget(
+            len(points), len(selected), events, workspace + survivor_bytes
         )
+        history = np.empty((len(selected), events), dtype=np.int64)
+        history[:, :-1] = outcomes.history[selected // states]
+        history[:, -1] = selected % states
+        return _Outcomes(normalized[:, selected], history), dropped
+
+    def _plan(self, plan: SingleFluxoniumPlan, key: bytes) -> _PlanResult:
+        points, events = len(plan.batch.points), len(plan.read_events)
+        self._plan_bytes = points * events * 32
+        self._check_budget(points, 1, events, 0)
+        density = self._advance(plan, 0, None, key)
+        probabilities = self._probabilities({-1: density})
+        del density
+        outcomes = _Outcomes(np.ones((points, 1)), np.empty((1, 0), dtype=np.int64))
+        survival = np.ones(points)
+        counts = np.empty((points, events - 1), dtype=np.int64)
+        pruned = np.empty((points, events - 1))
+        for event in range(events - 1):
+            outcomes, dropped = self._split(outcomes, probabilities, plan.batch.points)
+            counts[:, event] = (
+                outcomes.weights.shape[1]
+                if self.floor == 0
+                else np.count_nonzero(outcomes.weights, axis=-1)
+            )
+            pruned[:, event] = survival * dropped
+            survival *= 1 - dropped
+            densities = self._continue(plan, event + 1, outcomes, key)
+            probabilities = self._probabilities(densities)
+            del densities
+        self._plan_bytes = 0
+        return _PlanResult(outcomes, probabilities, counts, pruned)
 
     def prepare(
         self,
@@ -233,32 +278,58 @@ class ProjectionRunner:
         point_dims is the C-order request layout; key hashes all caller inputs.
         Low-weight histories are discarded per point after each projection and
         survivors renormalized. Zero-weight padding carries valid ground-state
-        distributions but cannot be sampled. Errors propagate without a result.
+        distributions but cannot be sampled. Projection arrays exceeding the
+        module's fixed 2 GiB budget raise ValueError before allocation. Other
+        numeric errors propagate without a result.
         """
-        results = [self._plan(plan, key) for plan in plans]
-        states = len(self.basis.labels)
-        outcomes_count = max(len(result[0]) for result in results)
-        size = int(np.prod(point_dims))
+        states, size = len(self.basis.labels), prod(point_dims)
+        events = len(plans[0].read_events)
+        # With pruning disabled the exact outcome count is known without solving.
+        if self.floor == 0:
+            count = states ** (events - 1)
+            self._check_budget(
+                size, count, events, size * count * (1 + events * states) * 16
+            )
+        results = []
+        for plan in plans:
+            result = self._plan(plan, key)
+            results.append(result)
+            self._retained_bytes += result.nbytes
+        outcomes_count = max(result.outcomes.weights.shape[1] for result in results)
+        output_bytes = size * outcomes_count * (1 + events * states) * 8
+        # ProjectionReadout owns a second full copy. Include one event's
+        # indexing/validation scratch and the diagnostic Python tuple payloads.
+        self._check_budget(
+            size,
+            outcomes_count,
+            events,
+            2 * output_bytes
+            + size * outcomes_count * (states * 8 + 32)
+            + size * events * 128,
+        )
         weights = np.zeros((size, outcomes_count))
-        populations = [
-            np.zeros((size, outcomes_count, states)) for _ in plans[0].read_events
-        ]
+        populations = [np.zeros((size, outcomes_count, states)) for _ in range(events)]
         for values in populations:
             values[..., 0] = 1
         retained: list[tuple[int, ...]] = [()] * size
         pruned: list[tuple[float, ...]] = [()] * size
-        for plan, (outcomes, counts, dropped) in zip(plans, results, strict=True):
-            for point, count, loss in zip(
-                plan.batch.points, counts, dropped, strict=True
+        one_hot = np.eye(states)
+        for plan, result in zip(plans, results, strict=True):
+            outcomes = result.outcomes
+            count = outcomes.weights.shape[1]
+            for point, counts, dropped in zip(
+                plan.batch.points, result.counts, result.pruned, strict=True
             ):
-                retained[point], pruned[point] = count, loss
-            for index, outcome in enumerate(outcomes):
-                weights[plan.batch.points, index] = outcome.weights
-                for event, state in enumerate(outcome.history):
-                    populations[event][plan.batch.points, index] = np.eye(states)[state]
-                populations[-1][plan.batch.points, index] = normalize_populations(
-                    batch_populations(outcome.densities, self.basis, self.basis)
-                )
+                retained[point] = tuple(int(value) for value in counts)
+                pruned[point] = tuple(float(value) for value in dropped)
+            weights[plan.batch.points, :count] = outcomes.weights
+            for event in range(events - 1):
+                populations[event][plan.batch.points, :count] = one_hot[
+                    outcomes.history[:, event]
+                ]
+            for index in range(count):
+                state = int(outcomes.history[index, -1]) if events > 1 else -1
+                populations[-1][plan.batch.points, index] = result.terminal[state]
         return ProjectionEvolution(
             ProjectionReadout(
                 weights.reshape((*point_dims, outcomes_count)),

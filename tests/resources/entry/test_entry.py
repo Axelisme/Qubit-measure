@@ -239,14 +239,22 @@ def test_setup_description_uses_one_transaction_for_direct_and_edit_writes(
         ("created_at", "2026-10-04T06:00:00+08:00"),
     ],
 )
-def test_created_at_is_validated_on_use_without_rewriting_setup(
+@pytest.mark.parametrize("point", [None, "working"])
+def test_created_at_is_validated_on_use_without_rewriting_parameters(
     entry_roots: tuple[Path, Path],
     entry: ResultEntry,
     field: str,
     invalid: str,
+    point: str | None,
 ) -> None:
     results, database = entry_roots
-    setup_path = results / "entry" / "parameters.yaml"
+    if point is not None:
+        entry.new_point(point)
+    setup_path = (
+        results / "entry" / "parameters.yaml"
+        if point is None
+        else results / "entry" / "points" / point / "parameters.yaml"
+    )
     yaml = YAML(typ="safe")
     with setup_path.open(encoding="utf-8") as stream:
         document = yaml.load(stream)
@@ -256,10 +264,9 @@ def test_created_at_is_validated_on_use_without_rewriting_setup(
     before = setup_path.read_bytes()
 
     opened = ResultEntry.open("entry", result_root=results, database_root=database)
+    view = opened.setup if point is None else opened.use_point(point)
     with pytest.raises(ValueError, match=field) as failure:
-        entry_api.document_value(
-            entry_api.parameter_content(opened.setup), f"general.{field}"
-        )
+        entry_api.document_value(entry_api.parameter_content(view), f"general.{field}")
 
     assert isinstance(failure.value.__cause__, ValidationError)
     assert setup_path.read_bytes() == before

@@ -268,6 +268,7 @@ def test_record_preview_selection_and_apply_preserve_adapter_json(
             "target_name": "general.description",
             "description": "skip",
             "selected": True,
+            "create_kind": None,
             "proposed_value": "unselected",
             "actual_path": "general.description",
             "stderr": None,

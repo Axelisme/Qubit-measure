@@ -232,8 +232,10 @@ class FormEditor[F: FormModel](QWidget):
     model sections get a red name label. An invalid Expression keeps its mode
     tint and gets a red border. The coloured widget has formError=True while
     invalid, False otherwise. form.error.<path> shows selectable inline error text
-    below that row's control. form.error.summary shows the first error and its
-    canonical path at the bottom, including folded or hidden children. form.error
+    below that row's control. form.error.summary shows the first error without
+    its own visible field and its canonical path, including folded or hidden
+    children and model/group errors. It hides when all errors have visible
+    fields. form.error
     displays model-wide or otherwise unlocated errors. Empty labels are hidden.
     Mapping-key/index errors appear at their container field, except within a
     FixedList where the original index addresses each model element.
@@ -867,12 +869,7 @@ class FormEditor[F: FormModel](QWidget):
     def _show_errors(self) -> None:
         errors = self.errors()
         messages = dict(errors.messages) if errors else {}
-        first = next(iter(messages.items()), None)
-        summary = ""
-        if first is not None:
-            path, message = first
-            location = ".".join(str(part) for part in path)
-            summary = f"{location}: {message}" if location else message
+        summary = self._error_summary(messages)
         self._summary.setText(summary)
         set_foreground(self._summary, error_colour(self))
         self._summary.setVisible(bool(summary))
@@ -909,6 +906,19 @@ class FormEditor[F: FormModel](QWidget):
         if self._state is not None and errors != self._last_errors:
             self._last_errors = errors
             self.errors_changed.emit(errors)
+
+    def _error_summary(self, messages: Mapping[FormPath, str]) -> str:
+        """Locate the first error without its own visible scalar/container field."""
+        # ADR-0065: repeat only errors without their own visible field.
+        for path, message in messages.items():
+            if self._error_target(path) == path and self._rows[path].field.kind not in (
+                "model",
+                "elements",
+            ):
+                continue
+            location = ".".join(str(part) for part in path)
+            return f"{location}: {message}" if location else message
+        return ""
 
     def _error_target(self, path: FormPath) -> FormWritePath | None:
         for length in range(len(path), 0, -1):

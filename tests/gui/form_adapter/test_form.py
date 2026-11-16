@@ -16,7 +16,7 @@ from zcu_tools.gui.session.context_types import SavedPoint
 from zcu_tools.gui.session.parameters import ParameterContext
 from zcu_tools.program.v2.sweep import SweepCfg
 from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
-from zcu_tools.resources.entry.schema import PointDocument, PointGeneral
+from zcu_tools.resources.entry.schema import ParameterDocument, ParameterGeneral
 
 
 class SweepSection(ConfigBase):
@@ -319,11 +319,11 @@ def indexed_expression_env() -> FormEnv:
     """Capture list values, mapping values and their index/key sources."""
     return FormEnv(
         parameters=ParameterContext(
-            point=PointDocument(
+            point=ParameterDocument(
                 format="zcu.parameter-container",
                 format_version="2.0",
                 schema_version=1,
-                general=PointGeneral(
+                general=ParameterGeneral(
                     created_at="2026-10-08T00:00:00Z",
                     ext={
                         "channels": [2, 5],

@@ -484,7 +484,11 @@ class WritebackDraft:
                 metadata: YamlMap = (
                     {"stderr": item.stderr} if item.stderr is not None else {}
                 )
-                items.append(concrete.ParameterWriteback(path, write.value, metadata))
+                items.append(
+                    concrete.ParameterWriteback(
+                        path, write.value, metadata, create_kind=item.create_kind
+                    )
+                )
                 written["parameter"].append(path)
             else:
                 path = destination_path(item, parameters)

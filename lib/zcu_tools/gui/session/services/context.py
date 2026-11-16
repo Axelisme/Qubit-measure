@@ -59,8 +59,7 @@ from zcu_tools.resources.entry import (
 from zcu_tools.resources.entry.aliases import EntryAliases
 from zcu_tools.resources.entry.ledger_models import JsonObject
 from zcu_tools.resources.entry.schema import (
-    PointDocument,
-    SetupDocument,
+    ParameterDocument,
 )
 from zcu_tools.resources.entry.storage import StorageBinding
 from zcu_tools.resources.entry.writeback import (
@@ -456,7 +455,7 @@ class ContextService:
         self._aliases = AliasSnapshot(AliasTable())
         self._publish(None, (), ContextReadiness.EMPTY, active_label=None)
 
-    def inspect_document(self, *, setup: bool = False) -> SetupDocument | PointDocument:
+    def inspect_document(self, *, setup: bool = False) -> ParameterDocument:
         """Return the cached setup template or current point document without I/O.
 
         setup=True reads the opened entry template; False reads the published

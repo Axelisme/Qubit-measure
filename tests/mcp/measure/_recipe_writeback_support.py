@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 from zcu_tools.cfg_model import ConstWaveformCfg, PulseSpec
 from zcu_tools.format_version import YamlValue
 from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AnalysisMode
+from zcu_tools.gui.app.measure.services import AdmissionDecision, TabAction
 from zcu_tools.gui.app.measure.services.ports import (
     AnalysisPaneSnapshot,
     PostAnalysisPaneSnapshot,
@@ -158,6 +159,10 @@ class WritebackGui(SyntheticGui):
         self, tab_id: str, pane: str, operation_id: int
     ) -> None:
         pass
+
+    def admit(self, tab_id: str, action: TabAction) -> AdmissionDecision:
+        """Leave domain admission outside writeback transport contracts."""
+        return AdmissionDecision(True, None, "")
 
     def has_tab(self, tab_id: str) -> bool:
         return tab_id == "tab-1"

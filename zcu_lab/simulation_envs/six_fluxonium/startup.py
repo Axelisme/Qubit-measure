@@ -1,13 +1,14 @@
 """Assemble the six-fluxonium demo entry and offline measure-GUI resources."""
 
 import logging
+import os
 from pathlib import Path
 from shlex import quote
 
 import yaml
 from pydantic import TypeAdapter
 from zcu_tools.format_version import YamlMap
-from zcu_tools.gui.app.measure.startup_context import StartupContext
+from zcu_tools.gui.app.measure.startup_context import StartupContext, simulation_workers
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.program import build_soccfg
 from zcu_tools.resources.entry import DestinationExistsError, load_entry_template
@@ -25,7 +26,8 @@ def startup(ctx: StartupContext) -> None:
     values come only from adjacent six_fluxonium.yaml. If it is missing,
     raise FileNotFoundError with a template copy command before creating an entry.
     No hardware, acquire or numeric warmup runs during startup. The mock SoC
-    evolves each qubit independently on demand. Q1_bias..Q6_bias each affect only their own qubit. The shared
+    evolves each qubit independently on demand, with one fewer worker than host
+    CPUs, at least one. Q1_bias..Q6_bias each affect only their own qubit. The shared
     coil_bias affects all six. Both contributions use per-qubit offsets and
     periods in A. No fast-flux line is installed. Single-tone scans use pulse
     gen0/ADC0; mux uses gen7/ADC2..7. Q1..Q6 charge drives use gen1..6.
@@ -63,7 +65,9 @@ def startup(ctx: StartupContext) -> None:
 
     ctx.progress("Building offline six-fluxonium resources")
     soccfg = build_soccfg(yaml.safe_load(PROFILE_PATH.read_text()))
-    environment = six_fluxonium(settings_path, soccfg=soccfg)
+    environment = six_fluxonium(
+        settings_path, workers=simulation_workers(os.cpu_count()), soccfg=soccfg
+    )
     transferred: set[str] = set()
 
     def close_environment() -> None:

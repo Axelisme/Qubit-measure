@@ -11,12 +11,15 @@ from contextlib import closing
 from pathlib import Path
 
 from zcu_tools.simulate.evolution import (
+    FrozenIndexEntry,
+    FrozenRecord,
     ModelSource,
     ReferenceResult,
     TimelineBatch,
     load_reference,
-    read_frozen_manifest,
+    read_frozen_index,
     read_physical_input,
+    read_scene_records,
     reference_key,
     write_reference,
 )
@@ -24,24 +27,73 @@ from zcu_tools.simulate.evolution import (
 from .interaction_reference import interaction_reference
 from .reference import converged_reference
 
+Solver = Callable[[ModelSource, TimelineBatch], ReferenceResult]
+
 
 def prepare_references(
     inputs: Path,
     cache: Path,
     *,
-    solver: Callable[[ModelSource, TimelineBatch], ReferenceResult],
+    scene_cache: Path,
+    solver: Solver,
+    scenario: str | None = None,
 ) -> dict[str, str]:
-    """Prepare one manifest with the caller's explicit independent solver.
+    """Prepare one index with explicit scene/cache paths and independent solver.
 
-    Read only record name and physical; metadata never selects a solver.
+    scenario requires exactly one matching indexed row before reading payloads;
+    None selects the entire index. Zero/multiple matches raise ValueError.
+    Read only selected record names and physical; metadata never selects a solver.
     Existing keys are loaded cache-only. Only a missing key triggers the given
     solver, without trying another solver after failure. Each decoded source
     is closed on success or failure; earlier writes remain after later failure.
     Container, numeric, solver and I/O errors propagate. Run separately under
     approved compute limits, never during timing.
     """
+    [(entries, _)] = _select_indexes([(inputs, solver)], scenario)
+    return _prepare_records(_read_scenes(entries, scene_cache), cache, solver)
+
+
+def _select_indexes(
+    sources: list[tuple[Path, Solver]], scenario: str | None
+) -> list[tuple[tuple[FrozenIndexEntry, ...], Solver]]:
+    indexed = [(path, read_frozen_index(path), solver) for path, solver in sources]
+    if scenario is None:
+        return [(entries, solver) for _, entries, solver in indexed]
+    matches = [
+        (path, entry, solver)
+        for path, entries, solver in indexed
+        for entry in entries
+        if entry.name == scenario
+    ]
+    if not matches:
+        legal = ", ".join(entry.name for _, entries, _ in indexed for entry in entries)
+        raise ValueError(f"Unknown scenario: {scenario}. Legal names: {legal}")
+    if len(matches) != 1:
+        paths = ", ".join(str(path) for path, _, _ in matches)
+        raise ValueError(f"Ambiguous scenario: {scenario}. Sources: {paths}")
+    _, entry, solver = matches[0]
+    return [((entry,), solver)]
+
+
+def _read_scenes(
+    entries: tuple[FrozenIndexEntry, ...], scene_cache: Path
+) -> tuple[FrozenRecord, ...]:
+    try:
+        return read_scene_records(scene_cache, entries)
+    except FileNotFoundError as error:
+        raise FileNotFoundError(
+            f"{error}\nPrepare scenes with: python -m tools.family_pareto_scenarios "
+            f"--scene-cache {scene_cache} (use --scenario NAME for one indexed scene)"
+        ) from error
+
+
+def _prepare_records(
+    records: tuple[FrozenRecord, ...],
+    cache: Path,
+    solver: Callable[[ModelSource, TimelineBatch], ReferenceResult],
+) -> dict[str, str]:
     prepared = {}
-    for record in read_frozen_manifest(inputs):
+    for record in records:
         frozen = read_physical_input(record.physical)
         with closing(frozen.source):
             try:
@@ -54,7 +106,14 @@ def prepare_references(
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Prepare explicit --converged/--interaction manifests into --cache.
+    """Prepare explicit --converged/--interaction indexes into --cache.
+
+    --scene-cache is required and explicit; no Git discovery or scene rebuilding.
+    --scenario NAME requires one match across all supplied indexes before reading
+    any payload; zero/multiple matches raise ValueError without solving. Omission
+    selects every indexed row. Load selected numeric files before any solving.
+    A missing scene lists its
+    name, hashes and producer command, then fails without running a solver.
 
     Each solver option accepts one path and may repeat. At least one is required.
     argv omits the executable name. Print name/key JSON; argparse handles invalid
@@ -66,28 +125,38 @@ def main(argv: list[str] | None = None) -> int:
         type=Path,
         action="append",
         default=[],
-        help="Frozen manifest for the independent lab-frame solver (repeatable)",
+        help="Frozen index for the independent lab-frame solver (repeatable)",
     )
     parser.add_argument(
         "--interaction",
         type=Path,
         action="append",
         default=[],
-        help="Frozen manifest for the interaction-picture solver (repeatable)",
+        help="Frozen index for the interaction-picture solver (repeatable)",
     )
     parser.add_argument(
         "--cache", type=Path, required=True, help="Reference NPZ cache destination"
     )
+    parser.add_argument("--scene-cache", type=Path, required=True)
+    parser.add_argument("--scenario")
     args = parser.parse_args(argv)
     if not args.converged and not args.interaction:
-        parser.error("at least one --converged or --interaction manifest is required")
+        parser.error("at least one --converged or --interaction index is required")
+    sources = [
+        (path, solver)
+        for paths, solver in (
+            (args.converged, converged_reference),
+            (args.interaction, interaction_reference),
+        )
+        for path in paths
+    ]
+    selected = [
+        (_read_scenes(entries, args.scene_cache), solver)
+        for entries, solver in _select_indexes(sources, args.scenario)
+    ]
     prepared = {}
-    for paths, solver in (
-        (args.converged, converged_reference),
-        (args.interaction, interaction_reference),
-    ):
-        for path in paths:
-            prepared.update(prepare_references(path, args.cache, solver=solver))
+    for records, solver in selected:
+        prepared.update(_prepare_records(records, args.cache, solver))
     print(json.dumps(prepared, sort_keys=True))
     return 0
 

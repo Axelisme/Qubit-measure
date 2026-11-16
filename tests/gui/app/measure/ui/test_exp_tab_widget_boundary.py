@@ -246,9 +246,7 @@ def test_exp_tab_run_tooltip_shows_no_soc_reason(main_window_control_factory, qa
     assert tab.run_btn.toolTip() == "This experiment requires a SoC connection"
 
 
-def test_exp_tab_run_tooltip_shows_cfg_invalid_reason(
-    main_window_control_factory, qapp
-):
+def test_exp_tab_run_tooltip_shows_cfg_repair_hint(main_window_control_factory, qapp):
     from zcu_tools.gui.app.measure.ui.main_window import ExpTabWidget
 
     tab = ExpTabWidget(
@@ -276,7 +274,7 @@ def test_exp_tab_run_tooltip_shows_cfg_invalid_reason(
     )
 
     assert tab.run_btn.isEnabled() is False
-    assert tab.run_btn.toolTip().startswith("Config invalid: reps: ")
+    assert tab.run_btn.toolTip() == "Fix the fields marked in red"
 
 
 def test_exp_tab_unselected_context_allows_analysis_but_disables_run_and_save(

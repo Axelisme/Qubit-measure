@@ -46,9 +46,16 @@ class WritebackItem(ABC):
 
 @dataclass
 class ParameterWriteback(WritebackItem):
-    """Propose a point parameter value at target_name, resolved against the Run capture."""
+    """Propose a working-unit value at target_name, resolving captured roles only.
+
+    create_kind names the registered component kind to create at Apply when the
+    component is absent. None keeps existing missing-component errors. Existing
+    components retain their kind and other fields; new ones use model defaults
+    except for the proposed field. The destination is active at Apply time.
+    """
 
     proposed_value: Any
+    create_kind: str | None = None
 
 
 @dataclass
