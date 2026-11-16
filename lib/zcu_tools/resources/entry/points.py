@@ -9,7 +9,7 @@ from zcu_tools.resources.document_store import DocumentStore
 
 from . import _point_origin
 from .roles import RoleSpec, RoleView, resolve_names
-from .schema import ComponentSchema, PointDocument, PointGeneral
+from .schema import ComponentSchema, ParameterDocument, ParameterGeneral
 from .views import (
     ComponentView,
     EditView,
@@ -39,7 +39,7 @@ class PointView:
 
     def __init__(
         self,
-        store: DocumentStore[PointDocument],
+        store: DocumentStore[ParameterDocument],
         source: Path,
         *,
         result_root: Path,
@@ -83,7 +83,7 @@ class PointView:
         )
 
     @contextmanager
-    def _edit_general(self, _field: str) -> Generator[PointGeneral]:
+    def _edit_general(self, _field: str) -> Generator[ParameterGeneral]:
         with self._store.edit() as draft, stage_general(draft) as candidate:
             yield candidate
 

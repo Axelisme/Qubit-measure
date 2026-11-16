@@ -1,6 +1,6 @@
 # `zcu_tools.resources.entry` result entry composition
 
-**Last updated:** 2026-11-16，EditView 新增元件與 writeback upsert
+**Last updated:** 2026-11-16，global／point 共用參數文件型別
 
 **讀者：** framework-dev。Result entry、point、ledger 與輸出位置契約。
 
@@ -41,6 +41,8 @@ Setup 的 alias 存在 `<entry>/aliases.yaml`。每個 point 的 alias 存在 `<
 範本必須有 `components` mapping 與 `aliases`。Components 沿用 point 的名稱、kind 與原 model 欄位驗證。`aliases` 是完整嵌套的 `zcu.aliases` 1.x document，內含 `format`、`format_version` 與 `aliases` mapping。Reader 在讀檔時拒絕錯誤 header、kind、欄位與非字串 alias bindings。Alias 語法、backward links 與解析仍由 GUI Session 的 AliasTable 擁有。
 
 ## 文件與 seed
+
+Global 與 point 的完整參數文件共用 `schema.ParameterDocument`，general 欄位共用 `ParameterGeneral`。兩個 model 不攜帶 scope 身分。`SetupView` 與 `PointView` 仍各綁自己的 `DocumentStore[ParameterDocument]`，由綁定位置選擇文件，磁碟格式不變。
 
 Entry 的 setup 參數既供 global 工作，也供新 point 繼承。Point 自帶 kind、元件、metadata 與 general。General 的固定欄位只有 created_at、description 與 ext。舊 entry_id 即使格式不合法也忽略。Read／refresh 不改 bytes，明確修改時移除這個欄位。Setup 同名換檔後，公開 refresh 或 new_point 會使用新內容，不因 UUID 拒絕。GUI 的 ContextService 使用同一批次 watcher 監看 entry 與 point 已安裝文件，resources 本身不建立 watcher，見 [ADR-0081](../../../../docs/adr/0081-point-data-disk-sync.md)。
 

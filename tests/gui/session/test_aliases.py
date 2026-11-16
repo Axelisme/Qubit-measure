@@ -6,10 +6,8 @@ from zcu_tools.gui.session import aliases
 from zcu_tools.gui.session.aliases import AliasRow, AliasTable, ResolvedAliasRow
 from zcu_tools.resources.entry import ComponentSchema, RoleResolutionError, RoleSpec
 from zcu_tools.resources.entry.schema import (
-    PointDocument,
-    PointGeneral,
-    SetupDocument,
-    SetupGeneral,
+    ParameterDocument,
+    ParameterGeneral,
 )
 
 
@@ -72,13 +70,13 @@ class LinkedComponent(ComponentSchema):
 
 
 @pytest.fixture
-def point() -> PointDocument:
+def point() -> ParameterDocument:
     # The alias reader accepts already validated snapshots, not resource handles.
-    return PointDocument.model_construct(
+    return ParameterDocument.model_construct(
         format="zcu.parameter-container",
         format_version="2.0",
         schema_version=1,
-        general=PointGeneral(created_at="2026-10-09T00:00:00Z"),
+        general=ParameterGeneral(created_at="2026-10-09T00:00:00Z"),
         components={
             "Q1": LinkedComponent(kind="qubit/test", frequency=4.0, partner="R1"),
             "Q2": LinkedComponent(kind="qubit/test", frequency=5.0, partner="R2"),
@@ -100,7 +98,7 @@ def list_table(rows: tuple[AliasRow, ...]) -> AliasTable:
 
 
 def test_ordered_list_resolves_links_and_scalar_reads_refuse_it(
-    point: PointDocument,
+    point: ParameterDocument,
 ) -> None:
     table = list_table(
         (
@@ -115,7 +113,7 @@ def test_ordered_list_resolves_links_and_scalar_reads_refuse_it(
 
 
 def test_empty_list_is_unbound_and_list_elements_do_not_fallback(
-    point: PointDocument,
+    point: ParameterDocument,
 ) -> None:
     table = list_table((AliasRow("participants", []),))
     assert table.names(point, {}) == {}
@@ -134,7 +132,7 @@ def test_empty_list_is_unbound_and_list_elements_do_not_fallback(
 
 @pytest.mark.parametrize("value", [["bad.name"], ["$later.partner"], [""]])
 def test_invalid_list_replacement_is_atomic(
-    point: PointDocument, value: list[str]
+    point: ParameterDocument, value: list[str]
 ) -> None:
     table = list_table((AliasRow("participants", ["Q2", "Q1"]),))
     with pytest.raises(InvalidInputError):
@@ -142,7 +140,7 @@ def test_invalid_list_replacement_is_atomic(
     assert table.names(point, {}) == {"participants": ["Q2", "Q1"]}
 
 
-def test_alias_lists_are_detached_on_install_and_read(point: PointDocument) -> None:
+def test_alias_lists_are_detached_on_install_and_read(point: ParameterDocument) -> None:
     value = ["Q2", "Q1"]
     table = list_table((AliasRow("participants", value),))
     value.clear()
@@ -152,7 +150,7 @@ def test_alias_lists_are_detached_on_install_and_read(point: PointDocument) -> N
     assert table.names(point, {}) == {"participants": ["Q2", "Q1"]}
 
 
-def test_list_cannot_be_used_as_a_scalar_link_root(point: PointDocument) -> None:
+def test_list_cannot_be_used_as_a_scalar_link_root(point: ParameterDocument) -> None:
     table = list_table(
         (AliasRow("participants", ["Q1"]), AliasRow("sense", "$participants.partner"))
     )
@@ -161,8 +159,8 @@ def test_list_cannot_be_used_as_a_scalar_link_root(point: PointDocument) -> None
 
 
 def test_setup_alias_links_resolve_against_the_fixed_component_snapshot() -> None:
-    setup = SetupDocument.model_construct(
-        general=SetupGeneral(
+    setup = ParameterDocument.model_construct(
+        general=ParameterGeneral(
             created_at="2026-10-09T00:00:00Z",
         ),
         components={
@@ -180,7 +178,7 @@ def test_setup_alias_links_resolve_against_the_fixed_component_snapshot() -> Non
 
 
 def test_links_follow_changed_earlier_rows_without_expanding_authored_values(
-    point: PointDocument,
+    point: ParameterDocument,
 ) -> None:
     table = AliasTable(
         (
@@ -211,7 +209,7 @@ def test_links_follow_changed_earlier_rows_without_expanding_authored_values(
     ],
 )
 def test_invalid_replacements_preserve_the_complete_old_table(
-    point: PointDocument, rows: tuple[AliasRow, ...]
+    point: ParameterDocument, rows: tuple[AliasRow, ...]
 ) -> None:
     table = AliasTable((AliasRow("qubit", "Q1"),))
     with pytest.raises(InvalidInputError) as caught:
@@ -222,7 +220,7 @@ def test_invalid_replacements_preserve_the_complete_old_table(
 
 
 def test_unused_unbound_or_bad_rows_do_not_prevent_other_alias_reads(
-    point: PointDocument,
+    point: ParameterDocument,
 ) -> None:
     table = AliasTable(
         (
@@ -237,7 +235,7 @@ def test_unused_unbound_or_bad_rows_do_not_prevent_other_alias_reads(
 
 
 def test_unbound_alias_never_falls_back_to_a_same_named_component(
-    point: PointDocument,
+    point: ParameterDocument,
 ) -> None:
     table = AliasTable((AliasRow("qubit", ""), AliasRow("resonator", "$qubit.partner")))
     declarations = {"qubit": RoleSpec("qubit/*"), "resonator": RoleSpec("resonator")}
@@ -252,7 +250,7 @@ def test_unbound_alias_never_falls_back_to_a_same_named_component(
 
 @pytest.mark.parametrize("partner", [None, 7, "missing"])
 def test_invalid_link_targets_are_explicit_not_unbound(
-    point: PointDocument, partner: str | int | None
+    point: ParameterDocument, partner: str | int | None
 ) -> None:
     point.components["Q1"] = LinkedComponent(
         kind="qubit/test", frequency=4.0, partner=partner
@@ -266,7 +264,7 @@ def test_invalid_link_targets_are_explicit_not_unbound(
 
 
 def test_missing_link_field_and_wrong_kind_report_the_requested_alias(
-    point: PointDocument,
+    point: ParameterDocument,
 ) -> None:
     table = AliasTable(
         (AliasRow("qubit", "Q1"), AliasRow("resonator", "$qubit.absent"))
@@ -282,7 +280,7 @@ def test_missing_link_field_and_wrong_kind_report_the_requested_alias(
 
 
 def test_linked_unbound_alias_names_the_empty_row_to_bind(
-    point: PointDocument,
+    point: ParameterDocument,
 ) -> None:
     table = AliasTable((AliasRow("qubit", ""), AliasRow("resonator", "$qubit.partner")))
     with pytest.raises(RoleResolutionError) as caught:
@@ -304,7 +302,7 @@ def test_linked_unbound_alias_names_the_empty_row_to_bind(
     ids=["missing-field", "non-name-target", "wrong-kind"],
 )
 def test_link_and_kind_failures_name_the_alias_and_keep_their_reason(
-    point: PointDocument, partner: int | str | None, kind: str | None, named: str
+    point: ParameterDocument, partner: int | str | None, kind: str | None, named: str
 ) -> None:
     link = "$qubit.absent" if partner is None else "$qubit.partner"
     point.components["Q1"] = LinkedComponent(
@@ -322,7 +320,7 @@ def test_link_and_kind_failures_name_the_alias_and_keep_their_reason(
 
 
 def test_one_use_override_rebinds_dependent_rows_without_mutating_the_table(
-    point: PointDocument,
+    point: ParameterDocument,
 ) -> None:
     table = AliasTable((AliasRow("qubit", ""), AliasRow("resonator", "$qubit.partner")))
     temporary = table.with_override("qubit", "Q2")
@@ -344,7 +342,7 @@ def test_invalid_override_is_rejected_without_changing_the_table(target: str) ->
 
 
 def test_capture_includes_custom_rows_without_inference_from_via(
-    point: PointDocument,
+    point: ParameterDocument,
 ) -> None:
     table = AliasTable(
         (

@@ -22,7 +22,7 @@ from zcu_tools.gui.session.context_types import (
 )
 from zcu_tools.gui.session.parameters import ParameterContext
 from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
-from zcu_tools.resources.entry.schema import PointDocument, PointGeneral
+from zcu_tools.resources.entry.schema import ParameterDocument, ParameterGeneral
 
 from tests.gui._form_converters import RebuildingForm
 
@@ -100,11 +100,11 @@ def environment(
     """Capture a point whose general.ext holds seed (omitted when None)."""
     ext: dict[str, JsonValue] = {} if seed is None else {"seed": seed}
     context = ParameterContext(
-        point=PointDocument(
+        point=ParameterDocument(
             format="zcu.parameter-container",
             format_version="2.0",
             schema_version=1,
-            general=PointGeneral(created_at="2026-10-13T00:00:00Z", ext=ext),
+            general=ParameterGeneral(created_at="2026-10-13T00:00:00Z", ext=ext),
         ),
         library=LibrarySnapshot(
             ModuleLibraryDocument(format="zcu.module-library", format_version="2.0")

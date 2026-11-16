@@ -19,7 +19,7 @@ from zcu_tools.resources.entry import (
     role_registry,
     snapshot,
 )
-from zcu_tools.resources.entry.schema import PointDocument, PointGeneral
+from zcu_tools.resources.entry.schema import ParameterDocument, ParameterGeneral
 
 from .fakes import Driver, Sensor
 
@@ -45,12 +45,12 @@ def make_point(tmp_path: Path) -> PointView:
 
 
 @pytest.fixture
-def document() -> PointDocument:
-    document = PointDocument(
+def document() -> ParameterDocument:
+    document = ParameterDocument(
         format="zcu.parameter-container",
         format_version="2.0",
         schema_version=1,
-        general=PointGeneral(
+        general=ParameterGeneral(
             created_at="2026-10-09T00:00:00Z",
         ),
     )
@@ -76,7 +76,7 @@ def document() -> PointDocument:
     ],
 )
 def test_resolve_path_expands_only_the_captured_namespace(
-    document: PointDocument, path: str, expected: str
+    document: ParameterDocument, path: str, expected: str
 ) -> None:
     roles = {"driver": "Q1"}
     assert resolve_path(document, path, roles=roles) == expected
@@ -101,7 +101,7 @@ def test_resolve_path_expands_only_the_captured_namespace(
     ],
 )
 def test_resolve_path_rejects_ambiguous_namespaces(
-    document: PointDocument,
+    document: ParameterDocument,
     path: str,
     roles: dict[str, str],
     reserved: tuple[str, ...],
@@ -126,7 +126,7 @@ def test_resolve_path_rejects_ambiguous_namespaces(
     ],
 )
 def test_resolve_path_rejects_unavailable_namespaces_or_targets(
-    document: PointDocument,
+    document: ParameterDocument,
     path: str,
     roles: dict[str, str],
     reserved: tuple[str, ...],
@@ -140,7 +140,7 @@ def test_resolve_path_rejects_unavailable_namespaces_or_targets(
 
 @pytest.mark.parametrize("path", ["", ".driver", "driver.", "driver..rate"])
 def test_resolve_path_rejects_empty_paths_or_segments(
-    document: PointDocument, path: str
+    document: ParameterDocument, path: str
 ) -> None:
     with pytest.raises(ValueError, match="nonempty dotted path"):
         resolve_path(document, path, roles={"driver": "Q1"})

@@ -22,7 +22,7 @@ from zcu_tools.gui.session.context_types import SavedPoint
 from zcu_tools.gui.session.parameters import ParameterContext
 from zcu_tools.gui.widgets.form import FormEditor
 from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
-from zcu_tools.resources.entry.schema import PointDocument, PointGeneral
+from zcu_tools.resources.entry.schema import ParameterDocument, ParameterGeneral
 
 from tests.gui._user_input import ComponentDriver
 from tests.gui.widgets.form._field_errors import error_widget, field_error, row_tooltip
@@ -99,11 +99,13 @@ def _palette(dark: bool) -> QPalette:
 def alias_env() -> FormEnv:
     """Capture general.ext.seed=4, memory only."""
     parameters = ParameterContext(
-        point=PointDocument(
+        point=ParameterDocument(
             format="zcu.parameter-container",
             format_version="2.0",
             schema_version=1,
-            general=PointGeneral(created_at="2026-10-13T00:00:00Z", ext={"seed": 4.0}),
+            general=ParameterGeneral(
+                created_at="2026-10-13T00:00:00Z", ext={"seed": 4.0}
+            ),
         ),
         library=LibrarySnapshot(
             ModuleLibraryDocument(format="zcu.module-library", format_version="2.0")

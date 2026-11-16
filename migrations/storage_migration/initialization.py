@@ -21,7 +21,7 @@ from zcu_tools.resources.entry import EntryIdentity, ResultEntry, source_path
 from zcu_tools.resources.entry.schema import (
     PARAMETER_FORMAT,
     PARAMETER_VERSION,
-    SetupDocument,
+    ParameterDocument,
 )
 
 from .backup import (
@@ -235,7 +235,7 @@ def _document_value(path: Path, kind: Literal["setup", "library"]) -> JsonObject
     if kind == "setup":
         document = DocumentStore(
             path,
-            SetupDocument,
+            ParameterDocument,
             format=PARAMETER_FORMAT,
             supported_version=PARAMETER_VERSION,
         ).snapshot()

@@ -9,8 +9,7 @@ from zcu_tools.resources.entry import ResultEntry, snapshot, source_path
 from zcu_tools.resources.entry.points import PointView
 from zcu_tools.resources.entry.schema import (
     PARAMETER_VERSION,
-    PointDocument,
-    SetupDocument,
+    ParameterDocument,
 )
 from zcu_tools.resources.entry.views import EditView, SetupView
 
@@ -35,14 +34,13 @@ def test_component_field_names_support_public_reads_and_writes(
         # Publish a document through the public schema/store seam, then bind it.
         document = snapshot(view).model_dump()
         document["components"][name] = {"kind": "fake/sensor", "rate": 10.0}
-        schema = SetupDocument if owner == "setup" else PointDocument
         try:
-            candidate = schema.model_validate(document)
+            candidate = ParameterDocument.model_validate(document)
         except ValueError as error:
             raise AssertionError(f"schema rejected legal component {name!r}") from error
         store = DocumentStore(
             source_path(view),
-            schema,
+            ParameterDocument,
             format="zcu.parameter-container",
             supported_version=PARAMETER_VERSION,
         )
@@ -79,9 +77,8 @@ def test_schema_accepts_identifiers_but_view_binding_rejects_shadowing(
     view = entry.setup if owner == "setup" else entry.new_point("a")
     document = snapshot(view).model_dump()
     document["components"]["edit"] = {"kind": "fake/sensor"}
-    schema = SetupDocument if owner == "setup" else PointDocument
     try:
-        candidate = schema.model_validate(document)
+        candidate = ParameterDocument.model_validate(document)
     except ValueError as error:
         raise AssertionError("schema must not enforce view membership") from error
     source = source_path(view)
@@ -92,7 +89,7 @@ def test_schema_accepts_identifiers_but_view_binding_rejects_shadowing(
     else:
         store = DocumentStore(
             source,
-            schema,
+            ParameterDocument,
             format="zcu.parameter-container",
             supported_version=PARAMETER_VERSION,
         )
@@ -102,7 +99,7 @@ def test_schema_accepts_identifiers_but_view_binding_rejects_shadowing(
         if owner == "setup":
             setup_store = DocumentStore(
                 source,
-                SetupDocument,
+                ParameterDocument,
                 format="zcu.parameter-container",
                 supported_version=PARAMETER_VERSION,
             )
@@ -111,7 +108,7 @@ def test_schema_accepts_identifiers_but_view_binding_rejects_shadowing(
         else:
             point_store = DocumentStore(
                 source,
-                PointDocument,
+                ParameterDocument,
                 format="zcu.parameter-container",
                 supported_version=PARAMETER_VERSION,
             )

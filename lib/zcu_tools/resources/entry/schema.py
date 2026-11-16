@@ -1,4 +1,4 @@
-"""Typed setup document at the persistence boundary."""
+"""Typed parameter document at the persistence boundary."""
 
 import keyword
 from collections.abc import Callable, Mapping
@@ -47,10 +47,8 @@ __all__ = (
     "PARAMETER_FORMAT",
     "PARAMETER_VERSION",
     "ComponentSchema",
-    "PointDocument",
-    "PointGeneral",
-    "SetupDocument",
-    "SetupGeneral",
+    "ParameterDocument",
+    "ParameterGeneral",
     "is_forward_minor",
     "validate_component_name",
 )
@@ -84,29 +82,8 @@ def _ignore_legacy_identity(value: object) -> object:
     return value
 
 
-class SetupGeneral(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    created_at: str
-    description: str | None = None
-    ext: YamlMap = Field(default_factory=dict)
-
-    @model_validator(mode="before")
-    @classmethod
-    def ignore_legacy_identity(cls, value: object) -> object:
-        """Discard obsolete entry identity without interpreting its value."""
-        return _ignore_legacy_identity(value)
-
-    @field_validator("created_at")
-    @classmethod
-    def validate_created_at(cls, value: str) -> str:
-        if datetime.fromisoformat(value).utcoffset() != timedelta(0):
-            raise ValueError("created_at must be a UTC timestamp")
-        return value
-
-
-class PointGeneral(BaseModel):
-    """Independent metadata copied from the seed setup or source point.
+class ParameterGeneral(BaseModel):
+    """General fields shared by global and point parameter documents.
 
     Legacy entry_id is ignored and omitted from explicit writes.
     created_at is renewed on creation, as an ISO-8601 UTC timestamp.
@@ -131,7 +108,9 @@ class PointGeneral(BaseModel):
     @field_validator("created_at")
     @classmethod
     def validate_created_at(cls, value: str) -> str:
-        return SetupGeneral.validate_created_at(value)
+        if datetime.fromisoformat(value).utcoffset() != timedelta(0):
+            raise ValueError("created_at must be a UTC timestamp")
+        return value
 
 
 class ComponentSchema(BaseModel):
@@ -147,8 +126,24 @@ class ComponentSchema(BaseModel):
     kind: str
 
 
-class _ParameterDocument(BaseModel):
-    """Shared typed component boundary for complete parameter documents."""
+class ParameterDocument(BaseModel):
+    """One complete parameter document in working units, without scope identity.
+
+    format and format_version are the parameter-container header, written as 2.0.
+    schema_version is the strict positive integer from the caller's registered
+    ParameterSchemaPolicy, independent of that container version. Runtime reads
+    require the current version and never classify or upgrade legacy documents.
+    Missing or noncurrent versions fail with a path and upgrade command before
+    kind lookup. The store validates header compatibility.
+    general contains created_at, description and opaque extensions.
+    components maps public identifiers to original registered ComponentSchema
+    models, including kind; each original model owns validation. Schema loading
+    does not reserve view members; view binding checks namespace collisions.
+    metadata maps logical dotted paths to opaque caller YAML mappings.
+    Component and nested models choose extra policy at every minor version:
+    forbid rejects unknown fields, ignore discards them, and allow retains them.
+    Forward-minor preservation applies only to unknown container fields.
+    """
 
     model_config = ConfigDict(extra="forbid")
     _source: ClassVar[Path] = Path(PARAMETERS_FILENAME)
@@ -159,6 +154,7 @@ class _ParameterDocument(BaseModel):
     schema_version: int = Field(strict=True, ge=1)
     components: dict[str, ComponentSchema] = Field(default_factory=dict)
     metadata: dict[str, YamlMap] = Field(default_factory=dict)
+    general: ParameterGeneral
 
     @classmethod
     @override
@@ -352,14 +348,14 @@ class ParameterContent(RootModel[YamlValue]):
             node[parts[-1]] = deepcopy(value)
         return content
 
-    def project(self) -> "PointDocument":
+    def project(self) -> "ParameterDocument":
         """Validate the complete recorded document, including all model checks.
 
-        Requires a complete point document, unlike leaf reads. Missing sections,
+        Requires a complete parameter document, unlike leaf reads. Missing sections,
         malformed components/general and model invariants raise owner errors.
         No file is read and no missing identity or timestamp is synthesized.
         """
-        return PointDocument.model_validate(self.captured().root)
+        return ParameterDocument.model_validate(self.captured().root)
 
     def projection(self, segments: tuple[str, ...]) -> object:
         """Project one native document subtree, validating only that selection.
@@ -402,12 +398,12 @@ class ParameterContent(RootModel[YamlValue]):
             return projection_value(
                 self.metadata if not suffix else self.section(section), tuple(suffix)
             )
-        if section not in PointDocument.model_fields:
+        if section not in ParameterDocument.model_fields:
             raise ProjectionPathError(section)
         raw = self.section(section)
         if suffix:
             return projection_value(raw, tuple(suffix))
-        schema = model_field_schema(PointDocument, section)
+        schema = model_field_schema(ParameterDocument, section)
         value = SchemaValidator(schema).validate_python(raw)
         return SchemaSerializer(schema).to_python(value, mode="python")
 
@@ -434,7 +430,7 @@ class ParameterContent(RootModel[YamlValue]):
             name: self.projection((name,))
             for name in ("format", "format_version", "schema_version")
         }
-        result["general"] = self._summary_model(PointGeneral, "general", describe)
+        result["general"] = self._summary_model(ParameterGeneral, "general", describe)
         result["components"] = {
             name: self._summary_model(self._root_field(name)[1], name, describe)
             for name in self.component_names()
@@ -538,19 +534,19 @@ class ParameterContent(RootModel[YamlValue]):
         return {name: self.component(name) for name in self.component_names()}
 
     @property
-    def general(self) -> PointGeneral | None:
+    def general(self) -> ParameterGeneral | None:
         """Decode captured general metadata, or None when absent."""
         if isinstance(self.root, dict) and "general" not in self.root:
             return None
         value = self.section("general")
-        return None if value is None else PointGeneral.model_validate(value)
+        return None if value is None else ParameterGeneral.model_validate(value)
 
     @property
     def metadata(self) -> dict[str, YamlMap]:
         """Decode the opaque metadata section when explicitly requested."""
         if isinstance(self.root, dict) and "metadata" not in self.root:
             return {}
-        return _ParameterDocument.validate_metadata(self.section("metadata"))
+        return ParameterDocument.validate_metadata(self.section("metadata"))
 
     def value(self, path: str) -> YamlValue:
         """Read a concrete field; reject malformed used values with its full path.
@@ -578,7 +574,7 @@ class ParameterContent(RootModel[YamlValue]):
         from .registry import component_registry
 
         if name == "general":
-            return self.section("general"), PointGeneral
+            return self.section("general"), ParameterGeneral
         components = self.section("components")
         if not isinstance(components, dict):
             raise ValueError("parameter components must be a mapping")
@@ -682,36 +678,3 @@ class ParameterContent(RootModel[YamlValue]):
             ),
             None,
         )
-
-
-class SetupDocument(_ParameterDocument):
-    """Entry identity and complete component template in working units.
-
-    schema_version is the caller policy's current whole-component version,
-    distinct from the container format_version. Missing or noncurrent versions
-    fail at model_validate with a path and upgrade command, before kind lookup.
-    """
-
-    general: SetupGeneral
-
-
-class PointDocument(_ParameterDocument):
-    """One complete, independent point document in working units.
-
-    format and format_version are the parameter-container header, written as 2.0.
-    schema_version is the strict positive integer from the caller's registered
-    ParameterSchemaPolicy, independent of that container version. Runtime reads
-    require the current version and never classify or upgrade legacy documents.
-    The store validates header compatibility. Values remain in working units;
-    general is point-local.
-    components maps public identifiers to original registered ComponentSchema models,
-    including kind; each original model owns validation. Schema loading does not
-    reserve view members; binding a view checks those namespace collisions. No value or source falls back to setup.
-    metadata maps logical dotted paths to opaque caller YAML mappings.
-    Component and nested models choose extra policy at every minor version:
-    forbid rejects unknown fields, ignore discards them, and allow retains them.
-    Forward-minor preservation applies only to unknown container fields.
-    """
-
-    _source: ClassVar[Path] = Path(PARAMETERS_FILENAME)
-    general: PointGeneral
