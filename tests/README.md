@@ -135,7 +135,7 @@ Guard edge、sweep、history 與 multisegment accuracy 案例仍由下面的精�
 
 準備參考解時，呼叫端明示每份 index 的 solver，並傳入顯式 `--scene-cache` 路徑。
 Git 只留名稱與三個 hash 的兩份小清單。數值放 repo 共用的 scenes/v1 快取，不隨 task 清理。
-首次遷移只核既有 payload 身份、point order 與 reference key，不是 builders 冷重建。歷史 blob 清理另行處理。
+首次遷移只核既有 payload 身份、point order 與 reference key，不是 builders 冷重建。
 量測與成對工具共用每筆 name、physical_sha256、oracle_sha256、metadata_sha256 身份，不用 manifest 路徑或檔案 SHA。
 求解必須先取得成本授權，並套用當次 heavy runner 與鎖的規則。這不是量測 preflight，也不保證既有 cache 已涵蓋全部場景。
 

@@ -255,8 +255,11 @@ GUI、MCP 組合根與開發工具需要 lab 宣告時，只直接 import `zcu_l
 固定裝置模型值由 `tools/family_pareto_settings.py` 持有。
 `tools/family_pareto_kernel_scenes.py` 則用公開 `SingleFluxoniumModel` 直接宣告單段數值控制，不經前端。
 通用 codec 歸 `simulate.evolution`，數值資料不包含 solver 或裝置 builder。
-2026-11-16 的存放方向是不將凍結場景入庫，Git 只留名稱與 hash 小清單。
-既有兩份 gzip 與預設來源尚待存放遷移，不以原資料路徑作終態。
+凍結場景的數值不入庫。2026-11-16，使用者要求：「檔案大就請不要入庫，用類似快取的方式來減少重複計算，記得考慮跨worktree也能復用的方案」；對範圍與釘住方式答「1a 2a」，即所有凍結場景都不入庫，Git 只留名稱與 hash 的小清單，重建結果與清單不符就停，只有明確更新清單才算數；對存放提案答「R」。
+數值放在 repo 共用快取，每筆 record 一個單筆檔，各 worktree 共用，位置與檔名見 [Tools README](../../tools/README.md#freeze-numeric-scenes)。`simulate` 擁有清單與單筆檔的讀寫、hash 核對與原子發布，只收顯式路徑；Git 位置的解析與覆寫留在 tools。Git 只留 `tools/data/family_pareto/frozen-synthetic.index.json` 與 `frozen-real.index.json` 兩份清單。
+量測工具與 tests 側參考解 producer 只讀清單與快取，缺檔就列出 producer 指令後失敗，不自建，因為自建會讓量測工具 import 場景 producer 與 `program`。每個凍結場景都要有入庫的 builder。
+Native thread 設定會改浮點末位，所以快取遺失而重建無法逐位元重現時，只能明確更新清單並重算受影響的參考解。
+選項比較見[凍結場景存放](../discussions/2026-11-16-frozen-scene-storage.md)。
 Report 身份使用每筆 name、physical_sha256、oracle_sha256 與 metadata_sha256，不隨存放方式改變。
 Producer 自持具名 `Scene`，不依賴 tests 的案例型別或清單。獨立參考解 producer 留在 tests 側，經檔案交接，契約見 [[0078]]。
 此處接受與 lab 重複，讓讀工具的人可以直接看懂場景；lab 序列改動不會自動更新已凍結的量表輸入。
@@ -264,6 +267,8 @@ Producer 自持具名 `Scene`，不依賴 tests 的案例型別或清單。獨�
 
 2026-11-12，使用者說：「我其實不樂意看到tool依賴zcu_lab，我認為你要測試，那就只複製最核心的pulse序列來模擬啊，又不需要整個experiment」。
 對工具內建場景的方案，使用者回答：「你這個工具的目的是對優化器做benchmark吧？那場景自然是挑選過的」，並補充：「而且這樣tool也能提高可讀性，我寧可重複也要提高可讀性」。
+2026-11-15，使用者進一步說：「但腳本也不應該依賴於我的模擬器環境參數設定，而是自己為每個場景設定的固定環境」，並界定範圍：「研究的话就没差，都可以用。但是如果你要持久的工具的话，麻烦请不要依赖于作者可能会改到的东西。」
+因此入庫、會持續使用的模擬器量測工具與測試不讀 `zcu_lab/simulation_envs/` 下的環境參數，每個場景的模型值由工具或測試自己固定持有；一次性研究可以讀已提交的環境參數。這條只管入庫的工具與測試，不改「Lab 只經 assembly 入口被依賴」的規則。
 兩次裁決的比較與先例立場見 [Lab 依賴邊界討論](../discussions/2026-11-14-lab-dependency-boundary.md)。
 
 ### 開發工具的數值交接
@@ -307,7 +312,7 @@ Profile 列不作 family 去留證據。新增 Pareto 場景須同時加名稱�
 
 測試側 exclusion estimator 與唯一 caller 測試已退休，不保留替代 module 或相容層。
 其 tests → tools 反向 import 隨之移除，這不表示已封閉 `simulate`。
-取捨與介面退休見 [量表 cache-only 遷移](../discussions/2026-11-16-family-pareto-cache-only.md)。
+取捨與介面退休見 [量表 cache-only 遷移](../discussions/2026-11-16-family-pareto-cache-only.md) 與 [Exclusion estimator 退休](../discussions/2026-11-16-exclusion-estimator-retirement.md)。
 
 ### Lab 定義與組合根
 

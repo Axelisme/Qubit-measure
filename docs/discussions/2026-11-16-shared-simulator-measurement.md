@@ -8,6 +8,7 @@ related:
   - ../../tools/README.md
   - ../../tools/simulator_measurement.py
   - ../../tools/family_pareto.py
+  - 2026-11-16-measurement-sample-durations.md
 basis:
   repo_commit: a82a482f91ad9d11cca55381d0c4411acdc5370f
   external_sources: none
@@ -19,7 +20,7 @@ basis:
 
 Family 量表切換到 tools 內的共用計時 owner。Session adapter 只交準備好的 invoke、inspect、clear_history 與 observer callbacks。Owner 控制 session 壽命、暖機、history 與兩個 clock，consumer 保留來源、reference preflight、誤差與結果 schema。現行責任見 [ADR-0072](../adr/0072-module-boundaries.md#開發工具的數值交接)。
 
-Elapsed 時間採有限非負秒數。Clock 解析度可以產生 0，owner 原樣記錄，不補 epsilon、不丟樣本或重取。Process CPU 可以大於 wall。負值、NaN 與 infinity 在 sample 建構時失敗。這個規則只保證樣本有效，不保證解析度以下的速度結論可信。
+Elapsed 時間採有限非負秒數。Clock 解析度可以產生 0，owner 原樣記錄，不補 epsilon、不丟樣本或重取。Process CPU 可以大於 wall。負值、NaN 與 infinity 在 sample 建構時失敗。這個規則只保證樣本有效，不保證解析度以下的速度結論可信。選項比較與否決見[量測樣本時間的值域](2026-11-16-measurement-sample-durations.md)。
 
 測試側 timing-only estimator 退休後，量表沒有需要 reference=None 的 caller，因此 measure_family 改為 reference 必填。結果與摘要 schema 不變。
 
