@@ -157,11 +157,12 @@ def _track(value: dict[str, Any]) -> DriveTrack:
     )
 
 
-def _batch(value: dict[str, Any], loops: int) -> TimelineBatch:
+def _batch(value: dict[str, Any], loops: int, size: int) -> TimelineBatch:
     flux = value["flux"]
     waveform = value["flux_waveform"]
     # Empty JSON lists lose dtype and trailing dimensions; DC model levels
     # retain the loop count even when the batch has no scheduled segments.
+    # The source density retains M for empty continuation densities (0,M,M).
     points = np.asarray(
         value["points"], dtype=np.int64 if value["points"] == [] else None
     )
@@ -184,7 +185,9 @@ def _batch(value: dict[str, Any], loops: int) -> TimelineBatch:
         else FluxWaveform(
             np.asarray(waveform["offsets"]),
             np.asarray(waveform["time_ns"]),
-            np.asarray(waveform["flux"]),
+            np.empty((0, loops), dtype=np.float64)
+            if value["points"] == [] and waveform["flux"] == []
+            else np.asarray(waveform["flux"]),
         ),
         tuple(tuple(times) for times in value["segment_boundaries"]),
         tuple(
@@ -194,6 +197,8 @@ def _batch(value: dict[str, Any], loops: int) -> TimelineBatch:
         None if value["start_ns"] is None else np.asarray(value["start_ns"]),
         None
         if value["initial_densities"] is None
+        else np.empty((0, size, size), dtype=np.complex128)
+        if value["points"] == [] and value["initial_densities"] == []
         else np.asarray(value["initial_densities"], complex),
     )
 
@@ -248,7 +253,11 @@ def read_physical_input(value: dict[str, object]) -> FrozenInput:
                 "slow_envelope_segments_per_period"
             ],
         ),
-        _batch(decoded["batch"], len(decoded["models"][0]["level"])),
+        _batch(
+            decoded["batch"],
+            len(decoded["models"][0]["level"]),
+            len(decoded["initial_density"]),
+        ),
     )
 
 
