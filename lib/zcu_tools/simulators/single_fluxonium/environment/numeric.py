@@ -2,7 +2,7 @@
 
 import numpy as np
 
-from zcu_tools.core.simulation import EnvironmentSnapshot
+from zcu_tools.simulate.boundary import EnvironmentSnapshot
 from zcu_tools.simulators.single_fluxonium.config.schema import SingleFluxoniumSettings
 
 

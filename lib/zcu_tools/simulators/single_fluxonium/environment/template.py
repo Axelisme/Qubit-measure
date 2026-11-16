@@ -6,12 +6,6 @@ from typing import Literal
 import numpy as np
 from numpy.typing import NDArray
 
-from zcu_tools.core.simulation import (
-    ChargeDriveRequirement,
-    EnvironmentSnapshot,
-    TimeBase,
-    TimelineTemplate,
-)
 from zcu_tools.experiment.readout_plan import (
     ProjectiveRead,
     ReadoutContents,
@@ -21,6 +15,12 @@ from zcu_tools.experiment.readout_plan import (
     logical_event_contents,
 )
 from zcu_tools.simulate.adc import ReadoutPulse
+from zcu_tools.simulate.boundary import (
+    ChargeDriveRequirement,
+    EnvironmentSnapshot,
+    TimeBase,
+    TimelineTemplate,
+)
 from zcu_tools.simulate.evolution import (
     ControlPulse,
     ControlSequence,

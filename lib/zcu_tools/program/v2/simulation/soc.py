@@ -7,7 +7,7 @@ import numpy as np
 from numpy.typing import NDArray
 from qick import QickConfig
 
-from zcu_tools.core.simulation import AcquireRequest, CancellationQuery, RoundSignals
+from zcu_tools.simulate.boundary import AcquireRequest, CancellationQuery, RoundSignals
 
 from .binding import SimulationBinding
 from .result import IntegratedRound

@@ -6,20 +6,20 @@ from typing import TYPE_CHECKING
 import numpy as np
 from numpy.typing import NDArray
 
-from zcu_tools.core.simulation import (
-    AcquireRequest,
-    CancellationQuery,
-    ChannelSignals,
-    EnvironmentSnapshot,
-    RoundSignals,
-    SamplingIdentity,
-)
 from zcu_tools.program.v2.simulation import IntegratedRound
 from zcu_tools.simulate.adc import (
     ChannelReadout,
     PreparedRawShots,
     round_statistics,
     sample_traces,
+)
+from zcu_tools.simulate.boundary import (
+    AcquireRequest,
+    CancellationQuery,
+    ChannelSignals,
+    EnvironmentSnapshot,
+    RoundSignals,
+    SamplingIdentity,
 )
 from zcu_tools.simulate.evolution import PathDiagnostics
 from zcu_tools.simulators.replay import ReplayAcquire, save_replay
