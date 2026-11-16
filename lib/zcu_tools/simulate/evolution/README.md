@@ -47,6 +47,7 @@ The exports in [__init__.py](__init__.py) fall into these groups:
 | States and population conversion | `Basis`, `DensityState`, `Populations`, `populations`, `batch_populations` |
 | Explicit joint-Fock prototype | `JointFockRequest`, `JointFockDiagnostic`, `JointFockResult`, `joint_fock_spectrum` |
 | Shared RWA Hamiltonian coefficients | `RWACoefficients`, `rwa_coefficients`, `interaction_hamiltonian` |
+| Indexed scene cache | `SCENE_CACHE_VERSION`, `FrozenIndexEntry`, `read_frozen_index`, `write_frozen_index`, `read_scene_records`, `write_scene_record` |
 | Frozen numeric inputs | `FrozenInput`, `FrozenRecord`, `physical_input`, `canonical_json`, `digest`, `read_physical_input`, `read_frozen_input`, `write_frozen_input`, `read_frozen_manifest`, `write_frozen_manifest` |
 | Solver-free reference storage | `SolverTolerances`, `ReferenceResult`, `reference_key`, `load_reference`, `write_reference` |
 
@@ -128,6 +129,24 @@ at different paths. Reconstruct a source separately with
 `read_physical_input(record.physical)` and close it after use. The container
 neither interprets scene declarations nor selects a reference solver.
 
+`FrozenIndexEntry.from_record(record)` pins the name and physical, oracle and
+metadata digests. Metadata uses the public `digest` without caller interpretation.
+`write_frozen_index(path, entries)` atomically publishes version 1 and ordered
+identity rows; `read_frozen_index(path)` validates them. Unknown versions fail.
+`write_scene_record(directory, record)` returns its entry after publishing a
+single-record manifest. Filenames contain the name and physical/metadata hash
+prefixes of 16 characters. `entry.cache_path(directory)` exposes that path when
+needed for explicit cache maintenance. Valid existing files are reused; conflicting
+files fail validation. Both writers stage files in the destination directory and
+publish with replace, preserving existing pins on a pre-publication failure.
+`read_scene_records(directory, entries)` reads only the indexed files in entry
+order and verifies their full identities, including opaque metadata. A missing
+file raises FileNotFoundError with the record name and hashes. None of these APIs
+constructs a model, runs an Engine/solver, resolves Git or deletes old cache files.
+Callers own cache locations and producer instructions. `SCENE_CACHE_VERSION` is
+1; callers negotiating a shared numeric format can compare it without parsing
+cache filenames or containers.
+
 `reference_key(source, batch)` preserves the historical key formula. It hashes
 version 1, identity-free physics, coarse tolerances 2e-10/2e-12, fine tolerances
 2e-12/2e-14 and convergence limit 2e-6. Callers can override both tolerance
@@ -141,7 +160,8 @@ checks the loaded result before evolution.
 The independent preparation entry point is
 [`family_pareto_reference_producer.py`](../../../../tests/simulate/evolution/contract/family_pareto_reference_producer.py).
 It reads only frozen record names and physics. The caller explicitly maps each
-manifest to the independent lab-frame or interaction-picture solver; metadata
+index to the independent lab-frame or interaction-picture solver and supplies
+an explicit scene cache. All numeric files load before any solver runs. Metadata
 and scene names do not select it. Both solvers stay in tests. The codec imports neither tests nor tools.
 See [ADR-0078](../../../../docs/adr/0078-evolution-module-boundary.md).
 

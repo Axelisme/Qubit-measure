@@ -19,8 +19,8 @@ from zcu_tools.simulate.evolution import (
     SecularDrive,
     SecularModel,
     TimelineBatch,
-    read_frozen_manifest,
     read_physical_input,
+    read_scene_records,
 )
 from zcu_tools.simulate.evolution import (
     canonical_json as canonical_json,
@@ -79,10 +79,11 @@ def _read_scene(record: FrozenRecord, families: tuple[str, ...]) -> Scene:
     return Scene(record.name, frozen.source, frozen.batch, families)
 
 
-def read_inputs(manifests: Sequence[Path]) -> list[Input]:
+def read_inputs(indexes: Sequence[Path], scene_cache: Path) -> list[Input]:
     """Read ordered frozen records and decode the tools-owned scene declarations.
 
-    manifests supplies simulator-owned gzip containers in caller order. Each
+    indexes supplies versioned identity lists in caller order; scene_cache is an
+    explicit numeric cache directory. Cross-index duplicate names fail. Each
     returned Input keeps its record name, reason, targets, companions, routes
     and provenance. No source is built while reading the declarations. Every
     Input.build() reconstructs a fresh Scene through read_physical_input; the
@@ -90,11 +91,14 @@ def read_inputs(manifests: Sequence[Path]) -> list[Input]:
     File/container errors, missing declarations and invalid metadata propagate;
     no producer, solver or legacy reader is used.
     """
-    return [
-        input_from_record(record)
-        for path in manifests
-        for record in read_frozen_manifest(path)
-    ]
+    from tools.family_pareto_storage import indexed_scenes, missing_scene_command
+
+    entries = indexed_scenes(indexes)
+    try:
+        records = read_scene_records(scene_cache, (entry for _, entry in entries))
+    except FileNotFoundError as error:
+        raise missing_scene_command(error, scene_cache) from error
+    return [input_from_record(record) for record in records]
 
 
 def input_from_record(record: FrozenRecord) -> Input:

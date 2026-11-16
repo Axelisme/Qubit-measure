@@ -2,12 +2,15 @@
 
 import argparse
 import json
+import os
 from contextlib import ExitStack, closing
 from dataclasses import asdict, replace
 from pathlib import Path
 from typing import TypedDict
 
+import numba
 import numpy as np
+from threadpoolctl import threadpool_limits
 from zcu_tools.program import build_soccfg
 from zcu_tools.program.v2 import Pulse, Readout, SweepCfg, TimelineBuilder
 from zcu_tools.program.v2.modules.pulse import PulseCfg
@@ -17,7 +20,6 @@ from zcu_tools.program.v2.simulation.compiled import build_compiled_request
 from zcu_tools.simulate.evolution import (
     SecularModel,
     segment_spans,
-    write_frozen_manifest,
 )
 from zcu_tools.simulators.ftf.config import parse_ftf
 from zcu_tools.simulators.ftf.environment import FTFSource, ftf, plan_template
@@ -25,10 +27,10 @@ from zcu_tools.simulators.ftf.environment import FTFSource, ftf, plan_template
 from tools.family_pareto_inputs import (
     Input,
     Scene,
-    freeze_records,
     make_inputs,
 )
 from tools.family_pareto_kernel_scenes import KERNEL_SCENES, make_kernel_inputs
+from tools.family_pareto_prepare import prepare_scenes as prepare_scenes
 from tools.family_pareto_scene_builders import (
     declared_input,
     integer_fluxonium_input,
@@ -40,6 +42,7 @@ from tools.family_pareto_settings import (
     FTF_MODEL,
     SOURCE_COMMIT,
 )
+from tools.family_pareto_storage import indexed_scenes, scene_cache_directory
 
 _PLATEAU = ("dyson", "single_tone_rwa", "floquet_period", "t6")
 _SHAPED = ("single_tone_gate", "shaped_sambe", "gate_cache", "period_table", "dop853")
@@ -866,49 +869,71 @@ def make_real_inputs(scenario: str | None = None) -> list[Input]:
 
 
 def main(argv: list[str] | None = None, *, inputs: list[Input] | None = None) -> int:
-    """Freeze two numeric manifests in --output without timing or solving.
+    """Prepare pinned numeric scenes without timing or solving.
 
-    argv omits the executable name. --scenario selects a single declared scene
-    before model construction; without it, freeze the complete declared set.
-    inputs optionally supplies caller-owned declarations instead of building
-    the default inventory. Sources returned by their builders are closed after
-    snapshotting. Write frozen-synthetic.json.gz and frozen-real.json.gz in the
-    output directory, replacing existing files. Their combined size must stay
-    within 10 MiB (10,485,760 bytes); otherwise raise ValueError for caller review.
-    argparse handles invalid options/help. Model, serialization and I/O failures
-    propagate; no Engine session or independent solver runs.
+    argv omits the executable name. --index-dir selects the directory containing
+    both category indexes. --scene-cache is an absolute override of the shared
+    cache. --scenario processes only its indexed row. inputs optionally supplies
+    caller-owned declarations instead of the fixed inventory; builder sources
+    are closed after snapshotting. Native thread settings are fixed/logged at 1.
+    --update-index explicitly updates selected identities only after all selected
+    builders succeed. Inventory deletion/regrouping is never inferred; edit the
+    tracked declarations and indexes explicitly for those changes. Unknown names,
+    inventory drift and unapproved hash changes fail. Codec/model/I/O failures
+    propagate; argparse handles invalid options. No Engine or solver runs.
     """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--output",
+        "--index-dir",
         type=Path,
-        default=Path("tools/data/family_pareto"),
-        help="Directory for the synthetic and real frozen manifests",
+        default=Path(__file__).parent / "data/family_pareto",
     )
-    parser.add_argument(
-        "--scenario", help="Freeze only this scene before constructing any other model"
-    )
+    parser.add_argument("--scene-cache", type=Path)
+    parser.add_argument("--scenario")
+    parser.add_argument("--update-index", action="store_true")
     args = parser.parse_args(argv)
-    if inputs is not None:
-        selected = inputs
-    elif args.scenario in KERNEL_SCENES:
-        selected = make_kernel_inputs(args.scenario)
-    elif args.scenario == "idle_coherence":
-        selected = make_inputs()
-    elif args.scenario:
-        selected = make_real_inputs(args.scenario)
-    else:
-        selected = [*make_inputs(), *make_real_inputs(), *make_kernel_inputs()]
-    paths = []
-    for category in ("synthetic", "real"):
-        path = args.output / f"frozen-{category}.json.gz"
-        records = freeze_records(
-            [item for item in selected if item.category == category]
+    native = {
+        key: "1"
+        for key in (
+            "OMP_NUM_THREADS",
+            "OPENBLAS_NUM_THREADS",
+            "MKL_NUM_THREADS",
+            "NUMBA_NUM_THREADS",
         )
-        write_frozen_manifest(path, records)
-        paths.append(path)
-    if sum(path.stat().st_size for path in paths) > 10_485_760:
-        raise ValueError("frozen manifests exceed the combined 10,485,760-byte limit")
+    }
+    os.environ.update(native)
+    numba.set_num_threads(1)
+    print(json.dumps({"native_threads": native}), flush=True)
+    indexes = {
+        category: args.index_dir / f"frozen-{category}.index.json"
+        for category in ("synthetic", "real")
+    }
+    entries = indexed_scenes(tuple(indexes.values()))
+    if args.scenario is not None and not any(
+        entry.name == args.scenario for _, entry in entries
+    ):
+        raise ValueError(
+            f"Unknown scenario: {args.scenario}. Legal names: {', '.join(entry.name for _, entry in entries)}"
+        )
+    cache = scene_cache_directory(args.scene_cache)
+    with threadpool_limits(limits=1):
+        if inputs is not None:
+            selected = inputs
+        elif args.scenario in KERNEL_SCENES:
+            selected = make_kernel_inputs(args.scenario)
+        elif args.scenario == "idle_coherence":
+            selected = make_inputs()
+        elif args.scenario:
+            selected = make_real_inputs(args.scenario)
+        else:
+            selected = [*make_inputs(), *make_real_inputs(), *make_kernel_inputs()]
+        prepare_scenes(
+            selected,
+            indexes,
+            cache,
+            scenario=args.scenario,
+            update_index=args.update_index,
+        )
     return 0
 
 

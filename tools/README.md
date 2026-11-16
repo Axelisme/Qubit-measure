@@ -171,17 +171,18 @@ including Gaussian gates, biased inputs, overlapping tones and a joint FTF scene
 The synthetic inventory contains the three-level `idle_coherence` scene.
 Accuracy/guard grids and amplified test workloads stay in tests.
 
-`select_inputs(manifest=None, scenario=None)` is the single public source and
+`select_inputs(index=None, scenario=None, *, scene_cache=None)` is the single public source and
 report-identity seam. It reads numeric records through the simulator codec,
 without importing the scene producer or rebuilding device models. Each returned
 `SelectedInput` contains an `Input`, its `FrozenRecord` and the metadata digest.
 `Input.build()` creates a fresh source that the caller closes.
 
-For integration only, an omitted manifest currently reads the two existing
-`tools/data/family_pareto/frozen-{synthetic,real}.json.gz` artifacts. A supplied
-`--manifest` selects one codec manifest. Storage migration will replace this
-source inside the same function; the paths are not the final storage contract.
-No caller should infer scene identity from a manifest location or file hash.
+By default it reads `tools/data/family_pareto/frozen-synthetic.index.json` and
+`frozen-real.index.json`. `--index PATH` selects one index. Numeric records live
+in the repository-shared `<git common dir parent>/.agent_state/benchmark/family_pareto/scenes/v1`.
+`--scene-cache DIR` requires an absolute override. Tools resolve Git locations;
+simulate only receives explicit paths. No caller should infer scene identity
+from an index location or file hash. Cross-index duplicate names always fail.
 Reference loading is cache-only for every selection.
 
 ### Recorded scenario summaries
@@ -247,9 +248,9 @@ preparation after cost approval.
 `--scenario NAME` requires exactly one matching input in the selected records.
 An unknown name fails with legal names; duplicate names fail with their source
 declarations. Selection failure starts no policy or Engine. The option can be
-combined with `--manifest`. Selection reads frozen records, not builders.
-Source storage is still awaiting its implementation cutover; the record identity
-contract below does not change when that location changes.
+combined with `--index`. Selection reads indexed numeric records, not builders.
+Missing scene files list the name, hashes and scene-producer command, then fail
+before policy or Engine work. Selection never rebuilds scenes or solves references.
 
 Every measurement first loads all references from `--reference-cache DIR`.
 A miss lists every missing input name and oracle key, then fails the whole batch.
@@ -312,21 +313,20 @@ requires the corresponding cost approval.
 
 ### Inventory-wide manifest workflow
 
-The command sequence is check first, measure second. Frozen-scene storage
-is still in transition. Supply an existing frozen codec manifest, or
-use the temporary integration defaults. The commands do not choose the final
-storage location.
+The command sequence is check first, measure second. Omit `--index` to read
+both tracked indexes. Select one index and an absolute numeric cache override
+when comparing a separately prepared scene set.
 From the worktree root, after obtaining the relevant cost approval:
 
 ```bash
 uv run --directory <worktree> --no-sync -- \
   python tools/run_heavy.py --log <results>/check.log <check-timeout-seconds> -- \
-  python -m tools.family_pareto --manifest <selected-manifest> \
+  python -m tools.family_pareto --index <selected-index> --scene-cache <absolute-scene-cache> \
   --reference-cache <reference-cache> --check-references \
   --output <results>/reference-check.json > <results>/check-receipt.json
 uv run --directory <worktree> --no-sync -- \
   python tools/run_heavy.py --exclusive --log <results>/run.log <timing-timeout-seconds> -- \
-  python -m tools.family_pareto --manifest <selected-manifest> \
+  python -m tools.family_pareto --index <selected-index> --scene-cache <absolute-scene-cache> \
   --reference-cache <reference-cache> --partial-output <results>/attempt.jsonl \
   --output <results>/matrix.json --summary <results>/summary.md \
   > <results>/receipt.json
@@ -700,53 +700,76 @@ separate from Engine time. This change does not choose storage or sharing policy
 
 ### Freeze numeric scenes
 
-The producer writes simulator-owned gzip manifests containing complete numeric
-physics and both hashes. Scene reason, target/companion declarations and provenance
-are opaque metadata owned by tools. `freeze_records` returns public
-`simulate.evolution.FrozenRecord` values. The codec owns versioning, unique names,
-hash verification and reproducible gzip with mtime=0 and no filename.
-No solver identity is added.
+The scene producer snapshots complete numeric physics through
+`freeze_records`, which returns public `simulate.evolution.FrozenRecord` values.
+Scene reason, targets, companions and provenance are opaque tools metadata.
+Simulate owns the version-1 index and single-record gzip codec, hash validation,
+file naming and same-directory temporary-file plus replace publication.
+Each filename contains the name and the first 16 characters of its physical and
+metadata hashes. Unknown index/container versions fail without fallback.
 
-Frozen scenes are not to be committed; Git will retain a small name/hash list.
-The storage and default-source migration is separate from this consumer change.
-The per-record report identity is already fixed. The existing `frozen-synthetic.json.gz` and `frozen-real.json.gz` bytes and history
-have not yet been migrated. Their former 10 MiB cap is not permission to commit
-future frozen scenes. The paths below describe existing producer artifacts,
-not the final consumer source.
+Git contains only `frozen-synthetic.index.json` and `frozen-real.index.json`.
+Each ordered row pins `name`, `physical_sha256`, `oracle_sha256` and
+`metadata_sha256`. The last digest uses `simulate.evolution.digest(metadata)`.
+The 19 existing payloads were migrated without changing identities, point order
+or reference keys. Numeric gzip files are no longer tracked at the tip.
+That deletion does not remove historical blobs. History cleanup remains a
+separate landing requirement. A complete cold builder rebuild has not been
+validated by that migration.
 
-Run model construction only with an approved compute budget and the current
-heavy runner/lock policy. The producer entry point is:
+Run model construction only with approved compute and the current runner/lock
+policy. This command rebuilds and checks the pinned inventory, outside measurement
+preflight:
 
 ```bash
 uv run --directory "$PWD" --no-sync -- python -m tools.family_pareto_scenarios \
-  --output tools/data/family_pareto
+  --index-dir tools/data/family_pareto --scene-cache /absolute/scene-cache
 ```
 
-`--scenario NAME` selects one declaration before model construction. The
-single-support `kernel_single_constant`, `kernel_single_sampled` and
+`main(argv, *, inputs=...)` retains explicit producer declarations.
+`prepare_scenes(inputs, indexes, scene_cache, *, scenario=None, update_index=False)`
+owns preparation. `indexes` maps categories to explicit index paths.
+The producer fixes and logs OMP, OpenBLAS, MKL and Numba native thread settings
+at one. Complete preparation checks each category's exact name set before
+snapshotting. `--scenario NAME` processes only that indexed row.
+Diagnostics distinguish existing files, missing files, rebuild checks and hash
+mismatches. A mismatch fails without replacing the old pinned file or index.
+Missing files are filled only after the rebuilt identity matches the pin.
+
+Only `--update-index` changes selected identities. Every selected builder must
+succeed before any index is published. Unselected rows retain their order and
+identity. Earlier numeric files can remain if a later builder fails.
+Preparation never infers deletion or category moves from missing declarations.
+For those changes, explicitly edit the tracked declaration and index together.
+Changed physics may also require separately approved reference production.
+No cache clear, model rebuild or reference solve is implied by this document.
+
+The single-support `kernel_single_constant`, `kernel_single_sampled` and
 `kernel_multitone_sampled` scenes use public `SingleFluxoniumModel` directly.
 They are separate from the complete F/L/I/N sequences, which retain 24 points
 and 21 levels each. See the [data README](data/family_pareto/README.md).
+The shared cache is not task scratch. Task cleanup must not delete it.
+Manual cleanup is confined to the scene-cache prefix.
 
-Independent reference preparation stays in tests. After separate solver-cost
-approval, the default manifest-to-solver mapping is:
+Independent reference production stays in tests. After separate solver-cost
+approval, supply explicit index-to-solver mappings and a scene cache:
 
 ```bash
 uv run --directory "$PWD" --no-sync -- python -m tests.simulate.evolution.contract.family_pareto_reference_producer \
-  --converged tools/data/family_pareto/frozen-synthetic.json.gz \
-  --interaction tools/data/family_pareto/frozen-real.json.gz \
-  --cache /path/to/approved/reference-cache
+  --converged tools/data/family_pareto/frozen-synthetic.index.json \
+  --interaction tools/data/family_pareto/frozen-real.index.json \
+  --scene-cache /absolute/scene-cache --cache /path/to/approved/reference-cache
 ```
 
-The producer reads only record names and physics; callers select the solver,
-not metadata or a name list. Existing cache entries are read without solving;
-missing entries are solved only by this separately approved preparation step.
-The public solver-free `load_reference` fails on cache misses.
-The consumer's old `freeze_manifest` helper and archive caller are retired.
-It never writes a second copy of the selected records. `main(argv)` takes CLI
-arguments only; small tests supply temporary codec manifests through the same
-selection seam as other callers. The scene producer retains its separate
-`main(argv, inputs=...)` fixture interface.
+The reference producer reads names and physics; metadata never selects a solver.
+All selected numeric files must load before any solver runs. Missing scene files
+list the name, hashes and scene-producer command, then fail without rebuilding.
+Existing reference keys are read cache-only. Missing reference keys are solved
+only by that separately approved producer. Measurement never writes references
+or copies selected records. Its `main(argv)` accepts only CLI arguments.
+Small tests write temporary indexes and scene files through the public codec.
+`read_inputs(indexes, scene_cache)` also accepts explicit paths and returns
+declarations whose fresh sources belong to the caller.
 
 ### Partial attempts and failure handling
 

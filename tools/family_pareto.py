@@ -26,7 +26,7 @@ from zcu_tools.simulate.evolution import (
     NoValidKernel,
     ReferenceResult,
     digest,
-    read_frozen_manifest,
+    read_scene_records,
 )
 
 from tools.family_pareto_inputs import (
@@ -53,6 +53,12 @@ from tools.family_pareto_results import (
     timing_equivalents,
 )
 from tools.family_pareto_results import mode_error as _mode_error
+from tools.family_pareto_storage import (
+    indexed_scenes,
+    missing_scene_command,
+    scene_cache_directory,
+    scene_index_paths,
+)
 
 
 @dataclass(frozen=True)
@@ -81,46 +87,37 @@ class SelectedInput:
 
 
 def select_inputs(
-    manifest: Path | None = None,
+    index: Path | None = None,
     scenario: str | None = None,
+    *,
+    scene_cache: Path | None = None,
 ) -> tuple[SelectedInput, ...]:
-    """Select frozen records and their report identity without producer work.
+    """Select indexed numeric records and their storage-independent identity.
 
-    manifest selects one public codec manifest. None temporarily reads the two
-    existing tools/data manifests, only for integration until storage migration.
-    scenario=None keeps file/record order; a name requires exactly one match.
-    Unknown names raise ValueError listing legal names; ambiguous names list
-    their source files. File/codec/metadata failures propagate. No references,
-    Engine or source are created here. Each returned input.build() creates a
-    fresh Scene whose source the caller must close. identity excludes source
-    paths and file hashes; main and paired consumers use the same record fields.
+    index selects one index; None reads both tracked indexes. scene_cache is an
+    absolute override of the repository-shared version-1 cache. All index names
+    must be globally unique, even without a scenario. A scenario requires one
+    match; unknown names list legal names and duplicates list source indexes.
+    Only selected numeric files are read. Missing files list identity and the
+    producer command; codec/metadata failures propagate. No references, Engine
+    or source are created. Each input.build() creates a fresh caller-owned Scene;
+    close its source after use. Identity excludes paths and file hashes.
     """
-    directory = Path(__file__).parent / "data" / "family_pareto"
-    paths = (
-        [manifest]
-        if manifest is not None
-        else [
-            directory / "frozen-synthetic.json.gz",
-            directory / "frozen-real.json.gz",
-        ]
-    )
-    records = [
-        (path, record) for path in paths for record in read_frozen_manifest(path)
-    ]
+    entries = indexed_scenes(scene_index_paths(index))
     if scenario is not None:
-        matches = [
-            (path, record) for path, record in records if record.name == scenario
-        ]
+        matches = [(path, entry) for path, entry in entries if entry.name == scenario]
         if not matches:
-            legal = ", ".join(record.name for _, record in records)
+            legal = ", ".join(entry.name for _, entry in entries)
             raise ValueError(f"Unknown scenario: {scenario}. Legal names: {legal}")
-        if len(matches) != 1:
-            sources = ", ".join(str(path) for path, _ in matches)
-            raise ValueError(f"Ambiguous scenario: {scenario}. Sources: {sources}")
-        records = matches
+        entries = tuple(matches)
+    cache = scene_cache_directory(scene_cache)
+    try:
+        records = read_scene_records(cache, (entry for _, entry in entries))
+    except FileNotFoundError as error:
+        raise missing_scene_command(error, cache) from error
     return tuple(
         SelectedInput(input_from_record(record), record, digest(record.metadata))
-        for _, record in records
+        for record in records
     )
 
 
@@ -715,7 +712,8 @@ def _parse_command(argv: list[str] | None) -> argparse.Namespace:
     )
     parser.add_argument("--reference-cache", type=Path)
     parser.add_argument("--check-references", action="store_true")
-    parser.add_argument("--manifest", type=Path)
+    parser.add_argument("--index", type=Path)
+    parser.add_argument("--scene-cache", type=Path)
     parser.add_argument("--output", type=Path)
     parser.add_argument("--summary", type=Path)
     parser.add_argument("--summary-output", type=Path)
@@ -760,8 +758,8 @@ def main(argv: list[str] | None = None) -> int:
     select_inputs owns frozen source selection and storage-independent record
     identity. --scenario requires exactly one matching record before construction;
     unknown names list legal names and ambiguous names list source files.
-    It can be combined with --manifest. Default tools/data sources are temporary
-    integration inputs, not the final storage location.
+    --index selects one tracked-format index, otherwise both defaults are read.
+    --scene-cache overrides the shared numeric cache with an absolute path.
 
     --check-references loads the complete selection cache-only, writes each
     name/key/convergence error/load time to --output and returns without policies
@@ -789,7 +787,9 @@ def main(argv: list[str] | None = None) -> int:
             raise ValueError(
                 "--summary-output and --compare-summary require --scenario"
             )
-        selected = select_inputs(args.manifest, args.scenario)
+        selected = select_inputs(
+            args.index, args.scenario, scene_cache=args.scene_cache
+        )
         items = [entry.input for entry in selected]
         identities = [entry.identity for entry in selected]
         # Keep the summary field name, but hash record identities, not file paths.
