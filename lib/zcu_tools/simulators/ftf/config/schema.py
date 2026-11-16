@@ -37,7 +37,6 @@ from zcu_tools.simulators.single_fluxonium.config.schema import (
     DriftParameter,
     FluxLine,
 )
-
 from zcu_tools.simulators.telemetry import TelemetrySettings
 
 LoopValue = TypeVar("LoopValue")

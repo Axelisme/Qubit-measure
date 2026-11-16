@@ -1,6 +1,6 @@
 # Physical simulator models
 
-**Last updated:** 2026-11-14
+**Last updated:** 2026-11-16
 
 **Readers:** framework-dev, lab-author, agent. Locate physical model configuration, numerics and environment builders.
 
@@ -52,6 +52,28 @@ Startup scripts and caller-owned model YAML live in
 [`zcu_lab/simulation_envs`](../../../zcu_lab/simulation_envs/README.md).
 The startup changes only select the new model imports.
 
+## Acquire telemetry
+
+`simulators.telemetry` owns `RoutingTelemetry`, `TelemetrySettings` and the shared
+acquire-summary types. FTF uses this writer; the other environments can supply the
+same summary without depending on FTF.
+
+Call `RoutingTelemetry(directory).write(summary, paths=paths)` once at the acquire
+boundary. `summary: AcquireTelemetry` requires `points`, `rounds`, `wall_s`,
+`compile_wall_s`, `evolve_wall_s`, `readout_wall_s`, `complete` and `extras`.
+Times are wall seconds; the three stages accept `None` when not measured.
+FTF currently supplies `None` for the stages and `True` for completion until its
+acquire observer supplies those measurements. These values do not certify success.
+Use simulator-prefixed extras keys and JSON values, or `{}` when absent.
+The writer projects only the declared fields and does not modify the caller's
+summary. `RoutingRecord` inherits them and adds a UTC timestamp, frontend CPU
+seconds, the cost-unit label and aggregated Engine family counters.
+No numerical inputs enter the record.
+
+The writer retains the `routing-*.jsonl` filenames, 50 MiB directory budget,
+per-instance lock and warning-once I/O policy described in the
+[FTF telemetry contract](ftf/environment/README.md#routing-telemetry).
+
 ## Private replay
 
 `simulators.replay` owns opt-in private FTF and single-fluxonium input JSON,
@@ -72,4 +94,6 @@ Replay does not change normal waveform assets or data.h5 policies.
 `tests/simulators/<model>/environment/` owns public planning and acquisition behavior.
 `tests/simulators/ftf/physics/` owns joint-model physics and its simulation marker.
 `tests/simulators/test_replay.py` owns private archive roundtrips and integrity errors.
+`tests/simulators/test_telemetry.py` owns shared summary serialization, file rotation
+and warning isolation. FTF acquire integration stays with the FTF environment tests.
 Generic engine, ADC, bath and source-line tests stay with their framework owners.

@@ -1,7 +1,7 @@
 """One bounded, best-effort routing record per admitted FTF acquisition."""
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 
 import numpy as np
@@ -91,4 +91,3 @@ def test_acquire_writes_one_line_for_all_rounds_and_opt_out_is_bitwise(tmp_path:
     finally:
         observed.devices.close_all_devices()
         plain.devices.close_all_devices()
-

@@ -32,33 +32,45 @@ class TelemetrySettings(Values):
     directory: Path | None = None
 
 
-class RoutingRecord(TypedDict):
-    """One acquire's persisted summary, without numerical inputs.
+class AcquireTelemetry(TypedDict):
+    """Required caller-supplied summary for one acquire, without numerical inputs.
 
-    timestamp: UTC ISO timestamp. points: grid size excluding shots and rounds.
-    rounds: captured attempts. wall_s: admitted acquire seconds including pacing,
-    excluding writer I/O. compile_wall_s, evolve_wall_s and readout_wall_s:
-    accumulated wall seconds in each stage, or None when not measured.
-    frontend_cpu_s: calling-thread geometry and work-plan CPU seconds.
-    estimated_cost_unit: label for relative family scheduling costs.
-    families: family name to summed Engine routing counters and CPU seconds;
-    estimated_cpu_s is None when any contributing estimate is unavailable.
-    complete: whether the acquire completed successfully.
+    points: request grid size excluding shots and rounds.
+    rounds: number of captured attempts, including failed attempts.
+    wall_s: admitted acquire wall seconds including pacing, excluding writer I/O.
+    compile_wall_s: compilation wall seconds, or None when not measured.
+    evolve_wall_s: sum of Engine.evolve wall seconds, or None when not measured.
+    readout_wall_s: ADC/readout wall seconds, or None when not measured.
+    complete: whether the acquire completed without an exception.
     extras: simulator-prefixed keys (for example ftf.projection_outcomes) mapped
-    to JSON values. Consumers requiring an extra must index it directly.
+    to JSON values; pass {} when absent. Consumers index required keys directly.
     """
-    timestamp: str
+
     points: int
     rounds: int
     wall_s: float
-    frontend_cpu_s: float
-    estimated_cost_unit: str
-    families: dict[str, dict[str, int | float | None]]
     compile_wall_s: float | None
     evolve_wall_s: float | None
     readout_wall_s: float | None
     complete: bool
     extras: dict[str, JsonValue]
+
+
+class RoutingRecord(AcquireTelemetry):
+    """Persisted acquire summary with writer-generated routing fields.
+
+    timestamp: UTC ISO timestamp.
+    frontend_cpu_s: calling-thread geometry and work-plan CPU seconds.
+    estimated_cost_unit: label for relative family scheduling costs.
+    families: family name to summed Engine routing counters and CPU seconds;
+    estimated_cpu_s is None when any contributing estimate is unavailable.
+    Caller-supplied fields retain their AcquireTelemetry meanings.
+    """
+
+    timestamp: str
+    frontend_cpu_s: float
+    estimated_cost_unit: str
+    families: dict[str, dict[str, int | float | None]]
 
 
 def _families(
@@ -116,44 +128,34 @@ class RoutingTelemetry:
 
     def write(
         self,
+        summary: AcquireTelemetry,
         *,
-        points: int,
-        wall_s: float,
-        rounds: int,
         paths: Sequence[PathDiagnostics],
-        complete: bool = True,
-        compile_wall_s: float | None = None,
-        evolve_wall_s: float | None = None,
-        readout_wall_s: float | None = None,
-        extras: dict[str, JsonValue] | None = None,
     ) -> None:
-        """Append an acquire summary; paths contains this acquire's round work.
+        """Append one summary without modifying it or persisting extra caller keys.
 
-        points counts the request grid once, not shots or software rounds. wall_s
-        measures admitted acquire wall time including pacing, excluding this I/O.
-        paths may be empty after a failure before evolution. Templates currently
-        carry no experiment/program identifier, so no name is synthesized.
-        complete marks successful completion; callers reporting failed partial work
-        pass False. Stage wall seconds may be None when not measured. extras uses
-        simulator-prefixed keys and JSON values; omitted extras writes an empty map.
-        Fields and family aggregation are described by RoutingRecord.
+        summary supplies every AcquireTelemetry field, including {} for no extras.
+        paths contains this acquire's round work; it may be empty after a failure
+        before evolution. Fields and aggregation are described by RoutingRecord.
+        Templates carry no experiment/program identifier, so none is synthesized.
+        Filesystem/serialization failures follow this class's warning-only policy.
         """
         with self._lock:
             try:
                 now = datetime.now(timezone.utc)
                 record: RoutingRecord = {
                     "timestamp": now.isoformat(),
-                    "points": points,
-                    "rounds": rounds,
-                    "wall_s": wall_s,
+                    "points": summary["points"],
+                    "rounds": summary["rounds"],
+                    "wall_s": summary["wall_s"],
                     "frontend_cpu_s": sum(p.frontend_cpu_s for p in paths),
                     "estimated_cost_unit": "relative scheduling units",
                     "families": _families(paths),
-                    "compile_wall_s": compile_wall_s,
-                    "evolve_wall_s": evolve_wall_s,
-                    "readout_wall_s": readout_wall_s,
-                    "complete": complete,
-                    "extras": extras if extras is not None else {},
+                    "compile_wall_s": summary["compile_wall_s"],
+                    "evolve_wall_s": summary["evolve_wall_s"],
+                    "readout_wall_s": summary["readout_wall_s"],
+                    "complete": summary["complete"],
+                    "extras": summary["extras"],
                 }
                 line = (
                     json.dumps(record, allow_nan=False, separators=(",", ":")) + "\n"

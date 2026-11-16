@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-11-16，GUI worker policy
+**Last updated:** 2026-11-16，GUI worker policy、共用 telemetry
 
 **讀者：** framework-dev、agent。FTF 環境的組裝接縫、數值接線與 acquisition 契約。
 
@@ -89,8 +89,10 @@ ADC, sampling and routing bookkeeping; wall includes those operations.
 Numeric templates contain no program/experiment identifier, so `experiment` is
 omitted rather than guessed from controls or caller frames.
 
-`projection_outcomes` counts retained outcome histories per C-order point in the
-latest solved round. `projection_pruned_weight` gives each point's cumulative
+The shared [acquire writer](../../README.md#acquire-telemetry) supplies the common
+summary fields. Projection values live only in `extras`:
+`ftf.projection_outcomes` counts retained outcome histories per C-order point in the
+latest solved round. `ftf.projection_pruned_weight` gives each point's cumulative
 removed probability before redistribution. Both arrays are empty for
 terminal-only templates or when no solve completed. Reused preparations retain
 these values. They do not count the semiclassical cavity main state.

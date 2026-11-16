@@ -67,13 +67,13 @@ from zcu_tools.simulators.ftf.environment.readout import (
     readout_configuration,
 )
 from zcu_tools.simulators.ftf.environment.replay import BACKEND_VERSION, replay_versions
-from zcu_tools.simulators.telemetry import RoutingTelemetry
 from zcu_tools.simulators.ftf.environment.template import (
     FTFModelFacts,
     FTFTemplatePlan,
     plan_template,
 )
 from zcu_tools.simulators.replay import ReplayAcquire, save_replay
+from zcu_tools.simulators.telemetry import RoutingTelemetry
 
 
 @dataclass(frozen=True)
@@ -741,22 +741,29 @@ class FTFSource:
             else ()
         )
         self.telemetry.write(
-            points=prod(request.point_dims) if request is not None else 0,
-            rounds=len(rounds),
-            wall_s=wall_s,
-            paths=paths,
-            extras={
-                "ftf.projection_outcomes": list(
-                    self.evaluations[-1].projection_outcomes
-                    if paths and self.evaluations
-                    else ()
-                ),
-                "ftf.projection_pruned_weight": list(
-                    self.evaluations[-1].projection_pruned_weight
-                    if paths and self.evaluations
-                    else ()
-                ),
+            {
+                "points": prod(request.point_dims) if request is not None else 0,
+                "rounds": len(rounds),
+                "wall_s": wall_s,
+                # Stage timing and completion are wired by the acquire observers.
+                "compile_wall_s": None,
+                "evolve_wall_s": None,
+                "readout_wall_s": None,
+                "complete": True,
+                "extras": {
+                    "ftf.projection_outcomes": list(
+                        self.evaluations[-1].projection_outcomes
+                        if paths and self.evaluations
+                        else ()
+                    ),
+                    "ftf.projection_pruned_weight": list(
+                        self.evaluations[-1].projection_pruned_weight
+                        if paths and self.evaluations
+                        else ()
+                    ),
+                },
             },
+            paths=paths,
         )
 
     def close(self) -> None:
