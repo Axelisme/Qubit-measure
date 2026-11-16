@@ -3,7 +3,7 @@
 import re
 from collections.abc import Iterator
 from pathlib import Path
-from typing import Literal, Self
+from typing import Annotated, Literal, Self
 
 import pytest
 from pydantic import Field, model_validator
@@ -17,7 +17,7 @@ from qtpy.QtWidgets import (
     QLineEdit,
     QWidget,
 )
-from zcu_tools.gui.form import FormEnv, FormModel, FormState
+from zcu_tools.gui.form import Display, FormEnv, FormInput, FormModel, FormState
 from zcu_tools.gui.session.context_types import SavedPoint
 from zcu_tools.gui.session.parameters import ParameterContext
 from zcu_tools.gui.widgets.form import FormEditor
@@ -295,12 +295,12 @@ def test_each_model_level_aligns_its_controls_on_one_label_column(
     )
 
 
-def test_invalid_text_explains_the_error_inline_and_in_the_summary_then_clears(
+def test_visible_invalid_text_explains_the_error_inline_without_summary_then_clears(
     editor: tuple[FormEditor[PresentationForm], FormState[PresentationForm]],
     qapp: QApplication,
     tmp_path: Path,
 ) -> None:
-    view, state = editor
+    view, _state = editor
     view.resize(1100, 700)
     view.show()
     qapp.processEvents()
@@ -310,13 +310,77 @@ def test_invalid_text_explains_the_error_inline_and_in_the_summary_then_clears(
     inline = driver.observe(object_name="form.error.count")
     summary = driver.observe(object_name="form.error.summary")
     assert inline.visible and inline.text
-    assert summary.visible and inline.text in summary.text and "count" in summary.text
+    assert not summary.visible
 
     driver.enter_text(object_name="form.input.count", value="4")
     driver.screenshot(tmp_path / "corrected-count.png")
-    assert state.input.data["count"] == 4
+    assert driver.text_input(object_name="form.input.count").text == "4"
     assert not driver.observe(object_name="form.error.count").visible
     assert not driver.observe(object_name="form.error.summary").visible
+
+
+def test_folding_errors_shows_only_the_unrepresented_error_in_the_summary(
+    editor: tuple[FormEditor[PresentationForm], FormState[PresentationForm]],
+    qapp: QApplication,
+    tmp_path: Path,
+) -> None:
+    view, _state = editor
+    lay_out(view, qapp)
+    driver = ComponentDriver(view)
+    driver.enter_text(object_name="form.input.count", value="-")
+    driver.enter_text(object_name="form.input.inner.gain", value="-")
+    driver.screenshot(tmp_path / "00-visible-errors.png")
+    assert not driver.observe(object_name="form.error.summary").visible
+
+    driver.click(object_name="form.fold.inner")
+    driver.screenshot(tmp_path / "01-folded-error.png")
+    summary = driver.observe(object_name="form.error.summary")
+    assert summary.visible and summary.text.startswith("inner.gain: ")
+    assert driver.observe(object_name="form.error.count").visible
+    assert not driver.observe(object_name="form.error.inner.gain").visible
+
+    driver.click(object_name="form.fold.inner")
+    driver.screenshot(tmp_path / "02-expanded-error.png")
+    assert not driver.observe(object_name="form.error.summary").visible
+    assert driver.observe(object_name="form.error.inner.gain").visible
+
+
+def test_hidden_field_error_remains_in_the_summary(
+    qapp: QApplication, tmp_path: Path
+) -> None:
+    class HiddenErrorForm(FormModel):
+        hidden: Annotated[int, Display(hidden=True), Field(gt=0)]
+        count: int = 3
+
+    state = FormState(FormInput(HiddenErrorForm, {"hidden": 0, "count": 3}))
+    view = FormEditor(state, FormEnv())
+    try:
+        lay_out(view, qapp)
+        driver = ComponentDriver(view)
+        driver.enter_text(object_name="form.input.count", value="-")
+        driver.screenshot(tmp_path / "hidden-and-visible-errors.png")
+        summary = driver.observe(object_name="form.error.summary")
+        assert summary.visible and summary.text.startswith("hidden: ")
+        assert driver.observe(object_name="form.error.count").visible
+    finally:
+        view.close()
+        view.deleteLater()
+        qapp.processEvents()
+
+
+def test_model_error_without_a_leaf_location_keeps_the_summary(
+    editor: tuple[FormEditor[PresentationForm], FormState[PresentationForm]],
+    qapp: QApplication,
+    tmp_path: Path,
+) -> None:
+    view, _state = editor
+    lay_out(view, qapp)
+    driver = ComponentDriver(view)
+    driver.enter_text(object_name="form.input.inner.gain", value="-1")
+    driver.screenshot(tmp_path / "model-error.png")
+    summary = driver.observe(object_name="form.error.summary")
+    assert summary.visible and "inner: " in summary.text
+    assert "Gain must not be negative" in summary.text
 
 
 @pytest.mark.parametrize("dark", [False, True], ids=["light", "dark"])
