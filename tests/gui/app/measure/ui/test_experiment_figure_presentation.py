@@ -16,7 +16,9 @@ from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.gui.app.measure.adapter import (
     Adapter,
+    AdapterCapabilities,
     Analysis,
+    AnalysisMode,
     AnalyzeRequest,
     PostAnalysis,
     PostAnalyzeRequest,
@@ -43,6 +45,7 @@ from tests.gui.app.measure._native_save_support import (
     PostSummary,
 )
 from tests.gui.app.measure.ui._figure_presentation_support import gallery
+from tests.gui.app.measure.ui._main_window_fakes import mock_ctrl
 from tests.program._profiles import load_soccfg
 
 
@@ -381,11 +384,35 @@ def test_user_switches_named_figures_gallery_and_left_panel(
     flow.screenshot(shots / "12-post-retained.png")
 
 
+@pytest.fixture
+def presentation_host(qapp, main_window_control_factory) -> Iterator[QWidget]:
+    """Host figure-only contracts without a session, worker or fake board."""
+    host = QWidget()
+    layout = QVBoxLayout(host)
+    tab = ExpTabWidget(
+        "presentation",
+        mock_ctrl(main_window_control_factory),
+        AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True),
+    )
+    layout.addWidget(tab)
+    host.resize(1280, 800)
+    host.show()
+    qapp.processEvents()
+    try:
+        yield host
+    finally:
+        tab.clear_all_figures()
+        tab.detach()
+        host.close()
+        host.deleteLater()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+
+
 @pytest.mark.parametrize("failed_pane", ["run", "analysis", "post_analysis"])
 def test_data_activation_uses_public_reader_and_isolates_each_failure(
-    presentation_window: QWidget, monkeypatch: pytest.MonkeyPatch, failed_pane: str
+    presentation_host: QWidget, monkeypatch: pytest.MonkeyPatch, failed_pane: str
 ) -> None:
-    (tab,) = presentation_window.findChildren(ExpTabWidget)
+    (tab,) = presentation_host.findChildren(ExpTabWidget)
     preview = gallery(tab)
     figures = {pane: Figure() for pane in ("run", "analysis", "post_analysis")}
     reads: list[str] = []
@@ -426,9 +453,9 @@ def test_data_activation_uses_public_reader_and_isolates_each_failure(
 
 @pytest.mark.parametrize("pane", ["analysis", "post_analysis"])
 def test_named_collection_keeps_figures_saveable_after_clear(
-    presentation_window: QWidget, pane: str
+    presentation_host: QWidget, pane: str
 ) -> None:
-    (tab,) = presentation_window.findChildren(ExpTabWidget)
+    (tab,) = presentation_host.findChildren(ExpTabWidget)
     collection = FigureCollection()
     first = Figure()
     second = Figure()
