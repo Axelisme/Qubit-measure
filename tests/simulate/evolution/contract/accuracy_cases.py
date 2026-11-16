@@ -246,6 +246,68 @@ def joint_case(*, constant: bool) -> AccuracyCase:
     return AccuracyCase(name, coherent_source(model), batch, families)
 
 
+def multitone_phase_case(
+    shape: str, repeats: int, *, varying_phases: bool = True, gain: float = 0.6
+) -> AccuracyCase:
+    """Build repeated 4 ns dual-tone gates on a coherent three-level model.
+
+    Gaussian and flat-top samples use distinct ports with noncircular,
+    cross-coupled quadratures. Every pulse shares envelope content and offsets;
+    varying_phases changes both common-origin carrier phases independently.
+    A nonzero bath exercises the four-way secular split on full densities.
+    """
+    duration = 4.0
+    times = np.linspace(0, duration, 9)
+    if shape == "gaussian":
+        samples = np.exp(-0.5 * ((times - 2) / 0.8) ** 2)
+    elif shape == "flat_top":
+        samples = np.minimum(1.0, np.minimum(times, duration - times))
+    else:
+        raise ValueError(f"unknown gate shape: {shape}")
+    envelope = EnvelopeSpec("sampled", samples.astype(complex), times)
+    x = np.array([[0.01, 0.04, 0.015], [0.04, -0.01, 0.025], [0.015, 0.025, 0]])
+    y = 1j * np.array([[0, 0.012, 0.007], [-0.012, 0, 0.009], [-0.007, -0.009, 0]])
+    model = SecularModel(
+        (0,),
+        "accuracy-dual-phase-gate",
+        np.array([0.0, 0.3, 0.7]),
+        np.eye(3, dtype=complex),
+        (
+            SecularDrive("a", x.astype(complex), y),
+            SecularDrive("b", (0.7 * x[::-1, ::-1]).astype(complex), -0.6 * y),
+        ),
+        np.array([[0.0, 1e-5, 2e-5], [0.0, 0.0, 1e-5], [0.0, 0.0, 0.0]]),
+        (np.ones((3, 3)) - np.eye(3)) * 1e-5,
+    )
+    batch = timeline(1, repeats * duration)
+    tracks = []
+    for pulse in range(repeats):
+        for slot, frequency in enumerate((0.3, -0.47)):
+            phase = (0.137, 1.531)[slot]
+            if varying_phases:
+                phase += pulse * (0.739, -1.117)[slot]
+            track = drive_track(
+                timeline(1, duration),
+                envelope,
+                frequency=frequency,
+                gain=gain * (1 if slot == 0 else -0.8),
+                port=("a", "b")[slot],
+            )
+            tracks.append(
+                replace(
+                    track,
+                    start_ns=np.array([pulse * duration]),
+                    phase_rad=np.array([phase]),
+                )
+            )
+    return AccuracyCase(
+        f"dual_phase/{shape}/{repeats}/{varying_phases}/{gain}",
+        coherent_source(model),
+        replace(batch, tracks=tuple(tracks)),
+        ("multitone_gate",),
+    )
+
+
 def common_frame_case(name: str) -> AccuracyCase:
     """Build nearby_carriers or either cheap_sampled_* pricing input.
 

@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-11-17，reference producer 單列選取
+**Last updated:** 2026-11-17，雙相位 gate 精度與拒收契約
 
 **讀者：** framework-dev、agent。查閱測試的 owner、fixture、執行方式與搬遷驗收契約。
 
@@ -178,14 +178,16 @@ uv run --directory <worktree> --no-sync -- \
 
 矩陣用 `Engine(1, families=(family,)).evolve(...)` 固定可用 family，
 再從 `paths.segments_by_kernel` 確認實際路徑。
-16 個 active family 都有 pinned 案例，預期 family 沒有執行任何 segment 時獨立失敗。
-`multitone_gate` 拒收所有列，矩陣不替它建立 density 案例，表中顯示 `NOT EXERCISED`。
-它的 sampled 拒收由 routing boundary 契約驗證，不填 error=0，也不報 PASS。
+17 個 family 都有 pinned density 案例，預期 family 沒有執行任何 segment 時獨立失敗。
+`multitone_gate` 的 `test_multitone_gate_dual_phase_density` 驗 Gaussian 與 flat-top。
+每種包絡跑 1 次或 7 次，重複時涵蓋固定與獨立變化的雙相位，完整 density 對同一 oracle。
+高 gain 案例移除 bath，從 `Engine.evolve` 驗相位解析不足時的 `NoValidKernel.attempted`。
+這些小模型案例不代表長序列已通過精度或速度驗收。
 Active family 的 guard 拒絕輸入會讓 density 測試失敗，不會產生誤差觀察值。
 各案例包含完整 complex coherence、relaxation 與 dephasing。模型尺寸依案例族區分：
 
 - 兩能階：`low_carrier`、`linear_shaped`、`linear_plateau`、`nearby_carriers`、`adiabatic_ramp` 與 `history_gate`。
-- 三能階：`idle_coherence`、`weak_plateau`、`strong_plateau`、`shaped_complex`、`two_carriers`、`continuous_flux`、`cheap_sampled_*` 與 `multisegment/final`。
+- 三能階：`idle_coherence`、`weak_plateau`、`strong_plateau`、`shaped_complex`、`two_carriers`、`continuous_flux`、`cheap_sampled_*`、`multisegment/final` 與 `dual_phase/*`。
 - 四能階：`joint_gate_inventory` 與 `joint_constant`。
 
 | 案例 | 固定的 family | 輸入 |
@@ -196,11 +198,12 @@ Active family 的 guard 拒絕輸入會讓 density 測試失敗，不會產生�
 | `nearby_carriers` | `common_frame` | 6.5 ns、600 與 630 MHz 的同 port constant tones |
 | `adiabatic_ramp` | `adiabatic_map` | 8 ns、無 tone、弱非對易 flux ramp |
 
-每個案例也保留預設選路的空歷史與暖歷史驗收。
-`joint_gate_inventory` 保留完整 20 點 sampled inventory，pinned density 改驗 `dop853`。
+`CASE_NAMES` 中的案例也保留預設選路的空歷史與暖歷史驗收。
+`joint_gate_inventory` 保留完整 20 點 sampled inventory，matrix 的 pinned density 驗 `dop853`。
 `joint_constant` 用相同模型和 inventory 保護 `multitone_rwa` 的 distinct-port constant 路徑。
-19／20 次 inventory 與 pinned 的 sampled 拒收由
-[`test_routing_boundaries.py`](simulate/evolution/contract/test_routing_boundaries.py) 驗證。19 與 20 次 inventory 都維持拒收，不預告恢復舊成本邊界測試。
+[`test_routing_boundaries.py`](simulate/evolution/contract/test_routing_boundaries.py) 驗證 19／20 次 inventory 的 pinned gate 都能執行且完整 density 合格。
+這兩個輸入的預設選路仍是 `common_frame`，保留空／暖 history 的 density 驗收。
+固定 `multitone_rwa` 仍拒收 sampled 輸入。固定 `multitone_gate` 可以略過舊 20 次成本偏好，不能略過相位驗證。
 `cheap_sampled_nearby` 與 `cheap_sampled_separated` 使用非平坦 smooth samples，避免 planner 抽成 constant row。
 兩個案例分別驗證失去 cheap-RWA 豁免後的 `common_frame` 與 `dop853` 分支，包含空／暖 history 的路徑與完整 density。
 多段案例量整條 timeline 的最終誤差。混合路徑的每個 family 列出同一個最終誤差，

@@ -14,6 +14,7 @@ from .._envelope import sample_value
 from ..kernel import ApplyContext, KernelContext, Prepared, SegmentTable
 from ..workplan import FactKey
 from ._dop853 import Tolerances, integrate, tolerances
+from ._multitone_gate_phase import FULL_DRIVE_GATE_POLICY
 from ._rwa_graph import RWA_GRAPH_POLICY, PhaseGraph, phase_graph, pruning_admitted
 from ._rwa_numeric import (
     MULTITONE_RETENTION_POLICY,
@@ -84,17 +85,22 @@ class GatePrepared:
 
 
 def canonical_key(table: SegmentTable, row: int, context: KernelContext) -> bytes:
-    """Hash canonical gate physics, omitting only covariant start and theta.
+    """Hash gate physics without start/theta, absorbed by phase expansion.
 
-    Model identity, level, bath, ordered carriers, gains, waveform, offsets,
-    duration, final retained mask and graph/integration policy distinguish products.
-    Guard admission is required before using this equivalence for playback.
+    Dual-tone full-drive keys include the Fourier/validation policy, not an RWA
+    graph. Single-tone keys retain their covariant RWA policy and retained mask.
+    Model identity, level, bath, ordered carriers, gains, waveform, offsets and
+    duration distinguish products. Guard admission is required before playback.
     """
     count = table.tones[row]
     model = table.model(context.source, row)
     retention = _row_retention(table, row, context)
     policy = SINGLE_GATE_POLICY if retention is not None else GATE_POLICY
+    if count == 2:
+        policy = FULL_DRIVE_GATE_POLICY
     digest = sha256(repr((policy, model.identity, model.level)).encode())
+    if count == 2:
+        digest.update(table.shift(row))
     if retention is not None:
         digest.update(
             retained_mask(

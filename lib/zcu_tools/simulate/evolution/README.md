@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-11-17, reference producer single-row selection
+**Last updated:** 2026-11-17, checked full-drive dual-phase gates
 
 **讀者：** framework-dev、agent。Segment evolution 的公開輸入、路由與數值邊界。
 
@@ -345,7 +345,8 @@ thresholds and algorithm details live with their owners:
 | Constant and shaped period builders | [Floquet period](kernels/floquet_period.py), [period table](kernels/period_table.py), [shaped Sambe](kernels/shaped_sambe.py), [gate cache](kernels/gate_cache.py) |
 | Two-tone Floquet admissions and variants | [Floquet](kernels/floquet.py) |
 | Shared RWA admission, retention and Hamiltonian coefficients | [RWA numerics](kernels/_rwa_numeric.py), using [Fourier numerics](kernels/_rwa_fourier.py); family playback remains in [multitone RWA](kernels/multitone_rwa.py) and [single constant RWA](kernels/single_tone_rwa.py) |
-| Covariant gate admission, splitting and reuse | [single-tone gate](kernels/single_tone_gate.py), [multitone gate](kernels/multitone_gate.py), [shared builder](kernels/_rwa_gate.py), [phase graph](kernels/_rwa_graph.py) |
+| Single-tone covariant gate admission, splitting and reuse | [single-tone gate](kernels/single_tone_gate.py), [RWA builder](kernels/_rwa_gate.py), [phase graph](kernels/_rwa_graph.py) |
+| Full-drive dual-phase gates | [multitone gate](kernels/multitone_gate.py), [phase validation](kernels/_multitone_gate_phase.py), [Hilbert endpoints](kernels/_gate_endpoints.py) |
 | Direct integration and chronological chains | [DOP853 planning](_dop853_dispatch.py), [DOP853](kernels/dop853.py), [flux DOP853](kernels/flux_dop853.py) |
 
 Cold-cost choices use the complete acquire inventory rather than resident cache
@@ -376,12 +377,13 @@ not measurements of final full-density error. RWA slope and curvature limits
 are normalized by envelope peak. Retained real dimension counts populations
 and both real coordinates of within-component coherences.
 
-The matrix exercises 16 active families, including a numerical-guard edge for
-each active guarded family. `multitone_gate` rejects every row and reports
-`NOT EXERCISED`, with no density error. Four existing edge cases exceed `2e-3` and remain strict
+The matrix exercises 17 families. `multitone_gate` has Gaussian and flat-top
+cases with one or seven gates, fixed or independently varying dual phases,
+and a high-gain phase-validation refusal. The other guarded families have
+numerical-guard edge cases. Four existing edge cases exceed `2e-3` and remain strict
 xfails: `gate_cache` at `9.296548e-3`, `common_frame` at `8.066669e-3`,
 `single_tone_rwa` at `2.180208e-2` and `shaped_sambe` at `3.091554e-3`.
-The other 12 active families pass. Representative inputs are pinned by
+The other families pass their pinned cases. Representative inputs are pinned by
 [`test_pinned_family_density`](../../../../tests/simulate/evolution/contract/test_accuracy_matrix.py);
 [`test_guard_edge_density`](../../../../tests/simulate/evolution/contract/test_accuracy_matrix.py)
 pins the [guard-edge inputs](../../../../tests/simulate/evolution/contract/guard_edge_cases.py).
@@ -391,10 +393,11 @@ those runs measure the families actually selected, not every candidate.
 The [matrix instructions](../../../../tests/README.md#evolution-精度矩陣)
 own the command and report format.
 
-Sampled multitone rejection is the current admission contract, not a temporary
-route pending a numerical fix. It leaves candidate order and common-frame pricing
-unchanged. Rejected sampled rows fall back to the next admitted candidate,
-often `dop853`. Previously cheap sampled RWA graphs lose their exemption from
+`multitone_rwa` still rejects sampled multitone rows. `multitone_gate` admits
+validated dual-tone keys using full-drive phase expansion, without RWA.
+Candidate order and common-frame pricing remain unchanged. Rejected keys
+fall back to the next admitted candidate, often `dop853`.
+Previously cheap sampled RWA graphs lose their exemption from
 common-frame pricing. The matrix's `cheap_sampled_nearby` and
 `cheap_sampled_separated` cases check both price branches, their empty/warm
 routes and final densities. This does not force every sampled row to DOP853.
@@ -414,7 +417,7 @@ routes and final densities. This does not force every sampled row to DOP853.
 | [`gate_cache`](kernels/gate_cache.py), phase-interpolated full-carrier shaped gates | `shaped` | Four Hilbert subsegments with secular half-steps. Model-only secular split d³ΓV²/16 ≤ 0.01. For 0 < d ≤ 30 ns, dispatch tries 6 phase nodes with 2 probes and full-unitary defect ≤ min(1e-4, 0.1B); other keys or failed convergence use 16 nodes. Fixed-order playback does not certify arbitrary-drive error against B. | [`shaped_complex`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | FAIL at guard edge: 9.296548e-3; strict xfail |
 | [`period_table`](kernels/period_table.py), shaped amplitude-band period playback | `shaped` | 8 Chebyshev amplitude nodes and 16 phase samples. Guard requires envelope-motion indicator ≤ 0.05, amplitude-band bandwidth ≤ 0.5 and secular split ≤ 0.01. These calibrated limits do not scale with B. DC is guard-admissible with local direct integration, but default costs prefer terminal DOP853. | [`linear_shaped`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
 | [`common_frame`](kernels/common_frame.py), common-frame SW2 beat dynamics | `two` or two-tone `multiple` only | Fixed-flux common frame with second-order beat/two-photon terms, first-order endpoint dressing and CF4/secular playback. Absolute mean carrier must be ≥ 1e-10 GHz. CF4 steps are capped at 8 ns and 0.08 cycles of the fastest retained channel, with no lower cutoff. Dispatch prices first-order playback steps, so cost rises with active carrier spacing; numerical guards determine applicability. Fast-channel denominator must exceed 1e-10. Row-local coherent/bath indicators must be ≤ 0.03/0.01, independent of B. | [`nearby_carriers`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | FAIL at guard edge: 8.066669e-3; strict xfail |
-| [`multitone_gate`](kernels/multitone_gate.py), retained simultaneous RWA gate family | `multiple`, disabled | Rejects every row. The retained 20-use inventory cost preference cannot restore numerical admission at 19 or 20 uses; pinning cannot bypass rejection. Shared single-tone gate numerics are unchanged. | [19/20 and pinned rejection contract](../../../../tests/simulate/evolution/contract/test_routing_boundaries.py) | NOT EXERCISED; no density error |
+| [`multitone_gate`](kernels/multitone_gate.py), full-drive dual-phase gates | `multiple` | Two tones, fixed flux, positive duration, at least one sampled envelope. Four D(h/2)·U·D(h/2) quarters with complete drive, no RWA or pruning. Secular split proxy d³ΓV²/16 ≤ 0.01. A 9×9 raw phase grid and two independent sets of 32 off-grid probes share DOP853 integration at rtol 4e-7, then polar retraction. Every quarter requires full-unitary Frobenius defect ≤ 1.9e-7. Failed validation rejects the key without upgrade. Keys omit start and both phases because Fourier playback absorbs them. The legacy 20-use preference remains; pinning bypasses price, never validation. | Gaussian/flat-top [dual-phase density and high-gain refusal](../../../../tests/simulate/evolution/contract/test_accuracy_matrix.py), [pinned routing](../../../../tests/simulate/evolution/contract/test_routing_boundaries.py) | PASS on small-model contract cases; long-sequence qualification separate |
 | [`multitone_rwa`](kernels/multitone_rwa.py), simultaneous omission-restored RWA | `two`, distinct ports only | Exactly two constant envelopes, fixed flux, B ≥ 1e-3 and each carrier magnitude ≥ 50 MHz. Sampled rows are rejected. Start with 50 MHz edges, restore omitted paths until transfer proxy ≤ 0.0058 and residual phase ≤ 0.0045 rad; retained real dimension ≤ 256. No carrier-spacing, full-operator/carrier ratio or retained-norm phase cap. Apply step ceiling is 16 ns. | [`joint_constant`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
 | [`floquet`](kernels/floquet.py), constant Stark tone plus probe | `two` | Larger absolute gain selects the Stark slot, with ties choosing the first; that slot requires positive carrier. Frame overlap ≥ 0.5, modal condition ≤ 1e8, maximum real eigenvalue ≤ 1e-10/ns and residual ≤ 1e-9; sampling extent ≤ 128 with at most 4096 phase samples. k=0 omission and convergence each fit B/3. Modal Dyson additionally uses r ≤ 0.1, r2 ≤ 0.05 when probe gain magnitude ≥ 0.1, Dyson norm-duration v ≤ 0.5, transfer indicator v + v²/2 ≤ 0.02 and higher-order remainder exp(v)·v³/6 ≤ B/3; otherwise use periodic channel playback. Retained-sideband admission instead requires convergence ≤ B/40 and bound ≤ 0.95B, retaining edges within 0.1/ns and averaging other harmonics through order 4. Admission is per row; refused rows continue to other allowed candidates. This finite-Fourier admission is not a density-error guarantee. | [`two_carriers`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
 | [`dop853`](kernels/dop853.py), full-drive direct density integration | `shaped`, `two`, `multiple`, terminal candidate | No RWA or fast-path admission threshold. Accepts valid rows with finite positive B, including complex sampled envelopes. Stops at active control knots. Local rtol = min(1e-4, 0.03B), atol = min(1e-6, 0.0003B), from the [shared solver](kernels/_dop853.py); these are not global error bounds. | [`shaped_complex`](../../../../tests/simulate/evolution/contract/accuracy_cases.py), [`two_carriers`](../../../../tests/simulate/evolution/contract/accuracy_cases.py), [`joint_gate_inventory`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
@@ -556,8 +559,9 @@ or rejected rows. Returning `None` raises rather than retrying `guard`.
 When false, classification calls `guard` directly. Multitone dispatch owns the
 20-use gate cost preference; prefix and worker calls borrow the complete-acquire
 inventory, never subset counts or resident warmth. The kernel guard checks only
-numerical admission. The `multitone_gate` family rejects all rows, including
-pinned calls and inventories of 19 or 20 uses.
+numerical admission. `multitone_gate` hands validated model-only Fourier
+products to apply without rebuilding. Pinning admits validated keys even once;
+unresolved phase dependence rejects a key regardless of its use count.
 Cross-timeline keys are guarded before shared preparation. Local builders run
 inside their timeline worker and retain the same handoff.
 
@@ -719,7 +723,7 @@ class's methods.
 | Adaptive DOP853 tableau, tolerances and integration | [kernels/_dop853.py](kernels/_dop853.py), used by density solvers and Hilbert endpoint builders. Packing and chain traversal live in [kernels/_dop853_data.py](kernels/_dop853_data.py) and [kernels/_dop853_chain.py](kernels/_dop853_chain.py). [kernels/_dop853_intervals.py](kernels/_dop853_intervals.py) owns density knot partitioning and source-coordinate playback clocks. |
 | Ordinary density endpoints, including H0-rotating-frame integration | `advance_endpoints` in [kernels/dop853.py](kernels/dop853.py) owns the full-drive secular density equation and exact return to the model eigenbasis. Ordinary DOP853 apply, `t6` direct rows and period fractional tails share this entry point and its budget-scaled local tolerance policy, supplying explicit frames. Budget validation, knot stops and numerical failures are unchanged. |
 | Period interpolation, secular playback and fractional tails | [kernels/_period_table.py](kernels/_period_table.py), shared by [period_table](kernels/period_table.py) and [shaped_sambe](kernels/shaped_sambe.py). |
-| Gate Hilbert endpoint integration | [kernels/_gate_endpoints.py](kernels/_gate_endpoints.py), shared by sixteen-node and [adaptive phase](kernels/gate_phase.py) builders. |
+| Gate Hilbert endpoint integration | [kernels/_gate_endpoints.py](kernels/_gate_endpoints.py), shared by sixteen-node, [adaptive single-phase](kernels/gate_phase.py) and [checked dual-phase](kernels/_multitone_gate_phase.py) builders. Single-tone integration is unchanged. |
 | Constant-tone Hilbert period build and playback | [kernels/floquet_period.py](kernels/floquet_period.py) owns period builds and trajectories, with [CF4 grid](kernels/_cf4_grid.py) and [Sambe](kernels/_period_sambe.py) helpers. [kernels/_period_channel.py](kernels/_period_channel.py) owns complete secular-channel playback. Separate from two-tone Floquet frames. |
 | RWA row admission, retention orchestration, WorkPlan facts and Hamiltonian coefficients | [kernels/_rwa_numeric.py](kernels/_rwa_numeric.py), shared by ordinary multitone, single-constant RWA, covariant gates and dispatch. Policy constants live at its top; family preparation and playback remain with their kernels. The package-root coefficient API imports this owner directly. |
 | RWA Fourier coefficients, omission estimates and retained-graph dimension | [kernels/_rwa_fourier.py](kernels/_rwa_fourier.py), used by `_rwa_numeric.py`. Phase graphs and covariant gate construction remain in `_rwa_graph.py` and `_rwa_gate.py`. |
