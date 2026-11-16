@@ -2,7 +2,7 @@
 
 **讀者：** lab-author、agent。查找實驗的檔案分工、作者契約與各家族入口。
 
-**Last updated:** 2026-11-13，mux participants 與 generator 衝突檢查邊界
+**Last updated:** 2026-11-16，two-tone 頻譜選項與窗口分流
 
 先從 [tutorial](../tutorial/README.md) 新增實驗，再按下列入口查契約與操作。
 實驗定義改動的驗收方式與命令範例見 [離線驗收](../README.md#實驗定義的離線驗收)。
@@ -42,6 +42,8 @@
 每個實驗有自己的資料夾。`core.py` 擁有 cfg、Result、量測與分析政策。
 `gui.py` 以具名參數宣告可選的 measure-gui Adapter 值，接上 Form、run、guide 與 Analysis／Interactive／PostAnalysis。
 Core 擁有 run 與 analyze 的計算，GUI 只接線、解析來源與決定 writeback。
+`twotone/freq` 的分析只提供 Model type、Expected center、Min SNR，使用局部最高峰與六半寬窗口。
+`twotone/chain` 的選項與中點窗口不變，兩者明選共用數值工具的不同策略，見 [ADR-0072](../../docs/adr/0072-module-boundaries.md#two-tone-廣掃的選峰與窗口)。
 Mux/onetone core 也擁有逐 tone 數值 outcomes 與擬合失敗隔離。
 GUI 只接線、解析固定 capture 的 route prior／resonator 來源與提出 writeback。
 Leaf 的 `__init__.py` 只提供 core exports，不載入 GUI。
