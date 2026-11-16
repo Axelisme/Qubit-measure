@@ -3,8 +3,8 @@
 import logging
 import time
 import warnings
-from collections.abc import Callable
-from contextlib import suppress
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from threading import Lock
 from uuid import uuid4
@@ -50,20 +50,42 @@ class SimulationProvenance:
 
 
 @dataclass(frozen=True)
+class AcquireOutcome:
+    """Observed result of one admitted acquire, after its body and cleanup.
+
+    Attributes:
+        rounds: Captured round inputs in execution order, including the input
+            of a failed round. This is not a list of completed rounds.
+        wall_s: Monotonic seconds after sequence admission through body and
+            mixin cleanup, before the observer, including pacing.
+        compile_wall_s: Sum of compiling scope seconds, including failed builds;
+            zero when no compiling scope ran.
+        complete: True when the body and cleanup returned without an escaping
+            BaseException, including a normally returned partial Stop result.
+            This does not mean all requested rounds completed.
+    """
+
+    rounds: tuple[RoundRequest, ...]
+    wall_s: float
+    compile_wall_s: float
+    complete: bool
+
+
+@dataclass(frozen=True)
 class SimulationCallbacks:
     """Optional acquire lifecycle observers, owned by the environment.
 
     wait_ready: no-argument startup wait after admission, before request creation;
         errors release admission and propagate. on_end: completed-acquire observer
-        receiving all captured rounds and elapsed admitted wall seconds, including
-        failed rounds/pacing. Its exceptions warn once, without masking execution
-        errors. on_begin: no-argument preparation after wait_ready, before request
+        receiving an AcquireOutcome, including failed rounds and pacing.
+        Its ordinary Exceptions warn once without masking execution errors;
+        BaseExceptions propagate with the acquire error retained as context. on_begin: no-argument preparation after wait_ready, before request
         construction; errors release admission and propagate. All default None
         and must not reenter acquisition.
     """
 
     wait_ready: Callable[[], object] | None = None
-    on_end: Callable[[tuple[RoundRequest, ...], float], None] | None = None
+    on_end: Callable[[AcquireOutcome], None] | None = None
     on_begin: Callable[[], None] | None = None
 
 
@@ -72,9 +94,9 @@ class SimulationBinding:
 
     capture_snapshot runs once immediately before each round's execute. execute
     receives only a RoundRequest and returns all ADCs together. Neither callback
-    owns averaging. Calls are synchronous; begin rejects simultaneous/reentrant
-    acquisition before changing active state. The acquisition adapter pairs each
-    successful begin with end in a finally block. This binding owns no drivers
+    owns averaging. Calls are synchronous; acquire rejects simultaneous/reentrant
+    acquisition before changing active state. The acquisition adapter places
+    request construction, execution and cleanup inside the acquire scope. This binding owns no drivers
     and does not close callback resources.
 
     Attributes:
@@ -92,9 +114,9 @@ class SimulationBinding:
             this binding's acquisitions. It retains no mutable program buffers.
         last_request: Most recently installed AcquireRequest, or None before any
             request is installed. A failure before installation may leave the
-            preceding request here. It is not cleared by begin or end.
-        rounds: Tuple of RoundRequest inputs captured since the latest successful
-            begin, in execution order. Empty before any round snapshot succeeds.
+            preceding request here. It is not cleared by acquire.
+        rounds: Tuple of RoundRequest inputs captured since the latest admitted
+            acquire, in execution order. Empty before any round snapshot succeeds.
             A backend failure leaves its captured input here, so this is not a
             list of successfully completed rounds.
 
@@ -144,12 +166,12 @@ class SimulationBinding:
         and release admission. It does not consume an acquire sequence on failure.
 
         callbacks.on_end optionally observes one completed admitted acquire, including
-        failed/partial calls. It receives all captured rounds (possibly empty)
-        and elapsed monotonic seconds since begin, including pacing. It runs
-        before releasing admission and must not reenter. Exceptions emit at most
-        one warning and never mask an acquisition error, even under -W error.
-        callbacks=None supplies no lifecycle hooks. on_end=None avoids
-        acquire-level clock reads and completion notifications.
+        failed/partial calls. It receives an AcquireOutcome after the body and
+        cleanup, before releasing admission, and must not reenter. Ordinary
+        Exceptions emit at most one warning and never mask an acquisition error,
+        even under -W error. BaseExceptions propagate, retaining any acquire
+        error as context. callbacks=None supplies no lifecycle hooks.
+        on_end=None avoids acquire/compiling clocks and completion notifications.
 
         Raises ValueError for an invalid scale or boolean/non-int/negative seed, and TypeError
         if NumPy returns non-integer entropy. Callback execution is deferred to
@@ -163,6 +185,7 @@ class SimulationBinding:
         self._on_end = hooks.on_end
         self._observer_warned = False
         self._acquire_started = 0.0
+        self._compile_wall_s = 0.0
         policy = SimulationTiming() if timing is None else timing
         self._time_scale = policy.time_scale
         self._clock = policy.clock
@@ -184,15 +207,18 @@ class SimulationBinding:
         self._sequence = 0
         self._admission = Lock()
 
-    def begin(self) -> int:
-        """Claim admission and return the next zero-based acquire sequence.
+    @contextmanager
+    def acquire(self) -> Iterator[int]:
+        """Admit one synchronous acquire and yield its zero-based int sequence.
 
-        Call before request construction. Success consumes the sequence even if
-        acquisition later fails or stops, and resets rounds to an empty tuple.
-        last_request stays unchanged until the SoC installs a new request.
-        Raises RuntimeError on concurrent/reentrant admission without changing
-        the active call or consuming a sequence. After success, the caller must
-        call end exactly once, including on failure.
+        Place request construction, execution and cleanup inside this scope.
+        Readiness/on_begin failure releases admission without consuming sequence
+        or notifying on_end. Admission resets rounds and compile time; a later
+        failure still consumes sequence. last_request is unchanged until install.
+        Concurrent/reentrant entry raises RuntimeError without consuming sequence.
+        The observer receives the body's normal-return/escaping-error outcome
+        after cleanup. Ordinary observer Exceptions warn once; BaseExceptions
+        propagate. Admission releases in either case.
         """
         if not self._admission.acquire(blocking=False):
             raise RuntimeError("simulation acquisition is already active (reentry)")
@@ -201,28 +227,50 @@ class SimulationBinding:
                 self._wait_ready()
             if self._on_begin is not None:
                 self._on_begin()
-        except BaseException:
-            self._admission.release()
-            raise
-        sequence = self._sequence
-        self._sequence += 1
-        self.rounds = ()
-        if self._on_end is not None:
-            self._acquire_started = time.monotonic()
-        return sequence
-
-    def end(self) -> None:
-        """Release a successful begin after synchronous acquisition finishes.
-
-        The caller must invoke this once in its finally block, after round work
-        ends. No replay inputs or callback resources are cleared. Returns None;
-        releasing an unlocked admission lock raises RuntimeError.
-        The optional on_end observer runs once, including after failed rounds;
-        observer exceptions cannot mask acquisition failures or leak admission.
-        """
-        try:
+            sequence = self._sequence
+            self._sequence += 1
+            self.rounds = ()
+            self._compile_wall_s = 0.0
             if self._on_end is not None:
-                self._on_end(self.rounds, time.monotonic() - self._acquire_started)
+                self._acquire_started = time.monotonic()
+            complete = False
+            try:
+                yield sequence
+                complete = True
+            finally:
+                self._notify_outcome(complete=complete)
+        finally:
+            self._admission.release()
+
+    @contextmanager
+    def compiling(self) -> Iterator[None]:
+        """Measure builder wall seconds inside an acquire scope, including failure.
+
+        Use only around request construction, not installation or execution.
+        Each scope adds elapsed monotonic seconds to that acquire's outcome.
+        Outside acquire, measured time is not delivered to an observer. This
+        method does not check scope ownership. Without on_end it reads no clock.
+        """
+        if self._on_end is None:
+            yield
+            return
+        started = time.monotonic()
+        try:
+            yield
+        finally:
+            self._compile_wall_s += time.monotonic() - started
+
+    def _notify_outcome(self, *, complete: bool) -> None:
+        if self._on_end is None:
+            return
+        outcome = AcquireOutcome(
+            self.rounds,
+            time.monotonic() - self._acquire_started,
+            self._compile_wall_s,
+            complete,
+        )
+        try:
+            self._on_end(outcome)
         except Exception as error:
             if not self._observer_warned:
                 self._observer_warned = True
@@ -235,8 +283,6 @@ class SimulationBinding:
                         RuntimeWarning,
                         stacklevel=2,
                     )
-        finally:
-            self._admission.release()
 
     def sample_round(
         self,
@@ -250,7 +296,7 @@ class SimulationBinding:
 
         request is the installed, fixed AcquireRequest for the admitted call.
         index is its zero-based software round index, supplied by the SoC. Call
-        between a successful begin and end; this method does not check admission,
+        inside an admitted acquire scope; this method does not check admission,
         request identity or index range and does not increment the index itself.
         cancel is forwarded unchanged as read-only round control; None disables it.
         pacing_cancel optionally controls waiting only, without reaching the backend.
