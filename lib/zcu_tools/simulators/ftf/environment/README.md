@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-11-16，GUI worker policy、共用 telemetry
+**Last updated:** 2026-11-16，acquire 分層 wall
 
 **讀者：** framework-dev、agent。FTF 環境的組裝接縫、數值接線與 acquisition 契約。
 
@@ -93,7 +93,15 @@ The shared [acquire writer](../../README.md#acquire-telemetry) supplies the comm
 summary fields. `FTFSource.finish_acquire(outcome)` receives the binding's
 `AcquireOutcome` and projects its builder-only `compile_wall_s` and `complete`.
 `complete` means the acquire body and cleanup returned normally, including partial
-Stop results. An escaping error is false; evolve/readout timing remains unmeasured.
+Stop results. An escaping error is false.
+`evolve_wall_s` sums each `Engine.evolve` call, including direct evolution,
+cavity-memory spans and projective outcome continuations across software rounds.
+`readout_wall_s` sums cavity field propagation, population conversion, conditional
+ADC preparation and integrated or decimated sampling. These scopes do not overlap
+evolution. A failing call contributes time through its exception; a stage never
+entered contributes `0.0`. Reusing a preparation adds no evolution wall, but still
+counts fresh round sampling. Preparation and pacing remain in total wall's
+remainder. Raw-shot materialization requested after acquire is outside this row.
 Projection values live only in `extras`:
 `ftf.projection_outcomes` counts retained outcome histories per C-order point in the
 latest solved round. `ftf.projection_pruned_weight` gives each point's cumulative

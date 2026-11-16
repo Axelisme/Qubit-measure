@@ -65,12 +65,15 @@ boundary. `summary: AcquireTelemetry` requires `points`, `rounds`, `wall_s`,
 Times are wall seconds; the three stages accept `None` when not measured.
 Each environment projects `compile_wall_s` and `complete` from the binding's frozen
 `AcquireOutcome`. Completion means normal return, including a partial Stop result,
-not completion of every requested round. Single and six fill all stage values
-with floats. Their evolve totals include projective prefixes and continuations.
-ADC preparation, integrated sampling and decimated sampling contribute to readout.
+not completion of every requested round. FTF, single and six fill all stage values
+with floats. FTF measures every `Engine.evolve` and ADC/readout call across rounds,
+cavity-memory spans and projective continuations. Single and six evolve totals
+include projective prefixes and continuations. ADC preparation, integrated sampling
+and decimated sampling contribute to readout.
 Failed calls retain elapsed stage time; stages not entered remain `0.0`.
 Deferred raw materialization after acquire is outside these totals.
-FTF's evolve/readout slots remain `None` until its stage instrumentation is installed.
+The shared stage annotations still allow `float | None`; unmeasured stages in
+other callers can use `None`.
 Use simulator-prefixed extras keys and JSON values, or `{}` when absent.
 The writer projects only the declared fields and does not modify the caller's
 summary. `RoutingRecord` inherits them and adds a UTC timestamp, frontend CPU
