@@ -90,6 +90,32 @@ class SelectedInput:
         }
 
 
+# The Pareto decision set is separate from the shared scene inventory (ADR-0072).
+PARETO_DEFAULT_NAMES = frozenset(
+    {
+        "idle_coherence",
+        "carrier_sweep",
+        "gain_sweep",
+        "length_sweep",
+        "idle_sweep",
+        "gate_sequence",
+        "simultaneous_drive",
+        "shaped_gate_sequence",
+        "overlapping_shaped_tones",
+        "overlapping_constant_tones",
+        "long_gate_sequence",
+        "long_shaped_gate_sequence",
+        "carrier_sweep_bias045",
+        "gate_sequence_bias045",
+        "random_gate_sequence",
+        "random_shaped_gate_sequence",
+        "kernel_single_constant",
+        "kernel_single_sampled",
+        "kernel_multitone_sampled",
+    }
+)
+
+
 def select_inputs(
     index: Path | None = None,
     scenario: str | None = None,
@@ -98,7 +124,9 @@ def select_inputs(
 ) -> tuple[SelectedInput, ...]:
     """Select indexed numeric records and their storage-independent identity.
 
-    index selects one index; None reads both tracked indexes. scene_cache is an
+    index selects all rows of one index; None reads both tracked indexes. With
+    neither index nor scenario, require and select PARETO_DEFAULT_NAMES before
+    reading payloads. Missing required names raise ValueError. scene_cache is an
     absolute override of the repository-shared version-1 cache. All index names
     must be globally unique, even without a scenario. A scenario requires one
     match; unknown names list legal names and duplicates list source indexes.
@@ -114,6 +142,17 @@ def select_inputs(
             legal = ", ".join(entry.name for _, entry in entries)
             raise ValueError(f"Unknown scenario: {scenario}. Legal names: {legal}")
         entries = tuple(matches)
+    elif index is None:
+        missing = PARETO_DEFAULT_NAMES - {entry.name for _, entry in entries}
+        if missing:
+            raise ValueError(
+                f"Missing Pareto default scenarios: {', '.join(sorted(missing))}"
+            )
+        entries = tuple(
+            (path, entry)
+            for path, entry in entries
+            if entry.name in PARETO_DEFAULT_NAMES
+        )
     cache = scene_cache_directory(scene_cache)
     try:
         records = read_scene_records(cache, (entry for _, entry in entries))

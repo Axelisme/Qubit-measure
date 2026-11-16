@@ -873,7 +873,8 @@ def main(argv: list[str] | None = None, *, inputs: list[Input] | None = None) ->
 
     argv omits the executable name. --index-dir selects the directory containing
     both category indexes. --scene-cache is an absolute override of the shared
-    cache. --scenario processes only its indexed row. inputs optionally supplies
+    cache. --scenario processes only its indexed row, or appends a declared new
+    scene to its category with --update-index. inputs optionally supplies
     caller-owned declarations instead of the fixed inventory; builder sources
     are closed after snapshotting. Native thread settings are fixed/logged at 1.
     --update-index explicitly updates selected identities only after all selected
@@ -909,8 +910,10 @@ def main(argv: list[str] | None = None, *, inputs: list[Input] | None = None) ->
         for category in ("synthetic", "real")
     }
     entries = indexed_scenes(tuple(indexes.values()))
-    if args.scenario is not None and not any(
-        entry.name == args.scenario for _, entry in entries
+    if (
+        args.scenario is not None
+        and not args.update_index
+        and not any(entry.name == args.scenario for _, entry in entries)
     ):
         raise ValueError(
             f"Unknown scenario: {args.scenario}. Legal names: {', '.join(entry.name for _, entry in entries)}"

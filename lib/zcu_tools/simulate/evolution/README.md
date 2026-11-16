@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-11-16, public physical decoding and scene-cache versions
+**Last updated:** 2026-11-17, reference producer single-row selection
 
 **讀者：** framework-dev、agent。Segment evolution 的公開輸入、路由與數值邊界。
 
@@ -168,8 +168,11 @@ The independent preparation entry point is
 [`family_pareto_reference_producer.py`](../../../../tests/simulate/evolution/contract/family_pareto_reference_producer.py).
 It reads only frozen record names and physics. The caller explicitly maps each
 index to the independent lab-frame or interaction-picture solver and supplies
-an explicit scene cache. All numeric files load before any solver runs. Metadata
-and scene names do not select it. Both solvers stay in tests. The codec imports neither tests nor tools.
+an explicit scene cache. `--scenario NAME` requires one matching row across the
+supplied indexes before reading payloads. Zero or multiple matches fail without
+solving; other rows need no payload. Without a scenario, all indexed rows remain
+selected. All selected numeric files load before any solver runs. Metadata
+and scene names do not select the solver. Both solvers stay in tests. The codec imports neither tests nor tools.
 See [ADR-0078](../../../../docs/adr/0078-evolution-module-boundary.md).
 
 ## Dispatch inspection

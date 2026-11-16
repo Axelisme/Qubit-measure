@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-11-16，environment 測試分層
+**Last updated:** 2026-11-17，reference producer 單列選取
 
 **讀者：** framework-dev、agent。查閱測試的 owner、fixture、執行方式與搬遷驗收契約。
 
@@ -149,6 +149,11 @@ uv run --directory "$PWD" --no-sync -- python -m tests.simulate.evolution.contra
 
 `--converged` 與 `--interaction` 可重複指定。Producer 只讀 record 的 name、physical，既有 key 命中就讀取，只有 missing key 才用指定 solver 求解。
 它不讀 metadata、不維護場景名稱清單，也不在失敗後換 solver。
+加 `--scenario NAME` 時，producer 先在所有明確提供的清單中選取恰好一筆同名列，再讀該列 payload。
+零筆會列合法名稱，多筆會列來源，兩者都在讀 payload 或呼叫 solver 前失敗。
+未選列不需要 payload，也不會求解。不帶 scenario 時維持整批處理。
+公開 `prepare_references(index, cache, scene_cache=..., solver=..., scenario=NAME)` 對單份清單提供同樣選取。
+例如只準備某個已凍結場景，沿用上方命令並加 `--scenario idle_coherence`，且仍須取得 solver 成本授權。
 所有選定數值檔載入成功才可求解。場景缺檔會列名稱、hash 與 scene producer 指令並失敗，不補建或求解。
 測試以公開 `write_frozen_index` 和 `write_scene_record` 在 tmp_path 建立最小 fixture，不填共用快取。
 既有極小 solver 回歸也只寫 tmp_path。

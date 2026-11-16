@@ -5,6 +5,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
+import pytest
 from zcu_tools.simulate.evolution import (
     FrozenIndexEntry,
     FrozenRecord,
@@ -17,8 +18,47 @@ from tests.tools.family_pareto_support import make_scene
 from tools import family_pareto, family_pareto_inputs
 
 
+@pytest.mark.parametrize("missing_default", [False, True])
+def test_default_selection_checks_required_names_before_reading_only_pareto_payloads(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, missing_default: bool
+) -> None:
+    scene = make_scene("idle_coherence")
+    with closing(scene.source):
+        physical = physical_input(scene.source, scene.batch)
+    cache = tmp_path / "scenes"
+    paths = (tmp_path / "first.index.json", tmp_path / "second.index.json")
+    names = sorted(family_pareto.PARETO_DEFAULT_NAMES)
+    records = [
+        FrozenRecord(name, physical, {"reason": "fixture", "expected_families": ["t4"]})
+        for name in names
+    ]
+    extra = FrozenIndexEntry.from_record(replace(records[0], name="other-workload"))
+    if missing_default:
+        # No payload exists: missing required names must fail at index selection.
+        entries = [FrozenIndexEntry.from_record(record) for record in records[1:]]
+    else:
+        entries = [write_scene_record(cache, record) for record in records]
+    write_frozen_index(paths[0], entries)
+    write_frozen_index(paths[1], (extra,))
+    # Default path discovery has no path override; substitute only that I/O boundary.
+    monkeypatch.setattr(family_pareto, "scene_index_paths", lambda index: paths)
+
+    if missing_default:
+        with pytest.raises(ValueError, match=f"Missing Pareto default.*{names[0]}"):
+            family_pareto.select_inputs(scene_cache=cache)
+    else:
+        selected = family_pareto.select_inputs(scene_cache=cache)
+        assert [item.input.name for item in selected] == names
+        assert [
+            FrozenIndexEntry.from_record(item.record) for item in selected
+        ] == entries
+
+
+@pytest.mark.parametrize("explicit_index", [False, True])
 def test_select_inputs_reads_one_frozen_scenario_without_producer_building(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    explicit_index: bool,
 ) -> None:
     scene = make_scene("idle_coherence")
     with closing(scene.source):
@@ -42,7 +82,12 @@ def test_select_inputs_reads_one_frozen_scenario_without_producer_building(
         ),
     )
 
-    (selected,) = family_pareto.select_inputs(path, "second", scene_cache=cache)
+    if not explicit_index:
+        # Default discovery has no path argument; keep real index/record selection.
+        monkeypatch.setattr(family_pareto, "scene_index_paths", lambda index: (path,))
+    (selected,) = family_pareto.select_inputs(
+        path if explicit_index else None, "second", scene_cache=cache
+    )
 
     assert selected.input.name == "second"
     assert selected.record.name == "second"
@@ -50,6 +95,23 @@ def test_select_inputs_reads_one_frozen_scenario_without_producer_building(
     with closing(scene.source):
         np.testing.assert_array_equal(scene.batch.points, [0, 1])
         assert scene.families == ("t4",)
+
+
+def test_explicit_index_selects_all_rows_outside_the_pareto_default(
+    tmp_path: Path,
+) -> None:
+    scene = make_scene("idle_coherence")
+    with closing(scene.source):
+        physical = physical_input(scene.source, scene.batch)
+    cache, path = tmp_path / "scenes", tmp_path / "inputs.index.json"
+    records = [
+        FrozenRecord(name, physical, {"reason": "fixture", "expected_families": ["t4"]})
+        for name in ("first-workload", "second-workload")
+    ]
+    entries = [write_scene_record(cache, record) for record in records]
+    write_frozen_index(path, entries)
+    selected = family_pareto.select_inputs(path, scene_cache=cache)
+    assert [FrozenIndexEntry.from_record(item.record) for item in selected] == entries
 
 
 def test_read_inputs_combines_manifests_and_builds_fresh_owned_scenes(

@@ -276,6 +276,12 @@ Child 沿用外層獨占 runner 的 process group 與鎖，不另取鎖。
 `family_pareto.select_inputs` 是公開來源／身份接縫，回傳工具的 `Input` 與原 `FrozenRecord`。
 它用 `simulate.evolution.digest(record.metadata)` 算 metadata hash，不另寫 hash 公式。
 接縫經公開 codec 讀入庫 index 與 repo 共用 scene cache，存放位置不參與 record 身份。
+共用清單的成員不等於 Pareto 決策集合。未指定 index 或 scenario 時，接縫要求並選取旁邊宣告的 19 個 Pareto 名稱。
+它先核對跨清單重名與必要名稱，再讀選定 payload。顯式 index 不帶 scenario 時全選，scenario 可嚴格單選非 Pareto 列。
+Profile 列不作 family 去留證據。新增 Pareto 場景須同時加名稱宣告與清單列。
+場景 producer 只在明確 `--update-index --scenario NEW` 時，接受 inventory 已宣告且所有清單皆無的新列。
+它先建構及寫快取，再加到該 category 尾端，保留其他列與順序。完整 prepare 仍核對 exact name set，不推導刪列或換組。
+選取與新增列的取捨見[共用清單與 Pareto 選集討論](../discussions/2026-11-17-pareto-selection-and-scene-append.md)。
 量測 consumer 不再寫 records 副本，也不保留舊 freeze helper 或 producer import。
 計時 owner 只接已備好的 session；paired caller 透過這個接縫取得同一組每筆身份。
 

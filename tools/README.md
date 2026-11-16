@@ -1,6 +1,6 @@
 # tools/
 
-**Last updated:** 2026-11-16 (paired Engine comparison and public input-format versions)
+**Last updated:** 2026-11-17 (Pareto default selection and single-scene preparation)
 
 **讀者：** framework-dev。查閱 repo 開發工具的 CLI、輸出與比較機制。
 
@@ -335,7 +335,16 @@ without importing the scene producer or rebuilding device models. Each returned
 `Input.build()` creates a fresh source that the caller closes.
 
 By default it reads `tools/data/family_pareto/frozen-synthetic.index.json` and
-`frozen-real.index.json`. `--index PATH` selects one index. Numeric records live
+`frozen-real.index.json`. With neither `--index` nor `--scenario`, it requires
+and selects the 19 names in `PARETO_DEFAULT_NAMES` beside `select_inputs`.
+It rejects missing default names after checking all indexes for duplicates,
+before reading any payload or reference. Other rows may share those indexes;
+the default selection does not read their payloads or references.
+`--index PATH` without a scenario selects every row in that index.
+`--scenario NAME` selects exactly one row from the supplied index or both default
+indexes, including rows outside the Pareto set. Adding a Pareto scene requires
+both its index row and an explicit addition to the name set. Profile rows do
+not provide evidence for family retention or removal. Numeric records live
 in the repository-shared `<git common dir parent>/.agent_state/benchmark/family_pareto/scenes/v1`.
 `--scene-cache DIR` requires an absolute override. Tools resolve Git locations;
 simulate only receives explicit paths. No caller should infer scene identity
@@ -470,9 +479,10 @@ requires the corresponding cost approval.
 
 ### Inventory-wide manifest workflow
 
-The command sequence is check first, measure second. Omit `--index` to read
-both tracked indexes. Select one index and an absolute numeric cache override
-when comparing a separately prepared scene set.
+The command sequence is check first, measure second. Omit `--index` and
+`--scenario` to select the Pareto default set from both tracked indexes.
+Select one index and an absolute numeric cache override when comparing every
+row of a separately prepared scene set.
 From the worktree root, after obtaining the relevant cost approval:
 
 ```bash
@@ -889,8 +899,21 @@ uv run --directory "$PWD" --no-sync -- python -m tools.family_pareto_scenarios \
 owns preparation. `indexes` maps categories to explicit index paths.
 The producer fixes and logs OMP, OpenBLAS, MKL and Numba native thread settings
 at one. Complete preparation checks each category's exact name set before
-snapshotting. `--scenario NAME` processes only that indexed row.
-Diagnostics distinguish existing files, missing files, rebuild checks and hash
+snapshotting, even with `--update-index`. `--scenario NAME` processes one row.
+For a new name already declared in the inventory but absent from both indexes,
+pass `--update-index --scenario NEW`. The producer builds and caches that scene,
+then appends its identity to the tail of its declared category's index.
+Without `--update-index`, a missing row fails. Unknown declarations, duplicate
+selections and category moves fail before building. For example, after adding
+the tracked builder declaration and obtaining compute approval:
+
+```bash
+uv run --directory "$PWD" --no-sync -- python -m tools.family_pareto_scenarios \
+  --index-dir tools/data/family_pareto --scene-cache /absolute/scene-cache \
+  --update-index --scenario NEW
+```
+
+Diagnostics distinguish unindexed names, existing files, missing files, rebuild checks and hash
 mismatches. A mismatch fails without replacing the old pinned file or index.
 Missing files are filled only after the rebuilt identity matches the pin.
 
@@ -919,6 +942,11 @@ uv run --directory "$PWD" --no-sync -- python -m tests.simulate.evolution.contra
   --scene-cache /absolute/scene-cache --cache /path/to/approved/reference-cache
 ```
 
+Add `--scenario NAME` to solve only that row. The reference producer requires
+exactly one match across the explicitly supplied indexes before reading any
+payload. Zero or multiple matches fail before the solver. Other rows need no
+payload for this operation. Without a scenario, it retains batch preparation.
+`prepare_references(..., scenario=NAME)` offers the same selection for one index.
 The reference producer reads names and physics; metadata never selects a solver.
 All selected numeric files must load before any solver runs. Missing scene files
 list the name, hashes and scene-producer command, then fail without rebuilding.

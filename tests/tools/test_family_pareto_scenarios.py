@@ -67,9 +67,11 @@ def test_prepare_checks_pinned_identity_and_keeps_valid_cache(tmp_path: Path) ->
 
 
 @pytest.mark.parametrize("change", ["missing", "extra", "renamed", "moved"])
+@pytest.mark.parametrize("update_index", [False, True])
 def test_prepare_rejects_inventory_drift_before_building(
     tmp_path: Path,
     change: str,
+    update_index: bool,
 ) -> None:
     from dataclasses import replace
 
@@ -93,7 +95,9 @@ def test_prepare_rejects_inventory_drift_before_building(
         "moved": [replace(original, category="real")],
     }[change]
     with pytest.raises(ValueError, match="inventory.*(missing|unexpected|category)"):
-        scene_producer.prepare_scenes(altered, {"synthetic": index}, tmp_path / "cache")
+        scene_producer.prepare_scenes(
+            altered, {"synthetic": index}, tmp_path / "cache", update_index=update_index
+        )
     assert built == []
 
 
@@ -182,6 +186,111 @@ def test_prepare_publishes_no_indexes_until_all_selected_builders_succeed(
     assert {
         category: read_frozen_index(path) for category, path in indexes.items()
     } == original
+
+
+@pytest.mark.parametrize("category", ["synthetic", "real"])
+def test_prepare_explicit_new_scenario_appends_once_after_caching(
+    pinned_inventory: PinnedInventory, tmp_path: Path, category: str
+) -> None:
+    from dataclasses import replace
+
+    from zcu_tools.simulate.evolution import read_frozen_index, read_scene_records
+
+    declarations, indexes, cache = pinned_inventory
+    original = {key: read_frozen_index(path) for key, path in indexes.items()}
+    new = replace(declarations[0], name="declared-new", category=category)
+
+    def forbidden_build() -> Scene:
+        raise AssertionError("append must not build unselected declarations")
+
+    inputs = [replace(item, build=forbidden_build) for item in declarations] + [new]
+    argv = [
+        "--index-dir",
+        str(tmp_path),
+        "--scene-cache",
+        str(cache),
+        "--update-index",
+        "--scenario",
+        new.name,
+    ]
+    assert scene_producer.main(argv, inputs=inputs) == 0
+    updated = read_frozen_index(indexes[category])
+    assert updated[:-1] == original[category]
+    assert updated[-1].name == new.name
+    assert read_scene_records(cache, updated[-1:])[0].name == new.name
+    for other, path in indexes.items():
+        if other != category:
+            assert read_frozen_index(path) == original[other]
+    assert scene_producer.main(argv, inputs=inputs) == 0
+    assert read_frozen_index(indexes[category]) == updated
+
+
+@pytest.mark.parametrize(
+    "selection", ["no-update", "unknown", "duplicate", "moved", "category"]
+)
+def test_prepare_invalid_single_scenario_does_not_build_or_publish(
+    pinned_inventory: PinnedInventory, selection: str
+) -> None:
+    from dataclasses import replace
+
+    from zcu_tools.simulate.evolution import read_frozen_index
+
+    declarations, indexes, cache = pinned_inventory
+    original = {key: read_frozen_index(path) for key, path in indexes.items()}
+    calls: list[str] = []
+
+    def forbidden_build() -> Scene:
+        calls.append("builder")
+        raise AssertionError("invalid selection must fail before building")
+
+    new = replace(declarations[0], name="declared-new", build=forbidden_build)
+    inputs = [new]
+    scenario = new.name
+    if selection == "unknown":
+        scenario = "not-declared"
+    elif selection == "duplicate":
+        inputs.append(new)
+    elif selection == "moved":
+        inputs = [replace(new, name=declarations[1].name)]
+        scenario = declarations[1].name
+    elif selection == "category":
+        inputs = [replace(new, category="not-a-category")]
+    with pytest.raises(ValueError, match="inventory.*(missing|ambiguous|category)"):
+        scene_producer.prepare_scenes(
+            inputs,
+            indexes,
+            cache,
+            scenario=scenario,
+            update_index=selection != "no-update",
+        )
+    assert calls == []
+    assert {key: read_frozen_index(path) for key, path in indexes.items()} == original
+
+
+def test_prepare_failed_new_builder_keeps_indexes_and_existing_numeric_data(
+    pinned_inventory: PinnedInventory,
+) -> None:
+    from dataclasses import replace
+
+    from zcu_tools.simulate.evolution import read_frozen_index, read_scene_records
+
+    declarations, indexes, cache = pinned_inventory
+    scene_producer.prepare_scenes(declarations, indexes, cache)
+    original = {key: read_frozen_index(path) for key, path in indexes.items()}
+
+    def failed_build() -> Scene:
+        raise RuntimeError("new builder failed")
+
+    new = replace(declarations[0], name="declared-new", build=failed_build)
+    with pytest.raises(RuntimeError, match="new builder failed"):
+        scene_producer.prepare_scenes(
+            [*declarations, new], indexes, cache, scenario=new.name, update_index=True
+        )
+    assert {key: read_frozen_index(path) for key, path in indexes.items()} == original
+    for entries in original.values():
+        assert [record.name for record in read_scene_records(cache, entries)] == [
+            entry.name for entry in entries
+        ]
 
 
 @pytest.fixture(scope="module")

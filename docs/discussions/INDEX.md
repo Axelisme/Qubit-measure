@@ -18,6 +18,8 @@
 
 ## 模擬量測環境
 
+- 2026-11-17 [共用清單的 Pareto 選集與明確新增場景](2026-11-17-pareto-selection-and-scene-append.md)：選取契約。Pareto 自持預設名稱，明確更新才新增列，reference producer 只讀解所選單列。
+
 - 2026-11-16 [成對 Engine 計時的 process、身份與統計](2026-11-16-paired-engine-timing.md)：跨 process 計時。Warm 長駐、first/cold 每筆新 child，四項 telemetry 校準共用一個模式。
 
 - 2026-11-16 [共用模擬器計時與 reference 必填](2026-11-16-shared-simulator-measurement.md)：計時歸屬。Session、history 與 clock 共用 owner，consumer 保留 reference 與結果 schema，0 elapsed 原樣記錄。

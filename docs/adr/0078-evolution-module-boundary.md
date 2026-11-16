@@ -63,6 +63,10 @@ Caller 的 JSON metadata 對 codec 不透明，場景 reason、families、routes
 `load_reference` 永遠 cache-only，miss 就失敗。
 `write_reference` 只原子保存 producer 交來的數值，不求解或替它認證收斂。
 獨立 solver 與 reference producer 留在 tests 側，經數值檔交接。失敗不換 solver。
+Tests reference producer 的 `--scenario NAME` 要求在呼叫端明示的清單中恰好一列同名，選取後才讀 payload 或呼叫 solver。
+零筆列合法名稱，多筆列來源並失敗。其他列不讀不解，不帶 scenario 時仍整批準備。
+Solver 由清單與 solver 的顯式對應決定，不讀 tools metadata，也不 import tools。
+單列準備的取捨見[共用清單與 Pareto 選集討論](../discussions/2026-11-17-pareto-selection-and-scene-append.md)。
 
 場景 producer 與數值 codec 的分工見 [[0072]]。
 取捨與歷史 cache 缺資料時的驗證方式見[凍結輸入討論](../discussions/2026-11-16-frozen-simulator-inputs.md)。
