@@ -50,6 +50,18 @@ Preview 的 destination_context 與 receipt destination 只含 entry_name、poin
 
 2026-10-29 使用者問：「關於代裁的23，真的需要知道entry/point的狀態嗎？不能只是聲明讀取或寫入當前激活的三個檔案嗎？」目前規則依此只呈現作用中位置，並允許 global 寫回，取代 2026-10-28 只接受 GUI 所選 point 的限制，見 [[0063]]。
 
+### Parameter upsert
+
+ParameterWriteback 與 ParameterUpdate 可帶 `create_kind: str | None = None`，由 adapter 指定元件不存在時使用的 registered kind。None 不建立元件，維持原本的缺元件錯誤。Apply 在同一次 parameter edit 中建立缺少的元件，再寫提案值與 metadata。建立時只提供提案欄位，其餘使用 registered model defaults。既有元件只更新指定欄位，不改 kind 或其他欄位。任一筆失敗整組不寫。Kind 與欄位仍由 lab 定義，framework 不寫死 resonator，遵循 [[0063]]。
+
+`EditView.add_component(name, kind=..., **fields)` 與 set、set_meta 共用同一個 draft，不另開 edit。Views owner 內的 `add_component_to_draft` 仍只收文件 draft。EditView 的 source 由 owning view 傳入，只用於新增元件時的錯誤來源。
+
+`onetone/range_find` 對每個有名字的 dip 提出 `<name>.freq` MHz，指定 create_kind="resonator"。不要求 capture，也不依 capture 內名稱篩列。Unassigned 不提案，identity_diagnostic 仍提示配對不確定。Preview 現值缺失時維持缺值顯示。GUI Apply、MCP apply_writeback 與 recipe accept 使用同一個 parameter item ID，不新增列種類、入口或按鈕。
+
+例如 R1、R2 的 dip 在 6012.3 與 6123.4 MHz，作用中 point 只有 R1，接受兩列後覆寫 R1.freq 並建立只指定 freq 的 resonator R2。名稱拼錯時會建立多餘元件，這是已接受的取捨，Apply 前可取消勾選。此政策只由 range_find 啟用，onetone/freq 與 mux adapters 維持 create_kind=None；其他實驗需要建立元件時須由其 adapter 明確指定。
+
+2026-11-16，使用者裁定「沒有就建立，有就複寫」，並對最終做法回答「可以，照這樣定」。使用者隨後要求 commit_parameter_updates 保持中立，反對為此擴大 add_component_to_draft 的參數型別，改由 EditView 提供 add_component。比較過的選項與被否決的理由見 [討論紀錄](../discussions/2026-11-16-range-find-writeback-upsert.md)。
+
 Host 的 busy、writable、result、context 與 [[0070]] holder admission 仍各自生效。可預期的 `LibraryEntryInvalid` 保留 dialog、row、selection 與 draft，供使用者修正；非預期錯誤向外傳遞。
 
 ## 取捨與相鄰責任

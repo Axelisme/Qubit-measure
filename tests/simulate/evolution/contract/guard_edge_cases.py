@@ -2,7 +2,7 @@
 
 Each case approaches one numerical threshold, not every conjunct of a guard.
 Inputs and margins are explicit here; no production guard/helper is imported.
-The 20-point multitone inventory is retained rather than bypassing reuse policy.
+The paused sampled multitone gate has no numerical-density edge observation.
 """
 
 from dataclasses import replace
@@ -35,7 +35,6 @@ EDGE_FAMILIES = (
     "gate_cache",
     "period_table",
     "common_frame",
-    "multitone_gate",
     "multitone_rwa",
     "floquet",
 )
@@ -63,8 +62,6 @@ def _smooth_rwa_edge(family: str) -> AccuracyCase:
         np.array([0.0, 4.0, 8.0]),
     )
     tracks = (drive_track(batch, envelope, gain=0.08, frequency=0.6),)
-    if family == "multitone_rwa":
-        tracks += (drive_track(batch, envelope, gain=0.05, frequency=0.73),)
     return AccuracyCase(
         "guard_edge/" + family,
         coherent_source(linear_drive_model()),
@@ -142,9 +139,12 @@ def guard_edge_case(family: str) -> AccuracyCase:
         # the spectral/interpolation estimate <= budget/2 limits this input.
         gain = 71.6674401855469 * (1 - 1e-6)
     elif family == "single_tone_rwa":
-        # Retained positive-frequency X/2 has norm .001 GHz.
-        # phase = 2*pi*d*(gain*.001)^2/f = .05999994 rad < .06.
-        gain = np.sqrt(0.06 * (1 - 1e-6) * frequency / (2 * np.pi * 8)) / 0.001
+        batch = timeline(2, 1.0)
+        x = np.diag([frequency, -frequency / 2]).astype(complex)
+        model = replace(model, drives=(SecularDrive("drive", x, np.zeros_like(x)),))
+        # Both signs give A=diag(gain,gain/2), so kappa2=gain, just below .08.
+        # At 1 ns each omitted transfer <=gain**2*f**2<.0058: no restoration.
+        gain = 0.08 * (1 - 1e-6)
     elif family == "dyson":
         batch = timeline(2, 1.0)
         # At resonance r = gain*0.002/sqrt(gamma**2 + 1/duration**2).
@@ -155,14 +155,17 @@ def guard_edge_case(family: str) -> AccuracyCase:
         # below its threshold while approaching the one-photon r boundary.
         density = 0.999 * np.eye(2) / 2 + 0.001 * coherent.initial_density
         source = ModelSource(density, coherent.model)
-    elif family in ("single_tone_gate", "multitone_rwa"):
+    elif family == "single_tone_gate":
         return _smooth_rwa_edge(family)
-    elif family == "multitone_gate":
-        case = accuracy_case("joint_gate_inventory")
-        # |f1|-|f2| = 0.1000001 GHz, only 1e-7 GHz above 100 MHz.
+    elif family == "multitone_rwa":
+        case = accuracy_case("joint_constant")
+        # Stay just above the 50 MHz absolute-carrier admission boundary.
         tracks = (
-            replace(case.batch.tracks[0], frequency_ghz=np.full(20, 0.4000001)),
-            case.batch.tracks[1],
+            case.batch.tracks[0],
+            replace(
+                case.batch.tracks[1],
+                frequency_ghz=np.full(20, 0.05 * (1 + 1e-6)),
+            ),
         )
         return replace(
             case,

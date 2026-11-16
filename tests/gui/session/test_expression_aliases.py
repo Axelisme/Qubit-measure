@@ -7,19 +7,21 @@ from zcu_tools.gui.session.expression import ExpressionError, evaluate_scalar_ex
 from zcu_tools.gui.session.types import ParameterContext, RoleBinding
 from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
 from zcu_tools.resources.entry import ComponentSchema, RoleResolutionError, RoleSpec
-from zcu_tools.resources.entry.schema import PointDocument, PointGeneral
+from zcu_tools.resources.entry.schema import ParameterDocument, ParameterGeneral
 
 
 class NumericComponent(ComponentSchema):
     rate: float
 
 
-def _point() -> PointDocument:
-    return PointDocument.model_construct(
+def _point() -> ParameterDocument:
+    return ParameterDocument.model_construct(
         format="zcu.parameter-container",
         format_version="2.0",
         schema_version=1,
-        general=PointGeneral(created_at="2026-10-09T00:00:00Z", ext={"offset": 2.0}),
+        general=ParameterGeneral(
+            created_at="2026-10-09T00:00:00Z", ext={"offset": 2.0}
+        ),
         components={
             "Q1": NumericComponent(kind="expression/test", rate=4.0),
             "Q2": NumericComponent(kind="expression/test", rate=5.0),

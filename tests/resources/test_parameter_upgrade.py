@@ -10,7 +10,7 @@ from ruamel.yaml import YAML
 from zcu_tools.format_version import YamlMap, YamlValue
 from zcu_tools.resources.parameter_schema import ParameterSchemaPolicy
 from zcu_tools.resources.parameter_upgrade import (
-    ParameterDocument,
+    ParameterUpgradeDocument,
     UpgradePlan,
     UpgradeSource,
     UpgradeStep,
@@ -139,17 +139,17 @@ def test_schema_hint_previews_and_applies_source_or_caller_target() -> None:
 def test_runner_orders_steps_and_preserves_caller_input() -> None:
     calls: list[int] = []
 
-    def validate(document: ParameterDocument, version: int) -> None:
+    def validate(document: ParameterUpgradeDocument, version: int) -> None:
         if document.data.get("schema_version") != version:
             raise ValueError("version does not match shape")
 
-    def step_one(document: ParameterDocument) -> ParameterDocument:
+    def step_one(document: ParameterUpgradeDocument) -> ParameterUpgradeDocument:
         calls.append(1)
         document.data["middle"] = document.data.pop("old")
         document.data["schema_version"] = 2
         return document
 
-    def step_two(document: ParameterDocument) -> ParameterDocument:
+    def step_two(document: ParameterUpgradeDocument) -> ParameterUpgradeDocument:
         calls.append(2)
         document.data["new"] = document.data.pop("middle")
         document.data["schema_version"] = 3
@@ -161,7 +161,9 @@ def test_runner_orders_steps_and_preserves_caller_input() -> None:
         validate,
         lambda _: False,
     )
-    original = ParameterDocument({"schema_version": 1, "old": 7, "keep": [None, "x"]})
+    original = ParameterUpgradeDocument(
+        {"schema_version": 1, "old": 7, "keep": [None, "x"]}
+    )
     before = deepcopy(original)
     result = upgrade_document(original, plan=plan)
     assert result.data == {"schema_version": 3, "new": 7, "keep": [None, "x"]}
@@ -174,7 +176,7 @@ def test_runner_orders_steps_and_preserves_caller_input() -> None:
 def test_cli_reports_conversion_notes_outside_yaml_payload(
     data_dir: Path, rename_plan: UpgradePlan, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    def transform(document: ParameterDocument) -> ParameterDocument:
+    def transform(document: ParameterUpgradeDocument) -> ParameterUpgradeDocument:
         converted = rename_plan.steps[0].transform(document)
         return replace(converted, notes=("new: rename the declared placeholder",))
 
@@ -184,7 +186,7 @@ def test_cli_reports_conversion_notes_outside_yaml_payload(
     assert main([str(path)], plan=plan) == 0
     assert "new: rename the declared placeholder" in capsys.readouterr().out
     assert upgrade_document(
-        ParameterDocument({"schema_version": 1, "old": 7}), plan=plan
+        ParameterUpgradeDocument({"schema_version": 1, "old": 7}), plan=plan
     ).data == {
         "schema_version": 2,
         "new": 7,
@@ -192,15 +194,15 @@ def test_cli_reports_conversion_notes_outside_yaml_payload(
 
 
 def test_unversioned_document_requires_complete_caller_classification() -> None:
-    def classify(document: ParameterDocument) -> bool:
+    def classify(document: ParameterUpgradeDocument) -> bool:
         return document.data == {"old": 7}
 
-    def validate(document: ParameterDocument, version: int) -> None:
+    def validate(document: ParameterUpgradeDocument, version: int) -> None:
         if document.data != {"old": 7, "schema_version": 1}:
             raise ValueError("incomplete v1 document")
 
     plan = UpgradePlan(ParameterSchemaPolicy(1, ("upgrade",)), (), validate, classify)
-    original = ParameterDocument({"old": 7})
+    original = ParameterUpgradeDocument({"old": 7})
     assert upgrade_document(original, plan=plan).data == {"old": 7, "schema_version": 1}
     assert original.data == {"old": 7}
     corrupt_documents: tuple[YamlMap, ...] = (
@@ -210,7 +212,7 @@ def test_unversioned_document_requires_complete_caller_classification() -> None:
     )
     for corrupt in corrupt_documents:
         with pytest.raises(ValueError, match="classification|unsupported"):
-            upgrade_document(ParameterDocument(corrupt), plan=plan)
+            upgrade_document(ParameterUpgradeDocument(corrupt), plan=plan)
 
 
 @pytest.mark.parametrize("sources", [(2, 1), (1, 1), (1, 3), (0, 1)])
@@ -230,7 +232,7 @@ def test_chain_declarations_must_be_ordered_consecutive_and_end_at_current(
 
 @pytest.mark.parametrize("next_version", [1, 3, 2.0, "2", None, True])
 def test_step_must_return_exact_next_integer_version(next_version: YamlValue) -> None:
-    def malformed_step(document: ParameterDocument) -> ParameterDocument:
+    def malformed_step(document: ParameterUpgradeDocument) -> ParameterUpgradeDocument:
         document.data["schema_version"] = next_version
         return document
 
@@ -240,7 +242,7 @@ def test_step_must_return_exact_next_integer_version(next_version: YamlValue) ->
         lambda _document, _version: None,
         lambda _: False,
     )
-    original = ParameterDocument({"schema_version": 1})
+    original = ParameterUpgradeDocument({"schema_version": 1})
     with pytest.raises(ValueError, match="must produce"):
         upgrade_document(original, plan=plan)
     assert original.data == {"schema_version": 1}
@@ -248,18 +250,18 @@ def test_step_must_return_exact_next_integer_version(next_version: YamlValue) ->
 
 @pytest.fixture
 def rename_plan() -> UpgradePlan:
-    def validate(document: ParameterDocument, version: int) -> None:
+    def validate(document: ParameterUpgradeDocument, version: int) -> None:
         expected = "old" if version == 1 else "new"
         forbidden = "new" if version == 1 else "old"
         if document.data.get(expected) != 7 or forbidden in document.data:
             raise ValueError(f"v{version}: require {expected}=7 and no {forbidden}")
 
-    def transform(document: ParameterDocument) -> ParameterDocument:
+    def transform(document: ParameterUpgradeDocument) -> ParameterUpgradeDocument:
         document.data["new"] = document.data.pop("old")
         document.data["schema_version"] = 2
         return document
 
-    def classify(document: ParameterDocument) -> bool:
+    def classify(document: ParameterUpgradeDocument) -> bool:
         validate(document, 1)
         return True
 
@@ -431,12 +433,12 @@ def test_file_runner_carries_source_context_across_fresh_step_outputs(
     source.write_text("schema_version: 1\n", encoding="utf-8")
     seen: list[tuple[Path | None, int]] = []
 
-    def validate(document: ParameterDocument, version: int) -> None:
+    def validate(document: ParameterUpgradeDocument, version: int) -> None:
         seen.append((document.source_path, version))
 
     plan = UpgradePlan(
         ParameterSchemaPolicy(2, ("upgrade",)),
-        (UpgradeStep(1, lambda _: ParameterDocument({"schema_version": 2})),),
+        (UpgradeStep(1, lambda _: ParameterUpgradeDocument({"schema_version": 2})),),
         validate,
         lambda _: False,
     )
@@ -781,6 +783,6 @@ def test_no_policy_default_or_missing_upgrade_step_is_inferred() -> None:
         lambda _: False,
     )
     with pytest.raises(ValueError, match="missing upgrade step v1"):
-        upgrade_document(ParameterDocument({"schema_version": 1}), plan=plan)
+        upgrade_document(ParameterUpgradeDocument({"schema_version": 1}), plan=plan)
     with pytest.raises(ValueError, match="unsupported schema_version 4"):
-        upgrade_document(ParameterDocument({"schema_version": 4}), plan=plan)
+        upgrade_document(ParameterUpgradeDocument({"schema_version": 4}), plan=plan)

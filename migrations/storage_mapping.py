@@ -9,7 +9,7 @@ or evaluated, and no definitions are registered on import.
 from collections.abc import Mapping
 from typing import Literal
 
-from zcu_tools.resources.parameter_upgrade import ParameterDocument
+from zcu_tools.resources.parameter_upgrade import ParameterUpgradeDocument
 
 from migrations.legacy_labber import LegacyVariableSchema
 from migrations.storage_migration import KeyRule, MigrationMapping, ModuleRule
@@ -123,7 +123,9 @@ _MODULE_NAMES = (
 )
 
 
-def _convert_parameter_batch(document: ParameterDocument) -> ParameterDocument:
+def _convert_parameter_batch(
+    document: ParameterUpgradeDocument,
+) -> ParameterUpgradeDocument:
     # Keep lab imports at execution, not declaration: synthetic framework callers
     # replace this callback and never load concrete lab models.
     from zcu_lab.components.flux_upgrade import convert_storage_flux_batch

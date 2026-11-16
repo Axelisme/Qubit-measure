@@ -4,7 +4,7 @@
 
 Cfg sweep fields use `depth` / `seed`. This experiment uses cfg schema 5.0. Loading a run from an older major version retains Result and metadata, sets cfg to None and emits `CfgUnavailableWarning`. These old runs cannot be reanalyzed. No cfg migration or field alias is provided.
 
-**Last updated:** 2026-10-31
+**Last updated:** 2026-11-15
 
 After changing the parameter source, use Reset to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Reset can overwrite unsaved inputs.
 
@@ -68,6 +68,23 @@ keeps its two charge phases fixed while logical frames evolve separately.
 After CZ, the two named logical corrections advance the respective frames.
 Virtual Z updates the logical frame only. Computational-basis readout is
 invariant to terminal Z frames.
+
+Since 2026-11-15, this experiment and the heralded variant use the same
+concurrent single-qubit schedule in the reference and interleaved arms. Each qubit's X90
+pulses and virtual Z updates keep their original order. Each X90 starts as
+soon as its own qubit's preceding pulse and configured delays finish, without
+waiting for the other qubit. With zero X90 delays, the sequence
+`X90_Q0, Z90_Q1, X90_Q1, X90_Q0, CZ` starts the first Q0 and Q1 X90s together.
+Q0's second X90 follows its first.
+CZ waits for both qubits, then starts the two charge-line pulses together.
+After both CZ pulses and their delays finish, both qubits resume from that
+common boundary. Terminal readout waits for both qubits.
+
+Both arms use this schedule so that their comparison does not mix the inserted
+CZ with a change in single-qubit concurrency or idle duration. Overlapping X90
+crosstalk contributes to both arms; this does not prove that all crosstalk
+cancels in the error estimate. Do not directly combine these error estimates
+with data acquired before this date under the serial schedule.
 
 Each depth/seed/arm has one compiled program and `rounds` host acquisitions of
 `reps` shots. Every host acquisition uses `rounds=1` to preserve its own slot.

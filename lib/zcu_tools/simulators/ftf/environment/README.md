@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-11-12，caller-owned routing controls
+**Last updated:** 2026-11-17，caller-owned routing controls and GUI worker policy
 
 **讀者：** framework-dev、agent。FTF 環境的組裝接縫、數值接線與 acquisition 契約。
 
@@ -80,8 +80,7 @@ CPU), `estimated_cost_unit` and `families`. Failed calls
 before a captured request have zero points and empty families. Family values are
 `rows`, `prepare_cpu_s`, `apply_cpu_s`, `actual_cpu_s`, `cache_hits`,
 `rejected_rows`, `prepare_builds`, `admission_rows`, `estimated_cost` and nullable
-`estimated_cpu_s`; common-frame instruments builds and admission evaluations,
-while other families currently leave those two counters zero; see the
+`estimated_cpu_s`; counter meanings and family-specific instrumentation follow the
 [evolution report contract](../../../simulate/evolution/README.md#routing-telemetry).
 Rows and hits sum across rounds. Noiseless reuse contributes logical rows and
 cache hits but zero kernel CPU, rejections and estimated work. Actual CPU excludes
@@ -168,7 +167,12 @@ One source owns one `Engine` with a 4 MiB routing-facts allowance.
 Numerical preparations live within one evolve. The source's complete preparation
 LRU remains separate from Engine and does not retain noisy outputs.
 The keyword `workers` selects the engine's sole parallel width; direct callers
-use one worker by default. GUI and Notebook policy belongs to
+use one worker by default, including tests, benchmarks and research.
+GUI startup reserves one host CPU, with at least one worker, and keeps warmup off.
+Notebook still reserves two CPUs and opts into warmup. The shared GUI policy is
+`gui.app.measure.startup_context.simulation_workers(cpu_count)`, defined by
+[ADR-0069](../../../../../docs/adr/0069-experiment-core-and-frontends.md#顯式-cfg-與裝置環境).
+Startup instructions belong to
 [FTF startup](../../../../../zcu_lab/simulation_envs/FTF/README.md#演化與重播).
 Evolution limits
 native BLAS to one thread for the entire call. Overlapping evolves share a

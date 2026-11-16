@@ -1,6 +1,6 @@
 # `zcu_tools.resources.entry` result entry composition
 
-**Last updated:** 2026-10-29，global 文件組、nullable point 與 Inspect 寫入
+**Last updated:** 2026-11-16，global／point 共用參數文件型別
 
 **讀者：** framework-dev。Result entry、point、ledger 與輸出位置契約。
 
@@ -42,6 +42,8 @@ Setup 的 alias 存在 `<entry>/aliases.yaml`。每個 point 的 alias 存在 `<
 
 ## 文件與 seed
 
+Global 與 point 的完整參數文件共用 `schema.ParameterDocument`，general 欄位共用 `ParameterGeneral`。兩個 model 不攜帶 scope 身分。`SetupView` 與 `PointView` 仍各綁自己的 `DocumentStore[ParameterDocument]`，由綁定位置選擇文件，磁碟格式不變。
+
 Entry 的 setup 參數既供 global 工作，也供新 point 繼承。Point 自帶 kind、元件、metadata 與 general。General 的固定欄位只有 created_at、description 與 ext。舊 entry_id 即使格式不合法也忽略。Read／refresh 不改 bytes，明確修改時移除這個欄位。Setup 同名換檔後，公開 refresh 或 new_point 會使用新內容，不因 UUID 拒絕。GUI 的 ContextService 使用同一批次 watcher 監看 entry 與 point 已安裝文件，resources 本身不建立 watcher，見 [ADR-0081](../../../../docs/adr/0081-point-data-disk-sync.md)。
 
 Caller 可在 general.ext.flux_value／general.ext.flux_unit 記錄 global flux，ext 沿既有 YAML 值契約保存原值，不提供 flux 專用型別、驗證或單位換算。
@@ -79,6 +81,9 @@ ComponentSchema 只要求字串 kind。完整 component 投影與寫入沿原 mo
 
 `component_field_specs(kind)` 依宣告順序深度優先投影 kind 的 pydantic 欄位，供編輯器使用。每個 FieldSpec 帶 segments、value_kind、required、choices、unit 與 description；巢狀 model 先列 group 再列子欄位，`kind` 不列。投影只讀 class 宣告，不讀值、不建 defaults、不跑 validator 或 I/O。未知 kind 報 UnknownKindError。頂層 text 欄位的 key 若等於沒有 via 的已註冊角色名稱，`reference_role` 填該角色；`role_candidates(document, role)` 依文件順序列出 kind 符合角色 pattern 的元件，供引用欄位的下拉選單使用。這沿用角色解析的既有慣例，不是引用標記，也不檢查目標是否存在。
 
+`EditView.add_component(name, kind=..., **fields)` 在目前 edit draft 新增 registered model，不開另一筆 edit。
+EditView 的 source 由 owning view 傳入，用於新增元件的錯誤來源；它不改寫入目的地。
+`add_component_to_draft` 仍只接受文件 draft，不接受 EditView。
 新增元件保留已產生的 defaults，避免 reload 或 seed 重生 factory 值。Seed 也複製當次 template validation 產生、原 YAML 尚未保存的 defaults。框架不檢查 canonical 或冪等，不替定義者修復 validator。
 
 `ParameterContent` 承載 live point 與量測檔中的唯讀參數，不帶持久文件身分。空內容不帶 general 或 created_at。`parameter_content(view)` 複製 cached content，未用的 raw 區塊保持不解碼。`document_value` 在請求具體欄位時才驗證。`component(name)` 完整驗證單一 component，供依賴跨欄位不變式的 consumer 使用，不先驗其他 component。明確讀取完整 components、general 或 metadata property 時，owner 才驗證該 section。
@@ -124,6 +129,11 @@ Acquired 只保存 run 身分、experiment、point、roles 與事件時間，不
 `ResultEntry.record_analysis(analysis_kind, *, run_ids, summary, record=None)` 記錄跨 run 分析，回傳可供 `ledger.get(id)` 查詢的事件 UUID。事件保留 caller 的分析種類、輸入 runs 順序與 JSON 摘要，origin 為 notebook；不查 run 資料，也不要求工作點。非 None 的 record 交給 ledger 保存與引用，內容格式由 caller 決定。入口只記錄分析，不寫回值；使用者以一般 point 或 setup 編輯寫入值，需要時自行寫 metadata，Entry 不自動連回分析事件。
 
 Accepted 不要求前序事件或 run。Producer 先 append accepted，再提交值與 metadata。Point commit 失敗時 accepted 可以保留，值與 metadata 仍由 DocumentStore 單檔交易控制。Ledger 鎖不延伸到 point；兩者不是跨檔交易。
+
+`ParameterWriteback` 與 `ParameterUpdate` 的 `create_kind` 是選填的 registered kind，預設 None 不建立元件。
+`commit_parameter_updates` 在同一 edit 以公開 `draft.add_component` 建立缺少的元件，再 set 值與 metadata。
+只用該項提案欄位建立元件，其餘使用 registered model defaults。既有元件只更新指定欄位。
+Kind 與欄位由 caller 註冊，框架不指定實驗 kind。任一筆驗證失敗，建立、值與 metadata 整組不寫，見 ADR-0008。
 
 `writeback` 提供共用 parameter／module／waveform／record 項目與 `apply_writeback`。RecordWriteback 接受具體元件名與 producer JSON 欄位，補上 captured run_id、目的地 point、accepted 時間與事件 source。Entry target 的 point 為 None，ledger 與 record row 都可保存 null。
 

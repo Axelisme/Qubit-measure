@@ -42,7 +42,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.context_types import ContextSourceFault, ContextTarget
     from zcu_tools.resources.context.library import ModuleLibrary
     from zcu_tools.resources.entry import PointView, ResultEntry, RoleSpec
-    from zcu_tools.resources.entry.schema import PointDocument
+    from zcu_tools.resources.entry.schema import ParameterDocument
 
 
 class ModuleSlotError(AttributeError):
@@ -107,7 +107,7 @@ class ParameterContext:
     def __init__(
         self,
         *,
-        point: PointDocument | ParameterContent,
+        point: ParameterDocument | ParameterContent,
         library: LibrarySnapshot,
         target: ContextTarget | None,
         roles: RoleBinding | None,
@@ -417,12 +417,12 @@ class ParameterContext:
             raise AttributeError(name)
         return self._point.components[name].model_copy(deep=True)
 
-    def document(self) -> PointDocument | ParameterContent:
+    def document(self) -> ParameterDocument | ParameterContent:
         """Copy the fixed point without I/O or model hooks; unavailable sources raise."""
         self._ensure_readable("point")
         return self._point.model_copy(deep=True)
 
-    def whole_document(self) -> PointDocument:
+    def whole_document(self) -> ParameterDocument:
         """Project the complete fixed point with all model checks, without I/O.
 
         Unlike document(), this explicitly consumes every parameter section.

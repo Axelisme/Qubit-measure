@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-11-16, constant-pair secular guard, diagnostics and frozen-input evidence
+**Last updated:** 2026-11-17, constant-pair guards, sampled rejection and kappa2 admission
 
 **讀者：** framework-dev、agent。Segment evolution 的公開輸入、路由與數值邊界。
 
@@ -12,6 +12,8 @@ boundary and the decision to keep algorithm knowledge in dispatch.
 ## Contents
 
 - [Public entry points](#public-entry-points)
+- [Frozen numeric inputs and references](#frozen-numeric-inputs-and-references)
+- [Dispatch inspection](#dispatch-inspection)
 - [Joint-Fock prototype](#joint-fock-prototype)
 - [Routing telemetry](#routing-telemetry)
 - [Decision graph](#decision-graph)
@@ -36,6 +38,7 @@ The exports in [__init__.py](__init__.py) fall into these groups:
 | Purpose | Exports |
 | --- | --- |
 | Execution and results | `Engine`, `EvolutionResult`, `PathDiagnostics`, `FamilyRouting`, `Cancelled`, `SEGMENT_NUMERIC_VERSION` |
+| Dispatch inspection | `DispatchInspection`, `DispatchRow`, `DispatchCandidate`, `RowKey` |
 | Engine model source and routing history | `ModelSource`, `SecularModel`, `SecularDrive`, `RoutingHistory` |
 | Flux description | `FluxExpansion`, `FluxTerm`, `FluxLevel`, `FluxSchedule`, `FluxWaveform` |
 | Batched timelines | `TimelineBatch`, `DriveTrack`, `EnvelopeSpec`, `SegmentShift`, `segment_spans` |
@@ -47,6 +50,9 @@ The exports in [__init__.py](__init__.py) fall into these groups:
 | Read-only constant RWA guard query | `single_tone_rwa_diagnostic`, `SingleToneRWADiagnostic`, `RWAGuardMetric`, `RWAUncomputed` |
 | Read-only constant-pair RWA guard query | `multitone_rwa_diagnostic`, `MultitoneRWADiagnostic` |
 | Read-only common-frame guard query | `common_frame_diagnostic`, `CommonFrameDiagnostic` |
+| Indexed scene cache | `SCENE_CACHE_VERSION`, `FrozenIndexEntry`, `read_frozen_index`, `write_frozen_index`, `read_scene_records`, `write_scene_record` |
+| Frozen numeric inputs | `FROZEN_PHYSICAL_VERSION`, `FrozenInput`, `FrozenRecord`, `physical_input`, `canonical_json`, `digest`, `read_physical_input`, `read_frozen_input`, `write_frozen_input`, `read_frozen_manifest`, `write_frozen_manifest` |
+| Solver-free reference storage | `SolverTolerances`, `ReferenceResult`, `reference_key`, `load_reference`, `write_reference` |
 
 `Engine(workers, *, families=None, kernels=None, chunks_per_worker=None,
 routing_cache_bytes=4*1024**2)` owns immutable routing facts.
@@ -54,7 +60,8 @@ Numerical preparations live only within one evolve. `evolve(source, batches, *, 
 `ModelSource` and all `TimelineBatch` inputs for one acquire. `NumericModel` is a
 separate fixed-coordinate record, not an Engine input. Constructor and field
 contracts live with their types in [engine.py](engine.py), [secular.py](secular.py),
-[controls.py](controls.py), [model.py](model.py) and [state.py](state.py).
+[inspection records](_inspection.py), [controls.py](controls.py), [model.py](model.py)
+and [state.py](state.py).
 
 Units are ns, GHz and rad. `SecularModel` supplies energies, drive quadratures,
 directional rates and pure dephasing in each quantized flux level's energy
@@ -113,32 +120,165 @@ computed and pass. Low and zero carriers return `accepted=False`, not an excepti
 | --- | --- | --- |
 | `budget` | Per-segment allowance, dimensionless | ≥ 1e-3 |
 | `carrier_ghz` | Absolute carrier, GHz | ≥ 0.05 |
-| `omission_transfer` | Remaining first/second-order transfer proxy after adaptive edge restoration, dimensionless | ≤ 0.0058 |
+| `kappa2` | Spectral norm of the entrywise absolute omitted c/d coefficients summed over both Fourier signs after adaptive edge restoration, dimensionless | ≤ 0.08 |
 | `strength_ratio` | abs(gain) × sum of full quadrature spectral norms / abs(carrier), dimensionless | ≤ 0.25 |
 | `phase_rad` | 2π × duration × squared gain-weighted retained positive Fourier norm / abs(carrier), rad | ≤ 0.06 |
 | `pruning` | Phase-graph population omission bound, dimensionless | ≤ min(budget, 1e-3) |
 | `real_dimension` | Populations plus real within-component coherence coordinates, count | ≤ 64 |
 
 The [single constant RWA owner](kernels/single_tone_rwa.py) defines the query and
-graph comparisons. It shares the retention, transfer, strength and phase
-calculation with the guard through [RWA numerics](kernels/_rwa_numeric.py).
+graph comparisons. It shares retention, kappa2, strength and phase calculations with the guard
+through [RWA numerics](kernels/_rwa_numeric.py). `kappa2` replaces the public
+`omission_transfer` field without an alias. Its value is
+`||sum_sign abs(c/d)||_2`, where c includes gain and d is signed detuning in GHz.
+It uses the endpoint kick's omitted edges, including diagonal ±carrier terms,
+from the complement of the resolved retention mask. Phase-graph pruning does
+not change this edge set.
+
+Retention still starts with the 50 MHz window and restores forward edges and
+their adjoints using first/second-order population transfer and the existing
+5.8e-3 threshold. Kappa2 replaces only the final single-constant transfer
+comparison. The shared transfer constant and `multitone_rwa` are unchanged.
+
 The query preserves guard early returns. Budget always has a value. A failed
-budget leaves every later metric uncomputed. A failed carrier leaves transfer,
-strength, phase, pruning and dimension uncomputed. Transfer and strength have
+budget leaves every later metric uncomputed. A failed carrier leaves kappa2,
+strength, phase, pruning and dimension uncomputed. Kappa2 and strength have
 values after these domain checks. A failed strength ratio leaves the phase in
 radians uncomputed. Any base rejection leaves pruning and dimension uncomputed.
 A pruning rejection still returns dimension because the guard computes both.
 
-Transfer is computed during retention, before strength and phase comparisons.
-Its value and passed status remain visible even when either of those later
-comparisons rejects the row. The diagnostic is a numeric table, not a decision
-trace. A value and passed status do not mean that comparison participated in
-the particular rejection.
+Kappa2 is computed after retention, before strength and phase comparisons.
+Its value and passed status remain visible even when either later comparison
+rejects the row. The diagnostic is a numeric table, not a decision trace.
+A value and passed status do not mean that comparison participated in the
+particular rejection. `accepted` equals the guard result for the same row.
 
 The query does not diagnose sampled envelopes, multiple tones or moving flux.
 Carrier phase and initial density do not enter the comparisons. These metrics
 are admission proxies, not a certificate of final full-density accuracy.
-The guard thresholds, dispatch order and other families are unchanged.
+The 0.08 threshold has margin on the fixed acceptance set described below.
+It is not a maximum usable threshold or an accuracy guarantee for arbitrary
+inputs. Dispatch order and other families are unchanged.
+
+## Frozen numeric inputs and references
+
+`FROZEN_PHYSICAL_VERSION` owns the physical decoding contract for manifests
+and standalone inputs. It changes when fields, units, dtypes, defaults or
+Engine-input reconstruction change. `SCENE_CACHE_VERSION` owns the index JSON
+and cache-directory revision. Both are currently 1. Consumers compare both
+without parsing storage layout. `SEGMENT_NUMERIC_VERSION` records numerical
+algorithm semantics, not input-format compatibility.
+
+The public codec snapshots a `ModelSource` and one `TimelineBatch` without
+running an Engine or a solver. `write_frozen_input(path, source, batch)` writes
+version 1, a complete `physical` record and its `physical_sha256`.
+`read_frozen_input(path)` checks the version and hash, then returns a
+`FrozenInput(source, batch)`. The caller closes the returned source.
+
+`physical_input(source, batch)` returns the same numeric record in memory.
+`read_physical_input(record)` reconstructs it, including records from JSON.
+The record contains the initial density, scheduled models plus DC zero,
+continuous-flux expansion when used, slow-envelope subdivisions and complete
+batch data. Point order, complex128/float64/int64/bool record dtypes, segment
+corrections and continuation fields survive the round trip. The reconstructed
+source has a fresh owned history and a finite level-to-model mapping. Unlisted
+levels raise `KeyError`. Python builders, devices and registered source shifts
+are not serialized.
+
+`canonical_json` uses sorted keys, compact separators, nested array lists and
+real/imag objects for complex values. It rejects nonfinite values. `digest`
+returns its SHA-256. `physical_input(..., include_identity=False)` removes only
+model namespaces. Complete physical hashes include those namespaces;
+identity-free hashes allow oracle sharing. Neither hash is a reference key.
+
+`write_frozen_manifest(path, records)` writes ordered `FrozenRecord` values as
+version-1 canonical JSON inside stdlib gzip. `FrozenRecord(name, physical,
+metadata=None)` keeps caller metadata opaque. Its `physical_sha256` and
+`oracle_sha256` properties calculate the complete and identity-free hashes.
+The writer calculates both hashes; `read_frozen_manifest(path)` verifies them
+and returns a tuple in original order. Both reject duplicate names. The gzip
+header has mtime=0 and no filename, so identical records produce identical bytes
+at different paths. Reconstruct a source separately with
+`read_physical_input(record.physical)` and close it after use. The container
+neither interprets scene declarations nor selects a reference solver.
+
+`FrozenIndexEntry.from_record(record)` pins the name and physical, oracle and
+metadata digests. Metadata uses the public `digest` without caller interpretation.
+`write_frozen_index(path, entries)` atomically publishes version 1 and ordered
+identity rows; `read_frozen_index(path)` validates them. Unknown versions fail.
+`write_scene_record(directory, record)` returns its entry after publishing a
+single-record manifest. Filenames contain the name and physical/metadata hash
+prefixes of 16 characters. `entry.cache_path(directory)` exposes that path when
+needed for explicit cache maintenance. Valid existing files are reused; conflicting
+files fail validation. Both writers stage files in the destination directory and
+publish with replace, preserving existing pins on a pre-publication failure.
+`read_scene_records(directory, entries)` reads only the indexed files in entry
+order and verifies their full identities, including opaque metadata. A missing
+file raises FileNotFoundError with the record name and hashes. None of these APIs
+constructs a model, runs an Engine/solver, resolves Git or deletes old cache files.
+Callers own cache locations and producer instructions. `SCENE_CACHE_VERSION` is
+1; callers negotiating a shared numeric format can compare it without parsing
+cache filenames or containers.
+
+`reference_key(source, batch)` preserves the historical key formula. It hashes
+version 1, identity-free physics, coarse tolerances 2e-10/2e-12, fine tolerances
+2e-12/2e-14 and convergence limit 2e-6. Callers can override both tolerance
+records. Solver identity and routing history do not enter the key.
+`load_reference(cache_dir, source, batch)` only reads the matching NPZ, without
+pickle or directory creation. A miss raises `FileNotFoundError`; it never solves.
+`write_reference` atomically publishes `density` and `convergence_error` under
+that same key. The producer certifies convergence, and measurement preflight
+checks the loaded result before evolution.
+
+The independent preparation entry point is
+[`family_pareto_reference_producer.py`](../../../../tests/simulate/evolution/contract/family_pareto_reference_producer.py).
+It reads only frozen record names and physics. The caller explicitly maps each
+index to the independent lab-frame or interaction-picture solver and supplies
+an explicit scene cache. `--scenario NAME` requires one matching row across the
+supplied indexes before reading payloads. Zero or multiple matches fail without
+solving; other rows need no payload. Without a scenario, all indexed rows remain
+selected. All selected numeric files load before any solver runs. Metadata
+and scene names do not select the solver. Both solvers stay in tests. The codec imports neither tests nor tools.
+See [ADR-0078](../../../../docs/adr/0078-evolution-module-boundary.md).
+
+## Dispatch inspection
+
+`Engine.inspect_dispatch(source, batches, *, budget=1e-3, cancel=None)` returns a
+`DispatchInspection` without evolving density. It uses evolve's classifier,
+candidate ordering, guards and complete-inventory pricing. Floquet admission
+still computes its one-period propagator. This method is not a no-computation
+shortcut or a second dispatcher. Source, batch, budget, cancellation and failure
+contracts match `evolve`; an exhausted candidate round raises `NoValidKernel`.
+
+`rows` follows input batch order, point order, then split-span order.
+Each row's `RowKey` contains the zero-based batch index, caller point ID and
+zero-based chronological segment index. Segment indices include drive, flux,
+plateau and explicit boundary splits. Continuations number only retained spans
+at or after `start_ns`. Each row also reports absolute `start_ns` and `duration_ns`.
+
+A `selected` row's `family` matches evolve from the same initial history.
+A `deferred` row has a local prepare key whose guard belongs to its timeline
+worker. A `needs_prefix_input` row needs a driven prefix density that evolve
+would compute first. These unresolved rows return `family=None`; inspection
+neither runs timeline workers nor computes prefix densities.
+
+`candidates` records offered families and guard decisions in first-offer order.
+An evaluated guard reports `accepted` or `rejected`. A local key reports
+`deferred`. Candidates after a stopped round report
+`untested_after_short_circuit`, unless an earlier round already evaluated them.
+Structurally inapplicable and cost-skipped families are not listed unless
+actually offered. Candidate `scheduling_cost` is `Kernel.cost`'s nonnegative
+relative row work for chunk interleaving, not seconds or a numerical certificate;
+it cannot explain why a family was chosen. The cold-amortized estimate used to
+order candidates is not exposed. Short-circuited candidates have
+`scheduling_cost=None`; evaluated and deferred candidates include their value.
+
+Inspection does not modify routing history. It projects usage without writing
+counters, content membership or generation, and does not create routing-reuse
+snapshots. Querying A before evolving B leaves B's route and density unchanged.
+Guard preparations expire on return and do not enter Engine caches. Source
+model caches and shift registrations may be populated. Calls sharing a history
+must serialize, just as for evolve.
 
 ### Constant-pair RWA guard diagnostics
 
@@ -277,9 +417,11 @@ Full-map accuracy and wall measurements are separate validation work.
 `result.paths.routing`. The default is False, with no thread CPU clock reads and
 an empty mapping. Evolution never writes files. `paths.frontend_cpu_s` separately
 reports calling-thread geometry and WorkPlan CPU.
-Common-frame reports also count `prepare_builds` and `admission_rows`; other
-families currently leave these two instrumented-owner counters at zero. Telemetry does not change guards,
-routes, densities or cancellation.
+Common-frame reports also count `prepare_builds` and `admission_rows`.
+Floquet's `prepare_builds` counts exact-key frame construction attempts,
+including invalid frames and frames whose rows are all refused. Other families
+leave these counters at zero. Telemetry does not change guards, routes,
+densities or cancellation.
 
 `PathDiagnostics.duration_ns_by_kernel` always reports logical physical ns per
 family, even with telemetry off, without CPU clocks. Its immutable mapping
@@ -311,6 +453,11 @@ into rows. [Dispatch](_dispatch.py) selects candidates from flux motion, active
 tones, envelope shape, known inputs and acquire-wide prepare-key reuse, not
 experiment names. Numerical guards decide validity separately from cost.
 A rejected guard leaves the row for the next candidate.
+Floquet admission is per row. With the default family set, a refused row
+continues to another candidate while admitted rows keep their Floquet plans.
+A fixed `families` set can remove that fallback. If any row then has no admitted
+candidate, the whole evolve call raises `NoValidKernel` without partial results.
+This does not move Floquet ahead of `multitone_rwa` in the candidate order.
 
 `Engine(..., families=("t4", "dop853"))` restricts every segment in the acquire,
 including shared prefixes and deferred timeline workers, to those families.
@@ -347,7 +494,6 @@ thresholds and algorithm details live with their owners:
 | --- | --- |
 | Row domains, named candidate order and terminal routes | [dispatch](_dispatch.py); [kernel collection](kernels/__init__.py) instantiates implementations only |
 | Shaped and two-tone cold-cost choices | [shaped dispatch](_shaped_dispatch.py), [two-tone dispatch](_two_tone_dispatch.py) return family names, not positional indices or unnamed flags |
-| `t6` direct/channel pricing and complete-acquire key inventory | [t6 dispatch](_t6_dispatch.py), called lazily by [t6 preparation](kernels/t6.py) |
 | Multitone gate amortization | [multitone dispatch](_multitone_dispatch.py) owns the 20-use cost preference and complete-acquire canonical-key inventory |
 | Slow/plateau carrier boundary | [slow-envelope comparison](kernels/slow_envelope.py) owns the strict absolute-carrier comparison shared by dispatch and its guard |
 | Common-frame pricing and numerical construction | [common-frame dispatch](_common_frame_dispatch.py), [kernel](kernels/common_frame_kernel.py) |
@@ -385,11 +531,18 @@ not measurements of final full-density error. RWA slope and curvature limits
 are normalized by envelope peak. Retained real dimension counts populations
 and both real coordinates of within-component coherences.
 
-The matrix exercises all 17 families, including a numerical-guard edge for
-each guarded family. Two existing edge cases exceed `2e-3` and remain strict
-xfails: `gate_cache` at `9.296548e-3` and `shaped_sambe` at `3.091554e-3`.
-The other 15 families pass. With endpoint kicks, the `single_tone_rwa`
-guard-edge error is `7.745247e-4`. Representative inputs are pinned by
+The matrix exercises 16 active families, including a numerical-guard edge for
+each active guarded family. `multitone_gate` rejects every row and reports
+`NOT EXERCISED`, with no density error. Two existing edge cases exceed
+`2e-3` and remain strict xfails: `gate_cache` at `9.296548e-3` and
+`shaped_sambe` at `3.091554e-3`.
+The other 14 active families pass in the recorded observations.
+The `single_tone_rwa` kappa2 inner-edge case has full-density error
+`3.061429e-13` and reference convergence difference `8.564902e-13`.
+Its two-level diagonal drive makes kappa2 equal to gain, set just below 0.08.
+The public diagnostic agrees with guard admission on both sides of that edge.
+This focused case replaces the older retained-phase edge and is separate from
+the real-workload calibration below. Representative inputs are pinned by
 [`test_pinned_family_density`](../../../../tests/simulate/evolution/contract/test_accuracy_matrix.py);
 [`test_guard_edge_density`](../../../../tests/simulate/evolution/contract/test_accuracy_matrix.py)
 pins the [guard-edge inputs](../../../../tests/simulate/evolution/contract/guard_edge_cases.py).
@@ -399,6 +552,14 @@ those runs measure the families actually selected, not every candidate.
 The [matrix instructions](../../../../tests/README.md#evolution-精度矩陣)
 own the command and report format.
 
+Sampled multitone rejection is the current admission contract, not a temporary
+route pending a numerical fix. It leaves candidate order and common-frame pricing
+unchanged. Rejected sampled rows fall back to the next admitted candidate,
+often `dop853`. Previously cheap sampled RWA graphs lose their exemption from
+common-frame pricing. The matrix's `cheap_sampled_nearby` and
+`cheap_sampled_separated` cases check both price branches, their empty/warm
+routes and final densities. This does not force every sampled row to DOP853.
+
 | Family and use | Dispatch domain | Approximation and numerical admission | Pinned accuracy cases | Full density ≤ 2e-3 |
 | --- | --- | --- | --- | --- |
 | [`t4`](kernels/t4.py), static idle evolution | `idle` | Exact secular population semigroup and coherence phases/decay. Guard requires zero tones; no approximation threshold. | [`idle_coherence`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
@@ -406,17 +567,17 @@ own the command and report format.
 | [`flux_dop853`](kernels/flux_dop853.py), driven continuous flux | `flux` | Integrate full H(flux(t)) with a fixed quantized secular bath per row, stopping at active flux/envelope knots. Requires tones and waveform samples. Local rtol = min(1e-4, 0.03B), atol = min(1e-6, 0.0003B), from the [shared solver](kernels/_dop853.py). | [`continuous_flux`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
 | [`slow_envelope`](kernels/slow_envelope.py), low-carrier constant drive | `slow`, carrier magnitude strictly below 30 MHz | Midpoint-held full Hamiltonians with Strang bath half-steps, default 20 holds per period and one hold for DC. Dispatch and kernel guard share the strict absolute-carrier < 30 MHz comparison; exactly ±30 MHz belongs to plateau. No budget adaptation; historical population calibration is separate from this density measurement. | [`low_carrier`](../../../../tests/simulate/evolution/contract/accuracy_cases.py); [boundary contract](../../../../tests/simulate/evolution/contract/test_routing_boundaries.py) | PASS |
 | [`dyson`](kernels/dyson.py), weak constant drive | `plateau` | Second-order full-carrier modal Dyson. Calibrated guards require r ≤ min(0.1, 0.25B^(1/3)), r2 ≤ 0.05, and second-order population indicator B2 + B/8 ≤ min(0.02, (1.5B)^(2/3)). Certified shared no-drive prefixes omit the B2 check. B/8 reserves path pruning; this is not a multilevel remainder proof. | [`weak_plateau`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
-| [`single_tone_rwa`](kernels/single_tone_rwa.py), constant rotating-frame block evolution | `plateau` | Fixed flux, B ≥ 1e-3, carrier magnitude ≥ 50 MHz. Initial 50 MHz edge window with omission-driven restoration; transfer proxy ≤ 0.0058, full-operator/carrier ratio ≤ 0.25 and retained-norm phase proxy ≤ 0.06 rad. Phase-graph pruning ≤ min(B, 1e-3); real generator dimension ≤ 64. First-order endpoint kicks include every edge outside the resolved retention mask, including diagonal ±carrier terms; phase-graph pruning is separate. Cross-component density entries below 1e-5 after the initial kick are dropped. Uses the full secular bath without Strang splitting. | [`linear_plateau`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS at guard edge: 7.745247e-4 |
+| [`single_tone_rwa`](kernels/single_tone_rwa.py), constant rotating-frame block evolution | `plateau` | Fixed flux, B ≥ 1e-3, carrier magnitude ≥ 50 MHz. Initial 50 MHz edge window with first/second-order population-transfer restoration at 5.8e-3, including forward edges and adjoints. Final admission uses kappa2 = spectral norm of sum_sign abs(c/d) over the resolved omitted edges, ≤ 0.08, in place of the remaining transfer comparison. Full-operator/carrier ratio ≤ 0.25 and retained-norm phase proxy ≤ 0.06 rad. Phase-graph pruning ≤ min(B, 1e-3); real generator dimension ≤ 64. First-order endpoint kicks include every edge outside the resolved retention mask, including diagonal ±carrier terms; phase-graph pruning is separate. Cross-component density entries below 1e-5 after the initial kick are dropped. Uses the full secular bath without Strang splitting. | [`linear_plateau`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS at kappa2 inner edge: 3.061429e-13 |
 | [`floquet_period`](kernels/floquet_period.py), full-carrier constant-tone period reuse | `plateau` | Hilbert period trajectories with secular split playback. Requires carrier magnitude ≥ 0.03 GHz and some subdivision count m in 1..64 with dT²ΓV²/m² ≤ 1.0, using this owner's rad/ns drive bound. Below 1 GHz, CF4 or adjacent-cutoff Sambe uses endpoint defect ≤ min(1e-4, 0.1B). Higher carriers use DOP853 rtol min(1e-8, 1e-4B), max step T/4. These are calibrated local controls. | [`weak_plateau`](../../../../tests/simulate/evolution/contract/accuracy_cases.py), [`strong_plateau`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS; largest family error 1.375101e-3 |
-| [`t6`](kernels/t6.py), full dissipative constant-tone evolution | `plateau`, terminal candidate | One constant tone at any strength. Direct integrates each density in the H0 frame with the full secular bath and the shared dop853 policy: local rtol = min(1e-4, 0.03B), atol = min(1e-6, 0.0003B), without a fixed step ceiling. These are not whole-sequence error bounds. Channel retains its existing integration controls, powers complete periods and Fourier-interpolates phase, refining 16..512 nodes until off-grid defect and spectral tail are each ≤ B/16. Complete-key reuse selects the strategy as described below. Neither strategy does RWA or density repair; numerical failure raises rather than reroutes. | [`weak_plateau`](../../../../tests/simulate/evolution/contract/accuracy_cases.py), [`strong_plateau`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
+| [`t6`](kernels/t6.py), full dissipative constant-tone evolution | `plateau`, terminal candidate | One constant tone at any strength. Direct integrates each density in the H0 frame with the full secular bath and the shared dop853 policy: local rtol = min(1e-4, 0.03B), atol = min(1e-6, 0.0003B), without a fixed step ceiling. These are not whole-sequence error bounds. All rows use direct integration, irrespective of key reuse. It does not do RWA or density repair; numerical failure raises rather than reroutes. | [`weak_plateau`](../../../../tests/simulate/evolution/contract/accuracy_cases.py), [`strong_plateau`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
 | [`single_tone_gate`](kernels/single_tone_gate.py), phase-covariant shaped RWA gates | `shaped` | Fixed flux, B ≥ 1e-3, real sampled envelope with at least 3 samples, slope ≤ 0.025/ns, curvature ≤ 0.003/ns², carrier magnitude ≥ 50 MHz. Omission restoration requires transfer ≤ 0.0058, residual phase ≤ 0.0045 rad and retained real dimension ≤ 256. Pruning ≤ min(B, 1e-3); adaptive secular split uses n ≥ 4 with d³ΓV²/n² ≤ 0.01. [Shared gate owner](kernels/_rwa_gate.py). | [`linear_shaped`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
 | [`shaped_sambe`](kernels/shaped_sambe.py), frozen-envelope finite-Fourier periods | `shaped` | Nonzero peak, carrier magnitude ≥ 0.03 GHz, subdivisions m ≤ 32, envelope slope ≤ 2·peak·abs(f)·m and peak drive bound ≤ 0.5·abs(f)·m. Subdivision policy limits real/complex motion to 0.01/0.0025 and secular split to 0.01. Compare adjacent harmonic cutoffs 2/3 or 3/4 and use 4 or 8 amplitude nodes; accumulated spectral plus interpolation estimate must be ≤ B/2. | [`linear_shaped`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | FAIL at guard edge: 3.091554e-3; strict xfail |
 | [`gate_cache`](kernels/gate_cache.py), phase-interpolated full-carrier shaped gates | `shaped` | Four Hilbert subsegments with secular half-steps. Model-only secular split d³ΓV²/16 ≤ 0.01. For 0 < d ≤ 30 ns, dispatch tries 6 phase nodes with 2 probes and full-unitary defect ≤ min(1e-4, 0.1B); other keys or failed convergence use 16 nodes. Fixed-order playback does not certify arbitrary-drive error against B. | [`shaped_complex`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | FAIL at guard edge: 9.296548e-3; strict xfail |
 | [`period_table`](kernels/period_table.py), shaped amplitude-band period playback | `shaped` | 8 Chebyshev amplitude nodes and 16 phase samples. Guard requires envelope-motion indicator ≤ 0.05, amplitude-band bandwidth ≤ 0.5 and secular split ≤ 0.01. These calibrated limits do not scale with B. DC is guard-admissible with local direct integration, but default costs prefer terminal DOP853. | [`linear_shaped`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
 | [`common_frame`](kernels/common_frame.py), common-frame SW2 beat dynamics | `two` or two-tone `multiple` only | Fixed-flux common frame with second-order beat/two-photon terms, first-order endpoint dressing and CF4/secular playback. Absolute mean carrier must be ≥ 1e-10 GHz. CF4 steps are capped at 8 ns and 0.08 cycles of the fastest retained channel, with no lower cutoff. Dispatch prices first-order playback steps, so cost rises with active carrier spacing; numerical guards determine applicability. Fast-channel denominator must exceed 1e-10. Row-local coherent/bath indicators must be ≤ 0.0018/0.01, independent of B. | [`nearby_carriers`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS at the new coherent guard edge |
-| [`multitone_gate`](kernels/multitone_gate.py), reused simultaneous RWA gates | `multiple`, requires a sampled envelope | When comparing `multitone_rwa` and `multitone_gate`, cost preference selects the gate at complete canonical-key inventory ≥ 20 and retains multitone RWA at 19 uses. Pinning this family bypasses cost, so 19 uses is allowed. Numerical admission: Fixed flux, B ≥ 1e-3, real envelopes, slope ≤ 0.025/ns, curvature ≤ 0.003/ns², each carrier magnitude ≥ 50 MHz and absolute-carrier spacing ≥ 100 MHz. Full-operator/carrier ratio ≤ 0.25, retained-norm phase proxy ≤ 0.06 rad and pruning ≤ min(B, 1e-3). Adaptive split uses n ≥ 4 with d³ΓV²/n² ≤ 0.01. These gate policies differ from ordinary multitone RWA. | [`joint_gate_inventory`](../../../../tests/simulate/evolution/contract/accuracy_cases.py), 20 points; [19/20 boundary contract](../../../../tests/simulate/evolution/contract/test_routing_boundaries.py) | PASS |
-| [`multitone_rwa`](kernels/multitone_rwa.py), simultaneous omission-restored RWA | `two`, distinct ports only; `multiple`, requires a sampled envelope | Fixed flux, B ≥ 1e-3, real envelopes, slope ≤ 0.025/ns, curvature ≤ 0.003/ns² and each carrier magnitude ≥ 50 MHz. Start with 50 MHz edges, restore omitted paths until transfer proxy ≤ 0.0058 and residual phase ≤ 0.0045 rad; retained real dimension ≤ 256. No carrier-spacing, full-operator/carrier ratio or retained-norm phase cap. Constant pairs additionally require final-mask ε_dom²·Ω_ret·T ≤ 1.476e-4 cycle; sampled rows do not use this comparison. The [constant-pair query](#constant-pair-rwa-guard-diagnostics) reports its final metrics. Constant dual-tone rows apply first-order endpoint kicks from every edge outside the resolved retention mask, including diagonal ±carrier terms. At each endpoint, the kernel sums all tones' kicks before acting on density. Row-local kick time equals the propagation duration; following idle rows do not extend it. Sampled rows are unchanged. Apply step ceiling is 16 ns for constants, 4 ns for sampled controls. | [`joint_gate_inventory`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
-| [`floquet`](kernels/floquet.py), constant Stark tone plus probe | `two` | Larger absolute gain selects the Stark slot, with ties choosing the first; that slot requires positive carrier. Frame overlap ≥ 0.5, modal condition ≤ 1e8, maximum real eigenvalue ≤ 1e-10/ns and residual ≤ 1e-9; sampling extent ≤ 128 with at most 4096 phase samples. k=0 omission and convergence each fit B/3. Modal Dyson additionally uses r ≤ 0.1, r2 ≤ 0.05 when probe gain magnitude ≥ 0.1, Dyson norm-duration v ≤ 0.5, transfer indicator v + v²/2 ≤ 0.02 and higher-order remainder exp(v)·v³/6 ≤ B/3; otherwise use periodic channel playback. Retained-sideband admission instead requires convergence ≤ B/40 and bound ≤ 0.95B, retaining edges within 0.1/ns and averaging other harmonics through order 4. This finite-Fourier admission is not a density-error guarantee. | [`two_carriers`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
+| [`multitone_gate`](kernels/multitone_gate.py), retained simultaneous RWA gate family | `multiple`, disabled | Rejects every row. The retained 20-use inventory cost preference cannot restore numerical admission at 19 or 20 uses; pinning cannot bypass rejection. Shared single-tone gate numerics are unchanged. | [19/20 and pinned rejection contract](../../../../tests/simulate/evolution/contract/test_routing_boundaries.py) | NOT EXERCISED; no density error |
+| [`multitone_rwa`](kernels/multitone_rwa.py), simultaneous omission-restored RWA | `two`, distinct ports only | Exactly two constant envelopes, fixed flux, B ≥ 1e-3 and each carrier magnitude ≥ 50 MHz. Sampled rows are rejected. Start with 50 MHz edges, restore omitted paths until transfer proxy ≤ 0.0058 and residual phase ≤ 0.0045 rad; retained real dimension ≤ 256. No carrier-spacing, full-operator/carrier ratio or retained-norm phase cap. Constant pairs additionally require final-mask ε_dom²·Ω_ret·T ≤ 1.476e-4 cycle. The [constant-pair query](#constant-pair-rwa-guard-diagnostics) reports its final metrics. First-order endpoint kicks include every edge outside the resolved retention mask, including diagonal ±carrier terms. At each endpoint, the kernel sums all tones' kicks before acting on density. Row-local kick time equals the propagation duration; following idle rows do not extend it. Apply step ceiling is 16 ns. | [`joint_constant`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
+| [`floquet`](kernels/floquet.py), constant Stark tone plus probe | `two` | Larger absolute gain selects the Stark slot, with ties choosing the first; that slot requires positive carrier. Frame overlap ≥ 0.5, modal condition ≤ 1e8, maximum real eigenvalue ≤ 1e-10/ns and residual ≤ 1e-9; sampling extent ≤ 128 with at most 4096 phase samples. k=0 omission and convergence each fit B/3. Modal Dyson additionally uses r ≤ 0.1, r2 ≤ 0.05 when probe gain magnitude ≥ 0.1, Dyson norm-duration v ≤ 0.5, transfer indicator v + v²/2 ≤ 0.02 and higher-order remainder exp(v)·v³/6 ≤ B/3; otherwise use periodic channel playback. Retained-sideband admission instead requires convergence ≤ B/40 and bound ≤ 0.95B, retaining edges within 0.1/ns and averaging other harmonics through order 4. Admission is per row; refused rows continue to other allowed candidates. This finite-Fourier admission is not a density-error guarantee. | [`two_carriers`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
 | [`dop853`](kernels/dop853.py), full-drive direct density integration | `shaped`, `two`, `multiple`, terminal candidate | No RWA or fast-path admission threshold. Accepts valid rows with finite positive B, including complex sampled envelopes. Stops at active control knots. Local rtol = min(1e-4, 0.03B), atol = min(1e-6, 0.0003B), from the [shared solver](kernels/_dop853.py); these are not global error bounds. | [`shaped_complex`](../../../../tests/simulate/evolution/contract/accuracy_cases.py), [`two_carriers`](../../../../tests/simulate/evolution/contract/accuracy_cases.py), [`joint_gate_inventory`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
 
 The `common_frame` coherent limit is 0.0018. In the retained two-tone grid,
@@ -463,6 +624,30 @@ matrices. These inputs do not establish a new real-workload timing or price.
 
 ### Recorded real-workload evidence
 
+A separate fixed-candidate acceptance run calibrated the single-constant
+kappa2 threshold of 0.08 with endpoint kicks. It covered 395 inputs and
+561 points with 136 references, including both eight-point RB workloads.
+Of the 561 pinned attempts, 512 admitted points met the full complex-density
+`2e-3` criterion. The 49 `NoValidKernel` refusals comprise 42 period points and
+seven nonzero shaped-RB points. Refusals have no density comparison and do not
+count as PASS or zero error. The 273 permitted `floquet_period` surrogate
+attempts admitted. There were no new A3 refusals and no default attempts, so
+this run supplies no new default-route observations.
+
+The worst admitted pinned point was `period/0.4/0.1/385.0`, point 0.
+Its full-density error was `0.00016965243421764126`, leaving
+`0.0018303475657823589` below `2e-3`. This is a real-workload point, not the
+synthetic guard-edge case. Both zero-segment RB points retained complete
+density/reference comparisons without invented route or kappa2 values.
+
+These results support 0.08 on this candidate and acceptance set, not a larger
+threshold or arbitrary-input accuracy. The parent reviewed source-generated
+reference identity, convergence and error metadata, and checked the saved
+densities' shape, complex dtype and finite values. That review did not solve
+references independently or repeat evolution. This accuracy run does not
+remeasure the timings or dominance counts in the historical tables below.
+Performance remeasurement remains pending.
+
 The [thirteen recorded summaries](../../../../tools/README.md#recorded-scenario-summaries)
 retain the final errors, three history modes, wall/process CPU medians, companions
 and measurement provenance. Dominance compares only policies whose maximum final
@@ -482,7 +667,7 @@ evidence. These observations do not authorize deletion or guard changes.
 | `t6` | Directly retained, terminal plateau candidate | [N-long](../../../../tools/data/family_pareto/summaries/long_gate_sequence.md) qualifies; local budget controls are not a final-error guarantee. |
 | `dop853` | Directly retained, terminal shaped/two/multiple candidate | [A](../../../../tools/data/family_pareto/summaries/gain_sweep.md) qualifies at 4.14019e-6 on remeasurement; retained does not mean accurate on every input. |
 | `dyson` | No measured target | Offered plateau groups refuse; no dominance conclusion. |
-| `single_tone_rwa` | 4: L, I, N, N-long | [N-long](../../../../tools/data/family_pareto/summaries/long_gate_sequence.md) qualifies at 1.24701e-3 over 50/100/200 gates. F and both bias045 tables fail. Disposition remains pending, not approved for deletion. |
+| `single_tone_rwa` | 4: L, I, N, N-long | [N-long](../../../../tools/data/family_pareto/summaries/long_gate_sequence.md) qualifies at 1.24701e-3 over 50/100/200 gates. F and both bias045 tables fail in these historical measurements, not in the fixed-candidate calibration above. Timing and dominance remeasurement remains pending; no deletion is authorized. |
 | `floquet_period` | 4: F, I, F-bias045, N-bias045 | L, N and N-long are dominated by qualified `single_tone_rwa`; [F-bias045](../../../../tools/data/family_pareto/summaries/carrier_sweep_bias045.md) supplies a qualified alternative to RWA. |
 | `single_tone_gate` | No measured target | Shaped target groups refuse; no dominance conclusion. |
 | `shaped_sambe` | 3: A, S, S-long | [S-long](../../../../tools/data/family_pareto/summaries/long_shaped_gate_sequence.md) qualifies at 8.42157e-5; O2 is companion-blocked, not target-refused. |
@@ -499,40 +684,14 @@ coverage of every shaped workload. Cavity-drive, multiple-readout and continuous
 flux workloads remain outside these tables. Family removal still requires the
 relevant workload evidence and user approval.
 
-[t6 dispatch](_t6_dispatch.py) selects direct when
-`N * C_direct < C_channel`; otherwise [t6](kernels/t6.py) builds a channel.
-`N` counts that prepare key's rows in the complete acquire inventory, not a worker
-subset or routing history. This count does not account for channel
-rebuilds when a prepared prefix expires; the estimate does not model prefix
-lifetime. For `M` levels, duration `d` ns and absolute carrier `f` GHz, the
-estimates in seconds are
-`C_direct = 0.0012*d*max(1, f/0.582)*(M/21)^3` and
-`C_channel = 31*(M/21)^5`. Direct uses two 21-level aggregate apply-CPU
-measurements at budget `1e-3`, near 0.582 GHz: 48 rows totaling 960 ns took
-1.138655 s, and 24 rows totaling 5040.244 ns took 6.056137 s. Each is the second
-fresh-source/history/Engine sample in one process, not a repeated-history sample.
-A nonnegative affine least-squares fit gives zero intercept and 0.001201
-seconds/ns. The rounded price leaves actual-minus-estimated residuals of
--0.013345 and +0.007844 s. These nonexclusive probes set an initial price; they
-are not performance acceptance or an isolated measurement of cold-start cost.
-Channel's 31 s/build comes from earlier production aggregates; its numerical
-controls and accuracy are unchanged.
-
-Both direct calibration inputs have the same dimension and carrier. They do not
-identify the dimension powers, frequency factor or breakpoint, which retain the
-earlier heuristic. Different budgets can also change direct work without
-changing this estimate. These are coarse strategy-selection prices, not runtime
-guarantees. In particular, complete-inventory counts omit prefix-lifetime channel
-rebuilds. WorkPlan retains the complete table before prefix/worker planning.
-The first `t6.prepare` asks `_t6_dispatch.publish_inventory` to build key counts,
-dimensions and decisions from that table's inputs. Prefixes and workers share the
-publication through the existing single-flight fact, including builder failures.
-Plans without `t6.prepare` do not scan t6 candidate keys. Preparation rejects a
-missing published key rather than recounting its worker subset. Standalone Kernel
-calls without retained geometry or a publication must supply their complete table
-and source; explicit early publication remains supported.
-`cost(table, rows)` retains table-only chunk-interleaving weights, not the
-selected strategy's cold price. It does not determine candidate order.
+[t6](kernels/t6.py) always integrates each density directly in the H0 frame.
+Preparation packs model-only operators without scanning the complete acquire
+inventory. Prepare keys still contain flux level, shift content, port, signed
+carrier, signed gain and duration; phase and start time are apply-only.
+`cost(table, rows)` supplies table-only chunk-interleaving weights.
+It does not determine candidate order.
+[ADR-0078](../../../../docs/adr/0078-evolution-module-boundary.md#t6-只保留-direct)
+records why the reusable-channel strategy was removed.
 
 The matrix measures the maximum absolute difference over every complex density
 entry at readout, against an independent full-Hamiltonian Lindblad DOP853
@@ -626,7 +785,8 @@ or rejected rows. Returning `None` raises rather than retrying `guard`.
 When false, classification calls `guard` directly. Multitone dispatch owns the
 20-use gate cost preference; prefix and worker calls borrow the complete-acquire
 inventory, never subset counts or resident warmth. The kernel guard checks only
-numerical admission, so pinning `multitone_gate` also permits 19 uses.
+numerical admission. The `multitone_gate` family rejects all rows, including
+pinned calls and inventories of 19 or 20 uses.
 Cross-timeline keys are guarded before shared preparation. Local builders run
 inside their timeline worker and retain the same handoff.
 
@@ -640,11 +800,13 @@ densities in place and returns a row-aligned boolean exceedance mask.
 ## WorkPlan and cache ownership
 
 [Dispatch](_dispatch.py) creates one [WorkPlan](workplan.py) from the complete
-evolve table before workers start. Prefix representatives, caller classification
+evolve table before workers start. Its history mode records usage for evolve
+and projects usage for inspection, with the same inventory and cost formulas. Prefix representatives, caller classification
 and timeline workers share it through `KernelContext` and `ApplyContext`. Engine
 drains its pool before closing the plan on success, cancellation or failure.
 The single `complete_table` field supplies full immutable geometry to common-frame,
-multitone and t6 dispatch. Closing drops it along with the evolve-local facts.
+multitone dispatch and Floquet frame construction. Closing drops it along with
+the evolve-local facts.
 The registry kernels retain no evolve-local data.
 
 ### Facts and algorithm groups
@@ -663,9 +825,12 @@ The shared facts include envelope peak/slope/real flags, period split rates, pac
 DOP853 samples and covariant gate admissions. Gate admission facts use full canonical physics, budget and numerical
 policies. Each row still checks its own continuous flux support before borrowing an
 admission; only absolute start and covariant phase are omitted from the fact.
-Floquet consumes full Fourier averages during frame construction. Its compact
-frames and optional sideband candidates belong only to active preparations,
-never evolve-long facts. Model facts include the full
+Floquet consumes full Fourier averages during frame construction. WorkPlan
+publishes each compact frame and optional sideband candidates once per source
+instance, budget and complete prepare key. Prefix and deferred classifications
+share these facts, including invalid frames and frames whose rows are all
+refused. The complete evolve table determines sideband demand before the first
+build; row-local certificates and admissions are not facts. Model facts include the full
 physical coordinates in their identity. Table-indexed facts
 also include table identity, so renumbered prefix representatives cannot alias
 the complete table. DOP853 packing also distinguishes flux-inclusive samples.
@@ -734,7 +899,9 @@ timeline and row count. Shared preparations retain their separate evolve lifetim
 
 Single-use ordinary keys prepare at their apply wave.
 Accepted guard products go directly to apply, even when only a subset of rows
-accepts. Fully rejected products have no consumers and are released.
+accepts. Fully rejected guard products have no apply consumers and are released.
+Floquet's compact frame fact remains available to later classifications until
+WorkPlan closes; no frame or refusal list survives the evolve.
 Input-bound payloads, densities and dissipative preparations never cross evolves
 through Engine storage.
 

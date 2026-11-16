@@ -1,8 +1,8 @@
 """Constant Stark tone plus weak probe, in an extended-zone Floquet frame.
 
 The two tones may use different ports. The larger absolute gain is the Stark
-slot (ties choose the first slot). ModelSource identity namespaces engine
-caches; keys additionally encode flux level, Stark port, frequency and gain.
+slot (ties choose the first slot). Source instance and budget namespace the
+evolve-local frames; keys encode flux level, shift content, Stark port, frequency and gain.
 All probe parameters and both start phases remain excluded from frame keys.
 
 P8 probe limits are r <= .1, population transfer <= .02 and r2 <= .05
@@ -36,6 +36,7 @@ another kernel.
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, replace
+from functools import partial
 from types import MappingProxyType
 from typing import Literal
 
@@ -56,12 +57,14 @@ from ..kernel import (
     SegmentTable,
 )
 from ..secular import SecularModel
+from ..workplan import FactKey
 from . import _floquet_k0
 from . import _floquet_sidebands as sb
 from ._floquet_policy import (
     MAX_PHASE_SAMPLES,
     MAX_SAMPLING_RATIO,
     phase_sample_count,
+    probe_bin_center,
 )
 from ._secular import coherence_decay
 
@@ -110,12 +113,14 @@ class _Entry:
 
 @dataclass(frozen=True)
 class _Prepared:
-    entries: tuple[_Entry, ...]
+    entries: tuple[_Entry | None, ...]
     keys: NDArray[np.void]
 
     @property
     def nbytes(self) -> int:
-        return self.keys.nbytes + sum(entry.nbytes for entry in self.entries)
+        return self.keys.nbytes + sum(
+            entry.nbytes for entry in self.entries if entry is not None
+        )
 
 
 @dataclass(frozen=True)
@@ -329,7 +334,7 @@ def _build(
     amplitude: float,
     parameters: NDArray[np.float64],
     budget: float,
-) -> _Entry:
+) -> _Entry | None:
     if frequency <= 0:
         raise ValueError("Floquet Stark frequency must be positive")
     count = int(phase_sample_count(_sampling_extent(model, port, amplitude), frequency))
@@ -338,26 +343,22 @@ def _build(
     energies, rotations, residual, overlap = _frame_samples(
         model, (port, frequency, amplitude), count
     )
+    if not (residual <= 1e-9 and overlap >= 0.5):
+        return None
     bath, x, y, convergence = _averages(model, rotations)
     l0 = _comm(np.diag(energies).astype(complex)) + bath[0]
     decomposition = eig(l0)
     lam = np.asarray(decomposition[0], dtype=np.complex128)
     modes = np.asarray(decomposition[1], dtype=np.complex128)
     condition = np.linalg.cond(modes)
-    inverse = (
-        np.linalg.inv(modes) if condition <= 1e8 else np.linalg.pinv(modes)
-    ).astype(np.complex128)
+    if not (condition <= 1e8 and np.max(lam.real) <= 1e-10):
+        return None
+    inverse = np.linalg.inv(modes).astype(np.complex128)
     couplings = np.array(
         [
             [inverse @ _comm((xx - sign * 1j * yy) / 2) @ modes for sign in (-1, 1)]
             for xx, yy in zip(x[0], y[0], strict=True)
         ]
-    )
-    valid = (
-        residual <= 1e-9
-        and overlap >= 0.5
-        and condition <= 1e8
-        and np.max(lam.real) <= 1e-10
     )
     omitted = np.array(
         [
@@ -416,7 +417,7 @@ def _build(
         modes,
         inverse,
         couplings,
-        bool(valid),
+        True,
     )
     _, eligible = _admission(entry, parameters, budget)
     if eligible.any():
@@ -461,6 +462,8 @@ def _admission(
         (~legacy)
         & entry.valid
         & (entry.convergence * parameters[:, 0] + entry.frame_error <= budget / 40)
+        # This existing sideband refusal does not apply to legacy accepts.
+        & ~(np.ptp(entry.lam.real) * parameters[:, 0] > 14)
     )
     return legacy, sideband
 
@@ -485,6 +488,15 @@ def _entry_admission(
         for member, use_modal in zip(legacy, modal, strict=True)
     }
     for local in np.flatnonzero(eligible):
+        if entry.sidebands is None:
+            raise RuntimeError("Floquet sideband candidates were not prepared")
+        port = int(parameters[local, -1])
+        center = probe_bin_center(parameters[local, 3])
+        if not any(
+            p == port and c.center == center for p, c in entry.sidebands.certificates
+        ):
+            # Early certification stopped only after every current bin row failed.
+            continue
         selected_plan = _sideband_plan(entry, parameters[local])
         accepted[local] = selected_plan.bound <= budget * 0.95
         if accepted[local]:
@@ -646,6 +658,8 @@ class FloquetKernel:
             )
             members = np.flatnonzero(inverse == key_index)
             entry = prepared.entries[0]
+            if entry is None:
+                continue
             _, eligible = _admission(entry, params[members], budget)
             if eligible.any():
                 if entry.sidebands is None:
@@ -656,13 +670,15 @@ class FloquetKernel:
                     entry.modes,
                     entry.inverse,
                     params[members[eligible]],
+                    budget=budget,
                 )
-                prepared = _Prepared((replace(entry, sidebands=frame),), prepared.keys)
+                entry = replace(entry, sidebands=frame)
+                prepared = _Prepared((entry,), prepared.keys)
             preparations.append(
                 GuardPreparation(keys[key_index : key_index + 1], prepared)
             )
             passed, plans = _entry_admission(
-                prepared.entries[0], params[members], selected[members], budget
+                entry, params[members], selected[members], budget
             )
             accepted[positions[members]] = passed
             admissions.update(plans)
@@ -707,8 +723,10 @@ class FloquetKernel:
         The complete table's same-key candidates decide whether construction
         needs sidebands. Full Fourier averages are consumed inside that build;
         only the compact immutable entry survives in the returned preparation.
-        Frame ownership follows resident admission or the current active binding,
-        never an evolve-long fact. Probe-bin certificates remain guard products.
+        WorkPlan owns the exact-source/budget/key frame until evolve exit,
+        including invalid frames and frames whose rows are all refused. Prefix
+        and deferred classifications borrow the same fact. Probe-bin
+        certificates remain row-local guard products, not shared decisions.
         """
         source, budget = context.source, context.budget
         if budget <= 0 or not np.array_equal(
@@ -717,31 +735,50 @@ class FloquetKernel:
             raise ValueError(
                 "Floquet requires positive budget and aligned representative rows"
             )
+        inventory = context.work_plan.complete_table
+        if inventory is None:
+            inventory = table
         entries = []
-        candidates = np.arange(len(table.timeline), dtype=np.int64)
-        candidates = candidates[_candidate_positions(table, candidates)]
-        candidate_keys = self.prepare_keys(table, candidates, context)
-        for key in keys:
-            model = source.shifted_model(
-                tuple(int(v) for v in key["level"]), bytes(key["shift"])
+        for index, key in enumerate(keys):
+            fact = FactKey(("floquet-frame", source, budget, key.tobytes()), _Prepared)
+            prepared = context.work_plan.fact(
+                fact,
+                partial(
+                    self._prepare_frame, keys[index : index + 1], inventory, context
+                ),
             )
-            parameters = _parameters(table, candidates[candidate_keys == key])
-            try:
-                entries.append(
-                    _build(
-                        model,
-                        int(key["port"]),
-                        float(key["frequency"]),
-                        float(key["gain"]),
-                        parameters,
-                        budget,
-                    )
-                )
-            except np.linalg.LinAlgError as error:
-                raise RuntimeError("Floquet modal construction failed") from error
+            entries.append(prepared.entries[0])
         owned_keys = keys.copy()
         owned_keys.setflags(write=False)
         return _Prepared(tuple(entries), owned_keys)
+
+    def _prepare_frame(
+        self, keys: NDArray[np.void], table: SegmentTable, context: KernelContext
+    ) -> _Prepared:
+        """Build one compact frame using the complete evolve's sideband demand."""
+        key = keys[0]
+        model = context.source.shifted_model(
+            tuple(int(v) for v in key["level"]), bytes(key["shift"])
+        )
+        candidates = np.arange(len(table.timeline), dtype=np.int64)
+        candidates = candidates[_candidate_positions(table, candidates)]
+        candidate_keys = self.prepare_keys(table, candidates, context)
+        parameters = _parameters(table, candidates[candidate_keys == key])
+        try:
+            context.work_plan.routing.built(self.name, 1)
+            entry = _build(
+                model,
+                int(key["port"]),
+                float(key["frequency"]),
+                float(key["gain"]),
+                parameters,
+                context.budget,
+            )
+        except np.linalg.LinAlgError as error:
+            raise RuntimeError("Floquet modal construction failed") from error
+        owned_keys = keys.copy()
+        owned_keys.setflags(write=False)
+        return _Prepared((entry,), owned_keys)
 
     def bind_input(
         self,
@@ -786,6 +823,10 @@ class FloquetKernel:
         for key in np.unique(key_index):
             positions = np.flatnonzero(key_index == key)
             entry = prepared.entries[int(key)]
+            if entry is None:
+                raise RuntimeError(
+                    f"Floquet invalid frame at segments {rows[positions]}"
+                )
             decisions = []
             for row in rows[positions]:
                 decision = plan.admissions.get(int(row))

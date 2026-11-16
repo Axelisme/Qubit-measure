@@ -1,17 +1,25 @@
-"""Simultaneous covariant RWA gates; dispatch owns preparation amortization."""
+"""Retained simultaneous covariant-gate family with no admitted rows."""
 
+import numpy as np
+from numpy.typing import NDArray
+
+from ..kernel import KernelContext, SegmentTable
 from ._rwa_gate import CovariantGateKernel
 
 
 class MultitoneGateKernel(CovariantGateKernel):
-    """Joint RWA gates with shared numerical admission and adaptive splitting.
+    """Retain the family name and reject every row.
 
-    Requires shared real-envelope RWA admission, pruning bound <=min(budget,1e-3),
-    and adaptive n-way secular split proxy <=.01. Row support bounds playback;
-    sampled slices, constant companions and final sample hold are supported.
-    Rejection retains ordinary row RWA. Products live only within one evolve.
-    The 20-use default cost preference belongs to multitone dispatch; pinning
-    this family permits smaller inventories without changing numerical guards.
+    Every row is rejected, including pinned families and inventories at or
+    above the 20-use cost preference. The existing shared numerical builder
+    remains available to single-tone gates; its admission is unchanged.
     """
 
     name = "multitone_gate"
+
+    def guard(
+        self, table: SegmentTable, rows: NDArray[np.int64], context: KernelContext
+    ) -> NDArray[np.bool_]:
+        """Return an all-False row mask, including for pinned calls."""
+        del table, context
+        return np.zeros(len(rows), dtype=np.bool_)

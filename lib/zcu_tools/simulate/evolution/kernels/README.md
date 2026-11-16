@@ -1,6 +1,6 @@
 # Evolution kernels
 
-**Last updated:** 2026-11-15，常數雙 tone endpoint kick consumer
+**Last updated:** 2026-11-17，常數雙 tone endpoint kick、sampled 拒收與 t6 direct owners
 
 **讀者：** framework-dev、agent。查找演化算法的數值 owner，以及 kernel 與 dispatch、scheduler 的接縫。
 
@@ -19,11 +19,14 @@ Fourier 係數與 omitted-edge endpoint kick 數值留在 `_rwa_fourier.py`。
 `multitone_rwa` 在每個 row 端點先加總所有 tone 的 kick，再作用於 density。
 末端 kick 與演化使用相同的 row duration；sampled row 不套用 kick。
 Phase graph 與 covariant gate builder 分別留在 `_rwa_graph.py` 與 `_rwa_gate.py`。
+`multitone_rwa` 的 family guard 只收 distinct-port constant pairs，拒收 sampled 多 tone 列。
+`multitone_gate` 的 family guard 拒收所有列，保留 family 與共用 single-tone 數值 owner。
+這是現行拒收契約，不預告恢復 admission。
+其餘候選沿用既有定價，可能選到 `common_frame` 或 `dop853`。
 `dop853.advance_endpoints` 擁有旋轉座標 density 積分，`dop853` 與 `t6` direct
 沿用相同的每段 budget 容差規則。這是局部積分控制，不保證整條序列的最終誤差。
-`t6` channel 的積分與插值控制不變。
-[`_t6_dispatch`](../_t6_dispatch.py) 擁有 direct／channel 定價、完整 prepare-key
-inventory 與選擇。第一次 `t6.prepare` 才呼叫 publisher；kernel 只消費決定並建置數值產品。
+`t6` 的每一列都走 direct，不依 key 重用數選算法，也不掃描完整 acquire inventory。
+Preparation 只打包 model operators；[`_t6_dispatch`](../_t6_dispatch.py) 保留 prepare-key 建構。
 完整 owner 對照見 [evolution README](../README.md#algorithm-ownership-and-reuse)。
 
 ## 內部接縫

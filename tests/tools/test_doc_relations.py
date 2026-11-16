@@ -1,5 +1,6 @@
 """Document-relation behavior through synthetic source mappings and one real Git diff."""
 
+import gzip
 import subprocess
 from pathlib import Path
 
@@ -15,6 +16,8 @@ from doc_relations import (
     related_documents,
     search_terms,
 )
+
+pytestmark = pytest.mark.requires_subprocess
 
 _KERNEL = "lib/pkg/engine/kernels/t6.py"
 _SOURCES = {
@@ -126,8 +129,11 @@ def test_check_references_reports_missing_targets_line_anchors_and_records() -> 
             "[ok](engine/README.md) [gone](engine/missing.md)\n"
             "[pinned](engine/kernels/t6.py#L12) [web](https://example.org) [top](#notes)\n"
             "Governed by ADR-0078 and ADR-0999.\n"
+            "[directory](engine/) [section](engine/README.md#notes) "
+            "[mail](mailto:reader@example.org)\n"
         ),
         "docs/discussions/2026-01-01-engine.md": "[stale](../gone.md)\n",
+        "docs/adr/retired/0011-old.md": "[stale](../gone.md) ADR-0999\n",
     }
     tracked = frozenset(
         {
@@ -151,6 +157,78 @@ def test_check_references_reports_missing_targets_line_anchors_and_records() -> 
     )
 
 
+def test_check_references_skips_fenced_links_but_keeps_prose_lines_and_adrs() -> None:
+    documents = {
+        "guide.md": (
+            "[before](first.md)\n"
+            "```markdown\n"
+            "[example](missing.md) [pinned](module.py#L12)\n"
+            "ADR-0999\n"
+            "```\n"
+            "[after](last.md)\n"
+        )
+    }
+
+    assert check_references(documents, frozenset()) == (
+        Violation("guide.md", 1, "link target is not tracked: first.md"),
+        Violation("guide.md", 4, "record does not exist: ADR-0999"),
+        Violation("guide.md", 6, "link target is not tracked: last.md"),
+    )
+
+
+@pytest.mark.parametrize(
+    ("opening", "non_closers", "closing"),
+    [
+        (
+            "   ````markdown",
+            ("```", "~~~~", "```` trailing", "    ````"),
+            " ````` \t",
+        ),
+        (
+            " ~~~markdown `info`",
+            ("~~", "```", "~~~ trailing", "    ~~~"),
+            "  ~~~~ \t",
+        ),
+    ],
+    ids=["backticks", "tildes"],
+)
+def test_check_references_requires_a_matching_fence_of_sufficient_length(
+    opening: str, non_closers: tuple[str, ...], closing: str
+) -> None:
+    lines = [opening, "[example](hidden.md)"]
+    for line in non_closers:
+        lines.extend([line, "[still example](hidden.md)"])
+    lines.extend([closing, "[prose](missing.md)"])
+
+    assert check_references({"guide.md": "\n".join(lines)}, frozenset()) == (
+        Violation("guide.md", 12, "link target is not tracked: missing.md"),
+    )
+
+
+@pytest.mark.parametrize(
+    "opening", ["``markdown", "    ```markdown", "```markdown `info`"]
+)
+def test_check_references_does_not_treat_invalid_openers_as_fenced_code(
+    opening: str,
+) -> None:
+    documents = {"guide.md": f"{opening}\n[prose](missing.md)\n"}
+
+    assert check_references(documents, frozenset()) == (
+        Violation("guide.md", 2, "link target is not tracked: missing.md"),
+    )
+
+
+def test_check_references_ends_unclosed_fences_at_the_document_boundary() -> None:
+    documents = {
+        "b.md": "[prose](missing.md)\n",
+        "a.md": "~~~markdown [info](example.md)\n[example](hidden.md)\n",
+    }
+
+    assert check_references(documents, frozenset()) == (
+        Violation("b.md", 1, "link target is not tracked: missing.md"),
+    )
+
+
 def _git(repo: Path, *args: str) -> None:
     subprocess.run(
         [
@@ -168,6 +246,12 @@ def _git(repo: Path, *args: str) -> None:
     )
 
 
+def _commit_base(repo: Path) -> None:
+    _git(repo, "init", "-q")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "base")
+
+
 def test_main_lists_related_documents_and_hits_for_a_diff(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -180,9 +264,7 @@ def test_main_lists_related_documents_and_hits_for_a_diff(
     (tmp_path / "docs" / "guide.md").write_text(
         "The `Plan` is small.\n", encoding="utf-8"
     )
-    _git(tmp_path, "init", "-q")
-    _git(tmp_path, "add", "-A")
-    _git(tmp_path, "commit", "-q", "-m", "base")
+    _commit_base(tmp_path)
     (tmp_path / "pkg" / "plan.py").write_text(
         "class Plan:\n    size = 2\n", encoding="utf-8"
     )
@@ -195,14 +277,66 @@ def test_main_lists_related_documents_and_hits_for_a_diff(
     assert "hit: docs/guide.md:1: small (given): The `Plan` is small." in lines
 
 
+def test_main_keeps_binary_changed_paths_in_the_readme_chain(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (tmp_path / "pkg").mkdir()
+    (tmp_path / "pkg" / "README.md").write_text("Notes.\n", encoding="utf-8")
+    _commit_base(tmp_path)
+    (tmp_path / "pkg" / "scene.json.gz").write_bytes(
+        gzip.compress(b'{"value": 1}\n', mtime=0)
+    )
+    _git(tmp_path, "add", "-A")
+
+    assert main(["HEAD", "--root", str(tmp_path)]) == 0
+
+    assert (
+        "related: pkg/README.md  (README chain of pkg/scene.json.gz)"
+        in capsys.readouterr().out.splitlines()
+    )
+
+
+def test_main_reads_adr_citations_from_changed_utf8_data(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (tmp_path / "docs" / "adr").mkdir(parents=True)
+    (tmp_path / "docs" / "adr" / "0001-data.md").write_text(
+        "# Data\n", encoding="utf-8"
+    )
+    (tmp_path / "scene.data").write_text("old\n", encoding="utf-8")
+    _commit_base(tmp_path)
+    (tmp_path / "scene.data").write_text("ADR-0001\n", encoding="utf-8")
+
+    assert main(["HEAD", "--root", str(tmp_path)]) == 0
+
+    assert (
+        "related: docs/adr/0001-data.md  (ADR-0001 cited by scene.data)"
+        in capsys.readouterr().out.splitlines()
+    )
+
+
+@pytest.mark.parametrize(
+    ("filename", "mode"),
+    [("notes.md", "HEAD"), ("code.py", "HEAD"), ("notes.md", "--check")],
+)
+def test_main_rejects_non_utf8_markdown_and_python(
+    tmp_path: Path, filename: str, mode: str
+) -> None:
+    source = tmp_path / filename
+    source.write_text("", encoding="utf-8")
+    _commit_base(tmp_path)
+    source.write_bytes(b"\xff")
+
+    with pytest.raises(UnicodeDecodeError):
+        main([mode, "--root", str(tmp_path)])
+
+
 def test_main_replaces_the_hits_of_a_term_over_the_limit_with_a_count(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     (tmp_path / "notes.md").write_text("alpha\nalpha\nalpha\n", encoding="utf-8")
     (tmp_path / "a.py").write_text("X = 1\n", encoding="utf-8")
-    _git(tmp_path, "init", "-q")
-    _git(tmp_path, "add", "-A")
-    _git(tmp_path, "commit", "-q", "-m", "base")
+    _commit_base(tmp_path)
 
     assert (
         main(["HEAD", "--root", str(tmp_path), "--term", "alpha", "--max-hits", "2"])
@@ -219,7 +353,9 @@ def test_main_check_reports_broken_references_and_exit_code(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], *, broken: bool
 ) -> None:
     target = "missing.md" if broken else "other.md"
-    (tmp_path / "guide.md").write_text(f"[x]({target})\n", encoding="utf-8")
+    (tmp_path / "guide.md").write_text(
+        f"[x]({target})\n```markdown\n[example](local.png)\n```\n", encoding="utf-8"
+    )
     (tmp_path / "other.md").write_text("ok\n", encoding="utf-8")
     _git(tmp_path, "init", "-q")
     _git(tmp_path, "add", "-A")
@@ -227,4 +363,6 @@ def test_main_check_reports_broken_references_and_exit_code(
     assert main(["--check", "--root", str(tmp_path)]) == (1 if broken else 0)
 
     out = capsys.readouterr().out
-    assert ("guide.md:1: link target is not tracked: missing.md" in out) is broken
+    assert out == (
+        "guide.md:1: link target is not tracked: missing.md\n" if broken else ""
+    )

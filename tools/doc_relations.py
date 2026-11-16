@@ -15,6 +15,7 @@ from typing import Final
 _RECORD: Final = re.compile(r"ADR-(\d{4})|adr/(?:retired/)?(\d{4})-")
 _RECORD_PATH: Final = re.compile(r"^docs/adr/(?:retired/)?(\d{4})-[^/]+\.md$")
 _LINK: Final = re.compile(r"\]\(([^)\s]+)\)")
+_FENCE: Final = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
 _LINE_ANCHOR: Final = re.compile(r"\.py#L\d+")
 _DEFAULT_MAX_HITS: Final = 40
 # A record cited by more documents than this governs the whole repository; its citers are
@@ -223,6 +224,23 @@ def find_hits(terms: Sequence[Term], documents: Mapping[str, str]) -> tuple[Hit,
     return tuple(hits)
 
 
+def _unfenced_links(text: str) -> dict[int, list[str]]:
+    """Extract link targets outside fenced code, keyed by original line number."""
+    links: dict[int, list[str]] = {}
+    fence = ""
+    for number, line in enumerate(text.splitlines(), 1):
+        marker = _FENCE.match(line)
+        if fence:
+            if marker and marker[1].startswith(fence) and not marker[2].strip():
+                fence = ""
+            continue
+        if marker and (marker[1].startswith("~") or "`" not in marker[2]):
+            fence = marker[1]
+            continue
+        links[number] = _LINK.findall(line)
+    return links
+
+
 def check_references(
     documents: Mapping[str, str], tracked: frozenset[str]
 ) -> tuple[Violation, ...]:
@@ -231,8 +249,9 @@ def check_references(
     documents maps repo-relative POSIX paths to Markdown text; tracked holds
     every tracked repo-relative POSIX path. A relative link must resolve to a
     tracked file or to a directory containing one, and must not pin a line
-    with a .py#L<n> anchor. Links with a URL scheme and in-page anchors are
-    skipped. Every ADR-NNNN must match a tracked docs/adr/NNNN-*.md, retired
+    with a .py#L<n> anchor. Links in fenced code blocks, with a URL scheme or
+    with in-page anchors are skipped. Every ADR-NNNN, including in fenced code,
+    must match a tracked docs/adr/NNNN-*.md, retired
     or not. Discussion snapshots and retired ADRs are skipped. Violations are
     ordered by path, line and position in the line.
     """
@@ -244,8 +263,9 @@ def check_references(
     for path, text in sorted(documents.items()):
         if _is_snapshot(path):
             continue
+        links = _unfenced_links(text)
         for number, line in enumerate(text.splitlines(), 1):
-            for target in _LINK.findall(line):
+            for target in links.get(number, ()):
                 if "://" in target or target.startswith(("#", "mailto:")):
                     continue
                 if _LINE_ANCHOR.search(target):
@@ -286,6 +306,22 @@ def _read(root: Path, paths: Sequence[str]) -> dict[str, str]:
     }
 
 
+def _read_changed(root: Path, paths: Sequence[str]) -> dict[str, str]:
+    """Read changed files for ADR citations; Markdown and Python stay UTF-8."""
+    sources: dict[str, str] = {}
+    for path in paths:
+        if not (root / path).is_file():
+            continue
+        data = (root / path).read_bytes()
+        try:
+            sources[path] = data.decode("utf-8")
+        except UnicodeDecodeError:
+            # Only non-document, non-Python content may omit ADR citations.
+            if path.endswith((".md", ".py")):
+                raise
+    return sources
+
+
 def main(argv: list[str] | None = None) -> int:
     """Print the documents and lines a change touches, or check all references.
 
@@ -300,15 +336,37 @@ def main(argv: list[str] | None = None) -> int:
     Markdown document, prints `<path>:<line>: <reason>` per violation and
     returns 1 when there is any, else 0.
 
-    argv=None reads sys.argv. Git and file-read errors propagate.
+    Changed files that are not valid UTF-8 contribute no ADR citations,
+    except Markdown and Python files, whose decoding errors propagate.
+    All changed paths still contribute to the README chain.
+    argv=None reads sys.argv. Git and I/O errors propagate.
     """
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("base", nargs="?")
-    parser.add_argument("--check", action="store_true")
-    parser.add_argument("--term", action="append", default=[])
-    parser.add_argument("--max-hits", type=int, default=_DEFAULT_MAX_HITS)
     parser.add_argument(
-        "--root", type=Path, default=Path(__file__).resolve().parents[1]
+        "base", nargs="?", help="commit to compare with the working tree"
+    )
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="check tracked Markdown references instead of a diff",
+    )
+    parser.add_argument(
+        "--term",
+        action="append",
+        default=[],
+        help="additional literal search term; repeatable",
+    )
+    parser.add_argument(
+        "--max-hits",
+        type=int,
+        default=_DEFAULT_MAX_HITS,
+        help="summarize terms exceeding this hit count (default: 40)",
+    )
+    parser.add_argument(
+        "--root",
+        type=Path,
+        default=Path(__file__).resolve().parents[1],
+        help="checkout to inspect (default: this checkout)",
     )
     options = parser.parse_args(argv)
     root: Path = options.root
@@ -330,7 +388,9 @@ def main(argv: list[str] | None = None) -> int:
         if old.endswith(".py") and not status.startswith("A"):
             before[old] = _git(root, "show", f"{options.base}:{old}")
     after = _read(root, [path for path in changed if path.endswith(".py")])
-    for item in related_documents(changed, {**documents, **_read(root, changed)}):
+    for item in related_documents(
+        changed, {**documents, **_read_changed(root, changed)}
+    ):
         print(f"related: {item.path}  ({item.reason})")
     terms = (
         *search_terms(before, after),

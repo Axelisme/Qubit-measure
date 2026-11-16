@@ -2,7 +2,7 @@
 
 from zcu_tools.resources.parameter_schema import ParameterSchemaPolicy
 from zcu_tools.resources.parameter_upgrade import (
-    ParameterDocument,
+    ParameterUpgradeDocument,
     UpgradePlan,
     UpgradeStep,
 )
@@ -26,7 +26,7 @@ PARAMETER_SCHEMA_POLICY = ParameterSchemaPolicy(
 )
 
 
-def _validate(document: ParameterDocument, version: int) -> None:
+def _validate(document: ParameterUpgradeDocument, version: int) -> None:
     classification = classify_flux_document(document)
     expected = "legacy" if version in (1, 2) else "current"
     if (
@@ -39,7 +39,7 @@ def _validate(document: ParameterDocument, version: int) -> None:
         )
 
 
-def _classify_legacy(document: ParameterDocument) -> bool:
+def _classify_legacy(document: ParameterUpgradeDocument) -> bool:
     _validate(document, 1)
     return True
 

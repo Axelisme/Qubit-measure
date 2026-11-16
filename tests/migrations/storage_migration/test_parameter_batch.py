@@ -6,7 +6,7 @@ import pytest
 from pydantic import field_validator
 from zcu_tools.datafile import JsonObject
 from zcu_tools.resources.entry import component_registry, document_value, snapshot
-from zcu_tools.resources.parameter_upgrade import ParameterDocument
+from zcu_tools.resources.parameter_upgrade import ParameterUpgradeDocument
 
 from migrations.storage_migration import KeyRule, MigrationMapping, MigrationRequest
 from tests.migrations.storage_migration.fakes import SyntheticProbe, write_meta
@@ -17,7 +17,7 @@ from tests.migrations.storage_migration.params_support import migrate, open_entr
 def test_seed_batch_converts_before_current_schema_validation(
     request_data: MigrationRequest, mapping: MigrationMapping, dry_run: bool
 ) -> None:
-    def transform(document: ParameterDocument) -> ParameterDocument:
+    def transform(document: ParameterUpgradeDocument) -> ParameterUpgradeDocument:
         components = document.data["components"]
         if not isinstance(components, dict):
             raise ValueError("components must be a mapping")
@@ -50,7 +50,7 @@ def test_value_batch_converts_whole_group_before_current_validation(
 ) -> None:
     seen: list[float] = []
 
-    def transform(document: ParameterDocument) -> ParameterDocument:
+    def transform(document: ParameterUpgradeDocument) -> ParameterUpgradeDocument:
         components = document.data["components"]
         if not isinstance(components, dict):
             raise ValueError("components must be a mapping")
@@ -111,7 +111,7 @@ def test_value_batch_converts_whole_group_before_current_validation(
 def test_conversion_notes_reach_report_for_seed_setup_and_point_batches(
     request_data: MigrationRequest, mapping: MigrationMapping, dry_run: bool
 ) -> None:
-    def transform(document: ParameterDocument) -> ParameterDocument:
+    def transform(document: ParameterUpgradeDocument) -> ParameterUpgradeDocument:
         return replace(document, notes=("C1.frequency: check the declared source",))
 
     mapping = replace(
@@ -166,7 +166,7 @@ def test_batch_preserves_omitted_setting_without_dropping_explicit_null(
     mapping: MigrationMapping,
     explicit_null: bool,
 ) -> None:
-    def transform(document: ParameterDocument) -> ParameterDocument:
+    def transform(document: ParameterUpgradeDocument) -> ParameterUpgradeDocument:
         components = document.data["components"]
         if not isinstance(components, dict):
             raise ValueError("components must be a mapping")

@@ -820,9 +820,9 @@ def ftf(  # noqa: PLR0913  # tolerated: independent optional inputs have distinc
     releases its in-memory routing facts. FTFSource.close explicitly clears it.
     warmup=False keeps direct callers/tests free of background CPU work. True
     starts process-wide single-flight numeric preparation. The Notebook example
-    opts in and reserves two host CPUs; GUI startup uses one worker without
-    warmup. An explicit EnvironmentWarmup supplies named preparation items
-    instead. It must not
+    opts in and reserves two host CPUs; GUI startup reserves one host CPU,
+    using at least one worker without warmup. An explicit EnvironmentWarmup
+    supplies named preparation items instead. It must not
     sample or mutate live devices. env.wait_ready() waits before caller timing;
     acquire also waits automatically. Failure status permits on-demand compiling.
     time_scale overrides numerics.time_scale (default 1.0 = physical time)

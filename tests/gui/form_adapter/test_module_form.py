@@ -46,7 +46,7 @@ from zcu_tools.resources.context.library import (
     LibrarySnapshot,
     ModuleLibraryDocument,
 )
-from zcu_tools.resources.entry.schema import PointDocument, PointGeneral
+from zcu_tools.resources.entry.schema import ParameterDocument, ParameterGeneral
 
 UNSUPPORTED_PULSE_FIELDS = ("desc",)
 
@@ -648,11 +648,13 @@ def creation_env(
         )
     )
     parameters = ParameterContext(
-        point=PointDocument(
+        point=ParameterDocument(
             format="zcu.parameter-container",
             format_version="2.0",
             schema_version=1,
-            general=PointGeneral(created_at="2026-10-13T00:00:00Z", ext={"seed": seed}),
+            general=ParameterGeneral(
+                created_at="2026-10-13T00:00:00Z", ext={"seed": seed}
+            ),
         ),
         library=library,
         target=SavedPoint(entry_name="synthetic", point="synthetic"),

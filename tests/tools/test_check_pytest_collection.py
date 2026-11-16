@@ -8,6 +8,12 @@ import check_pytest_collection as oracle
 import pytest
 
 
+def test_help_exits_successfully_without_collecting() -> None:
+    with pytest.raises(SystemExit) as caught:
+        oracle.main(["-h"])
+    assert caught.value.code == 0
+
+
 def test_parse_collection_requires_success_summary_and_exact_node_count() -> None:
     command = ("python", "-m", "pytest")
     output = (
@@ -177,7 +183,7 @@ def test_collection_matrix_has_one_result_per_entrypoint_and_mode(
         oracle, "configured_addopts", lambda _root: ("--import-mode=importlib",)
     )
 
-    assert oracle.main() == 0
+    assert oracle.main([]) == 0
     assert set(calls) == {
         ("module", False),
         ("module", True),

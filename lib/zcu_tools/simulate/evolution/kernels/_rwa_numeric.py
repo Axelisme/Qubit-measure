@@ -48,6 +48,14 @@ RWA_POLICY = (
 
 
 ADAPTIVE_RWA_POLICY = ("omission-strongest-parent-v2", CONSTANT_RWA_POLICY, RWA_POLICY)
+# Full-density calibration supports 0.08 with margin on the fixed candidate
+# acceptance set, not a maximum threshold or arbitrary-input accuracy bound.
+_MAX_KAPPA2 = 0.08
+SINGLE_CONSTANT_RWA_POLICY = (
+    "single-constant-kappa2-v1",
+    ADAPTIVE_RWA_POLICY,
+    _MAX_KAPPA2,
+)
 _MAX_OMISSION_PHASE_RAD = 0.0045
 _MAX_RETAINED_DIMENSION = 256
 MULTITONE_RETENTION_POLICY = (
@@ -126,19 +134,22 @@ class RWAUncomputed:
 
 @dataclass(frozen=True)
 class ConstantRWAAdmission:
-    """Shared constant-row retention and calibrated numeric comparisons.
+    """Shared constant-row retention and numeric admission comparisons.
 
     retention owns the final Fourier edge set. carrier_ghz is the absolute
-    carrier in GHz, required >=0.05. omission_transfer is a
-    dimensionless first/second-order transfer proxy. strength_ratio is the
-    dimensionless full-quadrature strength divided by absolute carrier.
+    carrier in GHz, required >=0.05. kappa2 is the dimensionless spectral norm
+    of the entrywise absolute omitted c/d coefficients summed over both signs,
+    after edge restoration. Its 0.08 cap has full-density calibration with
+    margin on the fixed candidate acceptance set. This does not establish a
+    maximum usable threshold or arbitrary-input accuracy.
+    strength_ratio is the full-quadrature strength divided by absolute carrier.
     phase_rad is the retained-norm phase proxy in radians, or RWAUncomputed
     when the strength-ratio comparison already rejected the row.
     """
 
     retention: RWARetention
     carrier_ghz: RWAGuardMetric
-    omission_transfer: RWAGuardMetric
+    kappa2: RWAGuardMetric
     strength_ratio: RWAGuardMetric
     phase_rad: RWAGuardMetric | RWAUncomputed
 
@@ -150,7 +161,7 @@ class ConstantRWAAdmission:
             and self.strength_ratio.passed
             and isinstance(self.phase_rad, RWAGuardMetric)
             and self.phase_rad.passed
-            and self.omission_transfer.passed
+            and self.kappa2.passed
         )
 
 
@@ -417,13 +428,15 @@ def constant_admission(
 
     Caller supplies a valid drive index, signed carrier with magnitude >=50 MHz,
     finite gain and nonnegative ns duration. No budget or density enters these
-    comparisons. Guard and public diagnostics consume this same product. A failed
-    strength comparison skips the phase-radian value, matching guard short-circuiting.
+    comparisons. Guard and public diagnostics consume this same product. Kappa2
+    uses the same resolved omitted edges as the endpoint kick and is computed
+    before strength/phase checks. A failed strength comparison skips the
+    phase-radian value, matching guard short-circuiting.
     """
     key = FactKey(
         (
             "constant-rwa-admission",
-            ADAPTIVE_RWA_POLICY,
+            SINGLE_CONSTANT_RWA_POLICY,
             model.identity,
             model.level,
             port,
@@ -438,6 +451,10 @@ def constant_admission(
         retention = constant_retention(
             model, port, frequency, amplitude, duration_ns, work_plan
         )
+        coefficients = rwa_kick_coefficients(
+            model, port, frequency, amplitude, retention
+        )
+        kappa2 = float(np.linalg.norm(np.abs(coefficients).sum(axis=0), ord=2))
         norms = quadrature_norms(model, port, work_plan)
         retained = _retained_norm(model, port, frequency, work_plan, retention)
         # Preserve the table guard's NumPy scalar arithmetic, including overflow.
@@ -454,9 +471,7 @@ def constant_admission(
         return ConstantRWAAdmission(
             retention,
             RWAGuardMetric(abs(frequency), _rwa_fourier.EDGE_GHZ, ">="),
-            RWAGuardMetric(
-                retention.omission_transfer, _rwa_fourier.MAX_OMISSION_TRANSFER
-            ),
+            RWAGuardMetric(kappa2, _MAX_KAPPA2),
             strength,
             phase,
         )
@@ -720,7 +735,7 @@ def admit_single_rows(
 def admit_constant_rows(
     table: SegmentTable, rows: NDArray[np.int64], context: KernelContext
 ) -> NDArray[np.bool_]:
-    """Admit single constant rows under the same omission/strength/phase policy.
+    """Admit single constant rows under the same kappa2/strength/phase policy.
 
     Fixed flux, |f|>=50 MHz and budget>=1e-3 are required. Graph pruning is a
     separate consumer admission; this function never reads input density.
