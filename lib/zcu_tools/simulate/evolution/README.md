@@ -325,7 +325,8 @@ The [family query](kernels/multitone_rwa.py) and kernel guard project the same
 recomputing it. Each independent query closes its temporary plan before return;
 it does not evolve density, select a family, mutate history or cache facts across
 calls. This query covers constant pairs only, not sampled controls or moving
-flux. Sampled-row admission and dispatch prices are unchanged.
+flux. The family guard rejects sampled rows. The query does not change dispatch
+prices.
 
 ### Common-frame guard diagnostics
 
@@ -610,7 +611,7 @@ the `1.476e-4` limit. Pinned `multitone_rwa` accepts it. The maximum complete
 complex-density error is `1.014148242e-3`, against independent full-Hamiltonian
 Lindblad references that agree within `4.751899e-11`. The fixed outside duration
 `184.5*1.01` ns reports `1.49076e-4` cycles and is rejected by both query and
-pinned Engine. The sampled guard edge remains a separate case.
+pinned Engine. The carrier guard edge uses a separate constant-pair case.
 
 The [ground-state A16 tracer](../../../../tests/simulate/evolution/contract/multitone_cases.py)
 builds a fixed 1600 ns constant pair through public physical/model interfaces.
