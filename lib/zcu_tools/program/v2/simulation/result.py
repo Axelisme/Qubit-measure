@@ -6,7 +6,7 @@ from typing import Protocol
 import numpy as np
 from numpy.typing import NDArray
 
-from zcu_tools.core.simulation import RoundStatistics
+from zcu_tools.simulate.boundary import RoundStatistics
 
 
 class RawShots(Protocol):

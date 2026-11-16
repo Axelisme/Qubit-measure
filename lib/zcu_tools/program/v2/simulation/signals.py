@@ -8,7 +8,7 @@ import numpy as np
 from numba import njit
 from numpy.typing import NDArray
 
-from zcu_tools.core.simulation import (
+from zcu_tools.simulate.boundary import (
     AcquireRequest,
     ChannelStatistics,
     RoundSignals,

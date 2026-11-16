@@ -6,18 +6,18 @@ from typing import Literal
 import numpy as np
 from numpy.typing import NDArray
 
-from zcu_tools.core.simulation import (
-    EventSlot,
-    PulseEnvelope,
-    ReadoutSlot,
-    TimeBase,
-    TimelineTemplate,
-)
 from zcu_tools.simulate.adc import (
     PiecewiseLinearEnvelope,
     ReadoutEvent,
     ReadoutPulse,
     SampleGrid,
+)
+from zcu_tools.simulate.boundary import (
+    EventSlot,
+    PulseEnvelope,
+    ReadoutSlot,
+    TimeBase,
+    TimelineTemplate,
 )
 from zcu_tools.simulate.evolution import DriveTrack, EnvelopeSpec
 

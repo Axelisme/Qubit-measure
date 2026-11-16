@@ -11,14 +11,14 @@ from uuid import uuid4
 
 import numpy as np
 
-from zcu_tools.core.simulation import (
+from zcu_tools.program.shot_time import request_round_time_s
+from zcu_tools.simulate.boundary import (
     AcquireRequest,
     CancellationQuery,
     EnvironmentSnapshot,
     RoundRequest,
     RoundSignals,
 )
-from zcu_tools.program.shot_time import request_round_time_s
 
 from ._envelope_pool import EnvelopePool
 from .clock import SimulationTiming
