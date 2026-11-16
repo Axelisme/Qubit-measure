@@ -9,7 +9,7 @@ from zcu_tools.core.simulation import ChannelSignals, RoundSignals, SamplingIden
 from ._integrated_paths import IntegratedPaths
 from ._jump_paths import JumpPaths
 from ._path_sampling import physical_shots
-from .projection import ProjectionReadout
+from .projection import ProjectionChain, ProjectionReadout
 from .raw import PreparedRawShots
 from .readout_batch import ReadoutBatch
 from .request import (
@@ -114,7 +114,7 @@ class ADC(ConditionalReadout):
 
 
 def sample_traces(
-    readout: ProjectionReadout,
+    readout: ProjectionReadout | ProjectionChain,
     batches: Mapping[int, ReadoutBatch],
     *,
     reps: int,
@@ -124,7 +124,7 @@ def sample_traces(
 ) -> RoundSignals:
     """Draw complete physical per-execution traces for every declared ADC.
 
-    readout supplies outcome weights and each event's conditional populations,
+    readout supplies outcome-conditioned populations or Markov projection states,
     in all batch models' identical state order. batches maps nonnegative
     ADC indices in declaration order to physical pulse/grid contents. Each
     content_index is flat C-order (prod(point_dims),); all ADCs must use the
@@ -137,7 +137,9 @@ def sample_traces(
 
     Return RoundSignals in mapping order with owned float64 IQ arrays shaped
     (prod(point_dims)*reps,reads,samples,2), points then shots in C order.
-    One outcome is shared per point/shot. Each event draws its own CTMC path,
+    ProjectionReadout shares one outcome per point/shot. ProjectionChain draws
+    each projection state conditional on the previous projection state, not the
+    CTMC endpoint. Each event draws its own CTMC path,
     shared across its carriers, ADCs and windows from the earliest pulse to the
     latest sample, including gaps and ringdown. Receivers add independent per-sample noise and offset
     once after coherent superposition. There is no rounding or normalization.

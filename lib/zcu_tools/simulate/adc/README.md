@@ -1,6 +1,6 @@
 # ADC probability and readout contracts
 
-**Last updated:** 2026-11-14
+**Last updated:** 2026-11-17
 
 **讀者：** framework-dev、agent。ADC 機率、讀出訊號與 interval moment 契約。
 
@@ -65,9 +65,10 @@ Row validation raises `PopulationValidationError`, a `ValueError` subclass whose
 counts rows failing the first reported rule. It returns no partial results.
 Callers can retain this count without parsing error text.
 
-`PopulationInput` and `ProjectionReadout` validate the same probability trace
-interval and require nonnegative entries. `round_statistics`, `PreparedRawShots`
-and `sample_traces` take a `ProjectionReadout` as their first argument.
+`PopulationInput`, `ProjectionReadout` and `ProjectionChain` validate the same
+probability trace interval and require nonnegative entries. `round_statistics`,
+`PreparedStatistics`, `PreparedRawShots` and `sample_traces` take either
+`ProjectionReadout` or `ProjectionChain` as their first argument.
 They expect explicitly normalized distributions and do not normalize or clip them. Their tolerance accommodates
 numeric residuals; it does not replace explicit preparation. State ordering must
 match the readout model and conditional responses. No basis inference occurs in
@@ -260,9 +261,37 @@ and one event. A single outcome consumes no extra outcome RNG draw. Its raw,
 trace and integrated outputs retain the previous single-event RNG order,
 including shared-event multi-grid and multi-ADC arrangements.
 
-The experiment runtime classifies readout blocks, prunes projection histories
-and supplies rank-1 diagonal projections in the retained DC energy basis.
-ADC neither chooses projection times nor applies the pruning floor. It does not
+`ProjectionChain(initial, transitions)` represents rank-1 projective reads
+without enumerating outcome histories. `initial` has shape `(*point_dims, S)`.
+Each subsequent event supplies one `(*point_dims, S, S)` transition array,
+indexed `[previous_projection_state, next_projection_state]`. Construction
+copies arrays read-only and validates every row without clipping or normalization.
+An empty transition tuple represents one event. `ProjectionReadout` remains
+the outcome-mixture input for FTF and `unprojected` readout.
+
+Raw and trace sampling follow each shot's chain, sharing projection states and
+each event's CTMC path across ADCs and grids. The next projection depends on
+the previous projection state, not on the readout CTMC endpoint. Chain sampling
+uses its own draw order. Equal inputs and identities reproduce results within
+the same numeric/RNG version; no bitwise parity with enumerated histories is
+promised. The existing single-event `ProjectionReadout` RNG order stays unchanged.
+
+Integrated chain sampling draws first-event occupancy with a multinomial.
+For each next event and source state it draws multinomial destination flows,
+then sums the incoming flows to obtain that event's histogram. No shot array
+or outcome history is constructed. `cumulative_count_bins(histograms)` encodes
+these histograms on sorted cumulative-count boundaries. It returns
+`HistogramBins.counts` and a tuple of per-histogram category `indices`.
+All histograms use the same point shape and total per point. The shared width
+is `1+sum(S_e-1)`, independent of reps; duplicate boundaries remain zero-count
+bins. Each read uses its `event_indices` entry and content-specific
+`column_order` to select means on these bins. These categories preserve marginal
+moments, not a joint state distribution or real shot paths. The same encoder
+can combine independent cavity histograms with different category counts.
+Receiver Gaussian noise and nearest-even rounding variance remain unchanged.
+
+The experiment runtime supplies projection probabilities in the retained DC
+energy basis. ADC neither chooses projection times nor applies the pruning floor. It does not
 group states by IQ distinguishability. ADC transitions during
 a herald event affect that event's IQ only. They do not feed back into the
 populations supplied for later events.
@@ -272,7 +301,8 @@ and per-channel ReadoutBatch inputs. `bind(identity)` returns an `ADCRawShots`
 source without doing shot work. `materialize(reps, avg_level)` alone draws full
 CTMC paths, one per logical event. Within an event all carriers, ADCs and grids
 share the path. Different events draw independent paths after selecting one
-outcome shared by the whole shot. Each receiver adds
+outcome shared by the whole shot, or following the chain's projection states.
+Each receiver adds
 independent noise. Zero jumps use direct vacuum sums. Jumped shots use compiled exact homogeneous propagation and discrete
 sample sums. Uniform samples use binary geometric sums; irregular samples keep
 their original coordinates. Flat baselines use singular-safe phi1 propagation.
@@ -306,15 +336,16 @@ counts or tolerances raise `ValueError`; baseline/field failures raise
 `RuntimeError`. There is no conditional-only trace sampler or fallback.
 
 `PreparedStatistics(readout, channels, reps=...)` validates and owns immutable
-integrated sampling inputs. It draws counts on the C-order flattened
+integrated sampling inputs. For `ProjectionReadout` it draws counts on the C-order flattened
 `(outcome, terminal state)` axis with probabilities `weights[k] * final[k, s]`.
 Earlier-event conditional sums average that event's populations for each outcome,
 then repeat across terminal states. Terminal-event conditional sums depend on
 the terminal state and repeat across outcomes. Every ADC/read uses those joint
 counts. Preparation expands conditional means and factors each ADC's noise
 covariance once. `draw(seed=..., acquire_sequence=..., round_index=...)`
-validates a fresh identity, draws the same joint multinomial and ADC-ordered
-Gaussian arrays as `round_statistics`, and retains no noisy results or identities.
+validates a fresh identity and uses the same count/noise algorithm as
+`round_statistics`. `ProjectionChain` uses flow counts and the cumulative-boundary
+encoding described above. The preparation retains no noisy results or identities.
 The public `round_statistics` still validates arbitrary inputs by building a plan
 for that call. FTF retains plans with noiseless preparations; no RNG draws or
 deferred raw materialization move into preparation.

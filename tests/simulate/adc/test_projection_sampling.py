@@ -51,6 +51,53 @@ def subset_inputs():
     return {3: batch, 1: terminal_only}, projection
 
 
+@pytest.mark.parametrize("mode", ["raw", "traces"])
+@pytest.mark.parametrize("jumps", [False, True])
+def test_chain_shots_follow_projection_states_and_share_event_paths(mode, jumps):
+    model, events, _, _ = projection_inputs()
+    if jumps:
+        model = replace(model, rates_per_ns=np.array([[0.0, 0.03], [0.02, 0.0]]))
+    # Two grids and two ADCs must see one common physical path per event.
+    events = tuple(replace(event, grids=event.grids * 2) for event in events)
+    batch = adc.ReadoutBatch(model, (events,), np.array([0], dtype=np.int64))
+    chain = adc.ProjectionChain(np.array([[0.35, 0.65]]), (np.eye(2)[None, ::-1],))
+    identity = SamplingIdentity(17, (0, 0, 1))
+    if mode == "raw":
+        shots = adc.PreparedRawShots(chain, {3: batch, 1: batch}, reps=64).bind(
+            identity
+        )
+        actual = shots.materialize(64, 0)
+        both, other = actual[3][:, 0], actual[1][:, 0]
+    else:
+        signals = adc.sample_traces(
+            chain, {3: batch, 1: batch}, reps=64, identity=identity
+        )
+        both, other = (channel.iq for channel in signals.channels)
+    assert_array_equal(both, other)
+    assert_array_equal(both[:, 0], both[:, 1])
+    assert_array_equal(both[:, 2], both[:, 3])
+    if not jumps:
+        expected = [
+            adc.ADC(model).response(event.pulses, event.grids[0]).traces
+            for event in events
+        ]
+        if mode == "raw":
+            expected = [
+                np.rint(values.sum(axis=-2)).astype(np.int64) for values in expected
+            ]
+        axes = tuple(range(1, both[:, 0].ndim))
+        ground = np.all(np.isclose(both[:, 0], expected[0][0]), axis=axes)
+        assert 0 < ground.sum() < 64
+        np.testing.assert_allclose(
+            both[ground, 2], np.broadcast_to(expected[1][1], both[ground, 2].shape)
+        )
+        np.testing.assert_allclose(
+            both[~ground, 2], np.broadcast_to(expected[1][0], both[~ground, 2].shape)
+        )
+    else:
+        assert np.unique(both[:, 0].reshape(64, -1), axis=0).shape[0] > 16
+
+
 def test_decimated_adc_without_herald_keeps_terminal_event_path_and_read_count():
     batches, projection = subset_inputs()
     actual = adc.sample_traces(
