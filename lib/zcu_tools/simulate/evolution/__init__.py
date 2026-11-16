@@ -36,6 +36,7 @@ from .kernels._rwa_numeric import (
     rwa_coefficients,
 )
 from .kernels.common_frame import CommonFrameDiagnostic, common_frame_diagnostic
+from .kernels.multitone_rwa import MultitoneRWADiagnostic, multitone_rwa_diagnostic
 from .kernels.single_tone_rwa import SingleToneRWADiagnostic, single_tone_rwa_diagnostic
 from .model import DriveSource, NumericModel
 from .routing_history import RoutingHistory

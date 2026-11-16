@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-11-15, constant dual-tone endpoint kicks and narrower common-frame guard
+**Last updated:** 2026-11-16, constant-pair secular guard, diagnostics and frozen-input evidence
 
 **讀者：** framework-dev、agent。Segment evolution 的公開輸入、路由與數值邊界。
 
@@ -45,6 +45,7 @@ The exports in [__init__.py](__init__.py) fall into these groups:
 | Explicit joint-Fock prototype | `JointFockRequest`, `JointFockDiagnostic`, `JointFockResult`, `joint_fock_spectrum` |
 | Shared RWA Hamiltonian coefficients | `RWACoefficients`, `rwa_coefficients`, `interaction_hamiltonian` |
 | Read-only constant RWA guard query | `single_tone_rwa_diagnostic`, `SingleToneRWADiagnostic`, `RWAGuardMetric`, `RWAUncomputed` |
+| Read-only constant-pair RWA guard query | `multitone_rwa_diagnostic`, `MultitoneRWADiagnostic` |
 | Read-only common-frame guard query | `common_frame_diagnostic`, `CommonFrameDiagnostic` |
 
 `Engine(workers, *, families=None, kernels=None, chunks_per_worker=None,
@@ -138,6 +139,53 @@ The query does not diagnose sampled envelopes, multiple tones or moving flux.
 Carrier phase and initial density do not enter the comparisons. These metrics
 are admission proxies, not a certificate of final full-density accuracy.
 The guard thresholds, dispatch order and other families are unchanged.
+
+### Constant-pair RWA guard diagnostics
+
+Call `multitone_rwa_diagnostic(model, ports, frequencies_ghz, amplitudes,
+duration_ns, budget=1e-3)` from the package root. Supply the fixed-flux row's
+`SecularModel`, including segment shifts, and three aligned length-two tuples.
+`ports` names known model drives, `frequencies_ghz` contains finite signed GHz,
+and `amplitudes` contains finite signed dimensionless gains. Duration is finite
+nonnegative ns, and budget is finite and positive. Unknown ports, wrong tuple
+lengths, nonfinite inputs, negative duration and invalid budget raise
+`ValueError`. Numerical construction failures propagate.
+
+The frozen `MultitoneRWADiagnostic` uses the same `RWAGuardMetric` and
+`RWAUncomputed` leaves as the single-tone query. It has no `reason` field.
+`accepted` reports numerical admission, not dispatch selection. Same-port,
+low/zero carrier and positive budget below `1e-3` return `accepted=False`.
+
+| Field | Value and units | Inclusive admission |
+| --- | --- | --- |
+| `budget` | Per-segment allowance, dimensionless | ≥ 1e-3 |
+| `carrier_ghz` | Smaller absolute carrier, GHz | ≥ 0.05 |
+| `omission_transfer` | Final mask's remaining first/second-order transfer proxy, dimensionless | ≤ 0.0058 |
+| `omission_phase_rad` | Final mask's remaining omission phase, rad | ≤ 0.0045 |
+| `real_dimension` | Sum of squared retained component sizes, including isolated populations | ≤ 256 |
+| `secular_accumulation` | ε_dom² × Ω_ret × row duration, cycles | ≤ 1.476e-4 |
+
+For the final resolved Fourier mask, ε_dom is the largest omitted nonzero
+coupling magnitude divided by absolute detuning, including diagonal terms.
+Ω_ret is twice the largest retained coupling magnitude over both tones and
+signs, in cycles/ns. Couplings include signed gains. Empty maxima are zero.
+The accumulation proxy uses row-local duration and no `2π` conversion.
+It supplements endpoint kicks; it does not bound final density error.
+
+Budget is always computed. A budget or same-port rejection leaves later
+metrics uncomputed. A carrier rejection skips retention and accumulation.
+Computed final-mask metrics remain visible even when a later comparison rejects
+the row. If restoration crosses the dimension limit before final-mask omission
+analysis, dimension is visible, but transfer, phase and accumulation are
+uncomputed. The query never reports earlier-mask values or infinity sentinels
+as final metrics.
+
+The [family query](kernels/multitone_rwa.py) and kernel guard project the same
+[admission fact](kernels/_rwa_numeric.py). One WorkPlan shares that fact without
+recomputing it. Each independent query closes its temporary plan before return;
+it does not evolve density, select a family, mutate history or cache facts across
+calls. This query covers constant pairs only, not sampled controls or moving
+flux. Sampled-row admission and dispatch prices are unchanged.
 
 ### Common-frame guard diagnostics
 
@@ -367,7 +415,7 @@ own the command and report format.
 | [`period_table`](kernels/period_table.py), shaped amplitude-band period playback | `shaped` | 8 Chebyshev amplitude nodes and 16 phase samples. Guard requires envelope-motion indicator ≤ 0.05, amplitude-band bandwidth ≤ 0.5 and secular split ≤ 0.01. These calibrated limits do not scale with B. DC is guard-admissible with local direct integration, but default costs prefer terminal DOP853. | [`linear_shaped`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
 | [`common_frame`](kernels/common_frame.py), common-frame SW2 beat dynamics | `two` or two-tone `multiple` only | Fixed-flux common frame with second-order beat/two-photon terms, first-order endpoint dressing and CF4/secular playback. Absolute mean carrier must be ≥ 1e-10 GHz. CF4 steps are capped at 8 ns and 0.08 cycles of the fastest retained channel, with no lower cutoff. Dispatch prices first-order playback steps, so cost rises with active carrier spacing; numerical guards determine applicability. Fast-channel denominator must exceed 1e-10. Row-local coherent/bath indicators must be ≤ 0.0018/0.01, independent of B. | [`nearby_carriers`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS at the new coherent guard edge |
 | [`multitone_gate`](kernels/multitone_gate.py), reused simultaneous RWA gates | `multiple`, requires a sampled envelope | When comparing `multitone_rwa` and `multitone_gate`, cost preference selects the gate at complete canonical-key inventory ≥ 20 and retains multitone RWA at 19 uses. Pinning this family bypasses cost, so 19 uses is allowed. Numerical admission: Fixed flux, B ≥ 1e-3, real envelopes, slope ≤ 0.025/ns, curvature ≤ 0.003/ns², each carrier magnitude ≥ 50 MHz and absolute-carrier spacing ≥ 100 MHz. Full-operator/carrier ratio ≤ 0.25, retained-norm phase proxy ≤ 0.06 rad and pruning ≤ min(B, 1e-3). Adaptive split uses n ≥ 4 with d³ΓV²/n² ≤ 0.01. These gate policies differ from ordinary multitone RWA. | [`joint_gate_inventory`](../../../../tests/simulate/evolution/contract/accuracy_cases.py), 20 points; [19/20 boundary contract](../../../../tests/simulate/evolution/contract/test_routing_boundaries.py) | PASS |
-| [`multitone_rwa`](kernels/multitone_rwa.py), simultaneous omission-restored RWA | `two`, distinct ports only; `multiple`, requires a sampled envelope | Fixed flux, B ≥ 1e-3, real envelopes, slope ≤ 0.025/ns, curvature ≤ 0.003/ns² and each carrier magnitude ≥ 50 MHz. Start with 50 MHz edges, restore omitted paths until transfer proxy ≤ 0.0058 and residual phase ≤ 0.0045 rad; retained real dimension ≤ 256. No carrier-spacing, full-operator/carrier ratio or retained-norm phase cap. Constant dual-tone rows apply first-order endpoint kicks from every edge outside the resolved retention mask, including diagonal ±carrier terms. At each endpoint, the kernel sums all tones' kicks before acting on density. Row-local kick time equals the propagation duration; following idle rows do not extend it. Sampled rows are unchanged. Apply step ceiling is 16 ns for constants, 4 ns for sampled controls. | [`joint_gate_inventory`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
+| [`multitone_rwa`](kernels/multitone_rwa.py), simultaneous omission-restored RWA | `two`, distinct ports only; `multiple`, requires a sampled envelope | Fixed flux, B ≥ 1e-3, real envelopes, slope ≤ 0.025/ns, curvature ≤ 0.003/ns² and each carrier magnitude ≥ 50 MHz. Start with 50 MHz edges, restore omitted paths until transfer proxy ≤ 0.0058 and residual phase ≤ 0.0045 rad; retained real dimension ≤ 256. No carrier-spacing, full-operator/carrier ratio or retained-norm phase cap. Constant pairs additionally require final-mask ε_dom²·Ω_ret·T ≤ 1.476e-4 cycle; sampled rows do not use this comparison. The [constant-pair query](#constant-pair-rwa-guard-diagnostics) reports its final metrics. Constant dual-tone rows apply first-order endpoint kicks from every edge outside the resolved retention mask, including diagonal ±carrier terms. At each endpoint, the kernel sums all tones' kicks before acting on density. Row-local kick time equals the propagation duration; following idle rows do not extend it. Sampled rows are unchanged. Apply step ceiling is 16 ns for constants, 4 ns for sampled controls. | [`joint_gate_inventory`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
 | [`floquet`](kernels/floquet.py), constant Stark tone plus probe | `two` | Larger absolute gain selects the Stark slot, with ties choosing the first; that slot requires positive carrier. Frame overlap ≥ 0.5, modal condition ≤ 1e8, maximum real eigenvalue ≤ 1e-10/ns and residual ≤ 1e-9; sampling extent ≤ 128 with at most 4096 phase samples. k=0 omission and convergence each fit B/3. Modal Dyson additionally uses r ≤ 0.1, r2 ≤ 0.05 when probe gain magnitude ≥ 0.1, Dyson norm-duration v ≤ 0.5, transfer indicator v + v²/2 ≤ 0.02 and higher-order remainder exp(v)·v³/6 ≤ B/3; otherwise use periodic channel playback. Retained-sideband admission instead requires convergence ≤ B/40 and bound ≤ 0.95B, retaining edges within 0.1/ns and averaging other harmonics through order 4. This finite-Fourier admission is not a density-error guarantee. | [`two_carriers`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
 | [`dop853`](kernels/dop853.py), full-drive direct density integration | `shaped`, `two`, `multiple`, terminal candidate | No RWA or fast-path admission threshold. Accepts valid rows with finite positive B, including complex sampled envelopes. Stops at active control knots. Local rtol = min(1e-4, 0.03B), atol = min(1e-6, 0.0003B), from the [shared solver](kernels/_dop853.py); these are not global error bounds. | [`shaped_complex`](../../../../tests/simulate/evolution/contract/accuracy_cases.py), [`two_carriers`](../../../../tests/simulate/evolution/contract/accuracy_cases.py), [`joint_gate_inventory`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
 
@@ -390,6 +438,28 @@ Its coherent indicator is 0.0017999982, one part per million inside the new
 limit. The matrix checks the complete complex density against a two-tolerance
 full-Hamiltonian Lindblad reference with the unchanged 2e-3 acceptance bound.
 The earlier 8.066669e-3 edge is replaced, not retained as an expected failure.
+
+### Constant-pair guard evidence
+
+The [constant-pair edge test](../../../../tests/simulate/evolution/contract/test_accuracy_matrix.py)
+uses two circular-drive ports with a diagonal pump component, relaxation and
+dephasing. Its two phase points have an inside duration of `184.5*(1-1e-6)` ns.
+The public query reports `1.475998524e-4` cycles, one part per million inside
+the `1.476e-4` limit. Pinned `multitone_rwa` accepts it. The maximum complete
+complex-density error is `1.014148242e-3`, against independent full-Hamiltonian
+Lindblad references that agree within `4.751899e-11`. The fixed outside duration
+`184.5*1.01` ns reports `1.49076e-4` cycles and is rejected by both query and
+pinned Engine. The sampled guard edge remains a separate case.
+
+The [ground-state A16 tracer](../../../../tests/simulate/evolution/contract/multitone_cases.py)
+builds a fixed 1600 ns constant pair through public physical/model interfaces.
+Before the secular guard, endpoint-kicked playback admitted this input with
+complete density error `7.352059944e-3`; its two reference tolerances agreed
+within `3.335506316e-10`. The permanent [rejection test](../../../../tests/simulate/evolution/kernels/test_multitone_rwa.py)
+checks public `NoValidKernel`, without solving a reference or loading saved
+matrices. These inputs do not establish a new real-workload timing or price.
+
+這份證據只涵蓋列出的凍結輸入；日常 FTF 常數雙 tone 的 32、288、512 ns、1 µs 未驗證。未驗證不是不支援，也不代表算錯。
 
 ### Recorded real-workload evidence
 
@@ -420,7 +490,7 @@ evidence. These observations do not authorize deletion or guard changes.
 | `period_table` | 1: O2 | [O2](../../../../tools/data/family_pareto/summaries/overlapping_shaped_tones.md) qualifies with `dop853` plus `t4` companions; A, S and S-long are dominated by `shaped_sambe`. |
 | `common_frame` | No measured target | M, O1 and O2 target guards/preconditions refuse; no dominance conclusion. |
 | `multitone_gate` | No measured target | M and O2 target guards/preconditions refuse; no dominance conclusion. |
-| `multitone_rwa` | No qualified target | [O1](../../../../tools/data/family_pareto/summaries/overlapping_constant_tones.md) fails at 2.59000e-3; M and O2 refuse. |
+| `multitone_rwa` | No qualified target in these historical tables | [O1](../../../../tools/data/family_pareto/summaries/overlapping_constant_tones.md) records 2.59000e-3 before the constant-pair changes; M and O2 refuse. The new frozen-input evidence above does not remeasure these workloads or prices. |
 | `floquet` | No measured target | O1 target guard/precondition refuses; other inputs are not its candidates. |
 
 The long shaped sequence supplies final-error evidence for `shaped_sambe` and
@@ -468,7 +538,8 @@ The matrix measures the maximum absolute difference over every complex density
 entry at readout, against an independent full-Hamiltonian Lindblad DOP853
 reference. It includes coherences, relaxation and dephasing. The reference must
 agree within `2e-6` between rtol/atol pairs `2e-10/2e-12` and `2e-12/2e-14`.
-The collected maximum reference difference is `4.432072948e-12`.
+The matrix emits density and reference-agreement measurements for each case;
+the constant-pair edge measurements are recorded above.
 [Multisegment](../../../../tests/simulate/evolution/contract/test_accuracy_matrix.py)
 observations measure the final density of the whole timeline, not each kernel's
 local contribution. The separate
@@ -829,6 +900,7 @@ across processes or Engine lifetimes.
 Experiments, rejected alternatives and historical measurements live in the
 tracked discussion snapshots, not in the runtime contract above:
 
+- [Constant-pair guard and diagnostic](../../../../docs/discussions/2026-11-16-constant-multitone-guard-diagnostic.md).
 - [Dyson input reuse](../../../../docs/discussions/2026-10-18-dyson-input-reuse.md).
 - [Constant-period builders](../../../../docs/discussions/2026-10-18-constant-period-builders.md).
 - [Shaped periods and gates](../../../../docs/discussions/2026-10-18-shaped-period-and-gates.md).

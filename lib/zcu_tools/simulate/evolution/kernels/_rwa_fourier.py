@@ -91,6 +91,47 @@ def kick_coefficients(
 
 
 @njit(nogil=True, cache=True)
+def secular_accumulation(
+    energies: NDArray[np.float64],
+    quadratures: tuple[NDArray[np.complex128], NDArray[np.complex128]],
+    frequencies: NDArray[np.float64],
+    amplitudes: NDArray[np.float64],
+    retained: NDArray[np.bool_],
+    duration_ns: float,
+) -> float:
+    """Return epsilon_dom**2 * Omega_ret * row duration in cycles.
+
+    energies is (M,) GHz, quadratures are aligned (tones,M,M) GHz/gain x/y,
+    frequencies are signed (tones,) GHz and amplitudes are signed gains.
+    retained is the final resolved (tones,2,M,M) mask in (+1,-1) sign order.
+    epsilon_dom is max(abs(C/d)) over omitted nonzero C, including diagonals;
+    Omega_ret is twice max(abs(C)) over all retained tones and signs, cycles/ns.
+    C is the gain-weighted full Fourier coefficient and d its signed detuning.
+    Empty maxima are zero. Omitted detunings lie outside the initial 50 MHz
+    window, so no denominator regularization is needed. duration_ns is local
+    row length, not absolute end. No 2*pi conversion enters this cycle proxy.
+    """
+    x, y = quadratures
+    epsilon_dom = 0.0
+    omega_ret = 0.0
+    for tone in range(len(frequencies)):
+        for slot in range(2):
+            sign = 1 - 2 * slot
+            for i in range(len(energies)):
+                for j in range(len(energies)):
+                    coupling = abs(
+                        amplitudes[tone]
+                        * fourier_coefficient(x[tone, i, j], y[tone, i, j], sign)
+                    )
+                    if retained[tone, slot, i, j]:
+                        omega_ret = max(omega_ret, 2 * coupling)
+                    elif coupling != 0:
+                        detuning = energies[i] - energies[j] + sign * frequencies[tone]
+                        epsilon_dom = max(epsilon_dom, coupling / abs(detuning))
+    return epsilon_dom**2 * omega_ret * duration_ns
+
+
+@njit(nogil=True, cache=True)
 def endpoint_kick(
     coefficients: NDArray[np.complex128], phase: float
 ) -> NDArray[np.complex128]:

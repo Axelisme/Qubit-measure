@@ -18,6 +18,8 @@
 
 ## 模擬量測環境
 
+- 2026-11-16 [常數雙 tone 的 secular guard 與唯讀診斷](2026-11-16-constant-multitone-guard-diagnostic.md)：適用域收窄。Guard 與公開 query 共用最終 admission fact，固定證據不外推到日常 FTF 或價格。
+
 - 2026-11-14 [RB 型相位序列作為固定量表輸入](2026-11-14-random-gate-sequence-workloads.md)：場景擴充。離線固定 phase prefix 與 recovery，constant／Gaussian 共用，不加入 runtime RB 代數。
 
 - 2026-11-14 [common_frame 的步長成本歸 dispatch](2026-11-14-common-frame-step-pricing.md)：成本歸屬。移除 kernel 的 2 ns 下限，dispatch 依 first-order 步數比較成本，數值 guard 決定適用域。

@@ -1,5 +1,6 @@
 """Calibrated joint-energy-basis RWA for simultaneous smooth or dual constant drives."""
 
+from contextlib import closing
 from dataclasses import dataclass
 from hashlib import sha256
 from typing import NamedTuple
@@ -12,23 +13,125 @@ from scipy.linalg import expm
 from .._envelope import sample_value
 from ..kernel import ApplyContext, KernelContext, Prepared, SegmentTable
 from ..secular import SecularModel
+from ..workplan import WorkPlan
 from ._dop853 import Tolerances, integrate, tolerances
 from ._dop853_data import Models, Segments, pack_models
 from ._rwa_fourier import endpoint_kick, kick_coefficients
 from ._rwa_numeric import (
     CONSTANT_RWA_POLICY,
     CONSTANT_STEP_NS,
-    MULTITONE_RETENTION_POLICY,
+    MULTITONE_GUARD_POLICY,
     STEP_NS,
     RWACoefficients,
+    RWAGuardMetric,
     RWARetention,
+    RWAUncomputed,
     admit_multitone_rows,
     interaction_hamiltonian,
+    multitone_constant_admission,
     multitone_retention,
     retained_mask,
     rwa_coefficients,
 )
 from ._workload_facts import packed_segments
+
+
+@dataclass(frozen=True)
+class MultitoneRWADiagnostic:
+    """Read-only admission metrics for two fixed-flux constant tones.
+
+    Computed fields are RWAGuardMetric values with inclusive thresholds and a
+    passed status. budget is the dimensionless per-segment allowance, required
+    >=1e-3. carrier_ghz is the smaller absolute carrier in GHz, required >=0.05.
+    omission_transfer is the final retained mask's remaining first/second-order
+    transfer proxy, dimensionless, required <=0.0058. omission_phase_rad is its
+    remaining omission phase in radians, required <=0.0045. real_dimension is
+    the sum of squared retained component sizes, including isolated populations,
+    required <=256. secular_accumulation is epsilon_dom**2 * Omega_ret * duration
+    in cycles, required <=1.476e-4. epsilon_dom is the largest omitted coupling
+    over absolute detuning; Omega_ret is twice the largest retained coupling in
+    GHz. These proxies do not bound final density error or sequence accuracy.
+
+    RWAUncomputed has neither value nor passed status and denotes skipped work,
+    not a failed comparison. Only final-mask metrics are reportable, even for a
+    rejected row; prior-mask values after restoration are not final metrics.
+    accepted is a bool reporting numerical admission, not dispatch selection.
+
+    Budget is always computed. Budget or same-port rejection skips all later
+    metrics; carrier rejection skips retention and secular metrics. Dimension
+    remains visible after a retention rejection. If restoration exceeds the
+    dimension limit before final-mask omission analysis, transfer, phase and
+    secular metrics are uncomputed rather than reporting prior-mask values.
+    """
+
+    budget: RWAGuardMetric | RWAUncomputed = RWAUncomputed()
+    carrier_ghz: RWAGuardMetric | RWAUncomputed = RWAUncomputed()
+    omission_transfer: RWAGuardMetric | RWAUncomputed = RWAUncomputed()
+    omission_phase_rad: RWAGuardMetric | RWAUncomputed = RWAUncomputed()
+    real_dimension: RWAGuardMetric | RWAUncomputed = RWAUncomputed()
+    secular_accumulation: RWAGuardMetric | RWAUncomputed = RWAUncomputed()
+    accepted: bool = False
+
+
+def multitone_rwa_diagnostic(
+    model: SecularModel,
+    ports: tuple[str, str],
+    frequencies_ghz: tuple[float, float],
+    amplitudes: tuple[float, float],
+    duration_ns: float,
+    *,
+    budget: float = 1e-3,
+) -> MultitoneRWADiagnostic:
+    """Read multitone_rwa admission for two fixed-flux constant tones.
+
+    model is the row's SecularModel, including any segment shifts. The aligned
+    length-two tuples name known ports, finite signed GHz carriers and finite
+    signed dimensionless gains. duration_ns is finite nonnegative row length in
+    ns; budget is a finite positive dimensionless per-segment allowance. Phase
+    and initial density do not enter the query.
+
+    Returns the guard's computed final-mask comparisons, including failed
+    metrics on rejected rows, and RWAUncomputed for skipped work. Same-port,
+    low/zero carrier and positive budget below 1e-3 return accepted=False.
+    Raises ValueError for unknown ports, wrong tuple lengths, nonfinite inputs,
+    negative duration or invalid budget. Numerical construction failures
+    propagate. The query does not evolve density, select a family, mutate inputs
+    or history, or retain facts across calls. Temporary facts close before return.
+    """
+    tolerances(budget)
+    if len(ports) != 2 or len(frequencies_ghz) != 2 or len(amplitudes) != 2:
+        raise ValueError("constant multitone RWA requires two aligned tones")
+    if (
+        not all(
+            np.isfinite(value) for value in (*frequencies_ghz, *amplitudes, duration_ns)
+        )
+        or duration_ns < 0
+    ):
+        raise ValueError(
+            "constant RWA requires finite carrier/gain and nonnegative finite duration"
+        )
+    names = [drive.name for drive in model.drives]
+    for port in ports:
+        if port not in names:
+            raise ValueError(f"unknown constant RWA drive port: {port}")
+    with closing(WorkPlan()) as plan:
+        admission = multitone_constant_admission(
+            model,
+            (names.index(ports[0]), names.index(ports[1])),
+            frequencies_ghz,
+            amplitudes,
+            (duration_ns, budget),
+            plan,
+        )
+        return MultitoneRWADiagnostic(
+            budget=admission.budget,
+            carrier_ghz=admission.carrier_ghz,
+            omission_transfer=admission.omission_transfer,
+            omission_phase_rad=admission.omission_phase_rad,
+            real_dimension=admission.real_dimension,
+            secular_accumulation=admission.secular_accumulation,
+            accepted=admission.accepted,
+        )
 
 
 class _DensitySupport(NamedTuple):
@@ -294,6 +397,12 @@ class MultitoneRWAKernel:
     The final Fourier union must fit real population/coherence dimension
     sum(component_size**2) <=256, the same measure as single constant RWA.
     Resolved masks enter both coefficient builders and prepare/fact identities.
+    Constant pairs also require epsilon_dom**2 * Omega_ret * row duration
+    <=1.476e-4 cycle. epsilon_dom is max(abs(C/d)) over omitted nonzero Fourier
+    coefficients, including diagonals; Omega_ret is twice max(abs(C)) over all
+    retained tones/signs in cycles/ns. Both use the final resolved mask and
+    gain-weighted coefficients. This endpoint-kick remainder proxy adds no
+    2*pi factor and does not apply to sampled rows.
 
     Transfer retains half the measured 0.0116496 combination-channel boundary.
     Phase calibration uses a 24-point two-tone, 16-level joint-model grid:
@@ -320,7 +429,7 @@ class MultitoneRWAKernel:
     """
 
     name = "multitone_rwa"
-    revision = (MULTITONE_RETENTION_POLICY, "constant-dual-endpoint-kick-v1")
+    revision = (MULTITONE_GUARD_POLICY, "constant-dual-endpoint-kick-v1")
     guard_builds = False
 
     def guard(

@@ -1,3 +1,5 @@
+# tolerated(file-size): Shared policies, resolved masks and WorkPlan facts keep
+# admission/retention rule changes here for both kernel guards and diagnostic queries.
 """Shared RWA admission, retained Fourier sets and Hamiltonian coefficients."""
 
 from dataclasses import dataclass
@@ -54,6 +56,17 @@ MULTITONE_RETENTION_POLICY = (
     _MAX_OMISSION_PHASE_RAD,
     _MAX_RETAINED_DIMENSION,
 )
+# The endpoint kick removes first-order omitted-edge error, not its secular
+# interaction with retained couplings. The calibrated constant-pair cap is
+# epsilon_dom**2 * Omega_ret * T <=1.476e-4 cycle; retention has its own policy.
+_MAX_MULTITONE_SECULAR_CYCLES = 1.476e-4
+MULTITONE_GUARD_POLICY = (
+    "constant-pair-secular-v1",
+    MULTITONE_RETENTION_POLICY,
+    MIN_RWA_BUDGET,
+    _rwa_fourier.EDGE_GHZ,
+    _MAX_MULTITONE_SECULAR_CYCLES,
+)
 
 
 @dataclass(frozen=True)
@@ -67,14 +80,16 @@ class RWARetention:
     dimension is sum(component_size**2), the real population/coherence dimension
     of the full Fourier union graph, including isolated populations. Phase and
     dimension are None for single constant rows, whose phase-graph owner keeps
-    its original phase/pruned-dimension policy. Exceeding a requested dimension
-    limit returns infinite omission proxies without further analysis.
+    its original phase/pruned-dimension policy. omission_computed is true only
+    when omission analysis completed for the final mask. A dimension stop can
+    leave infinite or prior-mask proxies, which must not be reported as final.
     """
 
     edges: tuple[tuple[tuple[int, int], ...], ...]
     omission_transfer: float
     omission_phase: float | None = None
     dimension: int | None = None
+    omission_computed: bool = False
 
 
 @dataclass(frozen=True)
@@ -137,6 +152,36 @@ class ConstantRWAAdmission:
             and self.phase_rad.passed
             and self.omission_transfer.passed
         )
+
+
+@dataclass(frozen=True)
+class MultitoneRWAAdmission:
+    """Constant-pair domain, final retention and secular admission fact.
+
+    budget compares the dimensionless allowance to the shared minimum.
+    carrier_ghz compares the smaller absolute carrier to 0.05 GHz, or is
+    uncomputed after budget or same-port rejection. retention is None when
+    domain/carrier rejection skips resolution; otherwise it is the final
+    retained set, including dimension rejection. omission_transfer is the final
+    mask's dimensionless transfer proxy, required <=MAX_OMISSION_TRANSFER;
+    omission_phase_rad is its phase in rad, required <=_MAX_OMISSION_PHASE_RAD.
+    Both are uncomputed when the final mask's omission analysis was skipped.
+    real_dimension compares the final graph's coordinate count to
+    _MAX_RETAINED_DIMENSION, even when that limit rejects the row.
+    secular_accumulation is
+    epsilon_dom**2 * Omega_ret * duration in cycles, or uncomputed when no
+    dimension-legal final mask was resolved. accepted includes every domain
+    and numeric comparison, not just the secular metric.
+    """
+
+    budget: RWAGuardMetric
+    carrier_ghz: RWAGuardMetric | RWAUncomputed
+    retention: RWARetention | None
+    secular_accumulation: RWAGuardMetric | RWAUncomputed
+    accepted: bool
+    omission_transfer: RWAGuardMetric | RWAUncomputed = RWAUncomputed()
+    omission_phase_rad: RWAGuardMetric | RWAUncomputed = RWAUncomputed()
+    real_dimension: RWAGuardMetric | RWAUncomputed = RWAUncomputed()
 
 
 @dataclass(frozen=True)
@@ -293,6 +338,7 @@ def _resolve_retention(
     retained = initial
     probability = phase = np.inf
     dimension: int | None = None
+    omission_computed = False
     while True:
         if dimension_limit is not None:
             dimension = int(_rwa_fourier.retained_dimension(retained, quadratures))
@@ -306,9 +352,11 @@ def _resolve_retention(
             retained,
             phase_limit,
         )
+        omission_computed = True
         if not np.any(additions & ~retained):
             break
         retained = retained | additions
+        omission_computed = False
     edges = tuple(
         tuple((int(i), int(j)) for i, j in np.argwhere(retained[a, 0] & ~initial[a, 0]))
         for a in range(len(ports))
@@ -318,6 +366,7 @@ def _resolve_retention(
         float(probability),
         None if phase_limit is None else float(phase),
         dimension,
+        omission_computed,
     )
 
 
@@ -477,7 +526,30 @@ def multitone_retention(
         np.abs(table.tone_amplitude[row, :count])
         * bounds.peaks[table.tone_envelope[row, :count]]
     )
-    duration = float(table.duration_ns[row])
+    return _multitone_retention(
+        model,
+        ports,
+        frequencies,
+        amplitudes,
+        float(table.duration_ns[row]),
+        context.work_plan,
+    )
+
+
+def _multitone_retention(
+    model: SecularModel,
+    ports: tuple[int, ...],
+    frequencies: tuple[float, ...],
+    amplitudes: NDArray[np.float64],
+    duration_ns: float,
+    work_plan: WorkPlan,
+) -> RWARetention:
+    """Share peak-weighted resolved masks between admission and preparation.
+
+    Inputs are aligned valid drive indices, signed GHz, nonnegative peak gains
+    and row duration in ns. Preserve the table retention identity and limits.
+    Numerical builder failures propagate and WorkPlan shares them without retry.
+    """
     key = FactKey(
         (
             "multitone-retention",
@@ -487,21 +559,124 @@ def multitone_retention(
             ports,
             frequencies,
             tuple(amplitudes),
-            duration,
+            duration_ns,
         ),
         RWARetention,
     )
-    return context.work_plan.fact(
+    return work_plan.fact(
         key,
         lambda: _resolve_retention(
             model,
             ports,
             frequencies,
             amplitudes,
-            duration,
+            duration_ns,
             limits=(_MAX_OMISSION_PHASE_RAD, _MAX_RETAINED_DIMENSION),
         ),
     )
+
+
+def multitone_constant_admission(
+    model: SecularModel,
+    ports: tuple[int, int],
+    frequencies: tuple[float, float],
+    amplitudes: tuple[float, float],
+    controls: tuple[float, float],
+    work_plan: WorkPlan,
+) -> MultitoneRWAAdmission:
+    """Publish constant-pair admission once for complete model and row inputs.
+
+    Caller establishes fixed flux and constant envelopes. ports are valid drive
+    indices in carrier order; frequencies are finite signed GHz and amplitudes
+    finite signed gains. controls is (nonnegative row duration in ns, positive
+    budget). Same-port, low-budget and low-carrier pairs return rejected facts.
+    Invalid budgets raise ValueError; numerical construction failures propagate.
+    No phase, absolute start, density, history or cross-call cache enters this fact.
+    """
+    duration_ns, budget = controls
+    tolerances(budget)
+    key = FactKey(
+        (
+            "multitone-constant-admission",
+            MULTITONE_GUARD_POLICY,
+            model.identity,
+            model.level,
+            ports,
+            frequencies,
+            amplitudes,
+            duration_ns,
+            budget,
+        ),
+        MultitoneRWAAdmission,
+    )
+
+    def build() -> MultitoneRWAAdmission:
+        allowance = RWAGuardMetric(budget, MIN_RWA_BUDGET, ">=")
+        uncomputed = RWAUncomputed()
+        if not allowance.passed or ports[0] == ports[1]:
+            return MultitoneRWAAdmission(allowance, uncomputed, None, uncomputed, False)
+        carrier = RWAGuardMetric(
+            min(abs(f) for f in frequencies), _rwa_fourier.EDGE_GHZ, ">="
+        )
+        if not carrier.passed:
+            return MultitoneRWAAdmission(allowance, carrier, None, uncomputed, False)
+        gains = np.array(amplitudes)
+        resolved = _multitone_retention(
+            model, ports, frequencies, np.abs(gains), duration_ns, work_plan
+        )
+        secular: RWAGuardMetric | RWAUncomputed = uncomputed
+        if (
+            resolved.dimension is not None
+            and resolved.dimension <= _MAX_RETAINED_DIMENSION
+        ):
+            quadratures = (
+                np.array([model.drives[p].in_phase_ghz for p in ports]),
+                np.array([model.drives[p].quadrature_ghz for p in ports]),
+            )
+            secular = RWAGuardMetric(
+                float(
+                    _rwa_fourier.secular_accumulation(
+                        model.energies_ghz,
+                        quadratures,
+                        np.array(frequencies),
+                        gains,
+                        retained_mask(model, frequencies, resolved),
+                        duration_ns,
+                    )
+                ),
+                _MAX_MULTITONE_SECULAR_CYCLES,
+            )
+        accepted = (
+            _resolved_retention_admissible(resolved)
+            and isinstance(secular, RWAGuardMetric)
+            and secular.passed
+        )
+        return MultitoneRWAAdmission(
+            allowance,
+            carrier,
+            resolved,
+            secular,
+            accepted,
+            omission_transfer=(
+                RWAGuardMetric(
+                    resolved.omission_transfer, _rwa_fourier.MAX_OMISSION_TRANSFER
+                )
+                if resolved.omission_computed
+                else uncomputed
+            ),
+            omission_phase_rad=(
+                RWAGuardMetric(resolved.omission_phase, _MAX_OMISSION_PHASE_RAD)
+                if resolved.omission_computed and resolved.omission_phase is not None
+                else uncomputed
+            ),
+            real_dimension=(
+                RWAGuardMetric(resolved.dimension, _MAX_RETAINED_DIMENSION)
+                if resolved.dimension is not None
+                else uncomputed
+            ),
+        )
+
+    return work_plan.fact(key, build)
 
 
 def admit_multitone_rows(
@@ -512,7 +687,8 @@ def admit_multitone_rows(
     Requires at least two smooth tones at fixed flux and the shared minimum
     budget. Constant pairs require distinct ports. Uses row-local retained
     transfer, phase and dimension bounds, not strength or carrier-spacing caps.
-    Invalid budgets raise ValueError.
+    Constant pairs also require epsilon_dom**2 * Omega_ret * row duration
+    <=1.476e-4 cycle after retention. Invalid budgets raise ValueError.
     """
     return _admit_rows(table, rows, context, single_tone=False, adaptive_multitone=True)
 
@@ -652,10 +828,28 @@ def _admit_rows(
     for index, raw_row in enumerate(rows):
         row = int(raw_row)
         count = table.tones[row]
-        if not _row_admissible(table, row, count, context, single_tone=single_tone):
-            continue
         envs = table.tone_envelope[row, :count]
         constant = all(table.envelopes[e].kind == "constant" for e in envs)
+        if adaptive_multitone and constant:
+            if count != 2 or not fixed_flux(table, row):
+                continue
+            accepted[index] = multitone_constant_admission(
+                table.model(context.source, row),
+                (int(table.tone_port[row, 0]), int(table.tone_port[row, 1])),
+                (
+                    float(table.tone_frequency_ghz[row, 0]),
+                    float(table.tone_frequency_ghz[row, 1]),
+                ),
+                (
+                    float(table.tone_amplitude[row, 0]),
+                    float(table.tone_amplitude[row, 1]),
+                ),
+                (float(table.duration_ns[row]), context.budget),
+                context.work_plan,
+            ).accepted
+            continue
+        if not _row_admissible(table, row, count, context, single_tone=single_tone):
+            continue
         if not _constant_domain(
             table, int(row), constant=constant, single=constant_single
         ):

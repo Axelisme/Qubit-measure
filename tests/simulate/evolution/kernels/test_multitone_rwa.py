@@ -13,6 +13,7 @@ from zcu_tools.simulate.evolution import (
     EnvelopeSpec,
     FluxSchedule,
     ModelSource,
+    NoValidKernel,
     SecularDrive,
     SecularModel,
     TimelineBatch,
@@ -25,6 +26,7 @@ from tests.simulate.evolution.contract.interaction_reference import (
     interaction_reference,
 )
 from tests.simulate.evolution.contract.kernel_suite import KernelCase, KernelContract
+from tests.simulate.evolution.contract.multitone_cases import accumulated_pair_case
 
 
 def endpoint_pair():
@@ -976,3 +978,14 @@ def test_retained_only_phase_does_not_reject_long_rows():
         for domain in ("constant", "same_port", "sampled")
         for phase in (0.05, 0.07, 1.0)
     }
+
+
+def test_constant_resonant_pair_rejects_accumulated_error() -> None:
+    """Pinned constant A16 must decline secular accumulation from ground."""
+    source, batch = accumulated_pair_case()
+    with (
+        closing(source),
+        closing(Engine(1, families=("multitone_rwa",))) as engine,
+        pytest.raises(NoValidKernel),
+    ):
+        engine.evolve(source, (batch,), budget=1e-3)

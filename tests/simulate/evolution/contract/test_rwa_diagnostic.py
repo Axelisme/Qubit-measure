@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from contextlib import closing
 from dataclasses import replace
 
@@ -12,6 +13,380 @@ from zcu_tools.simulate import evolution
 from .accuracy_cases import coherent_source, drive_track, linear_drive_model, timeline
 from .common_frame_cases import close_carrier_case
 from .guard_edge_cases import guard_edge_case
+from .multitone_cases import (
+    accumulated_pair_case,
+    restored_dimension_case,
+    short_pair_case,
+)
+
+
+@pytest.mark.sim
+@pytest.mark.parametrize(
+    ("build_case", "accepted"),
+    [
+        pytest.param(short_pair_case, True, id="short-pair-accepted"),
+        pytest.param(accumulated_pair_case, False, id="a16-secular-rejected"),
+    ],
+)
+def test_multitone_diagnostic_matches_admission(
+    build_case: Callable[[], tuple[evolution.ModelSource, evolution.TimelineBatch]],
+    accepted: bool,
+) -> None:
+    source, batch = build_case()
+    with (
+        closing(source),
+        closing(evolution.Engine(1, families=("multitone_rwa",))) as engine,
+    ):
+        pump, probe = batch.tracks
+        level = tuple(int(value) for value in batch.flux.level[0])
+        frequencies = (float(pump.frequency_ghz[0]), float(probe.frequency_ghz[0]))
+        budget = 1e-3
+        diagnostic = evolution.multitone_rwa_diagnostic(
+            source.model(level),
+            (pump.port, probe.port),
+            frequencies,
+            (float(pump.amplitude[0]), float(probe.amplitude[0])),
+            float(batch.end_ns[0]),
+            budget=budget,
+        )
+        metrics = tuple(
+            expect_metric(metric)
+            for metric in (
+                diagnostic.budget,
+                diagnostic.carrier_ghz,
+                diagnostic.omission_transfer,
+                diagnostic.omission_phase_rad,
+                diagnostic.real_dimension,
+                diagnostic.secular_accumulation,
+            )
+        )
+        allowance, carrier, transfer, phase, dimension, secular = metrics
+        assert all(np.isfinite(metric.value) for metric in metrics)
+        assert all(np.isfinite(metric.threshold) for metric in metrics)
+        assert all(metric.value >= 0 for metric in metrics)
+        assert tuple(metric.comparison for metric in metrics) == (
+            ">=",
+            ">=",
+            "<=",
+            "<=",
+            "<=",
+            "<=",
+        )
+        assert allowance.value == budget
+        assert carrier.value == min(abs(frequency) for frequency in frequencies)
+        assert all(metric.passed for metric in metrics[:-1])
+        assert secular.passed is accepted
+        assert diagnostic.accepted is accepted
+        assert diagnostic.accepted == all(metric.passed for metric in metrics)
+        if accepted:
+            assert transfer.value == 0.0
+            assert phase.value == 0.0
+            assert dimension.value == 4
+            assert secular.value == 0.0
+            result = engine.evolve(source, (batch,), budget=budget, telemetry=True)
+            assert result.paths.segments_by_kernel == {"multitone_rwa": 1}
+        else:
+            assert secular.value > secular.threshold
+            with pytest.raises(evolution.NoValidKernel):
+                engine.evolve(source, (batch,), budget=budget)
+
+
+@pytest.mark.sim
+def test_multitone_same_port_is_rejected_query() -> None:
+    source, batch = short_pair_case()
+    with (
+        closing(source),
+        closing(evolution.Engine(1, families=("multitone_rwa",))) as engine,
+    ):
+        batch = replace(
+            batch, tracks=tuple(replace(track, port="a") for track in batch.tracks)
+        )
+        pump, probe = batch.tracks
+        level = tuple(int(value) for value in batch.flux.level[0])
+        budget = 1e-3
+        diagnostic = evolution.multitone_rwa_diagnostic(
+            source.model(level),
+            (pump.port, probe.port),
+            (float(pump.frequency_ghz[0]), float(probe.frequency_ghz[0])),
+            (float(pump.amplitude[0]), float(probe.amplitude[0])),
+            float(batch.end_ns[0]),
+            budget=budget,
+        )
+        assert diagnostic.accepted is False
+        with pytest.raises(evolution.NoValidKernel):
+            engine.evolve(source, (batch,), budget=budget)
+
+
+@pytest.mark.sim
+@pytest.mark.parametrize(
+    ("ports", "frequencies", "amplitudes", "duration", "budget"),
+    [
+        pytest.param(
+            ("a", "b"),
+            (float("nan"), 0.37),
+            (1.0, 1.0),
+            8.0,
+            1e-3,
+            id="first-frequency-nan",
+        ),
+        pytest.param(
+            ("a", "b"),
+            (float("inf"), 0.37),
+            (1.0, 1.0),
+            8.0,
+            1e-3,
+            id="first-frequency-positive-inf",
+        ),
+        pytest.param(
+            ("a", "b"),
+            (-float("inf"), 0.37),
+            (1.0, 1.0),
+            8.0,
+            1e-3,
+            id="first-frequency-negative-inf",
+        ),
+        pytest.param(
+            ("a", "b"),
+            (0.3, float("nan")),
+            (1.0, 1.0),
+            8.0,
+            1e-3,
+            id="second-frequency-nan",
+        ),
+        pytest.param(
+            ("a", "b"),
+            (0.3, float("inf")),
+            (1.0, 1.0),
+            8.0,
+            1e-3,
+            id="second-frequency-positive-inf",
+        ),
+        pytest.param(
+            ("a", "b"),
+            (0.3, -float("inf")),
+            (1.0, 1.0),
+            8.0,
+            1e-3,
+            id="second-frequency-negative-inf",
+        ),
+        pytest.param(
+            ("a", "b"),
+            (0.3, 0.37),
+            (float("nan"), 1.0),
+            8.0,
+            1e-3,
+            id="first-amplitude-nan",
+        ),
+        pytest.param(
+            ("a", "b"),
+            (0.3, 0.37),
+            (float("inf"), 1.0),
+            8.0,
+            1e-3,
+            id="first-amplitude-positive-inf",
+        ),
+        pytest.param(
+            ("a", "b"),
+            (0.3, 0.37),
+            (-float("inf"), 1.0),
+            8.0,
+            1e-3,
+            id="first-amplitude-negative-inf",
+        ),
+        pytest.param(
+            ("a", "b"),
+            (0.3, 0.37),
+            (1.0, float("nan")),
+            8.0,
+            1e-3,
+            id="second-amplitude-nan",
+        ),
+        pytest.param(
+            ("a", "b"),
+            (0.3, 0.37),
+            (1.0, float("inf")),
+            8.0,
+            1e-3,
+            id="second-amplitude-positive-inf",
+        ),
+        pytest.param(
+            ("a", "b"),
+            (0.3, 0.37),
+            (1.0, -float("inf")),
+            8.0,
+            1e-3,
+            id="second-amplitude-negative-inf",
+        ),
+        pytest.param(
+            ("a", "b"),
+            (0.3, 0.37),
+            (1.0, 1.0),
+            float("nan"),
+            1e-3,
+            id="duration-nan",
+        ),
+        pytest.param(
+            ("a", "b"),
+            (0.3, 0.37),
+            (1.0, 1.0),
+            float("inf"),
+            1e-3,
+            id="duration-positive-inf",
+        ),
+        pytest.param(
+            ("a", "b"),
+            (0.3, 0.37),
+            (1.0, 1.0),
+            -float("inf"),
+            1e-3,
+            id="duration-negative-inf",
+        ),
+        pytest.param(
+            ("a", "b"),
+            (0.3, 0.37),
+            (1.0, 1.0),
+            -1.0,
+            1e-3,
+            id="duration-negative-one-ns",
+        ),
+        pytest.param(
+            ("unknown", "b"),
+            (0.3, 0.37),
+            (1.0, 1.0),
+            8.0,
+            1e-3,
+            id="first-port-unknown",
+        ),
+        pytest.param(
+            ("a", "unknown"),
+            (0.3, 0.37),
+            (1.0, 1.0),
+            8.0,
+            1e-3,
+            id="second-port-unknown",
+        ),
+        pytest.param(
+            ("a", "b"),
+            (0.3, 0.37),
+            (1.0, 1.0),
+            8.0,
+            float("nan"),
+            id="budget-nan",
+        ),
+        pytest.param(
+            ("a", "b"),
+            (0.3, 0.37),
+            (1.0, 1.0),
+            8.0,
+            float("inf"),
+            id="budget-positive-inf",
+        ),
+        pytest.param(
+            ("a", "b"),
+            (0.3, 0.37),
+            (1.0, 1.0),
+            8.0,
+            -float("inf"),
+            id="budget-negative-inf",
+        ),
+        pytest.param(
+            ("a", "b"),
+            (0.3, 0.37),
+            (1.0, 1.0),
+            8.0,
+            0.0,
+            id="budget-zero",
+        ),
+        pytest.param(
+            ("a", "b"),
+            (0.3, 0.37),
+            (1.0, 1.0),
+            8.0,
+            -1.0,
+            id="budget-negative-one",
+        ),
+    ],
+)
+def test_multitone_invalid_row_raises(
+    ports: tuple[str, str],
+    frequencies: tuple[float, float],
+    amplitudes: tuple[float, float],
+    duration: float,
+    budget: float,
+) -> None:
+    source, _ = short_pair_case()
+    with (
+        closing(source),
+        pytest.raises(
+            ValueError,
+            match=(
+                "constant RWA requires finite carrier/gain and nonnegative finite duration"
+                "|unknown constant RWA drive port: unknown"
+                "|budget must be positive and finite"
+            ),
+        ),
+    ):
+        evolution.multitone_rwa_diagnostic(
+            source.model((0,)), ports, frequencies, amplitudes, duration, budget=budget
+        )
+
+
+@pytest.mark.sim
+@pytest.mark.parametrize(
+    ("budget", "first_frequency", "budget_passed"),
+    [
+        pytest.param(5e-4, 0.6, False, id="low-budget"),
+        pytest.param(1e-3, 0.04, True, id="low-positive-carrier"),
+        pytest.param(1e-3, -0.04, True, id="low-negative-carrier"),
+        pytest.param(1e-3, 0.0, True, id="zero-carrier"),
+    ],
+)
+def test_multitone_early_rejection_preserves_uncomputed(
+    budget: float, first_frequency: float, budget_passed: bool
+) -> None:
+    source, batch = short_pair_case()
+    with (
+        closing(source),
+        closing(evolution.Engine(1, families=("multitone_rwa",))) as engine,
+    ):
+        pump, probe = batch.tracks
+        batch = replace(
+            batch,
+            tracks=(
+                replace(pump, frequency_ghz=np.array([first_frequency])),
+                probe,
+            ),
+        )
+        pump, probe = batch.tracks
+        level = tuple(int(value) for value in batch.flux.level[0])
+        frequencies = (float(pump.frequency_ghz[0]), float(probe.frequency_ghz[0]))
+        diagnostic = evolution.multitone_rwa_diagnostic(
+            source.model(level),
+            (pump.port, probe.port),
+            frequencies,
+            (float(pump.amplitude[0]), float(probe.amplitude[0])),
+            float(batch.end_ns[0]),
+            budget=budget,
+        )
+        assert diagnostic.accepted is False
+        allowance = expect_metric(diagnostic.budget)
+        assert allowance.value == budget
+        assert allowance.passed is budget_passed
+        if budget_passed:
+            carrier = expect_metric(diagnostic.carrier_ghz)
+            assert carrier.value == min(abs(frequency) for frequency in frequencies)
+            assert carrier.passed is False
+        else:
+            assert isinstance(diagnostic.carrier_ghz, evolution.RWAUncomputed)
+        for metric in (
+            diagnostic.omission_transfer,
+            diagnostic.omission_phase_rad,
+            diagnostic.real_dimension,
+            diagnostic.secular_accumulation,
+        ):
+            assert isinstance(metric, evolution.RWAUncomputed)
+        with pytest.raises(evolution.NoValidKernel):
+            engine.evolve(source, (batch,), budget=budget)
 
 
 @pytest.mark.sim
@@ -317,3 +692,42 @@ def test_common_frame_rejects_close_six_level_carriers() -> None:
     assert diagnostic.reason == "coherent"
     assert not expect_metric(diagnostic.coherent).passed
     assert expect_metric(diagnostic.bath).passed
+
+
+@pytest.mark.sim
+def test_multitone_restored_dimension_hides_stale_metrics() -> None:
+    source, batch = restored_dimension_case()
+    with (
+        closing(source),
+        closing(evolution.Engine(1, families=("multitone_rwa",))) as engine,
+    ):
+        pump, probe = batch.tracks
+        level = tuple(int(value) for value in batch.flux.level[0])
+        frequencies = (float(pump.frequency_ghz[0]), float(probe.frequency_ghz[0]))
+        budget = 1e-3
+        diagnostic = evolution.multitone_rwa_diagnostic(
+            source.model(level),
+            (pump.port, probe.port),
+            frequencies,
+            (float(pump.amplitude[0]), float(probe.amplitude[0])),
+            float(batch.end_ns[0]),
+            budget=budget,
+        )
+        allowance = expect_metric(diagnostic.budget)
+        assert allowance.value == budget
+        assert allowance.passed is True
+        carrier = expect_metric(diagnostic.carrier_ghz)
+        assert carrier.value == min(abs(frequency) for frequency in frequencies)
+        assert carrier.passed is True
+        dimension = expect_metric(diagnostic.real_dimension)
+        assert dimension.value == 289
+        assert dimension.passed is False
+        assert diagnostic.accepted is False
+        for metric in (
+            diagnostic.omission_transfer,
+            diagnostic.omission_phase_rad,
+            diagnostic.secular_accumulation,
+        ):
+            assert isinstance(metric, evolution.RWAUncomputed)
+        with pytest.raises(evolution.NoValidKernel):
+            engine.evolve(source, (batch,), budget=budget)
