@@ -35,6 +35,10 @@ Tests 側 reference producer 加入嚴格單列選取，先選清單列，再讀
 工具持有名稱集合可以沿用兩份清單與相同 cache，且不改四欄身份或 reference key。
 顯式 index 仍全選，scenario 仍可單選非 Pareto 列。
 
+預設表若讀清單全部列，預設範圍會從 19 列變成含 profile 的 34 列，多約 270 次 policy dispatch，且每次 Pareto 執行都要先備好 profile 的 reference。之後每個 family 的 profile 座標都會加進預設表，而量表的去留判定沒有任何一項讀這些列。
+另開一組 `tools/data/kernel_profile/` 清單可以避開這點，但 `--index-dir` 要能選 inventory，等於新的選擇語意；缺檔提示要改成印對應目錄的指令；跨目錄的重名不受全域檢查保護；也改動兩份清單由 solver 分組的既有佈局。
+把清單放在某個任務的工作目錄則在任務結束時消失，之後重量 `dop853` 或其他 family 的 profile 要重新凍結，缺檔指令也會指向不存在的位置。
+
 自動以 inventory 同步整份清單，可以省去新增列的明確操作，卻會把缺少宣告解釋成刪列或換組。
 本次沿用 update-index 與 scenario，將新增限制在一個已宣告且兩份清單皆無的名字。
 既有列保留原位置，新列只加到宣告 category 的尾端。

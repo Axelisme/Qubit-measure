@@ -105,3 +105,8 @@ Tools 解析 Git 共用位置，simulate 持有清單與數值讀寫、hash 驗�
 量測用 `--index` 與 `--scene-cache` 選來源，缺數值檔就失敗，不啟動 builder 或 solver。Producer 的 prepare 比對釘住身份，只有明確 `--update-index` 才能更新所選列。
 既有 gzip 已從 tip 移除，歷史 blob 清理仍是另一項落地條件。冷快取完整重建與 hash 重現尚未驗證，須另取運算授權。
 目前操作與完整 API 由 [tools README](../../tools/README.md#freeze-numeric-scenes) 和 [evolution README](../../lib/zcu_tools/simulate/evolution/README.md#frozen-numeric-inputs-and-references) 擁有。
+取捨與選項比較見[凍結場景存放](2026-11-16-frozen-scene-storage.md)。
+
+## 2026-11-17 後記：歷史清理
+
+落地前核對：落地的歷史不含兩個舊 gzip。本文「歷史 blob 清理仍是另一項落地條件」一句已完成。

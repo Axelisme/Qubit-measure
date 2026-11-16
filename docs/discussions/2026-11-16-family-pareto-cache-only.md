@@ -73,3 +73,20 @@ Pytest 涵蓋兩種 random gate 與一個固定 carrier 場景，不執行整批
 Exclusion estimator 與其唯一測試、反向 import 正式交由後續工作承接，原歸屬裁決與不執行的限制仍在。
 前文的 partial 停點不再阻擋本次 consumer 收斂，但存放與大檔歷史處理仍必須在 landing 前完成。
 量測結果與摘要 schema、mode transition 及 clock 不變；摘要舊欄名 `manifest_sha256` 改記有序 record 身份的 digest。
+
+## 2026-11-17 後記
+
+本文留下的存放、預設來源與 report 身份已有定案，現行規則見 [模組定位](../adr/0072-module-boundaries.md#開發工具的數值交接) 與 [Tools README](../../tools/README.md#freeze-numeric-scenes)。
+
+- 選取：量測用 `--index PATH` 單一清單取代本文的 `--manifest`。不給 `--index` 與 `--scenario` 時，讀兩份入庫清單並選 Pareto 預設名稱集合；`--scenario NAME` 仍嚴格單選，可與 `--index` 合用。
+- 存放：凍結場景不入庫，數值在 repo 共用的 scenes 快取，Git 只留兩份記名稱與三個 hash 的小清單。每筆身份的四個欄位不變。
+- 身份：report 記每筆 `{name, physical_sha256, oracle_sha256, metadata_sha256}` 加 HEAD／tree／dirty，不記清單路徑或檔案 SHA。
+- Exclusion estimator：已與它唯一的測試一起退休，見 [Exclusion estimator 退休](2026-11-16-exclusion-estimator-retirement.md)。
+
+本文沒有記下的否決選項與理由：
+
+- 保留 `--freeze-inputs` 當 codec 歸檔，會為每份 report 多複製約 10.4 MB，當時兩份 gzip 合計 10,374,837 bytes，不增加物理資訊。當時比較估算版本化索引約 4.9 KB。
+- 保留 `run_table(reference_solver=...)` 當測試接縫，但 tools 只讀 cache、不求解，也不為舊 fixture 留抽象。原來只解一次的斷言隨注入退休，改驗相同 physics、不同 model identity 的兩列取得同一 reference 物件。
+- `--manifest` 重複多路徑或依 category 篩選，沒有 caller，等需要再加。
+- 完全刪除獨立檢查，會讓量測前先查 cache、再申請計時的流程走不通。
+- 兩份預設來源同名時取第一筆，會掩蓋歧義。改為在 Engine 前失敗、列出來源，讓使用者用單一清單消歧。
