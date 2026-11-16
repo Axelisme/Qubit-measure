@@ -186,6 +186,7 @@ its resolution. Negative values, NaN and infinity raise Pydantic ValidationError
 a ValueError subclass. The owner records zero unchanged, without epsilon,
 dropping or resampling. Whole-process CPU may exceed wall time.
 These readings do not establish speed differences below clock resolution.
+Family retention rests on the more-than-10% rule and on a person reviewing the data (see [ADR-0078](../docs/adr/0078-evolution-module-boundary.md#family-去留合格只比耗時)), not on this owner.
 `Sample.observation` contains the untimed inspection result.
 
 `measure_modes` collects the family table's five samples per mode, including
@@ -243,7 +244,9 @@ reference, fills a missing numeric cache or rewrites a reference key.
 The handshake compares `PROTOCOL_VERSION`, `FROZEN_PHYSICAL_VERSION`,
 `SCENE_CACHE_VERSION` and the ordered per-record identity of name, physical hash,
 oracle hash and metadata hash. The protocol version covers the wire format and
-tools declaration interpretation. The physical version covers decoding fields,
+tools declaration interpretation.
+The record identity includes the metadata hash because companions and companions_by_target decide the observation whitelist and expected_routes decides attribution.
+The physical version covers decoding fields,
 units, dtypes, defaults and Engine-input reconstruction. The cache version
 covers index JSON and the cache-directory revision. `SEGMENT_NUMERIC_VERSION`
 is provenance only, so numerical optimizations can change it. Every fresh
@@ -283,16 +286,17 @@ Each cross-side block completes A1, B1, B2, A2. A is baseline and B is candidate
 For wall and process CPU separately, its ratio is `(B1+B2)/(A1+A2)`.
 A ratio below 1 means B is faster. Zero elapsed readings remain raw samples.
 If either side's block sum is nonpositive, statistics raise ValueError naming
-the block, clock and both totals. No epsilon, resampling or dropped block hides
+the block, clock and both totals.
+A zero baseline sum has no ratio, and a zero candidate sum is a clock-resolution artifact. Ratios feed the median, IQR and telemetry decision, so the statistics fail instead of substituting or skipping a block. The sample owner only records readings and does not make this check.
+No epsilon, resampling or dropped block hides
 clock-resolution limits. Summaries report the median and linear Q1/Q3 at
 indices `(K-1)*0.25` and `(K-1)*0.75`.
 
 Each side first runs off/off noise-floor blocks and off/on overhead blocks.
 Calibration uses the same ratio, with A=off and B=on. Only when both sides'
 wall and process overhead medians lie in their own off/off IQR closed intervals
-does final timing enable telemetry on both sides. K must exceed 2. Otherwise
-both timing sides disable telemetry and each adds one empty-history telemetry-on
-diagnostic in the same execution. Those diagnostics never enter timing ratios.
+does final timing enable telemetry on both sides.
+K must exceed 2: `run_comparison` raises ValueError otherwise, because a two-block IQR is too weak to choose a mode. When any of the four medians lies outside its interval, both timing sides disable telemetry and each adds one empty-history telemetry-on diagnostic in the same execution. Those diagnostics never enter timing ratios.
 At K=3, calibration plus comparison requests 60 samples before optional extra
 diagnostics. Warm sessions also run 12 untimed warmups in total.
 
@@ -871,15 +875,14 @@ Simulate owns the version-1 index and single-record gzip codec, hash validation,
 file naming and same-directory temporary-file plus replace publication.
 Each filename contains the name and the first 16 characters of its physical and
 metadata hashes. Unknown index/container versions fail without fallback.
+Every frozen scene needs a tracked builder in this producer. A scene built only by an untracked prototype cannot enter an index.
 
 Git contains only `frozen-synthetic.index.json` and `frozen-real.index.json`.
 Each ordered row pins `name`, `physical_sha256`, `oracle_sha256` and
 `metadata_sha256`. The last digest uses `simulate.evolution.digest(metadata)`.
 The 19 existing payloads were migrated without changing identities, point order
 or reference keys. Numeric gzip files are no longer tracked at the tip.
-That deletion does not remove historical blobs. History cleanup remains a
-separate landing requirement. A complete cold builder rebuild has not been
-validated by that migration.
+The old gzip files are not reachable from the landed history. The migration did not validate a complete cold builder rebuild.
 
 Run model construction only with approved compute and the current runner/lock
 policy. This command rebuilds and checks the pinned inventory, outside measurement
