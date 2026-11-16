@@ -196,6 +196,12 @@ Active family 的 guard 拒絕輸入會讓 density 測試失敗，不會產生�
 | `nearby_carriers` | `common_frame` | 6.5 ns、600 與 630 MHz 的同 port constant tones |
 | `adiabatic_ramp` | `adiabatic_map` | 8 ns、無 tone、弱非對易 flux ramp |
 
+`single_tone_sideband` 使用 committed 合成 fluxonium (4,1,1) GHz、flux=0.40、
+native cutoff=30、retained=6、N=3 的 d=18 joint 模型。初態是 dressed |e,0⟩，
+600 ns 方波驅動 |e,0⟩→|g,1⟩，g_sb=1 MHz，之後等待五個 cavity lifetimes。
+κ/(2π)=5 MHz，intrinsic capacitive Q=1e6 的 T1 仍在模型內。
+它固定驗 `dop853`，並以預設選路的空／暖歷史對雙容差 oracle 比完整 density。
+
 每個案例也保留預設選路的空歷史與暖歷史驗收。
 `joint_gate_inventory` 保留完整 20 點 sampled inventory，pinned density 改驗 `dop853`。
 `joint_constant` 用相同模型和 inventory 保護 `multitone_rwa` 的 distinct-port constant 路徑。
