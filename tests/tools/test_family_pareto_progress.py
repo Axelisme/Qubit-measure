@@ -13,17 +13,16 @@ from zcu_tools.simulate.evolution import (
     EvolutionResult,
     PathDiagnostics,
     reference_key,
-    write_frozen_manifest,
 )
 
 from tests.tools.family_pareto_support import (
     make_scene,
     write_test_cache,
-    write_test_manifest,
+    write_test_index,
 )
 from tools import family_pareto
 from tools.family_pareto import EngineSession, main, measure_family
-from tools.family_pareto_inputs import Input, freeze_records
+from tools.family_pareto_inputs import Input
 from tools.family_pareto_results import Sample
 
 
@@ -79,7 +78,7 @@ def test_partial_run_retains_samples_and_leaves_old_complete_outputs_untouched(
         tmp_path / name
         for name in ("inputs.json", "matrix.json", "summary.md", "attempt.jsonl")
     )
-    write_test_manifest(inputs, manifest)
+    write_test_index(inputs, manifest)
     cache = tmp_path / "cache"
     write_test_cache(inputs, cache)
     # main no longer exposes builder injection. Delegate real Engine calls and
@@ -90,8 +89,10 @@ def test_partial_run_retains_samples_and_leaves_old_complete_outputs_untouched(
     assert (
         main(
             [
-                "--manifest",
+                "--index",
                 str(manifest),
+                "--scene-cache",
+                str(tmp_path / "scenes"),
                 "--reference-cache",
                 str(cache),
                 "--output",
@@ -128,7 +129,7 @@ def test_cli_checks_references_without_policies_engine_or_a_summary(
     manifest, output, cache = (
         tmp_path / name for name in ("inputs.json", "references.json", "cache")
     )
-    write_test_manifest(inputs, manifest)
+    write_test_index(inputs, manifest)
     write_test_cache(inputs, cache)
     scene = inputs[0].build()
     with closing(scene.source):
@@ -143,8 +144,10 @@ def test_cli_checks_references_without_policies_engine_or_a_summary(
     assert (
         main(
             [
-                "--manifest",
+                "--index",
                 str(manifest),
+                "--scene-cache",
+                str(tmp_path / "scenes"),
                 "--check-references",
                 "--reference-cache",
                 str(cache),
@@ -168,14 +171,16 @@ def test_cli_reads_a_frozen_scenario_for_reference_check(tmp_path: Path) -> None
     manifest, output, cache = (
         tmp_path / name for name in ("inputs.json.gz", "references.json", "cache")
     )
-    write_frozen_manifest(manifest, freeze_records(inputs))
+    write_test_index(inputs, manifest)
     write_test_cache(inputs, cache)
 
     assert (
         main(
             [
-                "--manifest",
+                "--index",
                 str(manifest),
+                "--scene-cache",
+                str(tmp_path / "scenes"),
                 "--scenario",
                 "idle",
                 "--check-references",
@@ -198,13 +203,15 @@ def test_partial_attempt_never_reuses_an_old_journal(tmp_path: Path) -> None:
         tmp_path / name
         for name in ("inputs.json", "matrix.json", "summary.md", "attempt.jsonl")
     )
-    write_test_manifest(inputs, manifest)
+    write_test_index(inputs, manifest)
     journal.write_text("earlier attempt")
     assert (
         main(
             [
-                "--manifest",
+                "--index",
                 str(manifest),
+                "--scene-cache",
+                str(tmp_path / "scenes"),
                 "--output",
                 str(output),
                 "--summary",

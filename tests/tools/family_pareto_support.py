@@ -7,8 +7,9 @@ from zcu_tools.simulate.evolution import (
     Engine,
     ReferenceResult,
     RoutingHistory,
-    write_frozen_manifest,
+    write_frozen_index,
     write_reference,
+    write_scene_record,
 )
 
 from tests.simulate.evolution.contract.accuracy_cases import accuracy_case, history_case
@@ -47,9 +48,15 @@ def write_test_cache(inputs: list[Input], directory: Path) -> None:
             )
 
 
-def write_test_manifest(inputs: list[Input], path: Path) -> None:
-    """Write tiny test-owned numeric records through the public manifest codec."""
-    write_frozen_manifest(path, freeze_records(inputs))
+def write_test_index(inputs: list[Input], path: Path) -> None:
+    """Write tiny indexed records into the test-owned sibling scenes directory."""
+    write_frozen_index(
+        path,
+        (
+            write_scene_record(path.parent / "scenes", record)
+            for record in freeze_records(inputs)
+        ),
+    )
 
 
 def make_history_scene(count: int, history: RoutingHistory) -> Scene:

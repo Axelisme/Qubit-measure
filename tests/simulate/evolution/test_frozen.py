@@ -60,6 +60,104 @@ def test_manifest_round_trip_is_deterministic_and_rejects_invalid_identity(
         evolution.read_frozen_manifest(other)
 
 
+def test_index_cache_round_trip_preserves_order_and_metadata(tmp_path: Path) -> None:
+    write_record = getattr(evolution, "write_scene_record", None)
+    assert callable(write_record), "missing public single-record scene cache writer"
+    case = accuracy_case("idle_coherence")
+    with closing(case.source):
+        physical = evolution.physical_input(case.source, case.batch)
+    records = (
+        evolution.FrozenRecord("second", physical, {"opaque": 2}),
+        evolution.FrozenRecord("first", physical, None),
+    )
+    cache, index = tmp_path / "cache", tmp_path / "index.json"
+    entries = tuple(evolution.write_scene_record(cache, record) for record in records)
+    evolution.write_frozen_index(index, entries)
+    restored = evolution.read_scene_records(cache, evolution.read_frozen_index(index))
+    assert [record.name for record in restored] == ["second", "first"]
+    assert [record.metadata for record in restored] == [{"opaque": 2}, None]
+    assert [record.physical_sha256 for record in restored] == [
+        record.physical_sha256 for record in records
+    ]
+    assert entries[0].metadata_sha256 == evolution.digest({"opaque": 2})
+
+
+def test_scene_index_rejects_version_missing_and_mismatched_records(
+    tmp_path: Path,
+) -> None:
+    case = accuracy_case("idle_coherence")
+    with closing(case.source):
+        record = evolution.FrozenRecord(
+            "pinned",
+            evolution.physical_input(case.source, case.batch),
+            {"opaque": True},
+        )
+    entry = evolution.FrozenIndexEntry.from_record(record)
+    cache, index = tmp_path / "cache", tmp_path / "index.json"
+    evolution.write_frozen_index(index, (entry,))
+    payload = json.loads(index.read_text())
+    payload["version"] = 99
+    index.write_text(json.dumps(payload))
+    with pytest.raises(ValueError, match="version"):
+        evolution.read_frozen_index(index)
+    with pytest.raises(FileNotFoundError, match=f"pinned.*{entry.physical_sha256}"):
+        evolution.read_scene_records(cache, (entry,))
+    evolution.write_scene_record(cache, record)
+    wrong = replace(entry, oracle_sha256="0" * 64)
+    with pytest.raises(ValueError, match="hash/name mismatch.*pinned"):
+        evolution.read_scene_records(cache, (wrong,))
+    # The filename identity cannot hide a modified opaque metadata payload.
+    evolution.write_frozen_manifest(
+        entry.cache_path(cache), (replace(record, metadata={"opaque": False}),)
+    )
+    with pytest.raises(ValueError, match="hash/name mismatch.*pinned"):
+        evolution.read_scene_records(cache, (entry,))
+    evolution.write_frozen_manifest(
+        entry.cache_path(cache), (record, replace(record, name="extra"))
+    )
+    with pytest.raises(ValueError, match="hash/name mismatch.*pinned"):
+        evolution.read_scene_records(cache, (entry,))
+
+
+def test_atomic_scene_publication_preserves_pins_on_replace_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import os
+
+    case = accuracy_case("idle_coherence")
+    with closing(case.source):
+        record = evolution.FrozenRecord(
+            "pinned", evolution.physical_input(case.source, case.batch)
+        )
+    entry = evolution.write_scene_record(tmp_path / "cache", record)
+    index = tmp_path / "index.json"
+    evolution.write_frozen_index(index, (entry,))
+    changed = replace(entry, metadata_sha256="0" * 64)
+
+    def fail_replace(source: object, destination: object) -> None:
+        # Atomic replace is the filesystem boundary, not codec internals.
+        assert evolution.read_frozen_index(index) == (entry,)
+        raise OSError("injected publication failure")
+
+    monkeypatch.setattr(os, "replace", fail_replace)
+    with pytest.raises(OSError, match="publication failure"):
+        evolution.write_frozen_index(index, (changed,))
+    assert evolution.read_frozen_index(index) == (entry,)
+    with pytest.raises(OSError, match="publication failure"):
+        evolution.write_scene_record(
+            tmp_path / "cache", replace(record, metadata="new")
+        )
+    assert (
+        evolution.read_scene_records(tmp_path / "cache", (entry,))[0].name == "pinned"
+    )
+    with pytest.raises(FileNotFoundError):
+        evolution.read_scene_records(
+            tmp_path / "cache",
+            (evolution.FrozenIndexEntry.from_record(replace(record, metadata="new")),),
+        )
+
+
 def test_numeric_round_trip_preserves_models_tracks_flux_and_point_order(
     tmp_path: Path,
 ) -> None:

@@ -8,6 +8,15 @@
 DeviceManager, resources, GUI, YAML or an environment. The existing fluxonium
 prediction tools remain separate. ADR-0072 defines the package dependency rules.
 
+## Frozen scene storage
+
+`evolution` owns the versioned index and single-record numeric cache codec.
+Its public APIs take explicit paths and verify complete record identities.
+They do not discover Git roots, build device models or solve references.
+Tools choose the repository-shared cache; tests-side producers select independent
+solvers. See [frozen numeric inputs and references](evolution/README.md#frozen-numeric-inputs-and-references).
+This I/O boundary does not claim the whole simulate package is dependency-closed.
+
 ## Numeric parameter drift
 
 `zcu_tools.simulate.drift.LogOU` evolves a positive numeric parameter with exact

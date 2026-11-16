@@ -96,3 +96,12 @@ Kernel 單段與完整序列是不同場景，不能用裁切後的段冒充原�
 Reference consumer 的已放行變更與未完成邊界見[整批 cache-only 遷移](2026-11-16-family-pareto-cache-only.md)。
 同日後續裁決已固定每筆 record 的 name、physical_sha256、oracle_sha256 與 metadata_sha256 身份，退休舊 archive 與 helper。
 存放遷移只換來源，不再改這組身份。
+
+## 場景快取遷移後記
+
+現行存放規則已取代上文的 gzip 入庫選項。Git 只留兩份 version 1 名稱與 hash 清單，數值放 repo 共用的 scenes/v1 快取，每筆一個 gzip。
+Tools 解析 Git 共用位置，simulate 持有清單與數值讀寫、hash 驗證和原子發布。Tests 側 producer 只收顯式 index 與 cache 路徑，由 caller 指定 solver。
+首次遷移直接使用原有 19 筆 payload，核 physical、oracle、metadata hash、point order 和 reference key 不變。沒有由設定或 program 冷重建，也沒有重算 reference。
+量測用 `--index` 與 `--scene-cache` 選來源，缺數值檔就失敗，不啟動 builder 或 solver。Producer 的 prepare 比對釘住身份，只有明確 `--update-index` 才能更新所選列。
+既有 gzip 已從 tip 移除，歷史 blob 清理仍是另一項落地條件。冷快取完整重建與 hash 重現尚未驗證，須另取運算授權。
+目前操作與完整 API 由 [tools README](../../tools/README.md#freeze-numeric-scenes) 和 [evolution README](../../lib/zcu_tools/simulate/evolution/README.md#frozen-numeric-inputs-and-references) 擁有。

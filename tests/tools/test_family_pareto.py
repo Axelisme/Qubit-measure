@@ -14,12 +14,10 @@ import pytest
 from zcu_tools.simulate.evolution import (
     EvolutionResult,
     FamilyRouting,
-    FrozenRecord,
     NoValidKernel,
     PathDiagnostics,
     ReferenceResult,
     RoutingHistory,
-    read_frozen_manifest,
     write_reference,
 )
 
@@ -30,7 +28,7 @@ from tests.tools.family_pareto_support import (
     make_history_scene,
     make_scene,
     write_test_cache,
-    write_test_manifest,
+    write_test_index,
 )
 from tools import family_pareto, family_pareto_report
 from tools.family_pareto import (
@@ -552,14 +550,16 @@ def test_cli_measures_prepared_inputs_and_preserves_output_on_manifest_failure(
     manifest = tmp_path / "inputs.json"
     output = tmp_path / "result.json"
     summary = tmp_path / "summary.md"
-    write_test_manifest(inputs, manifest)
+    write_test_index(inputs, manifest)
     cache = tmp_path / "cache"
     write_test_cache(inputs, cache)
     argv = [
         "--reference-cache",
         str(cache),
-        "--manifest",
+        "--index",
         str(manifest),
+        "--scene-cache",
+        str(tmp_path / "scenes"),
         "--output",
         str(output),
         "--summary",
@@ -606,7 +606,7 @@ def test_cli_scenario_selects_exactly_one_before_build_with_a_manifest(
     cache = tmp_path / "cache"
     write_test_cache([inputs[1]], cache)
     manifest = tmp_path / "inputs.json"
-    write_test_manifest([inputs[1]], manifest)
+    write_test_index([inputs[1]], manifest)
     matrix = tmp_path / "matrix.json"
     report = tmp_path / "report.md"
     assert (
@@ -614,8 +614,10 @@ def test_cli_scenario_selects_exactly_one_before_build_with_a_manifest(
             [
                 "--scenario",
                 "idle",
-                "--manifest",
+                "--index",
                 str(manifest),
+                "--scene-cache",
+                str(tmp_path / "scenes"),
                 "--families",
                 "t4",
                 "--reference-cache",
@@ -645,7 +647,7 @@ def test_cli_scenario_cache_miss_stops_without_solving_and_explains_rebuild(
     matrix = tmp_path / "matrix.json"
     cache = tmp_path / "empty-cache"
     manifest = tmp_path / "scenes.json.gz"
-    write_test_manifest(
+    write_test_index(
         [Input("idle", lambda: make_scene("idle_coherence"), "tiny")], manifest
     )
     assert (
@@ -657,8 +659,10 @@ def test_cli_scenario_cache_miss_stops_without_solving_and_explains_rebuild(
                 "t4",
                 "--reference-cache",
                 str(cache),
-                "--manifest",
+                "--index",
                 str(manifest),
+                "--scene-cache",
+                str(tmp_path / "scenes"),
                 "--output",
                 str(matrix),
                 "--summary",
@@ -680,42 +684,38 @@ def test_cli_scenario_unknown_name_does_not_build_and_lists_legal_names(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     manifest = tmp_path / "scenes.json.gz"
-    write_test_manifest(
+    write_test_index(
         [Input("idle", lambda: make_scene("idle_coherence"), "tiny")], manifest
     )
-    assert main(["--scenario", "unknown", "--manifest", str(manifest)]) == 1
+    assert main(["--scenario", "unknown", "--index", str(manifest)]) == 1
     assert "Unknown scenario: unknown. Legal names: idle" in caplog.text
 
 
+@pytest.mark.parametrize("selection", [[], ["--scenario", "idle"]])
 def test_cli_rejects_ambiguous_scenario_before_build_and_lists_sources(
     tmp_path: Path,
     caplog: pytest.LogCaptureFixture,
     monkeypatch: pytest.MonkeyPatch,
+    selection: list[str],
 ) -> None:
     inputs = [Input("idle", lambda: make_scene("idle_coherence"), "tiny")]
     paths = [tmp_path / "first.json.gz", tmp_path / "second.json.gz"]
     for path in paths:
-        write_test_manifest(inputs, path)
-    decoded = iter(read_frozen_manifest(path) for path in paths)
-    sources: list[str] = []
+        write_test_index(inputs, path)
     calls: list[str] = []
-
-    def read(path: Path) -> tuple[FrozenRecord, ...]:
-        sources.append(str(path))
-        return next(decoded)
 
     def engine(*args: object, **kwargs: object) -> None:
         calls.append("Engine")
         raise AssertionError("ambiguous selection must not start Engine")
 
-    # CLI has one manifest option. Delegate its default reads to two valid
-    # codec fixtures without coupling this behavior test to storage locations.
-    monkeypatch.setattr(family_pareto, "read_frozen_manifest", read)
+    # CLI has one index option; substitute only default location discovery so
+    # the real global selection rule reads two independent valid fixture indexes.
+    monkeypatch.setattr(family_pareto, "scene_index_paths", lambda index: tuple(paths))
     monkeypatch.setattr(family_pareto, "Engine", engine)
-    assert main(["--scenario", "idle"]) == 1
+    monkeypatch.setattr(family_pareto, "measure_policy", engine)
+    assert main(selection) == 1
     assert "Ambiguous scenario: idle" in caplog.text
-    assert len(sources) == 2
-    assert all(source in caplog.text for source in sources)
+    assert all(str(path) in caplog.text for path in paths)
     assert calls == []
 
 
@@ -729,7 +729,7 @@ def test_cli_summary_comparison_never_blocks_writing_current_measurement(
     cache = tmp_path / "cache"
     write_test_cache(inputs, cache)
     manifest = tmp_path / "scenes.json.gz"
-    write_test_manifest(inputs, manifest)
+    write_test_index(inputs, manifest)
     destination = tmp_path / "current.json"
     baseline = tmp_path / "baseline.json"
     if baseline_kind == "fingerprint_mismatch":
@@ -770,8 +770,10 @@ def test_cli_summary_comparison_never_blocks_writing_current_measurement(
                 str(tmp_path / "report.md"),
                 "--partial-output",
                 str(tmp_path / "journal.jsonl"),
-                "--manifest",
+                "--index",
                 str(manifest),
+                "--scene-cache",
+                str(tmp_path / "scenes"),
                 "--summary-output",
                 str(destination),
                 "--compare-summary",
@@ -807,15 +809,17 @@ def test_cli_selects_families_without_changing_inputs_or_default_group(
     manifest = tmp_path / "inputs.json"
     output = tmp_path / "matrix.json"
     summary = tmp_path / "summary.md"
-    write_test_manifest(inputs, manifest)
+    write_test_index(inputs, manifest)
     cache = tmp_path / "cache"
     write_test_cache(inputs, cache)
     frozen = manifest.read_bytes()
     argv = [
         "--reference-cache",
         str(cache),
-        "--manifest",
+        "--index",
         str(manifest),
+        "--scene-cache",
+        str(tmp_path / "scenes"),
         "--output",
         str(output),
         "--summary",
@@ -875,15 +879,17 @@ def test_cli_rejects_family_selection_outside_measurement(
 ) -> None:
     manifest = tmp_path / "inputs.json"
     output = tmp_path / "output.json"
-    write_test_manifest([], manifest)
+    write_test_index([], manifest)
     output.write_text("previous output")
     assert (
         main(
             [
                 "--families",
                 "t6",
-                "--manifest",
+                "--index",
                 str(manifest),
+                "--scene-cache",
+                str(tmp_path / "scenes"),
                 "--output",
                 str(output),
                 "--reference-cache",

@@ -6,9 +6,11 @@ from pathlib import Path
 
 import numpy as np
 from zcu_tools.simulate.evolution import (
+    FrozenIndexEntry,
     FrozenRecord,
     physical_input,
-    write_frozen_manifest,
+    write_frozen_index,
+    write_scene_record,
 )
 
 from tests.tools.family_pareto_support import make_scene
@@ -30,9 +32,17 @@ def test_select_inputs_reads_one_frozen_scenario_without_producer_building(
         ),
     )
     path = tmp_path / "scenes.json.gz"
-    write_frozen_manifest(path, records)
+    cache = tmp_path / "scenes"
+    # The unselected first scene deliberately has no numeric cache file.
+    write_frozen_index(
+        path,
+        (
+            FrozenIndexEntry.from_record(records[0]),
+            write_scene_record(cache, records[1]),
+        ),
+    )
 
-    (selected,) = family_pareto.select_inputs(path, "second")
+    (selected,) = family_pareto.select_inputs(path, "second", scene_cache=cache)
 
     assert selected.input.name == "second"
     assert selected.record.name == "second"
@@ -67,10 +77,11 @@ def test_read_inputs_combines_manifests_and_builds_fresh_owned_scenes(
             },
         )
     paths = [tmp_path / "one.json.gz", tmp_path / "two.json.gz"]
-    write_frozen_manifest(paths[0], (first,))
-    write_frozen_manifest(paths[1], (second,))
+    cache = tmp_path / "scenes"
+    write_frozen_index(paths[0], (write_scene_record(cache, first),))
+    write_frozen_index(paths[1], (write_scene_record(cache, second),))
 
-    items = family_pareto_inputs.read_inputs(paths)
+    items = family_pareto_inputs.read_inputs(paths, cache)
 
     assert [item.name for item in items] == ["first", "second"]
     assert items[0].reason == "idle"
