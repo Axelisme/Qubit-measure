@@ -7,7 +7,7 @@ from math import prod
 import numpy as np
 from numpy.typing import NDArray
 
-from zcu_tools.core.simulation import SamplingIdentity
+from zcu_tools.simulate.boundary import SamplingIdentity
 from zcu_tools.simulate.rounding import shot_layout
 
 from ._path_sampling import physical_shots

@@ -1,12 +1,26 @@
 # Numeric simulation tools
 
-**Last updated:** 2026-11-17, simulator-owned cache root
+**Last updated:** 2026-11-17, boundary expand and simulator-owned cache root
 
 **讀者：** framework-dev、agent。查閱數值模擬的責任邊界、快取契約與實測效能。
 
 `evolution` and `adc` are independent numeric tools. Neither imports QICK,
 DeviceManager, resources, GUI, YAML or an environment. The existing fluxonium
 prediction tools remain separate. ADR-0072 defines the package dependency rules.
+
+## Acquisition boundary migration
+
+Simulator internals import shared acquisition records from
+`zcu_tools.simulate.boundary`. During the expand step, this module explicitly
+re-exports 19 public names from `zcu_tools.core.simulation`, where their
+definitions still live. External callers and tests can keep using the old path
+until their imports migrate. The contract step replaces the re-exports with the
+definitions and removes the old module.
+
+The package is not yet dependency-closed: `boundary` still imports
+`core.simulation`. No other simulator module imports another `zcu_tools` package.
+The existing C19 contract continues to forbid `core` from depending on `simulate`.
+A simulator-closure contract follows in the contract step; it is not active yet.
 
 ## Frozen scene storage
 
@@ -228,7 +242,7 @@ Receiver noise remains independent per sample and window. The result includes fl
 sums from one realization. Offset is added once per sample. Conditional responses
 and integrated round statistics remain deterministic first moments.
 A zero or singular positive-semidefinite 2x2 I/Q noise covariance is valid.
-`SamplingIdentity`, imported from `zcu_tools.core.simulation`, selects a local
+`SamplingIdentity`, imported from `zcu_tools.simulate.boundary`, selects a local
 PCG64 stream without changing global RNG state. The ADC and deferred integrated
 raw generation share this identity format.
 
@@ -237,7 +251,7 @@ and composes evolution, explicit populations and ADC. ADC and white_noise own
 complete integrated raw through structurally typed sources. `simulate.rounding`
 owns shared numeric nearest-even int64 conversion and shot-axis layout. Program
 owns the RawShots protocol, channel declaration order and acquisition normalization.
-Core statistics remain pure data. Deferred raw does no work during mean draws;
+Boundary statistics remain pure data. Deferred raw does no work during mean draws;
 its full CTMC paths use a separate stream and are not shifted to direct totals. [`evolution`](evolution/README.md) uses the segment engine's fast
 algorithms by default and shares prepared data within one evolve. It does not read or
 write an offline U-table library or persistent density records. Private replay

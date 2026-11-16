@@ -11,7 +11,7 @@ from dataclasses import dataclass
 import numpy as np
 from numpy.typing import NDArray
 
-from zcu_tools.core.simulation import (
+from zcu_tools.simulate.boundary import (
     ChannelStatistics,
     RoundStatistics,
     SamplingIdentity,
