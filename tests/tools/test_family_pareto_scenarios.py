@@ -1,9 +1,11 @@
 """Public fixed-scenario construction and reproducible manifest freezing."""
 
+import os
 from collections.abc import Iterator
 from contextlib import ExitStack, closing
 from pathlib import Path
 
+import numba
 import numpy as np
 import pytest
 from zcu_tools.program import build_soccfg
@@ -24,6 +26,51 @@ from tools.family_pareto_scene_builders import single_model_input
 from tools.family_pareto_settings import BOARD_PROFILE, SINGLE_MODEL
 
 PinnedInventory = tuple[list[Input], dict[str, Path], Path]
+NATIVE_THREAD_VARIABLES = (
+    "OMP_NUM_THREADS",
+    "OPENBLAS_NUM_THREADS",
+    "MKL_NUM_THREADS",
+    "NUMBA_NUM_THREADS",
+)
+
+
+def native_thread_state() -> tuple[dict[str, str | None], int]:
+    return (
+        {name: os.environ.get(name) for name in NATIVE_THREAD_VARIABLES},
+        numba.get_num_threads(),
+    )
+
+
+@pytest.fixture(scope="module", autouse=True)
+def native_threads_module_guard() -> Iterator[None]:
+    before = native_thread_state()
+    yield
+    assert native_thread_state() == before, "scenario module leaked native threads"
+
+
+@pytest.fixture(autouse=True)
+def native_threads_guard(
+    native_threads_module_guard: None, request: pytest.FixtureRequest
+) -> Iterator[None]:
+    before = native_thread_state()
+    yield
+    assert native_thread_state() == before, (
+        f"{request.node.nodeid} leaked native thread state"
+    )
+
+
+@pytest.fixture
+def restore_native_threads(native_threads_guard: None) -> Iterator[None]:
+    environment, mask = native_thread_state()
+    try:
+        yield
+    finally:
+        for name, value in environment.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+        numba.set_num_threads(mask)
 
 
 def test_prepare_checks_pinned_identity_and_keeps_valid_cache(tmp_path: Path) -> None:
@@ -127,7 +174,9 @@ def pinned_inventory(tmp_path: Path) -> PinnedInventory:
 
 
 def test_prepare_single_scenario_updates_only_its_row(
-    pinned_inventory: PinnedInventory, tmp_path: Path
+    pinned_inventory: PinnedInventory,
+    tmp_path: Path,
+    restore_native_threads: None,
 ) -> None:
     from dataclasses import replace
 
@@ -190,7 +239,10 @@ def test_prepare_publishes_no_indexes_until_all_selected_builders_succeed(
 
 @pytest.mark.parametrize("category", ["synthetic", "real"])
 def test_prepare_explicit_new_scenario_appends_once_after_caching(
-    pinned_inventory: PinnedInventory, tmp_path: Path, category: str
+    pinned_inventory: PinnedInventory,
+    tmp_path: Path,
+    category: str,
+    restore_native_threads: None,
 ) -> None:
     from dataclasses import replace
 

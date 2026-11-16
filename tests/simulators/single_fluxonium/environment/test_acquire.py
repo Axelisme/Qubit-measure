@@ -624,7 +624,17 @@ def test_source_rejects_invalidated_session_and_refreshes_mutated_controls():
         first = expect_integrated(session.sample_round(source.snapshot(), 0))
         request.templates[0].events[0].gain[:] = 0
         second = expect_integrated(session.sample_round(source.snapshot(), 0))
-        assert len(controlled_engine(source.engine).calls) == 2
+        calls = controlled_engine(source.engine).calls
+        assert len(calls) == 2
+        (_, first_batches), (_, second_batches) = calls
+        (first_batch,), (second_batch,) = first_batches, second_batches
+        assert len(first_batch.tracks) == len(second_batch.tracks) == 1
+        first_track, second_track = first_batch.tracks[0], second_batch.tracks[0]
+        assert np.any(first_track.amplitude != 0)
+        np.testing.assert_array_equal(second_track.amplitude, 0)
+        np.testing.assert_array_equal(second_batch.points, first_batch.points)
+        np.testing.assert_array_equal(second_track.start_ns, first_track.start_ns)
+        np.testing.assert_array_equal(second_track.duration_ns, first_track.duration_ns)
         assert (
             first.statistics.channels[0].sums.shape
             == second.statistics.channels[0].sums.shape

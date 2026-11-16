@@ -157,16 +157,26 @@ def _track(value: dict[str, Any]) -> DriveTrack:
     )
 
 
-def _batch(value: dict[str, Any]) -> TimelineBatch:
+def _batch(value: dict[str, Any], loops: int) -> TimelineBatch:
     flux = value["flux"]
     waveform = value["flux_waveform"]
+    # Empty JSON lists lose dtype and trailing dimensions; DC model levels
+    # retain the loop count even when the batch has no scheduled segments.
+    points = np.asarray(
+        value["points"], dtype=np.int64 if value["points"] == [] else None
+    )
+    levels = (
+        np.empty((0, loops), dtype=np.int64)
+        if value["points"] == [] and flux["level"] == []
+        else np.asarray(flux["level"])
+    )
     return TimelineBatch(
-        np.asarray(value["points"]),
+        points,
         tuple(_track(track) for track in value["tracks"]),
         FluxSchedule(
             np.asarray(flux["offsets"]),
             np.asarray(flux["start_ns"]),
-            np.asarray(flux["level"]),
+            levels,
         ),
         np.asarray(value["end_ns"]),
         None
@@ -238,7 +248,7 @@ def read_physical_input(value: dict[str, object]) -> FrozenInput:
                 "slow_envelope_segments_per_period"
             ],
         ),
-        _batch(decoded["batch"]),
+        _batch(decoded["batch"], len(decoded["models"][0]["level"])),
     )
 
 

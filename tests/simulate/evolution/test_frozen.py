@@ -158,6 +158,41 @@ def test_atomic_scene_publication_preserves_pins_on_replace_failure(
         )
 
 
+@pytest.mark.parametrize("loops", [1, 2])
+def test_zero_point_round_trip_preserves_empty_array_dtypes_and_loop_shape(
+    tmp_path: Path, loops: int
+) -> None:
+    case = accuracy_case("idle_coherence")
+    batch = evolution.TimelineBatch(
+        np.empty(0, dtype=np.int64),
+        (),
+        evolution.FluxSchedule(
+            np.array([0], dtype=np.int64),
+            np.empty(0),
+            np.empty((0, loops), dtype=np.int64),
+        ),
+        np.empty(0),
+    )
+    with closing(case.source):
+        path = tmp_path / "empty.json"
+        evolution.write_frozen_input(path, case.source, batch)
+        restored = evolution.read_frozen_input(path)
+        with closing(restored.source):
+            assert_array_equal(restored.batch.points, batch.points)
+            assert restored.batch.points.dtype == np.int64
+            assert_array_equal(restored.batch.flux.offsets, batch.flux.offsets)
+            assert restored.batch.flux.offsets.dtype == np.int64
+            assert_array_equal(restored.batch.flux.start_ns, batch.flux.start_ns)
+            assert restored.batch.flux.start_ns.dtype == np.float64
+            assert restored.batch.flux.level.shape == (0, loops)
+            assert restored.batch.flux.level.dtype == np.int64
+            assert_array_equal(restored.batch.end_ns, batch.end_ns)
+            assert restored.batch.end_ns.dtype == np.float64
+            assert evolution.canonical_json(
+                evolution.physical_input(restored.source, restored.batch)
+            ) == evolution.canonical_json(evolution.physical_input(case.source, batch))
+
+
 def test_numeric_round_trip_preserves_models_tracks_flux_and_point_order(
     tmp_path: Path,
 ) -> None:
