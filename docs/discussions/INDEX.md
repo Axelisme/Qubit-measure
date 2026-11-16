@@ -18,6 +18,8 @@
 
 ## 模擬量測環境
 
+- 2026-11-16 [FTF acquire 的演化與讀出 wall](2026-11-16-ftf-layer-walls.md)：分層計時。每次 Engine 與 ADC 工作各自累積 wall，跨 round 與 continuation 加總，失敗段保留已耗時間。
+
 - 2026-11-16 [Acquire outcome 的作用域與編譯交接](2026-11-16-acquire-outcome-scope.md)：生命週期。Binding 以自身作用域判斷正常返回，mixin 只圈住 builder 計時，environment 接收同一結果物件。
 
 - 2026-11-16 [共用 acquire telemetry writer](2026-11-16-shared-acquire-telemetry.md)：資料契約。共用八欄必填 summary，writer 明列投影，FTF projection 只放 namespaced extras。

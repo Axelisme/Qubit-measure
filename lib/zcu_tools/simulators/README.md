@@ -64,8 +64,10 @@ boundary. `summary: AcquireTelemetry` requires `points`, `rounds`, `wall_s`,
 Times are wall seconds; the three stages accept `None` when not measured.
 FTF projects `compile_wall_s` and `complete` from the binding's frozen
 `AcquireOutcome`. Completion means normal return, including a partial Stop result,
-not completion of every requested round. Evolve and readout remain `None` until
-those stages are measured.
+not completion of every requested round. FTF measures every Engine.evolve and
+ADC/readout call across rounds and continuations. A failing stage retains its
+elapsed seconds; a stage not entered is `0.0`. Unmeasured stages in other callers
+can still use `None`.
 Use simulator-prefixed extras keys and JSON values, or `{}` when absent.
 The writer projects only the declared fields and does not modify the caller's
 summary. `RoutingRecord` inherits them and adds a UTC timestamp, frontend CPU

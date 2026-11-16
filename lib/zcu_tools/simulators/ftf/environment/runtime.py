@@ -1,6 +1,8 @@
 """FTF round snapshots, persistent engine ownership and compact readout sampling."""
 
-from collections.abc import Collection
+import time
+from collections.abc import Collection, Generator
+from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from hashlib import sha256
 from math import prod
@@ -239,6 +241,9 @@ class FTFAcquire:
     source-owned bounded noiseless records can survive. Using an invalidated
     session raises RuntimeError. Calls are synchronous and
     must be serialized by the caller (the binding provides acquire admission).
+    evolve_wall_s sums Engine.evolve wall seconds across this session's rounds.
+    readout_wall_s sums cavity propagation, ADC preparation and round sampling.
+    Both include elapsed work in failed calls and stay zero with telemetry off.
     """
 
     def __init__(self, source: "FTFSource", request: AcquireRequest) -> None:
@@ -248,6 +253,30 @@ class FTFAcquire:
         self._snapshot: EnvironmentSnapshot | None = None
         self._prepared: _Prepared | None = None
         self.routing: list[PathDiagnostics] = []
+        self.evolve_wall_s = 0.0
+        self.readout_wall_s = 0.0
+
+    @contextmanager
+    def _evolving(self) -> Generator[None]:
+        if self._source.telemetry is None:
+            yield
+            return
+        start = time.monotonic()
+        try:
+            yield
+        finally:
+            self.evolve_wall_s += time.monotonic() - start
+
+    @contextmanager
+    def _reading(self) -> Generator[None]:
+        if self._source.telemetry is None:
+            yield
+            return
+        start = time.monotonic()
+        try:
+            yield
+        finally:
+            self.readout_wall_s += time.monotonic() - start
 
     def invalidate(self) -> None:
         """Release deterministic arrays and reject further rounds; safe to repeat."""
@@ -288,40 +317,43 @@ class FTFAcquire:
             self.routing.append(self._prepared.paths.for_reuse(telemetry=True))
         prepared = self._prepared
         acquire = self.request
-        if acquire.mode == "integrated":
-            if prepared.sampler is None:
-                raise RuntimeError("integrated preparation requires a sampler")
-            statistics = prepared.sampler.draw(
-                seed=acquire.root_seed,
-                acquire_sequence=acquire.sequence,
-                round_index=index,
-            )
-            result = IntegratedRound(
-                statistics, prepared.raw.bind(statistics.raw_identity)
-            )
-        else:
-            traces = sample_traces(
-                prepared.readout,
-                dict(prepared.raw.batches),
-                rtol=owner.settings.numerics.solver.rtol,
-                atol=owner.settings.numerics.solver.atol,
-                reps=acquire.reps,
-                identity=SamplingIdentity(
-                    acquire.root_seed, (acquire.sequence, index, 0)
-                ),
-            )
-            channels = []
-            for channel in traces.channels:
-                shaped = channel.iq.reshape(
-                    (*acquire.point_dims, acquire.reps, *channel.iq.shape[1:])
+        with self._reading():
+            if acquire.mode == "integrated":
+                if prepared.sampler is None:
+                    raise RuntimeError("integrated preparation requires a sampler")
+                statistics = prepared.sampler.draw(
+                    seed=acquire.root_seed,
+                    acquire_sequence=acquire.sequence,
+                    round_index=index,
                 )
-                ordered = np.moveaxis(
-                    shaped, len(acquire.point_dims), acquire.avg_level
+                result = IntegratedRound(
+                    statistics, prepared.raw.bind(statistics.raw_identity)
                 )
-                channels.append(
-                    ChannelSignals(channel.channel, ordered.reshape(channel.iq.shape))
+            else:
+                traces = sample_traces(
+                    prepared.readout,
+                    dict(prepared.raw.batches),
+                    rtol=owner.settings.numerics.solver.rtol,
+                    atol=owner.settings.numerics.solver.atol,
+                    reps=acquire.reps,
+                    identity=SamplingIdentity(
+                        acquire.root_seed, (acquire.sequence, index, 0)
+                    ),
                 )
-            result = RoundSignals(tuple(channels))
+                channels = []
+                for channel in traces.channels:
+                    shaped = channel.iq.reshape(
+                        (*acquire.point_dims, acquire.reps, *channel.iq.shape[1:])
+                    )
+                    ordered = np.moveaxis(
+                        shaped, len(acquire.point_dims), acquire.avg_level
+                    )
+                    channels.append(
+                        ChannelSignals(
+                            channel.channel, ordered.reshape(channel.iq.shape)
+                        )
+                    )
+                result = RoundSignals(tuple(channels))
         if owner.private_replay is not None:
             save_replay(
                 owner.private_replay,
@@ -400,7 +432,13 @@ class FTFAcquire:
         )
         _validate_event_layouts(plans)
         projection = None
-        options = CavityEvolutionOptions(key, owner.telemetry is not None, cancel)
+        options = CavityEvolutionOptions(
+            key,
+            owner.telemetry is not None,
+            cancel,
+            evolving=self._evolving,
+            reading=self._reading,
+        )
         if any(any(plan.projective_reads) for plan in plans):
             projection = evolve_projective_plans(
                 owner.engine, plans, facts, owner.effective_settings, options=options
@@ -431,44 +469,47 @@ class FTFAcquire:
                 projection_pruned_weight=pruned_weight,
             ),
         )
-        try:
-            distribution = _readout_distribution(
-                evolved,
-                plans,
-                acquire.point_dims,
-                None if projection is None else projection.readout,
-            )
-        except PopulationValidationError as error:
-            owner.evaluations = (
-                FTFNumericUse(
-                    acquire.sequence, index, evolved.paths, error.rejected_rows
-                ),
-            )
-            raise
-        if previous is None:
-            channels, raw_batches = _prepare_channels(plans, acquire, owner.settings)
-        else:
-            channels, raw_batches = previous.channels, dict(previous.raw.batches)
-        if previous is not None and _same_readout(distribution, previous.readout):
-            sampler = previous.sampler
-            raw = previous.raw
-        else:
-            sampler = (
-                PreparedStatistics(
-                    distribution,
-                    tuple(channels),
-                    reps=acquire.reps,
+        with self._reading():
+            try:
+                distribution = _readout_distribution(
+                    evolved,
+                    plans,
+                    acquire.point_dims,
+                    None if projection is None else projection.readout,
                 )
-                if acquire.mode == "integrated"
-                else None
-            )
-            raw = PreparedRawShots(
-                distribution,
-                raw_batches,
-                reps=acquire.reps,
-                rtol=owner.settings.numerics.solver.rtol,
-                atol=owner.settings.numerics.solver.atol,
-            )
+            except PopulationValidationError as error:
+                owner.evaluations = (
+                    FTFNumericUse(
+                        acquire.sequence, index, evolved.paths, error.rejected_rows
+                    ),
+                )
+                raise
+            if previous is None:
+                channels, raw_batches = _prepare_channels(
+                    plans, acquire, owner.settings
+                )
+            else:
+                channels, raw_batches = previous.channels, dict(previous.raw.batches)
+            if previous is not None and _same_readout(distribution, previous.readout):
+                sampler = previous.sampler
+                raw = previous.raw
+            else:
+                sampler = (
+                    PreparedStatistics(
+                        distribution,
+                        tuple(channels),
+                        reps=acquire.reps,
+                    )
+                    if acquire.mode == "integrated"
+                    else None
+                )
+                raw = PreparedRawShots(
+                    distribution,
+                    raw_batches,
+                    reps=acquire.reps,
+                    rtol=owner.settings.numerics.solver.rtol,
+                    atol=owner.settings.numerics.solver.atol,
+                )
         return _Prepared(
             distribution,
             tuple(channels),
@@ -525,9 +566,9 @@ class FTFSource:
     survive generation changes; preparation invalidation is unchanged. Close
     releases all fingerprints and retained envelopes.
     telemetry optionally supplies an already configured local routing writer.
-    Enabled sources collect calling-thread routing CPU and expose finish_acquire
-    for the binding completion callback. None (default) creates no directory,
-    reads no telemetry CPU clocks, and retains no routing reports.
+    Enabled sources collect stage wall and calling-thread routing CPU, and expose
+    finish_acquire for the binding completion callback. None (default) creates no
+    directory, reads no telemetry clocks, and retains no routing reports.
     acquisition supplies FTFAcquisitionOptions for the environment clock and
     private truth/replay paths; None uses its defaults. acquisition.clock=None
     creates a clock. begin_acquire freezes losses once per acquisition.
@@ -737,19 +778,17 @@ class FTFSource:
         rounds = outcome.rounds
         request = rounds[0].acquire if rounds else None
         session = self._session
-        paths = (
-            session.routing
-            if session is not None and session.request is request
-            else ()
-        )
+        if session is None or session.request is not request:
+            session = None
+        paths = () if session is None else session.routing
         self.telemetry.write(
             {
                 "points": prod(request.point_dims) if request is not None else 0,
                 "rounds": len(rounds),
                 "wall_s": outcome.wall_s,
                 "compile_wall_s": outcome.compile_wall_s,
-                "evolve_wall_s": None,
-                "readout_wall_s": None,
+                "evolve_wall_s": 0.0 if session is None else session.evolve_wall_s,
+                "readout_wall_s": 0.0 if session is None else session.readout_wall_s,
                 "complete": outcome.complete,
                 "extras": {
                     "ftf.projection_outcomes": list(
