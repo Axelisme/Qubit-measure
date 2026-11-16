@@ -147,6 +147,26 @@ Local flux reset 沿用 `reset/pulse`，由 lab 的 library 範本與 `twotone/r
 範本名稱與參數留在 lab 範本及 [gain](../../zcu_lab/v2/twotone/reset/flux/gain/guide.md)、[length](../../zcu_lab/v2/twotone/reset/flux/length/guide.md) 操作文件，不成為框架規則。
 2026-10-30，使用者選擇：「1A 2同意 3感覺復用reset/check就好？倒是reset/可以加一個flux_reset，4同意」，並對上述組裝與校準方式回覆「確認」。
 
+### Two-tone 廣掃的選峰與窗口
+
+`twotone/freq` 只暴露 Model type、Expected center 與 Min SNR，預設 SNR 為 5。
+數值選峰及窗口由 `analysis.fitting.spectrum.fit_spectrum` 的明填 `local_peak=True` 提供。
+Lab 保留選項宣告、IQ 投影與實際窗口的圖形標示，不讓數值工具讀 lab options。
+有指定中心時取附近最高局部極大值，不以全譜 range 比例拒絕弱峰；空白時取最顯著峰。
+窗口左右各取六個半高寬，鄰峰中點可裁切，但至少保留最近六點。
+例如廣掃同時包含強 transition 與高度不到它 0.2 的弱 transition 時，Expected center 可指定弱峰。
+Min SNR 仍可拒絕弱峰，失敗時回報候選數及門檻，不改擬合遠處強峰。
+
+此規則只適用 `twotone/freq`。`SpectrumFitOptions` 保留原欄位，`twotone/chain` 保留最近候選與中點窗口。
+Notebook fluxdep 與 workflow calibration 的獨立分析不改行為。
+這些 caller 若需要別的門檻或窗口，仍自行明選，不繼承 freq 的 GUI 選項。
+依賴方向沿用 lab → analysis，由 C8、C9、C15、C16 保護，不新增依賴邊。
+
+2026-11-16，使用者指出：「你twotone/freq的算法不好，對於廣掃，多transition peaks是很常見的，gui控制應該只需要model type/expected center兩個就好。」
+對窗口與門檻補充：「取6個半高寬。其他門檻，如果預設可能會導致找不到峰，那要考慮曝露。」
+使用者對保留 Min SNR、移除相對 prominence 與固定其餘兩門檻為零的提案回答「A」。
+本次小改動依使用者要求不另建討論快照，操作契約見 [frequency guide](../../zcu_lab/v2/twotone/freq/guide.md#peak-selection)。
+
 ### 即時圖工具與機制
 
 使用者於 2026-10-24 裁定：「框架與機制留在lib可以，live_line的定位應該是工具，可按需求擴充，但放在lib裡很難改。以及liveplot模塊應該可以考慮刪除，我以為plotting已經取代他了。」
