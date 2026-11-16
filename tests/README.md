@@ -133,7 +133,9 @@ ticket 內只跑受影響選集。只有變更觸及 `lib/zcu_tools/simulate/` �
 它不 import tools。工具單元測試可 import 受測工具，並用工具的公開 `Scene` 建 fixture。
 Guard edge、sweep、history 與 multisegment accuracy 案例仍由下面的精度矩陣擁有，不從工具 producer 反向取得。
 
-準備參考解時，由呼叫端明示每份 manifest 的 solver。預設場景的用法如下，必須先取得求解成本授權，並套用當次 heavy runner 與鎖的規則。這不是量測 preflight，也不保證既有 cache 已涵蓋全部場景。
+準備參考解時，由呼叫端明示每份 manifest 的 solver。下例使用既有兩份 producer artifact，不指定量測 consumer 的最終預設來源。
+凍結場景不入庫，Git 只留名稱與 hash 小清單；存放、預設來源與 report 身份仍待定。既有檔案與歷史尚未遷移。
+求解必須先取得成本授權，並套用當次 heavy runner 與鎖的規則。這不是量測 preflight，也不保證既有 cache 已涵蓋全部場景。
 
 ```bash
 uv run --directory "$PWD" --no-sync -- python -m tests.simulate.evolution.contract.family_pareto_reference_producer \
