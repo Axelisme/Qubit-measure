@@ -1,10 +1,10 @@
 # Single-fluxonium acquisition
 
-**Last updated:** 2026-11-12，caller-owned routing controls
+**Last updated:** 2026-11-16，caller-selected worker width
 
 **Readers:** framework-dev, lab-author, agent. Compose complete fluxonium timelines with one physical readout cavity.
 
-`single_fluxonium(path_or_settings, *, soccfg, private_replay=None, clock=None, truth_log=None, history=None, families=None)` returns the normal
+`single_fluxonium(path_or_settings, *, soccfg, workers=1, private_replay=None, clock=None, truth_log=None, history=None, families=None)` returns the normal
 `SimulationEnvironment`. It creates one fixed-unit DC FakeDevice, a mock SoC,
 one route per named microwave line, an optional fast-flux route and one readout generator/ADC route.
 All generators bind to that ADC for transport admission. Only the configured
@@ -27,6 +27,13 @@ including projective continuations. Unknown names raise at construction; an
 unavailable domain raises at acquire without bypassing guards or falling back
 outside the whitelist. Omitting both keywords preserves default routing and
 source-owned history. Neither control belongs in physical YAML or program cfg.
+
+`workers` selects the Engine's parallel width across timelines and defaults to 1.
+Values below 1 raise `ValueError` through Engine. Construction starts no worker
+pool. Empty work, one timeline or one worker runs serially. GUI startup explicitly
+reserves one host CPU, using at least one worker, and does no numeric warmup.
+Tests, benchmarks, research and other direct callers keep the serial default.
+The startup policy is defined in [ADR-0069](../../../../../docs/adr/0069-experiment-core-and-frontends.md#顯式-cfg-與裝置環境).
 
 ## Complete timelines
 

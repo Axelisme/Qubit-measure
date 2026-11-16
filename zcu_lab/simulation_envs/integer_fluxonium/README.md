@@ -2,7 +2,7 @@
 
 **Readers:** operator, lab-author, agent. Start the offline zero-flux environment and measure transition frequencies before preparing higher states.
 
-**Last updated:** 2026-11-11, independent STIRAP experiments and recipes
+**Last updated:** 2026-11-16, GUI simulation workers
 
 This environment uses the Mencia 2024 Device D circuit inputs
 EJ/EC/EL = 6.78/1.47/0.22 GHz, zero flux and a 20 mK qubit bath.
@@ -49,6 +49,9 @@ than switching environments. Older component documents need the explicit
 
 The script installs a simulated SoC and one fixed-unit DC FakeDevice using the
 same lifecycle as single-fluxonium. It performs no acquisition or numeric warmup.
+The script selects `max(1, (os.cpu_count() or 1) - 1)` workers through the shared
+GUI startup policy. Eight CPUs select seven workers. Direct calls to the
+single-fluxonium factory keep `workers=1`.
 After operations drain, the close callback closes the backend and releases
 untransferred devices. Drivers accepted by the GUI belong to the GUI and close
 there. Backend cleanup failure does not skip device cleanup.
