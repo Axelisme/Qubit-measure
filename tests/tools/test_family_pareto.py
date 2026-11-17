@@ -47,9 +47,9 @@ from tools.family_pareto import (
     measure_policy,
     render_summary,
     run_table,
-    tested_state,
     timing_equivalents,
 )
+from tools.family_pareto import tested_state as current_tested_state
 from tools.family_pareto_inputs import Input, canonical_json, freeze_manifest
 
 
@@ -770,7 +770,7 @@ def test_cli_summary_comparison_never_blocks_writing_current_measurement(
     assert saved["measured_families"] == ["t4"]
     assert saved["policies"]["t4"]["status"] == "qualified"
     assert saved["provenance"]["exclusive"] is False
-    assert saved["provenance"]["dirty"] == tested_state()["dirty"]
+    assert saved["provenance"]["dirty"] == current_tested_state()["dirty"]
     assert destination.with_suffix(".md").exists()
     assert (
         "Not comparable"
