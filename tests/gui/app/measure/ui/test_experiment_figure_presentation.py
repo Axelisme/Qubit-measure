@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from io import BytesIO
 from pathlib import Path
 
@@ -10,7 +10,7 @@ import pytest
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 from qtpy.QtCore import QCoreApplication, QEvent
-from qtpy.QtWidgets import QLabel, QVBoxLayout, QWidget
+from qtpy.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.simulation import white_noise
@@ -26,6 +26,7 @@ from zcu_tools.gui.app.measure.adapter import (
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
 from zcu_tools.gui.app.measure.ui.interactive_frontend import InteractiveFrontend
+from zcu_tools.gui.control_identity import ControlIdentity
 from zcu_tools.gui.session.context_types import (
     CommandOrigin,
     EntryRequest,
@@ -385,8 +386,15 @@ def test_user_switches_named_figures_gallery_and_left_panel(
 
 
 @pytest.fixture
-def presentation_host(qapp, main_window_control_factory) -> Iterator[QWidget]:
-    """Host figure-only contracts without a session, worker or fake board."""
+def presentation_host(
+    qapp: QApplication, main_window_control_factory: Callable[[], ControlIdentity]
+) -> Iterator[QWidget]:
+    """Yield a visible QWidget containing one ExpTabWidget, without a session.
+
+    The factory retains control authority until the Qt view tree is deleted.
+    Teardown clears figures and detaches the tab through its public APIs, then
+    closes the host and delivers its deferred deletion.
+    """
     host = QWidget()
     layout = QVBoxLayout(host)
     tab = ExpTabWidget(
