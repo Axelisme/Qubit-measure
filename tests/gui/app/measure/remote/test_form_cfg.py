@@ -17,6 +17,7 @@ from zcu_tools.gui.app.measure.services.form_contracts import (
 from zcu_tools.gui.form import FormInput, FormModel
 from zcu_tools.gui.form_adapter import Form, FormContext
 
+from tests.gui._context_reads import capture_focus
 from tests.gui.app.measure._synthetic import SampleAdapter, SampleCfg
 
 from ._form_rpc import FormRpc, ModuleRpcAdapter, ModuleRpcCfg
@@ -522,18 +523,26 @@ def test_reset_aliases_fixes_parameter_reads_until_next_reset(form_rpc) -> None:
     try:
         register_fakes()
         context = fixture.ctrl.context_control
-        context.add_component("Q1", "fake/drive/a", {"rate": 10.0})
-        context.add_component("Q2", "fake/drive/a", {"rate": 20.0})
-        rows = context.get_alias_rows()
+        context.add_component(
+            "Q1", "fake/drive/a", {"rate": 10.0}, point=context.current_point_label()
+        )
+        context.add_component(
+            "Q2", "fake/drive/a", {"rate": 20.0}, point=context.current_point_label()
+        )
+        rows = context.get_alias_rows(point=context.current_point_label())
         reset = rpc.call("tab.reset_cfg", {"tab_id": tab, "aliases": {"qubit": "Q2"}})
         assert reset["ok"], reset
-        context.set_parameter(context.read_context().target, "Q2.rate", 25.0)
+        context.set_parameter(
+            capture_focus(context).target,
+            "Q2.rate",
+            25.0,
+        )
         query = {"tab_id": tab, "paths": ["$qubit.rate"], "module_refs": []}
         frozen = rpc.call("tab.parameter_read", query)
         assert frozen["ok"], frozen
         assert frozen["result"] == {"values": {"$qubit.rate": 20.0}, "modules": {}}
         assert rpc.call("tab.get_cfg", {"tab_id": tab})["result"] == reset["result"]
-        assert context.get_alias_rows() == rows
+        assert context.get_alias_rows(point=context.current_point_label()) == rows
         reset = rpc.call("tab.reset_cfg", {"tab_id": tab, "aliases": {"qubit": "Q1"}})
         assert reset["ok"], reset
         assert rpc.call("tab.parameter_read", query)["result"]["values"] == {
@@ -557,12 +566,16 @@ def test_refresh_rpc_recaptures_aliases_preserving_input_and_obeys_admission(
     try:
         register_fakes()
         context = fixture.ctrl.context_control
-        context.add_component("Q1", "fake/drive/a", {"rate": 10.0})
-        context.add_component("Q2", "fake/drive/a", {"rate": 20.0})
+        context.add_component(
+            "Q1", "fake/drive/a", {"rate": 10.0}, point=context.current_point_label()
+        )
+        context.add_component(
+            "Q2", "fake/drive/a", {"rate": 20.0}, point=context.current_point_label()
+        )
         owner = fixture.ctrl.cfg_resources.lookup(tab)
         owner.write({("gain",): {"expr": "$qubit.rate / 100"}})
         authored = owner.input.data
-        rows = context.get_alias_rows()
+        rows = context.get_alias_rows(point=context.current_point_label())
         reply = rpc.call(
             "tab.refresh_sources", {"tab_id": tab, "aliases": {"qubit": "Q2"}}
         )
@@ -571,8 +584,12 @@ def test_refresh_rpc_recaptures_aliases_preserving_input_and_obeys_admission(
         assert {
             tuple(item["path"]): item["value"] for item in reply["result"]["values"]
         }[("gain",)] == 0.2
-        assert context.get_alias_rows() == rows
-        context.set_parameter(context.read_context().target, "Q2.rate", 30.0)
+        assert context.get_alias_rows(point=context.current_point_label()) == rows
+        context.set_parameter(
+            capture_focus(context).target,
+            "Q2.rate",
+            30.0,
+        )
         assert owner.preview().values[("gain",)] == 0.2
         fixture.state.set_tab_running(tab, running=True)
         try:

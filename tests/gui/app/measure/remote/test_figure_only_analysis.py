@@ -16,7 +16,7 @@ from zcu_tools.gui.app.measure.services.pane_commit import (
 )
 from zcu_tools.gui.app.measure.state import AnalysisPaneState, PostAnalysisPaneState
 from zcu_tools.gui.form_adapter import Form
-from zcu_tools.gui.session.context_types import EntryRequest, PointUseRequest
+from zcu_tools.gui.session.context_types import EntryRequest
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
 from tests.experiment._saving_support import SavingCfg, SavingCore
@@ -81,8 +81,8 @@ def figures_rpc(tmp_path, qapp, post):
         controller = Controller(
             session.state, registry, None, session.bus, project_root=str(tmp_path)
         )
-        controller.setup_control.open_entry(EntryRequest("original"))
-        controller.setup_control.use_point(PointUseRequest("p"))
+        controller.entry_control.open_entry(EntryRequest("original"))
+        controller.entry_control.use_point("p")
         controller.session_services.soc_connection.install_soc(
             MagicMock(), load_soccfg()
         )

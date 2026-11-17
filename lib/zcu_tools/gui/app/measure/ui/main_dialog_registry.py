@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 
 _PERSISTENT_DIALOGS: frozenset[DialogName] = frozenset({DialogName.PREDICTOR})
 _RUN_LOCKED_DIALOGS: frozenset[DialogName] = frozenset(
-    {DialogName.SETUP, DialogName.SOC}
+    {DialogName.ENTRY, DialogName.SOC}
 )
 
 
@@ -44,8 +44,8 @@ class MainDialogRegistry:
     """Retain the named dialogs exposed through ``MainWindow``.
 
     Use on the Qt owner thread. Named windows are non-modal. The host pushes
-    Local writability to new and retained Setup, SoC, Inspect, Device and ARB
-    windows; dialogs never observe authority. Run separately locks Setup/SoC.
+    Local writability to new and retained Entry, SoC, Inspect, Device and ARB
+    windows; dialogs never observe authority. Run separately locks Entry/SoC.
     """
 
     def __init__(
@@ -90,11 +90,11 @@ class MainDialogRegistry:
         Per-name imports stay lazy to avoid loading unused dialog modules during
         startup and lightweight tests.
         """
-        if name is DialogName.SETUP:
-            from zcu_tools.gui.session.ui.setup_dialog import SetupDialog
+        if name is DialogName.ENTRY:
+            from zcu_tools.gui.session.ui.entry_dialog import EntryDialog
 
-            dialog = SetupDialog(
-                self._ctrl.setup_control,
+            dialog = EntryDialog(
+                self._ctrl.entry_control,
                 parent=self._parent,
             )
             dialog.set_read_only(read_only=not writable)
@@ -110,7 +110,9 @@ class MainDialogRegistry:
 
             dialog = DeviceDialog(
                 self._ctrl.device_control,
-                parameter_provider=self._ctrl.context_control.read_context,
+                parameter_provider=lambda: self._ctrl.context_control.read_context(
+                    point=self._ctrl.context_control.current_point_label()
+                ),
                 parent=self._parent,
                 before_stop=self._reclaim_for_stop,
             )
@@ -123,7 +125,9 @@ class MainDialogRegistry:
                 self._ctrl.predictor_control,
                 parent=self._parent,
                 device=self._ctrl.device_control,
-                parameter_provider=self._ctrl.context_control.read_context,
+                parameter_provider=lambda: self._ctrl.context_control.read_context(
+                    point=self._ctrl.context_control.current_point_label()
+                ),
                 persistent_on_close=True,
             )
             dialog.enable_parameter_cache()
@@ -162,8 +166,8 @@ class MainDialogRegistry:
         """Push Local authority to all editors, preserving their Run policy."""
         from zcu_tools.gui.session.ui.arb_waveform_dialog import ArbWaveformDialog
         from zcu_tools.gui.session.ui.device_dialog import DeviceDialog
+        from zcu_tools.gui.session.ui.entry_dialog import EntryDialog
         from zcu_tools.gui.session.ui.inspect_dialog import InspectDialog
-        from zcu_tools.gui.session.ui.setup_dialog import SetupDialog
         from zcu_tools.gui.session.ui.soc_dialog import SocDialog
 
         self._writable = writable
@@ -172,7 +176,7 @@ class MainDialogRegistry:
             if isinstance(
                 dialog,
                 (
-                    SetupDialog,
+                    EntryDialog,
                     SocDialog,
                     DeviceDialog,
                     InspectDialog,
@@ -183,7 +187,7 @@ class MainDialogRegistry:
                 dialog.set_read_only(read_only=not writable or run_locked)
 
     def set_running(self, *, running: bool) -> None:
-        """Lock only Setup/SoC submissions during Run, retaining Local authority."""
+        """Lock only Entry/SoC submissions during Run, retaining Local authority."""
         self._running = running
         self.set_writable(writable=self._writable)
 

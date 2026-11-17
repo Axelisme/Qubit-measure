@@ -16,7 +16,7 @@ Launcher 擁有 CLI 解析與程序入口，把每次啟動的選項交給 share
 
 App 宣告固定的 process requirements，並提供 app-specific composition。`gui.runtime` 協調共用的 logging、Qt application、rendering 初始化、remote adapter 啟停與程序返回碼。App 組裝 controller、window、domain services 與自己的 remote adapter。Runtime 不決定 remote method、guard 或 app state。
 
-Runtime 提供 app lifecycle 接點並控制啟動順序。App 在接點內觸發自己的 startup workflow，透過既有 owner interface 執行。Composition 決定建立與注入哪些模組，startup 不接管 State、service 或 registry 的寫入權威。Dialog 與 control port 不接收 app phase，啟動與手動開啟使用同一個 Setup dialog。這不要求每個流程另建 Coordinator class。
+Runtime 提供 app lifecycle 接點並控制啟動順序。App 在接點內觸發自己的 startup workflow，透過既有 owner interface 執行。Composition 決定建立與注入哪些模組，startup 不接管 State、service 或 registry 的寫入權威。Dialog 與 control port 不接收 app phase，啟動與手動開啟使用同一個 Entry dialog。這不要求每個流程另建 Coordinator class。
 
 預設 session 還原腳本屬於框架，位於 `lib/zcu_tools/gui/app/measure/default_startup.py`；`zcu_lab/` 只放使用者自己的 startup 腳本。使用者於 2026-10-21 裁定：「這位置不對，預設startup腳本應該是放在lib裡框架層才對，不是讓用戶改的。」
 
@@ -30,7 +30,7 @@ Measure launcher 選擇一份可信 Python 檔，檔案定義 `startup(ctx)`。�
 - 沒給這兩個選項時，執行框架的 `lib/zcu_tools/gui/app/measure/default_startup.py`。
 - 給 `--script <path.py>` 時，只執行該腳本。自訂腳本若要預設行為，自己 import 並呼叫預設 `startup`，框架不自動串接。
 
-Composition 將選好的 `Path` 注入 `MeasureGuiBehavior`。Lib 不 import zcu_lab，沿用 [[0072]] 的 C16 `framework-no-user` contract。框架沒有 simulation environment loader 或 `--simulate` 相容入口。腳本可以安裝模擬資源，也可以連線硬體、建立元件或開啟 tabs。`--clean` 也略過已保存的 Qt 外觀；無腳本時 app 開啟一般 Setup dialog。
+Composition 將選好的 `Path` 注入 `MeasureGuiBehavior`。Lib 不 import zcu_lab，沿用 [[0072]] 的 C16 `framework-no-user` contract。框架沒有 simulation environment loader 或 `--simulate` 相容入口。腳本可以安裝模擬資源，也可以連線硬體、建立元件或開啟 tabs。`--clean` 也略過已保存的 Qt 外觀；無腳本時 app 開啟一般 Entry dialog。
 
 視窗顯示且 Qt 事件迴圈啟動後，app 以既有 operation runner 在背景 worker 執行腳本。狀態列顯示進度，STARTUP gate 暫時禁止 Run，但不禁止腳本經 owner 操作 SoC 或 device。未捕捉錯誤保留已完成的命令與已登記的 callbacks，解除啟動鎖，並以含腳本路徑及可定位行號的對話框報錯。GUI 保持可用，不回滾成空 session，也不回退另一個腳本或模擬環境。
 

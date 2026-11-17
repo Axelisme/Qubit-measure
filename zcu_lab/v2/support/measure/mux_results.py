@@ -7,13 +7,13 @@ from collections.abc import Sequence
 from pydantic import BaseModel
 from zcu_tools.analysis.fitting import FitQuality
 from zcu_tools.analysis.fitting.sampling import FringeSamplingQuality
-from zcu_tools.gui.session.parameters import ParameterContext
+from zcu_tools.gui.session.parameters import DocumentSetCapture
 
 from .mux_bindings import require_mux_qubits
 
 
 def captured_qubits(
-    parameters: ParameterContext | None, names: Sequence[str] | None
+    parameters: DocumentSetCapture | None, names: Sequence[str] | None
 ) -> tuple[str, ...] | None:
     """Resolve full qubit destinations from this Run/Load capture only.
 

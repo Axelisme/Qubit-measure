@@ -27,7 +27,6 @@ from zcu_tools.gui.session.context_control import ContextControlPort
 from zcu_tools.gui.session.context_types import (
     CommandOrigin,
     PointCreateRequest,
-    PointUseRequest,
 )
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.state import SessionState
@@ -42,6 +41,7 @@ from zcu_tools.resources.entry import (
 )
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
+from tests.gui._context_reads import capture_focus, inspect_focus
 from tests.gui._user_input import ComponentDriver
 from tests.resources.entry.fakes import (
     Profiled,
@@ -137,7 +137,7 @@ def component_widget(
     # Parameter writes need a selected saved point; start on one.
     entry.new_point("working")
     owner.install_entry(entry)
-    owner.use_point(PointUseRequest("working"))
+    owner.use_point("working")
     control = owner
     widget = ComponentTreeWidget(control)
     widget.resize(900, 700)
@@ -159,8 +159,10 @@ def _tree(widget: ComponentTreeWidget) -> QTreeWidget:
 
 
 def test_column_widths_are_interactive_and_survive_tree_rebuild(qapp, component_widget):
-    widget, _control = component_widget
-    assert widget.add_component("Q1", "fake/drive/a", {"rate": 4300.0})
+    widget, control = component_widget
+    assert widget.add_component(
+        "Q1", "fake/drive/a", {"rate": 4300.0}, point=control.current_point_label()
+    )
     header = _tree(widget).header()
     assert header is not None
     assert [header.sectionResizeMode(i) for i in range(4)] == [
@@ -275,8 +277,10 @@ def _add_button(widget: ComponentTreeWidget) -> QPushButton:
 
 
 def test_add_component_renders_tree(component_widget):
-    widget, _control = component_widget
-    assert widget.add_component("Q1", "fake/drive/a", {"rate": 4300.0})
+    widget, control = component_widget
+    assert widget.add_component(
+        "Q1", "fake/drive/a", {"rate": 4300.0}, point=control.current_point_label()
+    )
     tree = _tree(widget)
     roots = [tree.topLevelItem(i) for i in range(tree.topLevelItemCount())]
     assert any(root is not None and root.text(0) == "Q1" for root in roots)
@@ -284,21 +288,30 @@ def test_add_component_renders_tree(component_widget):
 
 def test_missing_required_field_displays_error_without_mutation(component_widget):
     widget, control = component_widget
-    assert not widget.add_component("Ref", "test/required", {})
+    assert not widget.add_component(
+        "Ref", "test/required", {}, point=control.current_point_label()
+    )
     error = _error(widget)
     assert "reference" in error.text()
     assert _is_red(error)
-    assert "Ref" not in control.inspect_document().components
+    assert "Ref" not in inspect_focus(control).components
     assert widget.add_component(
-        "Ref", "test/required", {"reference": "unresolved-name"}
+        "Ref",
+        "test/required",
+        {"reference": "unresolved-name"},
+        point=control.current_point_label(),
     )
-    assert widget.edit_parameter("Ref.reference", "ordinary-string")
-    assert control.read_context().value("Ref.reference") == "ordinary-string"
+    assert widget.edit_parameter(
+        "Ref.reference", "ordinary-string", point=control.current_point_label()
+    )
+    assert capture_focus(control).value("Ref.reference") == "ordinary-string"
 
 
 def test_tree_lists_every_schema_field_with_unit_and_description(component_widget):
-    widget, _control = component_widget
-    assert widget.add_component("P1", "test/profiled", {"label": "probe"})
+    widget, control = component_widget
+    assert widget.add_component(
+        "P1", "test/profiled", {"label": "probe"}, point=control.current_point_label()
+    )
     tree = _tree(widget)
     assert tree.columnCount() == 4
     root = _row(widget, "P1")
@@ -325,11 +338,13 @@ def test_tree_lists_every_schema_field_with_unit_and_description(component_widge
 
 def test_in_place_edit_fills_an_unset_field(qapp, component_widget):
     widget, control = component_widget
-    assert widget.add_component("P1", "test/profiled", {"label": "probe"})
+    assert widget.add_component(
+        "P1", "test/profiled", {"label": "probe"}, point=control.current_point_label()
+    )
 
     _edit_text(qapp, widget, _row(widget, "P1", "rate"), "4300.5", Qt.Key.Key_Return)
 
-    assert control.read_context().value("P1.rate") == 4300.5
+    assert capture_focus(control).value("P1.rate") == 4300.5
     rate = _row(widget, "P1", "rate")
     assert rate.text(VALUE) == "4300.5"
     assert not rate.font(VALUE).italic()
@@ -340,7 +355,9 @@ def test_child_of_unset_group_writes_the_shallowest_unset_ancestor(
     qapp, component_widget
 ):
     widget, control = component_widget
-    assert widget.add_component("P1", "test/profiled", {"label": "probe"})
+    assert widget.add_component(
+        "P1", "test/profiled", {"label": "probe"}, point=control.current_point_label()
+    )
 
     _edit_text(
         qapp,
@@ -350,19 +367,21 @@ def test_child_of_unset_group_writes_the_shallowest_unset_ancestor(
         Qt.Key.Key_Return,
     )
 
-    captured = control.read_context()
+    captured = capture_focus(control)
     assert captured.value("P1.routing.main") == {"ch": 2}
     assert _row(widget, "P1", "routing", "main", "ch").text(VALUE) == "2"
 
 
 def test_escape_cancels_the_edit_without_writing(qapp, component_widget):
     widget, control = component_widget
-    assert widget.add_component("P1", "test/profiled", {"label": "probe"})
-    before = control.inspect_document()
+    assert widget.add_component(
+        "P1", "test/profiled", {"label": "probe"}, point=control.current_point_label()
+    )
+    before = inspect_focus(control)
 
     _edit_text(qapp, widget, _row(widget, "P1", "label"), "changed", Qt.Key.Key_Escape)
 
-    assert control.inspect_document() == before
+    assert inspect_focus(control) == before
     assert _row(widget, "P1", "label").text(VALUE) == "probe"
     assert not any(
         editor.isVisible() for editor in _tree(widget).findChildren(QLineEdit)
@@ -371,7 +390,9 @@ def test_escape_cancels_the_edit_without_writing(qapp, component_widget):
 
 def test_choice_field_edits_through_a_drop_down(qapp, component_widget):
     widget, control = component_widget
-    assert widget.add_component("P1", "test/profiled", {"label": "probe"})
+    assert widget.add_component(
+        "P1", "test/profiled", {"label": "probe"}, point=control.current_point_label()
+    )
 
     _double_click_value(qapp, widget, _row(widget, "P1", "mode"))
     combo = _editor(widget, QComboBox)
@@ -379,12 +400,17 @@ def test_choice_field_edits_through_a_drop_down(qapp, component_widget):
     combo.setCurrentText("V")
     _press(qapp, combo, Qt.Key.Key_Return)
 
-    assert control.read_context().value("P1.mode") == "V"
+    assert capture_focus(control).value("P1.mode") == "V"
 
 
 def test_rejected_edit_shows_error_and_keeps_document_value(qapp, component_widget):
     widget, control = component_widget
-    assert widget.add_component("P1", "test/profiled", {"label": "probe", "count": 3})
+    assert widget.add_component(
+        "P1",
+        "test/profiled",
+        {"label": "probe", "count": 3},
+        point=control.current_point_label(),
+    )
 
     _edit_text(qapp, widget, _row(widget, "P1", "count"), "-x: [", Qt.Key.Key_Return)
     assert _error(widget).text() != ""
@@ -392,14 +418,18 @@ def test_rejected_edit_shows_error_and_keeps_document_value(qapp, component_widg
 
     _edit_text(qapp, widget, _row(widget, "P1", "count"), "2.5", Qt.Key.Key_Return)
     assert _error(widget).text() != ""
-    assert control.read_context().value("P1.count") == 3
+    assert capture_focus(control).value("P1.count") == 3
     assert _row(widget, "P1", "count").text(VALUE) == "3"
 
 
 def test_successful_edit_keeps_expansion_and_selection(qapp, component_widget):
-    widget, _control = component_widget
-    assert widget.add_component("P1", "test/profiled", {"label": "probe"})
-    assert widget.add_component("P2", "test/profiled", {"label": "other"})
+    widget, control = component_widget
+    assert widget.add_component(
+        "P1", "test/profiled", {"label": "probe"}, point=control.current_point_label()
+    )
+    assert widget.add_component(
+        "P2", "test/profiled", {"label": "other"}, point=control.current_point_label()
+    )
     tree = _tree(widget)
     _row(widget, "P2").setExpanded(False)
     routing = _row(widget, "P1", "routing")
@@ -407,7 +437,9 @@ def test_successful_edit_keeps_expansion_and_selection(qapp, component_widget):
     _row(widget, "P1", "routing", "bias").setExpanded(True)
     tree.setCurrentItem(_row(widget, "P1", "routing", "bias", "ch"))
 
-    assert widget.edit_parameter("P1.label", "renamed")
+    assert widget.edit_parameter(
+        "P1.label", "renamed", point=control.current_point_label()
+    )
 
     assert not _row(widget, "P2").isExpanded()
     assert _row(widget, "P1", "routing", "bias").isExpanded()
@@ -424,12 +456,16 @@ def test_metadata_column_shows_caller_mapping_and_survives_value_edits(
     qapp, component_widget
 ):
     widget, control = component_widget
-    assert widget.add_component("P1", "test/profiled", {"label": "probe"})
-    assert widget.add_component("O1", "test/open", {"custom": 5})
+    assert widget.add_component(
+        "P1", "test/profiled", {"label": "probe"}, point=control.current_point_label()
+    )
+    assert widget.add_component(
+        "O1", "test/open", {"custom": 5}, point=control.current_point_label()
+    )
     header = _tree(widget).headerItem()
     assert header is not None
     assert header.text(METADATA) == "Metadata"
-    target = control.read_context().target
+    target = capture_focus(control).target
     control.set_parameter(
         target, "P1.label", "probe", metadata={"stderr": 0.8, "comment": "ok"}
     )
@@ -456,8 +492,10 @@ def test_metadata_column_shows_caller_mapping_and_survives_value_edits(
 
 def test_group_and_unset_rows_show_their_path_metadata(component_widget):
     widget, control = component_widget
-    assert widget.add_component("P1", "test/profiled", {"label": "probe"})
-    target = control.read_context().target
+    assert widget.add_component(
+        "P1", "test/profiled", {"label": "probe"}, point=control.current_point_label()
+    )
+    target = capture_focus(control).target
     control.set_parameter(target, "P1.routing.main", {"ch": 1})
     control.set_parameter(target, "P1.routing.main.ch", 1, metadata={"stderr": 0.1})
     # A null group leaves its channel unset while that path keeps its metadata.
@@ -486,13 +524,15 @@ def test_multiline_metadata_summary_is_one_line_and_tooltip_keeps_content(
     component_widget,
 ):
     widget, control = component_widget
-    assert widget.add_component("P1", "test/profiled", {"label": "probe"})
+    assert widget.add_component(
+        "P1", "test/profiled", {"label": "probe"}, point=control.current_point_label()
+    )
     metadata: YamlMap = {
         "run\nnote": "first line\n\n  indented second\n",
         "history": ["a\nb", {"why": "x\ny"}],
         "stderr": 0.25,
     }
-    target = control.read_context().target
+    target = capture_focus(control).target
     control.set_parameter(target, "P1.label", "probe", metadata=metadata)
     widget.refresh()
 
@@ -507,14 +547,16 @@ def test_extra_document_data_outside_the_schema_stays_visible_and_editable(
     qapp, component_widget
 ):
     widget, control = component_widget
-    assert widget.add_component("O1", "test/open", {"custom": 5})
+    assert widget.add_component(
+        "O1", "test/open", {"custom": 5}, point=control.current_point_label()
+    )
     custom = _row(widget, "O1", "custom")
     assert custom.text(VALUE) == "5"
     assert _row(widget, "O1", "rate").font(VALUE).italic()
 
     _edit_text(qapp, widget, custom, "6", Qt.Key.Key_Return)
 
-    assert control.read_context().value("O1.custom") == 6
+    assert capture_focus(control).value("O1.custom") == 6
 
 
 def test_without_parameter_context_the_tree_clears_and_add_is_disabled(
@@ -537,16 +579,14 @@ def test_without_parameter_context_the_tree_clears_and_add_is_disabled(
                 database_root=tmp_path / "Database",
             )
         )
-        destination = next(
-            combo
-            for combo in widget.findChildren(QComboBox)
-            if combo.findText("Entry template") >= 0
-        )
-        destination.setCurrentText("Entry template")
+        destination = _child(widget, QComboBox, "inspect.parameters.destination")
+        destination.setCurrentText("Global")
+        # This standalone widget has no host subscription to the owner's bus.
+        widget.refresh()
         assert _add_button(widget).isEnabled()
         assert hint.text() == ""
         assert widget.add_component(
-            "T1", "test/profiled", {"label": "template"}, setup=True
+            "T1", "test/profiled", {"label": "template"}, point=None
         )
         assert _row(widget, "T1", "label").text(VALUE) == "template"
     finally:
@@ -563,8 +603,13 @@ def _count_rejection(count: object) -> ValidationError:
 def test_rejected_edit_error_names_the_field_with_full_text_in_tooltip(
     qapp, component_widget
 ):
-    widget, _control = component_widget
-    assert widget.add_component("P1", "test/profiled", {"label": "probe", "count": 3})
+    widget, control = component_widget
+    assert widget.add_component(
+        "P1",
+        "test/profiled",
+        {"label": "probe", "count": 3},
+        point=control.current_point_label(),
+    )
 
     _edit_text(qapp, widget, _row(widget, "P1", "count"), "2.5", Qt.Key.Key_Return)
 
@@ -638,22 +683,18 @@ def test_add_button_opens_a_modal_dialog_naming_the_destination(qapp, component_
     qapp.processEvents()
     assert _visible_dialogs(widget) == []
 
-    destination = next(
-        combo
-        for combo in widget.findChildren(QComboBox)
-        if combo.findText("Entry template") >= 0
-    )
-    destination.setCurrentText("Entry template")
+    destination = _child(widget, QComboBox, "inspect.parameters.destination")
+    destination.setCurrentText("Global")
     dialog = _open_add_dialog(qapp, widget, "test/profiled")
-    setup_text = _child(dialog, QLabel, "add_destination").text()
-    assert setup_text != current_text
-    assert "P1" not in setup_text
+    global_text = _child(dialog, QLabel, "add_destination").text()
+    assert global_text != current_text
+    assert "P1" not in global_text
     _child(dialog, QLineEdit, "add_name").setText("T1")
     _fill(dialog, "label", "template")
     _submit(qapp, dialog)
 
-    assert "T1" in control.inspect_document(setup=True).components
-    assert "T1" not in control.inspect_document().components
+    assert "T1" in control.inspect_document(point=None).components
+    assert "T1" not in inspect_focus(control).components
 
 
 def test_dialog_fields_follow_the_kind_schema_and_rebuild_on_kind_change(
@@ -737,7 +778,7 @@ def test_dialog_without_required_fields_submits_only_name_and_kind(
     dialog = _open_add_dialog(qapp, widget, "test/open")
     _child(dialog, QLineEdit, "add_name").setText("O1")
     _submit(qapp, dialog)
-    assert document_value(control.inspect_document(), "O1") == {"kind": "test/open"}
+    assert document_value(inspect_focus(control), "O1") == {"kind": "test/open"}
 
 
 def _fill_required_form(dialog: QDialog, *, count: str = "3") -> None:
@@ -768,7 +809,7 @@ def test_dialog_submits_filled_fields_as_nested_mapping_and_selects_the_componen
     _submit(qapp, dialog)
 
     assert _visible_dialogs(widget) == []
-    component = document_value(control.inspect_document(), "P1")
+    component = document_value(inspect_focus(control), "P1")
     assert component == {
         "kind": "test/form",
         "label": "probe",
@@ -797,7 +838,7 @@ def test_dialog_marks_missing_required_fields_and_does_not_submit(
     _submit(qapp, dialog)
 
     assert _visible_dialogs(widget) == [dialog]
-    assert control.inspect_document().components == {}
+    assert inspect_focus(control).components == {}
     _child(dialog, QLineEdit, "add_name").setText("P1")
     assert not submit.isEnabled()
     assert submit.toolTip() == "Missing: label"
@@ -814,7 +855,7 @@ def test_dialog_marks_missing_required_fields_and_does_not_submit(
     _child(dialog, QLineEdit, "add_name").setText("P1")
     assert submit.isEnabled() and submit.toolTip() == ""
     _submit(qapp, dialog)
-    assert "P1" in control.inspect_document().components
+    assert "P1" in inspect_focus(control).components
 
 
 def test_owner_rejection_stays_in_the_dialog_with_input_kept(qapp, component_widget):
@@ -826,7 +867,7 @@ def test_owner_rejection_stays_in_the_dialog_with_input_kept(qapp, component_wid
     _submit(qapp, dialog)
 
     assert _visible_dialogs(widget) == [dialog]
-    assert "P1" not in control.inspect_document().components
+    assert "P1" not in inspect_focus(control).components
     message = _count_rejection(2.5).errors()[0]["msg"]
     error = _child(dialog, QLabel, "add_error")
     assert error.text() == f"count: {message}"
@@ -888,9 +929,15 @@ def _completions(editor: QLineEdit) -> set[str]:
 
 def test_role_reference_field_picks_a_matching_component(qapp, component_widget):
     widget, control = component_widget
-    assert widget.add_component("S1", "fake/sensor", {})
-    assert widget.add_component("S2", "fake/sensor", {})
-    assert widget.add_component("D1", "fake/drive/a", {})
+    assert widget.add_component(
+        "S1", "fake/sensor", {}, point=control.current_point_label()
+    )
+    assert widget.add_component(
+        "S2", "fake/sensor", {}, point=control.current_point_label()
+    )
+    assert widget.add_component(
+        "D1", "fake/drive/a", {}, point=control.current_point_label()
+    )
 
     _double_click_value(qapp, widget, _row(widget, "D1", "sense"))
     combo = _editor(widget, QComboBox)
@@ -898,13 +945,17 @@ def test_role_reference_field_picks_a_matching_component(qapp, component_widget)
     combo.setCurrentText("S2")
     _press(qapp, combo, Qt.Key.Key_Return)
 
-    assert control.read_context().value("D1.sense") == "S2"
+    assert capture_focus(control).value("D1.sense") == "S2"
 
 
 def test_other_text_fields_complete_component_names(qapp, component_widget):
-    widget, _control = component_widget
-    assert widget.add_component("S1", "fake/sensor", {})
-    assert widget.add_component("D1", "fake/drive/a", {})
+    widget, control = component_widget
+    assert widget.add_component(
+        "S1", "fake/sensor", {}, point=control.current_point_label()
+    )
+    assert widget.add_component(
+        "D1", "fake/drive/a", {}, point=control.current_point_label()
+    )
 
     _double_click_value(qapp, widget, _row(widget, "D1", "source"))
     editor = _editor(widget, QLineEdit)
@@ -918,7 +969,9 @@ def test_dialog_role_reference_field_is_a_drop_down_of_matching_components(
     widget, control = component_widget
     control.new_point(PointCreateRequest("P1", "", CommandOrigin("gui")))
     widget.refresh()
-    assert widget.add_component("S1", "fake/sensor", {})
+    assert widget.add_component(
+        "S1", "fake/sensor", {}, point=control.current_point_label()
+    )
 
     dialog = _open_add_dialog(qapp, widget, "test/drive")
     sense = _child(dialog, QComboBox, "field:sense")
@@ -929,12 +982,14 @@ def test_dialog_role_reference_field_is_a_drop_down_of_matching_components(
     _fill(dialog, "source", "S1")
     _submit(qapp, dialog)
 
-    assert control.read_context().value("D1.sense") == "S1"
+    assert capture_focus(control).value("D1.sense") == "S1"
 
 
 def test_component_error_uses_theme_foreground(component_widget, window_palette):
-    widget, _ = component_widget
+    widget, control = component_widget
     widget.setPalette(window_palette)
-    assert not widget.add_component("Ref", "test/required", {})
+    assert not widget.add_component(
+        "Ref", "test/required", {}, point=control.current_point_label()
+    )
     error = _error(widget)
     assert error.palette().color(error.foregroundRole()) == error_colour(error)

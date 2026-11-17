@@ -33,7 +33,7 @@ Analyze 只發布圖並回傳 `None`。逐 DC 的聯合 fit、ζ、誤差與原�
 ## Notebook
 
 `cfg` 使用與表單相同的 IdleZZHeraldedCfg。
-`point_view` 是儲存目的地已綁定的 `PointView`。保存時以本次 `run()` 回傳的 `record` 作為 `source`。
+`point_view` 是儲存目的地已綁定的 `ParameterView`。保存時以本次 `run()` 回傳的 `record` 作為 `source`。
 
 ```python
 from zcu_tools.notebook import NotebookAdapter

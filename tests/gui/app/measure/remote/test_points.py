@@ -9,16 +9,16 @@ from zcu_tools.gui.app.measure.remote.handlers.point import PointListReply, h_po
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.session.context_types import (
+    DocumentSetRef,
     EntryInfo,
     EntryRequest,
     PointBindingError,
-    PointUseRequest,
-    SavedPoint,
 )
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.resources.entry import ResultEntry, source_path
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
+from tests.gui._context_reads import capture_focus
 from tests.gui.app.measure._record_support import require_target
 
 from ._point_application import PointApplication
@@ -42,7 +42,7 @@ def test_use_selects_point_or_global_with_destination_projection(
 ) -> None:
     info = application.open_entry()
     application.result("point.new", new_params("seed"))
-    capture = application.controller.context_control.read_context()
+    capture = capture_focus(application.controller.context_control)
     assert application.result("point.use", {"label": label}) == {
         "entry_name": info.name,
         "point": label,
@@ -52,8 +52,8 @@ def test_use_selects_point_or_global_with_destination_projection(
     assert application.controller.get_session_env().readiness.value == (
         "global" if label is None else "point"
     )
-    assert context.read_context().target is not None
-    assert capture.target == SavedPoint(entry_name=info.name, point="seed")
+    assert capture_focus(context).target is not None
+    assert capture.target == DocumentSetRef(entry_name=info.name, point="seed")
 
 
 @pytest.mark.parametrize("params", [{}, {"label": False}, {"label": ""}])
@@ -99,12 +99,12 @@ def test_new_rejects_invalid_modes_without_changing_selection(
 def test_new_empty_mode_omits_global_content(application: PointApplication) -> None:
     application.open_entry()
     context = application.controller.context_control
-    context.add_component("Q1", "fake/drive/a", {"rate": 10.0}, setup=True)
+    context.add_component("Q1", "fake/drive/a", {"rate": 10.0}, point=None)
     application.result(
         "point.new", new_params("blank", mode="empty", description="fresh")
     )
-    assert context.read_context().whole_document().components == {}
-    assert context.read_context().whole_document().general.description == "fresh"
+    assert capture_focus(context).whole_document().components == {}
+    assert capture_focus(context).whole_document().general.description == "fresh"
     assert [file.revision for file in context.get_file_revisions()][1:] == [None, None]
 
 
@@ -115,7 +115,7 @@ def test_list_empty_and_refresh_persisted_metadata(
     info = application.open_entry()
     opened_resource(info).new_point("base", description="original")
     # A separate resource writer changes disk state after the GUI's cached list.
-    with opened_resource(info).use_point("base").edit() as draft:
+    with opened_resource(info).parameters("base").edit() as draft:
         draft.set("general.description", "external edit")
     assert application.result("point.list", {}) == {
         "entry": {
@@ -134,12 +134,12 @@ def test_list_empty_and_refresh_persisted_metadata(
     }
 
 
-def test_new_uses_setup_and_clone_replaces_description(
+def test_new_inherits_global_and_clone_replaces_description(
     application: PointApplication,
 ) -> None:
     info = application.open_entry()
     context = application.controller.context_control
-    context.add_component("Q1", "fake/drive/a", {"rate": 10.0}, setup=True)
+    context.add_component("Q1", "fake/drive/a", {"rate": 10.0}, point=None)
     expected = {"entry_name": info.name, "point": "seed"}
     assert (
         application.result(
@@ -147,8 +147,8 @@ def test_new_uses_setup_and_clone_replaces_description(
         )
         == expected
     )
-    captured = context.read_context()
-    assert captured.target == SavedPoint(entry_name=info.name, point="seed")
+    captured = capture_focus(context)
+    assert captured.target == DocumentSetRef(entry_name=info.name, point="seed")
     assert captured.lookup("Q1.rate").value == 10.0
     context.set_parameter(require_target(captured), "Q1.rate", 20.0)
     assert application.result(
@@ -157,8 +157,8 @@ def test_new_uses_setup_and_clone_replaces_description(
         "entry_name": info.name,
         "point": "clone",
     }
-    assert context.read_context().lookup("Q1.rate").value == 20.0
-    assert context.read_context().whole_document().general.description == ""
+    assert capture_focus(context).lookup("Q1.rate").value == 20.0
+    assert capture_focus(context).whole_document().general.description == ""
     assert application.result("point.list", {})["points"] == [
         {"label": "clone", "description": "", "available": True, "error": None},
         {
@@ -214,7 +214,7 @@ def test_mutations_use_current_entry_after_switch(
 ) -> None:
     previous = application.open_entry()
     opened_resource(previous).new_point("selected")
-    application.controller.setup_control.new_entry(EntryRequest("other"))
+    application.controller.entry_control.new_entry(EntryRequest("other"))
     current = application.controller.context_control.get_entry_info()
     assert current is not None
     if method == "point.use":
@@ -224,9 +224,9 @@ def test_mutations_use_current_entry_after_switch(
         "entry_name": current.name,
         "point": "selected",
     }
-    assert application.controller.context_control.read_context().target == SavedPoint(
-        entry_name=current.name, point="selected"
-    )
+    assert capture_focus(
+        application.controller.context_control
+    ).target == DocumentSetRef(entry_name=current.name, point="selected")
     assert opened_resource(previous).list_points() == ["selected"]
     assert opened_resource(current).list_points() == ["selected"]
 
@@ -237,12 +237,12 @@ def test_missing_point_io_is_not_reclassified_or_replaced(
     info = application.open_entry()
     opened_resource(info).new_point("good")
     application.result("point.use", {"label": "good"})
-    before = application.controller.context_control.read_context().target
+    before = capture_focus(application.controller.context_control).target
     reply = application.rpc("point.use", {"label": "missing"})
     error = reply["error"]
     assert isinstance(error, dict)
     assert error["code"] == ErrorCode.CONTROLLER_ERROR
-    assert application.controller.context_control.read_context().target == before
+    assert capture_focus(application.controller.context_control).target == before
     assert opened_resource(info).list_points() == ["good"]
 
 
@@ -254,7 +254,7 @@ def test_list_isolates_unreadable_point_and_refreshes_its_error(
     context = application.controller.context_control
     opened_resource(info).new_point("good", description="usable")
     context.list_points(refresh=True)
-    source = source_path(opened_resource(info).use_point("base"))
+    source = source_path(opened_resource(info).parameters("base"))
     source.write_text("[invalid YAML", encoding="utf-8")
     reply = TypeAdapter(PointListReply).validate_python(
         application.result("point.list", {})
@@ -271,7 +271,7 @@ def test_list_isolates_unreadable_point_and_refreshes_its_error(
         "error": None,
     }
     application.result("point.use", {"label": "good"})
-    assert require_target(context.read_context()).point == "good"
+    assert require_target(capture_focus(context)).point == "good"
 
 
 def test_created_binding_failure_preserves_destination_and_recovers_with_use(
@@ -289,9 +289,9 @@ def test_created_binding_failure_preserves_destination_and_recovers_with_use(
 
     service = ContextService(application.state, BaseEventBus(), bind_assets=bind_assets)
     service.install_entry(entry)
-    service.use_point(PointUseRequest("previous"))
+    service.use_point("previous")
     application.remote.context_control = service
-    before = service.read_context().target
+    before = capture_focus(service).target
     fail = True
     with pytest.raises(RemoteError) as failure:
         h_point_new(application.remote, new_params("retained"))
@@ -309,7 +309,7 @@ def test_created_binding_failure_preserves_destination_and_recovers_with_use(
     assert error.__cause__.created is True
     assert isinstance(error.__cause__.__cause__, OSError)
     assert entry.list_points() == ["previous", "retained"]
-    assert service.read_context().target == before
+    assert capture_focus(service).target == before
     fail = False
     assert application.result("point.use", {"label": "retained"}) == {
         "entry_name": info.name,

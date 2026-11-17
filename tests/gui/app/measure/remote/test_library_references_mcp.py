@@ -16,6 +16,7 @@ from zcu_tools.gui.app.measure.adapter import (
 from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.gui.session.context_types import LibraryChange
 
+from tests.gui._context_reads import capture_focus
 from tests.gui.app.measure._record_support import require_target
 from tests.gui.app.measure._synthetic import SampleAdapter, SampleCfg
 
@@ -97,13 +98,16 @@ def test_library_mutation_refreshes_ref_and_explicit_inline_tab_cfg(
 ):
     kind, put, field, path, adapter_type = reference_library
     fx = Fixture(project_root=str(tmp_path), active_label="ctx001")
-    fx.ctrl.context_control.add_component("Q1", "fake/drive/a", {})
+    fx.ctrl.context_control.add_component(
+        "Q1", "fake/drive/a", {}, point=fx.ctrl.context_control.current_point_label()
+    )
     fx.ctrl.context_control.apply_library_change(
-        fx.ctrl.context_control.read_context(), put
+        capture_focus(fx.ctrl.context_control),
+        put,
     )
     if kind == "waveform":
         fx.ctrl.context_control.set_module(
-            require_target(fx.ctrl.context_control.read_context()),
+            require_target(capture_focus(fx.ctrl.context_control)),
             "Q1.pulses.carrier",
             PulseSpec(ch=0, nqz=1, freq=100.0, gain=0.5, waveform=path),
         )
@@ -139,7 +143,7 @@ def test_library_mutation_refreshes_ref_and_explicit_inline_tab_cfg(
         leaves = {tuple(item["path"]): item["value"] for item in before["values"]}
         assert leaves[inline_path] == 0.75
         fx.ctrl.context_control.apply_library_change(
-            fx.ctrl.context_control.read_context(),
+            capture_focus(fx.ctrl.context_control),
             LibraryChange(
                 kind,
                 "rename" if action == "rename" else "delete",
@@ -156,7 +160,7 @@ def test_library_mutation_refreshes_ref_and_explicit_inline_tab_cfg(
             raise TypeError("Expected captured library")
         keys = captured.module_keys() if kind == "module" else captured.waveform_keys()
         assert path in keys
-        current = fx.ctrl.context_control.read_context().library
+        current = capture_focus(fx.ctrl.context_control).library
         current_keys = (
             current.module_keys() if kind == "module" else current.waveform_keys()
         )

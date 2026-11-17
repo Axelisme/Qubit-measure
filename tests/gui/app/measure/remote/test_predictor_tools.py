@@ -52,7 +52,7 @@ def simulator(qapp, tmp_path: Path):
 
 def prepare_files(controller: Controller) -> Path:
     """Create synthetic v2 predictor sources in an opened entry without a point."""
-    controller.setup_control.new_entry(EntryRequest("queries"))
+    controller.entry_control.new_entry(EntryRequest("queries"))
     entry = controller.context_control.get_entry_info()
     assert entry is not None
     directory = entry.result_path / "predictors"
@@ -409,7 +409,7 @@ def test_mcp_discovery_errors_and_file_sources_follow_the_opened_entry(
                 {"method": "predictor.info", "params": {"filename": "missing.json"}},
             )
         assert missing.value.reason == "predictor_file_unavailable"
-        controller.setup_control.new_entry(EntryRequest("another"))
+        controller.entry_control.new_entry(EntryRequest("another"))
         assert invoke("rpc_call", {"method": "predictor.list_files"}) == {"files": []}
         entry = controller.context_control.get_entry_info()
         assert entry is not None

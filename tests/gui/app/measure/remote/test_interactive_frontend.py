@@ -22,6 +22,7 @@ from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_types import CommandOrigin, PointCreateRequest
 from zcu_tools.resources.entry import component_registry
 
+from tests.gui._context_reads import capture_focus
 from tests.gui.app.measure._components import register_all as register_components
 from tests.gui.app.measure._record_support import require_record
 from tests.resources.entry.fakes import registry_state, restore_registry
@@ -45,13 +46,20 @@ def mounted_fx(qapp, tmp_path):
         register_components(component_registry)
         fixture = InteractiveFixture(project_root=str(tmp_path))
         fixture.ctrl.context_control.add_component(
-            "R1", "resonator", {"freq": 4500.0, "kappa": 1.0}
+            "R1",
+            "resonator",
+            {"freq": 4500.0, "kappa": 1.0},
+            point=fixture.ctrl.context_control.current_point_label(),
         )
         fixture.ctrl.context_control.add_component(
-            "Q1", "qubit/fluxonium", {"resonator": "R1"}
+            "Q1",
+            "qubit/fluxonium",
+            {"resonator": "R1"},
+            point=fixture.ctrl.context_control.current_point_label(),
         )
         fixture.ctrl.context_control.apply_alias_rows(
-            (AliasRow("qubit", "Q1"), AliasRow("resonator", "$qubit.resonator"))
+            (AliasRow("qubit", "Q1"), AliasRow("resonator", "$qubit.resonator")),
+            point=fixture.ctrl.context_control.current_point_label(),
         )
         fixture.state.set_context(
             replace(fixture.state.session_env, soc=None, soccfg=None)
@@ -579,7 +587,7 @@ def test_mounted_equal_seed_done_failure_preserves_editor_then_recovers(
     mounted_fx,
 ) -> None:
     fx, window = mounted_fx
-    parameters = fx.ctrl.context_control.read_context()
+    parameters = capture_focus(fx.ctrl.context_control)
     fx.ctrl.context_control.set_parameter(parameters.target, "Q1.flux_half", 0.0)
     fx.ctrl.context_control.set_parameter(parameters.target, "Q1.flux_int", 0.0)
     tab_id, token, widget = start_mounted(fx, window, "synthetic/magnitude")

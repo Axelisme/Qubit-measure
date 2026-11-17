@@ -396,7 +396,7 @@ Adapter 的儀器值只讀 `req.run_result.metadata`，frame 只讀同次 Run �
 Metadata 缺 device_snapshot key 或該值為 null 時，adapter 記 `logging.warning("no device snapshot")` 並省略 record proposal。
 其他 parameter/module proposals 保留。空 snapshot dict 表示已知沒有連線裝置。
 Frame 有 period 但 snapshot 缺值的儀器不貢獻，period 保留。明寫無效或 bool 值時，writer 以 `ValueError` 指名 device。
-此檢查不查 setup、不讀 live 值，也不限制原始量測 Save。未校準 frame 合法。
+此檢查不查目前參數文件、不讀 live 值，也不限制原始量測 Save。未校準 frame 合法。
 記錄 append 到 `entry.records(target)` 的 `records/components/<target>.jsonl`。
 這個目錄與 `records/ledger.jsonl` 的事件信封分開，不讀舊 samples 路徑。
 

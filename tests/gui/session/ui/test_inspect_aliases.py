@@ -23,7 +23,6 @@ from qtpy.QtWidgets import (
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_control import ContextControlPort
-from zcu_tools.gui.session.context_types import PointUseRequest
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.state import SessionState
 from zcu_tools.gui.session.types import SessionEnv
@@ -33,6 +32,7 @@ from zcu_tools.resources.entry import ResultEntry
 from zcu_tools.resources.entry.aliases import EntryAliases
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
+from tests.gui._context_reads import capture_focus
 from tests.gui._dialog_fakes import RecordingDialogPresenter
 from tests.gui._user_input import ComponentDriver
 from tests.resources.entry.fakes import register_fakes, registry_state, restore_registry
@@ -80,10 +80,11 @@ def memory_session(qapp: QApplication, tmp_path: Path) -> Generator[_Session]:
     bus = BaseEventBus()
     service = _service(bus)
     service.install_entry(entry)
-    service.use_point(PointUseRequest("working"))
+    service.use_point("working")
     control = service
     control.apply_alias_rows(
-        (AliasRow("qubit", "Q1"), AliasRow("resonator", "$qubit.resonator"))
+        (AliasRow("qubit", "Q1"), AliasRow("resonator", "$qubit.resonator")),
+        point=control.current_point_label(),
     )
     session = _Session(control, bus)
     try:
@@ -102,8 +103,10 @@ def entry_session(qapp: QApplication, tmp_path: Path) -> Generator[_Session]:
     service = _service(bus)
     entry.new_point("working")
     service.install_entry(entry)
-    service.use_point(PointUseRequest("working"))
-    service.apply_alias_rows((AliasRow("qubit", "Q1"),))
+    service.use_point("working")
+    service.apply_alias_rows(
+        (AliasRow("qubit", "Q1"),), point=service.current_point_label()
+    )
     session = _Session(service, bus, entry, owner=service)
     try:
         yield session
@@ -124,16 +127,19 @@ def resolved_session(qapp: QApplication, tmp_path: Path) -> Generator[_Session]:
     service = _service(bus)
     service.install_entry(entry)
     control = service
-    control.use_point(PointUseRequest("working"))
-    control.add_component("R1", "fake/sensor", {})
-    control.add_component("Q1", "fake/drive/a", {"sense": "R1"})
+    control.use_point("working")
+    control.add_component("R1", "fake/sensor", {}, point=control.current_point_label())
+    control.add_component(
+        "Q1", "fake/drive/a", {"sense": "R1"}, point=control.current_point_label()
+    )
     control.apply_alias_rows(
         (
             AliasRow("qubit", "Q1"),
             AliasRow("resonator", "$qubit.sense"),
             AliasRow("flux_dev", ""),
             AliasRow("broken", "$qubit.no_such_field"),
-        )
+        ),
+        point=control.current_point_label(),
     )
     session = _Session(control, bus, entry)
     try:
@@ -209,8 +215,8 @@ def _fresh_rows(entry: ResultEntry) -> tuple[AliasRow, ...]:
     """Reopen entry in a new owner, reading only its saved aliases.yaml."""
     fresh = _service(BaseEventBus())
     fresh.install_entry(entry)
-    fresh.use_point(PointUseRequest("working"))
-    return fresh.get_alias_rows()
+    fresh.use_point("working")
+    return fresh.get_alias_rows(point=fresh.current_point_label())
 
 
 def test_alias_cell_completion_add_and_remove_write_through(
@@ -264,7 +270,7 @@ def test_external_point_switch_clears_saved_hint(entry_session, tmp_path: Path) 
     assert ui.observe(object_name="inspect.saved").text.startswith("Saved")
 
     # External actor at the public context seam, not a simulated UI operation.
-    entry_session.control.use_point(PointUseRequest("second"))
+    entry_session.control.use_point("second")
     ui.screenshot(evidence / "saved-switch-03-cleared.png")
     assert ui.observe(object_name="inspect.saved").text == ""
 
@@ -296,9 +302,9 @@ def test_clean_alias_draft_follows_selected_point(entry_session) -> None:
     entry = entry_session.entry
     assert entry is not None
     entry.new_point("other")
-    entry.save_aliases(EntryAliases(aliases={"other_alias": "R2"}), point="other")
+    entry.aliases(point="other").save(EntryAliases(aliases={"other_alias": "R2"}))
     page = _aliases_page(_open(entry_session))
-    entry_session.control.use_point(PointUseRequest("other"))
+    entry_session.control.use_point("other")
     assert _shown_rows(_table(page)) == [("other_alias", "R2")]
 
 
@@ -390,7 +396,7 @@ def test_point_switch_discards_invalid_alias_input(
         "Q1", "not a name", object_name="inspect.aliases.table", column="Value"
     )
     assert ui.observe(object_name="inspect.aliases.error").text
-    entry_session.control.use_point(PointUseRequest("second"))
+    entry_session.control.use_point("second")
     ui.screenshot(
         Path(os.environ.get("INSPECT_IMPLICIT_EVIDENCE", str(tmp_path)))
         / "aliases-switch-discards-invalid.png"
@@ -419,7 +425,9 @@ def test_each_invalid_alias_row_is_marked(memory_session, tmp_path: Path) -> Non
     rows = ui.table_rows(object_name="inspect.aliases.table")
     assert rows[0].tooltips[1]
     assert rows[1].tooltips[1]
-    assert memory_session.control.get_alias_rows() == (
+    assert memory_session.control.get_alias_rows(
+        point=memory_session.control.current_point_label()
+    ) == (
         AliasRow("qubit", "Q1"),
         AliasRow("resonator", "$qubit.resonator"),
     )
@@ -431,7 +439,9 @@ def test_edit_saves_to_the_opened_entry(entry_session) -> None:
     page = _aliases_page(_open(entry_session))
     _cell(_table(page), 0, 1).setText("Q2")
     assert _fresh_rows(entry) == (AliasRow("qubit", "Q2"),)
-    assert entry_session.control.get_alias_rows() == (AliasRow("qubit", "Q2"),)
+    assert entry_session.control.get_alias_rows(
+        point=entry_session.control.current_point_label()
+    ) == (AliasRow("qubit", "Q2"),)
 
 
 def test_storage_error_keeps_draft_and_installed_table_for_retry(
@@ -448,7 +458,9 @@ def test_storage_error_keeps_draft_and_installed_table_for_retry(
     blocker.unlink()
     blocker.mkdir()
     value.setText("Q2")
-    assert control.get_alias_rows() == (AliasRow("qubit", "Q1"),)
+    assert control.get_alias_rows(point=control.current_point_label()) == (
+        AliasRow("qubit", "Q1"),
+    )
     assert _error(page)
     assert value.text() == "Q2"
 
@@ -457,7 +469,9 @@ def test_storage_error_keeps_draft_and_installed_table_for_retry(
     blocker.write_bytes(original)
     value.setText("Q3")
     value.setText("Q2")
-    assert control.get_alias_rows() == (AliasRow("qubit", "Q2"),)
+    assert control.get_alias_rows(point=control.current_point_label()) == (
+        AliasRow("qubit", "Q2"),
+    )
     assert _error(page) == ""
     assert _fresh_rows(entry) == (AliasRow("qubit", "Q2"),)
 
@@ -478,7 +492,7 @@ def test_resolution_column_shows_owner_projection_and_read_only_cells(
         table.palette().color(QPalette.ColorRole.Window),
         0.42,
     )
-    error = control.read_context().resolved_aliases()[3].error
+    error = capture_focus(control).resolved_aliases()[3].error
     assert error is not None
     assert broken.text() == error
     assert broken.toolTip() == error
@@ -524,7 +538,9 @@ def test_read_only_locks_alias_writes_but_keeps_the_table_readable(
         assert _button(page, name).isEnabled(), name
     assert table.editTriggers() != QAbstractItemView.EditTrigger.NoEditTriggers
     _cell(table, 0, 1).setText("Q2")
-    assert control.get_alias_rows()[0] == AliasRow("qubit", "Q2")
+    assert control.get_alias_rows(point=control.current_point_label())[0] == AliasRow(
+        "qubit", "Q2"
+    )
 
 
 def test_alias_resolution_error_uses_table_theme(resolved_session, window_palette):
@@ -535,6 +551,6 @@ def test_alias_resolution_error_uses_table_theme(resolved_session, window_palett
     broken = _cell(table, 3, 2)
     assert (
         broken.text()
-        == resolved_session.control.read_context().resolved_aliases()[3].error
+        == capture_focus(resolved_session.control).resolved_aliases()[3].error
     )
     assert broken.foreground().color() == error_colour(table)

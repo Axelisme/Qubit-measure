@@ -6,13 +6,15 @@ import pytest
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.session.aliases import AliasRow
-from zcu_tools.gui.session.context_types import SavedPoint
+from zcu_tools.gui.session.context_types import DocumentSetRef
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.state import SessionState
 from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.gui.session.value_lookup import MissingValue
 from zcu_tools.resources.entry import ResultEntry
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
+
+from tests.gui._context_reads import capture_focus
 
 
 @pytest.fixture
@@ -38,9 +40,9 @@ def test_alias_edit_without_entry_rejects_without_retaining_the_request(
 ) -> None:
     rows = (AliasRow("qubit", "Q2"), AliasRow("resonator", "$qubit.resonator"))
     with pytest.raises(FailedPreconditionError) as failure:
-        control.apply_alias_rows(rows)
+        control.apply_alias_rows(rows, point=control.current_point_label())
     assert failure.value.reason_code == "no_context"
-    assert control.get_alias_rows() == ()
+    assert control.get_alias_rows(point=control.current_point_label()) == ()
     assert control.get_entry_info() is None
     assert control.get_source_binding() is None
 
@@ -64,21 +66,21 @@ def test_rejected_alias_submission_preserves_the_authored_table(
         )
     )
     original = (AliasRow("qubit", "Q1"), AliasRow("resonator", "$qubit.resonator"))
-    control.apply_alias_rows(original)
+    control.apply_alias_rows(original, point=control.current_point_label())
     with pytest.raises(InvalidInputError) as caught:
-        control.apply_alias_rows(rows)
+        control.apply_alias_rows(rows, point=control.current_point_label())
     assert caught.value.reason_code == "alias_invalid"
-    assert control.get_alias_rows() == original
+    assert control.get_alias_rows(point=control.current_point_label()) == original
 
 
 def test_empty_owner_capture_and_write_fail_explicitly(
     control: ContextService,
 ) -> None:
     with pytest.raises(FailedPreconditionError) as capture:
-        control.read_context()
+        capture_focus(control)
     assert capture.value.reason_code == "no_context"
     with pytest.raises(FailedPreconditionError) as write:
         control.set_parameter(
-            SavedPoint(entry_name="entry", point="a"), "Q1.rate", 4300.0
+            DocumentSetRef(entry_name="entry", point="a"), "Q1.rate", 4300.0
         )
     assert write.value.reason_code == "no_entry"

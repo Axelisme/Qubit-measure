@@ -13,8 +13,8 @@ from zcu_tools.gui.form import (
     FormState,
 )
 from zcu_tools.gui.session.aliases import AliasRow
-from zcu_tools.gui.session.context_types import SavedPoint
-from zcu_tools.gui.session.parameters import ParameterContext
+from zcu_tools.gui.session.context_types import DocumentSetRef
+from zcu_tools.gui.session.parameters import DocumentSetCapture
 from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
 from zcu_tools.resources.entry.schema import ParameterDocument, ParameterGeneral
 
@@ -38,7 +38,7 @@ class NamesForm(FormModel):
 @pytest.fixture
 def name_env() -> FormEnv:
     """Capture authored aliases without requiring devices or live sources."""
-    context = ParameterContext(
+    context = DocumentSetCapture(
         point=ParameterDocument(
             format="zcu.parameter-container",
             format_version="2.0",
@@ -48,7 +48,7 @@ def name_env() -> FormEnv:
         library=LibrarySnapshot(
             ModuleLibraryDocument(format="zcu.module-library", format_version="2.0")
         ),
-        target=SavedPoint(entry_name="entry", point="synthetic"),
+        target=DocumentSetRef(entry_name="entry", point="synthetic"),
         roles=None,
         storage=None,
     ).bind_aliases((AliasRow("device", "yoko1"), AliasRow("unbound", "")), {})

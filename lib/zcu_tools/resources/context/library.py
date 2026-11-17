@@ -1,4 +1,4 @@
-"""Point-local persistent Specs, isolated snapshots and single-file edits.
+"""Global and point persistent Specs, isolated snapshots and single-file edits.
 
 Library paths are concrete component.partition.name roots. Partitions are
 pulses/readout/reset for modules and waveforms for envelopes. No role expansion,
@@ -14,6 +14,7 @@ from copy import deepcopy
 from pathlib import Path
 from types import TracebackType
 from typing import Literal
+from weakref import WeakKeyDictionary
 
 from pydantic import (
     BaseModel,
@@ -42,7 +43,12 @@ from zcu_tools.cfg_model import (
 )
 from zcu_tools.format_version import FormatVersion, YamlMap, YamlValue
 
-from ..document_store import DocumentChange, DocumentRevision, DocumentValue
+from ..document_store import (
+    DocumentChange,
+    DocumentRevision,
+    DocumentStore,
+    DocumentValue,
+)
 from ..projection import typed_projection, typed_summary
 
 MODULE_LIBRARY_FORMAT = "zcu.module-library"
@@ -590,8 +596,24 @@ class LibraryEdit:
         self._install(candidate.document())
 
 
+# The entry package query cannot access protected members under Pyright or add a
+# public revision query; this weak table shares the store assigned only in __init__.
+_library_stores: WeakKeyDictionary[
+    ModuleLibrary, DocumentStore[ModuleLibraryDocument]
+] = WeakKeyDictionary()
+
+
+def library_revision(library: ModuleLibrary) -> DocumentRevision:
+    """Return the installed library bytes' revision without reading disk.
+
+    Used by resources.entry.document_revision for the library owner adapter.
+    Missing libraries have revision=None until a refresh or edit installs bytes.
+    """
+    return _library_stores[library].document_revision
+
+
 class ModuleLibrary:
-    """Point-local DocumentStore handle; no live store or mutable cfg is exposed.
+    """Global or point DocumentStore handle; no mutable cfg is exposed.
 
     Snapshot is memory-only. edit/refresh use the existing single-file
     optimistic transaction and publication contract, never multi-file atomicity.
@@ -617,16 +639,12 @@ class ModuleLibrary:
         from .library_store import open_library_store
 
         self._store = open_library_store(self._path, allow_absent=allow_absent)
+        _library_stores[self] = self._store
 
     @property
     def source_path(self) -> Path:
         """Return the absolute library.yaml path for external watchers."""
         return self._path
-
-    @property
-    def document_revision(self) -> DocumentRevision:
-        """Return the installed library bytes' version without disk I/O."""
-        return self._store.document_revision
 
     def snapshot(self) -> LibrarySnapshot:
         """Return an isolated copy of the published document, without file I/O or notice."""

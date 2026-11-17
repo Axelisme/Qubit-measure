@@ -12,7 +12,6 @@ from pydantic import TypeAdapter, ValidationError
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.session.aliases import AliasRow
-from zcu_tools.gui.session.context_types import SavedPoint
 from zcu_tools.gui.session.library_entry import LibraryEntryInvalid
 from zcu_tools.gui.session.value_lookup import MissingValue, ValueInfo
 from zcu_tools.resources.entry import document_value
@@ -32,8 +31,8 @@ def h_context_aliases_set(
 
     Each row has exactly alias (string) and value (AliasValue) fields.
     Ordered lists use JSON arrays, never an encoded string. The owner validates the
-    whole table, saves the selected point's aliases.yaml atomically, then
-    installs/publishes it. No selected point raises no_context before I/O.
+    whole table, saves the focused global/point aliases.yaml atomically, then
+    installs/publishes it. No opened entry raises no_context before I/O.
     Input/storage failures preserve the previous table. Return installed
     authored rows without resolving them; success does not imply resolvability.
     No dialog, selection, other point-container or ledger effects.
@@ -62,11 +61,15 @@ def h_context_aliases_set(
             ) from error
         rows.append(AliasRow(alias, binding))
     check_writer_revision(adapter, "aliases", params)
-    adapter.context_control.apply_alias_rows(tuple(rows))
+    adapter.context_control.apply_alias_rows(
+        tuple(rows), point=adapter.context_control.current_point_label()
+    )
     return {
         "rows": [
             {"alias": row.alias, "value": row.value}
-            for row in adapter.context_control.get_alias_rows()
+            for row in adapter.context_control.get_alias_rows(
+                point=adapter.context_control.current_point_label()
+            )
         ]
     }
 
@@ -74,7 +77,7 @@ def h_context_aliases_set(
 def h_context_set_parameter(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
-    """Set one concrete path at the currently selected point, preserving metadata.
+    """Set one concrete path at the focused global/point target, preserving metadata.
 
     Fix the target and before value with one pre-write capture. Missing/null
     request values are rejected by the method entry; nested YAML null is valid.
@@ -97,7 +100,9 @@ def h_context_set_parameter(
             ErrorCode.INVALID_PARAMS, f"invalid parameter value: {exc}"
         ) from exc
     check_writer_revision(adapter, "parameters", params)
-    capture = adapter.context_control.read_context()
+    capture = adapter.context_control.read_context(
+        point=adapter.context_control.current_point_label()
+    )
     target = capture.target
     if target is None:
         raise FailedPreconditionError(
@@ -179,7 +184,7 @@ def h_context_active(
     del params
     parameters = adapter.ctrl.get_session_env().parameters
     target = parameters.target if parameters is not None else None
-    return {"label": target.point if isinstance(target, SavedPoint) else None}
+    return {"label": target.point if target is not None else None}
 
 
 def h_context_snapshot(
@@ -200,7 +205,9 @@ def h_context_snapshot(
     PRECONDITION_FAILED/unserializable_context, never null or empty substitution.
     This read does not establish a per-connection mutation baseline.
     """
-    parameters = adapter.context_control.read_context()
+    parameters = adapter.context_control.read_context(
+        point=adapter.context_control.current_point_label()
+    )
     try:
         path = params.get("path")
         # Let the selected owner report an invalid path before reading reply siblings.

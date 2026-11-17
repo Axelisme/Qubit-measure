@@ -152,7 +152,7 @@ def build_server(config: MCPBridgeConfig, repo_root: Path) -> ReadonlyServer:
             "entry": {"type": "string", "description": "Existing Result entry name"},
             "component": {
                 "type": "string",
-                "description": "Fluxonium setup component; defaults to qubit alias",
+                "description": "Fluxonium global component; defaults to qubit alias",
             },
         }
     )

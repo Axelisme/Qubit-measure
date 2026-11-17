@@ -35,6 +35,7 @@ from zcu_tools.gui.session.parameter_capture import capture_parameters
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.program.v2.sweep import SweepCfg
 
+from tests.gui._context_reads import capture_focus
 from tests.gui.app.measure._flux_adapter import (
     SpectrumAdapter,
     SpectrumAdapter_make_interactive_frontend,
@@ -84,7 +85,7 @@ def load_native_spectrum(
     fx: InteractiveFixture, tab_id: str, path: Path, result: SpectrumResult
 ) -> None:
     """Write and publicly load history captured from the current session source."""
-    parameters = fx.ctrl.context_control.read_context()
+    parameters = capture_focus(fx.ctrl.context_control)
     assert parameters is not None
     storage = parameters.capture_storage()
     cfg = SpectrumCfg()
@@ -150,7 +151,7 @@ def start_mounted(
     # result publication and writeback must all use their production seams.
     run_result = RunRecord(cfg=None, result=SpectrumResult(devs, freqs, signals))
     if native_source is None:
-        parameters = fx.ctrl.context_control.read_context()
+        parameters = capture_focus(fx.ctrl.context_control)
         commit_run(
             fx.state,
             tab_id,
@@ -181,6 +182,7 @@ def start_interactive(fx, *, background=None):
     devs = np.linspace(-5.0, 5.0, 60)
     freqs = np.linspace(4.0, 5.0, 30)
     signals = np.exp(-(devs[:, None] ** 2)) * np.ones((1, 30))
+    captured = capture_focus(fx.ctrl.context_control)
     commit_run(
         fx.state,
         tab_id,
@@ -189,10 +191,8 @@ def start_interactive(fx, *, background=None):
                 None,
                 SpectrumResult(devs, freqs, np.asarray(signals, dtype=np.complex128)),
             ),
-            storage=None
-            if fx.ctrl.context_control.read_context() is None
-            else fx.ctrl.context_control.read_context().storage,
-            parameters=fx.ctrl.context_control.read_context(),
+            storage=captured.storage,
+            parameters=captured,
         ),
     )
     plots = Plots(NonPresentingHost())

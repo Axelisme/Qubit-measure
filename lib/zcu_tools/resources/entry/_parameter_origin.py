@@ -1,4 +1,4 @@
-"""Captured point location and clone checks; no view methods or identity table."""
+"""Captured parameter location and clone checks; no view methods or identity table."""
 
 from __future__ import annotations
 
@@ -7,11 +7,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .points import PointView
+    from .parameter_view import ParameterView
 
 
 @dataclass(frozen=True)
-class PointOrigin:
+class ParameterOrigin:
     """Owning identity and output configuration bound when constructing a view.
 
     source is the bound parameters.yaml path.
@@ -25,7 +25,7 @@ class PointOrigin:
     database_root: Path
 
 
-def clone_source(view: PointView, *, result_root: Path) -> PointOrigin:
+def clone_source(view: ParameterView, *, result_root: Path) -> ParameterOrigin:
     """Return this view's constructor identity if the Result root matches.
 
     Root mismatch raises ValueError without I/O. The caller reloads the published
@@ -33,9 +33,9 @@ def clone_source(view: PointView, *, result_root: Path) -> PointOrigin:
     or destination identity is used to invent an origin.
     """
     # Import at use time: views owns bindings and imports the identity type.
-    from .views import point_origin
+    from .views import parameter_origin
 
-    origin = point_origin(view)
+    origin = parameter_origin(view)
     if origin.result_root != result_root.resolve():
-        raise ValueError("PointView result roots do not match")
+        raise ValueError("ParameterView result roots do not match")
     return origin

@@ -2,7 +2,7 @@
 
 The v2 pipeline tail: take the cross-spectrum selection's *selected* (flux, freq)
 points, search a precomputed fluxonium database for the best (EJ, EC, EL), record
-it on State, and export a component predictor and setup values.
+it on State, and export a component predictor and global values.
 
 Pure, Qt-free, synchronous — like every fluxdep service. The slow ``search`` is
 wrapped in a worker thread by the GUI (``ui/analyze_panel``); the remote interface
@@ -81,7 +81,7 @@ class FitExportReceipt:
     savepath is the successful predictor path, or None when predictor is skipped.
     params is (EJ, EC, EL) in GHz, preserving full precision. alignment_from names the actual calibration's
     first aligned spectrum, including an empty sampled spectrum. component and
-    analysis_id identify the setup target and appended ledger event.
+    analysis_id identify the global target and appended ledger event.
     flux_writeback reports the injected component calibration policy's outcome.
     predictor_writeback independently reports the dataset predictor outcome.
     """
@@ -141,7 +141,7 @@ def _predictor_flux(
             "No device snapshot for a multi-device component. Load native data with an acquisition snapshot.",
         )
 
-    # Dataset alignment is positive; component P1 direction applies only to setup.
+    # Dataset alignment is positive; component P1 direction applies only to global.
     devices = {
         aligned.device: DevicePeriod(
             2 * abs(aligned.flux_int - aligned.flux_half), aligned.unit
@@ -192,7 +192,7 @@ class FitService:
         """Bind the component calibration policy on State's owner thread.
 
         Composition calls this before exposing the service to callers. The
-        callback receives detached setup and native reference positions at each
+        callback receives detached global and native reference positions at each
         export; its errors propagate before output. Replaces any prior policy.
         Raises RuntimeError off-owner. Without configuration, export fails with
         export_planner_missing before output; other operations remain available.
@@ -351,13 +351,13 @@ class FitService:
     def export_params(self) -> str | None:
         """Return the predictor path after export_params_receipt completes.
 
-        Returns None when the predictor is skipped; setup and ledger still write.
-        Uses the same setup/ledger writes and partial-failure contract.
+        Returns None when the predictor is skipped; global and ledger still write.
+        Uses the same global/ledger writes and partial-failure contract.
         """
         return self.export_params_receipt().savepath
 
     def export_params_receipt(self) -> FitExportReceipt:
-        """Write predictor JSON, declared setup fields, then analysis evidence.
+        """Write predictor JSON, declared global fields, then analysis evidence.
 
         Uses the opened entry and selected fluxonium component. Calibration is
         the first aligned spectrum, including zero-point sources. Predictor v2
@@ -377,7 +377,7 @@ class FitService:
         Declared EJ/EC/EL and the injected planner's component-relative calibration
         fields still write on a skip; component offset policy is unchanged.
         The planner receives
-        the setup projection and native integer/half positions before any output.
+        the global projection and native integer/half positions before any output.
         Missing fit, stale inputs, missing alignment, no entry or an unconfigured
         planner fail before output I/O. Planner errors also precede output I/O.
         Writes are sequential, not a cross-file transaction. I/O/schema failure
@@ -406,8 +406,8 @@ class FitService:
             )
 
         target = require_target(self._state.project)
-        target.resource.setup.refresh()
-        model = snapshot(target.resource.setup).components[target.component]
+        target.resource.parameters().refresh()
+        model = snapshot(target.resource.parameters()).components[target.component]
         if self._export_planner is None:
             raise FailedPreconditionError(
                 "Component export planner is not configured",
@@ -446,7 +446,7 @@ class FitService:
             "EC": EC,
             "EL": EL,
         }
-        with target.resource.setup.edit() as draft:
+        with target.resource.parameters().edit() as draft:
             for field, value in values.items():
                 if field in type(model).model_fields:
                     draft.set(f"{target.component}.{field}", value)

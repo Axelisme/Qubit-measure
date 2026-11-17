@@ -22,7 +22,7 @@ def add_analysis_entry_cli_options(parser: argparse.ArgumentParser) -> None:
         "--component",
         type=str,
         default=None,
-        help="Fluxonium component; omission uses setup qubit alias",
+        help="Fluxonium component; omission uses global qubit alias",
     )
 
 

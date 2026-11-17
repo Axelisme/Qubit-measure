@@ -6,7 +6,7 @@ from types import MappingProxyType
 
 from pydantic import BaseModel
 
-from ._point_origin import PointOrigin
+from ._parameter_origin import ParameterOrigin
 from .errors import RoleResolutionError
 from .registry import RoleSpec, component_registry
 from .schema import ComponentSchema
@@ -16,7 +16,7 @@ from .views import ComponentView
 class RoleView:
     """Fixed role-to-component names and values bound to one owning point.
 
-    Obtain this view through PointView.resolve. Component values follow that
+    Obtain this view through ParameterView.resolve. Component values follow that
     point; resolved names and constructor origin never follow another selection.
     Declared but unbound roles raise RoleResolutionError on getattr and hasattr;
     this ValueError is not treated as a missing attribute. Unknown attributes
@@ -31,7 +31,7 @@ class RoleView:
         components: Mapping[str, str],
         component: Callable[[str], ComponentView],
         *,
-        origin: PointOrigin,
+        origin: ParameterOrigin,
         roles: Mapping[str, RoleSpec] | Sequence[str] | None,
         focus: str | None,
     ) -> None:
@@ -39,11 +39,11 @@ class RoleView:
 
         components maps declared role names to concrete component names.
         component reads/edits that same point; unknown names raise AttributeError.
-        origin is its immutable PointOrigin, not an inferred callback identity.
-        roles is the same ordered declaration passed to PointView.resolve;
+        origin is its immutable ParameterOrigin, not an inferred callback identity.
+        roles is the same ordered declaration passed to ParameterView.resolve;
         None uses the registered notebook shorthand. focus is that call\'s
         component name or None. These fix unbound-role error context without
-        rerunning inference. PointView.resolve supplies all inputs.
+        rerunning inference. ParameterView.resolve supplies all inputs.
         """
         self._origin = origin
         self._declarations = _declarations(roles, focus, {})
@@ -76,10 +76,12 @@ class RoleView:
         return self._component(name)
 
 
-def capture_role_components(roles: RoleView, origin: PointOrigin) -> Mapping[str, str]:
+def capture_role_components(
+    roles: RoleView, origin: ParameterOrigin
+) -> Mapping[str, str]:
     """Copy fixed names for a RoleView from this complete point origin.
 
-    Entry-internal helper, not a package export. roles comes from PointView.resolve;
+    Entry-internal helper, not a package export. roles comes from ParameterView.resolve;
     origin is the destination point's constructor location. Compare resolved
     source and both owning roots, not UUID or handle/callback identity.
     Missing or mismatched origin raises ValueError even for an empty mapping.
@@ -87,7 +89,7 @@ def capture_role_components(roles: RoleView, origin: PointOrigin) -> Mapping[str
     """
     # Entry-internal metadata must not reserve another public role attribute.
     bound: object = vars(roles).get("_origin")
-    if not isinstance(bound, PointOrigin):
+    if not isinstance(bound, ParameterOrigin):
         raise ValueError("RoleView has no bound point origin")
     if (
         bound.result_root != origin.result_root

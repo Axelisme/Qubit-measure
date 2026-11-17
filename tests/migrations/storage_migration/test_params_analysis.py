@@ -111,7 +111,7 @@ def test_analysis_files_publish_typed_unknowns_and_keep_original_sections(
             assert loaded.params.stderr.Q_cap is None
             assert loaded.params.bounds == {"Q_cap": (1.0, None)}
             assert loaded.source.created_at == "2020-07-07T16:30:00+08:00"
-    doc = snapshot(entry.setup)
+    doc = snapshot(entry.parameters())
     assert document_value(doc, "Qlegacy.ext.legacy_params") == {
         "dispersive": {"timestamp": "unproven", "future": [1, None]}
     }
@@ -253,7 +253,7 @@ def test_invalid_analysis_content_stays_located_pending(
     )
     assert (
         document_value(
-            snapshot(open_entry(request_data).setup),
+            snapshot(open_entry(request_data).parameters()),
             f"Qlegacy.ext.legacy_params.{section}",
         )
         == value

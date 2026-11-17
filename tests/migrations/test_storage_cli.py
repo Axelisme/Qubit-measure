@@ -153,7 +153,7 @@ def test_cli_conflict_exits_two_with_located_diagnostic_without_writing(
             result_root=root.parent,
             database_root=tmp_path / "repo/Database",
         )
-        entry.setup.description = "Legal user edit"
+        entry.parameters().description = "Legal user edit"
     else:
         raw = json.loads(target.read_text())
         raw.pop("documents", None)

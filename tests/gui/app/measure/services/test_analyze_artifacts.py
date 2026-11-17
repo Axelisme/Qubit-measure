@@ -37,7 +37,7 @@ from zcu_tools.gui.interactive import PluginDefinition
 from zcu_tools.gui.session.adapters.manual_owner_scheduler import ManualOwnerScheduler
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.operation_handles import OperationHandles
-from zcu_tools.gui.session.parameters import ParameterContext
+from zcu_tools.gui.session.parameters import DocumentSetCapture
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.resources.entry import ArtifactKey
 
@@ -71,12 +71,12 @@ def native_session(tmp_path: Path, qapp: QApplication) -> Generator[NativeSaveSe
         yield session
 
 
-def _flux_parameters(original: ParameterContext | None = None) -> ParameterContext:
+def _flux_parameters(original: DocumentSetCapture | None = None) -> DocumentSetCapture:
     qubit = QubitSchema(kind="qubit/fluxonium", flux_half=-0.2, flux_int=0.3)
     if original is None:
         parameters = parameter_capture({"Q1": qubit})
     else:
-        parameters = ParameterContext(
+        parameters = DocumentSetCapture(
             point=original.whole_document().model_copy(
                 update={"components": {"Q1": qubit}}
             ),

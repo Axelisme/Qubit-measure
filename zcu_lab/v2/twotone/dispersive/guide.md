@@ -13,7 +13,7 @@
 ## 開始前
 
 先完成 resonator 頻率與線寬校準，以及 qubit spectroscopy、Rabi 的 x180 校準。
-在 Setup 選 entry、point，確認 `$qubit` 與 `$resonator` aliases 指向這次量測的元件。
+在 Entry 選 entry、point，確認 `$qubit` 與 `$resonator` aliases 指向這次量測的元件。
 確認 readout generator／ADC、qubit generator 與接線相符。
 量測期間 flux 保持固定，readout 與 x180 使用已完成的前置校準。
 

@@ -223,7 +223,7 @@ Fluxdep 對某個對象送階段工具，就進入該階段。Agent 不管理 op
 
 2026-10-14 使用者裁決：「mcp不要遷就gui的操作方式，能夠直接設定setup/device/inspect/...就不用打開dialog，也不要設定dialog focus自動跟隨」。
 
-- Setup、Device、Inspect（參數、modules、aliases）等 dialog 編輯的內容，MCP 直接以 RPC 讀寫負責保存的 owner，不經過 dialog。
+- Entry、Device、Inspect（參數、modules、aliases）等 dialog 編輯的內容，MCP 直接以 RPC 讀寫負責保存的 owner，不經過 dialog。
 - Agent 的操作不開啟 dialog，也不切換 dialog 的分頁或焦點。`dialog.screenshot` 只擷取使用者已開的 dialog 目前顯示的頁，不改畫面。
 - 本節只管 dialog。Agent 操作分頁時 GUI 跟隨的規則不變，使用者同日確認：「tab跟隨我保留」。
 

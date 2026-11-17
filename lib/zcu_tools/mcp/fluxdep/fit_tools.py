@@ -210,12 +210,12 @@ def build_fit_tools(bridge: McpBridge) -> ToolTable:
         bridge.config.tool_prefix + "fit_export_params": {
             "handler": export_params,
             "description": (
-                "Write predictors/<component>.json and declared setup fields in "
+                "Write predictors/<component>.json and declared global fields in "
                 "the opened entry, then append an analysis ledger record. "
                 "Return the predictor path (null when skipped), independent "
                 "predictor_writeback and component flux_writeback receipts, "
                 "full-precision EJ/EC/EL GHz and actual calibration source. "
-                "A skipped predictor leaves setup/ledger export available. Stale fits are refused by GUI "
+                "A skipped predictor leaves global/ledger export available. Stale fits are refused by GUI "
                 "with fit_stale. Native readiness, control and I/O failures "
                 "propagate without retry, fallback or rollback."
             ),

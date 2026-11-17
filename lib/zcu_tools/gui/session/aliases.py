@@ -62,7 +62,7 @@ def scalar_alias_bindings(
 ) -> dict[str, str]:
     """Admit scalar bindings from a fixed resolved-alias projection.
 
-    rows comes from ParameterContext.resolved_aliases(); required contains the
+    rows comes from DocumentSetCapture.resolved_aliases(); required contains the
     consumer's placeholder names. Return all resolved scalar rows, without
     mutating the projection. Required lists raise InvalidInputError before
     missing checks. Absent, unbound and failed rows count as missing.
@@ -206,7 +206,7 @@ class AliasTable:
         *,
         kind: str | None = None,
     ) -> str:
-        """Read an alias's component or device name from a fixed setup or point.
+        """Read an alias's component or device name from a fixed global or point.
 
         Concrete names need not belong to point.components or a device catalog.
         Follow only this row's earlier-row dependency chain. kind optionally

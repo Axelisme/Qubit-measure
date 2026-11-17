@@ -40,7 +40,7 @@ YAML 不是通用 environment DSL。Launcher／runtime 不辨識 FTF 欄位，�
 
 `SimulationEnvironment` 包含已綁定的 soc、匹配的 soccfg、已註冊具名裝置的 devices: DeviceManager，以及不含模型真值的公開 description。Builder 成功回傳後，caller 負責安排清理。Notebook 直接使用並清理 manager；GUI 腳本則經公開 facets 安裝 SoC 並逐一 register 已建 drivers，不把 environment manager 注入 session。GUI 只接管成功 register 的 driver，SoC 仍由 caller 擁有，不假設通用 close 方法。
 
-FTF 範例先讀相鄰 `entry-template.yaml`，建立新 entry 與 setup components。接著建立第一個 `initial` point，以 `ctx.context.apply_alias_rows` 初始化該 point 的 aliases。最後組裝環境、install SoC、register devices，GUI 即可從 New Tab 開實驗。它不依賴 `create_entry` CLI。建 entry／component 與 alias Apply 都走既有資源 owner，不由腳本自行寫 entry 檔案。
+FTF 範例先讀相鄰 `entry-template.yaml`，建立新 entry 與 global components。接著建立第一個 `initial` point，以 `ctx.context.apply_alias_rows` 初始化該 point 的 aliases。最後組裝環境、install SoC、register devices，GUI 即可從 New Tab 開實驗。它不依賴 `create_entry` CLI。建 entry／component 與 alias Apply 都走既有資源 owner，不由腳本自行寫 entry 檔案。
 
 FTF startup 呼叫 `ftf(Path(__file__).with_name("ftf.yaml"), workers=simulation_workers(os.cpu_count()), warmup=False)`，透過共用 GUI 策略保留一核，至少使用一個 worker。設定按 script 位置定位，不在啟動時做數值 warmup 或 acquire。Notebook 明示工作副本 YAML 路徑，以 `workers=max(1, (os.cpu_count() or 1) - 2), warmup=True` 保留兩核並啟動背景預編譯。指定檔缺失或無效直接報錯，不 fallback。公開 `ftf()` 預設只用一個 worker 且不預編譯，兩個 caller 各自明示成本政策。
 

@@ -224,7 +224,7 @@ def _validate_module_publication(
             "complete comparison evidence",
             "缺比較依據",
         )
-    expected = entry.module_library(
+    expected = entry.library(
         None if source.parent == source_root else source.parent.name
     ).source_path
     if publication.destination != expected:

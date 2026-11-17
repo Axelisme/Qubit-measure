@@ -13,11 +13,11 @@ from zcu_tools.gui.form import FormErrors, FormModel
 from zcu_tools.gui.session.context_types import (
     CommandOrigin,
     PointCreateRequest,
-    PointUseRequest,
 )
 from zcu_tools.gui.session.ports import OperationConflictError
 from zcu_tools.resources.entry import ResultEntry
 
+from tests.gui._context_reads import capture_focus
 from tests.program._profiles import load_soccfg
 
 from ._workflow_harness import StartHarness
@@ -49,7 +49,7 @@ def make_control(tmp_path):
     )
     entry.new_point("source", description="synthetic")
     harness.services.context.install_entry(entry)
-    harness.services.context.use_point(PointUseRequest("source"))
+    harness.services.context.use_point("source")
 
     from zcu_tools.experiment.simulation import white_noise
 
@@ -116,7 +116,7 @@ def test_same_name_tabs_keep_independent_drafts_and_close_without_session_shutdo
     assert control.close(two)
     assert control.tabs() == ()
     assert harness.state.session_env.soc is not None
-    assert harness.services.context.read_context().capture_storage().point == "source"
+    assert capture_focus(harness.services.context).capture_storage().point == "source"
     # Closing the last borrower does not stop admission on the session runner.
     third = control.open("synthetic")
     token = control.start(third, RUN_ID)
@@ -177,7 +177,7 @@ def test_prepare_forms_recaptures_after_terminal_without_losing_authored_draft(
             "next", description="new source", origin=CommandOrigin("gui")
         )
     )
-    harness.services.context.use_point(PointUseRequest("next"))
+    harness.services.context.use_point("next")
     assert control.form_env(tab, "tunables") is old
     control.prepare_forms(tab)
     refreshed = control.form_env(tab, "tunables")

@@ -11,7 +11,6 @@ from zcu_tools.gui.app.measure.remote import ControlOptions, RemoteControlAdapte
 from zcu_tools.gui.app.measure.state import State
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.remote.errors import RemoteError
-from zcu_tools.gui.session.context_types import PointUseRequest
 from zcu_tools.mcp.measure.session import GuiRpcError
 from zcu_tools.resources.entry import ResultEntry
 
@@ -41,7 +40,7 @@ def answering_client(qapp, tmp_path):
     )
     entry.new_point("source", description="synthetic")
     controller.session_services.context.install_entry(entry)
-    controller.session_services.context.use_point(PointUseRequest("source"))
+    controller.session_services.context.use_point("source")
     board = white_noise(load_soccfg(), std_adc=1.0, seed=None, routes=((0, 0),))
     controller.session_services.soc_connection.install_soc(board.soc, board.soccfg)
     control = controller.workflow_control()

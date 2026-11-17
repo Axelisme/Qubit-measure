@@ -13,6 +13,7 @@ from zcu_tools.mcp.measure.recipe_api import RecipeSession, recipe
 from zcu_tools.mcp.measure.session import GuiRpcError
 from zcu_tools.plotting.plots import Plots
 
+from tests.gui._context_reads import capture_focus
 from tests.gui.app.measure._synthetic import (
     SampleAdapter,
     SampleAnalysis,
@@ -146,7 +147,7 @@ def test_updates_reach_owner_and_done_resumes_same_recipe_before_writeback_answe
     fx.registry.register("synthetic/recipe-picker", RecipePicker)
     fx.view.interactive_presentation.return_value = None
     context = fx.ctrl.context_control
-    captured = context.read_context()
+    captured = capture_focus(context)
     assert captured is not None
     context.set_parameter(captured.target, "general.ext.recipe_half", 0.0)
 
@@ -193,7 +194,7 @@ def test_updates_reach_owner_and_done_resumes_same_recipe_before_writeback_answe
     question = status["pending_question"]
     items = question["question"]["proposal"]["items"]
     assert items[0]["value"] == 1.25
-    before_answer = context.read_context()
+    before_answer = capture_focus(context)
     assert before_answer is not None
     assert before_answer.lookup("general.ext.recipe_half").value == 0.0
     completed = call(
@@ -206,6 +207,6 @@ def test_updates_reach_owner_and_done_resumes_same_recipe_before_writeback_answe
     )
     assert completed["status"] == "completed"
     assert completed["report"] == {"half": 1.25, "written": 1}
-    after_answer = context.read_context()
+    after_answer = capture_focus(context)
     assert after_answer is not None
     assert after_answer.lookup("general.ext.recipe_half").value == 1.25

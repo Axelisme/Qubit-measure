@@ -12,7 +12,6 @@ from zcu_tools.gui.session.context_types import (
     EntryRequest,
     PointBindingError,
     PointCreateRequest,
-    PointUseRequest,
 )
 
 if TYPE_CHECKING:
@@ -58,7 +57,7 @@ def h_entry_list(
 
     params is empty. Owner discovery/schema/I/O failures propagate.
     """
-    return {"entries": list(adapter.ctrl.setup_control.list_entries(refresh=True))}
+    return {"entries": list(adapter.ctrl.entry_control.list_entries(refresh=True))}
 
 
 def h_entry_info(
@@ -72,7 +71,7 @@ def h_entry_info(
     Paths are absolute owner paths converted to strings. File revisions describe
     installed bytes, not unvalidated disk edits. No I/O or implicit refresh occurs.
     """
-    info = adapter.ctrl.setup_control.get_entry_info()
+    info = adapter.ctrl.entry_control.get_entry_info()
     return {
         "entry": _entry_projection(info) if info is not None else None,
         "files": [
@@ -89,7 +88,7 @@ def h_entry_info(
 def h_entry_new(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> PointEntry:
-    """Create required string name through SetupControlPort and leave point unselected.
+    """Create required string name through EntryControlPort and leave point unselected.
 
     Return the exact EntryInfo fields with path strings. Invalid wire types
     raise INVALID_PARAMS. Owner name/existence/I/O errors propagate and preserve
@@ -99,14 +98,14 @@ def h_entry_new(
     name = params.get("name")
     if not isinstance(name, str):
         raise RemoteError(ErrorCode.INVALID_PARAMS, "'name' must be a string")
-    info = adapter.ctrl.setup_control.new_entry(EntryRequest(name))
+    info = adapter.ctrl.entry_control.new_entry(EntryRequest(name))
     return _entry_projection(info)
 
 
 def h_entry_open(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> PointEntry:
-    """Open required string name through SetupControlPort and leave point unselected.
+    """Open required string name through EntryControlPort and leave point unselected.
 
     Return the exact EntryInfo fields with path strings. Invalid wire types
     raise INVALID_PARAMS. Owner invalid/missing/I/O/install errors propagate and
@@ -115,7 +114,7 @@ def h_entry_open(
     name = params.get("name")
     if not isinstance(name, str):
         raise RemoteError(ErrorCode.INVALID_PARAMS, "'name' must be a string")
-    info = adapter.ctrl.setup_control.open_entry(EntryRequest(name))
+    info = adapter.ctrl.entry_control.open_entry(EntryRequest(name))
     return _entry_projection(info)
 
 
@@ -198,11 +197,11 @@ def h_point_new(
     same-entry clone_from label; other modes reject clone_from.
     Return {entry_name, point}. Malformed wire input is INVALID_PARAMS.
     Unsafe destination labels raise the owner's typed input error, projected by
-    shared dispatch as INVALID_PARAMS with reason point_label_invalid. Setup and
+    shared dispatch as INVALID_PARAMS with reason point_label_invalid. Global and
     clone rejection precedes source reads/writes and preserves selection/files.
     Existing destinations raise the owner's typed input error, projected as
     INVALID_PARAMS with the original exists message and no structured data.
-    Collision rejection preserves selection/files for setup and clone alike.
+    Collision rejection preserves selection/files for global inheritance and clone alike.
     Owner no_entry/schema/source/other I/O failures retain their classification.
     Created-but-uninstalled PointBindingError becomes CONTROLLER_ERROR with
     reason point_binding_failed and data entry_name/point/created=True. Keep the
@@ -261,10 +260,7 @@ def h_point_use(
     if "label" not in params:
         raise RemoteError(ErrorCode.INVALID_PARAMS, "missing 'label'")
     label = params["label"]
-    if label is None:
-        target = adapter.context_control.use_global()
-        return {"entry_name": target.entry_name, "point": None}
-    if not isinstance(label, str):
+    if label is not None and not isinstance(label, str):
         raise RemoteError(ErrorCode.INVALID_PARAMS, "'label' must be a string or null")
-    point = adapter.context_control.use_point(PointUseRequest(label))
+    point = adapter.context_control.use_point(label)
     return {"entry_name": point.entry_name, "point": point.point}

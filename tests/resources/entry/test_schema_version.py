@@ -60,7 +60,7 @@ def test_runtime_hint_targets_whole_entry(
             )
     else:
         with pytest.raises(ValueError, match="schema_version missing") as error:
-            entry.use_point(point)
+            entry.parameters(point)
     preview, apply = str(error.value).splitlines()[-2:]
     assert split(preview.removeprefix("Preview: "))[-1] == str(entry.result_path)
     assert split(apply.removeprefix("Apply: "))[-2:] == [
@@ -80,7 +80,7 @@ def test_create_edit_seed_and_clone_use_caller_schema_version(
             result_root=entry.result_path.parent,
             database_root=entry.database_path.parent,
         )
-        created.setup.add_component("S1", kind="fake/sensor")
+        created.parameters().add_component("S1", kind="fake/sensor")
         created.new_point("seed")
         created.new_point("clone", mode="clone", clone_from="seed")
         for path in (

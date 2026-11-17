@@ -137,7 +137,7 @@ def upgrade_document(
 class UpgradeSource:
     """One exact YAML path and its optional caller-supplied point label.
 
-    path identifies a setup, point, template or another component document.
+    path identifies a global, point, template or another component document.
     point is display-only context; None denotes no point label. No discovery or
     lab shape is inferred from either field. Relative paths use the current cwd.
     """
@@ -296,7 +296,7 @@ def main(argv: Sequence[str] | None = None, *, plan: UpgradePlan | None = None) 
 
     argv selects file paths, --scope components (default), records or filenames,
     and optional --apply; None reads process arguments. Components also accept entry directories,
-    expanded by the entry owner to setup, all point YAML files and predictors/*.json.
+    expanded by the entry owner to global, all point YAML files and predictors/*.json.
     Predictor v1-to-v2 uses the resources owner, separately from the component plan.
     Non-entry directories raise argparse SystemExit(2). Components require a
     caller-owned plan. Filenames accepts entry roots or exact old file paths,

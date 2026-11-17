@@ -488,7 +488,7 @@ class DocumentStore[T: BaseModel]:
         path names the document, not its directory. model is the BaseModel class
         for its full shape, including format and format_version fields. format
         is the exact artifact identifier in the YAML header, e.g.
-        "zcu.parameter-container" for setup/point, not a kind name or "yaml".
+        "zcu.parameter-container" for global/point, not a kind name or "yaml".
         supported_version sets the accepted major/current minor. Future minor
         fields survive round-trip; only extra=allow models expose them in snapshots.
 

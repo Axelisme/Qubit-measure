@@ -1,6 +1,6 @@
 # `zcu_tools.gui` — GUI framework cheat-sheet
 
-**Last updated:** 2026-10-30
+**Last updated:** 2026-11-17
 
 **讀者：** framework-dev。共用 GUI 層、app 邊界與生命週期速查。
 
@@ -59,7 +59,7 @@ write controls and pushes availability into existing and new tabs/views. Domain
 busy/valid gates and pure viewing remain separate. Local modal dialogs refuse
 owner acquisition with `local_busy` and "Local 使用中" on the Qt owner turn.
 Choosers use non-native presentation so Qt can detect them. Dialogs do not
-subscribe to authority or recheck holder after choices. Measure Setup, Inspect,
+subscribe to authority or recheck holder after choices. Measure Entry, Inspect,
 Device and ARB windows receive read-only state on open and on control transfers.
 Local restores editing without overriding busy/valid gates.
 Only Measure experiment, embedded workflow and device Stop reclaim
@@ -172,26 +172,26 @@ hints, placeholders and decoration stay unselectable.
 
 ## Entry selection
 
-Measure 的 shared SetupDialog 使用 `ProjectSettingsService` 開啟或建立 Result Entry，
+Measure 的 shared EntryDialog 使用 `ProjectSettingsService` 開啟或建立 Result Entry，
 再透過 ContextService 選取或建立 Working Point。Entry discovery 由 resources owner
 列出含 parameters.yaml 的條目，普通查詢重用 cache，明確 refresh 才重讀。開啟 entry
 不自選 point，不連硬體，也不從 chip／qubit／resonator 名稱推導路徑。
 
 Fluxdep／dispersive 的 `AnalysisEntry`、`AnalysisTarget`、`EntryDialog`、
 entry CLI 與 RPC 投影由 [`app.analysis_project`](app/analysis_project/README.md)
-擁有。它開啟既有 entry，從 setup 選 fluxonium component，不使用 chip／qubit
+擁有。它開啟既有 entry，從 global 選 fluxonium component，不使用 chip／qubit
 兩級目錄或 params.json。分析 app 不執行 Database Save。
 Measure 的 entry binding 仍由 session 擁有。共用 GUI 不依賴此分析 owner。
 
 ## Shared session dialogs (`session/ui/`)
 
-`SetupDialog`、`InspectDialog`、`ArbWaveformDialog`、`DeviceDialog` 與
+`EntryDialog`、`InspectDialog`、`ArbWaveformDialog`、`DeviceDialog` 與
 `PredictorDialog` 由 shared session UI 擁有，依賴各 domain 的窄 control facet。
 `session/ui/alias_panel.py` 的 AliasPanel 是共用 Inspect 的 Aliases 頁，編輯元件與 device
 共用的有序 alias 表；沒有獨立的 Aliases 對話框或入口。
-Apply 要求已選 point，先驗表，再由 entry owner 原子保存該 point 的 `aliases.yaml`，成功後才安裝 memory 並發布 fact。
-空表也會保存。失敗保留舊表、舊檔與 draft。切 point 載入該 point 的表，缺檔就是空表，不回退 setup 或 caller preset。
-Inspect 的 clean draft 隨切換換表。Dirty draft 固定來源 entry／point，跨 target 拒絕 Apply；Revert 載入目前 point 的表。
+Apply 要求已開啟 entry，先驗表，再由 entry owner 原子保存所選 Destination 的 `aliases.yaml`，成功後才安裝 memory 並發布 fact。
+空表也會保存。失敗保留舊表、舊檔與 draft。切 point 載入該 point 的表，缺檔就是空表，不回退 global 或 caller preset。
+Inspect 的 clean draft 隨切換換表。Dirty draft 固定來源 entry／point，跨 target 拒絕 Apply；Revert 載入所選 Destination 的表。
 未存 draft 在關閉 Inspect 時走 Save／Discard／Cancel。
 App 保留 dialog lifecycle 與呈現政策，shared dialog 不反向 import app。
 

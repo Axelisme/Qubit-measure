@@ -177,7 +177,7 @@ def test_default_waveforms_publish_with_canonical_keys_and_only_unknown_raw(
     report = _convert(request, default_mapping)
     entry = _entry(request)
     point = "context" if label else None
-    library = entry.module_library(point).snapshot()
+    library = entry.library(point).snapshot()
     assert set(library.waveform_keys()) == planned
     for key, length in (
         ("Q1.waveforms.mist_waveform", 1.0),
@@ -186,7 +186,7 @@ def test_default_waveforms_publish_with_canonical_keys_and_only_unknown_raw(
         ("R1.waveforms.ro_waveform", 4.0),
     ):
         assert library.get_waveform(key).length == length
-    view = entry.setup if point is None else entry.use_point(point)
+    view = entry.parameters() if point is None else entry.parameters(point)
     assert document_value(snapshot(view), "Q1.module") == {
         "x180": "Q1.pulses.pi_amp",
         "x90": "Q1.pulses.pi2_amp",
@@ -223,7 +223,7 @@ def test_pi_scalars_deduplicate_only_their_explicit_candidate_and_report_actual_
     report = _convert(request, default_mapping)
     entry = _entry(request)
     point = "context" if label else None
-    library = entry.module_library(point)
+    library = entry.library(point)
     for result in (dry, report):
         assert not [item for item in result.pending if item.source == source]
         rows = {
@@ -238,7 +238,7 @@ def test_pi_scalars_deduplicate_only_their_explicit_candidate_and_report_actual_
             assert row.library_kind == "module"
             assert row.source_keys == (key,)
             assert library.snapshot().value(leaf) == _SCALARS[key]
-    view = entry.setup if point is None else entry.use_point(point)
+    view = entry.parameters() if point is None else entry.parameters(point)
     assert document_value(snapshot(view), "Q1.ext") == {}
     # The runtime lock protects reads too; only its empty bytes are stable.
     sidecar = lock_path_for(library.source_path)
@@ -264,7 +264,7 @@ def test_pi_scalars_deduplicate_only_their_explicit_candidate_and_report_actual_
 
 
 @pytest.mark.parametrize(
-    "mode", ["different", "failed", "missing", "no-library", "setup-only"]
+    "mode", ["different", "failed", "missing", "no-library", "global-only"]
 )
 def test_unmatched_pi_scalars_keep_original_values_in_their_context(
     request_data: MigrationRequest, default_mapping: MigrationMapping, mode: str
@@ -286,14 +286,14 @@ def test_unmatched_pi_scalars_keep_original_values_in_their_context(
         # Another candidate in the same slot must not swallow the source values.
         modules["pi_len"] = _pulse(0.8, {"style": "const", "length": 9.0})
         modules["pi2_len"] = _pulse(0.9, {"style": "const", "length": 8.0})
-    if mode == "setup-only":
+    if mode == "global-only":
         _library(write_meta(request, "", {}), _payload())
     source = write_meta(request, "exps/context", values)
-    if mode not in ("no-library", "setup-only"):
+    if mode not in ("no-library", "global-only"):
         _library(source, payload)
     dry = _convert(replace(request, dry_run=True), default_mapping)
     report = _convert(request, default_mapping)
-    view = _entry(request).use_point("context")
+    view = _entry(request).parameters("context")
     ext = document_value(snapshot(view), "Q1.ext")
     assert ext == values
     for result in (dry, report):

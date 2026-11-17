@@ -14,18 +14,16 @@ from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_types import (
     CommandOrigin,
     ContextSourceBinding,
+    DocumentSetRef,
     EntryInfo,
     PointBindingError,
     PointCreateRequest,
-    PointUseRequest,
-    SavedEntry,
-    SavedPoint,
 )
 from zcu_tools.gui.session.events import (
     AliasesChangedPayload,
     ContextSwitchedPayload,
 )
-from zcu_tools.gui.session.parameters import ParameterContext
+from zcu_tools.gui.session.parameters import DocumentSetCapture
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.state import SessionState
 from zcu_tools.gui.session.types import ContextReadiness, SessionEnv
@@ -39,6 +37,7 @@ from zcu_tools.resources.entry.aliases import EntryAliases
 from zcu_tools.resources.parameter_schema import ParameterSchemaPolicy
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
+from tests.gui._context_reads import capture_focus
 from tests.resources.entry.fakes import (
     register_fakes,
     registry_state,
@@ -53,41 +52,41 @@ def test_new_rejects_incompatible_mode_and_source_before_reads(
     rich_entry: ResultEntry, context: ContextService, mode, clone
 ) -> None:
     context.install_entry(rich_entry)
-    before = context.read_context().target
+    before = capture_focus(context).target
     with pytest.raises(InvalidInputError):
         context.new_point(
             PointCreateRequest("rejected", "", CommandOrigin("gui"), clone, mode=mode)
         )
-    assert context.read_context().target == before
+    assert capture_focus(context).target == before
     assert context.list_points(refresh=True) == ()
 
 
 def test_new_empty_does_not_inherit_global_values(
     rich_entry: ResultEntry, context: ContextService
 ) -> None:
-    rich_entry.save_aliases(EntryAliases(aliases={"driver": "Q1"}))
-    with rich_entry.module_library().edit() as draft:
+    rich_entry.aliases().save(EntryAliases(aliases={"driver": "Q1"}))
+    with rich_entry.library().edit() as draft:
         draft.set_waveform("Q1.waveforms.base", ConstWaveformCfg(length=0.1))
     context.install_entry(rich_entry)
     context.new_point(
         PointCreateRequest("blank", "fresh", CommandOrigin("gui"), mode="empty")
     )
 
-    capture = context.read_context()
+    capture = capture_focus(context)
     assert capture.whole_document().components == {}
     assert capture.whole_document().general.description == "fresh"
     assert capture.library.waveform_keys() == ()
-    assert context.get_alias_rows() == ()
+    assert context.get_alias_rows(point=context.current_point_label()) == ()
     assert [file.revision for file in context.get_file_revisions()][1:] == [None, None]
 
 
 def test_open_entry_captures_global_parameters_library_aliases_and_storage(
     rich_entry: ResultEntry, context: ContextService
 ) -> None:
-    rich_entry.save_aliases(EntryAliases(aliases={"driver": "Q1"}))
+    rich_entry.aliases().save(EntryAliases(aliases={"driver": "Q1"}))
     context.install_entry(rich_entry)
 
-    capture = context.read_context()
+    capture = capture_focus(context)
 
     assert capture.value("$driver.rate") == 4300.0
     assert capture.target is not None and capture.target.point is None
@@ -103,11 +102,13 @@ def test_open_entry_captures_global_parameters_library_aliases_and_storage(
     ]
 
 
+@pytest.mark.parametrize("explicit_none", [False, True], ids=["omitted", "none"])
 def test_point_and_global_switch_whole_sets_before_publishing_and_keep_captures(
     rich_entry: ResultEntry,
+    explicit_none: bool,
 ) -> None:
-    rich_entry.save_aliases(EntryAliases(aliases={"driver": "Q1"}))
-    with rich_entry.module_library().edit() as draft:
+    rich_entry.aliases().save(EntryAliases(aliases={"driver": "Q1"}))
+    with rich_entry.library().edit() as draft:
         draft.set_waveform("Q1.waveforms.base", ConstWaveformCfg(length=0.1))
     point = rich_entry.new_point("local", mode="empty")
     point.add_component("Q2", kind="fake/drive/a", rate=5200.0, sense="R2")
@@ -125,23 +126,26 @@ def test_point_and_global_switch_whole_sets_before_publishing_and_keep_captures(
                 tuple(file.path.parent for file in context.get_file_revisions()),
             )
         )
-        assert context.read_context().target is not None
+        assert capture_focus(context).target is not None
 
     subscription = bus.subscribe(ContextSwitchedPayload, switched)
     try:
         context.install_entry(rich_entry)
-        global_capture = context.read_context()
-        context.use_point(PointUseRequest("local"))
-        local_capture = context.read_context()
+        global_capture = capture_focus(context)
+        context.use_point("local")
+        local_capture = capture_focus(context)
         assert local_capture.value("Q2.rate") == 5200.0
         assert local_capture.library.waveform_keys() == ()
         with pytest.raises(RoleResolutionError):
             local_capture.value("Q1.rate")
         with pytest.raises(RoleResolutionError):
             local_capture.value("$driver")
-        context.use_global()
-        assert context.read_context().value("$driver.rate") == 4300.0
-        assert context.read_context().library.waveform_keys() == ("Q1.waveforms.base",)
+        if explicit_none:
+            context.use_point(None)
+        else:
+            context.use_point()
+        assert capture_focus(context).value("$driver.rate") == 4300.0
+        assert capture_focus(context).library.waveform_keys() == ("Q1.waveforms.base",)
         assert global_capture.value("Q1.rate") == 4300.0
         assert local_capture.value("Q2.rate") == 5200.0
         assert context.capture_storage(local_capture).point == "local"
@@ -163,7 +167,7 @@ def test_global_preparation_failure_keeps_selected_point_and_publishes_no_fact(
     bus = BaseEventBus()
     context = ContextService(state, bus, bind_assets=ArbWaveformDatabase.info_at)
     context.install_entry(rich_entry)
-    target = context.use_point(PointUseRequest("local"))
+    target = context.use_point("local")
     before = context.get_session_env()
     binding = context.get_source_binding()
     revisions = context.get_file_revisions()
@@ -174,9 +178,9 @@ def test_global_preparation_failure_keeps_selected_point_and_publishes_no_fact(
         path = rich_entry.result_path / "library.yaml"
         path.write_text("[invalid yaml", encoding="utf-8")
         with pytest.raises((ValueError, YAMLError)):
-            context.use_global()
+            context.use_point(None)
         assert context.get_session_env() is before
-        assert context.read_context().target == target
+        assert capture_focus(context).target == target
         assert context.get_source_binding() == binding
         assert context.get_file_revisions() == revisions
         assert state.version.get("context") == version
@@ -187,7 +191,7 @@ def test_global_preparation_failure_keeps_selected_point_and_publishes_no_fact(
 
 def test_current_point_label_for_storage_free_content_has_no_persistent_point() -> None:
     state = SessionState(
-        SessionEnv(parameters=ParameterContext.empty(), soc=None, soccfg=None)
+        SessionEnv(parameters=DocumentSetCapture.empty(), soc=None, soccfg=None)
     )
     owner = ContextService(
         state, BaseEventBus(), bind_assets=ArbWaveformDatabase.info_at
@@ -203,7 +207,7 @@ def test_current_point_label_follows_selection_without_refreshing_files(
     context.install_entry(rich_entry)
     assert context.current_point_label() is None
 
-    context.use_point(PointUseRequest("selected"))
+    context.use_point("selected")
     rich_entry.result_path.rename(rich_entry.result_path.with_name("offline"))
     assert context.current_point_label() == "selected"
 
@@ -223,8 +227,8 @@ def test_point_capture_reads_good_leaf_with_bad_sibling(
     before = path.read_bytes()
     context.install_entry(rich_entry)
 
-    context.use_point(PointUseRequest("partial"))
-    parameters = context.read_context()
+    context.use_point("partial")
+    parameters = capture_focus(context)
 
     assert parameters.value("Q1.rate") == 4300.0
     with pytest.raises(ValueError, match="Q1.sense"):
@@ -253,10 +257,10 @@ def test_point_availability_accepts_parseable_partial_components_and_isolates_ba
     assert rows["partial"].error is None
     assert not rows["unparseable"].available
     assert rows["unparseable"].error
-    context.use_point(PointUseRequest("partial"))
-    assert context.read_context().value("Q1.rate") == 4300.0
+    context.use_point("partial")
+    assert capture_focus(context).value("Q1.rate") == 4300.0
     with pytest.raises(ValueError, match="Q1.sense"):
-        context.read_context().value("Q1.sense")
+        capture_focus(context).value("Q1.sense")
 
 
 class Assets:
@@ -302,9 +306,11 @@ def registry_guard(request: pytest.FixtureRequest) -> Generator[None]:
 def rich_entry(tmp_path: Path) -> ResultEntry:
     entry = _entry(tmp_path)
     for name, rate, sense in (("Q1", 4300.0, "R1"), ("Q2", 5100.0, "R2")):
-        entry.setup.add_component(name, kind="fake/drive/a", rate=rate, sense=sense)
+        entry.parameters().add_component(
+            name, kind="fake/drive/a", rate=rate, sense=sense
+        )
     for name in ("R1", "R2"):
-        entry.setup.add_component(name, kind="fake/sensor", rate=6500.0)
+        entry.parameters().add_component(name, kind="fake/sensor", rate=6500.0)
     return entry
 
 
@@ -335,7 +341,7 @@ def _new_request(label: str, *, clone: str | None = None) -> PointCreateRequest:
 
 def _entry_command(context: ContextService, command: str, entry_name: str) -> object:
     if command == "use":
-        return context.use_point(PointUseRequest("new"))
+        return context.use_point("new")
     if command == "new":
         return context.new_point(PointCreateRequest("new", "", CommandOrigin("gui")))
     return context.entry_ledger(entry_name)
@@ -352,20 +358,21 @@ def test_global_alias_changes_install_before_the_fact_and_reject_invalid_batches
     observed: list[tuple[tuple[AliasRow, ...], int]] = []
 
     def on_aliases(event: AliasesChangedPayload) -> None:
-        assert service.get_alias_rows() == event.rows
+        assert service.get_alias_rows(point=service.current_point_label()) == event.rows
         observed.append((event.rows, state.version.snapshot().get("context", 0)))
 
     bus.subscribe(AliasesChangedPayload, on_aliases)
     rows = (AliasRow("driver", "Q1"), AliasRow("sense", "$driver.sense"))
-    service.apply_alias_rows(rows)
+    service.apply_alias_rows(rows, point=service.current_point_label())
     assert observed == [(rows, version + 1)]
     with pytest.raises(InvalidInputError):
         service.apply_alias_rows(
-            (AliasRow("driver", "Q2"), AliasRow("sense", "$sense.sense"))
+            (AliasRow("driver", "Q2"), AliasRow("sense", "$sense.sense")),
+            point=service.current_point_label(),
         )
-    assert service.get_alias_rows() == rows
+    assert service.get_alias_rows(point=service.current_point_label()) == rows
     assert state.version.snapshot().get("context") == version + 1
-    service.apply_alias_rows(rows)
+    service.apply_alias_rows(rows, point=service.current_point_label())
     assert observed == [(rows, version + 1)]
     assert state.version.snapshot().get("context") == version + 1
 
@@ -376,22 +383,24 @@ def test_current_alias_captures_follow_point_and_rows_but_prior_capture_stays_fi
 ) -> None:
     context.install_entry(rich_entry)
     target = context.new_point(_new_request("first"))
-    assert context.get_alias_rows() == ()
+    assert context.get_alias_rows(point=context.current_point_label()) == ()
     context.apply_alias_rows(
-        (AliasRow("driver", "Q1"), AliasRow("sense", "$driver.sense"))
+        (AliasRow("driver", "Q1"), AliasRow("sense", "$driver.sense")),
+        point=context.current_point_label(),
     )
-    first = context.read_context()
+    first = capture_focus(context)
     assert first is not None
     context.set_parameter(target, "Q1.rate", 4400.0)
-    current = context.read_context()
+    current = capture_focus(context)
     assert current is not None
     assert first.value("$driver.rate") == 4300.0
     assert current.value("$driver.rate") == 4400.0
     context.new_point(_new_request("second"))
     context.apply_alias_rows(
-        (AliasRow("driver", "Q2"), AliasRow("sense", "$driver.sense"))
+        (AliasRow("driver", "Q2"), AliasRow("sense", "$driver.sense")),
+        point=context.current_point_label(),
     )
-    second = context.read_context()
+    second = capture_focus(context)
     assert second is not None
     assert second.value("$driver.rate") == 5100.0
     assert first.target == target
@@ -415,24 +424,28 @@ def test_one_run_target_resolves_dependencies_without_changing_global_rows_or_ve
     context.install_entry(rich_entry)
     context.new_point(_new_request("first"))
     context.apply_alias_rows(
-        (AliasRow("driver", ""), AliasRow("sense", "$driver.sense"))
+        (AliasRow("driver", ""), AliasRow("sense", "$driver.sense")),
+        point=context.current_point_label(),
     )
-    before = context.get_alias_rows()
+    before = context.get_alias_rows(point=context.current_point_label())
     version = state.version.snapshot()
-    temporary = context.read_context(aliases={"driver": "Q2"})
+    temporary = context.read_context(
+        aliases={"driver": "Q2"}, point=context.current_point_label()
+    )
     assert temporary is not None
     assert temporary.value("$driver.rate") == 5100.0
     assert temporary.roles is not None
     assert temporary.roles.names == {"driver": "Q2", "sense": "R2"}
     assert temporary.capture_storage().roles == temporary.roles.names
-    assert context.get_alias_rows() == before
+    assert context.get_alias_rows(point=context.current_point_label()) == before
     assert state.version.snapshot() == version
-    current = context.read_context()
+    current = capture_focus(context)
     assert current is not None
     assert current.roles is not None
     assert current.roles.names == {}
     context.apply_alias_rows(
-        (AliasRow("driver", "Q1"), AliasRow("sense", "$driver.sense"))
+        (AliasRow("driver", "Q1"), AliasRow("sense", "$driver.sense")),
+        point=context.current_point_label(),
     )
     assert temporary.value("$driver.rate") == 5100.0
 
@@ -445,10 +458,12 @@ def test_bad_one_run_target_keeps_the_global_table(
 ) -> None:
     context.install_entry(rich_entry)
     context.new_point(_new_request("first"))
-    before = context.get_alias_rows()
+    before = context.get_alias_rows(point=context.current_point_label())
     with pytest.raises((InvalidInputError, RoleResolutionError)):
-        context.read_context(aliases={"driver": target}).value("$driver.rate")
-    assert context.get_alias_rows() == before
+        context.read_context(
+            aliases={"driver": target}, point=context.current_point_label()
+        ).value("$driver.rate")
+    assert context.get_alias_rows(point=context.current_point_label()) == before
 
 
 def test_historical_target_reads_keep_resolved_alias_names_when_point_links_change(
@@ -458,9 +473,10 @@ def test_historical_target_reads_keep_resolved_alias_names_when_point_links_chan
     context.install_entry(rich_entry)
     target = context.new_point(_new_request("first"))
     context.apply_alias_rows(
-        (AliasRow("driver", "Q1"), AliasRow("sense", "$driver.sense"))
+        (AliasRow("driver", "Q1"), AliasRow("sense", "$driver.sense")),
+        point=context.current_point_label(),
     )
-    captured = context.read_context()
+    captured = capture_focus(context)
     assert captured is not None
     fixed_names = captured.roles
     assert fixed_names is not None
@@ -468,7 +484,7 @@ def test_historical_target_reads_keep_resolved_alias_names_when_point_links_chan
     context.set_parameter(target, "Q1.sense", "R2")
     historical = context.read_target(target, roles=fixed_names)
     assert historical.resolve_path("$sense.rate") == "R1.rate"
-    current = context.read_context()
+    current = capture_focus(context)
     assert current is not None
     assert current.resolve_path("$sense.rate") == "R2.rate"
     assert captured.value("$driver.sense") == "R1"
@@ -479,7 +495,9 @@ def test_temporary_aliases_require_parameter_context(
     rich_entry: ResultEntry,
 ) -> None:
     with pytest.raises(FailedPreconditionError) as caught:
-        context.read_context(aliases={"driver": "Q1"})
+        context.read_context(
+            aliases={"driver": "Q1"}, point=context.current_point_label()
+        )
     assert caught.value.reason_code == "no_context"
 
 
@@ -489,11 +507,13 @@ def test_parameter_write_preserves_global_aliases(
 ) -> None:
     context.install_entry(rich_entry)
     target = context.new_point(_new_request("a"))
-    context.apply_alias_rows((AliasRow("driver", "Q1"),))
-    rows = context.get_alias_rows()
+    context.apply_alias_rows(
+        (AliasRow("driver", "Q1"),), point=context.current_point_label()
+    )
+    rows = context.get_alias_rows(point=context.current_point_label())
     context.set_parameter(target, "Q1.rate", 4500.0)
-    assert context.get_alias_rows() == rows
-    assert context.read_context().value("Q1.rate") == 4500.0
+    assert context.get_alias_rows(point=context.current_point_label()) == rows
+    assert capture_focus(context).value("Q1.rate") == 4500.0
 
 
 def test_empty_queries_have_no_entry_point_or_component_selection(
@@ -503,14 +523,14 @@ def test_empty_queries_have_no_entry_point_or_component_selection(
     assert not context.is_active_context()
     assert context.get_entry_info() is None
     assert context.list_points() == ()
-    assert context.get_alias_rows() == ()
+    assert context.get_alias_rows(point=context.current_point_label()) == ()
 
 
 def test_empty_read_rejects_instead_of_returning_default_parameters(
     context: ContextService,
 ) -> None:
     with pytest.raises(FailedPreconditionError) as error:
-        context.read_context()
+        capture_focus(context)
     assert error.value.reason_code == "no_context"
 
 
@@ -597,7 +617,7 @@ def test_install_entry_isolates_bad_point_parameters_without_reading_other_files
         assert points["bad"].available
         assert points["bad"].error is None
         with pytest.raises(ValueError, match=reason):
-            snapshot(entry.use_point("bad"))
+            snapshot(entry.parameters("bad"))
     else:
         assert not points["bad"].available
         assert points["bad"].error is not None
@@ -613,8 +633,8 @@ def test_install_entry_isolates_bad_point_parameters_without_reading_other_files
         (entry.result_path / "library.yaml").read_bytes()
     )
     (entry.result_path / "points/good/aliases.yaml").unlink()
-    context.use_point(PointUseRequest("good"))
-    assert context.read_context().whole_document().general.description == "usable point"
+    context.use_point("good")
+    assert capture_focus(context).whole_document().general.description == "usable point"
 
 
 def test_use_point_detaches_capture_and_uses_same_entry_library(
@@ -624,16 +644,16 @@ def test_use_point_detaches_capture_and_uses_same_entry_library(
     first = entry.new_point("first", description="first point")
     entry.new_point("second", description="second point")
     context.install_entry(entry)
-    target = context.use_point(PointUseRequest("first"))
-    capture = context.read_context()
-    assert target == SavedPoint(entry_name=entry.result_path.name, point="first")
+    target = context.use_point("first")
+    capture = capture_focus(context)
+    assert target == DocumentSetRef(entry_name=entry.result_path.name, point="first")
     assert capture.whole_document().general.description == "first point"
     with first.edit() as edit:
         edit.general.description = "changed outside publication"
-    context.use_point(PointUseRequest("second"))
+    context.use_point("second")
     assert capture.whole_document().general.description == "first point"
     assert capture.target == target
-    assert context.read_context().whole_document().general.description == "second point"
+    assert capture_focus(context).whole_document().general.description == "second point"
     assert context.get_session_env().readiness is ContextReadiness.POINT
     assert {point.label: point.description for point in context.list_points()} == {
         "first": "first point",
@@ -661,11 +681,11 @@ def test_failed_point_read_keeps_previous_capture(
     entry = _entry(tmp_path)
     entry.new_point("good", description="retained")
     context.install_entry(entry)
-    before = context.use_point(PointUseRequest("good"))
+    before = context.use_point("good")
     with pytest.raises(FileNotFoundError):
-        context.use_point(PointUseRequest("missing"))
-    assert context.read_context().target == before
-    assert context.read_context().whole_document().general.description == "retained"
+        context.use_point("missing")
+    assert capture_focus(context).target == before
+    assert capture_focus(context).whole_document().general.description == "retained"
 
 
 def test_failed_entry_asset_preparation_keeps_previous_binding(tmp_path: Path) -> None:
@@ -697,14 +717,16 @@ def test_new_point_uses_seed_or_clone_and_request_description(
         edit.set("general.ext.marker", 7.0)
     context.install_entry(entry)
     target = context.new_point(_new_request("destination", clone=clone))
-    assert target == SavedPoint(entry_name=entry.result_path.name, point="destination")
-    document = context.read_context().whole_document()
+    assert target == DocumentSetRef(
+        entry_name=entry.result_path.name, point="destination"
+    )
+    document = capture_focus(context).whole_document()
     assert document.general.description == "session description"
     assert document.general.ext.get("marker") == (None if clone is None else 7.0)
     assert {point.label for point in context.list_points()} == {"source", "destination"}
 
 
-@pytest.mark.parametrize("clone", [None, "source"], ids=["setup", "clone"])
+@pytest.mark.parametrize("clone", [None, "source"], ids=["global", "clone"])
 def test_duplicate_point_is_typed_input_error_without_side_effects(
     tmp_path: Path, clone: str | None
 ) -> None:
@@ -716,8 +738,8 @@ def test_duplicate_point_is_typed_input_error_without_side_effects(
     for label in ("copy", "source"):
         entry.new_point(label, description="retained")
     service.install_entry(entry)
-    target = context.use_point(PointUseRequest("source"))
-    before = context.read_context().document()
+    target = context.use_point("source")
+    before = capture_focus(context).document()
     version = state.version.snapshot()
     ledger = entry.ledger.events()
     files = {
@@ -731,8 +753,8 @@ def test_duplicate_point_is_typed_input_error_without_side_effects(
             context.new_point(_new_request("copy", clone=clone))
         assert isinstance(caught.value, InvalidInputError)
         assert "exist" in str(caught.value)
-        assert context.read_context().target == target
-        assert context.read_context().document() == before
+        assert capture_focus(context).target == target
+        assert capture_focus(context).document() == before
         assert [point.label for point in context.list_points()] == ["copy", "source"]
         assert state.version.snapshot() == version
         assert entry.ledger.events() == ledger
@@ -781,8 +803,8 @@ def test_unsafe_point_label_is_typed_input_error_without_side_effects(
     entry = _entry(tmp_path)
     entry.new_point("source", description="retained")
     service.install_entry(entry)
-    target = context.use_point(PointUseRequest("source"))
-    before = context.read_context().document()
+    target = context.use_point("source")
+    before = capture_focus(context).document()
     version = state.version.snapshot()
     ledger = entry.ledger.events()
     files = {
@@ -797,8 +819,8 @@ def test_unsafe_point_label_is_typed_input_error_without_side_effects(
         assert isinstance(caught.value, InvalidInputError)
         assert caught.value.reason_code == "point_label_invalid"
         assert "single path component" in str(caught.value)
-        assert context.read_context().target == target
-        assert context.read_context().document() == before
+        assert capture_focus(context).target == target
+        assert capture_focus(context).document() == before
         assert [point.label for point in context.list_points()] == ["source"]
         assert state.version.snapshot() == version
         assert entry.ledger.events() == ledger
@@ -843,7 +865,7 @@ def test_entry_ledger_is_the_real_capability_and_capture_never_appends(
     ledger = context.entry_ledger(entry.result_path.name)
     assert ledger.events() == before
     context.new_point(_new_request("working"))
-    context.read_context()
+    capture_focus(context)
     assert entry.ledger.events() == before
 
 
@@ -908,7 +930,7 @@ def test_publication_facts_observe_installed_state_and_one_context_bump(
     try:
         assert state.version.get("context") == 0 and observations == []
         info = context.install_entry(rich_entry)
-        context.use_point(PointUseRequest("first"))
+        context.use_point("first")
         assert state.version.get("context") == 2
         context.new_point(_new_request("second"))
         assert state.version.get("context") == 3
@@ -922,10 +944,10 @@ def test_publication_facts_observe_installed_state_and_one_context_bump(
             assert entry_info == info
             if version == 1:
                 assert env.parameters is not None
-                assert env.parameters.target == SavedEntry(entry_name=info.name)
+                assert env.parameters.target == DocumentSetRef(entry_name=info.name)
             else:
                 assert env.parameters is not None
-                assert env.parameters.target == SavedPoint(
+                assert env.parameters.target == DocumentSetRef(
                     entry_name=info.name, point="first" if version == 2 else "second"
                 )
             assert sources is not None and sources.sources
@@ -953,11 +975,11 @@ def test_failed_preparation_keeps_binding_version_and_publishes_no_facts(
     switched = bus.subscribe(ContextSwitchedPayload, events.append)
     try:
         context.install_entry(rich_entry)
-        target = context.use_point(PointUseRequest("first"))
+        target = context.use_point("first")
         version = state.version.get("context")
         events.clear()
         with pytest.raises(FileNotFoundError):
-            context.use_point(PointUseRequest("missing"))
+            context.use_point("missing")
         assets.fail = True
         with pytest.raises(OSError, match="asset binding"):
             context.install_entry(_entry(tmp_path, "other"))
@@ -965,7 +987,7 @@ def test_failed_preparation_keeps_binding_version_and_publishes_no_facts(
             context.new_point(_new_request("retained"))
         assert events == []
         assert state.version.get("context") == version
-        assert context.read_context().target == target
+        assert capture_focus(context).target == target
         assert rich_entry.list_points() == ["first", "retained"]
     finally:
         switched.unsubscribe()

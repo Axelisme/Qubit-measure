@@ -10,6 +10,7 @@ from zcu_tools.gui.remote.errors import ErrorCode
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_types import FileRevision
 
+from tests.gui._context_reads import capture_focus
 from tests.gui.app.measure._record_support import require_target
 
 from ._point_application import PointApplication
@@ -30,9 +31,9 @@ def application_templates() -> dict[str, TemplateDef]:
 def point_files(application: PointApplication) -> dict[Document, FileRevision]:
     application.open_entry()
     control = application.controller.context_control
-    control.add_component("Q1", "fake/drive/a", {"rate": 10.0}, setup=True)
+    control.add_component("Q1", "fake/drive/a", {"rate": 10.0}, point=None)
     application.result("point.new", {"label": "base"})
-    target = require_target(control.read_context())
+    target = require_target(capture_focus(control))
     control.set_waveform(target, "Q1.waveforms.seed", ConstWaveformCfg(length=10.0))
     control.set_module(
         target,
@@ -88,13 +89,15 @@ def test_reload_installs_edited_disk_using_installed_base_revision(
     assert installed[document].revision == revision
     assert file.path.read_bytes() == candidate
     if document == "parameters":
-        assert control.read_context().lookup_point("Q1.rate").value == 20.0
+        assert capture_focus(control).lookup_point("Q1.rate").value == 20.0
     elif document == "library":
-        assert control.read_context().library.get_waveform(
+        assert capture_focus(control).library.get_waveform(
             "Q1.waveforms.seed"
         ) == ConstWaveformCfg(length=20.0)
     else:
-        assert control.get_alias_rows() == (AliasRow("driver", "Q1"),)
+        assert control.get_alias_rows(point=control.current_point_label()) == (
+            AliasRow("driver", "Q1"),
+        )
 
 
 @pytest.mark.parametrize("external_exists", [False, True])
@@ -130,10 +133,9 @@ def test_library_writer_null_checks_absence_before_first_creation(
     else:
         reply = application.rpc("context.ml_create_from_role", params)
         assert reply["ok"] is True, reply
-        assert (
-            application.controller.context_control.read_context().library.waveform_keys()
-            == ("Q1.waveforms.new",)
-        )
+        assert capture_focus(
+            application.controller.context_control
+        ).library.waveform_keys() == ("Q1.waveforms.new",)
         assert path.is_file()
 
 
@@ -181,7 +183,7 @@ def test_reload_rejects_disk_hash_instead_of_installed_base(
         "revision_mismatch",
     )
     assert (
-        application.controller.context_control.read_context()
+        capture_focus(application.controller.context_control)
         .lookup_point("Q1.rate")
         .value
         == 10.0
@@ -196,7 +198,7 @@ def test_reload_validation_failure_names_file_and_preserves_installation(
     document: Document,
 ) -> None:
     control = application.controller.context_control
-    before = control.read_context()
+    before = capture_focus(control)
     file = point_files[document]
     candidate = b"not: [valid\n"
     file.path.write_bytes(candidate)
@@ -208,9 +210,9 @@ def test_reload_validation_failure_names_file_and_preserves_installation(
     assert error["code"] == ErrorCode.INVALID_PARAMS, error
     assert str(file.path) in str(error["message"])
     assert len(str(error["message"])) > len(str(file.path))
-    assert control.read_context().document() == before.document()
-    assert control.read_context().library.document() == before.library.document()
-    assert control.get_alias_rows() == ()
+    assert capture_focus(control).document() == before.document()
+    assert capture_focus(control).library.document() == before.library.document()
+    assert control.get_alias_rows(point=control.current_point_label()) == ()
     assert control.get_file_revisions() == tuple(point_files.values())
     assert file.path.read_bytes() == candidate
 
@@ -245,7 +247,7 @@ def test_reload_entry_while_point_active_keeps_active_files_and_version(
 ) -> None:
     info = application.open_entry()
     control = application.controller.context_control
-    control.add_component("Q1", "fake/drive/a", {"rate": 10.0}, setup=True)
+    control.add_component("Q1", "fake/drive/a", {"rate": 10.0}, point=None)
     if not global_active:
         application.result("point.new", {"label": "base"})
     active_files = application.result("entry.info", {})["files"]
@@ -280,14 +282,14 @@ def test_reload_entry_while_point_active_keeps_active_files_and_version(
         "path": str(path),
         "revision": sha256(candidate).hexdigest(),
     }
-    assert control.read_context(setup=True).value("Q1.rate") == 20.0
+    assert control.read_context(point=None).value("Q1.rate") == 20.0
     if global_active:
         assert application.state.version.get("context") == version + 1
-        assert control.read_context().value("Q1.rate") == 20.0
+        assert capture_focus(control).value("Q1.rate") == 20.0
     else:
         assert application.state.version.get("context") == version
         assert application.result("entry.info", {})["files"] == active_files
-        assert control.read_context().value("Q1.rate") == 10.0
+        assert capture_focus(control).value("Q1.rate") == 10.0
 
 
 def test_reload_requires_holder_before_installing_external_edit(
@@ -303,7 +305,7 @@ def test_reload_requires_holder_before_installing_external_edit(
     )
     assert error.get("reason") == "not_holder", error
     assert (
-        application.controller.context_control.read_context()
+        capture_focus(application.controller.context_control)
         .lookup_point("Q1.rate")
         .value
         == 10.0
@@ -360,7 +362,7 @@ def test_optional_writer_revision_rejects_stale_disk_without_side_effects(
 ) -> None:
     control = application.controller.context_control
     file = point_files[document]
-    before = control.read_context()
+    before = capture_focus(control)
     candidate = external_edit(file)
     error = error_reply(
         application, method, {**params, "expected_revision": file.revision}
@@ -370,9 +372,9 @@ def test_optional_writer_revision_rejects_stale_disk_without_side_effects(
         "revision_mismatch",
     ), error
     assert file.path.read_bytes() == candidate
-    assert control.read_context().document() == before.document()
-    assert control.read_context().library.document() == before.library.document()
-    assert control.get_alias_rows() == ()
+    assert capture_focus(control).document() == before.document()
+    assert capture_focus(control).library.document() == before.library.document()
+    assert control.get_alias_rows(point=control.current_point_label()) == ()
     assert control.get_file_revisions() == tuple(point_files.values())
 
 
@@ -419,4 +421,9 @@ def test_alias_writer_explicit_null_does_not_skip_missing_file_guard(
         "revision_mismatch",
     )
     assert file.path.read_bytes() == candidate
-    assert application.controller.context_control.get_alias_rows() == ()
+    assert (
+        application.controller.context_control.get_alias_rows(
+            point=application.controller.context_control.current_point_label()
+        )
+        == ()
+    )

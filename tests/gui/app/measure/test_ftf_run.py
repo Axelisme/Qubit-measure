@@ -138,8 +138,8 @@ def ftf_window(qapp, tmp_path):
 
 def test_ftf_yaml_environment_runs_and_saves_only_public_iq(ftf_window):
     ctrl, sock = ftf_window
-    ctrl.setup_control.new_entry(EntryRequest("offline"))
-    ctrl.setup_control.new_point(PointCreateRequest("point", "", CommandOrigin("gui")))
+    ctrl.entry_control.new_entry(EntryRequest("offline"))
+    ctrl.entry_control.new_point(PointCreateRequest("point", "", CommandOrigin("gui")))
     tab = ctrl.tab_control.new_tab("ftf")
     started = call(sock, "tab.run_start", {"tab_id": tab})["result"]["operation_id"]
     # The accepted Run must settle. Cold Numba compilation can outlast the

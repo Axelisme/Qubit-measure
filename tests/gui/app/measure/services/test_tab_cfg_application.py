@@ -45,6 +45,7 @@ from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.resources.entry import ComponentSchema, component_registry
 
+from tests.gui._context_reads import capture_focus
 from tests.gui._qt_waits import qt_until
 from tests.gui.app.measure._record_support import require_target
 from tests.gui.app.measure._synthetic import SampleAdapter, SampleCfg
@@ -155,7 +156,7 @@ def test_definition_failure_does_not_publish_a_partial_tab(
 
 
 def test_source_events_leave_every_tab_capture_unchanged(application: Fixture) -> None:
-    parameters = application.ctrl.context_control.read_context()
+    parameters = capture_focus(application.ctrl.context_control)
     application.ctrl.context_control.set_parameter(
         require_target(parameters), "general.ext.x", 1.0
     )
@@ -314,18 +315,19 @@ def global_sources(
             project_root=str(tmp_path),
         )
         try:
-            services.session.setup_control.new_entry(EntryRequest("sources"))
+            services.session.entry_control.new_entry(EntryRequest("sources"))
             services.session.context.add_component(
-                "Q1", "cfg/drive", {"gain": 10.0, "module": {"x180": None}}, setup=True
+                "Q1", "cfg/drive", {"gain": 10.0, "module": {"x180": None}}, point=None
             )
             services.session.context.add_component(
-                "Q2", "cfg/drive", {"gain": 20.0}, setup=True
+                "Q2", "cfg/drive", {"gain": 20.0}, point=None
             )
             services.session.context.new_point(
                 PointCreateRequest("first", "", CommandOrigin("gui"))
             )
             services.session.context.apply_alias_rows(
-                (AliasRow("qubit", "Q1"), AliasRow("custom", "Q2"))
+                (AliasRow("qubit", "Q1"), AliasRow("custom", "Q2")),
+                point=services.session.context.current_point_label(),
             )
             yield services, state
         finally:
@@ -362,11 +364,18 @@ def test_reset_aliases_capture_once_for_run(
     services, state = global_sources
     tab_id = services.tab.new_tab("global-source")
     cfg = state.get_tab(tab_id).cfg
-    rows = services.session.context.get_alias_rows()
+    rows = services.session.context.get_alias_rows(
+        point=services.session.context.current_point_label()
+    )
     assert cfg.accept().values["gain"] == 10.0
     cfg.reset(aliases={"qubit": "Q2"})
     assert cfg.accept().values["gain"] == 20.0
-    assert services.session.context.get_alias_rows() == rows
+    assert (
+        services.session.context.get_alias_rows(
+            point=services.session.context.current_point_label()
+        )
+        == rows
+    )
     admitted = services.guard.capture_run_inputs(tab_id)
     assert admitted.snapshot is not None
     assert admitted.snapshot.roles == {"qubit": "Q2", "custom": "Q2"}
@@ -391,9 +400,10 @@ def test_existing_tab_and_run_keep_point_until_reset(
         PointCreateRequest("second", "", CommandOrigin("gui"))
     )
     services.session.context.apply_alias_rows(
-        (AliasRow("qubit", "Q1"), AliasRow("custom", "Q2"))
+        (AliasRow("qubit", "Q1"), AliasRow("custom", "Q2")),
+        point=services.session.context.current_point_label(),
     )
-    parameters = services.session.context.read_context()
+    parameters = capture_focus(services.session.context)
     services.session.context.set_parameter(require_target(parameters), "Q1.gain", 30.0)
     before_reset = services.guard.capture_run_inputs(tab_id)
     assert before_reset.accepted_cfg.values["gain"] == 10.0
@@ -416,7 +426,8 @@ def test_dollar_defaults_keep_text_and_use_fixed_alias_capture_until_reset(
     tab_id = services.tab.new_tab("global-source")
     cfg = state.get_tab(tab_id).cfg
     services.session.context.apply_alias_rows(
-        (AliasRow("qubit", "Q2"), AliasRow("custom", "Q1"))
+        (AliasRow("qubit", "Q2"), AliasRow("custom", "Q1")),
+        point=services.session.context.current_point_label(),
     )
     assert cfg.accept().values["gain"] == 10.0
     assert cfg.input.data["gain"] == {"expr": "$qubit.gain"}
@@ -437,7 +448,9 @@ def test_reset_target_capture_delivers_displayed_values_to_execution(
     cfg = state.get_tab(tab_id).cfg
     cfg.reset(aliases=None if target is None else {"qubit": target})
     original = cfg.input.data
-    rows = services.session.context.get_alias_rows()
+    rows = services.session.context.get_alias_rows(
+        point=services.session.context.current_point_label()
+    )
     admitted: list[RunInputs] = []
 
     def receive_run(
@@ -452,7 +465,12 @@ def test_reset_target_capture_delivers_displayed_values_to_execution(
     assert admitted[0].snapshot.roles == {"qubit": qubit, "custom": "Q2"}
     assert admitted[0].accepted_cfg.values["gain"] == (10.0 if target is None else 20.0)
     assert cfg.input.data == original
-    assert services.session.context.get_alias_rows() == rows
+    assert (
+        services.session.context.get_alias_rows(
+            point=services.session.context.current_point_label()
+        )
+        == rows
+    )
     cfg.write({("gain",): 15.0})
     assert admitted[0].accepted_cfg.values["gain"] == (10.0 if target is None else 20.0)
 
@@ -462,7 +480,8 @@ def test_unbound_alias_reports_named_invalid_input(
 ) -> None:
     services, state = global_sources
     services.session.context.apply_alias_rows(
-        (AliasRow("qubit", ""), AliasRow("custom", "Q2"))
+        (AliasRow("qubit", ""), AliasRow("custom", "Q2")),
+        point=services.session.context.current_point_label(),
     )
     tab_id = services.tab.new_tab("global-source")
     cfg = state.get_tab(tab_id).cfg

@@ -32,7 +32,7 @@ def migrate_storage(
     explicit key rules, disk schemas and native-tag renames; register kinds in entry's shared registry
     before calling. Values/stderr keep working units; expressions are not evaluated.
     Root/point module_cfg uses typed Spec owners and explicit module/waveform
-    rules. Root libraries belong to setup. Unsupported Specs/references remain
+    rules. Root libraries belong to global. Unsupported Specs/references remain
     located pending; no child references or asset values are inferred/evaluated.
     Component flux groups use located explicit evidence before the declared
     assumption. Point unit overrides clear unreplaced inherited group values and

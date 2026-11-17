@@ -118,7 +118,7 @@ def test_historical_library_reconstructs_eight_modules_and_four_waveforms(
     report = _convert(request, historical_mapping)
     entry = _entry(request)
     point = "context" if label else None
-    library = entry.module_library(point).snapshot()
+    library = entry.library(point).snapshot()
     assert len(library.module_keys()) == 8
     assert len(library.waveform_keys()) == 4
     pulse = library.module_spec("C1.pulses.pi_amp")
@@ -163,7 +163,7 @@ def test_historical_library_reconstructs_eight_modules_and_four_waveforms(
     assert library.get_waveform("C1.waveforms.qub_cos").length == 2.0
     assert library.get_waveform("C1.waveforms.qub_flat").length == 2.0
     assert library.get_waveform("C1.waveforms.ro_waveform").length == 5.0
-    view = entry.setup if point is None else entry.use_point(point)
+    view = entry.parameters() if point is None else entry.parameters(point)
     assert document_value(snapshot(view), "C1.module") == {
         rule.old_name: rule.target_path
         for rule in historical_mapping.module_rules
@@ -207,12 +207,12 @@ def test_module_unknown_content_is_visible_without_duplicate_converted_leaves(
     report = _convert(request, library_mapping)
     entry = _entry(request)
     point = "context" if label else None
-    library = entry.module_library(point).snapshot()
+    library = entry.library(point).snapshot()
     assert library.module_keys() == ("C1.pulses.pi",)
     assert library.value("C1.pulses.pi.desc") == "Formal description"
     assert library.value("C1.pulses.pi.mixer_freq") == 80.0
     assert library.get_module("C1.pulses.pi").type == "pulse"
-    view = entry.setup if point is None else entry.use_point(point)
+    view = entry.parameters() if point is None else entry.parameters(point)
     assert document_value(snapshot(view), "general.ext.legacy_module_cfg") == {
         "modules": {
             "same": {
@@ -257,7 +257,7 @@ def test_module_unknown_content_is_visible_without_duplicate_converted_leaves(
         ],
     )
     edited = _entry(request)
-    edited_view = edited.setup if point is None else edited.use_point(point)
+    edited_view = edited.parameters() if point is None else edited.parameters(point)
     assert document_value(snapshot(edited_view), "general.ext.legacy_module_cfg") == {
         "user": "edited"
     }
@@ -279,11 +279,11 @@ def test_supported_module_missing_required_evidence_is_pending_and_preserved(
     )
     report = _convert(request, library_mapping)
     entry = _entry(request)
-    assert document_value(snapshot(entry.setup), "general.ext") == {
+    assert document_value(snapshot(entry.parameters()), "general.ext") == {
         "legacy_module_cfg": {"modules": {"same": pulse}}
     }
-    assert entry.module_library().snapshot().module_keys() == ()
-    assert document_value(snapshot(entry.setup), "C1.module") == {}
+    assert entry.library().snapshot().module_keys() == ()
+    assert document_value(snapshot(entry.parameters()), "C1.module") == {}
     assert any(
         item.source == source
         and item.location == "modules.same"
@@ -314,14 +314,11 @@ def test_missing_discriminator_requires_complete_historical_pulse_shape(
     )
     report = _convert(request, historical_mapping)
     entry = _entry(request)
-    assert entry.module_library().snapshot().module_keys() == ("C1.pulses.pi_amp",)
-    assert (
-        entry.module_library().snapshot().module_spec("C1.pulses.pi_amp").type
-        == "pulse"
-    )
-    assert document_value(snapshot(entry.setup), "general.ext.legacy_module_cfg") == {
-        "modules": {"pi2_amp": {"waveform": "unknown"}}
-    }
+    assert entry.library().snapshot().module_keys() == ("C1.pulses.pi_amp",)
+    assert entry.library().snapshot().module_spec("C1.pulses.pi_amp").type == "pulse"
+    assert document_value(
+        snapshot(entry.parameters()), "general.ext.legacy_module_cfg"
+    ) == {"modules": {"pi2_amp": {"waveform": "unknown"}}}
     assert not any(item.source == source for item in report.pending)
 
 
@@ -352,8 +349,8 @@ def test_base_readout_frequency_agreement_controls_publication(
     report = _convert(request, historical_mapping)
     entry = _entry(request)
     expected_keys = ("C1.readout.readout_dpm",) if ro_frequency == 456.75 else ()
-    assert entry.module_library().snapshot().module_keys() == expected_keys
-    raw = document_value(snapshot(entry.setup), "general.ext")
+    assert entry.library().snapshot().module_keys() == expected_keys
+    raw = document_value(snapshot(entry.parameters()), "general.ext")
     if ro_frequency == 456.75:
         assert raw == {
             "legacy_module_cfg": {
@@ -371,7 +368,7 @@ def test_base_readout_frequency_agreement_controls_publication(
             item.source == source and "456.75" in item.reason and "123.0" in item.reason
             for item in report.pending
         )
-        assert document_value(snapshot(entry.setup), "C1.module") == {}
+        assert document_value(snapshot(entry.parameters()), "C1.module") == {}
 
 
 def test_parameters_publish_canonical_specs_references_units_and_manual_sources(
@@ -384,7 +381,7 @@ def test_parameters_publish_canonical_specs_references_units_and_manual_sources(
     original = (meta.read_bytes(), source.read_bytes())
     report = _convert(request, library_mapping)
     entry = _entry(request)
-    library = entry.module_library("context")
+    library = entry.library("context")
     snapshot = library.snapshot()
     assert library.source_path == entry.result_path / "points/context/library.yaml"
     assert snapshot.module_keys() == ("C1.pulses.pi", "C1.readout.main")
@@ -407,7 +404,7 @@ def test_parameters_publish_canonical_specs_references_units_and_manual_sources(
     assert isinstance(readout, PulseReadoutCfg)
     assert readout.freq == 123.5
     assert readout.ro_length == 2.5
-    module = entry.use_point("context").C1.module
+    module = entry.parameters("context").C1.module
     assert isinstance(module, FieldView)
     assert module.chosen == "C1.pulses.pi"
     assert entry.ledger.events() == ()
@@ -449,7 +446,7 @@ def test_parameters_keep_arb_asset_key_without_reading_or_moving_assets(
     )
     original = source.read_bytes()
     report = _convert(request, library_mapping)
-    snapshot = _entry(request).module_library("context").snapshot()
+    snapshot = _entry(request).library("context").snapshot()
     assert snapshot.entry_value("C1.waveforms.base", kind="waveform")["data"] == "same"
     with pytest.raises(ValueError, match="assets"):
         snapshot.get_waveform("C1.waveforms.base")
@@ -505,7 +502,7 @@ def test_unconvertible_entries_stay_located_pending_beside_successful_file(
     )
     original = source.read_bytes()
     report = _convert(request, mapping)
-    library = _entry(request).module_library("context").snapshot()
+    library = _entry(request).library("context").snapshot()
     assert library.module_keys() == ("C1.pulses.pi",)
     assert library.waveform_keys() == ("C1.waveforms.base",)
     pending = [item for item in report.pending if item.source == source]
@@ -515,7 +512,7 @@ def test_unconvertible_entries_stay_located_pending_beside_successful_file(
         "waveforms.expression",
     }
     raw = document_value(
-        snapshot(_entry(request).use_point("context")), "general.ext.legacy_module_cfg"
+        snapshot(_entry(request).parameters("context")), "general.ext.legacy_module_cfg"
     )
     assert raw == {
         "modules": {

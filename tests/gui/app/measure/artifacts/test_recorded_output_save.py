@@ -219,7 +219,7 @@ def test_save_uses_validated_metadata_for_output_planning(
     assert metadata_from_container(load(native)) == session.metadata
 
 
-def test_open_with_only_setup_and_points_saves_before_first_ledger_append(
+def test_open_with_only_global_and_points_saves_before_first_ledger_append(
     native_session: NativeSaveSession,
 ) -> None:
     session = native_session

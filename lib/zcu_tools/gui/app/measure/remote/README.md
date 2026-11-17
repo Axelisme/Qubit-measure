@@ -1,6 +1,6 @@
 # `gui.app.measure.remote`
 
-**Last updated:** 2026-11-16，parameter writeback create_kind
+**Last updated:** 2026-11-17，Entry 視窗識別
 
 **讀者：** framework-dev。量測 GUI 的 RPC 方法、控制權與來源投影契約。
 
@@ -37,7 +37,7 @@ Neither method returns a kind discriminator.
 
 ## Context snapshot
 
-`context.snapshot` 回傳固定 capture 的 target、point、library 與完整 aliases。Library 只投影持久 Specs，不回傳 `provenance`，也不 materialize assets。目前契約版本為 WIRE_VERSION 138、GUI_VERSION 171。133／166 涵蓋 global／point 的作用中三筆 files、EMPTY／GLOBAL／POINT readiness、point.use 的必填 nullable label 與無 kind 回覆，以及 writeback preview／receipt 只報 entry_name、point 的目的地。Entry 與 point 共用 `parameters.yaml`／`library.yaml`／`aliases.yaml`；前次檔名統一對應的版本是 132／165。
+`context.snapshot` 回傳固定 capture 的 target、point、library 與完整 aliases。Library 只投影持久 Specs，不回傳 `provenance`，也不 materialize assets。目前契約版本為 WIRE_VERSION 140、GUI_VERSION 173。Entry 視窗在 `open_dialogs` 回報 `entry`，不接受舊視窗值。Target 統一為 `{entry_name, point}`，global 的 point 是 null，不再傳 kind。Source binding 的文件種類使用 `global`、`point` 與 `module_cfg`，不接受舊種類值。MCP 的 handshake pin 直接 import 同一個 WIRE_VERSION，因此同步拒絕舊 GUI。133／166 涵蓋 global／point 的作用中三筆 files、EMPTY／GLOBAL／POINT readiness、point.use 的必填 nullable label 與無 kind 回覆，以及 writeback preview／receipt 只報 entry_name、point 的目的地。Entry 與 point 共用 `parameters.yaml`／`library.yaml`／`aliases.yaml`；前次檔名統一對應的版本是 132／165。
 
 省略 path 與 summaries 時，owner 驗證完整 schema，wire encoder 再驗證所有輸出值。`path` 使用 dotted keys 與 canonical 非負 list indices，只由 owner 讀驗所選部分，並優先於 summaries。選整個 component 或 subtree 時，該層的完整投影契約仍適用。未選 sibling 的壞 schema、nonfinite 或 library source fault 不再擋住正常 point leaf。Invalid path 保留第一個不可讀 segment，不先驗其他 sibling。
 
@@ -83,7 +83,7 @@ used by the results browser. It needs neither an opened entry nor a selected
 point and does not switch either. Missing Database returns empty runs and issues.
 Top-level issues contain `entry`, absolute `path` and `reason` for Database items
 that could not be safely enumerated. `entry` is null for a Database root error.
-Escaping paths are not followed and do not hide healthy entries. Setup and ledger
+Escaping paths are not followed and do not hide healthy entries. Global parameters and ledger
 errors stay in the affected runs' issues; failed ledgers leave runs unregistered.
 
 Each run includes opaque `key`, `entry`, historical `run_id`, `experiment`,

@@ -11,7 +11,7 @@ from zcu_tools.resources.entry import ResultEntry, snapshot
 def test_export_writes_entry_artifact_without_adding_component_fields(analysis_target):
     state = DispersiveState(analysis_target)
     state.set_disp_result(g=0.068, bare_rf=5.35, res_dim=4)
-    before = snapshot(analysis_target.resource.setup)
+    before = snapshot(analysis_target.resource.parameters())
 
     path = ExportService(state).export_params()
 
@@ -23,7 +23,7 @@ def test_export_writes_entry_artifact_without_adding_component_fields(analysis_t
     assert saved.source is not None
     assert saved.source.run_id is None
     assert saved.source.created_at is not None
-    assert snapshot(analysis_target.resource.setup) == before
+    assert snapshot(analysis_target.resource.parameters()) == before
 
 
 def test_export_updates_only_declared_component_fields(analysis_target):
@@ -42,10 +42,10 @@ def test_export_updates_only_declared_component_fields(analysis_target):
     reopened = ResultEntry.open(
         target.entry, result_root=target.result_root, database_root=target.result_root
     )
-    assert snapshot(reopened.setup).components["q2"].model_dump()["g"] == 0.068
+    assert snapshot(reopened.parameters()).components["q2"].model_dump()["g"] == 0.068
     assert (
-        snapshot(reopened.setup).components["q1"]
-        == snapshot(target.resource.setup).components["q1"]
+        snapshot(reopened.parameters()).components["q1"]
+        == snapshot(target.resource.parameters()).components["q1"]
     )
 
 

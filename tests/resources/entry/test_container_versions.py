@@ -10,9 +10,8 @@ from ruamel.yaml import YAML
 from zcu_tools.format_version import FormatError, VersionError, YamlMap
 from zcu_tools.resources.entry import (
     ComponentSchema,
-    PointView,
+    ParameterView,
     ResultEntry,
-    SetupView,
     document_meta,
     document_value,
     snapshot,
@@ -63,9 +62,9 @@ def strict_kind() -> Generator[str]:
         yield kind
 
 
-def bound_view(entry: ResultEntry, owner: str, kind: str) -> SetupView | PointView:
-    entry.setup.add_component("S1", kind=kind)
-    return entry.setup if owner == "setup" else entry.new_point("a")
+def bound_view(entry: ResultEntry, owner: str, kind: str) -> ParameterView:
+    entry.parameters().add_component("S1", kind=kind)
+    return entry.parameters() if owner == "global" else entry.new_point("a")
 
 
 def add_future_data(path: Path, location: str = "component") -> bytes:
@@ -117,7 +116,7 @@ def test_document_minor_never_relaxes_original_model_validation(
         assert document_value(validated, "S1.timing.delay") == 1.2
 
 
-@pytest.mark.parametrize("owner", ["setup", "point"])
+@pytest.mark.parametrize("owner", ["global", "point"])
 @pytest.mark.parametrize("location", ["component", "nested"])
 def test_refresh_minor_defers_forbidden_data_until_whole_projection_or_edit(
     entry: ResultEntry, owner: str, location: str, strict_kind: str
@@ -134,21 +133,21 @@ def test_refresh_minor_defers_forbidden_data_until_whole_projection_or_edit(
         snapshot(view)
     with pytest.raises(ValidationError, match="future"):
         view.S1.rate = 13.0
-    if owner == "setup":
+    if owner == "global":
         reopened = ResultEntry.open(
             "entry",
             result_root=entry.result_path.parent,
             database_root=entry.database_path.parent,
-        ).setup
+        ).parameters()
     else:
-        reopened = entry.use_point("a")
+        reopened = entry.parameters("a")
     assert reopened.S1.rate == document_value(cached, "S1.rate")
     with pytest.raises(ValidationError, match="future"):
         snapshot(reopened)
     assert path.read_bytes() == bad_bytes
 
 
-@pytest.mark.parametrize("owner", ["setup", "point"])
+@pytest.mark.parametrize("owner", ["global", "point"])
 def test_commit_rejects_latest_forbidden_minor_data_before_publication(
     entry: ResultEntry, owner: str, strict_kind: str
 ) -> None:
@@ -170,7 +169,7 @@ def test_commit_rejects_latest_forbidden_minor_data_before_publication(
     assert document_meta(snapshot(view), "S1.rate") == document_meta(cached, "S1.rate")
 
 
-@pytest.mark.parametrize("owner", ["setup", "point"])
+@pytest.mark.parametrize("owner", ["global", "point"])
 def test_minor_commit_keeps_container_unknowns_but_applies_component_extra_policy(
     entry: ResultEntry, owner: str
 ) -> None:
@@ -218,7 +217,7 @@ def test_minor_commit_keeps_container_unknowns_but_applies_component_extra_polic
             result_root=entry.result_path.parent,
             database_root=entry.database_path.parent,
         )
-        again = reloaded.setup if owner == "setup" else reloaded.use_point("a")
+        again = reloaded.parameters() if owner == "global" else reloaded.parameters("a")
         assert snapshot(again).model_dump() == snapshot(view).model_dump()
         for header, value, expected in (
             ("format", "wrong", FormatError),

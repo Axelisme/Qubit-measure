@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from types import MappingProxyType
-from typing import TYPE_CHECKING
 
 from zcu_tools.resources.document_names import PARAMETERS_FILENAME
 from zcu_tools.resources.record_table import JsonlRecordTable
@@ -15,13 +14,10 @@ from zcu_tools.resources.record_table import JsonlRecordTable
 from ._path_segments import validate_path_segment
 from .aliases import AliasValue
 from .ledger import RecordsLedger
-from .points import PointView
+from .parameter_view import ParameterView
 from .roles import RoleView, capture_role_components
 from .save_layout import SaveLayout
-from .views import point_origin
-
-if TYPE_CHECKING:
-    from .result_entry import ResultEntry
+from .views import parameter_origin
 
 
 @dataclass(frozen=True)
@@ -34,7 +30,7 @@ class StorageBinding:
     result_path and database_path are absolute entry directories, not roots.
     ledger is a RecordsLedger bound to that entry's records directory, created on first append if absent.
     roles is a detached mapping of captured aliases to scalar names or ordered lists;
-    it is empty when capture_point_storage was called without a RoleView.
+    it is empty when capture_storage was called without a RoleView.
     """
 
     entry_name: str
@@ -78,7 +74,7 @@ class RunOutputBinding:
     def prepare_ledger(self) -> RecordsLedger:
         """Create the Result output directory and bind its append-only ledger.
 
-        No setup or point is opened or manufactured. Reject a records symlink
+        No global or point is opened or manufactured. Reject a records symlink
         escaping this entry before creating directories or appending evidence.
         """
         records = self.result_path / "records"
@@ -131,33 +127,14 @@ def bind_record_table(result_path: Path, component: str) -> JsonlRecordTable:
     return JsonlRecordTable(path, component=component)
 
 
-def capture_entry_storage(entry: ResultEntry) -> StorageBinding:
-    """Capture entry-level cached description and exact persistence capabilities.
-
-    entry is an already-open ResultEntry. Capture point=None and empty roles;
-    no point, aliases or library is selected or read. Paths are absolute entry
-    directories, not roots. The description comes from entry.setup's installed
-    snapshot; no refresh, reopen, output creation or event append occurs.
-    Source validation errors propagate. No hardware is read.
-    """
-    return StorageBinding(
-        entry_name=entry.result_path.name,
-        point=None,
-        description=entry.setup.description,
-        result_path=entry.result_path.resolve(),
-        database_path=entry.database_path.resolve(),
-        ledger=entry.ledger,
-        roles=MappingProxyType({}),
-    )
-
-
-def capture_point_storage(
-    view: PointView, *, roles: RoleView | None = None
+def capture_storage(
+    view: ParameterView, roles: RoleView | None = None
 ) -> StorageBinding:
-    """Capture this bound point's identity, description and optional fixed roles.
+    """Capture a bound global/point view's identity, description and fixed roles.
 
-    roles must come from PointView.resolve on this same entry/point with the
-    same owning roots. Another handle of that point is accepted; other origins
+    A global view captures point=None; a point view captures its label.
+    roles must come from ParameterView.resolve on this same entry/point with the
+    same owning roots. Another handle of that document is accepted; other origins
     raise ValueError, including for empty roles. None captures an empty mapping.
     Names are copied without re-resolving focus, references or changed values.
     Use its constructor origin and cached snapshot, never cwd or GUI focus.
@@ -165,24 +142,29 @@ def capture_point_storage(
     RecordsLedger permits a missing records directory; other I/O errors and
     invalid source locations propagate. No hardware is read.
     """
-    origin = point_origin(view)
+    origin = parameter_origin(view)
     names = (
         MappingProxyType({})
         if roles is None
         else capture_role_components(roles, origin)
     )
     relative = origin.source.resolve().relative_to(origin.result_root)
-    if (
-        len(relative.parts) != 4
-        or relative.parts[1] != "points"
-        or relative.parts[3] != PARAMETERS_FILENAME
+    if len(relative.parts) == 2 and relative.parts[1] == PARAMETERS_FILENAME:
+        entry_name = relative.parts[0]
+        point = None
+    elif (
+        len(relative.parts) == 4
+        and relative.parts[1] == "points"
+        and relative.parts[3] == PARAMETERS_FILENAME
     ):
+        entry_name, _, point, _ = relative.parts
+        validate_path_segment(point, field="point")
+    else:
         raise ValueError(
-            f"Point origin must be <entry>/points/<point>/{PARAMETERS_FILENAME}"
+            f"Parameter origin must be <entry>/{PARAMETERS_FILENAME} "
+            f"or <entry>/points/<point>/{PARAMETERS_FILENAME}"
         )
-    entry_name, _, point, _ = relative.parts
     validate_path_segment(entry_name, field="entry_name")
-    validate_path_segment(point, field="point")
     result_path = origin.result_root / entry_name
     database_path = origin.database_root / entry_name
     return StorageBinding(

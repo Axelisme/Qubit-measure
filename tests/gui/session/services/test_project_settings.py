@@ -5,15 +5,14 @@ from pathlib import Path
 import pytest
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.session.context_types import (
+    DocumentSetRef,
     EntryRequest,
-    PointUseRequest,
-    SavedPoint,
 )
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.services.project_settings import (
     ConnectionPreferences,
+    DialogPrefill,
     ProjectSettingsService,
-    SetupPreferences,
 )
 from zcu_tools.gui.session.state import (
     SessionState,
@@ -21,6 +20,8 @@ from zcu_tools.gui.session.state import (
 from zcu_tools.gui.session.types import ContextReadiness, SessionEnv
 from zcu_tools.resources.entry import ResultEntry
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
+
+from tests.gui._context_reads import capture_focus
 
 
 @pytest.fixture
@@ -102,11 +103,11 @@ def test_open_entry_then_use_point_publishes_active_target(
     entry.new_point("working", description="saved calibration")
     info = settings.open_entry(EntryRequest("entry"))
 
-    target = context.use_point(PointUseRequest("working"))
+    target = context.use_point("working")
 
-    assert target == SavedPoint(entry_name=info.name, point="working")
+    assert target == DocumentSetRef(entry_name=info.name, point="working")
     assert state.session_env.readiness is ContextReadiness.POINT
-    assert context.read_context().target == target
+    assert capture_focus(context).target == target
     assert context.list_points()[0].description == "saved calibration"
 
 
@@ -114,14 +115,14 @@ def test_connection_and_entry_preferences_default_without_opening(
     entry_services: tuple[ProjectSettingsService, ContextService, SessionState],
 ) -> None:
     settings, _, state = entry_services
-    assert settings.get_setup_preferences() == SetupPreferences(
+    assert settings.get_dialog_prefill() == DialogPrefill(
         entry_name="", ip="192.168.10.1", port=8887
     )
 
     settings.remember_connection(ConnectionPreferences(ip="10.0.0.2", port=1234))
 
     assert state.session_env.readiness is ContextReadiness.EMPTY
-    assert settings.get_setup_preferences() == SetupPreferences(
+    assert settings.get_dialog_prefill() == DialogPrefill(
         entry_name="", ip="10.0.0.2", port=1234
     )
 

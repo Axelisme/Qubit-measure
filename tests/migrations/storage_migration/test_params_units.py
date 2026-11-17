@@ -35,12 +35,12 @@ def test_missing_units_drive_alias_and_module_scalars_remain_observable(
     write_meta(request, "", {"qub_ch": 3, "pi_gain": 0.2, "flx_half": 0.5})
     write_meta(request, "bias", {"qub_ch": 4, "qub_0_1_ch": 2, "pi2_len": 0.03})
     report = migrate(request, metadata_mapping)
-    setup = snapshot(open_entry(request).setup)
-    assert document_value(setup, "Q1.wiring") == {"ch": 3}
-    assert document_value(setup, "Q1.ext.pi_gain") == 0.2
-    assert document_value(setup, "Q1.flux_half") == 0.5
-    assert document_value(setup, "general.ext.flux_unit") == "mA"
-    point = snapshot(open_entry(request).use_point("bias"))
+    global_parameters = snapshot(open_entry(request).parameters())
+    assert document_value(global_parameters, "Q1.wiring") == {"ch": 3}
+    assert document_value(global_parameters, "Q1.ext.pi_gain") == 0.2
+    assert document_value(global_parameters, "Q1.flux_half") == 0.5
+    assert document_value(global_parameters, "general.ext.flux_unit") == "mA"
+    point = snapshot(open_entry(request).parameters("bias"))
     assert document_value(point, "Q1.wiring.ch") == 2
     assert document_value(point, "Q1.ext.pi2_len") == 0.03
     assert any("假設單位" in row.reason for row in report.key_mappings)
@@ -51,8 +51,11 @@ def test_unbound_pi_scalars_are_saved_in_component_extensions(
 ) -> None:
     write_meta(request_data, "", {"pi_gain": 0.2, "pi_len": 0.05})
     migrate(request_data, metadata_mapping)
-    setup = snapshot(open_entry(request_data).setup)
-    assert document_value(setup, "Q1.ext") == {"pi_gain": 0.2, "pi_len": 0.05}
+    global_parameters = snapshot(open_entry(request_data).parameters())
+    assert document_value(global_parameters, "Q1.ext") == {
+        "pi_gain": 0.2,
+        "pi_len": 0.05,
+    }
 
 
 def test_assumption_supplies_missing_metadata_evidence_without_changing_values(
@@ -64,13 +67,13 @@ def test_assumption_supplies_missing_metadata_evidence_without_changing_values(
     )
     write_meta(request, "", {"flx_half": 0.5, "cur_A": 0.7})
     report = migrate(request, metadata_mapping)
-    setup = snapshot(open_entry(request).setup)
-    assert document_value(setup, "general.ext") == {
+    global_parameters = snapshot(open_entry(request).parameters())
+    assert document_value(global_parameters, "general.ext") == {
         "flux_unit": "mA",
         "flux_value": 0.7,
     }
-    assert document_value(setup, "Q1.flux_half") == 0.5
-    assert document_value(setup, "general.ext.flux_value") == 0.7
+    assert document_value(global_parameters, "Q1.flux_half") == 0.5
+    assert document_value(global_parameters, "general.ext.flux_value") == 0.7
     assert any("假設單位" in row.reason for row in report.key_mappings)
 
 
@@ -88,7 +91,7 @@ def test_entry_explicit_unit_beats_assumption_and_reports_its_file(
     (root / unit_source).write_text('{"flux_unit": "V"}', encoding="utf-8")
     write_meta(request, "bias", {"flx_half": 0.3})
     report = migrate(request, metadata_mapping)
-    point = snapshot(open_entry(request).use_point("bias"))
+    point = snapshot(open_entry(request).parameters("bias"))
     assert document_value(point, "general.ext.flux_unit") == "V"
     assert document_value(point, "Q1.flux_half") == 0.3
     assert any(
@@ -134,11 +137,13 @@ def test_point_unit_override_clears_only_unreplaced_inherited_group_values(
         {"flux_unit": "A", "flx_half": 0.3, "local_flux_unit": "V"},
     )
     report = migrate(request_data, metadata_mapping)
-    point = snapshot(open_entry(request_data).use_point("bias"))
+    point = snapshot(open_entry(request_data).parameters("bias"))
     assert document_value(point, "Q1.flux_half") == 0.3
     assert document_value(point, "Q1.flux_period") is None
-    assert open_entry(request_data).setup.meta("Q1.flux_period") == {"stderr": 0.02}
-    assert open_entry(request_data).use_point("bias").meta("Q1.flux_period") == {}
+    assert open_entry(request_data).parameters().meta("Q1.flux_period") == {
+        "stderr": 0.02
+    }
+    assert open_entry(request_data).parameters("bias").meta("Q1.flux_period") == {}
     assert document_value(point, "Q1.flux_int") is None
     assert document_value(point, "general.ext") == {"flux_unit": "A"}
     assert document_value(point, "Q1.ext") == {}
@@ -172,7 +177,7 @@ def test_jpa_does_not_borrow_params_unit_and_rejects_unsupported_owner_unit(
         },
     )
     report = migrate_with_unit_pending(request_data, metadata_mapping)
-    setup = snapshot(open_entry(request_data).setup)
+    global_parameters = snapshot(open_entry(request_data).parameters())
     assert any(
         item.source == source and item.location == "best_jpa_flux"
         for item in report.pending
@@ -181,8 +186,8 @@ def test_jpa_does_not_borrow_params_unit_and_rejects_unsupported_owner_unit(
         item.source == source and item.location == "local_flux_unit"
         for item in report.pending
     )
-    assert document_value(setup, "Q1.flux_half") == 0.3
-    assert getattr(open_entry(request_data).setup.J1, "flux", None) is None
+    assert document_value(global_parameters, "Q1.flux_half") == 0.3
+    assert getattr(open_entry(request_data).parameters().J1, "flux", None) is None
 
 
 def test_invalid_jpa_unit_keeps_whole_group_pending_without_conversion(
@@ -201,7 +206,7 @@ def test_invalid_jpa_unit_keeps_whole_group_pending_without_conversion(
         "jpa_flux_unit",
         "best_jpa_flux",
     }
-    assert getattr(open_entry(request_data).setup.J1, "flux", None) is None
+    assert getattr(open_entry(request_data).parameters().J1, "flux", None) is None
 
 
 def test_conflicting_entry_units_block_values_instead_of_using_assumption(
@@ -214,8 +219,8 @@ def test_conflicting_entry_units_block_values_instead_of_using_assumption(
     write_params(request, {"flux_unit": "A"})
     source = write_meta(request, "", {"flux_unit": "V", "flx_half": 0.2})
     report = migrate(request, metadata_mapping)
-    setup = snapshot(open_entry(request).setup)
-    assert document_value(setup, "general.ext") == {
+    global_parameters = snapshot(open_entry(request).parameters())
+    assert document_value(global_parameters, "general.ext") == {
         "legacy_meta_info": {"flux_unit": "V", "flx_half": 0.2}
     }
     assert any(
@@ -236,8 +241,10 @@ def test_jpa_never_borrows_global_assumption(
         item.source == source and item.location == "best_jpa_flux"
         for item in report.pending
     )
-    assert getattr(open_entry(request).setup.J1, "flux", None) is None
-    assert document_value(snapshot(open_entry(request).setup), "general.ext") == {
+    assert getattr(open_entry(request).parameters().J1, "flux", None) is None
+    assert document_value(
+        snapshot(open_entry(request).parameters()), "general.ext"
+    ) == {
         "flux_unit": "A",
         "flux_value": 0.4,
         "legacy_meta_info": {"best_jpa_flux": 0.2},
@@ -252,10 +259,10 @@ def test_independent_jpa_assumption_publishes_v_without_changing_global_ma(
     )
     write_meta(request, "", {"cur_A": 0.4, "best_jpa_flux": 0.2})
     report = migrate(request, metadata_mapping)
-    assert getattr(open_entry(request).setup.J1, "flux", None) == 0.2
-    setup = snapshot(open_entry(request).setup)
-    assert document_value(setup, "J1.flux_unit") == "V"
-    assert document_value(setup, "general.ext") == {
+    assert getattr(open_entry(request).parameters().J1, "flux", None) == 0.2
+    global_parameters = snapshot(open_entry(request).parameters())
+    assert document_value(global_parameters, "J1.flux_unit") == "V"
+    assert document_value(global_parameters, "general.ext") == {
         "flux_unit": "mA",
         "flux_value": 0.4,
     }
@@ -276,11 +283,12 @@ def test_jpa_assumption_never_replaces_explicit_or_invalid_evidence(
     report = migrate_with_unit_pending(request, metadata_mapping)
     if explicit == "A":
         assert (
-            document_value(snapshot(open_entry(request).setup), "J1.flux_unit") == "A"
+            document_value(snapshot(open_entry(request).parameters()), "J1.flux_unit")
+            == "A"
         )
         assert not any(item.source == source for item in report.pending)
     else:
-        assert getattr(open_entry(request).setup.J1, "flux", None) is None
+        assert getattr(open_entry(request).parameters().J1, "flux", None) is None
         assert any(
             item.source == source and item.location == "best_jpa_flux"
             for item in report.pending

@@ -20,7 +20,7 @@ from zcu_tools.gui.session.events import SocChangedPayload
 from zcu_tools.gui.session.services.connection import ConnectRemoteRequest
 from zcu_tools.gui.session.services.project_settings import (
     ConnectionPreferences,
-    SetupPreferences,
+    DialogPrefill,
 )
 from zcu_tools.gui.session.ui.soc_dialog import SocDialog
 from zcu_tools.gui.widgets import error_colour
@@ -30,7 +30,7 @@ from tests.gui._user_input import ComponentDriver
 
 def _make_ctrl() -> MagicMock:
     ctrl = MagicMock()
-    ctrl.get_setup_preferences.return_value = SetupPreferences(
+    ctrl.get_dialog_prefill.return_value = DialogPrefill(
         entry_name="", ip="192.168.10.1", port=8887
     )
     ctrl.get_soccfg.return_value = None
@@ -69,7 +69,7 @@ def soc_button(dialog: SocDialog, text: str) -> QPushButton:
     )
 
 
-def test_setup_dialog_connect_remote_dispatches_request(qapp):
+def test_soc_dialog_connect_remote_dispatches_request(qapp):
     ctrl = _make_ctrl()
     dialog = SocDialog(ctrl)
 
@@ -95,7 +95,7 @@ def test_setup_dialog_connect_remote_dispatches_request(qapp):
     )
 
 
-def test_setup_dialog_connect_failure_signal_updates_status(qapp):
+def test_soc_dialog_connect_failure_signal_updates_status(qapp):
     ctrl = _make_ctrl()
     dialog = SocDialog(ctrl)
 
@@ -146,7 +146,7 @@ def test_soc_dialog_reopen_prefills_preferences_and_observes_soc_changes(
         qapp.processEvents()
         driver = ComponentDriver(dialog)
         driver.click("Close")
-        ctrl.get_setup_preferences.return_value = SetupPreferences(
+        ctrl.get_dialog_prefill.return_value = DialogPrefill(
             entry_name="", ip="10.4.5.6", port=7000
         )
         dialog.show()

@@ -12,7 +12,7 @@ format_version: '2.0'
 components: {}
 ```
 
-改後每份 setup、point 與 entry template 另有嚴格正整數 `schema_version`。以下只展示相關標頭，其他既有 sections 不變。
+改後每份 global 或 point 參數文件另有嚴格正整數 `schema_version`。以下只展示相關標頭，其他既有 sections 不變。
 
 ```yaml
 format: zcu.parameter-container
