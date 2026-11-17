@@ -120,3 +120,7 @@ Ruff 與 gate 仍回報失敗，交付不得稱全綠。
 - [Engine](../../lib/zcu_tools/simulate/evolution/engine.py)、[dispatch](../../lib/zcu_tools/simulate/evolution/_dispatch.py)、[scheduler](../../lib/zcu_tools/simulate/evolution/_schedule.py) 與 [prefix resolver](../../lib/zcu_tools/simulate/evolution/_prefix.py) 擁有執行路徑。[Evolution README](../../lib/zcu_tools/simulate/evolution/README.md) 擁有公開介面說明。
 - [ADR-0078](../adr/0078-evolution-module-boundary.md) 擁有 evolution 黑盒邊界與凍結數值輸入的責任分工。[ADR-0072](../adr/0072-module-boundaries.md) 擁有 `simulate` 的依賴邊界。
 - [程式碼品質](../code-quality.md) 說明契約、可觀察驗證與限定例外的審查方式。本篇沒有使用外部來源。
+
+## 後記
+
+2026-11-17，使用者對「在 `Engine.evolve` 定義行加同行 `# noqa: PLR0913  # tolerated: <reason>`」答「B」。`Engine.evolve` 改用這個同行標記，理由寫在原地；只適用這一筆診斷，不改設定，PLR0913 不再回報。本文「不加 suppression」「Ruff 與 gate 仍回報失敗」兩句由此取代；保留七個獨立參數、不合併成 options 型別的判斷不變。

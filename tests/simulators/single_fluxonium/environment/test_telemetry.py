@@ -227,4 +227,11 @@ def test_writer_failure_warns_once_without_changing_acquire(
     ) as warnings:
         assert program.acquire(env.soc, progress=False) is not None
         assert program.acquire(env.soc, progress=False) is not None
-    assert len(warnings) == 1
+    # Cold dependency imports can also emit unrelated warnings during acquire.
+    routing_warnings = [
+        warning
+        for warning in warnings
+        if issubclass(warning.category, RuntimeWarning)
+        and str(warning.message).startswith("routing telemetry could not be written")
+    ]
+    assert len(routing_warnings) == 1

@@ -648,8 +648,7 @@ class Engine:
                 raise Cancelled()
             return self._routing_reuse.reuse(key, source, budget)
 
-    # Seven independent controls exceed six; grouping adds a single-user options type.
-    def evolve(
+    def evolve(  # noqa: PLR0913  # tolerated: capture is an independent per-call recording option; bundling it into an options type would hide it
         self,
         source: ModelSource,
         batches: Sequence[TimelineBatch],
