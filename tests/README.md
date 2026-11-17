@@ -399,6 +399,7 @@ Controller 的 terminal close。見 `tests/gui/session/services/test_device_mana
 殘留視窗讓該 nodeid 的 teardown 失敗，訊息列出類別、objectName 與標題，並保留原有 teardown 錯誤。
 Guard 直接取樣，不在取樣前交付 `DeferredDelete`、GC 或 drain，也不自動 close 或 hide 視窗。
 建立視窗的測試或 fixture 負責在 `deleteLater()` 前明確 `close()`。
+Fixture 只關閉並釋放自己建立或明確登記的視窗，不以「測試期間新增的 top-level」推定擁有權；不屬於 fixture 的視窗留給 guard 報出。
 Measure `MainWindow.close()` 會進非同步互動 shutdown；fixture 在完成 owner shutdown、drain 與其擁有的 callback／hardware cleanup 後使用公開 `dispose()`，不另追加 `deleteLater()`。
 Hidden 視窗不觸發這項檢查，但仍須由 owner 釋放；QObject event filter 或 scheduler 不套用 QWidget 的 close。
 
