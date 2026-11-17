@@ -14,7 +14,6 @@ from zcu_tools.gui.remote.rpc_endpoint import (
     NdjsonRpcEndpoint,
 )
 
-
 pytestmark = pytest.mark.requires_loopback
 
 
