@@ -1,4 +1,4 @@
-"""Tools-owned scene locations and cross-index selection policy."""
+"""Tools-owned benchmark/scene locations and cross-index selection policy."""
 
 import subprocess
 from collections.abc import Sequence
@@ -9,6 +9,23 @@ from zcu_tools.simulate.evolution import (
     FrozenIndexEntry,
     read_frozen_index,
 )
+
+
+def local_data_directory() -> Path:
+    """Create shared benchmark storage located through Git's absolute common dir.
+
+    All worktrees share the main repository's .agent_state/benchmark/family_pareto.
+    Git or filesystem errors propagate; no references are solved here.
+    """
+    common = Path(
+        subprocess.check_output(
+            ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
+            text=True,
+        ).strip()
+    )
+    directory = common.parent / ".agent_state" / "benchmark" / "family_pareto"
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory
 
 
 def scene_cache_directory(override: Path | None = None) -> Path:

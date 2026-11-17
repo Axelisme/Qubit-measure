@@ -1,8 +1,5 @@
 """Measure Engine.evolve families, not program.acquire latency."""
 
-# tolerated(file-size): Selection, session timing and reporting share complete
-# input identities and results; splitting this owner would scatter one comparison.
-
 from __future__ import annotations
 
 import argparse
@@ -60,6 +57,7 @@ from tools.family_pareto_results import (
 from tools.family_pareto_results import mode_error as _mode_error
 from tools.family_pareto_storage import (
     indexed_scenes,
+    local_data_directory,
     missing_scene_command,
     scene_cache_directory,
     scene_index_paths,
@@ -701,23 +699,6 @@ def tested_state() -> dict[str, str | bool]:
         "dirty": bool(git("status", "--porcelain")),
         "cwd": str(Path.cwd()),
     }
-
-
-def local_data_directory() -> Path:
-    """Create shared benchmark storage located through Git's absolute common dir.
-
-    All worktrees share the main repository's .agent_state/benchmark/family_pareto.
-    Git or filesystem errors propagate; no references are solved here.
-    """
-    common = Path(
-        subprocess.check_output(
-            ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
-            text=True,
-        ).strip()
-    )
-    directory = common.parent / ".agent_state" / "benchmark" / "family_pareto"
-    directory.mkdir(parents=True, exist_ok=True)
-    return directory
 
 
 def _selected_families(

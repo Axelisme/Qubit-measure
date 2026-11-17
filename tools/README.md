@@ -612,6 +612,12 @@ flux level. It preserves absolute carrier phase and pulse-local envelope times.
 the scene producer CLI selects these through `make_real_inputs`. Source
 snapshots reuse `numeric_builder`; cache/index handling stays in the existing
 producer and storage owners.
+`family_pareto_storage.py` owns benchmark and scene-cache locations, plus
+cross-index selection policy. Its `local_data_directory()` queries Git from the
+process working directory and creates the shared benchmark directory. Git and
+filesystem errors propagate. `scene_cache_directory()` instead queries Git from
+the tool's worktree, accepts an absolute override, and creates no directory.
+`family_pareto.py` imports the benchmark resolver directly from this owner.
 `single_model_input(name, emit, manifest, families)` in the builders module is
 the public single-model construction entry point.
 `family_pareto_settings.py` owns fixed single-fluxonium, integer-fluxonium, FTF and board inputs,
@@ -760,8 +766,10 @@ gain .1, a 1 us pulse/window and zero flight time.
 The lead uses a table sweep so each requested value is quantized independently.
 The endpoints remain separated and fully overlapping. Each shot has one pair;
 changing the relative lead changes overlap support, rather than repeating a
-canonical gate 20 times for `multitone_gate`'s default cost preference.
-Pinning `multitone_gate` bypasses that preference, not its numerical guards.
+canonical gate to increase reuse. Default routing compares per-key cold costs,
+amortizing first-stage preparation over uses in the current evolve's complete
+inventory, plus guard and apply costs. Pinning `multitone_gate` bypasses price
+comparison, not its numerical guards.
 
 O1 takes its overlap sequence from `twotone/reset/dual_tone/freq` and its
 ±50 MHz scan range from that experiment's Form. The Form's actual reset
