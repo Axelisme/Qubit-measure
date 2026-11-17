@@ -8,7 +8,12 @@ The paused sampled multitone gate has no numerical-density edge observation.
 from dataclasses import replace
 
 import numpy as np
-from zcu_tools.simulate.evolution import EnvelopeSpec, ModelSource, SecularModel
+from zcu_tools.simulate.evolution import (
+    EnvelopeSpec,
+    ModelSource,
+    SecularDrive,
+    SecularModel,
+)
 
 from .accuracy_cases import (
     AccuracyCase,
@@ -94,9 +99,12 @@ def guard_edge_case(family: str) -> AccuracyCase:
         # the spectral/interpolation estimate <= budget/2 limits this input.
         gain = 71.6674401855469 * (1 - 1e-6)
     elif family == "single_tone_rwa":
-        # Retained positive-frequency X/2 has norm .001 GHz.
-        # phase = 2*pi*d*(gain*.001)^2/f = .05999994 rad < .06.
-        gain = np.sqrt(0.06 * (1 - 1e-6) * frequency / (2 * np.pi * 8)) / 0.001
+        batch = timeline(2, 1.0)
+        x = np.diag([frequency, -frequency / 2]).astype(complex)
+        model = replace(model, drives=(SecularDrive("drive", x, np.zeros_like(x)),))
+        # Both signs give A=diag(gain,gain/2), so kappa2=gain, just below .08.
+        # At 1 ns each omitted transfer <=gain**2*f**2<.0058: no restoration.
+        gain = 0.08 * (1 - 1e-6)
     elif family == "dyson":
         batch = timeline(2, 1.0)
         # At resonance r = gain*0.002/sqrt(gamma**2 + 1/duration**2).

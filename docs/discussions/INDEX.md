@@ -40,6 +40,8 @@
 
 - 2026-11-16 [模擬器場景凍結與參考解數值交接](2026-11-16-frozen-simulator-inputs.md)：資料交接。場景 producer 自持控制與模型，通用 codec 保留既有 key，獨立 solver 留在 tests 側。
 
+- 2026-11-14 [single_tone_rwa 以 endpoint kick 保留，guard 改用 κ2](2026-11-14-single-tone-rwa-kick.md)：保留或刪除。隨機相位序列從最大 1.07e-2 降到 ≤2e-3；價格計入 kick 延後，L、I 的預設選路暫時比 floquet_period 慢超過 10%。
+
 - 2026-11-16 [Floquet 的保留與價格重校](2026-11-16-floquet-kept-price.md)：保留或刪除。Committed 批次上 `floquet` 快 1.65–1.81 倍，保留並重校價格；三 family 排序等 `multitone_rwa` 修好。
 - 2026-11-16 [Floquet 的拒絕成本與單次 evolve 內的 frame 重用](2026-11-16-floquet-refusal-cost.md)：拒絕成本。既有拒絕條件提前，一次 evolve 內 exact-key frame 只建一次；不把拒絕機率算進價格，不跨 key 或跨 evolve 保留 frame，不做建 frame 前的 trace 下界。
 
