@@ -24,6 +24,7 @@ from zcu_tools.simulate.evolution import (
 from zcu_tools.simulators.ftf.config import parse_ftf
 from zcu_tools.simulators.ftf.environment import FTFSource, ftf, plan_template
 
+from tools.dop853_segment import profile_inputs
 from tools.family_pareto_inputs import (
     Input,
     Scene,
@@ -837,10 +838,13 @@ def overlapping_constant_tones_input() -> Input:
 
 
 def make_real_inputs(scenario: str | None = None) -> list[Input]:
-    """Build all fixed scenarios, or only the named Input before any model work.
+    """Build fixed and profile inputs, or only scenario before any model work.
 
-    Returned inputs own detached fresh-source factories. An unknown scenario
-    raises ValueError listing legal Input names without constructing models.
+    scenario=None includes the declared DOP853 profile catalogue after the fixed
+    scans. A fixed name builds only that scan; other names go to profile_inputs
+    for selected-only construction or ValueError listing legal profile names.
+    Unknown names do not construct models. Model construction failures propagate.
+    Returned inputs own detached factories; callers close each built Scene.source.
     """
     builders = {
         "carrier_sweep": carrier_sweep_input,
@@ -860,12 +864,10 @@ def make_real_inputs(scenario: str | None = None) -> list[Input]:
         "random_shaped_gate_sequence": random_shaped_gate_sequence_input,
     }
     if scenario is None:
-        return [build() for build in builders.values()]
-    if scenario not in builders:
-        raise ValueError(
-            f"Unknown scenario: {scenario}. Legal names: {', '.join(builders)}"
-        )
-    return [builders[scenario]()]
+        return [*[build() for build in builders.values()], *profile_inputs()]
+    if scenario in builders:
+        return [builders[scenario]()]
+    return profile_inputs(scenario)
 
 
 def main(argv: list[str] | None = None, *, inputs: list[Input] | None = None) -> int:
@@ -875,7 +877,9 @@ def main(argv: list[str] | None = None, *, inputs: list[Input] | None = None) ->
     both category indexes. --scene-cache is an absolute override of the shared
     cache. --scenario processes only its indexed row, or appends a declared new
     scene to its category with --update-index. inputs optionally supplies
-    caller-owned declarations instead of the fixed inventory; builder sources
+    caller-owned declarations instead of the fixed and profile inventory. Default
+    --scenario routing constructs only the selected Input, including profile
+    names, and rejects unknown names before model work. Builder sources
     are closed after snapshotting. Native thread settings are fixed/logged at 1.
     --update-index explicitly updates selected identities only after all selected
     builders succeed. Inventory deletion/regrouping is never inferred; edit the
