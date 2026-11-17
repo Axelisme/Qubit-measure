@@ -3,10 +3,10 @@
 from dataclasses import replace
 
 import pytest
-from zcu_tools.core.simulation import RoundRequest
 from zcu_tools.program.v2.modules.delay import SoftDelay
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
+from zcu_tools.simulate.boundary import RoundRequest
 from zcu_tools.simulate.evolution import RoutingHistory
 from zcu_tools.simulators.ftf.environment import runtime
 

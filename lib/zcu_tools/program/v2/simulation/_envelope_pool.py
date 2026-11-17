@@ -4,7 +4,7 @@ from collections import OrderedDict
 from dataclasses import dataclass
 from sys import getsizeof
 
-from zcu_tools.core.simulation import PulseEnvelope
+from zcu_tools.simulate.boundary import PulseEnvelope
 
 
 @dataclass(frozen=True, slots=True)

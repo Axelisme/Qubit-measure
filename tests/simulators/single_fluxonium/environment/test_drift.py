@@ -7,7 +7,6 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from zcu_tools.core.simulation import AcquireRequest, ReadoutWindow
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.simulation import (
@@ -15,6 +14,7 @@ from zcu_tools.program.v2.simulation import (
     SimulationBinding,
     SimulationClock,
 )
+from zcu_tools.simulate.boundary import AcquireRequest, ReadoutWindow
 from zcu_tools.simulators.replay import read_replay, replay_paths
 from zcu_tools.simulators.single_fluxonium.config import (
     SingleFluxoniumSettings,

@@ -5,11 +5,11 @@ from threading import Event
 
 import numpy as np
 import pytest
-from zcu_tools.core.simulation import ChargeDriveRequirement
 from zcu_tools.program.acquisition import (
     AcquisitionContractError,
     StoppedPartialAcquireError,
 )
+from zcu_tools.simulate.boundary import ChargeDriveRequirement
 
 from tests.program._acquisition_soc import make_chunk_acquisition
 

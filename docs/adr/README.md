@@ -13,6 +13,7 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 ## Module Boundaries
 
 原則：組合根與開發工具只經 assembly 依賴使用者 lab，固定量表場景則不依賴 lab，見 [ADR-0072](0072-module-boundaries.md#使用者空間的依賴原則)。
+原則：模擬器（`simulate`）是封閉的子模塊，不 import `zcu_tools` 其他 package；具體裝置模型由使用方經聲明介面提供，見 [ADR-0072](0072-module-boundaries.md#模擬器是封閉的子模塊模型由使用方聲明)。
 
 - [0072 — 模組定位與依賴邊界](0072-module-boundaries.md)：Package 定位、依賴方向、各實驗獨立取數與 analysis 小摘要契約，依賴方向由 `.importlinter` 檢查。
 
@@ -79,6 +80,8 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 協作流程歸外部 dev-flow／collab skills，repo 的 live resource 限制見 [CLAUDE.md](../../CLAUDE.md)。
 
 ## Draft
+
+- [模擬器獨立成 package](draft/simulator-standalone-package.md)：使用者預計把模擬器拆成 `zcu_tools` 依賴的獨立 package；目前只做到封閉子模塊，拆分未排。
 
 - [模擬環境、FTF preset 與參數檔](draft/simulation-environments.md)：模擬環境與 FTF preset 的草稿及歷史驗證範圍，compiler owner 見 [[0083]]。
 - [GUI 事件收合](draft/remote-event-coalescing.md)：GUI 訂閱端依 payload type 與 tab 的 per-tick 收合尚未落實；cfg 表單 snapshot 收合已實作。

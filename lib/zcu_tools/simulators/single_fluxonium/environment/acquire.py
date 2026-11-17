@@ -6,20 +6,20 @@ from typing import TYPE_CHECKING
 import numpy as np
 from numpy.typing import NDArray
 
-from zcu_tools.core.simulation import (
-    AcquireRequest,
-    CancellationQuery,
-    ChannelSignals,
-    EnvironmentSnapshot,
-    RoundSignals,
-    SamplingIdentity,
-)
 from zcu_tools.program.v2.simulation import IntegratedRound
 from zcu_tools.simulate.adc import (
     ChannelReadout,
     PreparedRawShots,
     round_statistics,
     sample_traces,
+)
+from zcu_tools.simulate.boundary import (
+    AcquireRequest,
+    CancellationQuery,
+    ChannelSignals,
+    EnvironmentSnapshot,
+    RoundSignals,
+    SamplingIdentity,
 )
 from zcu_tools.simulate.evolution import PathDiagnostics
 from zcu_tools.simulators.replay import ReplayAcquire, save_replay
@@ -42,7 +42,7 @@ class SingleFluxoniumPreparation:
     populations: read-only (*point_dims,states) terminal DC-state marginals after
         ADC normalization. channels: event-aligned ADC conditional sums in
         preflight receiver order. channel selects the sole standalone receiver.
-    raw.readout keeps full projection histories and event populations; sampling
+    raw.readout keeps projection transitions, or unprojected populations; sampling
         must use it, not reconstruct independent events from the marginals.
     raw: immutable deferred physical-shot inputs, without a round RNG identity.
     paths: evolution-owned diagnostics, repeated on valid noiseless reuse.
@@ -65,7 +65,7 @@ class SingleFluxoniumPreparation:
         return self.channels[0]
 
     projection_diagnostics: ProjectionDiagnostics | None = None
-    """Per-point retained histories/pruned mass, or None without projection."""
+    """Per-point adopted rows/identity-approximation mass, or None without projection."""
 
 
 class SingleFluxoniumAcquire:

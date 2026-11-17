@@ -2,7 +2,7 @@
 
 from fractions import Fraction
 
-from zcu_tools.core.simulation import PulseEnvelope, TimeBase
+from zcu_tools.simulate.boundary import PulseEnvelope, TimeBase
 
 
 def time_us(base: TimeBase, ticks: int) -> float:

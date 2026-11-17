@@ -6,14 +6,14 @@ from math import prod
 import numpy as np
 from numpy.typing import NDArray
 
-from zcu_tools.core.simulation import (
+from zcu_tools.experiment.readout_plan import ReadoutDrive, classify_readout
+from zcu_tools.simulate.boundary import (
     AcquireRequest,
     EventSlot,
     ReadoutSlot,
     TimeBase,
     TimelineTemplate,
 )
-from zcu_tools.experiment.readout_plan import ReadoutDrive, classify_readout
 from zcu_tools.simulators.six_fluxonium.config import SixFluxoniumSettings
 
 # Cover floating subtraction at nearest-cavity ties, in MHz.
