@@ -131,3 +131,7 @@ Run／Load 的固定捕捉改名 `DocumentSetCapture`，位置值是 `DocumentSe
 - 型別調查基準 `e49630b95`，文件組調查基準 `de8245e3f`（兩者皆在 main 歷史中）。調查工作檔未入庫，結論與數字寫在本文。
 - 現行行為：[resources.entry README](../../lib/zcu_tools/resources/entry/README.md)、[gui.session README](../../lib/zcu_tools/gui/session/README.md)、[migration README](../../migrations/storage_migration/README.md)、[measure remote README](../../lib/zcu_tools/gui/app/measure/remote/README.md)。
 - 相關 ADR：[ADR-0063](../adr/0063-persistence-ownership.md)、[ADR-0067](../adr/0067-gui-application.md)、[ADR-0081](../adr/0081-point-data-disk-sync.md)。
+
+## 後記
+
+2026-11-17，使用者追認〈實作時的後續裁定〉第 1、2 點（`use_point(point: str | None = None)`；Entry 視窗的程式識別與 wire 值），原話「四筆追認，0154 選 A」。
