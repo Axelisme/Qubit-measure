@@ -5,11 +5,23 @@ from contextlib import closing
 from dataclasses import replace
 
 import pytest
-from zcu_tools.simulate.evolution import Engine, RoutingHistory, segment_spans
+from zcu_tools.simulate.evolution import (
+    Engine,
+    NoValidKernel,
+    RoutingHistory,
+    RWAGuardMetric,
+    common_frame_diagnostic,
+    multitone_rwa_diagnostic,
+    segment_spans,
+)
 
 from .accuracy import AccuracyMeasurement, measurement_property, require_families
 from .accuracy_cases import AccuracyCase, accuracy_case, history_case, multisegment_case
-from .guard_edge_cases import EDGE_FAMILIES, guard_edge_case
+from .guard_edge_cases import (
+    EDGE_FAMILIES,
+    constant_multitone_guard_case,
+    guard_edge_case,
+)
 from .reference import ReferenceResult, converged_reference, density_error
 
 CASE_NAMES = (
@@ -32,7 +44,6 @@ CASE_NAMES = (
 )
 KNOWN_EDGE_ERRORS = {
     "gate_cache": 0.00929654785179012,
-    "common_frame": 0.008066669226955314,
     "shaped_sambe": 0.0030915535285839482,
 }
 PINNED = tuple(
@@ -98,6 +109,23 @@ def test_guard_edge_density(
     matrix_reference: Callable[[AccuracyCase], ReferenceResult],
 ) -> None:
     case = guard_edge_case(family)
+    if family == "common_frame":
+        pump, probe = case.batch.tracks
+        diagnostic = common_frame_diagnostic(
+            case.source.model((0,)),
+            (pump.port, probe.port),
+            (float(pump.frequency_ghz[0]), float(probe.frequency_ghz[0])),
+            (float(pump.amplitude[0]), float(probe.amplitude[0])),
+            float(case.batch.end_ns[0]),
+        )
+        assert diagnostic.accepted
+        coherent = diagnostic.coherent
+        assert isinstance(coherent, RWAGuardMetric)
+        assert coherent.passed
+        assert 0.99 * coherent.threshold <= coherent.value <= coherent.threshold
+        request.node.user_properties.append(
+            ("common_frame_coherent", str(coherent.value))
+        )
     reference = matrix_reference(case)
     with closing(Engine(1, families=(family,))) as engine:
         result = engine.evolve(case.source, (case.batch,))
@@ -121,6 +149,80 @@ def test_guard_edge_density(
             )
         )
     assert error <= 2e-3, f"{case.name}: density error {error:.9g} > 2e-3"
+
+
+def test_constant_multitone_guard_edge_density(request: pytest.FixtureRequest) -> None:
+    """Bracket constant admission, then compare both admitted complex densities."""
+    inside_source, inside_batch = constant_multitone_guard_case(184.5 * (1 - 1e-6))
+    with closing(inside_source):
+        outside_source, outside_batch = constant_multitone_guard_case(184.5 * 1.01)
+        with closing(outside_source):
+            budget = 1e-3
+            for source, batch, accepted, expected_secular in (
+                (inside_source, inside_batch, True, 1.475998524e-4),
+                (outside_source, outside_batch, False, 1.49076e-4),
+            ):
+                pump, probe = batch.tracks
+                diagnostic = multitone_rwa_diagnostic(
+                    source.model((0,)),
+                    (pump.port, probe.port),
+                    (float(pump.frequency_ghz[0]), float(probe.frequency_ghz[0])),
+                    (float(pump.amplitude[0]), float(probe.amplitude[0])),
+                    float(batch.end_ns[0]),
+                    budget=budget,
+                )
+                assert diagnostic.accepted is accepted
+                for metric in (
+                    diagnostic.budget,
+                    diagnostic.carrier_ghz,
+                    diagnostic.omission_transfer,
+                    diagnostic.omission_phase_rad,
+                    diagnostic.real_dimension,
+                ):
+                    assert isinstance(metric, RWAGuardMetric)
+                    assert metric.passed
+                secular = diagnostic.secular_accumulation
+                assert isinstance(secular, RWAGuardMetric)
+                assert secular.passed is accepted
+                # Hand calculation: epsilon=.002, Omega_ret=.2 GHz.
+                assert secular.value == pytest.approx(expected_secular, rel=1e-12)
+                assert secular.threshold == 1.476e-4
+                if accepted:
+                    assert secular.value / secular.threshold == pytest.approx(
+                        1 - 1e-6, rel=1e-12
+                    )
+                request.node.user_properties.append(
+                    (
+                        "constant_multitone_secular_"
+                        + ("inside" if accepted else "outside"),
+                        str(secular.value),
+                    )
+                )
+            with (
+                closing(Engine(1, families=("multitone_rwa",))) as engine,
+                pytest.raises(NoValidKernel),
+            ):
+                engine.evolve(outside_source, (outside_batch,), budget=budget)
+            with closing(Engine(1, families=("multitone_rwa",))) as engine:
+                result = engine.evolve(inside_source, (inside_batch,), budget=budget)
+            require_families(result.paths, ("multitone_rwa",))
+            # Query and pinned routing must pass before paying for four independent
+            # integrations: two points at each of the two reference tolerances.
+            reference = converged_reference(inside_source, inside_batch)
+            error = density_error(result.densities, reference.density)
+            request.node.user_properties.append(
+                measurement_property(
+                    AccuracyMeasurement(
+                        "guard_edge/constant_multitone_rwa",
+                        "multitone_rwa",
+                        error,
+                        reference.convergence_error,
+                    )
+                )
+            )
+            assert error <= 2e-3, (
+                f"constant multitone guard-edge density error {error:.9g} > 2e-3"
+            )
 
 
 @pytest.mark.parametrize("name", CASE_NAMES)
