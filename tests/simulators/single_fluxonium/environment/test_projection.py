@@ -6,7 +6,6 @@ from threading import Event
 
 import numpy as np
 import pytest
-from zcu_tools.core.simulation import SamplingIdentity
 from zcu_tools.experiment.readout_plan import local_readout_pulses
 from zcu_tools.experiment.simulation import SimulationEnvironment
 from zcu_tools.program.v2.modules.delay import SoftDelay
@@ -14,6 +13,7 @@ from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.simulation import IntegratedRound
 from zcu_tools.simulate import adc
+from zcu_tools.simulate.boundary import SamplingIdentity
 from zcu_tools.simulate.evolution import Cancelled
 from zcu_tools.simulators.single_fluxonium.config import parse_single_fluxonium
 from zcu_tools.simulators.single_fluxonium.environment.runtime import (

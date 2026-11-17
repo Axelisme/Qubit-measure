@@ -45,7 +45,7 @@ filters. An omitted on_end avoids this observer and its acquire-level clocks. FT
 callback to persist its own local routing reports; program knows no file format.
 Integrated `acquire(..., charge_requirements=(ChargeDriveRequirement(name, gen_ch), ...))`
 passes named physical charge requirements through the simulation request. The
-record lives in `core.simulation`; names are diagnostics, not dispatch keys.
+record lives in `simulate.boundary`; names are diagnostics, not dispatch keys.
 Single-fluxonium validates membership before evolution. White noise accepts
 requirements without physical checks because it has no physical line model.
 Six-fluxonium and FTF reject nonempty requirements before evolution until they
@@ -325,7 +325,7 @@ points or reps.
 
 ## Numeric contract and extension points
 
-`core.simulation` owns immutable numeric records. No Module, driver, GUI object
+`simulate.boundary` owns immutable numeric records. No Module, driver, GUI object
 or callback crosses this boundary; `RoundRequest.cancel` is a read-only `is_set()`
 query, not a callback. Every request time is an integer tick in its required
 `TimeBase`. Array times use int64 without changing point/read shapes. Frequency
@@ -424,7 +424,7 @@ Normal hardware compilation and the native timeline timing policy are unchanged.
   coordinates admission and retains `last_request` and `rounds` privately in
   memory. `execute(RoundRequest)` returns `IntegratedRound(statistics, raw)` for
   integrated mode or `RoundSignals` for decimated mode. Mode/result mismatches raise.
-  `statistics` is a pure core `RoundStatistics`; `raw` satisfies the program-owned
+  `statistics` is a pure boundary `RoundStatistics`; `raw` satisfies the program-owned
   `RawShots.materialize(reps, avg_level)` protocol.
 - Integrated statistics contain per-point totals over reps, shared category
   counts that sum to reps, noiseless per-shot sums per read and category, and
@@ -434,7 +434,7 @@ Normal hardware compilation and the native timeline timing policy are unchanged.
   conditional-sum/covariance validation certificates, keyed by shape, dtype and
   exact bytes, not borrowed array identity. Counts, layout and noisy totals are
   checked each round, and every returned array is detached even on a certificate
-  hit. Certificates live with the SoC and do not cross the core/backend boundary.
+  hit. Certificates live with the SoC and do not cross the acquisition/backend boundary.
   Fixed request layouts and integrated normalization metadata are prepared once
   per acquire; this never freezes snapshots or certifies later backend values.
   Without processors, threshold or trackers,

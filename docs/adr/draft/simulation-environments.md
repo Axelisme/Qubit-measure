@@ -87,7 +87,7 @@ FTF builder 明確選 V／A，flux helper 比對實際 driver 單位，不以預
 
 ### 每 round 捕捉輸入，不承接前次量子態
 
-每次 acquire 固定一份 AcquireRequest，包含控制 timeline、量化座標、readout routes/windows、layout／mode 與 acquire 抽樣身份。每 round 真正執行前捕捉 EnvironmentSnapshot，包含裝置值與所用模型／校準設定版本；兩者加 round 身份組成 RoundRequest。這些具名型別由 `core.simulation` 提供，組合採具名欄位，不使用 dict 覆寫或 live device 引用。
+每次 acquire 固定一份 AcquireRequest，包含控制 timeline、量化座標、readout routes/windows、layout／mode 與 acquire 抽樣身份。每 round 真正執行前捕捉 EnvironmentSnapshot，包含裝置值與所用模型／校準設定版本；兩者加 round 身份組成 RoundRequest。這些具名型別由 `simulate.boundary` 提供，組合採具名欄位，不使用 dict 覆寫或 live device 引用。
 
 2026-10-14，使用者提出：「我預期在acquire時會記一筆acquire request，而每個round又記一筆環境的參數，這兩筆合成一個模擬的request，這樣合理嗎？」對此拆分確認「好，繼續」。原因是「因為可以預見一種使用場景，每round間隔改一次flux device值」。下一 round 必須看到新值；不逐 ADC getter 重讀裝置，也不在 prepare_round 過早固定環境。
 
@@ -345,8 +345,8 @@ Lookback／acquire_decimated 使用相同有限 pulse 與條件平均場，輸�
 
 | 契約 | 生產者 | 消費者與邊界 |
 | --- | --- | --- |
-| C1 模板請求 | `program.v2.simulation` | `experiment.ftf` 消費 `core.simulation` 的模板請求，不把 Module 物件交給數值引擎。 |
-| C2 round 結果 | `experiment.ftf` | 顯式組合演化、population 轉換與 ADC 的正規化工具，再產生 round 結果。program mixin 消費 `core.simulation` 的統計或訊號結果，負責 QICK buffer 轉換。 |
+| C1 模板請求 | `program.v2.simulation` | `experiment.ftf` 消費 `simulate.boundary` 的模板請求，不把 Module 物件交給數值引擎。 |
+| C2 round 結果 | `experiment.ftf` | 顯式組合演化、population 轉換與 ADC 的正規化工具，再產生 round 結果。program mixin 消費 `simulate.boundary` 的統計或訊號結果，負責 QICK buffer 轉換。 |
 | C3 引擎 API | `simulate.evolution` | `experiment.ftf` 呼叫演化入口，消費 readout 起點的量子態與路徑診斷。每次 evolve 回報最終 rows 的最大 trace 誤差，空輸入為零；只報告，不修正或套用 ADC 容差。 |
 | C4 模型 | `simulate.ftf` | `simulate.evolution` 消費模型與 secular 形式，不讀 YAML 或裝置。 |
 | C5 kernel | `simulate.evolution` 內部的 dispatch、排程與各 kernel | 依 [[0078]]，dispatch 擁有候選順序、builder、frame 與 chain；kernel 擁有數值 build、apply 與 certificate。Table-building guards 透過 `guard_prepared` 交還 acceptance 與 model-only payload，dispatch 將 Floquet admission 合併成 family `RowPlan`。排程以 `ApplyContext` 原樣傳給 apply，不重做分類。Plan、input-bound payload 與 model-only shared preparations 都只活在一次 evolve。這是內部接縫，不是跨 package API。完整契約與數值 owner 見 [evolution README](../../../lib/zcu_tools/simulate/evolution/README.md)。 |

@@ -6,7 +6,6 @@ import numpy as np
 import pytest
 from numpy.testing import assert_allclose, assert_array_equal
 from scipy.optimize import OptimizeResult, minimize_scalar
-from zcu_tools.core.simulation import SamplingIdentity
 from zcu_tools.simulate.adc import (
     ADC,
     PiecewiseLinearEnvelope,
@@ -16,6 +15,7 @@ from zcu_tools.simulate.adc import (
     Receiver,
     SampleGrid,
 )
+from zcu_tools.simulate.boundary import SamplingIdentity
 
 pytestmark = pytest.mark.sim
 

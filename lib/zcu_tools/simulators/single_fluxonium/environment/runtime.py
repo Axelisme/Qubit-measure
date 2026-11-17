@@ -11,15 +11,6 @@ from typing import Literal
 import numpy as np
 from qick import QickConfig
 
-from zcu_tools.core.simulation import (
-    AcquireRequest,
-    CancellationQuery,
-    EnvironmentSnapshot,
-    RoundRequest,
-    RoundSignals,
-    TimeBase,
-    TimelineTemplate,
-)
 from zcu_tools.device import DeviceManager, FakeDevice, FakeDeviceInfo
 from zcu_tools.experiment.simulation import SimulationEnvironment
 from zcu_tools.program.v2.simulation import (
@@ -36,6 +27,15 @@ from zcu_tools.simulate.adc import (
     ProjectionReadout,
     ReadoutModel,
     normalize_populations,
+)
+from zcu_tools.simulate.boundary import (
+    AcquireRequest,
+    CancellationQuery,
+    EnvironmentSnapshot,
+    RoundRequest,
+    RoundSignals,
+    TimeBase,
+    TimelineTemplate,
 )
 from zcu_tools.simulate.evolution import (
     Basis,

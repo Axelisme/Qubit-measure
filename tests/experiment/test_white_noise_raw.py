@@ -8,14 +8,14 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pytest
 from numpy.testing import assert_allclose, assert_array_equal
-from zcu_tools.core.simulation import (
+from zcu_tools.experiment.simulation import white_noise
+from zcu_tools.simulate.boundary import (
     AcquireRequest,
     ReadoutWindow,
     RoundRequest,
     RoundSignals,
     TimeBase,
 )
-from zcu_tools.experiment.simulation import white_noise
 
 from tests.program._profiles import load_soccfg
 

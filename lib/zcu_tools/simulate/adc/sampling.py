@@ -4,7 +4,7 @@ from collections.abc import Mapping
 
 import numpy as np
 
-from zcu_tools.core.simulation import ChannelSignals, RoundSignals, SamplingIdentity
+from zcu_tools.simulate.boundary import ChannelSignals, RoundSignals, SamplingIdentity
 
 from ._integrated_paths import IntegratedPaths
 from ._jump_paths import JumpPaths

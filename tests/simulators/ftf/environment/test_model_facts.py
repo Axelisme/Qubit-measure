@@ -6,8 +6,8 @@ from dataclasses import replace
 
 import numpy as np
 import pytest
-from zcu_tools.core.simulation import CancellationQuery
 from zcu_tools.device import DeviceManager
+from zcu_tools.simulate.boundary import CancellationQuery
 from zcu_tools.simulate.evolution import (
     Engine,
     EvolutionResult,

@@ -6,14 +6,14 @@ from math import prod
 import numpy as np
 from numpy.typing import NDArray
 
-from zcu_tools.core.simulation import (
+from zcu_tools.program.v2.simulation import IntegratedRound, RawShots
+from zcu_tools.simulate.adc import cumulative_count_bins
+from zcu_tools.simulate.boundary import (
     AcquireRequest,
     ChannelStatistics,
     RoundStatistics,
     SamplingIdentity,
 )
-from zcu_tools.program.v2.simulation import IntegratedRound, RawShots
-from zcu_tools.simulate.adc import cumulative_count_bins
 from zcu_tools.simulators.six_fluxonium.environment.routing import RoutedGroup
 
 

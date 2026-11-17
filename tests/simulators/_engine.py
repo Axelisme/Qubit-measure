@@ -4,7 +4,7 @@ from collections.abc import Collection, Sequence
 
 import numpy as np
 from numpy.typing import NDArray
-from zcu_tools.core.simulation import CancellationQuery
+from zcu_tools.simulate.boundary import CancellationQuery
 from zcu_tools.simulate.evolution import (
     Cancelled,
     Engine,

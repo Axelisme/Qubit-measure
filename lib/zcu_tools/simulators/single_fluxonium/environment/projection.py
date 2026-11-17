@@ -7,8 +7,8 @@ from math import prod
 import numpy as np
 from numpy.typing import NDArray
 
-from zcu_tools.core.simulation import CancellationQuery
 from zcu_tools.simulate.adc import ProjectionChain, normalize_populations
+from zcu_tools.simulate.boundary import CancellationQuery
 from zcu_tools.simulate.evolution import (
     Basis,
     Engine,

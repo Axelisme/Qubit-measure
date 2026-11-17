@@ -23,7 +23,7 @@ from pydantic import (
     ValidateAs,
 )
 
-from zcu_tools.core.simulation import (
+from zcu_tools.simulate.boundary import (
     AcquireRequest,
     AcquisitionMode,
     ChargeDriveRequirement,

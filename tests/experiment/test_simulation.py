@@ -131,14 +131,14 @@ def test_white_noise_all_routes_acquires_on_any_generator_and_adc(gen_ch, ro_ch)
 
 def test_white_noise_integrated_round_is_compact_and_decimated_remains_signals():
     import numpy as np
-    from zcu_tools.core.simulation import (
+    from zcu_tools.program.v2.simulation import IntegratedRound
+    from zcu_tools.simulate.boundary import (
         AcquireRequest,
         ReadoutWindow,
         RoundRequest,
         RoundSignals,
         TimeBase,
     )
-    from zcu_tools.program.v2.simulation import IntegratedRound
 
     env = white_noise(load_soccfg(), std_adc=3, seed=17, routes=((0, 0),))
     try:

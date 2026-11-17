@@ -5,13 +5,13 @@ from dataclasses import replace
 
 import pytest
 from qick import QickConfig
-from zcu_tools.core.simulation import AcquireRequest
 from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.program.v2.ir import CompiledRecord, CompiledStream
 from zcu_tools.program.v2.ir.instructions import RegWriteInst
 from zcu_tools.program.v2.ir.io_instructions import DportWriteInst, TrigInst
 from zcu_tools.program.v2.ir.operands import Immediate, ImmValue, Register, SrcKeyword
 from zcu_tools.program.v2.timeline import TimelineProgramV2
+from zcu_tools.simulate.boundary import AcquireRequest
 
 from tests.program._profiles import profile_soccfg
 from tests.program.v2.simulation._compiled_support import program, request

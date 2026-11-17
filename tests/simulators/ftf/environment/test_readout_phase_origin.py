@@ -4,8 +4,8 @@ from dataclasses import replace
 
 import numpy as np
 import pytest
-from zcu_tools.core.simulation import TimeBase
 from zcu_tools.simulate.adc import ConditionalReadout, ReadoutModel, Receiver
+from zcu_tools.simulate.boundary import TimeBase
 from zcu_tools.simulators.ftf.environment import (
     FTFMuxReadoutConfig,
     FTFReadoutConfig,

@@ -12,9 +12,9 @@ from itertools import product
 import numpy as np
 import pytest
 from numpy.typing import NDArray
-from zcu_tools.core.simulation import CancellationQuery
 from zcu_tools.experiment.readout_plan import ReadoutContents
 from zcu_tools.simulate.adc import ProjectionChain
+from zcu_tools.simulate.boundary import CancellationQuery
 from zcu_tools.simulate.evolution import (
     Basis,
     EvolutionResult,
