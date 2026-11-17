@@ -79,7 +79,8 @@ def test_populations_match_dense_ode(frequency: float) -> None:
         phase_rad=np.array([1.1]),
     )
     timeline = replace(batch(1, duration=50.0), tracks=(pulse,))
-    result = run(Engine(1), case.source, (timeline,))
+    # Measure this channel's accuracy, independent of default DC pricing.
+    result = run(Engine(1, families=("slow_envelope",)), case.source, (timeline,))
     assert result.paths.segments_by_kernel == {"slow_envelope": 1}
     np.testing.assert_allclose(
         result.densities[0].diagonal().real, expected.diagonal().real, atol=1e-3, rtol=0
