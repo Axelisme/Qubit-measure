@@ -157,6 +157,8 @@ Kernel 量測在 `Engine.evolve` 上用 `families=` 固定候選，輸入只有�
 整體耗時改用多段 `TimelineBatch` 在 `Engine.evolve` 的序列層量測，不經 program compilation 或 ADC sampling。
 現有的 family 誤差與耗時量表見下節。
 
+量測場景的選法、速度驗收的順序與 10% 回報規則見 [模擬器維護規則](../lib/zcu_tools/simulate/maintenance.md#4-量測)。
+
 ## Shared simulator measurement
 
 `tools.simulator_measurement` owns the session modes and wall/process clocks.
