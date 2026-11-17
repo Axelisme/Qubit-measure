@@ -8,12 +8,12 @@ from hashlib import sha256
 import numpy as np
 from numpy.typing import NDArray
 
-from zcu_tools.core.simulation import CancellationQuery
 from zcu_tools.simulate.adc import (
     CavityAverageCache,
     ProjectionReadout,
     normalize_populations,
 )
+from zcu_tools.simulate.boundary import CancellationQuery
 from zcu_tools.simulate.evolution import (
     Engine,
     EvolutionResult,

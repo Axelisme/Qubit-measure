@@ -11,15 +11,6 @@ from pathlib import Path
 import numpy as np
 from qick import QickConfig
 
-from zcu_tools.core.simulation import (
-    AcquireRequest,
-    CancellationQuery,
-    ChannelSignals,
-    EnvironmentSnapshot,
-    RoundRequest,
-    RoundSignals,
-    SamplingIdentity,
-)
 from zcu_tools.device import DeviceManager
 from zcu_tools.device.fake import FakeDevice, FakeDeviceInfo
 from zcu_tools.experiment.simulation import EnvironmentWarmup, SimulationEnvironment
@@ -43,6 +34,15 @@ from zcu_tools.simulate.adc import (
     ReadoutBatch,
     normalize_populations,
     sample_traces,
+)
+from zcu_tools.simulate.boundary import (
+    AcquireRequest,
+    CancellationQuery,
+    ChannelSignals,
+    EnvironmentSnapshot,
+    RoundRequest,
+    RoundSignals,
+    SamplingIdentity,
 )
 from zcu_tools.simulate.evolution import (
     Basis,

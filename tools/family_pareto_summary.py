@@ -9,8 +9,8 @@ from pathlib import Path
 
 from pydantic import TypeAdapter
 
-from tools.family_pareto import FamilyResult, FamilyStatus, InputResult
 from tools.family_pareto_inputs import canonical_json
+from tools.family_pareto_results import FamilyResult, FamilyStatus, InputResult
 
 
 @dataclass(frozen=True)
@@ -67,10 +67,13 @@ class PolicySummary:
 
 @dataclass(frozen=True)
 class ScenarioSummary:
-    """Version-1 numeric record for exactly one Input.name.
+    """Version-1 numeric record for exactly one selected scenario record.
 
-    name identifies the builder. manifest_sha256 hashes the current frozen
-    manifest; physical_sha256 includes model identity, oracle_sha256 omits it.
+    name is the selected record's scenario name. manifest_sha256 is a legacy
+    field name for the digest of the ordered selected record identities, each
+    containing name, physical_sha256, oracle_sha256 and metadata_sha256.
+    It is not a source path or a manifest file SHA.
+    physical_sha256 includes model identity, oracle_sha256 omits it.
     measured_families lists only measured pinned families, not default/fixed.
     policies includes those pinned policies and separate default/fixed results.
     provenance records this single run; summaries never merge policy sources.

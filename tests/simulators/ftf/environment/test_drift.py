@@ -8,9 +8,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 from threadpoolctl import threadpool_limits
-from zcu_tools.core.simulation import RoundSignals
 from zcu_tools.device import DeviceManager
 from zcu_tools.program.v2.simulation import SimulationClock
+from zcu_tools.simulate.boundary import RoundSignals
 from zcu_tools.simulators.ftf.config import parse_ftf
 from zcu_tools.simulators.ftf.environment import FTFAcquisitionOptions, FTFSource, ftf
 from zcu_tools.simulators.ftf.environment.drift import FTFCoherenceDrift

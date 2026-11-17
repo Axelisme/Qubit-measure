@@ -13,14 +13,6 @@ from threading import Event, Lock
 import numpy as np
 from numpy.typing import NDArray
 
-from zcu_tools.core.simulation import (
-    AcquireRequest,
-    ChannelStatistics,
-    ReadoutWindow,
-    RoundStatistics,
-    SamplingIdentity,
-    TimeBase,
-)
 from zcu_tools.experiment.warmup import EnvironmentWarmup
 from zcu_tools.program.v2.simulation.signals import StatisticsCopier
 from zcu_tools.simulate.adc import (
@@ -32,6 +24,14 @@ from zcu_tools.simulate.adc import (
     ReadoutPulse,
     Receiver,
     SampleGrid,
+)
+from zcu_tools.simulate.boundary import (
+    AcquireRequest,
+    ChannelStatistics,
+    ReadoutWindow,
+    RoundStatistics,
+    SamplingIdentity,
+    TimeBase,
 )
 from zcu_tools.simulate.evolution import (
     DriveTrack,

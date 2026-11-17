@@ -5,7 +5,7 @@ from dataclasses import replace
 
 import numpy as np
 
-from zcu_tools.core.simulation import CancellationQuery
+from zcu_tools.simulate.boundary import CancellationQuery
 
 from ._dispatch import classify
 from ._parallel import Executor

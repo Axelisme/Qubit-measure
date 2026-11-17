@@ -7,12 +7,6 @@ from fractions import Fraction
 from threading import Event
 
 import pytest
-from zcu_tools.core.simulation import (
-    AcquireRequest,
-    EnvironmentSnapshot,
-    RoundSignals,
-    TimeBase,
-)
 from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.program.acquisition import StoppedPartialAcquireError
 from zcu_tools.program.v2 import TimelineBuilder
@@ -25,6 +19,12 @@ from zcu_tools.program.v2.simulation import (
     SimulationSoc,
 )
 from zcu_tools.program.v2.simulation.compiled import build_compiled_request
+from zcu_tools.simulate.boundary import (
+    AcquireRequest,
+    EnvironmentSnapshot,
+    RoundSignals,
+    TimeBase,
+)
 
 from tests.program._profiles import load_soccfg
 

@@ -25,9 +25,29 @@
 - 2026-11-16 [Acquire outcome 的作用域與編譯交接](2026-11-16-acquire-outcome-scope.md)：生命週期。Binding 以自身作用域判斷正常返回，mixin 只圈住 builder 計時，environment 接收同一結果物件。
 
 - 2026-11-16 [共用 acquire telemetry writer](2026-11-16-shared-acquire-telemetry.md)：資料契約。共用八欄必填 summary，writer 明列投影，FTF projection 只放 namespaced extras。
+- 2026-11-17 [Projective read 的輸出改成 Markov chain](2026-11-17-projection-markov-chain-readout.md)：資料格式。Single／six 輸出每點初始分佈與逐 read 轉移表，integrated 用逐態 flow counts，floor 改成逐點 identity 近似；FTF 不動，決策見 [ADR-0078](../adr/0078-evolution-module-boundary.md#projective-read-的-markov-chain-表示)。
+
+
+- 2026-11-17 [共用清單的 Pareto 選集與明確新增場景](2026-11-17-pareto-selection-and-scene-append.md)：選取契約。Pareto 自持預設名稱，明確更新才新增列，reference producer 只讀解所選單列。
+
+- 2026-11-16 [凍結場景改為共用快取，Git 只留名稱與 hash 清單](2026-11-16-frozen-scene-storage.md)：資料入庫。數值不入庫，每筆單筆 gzip，Git 只留兩份小清單，重建不符就停。
+
+- 2026-11-16 [Exclusion estimator 退休](2026-11-16-exclusion-estimator-retirement.md)：刪除或收窄。退休沒有非測試 caller 的 helper，收窄 guard 的耗時影響改量實際改動。
+
+- 2026-11-16 [量測樣本時間的值域與成對比值檢查](2026-11-16-measurement-sample-durations.md)：值域取捨。Owner 原樣記錄有限非負秒數，成對區塊比值要求兩側總和為正。
+
+- 2026-11-16 [成對 Engine 計時的 process、身份與統計](2026-11-16-paired-engine-timing.md)：跨 process 計時。Warm 長駐、first/cold 每筆新 child，四項 telemetry 校準共用一個模式。
+
+- 2026-11-16 [共用模擬器計時與 reference 必填](2026-11-16-shared-simulator-measurement.md)：計時歸屬。Session、history 與 clock 共用 owner，consumer 保留 reference 與結果 schema，0 elapsed 原樣記錄。
+
+- 2026-11-16 [Family 量表改為整批 cache-only](2026-11-16-family-pareto-cache-only.md)：介面退休。Consumer 整批載入後才量測，check 不求解；公開接縫提供穩定的每筆 record 身份，存放已遷移到共用快取與小清單。
+
+- 2026-11-16 [模擬器場景凍結與參考解數值交接](2026-11-16-frozen-simulator-inputs.md)：資料交接。場景 producer 自持控制與模型，通用 codec 保留既有 key，獨立 solver 留在 tests 側。
 
 - 2026-11-16 [Floquet 的保留與價格重校](2026-11-16-floquet-kept-price.md)：保留或刪除。Committed 批次上 `floquet` 快 1.65–1.81 倍，保留並重校價格；三 family 排序等 `multitone_rwa` 修好。
 - 2026-11-16 [Floquet 的拒絕成本與單次 evolve 內的 frame 重用](2026-11-16-floquet-refusal-cost.md)：拒絕成本。既有拒絕條件提前，一次 evolve 內 exact-key frame 只建一次；不把拒絕機率算進價格，不跨 key 或跨 evolve 保留 frame，不做建 frame 前的 trace 下界。
+
+- 2026-11-15 [模擬器測試與量測的分層](2026-11-15-simulator-test-measurement-layering.md)：分層。Kernel、dispatch、序列、前端與 environment 分開驗，退休 acquire e2e 量測，決策見 [ADR-0078](../adr/0078-evolution-module-boundary.md#模擬器的測試與量測分層不做-e2e)。
 
 - 2026-11-15 [t6 只保留 direct](2026-11-15-t6-channel-removal.md)：刪除或收窄。移除代表性工作負載未選用的 channel 做法與價格分支，保留 direct 與既有 family。
 
@@ -71,6 +91,8 @@
 
 ## 模組邊界
 
+- 2026-11-15 [模擬器封閉成子模塊](2026-11-15-simulator-closed-submodule.md)：依賴邊界。`simulate` 不 import `zcu_tools` 其他 package，邊界型別歸它，裝置模型由使用方經介面聲明，決策見 [ADR-0072](../adr/0072-module-boundaries.md#模擬器是封閉的子模塊模型由使用方聲明)。
+- 2026-11-17 [封閉 simulate 的搬遷順序](2026-11-17-simulate-closure-expand-order.md)：搬遷順序。被 contract 擋住的暫時轉出改放在允許的方向（新位置轉出舊定義），分批改 importer，最後一票才搬定義，main 不出現 re-export。
 - 2026-11-14 [Lab 依賴只經 assembly 入口](2026-11-14-lab-dependency-boundary.md)：依賴邊界。組合根與開發工具只直接 import assembly，migrations 保留格式遷移所需的直接依賴，決策見 [ADR-0072](../adr/0072-module-boundaries.md)。
 - 2026-10-20 [框架去具體化：alias、模板、predictor 與一晶片一 qubit 假設](2026-10-20-framework-decoupling.md)：領域 alias、模板與模型認知留在 zcu_lab，框架的 owner 邊界見 [ADR-0072](../adr/0072-module-boundaries.md)。
 

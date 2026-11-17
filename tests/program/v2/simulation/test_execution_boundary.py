@@ -3,13 +3,13 @@
 import numpy as np
 import pytest
 from qick.asm_v2 import AsmInst, QickParam
-from zcu_tools.core.simulation import ChannelSignals, RoundSignals
 from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.program.v2 import TimelineBuilder, TimelineProgramV2
 from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.simulation import SimulationSoc
+from zcu_tools.simulate.boundary import ChannelSignals, RoundSignals
 
 from tests.program._profiles import TPROC_MHZ, load_soccfg
 from tests.program._timeline import compile_modules

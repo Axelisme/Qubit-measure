@@ -8,7 +8,7 @@ from dataclasses import dataclass, replace
 import numpy as np
 from numpy.typing import NDArray
 
-from zcu_tools.core.simulation import (
+from zcu_tools.simulate.boundary import (
     EventSlot,
     PulseEnvelope,
     ReadoutSlot,

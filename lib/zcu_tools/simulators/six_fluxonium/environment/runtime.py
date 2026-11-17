@@ -13,14 +13,6 @@ import numpy as np
 from numpy.typing import NDArray
 from qick import QickConfig
 
-from zcu_tools.core.simulation import (
-    AcquireRequest,
-    ChannelSignals,
-    EnvironmentSnapshot,
-    RoundRequest,
-    RoundSignals,
-    SamplingIdentity,
-)
 from zcu_tools.device import DeviceManager, FakeDevice, FakeDeviceInfo
 from zcu_tools.experiment.simulation import SimulationEnvironment
 from zcu_tools.program.v2.simulation import (
@@ -35,6 +27,14 @@ from zcu_tools.program.v2.simulation import (
 from zcu_tools.simulate.adc import (
     round_statistics,
     sample_traces,
+)
+from zcu_tools.simulate.boundary import (
+    AcquireRequest,
+    ChannelSignals,
+    EnvironmentSnapshot,
+    RoundRequest,
+    RoundSignals,
+    SamplingIdentity,
 )
 from zcu_tools.simulate.evolution import Engine, RoutingHistory
 from zcu_tools.simulators.single_fluxonium.config.schema import (

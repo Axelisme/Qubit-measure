@@ -11,8 +11,8 @@ from typing import Protocol
 import numpy as np
 import pytest
 from numpy.typing import NDArray
-from zcu_tools.core.simulation import RoundStatistics, SamplingIdentity
 from zcu_tools.simulate import adc
+from zcu_tools.simulate.boundary import RoundStatistics, SamplingIdentity
 
 
 class StatisticsImplementation(Protocol):

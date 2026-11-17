@@ -93,7 +93,11 @@ Solver tolerances control numerical integration, not basis convergence.
 Seed is required and selects the root RNG identity; explicit null chooses once
 at startup. Thermal occupation is required; null uses Bose equilibrium.
 YAML also requires `numerics.slow_envelope_segments_per_period` and
-`numerics.projection_prune_floor`. Acquire sequence and software round select
+`numerics.projection_prune_floor`. At each point, source states below this floor
+use identity transition rows, approximating them as staying in the same state.
+Zero gives the exact chain. Path total variation is at most the sum of that
+point's diagnostics `uncontinued_probability` across transitions.
+Acquire sequence and software round select
 independent streams; raw shots use a stream separate from direct means.
 `time_scale` multiplies physical round time: reps times the sum of each point's
 timeline duration and relax delay. The default is 1.0; 0.1 is ten times faster,

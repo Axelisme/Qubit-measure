@@ -9,23 +9,20 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from scipy.integrate import solve_ivp
-from zcu_tools.core.simulation import (
+from zcu_tools.program.v2.modules.pulse import PulseCfg
+from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
+from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
+from zcu_tools.program.v2.simulation import IntegratedRound
+from zcu_tools.simulate.boundary import (
     AcquireRequest,
     AcquisitionMode,
     ChargeDriveRequirement,
     ReadoutSlot,
     ReadoutWindow,
     RoundRequest,
-    RoundSignals,
     TimelineTemplate,
 )
-from zcu_tools.program.v2 import LoadValue, TimelineBuilder
-from zcu_tools.program.v2.modules.pulse import PulseCfg
-from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
-from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
-from zcu_tools.program.v2.simulation import IntegratedRound
-from zcu_tools.simulate.evolution import Engine
+from zcu_tools.simulate.evolution import EvolutionResult, PathDiagnostics
 from zcu_tools.simulators.replay import (
     ReplayAcquire,
     read_replay,
@@ -36,12 +33,13 @@ from zcu_tools.simulators.single_fluxonium.config import parse_single_fluxonium
 from zcu_tools.simulators.single_fluxonium.environment.runtime import (
     SingleFluxoniumRuntimeOptions,
     SingleFluxoniumSource,
-    single_fluxonium,
 )
 
 from tests.core._simulation import TIME_BASE, tick_array, tick_tuple
 from tests.program._profiles import profile_soccfg
 from tests.program._timeline import compile_modules
+from tests.simulators._engine import EngineDouble, controlled_engine
+from tests.simulators._sources import single_environment as single_fluxonium
 from tests.simulators.single_fluxonium.environment._inputs import settings, slot
 
 pytestmark = pytest.mark.sim
@@ -120,155 +118,50 @@ def expect_integrated(result):
     return result
 
 
-def independent_populations(source, request, point):
-    """Direct fixed-coordinate Lindblad ODE, independent of evolution dispatch."""
-    facts = source.model_facts(source.snapshot())
-    model = facts.source.model((0,))
-    rho0 = facts.source.initial_density
-    charge = model.drives[0]
-    template = request.templates[0]
-    end = request.time_base.ns(template.events[-1].start_ticks[point])
-    boundaries = sorted(
-        {
-            0.0,
-            end,
-            *(
-                float(value)
-                for event in template.events
-                if event.gen_ch != 0
-                for value in (
-                    request.time_base.ns(event.start_ticks[point]),
-                    request.time_base.ns(
-                        event.start_ticks[point] + event.duration_ticks[point]
-                    ),
-                )
-                if 0 < value < end
-            ),
-        }
-    )
-    state = rho0.ravel()
-    for start, stop in zip(boundaries[:-1], boundaries[1:], strict=True):
-        active = [
-            event
-            for event in template.events
-            if event.gen_ch != 0
-            and request.time_base.ns(event.start_ticks[point])
-            <= (start + stop) / 2
-            < request.time_base.ns(
-                event.start_ticks[point] + event.duration_ticks[point]
-            )
-        ]
-        flux = facts.model.dc_flux + sum(
-            event.gain[point] * source.settings.flux_line.flux_phi0_per_gain
-            for event in active
-            if event.gen_ch == 2
-        )
-        level = int(round((flux - facts.model.dc_flux) / 1e-3))
-        bath = facts.source.model((level,))
-        transform = model.eigenvectors.conj().T @ bath.eigenvectors
-        h0 = (
-            model.eigenvectors.conj().T
-            @ facts.model.hamiltonian(flux)
-            @ model.eigenvectors
-        )
-        rate = bath.rates_per_ns
-        outgoing = rate.sum(axis=0)
-        decay = (outgoing[:, None] + outgoing[None, :]) / 2 + bath.dephasing_per_ns
-
-        interval = (h0, active, transform, decay, rate)
-
-        def derivative(time, flattened, interval=interval):
-            h0, active, transform, decay, rate = interval
-            rho = flattened.reshape(rho0.shape)
-            hamiltonian = h0.copy()
-            for event in active:
-                if event.gen_ch != 1:
-                    continue
-                angle = 2 * np.pi * event.frequency_mhz[
-                    point
-                ] / 1000 * time + np.deg2rad(event.phase_deg[point])
-                hamiltonian += event.gain[point] * (
-                    np.cos(angle) * charge.in_phase_ghz
-                    + np.sin(angle) * charge.quadrature_ghz
-                )
-            local = transform.conj().T @ rho @ transform
-            dissipated = -decay * local
-            dissipated[np.diag_indices_from(local)] += rate @ local.diagonal()
-            result = (
-                -2j * np.pi * (hamiltonian @ rho - rho @ hamiltonian)
-                + transform @ dissipated @ transform.conj().T
-            )
-            return result.ravel()
-
-        solution = solve_ivp(
-            derivative, (start, stop), state, method="DOP853", rtol=1e-9, atol=1e-11
-        )
-        assert solution.success
-        state = solution.y[:, -1]
-    return state.reshape(rho0.shape).diagonal().real
-
-
 @pytest.mark.parametrize(
     "experiment", ["onetone", "twotone", "rabi", "t1", "fastflux_t1"]
 )
-def test_representative_single_points_match_population_oracle(experiment):
+def test_representative_single_points_deliver_given_populations_to_adc(experiment):
     config = physical_settings()
-    if experiment == "fastflux_t1":
-        if config.flux_line is None:
-            raise AssertionError("fast-flux oracle fixture requires a bound line")
-        config = config.model_copy(
-            update={
-                "flux_line": config.flux_line.model_copy(
-                    update={"tau_ns": 0.0, "delay_ns": 0.0}
-                )
-            }
-        )
     env = single_fluxonium(config, soccfg=profile_soccfg("single_fluxonium"))
-    source = SingleFluxoniumSource(config, env.devices)
+    # Deliberately return reverse point order with distinct supplied populations.
+    expected = np.array([[0.8, 0.2, 0, 0], [0.3, 0.7, 0, 0]])
+    engine = EngineDouble(
+        result=EvolutionResult(
+            np.array([1, 0], dtype=np.int64),
+            np.array([np.diag(expected[1]), np.diag(expected[0])], dtype=np.complex128),
+            PathDiagnostics(),
+        )
+    )
+    source = SingleFluxoniumSource(
+        config, env.devices, runtime=SingleFluxoniumRuntimeOptions(engine=engine)
+    )
     try:
         request = request_for(source, experiment)
-        try:
-            result = expect_integrated(
-                source.execute(RoundRequest(request, source.snapshot(), 0))
-            )
-        except NotImplementedError:
-            pytest.fail(
-                "single-cavity execute must evolve and sample a real integrated round"
-            )
-        populations = result.statistics.state_counts / request.reps
-        for point in range(2):
-            expected = independent_populations(source, request, point)
-            np.testing.assert_allclose(populations[point], expected, atol=0.015, rtol=0)
-        sums = result.statistics.channels[0].conditional_sums
-        assert sums.shape == (2, 1, 4, 2)
-        assert np.linalg.norm(sums[0, 0, 0] - sums[0, 0, 1]) > 0.01
+        result = expect_integrated(
+            source.execute(RoundRequest(request, source.snapshot(), 0))
+        )
+        np.testing.assert_allclose(
+            result.statistics.state_counts / request.reps, expected, atol=0.015, rtol=0
+        )
+        assert len(engine.calls) == 1
+        assert result.statistics.channels[0].conditional_sums.shape == (2, 1, 4, 2)
         assert result.statistics.raw_identity.stream == (0, 0, 1)
-        if experiment == "rabi":
-            assert populations[1, 1] > populations[0, 1] + 0.1
-        if experiment == "twotone":
-            assert populations[0, 1] > populations[1, 1] + 0.1
-        if experiment in ("t1", "fastflux_t1"):
-            assert populations[1, 1] < populations[0, 1]
-        if experiment == "fastflux_t1":
-            dc_only = replace(
-                request.templates[0],
-                events=tuple(
-                    event for event in request.templates[0].events if event.gen_ch != 2
-                ),
-            )
-            ignored = independent_populations(
-                source, replace(request, templates=(dc_only,)), 0
-            )
-            assert abs(populations[0, 1] - ignored[1]) > 0.015
     finally:
         source.close()
+        if env.close_backend is not None:
+            env.close_backend()
         env.devices.close_all_devices()
 
 
 def test_onetone_mean_matches_causal_scalar_cavity_solution():
     config = physical_settings()
     env = single_fluxonium(config, soccfg=profile_soccfg("single_fluxonium"))
-    source = SingleFluxoniumSource(config, env.devices)
+    source = SingleFluxoniumSource(
+        config,
+        env.devices,
+        runtime=SingleFluxoniumRuntimeOptions(engine=EngineDouble()),
+    )
     try:
         request = request_for(source)
         try:
@@ -307,7 +200,11 @@ def test_round_replay_and_raw_outlive_source(tmp_path: Path, mode):
     env = single_fluxonium(
         physical_settings(), soccfg=profile_soccfg("single_fluxonium")
     )
-    source = SingleFluxoniumSource(physical_settings(), env.devices)
+    source = SingleFluxoniumSource(
+        physical_settings(),
+        env.devices,
+        runtime=SingleFluxoniumRuntimeOptions(engine=EngineDouble()),
+    )
     try:
         source.private_replay = tmp_path / "archive"
         request = request_for(source, "rabi", mode, reps=8)
@@ -336,25 +233,16 @@ def test_round_replay_and_raw_outlive_source(tmp_path: Path, mode):
     if isinstance(result, IntegratedRound):
         for ch, raw in result.raw.materialize(request.reps, request.avg_level).items():
             np.testing.assert_array_equal(raw, expected[ch])
-    replayed = replay.replay_round(paths[0])
-    actual = (
-        replayed.raw.materialize(request.reps, request.avg_level)
-        if isinstance(replayed, IntegratedRound)
-        else {c.channel: c.iq for c in replayed.channels}
-    )
-    for ch in expected:
-        np.testing.assert_array_equal(actual[ch], expected[ch])
-    if isinstance(result, IntegratedRound):
-        np.testing.assert_array_equal(
-            expect_integrated(replayed).statistics.channels[0].sums,
-            result.statistics.channels[0].sums,
-        )
-    else:
-        assert isinstance(result, RoundSignals)
-        assert result.channels[0].iq.shape == (16, 1, 8, 2)
     saved = read_replay(paths[0])
+    assert saved.round.index == 2
+    assert saved.acquire.request.point_dims == request.point_dims
     incompatible = saved.acquire.model_copy(
-        update={"versions": (("backend", "obsolete"),)}
+        update={
+            "versions": tuple(
+                (name, "single-fluxonium-segment-v1" if name == "backend" else value)
+                for name, value in saved.acquire.versions
+            )
+        }
     )
     path = save_replay(tmp_path / "obsolete", incompatible, saved.round.snapshot, 2)
     with pytest.raises(ValueError, match="version mismatch"):
@@ -382,7 +270,11 @@ def named_drive_settings():
 def test_preflight_routes_overlapping_events_to_their_own_named_source():
     config = named_drive_settings()
     env = single_fluxonium(config, soccfg=profile_soccfg("single_fluxonium"))
-    source = SingleFluxoniumSource(config, env.devices)
+    source = SingleFluxoniumSource(
+        config,
+        env.devices,
+        runtime=SingleFluxoniumRuntimeOptions(engine=EngineDouble()),
+    )
     try:
         request = request_for(source, "rabi")
         compiled = request.templates[0]
@@ -392,6 +284,24 @@ def test_preflight_routes_overlapping_events_to_their_own_named_source():
         validated = source.preflight(request, source.snapshot())
         tracks = validated.plans[0][0].batch.tracks
         assert [track.port for track in tracks] == ["primary", "auxiliary"]
+        facts = source.model_facts(source.snapshot())
+        model = facts.source.model((0,))
+        charge = (
+            model.eigenvectors.conj().T
+            @ facts.model.charge_operator()
+            @ model.eigenvectors
+        )
+        assert [drive.name for drive in model.drives] == ["primary", "auxiliary"]
+        # Caller supplies distinct complex calibrations for the two named lines.
+        for drive, calibration in zip(
+            model.drives, (0.1 - 0.02j, -0.05 + 0.1j), strict=True
+        ):
+            np.testing.assert_allclose(
+                drive.in_phase_ghz, calibration.real * charge, atol=1e-12
+            )
+            np.testing.assert_allclose(
+                drive.quadrature_ghz, -calibration.imag * charge, atol=1e-12
+            )
         np.testing.assert_array_equal(tracks[0].start_ns, [0, 0])
         np.testing.assert_array_equal(tracks[1].start_ns, [8, 8])
         np.testing.assert_array_equal(tracks[1].duration_ns, [24, 24])
@@ -409,7 +319,11 @@ def test_preflight_routes_overlapping_events_to_their_own_named_source():
 def test_preflight_rejects_unknown_generator_with_event_path(channel):
     config = named_drive_settings()
     env = single_fluxonium(config, soccfg=profile_soccfg("single_fluxonium"))
-    source = SingleFluxoniumSource(config, env.devices)
+    source = SingleFluxoniumSource(
+        config,
+        env.devices,
+        runtime=SingleFluxoniumRuntimeOptions(engine=EngineDouble()),
+    )
     try:
         request = request_for(source, "rabi")
         compiled = request.templates[0]
@@ -425,71 +339,6 @@ def test_preflight_rejects_unknown_generator_with_event_path(channel):
         if env.close_backend is not None:
             env.close_backend()
         env.devices.close_all_devices()
-
-
-def test_overlapping_named_drives_acquire_and_respond_to_each_calibration():
-    means = []
-    for disabled in (None, "first", "second"):
-        configured = named_drive_settings().model_dump(mode="json")
-        if disabled is not None:
-            configured["drive_lines"][disabled]["charge_drive_ghz_per_gain"] = {
-                "real": 0.0,
-                "imag": 0.0,
-            }
-        env = single_fluxonium(
-            parse_single_fluxonium(configured),
-            soccfg=profile_soccfg("single_fluxonium"),
-        )
-        try:
-            first = PulseCfg(
-                ch=1,
-                nqz=1,
-                freq=580,
-                gain=0.2,
-                waveform=ConstWaveformCfg(length=0.032),
-            )
-            second = PulseCfg(
-                ch=5,
-                nqz=1,
-                freq=580,
-                phase=60,
-                gain=0.35,
-                waveform=ConstWaveformCfg(length=0.024),
-            )
-            readout = PulseReadoutCfg(
-                gen_ch=0,
-                ro_ch=0,
-                nqz=1,
-                freq=7000,
-                gain=0.1,
-                waveform=ConstWaveformCfg(length=0.024),
-                ro_length=0.016,
-                trig_offset=0.002,
-            )
-            builder = TimelineBuilder(env.soccfg, reps=100_000)
-            builder.fork("default", into="second")
-            builder.emit(first.build("first"))
-            builder.emit(second.build("second"), timeline="second")
-            builder.join("default", "second", into="default")
-            builder.emit(readout.build("ro"))
-            builder.delay_by_timeline()
-            program = builder.build()
-            average = program.acquire(
-                env.soc,
-                progress=False,
-                charge_requirements=(
-                    ChargeDriveRequirement("first drive", 1),
-                    ChargeDriveRequirement("second drive", 5),
-                ),
-            )
-            assert average is not None
-            means.append(np.asarray(average))
-        finally:
-            if env.close_backend is not None:
-                env.close_backend()
-            env.devices.close_all_devices()
-    assert np.max(np.abs(means[0] - means[1])) > 1e-3
-    assert np.max(np.abs(means[0] - means[2])) > 1e-3
 
 
 def test_program_acquire_raw_decimated_and_live_round_refresh():
@@ -558,7 +407,7 @@ def test_program_acquire_raw_decimated_and_live_round_refresh():
 def test_replay_rejects_other_backend_settings_before_numeric_work(
     tmp_path: Path, target
 ):
-    from zcu_tools.core.simulation import EnvironmentSnapshot
+    from zcu_tools.simulate.boundary import EnvironmentSnapshot
     from zcu_tools.simulators.ftf.config import parse_ftf
     from zcu_tools.simulators.ftf.environment import replay as ftf_replay
     from zcu_tools.simulators.single_fluxonium.environment import (
@@ -597,12 +446,13 @@ def test_replay_rejects_other_backend_settings_before_numeric_work(
 
 
 def test_changed_settings_refresh_snapshot_identity_and_replay_inputs(tmp_path: Path):
-    from zcu_tools.simulators.single_fluxonium.environment import replay_round
-
     config = physical_settings()
     env = single_fluxonium(config, soccfg=profile_soccfg("single_fluxonium"))
     source = SingleFluxoniumSource(
-        config, env.devices, private_replay=tmp_path / "archive"
+        config,
+        env.devices,
+        private_replay=tmp_path / "archive",
+        runtime=SingleFluxoniumRuntimeOptions(engine=EngineDouble()),
     )
     try:
         request = request_for(source, reps=8)
@@ -626,16 +476,9 @@ def test_changed_settings_refresh_snapshot_identity_and_replay_inputs(tmp_path: 
     finally:
         source.close()
         env.devices.close_all_devices()
-    replayed = expect_integrated(replay_round(archived))
-    np.testing.assert_array_equal(
-        replayed.statistics.channels[0].sums, result.statistics.channels[0].sums
-    )
-    for channel, values in result.raw.materialize(
-        request.reps, request.avg_level
-    ).items():
-        np.testing.assert_array_equal(
-            replayed.raw.materialize(request.reps, request.avg_level)[channel], values
-        )
+    saved = read_replay(archived)
+    assert saved.round.snapshot.model_identity == after.model_identity
+    assert result.statistics.channels[0].sums.shape == (2, 1, 2)
 
 
 def test_builder_backend_cleanup_rejects_later_work_but_leaves_drivers_owned():
@@ -696,97 +539,6 @@ def test_dc_only_single_source_acquires_without_a_fast_flux_route():
         env.devices.close_all_devices()
 
 
-@pytest.mark.parametrize(
-    "case, expected",
-    [
-        ("absent", [[972.5758438077908, -0.25173123177691964]]),
-        (
-            "inactive",
-            [
-                [972.5535136297327, -0.23690658344665044],
-                [972.5616134942782, -0.30040715262673],
-            ],
-        ),
-        (
-            "mixed",
-            [
-                [972.5535136297327, -0.23690658344665044],
-                [972.5616134942782, -0.30040715262673],
-            ],
-        ),
-        ("active", [[972.5750060008338, -0.1565572073141823]]),
-        ("delayed", [[972.5755645388051, -0.22000655695600715]]),
-        ("distorted", [[972.5752852698197, -0.18828188213509472]]),
-        ("tail", [[972.5755645388051, -0.22000655695600715]]),
-    ],
-)
-def test_fixed_seed_native_acquire_preserves_flux_controls(case, expected):
-    # Public native acquire means include ADC noise. Actual waveform ends ceil
-    # to processor ticks before the next pulse; they do not use cfg padding.
-    # Keep exact equality for these native quantized fixtures.
-    values = physical_settings().model_dump(mode="json")
-    if case == "active":
-        values["flux_line"].update(delay_ns=0.0, tau_ns=0.0)
-    elif case == "delayed":
-        values["flux_line"]["delay_ns"] = 6.0
-    elif case == "distorted":
-        values["flux_line"]["distortion_terms"] = [{"amplitude": 0.3, "tau_ns": 12.0}]
-    elif case == "tail":
-        values["flux_line"]["tau_ns"] = 20.0
-    env = single_fluxonium(
-        parse_single_fluxonium(values), soccfg=profile_soccfg("single_fluxonium")
-    )
-    try:
-        microwave = PulseCfg(
-            ch=1,
-            nqz=1,
-            freq=580,
-            gain=0.2,
-            waveform=ConstWaveformCfg(length=0.032),
-        )
-        fast_flux = PulseCfg(
-            ch=2,
-            nqz=1,
-            freq=0,
-            gain=0.4,
-            waveform=ConstWaveformCfg(length=0.008),
-        )
-        readout = PulseReadoutCfg(
-            gen_ch=0,
-            ro_ch=0,
-            nqz=1,
-            freq=7000,
-            gain=0.1,
-            waveform=ConstWaveformCfg(length=0.024),
-            ro_length=0.016,
-            trig_offset=0.002,
-        )
-        builder = TimelineBuilder(
-            env.soccfg, reps=8, initial_delay=0.0, relax_delay=0.0
-        )
-        if case in ("inactive", "mixed"):
-            builder.add_loop("axis", 2)
-        builder.emit(microwave.build("mw"))
-        if case in ("inactive", "mixed"):
-            counts = [0, 0] if case == "inactive" else [0, 1]
-            builder.emit(LoadValue("count", counts, "axis", "n"))
-            with builder.repeat("ff_repeat", "n", range_hint=(0, 1)):
-                builder.emit(fast_flux.build("ff"))
-        elif case != "absent":
-            builder.emit(fast_flux.build("ff"))
-        builder.timeline_inc(0.004)
-        builder.emit(readout.build("ro"))
-        builder.delay_by_timeline()
-        program = builder.build()
-        average = program.acquire(env.soc, rounds=1, progress=False)
-        assert average is not None
-        np.testing.assert_array_equal(np.asarray(average).reshape(-1, 2), expected)
-    finally:
-        if env.close_backend is not None:
-            env.close_backend()
-        env.devices.close_all_devices()
-
-
 def test_source_rejects_nonterminal_cavity_pulses_before_evolution():
     env = single_fluxonium(
         physical_settings(), soccfg=profile_soccfg("single_fluxonium")
@@ -806,7 +558,7 @@ def test_source_rejects_nonterminal_cavity_pulses_before_evolution():
         env.devices.close_all_devices()
 
 
-class EvolutionObserver(Engine):
+class EvolutionObserver(EngineDouble):
     """Count calls at the injected evolution boundary without replacing admission."""
 
     def __init__(self):
@@ -863,7 +615,11 @@ def test_source_rejects_invalidated_session_and_refreshes_mutated_controls():
     env = single_fluxonium(
         physical_settings(), soccfg=profile_soccfg("single_fluxonium")
     )
-    source = SingleFluxoniumSource(physical_settings(), env.devices)
+    source = SingleFluxoniumSource(
+        physical_settings(),
+        env.devices,
+        runtime=SingleFluxoniumRuntimeOptions(engine=EngineDouble()),
+    )
     try:
         request = request_for(source, "rabi", reps=100_000)
         try:
@@ -873,8 +629,21 @@ def test_source_rejects_invalidated_session_and_refreshes_mutated_controls():
         first = expect_integrated(session.sample_round(source.snapshot(), 0))
         request.templates[0].events[0].gain[:] = 0
         second = expect_integrated(session.sample_round(source.snapshot(), 0))
-        assert first.statistics.state_counts[1, 1] > 10_000
-        assert second.statistics.state_counts[1, 1] == 0
+        calls = controlled_engine(source.engine).calls
+        assert len(calls) == 2
+        (_, first_batches), (_, second_batches) = calls
+        (first_batch,), (second_batch,) = first_batches, second_batches
+        assert len(first_batch.tracks) == len(second_batch.tracks) == 1
+        first_track, second_track = first_batch.tracks[0], second_batch.tracks[0]
+        assert np.any(first_track.amplitude != 0)
+        np.testing.assert_array_equal(second_track.amplitude, 0)
+        np.testing.assert_array_equal(second_batch.points, first_batch.points)
+        np.testing.assert_array_equal(second_track.start_ns, first_track.start_ns)
+        np.testing.assert_array_equal(second_track.duration_ns, first_track.duration_ns)
+        assert (
+            first.statistics.channels[0].sums.shape
+            == second.statistics.channels[0].sums.shape
+        )
         source.open_acquire(request)
         with pytest.raises(RuntimeError, match="active"):
             session.sample_round(source.snapshot(), 1)

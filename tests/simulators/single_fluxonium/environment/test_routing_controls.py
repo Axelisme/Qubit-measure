@@ -6,12 +6,14 @@ from zcu_tools.program.v2.modules.delay import SoftDelay
 from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
-from zcu_tools.simulate.evolution import Engine, RoutingHistory
+from zcu_tools.simulate.evolution import RoutingHistory
 from zcu_tools.simulators.single_fluxonium.config import parse_single_fluxonium
 from zcu_tools.simulators.single_fluxonium.environment import runtime
 
 from tests.program._profiles import profile_soccfg
 from tests.program._timeline import compile_modules
+from tests.simulators._engine import EngineDouble, controlled_engine
+from tests.simulators._sources import single_environment
 from tests.simulators.single_fluxonium.environment._inputs import settings
 
 pytestmark = pytest.mark.sim
@@ -63,16 +65,16 @@ def read_program(env, *, post_herald_drive=False):
     )
 
 
-def test_source_routes_every_projective_span_and_clear_resolves_again():
+def test_source_passes_projective_spans_and_honors_engine_reuse_answer():
     config = routing_settings()
     history = RoutingHistory()
-    env = runtime.single_fluxonium(config, soccfg=profile_soccfg("single_fluxonium"))
+    env = single_environment(config, soccfg=profile_soccfg("single_fluxonium"))
     try:
         source = runtime.SingleFluxoniumSource(
             config,
             env.devices,
             runtime=runtime.SingleFluxoniumRuntimeOptions(
-                engine=Engine(workers=1, families={"t4"}), history=history
+                engine=EngineDouble(workers=1, families={"t4"}), history=history
             ),
         )
         try:
@@ -81,12 +83,16 @@ def test_source_routes_every_projective_span_and_clear_resolves_again():
             request = env.soc.binding.rounds[0].acquire
             snapshot = source.snapshot()
             first = source.prepare(request, snapshot)
-            assert set(first.paths.segments_by_kernel) == {"t4"}
+            assert len(controlled_engine(source.engine).calls) >= 2
+            assert all(
+                model.history is history
+                for model, _ in controlled_engine(source.engine).calls
+            )
             diagnostics = first.projection_diagnostics
             assert diagnostics is not None
             assert diagnostics.evolution_calls >= 2
             assert source.prepare(request, snapshot) is first
-            history.clear()
+            controlled_engine(source.engine).reuse_allowed = False
             resolved = source.prepare(request, snapshot)
             assert resolved is not first
             assert resolved.paths.segments_by_kernel == first.paths.segments_by_kernel
@@ -100,7 +106,7 @@ def test_source_routes_every_projective_span_and_clear_resolves_again():
 
 def test_builder_close_preserves_borrowed_history():
     history = RoutingHistory()
-    env = runtime.single_fluxonium(
+    env = single_environment(
         routing_settings(),
         soccfg=profile_soccfg("single_fluxonium"),
         history=history,
@@ -131,22 +137,27 @@ def test_builder_rejects_unknown_family_before_acquire():
         (True, {"t4"}, "plateau"),
     ],
 )
-def test_acquire_rejects_excluded_domain_including_post_projection_span(
+def test_acquire_propagates_engine_failure(
     post_herald_drive,
     families,
     domain,
 ):
-    env = runtime.single_fluxonium(
+    engine = EngineDouble()
+    error = RuntimeError("numeric backend rejected fixture")
+    engine.error = error
+    env = single_environment(
         routing_settings(),
+        engine=engine,
         soccfg=profile_soccfg("single_fluxonium"),
         families=families,
     )
     try:
         program = read_program(env, post_herald_drive=post_herald_drive)
         with pytest.raises(
-            RuntimeError, match=rf"domain {domain}: points \[0\], segments"
-        ):
+            RuntimeError, match="numeric backend rejected fixture"
+        ) as caught:
             program.acquire(env.soc, progress=False)
+        assert caught.value is error
     finally:
         if env.close_backend is not None:
             env.close_backend()
@@ -157,12 +168,12 @@ def test_acquire_rejects_excluded_domain_including_post_projection_span(
 def test_history_clear_preserves_complete_same_seed_acquire_iq_sequence(mode):
     cleared_history, retained_history = RoutingHistory(), RoutingHistory()
     config = routing_settings()
-    cleared = runtime.single_fluxonium(
+    cleared = single_environment(
         config,
         soccfg=profile_soccfg("single_fluxonium"),
         history=cleared_history,
     )
-    retained = runtime.single_fluxonium(
+    retained = single_environment(
         config,
         soccfg=profile_soccfg("single_fluxonium"),
         history=retained_history,

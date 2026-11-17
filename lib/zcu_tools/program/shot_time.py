@@ -5,7 +5,7 @@ import math
 import numpy as np
 from numpy.typing import ArrayLike
 
-from zcu_tools.core.simulation import AcquireRequest
+from zcu_tools.simulate.boundary import AcquireRequest
 
 
 def request_round_time_s(request: AcquireRequest) -> float:

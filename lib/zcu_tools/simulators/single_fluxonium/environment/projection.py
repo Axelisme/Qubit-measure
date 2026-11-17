@@ -1,14 +1,15 @@
-"""DC rank-1 outcome expansion and continuation through the evolution seam."""
+"""DC rank-1 projection chains with one continuation solve per source state."""
 
 from dataclasses import dataclass, replace
 from hashlib import sha256
+from math import prod
 from time import monotonic
 
 import numpy as np
 from numpy.typing import NDArray
 
-from zcu_tools.core.simulation import CancellationQuery
-from zcu_tools.simulate.adc import ProjectionReadout, normalize_populations
+from zcu_tools.simulate.adc import ProjectionChain, normalize_populations
+from zcu_tools.simulate.boundary import CancellationQuery
 from zcu_tools.simulate.evolution import (
     Basis,
     Engine,
@@ -24,57 +25,50 @@ from zcu_tools.simulators.single_fluxonium.environment.template import (
 
 @dataclass(frozen=True)
 class ProjectionDiagnostics:
-    """Author-only projection cost and discarded probability, not measured IQ.
+    """Author-only projection approximation and work, not measured IQ.
 
     points: flat request point IDs, in the same order as the following rows.
-    retained_outcomes: per-point counts after each chronological projection.
-        Counts exclude padding and include complete outcome histories, including
-        zero-weight histories when floor is zero.
-    pruned_weight: per-point probability discarded at each projection, measured
-        against the original unpruned probability mass. Sum a row for cumulative
-        discarded mass; earlier pruning is not counted again at later events.
-    evolution_calls: number of Engine.evolve calls, including initial prefixes.
+    continued_states: per-point counts of adopted solver rows for each transition.
+        Counts use the adoption mask, even when the solver row is identity.
+    uncontinued_probability: per-point source marginal mass on the complement
+        of that mask at each transition. Its row sum bounds path total variation.
+    Both rows have reads-1 entries, excluding prefix and anything after terminal.
+    evolution_calls: actual Engine.evolve calls, including prefixes. Adoption
+        counts cannot determine calls: a solved row may be unused at some points.
     """
 
     points: tuple[int, ...]
-    retained_outcomes: tuple[tuple[int, ...], ...]
-    pruned_weight: tuple[tuple[float, ...], ...]
+    continued_states: tuple[tuple[int, ...], ...]
+    uncontinued_probability: tuple[tuple[float, ...], ...]
     evolution_calls: int
 
 
 @dataclass(frozen=True)
 class ProjectionEvolution:
-    """Noiseless projection readout and evolution/reuse diagnostics.
+    """Noiseless projection chain and evolution/reuse diagnostics.
 
-    readout: outcome weights and chronological event populations in point layout.
+    readout: first-event probabilities and subsequent [source,target] rows.
     paths: merged engine diagnostics from all prefixes and continuations.
     reuse_keys: exact span digests, including initial densities and time bounds;
         validate every key with Engine.reuse before reusing this preparation.
-    diagnostics: per-point projection pruning and work counts.
+    diagnostics: per-point transition approximation and actual work counts.
     """
 
-    readout: ProjectionReadout
+    readout: ProjectionChain
     paths: PathDiagnostics
     reuse_keys: tuple[bytes, ...]
     diagnostics: ProjectionDiagnostics
 
 
-@dataclass(frozen=True)
-class _Outcome:
-    weights: NDArray[np.float64]
-    history: tuple[int, ...]
-    densities: NDArray[np.complex128]
-
-
 class ProjectionRunner:
-    """Expand DC-energy outcomes while keeping the engine's routing policy intact.
+    """Prepare DC-energy Markov chains without enumerating outcome histories.
 
     engine/source are the source-owned evolution resources. basis is the same
     retained DC energy basis as source densities and ADC labels. floor is the
-    nonnegative outcome probability threshold; cancel is forwarded unchanged.
-    One runner serves one preparation. Rank-1 continuations share a density only
-    within the same plan/span and after Engine.reuse validates the current route.
-    ADC CTMC jumps do not feed back into these density continuations.
+    finite threshold in [0,1): each point adopts solver rows only for source
+    states whose approximate marginal is at least floor; other rows are identity.
+    cancel is forwarded unchanged. One runner serves one preparation.
+    Densities never cross a plan or span; ADC CTMC jumps do not feed back.
     paths retains completed span diagnostics even when prepare raises.
     evolve_wall_s sums every Engine call's wall seconds, including a failed call.
     """
@@ -96,15 +90,12 @@ class ProjectionRunner:
     def _advance(
         self,
         plan: SingleFluxoniumPlan,
-        end: NDArray[np.float64],
-        outcome: _Outcome | None,
+        event: int,
+        densities: NDArray[np.complex128] | None,
         key: bytes,
-    ) -> tuple[NDArray[np.complex128], bytes]:
-        start = None
-        densities = None
-        if outcome is not None:
-            start = plan.read_events[len(outcome.history) - 1].end_ns
-            densities = outcome.densities
+    ) -> NDArray[np.complex128]:
+        end = plan.read_events[event].end_ns
+        start = None if densities is None else plan.read_events[event - 1].end_ns
         batch = replace(
             plan.batch,
             end_ns=end,
@@ -136,102 +127,12 @@ class ProjectionRunner:
             self.evolve_wall_s += monotonic() - started
         self.keys.append(reuse_key)
         self.paths.append(result.paths)
-        # Engine returns rows in its own point order, not necessarily batch order.
         indices = {int(point): index for index, point in enumerate(result.points)}
         order = [indices[int(point)] for point in plan.batch.points]
-        return result.densities[order], reuse_key
+        return result.densities[order]
 
-    def _continue(
-        self,
-        plan: SingleFluxoniumPlan,
-        end: NDArray[np.float64],
-        outcomes: list[_Outcome],
-        key: bytes,
-    ) -> list[_Outcome]:
-        # Each input was just projected, so its last state fully specifies its
-        # rank-1 density. Absolute controls and point order are fixed by this
-        # plan/span. Keep full histories; only the continuation solve is shared.
-        continuations: dict[int, tuple[NDArray[np.complex128], bytes]] = {}
-        advanced = []
-        for outcome in outcomes:
-            state = outcome.history[-1]
-            cached = continuations.get(state)
-            if cached is None or not self.engine.reuse(
-                self.source, cached[1], cancel=self.cancel
-            ):
-                cached = self._advance(plan, end, outcome, key)
-                continuations[state] = cached
-            advanced.append(replace(outcome, densities=cached[0]))
-        return advanced
-
-    def _split(
-        self,
-        outcomes: list[_Outcome],
-        points: NDArray[np.int64],
-    ) -> tuple[list[_Outcome], NDArray[np.float64]]:
-        candidates = []
-        for outcome in outcomes:
-            probabilities = normalize_populations(
-                batch_populations(outcome.densities, self.basis, self.basis)
-            )
-            for state in range(probabilities.shape[-1]):
-                weights = outcome.weights * probabilities[:, state]
-                densities = np.zeros_like(outcome.densities)
-                densities[:, state, state] = 1
-                candidates.append(
-                    _Outcome(weights, (*outcome.history, state), densities)
-                )
-        weights = np.stack([outcome.weights for outcome in candidates], axis=-1)
-        keep = weights >= self.floor
-        dropped = np.where(keep, 0, weights).sum(axis=-1)
-        retained = np.where(keep, weights, 0)
-        totals = retained.sum(axis=-1)
-        if np.any(totals == 0):
-            point = int(points[np.flatnonzero(totals == 0)[0]])
-            raise ValueError(
-                f"point {point}: projection pruning removed all outcomes at floor {self.floor}"
-            )
-        normalized = retained / totals[:, None]
-        return [
-            replace(outcome, weights=normalized[:, index])
-            for index, outcome in enumerate(candidates)
-            if np.any(keep[:, index])
-        ], dropped
-
-    def _plan(
-        self,
-        plan: SingleFluxoniumPlan,
-        key: bytes,
-    ) -> tuple[
-        list[_Outcome], tuple[tuple[int, ...], ...], tuple[tuple[float, ...], ...]
-    ]:
-        points = len(plan.batch.points)
-        density, _ = self._advance(plan, plan.read_events[0].end_ns, None, key)
-        outcomes = [_Outcome(np.ones(points), (), density)]
-        survival = np.ones(points)
-        counts, pruned = [], []
-        for event in range(len(plan.read_events) - 1):
-            outcomes, dropped = self._split(outcomes, plan.batch.points)
-            counts.append(
-                np.full(points, len(outcomes))
-                if self.floor == 0
-                else np.count_nonzero([outcome.weights for outcome in outcomes], axis=0)
-            )
-            pruned.append(survival * dropped)
-            survival *= 1 - dropped
-            outcomes = self._continue(
-                plan, plan.read_events[event + 1].end_ns, outcomes, key
-            )
-        return (
-            outcomes,
-            tuple(
-                tuple(int(count[point]) for count in counts) for point in range(points)
-            ),
-            tuple(
-                tuple(float(weight[point]) for weight in pruned)
-                for point in range(points)
-            ),
-        )
+    def _populations(self, density: NDArray[np.complex128]) -> NDArray[np.float64]:
+        return normalize_populations(batch_populations(density, self.basis, self.basis))
 
     def prepare(
         self,
@@ -239,49 +140,62 @@ class ProjectionRunner:
         point_dims: tuple[int, ...],
         key: bytes,
     ) -> ProjectionEvolution:
-        """Evolve plans to terminal and return padded outcome histories by point.
+        """Evolve plans into one immutable chain in C-order point_dims layout.
 
-        Plans cover each request point once and have a common event count.
-        point_dims is the C-order request layout; key hashes all caller inputs.
-        Low-weight histories are discarded per point after each projection and
-        survivors renormalized. Zero-weight padding carries valid ground-state
-        distributions but cannot be sampled. Errors propagate without a result.
+        Plans cover every request point once and share a chronological event
+        count. key hashes all caller inputs. Prefix evolution gives the first
+        event's populations. Subsequent transitions evolve each required rank-1
+        source state once per plan, for all its points. Adoption is point-local:
+        rows below floor remain identity even if solved for another point.
+        Zero floor is exact, including zero-probability states. Numerical and
+        cancellation errors propagate without a result.
         """
-        results = [self._plan(plan, key) for plan in plans]
-        states = len(self.basis.labels)
-        outcomes_count = max(len(result[0]) for result in results)
-        size = int(np.prod(point_dims))
-        weights = np.zeros((size, outcomes_count))
-        populations = [
-            np.zeros((size, outcomes_count, states)) for _ in plans[0].read_events
-        ]
-        for values in populations:
-            values[..., 0] = 1
-        retained: list[tuple[int, ...]] = [()] * size
-        pruned: list[tuple[float, ...]] = [()] * size
-        for plan, (outcomes, counts, dropped) in zip(plans, results, strict=True):
-            for point, count, loss in zip(
-                plan.batch.points, counts, dropped, strict=True
-            ):
-                retained[point], pruned[point] = count, loss
-            for index, outcome in enumerate(outcomes):
-                weights[plan.batch.points, index] = outcome.weights
-                for event, state in enumerate(outcome.history):
-                    populations[event][plan.batch.points, index] = np.eye(states)[state]
-                populations[-1][plan.batch.points, index] = normalize_populations(
-                    batch_populations(outcome.densities, self.basis, self.basis)
-                )
+        states, size = len(self.basis.labels), prod(point_dims)
+        events = len(plans[0].read_events)
+        initial = np.empty((size, states))
+        transitions = [np.empty((size, states, states)) for _ in range(events - 1)]
+        continued: list[tuple[int, ...]] = [()] * size
+        uncontinued: list[tuple[float, ...]] = [()] * size
+        for plan in plans:
+            points = plan.batch.points
+            initial[points] = self._populations(self._advance(plan, 0, None, key))
+            marginal = initial[points]
+            counts = np.empty((len(points), events - 1), dtype=np.int64)
+            losses = np.empty((len(points), events - 1))
+            for event, transition in enumerate(transitions, start=1):
+                adopted = marginal >= self.floor
+                counts[:, event - 1] = np.count_nonzero(adopted, axis=-1)
+                losses[:, event - 1] = np.where(adopted, 0, marginal).sum(axis=-1)
+                rows = np.broadcast_to(
+                    np.eye(states), (len(points), states, states)
+                ).copy()
+                # Each new span still goes through Engine.evolve's routing
+                # policy; complete reuse validates every span key (ADR-0078).
+                for state in np.flatnonzero(np.any(adopted, axis=0)):
+                    projected = np.zeros(
+                        (len(points), states, states), dtype=np.complex128
+                    )
+                    projected[:, state, state] = 1
+                    solved = self._populations(
+                        self._advance(plan, event, projected, key)
+                    )
+                    rows[adopted[:, state], state] = solved[adopted[:, state]]
+                transition[points] = rows
+                marginal = np.einsum("ps,pst->pt", marginal, rows)
+            for index, point in enumerate(points):
+                continued[point] = tuple(int(value) for value in counts[index])
+                uncontinued[point] = tuple(float(value) for value in losses[index])
         return ProjectionEvolution(
-            ProjectionReadout(
-                weights.reshape((*point_dims, outcomes_count)),
+            ProjectionChain(
+                initial.reshape((*point_dims, states)),
                 tuple(
-                    values.reshape((*point_dims, outcomes_count, states))
-                    for values in populations
+                    values.reshape((*point_dims, states, states))
+                    for values in transitions
                 ),
             ),
             merge_path_diagnostics(self.paths),
             tuple(self.keys),
             ProjectionDiagnostics(
-                tuple(range(size)), tuple(retained), tuple(pruned), len(self.keys)
+                tuple(range(size)), tuple(continued), tuple(uncontinued), len(self.keys)
             ),
         )

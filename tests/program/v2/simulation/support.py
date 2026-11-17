@@ -4,9 +4,9 @@ from dataclasses import dataclass
 
 import numpy as np
 from numpy.typing import NDArray
-from zcu_tools.core.simulation import AcquireRequest
 from zcu_tools.experiment.simulation import SimulationEnvironment
 from zcu_tools.program.acquisition import ImproveAcquireMixin
+from zcu_tools.simulate.boundary import AcquireRequest
 
 
 @dataclass(frozen=True)

@@ -12,15 +12,6 @@ from typing import Literal
 import numpy as np
 from qick import QickConfig
 
-from zcu_tools.core.simulation import (
-    AcquireRequest,
-    CancellationQuery,
-    EnvironmentSnapshot,
-    RoundRequest,
-    RoundSignals,
-    TimeBase,
-    TimelineTemplate,
-)
 from zcu_tools.device import DeviceManager, FakeDevice, FakeDeviceInfo
 from zcu_tools.experiment.simulation import SimulationEnvironment
 from zcu_tools.program.v2.simulation import (
@@ -36,9 +27,19 @@ from zcu_tools.resources.simulation_schema import Receiver
 from zcu_tools.simulate.adc import (
     ChannelReadout,
     PreparedRawShots,
+    ProjectionChain,
     ProjectionReadout,
     ReadoutModel,
     normalize_populations,
+)
+from zcu_tools.simulate.boundary import (
+    AcquireRequest,
+    CancellationQuery,
+    EnvironmentSnapshot,
+    RoundRequest,
+    RoundSignals,
+    TimeBase,
+    TimelineTemplate,
 )
 from zcu_tools.simulate.evolution import (
     Basis,
@@ -589,7 +590,7 @@ class SingleFluxoniumSource:
 
     def _prepare_adc(
         self,
-        readout: ProjectionReadout,
+        readout: ProjectionReadout | ProjectionChain,
         facts: SingleFluxoniumFacts,
         validated: SingleFluxoniumPreflight,
     ) -> tuple[tuple[ChannelReadout, ...], PreparedRawShots]:
@@ -629,7 +630,7 @@ class SingleFluxoniumSource:
         *,
         cancel: CancellationQuery | None = None,
     ) -> SingleFluxoniumPreparation:
-        """Prepare all validated ADCs with one common projection history.
+        """Prepare all validated ADCs with one common projection chain.
 
         validated comes unchanged from preflight at the current source settings.
         All receivers share physical paths, but retain their own calibration and
@@ -644,9 +645,9 @@ class SingleFluxoniumSource:
         layout; conflicts raise ValueError naming templates before evolution.
         Triggered nonterminal blocks project into DC rank-1 outcomes and continue
         through Engine.evolve. Untriggered cavity drives raise ValueError.
-        Per-point pruning follows numerics.projection_prune_floor; empty surviving
-        outcomes raise ValueError naming the point and floor. Preparation retains
-        full event histories and author-only projection_diagnostics.
+        At each point, source states below numerics.projection_prune_floor use
+        identity transition rows. Preparation retains the Markov chain and
+        author-only projection_diagnostics; no history enumeration is needed.
         Evolution alone segments the timelines between projection starts.
         ADC normalization is the sole probability repair. Errors clear partial
         preparations; they propagate without a result.
@@ -708,9 +709,11 @@ class SingleFluxoniumSource:
                 readout = projected.readout
                 paths, reuse_keys = projected.paths, projected.reuse_keys
                 diagnostics = projected.diagnostics
-                probabilities = np.sum(
-                    readout.weights[..., None] * readout.populations[-1], axis=-2
-                )
+                probabilities = readout.initial
+                for transition in readout.transitions:
+                    probabilities = np.einsum(
+                        "...s,...st->...t", probabilities, transition
+                    )
             else:
                 started = monotonic()
                 try:
