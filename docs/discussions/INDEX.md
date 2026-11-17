@@ -27,6 +27,7 @@
 - 2026-11-17 [共用清單的 Pareto 選集與明確新增場景](2026-11-17-pareto-selection-and-scene-append.md)：選取契約。Pareto 自持預設名稱，明確更新才新增列，reference producer 只讀解所選單列。
 
 - 2026-11-16 [常數雙 tone 的 secular guard 與唯讀診斷](2026-11-16-constant-multitone-guard-diagnostic.md)：適用域收窄。Guard 與公開 query 共用最終 admission fact，固定證據不外推到日常 FTF 或價格。
+- 2026-11-15 [`common_frame` 的 coherent 門檻收窄與唯讀診斷](2026-11-15-common-frame-coherent-narrowing.md)：適用域收窄。只把既有 coherent 上限從 0.03 降到 0.0018，不加新指標；多拒絕的 5 個合成格與兩 tone 取樣列改由價格選 family。
 
 
 - 2026-11-16 [凍結場景改為共用快取，Git 只留名稱與 hash 清單](2026-11-16-frozen-scene-storage.md)：資料入庫。數值不入庫，每筆單筆 gzip，Git 只留兩份小清單，重建不符就停。
