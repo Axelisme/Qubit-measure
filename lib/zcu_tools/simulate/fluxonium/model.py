@@ -20,6 +20,11 @@ from zcu_tools.simulate.evolution import (
     SecularDrive,
     SecularModel,
 )
+from zcu_tools.simulate.resonator_mode import (
+    ResonatorModeInput,
+    ResonatorModeResult,
+    build_resonator_mode,
+)
 
 from .coherence.purcell import calculate_purcell_t1_vs_flux
 from .coherence.rates import FluxoniumNoise, calculate_directional_loss_rates
@@ -201,6 +206,68 @@ class SingleFluxoniumModel:
         frequencies = np.array([value[0] for value in values])
         self._readout_frequencies[resonator] = frequencies
         return frequencies.copy()
+
+    def joint_resonator_model(
+        self,
+        level: FluxLevel,
+        resonator: DispersiveResonator,
+        *,
+        drive_operators_ghz: dict[str, ComplexArray],
+        photon_cutoff: int = 3,
+        noise: FluxoniumNoise = _DISABLED_NOISE,
+    ) -> ResonatorModeResult:
+        """Build a full-native-cutoff joint dressed model at one flux level.
+
+        level is one integer offset in milli-Phi0 from dc_flux. resonator gives
+        the bare frequency, full-charge coupling and photon decay rate.
+        drive_operators_ghz maps port names to Hermitian (cutoff,cutoff) H/h
+        matrices per real envelope unit in native oscillator coordinates, not
+        retained DC coordinates. photon_cutoff is the number N of Fock states.
+        Keep every (q,k) with q < retained_levels and k < N. The result exposes
+        the dressed model and label maps for initial states and transitions.
+        noise supplies intrinsic capacitive, inductive and quasiparticle T1
+        channels at temperature_k, evaluated on all native parent eigenstates.
+        No equilibrium Purcell or residual-photon dephasing term is added;
+        resonator.thermal_occupation and noise.aphi do not enter this model.
+        Invalid level, operators, cutoff or ambiguous labels raise ValueError;
+        diagonalization failures propagate.
+        """
+        if len(level) != 1 or type(level[0]) is not int:
+            raise ValueError("single fluxonium level requires exactly one integer")
+        native = calculate_oscillator_operators(self.params, cutoff=self.cutoff)
+        flux = self.dc_flux + 1e-3 * level[0]
+        angle = 2 * np.pi * flux
+        rates = calculate_directional_loss_rates(
+            self.params,
+            flux,
+            calculate_eigensystem(
+                self.params, flux, cutoff=self.cutoff, evals_count=self.cutoff
+            ),
+            noise,
+            cutoff=self.cutoff,
+            temperature_k=self.temperature_k,
+        )
+        return build_resonator_mode(
+            ResonatorModeInput(
+                hamiltonian_ghz=(
+                    native.static_ghz
+                    + np.cos(angle) * native.cosine_ghz
+                    + np.sin(angle) * native.sine_ghz
+                ),
+                coupling_ghz=resonator.g_ghz * native.charge,
+                drive_operators_ghz=drive_operators_ghz,
+                retained_labels=tuple(
+                    (q, k)
+                    for q in range(self.retained_levels)
+                    for k in range(photon_cutoff)
+                ),
+                frequency_ghz=resonator.frequency_ghz,
+                decay_per_ns=resonator.kappa_per_ns,
+                qubit_rates_per_ns=rates,
+                level=level,
+                photon_cutoff=photon_cutoff,
+            )
+        )
 
     def _rates(
         self,

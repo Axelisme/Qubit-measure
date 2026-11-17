@@ -28,6 +28,7 @@ CASE_NAMES = (
     "cheap_sampled_nearby",
     "cheap_sampled_separated",
     "adiabatic_ramp",
+    "single_tone_sideband",
 )
 KNOWN_EDGE_ERRORS = {
     "gate_cache": 0.00929654785179012,
@@ -68,9 +69,17 @@ def test_pinned_family_density(
 ) -> None:
     case = accuracy_case(name)
     reference = matrix_reference(case)
-    with closing(Engine(1, families=(family,))) as engine:
+    families = (case.idle_family, family) if case.idle_family is not None else (family,)
+    with closing(Engine(1, families=families)) as engine:
         result = engine.evolve(case.source, (case.batch,))
-    require_families(result.paths, (family,))
+    require_families(result.paths, families)
+    if case.idle_family is not None:
+        actual = {
+            name for name, count in result.paths.segments_by_kernel.items() if count > 0
+        }
+        assert actual == set(families), (
+            f"unexpected pinned path: {dict(result.paths.segments_by_kernel)}"
+        )
     error = density_error(result.densities, reference.density)
     request.node.user_properties.append(
         measurement_property(

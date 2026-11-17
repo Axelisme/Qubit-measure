@@ -26,9 +26,10 @@ type = experiment-imports
 
 # Numeric composition consumes the evolution contract without reverse imports.
 [importlinter:contract:resonator-builder-above-evolution]
-name = Dressed resonator builder consumes evolution records, never the reverse
+name = Fluxonium adapters consume the resonator builder and evolution, never the reverse
 type = layers
 layers =
+    zcu_tools.simulate.fluxonium
     zcu_tools.simulate.resonator_mode
     zcu_tools.simulate.evolution
 

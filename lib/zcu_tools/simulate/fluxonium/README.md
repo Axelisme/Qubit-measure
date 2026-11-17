@@ -1,6 +1,6 @@
 # `simulate/fluxonium` 模塊重點文檔
 
-**Last updated:** 2026-10-28，manifold population-decay modes
+**Last updated:** 2026-11-17，joint resonator adapter
 
 **讀者：** framework-dev、agent。Fluxonium 能譜、色散與 predictor 的數值工具。
 
@@ -38,6 +38,26 @@ Model 保留各 flux 的本徵系統與 resonator 的 dressed 腔頻，公開方
 這些資料不含損耗。每次建立 `model_source` 都綁定本次 noise，重新建立 directional rates
 與 dephasing，不從舊 source 借用 dissipative model 或 density。
 Caller 在溫度、DC、truncation 或其他結構設定改變時建立新 Model。
+
+`joint_resonator_model(level, resonator, drive_operators_ghz=..., photon_cutoff=3,
+noise=...)` 使用公開 `simulate.resonator_mode.build_resonator_mode`。
+它傳入完整 native cutoff 的 Hamiltonian、charge coupling 與 intrinsic T1 rates，
+一次對角化後保留 `q < retained_levels`、`k < photon_cutoff` 的 dressed 態。
+具名 drive 必須是 native oscillator 座標的 Hermitian 矩陣，不是
+`charge_operator()` 回傳的 retained DC 矩陣。
+回傳的 `ResonatorModeResult.label_to_index[(q,k)]` 用來定位初態與 dressed 躍遷；
+呼叫端不重建標籤或自行投影 dissipator。
+不唯一或 overlap ≤0.5 的標籤、無效輸入會 raise `ValueError`。
+
+Joint 路徑保留 `FluxoniumNoise` 的 capacitive、inductive 與 quasiparticle T1，
+但不另加 qubit-only 路徑的 equilibrium Purcell 0↔1 或殘餘熱光子 dephasing。
+它忽略 `resonator.thermal_occupation`，pure dephasing 為零，`noise.aphi` 不進此模型。
+這避免把 explicit resonator 的損耗算兩次；不表示支援熱光子。
+原有 `secular_model`／`model_source` 的半古典 cavity 行為不變。
+N=4 的 joint 能量差 `E(q,1)-E(q,0)` 與同 cutoff 的
+`readout_frequencies_ghz` 使用同一 Hamiltonian。
+轉接與 loss 投影屬數值模擬組合，遵循 ADR-0072；evolution 只接收公開模型紀錄，
+遵循 ADR-0078。
 
 `operators.py` 提供 cutoff-aware `calculate_eigensystem` 與
 `calculate_oscillator_operators`。後者回傳原生 H_LC、帶 EJ 的 cos/sin 算符與完整 charge；

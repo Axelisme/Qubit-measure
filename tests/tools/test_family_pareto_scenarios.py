@@ -237,6 +237,50 @@ def test_prepare_publishes_no_indexes_until_all_selected_builders_succeed(
     } == original
 
 
+def test_prepare_routes_profile_scenario_without_constructing_other_profiles(
+    pinned_inventory: PinnedInventory,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    restore_native_threads: None,
+) -> None:
+    from zcu_tools.simulate.evolution import read_frozen_index, read_scene_records
+
+    from tools import dop853_segment
+
+    _, indexes, cache = pinned_inventory
+    original = {key: read_frozen_index(path) for key, path in indexes.items()}
+    selected_name = "dop853_segment-gaussian-d20-l8-k9-r1-p1"
+    constructed: list[dop853_segment.Dop853Coordinates] = []
+    factory = dop853_segment.dop853_segment_input
+
+    def observe(coordinates: dop853_segment.Dop853Coordinates) -> Input:
+        constructed.append(coordinates)
+        return factory(coordinates)
+
+    # Returned scenes cannot expose whether unselected inputs were constructed.
+    monkeypatch.setattr(dop853_segment, "dop853_segment_input", observe)
+    assert (
+        scene_producer.main(
+            [
+                "--index-dir",
+                str(tmp_path),
+                "--scene-cache",
+                str(cache),
+                "--update-index",
+                "--scenario",
+                selected_name,
+            ]
+        )
+        == 0
+    )
+    assert constructed == [dop853_segment.Dop853Coordinates()]
+    updated = read_frozen_index(indexes["real"])
+    assert updated[:-1] == original["real"]
+    assert read_frozen_index(indexes["synthetic"]) == original["synthetic"]
+    (record,) = read_scene_records(cache, updated[-1:])
+    assert record.name == selected_name
+
+
 @pytest.mark.parametrize("category", ["synthetic", "real"])
 def test_prepare_explicit_new_scenario_appends_once_after_caching(
     pinned_inventory: PinnedInventory,
