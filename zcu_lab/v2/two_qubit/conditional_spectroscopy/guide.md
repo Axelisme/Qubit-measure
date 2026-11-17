@@ -51,7 +51,7 @@ Result 保存 float64 `sums`，形狀為 `DC × prepared_f1[2] × prepared_f2[2]
 
 ## Notebook
 
-先建立通過驗證的 `SpectroscopyCfg`，環境 handles 由 caller 提供。`point_view` 是保存目的地的 bound PointView。Notebook 經 adapter 管理 scope、plots 與 RunRecord。
+先建立通過驗證的 `SpectroscopyCfg`，環境 handles 由 caller 提供。`point_view` 是保存目的地的 bound ParameterView。Notebook 經 adapter 管理 scope、plots 與 RunRecord。
 
 ```python
 from zcu_tools.notebook import NotebookAdapter

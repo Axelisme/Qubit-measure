@@ -1,16 +1,17 @@
-# `zcu_tools.resources.context` point-local module library
+# `zcu_tools.resources.context` global and point module libraries
 
-**Last updated:** 2026-10-29，缺席 library 與明確空庫初始化
+**Last updated:** 2026-11-16，統一 library 開檔與 revision 查詢
 
-**讀者：** framework-dev。Point-local module library 的讀取、編輯與來源契約。
+**讀者：** framework-dev。Global 與 point module library 的讀取、編輯與來源契約。
 
-本 package 擁有 point-local `ModuleLibrary`。條目、setup 與 point 參數由 [entry owner](../entry/README.md) 管理；GUI 的切換與命令由 ContextService 編排。Library 使用 typed 文件，呼叫 `refresh()` 明確同步磁碟內容。
+本 package 擁有 global 與 point 各自獨立的 `ModuleLibrary`。條目與參數由 [entry owner](../entry/README.md) 管理；GUI 的切換與命令由 ContextService 編排。Library 使用 typed 文件，呼叫 `refresh()` 明確同步磁碟內容。
 
 ## Module library
 
 `library.py` 擁有 `library.yaml` 的文件、查詢與編輯。`library_store.py` 擁有磁碟讀取與 clone 複製。
 文件格式維持 `zcu.module-library` 2.0，header-only 文件表示空 library。
-`ResultEntry.module_library(label)` 與不傳 label 的 entry library 都允許缺席，回空快照與 revision=None。
+`entry.library(point=None, *, assets=None)` 預設開 global library，傳 point label 時只開該 point 的檔案。兩層都允許缺席，回空快照與 revision=None。
+`resources.entry.document_revision(library)` 不讀磁碟，回傳 handle 已安裝的 revision。
 讀取不建立檔案或父目錄。
 版本只跟容器結構走，不隨 Spec 欄位演進升版，見 ADR-0072。Forward minor 保留容器層未知欄位。
 
@@ -39,13 +40,13 @@ Library readout 的可選 `classifier` 保存 circle、linear 或 centroid3 分�
 
 `ModuleLibrary.edit()` 沿用 DocumentStore 的單檔交易。Draft setter 嚴格驗證新值。
 Body、schema、conflict 或 I/O 失敗不發布候選。Body 中的 snapshot 反映前項寫入。
-`snapshot()` 只複製記憶體，`refresh()` 顯式重載，`subscribe()` 在 publication 後通知。
+`snapshot()` 只複製記憶體，`refresh(*, strict=False)` 顯式重載並回傳內容是否改變，`subscribe()` 在 publication 後通知。
 未變的 bytes 沿用驗證快取，不另查外部依賴。Handle 不監看磁碟。
 缺席 library 的空 edit 不建檔，第一次非空 edit 在原鎖與單檔交易內建立文件。
 外部先建立文件時，edit 報 ConflictError 且不覆寫外部 bytes。
 `refresh(strict=True)` 可安裝外部新建的合法 library，無效候選保留已發布內容。
 
-Caller 透過 `ResultEntry.module_library(label)` 開啟 library，建立 point 由 ResultEntry 負責。
+Caller 透過 `entry.library(point)` 開啟 library，建立 point 由 ResultEntry 負責。
 Inherit 與 clone 都經 copy_library 複製合法 Specs 與 forward-minor 容器欄位，不改來源檔、不匯入事件或附件。
 來源缺 library 時，目的也保持缺檔。
 `library_store.create_empty_library(path)` 明確建立空庫，只供 caller 自有且未發布的目錄使用。既存目的以 FileExistsError 拒絕，不覆寫內容。離線遷移用它固定空庫 baseline；普通 empty point、讀取與空 edit 仍不建立 library。

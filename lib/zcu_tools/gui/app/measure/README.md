@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure`
 
-**Last updated:** 2026-11-16, GUI simulation worker policy and form error presentation
+**Last updated:** 2026-11-17，global／point 文件選擇
 
 **讀者：** framework-dev。量測 GUI 的組裝、分頁、tab admission 與 Run／Load／Save 分工。
 
@@ -158,7 +158,7 @@ App composition 協調 Artifact 與 Writeback。
 
 ## Composition root
 
-`MeasureGuiBehavior` 組裝後啟用同一個已安裝文件 watcher。它監看作用中三檔，選 point 時另監看仍由 Inspect 編輯的 entry 層文件。Controller 從目前 holder 注入 admission：Local 僅發布 pending，Remote 才自動重載。Authority 改變時重查 pending 檔案。Controller.close 先解除 watcher 與 authority listener，再 drain 背景工作，避免關閉後重載。
+`MeasureGuiBehavior` 組裝後啟用同一個已安裝文件 watcher。它監看作用中三檔，選 point 時另監看仍由 Inspect 編輯的 global 文件。Controller 從目前 holder 注入 admission：Local 僅發布 pending，Remote 才自動重載。Authority 改變時重查 pending 檔案。Controller.close 先解除 watcher 與 authority listener，再 drain 背景工作，避免關閉後重載。
 
 `MeasureGuiBehavior` 明確接收 lab 與 keyword-only 程序設定。
 它依本 package 的 `lab.MeasureGuiLab` Protocol 消費 lab，不 import 使用者套件。
@@ -179,7 +179,7 @@ Logging、rendering、`QApplication`、control options 與 exit code 留在 shar
 顯式腳本取代框架的 `default_startup.py`；自訂腳本需要預設行為時，自行 import 並呼叫
 `zcu_tools.gui.app.measure.default_startup.startup`。
 Framework 不 import lab 來選腳本。視窗顯示後，`after_show` 在 Qt loop 排入背景執行。
-沒有選定腳本時開啟 shared Setup dialog。
+沒有選定腳本時開啟 shared Entry dialog。
 
 `build_app_services()` constructs the app-local services and injects their driven
 ports. UI and remote code submit tab, run/analyze, save, writeback and session
@@ -197,7 +197,7 @@ subscriptions, editors and timers before deleting children; they never drain
 or disconnect the shared session. Native Ask answers and cancellation drain
 continue on the retained operation worker and lease, never on the UI loop.
 
-The toolbar keeps New Tab ▾ on the left and Setup…, SoC…, Devices…, Inspect…,
+The toolbar keeps New Tab ▾ on the left and Entry…, SoC…, Devices…, Inspect…,
 Predictor…, Results browser…, and More ▾ on the right. When space is short,
 Predictor and Results browser move into More. More lists Reload experiments,
 Retry skipped tabs (only when recovery has skipped tabs), and Workflow tabs /
@@ -210,11 +210,11 @@ Overflowed experiment tabs use Qt's native scroll arrows. The top-right all-tabs
 menu still lists every tab. Close buttons remain hidden when Local editing is
 unavailable under Remote control.
 
-The toolbar opens Setup… and SoC… as separate non-modal windows. Setup manages
+The toolbar opens Entry… and SoC… as separate non-modal windows. Entry manages
 result entries and working points; SoC connects the board and displays soccfg
 through `Controller.soc_control`. The named `soc` window supports remote screenshots.
 Session dialogs remain available for inspection during Run or remote control.
-Run disables Setup and SoC submissions. Inspect, Devices and ARB retain their
+Run disables Entry and SoC submissions. Inspect, Devices and ARB retain their
 existing Run policy. Remote control makes all five shared dialogs read-only;
 Local restores editing subject to each dialog's Run and validation gates.
 
@@ -281,7 +281,8 @@ tabs are not retried after later source selection. Its on-close callback capture
 then-current state. Aliases are not in that cache. Opening an entry loads its
 global aliases; selecting a point loads `points/<label>/aliases.yaml`.
 Startup code opens an entry before `ctx.context.apply_alias_rows(rows)`.
-That command saves active aliases, global or point, without a separate reload.
+That call saves global aliases without a separate reload. Pass the focused point
+label as `point=...` to save that point's aliases instead.
 Without an opened entry it raises no_context and retains no pending rows.
 Templates use caller-authored `Template.bindings`.
 
@@ -388,7 +389,7 @@ Reset uses the normal source capture and factory: success installs a real Form;
 any preparation failure propagates unchanged, leaving no Form and updating the
 visible reason, including capture, template binding and defaults failures. Native cfg
 never supplies form input. See ADR-0073 and ADR-0067.
-Live experiment reload uses detached `WorkspaceTab`／`WorkspaceSnapshot` RAM carriers and the shared `{data,selections}` codec. Rebuilding uses fresh captured defaults and Core recursive restoration, with dropped paths reported to the host. `TabSnapshot.cfg_input` remains live raw data. Framework disk persistence stores only window dimensions and left-panel width in `measure_layout_v1.json`; startup scripts own session save/restore policy. Entry and each point own independent alias files. Open/Refresh/Reset capture the active document set and its table. RPC and startup Apply save that table; an opened entry is required, a point is not. Missing files are empty without fallback. Inspect offers Active documents and Entry template on all three pages. Completed valid edits write through to the selected destination. Same-target source notifications preserve dirty input and its original revision. Switching entries or closing discards unsubmitted input. Existing tabs keep their captures until explicit Refresh or Reset.
+Live experiment reload uses detached `WorkspaceTab`／`WorkspaceSnapshot` RAM carriers and the shared `{data,selections}` codec. Rebuilding uses fresh captured defaults and Core recursive restoration, with dropped paths reported to the host. `TabSnapshot.cfg_input` remains live raw data. Framework disk persistence stores only window dimensions and left-panel width in `measure_layout_v1.json`; startup scripts own session save/restore policy. Entry and each point own independent alias files. Open/Refresh/Reset capture the active document set and its table. RPC saves that table; startup Apply defaults to global and requires an explicit focused point label for point writes; an opened entry is required, a point is not. Missing files are empty without fallback. Inspect lists Global and the focused point label on all three pages; global focus lists only Global. Completed valid edits write through to the selected destination. Same-target source notifications preserve dirty input and its original revision. Switching entries or closing discards unsubmitted input. Existing tabs keep their captures until explicit Refresh or Reset.
 Source events do not refresh existing forms. Device capture copies cached infos;
 it never queries a live driver.
 
@@ -396,7 +397,7 @@ Recipe 的 logical read/edit/selector 命令也由 `TabFormResource` 擁有。Ad
 
 RunService 在 run 終局後請 DeviceService 背景讀回已連線儀器。成功台更新觀察 cache，失敗台保留既有值。這項讀回不改變 run 終局、settlement、lease 或 run 前固定的 acquisition snapshot。
 
-RunInputs 固定 admission 的 ParameterContext，RunPaneState 隨 result 保存同一引用。
+RunInputs 固定 admission 的 DocumentSetCapture，RunPaneState 隨 result 保存同一引用。
 `stop_requested` 表示前端在這次 Run 發出過 Stop 或成功的 selector cancel，包含只取消子層。
 Core 自己設 stop 不改這個欄位。Snapshot 與 wire 的 result_state 交付同一 bool。
 New Run 或非 acquisition replacement 重設為 False。
@@ -419,7 +420,7 @@ Load 不新增 Run token 或量測歷史。
 Entry New／Open 安裝 GLOBAL 參數、library、aliases 與 storage，不自選既有 point。
 Run、WB 與 Inspect 編輯可直接使用 GLOBAL，不要求選 point。
 重新 Open 同 entry 回到 GLOBAL。Preview 與 Apply 的目的地是命令當下作用中的文件組。
-選了 point 時，Inspect 的 Entry template 只改 entry 文件，不改作用中 point 或既有 tab capture。
+選了 point 時，Inspect 的 Global 只改 global 文件，不改作用中 point 或既有 tab capture。
 Preview 的 destination_context 與 receipt destination 只報 entry_name、point，不含 kind。
 GLOBAL 的 point 為 null，POINT 為 label。未開 entry 仍可預覽合法 draft，兩個位置欄位與 current 都為 null；非空 Apply 仍以 no_context 拒絕。
 已提交 receipt 的 entry_name 必為字串。來源 capture 與 opaque actual_path 不變，preview 不鎖定 Apply 的目的地。

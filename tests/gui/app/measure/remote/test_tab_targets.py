@@ -32,6 +32,7 @@ from zcu_tools.gui.session.context_types import (
 )
 from zcu_tools.resources.entry import component_registry
 
+from tests.gui._context_reads import capture_focus
 from tests.gui.app.measure._record_support import require_target
 from tests.gui.app.measure._synthetic import SampleAdapter, SampleCfg
 from tests.resources.entry.fakes import (
@@ -111,27 +112,38 @@ def application(
         controller = Controller(
             state, registry, None, BaseEventBus(), project_root=str(tmp_path)
         )
-        controller.setup_control.new_entry(EntryRequest("entry"))
-        controller.setup_control.new_point(
+        controller.entry_control.new_entry(EntryRequest("entry"))
+        controller.entry_control.new_point(
             PointCreateRequest("working", "", CommandOrigin("gui"))
         )
         context = controller.context_control
-        context.add_component("Q1", "fake/drive/a", {"rate": 10.0, "sense": "R1"})
+        context.add_component(
+            "Q1",
+            "fake/drive/a",
+            {"rate": 10.0, "sense": "R1"},
+            point=context.current_point_label(),
+        )
         context.add_component(
             "Q2",
             "fake/drive/a",
             {"rate": 20.0, "source": "Q1", "energy_a": None, "sense": "R2"},
+            point=context.current_point_label(),
         )
-        context.add_component("S1", "fake/sensor", {"rate": 30.0})
+        context.add_component(
+            "S1", "fake/sensor", {"rate": 30.0}, point=context.current_point_label()
+        )
         for name in ("R1", "R2", "R3"):
-            context.add_component(name, "fake/sensor", {"rate": 30.0})
+            context.add_component(
+                name, "fake/sensor", {"rate": 30.0}, point=context.current_point_label()
+            )
         context.add_component(
             "QL",
             "fake/drive/library",
             {"rate": 40.0, "module": {"pi": "driver.pulses.pi"}},
+            point=context.current_point_label(),
         )
         context.set_module(
-            require_target(context.read_context()),
+            require_target(capture_focus(context)),
             "QL.pulses.pi",
             PulseSpec(
                 ch=0,
@@ -141,7 +153,9 @@ def application(
                 waveform=ConstWaveformCfg(length=0.05),
             ),
         )
-        context.apply_alias_rows((AliasRow("driver", "Q1"),))
+        context.apply_alias_rows(
+            (AliasRow("driver", "Q1"),), point=context.current_point_label()
+        )
         remote = RemoteControlAdapter(
             controller, ControlOptions(port=0), controller.owner_scheduler
         )
@@ -163,10 +177,11 @@ def test_named_aliases_apply_to_parameter_and_library_queries_without_mutating_s
             AliasRow("other", "Q1"),
             AliasRow("driver", "Q1"),
             AliasRow("sense", "$driver.sense"),
-        )
+        ),
+        point=context.current_point_label(),
     )
     tab_id = application.controller.tab_control.new_tab("targeted")
-    rows = context.get_alias_rows()
+    rows = context.get_alias_rows(point=context.current_point_label())
     h_tab_reset_cfg(
         application.remote,
         {"tab_id": tab_id, "aliases": {"driver": "QL", "sense": "R2"}},
@@ -185,7 +200,7 @@ def test_named_aliases_apply_to_parameter_and_library_queries_without_mutating_s
         "values": {"$driver.rate": 40.0, "$sense.rate": 30.0, "$other.rate": 10.0},
         "modules": {"$driver.pulses.pi": "QL.pulses.pi"},
     }
-    assert context.get_alias_rows() == rows
+    assert context.get_alias_rows(point=context.current_point_label()) == rows
     assert application.state.version.snapshot() == versions
     assert h_tab_get_cfg(application.remote, {"tab_id": tab_id}) == publication
 
@@ -196,8 +211,12 @@ def test_parameter_read_uses_current_sources_and_temporary_aliases(
     tab_id = h_tab_new(application.remote, {"adapter_name": "targeted"})["tab_id"]
     assert isinstance(tab_id, str)
     context = application.controller.context_control
-    context.set_parameter(require_target(context.read_context()), "Q2.rate", 25.0)
-    original_rows = context.get_alias_rows()
+    context.set_parameter(
+        require_target(capture_focus(context)),
+        "Q2.rate",
+        25.0,
+    )
+    original_rows = context.get_alias_rows(point=context.current_point_label())
     h_tab_reset_cfg(application.remote, {"tab_id": tab_id, "aliases": {"driver": "Q2"}})
     sources = h_tab_parameter_read(
         application.remote,
@@ -211,7 +230,7 @@ def test_parameter_read_uses_current_sources_and_temporary_aliases(
         "values": {"$driver.rate": 25.0, "$driver.energy_a": None},
         "modules": {},
     }
-    assert context.get_alias_rows() == original_rows
+    assert context.get_alias_rows(point=context.current_point_label()) == original_rows
 
 
 def test_parameter_read_resolves_library_slots_in_current_temporary_source(
@@ -220,10 +239,12 @@ def test_parameter_read_resolves_library_slots_in_current_temporary_source(
     tab_id = h_tab_new(application.remote, {"adapter_name": "targeted"})["tab_id"]
     context = application.controller.context_control
     context.set_parameter(
-        require_target(context.read_context()), "QL.module.pi", "QL.pulses.missing"
+        require_target(capture_focus(context)),
+        "QL.module.pi",
+        "QL.pulses.missing",
     )
     context.set_module(
-        require_target(context.read_context()),
+        require_target(capture_focus(context)),
         "QL.pulses.later",
         PulseSpec(
             ch=0,
@@ -289,7 +310,11 @@ def test_target_cfg_uses_fixed_source_until_reset(
     owner.write({("rate",): {"expr": "$driver.rate"}})
     before = h_tab_get_cfg(application.remote, {"tab_id": tab_id})
     context = application.controller.context_control
-    context.set_parameter(require_target(context.read_context()), "Q1.rate", 19.0)
+    context.set_parameter(
+        require_target(capture_focus(context)),
+        "Q1.rate",
+        19.0,
+    )
     assert h_tab_get_cfg(application.remote, {"tab_id": tab_id}) == before
     reset = h_tab_reset_cfg(
         application.remote, {"tab_id": tab_id, "aliases": {"driver": "Q2"}}

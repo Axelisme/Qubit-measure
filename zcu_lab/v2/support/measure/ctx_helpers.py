@@ -17,7 +17,7 @@ from zcu_lab.v2.support.flux import (
 
 if TYPE_CHECKING:
     from zcu_tools.gui.form_adapter import FormContext
-    from zcu_tools.gui.session.parameters import ParameterContext
+    from zcu_tools.gui.session.parameters import DocumentSetCapture
 
 
 def source(ctx: FormContext, path: str, template: Template) -> Slot | Template:
@@ -34,11 +34,11 @@ def source(ctx: FormContext, path: str, template: Template) -> Slot | Template:
     return Slot(path) if ctx.has(path) else template
 
 
-def optional_parameter_float(parameters: ParameterContext, path: str) -> float | None:
+def optional_parameter_float(parameters: DocumentSetCapture, path: str) -> float | None:
     """Read a finite real scalar from one fixed parameter capture.
 
     path is a direct component/general path or a captured role path accepted by
-    ParameterContext.lookup. Return None only for an absent leaf or explicit
+    DocumentSetCapture.lookup. Return None only for an absent leaf or explicit
     null; otherwise return a float in the parameter's working units.
     Bool/non-real values raise TypeError; nonfinite numbers raise ValueError.
     Invalid paths, missing roles, unavailable sources and library errors
@@ -56,7 +56,7 @@ def optional_parameter_float(parameters: ParameterContext, path: str) -> float |
 
 
 def flux_pick_initial_points(
-    parameters: ParameterContext | None,
+    parameters: DocumentSetCapture | None,
     device_name: str,
     snapshot: Mapping[str, JsonObject] | None,
 ) -> QubitFluxCalibration | None:
@@ -85,7 +85,7 @@ def flux_pick_initial_points(
 
 
 def t1_initial_time(
-    parameters: ParameterContext | None,
+    parameters: DocumentSetCapture | None,
     *,
     multiplier: float,
     with_tone: bool = False,

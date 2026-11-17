@@ -29,6 +29,7 @@ from zcu_tools.gui.session.parameter_capture import capture_parameters
 from zcu_tools.resources.entry import AcceptedWrite, RoleSpec
 
 from tests.experiment._saving_support import SavingCfg, SavingResult
+from tests.gui._context_reads import capture_focus
 from tests.gui._qt_waits import qt_until
 from tests.gui.app.measure._load_support import write_native_file
 from tests.gui.app.measure._native_save_support import (
@@ -70,7 +71,7 @@ def assert_rejected_write_preserves_context(fx, sock, tab, value):
     control.set_writeback_item_for_pane(
         tab, "analysis", "param-1", proposed_value=value
     )
-    captured = context.read_context()
+    captured = capture_focus(context)
     storage = context.capture_storage(captured)
     before_context = call(sock, "context.snapshot", {})
     assert before_context["ok"], before_context
@@ -96,7 +97,7 @@ def assert_rejected_write_preserves_context(fx, sock, tab, value):
             (("value",), "value_error")
         ]
         assert call(sock, "context.snapshot", {}) == before_context
-        current = context.read_context()
+        current = capture_focus(context)
         assert current.document() == before_point
         assert current.target == captured.target
         assert current.roles == captured.roles
@@ -148,7 +149,7 @@ def test_complete_md_values_survive_preview_and_write_socket(
     fx = Fixture(active_label="ctx001", project_root=str(tmp_path / "project"))
     fx.registry.register("proposals", definition)
     context = fx.ctrl.context_control
-    target = require_target(context.read_context())
+    target = require_target(capture_focus(context))
     if isinstance(before, complex):
         admitted = AcceptedWrite.model_validate(
             {"path": "general.ext.value", "value": before}
@@ -216,8 +217,8 @@ def module_fixture(tmp_path, qapp, point_models, point_registry_guard):
     fx = Fixture(active_label="ctx001", project_root=str(tmp_path / "project"))
     fx.registry.register("synthetic/module_writeback", ModuleProposalAdapter)
     context = fx.ctrl.context_control
-    target = require_target(context.read_context())
-    context.add_component("Q1", "fake/drive/a", {})
+    target = require_target(capture_focus(context))
+    context.add_component("Q1", "fake/drive/a", {}, point=context.current_point_label())
     context.set_waveform(target, MODULE_PROPOSAL_WAVEFORM, ConstWaveformCfg(length=0.1))
     context.set_module(target, MODULE_PROPOSAL_TARGET, _stored_pulse())
     fx.start()
@@ -280,7 +281,7 @@ def test_apply_writeback_tool_writes_module_proposal_by_id(
     invoke("connect", {"port": module_fixture.service.port})
     receipt = invoke("apply_writeback", {"tab": tab})
     assert receipt["status"] == "finished", receipt
-    library = module_fixture.ctrl.context_control.read_context().library
+    library = capture_focus(module_fixture.ctrl.context_control).library
     assert library.module_spec(MODULE_PROPOSAL_TARGET) == _stored_pulse(gain=0.3)
 
 
@@ -308,8 +309,16 @@ def test_live_preview_and_explicit_apply_preserve_other_gui_selection(
     fx = Fixture(active_label="ctx001", project_root=str(tmp_path / "project"))
     fx.registry.register("proposals", definition)
     context = fx.ctrl.context_control
-    context.set_parameter(require_target(context.read_context()), "general.ext.a", 1.0)
-    context.set_parameter(require_target(context.read_context()), "general.ext.b", 2.0)
+    context.set_parameter(
+        require_target(capture_focus(context)),
+        "general.ext.a",
+        1.0,
+    )
+    context.set_parameter(
+        require_target(capture_focus(context)),
+        "general.ext.b",
+        2.0,
+    )
     fx.start()
     sock = open_client(fx.service.port)
     try:
@@ -332,8 +341,8 @@ def test_live_preview_and_explicit_apply_preserve_other_gui_selection(
         assert applied["ok"]
         assert [item["id"] for item in applied["result"]["written"]] == ["param-1"]
         assert (
-            context.read_context().lookup("general.ext.a").value == 11.0
-            and context.read_context().lookup("general.ext.b").value == 2.0
+            capture_focus(context).lookup("general.ext.a").value == 11.0
+            and capture_focus(context).lookup("general.ext.b").value == 2.0
         )
         after = call(sock, "tab.writeback_preview", params)["result"]
         assert [item["current"] for item in after["items"]] == [11.0, 2.0]
@@ -356,7 +365,7 @@ def test_live_preview_and_explicit_apply_preserve_other_gui_selection(
         )
         assert failed["ok"] is False
         assert failed["error"]["code"] == "invalid_params"
-        assert context.read_context().lookup("general.ext.b").value == 2.0
+        assert capture_focus(context).lookup("general.ext.b").value == 2.0
         retained = call(sock, "tab.writeback_preview", params)["result"]
         assert retained["items"][1]["proposed"] == 33.0
         assert all(item["selected"] for item in retained["items"])
@@ -383,8 +392,8 @@ def test_live_preview_and_explicit_apply_preserve_other_gui_selection(
             ]
         }
         assert (
-            context.read_context().lookup("general.ext.a").value == 11.0
-            and context.read_context().lookup("general.ext.b").value == 33.0
+            capture_focus(context).lookup("general.ext.a").value == 11.0
+            and capture_focus(context).lookup("general.ext.b").value == 33.0
         )
     finally:
         sock.close()
@@ -435,17 +444,19 @@ def test_native_preview_and_window_keep_captured_path_and_stderr(
         "Q1",
         "fake/drive/a",
         {"rate": 10.0, "ext": {"value": 19.8}},
-        setup=True,
+        point=None,
     )
     context.add_component(
         "Q2",
         "fake/drive/a",
         {"rate": 20.0, "ext": {"value": 29.8}},
-        setup=True,
+        point=None,
     )
     application.result("point.new", {"label": "a"})
-    context.apply_alias_rows((AliasRow("driver", "Q1"),))
-    captured = context.read_context().bind_roles(
+    context.apply_alias_rows(
+        (AliasRow("driver", "Q1"),), point=context.current_point_label()
+    )
+    captured = capture_focus(context).bind_roles(
         {"driver": RoleSpec("fake/drive/*")}, focus="Q1", explicit={}
     )
     tab = controller.tab_control.new_tab("pointed")
@@ -461,8 +472,10 @@ def test_native_preview_and_window_keep_captured_path_and_stderr(
     assert analyzed["status"] == "finished", analyzed
     context.set_parameter(require_target(captured), "Q1.ext.value", 19.9)
     application.result("point.new", {"label": "b"})
-    context.apply_alias_rows((AliasRow("driver", "Q2"),))
-    active = context.read_context().target
+    context.apply_alias_rows(
+        (AliasRow("driver", "Q2"),), point=context.current_point_label()
+    )
+    active = capture_focus(context).target
     window = MainWindow(controller, templates=lambda: {})
     window.add_tab_widget(tab, "pointed")
     try:
@@ -489,8 +502,10 @@ def test_native_preview_and_window_keep_captured_path_and_stderr(
         assert any("Q1.ext.value" in text for text in texts)
         assert any("±" in text and "0.18" in text for text in texts)
         assert any("19.8" in text for text in texts)
-        assert context.read_context().target == active
-        assert context.get_alias_rows() == (AliasRow("driver", "Q2"),)
+        assert capture_focus(context).target == active
+        assert context.get_alias_rows(point=context.current_point_label()) == (
+            AliasRow("driver", "Q2"),
+        )
     finally:
         controller.tab_control.close_tab(tab)
         window.deleteLater()
@@ -535,13 +550,17 @@ def coupler_load_application(qapp, tmp_path: Path, point_models, point_registry_
     fx = Fixture(project_root=str(tmp_path), headless=True)
     fx.registry.register("captured-coupler", CapturedCouplerAdapter)
     context = fx.ctrl.context_control
-    context.add_component("coupler", "fake/drive/a", {"rate": 0.4})
-    target = require_target(context.read_context())
+    context.add_component(
+        "coupler", "fake/drive/a", {"rate": 0.4}, point=context.current_point_label()
+    )
+    target = require_target(capture_focus(context))
     entry_info = context.get_entry_info()
     assert entry_info is not None
     context.set_waveform(target, MODULE_PROPOSAL_WAVEFORM, ConstWaveformCfg(length=0.1))
     context.set_module(target, "coupler.pulses.cz_f2", _stored_pulse(gain=0.2))
-    context.apply_alias_rows((AliasRow("coupler", "coupler"),))
+    context.apply_alias_rows(
+        (AliasRow("coupler", "coupler"),), point=context.current_point_label()
+    )
     path = tmp_path / "source.h5"
     write_native_file(path, tag=CapturedCouplerAdapter.experiment_tag or "", gain=0.4)
     stored = load(path)
@@ -553,7 +572,7 @@ def coupler_load_application(qapp, tmp_path: Path, point_models, point_registry_
                 point=target.point,
                 roles={"coupler": "coupler"},
             ),
-            "parameter_snapshot": capture_parameters(context.read_context()),
+            "parameter_snapshot": capture_parameters(capture_focus(context)),
         }
     )
     save(
@@ -577,25 +596,31 @@ def test_registered_source_only_load_analyze_preview_keeps_concrete_collision_ta
 ) -> None:
     fx, client, tab, path = coupler_load_application
     context = fx.ctrl.context_control
-    source = context.read_context().target
+    source = capture_focus(context).target
     before_form = call(client, "tab.get_cfg", {"tab_id": tab})
     loaded = call(client, "tab.load_data", {"tab_id": tab, "data_path": str(path)})
     assert loaded["ok"], loaded
     assert call(client, "tab.get_cfg", {"tab_id": tab}) == before_form
     context.set_module(source, "coupler.pulses.cz_f2", _stored_pulse(gain=0.6))
     context.set_parameter(source, "coupler.rate", 0.7)
-    fx.ctrl.setup_control.new_point(
+    fx.ctrl.entry_control.new_point(
         PointCreateRequest("other", "", CommandOrigin("gui"))
     )
-    context.add_component("Q2", "fake/drive/a", {"rate": 9.0})
-    context.add_component("coupler", "fake/drive/a", {"rate": 0.9})
+    context.add_component(
+        "Q2", "fake/drive/a", {"rate": 9.0}, point=context.current_point_label()
+    )
+    context.add_component(
+        "coupler", "fake/drive/a", {"rate": 0.9}, point=context.current_point_label()
+    )
     context.set_module(
-        require_target(context.read_context()),
+        require_target(capture_focus(context)),
         "coupler.pulses.cz_f2",
         _stored_pulse(gain=0.8),
     )
-    context.apply_alias_rows((AliasRow("coupler", "Q2"),))
-    active = context.read_context().target
+    context.apply_alias_rows(
+        (AliasRow("coupler", "Q2"),), point=context.current_point_label()
+    )
+    active = capture_focus(context).target
     started = call(client, "tab.analyze", {"tab_id": tab})
     assert started["ok"], started
     assert_terminal_finished(fx, client, started["result"]["operation_id"])
@@ -609,5 +634,7 @@ def test_registered_source_only_load_analyze_preview_keeps_concrete_collision_ta
     assert pulse["proposed"]["gain"] == 0.4
     assert rate["actual_path"] == "coupler.rate"
     assert (rate["current"], rate["proposed"]) == (0.9, 0.4)
-    assert context.read_context().target == active
-    assert context.get_alias_rows() == (AliasRow("coupler", "Q2"),)
+    assert capture_focus(context).target == active
+    assert context.get_alias_rows(point=context.current_point_label()) == (
+        AliasRow("coupler", "Q2"),
+    )

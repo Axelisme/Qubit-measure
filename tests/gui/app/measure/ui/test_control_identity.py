@@ -51,20 +51,20 @@ from zcu_tools.gui.session.context_types import (
     CommandOrigin,
     EntryRequest,
     PointCreateRequest,
-    PointUseRequest,
 )
 from zcu_tools.gui.session.events import MdChangedPayload
 from zcu_tools.gui.session.ui.add_component_dialog import AddComponentDialog
 from zcu_tools.gui.session.ui.arb_waveform_dialog import ArbWaveformDialog
 from zcu_tools.gui.session.ui.component_tree import ComponentTreeWidget
 from zcu_tools.gui.session.ui.device_dialog import DeviceDialog
+from zcu_tools.gui.session.ui.entry_dialog import EntryDialog
 from zcu_tools.gui.session.ui.inspect_dialog import InspectDialog
-from zcu_tools.gui.session.ui.setup_dialog import SetupDialog
 from zcu_tools.gui.widgets.form import FormEditor
 from zcu_tools.resources.entry import component_registry
 from zcu_tools.resources.waveform_assets import FormulaRecipe
 
 from tests.gui._adapter_fakes import DummyResult
+from tests.gui._context_reads import capture_focus, inspect_focus
 from tests.gui._dialog_fakes import RecordingDialogPresenter
 from tests.gui._qt_waits import qt_until
 from tests.gui._user_input import ComponentDriver, key_click, type_text
@@ -201,8 +201,8 @@ def control_ui(
     ctrl.attach_caretaker(
         create_persistence_caretaker(ctrl, cache_dir=tmp_path / "cache")
     )
-    ctrl.setup_control.new_entry(EntryRequest("control"))
-    ctrl.setup_control.new_point(PointCreateRequest("point", "", CommandOrigin("gui")))
+    ctrl.entry_control.new_entry(EntryRequest("control"))
+    ctrl.entry_control.new_point(PointCreateRequest("point", "", CommandOrigin("gui")))
     dialogs = RecordingDialogPresenter(confirm_answers=[False])
     window = MainWindow(
         ctrl,
@@ -436,7 +436,7 @@ def test_remote_device_stop_reclaims_and_cancels(control_ui, qapp):
 @pytest.mark.parametrize(
     "name",
     [
-        DialogName.SETUP,
+        DialogName.ENTRY,
         DialogName.PREDICTOR,
         DialogName.ARB_WAVEFORM,
         DialogName.INSPECT,
@@ -463,7 +463,7 @@ def test_named_observation_window_allows_owner_and_reopen(control_ui, name):
 @pytest.mark.parametrize(
     ("name", "action"),
     [
-        (DialogName.SETUP, "New entry…"),
+        (DialogName.ENTRY, "New entry…"),
         (DialogName.DEVICE, "Add Device"),
         (DialogName.INSPECT, "New"),
         (DialogName.ARB_WAVEFORM, "Save"),
@@ -499,12 +499,12 @@ def test_remote_close_requires_holder_label_confirmation(control_ui):
 
 
 @pytest.mark.parametrize("decision", ["local", "cancel"])
-def test_setup_text_return_preserves_entry_input_and_cancel(control_ui, qapp, decision):
+def test_entry_text_return_preserves_entry_input_and_cancel(control_ui, qapp, decision):
     ui = control_ui
-    ui.window.open_dialog(DialogName.SETUP)
-    setup = ui.window.findChild(SetupDialog)
-    assert setup is not None
-    before = ui.controller.setup_control.get_entry_info()
+    ui.window.open_dialog(DialogName.ENTRY)
+    entry_dialog = ui.window.findChild(EntryDialog)
+    assert entry_dialog is not None
+    before = ui.controller.entry_control.get_entry_info()
 
     def choose(dialog: QInputDialog) -> None:
         dialog.setTextValue("new-entry")
@@ -514,17 +514,19 @@ def test_setup_text_return_preserves_entry_input_and_cancel(control_ui, qapp, de
             dialog.accept()
 
     modal_action(
-        qapp, lambda: button(setup, "New entry…").click(), [(QInputDialog, choose)]
+        qapp,
+        lambda: button(entry_dialog, "New entry…").click(),
+        [(QInputDialog, choose)],
     )
-    entries = ui.controller.setup_control.list_entries(refresh=True)
+    entries = ui.controller.entry_control.list_entries(refresh=True)
     if decision == "local":
         assert "new-entry" in entries
-        info = ui.controller.setup_control.get_entry_info()
+        info = ui.controller.entry_control.get_entry_info()
         assert info is not None and info.name == "new-entry"
     else:
         assert "new-entry" not in entries
-        assert ui.controller.setup_control.get_entry_info() == before
-    button(setup, "Close").click()
+        assert ui.controller.entry_control.get_entry_info() == before
+    button(entry_dialog, "Close").click()
 
 
 @pytest.mark.parametrize("operation", ["rename", "delete", "overwrite"])
@@ -655,7 +657,7 @@ def test_inspect_delete_confirmation_uses_live_library_owner(
     control_ui, qapp, decision
 ):
     ui = control_ui
-    capture = ui.controller.context_control.read_context()
+    capture = capture_focus(ui.controller.context_control)
     ui.controller.context_control.set_waveform(
         capture.target,
         "Q1.waveforms.pulse",
@@ -698,7 +700,7 @@ def test_inspect_delete_confirmation_uses_live_library_owner(
     assert failures == [], "legal deletion must use the current library owner"
     assert (
         "Q1.waveforms.pulse"
-        in ui.controller.context_control.read_context().library.waveform_keys()
+        in capture_focus(ui.controller.context_control).library.waveform_keys()
     ) is (decision != "local")
     assert inspect.close()
 
@@ -731,7 +733,7 @@ def test_unsaved_tab_close_confirmation_accept_and_cancel(control_ui, qapp, deci
 @pytest.mark.parametrize("control_ui", ["qt"], indirect=True)
 def test_inspect_rename_applies_on_enter_and_closes_without_prompt(control_ui, qapp):
     ui = control_ui
-    capture = ui.controller.context_control.read_context()
+    capture = capture_focus(ui.controller.context_control)
     ui.controller.context_control.set_waveform(
         capture.target,
         "Q1.waveforms.pulse",
@@ -749,7 +751,7 @@ def test_inspect_rename_applies_on_enter_and_closes_without_prompt(control_ui, q
 
     driver.enter_text(value="Q1.waveforms.renamed", object_name="inspect.entry.name")
 
-    keys = ui.controller.context_control.read_context().library.waveform_keys()
+    keys = capture_focus(ui.controller.context_control).library.waveform_keys()
     assert "Q1.waveforms.renamed" in keys
     assert "Q1.waveforms.pulse" not in keys
     assert inspect.close()
@@ -819,7 +821,7 @@ def test_shutdown_finishes_load_interaction_before_owner_teardown(
 @pytest.mark.parametrize("control_ui", ["qt"], indirect=True)
 def test_inspect_delete_confirmation_pins_the_original_saved_point(control_ui, qapp):
     ui = control_ui
-    original = ui.controller.context_control.read_context()
+    original = capture_focus(ui.controller.context_control)
     ui.controller.context_control.set_waveform(
         original.target,
         "Q1.waveforms.pulse",
@@ -844,10 +846,10 @@ def test_inspect_delete_confirmation_pins_the_original_saved_point(control_ui, q
             prompt.accept()
 
     def choose(prompt: QMessageBox) -> None:
-        ui.controller.setup_control.new_point(
+        ui.controller.entry_control.new_point(
             PointCreateRequest("other", "", CommandOrigin("gui"))
         )
-        other = ui.controller.context_control.read_context()
+        other = capture_focus(ui.controller.context_control)
         ui.controller.context_control.set_waveform(
             other.target,
             "Q1.waveforms.pulse",
@@ -864,13 +866,13 @@ def test_inspect_delete_confirmation_pins_the_original_saved_point(control_ui, q
     assert failures == []
     assert (
         "Q1.waveforms.pulse"
-        in ui.controller.context_control.read_context().library.waveform_keys()
+        in capture_focus(ui.controller.context_control).library.waveform_keys()
     )
     assert ui.controller.get_session_env().active_label == "other"
-    ui.controller.context_control.use_point(PointUseRequest("point"))
+    ui.controller.context_control.use_point("point")
     assert (
         "Q1.waveforms.pulse"
-        not in ui.controller.context_control.read_context().library.waveform_keys()
+        not in capture_focus(ui.controller.context_control).library.waveform_keys()
     )
     assert inspect.close()
 
@@ -902,7 +904,7 @@ def test_inspect_add_submit_after_close_has_no_owner_effects(
     assert tree is not None, "Inspect lacks its component tree"
     dialog = open_resonator_add(tree, "retired_resonator")
     submit = add_control(dialog, QPushButton, "add_submit")
-    baseline = ui.controller.context_control.inspect_document()
+    baseline = inspect_focus(ui.controller.context_control)
     changes: list[MdChangedPayload] = []
     subscription = ui.controller.get_bus().subscribe(MdChangedPayload, changes.append)
     delivered: list[bool] = []
@@ -921,7 +923,7 @@ def test_inspect_add_submit_after_close_has_no_owner_effects(
         qapp.processEvents()
         assert delivered == [True]
         assert ui.controller.control_identity.status().holder == "gui"
-        assert ui.controller.context_control.inspect_document() == baseline
+        assert inspect_focus(ui.controller.context_control) == baseline
         assert changes == []
     finally:
         subscription.unsubscribe()

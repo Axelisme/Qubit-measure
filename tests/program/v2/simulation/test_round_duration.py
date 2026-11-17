@@ -7,13 +7,6 @@ from threading import Event
 
 import numpy as np
 import pytest
-from zcu_tools.core.simulation import (
-    AcquireRequest,
-    EnvironmentSnapshot,
-    RoundSignals,
-    TimeBase,
-    TimelineTemplate,
-)
 from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
@@ -24,6 +17,13 @@ from zcu_tools.program.v2.simulation import (
     SimulationTiming,
 )
 from zcu_tools.program.v2.simulation.compiled import build_compiled_request
+from zcu_tools.simulate.boundary import (
+    AcquireRequest,
+    EnvironmentSnapshot,
+    RoundSignals,
+    TimeBase,
+    TimelineTemplate,
+)
 
 from tests.program._profiles import load_soccfg
 from tests.program._timeline import compile_modules

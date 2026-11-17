@@ -31,7 +31,7 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     "project.setup": MethodSpec(
         5.0,
         "Open an existing entry under project_root/result and select its fluxonium "
-        "component. Omitted component uses the setup qubit alias.",
+        "component. Omitted component uses the global qubit alias.",
         params=(
             ParamSpec("project_root", JsonType.STRING),
             ParamSpec("entry", JsonType.STRING),
@@ -239,7 +239,7 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     ),
     "fit.export_params": MethodSpec(
         30.0,
-        "Write predictors/<component>.json, update declared setup energy/alignment "
+        "Write predictors/<component>.json, update declared global energy/alignment "
         "fields and record analysis in the opened entry. Uses the first aligned "
         "spectrum. Writes can partially succeed; no rollback or retry.",
     ),

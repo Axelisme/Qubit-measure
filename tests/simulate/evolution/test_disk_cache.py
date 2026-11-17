@@ -115,12 +115,12 @@ def test_callee_source_change_uses_new_machine_code_in_a_new_process(
         'from numba import njit\n@njit(inline="always")\n'
         "def disk_cache_scale():\n    return 1.0\n"
     )
-    caller = kernels / "_rwa_numeric.py"
+    caller = kernels / "_rwa_fourier.py"
     source = caller.read_text()
     source = source.replace(
-        "from ..kernel import KernelContext, SegmentTable",
+        "from ._dop853_data import Models",
         "from ._disk_cache_fixture import disk_cache_scale\n"
-        "from ..kernel import KernelContext, SegmentTable",
+        "from ._dop853_data import Models",
     )
     start = source.index("def interaction_hamiltonian(")
     source = source[:start] + source[start:].replace(

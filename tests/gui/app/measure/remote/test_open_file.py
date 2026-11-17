@@ -41,8 +41,8 @@ def app(qapp, tmp_path, monkeypatch):
     write_native_file(tmp_path / "no-cfg.h5", gain=2.0, cfg_schema_version="2.0")
     write_native_file(tmp_path / "bad.h5", tag="wrong/experiment")
     fx = Fixture(empty_project=True, project_root=str(tmp_path))
-    fx.ctrl.setup_control.new_entry(EntryRequest("fake_qubit"))
-    fx.ctrl.setup_control.new_point(
+    fx.ctrl.entry_control.new_entry(EntryRequest("fake_qubit"))
+    fx.ctrl.entry_control.new_point(
         PointCreateRequest("working", "", CommandOrigin("gui"))
     )
     fx.registry.register("file", FileAdapter)

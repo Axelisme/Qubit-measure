@@ -158,8 +158,8 @@ def test_list_cannot_be_used_as_a_scalar_link_root(point: ParameterDocument) -> 
         table.resolve("sense", point)
 
 
-def test_setup_alias_links_resolve_against_the_fixed_component_snapshot() -> None:
-    setup = ParameterDocument.model_construct(
+def test_global_alias_links_resolve_against_the_fixed_component_snapshot() -> None:
+    global_document = ParameterDocument.model_construct(
         general=ParameterGeneral(
             created_at="2026-10-09T00:00:00Z",
         ),
@@ -171,10 +171,10 @@ def test_setup_alias_links_resolve_against_the_fixed_component_snapshot() -> Non
     table = AliasTable(
         (AliasRow("resonator", "R1"), AliasRow("qubit", "$resonator.partner"))
     )
-    assert table.resolve("qubit", setup, kind="qubit/fluxonium") == "Q2"
-    assert table.names(setup, {}) == {"resonator": "R1", "qubit": "Q2"}
+    assert table.resolve("qubit", global_document, kind="qubit/fluxonium") == "Q2"
+    assert table.names(global_document, {}) == {"resonator": "R1", "qubit": "Q2"}
     with pytest.raises(RoleResolutionError):
-        table.resolve("qubit", setup, kind="resonator")
+        table.resolve("qubit", global_document, kind="resonator")
 
 
 def test_links_follow_changed_earlier_rows_without_expanding_authored_values(

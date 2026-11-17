@@ -40,7 +40,7 @@ from zcu_tools.gui.app.measure.services.experiment_reload import ReloadReport
 from zcu_tools.gui.app.measure.services.load import LoadDataError
 from zcu_tools.gui.control_identity import ControlStatus
 from zcu_tools.gui.expected_error import ExpectedError, FailedPreconditionError
-from zcu_tools.gui.session.context_types import CommandOrigin, SavedEntry, SavedPoint
+from zcu_tools.gui.session.context_types import CommandOrigin
 from zcu_tools.gui.widgets import (
     DialogPresenter,
     DialogRefStore,
@@ -603,9 +603,9 @@ class MainWindow(QMainWindow):
         else:
             self._entry_label.setText(entry.name)
             reset_foreground(self._entry_label)
-        if isinstance(target, (SavedEntry, SavedPoint)):
+        if target is not None:
             self._point_label.setText(
-                target.point if isinstance(target, SavedPoint) else "Global"
+                target.point if target.point is not None else "Global"
             )
             reset_foreground(self._point_label)
         else:
@@ -629,7 +629,7 @@ class MainWindow(QMainWindow):
             self._tab_area.setCurrentWidget(self._tabs)
             return
         if self._ctrl.context_control.get_entry_info() is None:
-            self._empty_hint.setText("Open or create an entry in Setup… to begin.")
+            self._empty_hint.setText("Open or create an entry in Entry… to begin.")
         else:
             self._empty_hint.setText("Use New Tab to start an experiment.")
         self._tab_area.setCurrentWidget(self._empty_hint)
@@ -1246,7 +1246,7 @@ class MainWindow(QMainWindow):
         raises it if visible, or shows a hidden persistent instance.
         """
         if not self._writable and name not in (
-            DialogName.SETUP,
+            DialogName.ENTRY,
             DialogName.SOC,
             DialogName.INSPECT,
             DialogName.DEVICE,

@@ -123,8 +123,8 @@ class ControllerFixture:
                 address=address, fast_mode=True
             ),
         )
-        self.ctrl.setup_control.new_entry(EntryRequest("fake_qubit"))
-        self.ctrl.setup_control.new_point(
+        self.ctrl.entry_control.new_entry(EntryRequest("fake_qubit"))
+        self.ctrl.entry_control.new_point(
             PointCreateRequest("ctx001", "", CommandOrigin("gui"))
         )
         self.caretaker = PersistenceCaretaker(self.ctrl, cache_dir=cache_dir)
@@ -158,7 +158,7 @@ def _start_interactive_analysis(cf: ControllerFixture) -> tuple[str, int]:
 
 def test_get_project_root_returns_injected_root(qapp, tmp_path):
     """The entry script injects the repo root; the Controller exposes it so the
-    setup dialog / project RPC anchor default paths there instead of cwd (the
+    Entry dialog / project RPC anchor default paths there instead of cwd (the
     .bat launcher cd's into scripts/, so cwd is the wrong base)."""
     injected = str(tmp_path / "repo_root")
     fixture = ControllerFixture(cache_dir=tmp_path, project_root=injected)

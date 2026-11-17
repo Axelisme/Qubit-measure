@@ -65,13 +65,13 @@ class MeasureGuiBehavior[C](GuiRuntimeBehavior):
         hardware; registration/source failures abort construction.
         ``clean`` skips saved Qt layout and startup scripts.
         ``startup_script`` is the already-selected trusted Python path, or None
-        to run no script and show Setup. Composition chooses the default, not
+        to run no script and show Entry. Composition chooses the default, not
         this module. clean with a script raises ValueError. The script runs on
         a background worker after the Qt loop starts. Errors keep completed
         commands and show path/line diagnostics. Callback teardown runs on-owner.
         ``project_root`` anchors default paths, or uses the working directory.
         Aliases are file-backed. Startup scripts open an entry, then call
-        ctx.context.apply_alias_rows to initialize the active table explicitly.
+        ctx.context.apply_alias_rows to initialize global aliases, or pass the focused point label.
         """
         from zcu_tools.gui.app.measure.ui.error_handler import show_error_dialog
         from zcu_tools.gui.app.measure.utils.error_handler import (
@@ -204,7 +204,7 @@ class MeasureGuiBehavior[C](GuiRuntimeBehavior):
 
         parent = assembly.window
         assert _is_main_window(parent)
-        # The same Setup a toolbar click opens: non-modal so the Qt event loop
+        # The same Entry a toolbar click opens: non-modal so the Qt event loop
         # (and the remote control socket) keeps pumping while it is visible.
         if self._startup_script is not None:
             ctrl = assembly.controller
@@ -216,7 +216,7 @@ class MeasureGuiBehavior[C](GuiRuntimeBehavior):
 
             ctrl.owner_scheduler.post(start_script)
         else:
-            parent.open_dialog(DialogName.SETUP)
+            parent.open_dialog(DialogName.ENTRY)
 
     def _build_window(
         self,

@@ -1,4 +1,4 @@
-"""Entry RPC binding through real socket, setup and context owners."""
+"""Entry RPC binding through real socket, entry and context owners."""
 
 from hashlib import sha256
 from pathlib import Path
@@ -7,6 +7,8 @@ import pytest
 from zcu_tools.gui.session.context_types import EntryInfo, EntryRequest
 from zcu_tools.gui.session.types import ContextReadiness
 from zcu_tools.resources.entry import ResultEntry
+
+from tests.gui._context_reads import capture_focus
 
 from ._point_application import PointApplication
 
@@ -35,7 +37,7 @@ def test_empty_entry_queries_and_explicit_new_leave_point_unselected(
     (tmp_path / "result").mkdir()
     assert application.result("entry.list", {}) == {"entries": []}
     reply = application.result("entry.new", {"name": "cooldown-A"})
-    info = application.controller.setup_control.get_entry_info()
+    info = application.controller.entry_control.get_entry_info()
     assert info is not None
     assert reply == {
         "name": "cooldown-A",
@@ -128,12 +130,12 @@ def test_rejected_entry_request_preserves_selected_point(
 ) -> None:
     application.result("entry.new", {"name": "first"})
     application.result("point.new", {"label": "selected"})
-    before = application.controller.context_control.read_context()
+    before = capture_focus(application.controller.context_control)
     info = application.result("entry.info", {})
     rejected = application.rpc(method, params)
     assert rejected["ok"] is False, rejected
     assert application.result("entry.info", {}) == info
-    assert application.controller.context_control.read_context().target == before.target
+    assert capture_focus(application.controller.context_control).target == before.target
     assert application.state.session_env.readiness == ContextReadiness.POINT
     assert application.result("entry.list", {}) == {"entries": ["first"]}
 
@@ -143,7 +145,7 @@ def test_new_install_failure_keeps_created_entry_for_open_recovery(
 ) -> None:
     from zcu_tools.gui.session.services.context import ContextService
 
-    first = application.controller.setup_control.new_entry(EntryRequest("first"))
+    first = application.controller.entry_control.new_entry(EntryRequest("first"))
     original = ContextService.install_entry
 
     def fail_install(self: ContextService, entry: ResultEntry) -> EntryInfo:
@@ -155,7 +157,7 @@ def test_new_install_failure_keeps_created_entry_for_open_recovery(
     error = failed["error"]
     assert isinstance(error, dict)
     assert "Open" in str(error["message"])
-    assert application.controller.setup_control.get_entry_info() == first
+    assert application.controller.entry_control.get_entry_info() == first
     retained = ResultEntry.open(
         "retained", result_root=tmp_path / "result", database_root=tmp_path / "Database"
     )

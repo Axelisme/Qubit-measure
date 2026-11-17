@@ -28,6 +28,7 @@ from zcu_tools.gui.app.measure.state import RunPaneState
 from zcu_tools.gui.remote.framing import MAX_LINE_BYTES
 from zcu_tools.resources.entry.registry import component_registry
 
+from tests.gui._context_reads import capture_focus
 from tests.gui._qt_waits import qt_until
 from tests.gui.app.measure._components import QubitSchema, ResonatorSchema
 from tests.gui.app.measure._load_support import historical_metadata
@@ -88,7 +89,7 @@ def _await_completed_run(
 
 
 def _edit_context_as_gui(fx: _Fixture, key: str, value: str | int) -> None:
-    parameters = fx.ctrl.context_control.read_context()
+    parameters = capture_focus(fx.ctrl.context_control)
     assert parameters is not None
     fx.ctrl.context_control.set_parameter(
         require_target(parameters), f"general.ext.{key}", value

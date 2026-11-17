@@ -12,7 +12,7 @@ from typing_extensions import TypeVar
 
 if TYPE_CHECKING:
     from zcu_tools.cfg_model import CfgValidationContext, ConfigBase
-    from zcu_tools.gui.session.parameters import ParameterContext
+    from zcu_tools.gui.session.parameters import DocumentSetCapture
 
 
 # ``SocProtocol``/``SocCfgProtocol`` + the ``SocHandle``/``SocCfgHandle`` aliases,
@@ -100,7 +100,7 @@ class AnalyzeRequest(Generic[T_Result, T_AnalyzeParams]):
 
     run_result: T_Result
     analyze_params: T_AnalyzeParams
-    parameters: ParameterContext | None
+    parameters: DocumentSetCapture | None
 
 
 # ---------------------------------------------------------------------------
@@ -137,7 +137,7 @@ class PostAnalyzeRequest(Generic[T_Result, T_AnalyzeResult, T_PostAnalyzeParams]
     run_result: T_Result
     analyze_result: T_AnalyzeResult
     post_analyze_params: T_PostAnalyzeParams
-    parameters: ParameterContext | None
+    parameters: DocumentSetCapture | None
 
 
 @dataclass(frozen=True)

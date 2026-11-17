@@ -1,4 +1,4 @@
-"""Typed setup/point legacy library conversion in the parameter migration step."""
+"""Typed global/point legacy library conversion in the parameter migration step."""
 
 import shutil
 from dataclasses import dataclass, replace
@@ -304,7 +304,7 @@ def _set_slots(
 ) -> None:
     modules = published.module_keys()
     slots: set[str] = set()
-    view = entry.setup if label is None else entry.use_point(label)
+    view = entry.parameters() if label is None else entry.parameters(label)
     with edit_parameter(
         session, session.manifest.report.source.result_path, view
     ) as draft:
@@ -334,12 +334,12 @@ def convert_module_cfg(
     the absolute legacy module_cfg.yaml under its result root; an absent file
     returns None. Return the owner-validated same-context snapshot for scalar
     comparison: the isolated plan in dry-run, or the published library otherwise.
-    label is the validated point label, or None for root metadata with setup
+    label is the validated point label, or None for root metadata with global
     destination. entry is the matching handle, or None only in dry-run.
     mapping supplies explicit module/waveform source keys and canonical targets.
     The legacy envelope requires modules and waveforms mappings; malformed
     envelopes raise MigrationInputError and retain a module-step failure diagnostic.
-    Root entries use the setup library and set setup slots through the entry owner.
+    Root entries use the global library and set global slots through the entry owner.
     Slots choose the first successfully published module rule per reference path.
     Known fields with expressions, invalid/missing values or unmapped child
     references remain located pending, with the complete entry retained in the
@@ -365,7 +365,7 @@ def convert_module_cfg(
         item.source == source for item in session.manifest.module_files
     ):
         # The recovery owner already verified the fixed document baseline.
-        return entry.module_library(label).snapshot()
+        return entry.library(label).snapshot()
     try:
         source_hash = session.baseline(source)
         with source.open("r", encoding="utf-8") as stream:
@@ -397,7 +397,7 @@ def convert_module_cfg(
             return candidate
         if entry is None:
             raise ValueError("A library commit requires its ResultEntry handle")
-        library = entry.module_library(label)
+        library = entry.library(label)
         candidate, retained = _prepare_library(
             session, source, values, mapping, library.source_path
         )
@@ -420,7 +420,7 @@ def convert_module_cfg(
         else:
             candidate = library.snapshot()
         _set_slots(session, entry, label, candidate, mapping)
-        view = entry.setup if label is None else entry.use_point(label)
+        view = entry.parameters() if label is None else entry.parameters(label)
         with edit_parameter(session, source, view) as draft:
             _preserve_in_context(draft, retained)
         _record_preserved(session, source, values, retained, context_target)

@@ -12,7 +12,6 @@ from zcu_tools.analysis.singleshot import (
     summarize_centroid3,
 )
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.core.simulation import ChargeDriveRequirement
 from zcu_tools.experiment import AxesSpec, Experiment, RunRecord
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.v2.runtime import RunOptions, Schedule, SignalBuffer
@@ -28,6 +27,7 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.program.v2.modules.readout import centroid3_classifier
 from zcu_tools.program.v2.modules.waveform import EnvelopeWaveformCfg
+from zcu_tools.simulate.boundary import ChargeDriveRequirement
 
 from zcu_lab.v2.support import live_line
 

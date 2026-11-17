@@ -25,8 +25,8 @@ from zcu_tools.gui.app.measure.services.form_contracts import (
 )
 from zcu_tools.gui.form import FormEnv, FormErrors, FormInput, FormInputRejected
 from zcu_tools.gui.form_adapter import FixedElements, Form, FormContext
-from zcu_tools.gui.session.context_types import SavedPoint
-from zcu_tools.gui.session.parameters import ParameterContext
+from zcu_tools.gui.session.context_types import DocumentSetRef
+from zcu_tools.gui.session.parameters import DocumentSetCapture
 from zcu_tools.resources.context.library import (
     ComponentLibrary,
     LibrarySnapshot,
@@ -229,7 +229,7 @@ def captured_env(amount: float) -> FormEnv:
     library = LibrarySnapshot(
         ModuleLibraryDocument(format="zcu.module-library", format_version="2.0")
     )
-    parameters = ParameterContext(
+    parameters = DocumentSetCapture(
         point=ParameterDocument(
             format="zcu.parameter-container",
             format_version="1.0",
@@ -239,7 +239,7 @@ def captured_env(amount: float) -> FormEnv:
             ),
         ),
         library=library,
-        target=SavedPoint(entry_name="synthetic", point="working"),
+        target=DocumentSetRef(entry_name="synthetic", point="working"),
         roles=None,
     )
     return FormEnv(parameters=parameters, library=library)
@@ -291,7 +291,7 @@ def factory_env(amount: float, *, library: LibrarySnapshot | None = None) -> For
     fixed_library = env.library if library is None else library
     assert fixed_library is not None
     return FormEnv(
-        parameters=ParameterContext(
+        parameters=DocumentSetCapture(
             point=point,
             library=fixed_library,
             target=parameters.target,

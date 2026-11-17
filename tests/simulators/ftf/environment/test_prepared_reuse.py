@@ -4,9 +4,9 @@ from contextlib import ExitStack
 from dataclasses import replace
 
 import pytest
-from zcu_tools.core.simulation import ChargeDriveRequirement, RoundRequest
 from zcu_tools.device import DeviceManager
 from zcu_tools.program.v2.simulation import IntegratedRound
+from zcu_tools.simulate.boundary import ChargeDriveRequirement, RoundRequest
 from zcu_tools.simulators.ftf.environment import FTFSource, replay
 
 from tests.core._simulation import tick_array, ticks
@@ -70,7 +70,7 @@ def test_preparation_hits_preserve_routes_for_later_acquires(
     delayed_readout_template,
 ):
     import numpy as np
-    from zcu_tools.core.simulation import PulseEnvelope
+    from zcu_tools.simulate.boundary import PulseEnvelope
 
     base = delayed_readout_template
     drive, readout = base.events
@@ -113,7 +113,7 @@ def test_cached_small_acquire_reselects_route_after_source_usage_grows(
     rebuild, delayed_readout_template
 ):
     import numpy as np
-    from zcu_tools.core.simulation import PulseEnvelope
+    from zcu_tools.simulate.boundary import PulseEnvelope
 
     base = delayed_readout_template
     drive, readout = base.events
@@ -171,7 +171,7 @@ def test_history_sensitive_hit_reuses_policy_facts_without_prepare_or_put(
     delayed_readout_template,
 ):
     import numpy as np
-    from zcu_tools.core.simulation import PulseEnvelope
+    from zcu_tools.simulate.boundary import PulseEnvelope
     from zcu_tools.simulators.ftf.environment.preparation import PreparationCache
 
     class CountingPreparations[T](PreparationCache[T]):
@@ -228,7 +228,7 @@ def test_repeated_content_keeps_routes_stable_with_or_without_preparation_cache(
     clear, delayed_readout_template
 ):
     import numpy as np
-    from zcu_tools.core.simulation import PulseEnvelope
+    from zcu_tools.simulate.boundary import PulseEnvelope
 
     base = delayed_readout_template
     drive, readout = base.events

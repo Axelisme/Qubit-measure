@@ -1,0 +1,970 @@
+"""Smoke tests for EntryDialog."""
+
+from __future__ import annotations
+
+import os
+from collections.abc import Generator
+from pathlib import Path
+from unittest.mock import MagicMock
+
+import pytest
+from qtpy.QtCore import Qt
+from qtpy.QtWidgets import (
+    QApplication,
+    QComboBox,
+    QGroupBox,
+    QInputDialog,
+    QLabel,
+    QLineEdit,
+    QListWidget,
+    QPushButton,
+)
+from ruamel.yaml import YAML
+from zcu_tools.device.yoko import YOKOGS200Info
+from zcu_tools.gui.app.measure.controller import Controller
+from zcu_tools.gui.app.measure.registry import Registry
+from zcu_tools.gui.app.measure.state import State
+from zcu_tools.gui.event_bus import BaseEventBus
+from zcu_tools.gui.session.context_types import (
+    CommandOrigin,
+    EntryInfo,
+    EntryRequest,
+    PointCreateRequest,
+)
+from zcu_tools.gui.session.events import DeviceChangedPayload
+from zcu_tools.gui.session.services.project_settings import (
+    DialogPrefill,
+)
+from zcu_tools.gui.session.state import DeviceState, DeviceStatus
+from zcu_tools.gui.session.types import ContextReadiness, SessionEnv
+from zcu_tools.gui.session.ui.entry_dialog import EntryDialog
+from zcu_tools.gui.widgets import error_colour
+
+from tests.gui._context_reads import capture_focus
+from tests.gui._user_input import ComponentDriver
+
+
+def _prefs(
+    *,
+    entry_name: str = "",
+    ip: str = "192.168.10.1",
+    port: int = 8887,
+) -> DialogPrefill:
+    return DialogPrefill(
+        entry_name=entry_name,
+        ip=ip,
+        port=port,
+    )
+
+
+def _make_ctrl(**overrides: object) -> MagicMock:
+    ctrl = MagicMock()
+    # EntryControlPort.get_dialog_prefill is non-Optional (defaults when
+    # nothing is remembered), so the double honours that contract rather than
+    # returning None.
+    ctrl.get_dialog_prefill.return_value = _prefs()
+    ctrl.devices.list_devices.return_value = []
+    ctrl.get_context_labels.return_value = []
+    ctrl.get_active_context_label.return_value = None
+    ctrl.get_soccfg.return_value = None
+    ctrl.get_project_root.return_value = "/tmp"
+    ctrl.list_entries.return_value = ()
+    ctrl.get_entry_info.return_value = None
+    ctrl.list_points.return_value = ()
+    for k, v in overrides.items():
+        getattr(ctrl, k).return_value = v
+    return ctrl
+
+
+@pytest.fixture
+def entry_dialog(
+    qapp: QApplication, tmp_path: Path
+) -> Generator[tuple[EntryDialog, Controller, State]]:
+    """Own a real offline session; opening Entry never connects hardware."""
+    state = State(SessionEnv(parameters=None, soc=None, soccfg=None))
+    controller = Controller(
+        state, Registry(), None, BaseEventBus(), project_root=str(tmp_path)
+    )
+    controller.entry_control.new_entry(EntryRequest("remembered"))
+    dialog = EntryDialog(controller.entry_control)
+    try:
+        dialog.show()
+        qapp.processEvents()
+        yield dialog, controller, state
+    finally:
+        dialog.reject()
+        controller.close()
+        dialog.deleteLater()
+        qapp.processEvents()
+
+
+def entry_button(dialog: EntryDialog, text: str) -> QPushButton:
+    """Locate the visible action through the public Qt widget tree."""
+    return next(
+        button for button in dialog.findChildren(QPushButton) if button.text() == text
+    )
+
+
+def entry_selector(dialog: EntryDialog) -> QComboBox:
+    """Result entry selector has a stable object name for Qt consumers."""
+    combo = dialog.findChild(QComboBox, "result_entry")
+    assert combo is not None
+    return combo
+
+
+def test_point_modes_and_global_round_trip_through_visible_controls(
+    entry_dialog: tuple[EntryDialog, Controller, State], tmp_path: Path
+) -> None:
+    dialog, _controller, _state = entry_dialog
+    driver = ComponentDriver(dialog)
+    evidence = Path(os.environ.get("SESSION_DIALOG_EVIDENCE", str(tmp_path)))
+    assert [row.text for row in driver.list_rows()] == ["● Global"]
+    assert driver.observe(object_name="point_mode").text == "Inherit Global"
+    assert not driver.observe(object_name="clone_from").enabled
+    driver.screenshot(evidence / "01-global.png")
+
+    driver.enter_text(value="inherited", object_name="point_label", commit=False)
+    driver.enter_text(
+        value="Global copy", object_name="point_description", commit=False
+    )
+    driver.click("Create")
+    assert [row.text for row in driver.list_rows()] == ["Global", "● inherited"]
+    driver.screenshot(evidence / "02-inherited.png")
+
+    driver.select_combo("Empty", object_name="point_mode")
+    driver.enter_text(value="blank", object_name="point_label", commit=False)
+    assert not driver.observe(object_name="clone_from").enabled
+    driver.screenshot(evidence / "03-empty-mode.png")
+    driver.click("Create")
+    assert [row.text for row in driver.list_rows()] == [
+        "Global",
+        "● blank",
+        "inherited",
+    ]
+    driver.screenshot(evidence / "04-empty-created.png")
+
+    driver.select_combo("Clone point", object_name="point_mode")
+    assert driver.observe(object_name="clone_from").enabled
+    driver.select_combo("inherited", object_name="clone_from")
+    driver.enter_text(value="cloned", object_name="point_label", commit=False)
+    driver.enter_text(value="Local copy", object_name="point_description", commit=False)
+    driver.screenshot(evidence / "05-clone-mode.png")
+    driver.click("Create")
+    assert [row.text for row in driver.list_rows()] == [
+        "Global",
+        "blank",
+        "● cloned",
+        "inherited",
+    ]
+    assert driver.observe(object_name="point_mode").text == "Inherit Global"
+    driver.screenshot(evidence / "06-clone-created.png")
+
+    driver.select_list_row("Global")
+    driver.click("Switch to selected")
+    assert [row.text for row in driver.list_rows()][0] == "● Global"
+    assert driver.observe(object_name="entry_status").text == "Switched to Global"
+    driver.screenshot(evidence / "07-back-to-global.png")
+    driver.double_click_list_row("cloned")
+    assert [row.text for row in driver.list_rows()][2] == "● cloned"
+    assert (
+        driver.observe(object_name="selected_point_description").text
+        == "Description: Local copy"
+    )
+    driver.screenshot(evidence / "08-back-to-point.png")
+
+
+@pytest.mark.parametrize("field", ["point_label", "point_description"])
+def test_enter_creates_point_from_single_line_field(
+    entry_dialog: tuple[EntryDialog, Controller, State], field: str, tmp_path: Path
+) -> None:
+    dialog, _controller, _state = entry_dialog
+    driver = ComponentDriver(dialog)
+    driver.enter_text(value="bias-enter", object_name="point_label", commit=False)
+    driver.enter_text(
+        value="Created by keyboard", object_name="point_description", commit=False
+    )
+    driver.press_key(Qt.Key.Key_Return, object_name=field)
+    driver.screenshot(tmp_path / f"enter-{field}.png")
+    assert [row.text for row in driver.list_rows()] == ["Global", "● bias-enter"]
+    assert driver.observe(object_name="point_label").text == ""
+
+
+def test_double_click_switches_to_selected_point(
+    entry_dialog: tuple[EntryDialog, Controller, State], tmp_path: Path
+) -> None:
+    dialog, controller, _state = entry_dialog
+    for label in ("first", "second"):
+        controller.entry_control.new_point(
+            PointCreateRequest(label, "", CommandOrigin("gui"))
+        )
+    dialog.hide()
+    dialog.show()
+    driver = ComponentDriver(dialog)
+    driver.double_click_list_row("first")
+    driver.screenshot(tmp_path / "double-click.png")
+    assert [row.text for row in driver.list_rows()] == ["Global", "● first", "second"]
+
+
+def test_tab_visits_new_point_fields_in_reading_order(
+    entry_dialog: tuple[EntryDialog, Controller, State], tmp_path: Path
+) -> None:
+    dialog, _controller, _state = entry_dialog
+    driver = ComponentDriver(dialog)
+    dialog.activateWindow()
+    QApplication.processEvents()
+    for _ in range(20):
+        if driver.focused_input().object_name == "point_label":
+            break
+        driver.press_key(Qt.Key.Key_Tab)
+    assert driver.focused_input().object_name == "point_label"
+    for name in ("point_description", "point_mode", "track_device"):
+        driver.press_key(Qt.Key.Key_Tab)
+        driver.screenshot(
+            Path(os.environ.get("SESSION_DIALOG_EVIDENCE", str(tmp_path)))
+            / f"tab-{name}.png"
+        )
+        assert driver.focused_input().object_name == name, driver.focused_input()
+    driver.press_key(Qt.Key.Key_Tab)
+    assert driver.focused_input().text == "Create"
+
+
+def test_taller_dialog_gives_extra_height_only_to_point_list(
+    entry_dialog: tuple[EntryDialog, Controller, State], tmp_path: Path
+) -> None:
+    dialog, _controller, _state = entry_dialog
+    driver = ComponentDriver(dialog)
+    driver.resize_window(620, 640)
+    driver.enter_text(value="bias-a", object_name="point_label", commit=False)
+    driver.enter_text(
+        value="Near sweet spot", object_name="point_description", commit=False
+    )
+    driver.click("Create")
+    assert [row.text for row in driver.list_rows()] == ["Global", "● bias-a"]
+    assert driver.observe(object_name="selected_point_description").text == (
+        "Description: Near sweet spot"
+    )
+    driver.screenshot(tmp_path / "entry-620x640.png")
+
+    groups = {group.title(): group for group in dialog.findChildren(QGroupBox)}
+    entry = groups["Result entry"]
+    points = groups["Working points"]
+    new_point = groups["New working point"]
+    entry_pos = entry.mapTo(dialog, entry.rect().topLeft())
+    points_pos = points.mapTo(dialog, points.rect().topLeft())
+    new_point_pos = new_point.mapTo(dialog, new_point.rect().topLeft())
+    assert entry_pos.y() + entry.height() <= points_pos.y()
+    assert points_pos.y() + points.height() <= new_point_pos.y()
+    assert entry_pos.x() == points_pos.x() == new_point_pos.x()
+    assert entry.width() == points.width() == new_point.width()
+    form_heights = (entry.height(), new_point.height())
+    list_height = point_list(dialog).height()
+    window_height = driver.window_size().height()
+
+    driver.resize_window(620, 900)
+    driver.screenshot(tmp_path / "entry-620x900.png")
+    assert (entry.height(), new_point.height()) == form_heights
+    assert point_list(dialog).height() > list_height
+    assert point_list(dialog).height() - list_height == (
+        driver.window_size().height() - window_height
+    )
+    assert driver.observe("Create").fully_visible
+    assert driver.observe("Close").fully_visible
+
+
+def test_entry_show_and_reopen_prefill_without_changing_active_point(
+    entry_dialog: tuple[EntryDialog, Controller, State], qapp: QApplication
+) -> None:
+    dialog, controller, state = entry_dialog
+    selected = controller.entry_control.new_point(
+        PointCreateRequest("bias", "", CommandOrigin("gui"))
+    )
+    dialog.hide()
+    dialog.show()
+    qapp.processEvents()
+    assert entry_selector(dialog).currentText() == "remembered"
+    assert capture_focus(controller.context_control).target == selected
+    assert state.session_env.readiness == ContextReadiness.POINT
+    assert state.session_env.soc is None
+    assert state.session_env.soccfg is None
+
+
+def test_entry_new_arbitrary_name_displays_owner_paths_without_point(
+    entry_dialog: tuple[EntryDialog, Controller, State],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    dialog, controller, state = entry_dialog
+
+    def chosen_name(*args: object, **kwargs: object) -> tuple[str, bool]:
+        return "cooldown-A", True
+
+    monkeypatch.setattr(QInputDialog, "getText", chosen_name)
+    entry_button(dialog, "New entry…").click()
+    info = controller.entry_control.get_entry_info()
+    assert info is not None and info.name == "cooldown-A"
+    assert entry_selector(dialog).currentText() == info.name
+    assert entry_path_row(dialog, "result_path").toolTip() == str(info.result_path)
+    assert entry_path_row(dialog, "database_path").toolTip() == str(info.database_path)
+    assert state.session_env.readiness == ContextReadiness.GLOBAL
+    assert state.session_env.parameters is not None
+    assert controller.entry_control.list_points() == ()
+    assert state.session_env.soc is None
+    assert controller.device_control.list_devices() == []
+
+
+def test_entry_open_does_not_select_a_point(
+    entry_dialog: tuple[EntryDialog, Controller, State],
+) -> None:
+    dialog, controller, state = entry_dialog
+    controller.entry_control.new_point(
+        PointCreateRequest("bias", "", CommandOrigin("gui"))
+    )
+    entry_selector(dialog).setCurrentText("remembered")
+    entry_button(dialog, "Open").click()
+    assert state.session_env.readiness == ContextReadiness.GLOBAL
+    assert state.session_env.parameters is not None
+    assert controller.entry_control.list_points()[0].label == "bias"
+
+
+def test_entry_rejected_new_shows_error_and_keeps_active_point(
+    entry_dialog: tuple[EntryDialog, Controller, State],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    dialog, controller, state = entry_dialog
+    selected = controller.entry_control.new_point(
+        PointCreateRequest("bias", "", CommandOrigin("gui"))
+    )
+
+    def duplicate_name(*args: object, **kwargs: object) -> tuple[str, bool]:
+        return "remembered", True
+
+    monkeypatch.setattr(QInputDialog, "getText", duplicate_name)
+    entry_button(dialog, "New entry…").click()
+    assert capture_focus(controller.context_control).target == selected
+    assert state.session_env.readiness == ContextReadiness.POINT
+    labels = "\n".join(label.text() for label in dialog.findChildren(QLabel))
+    assert "exists" in labels.lower()
+
+
+def test_entry_cancel_new_keeps_binding(
+    entry_dialog: tuple[EntryDialog, Controller, State], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    dialog, controller, state = entry_dialog
+    before = controller.entry_control.get_entry_info()
+
+    def cancelled(*args: object, **kwargs: object) -> tuple[str, bool]:
+        return "", False
+
+    monkeypatch.setattr(QInputDialog, "getText", cancelled)
+    entry_button(dialog, "New entry…").click()
+    assert controller.entry_control.get_entry_info() == before
+    assert state.session_env.readiness == ContextReadiness.GLOBAL
+
+
+def test_entry_owner_switch_updates_visible_identity_and_paths(
+    entry_dialog: tuple[EntryDialog, Controller, State],
+) -> None:
+    dialog, controller, state = entry_dialog
+    info = controller.entry_control.new_entry(EntryRequest("external"))
+    assert entry_selector(dialog).currentText() == info.name
+    assert entry_path_row(dialog, "result_path").toolTip() == str(info.result_path)
+    assert entry_path_row(dialog, "database_path").toolTip() == str(info.database_path)
+    assert state.session_env.readiness == ContextReadiness.GLOBAL
+    assert state.session_env.soc is None
+
+
+def entry_path_row(dialog: EntryDialog, name: str) -> QLabel:
+    """Find the Result or Database path label by its public object name."""
+    label = dialog.findChild(QLabel, name)
+    assert label is not None
+    return label
+
+
+def point_field(dialog: EntryDialog, name: str) -> QLineEdit:
+    """Find an editable working-point field by its public object name."""
+    field = dialog.findChild(QLineEdit, name)
+    assert field is not None
+    return field
+
+
+def point_list(dialog: EntryDialog) -> QListWidget:
+    """Read working-point selection through the public Qt tree."""
+    listing = dialog.findChild(QListWidget, "working_points")
+    assert listing is not None
+    return listing
+
+
+def point_combo(dialog: EntryDialog, name: str) -> QComboBox:
+    """Find the Track device or Clone from selector."""
+    combo = dialog.findChild(QComboBox, name)
+    assert combo is not None
+    return combo
+
+
+def entry_status(dialog: EntryDialog) -> str:
+    """Read the visible owner-result message."""
+    status = dialog.findChild(QLabel, "entry_status")
+    assert status is not None
+    return status.text()
+
+
+def test_unavailable_point_shows_reason_while_another_point_remains_selectable(
+    entry_dialog: tuple[EntryDialog, Controller, State], tmp_path: Path
+) -> None:
+    dialog, controller, _state = entry_dialog
+    for label in ("bad", "good"):
+        controller.entry_control.new_point(
+            PointCreateRequest(label, f"{label} description", CommandOrigin("gui"))
+        )
+    source = tmp_path / "result/remembered/points/bad/parameters.yaml"
+    yaml = YAML(typ="safe")
+    document = yaml.load(source.read_text())
+    document["schema_version"] = 0
+    with source.open("w") as stream:
+        yaml.dump(document, stream)
+    driver = ComponentDriver(dialog)
+    evidence = Path(os.environ.get("SESSION_DIALOG_EVIDENCE", str(tmp_path)))
+
+    driver.click(text="Open")
+    driver.screenshot(evidence / "unavailable-point.png")
+    rows = driver.list_rows()
+    assert [row.text for row in rows] == ["● Global", "bad (unavailable)", "good"]
+    assert "bad description" in rows[1].tooltip
+    assert str(source) in rows[1].tooltip
+    assert "schema_version" in rows[1].tooltip
+    driver.select_list_row("good")
+    driver.click(text="Switch to selected")
+    driver.screenshot(evidence / "available-point-selected.png")
+    assert [row.text for row in driver.list_rows()] == [
+        "Global",
+        "bad (unavailable)",
+        "● good",
+    ]
+    assert (
+        driver.observe(object_name="selected_point_description").text
+        == "Description: good description"
+    )
+
+
+def test_working_point_switch_uses_label_and_displays_description(
+    entry_dialog: tuple[EntryDialog, Controller, State],
+) -> None:
+    dialog, controller, state = entry_dialog
+    first = controller.entry_control.new_point(
+        PointCreateRequest("bias-a", "near sweet spot", CommandOrigin("gui"))
+    )
+    controller.entry_control.new_point(
+        PointCreateRequest("bias-b", "away from sweet spot", CommandOrigin("gui"))
+    )
+    listing = point_list(dialog)
+    assert listing.count() == 3
+    first_item, second_item = listing.item(1), listing.item(2)
+    assert first_item is not None and second_item is not None
+    assert first_item.toolTip() == "near sweet spot"
+    assert second_item.toolTip() == "away from sweet spot"
+    listing.setCurrentRow(1)
+    entry_button(dialog, "Switch to selected").click()
+    assert capture_focus(controller.context_control).target == first
+    assert state.session_env.readiness == ContextReadiness.POINT
+
+
+@pytest.mark.parametrize("description", ["new description", ""])
+@pytest.mark.parametrize("source_label", ["source", "src"])
+def test_working_point_create_clones_source_and_replaces_description(
+    entry_dialog: tuple[EntryDialog, Controller, State],
+    description: str,
+    source_label: str,
+) -> None:
+    dialog, controller, state = entry_dialog
+    source = controller.entry_control.new_point(
+        PointCreateRequest(source_label, "source description", CommandOrigin("gui"))
+    )
+    controller.context_control.set_parameter(source, "general.ext.flux_value", 0.27)
+    point_combo(dialog, "point_mode").setCurrentIndex(2)
+    clone = point_combo(dialog, "clone_from")
+    clone.setCurrentIndex(clone.findData(source_label))
+    point_field(dialog, "point_label").setText("cloned")
+    point_field(dialog, "point_description").setText(description)
+    entry_button(dialog, "Create").click()
+    capture = capture_focus(controller.context_control)
+    assert capture.target != source
+    assert capture.value("general.ext.flux_value") == 0.27
+    assert capture.whole_document().general.description == description
+    assert {p.label: p.description for p in controller.entry_control.list_points()} == {
+        "cloned": description,
+        source_label: "source description",
+    }
+    assert state.session_env.readiness == ContextReadiness.POINT
+
+
+def test_working_point_inherit_create_uses_global(
+    entry_dialog: tuple[EntryDialog, Controller, State],
+) -> None:
+    dialog, controller, state = entry_dialog
+    assert state.session_env.parameters is not None
+    assert point_combo(dialog, "point_mode").currentText() == "Inherit Global"
+    point_field(dialog, "point_label").setText("fresh")
+    entry_button(dialog, "Create").click()
+    capture = capture_focus(controller.context_control)
+    assert not capture.lookup("general.ext.flux_value").present
+    assert capture.whole_document().general.description == ""
+    assert capture.whole_document().components == {}
+    assert state.session_env.readiness == ContextReadiness.POINT
+
+
+@pytest.mark.parametrize("label", ["duplicate", "", "../unsafe"])
+def test_working_point_create_owner_rejection_preserves_binding(
+    entry_dialog: tuple[EntryDialog, Controller, State],
+    label: str,
+) -> None:
+    dialog, controller, state = entry_dialog
+    selected = controller.entry_control.new_point(
+        PointCreateRequest("duplicate", "kept", CommandOrigin("gui"))
+    )
+    before = controller.entry_control.list_points()
+    point_field(dialog, "point_label").setText(label)
+    entry_button(dialog, "Create").click()
+    assert capture_focus(controller.context_control).target == selected
+    assert controller.entry_control.list_points() == before
+    assert state.session_env.readiness == ContextReadiness.POINT
+    assert "Failed" in entry_status(dialog)
+
+
+def test_working_point_missing_clone_preserves_binding(
+    entry_dialog: tuple[EntryDialog, Controller, State],
+) -> None:
+    dialog, controller, _state = entry_dialog
+    selected = controller.entry_control.new_point(
+        PointCreateRequest("kept", "", CommandOrigin("gui"))
+    )
+    point_combo(dialog, "point_mode").setCurrentIndex(2)
+    clone = point_combo(dialog, "clone_from")
+    clone.addItem("removed", "removed")
+    clone.setCurrentIndex(clone.count() - 1)
+    point_field(dialog, "point_label").setText("not-created")
+    entry_button(dialog, "Create").click()
+    assert capture_focus(controller.context_control).target == selected
+    assert [p.label for p in controller.entry_control.list_points()] == ["kept"]
+    assert "Failed" in entry_status(dialog)
+
+
+def test_working_point_switch_missing_source_preserves_binding(
+    entry_dialog: tuple[EntryDialog, Controller, State],
+) -> None:
+    from qtpy.QtCore import Qt
+
+    dialog, controller, _state = entry_dialog
+    selected = controller.entry_control.new_point(
+        PointCreateRequest("kept", "", CommandOrigin("gui"))
+    )
+    listing = point_list(dialog)
+    # A stale cached row still passes the exact label to the owning command.
+    item = listing.item(1)
+    assert item is not None
+    item.setData(Qt.ItemDataRole.UserRole, "removed")
+    listing.setCurrentRow(1)
+    entry_button(dialog, "Switch to selected").click()
+    assert capture_focus(controller.context_control).target == selected
+    assert "Failed" in entry_status(dialog)
+
+
+def test_working_points_follow_entry_changes_and_reopen_without_selecting(
+    entry_dialog: tuple[EntryDialog, Controller, State],
+    qapp: QApplication,
+) -> None:
+    dialog, controller, state = entry_dialog
+    controller.entry_control.new_point(
+        PointCreateRequest("old", "old entry", CommandOrigin("gui"))
+    )
+    controller.entry_control.new_entry(EntryRequest("other"))
+    listing = point_list(dialog)
+    assert listing.count() == 1
+    assert point_combo(dialog, "clone_from").count() == 1
+    controller.entry_control.new_point(
+        PointCreateRequest("new", "other entry", CommandOrigin("gui"))
+    )
+    controller.entry_control.open_entry(EntryRequest("other"))
+    before = controller.get_session_env()
+    dialog.hide()
+    dialog.show()
+    qapp.processEvents()
+    assert listing.count() == 2
+    item = listing.item(1)
+    assert item is not None and item.toolTip() == "other entry"
+    assert controller.get_session_env() == before
+    assert before.parameters is not None
+    assert state.session_env.readiness == ContextReadiness.GLOBAL
+
+
+def test_working_point_create_without_entry_shows_owner_failure(
+    qapp: QApplication,
+    tmp_path: Path,
+) -> None:
+    state = State(SessionEnv(parameters=None, soc=None, soccfg=None))
+    controller = Controller(
+        state, Registry(), None, BaseEventBus(), project_root=str(tmp_path)
+    )
+    dialog = EntryDialog(controller.entry_control)
+    try:
+        point_field(dialog, "point_label").setText("bias")
+        entry_button(dialog, "Create").click()
+        assert state.session_env.readiness == ContextReadiness.EMPTY
+        assert controller.entry_control.get_entry_info() is None
+        assert "Failed" in entry_status(dialog)
+    finally:
+        dialog.reject()
+        controller.close()
+        dialog.deleteLater()
+        qapp.processEvents()
+
+
+@pytest.mark.parametrize("cached", [None, 0.0035, 0.005])
+def test_working_point_device_suggestion_is_cached_and_preserves_manual_text(
+    entry_dialog: tuple[EntryDialog, Controller, State],
+    monkeypatch: pytest.MonkeyPatch,
+    cached: float | None,
+) -> None:
+    dialog, controller, state = entry_dialog
+
+    def forbidden_live_read(*args: object, **kwargs: object) -> None:
+        raise AssertionError("Entry must only read cached device facts")
+
+    for name in ("get_device_info", "poll_device_info", "try_poll_device_info"):
+        monkeypatch.setattr(controller.device_control, name, forbidden_live_read)
+    state.put_device(
+        DeviceState(
+            name="flux",
+            type_name="YOKOGS200",
+            address="offline",
+            status=DeviceStatus.CONNECTED,
+            remember=False,
+            info=YOKOGS200Info(address="offline", mode="current", value=cached)
+            if cached is not None
+            else None,
+        )
+    )
+    controller.get_bus().emit(DeviceChangedPayload(name="flux"))
+    device = point_combo(dialog, "track_device")
+    device.setCurrentIndex(device.findData("flux"))
+    label = point_field(dialog, "point_label")
+    assert label.text() == (f"{cached}A" if cached is not None else "")
+    label.selectAll()
+    label.insert("my-bias")
+    assert label.isModified()
+    state.set_device_info(
+        "flux", YOKOGS200Info(address="offline", mode="current", value=0.004)
+    )
+    controller.get_bus().emit(DeviceChangedPayload(name="flux"))
+    assert label.text() == "my-bias"
+    device.setCurrentIndex(0)
+    assert label.text() == "my-bias"
+    entry_button(dialog, "Create").click()
+    assert [p.label for p in controller.entry_control.list_points()] == ["my-bias"]
+    assert state.session_env.soc is None
+
+
+def test_working_point_cached_none_keeps_previous_suggestion(
+    entry_dialog: tuple[EntryDialog, Controller, State],
+) -> None:
+    dialog, controller, state = entry_dialog
+    state.put_device(
+        DeviceState(
+            name="flux",
+            type_name="YOKOGS200",
+            address="offline",
+            status=DeviceStatus.CONNECTED,
+            remember=False,
+            info=YOKOGS200Info(address="offline", mode="voltage", value=0.12),
+        )
+    )
+    controller.get_bus().emit(DeviceChangedPayload(name="flux"))
+    device = point_combo(dialog, "track_device")
+    device.setCurrentIndex(device.findData("flux"))
+    label = point_field(dialog, "point_label")
+    assert label.text() == "0.12V"
+    state.set_device_info("flux", None)
+    controller.get_bus().emit(DeviceChangedPayload(name="flux"))
+    assert label.text() == "0.12V"
+
+
+def point_texts(dialog: EntryDialog) -> list[str]:
+    listing = point_list(dialog)
+    items = [listing.item(row) for row in range(listing.count())]
+    return [item.text() for item in items if item is not None]
+
+
+def current_point_text(dialog: EntryDialog) -> str | None:
+    item = point_list(dialog).currentItem()
+    return item.text() if item is not None else None
+
+
+def selected_description(dialog: EntryDialog) -> QLabel:
+    label = dialog.findChild(QLabel, "selected_point_description")
+    assert label is not None
+    return label
+
+
+def test_long_status_message_wraps_without_widening_dialog(
+    entry_dialog: tuple[EntryDialog, Controller, State], qapp: QApplication
+) -> None:
+    dialog, _controller, _state = entry_dialog
+    dialog.resize(900, 600)
+    qapp.processEvents()
+    widths = (dialog.width(), dialog.minimumSizeHint().width())
+    combo = entry_selector(dialog)
+    combo.addItem("missing_" + "x" * 160)
+    combo.setCurrentIndex(combo.count() - 1)
+    entry_button(dialog, "Open").click()
+    qapp.processEvents()
+    status = dialog.findChild(QLabel, "entry_status")
+    assert status is not None and status.text()
+    assert status.wordWrap()
+    assert dialog.width() == widths[0]
+    assert dialog.minimumSizeHint().width() <= max(widths[1], 900)
+
+
+def test_entry_paths_elide_middle_keep_name_and_open_folder(
+    entry_dialog: tuple[EntryDialog, Controller, State], qapp: QApplication
+) -> None:
+    dialog, controller, _state = entry_dialog
+    info = controller.entry_control.get_entry_info()
+    assert info is not None
+    dialog.resize(520, 600)
+    qapp.processEvents()
+    for name, path in (
+        ("result_path", info.result_path),
+        ("database_path", info.database_path),
+    ):
+        row = entry_path_row(dialog, name)
+        assert row.toolTip() == str(path)
+        assert row.text().endswith(info.name)
+        assert row.text() != str(path)
+    folders = [b for b in dialog.findChildren(QPushButton) if b.text() == "Open folder"]
+    assert len(folders) == 2 and all(button.isEnabled() for button in folders)
+
+
+def test_point_rows_show_labels_and_selected_description_below(
+    entry_dialog: tuple[EntryDialog, Controller, State],
+) -> None:
+
+    dialog, controller, _state = entry_dialog
+    long_text = "JPA on, readout -30 dBm " * 8
+    controller.entry_control.new_point(
+        PointCreateRequest("bias-a", long_text, CommandOrigin("gui"))
+    )
+    controller.entry_control.new_point(
+        PointCreateRequest("bias-b", "", CommandOrigin("gui"))
+    )
+    listing = point_list(dialog)
+    assert point_texts(dialog) == ["Global", "bias-a", "● bias-b"]
+    listing.setCurrentRow(1)
+    view = selected_description(dialog)
+    assert long_text.strip() in view.text()
+    assert view.wordWrap()
+    listing.setCurrentRow(2)
+    assert long_text.strip() not in view.text()
+
+
+def test_selection_and_marker_follow_current_point(
+    entry_dialog: tuple[EntryDialog, Controller, State], qapp: QApplication
+) -> None:
+    dialog, controller, _state = entry_dialog
+    for label in ("p1", "p2", "p3"):
+        point_field(dialog, "point_label").setText(label)
+        entry_button(dialog, "Create").click()
+    assert point_texts(dialog) == ["Global", "p1", "p2", "● p3"]
+    assert current_point_text(dialog) == "● p3"
+    listing = point_list(dialog)
+    listing.setCurrentRow(2)
+    entry_button(dialog, "Switch to selected").click()
+    assert point_texts(dialog) == ["Global", "p1", "● p2", "p3"]
+    assert current_point_text(dialog) == "● p2"
+    current = listing.currentItem()
+    assert current is not None and current.font().bold()
+    first = listing.item(0)
+    assert first is not None and not first.font().bold()
+    controller.entry_control.use_point("p1")
+    assert current_point_text(dialog) == "● p1"
+    dialog.hide()
+    dialog.show()
+    qapp.processEvents()
+    assert current_point_text(dialog) == "● p1"
+
+
+def test_entry_without_selected_point_selects_global(
+    entry_dialog: tuple[EntryDialog, Controller, State],
+) -> None:
+    dialog, controller, _state = entry_dialog
+    controller.entry_control.new_point(
+        PointCreateRequest("p1", "", CommandOrigin("gui"))
+    )
+    controller.entry_control.open_entry(EntryRequest("remembered"))
+    assert point_texts(dialog) == ["● Global", "p1"]
+    assert current_point_text(dialog) == "● Global"
+
+
+def test_create_clears_form_on_success_and_keeps_it_on_failure(
+    entry_dialog: tuple[EntryDialog, Controller, State],
+) -> None:
+    dialog, _controller, _state = entry_dialog
+    label = point_field(dialog, "point_label")
+    description = point_field(dialog, "point_description")
+    label.setText("p1")
+    description.setText("first")
+    entry_button(dialog, "Create").click()
+    assert (label.text(), description.text()) == ("", "")
+    label.setText("p1")
+    description.setText("duplicate")
+    entry_button(dialog, "Create").click()
+    assert (label.text(), description.text()) == ("p1", "duplicate")
+
+
+def test_external_entry_creation_replaces_empty_hint_and_survives_reopen(
+    qapp: QApplication, tmp_path: Path
+) -> None:
+    state = State(SessionEnv(parameters=None, soc=None, soccfg=None))
+    controller = Controller(
+        state, Registry(), None, BaseEventBus(), project_root=str(tmp_path)
+    )
+    dialog = EntryDialog(controller.entry_control)
+    try:
+        dialog.show()
+        qapp.processEvents()
+        driver = ComponentDriver(dialog)
+        driver.screenshot(tmp_path / "empty.png")
+        assert (
+            "No result entries yet" in driver.observe(object_name="entry_status").text
+        )
+
+        # Another caller (e.g. RPC) installs an entry while Entry remains open.
+        controller.entry_control.new_entry(EntryRequest("created-externally"))
+        driver.screenshot(tmp_path / "entry-created.png")
+        assert driver.observe(object_name="result_entry").text == "created-externally"
+        assert driver.observe(object_name="entry_status").text == (
+            "Opened entry: created-externally"
+        )
+
+        driver.click("Close")
+        dialog.show()
+        qapp.processEvents()
+        driver.screenshot(tmp_path / "reopened.png")
+        assert driver.observe(object_name="result_entry").text == "created-externally"
+        assert (
+            "No result entries yet"
+            not in driver.observe(object_name="entry_status").text
+        )
+    finally:
+        dialog.reject()
+        controller.close()
+        dialog.deleteLater()
+        qapp.processEvents()
+
+
+def test_missing_result_root_shows_hint_instead_of_error(
+    qapp: QApplication, tmp_path: Path
+) -> None:
+    state = State(SessionEnv(parameters=None, soc=None, soccfg=None))
+    controller = Controller(
+        state, Registry(), None, BaseEventBus(), project_root=str(tmp_path)
+    )
+    dialog = EntryDialog(controller.entry_control)
+    try:
+        dialog.show()
+        qapp.processEvents()
+        status = dialog.findChild(QLabel, "entry_status")
+        assert status is not None
+        assert str(tmp_path / "result") in status.toolTip()
+        status.ensurePolished()
+        assert status.palette().color(status.foregroundRole()) != error_colour(status)
+        assert entry_selector(dialog).count() == 0
+        (tmp_path / "result").write_text("not a directory", encoding="utf-8")
+        next(
+            b
+            for b in dialog.findChildren(QPushButton)
+            if b.toolTip() == "Refresh result entries"
+        ).click()
+        status.ensurePolished()
+        assert status.palette().color(status.foregroundRole()) == error_colour(status)
+    finally:
+        dialog.reject()
+        controller.close()
+        dialog.deleteLater()
+        qapp.processEvents()
+
+
+def test_entry_error_uses_theme_foreground(qapp, window_palette):
+    ctrl = _make_ctrl()
+    ctrl.open_entry.side_effect = RuntimeError("entry failed")
+    dialog = EntryDialog(ctrl)
+    try:
+        dialog.setPalette(window_palette)
+        entry_selector(dialog).addItem("missing")
+        entry_selector(dialog).setCurrentText("missing")
+        entry_button(dialog, "Open").click()
+        label = next(
+            label for label in dialog.findChildren(QLabel) if "failed" in label.text()
+        )
+        label.ensurePolished()
+        assert label.palette().color(label.foregroundRole()) == error_colour(label)
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        qapp.processEvents()
+
+
+def test_entry_success_replaces_error_foreground(qapp, window_palette):
+    from zcu_tools.gui.widgets import success_colour
+
+    ctrl = _make_ctrl()
+    ctrl.open_entry.side_effect = RuntimeError("entry failed")
+    dialog = EntryDialog(ctrl)
+    try:
+        dialog.setPalette(window_palette)
+        entry_selector(dialog).addItem("entry")
+        entry_selector(dialog).setCurrentText("entry")
+        entry_button(dialog, "Open").click()
+        label = next(
+            label
+            for label in dialog.findChildren(QLabel)
+            if "entry failed" in label.text()
+        )
+        ctrl.open_entry.side_effect = None
+        ctrl.open_entry.return_value = EntryInfo(
+            "entry",
+            Path("/synthetic/result/entry"),
+            Path("/synthetic/database/entry"),
+        )
+        entry_button(dialog, "Open").click()
+        label.ensurePolished()
+        assert label.palette().color(label.foregroundRole()) == success_colour(dialog)
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        qapp.processEvents()
+
+
+def test_selected_description_restores_live_theme_inheritance(entry_dialog, qapp):
+    from qtpy.QtGui import QColor, QPalette
+
+    dialog, controller, _state = entry_dialog
+    palette = dialog.palette()
+    palette.setColor(QPalette.ColorRole.WindowText, QColor("black"))
+    dialog.setPalette(palette)
+    controller.entry_control.new_point(
+        PointCreateRequest("described", "A note", CommandOrigin("gui"))
+    )
+    controller.entry_control.new_point(
+        PointCreateRequest("empty", "", CommandOrigin("gui"))
+    )
+    listing = point_list(dialog)
+    listing.setCurrentRow(2)
+    label = selected_description(dialog)
+    assert label.text() == "No description"
+    listing.setCurrentRow(1)
+    assert label.text() == "Description: A note"
+    palette.setColor(QPalette.ColorRole.Window, QColor("#353535"))
+    palette.setColor(QPalette.ColorRole.WindowText, QColor("white"))
+    dialog.setPalette(palette)
+    qapp.processEvents()
+    assert label.palette().color(label.foregroundRole()) == dialog.palette().color(
+        QPalette.ColorRole.WindowText
+    )

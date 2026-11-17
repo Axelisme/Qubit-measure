@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-11-17，GUI plotting guard 的條件式回收
+**Last updated:** 2026-11-17，GUI plotting guard 的條件式回收、sideband plateau 與 idle 精度宣告、模擬器維護規則指標
 
 **讀者：** framework-dev、agent。查閱測試的 owner、fixture、執行方式與搬遷驗收契約。
 
@@ -127,6 +127,39 @@ ticket 內只跑受影響選集。只有變更觸及 `lib/zcu_tools/simulate/` �
 
 ### Evolution 精度矩陣
 
+新增 family 或改 guard 時要補哪些案例，見 [模擬器維護規則](../lib/zcu_tools/simulate/maintenance.md#3-精度驗收)。
+
+凍結數值的讀寫與 reference cache miss 契約由 `tests/simulate/evolution/test_frozen.py` 和
+`test_reference_cache.py` 在公開 `simulate.evolution` 接縫驗證。
+`tests/simulate/evolution/contract/family_pareto_reference_producer.py` 讀凍結數值，呼叫既有獨立 solver，再經 codec 寫 NPZ。
+它不 import tools。工具單元測試可 import 受測工具，並用工具的公開 `Scene` 建 fixture。
+Guard edge、sweep、history 與 multisegment accuracy 案例仍由下面的精度矩陣擁有，不從工具 producer 反向取得。
+
+準備參考解時，呼叫端明示每份 index 的 solver，並傳入顯式 `--scene-cache` 路徑。
+Git 只留名稱與三個 hash 的兩份小清單。數值放 repo 共用的 scenes/v1 快取，不隨 task 清理。
+首次遷移只核既有 payload 身份、point order 與 reference key，不是 builders 冷重建。
+量測與成對工具共用每筆 name、physical_sha256、oracle_sha256、metadata_sha256 身份，不用 manifest 路徑或檔案 SHA。
+求解必須先取得成本授權，並套用當次 heavy runner 與鎖的規則。這不是量測 preflight，也不保證既有 cache 已涵蓋全部場景。
+
+```bash
+uv run --directory "$PWD" --no-sync -- python -m tests.simulate.evolution.contract.family_pareto_reference_producer \
+  --converged tools/data/family_pareto/frozen-synthetic.index.json \
+  --interaction tools/data/family_pareto/frozen-real.index.json \
+  --scene-cache /absolute/scene-cache \
+  --cache /path/to/approved/reference-cache
+```
+
+`--converged` 與 `--interaction` 可重複指定。Producer 只讀 record 的 name、physical，既有 key 命中就讀取，只有 missing key 才用指定 solver 求解。
+它不讀 metadata、不維護場景名稱清單，也不在失敗後換 solver。
+加 `--scenario NAME` 時，producer 先在所有明確提供的清單中選取恰好一筆同名列，再讀該列 payload。
+零筆會列合法名稱，多筆會列來源，兩者都在讀 payload 或呼叫 solver 前失敗。
+未選列不需要 payload，也不會求解。不帶 scenario 時維持整批處理。
+公開 `prepare_references(index, cache, scene_cache=..., solver=..., scenario=NAME)` 對單份清單提供同樣選取。
+例如只準備某個已凍結場景，沿用上方命令並加 `--scenario idle_coherence`，且仍須取得 solver 成本授權。
+所有選定數值檔載入成功才可求解。場景缺檔會列名稱、hash 與 scene producer 指令並失敗，不補建或求解。
+測試以公開 `write_frozen_index` 和 `write_scene_record` 在 tmp_path 建立最小 fixture，不填共用快取。
+既有極小 solver 回歸也只寫 tmp_path。
+
 從 worktree 執行下列指令。先建立 `<log-dir>`，把它換成此次執行的輸出目錄。
 
 ```bash
@@ -164,6 +197,17 @@ Active family 的 guard 拒絕輸入會讓 density 測試失敗，不會產生�
 | `linear_plateau` | `single_tone_rwa` | 24 ns、600 MHz constant tone、X-only drive |
 | `nearby_carriers` | `common_frame` | 6.5 ns、600 與 630 MHz 的同 port constant tones |
 | `adiabatic_ramp` | `adiabatic_map` | 8 ns、無 tone、弱非對易 flux ramp |
+
+`single_tone_sideband` 使用 committed 合成 fluxonium (4,1,1) GHz、flux=0.40、
+native cutoff=30、retained=6、N=3 的 d=18 joint 模型。初態是 dressed |e,0⟩，
+600 ns 方波驅動 |e,0⟩→|g,1⟩，g_sb=1 MHz，之後等待五個 cavity lifetimes。
+κ/(2π)=5 MHz，intrinsic capacitive Q=1e6 的 T1 仍在模型內。
+它宣告 plateau targets 為 `floquet_period` 與 `t6`，idle companion 為 `t4`。
+各 target 以 `families=("t4", target)` 固定，實際執行的 family 集合須正好是兩者。
+另以預設選路的空／暖歷史對雙容差 oracle 比完整 density，reference 在同一 pytest worker 內共用。
+`t6` 是 plateau 的直接積分 family，不代表 `dop853` family 通過。
+
+這個案例允許超過〈測試成本〉每個測試 30 s 的預算：首次計算 18 態、約 760 ns 的兩級容差 lab-frame reference 是成本主體。保留原長度的理由是 joint dressed 模型是約化參數空間中其他案例不涵蓋的一軸，縮短序列會改變驗收的內容。它只在包含 `sim` 的選集執行；`worksteal` 把它的三個測試分到不同 worker 時，每個 worker 各算一次 reference。這是矩陣唯一具名的成本例外。之後新增或修改的案例在 `-n 0` 下超過 30 s 時，先依本節末的順序加本機 hash 快取，不新增第二個具名例外。
 
 每個案例也保留預設選路的空歷史與暖歷史驗收。
 `joint_gate_inventory` 保留完整 20 點 sampled inventory，pinned density 改驗 `dop853`。
@@ -268,6 +312,7 @@ fixture 過重、重複計算或不必要的 sleep／輪詢要直接修，不用
 ### 測試成本
 
 每個測試函數的計算只用單核心。一個測試內部的 worker、thread 或 process 總數最多兩個，用於驗證多 worker 契約。每個測試在 `-n 0` 下少於 30 s。
+Evolution 精度矩陣的 reference 成本依〈Evolution 精度矩陣〉的處理順序；目前唯一具名的成本例外是 `single_tone_sideband`。
 測試不跑慢的模擬或擬合。行為改用小型合成模型（少數能階、短 timeline）、解析解、不變性或最小 case 對照 reference 來確定。
 完整精度與效能量測放在 task 的量測腳本，不放進測試套件。新增測試時以 `--durations=0` 確認耗時。
 
@@ -521,8 +566,12 @@ sampling tests live in the corresponding numeric owner directories.
 and public acquire/decimated composition. `test_ftf_templates.py` covers DC readout
 and the template engine contract.
 `tests/simulators/ftf/environment/test_projective_readout.py` covers public frontend mux heralding, retained
-outcome histories, pruning, partial ADC observations and elementwise terminal-only
-runtime parity against direct Engine/ADC composition. Cavity field continuation
+outcome histories, pruning, partial ADC observations and terminal-only density,
+point-order and sampling-identity handoff to ADC using an injected non-evolving Engine.
+The eight single/six/FTF acquire, projection and routing-control test files replace
+numeric propagation with Engine answers. Six keeps six independent model sources.
+Engine density accuracy stays in `tests/simulate/evolution/contract/`, rather than
+in program-to-acquire parity or fixed-I/Q numerical baselines. Cavity field continuation
 stays in the same directory's `test_cavity_continuation.py`; acquisition-frozen losses stay in
 `test_drift.py`. Repeated frontend readouts use `builder.repeat(...)` and the public
 `set_reads_per_shot` count, since QICK counts the trigger macro once.
@@ -598,7 +647,7 @@ view product及lifecycle／stdio行為。每個fixture建立自己的session／b
 透過recording Transport觀察RPC，不patch server globals或私有helpers。
 `tests/gui/app/measure/remote/test_remote_mcp_toolchain.py`保留GUI project/device/save／guide
 handler契約；同目錄的事件整合測試保留真socket，驗證EventBus→bridge→session的origin。
-`tests/gui/app/measure/_app_launch.py`啟動真實 `MeasureGuiBehavior`（window、remote adapter、MCP client），`tests/gui/app/measure/test_setup_launch_flow.py`與`ui/test_named_dialog_screenshot.py`用它驗證 Setup 從還原、`after_show`、MCP screenshot、工具列聚焦到關閉重開，以及 project tool 變更後的預填。
+`tests/gui/app/measure/_app_launch.py`啟動真實 `MeasureGuiBehavior`（window、remote adapter、MCP client），`tests/gui/app/measure/test_entry_launch_flow.py`與`ui/test_named_dialog_screenshot.py`用它驗證 Entry 從還原、`after_show`、MCP screenshot、工具列聚焦到關閉重開，以及 project tool 變更後的預填。
 Shared exposure policy 的可觀察行為屬於 `tests/gui/remote/`。Schema 文字、tool inventory 與
 script flags 用直接 review，不納入 pytest。
 

@@ -10,6 +10,7 @@ import numpy as np
 import zcu_tools.simulate.evolution as evolution
 from numpy.typing import NDArray
 from scipy.integrate import solve_ivp
+from zcu_tools.simulate.evolution import ReferenceResult, SolverTolerances
 
 if TYPE_CHECKING:
     from .kernel_suite import KernelCase
@@ -34,22 +35,6 @@ def density_error(
     if not np.isfinite(actual).all() or not np.isfinite(expected).all():
         raise ValueError("densities must be finite")
     return float(np.max(np.abs(actual - expected)))
-
-
-@dataclass(frozen=True)
-class SolverTolerances:
-    """DOP853 local error controls: positive relative rtol and absolute atol."""
-
-    rtol: float
-    atol: float
-
-
-@dataclass(frozen=True)
-class ReferenceResult:
-    """Validated reference: fine density (...,M,M) and max coarse/fine error."""
-
-    density: NDArray[np.complex128]
-    convergence_error: float
 
 
 _COARSE = SolverTolerances(2e-10, 2e-12)
@@ -94,12 +79,10 @@ def _lindblad_rhs(
     bath = dynamics.bath((left + right) / 2)
     size = len(bath.energies_ghz)
     overlap = dynamics.basis.conj().T @ bath.eigenvectors
-    jumps = []
-    for target, origin in np.argwhere(bath.rates_per_ns > 0):
-        if target != origin:
-            jump = np.zeros((size, size), complex)
-            jump[target, origin] = np.sqrt(bath.rates_per_ns[target, origin])
-            jumps.append((jump, jump.conj().T @ jump))
+    rates = np.where(bath.rates_per_ns > 0, bath.rates_per_ns, 0.0)
+    np.fill_diagonal(rates, 0.0)
+    outgoing = rates.sum(axis=0)
+    damping = bath.dephasing_per_ns + (outgoing[:, None] + outgoing[None, :]) / 2
 
     def rhs(time: float, flat: NDArray[np.complex128]) -> NDArray[np.complex128]:
         rho = flat.reshape(size, size)
@@ -108,12 +91,10 @@ def _lindblad_rhs(
         h = dynamics.hamiltonian(interior)
         derivative = -2j * np.pi * (h @ rho - rho @ h)
         bath_rho = overlap.conj().T @ rho @ overlap
-        dissipation = -bath.dephasing_per_ns * bath_rho
-        for jump, loss in jumps:
-            dissipation += (
-                jump @ bath_rho @ jump.conj().T
-                - (loss @ bath_rho + bath_rho @ loss) / 2
-            )
+        # Each secular jump |target><origin| feeds only target population;
+        # its anticommutator damps each entry by half the two outgoing rates.
+        dissipation = -damping * bath_rho
+        dissipation[np.diag_indices(size)] += rates @ np.diag(bath_rho)
         return (derivative + overlap @ dissipation @ overlap.conj().T).ravel()
 
     return rhs

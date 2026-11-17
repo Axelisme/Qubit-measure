@@ -24,6 +24,8 @@ from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 from zcu_tools.simulate.fluxonium.predict import FluxoniumParams
 from zcu_tools.simulate.transmon import TransmonParams
 
+from tests.gui._context_reads import capture_focus
+
 
 @pytest.fixture
 def files(tmp_path: Path):
@@ -128,12 +130,12 @@ def test_load_file_preserves_partial_model_and_metadata_without_writes(files, pa
     path = entry.predictors_path / "trial.json"
     save_predictor_file(path, expected)
     before = path.read_bytes()
-    captured = context.read_context()
+    captured = capture_focus(context)
     revisions = context.get_file_revisions()
     assert load_outcome(control, "trial.json") == expected
     assert path.read_bytes() == before
-    assert context.read_context().target == captured.target
-    assert context.read_context().whole_document() == captured.whole_document()
+    assert capture_focus(context).target == captured.target
+    assert capture_focus(context).whole_document() == captured.whole_document()
     assert context.get_file_revisions() == revisions
     assert context.get_session_env().active_label is None
 

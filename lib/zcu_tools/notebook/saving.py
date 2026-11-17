@@ -33,13 +33,13 @@ from zcu_tools.format_version import YamlMap
 from zcu_tools.resources.entry import (
     AcquiredPayload,
     ArtifactKey,
+    BoundDocumentWritebackTarget,
     JsonObject,
     JsonValue,
     LedgerEvent,
     ModuleWriteback,
+    ParameterView,
     ParameterWriteback,
-    PointView,
-    PointWritebackTarget,
     RecordWriteback,
     RoleView,
     SaveContext,
@@ -48,7 +48,7 @@ from zcu_tools.resources.entry import (
     WritebackEvidence,
     WritebackItem,
     apply_writeback,
-    capture_point_storage,
+    capture_storage,
     resolve_path,
     snapshot,
 )
@@ -81,19 +81,19 @@ class SavedRun(Generic[CfgT, ResultT]):
 
     def __init__(
         self,
-        ctx: PointView,
+        ctx: ParameterView,
         *,
         source: RunRecord[CfgT, ResultT],
         spec: AxesSpec[ResultT, CfgT] | GroupedAxesSpec[ResultT, CfgT],
         acquisition: AcquisitionEvidence,
         roles: RoleView | None = None,
     ) -> None:
-        """Capture adapter-validated source/spec/evidence and this point's context.
+        """Capture adapter-validated source/spec/evidence and this view's context.
 
         Adapter-internal construction: source is its current successful record
         and acquisition is acquisition_for(source). spec is the core's declared
         persistence mapping. roles must be resolved from the same bound entry,
-        point and storage roots as ctx; another handle of that point is valid.
+        point and storage roots as ctx; another handle of that document is valid.
         spec.save_stem receives SaveContext on every save and returns the exact stem.
         The default joins dotted spec.tag, role names and full run_id with underscores.
         Invalid stems raise ValueError; callback failures propagate.
@@ -109,7 +109,7 @@ class SavedRun(Generic[CfgT, ResultT]):
             spec=spec,
             comment="",
         )
-        self._storage = capture_point_storage(ctx, roles=roles)
+        self._storage = capture_storage(ctx, roles=roles)
         self._point = ctx
         metadata = RunMetadata(
             run_id=acquisition.run_id,
@@ -165,8 +165,9 @@ class SavedRun(Generic[CfgT, ResultT]):
     ) -> SaveReport:
         """Rewrite data and retained/supplied files under the same run identity.
 
-        Named figures become run PNGs plus point copies. Each analysis document
-        becomes analysis/<pane>.json. Pass typed content to the shared saver;
+        Named figures become run PNGs plus copies in the bound scope's figures/.
+        Global copies go to entry/figures; point copies go to points/<point>/figures.
+        Each analysis document becomes analysis/<pane>.json. Pass typed content to the shared saver;
         encoding failures affect that member only, not data or other files.
         None preserves retained content/comment;
         empty mapping/tuple clears that set. comment is raw user text.
@@ -244,12 +245,15 @@ class SavedRun(Generic[CfgT, ResultT]):
         waveform: Mapping[str, WaveformSpec] | None = None,
         records: Mapping[str, JsonObject] | None = None,
     ) -> str:
-        """Accept results into this run's captured point, library and records.
+        """Accept results into this run's bound parameters, library and records.
 
-        parameter maps dotted point paths to working-unit JSON/complex values
+        Global views write entry-level parameters.yaml and library.yaml;
+        point views write only their own documents. Neither follows later focus.
+
+        parameter maps dotted parameter paths to working-unit JSON/complex values
         or (value, metadata) pairs. A plain value keeps the path's existing
         metadata. A pair replaces it with the caller's opaque string-keyed YAML
-        mapping in the same point commit; {} clears it. The second item must be
+        mapping in the same parameter commit; {} clears it. The second item must be
         such a mapping; anything else, including a number or None, raises
         ValidationError before the ledger append. Keys such as stderr are not
         interpreted. module and waveform map library keys to named persistent Specs,
@@ -296,7 +300,7 @@ class SavedRun(Generic[CfgT, ResultT]):
             items.append(RecordWriteback(component, fields))
         return apply_writeback(
             tuple(items),
-            target=PointWritebackTarget(self._point, self._storage),
+            target=BoundDocumentWritebackTarget(self._point, self._storage),
             evidence=WritebackEvidence(
                 run_id=self.run_id,
                 origin="notebook",

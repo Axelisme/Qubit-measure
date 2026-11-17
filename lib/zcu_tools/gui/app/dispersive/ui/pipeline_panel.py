@@ -14,7 +14,7 @@ The pipeline (each step enabled only once the prior completes — fast-fail UX):
    optimiser pre-fit them against the dropped sample-flux lines), then "Use these
    g/r_f" runs the predictor off-main, draws the Tune tab, and records the result (the
    accepted values are the final fit). The button is disabled while computing.
-5. **Export** — write the entry dispersive artifact and declared setup fields.
+5. **Export** — write the entry dispersive artifact and declared global fields.
 
 The heavy work (preprocess, predict, auto-tune) runs off-main via the shared
 ``BackgroundRunner`` (pool strategy), calling only the pure ``compute_*`` /

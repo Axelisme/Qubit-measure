@@ -14,7 +14,7 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackItem,
     WritebackRequest,
 )
-from zcu_tools.gui.session.parameters import ParameterContext
+from zcu_tools.gui.session.parameters import DocumentSetCapture
 from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2.support.measure.writeback_helpers import module_writeback
@@ -49,7 +49,7 @@ def _get_writeback_items(
 def amplitude_writeback(
     cfg: CZAmplitudeCfg | None,
     fit: CZReturnSummary,
-    parameters: ParameterContext | None,
+    parameters: DocumentSetCapture | None,
 ) -> Sequence[WritebackItem]:
     """Propose two ordinary coupler pulses and two separate resolved slot keys.
 

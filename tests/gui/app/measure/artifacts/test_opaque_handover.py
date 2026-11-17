@@ -102,7 +102,7 @@ def opaque_host(
         bus=BaseEventBus(),
         project_root=str(tmp_path),
     )
-    controller.setup_control.new_entry(EntryRequest("opaque-entry"))
+    controller.entry_control.new_entry(EntryRequest("opaque-entry"))
     controller.context_control.new_point(
         PointCreateRequest("p", "historical", CommandOrigin("gui"))
     )

@@ -5,14 +5,15 @@ from __future__ import annotations
 import json
 from dataclasses import replace
 from statistics import median
-from typing import TYPE_CHECKING
 
 from pydantic import TypeAdapter
 
-from tests.simulate.evolution.contract.accuracy import ALL_FAMILIES
-
-if TYPE_CHECKING:
-    from tools.family_pareto import InputResult
+from tools.family_pareto_results import (
+    ALL_FAMILIES,
+    DIRECTLY_RETAINED,
+    InputResult,
+    dominance,
+)
 
 
 def render_saved_summary(matrix_json: str) -> str:
@@ -25,9 +26,6 @@ def render_saved_summary(matrix_json: str) -> str:
     Extra provenance/derived keys are ignored. Missing keys, malformed JSON or
     invalid result fields raise KeyError or ValueError. No files are written.
     """
-    # Import after module initialization: family_pareto re-exports render_summary.
-    from tools.family_pareto import InputResult, dominance
-
     matrix = json.loads(matrix_json)
     rows = TypeAdapter(list[InputResult]).validate_python(matrix["inputs"])
     rows = [replace(row, dominators=dominance(row.policies)) for row in rows]
@@ -173,8 +171,6 @@ def render_summary(
     non-whitelisted preparation reports. All reported CPU enters the shares,
     including zero-row guard preparation. Default/fixed policies use group members.
     """
-    from tools.family_pareto import DIRECTLY_RETAINED
-
     lines = [
         "# Engine family Pareto table",
         "",

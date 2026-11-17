@@ -334,7 +334,7 @@ def test_A3_Writeback_items_show_current_proposed_and_edit(qapp, make_ctrl):
 
 
 def test_writeback_baseline_captured_via_service(qapp, make_ctrl):
-    """The service captures baseline summaries from a fixed ParameterContext."""
+    """The service captures baseline summaries from a fixed DocumentSetCapture."""
     from zcu_tools.cfg_model import ConstWaveformCfg, PulseReadoutSpec
     from zcu_tools.gui.app.measure.writeback import WritebackService
 

@@ -6,7 +6,13 @@ from pathlib import Path
 import pytest
 
 from tools import family_pareto_summary as summaries
-from tools.family_pareto import FamilyResult, InputResult, ModeResult, Refusal, Sample
+from tools.family_pareto_results import (
+    FamilyResult,
+    InputResult,
+    ModeResult,
+    Refusal,
+    Sample,
+)
 
 
 def scenario() -> InputResult:

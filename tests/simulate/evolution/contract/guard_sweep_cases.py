@@ -11,31 +11,38 @@ from dataclasses import replace
 import numpy as np
 from zcu_tools.simulate.evolution import EnvelopeSpec
 
-from .accuracy_cases import AccuracyCase, coherent_source, drive_track, timeline
+from .accuracy_cases import (
+    AccuracyCase,
+    coherent_source,
+    drive_track,
+    linear_drive_model,
+    timeline,
+)
 from .guard_edge_cases import guard_edge_case
 
-# Scale=1 is already covered by the unchanged guard-edge matrix.
+# Scale=1 is covered by the guard-edge matrix for common_frame/shaped_sambe.
+# Single-tone sweeps retain the original phase-edge input, not the kappa2 edge.
 SCALED_SAMPLES = (
-    ("single_tone_rwa", 0.05, 0.002056922640059744),
-    ("single_tone_rwa", 0.1, 0.004026441344577358),
-    ("single_tone_rwa", 0.2, 0.007368771189371792),
-    ("single_tone_rwa", 0.3, 0.009421756111037571),
-    ("single_tone_rwa", 0.4, 0.012146521056116133),
-    ("single_tone_rwa", 0.5, 0.016884327685639938),
-    ("single_tone_rwa", 0.6, 0.020885507361452307),
-    ("single_tone_rwa", 0.7, 0.02338565582638955),
-    ("single_tone_rwa", 0.8, 0.02372345902526813),
-    ("single_tone_rwa", 0.9, 0.02142050511880427),
+    ("single_tone_rwa", 0.05, None),
+    ("single_tone_rwa", 0.1, None),
+    ("single_tone_rwa", 0.2, None),
+    ("single_tone_rwa", 0.3, None),
+    ("single_tone_rwa", 0.4, None),
+    ("single_tone_rwa", 0.5, None),
+    ("single_tone_rwa", 0.6, None),
+    ("single_tone_rwa", 0.7, None),
+    ("single_tone_rwa", 0.8, None),
+    ("single_tone_rwa", 0.9, None),
     ("common_frame", 0.05, None),
     ("common_frame", 0.1, None),
     ("common_frame", 0.2, None),
     ("common_frame", 0.3, None),
     ("common_frame", 0.4, None),
     ("common_frame", 0.5, None),
-    ("common_frame", 0.6, 0.0022338288935597624),
-    ("common_frame", 0.7, 0.002780801440299356),
-    ("common_frame", 0.8, 0.004327340785507475),
-    ("common_frame", 0.9, 0.005249151472340078),
+    ("common_frame", 0.6, None),
+    ("common_frame", 0.7, None),
+    ("common_frame", 0.8, None),
+    ("common_frame", 0.9, None),
     ("shaped_sambe", 0.05, 0.006976190290283084),
     ("shaped_sambe", 0.1, 0.013939786732875038),
     ("shaped_sambe", 0.2, 0.009994325894870235),
@@ -47,9 +54,9 @@ SCALED_SAMPLES = (
     ("shaped_sambe", 0.8, 0.0030436859867629283),
     ("shaped_sambe", 0.9, 0.0027439229863831147),
     ("single_tone_rwa", 0.048593750000000005, None),
-    ("single_tone_rwa", 0.04859765625, 0.0020000189837015014),
+    ("single_tone_rwa", 0.04859765625, None),
     ("common_frame", 0.5242578124999999, None),
-    ("common_frame", 0.524296875, 0.002000082144536808),
+    ("common_frame", 0.524296875, None),
     ("shaped_sambe", 0.01431640625, None),
     ("shaped_sambe", 0.0143359375, 0.002000606697780786),
 )
@@ -98,7 +105,7 @@ GATE_SAMPLES = (
 
 
 def scaled_edge_case(family: str, scale: float) -> AccuracyCase:
-    """Multiply all gains of an existing edge input by positive scale <= 1.
+    """Multiply all gains of a fixed edge input by positive scale <= 1.
 
     Supported families are single_tone_rwa, common_frame and shaped_sambe.
     Duration, bath, phases, envelope and initial complex density stay unchanged.
@@ -110,7 +117,29 @@ def scaled_edge_case(family: str, scale: float) -> AccuracyCase:
         raise ValueError(f"no gain sweep for {family}")
     if not 0 < scale <= 1:
         raise ValueError("scale must be in (0, 1]")
-    case = guard_edge_case(family)
+    if family == "single_tone_rwa":
+        # Keep the original 8 ns non-diagonal phase-edge regression independent
+        # of the 1 ns diagonal-drive kappa2 edge (ADR-0078).
+        batch = timeline(2, 8.0)
+        frequency = 0.6
+        # Retained positive-frequency X/2 has norm .001 GHz.
+        # phase = 2*pi*d*(gain*.001)^2/f = .05999994 rad < .06.
+        gain = np.sqrt(0.06 * (1 - 1e-6) * frequency / (2 * np.pi * 8)) / 0.001
+        case = AccuracyCase(
+            "guard_edge/" + family,
+            coherent_source(linear_drive_model()),
+            replace(
+                batch,
+                tracks=(
+                    drive_track(
+                        batch, EnvelopeSpec("constant"), frequency=frequency, gain=gain
+                    ),
+                ),
+            ),
+            (family,),
+        )
+    else:
+        case = guard_edge_case(family)
     tracks = tuple(
         replace(track, amplitude=track.amplitude * scale) for track in case.batch.tracks
     )

@@ -2,20 +2,20 @@ from __future__ import annotations
 
 import pytest
 from zcu_tools.format_version import YamlMap
-from zcu_tools.gui.session.context_types import SavedPoint
+from zcu_tools.gui.session.context_types import DocumentSetRef
 from zcu_tools.gui.session.expression import (
     ExpressionError,
     coerce_eval_result,
     evaluate_numeric_expr,
     evaluate_scalar_expr,
 )
-from zcu_tools.gui.session.parameters import ParameterContext
+from zcu_tools.gui.session.parameters import DocumentSetCapture
 from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
 from zcu_tools.resources.entry.schema import ParameterDocument
 
 
-def _parameters(values: YamlMap) -> ParameterContext:
-    return ParameterContext(
+def _parameters(values: YamlMap) -> DocumentSetCapture:
+    return DocumentSetCapture(
         point=ParameterDocument.model_validate(
             {
                 "format": "zcu.parameter-container",
@@ -28,7 +28,7 @@ def _parameters(values: YamlMap) -> ParameterContext:
         library=LibrarySnapshot(
             ModuleLibraryDocument(format="zcu.module-library", format_version="2.0")
         ),
-        target=SavedPoint(entry_name="entry", point="working"),
+        target=DocumentSetRef(entry_name="entry", point="working"),
         roles=None,
     )
 

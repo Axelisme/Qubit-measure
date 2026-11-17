@@ -19,9 +19,7 @@ from zcu_tools.gui.expected_error import InvalidInputError
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_types import (
-    ContextTarget,
-    PointUseRequest,
-    SavedPoint,
+    DocumentSetRef,
 )
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.state import SessionState
@@ -30,6 +28,8 @@ from zcu_tools.resources.entry import ResultEntry
 from zcu_tools.resources.entry.writeback import ParameterUpdate
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
+from tests.gui._context_reads import capture_focus
+
 from ._helpers import dispatch_handler
 
 
@@ -37,7 +37,7 @@ class RejectingContext(ContextService):
     """A producer opt-in expected failure of the entire point group."""
 
     def set_parameters(
-        self, target: ContextTarget, updates: tuple[ParameterUpdate, ...]
+        self, target: DocumentSetRef, updates: tuple[ParameterUpdate, ...]
     ) -> tuple[YamlValue, ...]:
         if any(update.path == "general.ext.rejected" for update in updates):
             raise InvalidInputError("rejected fit", reason_code="fit_rejected")
@@ -110,7 +110,7 @@ def context_at(
         bind_assets=ArbWaveformDatabase.info_at,
     )
     context.install_entry(entry)
-    context.use_point(PointUseRequest("a"))
+    context.use_point("a")
     return entry, context
 
 
@@ -126,11 +126,11 @@ def test_preview_projects_current_location_without_authorizing_apply(
                 "general.description", "Description", proposed_value="new"
             )
         ],
-        parameters=context.read_context(),
+        parameters=capture_focus(context),
         experiment_name="synthetic",
     )
     if scope == "global":
-        context.use_global()
+        context.use_point(None)
     elif scope == "empty":
         context.clear_context()
     harness = WritebackHarness(context, service, draft)
@@ -163,7 +163,9 @@ def test_sample_write_receipt_reads_latest_jsonl_at_current_point(
     tmp_path: Path,
 ) -> None:
     entry, context = context_at(tmp_path)
-    context.apply_alias_rows((AliasRow("flux_dev", "bias_at_run"),))
+    context.apply_alias_rows(
+        (AliasRow("flux_dev", "bias_at_run"),), point=context.current_point_label()
+    )
     service = WritebackService(context, arb_names=lambda: ())
     draft = service.create_draft(
         [
@@ -173,13 +175,13 @@ def test_sample_write_receipt_reads_latest_jsonl_at_current_point(
                 record={"t1_us": 20.09},
             )
         ],
-        parameters=context.read_context(),
+        parameters=capture_focus(context),
         experiment_name="test/t1",
         run_id="run-fixed",
         device_snapshot={"bias_at_run": {"value": 0.00125, "value_unit": "A"}},
     )
     entry.new_point("b")
-    context.use_point(PointUseRequest("b"))
+    context.use_point("b")
     harness = WritebackHarness(context, service, draft)
     params = {"tab_id": "tab", "subtab_id": "analysis", "write": [{"id": "record-1"}]}
     first = dispatch_handler(harness, "tab.writeback_write", params)
@@ -225,7 +227,7 @@ def test_sample_write_receipt_reads_latest_jsonl_at_current_point(
         "source": entry.ledger.events()[-1].id,
     }
     assert updated["source"] != row["source"]
-    assert context.read_context().target == SavedPoint(
+    assert capture_focus(context).target == DocumentSetRef(
         entry_name=entry.result_path.name, point="b"
     )
     assert draft.get_all_applied() == {"record-1": True}
@@ -235,8 +237,10 @@ def test_record_preview_selection_and_apply_preserve_adapter_json(
     tmp_path: Path,
 ) -> None:
     entry, context = context_at(tmp_path)
-    context.apply_alias_rows((AliasRow("flux_dev", "bias_at_run"),))
-    capture = context.read_context()
+    context.apply_alias_rows(
+        (AliasRow("flux_dev", "bias_at_run"),), point=context.current_point_label()
+    )
+    capture = capture_focus(context)
     service = WritebackService(context, arb_names=lambda: ())
     draft = service.create_draft(
         [
@@ -254,9 +258,11 @@ def test_record_preview_selection_and_apply_preserve_adapter_json(
         run_id="run-fixed",
         device_snapshot={"bias_at_run": {"value": 0.00125, "value_unit": "A"}},
     )
-    context.apply_alias_rows((AliasRow("flux_dev", "later_device"),))
+    context.apply_alias_rows(
+        (AliasRow("flux_dev", "later_device"),), point=context.current_point_label()
+    )
     entry.new_point("b")
-    context.use_point(PointUseRequest("b"))
+    context.use_point("b")
     harness = WritebackHarness(context, service, draft)
     params = {"tab_id": "tab", "subtab_id": "analysis"}
     preview = dispatch_handler(harness, "tab.writeback_preview", params)
@@ -296,7 +302,7 @@ def test_record_preview_selection_and_apply_preserve_adapter_json(
     )
     written = TypeAdapter(list[dict[str, object]]).validate_python(receipt["written"])
     assert [item["id"] for item in written] == ["record-1"]
-    assert entry.use_point("a").description is None
+    assert entry.parameters("a").description is None
     row = entry.records("Q1").read().iloc[0].to_dict()
     event = entry.ledger.events()[-1]
     assert datetime.fromisoformat(row["at"]) == datetime.fromisoformat(event.at)
@@ -307,7 +313,7 @@ def test_record_preview_selection_and_apply_preserve_adapter_json(
         "at": row["at"],
         "source": event.id,
     }
-    assert context.read_context().target == SavedPoint(
+    assert capture_focus(context).target == DocumentSetRef(
         entry_name=entry.result_path.name, point="b"
     )
     assert draft.get_all_applied() == {"param-1": False, "record-1": True}
@@ -327,7 +333,7 @@ def test_preview_displays_adapter_note_and_current_manual_selection(
     service = WritebackService(context, arb_names=lambda: ())
     draft = service.create_draft(
         [original],
-        parameters=context.read_context(),
+        parameters=capture_focus(context),
         experiment_name="test/review",
     )
     harness = WritebackHarness(context, service, draft)
@@ -360,11 +366,11 @@ def test_partial_failure_preserves_expected_cause_wire_category(tmp_path: Path) 
             ),
             proposals.ParameterWriteback("general.ext.later", "last", proposed_value=2),
         ],
-        parameters=context.read_context(),
+        parameters=capture_focus(context),
         experiment_name="test/expected",
     )
     harness = WritebackHarness(context, service, draft)
-    before_description = entry.use_point("a").description
+    before_description = entry.parameters("a").description
     with pytest.raises(RemoteError) as caught:
         dispatch_handler(
             harness,
@@ -387,7 +393,7 @@ def test_partial_failure_preserves_expected_cause_wire_category(tmp_path: Path) 
         "param-2": False,
         "param-3": False,
     }
-    assert entry.use_point("a").description == before_description
-    assert not context.read_context().lookup("general.ext.rejected").present
-    assert not context.read_context().lookup("general.ext.later").present
+    assert entry.parameters("a").description == before_description
+    assert not capture_focus(context).lookup("general.ext.rejected").present
+    assert not capture_focus(context).lookup("general.ext.later").present
     assert entry.ledger.events()[-1].kind == "accepted"

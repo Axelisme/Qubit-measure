@@ -60,7 +60,7 @@ aliases:
     coupler: C1
 ```
 
-將範本交給自己的 startup 建立 entry 與 point。讀取範本本身不會建立 entry，完整格式見 [可攜 entry 範本](../../lib/zcu_tools/resources/entry/README.md#可攜-entry-範本)。已存在的 point 不會隨範本更新，setup 與 point 的關係見 [文件與 seed](../../lib/zcu_tools/resources/entry/README.md#文件與-seed)。
+將範本交給自己的 startup 建立 entry 與 point。讀取範本本身不會建立 entry，完整格式見 [可攜 entry 範本](../../lib/zcu_tools/resources/entry/README.md#可攜-entry-範本)。已存在的 point 不會隨範本更新，global 與 point 的關係見 [文件與 seed](../../lib/zcu_tools/resources/entry/README.md#文件與-seed)。
 
 選取該 point 後，在 Inspect 的 Aliases 頁確認 `coupler` 解析為 `C1`，再 Apply 保存。修改已有 entry 時，也可以在 GUI 新增 `coupler` kind 的元件並填入這些欄位，再新增同一列 alias。表單只讀取選定 point 的表，不從元件名稱猜 alias。Alias 的保存與捕捉規則見 [context 與 snapshot](../../lib/zcu_tools/gui/session/README.md#contextsession-environment-與-run-snapshot)。
 

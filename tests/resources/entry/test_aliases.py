@@ -1,9 +1,9 @@
-"""Setup and point authored aliases through public entry and codec seams."""
+"""Global and point authored aliases through public entry and codec seams."""
 
 from pathlib import Path
 
 import pytest
-from zcu_tools.resources.entry import PointView, ResultEntry
+from zcu_tools.resources.entry import ParameterView, ResultEntry, document_revision
 from zcu_tools.resources.entry.aliases import (
     EntryAliases,
     load_entry_aliases,
@@ -16,54 +16,62 @@ def authored() -> EntryAliases:
     return EntryAliases(aliases={"spare": "", "drive": "Q1", "sense": "$drive.sense"})
 
 
-def test_missing_setup_aliases_are_empty_until_first_explicit_save(
+def test_missing_global_aliases_are_empty_until_first_explicit_save(
     entry: ResultEntry, authored: EntryAliases
 ) -> None:
     source = entry.result_path / "aliases.yaml"
-    assert entry.load_aliases() == EntryAliases(aliases={})
-    aliases, revision = entry.load_aliases_with_revision()
+    assert entry.aliases().read().require_valid() == EntryAliases(aliases={})
+    handle = entry.aliases()
+    aliases = handle.read().require_valid()
+    revision = document_revision(handle)
     assert aliases.aliases == {}
     assert revision.revision is None
-    assert entry.read_aliases().revision == revision
+    assert entry.aliases().read().revision == revision
     assert not source.exists()
 
-    written = entry.save_aliases(authored)
-    restored, installed = entry.load_aliases_with_revision()
+    written = entry.aliases().save(authored)
+    restored_handle = entry.aliases()
+    restored = restored_handle.read().require_valid()
+    installed = document_revision(restored_handle)
     assert restored == authored
     assert installed == written
     assert installed.revision is not None
 
 
-def test_missing_point_aliases_do_not_fall_back_to_setup(
+def test_missing_point_aliases_do_not_fall_back_to_global(
     entry: ResultEntry, authored: EntryAliases
 ) -> None:
     entry.new_point("legacy")
-    entry.save_aliases(authored)
-    assert entry.load_aliases(point="legacy") == EntryAliases(aliases={})
-    assert entry.load_aliases() == authored
+    entry.aliases().save(authored)
+    assert entry.aliases(point="legacy").read().require_valid() == EntryAliases(
+        aliases={}
+    )
+    assert entry.aliases().read().require_valid() == authored
 
 
-def test_alias_round_trip_keeps_setup_and_points_independent(
+def test_alias_round_trip_keeps_global_and_points_independent(
     entry: ResultEntry, entry_roots: tuple[Path, Path], authored: EntryAliases
 ) -> None:
     entry.new_point("one")
     entry.new_point("two")
-    entry.save_aliases(authored)
+    entry.aliases().save(authored)
     point_table = EntryAliases(aliases={"drive": "Q2", "spare": ""})
-    entry.save_aliases(point_table, point="one")
-    loaded = entry.load_aliases(point="one")
+    entry.aliases(point="one").save(point_table)
+    loaded = entry.aliases(point="one").read().require_valid()
     assert list(loaded.aliases.items()) == [("drive", "Q2"), ("spare", "")]
     loaded.aliases["drive"] = "not persisted"
     results, database = entry_roots
     reopened = ResultEntry.open("entry", result_root=results, database_root=database)
-    assert reopened.load_aliases(point="one") == point_table
-    assert reopened.load_aliases(point="two") == EntryAliases(aliases={})
-    assert list(reopened.load_aliases().aliases.items()) == list(
+    assert reopened.aliases(point="one").read().require_valid() == point_table
+    assert reopened.aliases(point="two").read().require_valid() == EntryAliases(
+        aliases={}
+    )
+    assert list(reopened.aliases().read().require_valid().aliases.items()) == list(
         authored.aliases.items()
     )
-    reopened.save_aliases(EntryAliases(aliases={}), point="one")
-    assert entry.load_aliases(point="one") == EntryAliases(aliases={})
-    assert entry.load_aliases() == authored
+    reopened.aliases(point="one").save(EntryAliases(aliases={}))
+    assert entry.aliases(point="one").read().require_valid() == EntryAliases(aliases={})
+    assert entry.aliases().read().require_valid() == authored
 
 
 @pytest.mark.parametrize("operation", ["load", "save"])
@@ -72,10 +80,10 @@ def test_point_alias_io_rejects_unsafe_labels(
 ) -> None:
     if operation == "load":
         with pytest.raises(ValueError, match="name"):
-            entry.load_aliases(point="../escape")
+            entry.aliases(point="../escape").read().require_valid()
     else:
         with pytest.raises(ValueError, match="name"):
-            entry.save_aliases(EntryAliases(aliases={}), point="../escape")
+            entry.aliases(point="../escape").save(EntryAliases(aliases={}))
 
 
 def test_point_alias_load_reads_only_the_selected_alias_file(
@@ -84,8 +92,12 @@ def test_point_alias_load_reads_only_the_selected_alias_file(
     directory = entry.result_path / "points" / "orphan"
     directory.mkdir()
     save_entry_aliases(directory / "aliases.yaml", authored)
-    assert entry.load_aliases(point="orphan") == authored
-    assert entry.load_aliases(point="absent") == EntryAliases(aliases={})
+    (directory / "parameters.yaml").write_text("broken: [")
+    (directory / "library.yaml").write_text("broken: [")
+    assert entry.aliases(point="orphan").read().require_valid() == authored
+    assert entry.aliases(point="absent").read().require_valid() == EntryAliases(
+        aliases={}
+    )
     assert not (entry.result_path / "points/absent").exists()
 
 
@@ -96,17 +108,21 @@ def test_point_alias_save_needs_parameters_but_not_library(
     directory.mkdir()
     source = directory / "parameters.yaml"
     source.write_text("{}\n", encoding="utf-8")
-    entry.save_aliases(authored, point="partial")
-    assert entry.load_aliases(point="partial") == authored
+    handle = entry.aliases("partial")
+    written = handle.save(authored)
+    assert handle.read().require_valid() == authored
+    assert document_revision(handle) == written
     assert source.read_text(encoding="utf-8") == "{}\n"
     assert not (directory / "library.yaml").exists()
     source.unlink()
     before = (directory / "aliases.yaml").read_bytes()
     with pytest.raises(FileNotFoundError):
-        entry.save_aliases(EntryAliases(aliases={}), point="partial")
+        handle.save(EntryAliases(aliases={}))
+    assert handle.read().require_valid() == authored
+    assert document_revision(handle) == written
     assert (directory / "aliases.yaml").read_bytes() == before
     with pytest.raises(FileNotFoundError):
-        entry.save_aliases(authored, point="absent")
+        entry.aliases(point="absent").save(authored)
     assert not (entry.result_path / "points/absent").exists()
 
 
@@ -120,19 +136,19 @@ def test_point_aliases_accept_forward_minor_and_preserve_raw_rows(
         '  spare: ""\n  drive: Q1\n  sense: $drive.sense\n',
         encoding="utf-8",
     )
-    assert list(entry.load_aliases(point="one").aliases.items()) == list(
-        authored.aliases.items()
-    )
+    assert list(
+        entry.aliases(point="one").read().require_valid().aliases.items()
+    ) == list(authored.aliases.items())
 
 
 @pytest.mark.parametrize(
     "version,body",
     [("2.0", "{}"), ("1.0", "[]"), ("1.0", "{drive: null}"), ("1.0", "{drive: 7}")],
 )
-def test_point_aliases_reject_invalid_documents_without_setup_fallback(
+def test_point_aliases_reject_invalid_documents_without_global_fallback(
     entry: ResultEntry, authored: EntryAliases, version: str, body: str
 ) -> None:
-    entry.save_aliases(authored)
+    entry.aliases().save(authored)
     entry.new_point("one")
     source = entry.result_path / "points/one/aliases.yaml"
     source.write_text(
@@ -140,23 +156,23 @@ def test_point_aliases_reject_invalid_documents_without_setup_fallback(
         encoding="utf-8",
     )
     with pytest.raises(ValueError, match="aliases"):
-        entry.load_aliases(point="one")
-    assert entry.load_aliases() == authored
+        entry.aliases(point="one").read().require_valid()
+    assert entry.aliases().read().require_valid() == authored
 
 
-def test_new_point_copies_setup_aliases_only_at_creation(
+def test_new_point_copies_global_aliases_only_at_creation(
     entry: ResultEntry, authored: EntryAliases
 ) -> None:
     entry.new_point("unseeded")
     assert (
         load_entry_aliases(entry.result_path / "points/unseeded/aliases.yaml") is None
     )
-    entry.save_aliases(authored)
+    entry.aliases().save(authored)
     entry.new_point("seeded")
     source = entry.result_path / "aliases.yaml"
     destination = entry.result_path / "points/seeded/aliases.yaml"
     assert load_entry_aliases(destination) == authored
-    entry.save_aliases(EntryAliases(aliases={"drive": "Q2"}))
+    entry.aliases().save(EntryAliases(aliases={"drive": "Q2"}))
     assert load_entry_aliases(destination) == authored
     assert (
         load_entry_aliases(entry.result_path / "points/unseeded/aliases.yaml") is None
@@ -167,7 +183,7 @@ def test_new_point_copies_setup_aliases_only_at_creation(
 
 @pytest.mark.parametrize("foreign", [False, True], ids=["same-entry", "cross-entry"])
 @pytest.mark.parametrize("via_view", [False, True], ids=["label", "view"])
-def test_clone_copies_published_source_point_aliases_not_either_setup(
+def test_clone_copies_published_source_point_aliases_not_either_global(
     entry: ResultEntry,
     entry_roots: tuple[Path, Path],
     authored: EntryAliases,
@@ -183,9 +199,9 @@ def test_clone_copies_published_source_point_aliases_not_either_setup(
     source_view = source_entry.new_point("original")
     source_aliases = source_entry.result_path / "points/original/aliases.yaml"
     save_entry_aliases(source_aliases, authored)
-    source_entry.save_aliases(EntryAliases(aliases={"drive": "source setup"}))
-    entry.save_aliases(EntryAliases(aliases={"drive": "destination setup"}))
-    clone_from: str | PointView = (
+    source_entry.aliases().save(EntryAliases(aliases={"drive": "source global"}))
+    entry.aliases().save(EntryAliases(aliases={"drive": "destination global"}))
+    clone_from: str | ParameterView = (
         source_view if via_view else ("source/original" if foreign else "original")
     )
     entry.new_point("cloned", mode="clone", clone_from=clone_from)
@@ -200,4 +216,6 @@ def test_clone_copies_published_source_point_aliases_not_either_setup(
     source_aliases.unlink()
     entry.new_point("missing", mode="clone", clone_from=clone_from)
     assert load_entry_aliases(entry.result_path / "points/missing/aliases.yaml") is None
-    assert entry.load_aliases() == EntryAliases(aliases={"drive": "destination setup"})
+    assert entry.aliases().read().require_valid() == EntryAliases(
+        aliases={"drive": "destination global"}
+    )

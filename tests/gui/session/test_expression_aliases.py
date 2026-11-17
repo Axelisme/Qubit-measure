@@ -2,9 +2,9 @@
 
 import pytest
 from zcu_tools.gui.session.aliases import AliasRow
-from zcu_tools.gui.session.context_types import SavedPoint
+from zcu_tools.gui.session.context_types import DocumentSetRef
 from zcu_tools.gui.session.expression import ExpressionError, evaluate_scalar_expr
-from zcu_tools.gui.session.types import ParameterContext, RoleBinding
+from zcu_tools.gui.session.types import DocumentSetCapture, RoleBinding
 from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
 from zcu_tools.resources.entry import ComponentSchema, RoleResolutionError, RoleSpec
 from zcu_tools.resources.entry.schema import ParameterDocument, ParameterGeneral
@@ -30,13 +30,13 @@ def _point() -> ParameterDocument:
     )
 
 
-def _parameters(*, legacy: bool = False) -> ParameterContext:
-    parameters = ParameterContext(
+def _parameters(*, legacy: bool = False) -> DocumentSetCapture:
+    parameters = DocumentSetCapture(
         point=_point(),
         library=LibrarySnapshot(
             ModuleLibraryDocument(format="zcu.module-library", format_version="2.0")
         ),
-        target=SavedPoint(entry_name="entry", point="working"),
+        target=DocumentSetRef(entry_name="entry", point="working"),
         roles=RoleBinding(None, {"qubit": RoleSpec("expression/test")}, {"qubit": "Q1"})
         if legacy
         else None,
@@ -71,12 +71,12 @@ def test_missing_alias_does_not_read_a_same_named_component() -> None:
 
 
 def test_capture_without_alias_table_names_the_unbound_alias_path() -> None:
-    parameters = ParameterContext(
+    parameters = DocumentSetCapture(
         point=_point(),
         library=LibrarySnapshot(
             ModuleLibraryDocument(format="zcu.module-library", format_version="2.0")
         ),
-        target=SavedPoint(entry_name="entry", point="working"),
+        target=DocumentSetRef(entry_name="entry", point="working"),
         roles=None,
     )
     with pytest.raises(ExpressionError) as raised:

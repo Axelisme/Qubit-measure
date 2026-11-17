@@ -215,8 +215,11 @@ def populate_single_gate_plan(
         inventory, families = single_gate_costs(table, source, plan, budget)
         if not inventory:
             return ()
-        usage = source.history.record_gate_usage(
-            dict(inventory), content=plan.content_key
+        history = source.history
+        usage = (
+            history.record_gate_usage(dict(inventory), content=plan.content_key)
+            if plan.history_mode == "record"
+            else history.projected_gate_usage(dict(inventory), content=plan.content_key)
         )
         return tuple(family.choose(usage) for family in families)
 

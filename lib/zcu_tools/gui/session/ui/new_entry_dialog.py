@@ -78,13 +78,13 @@ class NewEntryDialog(QDialog):
         *,
         arb_waveforms: ArbWaveformKeys,
         dialog_presenter: DialogPresenter,
-        setup: bool = False,
+        point: str | None = None,
         parent: QWidget | None = None,
     ) -> None:
         """Build the dialog and the form of the first template.
 
-        setup=True fixes both template capture and Create to the entry cache;
-        False uses the active document set. Selection changes never redirect an
+        point=None fixes template capture and Create to global documents;
+        a label selects the focused point document set. Selection changes never redirect an
         already captured draft. ctrl supplies captures and the library write;
         templates is the
         persistent catalog by template id; arb_waveforms lists the arb asset
@@ -99,7 +99,7 @@ class NewEntryDialog(QDialog):
         """
         super().__init__(parent)
         self._ctrl = ctrl
-        self._setup = setup
+        self._point = point
         self._templates = templates
         self._arb_waveforms = arb_waveforms
         self._presenter = dialog_presenter
@@ -177,7 +177,7 @@ class NewEntryDialog(QDialog):
             self._show_error("No templates are available.")
             return
         try:
-            parameters = self._ctrl.read_context(setup=self._setup)
+            parameters = self._ctrl.read_context(point=self._point)
         except FailedPreconditionError as exc:
             self._show_error(str(exc))
             return

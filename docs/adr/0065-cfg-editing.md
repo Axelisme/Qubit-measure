@@ -98,7 +98,7 @@ RecipeTab.read_field 每次以一次 `tab.describe_cfg` 讀同一 owner turn 的
 
 Core 以 context.devices[cfg.flux_dev] 等具名欄位取 driver。缺名由實際使用者報錯；RunContext 不提供 setters。操作分工見 [[0067]]，Run 前 snapshot 與保存見 [[0063]]。Measure 不保留舊跨 tab source refresh／Unavailable 恢復路徑；使用時綁範本與缺來源的語義由 [[0073]] 擁有。
 
-Form expression 的 `$alias` 與 `$alias.path` 沿固定 ParameterContext 解析，bare concrete paths 使用獨立 namespace。Run 與 Load capture 相同。裸 `$alias` 是名稱字串，不參與數值算術或字串插值。缺列或未綁時 errors 指名 alias，不沿用舊解析值。Expression 不刷新來源。
+Form expression 的 `$alias` 與 `$alias.path` 沿固定 DocumentSetCapture 解析，bare concrete paths 使用獨立 namespace。Run 與 Load capture 相同。裸 `$alias` 是名稱字串，不參與數值算術或字串插值。缺列或未綁時 errors 指名 alias，不沿用舊解析值。Expression 不刷新來源。
 
 ## Library 與 Inspect
 
@@ -116,7 +116,7 @@ Inspect、Device 與 ARB UI 及其 service 由 session 提供，host 經公開�
 
 Aliases 由共用 Inspect 的第三頁編輯，沒有獨立 AliasDialog 或 aliases wire 名稱。Value 欄可輸入單一識別名、既有 `$` link 或 YAML flow list，例如 `[Q3, Q1]`。清單元素各自沿用 earlier-row link 規則，順序不變。空清單是未綁，不是已選零個元件。List 讀回使用普通固定 capture 的 `lookup`／`lookup_point`／`value`，不另造字串編碼。單一元件路徑及 template placeholder 拒絕清單，不取首項。
 
-Aliases 在每次儲存格編輯完成或 Remove 後，將有效的有序 authored rows 整表交 `apply_alias_rows`。Add 的新列在 alias 名稱有效前只留在畫面，空 Value 仍是合法的未綁值。無效列標紅、不寫入。Owner 要求已選 point，否則回 `no_context`；成功時先原子保存該 point 的 `aliases.yaml`，再安裝 memory 與發布。失敗保留舊表、檔案、版本與畫面輸入。Revision 過期沿 [[0081]] 的 Keep／Reload 流程。切換 point 或 entry 時直接丟棄未提交輸入並載入目前表。關閉不詢問，也不提供 Apply、Revert 或 undo。
+Aliases 在每次儲存格編輯完成或 Remove 後，將有效的有序 authored rows 整表交 `apply_alias_rows`。Add 的新列在 alias 名稱有效前只留在畫面，空 Value 仍是合法的未綁值。無效列標紅、不寫入。保存目的地是 Inspect 所選的 Destination（Global 或目前 point）。Owner 要求已開 entry，否則回 `no_context`；成功時先原子保存該文件組的 `aliases.yaml`，再安裝 memory 與發布。失敗保留舊表、檔案、版本與畫面輸入。Revision 過期沿 [[0081]] 的 Keep／Reload 流程。切換 point 或 entry 時直接丟棄未提交輸入並載入目前表。關閉不詢問，也不提供 Apply、Revert 或 undo。
 
 MCP 直接呼叫 owning context，不開 dialog、不切頁或焦點。`context.aliases_set` 回已安裝的 authored rows，不解析；解析另讀 snapshot。`context.set_parameter` 用一次 capture 固定具體 target 與 before，保留 metadata、不寫 ledger。這些 mutation 沿既有 owner 與 holder admission，Run 中可寫，但不改既有 Form 或 Run 的固定 capture。`dialog.screenshot` 只擷取目前已開 dialog 的當前頁，不切 Inspect tab。
 

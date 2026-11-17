@@ -52,7 +52,7 @@ def project_setup_params(tmp_path: Path) -> Iterator[dict[str, str]]:
             result_root=tmp_path / "result",
             database_root=tmp_path / "Database",
         )
-        entry.setup.add_component("Q1", kind=kind)
+        entry.parameters().add_component("Q1", kind=kind)
         yield {
             "project_root": str(tmp_path),
             "entry": "control-entry",

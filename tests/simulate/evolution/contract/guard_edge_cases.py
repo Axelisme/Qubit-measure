@@ -8,7 +8,13 @@ The paused sampled multitone gate has no numerical-density edge observation.
 from dataclasses import replace
 
 import numpy as np
-from zcu_tools.simulate.evolution import EnvelopeSpec, ModelSource, SecularModel
+from zcu_tools.simulate.evolution import (
+    EnvelopeSpec,
+    ModelSource,
+    SecularDrive,
+    SecularModel,
+    TimelineBatch,
+)
 
 from .accuracy_cases import (
     AccuracyCase,
@@ -64,6 +70,45 @@ def _smooth_rwa_edge(family: str) -> AccuracyCase:
     )
 
 
+def constant_multitone_guard_case(
+    duration_ns: float,
+) -> tuple[ModelSource, TimelineBatch]:
+    """Build the fixed two-point constant-tone guard scenario for duration in ns.
+
+    The two ports have circular drives; port a also has a diagonal component.
+    Both points span 0..duration_ns with phases .17 and 1.37 radians.
+    Return raw inputs for admission or rejection; the caller closes the source.
+    """
+    pump = np.array([[0, 0.1], [0, 0]], complex)
+    probe = np.array([[0, 0.0001], [0, 0]], complex)
+    model = SecularModel(
+        (0,),
+        "constant-multitone-guard-edge",
+        np.array([0.0, 0.6]),
+        np.eye(2, dtype=complex),
+        (
+            SecularDrive(
+                "a",
+                pump + pump.conj().T + np.diag([0.0024, -0.0024]),
+                1j * (pump - pump.conj().T),
+            ),
+            SecularDrive("b", probe + probe.conj().T, 1j * (probe - probe.conj().T)),
+        ),
+        np.array([[0.0, 1e-5], [0.0, 0.0]]),
+        np.array([[0.0, 1e-5], [1e-5, 0.0]]),
+    )
+    batch = timeline(2, duration_ns)
+    envelope = EnvelopeSpec("constant")
+    batch = replace(
+        batch,
+        tracks=(
+            drive_track(batch, envelope, port="a", frequency=0.6, gain=1.0),
+            drive_track(batch, envelope, port="b", frequency=0.63, gain=1.0),
+        ),
+    )
+    return coherent_source(model), batch
+
+
 def guard_edge_case(family: str) -> AccuracyCase:
     """Build fresh source/history and a complete timeline for one pinned family.
 
@@ -94,9 +139,12 @@ def guard_edge_case(family: str) -> AccuracyCase:
         # the spectral/interpolation estimate <= budget/2 limits this input.
         gain = 71.6674401855469 * (1 - 1e-6)
     elif family == "single_tone_rwa":
-        # Retained positive-frequency X/2 has norm .001 GHz.
-        # phase = 2*pi*d*(gain*.001)^2/f = .05999994 rad < .06.
-        gain = np.sqrt(0.06 * (1 - 1e-6) * frequency / (2 * np.pi * 8)) / 0.001
+        batch = timeline(2, 1.0)
+        x = np.diag([frequency, -frequency / 2]).astype(complex)
+        model = replace(model, drives=(SecularDrive("drive", x, np.zeros_like(x)),))
+        # Both signs give A=diag(gain,gain/2), so kappa2=gain, just below .08.
+        # At 1 ns each omitted transfer <=gain**2*f**2<.0058: no restoration.
+        gain = 0.08 * (1 - 1e-6)
     elif family == "dyson":
         batch = timeline(2, 1.0)
         # At resonance r = gain*0.002/sqrt(gamma**2 + 1/duration**2).
@@ -140,11 +188,11 @@ def guard_edge_case(family: str) -> AccuracyCase:
         # motion = 2*pi*gain*||X||*slope/f^2 = 0.04999995.
         gain = 0.05 * (1 - 1e-6) * frequency**2 / (2 * np.pi * 0.002 * 0.025)
     elif family == "common_frame":
-        # Public Engine admission brackets the scale boundary at
-        # [589.1080780029297 accepted, 589.1080799102783 rejected]. The same
-        # bracket holds with zero bath and 1000x bath, identifying coherent
-        # admission <= .03, rather than bath <= .01, as the limiting guard.
-        scale = 589.1080780029297 * (1 - 1e-6)
+        # Scalar two-level SW algebra gives coherent=0.0017999982 at this
+        # fixed scale, one part per million inside the 0.0018 limit.
+        # The constant-envelope terms are quadratic, cubic and quartic in
+        # scale plus the positive BCH tail. No test-time search is needed.
+        scale = 177.19922705562644
         batch = timeline(2, 6.5)
         batch = replace(
             batch,

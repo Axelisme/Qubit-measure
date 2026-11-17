@@ -28,7 +28,7 @@ from .ledger_models import (
     SavedPayload,
     SourceReference,
 )
-from .points import PointView
+from .parameter_view import ParameterView
 from .registry import ComponentRegistry, RoleRegistry, RoleSpec, component_registry
 from .result_entry import (
     EntryIdentity,
@@ -59,15 +59,13 @@ from .storage import (
     RunOutputBinding,
     StorageBinding,
     bind_run_outputs,
-    capture_entry_storage,
-    capture_point_storage,
+    capture_storage,
 )
 from .template import EntryTemplate, load_entry_template
 from .views import (
     ComponentView,
     DocumentField,
     EditView,
-    SetupView,
     document_fields,
     document_meta,
     document_revision,
@@ -79,11 +77,10 @@ from .views import (
     source_path,
 )
 from .writeback import (
+    BoundDocumentWritebackTarget,
     CommittedWrite,
-    EntryWritebackTarget,
     ModuleWriteback,
     ParameterWriteback,
-    PointWritebackTarget,
     RecordWriteback,
     WaveformWriteback,
     WritebackApplyError,

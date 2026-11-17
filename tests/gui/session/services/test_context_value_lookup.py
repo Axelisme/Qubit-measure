@@ -7,7 +7,6 @@ from zcu_tools.gui.app.measure.state import SessionEnv, State
 from zcu_tools.gui.session.context_types import (
     CommandOrigin,
     PointCreateRequest,
-    PointUseRequest,
 )
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.value_lookup import ValueKey, ValueRegistry
@@ -56,7 +55,7 @@ def test_use_context_preserves_lookup_when_io_returns_fresh_context(tmp_path) ->
     )
     entry.new_point("flux_0.0_A", description="")
     svc.install_entry(entry)
-    svc.use_point(PointUseRequest("flux_0.0_A"))
+    svc.use_point("flux_0.0_A")
     assert state.session_env.values is registry
     assert state.session_env.active_label == "flux_0.0_A"
     assert state.session_env.readiness is ContextReadiness.POINT

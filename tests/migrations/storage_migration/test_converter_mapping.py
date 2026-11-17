@@ -62,8 +62,8 @@ def test_two_complete_points_keep_working_units_and_sources(
         result_root=request_data.results_root,
         database_root=request_data.database_root,
     )
-    assert entry.setup.C1.frequency == 1.0
-    a, b = entry.use_point("context_a"), entry.use_point("context_b")
+    assert entry.parameters().C1.frequency == 1.0
+    a, b = entry.parameters("context_a"), entry.parameters("context_b")
     assert a.C1.frequency == 12.5
     assert b.C1.frequency == 42.0
     assert a.meta("C1.frequency") == {"stderr": 0.25}
@@ -77,8 +77,8 @@ def test_two_complete_points_keep_working_units_and_sources(
     assert unknown_row.old_file == source_a
     assert unknown_row.destination_keys == ("general", "ext", "unknown")
     assert (source_a.read_bytes(), source_b.read_bytes()) == before
-    entry.setup.C1.frequency = 77.0
-    assert entry.use_point("context_a").C1.frequency == 12.5
+    entry.parameters().C1.frequency = 77.0
+    assert entry.parameters("context_a").C1.frequency == 12.5
 
 
 def test_data_resume_reports_valid_user_edit_without_overwriting(
@@ -96,7 +96,7 @@ def test_data_resume_reports_valid_user_edit_without_overwriting(
         result_root=request_data.results_root,
         database_root=request_data.database_root,
     )
-    entry.use_point("context").C1.frequency = 19.0
+    entry.parameters("context").C1.frequency = 19.0
     assert_difference(
         lambda: migrate_storage(
             replace(request_data, part="data", resume=True),
@@ -107,7 +107,7 @@ def test_data_resume_reports_valid_user_edit_without_overwriting(
         request_data,
         [entry.result_path / "points/context/parameters.yaml"],
     )
-    assert entry.use_point("context").C1.frequency == 19.0
+    assert entry.parameters("context").C1.frequency == 19.0
 
 
 def test_invalid_current_point_is_not_restored(
@@ -238,7 +238,7 @@ def test_stderr_requires_a_value_accepted_by_this_mapping(
         request_data.name,
         result_root=request_data.results_root,
         database_root=request_data.database_root,
-    ).use_point("context")
+    ).parameters("context")
     assert point.C1.frequency == 1.0
     assert point.meta("C1.frequency") is None
     pending = [item for item in report.pending if item.location == "old_error"]
@@ -270,7 +270,7 @@ def test_parameter_requires_explicit_unit_evidence(
         request_data.name,
         result_root=request_data.results_root,
         database_root=request_data.database_root,
-    ).use_point("context")
+    ).parameters("context")
     accepted = unit_evidence == "declared-working-unit"
     assert point.C1.frequency == (12.5 if accepted else 1.0)
     pending = [item for item in report.pending if item.location == "old_frequency"]
@@ -305,7 +305,7 @@ def test_wrapped_channel_creates_a_complete_optional_container(
         request_data.name,
         result_root=request_data.results_root,
         database_root=request_data.database_root,
-    ).use_point("context")
+    ).parameters("context")
     channel = point.C1.channel
     assert isinstance(channel, FieldView)
     assert channel.ch == 7
@@ -351,7 +351,7 @@ def test_unsupported_module_candidates_preserve_source_without_slot(
         request_data.name,
         result_root=request_data.results_root,
         database_root=request_data.database_root,
-    ).use_point("context")
+    ).parameters("context")
     assert document_value(snapshot(point), "C1.module") == {}
     assert document_value(snapshot(point), "general.ext.legacy_module_cfg") == {
         "modules": {

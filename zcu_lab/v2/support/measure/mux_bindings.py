@@ -1,15 +1,15 @@
 """Mux component binding policy over the fixed parameter capture."""
 
-from zcu_tools.gui.session.parameters import ParameterContext
+from zcu_tools.gui.session.parameters import DocumentSetCapture
 from zcu_tools.resources.entry import RoleResolutionError
 
 from zcu_lab.components.mux import MuxGroupSchema
 
 
-def validate_mux_bindings(parameters: ParameterContext | None) -> None:
+def validate_mux_bindings(parameters: DocumentSetCapture | None) -> None:
     """Validate optional mux qubit/resonator links in a fixed parameter capture.
 
-    parameters is the borrowed, read-only ParameterContext captured for
+    parameters is the borrowed, read-only DocumentSetCapture captured for
     Open/Reset, or None when no capture is available. Return None without
     gating resonator bring-up if parameters is None, $mux is absent/unbound,
     its target is missing or not a MuxGroupSchema, or group.qubits is None.
@@ -68,7 +68,7 @@ def validate_mux_bindings(parameters: ParameterContext | None) -> None:
             )
 
 
-def require_mux_group(parameters: ParameterContext | None) -> MuxGroupSchema:
+def require_mux_group(parameters: DocumentSetCapture | None) -> MuxGroupSchema:
     """Return the group/mux bound to scalar alias mux in a fixed capture.
 
     Missing capture, absent/unbound alias or a non-group target raises
@@ -94,7 +94,7 @@ def require_mux_group(parameters: ParameterContext | None) -> MuxGroupSchema:
 
 
 def require_mux_qubits(
-    parameters: ParameterContext | None, tone_count: int | None = None
+    parameters: DocumentSetCapture | None, tone_count: int | None = None
 ) -> tuple[str, ...]:
     """Return full qubit names after validating the fixed mux binding.
 

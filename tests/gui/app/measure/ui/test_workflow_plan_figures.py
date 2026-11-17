@@ -179,8 +179,8 @@ def _host_plan_window(
             plot_attachment(),
         )
     )
-    ctrl.setup_control.new_entry(EntryRequest("plan-ui"))
-    ctrl.setup_control.new_point(PointCreateRequest("source", "", CommandOrigin("gui")))
+    ctrl.entry_control.new_entry(EntryRequest("plan-ui"))
+    ctrl.entry_control.new_point(PointCreateRequest("source", "", CommandOrigin("gui")))
     board = white_noise(load_soccfg(), std_adc=1.0, seed=None, routes=((0, 0),))
     ctrl.session_services.soc_connection.install_soc(board.soc, board.soccfg)
     window = MainWindow(

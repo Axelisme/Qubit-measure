@@ -330,7 +330,7 @@ def _shape(components: dict[str, YamlMap], version: int) -> None:
 
 
 def classify_flux_document(document: ParameterUpgradeDocument) -> FluxClassification:
-    """Classify detached v1/v2/v3 setup, point or template without mutation/I/O.
+    """Classify detached v1/v2/v3 global, point or template without mutation/I/O.
 
     Validate container, aliases, registered components, calibration completeness,
     finite numbers, historical spacing, mux membership and device name syntax.
@@ -419,7 +419,7 @@ def convert_storage_flux_batch(
 ) -> ParameterUpgradeDocument:
     """Convert a legacy-import overlay to v3 before current schema validation.
 
-    Effective flux_source/flux_dev includes setup/mapping inheritance. Complete
+    Effective flux_source/flux_dev includes global/mapping inheritance. Complete
     incoming calibration replaces offset and its device periods, retaining other
     inherited periods. No calibration retains the inherited frame unchanged.
     Only explicitly declared sources become flux_dev, including inherited names.

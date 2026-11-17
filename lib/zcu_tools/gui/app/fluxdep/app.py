@@ -3,7 +3,7 @@
 Wires State + Controller + MainWindow behind the shared GUI process runtime.
 Unlike measure-gui there is no registry/role-catalog (no experiment adapters)
 and no session-restore caretaker. The tool starts by loading raw spectra or a
-spectrums v2 checkpoint. Export writes an eligible predictor v2, declared setup
+spectrums v2 checkpoint. Export writes an eligible predictor v2, declared global
 fields and the entry analysis ledger.
 """
 

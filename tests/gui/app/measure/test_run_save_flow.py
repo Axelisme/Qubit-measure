@@ -115,18 +115,23 @@ def measure_window(
         installed = registry_state()
         # Fixture bootstrap only: open an isolated entry before user interaction.
         global_context = getattr(request, "param", "point") == "global"
-        app.controller.setup_control.new_entry(EntryRequest("component-flow"))
+        app.controller.entry_control.new_entry(EntryRequest("component-flow"))
         if not global_context:
-            app.controller.setup_control.new_point(
+            app.controller.entry_control.new_point(
                 PointCreateRequest(
                     "p", "Synthetic component flow", CommandOrigin("gui")
                 )
             )
         app.controller.context_control.add_component(
-            "calibration", "synthetic/calibration", {}, setup=global_context
+            "calibration",
+            "synthetic/calibration",
+            {},
+            point=None
+            if global_context
+            else app.controller.context_control.current_point_label(),
         )
         if global_context:
-            app.controller.setup_control.open_entry(EntryRequest("component-flow"))
+            app.controller.entry_control.open_entry(EntryRequest("component-flow"))
         app.controller.session_services.soc_connection.install_soc(
             MagicMock(), load_soccfg()
         )
@@ -192,7 +197,7 @@ def test_run_curve_then_save_all_reports_native_save_in_bottom_status(
     flow = _user_input.ComponentDriver(measure_window)
     shots = tmp_path / "run-save"
     flow.screenshot(shots / "01-setup.png")
-    assert flow.dialogs()[0].title == "Setup"
+    assert flow.dialogs()[0].title == "Entry"
     flow.click("Close")
     flow.screenshot(shots / "02-ready.png")
     assert flow.observe("Run").enabled

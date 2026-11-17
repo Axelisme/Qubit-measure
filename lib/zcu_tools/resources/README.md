@@ -1,6 +1,6 @@
 # `zcu_tools.resources` experiment work resources
 
-**Last updated:** 2026-11-01，simulators package ownership
+**Last updated:** 2026-11-17，global／point 文件選擇
 
 **讀者：** framework-dev。實驗資源的 scope、讀寫與持久化 owner 導覽。
 
@@ -12,7 +12,7 @@
 - [`qubit_params.py`](qubit_params.py) 直接管理 result scope 的 typed `params.json` handoff。公開讀寫先重新讀取 JSON，寫入採原子替換；方法與 section 規則見 [qubit_params.md](qubit_params.md)。
 - [`record_table/`](record_table/README.md) 管理條目的只追加 JSONL 樣本歷史、CSV 匯出與 opt-in v2 欄位協定。它也擁有 explicit record upgrade 的逐列分類、原 bytes 備份與原子替換，CLI 只呼叫該公開接縫。
 - [`waveform_assets.py`](waveform_assets.py) 是 qubit-scoped arbitrary waveform asset 的公開入口。每個 Database instance 持有固定 root，capture capability 固定原目錄但每次讀現在 bytes；沒有全域 repository 選擇器。core.waveform_format 負責 NPZ samples codec；內部 data、formula 與 NPZ 模組分別負責 payload／preview、formula 語意／rendering 與實體 I/O；格式、方法與約束見 [waveform_assets.md](waveform_assets.md)。
-- [`document_store.py`](document_store.py) 提供 typed YAML 的記憶體快照、單檔樂觀交易與跨程序鎖。公開 `DocumentRevision(path, revision)` 記錄絕對路徑與已安裝原始 bytes 的 SHA-256。`DocumentStore` 與 `ModuleLibrary` 的 `document_revision` 屬性，以及 entry 的 `document_revision(view)` 函式都不重新讀檔。缺席 entry 或 point library 的 revision 為 None，讀取不建檔。提交或 refresh 成功才更新版本，失敗保留舊版本。Entry／point ModuleLibrary 與 GUI／MCP 參數操作使用它。
+- [`document_store.py`](document_store.py) 提供 typed YAML 的記憶體快照、單檔樂觀交易與跨程序鎖。公開 `DocumentRevision(path, revision)` 記錄絕對路徑與已安裝原始 bytes 的 SHA-256。`DocumentStore.document_revision` 與 entry 的 `document_revision(handle)` 都不重新讀檔。後者接受 ParameterView、ModuleLibrary 與 AliasFile。缺 library 或 aliases 時 revision 為 None，讀取不建檔。Aliases 的 revision 也可指向無效 bytes，是否可用由觀察的 error 判定。提交或 refresh 成功才更新版本，失敗保留舊版本。Entry／point ModuleLibrary 與 GUI／MCP 參數操作使用它。
 - [`entry/`](entry/README.md) 組合條目身分、global 文件組與獨立完整的 point。每個視圖綁自己的 DocumentStore；新 point 預設繼承 global，也可明確建 empty 或 clone。
 - `upgrade_backup.py` 集中 parameter、predictor、record 與 spectrum 明確升級的備份定位。來源最近的 `result`／`Database` 所屬專案決定 `<專案根>-backup/`，鏡像相對路徑並加 UUID。CLI `--backup-root` 與 runner `backup_root` 可覆寫。解析後的根若直接含 `result`／`Database` 子目錄，名稱必須以 `-backup` 結尾；此名稱允許接續鏡像與遷移備份共處。未依此命名的空根首次產生鏡像後，後續 apply 會拒絕。Standalone 來源必須覆寫；資料樹內目的地、跳出鏡像根或導入另一資料樹的 symlink 在任何寫入前拒絕。它不依賴 migrations；操作規則見 [備份位置](../../../docs/parameter-upgrades.md#備份位置)。
 - `parameter_schema.py` 擁有 caller 注入的 `ParameterSchemaPolicy`。`parameter_upgrade.py` 提供具名文件、線性純函式升級鏈與 `main(argv, *, plan)`，預設 dry-run。Component CLI 接受檔案或 entry 目錄，目錄的 component 文件與 predictor JSON 由 entry owner 列舉。Predictor 檔案走獨立的 v1→v2 owner，不使用 component schema plan。Policy 的版本錯誤列出 Preview 與含 `--apply` 的 Apply 指令，目標由 caller 傳入，預設是來源檔。Lib 只讀版本、驗證連續性與管理單檔備份／replace，不知道 lab 欄位。完整舊格式分類、逐版本驗證與步驟由 caller 提供，未標版只在明確 upgrade 且分類成功後視為 v1。Runtime 讀取從不改檔。`UpgradePlan.notes` 列出整體操作警告；每份 `ParameterUpgradeDocument.notes` 隨轉換傳到 `UpgradeResult.notes`，CLI 在該檔結果下呈現。Notes 不寫入 YAML，runner 不解析 caller 的欄位或診斷內容。
@@ -54,7 +54,7 @@ Load 讀 caller 指定的 exact path，缺檔與格式錯誤直接拋出。Save 
 `set_model_value` 可沿 model／mapping 欄位與既有 list 的 canonical 非負 ASCII index 寫入 detached candidate。
 數字 mapping key 仍是 key。Setter 不建容器、不 append／insert、不接受 slice 或負索引，也不寫 tuple／ndarray。
 `sequence_index` 只驗 canonical index 與界限，供 setter 與 projection reader 共用；reader 保留 tuple／ndarray 讀取。
-複數仍交既有 codec，發布前由 caller 完整驗證 model。Entry 的 setup／point 視圖重用 FieldView、stage_model 與 metadata 讀寫，並使用 2.0 header 契約。`parameter_metadata.py` 擁有 opaque mapping 讀寫與 2.x header 拒絕契約。這些機制不解釋 metadata 的科學意義。
+複數仍交既有 codec，發布前由 caller 完整驗證 model。Entry 的 global／point 視圖重用 FieldView、stage_model 與 metadata 讀寫，並使用 2.0 header 契約。`parameter_metadata.py` 擁有 opaque mapping 讀寫與 2.x header 拒絕契約。這些機制不解釋 metadata 的科學意義。
 
 ## Scope 差別
 
@@ -68,7 +68,7 @@ Load 讀 caller 指定的 exact path，缺檔與格式錯誤直接拋出。Save 
 
 `DocumentStore` 擁有單檔交易，不換算數值。Caller 提供文件 model 與整份文件的 validation。Entry 另以 `read_validate` 選擇結構讀取，`content()` 保留未消費的欄位，`snapshot()`、edit 與 strict refresh 仍驗完整 model。其他 consumer 不啟用這個選項，維持既有完整驗證。參數容器的檔案與視圖使用相同工作單位；值與 metadata 都不經 SI 投影。不同 store 不共用快照；任一欄位衝突會拒絕整筆交易。通知失敗獨立回報，不撤銷已完成的提交。它不提供跨檔掉電保證，也不自動監看檔案。
 
-DocumentStore 在自己的單檔 edit 內合併、驗證、replace 並發布快照，不開放多檔 prepare／restore／publish 接縫。非空 commit 同時寫回 model 的讀檔轉換，以 normalized tree 比較衝突，再把差異套回 raw YAML，保留未改節點。一般讀取與空 edit 不 normalize 寫檔。ModuleLibrary 讀取略過無效 Spec 並公開原因，不改檔、不備份，見 [context owner](context/README.md) 與 ADR-0063。Entry 的 setup 與 point 不共用條目鎖或交易。
+DocumentStore 在自己的單檔 edit 內合併、驗證、replace 並發布快照，不開放多檔 prepare／restore／publish 接縫。非空 commit 同時寫回 model 的讀檔轉換，以 normalized tree 比較衝突，再把差異套回 raw YAML，保留未改節點。一般讀取與空 edit 不 normalize 寫檔。ModuleLibrary 讀取略過無效 Spec 並公開原因，不改檔、不備份，見 [context owner](context/README.md) 與 ADR-0063。Entry 的 global 與 point 不共用條目鎖或交易。
 
 Caller 從各 owner 的 module 或子 package import。
 
@@ -76,7 +76,7 @@ Caller 從各 owner 的 module 或子 package import。
 
 各 owner 的行為、限制與跨模組接縫只在自己的文件：
 
-- 條目、setup、point、角色與 metadata：[entry README](entry/README.md)。
+- 條目、global、point、角色與 metadata：[entry README](entry/README.md)。
 - ModuleLibrary 與 experiment cfg materialization 的接縫：[context README](context/README.md)。
 - QubitParams：[qubit_params.md](qubit_params.md)。
 - JSONL 樣本與 v2 欄位協定：[record_table README](record_table/README.md)。

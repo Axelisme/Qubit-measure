@@ -18,6 +18,7 @@ from zcu_tools.resources.entry import (
     snapshot,
 )
 
+from tests.gui._context_reads import capture_focus
 from tests.gui.app.measure._record_support import require_target
 
 from ._helpers import dispatch_handler as _dispatch
@@ -69,23 +70,25 @@ def test_alias_apply_returns_authored_rows_without_requiring_resolution(
         {"alias": "empty", "value": ""},
     ]
     if selection == "no_entry":
-        original = control.get_alias_rows()
+        original = control.get_alias_rows(point=control.current_point_label())
         error = rpc_error(application, "context.aliases_set", {"rows": rows})
         assert (error["code"], error["reason"]) == (
             ErrorCode.PRECONDITION_FAILED,
             "no_context",
         )
-        assert control.get_alias_rows() == original
+        assert control.get_alias_rows(point=control.current_point_label()) == original
         return
     assert application.result("context.aliases_set", {"rows": rows}) == {"rows": rows}
-    assert control.get_alias_rows() == (
+    assert control.get_alias_rows(point=control.current_point_label()) == (
         AliasRow("driver", "missing"),
         AliasRow("control", "$driver.sense"),
         AliasRow("empty", ""),
     )
     if info is not None:
         entry = entry_resource(info)
-        stored = entry.load_aliases(point=control.current_point_label())
+        stored = (
+            entry.aliases(point=control.current_point_label()).read().require_valid()
+        )
         assert list(stored.aliases.items()) == [
             ("driver", "missing"),
             ("control", "$driver.sense"),
@@ -93,9 +96,14 @@ def test_alias_apply_returns_authored_rows_without_requiring_resolution(
         ]
         assert entry.ledger.events() == ()
     assert application.result("context.aliases_set", {"rows": []}) == {"rows": []}
-    assert control.get_alias_rows() == ()
+    assert control.get_alias_rows(point=control.current_point_label()) == ()
     if info is not None:
-        stored = entry_resource(info).load_aliases(point=control.current_point_label())
+        stored = (
+            entry_resource(info)
+            .aliases(point=control.current_point_label())
+            .read()
+            .require_valid()
+        )
         assert stored.aliases == {}
 
 
@@ -118,11 +126,11 @@ def test_alias_apply_rejects_entire_payload_and_preserves_persisted_table(
     control = application.controller.context_control
     original = (AliasRow("driver", "original"),)
     application.result("point.new", {"label": "base"})
-    control.apply_alias_rows(original)
+    control.apply_alias_rows(original, point=control.current_point_label())
     old_file = (info.result_path / "points" / "base" / "aliases.yaml").read_bytes()
     error = rpc_error(application, "context.aliases_set", {"rows": rows})
     assert error["code"] == ErrorCode.INVALID_PARAMS
-    assert control.get_alias_rows() == original
+    assert control.get_alias_rows(point=control.current_point_label()) == original
     assert (
         info.result_path / "points" / "base" / "aliases.yaml"
     ).read_bytes() == old_file
@@ -136,14 +144,14 @@ def test_alias_apply_storage_failure_does_not_install_candidate(
     control = application.controller.context_control
     original = (AliasRow("driver", "original"),)
     application.result("point.new", {"label": "base"})
-    control.apply_alias_rows(original)
+    control.apply_alias_rows(original, point=control.current_point_label())
     # A directory destination forces the real entry's atomic replacement to fail.
     alias_path = info.result_path / "points" / "base" / "aliases.yaml"
     alias_path.unlink()
     alias_path.mkdir()
     error = rpc_error(application, "context.aliases_set", {"rows": []})
     assert error["code"] == ErrorCode.CONTROLLER_ERROR
-    assert control.get_alias_rows() == original
+    assert control.get_alias_rows(point=control.current_point_label()) == original
     assert (info.result_path / "points" / "base" / "aliases.yaml").is_dir()
 
 
@@ -152,8 +160,8 @@ def test_open_and_reset_capture_selected_point_aliases(
 ) -> None:
     info = application.open_entry()
     control = application.controller.context_control
-    control.add_component("Q1", "fake/drive/a", {"rate": 10.0}, setup=True)
-    control.add_component("Q2", "fake/drive/a", {"rate": 20.0}, setup=True)
+    control.add_component("Q1", "fake/drive/a", {"rate": 10.0}, point=None)
+    control.add_component("Q2", "fake/drive/a", {"rate": 20.0}, point=None)
     application.result("point.new", {"label": "first"})
     application.result(
         "context.aliases_set", {"rows": [{"alias": "driver", "value": "Q1"}]}
@@ -177,8 +185,12 @@ def test_open_and_reset_capture_selected_point_aliases(
         "$driver.rate": 20.0
     }
     entry = entry_resource(info)
-    assert entry.load_aliases(point="first").aliases == {"driver": "Q1"}
-    assert entry.load_aliases(point="second").aliases == {"driver": "Q2"}
+    assert entry.aliases(point="first").read().require_valid().aliases == {
+        "driver": "Q1"
+    }
+    assert entry.aliases(point="second").read().require_valid().aliases == {
+        "driver": "Q2"
+    }
 
 
 def test_parameter_set_commits_current_point_preserving_metadata_and_captures(
@@ -186,19 +198,19 @@ def test_parameter_set_commits_current_point_preserving_metadata_and_captures(
 ) -> None:
     info = application.open_entry()
     control = application.controller.context_control
-    control.add_component("Q1", "fake/drive/a", {"rate": 10.0}, setup=True)
+    control.add_component("Q1", "fake/drive/a", {"rate": 10.0}, point=None)
     application.result("point.new", {"label": "first"})
-    first = control.read_context()
+    first = capture_focus(control)
     application.result("point.new", {"label": "selected"})
-    selected = control.read_context()
+    selected = capture_focus(control)
     metadata: YamlMap = {"comment": "manual", "stderr": 0.2}
     control.set_parameter(require_target(selected), "Q1.rate", 12.0, metadata=metadata)
-    before = control.read_context()
+    before = capture_focus(control)
     assert application.result(
         "context.set_parameter", {"path": "Q1.rate", "value": 25.0}
     ) == {"path": "Q1.rate", "before": 12.0, "value": 25.0}
-    after = control.read_context()
-    persisted = snapshot(entry_resource(info).use_point("selected"))
+    after = capture_focus(control)
+    persisted = snapshot(entry_resource(info).parameters("selected"))
     assert after.target == selected.target
     assert document_value(persisted, "Q1.rate") == 25.0
     assert document_meta(persisted, "Q1.rate") == metadata
@@ -206,7 +218,9 @@ def test_parameter_set_commits_current_point_preserving_metadata_and_captures(
     assert (
         control.read_target(require_target(first)).lookup_point("Q1.rate").value == 10.0
     )
-    assert document_value(snapshot(entry_resource(info).setup), "Q1.rate") == 10.0
+    assert (
+        document_value(snapshot(entry_resource(info).parameters()), "Q1.rate") == 10.0
+    )
     assert entry_resource(info).ledger.events() == ()
 
 
@@ -220,7 +234,7 @@ def test_parameter_set_absent_before_and_nested_yaml_are_not_post_write_readback
         "context.set_parameter", {"path": "general.ext.test", "value": value}
     ) == {"path": "general.ext.test", "before": None, "value": value}
     assert (
-        application.controller.context_control.read_context()
+        capture_focus(application.controller.context_control)
         .lookup_point("general.ext.test")
         .value
         == value
@@ -238,7 +252,7 @@ def test_parameter_set_requires_entry_but_not_point(
             {"path": "general.description", "value": "new"},
         ) == {"path": "general.description", "before": None, "value": "new"}
         assert (
-            application.controller.context_control.read_context().value(
+            capture_focus(application.controller.context_control).value(
                 "general.description"
             )
             == "new"
@@ -260,16 +274,18 @@ def test_parameter_set_rejects_nonconcrete_parameter_path(
 ) -> None:
     info = application.open_entry()
     control = application.controller.context_control
-    control.add_component("Q1", "fake/drive/a", {"rate": 10.0}, setup=True)
+    control.add_component("Q1", "fake/drive/a", {"rate": 10.0}, point=None)
     application.result("point.new", {"label": "base"})
-    control.apply_alias_rows((AliasRow("driver", "Q1"),))
-    before = control.read_context()
+    control.apply_alias_rows(
+        (AliasRow("driver", "Q1"),), point=control.current_point_label()
+    )
+    before = capture_focus(control)
     error = rpc_error(
         application, "context.set_parameter", {"path": path, "value": 20.0}
     )
     assert error["code"] == ErrorCode.INVALID_PARAMS
-    assert control.read_context().document() == before.document()
-    assert snapshot(entry_resource(info).use_point("base")).model_dump(
+    assert capture_focus(control).document() == before.document()
+    assert snapshot(entry_resource(info).parameters("base")).model_dump(
         mode="python", serialize_as_any=True
     ) == before.whole_document().model_dump(mode="python", serialize_as_any=True)
 
@@ -287,14 +303,14 @@ def test_context_mutations_require_holder_without_domain_effects(
     application.open_entry()
     application.result("point.new", {"label": "base"})
     control = application.controller.context_control
-    before = control.read_context()
-    rows = control.get_alias_rows()
+    before = capture_focus(control)
+    rows = control.get_alias_rows(point=control.current_point_label())
     application.result("control.release", {})
     error = rpc_error(application, method, params)
     assert error["code"] == ErrorCode.PRECONDITION_FAILED, error
     assert error.get("reason") == "not_holder"
-    assert control.read_context().document() == before.document()
-    assert control.get_alias_rows() == rows
+    assert capture_focus(control).document() == before.document()
+    assert control.get_alias_rows(point=control.current_point_label()) == rows
 
 
 def test_context_ml_and_value_handlers_use_context_control_facet() -> None:
@@ -341,10 +357,10 @@ def test_parameter_set_rejects_malformed_payload_before_effects(
 ) -> None:
     info = application.open_entry()
     application.result("point.new", {"label": "base"})
-    before = application.controller.context_control.read_context()
+    before = capture_focus(application.controller.context_control)
     error = rpc_error(application, "context.set_parameter", params)
     assert error["code"] == ErrorCode.INVALID_PARAMS
-    assert snapshot(entry_resource(info).use_point("base")).model_dump(
+    assert snapshot(entry_resource(info).parameters("base")).model_dump(
         mode="python", serialize_as_any=True
     ) == before.whole_document().model_dump(mode="python", serialize_as_any=True)
     assert entry_resource(info).ledger.events() == ()
@@ -355,16 +371,16 @@ def test_parameter_set_preserves_schema_failure_and_old_point(
 ) -> None:
     info = application.open_entry()
     control = application.controller.context_control
-    control.add_component("Q1", "fake/drive/a", {"rate": 10.0}, setup=True)
+    control.add_component("Q1", "fake/drive/a", {"rate": 10.0}, point=None)
     application.result("point.new", {"label": "base"})
-    before = control.read_context()
+    before = capture_focus(control)
     error = rpc_error(
         application, "context.set_parameter", {"path": "Q1.rate", "value": "invalid"}
     )
     assert error["code"] == ErrorCode.CONTROLLER_ERROR
     assert "validation error" in str(error["message"])
-    assert control.read_context().document() == before.document()
-    assert snapshot(entry_resource(info).use_point("base")).model_dump(
+    assert capture_focus(control).document() == before.document()
+    assert snapshot(entry_resource(info).parameters("base")).model_dump(
         mode="python", serialize_as_any=True
     ) == before.whole_document().model_dump(mode="python", serialize_as_any=True)
 
@@ -382,7 +398,7 @@ def test_context_direct_write_admission_allows_active_run_without_changing_captu
     application.open_entry()
     application.result("point.new", {"label": "base"})
     control = application.controller.context_control
-    before = control.read_context()
+    before = capture_focus(control)
     tab_id = application.controller.tab_control.new_tab("pointed")
     application.state.set_tab_running(tab_id, running=True)
     try:

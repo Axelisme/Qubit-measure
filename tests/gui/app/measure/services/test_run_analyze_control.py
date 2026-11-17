@@ -28,7 +28,7 @@ from zcu_tools.gui.app.measure.ui.interactive_frontend import (
 from zcu_tools.gui.interactive import PluginDefinition, Session
 from zcu_tools.gui.session.adapters.manual_owner_scheduler import ManualOwnerScheduler
 from zcu_tools.gui.session.context_types import CommandOrigin
-from zcu_tools.gui.session.types import ParameterContext
+from zcu_tools.gui.session.types import DocumentSetCapture
 from zcu_tools.plotting.figures import FigureCollection
 from zcu_tools.plotting.plots import Plots
 
@@ -448,7 +448,7 @@ def test_fit_analyze_uses_worker_service_and_live_container() -> None:
 
 @pytest.mark.parametrize("context_free", [False, True])
 def test_interactive_factory_receives_run_source_after_tab_rebinding(
-    result_sources: tuple[ParameterContext, ParameterContext],
+    result_sources: tuple[DocumentSetCapture, DocumentSetCapture],
     context_free: bool,
 ) -> None:
     facet, log, state, _bus = _facet(analysis=AnalysisMode.INTERACTIVE)

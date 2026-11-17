@@ -27,7 +27,7 @@ from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 from zcu_tools.program import describe_soc
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.session.setup_control import SocControlPort
+    from zcu_tools.gui.session.soc_control import SocControlPort
 
 
 def _breakable(text: str) -> str:
@@ -164,7 +164,7 @@ class SocDialog(QDialog):
         self._maybe_show_current_cfg()
 
     def _prefill_from_preferences(self) -> None:
-        data = self._ctrl.get_setup_preferences()
+        data = self._ctrl.get_dialog_prefill()
         if data.ip:
             self._ip_edit.setText(data.ip)
         if data.port:

@@ -10,6 +10,7 @@ from zcu_tools.resources.context.library import ModuleLibraryDocument
 from zcu_tools.resources.document_store import ConflictError
 from zcu_tools.resources.entry import (
     ResultEntry,
+    document_revision,
 )
 
 from tests.program.v2.support.waveform_assets import InMemoryWaveformAsset
@@ -28,39 +29,32 @@ def library_assets() -> InMemoryWaveformAsset:
 def test_point_and_library_revisions_follow_each_independent_owner(
     entry: ResultEntry,
 ) -> None:
-    import zcu_tools.resources.entry as entry_api
-
-    revision = getattr(entry_api, "document_revision", None)
-    assert callable(revision), "Entry views need a public installed revision query"
-    from zcu_tools.resources.entry import document_revision
-
     point = entry.new_point("revision")
-    library = entry.module_library("revision")
-    assert hasattr(library, "document_revision"), "Libraries need installed revisions"
+    library = entry.library("revision")
     before_point = document_revision(point)
-    before_library = library.document_revision
+    before_library = document_revision(library)
     point.description = "written now"
     assert document_revision(point) != before_point
-    assert library.document_revision == before_library
+    assert document_revision(library) == before_library
     assert (
         document_revision(point).revision
         == sha256(before_point.path.read_bytes()).hexdigest()
     )
     with library.edit() as draft:
         draft.set_waveform("Q1.waveforms.base", ConstWaveformCfg(length=0.05))
-    assert library.document_revision != before_library
+    assert document_revision(library) != before_library
     assert (
-        library.document_revision.revision
+        document_revision(library).revision
         == sha256(library.source_path.read_bytes()).hexdigest()
     )
-    assert entry.module_library("revision").snapshot().waveform_keys() == (
+    assert entry.library("revision").snapshot().waveform_keys() == (
         "Q1.waveforms.base",
     )
     before_library.path.write_bytes(before_library.path.read_bytes() + b"# external\n")
-    installed = library.document_revision
-    assert library.document_revision == installed
+    installed = document_revision(library)
+    assert document_revision(library) == installed
     library.refresh()
-    assert library.document_revision != installed
+    assert document_revision(library) != installed
 
 
 @pytest.mark.parametrize("label", [None, "portable"])
@@ -74,18 +68,16 @@ def test_first_edit_creates_absent_library(
     )
     path = directory / "library.yaml"
     path.unlink()
-    library = entry.module_library(label)
+    library = entry.library(label)
     assert library.snapshot().waveform_keys() == ()
-    assert library.document_revision.revision is None
+    assert document_revision(library).revision is None
     with library.edit():
         pass
     assert not path.exists()
     with library.edit() as draft:
         draft.set_waveform("Q1.waveforms.base", ConstWaveformCfg(length=0.05))
-    assert library.document_revision.revision == sha256(path.read_bytes()).hexdigest()
-    assert entry.module_library(label).snapshot().waveform_keys() == (
-        "Q1.waveforms.base",
-    )
+    assert document_revision(library).revision == sha256(path.read_bytes()).hexdigest()
+    assert entry.library(label).snapshot().waveform_keys() == ("Q1.waveforms.base",)
 
 
 @pytest.mark.parametrize("label", [None, "portable"])
@@ -109,7 +101,7 @@ def test_absent_library_edit_conflicts_with_external_creation(
         else path.read_bytes() + b"# externally created\n"
     )
     path.unlink()
-    library = entry.module_library(label)
+    library = entry.library(label)
     if not created_during_edit:
         path.write_bytes(external)
 
@@ -129,7 +121,7 @@ def test_absent_library_edit_conflicts_with_external_creation(
             length=0.05
         )
     assert path.read_bytes() == external
-    assert library.document_revision.revision is None
+    assert document_revision(library).revision is None
     assert library.snapshot().waveform_keys() == ()
 
 
@@ -143,7 +135,7 @@ def test_clone_preserves_absent_library(entry: ResultEntry) -> None:
 
     assert cloned.description == "portable point"
     assert not (entry.result_path / "points/copy/library.yaml").exists()
-    assert entry.module_library("copy").document_revision.revision is None
+    assert document_revision(entry.library("copy")).revision is None
     assert not path.exists()
 
 
@@ -151,7 +143,7 @@ def test_new_point_inherits_global_library_independently(
     entry: ResultEntry,
 ) -> None:
     assert (entry.result_path / "library.yaml").is_file()
-    library = entry.module_library()
+    library = entry.library()
     with library.edit() as draft:
         draft.set_waveform("Q1.waveforms.base", ConstWaveformCfg(length=0.05))
     reopened = ResultEntry.open(
@@ -159,18 +151,33 @@ def test_new_point_inherits_global_library_independently(
         result_root=entry.result_path.parent,
         database_root=entry.database_path.parent,
     )
-    assert reopened.module_library().snapshot().waveform_keys() == (
-        "Q1.waveforms.base",
-    )
+    assert reopened.library().snapshot().waveform_keys() == ("Q1.waveforms.base",)
     entry.new_point("a")
-    assert entry.module_library("a").snapshot().waveform_keys() == (
-        "Q1.waveforms.base",
-    )
+    assert entry.library("a").snapshot().waveform_keys() == ("Q1.waveforms.base",)
     with library.edit() as draft:
         draft.set_waveform("Q1.waveforms.base", ConstWaveformCfg(length=0.1))
-    assert entry.module_library("a").snapshot().waveform_spec(
+    assert entry.library("a").snapshot().waveform_spec(
         "Q1.waveforms.base"
     ) == ConstWaveformCfg(length=0.05)
+
+
+@pytest.mark.parametrize("point", [None, "a"])
+def test_library_opener_reads_only_its_selected_file(
+    entry: ResultEntry, point: str | None
+) -> None:
+    if point is not None:
+        entry.new_point(point)
+    directory = (
+        entry.result_path if point is None else entry.result_path / "points" / point
+    )
+    (directory / "parameters.yaml").write_text("invalid: [", encoding="utf-8")
+    (directory / "aliases.yaml").write_text("invalid: [", encoding="utf-8")
+
+    library = entry.library(point=point)
+
+    assert library.snapshot().module_keys() == ()
+    assert library.snapshot().waveform_keys() == ()
+    assert document_revision(library).path == (directory / "library.yaml").resolve()
 
 
 def test_point_local_library_uses_entry_scope_without_reading_point_or_assets(
@@ -181,7 +188,7 @@ def test_point_local_library_uses_entry_scope_without_reading_point_or_assets(
     entry.new_point("b")
     source = entry.result_path / "points/a"
     (source / "parameters.yaml").write_text("invalid: [", encoding="utf-8")
-    library = entry.module_library("a", assets=library_assets)
+    library = entry.library("a", assets=library_assets)
     assert library.source_path == (source / "library.yaml").resolve()
     assert library.snapshot().module_keys() == ()
     with library.edit() as draft:
@@ -192,35 +199,33 @@ def test_point_local_library_uses_entry_scope_without_reading_point_or_assets(
             ),
         )
         draft.set_waveform("Q1.waveforms.base", ConstWaveformCfg(length=0.05))
-    reopened = entry.module_library("a", assets=library_assets)
+    reopened = entry.library("a", assets=library_assets)
     copied = reopened.snapshot().module_spec("Q1.pulses.pi")
     assert isinstance(copied, PulseSpec)
     assert copied.waveform == "Q1.waveforms.missing"
-    assert (
-        entry.module_library("b", assets=library_assets).snapshot().module_keys() == ()
-    )
+    assert entry.library("b", assets=library_assets).snapshot().module_keys() == ()
     assert (source / "parameters.yaml").read_text(encoding="utf-8") == "invalid: ["
 
 
 @pytest.mark.parametrize("label", ["", ".", "..", "a/b", "/absolute"])
-def test_module_library_rejects_unsafe_labels(
+def test_library_rejects_unsafe_labels(
     entry: ResultEntry,
     library_assets: InMemoryWaveformAsset,
     label: str,
 ) -> None:
     with pytest.raises(ValueError, match="name"):
-        entry.module_library(label, assets=library_assets)
+        entry.library(label, assets=library_assets)
     assert entry.list_points() == []
 
 
-def test_module_library_does_not_create_missing_document(
+def test_library_does_not_create_missing_document(
     entry: ResultEntry,
     library_assets: InMemoryWaveformAsset,
 ) -> None:
-    library = entry.module_library("absent", assets=library_assets)
+    library = entry.library("absent", assets=library_assets)
     assert library.snapshot().module_keys() == ()
     assert library.snapshot().waveform_keys() == ()
-    assert library.document_revision.revision is None
+    assert document_revision(library).revision is None
     assert not (entry.result_path / "points/absent").exists()
 
 
@@ -232,12 +237,12 @@ def test_point_without_library_can_be_selected_without_creating_files(
     path.unlink()
     before = sorted(entry.result_path.rglob("*"))
 
-    point = entry.use_point("portable")
-    library = entry.module_library("portable")
+    point = entry.parameters("portable")
+    library = entry.library("portable")
 
     assert point.description is None
     assert library.snapshot().module_keys() == ()
     assert library.snapshot().waveform_keys() == ()
-    assert library.document_revision.path == path.resolve()
-    assert library.document_revision.revision is None
+    assert document_revision(library).path == path.resolve()
+    assert document_revision(library).revision is None
     assert sorted(entry.result_path.rglob("*")) == before

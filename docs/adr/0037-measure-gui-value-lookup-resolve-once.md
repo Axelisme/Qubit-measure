@@ -6,7 +6,7 @@ status: accepted
 
 ## 脈絡
 
-Adapter defaults 和 GUI／agent 輸入有時需要 cached device values、session 路徑或 predictor metadata。穩定的參數讀取使用固定 `ParameterContext` 與 typed helpers。Session value lookup 只處理少量跨來源的 scalar 查詢，不取代參數容器或 alias 表。
+Adapter defaults 和 GUI／agent 輸入有時需要 cached device values、session 路徑或 predictor metadata。穩定的參數讀取使用固定 `DocumentSetCapture` 與 typed helpers。Session value lookup 只處理少量跨來源的 scalar 查詢，不取代參數容器或 alias 表。
 
 ContextService 的寫入權威見 [[0067]]；Form、expression 與固定來源見 [[0065]]，表單初值與範本見 [[0073]]。
 
@@ -18,11 +18,11 @@ Provider 依 owner 成組替換或移除。Context、predictor 或 device 更新
 
 Cached device values 供 defaults 和 resolve-once 輸入使用，不是 Run 的硬體 snapshot。GUI Run 框架在取得 hardware lease 後、呼叫 adapter.run 前讀取所有已連線 device；讀取失敗不以 lookup cache 補值。Snapshot 的保存見 [[0063]]。
 
-內建來源投影 SessionEnv 的 cached metadata、predictor metadata 與具名 device cache。ContextService 只發布 entry 的 result／database paths 與 active_label。元件名稱使用 `ParameterContext` 的固定 alias capture。Device keys 包括 `device.<name>.name` 和 `device.<name>.value`。名稱中的 device 是具體裝置名稱；lookup 不推論哪個裝置代表 flux。
+內建來源投影 SessionEnv 的 cached metadata、predictor metadata 與具名 device cache。ContextService 只發布 entry 的 result／database paths 與 active_label。元件名稱使用 `DocumentSetCapture` 的固定 alias capture。Device keys 包括 `device.<name>.name` 和 `device.<name>.value`。名稱中的 device 是具體裝置名稱；lookup 不推論哪個裝置代表 flux。
 
 ## 參數與 expression
 
-參數讀取使用 `ParameterContext` 的 point／library 固定投影。`$qubit.freq` 是 alias 路徑，`Q1.freq` 是具體元件路徑。`$qubit.module.x180.waveform.length` 先沿 point 的 module slot 找 library，再讀 module leaf。Alias 的 authored links 只沿這份 capture 求值，不讀目前 session。
+參數讀取使用 `DocumentSetCapture` 的參數／library 固定投影。`$qubit.freq` 是 alias 路徑，`Q1.freq` 是具體元件路徑。`$qubit.module.x180.waveform.length` 先沿參數文件的 module slot 找 library，再讀 module leaf。Alias 的 authored links 只沿這份 capture 求值，不讀目前 session。
 
 裸 `$alias` 回傳固定表解析後的名稱字串，例如 `$qubit` 得到 `Q1`。Alias 容器可保存元件或 device 名稱，不在 capture 或 preview 預查名稱可用性。實驗室表單以元件為焦點，裝置初值讀取 `$qubit.flux_dev` 等元件欄位，不要求 device alias，見 [[0073]]。缺列或未綁定時指名失敗，不代用同名元件、舊解析值或靜態名稱。名稱不接受數值算術或字串插值。
 
@@ -38,9 +38,9 @@ Remote 的 `value.list`／`value.read` 保留唯讀 lookup。舊 editor 的 `val
 
 ## 寫入與限制
 
-ContextService 接收已解析的普通值，透過參數容器或 Library owner 提交。Inspect Parameters 編輯 concrete point／setup 路徑，Modules 提交持久 Spec，都不把 ValueRef 當成持久來源。
+ContextService 接收已解析的普通值，透過參數容器或 Library owner 提交。Inspect Parameters 編輯 concrete global／point 路徑，Modules 提交持久 Spec，都不把 ValueRef 當成持久來源。
 
-數值 expression 使用 `gui.session.expression` 的受限 simpleeval 引擎。它沿固定 ParameterContext 解析參數，限制 AST、函式與數值大小，不使用 Python `eval` 或 SymPy。Lookup 不提供通用複合 source-expression parser，也不應取代穩定的 typed dependencies。
+數值 expression 使用 `gui.session.expression` 的受限 simpleeval 引擎。它沿固定 DocumentSetCapture 解析參數，限制 AST、函式與數值大小，不使用 Python `eval` 或 SymPy。Lookup 不提供通用複合 source-expression parser，也不應取代穩定的 typed dependencies。
 
 ## 後果
 

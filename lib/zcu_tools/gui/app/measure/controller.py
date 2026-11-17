@@ -90,6 +90,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.arb_waveform import ArbWaveformPort
     from zcu_tools.gui.session.context_control import ContextControlPort
     from zcu_tools.gui.session.device_control import DeviceControlPort
+    from zcu_tools.gui.session.entry_control import EntryControlPort
     from zcu_tools.gui.session.persistence import SingleFileCaretaker
     from zcu_tools.gui.session.ports import (
         DeviceRegistryPort,
@@ -100,7 +101,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.predictor_control import PredictorControlPort
     from zcu_tools.gui.session.progress_control import ProgressControlPort
     from zcu_tools.gui.session.services.build import SessionServices
-    from zcu_tools.gui.session.setup_control import SetupControlPort, SocControlPort
+    from zcu_tools.gui.session.soc_control import SocControlPort
     from zcu_tools.plotting.figures import FigureCollection
 
     from .artifacts import SaveControlPort
@@ -223,7 +224,7 @@ class ViewSnapshot(TypedDict):
     active_tab_id is the focused State-owned tab ID, or None.
     tab_ids lists State-owned IDs in State order, excluding ghost widgets.
     entry_label is the visible entry name, or "No entry open".
-    point_label is the visible SavedPoint label, "Draft (in-memory)", or
+    point_label is the visible DocumentSetRef label, "Draft (in-memory)", or
     "No point selected". It never derives from component focus.
     status is the visible status-bar text.
     open_dialogs lists the named dialogs currently open, using wire names.
@@ -292,7 +293,7 @@ def _save_summary(report: SaveReport) -> str:
 class Controller:
     """Façade for the GUI application. Delegates to domain services.
 
-    Shared setup, context / inspect, and value-source consumers use their own
+    Shared entry, context / inspect, and value-source consumers use their own
     control facets instead of this facade.
     """
 
@@ -318,7 +319,7 @@ class Controller:
         supplies registered drivers, which close_hardware eventually closes.
 
         Aliases are file-backed. Startup scripts open an entry, then call
-        ctx.context.apply_alias_rows to initialize the active table explicitly.
+        ctx.context.apply_alias_rows to initialize global aliases, or pass the focused point label.
         """
         self.control_identity = ControlIdentity()
         self._state = state
@@ -412,7 +413,7 @@ class Controller:
         self._progress_control = services.session.progress_control
         self._ctx_svc = services.session.context
         self._context_control = services.session.context_control
-        self._setup_control = services.session.setup_control
+        self._entry_control = services.session.entry_control
         self._soc_control = services.session.soc_control
         self._tab_forms = services.tab_forms
         self._tab_svc = services.tab
@@ -609,8 +610,8 @@ class Controller:
         return self._context_control
 
     @property
-    def setup_control(self) -> SetupControlPort:
-        return self._setup_control
+    def entry_control(self) -> EntryControlPort:
+        return self._entry_control
 
     @property
     def soc_control(self) -> SocControlPort:
@@ -1021,7 +1022,9 @@ class Controller:
                 f"Name {name!r} must use component.partition.name for {item_kind}. "
                 "Module partitions: pulses, readout, reset; waveform partition: waveforms."
             )
-        parameters = self._context_control.read_context()
+        parameters = self._context_control.read_context(
+            point=self._context_control.current_point_label()
+        )
         keys = (
             parameters.library.module_keys()
             if item_kind == "module"
@@ -1078,7 +1081,9 @@ class Controller:
         controller call.
         """
         return open_library_entry(
-            self._context_control.read_context(),
+            self._context_control.read_context(
+                point=self._context_control.current_point_label()
+            ),
             item_kind,
             name,
             arb_names=self._arb_waveform_svc.list_data_keys(),

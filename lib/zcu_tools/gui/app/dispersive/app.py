@@ -3,7 +3,7 @@
 Wires State + Controller + MainWindow behind the shared GUI process runtime. Like
 fluxdep-gui there is no registry/role-catalog and no session-restore caretaker:
 the tool starts fresh with an entry target, predictor and one-tone hdf5.
-Export writes the entry dispersive artifact and kind-declared setup fields.
+Export writes the entry dispersive artifact and kind-declared global fields.
 
 When ``control`` is given, a read-only ``RemoteControlAdapter`` is started so an
 automation agent (or the MCP server) can *observe* the GUI over TCP; it is stopped

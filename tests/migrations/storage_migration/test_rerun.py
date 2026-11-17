@@ -115,7 +115,7 @@ def test_legal_completed_edit_is_located_and_does_not_change_reports(
         result_root=request_data.results_root,
         database_root=request_data.database_root,
     )
-    view = entry.use_point("bias") if point else entry.setup
+    view = entry.parameters("bias") if point else entry.parameters()
     with view.edit() as draft:
         draft.set("C1.frequency", 18.0)
     target = entry.result_path / (
@@ -226,7 +226,7 @@ def test_point_prepared_publication_resumes_fixed_time_and_formal_binding(
         result_root=request_data.results_root,
         database_root=request_data.database_root,
     )
-    point = entry.use_point("bias")
+    point = entry.parameters("bias")
     assert source_path(point) == target / "parameters.yaml"
     assert point.general.created_at == created_at
     assert point.C1.frequency == 4.0
@@ -335,8 +335,8 @@ def test_prepared_document_recovers_fixed_owner_intent(
         result_root=request_data.results_root,
         database_root=request_data.database_root,
     )
-    assert entry.setup.general.created_at == expected
-    assert entry.setup.C1.frequency == 1.0
+    assert entry.parameters().general.created_at == expected
+    assert entry.parameters().C1.frequency == 1.0
     assert report.failures == ()
 
 

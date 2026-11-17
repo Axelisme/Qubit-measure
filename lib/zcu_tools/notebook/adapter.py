@@ -36,7 +36,7 @@ from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.notebook.plotting import NotebookPlotHost, finish_failed_plots
 from zcu_tools.notebook.saving import SavedRun
 from zcu_tools.plotting.plots import PlotHost, Plots
-from zcu_tools.resources.entry import PointView, RoleView
+from zcu_tools.resources.entry import ParameterView, RoleView
 
 CoreT = TypeVar("CoreT", bound=Experiment[Any, Any], covariant=True)
 CfgT = TypeVar("CfgT", bound=ConfigBase)
@@ -340,7 +340,7 @@ class NotebookExperiment(Generic[CoreT]):
 
     def save_run(
         self: NotebookExperiment[Experiment[ResultT, CfgT]],
-        ctx: PointView,
+        ctx: ParameterView,
         *,
         source: RunRecord[CfgT, ResultT],
         roles: RoleView | None = None,
@@ -348,13 +348,14 @@ class NotebookExperiment(Generic[CoreT]):
         analysis: tuple[AnalysisDocument, ...] = (),
         comment: str = "",
     ) -> SavedRun[CfgT, ResultT]:
-        """Save this adapter's latest acquired record into a bound point's run.
+        """Save this adapter's latest acquired record into a bound view's run.
 
-        ctx provides cached save-time context and exact entry storage. source
-        must be the same object returned by the most recent successful run;
+        ctx is a global or point view providing cached context and exact storage.
+        Global runs record point=None and copy figures into entry/figures.
+        source must be the same object returned by the most recent successful run;
         loaded, stale, manual and other-adapter records fail before output I/O.
         roles must be resolved from the same bound entry, point and storage
-        roots as ctx; another handle of that point is valid. None records no
+        roots as ctx; another handle of that document is valid. None records no
         roles. Wrong role origins raise ValueError before outputs or
         acquired/saved events. Named figures create PNGs/copies, analysis supplies
         JSON-safe pane results, and comment remains raw user text. A returned SavedRun can

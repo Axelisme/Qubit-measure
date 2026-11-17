@@ -12,7 +12,7 @@ from zcu_tools.device.base import BaseDeviceInfo
 if TYPE_CHECKING:
     from qtpy.QtWidgets import QWidget
 
-    from zcu_tools.gui.session.parameters import ParameterContext
+    from zcu_tools.gui.session.parameters import DocumentSetCapture
     from zcu_tools.gui.session.ports import DeviceProtocol
 
 
@@ -63,7 +63,7 @@ class DevicePanelFactory(Protocol):
 
     def __call__(
         self,
-        parameter_provider: Callable[[], ParameterContext | None],
+        parameter_provider: Callable[[], DocumentSetCapture | None],
         parent: QWidget | None = None,
     ) -> QWidget:
         """Return a QWidget implementing DevicePanelProtocol, owned by parent."""

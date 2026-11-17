@@ -3,15 +3,17 @@
 from dataclasses import replace
 
 import pytest
-from zcu_tools.core.simulation import RoundRequest
 from zcu_tools.program.v2.modules.delay import SoftDelay
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
-from zcu_tools.simulate.evolution import Engine, RoutingHistory
+from zcu_tools.simulate.boundary import RoundRequest
+from zcu_tools.simulate.evolution import RoutingHistory
 from zcu_tools.simulators.ftf.environment import runtime
 
 from tests.program._profiles import profile_soccfg
 from tests.program._timeline import compile_modules
+from tests.simulators._engine import EngineDouble, controlled_engine
+from tests.simulators._sources import ftf_environment
 from tests.simulators.ftf.environment._templates import settings
 
 pytestmark = pytest.mark.sim
@@ -57,16 +59,16 @@ def read_program(env):
     )
 
 
-def test_source_routes_every_projective_span_and_clear_resolves_again():
+def test_source_passes_projective_spans_and_honors_engine_reuse_answer():
     config = routing_settings()
     history = RoutingHistory()
-    env = runtime.ftf(config, soccfg=profile_soccfg("ftf"), time_scale=0)
+    env = ftf_environment(config, soccfg=profile_soccfg("ftf"), time_scale=0)
     try:
         source = runtime.FTFSource(
             config,
             env.devices,
             soccfg=env.soccfg,
-            engine=Engine(workers=1, families={"t4"}),
+            engine=EngineDouble(workers=1, families={"t4"}),
             history=history,
         )
         try:
@@ -77,8 +79,12 @@ def test_source_routes_every_projective_span_and_clear_resolves_again():
             source.execute(RoundRequest(request, snapshot, 0))
             first = source.evaluations[0]
             assert first.projection_outcomes
-            assert set(first.paths.segments_by_kernel) == {"t4"}
-            assert first.paths.segments_by_kernel["t4"] >= 2
+            assert len(controlled_engine(source.engine).calls) >= 2
+            assert all(
+                model.history is history
+                for model, _ in controlled_engine(source.engine).calls
+            )
+
             source.execute(
                 RoundRequest(
                     replace(request, sequence=request.sequence + 1), snapshot, 0
@@ -92,7 +98,7 @@ def test_source_routes_every_projective_span_and_clear_resolves_again():
                 )
             )
             assert source.evaluations[0].paths is reused
-            history.clear()
+            controlled_engine(source.engine).reuse_allowed = False
             source.execute(
                 RoundRequest(
                     replace(request, sequence=request.sequence + 3), snapshot, 0
@@ -111,7 +117,7 @@ def test_source_routes_every_projective_span_and_clear_resolves_again():
 
 def test_builder_close_preserves_borrowed_history():
     history = RoutingHistory()
-    env = runtime.ftf(
+    env = ftf_environment(
         routing_settings(),
         soccfg=profile_soccfg("ftf"),
         time_scale=0,
@@ -132,15 +138,22 @@ def test_builder_rejects_unknown_family_before_acquire():
         )
 
 
-def test_acquire_rejects_domain_without_an_allowed_family():
-    env = runtime.ftf(
+def test_acquire_propagates_engine_failure():
+    engine = EngineDouble()
+    error = RuntimeError("numeric backend rejected fixture")
+    engine.error = error
+    env = ftf_environment(
         routing_settings(),
+        engine=engine,
         soccfg=profile_soccfg("ftf"),
         time_scale=0,
         families={"dop853"},
     )
     try:
-        with pytest.raises(RuntimeError, match=r"domain idle: points \[0\], segments"):
+        with pytest.raises(
+            RuntimeError, match="numeric backend rejected fixture"
+        ) as caught:
             read_program(env).acquire(env.soc, progress=False)
+        assert caught.value is error
     finally:
         env.devices.close_all_devices()

@@ -2,13 +2,10 @@
 
 from collections.abc import Generator
 from dataclasses import replace
-from itertools import product
 from threading import Event
 
 import numpy as np
 import pytest
-from scipy.linalg import expm
-from zcu_tools.core.simulation import SamplingIdentity
 from zcu_tools.experiment.readout_plan import local_readout_pulses
 from zcu_tools.experiment.simulation import SimulationEnvironment
 from zcu_tools.program.v2.modules.delay import SoftDelay
@@ -16,16 +13,18 @@ from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.simulation import IntegratedRound
 from zcu_tools.simulate import adc
-from zcu_tools.simulate.evolution import Cancelled, Engine
+from zcu_tools.simulate.boundary import SamplingIdentity
+from zcu_tools.simulate.evolution import Cancelled
 from zcu_tools.simulators.single_fluxonium.config import parse_single_fluxonium
 from zcu_tools.simulators.single_fluxonium.environment.runtime import (
     SingleFluxoniumRuntimeOptions,
     SingleFluxoniumSource,
-    single_fluxonium,
 )
 
 from tests.program._profiles import profile_soccfg
 from tests.program._timeline import compile_modules
+from tests.simulators._engine import EngineDouble
+from tests.simulators._sources import single_environment as single_fluxonium
 from tests.simulators.single_fluxonium.environment._inputs import settings
 
 pytestmark = pytest.mark.sim
@@ -48,7 +47,11 @@ def projection_environment() -> Generator[
 ]:
     config = projection_settings()
     env = single_fluxonium(config, soccfg=profile_soccfg("single_fluxonium"))
-    source = SingleFluxoniumSource(config, env.devices)
+    source = SingleFluxoniumSource(
+        config,
+        env.devices,
+        runtime=SingleFluxoniumRuntimeOptions(engine=EngineDouble()),
+    )
     try:
         yield env, source
     finally:
@@ -83,8 +86,17 @@ def repeated_read_program(env, reads=2, reps=4096):
     )
 
 
+def expect_chain(
+    readout: adc.ProjectionReadout | adc.ProjectionChain,
+) -> adc.ProjectionChain:
+    """Require a chain at the projective preparation seam."""
+    if not isinstance(readout, adc.ProjectionChain):
+        raise AssertionError("projective preparation must return a chain")
+    return readout
+
+
 @pytest.mark.parametrize("floor", [0.4, 0.9])
-def test_source_pruning_records_discarded_mass_and_rejects_empty_point(
+def test_source_floor_keeps_low_probability_states_with_identity_rows(
     projection_environment: tuple[SimulationEnvironment, SingleFluxoniumSource],
     floor: float,
 ):
@@ -95,23 +107,24 @@ def test_source_pruning_records_discarded_mass_and_rejects_empty_point(
     program = repeated_read_program(env, reps=1)
     program.acquire(env.soc, progress=False)
     request = env.soc.binding.rounds[0].acquire
-    if floor == 0.9:
-        with pytest.raises(ValueError, match=r"point 0.*floor.*0.9"):
-            source.prepare(request, source.snapshot())
-    else:
-        prepared = source.prepare(request, source.snapshot())
-        np.testing.assert_array_equal(prepared.raw.readout.weights, [1.0])
-        diagnostics = prepared.projection_diagnostics
-        if diagnostics is None:
-            raise AssertionError("projective preparation must report pruning")
-        assert diagnostics.retained_outcomes == ((1,),)
-        initial = source.model_facts(source.snapshot()).source.initial_density
-        assert diagnostics.pruned_weight[0][0] == pytest.approx(initial[1, 1].real)
-        assert source.prepare(request, source.snapshot()) is prepared
+    prepared = source.prepare(request, source.snapshot())
+    chain = expect_chain(prepared.raw.readout)
+    diagnostics = prepared.projection_diagnostics
+    if diagnostics is None:
+        raise AssertionError("projective preparation must report approximation")
+    adopted = chain.initial >= floor
+    assert diagnostics.continued_states == ((int(np.count_nonzero(adopted)),),)
+    assert diagnostics.uncontinued_probability[0][0] == pytest.approx(
+        chain.initial[~adopted].sum()
+    )
+    np.testing.assert_array_equal(chain.transitions[0][~adopted], np.eye(2)[~adopted])
+    initial = source.model_facts(source.snapshot()).source.initial_density
+    np.testing.assert_allclose(chain.initial, np.diag(initial).real, atol=1e-9)
+    assert source.prepare(request, source.snapshot()) is prepared
 
 
 @pytest.mark.parametrize("projections", [1, 2, 3])
-def test_zero_floor_retains_zero_weight_histories_and_reuses_preparation(
+def test_zero_floor_continues_zero_probability_states_and_reuses_preparation(
     projection_environment: tuple[SimulationEnvironment, SingleFluxoniumSource],
     projections: int,
 ):
@@ -125,31 +138,23 @@ def test_zero_floor_retains_zero_weight_histories_and_reuses_preparation(
     original = env.soc.binding.rounds[0]
     snapshot = source.snapshot()
     prepared = source.prepare(original.acquire, snapshot)
-    readout = prepared.raw.readout
-    outcomes = 2**projections
-    assert readout.weights.shape == (outcomes,)
-    np.testing.assert_array_equal(readout.weights, [1, *([0] * (outcomes - 1))])
-    histories = [
-        np.argmax(populations, axis=-1)
-        for populations in readout.populations[:projections]
-    ]
-    assert list(zip(*histories, strict=True)) == list(
-        product(range(2), repeat=projections)
-    )
+    readout = expect_chain(prepared.raw.readout)
+    np.testing.assert_array_equal(readout.initial, [1, 0])
+    assert len(readout.transitions) == projections
     diagnostics = prepared.projection_diagnostics
     if diagnostics is None:
         raise AssertionError("projective preparation must report retained histories")
-    counts = tuple(2**index for index in range(1, projections + 1))
-    assert diagnostics.retained_outcomes == (counts,)
-    np.testing.assert_array_equal(diagnostics.pruned_weight, [[0] * projections])
+    assert diagnostics.continued_states == ((2,) * projections,)
+    np.testing.assert_array_equal(
+        diagnostics.uncontinued_probability, [[0] * projections]
+    )
     assert diagnostics.evolution_calls == len(prepared.reuse_keys) > 0
     assert source.prepare(original.acquire, snapshot) is prepared
     result = source.execute(replace(original, snapshot=snapshot))
     if not isinstance(result, IntegratedRound):
         raise AssertionError("integrated acquisition must retain joint counts")
-    assert result.statistics.state_counts.shape[-1] == outcomes * 2
-    joint = result.statistics.state_counts.reshape(outcomes, 2)
-    np.testing.assert_array_equal(joint.sum(axis=-1), [1, *([0] * (outcomes - 1))])
+    assert result.statistics.state_counts.sum() == 1
+    assert result.statistics.state_counts.shape[-1] <= 1 + (projections + 1)
     assert source.prepare(original.acquire, snapshot) is prepared
 
 
@@ -181,7 +186,7 @@ def test_preparation_rejects_equal_read_counts_with_different_template_events(
         source.prepare(request, source.snapshot())
 
 
-def test_two_projections_retain_complete_markov_outcome_histories(
+def test_two_projections_keep_given_conditional_markov_transitions(
     projection_environment: tuple[SimulationEnvironment, SingleFluxoniumSource],
 ):
     env, source = projection_environment
@@ -192,37 +197,27 @@ def test_two_projections_retain_complete_markov_outcome_histories(
     program.acquire(env.soc, progress=False)
     request = env.soc.binding.rounds[0].acquire
     prepared = source.prepare(request, source.snapshot())
-    readout = prepared.raw.readout
+    readout = expect_chain(prepared.raw.readout)
     facts = source.model_facts(source.snapshot())
-    plan = source.plan_template(
-        source.snapshot(), request.templates[0], time_base=request.time_base
+    # The injected Engine supplies unchanged densities for every span.
+    transition = final = np.eye(2)
+    np.testing.assert_allclose(
+        readout.initial, np.diag(facts.source.initial_density).real, atol=1e-8
     )
-    rate = facts.readout.rates_per_ns
-    generator = rate - np.diag(rate.sum(axis=0))
-    times = [event.end_ns[0] for event in plan.read_events]
-    transition = expm(generator * (times[1] - times[0])).T
-    final = expm(generator * (times[2] - times[1])).T
-    histories = [
-        np.argmax(values.reshape(4, 2), axis=-1) for values in readout.populations[:2]
-    ]
-    assert set(zip(*histories, strict=True)) == {(0, 0), (0, 1), (1, 0), (1, 1)}
-    for outcome, (first, second) in enumerate(zip(*histories, strict=True)):
-        assert readout.weights[outcome] == pytest.approx(
-            facts.source.initial_density[first, first].real * transition[first, second],
-            abs=1e-8,
-        )
-        np.testing.assert_allclose(
-            readout.populations[-1][outcome], final[second], atol=1e-7
-        )
+    np.testing.assert_allclose(readout.transitions[0], transition, atol=1e-7)
+    np.testing.assert_allclose(readout.transitions[1], final, atol=1e-7)
+    np.testing.assert_allclose(
+        prepared.populations, readout.initial @ transition @ final, atol=1e-7
+    )
     diagnostics = prepared.projection_diagnostics
     if diagnostics is None:
         raise AssertionError("projective preparation must report histories")
-    assert diagnostics.retained_outcomes == ((2, 4),)
-    np.testing.assert_array_equal(diagnostics.pruned_weight, [[0, 0]])
+    assert diagnostics.continued_states == ((2, 2),)
+    np.testing.assert_array_equal(diagnostics.uncontinued_probability, [[0, 0]])
     assert source.prepare(request, source.snapshot()) is prepared
 
 
-def test_independent_preparation_without_routing_residency_matches_full_histories(
+def test_independent_preparation_without_routing_residency_matches_chain(
     projection_environment: tuple[SimulationEnvironment, SingleFluxoniumSource],
 ):
     env, reference = projection_environment
@@ -234,18 +229,20 @@ def test_independent_preparation_without_routing_residency_matches_full_historie
         reference.settings,
         env.devices,
         runtime=SingleFluxoniumRuntimeOptions(
-            engine=Engine(workers=1, routing_cache_bytes=0)
+            engine=EngineDouble(workers=1, routing_cache_bytes=0)
         ),
     )
     try:
         actual = source.prepare(request, source.snapshot())
         assert actual is not expected
+        actual_chain = expect_chain(actual.raw.readout)
+        expected_chain = expect_chain(expected.raw.readout)
         np.testing.assert_allclose(
-            actual.raw.readout.weights, expected.raw.readout.weights, rtol=0, atol=1e-8
+            actual_chain.initial, expected_chain.initial, rtol=0, atol=1e-8
         )
         for actual_event, expected_event in zip(
-            actual.raw.readout.populations,
-            expected.raw.readout.populations,
+            actual_chain.transitions,
+            expected_chain.transitions,
             strict=True,
         ):
             np.testing.assert_allclose(actual_event, expected_event, rtol=0, atol=1e-8)
@@ -255,12 +252,12 @@ def test_independent_preparation_without_routing_residency_matches_full_historie
         ):
             raise AssertionError("projective preparations must report histories")
         assert (
-            actual.projection_diagnostics.retained_outcomes
-            == expected.projection_diagnostics.retained_outcomes
+            actual.projection_diagnostics.continued_states
+            == expected.projection_diagnostics.continued_states
         )
         np.testing.assert_allclose(
-            actual.projection_diagnostics.pruned_weight,
-            expected.projection_diagnostics.pruned_weight,
+            actual.projection_diagnostics.uncontinued_probability,
+            expected.projection_diagnostics.uncontinued_probability,
             rtol=0,
             atol=1e-8,
         )
@@ -287,11 +284,11 @@ def test_cancelled_projective_preparation_can_retry_without_partial_results(
         source.prepare(request, snapshot, cancel=cancel)
     cancel.clear()
     retried = source.prepare(request, snapshot, cancel=cancel)
-    np.testing.assert_array_equal(
-        retried.raw.readout.weights, prepared.raw.readout.weights
-    )
+    retried_chain = expect_chain(retried.raw.readout)
+    prepared_chain = expect_chain(prepared.raw.readout)
+    np.testing.assert_array_equal(retried_chain.initial, prepared_chain.initial)
     for actual, expected in zip(
-        retried.raw.readout.populations, prepared.raw.readout.populations, strict=True
+        retried_chain.transitions, prepared_chain.transitions, strict=True
     ):
         np.testing.assert_array_equal(actual, expected)
 
@@ -319,12 +316,16 @@ def test_unobserved_terminal_keeps_terminal_state_counts_and_evolution(
     assert prepared.channel.conditional.event_indices == (0,)
     batch = prepared.raw.batches[0][1]
     assert batch.events[0][-1].grids == ()
-    assert len(prepared.raw.readout.populations) == 2
-    assert np.any(prepared.raw.readout.populations[-1] > 0)
+    chain = expect_chain(prepared.raw.readout)
+    assert len(chain.transitions) == 1
+    np.testing.assert_allclose(
+        prepared.populations, chain.initial @ chain.transitions[0], atol=1e-14
+    )
     result = source.execute(replace(original, acquire=request))
     if not isinstance(result, IntegratedRound):
         raise AssertionError("integrated acquisition must retain terminal joint counts")
-    assert result.statistics.state_counts.shape[-1] == 4
+    assert result.statistics.state_counts.shape[-1] <= 3
+    assert result.statistics.state_counts.sum() == 1
     assert result.raw.materialize(1, 0)[0].shape[-2] == 1
 
 
@@ -392,7 +393,7 @@ def test_terminal_only_raw_statistics_and_traces_match_unprojected_inputs(
     np.testing.assert_array_equal(actual[2], expected[2])
 
 
-def test_program_herald_wait_terminal_matches_conditional_markov_prediction(
+def test_program_herald_terminal_preserves_given_conditional_populations(
     projection_environment: tuple[SimulationEnvironment, SingleFluxoniumSource],
 ):
     env, source = projection_environment
@@ -400,36 +401,35 @@ def test_program_herald_wait_terminal_matches_conditional_markov_prediction(
     program.acquire(env.soc, progress=False)
     request = env.soc.binding.rounds[0]
     prepared = source.prepare(request.acquire, source.snapshot())
-    projection = prepared.raw.readout
+    projection = expect_chain(prepared.raw.readout)
     facts = source.model_facts(source.snapshot())
-    rate = facts.readout.rates_per_ns
-    generator = rate - np.diag(rate.sum(axis=0))
-    plan = source.plan_template(
-        source.snapshot(),
-        request.acquire.templates[0],
-        time_base=request.acquire.time_base,
-    )
-    elapsed = plan.batch.end_ns[0] - plan.projective_reads[0][0].start_ns
-    transition = expm(generator * elapsed).T
-    weights = projection.weights.reshape(-1, 2)[0]
+    transition = np.eye(2)
+    weights = projection.initial
     np.testing.assert_allclose(
         weights, np.diag(facts.source.initial_density).real, atol=1e-9
     )
-    np.testing.assert_allclose(
-        projection.populations[0].reshape(-1, 2, 2)[0], np.eye(2), atol=1e-9
-    )
-    np.testing.assert_allclose(
-        projection.populations[1].reshape(-1, 2, 2)[0], transition, atol=1e-7
-    )
+    np.testing.assert_allclose(projection.transitions[0], transition, atol=1e-7)
     result = source.execute(request)
     if not isinstance(result, IntegratedRound):
         raise AssertionError("integrated acquisition must retain joint counts")
-    joint = result.statistics.state_counts.reshape(2, 2) / request.acquire.reps
-    np.testing.assert_allclose(joint, weights[:, None] * transition, atol=0.025)
+    centers = prepared.channel.conditional.sums[0]
+    channel = result.statistics.channels[0]
+    categories = np.argmin(
+        np.linalg.norm(
+            channel.conditional_sums[:, :, None, :] - centers[:, None, :, :], axis=-1
+        ),
+        axis=-1,
+    )
+    for event, marginal in enumerate((weights, weights @ transition)):
+        observed = np.bincount(
+            categories[event], weights=result.statistics.state_counts, minlength=2
+        )
+        np.testing.assert_allclose(
+            observed / request.acquire.reps, marginal, atol=0.025
+        )
     raw = program.get_raw()
     if raw is None:
         raise AssertionError("completed program must retain physical shots")
-    centers = prepared.channel.conditional.sums[0]
     shots = np.asarray(raw[0]).reshape(-1, 2, 2)
     states = np.argmin(
         np.linalg.norm(shots[:, :, None, :] - centers[None], axis=-1), axis=-1

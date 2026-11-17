@@ -17,41 +17,24 @@ if TYPE_CHECKING:
     from zcu_tools.resources.context.library import LibrarySnapshot
 
 
-class SavedPoint(BaseModel):
-    """A persisted destination within an entry.
+class DocumentSetRef(BaseModel):
+    """A global or point document set's persisted location, not a writable handle.
 
-    kind is the JSON discriminator, always saved_point.
-    entry_name is ResultEntry.result_path.name within the currently opened result root.
-    point is the entry owner's validated single-segment point label.
-    This value carries no selection generation or writable handle. Commands
-    validate entry membership and the label through the owning ResultEntry.
+    entry_name is ResultEntry.result_path.name in the currently opened Result
+    root, not a path or UUID. point is the owner's single-segment point label;
+    None (the default) identifies global documents without selecting a point.
+    Commands validate entry membership and label through ResultEntry. This
+    frozen value carries no session selection generation or resource capability.
+    Extra fields and values outside the declared strict types are rejected.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
 
-    kind: Literal["saved_point"] = "saved_point"
     entry_name: str
-    point: str
+    point: str | None = None
 
 
-class SavedEntry(BaseModel):
-    """The entry-level global document set in the opened Result root.
-
-    entry_name is ResultEntry.result_path.name, not a path or UUID.
-    kind identifies this internal target as saved_entry. point is always None:
-    this destination does not select or create a point. Commands validate
-    entry membership through ResultEntry before reading or writing resources.
-    """
-
-    model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
-
-    kind: Literal["saved_entry"] = "saved_entry"
-    entry_name: str
-    point: None = None
-
-
-ContextTarget: TypeAlias = SavedEntry | SavedPoint
-ContextSourceKind: TypeAlias = Literal["setup", "point", "module_cfg"]
+ContextSourceKind: TypeAlias = Literal["global", "point", "module_cfg"]
 
 
 @dataclass(frozen=True)
@@ -185,13 +168,6 @@ class WorkingPointInfo:
 
 
 @dataclass(frozen=True)
-class PointUseRequest:
-    """Select label, a safe single path segment, in the currently opened entry."""
-
-    label: str
-
-
-@dataclass(frozen=True)
 class CommandOrigin:
     """Frontend attribution, exactly gui or mcp.
 
@@ -260,7 +236,7 @@ class PointBindingError(RuntimeError):
 class ContextSource:
     """A bound persistent source and its last published health diagnostic.
 
-    document is setup, point, or module_cfg. path is its absolute owner path.
+    document is global, point, or module_cfg. path is its absolute owner path.
     fault is None after successful opening/refresh, not a guarantee about disk.
     """
 
@@ -274,7 +250,7 @@ class ContextSourceBinding:
     """Internal session source identity and ordered persistent sources.
 
     binding_id is the positive session-local ID allocated on installation.
-    sources is ordered setup, point, module_cfg, omitting unbound documents.
+    sources is ordered global, point, module_cfg, omitting unbound documents.
     This ID is for source facts/watcher routing, not a read/write target.
     """
 

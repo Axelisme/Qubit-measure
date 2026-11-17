@@ -1,5 +1,5 @@
 # tolerated(file-size): Entry/point installation, cached captures and inactive reloads
-# share the same entry/setup/point/library/aliases handles and publication transaction.
+# share the same global/active document sets and publication transaction.
 """Owner-thread entry/point bindings and fixed session parameter reads."""
 
 from __future__ import annotations
@@ -18,13 +18,12 @@ from zcu_tools.gui.session.aliases import AliasRow, AliasSnapshot, AliasTable
 from zcu_tools.gui.session.context_types import (
     ContextSource,
     ContextSourceBinding,
+    DocumentSetRef,
     EntryInfo,
     FileRevision,
     FileSyncStatus,
     LibraryChange,
     PointBindingError,
-    SavedEntry,
-    SavedPoint,
     WorkingPointInfo,
 )
 from zcu_tools.gui.session.events import (
@@ -34,9 +33,14 @@ from zcu_tools.gui.session.events import (
     MdChangedPayload,
     MlChangedPayload,
 )
+from zcu_tools.gui.session.parameters import DocumentSet
 from zcu_tools.gui.session.services.context_writeback import ContextWritebackTarget
 from zcu_tools.gui.session.services.file_sync import FileSync
-from zcu_tools.gui.session.types import ContextReadiness, ParameterContext, RoleBinding
+from zcu_tools.gui.session.types import (
+    ContextReadiness,
+    DocumentSetCapture,
+    RoleBinding,
+)
 from zcu_tools.gui.session.value_lookup import (
     MissingValue,
     ScalarValue,
@@ -46,7 +50,6 @@ from zcu_tools.gui.session.value_lookup import (
     resolve_value_ref,
 )
 from zcu_tools.resources.context.library import ModuleLibrary
-from zcu_tools.resources.document_store import DocumentRevision
 from zcu_tools.resources.entry import (
     DestinationExistsError,
     ResultEntry,
@@ -56,12 +59,12 @@ from zcu_tools.resources.entry import (
     source_path,
     validate_path_segment,
 )
-from zcu_tools.resources.entry.aliases import EntryAliases
+from zcu_tools.resources.entry.aliases import AliasFile, EntryAliases
 from zcu_tools.resources.entry.ledger_models import JsonObject
 from zcu_tools.resources.entry.schema import (
     ParameterDocument,
 )
-from zcu_tools.resources.entry.storage import StorageBinding
+from zcu_tools.resources.entry.storage import StorageBinding, capture_storage
 from zcu_tools.resources.entry.writeback import (
     LibraryUpdate,
     ModuleWriteback,
@@ -80,15 +83,12 @@ if TYPE_CHECKING:
     from zcu_tools.format_version import YamlMap, YamlValue
     from zcu_tools.gui.event_bus import BaseEventBus
     from zcu_tools.gui.session.context_types import (
-        ContextTarget,
         PointCreateRequest,
-        PointUseRequest,
     )
     from zcu_tools.gui.session.state import SessionState
     from zcu_tools.gui.session.types import SessionEnv
     from zcu_tools.resources.entry import (
-        PointView,
-        SetupView,
+        ParameterView,
     )
     from zcu_tools.resources.entry.ledger import RecordsLedger
 
@@ -129,15 +129,11 @@ class ContextService:
         self._values = values if values is not None else state.session_env.values
         self._entry: ResultEntry | None = None
         self._entry_info: EntryInfo | None = None
-        self._setup: SetupView | None = None
-        self._point: PointView | None = None
-        self._library: ModuleLibrary | None = None
-        self._entry_library: ModuleLibrary | None = None
-        self._entry_aliases = AliasSnapshot(AliasTable())
+        self._global_set: DocumentSet | None = None
+        self._active_set: DocumentSet | None = None
         self._points: tuple[WorkingPointInfo, ...] = ()
         self._source_binding: ContextSourceBinding | None = None
         self._binding_id = 0
-        self._aliases = AliasSnapshot(AliasTable())
         self._file_sync = FileSync(
             bus, installed=self.get_installed_file_revisions, install=self._reload_file
         )
@@ -147,7 +143,7 @@ class ContextService:
     def install_entry(self, entry: ResultEntry) -> EntryInfo:
         """Install an opened entry's global document set without selecting a point.
 
-        Prepare cached setup content, global library/aliases, entry storage,
+        Prepare cached global content, global library/aliases, entry storage,
         point summaries and assets before publication. Each bad point becomes
         an unavailable row. Alias syntax/content faults remain lazy in captures;
         other preparation failures retain the old binding and any created entry.
@@ -156,39 +152,37 @@ class ContextService:
         SoC, device and predictor capabilities remain with their own owners.
         """
         self._owner.assert_owner()
-        setup = entry.setup
+        global_parameters = entry.parameters()
         points = self._load_points(entry)
         assets = self._bind_assets(entry.database_path / "arb_waveforms")
-        library = entry.module_library(assets=assets)
-        parameters = ParameterContext.from_entry(
-            entry, library, SavedEntry(entry_name=entry.result_path.name)
+        library = entry.library(assets=assets)
+        documents = DocumentSet(global_parameters, library, entry.aliases())
+        parameters = DocumentSetCapture.from_set(
+            documents,
+            target=DocumentSetRef(entry_name=entry.result_path.name),
+            storage=capture_storage(global_parameters),
         )
-        aliases = AliasSnapshot.from_read(entry.read_aliases())
         info = EntryInfo(
             entry.result_path.name,
             entry.result_path,
             entry.database_path,
         )
         sources = (
-            ContextSource("setup", source_path(setup), None),
+            ContextSource("global", source_path(global_parameters), None),
             ContextSource("module_cfg", library.source_path, None),
         )
         self._entry = entry
         self._entry_info = info
-        self._setup = setup
-        self._point = None
-        self._library = library
-        self._entry_library = library
-        self._entry_aliases = aliases
+        self._global_set = documents
+        self._active_set = documents
         self._points = points
-        self._aliases = aliases
         self._publish(parameters, sources, ContextReadiness.GLOBAL, active_label=None)
         return info
 
     def get_source_binding(self) -> ContextSourceBinding | None:
         """Return detached cached persistent sources, or None without an opened entry.
 
-        GLOBAL binds setup and global library. POINT retains setup and binds
+        GLOBAL binds global parameters and library. POINT retains global parameters and binds
         the selected point and its library. All sources change in one publication.
 
         This internal source ID is for facts/refresh, never part of read targets.
@@ -205,17 +199,7 @@ class ContextService:
         previous installed versions.
         """
         self._owner.assert_owner()
-        active = self._point if self._point is not None else self._setup
-        if active is None or self._library is None or self._aliases.revision is None:
-            return ()
-        parameters = document_revision(active)
-        library = self._library.document_revision
-        aliases = self._aliases.revision
-        return (
-            FileRevision("parameters", parameters.path, parameters.revision),
-            FileRevision("library", library.path, library.revision),
-            FileRevision("aliases", aliases.path, aliases.revision),
-        )
+        return () if self._active_set is None else self._active_set.revisions()
 
     def get_installed_file_revisions(self) -> tuple[FileRevision, ...]:
         """Return cached active versions, then entry versions when a point is active.
@@ -228,20 +212,11 @@ class ContextService:
         """
         self._owner.assert_owner()
         active = self.get_file_revisions()
-        if self._point is None:
+        if self._active_set is self._global_set:
             return active
-        if self._setup is None or self._entry_library is None:
-            raise RuntimeError("Installed entry resources disappeared")
-        aliases = self._entry_aliases.revision
-        if aliases is None:
-            raise RuntimeError("Installed entry aliases have no owner revision")
-        parameters = document_revision(self._setup)
-        library = self._entry_library.document_revision
-        return active + (
-            FileRevision("parameters", parameters.path, parameters.revision),
-            FileRevision("library", library.path, library.revision),
-            FileRevision("aliases", aliases.path, aliases.revision),
-        )
+        if self._global_set is None:
+            raise RuntimeError("Installed global documents disappeared")
+        return active + self._global_set.revisions()
 
     def get_file_sync_status(self) -> tuple[FileSyncStatus, ...]:
         """Return installed-file observations without I/O; switches clear them."""
@@ -266,52 +241,52 @@ class ContextService:
         self._file_sync.synchronize(admit_reload=admit_reload)
 
     def _reload_file(self, file: FileRevision) -> FileRevision:
-        if self._point is not None and file not in self.get_file_revisions():
+        if (
+            self._active_set is not self._global_set
+            and file not in self.get_file_revisions()
+        ):
             return self._reload_entry_file(file)
         parameters = self._published_parameters()
         target = parameters.target
-        active = self._point if self._point is not None else self._setup
-        if active is None or self._library is None or target is None:
+        documents = self._active_set
+        if documents is None or target is None:
             raise RuntimeError("Active document resources disappeared")
         if file.document == "aliases":
-            saved, revision = self._require_open_entry().load_aliases_with_revision(
-                point=target.point
-            )
+            alias_file = self._require_open_entry().aliases(target.point)
+            saved = alias_file.read().require_valid()
             candidate = AliasTable(
                 tuple(AliasRow(name, value) for name, value in saved.aliases.items())
             )
-            self._install_alias_rows(candidate, revision)
+            self._install_alias_rows(candidate, alias_file)
         else:
             if file.document == "parameters":
-                active.refresh(strict=True)
+                documents.parameters.refresh(strict=True)
             else:
-                self._library.refresh(strict=True)
-            current = ParameterContext(
-                point=parameter_content(active),
-                library=self._library.snapshot(),
-                target=parameters.target,
-                roles=None,
-                storage=parameters.storage,
+                documents.library.refresh(strict=True)
+            self._publish_write(
+                parameters.storage, parameter=file.document == "parameters"
             )
-            self._publish_write(current, parameter=file.document == "parameters")
         return next(
             item for item in self.get_file_revisions() if item.path == file.path
         )
 
     def _reload_entry_file(self, file: FileRevision) -> FileRevision:
         """Strictly install an inactive entry candidate without active content facts."""
-        if self._setup is None or self._entry_library is None:
+        documents = self._global_set
+        if documents is None:
             raise RuntimeError("Installed entry resources disappeared")
         if file.document == "parameters":
-            self._setup.refresh(strict=True)
+            documents.parameters.refresh(strict=True)
         elif file.document == "library":
-            self._entry_library.refresh(strict=True)
+            documents.library.refresh(strict=True)
         else:
-            saved, revision = self._require_open_entry().load_aliases_with_revision()
+            alias_file = self._require_open_entry().aliases()
+            saved = alias_file.read().require_valid()
             table = AliasTable(
                 tuple(AliasRow(name, value) for name, value in saved.aliases.items())
             )
-            self._entry_aliases = AliasSnapshot(table, revision)
+            documents.alias_file = alias_file
+            documents.aliases = AliasSnapshot(table, document_revision(alias_file))
         return next(
             item
             for item in self.get_installed_file_revisions()
@@ -352,45 +327,32 @@ class ContextService:
                 self._points = self._load_points(self._entry)
         return deepcopy(self._points)
 
-    def use_point(self, request: PointUseRequest) -> SavedPoint:
-        """Prepare point/library/assets/aliases, then install POINT and publish facts.
+    def use_point(self, point: str | None = None) -> DocumentSetRef:
+        """Select global documents for None/omitted, or the named saved point.
 
-        Load point-local aliases, including an empty table for a missing file.
-        No setup or preset fallback is used. Alias content/syntax errors are
-        captured with the observed bytes hash, not raised during selection.
-        Alias consumers raise that original error; concrete parameter/library
-        reads remain available. Other storage errors propagate before replacing
-        the binding or table.
+        Prepare parameters/library/assets/aliases before publishing the new
+        focus. Any saved label may be selected, not just the current focus.
+        Global selection opens a fresh entry handle and refreshes the point list.
+        Missing aliases give an empty table; no global/preset fallback is used.
+        Alias content/syntax errors are captured with the observed bytes hash
+        for lazy consumers, leaving concrete parameter/library reads available.
 
-        No opened entry raises FailedPreconditionError(no_entry). Preparation
-        failure retains the old binding. The returned target has no session
-        selection generation.
+        No opened entry raises FailedPreconditionError(no_entry). Missing point,
+        schema, source and I/O failures retain the previous binding, versions,
+        revisions and captures. The returned target has no selection generation.
         """
         self._owner.assert_owner()
+        if point is None:
+            fresh = self._fresh_entry()
+            self.install_entry(fresh)
+            return DocumentSetRef(entry_name=fresh.result_path.name)
         entry = self._require_open_entry()
-        point = entry.use_point(request.label)
-        parameters, library, sources, info, aliases = self._prepare_point(
-            entry, request.label, point
-        )
-        self._aliases = aliases
-        self._install_point(point, library, parameters, sources, info)
-        return SavedPoint(entry_name=entry.result_path.name, point=request.label)
+        view = entry.parameters(point)
+        parameters, documents, sources, info = self._prepare_point(entry, point, view)
+        self._install_point(documents, parameters, sources, info)
+        return DocumentSetRef(entry_name=entry.result_path.name, point=point)
 
-    def use_global(self) -> SavedEntry:
-        """Select the opened entry's current global documents without creating a point.
-
-        Prepare a fresh entry handle, parameters/library/assets/aliases and point
-        list before publishing GLOBAL with active_label=None. No entry raises
-        FailedPreconditionError(no_entry). Schema, source and I/O failures retain
-        the previous published binding, versions and captures. Alias content
-        errors are captured for lazy alias consumers, as in use_point.
-        """
-        self._owner.assert_owner()
-        fresh = self._fresh_entry()
-        self.install_entry(fresh)
-        return SavedEntry(entry_name=fresh.result_path.name)
-
-    def new_point(self, request: PointCreateRequest) -> SavedPoint:
+    def new_point(self, request: PointCreateRequest) -> DocumentSetRef:
         """Create with the explicit inherit/empty/clone mode, then install POINT.
 
         No opened entry raises FailedPreconditionError(no_entry). Pass description
@@ -412,7 +374,7 @@ class ContextService:
                 str(exc), reason_code="point_label_invalid"
             ) from exc
         clone = (
-            entry.use_point(request.clone_from)
+            entry.parameters(request.clone_from)
             if request.clone_from is not None
             else None
         )
@@ -426,7 +388,7 @@ class ContextService:
         except DestinationExistsError as exc:
             raise InvalidInputError(str(exc)) from exc
         try:
-            parameters, library, sources, info, aliases = self._prepare_point(
+            parameters, documents, sources, info = self._prepare_point(
                 entry, request.label, point
             )
         except Exception as exc:
@@ -434,9 +396,8 @@ class ContextService:
             raise PointBindingError(
                 entry_name=entry.result_path.name, point=request.label
             ) from exc
-        self._aliases = aliases
-        self._install_point(point, library, parameters, sources, info)
-        return SavedPoint(entry_name=entry.result_path.name, point=request.label)
+        self._install_point(documents, parameters, sources, info)
+        return DocumentSetRef(entry_name=entry.result_path.name, point=request.label)
 
     def clear_context(self) -> None:
         """Publish EMPTY, clear entry/point, retaining non-parameter handles.
@@ -446,38 +407,28 @@ class ContextService:
         self._owner.assert_owner()
         self._entry = None
         self._entry_info = None
-        self._setup = None
-        self._point = None
-        self._library = None
-        self._entry_library = None
-        self._entry_aliases = AliasSnapshot(AliasTable())
+        self._global_set = None
+        self._active_set = None
         self._points = ()
-        self._aliases = AliasSnapshot(AliasTable())
         self._publish(None, (), ContextReadiness.EMPTY, active_label=None)
 
-    def inspect_document(self, *, setup: bool = False) -> ParameterDocument:
-        """Return the cached setup template or current point document without I/O.
+    def inspect_document(self, *, point: str | None = None) -> ParameterDocument:
+        """Return isolated installed global or focused point content without I/O.
 
-        setup=True reads the opened entry template; False reads the published
-        active GLOBAL or POINT document. No entry raises FailedPreconditionError.
-        Returned data is isolated; changing it does not write.
+        None selects global. A label must equal the focused point, otherwise
+        raise InvalidInputError(point_not_focused). No entry raises
+        FailedPreconditionError. Changing returned data does not write.
         """
         self._owner.assert_owner()
-        if setup:
-            if self._setup is None:
-                raise FailedPreconditionError(
-                    "No entry is opened", reason_code="no_entry"
-                )
-            return snapshot(self._setup)
-        return self.read_context().whole_document()
+        return self.read_context(point=point).whole_document()
 
     def add_component(
-        self, name: str, kind: str, fields: YamlMap, *, setup: bool = False
+        self, name: str, kind: str, fields: YamlMap, *, point: str | None = None
     ) -> None:
         """Add one component with working-unit fields using its registered kind.
 
-        setup=True edits only the opened entry template. Otherwise edit the
-        active GLOBAL or POINT documents in one resource transaction.
+        None edits global. A label must equal the focused point, otherwise
+        raise InvalidInputError(point_not_focused) before validation or I/O.
         Invalid names/kinds/required fields/duplicates leave content unchanged.
         Success on the current point installs its source before publishing one
         parameter change. A nonactive entry edit installs cache/revision before
@@ -488,50 +439,29 @@ class ContextService:
         self._owner.assert_owner()
         if self._entry is None:
             raise FailedPreconditionError("No entry is opened", reason_code="no_entry")
-        if setup and self._point is not None:
-            if self._setup is None:
-                raise FailedPreconditionError(
-                    "No setup is opened", reason_code="no_entry"
-                )
-            self._setup.add_component(name, kind=kind, **fields)
+        documents = self._documents_at(point)
+        if documents is None:
+            raise FailedPreconditionError("No entry is opened", reason_code="no_entry")
+        if documents is not self._active_set:
+            documents.parameters.add_component(name, kind=kind, **fields)
             self._bus.emit(EntryDocumentsChangedPayload())
             return
         parameters = self._published_parameters()
-        active = self._point if self._point is not None else self._setup
-        if active is None:
-            raise RuntimeError("Active parameter resource disappeared")
-        active.add_component(name, kind=kind, **fields)
+        documents.parameters.add_component(name, kind=kind, **fields)
         self._publish_write(
-            ParameterContext(
-                point=parameter_content(active),
-                library=parameters.library,
-                target=parameters.target,
-                roles=None,
-                storage=parameters.storage,
-            ),
+            parameters.storage,
             parameter=True,
         )
 
-    def set_setup_parameter(self, path: str, value: YamlValue) -> None:
-        """Edit an existing concrete setup field in working units.
-
-        Commit through the setup resource, never an existing point. No entry,
-        invalid path/schema, conflict and I/O failures propagate; no retry.
-        """
-        self._owner.assert_owner()
-        if self._setup is None:
-            raise FailedPreconditionError("No entry is opened", reason_code="no_entry")
-        entry = self._require_open_entry()
-        self.set_parameter(SavedEntry(entry_name=entry.result_path.name), path, value)
-
     def read_context(
-        self, *, aliases: Mapping[str, str] | None = None, setup: bool = False
-    ) -> ParameterContext:
+        self, *, aliases: Mapping[str, str] | None = None, point: str | None = None
+    ) -> DocumentSetCapture:
         """Capture installed documents/storage and all alias rows without I/O.
 
-        setup=True captures the entry set even with a selected point. False
-        captures the active set. Entry captures use the installed owner handles,
-        never disk candidates, and do not change selection or bypass pending.
+        point=None captures global documents. A label must equal the focused
+        point, otherwise InvalidInputError(point_not_focused) is raised before
+        reading sources. Captures use installed handles, never disk candidates,
+        and do not change selection or bypass pending.
 
         aliases maps temporary component/device names to authored rows for this
         capture only, retaining dependent links. Names need not exist in catalogs.
@@ -546,18 +476,20 @@ class ContextService:
         """
         self._owner.assert_owner()
         parameters = self._state.session_env.parameters
-        saved_aliases = self._aliases
-        if setup:
-            if self._entry is None or self._entry_library is None:
+        documents = self._documents_at(point)
+        saved_aliases = (
+            AliasSnapshot(AliasTable()) if documents is None else documents.aliases
+        )
+        if point is None:
+            if self._entry is None or documents is None:
                 raise FailedPreconditionError(
                     "No entry is opened", reason_code="no_context"
                 )
-            parameters = ParameterContext.from_entry(
-                self._entry,
-                self._entry_library,
-                SavedEntry(entry_name=self._entry.result_path.name),
+            parameters = DocumentSetCapture.from_set(
+                documents,
+                target=DocumentSetRef(entry_name=self._entry.result_path.name),
+                storage=capture_storage(documents.parameters),
             )
-            saved_aliases = self._entry_aliases
         if parameters is None:
             raise FailedPreconditionError(
                 "Select or create a working point first", reason_code="no_context"
@@ -567,39 +499,40 @@ class ContextService:
             table = table.with_override(alias, component)
         return parameters.bind_aliases(table.rows, {}, alias_error=saved_aliases.error)
 
-    def get_alias_rows(self, *, setup: bool = False) -> tuple[AliasRow, ...]:
+    def get_alias_rows(self, *, point: str | None = None) -> tuple[AliasRow, ...]:
         """Read installed authored rows without expansion or I/O.
 
-        setup=True selects the installed entry table, even with a selected point;
-        False selects the active table. Pending external candidates are not read.
+        None selects global. A label must equal the focused point, otherwise
+        raise InvalidInputError(point_not_focused). Pending candidates are not read.
         No entry returns empty rows. Invalid aliases raise their captured error.
         Missing files supply empty rows without fallback.
         """
         self._owner.assert_owner()
-        return (self._entry_aliases if setup else self._aliases).rows
+        documents = self._documents_at(point)
+        return () if documents is None else documents.aliases.rows
 
-    def _install_alias_rows(
-        self, candidate: AliasTable, revision: DocumentRevision | None = None
-    ) -> None:
-        previous = self._aliases.table.rows
-        had_error = self._aliases.error is not None
-        self._aliases = AliasSnapshot(candidate, revision)
-        if self._point is None:
-            self._entry_aliases = self._aliases
+    def _install_alias_rows(self, candidate: AliasTable, alias_file: AliasFile) -> None:
+        documents = self._active_set
+        if documents is None:
+            raise RuntimeError("Active document set disappeared")
+        previous = documents.aliases.table.rows
+        had_error = documents.aliases.error is not None
+        documents.alias_file = alias_file
+        documents.aliases = AliasSnapshot(candidate, document_revision(alias_file))
         if candidate.rows != previous or had_error:
             self._state.version.bump("context")
             self._bus.emit(AliasesChangedPayload(rows=candidate.rows))
 
     def apply_alias_rows(
-        self, rows: tuple[AliasRow, ...], *, setup: bool = False
+        self, rows: tuple[AliasRow, ...], *, point: str | None = None
     ) -> None:
-        """Validate and atomically save rows to the active aliases.yaml.
+        """Validate and atomically save rows to the chosen aliases.yaml.
 
         Runs on the owner thread. Without an opened entry raise
-        FailedPreconditionError(no_context) before validation or I/O. GLOBAL
-        writes entry aliases; POINT writes only the selected point's aliases.
-        setup=True always writes entry aliases, updating its installed cache and
-        revision without changing an active point or existing captures.
+        FailedPreconditionError(no_context) before validation or I/O. None writes
+        global aliases. A label must equal the focused point,
+        otherwise raise InvalidInputError(point_not_focused) before validation
+        or I/O. Global writes do not change an active point or existing captures.
         Validate syntax/order, save, then install the exact revision and publish
         changed rows. InvalidInputError(alias_invalid) and storage errors retain
         rows, versions and the old file. Identical active rows save without an
@@ -609,28 +542,30 @@ class ContextService:
         overwriting it. No ledger or other document is written.
         """
         self._owner.assert_owner()
-        label = None if setup else self._state.session_env.active_label
         if self._entry is None:
             raise FailedPreconditionError(
                 "Open an entry first", reason_code="no_context"
             )
+        documents = self._documents_at(point)
         candidate = AliasTable(rows)
-        installed = self._entry_aliases if setup else self._aliases
+        if documents is None:
+            raise RuntimeError("Installed documents disappeared")
+        installed = documents.aliases
         if installed.revision is not None and installed.revision.revision is None:
             self.check_file_revision(
                 FileRevision("aliases", installed.revision.path, None)
             )
-        revision = self._entry.save_aliases(
-            EntryAliases(aliases={row.alias: row.value for row in candidate.rows}),
-            point=label,
+        alias_file = documents.alias_file
+        revision = alias_file.save(
+            EntryAliases(aliases={row.alias: row.value for row in candidate.rows})
         )
-        if setup and self._point is not None:
-            self._entry_aliases = AliasSnapshot(candidate, revision)
+        if documents is not self._active_set:
+            documents.aliases = AliasSnapshot(candidate, revision)
             self._bus.emit(EntryDocumentsChangedPayload())
         else:
-            self._install_alias_rows(candidate, revision)
+            self._install_alias_rows(candidate, alias_file)
 
-    def capture_storage(self, parameters: ParameterContext) -> StorageBinding:
+    def capture_storage(self, parameters: DocumentSetCapture) -> StorageBinding:
         """Return historical storage for a fixed capture on the owner sequence.
 
         Current entry and point are not read. Source faults propagate;
@@ -641,28 +576,36 @@ class ContextService:
         return parameters.capture_storage()
 
     def read_target(
-        self, target: ContextTarget, *, roles: RoleBinding | None = None
-    ) -> ParameterContext:
+        self, target: DocumentSetRef, *, roles: RoleBinding | None = None
+    ) -> DocumentSetCapture:
         """Read current values at a fixed target without changing selection.
 
-        SavedEntry opens independent global views; SavedPoint opens independent
-        point/library views. Both may read files in the currently opened entry.
+        target.point=None reads global parameters/library; a label reads that
+        point's independent views in the currently opened entry.
         Supplied role names stay fixed. Missing required parameter documents,
         cross-entry, schema, source and I/O failures propagate. This read publishes
-        no versions or events and does not follow live alias rows.
+        no versions or events. It opens only parameters/library, never aliases,
+        and does not follow live alias rows.
         """
         self._owner.assert_owner()
         entry = self._require_write_target(target)
         assets = self._bind_assets(entry.database_path / "arb_waveforms")
-        library = entry.module_library(target.point, assets=assets)
-        if target.point is None:
-            fresh = self._fresh_entry()
-            return ParameterContext.from_entry(fresh, library, target, roles=roles)
-        point = entry.use_point(target.point)
-        return ParameterContext.from_point(point, library, target, roles=roles)
+        library = entry.library(target.point, assets=assets)
+        parameters = (
+            self._fresh_entry().parameters()
+            if target.point is None
+            else entry.parameters(target.point)
+        )
+        return DocumentSetCapture(
+            point=parameter_content(parameters),
+            library=library.snapshot(),
+            target=target,
+            roles=roles,
+            storage=capture_storage(parameters),
+        )
 
     def read_record(
-        self, target: ContextTarget, component: str, run_id: str
+        self, target: DocumentSetRef, component: str, run_id: str
     ) -> JsonObject | None:
         """Read one run's latest entry JSONL record without changing selection.
 
@@ -678,7 +621,7 @@ class ContextService:
 
     def apply_writeback(
         self,
-        target: ContextTarget,
+        target: DocumentSetRef,
         items: tuple[WritebackItem, ...],
         *,
         evidence: WritebackEvidence,
@@ -688,8 +631,8 @@ class ContextService:
         Validate opened entry membership and the captured parameter resource
         before append. Resource load errors propagate. The executor appends
         accepted, then commits one parameter group, one library group and
-        individual records, preserving each group's order. SavedEntry writes
-        global files; SavedPoint writes that point's files even when another
+        individual records, preserving each group's order. point=None writes
+        global files; a label writes that point's files even when another
         scope is selected. Parameter/library setters require an opened context,
         not a point selection. Record validation belongs to its resource owner.
         Each committed document publishes once; detached writes never select it.
@@ -706,7 +649,7 @@ class ContextService:
         if target.point is None:
             self._fresh_entry()
         else:
-            entry.use_point(target.point)
+            entry.parameters(target.point)
         return apply_writeback(
             items,
             target=ContextWritebackTarget(self, target, entry),
@@ -715,7 +658,7 @@ class ContextService:
 
     def set_parameter(
         self,
-        target: ContextTarget,
+        target: DocumentSetRef,
         path: str,
         value: YamlValue,
         *,
@@ -723,13 +666,13 @@ class ContextService:
     ) -> YamlValue:
         """Write one concrete path and return its detached actual working-unit value.
 
-        Use the captured target, not the current selection. SavedEntry writes
-        entry parameters; SavedPoint writes one point file in the opened entry.
+        Use the captured target, not the current selection. point=None writes
+        global parameters; a label writes one point file in the opened entry.
         A nonselected target stays unselected.
         metadata=None keeps the path's opaque metadata; a mapping replaces it
         in the same commit ({} clears). No source, time or event is added.
         Active-target success publishes its content fact after resource commit.
-        A nonactive SavedEntry write updates installed cache/revision and emits
+        A nonactive global write updates installed cache/revision and emits
         EntryDocumentsChangedPayload without changing active content or captures.
         Cross-entry, missing entry, path/schema/metadata
         representation, conflict and I/O failures propagate without publishing
@@ -738,7 +681,7 @@ class ContextService:
         return self.set_parameters(target, (ParameterUpdate(path, value, metadata),))[0]
 
     def set_parameters(
-        self, target: ContextTarget, updates: tuple[ParameterUpdate, ...]
+        self, target: DocumentSetRef, updates: tuple[ParameterUpdate, ...]
     ) -> tuple[YamlValue, ...]:
         """Commit nonempty ordered point updates in one edit and publish once.
 
@@ -754,13 +697,13 @@ class ContextService:
         entry = self._require_write_target(target)
         parameters = self._published_parameters()
         if target.point is None:
-            if self._setup is None:
+            if self._global_set is None:
                 raise RuntimeError("Installed entry parameters disappeared")
-            point = self._setup
-        elif target == parameters.target and self._point is not None:
-            point = self._point
+            point = self._global_set.parameters
+        elif target == parameters.target and self._active_set is not None:
+            point = self._active_set.parameters
         else:
-            point = entry.use_point(target.point)
+            point = entry.parameters(target.point)
         actual = commit_parameter_updates(point, updates)
         document = snapshot(point)
         self._points = tuple(
@@ -774,33 +717,23 @@ class ContextService:
                 self._bus.emit(EntryDocumentsChangedPayload())
             return actual
         self._publish_write(
-            ParameterContext(
-                point=parameter_content(point),
-                library=parameters.library,
-                target=target,
-                roles=None,
-                storage=(
-                    replace(
-                        parameters.storage, description=document.general.description
-                    )
-                    if parameters.storage is not None
-                    else None
-                ),
-            ),
+            replace(parameters.storage, description=document.general.description)
+            if parameters.storage is not None
+            else None,
             parameter=True,
         )
         return actual
 
     def set_module(
         self,
-        target: ContextTarget,
+        target: DocumentSetRef,
         path: str,
         value: ModuleSpec,
     ) -> YamlMap:
         """Write a module and return its detached actual cached Spec mapping.
 
         Target/publication/error rules match set_parameter.
-        SavedPoint uses one library transaction without source records.
+        Use one library transaction without source records.
         No lowering, materialization, accepted event production or batch receipt.
         """
         return self.set_modules(target, (LibraryUpdate(ModuleWriteback(path, value)),))[
@@ -809,7 +742,7 @@ class ContextService:
 
     def set_waveform(
         self,
-        target: ContextTarget,
+        target: DocumentSetRef,
         path: str,
         value: WaveformSpec,
     ) -> YamlMap:
@@ -823,7 +756,7 @@ class ContextService:
         )[0]
 
     def set_modules(
-        self, target: ContextTarget, updates: tuple[LibraryUpdate, ...]
+        self, target: DocumentSetRef, updates: tuple[LibraryUpdate, ...]
     ) -> tuple[YamlMap, ...]:
         """Commit a nonempty mixed module/waveform group and publish once.
 
@@ -840,25 +773,18 @@ class ContextService:
         parameters = self._published_parameters()
         handle = self._write_library(entry, target, parameters)
         actual = commit_library_updates(handle, updates)
-        library = handle.snapshot()
         if target != parameters.target:
             if target.point is None:
                 self._bus.emit(EntryDocumentsChangedPayload())
             return actual
         self._publish_write(
-            ParameterContext(
-                point=parameters.document(),
-                library=library,
-                target=target,
-                roles=None,
-                storage=parameters.storage,
-            ),
+            parameters.storage,
             parameter=False,
         )
         return actual
 
     def apply_library_change(
-        self, parameters: ParameterContext, change: LibraryChange
+        self, parameters: DocumentSetCapture, change: LibraryChange
     ) -> None:
         """Apply one structure command to the captured target in one transaction.
 
@@ -868,8 +794,8 @@ class ContextService:
         keys stay keys. Rename moves Spec and sources; delete does not cascade
         references. Replace checks source/destination and commits relocation
         plus value in one library transaction.
-        Same-entry nonselected SavedPoint writes do not select or publish.
-        SavedEntry uses the installed entry library handle. A nonactive entry
+        Same-entry nonselected point writes do not select or publish.
+        Global writes use the installed global library handle. A nonactive global
         commit updates its cache/revision before EntryDocumentsChangedPayload;
         the active point, version and existing captures remain unchanged.
         Cross-entry/missing entry/Spec family/source/conflict/I/O failures
@@ -891,15 +817,8 @@ class ContextService:
             if target.point is None:
                 self._bus.emit(EntryDocumentsChangedPayload())
             return
-        library = handle.snapshot()
         self._publish_write(
-            ParameterContext(
-                point=selected.document(),
-                library=library,
-                target=parameters.target,
-                roles=None,
-                storage=selected.storage,
-            ),
+            selected.storage,
             parameter=False,
         )
 
@@ -912,6 +831,14 @@ class ContextService:
         """
         self._owner.assert_owner()
         return self._require_entry(entry_name).ledger
+
+    def _documents_at(self, point: str | None) -> DocumentSet | None:
+        if point is not None and point != self.current_point_label():
+            raise InvalidInputError(
+                f"Point {point!r} is not the focused point",
+                reason_code="point_not_focused",
+            )
+        return self._global_set if point is None else self._active_set
 
     def _require_open_entry(self) -> ResultEntry:
         if self._entry is None:
@@ -935,11 +862,11 @@ class ContextService:
             )
         return entry
 
-    def _require_write_target(self, target: ContextTarget) -> ResultEntry:
+    def _require_write_target(self, target: DocumentSetRef) -> ResultEntry:
         """Reject cross-entry targets before opening a resource."""
         return self._require_entry(target.entry_name)
 
-    def _published_parameters(self) -> ParameterContext:
+    def _published_parameters(self) -> DocumentSetCapture:
         """Read the carrier without requiring unrelated selected-source data."""
         parameters = self._state.session_env.parameters
         if parameters is None:
@@ -949,17 +876,26 @@ class ContextService:
         return parameters
 
     def _write_library(
-        self, entry: ResultEntry, target: ContextTarget, parameters: ParameterContext
+        self, entry: ResultEntry, target: DocumentSetRef, parameters: DocumentSetCapture
     ) -> ModuleLibrary:
         """Use installed entry/active handles, otherwise open a detached point handle."""
-        if target.point is None and self._entry_library is not None:
-            return self._entry_library
-        if target == parameters.target and self._library is not None:
-            return self._library
-        return entry.module_library(target.point)
+        if target.point is None and self._global_set is not None:
+            return self._global_set.library
+        if target == parameters.target and self._active_set is not None:
+            return self._active_set.library
+        return entry.library(target.point)
 
-    def _publish_write(self, parameters: ParameterContext, *, parameter: bool) -> None:
+    def _publish_write(
+        self, storage: StorageBinding | None, *, parameter: bool
+    ) -> None:
         """Install a committed projection/version before its single content fact."""
+        documents = self._active_set
+        target = self._published_parameters().target
+        if documents is None or target is None:
+            raise RuntimeError("Active document resources disappeared")
+        parameters = DocumentSetCapture.from_set(
+            documents, target=target, roles=None, storage=storage
+        )
         self._state.set_context(replace(self._state.session_env, parameters=parameters))
         self._state.version.bump("context")
         payload = MdChangedPayload if parameter else MlChangedPayload
@@ -981,52 +917,49 @@ class ContextService:
         return tuple(points)
 
     def _prepare_point(
-        self, entry: ResultEntry, label: str, point: PointView
+        self, entry: ResultEntry, label: str, point: ParameterView
     ) -> tuple[
-        ParameterContext,
-        ModuleLibrary,
+        DocumentSetCapture,
+        DocumentSet,
         tuple[ContextSource, ...],
         WorkingPointInfo,
-        AliasSnapshot,
     ]:
-        if self._setup is None:
-            raise RuntimeError("Opened entry has no setup binding")
+        if self._global_set is None:
+            raise RuntimeError("Opened entry has no global binding")
         assets = self._bind_assets(entry.database_path / "arb_waveforms")
-        library = entry.module_library(label, assets=assets)
-        parameters = ParameterContext.from_point(
-            point,
-            library,
-            SavedPoint(entry_name=entry.result_path.name, point=label),
+        library = entry.library(label, assets=assets)
+        documents = DocumentSet(point, library, entry.aliases(label))
+        parameters = DocumentSetCapture.from_set(
+            documents,
+            target=DocumentSetRef(entry_name=entry.result_path.name, point=label),
+            storage=capture_storage(point),
         )
         sources = (
-            ContextSource("setup", source_path(self._setup), None),
+            ContextSource("global", source_path(self._global_set.parameters), None),
             ContextSource("point", source_path(point), None),
             ContextSource("module_cfg", library.source_path, None),
         )
         info = WorkingPointInfo(label, point.description or "")
-        aliases = AliasSnapshot.from_read(entry.read_aliases(point=label))
-        return parameters, library, sources, info, aliases
+        return parameters, documents, sources, info
 
     def _install_point(
         self,
-        point: PointView,
-        library: ModuleLibrary,
-        parameters: ParameterContext,
+        documents: DocumentSet,
+        parameters: DocumentSetCapture,
         sources: tuple[ContextSource, ...],
         info: WorkingPointInfo,
     ) -> None:
         points = {cached.label: cached for cached in self._points}
         points[info.label] = info
         self._points = tuple(points[label] for label in sorted(points))
-        self._point = point
-        self._library = library
+        self._active_set = documents
         self._publish(
             parameters, sources, ContextReadiness.POINT, active_label=info.label
         )
 
     def _publish(
         self,
-        parameters: ParameterContext | None,
+        parameters: DocumentSetCapture | None,
         sources: tuple[ContextSource, ...],
         readiness: ContextReadiness,
         *,

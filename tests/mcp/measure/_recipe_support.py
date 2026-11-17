@@ -26,8 +26,8 @@ from zcu_tools.gui.form import FormEnv, FormPathError
 from zcu_tools.gui.form_adapter import Form, LogicalEdit
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.session.aliases import AliasRow, AliasTable
-from zcu_tools.gui.session.context_types import SavedPoint
-from zcu_tools.gui.session.types import ParameterContext
+from zcu_tools.gui.session.context_types import DocumentSetRef
+from zcu_tools.gui.session.types import DocumentSetCapture
 from zcu_tools.program.v2 import SweepCfg
 from zcu_tools.resources.context.library import (
     ComponentLibrary,
@@ -168,7 +168,7 @@ class LookbackGui:
                 },
             }
         )
-        parameters = ParameterContext(
+        parameters = DocumentSetCapture(
             point=ParameterDocument.model_construct(
                 format="zcu.parameter-container",
                 format_version="2.0",
@@ -192,7 +192,7 @@ class LookbackGui:
                     },
                 )
             ),
-            target=SavedPoint(entry_name="recipe-entry", point="working"),
+            target=DocumentSetRef(entry_name="recipe-entry", point="working"),
             roles=None,
         )
         table = AliasTable(

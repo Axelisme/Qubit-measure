@@ -65,12 +65,13 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "backward $alias.field links, or ordered lists of nonempty names/links. "
             "An empty value list is unbound. "
             "Syntax/order errors reject the whole table. An opened entry saves "
-            "the selected point aliases.yaml atomically before installing/publishing; "
-            "without a selected point, fails with no_context. "
+            "global aliases.yaml when focus is global, or the focused point aliases.yaml, "
+            "atomically before installing/publishing; "
+            "without an opened entry, fails with no_context. "
             "Storage failure preserves the old file/table. "
             "Returns {rows: [{alias, value}]} from the installed authored table, "
             "not proof of resolvability. For resolved rows read "
-            "context.snapshot(path='aliases'); that read still requires a point. "
+            "context.snapshot(path='aliases'); global is readable too. "
             "Requires holder; allowed during Run, whose fixed capture is unchanged. "
             "No dialog/focus, point, metadata or ledger writes; no hidden read/retry.",
             (
@@ -91,12 +92,12 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "context:h_context_set_parameter",
         MethodSpec(
             10.0,
-            "Set a concrete parameter path at the currently selected point through "
-            "the Inspect Set owner. Requires holder and a selected point; EMPTY "
+            "Set a concrete parameter path at the focused global or point target through "
+            "the Inspect Set owner. Global writes are supported. Requires holder and an opened entry; EMPTY "
             "fails with no_context before writes. value is a required non-null JSON "
             "YAML value; this method cannot write top-level null. No alias paths, "
-            "library edits, component creation or setup writes. Module bindings are "
-            "point values: path='MG12.module.readout', value='MG12.readout.mux_ro' "
+            "library edits or component creation. Module bindings are "
+            "parameter values: path='MG12.module.readout', value='MG12.readout.mux_ro' "
             "can fill a missing slot; writing the module mapping is also supported. "
             "Captures the current "
             "target and before once without I/O, then submits once with metadata "
@@ -175,7 +176,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "Read the published parameter context: {target, point, library, aliases}. "
             "aliases contains ordered {alias, value, resolved} rows; failed rows have "
             "resolved=null and error. All come from one fixed capture without kind checks. "
-            "target is the existing saved_point locator. "
+            "target is a global or point document-set locator: entry_name and point=null for global, or a point label. "
             "point and library are complete working-unit native documents: point includes "
             "components and metadata; library contains Specs without asset "
             "materialization. "

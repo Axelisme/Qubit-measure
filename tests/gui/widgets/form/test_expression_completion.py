@@ -13,8 +13,8 @@ from qtpy.QtCore import Qt
 from qtpy.QtWidgets import QApplication, QPushButton, QVBoxLayout, QWidget
 from zcu_tools.gui.form import Display, FormEnv, FormInput, FormModel, FormState
 from zcu_tools.gui.session.aliases import AliasRow, ResolvedAliasRow
-from zcu_tools.gui.session.context_types import SavedPoint
-from zcu_tools.gui.session.parameters import ParameterContext, RoleBinding
+from zcu_tools.gui.session.context_types import DocumentSetRef
+from zcu_tools.gui.session.parameters import DocumentSetCapture, RoleBinding
 from zcu_tools.gui.widgets.form import FormEditor
 from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
 from zcu_tools.resources.entry import ComponentSchema
@@ -37,7 +37,7 @@ class Qubit(ComponentSchema):
     wiring: dict[str, int] = {"channel": 2}
 
 
-class CountingContext(ParameterContext):
+class CountingContext(DocumentSetCapture):
     """Record public candidate reads while preserving real capture behaviour."""
 
     alias_reads: int = 0
@@ -65,7 +65,7 @@ def capture(alias: str = "qubit") -> CountingContext:
         library=LibrarySnapshot(
             ModuleLibraryDocument(format="zcu.module-library", format_version="2.0")
         ),
-        target=SavedPoint(entry_name="entry", point="working"),
+        target=DocumentSetRef(entry_name="entry", point="working"),
         roles=RoleBinding(
             None,
             {},
@@ -90,7 +90,7 @@ class CompletionForm(FormModel):
 class Host(QWidget):
     """Minimal visible host using editor Refresh and state/editor Reset replacement."""
 
-    def __init__(self, parameters: ParameterContext) -> None:
+    def __init__(self, parameters: DocumentSetCapture) -> None:
         super().__init__()
         self.next_capture = parameters
         self.env = FormEnv(parameters=parameters)

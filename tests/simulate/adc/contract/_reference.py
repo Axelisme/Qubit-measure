@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import numpy as np
-from zcu_tools.core.simulation import (
+from zcu_tools.simulate import adc
+from zcu_tools.simulate.boundary import (
     ChannelStatistics,
     RoundStatistics,
     SamplingIdentity,
 )
-from zcu_tools.simulate import adc
 
 
 def reference_statistics(

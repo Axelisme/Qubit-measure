@@ -60,7 +60,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.artifacts import LayoutPlanner
     from zcu_tools.gui.event_bus import BaseEventBus as EventBus
     from zcu_tools.gui.session.ports import ExclusionGate
-    from zcu_tools.gui.session.types import ParameterContext
+    from zcu_tools.gui.session.types import DocumentSetCapture
     from zcu_tools.plotting.plots import Plots
 
     from ..state import State
@@ -80,7 +80,7 @@ class _RunOperation:
     origin: CommandOrigin
     adapter_name: str
     storage: StorageBinding | None
-    parameters: ParameterContext | None
+    parameters: DocumentSetCapture | None
     stop_requested: threading.Event = field(default_factory=threading.Event)
     request_lock: threading.Lock = field(default_factory=threading.Lock)
 

@@ -10,7 +10,7 @@ Startup script 是定義 `startup(ctx)` 的可信 Python 檔。GUI 顯示後會�
 
 Entry 保存實驗參數與結果的工作範圍。開 entry 後，entry 層 parameters.yaml、library.yaml 與 aliases.yaml 就是作用中的 GLOBAL 文件組。選 point 後整組換成該 point 的文件，不逐名稱回退。Entry 文件同時是新 point 預設繼承的範本，之後修改不會同步改既有 point。複製規則見 [文件與 seed](../../lib/zcu_tools/resources/entry/README.md#文件與-seed)。Startup 只是操作這些資源的程式，不是 entry 的檔案格式。
 
-FTF 的 [startup.py](../kickstart/FTF/startup.py) 第一次會建立 `FTF` entry，讀取相鄰的 [entry-template.yaml](../kickstart/FTF/entry-template.yaml)，把元件加入 setup，建立並選取 `initial` point，最後保存該 point 的 aliases。範本不含 module library 或校準完成的量測輸入，建立成功不代表可以 Run。
+FTF 的 [startup.py](../kickstart/FTF/startup.py) 第一次會建立 `FTF` entry，讀取相鄰的 [entry-template.yaml](../kickstart/FTF/entry-template.yaml)，把元件加入 global，建立並選取 `initial` point，最後保存該 point 的 aliases。範本不含 module library 或校準完成的量測輸入，建立成功不代表可以 Run。
 
 ## 指定腳本啟動
 
@@ -74,9 +74,9 @@ Aliases 的 Value 欄接受具體名稱或前列 alias 的欄位連結，兩者�
 
 若要讓 `f1` 與 `qubit1` 指向同一元件，兩列都填具體名稱 `Q1`。不要填 `f1: $qubit1`，Aliases 不接受裸 alias 作為另一列的連結。`$qubit.resonator` 才是可接受的欄位連結，而且 `qubit` 必須排在 `resonator` 前面。這是 Aliases 的儲存語法，不是表單 expression 中裸 `$alias` 的求值語法。
 
-在 GUI 開啟 Inspect 的 Aliases 頁，Destination 選 Active documents，把 `qubit` 的 Value 改成 `Q2`，按 Enter 完成編輯。有效編輯會立即保存，沒有另一個 Apply 按鈕。`resonator` 會解析成 `R2`。重新 Open／Reset 後，flux 表單從 Q2 的 flux_dev 取得 `f2_bias`。`mux: MG12` 仍指向同一個 group，不隨 `qubit` 切換。元件的 source 欄位與表單的裝置名稱都不會連線或建立 device。
+在 GUI 開啟 Inspect 的 Aliases 頁，Destination 選 initial，把 `qubit` 的 Value 改成 `Q2`，按 Enter 完成編輯。有效編輯會立即保存，沒有另一個 Apply 按鈕。`resonator` 會解析成 `R2`。重新 Open／Reset 後，flux 表單從 Q2 的 flux_dev 取得 `f2_bias`。`mux: MG12` 仍指向同一個 group，不隨 `qubit` 切換。元件的 source 欄位與表單的裝置名稱都不會連線或建立 device。
 
-程式的 `apply_alias_rows(rows)` 與 Inspect 完成編輯都直接保存所選文件。GLOBAL 保存 entry 層 aliases.yaml，選了 initial 則保存 points/initial/aliases.yaml。Inspect 的 Entry template 固定編輯 entry 表，即使已選 point 也不改該 point。切到另一個 point 會載入另一張表，缺檔時是空表，不回退到 entry 表。未開 entry 時呼叫 `apply_alias_rows` 會以 no_context 拒絕，不暫存或自動建立 entry。
+程式的 `apply_alias_rows(rows, point=None)` 預設保存 global aliases.yaml。傳 `point="initial"` 才保存目前 focus 的 initial point；其他 label 會報錯。Inspect 的 Destination 選 Global 時固定編輯 global 表，即使已選 point 也不改該 point。切到另一個 point 會載入另一張表，缺檔時是空表，不回退到 entry 表。未開 entry 時呼叫 `apply_alias_rows` 會以 no_context 拒絕，不暫存或自動建立 entry。
 
 自訂 startup 可在開 entry 後直接設定 global alias，不必建立 point：
 
