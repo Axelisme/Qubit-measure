@@ -47,11 +47,36 @@ status: accepted
 
 具體物理模型放在新增的 `zcu_tools.simulators` package。使用者對此位置選項的原話是「A」。
 
+### 模擬器是封閉的子模塊，模型由使用方聲明
+
+`simulate` 不 import `zcu_tools` 的其他 package，其他 package 可以依賴它。
+前端與 environment 共用的 acquisition 邊界型別定義在 `simulate.boundary`，包括 `TimeBase`、`AcquireRequest`、`RoundRequest`、timeline 與 slot、signals、statistics 與 `ChargeDriveRequirement`。
+Numba 機器碼快取的根目錄由 `simulate` 自己解析，規則與 `utils.cache.user_cache_root` 相同，所以快取目錄不隨封閉搬家。
+`.importlinter` 的 `simulate-closed` forbidden contract 以 `zcu_tools.simulate` 為 source，明列其他所有頂層 package 與 `format_version` module，間接 import 也算，不設 `ignore_imports`。
+新增頂層 package 時，同步把它加進這份清單。
+C19 照舊禁止 `core` import `simulate`；舊位置 `core.simulation` 已刪除，不保留 re-export。
+
+`simulate` 提供聲明模型的介面，具體裝置模型由使用方經這個介面聲明。
+例：`simulate.evolution.ModelSource` 收使用方給的 `build: Callable[[FluxLevel], SecularModel]`，這是依賴注入。
+只收物理參數、不綁裝置佈局或接線的元件屬於 `simulate`，例如 `simulate.fluxonium.SingleFluxoniumModel`（`EJ`、`EC`、`EL`、DC flux、截斷、溫度）、`simulate.transmon` 與 `simulate.resonator_mode` 的 resonator 模態 builder。
+裝置怎麼組合屬於使用方，例如 FTF 的耦合與 resonator 配置、six 的路由；這些今天在 `simulators`，定位見〈模組定位〉。
+模擬器的量測工具與測試只依賴模擬器，收模型聲明當輸入；量真實模型時由使用方那側的入口注入，工具本身不 import 具體模型。
+
+邊界：測試用的合成模型（例如兩能階模型）是照介面聲明的範例，可以和 `simulate` 自己的測試放在一起。
+這條規則只管 `simulate` 的依賴方向與元件放置，不改 `simulators` 的定位，也不改〈使用者空間的依賴原則〉中入庫工具與測試不讀使用者環境參數的規則。
+
+2026-11-15，使用者說明 package 方向：「先告訴你，我預計將模擬器功能獨立出zcu_tools成獨立的package，後者依賴前者，目前作為封閉子模塊可以」。
+對模型放在哪一側，使用者答：「C，模擬器應該提供一個方法讓使用方透過繼承或是組合或是依賴注入的方式讓使用方聲明模型」。
+對 `SingleFluxoniumModel` 放哪，使用者答「1A」，即只收物理參數的元件留在模擬器。
+對原則與預測（量真實 FTF 時由使用方把模型聲明注入通用量測工具，工具不 import FTF），使用者答「A」。
+整包獨立成 package 是尚未建的方向，見[模擬器獨立成 package](draft/simulator-standalone-package.md)。
+討論與選項見[模擬器封閉成子模塊](../discussions/2026-11-15-simulator-closed-submodule.md)；搬遷的切票順序見[封閉 simulate 的搬遷順序](../discussions/2026-11-17-simulate-closure-expand-order.md)。
+
 ### 真實 acquire 與模擬邊界
 
 真實硬體的 acquire 路徑不執行任何模擬模組，包含 `simulate` 與 `program.v2.simulation` 的排程器。共用時間成本計算放在中性的 `program` 工具，不讓真實 acquire 為了估時走模擬排程。2026-10-26，使用者裁決：「我不太希望真实 acquire 还会走模拟的模块。」
 
-Charge admission 是 caller 對 generator 必須綁定 charge drive line 的明確要求。Caller 以 `simulate.boundary.ChargeDriveRequirement` 傳入診斷名稱與 generator index，不查 environment settings 或判斷 physical membership。名稱不是 role registry 的 key。Program 的模擬入口只把需求放進 `AcquireRequest.charge_requirements`；resources 的 replay 保存同一個 boundary record，不重做物理驗證。
+Charge admission 是 caller 對 generator 必須綁定 charge drive line 的明確要求。Caller 以 `simulate.boundary.ChargeDriveRequirement` 傳入診斷名稱與 generator index，不查 environment settings 或判斷 physical membership。名稱不是 role registry 的 key。Program 的模擬入口只把需求放進 `AcquireRequest.charge_requirements`；`simulators.replay` 保存同一個 boundary record，不重做物理驗證。
 
 知道實體線路的 environment 擁有驗證。Single-fluxonium 每次 acquire 都在 preflight 檢查 `drive_lines`，早於 waveform 建構、preparation reuse 與 evolution。Generator 已綁 flux 或 readout 也不能滿足 charge 需求。這不改變其他合法 fast-flux 事件的路由。
 
@@ -59,7 +84,11 @@ Charge admission 是 caller 對 generator 必須綁定 charge drive line 的明�
 
 2026-10-30，advisor 依使用者代理授權「可以按需排task，我授權你代理」裁定上述分工。Advisor 的技術裁定原話為：「驗證 owner 是 single_fluxonium 環境，在既有拒絕 unbound generator 的 preflight 位置一起檢查，早於任何 evolution。」
 
-跨 package 資料沿既有 program／experiment／resources → core 方向傳遞，由 C8、C9、C12、C19 維持分層與 core 的無狀態邊界。既有 `.importlinter` 的 `program-simulation-entry` contract 限制 program classes 直接依賴 simulation frontend、timeline 與 adapter internals，只能經模擬入口使用。這是依賴檢查，不是 runtime 隔離的完整保證；真實 acquire 不執行模擬模組仍須在審閱執行路徑時確認。不新增 contract。
+邊界 record 沿 program／experiment／simulators → `simulate.boundary` 的方向傳遞；`zcu_lab` 的 STIRAP 實驗也從這裡取 `ChargeDriveRequirement`。
+真實硬體上的實驗因此會 import `simulate.boundary` 的 record 型別；import 型別不執行模擬，`simulate` 的 package 初始化只載入 numpy。
+C8 與 C9 維持分層與無循環，C12 禁止 `simulate` 依賴有狀態模組，`simulate-closed` 禁止 `simulate` 依賴其他任何 `zcu_tools` package，見〈模擬器是封閉的子模塊，模型由使用方聲明〉。
+`program-simulation-entry` contract 限制 program classes 直接依賴 simulation frontend、timeline 與 adapter internals，只能經模擬入口使用。
+這些 contract 是依賴檢查，不是 runtime 隔離的完整保證；真實 acquire 不執行模擬模組，仍須在審閱執行路徑時確認。
 
 ### Mux PFB channel 查詢與 carrier selection 的 owner
 
@@ -311,7 +340,7 @@ Profile 列不作 family 去留證據。新增 Pareto 場景須同時加名稱�
 計時 owner 只接已備好的 session；paired caller 透過這個接縫取得同一組每筆身份。
 
 測試側 exclusion estimator 與唯一 caller 測試已退休，不保留替代 module 或相容層。
-其 tests → tools 反向 import 隨之移除，這不表示已封閉 `simulate`。
+其 tests → tools 反向 import 隨之移除。
 取捨與介面退休見 [量表 cache-only 遷移](../discussions/2026-11-16-family-pareto-cache-only.md) 與 [Exclusion estimator 退休](../discussions/2026-11-16-exclusion-estimator-retirement.md)。
 
 ### Lab 定義與組合根
@@ -455,6 +484,8 @@ Resonators 數不等於完整 N 時仍保留 module 與 slot 提案，省略逐 
 | 穩定工具與值型別 | `core`、`cfg_model`、`utils`、`analysis`、`simulate`、`plotting`、`datafile`、`progress_bar` | 任何模組都可以選用。工具之間可以互相依賴，但不得循環 |
 | 有狀態的能力模組 | `program`、`resources`、`device`、`qick_remote` | 彼此不得 import，只透過 `cfg_model` 的型別與 Protocol 溝通 |
 
+`simulate` 是例外：它不依賴任何其他 `zcu_tools` package，包括同列的穩定工具，由 `simulate-closed` 檢查，見〈模擬器是封閉的子模塊，模型由使用方聲明〉。
+
 依賴朝向穩定的一方：被很多模組依賴的模組必須少變，常加功能的模組不被別人依賴。純工具接收數值、回傳數值，不自己讀容器、硬體或檔案以外的狀態。
 
 Package 初始化不把專用依賴帶進無關工具。`analysis` 在選用 `fluxdep` 時才載入它，
@@ -545,6 +576,8 @@ Device API 的局部參數與錯誤細節留在 module 文件與 docstring。
 `composition-roots-above-framework-and-lab` 的 `layers` contract 約束 `apps : mcp_servers` > `zcu_lab` > `zcu_tools`。Lab 與 framework 不反向 import 任一組合根，不新增 `ignore_imports`。
 
 `lab-assembly-only` 的 `forbidden` contract 列出 assembly 以外的 lab 直接子模組，保護組合根與開發工具的直接 import 邊界；`migrations` 與使用者空間 `scripts` 不在 source_modules 中。
+
+`simulate-closed` 的 `forbidden` contract 以 `zcu_tools.simulate` 為 source，禁止它 import 其他所有頂層 package 與 `format_version` module，保護〈模擬器是封閉的子模塊，模型由使用方聲明〉。寫法與 [[0080]] 的 `datafile-standalone` 相同：明列清單，不新增 `ignore_imports`。
 
 `zcu_tools`、`zcu_lab`、離線 `migrations` 與 repo 的 `apps`、`mcp_servers`、`scripts`、`tools` 都是 import-linter 的 root packages。只為離線遷移存在的程式與對照表放在 `migrations/`，`zcu_lab` 與 `zcu_tools` 不 import 它，遷移完成後可整個刪除。使用者於 2026-10-14 裁定：「我自己會預期，我遷移完後刪除migrations就可以了」。三個 GUI 與 measure MCP 組合根各注入一個 lab 描述，兩個 analysis MCP 只注入 GUI module 名稱；framework 不反向載入使用者定義。Tests 的 lab 獨立性由 review 檢查 import，必要時以 grep `zcu_lab` 輔助，不新增 tests import contract。
 
