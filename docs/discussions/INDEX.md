@@ -31,8 +31,12 @@
 - 2026-11-16 [Acquire outcome 的作用域與編譯交接](2026-11-16-acquire-outcome-scope.md)：生命週期。Binding 以自身作用域判斷正常返回，mixin 只圈住 builder 計時，environment 接收同一結果物件。
 
 - 2026-11-16 [共用 acquire telemetry writer](2026-11-16-shared-acquire-telemetry.md)：資料契約。共用八欄必填 summary，writer 明列投影，FTF projection 只放 namespaced extras。
-- 2026-11-17 [Projective read 的輸出改成 Markov chain](2026-11-17-projection-markov-chain-readout.md)：資料格式。Single／six 輸出每點初始分佈與逐 read 轉移表，integrated 用逐態 flow counts，floor 改成逐點 identity 近似；FTF 不動，決策見 [ADR-0078](../adr/0078-evolution-module-boundary.md#projective-read-的-markov-chain-表示)。
 
+- 2026-11-17 [DOP853 加速路線的證據與未驗項](2026-11-17-dop853-speed-route-summary.md)：路線比較。指定 Gaussian 批次的多 worker 有配對收益，取樣前導共享潛力未知，載波固定原型精度不合格，GPU 全 14 組比較延期未量。
+
+- 2026-11-17 [DOP853 profile 場景的單列選取與 producer 接線](2026-11-17-dop853-profile-scenario-routing.md)：場景接線。Profile owner 先選名稱再建單一 Input，producer 附加宣告但不擴大 Pareto 預設選集，也不自動準備數值。
+
+- 2026-11-17 [Projective read 的輸出改成 Markov chain](2026-11-17-projection-markov-chain-readout.md)：資料格式。Single／six 輸出每點初始分佈與逐 read 轉移表，integrated 用逐態 flow counts，floor 改成逐點 identity 近似；FTF 不動，決策見 [ADR-0078](../adr/0078-evolution-module-boundary.md#projective-read-的-markov-chain-表示)。
 
 - 2026-11-17 [共用清單的 Pareto 選集與明確新增場景](2026-11-17-pareto-selection-and-scene-append.md)：選取契約。Pareto 自持預設名稱，明確更新才新增列，reference producer 只讀解所選單列。
 
@@ -52,6 +56,8 @@
 
 - 2026-11-16 [Floquet 的保留與價格重校](2026-11-16-floquet-kept-price.md)：保留或刪除。Committed 批次上 `floquet` 快 1.65–1.81 倍，保留並重校價格；三 family 排序等 `multitone_rwa` 修好。
 - 2026-11-16 [Floquet 的拒絕成本與單次 evolve 內的 frame 重用](2026-11-16-floquet-refusal-cost.md)：拒絕成本。既有拒絕條件提前，一次 evolve 內 exact-key frame 只建一次；不把拒絕機率算進價格，不跨 key 或跨 evolve 保留 frame，不做建 frame 前的 trace 下界。
+
+- 2026-11-15 [單段雙 tone benchmark 的量測邊界](2026-11-15-single-segment-benchmark-boundary.md)：量測邊界。專用 Engine factory 與既有 acquire 分開，模型與參考解仍由各自 owner 建立。
 
 - 2026-11-15 [模擬器測試與量測的分層](2026-11-15-simulator-test-measurement-layering.md)：分層。Kernel、dispatch、序列、前端與 environment 分開驗，退休 acquire e2e 量測，決策見 [ADR-0078](../adr/0078-evolution-module-boundary.md#模擬器的測試與量測分層不做-e2e)。
 

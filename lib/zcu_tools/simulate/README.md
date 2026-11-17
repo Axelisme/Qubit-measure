@@ -1,12 +1,15 @@
 # Numeric simulation tools
 
-**Last updated:** 2026-11-17, simulator-owned boundary and dependency closure
+**Last updated:** 2026-11-17, maintenance rules pointer
 
 **讀者：** framework-dev、agent。查閱數值模擬的責任邊界、快取契約與實測效能。
 
 `evolution` and `adc` are independent numeric tools. Neither imports QICK,
 DeviceManager, resources, GUI, YAML or an environment. The existing fluxonium
 prediction tools remain separate. ADR-0072 defines the package dependency rules.
+
+Before adding or changing a kernel, a guard, a price or a measurement scene, or
+optimizing speed, follow the [simulator maintenance rules](maintenance.md).
 
 ## Acquisition boundary
 
@@ -195,14 +198,18 @@ dressed transition frequency.
 Resonator loss keeps only energy-lowering matrix elements of a.
 Qubit loss projects each parent jump into the joint basis.
 Pure dephasing is zero.
-The model identity hashes all numeric inputs, port names, retained labels,
-cutoff and flux level, with canonical matrix bytes and sorted drive ports.
+The model identity uses public `simulate.evolution.digest` on all input fields,
+including numeric arrays, port names, retained labels, cutoff and flux level.
+Canonical JSON sorts mapping keys, so drive insertion order does not affect it.
 
 Use this builder only when the caller explicitly needs photons in the evolution
 space. `SingleFluxoniumModel` with `DispersiveResonator` instead supplies the
 dispersive shifts for a semiclassical cavity; it adds no photon states to
 evolution. The builder does not choose a model adapter, remove duplicate loss
 terms or connect readout and acquisition environments.
+`SingleFluxoniumModel.joint_resonator_model` supplies native-cutoff fluxonium
+inputs and intrinsic qubit T1 without duplicate Purcell or thermal-photon terms;
+see the [fluxonium adapter](fluxonium/README.md#modelpy--單-fluxonium-演化與讀出模型).
 
 ## ADC readout
 
