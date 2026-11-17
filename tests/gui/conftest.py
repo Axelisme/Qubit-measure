@@ -31,15 +31,18 @@ def plotting_state_policy(request: pytest.FixtureRequest) -> Iterator[None]:
     """Identify modules that leak shutdown state or live figure attachments."""
     from zcu_tools.gui.plotting import dump_plot_state, is_shutting_down
 
-    # Observe completed Qt deletion and Python cycles, not cleanup queued by
-    # the previous module or this module's owning fixtures.
-    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete.value)
-    gc.collect()
+    # GC and DeferredDelete only remove attachments, so equal snapshots need no collection.
     before = (is_shutting_down(), dump_plot_state().attached_figures)
+    if before != (False, ()):
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete.value)
+        gc.collect()
+        before = (is_shutting_down(), dump_plot_state().attached_figures)
     yield
-    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete.value)
-    gc.collect()
     after = (is_shutting_down(), dump_plot_state().attached_figures)
+    if after != before:
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete.value)
+        gc.collect()
+        after = (is_shutting_down(), dump_plot_state().attached_figures)
     assert after == before, (
         f"plotting state polluter: {request.node.path}; "
         f"before={before!r}; after={after!r}"
