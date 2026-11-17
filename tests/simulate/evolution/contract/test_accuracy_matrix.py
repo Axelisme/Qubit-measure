@@ -32,7 +32,6 @@ CASE_NAMES = (
 )
 KNOWN_EDGE_ERRORS = {
     "gate_cache": 0.00929654785179012,
-    "single_tone_rwa": 0.021802081728112876,
     "common_frame": 0.008066669226955314,
     "shaped_sambe": 0.0030915535285839482,
 }

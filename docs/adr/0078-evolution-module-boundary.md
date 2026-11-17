@@ -121,7 +121,7 @@ Solver 由清單與 solver 的顯式對應決定，不讀 tools metadata，也�
 2026-11-12，使用者裁定：「B，只要為了優化速度可以損失一點一致性，只要誤差在容許範圍」，並要求「應該已正確的物理演化為誤差參考，而不是當前實作，否則誤差會累計」。
 Dispatch 可以依量測歷史選擇不同 kernel，量測層用公開參數控制空歷史、沿用歷史與允許的 family，不以 monkeypatch 操作內部狀態。
 精度驗收以獨立的完整 Hamiltonian 參考解為準，不以當前或重構前輸出作真值，也不要求重構前後逐值一致。Density 最大絕對差與 population 等效 expected I/Q 誤差的目標均為 `2e-3`。
-可用的候選須逐一對參考解驗證。現行有四個 guard 邊緣案例超標，以 strict xfail 保留，不放寬誤差門檻。案例與限制見 [evolution README 的 kernel 表](../../lib/zcu_tools/simulate/evolution/README.md#kernel-summary)，環境 expected I/Q 驗收尚未交付。
+可用的候選須逐一對參考解驗證。現行有三個 guard 邊緣案例超標，以 strict xfail 保留，不放寬誤差門檻。案例與限制見 [evolution README 的 kernel 表](../../lib/zcu_tools/simulate/evolution/README.md#kernel-summary)，環境 expected I/Q 驗收尚未交付。
 算法數值集中在自己的 owner，新增算法或優化不要求修改不相關模組。實際擴充位置見 [evolution README 的 Adding a family](../../lib/zcu_tools/simulate/evolution/README.md#adding-a-family)。
 
 ### Family 去留：合格只比耗時
