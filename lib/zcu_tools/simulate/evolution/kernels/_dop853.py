@@ -196,12 +196,37 @@ def tolerances(budget: float) -> Tolerances:
     )
 
 
+class Workspace(NamedTuple):
+    """Mutable complex128 buffers owned by one integration call or worker.
+
+    stages is (12,N), one flat derivative per tableau stage. intermediate is
+    (N,), the current stage input. current and candidate are distinct (N,)
+    state buffers swapped after acceptance. N matches the flat input size.
+    Concurrent integrations must never borrow the same workspace.
+    """
+
+    stages: NDArray[np.complex128]
+    intermediate: NDArray[np.complex128]
+    current: NDArray[np.complex128]
+    candidate: NDArray[np.complex128]
+
+
+@njit(nogil=True, cache=True)
+def make_workspace(state: NDArray[np.complex128]) -> Workspace:
+    """Allocate uninitialized buffers matching a flat complex128 state."""
+    return Workspace(
+        np.empty((12, state.size), dtype=np.complex128),
+        np.empty_like(state),
+        np.empty_like(state),
+        np.empty_like(state),
+    )
+
+
 @njit(nogil=True, cache=True, inline="always")
-def _trial(rhs, context, state, time, step):
-    """Accumulate nonzero tableau weights in place, reusing one stage buffer."""
-    stages = np.empty((12, state.size), dtype=np.complex128)
+def _trial_into(rhs, context, state, time, step, buffers):
+    """Overwrite trial buffers, retaining the tableau\'s accumulation order."""
+    stages, intermediate, candidate = buffers
     stages[0] = rhs(time, state, context)
-    intermediate = np.empty_like(state)
     for stage in range(1, 12):
         intermediate[:] = state
         for previous in range(stage):
@@ -210,12 +235,21 @@ def _trial(rhs, context, state, time, step):
                 for index in range(state.size):
                     intermediate[index] += weight * stages[previous, index]
         stages[stage] = rhs(time + _C[stage] * step, intermediate, context)
-    candidate = state.copy()
+    candidate[:] = state
     for stage in range(12):
         weight = step * _B[stage]
         if weight != 0:
             for index in range(state.size):
                 candidate[index] += weight * stages[stage, index]
+
+
+@njit(nogil=True, cache=True, inline="always")
+def _trial(rhs, context, state, time, step):
+    # Dense integration retains its allocating trial and extension ownership.
+    stages = np.empty((12, state.size), dtype=np.complex128)
+    intermediate = np.empty_like(state)
+    candidate = np.empty_like(state)
+    _trial_into(rhs, context, state, time, step, (stages, intermediate, candidate))
     return candidate, stages
 
 
@@ -264,6 +298,36 @@ def integrate(
     calls, so controls and bath can jump at boundaries. RuntimeError signals
     nonfinite derivatives/errors, step underflow or exhausted iterations.
     """
+    if duration_ns == 0:
+        return state
+    workspace = make_workspace(state)
+    workspace.current[:] = state
+    return integrate_workspace(
+        rhs, context, duration_ns, controls, first_step, workspace
+    )
+
+
+@njit(nogil=True, cache=True, inline="always")
+def integrate_workspace(
+    rhs: Callable[[float, NDArray[np.complex128], Context], NDArray[np.complex128]],
+    context: Context,
+    duration_ns: float,
+    controls: Tolerances,
+    first_step: float,
+    workspace: Workspace,
+) -> NDArray[np.complex128]:
+    """Integrate with caller-owned buffers and the same contract as integrate.
+
+    rhs(time_ns, flat_state, context) uses interval-local ns and complex128
+    input/output. Load the input into workspace.current before each call.
+    The returned vector aliases a workspace buffer until its next use. Callers
+    must store endpoints before reusing it for another row. Interval boundaries
+    reset the controller and derivative; only storage survives between calls.
+    """
+    state = workspace.current
+    if duration_ns == 0:
+        return state
+    candidate = workspace.candidate
     time = 0.0
     step = min(first_step, controls.max_step)
     rejected = False
@@ -273,12 +337,19 @@ def integrate(
         step = min(step, controls.max_step, duration_ns - time)
         if attempts > 10000000 or step <= 0 or time + step == time:
             raise RuntimeError("DOP853 step underflow or iteration limit")
-        candidate, stages = _trial(rhs, context, state, time, step)
-        error = _error_norm(stages, state, candidate, step, controls)
-        if not np.isfinite(error) or not np.isfinite(candidate).all():
+        _trial_into(
+            rhs,
+            context,
+            state,
+            time,
+            step,
+            (workspace.stages, workspace.intermediate, candidate),
+        )
+        error = _error_norm(workspace.stages, state, candidate, step, controls)
+        if not np.isfinite(error) or not _finite(candidate):
             raise RuntimeError("DOP853 nonfinite solution or error estimate")
         if error <= 1:
-            state = candidate
+            state, candidate = candidate, state
             time += step
             factor = 10.0 if error == 0 else min(10.0, 0.9 * error ** (-1 / 8))
             if rejected:
@@ -289,6 +360,14 @@ def integrate(
             step *= max(0.2, 0.9 * error ** (-1 / 8))
             rejected = True
     return state
+
+
+@njit(nogil=True, cache=True)
+def _finite(state):
+    finite = True
+    for value in state:
+        finite = np.isfinite(value) and finite
+    return finite
 
 
 # Extra stages and weights for the degree-seven continuous extension.

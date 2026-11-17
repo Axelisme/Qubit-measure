@@ -15,11 +15,11 @@ from ._dop853_data import (
     Context,
     Models,
     Segments,
-    hamiltonian,
+    fill_hamiltonian,
     pack_models,
 )
 from ._dop853_intervals import playback_time
-from ._flux_expansion import TERM_KINDS, PackedExpansion, flux_hamiltonian
+from ._flux_expansion import TERM_KINDS, PackedExpansion, fill_flux_hamiltonian
 from ._workload_facts import model_keys, packed_segments
 
 
@@ -44,11 +44,23 @@ class _FluxData(NamedTuple):
     energy_shifts: NDArray[np.float64]
 
 
+class _FluxWorkspace(NamedTuple):
+    hamiltonian: NDArray[np.complex128]
+    fixed_hamiltonian: NDArray[np.complex128]
+    intermediate: NDArray[np.complex128]
+    transformed: NDArray[np.complex128]
+    left_product: NDArray[np.complex128]
+    right_product: NDArray[np.complex128]
+    derivative: NDArray[np.complex128]
+    basis_adjoint: NDArray[np.complex128]
+
+
 class _FluxContext(NamedTuple):
     drive: Context
     expansion: PackedExpansion
     waveform: _Waveform
     energy_shifts: NDArray[np.float64]
+    workspace: _FluxWorkspace
 
 
 @dataclass(frozen=True)
@@ -80,7 +92,8 @@ def _pack_expansion(expansion: FluxExpansion) -> PackedExpansion:
 
 @njit(nogil=True, cache=True)
 def _rhs(time, state, context):
-    drive, expansion, waveform, energy_shifts = context
+    drive, expansion, waveform, energy_shifts, workspace = context
+    h, fixed_h, intermediate, transformed, left, right, derivative, basis_h = workspace
     models, segments, row, model, interval = drive
     size = models.energies.shape[1]
     rho = state.reshape(size, size)
@@ -89,17 +102,28 @@ def _rhs(time, state, context):
     absolute = playback_time(
         time, interval.flux_start, interval.flux_end, interval.duration
     )
-    fixed_h = flux_hamiltonian(
-        expansion, waveform.times[begin:end], waveform.flux[begin:end], absolute
+    fill_flux_hamiltonian(
+        expansion,
+        waveform.times[begin:end],
+        waveform.flux[begin:end],
+        absolute,
+        fixed_h,
     )
-    basis = models.basis[model]
-    h = hamiltonian(time, drive)
+    fill_hamiltonian(time, drive, h)
     for i in range(size):
         h[i, i] -= models.energies[model, i] - energy_shifts[model, i]
-    h += basis.conj().T @ fixed_h @ basis
-    derivative = -2j * np.pi * (h @ rho - rho @ h)
-    derivative -= models.decay[model] * rho
+    np.dot(basis_h, fixed_h, intermediate)
+    np.dot(intermediate, models.basis[model], transformed)
+    h += transformed
+    # Keep both products: flux propagation does not assume exact Hermiticity.
+    np.dot(h, rho, left)
+    np.dot(rho, h, right)
     for target in range(size):
+        for source in range(size):
+            derivative[target, source] = (
+                -2j * np.pi * (left[target, source] - right[target, source])
+                - models.decay[model, target, source] * rho[target, source]
+            )
         for source in range(size):
             derivative[target, target] += (
                 models.rates[model, target, source] * rho[source, source]
@@ -108,13 +132,34 @@ def _rhs(time, state, context):
 
 
 @njit(nogil=True, cache=True)
-def _context(data, row, model, interval):
+def _context(data, row, model, interval, previous):
     models, segments, expansion, waveform, energy_shifts = data
+    if previous is not None:
+        return _FluxContext(
+            Context(models, segments, row, model, interval),
+            expansion,
+            waveform,
+            energy_shifts,
+            previous.workspace,
+        )
+    size = models.energies.shape[1]
+    h = np.empty((size, size), dtype=np.complex128)
+    workspace = _FluxWorkspace(
+        h,
+        np.empty_like(h),
+        np.empty_like(h),
+        np.empty_like(h),
+        np.empty_like(h),
+        np.empty_like(h),
+        np.empty_like(h),
+        models.basis[model].conj().T.copy(),
+    )
     return _FluxContext(
         Context(models, segments, row, model, interval),
         expansion,
         waveform,
         energy_shifts,
+        workspace,
     )
 
 
