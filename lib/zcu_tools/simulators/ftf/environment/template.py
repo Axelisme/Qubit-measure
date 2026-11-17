@@ -6,11 +6,6 @@ import numpy as np
 from numpy.typing import NDArray
 from qick import QickConfig
 
-from zcu_tools.core.simulation import (
-    EnvironmentSnapshot,
-    TimeBase,
-    TimelineTemplate,
-)
 from zcu_tools.experiment.readout_plan import (
     ProjectiveRead,
     ReadoutDrive,
@@ -26,6 +21,11 @@ from zcu_tools.simulate.adc import (
     ReadoutBatch,
     ReadoutPulse,
     Receiver,
+)
+from zcu_tools.simulate.boundary import (
+    EnvironmentSnapshot,
+    TimeBase,
+    TimelineTemplate,
 )
 from zcu_tools.simulate.evolution import (
     EnvelopeSpec,

@@ -7,10 +7,10 @@ from dataclasses import replace
 
 import numpy as np
 import pytest
-from zcu_tools.core.simulation import EventSlot, PulseEnvelope, TimelineTemplate
 from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
+from zcu_tools.simulate.boundary import EventSlot, PulseEnvelope, TimelineTemplate
 from zcu_tools.simulate.evolution import Engine, segment_spans
 from zcu_tools.simulators.ftf.config import FTFSettings, parse_ftf
 from zcu_tools.simulators.ftf.environment import FTFModelFacts, ftf, plan_template

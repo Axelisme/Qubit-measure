@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-11-16, evolve-local exact-key Floquet frames
+**Last updated:** 2026-11-17, reference producer single-row selection
 
 **讀者：** framework-dev、agent。Segment evolution 的公開輸入、路由與數值邊界。
 
@@ -12,6 +12,8 @@ boundary and the decision to keep algorithm knowledge in dispatch.
 ## Contents
 
 - [Public entry points](#public-entry-points)
+- [Frozen numeric inputs and references](#frozen-numeric-inputs-and-references)
+- [Dispatch inspection](#dispatch-inspection)
 - [Joint-Fock prototype](#joint-fock-prototype)
 - [Routing telemetry](#routing-telemetry)
 - [Decision graph](#decision-graph)
@@ -36,6 +38,7 @@ The exports in [__init__.py](__init__.py) fall into these groups:
 | Purpose | Exports |
 | --- | --- |
 | Execution and results | `Engine`, `EvolutionResult`, `PathDiagnostics`, `FamilyRouting`, `Cancelled`, `SEGMENT_NUMERIC_VERSION` |
+| Dispatch inspection | `DispatchInspection`, `DispatchRow`, `DispatchCandidate`, `RowKey` |
 | Engine model source and routing history | `ModelSource`, `SecularModel`, `SecularDrive`, `RoutingHistory` |
 | Flux description | `FluxExpansion`, `FluxTerm`, `FluxLevel`, `FluxSchedule`, `FluxWaveform` |
 | Batched timelines | `TimelineBatch`, `DriveTrack`, `EnvelopeSpec`, `SegmentShift`, `segment_spans` |
@@ -44,6 +47,9 @@ The exports in [__init__.py](__init__.py) fall into these groups:
 | States and population conversion | `Basis`, `DensityState`, `Populations`, `populations`, `batch_populations` |
 | Explicit joint-Fock prototype | `JointFockRequest`, `JointFockDiagnostic`, `JointFockResult`, `joint_fock_spectrum` |
 | Shared RWA Hamiltonian coefficients | `RWACoefficients`, `rwa_coefficients`, `interaction_hamiltonian` |
+| Indexed scene cache | `SCENE_CACHE_VERSION`, `FrozenIndexEntry`, `read_frozen_index`, `write_frozen_index`, `read_scene_records`, `write_scene_record` |
+| Frozen numeric inputs | `FROZEN_PHYSICAL_VERSION`, `FrozenInput`, `FrozenRecord`, `physical_input`, `canonical_json`, `digest`, `read_physical_input`, `read_frozen_input`, `write_frozen_input`, `read_frozen_manifest`, `write_frozen_manifest` |
+| Solver-free reference storage | `SolverTolerances`, `ReferenceResult`, `reference_key`, `load_reference`, `write_reference` |
 
 `Engine(workers, *, families=None, kernels=None, chunks_per_worker=None,
 routing_cache_bytes=4*1024**2)` owns immutable routing facts.
@@ -51,7 +57,8 @@ Numerical preparations live only within one evolve. `evolve(source, batches, *, 
 `ModelSource` and all `TimelineBatch` inputs for one acquire. `NumericModel` is a
 separate fixed-coordinate record, not an Engine input. Constructor and field
 contracts live with their types in [engine.py](engine.py), [secular.py](secular.py),
-[controls.py](controls.py), [model.py](model.py) and [state.py](state.py).
+[inspection records](_inspection.py), [controls.py](controls.py), [model.py](model.py)
+and [state.py](state.py).
 
 Units are ns, GHz and rad. `SecularModel` supplies energies, drive quadratures,
 directional rates and pure dephasing in each quantized flux level's energy
@@ -86,6 +93,126 @@ The environment explicitly converts them to populations, then calls ADC's
 normalization and sampling tools. Evolution neither imports ADC nor produces
 I/Q. ADC owns its probability tolerance and readout sums; see the
 [ADC README](../adc/README.md).
+
+## Frozen numeric inputs and references
+
+`FROZEN_PHYSICAL_VERSION` owns the physical decoding contract for manifests
+and standalone inputs. It changes when fields, units, dtypes, defaults or
+Engine-input reconstruction change. `SCENE_CACHE_VERSION` owns the index JSON
+and cache-directory revision. Both are currently 1. Consumers compare both
+without parsing storage layout. `SEGMENT_NUMERIC_VERSION` records numerical
+algorithm semantics, not input-format compatibility.
+
+The public codec snapshots a `ModelSource` and one `TimelineBatch` without
+running an Engine or a solver. `write_frozen_input(path, source, batch)` writes
+version 1, a complete `physical` record and its `physical_sha256`.
+`read_frozen_input(path)` checks the version and hash, then returns a
+`FrozenInput(source, batch)`. The caller closes the returned source.
+
+`physical_input(source, batch)` returns the same numeric record in memory.
+`read_physical_input(record)` reconstructs it, including records from JSON.
+The record contains the initial density, scheduled models plus DC zero,
+continuous-flux expansion when used, slow-envelope subdivisions and complete
+batch data. Point order, complex128/float64/int64/bool record dtypes, segment
+corrections and continuation fields survive the round trip. The reconstructed
+source has a fresh owned history and a finite level-to-model mapping. Unlisted
+levels raise `KeyError`. Python builders, devices and registered source shifts
+are not serialized.
+
+`canonical_json` uses sorted keys, compact separators, nested array lists and
+real/imag objects for complex values. It rejects nonfinite values. `digest`
+returns its SHA-256. `physical_input(..., include_identity=False)` removes only
+model namespaces. Complete physical hashes include those namespaces;
+identity-free hashes allow oracle sharing. Neither hash is a reference key.
+
+`write_frozen_manifest(path, records)` writes ordered `FrozenRecord` values as
+version-1 canonical JSON inside stdlib gzip. `FrozenRecord(name, physical,
+metadata=None)` keeps caller metadata opaque. Its `physical_sha256` and
+`oracle_sha256` properties calculate the complete and identity-free hashes.
+The writer calculates both hashes; `read_frozen_manifest(path)` verifies them
+and returns a tuple in original order. Both reject duplicate names. The gzip
+header has mtime=0 and no filename, so identical records produce identical bytes
+at different paths. Reconstruct a source separately with
+`read_physical_input(record.physical)` and close it after use. The container
+neither interprets scene declarations nor selects a reference solver.
+
+`FrozenIndexEntry.from_record(record)` pins the name and physical, oracle and
+metadata digests. Metadata uses the public `digest` without caller interpretation.
+`write_frozen_index(path, entries)` atomically publishes version 1 and ordered
+identity rows; `read_frozen_index(path)` validates them. Unknown versions fail.
+`write_scene_record(directory, record)` returns its entry after publishing a
+single-record manifest. Filenames contain the name and physical/metadata hash
+prefixes of 16 characters. `entry.cache_path(directory)` exposes that path when
+needed for explicit cache maintenance. Valid existing files are reused; conflicting
+files fail validation. Both writers stage files in the destination directory and
+publish with replace, preserving existing pins on a pre-publication failure.
+`read_scene_records(directory, entries)` reads only the indexed files in entry
+order and verifies their full identities, including opaque metadata. A missing
+file raises FileNotFoundError with the record name and hashes. None of these APIs
+constructs a model, runs an Engine/solver, resolves Git or deletes old cache files.
+Callers own cache locations and producer instructions. `SCENE_CACHE_VERSION` is
+1; callers negotiating a shared numeric format can compare it without parsing
+cache filenames or containers.
+
+`reference_key(source, batch)` preserves the historical key formula. It hashes
+version 1, identity-free physics, coarse tolerances 2e-10/2e-12, fine tolerances
+2e-12/2e-14 and convergence limit 2e-6. Callers can override both tolerance
+records. Solver identity and routing history do not enter the key.
+`load_reference(cache_dir, source, batch)` only reads the matching NPZ, without
+pickle or directory creation. A miss raises `FileNotFoundError`; it never solves.
+`write_reference` atomically publishes `density` and `convergence_error` under
+that same key. The producer certifies convergence, and measurement preflight
+checks the loaded result before evolution.
+
+The independent preparation entry point is
+[`family_pareto_reference_producer.py`](../../../../tests/simulate/evolution/contract/family_pareto_reference_producer.py).
+It reads only frozen record names and physics. The caller explicitly maps each
+index to the independent lab-frame or interaction-picture solver and supplies
+an explicit scene cache. `--scenario NAME` requires one matching row across the
+supplied indexes before reading payloads. Zero or multiple matches fail without
+solving; other rows need no payload. Without a scenario, all indexed rows remain
+selected. All selected numeric files load before any solver runs. Metadata
+and scene names do not select the solver. Both solvers stay in tests. The codec imports neither tests nor tools.
+See [ADR-0078](../../../../docs/adr/0078-evolution-module-boundary.md).
+
+## Dispatch inspection
+
+`Engine.inspect_dispatch(source, batches, *, budget=1e-3, cancel=None)` returns a
+`DispatchInspection` without evolving density. It uses evolve's classifier,
+candidate ordering, guards and complete-inventory pricing. Floquet admission
+still computes its one-period propagator. This method is not a no-computation
+shortcut or a second dispatcher. Source, batch, budget, cancellation and failure
+contracts match `evolve`; an exhausted candidate round raises `NoValidKernel`.
+
+`rows` follows input batch order, point order, then split-span order.
+Each row's `RowKey` contains the zero-based batch index, caller point ID and
+zero-based chronological segment index. Segment indices include drive, flux,
+plateau and explicit boundary splits. Continuations number only retained spans
+at or after `start_ns`. Each row also reports absolute `start_ns` and `duration_ns`.
+
+A `selected` row's `family` matches evolve from the same initial history.
+A `deferred` row has a local prepare key whose guard belongs to its timeline
+worker. A `needs_prefix_input` row needs a driven prefix density that evolve
+would compute first. These unresolved rows return `family=None`; inspection
+neither runs timeline workers nor computes prefix densities.
+
+`candidates` records offered families and guard decisions in first-offer order.
+An evaluated guard reports `accepted` or `rejected`. A local key reports
+`deferred`. Candidates after a stopped round report
+`untested_after_short_circuit`, unless an earlier round already evaluated them.
+Structurally inapplicable and cost-skipped families are not listed unless
+actually offered. Candidate `scheduling_cost` is `Kernel.cost`'s nonnegative
+relative row work for chunk interleaving, not seconds or a numerical certificate;
+it cannot explain why a family was chosen. The cold-amortized estimate used to
+order candidates is not exposed. Short-circuited candidates have
+`scheduling_cost=None`; evaluated and deferred candidates include their value.
+
+Inspection does not modify routing history. It projects usage without writing
+counters, content membership or generation, and does not create routing-reuse
+snapshots. Querying A before evolving B leaves B's route and density unchanged.
+Guard preparations expire on return and do not enter Engine caches. Source
+model caches and shift registrations may be populated. Calls sharing a history
+must serialize, just as for evolve.
 
 ## Joint-Fock prototype
 
@@ -444,7 +571,8 @@ densities in place and returns a row-aligned boolean exceedance mask.
 ## WorkPlan and cache ownership
 
 [Dispatch](_dispatch.py) creates one [WorkPlan](workplan.py) from the complete
-evolve table before workers start. Prefix representatives, caller classification
+evolve table before workers start. Its history mode records usage for evolve
+and projects usage for inspection, with the same inventory and cost formulas. Prefix representatives, caller classification
 and timeline workers share it through `KernelContext` and `ApplyContext`. Engine
 drains its pool before closing the plan on success, cancellation or failure.
 The single `complete_table` field supplies full immutable geometry to common-frame,

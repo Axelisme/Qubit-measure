@@ -6,7 +6,7 @@ from dataclasses import dataclass
 import numpy as np
 from numpy.typing import NDArray
 
-from zcu_tools.core.simulation import SamplingIdentity
+from zcu_tools.simulate.boundary import SamplingIdentity
 
 from .model import RealArray, readonly_array
 from .populations import validate_populations

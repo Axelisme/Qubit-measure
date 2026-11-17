@@ -13,6 +13,7 @@ from .cavity import (
     cavity_field_average,
     cavity_fields,
 )
+from .histograms import HistogramBins, cumulative_count_bins
 from .model import (
     BackgroundBandEdge,
     BackgroundBandEdges,
@@ -26,7 +27,7 @@ from .populations import (
     PopulationValidationError,
     normalize_populations,
 )
-from .projection import ProjectionReadout
+from .projection import ProjectionChain, ProjectionReadout
 from .raw import ADCRawShots, PreparedRawShots
 from .readout_batch import (
     ChannelReadout,

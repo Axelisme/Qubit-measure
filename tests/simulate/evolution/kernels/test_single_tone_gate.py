@@ -117,6 +117,32 @@ def test_source_history_amortizes_later_small_acquire_and_invalidates_old_memo()
         assert later.paths.segments_by_kernel.get("single_tone_gate") == 2
 
 
+def test_dispatch_query_preserves_later_small_acquire_route_and_density():
+    """Inspecting a profitable gate must not amortize another acquire's build."""
+    large, small = batch(160), batch(2)
+    with (
+        closing(source()) as inspected,
+        closing(source()) as large_reference,
+        closing(source()) as small_reference,
+        closing(Engine(1)) as engine,
+    ):
+        query = engine.inspect_dispatch(inspected, (large,))
+        evolved_large = engine.evolve(large_reference, (large,), telemetry=True)
+        evolved_small = engine.evolve(small_reference, (small,), telemetry=True)
+        after_query = engine.evolve(inspected, (small,), telemetry=True)
+
+    assert sum(row.family == "single_tone_gate" for row in query.rows) == 160
+    for family, count in evolved_large.paths.segments_by_kernel.items():
+        assert sum(row.family == family for row in query.rows) == count
+    assert evolved_small.paths.segments_by_kernel.get("shaped_sambe") == 2
+    assert (
+        after_query.paths.segments_by_kernel == evolved_small.paths.segments_by_kernel
+    )
+    np.testing.assert_allclose(
+        after_query.densities, evolved_small.densities, atol=1e-14
+    )
+
+
 def test_borrowed_history_survives_source_close_and_amortizes_later_acquire():
     history = RoutingHistory()
     first = source(history)

@@ -1,6 +1,6 @@
 # Single-fluxonium acquisition
 
-**Last updated:** 2026-11-16，caller-selected worker width
+**Last updated:** 2026-11-17，projection chains and per-point continuation
 
 **Readers:** framework-dev, lab-author, agent. Compose complete fluxonium timelines with one physical readout cavity.
 
@@ -82,25 +82,36 @@ execution rejects them before evolution. The source does not approximate their
 Stark shifts, cavity memory or backaction. All readout uses the DC model even
 when flux has not returned to DC.
 
-`SingleFluxoniumSource.prepare` projects each density into rank-1 outcomes in the
-retained DC energy basis. It keeps each outcome's full history across later
-reads and continues from that read's start through `Engine.evolve`. ADC CTMC
-jumps during an earlier read affect its IQ only, not later density evolution.
-This approximation does not group outcomes by IQ distinguishability and does
-not add MIST or active reset. Within one preparation, templates must have equal
-projective counts and per-event grid counts. Conflicts raise `ValueError` naming
-the templates and layouts before evolution or sampling.
+`SingleFluxoniumSource.prepare` projects into rank-1 states in the retained
+DC energy basis. It returns a `ProjectionChain` with first-event populations
+and one source-to-target transition table per later read, including terminal.
+It does not enumerate outcome histories. Each span evolves required source
+states through `Engine.evolve`. ADC CTMC jumps during a read affect its IQ only,
+not later density evolution. This approximation does not group states by IQ
+distinguishability and does not add MIST or active reset. Within one preparation,
+templates must have equal projective counts and per-event grid counts.
+Conflicts raise `ValueError` naming templates and layouts before evolution or sampling.
 
-`numerics.projection_prune_floor` discards global history weights below its
-threshold after each projection, then normalizes survivors per point. The
-finite range is `0 <= floor < 1`, with default `1e-9`; zero disables pruning.
-If a point loses every outcome, preparation raises `ValueError` naming its ID
-and floor. `SingleFluxoniumPreparation.projection_diagnostics` records retained
-history counts per point/event, discarded probability mass relative to the
-original distribution, and evolution call count. Summing a point's discarded
-weights gives its cumulative loss without recounting earlier pruning.
-Span reuse digests include continuation densities and absolute time bounds.
-Every span must pass the engine's routing validation before preparation reuse.
+`numerics.projection_prune_floor` controls continuation at each point.
+A source state whose approximate probability is below the floor at that point
+uses an identity transition row there, approximating it as staying in that state.
+The finite range is `0 <= floor < 1`; the example supplies `1e-9`.
+Zero gives the exact chain, including transitions from zero-probability states.
+No probability is discarded or renormalized by this approximation.
+Path total variation from the exact chain is at most the sum of that point's
+`uncontinued_probability` across transitions.
+
+`SingleFluxoniumPreparation.projection_diagnostics` reports `continued_states`
+and `uncontinued_probability` per point and transition. Each row has reads−1
+entries, excluding prefix and anything after terminal. `continued_states`
+counts adopted solver rows, even when the solver returns identity.
+`uncontinued_probability` sums the source marginal on non-adopted rows.
+`evolution_calls` counts actual calls including prefixes. Adopted row counts
+cannot determine calls, because a row solved for another point may remain unused
+at this point. Span reuse digests include continuation densities and absolute
+time bounds. Every span must pass Engine routing validation before preparation
+reuse, following ADR-0078. Six-fluxonium uses this runner for each cavity.
+
 Without projective reads the source keeps its terminal-only evolution and ADC
 sampling path, including RNG consumption.
 
@@ -129,7 +140,8 @@ Preflight checks every template's projective count and each ADC's event/grid
 layout without building a model, evolving a density or solving an ADC response.
 Conflicts name the ADC, templates and layouts.
 
-`prepare_readouts(preflight)` evolves one common `ProjectionReadout` and returns
+`prepare_readouts(preflight)` evolves one common projection chain, or a terminal-only
+`ProjectionReadout`, and returns
 all `channels` and `raw.batches` in receiver order. ADCs observing the same event
 share its CTMC path in raw and decimated sampling. Their receiver noise remains
 independent. `ConditionalSums.event_indices` retains original logical event IDs,
@@ -235,7 +247,7 @@ reread on each lookup. Evolution validates reuse against its own routing policy.
 Noise, counts, round identities and measured IQ are never cached.
 Projection continuation densities exist only while preparing the spans of one
 timeline. No later shot, round or acquisition starts from a previous outcome's
-terminal density. Reuse of immutable outcome weights, event populations and
+terminal density. Reuse of immutable projection chains, unprojected populations and
 conditional sums follows the complete-preparation rules above. It does not
 carry forward a sampled herald result.
 Reassigning `source.settings` to validated settings changes the snapshot's

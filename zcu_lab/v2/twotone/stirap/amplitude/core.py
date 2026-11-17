@@ -12,7 +12,6 @@ from zcu_tools.analysis.singleshot import (
     summarize_centroid3,
 )
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.core.simulation import ChargeDriveRequirement
 from zcu_tools.experiment import Experiment
 from zcu_tools.experiment.axes_spec import (
     GroupedAxesSpec,
@@ -35,6 +34,7 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.program.v2.modules.readout import centroid3_classifier
 from zcu_tools.program.v2.modules.waveform import EnvelopeWaveformCfg
+from zcu_tools.simulate.boundary import ChargeDriveRequirement
 
 from .._pulses import drive_pulse
 
