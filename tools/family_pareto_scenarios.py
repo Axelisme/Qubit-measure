@@ -26,11 +26,13 @@ from zcu_tools.simulators.ftf.environment import FTFSource, ftf, plan_template
 
 from tools.dop853_segment import profile_inputs
 from tools.family_pareto_inputs import (
+    MULTITONE_PRICE_SCENES,
     Input,
     Scene,
     make_inputs,
 )
 from tools.family_pareto_kernel_scenes import KERNEL_SCENES, make_kernel_inputs
+from tools.family_pareto_multitone_scenes import make_multitone_price_inputs
 from tools.family_pareto_prepare import prepare_scenes as prepare_scenes
 from tools.family_pareto_scene_builders import (
     declared_input,
@@ -926,6 +928,8 @@ def main(argv: list[str] | None = None, *, inputs: list[Input] | None = None) ->
     with threadpool_limits(limits=1):
         if inputs is not None:
             selected = inputs
+        elif args.scenario in MULTITONE_PRICE_SCENES:
+            selected = make_multitone_price_inputs(args.scenario)
         elif args.scenario in KERNEL_SCENES:
             selected = make_kernel_inputs(args.scenario)
         elif args.scenario == "idle_coherence":
@@ -933,7 +937,12 @@ def main(argv: list[str] | None = None, *, inputs: list[Input] | None = None) ->
         elif args.scenario:
             selected = make_real_inputs(args.scenario)
         else:
-            selected = [*make_inputs(), *make_real_inputs(), *make_kernel_inputs()]
+            selected = [
+                *make_inputs(),
+                *make_real_inputs(),
+                *make_kernel_inputs(),
+                *make_multitone_price_inputs(),
+            ]
         prepare_scenes(
             selected,
             indexes,

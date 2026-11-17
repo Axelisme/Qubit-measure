@@ -339,7 +339,7 @@ without importing the scene producer or rebuilding device models. Each returned
 
 By default it reads `tools/data/family_pareto/frozen-synthetic.index.json` and
 `frozen-real.index.json`. With neither `--index` nor `--scenario`, it requires
-and selects the 19 names in `PARETO_DEFAULT_NAMES` beside `select_inputs`.
+and selects the 33 names in `PARETO_DEFAULT_NAMES` beside `select_inputs`.
 It rejects missing default names after checking all indexes for duplicates,
 before reading any payload or reference. Other rows may share those indexes;
 the default selection does not read their payloads or references.
@@ -1027,6 +1027,13 @@ The single-support `kernel_single_constant`, `kernel_single_sampled` and
 `kernel_multitone_sampled` scenes use public `SingleFluxoniumModel` directly.
 They are separate from the complete F/L/I/N sequences, which retain 24 points
 and 21 levels each. See the [data README](data/family_pareto/README.md).
+`family_pareto_multitone_scenes.py` declares fourteen constant-pair price
+controls: three INTEGER_MODEL C2b projections, a nine-point fixed-M synthetic
+feature star and consecutive N=20/100 base supports. Their names join the
+Pareto default set. Each new row is appended with `--update-index --scenario`;
+only hashes enter Git. See the [data README](data/family_pareto/README.md) for
+coordinates and the distinction between repeated supports and exact-key reuse.
+
 The shared cache is not task scratch. Task cleanup must not delete it.
 Manual cleanup is confined to the scene-cache prefix.
 

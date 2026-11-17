@@ -32,6 +32,7 @@ from zcu_tools.simulate.evolution import (
 )
 
 from tools.family_pareto_inputs import (
+    MULTITONE_PRICE_SCENES,
     Input,
     canonical_json,
     input_from_record,
@@ -112,6 +113,7 @@ PARETO_DEFAULT_NAMES = frozenset(
         "kernel_single_constant",
         "kernel_single_sampled",
         "kernel_multitone_sampled",
+        *MULTITONE_PRICE_SCENES,
     }
 )
 
