@@ -1,8 +1,12 @@
 """Engine family accuracy against a converged independent full-Lindblad oracle."""
 
+import sys
 from collections.abc import Callable
 from contextlib import closing
 from dataclasses import replace
+from hashlib import sha256
+from importlib.metadata import version
+from pathlib import Path
 
 import pytest
 from zcu_tools.simulate.evolution import (
@@ -11,17 +15,26 @@ from zcu_tools.simulate.evolution import (
     RoutingHistory,
     RWAGuardMetric,
     common_frame_diagnostic,
+    load_reference,
     multitone_rwa_diagnostic,
     segment_spans,
+    write_reference,
 )
 
 from .accuracy import AccuracyMeasurement, measurement_property, require_families
-from .accuracy_cases import AccuracyCase, accuracy_case, history_case, multisegment_case
+from .accuracy_cases import (
+    DISSIPATIVE_DC_CASES,
+    AccuracyCase,
+    accuracy_case,
+    history_case,
+    multisegment_case,
+)
 from .guard_edge_cases import (
     EDGE_FAMILIES,
     constant_multitone_guard_case,
     guard_edge_case,
 )
+from .interaction_reference import interaction_reference
 from .reference import ReferenceResult, converged_reference, density_error
 
 CASE_NAMES = (
@@ -41,6 +54,7 @@ CASE_NAMES = (
     "cheap_sampled_separated",
     "adiabatic_ramp",
     "single_tone_sideband",
+    *DISSIPATIVE_DC_CASES,
 )
 KNOWN_EDGE_ERRORS = {
     "gate_cache": 0.00929654785179012,
@@ -54,18 +68,40 @@ PINNED = tuple(
 
 
 @pytest.fixture(scope="session")
-def matrix_reference() -> Callable[[AccuracyCase], ReferenceResult]:
+def matrix_reference(
+    pytestconfig: pytest.Config,
+) -> Callable[[AccuracyCase], ReferenceResult]:
     """Solve each named matrix input once per session in this pytest worker.
 
     Sources/history remain fresh per test; cached arrays contain only oracle
     results for these deterministic physical inputs, never routing products.
+    The long DC interaction references also persist in pytest's local cache,
+    keyed by complete physics, oracle source, tolerances and dependency versions.
     """
+    oracle_code = b"".join(
+        Path(__file__).with_name(name).read_bytes()
+        for name in ("interaction_reference.py", "reference.py")
+    )
+    dependencies = sys.version + "".join(
+        version(name) for name in ("numpy", "scipy", "numba")
+    )
+    oracle_hash = sha256(oracle_code + dependencies.encode()).hexdigest()
+    cache = pytestconfig.cache.mkdir("interaction-reference") / oracle_hash
     results: dict[tuple[str, int], ReferenceResult] = {}
 
     def reference_for(case: AccuracyCase) -> ReferenceResult:
         key = case.name, len(case.batch.points)
         if key not in results:
-            results[key] = converged_reference(case.source, case.batch)
+            if case.name in DISSIPATIVE_DC_CASES:
+                try:
+                    result = load_reference(cache, case.source, case.batch)
+                except FileNotFoundError:
+                    result = interaction_reference(case.source, case.batch)
+                    write_reference(cache, case.source, case.batch, result)
+                assert result.convergence_error <= 2e-6
+                results[key] = result
+            else:
+                results[key] = converged_reference(case.source, case.batch)
         return results[key]
 
     return reference_for
