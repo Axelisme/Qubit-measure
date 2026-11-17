@@ -17,8 +17,8 @@ from zcu_tools.gui.form import (
     field_error,
 )
 from zcu_tools.gui.form_adapter import LinRange
-from zcu_tools.gui.session.context_types import SavedPoint
-from zcu_tools.gui.session.parameters import ParameterContext
+from zcu_tools.gui.session.context_types import DocumentSetRef
+from zcu_tools.gui.session.parameters import DocumentSetCapture
 from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
 from zcu_tools.resources.entry.schema import ParameterDocument, ParameterGeneral
 
@@ -238,7 +238,7 @@ def environment(
 ) -> FormEnv:
     """Capture a real point; context flags drive branch defaults and choices."""
     return FormEnv(
-        parameters=ParameterContext(
+        parameters=DocumentSetCapture(
             point=ParameterDocument(
                 format="zcu.parameter-container",
                 format_version="2.0",
@@ -258,7 +258,7 @@ def environment(
                     format_version="2.0",
                 )
             ),
-            target=SavedPoint(entry_name="entry", point="synthetic"),
+            target=DocumentSetRef(entry_name="entry", point="synthetic"),
             roles=None,
             storage=None,
         )

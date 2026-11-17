@@ -15,7 +15,7 @@ Qt 與 agent 都要編輯 tab cfg、Library entry 與分析產生的 writeback p
 `gui.form.FormState` 保存可不完整的 input。`gui.widgets.form.FormEditor` 只呈現 caller-owned state 與固定 FormEnv，不擁有提交或保存政策。Detach 不提交文字、不重設 state，也不銷毀宿主的 draft。
 
 - Measure tab 由 `TabFormResource` 持有 state、env 與 lifetime。Open／Reset 捕捉來源，Qt、remote 與 Run 使用同一資源。Run 只接受目前有效的 result，不重讀全域來源。
-- Library 與 Inspect 由 session 的 `LibraryEntryForm` 持有 state、固定 ParameterContext 與 arb 名稱。開啟既有 entry 時，生成器直接投影持久 Spec。Apply 取有效 Spec，交 `apply_library_change`，不經 runtime cfg 或 caller lowering。關閉時丟棄 form 即可，沒有 editor session registry、LRU 或 editor_id。
+- Library 與 Inspect 由 session 的 `LibraryEntryForm` 持有 state、固定 DocumentSetCapture 與 arb 名稱。開啟既有 entry 時，生成器直接投影持久 Spec。Apply 取有效 Spec，交 `apply_library_change`，不經 runtime cfg 或 caller lowering。關閉時丟棄 form 即可，沒有 editor session registry、LRU 或 editor_id。
 - 每個 `WritebackDraft` 擁有自己的 detached entries、固定來源、module Forms、summaries 與 applied state，以及 preview、edit、write、Apply 和 teardown。每個 module item 配一個 `ModuleEntryForm`，固定建立時的來源。Qt dialog 與 remote 都經 writeback control admission 讀寫同一 draft，dialog 是否存在不影響 draft。
 - `WritebackService` 建立 draft 並注入既有 `ContextControlPort` 寫入能力，只保留 `accept_drafts` 的跨 draft 預驗證與成功前綴協調。`WritebackControlFacet` 繼續負責 tab／pane admission、事件與 detached receipt，不另設 per-draft service 介面。
 
@@ -26,7 +26,7 @@ Form 的狀態可以 Invalid。Preview 只供呈現，不是 Apply 許可。Libr
 Adapter 的 `ModuleWriteback` 直接提供持久 `ModuleSpec`，不提供舊編輯樹或 editor identity。Child library key 保持 key。沒有現存 producer 的 waveform writeback 不保留；parameter 與 sample proposals 沿各自既有契約。
 
 `gui.app.measure.writeback.calibrated_module_writeback` 擁有中立的完整 module proposal 建構。
-Caller 提供固定 ParameterContext、Run 的 native module cfg、目標與精確欄位路徑及新值。
+Caller 提供固定 DocumentSetCapture、Run 的 native module cfg、目標與精確欄位路徑及新值。
 Builder 以 `LibrarySnapshot.module_spec()` 的原 Spec 為底。
 它以 `get_module()` 與 program 既有 native converter 取得可比較 cfg，只忽略指定更新路徑。
 其他數值或結構不同時拒絕，列出 dotted 欄位。
@@ -44,7 +44,7 @@ Analysis 與 Post-Analysis 各保存自己的 opaque draft。Remote 以 `(tab_id
 
 Selected Apply 先準備所有選中項目的值與目的地。任一 module form Invalid 時，不 append accepted、不寫 target。準備成功後，既有 Context write owner 先 append accepted，再依目的地文件分組提交：parameters 一組、library 一組、樣本逐筆，組內順序保留。任一項無效整組不寫，首錯停止，保留 accepted evidence 與已提交組；不回復前組，也不保證跨檔 crash transaction。`tab.writeback_write` 依序調整 draft；後項失敗可保留前項 draft 修改，這不等於已寫入 target。
 
-Draft 固定來源的 run_id 與參數環境，來源可以沒有持久 target。後來切 point、改 alias 或切換 pane 不改歷史求值內容。Preview 顯示當下作用中的位置，Apply 重新取得作用中文件組，不取歷史來源。GLOBAL 的目的地是 entry 文件組，POINT 則是選定 point 文件組。未開 entry 仍可預覽合法 draft，current 為 None；非空 Apply 以 no_context 拒絕。空歷史環境不構成拒絕理由。
+Draft 固定來源的 run_id 與參數環境，來源可以沒有持久 target。後來切 point、改 alias 或切換 pane 不改歷史求值內容。Preview 顯示當下作用中的位置，Apply 重新取得作用中文件組，不取歷史來源。GLOBAL 的目的地是 global 文件組，POINT 則是選定 point 文件組。未開 entry 仍可預覽合法 draft，current 為 None；非空 Apply 以 no_context 拒絕。空歷史環境不構成拒絕理由。
 
 Preview 的 destination_context 與 receipt destination 只含 entry_name、point，不含 kind。Global 的 point 為 null；未開 entry 的 preview 兩欄都為 null，已提交 receipt 的 entry_name 則必為字串。Opaque actual_path 與來源 capture 不變，預覽不是寫入許可。
 

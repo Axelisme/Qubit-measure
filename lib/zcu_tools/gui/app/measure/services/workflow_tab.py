@@ -158,7 +158,9 @@ class WorkflowTab[C]:
             )
 
     def _capture(self) -> FormEnv:
-        parameters = self._services.context.read_context()
+        parameters = self._services.context.read_context(
+            point=self._services.context.current_point_label()
+        )
         return FormEnv(
             parameters=parameters,
             library=parameters.library,

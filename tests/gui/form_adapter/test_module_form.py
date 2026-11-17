@@ -37,9 +37,9 @@ from zcu_tools.gui.form_adapter import ModuleInline
 from zcu_tools.gui.session.context_types import (
     ContextSourceFault,
     ContextSourceUnavailableError,
-    SavedPoint,
+    DocumentSetRef,
 )
-from zcu_tools.gui.session.parameters import ParameterContext
+from zcu_tools.gui.session.parameters import DocumentSetCapture
 from zcu_tools.program.v2.modules import PulseCfg as NativePulseCfg
 from zcu_tools.resources.context.library import (
     ComponentLibrary,
@@ -647,7 +647,7 @@ def creation_env(
             components={"Q": ComponentLibrary(pulses={"probe": library_entry()})},
         )
     )
-    parameters = ParameterContext(
+    parameters = DocumentSetCapture(
         point=ParameterDocument(
             format="zcu.parameter-container",
             format_version="2.0",
@@ -657,7 +657,7 @@ def creation_env(
             ),
         ),
         library=library,
-        target=SavedPoint(entry_name="synthetic", point="synthetic"),
+        target=DocumentSetRef(entry_name="synthetic", point="synthetic"),
         roles=None,
         source_faults=faults,
     )

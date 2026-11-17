@@ -15,7 +15,7 @@ from .schema import ComponentSchema, ParameterDocument
 
 @dataclass(frozen=True)
 class EntryTemplate:
-    """Validated startup data, not a saved setup or point.
+    """Validated startup data, not a saved global or point.
 
     components maps public names to models from the caller-bootstrapped shared
     component_registry, in authored order. Models include their schema defaults.

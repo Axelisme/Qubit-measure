@@ -41,9 +41,10 @@ from zcu_tools.gui.session.context_types import (
     EntryRequest,
     PointCreateRequest,
 )
-from zcu_tools.gui.session.parameters import ParameterContext
+from zcu_tools.gui.session.parameters import DocumentSetCapture
 from zcu_tools.plotting.plots import Plots
 
+from tests.gui._context_reads import capture_focus
 from tests.gui._dialog_fakes import RecordingDialogPresenter
 
 
@@ -123,7 +124,7 @@ RangeAdapter = Adapter(
 
 
 def _spectrum_record(
-    parameters: ParameterContext,
+    parameters: DocumentSetCapture,
     data: SpectrumData | None = None,
 ) -> RunRecord[SpectrumCfg, SpectrumData]:
     storage = parameters.capture_storage()
@@ -184,14 +185,14 @@ def range_application(
     registry.register("spectrum", adapter)
     state = State(SessionEnv(parameters=None, soc=None, soccfg=None))
     ctrl = Controller(state, registry, None, BaseEventBus(), project_root=str(tmp_path))
-    ctrl.setup_control.new_entry(EntryRequest("synthetic"))
-    ctrl.setup_control.new_point(PointCreateRequest("test", "", CommandOrigin("gui")))
+    ctrl.entry_control.new_entry(EntryRequest("synthetic"))
+    ctrl.entry_control.new_point(PointCreateRequest("test", "", CommandOrigin("gui")))
     window = MainWindow(
         ctrl, templates=lambda: {}, dialog_presenter=RecordingDialogPresenter()
     )
     ctrl.add_view(window)
     tab_id = ctrl.tab_control.new_tab("spectrum")
-    capture = ctrl.context_control.read_context()
+    capture = capture_focus(ctrl.context_control)
     commit_run(
         state,
         tab_id,

@@ -1,6 +1,6 @@
 # Analysis entry selection
 
-**Last updated:** 2026-10-28
+**Last updated:** 2026-11-17，global aliases 觀察
 
 **讀者：** framework-dev、agent。兩個分析 GUI 共用的 entry/component 選擇與 native 光譜載入接口。
 
@@ -12,12 +12,12 @@
 `entry.AnalysisTarget.open(selection)` 委派上述兩步，使用
 `selection.project_root/result` 與 `selection.project_root/Database` 開啟既有 ResultEntry。
 此入口要求非空 entry；兩個 analysis behavior 在註冊 lab components 後才呼叫它。
-Component 省略時，以 AliasTable 解析 setup 的 qubit alias。
+Component 省略時，以 `entry.aliases().read().require_valid()` 取得 global 表，再交 AliasTable 解析 qubit alias。
 缺 entry、component 或未綁 alias 會報錯。Kind 必須是 qubit/fluxonium 或其子 kind。
 
 AnalysisTarget 保留 absolute result_root、entry、component 與 ResultEntry resource。
 `predictor_path` 回傳選定 component 的 predictor JSON 路徑。
-分析只使用 setup、predictor/dispersive 路徑與 ledger，不呼叫 Database Save。
+分析透過 `entry.parameters()` 取得 global 參數，並使用 predictor/dispersive 路徑與 ledger，不呼叫 Database Save。
 `target_payload` 產生 entry/component/Result 路徑投影，未開 entry 時欄位為 null。
 `require_target` 在未開 entry 時以 no_entry 拒絕寫入。
 

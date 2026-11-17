@@ -11,10 +11,12 @@ from typing import TYPE_CHECKING
 from zcu_lab.v2.support.measure.ctx_helpers import optional_parameter_float
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.session.parameters import ParameterContext
+    from zcu_tools.gui.session.parameters import DocumentSetCapture
 
 
-def read_analysis_float(parameters: ParameterContext | None, path: str) -> float | None:
+def read_analysis_float(
+    parameters: DocumentSetCapture | None, path: str
+) -> float | None:
     """Read an optional finite scalar at a canonical path from the Run capture.
 
     Missing/null leaves return None for the core's optional analysis input.
@@ -26,7 +28,7 @@ def read_analysis_float(parameters: ParameterContext | None, path: str) -> float
     return optional_parameter_float(parameters, path)
 
 
-def read_chi_kappa(parameters: ParameterContext | None) -> tuple[float, float]:
+def read_chi_kappa(parameters: DocumentSetCapture | None) -> tuple[float, float]:
     """Read required $qubit.ext.chi and $resonator.kappa in MHz from the Run.
 
     Missing capture or calibration raises RuntimeError naming the canonical path.
@@ -38,7 +40,7 @@ def read_chi_kappa(parameters: ParameterContext | None) -> tuple[float, float]:
     )
 
 
-def _require_float(parameters: ParameterContext | None, path: str) -> float:
+def _require_float(parameters: DocumentSetCapture | None, path: str) -> float:
     value = read_analysis_float(parameters, path)
     if value is None:
         raise RuntimeError(f"Missing parameter calibration: {path}")

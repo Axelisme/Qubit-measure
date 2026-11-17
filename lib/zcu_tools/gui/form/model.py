@@ -15,7 +15,7 @@ from pydantic import BaseModel, ConfigDict, JsonValue
 from pydantic_core import PydanticCustomError
 
 from zcu_tools.device import BaseDeviceInfo
-from zcu_tools.gui.session.parameters import ParameterContext
+from zcu_tools.gui.session.parameters import DocumentSetCapture
 from zcu_tools.resources.context.library import LibrarySnapshot
 
 if TYPE_CHECKING:
@@ -286,7 +286,7 @@ class Display:
 class FormEnv:
     """Captured sources borrowed read-only by defaults, choices and evaluation.
 
-    parameters is the host's fixed ParameterContext, or None for source-free
+    parameters is the host's fixed DocumentSetCapture, or None for source-free
     input and arithmetic. Parameter expressions use native point/library paths.
     library is the fixed LibrarySnapshot, or None when unused. devices maps
     host device names to captured detached BaseDeviceInfo snapshots, including
@@ -297,7 +297,7 @@ class FormEnv:
     fails with its field path, rather than being treated as an unfilled value.
     """
 
-    parameters: ParameterContext | None = None
+    parameters: DocumentSetCapture | None = None
     library: LibrarySnapshot | None = None
     devices: Mapping[str, BaseDeviceInfo] = field(default_factory=dict)
 

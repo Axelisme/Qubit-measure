@@ -25,8 +25,8 @@ from zcu_tools.gui.form import (
 )
 from zcu_tools.gui.form_adapter import Form
 from zcu_tools.gui.session.aliases import AliasRow
-from zcu_tools.gui.session.context_types import SavedPoint
-from zcu_tools.gui.session.parameters import ParameterContext
+from zcu_tools.gui.session.context_types import DocumentSetRef
+from zcu_tools.gui.session.parameters import DocumentSetCapture
 from zcu_tools.program.v2.modules import BathResetCfg, PulseCfg, PulseReadoutCfg
 from zcu_tools.program.v2.modules import ConstWaveformCfg as NativeConstWaveformCfg
 from zcu_tools.resources.context.library import (
@@ -115,7 +115,7 @@ def environment() -> FormEnv:
             components={"Q": ComponentLibrary(pulses={"probe": pulse})},
         )
     )
-    parameters = ParameterContext(
+    parameters = DocumentSetCapture(
         point=ParameterDocument(
             format="zcu.parameter-container",
             format_version="1.0",
@@ -123,7 +123,7 @@ def environment() -> FormEnv:
             general=ParameterGeneral(created_at="2026-10-13T00:00:00Z"),
         ),
         library=library,
-        target=SavedPoint(entry_name="synthetic", point="synthetic"),
+        target=DocumentSetRef(entry_name="synthetic", point="synthetic"),
         roles=None,
         storage=None,
     ).bind_aliases((AliasRow("unbound", ""),), {})

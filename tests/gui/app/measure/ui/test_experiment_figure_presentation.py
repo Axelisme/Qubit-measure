@@ -148,8 +148,8 @@ def presentation_window(qapp, tmp_path: Path) -> Iterator[QWidget]:
     registry.register("presentation", PresentationAdapter)
     with launched_measure_app(qapp, tmp_path, registry=registry) as app:
         # Public fixture bootstrap only; the scenario below uses visible controls.
-        app.controller.setup_control.new_entry(EntryRequest("presentation"))
-        app.controller.setup_control.new_point(
+        app.controller.entry_control.new_entry(EntryRequest("presentation"))
+        app.controller.entry_control.new_point(
             PointCreateRequest("p", "Offline presentation", CommandOrigin("gui"))
         )
         board = white_noise(load_soccfg(), std_adc=1.0, seed=None, routes=((0, 0),))
@@ -198,8 +198,8 @@ def layout_window(qapp, tmp_path: Path) -> Iterator[QWidget]:
     registry = Registry()
     registry.register("layout", LayoutAdapter)
     with launched_measure_app(qapp, tmp_path, registry=registry) as app:
-        app.controller.setup_control.new_entry(EntryRequest("layout"))
-        app.controller.setup_control.new_point(
+        app.controller.entry_control.new_entry(EntryRequest("layout"))
+        app.controller.entry_control.new_point(
             PointCreateRequest("p", "Offline layout", CommandOrigin("gui"))
         )
         board = white_noise(load_soccfg(), std_adc=1.0, seed=None, routes=((0, 0),))

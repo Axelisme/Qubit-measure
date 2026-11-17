@@ -23,13 +23,12 @@ from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_control import ContextControlPort
 from zcu_tools.gui.session.context_types import (
     CommandOrigin,
+    DocumentSetRef,
     EntryInfo,
     EntryRequest,
     PointCreateRequest,
-    PointUseRequest,
-    SavedEntry,
-    SavedPoint,
 )
+from zcu_tools.gui.session.entry_control import EntryControlPort
 from zcu_tools.gui.session.operation_handles import OperationHandles
 from zcu_tools.gui.session.ports import OwnerScheduler
 from zcu_tools.gui.session.services.connection import (
@@ -37,7 +36,6 @@ from zcu_tools.gui.session.services.connection import (
     SoCConnectionService,
 )
 from zcu_tools.gui.session.services.device import DeviceService, DeviceSnapshot
-from zcu_tools.gui.session.setup_control import SetupControlPort
 from zcu_tools.gui.session.types import SocCfgHandle, SocHandle
 
 
@@ -216,10 +214,10 @@ class StartupDevices:
 
 @dataclass(frozen=True)
 class StartupSetup:
-    """Entry/point facet; calls marshals to the existing setup control owner."""
+    """Entry/point facet; calls marshal to the existing entry control owner."""
 
     calls: OwnerCalls
-    control: SetupControlPort
+    control: EntryControlPort
 
     def current(self) -> StartupSelection:
         """Read entry/point in one owner turn, without loading any source.
@@ -251,7 +249,7 @@ class StartupSetup:
         mode: Literal["inherit", "empty", "clone"] = "inherit",
         clone_from: str | None = None,
         description: str = "",
-    ) -> SavedPoint:
+    ) -> DocumentSetRef:
         """Create and select a point using the opened entry on-owner.
 
         label is one safe path segment. inherit copies global documents; empty
@@ -270,27 +268,20 @@ class StartupSetup:
     def open_entry(self, name: str) -> EntryInfo:
         """Open an existing entry by single-segment name; do not select a point.
 
-        Owner validates name and clears alias rows until a point is selected.
+        Owner validates name and installs the entry's global documents.
         I/O/binding failures propagate and preserve the old binding.
         Safe from worker/owner callback.
         """
         return self.calls.call(lambda: self.control.open_entry(EntryRequest(name)))
 
-    def use_point(self, label: str) -> SavedPoint:
-        """Select an existing label in the opened entry on-owner.
+    def use_point(self, point: str | None = None) -> DocumentSetRef:
+        """Select global for None/omitted, or any saved point label on-owner.
 
-        Missing entry/point and resource errors propagate, preserving the old
-        selection. No point is created. Safe from worker/owner callback.
+        Missing entry/point and preparation errors propagate, preserving binding,
+        versions, revisions and captures. Alias format/syntax errors are deferred
+        to consumers. No point is created. Safe from worker/owner callback.
         """
-        return self.calls.call(lambda: self.control.use_point(PointUseRequest(label)))
-
-    def use_global(self) -> SavedEntry:
-        """Select the opened entry global documents on-owner without creating a point.
-
-        Missing entry or preparation failure propagates and preserves selection.
-        Safe from a worker or owner callback. Existing captures remain unchanged.
-        """
-        return self.calls.call(self.control.use_global)
+        return self.calls.call(lambda: self.control.use_point(point))
 
 
 @dataclass(frozen=True)
@@ -300,30 +291,33 @@ class StartupParameters:
     calls: OwnerCalls
     control: ContextControlPort
 
-    def apply_alias_rows(self, rows: tuple[AliasRow, ...]) -> None:
+    def apply_alias_rows(
+        self, rows: tuple[AliasRow, ...], *, point: str | None = None
+    ) -> None:
         """Validate and persist ordered authored rows, then publish them in memory.
 
-        Save the active aliases.yaml (entry when global, otherwise the selected
-        point), then install its revision and rows. Without an opened entry
+        None writes global aliases.yaml; a label must be the focused point.
+        Save then install its revision and rows. Without an opened entry
         raise FailedPreconditionError(no_context) before validation or I/O.
         Invalid rows and storage errors preserve the prior table/file.
         The context owner manages validation and atomic file replacement.
         Synchronous from a worker or owner callback.
         """
-        self.calls.call(lambda: self.control.apply_alias_rows(rows))
+        self.calls.call(lambda: self.control.apply_alias_rows(rows, point=point))
 
     def add_component(
-        self, name: str, kind: str, fields: YamlMap, *, setup: bool = False
+        self, name: str, kind: str, fields: YamlMap, *, point: str | None = None
     ) -> None:
-        """Add registered kind with working-unit fields to point or setup template.
+        """Add registered kind with working-unit fields to global or focused point documents.
 
-        setup=True targets the opened entry template, otherwise the selected
-        point. The owner validates and commits one transaction. Schema, context,
+        None targets global documents; a label must equal the focused point.
+        Other labels raise InvalidInputError(point_not_focused) before I/O.
+        The owner validates and commits one transaction. Schema, context,
         conflict and I/O errors propagate without rollback of earlier commands.
         Caller must not mutate fields until return. Worker/owner safe.
         """
         self.calls.call(
-            lambda: self.control.add_component(name, kind, fields, setup=setup)
+            lambda: self.control.add_component(name, kind, fields, point=point)
         )
 
 

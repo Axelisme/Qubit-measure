@@ -20,7 +20,7 @@ def component_flux_context(
     raise ValueError identifying both component and kind. An uncalibrated offset
     remains frame=None, not a synthesized zero-offset calibration.
     """
-    component = snapshot(target.resource.setup).components[target.component]
+    component = snapshot(target.resource.parameters()).components[target.component]
     identity = f"component {target.component!r} (kind {component.kind!r})"
     if provider is None:
         raise ValueError(f"No component flux provider configured for {identity}")

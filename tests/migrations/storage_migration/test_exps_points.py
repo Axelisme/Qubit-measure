@@ -122,11 +122,11 @@ def test_exps_child_becomes_complete_point_with_independent_meta_and_library(
     report = _convert(request, mapping)
     entry = _entry(request)
     assert entry.list_points() == ["070716_0.500", "direct"]
-    point = entry.use_point("070716_0.500")
+    point = entry.parameters("070716_0.500")
     assert point.C1.frequency == (12.5 if metadata == "values" else 3.0)
-    assert entry.setup.C1.frequency == 3.0
-    assert entry.use_point("direct").C1.frequency == 4.0
-    library_view = entry.module_library("070716_0.500").snapshot()
+    assert entry.parameters().C1.frequency == 3.0
+    assert entry.parameters("direct").C1.frequency == 4.0
+    library_view = entry.library("070716_0.500").snapshot()
     assert library_view.waveform_keys() == ("C1.waveforms.constant",)
     assert library_view.get_waveform("C1.waveforms.constant").length == 0.125
     assert document_value(snapshot(point), "general.ext.legacy_module_cfg") == {
@@ -192,7 +192,7 @@ def test_exps_child_without_parameter_files_still_gets_point(
     _convert(replace(request_data, part="parameters"), mapping)
     entry = _entry(request_data)
     assert entry.list_points() == ["empty"]
-    assert entry.use_point("empty").C1.frequency == 1.0
+    assert entry.parameters("empty").C1.frequency == 1.0
     assert list(child.iterdir()) == []
 
 
@@ -236,13 +236,13 @@ def test_data_publishes_point_figures_once_without_archiving_or_unproven_associa
     assert len(states) == 1
     assert states[0].operation == "copy"
     assert states[0].destination == target
-    entry.use_point("070716_0.500").C1.frequency = 99.0
+    entry.parameters("070716_0.500").C1.frequency = 99.0
     assert_difference(
         lambda: _convert(replace(request, part="all", resume=True), mapping),
         request,
         [entry.result_path / "points/070716_0.500/parameters.yaml"],
     )
-    assert _entry(request).use_point("070716_0.500").C1.frequency == 99.0
+    assert _entry(request).parameters("070716_0.500").C1.frequency == 99.0
     assert target.read_bytes() == retained_figure.read_bytes()
     assert not (request.result_root / "chip/qubit").exists()
     assert not (request.database_root / "chip/qubit").exists()

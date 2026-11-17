@@ -19,7 +19,7 @@ MCP 啟動新 GUI 時也可指定腳本：
 connect(launch="new", script="/absolute/path/to/zcu_lab/kickstart/six_fluxonium/startup.py")
 ```
 
-首次執行會從相鄰的 `entry-template.yaml` 建立 Q1–Q6、R1–R6、六條局部線 `Q1_bias`–`Q6_bias`、global coil `coil_bias` 與 `MG123456` 的 setup 參數。
+首次執行會從相鄰的 `entry-template.yaml` 建立 Q1–Q6、R1–R6、六條局部線 `Q1_bias`–`Q6_bias`、global coil `coil_bias` 與 `MG123456` 的 global 參數。
 腳本接著建立並選取 `initial` point，再保存 aliases：
 `mux=MG123456`、`qubit=Q1`、`resonator=$qubit.resonator`。
 七條 DC 線都是 `device/current_source` 元件，不會因此連線儀器。

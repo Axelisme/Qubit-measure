@@ -229,8 +229,8 @@ def blocked_writeback_window(
         EventBus(),
         project_root=str(tmp_path),
     )
-    ctrl.setup_control.new_entry(EntryRequest("synthetic"))
-    target = ctrl.setup_control.new_point(
+    ctrl.entry_control.new_entry(EntryRequest("synthetic"))
+    target = ctrl.entry_control.new_point(
         PointCreateRequest("working", "", CommandOrigin("gui"))
     )
     ctrl.context_control.set_parameter(target, "general.ext.blocked", 3)
@@ -403,12 +403,12 @@ def test_main_window_named_dialog_facade_delegates_to_registry(
     window.open_dialog(DialogName.PREDICTOR)
     assert window.list_open_dialogs() == [DialogName.PREDICTOR]
 
-    assert window.take_dialog_screenshot(DialogName.SETUP) == b"png"
+    assert window.take_dialog_screenshot(DialogName.ENTRY) == b"png"
 
     registry.close.assert_called_once_with(DialogName.PREDICTOR)
     registry.open.assert_called_once_with(DialogName.PREDICTOR, writable=True)
     registry.visible_names.assert_called_once_with()
-    registry.take_screenshot.assert_called_once_with(DialogName.SETUP)
+    registry.take_screenshot.assert_called_once_with(DialogName.ENTRY)
 
 
 def test_show_error_dialog_retains_until_close(main_window_control_factory, qapp):

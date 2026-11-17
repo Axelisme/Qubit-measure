@@ -12,10 +12,11 @@ from zcu_tools.gui.app.measure.state import State
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import InvalidInputError
 from zcu_tools.gui.session.aliases import AliasRow
-from zcu_tools.gui.session.context_types import EntryRequest, PointUseRequest
+from zcu_tools.gui.session.context_types import EntryRequest
 from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.resources.entry import ResultEntry, component_registry
 
+from tests.gui._context_reads import capture_focus
 from tests.gui.app.measure._components import register_all
 from tests.gui.app.measure._record_support import require_target
 from tests.gui.app.measure._templates import TEMPLATES
@@ -40,13 +41,13 @@ def session(qapp, tmp_path: Path) -> Generator[TemplateSession]:
             result_root=tmp_path / "result",
             database_root=tmp_path / "Database",
         )
-        entry.setup.add_component(
+        entry.parameters().add_component(
             "R1", kind="resonator", freq=6123.0, wiring={"ch": 1, "ro_ch": 2}
         )
-        entry.setup.add_component(
+        entry.parameters().add_component(
             "R2", kind="resonator", freq=7200.0, wiring={"ch": 3, "ro_ch": 4}
         )
-        entry.setup.add_component("Empty", kind="resonator")
+        entry.parameters().add_component("Empty", kind="resonator")
         entry.new_point("first")
         entry.new_point("second")
         state = State(SessionEnv(parameters=None, soc=None, soccfg=None))
@@ -57,9 +58,12 @@ def session(qapp, tmp_path: Path) -> Generator[TemplateSession]:
             BaseEventBus(),
             project_root=str(tmp_path),
         )
-        ctrl.setup_control.open_entry(EntryRequest("entry"))
-        ctrl.context_control.use_point(PointUseRequest("first"))
-        ctrl.context_control.apply_alias_rows((AliasRow("resonator", "R1"),))
+        ctrl.entry_control.open_entry(EntryRequest("entry"))
+        ctrl.context_control.use_point("first")
+        ctrl.context_control.apply_alias_rows(
+            (AliasRow("resonator", "R1"),),
+            point=ctrl.context_control.current_point_label(),
+        )
         try:
             yield TemplateSession(ctrl, entry, state)
             assert registry_state() == installed, (
@@ -76,7 +80,7 @@ def test_bound_resonator_creates_original_probe_from_public_template(
     session: TemplateSession,
 ) -> None:
     ctrl = session.controller
-    original = ctrl.context_control.read_context()
+    original = capture_focus(ctrl.context_control)
     ledger = session.entry.ledger.events()
     try:
         ctrl.create_from_template("module", "res_probe", "R1.pulses.probe")
@@ -84,7 +88,7 @@ def test_bound_resonator_creates_original_probe_from_public_template(
         raise AssertionError(
             "A bound calibrated resonator must create the original template"
         ) from error
-    current = ctrl.context_control.read_context()
+    current = capture_focus(ctrl.context_control)
     probe = current.library.module_spec("R1.pulses.probe")
     assert isinstance(probe, PulseSpec)
     assert probe.freq == 6123.0
@@ -98,7 +102,9 @@ def test_bound_resonator_creates_original_readout_with_adc_channel(
 ) -> None:
     ctrl = session.controller
     ctrl.context_control.set_parameter(
-        require_target(ctrl.context_control.read_context()), "R1.ext.time_of_fly", 0.5
+        require_target(capture_focus(ctrl.context_control)),
+        "R1.ext.time_of_fly",
+        0.5,
     )
     try:
         ctrl.create_from_template("module", "readout", "R1.readout.rf")
@@ -106,7 +112,7 @@ def test_bound_resonator_creates_original_readout_with_adc_channel(
         raise AssertionError(
             "A bound resonator must create the original readout template"
         ) from error
-    readout = ctrl.context_control.read_context().library.module_spec("R1.readout.rf")
+    readout = capture_focus(ctrl.context_control).library.module_spec("R1.readout.rf")
     assert isinstance(readout, PulseReadoutSpec)
     assert readout.freq == 6123.0
     assert readout.gen_ch == 1
@@ -117,8 +123,11 @@ def test_bound_empty_resonator_reports_first_missing_leaf_without_write(
     session: TemplateSession,
 ) -> None:
     ctrl = session.controller
-    ctrl.context_control.apply_alias_rows((AliasRow("resonator", "Empty"),))
-    before = ctrl.context_control.read_context()
+    ctrl.context_control.apply_alias_rows(
+        (AliasRow("resonator", "Empty"),),
+        point=ctrl.context_control.current_point_label(),
+    )
+    before = capture_focus(ctrl.context_control)
     version = session.state.version.get("context")
     ledger = session.entry.ledger.events()
     with pytest.raises(InvalidInputError) as error:
@@ -126,7 +135,7 @@ def test_bound_empty_resonator_reports_first_missing_leaf_without_write(
     assert "ch" in str(error.value)
     assert "Field required" in str(error.value)
     assert (
-        ctrl.context_control.read_context().library.document()
+        capture_focus(ctrl.context_control).library.document()
         == before.library.document()
     )
     assert session.state.version.get("context") == version

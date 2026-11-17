@@ -18,9 +18,9 @@ from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_types import (
     ContextSourceFault,
     ContextSourceUnavailableError,
-    SavedPoint,
+    DocumentSetRef,
 )
-from zcu_tools.gui.session.parameters import ParameterContext
+from zcu_tools.gui.session.parameters import DocumentSetCapture
 from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
 from zcu_tools.resources.entry.schema import ParameterDocument, ParameterGeneral
 
@@ -99,7 +99,7 @@ def environment(
 ) -> FormEnv:
     """Capture a point whose general.ext holds seed (omitted when None)."""
     ext: dict[str, JsonValue] = {} if seed is None else {"seed": seed}
-    context = ParameterContext(
+    context = DocumentSetCapture(
         point=ParameterDocument(
             format="zcu.parameter-container",
             format_version="2.0",
@@ -109,13 +109,13 @@ def environment(
         library=LibrarySnapshot(
             ModuleLibraryDocument(format="zcu.module-library", format_version="2.0")
         ),
-        target=SavedPoint(entry_name="entry", point="synthetic"),
+        target=DocumentSetRef(entry_name="entry", point="synthetic"),
         roles=None,
     ).bind_aliases((AliasRow("device", device),), {})
     if not faults:
         return FormEnv(parameters=context)
     return FormEnv(
-        parameters=ParameterContext(
+        parameters=DocumentSetCapture(
             point=context.document(),
             library=context.library,
             target=context.target,

@@ -212,7 +212,7 @@ def test_results_list_reports_unenumerable_entries_with_healthy_runs(
 def test_results_list_refreshes_disk_without_switching_opened_entry(
     results_rpc: ResultsRpc, saved_runs: tuple[Path, Path, Path], tmp_path: Path
 ) -> None:
-    results_rpc.controller.setup_control.open_entry(EntryRequest("A"))
+    results_rpc.controller.entry_control.open_entry(EntryRequest("A"))
     before = results_rpc.result("entry.info", {})
     assert len(results_rpc.runs()) == 3
     _native_run(tmp_path, "C", "p3", "20261008T000000Z-cccccc")

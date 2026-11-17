@@ -24,19 +24,13 @@ from zcu_tools.resources.document_names import (
     LIBRARY_FILENAME,
     PARAMETERS_FILENAME,
 )
-from zcu_tools.resources.document_store import DocumentRevision, DocumentStore
+from zcu_tools.resources.document_store import DocumentStore
 from zcu_tools.resources.parameter_metadata import validate_parameter_header
 from zcu_tools.resources.record_table import JsonlRecordTable
 
-from . import _point_origin
+from . import _parameter_origin
 from ._path_segments import validate_path_segment
-from .aliases import (
-    AliasReadResult,
-    EntryAliases,
-    load_entry_aliases_with_revision,
-    read_entry_aliases,
-    save_entry_aliases,
-)
+from .aliases import AliasFile
 from .errors import DestinationExistsError, MissingPointError
 from .ledger import RecordsLedger
 from .ledger_models import (
@@ -45,7 +39,7 @@ from .ledger_models import (
     LedgerEvent,
     LedgerEventContent,
 )
-from .points import PointView
+from .parameter_view import ParameterView
 from .registry import component_registry
 from .schema import (
     PARAMETER_FORMAT,
@@ -56,8 +50,8 @@ from .schema import (
 )
 from .storage import bind_record_table
 from .views import (
-    SetupView,
     cached_parameter_content,
+    parameter_origin,
     validate_view_components,
 )
 
@@ -67,7 +61,7 @@ if TYPE_CHECKING:
 
 def validate_point_creation(
     mode: Literal["inherit", "empty", "clone"],
-    clone_from: str | PointView | None,
+    clone_from: str | ParameterView | None,
 ) -> None:
     """Validate creation mode/source presence without reading or writing resources.
 
@@ -109,20 +103,20 @@ def _entry_path(root: str | Path, name: str, *, new_destination: bool = False) -
 
 
 def entry_component_paths(entry_root: Path) -> tuple[Path, ...]:
-    """List setup then sorted point YAML paths without parsing component schemas.
+    """List global then sorted point YAML paths without parsing component schemas.
 
     entry_root is the exact Result entry directory. A parameters.yaml file identifies
     an entry, as in ResultEntry.list_names; otherwise raise ValueError. Include
     every existing points/*/parameters.yaml file, even without library.yaml.
     Missing points/ means no points. Do not read YAML or create files or locks.
     """
-    setup = entry_root / PARAMETERS_FILENAME
-    if not entry_root.is_dir() or not setup.is_file():
+    global_path = entry_root / PARAMETERS_FILENAME
+    if not entry_root.is_dir() or not global_path.is_file():
         raise ValueError(
             f"{entry_root}: not an entry directory; expected {PARAMETERS_FILENAME}"
         )
     return (
-        setup,
+        global_path,
         *sorted(
             path
             for path in entry_root.glob(f"points/*/{PARAMETERS_FILENAME}")
@@ -170,7 +164,7 @@ def rename_entry(old: str, new: str, *, result_root: str | Path) -> None:
 class EntryIdentity:
     """Fixed values for creating a new entry, not ownership of existing paths.
 
-    created_at is a timezone-aware UTC datetime written to setup.
+    created_at is a timezone-aware UTC datetime written to global.
     Non-UTC or naive times raise ValueError.
     These values do not authorize opening, replacing or repairing any entry.
     """
@@ -189,33 +183,34 @@ class ResultEntry:
         source = result_path / PARAMETERS_FILENAME
 
         # Bind diagnostics to this handle without shared mutable model context.
-        class EntrySetupDocument(ParameterDocument):
+        class EntryGlobalDocument(ParameterDocument):
             _source = source
             _upgrade_target = result_path
 
         try:
-            self._setup_store = DocumentStore[ParameterDocument](
+            self._global_store = DocumentStore[ParameterDocument](
                 source,
-                EntrySetupDocument,
+                EntryGlobalDocument,
                 format=PARAMETER_FORMAT,
                 supported_version=PARAMETER_VERSION,
-                validate=self._validate_setup,
+                validate=self._validate_global,
                 read_validate=lambda document: self._validate_parameter_read(
                     document, source
                 ),
             )
         except ValidationError as exc:
             raise ValueError(f"{source.resolve()}: {exc}") from exc
-        self._setup = SetupView(self._setup_store, source)
+        self._global = ParameterView(
+            self._global_store,
+            source,
+            result_root=result_path.parent,
+            database_root=database_path.parent,
+        )
 
-    def _validate_setup(self, document: ParameterDocument) -> None:
+    def _validate_global(self, document: ParameterDocument) -> None:
         validate_view_components(
             document, source=self._result_path / PARAMETERS_FILENAME
         )
-
-    @property
-    def setup(self) -> SetupView:
-        return self._setup
 
     @property
     def result_path(self) -> Path:
@@ -247,65 +242,21 @@ class ResultEntry:
             raise ValueError(f"{path}: dispersive directory escapes its entry")
         return path
 
-    def load_aliases(self, *, point: str | None = None) -> EntryAliases:
-        """Read setup aliases, or one existing point's aliases when point is set.
+    def aliases(self, point: str | None = None) -> AliasFile:
+        """Observe only global aliases, or the safe single-segment point's file.
 
-        point=None selects <entry>/aliases.yaml. Otherwise point is a safe
-        single-segment label selecting <entry>/points/<point>/aliases.yaml;
-        invalid labels raise ValueError. Only aliases.yaml is read; neither
-        parameters.yaml nor library.yaml needs to exist or is parsed or changed.
-        A missing alias file returns an empty EntryAliases, without copying or
-        falling back to setup. Preserve order, empty bindings and raw $ links.
-        Accept zcu.aliases 1.x; header/schema/YAML and I/O errors propagate.
-        No component lookup or writes occur. Syntax validation belongs to the
-        caller's alias table owner.
+        Missing files yield an empty cached observation, without creating files.
+        Format errors are deferred in read().error; other I/O errors raise.
+        Neither parameters nor library is read. Point save requires its
+        parameters.yaml to exist. Session syntax admission belongs to the caller.
         """
-        aliases, _ = self.load_aliases_with_revision(point=point)
-        return aliases
-
-    def load_aliases_with_revision(
-        self, *, point: str | None = None
-    ) -> tuple[EntryAliases, DocumentRevision]:
-        """Read aliases and their exact validated byte revision together.
-
-        Selection and failures follow load_aliases. A missing aliases file
-        returns an empty table with revision=None, never a setup fallback.
-        """
-        aliases, revision = load_entry_aliases_with_revision(self._aliases_path(point))
-        return (EntryAliases(aliases={}) if aliases is None else aliases), revision
-
-    def read_aliases(self, *, point: str | None = None) -> AliasReadResult:
-        """Observe aliases once with their raw revision and deferred content error.
-
-        Selection follows load_aliases. The result retains invalid bytes' hash
-        and original error, not a valid empty fallback. Missing files are empty
-        with revision=None; other filesystem errors propagate. No writes occur.
-        """
-        return read_entry_aliases(self._aliases_path(point))
-
-    def save_aliases(
-        self, aliases: EntryAliases, *, point: str | None = None
-    ) -> DocumentRevision:
-        """Atomically replace setup or point aliases with the named raw table.
-
-        aliases is an EntryAliases containing ordered scalar/list bindings, not
-        resolved names. point=None selects setup; a safe single-segment point
-        label selects only that point's aliases.yaml. Invalid labels raise
-        ValueError; missing parameters.yaml raises FileNotFoundError. library.yaml
-        need not exist. Neither parameter document is parsed or changed.
-        Write zcu.aliases 1.0 after strict string validation, using sibling-temp
-        replacement. Schema,
-        YAML and I/O errors propagate; failed replacement retains the old file.
-        Other alias tables, parameters, library, ledger and preferences do not
-        change. Return the exact written bytes' revision. No multiwriter merge
-        or crash guarantee is offered.
-        """
-        destination = self._aliases_path(point)
-        if point is not None:
-            source = destination.parent / PARAMETERS_FILENAME
-            if not source.is_file():
-                raise FileNotFoundError(source)
-        return save_entry_aliases(destination, aliases)
+        source = self._aliases_path(point)
+        return AliasFile(
+            source,
+            required_parameters=source.with_name(PARAMETERS_FILENAME)
+            if point is not None
+            else None,
+        )
 
     def _aliases_path(self, point: str | None) -> Path:
         if point is None:
@@ -341,7 +292,7 @@ class ResultEntry:
         The analyzed event uses current UTC time and notebook
         origin. A non-None record (including {}) is attached as records/<id>.json.
         The returned ID can be read with ledger.get(id). No values are written;
-        callers use ordinary point or setup edits and choose any metadata.
+        callers use ordinary point or global edits and choose any metadata.
 
         Payload validation and RecordsLedger I/O/validation errors propagate
         unchanged. The ledger owns locking and publication; failure may leave
@@ -429,9 +380,9 @@ class ResultEntry:
         label: str,
         *,
         mode: Literal["inherit", "empty", "clone"] = "inherit",
-        clone_from: str | PointView | None = None,
+        clone_from: str | ParameterView | None = None,
         description: str | None = None,
-    ) -> PointView:
+    ) -> ParameterView:
         """Create an independent complete point and return its validated view.
 
         label is a safe single path segment; existing destinations raise
@@ -443,10 +394,11 @@ class ResultEntry:
         Invalid modes or mode/source combinations raise ValueError before writes.
         Renew created_at in every independent copy.
         clone_from is a same-entry label, <entry>/<point>, or a ResultEntry-bound
-        PointView using the same resolved result/database roots. Reload published
+        ParameterView using the same resolved result root. A global view raises
+        ValueError before writes with guidance to use mode="inherit". Reload published
         point parameters and library and renew creation time. Copy aliases.yaml from
-        setup when seeding, or from the source point when cloning, only if present.
-        Missing source aliases or library stay absent, without setup fallback
+        global when seeding, or from the source point when cloning, only if present.
+        Missing source aliases or library stay absent, without global fallback
         during clone or inherit. Library copies go through the library owner.
         All alias tables remain independent after creation. Point values and
         opaque metadata copy verbatim. Library Specs copy without source records,
@@ -457,6 +409,12 @@ class ResultEntry:
         point. No cross-file transaction is provided.
         """
         validate_point_creation(mode, clone_from)
+        if isinstance(clone_from, ParameterView):
+            origin = parameter_origin(clone_from)
+            if origin.source.resolve().parent.parent == origin.result_root:
+                raise ValueError(
+                    'Cannot clone a global ParameterView; use mode="inherit" instead'
+                )
         destination = _entry_path(
             self._result_path / "points", label, new_destination=True
         )
@@ -468,7 +426,7 @@ class ResultEntry:
                 self._empty_point(destination, description=description)
             else:
                 self._seed_point(destination)
-            point = self.use_point(label)
+            point = self.parameters(label)
             if description is not None:
                 with point.edit() as draft:
                     draft.set("general.description", description)
@@ -493,29 +451,29 @@ class ResultEntry:
         with (destination / PARAMETERS_FILENAME).open("x", encoding="utf-8") as stream:
             YAML(typ="rt").dump(document, stream)
 
-    def initialize_point_parameters(self, label: str) -> PointView:
-        """Replace an existing point's parameters with the current setup template.
+    def initialize_point_parameters(self, label: str) -> ParameterView:
+        """Replace an existing point's parameters with the current global template.
 
         Use after new_point(mode="empty") for caller-owned, unpublished points.
         Copy parameters only; never read or copy library or aliases. Under the
-        template lock, refresh and validate setup components, preserve raw YAML
+        template lock, refresh and validate global components, preserve raw YAML
         and forward-minor unknown fields, metadata, description and general.ext,
         and persist generated component defaults with a new UTC created_at.
         The source stays unchanged. Return a newly bound view; prior captures
-        are not refreshed. Invalid labels, missing points, invalid setup content
+        are not refreshed. Invalid labels, missing points, invalid global content
         or I/O errors propagate. Creation/publication rollback belongs to the
         caller: a failure after copying may leave replaced point parameters.
         """
-        self.use_point(label)
+        self.parameters(label)
         destination = _entry_path(self._result_path / "points", label)
         self._initialize_point_parameters(destination)
-        return self.use_point(label)
+        return self.parameters(label)
 
     def _initialize_point_parameters(self, destination: Path) -> None:
         # Copy the validated YAML snapshot while the template lock is held.
-        with self._setup_store.locked():
-            self._setup_store.refresh()
-            content = cached_parameter_content(self.setup)
+        with self._global_store.locked():
+            self._global_store.refresh()
+            content = cached_parameter_content(self.parameters())
             components = {
                 name: content.component(name) for name in content.component_names()
             }
@@ -542,11 +500,13 @@ class ResultEntry:
         if aliases.exists():
             shutil.copyfile(aliases, destination / ALIASES_FILENAME)
 
-    def _clone_source(self, clone_from: str | PointView) -> tuple[ResultEntry, Path]:
+    def _clone_source(
+        self, clone_from: str | ParameterView
+    ) -> tuple[ResultEntry, Path]:
         result_root = self._result_path.parent
         database_root = self._database_path.parent
-        if isinstance(clone_from, PointView):
-            identity = _point_origin.clone_source(
+        if isinstance(clone_from, ParameterView):
+            identity = _parameter_origin.clone_source(
                 clone_from,
                 result_root=result_root,
             )
@@ -571,7 +531,7 @@ class ResultEntry:
     def _clone_point(
         self,
         destination: Path,
-        clone_from: str | PointView,
+        clone_from: str | ParameterView,
     ) -> None:
         source_entry, source = self._clone_source(clone_from)
         store = source_entry._point_store(source / PARAMETERS_FILENAME)
@@ -594,39 +554,43 @@ class ResultEntry:
                 datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
             )
 
-    def use_point(self, label: str) -> PointView:
-        """Load one complete point and return an independently bound view.
+    def parameters(self, point: str | None = None) -> ParameterView:
+        """Return the global view, or load an independently bound point view.
 
-        label follows new_point's single-segment path rules. Only parameters.yaml
+        None selects this entry's cached global parameters. A point label
+        follows new_point's single-segment path rules. Only parameters.yaml
         must exist; library.yaml is neither required nor parsed here. Invalid
         labels raise ValueError. Missing parameters.yaml raises MissingPointError,
         a FileNotFoundError subclass; other I/O and reference errors propagate. Original
         models apply their required fields, defaults and validators. Schema
         ValidationError becomes ValueError with the full document path and original
         diagnostic. The original error remains its cause. References are resolved
-        only on request. The view binds one Store and never reads setup.
-        No files are committed, other snapshots changed or active point selected.
+        only on request. A point Store never reads global parameters; the
+        global view uses its installed snapshot. No files are committed,
+        other snapshots changed or active point selected.
         """
-        directory = _entry_path(self._result_path / "points", label)
+        if point is None:
+            return self._global
+        directory = _entry_path(self._result_path / "points", point)
         source = directory / PARAMETERS_FILENAME
         try:
             source.stat()
         except FileNotFoundError as error:
             raise MissingPointError(source) from error
-        return PointView(
+        return ParameterView(
             self._point_store(source),
             source,
             result_root=self._result_path.parent,
             database_root=self._database_path.parent,
         )
 
-    def module_library(
-        self, label: str | None = None, *, assets: WaveformAssetInfo | None = None
+    def library(
+        self, point: str | None = None, *, assets: WaveformAssetInfo | None = None
     ) -> ModuleLibrary:
-        """Open a setup or point library without consulting the ledger.
+        """Open a global or point library without consulting the ledger.
 
-        None selects entry/library.yaml; a label selects its point library
-        under use_point's safe path rules. assets is optional for Spec-only use.
+        point=None selects entry/library.yaml; a label selects its point library
+        under parameters' safe path rules. assets is optional for Spec-only use.
         A missing library at either scope is empty with revision None; the
         first nonempty edit creates it. External creation conflicts with edits
         until refresh installs that candidate.
@@ -638,8 +602,8 @@ class ResultEntry:
 
         directory = (
             self._result_path
-            if label is None
-            else _entry_path(self._result_path / "points", label)
+            if point is None
+            else _entry_path(self._result_path / "points", point)
         )
         return ModuleLibrary(
             directory / LIBRARY_FILENAME, assets=assets, allow_absent=True
@@ -681,7 +645,7 @@ class ResultEntry:
 
         result_root is the exact Result root, not an entry or Database directory.
         Missing entry, records directory or ledger returns (). An existing entry
-        must have a valid setup header and UTC creation time; components are not
+        must have a valid global header and UTC creation time; components are not
         interpreted. Ledger validation and I/O errors propagate. Symlinks must
         preserve root/entry/records containment and keep the ledger in records,
         otherwise raise ValueError. No entry, file, directory or lock is created,
@@ -699,7 +663,7 @@ class ResultEntry:
         """Read partial historical events for a safe single-segment entry name.
 
         result_root is the exact Result root, not an entry or Database directory.
-        Missing entry/records/ledger returns (). Validate setup identity, ledger
+        Missing entry/records/ledger returns (). Validate global identity, ledger
         JSON, versions, event/run IDs, duplicates and complete tails. Other fields
         validate on use or explicit project(). I/O and validation errors propagate.
         Symlink containment matches read_events_snapshot. No files, directories
@@ -725,17 +689,17 @@ class ResultEntry:
 
     @classmethod
     def read_identity(cls, name: str, *, result_root: str | Path) -> EntryIdentity:
-        """Read setup header and identity without component registration or locks.
+        """Read global header and identity without component registration or locks.
 
         name is a safe single entry name under result_root. Validate the shared
         parameter-container header and general UTC creation time only;
         do not interpret component kinds or require point/records directories.
         Invalid names, identity/header/YAML and escaping symlinks raise ValueError.
-        Missing setup and other filesystem errors propagate. No files are written.
+        Missing global and other filesystem errors propagate. No files are written.
         """
         source = _entry_path(result_root, name) / PARAMETERS_FILENAME
         if not source.resolve().is_relative_to(source.parent.resolve()):
-            raise ValueError(f"{source}: setup escapes its entry")
+            raise ValueError(f"{source}: global escapes its entry")
         try:
             with source.open(encoding="utf-8") as stream:
                 document = TypeAdapter(YamlMap).validate_python(
@@ -820,12 +784,12 @@ class ResultEntry:
     def open(
         cls, name: str, *, result_root: str | Path, database_root: str | Path
     ) -> ResultEntry:
-        """Open a Result entry from setup and bind database_root/name for Save.
+        """Open a Result entry from global and bind database_root/name for Save.
 
         name must be a safe single path segment. The Result entry directory and
-        setup must exist and validate its header; field values validate on use.
+        global must exist and validate its header; field values validate on use.
         Missing points/ and records/ are empty and are not created.
-        A legacy-only setup filename raises ValueError naming the offline filename
+        A legacy-only global filename raises ValueError naming the offline filename
         upgrade command; no legacy content is read. Other missing paths propagate
         filesystem errors. Schema ValidationError becomes
         ValueError with the full document path and original diagnostic. The original

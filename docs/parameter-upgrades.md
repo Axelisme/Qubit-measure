@@ -6,7 +6,7 @@
 
 `parameters.yaml`、每個 `points/<label>/parameters.yaml` 與 entry template 都有整份文件的 `schema_version: N`。它描述 component schema。`format` 與 `format_version` 仍描述 YAML 容器，兩種版本不互相代替。
 
-GUI／MCP 只讀 lab 宣告的目前版本。缺版或不同版本會在讀取處報錯，列出來源路徑、文件版本與目前版本。`Preview:` 一行預覽差異，`Apply:` 一行含 `--apply`，備份後改檔。Setup 或 point 的兩行指令都以整個 entry 目錄為目標，entry template 則以該檔案為目標。指令會 quote 含空白的路徑，可直接複製執行。讀取不改檔。不要為了消除錯誤手改版本標頭。
+GUI／MCP 只讀 lab 宣告的目前版本。缺版或不同版本會在讀取處報錯，列出來源路徑、文件版本與目前版本。`Preview:` 一行預覽差異，`Apply:` 一行含 `--apply`，備份後改檔。Global 或 point 的兩行指令都以整個 entry 目錄為目標，entry template 則以該檔案為目標。指令會 quote 含空白的路徑，可直接複製執行。讀取不改檔。不要為了消除錯誤手改版本標頭。
 
 目前 lab runtime 與升級目標都是 `schema_version: 3`，保留 flux v1→v2→v3 純函式步驟。V2 仍是每台儀器 half／integer／period 與 `flux_source`，v3 才使用 offset／period mapping 與 `flux_dev`。Runtime 只接受 v3，不做 legacy 相容讀取。
 
@@ -28,7 +28,7 @@ uv run --directory /absolute/checkout --no-sync -- python scripts/upgrade_parame
   --scope filenames /data/project/result/device --apply
 ```
 
-此 scope 接受 entry 目錄或精確舊檔路徑。Entry 目錄須含舊 setup 或新 parameters。
+此 scope 接受 entry 目錄或精確舊檔路徑。Entry 目錄須含舊 `setup.yaml` 或新 `parameters.yaml`。
 它只掃 entry 根與直屬 `points/*/`，不解析 YAML，也不升級 predictor。
 Dry-run 列出舊路徑與新路徑，不建立檔案或鎖。
 Apply 先保存原 bytes 備份，再建立新名稱並移除舊名稱，內容逐 byte 不變。
@@ -85,7 +85,7 @@ Apply 先檢查備份位置，再取得 [per-user runtime lock](../lib/zcu_tools
 
 ## 同一 CLI 的 record 範圍
 
-`--scope records --device-name <name>` 逐列處理 JSONL 歷史，不使用 component 版本鏈。名稱由 operator 宣告，不從 setup 或歷史內容推測。工具將完整的舊 `dev_value/dev_unit` 移入具名 `devices`，保留所有歷史行與未涉 payload，不補 frame/component。單檔有部分或腐敗列就整檔拒絕，其他檔案繼續。
+`--scope records --device-name <name>` 逐列處理 JSONL 歷史，不使用 component 版本鏈。名稱由 operator 宣告，不從參數文件或歷史內容推測。工具將完整的舊 `dev_value/dev_unit` 移入具名 `devices`，保留所有歷史行與未涉 payload，不補 frame/component。單檔有部分或腐敗列就整檔拒絕，其他檔案繼續。
 
 四類形狀、dry-run／apply、備份還原、舊 flat-frame 的 caller fallback，以及改名改接線流程見 [Record device 升級指南](record-device-upgrades.md)。Record 範圍不改本頁的目前 component 版本或 lab 升級步驟。
 

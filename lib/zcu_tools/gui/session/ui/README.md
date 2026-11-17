@@ -1,6 +1,6 @@
 # Shared session UI
 
-**Last updated:** 2026-10-29，Inspect entry destination
+**Last updated:** 2026-11-17，global／point 文件選擇
 
 **讀者：** framework-dev、agent。查找共用 dialog 的 owner，以及 UI 命令交給 session 的接縫。
 
@@ -8,7 +8,7 @@
 
 | 元件 | 操作與責任 |
 | --- | --- |
-| `SetupDialog`、`SocDialog` | Setup 透過 SetupControlPort 開啟 entry、切換 Global／point，並以 inherit（預設）／empty／clone 建立 point。SoC 透過 SocControlPort 連線與瀏覽 soccfg。 |
+| `EntryDialog`、`SocDialog` | Entry 透過 EntryControlPort 開啟 entry、切換 Global／point，並以 inherit（預設）／empty／clone 建立 point。SoC 透過 SocControlPort 連線與瀏覽 soccfg。 |
 | `InspectDialog`、`AliasPanel`、`ComponentTreeWidget` | 顯示與編輯 context、library 與 alias，將提交交給 context owner。 |
 | `DeviceDialog` | 透過 DeviceControlPort 操作裝置，使用已登錄 adapter 的專屬 panel。 |
 | `ArbWaveformDialog` | 透過 arb waveform port 讀寫 entry-scoped waveform 資產。 |
@@ -19,8 +19,8 @@
 ContextControlPort 與 PredictorControlPort 直接由 owner service 實作，UI 不因移除純轉發層而取得額外能力。
 App 決定 dialog 的呈現與生命週期，session services 擁有狀態提交與資源操作。
 Widget 不直接寫入文件或管理 driver 連線。
-Inspect 的 Parameters、Modules、Aliases 各有 Destination，可選 Active documents 或 Entry template。
-Entry template 讀 owner 已安裝的 entry cache，選了 point 也不讀磁碟候選或改 active selection。
+Inspect 的 Parameters、Modules、Aliases 各有 Destination，列 Global 與目前 point 名；GLOBAL 時只有 Global。
+Global 讀 owner 已安裝的 global cache，選了 point 也不讀磁碟候選或改 active selection。
 明確 entry 寫入成功後，owner 發布 EntryDocumentsChangedPayload，三頁經 LifetimeScope 訂閱。
 乾淨頁面更新顯示，dirty draft 保留原值與原 revision。
 Modules New 固定 capture 與 Create 的 scope，不能從 point 取 alias 卻寫 entry。

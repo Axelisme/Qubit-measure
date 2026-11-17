@@ -5,7 +5,6 @@ from pathlib import Path
 
 import pytest
 from zcu_tools.gui.event_bus import BaseEventBus
-from zcu_tools.gui.session.context_types import PointUseRequest
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.state import SessionState
 from zcu_tools.gui.session.types import SessionEnv
@@ -27,7 +26,9 @@ def selected(
             result_root=tmp_path / "result",
             database_root=tmp_path / "database",
         )
-        entry.setup.add_component("Q1", kind="fake/drive/a", rate=4300.0, sense="R1")
+        entry.parameters().add_component(
+            "Q1", kind="fake/drive/a", rate=4300.0, sense="R1"
+        )
         entry.new_point("first")
         bus = BaseEventBus()
         context = ContextService(
@@ -36,7 +37,7 @@ def selected(
             bind_assets=ArbWaveformDatabase.info_at,
         )
         context.install_entry(entry)
-        context.use_point(PointUseRequest("first"))
+        context.use_point("first")
         yield context, bus, entry
     finally:
         restore_registry(before)

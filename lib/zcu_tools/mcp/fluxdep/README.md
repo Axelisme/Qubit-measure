@@ -53,7 +53,7 @@ The server exposes 13 analysis tools, 3 control tools and 3 lifecycle tools, for
 | Analysis | `fluxdep_fit_result` | Recorded params, inputs and freshness; images only for fresh quality-bearing results. |
 | Analysis | `fluxdep_export_spectrums` | Sampled checkpoint, including empty completed spectra, without Filter masks. |
 | Analysis | `fluxdep_spectrum_load_processed` | Restore checkpoint; reject all conflicting names before publication. |
-| Analysis | `fluxdep_fit_export_params` | Predictor/setup/ledger export; native path, params, calibration source and analysis ID. |
+| Analysis | `fluxdep_fit_export_params` | Predictor/global/ledger export; native path, params, calibration source and analysis ID. |
 
 Command parameters, numeric ranges and transition formulas are in each tool's
 description. The agent does not manage open/cancel, context IDs, search tokens or
@@ -74,7 +74,7 @@ Local; a GUI lock or another online holder still permits connection. The reply
 contains native `control` (`holder`, `locked`, `online`, `me`), project paths,
 published spectrum stages/drafts and fit freshness. An optional project supplies
 `project_root`, `entry` and optional `component`. GUI opens `project_root/result/entry`
-and defaults the component to the setup qubit alias. The project receipt contains
+and defaults the component to the global qubit alias. The project receipt contains
 result_root, entry, component, result_path and predictors_path. Unconfigured
 fields are null. GUI validates entry and component kind; MCP does not derive paths
 from chip/qubit names. Launch uses the same
@@ -176,7 +176,7 @@ creates zero statistics or reads the current cloud. Stage finish tools project
 native invalidated labels without rebuilding the dependency graph.
 
 `fluxdep_fit_export_params()` calls only `fit.export_params`. The GUI writes
-`predictors/<component>.json` in the opened entry, updates declared setup fields
+`predictors/<component>.json` in the opened entry, updates declared global fields
 and records analysis in its ledger. No arbitrary path override is accepted.
 The reply contains `savepath`, full-precision GHz `params` with EJ/EC/EL,
 `component`, `analysis_id`, and `alignment_from`, the actual first aligned

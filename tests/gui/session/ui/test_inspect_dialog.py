@@ -30,7 +30,6 @@ from zcu_tools.gui.form import FormErrors
 from zcu_tools.gui.form_adapter import module_form
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_control import ContextControlPort
-from zcu_tools.gui.session.context_types import PointUseRequest
 from zcu_tools.gui.session.events import ContextSwitchedPayload
 from zcu_tools.gui.session.hardware_gate import RunBlocksHardwareGate
 from zcu_tools.gui.session.library_entry import open_library_entry
@@ -49,6 +48,7 @@ from zcu_tools.gui.session.ui.inspect_dialog import InspectDialog
 from zcu_tools.resources.entry import ResultEntry
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
+from tests.gui._context_reads import capture_focus
 from tests.gui._dialog_fakes import RecordingDialogPresenter
 from tests.gui._user_input import ComponentDriver, key_click
 from tests.gui.app.measure._record_support import require_target
@@ -115,7 +115,7 @@ def session(qapp: QApplication, tmp_path: Path) -> Generator[_Session]:
         "entry", result_root=tmp_path / "results", database_root=tmp_path / "Database"
     )
     entry.new_point("point")
-    with entry.module_library("point").edit() as draft:
+    with entry.library("point").edit() as draft:
         draft.set_waveform(WAVEFORM, ConstWaveformCfg(length=0.1))
         draft.set_module(
             PULSE,
@@ -129,7 +129,7 @@ def session(qapp: QApplication, tmp_path: Path) -> Generator[_Session]:
     )
     service.install_entry(entry)
     control = service
-    control.use_point(PointUseRequest("point"))
+    control.use_point("point")
     session = _Session(entry, control, bus)
     try:
         yield session
@@ -212,7 +212,7 @@ def _group_fold(parent: QWidget, name: str) -> QLabel:
 
 
 def _library(session: _Session):
-    return session.entry.module_library("point").snapshot()
+    return session.entry.library("point").snapshot()
 
 
 def _pulse(session: _Session, name: str = PULSE) -> PulseSpec:
@@ -331,7 +331,7 @@ def test_reopened_module_preserves_full_frequency_precision_on_commit(
     session: _Session,
 ) -> None:
     session.control.set_module(
-        require_target(session.control.read_context()),
+        require_target(capture_focus(session.control)),
         PULSE,
         PulseSpec(ch=0, nqz=1, freq=5000.1234, gain=0.25, waveform=WAVEFORM),
     )
@@ -349,7 +349,7 @@ def test_reopened_module_preserves_full_frequency_precision_on_commit(
 def test_child_waveform_key_stays_a_key_after_apply(session: _Session) -> None:
     # A is a separate public capture. Inspect's capture/state have no public
     # read seam; B below observes only the actual host's Qt controls and Apply.
-    capture = session.control.read_context()
+    capture = capture_focus(session.control)
     assert WAVEFORM in capture.library.waveform_keys()
     opened = open_library_entry(capture, "module", PULSE, arb_names=())
     try:
@@ -403,7 +403,7 @@ def test_name_enter_renames_and_a_taken_name_keeps_input_inline(
     tmp_path: Path,
 ) -> None:
     session.control.set_module(
-        require_target(session.control.read_context()),
+        require_target(capture_focus(session.control)),
         f"{PULSE}_v2",
         PulseSpec(ch=0, nqz=1, freq=1.0, gain=0.1, waveform=WAVEFORM),
     )
@@ -575,7 +575,7 @@ def test_new_entry_suggests_names_until_the_user_types_one(
     session: _Session,
 ) -> None:
     session.control.set_module(
-        require_target(session.control.read_context()),
+        require_target(capture_focus(session.control)),
         "Q1.pulses.probe",
         PulseSpec(ch=0, nqz=1, freq=1.0, gain=0.1, waveform=WAVEFORM),
     )
@@ -704,7 +704,7 @@ def test_new_entry_uses_point_aliases_and_recovers_after_missing_bindings(
     rows: tuple[AliasRow, ...],
     loaded: bool,
 ) -> None:
-    session.control.apply_alias_rows(rows)
+    session.control.apply_alias_rows(rows, point=session.control.current_point_label())
     templates = {
         "aliased": TemplateDef(
             PulseSpec,

@@ -592,7 +592,7 @@ def test_initial_manifest_interruption_reruns_with_fixed_identity_and_future_fie
         database_root=request_data.database_root,
     )
 
-    assert snapshot(entry.setup).general.created_at == created_at
+    assert snapshot(entry.parameters()).general.created_at == created_at
     manifest = json.loads(
         (entry.result_path / "records/migration-state.json").read_text()
     )
@@ -644,7 +644,7 @@ def test_initialization_windows_resume_without_an_explicit_resume_flag(
         database_root=request_data.database_root,
     )
 
-    assert snapshot(entry.setup).general.created_at == raw["created_at"]
+    assert snapshot(entry.parameters()).general.created_at == raw["created_at"]
     assert not (request_data.results_root / raw["temporary_name"]).exists()
     assert not (request_data.database_root / raw["temporary_name"]).exists()
 
@@ -662,7 +662,7 @@ def test_initial_window_yaml_formatting_is_skipped_without_rewriting(
         with path.open("w") as stream:
             YAML(typ="safe").dump(raw, stream)
     before = {path: (path.read_bytes(), path.stat().st_mtime_ns) for path in paths}
-    # Data-only leaves the initial setup/library unchanged after bootstrap.
+    # Data-only leaves the initial global/library unchanged after bootstrap.
     migrate(replace(request_data, part="data"), mapping)
     assert {
         path: (path.read_bytes(), path.stat().st_mtime_ns) for path in paths

@@ -109,6 +109,7 @@ def nested_recipe_rpc(form_rpc, tmp_path):
     from zcu_tools.cfg_model import ConstWaveformCfg, PulseSpec
     from zcu_tools.gui.remote.errors import RemoteError
 
+    from tests.gui._context_reads import capture_focus
     from tests.mcp.measure._support import make_client
     from tests.resources.entry.fakes import (
         register_fakes,
@@ -122,8 +123,10 @@ def nested_recipe_rpc(form_rpc, tmp_path):
     try:
         register_fakes()
         context = fixture.ctrl.context_control
-        context.add_component("Q1", "fake/drive/a", {})
-        target = context.read_context().target
+        context.add_component(
+            "Q1", "fake/drive/a", {}, point=context.current_point_label()
+        )
+        target = capture_focus(context).target
         context.set_waveform(target, "Q1.waveforms.seed", ConstWaveformCfg(length=0.1))
         context.set_module(
             target,

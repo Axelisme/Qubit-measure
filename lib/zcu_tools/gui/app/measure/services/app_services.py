@@ -27,7 +27,7 @@ from zcu_tools.gui.session.operation_runner import (
 )
 from zcu_tools.gui.session.services.build import SessionServices, build_session_services
 from zcu_tools.gui.session.services.progress import ProgressService
-from zcu_tools.gui.session.types import ParameterContext
+from zcu_tools.gui.session.types import DocumentSetCapture
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
 from ..writeback import WritebackControlFacet, WritebackService
@@ -139,7 +139,7 @@ def build_app_services(  # noqa: PLR0913
     hardware factory; tests may inject a hardware-free constructor.
 
     Aliases are file-backed. Startup scripts open an entry, then call
-    ctx.context.apply_alias_rows to initialize the active table explicitly.
+    ctx.context.apply_alias_rows to initialize global aliases, or pass the focused point label.
     """
     access = ExperimentAccess()
     operation_gate = OperationGate(bus)
@@ -172,10 +172,12 @@ def build_app_services(  # noqa: PLR0913
 
     def captured_parameters(
         aliases: Mapping[str, str] | None,
-    ) -> ParameterContext | None:
+    ) -> DocumentSetCapture | None:
         if state.session_env.parameters is None and not aliases:
             return None
-        return context.read_context(aliases=aliases)
+        return context.read_context(
+            point=context.current_point_label(), aliases=aliases
+        )
 
     def form_sources(aliases: Mapping[str, str] | None) -> TabFormSources:
         parameters = captured_parameters(aliases)
@@ -282,7 +284,7 @@ def build_app_services(  # noqa: PLR0913
     startup_context = StartupContext(
         soc=StartupSoc(calls, session.soc_connection, handles),
         devices=StartupDevices(calls, device, handles),
-        setup=StartupSetup(calls, session.setup_control),
+        setup=StartupSetup(calls, session.entry_control),
         context=StartupParameters(calls, session.context_control),
         tabs=StartupTabs(calls, tab_control),
         calls=calls,

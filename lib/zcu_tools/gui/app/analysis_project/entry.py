@@ -14,10 +14,10 @@ from .selection import AnalysisSelection
 
 
 def fluxonium_components(entry: ResultEntry) -> tuple[str, ...]:
-    """List setup fluxonium qubits in document order, without changing the entry."""
+    """List global fluxonium qubits in document order, without changing the entry."""
     return tuple(
         name
-        for name, model in snapshot(entry.setup).components.items()
+        for name, model in snapshot(entry.parameters()).components.items()
         if model.kind == "qubit/fluxonium" or model.kind.startswith("qubit/fluxonium/")
     )
 
@@ -59,7 +59,7 @@ class AnalysisEntry:
 
     @property
     def components(self) -> tuple[str, ...]:
-        """Legal fluxonium choices in setup order, without any default selection."""
+        """Legal fluxonium choices in global order, without any default selection."""
         return fluxonium_components(self.resource)
 
     def select(self, component: str | None = None) -> AnalysisTarget:
@@ -69,9 +69,9 @@ class AnalysisEntry:
         and non-fluxonium kinds raise InvalidInputError before publication.
         No default is substituted for an absent or invalid alias.
         """
-        document = snapshot(self.resource.setup)
+        document = snapshot(self.resource.parameters())
         if component is None:
-            aliases = self.resource.load_aliases().aliases
+            aliases = self.resource.aliases().read().require_valid().aliases
             component = AliasTable(
                 [AliasRow(k, v) for k, v in aliases.items()]
             ).resolve("qubit", document)
@@ -91,10 +91,10 @@ class AnalysisEntry:
 
 @dataclass(frozen=True)
 class AnalysisTarget:
-    """Existing entry and concrete setup target; analysis never performs Save.
+    """Existing entry and concrete global target; analysis never performs Save.
 
     result_root is the absolute Result root; entry is its single-segment name.
-    component is a validated fluxonium qubit name. resource owns setup, predictor
+    component is a validated fluxonium qubit name. resource owns global, predictor
     paths and analysis ledger. Its Database binding is unused by analysis.
     """
 
@@ -108,7 +108,7 @@ class AnalysisTarget:
         cls,
         selection: AnalysisSelection,
     ) -> AnalysisTarget:
-        """Open an existing entry, defaulting to its setup qubit alias.
+        """Open an existing entry, defaulting to its global qubit alias.
 
         selection names the project root, entry and optional component.
         An empty entry is invalid here; GUI composition leaves it unopened.

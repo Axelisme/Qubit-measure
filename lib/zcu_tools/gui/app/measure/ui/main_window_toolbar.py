@@ -75,7 +75,7 @@ class MainWindowToolbar:
         self._scope.connect(self._new_tab_btn.clicked, self.show_new_tab_menu)
         self._layout.addWidget(self._new_tab_btn)
         self._layout.addStretch()
-        self._add_dialog_button("Setup…", DialogName.SETUP)
+        self._add_dialog_button("Entry…", DialogName.ENTRY)
         self._add_dialog_button("SoC…", DialogName.SOC)
         self._add_dialog_button("Devices…", DialogName.DEVICE)
         self._add_dialog_button("Inspect…", DialogName.INSPECT)

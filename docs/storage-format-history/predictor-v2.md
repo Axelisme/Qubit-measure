@@ -41,7 +41,7 @@ Fluxdep app 匯出時，把光譜明示的被掃儀器放在 `flux.period` 第�
 Native 只等 native，不換算。錯誤指名儀器與兩個單位，被掃 snapshot unit 不核對。
 缺席的其他 scalar 貢獻為 0。缺整份 snapshot 時，只有名稱吻合的單儀器來源可匯出。
 未校準、來源名稱不吻合或多儀器缺整份 snapshot 時，不寫 predictor，receipt 為 skipped、savepath=null。
-Setup 與 ledger 仍寫入，既有 predictor 保持原樣。
+Global 與 ledger 仍寫入，既有 predictor 保持原樣。
 
 ## 明確升級
 
@@ -53,7 +53,7 @@ uv run --no-sync -- python scripts/upgrade_parameters.py result/<entry>
 uv run --no-sync -- python scripts/upgrade_parameters.py result/<entry> --apply
 ```
 
-Entry 範圍包含 setup、各 point 的 component YAML 與 `predictors/*.json`。
+Entry 範圍包含 global、各 point 的 component YAML 與 `predictors/*.json`。
 Record 範圍 `--scope records` 不受此變更影響。
 
 V1 換算保留能量與 source，使用下式：

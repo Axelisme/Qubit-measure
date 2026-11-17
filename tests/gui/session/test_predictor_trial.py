@@ -379,11 +379,11 @@ def test_calibration_frequency_isolates_provider_failure_and_captures_lazily(
     calibration_trial: PredictorTrial, caplog: pytest.LogCaptureFixture
 ) -> None:
     from zcu_tools.gui.session.expression import EvalRef
-    from zcu_tools.gui.session.types import ParameterContext
+    from zcu_tools.gui.session.types import DocumentSetCapture
 
     calls: list[str] = []
 
-    def unavailable() -> ParameterContext | None:
+    def unavailable() -> DocumentSetCapture | None:
         calls.append("capture")
         raise RuntimeError("capture offline")
 

@@ -35,10 +35,9 @@ from zcu_tools.gui.session.context_types import (
     CommandOrigin,
     EntryRequest,
     PointCreateRequest,
-    PointUseRequest,
 )
 from zcu_tools.gui.session.operation_runner import OperationRunner
-from zcu_tools.gui.session.parameters import ParameterContext
+from zcu_tools.gui.session.parameters import DocumentSetCapture
 from zcu_tools.gui.session.services.progress import ProgressService
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.resources.entry import (
@@ -48,6 +47,7 @@ from zcu_tools.resources.entry import (
 )
 
 from tests.experiment._saving_support import SavingCfg, SavingResult
+from tests.gui._context_reads import capture_focus
 from tests.gui._progress_fakes import DirectProgressTransport
 from tests.gui._qt_waits import qt_until
 from tests.gui.app.measure._native_save_support import (
@@ -164,7 +164,7 @@ def test_native_run_without_save_records_acquired_at_its_historical_entry(
     )
     other.new_point("q")
     session.context.install_entry(other)
-    session.context.use_point(PointUseRequest("q"))
+    session.context.use_point("q")
     origin = GUI_ORIGIN if frontend == "gui" else CommandOrigin("mcp")
     token, terminal = _acquire_to_terminal(session, monkeypatch, origin=origin)
     assert terminal.outcome == "finished"
@@ -231,13 +231,21 @@ def role_application(
     try:
         register_fakes()
         installed = registry_state()
-        services.session.setup_control.new_entry(EntryRequest("birth"))
+        services.session.entry_control.new_entry(EntryRequest("birth"))
         services.session.context.new_point(
             PointCreateRequest("p", "birth point", GUI_ORIGIN)
         )
         for name in ("Q1", "Q2"):
-            services.session.context.add_component(name, "fake/drive/a", {"rate": 10.0})
-        services.session.context.apply_alias_rows((AliasRow("driver", "Q1"),))
+            services.session.context.add_component(
+                name,
+                "fake/drive/a",
+                {"rate": 10.0},
+                point=services.session.context.current_point_label(),
+            )
+        services.session.context.apply_alias_rows(
+            (AliasRow("driver", "Q1"),),
+            point=services.session.context.current_point_label(),
+        )
         yield state, services, bus
         assert registry_state() == installed
     finally:
@@ -259,19 +267,25 @@ def test_run_save_retains_admission_source_after_global_entry_and_alias_changes(
     state, services, bus = role_application
     tab_id = services.tab.new_tab("role_saving")
     tab = state.get_tab(tab_id)
-    birth = services.session.context.read_context()
+    birth = capture_focus(services.session.context)
     birth_storage = birth.capture_storage()
-    services.session.setup_control.new_entry(EntryRequest("acquisition"))
+    services.session.entry_control.new_entry(EntryRequest("acquisition"))
     services.session.context.new_point(
         PointCreateRequest("run-point", "Run source", GUI_ORIGIN)
     )
     for name in ("Q1", "Q2"):
-        services.session.context.add_component(name, "fake/drive/a", {"rate": 20.0})
+        services.session.context.add_component(
+            name,
+            "fake/drive/a",
+            {"rate": 20.0},
+            point=services.session.context.current_point_label(),
+        )
     services.session.context.apply_alias_rows(
         (
             AliasRow("driver", "Q2" if target is None else "Q1"),
             AliasRow("custom", "Q1"),
-        )
+        ),
+        point=services.session.context.current_point_label(),
     )
     origin = GUI_ORIGIN if frontend == "gui" else CommandOrigin("mcp")
     finished: list[RunFinishedPayload] = []
@@ -311,8 +325,11 @@ def test_run_save_retains_admission_source_after_global_entry_and_alias_changes(
         for output in member.outputs
     )
     services.session.context.set_parameter(require_target(parameters), "Q2.rate", 30.0)
-    services.session.context.apply_alias_rows((AliasRow("driver", "Q1"),))
-    services.session.setup_control.new_entry(EntryRequest("later"))
+    services.session.context.apply_alias_rows(
+        (AliasRow("driver", "Q1"),),
+        point=services.session.context.current_point_label(),
+    )
+    services.session.entry_control.new_entry(EntryRequest("later"))
     assert parameters.value("$driver.rate") == 20.0
     report = services.save_control.save_data(tab_id, origin=origin)
     assert all(output.status == "saved" for output in report.outputs)
@@ -422,7 +439,7 @@ def test_native_run_without_storage_reports_missing_acquired_destination(
     session.state.set_context(
         replace(
             session.state.session_env,
-            parameters=ParameterContext(
+            parameters=DocumentSetCapture(
                 point=captured.document(),
                 library=captured.library,
                 target=captured.target,

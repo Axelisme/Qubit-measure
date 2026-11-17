@@ -65,8 +65,8 @@ def stop_window(
     ctrl.session_services.soc_connection.install_soc(soccfg, soccfg)
     window = MainWindow(ctrl, templates=lambda: {})
     ctrl.add_view(window)
-    ctrl.setup_control.new_entry(EntryRequest("stop-scenario"))
-    ctrl.setup_control.new_point(PointCreateRequest("point", "", CommandOrigin("gui")))
+    ctrl.entry_control.new_entry(EntryRequest("stop-scenario"))
+    ctrl.entry_control.new_point(PointCreateRequest("point", "", CommandOrigin("gui")))
     window.show()
     qapp.processEvents()
     try:

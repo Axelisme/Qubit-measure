@@ -9,7 +9,7 @@ corresponding EventBus event so Views can react.
 It has only the dispersive single-flow pipeline actions: load fit inputs from
 an entry predictor → load a one-tone spectrum → preprocess → manually tune g & bare_rf
 (``set_manual_fit`` records the accepted values — there is no auto-fit) → export the
-entry dispersive artifact and declared setup fields. ``predict_dispersive`` is a read for the
+entry dispersive artifact and declared global fields. ``predict_dispersive`` is a read for the
 tuning figure (no State write, no event).
 """
 

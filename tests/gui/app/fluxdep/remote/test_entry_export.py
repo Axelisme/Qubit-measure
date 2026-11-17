@@ -30,15 +30,15 @@ def analysis_entry(tmp_path: Path) -> Iterator[ResultEntry]:
             result_root=tmp_path / "result",
             database_root=tmp_path / "unused",
         )
-        resource.setup.add_component("Q1", kind="qubit/fluxonium")
-        resource.setup.add_component("Q2", kind="qubit/fluxonium", EJ=9.0)
-        resource.save_aliases(EntryAliases(aliases={"qubit": "Q2"}))
+        resource.parameters().add_component("Q1", kind="qubit/fluxonium")
+        resource.parameters().add_component("Q2", kind="qubit/fluxonium", EJ=9.0)
+        resource.aliases().save(EntryAliases(aliases={"qubit": "Q2"}))
         yield resource
     finally:
         component_registry.unregister("qubit/fluxonium")
 
 
-def test_entry_alias_target_exports_predictor_setup_and_analysis_record(
+def test_entry_alias_target_exports_predictor_global_and_analysis_record(
     route_harness: RouteHarness, analysis_entry: ResultEntry
 ) -> None:
     route_harness.ctrl.configure_flux_context(synthetic_flux_context)
@@ -100,8 +100,8 @@ def test_entry_alias_target_exports_predictor_setup_and_analysis_record(
     assert predictor.flux.period == {"unnamed_device": 2.0}
     assert predictor.source is not None
     assert predictor.source.run_id is None
-    analysis_entry.setup.refresh()
-    components = snapshot(analysis_entry.setup).components
+    analysis_entry.parameters().refresh()
+    components = snapshot(analysis_entry.parameters()).components
     assert components["Q2"].model_dump() == {
         "kind": "qubit/fluxonium",
         "EJ": 5.123456789,
@@ -208,7 +208,9 @@ def test_export_unit_failure_reaches_rpc_without_writing(
     assert "coil" in message
     assert "'mA'" in message and "'A'" in message
     assert not target.predictor_path.exists()
-    assert snapshot(analysis_entry.setup).components["Q2"].model_dump()["EJ"] == 9.0
+    assert (
+        snapshot(analysis_entry.parameters()).components["Q2"].model_dump()["EJ"] == 9.0
+    )
     assert analysis_entry.ledger.read_events_snapshot() == ()
 
 
@@ -243,9 +245,9 @@ def test_invalid_entry_target_reports_the_cause_and_preserves_selection(
     before = route_harness.request(client, "project.info")
     component_registry.register("resonator", ComponentSchema)
     try:
-        analysis_entry.setup.add_component("R1", kind="resonator")
+        analysis_entry.parameters().add_component("R1", kind="resonator")
         if failure == "alias":
-            analysis_entry.save_aliases(EntryAliases(aliases={}))
+            analysis_entry.aliases().save(EntryAliases(aliases={}))
         entry = "missing-entry" if failure == "entry" else "synthetic"
         component = {"component": "missing-component", "kind": "R1"}.get(failure)
         rejected = route_harness.request(

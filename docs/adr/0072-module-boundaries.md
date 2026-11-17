@@ -441,12 +441,12 @@ Group 自己擁有 readout module，重排 resonators 不改 owner。
 Qubit 的 `flux: {offset, period: {<device>: ...}}` 保存零輸出時的 flux 與各儀器 signed periods，見 [[0082]]。Mux group 的 `flux_dev` 只保存預設 global coil 名稱，不要求提供 qubits，也不保存各 qubit 的校準。Global fluxdep 分開提出 `<qubit>.flux.period.<device>` 與預設勾選的 `<qubit>.flux.offset`，同時 append 原始擬合 record。保存沿用 [[0063]] 的單文件 mapping-leaf 合併與交易，不擴充 framework。
 
 Model 驗證名稱、qubits 與 resonators 等長及重複 qubit。
-提供 qubits 時，lab Form 在 Open／Reset 以固定 ParameterContext 檢查兩邊 component 存在與 kind，
+提供 qubits 時，lab Form 在 Open／Reset 以固定 DocumentSetCapture 檢查兩邊 component 存在與 kind，
 並逐項要求 `qubits[i].resonator == resonators[i]`。缺失或 null 同樣拒絕。
 錯誤指名欄位、index 與實際值，在 Run 前拒絕來源。不排序、猜配對或自動修正，不額外拒絕重複 resonator。
 Framework resources、session 與 program 不擁有這些關係。既有表單不隨全域來源編輯刷新。
 
-Scalar alias `mux=MG12` 已足以讓 adapter 經固定 ParameterContext 讀取 `$mux.resonators`。
+Scalar alias `mux=MG12` 已足以讓 adapter 經固定 DocumentSetCapture 讀取 `$mux.resonators`。
 一般 mux 與 FTF 表單在 `$mux.module.readout` 存在時引用 library，保留其完整 tones 與 scalar 設定。
 Mux 缺 slot 時用 blank 範本加 group tones；FTF 八張缺 slot 用 blank 範本，rb 保持 Invalid。
 `mux/onetone` 以副本加 group tones 調整 readout，並套用 ringup timing 初值。
@@ -521,10 +521,10 @@ Datafile／resources → core 的方向由 C8、C9、C12 約束。此函式只�
 
 `gui.app.analysis_project` 集中 fluxdep／dispersive 共用的 AnalysisEntry、AnalysisTarget、
 EntryDialog、entry CLI 與 RPC 投影。AnalysisEntry 以 project_root 下的 result/ 與 Database/
-開啟既有 ResultEntry，目標只接受 fluxonium 類 component。Component 省略時解析 setup 的
+開啟既有 ResultEntry，目標只接受 fluxonium 類 component。Component 省略時解析 global 的
 qubit alias。Dialog 在 alias 缺失或錯誤時要求使用者明示選擇，不自選第一個 component。
 分析 app 不使用舊 chip／qubit 兩級目錄與 params.json，也不呼叫 Database Save。
-Predictor 與 dispersive 格式由 resources 擁有。Fluxdep 匯出 predictor、更新 setup 已宣告欄位，
+Predictor 與 dispersive 格式由 resources 擁有。Fluxdep 匯出 predictor、更新 global 已宣告欄位，
 並以 record_analysis 留 ledger。Dispersive 讀 entry-local predictor，匯出獨立 dispersive artifact。
 Lab kind 的註冊函式由 `apps/` 組合根透過 lab 描述交給 analysis behavior；behavior 先註冊，再開啟 target。Framework 不 import `zcu_lab`。
 Notebook 的既有 params.json handoff 仍由 resources.qubit_params 擁有，不是分析 app 的 fallback。

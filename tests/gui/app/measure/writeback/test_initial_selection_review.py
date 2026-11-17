@@ -15,7 +15,6 @@ from zcu_tools.gui.app.measure.writeback import (
     WritebackWidget,
 )
 from zcu_tools.gui.event_bus import BaseEventBus
-from zcu_tools.gui.session.context_types import PointUseRequest
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.state import SessionState
 from zcu_tools.gui.session.types import SessionEnv
@@ -23,6 +22,7 @@ from zcu_tools.program.v2 import SweepCfg
 from zcu_tools.resources.entry import ResultEntry
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
+from tests.gui._context_reads import capture_focus
 from tests.gui._user_input import ComponentDriver
 from tests.gui.app.measure._synthetic import (
     SampleAdapter,
@@ -69,7 +69,7 @@ def review(qapp: QApplication, tmp_path: Path) -> Generator[ComponentDriver]:
         bind_assets=ArbWaveformDatabase.info_at,
     )
     context.install_entry(entry)
-    context.use_point(PointUseRequest("a"))
+    context.use_point("a")
     service = WritebackService(context, arb_names=lambda: ())
     adapter = ReviewAdapter
     run = RunRecord(
@@ -84,7 +84,9 @@ def review(qapp: QApplication, tmp_path: Path) -> Generator[ComponentDriver]:
         )
     )
     draft = service.create_draft(
-        items, parameters=context.read_context(), experiment_name="test/review"
+        items,
+        parameters=capture_focus(context),
+        experiment_name="test/review",
     )
     ctrl = MagicMock()
     ctrl.writeback_control.get_writeback_applied_for_pane.side_effect = lambda *_: (

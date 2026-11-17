@@ -7,14 +7,14 @@ from zcu_tools.analysis.fitting.singleshot_rabi import RabiJointFitSummary
 from zcu_tools.cfg_model import CircleClassifier
 from zcu_tools.gui.app.measure.adapter import WritebackItem
 from zcu_tools.gui.app.measure.writeback import calibrated_module_writeback
-from zcu_tools.gui.session.parameters import ParameterContext
+from zcu_tools.gui.session.parameters import DocumentSetCapture
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg, ReadoutCfg
 
 
 def rabi_calibration_writeback(
     fit: RabiJointFitSummary,
     readout: ReadoutCfg | None,
-    parameters: ParameterContext | None,
+    parameters: DocumentSetCapture | None,
 ) -> Sequence[WritebackItem]:
     """Propose the complete fitted circle on the captured resonator readout slot.
 

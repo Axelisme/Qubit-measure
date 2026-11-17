@@ -23,7 +23,7 @@ class FluxDepGuiLab(Protocol):
 
     @property
     def fluxdep_export_planner(self) -> ExportPlanner | None:
-        """Plan detached setup writes; None leaves viewing enabled but refuses export."""
+        """Plan detached global writes; None leaves viewing enabled but refuses export."""
         ...
 
     @property

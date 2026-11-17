@@ -48,7 +48,7 @@ Herald pass fraction measures classified acceptance, not ground-state purity. Ne
 ## Notebook
 
 Use a validated `JointReadoutCfg` as `cfg`. Supply the notebook's existing
-hardware handles and device manager. `point_view` is the bound PointView for the
+hardware handles and device manager. `point_view` is the bound ParameterView for the
 save destination. Run requires that environment; analyze uses the saved counts.
 
 ```python

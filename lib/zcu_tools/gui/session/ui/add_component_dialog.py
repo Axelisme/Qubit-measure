@@ -74,7 +74,7 @@ class AddComponentDialog(QDialog):
     """Collect a new component's name, kind and fields, then add it via the owner.
 
     The dialog states its destination ("Adds to: current point P1" or "Adds
-    to: setup template"). Below Name and Kind, a scroll area lists only required
+    to: Global"). Below Name and Kind, a scroll area lists only required
     leaf fields whose enclosing groups are all required, using full dotted-path
     labels without group headers or indentation. Kinds without these fields show
     "No required fields. Edit the others in Inspect after adding." Each field
@@ -100,13 +100,13 @@ class AddComponentDialog(QDialog):
         self,
         control: ContextControlPort,
         *,
-        setup: bool,
+        point: str | None,
         on_added: Callable[[str], None],
         parent: QWidget | None = None,
     ) -> None:
         """Build the form for the first registered kind; do not show it yet.
 
-        setup=True adds to the opened entry's setup template, False to the
+        point=None adds to global documents; a label selects the focused
         current point. on_added receives the new component's name after the
         owner accepted it, before the dialog closes. The destination text
         reads control.current_point_label() once, here; callers open a new
@@ -117,7 +117,7 @@ class AddComponentDialog(QDialog):
         self._control = control
         self._retired = False
         self.finished.connect(self._retire_inputs)
-        self._setup = setup
+        self._point = point
         self._on_added = on_added
         self._rows: list[_FieldRow] = []
         self.setWindowTitle("Add component")
@@ -188,13 +188,7 @@ class AddComponentDialog(QDialog):
         self._fit_to_screen()
 
     def _destination_text(self) -> str:
-        if self._setup:
-            return "Adds to: setup template"
-        label = self._control.current_point_label()
-        if label is None:
-            # The tree disables Add without a saved point, so this is a caller bug.
-            raise RuntimeError("Adding to the current point requires a selected point")
-        return f"Adds to: current point {label}"
+        return f"Adds to: {self._point or 'Global'}"
 
     # ------------------------------------------------------------------
     # Field form
@@ -220,7 +214,7 @@ class AddComponentDialog(QDialog):
             )
         ]
         # Reference choices and name completion come from the destination document.
-        document = self._control.inspect_document(setup=self._setup)
+        document = self._control.inspect_document(point=self._point)
         for row, spec in enumerate(required):
             label = QLabel(f"{spec.path} *")
             label.setObjectName(f"label:{spec.path}")
@@ -352,7 +346,7 @@ class AddComponentDialog(QDialog):
         name = self._name.text()
         try:
             self._control.add_component(
-                name, self._kind.currentText(), fields, setup=self._setup
+                name, self._kind.currentText(), fields, point=self._point
             )
         except Exception as exc:
             # GUI isolation point: show the owner's rejection, keep every input.

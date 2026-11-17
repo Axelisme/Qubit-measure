@@ -13,7 +13,6 @@ from zcu_tools.experiment.workflows import (
 )
 from zcu_tools.gui.app.measure.services.workflow_control import WorkflowControlFacet
 from zcu_tools.gui.form import FormErrors
-from zcu_tools.gui.session.context_types import PointUseRequest
 from zcu_tools.gui.session.ports import OperationConflictError
 from zcu_tools.resources.entry import ResultEntry
 
@@ -37,7 +36,7 @@ def asking(tmp_path):
     )
     entry.new_point("source", description="synthetic")
     harness.services.context.install_entry(entry)
-    harness.services.context.use_point(PointUseRequest("source"))
+    harness.services.context.use_point("source")
     board = white_noise(load_soccfg(), std_adc=1.0, seed=None, routes=((0, 0),))
     harness.services.soc_connection.install_soc(board.soc, board.soccfg)
     author = AskAuthor()

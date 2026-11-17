@@ -6,8 +6,8 @@ from copy import deepcopy
 from typing import TYPE_CHECKING
 
 from zcu_tools.gui.session.context_control import ContextControlPort
-from zcu_tools.gui.session.context_types import ContextTarget
-from zcu_tools.gui.session.types import ParameterContext
+from zcu_tools.gui.session.context_types import DocumentSetRef
+from zcu_tools.gui.session.types import DocumentSetCapture
 from zcu_tools.resources.entry import document_value
 from zcu_tools.resources.entry.writeback import WritebackResult
 
@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from .service import WritebackDraft
 
 
-def destination_path(item: WritebackItem, parameters: ParameterContext) -> str:
+def destination_path(item: WritebackItem, parameters: DocumentSetCapture) -> str:
     """Expand historical aliases/slots, leaving concrete destinations unchanged.
 
     parameters supplies only captured expression/library content, not a write
@@ -44,7 +44,7 @@ def destination_path(item: WritebackItem, parameters: ParameterContext) -> str:
 
 
 def destination_value(
-    item: WritebackItem, parameters: ParameterContext, path: str
+    item: WritebackItem, parameters: DocumentSetCapture, path: str
 ) -> object:
     """Read a concrete parameter path or raw library entry; absent means None."""
     if isinstance(item, ParameterWriteback):
@@ -63,7 +63,7 @@ def read_destination_value(
     write_port: ContextControlPort,
     draft: WritebackDraft,
     item: WritebackItem,
-    current: ParameterContext,
+    current: DocumentSetCapture,
     path: str,
 ) -> object:
     """Read a fixed destination, including accepted Record row metadata.
@@ -81,7 +81,7 @@ def read_destination_value(
 
 
 def applied_values(
-    target: ContextTarget,
+    target: DocumentSetRef,
     items: tuple[WritebackItem, ...],
     result: WritebackResult,
 ) -> tuple[WritebackApplied, ...]:

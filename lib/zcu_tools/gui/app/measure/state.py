@@ -29,7 +29,7 @@ from zcu_tools.gui.session.state import (
 from zcu_tools.gui.session.state import (
     SessionState,
 )
-from zcu_tools.gui.session.types import ParameterContext, SessionEnv
+from zcu_tools.gui.session.types import DocumentSetCapture, SessionEnv
 from zcu_tools.gui.version_table import (
     VersionTable as VersionTable,
 )
@@ -91,7 +91,7 @@ class RunPaneState:
     source_path: str | None = None
     source_operation_id: int | None = None
     confirmed_run_id: str | None = None
-    parameters: ParameterContext | None = None
+    parameters: DocumentSetCapture | None = None
     storage: StorageBinding | None = None
     stop_requested: bool = False
     # None for readable loaded history or non-Load; otherwise the fixed Load reason.

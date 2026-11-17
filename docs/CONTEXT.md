@@ -25,7 +25,7 @@ _Avoid_: project identity, chip/qubit scope
 _Avoid_: device value, bias folder
 
 **Parameter Container（參數容器）**:
-保存參數與 opaque metadata 的文件模型，包含 general、components 與 metadata。Setup 元件範本與工作點使用同一種模型，各自保存獨立的值與 metadata。Library 另存 Spec，不保存模組來源。
+保存參數與 opaque metadata 的文件模型，包含 general、components 與 metadata。Global 文件與工作點使用同一種模型，各自保存獨立的值與 metadata。Library 另存 Spec，不保存模組來源。
 _Avoid_: global parameter dict
 
 **Component（元件）**:
@@ -49,11 +49,11 @@ _Avoid_: run directory, parameter snapshot
 _Avoid_: experiment role, module role catalog
 
 **SessionEnv**:
-GUI session 目前生效的實驗 context 與 live 連線資源。它與預填 Setup 的 Session Preference 不同。
+GUI session 目前生效的實驗 context 與 live 連線資源。它與預填 Entry／SoC 的 Session Preference 不同。
 _Avoid_: persisted session preference, complete app state
 
 **Session Preference**:
-GUI 記住、用來預填 Setup 的條目名稱與連線位址。它不表示 entry 已開啟或儀器已連線。
+GUI 記住、用來預填 Entry／SoC 的條目名稱與連線位址。它不表示 entry 已開啟或儀器已連線。
 _Avoid_: active environment
 
 **Simulation Environment（模擬環境）**:

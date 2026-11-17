@@ -23,7 +23,7 @@ from zcu_tools.resources.context.library import (
 from zcu_tools.resources.dispersive_file import load_dispersive_file
 from zcu_tools.resources.document_names import LIBRARY_FILENAME, PARAMETERS_FILENAME
 from zcu_tools.resources.document_store import DocumentStore
-from zcu_tools.resources.entry import EditView, PointView, SetupView, source_path
+from zcu_tools.resources.entry import EditView, ParameterView, source_path
 from zcu_tools.resources.entry.schema import (
     PARAMETER_FORMAT,
     PARAMETER_VERSION,
@@ -47,7 +47,7 @@ _JSON = TypeAdapter(JsonObject)
 def document_value(path: Path, kind: DocumentKind) -> JsonObject:
     """Read without mutation through the public owner, retaining unknown raw data.
 
-    kind selects setup/point/library YAML or predictor/dispersive/t1_curve JSON.
+    kind selects global/point/library YAML or predictor/dispersive/t1_curve JSON.
     YAML default normalization is provided by DocumentStore, without library
     cleanup. JSON owners define null/default and active-channel semantics.
     Invalid/unreadable documents propagate their schema or I/O errors.
@@ -294,7 +294,7 @@ def publish_document(
 
 @contextmanager
 def edit_parameter(
-    session: MigrationSession, source: Path, view: SetupView | PointView
+    session: MigrationSession, source: Path, view: ParameterView
 ) -> Generator[EditView]:
     """Stage one parameter edit through DocumentStore/EditView before publication.
 
@@ -304,7 +304,12 @@ def edit_parameter(
     preparation discard staging; prepared failures retain the owner artifact.
     """
     path = source_path(view)
-    kind: DocumentKind = "setup" if isinstance(view, SetupView) else "point"
+    kind: DocumentKind = (
+        "setup"
+        if path.resolve().parent
+        == session.manifest.report.destination.result_path.resolve()
+        else "point"
+    )
     temporary = path.with_name(f".{path.name}.migration-edit-{uuid4().hex}.tmp")
     shutil.copyfile(path, temporary)
     try:

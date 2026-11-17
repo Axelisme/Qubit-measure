@@ -10,6 +10,7 @@ from zcu_tools.gui.app.measure.adapter import (
 )
 from zcu_tools.gui.form_adapter import FixedElements, Form, FormContext
 
+from tests.gui._context_reads import capture_focus
 from tests.gui.app.measure._synthetic import SampleAdapter, SampleCfg
 
 
@@ -171,7 +172,7 @@ def test_single_read_elements_keeps_sibling_drafts(form_rpc):
     library = indexed_env().library
     assert library is not None
     context.set_module(
-        context.read_context().target,
+        capture_focus(context).target,
         "Q.pulses.drive",
         library.module_spec("Q.pulses.drive"),
     )
@@ -229,7 +230,7 @@ def test_aggregate_relative_fields_use_real_rpc_and_keep_owner_errors(form_rpc):
     library = indexed_env().library
     assert library is not None
     context.set_module(
-        context.read_context().target,
+        capture_focus(context).target,
         "Q.pulses.drive",
         library.module_spec("Q.pulses.drive"),
     )

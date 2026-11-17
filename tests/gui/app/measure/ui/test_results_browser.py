@@ -23,7 +23,6 @@ from zcu_tools.gui.session.context_types import (
     CommandOrigin,
     EntryRequest,
     PointCreateRequest,
-    PointUseRequest,
 )
 
 from tests.gui._user_input import ComponentDriver
@@ -727,12 +726,12 @@ def load_browser(
     figures = session.native_data_path.parent / "figures"
     figures.mkdir()
     assert image.save(str(figures / "saved.png"))
-    ctrl.setup_control.open_entry(EntryRequest("original"))
+    ctrl.entry_control.open_entry(EntryRequest("original"))
     if variant != "empty":
-        ctrl.context_control.use_point(PointUseRequest("p"))
+        ctrl.context_control.use_point("p")
     if variant == "foreign":
-        ctrl.setup_control.new_entry(EntryRequest("foreign"))
-        ctrl.setup_control.new_point(
+        ctrl.entry_control.new_entry(EntryRequest("foreign"))
+        ctrl.entry_control.new_point(
             PointCreateRequest("other", "", CommandOrigin("gui"))
         )
     ctrl.add_view(window)

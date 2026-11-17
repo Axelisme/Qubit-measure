@@ -8,7 +8,7 @@ if TYPE_CHECKING:
     from datetime import datetime
 
     from zcu_tools.format_version import YamlMap, YamlValue
-    from zcu_tools.gui.session.context_types import ContextTarget
+    from zcu_tools.gui.session.context_types import DocumentSetRef
     from zcu_tools.gui.session.services.context import ContextService
     from zcu_tools.resources.entry import ResultEntry
     from zcu_tools.resources.entry.ledger_models import JsonObject
@@ -44,7 +44,7 @@ class ContextWritebackTarget:
     """
 
     def __init__(
-        self, context: ContextService, target: ContextTarget, entry: ResultEntry
+        self, context: ContextService, target: DocumentSetRef, entry: ResultEntry
     ) -> None:
         """Bind matching context/target/entry handles as described by the class."""
         self._context = context

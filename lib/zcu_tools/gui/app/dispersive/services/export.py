@@ -1,4 +1,4 @@
-"""Export dispersive fits to the entry artifact and declared setup fields."""
+"""Export dispersive fits to the entry artifact and declared global fields."""
 
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ class ExportService:
 
         Reject no entry or no accepted result before writing. Preserve authored
         transition annotations from an existing artifact. Source run is unknown;
-        created_at is this export's UTC time. Setup edits and the artifact are
+        created_at is this export's UTC time. Global edits and the artifact are
         separate commits; filesystem/schema failures propagate without rollback.
         Database is never saved.
         """
@@ -51,14 +51,14 @@ class ExportService:
         )
         target.resource.dispersive_path.mkdir(parents=True, exist_ok=True)
         save_dispersive_file(path, document)
-        component = snapshot(target.resource.setup).components[target.component]
+        component = snapshot(target.resource.parameters()).components[target.component]
         updates = {
             field: value
             for field, value in (("g", fit.g), ("bare_rf", fit.bare_rf))
             if field in type(component).model_fields
         }
         if updates:
-            with target.resource.setup.edit() as draft:
+            with target.resource.parameters().edit() as draft:
                 for field, value in updates.items():
                     draft.set(f"{target.component}.{field}", value)
         return str(path)

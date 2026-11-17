@@ -96,7 +96,7 @@ Fallback 統一使用 `analysis.flux.FluxFrame`，有值儀器的單位須與 ca
 
 ### Component 文件版本與升級
 
-Setup、point 與 entry template 共用整份文件的 `schema_version`，runtime 只接受 3。
+Global、point 與 entry template 共用整份文件的 `schema_version`，runtime 只接受 3。
 缺版或不同版本時列出文件版本、目前版本與長期 upgrade 命令，讀取不升級、不改檔。
 `resources.parameter_upgrade` 擁有版本鏈、dry-run、備份與寫入。Lab 擁有分類、逐版驗證與純函式步驟。
 未標版文件只有在明確 upgrade 且完整分類成功後才視為 v1。
@@ -119,7 +119,7 @@ offset = 0.5 - half_main / period_main - sum_other(integer[o] / period[o])
 不同來源候選 offset 不一致可能是 flux jump，不歸腐敗，也不要求一致或任選第一筆。
 
 Storage 在完整 seed／value batch 組成 EditView 前轉換，不先發布舊文件。
-每批與最終的 `flux_dev` 都只來自明示來源，包含完整 overlay 的有效 setup／mapping 繼承來源，否則留空。
+每批與最終的 `flux_dev` 都只來自明示來源，包含完整 overlay 的有效 global／mapping 繼承來源，否則留空。
 自動佔位不成為來源。Offset 每批按 v1 結構角色重算，自己的線優先，其次唯一 coil，否則 null。
 經 v2 再升 v3 時也由 v1 結構角色提供主線身分，不從佔位名稱猜測。
 完整有效且有明示來源的 point 校準取代繼承 offset 與該儀器 period，保留其他 periods。

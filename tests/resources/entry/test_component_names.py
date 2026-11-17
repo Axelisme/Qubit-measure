@@ -6,23 +6,23 @@ import pytest
 from ruamel.yaml import YAML
 from zcu_tools.resources.document_store import DocumentStore
 from zcu_tools.resources.entry import ResultEntry, snapshot, source_path
-from zcu_tools.resources.entry.points import PointView
+from zcu_tools.resources.entry.parameter_view import ParameterView
 from zcu_tools.resources.entry.schema import (
     PARAMETER_VERSION,
     ParameterDocument,
 )
-from zcu_tools.resources.entry.views import EditView, SetupView
+from zcu_tools.resources.entry.views import EditView
 
 
 @pytest.mark.parametrize(
     "name", ["wiring", "ext", "kind", "components", "entry_id", "created_at"]
 )
-@pytest.mark.parametrize("owner", ["setup", "point"])
+@pytest.mark.parametrize("owner", ["global", "point"])
 @pytest.mark.parametrize("operation", ["add", "load"])
 def test_component_field_names_support_public_reads_and_writes(
     entry: ResultEntry, name: str, owner: str, operation: str
 ) -> None:
-    view = entry.setup if owner == "setup" else entry.new_point("a")
+    view = entry.parameters() if owner == "global" else entry.new_point("a")
     if operation == "add":
         failure = None
         try:
@@ -70,11 +70,11 @@ def test_component_field_names_support_public_reads_and_writes(
         assert source_path(view).read_bytes() == before
 
 
-@pytest.mark.parametrize("owner", ["setup", "point", "edit"])
+@pytest.mark.parametrize("owner", ["global", "point", "edit"])
 def test_schema_accepts_identifiers_but_view_binding_rejects_shadowing(
     entry: ResultEntry, entry_roots: tuple[Path, Path], owner: str
 ) -> None:
-    view = entry.setup if owner == "setup" else entry.new_point("a")
+    view = entry.parameters() if owner == "global" else entry.new_point("a")
     document = snapshot(view).model_dump()
     document["components"]["edit"] = {"kind": "fake/sensor"}
     try:
@@ -96,15 +96,20 @@ def test_schema_accepts_identifiers_but_view_binding_rejects_shadowing(
         with store.edit() as draft:
             draft.components = candidate.components
         before = source.read_bytes()
-        if owner == "setup":
-            setup_store = DocumentStore(
+        if owner == "global":
+            global_store = DocumentStore(
                 source,
                 ParameterDocument,
                 format="zcu.parameter-container",
                 supported_version=PARAMETER_VERSION,
             )
             with pytest.raises(ValueError, match="edit.*shadow.*view"):
-                SetupView(setup_store, source)
+                ParameterView(
+                    global_store,
+                    source,
+                    result_root=entry_roots[0],
+                    database_root=entry_roots[1],
+                )
         else:
             point_store = DocumentStore(
                 source,
@@ -113,7 +118,7 @@ def test_schema_accepts_identifiers_but_view_binding_rejects_shadowing(
                 supported_version=PARAMETER_VERSION,
             )
             with pytest.raises(ValueError, match="edit.*shadow.*view"):
-                PointView(
+                ParameterView(
                     point_store,
                     source,
                     result_root=entry_roots[0],
@@ -137,7 +142,7 @@ def test_schema_accepts_identifiers_but_view_binding_rejects_shadowing(
         "set_meta",
     ],
 )
-@pytest.mark.parametrize("owner", ["setup", "point"])
+@pytest.mark.parametrize("owner", ["global", "point"])
 @pytest.mark.parametrize("operation", ["add", "bind"])
 def test_public_view_member_conflicts_are_named_without_publication(
     entry: ResultEntry,
@@ -146,7 +151,7 @@ def test_public_view_member_conflicts_are_named_without_publication(
     owner: str,
     operation: str,
 ) -> None:
-    view = entry.setup if owner == "setup" else entry.new_point("a")
+    view = entry.parameters() if owner == "global" else entry.new_point("a")
     view.add_component("R1", kind="fake/sensor", rate=10.0)
     path = source_path(view)
     cached = snapshot(view)
@@ -160,12 +165,12 @@ def test_public_view_member_conflicts_are_named_without_publication(
     def perform_operation() -> None:
         if operation == "add":
             view.add_component(name, kind="fake/sensor")
-        elif owner == "setup":
+        elif owner == "global":
             ResultEntry.open(
                 "entry", result_root=entry_roots[0], database_root=entry_roots[1]
             )
         else:
-            entry.use_point("a")
+            entry.parameters("a")
 
     with pytest.raises(ValueError, match="shadow.*view") as failure:
         perform_operation()

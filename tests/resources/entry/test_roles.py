@@ -9,7 +9,7 @@ import pytest
 from pydantic import BaseModel, ConfigDict
 from zcu_tools.resources.entry import (
     ComponentSchema,
-    PointView,
+    ParameterView,
     ResultEntry,
     RoleRegistry,
     RoleResolutionError,
@@ -33,15 +33,26 @@ def registered_role(name: str, spec: RoleSpec) -> Generator[str]:
         role_registry.unregister(name)
 
 
-def make_point(tmp_path: Path) -> PointView:
+def make_point(tmp_path: Path) -> ParameterView:
     entry = ResultEntry.create(
         "roles", result_root=tmp_path / "results", database_root=tmp_path / "database"
     )
-    entry.setup.add_component("R1", kind="fake/sensor", rate=6500.0)
-    entry.setup.add_component("R2", kind="fake/sensor", rate=7100.0)
-    entry.setup.add_component("Q1", kind="fake/drive/a", rate=4300.0, sense="R1")
-    entry.setup.add_component("Q2", kind="fake/drive/a", rate=5100.0, sense="R2")
+    entry.parameters().add_component("R1", kind="fake/sensor", rate=6500.0)
+    entry.parameters().add_component("R2", kind="fake/sensor", rate=7100.0)
+    entry.parameters().add_component("Q1", kind="fake/drive/a", rate=4300.0, sense="R1")
+    entry.parameters().add_component("Q2", kind="fake/drive/a", rate=5100.0, sense="R2")
     return entry.new_point("working")
+
+
+def test_global_view_resolves_readable_roles(entry: ResultEntry) -> None:
+    global_view = entry.parameters()
+    global_view.add_component("R1", kind="fake/sensor", rate=6500.0)
+    roles = global_view.resolve(["sense"], sense="R1")
+
+    assert roles.components == {"sense": "R1"}
+    assert roles.sense.rate == 6500.0
+    global_view.R1.rate = 7100.0
+    assert roles.sense.rate == 7100.0
 
 
 @pytest.fixture
@@ -158,7 +169,7 @@ class PairSchema(ComponentSchema):
 
 
 @pytest.fixture
-def pair_point(tmp_path: Path, registry_state_guard: None) -> Generator[PointView]:
+def pair_point(tmp_path: Path, registry_state_guard: None) -> Generator[ParameterView]:
     with ExitStack() as stack:
         component_registry.register("notebook/pair", PairSchema)
         stack.callback(component_registry.unregister, "notebook/pair")
@@ -209,8 +220,10 @@ def test_declared_kind_patterns_choose_unique_focus_and_derive_reference(
             result_root=tmp_path / "results",
             database_root=tmp_path / "database",
         )
-        entry.setup.add_component("Sensor", kind="beam/detector")
-        entry.setup.add_component("Emitter", kind="beam/source", detector="Sensor")
+        entry.parameters().add_component("Sensor", kind="beam/detector")
+        entry.parameters().add_component(
+            "Emitter", kind="beam/source", detector="Sensor"
+        )
         point = entry.new_point("working")
         resolved = point.resolve(
             ["beam", "detector"] if declaration == "explicit" else None
@@ -297,10 +310,10 @@ def test_unique_qubit_in_bound_point_is_default_focus(tmp_path: Path) -> None:
     entry = ResultEntry.create(
         "roles", result_root=tmp_path / "results", database_root=tmp_path / "database"
     )
-    entry.setup.add_component("R1", kind="fake/sensor", rate=6500.0)
-    entry.setup.add_component("Q1", kind="fake/drive/a", rate=4300.0, sense="R1")
+    entry.parameters().add_component("R1", kind="fake/sensor", rate=6500.0)
+    entry.parameters().add_component("Q1", kind="fake/drive/a", rate=4300.0, sense="R1")
     point = entry.new_point("one_qubit")
-    entry.setup.add_component("Q2", kind="fake/drive/b", rate=700.0)
+    entry.parameters().add_component("Q2", kind="fake/drive/b", rate=700.0)
     entry.new_point("two_qubits")
     roles = point.resolve()
     assert roles.components == {"driver": "Q1", "sense": "R1"}
@@ -358,7 +371,7 @@ def test_sequence_uses_registered_via_declaration(tmp_path: Path) -> None:
 
 
 def test_pair_focus_resolves_both_qubits_coupler_and_readouts(
-    pair_point: PointView,
+    pair_point: ParameterView,
 ) -> None:
     roles = pair_point.resolve(
         {
@@ -402,7 +415,7 @@ def test_role_mapping_stays_fixed_while_values_follow_bound_point(
     assert roles.sense.rate == 7100.0
     other = ResultEntry.open(
         "roles", result_root=tmp_path / "results", database_root=tmp_path / "database"
-    ).use_point("working")
+    ).parameters("working")
     other.R2.rate = 7200.0
     assert roles.sense.rate == 7100.0
     point.refresh()
@@ -610,7 +623,7 @@ def test_plain_string_target_resolves_and_round_trips_without_markers(
             "roles",
             result_root=tmp_path / "results",
             database_root=tmp_path / "database",
-        ).use_point("working")
+        ).parameters("working")
         assert loaded.resolve(requirements, focus="Q3").components == {
             "driver": "Q3",
             "sense": "R2",
@@ -653,7 +666,7 @@ def test_via_reads_collision_extra_target_and_follows_reload(
             "roles",
             result_root=tmp_path / "results",
             database_root=tmp_path / "database",
-        ).use_point("working")
+        ).parameters("working")
         assert loaded.resolve(requirements, focus="Q3").components == {
             "driver": "Q3",
             "sense": "R2",

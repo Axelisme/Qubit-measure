@@ -20,7 +20,7 @@ type AliasValue = str | list[str]
 
 
 class EntryAliases(BaseModel):
-    """A setup or point authored insertion-ordered alias table, not resolved names.
+    """A global or point authored insertion-ordered alias table, not resolved names.
 
     aliases maps names to raw scalar bindings or ordered lists in authored order.
     An empty string is unbound; $ links keep their original text. An empty
@@ -48,6 +48,81 @@ class AliasReadResult:
     aliases: EntryAliases
     revision: DocumentRevision
     error: Exception | None = None
+
+    def require_valid(self) -> EntryAliases:
+        """Return this observation's table, or raise its deferred format error."""
+        if self.error is not None:
+            raise self.error
+        return self.aliases
+
+
+class AliasFile:
+    """A cached observation of one global or point aliases.yaml.
+
+    Construction reads only source, once. Missing files give an empty table and
+    revision None; format errors are deferred in read().error. Other I/O errors
+    raise. This handle validates file format, not session alias syntax. Callers
+    with extra admission rules must open a new candidate rather than refresh an
+    installed handle. required_parameters gates point saves only.
+    """
+
+    def __init__(
+        self, source: Path, *, required_parameters: Path | None = None
+    ) -> None:
+        self._source = source
+        self._required_parameters = required_parameters
+        self._observation = read_entry_aliases(source)
+
+    def read(self) -> AliasReadResult:
+        """Return an isolated copy of the held observation, without I/O."""
+        observed = self._observation
+        return AliasReadResult(
+            observed.aliases.model_copy(deep=True), observed.revision, observed.error
+        )
+
+    def save(self, aliases: EntryAliases) -> DocumentRevision:
+        """Atomically replace this file, without optimistic locking or rereads.
+
+        aliases contains authored ordered scalar/list bindings; session syntax
+        belongs to the caller. Point handles require parameters.yaml to exist,
+        without parsing it. Success caches an isolated input copy and the exact
+        writer revision. Validation/I/O failure retains memory and the old file.
+        No other document is read or changed.
+        """
+        if (
+            self._required_parameters is not None
+            and not self._required_parameters.is_file()
+        ):
+            raise FileNotFoundError(self._required_parameters)
+        copied = aliases.model_copy(deep=True)
+        revision = save_entry_aliases(self._source, copied)
+        self._observation = AliasReadResult(copied, revision)
+        return revision
+
+    def refresh(self, *, strict: bool = False) -> bool:
+        """Reread only this file; report ordered content or validity changes.
+
+        Lax mode installs deferred format errors. Strict mode raises those
+        errors without installation. I/O failures always retain the observation.
+        Header/comment-only changes and missing/valid-empty transitions return
+        False but update revision. Two invalid observations compare byte hashes.
+        Session syntax validation is not performed; use a fresh candidate for
+        extra admission rules rather than refreshing an installed handle.
+        """
+        candidate = read_entry_aliases(self._source)
+        if strict and candidate.error is not None:
+            raise candidate.error
+        previous = self._observation
+        if previous.error is not None and candidate.error is not None:
+            changed = previous.revision != candidate.revision
+        elif previous.error is not None or candidate.error is not None:
+            changed = True
+        else:
+            changed = list(previous.aliases.aliases.items()) != list(
+                candidate.aliases.aliases.items()
+            )
+        self._observation = candidate
+        return changed
 
 
 def read_entry_aliases(source: Path) -> AliasReadResult:
