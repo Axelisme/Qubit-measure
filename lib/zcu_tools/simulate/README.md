@@ -196,14 +196,18 @@ dressed transition frequency.
 Resonator loss keeps only energy-lowering matrix elements of a.
 Qubit loss projects each parent jump into the joint basis.
 Pure dephasing is zero.
-The model identity hashes all numeric inputs, port names, retained labels,
-cutoff and flux level, with canonical matrix bytes and sorted drive ports.
+The model identity uses public `simulate.evolution.digest` on all input fields,
+including numeric arrays, port names, retained labels, cutoff and flux level.
+Canonical JSON sorts mapping keys, so drive insertion order does not affect it.
 
 Use this builder only when the caller explicitly needs photons in the evolution
 space. `SingleFluxoniumModel` with `DispersiveResonator` instead supplies the
 dispersive shifts for a semiclassical cavity; it adds no photon states to
 evolution. The builder does not choose a model adapter, remove duplicate loss
 terms or connect readout and acquisition environments.
+`SingleFluxoniumModel.joint_resonator_model` supplies native-cutoff fluxonium
+inputs and intrinsic qubit T1 without duplicate Purcell or thermal-photon terms;
+see the [fluxonium adapter](fluxonium/README.md#modelpy--單-fluxonium-演化與讀出模型).
 
 ## ADC readout
 
