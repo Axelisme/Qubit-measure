@@ -408,8 +408,8 @@ Setup 先取快照。只有旗標為 shutdown 或仍有 attachment 時，才交�
 Teardown 先與 setup 快照比對。只有不同時才交付 `DeferredDelete` 並 collect，再比一次。
 GC 與 `DeferredDelete` 只會移除 attachment，所以快照相等時省略回收不改變 guard 的判定。
 只剩弱引用、等待 GC 的 figure 不算污染；仍 attached 到 live container 的 figure 才算。
-測試自己建立的 `FigureContainer` 與 pyplot 的 Qt manager window 由建立它的 fixture 清理（container `clear()`／`close()`／`deleteLater()`、manager window `close()`／`deleteLater()`），
-不留給後面的模組。2026-10-28 全樹 15 個 teardown error 與一個退出時的 SIGSEGV 都來自這類未清理的測試資源。
+建立 `FigureContainer` 的 fixture 先呼叫 wrapper 的 `clear_dynamic_canvases()`，再對 fixture 持有的 Qt stack 呼叫 `close()`／`deleteLater()`。
+建立 pyplot Qt manager window 的 fixture 對該 window 呼叫 `close()`／`deleteLater()`，不留給後面的模組。2026-10-28 全樹 15 個 teardown error 與一個退出時的 SIGSEGV 都來自這類未清理的測試資源。
 
 ### 等待、時間與完成條件
 
