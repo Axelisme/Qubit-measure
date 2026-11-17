@@ -1,6 +1,6 @@
 # gui/widgets/form — Form draft view
 
-**Last updated:** 2026-11-16
+**Last updated:** 2026-11-17
 
 **讀者：** framework-dev。Form 草稿的 Qt 呈現、輸入與錯誤處理契約。
 
@@ -28,7 +28,7 @@ Host 必須同時傳入 `write=`、`select=` 與 `run_command=`，或全部省�
 
 Measure Run panel 使用 tab resource 的 guarded callbacks。Workflows 使用自己的 FormState 與 Apply／Discard／Start policy。Inspect 停用文字 idle commit，明確完成編輯後由 host 寫入有效 Spec。New Entry 與 writeback 編輯器保留各自的 entry capture、Apply／Cancel 與 destination guard。共用 editor 不接管這些 lifetime 或提交政策。公開 control object names、keyboard 與 Expression 細節見 `FormEditor` docstring。
 
-`InputSuggestions` 欄位預設使用下拉，清單外值仍顯示目前值而不清空。欄位標題與輸入控制項的右鍵選單都列出 field commands。Edit as text 與 Choose from list 透過相同的 guarded command callback 切換呈現。模式改變時重建該 row，保留 cfg 值；retiring row 先停用再解除 parent，等待 Qt deleteLater 期間不再提交文字。
+`InputSuggestions` 欄位預設使用下拉，清單外值仍顯示目前值而不清空。欄位標題與輸入控制項的右鍵選單都列出 field commands。Edit as text 與 Choose from list 透過相同的 guarded command callback 切換呈現。模式改變時重建該 row，保留 cfg 值；retiring row 先停用、解除 parent 並明確隱藏，等待 Qt deleteLater 期間不再提交文字，也不會顯示成獨立視窗。
 
 文字欄位的右鍵選單保留標準文字操作與 Expression。Owner description 的 field commands 顯示在掛載 row 的標題右鍵選單，包括 sweep 的折疊標題。Editor 不換算座標，只檢查 command.inputs 上的 local parse errors，再送既有 guarded run_command。換分支後保留不參與換算的 local 原文，包括未解析的 n／step。唯讀時 command actions 停用，晚建立的欄位也相同。Selector 是否畫成 dropdown 由 description.selector 決定，不由 Qt 猜 sweep 型別。
 

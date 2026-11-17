@@ -23,7 +23,7 @@ class TeardownReports:
         windows = [
             window
             for window in QApplication.topLevelWidgets()
-            if type(window).__name__ == "LeakedWindow"
+            if type(window).__name__ in {"LeakedWindow", "DeleteOnlyDialog"}
         ]
         self.visible[report.nodeid] = tuple(
             type(window).__name__ for window in windows if window.isVisible()
@@ -47,16 +47,20 @@ def test_gui_window_guard_runs_after_fixture_cleanup(
     (gui / "test_windows.py").write_text(
         """
 import pytest
-from qtpy.QtWidgets import QWidget
+from qtpy.QtWidgets import QDialog, QWidget
 
 windows = []
 
 class LeakedWindow(QWidget):
     pass
 
+class DeleteOnlyDialog(QDialog):
+    pass
+
 @pytest.fixture
 def owned_window(qapp):
     window = QWidget()
+    window.setObjectName('guard.synthetic.owned')
     windows.append(window)
     window.show()
     yield window
@@ -67,17 +71,33 @@ def test_fixture_closes_after_call(owned_window):
     assert owned_window.isVisible()
 
 def test_hidden_window(qapp):
-    windows.append(QWidget())
+    window = QWidget()
+    window.setObjectName('guard.synthetic.hidden')
+    windows.append(window)
 
 def test_closed_window(qapp):
     window = QWidget()
+    window.setObjectName('guard.synthetic.closed')
     windows.append(window)
     window.show()
     window.close()
 
 @pytest.fixture
+def delete_only_dialog(qapp):
+    dialog = DeleteOnlyDialog()
+    dialog.setObjectName('guard.synthetic.delete-only')
+    windows.append(dialog)
+    dialog.show()
+    yield dialog
+    dialog.deleteLater()
+
+def test_delete_only_dialog(delete_only_dialog):
+    assert delete_only_dialog.isVisible()
+
+@pytest.fixture
 def leaked_window(qapp, request):
     window = LeakedWindow()
+    window.setObjectName('guard.synthetic.leaked')
     windows.append(window)
     window.show()
     yield window
@@ -93,13 +113,19 @@ def test_leaked_window(leaked_window):
     reports = TeardownReports()
     try:
         result = pytester.runpytest_inprocess("-q", plugins=[reports])
-        result.assert_outcomes(passed=5, errors=2)
+        result.assert_outcomes(passed=6, errors=3)
         for name in (
             "test_fixture_closes_after_call",
             "test_hidden_window",
             "test_closed_window",
         ):
             assert reports.reports[f"gui/test_windows.py::{name}"].passed
+        nodeid = "gui/test_windows.py::test_delete_only_dialog"
+        dialog_report = reports.reports[nodeid]
+        assert dialog_report.failed
+        assert "DeleteOnlyDialog" in str(dialog_report.longrepr)
+        assert nodeid in str(dialog_report.longrepr)
+        assert reports.visible[nodeid] == ("DeleteOnlyDialog",)
         for parameter in ("False", "True"):
             nodeid = f"gui/test_windows.py::test_leaked_window[{parameter}]"
             leaked = reports.reports[nodeid]
@@ -113,5 +139,6 @@ def test_leaked_window(leaked_window):
     finally:
         # The synthetic owner isolates its deliberate leaks, not the guard.
         for window in QApplication.topLevelWidgets():
-            window.close()
-            window.deleteLater()
+            if window.objectName().startswith("guard.synthetic."):
+                window.close()
+                window.deleteLater()

@@ -309,6 +309,7 @@ def test_tab_switch_and_focus_loss_cancel_preview_without_canceling_analysis(qap
     assert cancelled == []
     assert updates == []
     widget.teardown()
+    stack.close()
     stack.deleteLater()
 
 

@@ -175,13 +175,20 @@ def main_window_control_factory(
         return authority
 
     yield create
-    for widget in qapp.topLevelWidgets():
-        if widget not in baseline:
-            if isinstance(widget, MainWindow):
-                widget.dispose()
-            else:
-                widget.close()
-                widget.deleteLater()
+    windows = set(qapp.topLevelWidgets()) - baseline
+    # A root's disposal also destroys its popup windows. Do not revisit their
+    # wrappers after MainWindow.dispose() synchronously deletes the Qt tree.
+    roots = [
+        widget
+        for widget in windows
+        if (parent := widget.parentWidget()) is None or parent.window() not in windows
+    ]
+    for widget in roots:
+        if isinstance(widget, MainWindow):
+            widget.dispose()
+        else:
+            widget.close()
+            widget.deleteLater()
     QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
     qapp.processEvents()
     authorities.clear()
