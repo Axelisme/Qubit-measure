@@ -18,6 +18,8 @@
 
 ## 模擬量測環境
 
+- 2026-11-17 [DOP853 加速路線的證據與未驗項](2026-11-17-dop853-speed-route-summary.md)：路線比較。指定 Gaussian 批次的多 worker 有配對收益，取樣前導共享潛力未知，載波固定原型精度不合格，GPU 全 14 組比較延期未量。
+
 - 2026-11-17 [DOP853 profile 場景的單列選取與 producer 接線](2026-11-17-dop853-profile-scenario-routing.md)：場景接線。Profile owner 先選名稱再建單一 Input，producer 附加宣告但不擴大 Pareto 預設選集，也不自動準備數值。
 
 - 2026-11-17 [Projective read 的輸出改成 Markov chain](2026-11-17-projection-markov-chain-readout.md)：資料格式。Single／six 輸出每點初始分佈與逐 read 轉移表，integrated 用逐態 flow counts，floor 改成逐點 identity 近似；FTF 不動，決策見 [ADR-0078](../adr/0078-evolution-module-boundary.md#projective-read-的-markov-chain-表示)。
