@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-11-17, constant-pair guards, sampled rejection and kappa2 admission
+**Last updated:** 2026-11-17, RWA Fourier record and Hamiltonian ownership
 
 **讀者：** framework-dev、agent。Segment evolution 的公開輸入、路由與數值邊界。
 
@@ -500,7 +500,7 @@ thresholds and algorithm details live with their owners:
 | Common-frame pricing and numerical construction | [common-frame dispatch](_common_frame_dispatch.py), [kernel](kernels/common_frame_kernel.py) |
 | Constant and shaped period builders | [Floquet period](kernels/floquet_period.py), [period table](kernels/period_table.py), [shaped Sambe](kernels/shaped_sambe.py), [gate cache](kernels/gate_cache.py) |
 | Two-tone Floquet admissions and variants | [Floquet](kernels/floquet.py) |
-| Shared RWA admission, retention and Hamiltonian coefficients | [RWA numerics](kernels/_rwa_numeric.py), using [Fourier numerics](kernels/_rwa_fourier.py); family playback remains in [multitone RWA](kernels/multitone_rwa.py) and [single constant RWA](kernels/single_tone_rwa.py) |
+| Shared RWA admission, retention and Hamiltonian coefficients | [RWA numerics](kernels/_rwa_numeric.py) owns policy, model/WorkPlan adapters and facts; [Fourier numerics](kernels/_rwa_fourier.py) owns the coefficient record and compiled Hamiltonian assembly. Family playback remains in [multitone RWA](kernels/multitone_rwa.py) and [single constant RWA](kernels/single_tone_rwa.py). |
 | Covariant gate admission, splitting and reuse | [single-tone gate](kernels/single_tone_gate.py), [multitone gate](kernels/multitone_gate.py), [shared builder](kernels/_rwa_gate.py), [phase graph](kernels/_rwa_graph.py) |
 | Direct integration and chronological chains | [DOP853 planning](_dop853_dispatch.py), [DOP853](kernels/dop853.py), [flux DOP853](kernels/flux_dop853.py) |
 
@@ -951,11 +951,17 @@ class's methods.
 | Period interpolation, secular playback and fractional tails | [kernels/_period_table.py](kernels/_period_table.py), shared by [period_table](kernels/period_table.py) and [shaped_sambe](kernels/shaped_sambe.py). |
 | Gate Hilbert endpoint integration | [kernels/_gate_endpoints.py](kernels/_gate_endpoints.py), shared by sixteen-node and [adaptive phase](kernels/gate_phase.py) builders. |
 | Constant-tone Hilbert period build and playback | [kernels/floquet_period.py](kernels/floquet_period.py) owns period builds and trajectories, with [CF4 grid](kernels/_cf4_grid.py) and [Sambe](kernels/_period_sambe.py) helpers. [kernels/_period_channel.py](kernels/_period_channel.py) owns complete secular-channel playback. Separate from two-tone Floquet frames. |
-| RWA row admission, retention orchestration, WorkPlan facts and Hamiltonian coefficients | [kernels/_rwa_numeric.py](kernels/_rwa_numeric.py), shared by ordinary multitone, single-constant RWA, covariant gates and dispatch. Policy constants live at its top; family preparation and playback remain with their kernels. The package-root coefficient API imports this owner directly. |
-| RWA Fourier coefficients, omitted-edge endpoint kicks, omission estimates and retained-graph dimension | [kernels/_rwa_fourier.py](kernels/_rwa_fourier.py), used by `_rwa_numeric.py`. Single-constant RWA and constant dual-tone `multitone_rwa` apply endpoint kicks using the resolved retention mask. Phase graphs and covariant gate construction remain in `_rwa_graph.py` and `_rwa_gate.py`. |
+| RWA row admission, retention orchestration, policy, model/WorkPlan coefficient adapters and facts | [kernels/_rwa_numeric.py](kernels/_rwa_numeric.py), shared by ordinary multitone, single-constant RWA, covariant gates and dispatch. The package root imports `rwa_coefficients` from this owner; it returns the Fourier owner's record. Family preparation and playback remain with their kernels. |
+| RWA Fourier coefficient record and numerics, compiled Hamiltonian assembly, omitted-edge endpoint kicks, omission estimates and retained-graph dimension | [kernels/_rwa_fourier.py](kernels/_rwa_fourier.py) owns `RWACoefficients` and `interaction_hamiltonian`, imported directly by the package root, RWA families, gate builder and joint-Fock diagnostic. Single-constant RWA and constant dual-tone `multitone_rwa` apply endpoint kicks using the resolved retention mask. Phase graphs and covariant gate construction remain in `_rwa_graph.py` and `_rwa_gate.py`. |
 | Two-tone k=0 admission and propagation, shared Fourier frame evaluation | [kernels/_floquet_k0.py](kernels/_floquet_k0.py) owns omission/Dyson admission, modal Dyson and periodic channels. Both k=0 and retained-sideband apply use its Fourier frame evaluation. Stark frame construction and row plans remain in [floquet](kernels/floquet.py); retained-sideband equations remain in `_floquet_sidebands`. Separate from single-constant-tone `_period_channel`. |
 | Two-tone retained-sideband certificates and equations | [kernels/_floquet_sidebands.py](kernels/_floquet_sidebands.py), used by [floquet](kernels/floquet.py) guard admission and apply. |
 | Common-carrier frame, SW2 beat channels, omitted-channel indicators and dressed CF4/secular propagation | [kernels/common_frame.py](kernels/common_frame.py), the model-only numerical owner with row-local admission. [kernels/common_frame_kernel.py](kernels/common_frame_kernel.py) hands charged products to the engine; [_common_frame_dispatch.py](_common_frame_dispatch.py) owns cold variant pricing. |
+
+The package-root coefficient names, record fields and numerical behavior are unchanged.
+`RWACoefficients.__module__` is now
+`zcu_tools.simulate.evolution.kernels._rwa_fourier`, rather than `_rwa_numeric`.
+The compiled `interaction_hamiltonian` source location also moves to
+`kernels/_rwa_fourier.py`. The old owner provides no compatibility shim.
 
 ## Accuracy, failures and lifecycle
 

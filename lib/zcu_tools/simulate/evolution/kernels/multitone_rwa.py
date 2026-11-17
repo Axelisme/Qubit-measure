@@ -16,18 +16,21 @@ from ..secular import SecularModel
 from ..workplan import WorkPlan
 from ._dop853 import Tolerances, integrate, tolerances
 from ._dop853_data import Models, Segments, pack_models
-from ._rwa_fourier import endpoint_kick, kick_coefficients
+from ._rwa_fourier import (
+    RWACoefficients,
+    endpoint_kick,
+    interaction_hamiltonian,
+    kick_coefficients,
+)
 from ._rwa_numeric import (
     CONSTANT_RWA_POLICY,
     CONSTANT_STEP_NS,
     MULTITONE_GUARD_POLICY,
     STEP_NS,
-    RWACoefficients,
     RWAGuardMetric,
     RWARetention,
     RWAUncomputed,
     admit_multitone_rows,
-    interaction_hamiltonian,
     multitone_constant_admission,
     multitone_retention,
     retained_mask,

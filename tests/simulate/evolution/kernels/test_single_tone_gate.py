@@ -396,10 +396,10 @@ def test_covariance_preserves_complex_density_for_sliced_support_and_key_domains
 def test_compiled_four_unitaries_match_scipy_at_sliced_absolute_intervals(
     frequency, monkeypatch
 ):
-    from zcu_tools.simulate.evolution.kernels._rwa_numeric import (
+    from zcu_tools.simulate.evolution.kernels._rwa_fourier import (
         interaction_hamiltonian,
-        rwa_coefficients,
     )
+    from zcu_tools.simulate.evolution.kernels._rwa_numeric import rwa_coefficients
 
     kernel = next(k for k in REGISTRY if k.name == "single_tone_gate")
     table = SegmentTable(

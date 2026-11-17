@@ -42,11 +42,10 @@ from .joint_fock import (
     JointFockResult,
     joint_fock_spectrum,
 )
+from .kernels._rwa_fourier import RWACoefficients, interaction_hamiltonian
 from .kernels._rwa_numeric import (
-    RWACoefficients,
     RWAGuardMetric,
     RWAUncomputed,
-    interaction_hamiltonian,
     rwa_coefficients,
 )
 from .kernels.common_frame import CommonFrameDiagnostic, common_frame_diagnostic

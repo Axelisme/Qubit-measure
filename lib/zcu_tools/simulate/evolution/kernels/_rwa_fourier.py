@@ -6,7 +6,7 @@ allocated and caller-owned. NumPy/Numba failures propagate without validation
 or recovery here. Carrier order is preserved; each sign axis is (+1,-1).
 """
 
-from typing import overload
+from typing import NamedTuple, overload
 
 import numpy as np
 from numba import njit
@@ -26,6 +26,62 @@ EDGE_GHZ = 0.05
 # The extended 96-point single-constant scan had no failures below 0.045813;
 # the same-tone counterexample is 0.015629. Keep the stricter shared cap.
 MAX_OMISSION_TRANSFER = 5.8e-3
+
+
+class RWACoefficients(NamedTuple):
+    """Joint RWA coefficients supplied by the single Hamiltonian owner.
+
+    positive/negative: (tones,M,M) GHz/gain Fourier operators, mutual adjoints.
+    diagonal: (tones,M) GHz/gain² phase-independent virtual diagonal terms,
+        multiplied by abs(gain*envelope)**2. Contains window-excluded single-tone
+        second-order shifts; retained edges are not counted twice.
+    All consumers, including the gate cache, assemble through
+    interaction_hamiltonian. They must not implement a separate drive RHS.
+    """
+
+    positive: NDArray[np.complex128]
+    negative: NDArray[np.complex128]
+    diagonal: NDArray[np.float64]
+
+
+@njit(nogil=True, cache=True)
+def interaction_hamiltonian(time, energies, coefficients, amplitudes, edges=None):
+    """Assemble the joint RWA interaction Hamiltonian, in GHz.
+
+    time is row-local ns. energies is the static interaction-picture diagonal,
+    either the joint energies for ordinary RWA or E+q@f for a covariant gate.
+    coefficients is RWACoefficients and owns EVERY driven term, including
+    phase-independent diagonal terms. amplitudes contains gain*envelope*phase
+    for every active tone. Diagonal terms come from the coefficient record;
+    the gate cache must not assemble its own RHS or add a separate shift.
+    edges optionally lists all nonzero Fourier coordinates as (count,2) int64;
+    ordinary RWA uses this exact sparsity, while other consumers default to the
+    full matrix. Diagonal virtual shifts are always assembled for every state.
+    Returns a new Hermitian matrix; input arrays remain unchanged. Restoring
+    the static picture at endpoints remains the integrator's responsibility.
+    """
+    size = len(energies)
+    h = np.zeros((size, size), dtype=np.complex128)
+    phases = np.exp(2j * np.pi * energies * time)
+    for tone in range(len(amplitudes)):
+        z = amplitudes[tone]
+        count = size * size if edges is None else len(edges)
+        for edge in range(count):
+            if edges is None:
+                i, j = edge // size, edge % size
+            else:
+                i, j = edges[edge, 0], edges[edge, 1]
+            h[i, j] += (
+                (
+                    coefficients.positive[tone, i, j] * z
+                    + coefficients.negative[tone, i, j] * z.conjugate()
+                )
+                * phases[i]
+                * phases[j].conjugate()
+            )
+        for i in range(size):
+            h[i, i] += coefficients.diagonal[tone, i] * abs(z) ** 2
+    return h
 
 
 @overload
