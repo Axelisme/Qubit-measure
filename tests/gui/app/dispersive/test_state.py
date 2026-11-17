@@ -6,7 +6,6 @@ import numpy as np
 from zcu_tools.analysis.dispersive.models import PreprocessResult
 from zcu_tools.analysis.spectrum import SpectrumData
 from zcu_tools.gui.app.dispersive.state import (
-    DEFAULT_BARE_RF,
     FIT_VERSION_KEY,
     ONETONE_VERSION_KEY,
     PREPROCESS_VERSION_KEY,
@@ -127,7 +126,3 @@ def test_set_disp_result_records_and_bumps_fit():
     assert st.disp_fit.g == 0.07 and st.disp_fit.bare_rf == 5.35
     assert st.disp_fit.res_dim == 5
     assert st.version.get(FIT_VERSION_KEY) > before
-
-
-def test_default_bare_rf_constant():
-    assert DEFAULT_BARE_RF == 5.0

@@ -51,6 +51,7 @@ def test_main_window_interaction_event_refreshes_finished_analysis_figure(
         writeback_items=(writeback_item,),
     )
     window = MainWindow(ctrl, templates=lambda: {})
+    main_window_control_factory.own(window)
     try:
         window.add_tab_widget("tab-1", "fake")
         tab = next(
@@ -103,6 +104,7 @@ def test_main_window_interaction_event_does_not_restore_old_figure_on_analyze_st
         figure=figure,
     )
     window = MainWindow(ctrl, templates=lambda: {})
+    main_window_control_factory.own(window)
     try:
         window.add_tab_widget("tab-1", "fake")
         tab = next(
@@ -152,6 +154,7 @@ def test_main_window_interaction_event_does_not_restore_old_figure_on_run_start(
     assert snapshot.analysis is not None
     ctrl.tab_control.get_tab_snapshot.return_value = snapshot
     window = MainWindow(ctrl, templates=lambda: {})
+    main_window_control_factory.own(window)
     tab = MagicMock()
     try:
         window.add_tab_widget("tab-1", "fake")
@@ -205,6 +208,7 @@ def test_main_window_interaction_event_shows_post_figure_after_primary(
         post_figure=post,
     )
     window = MainWindow(ctrl, templates=lambda: {})
+    main_window_control_factory.own(window)
     try:
         window.add_tab_widget("tab-1", "fake")
         tab = next(
@@ -270,6 +274,7 @@ def test_analysis_terminal_restore_rebuilds_real_primary_then_post_canvas(
     )
     ctrl.tab_control.get_tab_snapshot.return_value = snapshot
     window = MainWindow(ctrl, templates=lambda: {})
+    main_window_control_factory.own(window)
     try:
         window.add_tab_widget("tab-1", "fake")
         tab = next(
@@ -326,6 +331,7 @@ def test_loaded_content_clears_stale_real_canvas_when_state_has_no_figure(
     )
     ctrl.tab_control.get_tab_snapshot.return_value = snapshot
     window = MainWindow(ctrl, templates=lambda: {})
+    main_window_control_factory.own(window)
     try:
         window.add_tab_widget("tab-1", "fake")
         tab = next(
@@ -364,6 +370,7 @@ def test_finished_run_preserves_selected_subtab(
         "tab-1", has_run_result=True
     )
     window = MainWindow(ctrl, templates=lambda: {})
+    main_window_control_factory.own(window)
     try:
         window.add_tab_widget("tab-1", "fake")
         tab = next(
@@ -399,6 +406,7 @@ def test_stopped_run_does_not_auto_switch_to_analysis_tab(
         "tab-1", has_run_result=True
     )
     window = MainWindow(ctrl, templates=lambda: {})
+    main_window_control_factory.own(window)
     try:
         window.add_tab_widget("tab-1", "fake")
         tab = next(
@@ -429,6 +437,7 @@ def test_non_analysis_adapter_run_preserves_selected_subtab(
         "tab-1", has_run_result=True, supports_analysis=False, analyze_params=None
     )
     window = MainWindow(ctrl, templates=lambda: {})
+    main_window_control_factory.own(window)
     try:
         window.add_tab_widget("tab-1", "fake")
         tab = next(
@@ -465,6 +474,7 @@ def test_refresh_analyze_form_skips_non_analysis_adapter_without_raising(
         "tab-1", has_run_result=True, supports_analysis=False, analyze_params=None
     )
     window = MainWindow(ctrl, templates=lambda: {})
+    main_window_control_factory.own(window)
     try:
         window.add_tab_widget("tab-1", "fake")
         tab = next(
@@ -485,10 +495,9 @@ def test_show_analysis_figure_draws_canvas(
     main_window_control_factory, qapp, monkeypatch
 ):
     from matplotlib.figure import Figure
-    from zcu_tools.gui.app.measure.ui.main_window import ExpTabWidget
 
     del qapp
-    tab = ExpTabWidget(
+    tab = main_window_control_factory.create_tab(
         "tab-1",
         mock_ctrl(main_window_control_factory),
         AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False),
@@ -537,10 +546,9 @@ def test_show_analysis_figure_keeps_two_figures_coexisting(
     is distinct and showing one does not evict the other."""
     from matplotlib.figure import Figure
     from qtpy.QtWidgets import QApplication
-    from zcu_tools.gui.app.measure.ui.main_window import ExpTabWidget
 
     del qapp
-    tab = ExpTabWidget(
+    tab = main_window_control_factory.create_tab(
         "tab-1",
         mock_ctrl(main_window_control_factory),
         AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True),

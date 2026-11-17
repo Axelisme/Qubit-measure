@@ -23,10 +23,8 @@ from zcu_tools.gui.session.ui.inspect_dialog import InspectDialog
 from zcu_tools.resources.entry import ResultEntry
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
-from tests.gui._context_reads import capture_focus
 from tests.gui._dialog_fakes import RecordingDialogPresenter
 from tests.gui._user_input import ComponentDriver
-from tests.gui.app.measure._record_support import require_target
 from tests.resources.entry.fakes import register_fakes, registry_state, restore_registry
 
 
@@ -91,12 +89,17 @@ def conflict_ui(
     entry = ResultEntry.create(
         "entry", result_root=tmp_path / "results", database_root=tmp_path / "Database"
     )
-    entry.new_point("point")
+    point = entry.new_point("point")
+    point.add_component("Q1", kind="fake/drive/a", rate=4300.0)
+    entry.parameters().add_component("Q1", kind="fake/drive/a", rate=1200.0)
     with entry.library("point").edit() as draft:
         draft.set_waveform("Q1.waveforms.flat", ConstWaveformCfg(length=0.1))
     if request.param == "entry-library":
         with entry.library().edit() as draft:
             draft.set_waveform("Q1.waveforms.flat", ConstWaveformCfg(length=0.1))
+    second = entry.new_point("second")
+    with second.edit() as draft:
+        draft.set("Q1.rate", 5300.0)
     bus = BaseEventBus()
     service = ContextService(
         SessionState(SessionEnv(parameters=None, soc=None, soccfg=None)),
@@ -106,18 +109,6 @@ def conflict_ui(
     service.install_entry(entry)
     service.use_point("point")
     control = service
-    control.add_component(
-        "Q1", "fake/drive/a", {"rate": 4300.0}, point=control.current_point_label()
-    )
-    control.add_component("Q1", "fake/drive/a", {"rate": 1200.0}, point=None)
-    entry.new_point("second")
-    service.use_point("second")
-    control.set_parameter(
-        require_target(capture_focus(control)),
-        "Q1.rate",
-        5300.0,
-    )
-    service.use_point("point")
     # The missing-file case deliberately leaves aliases revision=None.
     document = request.param.removeprefix("entry-")
     if document != "aliases-missing":
@@ -152,6 +143,7 @@ def conflict_ui(
         yield ComponentDriver(dialog), path, evidence, service, dialog
     finally:
         dialog.hide()
+        dialog.close()
         dialog.deleteLater()
         qapp.processEvents()
 

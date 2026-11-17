@@ -87,6 +87,7 @@ def run_form(
     window = MainWindow(
         ctrl, templates=lambda: {}, dialog_presenter=RecordingDialogPresenter()
     )
+    main_window_control_factory.own(window)
     window.add_tab_widget("pending-tab", "fake")
     window.resize(1100, 700)
     window.show()
@@ -100,7 +101,7 @@ def run_form(
         yield RunFormFixture(window, ctrl, owner, tab, line, runs)
     finally:
         window.remove_tab_widget("pending-tab")
-        window.deleteLater()
+        window.dispose()
         qapp.processEvents()
 
 
@@ -198,6 +199,7 @@ def test_stop_does_not_publish_or_run(run_form: RunFormFixture) -> None:
 
 def test_reset_replaces_published_input_with_defaults(
     run_form: RunFormFixture,
+    main_window_control_factory,
 ) -> None:
     fx = run_form
     dialogs = RecordingDialogPresenter(confirm_answers=[True])
@@ -205,6 +207,7 @@ def test_reset_replaces_published_input_with_defaults(
     fx.window.remove_tab_widget("pending-tab")
     fx.window.deleteLater()
     fx.window = MainWindow(fx.ctrl, templates=lambda: {}, dialog_presenter=dialogs)
+    main_window_control_factory.own(fx.window)
     fx.window.add_tab_widget("pending-tab", "fake")
     tab = fx.window.findChildren(ExpTabWidget)[0]
     line = tab.findChild(QLineEdit, "form.input.value")

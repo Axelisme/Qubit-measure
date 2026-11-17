@@ -67,3 +67,32 @@ Wall 包含 uv／Python／pytest 啟動與退出；兩邊的 instrumentation、J
 - 數值 fit 資料量變更須保留真擬合與驗證精度，不能降級驗證來換速度。
 
 既有成本診斷只用來找候選，不是加速證據；整個案例的秒數也不是可省時間的上界估計。
+
+## 2026-11-17 預設選集第一波整理
+
+本次在本機8核心經 `tools/run_heavy.py` 執行預設選集
+`pytest -n 4 --dist=worksteal`。同一 worktree、同一 tree 先完整跑一次預設選集暖機，
+這次不計入樣本，再在同一批次連續跑3次取牆鐘 median。
+GUI cache 仍每個 process 從空目錄開始，不以跨 process 的 GUI cache 當暖態。
+
+基準為 HEAD `de8245e3ff4ff958a05663771bf15dc30bbfeaff`，每次17,150 passed。
+`run_heavy` receipt 的 elapsed wall median 為263.51 s。該批背景噪音大，
+只保留其量法與數值，不把它當成無干擾的對照。
+
+整理後在 tree `86ffd001634fa79dfc804e319bccfb6be2819e38` 量到以下結果，
+每次17,323 passed。Child wall 由 wrapper 以 child 啟動至退出的時間取得，
+包含 uv／Python／pytest 啟退，不含 runner 排隊或事後 CSV 分析。
+
+| 正式 run | Child wall s | Pytest 自報 s |
+| --- | ---: | ---: |
+| 1 | 183.98 | 181.87 |
+| 2 | 185.08 | 182.95 |
+| 3 | 185.70 | 183.55 |
+| Median | 185.08 | 182.95 |
+
+交付 tree `9ceabc70a93670bbe809525b13db172d87cc1674` 在後續 owner guard 修正與
+README 定稿後沒有重新量測，不能把上表當成它的新量測結果。
+
+基準與整理後的時鐘邊界、tree、選集數都不同，也不是同批 old／new 成對比較。
+兩個 median 的差值不當成提速收益。Setup／call／teardown 的 phase 加總是四個 worker
+各自 phase 的耗時相加，不是整套牆鐘，也不能除以 worker 數推算可回收時間。

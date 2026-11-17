@@ -89,7 +89,7 @@ def saving_view(
         finally:
             ctrl.close()
             ctrl.tab_control.close_tab(tab_id)
-            window.deleteLater()
+            window.dispose()
             qapp.processEvents()
 
 
@@ -138,7 +138,7 @@ def unbound_saving_view(
         finally:
             ctrl.close()
             ctrl.tab_control.close_tab(tab_id)
-            window.deleteLater()
+            window.dispose()
             qapp.processEvents()
 
 

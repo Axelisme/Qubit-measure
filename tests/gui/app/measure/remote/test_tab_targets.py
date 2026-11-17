@@ -25,12 +25,8 @@ from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.gui.session.aliases import AliasRow
-from zcu_tools.gui.session.context_types import (
-    CommandOrigin,
-    EntryRequest,
-    PointCreateRequest,
-)
-from zcu_tools.resources.entry import component_registry
+from zcu_tools.gui.session.context_types import EntryRequest
+from zcu_tools.resources.entry import ResultEntry, component_registry
 
 from tests.gui._context_reads import capture_focus
 from tests.gui.app.measure._record_support import require_target
@@ -112,47 +108,44 @@ def application(
         controller = Controller(
             state, registry, None, BaseEventBus(), project_root=str(tmp_path)
         )
-        controller.entry_control.new_entry(EntryRequest("entry"))
-        controller.entry_control.new_point(
-            PointCreateRequest("working", "", CommandOrigin("gui"))
+        entry = ResultEntry.create(
+            "entry",
+            result_root=tmp_path / "result",
+            database_root=tmp_path / "Database",
         )
-        context = controller.context_control
-        context.add_component(
-            "Q1",
-            "fake/drive/a",
-            {"rate": 10.0, "sense": "R1"},
-            point=context.current_point_label(),
-        )
-        context.add_component(
-            "Q2",
-            "fake/drive/a",
-            {"rate": 20.0, "source": "Q1", "energy_a": None, "sense": "R2"},
-            point=context.current_point_label(),
-        )
-        context.add_component(
-            "S1", "fake/sensor", {"rate": 30.0}, point=context.current_point_label()
-        )
-        for name in ("R1", "R2", "R3"):
-            context.add_component(
-                name, "fake/sensor", {"rate": 30.0}, point=context.current_point_label()
+        point = entry.new_point("working", description="")
+        with point.edit() as draft:
+            draft.add_component("Q1", kind="fake/drive/a", rate=10.0, sense="R1")
+            draft.add_component(
+                "Q2",
+                kind="fake/drive/a",
+                rate=20.0,
+                source="Q1",
+                energy_a=None,
+                sense="R2",
             )
-        context.add_component(
-            "QL",
-            "fake/drive/library",
-            {"rate": 40.0, "module": {"pi": "driver.pulses.pi"}},
-            point=context.current_point_label(),
-        )
-        context.set_module(
-            require_target(capture_focus(context)),
-            "QL.pulses.pi",
-            PulseSpec(
-                ch=0,
-                nqz=1,
-                freq=100.0,
-                gain=0.25,
-                waveform=ConstWaveformCfg(length=0.05),
-            ),
-        )
+            for name in ("S1", "R1", "R2", "R3"):
+                draft.add_component(name, kind="fake/sensor", rate=30.0)
+            draft.add_component(
+                "QL",
+                kind="fake/drive/library",
+                rate=40.0,
+                module={"pi": "driver.pulses.pi"},
+            )
+        with entry.library("working").edit() as draft:
+            draft.set_module(
+                "QL.pulses.pi",
+                PulseSpec(
+                    ch=0,
+                    nqz=1,
+                    freq=100.0,
+                    gain=0.25,
+                    waveform=ConstWaveformCfg(length=0.05),
+                ),
+            )
+        controller.entry_control.open_entry(EntryRequest("entry"))
+        controller.entry_control.use_point("working")
+        context = controller.context_control
         context.apply_alias_rows(
             (AliasRow("driver", "Q1"),), point=context.current_point_label()
         )

@@ -116,6 +116,7 @@
 
 ## 測試與驗證
 
+- 2026-11-17 [GUI teardown 的可見視窗 guard 與 owner 清理](2026-11-17-gui-teardown-visible-window-guard.md)：測試護欄。GUI 測試 teardown 後仍可見的 top-level 視窗讓該測試失敗；guard 立即取樣，不先交付 DeferredDelete；fixture 只退休自己擁有的視窗；產品退休的 form row 明確隱藏。
 - 2026-11-16 [Tools 標準化：補工具缺口，不搬目錄、不加硬閘](2026-11-16-tools-standardization.md)：工具標準化。品質工具補 `-h`／argv 與 docstring，加只報告的 docstring 現況列與 README 正向規則；不搬目錄、不加硬閘。
 - 2026-11-16 [實驗 probe 的 snapshot 保存與比較](2026-11-16-probe-snapshots.md)：工具範圍。保存與比較留在 tools，階段不寫 snapshot，環境清理由獨立 context manager 收尾。
 - 2026-11-15 [Doc relations 略過 fenced code 示例連結](2026-11-15-doc-relations-fenced-links.md)：檢查器誤報，修正 checker 對示例的判讀，保留正文連結與 ADR 檢查。

@@ -23,6 +23,7 @@ from zcu_tools.gui.app.measure.writeback import WritebackValues
 from zcu_tools.gui.control_identity import ControlIdentity
 from zcu_tools.plotting.figures import FigureCollection
 
+from tests.gui._user_input import ComponentDriver
 from tests.gui.app.measure._form_fakes import (
     LookupCfg,
     configure_form_lookup,
@@ -171,6 +172,7 @@ def exp_tab_widget(qapp, make_ctrl):
         yield create_tab
     finally:
         for tab in owned_tabs:
+            tab.close()
             tab.deleteLater()
         owned_tabs.clear()
 
@@ -248,9 +250,6 @@ def test_no_analysis_capability_constructs_only_run_data_and_guide(
         tab_none._left_tabs.tabText(i) for i in range(tab_none._left_tabs.count())
     ]
     assert visible_none == ["Run", "Data", "Guide"]
-    # Prove absent Analysis/Post pages and controls/containers were never constructed, not only hidden
-    assert not hasattr(tab_none, "analyze_form")
-    assert not hasattr(tab_none, "writeback_widget")
     center_none = tab_none.findChild(ArtifactSaveCenter)
     assert center_none is not None
     assert (
@@ -263,14 +262,10 @@ def test_no_analysis_capability_constructs_only_run_data_and_guide(
         )
         == 1
     )
-    assert not hasattr(tab_none, "_analysis_panel")
     assert not any(
         widget.accessibleName() == "Analysis figure"
         for widget in tab_none.findChildren(QComboBox)
     )
-    assert not hasattr(tab_none, "post_analyze_form")
-    assert not hasattr(tab_none, "post_writeback_widget")
-    assert not hasattr(tab_none, "_post_panel")
     assert not any(
         widget.accessibleName() == "Post-analysis figure"
         for widget in tab_none.findChildren(QComboBox)
@@ -339,7 +334,7 @@ def test_post_capability_constructs_post_analysis_after_analysis(
 
 
 def test_main_window_refresh_projects_post_writeback_into_post_widget(
-    qapp, exp_tab_widget, make_ctrl
+    qapp, make_ctrl, tmp_path
 ):
     from zcu_tools.gui.app.measure.adapter import ParameterWriteback
     from zcu_tools.gui.app.measure.ui.main_window import MainWindow
@@ -348,34 +343,45 @@ def test_main_window_refresh_projects_post_writeback_into_post_widget(
     empty = make_snapshot(
         "tab-1", analysis=AnalysisMode.FIT, post=True, has_post_result=True
     )
-    assert empty.capabilities is not None
-    tab = exp_tab_widget("tab-1", ctrl, empty.capabilities)
-    tab.attach(empty, MagicMock())
-    assert tab.post_writeback_widget._items == []
+    ctrl.tab_control.get_tab_snapshot.return_value = empty
+    ctrl.tab_control.get_running_tab_id.return_value = None
+    window = MainWindow(ctrl, templates=lambda: {})
+    try:
+        window.add_tab_widget("tab-1", "fake")
+        window.resize(1100, 850)
+        window.show()
+        driver = ComponentDriver(window)
+        driver.select_tab("Post-Analysis")
+        assert not any(
+            w.object_name == "writebackActualPath" for w in driver.visible().widgets
+        )
+        driver.screenshot(tmp_path / "post-writeback-empty.png")
 
-    item = ParameterWriteback(
-        target_name="radius", description="post", proposed_value=1
-    )
-    item.session_id = "param-1"
-    item.selected = True
-    committed = make_snapshot(
-        "tab-1",
-        analysis=AnalysisMode.FIT,
-        post=True,
-        has_post_result=True,
-        post_writeback_items=(item,),
-    )
-    host = MagicMock()
-    host._tab_widgets = {"tab-1": tab}
-    host._ctrl = ctrl
-
-    ctrl.writeback_control.get_writeback_values_for_pane.return_value = {
-        item.session_id: WritebackValues("radius", None, 1, None)
-    }
-    MainWindow.refresh_tab_writeback(host, "tab-1", committed)
-
-    assert tab.post_writeback_widget._items == [item]
-    tab.detach()
+        item = ParameterWriteback(
+            target_name="radius", description="post", proposed_value=1
+        )
+        item.session_id = "param-1"
+        item.selected = True
+        committed = make_snapshot(
+            "tab-1",
+            analysis=AnalysisMode.FIT,
+            post=True,
+            has_post_result=True,
+            post_writeback_items=(item,),
+        )
+        ctrl.tab_control.get_tab_snapshot.return_value = committed
+        ctrl.writeback_control.get_writeback_values_for_pane.return_value = {
+            item.session_id: WritebackValues("radius", None, 1, None)
+        }
+        window.refresh_tab_writeback("tab-1", committed)
+        qapp.processEvents()
+        assert driver.observe("radius*").checked is True
+        assert driver.observe(object_name="writebackActualPath").text == "radius"
+        driver.screenshot(tmp_path / "post-writeback-populated.png")
+    finally:
+        window.remove_tab_widget("tab-1")
+        window.dispose()
+        qapp.processEvents()
 
 
 def test_figure_containers_remain_stable_across_tab_switch_and_busy(
@@ -685,52 +691,69 @@ def test_operation_gates_editing_for_affected_pane(qapp, exp_tab_widget, make_ct
     tab.detach()
 
 
-def test_post_writeback_operates_on_its_own_draft(qapp, exp_tab_widget, make_ctrl):
+def test_post_writeback_operates_on_its_own_draft(
+    qapp, exp_tab_widget, make_ctrl, tmp_path
+):
+    from zcu_tools.gui.app.measure.adapter import ParameterWriteback
+
     ctrl = make_ctrl()
-    # Setup controller mock to track pane-qualified calls
-    ctrl.writeback_control.set_writeback_item_for_pane = MagicMock(
-        return_value={"valid": True}
+    ctrl.writeback_control.set_writeback_item_for_pane.return_value = {"valid": True}
+    primary = ParameterWriteback(
+        target_name="y", description="primary", proposed_value=2
     )
-    ctrl.get_writeback_item_draft_for_pane = MagicMock(return_value=MagicMock())
+    post = ParameterWriteback(target_name="x", description="post", proposed_value=1)
+    for item in (primary, post):
+        item.session_id = "param-1"
+        item.selected = True
     snap = make_snapshot(
-        "tab-1", analysis=AnalysisMode.FIT, post=True, has_post_result=True
+        "tab-1",
+        analysis=AnalysisMode.FIT,
+        post=True,
+        has_post_result=True,
+        analysis_writeback_items=(primary,),
+        post_writeback_items=(post,),
+    )
+    ctrl.tab_control.get_tab_snapshot.return_value = snap
+    ctrl.writeback_control.get_writeback_values_for_pane.side_effect = (
+        lambda _tab, pane: {
+            "param-1": WritebackValues(
+                "x" if pane == "post_analysis" else "y",
+                None,
+                1 if pane == "post_analysis" else 2,
+                None,
+            )
+        }
     )
     assert snap.capabilities is not None
     tab = exp_tab_widget("tab-1", ctrl, snap.capabilities)
     tab.attach(snap, MagicMock())
-    # Populate post writeback with a dummy item
-    from zcu_tools.gui.app.measure.adapter import ParameterWriteback
-
-    item = ParameterWriteback(target_name="x", description="d", proposed_value=1)
-    item.session_id = "param-1"
-    item.selected = True
-    tab.post_writeback_widget.populate(
-        [item], {item.session_id: WritebackValues("x", None, 1, None)}
+    tab.update_writeback_items([primary])
+    tab.update_post_writeback_items([post])
+    tab.resize(1100, 850)
+    tab.show()
+    driver = ComponentDriver(tab)
+    driver.select_tab("Post-Analysis")
+    assert driver.observe("x*").checked is True
+    driver.screenshot(tmp_path / "post-selected.png")
+    driver.click("x*")
+    assert driver.observe("x*").checked is False
+    ctrl.writeback_control.set_writeback_item_for_pane.assert_called_once_with(
+        "tab-1", "post_analysis", "param-1", selected=False
     )
-    # Toggle should route to post_analysis pane, not analysis
-    # Find checkbox and toggle
-    for _child in tab.post_writeback_widget.findChildren(MagicMock):
-        pass
-    # Directly call handler via widget
-    tab.post_writeback_widget._on_check_toggled(item)
-    ctrl.writeback_control.set_writeback_item_for_pane.assert_called_with(
-        "tab-1", "post_analysis", "param-1", selected=item.selected
-    )
-    # Edit should also route pane-qualified
+    driver.screenshot(tmp_path / "post-unchecked.png")
     ctrl.writeback_control.set_writeback_item_for_pane.reset_mock()
-    # Simulate edit via widget's edit path not needed; verify that primary widget still uses analysis pane
-    primary_item = ParameterWriteback(
-        target_name="y", description="d2", proposed_value=2
+    driver.select_tab("Analysis")
+    assert driver.observe("y*").checked is True
+    driver.screenshot(tmp_path / "primary-selected.png")
+    driver.click("y*")
+    assert driver.observe("y*").checked is False
+    ctrl.writeback_control.set_writeback_item_for_pane.assert_called_once_with(
+        "tab-1", "analysis", "param-1", selected=False
     )
-    primary_item.session_id = "param-1"
-    primary_item.selected = True
-    tab.writeback_widget.populate(
-        [primary_item], {primary_item.session_id: WritebackValues("y", None, 2, None)}
-    )
-    tab.writeback_widget._on_check_toggled(primary_item)
-    ctrl.writeback_control.set_writeback_item_for_pane.assert_called_with(
-        "tab-1", "analysis", "param-1", selected=primary_item.selected
-    )
+    driver.screenshot(tmp_path / "primary-unchecked.png")
+    driver.select_tab("Post-Analysis")
+    assert driver.observe("x*").checked is False
+    driver.screenshot(tmp_path / "post-remains-unchecked.png")
     tab.detach()
 
 

@@ -62,5 +62,5 @@ def test_browser_load_keeps_factory_failure_in_form_and_run(
             ui.screenshot(tmp_path / "history-form-diagnostic.png")
         finally:
             ctrl.close()
-            window.deleteLater()
+            window.dispose()
             qapp.processEvents()

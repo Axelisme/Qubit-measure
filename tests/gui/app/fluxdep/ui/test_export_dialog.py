@@ -18,6 +18,7 @@ from zcu_tools.gui.app.fluxdep.ui.export_dialog import ExportSpectrumsDialog
 def dialog(qapp):
     d = ExportSpectrumsDialog(os.path.join("result", "unknown_chip", "unknown_qubit"))
     yield d
+    d.close()
     d.deleteLater()
 
 

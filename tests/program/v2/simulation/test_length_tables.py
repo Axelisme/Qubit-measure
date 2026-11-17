@@ -1,5 +1,6 @@
 """Length lookup sweeps preserve scalar wave words and scheduling per point."""
 
+from copy import deepcopy
 from dataclasses import replace
 
 import numpy as np
@@ -21,6 +22,9 @@ from tests.program.v2.simulation._compiled_support import request, scheduled_sho
 from tests.program.v2.wave_observations import analyze, assert_scalar_shots
 
 RAMP_LENGTH_US = 0.04
+
+# Keep parsing local to this module; each compiler owns a detached config.
+_BASE_SOCCFG = load_soccfg(2, 1)
 
 
 class AutoFollower(Module):
@@ -56,7 +60,7 @@ def length_program(
     pre_delay=0.0,
     post_delay=0.0,
 ):
-    env = white_noise(load_soccfg(2, 1), std_adc=0, routes=((0, 0),), seed=None)
+    env = white_noise(deepcopy(_BASE_SOCCFG), std_adc=0, routes=((0, 0),), seed=None)
     builder = TimelineBuilder(env.soccfg, reps=2, initial_delay=0, relax_delay=0.1)
     if outer:
         builder.add_loop("outer", 2)
@@ -305,7 +309,7 @@ def test_native_auto_followers_preserve_scalar_request(flat, branch, outer, foll
 def test_noninitial_length_point_outside_qick_generator_range_fails_build(
     flat, invalid_cycles
 ):
-    soccfg = load_soccfg(2, 1)
+    soccfg = deepcopy(_BASE_SOCCFG)
     length = soccfg.cycles2us(invalid_cycles, gen_ch=1)
     if flat:
         length += RAMP_LENGTH_US

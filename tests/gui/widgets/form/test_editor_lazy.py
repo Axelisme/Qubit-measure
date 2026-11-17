@@ -1,12 +1,22 @@
 """First expansion builds rows; shape changes leave other rows alone."""
 
 from collections.abc import Iterator, Mapping
+from pathlib import Path
 from typing import Annotated, Literal
 
 import pytest
 from pydantic import Field, JsonValue
 from qtpy.QtCore import Qt
-from qtpy.QtWidgets import QApplication, QCheckBox, QComboBox, QLabel, QLineEdit
+from qtpy.QtWidgets import (
+    QApplication,
+    QCheckBox,
+    QComboBox,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
+)
 from zcu_tools.gui.form import (
     Display,
     FormDescription,
@@ -19,10 +29,11 @@ from zcu_tools.gui.form import (
     Option,
     WriteRejected,
 )
+from zcu_tools.gui.lifetime import LifetimeScope
 from zcu_tools.gui.widgets.form import FormEditor
 
 from tests.gui._form_converters import RebuildingForm
-from tests.gui._user_input import mouse_click, type_text
+from tests.gui._user_input import ComponentDriver, mouse_click, type_text
 from tests.gui.widgets.form._sections import expand_sections
 
 
@@ -73,6 +84,7 @@ def view(
     expand_sections(editor, "branch", "optional")
     yield editor, state
     editor.detach()
+    editor.close()
     editor.deleteLater()
     qapp.processEvents()
 
@@ -103,6 +115,7 @@ def test_expanding_an_empty_selected_layer_removes_the_fold_title(
         assert editor.errors() is None
     finally:
         editor.detach()
+        editor.close()
         editor.deleteLater()
         qapp.processEvents()
 
@@ -131,6 +144,7 @@ def test_model_description_is_requested_on_first_expansion(qapp: QApplication) -
         assert float(text(editor, "folded.value").text()) == 1.0
     finally:
         editor.detach()
+        editor.close()
         editor.deleteLater()
         qapp.processEvents()
 
@@ -279,6 +293,7 @@ def test_restored_focused_draft_commits_once_on_normal_focus_loss(
     finally:
         unsubscribe()
         editor.detach()
+        editor.close()
         editor.deleteLater()
         qapp.processEvents()
 
@@ -310,9 +325,64 @@ def test_replacing_a_focused_branch_does_not_commit_retired_text(
         assert batches == []
         assert state.input.data["branch"] == {"kind": "second", "two": 2.0}
         assert float(text(editor, "branch.two").text()) == 2.0
+        assert not any(
+            window.isVisible() and window.objectName() == "form.row.branch.one"
+            for window in qapp.topLevelWidgets()
+        )
     finally:
         editor.detach()
+        editor.close()
         editor.deleteLater()
+        qapp.processEvents()
+
+
+def test_replacing_a_new_branch_in_one_ui_turn_keeps_only_the_active_rows_visible(
+    qapp: QApplication, tmp_path: Path
+) -> None:
+    env = FormEnv()
+    state = FormState(LazyForm.default_input(env))
+    host = QWidget()
+    host.setWindowTitle("Form branch retirement")
+    layout = QVBoxLayout(host)
+    editor = FormEditor(state, env)
+    layout.addWidget(editor)
+    replace = QPushButton("Replace branch twice")
+    layout.addWidget(replace)
+    scope = LifetimeScope(host)
+
+    def replace_twice() -> None:
+        # A caller can publish two branch changes before Qt delivers layout shows.
+        state.select(("branch",), {"kind": "second"}, env)
+        state.select(("branch",), {"kind": "first"}, env)
+
+    scope.connect(replace.clicked, replace_twice)
+    try:
+        host.resize(640, 480)
+        host.show()
+        qapp.processEvents()
+        driver = ComponentDriver(host)
+        driver.screenshot(tmp_path / "01-collapsed.png")
+        driver.expand_section("form.fold.branch")
+        assert driver.observe(object_name="form.input.branch.one").text == "1.0"
+        driver.screenshot(tmp_path / "02-expanded.png")
+        driver.click("Replace branch twice")
+        assert driver.observe(object_name="form.input.branch.one").text == "1.0"
+        assert not any(
+            widget.object_name == "form.input.branch.two"
+            for widget in driver.visible().widgets
+        )
+        # Observe detached windows through the same visible-state driver seam.
+        assert not any(
+            widget.object_name == "form.row.branch.two"
+            for window in qapp.topLevelWidgets()
+            for widget in ComponentDriver(window).visible().widgets
+        )
+        driver.screenshot(tmp_path / "03-replaced.png")
+    finally:
+        scope.close()
+        editor.detach()
+        host.close()
+        host.deleteLater()
         qapp.processEvents()
 
 

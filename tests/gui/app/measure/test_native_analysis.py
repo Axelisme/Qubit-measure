@@ -304,7 +304,7 @@ def host(tmp_path: Path, qapp, request) -> Iterator[Host]:
         controller.close()
         remote.on_client_close(link, on_owner_thread=True)
         if window is not None:
-            window.deleteLater()
+            window.dispose()
             qapp.processEvents()
 
 

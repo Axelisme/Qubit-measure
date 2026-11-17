@@ -1,3 +1,4 @@
+import ast
 import json
 import os
 import sys
@@ -61,6 +62,49 @@ class _FailureLog:
         with self.path.open("a", encoding="utf-8") as stream:
             stream.write(json.dumps(record) + "\n")
             stream.flush()
+
+
+def _marker_outcomes(expression: ast.expr) -> set[bool]:
+    """Overestimate possible marker results for an item marked sim.
+
+    Unsupported syntax stays unknown. This is only a collection optimization;
+    pytest remains responsible for parsing and applying marker expressions.
+    """
+    if isinstance(expression, ast.Name):
+        return {True} if expression.id == "sim" else {False, True}
+    if isinstance(expression, ast.UnaryOp) and isinstance(expression.op, ast.Not):
+        return {not value for value in _marker_outcomes(expression.operand)}
+    if isinstance(expression, ast.BoolOp):
+        operands = [_marker_outcomes(value) for value in expression.values]
+        if isinstance(expression.op, ast.And):
+            return ({True} if all(True in values for values in operands) else set()) | (
+                {False} if any(False in values for values in operands) else set()
+            )
+        return ({True} if any(True in values for values in operands) else set()) | (
+            {False} if all(False in values for values in operands) else set()
+        )
+    return {False, True}
+
+
+def pytest_ignore_collect(collection_path: Path, config: pytest.Config) -> bool | None:
+    """Skip implicit simulate discovery only when markers cannot select sim.
+
+    Explicit paths inside simulate always retain normal collection and marker
+    deselection, including nodeids. Other marker syntax conservatively falls
+    back to normal collection instead of attempting to replace pytest's parser.
+    """
+    simulation_tests = Path(__file__).parent / "simulate"
+    if collection_path != simulation_tests or config.option.pyargs:
+        return None
+    for argument in config.args:
+        path = (config.invocation_params.dir / argument.split("::", 1)[0]).resolve()
+        if path.is_relative_to(simulation_tests):
+            return None
+    try:
+        expression = ast.parse(config.option.markexpr.strip(), mode="eval").body
+    except SyntaxError:
+        return None
+    return True if True not in _marker_outcomes(expression) else None
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:

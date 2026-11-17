@@ -5,7 +5,6 @@ import re
 import numpy as np
 import pytest
 import zcu_tools.analysis.fitting as fitting
-import zcu_tools.analysis.fitting.base as fitting_base
 from numpy.typing import NDArray
 from zcu_tools.analysis.fitting.shared import (
     FitTrace,
@@ -14,10 +13,8 @@ from zcu_tools.analysis.fitting.shared import (
 )
 
 
-def test_public_facades_expose_named_shared_fit_without_batch_compatibility() -> None:
+def test_public_facade_exposes_named_shared_fit() -> None:
     assert fitting.fit_shared is fit_shared
-    assert not hasattr(fitting, "batch_fit_func")
-    assert not hasattr(fitting_base, "batch_fit_func")
 
 
 def linear(

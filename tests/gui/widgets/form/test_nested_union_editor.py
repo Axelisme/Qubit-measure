@@ -112,6 +112,7 @@ def editor_state(
         editor, "qub_pulse", "qub_pulse.module", "readout", "readout.module"
     )
     yield editor, state
+    editor.close()
     editor.deleteLater()
     qapp.processEvents()
 

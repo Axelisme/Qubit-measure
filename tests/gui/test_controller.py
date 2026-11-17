@@ -48,11 +48,11 @@ from zcu_tools.gui.session.context_types import (
 from zcu_tools.gui.session.device_models import (
     ConnectDeviceRequest,
     DisconnectDeviceRequest,
+    SetupDeviceRequest,
 )
 from zcu_tools.gui.session.ports import (
     BackgroundAdmissionClosedError,
     OperationConflictError,
-    OperationKind,
 )
 from zcu_tools.plotting.plots import Plots
 
@@ -580,23 +580,37 @@ def test_start_run_while_running_raises(cf):
         _wait_for(lambda: not cf.state.is_tab_running(tab_id))
 
 
-def test_start_run_while_device_setup_active_raises(cf):
+def test_start_run_while_device_setup_active_raises(cf, monkeypatch):
     tab_id = cf.ctrl.tab_control.new_tab("fake")
-    cf.ctrl._operation_gate.register(
-        1,
-        OperationKind.DEVICE_SETUP,
-        owner_id="flux",
-        origin_kind="user",
-        note="held setup",
-        resource_id="flux",
+    devices = cf.ctrl.device_control
+    cf.ctrl.session_services.device.register_device(
+        "flux", FakeDevice(address="fake", fast_mode=True)
     )
+    info = devices.get_device_info("flux")
+    assert info is not None
+    entered = threading.Event()
+    release = threading.Event()
+    original_setup = FakeDevice.setup
 
-    with pytest.raises(OperationConflictError, match="device_setup is active"):
-        cf.ctrl.run_analyze_control.start_run(
-            tab_id,
-        )
+    def setup(device, info, *, progress=True, stop_event=None):
+        entered.set()
+        # The test's finally releases the admitted external driver call.
+        assert release.wait(30), "device setup was not released"
+        return original_setup(device, info, progress=progress, stop_event=stop_event)
 
-    cf.ctrl._operation_gate.release(1)
+    monkeypatch.setattr(FakeDevice, "setup", setup)
+    token = devices.start_setup_device(SetupDeviceRequest("flux", info))
+    try:
+        _wait_for(entered.is_set)
+        with pytest.raises(OperationConflictError, match="device_setup is active"):
+            cf.ctrl.run_analyze_control.start_run(tab_id)
+    finally:
+        release.set()
+        # Release guarantees worker completion; this public close joins owner delivery.
+        cf.ctrl.close(timeout_ms=30_000)
+    terminal = cf.ctrl.operation_control.await_operation(token, 0)
+    assert terminal.outcome is not None
+    assert terminal.outcome.status == "finished"
 
 
 def test_unselected_context_rejects_real_run(cf):
@@ -665,22 +679,36 @@ def test_load_tab_result_allows_unselected_context_without_soc_and_initializes_a
     )
 
 
-def test_run_rejected_while_soc_connect_lease_active(cf):
+def test_run_rejected_while_soc_connect_lease_active(cf, monkeypatch):
+    from zcu_tools import qick_remote
+    from zcu_tools.gui.session.services.connection import ConnectRemoteRequest
+
     tab_id = cf.ctrl.tab_control.new_tab("fake")
-    cf.ctrl._operation_gate.register(
-        1,
-        OperationKind.SOC_CONNECT,
-        owner_id="soc",
-        origin_kind="user",
-        note="held connect",
+    entered = threading.Event()
+    release = threading.Event()
+    soccfg = load_soccfg()
+
+    def connect(ip: str, port: int):
+        assert (ip, port) == ("offline-board", 1234)
+        entered.set()
+        # The test's finally releases this external connection attempt.
+        assert release.wait(30), "SoC connection was not released"
+        return soccfg, soccfg
+
+    monkeypatch.setattr(qick_remote, "make_soc_proxy", connect)
+    token = cf.ctrl.soc_control.start_connect(
+        ConnectRemoteRequest("offline-board", 1234)
     )
-
-    with pytest.raises(OperationConflictError, match="soc_connect is active"):
-        cf.ctrl.run_analyze_control.start_run(
-            tab_id,
-        )
-
-    cf.ctrl._operation_gate.release(1)
+    try:
+        _wait_for(entered.is_set)
+        with pytest.raises(OperationConflictError, match="soc_connect is active"):
+            cf.ctrl.run_analyze_control.start_run(tab_id)
+    finally:
+        release.set()
+        cf.ctrl.close(timeout_ms=30_000)
+    terminal = cf.ctrl.operation_control.await_operation(token, 0)
+    assert terminal.outcome is not None
+    assert terminal.outcome.status == "finished"
 
 
 def test_device_connect_updates_state_and_presents_ui_feedback(

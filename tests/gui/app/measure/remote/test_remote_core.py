@@ -68,11 +68,28 @@ def fx(tmp_path, qapp):
 pytestmark = pytest.mark.uses_wall_clock
 
 
-def test_service_binds_loopback_only(fx):
-    # The socket lives in the shared transport endpoint post-E3.
-    addr = fx.service._endpoint._server_sock.getsockname()
-    assert addr[0] == "127.0.0.1"
-    assert fx.service.port > 0
+def test_service_binds_loopback_only(tmp_path, qapp, monkeypatch):
+    addresses: list[tuple[str, int]] = []
+    original_socket = socket.socket
+
+    class RecordingSocket(original_socket):
+        def bind(self, address):
+            # Observe the OS socket boundary and still perform the real bind.
+            addresses.append(address)
+            return super().bind(address)
+
+    monkeypatch.setattr(socket, "socket", RecordingSocket)
+    fixture = _Fixture(project_root=str(tmp_path / "project"))
+    fixture.start()
+    try:
+        assert addresses == [("127.0.0.1", 0)]
+        with _open_client(fixture.service.port) as client:
+            assert client.getpeername() == ("127.0.0.1", fixture.service.port)
+            assert _raw_call(client, "state.has_active_context")["result"] == {
+                "value": True
+            }
+    finally:
+        fixture.stop()
 
 
 def test_external_requires_token(qapp):

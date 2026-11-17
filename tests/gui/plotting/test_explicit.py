@@ -51,6 +51,7 @@ def hosts(qapp):
     finally:
         for container, stack in zip(containers, stacks, strict=True):
             container.clear_dynamic_canvases()
+            stack.close()
             stack.deleteLater()
         owner.deleteLater()
         qapp.processEvents()

@@ -176,8 +176,6 @@ def control_ui(
     monkeypatch: pytest.MonkeyPatch,
 ) -> Iterator[ControlUi]:
     monkeypatch.chdir(tmp_path)
-    write_native_file(tmp_path / "original.hdf5")
-    write_native_file(tmp_path / "unsaved.hdf5")
     registry = Registry()
     registry.register("stoppable", StoppableAdapter)
     registry.register("loadable", ModalLoadAdapter)
@@ -230,7 +228,7 @@ def control_ui(
         ctrl.abort_shutdown()
         for tid in tuple(ctrl.tab_control.list_tab_ids()):
             ctrl.tab_control.close_tab(tid)
-        window.deleteLater()
+        window.dispose()
         QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
         qapp.processEvents()
 
@@ -611,6 +609,7 @@ def test_load_file_return_accept_and_cancel_preserve_result_contract(
 ):
     ui = control_ui
     tab_id = ui.controller.tab_control.new_tab("loadable")
+    write_native_file(tmp_path / "original.hdf5")
     path = tmp_path / "selected.h5"
     write_native_file(path)
     ui.controller.run_analyze_control.load_tab_result(tab_id, "original.hdf5")
@@ -707,8 +706,11 @@ def test_inspect_delete_confirmation_uses_live_library_owner(
 
 @pytest.mark.parametrize("control_ui", ["qt"], indirect=True)
 @pytest.mark.parametrize("decision", ["local", "cancel"])
-def test_unsaved_tab_close_confirmation_accept_and_cancel(control_ui, qapp, decision):
+def test_unsaved_tab_close_confirmation_accept_and_cancel(
+    control_ui, qapp, tmp_path, decision
+):
     ui = control_ui
+    write_native_file(tmp_path / "unsaved.hdf5")
     tab_id = ui.controller.tab_control.new_tab("loadable")
     ui.controller.run_analyze_control.load_tab_result(tab_id, "unsaved.hdf5")
     tabs = next(
@@ -763,6 +765,7 @@ def test_shutdown_finishes_load_interaction_before_owner_teardown(
     control_ui, qapp, tmp_path, stage
 ):
     ui = control_ui
+    write_native_file(tmp_path / "original.hdf5")
     tab_id = ui.controller.tab_control.new_tab("loadable")
     ui.controller.run_analyze_control.load_tab_result(tab_id, "original.hdf5")
     before = ui.controller.tab_control.get_tab_snapshot(tab_id).run

@@ -59,7 +59,8 @@ def history_ui(
         )
         qapp.processEvents()
         yield ComponentDriver(window), request.param
-        window.deleteLater()
+        ctrl.close()
+        window.dispose()
         qapp.processEvents()
 
 

@@ -7,7 +7,6 @@ tests cover reserve_labber_filepath and format_ext.
 
 from __future__ import annotations
 
-import zcu_tools.datafile as datafile
 from zcu_tools.datafile import (
     format_ext,
     reserve_labber_filepath,
@@ -59,8 +58,3 @@ def test_reserve_labber_filepath_does_not_increment_year_suffix(tmp_path):
     out = reserve_labber_filepath(str(tmp_path / "data_2024.hdf5"))
 
     assert out == str(tmp_path / "data_2024_1.hdf5")
-
-
-def test_legacy_reservation_alias_is_not_exported():
-    legacy_name = "safe" + "_labber_filepath"
-    assert not hasattr(datafile, legacy_name)

@@ -60,6 +60,7 @@ def panel(qapp):
     yield w, ctrl
     w.quiesce()
     w.dispose()
+    w.close()
     w.deleteLater()
     ctrl.interactive.dispose()
 
@@ -102,6 +103,7 @@ def test_published_fit_inputs_reach_search_and_show(
         if widget is not None:
             widget.quiesce()
             widget.dispose()
+            widget.close()
             widget.deleteLater()
         ctrl.interactive.dispose()
 
@@ -258,6 +260,7 @@ def test_upstream_change_marks_search_and_show_stale_until_a_new_result(
     finally:
         widget.quiesce()
         widget.dispose()
+        widget.close()
         widget.deleteLater()
 
 
@@ -346,6 +349,7 @@ def test_repeated_stale_alignment_keeps_captured_show_background(
     finally:
         widget.quiesce()
         widget.dispose()
+        widget.close()
         widget.deleteLater()
 
 
@@ -405,6 +409,7 @@ def test_auto_limits_keep_the_recorded_search_frame_until_a_fresh_search(
     finally:
         widget.quiesce()
         widget.dispose()
+        widget.close()
         widget.deleteLater()
 
 
@@ -427,6 +432,7 @@ def test_params_only_auto_limits_follow_current_sources(
     finally:
         widget.quiesce()
         widget.dispose()
+        widget.close()
         widget.deleteLater()
 
 
@@ -477,6 +483,7 @@ def test_upstream_refresh_keeps_unapplied_display_edits_pending(
     finally:
         widget.quiesce()
         widget.dispose()
+        widget.close()
         widget.deleteLater()
 
 
@@ -700,6 +707,7 @@ def test_search_waits_for_a_needed_frequency_and_keeps_the_result(
     finally:
         widget.quiesce()
         widget.dispose()
+        widget.close()
         widget.deleteLater()
 
 
@@ -894,6 +902,7 @@ def test_search_diagnostic_axis_labels_clear_the_next_subplot_after_resize(
         assert runner.quiesce()
         widget.quiesce()
         widget.dispose()
+        widget.close()
         widget.deleteLater()
         ctrl.interactive.dispose()
 
@@ -980,5 +989,6 @@ def test_show_toolbar_box_zooms_the_view_and_home_restores_the_drawing(
     finally:
         widget.quiesce()
         widget.dispose()
+        widget.close()
         widget.deleteLater()
         ctrl.interactive.dispose()

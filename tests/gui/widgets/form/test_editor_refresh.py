@@ -97,6 +97,7 @@ def view(
     editor = FormEditor(state, env)
     yield env, state, editor
     editor.detach()
+    editor.close()
     editor.deleteLater()
     qapp.processEvents()
 

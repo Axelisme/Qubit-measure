@@ -1,7 +1,5 @@
 """Mark numerical tests and summarize transported Engine accuracy observations."""
 
-from pathlib import Path
-
 import pytest
 from _pytest.terminal import TerminalReporter
 
@@ -12,13 +10,9 @@ from tests.simulate.evolution.contract.accuracy import (
 )
 
 
-@pytest.hookimpl(tryfirst=True)
-def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
-    """Mark this subtree before pytest applies command-line marker selection."""
-    simulation_tests = Path(__file__).parent
-    for item in items:
-        if item.path.is_relative_to(simulation_tests):
-            item.add_marker(pytest.mark.sim)
+def pytest_itemcollected(item: pytest.Item) -> None:
+    """Mark each item through its path-scoped hook before marker selection."""
+    item.add_marker(pytest.mark.sim)
 
 
 def pytest_terminal_summary(terminalreporter: TerminalReporter) -> None:

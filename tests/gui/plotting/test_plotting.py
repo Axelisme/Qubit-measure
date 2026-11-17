@@ -47,6 +47,7 @@ def make_figure(qapp: QApplication) -> Iterator[Callable[[], Figure]]:
             plt.close(figure)
         finally:
             if isinstance(manager, FigureManagerQT):
+                manager.window.close()
                 manager.window.deleteLater()
     QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete.value)
     qapp.processEvents()
@@ -70,6 +71,7 @@ def make_container(
         try:
             container.clear_dynamic_canvases()
         finally:
+            stack.close()
             stack.deleteLater()
     QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete.value)
     qapp.processEvents()

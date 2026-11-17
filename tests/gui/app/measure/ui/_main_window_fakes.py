@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import replace
 from unittest.mock import MagicMock
 
-from qtpy.QtWidgets import (
-    QTabWidget,
-)
+from qtpy.compat import isalive
+from qtpy.QtCore import QCoreApplication, QEvent
+from qtpy.QtWidgets import QTabWidget, QWidget
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AdapterGuide,
@@ -33,7 +32,67 @@ from tests.gui.app.measure._form_fakes import configure_form_lookup
 from tests.gui.app.measure.artifacts._snapshots import ready_figures, with_artifacts
 
 
-def mock_ctrl(control_factory: Callable[[], ControlIdentity]) -> MagicMock:
+class MainWindowControlFactory:
+    """Retain fake authority and explicitly registered views for one test.
+
+    Call to create a ControlIdentity. Register each owned Qt root with own();
+    unregistered windows are never cleaned up by this factory.
+    """
+
+    def __init__(self) -> None:
+        self._authorities: list[ControlIdentity] = []
+        self._views: list[QWidget] = []
+
+    def __call__(self) -> ControlIdentity:
+        """Create authority retained until dispose() retires all owned views."""
+        authority = ControlIdentity()
+        self._authorities.append(authority)
+        return authority
+
+    def own(self, view: QWidget) -> None:
+        """Transfer cleanup of this exact root and its Qt children to the factory."""
+        self._views.append(view)
+
+    def create_tab(
+        self,
+        tab_id: str,
+        ctrl: MagicMock,
+        capabilities: AdapterCapabilities,
+        *,
+        dialog_presenter: RecordingDialogPresenter | None = None,
+    ) -> ExpTabWidget:
+        """Build and own a standalone tab over a fake controller and capabilities.
+
+        dialog_presenter records confirmations when supplied. This factory
+        retires the tab before releasing the controller's retained authority.
+        """
+        tab = ExpTabWidget(
+            tab_id, ctrl, capabilities, dialog_presenter=dialog_presenter
+        )
+        self.own(tab)
+        return tab
+
+    def dispose(self) -> None:
+        """Destroy registered trees before releasing their control authority.
+
+        Already deleted views need no further cleanup. MainWindow uses its
+        non-interactive disposal; other roots close before targeted deletion.
+        Cleanup failures propagate without releasing the retained authority.
+        """
+        for view in reversed(self._views):
+            if not isalive(view):
+                continue
+            if isinstance(view, MainWindow):
+                view.dispose()
+            else:
+                view.close()
+                view.deleteLater()
+                QCoreApplication.sendPostedEvents(view, QEvent.Type.DeferredDelete)
+        self._views.clear()
+        self._authorities.clear()
+
+
+def mock_ctrl(control_factory: MainWindowControlFactory) -> MagicMock:
     """Build a controller fake with real form resources and retained authority.
 
     Pass the function-scoped authority factory supplied by the UI conftest so
@@ -223,7 +282,7 @@ def tab_pane_tabs(tab: ExpTabWidget) -> QTabWidget:
     return tabs
 
 
-def editor_wiring_ctrl(control_factory: Callable[[], ControlIdentity]) -> MagicMock:
+def editor_wiring_ctrl(control_factory: MainWindowControlFactory) -> MagicMock:
     """Build an idle view facade using the retained authority factory.
 
     Its real tab form resources are owned by the returned controller fake.
@@ -234,7 +293,7 @@ def editor_wiring_ctrl(control_factory: Callable[[], ControlIdentity]) -> MagicM
 
 
 def setup_window_with_tabs(
-    control_factory: Callable[[], ControlIdentity],
+    control_factory: MainWindowControlFactory,
     dialog_presenter: RecordingDialogPresenter | None = None,
     active_operations: int = 0,
 ) -> tuple[MainWindow, MagicMock]:
@@ -251,6 +310,7 @@ def setup_window_with_tabs(
     ctrl.tab_control.has_tab.side_effect = lambda tid: True
     dialogs = dialog_presenter or RecordingDialogPresenter()
     window = MainWindow(ctrl, templates=lambda: {}, dialog_presenter=dialogs)
+    control_factory.own(window)
     return window, ctrl
 
 
