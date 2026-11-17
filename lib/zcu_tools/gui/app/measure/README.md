@@ -281,7 +281,8 @@ tabs are not retried after later source selection. Its on-close callback capture
 then-current state. Aliases are not in that cache. Opening an entry loads its
 global aliases; selecting a point loads `points/<label>/aliases.yaml`.
 Startup code opens an entry before `ctx.context.apply_alias_rows(rows)`.
-That command saves active aliases, global or point, without a separate reload.
+That call saves global aliases without a separate reload. Pass the focused point
+label as `point=...` to save that point's aliases instead.
 Without an opened entry it raises no_context and retains no pending rows.
 Templates use caller-authored `Template.bindings`.
 

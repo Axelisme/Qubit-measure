@@ -161,14 +161,17 @@ def _seed_predictors(
 
 
 def _seed_entry(ctx: StartupContext, template: EntryTemplate) -> None:
-    """Fill the just-created entry's setup and initial point from the template."""
+    """Seed global components, then create initial and save its aliases."""
     for name, component in template.components.items():
         fields = TypeAdapter(YamlMap).validate_python(
             component.model_dump(exclude_unset=True)
         )
         fields.pop("kind")
-        ctx.context.add_component(name, component.kind, fields, setup=True)
+        ctx.context.add_component(name, component.kind, fields, point=None)
     ctx.setup.new_point("initial")
     ctx.context.apply_alias_rows(
-        tuple(AliasRow(name, value) for name, value in template.aliases.aliases.items())
+        tuple(
+            AliasRow(name, value) for name, value in template.aliases.aliases.items()
+        ),
+        point="initial",
     )
