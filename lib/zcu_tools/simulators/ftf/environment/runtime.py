@@ -1,3 +1,6 @@
+# tolerated(file-size): FTF acquire assembly shares one source's Engine, effective
+# settings, preparation cache and current capture/telemetry state. Keeping round
+# preparation, invalidation and completion together preserves their lifetime rules.
 """FTF round snapshots, persistent engine ownership and compact readout sampling."""
 
 import time
