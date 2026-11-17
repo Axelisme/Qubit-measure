@@ -59,7 +59,12 @@ def session(tmp_path: Path):
             result_root=tmp_path / "Result",
             database_root=tmp_path / "Database",
         )
-        entry.new_point("a")
+        point = entry.new_point("a")
+        with point.edit() as draft:
+            draft.add_component("Q1", kind="fake/drive/a")
+            draft.set("general.ext.flux_value", 2.0)
+        with entry.library("a").edit() as draft:
+            draft.set_waveform(WAVEFORM, ConstWaveformCfg(length=0.1))
         bus = BaseEventBus()
         context = ContextService(
             SessionState(SessionEnv(parameters=None, soc=None, soccfg=None)),
@@ -69,12 +74,6 @@ def session(tmp_path: Path):
         context.install_entry(entry)
         control = context
         control.use_point("a")
-        control.add_component(
-            "Q1", "fake/drive/a", {}, point=control.current_point_label()
-        )
-        target = require_target(capture_focus(control))
-        control.set_waveform(target, WAVEFORM, ConstWaveformCfg(length=0.1))
-        control.set_parameter(target, "general.ext.flux_value", 2.0)
         service = WritebackService(control, arb_names=lambda: ())
         yield entry, control, service
         assert registry_state() == installed
