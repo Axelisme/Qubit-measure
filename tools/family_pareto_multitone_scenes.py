@@ -14,25 +14,9 @@ from zcu_tools.simulate.evolution import (
     TimelineBatch,
 )
 
-from tools.family_pareto_inputs import Input, Scene
+from tools.family_pareto_inputs import MULTITONE_PRICE_SCENES, Input, Scene
 from tools.family_pareto_scene_builders import integer_fluxonium_input, numeric_builder
 
-MULTITONE_PRICE_SCENES = (
-    "mtrwa_c2b_l16_128",
-    "mtrwa_c2b_l20_128",
-    "mtrwa_c2b_l16_512",
-    "mtrwa_star_base",
-    "mtrwa_star_action_low",
-    "mtrwa_star_action_high",
-    "mtrwa_star_dimension_low",
-    "mtrwa_star_dimension_high",
-    "mtrwa_star_bandwidth_low",
-    "mtrwa_star_bandwidth_high",
-    "mtrwa_star_duration_low",
-    "mtrwa_star_duration_high",
-    "mtrwa_star_n20",
-    "mtrwa_star_n100",
-)
 _FAMILIES = ("multitone_rwa", "common_frame", "floquet", "dop853")
 
 
@@ -153,14 +137,16 @@ def _star(name: str) -> Input:
         "action_high": (0.18, 2, 0.08, 128.0, 1),
         "dimension_low": (0.16, 1, 0.08, 128.0, 1),
         "dimension_high": (0.16, 4, 0.08, 128.0, 1),
-        "bandwidth_low": (0.16, 2, 0.06, 128.0, 1),
+        "bandwidth_low": (0.16, 2, 0.075, 128.0, 1),
         "bandwidth_high": (0.16, 2, 0.10, 128.0, 1),
         "duration_low": (0.16, 2, 0.08, 32.0, 1),
         "duration_high": (0.16, 2, 0.08, 512.0, 1),
         "n20": (0.16, 2, 0.08, 128.0, 20),
         "n100": (0.16, 2, 0.08, 128.0, 100),
     }
-    gain, blocks, detuning, duration, repeats = controls[name.removeprefix("mtrwa_star_")]
+    gain, blocks, detuning, duration, repeats = controls[
+        name.removeprefix("mtrwa_star_")
+    ]
     size = 16
     energies = np.arange(size, dtype=float) * 1.5
     drive = np.zeros((size, size), dtype=complex)

@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-11-17, Engine capture, atomic publication, shared directory, endpoint kicks, RWA Fourier ownership, kappa2 admission, current plateau dispatch and common-frame sampled scope
+**Last updated:** 2026-11-18, constant-pair cold prices and fixed-input calibration scope
 
 **讀者：** framework-dev、agent。Segment evolution 的公開輸入、路由與數值邊界。
 
@@ -795,6 +795,20 @@ within `3.335506316e-10`. The permanent [rejection test](../../../../tests/simul
 checks public `NoValidKernel`, without solving a reference or loading saved
 matrices. These inputs do not establish a new real-workload timing or price.
 
+Constant-pair cold prices include an endpoint-prepare reserve and restored-edge
+bandwidth work. The three restored-zero C2b controls retain the small-graph
+shortcut because kicked RWA is faster than their qualified competitors.
+Complete inventories and prefix/worker subsets use one small-graph predicate.
+The endpoint-prepare reserve amortizes over exact RWA prepare-key consumers,
+not over the broader common-frame coefficient group.
+The [fixed scene declarations](../../../../tools/family_pareto_multitone_scenes.py)
+add three C2b controls, a nine-point synthetic feature star at fixed M=16,
+and consecutive base supports at N=20/100. Numeric payloads stay outside Git;
+[the indexes](../../../../tools/data/family_pareto/README.md) pin their identities.
+The star records price residuals; it does not extend the accuracy guarantee to
+all constant-pair inputs. O1 comparisons retain its complete 24-point acquire
+and the same `t4` idle companion for every pinned driven family.
+
 這份證據只涵蓋列出的凍結輸入；日常 FTF 常數雙 tone 的 32、288、512 ns、1 µs 未驗證。未驗證不是不支援，也不代表算錯。
 
 ### Recorded real-workload evidence
@@ -850,7 +864,7 @@ evidence. These observations do not authorize deletion or guard changes.
 | `period_table` | 1: O2 | [O2](../../../../tools/data/family_pareto/summaries/overlapping_shaped_tones.md) qualifies with `dop853` plus `t4` companions; A, S and S-long are dominated by `shaped_sambe`. |
 | `common_frame` | No measured target | M, O1 and O2 target guards/preconditions refuse; no dominance conclusion. |
 | `multitone_gate` | No measured target | M and O2 target guards/preconditions refuse; no dominance conclusion. |
-| `multitone_rwa` | No qualified target in these historical tables | [O1](../../../../tools/data/family_pareto/summaries/overlapping_constant_tones.md) records 2.59000e-3 before the constant-pair changes; M and O2 refuse. The new frozen-input evidence above does not remeasure these workloads or prices. |
+| `multitone_rwa` | No qualified target in these historical tables | [O1](../../../../tools/data/family_pareto/summaries/overlapping_constant_tones.md) records 2.59000e-3 before the constant-pair changes; M and O2 refuse there. The fixed-input price calibration above qualifies the current O1 acquire with its `t4` companion. It does not replace the historical all-mode Pareto table or remeasure M and O2. |
 | `floquet` | No measured target | O1 target guard/precondition refuses; other inputs are not its candidates. |
 
 The long shaped sequence supplies final-error evidence for `shaped_sambe` and

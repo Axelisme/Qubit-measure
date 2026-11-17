@@ -26,15 +26,13 @@ from zcu_tools.simulators.ftf.environment import FTFSource, ftf, plan_template
 
 from tools.dop853_segment import profile_inputs
 from tools.family_pareto_inputs import (
+    MULTITONE_PRICE_SCENES,
     Input,
     Scene,
     make_inputs,
 )
 from tools.family_pareto_kernel_scenes import KERNEL_SCENES, make_kernel_inputs
-from tools.family_pareto_multitone_scenes import (
-    MULTITONE_PRICE_SCENES,
-    make_multitone_price_inputs,
-)
+from tools.family_pareto_multitone_scenes import make_multitone_price_inputs
 from tools.family_pareto_prepare import prepare_scenes as prepare_scenes
 from tools.family_pareto_scene_builders import (
     declared_input,

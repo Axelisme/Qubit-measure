@@ -27,6 +27,25 @@ from zcu_tools.simulate.evolution import (
 )
 from zcu_tools.simulate.evolution import physical_input as numeric_input
 
+# Cache-only consumers share labels without importing model/program builders.
+# ADR-0072 keeps those producers out of the measurement import graph.
+MULTITONE_PRICE_SCENES = (
+    "mtrwa_c2b_l16_128",
+    "mtrwa_c2b_l20_128",
+    "mtrwa_c2b_l16_512",
+    "mtrwa_star_base",
+    "mtrwa_star_action_low",
+    "mtrwa_star_action_high",
+    "mtrwa_star_dimension_low",
+    "mtrwa_star_dimension_high",
+    "mtrwa_star_bandwidth_low",
+    "mtrwa_star_bandwidth_high",
+    "mtrwa_star_duration_low",
+    "mtrwa_star_duration_high",
+    "mtrwa_star_n20",
+    "mtrwa_star_n100",
+)
+
 
 @dataclass(frozen=True)
 class Scene:

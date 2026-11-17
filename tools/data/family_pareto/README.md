@@ -4,7 +4,7 @@
 
 ## Owner 與用途
 
-Pareto 集合包含 1 個重新宣告的 synthetic 場景、15 個完整 real 場景與 3 個單段 kernel 場景。
+Pareto 集合包含 1 個重新宣告的 synthetic 場景、15 個完整 real 場景、3 個單段 kernel 場景與 14 個常數雙 tone 價格控制。
 `frozen-synthetic.index.json` 與 `frozen-real.index.json` 依 category 保存這些身份，也可容納其他已宣告的場景。
 兩份 version 1 清單只存每筆 name、physical_sha256、oracle_sha256 與 metadata_sha256。
 Metadata hash 使用公開 `simulate.evolution.digest(record.metadata)`。
@@ -13,7 +13,7 @@ Metadata hash 使用公開 `simulate.evolution.digest(record.metadata)`。
 首次從既有兩份 gzip 遷移 19 筆，逐筆核三個 hash、point order 與 reference key 不變，沒有跑 builders 或 solver。
 落地的歷史不含兩個舊 gzip。冷快取完整重建尚未驗證，需另取運算授權。
 公開 `family_pareto.select_inputs(index, scenario, *, scene_cache=...)` 集中來源與 report 身份。
-未指定 index 或 scenario 時，先讀這兩份清單，只選 `select_inputs` 旁宣告的 19 個 Pareto 名稱。
+未指定 index 或 scenario 時，先讀這兩份清單，只選 `select_inputs` 旁宣告的 33 個 Pareto 名稱。
 缺少任何預設名稱就失敗，不讀其他列的 payload 或 reference。
 `--index PATH` 不帶 scenario 時全選該份清單，`--scenario NAME` 可嚴格單選非 Pareto 列。
 Profile 列不作 family 去留證據。`--scene-cache DIR` 接受絕對快取路徑。
@@ -21,7 +21,7 @@ Profile 列不作 family 去留證據。`--scene-cache DIR` 接受絕對快取�
 接縫只讀已凍結數值，不重建裝置、前端或使用者設定。
 量測只在 `Engine.evolve` 上進行。
 
-固定 Pareto 場景控制由 `tools/family_pareto_scenarios.py`、`family_pareto_kernel_scenes.py` 與固定 settings 持有。
+固定 Pareto 場景控制由 `tools/family_pareto_scenarios.py`、`family_pareto_kernel_scenes.py`、`family_pareto_multitone_scenes.py` 與固定 settings 持有。
 `tools/dop853_segment.py` 持有 profile 座標與座標衍生名稱，透過 `profile_inputs()` 提供宣告。
 Producer 預設 inventory 包含這些 profile 宣告，但固定 Pareto 預設名稱集合不變。
 宣告與單列路由不會填入 index 或共用 cache。取得計算授權後，須顯式執行 producer 準備。
@@ -32,6 +32,9 @@ Single/integer 編譯與數值 source 的生命週期由 `family_pareto_scene_bu
 ## 場景範圍
 
 - Synthetic：`idle_coherence`，3 能階、2 個點。其餘 accuracy、guard、history 與放大 workload 留在 tests 側，不當作工具場景。
+- 常數雙 tone 價格控制：`mtrwa_c2b_l16_128`、`mtrwa_c2b_l20_128`、`mtrwa_c2b_l16_512` 是 INTEGER_MODEL 的 leading energy-basis projection。Pump/Stokes 頻率為 E10+0.5/0.01 GHz，DAC 量化前 gain 為 0.02/1e-4。它們各有一個同起同止的支援區間，沒有 frontend gap 或 readout lead。
+- `mtrwa_star_*` 用固定 M=16 的 synthetic 三能階 blocks。Base 有 2 個 active blocks、gain 0.16、restored detuning 0.08 GHz、duration 128 ns。每個 low/high 只改 action、retained dimension、restored bandwidth 或 duration 之一；其餘參數保持 base。九列的實際 retained D 為 22/28/40，restored B_eff 為 0.075/0.08/0.1 GHz，duration 為 32/128/512 ns。模型不是日常 FTF 輸入的替身。
+- `mtrwa_star_n20`、`mtrwa_star_n100` 接續相同 base support，以 neutral boundaries 保留 20/100 個段。每段保留全域相位。RWA prepare key 含 absolute start，因此這些段不宣稱共用同一個 prepare key。
 - 完整 F/L/I/N：`carrier_sweep`、`length_sweep`、`idle_sweep`、`gate_sequence`，各 24 點、21 能階。保留編譯後的 gaps、readout lead、point order、控制相位和 companion 宣告。
 - 其餘完整 real 場景包含 gain scan、joint simultaneous drive、constant/shaped tone overlap，以及 biased、long、random gate 序列。它們不是四組 F/L/I/N 的替代品。
 - 單段 kernel：`kernel_single_constant`、`kernel_single_sampled`、`kernel_multitone_sampled`，各 4 點、21 能階。它們使用公開 `SingleFluxoniumModel`，每個點只有一個同時支援區間，不從完整序列裁切。
