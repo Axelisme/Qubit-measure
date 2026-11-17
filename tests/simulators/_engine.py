@@ -1,12 +1,14 @@
 """Non-evolving collaborator for environment composition tests."""
 
 from collections.abc import Collection, Sequence
+from typing import override
 
 import numpy as np
 from numpy.typing import NDArray
 from zcu_tools.simulate.boundary import CancellationQuery
 from zcu_tools.simulate.evolution import (
     Cancelled,
+    CaptureBuffer,
     Engine,
     EvolutionResult,
     ModelSource,
@@ -47,6 +49,7 @@ class EngineDouble(Engine):
         self.reuse_allowed = True
         self.error: Exception | None = None
 
+    @override
     def evolve(
         self,
         source: ModelSource,
@@ -56,6 +59,7 @@ class EngineDouble(Engine):
         cancel: CancellationQuery | None = None,
         telemetry: bool = False,
         reuse_key: bytes | None = None,
+        capture: CaptureBuffer | None = None,
     ) -> EvolutionResult:
         """Record the public handoff and deliver the fixture's Engine answer."""
         self.calls.append((source, tuple(batches)))
