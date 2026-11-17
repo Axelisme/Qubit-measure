@@ -20,6 +20,8 @@ from tests.gui._user_input import ComponentDriver
 def dialog(qapp):
     d = LoadSpectrumDialog({"existing.hdf5": (0.5, 1.5)})
     yield d
+    # Retire focus/signals while the Python dialog is still owned by this fixture.
+    d.close()
     d.deleteLater()
 
 
