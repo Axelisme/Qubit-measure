@@ -1,5 +1,6 @@
 """Table sweeps preserve scalar and native-linear linked output and reference time."""
 
+from copy import deepcopy
 from dataclasses import replace
 from typing import Literal
 
@@ -28,6 +29,10 @@ Mode = Literal["scalar", "linear", "table"]
 RAMP_US = 0.04
 POINTS = 3
 
+# Keep parsing local to this module; each compiler owns a detached config.
+_BASE_SOCCFG = load_soccfg()
+_ADC_ORIGIN_SOCCFG = load_soccfg(1, 1)
+
 
 def compile_scan(
     field: Field,
@@ -39,7 +44,7 @@ def compile_scan(
     reps_innermost: bool,
 ) -> tuple[TimelineProgramV2, str]:
     """Compile the same nested scan/branch topology for every kind of parameter."""
-    soccfg = load_soccfg()
+    soccfg = deepcopy(_BASE_SOCCFG)
     # Two live branch arms plus nested counters and runtime length consumers
     # need more registers than the minimal compile fixture reserves.
     soccfg["tprocs"][0]["dreg_qty"] *= 2
@@ -120,7 +125,7 @@ def compile_scan(
 def compile_adc_origin(value, *, table: bool, fork: bool) -> TimelineProgramV2:
     """Keep a table fork while overwriting its parent with a LoadValue origin."""
     builder = TimelineBuilder(
-        load_soccfg(1, 1), reps=2, initial_delay=0, relax_delay=0.1
+        deepcopy(_ADC_ORIGIN_SOCCFG), reps=2, initial_delay=0, relax_delay=0.1
     )
     if table:
         value = builder.add_table_sweep("point", value)
