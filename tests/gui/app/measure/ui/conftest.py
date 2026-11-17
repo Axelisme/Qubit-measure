@@ -50,7 +50,7 @@ def browser_host(
     window.show()
     qapp.processEvents()
     yield window
-    window.deleteLater()
+    window.dispose()
     qapp.processEvents()
 
 
@@ -175,8 +175,19 @@ def main_window_control_factory(
         return authority
 
     yield create
-    for widget in qapp.topLevelWidgets():
-        if widget not in baseline:
+    windows = set(qapp.topLevelWidgets()) - baseline
+    # A root's disposal also destroys its popup windows. Do not revisit their
+    # wrappers after MainWindow.dispose() synchronously deletes the Qt tree.
+    roots = [
+        widget
+        for widget in windows
+        if (parent := widget.parentWidget()) is None or parent.window() not in windows
+    ]
+    for widget in roots:
+        if isinstance(widget, MainWindow):
+            widget.dispose()
+        else:
+            widget.close()
             widget.deleteLater()
     QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
     qapp.processEvents()
@@ -239,5 +250,5 @@ def live_ui(
             assert session.background.quiesce()
             ctrl.tab_control.close_tab(tab_id)
             ctrl.close()
-            window.deleteLater()
+            window.dispose()
             qapp.processEvents()

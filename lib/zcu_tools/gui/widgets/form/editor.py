@@ -581,8 +581,10 @@ class FormEditor[F: FormModel](QWidget):
             # Replacing a branch must not commit text from the retiring row.
             with QSignalBlocker(focused):
                 widget.setParent(None)
+                widget.hide()
         else:
             widget.setParent(None)
+            widget.hide()
         widget.deleteLater()
 
     def _sync_level(

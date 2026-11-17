@@ -172,6 +172,7 @@ def exp_tab_widget(qapp, make_ctrl):
         yield create_tab
     finally:
         for tab in owned_tabs:
+            tab.close()
             tab.deleteLater()
         owned_tabs.clear()
 
@@ -379,7 +380,7 @@ def test_main_window_refresh_projects_post_writeback_into_post_widget(
         driver.screenshot(tmp_path / "post-writeback-populated.png")
     finally:
         window.remove_tab_widget("tab-1")
-        window.deleteLater()
+        window.dispose()
         qapp.processEvents()
 
 

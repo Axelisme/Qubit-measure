@@ -73,7 +73,7 @@ def mounted_fx(qapp, tmp_path):
         yield fixture, window
         fixture.ctrl.close()
         fixture.stop()
-        window.deleteLater()
+        window.dispose()
         qapp.processEvents()
     finally:
         restore_registry(before)

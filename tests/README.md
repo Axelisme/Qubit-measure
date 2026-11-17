@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-11-17，GUI plotting guard 的條件式回收、reference producer 單列選取、acquire capture owners、sideband plateau 與 idle 精度宣告、模擬器維護規則指標
+**Last updated:** 2026-11-17，GUI visible-window teardown guard、plotting guard 的條件式回收、reference producer 單列選取、acquire capture owners、sideband plateau 與 idle 精度宣告、模擬器維護規則指標
 
 **讀者：** framework-dev、agent。查閱測試的 owner、fixture、執行方式與搬遷驗收契約。
 
@@ -390,6 +390,16 @@ def controller_view(qapp):
 Controller 的 terminal close。見 `tests/gui/session/services/test_device_manager.py`
 的 `_quiesce_services` fixture。
 
+### GUI 可見視窗的 teardown guard
+
+`tests/gui/conftest.py` 在每個測試的 teardown report 產生時檢查可見 top-level 視窗。
+此時 pytest 已拆除該測試的 fixtures，不會把等待 fixture 清理的正常視窗誤判成殘留。
+殘留視窗讓該 nodeid 的 teardown 失敗，訊息列出類別、objectName 與標題，並保留原有 teardown 錯誤。
+Guard 直接取樣，不在取樣前交付 `DeferredDelete`、GC 或 drain，也不自動 close 或 hide 視窗。
+建立視窗的測試或 fixture 負責在 `deleteLater()` 前明確 `close()`。
+Measure `MainWindow.close()` 會進非同步互動 shutdown；fixture 在完成 owner shutdown、drain 與其擁有的 callback／hardware cleanup 後使用公開 `dispose()`，不另追加 `deleteLater()`。
+Hidden 視窗不觸發這項檢查，但仍須由 owner 釋放；QObject event filter 或 scheduler 不套用 QWidget 的 close。
+
 ### GUI plotting 狀態的 module guard
 
 `tests/gui/conftest.py` 的 module-scope guard 在每個測試模組前後比對 plotting 的 shutting-down 旗標與 live container attachments 快照，
@@ -398,8 +408,8 @@ Setup 先取快照。只有旗標為 shutdown 或仍有 attachment 時，才交�
 Teardown 先與 setup 快照比對。只有不同時才交付 `DeferredDelete` 並 collect，再比一次。
 GC 與 `DeferredDelete` 只會移除 attachment，所以快照相等時省略回收不改變 guard 的判定。
 只剩弱引用、等待 GC 的 figure 不算污染；仍 attached 到 live container 的 figure 才算。
-測試自己建立的 `FigureContainer` 與 pyplot 的 Qt manager window 由建立它的 fixture 清理（container `clear()`／`deleteLater()`、manager window `deleteLater()`），
-不留給後面的模組。2026-10-28 全樹 15 個 teardown error 與一個退出時的 SIGSEGV 都來自這類未清理的測試資源。
+建立 `FigureContainer` 的 fixture 先呼叫 wrapper 的 `clear_dynamic_canvases()`，再對 fixture 持有的 Qt stack 呼叫 `close()`／`deleteLater()`。
+建立 pyplot Qt manager window 的 fixture 對該 window 呼叫 `close()`／`deleteLater()`，不留給後面的模組。2026-10-28 全樹 15 個 teardown error 與一個退出時的 SIGSEGV 都來自這類未清理的測試資源。
 
 ### 等待、時間與完成條件
 

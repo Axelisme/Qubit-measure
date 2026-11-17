@@ -107,6 +107,7 @@ def toolbar_ui(qapp):
         yield toolbar, host, ComponentDriver(parent)
     finally:
         toolbar.dispose()
+        parent.close()
         parent.deleteLater()
         qapp.processEvents()
 
@@ -288,7 +289,7 @@ def toolbar_application(
         ctrl.close()
         for tid in tuple(ctrl.tab_control.list_tab_ids()):
             ctrl.tab_control.close_tab(tid)
-        window.deleteLater()
+        window.dispose()
         QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
         qapp.processEvents()
 

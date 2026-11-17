@@ -27,6 +27,7 @@ def uncalibrated_native_dialog(qapp, tmp_path):
         yield driver, path
     finally:
         driver.click("Cancel")
+        dialog.close()
         dialog.deleteLater()
         qapp.processEvents()
 

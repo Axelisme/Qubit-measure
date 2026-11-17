@@ -247,7 +247,7 @@ def blocked_writeback_window(
     finally:
         ctrl.close()
         ctrl.tab_control.close_tab(tab_id)
-        window.deleteLater()
+        window.dispose()
         QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
         qapp.processEvents()
 

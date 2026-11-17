@@ -41,6 +41,8 @@ Point 清單只投影 description，availability 另判參數文件可讀且能�
 
 GUI 沿用同一個批次 watcher 監看作用中目錄，選 point 時也監看仍可由 Inspect 編輯的 global 文件目錄。切換作用中組時同步更新監看目錄。同一個 QFileSystemWatcher 看目錄，100 ms 去抖後一次比對全部已安裝文件的 hash。Hash 等於記憶體 revision 時忽略，不等於才解析並驗證。合法候選安裝後發布「來源已重載」。非法候選保留記憶體，Inspect 顯示該檔的錯誤與原因，不改檔、不自動修。Tab 的固定 capture 不變，Refresh／Reset 才取新值。
 
+Aliases 的候選由 session 用 opener 另開一個物件，不在已安裝的物件上 refresh。開 entry、切 point 照舊把語法錯延後；strict reload 要格式與 alias 語法都通過，才把物件與 session 的表一起換上，再發 fact；失敗時兩者都不變。理由是 alias 語法由 session 擁有（[[0063]]），物件只驗檔案格式；原地 refresh 會讓物件先換上新內容、session 卻保留舊表。2026-11-17，使用者追認這項代裁，並選擇維持語法 owner 不搬到 resources：「四筆追認，0154 選 A」。
+
 非作用中 global 組的外部 reload 只發布 file status，不推進 active content version。Inspect 明確寫 global 時，owner 先更新 cache 與 revision，再發布非作用中通知。它不冒充外部 reload，也不改作用中 point 或既有 capture。
 
 ### 衝突只在人有草稿時

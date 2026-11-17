@@ -49,6 +49,7 @@ def selector(qapp, cross_controller):
     )
     yield widget, context, jobs
     widget.teardown()
+    widget.close()
     widget.deleteLater()
     qapp.processEvents()
 

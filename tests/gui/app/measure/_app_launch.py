@@ -101,6 +101,6 @@ def launched_measure_app(
         background.quiesce()
         if window is not None:
             window.close_dialog(DialogName.ENTRY)
-            window.deleteLater()
+            window.dispose()
         sys.excepthook = previous_hook
         qapp.processEvents()

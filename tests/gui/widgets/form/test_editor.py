@@ -137,6 +137,7 @@ def views(qapp: QApplication) -> Iterator[list[QWidget]]:
     owned: list[QWidget] = []
     yield owned
     for widget in owned:
+        widget.close()
         widget.deleteLater()
     qapp.processEvents()
 

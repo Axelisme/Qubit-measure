@@ -68,6 +68,7 @@ def surface(qapp) -> Generator[QMainWindow]:
     window.show()
     qapp.processEvents()
     yield window
+    window.close()
     window.deleteLater()
     qapp.processEvents()
 
@@ -711,6 +712,7 @@ def choice_surface(qapp) -> Generator[QWidget]:
     window.show()
     qapp.processEvents()
     yield window
+    window.close()
     window.deleteLater()
     qapp.processEvents()
 

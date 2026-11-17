@@ -84,7 +84,7 @@ def test_document_set_scope_is_visible_when_opening_inspect(
         driver.screenshot(evidence / scope / "03-returned.png")
     finally:
         ctrl.close()
-        window.deleteLater()
+        window.dispose()
         qapp.processEvents()
 
 
@@ -162,7 +162,8 @@ def test_existing_tab_tracks_unselected_and_active_source(
         assert background.quiesce()
         for tab_id in tuple(ctrl.tab_control.list_tab_ids()):
             ctrl.tab_control.close_tab(tab_id)
-        window.deleteLater()
+        ctrl.close()
+        window.dispose()
         qapp.processEvents()
 
 
@@ -225,6 +226,6 @@ def test_empty_tab_area_shows_next_step_hint_until_a_tab_opens(
         assert background.quiesce()
         for tab_id in tuple(ctrl.tab_control.list_tab_ids()):
             ctrl.tab_control.close_tab(tab_id)
-        window.close()
-        window.deleteLater()
+        ctrl.close()
+        window.dispose()
         qapp.processEvents()

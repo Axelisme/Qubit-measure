@@ -23,6 +23,7 @@ def widget(qapp, onetone_controller):
     view = OneToneWidget(context)
     yield view, context
     view.teardown()
+    view.close()
     view.deleteLater()
     qapp.processEvents()
 

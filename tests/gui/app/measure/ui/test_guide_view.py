@@ -73,6 +73,7 @@ def open_guide(qapp: QApplication) -> Iterator[Callable[[AdapterGuide], QTextBro
     finally:
         for tab in owned_tabs:
             tab.hide()
+            tab.close()
             tab.deleteLater()
         qapp.processEvents()
         owned_authorities.clear()

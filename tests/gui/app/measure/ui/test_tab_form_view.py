@@ -175,6 +175,7 @@ def open_tab(qapp: QApplication) -> Iterator[Callable[..., TabView]]:
     yield make
     for view in views:
         view.tab.detach()
+        view.tab.close()
         view.tab.deleteLater()
     # Delete now, not whenever garbage collection reaches the views.
     QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
@@ -516,7 +517,7 @@ def source_window(tmp_path, qapp: QApplication) -> Iterator[MainWindow]:
         application.stop()
         for tab_id in tuple(ctrl.tab_control.list_tab_ids()):
             ctrl.tab_control.close_tab(tab_id)
-        window.deleteLater()
+        window.dispose()
         QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
         qapp.processEvents()
 

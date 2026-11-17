@@ -49,6 +49,7 @@ def widget(qapp, context):
     view = LinePickerWidget(context, onetone=False)
     yield view
     view.teardown()
+    view.close()
     view.deleteLater()
     qapp.processEvents()
 
