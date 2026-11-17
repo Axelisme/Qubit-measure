@@ -20,8 +20,8 @@ from zcu_tools.gui.session.context_types import (
     PointCreateRequest,
 )
 
-from tests.gui._context_reads import capture_focus
 from tests.experiment._saving_support import SavingCfg, SavingResult
+from tests.gui._context_reads import capture_focus
 from tests.gui.app.measure._history_form_support import (
     SourceDependentAdapter,
     history_controller,
@@ -72,8 +72,8 @@ def test_unavailable_reset_updates_nonfactory_error_and_reraises_without_a_form(
         tab_id = ctrl.tab_control.get_active_tab_id()
         assert tab_id is not None
         resource = ctrl.cfg_resources.lookup(tab_id)
-        ctrl.setup_control.new_entry(EntryRequest("current"))
-        ctrl.setup_control.new_point(PointCreateRequest("p", "", CommandOrigin("gui")))
+        ctrl.entry_control.new_entry(EntryRequest("current"))
+        ctrl.entry_control.new_point(PointCreateRequest("p", "", CommandOrigin("gui")))
         ctrl.context_control.add_component(
             "Q1", "history/source", {}, point=ctrl.context_control.current_point_label()
         )

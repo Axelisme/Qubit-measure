@@ -38,7 +38,7 @@ from zcu_tools.gui.app.measure.state import (
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
-from zcu_tools.gui.session.context_types import CommandOrigin, PointUseRequest
+from zcu_tools.gui.session.context_types import CommandOrigin
 from zcu_tools.gui.session.operation_handles import OperationHandles
 from zcu_tools.gui.session.parameters import DocumentSetCapture
 from zcu_tools.gui.session.services.context import ContextService
@@ -46,8 +46,8 @@ from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.resources.entry import ResultEntry
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
-from tests.gui._context_reads import capture_focus
 from tests.experiment._saving_support import SavingCfg, SavingCore, SavingResult
+from tests.gui._context_reads import capture_focus
 from tests.gui.app.measure._form_fakes import make_form
 
 GUI_ORIGIN = CommandOrigin("gui")
@@ -188,7 +188,7 @@ def native_save_session(
     context = ContextService(state, bus, bind_assets=ArbWaveformDatabase.info_at)
     context.install_entry(entry)
     context_control = context
-    context_control.use_point(PointUseRequest("p"))
+    context_control.use_point("p")
     captured = capture_focus(context_control)
     storage = captured.capture_storage()
     cfg = SavingCfg()

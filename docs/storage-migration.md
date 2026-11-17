@@ -10,7 +10,7 @@
 
 Shipped mapping 共用 lab 的純 flux 轉換。每個完整 seed／value batch 先轉換，再以目前 `schema_version: 3` 驗證與發布，不先發布舊文件。現行校準為 `{offset, period}`，v1 自己的線保留 half 分支，coil 只保留 signed period，原 half／int 列報告。
 
-每批與最終的 `flux_dev` 只保留明示來源，包含完整 overlay 中有效的 setup／mapping 繼承來源。無明示來源時留空，不從單位、live device 或佔位名稱猜測。缺名 local／coil 分別保留 `period.unnamed_device`／`period.unnamed_coil`，報告逐實際目的位置提醒改名，不因缺名列 pending。原資料明示的 `unnamed_*` 照明示處理。
+每批與最終的 `flux_dev` 只保留明示來源，包含完整 overlay 中有效的 global／mapping 繼承來源。無明示來源時留空，不從單位、live device 或佔位名稱猜測。缺名 local／coil 分別保留 `period.unnamed_device`／`period.unnamed_coil`，報告逐實際目的位置提醒改名，不因缺名列 pending。原資料明示的 `unnamed_*` 照明示處理。
 
 Offset 每批按 v1 結構角色重算，自己的線優先，其次唯一 coil，否則 null。經 v2 中間形狀時也不靠佔位 `flux_source` 判斷角色，不新增 finalizer。Point 完整有效且明示來源的校準取代繼承 offset 與該儀器 period，其他 periods 保留。同批撞鍵、partial、非法名稱、數值與 spacing 仍拒絕。詳見 [flux 升級指南](flux-migration.md#storage-匯入的來源與覆寫)。
 

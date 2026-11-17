@@ -13,7 +13,6 @@ from zcu_tools.gui.form import FormErrors, FormModel
 from zcu_tools.gui.session.context_types import (
     CommandOrigin,
     PointCreateRequest,
-    PointUseRequest,
 )
 from zcu_tools.gui.session.ports import OperationConflictError
 from zcu_tools.resources.entry import ResultEntry
@@ -50,7 +49,7 @@ def make_control(tmp_path):
     )
     entry.new_point("source", description="synthetic")
     harness.services.context.install_entry(entry)
-    harness.services.context.use_point(PointUseRequest("source"))
+    harness.services.context.use_point("source")
 
     from zcu_tools.experiment.simulation import white_noise
 
@@ -178,7 +177,7 @@ def test_prepare_forms_recaptures_after_terminal_without_losing_authored_draft(
             "next", description="new source", origin=CommandOrigin("gui")
         )
     )
-    harness.services.context.use_point(PointUseRequest("next"))
+    harness.services.context.use_point("next")
     assert control.form_env(tab, "tunables") is old
     control.prepare_forms(tab)
     refreshed = control.form_env(tab, "tunables")

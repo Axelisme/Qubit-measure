@@ -595,7 +595,7 @@ view product及lifecycle／stdio行為。每個fixture建立自己的session／b
 透過recording Transport觀察RPC，不patch server globals或私有helpers。
 `tests/gui/app/measure/remote/test_remote_mcp_toolchain.py`保留GUI project/device/save／guide
 handler契約；同目錄的事件整合測試保留真socket，驗證EventBus→bridge→session的origin。
-`tests/gui/app/measure/_app_launch.py`啟動真實 `MeasureGuiBehavior`（window、remote adapter、MCP client），`tests/gui/app/measure/test_setup_launch_flow.py`與`ui/test_named_dialog_screenshot.py`用它驗證 Setup 從還原、`after_show`、MCP screenshot、工具列聚焦到關閉重開，以及 project tool 變更後的預填。
+`tests/gui/app/measure/_app_launch.py`啟動真實 `MeasureGuiBehavior`（window、remote adapter、MCP client），`tests/gui/app/measure/test_entry_launch_flow.py`與`ui/test_named_dialog_screenshot.py`用它驗證 Entry 從還原、`after_show`、MCP screenshot、工具列聚焦到關閉重開，以及 project tool 變更後的預填。
 Shared exposure policy 的可觀察行為屬於 `tests/gui/remote/`。Schema 文字、tool inventory 與
 script flags 用直接 review，不納入 pytest。
 

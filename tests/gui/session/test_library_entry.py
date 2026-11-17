@@ -16,7 +16,6 @@ from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.form import FormErrors
 from zcu_tools.gui.session.context_control import ContextControlPort
-from zcu_tools.gui.session.context_types import PointUseRequest
 from zcu_tools.gui.session.events import MlChangedPayload
 from zcu_tools.gui.session.library_entry import (
     LibraryEntryInvalid,
@@ -60,7 +59,7 @@ def session(tmp_path: Path) -> LibrarySession:
 
 def _select(session: LibrarySession, label: str) -> None:
     session.entry.new_point(label)
-    session.control.use_point(PointUseRequest(label))
+    session.control.use_point(label)
 
 
 def _seed(

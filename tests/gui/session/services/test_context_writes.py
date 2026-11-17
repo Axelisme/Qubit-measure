@@ -19,7 +19,6 @@ from zcu_tools.gui.session.context_control import ContextControlPort
 from zcu_tools.gui.session.context_types import (
     DocumentSetRef,
     LibraryChange,
-    PointUseRequest,
 )
 from zcu_tools.gui.session.events import (
     ContextSwitchedPayload,
@@ -115,7 +114,7 @@ def _value(capture: DocumentSetCapture, kind: Kind) -> YamlValue:
 
 def _select(session: _Session, label: str) -> DocumentSetRef:
     session.entry.new_point(label)
-    return session.control.use_point(PointUseRequest(label))
+    return session.control.use_point(label)
 
 
 @pytest.mark.parametrize("kind", KINDS)
@@ -538,7 +537,7 @@ def test_detached_saved_point_write_keeps_current_point_and_publication(
     )
     assert session.state.version.get("context") == before_version
     assert events == []
-    session.control.use_point(PointUseRequest("a"))
+    session.control.use_point("a")
     assert _value(capture_focus(session.control), kind) == pytest.approx(0.2)
     _write(session.control, first, kind, 0.3)
     assert _value(capture_focus(session.control), kind) == pytest.approx(0.3)

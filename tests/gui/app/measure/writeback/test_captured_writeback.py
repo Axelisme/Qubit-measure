@@ -42,7 +42,6 @@ from zcu_tools.gui.session.context_control import ContextControlPort
 from zcu_tools.gui.session.context_types import (
     CommandOrigin,
     DocumentSetRef,
-    PointUseRequest,
 )
 from zcu_tools.gui.session.expression import evaluate_scalar_expr
 from zcu_tools.gui.session.operation_runner import OperationRunner
@@ -66,8 +65,8 @@ from zcu_tools.resources.entry.ledger_models import AcceptedPayload, LedgerEvent
 from zcu_tools.resources.entry.registry import RoleSpec
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
-from tests.gui._context_reads import capture_focus
 from tests.experiment._saving_support import SavingCfg, SavingResult
+from tests.gui._context_reads import capture_focus
 from tests.gui.app.measure._native_save_support import (
     AnalysisSavingAdapter,
     NativeSaveSession,
@@ -79,10 +78,10 @@ from tests.resources.entry.fakes import register_fakes, registry_state, restore_
 
 
 def saved_target(parameters: DocumentSetCapture) -> DocumentSetRef:
-    """Require a saved-point fixture capture for setup writes."""
+    """Require a document-set fixture capture for global writes."""
     target = parameters.target
     if not isinstance(target, DocumentSetRef):
-        raise AssertionError("Fixture capture has no saved point")
+        raise AssertionError("Fixture capture has no document-set target")
     return target
 
 
@@ -112,7 +111,7 @@ def session(tmp_path: Path) -> Generator[WritebackSession]:
         )
         entry.new_point("working")
         context.install_entry(entry)
-        context.use_point(PointUseRequest("working"))
+        context.use_point("working")
         control = context
         control.add_component(
             "Q1", "fake/drive/a", {}, point=control.current_point_label()
@@ -127,7 +126,7 @@ def session(tmp_path: Path) -> Generator[WritebackSession]:
 @pytest.fixture
 def saved_session(session: WritebackSession) -> WritebackSession:
     session.entry.new_point("saved")
-    session.control.use_point(PointUseRequest("saved"))
+    session.control.use_point("saved")
     session.control.add_component(
         "Q1", "fake/drive/a", {}, point=session.control.current_point_label()
     )
@@ -301,7 +300,7 @@ def test_apply_uses_current_document_set_and_records_nullable_point(
         (AliasRow("qubit", "Q1"),), point=session.control.current_point_label()
     )
     point_source = capture_focus(session.control)
-    session.control.use_global()
+    session.control.use_point(None)
     session.control.add_component(
         "Q1", "fake/drive/a", {}, point=session.control.current_point_label()
     )
@@ -320,7 +319,7 @@ def test_apply_uses_current_document_set_and_records_nullable_point(
     )
     source = point_source if destination == "global" else global_source
     if destination == "global":
-        session.control.use_point(PointUseRequest("working"))
+        session.control.use_point("working")
     draft = session.service.create_draft(
         [
             ParameterWriteback("$qubit.ext.gain", "Gain", proposed_value=0.8),
@@ -332,9 +331,9 @@ def test_apply_uses_current_document_set_and_records_nullable_point(
         device_snapshot={"device": {"value": 0.1, "value_unit": "V"}},
     )
     if destination == "point":
-        session.control.use_point(PointUseRequest("working"))
+        session.control.use_point("working")
     else:
-        session.control.use_global()
+        session.control.use_point(None)
     # A different live alias must not redirect the captured proposal.
     session.control.apply_alias_rows(
         (AliasRow("qubit", "Q2"),), point=session.control.current_point_label()
@@ -386,7 +385,7 @@ def test_preview_and_apply_use_current_gui_point_not_analysis_origin(
         experiment_name="synthetic",
     )
     session.entry.new_point("other")
-    session.control.use_point(PointUseRequest("other"))
+    session.control.use_point("other")
     session.control.add_component(
         "Q1", "fake/drive/a", {}, point=session.control.current_point_label()
     )
@@ -749,7 +748,7 @@ def test_post_analysis_draft_retains_primary_identity(
             ).model_dump(mode="json"),
         )
         native.entry.new_point("later-point")
-        control.use_point(PointUseRequest("later-point"))
+        control.use_point("later-point")
         current = capture_focus(control)
         assert current is not captured
         service.start_post_analyze("tab", object(), plots=Plots(NonPresentingHost()))
@@ -804,7 +803,7 @@ def test_writeback_evaluates_module_expression_from_creation_capture(
     draft.edit("ml-1", edits={("gain",): {"expr": "general.ext.flux_value"}})
     session.control.set_parameter(saved_target(captured), "general.ext.flux_value", 0.9)
     if destination == "global":
-        session.control.use_global()
+        session.control.use_point(None)
         session.control.add_component(
             "Q1", "fake/drive/a", {}, point=session.control.current_point_label()
         )
@@ -846,7 +845,7 @@ def test_complex_writeback_keeps_captured_role_path_but_writes_selected_point(
     session: WritebackSession,
 ) -> None:
     session.entry.new_point("a")
-    first = session.control.use_point(PointUseRequest("a"))
+    first = session.control.use_point("a")
     session.control.add_component(
         "Q1",
         "fake/drive/a",
@@ -880,7 +879,7 @@ def test_complex_writeback_keeps_captured_role_path_but_writes_selected_point(
         first, "Q1.ext.response.origin", {"__complex__": [0.6, 0.1]}
     )
     session.entry.new_point("b")
-    second = session.control.use_point(PointUseRequest("b"))
+    second = session.control.use_point("b")
     session.control.add_component(
         "Q2", "fake/drive/a", {}, point=session.control.current_point_label()
     )
@@ -933,7 +932,7 @@ def test_receipt_reads_actual_role_target_after_point_change(
     session: WritebackSession,
 ) -> None:
     session.entry.new_point("a")
-    first = session.control.use_point(PointUseRequest("a"))
+    first = session.control.use_point("a")
     session.control.add_component(
         "Q1", "fake/drive/a", {"rate": 0.1}, point=session.control.current_point_label()
     )
@@ -948,7 +947,7 @@ def test_receipt_reads_actual_role_target_after_point_change(
     )
     session.control.set_parameter(first, "Q1.rate", 0.6)
     session.entry.new_point("b")
-    second = session.control.use_point(PointUseRequest("b"))
+    second = session.control.use_point("b")
     session.control.add_component(
         "Q2", "fake/drive/a", {"rate": 0.9}, point=session.control.current_point_label()
     )

@@ -182,6 +182,7 @@ def start_interactive(fx, *, background=None):
     devs = np.linspace(-5.0, 5.0, 60)
     freqs = np.linspace(4.0, 5.0, 30)
     signals = np.exp(-(devs[:, None] ** 2)) * np.ones((1, 30))
+    captured = capture_focus(fx.ctrl.context_control)
     commit_run(
         fx.state,
         tab_id,
@@ -190,10 +191,8 @@ def start_interactive(fx, *, background=None):
                 None,
                 SpectrumResult(devs, freqs, np.asarray(signals, dtype=np.complex128)),
             ),
-            storage=None
-            if capture_focus(fx.ctrl.context_control) is None
-            else capture_focus(fx.ctrl.context_control).storage,
-            parameters=capture_focus(fx.ctrl.context_control),
+            storage=captured.storage,
+            parameters=captured,
         ),
     )
     plots = Plots(NonPresentingHost())

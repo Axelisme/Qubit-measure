@@ -1,7 +1,6 @@
 """Real-file watcher admission, deterministic debounce draining and teardown."""
 
 from zcu_tools.gui.session import adapters
-from zcu_tools.gui.session.context_types import PointUseRequest
 from zcu_tools.gui.session.events import MdChangedPayload
 
 from tests.gui._context_reads import capture_focus
@@ -18,7 +17,7 @@ def test_watcher_follows_point_to_global_directory_and_keeps_old_captures(
     point_path = context.get_file_revisions()[0].path
     watcher = FileWatcher(context, bus, admit_reload=lambda: True)
     try:
-        context.use_global()
+        context.use_point(None)
         global_capture = capture_focus(context)
         path = entry.result_path / "parameters.yaml"
         path.write_text(path.read_text().replace("4300.0", "5500.0"))
@@ -123,7 +122,7 @@ def test_directory_event_installs_new_library_after_absent_selection(
     context, bus, entry = selected
     path = entry.result_path / "points/first/library.yaml"
     path.unlink()
-    context.use_point(PointUseRequest("first"))
+    context.use_point("first")
     captured = capture_focus(context)
     watcher = FileWatcher(context, bus, admit_reload=lambda: True)
     try:
@@ -163,7 +162,7 @@ def test_directory_events_follow_atomic_replace_point_switch_and_missing_aliases
             label="point file reload",
         )
         entry.new_point("second")
-        context.use_point(PointUseRequest("second"))
+        context.use_point("second")
         alias = context.get_file_revisions()[2]
         alias.path.write_text(
             'format: zcu.aliases\nformat_version: "1.0"\naliases: {driver: Q1}\n'

@@ -20,7 +20,6 @@ from zcu_tools.gui.session.context_control import ContextControlPort
 from zcu_tools.gui.session.context_types import (
     ContextSourceFault,
     ContextSourceUnavailableError,
-    PointUseRequest,
 )
 from zcu_tools.gui.session.parameters import DocumentSetCapture
 from zcu_tools.gui.session.services.context import ContextService
@@ -64,7 +63,7 @@ def session(tmp_path: Path) -> Generator[SaveSession]:
         context = ContextService(state, bus, bind_assets=ArbWaveformDatabase.info_at)
         context.install_entry(entry)
         control = context
-        control.use_point(PointUseRequest("p"))
+        control.use_point("p")
         yield SaveSession(entry, context, control, state, bus)
         assert registry_state() == installed
     finally:
@@ -88,7 +87,7 @@ def test_storage_retains_entry_point_description_and_roles_after_switch(
         (AliasRow("driver", "Q2"),), point=session.control.current_point_label()
     )
     session.entry.new_point("q")
-    session.control.use_point(PointUseRequest("q"))
+    session.control.use_point("q")
     other = ResultEntry.create(
         "entry-b", result_root=tmp_path / "Result", database_root=tmp_path / "Database"
     )
@@ -182,7 +181,7 @@ def test_storage_requires_saved_origin_and_readable_sources(
 def test_storage_rejects_mismatched_target(session: SaveSession) -> None:
     saved = capture_focus(session.control)
     session.entry.new_point("q")
-    session.control.use_point(PointUseRequest("q"))
+    session.control.use_point("q")
     other = capture_focus(session.control)
     with pytest.raises(ValueError, match="origin"):
         DocumentSetCapture(

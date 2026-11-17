@@ -38,9 +38,9 @@ from zcu_tools.gui.form import FormEnv
 from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.gui.session.state import DeviceState, DeviceStatus
 
-from tests.gui._context_reads import capture_focus
 from tests.device._snapshot_fakes import SnapshotDevice
 from tests.experiment._saving_support import SavingCfg, SavingCore, SavingResult
+from tests.gui._context_reads import capture_focus
 from tests.gui.app.measure._cfg_fakes import parameter_capture
 from tests.gui.app.measure._form_fakes import make_form
 from tests.gui.app.measure._native_save_support import (

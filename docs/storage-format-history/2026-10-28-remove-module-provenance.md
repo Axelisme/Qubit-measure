@@ -2,7 +2,7 @@
 
 # 移除模組來源
 
-2026-10-28 移除 `module_cfg.yaml` 的 per-leaf `provenance`。Library 容器維持 `format: zcu.module-library` 與 `format_version: '2.0'`。Point 與 setup 的 opaque `metadata` 不受影響。
+2026-10-28 移除 `module_cfg.yaml` 的 per-leaf `provenance`。Library 容器維持 `format: zcu.module-library` 與 `format_version: '2.0'`。Point 與 global 的 opaque `metadata` 不受影響。
 
 ## 舊資料
 

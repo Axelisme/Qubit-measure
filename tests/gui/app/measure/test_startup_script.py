@@ -23,13 +23,12 @@ from zcu_tools.gui.session.context_types import (
     CommandOrigin,
     EntryRequest,
     PointCreateRequest,
-    PointUseRequest,
 )
 from zcu_tools.gui.session.ports import OperationConflictError
 from zcu_tools.resources.entry import ResultEntry, component_registry
 
-from tests.gui._context_reads import capture_focus, inspect_focus
 from tests._lab import synthetic_lab
+from tests.gui._context_reads import capture_focus, inspect_focus
 from tests.gui._qt_waits import qt_until
 from tests.gui._user_input import ComponentDriver
 from tests.gui.app.measure._components import QubitSchema
@@ -82,8 +81,8 @@ def startup_app(qapp, tmp_path, monkeypatch):
     probe.driver.calls = probe.calls
     probe.soccfg = load_soccfg()
     monkeypatch.setitem(sys.modules, "startup_probe", probe)
-    ctrl.setup_control.new_entry(EntryRequest("synthetic"))
-    ctrl.setup_control.new_point(PointCreateRequest("first", "", CommandOrigin("gui")))
+    ctrl.entry_control.new_entry(EntryRequest("synthetic"))
+    ctrl.entry_control.new_point(PointCreateRequest("first", "", CommandOrigin("gui")))
     try:
         yield behavior, assembly, ctrl, window, probe
     finally:
@@ -300,7 +299,7 @@ def test_startup_selects_global_and_creates_points_in_all_modes(startup_app, tmp
         "    ctx.setup.new_point('seed', description='Global copy')\n"
         "    ctx.setup.new_point('blank', mode='empty', description='Blank')\n"
         "    ctx.setup.new_point('copy', mode='clone', clone_from='seed', description='Clone')\n"
-        "    ctx.setup.use_global()\n",
+        "    ctx.setup.use_point(None)\n",
     )
     token = ctrl.start_startup(path)
     qt_until(
@@ -355,10 +354,10 @@ def test_startup_persists_aliases_in_the_active_document_set(
         assert entry.aliases(point=point).read().require_valid().aliases == {
             "qubit": "Q1"
         }
-        ctrl.setup_control.open_entry(EntryRequest("synthetic"))
-        ctrl.setup_control.open_entry(EntryRequest("created"))
+        ctrl.entry_control.open_entry(EntryRequest("synthetic"))
+        ctrl.entry_control.open_entry(EntryRequest("created"))
         if point is not None:
-            ctrl.setup_control.use_point(PointUseRequest(point))
+            ctrl.entry_control.use_point(point)
         assert capture_focus(ctrl.context_control).value("$qubit.freq") == 5.25
     finally:
         restore_registry(before)
@@ -415,7 +414,7 @@ def test_live_queries_and_close_callback_read_current_not_startup_state(
         "    ctx.on_close(closing)\n",
     )
     run_script(ctrl, path)
-    ctrl.setup_control.new_point(PointCreateRequest("later", "", CommandOrigin("gui")))
+    ctrl.entry_control.new_point(PointCreateRequest("later", "", CommandOrigin("gui")))
     ctrl.tab_control.new_tab("sample")
     behavior.close(assembly)
     assert probe.calls == ["snapshot", "hardware"]

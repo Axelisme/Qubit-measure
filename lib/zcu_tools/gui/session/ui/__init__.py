@@ -1,7 +1,7 @@
 """Session-core UI — app-agnostic dialogs/widgets every measurement-session app
-reuses (setup / device / context-inspect / progress).
+reuses (entry / device / context-inspect / progress).
 
-Setup depends on the session services through ``SetupControlPort``;
+Entry depends on the session services through ``EntryControlPort``;
 context-inspect, device, and predictor management depend on their own control
 facets. Device management also receives a separate md provider for eval-mode
 fields. They never reach into a concrete ``gui.app.*`` package. Each app

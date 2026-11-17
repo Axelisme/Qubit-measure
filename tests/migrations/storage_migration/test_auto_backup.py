@@ -662,7 +662,7 @@ def test_initial_window_yaml_formatting_is_skipped_without_rewriting(
         with path.open("w") as stream:
             YAML(typ="safe").dump(raw, stream)
     before = {path: (path.read_bytes(), path.stat().st_mtime_ns) for path in paths}
-    # Data-only leaves the initial setup/library unchanged after bootstrap.
+    # Data-only leaves the initial global/library unchanged after bootstrap.
     migrate(replace(request_data, part="data"), mapping)
     assert {
         path: (path.read_bytes(), path.stat().st_mtime_ns) for path in paths

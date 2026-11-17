@@ -34,9 +34,9 @@ def _make_controller(readiness: ContextReadiness, *, tmp_path) -> Controller:
 
     fixture = Fixture(empty_project=True, project_root=str(tmp_path / "project"))
     if readiness is not ContextReadiness.EMPTY:
-        fixture.ctrl.setup_control.new_entry(EntryRequest("fake_qubit"))
+        fixture.ctrl.entry_control.new_entry(EntryRequest("fake_qubit"))
     if readiness is ContextReadiness.POINT:
-        fixture.ctrl.setup_control.new_point(
+        fixture.ctrl.entry_control.new_point(
             PointCreateRequest("ctx001", "", CommandOrigin("gui"))
         )
     fixture.state.set_context(

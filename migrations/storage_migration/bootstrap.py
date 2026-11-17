@@ -446,13 +446,13 @@ def prepare_session(
         validate_run_evidence(request, session)
     if session.manifest.cleanup_phase == "complete":
         return session, entry
-    refresh_setup = any(
+    refresh_global = any(
         item.kind == "setup" and item.phase == "prepared"
         for item in (session.manifest.documents or {}).values()
     )
     recover_documents(session)
     recover_points(session)
-    if refresh_setup and entry is not None and not session.dry_run:
+    if refresh_global and entry is not None and not session.dry_run:
         entry.parameters().refresh()
     session.checkpoint()
     publish_report(session)

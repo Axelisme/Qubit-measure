@@ -27,7 +27,6 @@ from zcu_tools.gui.session.context_control import ContextControlPort
 from zcu_tools.gui.session.context_types import (
     CommandOrigin,
     PointCreateRequest,
-    PointUseRequest,
 )
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.state import SessionState
@@ -138,7 +137,7 @@ def component_widget(
     # Parameter writes need a selected saved point; start on one.
     entry.new_point("working")
     owner.install_entry(entry)
-    owner.use_point(PointUseRequest("working"))
+    owner.use_point("working")
     control = owner
     widget = ComponentTreeWidget(control)
     widget.resize(900, 700)

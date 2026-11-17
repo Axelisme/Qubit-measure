@@ -7,7 +7,6 @@ from typing import Literal
 import numpy as np
 import pytest
 from pydantic import ConfigDict
-from tests.gui._context_reads import capture_focus
 from zcu_tools.cfg_model import ArbWaveformCfg, PulseSpec
 from zcu_tools.gui.remote.errors import ErrorCode
 from zcu_tools.gui.session.aliases import AliasRow
@@ -16,6 +15,8 @@ from zcu_tools.gui.session.parameters import DocumentSetCapture, RoleBinding
 from zcu_tools.resources.context.library import LibraryContent, LibrarySnapshot
 from zcu_tools.resources.entry import ComponentSchema, ResultEntry, component_registry
 from zcu_tools.resources.waveform_assets import ArbWaveformError
+
+from tests.gui._context_reads import capture_focus
 
 from ._point_application import PointApplication
 
@@ -304,7 +305,10 @@ def test_snapshot_summary_checks_fields_it_outputs_not_list_item_schemas(
             replace(
                 application.state.session_env,
                 parameters=DocumentSetCapture(
-                    point=content, library=captured.library, target=captured.target, roles=None
+                    point=content,
+                    library=captured.library,
+                    target=captured.target,
+                    roles=None,
                 ),
             )
         )
@@ -341,7 +345,10 @@ def test_snapshot_path_reads_a_leaf_without_validating_same_component_sibling(
         replace(
             application.state.session_env,
             parameters=DocumentSetCapture(
-                point=content, library=captured.library, target=captured.target, roles=None
+                point=content,
+                library=captured.library,
+                target=captured.target,
+                roles=None,
             ),
         )
     )
@@ -396,7 +403,10 @@ def test_snapshot_library_path_reads_only_selected_spec_fields(
         replace(
             application.state.session_env,
             parameters=DocumentSetCapture(
-                point=captured.point_content(), library=library, target=captured.target, roles=None
+                point=captured.point_content(),
+                library=library,
+                target=captured.target,
+                roles=None,
             ),
         )
     )

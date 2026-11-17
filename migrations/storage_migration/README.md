@@ -1,6 +1,6 @@
 # `migrations.storage_migration` 離線遷移
 
-**Last updated:** 2026-11-16，共用 ParameterView 與按路徑分類的 manifest
+**Last updated:** 2026-11-17，global 名稱與持久格式 token
 
 **讀者：** framework-dev、agent。維護離線遷移的來源 mapping、owner 接縫與可續跑 publication。
 
@@ -10,7 +10,7 @@
 
 - [組合根與依賴](#組合根與依賴)
 - [來源檔案與目的](#來源檔案與目的)
-- [Setup 與 point mapping](#setup-與-point-mapping)
+- [Global 與 point mapping](#global-與-point-mapping)
 - [分析檔 mapping](#分析檔-mapping)
 - [Module library mapping](#module-library-mapping)
 - [Samples mapping](#samples-mapping)
@@ -23,7 +23,7 @@
 
 - 組合根提供 mapping、entry 的共用 kind 註冊、planning 前的 concrete cfg validation 與發布後的 native validation callback。本 package 使用 experiment 的 metadata 型別與編碼，不 import `zcu_lab` 或舊資源容器。`lib` 不 import `migrations`。
 
-- Parameters 與 data 可分開執行。第二部分改 part 即自動續接同一 manifest，仍可明填 resume，不合併任意既有條目。完成的 setup／point 可以獨立編輯，但之後重跑遷移會列出與 baseline 的差異，不恢復舊值。
+- Parameters 與 data 可分開執行。第二部分改 part 即自動續接同一 manifest，仍可明填 resume，不合併任意既有條目。完成的 global／point 可以獨立編輯，但之後重跑遷移會列出與 baseline 的差異，不恢復舊值。
 
 ## 來源檔案與目的
 
@@ -33,8 +33,8 @@
 | --- | --- |
 | 根 `meta_info.json` | `parameters.yaml` 的正式欄位與 `general.ext` |
 | 根 `params.json` 的 fit | entry 的 `predictors/<Q>.json`、`dispersive/<Q>.json`、`t1_curve/<Q>.json` |
-| `params.json` 未轉 leaf | setup 的 `components.<Q>.ext.legacy_params`，完整來源留外部備份 |
-| 根 `module_cfg.yaml` | entry 的 setup library `library.yaml` |
+| `params.json` 未轉 leaf | global 的 `components.<Q>.ext.legacy_params`，完整來源留外部備份 |
+| 根 `module_cfg.yaml` | entry 的 global library `library.yaml` |
 | `exps/<sub>/` 或舊直屬 child 的 meta／library | `points/<sub>/parameters.yaml`、`points/<sub>/library.yaml` |
 | `exps/<sub>/image/*.png` | `points/<sub>/figures/<原檔名>` |
 | exps 外的 `image/` | entry 的 `figures/<來源相對路徑>` |
@@ -51,19 +51,19 @@
 
 - `preservation.py` 在首次備份及 entry 建立前預檢所有原樣目的，resume 在 checkpoint／report 寫入前再檢查。新格式保留檔／目錄、來源路由互撞、目的既有檔及祖先／後代佔用都會列出來源與目的並停止。不覆寫、不改名、不認領任意既有檔。只有同 manifest 的發布且 hash 一致才可重用；prepared publication 的既有復原協定不變。
 
-## Setup 與 point mapping
+## Global 與 point mapping
 
 ### 完整 batch 與目前 schema 驗證
 
-`MigrationMapping.parameter_transform` 是可選的純 `ParameterUpgradeDocument → ParameterUpgradeDocument` callback。`prepare_parameter_batch` 先將 seed 或整組 values 疊到完整 raw 文件，再呼叫轉換，最後以共用的 `ParameterDocument.model_validate` 驗證，才建立 `EditView`。來源欄位可以不屬於目前 component schema，不需要讓 reader 接受歷史格式。Batch projection 保留 unset 與顯式 null 的區別，不把未填的 optional 欄位變成 null，也不丟掉明填 null。Seed 在 `_seed_components` 與 dry-run setup 共用此接縫，value group 在 `_flux_units._stage_group` 共用它。Seed 失敗停止；group 失敗按既有 pending 規則保留原文，不提交該組。
+`MigrationMapping.parameter_transform` 是可選的純 `ParameterUpgradeDocument → ParameterUpgradeDocument` callback。`prepare_parameter_batch` 先將 seed 或整組 values 疊到完整 raw 文件，再呼叫轉換，最後以共用的 `ParameterDocument.model_validate` 驗證，才建立 `EditView`。來源欄位可以不屬於目前 component schema，不需要讓 reader 接受歷史格式。Batch projection 保留 unset 與顯式 null 的區別，不把未填的 optional 欄位變成 null，也不丟掉明填 null。Seed 在 `_seed_components` 與 dry-run global 共用此接縫，value group 在 `_flux_units._stage_group` 共用它。Seed 失敗停止；group 失敗按既有 pending 規則保留原文，不提交該組。
 
-Callback 的 `ParameterUpgradeDocument.notes` 是不寫入 YAML 的操作提醒。`prepare_parameter_batch` 回傳 `PreparedParameterBatch(document, notes)`，seed 與 value-group caller 將成功批次的 notes 附上實際 setup／point 目的路徑，去除同位置的重複訊息，存入 `MigrationReport.notes`。Dry-run 與正式報告使用同一路徑。Migration owner 不解析訊息中的實驗欄位。
+Callback 的 `ParameterUpgradeDocument.notes` 是不寫入 YAML 的操作提醒。`prepare_parameter_batch` 回傳 `PreparedParameterBatch(document, notes)`，seed 與 value-group caller 將成功批次的 notes 附上實際 global／point 目的路徑，去除同位置的重複訊息，存入 `MigrationReport.notes`。Dry-run 與正式報告使用同一路徑。Migration owner 不解析訊息中的實驗欄位。
 
 Shipped `storage_mapping` 在 callback 執行時才載入 lab 的 `convert_storage_flux_batch`。它與長期 v1→v2→v3 升級鏈共用 lab 的純轉換。框架測試替換 callback，僅使用合成同版 schema，不依賴 lab。Mapping revision 同時變更，避免舊 manifest 認領不同轉換規則。
 
 Runtime 與 callback 產物都是 v3，不新增 reader compatibility。下表舊 flux logical paths 是組裝 batch 的歷史輸入，轉換後保存 qubit `{offset, period}`，不發布舊版文件。
 
-Storage 每批與最終的 `flux_dev` 都只保留明示來源，包含完整 overlay 中有效的 setup／mapping 繼承來源，否則留空。不從單位、live device 或校準 entry 猜來源。缺名 local／coil 分別保留 `period.unnamed_device`／`period.unnamed_coil`，不因此列 pending。Diagnostics 逐實際目的位置提醒改名。原資料明示的 `unnamed_*` 仍照明示處理。
+Storage 每批與最終的 `flux_dev` 都只保留明示來源，包含完整 overlay 中有效的 global／mapping 繼承來源，否則留空。不從單位、live device 或校準 entry 猜來源。缺名 local／coil 分別保留 `period.unnamed_device`／`period.unnamed_coil`，不因此列 pending。Diagnostics 逐實際目的位置提醒改名。原資料明示的 `unnamed_*` 仍照明示處理。
 
 Offset 每批依 v1 結構角色重算，自己的線優先，其次唯一 coil，否則 null。若經 v2 再升 v3，也由 v1 結構角色提供主線身分，不靠佔位名稱。Coil 在 v2 中立化為 integer 0、half = period／2，只保留 signed period，原 half／int 進報告。不新增 finalizer 或 provenance API。
 
@@ -85,15 +85,15 @@ Offset 每批依 v1 結構角色重算，自己的線優先，其次唯一 coil�
 | `t1err`、`t2r_err`、`t2e_err` | `metadata[Q.t1 / Q.t2r / Q.t2e].stderr` |
 | `pi_gain`、`pi_len`、`pi2_gain`、`pi2_len` | 與本 context 的明示 library candidate 比對，同值去重，否則 `Q.ext.<原key>` |
 
-- Meta 未映射 key 以原名原值留在該 setup／point 的 `general.ext` 根層，報告標 `action="preserved"`，不列 pending。來源 key 若是 `legacy_meta_info` 或 `legacy_module_cfg`，則存在 `general.ext.legacy_meta_info` 的同名 key，不覆寫保留容器。未知原 key 若撞本 context 成功寫入的正式 ext 目的，正式值不被覆寫；不同值原文放 `legacy_meta_info[原key]`，同值則去重並報正式目的，不按無關值去重。Point 從 setup 繼承的成功正式 ext 目的也受保護，撞名原文存在該 point 的 legacy 容器，或按對應繼承目的去重。判斷依據是已成功的正式 projection 報告，不是任意 ext 現值；point 明示正式來源的同檔優先及分組清除不變。保留 rows 逐項記錄 literal `source_keys`／`destination_keys`、實際 YAML 檔與 `new_path=None`。Dry-run 規劃同一位置但不寫入，manifest／resume 保留 typed rows，完成後合法編輯也會產生 typed 差異，既有內容不動。
+- Meta 未映射 key 以原名原值留在該 global／point 的 `general.ext` 根層，報告標 `action="preserved"`，不列 pending。來源 key 若是 `legacy_meta_info` 或 `legacy_module_cfg`，則存在 `general.ext.legacy_meta_info` 的同名 key，不覆寫保留容器。未知原 key 若撞本 context 成功寫入的正式 ext 目的，正式值不被覆寫；不同值原文放 `legacy_meta_info[原key]`，同值則去重並報正式目的，不按無關值去重。Point 從 global 繼承的成功正式 ext 目的也受保護，撞名原文存在該 point 的 legacy 容器，或按對應繼承目的去重。判斷依據是已成功的正式 projection 報告，不是任意 ext 現值；point 明示正式來源的同檔優先及分組清除不變。保留 rows 逐項記錄 literal `source_keys`／`destination_keys`、實際 YAML 檔與 `new_path=None`。Dry-run 規劃同一位置但不寫入，manifest／resume 保留 typed rows，完成後合法編輯也會產生 typed 差異，既有內容不動。
 
 - 被阻擋的磁通組與 owner 不接受的 `local_flux_unit` 仍列轉換 pending，實際來源 key/value 存在 `general.ext.legacy_meta_info`。原文取 source JSON，不採單位解析後的 null，也不保存合成的 evidence key。`_REMOVED` 表中的八鍵不再一律丟棄。只有同 context 的對應正式來源成功寫入且同值時才去重，報告標 `remove` 並指出正式檔案與欄位。目前有明確對應的舊別名是 `readout_f` → `R1.freq`、`flx_bias` → `Q1.ext.flux_bias`；不同值、正式來源未成功寫入或沒有可靠對應時保留原文，不因其他欄位數字相同而去重。
 
-- `qub_ch` 只在同檔沒有 `qub_0_1_ch` 時映射 `Q.wiring.ch`。兩者都有時正式 wiring 採 `qub_0_1_ch`，落選的 `qub_ch` 不同值就留 `general.ext.legacy_meta_info`，同值才按正式 wiring 去重並報告。Pi 脈衝 scalar 只與宣告的同 context library candidate leaf 經 owner lookup 比較，不採 active slot。只有同值才去重，報告指向實際 library 檔與 literal leaf，且不列 pending。不同值、candidate 缺席或無法求值時，按原 key 保存到 `component.ext`。Dry-run 與正式發布共用本 context 的 owner snapshot，point 不借 setup library 認領。已轉換的 params 不再複製成 entry 層 `params.json`；原文仍完整留在外部備份。
+- `qub_ch` 只在同檔沒有 `qub_0_1_ch` 時映射 `Q.wiring.ch`。兩者都有時正式 wiring 採 `qub_0_1_ch`，落選的 `qub_ch` 不同值就留 `general.ext.legacy_meta_info`，同值才按正式 wiring 去重並報告。Pi 脈衝 scalar 只與宣告的同 context library candidate leaf 經 owner lookup 比較，不採 active slot。只有同值才去重，報告指向實際 library 檔與 literal leaf，且不列 pending。不同值、candidate 缺席或無法求值時，按原 key 保存到 `component.ext`。Dry-run 與正式發布共用本 context 的 owner snapshot，point 不借 global library 認領。已轉換的 params 不再複製成 entry 層 `params.json`；原文仍完整留在外部備份。
 
 - Component 的 global 磁通組包含 `cur_A`、`flx_half/period/int`、`flux_bias`，單位寫 `general.ext.flux_unit`。來源順序是同檔 `flux_unit`、根 meta_info 同 key、params 根 `flux_unit`、operator assumption。JPA 組只採 `jpa_flux_unit`，依同檔、根 meta_info、獨立 `assume_jpa_flux_unit` 順序。JPA 假設只接受 A/V，未提供就保持 pending，不借 qubit params 或 global 假設。CLI 的兩組假設各自明填，報告分別標「假設單位」。報告寫實際來源檔。根 meta_info 與 params 同層明示單位衝突時，整組 pending，不用假設解衝突。
 
-- Point 自己明示的單位優先。單位改變時，移除未被 point 覆寫的同組 setup 繼承數值及其 metadata。Nullable typed 值設 null，ext 值從 mapping 移除，metadata 依 owner 契約清為空。候選值先過 owner 驗證，再與新單位同筆 edit 提交。其他組不變。`local_flux_unit` 只照抄到 `Q.flux_unit`，不作任何數值證據或清除依據。Owner 不接受來源單位時，該組 pending，不換算。
+- Point 自己明示的單位優先。單位改變時，移除未被 point 覆寫的同組 global 繼承數值及其 metadata。Nullable typed 值設 null，ext 值從 mapping 移除，metadata 依 owner 契約清為空。候選值先過 owner 驗證，再與新單位同筆 edit 提交。其他組不變。`local_flux_unit` 只照抄到 `Q.flux_unit`，不作任何數值證據或清除依據。Owner 不接受來源單位時，該組 pending，不換算。
 
 ## 分析檔 mapping
 
@@ -114,25 +114,25 @@ Dispersive JSON 經 [resources owner](../../lib/zcu_tools/resources/README.md) �
 
 T1 的 fit 欄位包括 `params`、`stderr`、`bounds`、`fixed`、`free`、`cost`、`init`、`reduced_chi2`、`success`、`message`、`residual_mode`、`loss`、`max_nfev`。`Temp` 用 K，`Q_cap`、`Q_ind`、`x_qp` 無單位。`params.params` 的 keys 決定 active 參數，其值可為 null。`fixed/free/bounds/stderr/init` 只能引用 active 名稱。
 
-- `params.json` 以本次建立的唯一 qubit component 為對象，找不到唯一對應就整份 pending。Converter 先發布正式分析檔，只把未轉、非法或缺證據的來源值存入 setup 的 `component.ext.legacy_params`，再建 points。成功轉換的來源 leaf 不另存 raw 副本，清空的父分支也會移除。已成功轉換的已知空容器不再 raw 雙存，未知原文中的空 object／list 仍保留。Points 繼承完整 YAML，屬於獨立可編輯 context，不在原文去重範圍。根層與各 point 的 meta_info 值優先，params 只補缺；衝突保留 meta_info 值，並報告兩來源與 pending。
+- `params.json` 以本次建立的唯一 qubit component 為對象，找不到唯一對應就整份 pending。Converter 先發布正式分析檔，只把未轉、非法或缺證據的來源值存入 global 的 `component.ext.legacy_params`，再建 points。成功轉換的來源 leaf 不另存 raw 副本，清空的父分支也會移除。已成功轉換的已知空容器不再 raw 雙存，未知原文中的空 object／list 仍保留。Points 繼承完整 YAML，屬於獨立可編輯 context，不在原文去重範圍。根層與各 point 的 meta_info 值優先，params 只補缺；衝突保留 meta_info 值，並報告兩來源與 pending。
 
 - `fluxdep_fit` 寫入 entry 的 `predictors/<component名>.json`，不寫 component fit 欄位，也不複製到 points。Converter 使用 `resources.predictor_file` 的 `PredictorFile`／`PredictorSource` 與 simulate 的 nullable Params。Dry-run 走 owner 的 pure validation，不建立暫存檔。正式寫入先建 parent directory，再由 `save_predictor_file` 執行原子 I/O。未完成的 parameters resume 經 `load_predictor_file` 驗證格式並比較 typed 值，numeric 省略與 null 都表示未知，不按 JSON 排版比較。完整性與物理限制仍交給 build_predictor。
 
 - 舊 EJ/EC/EL fit 寫 `model=fluxonium`，`flux_int` 只作 alignment，不寫 predictor。歷史根層 `params.EJ/EC/EL`、`half flux`、`period`、`flux_bias` 與 section fit 共用 `upgrade_predictor_document`。完整 half／period／bias 才產生 v2 frame，offset 為 `0.5 + (bias-half)/period`；缺項、非法值或零 period 都不發布 predictor，原文保留並列 pending。未記名儀器使用 `unnamed_device`。根層的 name、project、schema 等 metadata 不改名，留在 `legacy_params`。`fluxdep_fit.params` 有 EJ 或 EL 時，extra key 不阻斷已支援參數，extra 原名原值留 ext。只有 EC 加陌生 key 或只有陌生 key 時不建立 predictor，報告標不支援模型並原樣保留，不列 pending。未定義的明示 model 仍 pending，不推論模型。predictor 單位只讀 params 根層或 fit 的明示 `flux_unit`。兩處都沒有時才可用 `assume_flux_unit`，報告標「假設單位」。缺單位或明示 null 沿 upgrade owner 使用 `native`；非空單位字串原樣保存。明示值衝突或格式非法時不發布 predictor，保留原文並列 pending。meta_info 不能作 predictor 單位證據，也不換算數字。`source.run_id` 固定 null；`source.created_at` 由公開 `proven_created_at` 重用 `resources.analysis_source.AnalysisSource` 驗證，只接受有效的 `YYYY-MM-DDTHH:MM[:SS[.ffffff]]` 加 `Z` 或 `±HH:MM`，小數秒為一至六位，接受時保留原文。其他形式或無效日期時間回傳 None，寫 null 並列 pending。Source 的兩個 nullable 欄位仍必須存在；報告保留備份內原文定位。
 
-- `dispersive` 與 `fluxdep_fit.plot_transitions` 經 resources owner 寫入 entry 的 `dispersive/<component名>.json`，`t1_curve_fit` 寫入 `t1_curve/<component名>.json`。只有 transition seed 時也產生 dispersive 檔，不補 g 或 bare_rf。兩檔保留缺項、null 與 active T1 名稱的差異，source 時間只採各自 section 的 timestamp；只有根層 allows 時採根層 timestamp。時間沿用上述窄形式與原文保真規則。無法驗證的內容保持 located pending，未轉原文、未知欄位與未採用的 metadata 留在 setup ext 並由 points 繼承。未知欄位不阻斷可支援的正式輸出，也不因保全原文就列 pending。所有重跑都經 owner load 比對固定 baseline 的欄位存在性與內容。完成後的合法編輯也列 typed 差異，不覆寫、不當成相同。Dry-run 列出相同檔案但不寫入。
+- `dispersive` 與 `fluxdep_fit.plot_transitions` 經 resources owner 寫入 entry 的 `dispersive/<component名>.json`，`t1_curve_fit` 寫入 `t1_curve/<component名>.json`。只有 transition seed 時也產生 dispersive 檔，不補 g 或 bare_rf。兩檔保留缺項、null 與 active T1 名稱的差異，source 時間只採各自 section 的 timestamp；只有根層 allows 時採根層 timestamp。時間沿用上述窄形式與原文保真規則。無法驗證的內容保持 located pending，未轉原文、未知欄位與未採用的 metadata 留在 global ext 並由 points 繼承。未知欄位不阻斷可支援的正式輸出，也不因保全原文就列 pending。所有重跑都經 owner load 比對固定 baseline 的欄位存在性與內容。完成後的合法編輯也列 typed 差異，不覆寫、不當成相同。Dry-run 列出相同檔案但不寫入。
 
 - 根層舊 shape 與 `fluxdep_fit` 同時存在時，較新的 `fluxdep_fit` 決定 predictor。根層對應同值 leaf 去重，不同值仍留 `legacy_params`，不合併數值或中止整份轉換。根 `allows` 是唯一 transition 來源時，整個原名原值存進 dispersive 的 `params.plot_transitions`，不另留 raw；不把 sample_f 改成 r_f，也不改 transitions／mirror 的內容或宣稱歷史公式等價。同時有 `fluxdep_fit.plot_transitions` 時由後者正式輸出，`allows` 只留下不同或無對應的 leaf。
 
-- `MigrationReport.key_mappings` 用 `action="preserved"` 區分原樣保留與正式轉換，不能只按 reason 文字判斷。Params 的保留 rows 逐項記錄 literal `source_keys` 與 `destination_keys`，`new_file` 指向 setup，`new_path=None`。例如原 key `unknown.section` 是一個 segment，不拆成巢狀路徑。`value` rows 的 `source_keys` 只標實際轉進正式檔的來源 subtree，不把 section summary 當整份成功。雙來源比較另有 literal `compared_source_keys` 指向同檔較新來源；同值用 `remove`，不同值用 `preserved` 並列兩來源與值。缺少 ext 能力時仍 pending，不能宣稱已保留。Dry-run 記錄同一份計畫但不寫入；manifest、累積 report 與 resume 保留狀態及定位，完成後的編輯列 typed 差異且不覆寫。
+- `MigrationReport.key_mappings` 用 `action="preserved"` 區分原樣保留與正式轉換，不能只按 reason 文字判斷。Params 的保留 rows 逐項記錄 literal `source_keys` 與 `destination_keys`，`new_file` 指向 global，`new_path=None`。例如原 key `unknown.section` 是一個 segment，不拆成巢狀路徑。`value` rows 的 `source_keys` 只標實際轉進正式檔的來源 subtree，不把 section summary 當整份成功。雙來源比較另有 literal `compared_source_keys` 指向同檔較新來源；同值用 `remove`，不同值用 `preserved` 並列兩來源與值。缺少 ext 能力時仍 pending，不能宣稱已保留。Dry-run 記錄同一份計畫但不寫入；manifest、累積 report 與 resume 保留狀態及定位，完成後的編輯列 typed 差異且不覆寫。
 
 ## Module library mapping
 
-- Parameters 將根層與 child point 的 module／waveform 轉成 `cfg_model` 的正式 Spec。根庫透過 `ResultEntry.library()` 提交到 entry 的 `library.yaml`，slots 寫 setup。Point 庫透過 `library(point=label)` 提交，slots 寫 point。Mapping 明示來源 family 與 canonical key，typed reference remap 由 `cfg_model` 擁有。Slots 依 mapping 次序選第一個成功發布的 Spec，支援候選缺必要欄位、含無法求值的已知 expression 或缺 child mapping 時才列 located pending，原文也保留在該 context。沒有成功 module Spec 的合法空庫不建立引用。新 point 先以 `new_point(mode="empty")` 建立，再經 entry owner 的 `initialize_point_parameters` 複製 setup 參數，並經 library owner 的 `create_empty_library` 在尚未 prepared 的自有 staging 建立空庫。Point 不複製 setup library 或 aliases，空庫仍納入原有 baseline 與完整 inventory。未完成的 parameters 遷移會清除 point 中無法由該 point 自己的 library 解析的繼承 slots。有效引用保持原值，成功的 child module 再依 mapping 覆寫。完成後 resume 比較使用者編輯，差異非零且不改內容。
+- Parameters 將根層與 child point 的 module／waveform 轉成 `cfg_model` 的正式 Spec。根庫透過 `ResultEntry.library()` 提交到 entry 的 `library.yaml`，slots 寫 global。Point 庫透過 `library(point=label)` 提交，slots 寫 point。Mapping 明示來源 family 與 canonical key，typed reference remap 由 `cfg_model` 擁有。Slots 依 mapping 次序選第一個成功發布的 Spec，支援候選缺必要欄位、含無法求值的已知 expression 或缺 child mapping 時才列 located pending，原文也保留在該 context。沒有成功 module Spec 的合法空庫不建立引用。新 point 先以 `new_point(mode="empty")` 建立，再經 entry owner 的 `initialize_point_parameters` 複製 global 參數，並經 library owner 的 `create_empty_library` 在尚未 prepared 的自有 staging 建立空庫。Point 不複製 global library 或 aliases，空庫仍納入原有 baseline 與完整 inventory。未完成的 parameters 遷移會清除 point 中無法由該 point 自己的 library 解析的繼承 slots。有效引用保持原值，成功的 child module 再依 mapping 覆寫。完成後 resume 比較使用者編輯，差異非零且不改內容。
 
 - Module 歷史轉換只在離線 `_legacy_modules.py`。完整的舊 pulse shape 缺 type 時依歷史 `Pulse.auto_fill` 補 `pulse`，不按名稱推論；phase、pre_delay、post_delay 的歷史預設為 0.0。舊 `base` 的 pulse_cfg.ch 改為 gen_ch，ro_cfg 的 ro_ch／ro_length／trig_offset 平鋪到 `readout/pulse`。ro_freq 缺席或等於 pulse_cfg.freq 時共用 freq；不同時不建立該條 Spec，整條原文保全，pending 報兩頻。舊 `bath` 改為 `reset/bath`，三個具名子 pulse 各自重建。正式支援的 desc、mixer_freq 與其他值照轉，不因白名單而丟欄。
 
-- `cfg_model` 的純 partition 介面分離未知欄位，輸出仍走 strict Spec 驗證與 typed reference remap。成功 Spec 照常發布，只有未表達欄位樹寫到該 context 的 `general.ext.legacy_module_cfg[原section][原name]`。整體未知 family、無 mapping 條目及未知 section 才保全完整原文，不另列 pending。已轉 leaf 不存 raw 副本，空的已轉分支移除。保全 rows 用 `action="preserved"`、literal source_keys／destination_keys、setup 或 point 的 new_file 與 new_path=None 記錄，不靠 reason 文字分類。Dry-run 驗證同一份計畫，不寫 entry 或備份。Arb asset key 保持原值，不搬 asset，也不保證全部模組已可 materialize。
+- `cfg_model` 的純 partition 介面分離未知欄位，輸出仍走 strict Spec 驗證與 typed reference remap。成功 Spec 照常發布，只有未表達欄位樹寫到該 context 的 `general.ext.legacy_module_cfg[原section][原name]`。整體未知 family、無 mapping 條目及未知 section 才保全完整原文，不另列 pending。已轉 leaf 不存 raw 副本，空的已轉分支移除。保全 rows 用 `action="preserved"`、literal source_keys／destination_keys、global 或 point 的 new_file 與 new_path=None 記錄，不靠 reason 文字分類。Dry-run 驗證同一份計畫，不寫 entry 或備份。Arb asset key 保持原值，不搬 asset，也不保證全部模組已可 materialize。
 
 - Library dry-run 驗證隔離候選，不取得目的 handle。其 report rows 保留 canonical `new_path`，`new_file=None` 本身不表示 pending。正常提交前 manifest 固定 owner 寫好的 staging artifact 與 typed baseline，resume 核對完成的 library 而不重做。Library 排版差異不算內容變動。
 
@@ -203,7 +203,7 @@ RunMetadata、RunSnapshot 與 SoftwareProvenance 由 [experiment](../../lib/zcu_
 
 - `backup.py` 擁有鏡像位置、完整複製、清單驗證與清理。Manifest 綁定兩份清單的 SHA256 及來源完整 hashes。每次 resume 只驗證本次鏡像，不重做備份，也不要求其他 chip/qubit 的內容固定。已搬移或已清理的來源不必存在。未完成的備份不授權遷移。初始化中斷可用原指令重跑，不要求手動刪 entry 或備份。工具只認領本工具紀錄擁有的 entry，不刪共用根或其他備份。舊每-entry 備份不提供相容讀取或自動搬移。
 
-- `initialization.py` 在首次備份或 entry 寫入前，將 typed ownership 存到 `migration-records/<chip>/<qubit>/migration-initialization.json`。紀錄固定來源完整清單、request identity、宣告、mapping 版本、migration_id 操作 token、setup 建立時間與報告日期／路徑，保留未知 wire 欄位。只有這份紀錄或正式 manifest 能認領 entry。migration_id 只屬於一次遷移操作，不用於 entry 歸屬。暫存名稱使用 .migration-operation-<migration_id.hex>。舊 manifest、report 或 initialization 含 entry_id ownership 時，公開操作拒絕並指名檔案，不讀舊值、不轉換、不刪來源或備份。Operator 需用舊版完成，或確認後自行處理。
+- `initialization.py` 在首次備份或 entry 寫入前，將 typed ownership 存到 `migration-records/<chip>/<qubit>/migration-initialization.json`。紀錄固定來源完整清單、request identity、宣告、mapping 版本、migration_id 操作 token、global 建立時間與報告日期／路徑，保留未知 wire 欄位。只有這份紀錄或正式 manifest 能認領 entry。migration_id 只屬於一次遷移操作，不用於 entry 歸屬。暫存名稱使用 .migration-operation-<migration_id.hex>。舊 manifest、report 或 initialization 含 entry_id ownership 時，公開操作拒絕並指名檔案，不讀舊值、不轉換、不刪來源或備份。Operator 需用舊版完成，或確認後自行處理。
 
 - 初始化先以 `ResultEntry.create(identity=EntryIdentity(...))` 在 Result root 的已記錄暫存名稱建完整 entry，再只 rename Result 到正式名稱。Database 不建立 staging，也不參與 rename，首次 data publication 才建立所需目錄。遷移仍要求未認領的兩個目的都不存在，這是保護目的資料的 preflight，不是一般 entry create／open 的條件。重跑只可刪紀錄指名且尚未發布的 Result 暫存目錄，不能刪正式 entry。Prepared 狀態保存 owner 產物清單，重跑先用公開 schema 比較 YAML，包含未知原文，再核其他檔案 SHA256 與所有目錄。排版不算差異，既有相同檔案不重寫。Result rename 後中斷時驗證正式目錄，再落正式 manifest。這不提供掉電交易或並行 writer 保證。
 
@@ -217,6 +217,6 @@ RunMetadata、RunSnapshot 與 SoftwareProvenance 由 [experiment](../../lib/zcu_
 
 文件 baseline 保存 owner normalized 值、unknown raw、來源／目的與 prepared 狀態。Report 與 manifest 的 forward-minor unknown 欄位仍保留，內容值不從舊 raw 合併回已移除的 keys。完成重跑只回傳新的 skipped 快照，不重寫原 manifest／報告。
 
-`state.py` 集中 report／manifest encoding 與 copy、native、samples、processed spectrums、move 的 publication recovery。`documents.py` 用 owner 在 sibling temp 完成 global／point／library／分析 JSON，固定 typed expected 與 previous 後才發布。參數 handle 共用 `ParameterView`，manifest 的 setup／point DocumentKind 依來源文件路徑分類，不依 view 型別。重跑只接受 expected，或 prepared 階段的 previous，不接受第三值。`points.py` 在 manifest 指名暫存 label，以公開 new_point 建完整 point，固定 baseline 與完整 inventory 後 rename，再以 `parameters(point=label)` 取得正式 bound `ParameterView`。未 prepared 只清工具指名的暫存，prepared 後不重生 created_at。本 package 不提供掉電保證、硬體操作或多程序 writer 協調。
+`state.py` 集中 report／manifest encoding 與 copy、native、samples、processed spectrums、move 的 publication recovery。`documents.py` 用 owner 在 sibling temp 完成 global／point／library／分析 JSON，固定 typed expected 與 previous 後才發布。參數 handle 共用 `ParameterView`，manifest 格式 1.0 的 `"setup"`／`"point"` DocumentKind 依來源文件路徑分類，不依 view 型別。重跑只接受 expected，或 prepared 階段的 previous，不接受第三值。`points.py` 在 manifest 指名暫存 label，以公開 new_point 建完整 point，固定 baseline 與完整 inventory 後 rename，再以 `parameters(point=label)` 取得正式 bound `ParameterView`。未 prepared 只清工具指名的暫存，prepared 後不重生 created_at。本 package 不提供掉電保證、硬體操作或多程序 writer 協調。
 
 `migrations/migrate_storage.py` 是離線組合根。具體 mapping 與固定 native declarations 位於同目錄上層的 `migrations/storage_mapping.py` 與 `migrations/migration_experiments.py`，沒有動態 discovery 或新 runtime registry。單獨 Parameters 模式不執行 data 搬移；只有同一 manifest 的兩部分都完成才可清理，包含第二部分以 parameters resume 的情況。操作授權、來源保全與 pending／resume 步驟見 [operator CLI 指南](../../docs/storage-migration.md)。

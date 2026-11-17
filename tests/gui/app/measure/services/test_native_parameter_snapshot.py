@@ -11,7 +11,6 @@ from zcu_tools.gui.app.measure.services.pane_commit import commit_run
 from zcu_tools.gui.app.measure.services.post_analyze import PostAnalyzeService
 from zcu_tools.gui.app.measure.state import RunPaneState
 from zcu_tools.gui.app.measure.writeback import WritebackService
-from zcu_tools.gui.session.context_types import PointUseRequest
 from zcu_tools.gui.session.operation_runner import OperationRunner
 from zcu_tools.gui.session.parameter_capture import capture_parameters
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
@@ -68,7 +67,7 @@ def test_native_save_load_uses_captured_environment_after_source_removal(
         )
     )
     source_bytes = parameter_file.read_bytes()
-    control.use_point(PointUseRequest(target.point))
+    control.use_point(target.point)
     captured = capture_focus(control)
     tab = session.state.get_tab("tab")
     record = require_record(tab.run)

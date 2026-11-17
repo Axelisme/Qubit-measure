@@ -1,4 +1,4 @@
-"""Typed setup/point legacy library conversion in the parameter migration step."""
+"""Typed global/point legacy library conversion in the parameter migration step."""
 
 import shutil
 from dataclasses import dataclass, replace
@@ -334,12 +334,12 @@ def convert_module_cfg(
     the absolute legacy module_cfg.yaml under its result root; an absent file
     returns None. Return the owner-validated same-context snapshot for scalar
     comparison: the isolated plan in dry-run, or the published library otherwise.
-    label is the validated point label, or None for root metadata with setup
+    label is the validated point label, or None for root metadata with global
     destination. entry is the matching handle, or None only in dry-run.
     mapping supplies explicit module/waveform source keys and canonical targets.
     The legacy envelope requires modules and waveforms mappings; malformed
     envelopes raise MigrationInputError and retain a module-step failure diagnostic.
-    Root entries use the setup library and set setup slots through the entry owner.
+    Root entries use the global library and set global slots through the entry owner.
     Slots choose the first successfully published module rule per reference path.
     Known fields with expressions, invalid/missing values or unmapped child
     references remain located pending, with the complete entry retained in the

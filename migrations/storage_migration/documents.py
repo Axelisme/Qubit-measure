@@ -47,7 +47,7 @@ _JSON = TypeAdapter(JsonObject)
 def document_value(path: Path, kind: DocumentKind) -> JsonObject:
     """Read without mutation through the public owner, retaining unknown raw data.
 
-    kind selects setup/point/library YAML or predictor/dispersive/t1_curve JSON.
+    kind selects global/point/library YAML or predictor/dispersive/t1_curve JSON.
     YAML default normalization is provided by DocumentStore, without library
     cleanup. JSON owners define null/default and active-channel semantics.
     Invalid/unreadable documents propagate their schema or I/O errors.

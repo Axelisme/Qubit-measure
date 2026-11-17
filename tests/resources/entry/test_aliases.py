@@ -1,4 +1,4 @@
-"""Setup and point authored aliases through public entry and codec seams."""
+"""Global and point authored aliases through public entry and codec seams."""
 
 from pathlib import Path
 

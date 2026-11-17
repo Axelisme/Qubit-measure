@@ -38,7 +38,7 @@ def analysis_entry(tmp_path: Path) -> Iterator[ResultEntry]:
         component_registry.unregister("qubit/fluxonium")
 
 
-def test_entry_alias_target_exports_predictor_setup_and_analysis_record(
+def test_entry_alias_target_exports_predictor_global_and_analysis_record(
     route_harness: RouteHarness, analysis_entry: ResultEntry
 ) -> None:
     route_harness.ctrl.configure_flux_context(synthetic_flux_context)

@@ -101,8 +101,8 @@ def hw_fixture(qapp, tmp_path):
     ctrl.add_view(window)
     caretaker = create_persistence_caretaker(ctrl, cache_dir=tmp_path / "cache")
     ctrl.attach_caretaker(caretaker)
-    ctrl.setup_control.new_entry(EntryRequest("lab"))
-    ctrl.setup_control.new_point(PointCreateRequest("ctx001", "", CommandOrigin("gui")))
+    ctrl.entry_control.new_entry(EntryRequest("lab"))
+    ctrl.entry_control.new_point(PointCreateRequest("ctx001", "", CommandOrigin("gui")))
     ctrl.context_control.add_component(
         "R1",
         "resonator",

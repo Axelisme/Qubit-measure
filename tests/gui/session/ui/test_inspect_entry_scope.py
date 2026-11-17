@@ -14,7 +14,6 @@ from qtpy.QtWidgets import QApplication
 from zcu_tools.cfg_model import ConstWaveformCfg, PulseSpec, TemplateDef
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.session.aliases import AliasRow
-from zcu_tools.gui.session.context_types import PointUseRequest
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.state import SessionState
 from zcu_tools.gui.session.types import SessionEnv
@@ -61,7 +60,7 @@ def entry_ui(
         )
         if request.param == "point":
             entry.new_point("working")
-            target = context.use_point(PointUseRequest("working"))
+            target = context.use_point("working")
             context.set_parameter(target, "Q1.rate", 4300.0)
             context.apply_alias_rows(
                 (AliasRow("driver", "Q2"),), point=context.current_point_label()

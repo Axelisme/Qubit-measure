@@ -804,9 +804,9 @@ def test_nested_model_views_and_dotted_edits_preserve_draft_isolation(
         field_view(reopened.parameters().N1.timing).width == 10.0
         and field_view(reopened.parameters().N1.timing).label == "prepared"
     )
-    assert YAML(typ="safe").load(global_path)["components"]["N1"]["timing"]["width"] == (
-        pytest.approx(10.0)
-    )
+    assert YAML(typ="safe").load(global_path)["components"]["N1"]["timing"][
+        "width"
+    ] == (pytest.approx(10.0))
 
 
 @pytest.mark.parametrize("value", [None, "not a frequency"])

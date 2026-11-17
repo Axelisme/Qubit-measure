@@ -12,7 +12,7 @@ from zcu_tools.gui.app.measure.state import State
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import InvalidInputError
 from zcu_tools.gui.session.aliases import AliasRow
-from zcu_tools.gui.session.context_types import EntryRequest, PointUseRequest
+from zcu_tools.gui.session.context_types import EntryRequest
 from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.resources.entry import ResultEntry, component_registry
 
@@ -58,8 +58,8 @@ def session(qapp, tmp_path: Path) -> Generator[TemplateSession]:
             BaseEventBus(),
             project_root=str(tmp_path),
         )
-        ctrl.setup_control.open_entry(EntryRequest("entry"))
-        ctrl.context_control.use_point(PointUseRequest("first"))
+        ctrl.entry_control.open_entry(EntryRequest("entry"))
+        ctrl.context_control.use_point("first")
         ctrl.context_control.apply_alias_rows(
             (AliasRow("resonator", "R1"),),
             point=ctrl.context_control.current_point_label(),

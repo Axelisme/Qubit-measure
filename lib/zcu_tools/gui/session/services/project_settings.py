@@ -24,10 +24,12 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
-class SetupPreferences:
-    """What the setup dialog prefills — not the active project or connection.
+class DialogPrefill:
+    """Cached input values for Entry and SoC dialogs, not active bindings.
 
-    A narrow live read model; these values are not a disk session memento.
+    entry_name prefills the Entry dialog. ip and port prefill the SoC dialog.
+    These live values do not assert an opened entry or a connected device and
+    are not a disk session memento.
     """
 
     entry_name: str
@@ -130,10 +132,10 @@ class ProjectSettingsService:
             self._entry_names = tuple(sorted(set((*self._entry_names, info.name))))
         return info
 
-    def get_setup_preferences(self) -> SetupPreferences:
-        """The remembered values the setup dialog prefills (not the active project)."""
+    def get_dialog_prefill(self) -> DialogPrefill:
+        """The remembered values the Entry and SoC dialogs prefill (not the active project)."""
         prefs = self._state.preferences
-        return SetupPreferences(
+        return DialogPrefill(
             entry_name=prefs.entry_name,
             ip=prefs.ip,
             port=prefs.port,

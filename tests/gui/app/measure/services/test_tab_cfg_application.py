@@ -315,7 +315,7 @@ def global_sources(
             project_root=str(tmp_path),
         )
         try:
-            services.session.setup_control.new_entry(EntryRequest("sources"))
+            services.session.entry_control.new_entry(EntryRequest("sources"))
             services.session.context.add_component(
                 "Q1", "cfg/drive", {"gain": 10.0, "module": {"x180": None}}, point=None
             )

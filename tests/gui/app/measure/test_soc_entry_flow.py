@@ -1,4 +1,4 @@
-"""SoC and Setup toolbar entry points share the host's run edit lock."""
+"""SoC and Entry toolbar entry points share the host's run edit lock."""
 
 import os
 from collections.abc import Iterator
@@ -55,8 +55,8 @@ def soc_app(
     with launched_measure_app(qapp, tmp_path, registry=registry) as app:
         env = white_noise(load_soccfg(), std_adc=1.0, seed=None, routes=((0, 0),))
         app.controller.session_services.soc_connection.install_soc(env.soc, env.soccfg)
-        app.controller.setup_control.new_entry(EntryRequest("synthetic"))
-        app.controller.setup_control.new_point(
+        app.controller.entry_control.new_entry(EntryRequest("synthetic"))
+        app.controller.entry_control.new_point(
             PointCreateRequest("p", "Synthetic source", CommandOrigin("gui"))
         )
         app.controller.tab_control.new_tab("held")
@@ -81,7 +81,7 @@ def arb_driver(app: LaunchedMeasureApp) -> ComponentDriver:
         ("Arb Waveforms…", "Save", True),
     ],
 )
-def test_run_only_locks_setup_soc_and_preserves_remote_control_policy(
+def test_run_only_locks_entry_soc_and_preserves_remote_control_policy(
     soc_app: tuple[LaunchedMeasureApp, Event, Event],
     tmp_path: Path,
     opening: str,
@@ -151,7 +151,7 @@ def test_toolbar_soc_reopens_and_both_dialogs_follow_run_lock(
     app, entered, release = soc_app
     ui = ComponentDriver(app.window)
     shots = Path(os.environ.get("SOC_UI_EVIDENCE", str(tmp_path))) / "measure"
-    ui.screenshot(shots / "01-launch-setup.png")
+    ui.screenshot(shots / "01-launch-entry.png")
     assert "IP address:" not in ui.dialogs()[0].texts
     ui.click("Close")
     ui.screenshot(shots / "02-toolbar.png")
@@ -195,14 +195,14 @@ def test_toolbar_soc_reopens_and_both_dialogs_follow_run_lock(
     ui.select_list_row(ui.list_rows()[0].text)
     assert ui.list_rows()[0].selected
     assert ui.observe("Close").enabled
-    ui.screenshot(shots / "08-running-setup.png")
+    ui.screenshot(shots / "08-running-entry.png")
     release.set()
     qt_until(
         lambda: any(w.text == "Run" and w.enabled for w in ui.visible().widgets),
         label="synthetic run delivered",
     )
     assert ui.observe("New entry…").enabled
-    ui.screenshot(shots / "09-unlocked-setup.png")
+    ui.screenshot(shots / "09-unlocked-entry.png")
     ui.click("Close")
     ui.click("SoC…")
     assert ui.observe("Connect").enabled

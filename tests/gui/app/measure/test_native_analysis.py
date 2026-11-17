@@ -46,8 +46,8 @@ from zcu_tools.gui.session.context_types import (
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.resources.entry import ArtifactKey
 
-from tests.gui._context_reads import capture_focus
 from tests.experiment._saving_support import SavingCfg, SavingCore, SavingResult
+from tests.gui._context_reads import capture_focus
 from tests.gui._dialog_fakes import RecordingDialogPresenter
 from tests.gui._qt_waits import qt_until
 from tests.gui._user_input import ComponentDriver
@@ -252,8 +252,8 @@ def host(tmp_path: Path, qapp, request) -> Iterator[Host]:
     if window is not None:
         controller.add_view(window)
     tab = controller.tab_control.new_tab("native")
-    controller.setup_control.new_entry(EntryRequest("native"))
-    controller.setup_control.new_point(
+    controller.entry_control.new_entry(EntryRequest("native"))
+    controller.entry_control.new_point(
         PointCreateRequest("p", "", CommandOrigin("gui"))
     )
     captured = capture_focus(controller.context_control)

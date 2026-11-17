@@ -115,9 +115,9 @@ def measure_window(
         installed = registry_state()
         # Fixture bootstrap only: open an isolated entry before user interaction.
         global_context = getattr(request, "param", "point") == "global"
-        app.controller.setup_control.new_entry(EntryRequest("component-flow"))
+        app.controller.entry_control.new_entry(EntryRequest("component-flow"))
         if not global_context:
-            app.controller.setup_control.new_point(
+            app.controller.entry_control.new_point(
                 PointCreateRequest(
                     "p", "Synthetic component flow", CommandOrigin("gui")
                 )
@@ -131,7 +131,7 @@ def measure_window(
             else app.controller.context_control.current_point_label(),
         )
         if global_context:
-            app.controller.setup_control.open_entry(EntryRequest("component-flow"))
+            app.controller.entry_control.open_entry(EntryRequest("component-flow"))
         app.controller.session_services.soc_connection.install_soc(
             MagicMock(), load_soccfg()
         )

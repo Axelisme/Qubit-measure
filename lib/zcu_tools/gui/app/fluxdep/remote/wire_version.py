@@ -26,7 +26,7 @@ from __future__ import annotations
 # pre-downsample selection; all-selected without a published mask), so
 # selection.interactive.open evidence reports that seed.
 # 10: project.setup opens an entry/component; fit.export_params writes predictor,
-# setup and analysis ledger and returns component/analysis_id.
+# global and analysis ledger and returns component/analysis_id.
 # 11: native spectrum.load explicitly selects variable, device_axis and device.
 # 12: independent predictor_writeback receipt; skipped predictor has null savepath.
 WIRE_VERSION = 12
@@ -52,7 +52,7 @@ WIRE_VERSION = 12
 # a locked stage stays shown with its inputs disabled.
 # 16: Filter Apply/Finish also publish the brush selection; a reopened Filter
 # starts from it, so an unchanged Finish reproduces the published kept mask.
-# 17: entry/component dialog and entry-scoped predictor/setup export.
+# 17: entry/component dialog and entry-scoped predictor/global export.
 # 18: native source selectors and acquisition snapshots; processed spectra v2.
 # 19: dataset-specific multi-device predictor v2 export and separate receipts.
 GUI_VERSION = 19

@@ -1,6 +1,6 @@
 # Measure Qt views
 
-**Last updated:** 2026-11-16
+**Last updated:** 2026-11-17
 
 **讀者：** framework-dev。量測 Qt views、對話框與呈現生命週期。
 
@@ -11,10 +11,10 @@ not confirm socket delivery.
 
 Views project controller snapshots and submit commands through control facets.
 They do not own result data or Save policy. `MainDialogRegistry` retains truly
-non-modal named windows. `MainWindow` synchronizes Setup, SoC, Devices,
+non-modal named windows. `MainWindow` synchronizes Entry, SoC, Devices,
 Inspect and ARB editing on control transfer, including windows already open.
-Run separately locks Setup and SoC submissions; Inspect, Devices and ARB keep
-their existing Run policy. Setup… and SoC… have separate toolbar entries; the named `soc`
+Run separately locks Entry and SoC submissions; Inspect, Devices and ARB keep
+their existing Run policy. Entry… and SoC… have separate toolbar entries; the named `soc`
 window participates in remote screenshots.
 Diagnostic errors under an online Remote holder show an eight-second notice
 with the title and first line; the complete message goes to the error log.
@@ -31,7 +31,7 @@ same stacked area. New Tab lists registrations for the displayed kind.
 `WorkflowTabs` subscribes to the shared workflow facet, so remote opens mount
 panes without going through a GUI selection command. Same-name tabs keep
 monotonic display numbers. The status badge returns to the active workflow.
-The shared RUN lease locks competing panes and Setup/SoC submissions.
+The shared RUN lease locks competing panes and Entry/SoC submissions.
 
 `WorkflowPane` renders the facet's Plan and Tunables drafts with `FormEditor`.
 It forwards Refresh, Start, Stop, Apply and Discard to the facet.

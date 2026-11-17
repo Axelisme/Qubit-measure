@@ -523,6 +523,7 @@ class MigrationBackup:
     skipped: tuple[ExistingItem, ...] = ()
 
 
+# JSON 1.0 persists "setup" as the token for the global parameters document.
 type DocumentKind = Literal[
     "setup", "point", "library", "predictor", "dispersive", "t1_curve"
 ]
@@ -585,7 +586,7 @@ class MigrationManifest:
     means an existing path must match that exact initial report before recovery.
     format/format_version identify zcu.storage-migration 1.x. raw retains loaded
     unknown fields; an empty raw denotes a new manifest. module_files records
-    completed setup/point library commits; pending entries may remain in report.
+    completed global/point library commits; pending entries may remain in report.
     Module files and manifest are not a cross-file atomic transaction.
     backup binds the verified external inventory; None is invalid for execution.
     cleanup_phase is pending before full completion, cleaning after verified

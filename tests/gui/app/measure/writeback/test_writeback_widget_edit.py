@@ -35,8 +35,8 @@ from zcu_tools.gui.session.context_types import (
 )
 from zcu_tools.gui.widgets.form import FormEditor
 
-from tests.gui._context_reads import capture_focus
 from tests._filesystem import DIRECTORY_OPEN_ERROR
+from tests.gui._context_reads import capture_focus
 from tests.gui._dialog_fakes import RecordingDialogPresenter
 from tests.gui._progress_fakes import DirectProgressTransport
 from tests.gui._qt_waits import qt_until
@@ -254,8 +254,8 @@ def module_widget(tmp_path: Path, qapp: QApplication, request: pytest.FixtureReq
     widget: WritebackWidget | None = None
     tab_id: str | None = None
     try:
-        ctrl.setup_control.new_entry(EntryRequest("offline"))
-        ctrl.setup_control.new_point(PointCreateRequest("a", "", CommandOrigin("gui")))
+        ctrl.entry_control.new_entry(EntryRequest("offline"))
+        ctrl.entry_control.new_point(PointCreateRequest("a", "", CommandOrigin("gui")))
         context = ctrl.context_control
         context.add_component(
             "Q1", "fake/drive/a", {}, point=context.current_point_label()

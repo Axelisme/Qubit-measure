@@ -330,7 +330,7 @@ def test_accept_upserts_at_active_target_with_original_item_ids(
         gui.drafts["analysis"] = draft
         gui.state.get_tab("tab-1").analysis.writeback_draft = draft
         if scope == "global":
-            gui.context.use_global()
+            gui.context.use_point(None)
 
     gui.owner.submit(prepare).result()
     preview = gui.respond(

@@ -1,4 +1,4 @@
-"""Smoke tests for SetupDialog."""
+"""Smoke tests for EntryDialog."""
 
 from __future__ import annotations
 
@@ -30,15 +30,14 @@ from zcu_tools.gui.session.context_types import (
     EntryInfo,
     EntryRequest,
     PointCreateRequest,
-    PointUseRequest,
 )
 from zcu_tools.gui.session.events import DeviceChangedPayload
 from zcu_tools.gui.session.services.project_settings import (
-    SetupPreferences,
+    DialogPrefill,
 )
 from zcu_tools.gui.session.state import DeviceState, DeviceStatus
 from zcu_tools.gui.session.types import ContextReadiness, SessionEnv
-from zcu_tools.gui.session.ui.setup_dialog import SetupDialog
+from zcu_tools.gui.session.ui.entry_dialog import EntryDialog
 from zcu_tools.gui.widgets import error_colour
 
 from tests.gui._context_reads import capture_focus
@@ -50,8 +49,8 @@ def _prefs(
     entry_name: str = "",
     ip: str = "192.168.10.1",
     port: int = 8887,
-) -> SetupPreferences:
-    return SetupPreferences(
+) -> DialogPrefill:
+    return DialogPrefill(
         entry_name=entry_name,
         ip=ip,
         port=port,
@@ -60,10 +59,10 @@ def _prefs(
 
 def _make_ctrl(**overrides: object) -> MagicMock:
     ctrl = MagicMock()
-    # SetupControlPort.get_setup_preferences is non-Optional (defaults when
+    # EntryControlPort.get_dialog_prefill is non-Optional (defaults when
     # nothing is remembered), so the double honours that contract rather than
     # returning None.
-    ctrl.get_setup_preferences.return_value = _prefs()
+    ctrl.get_dialog_prefill.return_value = _prefs()
     ctrl.devices.list_devices.return_value = []
     ctrl.get_context_labels.return_value = []
     ctrl.get_active_context_label.return_value = None
@@ -80,14 +79,14 @@ def _make_ctrl(**overrides: object) -> MagicMock:
 @pytest.fixture
 def entry_dialog(
     qapp: QApplication, tmp_path: Path
-) -> Generator[tuple[SetupDialog, Controller, State]]:
-    """Own a real offline session; opening Setup never connects hardware."""
+) -> Generator[tuple[EntryDialog, Controller, State]]:
+    """Own a real offline session; opening Entry never connects hardware."""
     state = State(SessionEnv(parameters=None, soc=None, soccfg=None))
     controller = Controller(
         state, Registry(), None, BaseEventBus(), project_root=str(tmp_path)
     )
-    controller.setup_control.new_entry(EntryRequest("remembered"))
-    dialog = SetupDialog(controller.setup_control)
+    controller.entry_control.new_entry(EntryRequest("remembered"))
+    dialog = EntryDialog(controller.entry_control)
     try:
         dialog.show()
         qapp.processEvents()
@@ -99,14 +98,14 @@ def entry_dialog(
         qapp.processEvents()
 
 
-def entry_button(dialog: SetupDialog, text: str) -> QPushButton:
+def entry_button(dialog: EntryDialog, text: str) -> QPushButton:
     """Locate the visible action through the public Qt widget tree."""
     return next(
         button for button in dialog.findChildren(QPushButton) if button.text() == text
     )
 
 
-def entry_selector(dialog: SetupDialog) -> QComboBox:
+def entry_selector(dialog: EntryDialog) -> QComboBox:
     """Result entry selector has a stable object name for Qt consumers."""
     combo = dialog.findChild(QComboBox, "result_entry")
     assert combo is not None
@@ -114,7 +113,7 @@ def entry_selector(dialog: SetupDialog) -> QComboBox:
 
 
 def test_point_modes_and_global_round_trip_through_visible_controls(
-    entry_dialog: tuple[SetupDialog, Controller, State], tmp_path: Path
+    entry_dialog: tuple[EntryDialog, Controller, State], tmp_path: Path
 ) -> None:
     dialog, _controller, _state = entry_dialog
     driver = ComponentDriver(dialog)
@@ -163,7 +162,7 @@ def test_point_modes_and_global_round_trip_through_visible_controls(
     driver.select_list_row("Global")
     driver.click("Switch to selected")
     assert [row.text for row in driver.list_rows()][0] == "● Global"
-    assert driver.observe(object_name="setup_status").text == "Switched to Global"
+    assert driver.observe(object_name="entry_status").text == "Switched to Global"
     driver.screenshot(evidence / "07-back-to-global.png")
     driver.double_click_list_row("cloned")
     assert [row.text for row in driver.list_rows()][2] == "● cloned"
@@ -176,7 +175,7 @@ def test_point_modes_and_global_round_trip_through_visible_controls(
 
 @pytest.mark.parametrize("field", ["point_label", "point_description"])
 def test_enter_creates_point_from_single_line_field(
-    entry_dialog: tuple[SetupDialog, Controller, State], field: str, tmp_path: Path
+    entry_dialog: tuple[EntryDialog, Controller, State], field: str, tmp_path: Path
 ) -> None:
     dialog, _controller, _state = entry_dialog
     driver = ComponentDriver(dialog)
@@ -191,11 +190,11 @@ def test_enter_creates_point_from_single_line_field(
 
 
 def test_double_click_switches_to_selected_point(
-    entry_dialog: tuple[SetupDialog, Controller, State], tmp_path: Path
+    entry_dialog: tuple[EntryDialog, Controller, State], tmp_path: Path
 ) -> None:
     dialog, controller, _state = entry_dialog
     for label in ("first", "second"):
-        controller.setup_control.new_point(
+        controller.entry_control.new_point(
             PointCreateRequest(label, "", CommandOrigin("gui"))
         )
     dialog.hide()
@@ -207,7 +206,7 @@ def test_double_click_switches_to_selected_point(
 
 
 def test_tab_visits_new_point_fields_in_reading_order(
-    entry_dialog: tuple[SetupDialog, Controller, State], tmp_path: Path
+    entry_dialog: tuple[EntryDialog, Controller, State], tmp_path: Path
 ) -> None:
     dialog, _controller, _state = entry_dialog
     driver = ComponentDriver(dialog)
@@ -230,7 +229,7 @@ def test_tab_visits_new_point_fields_in_reading_order(
 
 
 def test_taller_dialog_gives_extra_height_only_to_point_list(
-    entry_dialog: tuple[SetupDialog, Controller, State], tmp_path: Path
+    entry_dialog: tuple[EntryDialog, Controller, State], tmp_path: Path
 ) -> None:
     dialog, _controller, _state = entry_dialog
     driver = ComponentDriver(dialog)
@@ -244,7 +243,7 @@ def test_taller_dialog_gives_extra_height_only_to_point_list(
     assert driver.observe(object_name="selected_point_description").text == (
         "Description: Near sweet spot"
     )
-    driver.screenshot(tmp_path / "setup-620x640.png")
+    driver.screenshot(tmp_path / "entry-620x640.png")
 
     groups = {group.title(): group for group in dialog.findChildren(QGroupBox)}
     entry = groups["Result entry"]
@@ -262,7 +261,7 @@ def test_taller_dialog_gives_extra_height_only_to_point_list(
     window_height = driver.window_size().height()
 
     driver.resize_window(620, 900)
-    driver.screenshot(tmp_path / "setup-620x900.png")
+    driver.screenshot(tmp_path / "entry-620x900.png")
     assert (entry.height(), new_point.height()) == form_heights
     assert point_list(dialog).height() > list_height
     assert point_list(dialog).height() - list_height == (
@@ -273,10 +272,10 @@ def test_taller_dialog_gives_extra_height_only_to_point_list(
 
 
 def test_entry_show_and_reopen_prefill_without_changing_active_point(
-    entry_dialog: tuple[SetupDialog, Controller, State], qapp: QApplication
+    entry_dialog: tuple[EntryDialog, Controller, State], qapp: QApplication
 ) -> None:
     dialog, controller, state = entry_dialog
-    selected = controller.setup_control.new_point(
+    selected = controller.entry_control.new_point(
         PointCreateRequest("bias", "", CommandOrigin("gui"))
     )
     dialog.hide()
@@ -290,7 +289,7 @@ def test_entry_show_and_reopen_prefill_without_changing_active_point(
 
 
 def test_entry_new_arbitrary_name_displays_owner_paths_without_point(
-    entry_dialog: tuple[SetupDialog, Controller, State],
+    entry_dialog: tuple[EntryDialog, Controller, State],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     dialog, controller, state = entry_dialog
@@ -300,38 +299,38 @@ def test_entry_new_arbitrary_name_displays_owner_paths_without_point(
 
     monkeypatch.setattr(QInputDialog, "getText", chosen_name)
     entry_button(dialog, "New entry…").click()
-    info = controller.setup_control.get_entry_info()
+    info = controller.entry_control.get_entry_info()
     assert info is not None and info.name == "cooldown-A"
     assert entry_selector(dialog).currentText() == info.name
     assert entry_path_row(dialog, "result_path").toolTip() == str(info.result_path)
     assert entry_path_row(dialog, "database_path").toolTip() == str(info.database_path)
     assert state.session_env.readiness == ContextReadiness.GLOBAL
     assert state.session_env.parameters is not None
-    assert controller.setup_control.list_points() == ()
+    assert controller.entry_control.list_points() == ()
     assert state.session_env.soc is None
     assert controller.device_control.list_devices() == []
 
 
 def test_entry_open_does_not_select_a_point(
-    entry_dialog: tuple[SetupDialog, Controller, State],
+    entry_dialog: tuple[EntryDialog, Controller, State],
 ) -> None:
     dialog, controller, state = entry_dialog
-    controller.setup_control.new_point(
+    controller.entry_control.new_point(
         PointCreateRequest("bias", "", CommandOrigin("gui"))
     )
     entry_selector(dialog).setCurrentText("remembered")
     entry_button(dialog, "Open").click()
     assert state.session_env.readiness == ContextReadiness.GLOBAL
     assert state.session_env.parameters is not None
-    assert controller.setup_control.list_points()[0].label == "bias"
+    assert controller.entry_control.list_points()[0].label == "bias"
 
 
 def test_entry_rejected_new_shows_error_and_keeps_active_point(
-    entry_dialog: tuple[SetupDialog, Controller, State],
+    entry_dialog: tuple[EntryDialog, Controller, State],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     dialog, controller, state = entry_dialog
-    selected = controller.setup_control.new_point(
+    selected = controller.entry_control.new_point(
         PointCreateRequest("bias", "", CommandOrigin("gui"))
     )
 
@@ -347,25 +346,25 @@ def test_entry_rejected_new_shows_error_and_keeps_active_point(
 
 
 def test_entry_cancel_new_keeps_binding(
-    entry_dialog: tuple[SetupDialog, Controller, State], monkeypatch: pytest.MonkeyPatch
+    entry_dialog: tuple[EntryDialog, Controller, State], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     dialog, controller, state = entry_dialog
-    before = controller.setup_control.get_entry_info()
+    before = controller.entry_control.get_entry_info()
 
     def cancelled(*args: object, **kwargs: object) -> tuple[str, bool]:
         return "", False
 
     monkeypatch.setattr(QInputDialog, "getText", cancelled)
     entry_button(dialog, "New entry…").click()
-    assert controller.setup_control.get_entry_info() == before
+    assert controller.entry_control.get_entry_info() == before
     assert state.session_env.readiness == ContextReadiness.GLOBAL
 
 
 def test_entry_owner_switch_updates_visible_identity_and_paths(
-    entry_dialog: tuple[SetupDialog, Controller, State],
+    entry_dialog: tuple[EntryDialog, Controller, State],
 ) -> None:
     dialog, controller, state = entry_dialog
-    info = controller.setup_control.new_entry(EntryRequest("external"))
+    info = controller.entry_control.new_entry(EntryRequest("external"))
     assert entry_selector(dialog).currentText() == info.name
     assert entry_path_row(dialog, "result_path").toolTip() == str(info.result_path)
     assert entry_path_row(dialog, "database_path").toolTip() == str(info.database_path)
@@ -373,47 +372,47 @@ def test_entry_owner_switch_updates_visible_identity_and_paths(
     assert state.session_env.soc is None
 
 
-def entry_path_row(dialog: SetupDialog, name: str) -> QLabel:
+def entry_path_row(dialog: EntryDialog, name: str) -> QLabel:
     """Find the Result or Database path label by its public object name."""
     label = dialog.findChild(QLabel, name)
     assert label is not None
     return label
 
 
-def point_field(dialog: SetupDialog, name: str) -> QLineEdit:
+def point_field(dialog: EntryDialog, name: str) -> QLineEdit:
     """Find an editable working-point field by its public object name."""
     field = dialog.findChild(QLineEdit, name)
     assert field is not None
     return field
 
 
-def point_list(dialog: SetupDialog) -> QListWidget:
+def point_list(dialog: EntryDialog) -> QListWidget:
     """Read working-point selection through the public Qt tree."""
     listing = dialog.findChild(QListWidget, "working_points")
     assert listing is not None
     return listing
 
 
-def point_combo(dialog: SetupDialog, name: str) -> QComboBox:
+def point_combo(dialog: EntryDialog, name: str) -> QComboBox:
     """Find the Track device or Clone from selector."""
     combo = dialog.findChild(QComboBox, name)
     assert combo is not None
     return combo
 
 
-def setup_status(dialog: SetupDialog) -> str:
+def entry_status(dialog: EntryDialog) -> str:
     """Read the visible owner-result message."""
-    status = dialog.findChild(QLabel, "setup_status")
+    status = dialog.findChild(QLabel, "entry_status")
     assert status is not None
     return status.text()
 
 
 def test_unavailable_point_shows_reason_while_another_point_remains_selectable(
-    entry_dialog: tuple[SetupDialog, Controller, State], tmp_path: Path
+    entry_dialog: tuple[EntryDialog, Controller, State], tmp_path: Path
 ) -> None:
     dialog, controller, _state = entry_dialog
     for label in ("bad", "good"):
-        controller.setup_control.new_point(
+        controller.entry_control.new_point(
             PointCreateRequest(label, f"{label} description", CommandOrigin("gui"))
         )
     source = tmp_path / "result/remembered/points/bad/parameters.yaml"
@@ -447,13 +446,13 @@ def test_unavailable_point_shows_reason_while_another_point_remains_selectable(
 
 
 def test_working_point_switch_uses_label_and_displays_description(
-    entry_dialog: tuple[SetupDialog, Controller, State],
+    entry_dialog: tuple[EntryDialog, Controller, State],
 ) -> None:
     dialog, controller, state = entry_dialog
-    first = controller.setup_control.new_point(
+    first = controller.entry_control.new_point(
         PointCreateRequest("bias-a", "near sweet spot", CommandOrigin("gui"))
     )
-    controller.setup_control.new_point(
+    controller.entry_control.new_point(
         PointCreateRequest("bias-b", "away from sweet spot", CommandOrigin("gui"))
     )
     listing = point_list(dialog)
@@ -471,12 +470,12 @@ def test_working_point_switch_uses_label_and_displays_description(
 @pytest.mark.parametrize("description", ["new description", ""])
 @pytest.mark.parametrize("source_label", ["source", "src"])
 def test_working_point_create_clones_source_and_replaces_description(
-    entry_dialog: tuple[SetupDialog, Controller, State],
+    entry_dialog: tuple[EntryDialog, Controller, State],
     description: str,
     source_label: str,
 ) -> None:
     dialog, controller, state = entry_dialog
-    source = controller.setup_control.new_point(
+    source = controller.entry_control.new_point(
         PointCreateRequest(source_label, "source description", CommandOrigin("gui"))
     )
     controller.context_control.set_parameter(source, "general.ext.flux_value", 0.27)
@@ -490,7 +489,7 @@ def test_working_point_create_clones_source_and_replaces_description(
     assert capture.target != source
     assert capture.value("general.ext.flux_value") == 0.27
     assert capture.whole_document().general.description == description
-    assert {p.label: p.description for p in controller.setup_control.list_points()} == {
+    assert {p.label: p.description for p in controller.entry_control.list_points()} == {
         "cloned": description,
         source_label: "source description",
     }
@@ -498,7 +497,7 @@ def test_working_point_create_clones_source_and_replaces_description(
 
 
 def test_working_point_inherit_create_uses_global(
-    entry_dialog: tuple[SetupDialog, Controller, State],
+    entry_dialog: tuple[EntryDialog, Controller, State],
 ) -> None:
     dialog, controller, state = entry_dialog
     assert state.session_env.parameters is not None
@@ -514,27 +513,27 @@ def test_working_point_inherit_create_uses_global(
 
 @pytest.mark.parametrize("label", ["duplicate", "", "../unsafe"])
 def test_working_point_create_owner_rejection_preserves_binding(
-    entry_dialog: tuple[SetupDialog, Controller, State],
+    entry_dialog: tuple[EntryDialog, Controller, State],
     label: str,
 ) -> None:
     dialog, controller, state = entry_dialog
-    selected = controller.setup_control.new_point(
+    selected = controller.entry_control.new_point(
         PointCreateRequest("duplicate", "kept", CommandOrigin("gui"))
     )
-    before = controller.setup_control.list_points()
+    before = controller.entry_control.list_points()
     point_field(dialog, "point_label").setText(label)
     entry_button(dialog, "Create").click()
     assert capture_focus(controller.context_control).target == selected
-    assert controller.setup_control.list_points() == before
+    assert controller.entry_control.list_points() == before
     assert state.session_env.readiness == ContextReadiness.POINT
-    assert "Failed" in setup_status(dialog)
+    assert "Failed" in entry_status(dialog)
 
 
 def test_working_point_missing_clone_preserves_binding(
-    entry_dialog: tuple[SetupDialog, Controller, State],
+    entry_dialog: tuple[EntryDialog, Controller, State],
 ) -> None:
     dialog, controller, _state = entry_dialog
-    selected = controller.setup_control.new_point(
+    selected = controller.entry_control.new_point(
         PointCreateRequest("kept", "", CommandOrigin("gui"))
     )
     point_combo(dialog, "point_mode").setCurrentIndex(2)
@@ -544,17 +543,17 @@ def test_working_point_missing_clone_preserves_binding(
     point_field(dialog, "point_label").setText("not-created")
     entry_button(dialog, "Create").click()
     assert capture_focus(controller.context_control).target == selected
-    assert [p.label for p in controller.setup_control.list_points()] == ["kept"]
-    assert "Failed" in setup_status(dialog)
+    assert [p.label for p in controller.entry_control.list_points()] == ["kept"]
+    assert "Failed" in entry_status(dialog)
 
 
 def test_working_point_switch_missing_source_preserves_binding(
-    entry_dialog: tuple[SetupDialog, Controller, State],
+    entry_dialog: tuple[EntryDialog, Controller, State],
 ) -> None:
     from qtpy.QtCore import Qt
 
     dialog, controller, _state = entry_dialog
-    selected = controller.setup_control.new_point(
+    selected = controller.entry_control.new_point(
         PointCreateRequest("kept", "", CommandOrigin("gui"))
     )
     listing = point_list(dialog)
@@ -565,25 +564,25 @@ def test_working_point_switch_missing_source_preserves_binding(
     listing.setCurrentRow(1)
     entry_button(dialog, "Switch to selected").click()
     assert capture_focus(controller.context_control).target == selected
-    assert "Failed" in setup_status(dialog)
+    assert "Failed" in entry_status(dialog)
 
 
 def test_working_points_follow_entry_changes_and_reopen_without_selecting(
-    entry_dialog: tuple[SetupDialog, Controller, State],
+    entry_dialog: tuple[EntryDialog, Controller, State],
     qapp: QApplication,
 ) -> None:
     dialog, controller, state = entry_dialog
-    controller.setup_control.new_point(
+    controller.entry_control.new_point(
         PointCreateRequest("old", "old entry", CommandOrigin("gui"))
     )
-    controller.setup_control.new_entry(EntryRequest("other"))
+    controller.entry_control.new_entry(EntryRequest("other"))
     listing = point_list(dialog)
     assert listing.count() == 1
     assert point_combo(dialog, "clone_from").count() == 1
-    controller.setup_control.new_point(
+    controller.entry_control.new_point(
         PointCreateRequest("new", "other entry", CommandOrigin("gui"))
     )
-    controller.setup_control.open_entry(EntryRequest("other"))
+    controller.entry_control.open_entry(EntryRequest("other"))
     before = controller.get_session_env()
     dialog.hide()
     dialog.show()
@@ -604,13 +603,13 @@ def test_working_point_create_without_entry_shows_owner_failure(
     controller = Controller(
         state, Registry(), None, BaseEventBus(), project_root=str(tmp_path)
     )
-    dialog = SetupDialog(controller.setup_control)
+    dialog = EntryDialog(controller.entry_control)
     try:
         point_field(dialog, "point_label").setText("bias")
         entry_button(dialog, "Create").click()
         assert state.session_env.readiness == ContextReadiness.EMPTY
-        assert controller.setup_control.get_entry_info() is None
-        assert "Failed" in setup_status(dialog)
+        assert controller.entry_control.get_entry_info() is None
+        assert "Failed" in entry_status(dialog)
     finally:
         dialog.reject()
         controller.close()
@@ -620,14 +619,14 @@ def test_working_point_create_without_entry_shows_owner_failure(
 
 @pytest.mark.parametrize("cached", [None, 0.0035, 0.005])
 def test_working_point_device_suggestion_is_cached_and_preserves_manual_text(
-    entry_dialog: tuple[SetupDialog, Controller, State],
+    entry_dialog: tuple[EntryDialog, Controller, State],
     monkeypatch: pytest.MonkeyPatch,
     cached: float | None,
 ) -> None:
     dialog, controller, state = entry_dialog
 
     def forbidden_live_read(*args: object, **kwargs: object) -> None:
-        raise AssertionError("Setup must only read cached device facts")
+        raise AssertionError("Entry must only read cached device facts")
 
     for name in ("get_device_info", "poll_device_info", "try_poll_device_info"):
         monkeypatch.setattr(controller.device_control, name, forbidden_live_read)
@@ -659,12 +658,12 @@ def test_working_point_device_suggestion_is_cached_and_preserves_manual_text(
     device.setCurrentIndex(0)
     assert label.text() == "my-bias"
     entry_button(dialog, "Create").click()
-    assert [p.label for p in controller.setup_control.list_points()] == ["my-bias"]
+    assert [p.label for p in controller.entry_control.list_points()] == ["my-bias"]
     assert state.session_env.soc is None
 
 
 def test_working_point_cached_none_keeps_previous_suggestion(
-    entry_dialog: tuple[SetupDialog, Controller, State],
+    entry_dialog: tuple[EntryDialog, Controller, State],
 ) -> None:
     dialog, controller, state = entry_dialog
     state.put_device(
@@ -687,25 +686,25 @@ def test_working_point_cached_none_keeps_previous_suggestion(
     assert label.text() == "0.12V"
 
 
-def point_texts(dialog: SetupDialog) -> list[str]:
+def point_texts(dialog: EntryDialog) -> list[str]:
     listing = point_list(dialog)
     items = [listing.item(row) for row in range(listing.count())]
     return [item.text() for item in items if item is not None]
 
 
-def current_point_text(dialog: SetupDialog) -> str | None:
+def current_point_text(dialog: EntryDialog) -> str | None:
     item = point_list(dialog).currentItem()
     return item.text() if item is not None else None
 
 
-def selected_description(dialog: SetupDialog) -> QLabel:
+def selected_description(dialog: EntryDialog) -> QLabel:
     label = dialog.findChild(QLabel, "selected_point_description")
     assert label is not None
     return label
 
 
 def test_long_status_message_wraps_without_widening_dialog(
-    entry_dialog: tuple[SetupDialog, Controller, State], qapp: QApplication
+    entry_dialog: tuple[EntryDialog, Controller, State], qapp: QApplication
 ) -> None:
     dialog, _controller, _state = entry_dialog
     dialog.resize(900, 600)
@@ -716,7 +715,7 @@ def test_long_status_message_wraps_without_widening_dialog(
     combo.setCurrentIndex(combo.count() - 1)
     entry_button(dialog, "Open").click()
     qapp.processEvents()
-    status = dialog.findChild(QLabel, "setup_status")
+    status = dialog.findChild(QLabel, "entry_status")
     assert status is not None and status.text()
     assert status.wordWrap()
     assert dialog.width() == widths[0]
@@ -724,10 +723,10 @@ def test_long_status_message_wraps_without_widening_dialog(
 
 
 def test_entry_paths_elide_middle_keep_name_and_open_folder(
-    entry_dialog: tuple[SetupDialog, Controller, State], qapp: QApplication
+    entry_dialog: tuple[EntryDialog, Controller, State], qapp: QApplication
 ) -> None:
     dialog, controller, _state = entry_dialog
-    info = controller.setup_control.get_entry_info()
+    info = controller.entry_control.get_entry_info()
     assert info is not None
     dialog.resize(520, 600)
     qapp.processEvents()
@@ -744,15 +743,15 @@ def test_entry_paths_elide_middle_keep_name_and_open_folder(
 
 
 def test_point_rows_show_labels_and_selected_description_below(
-    entry_dialog: tuple[SetupDialog, Controller, State],
+    entry_dialog: tuple[EntryDialog, Controller, State],
 ) -> None:
 
     dialog, controller, _state = entry_dialog
     long_text = "JPA on, readout -30 dBm " * 8
-    controller.setup_control.new_point(
+    controller.entry_control.new_point(
         PointCreateRequest("bias-a", long_text, CommandOrigin("gui"))
     )
-    controller.setup_control.new_point(
+    controller.entry_control.new_point(
         PointCreateRequest("bias-b", "", CommandOrigin("gui"))
     )
     listing = point_list(dialog)
@@ -766,7 +765,7 @@ def test_point_rows_show_labels_and_selected_description_below(
 
 
 def test_selection_and_marker_follow_current_point(
-    entry_dialog: tuple[SetupDialog, Controller, State], qapp: QApplication
+    entry_dialog: tuple[EntryDialog, Controller, State], qapp: QApplication
 ) -> None:
     dialog, controller, _state = entry_dialog
     for label in ("p1", "p2", "p3"):
@@ -783,7 +782,7 @@ def test_selection_and_marker_follow_current_point(
     assert current is not None and current.font().bold()
     first = listing.item(0)
     assert first is not None and not first.font().bold()
-    controller.setup_control.use_point(PointUseRequest("p1"))
+    controller.entry_control.use_point("p1")
     assert current_point_text(dialog) == "● p1"
     dialog.hide()
     dialog.show()
@@ -792,19 +791,19 @@ def test_selection_and_marker_follow_current_point(
 
 
 def test_entry_without_selected_point_selects_global(
-    entry_dialog: tuple[SetupDialog, Controller, State],
+    entry_dialog: tuple[EntryDialog, Controller, State],
 ) -> None:
     dialog, controller, _state = entry_dialog
-    controller.setup_control.new_point(
+    controller.entry_control.new_point(
         PointCreateRequest("p1", "", CommandOrigin("gui"))
     )
-    controller.setup_control.open_entry(EntryRequest("remembered"))
+    controller.entry_control.open_entry(EntryRequest("remembered"))
     assert point_texts(dialog) == ["● Global", "p1"]
     assert current_point_text(dialog) == "● Global"
 
 
 def test_create_clears_form_on_success_and_keeps_it_on_failure(
-    entry_dialog: tuple[SetupDialog, Controller, State],
+    entry_dialog: tuple[EntryDialog, Controller, State],
 ) -> None:
     dialog, _controller, _state = entry_dialog
     label = point_field(dialog, "point_label")
@@ -826,21 +825,21 @@ def test_external_entry_creation_replaces_empty_hint_and_survives_reopen(
     controller = Controller(
         state, Registry(), None, BaseEventBus(), project_root=str(tmp_path)
     )
-    dialog = SetupDialog(controller.setup_control)
+    dialog = EntryDialog(controller.entry_control)
     try:
         dialog.show()
         qapp.processEvents()
         driver = ComponentDriver(dialog)
         driver.screenshot(tmp_path / "empty.png")
         assert (
-            "No result entries yet" in driver.observe(object_name="setup_status").text
+            "No result entries yet" in driver.observe(object_name="entry_status").text
         )
 
-        # Another caller (e.g. RPC) installs an entry while Setup remains open.
-        controller.setup_control.new_entry(EntryRequest("created-externally"))
+        # Another caller (e.g. RPC) installs an entry while Entry remains open.
+        controller.entry_control.new_entry(EntryRequest("created-externally"))
         driver.screenshot(tmp_path / "entry-created.png")
         assert driver.observe(object_name="result_entry").text == "created-externally"
-        assert driver.observe(object_name="setup_status").text == (
+        assert driver.observe(object_name="entry_status").text == (
             "Opened entry: created-externally"
         )
 
@@ -851,7 +850,7 @@ def test_external_entry_creation_replaces_empty_hint_and_survives_reopen(
         assert driver.observe(object_name="result_entry").text == "created-externally"
         assert (
             "No result entries yet"
-            not in driver.observe(object_name="setup_status").text
+            not in driver.observe(object_name="entry_status").text
         )
     finally:
         dialog.reject()
@@ -867,11 +866,11 @@ def test_missing_result_root_shows_hint_instead_of_error(
     controller = Controller(
         state, Registry(), None, BaseEventBus(), project_root=str(tmp_path)
     )
-    dialog = SetupDialog(controller.setup_control)
+    dialog = EntryDialog(controller.entry_control)
     try:
         dialog.show()
         qapp.processEvents()
-        status = dialog.findChild(QLabel, "setup_status")
+        status = dialog.findChild(QLabel, "entry_status")
         assert status is not None
         assert str(tmp_path / "result") in status.toolTip()
         status.ensurePolished()
@@ -892,10 +891,10 @@ def test_missing_result_root_shows_hint_instead_of_error(
         qapp.processEvents()
 
 
-def test_setup_error_uses_theme_foreground(qapp, window_palette):
+def test_entry_error_uses_theme_foreground(qapp, window_palette):
     ctrl = _make_ctrl()
     ctrl.open_entry.side_effect = RuntimeError("entry failed")
-    dialog = SetupDialog(ctrl)
+    dialog = EntryDialog(ctrl)
     try:
         dialog.setPalette(window_palette)
         entry_selector(dialog).addItem("missing")
@@ -912,12 +911,12 @@ def test_setup_error_uses_theme_foreground(qapp, window_palette):
         qapp.processEvents()
 
 
-def test_setup_success_replaces_error_foreground(qapp, window_palette):
+def test_entry_success_replaces_error_foreground(qapp, window_palette):
     from zcu_tools.gui.widgets import success_colour
 
     ctrl = _make_ctrl()
     ctrl.open_entry.side_effect = RuntimeError("entry failed")
-    dialog = SetupDialog(ctrl)
+    dialog = EntryDialog(ctrl)
     try:
         dialog.setPalette(window_palette)
         entry_selector(dialog).addItem("entry")
@@ -950,10 +949,10 @@ def test_selected_description_restores_live_theme_inheritance(entry_dialog, qapp
     palette = dialog.palette()
     palette.setColor(QPalette.ColorRole.WindowText, QColor("black"))
     dialog.setPalette(palette)
-    controller.setup_control.new_point(
+    controller.entry_control.new_point(
         PointCreateRequest("described", "A note", CommandOrigin("gui"))
     )
-    controller.setup_control.new_point(
+    controller.entry_control.new_point(
         PointCreateRequest("empty", "", CommandOrigin("gui"))
     )
     listing = point_list(dialog)

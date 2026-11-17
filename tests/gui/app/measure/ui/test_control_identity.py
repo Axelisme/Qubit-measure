@@ -51,21 +51,20 @@ from zcu_tools.gui.session.context_types import (
     CommandOrigin,
     EntryRequest,
     PointCreateRequest,
-    PointUseRequest,
 )
 from zcu_tools.gui.session.events import MdChangedPayload
 from zcu_tools.gui.session.ui.add_component_dialog import AddComponentDialog
 from zcu_tools.gui.session.ui.arb_waveform_dialog import ArbWaveformDialog
 from zcu_tools.gui.session.ui.component_tree import ComponentTreeWidget
 from zcu_tools.gui.session.ui.device_dialog import DeviceDialog
+from zcu_tools.gui.session.ui.entry_dialog import EntryDialog
 from zcu_tools.gui.session.ui.inspect_dialog import InspectDialog
-from zcu_tools.gui.session.ui.setup_dialog import SetupDialog
 from zcu_tools.gui.widgets.form import FormEditor
 from zcu_tools.resources.entry import component_registry
 from zcu_tools.resources.waveform_assets import FormulaRecipe
 
-from tests.gui._context_reads import capture_focus, inspect_focus
 from tests.gui._adapter_fakes import DummyResult
+from tests.gui._context_reads import capture_focus, inspect_focus
 from tests.gui._dialog_fakes import RecordingDialogPresenter
 from tests.gui._qt_waits import qt_until
 from tests.gui._user_input import ComponentDriver, key_click, type_text
@@ -202,8 +201,8 @@ def control_ui(
     ctrl.attach_caretaker(
         create_persistence_caretaker(ctrl, cache_dir=tmp_path / "cache")
     )
-    ctrl.setup_control.new_entry(EntryRequest("control"))
-    ctrl.setup_control.new_point(PointCreateRequest("point", "", CommandOrigin("gui")))
+    ctrl.entry_control.new_entry(EntryRequest("control"))
+    ctrl.entry_control.new_point(PointCreateRequest("point", "", CommandOrigin("gui")))
     dialogs = RecordingDialogPresenter(confirm_answers=[False])
     window = MainWindow(
         ctrl,
@@ -437,7 +436,7 @@ def test_remote_device_stop_reclaims_and_cancels(control_ui, qapp):
 @pytest.mark.parametrize(
     "name",
     [
-        DialogName.SETUP,
+        DialogName.ENTRY,
         DialogName.PREDICTOR,
         DialogName.ARB_WAVEFORM,
         DialogName.INSPECT,
@@ -464,7 +463,7 @@ def test_named_observation_window_allows_owner_and_reopen(control_ui, name):
 @pytest.mark.parametrize(
     ("name", "action"),
     [
-        (DialogName.SETUP, "New entry…"),
+        (DialogName.ENTRY, "New entry…"),
         (DialogName.DEVICE, "Add Device"),
         (DialogName.INSPECT, "New"),
         (DialogName.ARB_WAVEFORM, "Save"),
@@ -500,12 +499,12 @@ def test_remote_close_requires_holder_label_confirmation(control_ui):
 
 
 @pytest.mark.parametrize("decision", ["local", "cancel"])
-def test_setup_text_return_preserves_entry_input_and_cancel(control_ui, qapp, decision):
+def test_entry_text_return_preserves_entry_input_and_cancel(control_ui, qapp, decision):
     ui = control_ui
-    ui.window.open_dialog(DialogName.SETUP)
-    setup = ui.window.findChild(SetupDialog)
-    assert setup is not None
-    before = ui.controller.setup_control.get_entry_info()
+    ui.window.open_dialog(DialogName.ENTRY)
+    entry_dialog = ui.window.findChild(EntryDialog)
+    assert entry_dialog is not None
+    before = ui.controller.entry_control.get_entry_info()
 
     def choose(dialog: QInputDialog) -> None:
         dialog.setTextValue("new-entry")
@@ -515,17 +514,19 @@ def test_setup_text_return_preserves_entry_input_and_cancel(control_ui, qapp, de
             dialog.accept()
 
     modal_action(
-        qapp, lambda: button(setup, "New entry…").click(), [(QInputDialog, choose)]
+        qapp,
+        lambda: button(entry_dialog, "New entry…").click(),
+        [(QInputDialog, choose)],
     )
-    entries = ui.controller.setup_control.list_entries(refresh=True)
+    entries = ui.controller.entry_control.list_entries(refresh=True)
     if decision == "local":
         assert "new-entry" in entries
-        info = ui.controller.setup_control.get_entry_info()
+        info = ui.controller.entry_control.get_entry_info()
         assert info is not None and info.name == "new-entry"
     else:
         assert "new-entry" not in entries
-        assert ui.controller.setup_control.get_entry_info() == before
-    button(setup, "Close").click()
+        assert ui.controller.entry_control.get_entry_info() == before
+    button(entry_dialog, "Close").click()
 
 
 @pytest.mark.parametrize("operation", ["rename", "delete", "overwrite"])
@@ -845,7 +846,7 @@ def test_inspect_delete_confirmation_pins_the_original_saved_point(control_ui, q
             prompt.accept()
 
     def choose(prompt: QMessageBox) -> None:
-        ui.controller.setup_control.new_point(
+        ui.controller.entry_control.new_point(
             PointCreateRequest("other", "", CommandOrigin("gui"))
         )
         other = capture_focus(ui.controller.context_control)
@@ -868,7 +869,7 @@ def test_inspect_delete_confirmation_pins_the_original_saved_point(control_ui, q
         in capture_focus(ui.controller.context_control).library.waveform_keys()
     )
     assert ui.controller.get_session_env().active_label == "other"
-    ui.controller.context_control.use_point(PointUseRequest("point"))
+    ui.controller.context_control.use_point("point")
     assert (
         "Q1.waveforms.pulse"
         not in capture_focus(ui.controller.context_control).library.waveform_keys()

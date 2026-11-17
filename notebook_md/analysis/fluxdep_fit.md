@@ -27,8 +27,8 @@ jupyter:
 **Readers:** operator, lab-author. Select spectral lines, fit fluxonium parameters and export an entry-local predictor.
 
 Set the entry name and component name below. The component must have kind
-`qubit/fluxonium` in the entry setup. This notebook does not choose from aliases.
-It writes the predictor, declared setup fields and analysis ledger in separate steps.
+`qubit/fluxonium` in the entry global parameters. This notebook does not choose from aliases.
+It writes the predictor, declared global fields and analysis ledger in separate steps.
 It does not save Database output or read the old two-level params.json.
 The [fluxdep GUI](../../lib/zcu_tools/gui/app/fluxdep/README.md) uses the same artifact format.
 
@@ -353,7 +353,7 @@ fig.write_html(f"{web_dir}/spect_fit.html", include_plotlyjs="cdn")
 fig.write_image(f"{image_dir}/spect_fit.png", format="png")
 ```
 
-# Save predictor and setup
+# Save predictor and global parameters
 
 ```python
 savepath = entry.predictors_path / f"{component}.json"

@@ -10,7 +10,7 @@ from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_control import ContextControlPort
-from zcu_tools.gui.session.context_types import DocumentSetRef, PointUseRequest
+from zcu_tools.gui.session.context_types import DocumentSetRef
 from zcu_tools.gui.session.events import (
     AliasesChangedPayload,
     ContextSwitchedPayload,
@@ -64,7 +64,7 @@ def session(tmp_path: Path) -> Generator[CaptureSession]:
         bus = BaseEventBus()
         service = ContextService(state, bus, bind_assets=ArbWaveformDatabase.info_at)
         service.install_entry(entry)
-        service.use_point(PointUseRequest("first"))
+        service.use_point("first")
         service.apply_alias_rows(
             (AliasRow("driver", "Q1"), AliasRow("sense", "$driver.sense")),
             point=service.current_point_label(),
@@ -152,7 +152,7 @@ def test_capture_keeps_point_library_storage_and_rows_after_later_changes(
     session.entry.aliases(point="second").save(
         EntryAliases(aliases={"driver": "Q2", "sense": "$driver.sense"})
     )
-    control.use_point(PointUseRequest("second"))
+    control.use_point("second")
     source_path(session.entry.parameters("first")).unlink()
     source_path(session.entry.parameters("second")).unlink()
     assert captured.value("$driver.rate") == 4300.0
@@ -247,7 +247,7 @@ def test_read_target_preserves_historical_names_in_saved_reads(
     fixed = control.read_target(require_target(captured), roles=history)
     assert fixed.value("$driver.rate") == 4300.0
     assert fixed.value("$sense.rate") == 6123.0
-    control.use_point(PointUseRequest("second"))
+    control.use_point("second")
     assert control.read_target(require_target(captured), roles=history).roles == history
 
 
@@ -392,7 +392,7 @@ def test_named_published_reads_keep_fixed_names_and_values_without_source_io(
         )
         == names
     )
-    control.use_point(PointUseRequest("second"))
+    control.use_point("second")
     source_path(first).unlink()
     source_path(second).unlink()
     assert captured.target == original_target

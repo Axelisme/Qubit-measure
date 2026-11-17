@@ -185,8 +185,8 @@ def range_application(
     registry.register("spectrum", adapter)
     state = State(SessionEnv(parameters=None, soc=None, soccfg=None))
     ctrl = Controller(state, registry, None, BaseEventBus(), project_root=str(tmp_path))
-    ctrl.setup_control.new_entry(EntryRequest("synthetic"))
-    ctrl.setup_control.new_point(PointCreateRequest("test", "", CommandOrigin("gui")))
+    ctrl.entry_control.new_entry(EntryRequest("synthetic"))
+    ctrl.entry_control.new_point(PointCreateRequest("test", "", CommandOrigin("gui")))
     window = MainWindow(
         ctrl, templates=lambda: {}, dialog_presenter=RecordingDialogPresenter()
     )

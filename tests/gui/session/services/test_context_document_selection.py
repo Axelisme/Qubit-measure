@@ -4,7 +4,7 @@ import pytest
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import InvalidInputError
 from zcu_tools.gui.session.aliases import AliasRow
-from zcu_tools.gui.session.context_types import DocumentSetRef, PointUseRequest
+from zcu_tools.gui.session.context_types import DocumentSetRef
 from zcu_tools.gui.session.events import ContextSwitchedPayload
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.state import SessionState
@@ -21,7 +21,7 @@ def test_default_capture_reads_global_while_focus_remains_point(
     point = rich_entry.new_point("local")
     point.Q1.rate = 5200.0
     context.install_entry(rich_entry)
-    context.use_point(PointUseRequest("local"))
+    context.use_point("local")
     before = context.get_source_binding()
     revisions = context.get_installed_file_revisions()
 
@@ -34,7 +34,7 @@ def test_default_capture_reads_global_while_focus_remains_point(
     assert context.get_installed_file_revisions() == revisions
 
 
-def test_default_document_edits_use_global_not_focused_point(
+def test_default_document_edits_target_global_not_focused_point(
     selected: tuple[ContextService, BaseEventBus, ResultEntry],
 ) -> None:
     context, _, rich_entry = selected
@@ -43,7 +43,7 @@ def test_default_document_edits_use_global_not_focused_point(
     point.Q1.rate = 5200.0
     rich_entry.aliases("local").save(EntryAliases(aliases={"driver": "Q2"}))
     context.install_entry(rich_entry)
-    context.use_point(PointUseRequest("local"))
+    context.use_point("local")
     old_point = context.read_context(point="local")
     revisions = context.get_file_revisions()
 
@@ -75,7 +75,7 @@ def test_document_commands_reject_nonfocused_point_without_effects(
     bus = BaseEventBus()
     context = ContextService(state, bus, bind_assets=ArbWaveformDatabase.info_at)
     context.install_entry(rich_entry)
-    context.use_point(PointUseRequest("local"))
+    context.use_point("local")
     capture = context.read_context(point="local")
     binding = context.get_source_binding()
     revisions = context.get_installed_file_revisions()

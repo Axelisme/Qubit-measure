@@ -79,7 +79,7 @@ def test_component_reference_is_an_ordinary_string(component_session):
     assert capture_focus(control).value("Ref.reference") == "another-name"
 
 
-def test_setup_edits_do_not_change_existing_points(component_session):
+def test_global_edits_do_not_change_existing_points(component_session):
     control, entry = component_session
     control.add_component("Q1", "fake/drive/a", {"rate": 4300.0}, point=None)
     target = control.new_point(PointCreateRequest("a", "", CommandOrigin("gui")))

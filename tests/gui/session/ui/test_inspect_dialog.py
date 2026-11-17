@@ -30,7 +30,6 @@ from zcu_tools.gui.form import FormErrors
 from zcu_tools.gui.form_adapter import module_form
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_control import ContextControlPort
-from zcu_tools.gui.session.context_types import PointUseRequest
 from zcu_tools.gui.session.events import ContextSwitchedPayload
 from zcu_tools.gui.session.hardware_gate import RunBlocksHardwareGate
 from zcu_tools.gui.session.library_entry import open_library_entry
@@ -130,7 +129,7 @@ def session(qapp: QApplication, tmp_path: Path) -> Generator[_Session]:
     )
     service.install_entry(entry)
     control = service
-    control.use_point(PointUseRequest("point"))
+    control.use_point("point")
     session = _Session(entry, control, bus)
     try:
         yield session

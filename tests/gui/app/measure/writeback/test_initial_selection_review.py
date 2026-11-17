@@ -15,7 +15,6 @@ from zcu_tools.gui.app.measure.writeback import (
     WritebackWidget,
 )
 from zcu_tools.gui.event_bus import BaseEventBus
-from zcu_tools.gui.session.context_types import PointUseRequest
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.state import SessionState
 from zcu_tools.gui.session.types import SessionEnv
@@ -70,7 +69,7 @@ def review(qapp: QApplication, tmp_path: Path) -> Generator[ComponentDriver]:
         bind_assets=ArbWaveformDatabase.info_at,
     )
     context.install_entry(entry)
-    context.use_point(PointUseRequest("a"))
+    context.use_point("a")
     service = WritebackService(context, arb_names=lambda: ())
     adapter = ReviewAdapter
     run = RunRecord(

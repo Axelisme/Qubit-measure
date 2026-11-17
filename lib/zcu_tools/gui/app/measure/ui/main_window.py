@@ -1246,7 +1246,7 @@ class MainWindow(QMainWindow):
         raises it if visible, or shows a hidden persistent instance.
         """
         if not self._writable and name not in (
-            DialogName.SETUP,
+            DialogName.ENTRY,
             DialogName.SOC,
             DialogName.INSPECT,
             DialogName.DEVICE,

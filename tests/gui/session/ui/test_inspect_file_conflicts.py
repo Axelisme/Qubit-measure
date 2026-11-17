@@ -16,7 +16,6 @@ from qtpy.QtWidgets import QApplication
 from zcu_tools.cfg_model import ConstWaveformCfg
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.session.aliases import AliasRow
-from zcu_tools.gui.session.context_types import PointUseRequest
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.state import SessionState
 from zcu_tools.gui.session.types import SessionEnv
@@ -105,20 +104,20 @@ def conflict_ui(
         bind_assets=ArbWaveformDatabase.info_at,
     )
     service.install_entry(entry)
-    service.use_point(PointUseRequest("point"))
+    service.use_point("point")
     control = service
     control.add_component(
         "Q1", "fake/drive/a", {"rate": 4300.0}, point=control.current_point_label()
     )
     control.add_component("Q1", "fake/drive/a", {"rate": 1200.0}, point=None)
     entry.new_point("second")
-    service.use_point(PointUseRequest("second"))
+    service.use_point("second")
     control.set_parameter(
         require_target(capture_focus(control)),
         "Q1.rate",
         5300.0,
     )
-    service.use_point(PointUseRequest("point"))
+    service.use_point("point")
     # The missing-file case deliberately leaves aliases revision=None.
     document = request.param.removeprefix("entry-")
     if document != "aliases-missing":
@@ -493,7 +492,7 @@ def test_parameter_draft_cannot_follow_destination(conflict_ui) -> None:
         row.path == ("Q1", "rate") and row.columns[1] == "1200.0"
         for row in ui.visible().tree_rows
     )
-    ui.screenshot(evidence / "03-setup-unchanged.png")
+    ui.screenshot(evidence / "03-global-unchanged.png")
 
 
 @pytest.mark.parametrize("conflict_ui", ["parameters"], indirect=True)
@@ -508,7 +507,7 @@ def test_parameter_draft_cannot_follow_context(conflict_ui) -> None:
     )
     ui.screenshot(evidence / "01-draft.png")
     # An external context switch is not a UI action in this scenario.
-    source.use_point(PointUseRequest("second"))
+    source.use_point("second")
     assert ui.focused_input().text == "9"
     ui.press_key(Qt.Key.Key_Return)
     assert ui.observe(object_name="component_error").text

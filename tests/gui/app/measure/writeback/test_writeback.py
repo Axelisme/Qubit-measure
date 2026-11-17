@@ -26,7 +26,6 @@ from zcu_tools.gui.app.measure.writeback import (
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.session.aliases import AliasRow
-from zcu_tools.gui.session.context_types import PointUseRequest
 from zcu_tools.gui.session.library_entry import LibraryEntryInvalid, ModuleEntryForm
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.state import SessionState
@@ -69,7 +68,7 @@ def session(tmp_path: Path):
         )
         context.install_entry(entry)
         control = context
-        control.use_point(PointUseRequest("a"))
+        control.use_point("a")
         control.add_component(
             "Q1", "fake/drive/a", {}, point=control.current_point_label()
         )
@@ -324,7 +323,9 @@ def test_drafts_keep_ordered_entries_forms_and_applied_state_independent(session
     assert first.experiment_name == second.experiment_name == "synthetic/independent"
     assert second.get_summaries("param-1")[1] == "list[2]"
     assert first.apply(item_ids=("ml-1",))["applied_ids"] == ["ml-1"]
-    assert capture_focus(control).library.module_spec(PULSE).gain == 0.5
+    first_written = capture_focus(control).library.module_spec(PULSE)
+    assert isinstance(first_written, PulseSpec)
+    assert first_written.gain == 0.5
     assert first.get_all_applied()["ml-1"]
     assert second.get_all_applied() == {
         "ml-1": False,
@@ -333,7 +334,9 @@ def test_drafts_keep_ordered_entries_forms_and_applied_state_independent(session
     }
     first.teardown()
     assert second.apply(item_ids=("ml-1",))["applied_ids"] == ["ml-1"]
-    assert capture_focus(control).library.module_spec(PULSE).gain == 0.2
+    second_written = capture_focus(control).library.module_spec(PULSE)
+    assert isinstance(second_written, PulseSpec)
+    assert second_written.gain == 0.2
 
 
 @pytest.mark.parametrize("bad_ids", [("missing",), ("param-1", "param-1")])

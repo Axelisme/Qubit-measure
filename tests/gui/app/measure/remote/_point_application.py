@@ -48,7 +48,7 @@ class PointApplication:
         return result
 
     def open_entry(self) -> EntryInfo:
-        self.controller.setup_control.new_entry(EntryRequest("entry"))
+        self.controller.entry_control.new_entry(EntryRequest("entry"))
         info = self.controller.context_control.get_entry_info()
         assert info is not None
         return info

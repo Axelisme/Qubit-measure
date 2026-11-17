@@ -12,7 +12,7 @@
 | 兩層 aliases | `aliases.yaml` | `aliases.yaml`，不變 |
 
 `resources.document_names` 擁有檔名。Entry discovery 只認根層 `parameters.yaml`。
-Runtime 不讀舊名或自動改名。只有舊 setup 的 entry 開啟時，錯誤會列出舊檔與改名工具。
+Runtime 不讀舊名或自動改名。只有舊 `setup.yaml` 的 entry 開啟時，錯誤會列出舊檔與改名工具。
 GUI watcher、MCP files 與 storage migration 產出使用新名。
 這次不改 global 工作集、文件內容、schema_version 或容器版本。
 

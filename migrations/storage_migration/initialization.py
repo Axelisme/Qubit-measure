@@ -43,11 +43,12 @@ _JSON = TypeAdapter(JsonObject)
 class InitializationDocument:
     """One owner-created YAML document captured before publishing the entry.
 
-    kind selects the public setup/library schema. value contains the normalized
+    kind selects the public global-parameters/library schema. value contains the normalized
     typed document plus unknown raw fields, never a hand-built owner layout.
     Its path is the result/Database-relative key in ownership.documents.
     """
 
+    # JSON 1.0 persists "setup" as the token for the global parameters document.
     kind: Literal["setup", "library"]
     value: JsonObject
 
@@ -57,7 +58,7 @@ class InitializationOwnership:
     """Fixed bootstrap intent and publication baseline, not a transaction journal.
 
     manifest holds the fixed request identity, declarations, report date/path and
-    initial empty conversion state. created_at is the fixed UTC setup time.
+    initial empty conversion state. created_at is the fixed UTC global-parameters creation time.
     temporary_name names only this tool's sibling staging directories, derived
     from manifest.identity.migration_id. source_inventory fixes complete live hashes
     and directories before the first backup/entry write. prepared becomes true
@@ -344,11 +345,11 @@ def _publish_entry(
                 created_at=ownership.created_at,
             ),
         )
-        setup = source_path(entry.parameters())
+        global_parameters = source_path(entry.parameters())
         library = entry.library().source_path
         inventory = inventory_paths(staged)
         document_paths: tuple[tuple[Path, Literal["setup", "library"]], ...] = (
-            (setup, "setup"),
+            (global_parameters, "setup"),
             (library, "library"),
         )
         documents = {

@@ -26,8 +26,8 @@ from zcu_tools.gui.session.library_entry import LibraryEntryInvalid
 from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.resources.entry import component_registry
 
-from tests.gui._context_reads import capture_focus
 from tests.gui._component_fakes import Qubit
+from tests.gui._context_reads import capture_focus
 from tests.gui.app.measure._record_support import require_target
 
 
@@ -71,12 +71,12 @@ def controller(qapp, tmp_path: Path):
         BaseEventBus(),
         project_root=str(tmp_path),
     )
-    ctrl.setup_control.new_entry(EntryRequest("templates"))
+    ctrl.entry_control.new_entry(EntryRequest("templates"))
     before = component_registry.kinds()
     component_registry.register("template/qubit", Qubit)
     try:
         ctrl.context_control.add_component("Q1", "template/qubit", {}, point=None)
-        ctrl.setup_control.new_point(
+        ctrl.entry_control.new_point(
             PointCreateRequest("working", "", CommandOrigin("gui"))
         )
         ctrl.context_control.apply_alias_rows(

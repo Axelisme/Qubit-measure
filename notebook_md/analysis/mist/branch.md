@@ -6,7 +6,7 @@ This is an offline analysis example. It reads an existing new-format entry, type
 
 ## Definitions and entry
 
-Register component definitions once per kernel. Restart the kernel before repeating registration. Opening requires an entry with setup, points, records, and its Database directory; it does not migrate old metadata files.
+Register component definitions once per kernel. Restart the kernel before repeating registration. Opening requires an entry with global parameters, points, records, and its Database directory; it does not migrate old metadata files.
 
 ```python
 from pathlib import Path

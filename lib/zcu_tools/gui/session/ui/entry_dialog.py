@@ -1,4 +1,4 @@
-"""SetupDialog — explicit result entry and working-point binding."""
+"""EntryDialog — explicit result entry and working-point binding."""
 
 from __future__ import annotations
 
@@ -32,7 +32,6 @@ from zcu_tools.gui.session.context_types import (
     EntryInfo,
     EntryRequest,
     PointCreateRequest,
-    PointUseRequest,
 )
 from zcu_tools.gui.widgets import (
     error_colour,
@@ -44,7 +43,7 @@ from zcu_tools.gui.widgets import (
 from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.session.setup_control import SetupControlPort
+    from zcu_tools.gui.session.entry_control import EntryControlPort
 
 logger = logging.getLogger(__name__)
 
@@ -106,8 +105,8 @@ class _ElidedPathLabel(QLabel):
         )
 
 
-class SetupDialog(QDialog):
-    """Resizable result-entry and working-point form over SetupControlPort.
+class EntryDialog(QDialog):
+    """Resizable result-entry and working-point form over EntryControlPort.
 
     Showing/reopening only prefills cached preferences and queries; it does not
     open an entry or connect hardware. New/Open publish the owner binding and
@@ -125,7 +124,7 @@ class SetupDialog(QDialog):
 
     def __init__(
         self,
-        controller: SetupControlPort,
+        controller: EntryControlPort,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -148,7 +147,7 @@ class SetupDialog(QDialog):
         btn_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
         btn_box.rejected.connect(self.reject)
         # Full-width status keeps long project messages to as few lines as possible.
-        self._project_status = _wrapping_label("setup_status")
+        self._project_status = _wrapping_label("entry_status")
         root_layout.addWidget(self._project_status)
         root_layout.addWidget(btn_box)
 
@@ -360,7 +359,7 @@ class SetupDialog(QDialog):
 
         Reopening the dialog after a close (``show()`` on the kept instance)
         replaces any previously-typed-but-never-applied draft with the
-        remembered values from ``get_setup_preferences``.  The first show is
+        remembered values from ``get_dialog_prefill``.  The first show is
         harmless because ``_prefill_from_preferences`` already ran in
         ``__init__``.
 
@@ -398,7 +397,7 @@ class SetupDialog(QDialog):
     # ------------------------------------------------------------------
 
     def _prefill_from_preferences(self) -> None:
-        data = self._ctrl.get_setup_preferences()
+        data = self._ctrl.get_dialog_prefill()
         if data.entry_name:
             self._select_entry_name(data.entry_name)
         info = self._ctrl.get_entry_info()
@@ -541,9 +540,9 @@ class SetupDialog(QDialog):
         label = item.data(Qt.ItemDataRole.UserRole)
         try:
             if label is None:
-                self._ctrl.use_global()
+                self._ctrl.use_point(None)
             else:
-                self._ctrl.use_point(PointUseRequest(label))
+                self._ctrl.use_point(label)
         except Exception as exc:
             # Keep owner rejection visible without escaping the Qt callback.
             logger.exception("Failed to switch working point")

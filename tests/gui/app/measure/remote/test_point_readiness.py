@@ -146,7 +146,7 @@ def test_global_allows_writeback_and_inspect_while_empty_requires_entry(
         assert hint.text().strip()
         assert not add.isEnabled()
         assert not editor.edit_parameter("general.ext.flux_value", 1.0)
-        application.controller.setup_control.open_entry(EntryRequest("entry"))
+        application.controller.entry_control.open_entry(EntryRequest("entry"))
         application.result("point.new", {"label": "selected"})
         editor.refresh()
         assert add.isEnabled()
@@ -193,7 +193,7 @@ def test_writeback_uses_global_after_reopen_then_current_selected_destination(
         ),
     )
 
-    application.controller.setup_control.open_entry(EntryRequest("entry"))
+    application.controller.entry_control.open_entry(EntryRequest("entry"))
     before = entry_resource(application).ledger.events()
     try:
         if frontend == "application":
@@ -225,7 +225,7 @@ def test_writeback_uses_global_after_reopen_then_current_selected_destination(
         assert selected.value("general.ext.flux_value") == 2.0
         assert require_target(selected).point == "b"
         assert len(entry_resource(application).ledger.events()) == len(before) + 2
-        application.controller.setup_control.new_entry(EntryRequest("other"))
+        application.controller.entry_control.new_entry(EntryRequest("other"))
         application.result("point.new", {"label": "c"})
         facet.apply_writeback_for_pane(tab_id, "analysis")
         assert capture_focus(control).value("general.ext.flux_value") == 2.0

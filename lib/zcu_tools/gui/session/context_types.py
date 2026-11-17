@@ -168,13 +168,6 @@ class WorkingPointInfo:
 
 
 @dataclass(frozen=True)
-class PointUseRequest:
-    """Select label, a safe single path segment, in the currently opened entry."""
-
-    label: str
-
-
-@dataclass(frozen=True)
 class CommandOrigin:
     """Frontend attribution, exactly gui or mcp.
 

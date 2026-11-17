@@ -76,7 +76,7 @@ if acquisition.device_snapshot is not None:
 這兩個 helper 是 lab 的選用慣例，框架不 import lab，也不解讀 `flux_frame`。
 `record_flux_frame` 複製 `{offset, period}`。Offset 以 Φ0 表示，各 signed period 使用該儀器原生單位／Φ0。
 有 period 但同次 snapshot 缺值的儀器不貢獻，period 保留；明寫無效或 bool 值以 `ValueError` 指名 device。
-`{offset: null, period: {}}` 表示未校準。缺整份 snapshot 時，上例保留 raw Save 而不組 record；不讀 setup、live 值或目前 point。
+`{offset: null, period: {}}` 表示未校準。缺整份 snapshot 時，上例保留 raw Save 而不組 record；不讀 global、live 值或目前 point。
 作者有自己的 flux 定義時，直接傳入自己捕捉的 JSON 欄位。Mux 逐 participant 捕捉各自 qubit 的 frame。
 `SavedRun.accept` 不從 live point、alias、cfg 或 devices 推測校準。
 

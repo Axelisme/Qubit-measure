@@ -118,9 +118,11 @@ def test_blocked_flux_preserves_actual_source_without_activating_units(
     source = write_meta(request_data, "", {**values, "qub_ch": 4})
     dry = migrate(replace(request_data, dry_run=True), metadata_mapping)
     report = migrate(request_data, metadata_mapping)
-    setup = snapshot(open_entry(request_data).parameters())
-    assert document_value(setup, "general.ext") == {"legacy_meta_info": values}
-    assert document_value(setup, "Q1.wiring.ch") == 4
+    global_parameters = snapshot(open_entry(request_data).parameters())
+    assert document_value(global_parameters, "general.ext") == {
+        "legacy_meta_info": values
+    }
+    assert document_value(global_parameters, "Q1.wiring.ch") == 4
     view = open_entry(request_data).parameters()
     assert getattr(view.Q1, "flux_half", None) is None
     assert getattr(view.J1, "flux_unit", None) is None
@@ -147,9 +149,9 @@ def test_qubit_channel_alias_is_deduplicated_only_against_selected_wiring(
 ) -> None:
     source = write_meta(request_data, "", {"qub_ch": 2 if same else 4, "qub_0_1_ch": 2})
     report = migrate(request_data, metadata_mapping)
-    setup = snapshot(open_entry(request_data).parameters())
-    assert document_value(setup, "Q1.wiring.ch") == 2
-    assert document_value(setup, "general.ext") == (
+    global_parameters = snapshot(open_entry(request_data).parameters())
+    assert document_value(global_parameters, "Q1.wiring.ch") == 2
+    assert document_value(global_parameters, "general.ext") == (
         {} if same else {"legacy_meta_info": {"qub_ch": 4}}
     )
     row = next(
@@ -288,9 +290,9 @@ def test_unknown_expression_collision_preserves_pending_and_formal_value(
         {"cur_A": 0.4, "flux_unit": "V", "flux_value": "=md.other"},
     )
     report = migrate(request_data, metadata_mapping)
-    setup = snapshot(open_entry(request_data).parameters())
-    assert document_value(setup, "general.ext.flux_value") == 0.4
-    assert document_value(setup, "general.ext.legacy_meta_info") == {
+    global_parameters = snapshot(open_entry(request_data).parameters())
+    assert document_value(global_parameters, "general.ext.flux_value") == 0.4
+    assert document_value(global_parameters, "general.ext.legacy_meta_info") == {
         "flux_value": "=md.other"
     }
     row = next(
@@ -311,7 +313,7 @@ def test_unknown_expression_collision_preserves_pending_and_formal_value(
 
 
 @pytest.mark.parametrize("raw_value", [0.4, 0.9])
-def test_point_unknown_collision_protects_only_successful_setup_projection(
+def test_point_unknown_collision_protects_only_successful_global_projection(
     request_data: MigrationRequest,
     metadata_mapping: MigrationMapping,
     raw_value: float,
@@ -323,9 +325,9 @@ def test_point_unknown_collision_protects_only_successful_setup_projection(
     dry = migrate(replace(request_data, dry_run=True), metadata_mapping)
     report = migrate(request_data, metadata_mapping)
     entry = open_entry(request_data)
-    setup = snapshot(entry.parameters())
+    global_parameters = snapshot(entry.parameters())
     point = snapshot(entry.parameters("bias"))
-    assert document_value(setup, "general.ext.flux_value") == 0.4
+    assert document_value(global_parameters, "general.ext.flux_value") == 0.4
     assert document_value(point, "general.ext.flux_value") == 0.4
     assert document_value(point, "general.ext.arbitrary") == raw_value
     rows = {row.old_key: row for row in report.key_mappings if row.old_file == source}

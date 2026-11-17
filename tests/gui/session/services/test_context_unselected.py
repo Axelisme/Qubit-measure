@@ -3,7 +3,6 @@
 from pathlib import Path
 
 import pytest
-from tests.gui._context_reads import capture_focus
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.session.aliases import AliasRow
@@ -14,6 +13,8 @@ from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.gui.session.value_lookup import MissingValue
 from zcu_tools.resources.entry import ResultEntry
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
+
+from tests.gui._context_reads import capture_focus
 
 
 @pytest.fixture

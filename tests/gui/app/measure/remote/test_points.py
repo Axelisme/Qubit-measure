@@ -13,7 +13,6 @@ from zcu_tools.gui.session.context_types import (
     EntryInfo,
     EntryRequest,
     PointBindingError,
-    PointUseRequest,
 )
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.resources.entry import ResultEntry, source_path
@@ -135,7 +134,7 @@ def test_list_empty_and_refresh_persisted_metadata(
     }
 
 
-def test_new_uses_setup_and_clone_replaces_description(
+def test_new_inherits_global_and_clone_replaces_description(
     application: PointApplication,
 ) -> None:
     info = application.open_entry()
@@ -215,7 +214,7 @@ def test_mutations_use_current_entry_after_switch(
 ) -> None:
     previous = application.open_entry()
     opened_resource(previous).new_point("selected")
-    application.controller.setup_control.new_entry(EntryRequest("other"))
+    application.controller.entry_control.new_entry(EntryRequest("other"))
     current = application.controller.context_control.get_entry_info()
     assert current is not None
     if method == "point.use":
@@ -290,7 +289,7 @@ def test_created_binding_failure_preserves_destination_and_recovers_with_use(
 
     service = ContextService(application.state, BaseEventBus(), bind_assets=bind_assets)
     service.install_entry(entry)
-    service.use_point(PointUseRequest("previous"))
+    service.use_point("previous")
     application.remote.context_control = service
     before = capture_focus(service).target
     fail = True

@@ -284,7 +284,7 @@ def build_app_services(  # noqa: PLR0913
     startup_context = StartupContext(
         soc=StartupSoc(calls, session.soc_connection, handles),
         devices=StartupDevices(calls, device, handles),
-        setup=StartupSetup(calls, session.setup_control),
+        setup=StartupSetup(calls, session.entry_control),
         context=StartupParameters(calls, session.context_control),
         tabs=StartupTabs(calls, tab_control),
         calls=calls,

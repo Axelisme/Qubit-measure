@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import NoReturn
 
 import pytest
-from tests.gui._context_reads import capture_focus
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.session.predictor_control import PredictorControlPort
@@ -24,6 +23,8 @@ from zcu_tools.resources.predictor_file import (
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 from zcu_tools.simulate.fluxonium.predict import FluxoniumParams
 from zcu_tools.simulate.transmon import TransmonParams
+
+from tests.gui._context_reads import capture_focus
 
 
 @pytest.fixture

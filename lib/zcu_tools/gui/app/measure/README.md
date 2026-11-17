@@ -179,7 +179,7 @@ Logging、rendering、`QApplication`、control options 與 exit code 留在 shar
 顯式腳本取代框架的 `default_startup.py`；自訂腳本需要預設行為時，自行 import 並呼叫
 `zcu_tools.gui.app.measure.default_startup.startup`。
 Framework 不 import lab 來選腳本。視窗顯示後，`after_show` 在 Qt loop 排入背景執行。
-沒有選定腳本時開啟 shared Setup dialog。
+沒有選定腳本時開啟 shared Entry dialog。
 
 `build_app_services()` constructs the app-local services and injects their driven
 ports. UI and remote code submit tab, run/analyze, save, writeback and session
@@ -210,11 +210,11 @@ Overflowed experiment tabs use Qt's native scroll arrows. The top-right all-tabs
 menu still lists every tab. Close buttons remain hidden when Local editing is
 unavailable under Remote control.
 
-The toolbar opens Entry… and SoC… as separate non-modal windows. Setup manages
+The toolbar opens Entry… and SoC… as separate non-modal windows. Entry manages
 result entries and working points; SoC connects the board and displays soccfg
 through `Controller.soc_control`. The named `soc` window supports remote screenshots.
 Session dialogs remain available for inspection during Run or remote control.
-Run disables Setup and SoC submissions. Inspect, Devices and ARB retain their
+Run disables Entry and SoC submissions. Inspect, Devices and ARB retain their
 existing Run policy. Remote control makes all five shared dialogs read-only;
 Local restores editing subject to each dialog's Run and validation gates.
 

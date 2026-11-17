@@ -26,7 +26,7 @@ def test_remote_creation_allows_empty_source_without_recapturing_later_aliases(
         assert ctrl.tab_control.list_tab_ids() == [tab_id]
         interaction = ctrl.tab_control.get_tab_snapshot(tab_id).interaction
         assert interaction is not None and not interaction.has_context
-        ctrl.setup_control.new_entry(EntryRequest("entry"))
+        ctrl.entry_control.new_entry(EntryRequest("entry"))
         ctrl.context_control.apply_alias_rows(
             rows, point=ctrl.context_control.current_point_label()
         )

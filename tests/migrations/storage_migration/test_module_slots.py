@@ -1,4 +1,4 @@
-"""Setup and point slots reference only successfully published library specs."""
+"""Global and point slots reference only successfully published library specs."""
 
 import os
 from dataclasses import replace
@@ -23,7 +23,7 @@ from tests.migrations.storage_migration.module_cfg_support import pulse as _puls
 pytestmark = pytest.mark.usefixtures("registry_guard")
 
 
-def test_root_library_populates_setup_slots_without_a_point(
+def test_root_library_populates_global_slots_without_a_point(
     request_data: MigrationRequest,
     library_mapping: MigrationMapping,
 ) -> None:

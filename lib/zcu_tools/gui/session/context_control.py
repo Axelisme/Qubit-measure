@@ -19,7 +19,6 @@ if TYPE_CHECKING:
         FileSyncStatus,
         LibraryChange,
         PointCreateRequest,
-        PointUseRequest,
         WorkingPointInfo,
     )
     from zcu_tools.gui.session.types import DocumentSetCapture, RoleBinding
@@ -243,15 +242,12 @@ class ContextControlPort(Protocol):
         """Read cached point descriptions; True refreshes via the owner."""
         ...
 
-    def use_point(self, request: PointUseRequest) -> DocumentSetRef:
-        """Prepare/select a saved point in the opened entry."""
-        ...
+    def use_point(self, point: str | None = None) -> DocumentSetRef:
+        """Select global for None/omitted, or any saved point label in the entry.
 
-    def use_global(self) -> DocumentSetRef:
-        """Prepare/select the entry's global documents; errors preserve binding.
-
-        No opened entry raises no_entry. Success publishes GLOBAL and a None
-        point label. See ContextService.use_global for preparation failures.
+        No opened entry raises no_entry. Preparation failure preserves binding,
+        versions, revisions and captures. Alias format/syntax errors are deferred
+        to consumers. See ContextService.use_point for resource failure semantics.
         """
         ...
 

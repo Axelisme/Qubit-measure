@@ -105,8 +105,8 @@ def test_restored_valid_tab_reenables_run_without_an_extra_form_action(
     tmp_path: Path,
 ) -> None:
     app = window_app
-    app.ctrl.setup_control.new_entry(EntryRequest("reload"))
-    app.ctrl.setup_control.new_point(
+    app.ctrl.entry_control.new_entry(EntryRequest("reload"))
+    app.ctrl.entry_control.new_point(
         PointCreateRequest("point", "", CommandOrigin("gui"))
     )
     app.ctrl.session_services.soc_connection.install_soc(MagicMock(), load_soccfg())

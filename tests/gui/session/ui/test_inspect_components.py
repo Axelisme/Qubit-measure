@@ -9,7 +9,6 @@ from qtpy.QtCore import Qt
 from qtpy.QtWidgets import QComboBox, QTabWidget, QTreeWidget
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.session.context_control import ContextControlPort
-from zcu_tools.gui.session.context_types import PointUseRequest
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.state import SessionState
 from zcu_tools.gui.session.types import SessionEnv
@@ -51,7 +50,7 @@ def inspector(
         )
         entry.new_point("working")
         service.install_entry(entry)
-        service.use_point(PointUseRequest("working"))
+        service.use_point("working")
         control = service
         dialog = InspectDialog(
             control,

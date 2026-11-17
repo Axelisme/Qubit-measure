@@ -46,7 +46,7 @@ dev_value,dev_unit,T1 (us),comment
 
 ## 改後形狀
 
-新 entry 在 `result/<entry>/` 保存 setup、points、libraries、分析文件與 records。Database 的 `<entry>/` 是輸出位置，不是 entry 身分的唯一依據。主要對照如下，沿用上述 mapping 表的範本：
+新 entry 在 `result/<entry>/` 保存 global、points、libraries、分析文件與 records。Database 的 `<entry>/` 是輸出位置，不是 entry 身分的唯一依據。主要對照如下，沿用上述 mapping 表的範本：
 
 | 舊內容 | 新 entry／輸出位置 |
 | --- | --- |
@@ -81,7 +81,7 @@ V2 分析 frame 使用明示 `dev_value`／`dev_unit`，單位為 A、V 或 nati
 
 舊目錄、Labber comment 與 CSV 欄名不能各自提供完整的 typed cfg、歷史身分、單位及完成狀態。遷移需要把已知資料放進各 owner 的文件，並將缺少的歷史證據列出，不能把目前設定或路徑日期當成當年的事實。
 
-Native `data.h5` 保存實驗的全部 Data Variables 與 cfg／metadata，Labber 留作衍生輸出與原檔保全。Entry 將 setup 範本、獨立 point 與記錄分開。JSONL 保存追加歷史，CSV 留作匯入／匯出；明示的 v2 座標讓分析端不必從 `calibrated mA` 這類欄名猜單位。這些目的不同，因此沒有讓正常 runtime 自動猜格式、雙讀 CSV 或執行遷移。
+Native `data.h5` 保存實驗的全部 Data Variables 與 cfg／metadata，Labber 留作衍生輸出與原檔保全。Entry 將 global 文件、獨立 point 與記錄分開。JSONL 保存追加歷史，CSV 留作匯入／匯出；明示的 v2 座標讓分析端不必從 `calibrated mA` 這類欄名猜單位。這些目的不同，因此沒有讓正常 runtime 自動猜格式、雙讀 CSV 或執行遷移。
 
 ## 如何辨識
 

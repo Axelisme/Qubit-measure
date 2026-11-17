@@ -112,8 +112,8 @@ def application(
         controller = Controller(
             state, registry, None, BaseEventBus(), project_root=str(tmp_path)
         )
-        controller.setup_control.new_entry(EntryRequest("entry"))
-        controller.setup_control.new_point(
+        controller.entry_control.new_entry(EntryRequest("entry"))
+        controller.entry_control.new_point(
             PointCreateRequest("working", "", CommandOrigin("gui"))
         )
         context = controller.context_control

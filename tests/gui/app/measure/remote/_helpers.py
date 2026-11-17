@@ -183,8 +183,8 @@ class Fixture:
             driver_factory=driver_factory,
         )
         if not empty_project:
-            self.ctrl.setup_control.new_entry(EntryRequest("fake_qubit"))
-            self.ctrl.setup_control.new_point(
+            self.ctrl.entry_control.new_entry(EntryRequest("fake_qubit"))
+            self.ctrl.entry_control.new_point(
                 PointCreateRequest(active_label or "ctx001", "", CommandOrigin("gui"))
             )
             self.state.set_context(

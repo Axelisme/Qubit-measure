@@ -20,7 +20,7 @@ from enum import Enum
 class DialogName(str, Enum):
     """Stable identifiers for the measure window's named dialogs."""
 
-    SETUP = "setup"
+    ENTRY = "entry"
     SOC = "soc"
     DEVICE = "device"
     PREDICTOR = "predictor"

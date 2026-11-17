@@ -4,7 +4,6 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
-from tests.gui._context_reads import capture_focus
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.session.context_types import (
     CommandOrigin,
@@ -22,6 +21,8 @@ from zcu_tools.gui.session.services.progress import ProgressService
 from zcu_tools.gui.session.state import SessionState
 from zcu_tools.gui.session.types import ContextReadiness, SessionEnv
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
+
+from tests.gui._context_reads import capture_focus
 
 
 @pytest.mark.parametrize("field", ("runner", "progress"))
@@ -67,16 +68,16 @@ def test_shared_build_routes_entry_and_point_commands_to_real_owners(
         project_root=str(tmp_path),
     )
 
-    entry = services.setup_control.new_entry(EntryRequest("entry"))
+    entry = services.entry_control.new_entry(EntryRequest("entry"))
 
     assert state.session_env.readiness is ContextReadiness.GLOBAL
     assert state.session_env.parameters is not None
-    assert services.setup_control.get_entry_info() == entry
+    assert services.entry_control.get_entry_info() == entry
 
-    target = services.setup_control.new_point(
+    target = services.entry_control.new_point(
         PointCreateRequest(
             label="working",
-            description="created through Setup",
+            description="created through Entry",
             origin=CommandOrigin("gui"),
         )
     )
@@ -84,5 +85,5 @@ def test_shared_build_routes_entry_and_point_commands_to_real_owners(
     assert state.session_env.readiness is ContextReadiness.POINT
     assert capture_focus(services.context_control).target == target
     assert (
-        services.setup_control.list_points()[0].description == "created through Setup"
+        services.entry_control.list_points()[0].description == "created through Entry"
     )

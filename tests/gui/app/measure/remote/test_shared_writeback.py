@@ -5,7 +5,6 @@ from pathlib import Path
 
 import pytest
 from pydantic import TypeAdapter
-from tests.gui._context_reads import capture_focus
 from zcu_tools.format_version import YamlValue
 from zcu_tools.gui.app.measure import adapter as proposals
 from zcu_tools.gui.app.measure.services import AdmissionDecision, TabAction
@@ -21,7 +20,6 @@ from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_types import (
     DocumentSetRef,
-    PointUseRequest,
 )
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.state import SessionState
@@ -29,6 +27,8 @@ from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.resources.entry import ResultEntry
 from zcu_tools.resources.entry.writeback import ParameterUpdate
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
+
+from tests.gui._context_reads import capture_focus
 
 from ._helpers import dispatch_handler
 
@@ -110,7 +110,7 @@ def context_at(
         bind_assets=ArbWaveformDatabase.info_at,
     )
     context.install_entry(entry)
-    context.use_point(PointUseRequest("a"))
+    context.use_point("a")
     return entry, context
 
 
@@ -130,7 +130,7 @@ def test_preview_projects_current_location_without_authorizing_apply(
         experiment_name="synthetic",
     )
     if scope == "global":
-        context.use_global()
+        context.use_point(None)
     elif scope == "empty":
         context.clear_context()
     harness = WritebackHarness(context, service, draft)
@@ -181,7 +181,7 @@ def test_sample_write_receipt_reads_latest_jsonl_at_current_point(
         device_snapshot={"bias_at_run": {"value": 0.00125, "value_unit": "A"}},
     )
     entry.new_point("b")
-    context.use_point(PointUseRequest("b"))
+    context.use_point("b")
     harness = WritebackHarness(context, service, draft)
     params = {"tab_id": "tab", "subtab_id": "analysis", "write": [{"id": "record-1"}]}
     first = dispatch_handler(harness, "tab.writeback_write", params)
@@ -262,7 +262,7 @@ def test_record_preview_selection_and_apply_preserve_adapter_json(
         (AliasRow("flux_dev", "later_device"),), point=context.current_point_label()
     )
     entry.new_point("b")
-    context.use_point(PointUseRequest("b"))
+    context.use_point("b")
     harness = WritebackHarness(context, service, draft)
     params = {"tab_id": "tab", "subtab_id": "analysis"}
     preview = dispatch_handler(harness, "tab.writeback_preview", params)

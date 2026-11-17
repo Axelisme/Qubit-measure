@@ -34,8 +34,8 @@ from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.resources.entry import AcquiredPayload, ComponentSchema, ResultEntry
 
-from tests.gui._context_reads import capture_focus
 from tests.experiment._saving_support import SavingCfg, SavingResult
+from tests.gui._context_reads import capture_focus
 from tests.gui._qt_waits import qt_until
 from tests.gui.app.measure._native_save_support import PaneParams, SavingAdapter
 from tests.gui.app.measure._record_support import (
@@ -120,10 +120,10 @@ def snapshot_controller(
         controller = Controller(
             state, registry, None, BaseEventBus(), project_root=str(tmp_path)
         )
-        controller.setup_control.new_entry(EntryRequest("recorded"))
+        controller.entry_control.new_entry(EntryRequest("recorded"))
         global_context = getattr(request, "param", "point") == "global"
         if not global_context:
-            controller.setup_control.new_point(
+            controller.entry_control.new_point(
                 PointCreateRequest("p", "captured", CommandOrigin("gui"))
             )
         context = controller.context_control
@@ -134,7 +134,7 @@ def snapshot_controller(
             point=None if global_context else context.current_point_label(),
         )
         if global_context:
-            controller.setup_control.open_entry(EntryRequest("recorded"))
+            controller.entry_control.open_entry(EntryRequest("recorded"))
         context.set_module(
             require_target(capture_focus(context)),
             "Q1.pulses.pi",

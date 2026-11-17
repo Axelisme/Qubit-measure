@@ -28,8 +28,8 @@ from zcu_tools.gui.session.context_types import CommandOrigin, PointCreateReques
 from zcu_tools.gui.session.parameter_capture import capture_parameters
 from zcu_tools.resources.entry import AcceptedWrite, RoleSpec
 
-from tests.gui._context_reads import capture_focus
 from tests.experiment._saving_support import SavingCfg, SavingResult
+from tests.gui._context_reads import capture_focus
 from tests.gui._qt_waits import qt_until
 from tests.gui.app.measure._load_support import write_native_file
 from tests.gui.app.measure._native_save_support import (
@@ -603,7 +603,7 @@ def test_registered_source_only_load_analyze_preview_keeps_concrete_collision_ta
     assert call(client, "tab.get_cfg", {"tab_id": tab}) == before_form
     context.set_module(source, "coupler.pulses.cz_f2", _stored_pulse(gain=0.6))
     context.set_parameter(source, "coupler.rate", 0.7)
-    fx.ctrl.setup_control.new_point(
+    fx.ctrl.entry_control.new_point(
         PointCreateRequest("other", "", CommandOrigin("gui"))
     )
     context.add_component(

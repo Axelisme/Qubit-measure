@@ -30,7 +30,7 @@ from zcu_tools.gui.app.measure.services.pane_commit import (
     commit_run,
 )
 from zcu_tools.gui.app.measure.state import RunPaneState
-from zcu_tools.gui.session.context_types import EntryRequest, PointUseRequest
+from zcu_tools.gui.session.context_types import EntryRequest
 from zcu_tools.gui.session.parameters import DocumentSetCapture
 from zcu_tools.resources.entry import AcquiredPayload
 
@@ -116,8 +116,8 @@ def native_save_rpc(
         controller = Controller(
             session.state, registry, None, session.bus, project_root=str(tmp_path)
         )
-        controller.setup_control.open_entry(EntryRequest("original"))
-        controller.setup_control.use_point(PointUseRequest("p"))
+        controller.entry_control.open_entry(EntryRequest("original"))
+        controller.entry_control.use_point("p")
         board = white_noise(load_soccfg(), std_adc=1.0, seed=None, routes=((0, 0),))
         controller.session_services.soc_connection.install_soc(board.soc, board.soccfg)
         remote = RemoteControlAdapter(

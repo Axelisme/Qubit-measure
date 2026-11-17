@@ -18,7 +18,6 @@ from zcu_tools.gui.session.context_types import (
     EntryInfo,
     PointBindingError,
     PointCreateRequest,
-    PointUseRequest,
 )
 from zcu_tools.gui.session.events import (
     AliasesChangedPayload,
@@ -103,8 +102,10 @@ def test_open_entry_captures_global_parameters_library_aliases_and_storage(
     ]
 
 
+@pytest.mark.parametrize("explicit_none", [False, True], ids=["omitted", "none"])
 def test_point_and_global_switch_whole_sets_before_publishing_and_keep_captures(
     rich_entry: ResultEntry,
+    explicit_none: bool,
 ) -> None:
     rich_entry.aliases().save(EntryAliases(aliases={"driver": "Q1"}))
     with rich_entry.library().edit() as draft:
@@ -131,7 +132,7 @@ def test_point_and_global_switch_whole_sets_before_publishing_and_keep_captures(
     try:
         context.install_entry(rich_entry)
         global_capture = capture_focus(context)
-        context.use_point(PointUseRequest("local"))
+        context.use_point("local")
         local_capture = capture_focus(context)
         assert local_capture.value("Q2.rate") == 5200.0
         assert local_capture.library.waveform_keys() == ()
@@ -139,7 +140,10 @@ def test_point_and_global_switch_whole_sets_before_publishing_and_keep_captures(
             local_capture.value("Q1.rate")
         with pytest.raises(RoleResolutionError):
             local_capture.value("$driver")
-        context.use_global()
+        if explicit_none:
+            context.use_point(None)
+        else:
+            context.use_point()
         assert capture_focus(context).value("$driver.rate") == 4300.0
         assert capture_focus(context).library.waveform_keys() == ("Q1.waveforms.base",)
         assert global_capture.value("Q1.rate") == 4300.0
@@ -163,7 +167,7 @@ def test_global_preparation_failure_keeps_selected_point_and_publishes_no_fact(
     bus = BaseEventBus()
     context = ContextService(state, bus, bind_assets=ArbWaveformDatabase.info_at)
     context.install_entry(rich_entry)
-    target = context.use_point(PointUseRequest("local"))
+    target = context.use_point("local")
     before = context.get_session_env()
     binding = context.get_source_binding()
     revisions = context.get_file_revisions()
@@ -174,7 +178,7 @@ def test_global_preparation_failure_keeps_selected_point_and_publishes_no_fact(
         path = rich_entry.result_path / "library.yaml"
         path.write_text("[invalid yaml", encoding="utf-8")
         with pytest.raises((ValueError, YAMLError)):
-            context.use_global()
+            context.use_point(None)
         assert context.get_session_env() is before
         assert capture_focus(context).target == target
         assert context.get_source_binding() == binding
@@ -203,7 +207,7 @@ def test_current_point_label_follows_selection_without_refreshing_files(
     context.install_entry(rich_entry)
     assert context.current_point_label() is None
 
-    context.use_point(PointUseRequest("selected"))
+    context.use_point("selected")
     rich_entry.result_path.rename(rich_entry.result_path.with_name("offline"))
     assert context.current_point_label() == "selected"
 
@@ -223,7 +227,7 @@ def test_point_capture_reads_good_leaf_with_bad_sibling(
     before = path.read_bytes()
     context.install_entry(rich_entry)
 
-    context.use_point(PointUseRequest("partial"))
+    context.use_point("partial")
     parameters = capture_focus(context)
 
     assert parameters.value("Q1.rate") == 4300.0
@@ -253,7 +257,7 @@ def test_point_availability_accepts_parseable_partial_components_and_isolates_ba
     assert rows["partial"].error is None
     assert not rows["unparseable"].available
     assert rows["unparseable"].error
-    context.use_point(PointUseRequest("partial"))
+    context.use_point("partial")
     assert capture_focus(context).value("Q1.rate") == 4300.0
     with pytest.raises(ValueError, match="Q1.sense"):
         capture_focus(context).value("Q1.sense")
@@ -337,7 +341,7 @@ def _new_request(label: str, *, clone: str | None = None) -> PointCreateRequest:
 
 def _entry_command(context: ContextService, command: str, entry_name: str) -> object:
     if command == "use":
-        return context.use_point(PointUseRequest("new"))
+        return context.use_point("new")
     if command == "new":
         return context.new_point(PointCreateRequest("new", "", CommandOrigin("gui")))
     return context.entry_ledger(entry_name)
@@ -629,7 +633,7 @@ def test_install_entry_isolates_bad_point_parameters_without_reading_other_files
         (entry.result_path / "library.yaml").read_bytes()
     )
     (entry.result_path / "points/good/aliases.yaml").unlink()
-    context.use_point(PointUseRequest("good"))
+    context.use_point("good")
     assert capture_focus(context).whole_document().general.description == "usable point"
 
 
@@ -640,13 +644,13 @@ def test_use_point_detaches_capture_and_uses_same_entry_library(
     first = entry.new_point("first", description="first point")
     entry.new_point("second", description="second point")
     context.install_entry(entry)
-    target = context.use_point(PointUseRequest("first"))
+    target = context.use_point("first")
     capture = capture_focus(context)
     assert target == DocumentSetRef(entry_name=entry.result_path.name, point="first")
     assert capture.whole_document().general.description == "first point"
     with first.edit() as edit:
         edit.general.description = "changed outside publication"
-    context.use_point(PointUseRequest("second"))
+    context.use_point("second")
     assert capture.whole_document().general.description == "first point"
     assert capture.target == target
     assert capture_focus(context).whole_document().general.description == "second point"
@@ -677,9 +681,9 @@ def test_failed_point_read_keeps_previous_capture(
     entry = _entry(tmp_path)
     entry.new_point("good", description="retained")
     context.install_entry(entry)
-    before = context.use_point(PointUseRequest("good"))
+    before = context.use_point("good")
     with pytest.raises(FileNotFoundError):
-        context.use_point(PointUseRequest("missing"))
+        context.use_point("missing")
     assert capture_focus(context).target == before
     assert capture_focus(context).whole_document().general.description == "retained"
 
@@ -734,7 +738,7 @@ def test_duplicate_point_is_typed_input_error_without_side_effects(
     for label in ("copy", "source"):
         entry.new_point(label, description="retained")
     service.install_entry(entry)
-    target = context.use_point(PointUseRequest("source"))
+    target = context.use_point("source")
     before = capture_focus(context).document()
     version = state.version.snapshot()
     ledger = entry.ledger.events()
@@ -799,7 +803,7 @@ def test_unsafe_point_label_is_typed_input_error_without_side_effects(
     entry = _entry(tmp_path)
     entry.new_point("source", description="retained")
     service.install_entry(entry)
-    target = context.use_point(PointUseRequest("source"))
+    target = context.use_point("source")
     before = capture_focus(context).document()
     version = state.version.snapshot()
     ledger = entry.ledger.events()
@@ -926,7 +930,7 @@ def test_publication_facts_observe_installed_state_and_one_context_bump(
     try:
         assert state.version.get("context") == 0 and observations == []
         info = context.install_entry(rich_entry)
-        context.use_point(PointUseRequest("first"))
+        context.use_point("first")
         assert state.version.get("context") == 2
         context.new_point(_new_request("second"))
         assert state.version.get("context") == 3
@@ -971,11 +975,11 @@ def test_failed_preparation_keeps_binding_version_and_publishes_no_facts(
     switched = bus.subscribe(ContextSwitchedPayload, events.append)
     try:
         context.install_entry(rich_entry)
-        target = context.use_point(PointUseRequest("first"))
+        target = context.use_point("first")
         version = state.version.get("context")
         events.clear()
         with pytest.raises(FileNotFoundError):
-            context.use_point(PointUseRequest("missing"))
+            context.use_point("missing")
         assets.fail = True
         with pytest.raises(OSError, match="asset binding"):
             context.install_entry(_entry(tmp_path, "other"))

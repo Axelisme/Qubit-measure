@@ -23,7 +23,6 @@ from qtpy.QtWidgets import (
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_control import ContextControlPort
-from zcu_tools.gui.session.context_types import PointUseRequest
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.state import SessionState
 from zcu_tools.gui.session.types import SessionEnv
@@ -81,7 +80,7 @@ def memory_session(qapp: QApplication, tmp_path: Path) -> Generator[_Session]:
     bus = BaseEventBus()
     service = _service(bus)
     service.install_entry(entry)
-    service.use_point(PointUseRequest("working"))
+    service.use_point("working")
     control = service
     control.apply_alias_rows(
         (AliasRow("qubit", "Q1"), AliasRow("resonator", "$qubit.resonator")),
@@ -104,7 +103,7 @@ def entry_session(qapp: QApplication, tmp_path: Path) -> Generator[_Session]:
     service = _service(bus)
     entry.new_point("working")
     service.install_entry(entry)
-    service.use_point(PointUseRequest("working"))
+    service.use_point("working")
     service.apply_alias_rows(
         (AliasRow("qubit", "Q1"),), point=service.current_point_label()
     )
@@ -128,7 +127,7 @@ def resolved_session(qapp: QApplication, tmp_path: Path) -> Generator[_Session]:
     service = _service(bus)
     service.install_entry(entry)
     control = service
-    control.use_point(PointUseRequest("working"))
+    control.use_point("working")
     control.add_component("R1", "fake/sensor", {}, point=control.current_point_label())
     control.add_component(
         "Q1", "fake/drive/a", {"sense": "R1"}, point=control.current_point_label()
@@ -216,7 +215,7 @@ def _fresh_rows(entry: ResultEntry) -> tuple[AliasRow, ...]:
     """Reopen entry in a new owner, reading only its saved aliases.yaml."""
     fresh = _service(BaseEventBus())
     fresh.install_entry(entry)
-    fresh.use_point(PointUseRequest("working"))
+    fresh.use_point("working")
     return fresh.get_alias_rows(point=fresh.current_point_label())
 
 
@@ -271,7 +270,7 @@ def test_external_point_switch_clears_saved_hint(entry_session, tmp_path: Path) 
     assert ui.observe(object_name="inspect.saved").text.startswith("Saved")
 
     # External actor at the public context seam, not a simulated UI operation.
-    entry_session.control.use_point(PointUseRequest("second"))
+    entry_session.control.use_point("second")
     ui.screenshot(evidence / "saved-switch-03-cleared.png")
     assert ui.observe(object_name="inspect.saved").text == ""
 
@@ -305,7 +304,7 @@ def test_clean_alias_draft_follows_selected_point(entry_session) -> None:
     entry.new_point("other")
     entry.aliases(point="other").save(EntryAliases(aliases={"other_alias": "R2"}))
     page = _aliases_page(_open(entry_session))
-    entry_session.control.use_point(PointUseRequest("other"))
+    entry_session.control.use_point("other")
     assert _shown_rows(_table(page)) == [("other_alias", "R2")]
 
 
@@ -397,7 +396,7 @@ def test_point_switch_discards_invalid_alias_input(
         "Q1", "not a name", object_name="inspect.aliases.table", column="Value"
     )
     assert ui.observe(object_name="inspect.aliases.error").text
-    entry_session.control.use_point(PointUseRequest("second"))
+    entry_session.control.use_point("second")
     ui.screenshot(
         Path(os.environ.get("INSPECT_IMPLICIT_EVIDENCE", str(tmp_path)))
         / "aliases-switch-discards-invalid.png"

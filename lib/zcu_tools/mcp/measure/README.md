@@ -50,7 +50,7 @@ Tool description 與 schema 說明參數、回覆與錯誤，第一句寫用途�
 Agent 經 `rpc_call` 呼叫 `point.use`，params 傳 `{"label": null}` 切回 global，再取得 files 與 revision。
 label 必填，可為 point 字串或 null；省略為 invalid_params。回覆只含 `{entry_name, point}`，global 的 point 為 null，不含 kind。
 `point.new` 的 mode 預設 inherit，繼承 global 三檔；empty 只建最小有效 parameters，不建 library 或 aliases。
-clone 必須帶 clone_from，inherit 與 empty 禁止帶來源。GUI 與 `StartupSetup.use_global()` 使用相同選組規則。
+clone 必須帶 clone_from，inherit 與 empty 禁止帶來源。GUI 與 `StartupSetup.use_point(None)` 使用相同選組規則。
 既有資料先依[升級指南](../../../../docs/parameter-upgrades.md#先改檔名再升級內容)離線改名，runtime 不讀舊名。
 GUI、writeback、recipe 與啟動腳本經 owner 寫入時，成功即落盤。
 Agent 直接讀寫這些檔案，固定工具不提供參數／modules／aliases 特化讀寫。

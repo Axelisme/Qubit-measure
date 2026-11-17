@@ -40,8 +40,8 @@ def test_seed_batch_converts_before_current_schema_validation(
     if dry_run:
         assert not (request_data.results_root / request_data.name).exists()
     else:
-        setup = snapshot(open_entry(request_data).parameters())
-        assert document_value(setup, "C1.frequency") == 3.0
+        global_parameters = snapshot(open_entry(request_data).parameters())
+        assert document_value(global_parameters, "C1.frequency") == 3.0
 
 
 @pytest.mark.parametrize("dry_run", [False, True])
@@ -102,13 +102,13 @@ def test_value_batch_converts_whole_group_before_current_validation(
     if dry_run:
         assert not (request_data.results_root / request_data.name).exists()
     else:
-        setup = snapshot(open_entry(request_data).parameters())
-        assert document_value(setup, "C1.frequency") == 9.0
-        assert document_value(setup, "general.ext.unit") == "V"
+        global_parameters = snapshot(open_entry(request_data).parameters())
+        assert document_value(global_parameters, "C1.frequency") == 9.0
+        assert document_value(global_parameters, "general.ext.unit") == "V"
 
 
 @pytest.mark.parametrize("dry_run", [False, True])
-def test_conversion_notes_reach_report_for_seed_setup_and_point_batches(
+def test_conversion_notes_reach_report_for_seed_global_and_point_batches(
     request_data: MigrationRequest, mapping: MigrationMapping, dry_run: bool
 ) -> None:
     def transform(document: ParameterUpgradeDocument) -> ParameterUpgradeDocument:
@@ -211,17 +211,22 @@ def test_batch_preserves_omitted_setting_without_dropping_explicit_null(
     component_registry.register("migration_optional_probe", OptionalSettingProbe)
     try:
         report = migrate(request_data, mapping)
-        setup = snapshot(open_entry(request_data).parameters())
+        global_parameters = snapshot(open_entry(request_data).parameters())
         if explicit_null:
             assert report.pending
             assert "optional_setting cannot be null" in report.pending[0].reason
-            assert document_value(setup, "C1.frequency") == 1.0
-            assert document_value(setup, "general.ext.legacy_meta_info.setting") is None
+            assert document_value(global_parameters, "C1.frequency") == 1.0
+            assert (
+                document_value(
+                    global_parameters, "general.ext.legacy_meta_info.setting"
+                )
+                is None
+            )
         else:
             assert report.pending == (), "\n".join(
                 item.reason for item in report.pending
             )
-            assert document_value(setup, "C1.frequency") == 9.0
-            assert document_value(setup, "general.ext.unit") == "V"
+            assert document_value(global_parameters, "C1.frequency") == 9.0
+            assert document_value(global_parameters, "general.ext.unit") == "V"
     finally:
         component_registry.unregister("migration_optional_probe")

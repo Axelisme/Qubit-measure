@@ -4,12 +4,11 @@ from hashlib import sha256
 from pathlib import Path
 
 import pytest
-from tests.gui._context_reads import capture_focus
 from zcu_tools.format_version import YamlValue
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.session.aliases import AliasRow
-from zcu_tools.gui.session.context_types import FileRevision, PointUseRequest
+from zcu_tools.gui.session.context_types import FileRevision
 from zcu_tools.gui.session.events import (
     AliasesChangedPayload,
     MdChangedPayload,
@@ -17,6 +16,8 @@ from zcu_tools.gui.session.events import (
 )
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.resources.entry import ResultEntry
+
+from tests.gui._context_reads import capture_focus
 
 type SelectedPoint = tuple[ContextService, BaseEventBus, ResultEntry]
 
@@ -32,9 +33,9 @@ def test_absent_library_installs_external_creation_strictly(
     )
     path.unlink()
     if global_active:
-        context.use_global()
+        context.use_point(None)
     else:
-        context.use_point(PointUseRequest("first"))
+        context.use_point("first")
     file = next(
         item for item in context.get_file_revisions() if item.document == "library"
     )
@@ -99,7 +100,7 @@ def test_entry_candidates_obey_pending_validation_and_capture_isolation(
 ) -> None:
     context, bus, entry = selected
     if global_active:
-        context.use_global()
+        context.use_point(None)
     active_files = context.get_file_revisions()
     installed_files = context.get_installed_file_revisions()
     assert len(installed_files) == (3 if global_active else 6)
@@ -208,7 +209,7 @@ def test_invalid_candidate_retains_memory_revision_and_bytes(
         "Invalid external candidates need strict owner admission"
     )
     if scope == "global":
-        context.use_global()
+        context.use_point(None)
     global_destination = scope == "entry"
     files = context.get_installed_file_revisions()
     scoped_files = files[3:] if global_destination else files[:3]
@@ -356,7 +357,7 @@ def test_switch_clears_sync_status(selected) -> None:
         context.reload_file(file.path, file.revision)
     assert context.get_file_sync_status()
     entry.new_point("second")
-    context.use_point(PointUseRequest("second"))
+    context.use_point("second")
     assert context.get_file_sync_status() == ()
     context.clear_context()
     assert context.get_file_sync_status() == ()

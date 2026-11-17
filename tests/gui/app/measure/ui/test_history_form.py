@@ -34,8 +34,8 @@ def history_ui(
         presenter = RecordingDialogPresenter(confirm_answers=[True])
         window = MainWindow(ctrl, templates=lambda: {}, dialog_presenter=presenter)
         ctrl.add_view(window)
-        ctrl.setup_control.new_entry(EntryRequest("current"))
-        ctrl.setup_control.new_point(PointCreateRequest("p", "", CommandOrigin("gui")))
+        ctrl.entry_control.new_entry(EntryRequest("current"))
+        ctrl.entry_control.new_point(PointCreateRequest("p", "", CommandOrigin("gui")))
         ctrl.session_services.soc_connection.install_soc(MagicMock(), load_soccfg())
         ctrl.context_control.add_component(
             "Q1", "history/source", {}, point=ctrl.context_control.current_point_label()

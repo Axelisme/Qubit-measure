@@ -1,4 +1,4 @@
-"""Setup view validation, forward-minor fields and shared drafts."""
+"""Global view validation, forward-minor fields and shared drafts."""
 
 from pathlib import Path
 

@@ -36,7 +36,7 @@ _FLUX_FIELDS = ("flux_half", "flux_period", "flux_bias")
 
 @dataclass
 class _Context:
-    """Setup metadata, including seed values when no dry-run handle exists."""
+    """Global metadata, including seed values when no dry-run handle exists."""
 
     target: Path
     session: MigrationSession
@@ -59,7 +59,7 @@ class _Context:
         self.values[path] = value
 
 
-def _setup_context(
+def _global_context(
     session: MigrationSession,
     entry: ResultEntry | None,
     mapping: MigrationMapping,
@@ -537,7 +537,7 @@ def convert_params_json(
     and literal source_keys/destination_keys; raw preservation alone is not pending.
     Without an ext field, preservation stays pending and reports no destination.
     Predictors remain entry
-    resources and never participate in setup/point inheritance. Dispersive and T1
+    resources and never participate in global/point inheritance. Dispersive and T1
     file owners validate partial data and source evidence; invalid content stays
     pending with its original ext copy. plot_transitions joins the dispersive
     file without inventing fit values. Earlier allows transfers unchanged as opaque
@@ -571,7 +571,7 @@ def convert_params_json(
     if not isinstance(kind, str):
         raise ValueError(f"{name}: seed requires kind")
     fields = set(component_registry.get(kind).model_fields)
-    context = _setup_context(session, entry, mapping, name)
+    context = _global_context(session, entry, mapping, name)
     rows = _project_fit(session, source, name, values)
     rows.extend(convert_analysis_files(session, entry, source, name, values))
     rows.extend(_compare_top_sources(values, rows))

@@ -33,7 +33,7 @@ class SocProtocol(Protocol):
 
 
 class SocCfgProtocol(Protocol):
-    """Minimal QICK config surface used by adapters and setup UI."""
+    """Minimal QICK config surface used by adapters and SoC UI."""
 
     def description(self) -> str: ...
     def dump_cfg(self) -> str: ...  # QICK config as a JSON string

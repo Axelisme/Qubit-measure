@@ -22,7 +22,7 @@ from zcu_tools.gui.app.measure.writeback import (
 from zcu_tools.gui.app.measure.writeback.control import WritebackControlFacet
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import InvalidInputError
-from zcu_tools.gui.session.context_types import DocumentSetRef, PointUseRequest
+from zcu_tools.gui.session.context_types import DocumentSetRef
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.state import SessionState
 from zcu_tools.gui.session.types import SessionEnv
@@ -78,7 +78,7 @@ class WritebackGui(SyntheticGui):
             bind_assets=ArbWaveformDatabase.info_at,
         )
         self.context.install_entry(entry)
-        self.context.use_point(PointUseRequest("point"))
+        self.context.use_point("point")
         control = self.context
         control.add_component(
             "Q1", "fake/drive/a", {}, point=control.current_point_label()

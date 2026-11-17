@@ -8,7 +8,6 @@ import pytest
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.session.aliases import AliasRow
-from zcu_tools.gui.session.context_types import PointUseRequest
 from zcu_tools.gui.session.events import (
     AliasesChangedPayload,
     EntryDocumentsChangedPayload,
@@ -74,7 +73,7 @@ def test_list_apply_reopen_capture_storage_and_failed_save(
     entry = entry_at(tmp_path)
     context = service()
     context.install_entry(entry)
-    context.use_point(PointUseRequest("first"))
+    context.use_point("first")
     rows = (AliasRow("driver", "Q1"), AliasRow("participants", ["$driver.sense", "Q1"]))
     try:
         context.apply_alias_rows(rows, point=context.current_point_label())
@@ -87,7 +86,7 @@ def test_list_apply_reopen_capture_storage_and_failed_save(
     with pytest.raises(RoleResolutionError, match="list"):
         captured.resolve_path("$participants.rate")
     assert captured.resolved_aliases()[1].resolved == ["R1", "Q1"]
-    context.use_point(PointUseRequest("first"))
+    context.use_point("first")
     assert context.get_alias_rows(point=context.current_point_label()) == rows
     assert entry.aliases(point="first").read().require_valid().aliases[
         "participants"
@@ -99,7 +98,7 @@ def test_list_apply_reopen_capture_storage_and_failed_save(
     context_bus = BaseEventBus()
     fresh = service(context_bus)
     fresh.install_entry(entry)
-    fresh.use_point(PointUseRequest("first"))
+    fresh.use_point("first")
     context_bus.subscribe(AliasesChangedPayload, events.append)
     old_file = (entry.result_path / "points/first/aliases.yaml").read_bytes()
 
@@ -121,7 +120,7 @@ def test_list_apply_reopen_capture_storage_and_failed_save(
     with pytest.raises(RoleResolutionError, match="not bound"):
         capture_focus(context).value("$participants")
     assert captured.value("$participants") == ["R1", "Q1"]
-    context.use_point(PointUseRequest("first"))
+    context.use_point("first")
     assert context.get_alias_rows(point=context.current_point_label()) == (
         AliasRow("participants", []),
     )
@@ -139,7 +138,7 @@ def test_file_revisions_are_installed_snapshots_and_alias_writes_publish_after_d
     entry = entry_at(tmp_path)
     context.install_entry(entry)
     assert len(context.get_file_revisions()) == 3
-    context.use_point(PointUseRequest("first"))
+    context.use_point("first")
     files = context.get_file_revisions()
     assert [item.document for item in files] == ["parameters", "library", "aliases"]
     assert all(item.path.is_absolute() for item in files)
@@ -153,7 +152,7 @@ def test_file_revisions_are_installed_snapshots_and_alias_writes_publish_after_d
     assert entry.aliases(point="first").read().require_valid().aliases["driver"] == "Q1"
     write_table(entry, "{}")
     assert context.get_file_revisions() == installed
-    context.use_point(PointUseRequest("first"))
+    context.use_point("first")
     assert context.get_file_revisions()[2].revision != installed[2].revision
     context.clear_context()
     assert context.get_file_revisions() == ()
@@ -165,7 +164,7 @@ def test_entry_alias_apply_updates_installed_revision_without_changing_point(
     context = service()
     entry = entry_at(tmp_path)
     context.install_entry(entry)
-    context.use_point(PointUseRequest("first"))
+    context.use_point("first")
     active = capture_focus(context)
     captured = context.read_context(point=None)
     files = context.get_installed_file_revisions()
@@ -192,7 +191,7 @@ def test_entry_alias_first_write_rejects_external_creation_without_success_fact(
     bus = BaseEventBus()
     context = service(bus)
     context.install_entry(entry)
-    context.use_point(PointUseRequest("first"))
+    context.use_point("first")
     bus.subscribe(EntryDocumentsChangedPayload, events.append)
     entry.aliases().save(EntryAliases(aliases={"external": "R1"}))
 
@@ -213,42 +212,42 @@ def test_saved_table_loads_in_order_without_filling_empty_rows(tmp_path: Path) -
     )
     context = service()
     context.install_entry(entry)
-    context.use_point(PointUseRequest("first"))
+    context.use_point("first")
     assert context.get_alias_rows(point=context.current_point_label()) == (
         AliasRow("spare", ""),
         *AUTHORED[:2],
     )
     write_table(entry, "{}")
     context.install_entry(entry)
-    context.use_point(PointUseRequest("first"))
+    context.use_point("first")
     assert context.get_alias_rows(point=context.current_point_label()) == ()
     write_table(entry, '\n  driver: ""\n  sense: $driver.sense')
     context.install_entry(entry)
-    context.use_point(PointUseRequest("first"))
+    context.use_point("first")
     assert context.get_alias_rows(point=context.current_point_label()) == PRESET
 
 
-def test_switch_point_reloads_local_table_without_setup_or_preset_fallback(
+def test_switch_point_reloads_local_table_without_global_or_preset_fallback(
     tmp_path: Path,
 ) -> None:
     entry = entry_at(tmp_path)
     entry.new_point("second")
-    entry.aliases().save(EntryAliases(aliases={"setup_only": "Q1"}))
+    entry.aliases().save(EntryAliases(aliases={"global_only": "Q1"}))
     entry.aliases(point="second").save(EntryAliases(aliases={"driver": "R1"}))
     context = service()
     context.install_entry(entry)
     assert context.get_alias_rows(point=context.current_point_label()) == (
-        AliasRow("setup_only", "Q1"),
+        AliasRow("global_only", "Q1"),
     )
-    context.use_point(PointUseRequest("first"))
+    context.use_point("first")
     assert context.get_alias_rows(point=context.current_point_label()) == ()
     context.apply_alias_rows(AUTHORED, point=context.current_point_label())
-    context.use_point(PointUseRequest("second"))
+    context.use_point("second")
     assert context.get_alias_rows(point=context.current_point_label()) == (
         AliasRow("driver", "R1"),
     )
     assert capture_focus(context).value("$driver.rate") == 6500.0
-    context.use_point(PointUseRequest("first"))
+    context.use_point("first")
     assert context.get_alias_rows(point=context.current_point_label()) == AUTHORED
 
 
@@ -268,14 +267,14 @@ def test_bad_alias_file_isolated_until_consumed_and_repaired(
     context = service()
     first = entry_at(tmp_path, "one")
     context.install_entry(first)
-    context.use_point(PointUseRequest("first"))
+    context.use_point("first")
     entry = first
     entry.new_point("second")
     (entry.result_path / "points" / "second" / "aliases.yaml").write_text(
         f'format: zcu.aliases\nformat_version: "{version}"\naliases: {body}\n',
         encoding="utf-8",
     )
-    target = context.use_point(PointUseRequest("second"))
+    target = context.use_point("second")
     captured = capture_focus(context)
     assert captured.value("Q1.rate") == 4300.0
     assert captured.library.module_keys() == ()
@@ -309,7 +308,7 @@ def test_apply_round_trip_entry_isolation_and_write_through_set(tmp_path: Path) 
     second = entry_at(tmp_path, "two")
     context = service()
     context.install_entry(first)
-    context.use_point(PointUseRequest("first"))
+    context.use_point("first")
     context.apply_alias_rows(AUTHORED, point=context.current_point_label())
     saved = first.aliases(point="first").read().require_valid()
     assert list(saved.aliases.items()) == [
@@ -328,22 +327,22 @@ def test_apply_round_trip_entry_isolation_and_write_through_set(tmp_path: Path) 
     )
     fresh = service()
     fresh.install_entry(reopened)
-    fresh.use_point(PointUseRequest("first"))
+    fresh.use_point("first")
     assert fresh.get_alias_rows(point=fresh.current_point_label()) == (
         AliasRow("transient", "Q1"),
     )
     fresh.install_entry(second)
-    fresh.use_point(PointUseRequest("first"))
+    fresh.use_point("first")
     fresh.apply_alias_rows((), point=fresh.current_point_label())
     assert second.aliases(point="first").read().require_valid().aliases == {}
     assert first.aliases().read().require_valid().aliases == {}
     fresh.install_entry(reopened)
-    fresh.use_point(PointUseRequest("first"))
+    fresh.use_point("first")
     assert fresh.get_alias_rows(point=fresh.current_point_label()) == (
         AliasRow("transient", "Q1"),
     )
     fresh.install_entry(second)
-    fresh.use_point(PointUseRequest("first"))
+    fresh.use_point("first")
     assert fresh.get_alias_rows(point=fresh.current_point_label()) == ()
 
 
@@ -354,7 +353,7 @@ def test_apply_failure_preserves_file_rows_and_events_then_retries(
     context = service(bus)
     entry = entry_at(tmp_path)
     context.install_entry(entry)
-    context.use_point(PointUseRequest("first"))
+    context.use_point("first")
     context.apply_alias_rows(AUTHORED, point=context.current_point_label())
     events: list[AliasesChangedPayload] = []
     bus.subscribe(AliasesChangedPayload, events.append)
@@ -370,7 +369,7 @@ def test_apply_failure_preserves_file_rows_and_events_then_retries(
     assert not events
     fresh = service()
     fresh.install_entry(entry)
-    fresh.use_point(PointUseRequest("first"))
+    fresh.use_point("first")
     assert fresh.get_alias_rows(point=fresh.current_point_label()) == AUTHORED
     context.apply_alias_rows((), point=context.current_point_label())
     assert context.get_alias_rows(point=context.current_point_label()) == ()
@@ -382,12 +381,12 @@ def test_apply_without_entry_fails_without_changing_rows_or_an_unopened_entry(
 ) -> None:
     context = service()
     entry = entry_at(tmp_path)
-    entry.aliases().save(EntryAliases(aliases={"setup": "Q1"}))
+    entry.aliases().save(EntryAliases(aliases={"unopened": "Q1"}))
     with pytest.raises(FailedPreconditionError) as failure:
         context.apply_alias_rows(AUTHORED, point=context.current_point_label())
     assert failure.value.reason_code == "no_context"
     assert context.get_alias_rows(point=context.current_point_label()) == ()
-    assert entry.aliases().read().require_valid().aliases == {"setup": "Q1"}
+    assert entry.aliases().read().require_valid().aliases == {"unopened": "Q1"}
     context.clear_context()
     assert context.get_alias_rows(point=context.current_point_label()) == ()
 
@@ -396,7 +395,7 @@ def test_invalid_apply_preserves_point_table(tmp_path: Path) -> None:
     context = service()
     entry = entry_at(tmp_path)
     context.install_entry(entry)
-    context.use_point(PointUseRequest("first"))
+    context.use_point("first")
     with pytest.raises(InvalidInputError):
         context.apply_alias_rows(
             (AliasRow("driver", "$later.rate"),), point=context.current_point_label()
@@ -410,7 +409,7 @@ def test_missing_names_are_diagnosed_only_when_used(tmp_path: Path) -> None:
     entry = entry_at(tmp_path)
     write_table(entry, "\n  driver: Gone\n  flux_dev: MissingDevice")
     context.install_entry(entry)
-    context.use_point(PointUseRequest("first"))
+    context.use_point("first")
     capture = capture_focus(context)
     assert capture.value("Q1.rate") == 4300.0
     assert capture.value("$driver") == "Gone"
@@ -428,7 +427,7 @@ def test_temporary_capture_and_historical_storage_stay_fixed(tmp_path: Path) -> 
     context = service()
     entry = entry_at(tmp_path, "one")
     context.install_entry(entry)
-    context.use_point(PointUseRequest("first"))
+    context.use_point("first")
     context.apply_alias_rows(AUTHORED, point=context.current_point_label())
     capture = capture_focus(context)
     storage = context.capture_storage(capture)

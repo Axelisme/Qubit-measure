@@ -14,7 +14,6 @@ from zcu_tools.gui.app.measure.writeback import (
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.aliases import AliasRow
-from zcu_tools.gui.session.context_types import PointUseRequest
 from zcu_tools.gui.session.library_entry import LibraryEntryInvalid
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.state import SessionState
@@ -53,7 +52,7 @@ def session(tmp_path: Path, component_kinds):
     )
     context.install_entry(entry)
     control = context
-    control.use_point(PointUseRequest("a"))
+    control.use_point("a")
     control.add_component("Q1", "fake/drive/a", {}, point=control.current_point_label())
     service = WritebackService(control, arb_names=lambda: ())
     return entry, control, service
@@ -89,7 +88,7 @@ def test_static_unit_facts_follow_selected_point_and_captured_path_without_conve
             assert (initial.current, initial.proposed) == (19.8, 20.09)
             control.set_parameter(target, "U1.frequency", 21.5)
             entry.new_point("b")
-            control.use_point(PointUseRequest("b"))
+            control.use_point("b")
             control.add_component(
                 "Q2", "fake/drive/a", {}, point=control.current_point_label()
             )
@@ -153,7 +152,7 @@ def test_concrete_destination_does_not_use_alias_or_historical_point_fallback(se
                 captured.target, "coupler.module.cz_f2", "coupler.pulses.updated"
             )
             entry.new_point("b")
-            control.use_point(PointUseRequest("b"))
+            control.use_point("b")
             control.add_component(
                 "other_coupler",
                 kind,
@@ -199,7 +198,7 @@ def test_values_follow_selected_point_retarget_edits_and_actual_current_values(s
     control.set_parameter(target, "general.ext.other", 7)
     assert draft.preview_values()["param-1"].current == 7
     entry.new_point("b")
-    control.use_point(PointUseRequest("b"))
+    control.use_point("b")
     control.set_parameter(
         capture_focus(control).target,
         "general.ext.other",

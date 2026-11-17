@@ -316,7 +316,7 @@ def _map_unknown_parameter(
         reason = (
             "Colliding formal destination in this context"
             if current
-            else "Inherited formal destination from setup"
+            else "Inherited formal destination from global"
         )
         _map_superseded_parameter(
             session,
@@ -470,7 +470,7 @@ def _module_scalar_destination(rule: KeyRule, mapping: MigrationMapping) -> str 
 def _retain_point_slots(
     session: MigrationSession, entry: ResultEntry, label: str, mapping: MigrationMapping
 ) -> None:
-    # New points copy setup YAML but deliberately start with an empty library.
+    # New points copy global YAML but deliberately start with an empty library.
     # Keep only references that this point's own published library can resolve.
     published = entry.library(label).snapshot().module_keys()
     with edit_parameter(
@@ -496,40 +496,40 @@ def _convert_context(
     entry: ResultEntry | None,
     mapping: MigrationMapping,
     candidate: Path,
-    dry_setup: EditView | None,
+    dry_global: EditView | None,
 ) -> None:
     source_root = session.manifest.report.source.result_path
     destination_root = session.manifest.report.destination.result_path
     contained_path(candidate, source_root)
     source = contained_path(candidate / "meta_info.json", source_root)
-    is_setup = candidate == source_root
+    is_global = candidate == source_root
     label = candidate.name
     validate_segment(label, "context label")
     target = (
         destination_root / PARAMETERS_FILENAME
-        if is_setup
+        if is_global
         else destination_root / "points" / label / PARAMETERS_FILENAME
     )
     view = None
     if entry is not None and not session.dry_run:
         view = (
             entry.parameters()
-            if is_setup
+            if is_global
             else entry.parameters(label)
             if label in entry.list_points()
             else create_point(session, entry, label, candidate)
         )
-        if not is_setup:
+        if not is_global:
             _retain_point_slots(session, entry, label, mapping)
     dry_context = (
-        (dry_setup if is_setup else EditView(snapshot(dry_setup), source=target))
-        if dry_setup is not None
+        (dry_global if is_global else EditView(snapshot(dry_global), source=target))
+        if dry_global is not None
         else None
     )
     library = convert_module_cfg(
         session,
         entry=entry,
-        label=None if is_setup else label,
+        label=None if is_global else label,
         source=candidate / LEGACY_LIBRARY_FILENAME,
         mapping=mapping,
         dry_view=dry_context,
@@ -574,7 +574,7 @@ def convert_parameters(
 
     session owns progress/report and sources; entry is its handle or None in a new
     dry-run; mapping provides registered seeds and working-unit key decisions.
-    Root metadata seeds setup; direct metadata children and every exps child
+    Root metadata seeds global; direct metadata children and every exps child
     become points. Reject duplicate labels with both source locations before
     point writes. Preserve unknown/expressions in ext, convert typed module cfg
     and convert samples with explicit independent CSV declarations. Original
@@ -587,7 +587,7 @@ def convert_parameters(
     if entry is not None and not session.dry_run:
         _seed_components(session, entry, mapping)
     convert_params_json(session, entry, mapping)
-    dry_setup = None
+    dry_global = None
     if session.dry_run:
         prepared = prepare_parameter_batch(
             ParameterUpgradeDocument(
@@ -609,13 +609,13 @@ def convert_parameters(
             session.manifest.report.destination.result_path / PARAMETERS_FILENAME,
             prepared.notes,
         )
-        dry_setup = EditView(
+        dry_global = EditView(
             prepared.document,
             source=session.manifest.report.destination.result_path
             / PARAMETERS_FILENAME,
         )
     for candidate in _context_directories(source_root):
-        _convert_context(session, entry, mapping, candidate, dry_setup)
+        _convert_context(session, entry, mapping, candidate, dry_global)
     convert_samples(session, entry, mapping)
     session.manifest = replace(session.manifest, parameters_complete=True)
     session.checkpoint()

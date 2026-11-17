@@ -27,7 +27,7 @@ class ExportService:
 
         Reject no entry or no accepted result before writing. Preserve authored
         transition annotations from an existing artifact. Source run is unknown;
-        created_at is this export's UTC time. Setup edits and the artifact are
+        created_at is this export's UTC time. Global edits and the artifact are
         separate commits; filesystem/schema failures propagate without rollback.
         Database is never saved.
         """

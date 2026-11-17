@@ -53,7 +53,6 @@ from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_control import ContextControlPort
 from zcu_tools.gui.session.context_types import (
     CommandOrigin,
-    PointUseRequest,
 )
 from zcu_tools.gui.session.operation_runner import OperationRunner
 from zcu_tools.gui.session.parameter_capture import capture_parameters
@@ -65,8 +64,8 @@ from zcu_tools.resources.entry import (
     SavedPayload,
 )
 
-from tests.gui._context_reads import capture_focus
 from tests.experiment._saving_support import SavingCfg, SavingResult
+from tests.gui._context_reads import capture_focus
 from tests.gui.app.measure._form_fakes import form_resources, form_sources
 from tests.gui.app.measure._native_save_support import (
     AnalysisSavingAdapter,
@@ -217,7 +216,7 @@ def test_native_load_analysis_and_writeback_keep_historical_point_aliases_and_id
     target = require_target(capture_focus(control))
     path = session.native_data_path
     session.entry.new_point("other")
-    other = control.use_point(PointUseRequest("other"))
+    other = control.use_point("other")
     control.add_component(
         "Q1", "run-source/qubit", {"rate": 40.0}, point=control.current_point_label()
     )
@@ -442,7 +441,7 @@ def context_free_load_session(
         point = other.new_point("foreign-point")
         point.add_component("Q1", kind="run-source/qubit", rate=5.0)
         session.context.install_entry(other)
-        session.context.use_point(PointUseRequest("foreign-point"))
+        session.context.use_point("foreign-point")
     elif source == "empty":
         session.context.clear_context()
     else:
@@ -560,7 +559,7 @@ def test_public_writeback_targets_current_entry_not_historical_source(
     selected = other.new_point("other")
     selected.add_component("Q1", kind="run-source/qubit", rate=5.0)
     session.context.install_entry(other)
-    control.use_point(PointUseRequest("other"))
+    control.use_point("other")
     session.context.apply_alias_rows(
         (AliasRow("source_qubit", "Q1"),), point=session.context.current_point_label()
     )
@@ -577,7 +576,7 @@ def test_public_writeback_targets_current_entry_not_historical_source(
         assert draft.is_active
         assert all(wb.get_writeback_applied_for_pane("tab", "analysis").values())
         session.context.install_entry(session.entry)
-        control.use_point(PointUseRequest(parameters.target.point))
+        control.use_point(parameters.target.point)
         assert capture_focus(control).lookup("Q1.rate").value == 7.0
     finally:
         draft.teardown()
@@ -626,7 +625,7 @@ def test_native_load_retains_history_and_resaves_captured_source(
         )
         other.new_point("other-point")
         session.context.install_entry(other)
-        session.context.use_point(PointUseRequest("other-point"))
+        session.context.use_point("other-point")
         tab = session.state.get_tab("tab")
         record = require_record(tab.run)
         assert isinstance(record, RunRecord)
@@ -660,7 +659,7 @@ def test_loaded_same_entry_different_point_resaves_original_run(
         assert stored.snapshot.point == "p"
         session.entry.new_point("destination-point")
         control = session.context
-        control.use_point(PointUseRequest("destination-point"))
+        control.use_point("destination-point")
         tab = session.state.get_tab("tab")
         service = LoadService(
             session.state, plan_layout=session.save_service.plan_layout
@@ -761,7 +760,7 @@ def test_loaded_foreign_selection_saves_recorded_names_and_historical_metadata(
         destination.new_point("destination-point")
         session.context.install_entry(destination)
         control = session.context
-        control.use_point(PointUseRequest("destination-point"))
+        control.use_point("destination-point")
         tab = session.state.get_tab("tab")
         captured = capture_focus(control).capture_storage()
         assert captured.point == "destination-point"
@@ -859,7 +858,7 @@ def test_unselected_entry_load_and_save_use_recorded_history(
             for p in tmp_path.rglob("*")
             if p.is_file()
         } == before
-        control.use_point(PointUseRequest("p"))
+        control.use_point("p")
         save = session.save_artifacts if save_all else session.save
         report = save()
         assert all(item.status == "saved" for item in report.outputs)

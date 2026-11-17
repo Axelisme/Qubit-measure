@@ -181,7 +181,7 @@ def test_toolbar_dialog_buttons_and_more_menu_route_commands(
         driver.select_menu("More ▾", (caption,))
     driver.screenshot(tmp_path / "toolbar.png")
     assert host.opened == [
-        DialogName.SETUP,
+        DialogName.ENTRY,
         DialogName.SOC,
         DialogName.DEVICE,
         DialogName.INSPECT,
@@ -268,8 +268,8 @@ def toolbar_application(
         owner_scheduler=scheduler,
         project_root=str(tmp_path),
     )
-    ctrl.setup_control.new_entry(EntryRequest("toolbar"))
-    ctrl.setup_control.new_point(PointCreateRequest("point", "", CommandOrigin("gui")))
+    ctrl.entry_control.new_entry(EntryRequest("toolbar"))
+    ctrl.entry_control.new_point(PointCreateRequest("point", "", CommandOrigin("gui")))
     window = MainWindow(
         ctrl, templates=lambda: {}, dialog_presenter=RecordingDialogPresenter()
     )

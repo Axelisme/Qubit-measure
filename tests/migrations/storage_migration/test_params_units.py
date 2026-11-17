@@ -35,11 +35,11 @@ def test_missing_units_drive_alias_and_module_scalars_remain_observable(
     write_meta(request, "", {"qub_ch": 3, "pi_gain": 0.2, "flx_half": 0.5})
     write_meta(request, "bias", {"qub_ch": 4, "qub_0_1_ch": 2, "pi2_len": 0.03})
     report = migrate(request, metadata_mapping)
-    setup = snapshot(open_entry(request).parameters())
-    assert document_value(setup, "Q1.wiring") == {"ch": 3}
-    assert document_value(setup, "Q1.ext.pi_gain") == 0.2
-    assert document_value(setup, "Q1.flux_half") == 0.5
-    assert document_value(setup, "general.ext.flux_unit") == "mA"
+    global_parameters = snapshot(open_entry(request).parameters())
+    assert document_value(global_parameters, "Q1.wiring") == {"ch": 3}
+    assert document_value(global_parameters, "Q1.ext.pi_gain") == 0.2
+    assert document_value(global_parameters, "Q1.flux_half") == 0.5
+    assert document_value(global_parameters, "general.ext.flux_unit") == "mA"
     point = snapshot(open_entry(request).parameters("bias"))
     assert document_value(point, "Q1.wiring.ch") == 2
     assert document_value(point, "Q1.ext.pi2_len") == 0.03
@@ -51,8 +51,11 @@ def test_unbound_pi_scalars_are_saved_in_component_extensions(
 ) -> None:
     write_meta(request_data, "", {"pi_gain": 0.2, "pi_len": 0.05})
     migrate(request_data, metadata_mapping)
-    setup = snapshot(open_entry(request_data).parameters())
-    assert document_value(setup, "Q1.ext") == {"pi_gain": 0.2, "pi_len": 0.05}
+    global_parameters = snapshot(open_entry(request_data).parameters())
+    assert document_value(global_parameters, "Q1.ext") == {
+        "pi_gain": 0.2,
+        "pi_len": 0.05,
+    }
 
 
 def test_assumption_supplies_missing_metadata_evidence_without_changing_values(
@@ -64,13 +67,13 @@ def test_assumption_supplies_missing_metadata_evidence_without_changing_values(
     )
     write_meta(request, "", {"flx_half": 0.5, "cur_A": 0.7})
     report = migrate(request, metadata_mapping)
-    setup = snapshot(open_entry(request).parameters())
-    assert document_value(setup, "general.ext") == {
+    global_parameters = snapshot(open_entry(request).parameters())
+    assert document_value(global_parameters, "general.ext") == {
         "flux_unit": "mA",
         "flux_value": 0.7,
     }
-    assert document_value(setup, "Q1.flux_half") == 0.5
-    assert document_value(setup, "general.ext.flux_value") == 0.7
+    assert document_value(global_parameters, "Q1.flux_half") == 0.5
+    assert document_value(global_parameters, "general.ext.flux_value") == 0.7
     assert any("假設單位" in row.reason for row in report.key_mappings)
 
 
@@ -174,7 +177,7 @@ def test_jpa_does_not_borrow_params_unit_and_rejects_unsupported_owner_unit(
         },
     )
     report = migrate_with_unit_pending(request_data, metadata_mapping)
-    setup = snapshot(open_entry(request_data).parameters())
+    global_parameters = snapshot(open_entry(request_data).parameters())
     assert any(
         item.source == source and item.location == "best_jpa_flux"
         for item in report.pending
@@ -183,7 +186,7 @@ def test_jpa_does_not_borrow_params_unit_and_rejects_unsupported_owner_unit(
         item.source == source and item.location == "local_flux_unit"
         for item in report.pending
     )
-    assert document_value(setup, "Q1.flux_half") == 0.3
+    assert document_value(global_parameters, "Q1.flux_half") == 0.3
     assert getattr(open_entry(request_data).parameters().J1, "flux", None) is None
 
 
@@ -216,8 +219,8 @@ def test_conflicting_entry_units_block_values_instead_of_using_assumption(
     write_params(request, {"flux_unit": "A"})
     source = write_meta(request, "", {"flux_unit": "V", "flx_half": 0.2})
     report = migrate(request, metadata_mapping)
-    setup = snapshot(open_entry(request).parameters())
-    assert document_value(setup, "general.ext") == {
+    global_parameters = snapshot(open_entry(request).parameters())
+    assert document_value(global_parameters, "general.ext") == {
         "legacy_meta_info": {"flux_unit": "V", "flx_half": 0.2}
     }
     assert any(
@@ -257,9 +260,9 @@ def test_independent_jpa_assumption_publishes_v_without_changing_global_ma(
     write_meta(request, "", {"cur_A": 0.4, "best_jpa_flux": 0.2})
     report = migrate(request, metadata_mapping)
     assert getattr(open_entry(request).parameters().J1, "flux", None) == 0.2
-    setup = snapshot(open_entry(request).parameters())
-    assert document_value(setup, "J1.flux_unit") == "V"
-    assert document_value(setup, "general.ext") == {
+    global_parameters = snapshot(open_entry(request).parameters())
+    assert document_value(global_parameters, "J1.flux_unit") == "V"
+    assert document_value(global_parameters, "general.ext") == {
         "flux_unit": "mA",
         "flux_value": 0.4,
     }

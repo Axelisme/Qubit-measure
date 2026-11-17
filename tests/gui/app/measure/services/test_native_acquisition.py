@@ -35,7 +35,6 @@ from zcu_tools.gui.session.context_types import (
     CommandOrigin,
     EntryRequest,
     PointCreateRequest,
-    PointUseRequest,
 )
 from zcu_tools.gui.session.operation_runner import OperationRunner
 from zcu_tools.gui.session.parameters import DocumentSetCapture
@@ -47,8 +46,8 @@ from zcu_tools.resources.entry import (
     ResultEntry,
 )
 
-from tests.gui._context_reads import capture_focus
 from tests.experiment._saving_support import SavingCfg, SavingResult
+from tests.gui._context_reads import capture_focus
 from tests.gui._progress_fakes import DirectProgressTransport
 from tests.gui._qt_waits import qt_until
 from tests.gui.app.measure._native_save_support import (
@@ -165,7 +164,7 @@ def test_native_run_without_save_records_acquired_at_its_historical_entry(
     )
     other.new_point("q")
     session.context.install_entry(other)
-    session.context.use_point(PointUseRequest("q"))
+    session.context.use_point("q")
     origin = GUI_ORIGIN if frontend == "gui" else CommandOrigin("mcp")
     token, terminal = _acquire_to_terminal(session, monkeypatch, origin=origin)
     assert terminal.outcome == "finished"
@@ -232,7 +231,7 @@ def role_application(
     try:
         register_fakes()
         installed = registry_state()
-        services.session.setup_control.new_entry(EntryRequest("birth"))
+        services.session.entry_control.new_entry(EntryRequest("birth"))
         services.session.context.new_point(
             PointCreateRequest("p", "birth point", GUI_ORIGIN)
         )
@@ -270,7 +269,7 @@ def test_run_save_retains_admission_source_after_global_entry_and_alias_changes(
     tab = state.get_tab(tab_id)
     birth = capture_focus(services.session.context)
     birth_storage = birth.capture_storage()
-    services.session.setup_control.new_entry(EntryRequest("acquisition"))
+    services.session.entry_control.new_entry(EntryRequest("acquisition"))
     services.session.context.new_point(
         PointCreateRequest("run-point", "Run source", GUI_ORIGIN)
     )
@@ -330,7 +329,7 @@ def test_run_save_retains_admission_source_after_global_entry_and_alias_changes(
         (AliasRow("driver", "Q1"),),
         point=services.session.context.current_point_label(),
     )
-    services.session.setup_control.new_entry(EntryRequest("later"))
+    services.session.entry_control.new_entry(EntryRequest("later"))
     assert parameters.value("$driver.rate") == 20.0
     report = services.save_control.save_data(tab_id, origin=origin)
     assert all(output.status == "saved" for output in report.outputs)

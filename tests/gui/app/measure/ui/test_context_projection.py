@@ -19,7 +19,6 @@ from zcu_tools.gui.session.context_types import (
     CommandOrigin,
     EntryRequest,
     PointCreateRequest,
-    PointUseRequest,
 )
 from zcu_tools.gui.session.types import SessionEnv
 
@@ -55,9 +54,9 @@ def test_document_set_scope_is_visible_when_opening_inspect(
         progress_transport=DirectProgressTransport(),
         project_root=str(tmp_path),
     )
-    ctrl.setup_control.new_entry(EntryRequest("entry"))
+    ctrl.entry_control.new_entry(EntryRequest("entry"))
     if point is not None:
-        ctrl.setup_control.new_point(
+        ctrl.entry_control.new_point(
             PointCreateRequest(point, "", CommandOrigin("gui"))
         )
     window = MainWindow(ctrl, templates=lambda: {})
@@ -133,20 +132,20 @@ def test_existing_tab_tracks_unselected_and_active_source(
         assert not interaction.has_context
         assert not interaction.has_active_context
         assert window.get_view_snapshot()["point_label"] == "No point selected"
-        ctrl.setup_control.new_entry(EntryRequest("entry"))
+        ctrl.entry_control.new_entry(EntryRequest("entry"))
         interaction = ctrl.tab_control.get_tab_snapshot(tab_id).interaction
         assert interaction is not None
         assert interaction.has_context and interaction.has_active_context
         assert window.get_view_snapshot()["point_label"] == "Global"
         for label in ("first", "second"):
-            ctrl.setup_control.new_point(
+            ctrl.entry_control.new_point(
                 PointCreateRequest(label, "", CommandOrigin("gui"))
             )
             interaction = ctrl.tab_control.get_tab_snapshot(tab_id).interaction
             assert interaction is not None
             assert interaction.has_context and interaction.has_active_context
             assert window.get_view_snapshot()["point_label"] == label
-        ctrl.setup_control.use_point(PointUseRequest("first"))
+        ctrl.entry_control.use_point("first")
         assert window.get_view_snapshot()["point_label"] == "first"
         assert ctrl.tab_control.list_tab_ids() == [tab_id]
         assert ctrl.cfg_resources.lookup(tab_id) is cfg
@@ -199,21 +198,21 @@ def test_empty_tab_area_shows_next_step_hint_until_a_tab_opens(
         assert hint is not None and tabs is not None
         assert hint.isVisibleTo(window) and not tabs.isVisibleTo(window)
         without_entry = hint.text()
-        ctrl.setup_control.new_entry(EntryRequest("entry"))
+        ctrl.entry_control.new_entry(EntryRequest("entry"))
         qapp.processEvents()
         assert hint.isVisibleTo(window)
         without_point = hint.text()
         assert without_point and without_point != without_entry
-        ctrl.setup_control.new_point(
+        ctrl.entry_control.new_point(
             PointCreateRequest("first", "", CommandOrigin("gui"))
         )
         qapp.processEvents()
         with_point = hint.text()
         assert with_point == without_point
-        ctrl.setup_control.open_entry(EntryRequest("entry"))
+        ctrl.entry_control.open_entry(EntryRequest("entry"))
         qapp.processEvents()
         assert hint.text() == without_point
-        ctrl.setup_control.use_point(PointUseRequest("first"))
+        ctrl.entry_control.use_point("first")
         qapp.processEvents()
         assert hint.text() == with_point
         tab_id = ctrl.tab_control.new_tab("fake")

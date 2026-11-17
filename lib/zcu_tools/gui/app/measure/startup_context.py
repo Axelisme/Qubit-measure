@@ -27,8 +27,8 @@ from zcu_tools.gui.session.context_types import (
     EntryInfo,
     EntryRequest,
     PointCreateRequest,
-    PointUseRequest,
 )
+from zcu_tools.gui.session.entry_control import EntryControlPort
 from zcu_tools.gui.session.operation_handles import OperationHandles
 from zcu_tools.gui.session.ports import OwnerScheduler
 from zcu_tools.gui.session.services.connection import (
@@ -36,7 +36,6 @@ from zcu_tools.gui.session.services.connection import (
     SoCConnectionService,
 )
 from zcu_tools.gui.session.services.device import DeviceService, DeviceSnapshot
-from zcu_tools.gui.session.setup_control import SetupControlPort
 from zcu_tools.gui.session.types import SocCfgHandle, SocHandle
 
 
@@ -215,10 +214,10 @@ class StartupDevices:
 
 @dataclass(frozen=True)
 class StartupSetup:
-    """Entry/point facet; calls marshals to the existing setup control owner."""
+    """Entry/point facet; calls marshal to the existing entry control owner."""
 
     calls: OwnerCalls
-    control: SetupControlPort
+    control: EntryControlPort
 
     def current(self) -> StartupSelection:
         """Read entry/point in one owner turn, without loading any source.
@@ -269,27 +268,20 @@ class StartupSetup:
     def open_entry(self, name: str) -> EntryInfo:
         """Open an existing entry by single-segment name; do not select a point.
 
-        Owner validates name and clears alias rows until a point is selected.
+        Owner validates name and installs the entry's global documents.
         I/O/binding failures propagate and preserve the old binding.
         Safe from worker/owner callback.
         """
         return self.calls.call(lambda: self.control.open_entry(EntryRequest(name)))
 
-    def use_point(self, label: str) -> DocumentSetRef:
-        """Select an existing label in the opened entry on-owner.
+    def use_point(self, point: str | None = None) -> DocumentSetRef:
+        """Select global for None/omitted, or any saved point label on-owner.
 
-        Missing entry/point and resource errors propagate, preserving the old
-        selection. No point is created. Safe from worker/owner callback.
+        Missing entry/point and preparation errors propagate, preserving binding,
+        versions, revisions and captures. Alias format/syntax errors are deferred
+        to consumers. No point is created. Safe from worker/owner callback.
         """
-        return self.calls.call(lambda: self.control.use_point(PointUseRequest(label)))
-
-    def use_global(self) -> DocumentSetRef:
-        """Select the opened entry global documents on-owner without creating a point.
-
-        Missing entry or preparation failure propagates and preserves selection.
-        Safe from a worker or owner callback. Existing captures remain unchanged.
-        """
-        return self.calls.call(self.control.use_global)
+        return self.calls.call(lambda: self.control.use_point(point))
 
 
 @dataclass(frozen=True)

@@ -264,7 +264,7 @@ def test_pi_scalars_deduplicate_only_their_explicit_candidate_and_report_actual_
 
 
 @pytest.mark.parametrize(
-    "mode", ["different", "failed", "missing", "no-library", "setup-only"]
+    "mode", ["different", "failed", "missing", "no-library", "global-only"]
 )
 def test_unmatched_pi_scalars_keep_original_values_in_their_context(
     request_data: MigrationRequest, default_mapping: MigrationMapping, mode: str
@@ -286,10 +286,10 @@ def test_unmatched_pi_scalars_keep_original_values_in_their_context(
         # Another candidate in the same slot must not swallow the source values.
         modules["pi_len"] = _pulse(0.8, {"style": "const", "length": 9.0})
         modules["pi2_len"] = _pulse(0.9, {"style": "const", "length": 8.0})
-    if mode == "setup-only":
+    if mode == "global-only":
         _library(write_meta(request, "", {}), _payload())
     source = write_meta(request, "exps/context", values)
-    if mode not in ("no-library", "setup-only"):
+    if mode not in ("no-library", "global-only"):
         _library(source, payload)
     dry = _convert(replace(request, dry_run=True), default_mapping)
     report = _convert(request, default_mapping)

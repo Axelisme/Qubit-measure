@@ -506,7 +506,7 @@ def source_window(tmp_path, qapp: QApplication) -> Iterator[MainWindow]:
         {("gain",): {"expr": "general.ext.amount * 1.5"}}
     )
     window.refresh_context_panel()
-    # Setup publishes a newer source without changing the open tab's capture.
+    # Global edits publish a newer source without changing the open tab's capture.
     ctrl.context_control.set_parameter(target, "general.ext.amount", 0.5)
     window.resize(1200, 850)
     window.show()

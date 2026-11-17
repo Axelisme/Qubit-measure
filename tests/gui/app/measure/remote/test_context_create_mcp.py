@@ -93,7 +93,7 @@ def test_context_create_named_clone_and_invalid_source_do_not_change_active(
 
 
 @pytest.mark.uses_wall_clock
-@pytest.mark.parametrize("clone", [None, "source"], ids=["setup", "clone"])
+@pytest.mark.parametrize("clone", [None, "source"], ids=["inherit", "clone"])
 def test_duplicate_point_returns_invalid_params_without_side_effects(
     qapp, tmp_path: Path, clone: str | None
 ) -> None:

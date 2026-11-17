@@ -84,7 +84,6 @@ if TYPE_CHECKING:
     from zcu_tools.gui.event_bus import BaseEventBus
     from zcu_tools.gui.session.context_types import (
         PointCreateRequest,
-        PointUseRequest,
     )
     from zcu_tools.gui.session.state import SessionState
     from zcu_tools.gui.session.types import SessionEnv
@@ -328,42 +327,30 @@ class ContextService:
                 self._points = self._load_points(self._entry)
         return deepcopy(self._points)
 
-    def use_point(self, request: PointUseRequest) -> DocumentSetRef:
-        """Prepare point/library/assets/aliases, then install POINT and publish facts.
+    def use_point(self, point: str | None = None) -> DocumentSetRef:
+        """Select global documents for None/omitted, or the named saved point.
 
-        Load point-local aliases, including an empty table for a missing file.
-        No global or preset fallback is used. Alias content/syntax errors are
-        captured with the observed bytes hash, not raised during selection.
-        Alias consumers raise that original error; concrete parameter/library
-        reads remain available. Other storage errors propagate before replacing
-        the binding or table.
+        Prepare parameters/library/assets/aliases before publishing the new
+        focus. Any saved label may be selected, not just the current focus.
+        Global selection opens a fresh entry handle and refreshes the point list.
+        Missing aliases give an empty table; no global/preset fallback is used.
+        Alias content/syntax errors are captured with the observed bytes hash
+        for lazy consumers, leaving concrete parameter/library reads available.
 
-        No opened entry raises FailedPreconditionError(no_entry). Preparation
-        failure retains the old binding. The returned target has no session
-        selection generation.
+        No opened entry raises FailedPreconditionError(no_entry). Missing point,
+        schema, source and I/O failures retain the previous binding, versions,
+        revisions and captures. The returned target has no selection generation.
         """
         self._owner.assert_owner()
+        if point is None:
+            fresh = self._fresh_entry()
+            self.install_entry(fresh)
+            return DocumentSetRef(entry_name=fresh.result_path.name)
         entry = self._require_open_entry()
-        point = entry.parameters(request.label)
-        parameters, documents, sources, info = self._prepare_point(
-            entry, request.label, point
-        )
+        view = entry.parameters(point)
+        parameters, documents, sources, info = self._prepare_point(entry, point, view)
         self._install_point(documents, parameters, sources, info)
-        return DocumentSetRef(entry_name=entry.result_path.name, point=request.label)
-
-    def use_global(self) -> DocumentSetRef:
-        """Select the opened entry's current global documents without creating a point.
-
-        Prepare a fresh entry handle, parameters/library/assets/aliases and point
-        list before publishing GLOBAL with active_label=None. No entry raises
-        FailedPreconditionError(no_entry). Schema, source and I/O failures retain
-        the previous published binding, versions and captures. Alias content
-        errors are captured for lazy alias consumers, as in use_point.
-        """
-        self._owner.assert_owner()
-        fresh = self._fresh_entry()
-        self.install_entry(fresh)
-        return DocumentSetRef(entry_name=fresh.result_path.name)
+        return DocumentSetRef(entry_name=entry.result_path.name, point=point)
 
     def new_point(self, request: PointCreateRequest) -> DocumentSetRef:
         """Create with the explicit inherit/empty/clone mode, then install POINT.
