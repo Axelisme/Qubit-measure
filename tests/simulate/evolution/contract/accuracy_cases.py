@@ -45,6 +45,61 @@ class AccuracyCase:
     idle_family: str | None = None
 
 
+DISSIPATIVE_DC_CASES = ("dephasing_pump", "raman_decay", "raman_weak_legs")
+
+
+def dissipative_dc_case(name: str) -> AccuracyCase:
+    """Build zero-carrier bath-assisted transfer from an initial ground state.
+
+    Dephasing pump uses pair dephasing 0.1/ns for 1000 ns. Raman decay uses
+    a 0.02/ns jump for 500 ns; weak legs use 0.0002/ns for 12500 ns.
+    The latter is within a 0.01/ns rate ceiling; the former two exceed it.
+    """
+    if name == "dephasing_pump":
+        energies = [0.0, 0.1, 0.5]
+        edges = ((0, 1, 0.001),)
+        jumps = ()
+        phi, duration = 0.1, 1000.0
+    elif name in ("raman_decay", "raman_weak_legs"):
+        energies = [0.0, 0.0, 0.02, 0.2, 0.7]
+        weak = name == "raman_weak_legs"
+        coupling = 0.002 if weak else 0.01
+        edges = ((0, 3, coupling), (1, 3, coupling))
+        jumps = ((2, 3, 0.0002 if weak else 0.02),)
+        phi, duration = 0.0, 12500.0 if weak else 500.0
+    else:
+        raise ValueError(f"unknown dissipative DC case: {name}")
+    size = len(energies)
+    x = np.zeros((size, size), dtype=complex)
+    rates = np.zeros((size, size))
+    for a, b, coupling in edges:
+        x[a, b] = x[b, a] = coupling
+    for target, source, rate in jumps:
+        rates[target, source] = rate
+    model = SecularModel(
+        (0,),
+        "accuracy-" + name,
+        np.array(energies),
+        np.eye(size, dtype=complex),
+        (SecularDrive("drive", x, np.zeros_like(x)),),
+        rates,
+        phi * (np.ones((size, size)) - np.eye(size)),
+    )
+    initial = np.zeros((size, size), dtype=complex)
+    initial[0, 0] = 1
+    batch = timeline(1, duration)
+    pulse = replace(
+        drive_track(batch, EnvelopeSpec("constant"), frequency=0.0, gain=1.0),
+        phase_rad=np.zeros(1),
+    )
+    return AccuracyCase(
+        name,
+        ModelSource(initial, lambda level: replace(model, level=level)),
+        replace(batch, tracks=(pulse,)),
+        ("slow_envelope",),
+    )
+
+
 def coherent_source(model: SecularModel) -> ModelSource:
     """Build a source with full complex coherence and the supplied constant bath."""
     vector = np.exp(0.7j * np.arange(len(model.energies_ghz)))
@@ -332,9 +387,12 @@ def accuracy_case(name: str) -> AccuracyCase:
     Names: idle_coherence, weak_plateau, strong_plateau, shaped_complex,
     two_carriers, continuous_flux, joint_gate_inventory, joint_constant, low_carrier,
     linear_shaped, linear_plateau, nearby_carriers, cheap_sampled_nearby,
-    cheap_sampled_separated, adiabatic_ramp and single_tone_sideband. Each call
+    cheap_sampled_separated, adiabatic_ramp, single_tone_sideband,
+    dephasing_pump, raman_decay and raman_weak_legs. Each call
     owns a fresh source/history. The joint gate keeps its 20-point inventory.
     """
+    if name in DISSIPATIVE_DC_CASES:
+        return dissipative_dc_case(name)
     specialized: dict[str, Callable[[], AccuracyCase]] = {
         "linear_shaped": partial(linear_case, shaped=True),
         "linear_plateau": partial(linear_case, shaped=False),

@@ -30,7 +30,7 @@ from .secular import FluxSchedule, FluxWaveform, ModelSource, SegmentShift
 from .telemetry import FamilyRouting
 
 # Replay identity of the segment engine numerical algorithms, independent of records.
-SEGMENT_NUMERIC_VERSION = "segment-engine-v7"
+SEGMENT_NUMERIC_VERSION = "segment-engine-v8"
 
 
 @dataclass(frozen=True)

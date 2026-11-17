@@ -1,6 +1,6 @@
 # Numeric simulation tools
 
-**Last updated:** 2026-11-17, maintenance rules pointer
+**Last updated:** 2026-11-18, dissipative DC propagation
 
 **讀者：** framework-dev、agent。查閱數值模擬的責任邊界、快取契約與實測效能。
 
@@ -149,9 +149,12 @@ default. The engine segments controls, selects kernels and shares deterministic
 preparations across points and acquires. It never carries quantum states into a
 new shot. Numeric tolerances do not certify basis convergence or the physical
 validity of a model.
-Single constant-tone plateaus below 30 MHz use `slow_envelope`, which holds
-carrier phase at each midpoint and applies full-Hamiltonian matrix exponentials
-between secular bath half-steps. The default is 20 segments per carrier period.
+Single constant-tone plateaus below 30 MHz use `slow_envelope`. Nonzero
+carriers hold phase at each midpoint and apply full-Hamiltonian matrix
+exponentials between secular bath half-steps. The default is 20 segments per
+carrier period. Dissipative DC uses the exact constant Lindblad channel instead
+of splitting the bath. Its channel stores O(M⁴) complex values for M levels.
+Bath-free DC uses one full-duration unitary.
 Set `numerics.slow_envelope_segments_per_period` in single-fluxonium or the
 six-fluxonium environment to refine this grid. Population error against dense
 ODE is accepted within 1e-2; the 21-level Q1 calibration measured about 1e-4 or
