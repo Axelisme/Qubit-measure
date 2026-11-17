@@ -7,6 +7,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from zcu_tools.program.v2.simulation import IntegratedRound, RawShots
+from zcu_tools.simulate.adc import cumulative_count_bins
 from zcu_tools.simulate.boundary import (
     AcquireRequest,
     ChannelStatistics,
@@ -77,14 +78,15 @@ def combine_integrated(
 ) -> IntegratedRound:
     """Combine independent cavity marginals without enumerating joint states.
 
-    rounds partition requested ADCs/points; each count axis flattens that
-    cavity's (history, terminal state). levels supplies the six retained state
-    dimensions, used as minimum widths to preserve terminal-only layout.
-    index is the nonnegative software-round identity. Each cavity's sampled
-    multinomial counts are preserved exactly. Sorted cumulative-count boundaries
-    form at most 1+sum(maximum_cavity_axis_widths-1) bins per point;
+    rounds partition requested ADCs/points; each count axis partitions reps
+    into that cavity's categories, which need not represent physical shot paths.
+    levels supplies the six retained state dimensions, used as minimum widths
+    to preserve terminal-only layout. index is the nonnegative software-round
+    identity. Each cavity's sampled category counts are preserved exactly.
+    Sorted cumulative-count boundaries form at most
+    1+sum(maximum_cavity_axis_widths-1) bins per point;
     zero-width duplicate boundaries are retained. Conditional responses select
-    each marginal's state on these bins. This is a representation of integrated
+    each marginal's category on these bins. This is a representation of integrated
     marginal moments, not a joint state distribution or raw-shot sampler.
     Raw shots retain the independent cavity sources, including shared histories
     for multiple ADCs observing the same cavity at the same point.
@@ -102,29 +104,15 @@ def combine_integrated(
         value = piece.result.statistics.state_counts
         counts[piece.group.cavity][piece.group.points] = 0
         counts[piece.group.cavity][piece.group.points, : value.shape[-1]] = value
-    cumulative = [np.cumsum(value, axis=-1) for value in counts]
-    boundaries = np.sort(
-        np.concatenate(
-            [
-                np.zeros((points, 1), dtype=np.int64),
-                *[value[:, :-1] for value in cumulative],
-                np.full((points, 1), request.reps, dtype=np.int64),
-            ],
-            axis=-1,
-        ),
-        axis=-1,
-    )
-    joint = np.diff(boundaries, axis=-1)
-    bins = joint.shape[-1]
+    encoded = cumulative_count_bins(tuple(counts))
+    bins = encoded.counts.shape[-1]
     channels: dict[int, ChannelStatistics] = {}
     for piece in rounds:
         group = piece.group
-        states = np.sum(
-            boundaries[group.points, :-1, None]
-            >= cumulative[group.cavity][group.points, None, :-1],
-            axis=-1,
+        categories = np.minimum(
+            encoded.indices[group.cavity][group.points],
+            piece.result.statistics.state_counts.shape[-1] - 1,
         )
-        states = np.minimum(states, piece.result.statistics.state_counts.shape[-1] - 1)
         for channel in piece.result.statistics.channels:
             if channel.channel not in channels:
                 reads = channel.sums.shape[-2]
@@ -137,7 +125,7 @@ def combine_integrated(
             destination = channels[channel.channel]
             destination.sums[group.points] = channel.sums
             destination.conditional_sums[group.points] = np.take_along_axis(
-                channel.conditional_sums, states[:, None, :, None], axis=-2
+                channel.conditional_sums, categories[:, None, :, None], axis=-2
             )
     shaped = tuple(
         ChannelStatistics(
@@ -151,7 +139,7 @@ def combine_integrated(
         for channel in channels.values()
     )
     statistics = RoundStatistics(
-        joint.reshape(*request.point_dims, bins),
+        encoded.counts.reshape(*request.point_dims, bins),
         shaped,
         SamplingIdentity(request.root_seed, (request.sequence, index, 1)),
     )

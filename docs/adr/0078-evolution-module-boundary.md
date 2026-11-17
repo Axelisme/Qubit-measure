@@ -200,7 +200,8 @@ preparation 不得跨不同 losses 重用。
 分支 continuation density 僅在一次 preparation 的 span 演化中存在，不跨 acquisition 保留或作下次初態。
 環境在 projective read 起點投影並續演化，Engine 仍不保留跨 evolve 的數值 preparation。
 同輸入的 immutable 完整 preparation 是否重用，仍依本節既有設定、losses 與 route 規則。
-其中的 outcome weights、各 event populations 與 conditional sums 是可重用的數值產品，不是上一個 shot、round 或 acquisition 的量子態或已抽樣 herald 結果。
+其中可重用的數值產品是 FTF 的 outcome weights 與各 event populations、single／six 的 `ProjectionChain` 初始分佈與轉移表，以及兩者的 conditional sums。
+它們不是上一個 shot、round 或 acquisition 的量子態或已抽樣 herald 結果。
 已交付 raw source 保留自己的不可變抽樣輸入，不因此承接前次量子態。
 
 Engine 的 routing-facts cache 只驗證 caller-owned preparation 的當前 route。
@@ -212,6 +213,23 @@ FTF 的 complete preparation LRU、envelope fingerprints 與上述 acquire-local
 FTF 與 single 不同，不拆損耗無關結構。漂移開啟時，每次 acquisition 用 effective settings 重建完整 `FTFModelFacts`，包含 eigensystem，並清除舊的 complete preparations；
 整次 points／rounds 共用這次的 losses，不跨不同 losses 重用 rates 或完整 preparation。漂移關閉的既有行為不變。
 這是 advisor 於 2026-10-27 依使用者授權「B你可以自己開task，不用我看過」訂定的重建策略。數值、設定與 truth 的 owner 分工見 [[0072]]。
+
+### Projective read 的 Markov chain 表示
+
+2026-11-16，使用者要求「模擬器不該有 OOM」，看過選項後授權「OOM你就改designer決定」。
+Designer 於 2026-11-17 依此代裁 single／six 的 projective read 表示。
+
+DC rank-1 投影之後，下一段演化只依投影狀態，所以一串 projective read 是以投影狀態為狀態的 Markov chain。
+Single runner 輸出 `simulate.adc.ProjectionChain`：每點第一個 read 的 populations，加上每個後續 read 依前一個投影狀態的轉移表。
+Six 對每個 cavity 使用同一個 runner。
+Runner 不列舉 outcome history，也不設 projection 記憶體預算；記憶體隨點數線性成長，raw 另隨 reps 成長。
+每一點、每個轉移各自判斷：該點近似機率不低於 `projection_prune_floor` 的 source state 採用 `Engine.evolve` 算出的轉移列，其餘狀態在該點設 identity。
+一點的近似不依同次 acquire 的其他點；floor 為零時是精確 chain。
+`simulate.adc` 擁有 chain 的 raw／trace 取樣、integrated 的逐態 flow counts 與累積邊界 bins 編碼；six 合併 integrated 時呼叫同一個編碼器。
+FTF 的 history 帶腔記憶，DC 末態不足以決定後續，FTF 維持 `ProjectionReadout`。
+沒有 projective read 的 single／six 與 FTF 輸出逐位元不變。
+有 projective read 時同 seed 的抽樣值改變；single private replay 升版，舊 archive 明確拒絕。
+選項比較、誤差界與先例立場見[討論快照](../discussions/2026-11-17-projection-markov-chain-readout.md)。
 
 ### Integrated raw 由環境生成，介面由 program 擁有
 

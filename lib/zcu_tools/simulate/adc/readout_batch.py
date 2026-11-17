@@ -17,9 +17,10 @@ from zcu_tools.simulate.boundary import (
     SamplingIdentity,
 )
 
+from ._chain_statistics import chain_conditional, chain_counts
 from ._noise import noise_root
 from .model import ReadoutModel, RealArray, Receiver, readonly_array
-from .projection import ProjectionReadout
+from .projection import ProjectionChain, ProjectionReadout
 from .request import ReadoutPulse, SampleGrid
 
 
@@ -151,7 +152,7 @@ class ConditionalSums:
         the samples axis. None means traces were not requested.
     event_indices: one nonnegative logical event index per read. Empty means
         all reads belong to event zero. Integrated sampling validates indices
-        against ProjectionReadout and expands reads onto its joint count axis.
+        against the readout events and expands reads onto the category axis.
     output_order: optional int64 (contents, reads) complete permutations, with
         the same output-column-to-event-major-column direction as ReadoutBatch.
         None retains the identity policy; explicit permutations are owned and
@@ -260,7 +261,7 @@ class ChannelReadout:
 
 
 def round_statistics(
-    readout: ProjectionReadout,
+    readout: ProjectionReadout | ProjectionChain,
     channels: tuple[ChannelReadout, ...],
     *,
     reps: int,
@@ -270,9 +271,9 @@ def round_statistics(
 ) -> RoundStatistics:
     """Draw integrated statistics for all ADCs from one joint state-count draw.
 
-    readout: immutable outcome weights and event-specific populations. State
-        order must match every channel's conditional state axis. Probabilities
-        are validated by ProjectionReadout, never normalized by sampling.
+    readout: immutable outcome-conditioned populations or projection chain.
+        State order must match every channel's conditional state axis. The
+        readout constructor validates probabilities; sampling never repairs them.
     channels: unique ADCs; content_index shape must equal point_dims and each
         conditional state axis must match readout populations. Reads of one ADC must
         have equal sample_counts; ADCs may have different sample counts.
@@ -281,14 +282,19 @@ def round_statistics(
         SamplingIdentity(seed, (acquire_sequence, round_index, 0)) PCG64 stream.
         One stream serves every point and ADC without changing global RNG state.
 
-    counts[p] is Multinomial(reps, weights[k] * terminal_populations[k,s]),
+    For ProjectionReadout, counts[p] is Multinomial(reps, weights[k] * terminal_populations[k,s]),
     with (k,s) flattened in C order and shared across ADCs/reads. Earlier reads'
     conditional means average their event populations for k, repeated across s;
     terminal reads depend on s, repeated across k. Each ADC/read sum is counts
     @ those conditional means plus independent Gaussian
     noise with covariance reps * (sample_count * receiver.noise_covariance
     + I/12). The I/12 term models nearest-even int64 rounding of individual shots.
-    Returned conditional_sums have shape (*point_dims, reads, outcomes*states, 2);
+    ProjectionChain instead draws initial occupancy and each source state's
+    multinomial transition flows. Cumulative boundaries encode event histograms
+    on at most 1+events*(states-1) categories, keeping duplicate zero bins.
+    Each read selects its event's state-conditioned mean on those categories,
+    then applies its content's column_order. Categories need not be shot paths.
+    Returned conditional_sums have shape (*point_dims, reads, categories, 2);
     shot_covariance excludes rounding. raw_identity uses the same seed with
     stream (acquire_sequence, round_index, 1), isolating deferred raw draws.
     Inputs remain unchanged and equal identities reproduce results within the
@@ -308,6 +314,7 @@ class _StatisticsChannel:
     conditional: RealArray
     covariance: RealArray
     noise_root: RealArray
+    events: NDArray[np.int64]
 
 
 @dataclass(frozen=True, init=False)
@@ -315,10 +322,12 @@ class PreparedStatistics:
     """Owned immutable integrated sampling inputs; no seed, counts or noisy IQ.
 
     Constructor inputs and errors match round_statistics, including probability,
-    reps and channel layout validation. Copies probabilities and expands owned
-    conditional means once. Each channel's covariance is factored once, without
-    changing draw order or arithmetic. populations is read-only float64
-    (*point_dims, outcomes*states) in C-order (outcome, terminal state) order;
+    reps and channel layout validation. Copies probabilities and owns
+    conditional means. Each channel's covariance is factored once.
+    populations is read-only float64: (*point_dims, outcomes*states) in C-order
+    (outcome, terminal state) order for ProjectionReadout, or (*point_dims, states)
+    first-event probabilities for ProjectionChain. Chain category-conditioned
+    means are assembled at draw time from sampled event histograms, never shots.
     reps is the validated shots per point. draw
     validates a fresh identity on every call and returns independently owned
     counts/noisy totals, so previous rounds and delayed raw remain usable.
@@ -327,10 +336,11 @@ class PreparedStatistics:
     populations: RealArray
     reps: int
     _channels: tuple[_StatisticsChannel, ...]
+    _chain: ProjectionChain | None
 
     def __init__(
         self,
-        readout: ProjectionReadout,
+        readout: ProjectionReadout | ProjectionChain,
         channels: tuple[ChannelReadout, ...],
         *,
         reps: int,
@@ -340,9 +350,24 @@ class PreparedStatistics:
             self, "populations", readonly_array(probabilities, "populations")
         )
         object.__setattr__(self, "reps", reps)
+        object.__setattr__(
+            self, "_chain", readout if isinstance(readout, ProjectionChain) else None
+        )
         prepared = []
         for channel in channels:
-            conditional = _joint_conditional(readout, channel)
+            order = channel.conditional.column_order[channel.content_index]
+            events = np.asarray(channel.conditional.event_indices, dtype=np.int64)[
+                order
+            ]
+            conditional = (
+                np.take_along_axis(
+                    channel.conditional.sums[channel.content_index],
+                    order[..., :, None, None],
+                    axis=-3,
+                )
+                if isinstance(readout, ProjectionChain)
+                else _joint_conditional(readout, channel)
+            )
             covariance = (
                 int(channel.conditional.sample_counts[0])
                 * channel.receiver.noise_covariance
@@ -354,6 +379,7 @@ class PreparedStatistics:
                     readonly_array(conditional, "conditional means"),
                     readonly_array(covariance, "shot covariance"),
                     readonly_array(root, "noise root"),
+                    events,
                 )
             )
         object.__setattr__(self, "_channels", tuple(prepared))
@@ -361,7 +387,7 @@ class PreparedStatistics:
     def draw(
         self, *, seed: int, acquire_sequence: int, round_index: int
     ) -> RoundStatistics:
-        """Draw a joint multinomial followed by ADC-ordered Gaussian noise.
+        """Draw category counts followed by ADC-ordered Gaussian noise.
 
         Identity parameters are nonnegative integers with the same PCG64 stream
         policy and errors as round_statistics. No global RNG state is changed.
@@ -370,16 +396,30 @@ class PreparedStatistics:
         rng = np.random.Generator(
             np.random.PCG64(np.random.SeedSequence((identity.seed, *identity.stream)))
         )
-        counts = rng.multinomial(self.reps, self.populations)
+        bins = (
+            chain_counts(self._chain, self.reps, rng)
+            if self._chain is not None
+            else None
+        )
+        counts = (
+            bins.counts
+            if bins is not None
+            else rng.multinomial(self.reps, self.populations)
+        )
         output = []
         for channel in self._channels:
-            means = np.einsum("...s,...rsi->...ri", counts, channel.conditional)
+            conditional = (
+                chain_conditional(channel.conditional, channel.events, bins)
+                if bins is not None
+                else channel.conditional
+            )
+            means = np.einsum("...s,...rsi->...ri", counts, conditional)
             noise = rng.standard_normal(means.shape) @ channel.noise_root.T
             output.append(
                 ChannelStatistics(
                     channel.channel,
                     means + noise,
-                    channel.conditional,
+                    conditional,
                     channel.covariance,
                 )
             )
@@ -420,11 +460,20 @@ def _joint_conditional(
 
 
 def _validate_round_inputs(
-    readout: ProjectionReadout, channels: tuple[ChannelReadout, ...], reps: int
+    readout: ProjectionReadout | ProjectionChain,
+    channels: tuple[ChannelReadout, ...],
+    reps: int,
 ) -> RealArray:
     """Validate the shared probability/layout contract without repairing inputs."""
-    joint = readout.weights[..., :, None] * readout.populations[-1]
-    probabilities = joint.reshape((*readout.weights.shape[:-1], -1))
+    if isinstance(readout, ProjectionChain):
+        probabilities = readout.initial
+        states = readout.initial.shape[-1]
+        events = 1 + len(readout.transitions)
+    else:
+        joint = readout.weights[..., :, None] * readout.populations[-1]
+        probabilities = joint.reshape((*readout.weights.shape[:-1], -1))
+        states = readout.populations[-1].shape[-1]
+        events = len(readout.populations)
     if type(reps) is not int or reps < 0:
         raise ValueError("reps must be a nonnegative integer")
     if len({channel.channel for channel in channels}) != len(channels):
@@ -433,9 +482,9 @@ def _validate_round_inputs(
         if channel.content_index.shape != probabilities.shape[:-1]:
             raise ValueError("channel point shape must match populations")
         conditional = channel.conditional
-        if max(conditional.event_indices) >= len(readout.populations):
+        if max(conditional.event_indices) >= events:
             raise ValueError("conditional event index outside readout events")
-        if conditional.sums.shape[2] != readout.populations[-1].shape[-1]:
+        if conditional.sums.shape[2] != states:
             raise ValueError("conditional state axis must match populations")
         if np.any(conditional.sample_counts != conditional.sample_counts[0]):
             raise ValueError("reads of one channel must have equal sample counts")

@@ -202,10 +202,12 @@ class StatisticsCopier:
         expected_channel labels errors with the request readout's ADC index;
         the returned ChannelStatistics keeps the backend's ch.channel value.
         shape is (*point_dims, reads, 2) for totals over reps; conditional_shape
-        is (*point_dims, reads, states, 2) for per-shot state-conditioned sums.
-        Point axes exclude the request's averaging axis, states matches the
-        round's state_counts last axis, and the final axis is [I, Q]. Covariance
-        must be (2, 2). reps is the request's repetition count, already checked
+        is (*point_dims, reads, categories, 2) for noiseless per-shot sums per
+        read and category. Categories partition reps and need not represent
+        physical shot paths. Point axes exclude the request's averaging axis;
+        the category count matches the round's state_counts last axis. The final
+        axis is [I, Q]. Covariance must be (2, 2). reps is the request's repetition
+        count, already checked
         against each count row; it scales totals to per-shot int64 range.
 
         Raise ValueError for shape/nonfinite totals first, then invalid
