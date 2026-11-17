@@ -13,7 +13,12 @@ from ..kernel import ApplyContext, KernelContext, Prepared, SegmentTable
 from ..secular import SecularModel
 from ..workplan import WorkPlan
 from ._dop853 import tolerances
-from ._rwa_fourier import EDGE_GHZ, endpoint_kick
+from ._rwa_fourier import (
+    EDGE_GHZ,
+    RWACoefficients,
+    endpoint_kick,
+    interaction_hamiltonian,
+)
 from ._rwa_graph import (
     PRUNE_LIMIT,
     RWA_GRAPH_POLICY,
@@ -25,14 +30,12 @@ from ._rwa_numeric import (
     MIN_RWA_BUDGET,
     SINGLE_CONSTANT_RWA_POLICY,
     ConstantRWAAdmission,
-    RWACoefficients,
     RWAGuardMetric,
     RWARetention,
     RWAUncomputed,
     admit_constant_rows,
     constant_admission,
     constant_retentions,
-    interaction_hamiltonian,
     rwa_coefficients,
     rwa_kick_coefficients,
 )

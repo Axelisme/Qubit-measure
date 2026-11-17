@@ -183,7 +183,7 @@ def preferred(
     Remaining rows price wasted cold builds using first-order SW strength,
     weighted by actual gains and envelope peaks. The empirical eighth-power
     risk near eta=.08 is a cost forecast, not an admission/accuracy veto.
-    Exact coherent .03 / bath .01 admission stays with the numerical owner.
+    Coherent and bath admission stays with the common_frame numerical owner.
     Cache warmth never changes these choices.
     """
     selected = ~_cheap_rwa(table, rows, context, rwa)
