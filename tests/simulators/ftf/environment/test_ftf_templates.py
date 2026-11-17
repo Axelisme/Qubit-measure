@@ -3,6 +3,7 @@
 from collections.abc import Sequence
 from dataclasses import replace
 from threading import Event
+from typing import override
 
 import numpy as np
 import pytest
@@ -14,6 +15,7 @@ from zcu_tools.simulate.boundary import (
     RoundStatistics,
 )
 from zcu_tools.simulate.evolution import (
+    CaptureBuffer,
     Engine,
     EvolutionResult,
     ModelSource,
@@ -367,6 +369,7 @@ class CountingEngine(Engine):
         super().__init__(1)
         self.calls = 0
 
+    @override
     def evolve(
         self,
         source: ModelSource,
@@ -376,6 +379,7 @@ class CountingEngine(Engine):
         cancel: CancellationQuery | None = None,
         telemetry: bool = False,
         reuse_key: bytes | None = None,
+        capture: CaptureBuffer | None = None,
     ) -> EvolutionResult:
         self.calls += 1
         return super().evolve(
@@ -385,6 +389,7 @@ class CountingEngine(Engine):
             cancel=cancel,
             telemetry=telemetry,
             reuse_key=reuse_key,
+            capture=capture,
         )
 
 
@@ -422,6 +427,7 @@ class ResidualEngine(Engine):
         super().__init__(1)
         self.populations = populations
 
+    @override
     def evolve(
         self,
         source: ModelSource,
@@ -431,6 +437,7 @@ class ResidualEngine(Engine):
         cancel: CancellationQuery | None = None,
         telemetry: bool = False,
         reuse_key: bytes | None = None,
+        capture: CaptureBuffer | None = None,
     ) -> EvolutionResult:
         from zcu_tools.simulate.evolution import PathDiagnostics
 

@@ -284,21 +284,18 @@ def test_builder_admission_and_rounds_share_one_physical_clock(tmp_path: Path):
     )
     try:
         binding = env.soc.binding
-        sequence = binding.begin()
-        assert len(truth.read_text().splitlines()) == 3
-        acquire = replace(
-            request(), sequence=sequence, relax_delay_ticks=TIME_BASE.ticks(125000)
-        )
         duration = 3 * 2 * (125000 + 0.030) / 1e6
-        try:
+        with binding.acquire() as sequence:
+            assert len(truth.read_text().splitlines()) == 3
+            acquire = replace(
+                request(), sequence=sequence, relax_delay_ticks=TIME_BASE.ticks(125000)
+            )
             for index in range(2):
                 binding.sample_round(acquire, index)
                 assert clock.now() == pytest.approx(100 + (index + 1) * duration)
-        finally:
-            binding.end()
         assert len(truth.read_text().splitlines()) == 3
-        binding.begin()
-        binding.end()
+        with binding.acquire():
+            pass
         rows = [json.loads(line) for line in truth.read_text().splitlines()]
         assert [row["sim_now"] for row in rows[3:]] == pytest.approx(
             [100 + 2 * duration] * 3

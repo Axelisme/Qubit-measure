@@ -4,11 +4,13 @@ from collections import OrderedDict
 from collections.abc import Sequence
 from dataclasses import dataclass, fields, replace
 from sys import getsizeof
+from typing import override
 
 import pytest
 from zcu_tools.device import DeviceManager
 from zcu_tools.simulate.boundary import CancellationQuery, PulseEnvelope, RoundRequest
 from zcu_tools.simulate.evolution import (
+    CaptureBuffer,
     Engine,
     EvolutionResult,
     ModelSource,
@@ -152,6 +154,7 @@ class RecordingEngine(Engine):
         super().__init__(1)
         self.density_bytes = b""
 
+    @override
     def evolve(
         self,
         source: ModelSource,
@@ -161,6 +164,7 @@ class RecordingEngine(Engine):
         cancel: CancellationQuery | None = None,
         telemetry: bool = False,
         reuse_key: bytes | None = None,
+        capture: CaptureBuffer | None = None,
     ) -> EvolutionResult:
         result = super().evolve(
             source,
@@ -169,6 +173,7 @@ class RecordingEngine(Engine):
             cancel=cancel,
             telemetry=telemetry,
             reuse_key=reuse_key,
+            capture=capture,
         )
         self.density_bytes = result.densities.tobytes()
         return result

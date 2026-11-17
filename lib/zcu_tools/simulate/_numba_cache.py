@@ -15,7 +15,13 @@ from numba import config
 logger = logging.getLogger(__name__)
 
 
-def _user_cache_root() -> Path:
+def user_cache_root() -> Path:
+    """Resolve the shared cache root without creating it.
+
+    ZCU_TOOLS_CACHE_DIR must be a non-empty absolute path when set; otherwise
+    raise ValueError. Without it, use platformdirs, falling back to the system
+    temporary directory plus .zcu_tools when platformdirs fails.
+    """
     override = os.environ.get("ZCU_TOOLS_CACHE_DIR")
     if override is not None:
         root = Path(override)
@@ -70,7 +76,7 @@ def configure_numba_cache() -> None:
     directory = (
         Path(override) / f"zcu-simulate-{namespace}"
         if override is not None
-        else _user_cache_root() / "numba" / namespace
+        else user_cache_root() / "numba" / namespace
     )
     os.environ["NUMBA_CACHE_DIR"] = str(directory)
     os.environ["NUMBA_CACHE_LOCATOR_CLASSES"] = "UserProvidedCacheLocator"

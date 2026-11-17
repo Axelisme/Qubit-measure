@@ -68,6 +68,7 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 原則：有誤差問題的快速算法先查原因並修正，修不好的範圍才收 guard，見 [ADR-0078](0078-evolution-module-boundary.md#快速算法先修好不輕易放棄)。
 原則：支援範圍由物理與介面決定，不看使用頻率；頻率只排優化先後，見 [ADR-0078](0078-evolution-module-boundary.md#支援範圍不看使用頻率)。
 原則：實驗參數不當時模擬器照常給結果並警告，契約外輸入照舊 fast fail，見 [ADR-0078](0078-evolution-module-boundary.md#模擬器不替使用者擋實驗參數)。
+原則：每個模擬器提供同一組調試介面，定位與驗證工具只依賴它；共通部分有型別，模擬器特有的值放 dict，見 [ADR-0078](0078-evolution-module-boundary.md#模擬器帶通用調試介面)。
 原則：kernel 的量測場景只有一段，重複就是同一段接 N 次，見 [ADR-0078](0078-evolution-module-boundary.md#每個-kernel-的量測場景只有一段)。
 原則：場景照約化參數軸宣告覆蓋，不為個別實驗加專屬場景，見 [ADR-0078](0078-evolution-module-boundary.md#場景覆蓋靠約化的參數空間)。
 

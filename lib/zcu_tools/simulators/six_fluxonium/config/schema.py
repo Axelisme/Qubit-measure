@@ -12,6 +12,7 @@ from zcu_tools.simulators.single_fluxonium.config.schema import (
     Numerics,
     Readout,
 )
+from zcu_tools.simulators.telemetry import TelemetrySettings
 
 
 class CurrentSource(Values):
@@ -130,6 +131,10 @@ class SixFluxoniumNumerics(Values):
 
     slow_envelope_segments_per_period: Annotated[int, Field(ge=1, strict=True)]
     routing_cache_bytes: Index
+    debug_capture: bool = False
+    """Record all six sources in one acquire capture; disabled by default."""
+    telemetry: TelemetrySettings = TelemetrySettings()
+    """Acquire JSONL policy for the whole six-source environment, default enabled."""
 
 
 class SixFluxoniumSettings(Values):
