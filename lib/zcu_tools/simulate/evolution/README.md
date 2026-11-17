@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-11-17, RWA Fourier ownership, kappa2 admission and current plateau dispatch
+**Last updated:** 2026-11-17, RWA Fourier ownership, kappa2 admission, current plateau dispatch and common-frame sampled scope
 
 **讀者：** framework-dev、agent。Segment evolution 的公開輸入、路由與數值邊界。
 
@@ -589,9 +589,12 @@ The `common_frame` coherent limit is 0.0018. In the retained two-tone grid,
 14 admitted cells had coherent indicators at most 0.001469411 and historical
 full-density error at most 8.234e-4. The nearest known failure had coherent
 0.002623604 and density error 2.1542e-3. The limit leaves 22.5% headroom above
-the retained maximum and 31.4% clearance below that failure. These are calibrated
-proxies, not a proof for arbitrary models or durations. The bath limit stays
-0.01; no additional comparison is used.
+the retained maximum and 31.4% clearance below that failure.
+The limit applies to every `common_frame` row, including two-tone sampled rows.
+The calibration grid holds constant pairs only; sampled rows have no separate
+calibration, and the new limit is stricter than their former 0.03.
+These are calibrated proxies, not a proof for arbitrary models or durations.
+The bath limit stays 0.01; no additional comparison is used.
 
 This also rejects five historically qualified cells: `A_x3.5_T400`,
 `B_f0.25_g0.038_T1000`, `B_f0.25_g0.038_T250`, `B_f0.45_eps0.029_T400`

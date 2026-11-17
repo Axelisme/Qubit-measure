@@ -120,7 +120,7 @@ class CommonFrame:
 class CommonFrameAdmission:
     """Current row's detuning-aware indicators, not mathematical certificates.
 
-    accepted: coherent sum <= .03, bath <= .01, no denominator rejection.
+    accepted: coherent sum <= 0.0018, bath <= 0.01, no denominator rejection.
     reason: 'accepted', 'denominator', 'coherent', or 'bath'. Dispatch
         must use an existing algorithm for every rejected row.
     step_ns, steps: CF4 ceiling in ns and ceil(duration/step), at least one.
