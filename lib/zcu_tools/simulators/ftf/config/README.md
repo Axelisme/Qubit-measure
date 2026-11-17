@@ -2,7 +2,11 @@
 
 **讀者：** framework-dev。FTF YAML schema、單位與欄位診斷契約。
 
-**Last updated:** 2026-11-14
+**Last updated:** 2026-11-17
+
+`numerics.debug_capture` is optional and defaults to false. True records one
+acquire's Engine inputs and routes using the
+[shared capture policy](../../README.md#debug-capture).
 
 [ADR-0072](../../../../../docs/adr/0072-module-boundaries.md) 規定模型設定與框架機制的分工，以及呼叫端提供板子 profile 的邊界。
 

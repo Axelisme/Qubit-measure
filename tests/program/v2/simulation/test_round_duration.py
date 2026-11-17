@@ -120,15 +120,12 @@ def test_simulation_clock_preserves_physical_rounds_and_idle(clock: Clock, scale
         backend_version="test",
         timing=SimulationTiming(time_scale=scale, clock=sim_clock),
     )
-    sequence = binding.begin()
-    try:
+    with binding.acquire() as sequence:
         request = request_for(binding, sequence)
         binding.sample_round(request, 0)
         assert sim_clock.now() == pytest.approx(max(0.2, work))
         binding.sample_round(request, 1)
         assert sim_clock.now() == pytest.approx(2 * max(0.2, work))
-    finally:
-        binding.end()
     clock.now += 10
     assert sim_clock.now() == pytest.approx(10 + 2 * max(0.2, work))
 
@@ -153,8 +150,7 @@ def test_simulation_clock_does_not_credit_cancelled_or_failed_rounds(
         backend_version="test",
         timing=SimulationTiming(time_scale=0, clock=sim_clock),
     )
-    binding.begin()
-    try:
+    with binding.acquire():
         binding.sample_round(
             request_for(binding, 0),
             0,
@@ -162,21 +158,16 @@ def test_simulation_clock_does_not_credit_cancelled_or_failed_rounds(
             pacing_cancel=Event() if separate_pacing else None,
         )
         assert sim_clock.now() == pytest.approx(0.03)
-    finally:
-        binding.end()
 
     def fail(_request):
         clock.now += 0.02
         raise RuntimeError("numeric failure")
 
     binding.execute = fail
-    binding.begin()
-    try:
+    with binding.acquire():
         with pytest.raises(RuntimeError, match="numeric failure"):
             binding.sample_round(request_for(binding, 1), 0)
         assert sim_clock.now() == pytest.approx(0.05)
-    finally:
-        binding.end()
 
 
 def test_physical_target_scales_with_reps_and_time_scale(clock: Clock):
@@ -187,14 +178,11 @@ def test_physical_target_scales_with_reps_and_time_scale(clock: Clock):
         seed=1,
         timing=SimulationTiming(time_scale=0.5),
     )
-    sequence = binding.begin()
-    try:
+    with binding.acquire() as sequence:
         request = request_for(binding, sequence)
         binding.sample_round(request, 0)
         binding.sample_round(replace(request, reps=100, loop_dims=(100, 3)), 1)
         assert clock.waits == pytest.approx([0.1, 1.0])
-    finally:
-        binding.end()
 
 
 def test_each_round_includes_snapshot_time_and_only_waits_for_remainder(clock: Clock):
@@ -216,8 +204,7 @@ def test_each_round_includes_snapshot_time_and_only_waits_for_remainder(clock: C
         seed=1,
         timing=SimulationTiming(time_scale=1),
     )
-    sequence = binding.begin()
-    try:
+    with binding.acquire() as sequence:
         request = request_for(binding, sequence)
         completed: list[float] = []
         for index in range(3):
@@ -226,8 +213,6 @@ def test_each_round_includes_snapshot_time_and_only_waits_for_remainder(clock: C
         assert clock.waits == pytest.approx([0.13, 0.18])
         assert completed == pytest.approx([0.2, 0.52, 0.72])
         assert [r.index for r in binding.rounds] == [0, 1, 2]
-    finally:
-        binding.end()
 
 
 @pytest.mark.parametrize("adc_length, expected", [(4.0, 180e-6), (12.0, 200e-6)])
@@ -261,8 +246,7 @@ def test_compiled_timeline_includes_readout_delays_and_per_point_relaxation(
         initial_delay=0,
         relax_delay=8,
     )
-    sequence = binding.begin()
-    try:
+    with binding.acquire() as sequence:
         binding.sample_round(
             build_compiled_request(
                 program, "decimated", binding, sequence, routes=((0, 0),)
@@ -273,8 +257,6 @@ def test_compiled_timeline_includes_readout_delays_and_per_point_relaxation(
         # Shot closure waits max(10, adc_length), then relaxes 8 us: 18/20 us.
         # Ten repetitions give 180/200 us; allow 10 ns rounding per repetition.
         assert clock.waits == pytest.approx([expected], abs=100e-9)
-    finally:
-        binding.end()
 
 
 def test_stop_during_wait_returns_at_next_checkpoint(
@@ -295,8 +277,7 @@ def test_stop_during_wait_returns_at_next_checkpoint(
         backend_version="test",
         timing=SimulationTiming(time_scale=1),
     )
-    sequence = binding.begin()
-    try:
+    with binding.acquire() as sequence:
         assert (
             binding.sample_round(request_for(binding, sequence), 0, cancel=cancel)
             is result
@@ -304,8 +285,6 @@ def test_stop_during_wait_returns_at_next_checkpoint(
         assert cancel.is_set()
         assert len(clock.waits) == 1
         assert 0 < clock.waits[0] <= 0.01
-    finally:
-        binding.end()
 
 
 def test_decimated_stop_interrupts_wait_and_keeps_completed_trace(
@@ -375,11 +354,8 @@ def test_zero_scale_never_sleeps_or_reads_clock(monkeypatch: pytest.MonkeyPatch)
         backend_version="test",
         timing=SimulationTiming(time_scale=0),
     )
-    sequence = binding.begin()
-    try:
+    with binding.acquire() as sequence:
         binding.sample_round(request_for(binding, sequence), 0)
-    finally:
-        binding.end()
 
 
 def test_backend_failure_propagates_without_waiting(clock: Clock):
@@ -392,13 +368,10 @@ def test_backend_failure_propagates_without_waiting(clock: Clock):
         backend_version="test",
         timing=SimulationTiming(time_scale=1),
     )
-    sequence = binding.begin()
-    try:
+    with binding.acquire() as sequence:
         with pytest.raises(RuntimeError, match="backend failed"):
             binding.sample_round(request_for(binding, sequence), 0)
         assert clock.waits == []
-    finally:
-        binding.end()
 
 
 @pytest.mark.parametrize("scale", [-0.1, float("nan"), float("inf")])

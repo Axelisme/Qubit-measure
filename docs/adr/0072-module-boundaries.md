@@ -60,6 +60,7 @@ C19 照舊禁止 `core` import `simulate`；舊位置 `core.simulation` 已刪�
 例：`simulate.evolution.ModelSource` 收使用方給的 `build: Callable[[FluxLevel], SecularModel]`，這是依賴注入。
 只收物理參數、不綁裝置佈局或接線的元件屬於 `simulate`，例如 `simulate.fluxonium.SingleFluxoniumModel`（`EJ`、`EC`、`EL`、DC flux、截斷、溫度）、`simulate.transmon` 與 `simulate.resonator_mode` 的 resonator 模態 builder。
 裝置怎麼組合屬於使用方，例如 FTF 的耦合與 resonator 配置、six 的路由；這些今天在 `simulators`，定位見〈模組定位〉。
+三個 environment 不共用基底類別或 acquire 流程，因為 FTF 的腔記憶與 six 的 scatter 會變成基底上的可選 hook；它們只共用中性的 `simulators.telemetry` writer 與欄位型別，以及 `simulate.evolution` 的錄製 buffer，見 [ADR-0078〈模擬器帶通用調試介面〉](0078-evolution-module-boundary.md#模擬器帶通用調試介面)。
 模擬器的量測工具與測試只依賴模擬器，收模型聲明當輸入；量真實模型時由使用方那側的入口注入，工具本身不 import 具體模型。
 
 邊界：測試用的合成模型（例如兩能階模型）是照介面聲明的範例，可以和 `simulate` 自己的測試放在一起。

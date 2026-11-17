@@ -6,7 +6,7 @@ import time
 import warnings
 from collections import Counter
 from collections.abc import Collection, Mapping, Sequence
-from contextlib import closing
+from contextlib import closing, nullcontext
 from dataclasses import dataclass, field, replace
 from hashlib import sha256
 from threading import Event, Lock
@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Literal
 from zcu_tools.simulate.boundary import CancellationQuery
 
 if TYPE_CHECKING:
+    from ._capture import CaptureBuffer
     from .kernel import Kernel
 
 import numpy as np
@@ -647,7 +648,7 @@ class Engine:
                 raise Cancelled()
             return self._routing_reuse.reuse(key, source, budget)
 
-    def evolve(
+    def evolve(  # noqa: PLR0913  # tolerated: capture is an independent per-call recording option; bundling it into an options type would hide it
         self,
         source: ModelSource,
         batches: Sequence[TimelineBatch],
@@ -656,6 +657,7 @@ class Engine:
         cancel: CancellationQuery | None = None,
         telemetry: bool = False,
         reuse_key: bytes | None = None,
+        capture: CaptureBuffer | None = None,
     ) -> EvolutionResult:
         """Evolve all batches to readout, forwarding per-segment budget to kernels.
 
@@ -676,6 +678,11 @@ class Engine:
         otherwise raises ValueError. A closed engine raises RuntimeError.
         cancel: read-only is_set query checked between chunks; None disables it;
         when set, raises Cancelled, without returning partial results.
+        capture optionally appends frozen batch inputs and actual route events
+        to a caller-owned CaptureBuffer; None does no recording. Success marks
+        this call's records complete; exceptions retain incomplete records and
+        propagate unchanged. Concurrent use of the same buffer raises ValueError
+        at entry. Engine performs no file I/O; see CaptureBuffer for lifetimes.
         telemetry enables per-family calling-thread CPU and routing accounting
         without I/O; False avoids CPU clock reads and returns empty routing.
         Model ValueErrors propagate; numerical failure raises RuntimeError
@@ -688,6 +695,7 @@ class Engine:
         exceedances stay in the result's paths.exceeded_by_kernel and produce
         exactly one RuntimeWarning per call, without correction or retry.
         """
+        from ._capture import CaptureRun
         from ._dispatch import classify, create_work_plan
         from ._input_key import input_key
         from ._planning import plan
@@ -696,7 +704,12 @@ class Engine:
         from .kernel import KernelContext
 
         cancel = Event() if cancel is None else cancel
-        with self._lock, native_limit.acquire():
+        recording_scope = (
+            nullcontext()
+            if capture is None
+            else capture.recording(source, batches, budget, self._families)
+        )
+        with recording_scope as captured, self._lock, native_limit.acquire():
             self._check_evolve_ready(budget, cancel)
             if not batches or not any(len(batch.points) for batch in batches):
                 size = source.initial_density.shape[0]
@@ -708,6 +721,9 @@ class Engine:
             content_key = input_key(source, batches, budget)
             frontend_started = time.thread_time() if telemetry else 0.0
             geometry = plan(source, batches)
+            capture_run = (
+                None if captured is None else CaptureRun(geometry, batches, captured)
+            )
             workers = (
                 self._workers
                 if len(geometry.points) > 1 and len(geometry.table.timeline)
@@ -733,10 +749,20 @@ class Engine:
                 kernels = self._kernels
                 with execution_pool(workers) as pool:
                     geometry = PrefixResolver(
-                        geometry, kernels, context, cancel
+                        geometry, kernels, context, cancel, capture=capture_run
                     ).resolve(pool, self._chunks)
-                    dispatch = classify(geometry, kernels, context, pool=pool)
-                    schedule = Schedule(geometry, dispatch, context, cancel)
+                    dispatch = classify(
+                        geometry,
+                        kernels,
+                        context,
+                        pool=pool,
+                        trace=None
+                        if capture_run is None
+                        else capture_run.round(geometry),
+                    )
+                    schedule = Schedule(
+                        geometry, dispatch, context, cancel, capture=capture_run
+                    )
                     result = schedule.run(
                         kernels,
                         pool,

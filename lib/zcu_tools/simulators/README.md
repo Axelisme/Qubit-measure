@@ -1,6 +1,6 @@
 # Physical simulator models
 
-**Last updated:** 2026-11-14
+**Last updated:** 2026-11-17, optional acquire captures and telemetry correlation
 
 **Readers:** framework-dev, lab-author, agent. Locate physical model configuration, numerics and environment builders.
 
@@ -52,6 +52,99 @@ Startup scripts and caller-owned model YAML live in
 [`zcu_lab/simulation_envs`](../../../zcu_lab/simulation_envs/README.md).
 The startup changes only select the new model imports.
 
+## Acquire telemetry
+
+`simulators.telemetry` owns `RoutingTelemetry`, `TelemetrySettings` and the shared
+acquire-summary types. FTF, single and six use this writer. Each admitted acquire
+writes one row, including numeric failures. Six aggregates all sources and routed
+groups before writing; individual sources do not write rows.
+
+Call `RoutingTelemetry(directory).write(summary, paths=paths)` once at the acquire
+boundary. `AcquireTelemetry` requires the first nine fields below.
+`RoutingRecord` inherits them and adds the four writer-generated fields.
+
+| Field | Meaning |
+| --- | --- |
+| `points` | Request grid size, excluding shots and rounds. |
+| `rounds` | Captured attempts, including failed attempts. |
+| `wall_s` | Admitted acquire wall seconds, including pacing and excluding telemetry I/O. |
+| `compile_wall_s` | Compilation wall seconds from the binding's frozen `AcquireOutcome`. |
+| `evolve_wall_s` | Sum of every `Engine.evolve` call's wall seconds across rounds and continuations. |
+| `readout_wall_s` | Sum of ADC/readout wall seconds, including preparation and integrated or decimated sampling. |
+| `complete` | `true` when the acquire body and cleanup returned normally, including a partial Stop result. `false` when an exception escaped. |
+| `extras` | Simulator-prefixed keys with JSON values, or `{}` when absent. |
+| `capture_file` | Capture basename, or `null` when recording is off or publication fails. |
+| `timestamp` | Writer-generated UTC ISO timestamp. |
+| `frontend_cpu_s` | Geometry and work-plan calling-thread CPU seconds. |
+| `estimated_cost_unit` | `relative scheduling units`, the label for family scheduling costs. |
+| `families` | Engine family names mapped to aggregated counters and CPU seconds. |
+
+All four wall fields are floats. A failed call retains elapsed time through its
+exception; a stage not entered contributes `0.0`. `complete` comes from the binding
+and does not mean every requested round ran. FTF measures cavity-memory spans and
+projective continuations. Single and six also include projective prefixes and
+continuations. The remainder, `wall_s - compile_wall_s - evolve_wall_s - readout_wall_s`,
+contains environment preparation and pacing outside the measured stages.
+Raw materialization requested after acquire is outside the row.
+
+Use extras keys such as `ftf.projection_outcomes`; the prefix names the simulator's
+extension, not a row identity. Required extras keys are indexed directly by their
+consumer. The writer projects only declared fields and never modifies the caller's
+summary. It stores no numerical inputs or simulator identity.
+Family counters retain the [Engine report contract](../simulate/evolution/README.md#routing-telemetry).
+Family CPU excludes ADC, sampling and routing bookkeeping. It is not wall time.
+
+`numerics.telemetry.enabled` defaults to true in all three environments.
+Their default `numerics.telemetry.directory=null` selects the same project-root
+`.sim_telemetry` directory. To analyze environments separately, set a different
+`telemetry.directory` under each environment's `numerics`, then run the analyzer
+once per directory. Passing multiple directories to one invocation merges them
+into one report. No path, filename, family or backend version identifies a row's
+simulator.
+
+Files use UTC dates in `routing-YYYYMMDD.jsonl`. Before appending, the writer deletes
+oldest owned files by modification time, breaking ties by filename, until the new
+line fits within the 50 MiB directory budget. It may remove and recreate today's
+file. It leaves unrelated files alone and does not write a line larger than the
+budget. Each writer instance serializes its writes. Filesystem or serialization
+failure emits at most one `RuntimeWarning` per instance and never changes the
+acquire result, even when warnings are configured as errors.
+
+The [routing analyzer](../../../tools/README.md#routing-telemetry-analysis) reports
+wall totals under `normal_return`, `raised` and `unknown`, using only `complete`.
+Missing or null `complete` is unknown. Missing or null wall fields are unmeasured.
+Only rows with numeric `wall_s` and all three numeric stages contribute wall totals
+and the remainder, including unknown rows. Each observed group reports `included`
+and `excluded`; their sum across groups equals `records`. Absent groups mean zero
+rows. Every valid row still contributes family statistics. Non-null `complete`
+must be a JSON boolean. Non-null wall fields must be JSON numbers, not booleans or
+numeric strings. Wrong types skip the entire row, including its family counters,
+and produce a file/line warning and a `skipped` count.
+
+## Debug capture
+
+Set `numerics.debug_capture: true` in FTF, single or six settings to record
+Engine inputs and actual routes. The default is false. Six's top-level switch
+owns one buffer for all six sources; nested qubit switches do not publish files.
+One admitted acquire creates one buffer and passes it to every evolve.
+After return or failure, on_end publishes one manifest before building telemetry.
+A compile failure publishes an empty manifest. Readiness or on_begin failure
+does not call on_end and leaves no capture. A later acquire failure does not
+change the complete flag of an earlier successful evolve.
+
+Recording works with `numerics.telemetry.enabled: false` and writes no JSONL row
+in that mode. Otherwise the row's `capture_file` contains the successful
+manifest basename. Off and failed publication both produce null. Older rows
+without the key have no associated capture; the routing analyzer does not use it.
+The binding has already measured `wall_s` before either writer runs.
+
+Use `zcu_tools.simulate.evolution.capture_directory()` to locate files.
+It returns `<user-cache-root>/simulator-debug/v1`, shared across worktrees and
+tasks. `ZCU_TOOLS_CACHE_DIR` overrides the shared root with a non-empty absolute
+path. The [capture writer](../simulate/evolution/README.md#capture-persistence)
+defines atomic publication, codec failures and retention.
+Captures contain numerical inputs and are not ordinary run metadata or Git data.
+
 ## Private replay
 
 `simulators.replay` owns opt-in private FTF and single-fluxonium input JSON,
@@ -72,4 +165,9 @@ Replay does not change normal waveform assets or data.h5 policies.
 `tests/simulators/<model>/environment/` owns public planning and acquisition behavior.
 `tests/simulators/ftf/physics/` owns joint-model physics and its simulation marker.
 `tests/simulators/test_replay.py` owns private archive roundtrips and integrity errors.
+`tests/simulators/test_telemetry.py` owns shared summary serialization, file rotation
+and warning isolation. `tests/simulators/test_capture.py` owns the shared capture
+lifecycle through public acquire with non-evolving Engine collaborators.
+Writer/codec publication belongs to `tests/simulate/evolution/test_capture_writer.py`.
+FTF telemetry integration stays with the FTF environment tests.
 Generic engine, ADC, bath and source-line tests stay with their framework owners.

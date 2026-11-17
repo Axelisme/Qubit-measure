@@ -8,6 +8,7 @@ from collections.abc import Sequence
 from contextlib import closing
 from dataclasses import replace
 from itertools import product
+from typing import override
 
 import numpy as np
 import pytest
@@ -17,6 +18,7 @@ from zcu_tools.simulate.adc import ProjectionChain
 from zcu_tools.simulate.boundary import CancellationQuery
 from zcu_tools.simulate.evolution import (
     Basis,
+    CaptureBuffer,
     EvolutionResult,
     FluxSchedule,
     ModelSource,
@@ -50,6 +52,7 @@ class AnswerEngine(EngineDouble):
         self.prefix = prefix
         self.transitions = transitions
 
+    @override
     def evolve(
         self,
         source: ModelSource,
@@ -59,6 +62,7 @@ class AnswerEngine(EngineDouble):
         cancel: CancellationQuery | None = None,
         telemetry: bool = False,
         reuse_key: bytes | None = None,
+        capture: CaptureBuffer | None = None,
     ) -> EvolutionResult:
         """Supply the answer for each point, deliberately in reverse point order."""
         (batch,) = batches
@@ -88,6 +92,7 @@ class AnswerEngine(EngineDouble):
             cancel=cancel,
             telemetry=telemetry,
             reuse_key=reuse_key,
+            capture=capture,
         )
 
 

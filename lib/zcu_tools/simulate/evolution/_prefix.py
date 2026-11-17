@@ -7,6 +7,7 @@ import numpy as np
 
 from zcu_tools.simulate.boundary import CancellationQuery
 
+from ._capture import CaptureRun
 from ._dispatch import classify
 from ._parallel import Executor
 from ._planning import Geometry
@@ -147,8 +148,10 @@ class PrefixResolver:
         kernels: Mapping[str, Kernel],
         context: KernelContext,
         cancel: CancellationQuery,
+        capture: CaptureRun | None = None,
     ):
         self.geometry = geometry
+        self.capture = capture
         self.kernels = kernels
         self.context = context
         self.cancel = cancel
@@ -187,8 +190,20 @@ class PrefixResolver:
             table = replace(table, prefix_inputs=inputs)
             geometry = replace(geometry, table=table, prefix_paths=paths)
             prefix = _representative(geometry, first, row)
-            dispatch = classify(prefix, kernels, context)
-            schedule = Schedule(prefix, dispatch, context, cancel, initial)
+            capture = (
+                None
+                if self.capture is None
+                else self.capture.prefix(geometry, first, row, group)
+            )
+            dispatch = classify(
+                prefix,
+                kernels,
+                context,
+                trace=None if capture is None else capture.round(prefix),
+            )
+            schedule = Schedule(
+                prefix, dispatch, context, cancel, initial, capture=capture
+            )
             result = schedule.run(kernels, pool, chunks)
             inputs[group] = result.densities[0]
             paths[group] = result.paths

@@ -2,6 +2,7 @@
 
 from collections.abc import Sequence
 from dataclasses import replace
+from typing import override
 
 import numpy as np
 import pytest
@@ -16,6 +17,7 @@ from zcu_tools.simulate.adc import (
 )
 from zcu_tools.simulate.boundary import CancellationQuery
 from zcu_tools.simulate.evolution import (
+    CaptureBuffer,
     Engine,
     EvolutionResult,
     ModelSource,
@@ -415,6 +417,7 @@ class MixedEngine(Engine):
     def __init__(self):
         super().__init__(1)
 
+    @override
     def evolve(
         self,
         source: ModelSource,
@@ -424,6 +427,7 @@ class MixedEngine(Engine):
         cancel: CancellationQuery | None = None,
         telemetry: bool = False,
         reuse_key: bytes | None = None,
+        capture: CaptureBuffer | None = None,
     ) -> EvolutionResult:
         points = np.concatenate([batch.points for batch in batches])
         densities = np.tile(np.diag([0.4, 0.6])[None], (len(points), 1, 1))

@@ -1,5 +1,7 @@
 """Sequential FTF density and dominant-branch cavity memory composition."""
 
+from collections.abc import Callable
+from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, replace
 from hashlib import sha256
 
@@ -13,6 +15,7 @@ from zcu_tools.simulate.adc import (
 )
 from zcu_tools.simulate.boundary import CancellationQuery
 from zcu_tools.simulate.evolution import (
+    CaptureBuffer,
     Engine,
     EvolutionResult,
     FluxSchedule,
@@ -37,11 +40,18 @@ class CavityEvolutionOptions:
     telemetry: Whether evolution collects per-family CPU and routing reports.
     cancel: Read-only query checked between chunks, or None to disable Stop.
         Cancellation raises Cancelled and returns no partial composition.
+    evolving: Scope around each Engine.evolve, including failed calls.
+    reading: Scope around cavity field propagation and population readout.
+        Both scopes default to no observation and must not suppress errors.
     """
 
     key: bytes
     telemetry: bool
+    capture: CaptureBuffer | None = None
+    """Acquire-owned buffer forwarded to every evolve, or None to disable recording."""
     cancel: CancellationQuery | None = None
+    evolving: Callable[[], AbstractContextManager[None]] = nullcontext
+    reading: Callable[[], AbstractContextManager[None]] = nullcontext
 
 
 @dataclass
@@ -220,22 +230,26 @@ def _evolve_outcomes(
     survival = 1.0
     for step, (start, _) in enumerate(outcomes[0].timeline.spans[0]):
         if start in read_starts:
-            outcomes, removed = _project_outcomes(outcomes, floor)
+            with options.reading():
+                outcomes, removed = _project_outcomes(outcomes, floor)
             survival *= 1 - removed
         for outcome in outcomes:
-            batch = outcome.timeline.advance(step)
+            with options.reading():
+                batch = outcome.timeline.advance(step)
             # Histories can end in the same density with different cavity memory.
             history_key = sha256(
                 options.key + np.asarray(outcome.history, dtype=np.int64).tobytes()
             ).digest()
             key = _span_key(history_key, step, (batch,))
-            result = engine.evolve(
-                facts.source,
-                (batch,),
-                cancel=options.cancel,
-                telemetry=options.telemetry,
-                reuse_key=key,
-            )
+            with options.evolving():
+                result = engine.evolve(
+                    facts.source,
+                    (batch,),
+                    cancel=options.cancel,
+                    telemetry=options.telemetry,
+                    capture=options.capture,
+                    reuse_key=key,
+                )
             outcome.timeline.density = result.densities
             paths.append(result.paths)
             keys.append(key)
@@ -316,9 +330,10 @@ def evolve_projective_plans(
             weights[point, index] = outcome.weight
             for event, state in enumerate(outcome.history):
                 populations[event][point, index] = np.eye(count)[state]
-            populations[-1][point, index] = normalize_populations(
-                outcome.timeline.density[0].diagonal().real
-            )
+            with options.reading():
+                populations[-1][point, index] = normalize_populations(
+                    outcome.timeline.density[0].diagonal().real
+                )
             densities[point] += outcome.weight * outcome.timeline.density[0]
     return ProjectionEvolution(
         EvolutionResult(points, densities, merge_path_diagnostics(paths)),
@@ -361,13 +376,15 @@ def evolve_plans(
     no owner is retained by the engine or long-lived acquisition source.
     """
     if not any(any(plan.cavity_drives) for plan in plans):
-        return engine.evolve(
-            facts.source,
-            tuple(plan.batch for plan in plans),
-            cancel=options.cancel,
-            telemetry=options.telemetry,
-            reuse_key=options.key,
-        ), (options.key,)
+        with options.evolving():
+            return engine.evolve(
+                facts.source,
+                tuple(plan.batch for plan in plans),
+                cancel=options.cancel,
+                telemetry=options.telemetry,
+                capture=options.capture,
+                reuse_key=options.key,
+            ), (options.key,)
     cache = CavityAverageCache()
     try:
         pair = resonators(settings)
@@ -407,13 +424,15 @@ def _evolve_cavities(
     output_densities = []
     if plain:
         plain_key = sha256(b"ftf-no-cavity\0" + options.key).digest()
-        result = engine.evolve(
-            facts.source,
-            plain,
-            cancel=options.cancel,
-            telemetry=options.telemetry,
-            reuse_key=plain_key,
-        )
+        with options.evolving():
+            result = engine.evolve(
+                facts.source,
+                plain,
+                cancel=options.cancel,
+                telemetry=options.telemetry,
+                capture=options.capture,
+                reuse_key=plain_key,
+            )
         paths.append(result.paths)
         reuse_keys.append(plain_key)
         output_points.append(result.points)
@@ -423,15 +442,18 @@ def _evolve_cavities(
         (len(spans) for timeline in timelines for spans in timeline.spans), default=0
     )
     for step in range(steps):
-        batches = tuple(timeline.advance(step) for timeline in timelines)
+        with options.reading():
+            batches = tuple(timeline.advance(step) for timeline in timelines)
         reuse_key = _span_key(options.key, step, batches)
-        result = engine.evolve(
-            facts.source,
-            batches,
-            cancel=options.cancel,
-            telemetry=options.telemetry,
-            reuse_key=reuse_key,
-        )
+        with options.evolving():
+            result = engine.evolve(
+                facts.source,
+                batches,
+                cancel=options.cancel,
+                telemetry=options.telemetry,
+                capture=options.capture,
+                reuse_key=reuse_key,
+            )
         paths.append(result.paths)
         reuse_keys.append(reuse_key)
         offset = 0
