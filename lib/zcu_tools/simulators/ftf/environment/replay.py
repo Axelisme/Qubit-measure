@@ -5,9 +5,9 @@ from pathlib import Path
 
 from qick import QickConfig
 
-from zcu_tools.core.simulation import RoundRequest, RoundSignals
 from zcu_tools.device import DeviceManager
 from zcu_tools.program.v2.simulation import IntegratedRound
+from zcu_tools.simulate.boundary import RoundRequest, RoundSignals
 from zcu_tools.simulate.evolution import SEGMENT_NUMERIC_VERSION
 from zcu_tools.simulators.ftf.config import FTFSettings
 from zcu_tools.simulators.replay import read_replay

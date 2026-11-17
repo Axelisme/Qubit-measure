@@ -8,7 +8,7 @@ import numpy as np
 from joblib import delayed
 from numpy.typing import NDArray
 
-from zcu_tools.core.simulation import CancellationQuery
+from zcu_tools.simulate.boundary import CancellationQuery
 
 from ._dispatch import Dispatch, Selection, classify, prepare
 from ._dispatch import diagnostics as dispatch_diagnostics

@@ -4,8 +4,8 @@ from dataclasses import replace
 
 import numpy as np
 import pytest
-from zcu_tools.core.simulation import SamplingIdentity
 from zcu_tools.simulate import adc
+from zcu_tools.simulate.boundary import SamplingIdentity
 
 
 def legacy_rng_state():

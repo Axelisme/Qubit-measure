@@ -1,4 +1,4 @@
-"""Immutable classical outcome weights and event-specific readout populations."""
+"""Immutable outcome mixtures and Markov-chain readout populations."""
 
 from dataclasses import dataclass
 
@@ -6,6 +6,39 @@ import numpy as np
 
 from .model import RealArray, readonly_array
 from .populations import validate_populations
+
+
+@dataclass(frozen=True)
+class ProjectionChain:
+    """Rank-1 projection states at an ordered sequence of read events.
+
+    initial: finite nonnegative (*point_dims, states) first-event probabilities,
+        with a positive state count and rows summing to 1 within 1e-6.
+    transitions: tuple in subsequent-event order, empty for a single event.
+        Each (*point_dims, states, states) array uses [previous, next] state
+        order and has finite nonnegative rows summing to 1 within 1e-6.
+        Readout CTMC jumps affect IQ only, not these projection transitions.
+
+    Construction copies arrays read-only without clipping or normalization.
+    Invalid probabilities or mismatched transition shapes raise ValueError.
+    """
+
+    initial: RealArray
+    transitions: tuple[RealArray, ...]
+
+    def __post_init__(self) -> None:
+        initial = readonly_array(
+            validate_populations(self.initial), "initial populations"
+        )
+        transitions = tuple(
+            readonly_array(validate_populations(values), "transition populations")
+            for values in self.transitions
+        )
+        shape = (*initial.shape, initial.shape[-1])
+        if any(values.shape != shape for values in transitions):
+            raise ValueError("transitions must have shape (*points, states, states)")
+        object.__setattr__(self, "initial", initial)
+        object.__setattr__(self, "transitions", transitions)
 
 
 @dataclass(frozen=True)

@@ -5,11 +5,11 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from zcu_tools.core.simulation import RoundRequest
 from zcu_tools.device import DeviceManager
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.simulation import IntegratedRound, SimulationClock
+from zcu_tools.simulate.boundary import RoundRequest
 from zcu_tools.simulators.ftf.config import parse_ftf
 from zcu_tools.simulators.ftf.environment import (
     FTFAcquisitionOptions,
@@ -212,8 +212,8 @@ def test_replay_rejects_archive_from_obsolete_numeric_backend(
 
 
 def test_replay_recomputes_statistics_without_numeric_records(tmp_path: Path) -> None:
-    from zcu_tools.core.simulation import RoundRequest
     from zcu_tools.device import DeviceManager
+    from zcu_tools.simulate.boundary import RoundRequest
     from zcu_tools.simulators.ftf.environment import FTFSource, replay_round
     from zcu_tools.simulators.replay import read_replay, replay_paths, save_replay
 

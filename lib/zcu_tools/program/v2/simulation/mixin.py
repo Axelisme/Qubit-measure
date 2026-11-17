@@ -8,13 +8,13 @@ import numpy as np
 from numpy.typing import NDArray
 from qick.qick_asm import AcquireMixin
 
-from zcu_tools.core.simulation import (
+from zcu_tools.program.acquisition import CancelFlagProtocol, ImproveAcquireMixin
+from zcu_tools.progress_bar import make_pbar
+from zcu_tools.simulate.boundary import (
     AcquireRequest,
     ChargeDriveRequirement,
     RoundStatistics,
 )
-from zcu_tools.program.acquisition import CancelFlagProtocol, ImproveAcquireMixin
-from zcu_tools.progress_bar import make_pbar
 
 from .result import IntegratedRound, RawShots
 from .signals import materialize_shots

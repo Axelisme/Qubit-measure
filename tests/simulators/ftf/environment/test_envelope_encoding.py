@@ -6,8 +6,8 @@ from dataclasses import dataclass, fields, replace
 from sys import getsizeof
 
 import pytest
-from zcu_tools.core.simulation import CancellationQuery, PulseEnvelope, RoundRequest
 from zcu_tools.device import DeviceManager
+from zcu_tools.simulate.boundary import CancellationQuery, PulseEnvelope, RoundRequest
 from zcu_tools.simulate.evolution import (
     Engine,
     EvolutionResult,

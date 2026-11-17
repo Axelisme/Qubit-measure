@@ -6,8 +6,8 @@ import numpy as np
 import pytest
 from numpy.testing import assert_allclose
 from scipy.linalg import expm
-from zcu_tools.core.simulation import SamplingIdentity
 from zcu_tools.simulate import adc
+from zcu_tools.simulate.boundary import SamplingIdentity
 
 
 def test_omitted_extensions_preserve_legacy_background_point_for_point():

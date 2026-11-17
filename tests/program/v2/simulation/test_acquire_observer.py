@@ -4,13 +4,13 @@ import warnings
 from fractions import Fraction
 
 import pytest
-from zcu_tools.core.simulation import (
+from zcu_tools.program.v2.simulation import SimulationBinding
+from zcu_tools.simulate.boundary import (
     AcquireRequest,
     EnvironmentSnapshot,
     RoundSignals,
     TimeBase,
 )
-from zcu_tools.program.v2.simulation import SimulationBinding
 
 
 def test_completion_observer_sees_all_rounds_and_cannot_mask_execution_failure():
