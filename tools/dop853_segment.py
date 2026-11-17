@@ -149,6 +149,8 @@ def dop853_segment_input(coordinates: Dop853Coordinates) -> Input:
     )
     # model_copy does not validate nested updates; validate before any modeling.
     settings = type(settings).model_validate(settings.model_dump())
+    # ADR-0072: the concrete model owner builds physics; tools supply fixed settings,
+    # not lab configuration, to the simulator's numeric declaration boundary.
     env = single_fluxonium(settings, soccfg=build_soccfg(BOARD_PROFILE))
     name = _segment_name(coordinates)
     with ExitStack() as stack:
@@ -161,6 +163,8 @@ def dop853_segment_input(coordinates: Dop853Coordinates) -> Input:
         snapshot = owner.snapshot()
         numeric = stack.enter_context(closing(owner.model_facts(snapshot).source))
         batch = _dop853_batch(coordinates, numeric.model((0,)))
+        # ADR-0078: snapshot the tools-owned Scene through the numeric builder
+        # before closing its source; codec/hash ownership stays in simulate.
         build = numeric_builder(Scene(name, numeric, batch, ("dop853",)))
     return Input(
         name,

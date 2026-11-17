@@ -1,6 +1,6 @@
 # tools/
 
-**Last updated:** 2026-11-17 (Pareto default selection, single-scene preparation and DOP853 profile producer routing)
+**Last updated:** 2026-11-17 (Pareto selection, single-scene preparation and DOP853 snapshot API and worker evidence)
 
 **讀者：** framework-dev。查閱 repo 開發工具的 CLI、輸出與比較機制。
 
@@ -631,9 +631,20 @@ only Pump gain varies; Engine worker count is a separate execution setting.
 Change one coordinate at a time to isolate duration, dimension or knot density.
 The controls are benchmark inputs, not calibrated STIRAP transfer.
 
-`freeze_manifest([item])` records complete physical/oracle hashes and the
-versioned coordinates. `zcu_tools.simulate.evolution.reference_key(case.source,
-case.batch)` returns the persistent reference key without disk access or integration.
+```python
+from tools.family_pareto_inputs import freeze_records
+
+records = freeze_records([item])
+```
+
+`freeze_records(inputs: list[Input]) -> tuple[FrozenRecord, ...]` snapshots the
+ordered declarations into numeric records with tool-owned metadata, including
+the versioned coordinates. It closes each built source without evolving; source
+arrays remain in the returned records. Builder and serialization failures
+propagate. The simulator manifest writer calculates the physical/oracle hashes
+and owns the container; this call does not write a manifest or solve references.
+`zcu_tools.simulate.evolution.reference_key(case.source, case.batch)` returns the
+persistent reference key without disk access or integration.
 `Input.name` and its built `Scene.name` identify all coordinates:
 `dop853_segment-<envelope>-d<duration_ns>-l<levels>-k<knots>-r<repeats>-p<points>`.
 Integer durations omit the decimal part; 20.5 ns becomes `d20p5`. Names do not
@@ -643,10 +654,12 @@ enter the physical, oracle or metadata hashes, or the reference key.
 catalogue. Calling `profile_inputs()` builds seven Gaussian and seven sampled
 inputs. Each envelope has the d20/l8/k9/r1/p1 baseline, then single-axis variants
 for duration 40 ns, levels 20, knots 17, and repeats 2/20/100. The final input is
-`dop853_segment-gaussian-d20-l8-k9-r1-p64`, an uncalibrated workers candidate.
-Its 64 independent points have not been timed against the one-second wall
-threshold, and its reference is not prepared by this call. These declarations
-remain outside the default family-table inventory.
+`dop853_segment-gaussian-d20-l8-k9-r1-p64`, a 64-point workers candidate.
+This call neither times the inputs nor prepares their references. The measured
+Gaussian worker results and their limits are recorded in the
+[DOP853 route summary](../docs/discussions/2026-11-17-dop853-speed-route-summary.md#多-worker-的配對結果).
+These research declarations remain outside the default family-table inventory;
+the measured sample does not change production defaults.
 
 `profile_inputs(scenario=NAME)` selects one declared profile by its complete
 coordinate-derived name before constructing any model. Unknown names raise
@@ -657,8 +670,9 @@ The scene producer's `make_real_inputs()` includes these profiles after the fixe
 scans. Its existing `--scenario NAME` route constructs only the selected Input;
 fixed scan names keep their direct routes. `main(argv, inputs=[item])` still
 accepts caller-owned declarations. Neither this wiring nor `profile_inputs()`
-prepares scene files, reference entries or real-index rows. The workers candidate
-still needs wall-time calibration and its own reference.
+prepares scene files, reference entries or real-index rows. Each consumer must
+prepare its selected scene and reference caches explicitly; the recorded Gaussian
+results do not imply that every consumer's caches are ready.
 
 After separate compute approval, freeze a selected profile through the existing
 producer with `--update-index --scenario NAME`, choosing the shared real index
