@@ -311,10 +311,12 @@ fixture 過重、重複計算或不必要的 sleep／輪詢要直接修，不用
 
 ### 測試成本
 
-每個測試函數的計算只用單核心。一個測試內部的 worker、thread 或 process 總數最多兩個，用於驗證多 worker 契約。每個測試在 `-n 0` 下少於 30 s。
+每個測試函數的計算只用單核心。每個測試在 `-n 0` 下少於 30 s。
 Evolution 精度矩陣的 reference 成本依〈Evolution 精度矩陣〉的處理順序；目前唯一具名的成本例外是 `single_tone_sideband`。
 測試不跑慢的模擬或擬合。行為改用小型合成模型（少數能階、短 timeline）、解析解、不變性或最小 case 對照 reference 來確定。
 完整精度與效能量測放在 task 的量測腳本，不放進測試套件。新增測試時以 `--durations=0` 確認耗時。
+
+執行緒數量是建議，用來避免單一測試在內部做平行運算，在 `-n 4` 下和其他 worker 搶 CPU，拖慢整個選集。一個測試自己啟動的 CPU 密集 worker、thread 或 process 建議不超過兩個。以等待或 I/O 為主的執行緒不計入，例如 RPC server、client writer、等待中的 Run worker。確實需要更多 CPU 密集執行緒時，在測試旁寫一行理由；review 不把它當成違規。
 
 Store 效率以工作量測試保護，不斷言實測秒數。使用 synthetic 規模，從公開讀寫接縫操作，透過 I/O 或驗證協作者觀察讀取次數、parse 範圍與驗證次數，不直接呼叫或替換被測私有函式。例如先讀取 1000 筆 ledger，再 append 一筆並查詢，只應 parse 新增尾段；文件內容不變時連續讀取應重用已驗證快照，外部改檔後必須重新驗證。實際延遲另以同一 harness 在相同資源配置下背靠背比較 old／new，工作量斷言不取代量測。
 
