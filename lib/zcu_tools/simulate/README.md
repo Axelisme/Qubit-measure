@@ -1,12 +1,15 @@
 # Numeric simulation tools
 
-**Last updated:** 2026-11-17, simulator-owned boundary and dependency closure
+**Last updated:** 2026-11-17, maintenance rules pointer
 
 **讀者：** framework-dev、agent。查閱數值模擬的責任邊界、快取契約與實測效能。
 
 `evolution` and `adc` are independent numeric tools. Neither imports QICK,
 DeviceManager, resources, GUI, YAML or an environment. The existing fluxonium
 prediction tools remain separate. ADR-0072 defines the package dependency rules.
+
+Before adding or changing a kernel, a guard, a price or a measurement scene, or
+optimizing speed, follow the [simulator maintenance rules](maintenance.md).
 
 ## Acquisition boundary
 

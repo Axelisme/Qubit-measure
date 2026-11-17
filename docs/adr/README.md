@@ -62,12 +62,20 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 原則：family 的完整序列最終精度合格就只比耗時，刪除前先補同型態長序列證據，見 [ADR-0078](0078-evolution-module-boundary.md#family-去留合格只比耗時)。
 原則：模擬器的測試與量測按層分開（kernel、dispatch、序列、前端、environment），不做 program → 編譯 → 演化 → I/Q 的 e2e，見 [ADR-0078](0078-evolution-module-boundary.md#模擬器的測試與量測分層不做-e2e)。
+原則：guard 在整個參數空間不放行超標；速度優化只做有耗時紀錄的瓶頸，修法時程未定時先走慢但對的候選，見 [ADR-0078](0078-evolution-module-boundary.md#先保證正確再優化瓶頸)。
+原則：有誤差問題的快速算法先查原因並修正，修不好的範圍才收 guard，見 [ADR-0078](0078-evolution-module-boundary.md#快速算法先修好不輕易放棄)。
+原則：支援範圍由物理與介面決定，不看使用頻率；頻率只排優化先後，見 [ADR-0078](0078-evolution-module-boundary.md#支援範圍不看使用頻率)。
+原則：實驗參數不當時模擬器照常給結果並警告，契約外輸入照舊 fast fail，見 [ADR-0078](0078-evolution-module-boundary.md#模擬器不替使用者擋實驗參數)。
+原則：kernel 的量測場景只有一段，重複就是同一段接 N 次，見 [ADR-0078](0078-evolution-module-boundary.md#每個-kernel-的量測場景只有一段)。
+原則：場景照約化參數軸宣告覆蓋，不為個別實驗加專屬場景，見 [ADR-0078](0078-evolution-module-boundary.md#場景覆蓋靠約化的參數空間)。
 
 - [0085 — 實驗數值工具的 fitting owner](0085-numerical-fitting-owners.md)：六組純數值工具由 fitting 持有，lab 保留選資料、herald、維度換算、live 與畫圖。
 
 - [0071 — Coherence 頻率與時間單位](0071-coherence-units.md)：頻率、時間、loss parameters 與 lifetime 的單位和換算契約。
 - [0078 — Evolution 黑盒邊界與算法內聚](0078-evolution-module-boundary.md)：Evolution 的 dispatch／kernel 分工、公開黑箱、數值 preparation 壽命與 t6 只保留 direct 的決定。
 - [0084 — 模擬 request 的公共整數時基](0084-simulation-integer-time-base.md)：公共有理數時基、整數 request、compiled frontend 與 replay v2。
+
+改模擬器時的流程與自查見 [模擬器維護規則](../../lib/zcu_tools/simulate/maintenance.md)。
 
 局部分析／預測契約見 [fluxdep](../../lib/zcu_tools/analysis/fluxdep/README.md)、[fitting](../../lib/zcu_tools/analysis/fitting/README.md) 與 [prediction](../../lib/zcu_tools/simulate/fluxonium/README.md)；waveform 資產契約見 [repository 參考](../../lib/zcu_tools/resources/waveform_assets.md)。
 

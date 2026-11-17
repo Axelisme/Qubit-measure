@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-11-17，reference producer 單列選取
+**Last updated:** 2026-11-17，模擬器維護規則指標
 
 **讀者：** framework-dev、agent。查閱測試的 owner、fixture、執行方式與搬遷驗收契約。
 
@@ -126,6 +126,8 @@ ticket 內只跑受影響選集。只有變更觸及 `lib/zcu_tools/simulate/` �
 若仍要排除慢測試，明寫 `-m "sim and not slow"`。
 
 ### Evolution 精度矩陣
+
+新增 family 或改 guard 時要補哪些案例，見 [模擬器維護規則](../lib/zcu_tools/simulate/maintenance.md#3-精度驗收)。
 
 凍結數值的讀寫與 reference cache miss 契約由 `tests/simulate/evolution/test_frozen.py` 和
 `test_reference_cache.py` 在公開 `simulate.evolution` 接縫驗證。
