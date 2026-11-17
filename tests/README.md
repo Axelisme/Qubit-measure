@@ -207,6 +207,8 @@ native cutoff=30、retained=6、N=3 的 d=18 joint 模型。初態是 dressed |e
 另以預設選路的空／暖歷史對雙容差 oracle 比完整 density，reference 在同一 pytest worker 內共用。
 `t6` 是 plateau 的直接積分 family，不代表 `dop853` family 通過。
 
+這個案例允許超過〈測試成本〉每個測試 30 s 的預算：首次計算 18 態、約 760 ns 的兩級容差 lab-frame reference 是成本主體。保留原長度的理由是 joint dressed 模型是約化參數空間中其他案例不涵蓋的一軸，縮短序列會改變驗收的內容。它只在包含 `sim` 的選集執行；`worksteal` 把它的三個測試分到不同 worker 時，每個 worker 各算一次 reference。這是矩陣唯一具名的成本例外。之後新增或修改的案例在 `-n 0` 下超過 30 s 時，先依本節末的順序加本機 hash 快取，不新增第二個具名例外。
+
 每個案例也保留預設選路的空歷史與暖歷史驗收。
 `joint_gate_inventory` 保留完整 20 點 sampled inventory，pinned density 改驗 `dop853`。
 `joint_constant` 用相同模型和 inventory 保護 `multitone_rwa` 的 distinct-port constant 路徑。
@@ -310,6 +312,7 @@ fixture 過重、重複計算或不必要的 sleep／輪詢要直接修，不用
 ### 測試成本
 
 每個測試函數的計算只用單核心。一個測試內部的 worker、thread 或 process 總數最多兩個，用於驗證多 worker 契約。每個測試在 `-n 0` 下少於 30 s。
+Evolution 精度矩陣的 reference 成本依〈Evolution 精度矩陣〉的處理順序；目前唯一具名的成本例外是 `single_tone_sideband`。
 測試不跑慢的模擬或擬合。行為改用小型合成模型（少數能階、短 timeline）、解析解、不變性或最小 case 對照 reference 來確定。
 完整精度與效能量測放在 task 的量測腳本，不放進測試套件。新增測試時以 `--durations=0` 確認耗時。
 
