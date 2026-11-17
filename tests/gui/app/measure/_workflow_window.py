@@ -128,5 +128,5 @@ def host_window(
                 control.stop(tab.run_id)
         ctrl.close()
         if not destroyed.is_set():
-            window.deleteLater()
+            window.dispose()
         qapp.processEvents()

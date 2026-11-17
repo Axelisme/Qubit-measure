@@ -213,5 +213,5 @@ def range_application(
         ctrl.run_analyze_control.cancel_analyze(tab_id)
         ctrl.tab_control.close_tab(tab_id)
         ctrl.close()
-        window.deleteLater()
+        window.dispose()
         qapp.processEvents()
