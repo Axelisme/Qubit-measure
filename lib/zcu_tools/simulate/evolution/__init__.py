@@ -55,9 +55,12 @@ from .joint_fock import (
 )
 from .kernels._rwa_numeric import (
     RWACoefficients,
+    RWAGuardMetric,
+    RWAUncomputed,
     interaction_hamiltonian,
     rwa_coefficients,
 )
+from .kernels.single_tone_rwa import SingleToneRWADiagnostic, single_tone_rwa_diagnostic
 from .model import DriveSource, NumericModel
 from .reference_cache import (
     ReferenceResult,

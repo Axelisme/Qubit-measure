@@ -57,6 +57,56 @@ def fourier_coefficient(
 
 
 @njit(nogil=True, cache=True)
+def kick_coefficients(
+    energies: NDArray[np.float64],
+    x: NDArray[np.complex128],
+    y: NDArray[np.complex128],
+    frequency: float,
+    amplitude: float,
+    retained: NDArray[np.bool_],
+) -> NDArray[np.complex128]:
+    """Prepare omitted c/d for one constant tone, with signs (+1,-1).
+
+    energies is (M,) GHz, x/y are (M,M) GHz/gain quadratures, frequency
+    is signed GHz and amplitude is signed gain. retained is the resolved
+    (2,M,M) Fourier mask, including restored edges and their adjoints.
+    Return caller-owned (2,M,M) dimensionless coefficients, including diagonal
+    +/-carrier terms. Phase-graph pruning does not change this mask.
+    Every omitted denominator is outside the 50 MHz window; no cutoff is used.
+    """
+    size = len(energies)
+    result = np.zeros((2, size, size), dtype=np.complex128)
+    for slot in range(2):
+        sign = 1 - 2 * slot
+        for i in range(size):
+            for j in range(size):
+                if not retained[slot, i, j]:
+                    detuning = energies[i] - energies[j] + sign * frequency
+                    result[slot, i, j] = (
+                        amplitude
+                        * fourier_coefficient(x[i, j], y[i, j], sign)
+                        / detuning
+                    )
+    return result
+
+
+@njit(nogil=True, cache=True)
+def endpoint_kick(
+    coefficients: NDArray[np.complex128], phase: float
+) -> NDArray[np.complex128]:
+    """Evaluate Hermitian K in the lab energy basis at a carrier phase.
+
+    coefficients is the prepared (2,M,M) c/d array; phase is radians.
+    At local t, phase=theta+2*pi*f*t. Conjugating the interaction-picture
+    K(t)=-i sum(c*exp(i*2*pi*d*t)/d) back to the lab basis cancels the
+    energy-gap phase, leaving only these signed carrier phases.
+    Return a new caller-owned (M,M) dimensionless matrix.
+    """
+    positive = np.exp(1j * phase)
+    return -1j * (coefficients[0] * positive + coefficients[1] * positive.conjugate())
+
+
+@njit(nogil=True, cache=True)
 def _transfer_probability(coupling, detuning, duration):
     strength = (2 * abs(coupling)) ** 2
     if strength == 0:

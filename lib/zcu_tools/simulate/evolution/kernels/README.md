@@ -1,6 +1,6 @@
 # Evolution kernels
 
-**Last updated:** 2026-11-15，t6 只保留 direct
+**Last updated:** 2026-11-17，endpoint kick、sampled multitone 拒收與 t6 direct owners
 
 **讀者：** framework-dev、agent。查找演化算法的數值 owner，以及 kernel 與 dispatch、scheduler 的接縫。
 
@@ -14,10 +14,13 @@
 `_flux_expansion.py` 擁有連續 flux 的插值與 Hamiltonian 累加。
 `_workload_facts.py` 的 `model_keys` 供 Dyson 與 flux DOP853 共用 flux-level／shift-content 分組。
 `_rwa_numeric.py` 擁有多個 RWA family 共用的 admission、retention、policy 與 Hamiltonian coefficients。
+Fourier 係數與 omitted-edge endpoint kick 數值留在 `_rwa_fourier.py`。
+`_rwa_numeric.py` 以 resolved retention mask 準備 kick 係數，目前只有 `single_tone_rwa` 套用。
+Phase graph 與 covariant gate builder 分別留在 `_rwa_graph.py` 與 `_rwa_gate.py`。
 `multitone_rwa` 的 family guard 只收 distinct-port constant pairs，拒收 sampled 多 tone 列。
 `multitone_gate` 的 family guard 拒收所有列，保留 family 與共用 single-tone 數值 owner。
-這是現行拒收契約，不預告恢復 admission。其餘候選沿用既有定價，可能選到 `common_frame` 或 `dop853`。
-Fourier 數值、phase graph 與 covariant gate builder 分別留在 `_rwa_fourier.py`、`_rwa_graph.py` 與 `_rwa_gate.py`。
+這是現行拒收契約，不預告恢復 admission。
+其餘候選沿用既有定價，可能選到 `common_frame` 或 `dop853`。
 `dop853.advance_endpoints` 擁有旋轉座標 density 積分，`dop853` 與 `t6` direct
 沿用相同的每段 budget 容差規則。這是局部積分控制，不保證整條序列的最終誤差。
 `t6` 的每一列都走 direct，不依 key 重用數選算法，也不掃描完整 acquire inventory。
