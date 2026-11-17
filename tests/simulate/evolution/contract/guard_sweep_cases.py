@@ -11,10 +11,17 @@ from dataclasses import replace
 import numpy as np
 from zcu_tools.simulate.evolution import EnvelopeSpec
 
-from .accuracy_cases import AccuracyCase, coherent_source, drive_track, timeline
+from .accuracy_cases import (
+    AccuracyCase,
+    coherent_source,
+    drive_track,
+    linear_drive_model,
+    timeline,
+)
 from .guard_edge_cases import guard_edge_case
 
-# Scale=1 is already covered by the unchanged guard-edge matrix.
+# Scale=1 is covered by the guard-edge matrix for common_frame/shaped_sambe.
+# Single-tone sweeps retain the original phase-edge input, not the kappa2 edge.
 SCALED_SAMPLES = (
     ("single_tone_rwa", 0.05, None),
     ("single_tone_rwa", 0.1, None),
@@ -98,7 +105,7 @@ GATE_SAMPLES = (
 
 
 def scaled_edge_case(family: str, scale: float) -> AccuracyCase:
-    """Multiply all gains of an existing edge input by positive scale <= 1.
+    """Multiply all gains of a fixed edge input by positive scale <= 1.
 
     Supported families are single_tone_rwa, common_frame and shaped_sambe.
     Duration, bath, phases, envelope and initial complex density stay unchanged.
@@ -110,7 +117,29 @@ def scaled_edge_case(family: str, scale: float) -> AccuracyCase:
         raise ValueError(f"no gain sweep for {family}")
     if not 0 < scale <= 1:
         raise ValueError("scale must be in (0, 1]")
-    case = guard_edge_case(family)
+    if family == "single_tone_rwa":
+        # Keep the original 8 ns non-diagonal phase-edge regression independent
+        # of the 1 ns diagonal-drive kappa2 edge (ADR-0078).
+        batch = timeline(2, 8.0)
+        frequency = 0.6
+        # Retained positive-frequency X/2 has norm .001 GHz.
+        # phase = 2*pi*d*(gain*.001)^2/f = .05999994 rad < .06.
+        gain = np.sqrt(0.06 * (1 - 1e-6) * frequency / (2 * np.pi * 8)) / 0.001
+        case = AccuracyCase(
+            "guard_edge/" + family,
+            coherent_source(linear_drive_model()),
+            replace(
+                batch,
+                tracks=(
+                    drive_track(
+                        batch, EnvelopeSpec("constant"), frequency=frequency, gain=gain
+                    ),
+                ),
+            ),
+            (family,),
+        )
+    else:
+        case = guard_edge_case(family)
     tracks = tuple(
         replace(track, amplitude=track.amplitude * scale) for track in case.batch.tracks
     )

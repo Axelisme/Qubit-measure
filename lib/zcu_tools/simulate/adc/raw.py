@@ -7,11 +7,11 @@ from math import prod
 import numpy as np
 from numpy.typing import NDArray
 
-from zcu_tools.core.simulation import SamplingIdentity
+from zcu_tools.simulate.boundary import SamplingIdentity
 from zcu_tools.simulate.rounding import shot_layout
 
 from ._path_sampling import physical_shots
-from .projection import ProjectionReadout
+from .projection import ProjectionChain, ProjectionReadout
 from .readout_batch import ReadoutBatch
 
 
@@ -33,9 +33,9 @@ def _validate_event_layout(batch: ReadoutBatch, event_count: int) -> None:
 class PreparedRawShots:
     """Retain noiseless inputs for deferred integrated ADC paths and noise.
 
-    readout: owned immutable ProjectionReadout. Its populations use every
-        batch model's identical state order. Each batch must have exactly the
-        same number of logical events as readout.populations.
+    readout: owned immutable ProjectionReadout or ProjectionChain. Its states
+        use every batch model's identical state order. Each batch must have
+        exactly the same number of logical events as the readout.
     batches: constructor mapping from unique nonnegative ADC indices to ReadoutBatch;
         retained as an immutable tuple of (channel,batch) pairs. Each
         batch.content_index is flat C-order (prod(point_dims),), and the state
@@ -54,7 +54,7 @@ class PreparedRawShots:
     ValueError. Numeric/solver failures propagate at materialization time.
     """
 
-    readout: ProjectionReadout
+    readout: ProjectionReadout | ProjectionChain
     batches: tuple[tuple[int, ReadoutBatch], ...]
     reps: int
     rtol: float
@@ -62,14 +62,28 @@ class PreparedRawShots:
 
     def __init__(
         self,
-        readout: ProjectionReadout,
+        readout: ProjectionReadout | ProjectionChain,
         batches: Mapping[int, ReadoutBatch],
         *,
         reps: int,
         rtol: float = 1e-10,
         atol: float = 1e-12,
     ) -> None:
-        probabilities = readout.populations[-1]
+        probabilities = (
+            readout.initial
+            if isinstance(readout, ProjectionChain)
+            else readout.populations[-1]
+        )
+        point_dims = (
+            probabilities.shape[:-1]
+            if isinstance(readout, ProjectionChain)
+            else readout.weights.shape[:-1]
+        )
+        event_count = (
+            1 + len(readout.transitions)
+            if isinstance(readout, ProjectionChain)
+            else len(readout.populations)
+        )
         if type(reps) is not int or reps < 0:
             raise ValueError("reps must be a nonnegative integer")
         if not np.isfinite([rtol, atol]).all() or min(rtol, atol) <= 0:
@@ -79,7 +93,7 @@ class PreparedRawShots:
         for channel, batch in batches.items():
             if type(channel) is not int or channel < 0:
                 raise ValueError("channel must be a nonnegative integer")
-            if batch.content_index.shape != (prod(readout.weights.shape[:-1]),):
+            if batch.content_index.shape != (prod(point_dims),):
                 raise ValueError("batch point shape must match populations")
             if len(batch.model.state_labels) != probabilities.shape[-1]:
                 raise ValueError("model state axis must match populations")
@@ -91,7 +105,7 @@ class PreparedRawShots:
                 raise ValueError("directional rates must match across ADCs")
             labels = batch.model.state_labels
             rates = batch.model.rates_per_ns
-            _validate_event_layout(batch, len(readout.populations))
+            _validate_event_layout(batch, event_count)
         object.__setattr__(self, "readout", readout)
         object.__setattr__(self, "batches", tuple(batches.items()))
         object.__setattr__(self, "reps", reps)
@@ -129,13 +143,19 @@ class ADCRawShots:
         point dimensions and must be in [0,len(point_dims)]. Invalid arguments,
         nonfinite receiver output or int64 overflow raise ValueError; baseline
         solver failures raise RuntimeError. Receiver noise is independent per
-        ADC/read/shot. One outcome is shared across the shot. Within each event,
+        ADC/read/shot. ProjectionReadout shares one outcome across the shot;
+        ProjectionChain draws successive states conditional on the previous
+        projection state, not on the readout CTMC's final state. Within each event,
         initial states and full CTMC paths are shared across carriers, ADCs and
         grids, including multi-jump tails and gaps. Different events draw
         independent paths. No raw is shifted to fit round sums.
         """
         prepared = self.prepared
-        point_dims = prepared.readout.weights.shape[:-1]
+        point_dims = (
+            prepared.readout.initial.shape[:-1]
+            if isinstance(prepared.readout, ProjectionChain)
+            else prepared.readout.weights.shape[:-1]
+        )
         if type(reps) is not int or reps != prepared.reps:
             raise ValueError("reps must match the raw preparation")
         if type(avg_level) is not int or not 0 <= avg_level <= len(point_dims):

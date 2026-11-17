@@ -9,7 +9,11 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from zcu_tools.core.simulation import (
+from zcu_tools.program.v2.modules.pulse import PulseCfg
+from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
+from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
+from zcu_tools.program.v2.simulation import IntegratedRound
+from zcu_tools.simulate.boundary import (
     AcquireRequest,
     AcquisitionMode,
     ChargeDriveRequirement,
@@ -18,10 +22,6 @@ from zcu_tools.core.simulation import (
     RoundRequest,
     TimelineTemplate,
 )
-from zcu_tools.program.v2.modules.pulse import PulseCfg
-from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
-from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
-from zcu_tools.program.v2.simulation import IntegratedRound
 from zcu_tools.simulate.evolution import EvolutionResult, PathDiagnostics
 from zcu_tools.simulators.replay import (
     ReplayAcquire,
@@ -237,7 +237,12 @@ def test_round_replay_and_raw_outlive_source(tmp_path: Path, mode):
     assert saved.round.index == 2
     assert saved.acquire.request.point_dims == request.point_dims
     incompatible = saved.acquire.model_copy(
-        update={"versions": (("backend", "obsolete"),)}
+        update={
+            "versions": tuple(
+                (name, "single-fluxonium-segment-v1" if name == "backend" else value)
+                for name, value in saved.acquire.versions
+            )
+        }
     )
     path = save_replay(tmp_path / "obsolete", incompatible, saved.round.snapshot, 2)
     with pytest.raises(ValueError, match="version mismatch"):
@@ -402,7 +407,7 @@ def test_program_acquire_raw_decimated_and_live_round_refresh():
 def test_replay_rejects_other_backend_settings_before_numeric_work(
     tmp_path: Path, target
 ):
-    from zcu_tools.core.simulation import EnvironmentSnapshot
+    from zcu_tools.simulate.boundary import EnvironmentSnapshot
     from zcu_tools.simulators.ftf.config import parse_ftf
     from zcu_tools.simulators.ftf.environment import replay as ftf_replay
     from zcu_tools.simulators.single_fluxonium.environment import (

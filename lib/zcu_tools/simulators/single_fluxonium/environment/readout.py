@@ -5,7 +5,6 @@ from math import prod
 
 import numpy as np
 
-from zcu_tools.core.simulation import AcquireRequest
 from zcu_tools.experiment.readout_plan import map_readout_events
 from zcu_tools.simulate.adc import (
     BackgroundBandEdge,
@@ -19,6 +18,7 @@ from zcu_tools.simulate.adc import (
     ReadoutModel,
     Receiver,
 )
+from zcu_tools.simulate.boundary import AcquireRequest
 from zcu_tools.simulate.evolution import ModelSource
 from zcu_tools.simulate.fluxonium import DispersiveResonator, SingleFluxoniumModel
 from zcu_tools.simulators.single_fluxonium.config import SingleFluxoniumSettings

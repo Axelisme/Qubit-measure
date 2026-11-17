@@ -1,6 +1,6 @@
 # tools/
 
-**Last updated:** 2026-11-17 (Pareto default selection and single-scene preparation)
+**Last updated:** 2026-11-17 (Pareto selection, single-scene preparation and DOP853 snapshot API and worker evidence)
 
 **讀者：** framework-dev。查閱 repo 開發工具的 CLI、輸出與比較機制。
 
@@ -156,6 +156,8 @@ write_snapshot(
 Kernel 量測在 `Engine.evolve` 上用 `families=` 固定候選，輸入只有一段。
 整體耗時改用多段 `TimelineBatch` 在 `Engine.evolve` 的序列層量測，不經 program compilation 或 ADC sampling。
 現有的 family 誤差與耗時量表見下節。
+
+量測場景的選法、速度驗收的順序與 10% 回報規則見 [模擬器維護規則](../lib/zcu_tools/simulate/maintenance.md#4-量測)。
 
 ## Shared simulator measurement
 
@@ -598,6 +600,100 @@ to `simulator_measurement.measure_modes`. It requires a real reference.
 Tests use controlled clocks and small
 collaborators; the complete matrix runs outside pytest through the exclusive runner.
 
+### Dedicated DOP853 segments
+
+`dop853_segment.dop853_segment_input(Dop853Coordinates(...))` builds
+simultaneous two-tone Engine inputs. It does not use acquire, append readout,
+change `single_model_input`, or join the default family-table inventory.
+The factory validates settings before `SingleFluxoniumSource.model_facts`
+rebuilds the retained model and Gibbs initial density. It uses the fixed single
+model with bias .45, two charge ports and no fast flux. Levels above the fixed
+native cutoff raise `ValueError`; no prebuilt matrix is sliced.
+
+```python
+from contextlib import closing
+from zcu_tools.simulate.evolution import Engine
+from tools.dop853_segment import Dop853Coordinates, dop853_segment_input
+
+item = dop853_segment_input(Dop853Coordinates(envelope="sampled", repeats=2))
+with closing((case := item.build()).source), closing(Engine(workers=1, families=("dop853",))) as engine:
+    result = engine.evolve(case.source, (case.batch,), telemetry=True)
+```
+
+Run numerical measurements through `run_heavy.py` under the applicable compute
+grant. Importing or constructing inputs does not solve references or evolve.
+Coordinates select `gaussian` or non-Gaussian `sampled` envelopes, support in ns,
+retained `levels`, sample `knots` including both endpoints, `repeats` in
+1/2/20/100, and independent `points`. Both tones have the same support. Every
+sample is a linear-interpolation knot. Gaussian centers differ within that
+support. Flat-top plateaus are outside this input. Each repeated pair restarts
+its pulse-local carrier phase, with no gaps or companion family. End time is
+N times the support. N does not multiply the point count. For multiple points,
+only Pump gain varies; Engine worker count is a separate execution setting.
+Change one coordinate at a time to isolate duration, dimension or knot density.
+The controls are benchmark inputs, not calibrated STIRAP transfer.
+
+```python
+from tools.family_pareto_inputs import freeze_records
+
+records = freeze_records([item])
+```
+
+`freeze_records(inputs: list[Input]) -> tuple[FrozenRecord, ...]` snapshots the
+ordered declarations into numeric records with tool-owned metadata, including
+the versioned coordinates. It closes each built source without evolving; source
+arrays remain in the returned records. Builder and serialization failures
+propagate. The simulator manifest writer calculates the physical/oracle hashes
+and owns the container; this call does not write a manifest or solve references.
+`zcu_tools.simulate.evolution.reference_key(case.source, case.batch)` returns the
+persistent reference key without disk access or integration.
+`Input.name` and its built `Scene.name` identify all coordinates:
+`dop853_segment-<envelope>-d<duration_ns>-l<levels>-k<knots>-r<repeats>-p<points>`.
+Integer durations omit the decimal part; 20.5 ns becomes `d20p5`. Names do not
+enter the physical, oracle or metadata hashes, or the reference key.
+
+`from tools.dop853_segment import profile_inputs` exposes the declared profile
+catalogue. Calling `profile_inputs()` builds seven Gaussian and seven sampled
+inputs. Each envelope has the d20/l8/k9/r1/p1 baseline, then single-axis variants
+for duration 40 ns, levels 20, knots 17, and repeats 2/20/100. The final input is
+`dop853_segment-gaussian-d20-l8-k9-r1-p64`, a 64-point workers candidate.
+This call neither times the inputs nor prepares their references. The measured
+Gaussian worker results and their limits are recorded in the
+[DOP853 route summary](../docs/discussions/2026-11-17-dop853-speed-route-summary.md#多-worker-的配對結果).
+These research declarations remain outside the default family-table inventory;
+the measured sample does not change production defaults.
+
+`profile_inputs(scenario=NAME)` selects one declared profile by its complete
+coordinate-derived name before constructing any model. Unknown names raise
+`ValueError` with legal profile names and construct no models. Omitting the
+argument retains the complete catalogue in the order above.
+
+The scene producer's `make_real_inputs()` includes these profiles after the fixed
+scans. Its existing `--scenario NAME` route constructs only the selected Input;
+fixed scan names keep their direct routes. `main(argv, inputs=[item])` still
+accepts caller-owned declarations. Neither this wiring nor `profile_inputs()`
+prepares scene files, reference entries or real-index rows. Each consumer must
+prepare its selected scene and reference caches explicitly; the recorded Gaussian
+results do not imply that every consumer's caches are ready.
+
+After separate compute approval, freeze a selected profile through the existing
+producer with `--update-index --scenario NAME`, choosing the shared real index
+and approved scene-cache destination. Until those explicit preparations finish,
+a complete prepare fails the exact-name-set check against indexes lacking the
+profile rows. No profile row is added to the Pareto default selection.
+Independent reference preparation belongs to the tests-side producer described
+below. Its interaction-picture oracle stops at knots and checks two tolerances.
+During measurement, use the public `load_reference(cache_dir, case.source,
+case.batch)`; misses raise instead of solving. Worker count does not enter the key.
+N and points do.
+Same-dimension reference agreement does not establish retained-level convergence.
+
+Measure wall/process only around `Engine.evolve`, keeping construction,
+reference loading and density comparison outside. These are whole-Engine times,
+not bare kernel costs. Report public `prepare_cpu_s`, `apply_cpu_s`, `rows` and
+`cache_hits` separately. `apply_cpu_s / rows` is a logical-row amortization,
+not one apply call's cost. Missing diagnostics are errors, not zeros.
+
 ### Fixed scenarios, companions and reference cache
 
 `family_pareto_scenarios.py` owns curated core pulse sequences and the scene
@@ -893,7 +989,9 @@ uv run --directory "$PWD" --no-sync -- python -m tools.family_pareto_scenarios \
   --index-dir tools/data/family_pareto --scene-cache /absolute/scene-cache
 ```
 
-`main(argv, *, inputs=...)` retains explicit producer declarations.
+`main(argv, *, inputs=...)` retains explicit producer declarations. Its default
+inventory includes the [DOP853 profile catalogue](#dedicated-dop853-segments).
+Adding those declarations does not populate the tracked indexes or shared cache.
 `prepare_scenes(inputs, indexes, scene_cache, *, scenario=None, update_index=False)`
 owns preparation. `indexes` maps categories to explicit index paths.
 The producer fixes and logs OMP, OpenBLAS, MKL and Numba native thread settings

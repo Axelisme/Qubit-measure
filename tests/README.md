@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-11-17，reference producer 單列選取
+**Last updated:** 2026-11-17，sideband plateau 與 idle 精度宣告、模擬器維護規則指標
 
 **讀者：** framework-dev、agent。查閱測試的 owner、fixture、執行方式與搬遷驗收契約。
 
@@ -127,6 +127,8 @@ ticket 內只跑受影響選集。只有變更觸及 `lib/zcu_tools/simulate/` �
 
 ### Evolution 精度矩陣
 
+新增 family 或改 guard 時要補哪些案例，見 [模擬器維護規則](../lib/zcu_tools/simulate/maintenance.md#3-精度驗收)。
+
 凍結數值的讀寫與 reference cache miss 契約由 `tests/simulate/evolution/test_frozen.py` 和
 `test_reference_cache.py` 在公開 `simulate.evolution` 接縫驗證。
 `tests/simulate/evolution/contract/family_pareto_reference_producer.py` 讀凍結數值，呼叫既有獨立 solver，再經 codec 寫 NPZ。
@@ -195,6 +197,17 @@ Active family 的 guard 拒絕輸入會讓 density 測試失敗，不會產生�
 | `linear_plateau` | `single_tone_rwa` | 24 ns、600 MHz constant tone、X-only drive |
 | `nearby_carriers` | `common_frame` | 6.5 ns、600 與 630 MHz 的同 port constant tones |
 | `adiabatic_ramp` | `adiabatic_map` | 8 ns、無 tone、弱非對易 flux ramp |
+
+`single_tone_sideband` 使用 committed 合成 fluxonium (4,1,1) GHz、flux=0.40、
+native cutoff=30、retained=6、N=3 的 d=18 joint 模型。初態是 dressed |e,0⟩，
+600 ns 方波驅動 |e,0⟩→|g,1⟩，g_sb=1 MHz，之後等待五個 cavity lifetimes。
+κ/(2π)=5 MHz，intrinsic capacitive Q=1e6 的 T1 仍在模型內。
+它宣告 plateau targets 為 `floquet_period` 與 `t6`，idle companion 為 `t4`。
+各 target 以 `families=("t4", target)` 固定，實際執行的 family 集合須正好是兩者。
+另以預設選路的空／暖歷史對雙容差 oracle 比完整 density，reference 在同一 pytest worker 內共用。
+`t6` 是 plateau 的直接積分 family，不代表 `dop853` family 通過。
+
+這個案例允許超過〈測試成本〉每個測試 30 s 的預算：首次計算 18 態、約 760 ns 的兩級容差 lab-frame reference 是成本主體。保留原長度的理由是 joint dressed 模型是約化參數空間中其他案例不涵蓋的一軸，縮短序列會改變驗收的內容。它只在包含 `sim` 的選集執行；`worksteal` 把它的三個測試分到不同 worker 時，每個 worker 各算一次 reference。這是矩陣唯一具名的成本例外。之後新增或修改的案例在 `-n 0` 下超過 30 s 時，先依本節末的順序加本機 hash 快取，不新增第二個具名例外。
 
 每個案例也保留預設選路的空歷史與暖歷史驗收。
 `joint_gate_inventory` 保留完整 20 點 sampled inventory，pinned density 改驗 `dop853`。
@@ -299,6 +312,7 @@ fixture 過重、重複計算或不必要的 sleep／輪詢要直接修，不用
 ### 測試成本
 
 每個測試函數的計算只用單核心。一個測試內部的 worker、thread 或 process 總數最多兩個，用於驗證多 worker 契約。每個測試在 `-n 0` 下少於 30 s。
+Evolution 精度矩陣的 reference 成本依〈Evolution 精度矩陣〉的處理順序；目前唯一具名的成本例外是 `single_tone_sideband`。
 測試不跑慢的模擬或擬合。行為改用小型合成模型（少數能階、短 timeline）、解析解、不變性或最小 case 對照 reference 來確定。
 完整精度與效能量測放在 task 的量測腳本，不放進測試套件。新增測試時以 `--durations=0` 確認耗時。
 

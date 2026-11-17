@@ -2,13 +2,12 @@
 
 # ADR-0072: numeric composition belongs in simulate, not a physical model adapter.
 
-from dataclasses import dataclass
-from hashlib import sha256
+from dataclasses import asdict, dataclass
 
 import numpy as np
 from numpy.typing import NDArray
 
-from .evolution import FluxLevel, SecularDrive, SecularModel
+from .evolution import FluxLevel, SecularDrive, SecularModel, digest
 
 
 @dataclass(frozen=True)
@@ -101,31 +100,6 @@ def _validate_inputs(inputs: ResonatorModeInput) -> None:
             )
 
 
-def _content_key(inputs: ResonatorModeInput) -> str:
-    """Hash length-framed, little-endian arrays and exact scalar/label content."""
-    parts = [
-        b"resonator-mode-v1",
-        repr((inputs.retained_labels, inputs.level, inputs.photon_cutoff)).encode(),
-        float(inputs.frequency_ghz).hex().encode(),
-        float(inputs.decay_per_ns).hex().encode(),
-    ]
-    arrays = [inputs.hamiltonian_ghz, inputs.coupling_ghz]
-    for name, operator in sorted(inputs.drive_operators_ghz.items()):
-        parts.append(name.encode("utf-8"))
-        arrays.append(operator)
-    parts.append(str(len(inputs.drive_operators_ghz)).encode())
-    for matrix in arrays:
-        canonical = np.asarray(matrix, dtype="<c16")
-        parts.extend([repr(canonical.shape).encode(), canonical.tobytes(order="C")])
-    rates = np.asarray(inputs.qubit_rates_per_ns, dtype="<f8")
-    parts.extend([repr(rates.shape).encode(), rates.tobytes(order="C")])
-    content = sha256()
-    for part in parts:
-        content.update(len(part).to_bytes(8, "little"))
-        content.update(part)
-    return content.hexdigest()
-
-
 def _select_labels(
     overlaps: NDArray[np.float64], labels: tuple[tuple[int, int], ...], cutoff: int
 ) -> dict[int, tuple[int, int]]:
@@ -198,7 +172,7 @@ def build_resonator_mode(inputs: ResonatorModeInput) -> ResonatorModeResult:
     np.fill_diagonal(rates, 0)
     model = SecularModel(
         level=inputs.level,
-        identity=_content_key(inputs),
+        identity=digest(asdict(inputs)),
         energies_ghz=energies,
         eigenvectors=np.eye(len(indices), dtype=complex),
         drives=drives,

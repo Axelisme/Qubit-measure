@@ -5,8 +5,8 @@ from dataclasses import replace
 import numpy as np
 import pytest
 from scipy.integrate import solve_ivp, trapezoid
-from zcu_tools.core.simulation import SamplingIdentity
 from zcu_tools.simulate import adc
+from zcu_tools.simulate.boundary import SamplingIdentity
 
 
 def _model(*, jumping=False, identical=False, mismatch=True):

@@ -1,53 +1,54 @@
-"""Physical inputs for finite constant-RWA sweeps, using the Pareto model owner.
+"""Self-contained physical inputs for finite constant-RWA sweeps.
 
 Only input construction lives here. Consumers observe the public diagnostic and
 Engine paths, and use interaction_reference for the full-density comparison.
 Large exploratory grids and their results do not belong in the pytest inventory.
 """
 
-from contextlib import ExitStack, closing
+from contextlib import closing
 from dataclasses import replace
 
-from zcu_tools.program import build_soccfg
-from zcu_tools.simulate.evolution import EnvelopeSpec, ModelSource
-from zcu_tools.simulators.single_fluxonium.config import parse_single_fluxonium
-from zcu_tools.simulators.single_fluxonium.environment import (
-    SingleFluxoniumSource,
-    single_fluxonium,
+import numpy as np
+from zcu_tools.simulate.evolution import DriveSource, EnvelopeSpec, ModelSource
+from zcu_tools.simulate.fluxonium import (
+    DispersiveResonator,
+    FluxoniumNoise,
+    SingleFluxoniumModel,
 )
-
-from tools.family_pareto_settings import BOARD_PROFILE, SINGLE_MODEL
 
 from .accuracy_cases import AccuracyCase, drive_track, timeline
 
 
 def real_rwa_source(bias_phi0: float = 0.5) -> ModelSource:
-    """Return an owned, detached 21-level Pareto source at a fixed DC bias.
+    """Return an owned static 21-level source at bias_phi0 in flux quanta.
 
-    bias_phi0 is DC flux in flux quanta. Only the fixed settings' DC offset is
-    changed; native cutoff, retained levels, temperature, bath and drive line
-    remain those of SINGLE_MODEL. The public environment owner builds the model
-    and initial density. No lab files, device hardware or evolution are used.
-    Fake devices and the environment close before return. The caller must close
-    the returned numeric source. Configuration/model errors propagate.
+    The fixed test inputs are EJ/EC/EL=4/1/1 GHz, native cutoff 40, 50 mK,
+    charge coupling .1 GHz/gain and the loss/resonator parameters below.
+    The public numeric model supplies Gibbs density, bases, drives and baths.
+    All requested levels reuse the DC model, as these sweeps have no flux
+    waveform. No environment, device or settings file is used (ADR-0072).
+    The caller must close the returned source. Numeric model errors propagate.
     """
-    settings = parse_single_fluxonium(SINGLE_MODEL)
-    settings = settings.model_copy(
-        update={
-            "dc_bias": settings.dc_bias.model_copy(update={"offset_phi0": bias_phi0}),
-            "drift": None,
-            "numerics": settings.numerics.model_copy(update={"time_scale": 0.0}),
-        }
+    physical = SingleFluxoniumModel(
+        (4.0, 1.0, 1.0),
+        bias_phi0,
+        cutoff=40,
+        retained_levels=21,
+        temperature_k=0.05,
     )
-    env = single_fluxonium(settings, soccfg=build_soccfg(BOARD_PROFILE))
-    with ExitStack() as stack:
-        stack.callback(env.devices.close_all_devices)
-        if env.close_backend is not None:
-            stack.callback(env.close_backend)
-        owner = stack.enter_context(
-            closing(SingleFluxoniumSource(settings, env.devices))
+    charge = physical.charge_operator()
+    with closing(
+        physical.model_source(
+            (DriveSource("q1_charge", 0.1 * charge, -0.0 * charge),),
+            noise=FluxoniumNoise(q_cap=1e6, q_ind=1e8, xqp=2e-7, aphi=2e-6),
+            resonator=DispersiveResonator(
+                frequency_ghz=7.0,
+                g_ghz=0.03,
+                kappa_per_ns=2 * np.pi * (1.0 + 0.1) / 1000,
+                thermal_occupation=0.0,
+            ),
         )
-        numeric = owner.model_facts(owner.snapshot()).source
+    ) as numeric:
         model = numeric.model((0,))
         initial = numeric.initial_density.copy()
     return ModelSource(initial, lambda level: replace(model, level=level))

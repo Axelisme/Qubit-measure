@@ -5,7 +5,7 @@ from fractions import Fraction
 
 import numpy as np
 import pytest
-from zcu_tools.core import simulation
+from zcu_tools.simulate import boundary as simulation
 
 
 @pytest.mark.parametrize(

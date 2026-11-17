@@ -7,11 +7,6 @@ from threading import Event
 import numpy as np
 import pytest
 from zcu_tools.cfg_model import LinearClassifier
-from zcu_tools.core.simulation import (
-    ChannelStatistics,
-    RoundStatistics,
-    SamplingIdentity,
-)
 from zcu_tools.program.acquisition import StoppedPartialAcquireError
 from zcu_tools.program.v2.builder import TimelineBuilder
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
@@ -19,6 +14,11 @@ from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.read_axes import IQ, Classify, shot_sums, split_sums
 from zcu_tools.program.v2.simulation import IntegratedRound
 from zcu_tools.program.v2.timeline import TimelineProgramV2
+from zcu_tools.simulate.boundary import (
+    ChannelStatistics,
+    RoundStatistics,
+    SamplingIdentity,
+)
 from zcu_tools.simulate.evolution import Cancelled
 
 from tests.program._profiles import load_soccfg
@@ -270,12 +270,12 @@ def test_explicit_zero_noise_preserves_shapes_and_raw():
 
 @pytest.mark.parametrize("edge_counting", [False, True])
 def test_integrated_normalization_round_buffers_and_delayed_raw(edge_counting):
-    from zcu_tools.core.simulation import (
+    from zcu_tools.program.v2.simulation import IntegratedRound
+    from zcu_tools.simulate.boundary import (
         ChannelStatistics,
         RoundStatistics,
         SamplingIdentity,
     )
-    from zcu_tools.program.v2.simulation import IntegratedRound
 
     from tests.program.v2.simulation.support import FixedRawShots
 
@@ -658,7 +658,7 @@ def test_unbound_channel_rejected():
 
 
 def test_numeric_source_round_snapshots_packing_and_fixed_quantized_controls():
-    from zcu_tools.core.simulation import (
+    from zcu_tools.simulate.boundary import (
         ChannelStatistics,
         EnvironmentSnapshot,
         RoundStatistics,
@@ -745,7 +745,7 @@ def test_numeric_source_round_snapshots_packing_and_fixed_quantized_controls():
     ],
 )
 def test_invalid_backend_signals_fail_public_acquire_and_allow_retry(invalid):
-    from zcu_tools.core.simulation import ChannelSignals, RoundSignals
+    from zcu_tools.simulate.boundary import ChannelSignals, RoundSignals
 
     env = environment(std_adc=0, seed=45)
     prog = program(env, reps=1, samples=4)

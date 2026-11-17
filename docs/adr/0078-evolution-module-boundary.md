@@ -90,6 +90,32 @@ Solver 由清單與 solver 的顯式對應決定，不讀 tools metadata，也�
 2026-11-15，使用者說：「我會預期模擬器測試腳本只會依賴模擬器模塊，後端與前端分開測，kernel與dispatch也分開測，不該有e2e的測試需求」。對「整條序列的最終誤差放哪一層」答「A」，即加序列層，不只留 kernel 與 dispatch，也不保留 acquire e2e 只記耗時；對除錯邊界答「我選B」，即除錯時可以跑 e2e，腳本不入庫、不當門檻。
 選項比較見[模擬器測試與量測的分層](../discussions/2026-11-15-simulator-test-measurement-layering.md)。
 
+### 每個 kernel 的量測場景只有一段
+
+優化或校準某個 kernel 時，量測場景是一段由該 kernel 處理的輸入。
+測重複就是同一段接 N 次；一次只改一個約化軸；誤差與耗時在同一組座標上量。
+多段工作負載放在序列層，用來確認整體沒變慢、選路正確與 family 去留。
+
+例：`dop853` 的多 tone 取樣場景是兩個 tone 同起同止、各帶一條包絡的一段，以 `families=("dop853",)` 固定，重複 1、2、20、100 次。
+不用「兩個 Gaussian 錯開 8 ns」這種會被切成好幾段的寫法。
+邊界：要量的就是跨段的東西時（使用者等待的總時間、選路、段間銜接），用序列層手寫的多段 `TimelineBatch`。
+
+2026-11-15，使用者說：「每一个 kernel 的场景，应该都应该只有一段。如果你想要测试重复的，那就是好几个重复段，不会出现两个高选然后交错在一起，然后实际上有五段这样子，这这没什么用。」（「高选」讀作「高斯」）
+這條原則出自 STIRAP 多段 workload 的量測檢討，原始討論未入庫；分層本身見上一段。
+
+### 場景覆蓋靠約化的參數空間
+
+模擬器的測試與驗收不為個別實驗加專屬場景。
+先把輸入約化成 kernel 與 guard 實際看到的物理量：每個 tone 的耦合（gain × 該 flux 下的矩陣元）、到最近躍遷的失諧、時長、包絡形狀與 tone 間距。
+在這個空間上事先宣告格點，系統地覆蓋；每個實驗只核它的座標落在已覆蓋的區域。
+
+例：兩個常數 tone 的輸入（AC Stark、FTF mux 等）用三條軸的一張格點覆蓋，不各量一組：共振轉角（耦合 × 時長）、離共振比（耦合 ÷ 失諧）、累積 Stark 相位（耦合² × 時長 ÷ 失諧）。
+序列層的 RB 型場景照 gate 種類 × 個數宣告，並用隨機相位，因為固定的 X、Y、−X、−Y 循環會抵消部分 RWA 誤差（[RB 型相位序列作為固定量表輸入](../discussions/2026-11-14-random-gate-sequence-workloads.md)）。
+邊界：約化丟掉的物理會改變結果時（例如讀出投影、連續 flux、量子 resonator），把它加成約化空間的新一軸，不加實驗場景。
+
+2026-11-14，使用者主動提出：「实验场景非常多，要完整覆盖是相当困难的，无脑扩充测试场景只会拖慢开发速度，你应该约化不同场景，系统性的覆盖可能情况」。對整理後的原則答：「符合，我預期不會加專屬實驗場景」。
+原始討論（`multitone_rwa` 的量測範圍）未入庫。
+
 ### 歷史控制與精度驗收
 
 2026-11-12，使用者裁定：「B，只要為了優化速度可以損失一點一致性，只要誤差在容許範圍」，並要求「應該已正確的物理演化為誤差參考，而不是當前實作，否則誤差會累計」。
@@ -121,6 +147,58 @@ Dispatch 可以依量測歷史選擇不同 kernel，量測層用公開參數控�
 對整理後的規則答「確認」。
 出處與選項比較見 [family 支配定義的討論](../discussions/2026-11-13-family-dominance-within-tolerance.md)。
 量表判定機制見 [tools README](../../tools/README.md#engine-family-pareto-table)。
+
+### 先保證正確，再優化瓶頸
+
+Guard 在整個參數空間不放行最終誤差超過 `2e-3` 的結果。
+速度優化只針對瓶頸，也就是實際工作負載中耗時最多、使用者在等的場景。
+瓶頸從已有的耗時紀錄找，例如 kernel 表的實測證據、量表摘要與討論紀錄；找不到紀錄才問使用者。
+不要求快速算法涵蓋它能算對的全部區域，安全但較窄的 guard 可以接受。
+
+例：`t6` 的 direct 做法從四個有耗時紀錄的慢場景下手，掃長度的 first-evolve wall 從 736 s 降到 6.3 s，四個場景的最終誤差都 ≤ `2e-3`（[t6 的 direct 加速策略](../discussions/2026-11-14-t6-direct-strategy.md)）。
+邊界：修法已在做、很快落地時，過渡期維持現狀；修法還要研究、時程未定時，先收窄 admission，改走慢但對的候選，修好再放回。
+例：sampled multitone 在修法研究期間暫停 admission，由其他候選計算（[Sampled multitone 的過渡期拒收](../discussions/2026-11-14-sampled-multitone-interim.md)）。
+
+2026-11-14，使用者問「模拟器不应该是覆盖所有可能范围吗？」，並說：「我预期就是首先先确保能全覆盖，然后再来是对于瓶颈场景做优化。」對過渡期的邊界選項答「A」。
+這條原則出自 `multitone_rwa` 適用範圍的討論，原始討論未入庫。
+
+### 快速算法先修好，不輕易放棄
+
+快速算法有誤差問題時，先查原因並試著修正，不先刪除或整個收窄。
+修不好的部分才收 guard，瓶頸範圍留在快速算法（〈先保證正確，再優化瓶頸〉）。
+提出刪除或收窄之前，先寫清誤差或變慢的來源，以及能否修正。
+
+例：`floquet` 最初只量到拒絕或單點較慢的例子。使用者選擇再研究一輪並設停損條件，結果在 committed 批次上比 `dop853` 快 1.65–1.81 倍，因此保留並重校價格（[Floquet 的保留與價格重校](../discussions/2026-11-16-floquet-kept-price.md)）。
+邊界：這條處理算不準的算法。已經算得準、卻沒有服務任何現有瓶頸的做法可以移除，例如 `t6` 的 channel 做法（[t6 只保留 direct](../discussions/2026-11-15-t6-channel-removal.md)）。
+找不到任何能算對的範圍時才收窄或刪除；刪除 family 仍照〈Family 去留〉由使用者看過數據點頭。
+
+2026-11-14，使用者說：「我不太想放弃快速的算法，目前的优化需求还蛮大的」。
+這條原則出自 `single_tone_rwa` 去留與 `multitone_rwa` 超標兩題，原始討論未入庫。
+
+### 支援範圍不看使用頻率
+
+模擬器要支援、要算對、價格要合理的輸入範圍，由物理與介面決定，並在約化參數空間上覆蓋（〈場景覆蓋靠約化的參數空間〉）。
+使用者常不常用不決定這個範圍。
+
+例：價格的 prepare 攤提把重用次數當輸入軸覆蓋，同一段接 N = 1、20、100，不問同一段常不常重複。
+Sampled multitone 過渡期的速度代價照樣用 benchmark 判斷，不以「這類序列較少使用」取代（[Sampled multitone 的過渡期拒收](../discussions/2026-11-14-sampled-multitone-interim.md)）。
+邊界：使用頻率只在已有耗時紀錄時用來排優化的先後，不決定支不支援、算不算對。
+例：`t6` 移除只在高重用才快的 channel 做法後，那類輸入照樣算對，只是變慢（[t6 只保留 direct](../discussions/2026-11-15-t6-channel-removal.md)）。
+
+2026-11-16，使用者問「你為什麼老是問我常不常用？我常用與你模擬器要不要支援是兩回事」，對邊界答「A」。
+原始討論（`multitone_rwa` 的校價需求題）未入庫。
+
+### 模擬器不替使用者擋實驗參數
+
+實驗參數設得不好時，模擬器照常給結果。
+它算不準的部分以警告說明是模擬器的限制，不因參數不當而報錯。
+
+例：projective read 改成 Markov chain 時，51 點、21 能階是合法參數，沒有被記憶體預算擋下（[Projective read 的輸出改成 Markov chain](../discussions/2026-11-17-projection-markov-chain-readout.md)）。
+邊界：契約外的輸入（型別、範圍、維度錯）照舊在進入點 fast fail。
+數值近似的 guard 照〈先保證正確，再優化瓶頸〉不放行超標結果，因為那是算法算錯，不是參數造成的。
+
+2026-11-15，使用者覆核 sideband reset 的殘餘光子檢查時說：「4我覺得有需要嗎？實驗參數設置不當就會發生的問題為什麼模擬器要擋？」對選項答「A」，即算不準也照常給結果並警告。
+原始討論未入庫。
 
 ### 內部允許實質耦合，dispatch 擁有決策知識
 
@@ -200,7 +278,8 @@ preparation 不得跨不同 losses 重用。
 分支 continuation density 僅在一次 preparation 的 span 演化中存在，不跨 acquisition 保留或作下次初態。
 環境在 projective read 起點投影並續演化，Engine 仍不保留跨 evolve 的數值 preparation。
 同輸入的 immutable 完整 preparation 是否重用，仍依本節既有設定、losses 與 route 規則。
-其中的 outcome weights、各 event populations 與 conditional sums 是可重用的數值產品，不是上一個 shot、round 或 acquisition 的量子態或已抽樣 herald 結果。
+其中可重用的數值產品是 FTF 的 outcome weights 與各 event populations、single／six 的 `ProjectionChain` 初始分佈與轉移表，以及兩者的 conditional sums。
+它們不是上一個 shot、round 或 acquisition 的量子態或已抽樣 herald 結果。
 已交付 raw source 保留自己的不可變抽樣輸入，不因此承接前次量子態。
 
 Engine 的 routing-facts cache 只驗證 caller-owned preparation 的當前 route。
@@ -213,6 +292,23 @@ FTF 與 single 不同，不拆損耗無關結構。漂移開啟時，每次 acqu
 整次 points／rounds 共用這次的 losses，不跨不同 losses 重用 rates 或完整 preparation。漂移關閉的既有行為不變。
 這是 advisor 於 2026-10-27 依使用者授權「B你可以自己開task，不用我看過」訂定的重建策略。數值、設定與 truth 的 owner 分工見 [[0072]]。
 
+### Projective read 的 Markov chain 表示
+
+2026-11-16，使用者要求「模擬器不該有 OOM」，看過選項後授權「OOM你就改designer決定」。
+Designer 於 2026-11-17 依此代裁 single／six 的 projective read 表示。
+
+DC rank-1 投影之後，下一段演化只依投影狀態，所以一串 projective read 是以投影狀態為狀態的 Markov chain。
+Single runner 輸出 `simulate.adc.ProjectionChain`：每點第一個 read 的 populations，加上每個後續 read 依前一個投影狀態的轉移表。
+Six 對每個 cavity 使用同一個 runner。
+Runner 不列舉 outcome history，也不設 projection 記憶體預算；記憶體隨點數線性成長，raw 另隨 reps 成長。
+每一點、每個轉移各自判斷：該點近似機率不低於 `projection_prune_floor` 的 source state 採用 `Engine.evolve` 算出的轉移列，其餘狀態在該點設 identity。
+一點的近似不依同次 acquire 的其他點；floor 為零時是精確 chain。
+`simulate.adc` 擁有 chain 的 raw／trace 取樣、integrated 的逐態 flow counts 與累積邊界 bins 編碼；six 合併 integrated 時呼叫同一個編碼器。
+FTF 的 history 帶腔記憶，DC 末態不足以決定後續，FTF 維持 `ProjectionReadout`。
+沒有 projective read 的 single／six 與 FTF 輸出逐位元不變。
+有 projective read 時同 seed 的抽樣值改變；single private replay 升版，舊 archive 明確拒絕。
+選項比較、誤差界與先例立場見[討論快照](../discussions/2026-11-17-projection-markov-chain-readout.md)。
+
 ### Integrated raw 由環境生成，介面由 program 擁有
 
 使用者於 2026-10-20 裁決：「1-1」「基本認同丙，但我質疑有需要進core嗎？」。
@@ -221,8 +317,8 @@ FTF 與 single 不同，不拆損耗無關結構。漂移開啟時，每次 acqu
 `program.v2.simulation.RawShots` 定義延遲產生完整單發 ADC sums 的介面。
 環境以 `IntegratedRound` 一起交付純統計資料和 raw source。
 Program 只在單發 processing 或 getter 需要資料時呼叫 source，不重跑 backend。
-`core.simulation.RoundStatistics` 只有資料，不定義 materializer、Protocol 或 callback。
-Core 的 no-callback 邊界不變。
+`simulate.boundary.RoundStatistics` 只有資料，不定義 materializer、Protocol 或 callback。
+統計資料的 no-callback 邊界不變。
 
 ADC 和 white_noise 各自生成完整 raw，包含物理訊號、receiver noise、nearest-even int64 轉換和排列。
 兩者以結構型別符合 RawShots，不 import program。

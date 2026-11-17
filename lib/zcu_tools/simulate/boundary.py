@@ -793,13 +793,14 @@ class RoundSignals:
 class ChannelStatistics:
     """Borrowed integrated round statistics of one ADC, in ADC sample-sum units.
 
-    With P = point_dims, R = reads, S = readout states:
+    With P = point_dims, R = reads, S = integrated categories:
 
     channel: Zero-based ADC index, independent of tuple position.
     sums: float64 (*P, R, 2) totals over reps, without normalization. Includes
         receiver noise and the int64 rounding variance reps/12 per component.
-    conditional_sums: float64 (*P, R, S, 2) noiseless per-shot sums conditioned
-        on the initial readout state. State order matches state_counts.
+    conditional_sums: float64 (*P, R, S, 2) noiseless per-shot sums for each
+        read and category. Category order matches state_counts. A category
+        need not represent a real shot path or an initial readout state.
     shot_covariance: float64 (2, 2) positive-semidefinite receiver-noise
         covariance of one sum, samples times the per-sample covariance.
         Zero and singular covariance are valid. It excludes rounding variance.
@@ -819,8 +820,10 @@ class ChannelStatistics:
 class RoundStatistics:
     """Integrated-mode summary of one software round, with borrowed arrays.
 
-    state_counts: int64 (*point_dims, states) nonnegative multinomial counts,
-        summing to reps per point. Counts are shared by all ADCs and reads.
+    state_counts: int64 (*point_dims, categories) nonnegative category counts,
+        partitioning reps per point. All ADCs and reads share these counts.
+        Categories may encode marginal event or cavity histograms rather than
+        real shot paths. They are not necessarily a joint state distribution.
     channels: One ChannelStatistics per requested ADC, in any order.
     raw_identity: Informational local PCG64 identity for the environment's raw
         source. This record never generates shots. Producers use stream

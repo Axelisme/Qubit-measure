@@ -3,14 +3,14 @@
 from importlib.metadata import version
 from pathlib import Path
 
-from zcu_tools.core.simulation import RoundRequest, RoundSignals
 from zcu_tools.device import DeviceManager
 from zcu_tools.program.v2.simulation import IntegratedRound
+from zcu_tools.simulate.boundary import RoundRequest, RoundSignals
 from zcu_tools.simulate.evolution import SEGMENT_NUMERIC_VERSION
 from zcu_tools.simulators.replay import read_replay
 from zcu_tools.simulators.single_fluxonium.config import SingleFluxoniumSettings
 
-BACKEND_VERSION = "single-fluxonium-segment-v1"
+BACKEND_VERSION = "single-fluxonium-chain-v2"
 
 
 def replay_versions() -> tuple[tuple[str, str], ...]:

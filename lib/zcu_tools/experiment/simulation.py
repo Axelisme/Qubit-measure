@@ -11,15 +11,15 @@ from uuid import uuid4
 
 from qick import QickConfig
 
-from zcu_tools.core.simulation import (
-    RoundRequest,
-    RoundSignals,
-)
 from zcu_tools.device import DeviceManager, FakeDevice
 from zcu_tools.program.v2.simulation import (
     IntegratedRound,
     SimulationBinding,
     SimulationSoc,
+)
+from zcu_tools.simulate.boundary import (
+    RoundRequest,
+    RoundSignals,
 )
 from zcu_tools.simulate.white_noise import WhiteNoise
 
