@@ -9,7 +9,13 @@ from dataclasses import replace
 
 import numpy as np
 import pytest
-from zcu_tools.simulate.evolution import Engine, EnvelopeSpec, NoValidKernel
+from zcu_tools.simulate.evolution import (
+    Engine,
+    EnvelopeSpec,
+    ModelSource,
+    NoValidKernel,
+    RoutingHistory,
+)
 
 from .accuracy_cases import (
     AccuracyCase,
@@ -82,8 +88,8 @@ def test_pinned_multitone_gate_below_cost_break_even() -> None:
 # guard+apply=6.125e-7 s; break-even=132.13687 current-acquire uses.
 # Build coefficient uses the fixed 32-state FTF X90/CZ first-stage calibration.
 # 1/10 uses are >10x below; 4096 is >30x above. Twenty is the short-use
-# regression, not a price boundary. Tests never price the key. WIP until the
-# target producer's final key identities are checked against the calibration.
+# regression, not a price boundary. Tests never price the key. The target
+# producer's four canonical keys match the fixed-FTF calibration inputs.
 @pytest.mark.parametrize("count", [1, 10, 20])
 def test_short_inventory_skips_unprofitable_gate_before_guard(count: int) -> None:
     """Twenty uses cannot repay a full-drive phase build."""
@@ -97,6 +103,35 @@ def test_short_inventory_skips_unprofitable_gate_before_guard(count: int) -> Non
             "dop853": "accepted",
             "multitone_gate": "untested_after_short_circuit",
         }
+
+
+# Gate inventory currently does not write RoutingHistory. This checks only the
+# public promise that a prior evolve on the shared history leaves the current
+# one-use gate decision unchanged, not an internal same-key counter. If gate
+# usage is recorded later, this also protects against amortizing over history.
+# The preceding boundary receipt puts 4096 uses >30x above break-even.
+def test_prior_evolve_on_shared_history_keeps_short_gate_unprofitable() -> None:
+    history = RoutingHistory()
+    large = _joint_gate_case(4096)
+    short = _joint_gate_case(1)
+    with (
+        closing(
+            ModelSource(
+                large.source.initial_density, large.source.model, history=history
+            )
+        ) as source,
+        closing(Engine(1, families=("multitone_gate", "dop853"))) as engine,
+    ):
+        engine.evolve(source, (large.batch,))
+        query = engine.inspect_dispatch(source, (short.batch,))
+    assert len(query.rows) == 1
+    assert query.rows[0].family == "dop853"
+    assert {
+        candidate.family: candidate.guard for candidate in query.rows[0].candidates
+    } == {
+        "dop853": "accepted",
+        "multitone_gate": "untested_after_short_circuit",
+    }
 
 
 @pytest.mark.parametrize("shared", [False, True])

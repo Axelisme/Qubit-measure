@@ -50,7 +50,8 @@ def gate_preferred(
 ) -> NDArray[np.bool_]:
     """Compare cold gate prices before building any phase coefficients.
 
-    Only complete current-acquire canonical counts amortize gate construction.
+    Only complete current-acquire canonical inventory counts amortize gate
+    construction; the gate price never reads RoutingHistory.
     Eligible RWA retains its source-history cold price. An absent competitor
     cannot veto a pinned gate; numerical admission still belongs to its guard.
     """
@@ -88,6 +89,10 @@ def gate_preferred(
 
 def gate_cost(table: SegmentTable, row: int, context: KernelContext) -> "MultitoneCost":
     """Estimate first-stage build and four-quarter phase playback in CPU seconds.
+
+    These usage-independent prices are amortized by gate_preferred using only
+    this acquire's complete canonical inventory, never RoutingHistory. Every
+    evolve pays for its own construction, even after a prior matching evolve.
 
     The density-to-Hilbert work coefficient 0.289 fits four first-stage builds
     on tools/family_pareto_settings.FTF_MODEL, 32 states at flux .48/.20/.49.
@@ -254,7 +259,14 @@ def populate_multitone_plan(
 
 @dataclass(frozen=True)
 class MultitoneCost:
-    """Usage-independent direct/RWA prices for one expanded row."""
+    """Usage-independent prices for one row's gate or expanded-RWA candidate.
+
+    All fields are finite nonnegative CPU-second estimates, not measurements
+    or runtime guarantees. direct is one full-drive density evolution of the
+    same row. prepare is one cold construction of this candidate's reusable
+    product. guard and apply are this candidate's per-use admission and playback
+    work. Amortizing prepare requires a positive integer use count.
+    """
 
     direct: float
     prepare: float
@@ -262,6 +274,7 @@ class MultitoneCost:
     apply: float
 
     def direct_cheaper(self, uses: int) -> bool:
+        """Compare direct against cold candidate work for positive integer uses."""
         return self.direct < self.guard + self.prepare / uses + self.apply
 
 
@@ -328,12 +341,9 @@ def _price_row(table: SegmentTable, row: int, context: KernelContext) -> Multito
     action = 1 + 4 * np.sqrt(strength) + 4 * strength
     tolerance = (1e-3 / context.budget) ** 0.125
     restored_frequency = max(
-        (
-            abs(model.energies_ghz[i] - model.energies_ghz[j] + frequency)
-            for frequency, edges in zip(frequencies, retained.edges, strict=True)
-            for i, j in edges
-        ),
-        default=0.05,
+        abs(model.energies_ghz[i] - model.energies_ghz[j] + frequency)
+        for frequency, edges in zip(frequencies, retained.edges, strict=True)
+        for i, j in edges
     )
     occupancy = retained.dimension / size**2
     # Expanded graphs incur fast interaction-picture oscillations and additional
