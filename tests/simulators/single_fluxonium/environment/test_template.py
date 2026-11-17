@@ -5,13 +5,13 @@ from dataclasses import replace
 
 import numpy as np
 import pytest
-from zcu_tools.core.simulation import (
+from zcu_tools.device import DeviceManager
+from zcu_tools.simulate.boundary import (
     AcquireRequest,
     ChargeDriveRequirement,
     PulseEnvelope,
     ReadoutWindow,
 )
-from zcu_tools.device import DeviceManager
 from zcu_tools.simulators.single_fluxonium.config import parse_single_fluxonium
 from zcu_tools.simulators.single_fluxonium.environment import SingleFluxoniumSource
 

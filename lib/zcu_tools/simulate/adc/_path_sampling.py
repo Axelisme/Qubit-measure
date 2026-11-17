@@ -1,14 +1,18 @@
 """Shared physical path observations for integrated raw and batched traces."""
 
+from collections.abc import Iterator
 from itertools import groupby
+from math import prod
 from typing import TYPE_CHECKING
 
 import numpy as np
+from numpy.typing import NDArray
 
 from ._integrated_paths import IntegratedPaths
 from ._jump_paths import JumpPaths
 from ._noise import noise_root
 from .model import RealArray
+from .projection import ProjectionChain, ProjectionReadout
 
 if TYPE_CHECKING:
     from .raw import PreparedRawShots
@@ -28,16 +32,13 @@ def physical_shots(
     per receiver/read/sample. Traces require equal sample counts per ADC.
     """
     readout = prepared.readout
-    weights = readout.weights.reshape((-1, readout.weights.shape[-1]))
+    point_dims = (
+        readout.initial.shape[:-1]
+        if isinstance(readout, ProjectionChain)
+        else readout.weights.shape[:-1]
+    )
+    points_count = prod(point_dims)
     batches, reps = prepared.batches, prepared.reps
-    if weights.shape[-1] == 1:
-        outcomes = np.zeros((len(weights), reps), dtype=np.int64)
-    else:
-        outcomes = np.sum(
-            rng.random((len(weights), reps))[..., None]
-            >= weights.cumsum(axis=-1)[:, None, :-1],
-            axis=-1,
-        )
     output = {}
     for channel, batch in batches:
         counts = tuple(
@@ -45,26 +46,19 @@ def physical_shots(
         )
         if traces and len(set(counts)) != 1:
             raise ValueError("trace reads of one ADC must have equal sample counts")
-        shape = (len(weights), reps, len(counts))
+        shape = (points_count, reps, len(counts))
         output[channel] = np.zeros((*shape, *((counts[0],) if traces else ()), 2))
         _fill_empty_events(batch, output[channel], traces=traces)
-    if not batches or not reps or not len(weights):
+    if not batches or not reps or not points_count:
         return output
     # ADCs may deduplicate contents differently. Group by the complete tuple.
     keys = [
         tuple(int(batch.content_index[p]) for _, batch in batches)
-        for p in range(len(weights))
+        for p in range(points_count)
     ]
     ordered = sorted(range(len(keys)), key=keys.__getitem__)
     offsets = dict.fromkeys((channel for channel, _ in batches), 0)
-    for event_index, populations in enumerate(readout.populations):
-        probabilities = populations.reshape((len(weights), weights.shape[-1], -1))
-        selected = probabilities[np.arange(len(weights))[:, None], outcomes]
-        states = np.sum(
-            rng.random((len(weights), reps))[..., None]
-            >= selected.cumsum(axis=-1)[..., :-1],
-            axis=-1,
-        )
+    for event_index, states in enumerate(_event_states(readout, reps, rng)):
         plans = {
             (channel, content): IntegratedPaths(
                 batch.model,
@@ -120,6 +114,52 @@ def physical_shots(
             axis=2,
         )
     return output
+
+
+def _event_states(
+    readout: ProjectionReadout | ProjectionChain, reps: int, rng: np.random.Generator
+) -> Iterator[NDArray[np.int64]]:
+    """Yield projection states, interleaving each event draw with its CTMC draws."""
+    if isinstance(readout, ProjectionChain):
+        initial = readout.initial.reshape((-1, readout.initial.shape[-1]))
+        selected = np.broadcast_to(
+            initial[:, None, :], (len(initial), reps, initial.shape[-1])
+        )
+        states = np.sum(
+            rng.random((len(initial), reps))[..., None]
+            >= selected.cumsum(axis=-1)[..., :-1],
+            axis=-1,
+        )
+        yield states
+        for transition in readout.transitions:
+            rows = transition.reshape(
+                (len(initial), initial.shape[-1], initial.shape[-1])
+            )
+            selected = rows[np.arange(len(initial))[:, None], states]
+            states = np.sum(
+                rng.random((len(initial), reps))[..., None]
+                >= selected.cumsum(axis=-1)[..., :-1],
+                axis=-1,
+            )
+            yield states
+    else:
+        weights = readout.weights.reshape((-1, readout.weights.shape[-1]))
+        if weights.shape[-1] == 1:
+            outcomes = np.zeros((len(weights), reps), dtype=np.int64)
+        else:
+            outcomes = np.sum(
+                rng.random((len(weights), reps))[..., None]
+                >= weights.cumsum(axis=-1)[:, None, :-1],
+                axis=-1,
+            )
+        for populations in readout.populations:
+            probabilities = populations.reshape((len(weights), weights.shape[-1], -1))
+            selected = probabilities[np.arange(len(weights))[:, None], outcomes]
+            yield np.sum(
+                rng.random((len(weights), reps))[..., None]
+                >= selected.cumsum(axis=-1)[..., :-1],
+                axis=-1,
+            )
 
 
 def _fill_empty_events(

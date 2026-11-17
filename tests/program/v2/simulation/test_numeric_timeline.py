@@ -3,7 +3,6 @@
 import numpy as np
 import pytest
 from qick.asm_v2 import QickParam
-from zcu_tools.core.simulation import ChannelSignals, RoundSignals
 from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.program.v2 import TimelineBuilder
 from zcu_tools.program.v2.modules.delay import Delay, DelayAuto
@@ -11,6 +10,7 @@ from zcu_tools.program.v2.modules.dmem import LoadValue
 from zcu_tools.program.v2.modules.pulse import Pulse
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ArbWaveformCfg, ConstWaveformCfg
+from zcu_tools.simulate.boundary import ChannelSignals, RoundSignals
 
 from tests.program._profiles import (
     GEN_MAXV,

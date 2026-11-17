@@ -212,10 +212,12 @@ class Numerics(RoundPacing):
     slow_envelope_segments_per_period: Annotated[int, Field(ge=1, strict=True)]
     seed: Index | None
     projection_prune_floor: Annotated[Nonnegative, Field(lt=1)]
-    """Discard global projective outcome weights below this finite threshold.
+    """Per-point source-state probability threshold for projection continuation.
 
-    Zero disables pruning. If every outcome of a point falls below the floor,
-    execution raises ValueError naming the point and threshold.
+    A state below this finite floor at a point stays in that state there,
+    using an identity transition row instead of a solver row. Zero gives the
+    exact chain. Path total variation is at most the sum of that point's
+    diagnostics.uncontinued_probability across transitions.
     """
 
 

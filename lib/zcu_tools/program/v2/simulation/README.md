@@ -1,6 +1,6 @@
 # Explicit acquisition environments
 
-**Last updated:** 2026-11-16
+**Last updated:** 2026-11-17
 
 **讀者：** framework-dev。模擬 acquisition 的 request、round 與 raw source 契約。
 
@@ -45,7 +45,7 @@ filters. An omitted on_end avoids this observer and its acquire-level clocks. FT
 callback to persist its own local routing reports; program knows no file format.
 Integrated `acquire(..., charge_requirements=(ChargeDriveRequirement(name, gen_ch), ...))`
 passes named physical charge requirements through the simulation request. The
-record lives in `core.simulation`; names are diagnostics, not dispatch keys.
+record lives in `simulate.boundary`; names are diagnostics, not dispatch keys.
 Single-fluxonium validates membership before evolution. White noise accepts
 requirements without physical checks because it has no physical line model.
 Six-fluxonium and FTF reject nonempty requirements before evolution until they
@@ -309,10 +309,12 @@ reuses the physical result across rounds. A changed snapshot requires a new
 evolution. Each readout state's conditional mean response is computed once per
 distinct readout content; populations combine these means linearly.
 
-Integrated statistics draw noise once per (round, point), not per shot.
-Multinomial state counts represent projection noise. Gaussian receiver noise
-uses the covariance of the sum over reps. Environments deliver an independent
-RawShots source with retained noiseless inputs and a local round identity.
+Integrated statistics sample category counts that sum to reps at each point.
+The counts retain projection noise, but categories need not represent physical
+shot paths. Each read and category has noiseless per-shot sums. Gaussian
+receiver noise uses the covariance of the sum over reps. Environments deliver
+an independent RawShots source with retained noiseless inputs and a local round
+identity.
 Requesting shots calls that source without rerunning evolution or the backend.
 Raw ADC values remain int64, and round indices select distinct sampling streams.
 
@@ -323,7 +325,7 @@ points or reps.
 
 ## Numeric contract and extension points
 
-`core.simulation` owns immutable numeric records. No Module, driver, GUI object
+`simulate.boundary` owns immutable numeric records. No Module, driver, GUI object
 or callback crosses this boundary; `RoundRequest.cancel` is a read-only `is_set()`
 query, not a callback. Every request time is an integer tick in its required
 `TimeBase`. Array times use int64 without changing point/read shapes. Frequency
@@ -422,15 +424,17 @@ Normal hardware compilation and the native timeline timing policy are unchanged.
   coordinates admission and retains `last_request` and `rounds` privately in
   memory. `execute(RoundRequest)` returns `IntegratedRound(statistics, raw)` for
   integrated mode or `RoundSignals` for decimated mode. Mode/result mismatches raise.
-  `statistics` is a pure core `RoundStatistics`; `raw` satisfies the program-owned
+  `statistics` is a pure boundary `RoundStatistics`; `raw` satisfies the program-owned
   `RawShots.materialize(reps, avg_level)` protocol.
-- Integrated statistics contain per-point totals over reps, shared state counts,
-  conditional per-shot sums and receiver covariance. The adapter validates and
-  detaches these arrays. Each SimulationSoc retains at most 64 KiB of successful
+- Integrated statistics contain per-point totals over reps, shared category
+  counts that sum to reps, noiseless per-shot sums per read and category, and
+  receiver covariance. Categories need not represent physical shot paths.
+  The adapter validates and detaches these arrays. Each SimulationSoc retains
+  at most 64 KiB of successful
   conditional-sum/covariance validation certificates, keyed by shape, dtype and
   exact bytes, not borrowed array identity. Counts, layout and noisy totals are
   checked each round, and every returned array is detached even on a certificate
-  hit. Certificates live with the SoC and do not cross the core/backend boundary.
+  hit. Certificates live with the SoC and do not cross the acquisition/backend boundary.
   Fixed request layouts and integrated normalization metadata are prepared once
   per acquire; this never freezes snapshots or certifies later backend values.
   Without processors, threshold or trackers,

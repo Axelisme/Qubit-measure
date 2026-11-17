@@ -5,9 +5,9 @@ from dataclasses import replace
 import numpy as np
 import pytest
 from numpy.typing import NDArray
-from zcu_tools.core.simulation import PulseEnvelope
 from zcu_tools.device import DeviceManager
 from zcu_tools.simulate.adc import cavity_field_average, cavity_fields
+from zcu_tools.simulate.boundary import PulseEnvelope
 from zcu_tools.simulate.evolution import (
     Engine,
     EvolutionResult,
