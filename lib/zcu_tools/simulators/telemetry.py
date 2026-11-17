@@ -1,5 +1,7 @@
 """Best-effort local JSONL persistence for acquire-level routing reports."""
 
+from __future__ import annotations
+
 import json
 import warnings
 from collections.abc import Sequence
@@ -8,26 +10,80 @@ from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import Lock
-from typing import TypedDict
+from typing import TYPE_CHECKING, TypedDict
 
-from zcu_tools.simulate.evolution import FamilyRouting, PathDiagnostics
+from pydantic import JsonValue
+
+from zcu_tools.resources.simulation_schema import Values
+
+if TYPE_CHECKING:
+    from zcu_tools.simulate.evolution import PathDiagnostics
 
 
-class _Record(TypedDict):
-    timestamp: str
+class TelemetrySettings(Values):
+    """Local routing logging policy, separate from numerical accuracy.
+
+    enabled: write one acquire summary, default True. directory: optional output
+    path; None uses project-root .sim_telemetry. Relative paths resolve against
+    the working directory when the environment is built. No I/O occurs here.
+    """
+
+    enabled: bool = True
+    directory: Path | None = None
+
+
+class AcquireTelemetry(TypedDict):
+    """Required caller-supplied summary for one acquire, without numerical inputs.
+
+    points: request grid size excluding shots and rounds.
+    rounds: number of captured attempts, including failed attempts.
+    wall_s: admitted acquire wall seconds including pacing, excluding writer I/O.
+    compile_wall_s: compilation wall seconds, through failure if it raises.
+    evolve_wall_s: sum of Engine.evolve wall seconds, including failed calls.
+    readout_wall_s: summed ADC/readout wall seconds, including failed calls.
+    Stages not entered contribute 0.0; no stage may be unmeasured.
+    complete: True if the acquire body and cleanup returned normally, including
+    a partial Stop result; False if an exception escaped. It does not mean all
+    requested rounds completed.
+    extras: simulator-prefixed keys (for example ftf.projection_outcomes) mapped
+    to JSON values; pass {} when absent. Consumers index required keys directly.
+    """
+
     points: int
     rounds: int
     wall_s: float
+    compile_wall_s: float
+    evolve_wall_s: float
+    readout_wall_s: float
+    complete: bool
+    extras: dict[str, JsonValue]
+    capture_file: str | None
+    """Published capture basename; None when recording is off or publication fails."""
+
+
+class RoutingRecord(AcquireTelemetry):
+    """Persisted acquire summary with writer-generated routing fields.
+
+    timestamp: UTC ISO timestamp.
+    frontend_cpu_s: calling-thread geometry and work-plan CPU seconds.
+    estimated_cost_unit: label for relative family scheduling costs.
+    families: family name to summed Engine routing counters and CPU seconds;
+    estimated_cpu_s is None when any contributing estimate is unavailable.
+    Caller-supplied fields retain their AcquireTelemetry meanings.
+    """
+
+    timestamp: str
     frontend_cpu_s: float
     estimated_cost_unit: str
     families: dict[str, dict[str, int | float | None]]
-    projection_outcomes: list[int]
-    projection_pruned_weight: list[float]
 
 
 def _families(
     paths: Sequence[PathDiagnostics],
 ) -> dict[str, dict[str, int | float | None]]:
+    # Keep configuration imports independent of the numerical runtime.
+    from zcu_tools.simulate.evolution import FamilyRouting
+
     grouped: dict[str, list[FamilyRouting]] = {}
     for report in paths:
         for name, family in report.routing.items():
@@ -77,37 +133,35 @@ class RoutingTelemetry:
 
     def write(
         self,
+        summary: AcquireTelemetry,
         *,
-        points: int,
-        wall_s: float,
-        rounds: int,
         paths: Sequence[PathDiagnostics],
-        projection_outcomes: Sequence[int] = (),
-        projection_pruned_weight: Sequence[float] = (),
     ) -> None:
-        """Append an acquire summary; paths contains this acquire's round work.
+        """Append one summary without modifying it or persisting extra caller keys.
 
-        points counts the request grid once, not shots or software rounds. wall_s
-        measures admitted acquire wall time including pacing, excluding this I/O.
-        paths may be empty after a failure before evolution. Templates currently
-        carry no experiment/program identifier, so no name is synthesized.
-        projection_outcomes and projection_pruned_weight describe the latest
-        round's retained histories and cumulative removed probability per C-order
-        point. Empty sequences mean no projective reads or no completed solve.
+        summary supplies every AcquireTelemetry field, including {} for no extras.
+        paths contains this acquire's round work; it may be empty after a failure
+        before evolution. Fields and aggregation are described by RoutingRecord.
+        Templates carry no experiment/program identifier, so none is synthesized.
+        Filesystem/serialization failures follow this class's warning-only policy.
         """
         with self._lock:
             try:
                 now = datetime.now(timezone.utc)
-                record: _Record = {
+                record: RoutingRecord = {
                     "timestamp": now.isoformat(),
-                    "points": points,
-                    "rounds": rounds,
-                    "wall_s": wall_s,
+                    "points": summary["points"],
+                    "rounds": summary["rounds"],
+                    "wall_s": summary["wall_s"],
                     "frontend_cpu_s": sum(p.frontend_cpu_s for p in paths),
                     "estimated_cost_unit": "relative scheduling units",
                     "families": _families(paths),
-                    "projection_outcomes": list(projection_outcomes),
-                    "projection_pruned_weight": list(projection_pruned_weight),
+                    "compile_wall_s": summary["compile_wall_s"],
+                    "evolve_wall_s": summary["evolve_wall_s"],
+                    "readout_wall_s": summary["readout_wall_s"],
+                    "complete": summary["complete"],
+                    "extras": summary["extras"],
+                    "capture_file": summary["capture_file"],
                 }
                 line = (
                     json.dumps(record, allow_nan=False, separators=(",", ":")) + "\n"

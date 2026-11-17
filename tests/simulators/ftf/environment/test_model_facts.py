@@ -3,12 +3,14 @@
 import weakref
 from collections.abc import Sequence
 from dataclasses import replace
+from typing import override
 
 import numpy as np
 import pytest
 from zcu_tools.device import DeviceManager
 from zcu_tools.simulate.boundary import CancellationQuery
 from zcu_tools.simulate.evolution import (
+    CaptureBuffer,
     Engine,
     EvolutionResult,
     ModelSource,
@@ -37,6 +39,7 @@ class ObservedEngine(Engine):
         super().__init__(1)
         self.sources: list[weakref.ReferenceType[ModelSource]] = []
 
+    @override
     def evolve(
         self,
         source: ModelSource,
@@ -46,6 +49,7 @@ class ObservedEngine(Engine):
         cancel: CancellationQuery | None = None,
         telemetry: bool = False,
         reuse_key: bytes | None = None,
+        capture: CaptureBuffer | None = None,
     ) -> EvolutionResult:
         self.sources.append(weakref.ref(source))
         return super().evolve(
@@ -55,6 +59,7 @@ class ObservedEngine(Engine):
             cancel=cancel,
             telemetry=telemetry,
             reuse_key=reuse_key,
+            capture=capture,
         )
 
 

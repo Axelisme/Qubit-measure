@@ -4,6 +4,10 @@
 
 **讀者：** framework-dev。查閱 single-fluxonium YAML 的載入入口、欄位單位與驗證規則。
 
+`numerics.debug_capture` is optional and defaults to false. True records one
+acquire's Engine inputs and routes using the
+[shared capture policy](../../README.md#debug-capture).
+
 [ADR-0072](../../../../../docs/adr/0072-module-boundaries.md) separates model configuration from shared framework mechanisms and caller-owned board profiles.
 
 `load_single_fluxonium(path)` reads UTF-8 YAML. `parse_single_fluxonium(document)` validates a decoded document. Both return immutable `SingleFluxoniumSettings` and reject invalid values with dotted field paths. Neither creates devices or numerical models.
@@ -23,6 +27,11 @@ and `readout.resonator.thermal_occupation`. An explicit null seed chooses once
 at startup; an explicit null occupation uses Bose equilibrium at the chip temperature.
 Each receiver requires `background.ripple_period_mhz` and `background.pivot_ghz`.
 Zero depth and slope still disable those effects. Off/identity defaults remain optional.
+
+Optional `numerics.telemetry` uses the shared `TelemetrySettings` from
+`simulators.telemetry`. `enabled` defaults to true. `directory` defaults to null,
+selecting the project-root `.sim_telemetry`; relative paths resolve at environment
+construction. Disabling telemetry suppresses acquire JSONL writes.
 
 Source names must differ across DC, microwave and fast flux. All bound generator routes must differ. ADC channels use a separate namespace. Unknown fields, invalid dimensions, nonfinite numbers and non-PSD receiver noise fail before resource creation. YAML decoding uses the shared `resources.yaml.load_yaml`; common physical records come from `resources.simulation_schema`, also used by FTF.
 

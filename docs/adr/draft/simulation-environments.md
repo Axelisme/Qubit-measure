@@ -103,7 +103,7 @@ Single-fluxonium 的選填 YAML `drift` 區塊為 `q_cap`、`xqp`、`aphi` 各�
 
 一個模擬環境共用一個 `SimulationClock`，時間等於 `time.monotonic()` 加只增不減的 offset。每個完成 round 增加 `max(0, 未乘 time_scale 的物理時長 - 實際牆鐘時長)`。牆鐘時長包含 snapshot、計算與 pacing sleep。取消或失敗的 round 不補 offset。Acquisition 間的等待由牆鐘自然計入。新環境重設 offset 為零。時鐘只在模擬側執行，真實 acquire 不接觸它，依 [[0072]]。
 
-`SimulationBinding.begin` 在 admission 後、request 建構前呼叫模擬端 preparation。`SingleFluxoniumSource.open_acquire` 消耗這份 preparation，不再次取樣。直接使用 Source 的 caller 則在 open 時取樣。整次 acquisition 的 sweep 與 rounds 共用有效損耗，DC 裝置值仍逐 round 捕捉。獨立 drift RNG 由 acquisition 根種子派生，不消耗既有 ADC 抽樣 stream。相同種子只在相同時間序列下重現軌跡。
+`SimulationBinding.acquire()` 作用域在 admission 後、request 建構前呼叫模擬端 preparation。`SingleFluxoniumSource.open_acquire` 消耗這份 preparation，不再次取樣。直接使用 Source 的 caller 則在 open 時取樣。整次 acquisition 的 sweep 與 rounds 共用有效損耗，DC 裝置值仍逐 round 捕捉。獨立 drift RNG 由 acquisition 根種子派生，不消耗既有 ADC 抽樣 stream。相同種子只在相同時間序列下重現軌跡。
 
 開啟漂移時，模擬端每次 acquisition 寫一行 JSONL。預設位置為 `~/.local/state/zcu-tools/simulation/single-fluxonium/<session>/truth.jsonl`，builder/source 的 `truth_log` 可指定其他檔案。每行包含 session UUID、秒制 `sim_now`、UTC ISO `wall_time`，以及 `q_cap`、`q_ind`、`xqp`、`aphi`。新環境產生新 session。關閉漂移不建立檔案。I/O 失敗向 caller 傳遞，不偽裝成成功。
 

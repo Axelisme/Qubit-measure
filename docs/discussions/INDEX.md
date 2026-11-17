@@ -18,6 +18,20 @@
 
 ## 模擬量測環境
 
+- 2026-11-17 [Capture 的唯讀體檢與 typed metadata](2026-11-17-capture-inspection.md)：唯讀報告。共用 owner schema 讀逐輪實錄，以 capture_file 對行，條件差異只標記、不重算。
+
+- 2026-11-17 [Capture 的發布與 acquire 關聯](2026-11-17-capture-publication.md)：公開寫出。Writer 共用 cache root，以原子 manifest 發布和 capture_file 關聯三個 environment 的同次 telemetry。
+
+- 2026-11-17 [Engine capture 的逐輪選路事件](2026-11-17-engine-capture-events.md)：公開錄製。每次 evolve 一個 ID，以既有凍結容器保存輸入，分開記 caller deferral、worker resolution 與 prefix 採用者。
+
+- 2026-11-16 [Acquire wall 的分組與未量測資料](2026-11-16-acquire-wall-analysis.md)：彙總契約。只按 complete 分組，四個 wall 俱為數字才計入耗時，所有有效行保留 family 統計。
+- 2026-11-16 [Single 與 six 的 acquire telemetry](2026-11-16-single-six-acquire-telemetry.md)：計時聚合。以 acquire 為寫入邊界，聚合各 source 與 projective span，直接沿用 binding 成敗。
+- 2026-11-16 [FTF acquire 的演化與讀出 wall](2026-11-16-ftf-layer-walls.md)：分層計時。每次 Engine 與 ADC 工作各自累積 wall，跨 round 與 continuation 加總，失敗段保留已耗時間。
+
+- 2026-11-16 [Acquire outcome 的作用域與編譯交接](2026-11-16-acquire-outcome-scope.md)：生命週期。Binding 以自身作用域判斷正常返回，mixin 只圈住 builder 計時，environment 接收同一結果物件。
+
+- 2026-11-16 [共用 acquire telemetry writer](2026-11-16-shared-acquire-telemetry.md)：資料契約。共用八欄必填 summary，writer 明列投影，FTF projection 只放 namespaced extras。
+
 - 2026-11-17 [DOP853 加速路線的證據與未驗項](2026-11-17-dop853-speed-route-summary.md)：路線比較。指定 Gaussian 批次的多 worker 有配對收益，取樣前導共享潛力未知，載波固定原型精度不合格，GPU 全 14 組比較延期未量。
 
 - 2026-11-17 [DOP853 profile 場景的單列選取與 producer 接線](2026-11-17-dop853-profile-scenario-routing.md)：場景接線。Profile owner 先選名稱再建單一 Input，producer 附加宣告但不擴大 Pareto 預設選集，也不自動準備數值。

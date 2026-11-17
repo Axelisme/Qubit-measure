@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-11-17, RWA Fourier ownership, kappa2 admission, current plateau dispatch and common-frame sampled scope
+**Last updated:** 2026-11-17, Engine capture, atomic publication, shared directory, endpoint kicks, RWA Fourier ownership, kappa2 admission, current plateau dispatch and common-frame sampled scope
 
 **讀者：** framework-dev、agent。Segment evolution 的公開輸入、路由與數值邊界。
 
@@ -14,6 +14,7 @@ boundary and the decision to keep algorithm knowledge in dispatch.
 - [Public entry points](#public-entry-points)
 - [Frozen numeric inputs and references](#frozen-numeric-inputs-and-references)
 - [Dispatch inspection](#dispatch-inspection)
+- [Engine capture](#engine-capture)
 - [Joint-Fock prototype](#joint-fock-prototype)
 - [Routing telemetry](#routing-telemetry)
 - [Decision graph](#decision-graph)
@@ -38,6 +39,7 @@ The exports in [__init__.py](__init__.py) fall into these groups:
 | Purpose | Exports |
 | --- | --- |
 | Execution and results | `Engine`, `EvolutionResult`, `PathDiagnostics`, `FamilyRouting`, `Cancelled`, `SEGMENT_NUMERIC_VERSION` |
+| Execution capture | `CaptureBuffer`, `CaptureMetadata`, `CaptureRoute`, `CaptureCandidate`, `CapturePrefixRun`, `CapturePosition`, `CaptureAdopter` |
 | Dispatch inspection | `DispatchInspection`, `DispatchRow`, `DispatchCandidate`, `RowKey` |
 | Engine model source and routing history | `ModelSource`, `SecularModel`, `SecularDrive`, `RoutingHistory` |
 | Flux description | `FluxExpansion`, `FluxTerm`, `FluxLevel`, `FluxSchedule`, `FluxWaveform` |
@@ -369,6 +371,171 @@ preparations, or compute extra indicators. These calibrated proxies do not
 certify full-density accuracy. The coherent limit is 0.0018; the bath limit
 remains 0.01. A rejected pinned row raises `NoValidKernel`. Default dispatch
 compares the remaining admissible families by price.
+
+## Engine capture
+
+`CaptureBuffer()` is a caller-owned in-memory recording. Pass it to
+`Engine.evolve(..., capture=buffer)` and read `buffer.records` after return or
+failure. The default `capture=None` does not freeze inputs or collect routes.
+Engine never writes a file. After all evolves return or raise, call
+`write_capture(buffer)` to publish the accumulated records. Explicit-path
+consumers can still use `write_frozen_manifest(path, buffer.records)`.
+
+Each evolve gets a fresh random `capture_id` and appends one `FrozenRecord`
+per input batch, including empty batches, before prefix execution or dispatch.
+Names are `<capture_id>-<batch_index>`. A buffer can accumulate multiple calls.
+`CaptureBuffer.recording(source, batches, budget, families)` owns the Engine's
+recording scope and yields the call's metadata list. Other callers should pass
+the buffer to evolve instead. Direct scope entry only freezes inputs, produces
+no route events, and still marks complete on normal exit. The method sorts
+events and releases buffer ownership on every exit.
+A concurrent call using the same buffer raises `ValueError` at entry, before
+waiting for an Engine lock. `records` is a tuple snapshot. Metadata dictionaries
+are not deeply frozen; callers must not modify them.
+
+Read a saved capture with `records = read_frozen_manifest(path)`, then call
+`read_capture_metadata(record)` for each record. The latter returns
+`CaptureMetadata`. Non-dict metadata, missing fields, wrong types or Literal
+values, and extra fields at any depth raise the original
+`pydantic.ValidationError` with field paths. It neither supplies defaults nor
+checks cross-field relationships, solver conditions or guard numerics. The
+frozen codec still treats metadata as opaque and does not construct models.
+The [capture inspector](../../../../tools/README.md#simulator-capture-inspection)
+reports these observations and joins same-acquire telemetry without solving.
+
+`CaptureMetadata` defines the opaque JSON metadata. It contains `capture_id`,
+zero-based `batch_index`, `batch_count`, `budget`, sorted `families` or null,
+the frozen DC model's `source_identity`, `segment_numeric_version` as a string,
+`frozen_physical_version` as an integer, `complete`, `routes` and `prefix_runs`.
+Normal return marks all records for that call complete. Freezing, numerical and
+cancellation errors propagate unchanged. Already frozen batches retain
+`complete=false` and observed events; a batch that failed to freeze has no record.
+
+Each `CaptureRoute` describes one actual classification round. It has caller
+`point` and split `segment`, absolute `start_ns`, `duration_ns`, `round` as caller
+or worker, `prefix_run` as an index or null, the selected `family` or null, and
+ordered `{family, guard}` candidates. Guards use the same four decisions as
+inspection, including `untested_after_short_circuit`. Caller deferral and worker
+resolution remain separate events. Capture does not rerun guards, call inspection
+or add `Kernel.cost` calls. It stores neither costs nor guard certificates.
+
+Each `CapturePrefixRun` names the representative group row after a shared prefix
+and all adopting `{batch, point, segment}` rows, including itself. It lives in
+the representative batch's record. Only the representative timeline has prefix
+events. Adopters reuse that input; they do not claim a second execution.
+Events list prefix runs in Engine order, then the main run. Within each run,
+caller events precede worker events. Each round follows input point order and
+segment order, independent of worker scheduling.
+
+The physical codec preserves `batch.segment_shifts`, so reconstruction with
+`read_physical_input(record.physical)` restores those corrections. Engine
+currently registers shifts only through these batch inputs. The source registry
+itself is not serialized. A future registration path outside batch corrections
+must add an explicit non-reconstructibility marker. Capture supplies no reference
+error. See the [capture discussion](../../../../docs/discussions/2026-11-17-engine-capture-events.md)
+for the lifecycle and event-log choices.
+
+## Capture persistence
+
+`write_capture(buffer: CaptureBuffer) -> Path | None` snapshots records once
+and publishes a new `capture-<uuid4 hex>.json.gz` file. Rewriting the same
+buffer keeps earlier records in a different file. An empty buffer produces
+a zero-record manifest, not None. Read it with `read_frozen_manifest(path)`.
+The existing frozen format and physical hashes do not change.
+
+`capture_directory() -> Path` returns the absolute
+`<user-cache-root>/simulator-debug/v1` directory without creating it.
+The writer and Numba use the same resolver. Set `ZCU_TOOLS_CACHE_DIR` before
+use to select another non-empty absolute cache root. Without an override,
+platformdirs selects the root, with the system temporary directory as fallback.
+
+The writer serializes into a same-directory temporary file and publishes it
+with `os.replace`. It attempts to remove temporary files on failure.
+Invalid cache configuration and errors reading records propagate before
+publication. Publication OSError and codec ValueError/TypeError emit at most
+one RuntimeWarning per call, then return None, even under warnings-as-errors.
+Nonfinite and unsupported JSON values cannot be recorded. Other errors propagate.
+
+V1 has no automatic size limit, truncation or eviction. Files persist across
+tasks until the user deletes them, for example by unlinking selected paths from
+`capture_directory().glob("capture-*.json.gz")`.
+During acquire, memory grows with the recorded evolves and their frozen inputs
+and events. Publication also allocates the full canonical JSON and gzip bytes.
+The [environment switch](../../simulators/README.md#debug-capture) publishes once
+per acquire and links the basename to telemetry.
+The [writer discussion](../../../../docs/discussions/2026-11-17-capture-publication.md)
+records the API and failure-policy choices.
+
+### Capture measurements
+
+A single offline batch on 2026-11-17 measured revision `eb095cfcc77d213b728bf1f7662631e3b229960d`,
+whose tree was `d38ca3f84ae7594d74822c3727f790eb96d4ddaa`.
+The runner held both CPU slots, CPU union 0–7. The payload and all fresh children
+used CPU affinity 0–3, one native thread, 8 GiB memory and zero swap.
+MemAvailable exceeded 12 GiB before and after admission. Payload elapsed was
+30.56 s under a 600 s bound. Queue time was 383.85 s and was not sample time.
+No hardware, GUI, reference solver or shared scene cache participated.
+
+The tiny Engine scene used three levels, one four-point DC batch and one empty
+batch, with two evolves per unit. All modes used one worker, t4 and telemetry.
+A disabled capture, B recorded in memory, C also published one manifest.
+Each cold sample used a fresh process and empty private Numba cache. Imports
+and scene construction stayed outside the timer. Cold measured the first Engine
+calls, not application startup. Each mode has only one cold observation.
+
+| Mode | Cold wall ms | Cold process CPU ms | Warm wall median ms, range | Warm process CPU median ms, range |
+| --- | ---: | ---: | ---: | ---: |
+| A, off | 327.396 | 288.432 | 5.726, 5.539–5.777 | 4.786, 4.720–4.850 |
+| B, memory | 327.072 | 287.516 | 5.708, 5.622–5.826 | 4.984, 4.916–5.147 |
+| C, published | 348.389 | 307.809 | 7.149, 6.765–7.395 | 5.885, 5.769–6.021 |
+
+The resident process warmed each mode once, then ran ABC/CBA twice, four samples
+per mode. History clearing and density/manifest checks stayed outside the timer.
+B minus A was −0.017 ms wall, −0.31%, and +0.197 ms CPU, +4.12%.
+The overlapping wall ranges do not establish a memory-recording speedup.
+C minus A was +1.423 ms wall, +24.84%, and +1.099 ms CPU, +22.95%.
+Each C file contained four records, two evolve IDs and two empty batches.
+Warm gzip sizes were 1,018–1,021 bytes, with 9,327 uncompressed JSON bytes.
+The cold C file was 1,019 bytes. All compared densities were identical.
+
+Capacity samples used synthetic source/binding acquire inputs, not program
+compilation or user YAML. FTF had 32 points, single 64, six 128. Six was the
+largest grid in this batch, with every source seeing all 128 mux points.
+All had two read windows, two rounds and two shots. FTF retained two levels;
+single and each six source used two levels from a six-state native basis.
+Each environment used ACCA order in four fresh processes, two samples per mode.
+A complete capture-off warmup preceded each sample. A fresh environment prevented
+warmup preparation reuse. Before timing, each process wrote 5 to its own
+`/proc/self/clear_refs`, verified VmHWM reset to current RSS, then read VmHWM
+immediately after acquire and before codec validation. This excludes historical
+import/JIT peaks and captures short-lived JSON/gzip allocations without polling.
+
+| Environment | A/C mean wall ms | A/C mean process CPU ms | A peak RSS MiB, range | C peak RSS MiB, range | Mean C−A peak MiB |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| FTF, 32 points | 159.285 / 170.540 | 158.475 / 169.687 | 273.121–276.965 | 277.199–277.289 | +2.201 |
+| Single, 64 points | 31.872 / 33.942 | 31.725 / 33.801 | 445.422–445.523 | 445.648–445.699 | +0.201 |
+| Six, 128 points | 337.469 / 359.277 | 336.054 / 357.806 | 447.887–447.961 | 449.062–449.137 | +1.176 |
+
+Reset baseline RSS ranges in MiB were A/C 273.121–276.965 / 277.043–277.098
+for FTF, 445.418–445.520 / 445.645–445.695 for single, and
+447.879–447.934 / 447.984–448.047 for six. Per-process peak above baseline was
+A/C 0 / 0.156–0.191 MiB for FTF, 0.004 / 0.004 MiB for single, and
+0.008–0.027 / 1.078–1.090 MiB for six. The absolute C−A comparison includes
+process-baseline differences. It is not an isolated allocation estimate.
+
+| Environment | Records / evolve IDs per file | Gzip bytes, range | Uncompressed JSON bytes |
+| --- | ---: | ---: | ---: |
+| FTF | 64 / 64 | 9,281–9,285 | 148,561 |
+| Single | 2 / 2 | 1,697 | 33,935 |
+| Six | 12 / 12 | 12,430–12,437 | 387,705 |
+
+Every file decoded, all recorded evolves were complete, capture_file matched
+telemetry, and A/C output fingerprints agreed. Reused round preparations did not
+invent extra evolve records. The largest gzip was 12,437 bytes and the largest
+mean peak increment was 2,308,096 bytes, below the 256 MiB and 2 GiB review
+thresholds. These small synthetic samples do not bound user workloads or certify
+numerical accuracy. Different process baselines and two memory samples per mode
+limit the peak comparison. V1 retention still requires manual deletion.
 
 ## Joint-Fock prototype
 

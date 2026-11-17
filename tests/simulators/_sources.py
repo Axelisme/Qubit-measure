@@ -7,12 +7,12 @@ from zcu_tools.experiment.simulation import SimulationEnvironment
 from zcu_tools.program.v2.simulation import SimulationBinding, SimulationCallbacks
 from zcu_tools.simulators.ftf.config import FTFSettings
 from zcu_tools.simulators.ftf.environment import FTFSource, ftf
-from zcu_tools.simulators.ftf.environment.telemetry import RoutingTelemetry
 from zcu_tools.simulators.single_fluxonium.environment.runtime import (
     SingleFluxoniumRuntimeOptions,
     SingleFluxoniumSource,
     single_fluxonium,
 )
+from zcu_tools.simulators.telemetry import RoutingTelemetry
 
 from tests.simulators._engine import EngineDouble
 

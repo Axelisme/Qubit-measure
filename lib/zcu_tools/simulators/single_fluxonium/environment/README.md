@@ -1,6 +1,6 @@
 # Single-fluxonium acquisition
 
-**Last updated:** 2026-11-17，projection chains and per-point continuation
+**Last updated:** 2026-11-17, acquire telemetry and optional capture publication
 
 **Readers:** framework-dev, lab-author, agent. Compose complete fluxonium timelines with one physical readout cavity.
 
@@ -34,6 +34,33 @@ pool. Empty work, one timeline or one worker runs serially. GUI startup explicit
 reserves one host CPU, using at least one worker, and does no numeric warmup.
 Tests, benchmarks, research and other direct callers keep the serial default.
 The startup policy is defined in [ADR-0069](../../../../../docs/adr/0069-experiment-core-and-frontends.md#顯式-cfg-與裝置環境).
+
+## Debug capture
+
+`numerics.debug_capture` defaults to false. Enable it to publish one frozen
+Engine-input and route manifest after each admitted acquire, including failure.
+Every evolve in that acquire shares the same buffer. Telemetry can remain off.
+When enabled, telemetry stores the published basename in `capture_file`,
+or null when capture is off or publication fails. Capture writes run before
+summary construction and outside binding's measured wall time.
+See the [shared switch contract](../../README.md#debug-capture) for empty
+captures, retention and the cache directory.
+
+## Acquire telemetry
+
+`numerics.telemetry.enabled` defaults to true. The environment writes one
+bounded `routing-*.jsonl` row after each admitted acquire. Set `directory` to
+choose the output directory; null selects project-root `.sim_telemetry`.
+Direct evolution and every projective continuation enable Engine telemetry.
+The row contains binding compile time, summed Engine wall time and ADC/readout
+wall time. It includes failed calls through their failure and leaves unentered
+stages at `0.0`. No deferred raw materialization enters the row.
+`complete` comes from the binding's `AcquireOutcome`: normal partial Stop is true,
+while exceptions are false. Writer I/O failures warn once and do not change the
+acquire result. Disabling the policy suppresses writes; evolution still collects
+its per-call diagnostics. The shared fields, common default directory, separate
+analysis setup and file budget are described in the
+[telemetry contract](../../README.md#acquire-telemetry).
 
 ## Complete timelines
 
