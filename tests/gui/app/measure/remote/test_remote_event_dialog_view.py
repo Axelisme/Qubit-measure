@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from zcu_tools.device import FakeDevice
 
 from tests.gui._qt_waits import qt_until
 
@@ -16,27 +17,32 @@ from ._helpers import (
 
 @pytest.fixture()
 def fx(tmp_path, qapp):
-    f = Fixture(project_root=str(tmp_path / "project"))
+    def driver_factory(type_name: str, address: str) -> FakeDevice:
+        assert type_name == "FakeDevice"
+        if address == "failed":
+            raise OSError("offline device refused")
+        return FakeDevice(address=address, fast_mode=True)
+
+    f = Fixture(project_root=str(tmp_path / "project"), driver_factory=driver_factory)
     f.start()
     yield f
     f.stop()
 
 
 def test_diagnostic_pushed_without_subscription(fx):
-    """The adapter is a diagnostic sink (ADR-0068): a Controller diagnostic
-    reaches the client out-of-band of EventBus, with no subscription needed."""
+    """A failed public device command pushes its diagnostic without subscription."""
     sock = open_client(fx.service.port)
     try:
         # Round-trip first so the server has registered this client before the
         # diagnostic fans out (no subscription needed for diagnostics).
         call(sock, "state.has_active_context")
-        # Drive a Controller diagnostic on the main thread (fan-out is sync).
-        fx.ctrl._notify("error", "Run failed", "boom")
+        fx.ctrl.session_services.device.remember_device("probe", "FakeDevice", "failed")
+        fx.ctrl.device_control.start_reconnect_device("probe")
         msg = recv_push(sock, "diagnostic")
         assert set(msg) == {"event", "payload"}
         assert msg["payload"]["severity"] == "error"
-        assert msg["payload"]["title"] == "Run failed"
-        assert msg["payload"]["message"] == "boom"
+        assert msg["payload"]["title"] == "Device operation failed: probe"
+        assert "offline device refused" in msg["payload"]["message"]
     finally:
         sock.close()
 
@@ -45,11 +51,14 @@ def test_info_diagnostic_pushed(fx):
     sock = open_client(fx.service.port)
     try:
         call(sock, "state.has_active_context")
-        fx.ctrl._info("Data saved to /tmp/x")
+        fx.ctrl.session_services.device.remember_device(
+            "probe", "FakeDevice", "success"
+        )
+        fx.ctrl.device_control.start_reconnect_device("probe")
         msg = recv_push(sock, "diagnostic")
         assert msg["payload"]["severity"] == "info"
         assert msg["payload"]["title"] == ""
-        assert msg["payload"]["message"] == "Data saved to /tmp/x"
+        assert msg["payload"]["message"] == "Device connected: probe"
     finally:
         sock.close()
 

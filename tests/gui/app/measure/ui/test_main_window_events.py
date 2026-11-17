@@ -8,7 +8,6 @@ from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
-from qtpy.QtWidgets import QWidget
 from zcu_tools.gui.app.measure.events.run import RunFinishedPayload, RunStartedPayload
 from zcu_tools.gui.app.measure.events.startup import StartupChangedPayload
 from zcu_tools.gui.app.measure.events.tab import (
@@ -540,50 +539,54 @@ def test_run_started_refreshes_invalidated_content_once(
         coordinator.close()
 
 
-def test_main_window_run_marker_tracks_state_and_clears(qapp) -> None:
+def test_main_window_run_marker_tracks_state_and_clears(
+    qapp, main_window_control_factory, tmp_path
+) -> None:
     from qtpy.QtWidgets import QTabWidget
-    from zcu_tools.gui.app.measure.ui.main_window import MainWindow
-    from zcu_tools.gui.control_identity import ControlIdentity
 
-    ctrl = MagicMock()
-    ctrl.get_bus.return_value = BaseEventBus()
+    from tests.gui._user_input import ComponentDriver
+    from tests.gui.app.measure.ui._main_window_fakes import (
+        make_tab_snapshot,
+        setup_window_with_tabs,
+    )
+
+    window, ctrl = setup_window_with_tabs(main_window_control_factory)
     ctrl.tab_control.get_running_tab_id.return_value = "tab-a"
-    ctrl.control_identity = ControlIdentity()
-    ctrl.tab_control.get_active_tab_id.return_value = None
-    ctrl.active_operation_count.return_value = 0
-    ctrl.tab_control.has_tab.return_value = True
+    ctrl.tab_control.get_tab_snapshot.side_effect = lambda tab_id: make_tab_snapshot(
+        tab_id,
+        supports_analysis=False,
+        analyze_params=None,
+        is_running=tab_id == ctrl.tab_control.get_running_tab_id.return_value,
+    )
+    try:
+        window.add_tab_widget("tab-a", "A")
+        window.add_tab_widget("tab-b", "B")
+        window.resize(1100, 800)
+        window.show()
+        driver = ComponentDriver(window)
+        window.refresh_run_lock("tab-a")
+        qapp.processEvents()
 
-    class _TabStub(QWidget):
-        def update_interaction_state(self, _snapshot: object) -> None:
-            pass
+        tabs = window.findChild(QTabWidget, "experiment.tabs")
+        assert tabs is not None
+        tab_bar = tabs.tabBar()
+        assert tab_bar is not None
+        assert driver.tabs("● A").captions == ("● A", "B")
+        assert tab_bar.tabTextColor(0).name() == "#286ac7"
+        assert tab_bar.tabToolTip(0) == "A — Run in progress"
+        driver.screenshot(tmp_path / "run-marker-active.png")
 
-    window = MainWindow(ctrl, templates=lambda: {})
-    tab_a = _TabStub()
-    tab_b = _TabStub()
-    # tolerated: The injected tab fixture supplies only the run-marker interaction surface exercised here.
-    window._tab_widgets["tab-a"] = tab_a  # pyright: ignore[reportArgumentType, reportPrivateUsage]
-    # tolerated: The injected tab fixture supplies only the run-marker interaction surface exercised here.
-    window._tab_widgets["tab-b"] = tab_b  # pyright: ignore[reportArgumentType, reportPrivateUsage]
-    tabs = window.findChild(QTabWidget, "experiment.tabs")
-    assert tabs is not None
-    tabs.addTab(tab_a, "A")
-    tabs.addTab(tab_b, "B")
-
-    window.refresh_run_lock(ctrl.tab_control.get_running_tab_id.return_value)
-
-    tab_bar = tabs.tabBar()
-    assert tab_bar is not None
-    assert tabs.tabText(0) == "● A"
-    assert tabs.tabText(1) == "B"
-    assert tab_bar.tabTextColor(0).name() == "#286ac7"
-    assert tab_bar.tabToolTip(0) == "A — Run in progress"
-
-    ctrl.tab_control.get_running_tab_id.return_value = None
-    window.refresh_run_lock(ctrl.tab_control.get_running_tab_id.return_value)
-
-    assert tabs.tabText(0) == "A"
-    assert tabs.tabText(1) == "B"
-    assert tab_bar.tabToolTip(0) == "A"
+        ctrl.tab_control.get_running_tab_id.return_value = None
+        window.refresh_run_lock(None)
+        qapp.processEvents()
+        assert driver.tabs("A").captions == ("A", "B")
+        assert tab_bar.tabToolTip(0) == "A"
+        driver.screenshot(tmp_path / "run-marker-cleared.png")
+    finally:
+        window.remove_tab_widget("tab-a")
+        window.remove_tab_widget("tab-b")
+        window.deleteLater()
+        qapp.processEvents()
 
 
 def test_context_event_refreshes_interaction_without_writeback() -> None:

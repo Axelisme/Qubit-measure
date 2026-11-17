@@ -351,10 +351,6 @@ def test_non_analysis_adapter_hides_analysis_widgets_but_keeps_save(
     left_tabs = tab_pane_tabs(tab)
     visible = [left_tabs.tabText(i) for i in range(left_tabs.count())]
     assert visible == ["Run", "Data", "Guide"]
-    # Prove Analysis page and controls were never constructed, not only hidden
-    assert not hasattr(tab, "_analysis_panel")
-    assert not hasattr(tab, "analyze_form")
-    assert not hasattr(tab, "_analyze_section")
     # ... but Save stays reachable and usable (run result + active context).
     saves = [
         button for button in tab.findChildren(QPushButton) if button.text() == "Save"

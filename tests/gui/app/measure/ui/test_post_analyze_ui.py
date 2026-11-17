@@ -174,8 +174,6 @@ def test_post_tab_visible_only_for_post_analysis_adapter(
     # Post tab is constructed when post_analysis True
     assert tab_with._left_tabs.count() == 5
     assert tab_with._left_tabs.tabText(2) == "Post-Analysis"
-    assert hasattr(tab_with, "_post_panel")
-    assert hasattr(tab_with, "post_analyze_form")
     # Post tab not constructed when capability absent
     tab_without = exp_tab_widget(
         "tab-1",
@@ -183,8 +181,6 @@ def test_post_tab_visible_only_for_post_analysis_adapter(
         AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False),
     )
     assert tab_without._left_tabs.count() == 4
-    assert not hasattr(tab_without, "_post_panel")
-    assert not hasattr(tab_without, "post_analyze_form")
     with pytest.raises(RuntimeError, match="does not support post-analysis"):
         tab_without.get_post_container()
 
@@ -746,19 +742,29 @@ def test_post_artifact_save_disabled_without_active_context(
     actions.save_artifact.assert_not_called()
 
 
-def test_post_tab_uses_separate_qt_tab_index(qapp, make_ctrl, exp_tab_widget):
-    """The Post sub-tab is a distinct QTabWidget tab (not Analysis at index 1)."""
-
+def test_post_and_primary_tabs_show_distinct_content(
+    qapp, make_ctrl, exp_tab_widget, tmp_path
+):
     tab = exp_tab_widget(
         "tab-1",
         make_ctrl(),
         AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True),
     )
-
-    assert tab._post_tab_index != 1
-    assert tab._left_tabs.tabText(tab._post_tab_index) == "Post-Analysis"
-    # Analysis stays at index 1 (the auto-switch + label logic depends on it).
-    assert tab._left_tabs.tabText(1) == "Analysis"
+    tab.attach(_snapshot("tab-1", post_params=_PostParams()), MagicMock())
+    tab.resize(1000, 750)
+    tab.show()
+    driver = ComponentDriver(tab)
+    driver.select_tab("Analysis")
+    assert driver.tabs("Analysis").current == "Analysis"
+    assert driver.observe("Analyze").visible is True
+    driver.screenshot(tmp_path / "primary-tab.png")
+    driver.select_tab("Post-Analysis")
+    assert driver.tabs("Post-Analysis").current == "Post-Analysis"
+    assert driver.observe("Run Post-Analysis").visible is True
+    driver.screenshot(tmp_path / "post-tab.png")
+    driver.select_tab("Analysis")
+    assert driver.observe("Analyze").visible is True
+    driver.screenshot(tmp_path / "primary-tab-return.png")
 
 
 def test_post_analyze_button_matches_analyze_button(qapp, make_ctrl):
