@@ -52,12 +52,11 @@ def session(tmp_path: Path) -> Generator[CaptureSession]:
             result_root=tmp_path / "Result",
             database_root=tmp_path / "Database",
         )
-        for name, rate, sense in (("Q1", 4300.0, "R1"), ("Q2", 5100.0, "R2")):
-            entry.parameters().add_component(
-                name, kind="fake/drive/a", rate=rate, sense=sense
-            )
-        for name, rate in (("R1", 6123.0), ("R2", 7200.0), ("driver", 123.0)):
-            entry.parameters().add_component(name, kind="fake/sensor", rate=rate)
+        with entry.parameters().edit() as draft:
+            for name, rate, sense in (("Q1", 4300.0, "R1"), ("Q2", 5100.0, "R2")):
+                draft.add_component(name, kind="fake/drive/a", rate=rate, sense=sense)
+            for name, rate in (("R1", 6123.0), ("R2", 7200.0), ("driver", 123.0)):
+                draft.add_component(name, kind="fake/sensor", rate=rate)
         entry.new_point("first")
         entry.new_point("second")
         state = SessionState(SessionEnv(parameters=None, soc=None, soccfg=None))
