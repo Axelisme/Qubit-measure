@@ -237,6 +237,16 @@ A concurrent call using the same buffer raises `ValueError` at entry, before
 waiting for an Engine lock. `records` is a tuple snapshot. Metadata dictionaries
 are not deeply frozen; callers must not modify them.
 
+Read a saved capture with `records = read_frozen_manifest(path)`, then call
+`read_capture_metadata(record)` for each record. The latter returns
+`CaptureMetadata`. Non-dict metadata, missing fields, wrong types or Literal
+values, and extra fields at any depth raise the original
+`pydantic.ValidationError` with field paths. It neither supplies defaults nor
+checks cross-field relationships, solver conditions or guard numerics. The
+frozen codec still treats metadata as opaque and does not construct models.
+The [capture inspector](../../../../tools/README.md#simulator-capture-inspection)
+reports these observations and joins same-acquire telemetry without solving.
+
 `CaptureMetadata` defines the opaque JSON metadata. It contains `capture_id`,
 zero-based `batch_index`, `batch_count`, `budget`, sorted `families` or null,
 the frozen DC model's `source_identity`, `segment_numeric_version` as a string,

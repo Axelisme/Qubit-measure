@@ -16,6 +16,7 @@ from ._capture import (
     CapturePosition,
     CapturePrefixRun,
     CaptureRoute,
+    read_capture_metadata,
 )
 from ._inspection import DispatchCandidate, DispatchInspection, DispatchRow, RowKey
 from .capture_writer import capture_directory, write_capture

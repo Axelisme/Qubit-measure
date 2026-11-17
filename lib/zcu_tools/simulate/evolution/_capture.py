@@ -11,6 +11,7 @@ from uuid import uuid4
 
 import numpy as np
 from numpy.typing import NDArray
+from pydantic import TypeAdapter
 
 from ._inspection import GuardDecision, RowKey
 
@@ -93,6 +94,24 @@ class CaptureMetadata(TypedDict):
     complete: bool
     routes: list[CaptureRoute]
     prefix_runs: list[CapturePrefixRun]
+
+
+_CAPTURE_METADATA_ADAPTER = TypeAdapter(CaptureMetadata)
+
+
+def read_capture_metadata(record: FrozenRecord) -> CaptureMetadata:
+    """Validate record.metadata and return the shared capture metadata mapping.
+
+    Pass a FrozenRecord, normally from read_frozen_manifest. Non-dict metadata,
+    missing required keys, wrong types or Literal values at any depth, and extra
+    keys at any depth raise the original pydantic.ValidationError with field
+    paths. No defaults, coercion or compatibility are supplied. Only JSON shape
+    is checked, not cross-field relationships, solver conditions or guard
+    numerics. Does not reconstruct a model or modify the record.
+    """
+    return _CAPTURE_METADATA_ADAPTER.validate_python(
+        record.metadata, strict=True, extra="forbid"
+    )
 
 
 class CaptureBuffer:

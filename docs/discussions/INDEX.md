@@ -18,6 +18,8 @@
 
 ## 模擬量測環境
 
+- 2026-11-17 [Capture 的唯讀體檢與 typed metadata](2026-11-17-capture-inspection.md)：唯讀報告。共用 owner schema 讀逐輪實錄，以 capture_file 對行，條件差異只標記、不重算。
+
 - 2026-11-17 [Capture 的發布與 acquire 關聯](2026-11-17-capture-publication.md)：公開寫出。Writer 共用 cache root，以原子 manifest 發布和 capture_file 關聯三個 environment 的同次 telemetry。
 
 - 2026-11-17 [Engine capture 的逐輪選路事件](2026-11-17-engine-capture-events.md)：公開錄製。每次 evolve 一個 ID，以既有凍結容器保存輸入，分開記 caller deferral、worker resolution 與 prefix 採用者。

@@ -43,6 +43,7 @@
 | `probe_snapshot.py` | `tools/probe_snapshot.py compare A B [--rtol R] [--atol A]` | 0 輸出相同或容差內且輸入相同；1 陣列、PNG 或 case 不同／缺漏，優先於 3；2 用法、讀寫或格式錯誤；3 輸出相同或容差內但輸入不同 | 否，手動比較離線 probe 輸出 |
 | `run_heavy.py` | `tools/run_heavy.py --log <file> <timeout> -- <command>` | 子程序狀態；2 啟動前失敗、70 runner 失敗、75 等待逾時、124 執行逾時 | 否，重計算外層 |
 | `analyze_routing_telemetry.py` | `tools/analyze_routing_telemetry.py <path> ...` | 0 完成，無法讀檔時非零 | 否 |
+| `inspect_simulator_capture.py` | `tools/inspect_simulator_capture.py [path] --telemetry-directory DIRECTORY` | 0 完成，壞資料或讀檔失敗時非零 | 否 |
 | `family_pareto.py` | `-m tools.family_pareto --scenario <name>` | 0 完成，輸入或量測失敗時非零 | 否 |
 | `paired_benchmark.py` | `-m tools.paired_benchmark run --baseline A --candidate B --scenario NAME --reference-cache DIR --blocks K --exclusive --output FILE` | 0 完成；1 輸入、cache 或 child 失敗；2 用法錯誤 | 否，需外層 exclusive runner |
 
@@ -1067,6 +1068,59 @@ uv run --directory <worktree> --no-sync -- python tools/analyze_routing_telemetr
 One invocation with all three directories instead merges their rows.
 The [shared telemetry contract](../lib/zcu_tools/simulators/README.md#acquire-telemetry)
 defines fields, extras prefixes, failure behavior and the writer's file budget.
+
+## Simulator capture inspection
+
+```bash
+uv run --directory <worktree> --no-sync -- python tools/inspect_simulator_capture.py
+uv run --directory <worktree> --no-sync -- python tools/inspect_simulator_capture.py <capture-file-or-directory> --telemetry-directory <routing-directory>
+```
+
+The inspector prints JSON from recorded manifests and telemetry JSONL. It does
+not construct models, run evolution, inspect dispatch or evaluate guards.
+Omitting `path` calls `simulate.evolution.capture_directory()`. A directory
+selects only its immediate `capture-*.json.gz` files, sorted by filename. An
+explicit file selects that file alone. The default telemetry directory is
+`.sim_telemetry` under the tool's own worktree root, regardless of the caller's
+working directory. No path or family implies a simulator identity.
+
+Each batch retains its capture ID, zero-based batch index, complete flag and
+actual routes. Caller and worker rounds stay separate. Candidates retain their
+recorded order and guard decisions, including `untested_after_short_circuit`.
+A caller row without a worker result remains pending, reported as `停在deferred`.
+Prefix representatives retain their actual routes. Adopters, including adopters
+in another batch of the same evolve, report `沿用第k個prefix run` with a one-based
+run number within the representative batch. The inspector does not invent
+adopter classifications or repeated prefix evolution.
+
+The inspector matches telemetry only when `capture_file` equals the manifest's
+basename. Missing and null keys do not match. A unique match adds acquire
+`complete`, total wall, compile, evolve, readout and remainder seconds. Remainder
+is total minus those three stages. It does not change each evolve's recorded
+`complete`. Without a match, the report says `未找到同次 telemetry 行`, omits timing
+and does not guess why. Multiple matching rows raise an error naming the
+manifest. Empty manifests report `沒有evolve被錄到`.
+
+Compare optional conditions without changing the stored observations:
+
+```bash
+uv run --directory <worktree> --no-sync -- python tools/inspect_simulator_capture.py <capture-file> --budget 1e-7 --families '["direct"]'
+```
+
+`--budget` takes a float, `--source-identity` and `--segment-numeric-version`
+take strings, and `--frozen-physical-version` takes an integer. `--families`
+takes a JSON string array or `null` for unrestricted candidates. Array order and
+duplicates do not change the restriction. An empty array means no candidates.
+Omitted options retain each batch's recorded condition. Any difference lists
+its metadata key in `condition_differences` and labels `新條件下重新評估`. The
+report still shows the recorded conditions and routes, explicitly marked
+`下列仍是錄製時選路，未重算`. This label is not a rerun or a reproduction claim.
+
+Unrecorded routing reasons are `未知`. Numerical error is `未提供` because these
+captures have no independent reference solution. Guard acceptance is not an
+error estimate. The tool neither generates references nor reads numerical
+caches. Missing required capture fields and malformed matched telemetry fail
+instead of supplying default values.
 
 ## 怎麼跑
 
