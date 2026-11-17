@@ -18,7 +18,6 @@ from zcu_tools.program.v2.simulation import (
     SimulationCallbacks,
 )
 from zcu_tools.simulate.adc import ConditionalReadout, PreparedStatistics
-from zcu_tools.simulate.evolution import Engine
 from zcu_tools.simulators.ftf.environment import ftf, runtime
 from zcu_tools.simulators.ftf.environment.runtime import FTFSource
 from zcu_tools.simulators.ftf.physics import CavityDrive
@@ -27,6 +26,7 @@ from zcu_tools.simulators.telemetry import RoutingTelemetry
 from tests.core._simulation import tick_array
 from tests.program._profiles import profile_soccfg
 from tests.program._timeline import compile_modules
+from tests.simulators._telemetry import TelemetryEngine
 from tests.simulators.ftf.environment._templates import (
     herald_template,
     request,
@@ -36,13 +36,21 @@ from tests.simulators.ftf.environment._templates import (
 )
 
 
+@pytest.fixture(autouse=True)
+def non_evolving_builder(monkeypatch):
+    # ftf() has no public Engine injection; direct FTFSource callers use engine=.
+    # Replace only the builder's numerical collaborator, not environment logic.
+    monkeypatch.setattr(runtime, "Engine", TelemetryEngine)
+
+
 @pytest.fixture
 def work_clock(monkeypatch):
     clock = SimpleNamespace(
         now=0.0, evolve=0.0, readout=0.0, fail=None, fail_on=1, calls={}
     )
     # No public telemetry clock injection exists. Only public numeric collaborators
-    # advance synthetic time; their real work and the environment stay unchanged.
+    # advance synthetic time; ADC work and the environment stay unchanged.
+    # Evolution uses prescribed densities, not a solver.
     monkeypatch.setattr(time, "monotonic", lambda: clock.now)
 
     def observe(method, stage, seconds):
@@ -60,7 +68,9 @@ def work_clock(monkeypatch):
 
         return run
 
-    monkeypatch.setattr(Engine, "evolve", observe(Engine.evolve, "evolve", 2.0))
+    monkeypatch.setattr(
+        TelemetryEngine, "evolve", observe(TelemetryEngine.evolve, "evolve", 2.0)
+    )
     monkeypatch.setattr(
         CavityDrive, "advance", observe(CavityDrive.advance, "readout", 3.0)
     )
@@ -91,6 +101,7 @@ def bound_source(tmp_path):
             devices,
             soccfg=profile_soccfg("ftf"),
             readout=readout,
+            engine=TelemetryEngine(),
             telemetry=RoutingTelemetry(tmp_path),
         )
         sources.append(source)

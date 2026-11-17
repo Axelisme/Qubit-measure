@@ -1185,7 +1185,9 @@ working directory. No path or family implies a simulator identity.
 Each batch retains its capture ID, zero-based batch index, complete flag and
 actual routes. Caller and worker rounds stay separate. Candidates retain their
 recorded order and guard decisions, including `untested_after_short_circuit`.
-A caller row without a worker result remains pending, reported as `停在deferred`.
+A caller row remains pending, reported as `停在deferred`, only when its candidates
+include a recorded `deferred` decision and no worker result resolves it. All-rejected
+caller rows retain their candidates and null family without being marked pending.
 Prefix representatives retain their actual routes. Adopters, including adopters
 in another batch of the same evolve, report `沿用第k個prefix run` with a one-based
 run number within the representative batch. The inspector does not invent

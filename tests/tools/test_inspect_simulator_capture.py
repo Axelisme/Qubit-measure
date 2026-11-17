@@ -172,6 +172,29 @@ def test_report_preserves_rounds_candidates_and_only_marks_unresolved_rows_pendi
     assert capture.read_bytes() == before
 
 
+def test_all_rejected_caller_is_not_pending_and_keeps_recorded_failure(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], metadata: CaptureMetadata
+) -> None:
+    metadata["families"] = ["multitone_rwa"]
+    metadata["routes"] = [
+        {
+            **metadata["routes"][0],
+            "candidates": [{"family": "multitone_rwa", "guard": "rejected"}],
+        }
+    ]
+    capture = tmp_path / "capture-rejected.json.gz"
+    write_capture(capture, metadata)
+
+    assert inspector.main([str(capture), "--telemetry-directory", str(tmp_path)]) == 0
+    batch = json.loads(capsys.readouterr().out)["captures"][0]["batches"][0]
+    assert batch["pending"] == []
+    assert batch["pending_status"] is None
+    assert batch["complete"] is False
+    assert batch["routes"] == metadata["routes"]
+    assert batch["reason"] == "未知"
+    assert batch["error"] == "未提供"
+
+
 def test_prefix_adopters_reuse_representative_across_batches_but_not_evolves(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], metadata: CaptureMetadata
 ) -> None:

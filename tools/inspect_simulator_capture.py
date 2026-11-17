@@ -92,6 +92,7 @@ def _batch_report(
         for route in metadata["routes"]
         if route["round"] == "caller"
         and route["family"] is None
+        and any(candidate["guard"] == "deferred" for candidate in route["candidates"])
         and (route["prefix_run"], route["point"], route["segment"]) not in resolved
     ]
     recorded: dict[str, object] = dict(metadata)
