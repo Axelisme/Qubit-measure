@@ -30,6 +30,7 @@ def test_writer_serializes_common_spans_completion_and_namespaced_extras(
             "ftf.projection_outcomes": [4, 2],
             "ftf.projection_pruned_weight": [0.0, 0.01],
         },
+        "capture_file": "capture-example.json.gz",
         "caller_context": "not part of the wire contract",
     }
     before = json.dumps(summary, sort_keys=True)
@@ -52,6 +53,7 @@ def test_writer_serializes_common_spans_completion_and_namespaced_extras(
         "readout_wall_s",
         "complete",
         "extras",
+        "capture_file",
         "timestamp",
         "frontend_cpu_s",
         "estimated_cost_unit",
@@ -68,6 +70,7 @@ def test_writer_serializes_common_spans_completion_and_namespaced_extras(
             "readout_wall_s",
             "complete",
             "families",
+            "capture_file",
             "extras",
         )
     } == {
@@ -79,6 +82,7 @@ def test_writer_serializes_common_spans_completion_and_namespaced_extras(
         "readout_wall_s": 0.2,
         "complete": False,
         "families": {},
+        "capture_file": "capture-example.json.gz",
         "extras": {
             "ftf.projection_outcomes": [4, 2],
             "ftf.projection_pruned_weight": [0.0, 0.01],
@@ -115,6 +119,7 @@ def test_writer_removes_oldest_routing_files_and_warns_only_once(tmp_path: Path)
             "readout_wall_s": 0.0,
             "complete": True,
             "extras": {},
+            "capture_file": None,
         },
         paths=(),
     )
@@ -141,6 +146,7 @@ def test_writer_removes_oldest_routing_files_and_warns_only_once(tmp_path: Path)
                     "readout_wall_s": 0.0,
                     "complete": False,
                     "extras": {},
+                    "capture_file": None,
                 },
                 paths=(),
             )

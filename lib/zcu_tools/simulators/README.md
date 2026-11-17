@@ -1,6 +1,6 @@
 # Physical simulator models
 
-**Last updated:** 2026-11-16
+**Last updated:** 2026-11-17, optional acquire captures and telemetry correlation
 
 **Readers:** framework-dev, lab-author, agent. Locate physical model configuration, numerics and environment builders.
 
@@ -60,7 +60,7 @@ writes one row, including numeric failures. Six aggregates all sources and route
 groups before writing; individual sources do not write rows.
 
 Call `RoutingTelemetry(directory).write(summary, paths=paths)` once at the acquire
-boundary. `AcquireTelemetry` requires the first eight fields below.
+boundary. `AcquireTelemetry` requires the first nine fields below.
 `RoutingRecord` inherits them and adds the four writer-generated fields.
 
 | Field | Meaning |
@@ -73,6 +73,7 @@ boundary. `AcquireTelemetry` requires the first eight fields below.
 | `readout_wall_s` | Sum of ADC/readout wall seconds, including preparation and integrated or decimated sampling. |
 | `complete` | `true` when the acquire body and cleanup returned normally, including a partial Stop result. `false` when an exception escaped. |
 | `extras` | Simulator-prefixed keys with JSON values, or `{}` when absent. |
+| `capture_file` | Capture basename, or `null` when recording is off or publication fails. |
 | `timestamp` | Writer-generated UTC ISO timestamp. |
 | `frontend_cpu_s` | Geometry and work-plan calling-thread CPU seconds. |
 | `estimated_cost_unit` | `relative scheduling units`, the label for family scheduling costs. |
@@ -119,6 +120,30 @@ rows. Every valid row still contributes family statistics. Non-null `complete`
 must be a JSON boolean. Non-null wall fields must be JSON numbers, not booleans or
 numeric strings. Wrong types skip the entire row, including its family counters,
 and produce a file/line warning and a `skipped` count.
+
+## Debug capture
+
+Set `numerics.debug_capture: true` in FTF, single or six settings to record
+Engine inputs and actual routes. The default is false. Six's top-level switch
+owns one buffer for all six sources; nested qubit switches do not publish files.
+One admitted acquire creates one buffer and passes it to every evolve.
+After return or failure, on_end publishes one manifest before building telemetry.
+A compile failure publishes an empty manifest. Readiness or on_begin failure
+does not call on_end and leaves no capture. A later acquire failure does not
+change the complete flag of an earlier successful evolve.
+
+Recording works with `numerics.telemetry.enabled: false` and writes no JSONL row
+in that mode. Otherwise the row's `capture_file` contains the successful
+manifest basename. Off and failed publication both produce null. Older rows
+without the key have no associated capture; the routing analyzer does not use it.
+The binding has already measured `wall_s` before either writer runs.
+
+Use `zcu_tools.simulate.evolution.capture_directory()` to locate files.
+It returns `<user-cache-root>/simulator-debug/v1`, shared across worktrees and
+tasks. `ZCU_TOOLS_CACHE_DIR` overrides the shared root with a non-empty absolute
+path. The [capture writer](../simulate/evolution/README.md#capture-persistence)
+defines atomic publication, codec failures and retention.
+Captures contain numerical inputs and are not ordinary run metadata or Git data.
 
 ## Private replay
 

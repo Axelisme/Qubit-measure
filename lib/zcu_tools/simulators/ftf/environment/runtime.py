@@ -46,11 +46,13 @@ from zcu_tools.simulate.boundary import (
 )
 from zcu_tools.simulate.evolution import (
     Basis,
+    CaptureBuffer,
     Engine,
     EvolutionResult,
     PathDiagnostics,
     RoutingHistory,
     batch_populations,
+    write_capture,
 )
 from zcu_tools.simulators.ftf.config import FTFSettings, load_ftf, parse_ftf
 from zcu_tools.simulators.ftf.environment.acquisition import FTFAcquisitionOptions
@@ -435,7 +437,8 @@ class FTFAcquire:
         options = CavityEvolutionOptions(
             key,
             owner.telemetry is not None,
-            cancel,
+            cancel=cancel,
+            capture=owner.capture,
             evolving=self._evolving,
             reading=self._reading,
         )
@@ -624,6 +627,7 @@ class FTFSource:
         self.preparation_cache: PreparationCache[_Prepared] = PreparationCache()
         self.envelope_encoder = EnvelopeEncoder()
         self._preparation_engine = self.engine
+        self.capture: CaptureBuffer | None = None
         self._closed = False
 
     @property
@@ -668,6 +672,7 @@ class FTFSource:
                 self._facts.source.close()
             self._facts = None
             self.preparation_cache.clear()
+        self.capture = CaptureBuffer() if self.settings.numerics.debug_capture else None
         self._pending_acquire = True
 
     def model_facts(self, snapshot: EnvironmentSnapshot) -> FTFModelFacts:
@@ -773,6 +778,7 @@ class FTFSource:
         Only the matching current session contributes routing work. Direct execute
         users may supply their own outcome after the final round and cleanup.
         """
+        capture_file = write_capture(self.capture) if self.capture is not None else None
         if self.telemetry is None:
             return
         rounds = outcome.rounds
@@ -790,6 +796,7 @@ class FTFSource:
                 "evolve_wall_s": 0.0 if session is None else session.evolve_wall_s,
                 "readout_wall_s": 0.0 if session is None else session.readout_wall_s,
                 "complete": outcome.complete,
+                "capture_file": None if capture_file is None else capture_file.name,
                 "extras": {
                     "ftf.projection_outcomes": list(
                         self.evaluations[-1].projection_outcomes
@@ -968,7 +975,7 @@ def ftf(  # noqa: PLR0913  # tolerated: independent optional inputs have distinc
                 wait_ready=None if preparation is None else preparation.wait_ready,
                 on_begin=lambda: coordinator.begin_acquire(seed=binding.root_seed),
                 on_end=coordinator.finish_acquire
-                if coordinator.telemetry is not None
+                if coordinator.telemetry is not None or settings.numerics.debug_capture
                 else None,
             ),
         )

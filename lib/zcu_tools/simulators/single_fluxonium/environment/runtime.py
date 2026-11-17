@@ -43,12 +43,14 @@ from zcu_tools.simulate.boundary import (
 )
 from zcu_tools.simulate.evolution import (
     Basis,
+    CaptureBuffer,
     DriveSource,
     Engine,
     ModelSource,
     PathDiagnostics,
     RoutingHistory,
     batch_populations,
+    write_capture,
 )
 from zcu_tools.simulate.fluxonium import (
     FluxoniumNoise,
@@ -298,6 +300,8 @@ class SingleFluxoniumSource:
         self.paths: list[PathDiagnostics] = []
         self.evolve_wall_s = 0.0
         self.readout_wall_s = 0.0
+        self.capture: CaptureBuffer | None = None
+        """Current acquire recording; None when debug_capture is disabled."""
         self.devices = devices
         self.private_replay = private_replay
         runtime = SingleFluxoniumRuntimeOptions() if runtime is None else runtime
@@ -367,6 +371,7 @@ class SingleFluxoniumSource:
             self._effective_settings = self._drift.sample(self._clock.now())
         self.paths.clear()
         self.evolve_wall_s = self.readout_wall_s = 0.0
+        self.capture = CaptureBuffer() if self.settings.numerics.debug_capture else None
         self._pending_acquire = True
 
     def finish_acquire(self, outcome: AcquireOutcome) -> None:
@@ -374,8 +379,11 @@ class SingleFluxoniumSource:
 
         Uses captured attempts for points/rounds and accumulated Engine/ADC work.
         Writer failures warn once without changing the outcome. Disabled policy
-        writes nothing. The binding is the sole authority for complete.
+        writes no telemetry. When debug_capture is enabled, publish its buffer
+        first even with telemetry disabled; include the successful basename or
+        None in the summary. The binding is the sole authority for complete.
         """
+        capture_file = write_capture(self.capture) if self.capture is not None else None
         if self.telemetry is not None:
             self.telemetry.write(
                 {
@@ -389,6 +397,7 @@ class SingleFluxoniumSource:
                     "readout_wall_s": self.readout_wall_s,
                     "complete": outcome.complete,
                     "extras": {},
+                    "capture_file": None if capture_file is None else capture_file.name,
                 },
                 paths=self.paths,
             )
@@ -700,6 +709,7 @@ class SingleFluxoniumSource:
                     basis,
                     self.settings.numerics.projection_prune_floor,
                     cancel,
+                    capture=self.capture,
                 )
                 try:
                     projected = runner.prepare(plans, request.point_dims, key)
@@ -723,6 +733,7 @@ class SingleFluxoniumSource:
                         cancel=cancel,
                         reuse_key=key,
                         telemetry=True,
+                        capture=self.capture,
                     )
                 finally:
                     self.evolve_wall_s += monotonic() - started
@@ -904,7 +915,9 @@ def single_fluxonium(  # noqa: PLR0913  # tolerated: independent optional inputs
             ),
             callbacks=SimulationCallbacks(
                 on_begin=lambda: source.begin_acquire(seed=binding.root_seed),
-                on_end=source.finish_acquire if source.telemetry is not None else None,
+                on_end=source.finish_acquire
+                if source.telemetry is not None or settings.numerics.debug_capture
+                else None,
             ),
         )
         soc = SimulationSoc(soccfg, binding, routes=tuple((gen, adc) for gen in gens))

@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-11-17，acquire 分層 wall、caller-owned routing controls and GUI worker policy
+**Last updated:** 2026-11-17, acquire telemetry and optional capture publication
 
 **讀者：** framework-dev、agent。FTF 環境的組裝接縫、數值接線與 acquisition 契約。
 
@@ -60,6 +60,17 @@ budget. No GUI field is added; final plot-buffer flushing is unchanged.
 
 Profiling overrides and the caller's board-loading example belong to
 [environment setup](../../../../../zcu_lab/simulation_envs/README.md#關閉補等與-telemetry).
+
+## Debug capture
+
+`numerics.debug_capture` defaults to false. Enable it to publish one frozen
+Engine-input and route manifest after each admitted acquire, including failure.
+Every evolve in that acquire shares the same buffer. Telemetry can remain off.
+When enabled, telemetry stores the published basename in `capture_file`,
+or null when capture is off or publication fails. Capture writes run before
+summary construction and outside binding's measured wall time.
+See the [shared switch contract](../../README.md#debug-capture) for empty
+captures, retention and the cache directory.
 
 ## Routing telemetry
 

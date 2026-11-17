@@ -57,6 +57,8 @@ class AcquireTelemetry(TypedDict):
     readout_wall_s: float
     complete: bool
     extras: dict[str, JsonValue]
+    capture_file: str | None
+    """Published capture basename; None when recording is off or publication fails."""
 
 
 class RoutingRecord(AcquireTelemetry):
@@ -159,6 +161,7 @@ class RoutingTelemetry:
                     "readout_wall_s": summary["readout_wall_s"],
                     "complete": summary["complete"],
                     "extras": summary["extras"],
+                    "capture_file": summary["capture_file"],
                 }
                 line = (
                     json.dumps(record, allow_nan=False, separators=(",", ":")) + "\n"

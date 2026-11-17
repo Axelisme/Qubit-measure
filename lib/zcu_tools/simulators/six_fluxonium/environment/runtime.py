@@ -36,7 +36,12 @@ from zcu_tools.simulate.boundary import (
     RoundSignals,
     SamplingIdentity,
 )
-from zcu_tools.simulate.evolution import Engine, RoutingHistory
+from zcu_tools.simulate.evolution import (
+    CaptureBuffer,
+    Engine,
+    RoutingHistory,
+    write_capture,
+)
 from zcu_tools.simulators.single_fluxonium.config.schema import (
     DCBias,
     DCSource,
@@ -226,6 +231,7 @@ class SixFluxoniumSource:
             )
             for index, qubit in enumerate(settings.qubits.ordered())
         )
+        self.capture: CaptureBuffer | None = None
         self._closed = False
         self._identity = sha256(settings.model_dump_json().encode()).hexdigest()
 
@@ -277,8 +283,10 @@ class SixFluxoniumSource:
             self._effective_settings = self.settings.model_copy(
                 update={"qubits": self.settings.qubits.model_copy(update=qubits)}
             )
+        self.capture = CaptureBuffer() if self.settings.numerics.debug_capture else None
         for source in self.sources:
             source.begin_acquire(seed=seed)
+            source.capture = self.capture
         self.readout_wall_s = 0.0
         self._request = None
         self._pending_acquire = True
@@ -290,6 +298,7 @@ class SixFluxoniumSource:
         failed spans; binding alone supplies compile time and complete. Writer
         failures warn once without changing results; disabled policy writes nothing.
         """
+        capture_file = write_capture(self.capture) if self.capture is not None else None
         if self.telemetry is not None:
             self.telemetry.write(
                 {
@@ -306,6 +315,7 @@ class SixFluxoniumSource:
                     + sum(source.readout_wall_s for source in self.sources),
                     "complete": outcome.complete,
                     "extras": {},
+                    "capture_file": None if capture_file is None else capture_file.name,
                 },
                 paths=[path for source in self.sources for path in source.paths],
             )
@@ -619,7 +629,9 @@ def six_fluxonium(  # noqa: PLR0913  # tolerated: independent optional controls 
             ),
             callbacks=SimulationCallbacks(
                 on_begin=lambda: source.begin_acquire(seed=binding.root_seed),
-                on_end=source.finish_acquire if source.telemetry is not None else None,
+                on_end=source.finish_acquire
+                if source.telemetry is not None or settings.numerics.debug_capture
+                else None,
             ),
         )
         mux_channels = tuple(q.readout.adc.ro_ch for q in settings.qubits.ordered())

@@ -1,6 +1,6 @@
 # Six independent fluxonium cavities
 
-**Last updated:** 2026-11-17，acquire telemetry、per-point projection continuation and integrated categories
+**Last updated:** 2026-11-17, acquire telemetry and optional capture publication
 
 **Readers:** framework-dev, lab-author, agent. Build and acquire six independent cavities through the normal simulation SoC.
 
@@ -51,6 +51,17 @@ exist only during multi-timeline evolution. No sixfold worker pool runs at once.
 GUI startup reserves one host CPU, with at least one worker, and does no warmup.
 Tests, benchmarks and research keep the serial factory default. The startup
 policy is defined in [ADR-0069](../../../../../docs/adr/0069-experiment-core-and-frontends.md#顯式-cfg-與裝置環境).
+
+## Debug capture
+
+`numerics.debug_capture` defaults to false. Enable it to publish one frozen
+Engine-input and route manifest after each admitted acquire, including failure.
+Every evolve in that acquire shares the same buffer. Telemetry can remain off.
+When enabled, telemetry stores the published basename in `capture_file`,
+or null when capture is off or publication fails. Capture writes run before
+summary construction and outside binding's measured wall time.
+See the [shared switch contract](../../README.md#debug-capture) for empty
+captures, retention and the cache directory.
 
 ## Acquire telemetry
 

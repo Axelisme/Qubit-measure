@@ -1,6 +1,6 @@
 # Single-fluxonium acquisition
 
-**Last updated:** 2026-11-17，acquire telemetry、projection chains and per-point continuation
+**Last updated:** 2026-11-17, acquire telemetry and optional capture publication
 
 **Readers:** framework-dev, lab-author, agent. Compose complete fluxonium timelines with one physical readout cavity.
 
@@ -34,6 +34,17 @@ pool. Empty work, one timeline or one worker runs serially. GUI startup explicit
 reserves one host CPU, using at least one worker, and does no numeric warmup.
 Tests, benchmarks, research and other direct callers keep the serial default.
 The startup policy is defined in [ADR-0069](../../../../../docs/adr/0069-experiment-core-and-frontends.md#顯式-cfg-與裝置環境).
+
+## Debug capture
+
+`numerics.debug_capture` defaults to false. Enable it to publish one frozen
+Engine-input and route manifest after each admitted acquire, including failure.
+Every evolve in that acquire shares the same buffer. Telemetry can remain off.
+When enabled, telemetry stores the published basename in `capture_file`,
+or null when capture is off or publication fails. Capture writes run before
+summary construction and outside binding's measured wall time.
+See the [shared switch contract](../../README.md#debug-capture) for empty
+captures, retention and the cache directory.
 
 ## Acquire telemetry
 

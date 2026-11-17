@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-11-17, optional Engine capture and actual route events
+**Last updated:** 2026-11-17, Engine capture, atomic publication and shared directory
 
 **讀者：** framework-dev、agent。Segment evolution 的公開輸入、路由與數值邊界。
 
@@ -221,8 +221,9 @@ must serialize, just as for evolve.
 `CaptureBuffer()` is a caller-owned in-memory recording. Pass it to
 `Engine.evolve(..., capture=buffer)` and read `buffer.records` after return or
 failure. The default `capture=None` does not freeze inputs or collect routes.
-Engine never writes a file. A caller can save the tuple with the existing
-`write_frozen_manifest(path, buffer.records)` codec.
+Engine never writes a file. After all evolves return or raise, call
+`write_capture(buffer)` to publish the accumulated records. Explicit-path
+consumers can still use `write_frozen_manifest(path, buffer.records)`.
 
 Each evolve gets a fresh random `capture_id` and appends one `FrozenRecord`
 per input batch, including empty batches, before prefix execution or dispatch.
@@ -267,6 +268,37 @@ itself is not serialized. A future registration path outside batch corrections
 must add an explicit non-reconstructibility marker. Capture supplies no reference
 error. See the [capture discussion](../../../../docs/discussions/2026-11-17-engine-capture-events.md)
 for the lifecycle and event-log choices.
+
+## Capture persistence
+
+`write_capture(buffer: CaptureBuffer) -> Path | None` snapshots records once
+and publishes a new `capture-<uuid4 hex>.json.gz` file. Rewriting the same
+buffer keeps earlier records in a different file. An empty buffer produces
+a zero-record manifest, not None. Read it with `read_frozen_manifest(path)`.
+The existing frozen format and physical hashes do not change.
+
+`capture_directory() -> Path` returns the absolute
+`<user-cache-root>/simulator-debug/v1` directory without creating it.
+The writer and Numba use the same resolver. Set `ZCU_TOOLS_CACHE_DIR` before
+use to select another non-empty absolute cache root. Without an override,
+platformdirs selects the root, with the system temporary directory as fallback.
+
+The writer serializes into a same-directory temporary file and publishes it
+with `os.replace`. It attempts to remove temporary files on failure.
+Invalid cache configuration and errors reading records propagate before
+publication. Publication OSError and codec ValueError/TypeError emit at most
+one RuntimeWarning per call, then return None, even under warnings-as-errors.
+Nonfinite and unsupported JSON values cannot be recorded. Other errors propagate.
+
+V1 has no automatic size limit, truncation or eviction. Files persist across
+tasks until the user deletes them, for example by unlinking selected paths from
+`capture_directory().glob("capture-*.json.gz")`.
+During acquire, memory grows with the recorded evolves and their frozen inputs
+and events. Publication also allocates the full canonical JSON and gzip bytes.
+The [environment switch](../../simulators/README.md#debug-capture) publishes once
+per acquire and links the basename to telemetry.
+The [writer discussion](../../../../docs/discussions/2026-11-17-capture-publication.md)
+records the API and failure-policy choices.
 
 ## Joint-Fock prototype
 

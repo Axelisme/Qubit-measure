@@ -12,6 +12,7 @@ from zcu_tools.simulate.adc import ProjectionChain, normalize_populations
 from zcu_tools.simulate.boundary import CancellationQuery
 from zcu_tools.simulate.evolution import (
     Basis,
+    CaptureBuffer,
     Engine,
     ModelSource,
     PathDiagnostics,
@@ -67,7 +68,9 @@ class ProjectionRunner:
     retained DC energy basis as source densities and ADC labels. floor is the
     finite threshold in [0,1): each point adopts solver rows only for source
     states whose approximate marginal is at least floor; other rows are identity.
-    cancel is forwarded unchanged. One runner serves one preparation.
+    cancel is forwarded unchanged. capture is the acquire-owned CaptureBuffer
+    forwarded to every prefix and continuation; None disables recording.
+    One runner serves one preparation.
     Densities never cross a plan or span; ADC CTMC jumps do not feed back.
     paths retains completed span diagnostics even when prepare raises.
     evolve_wall_s sums every Engine call's wall seconds, including a failed call.
@@ -80,9 +83,12 @@ class ProjectionRunner:
         basis: Basis,
         floor: float,
         cancel: CancellationQuery | None,
+        *,
+        capture: CaptureBuffer | None = None,
     ) -> None:
         self.engine, self.source, self.basis = engine, source, basis
         self.floor, self.cancel = floor, cancel
+        self.capture = capture
         self.paths: list[PathDiagnostics] = []
         self.evolve_wall_s = 0.0
         self.keys: list[bytes] = []
@@ -122,6 +128,7 @@ class ProjectionRunner:
                 cancel=self.cancel,
                 reuse_key=reuse_key,
                 telemetry=True,
+                capture=self.capture,
             )
         finally:
             self.evolve_wall_s += monotonic() - started

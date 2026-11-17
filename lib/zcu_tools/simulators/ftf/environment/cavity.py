@@ -15,6 +15,7 @@ from zcu_tools.simulate.adc import (
 )
 from zcu_tools.simulate.boundary import CancellationQuery
 from zcu_tools.simulate.evolution import (
+    CaptureBuffer,
     Engine,
     EvolutionResult,
     FluxSchedule,
@@ -46,6 +47,8 @@ class CavityEvolutionOptions:
 
     key: bytes
     telemetry: bool
+    capture: CaptureBuffer | None = None
+    """Acquire-owned buffer forwarded to every evolve, or None to disable recording."""
     cancel: CancellationQuery | None = None
     evolving: Callable[[], AbstractContextManager[None]] = nullcontext
     reading: Callable[[], AbstractContextManager[None]] = nullcontext
@@ -244,6 +247,7 @@ def _evolve_outcomes(
                     (batch,),
                     cancel=options.cancel,
                     telemetry=options.telemetry,
+                    capture=options.capture,
                     reuse_key=key,
                 )
             outcome.timeline.density = result.densities
@@ -378,6 +382,7 @@ def evolve_plans(
                 tuple(plan.batch for plan in plans),
                 cancel=options.cancel,
                 telemetry=options.telemetry,
+                capture=options.capture,
                 reuse_key=options.key,
             ), (options.key,)
     cache = CavityAverageCache()
@@ -425,6 +430,7 @@ def _evolve_cavities(
                 plain,
                 cancel=options.cancel,
                 telemetry=options.telemetry,
+                capture=options.capture,
                 reuse_key=plain_key,
             )
         paths.append(result.paths)
@@ -445,6 +451,7 @@ def _evolve_cavities(
                 batches,
                 cancel=options.cancel,
                 telemetry=options.telemetry,
+                capture=options.capture,
                 reuse_key=reuse_key,
             )
         paths.append(result.paths)

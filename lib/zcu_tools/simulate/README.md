@@ -94,7 +94,9 @@ bootstrap module. Python serializes its initialization and retains only a
 successful import, so multiple tools share one namespace without nesting it.
 A failed bootstrap propagates its error and is retried on the next tool import.
 Without `NUMBA_CACHE_DIR`, it uses `<user-cache-root>/numba/<digest>/`.
-The simulator resolves this root without importing `utils.cache`.
+The simulator resolves this root with `_numba_cache.user_cache_root()` without
+importing `utils.cache`. The debug capture writer uses the same resolver for
+`simulator-debug/v1`; see [capture persistence](evolution/README.md#capture-persistence).
 `ZCU_TOOLS_CACHE_DIR` must be a non-empty absolute path; invalid values raise
 `ValueError`. Without this override, the root is
 `platformdirs.user_cache_dir("zcu_tools", "zcu_tools")`. If platform lookup fails,

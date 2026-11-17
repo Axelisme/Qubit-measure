@@ -211,6 +211,9 @@ class Numerics(RoundPacing):
     telemetry: TelemetrySettings = TelemetrySettings()
     """Acquire JSONL policy; enabled by default, with an optional output directory."""
 
+    debug_capture: bool = False
+    """Record Engine inputs and routes per acquire; disabled by default."""
+
     truncation: Truncation
     solver: Solver
     slow_envelope_segments_per_period: Annotated[int, Field(ge=1, strict=True)]

@@ -1,9 +1,13 @@
 # Six-fluxonium material
 
-**Last updated:** 2026-11-16
+**Last updated:** 2026-11-17
 
 **Readers:** framework-dev, lab-author, agent. Load six circuit materials with local currents and one shared coil.
 
+`numerics.debug_capture` is optional and defaults to false. True records one
+acquire's Engine inputs and routes using the
+[shared capture policy](../../README.md#debug-capture).
+Only the top-level switch controls the shared six-source buffer.\n
 [ADR-0072](../../../../../docs/adr/0072-module-boundaries.md) separates model configuration from shared framework mechanisms and caller-owned board profiles.
 
 `parse_six_fluxonium(document)` validates a decoded mapping.

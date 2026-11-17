@@ -392,6 +392,8 @@ class Numerics(RoundPacing):
     solver: Solver
     seed: Index | None
     telemetry: TelemetrySettings = Field(default_factory=TelemetrySettings)
+    debug_capture: bool = False
+    """Record Engine inputs and routes per acquire; disabled by default."""
     projection_weight_floor: Annotated[Finite, Field(ge=0, lt=1)]
 
 
