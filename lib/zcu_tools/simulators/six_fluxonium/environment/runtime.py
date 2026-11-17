@@ -156,6 +156,10 @@ class SixFluxoniumSource:
     Values below 1 raise ValueError. Sources are still prepared serially.
     readout_wall_s sums six-owner ADC sampling and result assembly seconds;
     source-owned ADC preparation and Engine counters are added at finish_acquire.
+    capture is the current acquire's shared CaptureBuffer, or None when the
+    top-level debug_capture is disabled. begin_acquire gives every source this
+    same buffer. finish_acquire publishes it before telemetry, even if telemetry
+    is disabled. Nested qubit capture settings do not publish separate files.
     begin_acquire resets all counters. telemetry is the optional writer used
     only by finish_acquire, never by an individual source or routed group.
     """
@@ -296,7 +300,9 @@ class SixFluxoniumSource:
 
         Captured attempts supply points/rounds. Engine and ADC totals include
         failed spans; binding alone supplies compile time and complete. Writer
-        failures warn once without changing results; disabled policy writes nothing.
+        failures warn once without changing results; disabled telemetry writes
+        no row. Enabled debug_capture publishes first regardless of telemetry.
+        The summary's capture_file is the successful basename, otherwise None.
         """
         capture_file = write_capture(self.capture) if self.capture is not None else None
         if self.telemetry is not None:

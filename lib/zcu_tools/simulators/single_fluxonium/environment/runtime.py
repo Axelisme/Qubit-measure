@@ -268,6 +268,9 @@ class SingleFluxoniumSource:
     sums Engine calls; readout_wall_s sums ADC preparation and round sampling.
     begin_acquire resets these counters. telemetry is the optional local writer;
     only finish_acquire writes, using the binding's AcquireOutcome.
+    capture is the current acquire's CaptureBuffer, or None when debug_capture
+    is disabled. All evolves borrow it; finish_acquire publishes it before
+    constructing telemetry, including when telemetry itself is disabled.
     """
 
     def __init__(

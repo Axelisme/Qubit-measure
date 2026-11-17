@@ -300,6 +300,77 @@ per acquire and links the basename to telemetry.
 The [writer discussion](../../../../docs/discussions/2026-11-17-capture-publication.md)
 records the API and failure-policy choices.
 
+### Capture measurements
+
+A single offline batch on 2026-11-17 measured revision `eb095cfcc77d213b728bf1f7662631e3b229960d`,
+whose tree was `d38ca3f84ae7594d74822c3727f790eb96d4ddaa`.
+The runner held both CPU slots, CPU union 0–7. The payload and all fresh children
+used CPU affinity 0–3, one native thread, 8 GiB memory and zero swap.
+MemAvailable exceeded 12 GiB before and after admission. Payload elapsed was
+30.56 s under a 600 s bound. Queue time was 383.85 s and was not sample time.
+No hardware, GUI, reference solver or shared scene cache participated.
+
+The tiny Engine scene used three levels, one four-point DC batch and one empty
+batch, with two evolves per unit. All modes used one worker, t4 and telemetry.
+A disabled capture, B recorded in memory, C also published one manifest.
+Each cold sample used a fresh process and empty private Numba cache. Imports
+and scene construction stayed outside the timer. Cold measured the first Engine
+calls, not application startup. Each mode has only one cold observation.
+
+| Mode | Cold wall ms | Cold process CPU ms | Warm wall median ms, range | Warm process CPU median ms, range |
+| --- | ---: | ---: | ---: | ---: |
+| A, off | 327.396 | 288.432 | 5.726, 5.539–5.777 | 4.786, 4.720–4.850 |
+| B, memory | 327.072 | 287.516 | 5.708, 5.622–5.826 | 4.984, 4.916–5.147 |
+| C, published | 348.389 | 307.809 | 7.149, 6.765–7.395 | 5.885, 5.769–6.021 |
+
+The resident process warmed each mode once, then ran ABC/CBA twice, four samples
+per mode. History clearing and density/manifest checks stayed outside the timer.
+B minus A was −0.017 ms wall, −0.31%, and +0.197 ms CPU, +4.12%.
+The overlapping wall ranges do not establish a memory-recording speedup.
+C minus A was +1.423 ms wall, +24.84%, and +1.099 ms CPU, +22.95%.
+Each C file contained four records, two evolve IDs and two empty batches.
+Warm gzip sizes were 1,018–1,021 bytes, with 9,327 uncompressed JSON bytes.
+The cold C file was 1,019 bytes. All compared densities were identical.
+
+Capacity samples used synthetic source/binding acquire inputs, not program
+compilation or user YAML. FTF had 32 points, single 64, six 128. Six was the
+largest grid in this batch, with every source seeing all 128 mux points.
+All had two read windows, two rounds and two shots. FTF retained two levels;
+single and each six source used two levels from a six-state native basis.
+Each environment used ACCA order in four fresh processes, two samples per mode.
+A complete capture-off warmup preceded each sample. A fresh environment prevented
+warmup preparation reuse. Before timing, each process wrote 5 to its own
+`/proc/self/clear_refs`, verified VmHWM reset to current RSS, then read VmHWM
+immediately after acquire and before codec validation. This excludes historical
+import/JIT peaks and captures short-lived JSON/gzip allocations without polling.
+
+| Environment | A/C mean wall ms | A/C mean process CPU ms | A peak RSS MiB, range | C peak RSS MiB, range | Mean C−A peak MiB |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| FTF, 32 points | 159.285 / 170.540 | 158.475 / 169.687 | 273.121–276.965 | 277.199–277.289 | +2.201 |
+| Single, 64 points | 31.872 / 33.942 | 31.725 / 33.801 | 445.422–445.523 | 445.648–445.699 | +0.201 |
+| Six, 128 points | 337.469 / 359.277 | 336.054 / 357.806 | 447.887–447.961 | 449.062–449.137 | +1.176 |
+
+Reset baseline RSS ranges in MiB were A/C 273.121–276.965 / 277.043–277.098
+for FTF, 445.418–445.520 / 445.645–445.695 for single, and
+447.879–447.934 / 447.984–448.047 for six. Per-process peak above baseline was
+A/C 0 / 0.156–0.191 MiB for FTF, 0.004 / 0.004 MiB for single, and
+0.008–0.027 / 1.078–1.090 MiB for six. The absolute C−A comparison includes
+process-baseline differences. It is not an isolated allocation estimate.
+
+| Environment | Records / evolve IDs per file | Gzip bytes, range | Uncompressed JSON bytes |
+| --- | ---: | ---: | ---: |
+| FTF | 64 / 64 | 9,281–9,285 | 148,561 |
+| Single | 2 / 2 | 1,697 | 33,935 |
+| Six | 12 / 12 | 12,430–12,437 | 387,705 |
+
+Every file decoded, all recorded evolves were complete, capture_file matched
+telemetry, and A/C output fingerprints agreed. Reused round preparations did not
+invent extra evolve records. The largest gzip was 12,437 bytes and the largest
+mean peak increment was 2,308,096 bytes, below the 256 MiB and 2 GiB review
+thresholds. These small synthetic samples do not bound user workloads or certify
+numerical accuracy. Different process baselines and two memory samples per mode
+limit the peak comparison. V1 retention still requires manual deletion.
+
 ## Joint-Fock prototype
 
 `joint_fock_spectrum(JointFockRequest(...))` is an independent numeric entry.

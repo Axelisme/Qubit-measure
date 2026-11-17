@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-11-17，reference producer 單列選取
+**Last updated:** 2026-11-17，reference producer 單列選取與 acquire capture owners
 
 **讀者：** framework-dev、agent。查閱測試的 owner、fixture、執行方式與搬遷驗收契約。
 
@@ -551,6 +551,9 @@ and the template engine contract.
 `tests/simulators/ftf/environment/test_projective_readout.py` covers public frontend mux heralding, retained
 outcome histories, pruning, partial ADC observations and terminal-only density,
 point-order and sampling-identity handoff to ADC using an injected non-evolving Engine.
+`tests/simulators/test_capture.py` owns the shared acquire capture lifecycle across
+FTF, single and six, using non-evolving Engine collaborators. Writer/codec
+publication behavior lives in `tests/simulate/evolution/test_capture_writer.py`.
 The eight single/six/FTF acquire, projection and routing-control test files replace
 numeric propagation with Engine answers. Six keeps six independent model sources.
 Engine density accuracy stays in `tests/simulate/evolution/contract/`, rather than

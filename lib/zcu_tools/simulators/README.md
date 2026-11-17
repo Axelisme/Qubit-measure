@@ -166,5 +166,8 @@ Replay does not change normal waveform assets or data.h5 policies.
 `tests/simulators/ftf/physics/` owns joint-model physics and its simulation marker.
 `tests/simulators/test_replay.py` owns private archive roundtrips and integrity errors.
 `tests/simulators/test_telemetry.py` owns shared summary serialization, file rotation
-and warning isolation. FTF acquire integration stays with the FTF environment tests.
+and warning isolation. `tests/simulators/test_capture.py` owns the shared capture
+lifecycle through public acquire with non-evolving Engine collaborators.
+Writer/codec publication belongs to `tests/simulate/evolution/test_capture_writer.py`.
+FTF telemetry integration stays with the FTF environment tests.
 Generic engine, ADC, bath and source-line tests stay with their framework owners.

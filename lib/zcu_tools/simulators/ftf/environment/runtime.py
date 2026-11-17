@@ -568,6 +568,9 @@ class FTFSource:
     are always reread. Fingerprints contain no physical generation data and
     survive generation changes; preparation invalidation is unchanged. Close
     releases all fingerprints and retained envelopes.
+    capture is the current acquire's CaptureBuffer, or None when debug_capture
+    is disabled. begin_acquire creates it; all spans borrow it. finish_acquire
+    publishes once per observer call, before any telemetry summary.
     telemetry optionally supplies an already configured local routing writer.
     Enabled sources collect stage wall and calling-thread routing CPU, and expose
     finish_acquire for the binding completion callback. None (default) creates no
@@ -777,6 +780,9 @@ class FTFSource:
         seconds including pacing, builder seconds and normal-return status.
         Only the matching current session contributes routing work. Direct execute
         users may supply their own outcome after the final round and cleanup.
+        Enabled debug_capture publishes the buffer before summary construction,
+        even with telemetry disabled. capture_file is the successful basename
+        or None when recording is off or publication fails.
         """
         capture_file = write_capture(self.capture) if self.capture is not None else None
         if self.telemetry is None:
