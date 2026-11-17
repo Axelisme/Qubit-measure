@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterator
 from typing import TYPE_CHECKING
 
 import pytest
@@ -18,10 +19,22 @@ pytest.importorskip("qtpy")
 # ---------------------------------------------------------------------------
 
 
-def _make_stack(qapp):
+@pytest.fixture
+def make_stack(qapp) -> Iterator[Callable[[], ProgressStack]]:
     from zcu_tools.gui.session.ui.progress_stack import ProgressStack
 
-    return ProgressStack()
+    owned: list[ProgressStack] = []
+
+    def create() -> ProgressStack:
+        stack = ProgressStack()
+        owned.append(stack)
+        return stack
+
+    yield create
+    for stack in owned:
+        stack.close()
+        stack.deleteLater()
+    qapp.processEvents()
 
 
 def _layout_bars(stack: ProgressStack) -> tuple[LightweightProgressBar, ...]:
@@ -105,11 +118,11 @@ def test_lightweight_progress_bar_format_and_value(
         qapp.processEvents()
 
 
-def test_factory_push_and_pop_leave_false(qapp):
+def test_factory_push_and_pop_leave_false(make_stack, qapp):
     """leave=False: close() pops the bar immediately."""
     from qtpy.QtWidgets import QApplication
 
-    stack = _make_stack(qapp)
+    stack = make_stack()
     factory = _make_factory(stack)
 
     pbar = factory(desc="test", total=10, leave=False)
@@ -129,11 +142,11 @@ def test_factory_push_and_pop_leave_false(qapp):
     assert len(_layout_bars(stack)) == 0  # bar was popped
 
 
-def test_reset_all_keeps_removed_bar_as_hidden_child(qapp):
+def test_reset_all_keeps_removed_bar_as_hidden_child(make_stack, qapp):
     """Clearing a visible bar must not turn it into a top-level window."""
     from qtpy.QtWidgets import QApplication
 
-    stack = _make_stack(qapp)
+    stack = make_stack()
     stack.show()
     factory = _make_factory(stack)
     factory(desc="test", total=10, leave=True)
@@ -149,11 +162,11 @@ def test_reset_all_keeps_removed_bar_as_hidden_child(qapp):
     assert bar.isVisible() is False
 
 
-def test_factory_push_and_pop_leave_true(qapp):
+def test_factory_push_and_pop_leave_true(make_stack, qapp):
     """leave=True: close() leaves bar visible; reset_all() clears it."""
     from qtpy.QtWidgets import QApplication
 
-    stack = _make_stack(qapp)
+    stack = make_stack()
     factory = _make_factory(stack)
 
     pbar = factory(desc="test", total=10, leave=True)
@@ -168,11 +181,11 @@ def test_factory_push_and_pop_leave_true(qapp):
     assert len(_layout_bars(stack)) == 0
 
 
-def test_factory_two_layers(qapp):
+def test_factory_two_layers(make_stack, qapp):
     """Two nested pbars (leave=False): inner pops on close, outer stays until reset."""
     from qtpy.QtWidgets import QApplication
 
-    stack = _make_stack(qapp)
+    stack = make_stack()
     factory = _make_factory(stack)
 
     outer = factory(desc="outer", total=5, leave=True)
@@ -193,11 +206,11 @@ def test_factory_two_layers(qapp):
     assert len(_layout_bars(stack)) == 0
 
 
-def test_total_setter(qapp):
+def test_total_setter(make_stack, qapp):
     """Integer totals set the raw maximum; float progress fills proportionally."""
     from qtpy.QtWidgets import QApplication
 
-    stack = _make_stack(qapp)
+    stack = make_stack()
     factory = _make_factory(stack)
 
     # integer total → max == raw value
@@ -236,7 +249,7 @@ def test_total_setter(qapp):
         QApplication.processEvents()
 
 
-def test_total_change_updates_widget_in_place_no_flicker(qapp):
+def test_total_change_updates_widget_in_place_no_flicker(make_stack, qapp):
     """Changing a live bar's ``total`` between sweep points must update the existing
     progress widget in place, never remove+re-add
     it. Regression: the total setter used to emit CREATE, which rebuilt the model
@@ -245,7 +258,7 @@ def test_total_change_updates_widget_in_place_no_flicker(qapp):
     """
     from qtpy.QtWidgets import QApplication
 
-    stack = _make_stack(qapp)
+    stack = make_stack()
     factory = _make_factory(stack)
 
     pbar = factory(desc="rounds", total=10, leave=True)
@@ -267,11 +280,11 @@ def test_total_change_updates_widget_in_place_no_flicker(qapp):
 
 
 def test_progress_stack_skips_unchanged_bar_properties(
-    qapp, monkeypatch: pytest.MonkeyPatch
+    make_stack, qapp, monkeypatch: pytest.MonkeyPatch
 ):
     from zcu_tools.gui.session.pbar_host import ProgressBarModel
 
-    stack = _make_stack(qapp)
+    stack = make_stack()
     profile_calls: list[tuple[str, float, str]] = []
     stack.set_profile_callback(
         lambda label, duration_ms, detail: profile_calls.append(
@@ -351,12 +364,12 @@ def test_progress_stack_skips_unchanged_bar_properties(
 # ---------------------------------------------------------------------------
 
 
-def test_context_local_factory_routes_nested_progress(qapp):
+def test_context_local_factory_routes_nested_progress(make_stack, qapp):
     """A synthetic nested acquisition leaves only its retained outer bar."""
     from zcu_tools.gui.session.ui.progress_bar import LightweightProgressBar
     from zcu_tools.progress_bar.interface import make_pbar, use_pbar_factory
 
-    stack = _make_stack(qapp)
+    stack = make_stack()
     factory = _make_factory(stack)
     try:
         with use_pbar_factory(factory):
@@ -393,11 +406,11 @@ def test_context_local_factory_routes_nested_progress(qapp):
 # ---------------------------------------------------------------------------
 
 
-def test_disabled_pbar_does_not_push_to_stack(qapp):
+def test_disabled_pbar_does_not_push_to_stack(make_stack, qapp):
     """factory(disable=True) must not add any bar to the stack layout."""
     from qtpy.QtWidgets import QApplication
 
-    stack = _make_stack(qapp)
+    stack = make_stack()
     factory = _make_factory(stack)
 
     factory(desc="hidden", total=10, leave=False, disable=True)
@@ -405,10 +418,10 @@ def test_disabled_pbar_does_not_push_to_stack(qapp):
     assert len(_layout_bars(stack)) == 0
 
 
-def test_disabled_pbar_methods_are_noop_no_exception(qapp):
+def test_disabled_pbar_methods_are_noop_no_exception(make_stack, qapp):
     """All mutating methods on a disabled pbar must not raise and must not touch the stack."""
 
-    stack = _make_stack(qapp)
+    stack = make_stack()
     factory = _make_factory(stack)
 
     pbar = factory(desc="hidden", total=10, leave=False, disable=True)
@@ -422,10 +435,10 @@ def test_disabled_pbar_methods_are_noop_no_exception(qapp):
     assert len(_layout_bars(stack)) == 0
 
 
-def test_disabled_pbar_internal_state_updates(qapp):
+def test_disabled_pbar_internal_state_updates(make_stack, qapp):
     """Mutating methods on a disabled pbar still update internal state (no Qt signals)."""
 
-    stack = _make_stack(qapp)
+    stack = make_stack()
     factory = _make_factory(stack)
 
     pbar = factory(desc="hidden", total=10, disable=True)
@@ -444,11 +457,11 @@ def test_disabled_pbar_internal_state_updates(qapp):
     assert len(_layout_bars(stack)) == 0
 
 
-def test_disabled_pbar_close_does_not_pop_stack(qapp):
+def test_disabled_pbar_close_does_not_pop_stack(make_stack, qapp):
     """close() on a disabled pbar (leave=False) must not affect the stack."""
     from qtpy.QtWidgets import QApplication
 
-    stack = _make_stack(qapp)
+    stack = make_stack()
     factory = _make_factory(stack)
 
     pbar = factory(desc="hidden", total=5, leave=False, disable=True)
@@ -457,11 +470,11 @@ def test_disabled_pbar_close_does_not_pop_stack(qapp):
     assert len(_layout_bars(stack)) == 0
 
 
-def test_explicit_disable_false_behaves_normally(qapp):
+def test_explicit_disable_false_behaves_normally(make_stack, qapp):
     """Explicitly passing disable=False must behave identically to the default."""
     from qtpy.QtWidgets import QApplication
 
-    stack = _make_stack(qapp)
+    stack = make_stack()
     factory = _make_factory(stack)
 
     pbar = factory(desc="normal", total=5, leave=False, disable=False)
@@ -476,11 +489,11 @@ def test_explicit_disable_false_behaves_normally(qapp):
     assert len(_layout_bars(stack)) == 0
 
 
-def test_disabled_and_enabled_pbars_coexist(qapp):
+def test_disabled_and_enabled_pbars_coexist(make_stack, qapp):
     """A disabled pbar alongside an enabled one must not interfere with the stack."""
     from qtpy.QtWidgets import QApplication
 
-    stack = _make_stack(qapp)
+    stack = make_stack()
     factory = _make_factory(stack)
 
     enabled = factory(desc="active", total=10, leave=True, disable=False)

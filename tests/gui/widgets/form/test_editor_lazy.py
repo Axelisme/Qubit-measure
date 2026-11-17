@@ -73,6 +73,7 @@ def view(
     expand_sections(editor, "branch", "optional")
     yield editor, state
     editor.detach()
+    editor.close()
     editor.deleteLater()
     qapp.processEvents()
 
@@ -103,6 +104,7 @@ def test_expanding_an_empty_selected_layer_removes_the_fold_title(
         assert editor.errors() is None
     finally:
         editor.detach()
+        editor.close()
         editor.deleteLater()
         qapp.processEvents()
 
@@ -131,6 +133,7 @@ def test_model_description_is_requested_on_first_expansion(qapp: QApplication) -
         assert float(text(editor, "folded.value").text()) == 1.0
     finally:
         editor.detach()
+        editor.close()
         editor.deleteLater()
         qapp.processEvents()
 
@@ -279,6 +282,7 @@ def test_restored_focused_draft_commits_once_on_normal_focus_loss(
     finally:
         unsubscribe()
         editor.detach()
+        editor.close()
         editor.deleteLater()
         qapp.processEvents()
 
@@ -312,6 +316,7 @@ def test_replacing_a_focused_branch_does_not_commit_retired_text(
         assert float(text(editor, "branch.two").text()) == 2.0
     finally:
         editor.detach()
+        editor.close()
         editor.deleteLater()
         qapp.processEvents()
 

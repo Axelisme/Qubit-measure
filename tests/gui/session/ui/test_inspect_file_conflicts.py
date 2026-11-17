@@ -143,6 +143,7 @@ def conflict_ui(
         yield ComponentDriver(dialog), path, evidence, service, dialog
     finally:
         dialog.hide()
+        dialog.close()
         dialog.deleteLater()
         qapp.processEvents()
 

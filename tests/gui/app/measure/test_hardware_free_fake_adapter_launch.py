@@ -123,7 +123,7 @@ def hw_fixture(qapp, tmp_path):
         yield ctrl, window
     finally:
         ctrl.close()
-        window.deleteLater()
+        window.dispose()
         qapp.processEvents()
         if added:
             component_registry.unregister("resonator")

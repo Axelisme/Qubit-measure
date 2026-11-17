@@ -100,7 +100,7 @@ def run_form(
         yield RunFormFixture(window, ctrl, owner, tab, line, runs)
     finally:
         window.remove_tab_widget("pending-tab")
-        window.deleteLater()
+        window.dispose()
         qapp.processEvents()
 
 

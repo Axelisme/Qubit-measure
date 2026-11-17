@@ -152,6 +152,7 @@ def test_click_follow_and_click_place_use_latest_committed_state(qapp):
     assert widget.preview_active is False
     unsubscribe()
     widget.teardown()
+    widget.close()
     widget.deleteLater()
 
 
@@ -193,6 +194,7 @@ def test_measure_preview_coalesces_loss_and_second_click_uses_final_coordinate(q
         np.asarray(loss_axes.images[0].get_array()), preview_image
     )
     widget.teardown()
+    widget.close()
     widget.deleteLater()
 
 
@@ -211,6 +213,7 @@ def test_equal_line_second_click_discards_preview_without_a_commit(qapp):
         if "separat" in label.text()
     )
     widget.teardown()
+    widget.close()
     widget.deleteLater()
 
 
@@ -245,6 +248,7 @@ def test_preview_cancels_on_escape_hide_and_finish_uses_committed_values(qapp):
     assert completed[0].flx_int == start.flux_int
     _button(widget, "Done").click()
     assert len(completed) == 1
+    widget.close()
     widget.deleteLater()
 
 
@@ -263,6 +267,7 @@ def test_invalid_second_click_and_tab_hide_discard_preview_without_committing(qa
     widget.hide()
     assert session.snapshot() == start
     widget.teardown()
+    widget.close()
     widget.deleteLater()
 
 
@@ -337,6 +342,7 @@ def test_conjugate_swap_and_auto_align_single_flight_with_late_delivery(qapp):
     on_done(compute())
     assert len(completed) == 1
     assert plugin.plugin_id == "flux_pick"
+    widget.close()
     widget.deleteLater()
 
 
@@ -355,6 +361,7 @@ def test_auto_align_failure_keeps_session_editable_and_cancel_ignores_late_resul
     assert cancelled == [True]
     on_done(compute())
     assert plugin.plugin_id == "flux_pick"
+    widget.close()
     widget.deleteLater()
 
 
@@ -384,6 +391,7 @@ def test_auto_align_submission_failure_keeps_editing_and_logs_traceback(
     finally:
         widget.teardown()
         session.dispose()
+        widget.close()
         widget.deleteLater()
         qapp.processEvents()
 
@@ -410,6 +418,7 @@ def test_terminal_buttons_remain_at_bottom_of_side_panel(qapp, tmp_path: Path):
     assert done.y() < cancel.y()
     assert controls.height() - cancel.geometry().bottom() <= 30
     widget.teardown()
+    widget.close()
     widget.deleteLater()
 
 
@@ -435,6 +444,7 @@ def test_right_click_does_not_select_or_place_a_line(qapp):
         start.flux_half + 0.3, abs=0.03
     )
     widget.teardown()
+    widget.close()
     widget.deleteLater()
 
 
@@ -448,6 +458,7 @@ def test_done_and_cancel_drop_unplaced_preview(qapp):
     _button(widget, "Done").click()
     assert completed[0].flx_half == start.flux_half
     assert widget.preview_active is False
+    widget.close()
     widget.deleteLater()
 
     widget, _plugin, session, _env, _done, cancelled, canvas = _frontend(qapp)
@@ -463,6 +474,7 @@ def test_done_and_cancel_drop_unplaced_preview(qapp):
     assert cancelled == [True]
     assert widget.preview_active is False
     assert updates == []
+    widget.close()
     widget.deleteLater()
 
 
@@ -494,4 +506,5 @@ def test_readonly_frontend_keeps_plot_viewing_but_blocks_buttons_and_line_edits(
     assert session.snapshot().flux_half == pytest.approx(start.flux_half)
     widget.teardown()
     session.dispose()
+    widget.close()
     widget.deleteLater()

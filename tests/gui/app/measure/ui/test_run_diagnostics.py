@@ -55,7 +55,7 @@ def diagnostic_window(
         yield ctrl, window
     finally:
         ctrl.close()
-        window.deleteLater()
+        window.dispose()
         qapp.processEvents()
 
 

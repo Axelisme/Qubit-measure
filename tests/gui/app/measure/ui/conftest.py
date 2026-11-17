@@ -50,7 +50,7 @@ def browser_host(
     window.show()
     qapp.processEvents()
     yield window
-    window.deleteLater()
+    window.dispose()
     qapp.processEvents()
 
 
@@ -177,7 +177,11 @@ def main_window_control_factory(
     yield create
     for widget in qapp.topLevelWidgets():
         if widget not in baseline:
-            widget.deleteLater()
+            if isinstance(widget, MainWindow):
+                widget.dispose()
+            else:
+                widget.close()
+                widget.deleteLater()
     QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
     qapp.processEvents()
     authorities.clear()
@@ -239,5 +243,5 @@ def live_ui(
             assert session.background.quiesce()
             ctrl.tab_control.close_tab(tab_id)
             ctrl.close()
-            window.deleteLater()
+            window.dispose()
             qapp.processEvents()

@@ -228,7 +228,7 @@ def control_ui(
         ctrl.abort_shutdown()
         for tid in tuple(ctrl.tab_control.list_tab_ids()):
             ctrl.tab_control.close_tab(tid)
-        window.deleteLater()
+        window.dispose()
         QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
         qapp.processEvents()
 

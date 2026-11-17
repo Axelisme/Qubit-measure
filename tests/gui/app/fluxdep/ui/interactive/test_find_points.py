@@ -87,6 +87,7 @@ def presented(
     widget = FindPointsWidget(context, submit_preview=queue.submit)
     yield widget, queue, twotone_controller
     widget.teardown()
+    widget.close()
     widget.deleteLater()
     qapp.processEvents()
 

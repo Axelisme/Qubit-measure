@@ -104,6 +104,7 @@ def panel(qapp, cross_controller):
     widget.quiesce()
     widget.detach()
     widget.dispose()
+    widget.close()
     widget.deleteLater()
     qapp.processEvents()
 

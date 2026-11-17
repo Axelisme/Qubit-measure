@@ -172,6 +172,7 @@ def exp_tab_widget(qapp, make_ctrl):
         yield create_tab
     finally:
         for tab in owned_tabs:
+            tab.close()
             tab.deleteLater()
         owned_tabs.clear()
 

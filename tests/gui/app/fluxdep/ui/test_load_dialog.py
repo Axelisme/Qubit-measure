@@ -39,6 +39,7 @@ def preview_dialog(qapp, spectrum_hdf5, monkeypatch):
         try:
             yield d, filename
         finally:
+            d.close()
             d.deleteLater()
             qapp.processEvents()
 

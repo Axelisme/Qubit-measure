@@ -399,6 +399,7 @@ def test_search_panel_observes_app_start_progress_cancel_and_reopen(qapp, search
         assert search.isEnabled()
         assert not cancel.isEnabled()
         panel.dispose()
+        panel.close()
         panel.deleteLater()
         panel = AnalyzePanelWidget(ctrl)
         assert any(
@@ -408,6 +409,7 @@ def test_search_panel_observes_app_start_progress_cancel_and_reopen(qapp, search
     finally:
         panel.quiesce()
         panel.dispose()
+        panel.close()
         panel.deleteLater()
         qapp.processEvents()
 

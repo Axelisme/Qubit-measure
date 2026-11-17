@@ -77,6 +77,7 @@ def fx(qapp, tmp_path):
     fixture.ctrl.close()
     for widget in fixture.widgets:
         widget.teardown()
+        widget.close()
         widget.deleteLater()
     fixture.stop()
     qapp.processEvents()

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import gc
 import os
-from collections.abc import Iterator
+from collections.abc import Generator, Iterator
 
 import pytest
 
@@ -15,6 +15,32 @@ os.environ["QT_QPA_PLATFORMTHEME"] = "generic"
 from qtpy.QtCore import QCoreApplication, QEvent
 from qtpy.QtGui import QColor, QPalette
 from qtpy.QtWidgets import QApplication
+
+
+@pytest.hookimpl(wrapper=True, trylast=True)
+def pytest_runtest_makereport(
+    item: pytest.Item, call: pytest.CallInfo[None]
+) -> Generator[None, pytest.TestReport, pytest.TestReport]:
+    """Report visible windows only after pytest has torn down all fixtures."""
+    report = yield
+    if call.when == "teardown" and QApplication.instance() is not None:
+        windows = [
+            f"{type(window).__name__}(objectName={window.objectName()!r}, "
+            f"title={window.windowTitle()!r})"
+            for window in QApplication.topLevelWidgets()
+            if window.isVisible()
+        ]
+        if windows:
+            message = f"Visible top-level windows after {item.nodeid}: " + "; ".join(
+                sorted(windows)
+            )
+            report.sections.append(("Visible top-level windows", message))
+            # Preserve any fixture teardown error as well as the window evidence.
+            report.longrepr = (
+                f"{report.longrepr}\n{message}" if report.failed else message
+            )
+            report.outcome = "failed"
+    return report
 
 
 @pytest.fixture(scope="session")

@@ -92,6 +92,7 @@ def widget_factory(
         for dialog in widget.findChildren(QDialog):
             if dialog.isVisible():
                 dialog.reject()
+        widget.close()
         widget.deleteLater()
     QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
     qapp.processEvents()
@@ -311,6 +312,7 @@ def module_widget(tmp_path: Path, qapp: QApplication, request: pytest.FixtureReq
         if widget is not None:
             for dialog in widget.findChildren(QDialog):
                 dialog.reject()
+            widget.close()
             widget.deleteLater()
         if tab_id is not None and ctrl.tab_control.has_tab(tab_id):
             ctrl.tab_control.close_tab(tab_id)
@@ -639,7 +641,8 @@ def module_host(module_widget, qapp):
         # Publish the real tab close while its subscribed Qt host is still live.
         if ctrl.tab_control.has_tab(tab_id):
             ctrl.tab_control.close_tab(tab_id)
-        window.deleteLater()
+        ctrl.close()
+        window.dispose()
         QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
         qapp.processEvents()
 

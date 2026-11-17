@@ -76,7 +76,7 @@ def stop_window(
         # when a driver action or screenshot failed before the Stop click.
         ctrl.run_analyze_control.cancel_run()
         ctrl.close()
-        window.deleteLater()
+        window.dispose()
         qapp.processEvents()
 
 

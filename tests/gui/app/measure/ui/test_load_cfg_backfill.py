@@ -89,7 +89,7 @@ def app(qapp, tmp_path, monkeypatch):
         yield ctrl, window, state, tab_id
     finally:
         ctrl.close()
-        window.deleteLater()
+        window.dispose()
         qapp.processEvents()
 
 

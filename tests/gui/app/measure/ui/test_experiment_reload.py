@@ -71,7 +71,7 @@ def window_app(qapp, tmp_path: Path) -> Iterator[WindowApp]:
         yield WindowApp(ctrl, window, state, loader, dialogs)
     finally:
         ctrl.close()
-        window.deleteLater()
+        window.dispose()
         qapp.processEvents()
 
 

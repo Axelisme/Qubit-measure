@@ -94,6 +94,7 @@ def entry_dialog(
     finally:
         dialog.reject()
         controller.close()
+        dialog.close()
         dialog.deleteLater()
         qapp.processEvents()
 

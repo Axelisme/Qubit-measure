@@ -126,7 +126,9 @@ def test_persistent_predictor_dialog_is_reused_when_hidden(qapp) -> None:
     assert created == [first]
     assert first.isVisible() is True
     assert registry.visible_names() == [DialogName.PREDICTOR]
+    first.close()
     first.deleteLater()
+    parent.close()
     parent.deleteLater()
     qapp.processEvents()
 

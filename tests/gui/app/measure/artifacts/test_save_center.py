@@ -91,6 +91,7 @@ def test_pane_specimens_render_data_json_and_named_figure_outputs(
             button.click()
         assert selected == list(_REFS)
     finally:
+        center.close()
         center.deleteLater()
         qapp.processEvents()
 
@@ -218,6 +219,7 @@ def test_long_output_evidence_keeps_panel_width(
             assert len(failures) == len(outputs)
             assert all(w.tooltip == "✗ " + error for w in failures)
     finally:
+        scroll.close()
         scroll.deleteLater()
         qapp.processEvents()
 
@@ -260,6 +262,7 @@ def test_all_output_paths_are_read_only_and_refresh_retains_selection(
             assert editor.selectedText() == editor.text()
         assert center.findChildren(QLineEdit) == editors
     finally:
+        center.close()
         center.deleteLater()
         qapp.processEvents()
 
@@ -301,6 +304,7 @@ def test_outputs_follow_actual_report_paths_and_errors(
         )
         assert center.has_unsaved_data()
     finally:
+        center.close()
         center.deleteLater()
         qapp.processEvents()
 
@@ -371,6 +375,7 @@ def test_folder_actions_follow_latest_outputs_without_creating_directories(
         ]
         assert all(not item.output.path.parent.exists() for item in outputs)
     finally:
+        center.close()
         center.deleteLater()
         qapp.processEvents()
 
@@ -401,6 +406,7 @@ def output_center(qapp: QApplication, tmp_path: Path) -> Generator[ArtifactSaveC
     center.show()
     qapp.processEvents()
     yield center
+    center.close()
     center.deleteLater()
     qapp.processEvents()
 
@@ -591,6 +597,7 @@ def test_save_commands_disable_when_all_saved_and_reenable_for_any_unsaved_artif
         assert not center.save_all_button.isEnabled()
         assert not center.has_unsaved_data()
     finally:
+        center.close()
         center.deleteLater()
         qapp.processEvents()
 
@@ -644,6 +651,7 @@ def test_artifact_status_recolours_on_palette_change(qapp, tmp_path, status_name
             for label in statuses
         )
     finally:
+        center.close()
         center.deleteLater()
         qapp.processEvents()
 
@@ -675,5 +683,6 @@ def test_no_persistence_hint_recolours_on_palette_change(qapp):
         qapp.processEvents()
         assert label.palette().color(label.foregroundRole()) == secondary_colour(center)
     finally:
+        center.close()
         center.deleteLater()
         qapp.processEvents()
