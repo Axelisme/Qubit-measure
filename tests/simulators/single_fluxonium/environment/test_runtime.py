@@ -10,13 +10,13 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
-from zcu_tools.core.simulation import (
+from zcu_tools.device import DeviceManager, FakeDevice
+from zcu_tools.simulate.boundary import (
     AcquireRequest,
     PulseEnvelope,
     ReadoutWindow,
     RoundRequest,
 )
-from zcu_tools.device import DeviceManager, FakeDevice
 
 from tests.core._simulation import TIME_BASE, tick_tuple, ticks
 from tests.program._profiles import profile_soccfg

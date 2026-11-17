@@ -8,11 +8,11 @@ from collections.abc import Iterator
 import numpy as np
 import pytest
 from qick.qick_asm import AcquireMixin
-from zcu_tools.core.simulation import ChargeDriveRequirement
 from zcu_tools.experiment.simulation import SimulationEnvironment, white_noise
 from zcu_tools.program.v2 import TimelineProgramV2
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
+from zcu_tools.simulate.boundary import ChargeDriveRequirement
 
 from tests.program._profiles import load_soccfg
 from tests.program._timeline import compile_modules

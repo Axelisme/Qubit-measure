@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 from qick.asm_v2 import QickRawParam
-from zcu_tools.core.simulation import TimeBase
+from zcu_tools.simulate.boundary import TimeBase
 
 from tests.program._profiles import load_soccfg
 from tests.program._timing_expectations import generator_duration, generator_tproc_grid

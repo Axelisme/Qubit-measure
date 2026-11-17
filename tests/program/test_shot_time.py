@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 from numpy.typing import ArrayLike
 from zcu_tools import program
-from zcu_tools.core.simulation import AcquireRequest, TimeBase, TimelineTemplate
+from zcu_tools.simulate.boundary import AcquireRequest, TimeBase, TimelineTemplate
 
 
 @pytest.mark.parametrize("reps", [3, 10**12])

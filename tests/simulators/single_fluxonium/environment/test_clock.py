@@ -3,13 +3,13 @@
 from dataclasses import replace
 
 import numpy as np
-from zcu_tools.core.simulation import (
+from zcu_tools.program.v2.simulation.compiled import build_compiled_request
+from zcu_tools.simulate.boundary import (
     AcquireRequest,
     RoundRequest,
     RoundSignals,
     TimeBase,
 )
-from zcu_tools.program.v2.simulation.compiled import build_compiled_request
 from zcu_tools.simulators.single_fluxonium.environment.runtime import (
     SingleFluxoniumSource,
     single_fluxonium,
@@ -45,7 +45,7 @@ def test_source_plan_and_preparation_reinterpret_ticks_when_clock_changes():
             templates=(compiled,),
         )
         # preflight requires the same declared receiver set as the templates.
-        from zcu_tools.core.simulation import ReadoutWindow
+        from zcu_tools.simulate.boundary import ReadoutWindow
 
         request = replace(request, readouts=(ReadoutWindow(0, 0, 4, 1344, (24192,)),))
         a = source.prepare(request, snapshot)

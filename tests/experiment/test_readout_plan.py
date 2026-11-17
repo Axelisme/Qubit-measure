@@ -5,14 +5,14 @@ from fractions import Fraction
 
 import numpy as np
 import pytest
-from zcu_tools.core.simulation import (
+from zcu_tools.experiment import readout_plan
+from zcu_tools.simulate.boundary import (
     EventSlot,
     PulseEnvelope,
     ReadoutSlot,
     TimeBase,
     TimelineTemplate,
 )
-from zcu_tools.experiment import readout_plan
 
 from tests.core._simulation import TIME_BASE, tick_array, ticks
 

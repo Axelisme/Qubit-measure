@@ -7,12 +7,12 @@ from threading import Event
 import numpy as np
 import pytest
 from scipy.integrate import solve_ivp
-from zcu_tools.core.simulation import (
+from zcu_tools.device import DeviceManager
+from zcu_tools.simulate.boundary import (
     CancellationQuery,
     RoundSignals,
     RoundStatistics,
 )
-from zcu_tools.device import DeviceManager
 from zcu_tools.simulate.evolution import (
     Engine,
     EvolutionResult,
@@ -546,9 +546,9 @@ def test_template_wires_receiver_delay_and_mismatch_without_delaying_evolution()
 def test_sampled_readout_template_preserves_linear_envelope_without_field_ode(
     monkeypatch,
 ):
-    from zcu_tools.core.simulation import PulseEnvelope
     from zcu_tools.simulate import adc
     from zcu_tools.simulate.adc import response
+    from zcu_tools.simulate.boundary import PulseEnvelope
     from zcu_tools.simulators.ftf.environment import plan_template
 
     base = template()

@@ -13,7 +13,7 @@ from threading import Event, Lock
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Literal
 
-from zcu_tools.core.simulation import CancellationQuery
+from zcu_tools.simulate.boundary import CancellationQuery
 
 if TYPE_CHECKING:
     from .kernel import Kernel

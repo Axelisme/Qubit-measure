@@ -8,7 +8,10 @@ from fractions import Fraction
 import numpy as np
 import pytest
 from numpy.typing import NDArray
-from zcu_tools.core.simulation import (
+from zcu_tools.experiment.simulation import white_noise
+from zcu_tools.program.v2.simulation import IntegratedRound
+from zcu_tools.program.v2.simulation.signals import StatisticsCopier
+from zcu_tools.simulate.boundary import (
     AcquireRequest,
     ChannelStatistics,
     ReadoutWindow,
@@ -16,9 +19,6 @@ from zcu_tools.core.simulation import (
     SamplingIdentity,
     TimeBase,
 )
-from zcu_tools.experiment.simulation import white_noise
-from zcu_tools.program.v2.simulation import IntegratedRound
-from zcu_tools.program.v2.simulation.signals import StatisticsCopier
 from zcu_tools.simulate.white_noise import WhiteNoiseRawShots
 
 from tests.program._profiles import load_soccfg

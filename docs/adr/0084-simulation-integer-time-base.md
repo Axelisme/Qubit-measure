@@ -14,7 +14,7 @@ Compiled simulation 的 request 目前以浮點微秒傳遞時間。Frontend 與
 
 2026-10-31，使用者提出「我傾向根除的解決方案」，並選擇「2b」。採用第一階段的公共整數時基 request。第二階段的物理建模留待後議。
 
-`core.simulation.TimeBase` 擁有公共有理數頻率與換算規則。Program 從 soccfg 擷取本次 tProc、已宣告 generator 的 fabric／envelope sample clocks 與已宣告 ADC 的 output clocks，再交給 TimeBase。未宣告 channel 不參與，TimeBase 屬於單一 request。Core 不讀 soccfg，也不 import driver。額外宣告不影響既有事件的異質 clock channel 可以改變時基，但不能改變原 channel 的物理時間與模擬輸出。Frontend 的 ns 網格與 physical IQ 不變性已納入驗證。測試額外宣告 512 MHz fabric generator，時基由 43008 變為 172032 MHz，原 generator／ADC 的事件與 IQ bits 不變。
+`simulate.boundary.TimeBase` 擁有公共有理數頻率與換算規則。Program 從 soccfg 擷取本次 tProc、已宣告 generator 的 fabric／envelope sample clocks 與已宣告 ADC 的 output clocks，再交給 TimeBase。未宣告 channel 不參與，TimeBase 屬於單一 request。TimeBase 不讀 soccfg，也不 import driver。額外宣告不影響既有事件的異質 clock channel 可以改變時基，但不能改變原 channel 的物理時間與模擬輸出。Frontend 的 ns 網格與 physical IQ 不變性已納入驗證。測試額外宣告 512 MHz fabric generator，時基由 43008 變為 172032 MHz，原 generator／ADC 的事件與 IQ bits 不變。
 
 TimeBase、request schema、compiled frontend、physical consumer 與 replay 已使用整數時間。Planner 以必填 time_base keyword 接收 request 的時基。TimelineTemplate 不重複保存時基。Plan 與 preparation cache key 納入時基。
 
@@ -43,6 +43,6 @@ Mock 時鐘的公共頻率為 43008 MHz。對應的 tProc、fabric、ADC、envel
 
 ## 依賴與驗證
 
-沿用 [[0072]] 的分層與 `.importlinter` C8、C9、C12、C19。Core 僅依賴標準庫、外部函式庫與 utils，program 與 experiment 使用 core 的資料契約。本決策不新增跨 package import 邊，也不新增 import-linter contract。Compiled frontend 的入口與 snapshot owner 維持 [[0083]]。
+沿用 [[0072]] 的分層與 `.importlinter` C8、C9、C12、C19。Program 與 experiment 使用 `simulate.boundary` 的資料契約；`simulate-closed` contract 禁止 simulate import 其他 zcu_tools package。TimeBase 只使用標準庫與 NumPy。Compiled frontend 的入口與 snapshot owner 維持 [[0083]]。
 
 公開測試驗證兩組時鐘的整數週期、時間組合順序、scalar／array 的逐位正確捨入、非整數時基、格點拒絕及精確範圍邊界。文件與 replay 版本政策由直接審閱確認，不以靜態文字斷言測試。

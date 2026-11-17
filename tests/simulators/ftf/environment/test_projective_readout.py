@@ -6,13 +6,13 @@ from dataclasses import replace
 import numpy as np
 import pytest
 from zcu_tools.cfg_model import MuxReadoutTone
-from zcu_tools.core.simulation import RoundSignals, SamplingIdentity
 from zcu_tools.device import DeviceManager
 from zcu_tools.program.v2 import TimelineBuilder
 from zcu_tools.program.v2.modules.readout import MuxReadoutCfg
 from zcu_tools.program.v2.simulation import IntegratedRound
 from zcu_tools.simulate import adc
 from zcu_tools.simulate.adc import ADC
+from zcu_tools.simulate.boundary import RoundSignals, SamplingIdentity
 from zcu_tools.simulate.evolution import Engine, EvolutionResult, PathDiagnostics
 from zcu_tools.simulators.ftf.config.schema import MuxReadoutSource
 from zcu_tools.simulators.ftf.environment import FTFSource, plan_template
