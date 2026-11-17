@@ -19,7 +19,7 @@ from zcu_tools.resources.entry import (
     component_registry,
     role_registry,
 )
-from zcu_tools.resources.entry.schema import PointDocument
+from zcu_tools.resources.entry.schema import ParameterDocument
 
 from tests.gui.app.measure._native_save_support import (
     NativeSaveSession,
@@ -42,7 +42,7 @@ def result_sources() -> Iterator[tuple[ParameterContext, ParameterContext]]:
     role_registry.register("source_qubit", RoleSpec("run-source/qubit"))
     try:
         source = ParameterContext(
-            point=PointDocument.model_validate(
+            point=ParameterDocument.model_validate(
                 {
                     "format": "zcu.parameter-container",
                     "format_version": "2.0",

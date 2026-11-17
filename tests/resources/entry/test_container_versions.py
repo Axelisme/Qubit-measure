@@ -18,7 +18,7 @@ from zcu_tools.resources.entry import (
     snapshot,
     source_path,
 )
-from zcu_tools.resources.entry.schema import PointDocument, SetupDocument
+from zcu_tools.resources.entry.schema import ParameterDocument
 
 from .view_support import registered_model
 
@@ -78,14 +78,12 @@ def add_future_data(path: Path, location: str = "component") -> bytes:
     return path.read_bytes()
 
 
-@pytest.mark.parametrize("schema", [SetupDocument, PointDocument])
 @pytest.mark.parametrize("location", ["component", "nested"])
 def test_document_minor_never_relaxes_original_model_validation(
-    schema: type[SetupDocument] | type[PointDocument], location: str, strict_kind: str
+    location: str, strict_kind: str
 ) -> None:
     general: YamlMap = {"created_at": "2026-10-10T00:00:00Z"}
-    if schema is SetupDocument:
-        general["entry_id"] = "00000000-0000-0000-0000-000000000001"
+    general["entry_id"] = "00000000-0000-0000-0000-000000000001"
     for minor in (0, 7):
         fields: YamlMap = {
             "kind": strict_kind,
@@ -106,7 +104,7 @@ def test_document_minor_never_relaxes_original_model_validation(
         before = deepcopy(document)
         error = None
         try:
-            schema.model_validate(document)
+            ParameterDocument.model_validate(document)
         except ValidationError as caught:
             error = caught
         assert error is not None, "container minor must not override model extra=forbid"
@@ -114,7 +112,7 @@ def test_document_minor_never_relaxes_original_model_validation(
         assert document == before
         fields.pop("future", None)
         fields["timing"] = {"delay": 1.2}
-        validated = schema.model_validate(document)
+        validated = ParameterDocument.model_validate(document)
         assert document_value(validated, "S1.rate") == 6500.0
         assert document_value(validated, "S1.timing.delay") == 1.2
 

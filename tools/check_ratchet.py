@@ -41,6 +41,7 @@ from pathlib import Path
 from typing import Any, Final
 
 import _support
+import check_quality
 from quality_report import radon_findings
 from suppression_comparison import IGNORE_KINDS, compare_ignores
 
@@ -66,6 +67,7 @@ class Regression:
 
     @property
     def increase(self) -> int:
+        """Return candidate count minus base count for this path/rule."""
         return self.after - self.before
 
 
@@ -343,10 +345,9 @@ def file_size_counts(tree: Path, files: Iterable[str]) -> Mapping[tuple[str, str
     and files at or below the limit produce no entry. Each oversize file counts
     once regardless of its line count; the existing receipt rule stays "lines".
     """
-    checker = _support.load_tool("check_file_size")
     return {
         (str(item.path), "lines"): 1
-        for item in checker.oversize_files(tree, paths=files)
+        for item in check_quality.oversize_files(tree, paths=files)
     }
 
 
@@ -380,10 +381,9 @@ def path_correspondence_counts(
     directory appear or disappear without that file being the one at fault.
     """
     del files
-    checker = _support.load_tool("check_test_path_correspondence")
     return {
         (str(item.test_dir), "path-correspondence"): 1
-        for item in checker.violations(tree)
+        for item in check_quality.path_violations(tree)
     }
 
 
@@ -392,10 +392,9 @@ def test_structure_counts(
 ) -> Mapping[tuple[str, str], int]:
     """Compare the whole test tree: new targets can resolve unchanged imports."""
     del files
-    checker = _support.load_tool("check_test_structure")
     counts: dict[tuple[str, str], int] = {}
     try:
-        found = checker.findings(tree)
+        found = check_quality.structure_findings(tree)
     except (OSError, SyntaxError, UnicodeError, ValueError) as error:
         raise RatchetError(f"test structure check failed: {error}") from error
     for item in found:
@@ -413,10 +412,9 @@ def capability_counts(
     Narrowed to the changed files: the unit is the module, and a module can only
     gain a capability by being edited.
     """
-    checker = _support.load_tool("check_test_capabilities")
     return {
         (str(item.module), f"capability:{item.capability}"): item.uses
-        for item in checker.undeclared_capabilities(tree, paths=files)
+        for item in check_quality.undeclared_capabilities(tree, paths=files)
     }
 
 
@@ -429,10 +427,9 @@ def suppression_counts(
     alongside the findings. Clearing a ruff violation with `# noqa` then trades one
     counted thing for another and the total does not fall.
     """
-    checker = _support.load_tool("check_suppressions")
     counts = {
         (str(item.path), f"suppression:{item.kind}"): item.count
-        for item in checker.suppressions(tree, paths=files)
+        for item in check_quality.suppressions(tree, paths=files)
         if not str(item.path).startswith("pyproject.toml[")
     }
     # Configuration entries are compared unconditionally. They are not keyed by a
@@ -444,7 +441,7 @@ def suppression_counts(
     counts.update(
         {
             (str(item.path), f"suppression:{item.kind}"): item.count
-            for item in checker.config_suppressions(tree, filename=base_config)
+            for item in check_quality.config_suppressions(tree, filename=base_config)
         }
     )
     return counts
@@ -680,6 +677,13 @@ def run(
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Compare this checkout with --base and print a JSON regression receipt.
+
+    None reads sys.argv. The default base is merge-base HEAD main. --detector
+    restricts checks and is repeatable; --full-pyright includes unchanged callers.
+    Return 0 without increases, 1 with increases, or 2 if comparison fails.
+    argparse handles help and invalid CLI syntax with SystemExit.
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--base",

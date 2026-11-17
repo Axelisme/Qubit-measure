@@ -16,18 +16,21 @@ from ..secular import SecularModel
 from ..workplan import WorkPlan
 from ._dop853 import Tolerances, integrate, tolerances
 from ._dop853_data import Models, Segments, pack_models
-from ._rwa_fourier import endpoint_kick, kick_coefficients
+from ._rwa_fourier import (
+    RWACoefficients,
+    endpoint_kick,
+    interaction_hamiltonian,
+    kick_coefficients,
+)
 from ._rwa_numeric import (
     CONSTANT_RWA_POLICY,
     CONSTANT_STEP_NS,
     MULTITONE_GUARD_POLICY,
     STEP_NS,
-    RWACoefficients,
     RWAGuardMetric,
     RWARetention,
     RWAUncomputed,
     admit_multitone_rows,
-    interaction_hamiltonian,
     multitone_constant_admission,
     multitone_retention,
     retained_mask,
@@ -376,10 +379,10 @@ def _run(data, row_models, states, controls):
 class MultitoneRWAKernel:
     """Joint RWA C5 family with omission-driven Fourier retention.
 
-    Admission requires >=2 tones with a sampled envelope, or exactly two
-    constant envelopes on distinct ports, fixed flux,
-    real envelopes with peak-normalized slope <=0.025/ns and curvature
-    <=0.003/ns², each |f|>=0.05 GHz and budget >=1e-3. Carrier spacing
+    Admission requires exactly two constant envelopes on distinct ports,
+    fixed flux, each |f|>=0.05 GHz and budget >=1e-3. Sampled envelopes are
+    rejected because omission bounds do not certify their final whole-sequence
+    density error. Carrier spacing
     does not veto admission: close or equal carriers use the same joint
     omission solver and retained-dimension limit. Full-operator/carrier and
     retained-norm phase caps do not apply here. Single-constant RWA and
@@ -405,7 +408,7 @@ class MultitoneRWAKernel:
     2*pi factor and does not apply to sampled rows.
 
     Transfer retains half the measured 0.0116496 combination-channel boundary.
-    Phase calibration uses a 24-point two-tone, 16-level joint-model grid:
+    Historical phase calibration used a 24-point two-tone, 16-level joint-model grid:
     integer/quarter/half flux, constant/Gaussian (sigma=T/4), full-operator/carrier
     ratios 0.1/0.5, durations 128/1024 ns and phases 0.7/-1.2 rad. Candidate
     budget is 1e-3; lab DOP853 reference is 1e-7. Both transfer-only masks and
@@ -421,7 +424,8 @@ class MultitoneRWAKernel:
     256 halves the validated 512 ceiling. At dimension 256, build plus apply
     is faster than same-budget DOP853 in all four envelope/duration probes.
     These are empirical admission rules, not arbitrary-input or sequence error
-    certificates. Constant rows use a 16 ns ceiling; sampled rows retain 4 ns.
+    certificates. Admitted constant rows use a 16 ns ceiling. Historical
+    sampled probes above do not grant sampled-envelope admission.
     Dispatch may prefer full-drive DOP853 even after numerical admission when
     restoring fast edges makes cold prepare/guard/apply more expensive. That
     choice does not change these omission bounds or the retained-dimension cap.
@@ -435,8 +439,11 @@ class MultitoneRWAKernel:
     def guard(
         self, table: SegmentTable, rows: NDArray[np.int64], context: KernelContext
     ) -> NDArray[np.bool_]:
-        """Return row-local admission under the explicit calibrated policy above."""
-        return admit_multitone_rows(table, rows, context)
+        """Admit constant pairs under the calibrated policy; reject sampled rows."""
+        constant = table.constant_envelopes(rows)
+        accepted = np.zeros(len(rows), dtype=np.bool_)
+        accepted[constant] = admit_multitone_rows(table, rows[constant], context)
+        return accepted
 
     def prepare_keys(
         self, table: SegmentTable, rows: NDArray[np.int64], context: KernelContext
@@ -586,8 +593,8 @@ class MultitoneRWAKernel:
         theta is the phase at row start; offsets preserve pulse-local envelopes.
         The final kick and propagation share the exact row duration.
         Adaptive integration uses the ordinary budget tolerance and 0.1 ns seed,
-        capped at 16 ns for dual constant envelopes and 4 ns otherwise,
-        rather than sampled knots. This is not a certified bound
+        capped at 16 ns for the admitted dual constant envelopes.
+        This is not a certified bound
         on omitted edges or accumulated RB fidelity. Engine owns inter-row basis
         changes and chronology. Invalid payload, plan or shapes raise ValueError;
         numerical integration failures propagate without a retry.

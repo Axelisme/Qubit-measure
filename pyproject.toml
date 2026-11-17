@@ -237,7 +237,7 @@ markers = [
   "requires_loopback: integration tests that bind or connect a real loopback socket",
   "slow: expensive validation reserved for pre-land review (see tests/README.md)",
   "sim: tests that drive the evolution/adc/ftf simulation engines (see tests/README.md)",
-  # Capability markers. A module declares what it uses; tools/check_test_capabilities.py
+  # Capability markers. A module declares what it uses; tools/check_quality.py test-capabilities
   # checks the declaration. These name a capability, not permission to be slow, so
   # mismarking makes a test wrong rather than exempt.
   "requires_subprocess: tests that spawn a real child process",

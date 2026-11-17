@@ -17,11 +17,8 @@ from ._joint_fock_numeric import (
     rk4,
 )
 from ._joint_fock_two_level import FockRow, pointer_cutoff, pointer_fields
-from .kernels._rwa_numeric import (
-    RWACoefficients,
-    interaction_hamiltonian,
-    rwa_coefficients,
-)
+from .kernels._rwa_fourier import RWACoefficients, interaction_hamiltonian
+from .kernels._rwa_numeric import rwa_coefficients
 
 if TYPE_CHECKING:
     from .joint_fock import JointFockDiagnostic, JointFockRequest

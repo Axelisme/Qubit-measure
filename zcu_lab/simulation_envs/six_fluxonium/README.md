@@ -2,7 +2,7 @@
 
 **Readers:** operator, lab-author, agent. Start six independent fluxonium models and prepare mux measurements without hardware.
 
-**Last updated:** 2026-11-02，shared v2 board wiring
+**Last updated:** 2026-11-16，GUI simulation workers
 
 For existing entries, move resonator and mux-group `ext.time_of_fly` to top-level `time_of_fly`. The loader does not migrate it.
 
@@ -136,7 +136,10 @@ Startup never upgrades saved entries.
 
 The script installs a mock SoC and seven DC FakeDevices with fixed unit A. It reads files
 beside the script rather than relative to the shell cwd. Startup does not acquire,
-run numeric warmup or access hardware. Existing entries keep their edited
+run numeric warmup or access hardware. The script uses the shared GUI policy,
+`max(1, (os.cpu_count() or 1) - 1)` workers. Eight CPUs select seven workers.
+Each cavity has its own Engine, but sources prepare one after another, so the
+worker width is not multiplied by six. Direct factory calls keep `workers=1`. Existing entries keep their edited
 components and aliases. To apply a changed template, use a new project root or
 remove the demo directory under `result/` after saving any work you need.
 Save outputs under `Database/` are independent; preserve or archive them before

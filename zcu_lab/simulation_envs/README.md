@@ -1,6 +1,6 @@
 # Simulation environments
 
-**Last updated:** 2026-11-12，envelope 與 DDS 振幅刻度
+**Last updated:** 2026-11-16，GUI simulation workers
 
 **讀者：** lab-author、agent。查找 GUI／Notebook 模擬環境、參數與 compile profile 的入口。
 
@@ -141,7 +141,15 @@ Routing 與 density／readout 數值不變。欄位契約見 [FTF config](../../
 
 ### Workers 與 startup preparation
 
-GUI、Notebook 與直接呼叫的 workers／warmup 選擇，以及 ready 後才計時的操作，見
-[FTF 演化與重播](FTF/README.md#演化與重播)。GUI startup 不做預編譯，Notebook 明確啟用。
+single_fluxonium、integer_fluxonium、six_fluxonium 與 FTF 的 GUI startup 呼叫共用的
+`zcu_tools.gui.app.measure.startup_context.simulation_workers(os.cpu_count())`。
+策略選擇 `max(1, (cpu_count or 1) - 1)`，保留一核，至少使用 1 個 worker。
+核心數未知時使用 1 個 worker，八核主機使用 7 個 GUI workers。
+GUI startup 不做預編譯，FTF 保持 `warmup=False`。
+工廠與 Engine 的預設仍為 `workers=1`，測試、benchmark、研究與直接呼叫不套用 GUI 策略。
+Engine 只在多條 timeline 間平行，單條 timeline 或單 worker 串行；演化期間 native BLAS 使用 1 個執行緒。
+
+Notebook 的保留兩核與預編譯規則不變。Workers／warmup 選擇及 ready 後才計時的操作，見
+[FTF 演化與重播](FTF/README.md#演化與重播)。
 Framework 的 `EnvironmentWarmup` 介面與 coverage 邊界見
 [FTF startup preparation](../../lib/zcu_tools/simulators/ftf/environment/README.md#startup-preparation)。

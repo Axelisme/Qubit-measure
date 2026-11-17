@@ -10,7 +10,7 @@ from uuid import UUID
 from pydantic import JsonValue
 from zcu_tools.datafile import JsonObject
 from zcu_tools.experiment.metadata import CfgSnapshot, SoftwareProvenance
-from zcu_tools.resources.parameter_upgrade import ParameterDocument
+from zcu_tools.resources.parameter_upgrade import ParameterUpgradeDocument
 
 from migrations.comparison import ExistingItem
 from migrations.comparison import MigrationDifference as MigrationDifference
@@ -86,7 +86,7 @@ class MigrationMapping:
     module_rules declares deferred flat module names in reference priority order.
     The composition root registers the seeds' kinds with entry before use.
     parameter_transform optionally converts detached complete seed/value batches
-    before current-schema validation. It receives/returns ParameterDocument and
+    before current-schema validation. It receives/returns ParameterUpgradeDocument and
     must preserve unrelated fields, perform no I/O and raise ValueError for
     unsupported input. None keeps current seeds/rules unchanged. Seed failure
     aborts before seeding; a failed value group is pending with original values
@@ -100,7 +100,9 @@ class MigrationMapping:
     data_schemas: Mapping[tuple[str, str], tuple[LegacyVariableSchema, ...]]
     module_rules: tuple[ModuleRule, ...] = ()
     native_tags: Mapping[tuple[str, str], str] = field(default_factory=dict)
-    parameter_transform: Callable[[ParameterDocument], ParameterDocument] | None = None
+    parameter_transform: (
+        Callable[[ParameterUpgradeDocument], ParameterUpgradeDocument] | None
+    ) = None
 
 
 @dataclass(frozen=True, kw_only=True)

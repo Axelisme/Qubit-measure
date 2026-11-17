@@ -1,6 +1,6 @@
 # Six independent fluxonium cavities
 
-**Last updated:** 2026-11-14
+**Last updated:** 2026-11-16，caller-selected worker width
 
 **Readers:** framework-dev, lab-author, agent. Build and acquire six independent cavities through the normal simulation SoC.
 
@@ -8,7 +8,7 @@
 [ADR-0078](../../../../../docs/adr/0078-evolution-module-boundary.md) governs routing history, preparation lifetimes and raw sampling ownership.
 [ADR-0084](../../../../../docs/adr/0084-simulation-integer-time-base.md) defines integer request timing and physical-time conversion.
 
-`six_fluxonium(configuration, *, soccfg, clock=None, truth_log=None, history=None, families=None)` accepts `SixFluxoniumSettings` or a YAML path and
+`six_fluxonium(configuration, *, soccfg, workers=1, clock=None, truth_log=None, history=None, families=None)` accepts `SixFluxoniumSettings` or a YAML path and
 returns `SimulationEnvironment`. The builder creates seven addressed FakeDevices
 in A, `Q1_bias` through `Q6_bias` and `coil_bias`. Each local line affects only
 its own circuit. The shared coil affects all six, with each circuit's own
@@ -43,6 +43,14 @@ projective continuations. Unknown names raise at construction; an unavailable
 domain raises at acquire without bypassing guards or falling back outside the
 whitelist. Omitting both keywords preserves default routing. Neither control
 belongs in physical YAML or program cfg.
+
+`workers` selects each cavity Engine's parallel width across timelines and
+keeps the direct-call default of 1. Values below 1 raise `ValueError` through
+Engine. The six sources prepare one after another, not in parallel; worker pools
+exist only during multi-timeline evolution. No sixfold worker pool runs at once.
+GUI startup reserves one host CPU, with at least one worker, and does no warmup.
+Tests, benchmarks and research keep the serial factory default. The startup
+policy is defined in [ADR-0069](../../../../../docs/adr/0069-experiment-core-and-frontends.md#顯式-cfg-與裝置環境).
 
 ## Cache budgets
 

@@ -27,16 +27,22 @@ def first_candidate(
     work scales with budget**(-1/8). No guard, trial integration, cache inspection
     or timing occurs here.
 
-    Floquet coefficients were calibrated on 16-level FTF S9 throughput (16 ns, weak),
-    S9 qualitative (514 ns, strong), and 16--512 ns / .02--.5 gain boundary rows
-    at .5 and 7.29 GHz. They are estimates outside that calibration, not universal
-    timing predictions. Cold distinct-port balanced drives were also calibrated
+    The 2026-11-15 calibration uses the committed FTF_MODEL in
+    tools/family_pareto_settings.py with 16 retained levels: ten interleaved
+    three-pair controls, 32--2000 ns, 1--11-point duration and detuning
+    inventories, Stark gains .2--.5 with a 1e-4 probe, and balanced distinct-port
+    gains .1--.2.
+    Frame/bin charges fit log CPU on the eight admitted controls; modal apply
+    uses 8 ms/row (observed 2--11 ms). DOP853's coefficient fits all ten controls;
+    the dimension exponent retains the earlier 8--20-level fluxonium fit.
+    These are cost estimates, not universal timing or admission predictions.
+    Cold distinct-port balanced drives were also calibrated
     on the 16-level half-flux mux model: 128--512 ns, gains .1--.2, carriers
     .295/.597 GHz, eleven probe points spanning 2 MHz. At 512 ns and gain .2,
     measured frame/certificate work was 4.32/8.60 CPU-s versus 1.4/2.1 estimated.
     Their multipliers ramp to 3.1/4.1 with both drive actions and balance; this
     charges construction, not a prediction that a strong probe must be rejected.
-    Same-port costs are unchanged. Every candidate still needs its own guard;
+    Every candidate still needs its own guard;
     rejection tries the other family. Input rows must include the acquire-wide
     candidate set, never a worker subset. Return a row-aligned string array:
     'dop853' when direct integration is cheaper, otherwise 'floquet'.
@@ -69,12 +75,11 @@ def first_candidate(
         stark_frequency = np.abs(frequency[np.arange(len(selected)), stark])
         duration = table.duration_ns[selected]
         tolerance_work = (1e-3 / budget) ** 0.125
-        # 2026-11-14: log least-squares refit against warm DOP853 process CPU,
-        # 13 single-fluxonium points, 8--20 levels, 16--1000 ns, including O1
-        # and absolute carriers. Bandwidth already grows with dimension;
-        # fitted scale power is 0.324, not cubic. Estimate/actual: 0.926--1.095.
+        # 2026-11-15: the ten tool-owned controls above need 1.633 times the
+        # earlier single-fluxonium CPU estimate (geometric mean). Keep its
+        # 0.324 dimension power: bandwidth already grows with dimension.
         direct = (
-            3.47e-5
+            5.67e-5
             * duration
             * (width + np.max(np.abs(frequency), axis=1) + 2 * strength)
             * (1 + 4 * np.sqrt(strength) + 4 * strength)
@@ -105,11 +110,13 @@ def first_candidate(
             * np.minimum(1, 4 * balance)
             * np.minimum(1, duration * weakest / 0.15)
         )
-        frame = 1.4 * samples / 512 * scale**5 * (1 + 2.1 * dual_work)
+        # Log-CPU fit: 4.181 s per 512 frame samples, 0.274 s per probe bin.
+        # The fit moves shared work out of the old 1.05 s/bin certificate charge.
+        frame = 4.18 * samples / 512 * scale**5 * (1 + 2.1 * dual_work)
         certificates = (
-            1.05 * bin_count * scale**6 * certificate_fraction * (1 + 3.1 * dual_work)
+            0.274 * bin_count * scale**6 * certificate_fraction * (1 + 3.1 * dual_work)
         )
-        floquet = 0.07 * scale**6 + (frame + certificates) / len(selected)
+        floquet = 0.008 * scale**6 + (frame + certificates) / len(selected)
         context.work_plan.routing.expect("dop853", table, selected, direct)
         context.work_plan.routing.expect("floquet", table, selected, floquet)
         preferred[positions] = np.where(direct < floquet, "dop853", "floquet")

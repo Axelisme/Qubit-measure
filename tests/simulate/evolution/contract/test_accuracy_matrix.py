@@ -32,10 +32,13 @@ CASE_NAMES = (
     "two_carriers",
     "continuous_flux",
     "joint_gate_inventory",
+    "joint_constant",
     "low_carrier",
     "linear_shaped",
     "linear_plateau",
     "nearby_carriers",
+    "cheap_sampled_nearby",
+    "cheap_sampled_separated",
     "adiabatic_ramp",
 )
 KNOWN_EDGE_ERRORS = {
@@ -220,11 +223,15 @@ def test_default_empty_and_warm_history_density(
     matrix_reference: Callable[[AccuracyCase], ReferenceResult],
 ) -> None:
     case = accuracy_case(name)
-    reference = matrix_reference(case)
     with closing(Engine(1)) as engine:
         for state in ("empty", "warm"):
             result = engine.evolve(case.source, (case.batch,))
             assert result.paths.segments_by_kernel
+            if name in ("cheap_sampled_nearby", "cheap_sampled_separated"):
+                assert result.paths.segments_by_kernel == {
+                    case.families[0]: len(case.batch.points)
+                }
+            reference = matrix_reference(case)
             error = density_error(result.densities, reference.density)
             for family, count in result.paths.segments_by_kernel.items():
                 if count:

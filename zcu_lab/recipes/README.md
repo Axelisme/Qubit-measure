@@ -2,7 +2,7 @@
 
 **讀者：** lab-author、agent。查找 recipe 宣告、操作順序與作者契約。
 
-**Last updated:** 2026-11-12，Raman 以 drive gain 作掃描軸
+**Last updated:** 2026-11-16，range find 具名頻率 upsert
 
 Recipe 是操作 GUI tab 的 async 函式。Core 擁有 cfg、量測與分析計算，Adapter 接上表單、RunRecord 與分析來源。
 Recipe 選來源、設參數，再決定 Run、Analyze 與 writeback 問答的順序。
@@ -183,7 +183,7 @@ QND 軸固定 0..1，但回報不裁切。Score 軸只按 score 值決定，不�
 | MCP tool | Adapter | 掃描與回報 |
 | --- | --- | --- |
 | `mux_onetone` | `mux/onetone` | `participants` 收完整 readout 的原始整數 index，依清單順序執行，不以名稱查位置。`df:{start,stop}` 是共同 MHz offset，`n` 是共用點數。回覆每 tone 的 index、name、freq、kappa、fit_quality 與 identity 診斷。 |
-| `onetone_range_find` | `onetone/range_find` | 必填絕對 MHz `freq:{start,stop}`、`n` 與非空 `resonators` 名單。名稱數是預期峰數，初始依頻率升序配對，不進 acquisition cfg。未辨識的峰先用暫用名稱，例如 `["dip1"]`。單一 Interactive 入口預設不平滑、自動依名稱數求 prominence factor、FWHM 上限 25 MHz，以 depth / FWHM 排序。`min_separation` 為有限正數 MHz，初值 1 MHz，與名單經同一 Analyze updates 傳入。Recipe 等待 agent 經 `tab_interact` 調整或確認並送 done，才詢問 writeback，不自動送 done。回覆最終 name、freq、depth、fwhm、score、實際 `prominence_factor` 與 identity／writeback 診斷。手動非候選點的 metrics 為 null。 |
+| `onetone_range_find` | `onetone/range_find` | 必填絕對 MHz `freq:{start,stop}`、`n` 與非空 `resonators` 名單。名稱數是預期峰數，初始依頻率升序配對，不進 acquisition cfg。傳入實際元件名稱，例如 `["R1"]`；未辨識的峰可用暫用名稱。GUI Analysis 預設為 `["R1"]`，recipe 仍須明填名單，不沿用此預設。單一 Interactive 入口預設不平滑、自動依名稱數求 prominence factor、FWHM 上限 25 MHz，以 depth / FWHM 排序。`min_separation` 為有限正數 MHz，初值 1 MHz，與名單經同一 Analyze updates 傳入。Recipe 等待 agent 經 `tab_interact` 調整或確認並送 done，才詢問 writeback，不自動送 done。每個具名 dip 都提議 `<name>.freq`，不依 capture 篩選，Unassigned 不提案。接受後在作用中文件覆寫既有 freq，或建立只指定 freq 的 resonator，其餘使用 model defaults。名稱打錯會建立多餘元件，可在接受前取消該候選。回覆最終 name、freq、depth、fwhm、score、實際 `prominence_factor` 與 `identity_diagnostic`。手動非候選點的 metrics 為 null。 |
 | `stirap_amplitude` | `twotone/stirap/amplitude` | `pump_start/pump_stop/pump_n` 與 `stokes_start/stokes_stop/stokes_n` 指定兩條獨立 gain 軸，兩組 `n → expts`。支援 signed gain 與零值，超出 [-1, 1] 在 Run 編譯時報錯。同一 program 用兩個硬體 sweep 取得二維 g/e/f counts。Pump/Stokes 各選 gauss、cosine、drag 或 arb，`pump_waveform_ref/stokes_waveform_ref` 選 library key 或 inline Form 選項，overrides 設波形參數。載波用 MHz，固定 `stokes_lead_us` 正值表示 Stokes 先。Run、Analyze、Save，不提出 writeback。 |
 | `stirap_delay` | `twotone/stirap/delay` | `start_us/stop_us/n` 掃描 Stokes lead，正值 Stokes 先、負值 Pump 先。兩條各自選 gauss、cosine、drag 或 arb 與各自時長。必填量得的 `pump_freq_mhz/stokes_freq_mhz` 與 signed gains。完整 Run、Analyze、Save，分析只用保存的 centroid3，不提出 writeback。 |
 | `stirap_detuning` | `twotone/stirap/detuning` | Pump 與 Stokes 各自選 gauss、cosine、drag 或 arb。`pump_start_mhz/pump_stop_mhz/pump_n` 掃內層 Pump，`stokes_start_mhz/stokes_stop_mhz/stokes_n` 掃外層 Stokes。兩軸都是加到量得載波的 MHz offset。`pump_waveform_ref/stokes_waveform_ref` 選 library key 或 `Inline: cosine` 等 Form 選項，overrides 設所選波形參數。完整 Run、Analyze、Save，不提出 writeback。 |

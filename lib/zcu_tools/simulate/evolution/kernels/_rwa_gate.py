@@ -14,15 +14,14 @@ from .._envelope import sample_value
 from ..kernel import ApplyContext, KernelContext, Prepared, SegmentTable
 from ..workplan import FactKey
 from ._dop853 import Tolerances, integrate, tolerances
+from ._rwa_fourier import RWACoefficients, interaction_hamiltonian
 from ._rwa_graph import RWA_GRAPH_POLICY, PhaseGraph, phase_graph, pruning_admitted
 from ._rwa_numeric import (
     MULTITONE_RETENTION_POLICY,
     RWA_POLICY,
-    RWACoefficients,
     RWARetention,
     admit_rows,
     admit_single_rows,
-    interaction_hamiltonian,
     multitone_retention,
     retained_mask,
     rwa_coefficients,
@@ -581,7 +580,8 @@ class CovariantGateKernel:
 
     Numerical guard checks shared calibrated RWA and bounded phase-graph pruning.
     Preparation refines secular splitting without relaxing its proxy threshold.
-    Both families allow sampled slices and final sample hold within row support.
+    The builder supports sampled slices and final sample hold within row support.
+    Family guards decide admission; the multitone wrapper rejects every row.
     All gates compile Hilbert integration through the shared DOP853 solver.
     Dispatch/family wrappers own acquire-wide cost and reuse decisions.
     """

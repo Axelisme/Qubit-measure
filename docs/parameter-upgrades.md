@@ -93,7 +93,7 @@ Apply 先檢查備份位置，再取得 [per-user runtime lock](../lib/zcu_tools
 
 `zcu_lab.components.parameter_upgrades` 宣告目前版本與 `parameter_upgrade_plan()`。`register_all` 將具名 `ParameterSchemaPolicy` 與 models 一起交給既有 ComponentRegistry。未配置 policy 時，框架拒絕建立或讀取 component 文件。
 
-每個結構變更新增一個純函式 vN→vN+1 步驟。步驟接收具名 `ParameterDocument`，回傳含下一個嚴格整數 `schema_version` 的完整文件，不讀寫檔案。Runner 保留可選的 source_path 作診斷與容器種類判斷。Callback 不能從這個路徑讀檔。Caller 的 `validate(document, version)` 檢查該版完整容器與所有 components，包含半升級或不一致形狀。Runner 在每步前後驗證，current 文件也不能跳過檢查。
+每個結構變更新增一個純函式 vN→vN+1 步驟。步驟接收具名 `ParameterUpgradeDocument`，回傳含下一個嚴格整數 `schema_version` 的完整文件，不讀寫檔案。Runner 保留可選的 source_path 作診斷與容器種類判斷。Callback 不能從這個路徑讀檔。Caller 的 `validate(document, version)` 檢查該版完整容器與所有 components，包含半升級或不一致形狀。Runner 在每步前後驗證，current 文件也不能跳過檢查。
 
 未標版文件只在 `classify_legacy` 完整確認舊格式後視為 v1。不能用「有一個舊欄位」取代完整分類。分類拒絕或無法確認時，回報原因並保持來源不變。
 

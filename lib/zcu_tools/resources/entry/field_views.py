@@ -15,7 +15,7 @@ from zcu_tools.resources.parameter_fields import (
     read_field,
 )
 
-from .schema import ComponentSchema, ParameterContent, PointGeneral, SetupGeneral
+from .schema import ComponentSchema, ParameterContent, ParameterGeneral
 
 __all__ = (
     "ComponentView",
@@ -28,13 +28,13 @@ __all__ = (
 
 
 class GeneralView(FieldView):
-    _general_model: Callable[[], SetupGeneral | PointGeneral]
+    _general_model: Callable[[], ParameterGeneral]
     _extension: FieldView
 
     def __init__(
         self,
-        model: Callable[[], SetupGeneral | PointGeneral],
-        edit: Callable[[str], AbstractContextManager[SetupGeneral | PointGeneral]],
+        model: Callable[[], ParameterGeneral],
+        edit: Callable[[str], AbstractContextManager[ParameterGeneral]],
         *,
         content: Callable[[], ParameterContent] | None = None,
     ) -> None:

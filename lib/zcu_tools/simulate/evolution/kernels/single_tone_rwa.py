@@ -13,7 +13,12 @@ from ..kernel import ApplyContext, KernelContext, Prepared, SegmentTable
 from ..secular import SecularModel
 from ..workplan import WorkPlan
 from ._dop853 import tolerances
-from ._rwa_fourier import EDGE_GHZ, endpoint_kick
+from ._rwa_fourier import (
+    EDGE_GHZ,
+    RWACoefficients,
+    endpoint_kick,
+    interaction_hamiltonian,
+)
 from ._rwa_graph import (
     PRUNE_LIMIT,
     RWA_GRAPH_POLICY,
@@ -22,17 +27,15 @@ from ._rwa_graph import (
     pruning_bound,
 )
 from ._rwa_numeric import (
-    ADAPTIVE_RWA_POLICY,
     MIN_RWA_BUDGET,
+    SINGLE_CONSTANT_RWA_POLICY,
     ConstantRWAAdmission,
-    RWACoefficients,
     RWAGuardMetric,
     RWARetention,
     RWAUncomputed,
     admit_constant_rows,
     constant_admission,
     constant_retentions,
-    interaction_hamiltonian,
     rwa_coefficients,
     rwa_kick_coefficients,
 )
@@ -44,10 +47,10 @@ _MAX_BLOCK_DIMENSION = 64
 # ten times less to leave margin under the 2e-3 final-density allowance.
 _CROSS_COMPONENT_CUTOFF = 1e-5
 _POLICY = (
-    "constant-rwa-endpoint-kick-v3",
+    "constant-rwa-endpoint-kick-kappa2-v4",
     _CROSS_COMPONENT_CUTOFF,
     RWA_GRAPH_POLICY,
-    ADAPTIVE_RWA_POLICY,
+    SINGLE_CONSTANT_RWA_POLICY,
     _MAX_BLOCK_DIMENSION,
 )
 
@@ -59,30 +62,35 @@ class SingleToneRWADiagnostic:
     Each RWAGuardMetric supplies value, inclusive threshold and passed status.
     budget is the dimensionless per-segment allowance, required >=1e-3.
     carrier_ghz is the absolute carrier in GHz, required >=0.05.
-    omission_transfer is the dimensionless remaining first/second-order transfer
-    proxy after adaptive edge restoration, required <=0.0058. strength_ratio is
-    abs(gain)*(||X||+||Y||)/abs(carrier), dimensionless, required <=0.25.
+    kappa2 is ||sum_sign abs(c/d)||_2, the dimensionless spectral norm over
+    omitted Fourier edges after adaptive restoration, including diagonal +/-f
+    edges. The coefficients include gain; d is signed detuning in GHz. This
+    uses the endpoint kick's resolved mask, not the pruned phase graph. Its
+    0.08 cap has full-density calibration with margin on the fixed candidate
+    acceptance set. This does not establish a maximum usable threshold or
+    arbitrary-input accuracy. strength_ratio is dimensionless,
+    abs(gain)*(||X||+||Y||)/abs(carrier), required <=0.25.
     phase_rad is 2*pi*duration*(gain*||retained positive Fourier operator||)^2 /
     abs(carrier), in rad, required <=0.06. pruning is the dimensionless phase-graph
     population omission bound, required <=min(budget,1e-3). real_dimension counts
     populations and real coordinates of within-component coherences, required
-    <=64. accepted is true only when every comparison passes. These are calibrated
-    admission proxies, not a bound on final density error or sequence accuracy.
+    <=64. accepted is true only when every comparison passes. These admission
+    proxies do not bound final density error or sequence accuracy.
 
     RWAUncomputed marks skipped numeric work and has no value or passed status.
     budget always has a value. carrier_ghz is uncomputed after budget rejection.
-    Transfer and strength are uncomputed after budget/carrier rejection. Phase
+    Kappa2 and strength are uncomputed after budget/carrier rejection. Phase
     is also uncomputed after strength rejection. Pruning and dimension are
-    uncomputed after any base rejection (budget/carrier/transfer/strength/phase).
-    Dimension is still computed if pruning fails. Transfer's value is computed
-    before strength/phase comparisons and remains visible if either rejects.
+    uncomputed after any base rejection (budget/carrier/kappa2/strength/phase).
+    Dimension is still computed if pruning fails. Kappa2 is computed after
+    retention, before strength/phase checks, and remains visible if either rejects.
     This is a numeric table, not a decision trace: a value and passed status do
     not mean the guard used that comparison in this particular rejection.
     """
 
     budget: RWAGuardMetric
     carrier_ghz: RWAGuardMetric | RWAUncomputed = RWAUncomputed()
-    omission_transfer: RWAGuardMetric | RWAUncomputed = RWAUncomputed()
+    kappa2: RWAGuardMetric | RWAUncomputed = RWAUncomputed()
     strength_ratio: RWAGuardMetric | RWAUncomputed = RWAUncomputed()
     phase_rad: RWAGuardMetric | RWAUncomputed = RWAUncomputed()
     pruning: RWAGuardMetric | RWAUncomputed = RWAUncomputed()
@@ -96,7 +104,7 @@ class SingleToneRWADiagnostic:
             for metric in (
                 self.budget,
                 self.carrier_ghz,
-                self.omission_transfer,
+                self.kappa2,
                 self.strength_ratio,
                 self.phase_rad,
                 self.pruning,
@@ -116,7 +124,7 @@ def _diagnostic(
     diagnostic = SingleToneRWADiagnostic(
         RWAGuardMetric(budget, MIN_RWA_BUDGET, ">="),
         admission.carrier_ghz,
-        admission.omission_transfer,
+        admission.kappa2,
         admission.strength_ratio,
         admission.phase_rad,
     )
@@ -154,9 +162,12 @@ def single_tone_rwa_diagnostic(
     Returns frozen metrics for computed values, and RWAUncomputed for work
     skipped by guard early returns. Low/zero carrier and positive budget below
     1e-3 return accepted=False. See SingleToneRWADiagnostic for each metric's
-    availability. Raises ValueError for an unknown port, nonfinite inputs,
-    negative duration or invalid budget. Numerical construction
-    failures propagate. No evolution, routing, history or preparation is changed;
+    availability and the 0.08 kappa2 cap, calibrated with full-density margin
+    on the fixed candidate acceptance set. This does not establish a maximum
+    usable threshold or arbitrary-input accuracy. Raises ValueError for an
+    unknown port, nonfinite inputs, negative duration or invalid budget.
+    Numerical construction failures propagate.
+    No evolution, routing, history or preparation is changed;
     temporary model-only facts are released before return. This query does not
     diagnose shaped, multitone or moving-flux rows and does not select a family.
     """
@@ -422,8 +433,11 @@ def _play(
 class SingleToneRWAKernel:
     """Single constant-tone C5 family with arbitrary complex density playback.
 
-    Uses the shared RWA omission, strength and 0.06 rad phase admission, budget
-    >=1e-3 and fixed flux. The retained graph must also pass the explicit
+    Uses final kappa2 <=0.08 admission, the shared strength comparison and
+    0.06 rad phase admission, budget >=1e-3 and fixed flux. The 0.08 cap has
+    full-density calibration with margin on the fixed candidate acceptance set.
+    This does not establish a maximum usable threshold or arbitrary-input
+    accuracy. The retained graph must also pass the explicit
     min(budget,1e-3) pruning bound. Preparation never sees density. Each key
     stores a constant rotating-frame Hamiltonian and full secular bath, with
     all populations and within-component coherences in one real generator

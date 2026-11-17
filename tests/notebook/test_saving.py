@@ -41,7 +41,7 @@ from zcu_tools.resources.entry import (
     source_path,
     writeback,
 )
-from zcu_tools.resources.entry.schema import PARAMETER_VERSION, PointDocument
+from zcu_tools.resources.entry.schema import PARAMETER_VERSION, ParameterDocument
 
 from tests.device._snapshot_fakes import SnapshotDevice
 from tests.experiment._saving_support import (
@@ -821,7 +821,7 @@ def test_accept_commit_validator_error_propagates_and_keeps_event(
 ) -> None:
     failure = RuntimeError("point validation rejected the fit")
 
-    def reject_fit(document: PointDocument) -> None:
+    def reject_fit(document: ParameterDocument) -> None:
         if document.general.description == "candidate":
             raise failure
 
@@ -830,7 +830,7 @@ def test_accept_commit_validator_error_propagates_and_keeps_event(
     bound = PointView(
         DocumentStore(
             path,
-            PointDocument,
+            ParameterDocument,
             format="zcu.parameter-container",
             supported_version=PARAMETER_VERSION,
             validate=reject_fit,
