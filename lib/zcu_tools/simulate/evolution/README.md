@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-11-17, kappa2 admission and frozen-scene reference selection
+**Last updated:** 2026-11-17, kappa2 admission and current plateau dispatch
 
 **讀者：** framework-dev、agent。Segment evolution 的公開輸入、路由與數值邊界。
 
@@ -367,6 +367,10 @@ continues to another candidate while admitted rows keep their Floquet plans.
 A fixed `families` set can remove that fallback. If any row then has no admitted
 candidate, the whole evolve call raises `NoValidKernel` without partial results.
 This does not move Floquet ahead of `multitone_rwa` in the candidate order.
+
+For plateau rows, default dispatch tries `single_tone_rwa` before
+`floquet_period` without comparing their costs. On the L and I workloads,
+kick-enabled `single_tone_rwa` is more than 10% slower than `floquet_period`.
 
 `Engine(..., families=("t4", "dop853"))` restricts every segment in the acquire,
 including shared prefixes and deferred timeline workers, to those families.
