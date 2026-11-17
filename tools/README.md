@@ -336,7 +336,7 @@ without importing the scene producer or rebuilding device models. Each returned
 
 By default it reads `tools/data/family_pareto/frozen-synthetic.index.json` and
 `frozen-real.index.json`. With neither `--index` nor `--scenario`, it requires
-and selects the 19 names in `PARETO_DEFAULT_NAMES` beside `select_inputs`.
+and selects the 35 names in `PARETO_DEFAULT_NAMES` beside `select_inputs`.
 It rejects missing default names after checking all indexes for duplicates,
 before reading any payload or reference. Other rows may share those indexes;
 the default selection does not read their payloads or references.
@@ -655,8 +655,9 @@ not at the end of that window.
 
 The numeric FTF gate declarations use the same fixed model at flux
 F1/coupler/F2 = .48/.20/.49 Phi0, local4x4x4 and 32 retained joint states.
-Gaussian and sampled X90 pairs last 100 ns. A tail uses the same role's pulse.
-`multitone_gate_{gaussian,sampled}_n{1,21,100}` repeats one aligned pair.
+Gaussian, DRAG, sampled and flat-top X90 pairs last 100 ns.
+`multitone_gate_{gaussian,sampled,drag,flat_top}_n{1,21,100}` repeats one aligned
+pair, for 12 kernel scenes. A sequence tail uses the same role's pulse.
 `multitone_depth500_{gaussian,sampled}_{min_pairs,max_pairs}` mixes aligned pairs,
 alternating-role single-tone tails and 200 ns dual-charge-line CZ representatives
 with a fixed seed0 permutation. The two inventories contain respectively
@@ -664,14 +665,22 @@ with a fixed seed0 permutation. The two inventories contain respectively
 and maximum aligned-pair counts from a three-seed, two-arm simultaneous RB
 inventory, rather than replaying a lab experiment.
 
-The gate producer records complete envelope recipes and calibrated Gaussian/
-sampled gains in its source. The original spike working files were not
-committed. The CZ scale comes only from the public drive operators' coherent
+The gate producer records all four envelope recipes and role-specific gains
+in its source. DRAG uses 33 knots, sigma25 ns and Q=-dG/dt/alpha with role-local
+anharmonicities, zero Q endpoints and complex maxabs normalization, without a
+2*pi conversion. The kernel flat-top uses 33 knots, 25 ns ramps with sigma6.25 ns,
+a 50 ns platform and forced zero endpoints, then peak normalization without
+baseline subtraction. It does not use the CZ's 257-knot envelope.
+The gains target single-tone dressed population .5 from joint ground with loss
+off. The actual scenes retain joint Gibbs density and fixed baths/dephasing.
+The original spike working files were not committed. The CZ scale comes only from the public drive operators' coherent
 matrix element and the actual flat-top area. It is not a calibrated CZ and makes
 no conditional-phase or fidelity claim. Builder availability does not imply
 reference convergence, index admission, numerical qualification or speedup.
-New rows still require explicit per-scenario index updates and approved
-independent reference production below.
+The 16 gate scenes are in the real index, shared numeric cache and Pareto
+name set. Independent references and whole-sequence speed qualification remain
+separate work. Index admission does not establish reference convergence or a
+2x speedup; reference production requires its own compute approval below.
 
 `carrier_sweep_bias045_input()` and `gate_sequence_bias045_input()` keep the
 fixed single-fluxonium physical and board values from the source commit above.
@@ -726,9 +735,9 @@ Changes to the fixed controls require review. New seed/depth sequences require o
 
 `long_gate_sequence_input()` and `long_shaped_gate_sequence_input()` compile
 N-long and S-long through the same public program and single-fluxonium model
-path as N and S. The default fixed inventory includes both three-point scans,
-both bias045 scans and both random-phase scans alongside the original nine
-scenarios, for fifteen total.
+path as N and S. The compiled-scan inventory includes both three-point scans, both bias045 scans
+and both random-phase scans alongside the original nine scenarios, for fifteen
+compiled scans. The numeric gate scenes are additional inputs.
 Only the requested gate counts change for the long scans.
 The model and board values retain source commit
 `303074e166d1a563addfab4fd94717d958a7dd56`; DC bias, initial density, carrier,

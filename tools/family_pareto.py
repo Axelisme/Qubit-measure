@@ -1,5 +1,8 @@
 """Measure Engine.evolve families, not program.acquire latency."""
 
+# tolerated(file-size): Selection, session timing and reporting share complete
+# input identities and results; splitting this owner would scatter one comparison.
+
 from __future__ import annotations
 
 import argparse
@@ -112,6 +115,22 @@ PARETO_DEFAULT_NAMES = frozenset(
         "kernel_single_constant",
         "kernel_single_sampled",
         "kernel_multitone_sampled",
+        "multitone_gate_gaussian_n1",
+        "multitone_gate_gaussian_n21",
+        "multitone_gate_gaussian_n100",
+        "multitone_gate_sampled_n1",
+        "multitone_gate_sampled_n21",
+        "multitone_gate_sampled_n100",
+        "multitone_gate_drag_n1",
+        "multitone_gate_drag_n21",
+        "multitone_gate_drag_n100",
+        "multitone_gate_flat_top_n1",
+        "multitone_gate_flat_top_n21",
+        "multitone_gate_flat_top_n100",
+        "multitone_depth500_gaussian_min_pairs",
+        "multitone_depth500_gaussian_max_pairs",
+        "multitone_depth500_sampled_min_pairs",
+        "multitone_depth500_sampled_max_pairs",
     }
 )
 

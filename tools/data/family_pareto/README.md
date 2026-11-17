@@ -4,7 +4,7 @@
 
 ## Owner 與用途
 
-Pareto 集合包含 1 個重新宣告的 synthetic 場景、15 個完整 real 場景與 3 個單段 kernel 場景。
+Pareto 集合包含 1 個重新宣告的 synthetic 場景、15 個完整 real 場景、3 個單段 kernel 場景與 16 個 FTF gate 場景。
 `frozen-synthetic.index.json` 與 `frozen-real.index.json` 依 category 保存這些身份，也可容納其他已宣告的場景。
 兩份 version 1 清單只存每筆 name、physical_sha256、oracle_sha256 與 metadata_sha256。
 Metadata hash 使用公開 `simulate.evolution.digest(record.metadata)`。
@@ -13,7 +13,7 @@ Metadata hash 使用公開 `simulate.evolution.digest(record.metadata)`。
 首次從既有兩份 gzip 遷移 19 筆，逐筆核三個 hash、point order 與 reference key 不變，沒有跑 builders 或 solver。
 落地的歷史不含兩個舊 gzip。冷快取完整重建尚未驗證，需另取運算授權。
 公開 `family_pareto.select_inputs(index, scenario, *, scene_cache=...)` 集中來源與 report 身份。
-未指定 index 或 scenario 時，先讀這兩份清單，只選 `select_inputs` 旁宣告的 19 個 Pareto 名稱。
+未指定 index 或 scenario 時，先讀這兩份清單，只選 `select_inputs` 旁宣告的 35 個 Pareto 名稱。
 缺少任何預設名稱就失敗，不讀其他列的 payload 或 reference。
 `--index PATH` 不帶 scenario 時全選該份清單，`--scenario NAME` 可嚴格單選非 Pareto 列。
 Profile 列不作 family 去留證據。`--scene-cache DIR` 接受絕對快取路徑。
@@ -33,6 +33,7 @@ Single/integer 編譯與數值 source 的生命週期由 `family_pareto_scene_bu
 - 完整 F/L/I/N：`carrier_sweep`、`length_sweep`、`idle_sweep`、`gate_sequence`，各 24 點、21 能階。保留編譯後的 gaps、readout lead、point order、控制相位和 companion 宣告。
 - 其餘完整 real 場景包含 gain scan、joint simultaneous drive、constant/shaped tone overlap，以及 biased、long、random gate 序列。它們不是四組 F/L/I/N 的替代品。
 - 單段 kernel：`kernel_single_constant`、`kernel_single_sampled`、`kernel_multitone_sampled`，各 4 點、21 能階。它們使用公開 `SingleFluxoniumModel`，每個點只有一個同時支援區間，不從完整序列裁切。
+- FTF gate：`multitone_gate_{gaussian,sampled,drag,flat_top}_n{1,21,100}` 共 12 個重複段場景。另有 `multitone_depth500_{gaussian,sampled}_{min_pairs,max_pairs}` 共 4 個序列場景。每個場景各 1 點、32 能階，沿固定 FTF 模型的 Gibbs 初態與 baths。完整配方與校準來源在 gate producer 原地。16 列已進 real index，共用快取保存數值，尚不代表參考解或整序列速度驗收完成。
 
 Kernel 模型為 EJ/EC/EL = 4/1/1 GHz、DC flux = 0.5 Φ₀、cutoff 40、temperature 0.03 K，關閉 loss。
 四個 gain 是 0.01、0.04、0.07、0.1，support 為 100 ns，charge coefficient 為 0.1 GHz/gain。

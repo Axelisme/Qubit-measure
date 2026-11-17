@@ -33,13 +33,20 @@ from tools.family_pareto_settings import FTF_MODEL
 # recipes keep this producer independent of those files and mutable lab settings.
 # Single-tone X90 calibration: joint ground, bath/dephasing off, evolve 100 ns,
 # bisect real gain until the role's maximum-overlap dressed population is .5.
+# Calibration used FTF_MODEL at flux .48/.20/.49 Phi0, local4x4x4/retained32.
+# This targets population, not gate fidelity. Actual scenes retain joint Gibbs
+# density and the fixed model's baths/dephasing, not the calibration state.
 # Candidate-tree diagonalization matched the supplied carriers within 1e-9 GHz,
 # so the calibrated gains are reused without another evolution calibration.
 _X90_CARRIERS = (0.5989899500508908, 0.29771353219577534)
 _X90_GAINS = {
     "gaussian": (0.6118698121, 0.7346289760),
     "sampled": (0.7781773395, 0.9345741322),
+    "drag": (0.6118698121387076, 0.7346289759718283),
+    "flat_top": (0.5570356694528016, 0.6688906298485409),
 }
+# Local role anharmonicities E2 - 2*E1 + E0 in GHz, F1 then F2.
+_DRAG_ALPHA_GHZ = (4.855628336465323, 4.929989930790512)
 _PORTS = ("f1_charge", "f2_charge")
 # Simultaneous RB, three seeds and two arms at depth500: choose the extremes
 # in aligned pairs rather than the complete six-row cross product. The original
@@ -57,7 +64,7 @@ GATE_SCENES = tuple(
 )
 
 
-def _x90_envelope(shape: str) -> EnvelopeSpec:
+def _x90_envelope(shape: str, role: int) -> EnvelopeSpec:
     if shape == "gaussian":
         times = np.linspace(0.0, 100.0, 33)
         values = np.exp(-0.5 * ((times - 50.0) / 25.0) ** 2)
@@ -71,6 +78,25 @@ def _x90_envelope(shape: str) -> EnvelopeSpec:
         smooth -= float(np.mean(smooth))
         modulation = 0.82 + 0.18 * smooth / float(np.max(np.abs(smooth)))
         values = np.sin(np.pi * times / 100.0) ** 2 * modulation
+        values[[0, -1]] = 0.0
+    elif shape == "drag":
+        times = np.linspace(0.0, 100.0, 33)
+        x = times - 50.0
+        gaussian = np.exp(-0.5 * (x / 25.0) ** 2)
+        derivative = -(x / 25.0**2) * gaussian
+        # Q=-dG/dt/alpha, with no 2*pi conversion. Force only Q endpoints
+        # to zero, retain G endpoints, then normalize by complex maxabs below.
+        quadrature = -derivative / _DRAG_ALPHA_GHZ[role]
+        quadrature[[0, -1]] = 0.0
+        values = gaussian + 1j * quadrature
+    elif shape == "flat_top":
+        times = np.linspace(0.0, 100.0, 33)
+        distance = np.minimum(times, 100.0 - times)
+        values = np.ones_like(times)
+        ramp = distance < 25.0
+        # Two 25 ns Gaussian ramps, sigma 6.25 ns, 50 ns platform.
+        # Unlike CZ, use 33 knots and do not subtract exp(-8) baseline.
+        values[ramp] = np.exp(-0.5 * ((distance[ramp] - 25.0) / 6.25) ** 2)
         values[[0, -1]] = 0.0
     else:
         raise ValueError(f"Unknown X90 envelope: {shape}")
@@ -107,11 +133,10 @@ def _track(
 
 
 def _gate_templates(shape: str) -> dict[str, tuple[DriveTrack, ...]]:
-    envelope = _x90_envelope(shape)
     pair = tuple(
-        _track(port, carrier, gain, envelope)
-        for port, carrier, gain in zip(
-            _PORTS, _X90_CARRIERS, _X90_GAINS[shape], strict=True
+        _track(port, carrier, gain, _x90_envelope(shape, role))
+        for role, (port, carrier, gain) in enumerate(
+            zip(_PORTS, _X90_CARRIERS, _X90_GAINS[shape], strict=True)
         )
     )
     # Representative CZ coordinates, NOT a calibrated CZ. No conditional phase
