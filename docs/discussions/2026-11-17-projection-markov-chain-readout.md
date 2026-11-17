@@ -125,3 +125,7 @@ Diagnostics：`continued_states[p][t]` 是點 p 在轉移 t 採用 solver 列的
 
   RSS 含整個 payload 的 import 與 setup，wall 只包對應 seam；每組量一次，21 與 12 的差包含 JIT／cache，不能推論縮放倍率。逐點跨轉移 `uncontinued_probability` 總和的最大值：levels=21 為 1.875e-8，levels=12 為 1.864e-8。
 - 有限 chain 的 `Fraction` 窮舉（3 狀態、2 點、2 轉移）是有效 stochastic kernel，不是物理 workload。
+
+## 後記
+
+2026-11-17，使用者追認本篇記錄的代裁，原話「兩筆追認」；〈留下的問題〉列的覆核點全數接受。

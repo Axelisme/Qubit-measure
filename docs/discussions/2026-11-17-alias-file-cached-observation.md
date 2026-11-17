@@ -83,3 +83,7 @@ B-stage 不加公開方法或 hook，session 的 strict reload 形狀與原本�
 - 調查基準 `ed552a79b`（main 歷史中）。調查與 challenge 的工作檔未入庫，結論與事實寫在本文。Challenge 補上的項目：候選介面的兩個替代（B-cand、Safe-A）、可變資料隔離、三種 scope 的 save 與安裝、bool 邊界。
 - 現行行為：[resources.entry README](../../lib/zcu_tools/resources/entry/README.md)、`lib/zcu_tools/resources/entry/aliases.py` 的 docstring。
 - 相關 ADR：[ADR-0063](../adr/0063-persistence-ownership.md)、[ADR-0081](../adr/0081-point-data-disk-sync.md)。
+
+## 後記
+
+2026-11-17，使用者追認本篇的代裁，原話「四筆追認，0154 選 A」：維持 session 擁有 alias 語法、以候選准入。把語法檢查搬進 resources、讓 session 原地 refresh 的方案不採，等出現第二個需要長期持有 aliases 物件並原地 refresh 的使用者再議。

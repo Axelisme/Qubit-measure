@@ -314,6 +314,7 @@ FTF 與 single 不同，不拆損耗無關結構。漂移開啟時，每次 acqu
 
 2026-11-16，使用者要求「模擬器不該有 OOM」，看過選項後授權「OOM你就改designer決定」。
 Designer 於 2026-11-17 依此代裁 single／six 的 projective read 表示。
+2026-11-17，使用者覆核這份代裁（輸出改成 Markov chain、floor 改成逐點判斷的狀態層級語意、同 seed 結果改變、category 軸為人工 bins、移除 2 GiB 預算），答「兩筆追認」。
 
 DC rank-1 投影之後，下一段演化只依投影狀態，所以一串 projective read 是以投影狀態為狀態的 Markov chain。
 Single runner 輸出 `simulate.adc.ProjectionChain`：每點第一個 read 的 populations，加上每個後續 read 依前一個投影狀態的轉移表。
