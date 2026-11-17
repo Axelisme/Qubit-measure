@@ -15,6 +15,9 @@ from zcu_tools.gui.remote.rpc_endpoint import (
 )
 
 
+pytestmark = pytest.mark.requires_loopback
+
+
 class HeldWriterQueue(queue.Queue[bytes]):
     """Keep accepted clients' writer reads behind an explicit teardown release.
 

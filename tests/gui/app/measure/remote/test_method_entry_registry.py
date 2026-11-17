@@ -56,6 +56,7 @@ def test_build_dispatch_registry_rejects_bad_handler_refs(
         build_dispatch_registry((_entry("test.method", handler_ref),))
 
 
+@pytest.mark.requires_loopback
 def test_discovered_methods_are_dispatchable(remote) -> None:
     # An observer reaches validation/admission without mutating application state.
     with socket.create_connection(("127.0.0.1", remote.service.port)) as client:
@@ -75,6 +76,7 @@ def test_discovered_methods_are_dispatchable(remote) -> None:
                 }, (entry["method"], reply)
 
 
+@pytest.mark.requires_loopback
 def test_dispatch_operation_await_returns_terminal_reply(remote) -> None:
     with open_client(remote.service.port) as client:
         created = call(client, "tab.new", {"adapter_name": "fake"})
