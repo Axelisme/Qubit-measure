@@ -46,7 +46,7 @@ Tool description 與 schema 說明參數、回覆與錯誤，第一句寫用途�
 
 作用中的 `parameters.yaml`、`library.yaml` 與 `aliases.yaml` 以磁碟檔案為權威。
 開 entry 後，未選 point 時使用 entry 層的 global 文件組，選 point 後整組換成該 point 的文件。
-選 point 時，Inspect 仍可編輯 entry 層文件，watcher 也繼續監看，但它們不列在 files。
+選 point 時，Inspect 仍可編輯 global 文件，watcher 也繼續監看，但它們不列在 files。
 Agent 經 `rpc_call` 呼叫 `point.use`，params 傳 `{"label": null}` 切回 global，再取得 files 與 revision。
 label 必填，可為 point 字串或 null；省略為 invalid_params。回覆只含 `{entry_name, point}`，global 的 point 為 null，不含 kind。
 `point.new` 的 mode 預設 inherit，繼承 global 三檔；empty 只建最小有效 parameters，不建 library 或 aliases。
@@ -78,7 +78,7 @@ Agent 直接讀寫這些檔案，固定工具不提供參數／modules／aliases
 Owner 驗證後才安裝，既有 Tab／Run capture 不變。
 GUI library 編輯或 writeback 首次觸及 library 時，owner 會在單檔交易內建立文件。
 若外部已先建檔，帶 null 的 library writer 回 `revision_mismatch`，不覆寫外部內容。
-`context.reload` 接受任一已安裝文件的絕對路徑，包括選 point 時的 entry 層文件。
+`context.reload` 接受任一已安裝文件的絕對路徑，包括選 point 時的 global 文件。
 非作用中 entry 文件重載只發布 file status，不推進作用中 content version 或改既有 capture。
 Inspect 對 entry 的明確寫入先更新 owner cache 與 revision，再發布非作用中通知，不冒充外部 reload。
 

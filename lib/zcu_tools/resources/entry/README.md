@@ -190,7 +190,7 @@ List 是整欄衝突與通知單位。等長編輯按位置保留未改資料。
 GUI 透過 ContextService 讀取作用中文件組的元件／device 共用 alias 表。
 `apply_alias_rows(rows, point=None)` 一律 write-through，預設寫 global，明確傳 focus label 才寫該 point；其他 label 在讀寫前拒絕。
 未開 entry 時以 no_context 拒絕，不保存 memory-only rows 或 presets。Startup 先開 entry，再明確套用 rows。
-Inspect 保存所選 Destination。選 point 時改 entry 表只更新 entry cache 與 revision，不改作用中 point 或舊 capture。
+Inspect 保存所選 Destination。選 point 時改 global 表只更新 global cache 與 revision，不改作用中 point 或舊 capture。
 兩層檔案同步見 [ADR-0081](../../../../docs/adr/0081-point-data-disk-sync.md)。
 公開 `read_context` 不要求 GUI consumer roles 或 kind 檢查。Tab 在 Open／Refresh／Reset
 捕捉作用中文件組與 alias 表，Run 使用固定 capture。GUI 不自動初始化 point alias，
