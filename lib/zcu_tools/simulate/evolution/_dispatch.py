@@ -610,7 +610,9 @@ class _Classifier:
         rows = rows[(self.names[rows] == "") & ~self.deferred[rows]]
         gate = self.kernels.get("multitone_gate")
         if gate is not None and len(rows):
-            preferred = gate_preferred(self.table, rows, self.context)
+            preferred = gate_preferred(
+                self.table, rows, self.context, tuple(self.kernels)
+            )
             self.try_kernel(gate, rows[preferred])
             rows = rows[(self.names[rows] == "") & ~self.deferred[rows]]
         preferred = self.expanded_direct(rows)

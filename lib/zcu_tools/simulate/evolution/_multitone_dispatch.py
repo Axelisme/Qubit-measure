@@ -8,14 +8,13 @@ import numpy as np
 from numpy.typing import NDArray
 
 from .kernel import KernelContext, SegmentTable
+from .kernels._multitone_gate_phase import PHASE_GRID, PHASE_RTOL
 from .kernels._rwa_gate import GATE_POLICY, canonical_keys
 from .kernels._rwa_numeric import multitone_retention
 from .kernels.multitone_rwa import MultitoneRWAKernel
 from .secular import ModelSource
 from .workplan import FactKey, WorkPlan
 
-# Cost break-even: four-U preparation is unamortized over 3--19 rows.
-_MIN_GATE_REUSE = 20
 _GATE_INVENTORY = FactKey(("multitone-gate-inventory", GATE_POLICY), tuple)
 
 
@@ -44,16 +43,105 @@ def populate_gate_inventory(
 
 
 def gate_preferred(
-    table: SegmentTable, rows: NDArray[np.int64], context: KernelContext
+    table: SegmentTable,
+    rows: NDArray[np.int64],
+    context: KernelContext,
+    competitors: tuple[str, ...],
 ) -> NDArray[np.bool_]:
-    """Return a row-aligned cost preference for keys used at least 20 times.
+    """Compare cold gate prices before building any phase coefficients.
 
-    Uses the complete acquire inventory, never a prefix or worker subset.
-    Pinning a family bypasses this cost preference, not its numerical guard.
+    Only complete current-acquire canonical inventory counts amortize gate
+    construction; the gate price never reads RoutingHistory.
+    Eligible RWA retains its source-history cold price. An absent competitor
+    cannot veto a pinned gate; numerical admission still belongs to its guard.
     """
-    counts = dict(populate_gate_inventory(table, context.source, context.work_plan))
+    plan = context.work_plan
+    geometry = table if plan.complete_table is None else plan.complete_table
+    counts = dict(populate_gate_inventory(geometry, context.source, plan))
     canonical = canonical_keys(table, context)
-    return np.array([counts.get(canonical[row], 0) >= _MIN_GATE_REUSE for row in rows])
+    rwa = (
+        populate_multitone_inventory(geometry, context.source, plan, context.budget)
+        if "multitone_rwa" in competitors
+        else MultitoneInventory((), (), ())
+    )
+    rwa_uses = dict(rwa.uses)
+    # RWA inventory rows refer to the complete table, even inside a worker.
+    rwa_rows = {canonical_keys(geometry, context)[row]: row for row in rwa.admitted}
+    preferred = np.zeros(len(rows), dtype=bool)
+    for index, row in enumerate(rows):
+        uses = counts.get(canonical[row], 0)
+        if not uses:
+            continue
+        cost = gate_cost(table, int(row), context)
+        alternative = cost.direct if "dop853" in competitors else np.inf
+        if canonical[row] in rwa_rows:
+            representative = rwa_rows[canonical[row]]
+            other = multitone_cost(geometry, representative, context)
+            alternative = min(
+                alternative,
+                other.guard
+                + other.prepare / rwa_uses.get(representative, 1)
+                + other.apply,
+            )
+        preferred[index] = cost.guard + cost.prepare / uses + cost.apply < alternative
+    return preferred
+
+
+def gate_cost(table: SegmentTable, row: int, context: KernelContext) -> "MultitoneCost":
+    """Estimate first-stage build and four-quarter phase playback in CPU seconds.
+
+    These usage-independent prices are amortized by gate_preferred using only
+    this acquire's complete canonical inventory, never RoutingHistory. Every
+    evolve pays for its own construction, even after a prior matching evolve.
+
+    The density-to-Hilbert work coefficient 0.289 fits four first-stage builds
+    on tools/family_pareto_settings.FTF_MODEL, 32 states at flux .48/.20/.49.
+    Ordered f1_charge/f2_charge Gaussian and sampled X90 pairs last 100 ns,
+    at carriers .5989899500508908/.29771353219577534 GHz. Gains are
+    .6118698121/.7346289760 and .7781773395/.9345741322 respectively. Gaussian
+    uses 33 sampled knots, sigma 25 ns; sampled uses 32 smoothed seed-0 knots.
+    Two 25 ns CZ ramps use the same ordered ports, carrier 5.443720064991563 GHz,
+    equal gains .1587989411334408 and a 257-knot 200 ns flat-top envelope.
+    Warm compiled first-stage CPU times were 165.219/165.367/40.457/40.842 s.
+    The coefficient minimizes the worst relative build residual, rounded to
+    three decimals; estimates differ by approximately +4.5/+16.1/-15.0/-15.8%.
+    This is not full guard/apply timing or a bound for other physical inputs.
+
+    The rtol ratio uses the existing eighth-power work model. All first-stage
+    nodes and 64 validation trajectories integrate once. FFT fitting charges
+    an assumed 0.2 us per quarter/node/log2(node) at 16 levels, scaled
+    quadratically. Playback assumes 0.02 us per quarter/mode and 7.5 us per
+    D-U-D quarter at 16 levels; 2 us covers row guard/key work. These terms were
+    not measured separately. No upgrade is prepaid and no timing is retained.
+    """
+    return context.work_plan.fact(
+        FactKey(
+            (
+                "multitone-gate-cold-price",
+                canonical_keys(table, context)[row],
+                context.budget,
+            ),
+            MultitoneCost,
+        ),
+        lambda: _price_gate(table, row, context),
+    )
+
+
+def _price_gate(
+    table: SegmentTable, row: int, context: KernelContext
+) -> "MultitoneCost":
+    model = table.model(context.source, row)
+    scale = (len(model.energies_ghz) / 16) ** 3
+    nodes = int(np.prod(PHASE_GRID))
+    trajectories = nodes + 64
+    direct = _direct_cost(table, row, context)
+    # Undo direct's tolerance multiplier: build precision is budget-independent.
+    baseline = direct / (1e-3 / context.budget) ** 0.125
+    precision = (min(1e-4, 0.03e-3) / PHASE_RTOL) ** 0.125
+    integrate = baseline * trajectories * 0.289 * precision
+    fit = 2e-7 * 4 * nodes * np.log2(nodes) * (len(model.energies_ghz) / 16) ** 2
+    apply = (2e-8 * 4 * nodes + 7.5e-6 * 4) * scale
+    return MultitoneCost(direct, float(integrate + fit), 2e-6 * scale, apply)
 
 
 @dataclass(frozen=True)
@@ -171,7 +259,14 @@ def populate_multitone_plan(
 
 @dataclass(frozen=True)
 class MultitoneCost:
-    """Usage-independent direct/RWA prices for one expanded row."""
+    """Usage-independent prices for one row's gate or expanded-RWA candidate.
+
+    All fields are finite nonnegative CPU-second estimates, not measurements
+    or runtime guarantees. direct is one full-drive density evolution of the
+    same row. prepare is one cold construction of this candidate's reusable
+    product. guard and apply are this candidate's per-use admission and playback
+    work. Amortizing prepare requires a positive integer use count.
+    """
 
     direct: float
     prepare: float
@@ -179,6 +274,7 @@ class MultitoneCost:
     apply: float
 
     def direct_cheaper(self, uses: int) -> bool:
+        """Compare direct against cold candidate work for positive integer uses."""
         return self.direct < self.guard + self.prepare / uses + self.apply
 
 
@@ -189,6 +285,39 @@ def multitone_cost(
     return context.work_plan.fact(
         FactKey(("multitone-row-cost", id(table), row, context.budget), MultitoneCost),
         lambda: _price_row(table, row, context),
+    )
+
+
+def _direct_cost(table: SegmentTable, row: int, context: KernelContext) -> float:
+    """Existing full-drive density work estimate shared by both comparisons."""
+    model = table.model(context.source, row)
+    size = len(model.energies_ghz)
+    scale = (size / 16) ** 3
+    count = int(table.tones[row])
+    frequencies = table.tone_frequency_ghz[row, :count]
+    strength = sum(
+        abs(table.tone_amplitude[row, tone])
+        * (
+            np.linalg.norm(model.drives[port].in_phase_ghz, 2)
+            + np.linalg.norm(model.drives[port].quadrature_ghz, 2)
+        )
+        for tone, port in enumerate(table.tone_port[row, :count])
+    )
+    duration = table.duration_ns[row]
+    bandwidth = float(np.ptp(model.energies_ghz)) + max(abs(frequencies)) + 2 * strength
+    action = 1 + 4 * np.sqrt(strength) + 4 * strength
+    tolerance = (1e-3 / context.budget) ** 0.125
+    sampled = any(
+        table.envelopes[e].kind != "constant" for e in table.tone_envelope[row, :count]
+    )
+    return float(
+        8e-5
+        * duration
+        * bandwidth
+        * action
+        * scale
+        * tolerance
+        * (0.7 if sampled else 1.0)
     )
 
 
@@ -209,21 +338,8 @@ def _price_row(table: SegmentTable, row: int, context: KernelContext) -> Multito
         for tone, port in enumerate(table.tone_port[row, :count])
     )
     duration = table.duration_ns[row]
-    bandwidth = float(np.ptp(model.energies_ghz)) + max(abs(frequencies)) + 2 * strength
     action = 1 + 4 * np.sqrt(strength) + 4 * strength
     tolerance = (1e-3 / context.budget) ** 0.125
-    sampled = any(
-        table.envelopes[e].kind != "constant" for e in table.tone_envelope[row, :count]
-    )
-    direct = (
-        8e-5
-        * duration
-        * bandwidth
-        * action
-        * scale
-        * tolerance
-        * (0.7 if sampled else 1.0)
-    )
     restored_frequency = max(
         abs(model.energies_ghz[i] - model.energies_ghz[j] + frequency)
         for frequency, edges in zip(frequencies, retained.edges, strict=True)
@@ -243,4 +359,6 @@ def _price_row(table: SegmentTable, row: int, context: KernelContext) -> Multito
         * scale
         * tolerance
     )
-    return MultitoneCost(float(direct), float(prepare), float(guard), float(apply))
+    return MultitoneCost(
+        _direct_cost(table, row, context), float(prepare), float(guard), float(apply)
+    )
