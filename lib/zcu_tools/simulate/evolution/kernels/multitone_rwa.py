@@ -1,5 +1,6 @@
 """Calibrated joint-energy-basis RWA for simultaneous smooth or dual constant drives."""
 
+from contextlib import closing
 from dataclasses import dataclass
 from hashlib import sha256
 from typing import NamedTuple
@@ -7,23 +8,133 @@ from typing import NamedTuple
 import numpy as np
 from numba import njit
 from numpy.typing import NDArray
+from scipy.linalg import expm
 
 from .._envelope import sample_value
 from ..kernel import ApplyContext, KernelContext, Prepared, SegmentTable
+from ..secular import SecularModel
+from ..workplan import WorkPlan
 from ._dop853 import Tolerances, integrate, tolerances
 from ._dop853_data import Models, Segments, pack_models
+from ._rwa_fourier import (
+    RWACoefficients,
+    endpoint_kick,
+    interaction_hamiltonian,
+    kick_coefficients,
+)
 from ._rwa_numeric import (
     CONSTANT_RWA_POLICY,
     CONSTANT_STEP_NS,
-    MULTITONE_RETENTION_POLICY,
+    MULTITONE_GUARD_POLICY,
     STEP_NS,
-    RWACoefficients,
+    RWAGuardMetric,
+    RWARetention,
+    RWAUncomputed,
     admit_multitone_rows,
-    interaction_hamiltonian,
+    multitone_constant_admission,
     multitone_retention,
+    retained_mask,
     rwa_coefficients,
 )
 from ._workload_facts import packed_segments
+
+
+@dataclass(frozen=True)
+class MultitoneRWADiagnostic:
+    """Read-only admission metrics for two fixed-flux constant tones.
+
+    Computed fields are RWAGuardMetric values with inclusive thresholds and a
+    passed status. budget is the dimensionless per-segment allowance, required
+    >=1e-3. carrier_ghz is the smaller absolute carrier in GHz, required >=0.05.
+    omission_transfer is the final retained mask's remaining first/second-order
+    transfer proxy, dimensionless, required <=0.0058. omission_phase_rad is its
+    remaining omission phase in radians, required <=0.0045. real_dimension is
+    the sum of squared retained component sizes, including isolated populations,
+    required <=256. secular_accumulation is epsilon_dom**2 * Omega_ret * duration
+    in cycles, required <=1.476e-4. epsilon_dom is the largest omitted coupling
+    over absolute detuning; Omega_ret is twice the largest retained coupling in
+    GHz. These proxies do not bound final density error or sequence accuracy.
+
+    RWAUncomputed has neither value nor passed status and denotes skipped work,
+    not a failed comparison. Only final-mask metrics are reportable, even for a
+    rejected row; prior-mask values after restoration are not final metrics.
+    accepted is a bool reporting numerical admission, not dispatch selection.
+
+    Budget is always computed. Budget or same-port rejection skips all later
+    metrics; carrier rejection skips retention and secular metrics. Dimension
+    remains visible after a retention rejection. If restoration exceeds the
+    dimension limit before final-mask omission analysis, transfer, phase and
+    secular metrics are uncomputed rather than reporting prior-mask values.
+    """
+
+    budget: RWAGuardMetric | RWAUncomputed = RWAUncomputed()
+    carrier_ghz: RWAGuardMetric | RWAUncomputed = RWAUncomputed()
+    omission_transfer: RWAGuardMetric | RWAUncomputed = RWAUncomputed()
+    omission_phase_rad: RWAGuardMetric | RWAUncomputed = RWAUncomputed()
+    real_dimension: RWAGuardMetric | RWAUncomputed = RWAUncomputed()
+    secular_accumulation: RWAGuardMetric | RWAUncomputed = RWAUncomputed()
+    accepted: bool = False
+
+
+def multitone_rwa_diagnostic(
+    model: SecularModel,
+    ports: tuple[str, str],
+    frequencies_ghz: tuple[float, float],
+    amplitudes: tuple[float, float],
+    duration_ns: float,
+    *,
+    budget: float = 1e-3,
+) -> MultitoneRWADiagnostic:
+    """Read multitone_rwa admission for two fixed-flux constant tones.
+
+    model is the row's SecularModel, including any segment shifts. The aligned
+    length-two tuples name known ports, finite signed GHz carriers and finite
+    signed dimensionless gains. duration_ns is finite nonnegative row length in
+    ns; budget is a finite positive dimensionless per-segment allowance. Phase
+    and initial density do not enter the query.
+
+    Returns the guard's computed final-mask comparisons, including failed
+    metrics on rejected rows, and RWAUncomputed for skipped work. Same-port,
+    low/zero carrier and positive budget below 1e-3 return accepted=False.
+    Raises ValueError for unknown ports, wrong tuple lengths, nonfinite inputs,
+    negative duration or invalid budget. Numerical construction failures
+    propagate. The query does not evolve density, select a family, mutate inputs
+    or history, or retain facts across calls. Temporary facts close before return.
+    """
+    tolerances(budget)
+    if len(ports) != 2 or len(frequencies_ghz) != 2 or len(amplitudes) != 2:
+        raise ValueError("constant multitone RWA requires two aligned tones")
+    if (
+        not all(
+            np.isfinite(value) for value in (*frequencies_ghz, *amplitudes, duration_ns)
+        )
+        or duration_ns < 0
+    ):
+        raise ValueError(
+            "constant RWA requires finite carrier/gain and nonnegative finite duration"
+        )
+    names = [drive.name for drive in model.drives]
+    for port in ports:
+        if port not in names:
+            raise ValueError(f"unknown constant RWA drive port: {port}")
+    with closing(WorkPlan()) as plan:
+        admission = multitone_constant_admission(
+            model,
+            (names.index(ports[0]), names.index(ports[1])),
+            frequencies_ghz,
+            amplitudes,
+            (duration_ns, budget),
+            plan,
+        )
+        return MultitoneRWADiagnostic(
+            budget=admission.budget,
+            carrier_ghz=admission.carrier_ghz,
+            omission_transfer=admission.omission_transfer,
+            omission_phase_rad=admission.omission_phase_rad,
+            real_dimension=admission.real_dimension,
+            secular_accumulation=admission.secular_accumulation,
+            accepted=admission.accepted,
+        )
 
 
 class _DensitySupport(NamedTuple):
@@ -57,12 +168,15 @@ class RWAPrepared:
         respectively, after the omission-resolved Fourier-edge selection.
     diagonal: (keys,max_active_tones,M) GHz/gain² diagonal terms from
         RWACoefficients, independent of carrier phase.
+    endpoint_maps: (keys,2,M,M) initial/final kick unitaries for constant
+        dual-tone rows; identity maps for sampled rows, which do not use them.
     """
 
     models: Models
     positive: NDArray[np.complex128]
     negative: NDArray[np.complex128]
     diagonal: NDArray[np.float64]
+    endpoint_maps: NDArray[np.complex128]
 
     @property
     def nbytes(self) -> int:
@@ -71,7 +185,39 @@ class RWAPrepared:
             + self.positive.nbytes
             + self.negative.nbytes
             + self.diagonal.nbytes
+            + self.endpoint_maps.nbytes
         )
+
+
+def _constant_endpoint_maps(
+    model: SecularModel,
+    table: SegmentTable,
+    row: int,
+    retention: RWARetention,
+) -> NDArray[np.complex128]:
+    """Sum all omitted-tone K at each row-local endpoint before exponentiating."""
+    count = int(table.tones[row])
+    frequencies = tuple(float(f) for f in table.tone_frequency_ghz[row, :count])
+    mask = retained_mask(model, frequencies, retention)
+    size = len(model.energies_ghz)
+    kicks = np.zeros((2, size, size), dtype=np.complex128)
+    for tone, frequency in enumerate(frequencies):
+        drive = model.drives[table.tone_port[row, tone]]
+        coefficients = kick_coefficients(
+            model.energies_ghz,
+            drive.in_phase_ghz,
+            drive.quadrature_ghz,
+            frequency,
+            float(table.tone_amplitude[row, tone]),
+            mask[tone],
+        )
+        theta = float(table.tone_theta_rad[row, tone])
+        kicks[0] += endpoint_kick(coefficients, theta)
+        # theta already includes the absolute row start. Idle after drive ends
+        # belongs to another row, so kick and integration use the same duration.
+        phase = theta + 2 * np.pi * frequency * table.duration_ns[row]
+        kicks[1] += endpoint_kick(coefficients, phase)
+    return np.stack((expm(1j * kicks[0]), expm(-1j * kicks[1])), dtype=np.complex128)
 
 
 @njit(nogil=True, cache=True)
@@ -182,10 +328,20 @@ def _rhs(time, state, context):
 
 @njit(nogil=True, cache=True)
 def _run(data, row_models, states, controls):
-    models, segments, positive, negative, diagonal = data
+    models, segments, positive, negative, diagonal, endpoint_maps = data
     rows, indices = row_models
     for index in range(len(rows)):
         row, model = rows[index], indices[index]
+        constant = segments.tones[row] == 2
+        for tone in range(segments.tones[row]):
+            env = segments.envelope[row, tone]
+            constant = (
+                constant
+                and segments.sample_offsets[env] == segments.sample_offsets[env + 1]
+            )
+        if constant:
+            initial_kick = endpoint_maps[model, 0]
+            states[index] = initial_kick @ states[index] @ initial_kick.conj().T
         support = _density_support(positive[model], negative[model], states[index])
         context = _Context(
             models, segments, positive, negative, diagonal, row, model, support
@@ -194,13 +350,6 @@ def _run(data, row_models, states, controls):
         for entry in range(len(initial)):
             i, j = support.coordinates[entry]
             initial[entry] = states[index, i, j]
-        constant = segments.tones[row] == 2
-        for tone in range(segments.tones[row]):
-            env = segments.envelope[row, tone]
-            constant = (
-                constant
-                and segments.sample_offsets[env] == segments.sample_offsets[env + 1]
-            )
         ceiling = CONSTANT_STEP_NS if constant else STEP_NS
         row_controls = Tolerances(
             controls.rtol,
@@ -222,6 +371,9 @@ def _run(data, row_models, states, controls):
         for entry in range(len(result)):
             i, j = support.coordinates[entry]
             states[index, i, j] = result[entry] * phases[i] * phases[j].conjugate()
+        if constant:
+            final_kick = endpoint_maps[model, 1]
+            states[index] = final_kick @ states[index] @ final_kick.conj().T
 
 
 class MultitoneRWAKernel:
@@ -248,6 +400,12 @@ class MultitoneRWAKernel:
     The final Fourier union must fit real population/coherence dimension
     sum(component_size**2) <=256, the same measure as single constant RWA.
     Resolved masks enter both coefficient builders and prepare/fact identities.
+    Constant pairs also require epsilon_dom**2 * Omega_ret * row duration
+    <=1.476e-4 cycle. epsilon_dom is max(abs(C/d)) over omitted nonzero Fourier
+    coefficients, including diagonals; Omega_ret is twice max(abs(C)) over all
+    retained tones/signs in cycles/ns. Both use the final resolved mask and
+    gain-weighted coefficients. This endpoint-kick remainder proxy adds no
+    2*pi factor and does not apply to sampled rows.
 
     Transfer retains half the measured 0.0116496 combination-channel boundary.
     Historical phase calibration used a 24-point two-tone, 16-level joint-model grid:
@@ -275,7 +433,7 @@ class MultitoneRWAKernel:
     """
 
     name = "multitone_rwa"
-    revision = MULTITONE_RETENTION_POLICY
+    revision = (MULTITONE_GUARD_POLICY, "constant-dual-endpoint-kick-v1")
     guard_builds = False
 
     def guard(
@@ -296,9 +454,7 @@ class MultitoneRWAKernel:
             count = table.tones[row]
             retention = multitone_retention(table, int(row), context)
             digest = sha256(
-                repr(
-                    (MULTITONE_RETENTION_POLICY, retention.edges, context.budget)
-                ).encode("ascii")
+                repr((self.revision, retention.edges, context.budget)).encode("ascii")
             )
             if all(
                 table.envelopes[e].kind == "constant"
@@ -361,23 +517,36 @@ class MultitoneRWAKernel:
         diagonal = np.zeros(
             (len(rows), int(np.max(table.tones[rows])), models.energies.shape[1])
         )
+        size = models.energies.shape[1]
+        endpoint_maps = np.broadcast_to(
+            np.eye(size, dtype=np.complex128), (len(rows), 2, size, size)
+        ).copy()
         for index, row in enumerate(rows):
             count = int(table.tones[row])
             model = table.model(context.source, row)
+            retention = multitone_retention(table, int(row), context)
             coefficients = rwa_coefficients(
                 model,
                 tuple(int(v) for v in table.tone_port[row, :count]),
                 tuple(float(v) for v in table.tone_frequency_ghz[row, :count]),
-                multitone_retention(table, int(row), context),
+                retention,
                 work_plan=context.work_plan,
             )
             positive[index, :count] = coefficients.positive
             negative[index, :count] = coefficients.negative
             diagonal[index, :count] = coefficients.diagonal
+            if count == 2 and all(
+                table.envelopes[e].kind == "constant"
+                for e in table.tone_envelope[row, :count]
+            ):
+                endpoint_maps[index] = _constant_endpoint_maps(
+                    model, table, int(row), retention
+                )
+        endpoint_maps.setflags(write=False)
         positive.setflags(write=False)
         negative.setflags(write=False)
         diagonal.setflags(write=False)
-        return RWAPrepared(models, positive, negative, diagonal)
+        return RWAPrepared(models, positive, negative, diagonal, endpoint_maps)
 
     def guard_prepared(
         self, table: SegmentTable, rows: NDArray[np.int64], context: KernelContext
@@ -417,7 +586,12 @@ class MultitoneRWAKernel:
         adaptive controls. It integrates all retained tones and envelope-squared
         omitted-edge shifts through interaction_hamiltonian
         in a row-local interaction picture, then restores Schrödinger coordinates.
+        Constant dual-tone rows receive the summed first-order omitted-edge
+        kick before support selection and after returning to the lab frame.
+        The kick uses the complement of resolved retention, including diagonal
+        +/-carrier terms, not phase-graph pruning. Sampled rows receive no kick.
         theta is the phase at row start; offsets preserve pulse-local envelopes.
+        The final kick and propagation share the exact row duration.
         Adaptive integration uses the ordinary budget tolerance and 0.1 ns seed,
         capped at 16 ns for the admitted dual constant envelopes.
         This is not a certified bound
@@ -440,6 +614,7 @@ class MultitoneRWAKernel:
                 prepared.positive,
                 prepared.negative,
                 prepared.diagonal,
+                prepared.endpoint_maps,
             ),
             (rows, key_index),
             states,

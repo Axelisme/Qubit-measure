@@ -6,7 +6,7 @@ allocated and caller-owned. NumPy/Numba failures propagate without validation
 or recovery here. Carrier order is preserved; each sign axis is (+1,-1).
 """
 
-from typing import overload
+from typing import NamedTuple, overload
 
 import numpy as np
 from numba import njit
@@ -26,6 +26,62 @@ EDGE_GHZ = 0.05
 # The extended 96-point single-constant scan had no failures below 0.045813;
 # the same-tone counterexample is 0.015629. Keep the stricter shared cap.
 MAX_OMISSION_TRANSFER = 5.8e-3
+
+
+class RWACoefficients(NamedTuple):
+    """Joint RWA coefficients supplied by the single Hamiltonian owner.
+
+    positive/negative: (tones,M,M) GHz/gain Fourier operators, mutual adjoints.
+    diagonal: (tones,M) GHz/gain² phase-independent virtual diagonal terms,
+        multiplied by abs(gain*envelope)**2. Contains window-excluded single-tone
+        second-order shifts; retained edges are not counted twice.
+    All consumers, including the gate cache, assemble through
+    interaction_hamiltonian. They must not implement a separate drive RHS.
+    """
+
+    positive: NDArray[np.complex128]
+    negative: NDArray[np.complex128]
+    diagonal: NDArray[np.float64]
+
+
+@njit(nogil=True, cache=True)
+def interaction_hamiltonian(time, energies, coefficients, amplitudes, edges=None):
+    """Assemble the joint RWA interaction Hamiltonian, in GHz.
+
+    time is row-local ns. energies is the static interaction-picture diagonal,
+    either the joint energies for ordinary RWA or E+q@f for a covariant gate.
+    coefficients is RWACoefficients and owns EVERY driven term, including
+    phase-independent diagonal terms. amplitudes contains gain*envelope*phase
+    for every active tone. Diagonal terms come from the coefficient record;
+    the gate cache must not assemble its own RHS or add a separate shift.
+    edges optionally lists all nonzero Fourier coordinates as (count,2) int64;
+    ordinary RWA uses this exact sparsity, while other consumers default to the
+    full matrix. Diagonal virtual shifts are always assembled for every state.
+    Returns a new Hermitian matrix; input arrays remain unchanged. Restoring
+    the static picture at endpoints remains the integrator's responsibility.
+    """
+    size = len(energies)
+    h = np.zeros((size, size), dtype=np.complex128)
+    phases = np.exp(2j * np.pi * energies * time)
+    for tone in range(len(amplitudes)):
+        z = amplitudes[tone]
+        count = size * size if edges is None else len(edges)
+        for edge in range(count):
+            if edges is None:
+                i, j = edge // size, edge % size
+            else:
+                i, j = edges[edge, 0], edges[edge, 1]
+            h[i, j] += (
+                (
+                    coefficients.positive[tone, i, j] * z
+                    + coefficients.negative[tone, i, j] * z.conjugate()
+                )
+                * phases[i]
+                * phases[j].conjugate()
+            )
+        for i in range(size):
+            h[i, i] += coefficients.diagonal[tone, i] * abs(z) ** 2
+    return h
 
 
 @overload
@@ -88,6 +144,47 @@ def kick_coefficients(
                         / detuning
                     )
     return result
+
+
+@njit(nogil=True, cache=True)
+def secular_accumulation(
+    energies: NDArray[np.float64],
+    quadratures: tuple[NDArray[np.complex128], NDArray[np.complex128]],
+    frequencies: NDArray[np.float64],
+    amplitudes: NDArray[np.float64],
+    retained: NDArray[np.bool_],
+    duration_ns: float,
+) -> float:
+    """Return epsilon_dom**2 * Omega_ret * row duration in cycles.
+
+    energies is (M,) GHz, quadratures are aligned (tones,M,M) GHz/gain x/y,
+    frequencies are signed (tones,) GHz and amplitudes are signed gains.
+    retained is the final resolved (tones,2,M,M) mask in (+1,-1) sign order.
+    epsilon_dom is max(abs(C/d)) over omitted nonzero C, including diagonals;
+    Omega_ret is twice max(abs(C)) over all retained tones and signs, cycles/ns.
+    C is the gain-weighted full Fourier coefficient and d its signed detuning.
+    Empty maxima are zero. Omitted detunings lie outside the initial 50 MHz
+    window, so no denominator regularization is needed. duration_ns is local
+    row length, not absolute end. No 2*pi conversion enters this cycle proxy.
+    """
+    x, y = quadratures
+    epsilon_dom = 0.0
+    omega_ret = 0.0
+    for tone in range(len(frequencies)):
+        for slot in range(2):
+            sign = 1 - 2 * slot
+            for i in range(len(energies)):
+                for j in range(len(energies)):
+                    coupling = abs(
+                        amplitudes[tone]
+                        * fourier_coefficient(x[tone, i, j], y[tone, i, j], sign)
+                    )
+                    if retained[tone, slot, i, j]:
+                        omega_ret = max(omega_ret, 2 * coupling)
+                    elif coupling != 0:
+                        detuning = energies[i] - energies[j] + sign * frequencies[tone]
+                        epsilon_dom = max(epsilon_dom, coupling / abs(detuning))
+    return epsilon_dom**2 * omega_ret * duration_ns
 
 
 @njit(nogil=True, cache=True)
