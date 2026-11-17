@@ -68,6 +68,7 @@ def test_main_window_role_failure_is_presented_without_registering_tab(
     )
     dialogs = RecordingDialogPresenter()
     window = MainWindow(ctrl, templates=lambda: {}, dialog_presenter=dialogs)
+    main_window_control_factory.own(window)
     window.create_tab("fake")
     assert len(dialogs.calls) == 1
     assert "qubit" in dialogs.calls[0].message
@@ -120,6 +121,7 @@ def test_main_window_load_data_dialog_calls_controller(
     )
     dialogs = RecordingDialogPresenter()
     window = MainWindow(ctrl, templates=lambda: {}, dialog_presenter=dialogs)
+    main_window_control_factory.own(window)
     window.add_tab_widget("tab-1", "fake")
     try:
         assert window.has_tab_widget("tab-1") is True
@@ -179,6 +181,7 @@ def test_main_window_successful_writeback_relies_on_event_owned_projection(
         "written": {"parameter": ["r_f"], "ml_modules": [], "ml_waveforms": []},
     }
     window = MainWindow(ctrl, templates=lambda: {})
+    main_window_control_factory.own(window)
     window.add_tab_widget("tab-1", "fake")
     try:
         assert window.has_tab_widget("tab-1") is True
@@ -328,6 +331,7 @@ def test_status_bar_message_is_mouse_selectable(main_window_control_factory, qap
     ctrl.get_bus.return_value = EventBus()
     ctrl.tab_control.list_tab_ids.return_value = []
     window = MainWindow(ctrl, templates=lambda: {})
+    main_window_control_factory.own(window)
 
     assert len(_status_bar_labels(window, "Ready")) == 1
 
@@ -347,6 +351,7 @@ def test_long_status_message_stays_within_window_with_full_tooltip(
     ctrl.get_bus.return_value = EventBus()
     ctrl.tab_control.list_tab_ids.return_value = []
     window = MainWindow(ctrl, templates=lambda: {})
+    main_window_control_factory.own(window)
     message = "Config invalid: " + (
         "Fill in F1 pulse frequency (MHz), normalized gain and duration (us). " * 8
     )
@@ -373,6 +378,7 @@ def test_main_window_toolbar_does_not_show_arb_waveforms(
     ctrl.get_bus.return_value = EventBus()
 
     window = MainWindow(ctrl, templates=lambda: {})
+    main_window_control_factory.own(window)
     texts = {button.text() for button in window.findChildren(QPushButton)}
 
     assert "Inspect…" in texts
@@ -398,6 +404,7 @@ def test_main_window_named_dialog_facade_delegates_to_registry(
     monkeypatch.setattr(MainDialogRegistry, "visible_names", registry.visible_names)
     monkeypatch.setattr(MainDialogRegistry, "take_screenshot", registry.take_screenshot)
     window = MainWindow(ctrl, templates=lambda: {})
+    main_window_control_factory.own(window)
 
     window.close_dialog(DialogName.PREDICTOR)
     window.open_dialog(DialogName.PREDICTOR)
@@ -420,6 +427,7 @@ def test_show_error_dialog_retains_until_close(main_window_control_factory, qapp
     ctrl = apply_window_defaults(mock_ctrl(main_window_control_factory))
     ctrl.get_bus.return_value = EventBus()
     window = MainWindow(ctrl, templates=lambda: {})
+    main_window_control_factory.own(window)
 
     window.show_error_dialog("Broken", "Something failed")
     qapp.processEvents()
@@ -468,6 +476,7 @@ def test_main_window_load_data_dialog_cancel_is_noop(
     )
     ctrl.save_control.list_saved_runs.return_value = ()
     window = MainWindow(ctrl, templates=lambda: {})
+    main_window_control_factory.own(window)
     window.add_tab_widget("tab-1", "fake")
     try:
         assert window.has_tab_widget("tab-1") is True
@@ -506,6 +515,7 @@ def test_main_window_load_data_dialog_shows_user_facing_error(
         reason_code="invalid_data_file",
     )
     window = MainWindow(ctrl, templates=lambda: {})
+    main_window_control_factory.own(window)
     window.add_tab_widget("tab-1", "fake")
     try:
         assert window.has_tab_widget("tab-1") is True
@@ -551,6 +561,7 @@ def test_main_window_run_lock_keeps_new_tab_available(
     )
 
     window = MainWindow(ctrl, templates=lambda: {})
+    main_window_control_factory.own(window)
     try:
         window.add_tab_widget("tab-1", "fake")
         window.add_tab_widget("tab-2", "fake")
@@ -584,6 +595,7 @@ def test_main_window_tabs_are_movable_and_close_uses_moved_widget(
         tab_id, has_run_result=False
     )
     window = MainWindow(ctrl, templates=lambda: {})
+    main_window_control_factory.own(window)
     try:
         window.add_tab_widget("tab-a", "A")
         window.add_tab_widget("tab-b", "B")
@@ -620,6 +632,7 @@ def test_main_window_soc_changed_refreshes_run_lock(
     ctrl.tab_control.get_tab_snapshot.return_value = make_tab_snapshot("tab-1")
 
     window = MainWindow(ctrl, templates=lambda: {})
+    main_window_control_factory.own(window)
     try:
         window.add_tab_widget("tab-1", "fake")
         tab = next(
@@ -651,6 +664,7 @@ def test_main_window_content_event_queries_single_tab_snapshot(
     assert snapshot.analysis is not None
     ctrl.tab_control.get_tab_snapshot.return_value = snapshot
     window = MainWindow(ctrl, templates=lambda: {})
+    main_window_control_factory.own(window)
     tab = MagicMock()
     try:
         window.add_tab_widget("tab-1", "fake")
@@ -688,6 +702,7 @@ def test_new_tab_menu_supports_nested_paths(
         "twotone/rabi/amp",
     ]
     window = MainWindow(ctrl, templates=lambda: {})
+    main_window_control_factory.own(window)
 
     def _find_action_by_data(menu: QMenu, target: str):
         for action in menu.actions():

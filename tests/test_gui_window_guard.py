@@ -23,7 +23,8 @@ class TeardownReports:
         windows = [
             window
             for window in QApplication.topLevelWidgets()
-            if type(window).__name__ in {"LeakedWindow", "DeleteOnlyDialog"}
+            if type(window).__name__
+            in {"LeakedWindow", "DeleteOnlyDialog", "UnownedDialog", "UnownedRow"}
         ]
         self.visible[report.nodeid] = tuple(
             type(window).__name__ for window in windows if window.isVisible()
@@ -33,6 +34,59 @@ class TeardownReports:
         for window in windows:
             window.close()
             window.deleteLater()
+
+
+def test_control_factory_leaves_unowned_windows_for_guard(
+    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Only explicitly owned views may retire before the teardown report."""
+    repo = Path(__file__).resolve().parents[1]
+    gui = pytester.path / "gui"
+    ui = gui / "ui"
+    ui.mkdir(parents=True)
+    shutil.copyfile(repo / "tests/gui/conftest.py", gui / "conftest.py")
+    shutil.copyfile(repo / "tests/gui/app/measure/ui/conftest.py", ui / "conftest.py")
+    pytester.makeini("[pytest]\naddopts = --import-mode=importlib\n")
+    monkeypatch.delenv("PYTEST_ADDOPTS", raising=False)
+    (ui / "test_unowned.py").write_text(
+        """
+import pytest
+from qtpy.QtWidgets import QDialog, QWidget
+
+windows = []
+
+class UnownedDialog(QDialog):
+    pass
+
+class UnownedRow(QWidget):
+    pass
+
+@pytest.mark.parametrize('window_type', [UnownedDialog, UnownedRow])
+def test_unowned_window(browser_host, window_type):
+    window = window_type()
+    window.setObjectName('guard.synthetic.unowned')
+    windows.append(window)
+    window.show()
+    assert window.isVisible()
+""",
+        encoding="utf-8",
+    )
+    reports = TeardownReports()
+    try:
+        result = pytester.runpytest_inprocess("-q", plugins=[reports])
+        result.assert_outcomes(passed=2, errors=2)
+        for window_type in ("UnownedDialog", "UnownedRow"):
+            nodeid = f"gui/ui/test_unowned.py::test_unowned_window[{window_type}]"
+            report = reports.reports[nodeid]
+            assert report.failed
+            assert window_type in str(report.longrepr)
+            assert nodeid in str(report.longrepr)
+            assert reports.visible[nodeid] == (window_type,)
+    finally:
+        for window in QApplication.topLevelWidgets():
+            if window.objectName() == "guard.synthetic.unowned":
+                window.close()
+                window.deleteLater()
 
 
 def test_gui_window_guard_runs_after_fixture_cleanup(

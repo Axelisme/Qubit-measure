@@ -23,9 +23,8 @@ def _left_panel_handle(tab: ExpTabWidget) -> QToolButton:
 
 def test_left_panel_toggle_is_attached_to_tab_bar(main_window_control_factory, qapp):
     from qtpy.QtWidgets import QApplication
-    from zcu_tools.gui.app.measure.ui.main_window import ExpTabWidget
 
-    tab = ExpTabWidget(
+    tab = main_window_control_factory.create_tab(
         "tab-1",
         mock_ctrl(main_window_control_factory),
         AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False),
@@ -43,9 +42,8 @@ def test_left_panel_toggle_uses_collapsed_boundary_handle(
     main_window_control_factory, qapp
 ):
     from qtpy.QtWidgets import QApplication
-    from zcu_tools.gui.app.measure.ui.main_window import ExpTabWidget
 
-    tab = ExpTabWidget(
+    tab = main_window_control_factory.create_tab(
         "tab-1",
         mock_ctrl(main_window_control_factory),
         AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False),
@@ -79,9 +77,8 @@ def test_left_panel_toggle_uses_collapsed_boundary_handle(
 
 def test_left_panel_handle_tracks_splitter_boundary(main_window_control_factory, qapp):
     from qtpy.QtWidgets import QApplication
-    from zcu_tools.gui.app.measure.ui.main_window import ExpTabWidget
 
-    tab = ExpTabWidget(
+    tab = main_window_control_factory.create_tab(
         "tab-1",
         mock_ctrl(main_window_control_factory),
         AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False),

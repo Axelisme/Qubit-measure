@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator
+from collections.abc import Iterator
 from io import BytesIO
 from pathlib import Path
 
@@ -26,7 +26,6 @@ from zcu_tools.gui.app.measure.adapter import (
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
 from zcu_tools.gui.app.measure.ui.interactive_frontend import InteractiveFrontend
-from zcu_tools.gui.control_identity import ControlIdentity
 from zcu_tools.gui.session.context_types import (
     CommandOrigin,
     EntryRequest,
@@ -46,7 +45,10 @@ from tests.gui.app.measure._native_save_support import (
     PostSummary,
 )
 from tests.gui.app.measure.ui._figure_presentation_support import gallery
-from tests.gui.app.measure.ui._main_window_fakes import mock_ctrl
+from tests.gui.app.measure.ui._main_window_fakes import (
+    MainWindowControlFactory,
+    mock_ctrl,
+)
 from tests.program._profiles import load_soccfg
 
 
@@ -387,7 +389,7 @@ def test_user_switches_named_figures_gallery_and_left_panel(
 
 @pytest.fixture
 def presentation_host(
-    qapp: QApplication, main_window_control_factory: Callable[[], ControlIdentity]
+    qapp: QApplication, main_window_control_factory: MainWindowControlFactory
 ) -> Iterator[QWidget]:
     """Yield a visible QWidget containing one ExpTabWidget, without a session.
 
@@ -396,6 +398,7 @@ def presentation_host(
     closes the host and delivers its deferred deletion.
     """
     host = QWidget()
+    main_window_control_factory.own(host)
     layout = QVBoxLayout(host)
     tab = ExpTabWidget(
         "presentation",
