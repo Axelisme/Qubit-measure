@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-11-17, reference producer single-row selection
+**Last updated:** 2026-11-17, optional Engine capture and actual route events
 
 **讀者：** framework-dev、agent。Segment evolution 的公開輸入、路由與數值邊界。
 
@@ -14,6 +14,7 @@ boundary and the decision to keep algorithm knowledge in dispatch.
 - [Public entry points](#public-entry-points)
 - [Frozen numeric inputs and references](#frozen-numeric-inputs-and-references)
 - [Dispatch inspection](#dispatch-inspection)
+- [Engine capture](#engine-capture)
 - [Joint-Fock prototype](#joint-fock-prototype)
 - [Routing telemetry](#routing-telemetry)
 - [Decision graph](#decision-graph)
@@ -38,6 +39,7 @@ The exports in [__init__.py](__init__.py) fall into these groups:
 | Purpose | Exports |
 | --- | --- |
 | Execution and results | `Engine`, `EvolutionResult`, `PathDiagnostics`, `FamilyRouting`, `Cancelled`, `SEGMENT_NUMERIC_VERSION` |
+| Execution capture | `CaptureBuffer`, `CaptureMetadata`, `CaptureRoute`, `CaptureCandidate`, `CapturePrefixRun`, `CapturePosition`, `CaptureAdopter` |
 | Dispatch inspection | `DispatchInspection`, `DispatchRow`, `DispatchCandidate`, `RowKey` |
 | Engine model source and routing history | `ModelSource`, `SecularModel`, `SecularDrive`, `RoutingHistory` |
 | Flux description | `FluxExpansion`, `FluxTerm`, `FluxLevel`, `FluxSchedule`, `FluxWaveform` |
@@ -213,6 +215,58 @@ snapshots. Querying A before evolving B leaves B's route and density unchanged.
 Guard preparations expire on return and do not enter Engine caches. Source
 model caches and shift registrations may be populated. Calls sharing a history
 must serialize, just as for evolve.
+
+## Engine capture
+
+`CaptureBuffer()` is a caller-owned in-memory recording. Pass it to
+`Engine.evolve(..., capture=buffer)` and read `buffer.records` after return or
+failure. The default `capture=None` does not freeze inputs or collect routes.
+Engine never writes a file. A caller can save the tuple with the existing
+`write_frozen_manifest(path, buffer.records)` codec.
+
+Each evolve gets a fresh random `capture_id` and appends one `FrozenRecord`
+per input batch, including empty batches, before prefix execution or dispatch.
+Names are `<capture_id>-<batch_index>`. A buffer can accumulate multiple calls.
+`CaptureBuffer.recording(source, batches, budget, families)` owns the Engine's
+recording scope and yields the call's metadata list. Other callers should pass
+the buffer to evolve instead. Direct scope entry only freezes inputs, produces
+no route events, and still marks complete on normal exit. The method sorts
+events and releases buffer ownership on every exit.
+A concurrent call using the same buffer raises `ValueError` at entry, before
+waiting for an Engine lock. `records` is a tuple snapshot. Metadata dictionaries
+are not deeply frozen; callers must not modify them.
+
+`CaptureMetadata` defines the opaque JSON metadata. It contains `capture_id`,
+zero-based `batch_index`, `batch_count`, `budget`, sorted `families` or null,
+the frozen DC model's `source_identity`, `segment_numeric_version` as a string,
+`frozen_physical_version` as an integer, `complete`, `routes` and `prefix_runs`.
+Normal return marks all records for that call complete. Freezing, numerical and
+cancellation errors propagate unchanged. Already frozen batches retain
+`complete=false` and observed events; a batch that failed to freeze has no record.
+
+Each `CaptureRoute` describes one actual classification round. It has caller
+`point` and split `segment`, absolute `start_ns`, `duration_ns`, `round` as caller
+or worker, `prefix_run` as an index or null, the selected `family` or null, and
+ordered `{family, guard}` candidates. Guards use the same four decisions as
+inspection, including `untested_after_short_circuit`. Caller deferral and worker
+resolution remain separate events. Capture does not rerun guards, call inspection
+or add `Kernel.cost` calls. It stores neither costs nor guard certificates.
+
+Each `CapturePrefixRun` names the representative group row after a shared prefix
+and all adopting `{batch, point, segment}` rows, including itself. It lives in
+the representative batch's record. Only the representative timeline has prefix
+events. Adopters reuse that input; they do not claim a second execution.
+Events list prefix runs in Engine order, then the main run. Within each run,
+caller events precede worker events. Each round follows input point order and
+segment order, independent of worker scheduling.
+
+The physical codec preserves `batch.segment_shifts`, so reconstruction with
+`read_physical_input(record.physical)` restores those corrections. Engine
+currently registers shifts only through these batch inputs. The source registry
+itself is not serialized. A future registration path outside batch corrections
+must add an explicit non-reconstructibility marker. Capture supplies no reference
+error. See the [capture discussion](../../../../docs/discussions/2026-11-17-engine-capture-events.md)
+for the lifecycle and event-log choices.
 
 ## Joint-Fock prototype
 

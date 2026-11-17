@@ -8,6 +8,7 @@ import numpy as np
 from joblib import delayed
 from numpy.typing import NDArray
 
+from ._capture import CaptureRound
 from ._carrier_plan import populate_carrier_plan
 from ._common_frame_dispatch import preferred as common_frame_preferred
 from ._dop853_dispatch import direct_plans
@@ -312,6 +313,7 @@ class _Classifier:
         trace: dict[int, dict[str, DispatchCandidate]] | None = None,
     ):
         self.trace = trace
+        self.capture: CaptureRound | None = None
         self.pool, self.selection = pool, selection
         self.geometry = geometry
         self.kernels = (
@@ -348,7 +350,9 @@ class _Classifier:
     def observe(
         self, kernel: Kernel, rows: NDArray[np.int64], decision: GuardDecision
     ) -> None:
-        """Record only query observations; ordinary evolve does no extra pricing."""
+        """Observe actual decisions; only an inspection requests extra pricing."""
+        if self.capture is not None:
+            self.capture.observe(kernel.name, rows, decision)
         if self.trace is None or not len(rows):
             return
         scheduling_costs = (
@@ -486,7 +490,7 @@ class _Classifier:
         for index, name in enumerate(candidates):
             offered = rows
             rows = self.try_kernel(require(self.kernels, name, self.table, rows), rows)
-            if self.trace is not None:
+            if self.trace is not None or self.capture is not None:
                 stopped = offered[~np.isin(offered, rows)]
                 for later in candidates[index + 1 :]:
                     kernel = self.kernels.get(later)
@@ -730,7 +734,7 @@ def classify(
     pool: Executor | None = None,
     selection: Selection | None = None,
     *,
-    trace: dict[int, dict[str, DispatchCandidate]] | None = None,
+    trace: dict[int, dict[str, DispatchCandidate]] | CaptureRound | None = None,
 ) -> Dispatch:
     """Guard shared candidates now and resolve local candidates in their worker.
 
@@ -742,5 +746,14 @@ def classify(
     to collect row/family observations and excludes rows that need an uncomputed
     driven prefix density. The mapping receives immutable DispatchCandidate
     records; no worker classification or prefix evolution runs for a query.
+    A CaptureRound instead observes actual evolve decisions, without pricing
+    or the query's prefix exclusion, and retains observations on failure.
     """
-    return _Classifier(geometry, kernels, context, pool, selection, trace).classify()
+    query_trace = trace if isinstance(trace, dict) else None
+    classifier = _Classifier(geometry, kernels, context, pool, selection, query_trace)
+    classifier.capture = trace if isinstance(trace, CaptureRound) else None
+    try:
+        return classifier.classify()
+    finally:
+        if classifier.capture is not None:
+            classifier.capture.finish(classifier.names)
