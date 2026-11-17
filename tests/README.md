@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-11-17，GUI visible-window teardown guard、plotting guard 的條件式回收、reference producer 單列選取、acquire capture owners、sideband plateau 與 idle 精度宣告、模擬器維護規則指標
+**Last updated:** 2026-11-18，耗散 DC 精度矩陣案例
 
 **讀者：** framework-dev、agent。查閱測試的 owner、fixture、執行方式與搬遷驗收契約。
 
@@ -230,7 +230,11 @@ Lab-frame 參考解在這類輸入上一點 600 秒算不完。
 它只接受整個 shot 單一 schedule level 的 timeline。
 帶 continuous flux waveform 或一個 shot 多個 level 的輸入會 raise。
 兩個參考解在 DC 固定的精度案例上由 pytest 互相比對，差值不超過 `2e-6`。
-精度矩陣本身繼續用 lab-frame 參考解。
+精度矩陣的 `dephasing_pump`、`raman_decay`、`raman_weak_legs` 使用這個參考解，
+其餘案例繼續用 lab-frame 參考解。這三個零載波 constant drive 案例在 pinned
+`slow_envelope` 與預設空／暖歷史下，都驗證完整 density ≤2e-3。
+前兩例的 bath rate 為 0.1/ns 與 0.02/ns，超過約 0.01/ns 的物理使用範圍。
+弱腿 Λ 的 decay rate 為 0.0002/ns，在範圍內。
 這是測試支援，不 import production 的 kernel、dispatch 或 Engine，也不進 production。
 
 建構函式在 `tests/simulate/evolution/contract/accuracy_cases.py`，
@@ -239,7 +243,11 @@ Lab-frame 參考解在這類輸入上一點 600 秒算不完。
 已知的數值超標以 strict xfail 保留實測誤差，terminal summary 仍列 FAIL，不表示達標。路徑未執行或參考解未收斂必須直接失敗。新發現的超標回報使用者，不放寬 `2e-3` 門檻。
 精度比較始終使用同一個獨立物理參考解，省時間只改變參考解何時計算，不改成與目前實作輸出比較。
 參考計算變慢時先讓同一案例在每個 pytest worker 的 session 內共用一次結果。仍不足時才加本機快取，以案例輸入與參考解程式碼的 hash 為 key，內容不進 repo。
-只有首次計算也慢到不能接受時，才提議將參考結果入庫，先取得使用者同意，並用 hash 核對輸入與參考程式版本。本機 hash 快取與結果入庫是後續處理順序，現行矩陣只使用 session 共用。
+只有首次計算也慢到不能接受時，才提議將參考結果入庫，先取得使用者同意，並用 hash 核對輸入與參考程式版本。
+三個耗散 DC interaction-reference 案例另用 `.pytest_cache` 下的
+`interaction-reference` 本機快取。Key 包含完整物理輸入、兩級容差、參考解原始碼
+與 Python／NumPy／SciPy／Numba 版本。Cold miss 仍以同一個獨立 solver 求解，
+只在兩級容差收斂後寫入。刪除 `.pytest_cache` 就會重算。其餘案例只使用 session 共用。
 
 ### 怎麼跑比較快
 
