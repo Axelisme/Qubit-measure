@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-11-18, constant-pair cold prices, fixed-input calibration scope and exact dissipative DC channels
+**Last updated:** 2026-11-18, constant-pair cold prices and amortized dissipative DC channel prices
 
 **讀者：** framework-dev、agent。Segment evolution 的公開輸入、路由與數值邊界。
 
@@ -667,6 +667,7 @@ thresholds and algorithm details live with their owners:
 | Row domains, named candidate order and terminal routes | [dispatch](_dispatch.py); [kernel collection](kernels/__init__.py) instantiates implementations only |
 | Shaped and two-tone cold-cost choices | [shaped dispatch](_shaped_dispatch.py), [two-tone dispatch](_two_tone_dispatch.py) return family names, not positional indices or unnamed flags |
 | Multitone gate amortization | [multitone dispatch](_multitone_dispatch.py) owns the 20-use cost preference and complete-acquire canonical-key inventory |
+| Dissipative DC channel pricing | [slow dispatch](_slow_dispatch.py) compares M⁶ channel construction amortized over complete-acquire exact prepare keys with DOP853 |
 | Slow/plateau carrier boundary | [slow-envelope comparison](kernels/slow_envelope.py) owns the strict absolute-carrier comparison shared by dispatch and its guard |
 | Common-frame pricing and numerical construction | [common-frame dispatch](_common_frame_dispatch.py), [kernel](kernels/common_frame_kernel.py) |
 | Constant and shaped period builders | [Floquet period](kernels/floquet_period.py), [period table](kernels/period_table.py), [shaped Sambe](kernels/shaped_sambe.py), [gate cache](kernels/gate_cache.py) |
@@ -750,7 +751,25 @@ routes and final densities. This does not force every sampled row to DOP853.
 | [`multitone_gate`](kernels/multitone_gate.py), retained simultaneous RWA gate family | `multiple`, disabled | Rejects every row. The retained 20-use inventory cost preference cannot restore numerical admission at 19 or 20 uses; pinning cannot bypass rejection. Shared single-tone gate numerics are unchanged. | [19/20 and pinned rejection contract](../../../../tests/simulate/evolution/contract/test_routing_boundaries.py) | NOT EXERCISED; no density error |
 | [`multitone_rwa`](kernels/multitone_rwa.py), simultaneous omission-restored RWA | `two`, distinct ports only | Exactly two constant envelopes, fixed flux, B ≥ 1e-3 and each carrier magnitude ≥ 50 MHz. Sampled rows are rejected. Start with 50 MHz edges, restore omitted paths until transfer proxy ≤ 0.0058 and residual phase ≤ 0.0045 rad; retained real dimension ≤ 256. No carrier-spacing, full-operator/carrier ratio or retained-norm phase cap. Constant pairs additionally require final-mask ε_dom²·Ω_ret·T ≤ 1.476e-4 cycle. The [constant-pair query](#constant-pair-rwa-guard-diagnostics) reports its final metrics. First-order endpoint kicks include every edge outside the resolved retention mask, including diagonal ±carrier terms. At each endpoint, the kernel sums all tones' kicks before acting on density. Row-local kick time equals the propagation duration; following idle rows do not extend it. Apply step ceiling is 16 ns. | [`joint_constant`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
 | [`floquet`](kernels/floquet.py), constant Stark tone plus probe | `two` | Larger absolute gain selects the Stark slot, with ties choosing the first; that slot requires positive carrier. Frame overlap ≥ 0.5, modal condition ≤ 1e8, maximum real eigenvalue ≤ 1e-10/ns and residual ≤ 1e-9; sampling extent ≤ 128 with at most 4096 phase samples. k=0 omission and convergence each fit B/3. Modal Dyson additionally uses r ≤ 0.1, r2 ≤ 0.05 when probe gain magnitude ≥ 0.1, Dyson norm-duration v ≤ 0.5, transfer indicator v + v²/2 ≤ 0.02 and higher-order remainder exp(v)·v³/6 ≤ B/3; otherwise use periodic channel playback. Retained-sideband admission instead requires convergence ≤ B/40 and bound ≤ 0.95B, retaining edges within 0.1/ns and averaging other harmonics through order 4. Admission is per row; refused rows continue to other allowed candidates. This finite-Fourier admission is not a density-error guarantee. | [`two_carriers`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
-| [`dop853`](kernels/dop853.py), full-drive direct density integration | `shaped`, `two`, `multiple`, terminal candidate | No RWA or fast-path admission threshold. Accepts valid rows with finite positive B, including complex sampled envelopes. Stops at active control knots. Local rtol = min(1e-4, 0.03B), atol = min(1e-6, 0.0003B), from the [shared solver](kernels/_dop853.py); these are not global error bounds. | [`shaped_complex`](../../../../tests/simulate/evolution/contract/accuracy_cases.py), [`two_carriers`](../../../../tests/simulate/evolution/contract/accuracy_cases.py), [`joint_gate_inventory`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
+| [`dop853`](kernels/dop853.py), full-drive direct density integration | `slow`, `shaped`, `two`, `multiple`, terminal candidate | No RWA or fast-path admission threshold. Accepts valid rows with finite positive B, including complex sampled envelopes. Stops at active control knots. Local rtol = min(1e-4, 0.03B), atol = min(1e-6, 0.0003B), from the [shared solver](kernels/_dop853.py); these are not global error bounds. | [`shaped_complex`](../../../../tests/simulate/evolution/contract/accuracy_cases.py), [`two_carriers`](../../../../tests/simulate/evolution/contract/accuracy_cases.py), [`joint_gate_inventory`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
+
+For dissipative DC rows, [slow dispatch](_slow_dispatch.py) charges channel
+construction as `1.71 * (M/32)^6` seconds, divided by the exact prepare key's
+use count in this acquire. It adds `0.000422 * (M/32)^4` seconds per application.
+The single-thread dense-expm measurements were 0.035, 1.71, 19.1 and 120 seconds
+at M=16, 32, 48 and 64. The key includes level, shift, port, carrier, gain,
+duration, phase and subdivision policy. Prior acquires and resident cache warmth
+do not subsidize construction. Dispatch compares this cold price with the
+existing DOP853 bandwidth/action estimate. Pinning either family preserves its
+numerical guard. Bath-free DC and nonzero carriers keep `slow_envelope` first.
+`Kernel.cost` remains a relative chunk-scheduling weight, not this cold price.
+
+The price check uses a 32-level synthetic 100 ns DC segment and the three
+small dissipative DC matrix cases. Their default routes meet the 10% timing
+margin against the fastest admitted family with full-density error ≤2e-3.
+A 100-point shared-key check still selects `slow_envelope` but takes about
+2.25 seconds versus 1.10 seconds for DOP853. These prices do not establish a
+runtime bound or a complete dimension/duration/reuse calibration.
 
 The `common_frame` coherent limit is 0.0018. In the retained two-tone grid,
 14 admitted cells had coherent indicators at most 0.001469411 and historical

@@ -28,6 +28,7 @@ from ._shaped_dispatch import (
     preference,
     single_gate_preferred,
 )
+from ._slow_dispatch import direct_preferred as slow_direct_preferred
 from ._two_tone_dispatch import first_candidate
 from .engine import PathDiagnostics
 from .exceptions import NoValidKernel
@@ -553,7 +554,7 @@ class _Classifier:
             "adiabatic", rows[self.domains["adiabatic"][rows]], ("adiabatic_map",)
         )
         self.accept("flux", rows[self.domains["flux"][rows]], ("flux_dop853",))
-        self.accept("slow", rows[self.domains["slow"][rows]], ("slow_envelope",))
+        self.classify_slow(rows[self.domains["slow"][rows]])
         # Group shaped and constant consumers together before any legacy prepare.
         common = self.domains["two"] | self.domains["multiple"]
         self.try_common_frame(rows[common[rows]])
@@ -566,6 +567,17 @@ class _Classifier:
             self.classify_two_tone(two_tone)
         self.classify_multiple(rows[self.domains["multiple"][rows]])
         return self._result()
+
+    def classify_slow(self, rows: NDArray[np.int64]) -> None:
+        """Price dissipative DC channels over complete-acquire exact-key usage."""
+        if not len(rows):
+            return
+        direct = slow_direct_preferred(
+            self.table, np.flatnonzero(self.domains["slow"]), self.context
+        )
+        preferred = np.array([int(row) in direct for row in rows], dtype=bool)
+        self.accept("slow", rows[preferred], ("dop853", "slow_envelope"))
+        self.accept("slow", rows[~preferred], ("slow_envelope", "dop853"))
 
     def classify_plateau(self, rows: NDArray[np.int64]) -> None:
         """Prefer shared Dyson paths, or constant RWA/periods for distinct inputs."""

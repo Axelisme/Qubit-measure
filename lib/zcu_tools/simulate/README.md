@@ -1,6 +1,6 @@
 # Numeric simulation tools
 
-**Last updated:** 2026-11-18, dissipative DC propagation
+**Last updated:** 2026-11-18, dissipative DC propagation and channel pricing
 
 **讀者：** framework-dev、agent。查閱數值模擬的責任邊界、快取契約與實測效能。
 
@@ -149,7 +149,9 @@ default. The engine segments controls, selects kernels and shares deterministic
 preparations across points and acquires. It never carries quantum states into a
 new shot. Numeric tolerances do not certify basis convergence or the physical
 validity of a model.
-Single constant-tone plateaus below 30 MHz use `slow_envelope`. Nonzero
+Single constant-tone plateaus below 30 MHz offer `slow_envelope` and `dop853`.
+Dissipative DC compares the channel's M⁶ construction cost, amortized over exact
+prepare-key uses in the acquire, with direct integration. Nonzero
 carriers hold phase at each midpoint and apply full-Hamiltonian matrix
 exponentials between secular bath half-steps. The default is 20 segments per
 carrier period. Dissipative DC uses the exact constant Lindblad channel instead
