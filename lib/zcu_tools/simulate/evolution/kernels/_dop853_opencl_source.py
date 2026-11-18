@@ -168,8 +168,9 @@ __kernel void advance(__global float2 *states, __global float2 *derivatives,
                       __constant const float2 *operators, __constant const float *bath,
                       __global const double *knots, __global const float2 *samples,
                       __global const double4 *tones, __global const int *interval_counts,
-                      int width, float rtol, float atol, int trial_limit) {
-    int row = get_group_id(0), lane = get_local_id(0);
+                      int width, float rtol, float atol, int trial_limit,
+                      __global const int *active_rows) {
+    int row = active_rows[get_group_id(0)], lane = get_local_id(0);
     __global float2 *state = states + row*Q;
     __global float2 *slopes = derivatives + row*12*Q;
     __global const double *times = knots + row*width;

@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-11-18, execution and close semantics
+**Last updated:** 2026-11-18, execution and CPU chunk semantics
 
 **讀者：** framework-dev、agent。Segment evolution 的公開輸入、路由與數值邊界。
 
@@ -971,8 +971,8 @@ does not certify the adiabatic approximation.
   persistent kernel state.
 - `KernelContext(source, budget, work_plan)` supplies preparation, key and guard
   calls with one evolve owner. `ApplyContext(budget, plan, work_plan)` supplies the finite positive per-segment allowance
-  and the family's plan. Floquet and both direct solvers require their own plan;
-  a missing plan raises `ValueError`, and a wrong family type raises `TypeError`.
+  and the family's plan. Floquet and both CPU direct solvers require their own
+  plan; a missing plan raises `ValueError`, and a wrong family type raises `TypeError`.
   Families without plans, including `single_tone_rwa`, `multitone_rwa`,
   `single_tone_gate` and `multitone_gate`, reject a non-`None` plan with `ValueError`.
 
@@ -1154,7 +1154,7 @@ class's methods.
 | Secular coherence decay | [kernels/_secular.py](kernels/_secular.py), used by static, split, modal and direct propagators. |
 | Density basis conversion | `transform_density` in [state.py](state.py), shared by population conversion, scheduler boundaries, Dyson input bounds and compiled DOP853 chains. Callers retain basis selection and traversal. |
 | Adaptive DOP853 tableau, tolerances and integration | [kernels/_dop853.py](kernels/_dop853.py), used by density solvers and Hilbert endpoint builders. Packing and chain traversal live in [kernels/_dop853_data.py](kernels/_dop853_data.py) and [kernels/_dop853_chain.py](kernels/_dop853_chain.py). [kernels/_dop853_intervals.py](kernels/_dop853_intervals.py) owns density knot partitioning and source-coordinate playback clocks. |
-| Ordinary density endpoints, including H0-rotating-frame integration | `advance_endpoints` in [kernels/dop853.py](kernels/dop853.py) owns the full-drive secular density equation and exact return to the model eigenbasis. Ordinary DOP853 apply, `t6` direct rows and period fractional tails share this entry point and its budget-scaled local tolerance policy, supplying explicit frames. Budget validation, knot stops and numerical failures are unchanged. |
+| Ordinary density endpoints, including H0-rotating-frame integration | `advance_endpoints` in [kernels/dop853.py](kernels/dop853.py) owns the full-drive secular density equation and exact return to the model eigenbasis. CPU DOP853 apply, `t6` direct rows and period fractional tails share this entry point and its budget-scaled local tolerance policy, supplying explicit frames. Budget validation, knot stops and numerical failures are unchanged. |
 | Period interpolation, secular playback and fractional tails | [kernels/_period_table.py](kernels/_period_table.py), shared by [period_table](kernels/period_table.py) and [shaped_sambe](kernels/shaped_sambe.py). |
 | Gate Hilbert endpoint integration | [kernels/_gate_endpoints.py](kernels/_gate_endpoints.py), shared by sixteen-node and [adaptive phase](kernels/gate_phase.py) builders. |
 | Constant-tone Hilbert period build and playback | [kernels/floquet_period.py](kernels/floquet_period.py) owns period builds and trajectories, with [CF4 grid](kernels/_cf4_grid.py) and [Sambe](kernels/_period_sambe.py) helpers. [kernels/_period_channel.py](kernels/_period_channel.py) owns complete secular-channel playback. Separate from two-tone Floquet frames. |
@@ -1221,8 +1221,8 @@ multiple workers create and close a pool per evolve; empty work, one timeline
 and one worker run inline. By default, complete-acquire row density and the
 fraction of cheap gate/no-drive rows select one or six timeline chunks per
 worker. Prepare retains six chunks per worker to spread cold key builds.
-An explicit `chunks_per_worker` fixes both stages. This choice occurs after
-classification and does not change admission, WorkPlan facts or RNG.
+An explicit `chunks_per_worker` fixes CPU prepare and timeline chunks. It does
+not split GPU batches. This choice does not change admission, WorkPlan facts or RNG.
 Cancellation is checked at chunk and preparation boundaries, and before return.
 Native BLAS stays at one thread throughout evolve. Overlapping engines share a
 process-level reference count and the last call restores the original limits;

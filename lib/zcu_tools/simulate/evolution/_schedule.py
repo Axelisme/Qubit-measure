@@ -1,5 +1,7 @@
 """Evolve-local shared preparations and independent chunk-local apply waves."""
 
+from __future__ import annotations
+
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
@@ -56,6 +58,12 @@ class _ChunkResult:
     points: NDArray[np.int64]
     states: NDArray[np.complex128]
     exceeded_by_kernel: Counter[str]
+
+
+@dataclass(frozen=True)
+class _OpenCLWave:
+    chunk: _Chunk
+    slots: NDArray[np.int64]
 
 
 def _deduplicate(
@@ -366,18 +374,81 @@ class Schedule:
         ordered = np.argsort(-cost, kind="stable")
         width = min(timeline_chunks, count)
         work = [ordered[i::width] for i in range(width)]
-        results = pool(delayed(self.chunk)(points, entries, shared) for points in work)
+        steps: list[_ChunkResult | _OpenCLWave | None] = []
+        for part in pool(
+            delayed(self.chunk)(points, entries, shared) for points in work
+        ):
+            if part is None:
+                raise RuntimeError("timeline job returned no densities")
+            steps.extend(part)
+        results = self._finish_waves(pool, steps)
         output = np.empty(
             (count, *self.source.initial_density.shape), dtype=np.complex128
         )
         exceeded: Counter[str] = Counter()
         for result in results:
-            if result is None:
-                raise RuntimeError("timeline job returned no densities")
             output[result.points] = result.states
             exceeded.update(result.exceeded_by_kernel)
         diagnostics = self.diagnostics(output, exceeded)
         return EvolutionResult(self.geometry.points, output, diagnostics)
+
+    def _finish_waves(
+        self, pool: Executor, steps: list[_ChunkResult | _OpenCLWave | None]
+    ) -> list[_ChunkResult]:
+        results: list[_ChunkResult] = []
+        while True:
+            waves: list[_OpenCLWave] = []
+            for step in steps:
+                if step is None:
+                    raise RuntimeError("timeline job returned no densities")
+                if isinstance(step, _ChunkResult):
+                    results.append(step)
+                else:
+                    waves.append(step)
+            # Only the active waves need to retain worker-local preparations.
+            steps.clear()
+            if not waves:
+                return results
+            self._apply_opencl(waves)
+            steps = list(pool(delayed(wave.chunk.run)() for wave in waves))
+
+    def _apply_opencl(self, waves: Sequence[_OpenCLWave]) -> None:
+        # Workers have joined at the next GPU row (or at readout). Assemble
+        # ready inputs across chunks before borrowing the runner on this thread.
+        if self.cancel.is_set():
+            raise Cancelled()
+        rows = np.concatenate([wave.chunk.cursor[wave.slots] for wave in waves])
+        states = np.concatenate([wave.chunk.states[wave.slots] for wave in waves])
+        kernel = self.kernels["dop853"]
+        keys, first, indices = np.unique(
+            kernel.prepare_keys(self.table, rows, self.context),
+            return_index=True,
+            return_inverse=True,
+        )
+        payload = prepare(kernel, keys, self.table, rows[first], self.context)
+        try:
+            with self.context.work_plan.routing.measure(kernel.name, "apply"):
+                kernel.apply(
+                    payload,
+                    indices,
+                    self.table,
+                    rows,
+                    states,
+                    ApplyContext(
+                        self.budget,
+                        work_plan=self.context.work_plan,
+                        opencl=self.context.opencl,
+                    ),
+                )
+        except RuntimeError as error:
+            point = self.geometry.points[self.table.timeline[rows[0]]]
+            raise RuntimeError(f"point {point} segment {rows[0]}: {error}") from error
+        offset = 0
+        for wave in waves:
+            end = offset + len(wave.slots)
+            wave.chunk.states[wave.slots] = states[offset:end]
+            wave.chunk.cursor[wave.slots] += 1
+            offset = end
 
     def diagnostics(
         self, output: NDArray[np.complex128], exceeded: Counter[str]
@@ -474,8 +545,8 @@ class Schedule:
         points: NDArray[np.int64],
         entries: Sequence[_Entries],
         shared: Sequence[_Binding],
-    ):
-        """Run local waves; group each next row by kernel and opaque payload."""
+    ) -> list[_ChunkResult | _OpenCLWave]:
+        """Run CPU waves until each local timeline finishes or needs OpenCL."""
         if self.cancel.is_set():
             raise Cancelled()
         selected = np.isin(self.table.timeline, points)
@@ -506,15 +577,7 @@ class Schedule:
             work = [point[None] for point in points[local_points]]
             if not local_points.all():
                 work.append(points[~local_points])
-            results = [self.chunk(part, entries, shared) for part in work]
-            exceeded: Counter[str] = Counter()
-            for result in results:
-                exceeded.update(result.exceeded_by_kernel)
-            return _ChunkResult(
-                np.concatenate([result.points for result in results]),
-                np.concatenate([result.states for result in results]),
-                exceeded,
-            )
+            return [step for part in work for step in self.chunk(part, entries, shared)]
         local_bindings, local_dispatch = (
             self.resolve_deferred(np.flatnonzero(deferred))
             if np.any(deferred)
@@ -545,7 +608,7 @@ class Schedule:
                 payload = _build(entry, unique, self.table, self.context, self.cancel)
                 local_bindings.append(_bind(entry, payload, local, local_dispatch))
         bindings = [*shared, *self.bind_inputs(local_bindings)]
-        return _Chunk(self, points, selected, bindings, entries, local_dispatch).run()
+        return [_Chunk(self, points, selected, bindings, entries, local_dispatch).run()]
 
 
 class _Chunk:
@@ -696,7 +759,6 @@ class _Chunk:
                         self.schedule.budget,
                         binding.plan,
                         self.schedule.context.work_plan,
-                        self.schedule.context.opencl,
                     ),
                 )
         except RuntimeError as error:
@@ -766,10 +828,19 @@ class _Chunk:
             self.binding[rows] = -1
             self.bindings.pop()
 
-    def run(self):
-        """Propagate local timelines and convert final densities to DC basis."""
+    def run(self) -> _ChunkResult | _OpenCLWave:
+        """Run CPU rows until done or until every pending slot needs the GPU."""
+        if self.schedule.cancel.is_set():
+            raise Cancelled()
+        gpu = self.dispatch.opencl
         while np.any(self.cursor < self.end):
             pending = np.flatnonzero(self.cursor < self.end)
+            if gpu is not None:
+                waiting = gpu[self.cursor[pending]]
+                if waiting.all():
+                    self._basis(pending, self.table.level[self.cursor[pending]])
+                    return _OpenCLWave(self, pending)
+                pending = pending[~waiting]
             binding_ids = self.binding[self.cursor[pending]]
             for index in np.unique(binding_ids):
                 slots = pending[binding_ids == index]

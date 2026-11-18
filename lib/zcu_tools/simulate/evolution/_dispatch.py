@@ -11,7 +11,7 @@ from numpy.typing import NDArray
 from ._capture import CaptureRound
 from ._carrier_plan import populate_carrier_plan
 from ._common_frame_dispatch import preferred as common_frame_preferred
-from ._dop853_dispatch import direct_plans
+from ._dop853_dispatch import direct_plans, opencl_rows
 from ._gain_plan import plan_gain_groups
 from ._inspection import DispatchCandidate, GuardDecision, needs_prefix_input
 from ._multitone_dispatch import (
@@ -41,6 +41,7 @@ from .kernel import (
     SegmentTable,
 )
 from .kernels.common_frame import zero_mean_carrier
+from .kernels.dop853 import DOP853Kernel
 from .kernels.floquet import FloquetPlan
 from .kernels.gate_cache import GateCacheKernel
 from .kernels.multitone_rwa import MultitoneRWAKernel
@@ -165,6 +166,8 @@ class Dispatch:
         plans live only for this evolve.
     chain: global-row chain IDs; -1 for independent rows. A timeline worker
         replaces provisional decisions locally after its deferred guards finish.
+    opencl: read-only global-row mask routing ready DOP853 endpoints to OpenCL,
+        or None when no such routes are offered.
     """
 
     names: NDArray[np.str_]
@@ -181,6 +184,7 @@ class Dispatch:
     chain: NDArray[np.int64] = field(
         default_factory=lambda: np.empty(0, dtype=np.int64)
     )
+    opencl: NDArray[np.bool_] | None = None
 
 
 def diagnostics(table: SegmentTable, names: NDArray[np.str_]) -> PathDiagnostics:
@@ -710,11 +714,6 @@ class _Classifier:
             self.costs[rows] = self.kernels[str(name)].cost(self.table, rows)
         if not np.isfinite(self.costs).all() or np.any(self.costs < 0):
             raise ValueError("kernel costs must be finite and nonnegative")
-        dimension = (
-            None
-            if self.context.opencl is None
-            else self.context.source.initial_density.shape[0]
-        )
         if self.selection is not None and self.selection.names is not None:
             point = int(self.table.timeline[self.selection.rows[0]])
             first, stop = (
@@ -726,13 +725,19 @@ class _Classifier:
             unresolved = context == ""
             context[unresolved] = self.selection.names[context_rows[unresolved]]
             context[~self.geometry.pending[context_rows]] = ""
-            plans, chain = direct_plans(
-                self.table, context, context_rows, opencl_dimension=dimension
-            )
+            plans, chain = direct_plans(self.table, context, context_rows)
         else:
-            plans, chain = direct_plans(
-                self.table, self.names, opencl_dimension=dimension
+            plans, chain = direct_plans(self.table, self.names)
+        gpu = (
+            opencl_rows(
+                self.table,
+                plans.get("dop853"),
+                self.context.source.initial_density.shape[0],
             )
+            if self.context.opencl is not None
+            and isinstance(self.kernels.get("dop853"), DOP853Kernel)
+            else None
+        )
         self.plans.update(plans)
         return Dispatch(
             self.names,
@@ -745,6 +750,7 @@ class _Classifier:
             self.two_tone_first,
             self.plans,
             chain,
+            opencl=gpu,
         )
 
 

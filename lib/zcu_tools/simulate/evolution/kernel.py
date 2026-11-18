@@ -294,11 +294,10 @@ class ApplyContext:
     budget: positive absolute per-segment allowance.
     work_plan: shared evolve ownership. The default is only for standalone
         calls; Engine always passes the same WorkPlan to every apply.
-    plan: this family's RowPlan from dispatch, or None when dispatch made none.
-        Kernels that never receive a plan raise ValueError for a non-None plan;
-        kernels that need one raise ValueError for None.
-    opencl: borrowed DOP853 runner for applying rows marked for OpenCL by
-        dispatch; None when the Engine did not enable OpenCL for this work.
+    plan: this family's CPU RowPlan, or None when no plan is needed. CPU
+        kernels reject missing required plans or plans that they cannot consume.
+    opencl: runner borrowed for a batch consisting only of admitted independent
+        DOP853 rows; None for CPU applies, including neighbors of OpenCL rows.
     """
 
     budget: float

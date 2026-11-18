@@ -8,13 +8,22 @@ from .kernels.dop853 import DOP853Plan
 from .kernels.flux_dop853 import FluxDOP853Plan
 
 
-def _opencl_rows(
-    table: SegmentTable, frame: NDArray[np.str_], dimension: int | None
+def opencl_rows(
+    table: SegmentTable, plan: RowPlan | None, dimension: int
 ) -> NDArray[np.bool_] | None:
-    if dimension is None or dimension > 32 or not len(table.complete_pulses):
+    """Mark global DOP853 rows that can run as independent OpenCL endpoints.
+
+    Supply the completed direct plan for this acquire or resolved timeline.
+    Return a read-only mask, or None for unsupported models or no DOP853 plan.
+    """
+    if (
+        not isinstance(plan, DOP853Plan)
+        or dimension > 32
+        or not len(table.complete_pulses)
+    ):
         return None
     eligible = (
-        (frame == "interaction")
+        (plan.frame == "interaction")
         & table.complete_pulses
         & (table.tones == 2)
         & (table.duration_ns >= 100.0)
@@ -44,8 +53,6 @@ def direct_plans(
     table: SegmentTable,
     names: NDArray[np.str_],
     rows: NDArray[np.int64] | None = None,
-    *,
-    opencl_dimension: int | None = None,
 ) -> tuple[dict[str, RowPlan], NDArray[np.int64]]:
     """Plan direct rows from complete chronological timeline routing.
 
@@ -54,8 +61,6 @@ def direct_plans(
     just its deferred candidates. Empty names break chains. Returned decisions
     retain global-row indexing; frames outside the selected family are empty.
     A chain ID is its first global row, independent of payload/apply partition.
-    opencl_dimension is the model density dimension when the Engine offers
-    OpenCL. None leaves every endpoint on CPU.
     """
     size = len(table.timeline)
     if rows is None:
@@ -95,9 +100,7 @@ def direct_plans(
             # Chains retain lab endpoints for basis changes across row models.
             frame[rows[selected & ~members]] = "interaction"
             frame.setflags(write=False)
-            plans[name] = DOP853Plan(
-                frame, chain, _opencl_rows(table, frame, opencl_dimension)
-            )
+            plans[name] = DOP853Plan(frame, chain)
         else:
             plans[name] = FluxDOP853Plan(chain)
     chain.setflags(write=False)

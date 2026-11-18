@@ -6,7 +6,13 @@ from threading import Event
 
 import numpy as np
 import pytest
-from zcu_tools.simulate.evolution import Engine, EnvelopeSpec, ModelSource
+from numpy.typing import NDArray
+from zcu_tools.simulate.evolution import (
+    Engine,
+    EnvelopeSpec,
+    ModelSource,
+    TimelineBatch,
+)
 from zcu_tools.simulate.evolution.kernel import KernelContext, SegmentTable
 from zcu_tools.simulate.evolution.kernels.dop853 import DOP853Kernel
 from zcu_tools.simulate.evolution.workplan import WorkPlan
@@ -221,6 +227,73 @@ def test_engine_worker_and_chunk_partition_preserve_independent_density(
     for result in results:
         assert result.paths.segments_by_kernel == {"dop853": n}
         np.testing.assert_array_equal(result.densities, results[0].densities)
+
+
+def opencl_workload(
+    durations: NDArray[np.float64], *, mixed: bool = False
+) -> TimelineBatch:
+    """Build distinct sampled rows, with CPU neighbors in the mixed acquire."""
+    n = len(durations)
+    envelopes = tuple(
+        EnvelopeSpec(
+            "sampled",
+            np.sin(np.linspace(0, np.pi, 21)).astype(complex),
+            np.linspace(0, duration, 21),
+        )
+        for duration in durations
+    )
+    starts = 3.0 + 2.0 * np.arange(n) if mixed else np.zeros(n)
+    pulse = replace(
+        track(n, envelopes[0]),
+        start_ns=starts,
+        duration_ns=durations,
+        envelopes=envelopes,
+        envelope_index=np.arange(n),
+        amplitude=np.linspace(0.01, 0.03, n),
+        frequency_ghz=np.full(n, 0.132),
+    )
+    second = replace(
+        pulse,
+        frequency_ghz=np.full(n, -0.142),
+        active=np.arange(n) != 1 if mixed else np.ones(n, dtype=bool),
+    )
+    return replace(
+        batch(n),
+        points=50 + 3 * np.arange(n),
+        tracks=(pulse, second),
+        end_ns=starts + durations + (9.0 if mixed else 0.0),
+    )
+
+
+@pytest.mark.requires_opencl
+@pytest.mark.parametrize("mixed", [False, True], ids=["length-scan", "mixed"])
+def test_opencl_acquire_preserves_independent_endpoints(mixed: bool) -> None:
+    src = common_controls().source
+    workload = opencl_workload(
+        np.array([380.0, 100.0, 210.0, 940.0, 100.0, 160.0]), mixed=mixed
+    )
+    results = []
+    for workers, chunks in ((1, 1), (1, 6), (2, 1), (2, 4)):
+        with closing(
+            Engine(
+                workers,
+                chunks_per_worker=chunks,
+                families=("dop853", "t4"),
+                backend="opencl",
+            )
+        ) as engine:
+            results.append(engine.evolve(src, (workload,), telemetry=True))
+    with closing(Engine(1, families=("dop853", "t4"), backend="cpu")) as engine:
+        cpu = engine.evolve(src, (workload,))
+    for result in results:
+        assert (
+            result.paths.routing["dop853"].opencl_rows == len(workload.points) - mixed
+        )
+        np.testing.assert_array_equal(result.points, workload.points)
+        np.testing.assert_allclose(result.densities, cpu.densities, atol=1e-3, rtol=0)
+        np.testing.assert_array_equal(result.densities, results[0].densities)
+    if mixed:
+        np.testing.assert_array_equal(results[0].densities[1], cpu.densities[1])
 
 
 def test_zero_tone_table_without_drive_slots_matches_lab_reference() -> None:

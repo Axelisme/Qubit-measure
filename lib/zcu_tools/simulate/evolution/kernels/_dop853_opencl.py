@@ -20,11 +20,12 @@ if TYPE_CHECKING:
 
     from .dop853 import EndpointData
 
-# Bound the amount of work in one launch even for a 10 us row or an unusually
-# stiff interval. Resume the same controller on device without a knot restart.
-# 32 trials is no more work than the 32 complete intervals used in the dense
-# 100 ns prototype (~30 ms per launch for 24 d=32 rows on Intel Arc).
-_TRIALS_PER_LAUNCH = 32
+# Aim below both Windows' default 2 s TDR and Linux xe's
+# preempt_timeout_us=640000 without relying on either driver setting.
+_TARGET_DISPATCH_NS = 100_000_000
+# 32 trials took at most the work of 32 intervals in the dense prototype
+# (~30 ms for 24 d=32 rows on Intel Arc). Start here before any timing.
+_INITIAL_TRIALS = 32
 _ROWS_PER_BATCH = 32
 
 
@@ -176,7 +177,7 @@ class OpenCLDOP853:
         basis; it is not modified. budget is the positive DOP853 local error
         allowance. The caller admits rows with two full-support sampled tones.
         Build, driver and numerical failures raise RuntimeError; no CPU retry.
-        Queue, buffers and mutable kernel arguments belong to the calling worker.
+        Queue, buffers and mutable kernel arguments belong to this call.
         """
         rows, keys = row_models
         result = np.empty_like(states)
@@ -235,11 +236,18 @@ class OpenCLDOP853:
             for array in inputs
         ]
         width = self._width(dimension)
-        with cl.CommandQueue(self._context) as queue:
-            while np.any(progress[:, 0] < playback.interval_counts):
-                kernel(
+        active = np.arange(count, dtype=np.int32)
+        row_map = cl.Buffer(
+            self._context, flags.READ_ONLY | flags.COPY_HOST_PTR, hostbuf=active
+        )
+        trials = _INITIAL_TRIALS
+        with cl.CommandQueue(
+            self._context, properties=cl.command_queue_properties.PROFILING_ENABLE
+        ) as queue:
+            while active.size:
+                event = kernel(
                     queue,
-                    (count * width,),
+                    (active.size * width,),
                     (width,),
                     buffers[0],
                     slopes,
@@ -248,7 +256,8 @@ class OpenCLDOP853:
                     np.int32(playback.knots.shape[1]),
                     np.float32(controls.rtol),
                     np.float32(controls.atol),
-                    np.int32(_TRIALS_PER_LAUNCH),
+                    np.int32(trials),
+                    row_map,
                 )
                 cl.enqueue_copy(queue, progress, buffers[1], is_blocking=True)
                 if np.any(progress[:, 3]):
@@ -259,6 +268,19 @@ class OpenCLDOP853:
                         else "nonfinite solution or error estimate"
                     )
                     raise RuntimeError(f"DOP853 OpenCL {detail}")
+                remaining = active[
+                    progress[active, 0] < playback.interval_counts[active]
+                ]
+                if remaining.size and remaining.size != active.size:
+                    cl.enqueue_copy(queue, row_map, remaining, is_blocking=True)
+                active = remaining
+                # Size the next submission from measured device time. A trial
+                # cap also bounds the number of intervals, without letting one
+                # stiff interval run unbounded. Raise it by at most 2x at once.
+                elapsed_ns = max(1, event.profile.end - event.profile.start)
+                trials = max(
+                    1, min(2 * trials, trials * _TARGET_DISPATCH_NS // elapsed_ns)
+                )
             cl.enqueue_copy(queue, state, buffers[0], is_blocking=True)
         duration = playback.knots[np.arange(count), playback.interval_counts]
         return _handoff(state, duration, model.energies)

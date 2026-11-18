@@ -29,13 +29,10 @@ class DOP853Plan:
 
     frame: interaction, lab, or empty for a row belonging to another family.
     chain: first row of a touching chain, or -1 for an independent row.
-    opencl: read-only mask marking independent rows planned for the GPU;
-        None means the whole plan runs on CPU.
     """
 
     frame: NDArray[np.str_]
     chain: NDArray[np.int64]
-    opencl: NDArray[np.bool_] | None = None
 
 
 class EndpointData(NamedTuple):
@@ -349,16 +346,19 @@ class DOP853Kernel:
 
         Raises ValueError for incompatible prepared data, state/index shapes or
         nonexistent ports. RuntimeError signals numerical failure; earlier rows
-        may already have been advanced. OpenCL endpoints are symmetrized and
-        normalized for handoff; CPU endpoints are unmodified. Neither clips.
+        may already have been advanced. A context with an OpenCL runner must
+        contain only pre-admitted independent rows, and needs no CPU plan.
+        OpenCL endpoints are symmetrized and normalized for handoff; CPU
+        endpoints are unmodified. Neither clips.
 
         Return an all-False bool mask aligned with rows; no post-apply check.
         """
         plan = context.plan
-        if plan is None:
-            raise ValueError("DOP853 requires a row plan")
-        if not isinstance(plan, DOP853Plan):
-            raise TypeError("DOP853 requires its own row plan")
+        if context.opencl is None:
+            if plan is None:
+                raise ValueError("DOP853 requires a row plan")
+            if not isinstance(plan, DOP853Plan):
+                raise TypeError("DOP853 requires its own row plan")
         budget = context.budget
         tolerances(budget)
         if not isinstance(prepared, DOP853Prepared):
@@ -376,36 +376,13 @@ class DOP853Kernel:
         if np.any(playing & (table.tone_port[rows] >= models.ports[key_index, None])):
             raise ValueError("DOP853 tone port absent from model")
         data = EndpointData(prepared.models, packed_segments(table, context.work_plan))
-        _apply_endpoints(data, (rows, key_index), states, context, plan)
+        runner = context.opencl
+        if runner is not None:
+            states[:] = runner.advance(data, (rows, key_index), states, budget)
+            context.work_plan.routing.ran_opencl(self.name, len(rows))
+        elif isinstance(plan, DOP853Plan):
+            advance_endpoints(data, (rows, key_index), states, budget, plan)
         return np.zeros(len(rows), dtype=np.bool_)
-
-
-def _apply_endpoints(
-    data: EndpointData,
-    row_models: tuple[NDArray[np.int64], NDArray[np.int64]],
-    states: NDArray[np.complex128],
-    context: ApplyContext,
-    plan: DOP853Plan,
-) -> None:
-    rows, keys = row_models
-    gpu = None if plan.opencl is None else plan.opencl[rows]
-    if gpu is None or not np.any(gpu):
-        advance_endpoints(data, row_models, states, context.budget, plan)
-        return
-    runner = context.opencl
-    if runner is None:
-        raise RuntimeError("OpenCL row has no Engine runner")
-    states[gpu] = runner.advance(
-        data, (rows[gpu], keys[gpu]), states[gpu], context.budget
-    )
-    context.work_plan.routing.ran_opencl("dop853", int(np.count_nonzero(gpu)))
-    cpu = ~gpu
-    if np.any(cpu):
-        cpu_states = states[cpu]
-        advance_endpoints(
-            data, (rows[cpu], keys[cpu]), cpu_states, context.budget, plan
-        )
-        states[cpu] = cpu_states
 
 
 def prepare_models(models: list[SecularModel]) -> DOP853Prepared:
