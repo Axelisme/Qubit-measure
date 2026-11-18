@@ -229,7 +229,7 @@ def test_multitone_gate_rejects_large_split_defect() -> None:
 
 def test_multitone_gate_split_refusal_executes_the_direct_fallback() -> None:
     """A reused shaped key can lose on density admission, not on cold price."""
-    repeats = 160
+    repeats = 512  # Amortize the build so this case reaches numerical admission.
     case = multitone_phase_case("flat_top", repeats, gain=0.55)
     with (
         closing(Engine(1, families=("multitone_gate", "dop853"))) as engine,

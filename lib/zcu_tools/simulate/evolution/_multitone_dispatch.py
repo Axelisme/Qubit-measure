@@ -17,6 +17,9 @@ from .secular import ModelSource
 from .workplan import FactKey, WorkPlan
 
 _GATE_INVENTORY = FactKey(("multitone-gate-inventory", GATE_POLICY), tuple)
+# Six matched CPU rows at budget 1e-3 overpredicted DOP853 by 4.19–10.52×.
+# Calibrate only the gate competitor; build terms and RWA keep the raw scale.
+_GATE_DOP853_PRICE_SCALE = 0.15
 # Full M=16 constant-pair preparation measured 0.24--0.28 ms. This reserve
 # covers endpoint construction; the two dense applications stay in base work.
 CONSTANT_KICK_PREPARE_S = 0.0003
@@ -77,7 +80,11 @@ def gate_preferred(
         if not uses:
             continue
         cost = gate_cost(table, int(row), context)
-        alternative = cost.direct if "dop853" in competitors else np.inf
+        alternative = (
+            _GATE_DOP853_PRICE_SCALE * cost.direct
+            if "dop853" in competitors
+            else np.inf
+        )
         if canonical[row] in rwa_rows:
             representative = rwa_rows[canonical[row]]
             other = multitone_cost(geometry, representative, context)
@@ -95,8 +102,8 @@ def gate_preferred(
 class GateCost:
     """Cold gate terms in estimated CPU seconds, independent of use count.
 
-    direct is one full-drive density evolution. endpoints, fourier, tight_split
-    and budget_split are one key's build; guard and apply are per use.
+    direct is the uncalibrated full-drive work scale. endpoints, fourier,
+    tight_split and budget_split are one key's build; guard and apply are per use.
     """
 
     direct: float
@@ -317,7 +324,7 @@ def multitone_cost(
 
 
 def _direct_cost(table: SegmentTable, row: int, context: KernelContext) -> float:
-    """Existing full-drive density work estimate shared by both comparisons."""
+    """Raw full-drive work scale for gate construction and the RWA comparison."""
     model = table.model(context.source, row)
     size = len(model.energies_ghz)
     scale = (size / 16) ** 3

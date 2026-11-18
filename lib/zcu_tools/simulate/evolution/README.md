@@ -690,10 +690,13 @@ work and playback. The price must beat the eligible direct/RWA alternatives
 before the guard builds. Gate construction expires after each evolve. RWA
 keeps its history-based cold price; gate amortization never reads history.
 
-The estimator scales its endpoint and split terms from the direct solver's
-work estimate and uses the grid size for Fourier and playback. These terms
-estimate CPU work, not wall time or a speed guarantee. The split check does
-not certify arbitrary inputs or whole-sequence accuracy.
+The estimator uses the raw full-drive work scale for gate endpoint and split
+terms and the grid size for Fourier and playback. Only the CPU DOP853 price
+that competes with the gate is calibrated from matched rows. Gate build and
+playback prices and the RWA comparison are unchanged. Insufficient current
+reuse can leave a numerically eligible gate unbuilt. These are CPU estimates,
+not wall-time guarantees. The split check does not certify arbitrary inputs
+or whole-sequence accuracy.
 
 Historical calibration note for [slow-envelope propagation](kernels/slow_envelope.py):
 the calibrated population tolerance is 1e-2, with about 1e-4 or less measured on

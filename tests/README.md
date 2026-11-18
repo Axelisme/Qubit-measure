@@ -227,8 +227,9 @@ native cutoff=30、retained=6、N=3 的 d=18 joint 模型。初態是 dressed |e
 `joint_gate_inventory` 保留完整 20 點 sampled inventory，matrix 的 pinned density 驗 `dop853`。
 `joint_constant` 用相同模型和 inventory 保護 `multitone_rwa` 的 distinct-port constant 路徑。
 [`test_routing_boundaries.py`](simulate/evolution/contract/test_routing_boundaries.py) 驗證單次 pinned gate 的完整 density，另以原有 20 點共享輸入保留預設 `common_frame` 空／暖 history 的 density 驗收。
-同檔從 `inspect_dispatch` 驗證逐 key 冷價的兩側。便宜的本地 key 回 `deferred`，共享 key 跑 guard，價格輸的 gate 回 `untested_after_short_circuit`。
-邊界探點距 owner 的邊界至少 10 倍，另保留 20 次短序列回歸。邊界來源與校準狀態寫在測試註解，不在測試重算價格。
+同檔從 `inspect_dispatch` 驗證逐 key 冷價的兩側。價格勝出的本地 key 回 `deferred`，共享 key 跑 guard，價格輸的 gate 回 `untested_after_short_circuit`。
+短 inventory 在空歷史和前次已執行同 key 的情況下都預測 DOP853；實際 evolve 確認選路與未付 gate prepare。長 inventory 驗證合格 key 可執行 gate，且不能攤提到另一個罕用 key。
+測試使用有冷價間距的輸入，不重算係數或鎖住 break-even 的精確位置。
 固定 `multitone_rwa` 仍拒收 sampled 輸入。固定 `multitone_gate` 可以略過成本比較，不能略過相位與 split 驗證。
 `cheap_sampled_nearby` 與 `cheap_sampled_separated` 使用非平坦 smooth samples，避免 planner 抽成 constant row。
 兩個案例分別驗證失去 cheap-RWA 豁免後的 `common_frame` 與 `dop853` 分支，包含空／暖 history 的路徑與完整 density。
