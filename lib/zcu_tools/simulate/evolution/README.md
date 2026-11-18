@@ -211,8 +211,10 @@ batches ready rows across the acquire by dimension and model key. It uses
 measured dispatch times to target about 0.1 s per batch without reading OS or
 driver timeout settings.
 
-The CPU/GPU cost choice uses the acquire, worker count and device identity.
-Disk cache warmth and measured batch times do not enter that choice. Program
+The CPU/GPU cost choice uses the ready rows, worker count and evolve budget.
+The CPU estimate uses the DP5(4) price when that tableau would run on CPU.
+The GPU estimate remains based on DOP853. Disk cache warmth and measured
+batch times do not enter that choice. Program
 builds and detection records use
 `<user-cache-root>/opencl/dop853/<digest>/`; the digest covers the kernel
 source and options, dimension, device and driver. The driver can also cache
@@ -330,7 +332,9 @@ An evaluated guard reports `accepted` or `rejected`. A local key reports
 Structurally inapplicable and cost-skipped families are not listed unless
 actually offered. Candidate `scheduling_cost` is `Kernel.cost`'s nonnegative
 relative row work for chunk interleaving, not seconds or a numerical certificate;
-it cannot explain why a family was chosen. The cold-amortized estimate used to
+it cannot explain why a family was chosen. For `dop853` this is the CPU fallback
+price, reduced for rows eligible for CPU DP5(4). Backend selection happens
+when the scheduler has a ready wave. The cold-amortized estimate used to
 order candidates is not exposed. Short-circuited candidates have
 `scheduling_cost=None`; evaluated and deferred candidates include their value.
 

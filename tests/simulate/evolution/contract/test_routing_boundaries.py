@@ -79,9 +79,35 @@ def test_cpu_dop853_selects_tableau_by_row_duration_and_budget(
     assert (reused.dp54_rows, reused.dop853_rows) == (0, 0)
 
 
-def test_opencl_dop853_keeps_eighth_order_tableau(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_dispatch_prices_the_short_cpu_tableau_below_dop853() -> None:
+    case = accuracy_case("sampled_gaussian_9")
+    with (
+        closing(case.source),
+        closing(Engine(1, backend="cpu", families=case.families)) as engine,
+    ):
+        tight = engine.inspect_dispatch(case.source, (case.batch,), budget=0.999e-3)
+        loose = engine.inspect_dispatch(case.source, (case.batch,), budget=1e-3)
+        result = engine.evolve(case.source, (case.batch,), budget=1e-3, telemetry=True)
+
+    costs = []
+    for inspection in (tight, loose):
+        prices = [
+            candidate.scheduling_cost
+            for row in inspection.rows
+            for candidate in row.candidates
+            if row.family == candidate.family == "dop853"
+        ]
+        assert len(prices) == len(case.batch.points)
+        costs.append(sum(price for price in prices if price is not None))
+    assert 0 < costs[1] < costs[0]
+    routing = result.paths.routing["dop853"]
+    assert routing.dp54_rows == len(case.batch.points)
+    assert routing.estimated_cost == pytest.approx(costs[1])
+
+
+@pytest.fixture
+def stub_opencl(monkeypatch: pytest.MonkeyPatch) -> str:
+    """Install a working device at the optional OpenCL runner boundary."""
     from zcu_tools.simulate.evolution.kernels import _dop853_opencl
 
     class DeviceStub:
@@ -89,6 +115,12 @@ def test_opencl_dop853_keeps_eighth_order_tableau(
 
         def check_device(self) -> None:
             pass
+
+        def cached_build_failure(self, dimension: int) -> None:
+            return None
+
+        def compile_variant(self, dimension: int) -> None:
+            return None
 
         def advance(
             self,
@@ -105,11 +137,15 @@ def test_opencl_dop853_keeps_eighth_order_tableau(
     # The optional GPU numerical collaborator is outside the routing contract.
     # CPU CI has no public way to supply a device, so replace just its runner.
     monkeypatch.setattr(_dop853_opencl, "OpenCLDOP853", DeviceStub)
+    return DeviceStub.execution_device
+
+
+def test_opencl_dop853_keeps_eighth_order_tableau(stub_opencl: str) -> None:
     case = accuracy_case("sampled_gaussian_9")
     with closing(Engine(1, backend="opencl", families=case.families)) as engine:
         paths = engine.evolve(case.source, (case.batch,), telemetry=True).paths
 
-    assert paths.execution_device == DeviceStub.execution_device
+    assert paths.execution_device == stub_opencl
     report = paths.routing["dop853"]
     assert report.opencl_rows == len(case.batch.points)
     assert report.dp54_rows == 0
@@ -288,6 +324,23 @@ def _dense_batch(count: int) -> TimelineBatch:
             drive_track(dense, envelope, frequency=0.17, gain=-0.007),
         ),
     )
+
+
+def test_auto_reprices_only_the_dp54_cpu_alternative(stub_opencl: str) -> None:
+    # One dense 13-level endpoint sits between the legacy DOP853 CPU price
+    # and the calibrated DP5(4) CPU price. Keep GPU work identical across calls.
+    batch = _dense_batch(1)
+    with (
+        closing(coherent_source(synthetic_model(13))) as source,
+        closing(Engine(1, families=("dop853",), backend="auto")) as engine,
+    ):
+        tight = engine.evolve(source, (batch,), budget=0.999e-3, telemetry=True)
+        loose = engine.evolve(source, (batch,), budget=1e-3, telemetry=True)
+
+    assert tight.paths.execution_device == "cpu"
+    assert tight.paths.routing["dop853"].dop853_rows == 1
+    assert loose.paths.execution_device == stub_opencl
+    assert loose.paths.routing["dop853"].opencl_rows == 1
 
 
 @pytest.mark.requires_opencl

@@ -450,6 +450,7 @@ class Schedule:
             rows,
             dimension,
             self.workers,
+            budget=self.budget,
         ):
             return None
         return backend.prepare(dimension)

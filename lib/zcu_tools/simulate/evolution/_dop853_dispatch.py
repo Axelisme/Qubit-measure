@@ -92,6 +92,8 @@ def opencl_preferred(
     rows: NDArray[np.int64],
     dimension: int,
     workers: int,
+    *,
+    budget: float,
 ) -> bool:
     """Compare CPU and GPU wall prices for one acquire-wide ready wave.
 
@@ -100,6 +102,7 @@ def opencl_preferred(
     For an available device, the price uses the acquire work and worker width,
     not Engine or disk cache warmth or measured wall time. Calibrated on Arc
     for d=3 sampled pulses and d=32 FTF simultaneous drive at 1, 4 and 24 points.
+    The evolve budget determines which tableau the CPU alternative would use.
     """
     # One extra knot covers a final held value before the appended row end.
     knots = _union_knots(table, rows) + 1
@@ -109,6 +112,11 @@ def opencl_preferred(
     # Dense CPU per-thread throughput falls from ~17 to ~9 GFLOP/s from
     # 1 to 7 workers; a 4 us per-trial floor accounts for small matrices.
     cpu_row = work * (1 + 0.15 * (lanes - 1)) / 17e9 + trials * 4e-6
+    # This model is in seconds, unlike the relative scheduling units. On the
+    # 960-knot FTF rows, measured DP5(4) CPU was 1.02–1.52 times the legacy
+    # CPU estimate (which underpredicted actual DOP853 CPU on this host).
+    # Reprice just the CPU alternative; device work still uses 12 stages.
+    cpu_row *= np.where(cpu_dp54_rows(table.duration_ns[rows], budget), 1.2, 1.0)
     cpu = max(float(cpu_row.sum()) / lanes, float(cpu_row.max()))
     # Like routing history, replacing the Engine must not change the route.
     # Disk cache amortizes cold compilation per machine, driver, kernel and d;

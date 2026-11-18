@@ -352,6 +352,13 @@ class _Classifier:
         self.guard_plans: dict[str, list[RowPlan]] = {}
         self.plans: dict[str, RowPlan] = {}
 
+    def scheduling_cost(
+        self, kernel: Kernel, rows: NDArray[np.int64]
+    ) -> NDArray[np.float64]:
+        if isinstance(kernel, DOP853Kernel):
+            return kernel.cost(self.table, rows, budget=self.budget)
+        return kernel.cost(self.table, rows)
+
     def observe(
         self, kernel: Kernel, rows: NDArray[np.int64], decision: GuardDecision
     ) -> None:
@@ -361,7 +368,7 @@ class _Classifier:
         if self.trace is None or not len(rows):
             return
         scheduling_costs = (
-            kernel.cost(self.table, rows)
+            self.scheduling_cost(kernel, rows)
             if decision != "untested_after_short_circuit"
             else [None] * len(rows)
         )
@@ -396,7 +403,7 @@ class _Classifier:
         self.deferred[local] = True
         self.observe(kernel, local, "deferred")
         if len(local):
-            self.costs[local] = kernel.cost(self.table, local)
+            self.costs[local] = self.scheduling_cost(kernel, local)
         selections = (
             selected for index, selected in groups.selections() if caller_keys[index]
         )
@@ -711,7 +718,7 @@ class _Classifier:
     def _result(self) -> Dispatch:
         for name in np.unique(self.names[self.names != ""]):
             rows = np.flatnonzero(self.names == name)
-            self.costs[rows] = self.kernels[str(name)].cost(self.table, rows)
+            self.costs[rows] = self.scheduling_cost(self.kernels[str(name)], rows)
         if not np.isfinite(self.costs).all() or np.any(self.costs < 0):
             raise ValueError("kernel costs must be finite and nonnegative")
         if self.selection is not None and self.selection.names is not None:

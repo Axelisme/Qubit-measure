@@ -26,6 +26,9 @@ from ._workload_facts import packed_segments
 # budgets were not measured and favor the higher-order DOP853 method.
 _MAX_DP54_DURATION_NS = 10_000.0
 _MIN_DP54_BUDGET = 1e-3
+# Seven paired CPU endpoints (d=8..32, 0.1..10 µs) took 0.50..0.75 times
+# the same row's DOP853 apply CPU. Keep the existing relative scheduling units.
+_DP54_SCHEDULING_SCALE = 0.6
 
 
 def cpu_dp54_rows(duration_ns: NDArray[np.float64], budget: float) -> NDArray[np.bool_]:
@@ -267,12 +270,27 @@ class DOP853Kernel:
         keys["shift"] = table.shift_content[rows]
         return keys
 
-    def cost(self, table: SegmentTable, rows: NDArray[np.int64]) -> NDArray[np.float64]:
-        """Estimate RHS work from duration and tone count, with no timing probe."""
+    def cost(
+        self,
+        table: SegmentTable,
+        rows: NDArray[np.int64],
+        *,
+        budget: float | None = None,
+    ) -> NDArray[np.float64]:
+        """Estimate CPU fallback work for chunk interleaving, not seconds.
+
+        Supply the positive evolve budget to price eligible CPU rows as DP5(4).
+        Without it, return DOP853 prices as in the generic Kernel cost contract.
+        Backend selection happens later, on the scheduler's ready wave.
+        """
+        duration = table.duration_ns[rows]
+        scale = (
+            1.0
+            if budget is None
+            else np.where(cpu_dp54_rows(duration, budget), _DP54_SCHEDULING_SCALE, 1.0)
+        )
         return np.asarray(
-            0.8
-            * (1.0 + table.tones[rows])
-            * np.maximum(1.0, table.duration_ns[rows] / 0.1),
+            0.8 * scale * (1.0 + table.tones[rows]) * np.maximum(1.0, duration / 0.1),
             dtype=np.float64,
         )
 
