@@ -822,22 +822,22 @@ routes and final densities. This does not force every sampled row to DOP853.
 | [`dop853`](kernels/dop853.py), full-drive direct density integration | `slow`, `shaped`, `two`, `multiple`, terminal candidate | No RWA or fast-path admission threshold. Accepts valid rows with finite positive B, including complex sampled envelopes. Stops at active control knots. Local rtol = min(1e-4, 0.03B), atol = min(1e-6, 0.0003B), from the [shared solver](kernels/_dop853.py); these are not global error bounds. | [`shaped_complex`](../../../../tests/simulate/evolution/contract/accuracy_cases.py), [`two_carriers`](../../../../tests/simulate/evolution/contract/accuracy_cases.py), [`joint_gate_inventory`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
 
 For dissipative DC rows, [slow dispatch](_slow_dispatch.py) charges channel
-construction as `1.71 * (M/32)^6` seconds, divided by the exact prepare key's
+construction as `3.8 * (M/32)^6` seconds, divided by the exact prepare key's
 use count in this acquire. It adds `0.000422 * (M/32)^4` seconds per application.
-The single-thread dense-expm measurements were 0.035, 1.71, 19.1 and 120 seconds
-at M=16, 32, 48 and 64. The key includes level, shift, port, carrier, gain,
-duration, phase and subdivision policy. Prior acquires and resident cache warmth
-do not subsidize construction. Dispatch compares this cold price with the
-existing DOP853 bandwidth/action estimate. Pinning either family preserves its
+The key includes level, shift, port, carrier, gain, duration, phase and
+subdivision policy. Prior acquires and resident cache warmth do not subsidize
+construction. Dispatch compares this cold price with a slow-domain calibration
+of the DOP853 bandwidth/action estimate. Pinning either family preserves its
 numerical guard. Bath-free DC and nonzero carriers keep `slow_envelope` first.
 `Kernel.cost` remains a relative chunk-scheduling weight, not this cold price.
 
-The price check uses a 32-level synthetic 100 ns DC segment and the three
-small dissipative DC matrix cases. Their default routes meet the 10% timing
-margin against the fastest admitted family with full-density error ≤2e-3.
-A 100-point shared-key check still selects `slow_envelope` but takes about
-2.25 seconds versus 1.10 seconds for DOP853. These prices do not establish a
-runtime bound or a complete dimension/duration/reuse calibration.
+The calibration covers 11 synthetic plateaus at M=16, 32 and 48 and durations
+of 40–350 ns. Estimates were 0.53–1.36 times measured single-thread wall time.
+The default route for a 32-level 100 ns DC segment and the three small
+dissipative DC matrix cases stays within 10% of the fastest admitted family,
+with full-density error ≤2e-3. The 100-point shared-key case now selects DOP853.
+Its paired wall-time ratio against the previous `slow_envelope` default is 0.44.
+These prices are not runtime bounds.
 
 The `common_frame` coherent limit is 0.0018. In the retained two-tone grid,
 14 admitted cells had coherent indicators at most 0.001469411 and historical
