@@ -765,10 +765,12 @@ class FTFSource:
 
         outcome retains captured round inputs (including failed attempts), wall
         seconds including pacing, builder seconds and normal-return status.
-        Only the matching current session contributes routing work. For debug
-        capture, take round snapshots after begin_acquire. The buffer publishes
-        before summary construction, even with telemetry disabled. capture_file
-        is the successful basename or None when recording is off or publication fails.
+        Only the matching current session contributes routing work. Direct callers
+        may supply their own outcome after the final round and cleanup. Debug capture
+        keeps detached rounds but omits settings for identities it did not observe.
+        The buffer publishes before summary construction, even with telemetry disabled.
+        capture_file is the successful basename or None when recording is off or
+        publication fails.
         """
         capture_settings = self._capture_settings
         self._capture_settings = None

@@ -7,15 +7,20 @@ from importlib import import_module
 
 import pytest
 from zcu_tools.cfg_model import MuxReadoutTone
+from zcu_tools.device import DeviceManager, FakeDevice
 from zcu_tools.program.v2 import TimelineBuilder
 from zcu_tools.program.v2.modules.readout import MuxReadoutCfg, PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
+from zcu_tools.program.v2.simulation import AcquireOutcome
+from zcu_tools.simulate.boundary import RoundRequest
 from zcu_tools.simulate.evolution import capture_directory, read_frozen_manifest
+from zcu_tools.simulators.ftf.environment import FTFSource
 from zcu_tools.simulators.six_fluxonium.config import parse_six_fluxonium
-from zcu_tools.simulators.telemetry import TelemetrySettings
+from zcu_tools.simulators.telemetry import RoutingTelemetry, TelemetrySettings
 
 from tests.program._profiles import profile_soccfg
 from tests.simulators._engine import EngineDouble
+from tests.simulators.ftf.environment._templates import request, snapshot
 from tests.simulators.ftf.environment._templates import settings as ftf_settings
 from tests.simulators.single_fluxonium.environment._inputs import (
     settings as single_settings,
@@ -248,6 +253,71 @@ def test_acquire_capture_is_shared_and_published_before_telemetry(
         assert program.acquire(env.soc, progress=False) is not None
         assert len(list(capture_directory().glob("capture-*.json.gz"))) == 2
         assert telemetry_records(tmp_path)[1]["capture_file"] != files[0].name
+
+
+def test_direct_ftf_finish_publishes_capture_and_telemetry_with_detached_round(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("ZCU_TOOLS_CACHE_DIR", str(tmp_path / "cache"))
+    config = ftf_settings()
+    config = config.model_copy(
+        update={"numerics": config.numerics.model_copy(update={"debug_capture": True})}
+    )
+    devices = DeviceManager()
+    bias = FakeDevice(fast_mode=True, value_unit=config.dc_bias.sources["bias"].unit)
+    bias.set_value(0.3)
+    devices.register_device("bias", bias)
+    source = FTFSource(
+        config,
+        devices,
+        soccfg=profile_soccfg("ftf"),
+        engine=EngineDouble(),
+        telemetry=RoutingTelemetry(tmp_path / "telemetry"),
+    )
+    try:
+        acquire = request()
+        detached = snapshot(0.2)
+        session = source.open_acquire(acquire)
+        session.sample_round(detached, 0)
+        observed = source.snapshot()
+        session.sample_round(observed, 1)
+        source.finish_acquire(
+            AcquireOutcome(
+                (
+                    RoundRequest(acquire, detached, 0),
+                    RoundRequest(acquire, observed, 1),
+                ),
+                wall_s=7.0,
+                compile_wall_s=0.0,
+                complete=True,
+            )
+        )
+    finally:
+        source.close()
+        devices.close_all_devices()
+
+    (path,) = capture_directory().glob("capture-*.json.gz")
+    with gzip.open(path, "rt", encoding="utf-8") as stream:
+        manifest = json.load(stream)
+    assert manifest["inputs"]
+    metadata = manifest["metadata"]
+    assert metadata["rounds"] == [
+        {
+            "index": 0,
+            "dc_values": {"bias": 0.2},
+            "model_identity": detached.model_identity,
+        },
+        {
+            "index": 1,
+            "dc_values": {"bias": 0.3},
+            "model_identity": observed.model_identity,
+        },
+    ]
+    assert set(metadata["effective_settings"]) == {observed.model_identity}
+    assert metadata["admission_settings"] is None
+    (summary,) = telemetry_records(tmp_path)
+    assert summary["capture_file"] == path.name
+    assert summary["rounds"] == 2
 
 
 @pytest.mark.parametrize("telemetry", [False, True])

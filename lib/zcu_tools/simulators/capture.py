@@ -26,9 +26,10 @@ class CaptureRound(TypedDict):
 class AcquireCaptureMetadata(TypedDict):
     """Normal-return flag, captured attempts, and the settings they refer to.
 
-    Sampling is null without a round snapshot. effective_settings holds
-    simulator-specific JSON by round model identity, including sampled losses.
-    admission_settings supplies the settings at begin only when no round was captured.
+    Sampling is null without a round snapshot in the outcome. effective_settings
+    holds simulator-specific JSON by observed round model identity, including
+    sampled losses. admission_settings supplies the settings at begin only when
+    the outcome has no round snapshots.
     """
 
     complete: bool
@@ -56,9 +57,9 @@ class AcquireCaptureSettings:
     def write(self, buffer: CaptureBuffer, outcome: AcquireOutcome) -> str | None:
         """Publish after evolution and return the basename or None on writer failure.
 
-        Only snapshots in outcome.rounds are included, even if other snapshots
-        were observed. A round whose execution failed still names its settings.
-        All outcome snapshots must have been recorded by this acquire.
+        Keep every round in outcome.rounds, including failed attempts. Include
+        effective settings only for round identities observed by this capture.
+        Detached rounds can name identities absent from effective_settings.
         """
         rounds: list[CaptureRound] = [
             {
@@ -80,6 +81,7 @@ class AcquireCaptureSettings:
             "effective_settings": {
                 identity: self._by_identity[identity].model_dump(mode="json")
                 for identity in dict.fromkeys(item["model_identity"] for item in rounds)
+                if identity in self._by_identity
             },
             "admission_settings": None
             if rounds
