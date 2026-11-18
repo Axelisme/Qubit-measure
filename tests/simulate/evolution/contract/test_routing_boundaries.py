@@ -83,13 +83,9 @@ def test_pinned_multitone_gate_below_cost_break_even() -> None:
     assert rejected.value.attempted == ("multitone_rwa",)
 
 
-# Boundary from _multitone_dispatch.gate_cost on this four-level 1.5 ns
-# joint key, budget=1e-3: prepare=0.0001982771146 s, direct=2.113043463e-6 s,
-# guard+apply=6.125e-7 s; break-even=132.13687 current-acquire uses.
-# Build coefficient uses the fixed 32-state FTF X90/CZ first-stage calibration.
-# 1/10 uses are >10x below; 4096 is >30x above. Twenty is the short-use
-# regression, not a price boundary. Tests never price the key. The target
-# producer's four canonical keys match the fixed-FTF calibration inputs.
+# These inventories straddle the four-level 1.5 ns key's cold break-even
+# with room for price calibration. Twenty is a short-use regression, not a
+# price boundary. Tests observe dispatch rather than pricing the key.
 @pytest.mark.parametrize("count", [1, 10, 20])
 def test_short_inventory_skips_unprofitable_gate_before_guard(count: int) -> None:
     """Twenty uses cannot repay a full-drive phase build."""
@@ -109,7 +105,6 @@ def test_short_inventory_skips_unprofitable_gate_before_guard(count: int) -> Non
 # public promise that a prior evolve on the shared history leaves the current
 # one-use gate decision unchanged, not an internal same-key counter. If gate
 # usage is recorded later, this also protects against amortizing over history.
-# The preceding boundary receipt puts 4096 uses >30x above break-even.
 def test_prior_evolve_on_shared_history_keeps_short_gate_unprofitable() -> None:
     history = RoutingHistory()
     large = _joint_gate_case(4096)

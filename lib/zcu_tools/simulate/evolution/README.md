@@ -696,9 +696,10 @@ follows their work estimates. Phase construction uses a coefficient fitted to
 four fixed-FTF X90/CZ keys at 32 states. Those phase build estimates differ from
 measured CPU times by about -16% to +16%. The two 100 ns X90 keys calibrate the
 tight reference work. Their four solves take 4.80 and 7.62 CPU seconds per key
-in the isolated calibration. Each fallback probe uses the ordinary direct
-work estimate at the Engine budget. Per-row guard and playback terms remain
-work estimates. Neither guard certifies arbitrary-input or whole-sequence accuracy.
+in the isolated calibration. The four fallback solves take 0.98 and 0.94
+CPU seconds per key at budget 1e-3. Their price scales the ordinary direct
+work estimate to match that isolated work. Per-row guard and playback terms
+remain work estimates. Neither guard certifies arbitrary-input or whole-sequence accuracy.
 
 Historical calibration note for [slow-envelope propagation](kernels/slow_envelope.py):
 the calibrated population tolerance is 1e-2, with about 1e-4 or less measured on

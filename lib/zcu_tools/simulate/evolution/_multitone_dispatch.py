@@ -115,7 +115,11 @@ def gate_cost(table: SegmentTable, row: int, context: KernelContext) -> "Multito
     At reference budget 1e-8 they take 4.801/7.621 warm CPU seconds in total
     (Gaussian/sampled). The split coefficient 0.155 minimizes the worst
     relative residual of the budget-scaled direct estimate, rounded to three
-    decimals. The probes are charged once per key, not once per row.
+    decimals. The four Engine-budget DOP853 solves use the same probe inputs.
+    At budget 1e-3 they take 0.979/0.938 warm CPU seconds versus nominal direct
+    estimates of 8.633/9.595 for four solves. A 0.105 multiplier minimizes
+    their worst relative residual, rounded to three decimals. The two groups
+    are charged once per key, not once per row.
 
     The tolerance ratios use the existing eighth-power work model. All first-stage
     nodes and 64 validation trajectories integrate once. FFT fitting charges
@@ -152,9 +156,8 @@ def _price_gate(
     fit = 2e-7 * 4 * nodes * np.log2(nodes) * (len(model.energies_ghz) / 16) ** 2
     split_precision = (1e-3 / SPLIT_REFERENCE_BUDGET) ** 0.125
     reference = len(SPLIT_PHASES) * baseline * split_precision * 0.155
-    # The fallback probes run at the Engine budget; use the ordinary direct
-    # price per solve. Like the reference, this work is paid once per key.
-    fallback = len(SPLIT_PHASES) * direct
+    # Scale the ordinary direct price for the warm isolated fallback probes.
+    fallback = len(SPLIT_PHASES) * direct * 0.105
     apply = (2e-8 * 4 * nodes + 7.5e-6 * 4) * scale
     return MultitoneCost(
         direct, float(integrate + fit + reference + fallback), 2e-6 * scale, apply
