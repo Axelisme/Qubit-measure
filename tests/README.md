@@ -219,8 +219,9 @@ native cutoff=30、retained=6、N=3 的 d=18 joint 模型。初態是 dressed |e
 `joint_constant` 用相同模型保護 distinct-port constant 路徑。
 [`test_routing_boundaries.py`](simulate/evolution/contract/test_routing_boundaries.py)
 驗證 19 與 20 次 inventory 都能通過 `multitone_rwa` guard，並用 telemetry 驗證同 key 的抽查只活在一次 evolve。
-`cheap_sampled_nearby` 通過抽查；`cheap_sampled_separated` 和相位變換序列
-`sampled_multitone_phase_sequence` 驗證抽查失敗後整群退回，對照獨立參考解。
+`cheap_sampled_nearby` 通過抽查；`cheap_sampled_separated` 有兩個不同相位群，
+`sampled_multitone_phase_sequence` 有六個。這兩個案例逐群驗證抽查失敗後退回，對照獨立參考解。
+Routing boundary 另驗證振幅極值、樣本與切片的精確分群，以及拒收不影響不同相位的群。
 `sampled_multitone_short_sweep_32` 是 25 ns 的雙 tone 頻掃，用 32 能階與
 `interaction_reference` 驗證完整 density。
 多段案例量整條 timeline 的最終誤差。混合路徑的每個 family 列出同一個最終誤差，

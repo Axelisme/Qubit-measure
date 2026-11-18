@@ -12,7 +12,7 @@ from ._dop853_dispatch import (
 )
 from .kernel import Kernel, KernelContext, SegmentTable
 from .kernels._dop853 import ROW_INITIAL_STEP_NS
-from .kernels._multitone_spot import sampled_candidates, spot_rows
+from .kernels._multitone_spot import sampled_candidates, sampled_groups
 from .kernels._rwa_fourier import fourier_coefficient
 from .kernels._rwa_numeric import STEP_NS, multitone_retention
 from .kernels.multitone_rwa import MultitoneRWAKernel
@@ -114,7 +114,8 @@ def _rwa_seconds(
     # source history do not enter dispatch.
     d = context.source.initial_density.shape[0]
     apply = np.array([_rwa_apply_seconds(table, int(row), context) for row in rows])
-    indices = np.searchsorted(rows, spot_rows(table, tuple(rows.tolist()), context))
+    groups = sampled_groups(table, context).groups
+    indices = np.searchsorted(rows, [row for group in groups for row in group.spot_rows])
     probe = float(np.sum(direct[indices] + apply[indices] + 260e-6 + 2.5e-6 * d))
     playback = _parallel_seconds(table, rows, apply + 65e-6 + 1e-6 * d, context.workers)
     return probe + playback

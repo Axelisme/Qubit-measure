@@ -799,20 +799,23 @@ those runs measure the families actually selected, not every candidate.
 The [matrix instructions](../../../../tests/README.md#evolution-精度矩陣)
 own the command and report format.
 
-Sampled dual tones that pass the row proxies form one `multitone_rwa` candidate
-group. Dispatch prices the whole group, including RWA playback and the
-caller-thread cost of its spot checks. Each check charges a fresh RWA build
-and apply plus full-drive CPU DOP853. Dispatch skips the checks when an eligible
-alternative is at least as cheap. An RWA-only allowlist skips pricing, not the
-guard. Neither the price amortization nor the admission decision carries over
-to another evolve.
+Sampled dual tones that pass the row proxies form `multitone_rwa` groups whose
+members differ only in each tone's amplitude. A group matches model, duration,
+ports, carriers, effective start phases and pulse-local offsets exactly.
+Sampled envelopes must share a native grid and have exactly proportional I/Q
+samples, with no phase rotation or tolerance. The guard probes the largest
+amplitude for each tone, checking a row only once if it has both maxima.
 
-The guard selects the rows with greatest drive strength, peak-normalized
-envelope slope and peak-normalized curvature. It compares each distinct row's
-fixed coherent probe in RWA and full-drive CPU DOP853 at the requested budget.
-The maximum absolute difference in the complete density must be ≤ 0.1 × B on
-every checked row. If any fails, the entire group falls back to other candidates
-such as `common_frame` or `dop853`. This empirical check replaces the
+Dispatch pricing includes RWA playback and caller-thread spot checks, each
+charging a fresh RWA build and apply plus full-drive CPU DOP853. Dispatch
+skips the checks when an eligible alternative is at least as cheap. An RWA-only
+allowlist skips pricing, not the guard. Price amortization and guard decisions
+do not carry over to another evolve.
+
+The guard evolves the same fixed coherent probe with RWA and full-drive CPU
+`dop853` at the requested budget. Every probed row must have maximum absolute
+full-density difference ≤ 0.1 × B. If any fails, only its group falls back
+to other candidates such as `common_frame` or `dop853`. This empirical check replaces the
 [2026-11-14 interim rejection](../../../../docs/discussions/2026-11-14-sampled-multitone-interim.md)
 for sampled RWA, but does not certify arbitrary input states or accumulated
 sequence error. The matrix covers rejected phase-varied sequences and short
@@ -834,7 +837,7 @@ sequence error. The matrix covers rejected phase-varied sequences and short
 | [`period_table`](kernels/period_table.py), shaped amplitude-band period playback | `shaped` | 8 Chebyshev amplitude nodes and 16 phase samples. Guard requires envelope-motion indicator ≤ 0.05, amplitude-band bandwidth ≤ 0.5 and secular split ≤ 0.01. These calibrated limits do not scale with B. DC is guard-admissible with local direct integration, but default costs prefer terminal DOP853. | [`linear_shaped`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
 | [`common_frame`](kernels/common_frame.py), common-frame SW2 beat dynamics | `two` or two-tone `multiple` only | Fixed-flux common frame with second-order beat/two-photon terms, first-order endpoint dressing and CF4/secular playback. Absolute mean carrier must be ≥ 1e-10 GHz. CF4 steps are capped at 8 ns and 0.08 cycles of the fastest retained channel, with no lower cutoff. Dispatch prices first-order playback steps, so cost rises with active carrier spacing; numerical guards determine applicability. Fast-channel denominator must exceed 1e-10. Row-local coherent/bath indicators must be ≤ 0.0018/0.01, independent of B. | [`nearby_carriers`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS at the new coherent guard edge |
 | [`multitone_gate`](kernels/multitone_gate.py), retained simultaneous RWA gate family | `multiple`, disabled | Rejects every row. The retained inventory cost preference and pinning cannot bypass rejection. Shared single-tone gate numerics are unchanged. | [pinned rejection contract](../../../../tests/simulate/evolution/contract/test_routing_boundaries.py) | NOT EXERCISED; no density error |
-| [`multitone_rwa`](kernels/multitone_rwa.py), simultaneous omission-restored RWA | `two` for distinct-port constant pairs; two-tone `multiple` | Fixed flux, B ≥ 1e-3 and each carrier magnitude ≥ 50 MHz. Restore omitted paths until transfer proxy ≤ 0.0058 and residual phase ≤ 0.0045 rad, with retained real dimension ≤ 256. For sampled pairs, slope and curvature pick probes, not row rejections. Up to three full-drive probes at ≤ 0.1 × B admit the group. Sampled rows have a 4 ns step ceiling and no kick. Constant pairs additionally require final-mask ε_dom²·Ω_ret·T ≤ 1.476e-4 cycle and use summed first-order endpoint kicks with a 16 ns step ceiling. The [constant-pair query](#constant-pair-rwa-guard-diagnostics) reports the constant metrics. | [`joint_constant`, `joint_gate_inventory`, `cheap_sampled_nearby`, `sampled_multitone_short_sweep_32`](../../../../tests/simulate/evolution/contract/accuracy_cases.py); [phase sequence fallback](../../../../tests/simulate/evolution/contract/test_accuracy_matrix.py) | PASS for admitted rows; rejected groups use fallback |
+| [`multitone_rwa`](kernels/multitone_rwa.py), simultaneous omission-restored RWA | `two` for distinct-port constant pairs; two-tone `multiple` | Fixed flux, B ≥ 1e-3 and each carrier magnitude ≥ 50 MHz. Restore omitted paths until transfer proxy ≤ 0.0058 and residual phase ≤ 0.0045 rad, with retained real dimension ≤ 256. For sampled pairs, slope and curvature do not reject rows. The amplitude maximum of each tone is checked once per group against full-drive `dop853` at ≤ 0.1 × B. Sampled rows have a 4 ns step ceiling and no kick. Constant pairs additionally require final-mask ε_dom²·Ω_ret·T ≤ 1.476e-4 cycle and use summed first-order endpoint kicks with a 16 ns step ceiling. The [constant-pair query](#constant-pair-rwa-guard-diagnostics) reports the constant metrics. | [`joint_constant`, `joint_gate_inventory`, `cheap_sampled_nearby`, `sampled_multitone_short_sweep_32`](../../../../tests/simulate/evolution/contract/accuracy_cases.py); [phase sequence fallback](../../../../tests/simulate/evolution/contract/test_accuracy_matrix.py) | PASS for admitted rows; rejected groups use fallback |
 | [`floquet`](kernels/floquet.py), constant Stark tone plus probe | `two` | Larger absolute gain selects the Stark slot, with ties choosing the first; that slot requires positive carrier. Frame overlap ≥ 0.5, modal condition ≤ 1e8, maximum real eigenvalue ≤ 1e-10/ns and residual ≤ 1e-9; sampling extent ≤ 128 with at most 4096 phase samples. k=0 omission and convergence each fit B/3. Modal Dyson additionally uses r ≤ 0.1, r2 ≤ 0.05 when probe gain magnitude ≥ 0.1, Dyson norm-duration v ≤ 0.5, transfer indicator v + v²/2 ≤ 0.02 and higher-order remainder exp(v)·v³/6 ≤ B/3; otherwise use periodic channel playback. Retained-sideband admission instead requires convergence ≤ B/40 and bound ≤ 0.95B, retaining edges within 0.1/ns and averaging other harmonics through order 4. Admission is per row; refused rows continue to other allowed candidates. This finite-Fourier admission is not a density-error guarantee. | [`two_carriers`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
 | [`dop853`](kernels/dop853.py), full-drive direct density integration | `slow`, `shaped`, `two`, `multiple`, terminal candidate | No RWA or fast-path admission threshold. Accepts valid rows with finite positive B, including complex sampled envelopes. Stops at active control knots. Local rtol = min(1e-4, 0.03B), atol = min(1e-6, 0.0003B), from the [shared solver](kernels/_dop853.py); these are not global error bounds. | [`shaped_complex`](../../../../tests/simulate/evolution/contract/accuracy_cases.py), [`two_carriers`](../../../../tests/simulate/evolution/contract/accuracy_cases.py), [`joint_gate_inventory`](../../../../tests/simulate/evolution/contract/accuracy_cases.py) | PASS |
 

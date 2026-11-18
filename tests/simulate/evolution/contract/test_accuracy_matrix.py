@@ -349,10 +349,12 @@ def test_default_empty_and_warm_history_density(
 
 
 @pytest.mark.parametrize(
-    "name", ("cheap_sampled_separated", "sampled_multitone_phase_sequence")
+    "name, expected_spots",
+    [("cheap_sampled_separated", 2), ("sampled_multitone_phase_sequence", 6)],
 )
-def test_sampled_multitone_rejects_the_complete_group(
+def test_sampled_multitone_rejects_each_failed_group(
     name: str,
+    expected_spots: int,
     request: pytest.FixtureRequest,
     matrix_reference: Callable[[AccuracyCase], ReferenceResult],
 ) -> None:
@@ -386,7 +388,7 @@ def test_sampled_multitone_rejects_the_complete_group(
         )
     assert result.paths.segments_by_kernel == {"dop853": expected_rows}
     routing = result.paths.routing["multitone_rwa"]
-    assert 1 <= routing.admission_rows <= 3
+    assert routing.admission_rows == expected_spots
     assert routing.rejected_rows == expected_rows
     reference = matrix_reference(case)
     error = density_error(result.densities, reference.density)
