@@ -2,7 +2,7 @@
 
 **讀者：** operator、lab-author、agent。準備 FTF 模擬參數與 entry，並從 GUI 或 Notebook 啟動模擬環境。
 
-**Last updated:** 2026-11-16，GUI 模擬保留一核
+**Last updated:** 2026-11-18，私有重播的執行裝置
 
 既有 entry 把 resonator 與 mux group 的 `ext.time_of_fly` 搬到頂層 `time_of_fly`。程式不自動搬移。
 
@@ -155,4 +155,11 @@ Notebook 明確傳 `workers=max(1, (os.cpu_count() or 1) - 2), warmup=True`，�
 
 整個 evolve 期間 native BLAS 限為 1 個執行緒。重疊的 evolve 共用 process 層級的 reference count，第一個進入時設限，最後一個離開時還原。其他程式碼不要在 evolve 期間自行更改 threadpoolctl 限制。沒有演化工作、只有一條 timeline 或只有 1 個 worker 時，不開 joblib pool。模型與 caller-owned 完整 preparation 只保留在記憶體，Engine 的數值 preparation 限一次 evolve。不需要離線建庫或 GPU，也不保存 exact density records。
 
-從 `zcu_tools.simulators.ftf.environment` 匯入 `FTFAcquisitionOptions`，再用 `ftf(..., acquisition=FTFAcquisitionOptions(private_replay=absolute_directory))` 保存私有輸入。同一模組的 `replay_round(round_path, soccfg=recording_profile)` 在相同數值、RNG 與相依套件版本下重算一個已保存的 round，不讀取演化資料庫。Archive 保存當次 effective settings，`drift=None`，因此重播不依賴時鐘，也不再抽漂移。Model identity 保存在既有的 round snapshot；重播不需要目前物理 YAML 或較早的 rounds。Caller 必須提供錄製時使用的板子 profile，archive 不保存它，replay 也不驗證其一致性。私有檔案含模型真值，不放入一般 Run／GUI／MCP metadata。
+從 `zcu_tools.simulators.ftf.environment` 匯入 `FTFAcquisitionOptions`，再用 `ftf(..., acquisition=FTFAcquisitionOptions(private_replay=absolute_directory))` 保存私有輸入。
+同一模組的 `replay_round(round_path, soccfg=recording_profile)` 檢查數值、RNG 與相依套件版本，再重算一個已保存的 round。
+CPU 錄製一律用 CPU 重算；GPU 錄製要用相同 OpenCL 身分和錄製時的 worker 數。
+詳見 [FTF private replay](../../../lib/zcu_tools/simulators/ftf/environment/README.md#private-replay)。
+Archive 保存當次 effective settings，`drift=None`，因此重播不依賴時鐘，也不再抽漂移。
+Model identity 保存在 round snapshot；重播不需要演化資料庫、目前物理 YAML 或較早的 rounds。
+Caller 必須提供錄製時使用的板子 profile，archive 不保存它，replay 也不驗證其一致性。
+私有檔案含模型真值，不放入一般 Run／GUI／MCP metadata。

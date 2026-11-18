@@ -94,9 +94,15 @@ class OpenCLBackend:
         self.forced = forced
         self._runner = OpenCLDOP853() if forced else None
         self._detect_lock = Lock()
-        self._used_dimensions: set[int] = set()
         self._probe_failure: str | None = None
         self._build_failures: dict[int, str | None] = {}
+
+    def detect_execution_device(self) -> str:
+        """Resolve this Engine's device, or return cpu if auto detection fails."""
+        with self._detect_lock:
+            self._detect_device()
+            runner = self._runner
+        return "cpu" if runner is None else runner.execution_device
 
     def failure(self, dimension: int) -> str | None:
         """Return the device probe or dimension build failure already observed."""
@@ -147,17 +153,6 @@ class OpenCLBackend:
             return None
         return runner
 
-    def used_dimension(self, dimension: int) -> bool:
-        """Whether this Engine has completed a GPU evolve at dimension."""
-        return dimension in self._used_dimensions
-
-    def record_use(self, dimension: int) -> bool:
-        """Record a successful GPU evolve; return True on first use of dimension."""
-        if self.used_dimension(dimension):
-            return False
-        self._used_dimensions.add(dimension)
-        return True
-
 
 class OpenCLDOP853:
     """Own the FP64-capable GPU, context and programs borrowed by one Engine.
@@ -202,6 +197,11 @@ class OpenCLDOP853:
         self._programs: dict[int, cl.Program] = {}
         self._build_lock = Lock()
         self._source = opencl_source()
+        kernel_version = sha256(self._source.encode()).hexdigest()
+        self.execution_device = (
+            f"opencl:{device.name}/{device.driver_version}/{kernel_version}/"
+            f"{cl.VERSION_TEXT}"
+        )
 
     def check_device(self) -> None:
         """Validate automatic admission using the persisted CPU/GPU comparison.

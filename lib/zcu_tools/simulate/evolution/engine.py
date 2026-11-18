@@ -358,6 +358,17 @@ class PathDiagnostics:
     Merge adds lengths; exact-result reuse retains them with zero measured CPU.
     """
 
+    execution_device: str = "cpu"
+    """Device that produced these results, even when telemetry is disabled.
+
+    "cpu" means no row ran on GPU. Otherwise the identity is
+    "opencl:<device name>/<driver version>/<kernel version>/<pyopencl version>",
+    where the kernel version hashes the generated OpenCL source.
+    Merge keeps the GPU identity if present, ignoring CPU-only parts; it
+    raises ValueError for distinct GPU identities. Exact-result reuse retains
+    the identity of the device that computed the cached result.
+    """
+
     def for_reuse(self, *, telemetry: bool) -> PathDiagnostics:
         """Preserve routes but report no kernel calls for an exact-result hit.
 
@@ -462,8 +473,12 @@ def merge_path_diagnostics(parts: Sequence[PathDiagnostics]) -> PathDiagnostics:
     estimated_cpu_s is None if any contributing family estimate is unknown.
     Reuse-hit diagnostics participate exactly as returned, without adding hits
     or replacing their counts. Empty parts returns empty PathDiagnostics.
-    Inputs are unchanged; the result owns immutable mappings and member tuples.
+    CPU-only parts do not override a GPU execution_device; conflicting GPU
+    identities raise ValueError. Inputs are unchanged.
     """
+    devices = {part.execution_device for part in parts} - {"cpu"}
+    if len(devices) > 1:
+        raise ValueError(f"cannot merge GPU execution devices: {sorted(devices)}")
     segments: Counter[str] = Counter()
     durations: Counter[str] = Counter()
     exceeded: Counter[str] = Counter()
@@ -486,6 +501,7 @@ def merge_path_diagnostics(parts: Sequence[PathDiagnostics]) -> PathDiagnostics:
         sum(part.frontend_cpu_s for part in parts),
         {name: tuple(sorted(indices)) for name, indices in members.items()},
         duration_ns_by_kernel=durations,
+        execution_device=next(iter(devices), "cpu"),
     )
 
 
@@ -658,6 +674,27 @@ class Engine:
             None if backend == "cpu" else OpenCLBackend(forced=backend == "opencl")
         )
 
+    @property
+    def workers(self) -> int:
+        """Configured maximum host worker count, including for OpenCL pricing."""
+        return self._workers
+
+    def detect_execution_device(self) -> str:
+        """Resolve this Engine's available device before evolving.
+
+        Returns an identity in the same format as PathDiagnostics.execution_device,
+        or "cpu" if this Engine is CPU-only or automatic detection fails. An
+        auto Engine performs its otherwise lazy OpenCL check on this call.
+        Detection does not price rows or guarantee that a dimension can run on
+        the GPU. For actual execution, read the evolve result's paths instead.
+        A closed Engine raises RuntimeError.
+        """
+        with self._lock:
+            if self._closed:
+                raise RuntimeError("engine is closed")
+            backend = self._opencl
+            return "cpu" if backend is None else backend.detect_execution_device()
+
     def reuse(
         self,
         source: ModelSource,
@@ -709,10 +746,10 @@ class Engine:
         invalidate its retained result on any content, source, budget or Engine
         change; evolve does not verify the caller's digest. Registration does not
         change the numerical solve or its result. Facts use a separate LRU capped
-        at routing_cache_bytes (default 4 MiB). Empty work,
-        disabled routing residency, oversized facts or the first auto GPU use
-        of a dimension may leave no entry. A later reuse() returns False after eviction or
-        a route change; the caller must then evolve the full acquire again.
+        at routing_cache_bytes (default 4 MiB). Empty work, disabled routing
+        residency or oversized facts may leave no entry. A later reuse()
+        returns False after eviction or a route change; the caller must then
+        evolve the full acquire again.
         budget: finite positive absolute population and low-four error allowance;
         otherwise raises ValueError. A closed engine raises RuntimeError.
         cancel: read-only is_set query checked between chunks; None disables it;
@@ -818,24 +855,8 @@ class Engine:
             if cancel.is_set():
                 raise Cancelled()
             result.paths.warn_exceeded(stacklevel=3)
-            if self._first_auto_gpu_use(
-                result.densities.shape[1], used=schedule.opencl_used
-            ):
-                # Prices for this dimension just changed. A cached result may
-                # have used CPU at the cold price, including an earlier wave here.
-                self._routing_reuse.clear()
-            else:
-                self._routing_reuse.add(reuse_key, reuse_snapshot)
+            self._routing_reuse.add(reuse_key, reuse_snapshot)
             return result
-
-    def _first_auto_gpu_use(self, dimension: int, *, used: bool) -> bool:
-        backend = self._opencl
-        return (
-            used
-            and backend is not None
-            and not backend.forced
-            and backend.record_use(dimension)
-        )
 
     def inspect_dispatch(
         self,

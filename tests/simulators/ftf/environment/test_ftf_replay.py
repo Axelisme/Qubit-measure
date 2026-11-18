@@ -1,15 +1,26 @@
 """Author-opted persistent round replay through acquisition and detached inputs."""
 
+import sys
+from contextlib import closing
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
+from joblib import Parallel
+from qick import QickConfig
 from zcu_tools.device import DeviceManager
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.simulation import IntegratedRound, SimulationClock
-from zcu_tools.simulate.boundary import RoundRequest
+from zcu_tools.simulate.boundary import (
+    AcquireRequest,
+    PulseEnvelope,
+    RoundRequest,
+    RoundStatistics,
+)
+from zcu_tools.simulate.evolution import Engine
 from zcu_tools.simulators.ftf.config import parse_ftf
 from zcu_tools.simulators.ftf.environment import (
     FTFAcquisitionOptions,
@@ -19,11 +30,159 @@ from zcu_tools.simulators.ftf.environment import (
 )
 from zcu_tools.simulators.replay import read_replay, replay_paths
 
+from tests.core._simulation import ticks
 from tests.program._profiles import profile_soccfg
 from tests.program._timeline import compile_modules
 from tests.simulators.ftf.config._data import ftf_document
 
 pytestmark = pytest.mark.sim
+
+
+def _sampled_request() -> AcquireRequest:
+    from tests.simulators.ftf.environment._templates import request, template
+
+    count = 8
+    duration = ticks(0.5)
+    base = template(tones=2)
+    envelope = PulseEnvelope(ticks(0.125), (0j, 0.4 + 0j, 0.7 + 0j, 0.4 + 0j, 0j))
+    drives = tuple(
+        replace(
+            event,
+            start_ticks=np.zeros(count, dtype=np.int64),
+            duration_ticks=np.full(count, duration),
+            frequency_mhz=np.full(count, frequency),
+            phase_deg=np.linspace(5.0, 85.0, count),
+            gain=np.linspace(0.05, 0.2, count),
+            envelopes=(envelope,),
+            envelope_index=np.zeros(count, dtype=np.int64),
+            active=np.ones(count, dtype=bool),
+        )
+        # Separated high carriers keep this sampled pair on DOP853 under
+        # default family routing, so replay exercises its GPU/CPU price.
+        for event, frequency in zip(base.events[:2], (5000.0, 5500.0), strict=True)
+    )
+    readout = base.events[-1]
+    terminal = replace(
+        readout,
+        start_ticks=np.full(count, duration),
+        duration_ticks=np.full(count, readout.duration_ticks[0]),
+        frequency_mhz=np.full(count, readout.frequency_mhz[0]),
+        phase_deg=np.full(count, readout.phase_deg[0]),
+        gain=np.full(count, readout.gain[0]),
+        envelope_index=np.zeros(count, dtype=np.int64),
+        active=np.ones(count, dtype=bool),
+    )
+    adc = base.readouts[0]
+    batch = replace(
+        base,
+        points=np.arange(count, dtype=np.int64),
+        events=(*drives, terminal),
+        readouts=(
+            replace(
+                adc,
+                trigger_ticks=np.full((count, 1), duration),
+                frequency_mhz=np.repeat(adc.frequency_mhz[:1], count, axis=0),
+                phase_deg=np.repeat(adc.phase_deg[:1], count, axis=0),
+                generator_channels=np.repeat(adc.generator_channels[:1], count, axis=0),
+            ),
+        ),
+        duration_ticks=terminal.start_ticks + terminal.duration_ticks,
+    )
+    acquire = request()
+    return replace(
+        acquire,
+        loop_dims=(acquire.reps, count),
+        point_dims=(count,),
+        templates=(batch,),
+        readouts=(replace(acquire.readouts[0], trigger_ticks=(duration,)),),
+    )
+
+
+def _record_sampled_round(
+    archive: Path, soccfg: QickConfig, engine: Engine
+) -> tuple[Path, RoundStatistics]:
+    from tests.simulators.ftf.environment._templates import expect_statistics, snapshot
+
+    acquire = _sampled_request()
+    with closing(
+        FTFSource(
+            parse_ftf(ftf_document()).with_telemetry(enabled=False),
+            DeviceManager(),
+            soccfg=soccfg,
+            engine=engine,
+            acquisition=FTFAcquisitionOptions(private_replay=archive),
+        )
+    ) as source:
+        expected = expect_statistics(
+            source.execute(RoundRequest(acquire, snapshot(), 0))
+        )
+
+    return replay_paths(archive)[0], expected
+
+
+def test_cpu_round_replays_bitwise_without_probing_opencl(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tests.simulators.ftf.environment._templates import expect_statistics
+
+    soccfg = profile_soccfg("ftf")
+    path, expected = _record_sampled_round(tmp_path, soccfg, Engine(2, backend="cpu"))
+    versions = dict(read_replay(path).acquire.versions)
+    assert versions["execution_device"] == "cpu"
+    assert versions["workers"] == "2"
+    assert "pyopencl" not in versions
+
+    def unexpected_probe() -> None:
+        raise AssertionError("CPU replay must not probe for an OpenCL device")
+
+    # Any GPU discovery would consult this external loader boundary.
+    monkeypatch.setitem(
+        sys.modules,
+        "pyopencl",
+        SimpleNamespace(Error=RuntimeError, get_platforms=unexpected_probe),
+    )
+    actual = expect_statistics(replay_round(path, soccfg=soccfg))
+    assert actual.state_counts.tobytes() == expected.state_counts.tobytes()
+    assert actual.channels[0].sums.tobytes() == expected.channels[0].sums.tobytes()
+
+
+@pytest.mark.requires_opencl
+def test_gpu_round_replays_bitwise_at_recorded_worker_width_and_rejects_missing_gpu(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import pyopencl as cl
+
+    from tests.simulators.ftf.environment._templates import expect_statistics
+
+    monkeypatch.setenv("ZCU_TOOLS_CACHE_DIR", str(tmp_path / "cache"))
+    soccfg = profile_soccfg("ftf")
+    path, expected = _record_sampled_round(tmp_path / "archive", soccfg, Engine(2))
+    versions = dict(read_replay(path).acquire.versions)
+    recorded = versions["execution_device"]
+    assert recorded.startswith("opencl:")
+    assert versions["workers"] == "2"
+    assert "pyopencl" not in versions
+
+    # I/Q need not change at every worker width. Observe the actual pool width
+    # at the joblib boundary without replacing execution or device routing.
+    pool_widths: list[int] = []
+    enter = Parallel.__enter__
+
+    def observe_pool(pool: Parallel) -> Parallel:
+        pool_widths.append(pool.n_jobs)
+        return enter(pool)
+
+    monkeypatch.setattr(Parallel, "__enter__", observe_pool)
+    actual = expect_statistics(replay_round(path, soccfg=soccfg))
+    assert pool_widths and set(pool_widths) == {2}
+    assert actual.state_counts.tobytes() == expected.state_counts.tobytes()
+    assert actual.channels[0].sums.tobytes() == expected.channels[0].sums.tobytes()
+
+    # Discovery is the external boundary that differs on a CPU-only machine.
+    monkeypatch.setattr(cl, "get_platforms", list)
+    with pytest.raises(ValueError, match="execution device mismatch") as mismatch:
+        replay_round(path, soccfg=soccfg)
+    assert f"recorded {recorded}, current cpu" in str(mismatch.value)
 
 
 @pytest.mark.parametrize("mode", ["integrated", "decimated"])

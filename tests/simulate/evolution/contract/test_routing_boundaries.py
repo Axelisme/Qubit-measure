@@ -18,6 +18,7 @@ from zcu_tools.simulate.evolution import (
     EnvelopeSpec,
     NoValidKernel,
     TimelineBatch,
+    merge_path_diagnostics,
 )
 
 from .accuracy_cases import (
@@ -173,7 +174,7 @@ def test_auto_prices_small_and_wide_dense_acquires(
 
 
 @pytest.mark.requires_opencl
-def test_disk_cache_does_not_replace_an_engines_opencl_price_history(
+def test_opencl_price_does_not_depend_on_engine_or_disk_warmth(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     import pyopencl as cl
@@ -182,25 +183,24 @@ def test_disk_cache_does_not_replace_an_engines_opencl_price_history(
     source = coherent_source(synthetic_model(32))
     narrow, wide = _dense_batch(1), _dense_batch(12)
     with closing(Engine(2, families=("dop853",))) as auto:
-        cold = auto.evolve(source, (narrow,), telemetry=True, reuse_key=b"narrow")
-        assert auto.reuse(source, b"narrow")
+        cold = auto.evolve(source, (narrow,), telemetry=True)
         auto.evolve(source, (wide,))
-        assert not auto.reuse(source, b"narrow")
         warm = auto.evolve(source, (narrow,), telemetry=True)
-    assert cold.paths.routing["dop853"].opencl_rows == 0
-    assert warm.paths.routing["dop853"].opencl_rows == 1
+    with closing(Engine(2, families=("dop853",))) as restarted:
+        again = restarted.evolve(source, (narrow,), telemetry=True)
+    for result in (cold, warm, again):
+        assert result.paths.routing["dop853"].opencl_rows == 1
+        assert result.densities.tobytes() == cold.densities.tobytes()
 
     def bad_launch(*args: object, **kwargs: object) -> None:
         raise RuntimeError("injected GPU execution failure")
 
     monkeypatch.setattr(cl, "Kernel", bad_launch)
-    with closing(Engine(2, families=("dop853",))) as restarted:
-        again = restarted.evolve(source, (narrow,), telemetry=True)
-        assert again.paths.routing["dop853"].opencl_detection_error is None
-        assert again.paths.routing["dop853"].opencl_rows == 0
-        assert again.densities.tobytes() == cold.densities.tobytes()
-        with pytest.raises(RuntimeError, match="injected GPU execution failure"):
-            restarted.evolve(source, (wide,))
+    with (
+        closing(Engine(2, families=("dop853",))) as restarted,
+        pytest.raises(RuntimeError, match="injected GPU execution failure"),
+    ):
+        restarted.evolve(source, (wide,))
 
 
 @pytest.mark.requires_opencl
@@ -240,6 +240,7 @@ def test_auto_isolates_a_failing_dimension_build(
     with closing(Engine(2, families=("dop853",))) as restarted:
         cached = restarted.evolve(source, (batch,), telemetry=True)
     for result in (declined, cached):
+        assert result.paths.execution_device == "cpu"
         assert result.densities.tobytes() == expected.densities.tobytes()
         report = result.paths.routing["dop853"]
         assert report.opencl_rows == 0
@@ -257,7 +258,12 @@ def test_auto_isolates_a_failing_dimension_build(
 
 
 @pytest.mark.requires_opencl
-def test_opencl_keeps_clipped_pulses_and_touching_dop853_chains_on_cpu() -> None:
+def test_opencl_keeps_clipped_pulses_and_touching_dop853_chains_on_cpu(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import pyopencl as cl
+
+    monkeypatch.setenv("ZCU_TOOLS_CACHE_DIR", str(tmp_path))
     case = accuracy_case("sampled_gaussian_9")
     full = case.batch
     clipped = replace(
@@ -278,6 +284,23 @@ def test_opencl_keeps_clipped_pulses_and_touching_dop853_chains_on_cpu() -> None
     np.testing.assert_array_equal(actual.points, expected.points)
     assert actual.densities[2:].tobytes() == expected.densities[2:].tobytes()
     assert density_error(actual.densities[:2], expected.densities[:2]) < 1e-3
+    assert expected.paths.execution_device == "cpu"
+    identity = actual.paths.execution_device
+    assert identity.startswith("opencl:")
+    name, driver, kernel, binding = identity.removeprefix("opencl:").rsplit("/", 3)
+    assert (name, driver) in {
+        (device.name, device.driver_version)
+        for platform in cl.get_platforms()
+        for device in platform.get_devices(device_type=cl.device_type.GPU)
+    }
+    assert kernel
+    assert binding == cl.VERSION_TEXT
+    reused = actual.paths.for_reuse(telemetry=False)
+    assert reused.execution_device == actual.paths.execution_device
+    assert (
+        merge_path_diagnostics((expected.paths, actual.paths, reused)).execution_device
+        == actual.paths.execution_device
+    )
 
 
 def _joint_gate_case(count: int) -> AccuracyCase:

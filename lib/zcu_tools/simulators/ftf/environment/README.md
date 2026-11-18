@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-11-18, segment numeric revision
+**Last updated:** 2026-11-18, private replay execution device
 
 **讀者：** framework-dev、agent。FTF 環境的組裝接縫、數值接線與 acquisition 契約。
 
@@ -648,7 +648,16 @@ identity. It never infers board settings from saved model wiring.
 `ReplayAcquire.settings` stores that acquisition's effective settings with
 `drift=None`, so replay neither reads the simulation clock nor samples drift.
 `ReplayRound.snapshot.model_identity` stores the effective model identity.
-Backend, engine numeric version, RNG version and dependency versions must match. The stream policy is `PCG64/SeedSequence-v2`.
+The version pairs require an exact backend, model, engine numeric version, RNG
+and dependency match. They also record `workers`, the Engine's worker count, and
+`execution_device`, the device that computed the round's evolution. If no row ran
+on GPU, the record says `cpu` and replay forces the CPU backend without checking
+for OpenCL. If any row ran on GPU, replay requires the same OpenCL device name,
+driver, kernel version and pyopencl version, then reruns automatic routing with
+the recorded worker count. A different or unavailable GPU raises `ValueError`
+with both identities. pyopencl is not a global replay dependency. Archives
+missing either execution field fail the version check.
+The stream policy is `PCG64/SeedSequence-v2`.
 The backend is `ftf-segment-v13`. Integrated raw and decimated traces resolve
 continuous CTMC jump times and cavity memory, with one physical path per shot
 shared across mux carriers, ADCs and windows. Archives from `ftf-segment-v12`

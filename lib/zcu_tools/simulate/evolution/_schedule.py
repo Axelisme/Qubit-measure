@@ -155,7 +155,7 @@ class Schedule:
         self.source, self.budget = context.source, context.budget
         self.table = geometry.table
         self.batch_static_maps = False
-        self.opencl_used = False
+        self.execution_device = "cpu"
         self.initial_density = (
             context.source.initial_density
             if initial_density is None
@@ -421,7 +421,7 @@ class Schedule:
             runner = self._opencl_runner(rows[order])
             if runner is not None:
                 self._apply_opencl(waves, rows[order], order, runner)
-                self.opencl_used = True
+                self.execution_device = runner.execution_device
             steps = list(
                 pool(
                     delayed(wave.chunk.run)(wave.slots if runner is None else None)
@@ -443,7 +443,6 @@ class Schedule:
             rows,
             dimension,
             self.workers,
-            warm=self.opencl_used or backend.used_dimension(dimension),
         ):
             return None
         return backend.prepare(dimension)
@@ -539,6 +538,7 @@ class Schedule:
             float(np.max(np.abs(np.trace(output, axis1=1, axis2=2) - 1))),
             routing=routing,
             duration_ns_by_kernel=durations,
+            execution_device=self.execution_device,
             point_members={
                 name: tuple(sorted(int(self.geometry.points[i]) for i in timelines))
                 for name, timelines in points.items()

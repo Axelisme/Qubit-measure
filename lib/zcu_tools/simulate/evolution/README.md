@@ -612,6 +612,12 @@ counts endpoints computed on GPU and `opencl_detection_error` reports why
 automatic detection or the active dimension's compilation failed. It is
 `None` when neither failed.
 
+`PathDiagnostics.execution_device` is read-only and available with telemetry
+off. It is `cpu` if no row ran on GPU; otherwise it contains the OpenCL device
+name, driver version, kernel version and pyopencl version. Merging CPU and GPU
+parts keeps the GPU identity; merging different GPU identities raises
+`ValueError`. Exact-result reuse keeps the device that produced the result.
+
 `estimated_cost` uses **relative scheduling units**, not seconds. The existing
 constant two-tone plan supplies seconds estimates for selected Floquet/DOP853
 rows. Other rows have `estimated_cpu_s=None`; mixed-plan totals are not assigned

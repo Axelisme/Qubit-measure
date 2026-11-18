@@ -365,7 +365,10 @@ class FTFAcquire:
                 ReplayAcquire(
                     settings=owner.effective_settings,
                     request=acquire,
-                    versions=replay_versions(),
+                    versions=replay_versions(
+                        execution_device=prepared.paths.execution_device,
+                        workers=owner.engine.workers,
+                    ),
                 ),
                 replace(snapshot, model_identity=owner.identity),
                 index,

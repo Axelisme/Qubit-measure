@@ -417,13 +417,17 @@ def test_replay_rejects_other_backend_settings_before_numeric_work(
     from tests.simulators.ftf.config._data import ftf_document
 
     wrong = parse_ftf(ftf_document()) if target == "single" else physical_settings()
-    replay = single_replay if target == "single" else ftf_replay
+    versions = (
+        single_replay.replay_versions()
+        if target == "single"
+        else ftf_replay.replay_versions(execution_device="cpu", workers=1)
+    )
     fixed = ReplayAcquire(
         settings=wrong,
         request=AcquireRequest(
             "integrated", (1,), 0, (), 123, 0, "test", time_base=TIME_BASE
         ),
-        versions=replay.replay_versions(),
+        versions=versions,
     )
     path = save_replay(tmp_path, fixed, EnvironmentSnapshot("wrong", "wrong"), 0)
     try:

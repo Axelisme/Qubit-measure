@@ -88,17 +88,14 @@ def opencl_preferred(
     rows: NDArray[np.int64],
     dimension: int,
     workers: int,
-    *,
-    warm: bool,
 ) -> bool:
     """Compare CPU and GPU wall prices for one acquire-wide ready wave.
 
     rows are already admitted, sorted global IDs. All have the same DC model;
     GPU buffers are grouped by ordered port pair and split at the batch cap.
-    warm means this Engine has already run that dimension (including an earlier
-    wave in the same evolve). Disk cache state and measured wall time never
-    enter the decision. Calibrated on Arc for d=3 sampled pulses and d=32
-    FTF simultaneous drive at 1, 4 and 24 points.
+    For an available device, the price uses the acquire work and worker width,
+    not Engine or disk cache warmth or measured wall time. Calibrated on Arc
+    for d=3 sampled pulses and d=32 FTF simultaneous drive at 1, 4 and 24 points.
     """
     knots = _playback_knots(table, rows)
     trials = np.maximum(1.4 * table.duration_ns[rows], 2.0 * (knots - 1))
@@ -108,9 +105,10 @@ def opencl_preferred(
     # 1 to 7 workers; a 4 us per-trial floor accounts for small matrices.
     cpu_row = work * (1 + 0.15 * (lanes - 1)) / 17e9 + trials * 4e-6
     cpu = max(float(cpu_row.sum()) / lanes, float(cpu_row.max()))
-    # First-use compilation can take longer when the driver has no binary;
-    # don't use a fast disk hit to choose a different numerical backend.
-    gpu = 3e-6 if warm else 0.35 if dimension <= 8 else 1.8
+    # Like routing history, replacing the Engine must not change the route.
+    # Disk cache amortizes cold compilation per machine, driver, kernel and d;
+    # charge only the resident-program overhead, regardless of cache state.
+    gpu = 3e-6
     ports, membership = np.unique(
         table.tone_port[rows, :2], axis=0, return_inverse=True
     )
