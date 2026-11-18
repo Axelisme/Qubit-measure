@@ -2,7 +2,7 @@
 
 **讀者：** operator、lab-author、agent。準備 FTF 模擬參數與 entry，並從 GUI 或 Notebook 啟動模擬環境。
 
-**Last updated:** 2026-11-18，私有重播的執行裝置
+**Last updated:** 2026-11-18，GPU 預編譯
 
 既有 entry 把 resonator 與 mux group 的 `ext.time_of_fly` 搬到頂層 `time_of_fly`。程式不自動搬移。
 
@@ -56,7 +56,7 @@ Script 接著建立離線 FTF 環境，安裝 SoC，登記 f1_bias、coupler_bia
 f2_bias 三個 live device，GUI 即可從 New Tab 開實驗。毋須手動 Open 或選 point。
 Template 不含 module library 或校準值；tab 可編輯，但執行量測前仍須設定有效輸入。
 Script 透過共用 GUI 策略選擇 `workers=max(1, (os.cpu_count() or 1) - 1)`，保留一核。
-`warmup=False` 不變，不在啟動時預編譯或執行 acquisition。
+`warmup=True` 在背景準備常用 CPU 路徑與可用的 OpenCL 程式，不執行 acquisition。
 
 MCP 的等效入口是
 `connect(launch="new", script="/absolute/path/startup.py", project_root="/absolute/new-ftf-project")`。
@@ -145,13 +145,13 @@ F1／F2 可選 `q_cap`、`xqp`、`aphi`；coupler 只有 `q_cap`、`aphi`，`q_i
 
 ## 演化與重播
 
-FTF 預設使用分段引擎的快速算法。GUI startup 透過共用策略明確傳 `workers=max(1, (os.cpu_count() or 1) - 1)`，保留一核，至少使用 1 個 worker。GUI 保持 `warmup=False`，不啟動數值預編譯。核心數未知時使用 1 個 worker，八核主機使用 7 個 GUI workers。
+GUI startup 選擇 `workers=max(1, (os.cpu_count() or 1) - 1)`，保留一核，至少使用一個 worker。八核主機使用七個 GUI workers。GUI 傳 `warmup=True`，在背景準備常用 CPU 路徑，並依 `retained_levels` 預編譯可用的 OpenCL 程式。準備完成後，第一次 acquisition 不必再等這些編譯。
 
-Notebook 明確傳 `workers=max(1, (os.cpu_count() or 1) - 2), warmup=True`，仍保留兩核。建立環境後，它啟動單一背景 worker 預編譯常用數值路徑。核心數未知時使用 1 個 worker，八核主機使用 6 個 Notebook workers。公開 `ftf()` 的預設仍是 `workers=1, warmup=False`；`workers` 必須為正整數。測試、benchmark、研究與其他直接呼叫不套用 GUI 策略。
+Notebook 傳 `workers=max(1, (os.cpu_count() or 1) - 2), warmup=True`，保留兩核，並在背景預編譯常用 CPU 路徑與可用的 GPU 程式。八核主機使用六個 Notebook workers。公開 `ftf()` 仍預設 `workers=1, warmup=False`；測試、benchmark、研究與直接呼叫不套用 GUI 策略。
 
-預編譯會占用 CPU 與記憶體，只把編譯時間與其他工作重疊，不縮短總編譯成本。同一個 process 內啟用 warmup 的環境共用同一個 future。
+同一個 process 內的環境共用相同維度的 GPU 預編譯，不重複編譯。獨立 warmup 引擎只填磁碟快取，不抽樣或改變正式 device bias。沒有可用 GPU 時維持按需執行的 CPU 路徑。
 
-啟用預編譯時，`env.warmup.status` 提供進度與錯誤。停用時 `env.warmup` 為 `None`。`env.wait_ready()` 等待完成；若要讓計時排除預編譯，先等 ready 再啟動計時。Acquire 也會自動等待，失敗則回到 on-demand 編譯。背景工作不抽樣、不切換正式 device bias，也不保留正式引擎的數值 preparation。結束 process 時會等當前編譯完成，不強制中止 compiler。完整介面見 [FTF 契約](../../../lib/zcu_tools/simulators/ftf/environment/README.md#startup-preparation)。
+若有準備工作，`env.warmup.status` 提供進度與錯誤，`env.wait_ready()` 等待結束。若要排除預編譯，先等工作結束再開始計時。Acquire 會自動等待，準備失敗仍按需運算。GUI 關閉時等背景工作結束再釋放裝置，不強制中止 compiler。完整介面見 [FTF 契約](../../../lib/zcu_tools/simulators/ftf/environment/README.md#startup-preparation)。
 
 整個 evolve 期間 native BLAS 限為 1 個執行緒。重疊的 evolve 共用 process 層級的 reference count，第一個進入時設限，最後一個離開時還原。其他程式碼不要在 evolve 期間自行更改 threadpoolctl 限制。沒有演化工作、只有一條 timeline 或只有 1 個 worker 時，不開 joblib pool。模型與 caller-owned 完整 preparation 只保留在記憶體，Engine 的數值 preparation 限一次 evolve。不需要離線建庫或 GPU，也不保存 exact density records。
 

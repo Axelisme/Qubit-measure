@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-11-18, private replay execution device
+**Last updated:** 2026-11-18, GPU startup preparation
 
 **讀者：** framework-dev、agent。FTF 環境的組裝接縫、數值接線與 acquisition 契約。
 
@@ -194,8 +194,9 @@ Numerical preparations live within one evolve. The source's complete preparation
 LRU remains separate from Engine and does not retain noisy outputs.
 The keyword `workers` selects the engine's sole parallel width; direct callers
 use one worker by default, including tests, benchmarks and research.
-GUI startup reserves one host CPU, with at least one worker, and keeps warmup off.
-Notebook still reserves two CPUs and opts into warmup. The shared GUI policy is
+GUI startup reserves one host CPU, with at least one worker. The Notebook
+reserves two CPUs. Both pass `warmup=True` to start CPU and GPU preparation.
+The shared GUI worker policy is
 `gui.app.measure.startup_context.simulation_workers(cpu_count)`, defined by
 [ADR-0069](../../../../../docs/adr/0069-experiment-core-and-frontends.md#顯式-cfg-與裝置環境).
 Startup instructions belong to
@@ -226,15 +227,24 @@ complete preparations. No projected operators or rates cross flux points.
 
 ## Startup preparation
 
-`ftf(..., warmup=False)` starts no numeric preparation by default. Callers choose
-workers and warmup explicitly; GUI and Notebook policy belongs to
+Callers select startup work with `ftf(..., warmup=...)`:
+
+- `False` (default) starts no background work.
+- `True` prepares common CPU paths, then the OpenCL DOP853 program for the model's
+  `retained_levels`. It skips GPU preparation if pyopencl is absent, `families`
+  excludes `dop853`, or the dimension exceeds GPU coverage. If background
+  detection finds no usable GPU, it skips the synthetic solve. A later eligible
+  acquire reports detection and build failures through routing diagnostics.
+- An explicit `EnvironmentWarmup` runs only the caller's items.
+
+GUI and Notebook policy belongs to
 [environment setup](../../../../../zcu_lab/simulation_envs/README.md#workers-與-startup-preparation).
-Opting in starts one process-wide background numeric worker. All opted-in
-environments in the process share its future and terminal result.
-Preparation uses small disposable numeric models, one evolution worker and no
-sampling. It never reads or changes the live environment's devices, binding seed,
-acquire sequence or resident engine cache. Compilation still consumes CPU and
-memory; it overlaps configuration work rather than reducing total compile cost.
+Environments requesting identical items share a future. Within one process,
+each CPU item runs once and each supported dimension gets at most one GPU warmup.
+The GPU item uses a disposable Engine and fills the existing device-check and
+program disk caches. Preparation never samples
+or changes the live devices, binding seed, acquire sequence or resident Engine.
+Startup overlaps compilation with other work; it does not reduce its total cost.
 
 `env.warmup` is an `EnvironmentWarmup`, or None when disabled. Its immutable
 `status` reports `state` (pending/running/ready/failed), `completed` item names,
@@ -243,10 +253,13 @@ memory; it overlaps configuration work rather than reducing total compile cost.
 callbacks receive the terminal status and must marshal GUI updates to the owner
 thread. `env.wait_ready(timeout=None)` waits for completion and returns the terminal
 status, or None when disabled. A timeout raises `TimeoutError` without cancelling
-work. Failure is logged, retained in status and permits ordinary on-demand
-compilation. The worker exits after completion. Process exit waits for an active
-worker rather than interrupting the compiler. Closing live devices does not cancel
-this independent numeric work.
+work. A CPU preparation error stops the manifest before the GPU item and appears
+in the failed status. A GPU preparation error is logged without changing CPU
+readiness. Acquire still uses on-demand compilation or CPU fallback when needed.
+The worker exits after completion. Call `env.close_backend()` after acquisitions drain to wait
+for preparation and release the Engine. Device cleanup is separate; use
+`closing_environment(env)` to release both. Closing devices alone does not wait
+for independent numeric preparation.
 
 Acquire automatically waits after binding admission and before consuming its RNG
 sequence or constructing its request. Call `env.wait_ready()` **before starting a
