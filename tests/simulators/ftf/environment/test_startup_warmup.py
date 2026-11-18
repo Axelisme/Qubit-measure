@@ -1,10 +1,10 @@
 """Startup preparation is observable and does not consume acquisition identity."""
 
-import logging
 import sys
-from collections.abc import Sequence
+from collections import Counter
+from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import closing
+from contextlib import ExitStack, closing
 from dataclasses import replace
 from importlib.machinery import ModuleSpec
 from pathlib import Path
@@ -17,6 +17,7 @@ from tqdm.auto import tqdm
 from zcu_tools.experiment import simulation
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
+from zcu_tools.simulate.adc import ConditionalReadout, ConditionalSums, ReadoutBatch
 from zcu_tools.simulate.evolution import Engine, EnvelopeSpec
 from zcu_tools.simulators.ftf.config import parse_ftf
 from zcu_tools.simulators.ftf.environment import ftf
@@ -61,11 +62,26 @@ def program(env):
 
 @pytest.fixture
 def isolated_startup(monkeypatch: pytest.MonkeyPatch) -> None:
-    # Restore the process-wide registries after each built-in warmup test.
+    # The public interface has no reset for process-wide single-flight state.
     monkeypatch.setattr(ftf_warmup, "_startup", {})
-    monkeypatch.setattr(ftf_warmup, "_cpu_prepared", {})
-    # The GPU seam needs no CPU manifest; the measurement exercises all CPU items.
+    monkeypatch.setattr(ftf_warmup, "_cpu_prepared", set())
+    monkeypatch.setattr(ftf_warmup, "_cpu_failures", {})
+    # GPU tests need no CPU workloads unless they check the CPU/GPU handoff.
     monkeypatch.setattr(ftf_warmup, "COVERAGE", ())
+
+
+def install_fake_opencl(
+    monkeypatch: pytest.MonkeyPatch, get_platforms: Callable[[], list[object]]
+) -> None:
+    pyopencl = ModuleType("pyopencl")
+    pyopencl.__spec__ = ModuleSpec("pyopencl", loader=None)
+    pyopencl.__dict__["get_platforms"] = get_platforms
+    monkeypatch.setitem(sys.modules, "pyopencl", pyopencl)
+
+
+def test_invalid_warmup_dimension_is_rejected():
+    with pytest.raises(ValueError, match="dimension must be at least one"):
+        ftf_warmup.startup_warmup(0, families=("t4",))
 
 
 def test_gpu_warmup_does_not_block_construction_or_duplicate_discovery(
@@ -79,62 +95,145 @@ def test_gpu_warmup_does_not_block_construction_or_duplicate_discovery(
         nonlocal calls
         calls += 1
         entered.set()
-        assert release.wait(15), "test watchdog: release device discovery"
+        # The constructor caller releases discovery after both builds return.
+        assert release.wait(30), "test watchdog: release device discovery"
         return []
 
-    # OpenCL discovery is the external boundary; the worker and factory run normally.
-    pyopencl = ModuleType("pyopencl")
-    pyopencl.__spec__ = ModuleSpec("pyopencl", loader=None)
-    pyopencl.__dict__["get_platforms"] = no_gpu
-    monkeypatch.setitem(sys.modules, "pyopencl", pyopencl)
+    install_fake_opencl(monkeypatch, no_gpu)
     settings = parse_ftf(ftf_document())
     soccfg = profile_soccfg("ftf")
 
-    with ThreadPoolExecutor(max_workers=1) as executor:
-        first_build = executor.submit(ftf, settings, soccfg=soccfg, warmup=True)
+    with ExitStack() as environments:
         try:
-            first = first_build.result(timeout=10)
-            assert first.warmup is not None, (
-                "GPU warmup must be started at construction"
+            first = environments.enter_context(
+                simulation.closing_environment(
+                    ftf(settings, soccfg=soccfg, warmup=True)
+                )
             )
-            assert entered.wait(10)
-            second = executor.submit(ftf, settings, soccfg=soccfg, warmup=True).result(
-                timeout=10
+            assert first.warmup is not None
+            # Construction starts the worker, whose first item calls discovery.
+            assert entered.wait(30), "test watchdog: startup must reach discovery"
+            second = environments.enter_context(
+                simulation.closing_environment(
+                    ftf(settings, soccfg=soccfg, warmup=True)
+                )
             )
-            try:
-                assert second.warmup is first.warmup
-                with pytest.raises(TimeoutError):
-                    first.wait_ready(timeout=0)
-            finally:
-                second.devices.close_all_devices()
+            assert second.warmup is first.warmup
+            with pytest.raises(TimeoutError):
+                first.wait_ready(timeout=0)
         finally:
             release.set()
-            first = first_build.result()
-            try:
-                status = first.wait_ready()
-            finally:
-                first.devices.close_all_devices()
+        # Released discovery returns no devices and the only item finishes.
+        status = first.wait_ready(timeout=30)
     assert status is not None and status.state == "ready"
+    assert status.completed == ("dop853_opencl",)
     assert calls == 1
 
 
-@pytest.mark.parametrize("has_extra", [False, True])
-def test_gpu_only_warmup_is_inactive_when_no_extra_or_no_dop853(
+def test_warmup_skips_gpu_without_the_extra(
     monkeypatch: pytest.MonkeyPatch,
     isolated_startup: None,
-    has_extra: bool,
 ) -> None:
-    pyopencl = ModuleType("pyopencl")
-    pyopencl.__spec__ = ModuleSpec("pyopencl", loader=None)
-    monkeypatch.setitem(sys.modules, "pyopencl", pyopencl if has_extra else None)
-    settings = parse_ftf(ftf_document())
-    families = ("t4",) if has_extra else None
-    with simulation.closing_environment(
-        ftf(settings, soccfg=profile_soccfg("ftf"), warmup=True, families=families)
-    ) as env:
-        status = env.wait_ready()
-        assert status is not None and status.state == "ready"
+    monkeypatch.setitem(sys.modules, "pyopencl", None)
+    warmup = ftf_warmup.startup_warmup(8, families=None)
+    # With an empty CPU manifest and no GPU item, the worker finishes immediately.
+    status = warmup.wait_ready(timeout=30)
+    assert status.state == "ready"
+    assert not status.completed
+
+
+def test_warmup_skips_gpu_when_dop853_is_excluded(
+    monkeypatch: pytest.MonkeyPatch,
+    isolated_startup: None,
+) -> None:
+    def unexpected_discovery() -> list[object]:
+        pytest.fail("excluded dop853 must not discover an OpenCL device")
+
+    install_fake_opencl(monkeypatch, unexpected_discovery)
+    warmup = ftf_warmup.startup_warmup(8, families=("t4",))
+    # Excluding dop853 leaves the worker no items to run.
+    status = warmup.wait_ready(timeout=30)
+    assert status.state == "ready"
+    assert not status.completed
+
+
+def test_cpu_failure_stops_gpu_warmup_across_dimensions(
+    monkeypatch: pytest.MonkeyPatch,
+    isolated_startup: None,
+) -> None:
+    discoveries = cpu_calls = 0
+
+    def no_gpu() -> list[object]:
+        nonlocal discoveries
+        discoveries += 1
+        return []
+
+    def reject_readout(
+        readout: ConditionalReadout, batch: ReadoutBatch
+    ) -> ConditionalSums:
+        nonlocal cpu_calls
+        cpu_calls += 1
+        raise ValueError("synthetic CPU readout failure")
+
+    install_fake_opencl(monkeypatch, no_gpu)
+    monkeypatch.setattr(ftf_warmup, "COVERAGE", ("readout_integrated",))
+    monkeypatch.setattr(ConditionalReadout, "responses", reject_readout)
+    for dimension in (8, 9):
+        warmup = ftf_warmup.startup_warmup(dimension, families=None)
+        # The readout boundary rejects immediately (or reuses that failure).
+        status = warmup.wait_ready(timeout=30)
+        assert status.state == "failed"
+        assert status.error == "ValueError: synthetic CPU readout failure"
         assert not status.completed
+    assert cpu_calls == 1
+    assert discoveries == 0
+
+
+@pytest.mark.requires_opencl
+def test_gpu_warmup_prepares_each_dimension_and_shares_cpu_work(
+    monkeypatch: pytest.MonkeyPatch,
+    isolated_startup: None,
+    tmp_path: Path,
+) -> None:
+    import pyopencl as cl
+
+    monkeypatch.setenv("ZCU_TOOLS_CACHE_DIR", str(tmp_path))
+    monkeypatch.setattr(ftf_warmup, "COVERAGE", ("readout_integrated",))
+    responses = ConditionalReadout.responses
+    cpu_calls = 0
+
+    def count_readout(
+        readout: ConditionalReadout, batch: ReadoutBatch
+    ) -> ConditionalSums:
+        nonlocal cpu_calls
+        cpu_calls += 1
+        return responses(readout, batch)
+
+    builds: Counter[str] = Counter()
+    build = cl.Program.build
+
+    def count_build(
+        program: cl.Program,
+        options: str | Sequence[str] | None = None,
+        devices: Sequence[cl.Device] | None = None,
+        cache_dir: str | None = None,
+    ) -> cl.Program:
+        defines = options.split() if isinstance(options, str) else options or ()
+        builds.update(define for define in defines if define.startswith("-DD="))
+        return build(program, options=options, devices=devices, cache_dir=cache_dir)
+
+    monkeypatch.setattr(ConditionalReadout, "responses", count_readout)
+    monkeypatch.setattr(cl.Program, "build", count_build)
+    first = ftf_warmup.startup_warmup(8, families=None)
+    second = ftf_warmup.startup_warmup(9, families=None)
+    assert first is not second
+    for warmup in (first, second):
+        # Each controller runs a finite solve with no parked collaborators.
+        status = warmup.wait_ready(timeout=30)
+        assert status.state == "ready"
+        assert status.completed == ("readout_integrated", "dop853_opencl")
+    assert cpu_calls == 1
+    assert builds["-DD=8"] == builds["-DD=9"] == 1
 
 
 @pytest.mark.requires_opencl
@@ -142,16 +241,19 @@ def test_gpu_warmup_builds_the_dimension_before_acquire(
     monkeypatch: pytest.MonkeyPatch,
     isolated_startup: None,
     tmp_path: Path,
-    caplog: pytest.LogCaptureFixture,
 ) -> None:
     import pyopencl as cl
 
-    monkeypatch.setenv("ZCU_TOOLS_CACHE_DIR", str(tmp_path / "opencl"))
-    compiling, progressed, release, waiting = Event(), Event(), Event(), Event()
+    cache = tmp_path / "cache"
+    monkeypatch.setenv("ZCU_TOOLS_CACHE_DIR", str(cache))
+    progressed, release = Event(), Event()
     settings = parse_ftf(ftf_document())
     dimension = settings.numerics.truncation.retained_levels
     build = cl.Program.build
-    wait_ready = simulation.EnvironmentWarmup.wait_ready
+    variant_builds: list[Path] = []
+
+    def files() -> set[Path]:
+        return {path for path in cache.rglob("*") if path.is_file()}
 
     def pause_build(
         program: cl.Program,
@@ -161,51 +263,42 @@ def test_gpu_warmup_builds_the_dimension_before_acquire(
     ) -> cl.Program:
         defines = options.split() if isinstance(options, str) else options or ()
         if f"-DD={dimension}" in defines:
-            compiling.set()
+            assert cache_dir is not None
+            variant_builds.append(Path(cache_dir))
             progressed.set()
+            # The test releases the build after taking the pre-build snapshot.
             assert release.wait(30), "test watchdog: release the OpenCL compiler"
         return build(program, options=options, devices=devices, cache_dir=cache_dir)
 
-    def observe_wait(
-        warmup: simulation.EnvironmentWarmup, timeout: float | None = None
-    ) -> simulation.WarmupStatus:
-        waiting.set()
-        return wait_ready(warmup, timeout)
-
     monkeypatch.setattr(cl.Program, "build", pause_build)
-    # Observe the public readiness boundary: acquisition has no wait-state field.
-    monkeypatch.setattr(simulation.EnvironmentWarmup, "wait_ready", observe_wait)
-    caplog.set_level(logging.DEBUG, logger="pyopencl.cache")
-
-    def acquire(env: simulation.SimulationEnvironment) -> int:
-        with env.soc.binding.acquire() as sequence:
-            return sequence
-
-    with (
-        simulation.closing_environment(
-            ftf(settings, soccfg=profile_soccfg("ftf"), warmup=True)
-        ) as env,
-        ThreadPoolExecutor(max_workers=1) as executor,
-    ):
+    with simulation.closing_environment(
+        ftf(settings, soccfg=profile_soccfg("ftf"), warmup=True)
+    ) as env:
         try:
             assert env.warmup is not None, "expected background GPU preparation"
             env.warmup.start().add_done_callback(lambda _: progressed.set())
+            # The worker either reaches Program.build or publishes terminal status.
             assert progressed.wait(30), "test watchdog: startup must advance"
-            assert compiling.is_set(), "startup must build for retained_levels"
-            caplog.clear()  # Exclude the small device self-test's program.
-            admission = executor.submit(acquire, env)
-            assert waiting.wait(10), "acquire must reach the readiness boundary"
-            assert not admission.done()
+            assert len(variant_builds) == 1, "startup must build for retained_levels"
+            before_build = files()
         finally:
             release.set()
-        assert admission.result(timeout=10) == 0
-        status = env.wait_ready()
+        # The released compiler and the finite synthetic solve finish the item.
+        status = env.wait_ready(timeout=30)
         assert status is not None and status.state == "ready"
-        assert caplog.text.count("from-source build complete") == 1
+        prepared = files()
+        (variant_dir,) = variant_builds
+        assert any(
+            path.is_relative_to(variant_dir)
+            and path.name == "binary"
+            and path.stat().st_size
+            for path in prepared - before_build
+        ), "startup must persist the retained_levels binary in the configured cache"
+        program(env).acquire(env.soc, progress=False)
+        assert files() == prepared
 
     # Use a fresh Engine with eligible work to check reuse of the persisted
-    # binary, not resident programs. The optional runtime reports cache hits.
-    caplog.clear()
+    # program rather than resident programs.
     batch = timeline(16, 120.0)
     times = np.linspace(0, 120.0, 129)
     envelope = EnvelopeSpec(
@@ -223,8 +316,47 @@ def test_gpu_warmup_builds_the_dimension_before_acquire(
             coherent_source(synthetic_model(dimension)), (batch,), telemetry=True
         )
     assert result.paths.routing["dop853"].opencl_rows == len(batch.points)
-    assert "binary cache hit" in caplog.text
-    assert "from-source build complete" not in caplog.text
+    assert files() == prepared
+
+
+@pytest.mark.requires_opencl
+def test_failed_gpu_build_reports_error_but_allows_acquisition(
+    monkeypatch: pytest.MonkeyPatch,
+    isolated_startup: None,
+    tmp_path: Path,
+) -> None:
+    import pyopencl as cl
+
+    monkeypatch.setenv("ZCU_TOOLS_CACHE_DIR", str(tmp_path))
+    settings = parse_ftf(ftf_document())
+    dimension = settings.numerics.truncation.retained_levels
+    build = cl.Program.build
+    reason = "synthetic OpenCL compiler rejection"
+
+    def reject_variant(
+        program: cl.Program,
+        options: str | Sequence[str] | None = None,
+        devices: Sequence[cl.Device] | None = None,
+        cache_dir: str | None = None,
+    ) -> cl.Program:
+        defines = options.split() if isinstance(options, str) else options or ()
+        if f"-DD={dimension}" in defines:
+            raise RuntimeError(reason)
+        return build(program, options=options, devices=devices, cache_dir=cache_dir)
+
+    monkeypatch.setattr(cl.Program, "build", reject_variant)
+    with simulation.closing_environment(
+        ftf(settings, soccfg=profile_soccfg("ftf"), warmup=True)
+    ) as env:
+        # The worker encounters the injected rejection and finishes the manifest.
+        status = env.wait_ready(timeout=30)
+        assert status is not None
+        assert status.state == "failed"
+        assert "dop853_opencl" not in status.completed
+        assert status.error is not None and reason in status.error
+        program(env).acquire(env.soc, progress=False)
+        assert env.soc.binding.last_request is not None
+        assert env.soc.binding.last_request.sequence == 0
 
 
 def test_start_is_single_flight_and_progress_is_observable():
@@ -237,12 +369,14 @@ def test_start_is_single_flight_and_progress_is_observable():
 
     def second():
         entered.set()
+        # The test releases the worker after observing the active item.
         assert release.wait(30), "test watchdog: main thread must release warmup"
         calls.append("second")
 
     warmup = cls((("first", first), ("second", second)))
     try:
         future = warmup.start()
+        # The first item only appends, so the worker proceeds to the second.
         assert entered.wait(30), "test watchdog: second item must start"
         assert warmup.start() is future
         status = warmup.status
@@ -253,15 +387,16 @@ def test_start_is_single_flight_and_progress_is_observable():
         assert status.error is None
     finally:
         release.set()
-        warmup.wait_ready()
-    assert future.result().state == "ready"
+        # The released second item only appends before the worker finishes.
+        result = warmup.wait_ready(timeout=30)
+    assert result.state == "ready"
     assert warmup.status.completed == ("first", "second")
     assert calls == ["first", "second"]
 
 
 def test_acquire_waits_for_startup_future_before_consuming_sequence():
     cls = warmup_type()
-    entered, release, attempted, waiting = Event(), Event(), Event(), Event()
+    entered, release, waiting = Event(), Event(), Event()
 
     class ObservedWarmup(cls):
         def wait_ready(self, timeout=None):
@@ -270,13 +405,19 @@ def test_acquire_waits_for_startup_future_before_consuming_sequence():
 
     def prepare():
         entered.set()
+        # The test releases preparation after observing acquire at readiness.
         assert release.wait(30), "test watchdog: main thread must release warmup"
 
     warmup = ObservedWarmup((("synthetic", prepare),))
-    env = ftf(parse_ftf(ftf_document()), soccfg=profile_soccfg("ftf"), warmup=warmup)
-    prog = program(env)
-    with ThreadPoolExecutor(max_workers=1) as executor:
+    with (
+        simulation.closing_environment(
+            ftf(parse_ftf(ftf_document()), soccfg=profile_soccfg("ftf"), warmup=warmup)
+        ) as env,
+        ThreadPoolExecutor(max_workers=1) as executor,
+    ):
         try:
+            prog = program(env)
+            # The factory starts the one-item manifest, which signals entry.
             assert entered.wait(30), "test watchdog: startup must start"
             assert env.warmup is warmup
             shared = warmup.start()
@@ -284,12 +425,8 @@ def test_acquire_waits_for_startup_future_before_consuming_sequence():
                 env.wait_ready(timeout=0)
             waiting.clear()
 
-            def acquire():
-                attempted.set()
-                return prog.acquire(env.soc, progress=False)
-
-            acquisition = executor.submit(acquire)
-            assert attempted.wait(30), "test watchdog: acquire caller must start"
+            acquisition = executor.submit(prog.acquire, env.soc, progress=False)
+            # The free binding admits the only caller and calls wait_ready.
             assert waiting.wait(30), (
                 "test watchdog: acquire must reach readiness boundary"
             )
@@ -297,12 +434,12 @@ def test_acquire_waits_for_startup_future_before_consuming_sequence():
             assert env.soc.binding.last_request is None
         finally:
             release.set()
+        # Releasing preparation opens the binding; the finite acquire can finish.
         acquisition.result(timeout=30)
         assert shared is warmup.start()
         assert env.soc.binding.last_request is not None
         assert env.soc.binding.last_request.sequence == 0
         assert warmup.status.state == "ready"
-    env.devices.close_all_devices()
 
 
 def test_close_backend_waits_for_pending_preparation() -> None:
@@ -316,7 +453,8 @@ def test_close_backend_waits_for_pending_preparation() -> None:
 
     def prepare() -> None:
         entered.set()
-        assert release.wait(15), "test watchdog: release preparation"
+        # The test releases preparation after observing the close attempt.
+        assert release.wait(30), "test watchdog: release preparation"
 
     env = ftf(
         parse_ftf(ftf_document()),
@@ -328,20 +466,23 @@ def test_close_backend_waits_for_pending_preparation() -> None:
         assert close_backend is not None
         with ThreadPoolExecutor(max_workers=1) as executor:
             try:
-                assert entered.wait(10)
+                # The single startup item signals entry before it parks.
+                assert entered.wait(30), "test watchdog: startup must start"
                 closed = executor.submit(close_backend)
                 closed.add_done_callback(lambda _: progressed.set())
-                assert progressed.wait(10)
+                # The close call either reaches wait_ready or returns.
+                assert progressed.wait(30), "test watchdog: close must advance"
                 assert waiting.is_set(), "backend close must wait for startup work"
                 assert not closed.done()
             finally:
                 release.set()
-            closed.result(timeout=10)
+            # Released preparation completes so backend close can finish.
+            closed.result(timeout=30)
         assert env.warmup is not None and env.warmup.status.state == "ready"
     finally:
         release.set()
-        env.wait_ready()
-        env.devices.close_all_devices()
+        with simulation.closing_environment(env):
+            pass
 
 
 def test_failed_warmup_reports_error_but_allows_acquisition():
@@ -353,7 +494,8 @@ def test_failed_warmup_reports_error_but_allows_acquisition():
     warmup = cls((("broken", broken),))
     env = ftf(parse_ftf(ftf_document()), soccfg=profile_soccfg("ftf"), warmup=warmup)
     try:
-        status = env.wait_ready()
+        # The only item raises immediately and publishes failed status.
+        status = env.wait_ready(timeout=30)
         assert status is not None
         assert status.state == "failed"
         assert status.current is None
@@ -411,7 +553,8 @@ def test_warmup_does_not_change_rng_or_live_bias():
     )
     plain = ftf(settings, soccfg=profile_soccfg("ftf"))
     try:
-        prepared.wait_ready()
+        # The no-op startup item returns without waiting on a collaborator.
+        prepared.wait_ready(timeout=30)
         assert prepared.devices.get_info("bias") == plain.devices.get_info("bias")
         a, b = program(prepared), program(plain)
         a.acquire(prepared.soc, progress=False)

@@ -231,16 +231,17 @@ Callers select startup work with `ftf(..., warmup=...)`:
 
 - `False` (default) starts no background work.
 - `True` prepares common CPU paths, then the OpenCL DOP853 program for the model's
-  `retained_levels`. It skips GPU preparation if pyopencl is absent, `families`
-  excludes `dop853`, or the dimension exceeds GPU coverage. If background
-  detection finds no usable GPU, it skips the synthetic solve. A later eligible
-  acquire reports detection and build failures through routing diagnostics.
+  `retained_levels`. It skips the GPU item if pyopencl is absent or `families`
+  excludes `dop853`. If detection finds no usable GPU, the item completes
+  without a solve. Otherwise the disposable Engine runs a synthetic solve.
+  Its automatic routing selects CPU for unsupported dimensions. On completion,
+  a usable GPU program for the dimension is in the disk cache.
 - An explicit `EnvironmentWarmup` runs only the caller's items.
 
 GUI and Notebook policy belongs to
 [environment setup](../../../../../zcu_lab/simulation_envs/README.md#workers-與-startup-preparation).
 Environments requesting identical items share a future. Within one process,
-each CPU item runs once and each supported dimension gets at most one GPU warmup.
+each CPU item runs once and each dimension gets at most one GPU warmup.
 The GPU item uses a disposable Engine and fills the existing device-check and
 program disk caches. Preparation never samples
 or changes the live devices, binding seed, acquire sequence or resident Engine.
@@ -253,9 +254,11 @@ Startup overlaps compilation with other work; it does not reduce its total cost.
 callbacks receive the terminal status and must marshal GUI updates to the owner
 thread. `env.wait_ready(timeout=None)` waits for completion and returns the terminal
 status, or None when disabled. A timeout raises `TimeoutError` without cancelling
-work. A CPU preparation error stops the manifest before the GPU item and appears
-in the failed status. A GPU preparation error is logged without changing CPU
-readiness. Acquire still uses on-demand compilation or CPU fallback when needed.
+work. A CPU preparation error stops the manifest before the GPU item. An error
+after successful GPU detection stops the GPU item. Both errors appear in the
+failed status. Acquire still uses on-demand compilation or CPU fallback when
+needed. An eligible acquire reports detection and build failures through routing
+diagnostics.
 The worker exits after completion. Call `env.close_backend()` after acquisitions drain to wait
 for preparation and release the Engine. Device cleanup is separate; use
 `closing_environment(env)` to release both. Closing devices alone does not wait

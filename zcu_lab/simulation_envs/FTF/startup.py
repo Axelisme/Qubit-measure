@@ -1,5 +1,6 @@
 """Open or create the FTF entry and install offline resources in a measure GUI."""
 
+import logging
 import os
 from pathlib import Path
 
@@ -90,15 +91,24 @@ def startup(ctx: StartupContext) -> None:
     transferred: set[str] = set()
 
     def close_environment() -> None:
-        try:
-            if environment.close_backend is not None:
+        errors: list[Exception] = []
+        if environment.close_backend is not None:
+            try:
                 environment.close_backend()
-        finally:
+            except Exception as error:
+                logging.exception("FTF backend cleanup failed")
+                errors.append(error)
+        try:
             # Only the GUI closes transferred drivers. Rejected drivers remain
             # script-owned.
             for name in transferred:
                 environment.devices.drop_device(name)
             environment.devices.close_all_devices()
+        except Exception as error:
+            logging.exception("FTF device cleanup failed")
+            errors.append(error)
+        if errors:
+            raise ExceptionGroup("FTF resource cleanup failed", errors)
 
     ctx.on_close(close_environment)
     ctx.soc.install(environment.soc, environment.soccfg)

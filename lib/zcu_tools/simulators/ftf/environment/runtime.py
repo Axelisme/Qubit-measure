@@ -891,14 +891,13 @@ def ftf(  # noqa: PLR0913  # tolerated: independent optional inputs have distinc
     Worker threads live only during multi-timeline evolve; dropping the environment
     releases its in-memory routing facts. FTFSource.close explicitly clears it.
     warmup=False starts no background work. True prepares common CPU paths, then
-    precompiles the OpenCL program for retained_levels. GPU work is skipped if
-    pyopencl or a usable GPU is unavailable, families excludes dop853, or the
-    dimension exceeds GPU coverage. A GPU-only failure is logged without failing
-    CPU preparation; routing diagnostics on eligible acquires show detection or
-    build failures. If CPU preparation fails, the worker stops before GPU
-    preparation and the first acquire compiles on demand. An explicit
-    EnvironmentWarmup runs only the caller's items, which must not sample or
-    mutate live devices. env.wait_ready() waits before caller timing; acquire
+    precompiles the OpenCL program for retained_levels if the device and dimension
+    are supported. No GPU item is scheduled without pyopencl or when families
+    excludes dop853. A CPU preparation failure stops the manifest before GPU work.
+    A failure after GPU detection succeeds also appears in the failed warmup
+    status. Neither failure blocks construction or prevents on-demand acquisition.
+    An explicit EnvironmentWarmup runs only the caller's items, which must not sample
+    or mutate live devices. env.wait_ready() waits before caller timing; acquire
     also waits automatically.
     After acquisitions drain, call env.close_backend to wait for startup work
     and release numeric resources. The caller closes the device manager separately.
@@ -982,6 +981,7 @@ def ftf(  # noqa: PLR0913  # tolerated: independent optional inputs have distinc
         )
 
         def close_backend() -> None:
+            # This callback owns only backend cleanup; readiness failures are status values.
             if preparation is not None:
                 preparation.wait_ready()
             coordinator.close()

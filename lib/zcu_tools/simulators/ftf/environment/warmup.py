@@ -11,8 +11,9 @@ from contextlib import closing
 from dataclasses import replace
 from functools import partial
 from importlib.util import find_spec
-from logging import getLogger
 from threading import Event, Lock
+from types import TracebackType
+from typing import Literal
 
 import numpy as np
 from numpy.typing import NDArray
@@ -76,11 +77,12 @@ COVERAGE = (
     "statistics_copy",
 )
 
-_logger = getLogger(__name__)
+_CPU_ONLY = "cpu-only"
 _lock = Lock()
-_startup: dict[int | None, EnvironmentWarmup] = {}
+_startup: dict[int | Literal["cpu-only"], EnvironmentWarmup] = {}
 _compile_lock = Lock()
-_cpu_prepared: dict[str, str | None] = {}
+_cpu_prepared: set[str] = set()
+_cpu_failures: dict[str, tuple[Exception, TracebackType | None]] = {}
 
 
 def startup_warmup(
@@ -88,56 +90,54 @@ def startup_warmup(
 ) -> EnvironmentWarmup:
     """Return lazy preparation shared by FTF bundles with matching startup work.
 
-    dimension is the number of retained states; OpenCL work is scheduled for
-    up to 32 states when families permits dop853 (None permits all) and pyopencl
-    is installed. The GPU item follows the CPU manifest and logs any failure
-    without changing CPU readiness. If a CPU item fails, GPU preparation is not
-    attempted. The caller starts the returned controller after environment
-    construction. CPU items and each GPU dimension run at most once per process.
+    dimension is the number of retained states (at least one, else ValueError).
+    When pyopencl is installed and families permits dop853 (None permits all),
+    a GPU item follows the CPU manifest. Completion means device detection
+    finished and the program was built if the device and dimension were usable.
+    An error after GPU detection succeeds fails the item. A CPU failure stops
+    the manifest before the GPU item. The caller starts the returned controller
+    after environment construction. CPU items and each GPU dimension run at
+    most once per process.
     """
-    # This disposable workload only covers dimensions admitted by GPU DOP853.
-    prepare_gpu = (
-        dimension <= 32
-        and (families is None or "dop853" in families)
-        and find_spec("pyopencl") is not None
-    )
-    gpu_dimension = dimension if prepare_gpu else None
+    if dimension < 1:
+        raise ValueError("dimension must be at least one")
+    prepare_gpu = (families is None or "dop853" in families) and find_spec(
+        "pyopencl"
+    ) is not None
+    key = dimension if prepare_gpu else _CPU_ONLY
     with _lock:
-        if gpu_dimension not in _startup:
+        if key not in _startup:
             items: list[tuple[str, Callable[[], None]]] = [
                 (name, partial(_prepare_cpu_once, name)) for name in COVERAGE
             ]
-            if gpu_dimension is not None:
-                items.append(("dop853_opencl", partial(_prepare_opencl, gpu_dimension)))
-            _startup[gpu_dimension] = EnvironmentWarmup(tuple(items))
-        return _startup[gpu_dimension]
+            if prepare_gpu:
+                items.append(("dop853_opencl", partial(_prepare_opencl, dimension)))
+            _startup[key] = EnvironmentWarmup(tuple(items))
+        return _startup[key]
 
 
 def _prepare_cpu_once(name: str) -> None:
     # Shared across dimension-specific controllers. A separate lock keeps
     # controller lookup free while a compiler is running.
     with _compile_lock:
-        if name not in _cpu_prepared:
-            try:
-                _prepare(name)
-            except Exception as error:
-                _cpu_prepared[name] = f"{type(error).__name__}: {error}"
-                raise
-            _cpu_prepared[name] = None
-        elif (failure := _cpu_prepared[name]) is not None:
-            raise RuntimeError(failure)
+        if name in _cpu_prepared:
+            return
+        if name in _cpu_failures:
+            error, traceback = _cpu_failures[name]
+            raise error.with_traceback(traceback)
+        try:
+            _prepare(name)
+        except Exception as error:
+            # Keep the original frames instead of accumulating each re-raise.
+            _cpu_failures[name] = (error, error.__traceback__)
+            raise
+        _cpu_prepared.add(name)
 
 
 def _prepare_opencl(dimension: int) -> None:
     # Keep the device probe single-flight even for different model dimensions.
     with _compile_lock:
-        try:
-            _warm_opencl(dimension)
-        except Exception:
-            # Optional GPU preparation must not invalidate successful CPU work.
-            _logger.exception(
-                "FTF OpenCL startup preparation failed at d=%d", dimension
-            )
+        _warm_opencl(dimension)
 
 
 def _warm_opencl(dimension: int) -> None:
@@ -150,10 +150,7 @@ def _warm_opencl(dimension: int) -> None:
         routing = result.paths.routing["dop853"]
         if routing.opencl_detection_error is not None:
             raise RuntimeError(routing.opencl_detection_error)
-        if not routing.opencl_rows:
-            raise RuntimeError(
-                f"FTF startup workload did not select OpenCL at d={dimension}"
-            )
+        # No OpenCL rows without an error means auto did not admit this workload.
 
 
 def _opencl_source(dimension: int) -> ModelSource:

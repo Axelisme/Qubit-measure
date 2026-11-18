@@ -114,7 +114,7 @@ FTF 的 `DriveLine.operator: flux` 仍只在 DC 附近線性化。Fast-flux 線�
 
 `default.yaml` 的 circuit energies、couplings 與 resonator frequencies 採論文 Device A，其餘包含本機手動設定。它不是通用校準結果，也不保證截斷或 solver 收斂。Channel 數量、型別與時脈由共用的 [qick_216_v2.yaml](../profiles/qick_216_v2.yaml) 提供，不從模型接線推導。Caller 要確保物理模型 YAML 的綁定符合該板子。樣板使用 pulse readout gen0／ADC0、mixmux8 mux readout gen7／PFB readout 2 與 3，以及 f1_charge gen2、f2_charge gen3。共用板子 YAML 提供 8 個 generator 與 10 個 readout，FTF 只綁定其中所需的通道。ADC output sample interval `dt_ns` 由 caller 的板子 YAML 決定，模型 YAML 不設定 ADC clock。空出的 v6 gen1 可供註解中的 fast-flux 範例使用。兩條 charge line 的主迴路係數為 0.1 GHz/gain，coupler 串擾為 0.01，對另一 fluxonium 為 0。這些係數是模擬假設。Entry 範本的 Q1/Q2 分別綁 gen2/gen3，既有 entry 不會自動更新。完整訊號路徑與接線表見 [欄位指南](field-guide.md)。更換樣品時可複製 startup 與 YAML，並調整 Notebook 的 YAML 路徑。
 
-[Notebook 範例](../../../notebook_md/single_qubit.md) 呼叫同一個公開 `ftf(...)` builder。成功回傳後，Notebook 負責關閉傳回的 device manager。Startup 在交付前登記 `on_close`。成功登記的 driver 由 GUI 關閉，環境 manager 在 runtime 只借用它們；callback 先移除這些借用，再關閉尚未交付的 driver。Startup 中途失敗仍保留 callback。完整組裝與數值限制見 [FTF 契約](../../../lib/zcu_tools/simulators/ftf/environment/README.md)。
+[Notebook 範例](../../../notebook_md/single_qubit.md) 呼叫同一個公開 `ftf(...)` builder，並用 `closing_environment` 關閉引擎與裝置。Startup 在交付前登記 `on_close`。成功登記的 driver 由 GUI 關閉，環境 manager 在 runtime 只借用它們。Callback 先關閉引擎，再移除這些借用並關閉尚未交付的 driver。引擎清理失敗時仍會清理裝置。Startup 中途失敗仍保留 callback。完整組裝與數值限制見 [FTF 契約](../../../lib/zcu_tools/simulators/ftf/environment/README.md)。
 
 ## 啟用跨 acquisition 漂移
 
@@ -145,7 +145,7 @@ F1／F2 可選 `q_cap`、`xqp`、`aphi`；coupler 只有 `q_cap`、`aphi`，`q_i
 
 ## 演化與重播
 
-GUI startup 選擇 `workers=max(1, (os.cpu_count() or 1) - 1)`，保留一核，至少使用一個 worker。八核主機使用七個 GUI workers。GUI 傳 `warmup=True`，在背景準備常用 CPU 路徑，並依 `retained_levels` 預編譯可用的 OpenCL 程式。準備完成後，第一次 acquisition 不必再等這些編譯。
+GUI startup 選擇 `workers=max(1, (os.cpu_count() or 1) - 1)`，保留一核，至少使用一個 worker。八核主機使用七個 GUI workers。GUI 傳 `warmup=True`，在背景準備常用 CPU 路徑，並依 `retained_levels` 預編譯可用的 OpenCL 程式。準備成功後，第一次 acquisition 不必再等這些編譯。
 
 Notebook 傳 `workers=max(1, (os.cpu_count() or 1) - 2), warmup=True`，保留兩核，並在背景預編譯常用 CPU 路徑與可用的 GPU 程式。八核主機使用六個 Notebook workers。公開 `ftf()` 仍預設 `workers=1, warmup=False`；測試、benchmark、研究與直接呼叫不套用 GUI 策略。
 

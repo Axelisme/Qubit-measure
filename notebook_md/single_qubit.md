@@ -30,6 +30,7 @@ from pathlib import Path
 import yaml
 from zcu_tools.program import build_soccfg
 from zcu_tools.device.fake import FakeDevice
+from zcu_tools.experiment import simulation
 from zcu_tools.simulators.ftf.environment import ftf
 from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.experiment.utils.device import set_flux
@@ -103,12 +104,9 @@ The YAML example supplies native/local/global dimensions and solver tolerances e
 
 ## Close the environment
 
-After synchronous acquisitions finish, wait for any remaining startup preparation and release the Engine. Then close the returned device manager, even if backend cleanup fails. The GUI startup arranges backend cleanup with `on_close` and transfers successfully registered drivers to the GUI.
+Run this final cell after the synchronous acquisitions finish. Leaving `closing_environment` waits for any remaining startup preparation, releases the Engine and closes the device manager even if backend cleanup fails. The GUI startup registers its own `on_close` callback because the GUI owns the successfully registered drivers.
 
 ```python
-try:
-    if env.close_backend is not None:
-        env.close_backend()
-finally:
-    env.devices.close_all_devices()
+with simulation.closing_environment(env):
+    pass
 ```
