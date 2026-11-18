@@ -59,7 +59,7 @@ assert not Path(os.environ["ZCU_TOOLS_CACHE_DIR"]).exists()
 """
 
 
-@pytest.mark.parametrize("unavailable", ["numba", "scipy", "none"])
+@pytest.mark.parametrize("unavailable", ["numba", "scipy", "pyopencl", "none"])
 def test_basic_conversion_import_needs_no_optional_client_or_cache_policy(
     tmp_path: Path, unavailable: str
 ) -> None:
@@ -100,6 +100,26 @@ importlib.import_module("zcu_tools.simulate.{second}")
 assert config.CACHE_DIR == directory
 assert os.environ["NUMBA_CACHE_DIR"] == directory
 assert len(scans) == 1, scans
+""",
+        tmp_path,
+    )
+
+
+def test_cpu_engine_can_load_without_pyopencl(tmp_path: Path) -> None:
+    launch_import(
+        """
+import sys
+assert "pyopencl" not in sys.modules
+sys.modules["pyopencl"] = None
+from zcu_tools.simulate.evolution import Engine
+for backend in ("cpu", "auto"):
+    Engine(1, backend=backend).close()
+try:
+    Engine(1, backend="opencl")
+except RuntimeError as error:
+    assert "pyopencl" in str(error), error
+else:
+    raise AssertionError("explicit OpenCL accepted an unavailable pyopencl")
 """,
         tmp_path,
     )

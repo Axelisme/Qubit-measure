@@ -8,6 +8,7 @@ from hashlib import sha256
 from importlib.metadata import version
 from pathlib import Path
 
+import numpy as np
 import pytest
 from zcu_tools.simulate.evolution import (
     Engine,
@@ -24,6 +25,7 @@ from zcu_tools.simulate.evolution import (
 from .accuracy import AccuracyMeasurement, measurement_property, require_families
 from .accuracy_cases import (
     DISSIPATIVE_DC_CASES,
+    OPENCL_CASES,
     AccuracyCase,
     accuracy_case,
     history_case,
@@ -136,6 +138,40 @@ def test_pinned_family_density(
         )
     )
     assert error <= 2e-3, f"{name}/{family}: density error {error:.9g} > 2e-3"
+
+
+@pytest.mark.requires_opencl
+@pytest.mark.parametrize("name", OPENCL_CASES)
+def test_opencl_dop853_density(
+    name: str,
+    request: pytest.FixtureRequest,
+) -> None:
+    case = accuracy_case(name)
+    families = ("t4", *case.families) if case.idle_family else case.families
+    with closing(
+        Engine(1, backend="opencl", families=families, chunks_per_worker=1)
+    ) as engine:
+        result = engine.evolve(case.source, (case.batch,), telemetry=True)
+    require_families(result.paths, families)
+    assert result.paths.routing["dop853"].opencl_rows == len(case.batch.points)
+    assert result.paths.max_trace_error <= 1e-8
+    densities = result.densities
+    assert np.max(np.abs(densities - densities.conj().swapaxes(-1, -2))) <= 1e-10
+
+    reference = interaction_reference(case.source, case.batch)
+    assert reference.convergence_error <= 2e-6
+    with closing(Engine(1, backend="cpu", families=families)) as engine:
+        cpu = engine.evolve(case.source, (case.batch,))
+    error = density_error(densities, reference.density)
+    request.node.user_properties.append(
+        measurement_property(
+            AccuracyMeasurement(
+                name + "/pinned", "dop853/opencl", error, reference.convergence_error
+            )
+        )
+    )
+    assert error <= 2e-3
+    assert density_error(densities, cpu.densities) < 1e-3
 
 
 @pytest.mark.parametrize("family", EDGE_FAMILIES)

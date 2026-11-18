@@ -710,6 +710,11 @@ class _Classifier:
             self.costs[rows] = self.kernels[str(name)].cost(self.table, rows)
         if not np.isfinite(self.costs).all() or np.any(self.costs < 0):
             raise ValueError("kernel costs must be finite and nonnegative")
+        dimension = (
+            None
+            if self.context.opencl is None
+            else self.context.source.initial_density.shape[0]
+        )
         if self.selection is not None and self.selection.names is not None:
             point = int(self.table.timeline[self.selection.rows[0]])
             first, stop = (
@@ -721,9 +726,13 @@ class _Classifier:
             unresolved = context == ""
             context[unresolved] = self.selection.names[context_rows[unresolved]]
             context[~self.geometry.pending[context_rows]] = ""
-            plans, chain = direct_plans(self.table, context, context_rows)
+            plans, chain = direct_plans(
+                self.table, context, context_rows, opencl_dimension=dimension
+            )
         else:
-            plans, chain = direct_plans(self.table, self.names)
+            plans, chain = direct_plans(
+                self.table, self.names, opencl_dimension=dimension
+            )
         self.plans.update(plans)
         return Dispatch(
             self.names,

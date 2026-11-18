@@ -25,10 +25,17 @@ from ._workload_facts import packed_segments
 
 @dataclass(frozen=True)
 class DOP853Plan:
-    """Global-row frames and chain IDs fixed by dispatch for this evolve."""
+    """Global-row decisions fixed by dispatch for one evolve.
+
+    frame: interaction, lab, or empty for a row belonging to another family.
+    chain: first row of a touching chain, or -1 for an independent row.
+    opencl: read-only mask marking independent rows planned for the GPU;
+        None means the whole plan runs on CPU.
+    """
 
     frame: NDArray[np.str_]
     chain: NDArray[np.int64]
+    opencl: NDArray[np.bool_] | None = None
 
 
 class EndpointData(NamedTuple):
@@ -214,8 +221,9 @@ class DOP853Kernel:
 
     The kernel is stateless. Keys encode flux level; the engine must scope its
     cache by ModelSource identity. prepare owns read-only copies of secular
-    operators, never a density. All row iteration/integration releases the GIL
-    in single-threaded numba code. Input ports must exist in each row's model.
+    operators, never a density. CPU integration releases the GIL in
+    single-threaded numba code. The optional OpenCL runner is borrowed for
+    eligible independent endpoints. Input ports must exist in each row's model.
     """
 
     name = "dop853"
@@ -341,7 +349,8 @@ class DOP853Kernel:
 
         Raises ValueError for incompatible prepared data, state/index shapes or
         nonexistent ports. RuntimeError signals numerical failure; earlier rows
-        may already have been advanced. No state normalization/clipping occurs.
+        may already have been advanced. OpenCL endpoints are symmetrized and
+        normalized for handoff; CPU endpoints are unmodified. Neither clips.
 
         Return an all-False bool mask aligned with rows; no post-apply check.
         """
@@ -366,14 +375,37 @@ class DOP853Kernel:
         playing = np.arange(table.tone_port.shape[1])[None, :] < table.tones[rows, None]
         if np.any(playing & (table.tone_port[rows] >= models.ports[key_index, None])):
             raise ValueError("DOP853 tone port absent from model")
-        advance_endpoints(
-            EndpointData(prepared.models, packed_segments(table, context.work_plan)),
-            (rows, key_index),
-            states,
-            budget,
-            plan,
-        )
+        data = EndpointData(prepared.models, packed_segments(table, context.work_plan))
+        _apply_endpoints(data, (rows, key_index), states, context, plan)
         return np.zeros(len(rows), dtype=np.bool_)
+
+
+def _apply_endpoints(
+    data: EndpointData,
+    row_models: tuple[NDArray[np.int64], NDArray[np.int64]],
+    states: NDArray[np.complex128],
+    context: ApplyContext,
+    plan: DOP853Plan,
+) -> None:
+    rows, keys = row_models
+    gpu = None if plan.opencl is None else plan.opencl[rows]
+    if gpu is None or not np.any(gpu):
+        advance_endpoints(data, row_models, states, context.budget, plan)
+        return
+    runner = context.opencl
+    if runner is None:
+        raise RuntimeError("OpenCL row has no Engine runner")
+    states[gpu] = runner.advance(
+        data, (rows[gpu], keys[gpu]), states[gpu], context.budget
+    )
+    context.work_plan.routing.ran_opencl("dop853", int(np.count_nonzero(gpu)))
+    cpu = ~gpu
+    if np.any(cpu):
+        cpu_states = states[cpu]
+        advance_endpoints(
+            data, (rows[cpu], keys[cpu]), cpu_states, context.budget, plan
+        )
+        states[cpu] = cpu_states
 
 
 def prepare_models(models: list[SecularModel]) -> DOP853Prepared:

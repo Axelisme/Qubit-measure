@@ -696,6 +696,7 @@ class _Chunk:
                         self.schedule.budget,
                         binding.plan,
                         self.schedule.context.work_plan,
+                        self.schedule.context.opencl,
                     ),
                 )
         except RuntimeError as error:

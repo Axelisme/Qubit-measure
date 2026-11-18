@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-11-18，耗散 DC 精度矩陣案例
+**Last updated:** 2026-11-18，OpenCL 精度矩陣選集
 
 **讀者：** framework-dev、agent。查閱測試的 owner、fixture、執行方式與搬遷驗收契約。
 
@@ -124,6 +124,9 @@ pytest 預設使用 `-m "not slow and not sim"`，排除慢測試與模擬測試
 ticket 內只跑受影響選集。只有變更觸及 `lib/zcu_tools/simulate/` 時，才用
 `-m sim` 或包含 sim 的受影響選集跑模擬測試。`-m` 會取代預設過濾，
 若仍要排除慢測試，明寫 `-m "sim and not slow"`。
+CPU lane 明確加 `not requires_opencl`，例如 `-m "sim and not requires_opencl"`。
+裝有 `gpu` extra 與 FP64 OpenCL GPU 的 lane 用 `-m requires_opencl` 執行 GPU 測試。
+缺少依賴或裝置時，這個選集報錯而非跳過。
 
 ### Evolution 精度矩陣
 
@@ -167,14 +170,16 @@ uv run --directory <worktree> --no-sync -- \
   python tools/run_heavy.py --log <log-dir>/accuracy.log 1800 -- \
   pytest --rootdir <worktree> -c <worktree>/pyproject.toml \
   tests/simulate/evolution/contract/test_accuracy_matrix.py \
-  -n 4 --dist=worksteal -m sim --durations=0 \
+  -n 4 --dist=worksteal -m 'sim and not requires_opencl' --durations=0 \
   > <log-dir>/accuracy-receipt.json
 ```
 
 `accuracy.log` 的 terminal summary 列出 family、案例數、最大 density 誤差、
 最大參考收斂誤差、density 誤差最差的案例與狀態。
 `PASS` 表示最大誤差不超過 `2e-3`。`FAIL` 保留超標數字，即使案例標了 xfail。
-`NOT EXERCISED` 表示此次選集沒有該 family 的觀察值，誤差欄顯示 `-`，不填 `0`。
+`NOT EXERCISED` 表示此次選集沒有該 family 或 backend 的觀察值，誤差欄顯示 `-`，不填 `0`。
+`dop853/opencl` 另計實際走 GPU 的案例。GPU lane 選 `-m requires_opencl` 時，
+矩陣用 `telemetry=True` 核對 GPU row 數，並驗證交接密度的 trace 與 Hermiticity。
 案例數計算 case/family 觀察值，不是 point 或 segment 數。
 同一輸入的 pinned、空歷史與暖歷史分別計數。
 
@@ -270,8 +275,9 @@ uv run --directory <worktree> --no-sync -- \
 | 用途 | Marker expression | 是否含 slow |
 | --- | --- | --- |
 | 日常預設 | 不另傳 `-m`，即 `not slow and not sim` | 否 |
-| 受影響模擬案例 | `-m sim` | 是 |
-| 受影響模擬案例，明確排除 slow | `-m "sim and not slow"` | 否 |
+| 受影響模擬案例，CPU lane | `-m "sim and not requires_opencl"` | 是 |
+| 受影響模擬案例，CPU lane 排除 slow | `-m "sim and not slow and not requires_opencl"` | 否 |
+| OpenCL 案例，GPU lane | `-m requires_opencl` | 是 |
 | 完整非模擬選集 | `-m "not sim"` | 是 |
 | 全部案例，包含模擬 | `-m ""` | 是 |
 
@@ -283,10 +289,11 @@ Runner 固定 headless 與單執行緒環境，結束後將 JSON 收據印到 st
 4 workers 的建議依據見 [worker 數比較](../docs/reference/test-speed-comparisons.md#worker-數比較)。
 保留 `worksteal`，不改 pytest 的預設 marker。
 
-全樹驗證的時點依 task 適用流程安排。依變更範圍選擇 marker expression，兩種都包含 slow：
+全樹驗證的時點依 task 適用流程安排。下列選集都包含 slow：
 
 - 未改 `lib/zcu_tools/simulate/`，用 `-m "not sim"`。
-- 改到 `lib/zcu_tools/simulate/`，用 `-m ""`，包含所有測試。
+- 改到 `lib/zcu_tools/simulate/`，CPU lane 用 `-m "not requires_opencl"`。
+- 改到 `lib/zcu_tools/simulate/`，GPU lane 用 `-m ""`，包含所有測試。
 
 先切換到 `<worktree>`，建立下方使用的 per-task 目錄，再執行命令，將測試輸出寫入 log，將收據另存為 JSON：
 
@@ -297,7 +304,7 @@ uv run --directory <worktree> --no-sync -- \
   -n 4 --dist=worksteal -m "not sim" --durations=25 \
   --failure-log <per-task 目錄>/pytest-failures.jsonl \
   > <per-task 目錄>/pytest-receipt.json
-# 若改到 lib/zcu_tools/simulate/，將上面的 -m "not sim" 換成 -m ""。
+# 若改到 lib/zcu_tools/simulate/，改用上述 CPU lane 或 GPU lane 的 -m 選項。
 ```
 
 `--rootdir` 與 `-c` 把 rootdir 與設定檔固定在 worktree。pytest 也從既存的選項值路徑推算 rootdir；未固定時，worktree 外既存的 `--failure-log` 檔會讓它選到主 checkout 並收集主 checkout 的測試。

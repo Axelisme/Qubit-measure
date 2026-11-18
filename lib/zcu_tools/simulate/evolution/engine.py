@@ -450,7 +450,8 @@ def merge_path_diagnostics(parts: Sequence[PathDiagnostics]) -> PathDiagnostics:
     segments_by_kernel, duration_ns_by_kernel, exceeded_by_kernel and
     frontend_cpu_s are summed.
     max_trace_error is the maximum, or zero for empty parts. Routing sums each
-    family's rows, CPU times, hits, rejections, costs, builds and admission rows;
+    family's row counts, CPU times, hits, rejections, costs, builds,
+    admission rows and OpenCL endpoints;
     estimated_cpu_s is None if any contributing family estimate is unknown.
     Reuse-hit diagnostics participate exactly as returned, without adding hits
     or replacing their counts. Empty parts returns empty PathDiagnostics.
@@ -501,6 +502,7 @@ def _merge_family(parts: Sequence[FamilyRouting]) -> FamilyRouting:
         ),
         prepare_builds=sum(part.prepare_builds for part in parts),
         admission_rows=sum(part.admission_rows for part in parts),
+        opencl_rows=sum(part.opencl_rows for part in parts),
     )
 
 
@@ -549,7 +551,7 @@ class Cancelled(Exception):
 class Engine:
     """Segment engine with inline or threaded execution.
 
-    workers: positive sole parallel width; kernels remain single-threaded.
+    workers: positive host parallel width; CPU kernels remain single-threaded.
     routing_cache_bytes: nonnegative integer byte cap for immutable routing
         facts, including metadata. Defaults to 4 MiB; zero disables retention.
         This is not a process RAM cap. Numerical preparations live only for
@@ -570,6 +572,18 @@ class Engine:
         single_tone_rwa, floquet_period, t6, single_tone_gate, shaped_sambe,
         gate_cache, period_table, common_frame, multitone_gate, multitone_rwa,
         floquet, dop853. kernels remains an internal collaborator seam.
+    backend: "cpu" always uses CPU and never loads OpenCL. "auto" (default)
+        currently also uses CPU. "opencl" requires the gpu extra and an OpenCL
+        GPU with cl_khr_fp64; missing dependencies or a GPU that cannot be
+        initialized raise RuntimeError at construction. With "opencl", a
+        selected dop853 segment uses the GPU when it is an independent
+        interaction-frame row at DC without a flux waveform or segment shift,
+        its dimension is at most 32, and two sampled tones (up to 960 knots
+        each) both cover the whole 100–10000 ns segment. Ineligible segments,
+        shared prefixes and other families use CPU. Program builds on first
+        use of a dimension use the simulator user cache; build and execution
+        errors propagate from evolve, without CPU retry. Unknown values raise
+        ValueError.
     chunks_per_worker: optional positive fixed chunk multiplier. None selects
         timeline batching from the complete acquire inventory and keeps six
         prepare chunks per worker. Scheduling does not change numerical admission.
@@ -594,11 +608,15 @@ class Engine:
         families: Collection[str] | None = None,
         chunks_per_worker: int | None = None,
         routing_cache_bytes: int = 4 * 1024**2,
+        backend: Literal["auto", "cpu", "opencl"] = "auto",
     ) -> None:
         """Create an Engine under the execution and family contract above."""
         from ._routing_reuse import RoutingReuse
         from .kernels import REGISTRY
+        from .kernels._dop853_opencl import OpenCLDOP853
 
+        if backend not in ("auto", "cpu", "opencl"):
+            raise ValueError(f"unknown evolution backend: {backend!r}")
         if workers < 1 or (chunks_per_worker is not None and chunks_per_worker < 1):
             raise ValueError("workers/chunks must be positive")
         self._families = None if families is None else frozenset(families)
@@ -618,6 +636,7 @@ class Engine:
         self._lock = Lock()
         self._closed = False
         self._workers = workers
+        self._opencl = OpenCLDOP853() if backend == "opencl" else None
 
     def reuse(
         self,
@@ -682,7 +701,8 @@ class Engine:
         to a caller-owned CaptureBuffer; None does no recording. Success marks
         this call's records complete; exceptions retain incomplete records and
         propagate unchanged. Concurrent use of the same buffer raises ValueError
-        at entry. Engine performs no file I/O; see CaptureBuffer for lifetimes.
+        at entry. Capture itself performs no file I/O; see CaptureBuffer for
+        lifetimes. OpenCL program builds may access the simulator user cache.
         telemetry enables per-family calling-thread CPU and routing accounting
         without I/O; False avoids CPU clock reads and returns empty routing.
         Model ValueErrors propagate; numerical failure raises RuntimeError
@@ -751,6 +771,8 @@ class Engine:
                     geometry = PrefixResolver(
                         geometry, kernels, context, cancel, capture=capture_run
                     ).resolve(pool, self._chunks)
+                    if self._opencl is not None:
+                        context = replace(context, opencl=self._opencl)
                     dispatch = classify(
                         geometry,
                         kernels,
@@ -848,8 +870,12 @@ class Engine:
             raise Cancelled()
 
     def close(self) -> None:
-        """Wait for active work, clear routing facts and reject later evolves; idempotent."""
+        """Wait for work, release OpenCL and routing facts, and reject later calls.
+
+        Repeated calls are safe. The on-disk OpenCL build cache remains.
+        """
         with self._lock:
             if not self._closed:
                 self._closed = True
                 self._routing_reuse.clear()
+                self._opencl = None

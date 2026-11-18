@@ -46,6 +46,12 @@ class AccuracyCase:
 
 
 DISSIPATIVE_DC_CASES = ("dephasing_pump", "raman_decay", "raman_weak_legs")
+OPENCL_CASES = (
+    "sampled_gaussian_9",
+    "sampled_gaussian_960",
+    "sampled_cosine",
+    "sampled_gaussian_960_long",
+)
 
 
 def dissipative_dc_case(name: str) -> AccuracyCase:
@@ -381,6 +387,38 @@ def single_tone_sideband_case() -> AccuracyCase:
     )
 
 
+def _opencl_case(name: str) -> AccuracyCase:
+    large_model = name == "sampled_gaussian_960"
+    long = name == "sampled_gaussian_960_long"
+    cosine = name == "sampled_cosine"
+    model = synthetic_model(21 if large_model else 3)
+    duration = 1000.0 if long else 100.0
+    count = 1 if large_model or long else 2
+    knots = 960 if large_model or long else 41 if cosine else 9
+    times = np.linspace(0.0, duration, knots, endpoint=not large_model)
+    samples = (
+        np.sin(np.pi * times / duration) ** 2
+        if cosine
+        else np.exp(-0.5 * ((times - duration / 2) / (duration / 6)) ** 2)
+    )
+    envelope = EnvelopeSpec("sampled", samples.astype(np.complex128), times)
+    batch = timeline(count, duration)
+    tracks = (
+        drive_track(batch, envelope, frequency=0.129, gain=0.003),
+        drive_track(batch, envelope, frequency=0.17, gain=-0.007),
+    )
+    # The dense case has a CPU idle tail after the GPU returns a density.
+    if large_model:
+        batch = replace(batch, end_ns=batch.end_ns + 2.3)
+    return AccuracyCase(
+        name,
+        coherent_source(model),
+        replace(batch, tracks=tracks),
+        ("dop853",),
+        idle_family="t4" if large_model else None,
+    )
+
+
 def accuracy_case(name: str) -> AccuracyCase:
     """Build an isolated matrix input; unknown names raise ValueError.
 
@@ -388,11 +426,14 @@ def accuracy_case(name: str) -> AccuracyCase:
     two_carriers, continuous_flux, joint_gate_inventory, joint_constant, low_carrier,
     linear_shaped, linear_plateau, nearby_carriers, cheap_sampled_nearby,
     cheap_sampled_separated, adiabatic_ramp, single_tone_sideband,
-    dephasing_pump, raman_decay and raman_weak_legs. Each call
+    dephasing_pump, raman_decay, raman_weak_legs, and the OPENCL_CASES.
+    Each call
     owns a fresh source/history. The joint gate keeps its 20-point inventory.
     """
     if name in DISSIPATIVE_DC_CASES:
         return dissipative_dc_case(name)
+    if name in OPENCL_CASES:
+        return _opencl_case(name)
     specialized: dict[str, Callable[[], AccuracyCase]] = {
         "linear_shaped": partial(linear_case, shaped=True),
         "linear_plateau": partial(linear_case, shaped=False),

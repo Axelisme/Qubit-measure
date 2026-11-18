@@ -4,8 +4,10 @@ Sampled multitone rejection applies on both sides of the 19/20 cost split.
 Pinned calls cannot restore admission; no numerical fix is assumed to reopen it.
 """
 
+import sys
 from contextlib import closing
 from dataclasses import replace
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -20,6 +22,46 @@ from .accuracy_cases import (
     timeline,
 )
 from .reference import converged_reference, density_error
+
+
+def test_explicit_opencl_raises_during_construction_without_a_device(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Replace only the optional loader's discovery boundary; no driver needed.
+    try:
+        import pyopencl as cl
+    except ImportError:
+        monkeypatch.setitem(
+            sys.modules, "pyopencl", SimpleNamespace(get_platforms=list)
+        )
+    else:
+        monkeypatch.setattr(cl, "get_platforms", list)
+    with pytest.raises(RuntimeError, match="cl_khr_fp64"):
+        Engine(1, backend="opencl")
+
+
+@pytest.mark.requires_opencl
+def test_opencl_keeps_clipped_pulses_and_touching_dop853_chains_on_cpu() -> None:
+    case = accuracy_case("sampled_gaussian_9")
+    full = case.batch
+    clipped = replace(
+        full,
+        points=full.points + 2,
+        tracks=tuple(replace(t, duration_ns=t.duration_ns + 10) for t in full.tracks),
+    )
+    split = replace(full, points=full.points + 4, segment_boundaries=((50.0,), (50.0,)))
+    batches = (full, clipped, split)
+    with (
+        closing(Engine(2, backend="cpu", families=case.families)) as cpu,
+        closing(Engine(2, backend="opencl", families=case.families)) as gpu,
+    ):
+        expected = cpu.evolve(case.source, batches)
+        actual = gpu.evolve(case.source, batches, telemetry=True)
+    assert actual.paths.segments_by_kernel == {"dop853": 8}
+    assert actual.paths.routing["dop853"].opencl_rows == len(full.points)
+    np.testing.assert_array_equal(actual.points, expected.points)
+    assert actual.densities[2:].tobytes() == expected.densities[2:].tobytes()
+    assert density_error(actual.densities[:2], expected.densities[:2]) < 1e-3
 
 
 def _joint_gate_case(count: int) -> AccuracyCase:

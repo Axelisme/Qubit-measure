@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-11-18, constant-pair cold prices and amortized dissipative DC channel prices
+**Last updated:** 2026-11-18, execution and close semantics
 
 **讀者：** framework-dev、agent。Segment evolution 的公開輸入、路由與數值邊界。
 
@@ -1215,8 +1215,8 @@ failing row group; later groups in the acquire have not been checked.
 Preparation and apply failures propagate; they do not restart candidate
 selection. Cancellation raises `Cancelled` without partial results.
 
-Calls on one Engine serialize. Joblib threading is the only parallel layer;
-kernels are single-threaded and do not open pools. Multi-timeline calls with
+Calls on one Engine serialize. Joblib provides host parallelism.
+CPU kernels are single-threaded and do not open pools. Multi-timeline calls with
 multiple workers create and close a pool per evolve; empty work, one timeline
 and one worker run inline. By default, complete-acquire row density and the
 fraction of cheap gate/no-drive rows select one or six timeline chunks per
@@ -1227,7 +1227,7 @@ Cancellation is checked at chunk and preparation boundaries, and before return.
 Native BLAS stays at one thread throughout evolve. Overlapping engines share a
 process-level reference count and the last call restores the original limits;
 external threadpoolctl users must not change them during active evolves.
-`close()` waits for active work, clears routing facts and is idempotent.
+`close()` is idempotent. It waits for active work, then clears routing facts and releases OpenCL resources.
 
 `RoutingHistory` owns distinct acquire content's complete row inventories,
 separate from resident preparations and numerical guards. Each numerical input digest

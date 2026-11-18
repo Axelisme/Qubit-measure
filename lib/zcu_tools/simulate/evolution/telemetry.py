@@ -35,6 +35,9 @@ class FamilyRouting:
         Zero for families without product instrumentation.
     admission_rows: common-frame row indicator evaluations, excluding apply and
         caller-preparation hits. Other families currently leave this count zero.
+    opencl_rows: physical endpoints executed by OpenCL within this family.
+        Zero for CPU-only calls and reuse hits. The backend does not rename
+        the family or change the logical row counts.
     CPU values exclude dispatch, geometry, ADC and I/O. All values are
     nonnegative; actual_cpu_s is the sum of the two measured phases.
     """
@@ -49,6 +52,7 @@ class FamilyRouting:
     prepare_builds: int = 0
     admission_rows: int = 0
     duration_ns: float = 0.0
+    opencl_rows: int = 0
 
     @property
     def actual_cpu_s(self) -> float:
@@ -66,6 +70,7 @@ class _Totals:
     missing_estimate: bool = False
     prepare_builds: int = 0
     admission_rows: int = 0
+    opencl_rows: int = 0
 
 
 class RoutingCollector:
@@ -112,6 +117,12 @@ class RoutingCollector:
         if self.enabled and count:
             with self._lock:
                 self._totals.setdefault(name, _Totals()).admission_rows += count
+
+    def ran_opencl(self, name: str, count: int) -> None:
+        """Count count physical endpoints completed on OpenCL for family name."""
+        if self.enabled and count:
+            with self._lock:
+                self._totals.setdefault(name, _Totals()).opencl_rows += count
 
     def reject(self, name: str, count: int) -> None:
         """Count actual numerical rejections, never cost-based skips."""
@@ -164,6 +175,7 @@ class RoutingCollector:
                 duration_ns=durations.get(name, 0.0),
                 prepare_builds=total.prepare_builds,
                 admission_rows=total.admission_rows,
+                opencl_rows=total.opencl_rows,
                 prepare_cpu_s=total.prepare_cpu_s,
                 apply_cpu_s=total.apply_cpu_s,
                 rejected_rows=total.rejected_rows,
