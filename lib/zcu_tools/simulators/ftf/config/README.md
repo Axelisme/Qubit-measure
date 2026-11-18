@@ -2,7 +2,7 @@
 
 **讀者：** framework-dev。FTF YAML schema、單位與欄位診斷契約。
 
-**Last updated:** 2026-11-17
+**Last updated:** 2026-11-18
 
 `numerics.debug_capture` is optional and defaults to false. True records one
 acquire's Engine inputs and routes using the
@@ -38,7 +38,7 @@ Coupler 使用 `SquidDrift`，只接受 `q_cap`、`aphi`，拒絕 `q_ind` 與 `x
 [FTF runtime](../environment/README.md#acquisition-clock-and-loss-drift) 擁有。
 預設路徑為 `~/.local/state/zcu-tools/simulation/ftf/<session>/truth.jsonl`。
 每次啟用漂移的 begin 寫三行，coupler 的 `q_ind`／`xqp` 為 `null`。
-Private replay 保存當次 effective settings，`drift=None`，不依賴時鐘。
+啟用 [Debug capture](../environment/README.md#debug-capture) 會記錄當次有效設定，含凍結的損耗。
 這些檔案不進一般 Run／GUI／MCP metadata。
 啟用步驟與註解範例見 [Drift 指南](../../../../../zcu_lab/simulation_envs/FTF/field-guide.md#drift跨-acquisition-損耗漂移)。
 `drift` 只屬於 FTF 環境設定，不屬於 entry。
