@@ -60,12 +60,16 @@ gui = [
   "markdown-it-py",
   "mdit-py-plugins",
 ]
+# OpenCL runtime for the simulator's optional dop853 GPU backend; the simulator
+# imports it lazily and runs on CPU when it is absent.
+gpu = ["pyopencl"]
 all = ["zcu-tools[client,design,gui]"]
 development = ["zcu-tools[all]"]
 
 [dependency-groups]
 dev = [
-  "zcu-tools[gui]",
+  # gpu lets lanes on machines with an FP64 OpenCL GPU run requires_opencl tests.
+  "zcu-tools[gui,gpu]",
   # Remove this pin after a release includes fix fc8f56bd2 for pytest-dev/pytest#14635.
   "pytest==9.0.3",
   "pytest-cov",
@@ -240,6 +244,7 @@ markers = [
   # Capability markers. A module declares what it uses; tools/check_quality.py test-capabilities
   # checks the declaration. These name a capability, not permission to be slow, so
   # mismarking makes a test wrong rather than exempt.
+  "requires_opencl: tests that run on an OpenCL GPU supporting cl_khr_fp64",
   "requires_subprocess: tests that spawn a real child process",
   "uses_wall_clock: tests that sleep instead of synchronising on an event",
 ]

@@ -104,6 +104,7 @@ def _representative(geometry: Geometry, first: int, stop: int) -> Geometry:
             "duration_ns",
             "level",
             "shift_content",
+            "complete_pulses",
             "tones",
             "tone_port",
             "tone_frequency_ghz",

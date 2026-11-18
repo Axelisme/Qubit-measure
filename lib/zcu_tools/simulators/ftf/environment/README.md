@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-11-18, segment numeric revision
+**Last updated:** 2026-11-18, GPU startup preparation
 
 **讀者：** framework-dev、agent。FTF 環境的組裝接縫、數值接線與 acquisition 契約。
 
@@ -194,8 +194,9 @@ Numerical preparations live within one evolve. The source's complete preparation
 LRU remains separate from Engine and does not retain noisy outputs.
 The keyword `workers` selects the engine's sole parallel width; direct callers
 use one worker by default, including tests, benchmarks and research.
-GUI startup reserves one host CPU, with at least one worker, and keeps warmup off.
-Notebook still reserves two CPUs and opts into warmup. The shared GUI policy is
+GUI startup reserves one host CPU, with at least one worker. The Notebook
+reserves two CPUs. Both pass `warmup=True` to start CPU and GPU preparation.
+The shared GUI worker policy is
 `gui.app.measure.startup_context.simulation_workers(cpu_count)`, defined by
 [ADR-0069](../../../../../docs/adr/0069-experiment-core-and-frontends.md#顯式-cfg-與裝置環境).
 Startup instructions belong to
@@ -226,15 +227,25 @@ complete preparations. No projected operators or rates cross flux points.
 
 ## Startup preparation
 
-`ftf(..., warmup=False)` starts no numeric preparation by default. Callers choose
-workers and warmup explicitly; GUI and Notebook policy belongs to
+Callers select startup work with `ftf(..., warmup=...)`:
+
+- `False` (default) starts no background work.
+- `True` prepares common CPU paths, then the OpenCL DOP853 program for the model's
+  `retained_levels`. It skips the GPU item if pyopencl is absent or `families`
+  excludes `dop853`. If detection finds no usable GPU, the item completes
+  without a solve. Otherwise the disposable Engine runs a synthetic solve.
+  Its automatic routing selects CPU for unsupported dimensions. If the solve
+  uses OpenCL, preparation leaves the program in the disk cache.
+- An explicit `EnvironmentWarmup` runs only the caller's items.
+
+GUI and Notebook policy belongs to
 [environment setup](../../../../../zcu_lab/simulation_envs/README.md#workers-與-startup-preparation).
-Opting in starts one process-wide background numeric worker. All opted-in
-environments in the process share its future and terminal result.
-Preparation uses small disposable numeric models, one evolution worker and no
-sampling. It never reads or changes the live environment's devices, binding seed,
-acquire sequence or resident engine cache. Compilation still consumes CPU and
-memory; it overlaps configuration work rather than reducing total compile cost.
+Environments requesting identical items share a future. Within one process,
+each CPU item runs once and each dimension gets at most one GPU warmup.
+The GPU item uses a disposable Engine and fills the existing device-check and
+program disk caches. Preparation never samples
+or changes the live devices, binding seed, acquire sequence or resident Engine.
+Startup overlaps compilation with other work; it does not reduce its total cost.
 
 `env.warmup` is an `EnvironmentWarmup`, or None when disabled. Its immutable
 `status` reports `state` (pending/running/ready/failed), `completed` item names,
@@ -243,10 +254,15 @@ memory; it overlaps configuration work rather than reducing total compile cost.
 callbacks receive the terminal status and must marshal GUI updates to the owner
 thread. `env.wait_ready(timeout=None)` waits for completion and returns the terminal
 status, or None when disabled. A timeout raises `TimeoutError` without cancelling
-work. Failure is logged, retained in status and permits ordinary on-demand
-compilation. The worker exits after completion. Process exit waits for an active
-worker rather than interrupting the compiler. Closing live devices does not cancel
-this independent numeric work.
+work. A CPU preparation error stops the manifest before the GPU item. An error
+after successful GPU detection stops the GPU item. Both errors appear in the
+failed status. Acquire still uses on-demand compilation or CPU fallback when
+needed. An eligible acquire reports detection and build failures through routing
+diagnostics.
+The worker exits after completion. Call `env.close_backend()` after acquisitions drain to wait
+for preparation and release the Engine. Device cleanup is separate; use
+`closing_environment(env)` to release both. Closing devices alone does not wait
+for independent numeric preparation.
 
 Acquire automatically waits after binding admission and before consuming its RNG
 sequence or constructing its request. Call `env.wait_ready()` **before starting a
@@ -648,7 +664,16 @@ identity. It never infers board settings from saved model wiring.
 `ReplayAcquire.settings` stores that acquisition's effective settings with
 `drift=None`, so replay neither reads the simulation clock nor samples drift.
 `ReplayRound.snapshot.model_identity` stores the effective model identity.
-Backend, engine numeric version, RNG version and dependency versions must match. The stream policy is `PCG64/SeedSequence-v2`.
+The version pairs require an exact backend, model, engine numeric version, RNG
+and dependency match. They also record `workers`, the Engine's worker count, and
+`execution_device`, the device that computed the round's evolution. If no row ran
+on GPU, the record says `cpu` and replay forces the CPU backend without checking
+for OpenCL. If any row ran on GPU, replay requires the same OpenCL device name,
+driver, kernel version and pyopencl version, then reruns automatic routing with
+the recorded worker count. A different or unavailable GPU raises `ValueError`
+with both identities. pyopencl is not a global replay dependency. Archives
+missing either execution field fail the version check.
+The stream policy is `PCG64/SeedSequence-v2`.
 The backend is `ftf-segment-v13`. Integrated raw and decimated traces resolve
 continuous CTMC jump times and cavity memory, with one physical path per shot
 shared across mux carriers, ADCs and windows. Archives from `ftf-segment-v12`
@@ -657,7 +682,7 @@ field inheritance.
 Direct means retain conditional moments, their numeric values and their existing
 RNG stream. Raw getters do not advance that stream or shift shots to match a
 finite-shot direct mean. Each acquisition route reproduces itself for equal
-seed, inputs and recorded versions. Evolution uses `segment-engine-v8`.
+seed, inputs and recorded versions. Evolution uses `segment-engine-v9`.
 Old exact-record manifests also fail explicitly. Archives contain model truth and
 must not appear in ordinary Run/native/RPC metadata. Normal provenance remains
 the opaque simulation identifier.

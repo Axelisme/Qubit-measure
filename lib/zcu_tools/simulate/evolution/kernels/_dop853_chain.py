@@ -5,7 +5,12 @@ from numba import njit
 from numpy.typing import NDArray
 
 from ..state import transform_density
-from ._dop853 import Tolerances, integrate_workspace, make_workspace
+from ._dop853 import (
+    ROW_INITIAL_STEP_NS,
+    Tolerances,
+    integrate_workspace,
+    make_workspace,
+)
 from ._dop853_intervals import row_intervals
 
 
@@ -91,7 +96,7 @@ def run_chain(
                 context,
                 interval.duration,
                 row_controls,
-                min(0.1, interval.duration, row_controls.max_step),
+                min(ROW_INITIAL_STEP_NS, interval.duration, row_controls.max_step),
                 workspace,
             )
         states[index] = result.reshape(state.shape)

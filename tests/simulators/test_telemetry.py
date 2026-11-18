@@ -15,6 +15,8 @@ def test_writer_serializes_common_spans_completion_and_namespaced_extras(
     except ImportError as error:
         raise AssertionError("Writer must accept a complete acquire summary") from error
 
+    from zcu_tools.simulate.evolution import FamilyRouting, PathDiagnostics
+
     class CallerSummary(AcquireTelemetry):
         caller_context: str
 
@@ -35,7 +37,21 @@ def test_writer_serializes_common_spans_completion_and_namespaced_extras(
     }
     before = json.dumps(summary, sort_keys=True)
     writer = RoutingTelemetry(tmp_path)
-    writer.write(summary, paths=())
+    paths = tuple(
+        PathDiagnostics(
+            {"dop853": family.rows},
+            routing={"dop853": family},
+            duration_ns_by_kernel={"dop853": family.duration_ns},
+        )
+        for family in (
+            FamilyRouting(rows=3, opencl_rows=3, duration_ns=300),
+            FamilyRouting(
+                rows=1, opencl_detection_error="self-test failed", duration_ns=100
+            ),
+            FamilyRouting(rows=1, opencl_detection_error="no device", duration_ns=100),
+        )
+    )
+    writer.write(summary, paths=paths)
     assert json.dumps(summary, sort_keys=True) == before
     records = [
         json.loads(line)
@@ -69,7 +85,6 @@ def test_writer_serializes_common_spans_completion_and_namespaced_extras(
             "evolve_wall_s",
             "readout_wall_s",
             "complete",
-            "families",
             "capture_file",
             "extras",
         )
@@ -81,13 +96,16 @@ def test_writer_serializes_common_spans_completion_and_namespaced_extras(
         "evolve_wall_s": 0.5,
         "readout_wall_s": 0.2,
         "complete": False,
-        "families": {},
         "capture_file": "capture-example.json.gz",
         "extras": {
             "ftf.projection_outcomes": [4, 2],
             "ftf.projection_pruned_weight": [0.0, 0.01],
         },
     }
+    dop853 = record["families"]["dop853"]
+    assert dop853["rows"] == 5
+    assert dop853["opencl_rows"] == 3
+    assert dop853["opencl_detection_error"] == "self-test failed"
 
 
 def test_writer_removes_oldest_routing_files_and_warns_only_once(tmp_path: Path):

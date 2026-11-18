@@ -160,6 +160,23 @@ _E5 = np.array(
 )
 
 
+ROW_INITIAL_STEP_NS = 0.1
+STEP_SAFETY = 0.9
+STEP_MIN_FACTOR = 0.2
+STEP_MAX_FACTOR = 10.0
+STEP_ERROR_EXPONENT = -1 / 8
+ENDPOINT_ATTEMPT_LIMIT = 10_000_000
+ERROR_NORM_BLEND = 0.01
+
+
+def endpoint_coefficients() -> dict[str, NDArray[np.float64]]:
+    """Return copies of the RK tableau and embedded 5th/3rd error weights."""
+    return {
+        name: values.copy()
+        for name, values in (("A", _A), ("B", _B), ("C", _C), ("E5", _E5), ("E3", _E3))
+    }
+
+
 class Tolerances(NamedTuple):
     """Local errors, ns step ceiling and optional bare-phase allowance.
 
@@ -273,7 +290,11 @@ def _error_norm(stages, state, candidate, step, controls):
         third_norm += abs(third / scale) ** 2
     if fifth_norm == 0 and third_norm == 0:
         return 0.0
-    return step * fifth_norm / np.sqrt((fifth_norm + 0.01 * third_norm) * norm_size)
+    return (
+        step
+        * fifth_norm
+        / np.sqrt((fifth_norm + ERROR_NORM_BLEND * third_norm) * norm_size)
+    )
 
 
 @njit(nogil=True, cache=True, inline="always")
@@ -335,7 +356,7 @@ def integrate_workspace(
     while time < duration_ns:
         attempts += 1
         step = min(step, controls.max_step, duration_ns - time)
-        if attempts > 10000000 or step <= 0 or time + step == time:
+        if attempts > ENDPOINT_ATTEMPT_LIMIT or step <= 0 or time + step == time:
             raise RuntimeError("DOP853 step underflow or iteration limit")
         _trial_into(
             rhs,
@@ -351,13 +372,17 @@ def integrate_workspace(
         if error <= 1:
             state, candidate = candidate, state
             time += step
-            factor = 10.0 if error == 0 else min(10.0, 0.9 * error ** (-1 / 8))
+            factor = (
+                STEP_MAX_FACTOR
+                if error == 0
+                else min(STEP_MAX_FACTOR, STEP_SAFETY * error**STEP_ERROR_EXPONENT)
+            )
             if rejected:
                 factor = min(1.0, factor)
             step *= factor
             rejected = False
         else:
-            step *= max(0.2, 0.9 * error ** (-1 / 8))
+            step *= max(STEP_MIN_FACTOR, STEP_SAFETY * error**STEP_ERROR_EXPONENT)
             rejected = True
     return state
 

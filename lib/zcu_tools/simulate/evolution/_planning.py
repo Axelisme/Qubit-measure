@@ -230,6 +230,7 @@ def _tone_columns(batch, tracks, table, source, flux_point):
     used = np.zeros(rows, dtype=np.int64)
     envelopes = [EnvelopeSpec("constant")]
     flux_drive = np.zeros(rows, dtype=bool)
+    complete = np.ones(rows, dtype=bool)
     change = np.ones(len(flux_point), dtype=bool)
     change[1:] = (flux_point[1:] == flux_point[:-1]) & np.any(
         batch.flux.level[1:] != batch.flux.level[:-1], axis=1
@@ -239,6 +240,10 @@ def _tone_columns(batch, tracks, table, source, flux_point):
     for track, geometry, chosen in zip(batch.tracks, tracks, track_rows, strict=True):
         if not len(chosen):
             continue
+        pulse_points = point[chosen]
+        complete[chosen] &= (start[chosen] == geometry.pulse.start[pulse_points]) & (
+            end[chosen] == geometry.pulse.end[pulse_points]
+        )
         slot = used[chosen]
         used[chosen] += 1
         frequency[chosen, slot] = track.frequency_ghz[point[chosen]]
@@ -281,6 +286,7 @@ def _tone_columns(batch, tracks, table, source, flux_point):
         (port, frequency, amplitude, theta, env_index, offset),
         tuple(envelopes),
         flux_drive,
+        complete,
     )
 
 
@@ -331,7 +337,7 @@ def _batch_geometry(
     flux_events = _events(flux_point, batch.flux.start_ns)
     flux_row = np.searchsorted(flux_events, events, side="right") - 1
     level = batch.flux.level[flux_row]
-    tones, columns, envelopes, flux_drive = _tone_columns(
+    tones, columns, envelopes, flux_drive, complete = _tone_columns(
         batch, tracks, (point, start, end, level), source, flux_point
     )
     flux_drive |= _waveform_varies(batch, point, start, end)
@@ -351,6 +357,7 @@ def _batch_geometry(
         envelopes,
         batch.flux_waveform,
         shift_content=_shift_contents(batch, point, start, level, source),
+        complete_pulses=complete,
     )
     return Geometry(table, batch.points, flux_drive)
 
@@ -430,6 +437,7 @@ def plan(source: ModelSource, batches: Sequence[TimelineBatch]) -> Geometry:
         level=np.concatenate(columns["level"]),
         tones=np.concatenate(columns["tones"]),
         shift_content=np.concatenate(columns["shift_content"]),
+        complete_pulses=np.concatenate(columns["complete_pulses"]),
         tone_port=np.concatenate(columns["tone_port"]),
         tone_frequency_ghz=np.concatenate(columns["tone_frequency_ghz"]),
         tone_amplitude=np.concatenate(columns["tone_amplitude"]),

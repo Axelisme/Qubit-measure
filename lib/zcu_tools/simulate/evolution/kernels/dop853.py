@@ -25,7 +25,11 @@ from ._workload_facts import packed_segments
 
 @dataclass(frozen=True)
 class DOP853Plan:
-    """Global-row frames and chain IDs fixed by dispatch for this evolve."""
+    """Global-row decisions fixed by dispatch for one evolve.
+
+    frame: interaction, lab, or empty for a row belonging to another family.
+    chain: first row of a touching chain, or -1 for an independent row.
+    """
 
     frame: NDArray[np.str_]
     chain: NDArray[np.int64]
@@ -214,8 +218,9 @@ class DOP853Kernel:
 
     The kernel is stateless. Keys encode flux level; the engine must scope its
     cache by ModelSource identity. prepare owns read-only copies of secular
-    operators, never a density. All row iteration/integration releases the GIL
-    in single-threaded numba code. Input ports must exist in each row's model.
+    operators, never a density. CPU integration releases the GIL in
+    single-threaded numba code. The optional OpenCL runner is borrowed for
+    eligible independent endpoints. Input ports must exist in each row's model.
     """
 
     name = "dop853"
@@ -341,15 +346,22 @@ class DOP853Kernel:
 
         Raises ValueError for incompatible prepared data, state/index shapes or
         nonexistent ports. RuntimeError signals numerical failure; earlier rows
-        may already have been advanced. No state normalization/clipping occurs.
+        may already have been advanced. A context with an OpenCL runner must
+        contain only pre-admitted independent rows, and needs no CPU plan.
+        OpenCL endpoints are symmetrized and normalized for handoff; CPU
+        endpoints are unmodified. Neither clips.
 
         Return an all-False bool mask aligned with rows; no post-apply check.
         """
-        plan = context.plan
-        if plan is None:
-            raise ValueError("DOP853 requires a row plan")
-        if not isinstance(plan, DOP853Plan):
-            raise TypeError("DOP853 requires its own row plan")
+        runner = context.opencl
+        cpu_plan = None
+        if runner is None:
+            plan = context.plan
+            if plan is None:
+                raise ValueError("DOP853 requires a row plan")
+            if not isinstance(plan, DOP853Plan):
+                raise TypeError("DOP853 requires its own row plan")
+            cpu_plan = plan
         budget = context.budget
         tolerances(budget)
         if not isinstance(prepared, DOP853Prepared):
@@ -366,13 +378,12 @@ class DOP853Kernel:
         playing = np.arange(table.tone_port.shape[1])[None, :] < table.tones[rows, None]
         if np.any(playing & (table.tone_port[rows] >= models.ports[key_index, None])):
             raise ValueError("DOP853 tone port absent from model")
-        advance_endpoints(
-            EndpointData(prepared.models, packed_segments(table, context.work_plan)),
-            (rows, key_index),
-            states,
-            budget,
-            plan,
-        )
+        data = EndpointData(prepared.models, packed_segments(table, context.work_plan))
+        if cpu_plan is not None:
+            advance_endpoints(data, (rows, key_index), states, budget, cpu_plan)
+        if runner is not None:
+            states[:] = runner.advance(data, (rows, key_index), states, budget)
+            context.work_plan.routing.ran_opencl(self.name, len(rows))
         return np.zeros(len(rows), dtype=np.bool_)
 
 

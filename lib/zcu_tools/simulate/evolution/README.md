@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-11-18, constant-pair cold prices and amortized dissipative DC channel prices
+**Last updated:** 2026-11-18, DOP853 GPU detection and admission
 
 **讀者：** framework-dev、agent。Segment evolution 的公開輸入、路由與數值邊界。
 
@@ -12,6 +12,7 @@ boundary and the decision to keep algorithm knowledge in dispatch.
 ## Contents
 
 - [Public entry points](#public-entry-points)
+- [GPU backend](#gpu-backend)
 - [Frozen numeric inputs and references](#frozen-numeric-inputs-and-references)
 - [Dispatch inspection](#dispatch-inspection)
 - [Engine capture](#engine-capture)
@@ -57,7 +58,7 @@ The exports in [__init__.py](__init__.py) fall into these groups:
 | Solver-free reference storage | `SolverTolerances`, `ReferenceResult`, `reference_key`, `load_reference`, `write_reference` |
 
 `Engine(workers, *, families=None, kernels=None, chunks_per_worker=None,
-routing_cache_bytes=4*1024**2)` owns immutable routing facts.
+routing_cache_bytes=4*1024**2, backend="auto")` owns immutable routing facts.
 Numerical preparations live only within one evolve. `evolve(source, batches, *, budget=1e-3, cancel=event)` consumes a
 `ModelSource` and all `TimelineBatch` inputs for one acquire. `NumericModel` is a
 separate fixed-coordinate record, not an Engine input. Constructor and field
@@ -161,6 +162,63 @@ are admission proxies, not a certificate of final full-density accuracy.
 The 0.08 threshold has margin on the fixed acceptance set described below.
 It is not a maximum usable threshold or an accuracy guarantee for arbitrary
 inputs. Dispatch order and other families are unchanged.
+
+## GPU backend
+
+OpenCL is an execution backend for `dop853`, not an extra family. On Windows
+or Linux, install a GPU driver that exposes `cl_khr_fp64` and add the optional
+`gpu` extra. For a GUI checkout, run:
+
+```bash
+uv sync --directory <worktree> --locked --no-dev --extra gui --extra gpu
+```
+
+The extra installs `pyopencl` from `uv.lock`, not the driver. The `all` extra
+does not include `gpu`. The default development group includes `gpu` so
+managed lanes can run GPU tests on machines with a compatible driver.
+
+| `Engine(backend=...)` | Behavior |
+| --- | --- |
+| `"auto"` (default) | Detects OpenCL on the first eligible row. For eligible DOP853 work, compares CPU and GPU cost, including warm program setup, transfers and batch size. |
+| `"cpu"` | Never probes or uses OpenCL. |
+| `"opencl"` | Requires a device that passes detection at construction. Sends eligible DOP853 rows to that device without price comparison or fallback. A dimension-specific build failure raises during evolve. Ineligible rows can still run on CPU. |
+
+Eligibility depends on structure, not envelope shape. The row must be an
+independent, unchained interaction-frame DOP853 endpoint at fixed DC, with no
+flux modulation or segment shift. It must last 100 ns to 10 µs and have at most
+32 retained levels. Two sampled tones must cover the whole row. The union of
+their sample grids can contain at most 960 knots, because the runner restarts
+integration at knots from either tone. Other rows in the same timeline may
+run on CPU.
+
+Detection imports `pyopencl`, finds an FP64 GPU, compiles a small program and
+checks a fixed endpoint against CPU. The maximum absolute entry difference
+must be at most `1e-5`. The Engine can reuse the stored probe result for the
+same device, driver and kernel. Failure to write that result does not change
+the probe outcome. If detection fails, `opencl` raises during construction and
+`auto` uses CPU with the same numerical result as `"cpu"`. If a program fails
+to build for one dimension before execution, `auto` falls back only for that
+dimension. Read the reason in `opencl_detection_error` with routing telemetry
+enabled. Errors during GPU execution raise instead of retrying on CPU.
+
+One work-group integrates one row on device, using the CPU method's DOP853
+tableau, error norm, controller and budget-scaled tolerances. The GPU computes
+the starting interaction-frame phasor of each step in FP64 and uses FP32
+within the step. Before handing off the density, the runner returns it to the
+model eigenbasis, symmetrizes it and normalizes its trace. The scheduler
+batches ready rows across the acquire by dimension and model key. It uses
+measured dispatch times to target about 0.1 s per batch without reading OS or
+driver timeout settings.
+
+The CPU/GPU cost choice uses the acquire, worker count and device identity.
+Disk cache warmth and measured batch times do not enter that choice. Program
+builds and detection records use
+`<user-cache-root>/opencl/dop853/<digest>/`; the digest covers the kernel
+source and options, dimension, device and driver. The driver can also cache
+builds itself. The simulator's [cache root](../README.md#numba-machine-code-cache)
+can be set with an absolute `ZCU_TOOLS_CACHE_DIR`. A cold build populates the
+cache for later Engines and is not charged in the routing cost. The Engine
+owns the OpenCL context and releases it on `close()` after active work ends.
 
 ## Frozen numeric inputs and references
 
@@ -377,7 +435,7 @@ compares the remaining admissible families by price.
 `CaptureBuffer()` is a caller-owned in-memory recording. Pass it to
 `Engine.evolve(..., capture=buffer)` and read `buffer.records` after return or
 failure. The default `capture=None` does not freeze inputs or collect routes.
-Engine never writes a file. After all evolves return or raise, call
+Capture buffering does not write files. After all evolves return or raise, call
 `write_capture(buffer)` to publish the accumulated records. Explicit-path
 consumers can still use `write_frozen_manifest(path, buffer.records)`.
 
@@ -583,7 +641,8 @@ Full-map accuracy and wall measurements are separate validation work.
 
 `Engine.evolve(..., telemetry=True)` adds immutable `FamilyRouting` values to
 `result.paths.routing`. The default is False, with no thread CPU clock reads and
-an empty mapping. Evolution never writes files. `paths.frontend_cpu_s` separately
+an empty mapping. Telemetry does not write files. OpenCL device detection and
+program builds can access the simulator user cache. `paths.frontend_cpu_s` separately
 reports calling-thread geometry and WorkPlan CPU.
 Common-frame reports also count `prepare_builds` and `admission_rows`.
 Floquet's `prepare_builds` counts exact-key frame construction attempts,
@@ -606,7 +665,16 @@ Rejections count actual numerical guard refusals, not cost-based skips or planne
 feasibility probes. A shared prefix executes once although logical rows include
 all adopting timelines. Caller-retained complete preparation hits report logical
 rows as `cache_hits`, with zero CPU, rejected rows and estimated work.
-Engine evolves always execute numerical work.
+Engine evolves always execute numerical work. For `dop853`, `opencl_rows`
+counts endpoints computed on GPU and `opencl_detection_error` reports why
+automatic detection or the active dimension's compilation failed. It is
+`None` when neither failed.
+
+`PathDiagnostics.execution_device` is read-only and available with telemetry
+off. It is `cpu` if no row ran on GPU; otherwise it contains the OpenCL device
+name, driver version, kernel version and pyopencl version. Merging CPU and GPU
+parts keeps the GPU identity; merging different GPU identities raises
+`ValueError`. Exact-result reuse keeps the device that produced the result.
 
 `estimated_cost` uses **relative scheduling units**, not seconds. The existing
 constant two-tone plan supplies seconds estimates for selected Floquet/DOP853
@@ -969,10 +1037,12 @@ does not certify the adiabatic approximation.
   one family in one evolve. Floquet stores admissions and retained equations;
   the direct solvers store frame or chain decisions. Plans never enter
   persistent kernel state.
-- `KernelContext(source, budget, work_plan)` supplies preparation, key and guard
-  calls with one evolve owner. `ApplyContext(budget, plan, work_plan)` supplies the finite positive per-segment allowance
-  and the family's plan. Floquet and both direct solvers require their own plan;
-  a missing plan raises `ValueError`, and a wrong family type raises `TypeError`.
+- `KernelContext(source, budget, work_plan, opencl)` supplies preparation, key
+  and guard calls with one evolve owner and an optional OpenCL backend.
+  `ApplyContext(budget, plan, work_plan, opencl)` supplies the finite positive
+  per-segment allowance, the family's plan and an optional runner for a batch
+  of admitted OpenCL rows. Floquet and both CPU direct solvers require their own
+  plan; a missing plan raises `ValueError`, and a wrong family type raises `TypeError`.
   Families without plans, including `single_tone_rwa`, `multitone_rwa`,
   `single_tone_gate` and `multitone_gate`, reject a non-`None` plan with `ValueError`.
 
@@ -1154,7 +1224,7 @@ class's methods.
 | Secular coherence decay | [kernels/_secular.py](kernels/_secular.py), used by static, split, modal and direct propagators. |
 | Density basis conversion | `transform_density` in [state.py](state.py), shared by population conversion, scheduler boundaries, Dyson input bounds and compiled DOP853 chains. Callers retain basis selection and traversal. |
 | Adaptive DOP853 tableau, tolerances and integration | [kernels/_dop853.py](kernels/_dop853.py), used by density solvers and Hilbert endpoint builders. Packing and chain traversal live in [kernels/_dop853_data.py](kernels/_dop853_data.py) and [kernels/_dop853_chain.py](kernels/_dop853_chain.py). [kernels/_dop853_intervals.py](kernels/_dop853_intervals.py) owns density knot partitioning and source-coordinate playback clocks. |
-| Ordinary density endpoints, including H0-rotating-frame integration | `advance_endpoints` in [kernels/dop853.py](kernels/dop853.py) owns the full-drive secular density equation and exact return to the model eigenbasis. Ordinary DOP853 apply, `t6` direct rows and period fractional tails share this entry point and its budget-scaled local tolerance policy, supplying explicit frames. Budget validation, knot stops and numerical failures are unchanged. |
+| Ordinary density endpoints, including H0-rotating-frame integration | `advance_endpoints` in [kernels/dop853.py](kernels/dop853.py) owns the full-drive secular density equation and exact return to the model eigenbasis. CPU DOP853 apply, `t6` direct rows and period fractional tails share this entry point and its budget-scaled local tolerance policy, supplying explicit frames. Budget validation, knot stops and numerical failures are unchanged. |
 | Period interpolation, secular playback and fractional tails | [kernels/_period_table.py](kernels/_period_table.py), shared by [period_table](kernels/period_table.py) and [shaped_sambe](kernels/shaped_sambe.py). |
 | Gate Hilbert endpoint integration | [kernels/_gate_endpoints.py](kernels/_gate_endpoints.py), shared by sixteen-node and [adaptive phase](kernels/gate_phase.py) builders. |
 | Constant-tone Hilbert period build and playback | [kernels/floquet_period.py](kernels/floquet_period.py) owns period builds and trajectories, with [CF4 grid](kernels/_cf4_grid.py) and [Sambe](kernels/_period_sambe.py) helpers. [kernels/_period_channel.py](kernels/_period_channel.py) owns complete secular-channel playback. Separate from two-tone Floquet frames. |
@@ -1215,19 +1285,19 @@ failing row group; later groups in the acquire have not been checked.
 Preparation and apply failures propagate; they do not restart candidate
 selection. Cancellation raises `Cancelled` without partial results.
 
-Calls on one Engine serialize. Joblib threading is the only parallel layer;
-kernels are single-threaded and do not open pools. Multi-timeline calls with
+Calls on one Engine serialize. Joblib provides host parallelism.
+CPU kernels are single-threaded and do not open pools. Multi-timeline calls with
 multiple workers create and close a pool per evolve; empty work, one timeline
 and one worker run inline. By default, complete-acquire row density and the
 fraction of cheap gate/no-drive rows select one or six timeline chunks per
 worker. Prepare retains six chunks per worker to spread cold key builds.
-An explicit `chunks_per_worker` fixes both stages. This choice occurs after
-classification and does not change admission, WorkPlan facts or RNG.
+An explicit `chunks_per_worker` fixes CPU prepare and timeline chunks. It does
+not split GPU batches. This choice does not change admission, WorkPlan facts or RNG.
 Cancellation is checked at chunk and preparation boundaries, and before return.
 Native BLAS stays at one thread throughout evolve. Overlapping engines share a
 process-level reference count and the last call restores the original limits;
 external threadpoolctl users must not change them during active evolves.
-`close()` waits for active work, clears routing facts and is idempotent.
+`close()` is idempotent. It waits for active work, then clears routing facts and releases OpenCL resources.
 
 `RoutingHistory` owns distinct acquire content's complete row inventories,
 separate from resident preparations and numerical guards. Each numerical input digest
@@ -1271,8 +1341,8 @@ initial density, reset sampling RNG or reset a simulation clock. It owns none
 of those states. Callers with history-sensitive preparations use `Engine.reuse`
 or `Engine.evolve` to resolve the current route.
 
-`SEGMENT_NUMERIC_VERSION` is `segment-engine-v8`. This revision replaces the
-single full-duration bath split for dissipative DC with a full Lindblad channel.
+`SEGMENT_NUMERIC_VERSION` is `segment-engine-v9`. With the default `backend="auto"`,
+eligible `dop853` rows can use the mixed-precision GPU solver.
 `simulators.ftf.environment` owns private replay and checks backend, model,
 numerical, RNG and dependency versions before
 recomputing a round. Evolution does not persist densities or offline tables

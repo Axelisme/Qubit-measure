@@ -4,10 +4,12 @@ This is deliberately not re-exported by the evolution package. Kernels own
 opaque prepared payloads; the engine only sees their resident array byte size.
 """
 
+from __future__ import annotations
+
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Protocol, SupportsIndex
+from typing import TYPE_CHECKING, Protocol, SupportsIndex
 
 import numpy as np
 from numpy.typing import NDArray
@@ -16,6 +18,9 @@ from ._validation import integers, owned, shape
 from .engine import EnvelopeSpec
 from .secular import FluxWaveform, ModelSource
 from .workplan import WorkPlan
+
+if TYPE_CHECKING:
+    from .kernels._dop853_opencl import OpenCLBackend, OpenCLDOP853
 
 
 @dataclass(frozen=True)
@@ -50,6 +55,8 @@ class SegmentTable:
         one source/evolve, including timing, levels, tones and flux samples.
         Only the planner assigns groups; kernels must not infer them from level.
     prefix_no_drive: group-aligned tuple. True preserves no-drive B2 exemption.
+    complete_pulses: row-aligned flags; True means the row covers the full
+        support of every active pulse. Empty means no such planner facts.
     prefix_inputs: immutable group-ID to read-only DC density mapping. The
         engine computes these known inputs before dependent rows are classified.
         Workers adopt the latest saved input and skip its preceding rows.
@@ -83,6 +90,10 @@ class SegmentTable:
     prefix_inputs: Mapping[int, NDArray[np.complex128]] = field(default_factory=dict)
     shift_content: NDArray[np.bytes_] = field(
         default_factory=lambda: np.empty(0, dtype="S64")
+    )
+
+    complete_pulses: NDArray[np.bool_] = field(
+        default_factory=lambda: np.empty(0, dtype=np.bool_)
     )
 
     def __post_init__(self) -> None:
@@ -122,6 +133,10 @@ class SegmentTable:
         shape(shifts, (rows,), "segment shift content")
         shifts.setflags(write=False)
         object.__setattr__(self, "shift_content", shifts)
+        complete = owned(self.complete_pulses, np.bool_, "complete pulses")
+        if len(complete):
+            shape(complete, (rows,), "complete pulses")
+        object.__setattr__(self, "complete_pulses", complete)
         self._validate_prefixes(rows)
         self._validate_tones(rows)
 
@@ -257,12 +272,15 @@ class KernelContext:
     Standalone callers supply a fresh WorkPlan and close it after use.
     families is the immutable acquire-wide family allowlist for dispatch;
     None preserves unrestricted selection. Kernels retain their original guards.
+    opencl borrows the Engine's DOP853 backend during ordinary timeline work;
+    None plans and runs CPU-only work (including shared prefixes).
     """
 
     source: ModelSource
     budget: float
     work_plan: WorkPlan
     families: frozenset[str] | None = None
+    opencl: OpenCLBackend | None = None
 
     def __post_init__(self) -> None:
         if not np.isfinite(self.budget) or self.budget <= 0:
@@ -276,14 +294,16 @@ class ApplyContext:
     budget: positive absolute per-segment allowance.
     work_plan: shared evolve ownership. The default is only for standalone
         calls; Engine always passes the same WorkPlan to every apply.
-    plan: this family's RowPlan from dispatch, or None when dispatch made none.
-        Kernels that never receive a plan raise ValueError for a non-None plan;
-        kernels that need one raise ValueError for None.
+    plan: this family's CPU RowPlan, or None when no plan is needed. CPU
+        kernels reject missing required plans or plans that they cannot consume.
+    opencl: runner borrowed for a batch consisting only of admitted independent
+        DOP853 rows; None for CPU applies, including neighbors of OpenCL rows.
     """
 
     budget: float
     plan: RowPlan | None = None
     work_plan: WorkPlan = field(default_factory=WorkPlan)
+    opencl: OpenCLDOP853 | None = None
 
     def __post_init__(self) -> None:
         if not np.isfinite(self.budget) or self.budget <= 0:
