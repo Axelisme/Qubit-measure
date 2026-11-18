@@ -65,7 +65,7 @@ def test_incomplete_affine_stays_pending_without_publishing_predictor(
     ).exists()
     assert (
         document_value(
-            snapshot(open_entry(request_data).setup),
+            snapshot(open_entry(request_data).parameters()),
             "Qlegacy.ext.legacy_params.fluxdep_fit",
         )
         == fit
@@ -114,7 +114,7 @@ def test_partial_root_alignment_without_params_stays_pending_and_preserved(
     else:
         assert (
             document_value(
-                snapshot(open_entry(request).setup), "Qlegacy.ext.legacy_params"
+                snapshot(open_entry(request).parameters()), "Qlegacy.ext.legacy_params"
             )
             == values
         )
@@ -189,7 +189,7 @@ def test_historical_top_level_fit_projects_exact_source_leaves(
         source=PredictorSource(None, None),
     )
     assert document_value(
-        snapshot(open_entry(request).setup), "Qlegacy.ext.legacy_params"
+        snapshot(open_entry(request).parameters()), "Qlegacy.ext.legacy_params"
     ) == {
         "params": {"custom.energy": [3, None]},
         "name": "historical author",
@@ -223,7 +223,7 @@ def test_fluxonium_identifying_parameter_allows_unknown_siblings(
         {energy_key: 0.8}
     )
     assert document_value(
-        snapshot(open_entry(request_data).setup),
+        snapshot(open_entry(request_data).parameters()),
         "Qlegacy.ext.legacy_params.fluxdep_fit",
     ) == {
         "params": {"custom.energy": {"note": "untouched"}, "EC": True},
@@ -276,9 +276,9 @@ def test_historical_allows_are_owner_annotations_without_reinterpretation(
     assert dispersive.source is not None
     assert dispersive.source.run_id is None
     assert dispersive.source.created_at == "2020-07-07T16:30:00+08:00"
-    assert document_value(snapshot(entry.setup), "Qlegacy.ext.legacy_params") == {
-        "name": "old author"
-    }
+    assert document_value(
+        snapshot(entry.parameters()), "Qlegacy.ext.legacy_params"
+    ) == {"name": "old author"}
     assert any(
         row.old_file == source
         and row.action == "value"
@@ -313,7 +313,7 @@ def test_newer_fit_wins_and_top_level_values_are_compared_by_source(
         EJ=6.27, EC=1.41, EL=0.8
     )
     assert document_value(
-        snapshot(open_entry(request_data).setup), "Qlegacy.ext.legacy_params"
+        snapshot(open_entry(request_data).parameters()), "Qlegacy.ext.legacy_params"
     ) == {
         "fluxdep_fit": {"flux_int": -0.3},
         "params": {"author": "keep", **({} if equal else {"EJ": 8.2})},
@@ -371,7 +371,9 @@ def test_newer_transition_annotations_preserve_only_different_historical_leaves(
         "mirror": [[2, 3]],
         "nested": {"equal": [], "different": "new"},
     }
-    assert document_value(snapshot(entry.setup), "Qlegacy.ext.legacy_params") == {
+    assert document_value(
+        snapshot(entry.parameters()), "Qlegacy.ext.legacy_params"
+    ) == {
         "allows": {
             "sample_f": 9.7,
             "mirror": [[1, 2]],
@@ -495,7 +497,7 @@ def test_legacy_fit_publishes_named_entry_predictor_with_native_values(
         ),
         source=PredictorSource(None, "2020-07-07T16:30:00+08:00"),
     )
-    point = snapshot(open_entry(request_data).use_point("bias"))
+    point = snapshot(open_entry(request_data).parameters("bias"))
     assert document_value(point, "Qlegacy.EJ") == 11.0
     assert document_value(point, "general.ext.flux_unit") == "mV"
     assert document_value(point, "Qlegacy.ext.legacy_params.fluxdep_fit") == {
@@ -592,7 +594,7 @@ def test_invalid_affine_preserves_partial_energies_without_publishing_predictor(
     report = migrate(request_data, analysis_mapping)
     assert report.pending
     assert document_value(
-        snapshot(open_entry(request_data).setup),
+        snapshot(open_entry(request_data).parameters()),
         "Qlegacy.ext.legacy_params.fluxdep_fit",
     ) == {
         "params": {"EC": -1.0, "EL": None},
@@ -624,7 +626,7 @@ def test_undefined_explicit_model_contract_remains_located_pending(
         for item in report.pending
     )
     assert document_value(
-        snapshot(open_entry(request_data).setup),
+        snapshot(open_entry(request_data).parameters()),
         "Qlegacy.ext.legacy_params.fluxdep_fit",
     ) == {
         key: value
@@ -659,7 +661,7 @@ def test_undefined_transmon_parameter_shape_is_preserved_as_unsupported(
     ).exists()
     assert (
         document_value(
-            snapshot(open_entry(request_data).setup),
+            snapshot(open_entry(request_data).parameters()),
             "Qlegacy.ext.legacy_params.fluxdep_fit",
         )
         == fit

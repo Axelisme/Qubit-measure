@@ -1,15 +1,39 @@
 """Source- and runtime-version isolation for simulator machine-code caches."""
 
+import logging
 import os
 import platform
+import tempfile
 from hashlib import sha256
 from importlib.metadata import version
 from pathlib import Path
 from typing import NoReturn
 
+import platformdirs
 from numba import config
 
-from zcu_tools.utils.cache import user_cache_root
+logger = logging.getLogger(__name__)
+
+
+def user_cache_root() -> Path:
+    """Resolve the shared cache root without creating it.
+
+    ZCU_TOOLS_CACHE_DIR must be a non-empty absolute path when set; otherwise
+    raise ValueError. Without it, use platformdirs, falling back to the system
+    temporary directory plus .zcu_tools when platformdirs fails.
+    """
+    override = os.environ.get("ZCU_TOOLS_CACHE_DIR")
+    if override is not None:
+        root = Path(override)
+        if not override or not root.is_absolute():
+            raise ValueError("ZCU_TOOLS_CACHE_DIR must be a non-empty absolute path")
+        return root
+
+    try:
+        return Path(platformdirs.user_cache_dir("zcu_tools", "zcu_tools"))
+    except Exception:
+        logger.exception("User cache lookup failed; using temporary storage")
+        return Path(tempfile.gettempdir()) / ".zcu_tools"
 
 
 def _raise_source_scan_error(error: OSError) -> NoReturn:

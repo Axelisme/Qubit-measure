@@ -46,9 +46,17 @@ class EndpointData(NamedTuple):
 
 
 class _LabContext(NamedTuple):
-    # Mutable scratch belongs to one interval, not to the model-only preparation.
+    # Mutable scratch belongs to one row, not to the model-only preparation.
     drive: Context
     hamiltonian: NDArray[np.complex128]
+    product: NDArray[np.complex128]
+    derivative: NDArray[np.complex128]
+
+
+class _InteractionContext(NamedTuple):
+    drive: Context
+    hamiltonian: NDArray[np.complex128]
+    phases: NDArray[np.complex128]
     product: NDArray[np.complex128]
     derivative: NDArray[np.complex128]
 
@@ -93,7 +101,14 @@ def _context(data, row, model, interval):
 
 
 @njit(nogil=True, cache=True)
-def _lab_context(data, row, model, interval):
+def _lab_context(data, row, model, interval, previous):
+    if previous is not None:
+        return _LabContext(
+            _context(data, row, model, interval),
+            previous.hamiltonian,
+            previous.product,
+            previous.derivative,
+        )
     size = data.models.energies.shape[1]
     h = np.empty((size, size), dtype=np.complex128)
     return _LabContext(
@@ -108,37 +123,38 @@ def _run(data, row_models, states, controls):
     run_chain(_rhs, _lab_context, data, row_models, states, controls)
 
 
-@njit(nogil=True, cache=True, inline="always")
-def _tone_hamiltonian(time, context, tone):
-    models, segments, row, model, _ = context
-    z = drive_amplitude(time, context, tone)
-    port = segments.port[row, tone]
-    return z.real * models.x[model, port] + z.imag * models.y[model, port]
-
-
 @njit(nogil=True, cache=True)
 def _interaction_rhs(time, state, context):
-    models, segments, row, model, interval = context
+    drive, h, phases, product, derivative = context
+    models, segments, row, model, interval = drive
     size = models.energies.shape[1]
     rho = state.reshape(size, size)
     # Build only the drives: subtracting H0 from a full Hamiltonian would
     # lose small diagonal drive terms to cancellation at weak gains. The first
     # tone keeps the original single-tone arithmetic without an extra M² buffer.
-    if segments.tones[row]:
-        h = _tone_hamiltonian(time, context, 0)
-        for tone in range(1, segments.tones[row]):
-            h += _tone_hamiltonian(time, context, tone)
-    else:
-        h = np.zeros((size, size), dtype=np.complex128)
+    h[:] = 0.0
+    for tone in range(segments.tones[row]):
+        z = drive_amplitude(time, drive, tone)
+        port = segments.port[row, tone]
+        for i in range(size):
+            for j in range(size):
+                value = (
+                    z.real * models.x[model, port, i, j]
+                    + z.imag * models.y[model, port, i, j]
+                )
+                if tone == 0:
+                    h[i, j] = value
+                else:
+                    h[i, j] += value
     row_time = playback_time(
         time, interval.row_start, interval.row_end, interval.duration
     )
-    phases = np.exp(2j * np.pi * models.energies[model] * row_time)
+    for i in range(size):
+        phases[i] = np.exp(2j * np.pi * models.energies[model, i] * row_time)
     for i in range(size):
         for j in range(size):
             h[i, j] *= phases[i] * phases[j].conjugate()
-    product = h @ rho
-    derivative = np.empty_like(rho)
+    np.dot(h, rho, product)
     for target in range(size):
         for source in range(size):
             derivative[target, source] = (
@@ -155,10 +171,33 @@ def _interaction_rhs(time, state, context):
 
 
 @njit(nogil=True, cache=True)
+def _interaction_context(data, row, model, interval, previous):
+    if previous is not None:
+        return _InteractionContext(
+            _context(data, row, model, interval),
+            previous.hamiltonian,
+            previous.phases,
+            previous.product,
+            previous.derivative,
+        )
+    size = data.models.energies.shape[1]
+    h = np.empty((size, size), dtype=np.complex128)
+    return _InteractionContext(
+        _context(data, row, model, interval),
+        h,
+        np.empty(size, dtype=np.complex128),
+        np.empty_like(h),
+        np.empty_like(h),
+    )
+
+
+@njit(nogil=True, cache=True)
 def _run_interaction(data, row_models, states, controls):
     # Only independent rows enter: each starts at sigma(0)=rho(0), with its own
     # controller and seed. The callback-free entry point has a stable disk key.
-    run_chain(_interaction_rhs, _context, data, row_models, states, controls)
+    run_chain(
+        _interaction_rhs, _interaction_context, data, row_models, states, controls
+    )
     rows, model_index, _ = row_models
     for index in range(len(rows)):
         row, model = rows[index], model_index[index]

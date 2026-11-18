@@ -21,6 +21,7 @@ from zcu_tools.gui.app.measure.writeback import ParameterWriteback, WritebackSer
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.resources.entry import ArtifactKey
 
+from tests.gui._context_reads import capture_focus
 from tests.gui.app.measure._form_fakes import form_resources
 from tests.gui.app.measure._native_save_support import (
     NativeSaveSession,
@@ -56,7 +57,7 @@ def test_snapshot_exposes_independent_panes_and_paths(
     primary_draft, post_draft = (
         writeback.create_draft(
             [ParameterWriteback("general.ext.a", description, proposed_value=value)],
-            parameters=session.context.read_context(),
+            parameters=capture_focus(session.context),
             experiment_name="synthetic",
         )
         for description, value in (("primary", 1), ("post", 2))

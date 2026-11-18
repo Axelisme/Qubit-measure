@@ -14,12 +14,6 @@ from matplotlib.figure import Figure
 from zcu_tools.plotting.figures import FigureCollection
 
 
-@pytest.fixture(autouse=True)
-def collect_figure_cycles():
-    yield
-    gc.collect()
-
-
 def test_subplots_are_native_registered_and_saveable_without_presentation() -> None:
     figures = FigureCollection()
     managers = plt.get_fignums()

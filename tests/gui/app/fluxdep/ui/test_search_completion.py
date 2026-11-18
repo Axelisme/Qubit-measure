@@ -98,6 +98,7 @@ def search_panel(qapp, search_input, monkeypatch, failure):
         assert runner.quiesce()
         panel.quiesce()
         panel.dispose()
+        panel.close()
         panel.deleteLater()
 
 

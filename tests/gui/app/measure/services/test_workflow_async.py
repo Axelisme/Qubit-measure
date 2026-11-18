@@ -8,7 +8,6 @@ from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.experiment.workflows import QuestionMismatch
 from zcu_tools.gui.app.measure.services.workflow_control import WorkflowControlFacet
 from zcu_tools.gui.form import FormErrors
-from zcu_tools.gui.session.context_types import PointUseRequest
 from zcu_tools.resources.entry import ResultEntry
 
 from tests.gui._qt_waits import qt_until
@@ -30,7 +29,7 @@ def retained_ask(qapp, tmp_path):
     )
     entry.new_point("source", description="synthetic")
     harness.services.context.install_entry(entry)
-    harness.services.context.use_point(PointUseRequest("source"))
+    harness.services.context.use_point("source")
     board = white_noise(load_soccfg(), std_adc=1.0, seed=None, routes=((0, 0),))
     harness.services.soc_connection.install_soc(board.soc, board.soccfg)
     author = AskAuthor()

@@ -98,8 +98,11 @@ def _seed_entry(ctx: StartupContext) -> None:
             component.model_dump(exclude_unset=True)
         )
         fields.pop("kind")
-        ctx.context.add_component(name, component.kind, fields, setup=True)
+        ctx.context.add_component(name, component.kind, fields, point=None)
     ctx.setup.new_point("initial")
     ctx.context.apply_alias_rows(
-        tuple(AliasRow(name, value) for name, value in template.aliases.aliases.items())
+        tuple(
+            AliasRow(name, value) for name, value in template.aliases.aliases.items()
+        ),
+        point="initial",
     )

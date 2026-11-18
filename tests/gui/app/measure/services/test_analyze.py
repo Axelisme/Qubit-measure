@@ -27,7 +27,7 @@ from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.expected_error import ExpectedErrorCategory, FailedPreconditionError
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.operation_handles import OperationHandles
-from zcu_tools.gui.session.parameters import ParameterContext
+from zcu_tools.gui.session.parameters import DocumentSetCapture
 from zcu_tools.resources.entry.schema import ParameterDocument
 
 from tests.gui._completion_helpers import on_analyze_failed
@@ -114,7 +114,7 @@ def test_historical_analyze_uses_run_capture_after_alias_and_parameter_edits(
             "Q2": QubitSchema(kind="qubit/fluxonium", freq=5100.0),
         },
     )
-    captured = ParameterContext(
+    captured = DocumentSetCapture(
         point=point, library=original.library, target=original.target, roles=None
     ).bind_aliases((AliasRow("qubit", "Q1"),), {})
     state = make_state()
@@ -128,7 +128,7 @@ def test_historical_analyze_uses_run_capture_after_alias_and_parameter_edits(
         ),
     )
     point.components["Q1"] = QubitSchema(kind="qubit/fluxonium", freq=4300.0)
-    current = ParameterContext(
+    current = DocumentSetCapture(
         point=point, library=original.library, target=original.target, roles=None
     ).bind_aliases((AliasRow("qubit", "Q2"),), {})
     state.session_env = replace(state.session_env, parameters=current)

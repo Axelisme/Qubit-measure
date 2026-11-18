@@ -14,7 +14,6 @@ import pytest
 from qtpy.QtWidgets import QPushButton
 from zcu_tools.device import FakeDevice, FakeDeviceInfo
 from zcu_tools.gui import launcher
-from zcu_tools.gui.app.measure import default_startup
 from zcu_tools.gui.app.measure.app import MeasureGuiBehavior
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
@@ -23,12 +22,12 @@ from zcu_tools.gui.session.context_types import (
     CommandOrigin,
     EntryRequest,
     PointCreateRequest,
-    PointUseRequest,
 )
 from zcu_tools.gui.session.ports import OperationConflictError
 from zcu_tools.resources.entry import ResultEntry, component_registry
 
 from tests._lab import synthetic_lab
+from tests.gui._context_reads import capture_focus, inspect_focus
 from tests.gui._qt_waits import qt_until
 from tests.gui._user_input import ComponentDriver
 from tests.gui.app.measure._components import QubitSchema
@@ -81,8 +80,8 @@ def startup_app(qapp, tmp_path, monkeypatch):
     probe.driver.calls = probe.calls
     probe.soccfg = load_soccfg()
     monkeypatch.setitem(sys.modules, "startup_probe", probe)
-    ctrl.setup_control.new_entry(EntryRequest("synthetic"))
-    ctrl.setup_control.new_point(PointCreateRequest("first", "", CommandOrigin("gui")))
+    ctrl.entry_control.new_entry(EntryRequest("synthetic"))
+    ctrl.entry_control.new_point(PointCreateRequest("first", "", CommandOrigin("gui")))
     try:
         yield behavior, assembly, ctrl, window, probe
     finally:
@@ -110,16 +109,6 @@ def run_script(ctrl: Controller, path: Path) -> None:
     )
     outcome = ctrl.operation_control.await_operation(token, 0).outcome
     assert outcome is not None and outcome.status == "finished", outcome
-
-
-def test_framework_default_script_is_selectable_and_defines_startup():
-    default = Path(default_startup.__file__)
-    assert default.is_file()
-    assert callable(default_startup.startup)
-    assert (
-        launcher.select_startup_script(clean=False, script=None, default_script=default)
-        == default
-    )
 
 
 def test_script_selection_uses_only_default_custom_or_clean(tmp_path):
@@ -174,7 +163,7 @@ def test_background_facets_lock_run_and_keep_completed_work(startup_app, tmp_pat
     _behavior, _assembly, ctrl, _window, probe = startup_app
     path = write_script(
         tmp_path,
-        "    p.worker_ids.append(threading.get_ident())\n    ctx.soc.install(p.soccfg, p.soccfg)\n    ctx.devices.register('synthetic', p.driver)\n    ctx.setup.open_entry('synthetic')\n    ctx.setup.use_point('first')\n    ctx.context.apply_alias_rows(())\n    p.tab = ctx.tabs.new_tab('sample')\n    ctx.progress('Waiting for synthetic source')\n    p.started.set()\n    p.release.wait()\n",
+        "    p.worker_ids.append(threading.get_ident())\n    ctx.soc.install(p.soccfg, p.soccfg)\n    ctx.devices.register('synthetic', p.driver)\n    ctx.setup.open_entry('synthetic')\n    ctx.setup.use_point('first')\n    ctx.context.apply_alias_rows((), point=ctx.setup.current().point_label)\n    p.tab = ctx.tabs.new_tab('sample')\n    ctx.progress('Waiting for synthetic source')\n    p.started.set()\n    p.release.wait()\n",
     )
     token = ctrl.start_startup(path)
     try:
@@ -229,7 +218,7 @@ def test_close_drains_startup_owner_delivery_before_callbacks_and_hardware(
     window.destroyed.connect(lambda: probe.calls.append("view released"))
     path = write_script(
         tmp_path,
-        "    ctx.devices.register('synthetic', p.driver)\n    ctx.on_close(lambda: (ctx.context.apply_alias_rows(()), p.calls.append('callback')))\n    p.started.set()\n    p.release.wait()\n    ctx.context.apply_alias_rows(())\n    p.calls.append('worker finished')\n",
+        "    ctx.devices.register('synthetic', p.driver)\n    ctx.on_close(lambda: (ctx.context.apply_alias_rows((), point=ctx.setup.current().point_label), p.calls.append('callback')))\n    p.started.set()\n    p.release.wait()\n    ctx.context.apply_alias_rows((), point=ctx.setup.current().point_label)\n    p.calls.append('worker finished')\n",
     )
     ctrl.start_startup(path)
     qt_until(probe.started.is_set, label="startup waiting")
@@ -299,7 +288,7 @@ def test_startup_selects_global_and_creates_points_in_all_modes(startup_app, tmp
         "    ctx.setup.new_point('seed', description='Global copy')\n"
         "    ctx.setup.new_point('blank', mode='empty', description='Blank')\n"
         "    ctx.setup.new_point('copy', mode='clone', clone_from='seed', description='Clone')\n"
-        "    ctx.setup.use_global()\n",
+        "    ctx.setup.use_point(None)\n",
     )
     token = ctrl.start_startup(path)
     qt_until(
@@ -331,9 +320,9 @@ def test_startup_persists_aliases_in_the_active_document_set(
             tmp_path,
             "    from zcu_tools.gui.session.aliases import AliasRow\n"
             "    ctx.setup.new_entry('created')\n"
-            "    ctx.context.add_component('Q1', 'startup/qubit', {'freq': 5.25}, setup=True)\n"
+            "    ctx.context.add_component('Q1', 'startup/qubit', {'freq': 5.25}, point=None)\n"
             + ("    ctx.setup.new_point('initial')\n" if point is not None else "")
-            + "    ctx.context.apply_alias_rows((AliasRow('qubit', 'Q1'),))\n",
+            + "    ctx.context.apply_alias_rows((AliasRow('qubit', 'Q1'),), point=ctx.setup.current().point_label)\n",
         )
         token = ctrl.start_startup(path)
         qt_until(
@@ -345,18 +334,20 @@ def test_startup_persists_aliases_in_the_active_document_set(
         outcome = ctrl.operation_control.await_operation(token, 0).outcome
         assert outcome is not None and outcome.status == "finished"
         assert ctrl.context_control.current_point_label() == point
-        assert ctrl.context_control.read_context().value("$qubit.freq") == 5.25
+        assert capture_focus(ctrl.context_control).value("$qubit.freq") == 5.25
         entry = ResultEntry.open(
             "created",
             result_root=tmp_path / "result",
             database_root=tmp_path / "Database",
         )
-        assert entry.load_aliases(point=point).aliases == {"qubit": "Q1"}
-        ctrl.setup_control.open_entry(EntryRequest("synthetic"))
-        ctrl.setup_control.open_entry(EntryRequest("created"))
+        assert entry.aliases(point=point).read().require_valid().aliases == {
+            "qubit": "Q1"
+        }
+        ctrl.entry_control.open_entry(EntryRequest("synthetic"))
+        ctrl.entry_control.open_entry(EntryRequest("created"))
         if point is not None:
-            ctrl.setup_control.use_point(PointUseRequest(point))
-        assert ctrl.context_control.read_context().value("$qubit.freq") == 5.25
+            ctrl.entry_control.use_point(point)
+        assert capture_focus(ctrl.context_control).value("$qubit.freq") == 5.25
     finally:
         restore_registry(before)
         assert registry_state() == before
@@ -370,8 +361,8 @@ def test_component_and_alias_facets_commit_through_context_owner(startup_app, tm
         path = write_script(
             tmp_path,
             "    from zcu_tools.gui.session.aliases import AliasRow\n"
-            "    ctx.context.add_component('Q1', 'startup/qubit', {'freq': 5.25})\n"
-            "    ctx.context.apply_alias_rows((AliasRow('qubit', 'Q1'),))\n",
+            "    ctx.context.add_component('Q1', 'startup/qubit', {'freq': 5.25}, point=ctx.setup.current().point_label)\n"
+            "    ctx.context.apply_alias_rows((AliasRow('qubit', 'Q1'),), point=ctx.setup.current().point_label)\n",
         )
         token = ctrl.start_startup(path)
         qt_until(
@@ -382,8 +373,8 @@ def test_component_and_alias_facets_commit_through_context_owner(startup_app, tm
         )
         outcome = ctrl.operation_control.await_operation(token, 0).outcome
         assert outcome is not None and outcome.status == "finished"
-        assert ctrl.context_control.read_context().value("$qubit.freq") == 5.25
-        assert "Q1" in ctrl.context_control.inspect_document().components
+        assert capture_focus(ctrl.context_control).value("$qubit.freq") == 5.25
+        assert "Q1" in inspect_focus(ctrl.context_control).components
     finally:
         restore_registry(before)
         assert registry_state() == before
@@ -412,7 +403,7 @@ def test_live_queries_and_close_callback_read_current_not_startup_state(
         "    ctx.on_close(closing)\n",
     )
     run_script(ctrl, path)
-    ctrl.setup_control.new_point(PointCreateRequest("later", "", CommandOrigin("gui")))
+    ctrl.entry_control.new_point(PointCreateRequest("later", "", CommandOrigin("gui")))
     ctrl.tab_control.new_tab("sample")
     behavior.close(assembly)
     assert probe.calls == ["snapshot", "hardware"]

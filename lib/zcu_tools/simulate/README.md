@@ -1,12 +1,33 @@
 # Numeric simulation tools
 
-**Last updated:** 2026-11-17, frozen scene storage and dressed resonator builder
+**Last updated:** 2026-11-18, dissipative DC propagation and channel pricing
 
 **讀者：** framework-dev、agent。查閱數值模擬的責任邊界、快取契約與實測效能。
 
 `evolution` and `adc` are independent numeric tools. Neither imports QICK,
 DeviceManager, resources, GUI, YAML or an environment. The existing fluxonium
 prediction tools remain separate. ADR-0072 defines the package dependency rules.
+
+Before adding or changing a kernel, a guard, a price or a measurement scene, or
+optimizing speed, follow the [simulator maintenance rules](maintenance.md).
+
+## Acquisition boundary
+
+`zcu_tools.simulate.boundary` owns the immutable numeric acquisition records
+shared by the frontend and environments. Import `TimeBase`, `AcquireRequest`,
+`RoundRequest`, timeline slots, signals and statistics from this module.
+`TimeBase` owns the rational common clock and integer-tick conversion.
+`ChargeDriveRequirement` carries caller-supplied charge-line requirements;
+physical environments validate membership. Records define units, array shapes
+and borrow lifetimes without importing drivers, Module objects or GUI code.
+See the [program simulation contract](../program/v2/simulation/README.md) for
+frontend admission, round execution and ADC transport.
+
+`simulate` does not import any other `zcu_tools` package.
+The `.importlinter` contract `simulate-closed` forbids these dependencies,
+including indirect imports, without exceptions. C19 continues to forbid
+`core` from depending on `simulate`. Boundary records have no compatibility
+re-export at their former location.
 
 ## Frozen scene storage
 
@@ -17,7 +38,7 @@ Its public APIs take explicit paths and verify complete record identities.
 They do not discover Git roots, build device models or solve references.
 Tools choose the repository-shared cache; tests-side producers select independent
 solvers. See [frozen numeric inputs and references](evolution/README.md#frozen-numeric-inputs-and-references).
-This I/O boundary does not claim the whole simulate package is dependency-closed.
+This I/O boundary stays within the package's dependency-closure contract.
 
 ## Numeric parameter drift
 
@@ -75,9 +96,16 @@ its dispatchers or first compiles JIT code. Both entries import the same private
 bootstrap module. Python serializes its initialization and retains only a
 successful import, so multiple tools share one namespace without nesting it.
 A failed bootstrap propagates its error and is retried on the next tool import.
-Without `NUMBA_CACHE_DIR`, it uses `user_cache_root()/numba/<digest>/`.
-The shared root honors
-`ZCU_TOOLS_CACHE_DIR`. An existing `NUMBA_CACHE_DIR` becomes a parent:
+Without `NUMBA_CACHE_DIR`, it uses `<user-cache-root>/numba/<digest>/`.
+The simulator resolves this root with `_numba_cache.user_cache_root()` without
+importing `utils.cache`. The debug capture writer uses the same resolver for
+`simulator-debug/v1`; see [capture persistence](evolution/README.md#capture-persistence).
+`ZCU_TOOLS_CACHE_DIR` must be a non-empty absolute path; invalid values raise
+`ValueError`. Without this override, the root is
+`platformdirs.user_cache_dir("zcu_tools", "zcu_tools")`. If platform lookup fails,
+it uses `<tempdir>/.zcu_tools`. These rules match `utils.cache.user_cache_root`,
+so GUI and session cache roots keep their existing locations.
+An existing `NUMBA_CACHE_DIR` becomes a parent:
 `<NUMBA_CACHE_DIR>/zcu-simulate-<digest>/`. Set overrides before the first
 Numba tool import. Changing them later requires a new process.
 
@@ -121,9 +149,14 @@ default. The engine segments controls, selects kernels and shares deterministic
 preparations across points and acquires. It never carries quantum states into a
 new shot. Numeric tolerances do not certify basis convergence or the physical
 validity of a model.
-Single constant-tone plateaus below 30 MHz use `slow_envelope`, which holds
-carrier phase at each midpoint and applies full-Hamiltonian matrix exponentials
-between secular bath half-steps. The default is 20 segments per carrier period.
+Single constant-tone plateaus below 30 MHz offer `slow_envelope` and `dop853`.
+Dissipative DC compares the channel's M⁶ construction cost, amortized over exact
+prepare-key uses in the acquire, with direct integration. Nonzero
+carriers hold phase at each midpoint and apply full-Hamiltonian matrix
+exponentials between secular bath half-steps. The default is 20 segments per
+carrier period. Dissipative DC uses the exact constant Lindblad channel instead
+of splitting the bath. Its channel stores O(M⁴) complex values for M levels.
+Bath-free DC uses one full-duration unitary.
 Set `numerics.slow_envelope_segments_per_period` in single-fluxonium or the
 six-fluxonium environment to refine this grid. Population error against dense
 ODE is accepted within 1e-2; the 21-level Q1 calibration measured about 1e-4 or
@@ -170,14 +203,18 @@ dressed transition frequency.
 Resonator loss keeps only energy-lowering matrix elements of a.
 Qubit loss projects each parent jump into the joint basis.
 Pure dephasing is zero.
-The model identity hashes all numeric inputs, port names, retained labels,
-cutoff and flux level, with canonical matrix bytes and sorted drive ports.
+The model identity uses public `simulate.evolution.digest` on all input fields,
+including numeric arrays, port names, retained labels, cutoff and flux level.
+Canonical JSON sorts mapping keys, so drive insertion order does not affect it.
 
 Use this builder only when the caller explicitly needs photons in the evolution
 space. `SingleFluxoniumModel` with `DispersiveResonator` instead supplies the
 dispersive shifts for a semiclassical cavity; it adds no photon states to
 evolution. The builder does not choose a model adapter, remove duplicate loss
 terms or connect readout and acquisition environments.
+`SingleFluxoniumModel.joint_resonator_model` supplies native-cutoff fluxonium
+inputs and intrinsic qubit T1 without duplicate Purcell or thermal-photon terms;
+see the [fluxonium adapter](fluxonium/README.md#modelpy--單-fluxonium-演化與讀出模型).
 
 ## ADC readout
 
@@ -223,7 +260,7 @@ Receiver noise remains independent per sample and window. The result includes fl
 sums from one realization. Offset is added once per sample. Conditional responses
 and integrated round statistics remain deterministic first moments.
 A zero or singular positive-semidefinite 2x2 I/Q noise covariance is valid.
-`SamplingIdentity`, imported from `zcu_tools.core.simulation`, selects a local
+`SamplingIdentity`, imported from `zcu_tools.simulate.boundary`, selects a local
 PCG64 stream without changing global RNG state. The ADC and deferred integrated
 raw generation share this identity format.
 
@@ -232,7 +269,7 @@ and composes evolution, explicit populations and ADC. ADC and white_noise own
 complete integrated raw through structurally typed sources. `simulate.rounding`
 owns shared numeric nearest-even int64 conversion and shot-axis layout. Program
 owns the RawShots protocol, channel declaration order and acquisition normalization.
-Core statistics remain pure data. Deferred raw does no work during mean draws;
+Boundary statistics remain pure data. Deferred raw does no work during mean draws;
 its full CTMC paths use a separate stream and are not shifted to direct totals. [`evolution`](evolution/README.md) uses the segment engine's fast
 algorithms by default and shares prepared data within one evolve. It does not read or
 write an offline U-table library or persistent density records. Private replay

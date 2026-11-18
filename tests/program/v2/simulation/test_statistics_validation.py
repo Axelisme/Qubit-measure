@@ -8,7 +8,10 @@ from fractions import Fraction
 import numpy as np
 import pytest
 from numpy.typing import NDArray
-from zcu_tools.core.simulation import (
+from zcu_tools.experiment.simulation import white_noise
+from zcu_tools.program.v2.simulation import IntegratedRound
+from zcu_tools.program.v2.simulation.signals import StatisticsCopier
+from zcu_tools.simulate.boundary import (
     AcquireRequest,
     ChannelStatistics,
     ReadoutWindow,
@@ -16,9 +19,6 @@ from zcu_tools.core.simulation import (
     SamplingIdentity,
     TimeBase,
 )
-from zcu_tools.experiment.simulation import white_noise
-from zcu_tools.program.v2.simulation import IntegratedRound
-from zcu_tools.program.v2.simulation.signals import StatisticsCopier
 from zcu_tools.simulate.white_noise import WhiteNoiseRawShots
 
 from tests.program._profiles import load_soccfg
@@ -53,13 +53,14 @@ def compact_round():
     env.soc.binding.execute = lambda _: IntegratedRound(
         record, WhiteNoiseRawShots(0, request, record.raw_identity)
     )
-    env.soc.binding.begin()
-    env.soc.install_request(request)
     try:
-        yield env.soc, request, record
+        with env.soc.binding.acquire():
+            env.soc.install_request(request)
+            try:
+                yield env.soc, request, record
+            finally:
+                env.soc.release_request()
     finally:
-        env.soc.release_request()
-        env.soc.binding.end()
         env.devices.close_all_devices()
 
 
@@ -430,13 +431,14 @@ def test_certificate_is_not_shared_between_socs(compact_round, eigen_calls):
     other.soc.binding.execute = lambda _: IntegratedRound(
         record, WhiteNoiseRawShots(0, request, record.raw_identity)
     )
-    other.soc.binding.begin()
-    other.soc.install_request(request)
     try:
-        other.soc.run_round()
+        with other.soc.binding.acquire():
+            other.soc.install_request(request)
+            try:
+                other.soc.run_round()
+            finally:
+                other.soc.release_request()
     finally:
-        other.soc.release_request()
-        other.soc.binding.end()
         other.devices.close_all_devices()
     assert len(eigen_calls) == 2
 

@@ -12,12 +12,12 @@ from zcu_tools.resources.parameter_fields import set_model_value
 from .items import ModuleWriteback
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.session.parameters import ParameterContext
+    from zcu_tools.gui.session.parameters import DocumentSetCapture
     from zcu_tools.program.v2.modules import AbsModuleCfg
 
 
 def calibrated_module_writeback(
-    parameters: ParameterContext,
+    parameters: DocumentSetCapture,
     tested_module: AbsModuleCfg,
     *,
     target: str,

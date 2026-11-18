@@ -14,7 +14,7 @@ Control 保留 tab／pane admission、事件與 detached receipt；UI 和 remote
 
 `calibrated_module_writeback(parameters, tested_module, target=...,
 description=..., field_updates=...)` builds one complete `ModuleWriteback`.
-The caller supplies a read-only Run/Load ParameterContext, the native tested
+The caller supplies a read-only Run/Load DocumentSetCapture, the native tested
 module cfg, and exact dotted Spec paths with new values.
 The builder resolves the captured slot, copies `LibrarySnapshot.module_spec()`,
 and materializes `get_module()` through the existing native converter.

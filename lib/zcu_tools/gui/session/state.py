@@ -101,7 +101,7 @@ class SessionPreferences:
     """Remembered session preferences — the *prefill* values, distinct from the
     active ``SessionEnv``.
 
-    These are what the setup dialog prefills and what persistence projects to
+    These are what the Entry and SoC dialogs prefill and what persistence projects to
     disk; they are NOT the live connection/active-project state. Because the
     instrument never auto-connects, there is no need to distinguish
     "currently connected to" from "remembered" — apply/connect just update these
@@ -110,7 +110,7 @@ class SessionPreferences:
     not versioned (no guarded op depends on it).
     """
 
-    # Remembered ResultEntry name for Setup prefill, not an opened entry.
+    # Remembered ResultEntry name for Entry prefill, not an opened entry.
     entry_name: str = ""
     scope_id: str = ""
     result_dir: str = ""
@@ -146,7 +146,7 @@ class SessionState:
         non-md/ml fields (soc/soccfg via connect, predictor via load/clear).
 
         The ``context`` version represents md/ml *content*: only callers that
-        actually change md/ml (setup_project / use_context / new_context) bump
+        actually change md/ml (open_entry / use_point / new_point) bump
         it explicitly. soc has its own ``soc`` version key; predictor is not a
         guarded resource. This keeps soc-connect / predictor-load from spuriously
         marking md/ml-dependent ops (run / editor.commit / writeback) stale.

@@ -12,8 +12,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 from numpy.testing import assert_array_equal
-from zcu_tools.core.simulation import SamplingIdentity
 from zcu_tools.simulate import adc
+from zcu_tools.simulate.boundary import SamplingIdentity
 
 
 def unprojected_inputs():

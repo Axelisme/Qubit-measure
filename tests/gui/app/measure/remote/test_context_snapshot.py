@@ -10,11 +10,13 @@ from pydantic import ConfigDict
 from zcu_tools.cfg_model import ArbWaveformCfg, PulseSpec
 from zcu_tools.gui.remote.errors import ErrorCode
 from zcu_tools.gui.session.aliases import AliasRow
-from zcu_tools.gui.session.context_types import ContextSourceFault, SavedPoint
-from zcu_tools.gui.session.parameters import ParameterContext, RoleBinding
+from zcu_tools.gui.session.context_types import ContextSourceFault, DocumentSetRef
+from zcu_tools.gui.session.parameters import DocumentSetCapture, RoleBinding
 from zcu_tools.resources.context.library import LibraryContent, LibrarySnapshot
 from zcu_tools.resources.entry import ComponentSchema, ResultEntry, component_registry
 from zcu_tools.resources.waveform_assets import ArbWaveformError
+
+from tests.gui._context_reads import capture_focus
 
 from ._point_application import PointApplication
 
@@ -60,15 +62,17 @@ def test_active_point_label_and_real_window_follow_published_target_not_aliases(
         info = application.open_entry()
         assert_visible_snapshot(info.name, "Global")
         context = controller.context_control
-        context.add_component("Q1", "fake/drive/a", {"rate": 10.0}, setup=True)
-        context.add_component("Q2", "fake/drive/a", {"rate": 20.0}, setup=True)
+        context.add_component("Q1", "fake/drive/a", {"rate": 10.0}, point=None)
+        context.add_component("Q2", "fake/drive/a", {"rate": 20.0}, point=None)
         assert application.result("context.active", {}) == {"label": None}
         for point in ("base", "next"):
             application.result("point.new", {"label": point, "description": point})
             assert application.result("context.active", {}) == {"label": point}
             assert_visible_snapshot(info.name, point)
             for name in ("Q1", "Q2", ""):
-                context.apply_alias_rows((AliasRow("driver", name),))
+                context.apply_alias_rows(
+                    (AliasRow("driver", name),), point=context.current_point_label()
+                )
                 assert application.result("context.active", {}) == {"label": point}
                 assert_visible_snapshot(info.name, point)
         assert application.result("context.labels", {}) == {"labels": ["base", "next"]}
@@ -92,8 +96,8 @@ def test_snapshot_returns_complete_native_documents_without_materializing_assets
 ) -> None:
     info = application.open_entry()
     context = application.controller.context_control
-    context.add_component("Q1", "fake/drive/a", {"rate": 10.0}, setup=True)
-    context.add_component("S1", "fake/sensor", {"rate": 20.0}, setup=True)
+    context.add_component("Q1", "fake/drive/a", {"rate": 10.0}, point=None)
+    context.add_component("S1", "fake/sensor", {"rate": 20.0}, point=None)
     entry = ResultEntry.open(
         info.name,
         result_root=info.result_path.parent,
@@ -103,7 +107,7 @@ def test_snapshot_returns_complete_native_documents_without_materializing_assets
     with point.edit() as draft:
         draft.set("general.ext.nested", {"trace": [1.0, 2.0], "unset": None})
         draft.set_meta("general.ext.nested.trace", {"stderr": [0.1, 0.2]})
-    library = entry.module_library("base")
+    library = entry.library("base")
     with library.edit() as draft:
         draft.set_waveform(
             "Q1.waveforms.arbitrary", ArbWaveformCfg(data="missing_asset")
@@ -115,7 +119,7 @@ def test_snapshot_returns_complete_native_documents_without_materializing_assets
             ),
         )
     application.result("point.use", {"label": "base"})
-    captured = context.read_context()
+    captured = capture_focus(context)
     result = application.result("context.snapshot", {})
     assert result == {
         "target": saved_target(captured).model_dump(),
@@ -160,11 +164,11 @@ def test_source_unavailable_snapshot_does_not_unlock_context(
 ) -> None:
     application.open_entry()
     application.result("point.new", {"label": "working"})
-    captured = application.controller.context_control.read_context()
+    captured = capture_focus(application.controller.context_control)
     fault = ContextSourceFault(
         document, tmp_path / f"{document}.yaml", "OSError", "source fault"
     )
-    unavailable = ParameterContext(
+    unavailable = DocumentSetCapture(
         point=captured.document(),
         library=captured.library,
         target=captured.target,
@@ -189,7 +193,9 @@ def test_nonfinite_snapshot_never_substitutes_null_or_unlocks_context(
     application.result("point.new", {"label": "working"})
     context = application.controller.context_control
     context.set_parameter(
-        saved_target(context.read_context()), "general.ext.nested", {"values": [value]}
+        saved_target(capture_focus(context)),
+        "general.ext.nested",
+        {"values": [value]},
     )
     reply = application.rpc("context.snapshot", {})
     error = reply["error"]
@@ -205,15 +211,17 @@ def test_snapshot_path_validates_only_the_selected_parameter_subtree(
     application.open_entry()
     application.result("point.new", {"label": "working"})
     context = application.controller.context_control
-    context.add_component("Q1", "fake/drive/a", {"rate": 10.0})
-    captured = context.read_context()
+    context.add_component(
+        "Q1", "fake/drive/a", {"rate": 10.0}, point=context.current_point_label()
+    )
+    captured = capture_focus(context)
     content = captured.point_content()
     raw = snapshot_mapping(content.root)
     components = snapshot_mapping(raw["components"])
     components["Q1"] = {"kind": "fake/drive/a", "rate": 10.0}
     components["Broken"] = {"kind": "fake/drive/a", "rate": bad}
-    restored = ParameterContext.from_content(
-        point=content, library=captured.library, aliases=None, names={}
+    restored = DocumentSetCapture(
+        point=content, library=captured.library, target=captured.target, roles=None
     )
     application.state.set_context(
         replace(application.state.session_env, parameters=restored)
@@ -250,7 +258,7 @@ def test_snapshot_summary_does_not_consume_hidden_list_elements(
     application.result("point.new", {"label": "working"})
     context = application.controller.context_control
     context.set_parameter(
-        saved_target(context.read_context()),
+        saved_target(capture_focus(context)),
         "general.ext.hidden",
         {"values": [float("inf"), float("nan")]},
     )
@@ -262,7 +270,9 @@ def test_snapshot_summary_does_not_consume_hidden_list_elements(
     error = snapshot_mapping(application.rpc("context.snapshot", {})["error"])
     assert error["reason"] == "unserializable_context"
     context.set_parameter(
-        saved_target(context.read_context()), "general.ext.output", float("inf")
+        saved_target(capture_focus(context)),
+        "general.ext.output",
+        float("inf"),
     )
     used = snapshot_mapping(
         application.rpc("context.snapshot", {"summaries": True})["error"]
@@ -282,7 +292,7 @@ def test_snapshot_summary_checks_fields_it_outputs_not_list_item_schemas(
     try:
         application.open_entry()
         application.result("point.new", {"label": "working"})
-        captured = application.controller.context_control.read_context()
+        captured = capture_focus(application.controller.context_control)
         content = captured.point_content()
         components = snapshot_mapping(snapshot_mapping(content.root)["components"])
         components["Trace"] = {
@@ -294,8 +304,11 @@ def test_snapshot_summary_checks_fields_it_outputs_not_list_item_schemas(
         application.state.set_context(
             replace(
                 application.state.session_env,
-                parameters=ParameterContext.from_content(
-                    point=content, library=captured.library, aliases=None, names={}
+                parameters=DocumentSetCapture(
+                    point=content,
+                    library=captured.library,
+                    target=captured.target,
+                    roles=None,
                 ),
             )
         )
@@ -321,16 +334,21 @@ def test_snapshot_path_reads_a_leaf_without_validating_same_component_sibling(
     application.open_entry()
     application.result("point.new", {"label": "working"})
     context = application.controller.context_control
-    context.add_component("Q1", "fake/drive/a", {"rate": 10.0})
-    captured = context.read_context()
+    context.add_component(
+        "Q1", "fake/drive/a", {"rate": 10.0}, point=context.current_point_label()
+    )
+    captured = capture_focus(context)
     content = captured.point_content()
     components = snapshot_mapping(snapshot_mapping(content.root)["components"])
     components["Q1"] = {"kind": "fake/drive/a", "rate": 10.0, "sense": 42}
     application.state.set_context(
         replace(
             application.state.session_env,
-            parameters=ParameterContext.from_content(
-                point=content, library=captured.library, aliases=None, names={}
+            parameters=DocumentSetCapture(
+                point=content,
+                library=captured.library,
+                target=captured.target,
+                roles=None,
             ),
         )
     )
@@ -356,7 +374,7 @@ def test_snapshot_library_path_reads_only_selected_spec_fields(
 ) -> None:
     application.open_entry()
     application.result("point.new", {"label": "working"})
-    captured = application.controller.context_control.read_context()
+    captured = capture_focus(application.controller.context_control)
     library = LibrarySnapshot.from_content(
         LibraryContent(
             {
@@ -384,8 +402,11 @@ def test_snapshot_library_path_reads_only_selected_spec_fields(
     application.state.set_context(
         replace(
             application.state.session_env,
-            parameters=ParameterContext.from_content(
-                point=captured.point_content(), library=library, aliases=None, names={}
+            parameters=DocumentSetCapture(
+                point=captured.point_content(),
+                library=library,
+                target=captured.target,
+                roles=None,
             ),
         )
     )
@@ -420,8 +441,8 @@ def test_snapshot_point_path_does_not_consume_unselected_library_source_fault(
 ) -> None:
     application.open_entry()
     application.result("point.new", {"label": "working", "description": "available"})
-    captured = application.controller.context_control.read_context()
-    unavailable = ParameterContext(
+    captured = capture_focus(application.controller.context_control)
+    unavailable = DocumentSetCapture(
         point=captured.document(),
         library=captured.library,
         target=captured.target,
@@ -456,8 +477,8 @@ def test_invalid_snapshot_target_path_precedes_unselected_point_source_fault(
 ) -> None:
     application.open_entry()
     application.result("point.new", {"label": "working"})
-    captured = application.controller.context_control.read_context()
-    unavailable = ParameterContext(
+    captured = capture_focus(application.controller.context_control)
+    unavailable = DocumentSetCapture(
         point=captured.document(),
         library=captured.library,
         target=captured.target,
@@ -484,12 +505,12 @@ def test_snapshot_path_reports_malformed_required_ancestor_as_schema_error(
 ) -> None:
     application.open_entry()
     application.result("point.new", {"label": "working"})
-    captured = application.controller.context_control.read_context()
+    captured = capture_focus(application.controller.context_control)
     content = captured.point_content()
     components = snapshot_mapping(snapshot_mapping(content.root)["components"])
     components["Q1"] = {"kind": "fake/drive/a", "rate": 10.0, "wiring": wiring}
-    restored = ParameterContext.from_content(
-        point=content, library=captured.library, aliases=None, names={}
+    restored = DocumentSetCapture(
+        point=content, library=captured.library, target=captured.target, roles=None
     )
     application.state.set_context(
         replace(application.state.session_env, parameters=restored)
@@ -512,9 +533,9 @@ def test_snapshot_path_reports_malformed_required_ancestor_as_schema_error(
         restored.value("Q1.wiring.ch")
 
 
-def saved_target(parameters: ParameterContext) -> SavedPoint:
+def saved_target(parameters: DocumentSetCapture) -> DocumentSetRef:
     target = parameters.target
-    assert isinstance(target, SavedPoint)
+    assert isinstance(target, DocumentSetRef)
     return target
 
 
@@ -533,10 +554,17 @@ def browse_context(application: PointApplication) -> PointApplication:
     application.open_entry()
     application.result("point.new", {"label": "working"})
     context = application.controller.context_control
-    context.add_component("Q1", "fake/drive/a", {"rate": 10.0, "sense": "S1"})
-    context.add_component("S1", "fake/sensor", {"rate": 20.0})
+    context.add_component(
+        "Q1",
+        "fake/drive/a",
+        {"rate": 10.0, "sense": "S1"},
+        point=context.current_point_label(),
+    )
+    context.add_component(
+        "S1", "fake/sensor", {"rate": 20.0}, point=context.current_point_label()
+    )
     context.set_parameter(
-        saved_target(context.read_context()),
+        saved_target(capture_focus(context)),
         "general.ext.browse",
         {
             "scalar": 7.5,
@@ -553,7 +581,8 @@ def browse_context(application: PointApplication) -> PointApplication:
             AliasRow("unbound", ""),
             AliasRow("missing", "Absent"),
             AliasRow("bad_link", "$drive.rate"),
-        )
+        ),
+        point=context.current_point_label(),
     )
     return application
 
@@ -569,7 +598,7 @@ def test_snapshot_summary_preserves_native_array_shape_and_numpy_scalars(
     try:
         application.open_entry()
         application.result("point.new", {"label": "working"})
-        captured = application.controller.context_control.read_context()
+        captured = capture_focus(application.controller.context_control)
         point = captured.whole_document()
         point = point.model_copy(
             update={
@@ -583,7 +612,7 @@ def test_snapshot_summary_preserves_native_array_shape_and_numpy_scalars(
                 }
             }
         )
-        native = ParameterContext(
+        native = DocumentSetCapture(
             point=point,
             library=captured.library,
             target=captured.target,
@@ -677,7 +706,7 @@ def test_snapshot_summary_keeps_scalars_and_complete_aliases(
         ),
         ("point.general.ext.browse.matrix.1", [3, 4]),
         ("point.components.Q1.rate", 10.0),
-        ("target.kind", "saved_point"),
+        ("target.point", "working"),
         ("library.components", {}),
         ("aliases.1.resolved", "S1"),
     ],

@@ -12,7 +12,7 @@
 
 `v2/` 放各實驗的 core 與前端附件，`recipes/` 放量測流程定義。`workflows/` 的 `coherence_fluxdep/`、`mist_fluxdep/`、`overnight/` 各自擁有流程、表單與科學工具，`common/` 只放真正共用的實驗步驟。`workflows/registry.py` 提供有序註冊清單。Window、App、RPC、MCP、表單協調、layout 與 input 保存都由 lib 宿主負責。實驗室宣告位於 `components/`、`definitions.py` 與 `templates.py`。[`simulation_envs/`](simulation_envs/FTF/README.md) 放 GUI／Notebook 共用的模擬參數檔與 startup 範例，不提供離線建庫入口。[Six-fluxonium](simulation_envs/six_fluxonium/README.md) 提供六顆無耦合 fluxonium、六條局部 DC 線、共用 coil 與 mux 讀出。每顆各自設定局部線與 coil 的 current offset／period，兩路 reduced flux 相加，不含串擾或 fast-flux pulse。
 
-GUI 啟動時 alias 表是空的，沒有 preset 檔。Alias 只存在各 point 的 `aliases.yaml`：開 entry 清空 alias，選 point 載入該 point 的表；Inspect 編輯目前表的草稿，Apply 才保存至目前 point。要在啟動時有初值，由 startup 腳本先建立 point，再用 `ctx.context.apply_alias_rows` 初始化並保存其表（simulation_envs 與 kickstart 的腳本都這樣做）。Alias 表只選元件焦點。表單從元件的 flux_dev／rf_source 取得裝置初值，框架不從 cache 推測裝置。
+Alias 各自保存在 global 與 point 的 `aliases.yaml`，缺檔為空表，不回退到另一層。Inspect 的 Destination 選 Global 或目前 point 名，完成有效編輯即保存所選表。Startup 的 `ctx.context.apply_alias_rows(rows)` 預設寫 global；建立並選取 point 後，明確傳 `point="initial"` 才寫該 point。Alias 表只選元件焦點。表單從元件的 flux_dev／rf_source 取得裝置初值，框架不從 cache 推測裝置。
 
 ## Lab 組裝與註冊
 
@@ -52,7 +52,7 @@ Import 不執行註冊，重複 bootstrap 按接收 registry 的規則報錯。
 
 `components/` 擁有具體元件 model、wiring、module 槽與內建角色。`base.py` 放共用欄位與基礎元件；`qubit.py` 放共用 qubit 欄位與 wiring。Fluxonium、transmon、resonator、JPA 與 mux 各有獨立子模組。`__init__.py` 提供公開匯出與明確註冊入口。Model 自行宣告 ext 與 extra 策略，普通字串引用在 resolve 時解析。GUI behavior 與 measure MCP server 消費 lab 的 registrar，明確 bootstrap；兩個 analysis MCP 不註冊 components。Notebook caller 可呼叫 `components.register_all(component_registry)`。框架只提供容器、kind 查表、角色解析與來源記錄。
 
-`MuxGroupSchema` 以 `group/mux` 註冊於同一 ComponentRegistry。必填 resonators 保存 1 至 8 個有序名稱。選填 qubits 必須等長且不重複。`flux_dev` 保存 global coil 的 device 名稱。每顆 qubit 的 `flux: {offset, period: {<device>: ...}}` 保存零輸出時的 flux 與 local、coil 等儀器的 signed periods，group 不另存校準。Component YAML 使用 `schema_version: 3`；舊文件經[長期升級入口](../docs/parameter-upgrades.md)轉換，runtime 不自動升級。提供 qubits 時，lab Form 在 Open／Reset 以固定 ParameterContext 檢查兩邊 component 存在、kind 正確，並逐項要求 qubits[i].resonator 等於 resonators[i]。錯誤指名欄位、index 與實際值。Resonators 不去重；沒有 qubits 的 onetone 保留手填 readout 與缺來源的既有政策。
+`MuxGroupSchema` 以 `group/mux` 註冊於同一 ComponentRegistry。必填 resonators 保存 1 至 8 個有序名稱。選填 qubits 必須等長且不重複。`flux_dev` 保存 global coil 的 device 名稱。每顆 qubit 的 `flux: {offset, period: {<device>: ...}}` 保存零輸出時的 flux 與 local、coil 等儀器的 signed periods，group 不另存校準。Component YAML 使用 `schema_version: 3`；舊文件經[長期升級入口](../docs/parameter-upgrades.md)轉換，runtime 不自動升級。提供 qubits 時，lab Form 在 Open／Reset 以固定 DocumentSetCapture 檢查兩邊 component 存在、kind 正確，並逐項要求 qubits[i].resonator 等於 resonators[i]。錯誤指名欄位、index 與實際值。Resonators 不去重；沒有 qubits 的 onetone 保留手填 readout 與缺來源的既有政策。
 
 Scalar alias `mux=MG12` 讓 mux adapter 從固定 capture 的 `$mux.module.readout` 取得 Readout 初值。完整 tones[i] 綁定 resonators[i]。participants 以 list[int] 選擇量測的原始序號並指定順序，不改綁定或保存的 resonators。Module owner 是 group，不是第一個 resonator；重排不會改 owner。Framework 不知道 group schema。定位與 writeback capture 邊界見 [ADR-0072](../docs/adr/0072-module-boundaries.md#mux-group-是實驗室的-component-定義)。
 

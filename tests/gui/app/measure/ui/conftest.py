@@ -1,12 +1,12 @@
 """Shared real measure UI composition and teardown for public view contracts."""
 
-from collections.abc import Callable, Generator, Iterator
+from collections.abc import Generator, Iterator
 from dataclasses import replace
 from pathlib import Path
 from uuid import uuid4
 
 import pytest
-from qtpy.QtCore import QCoreApplication, QEvent, Qt
+from qtpy.QtCore import Qt
 from qtpy.QtGui import QImage
 from qtpy.QtWidgets import QApplication, QWidget
 from zcu_tools.datafile import Container, ContainerAttrs, JsonObject, save
@@ -17,7 +17,6 @@ from zcu_tools.gui.app.measure.services.pane_commit import commit_run
 from zcu_tools.gui.app.measure.services.results_index import scan_results
 from zcu_tools.gui.app.measure.state import RunPaneState
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
-from zcu_tools.gui.control_identity import ControlIdentity
 from zcu_tools.resources.entry import AcquiredPayload, LedgerEvent, ResultEntry
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
@@ -32,14 +31,18 @@ from tests.gui.app.measure._record_support import require_record
 from tests.gui.app.measure._workflow_window import (
     workflow_window as make_workflow_window,
 )
-from tests.gui.app.measure.ui._main_window_fakes import apply_window_defaults, mock_ctrl
+from tests.gui.app.measure.ui._main_window_fakes import (
+    MainWindowControlFactory,
+    apply_window_defaults,
+    mock_ctrl,
+)
 
 
 @pytest.fixture
 def browser_host(
     qapp: QApplication,
     tmp_path: Path,
-    main_window_control_factory: Callable[[], ControlIdentity],
+    main_window_control_factory: MainWindowControlFactory,
 ) -> Iterator[MainWindow]:
     ctrl = apply_window_defaults(mock_ctrl(main_window_control_factory))
     ctrl.query_results.side_effect = lambda: scan_results(tmp_path)
@@ -47,10 +50,11 @@ def browser_host(
     window = MainWindow(
         ctrl, templates=lambda: {}, dialog_presenter=RecordingDialogPresenter()
     )
+    main_window_control_factory.own(window)
     window.show()
     qapp.processEvents()
     yield window
-    window.deleteLater()
+    window.dispose()
     qapp.processEvents()
 
 
@@ -164,23 +168,11 @@ def workflow_window(
 @pytest.fixture
 def main_window_control_factory(
     qapp: QApplication,
-) -> Iterator[Callable[[], ControlIdentity]]:
-    """Keep fake application authority alive until its Qt view tree is deleted."""
-    baseline = set(qapp.topLevelWidgets())
-    authorities: list[ControlIdentity] = []
-
-    def create() -> ControlIdentity:
-        authority = ControlIdentity()
-        authorities.append(authority)
-        return authority
-
-    yield create
-    for widget in qapp.topLevelWidgets():
-        if widget not in baseline:
-            widget.deleteLater()
-    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
-    qapp.processEvents()
-    authorities.clear()
+) -> Iterator[MainWindowControlFactory]:
+    """Retain authority until explicitly registered Qt roots have retired."""
+    factory = MainWindowControlFactory()
+    yield factory
+    factory.dispose()
 
 
 @pytest.fixture
@@ -239,5 +231,5 @@ def live_ui(
             assert session.background.quiesce()
             ctrl.tab_control.close_tab(tab_id)
             ctrl.close()
-            window.deleteLater()
+            window.dispose()
             qapp.processEvents()

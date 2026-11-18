@@ -8,6 +8,7 @@ import numpy as np
 from joblib import delayed
 from numpy.typing import NDArray
 
+from ._capture import CaptureRound
 from ._carrier_plan import populate_carrier_plan
 from ._common_frame_dispatch import preferred as common_frame_preferred
 from ._dop853_dispatch import direct_plans
@@ -27,6 +28,7 @@ from ._shaped_dispatch import (
     preference,
     single_gate_preferred,
 )
+from ._slow_dispatch import direct_preferred as slow_direct_preferred
 from ._two_tone_dispatch import first_candidate
 from .engine import PathDiagnostics
 from .exceptions import NoValidKernel
@@ -312,6 +314,7 @@ class _Classifier:
         trace: dict[int, dict[str, DispatchCandidate]] | None = None,
     ):
         self.trace = trace
+        self.capture: CaptureRound | None = None
         self.pool, self.selection = pool, selection
         self.geometry = geometry
         self.kernels = (
@@ -348,7 +351,9 @@ class _Classifier:
     def observe(
         self, kernel: Kernel, rows: NDArray[np.int64], decision: GuardDecision
     ) -> None:
-        """Record only query observations; ordinary evolve does no extra pricing."""
+        """Observe actual decisions; only an inspection requests extra pricing."""
+        if self.capture is not None:
+            self.capture.observe(kernel.name, rows, decision)
         if self.trace is None or not len(rows):
             return
         scheduling_costs = (
@@ -486,7 +491,7 @@ class _Classifier:
         for index, name in enumerate(candidates):
             offered = rows
             rows = self.try_kernel(require(self.kernels, name, self.table, rows), rows)
-            if self.trace is not None:
+            if self.trace is not None or self.capture is not None:
                 stopped = offered[~np.isin(offered, rows)]
                 for later in candidates[index + 1 :]:
                     kernel = self.kernels.get(later)
@@ -549,7 +554,7 @@ class _Classifier:
             "adiabatic", rows[self.domains["adiabatic"][rows]], ("adiabatic_map",)
         )
         self.accept("flux", rows[self.domains["flux"][rows]], ("flux_dop853",))
-        self.accept("slow", rows[self.domains["slow"][rows]], ("slow_envelope",))
+        self.classify_slow(rows[self.domains["slow"][rows]])
         # Group shaped and constant consumers together before any legacy prepare.
         common = self.domains["two"] | self.domains["multiple"]
         self.try_common_frame(rows[common[rows]])
@@ -562,6 +567,17 @@ class _Classifier:
             self.classify_two_tone(two_tone)
         self.classify_multiple(rows[self.domains["multiple"][rows]])
         return self._result()
+
+    def classify_slow(self, rows: NDArray[np.int64]) -> None:
+        """Price dissipative DC channels over complete-acquire exact-key usage."""
+        if not len(rows):
+            return
+        direct = slow_direct_preferred(
+            self.table, np.flatnonzero(self.domains["slow"]), self.context
+        )
+        preferred = np.array([int(row) in direct for row in rows], dtype=bool)
+        self.accept("slow", rows[preferred], ("dop853", "slow_envelope"))
+        self.accept("slow", rows[~preferred], ("slow_envelope", "dop853"))
 
     def classify_plateau(self, rows: NDArray[np.int64]) -> None:
         """Prefer shared Dyson paths, or constant RWA/periods for distinct inputs."""
@@ -732,7 +748,7 @@ def classify(
     pool: Executor | None = None,
     selection: Selection | None = None,
     *,
-    trace: dict[int, dict[str, DispatchCandidate]] | None = None,
+    trace: dict[int, dict[str, DispatchCandidate]] | CaptureRound | None = None,
 ) -> Dispatch:
     """Guard shared candidates now and resolve local candidates in their worker.
 
@@ -744,5 +760,14 @@ def classify(
     to collect row/family observations and excludes rows that need an uncomputed
     driven prefix density. The mapping receives immutable DispatchCandidate
     records; no worker classification or prefix evolution runs for a query.
+    A CaptureRound instead observes actual evolve decisions, without pricing
+    or the query's prefix exclusion, and retains observations on failure.
     """
-    return _Classifier(geometry, kernels, context, pool, selection, trace).classify()
+    query_trace = trace if isinstance(trace, dict) else None
+    classifier = _Classifier(geometry, kernels, context, pool, selection, query_trace)
+    classifier.capture = trace if isinstance(trace, CaptureRound) else None
+    try:
+        return classifier.classify()
+    finally:
+        if classifier.capture is not None:
+            classifier.capture.finish(classifier.names)

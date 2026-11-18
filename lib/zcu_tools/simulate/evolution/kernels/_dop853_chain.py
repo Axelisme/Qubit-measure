@@ -5,7 +5,7 @@ from numba import njit
 from numpy.typing import NDArray
 
 from ..state import transform_density
-from ._dop853 import Tolerances, integrate
+from ._dop853 import Tolerances, integrate_workspace, make_workspace
 from ._dop853_intervals import row_intervals
 
 
@@ -22,10 +22,13 @@ def run_chain(
 ):
     """Advance touching same-timeline rows and store every interval endpoint.
 
-    rhs(time, flat_state, context) and make_context(data, row, model, interval)
+    rhs(time, flat_state, context) and make_context(data, row, model, interval, previous)
     are compiled kernel-owned callables. RHS time is interval-local; context
     retains row, absolute-flux and pulse-local playback clocks. data supplies
-    packed models and segments.
+    packed models and segments. Each context has a drive field containing its
+    interval clocks and call-owned RHS buffers reused across that row's knots.
+    Passing previous=None allocates those buffers; a previous context reuses them.
+    Step buffers belong to this invocation and are reused across rows.
     row_models is (rows, model_index, global_chain_ids). The first two vectors
     align with states (rows, M, M); chain IDs are indexed by global table row.
     Each chain reads only its first input slot; subsequent rows use the previous
@@ -44,6 +47,9 @@ def run_chain(
     """
     models, segments = data.models, data.segments
     rows, model_index, chain = row_models
+    if not len(rows):
+        return
+    workspace = make_workspace(states[0].ravel())
     for index in range(len(rows)):
         row, model = rows[index], model_index[index]
         state = states[index].copy()
@@ -72,14 +78,20 @@ def run_chain(
             0,
         )
         result = state.ravel()
-        for interval in row_intervals(segments, row):
-            context = make_context(data, row, model, interval)
-            result = integrate(
+        intervals = row_intervals(segments, row)
+        if not len(intervals):
+            states[index] = state
+            continue
+        context = make_context(data, row, model, intervals[0], None)
+        for interval in intervals:
+            context = make_context(data, row, model, interval, context)
+            workspace.current[:] = result
+            result = integrate_workspace(
                 rhs,
                 context,
-                result,
                 interval.duration,
                 row_controls,
                 min(0.1, interval.duration, row_controls.max_step),
+                workspace,
             )
         states[index] = result.reshape(state.shape)

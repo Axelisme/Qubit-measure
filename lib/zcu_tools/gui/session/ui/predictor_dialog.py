@@ -59,7 +59,7 @@ from zcu_tools.simulate.predictor import (
 
 if TYPE_CHECKING:
     from zcu_tools.gui.session.device_control import DeviceControlPort
-    from zcu_tools.gui.session.parameters import ParameterContext
+    from zcu_tools.gui.session.parameters import DocumentSetCapture
     from zcu_tools.gui.session.predictor_control import PredictorControlPort
 
 logger = logging.getLogger(__name__)
@@ -118,7 +118,7 @@ class PredictorDialog(QDialog):
     """Own detached fluxonium or SQUID transmon inputs for prediction and calibration.
 
     device optionally supplies cached/live device values. parameter_provider
-    supplies fixed ParameterContext captures for optional frequency expressions.
+    supplies fixed DocumentSetCapture captures for optional frequency expressions.
     Predictor files come from the current entry through predictor control.
     params optionally prefills complete or partial local inputs. Blank fields are
     unknown (None); nonnumeric or nonfinite text reports a named field error and
@@ -135,7 +135,7 @@ class PredictorDialog(QDialog):
         parent: QWidget | None = None,
         *,
         device: DeviceControlPort | None = None,
-        parameter_provider: Callable[[], ParameterContext | None] | None = None,
+        parameter_provider: Callable[[], DocumentSetCapture | None] | None = None,
         persistent_on_close: bool = False,
         params: ModelParams | None = None,
     ) -> None:

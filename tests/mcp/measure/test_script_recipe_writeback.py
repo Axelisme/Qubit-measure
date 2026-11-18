@@ -15,6 +15,7 @@ from zcu_tools.mcp.measure.recipe_api import (
     recipe,
 )
 
+from tests.gui._context_reads import capture_focus
 from tests.resources.entry.fakes import register_fakes, registry_state, restore_registry
 
 from ._recipe_writeback_support import WritebackGui
@@ -311,7 +312,7 @@ def test_accept_upserts_at_active_target_with_original_item_ids(
     gui = writeback_gui(False, False)
 
     def prepare() -> None:
-        target = gui.context.read_context().target
+        target = capture_focus(gui.context).target
         assert target is not None
         gui.context.set_parameter(target, "Q1.rate", 5000.0)
         draft = gui.service.create_draft(
@@ -323,13 +324,13 @@ def test_accept_upserts_at_active_target_with_original_item_ids(
                     "Q2.rate", "Missing", 6123.4, create_kind="fake/drive/a"
                 ),
             ],
-            parameters=gui.context.read_context(),
+            parameters=capture_focus(gui.context),
             experiment_name="synthetic",
         )
         gui.drafts["analysis"] = draft
         gui.state.get_tab("tab-1").analysis.writeback_draft = draft
         if scope == "global":
-            gui.context.use_global()
+            gui.context.use_point(None)
 
     gui.owner.submit(prepare).result()
     preview = gui.respond(

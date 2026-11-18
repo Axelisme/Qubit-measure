@@ -28,7 +28,7 @@ from zcu_tools.gui.interactive import PluginDefinition
 from zcu_tools.gui.session.adapters.manual_owner_scheduler import ManualOwnerScheduler
 from zcu_tools.gui.session.operation_handles import OperationHandles
 from zcu_tools.gui.session.operation_runner import OperationRunner
-from zcu_tools.gui.session.types import ParameterContext, SessionEnv
+from zcu_tools.gui.session.types import DocumentSetCapture, SessionEnv
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
 from tests.gui.app.measure._form_fakes import form_resources, form_sources
@@ -40,7 +40,7 @@ from tests.gui.session.ui._parameter_fakes import make_parameters
 @pytest.mark.parametrize("loaded", [False, True], ids=["run", "load"])
 @pytest.mark.parametrize("context_free", [False, True], ids=["captured", "none"])
 def test_default_analysis_params_retain_result_source(
-    result_sources: tuple[ParameterContext, ParameterContext],
+    result_sources: tuple[DocumentSetCapture, DocumentSetCapture],
     loaded: bool,
     context_free: bool,
 ) -> None:
@@ -52,8 +52,8 @@ def test_default_analysis_params_retain_result_source(
         analysis=AnalysisMode.FIT, post_analysis=True
     )
     primary_params, post_params = object(), object()
-    primary_contexts: list[ParameterContext | None] = []
-    post_contexts: list[ParameterContext | None] = []
+    primary_contexts: list[DocumentSetCapture | None] = []
+    post_contexts: list[DocumentSetCapture | None] = []
 
     def primary(_result: object, ctx: SessionEnv) -> object:
         primary_contexts.append(ctx.parameters)
@@ -180,7 +180,7 @@ def _plots() -> Plots:
 @pytest.mark.parametrize("context_free", [False, True])
 def test_fit_uses_run_source_for_request_and_writeback_after_rebinding(
     qapp,
-    result_sources: tuple[ParameterContext, ParameterContext],
+    result_sources: tuple[DocumentSetCapture, DocumentSetCapture],
     context_free: bool,
 ):
     state = _make_source_state()
@@ -226,7 +226,7 @@ def test_fit_uses_run_source_for_request_and_writeback_after_rebinding(
 @pytest.mark.parametrize("context_free", [False, True])
 def test_interactive_writeback_retains_run_source_after_rebinding(
     qapp,
-    result_sources: tuple[ParameterContext, ParameterContext],
+    result_sources: tuple[DocumentSetCapture, DocumentSetCapture],
     context_free: bool,
 ) -> None:
     state = _make_source_state()
@@ -269,7 +269,7 @@ def test_interactive_writeback_retains_run_source_after_rebinding(
 @pytest.mark.parametrize("context_free", [False, True])
 def test_post_uses_run_source_for_request_and_writeback_after_rebinding(
     qapp,
-    result_sources: tuple[ParameterContext, ParameterContext],
+    result_sources: tuple[DocumentSetCapture, DocumentSetCapture],
     context_free: bool,
 ) -> None:
     state = _make_source_state()

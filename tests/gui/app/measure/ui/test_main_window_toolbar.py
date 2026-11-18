@@ -107,6 +107,7 @@ def toolbar_ui(qapp):
         yield toolbar, host, ComponentDriver(parent)
     finally:
         toolbar.dispose()
+        parent.close()
         parent.deleteLater()
         qapp.processEvents()
 
@@ -166,7 +167,7 @@ def test_toolbar_dialog_buttons_and_more_menu_route_commands(
 ) -> None:
     _, host, driver = toolbar_ui
     for caption in (
-        "Setup…",
+        "Entry…",
         "SoC…",
         "Devices…",
         "Inspect…",
@@ -181,7 +182,7 @@ def test_toolbar_dialog_buttons_and_more_menu_route_commands(
         driver.select_menu("More ▾", (caption,))
     driver.screenshot(tmp_path / "toolbar.png")
     assert host.opened == [
-        DialogName.SETUP,
+        DialogName.ENTRY,
         DialogName.SOC,
         DialogName.DEVICE,
         DialogName.INSPECT,
@@ -268,8 +269,8 @@ def toolbar_application(
         owner_scheduler=scheduler,
         project_root=str(tmp_path),
     )
-    ctrl.setup_control.new_entry(EntryRequest("toolbar"))
-    ctrl.setup_control.new_point(PointCreateRequest("point", "", CommandOrigin("gui")))
+    ctrl.entry_control.new_entry(EntryRequest("toolbar"))
+    ctrl.entry_control.new_point(PointCreateRequest("point", "", CommandOrigin("gui")))
     window = MainWindow(
         ctrl, templates=lambda: {}, dialog_presenter=RecordingDialogPresenter()
     )
@@ -288,7 +289,7 @@ def toolbar_application(
         ctrl.close()
         for tid in tuple(ctrl.tab_control.list_tab_ids()):
             ctrl.tab_control.close_tab(tid)
-        window.deleteLater()
+        window.dispose()
         QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
         qapp.processEvents()
 
@@ -400,7 +401,9 @@ def test_run_with_alias_overrides_is_rejected_without_effects(
     before = cfg.input.data
     publications: list[object] = []
     remove = cfg.subscribe(lambda: publications.append(cfg.input.data))
-    rows = ui.controller.context_control.get_alias_rows()
+    rows = ui.controller.context_control.get_alias_rows(
+        point=ui.controller.context_control.current_point_label()
+    )
     ui.connect()
     try:
         rejected = ui.rpc(
@@ -413,6 +416,11 @@ def test_run_with_alias_overrides_is_rejected_without_effects(
         assert ui.controller.operation_control.active_operations() == ()
         assert cfg.input.data == before
         assert publications == []
-        assert ui.controller.context_control.get_alias_rows() == rows
+        assert (
+            ui.controller.context_control.get_alias_rows(
+                point=ui.controller.context_control.current_point_label()
+            )
+            == rows
+        )
     finally:
         remove()

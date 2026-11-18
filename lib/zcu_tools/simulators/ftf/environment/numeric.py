@@ -3,7 +3,7 @@
 import numpy as np
 from numpy.typing import NDArray
 
-from zcu_tools.core.simulation import EnvironmentSnapshot
+from zcu_tools.simulate.boundary import EnvironmentSnapshot
 from zcu_tools.simulate.evolution import DriveSource
 from zcu_tools.simulators.ftf.config import FTFSettings
 from zcu_tools.simulators.ftf.config.schema import Fluxonium, FluxoniumTruncation

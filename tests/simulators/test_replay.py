@@ -6,7 +6,7 @@ from fractions import Fraction
 from pathlib import Path
 
 import pytest
-from zcu_tools.core.simulation import (
+from zcu_tools.simulate.boundary import (
     AcquireRequest,
     ChargeDriveRequirement,
     EnvironmentSnapshot,
@@ -239,7 +239,7 @@ def test_replay_round_trips_every_template_array_with_dtype_and_shape(tmp_path: 
     from dataclasses import fields
 
     import numpy as np
-    from zcu_tools.core.simulation import EventSlot, ReadoutSlot, TimelineTemplate
+    from zcu_tools.simulate.boundary import EventSlot, ReadoutSlot, TimelineTemplate
     from zcu_tools.simulators.replay import ReplayAcquire, read_replay, save_replay
 
     event = EventSlot(

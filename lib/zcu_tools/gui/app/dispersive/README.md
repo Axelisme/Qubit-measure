@@ -1,6 +1,6 @@
 # Dispersive-shift analysis GUI
 
-**Last updated:** 2026-10-28
+**Last updated:** 2026-11-17，global aliases 觀察
 
 **讀者：** framework-dev、operator。開啟 entry、選 predictor 與匯出色散擬合的流程及 owner。
 
@@ -8,7 +8,7 @@
 
 以 `python -m apps.dispersive --project-root <root> --entry <entry> --component <name>`
 啟動。省略 entry 時，在 GUI 的 Entry 對話框選擇。
-省略 component 時，以 setup 的 qubit alias 預選。Alias 缺失或錯誤時，使用者必須明示選擇。
+省略 component 時，以 global 的 qubit alias 預選。Alias 缺失或錯誤時，使用者必須明示選擇。
 
 共用 [analysis_project](../analysis_project/README.md) 擁有 entry 開啟、component/kind
 驗證、dialog 與 CLI。Dispersive 不複製這些規則。`DispersiveGuiBehavior(lab, selection)`
@@ -26,7 +26,7 @@ Flux 為 `offset + sum(value[d] / period[d])`，單位為 Φ0。Period 可為負
 Bare resonator frequency 初值依序取：
 1. dispersive/<component>.json 的 params.bare_rf。
 2. 同檔的 params.plot_transitions.r_f。
-3. setup 的 resonator alias 所指 component 已設的 freq，MHz 換 GHz。
+3. `entry.aliases().read().require_valid()` 的 resonator alias 所指 component 已設的 freq，MHz 換 GHz。
 4. 5 GHz。
 
 壞 dispersive seed 記 warning 後退回 alias／預設值，不擋 predictor。只讀 seed 不驗 g；實際使用 g 時由 resources 的 `require_g()` 驗證。
@@ -62,8 +62,8 @@ Auto tune 以 sample lines 定義 objective，只回填 slider。
 Export dispersive 經 `resources.dispersive_file.save_dispersive_file` 寫入
 entry.dispersive_path/<component>.json，保存 GHz 的 g、bare_rf 與 UTC created_at。
 未知 source.run_id 寫 null。已有 plot_transitions annotations 保留。
-Setup 僅更新該 kind 已宣告的 g/bare_rf，不新增欄位。
-Artifact 與 setup 是分開的寫入，沒有跨檔原子性或 rollback。
+`entry.parameters()` 僅更新 global 該 kind 已宣告的 g/bare_rf，不新增欄位。
+Artifact 與 global 是分開的寫入，沒有跨檔原子性或 rollback。
 切換 entry/component 會清空舊 pipeline，避免把舊結果匯出到新 target。
 
 ## Owners and background work

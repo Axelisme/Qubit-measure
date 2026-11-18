@@ -1,6 +1,6 @@
 # Six independent fluxonium cavities
 
-**Last updated:** 2026-11-16，caller-selected worker width
+**Last updated:** 2026-11-17, acquire telemetry and optional capture publication
 
 **Readers:** framework-dev, lab-author, agent. Build and acquire six independent cavities through the normal simulation SoC.
 
@@ -51,6 +51,33 @@ exist only during multi-timeline evolution. No sixfold worker pool runs at once.
 GUI startup reserves one host CPU, with at least one worker, and does no warmup.
 Tests, benchmarks and research keep the serial factory default. The startup
 policy is defined in [ADR-0069](../../../../../docs/adr/0069-experiment-core-and-frontends.md#顯式-cfg-與裝置環境).
+
+## Debug capture
+
+`numerics.debug_capture` defaults to false. Enable it to publish one frozen
+Engine-input and route manifest after each admitted acquire, including failure.
+Every evolve in that acquire shares the same buffer. Telemetry can remain off.
+When enabled, telemetry stores the published basename in `capture_file`,
+or null when capture is off or publication fails. Capture writes run before
+summary construction and outside binding's measured wall time.
+See the [shared switch contract](../../README.md#debug-capture) for empty
+captures, retention and the cache directory.
+
+## Acquire telemetry
+
+`numerics.telemetry.enabled` defaults to true. The environment writes one
+bounded `routing-*.jsonl` row after each admitted acquire. Set `directory` to
+choose the output directory; null selects project-root `.sim_telemetry`.
+All six sources, routed groups and projective spans contribute to one row.
+The row contains binding compile time, summed Engine wall time and ADC/readout
+wall time. It includes failed calls through their failure and leaves unentered
+stages at `0.0`. No deferred raw materialization enters the row.
+`complete` comes from the binding's `AcquireOutcome`: normal partial Stop is true,
+while exceptions are false. Writer I/O failures warn once and do not change the
+acquire result. Disabling the policy suppresses writes; evolution still collects
+its per-call diagnostics. The shared fields, common default directory, separate
+analysis setup and file budget are described in the
+[telemetry contract](../../README.md#acquire-telemetry).
 
 ## Cache budgets
 
@@ -106,11 +133,13 @@ ADC jumps during herald affect IQ but do not feed back into later evolution.
 This does not add MIST or data-dependent feedback for active reset. Trigger
 pairing and nonterminal sample-window rejection follow the shared
 [readout planner](../../../experiment/README.md#explicit-simulation-environments).
-Each qubit's `numerics.projection_prune_floor` controls its own global history
-pruning. It requires a finite `0 <= floor < 1`; the example supplies `1e-9`.
-Zero retains every history, including zero-weight histories. A positive floor
-discards lower weights and renormalizes survivors. Empty survivors raise
-`ValueError` naming the point and floor.
+Each qubit's `numerics.projection_prune_floor` controls continuation at each point.
+It requires a finite `0 <= floor < 1`; the example supplies `1e-9`.
+A source state below the floor at a point uses an identity transition row there,
+approximating it as staying in that state. Zero gives the exact chain.
+No probability is discarded or renormalized. Path total variation from the exact
+chain is at most the sum of that point's `uncontinued_probability` across
+transitions, reported by single's projection diagnostics.
 The pulse ADC uses Q1's receiver gain, offset, phase, time of flight and noise PSD.
 Its physical cavity and incident-field calibration follow the frequency route.
 Q1's seed selects the environment root stream. The largest per-qubit
@@ -156,12 +185,14 @@ Single-fluxonium's pulse-only private replay contract is unchanged.
 
 The backend partitions only routing patterns present in the request. It prepares
 independent cavity histories and ADC responses on those point subsets.
-Integrated mode flattens each cavity's history and terminal state into one
-marginal axis. Sorted cumulative-count boundaries preserve each sampled
-marginal count in at most `1 + sum(axis_sizes - 1)` bins. Each axis size is the
-maximum flattened count width for that cavity, with its retained level count
-as the minimum. Without projections, six 21-level circuits still use 121 bins,
-rather than `21**6` joint states. This summary represents marginal moments,
+Integrated mode represents each cavity with a marginal category axis whose
+counts sum to reps. Categories need not represent physical shot paths.
+The ADC owner's `cumulative_count_bins` preserves each sampled marginal count
+on shared sorted cumulative-count boundaries in at most
+`1 + sum(axis_sizes - 1)` bins. Each axis size is the maximum category count
+width for that cavity, with its retained level count as the minimum.
+Without projections, six 21-level circuits still use 121 bins, rather than
+`21**6` joint states. This summary represents marginal moments,
 not a cross-cavity joint quantum state or a physical joint-shot sample.
 Raw retains the complete independent sources through `IndependentRawShots`.
 Raw and decimated draws use the ADC owner's physical samplers, not that histogram.

@@ -8,9 +8,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 from threadpoolctl import threadpool_limits
-from zcu_tools.core.simulation import RoundSignals
 from zcu_tools.device import DeviceManager
 from zcu_tools.program.v2.simulation import SimulationClock
+from zcu_tools.simulate.boundary import RoundSignals
 from zcu_tools.simulators.ftf.config import parse_ftf
 from zcu_tools.simulators.ftf.environment import FTFAcquisitionOptions, FTFSource, ftf
 from zcu_tools.simulators.ftf.environment.drift import FTFCoherenceDrift
@@ -284,21 +284,18 @@ def test_builder_admission_and_rounds_share_one_physical_clock(tmp_path: Path):
     )
     try:
         binding = env.soc.binding
-        sequence = binding.begin()
-        assert len(truth.read_text().splitlines()) == 3
-        acquire = replace(
-            request(), sequence=sequence, relax_delay_ticks=TIME_BASE.ticks(125000)
-        )
         duration = 3 * 2 * (125000 + 0.030) / 1e6
-        try:
+        with binding.acquire() as sequence:
+            assert len(truth.read_text().splitlines()) == 3
+            acquire = replace(
+                request(), sequence=sequence, relax_delay_ticks=TIME_BASE.ticks(125000)
+            )
             for index in range(2):
                 binding.sample_round(acquire, index)
                 assert clock.now() == pytest.approx(100 + (index + 1) * duration)
-        finally:
-            binding.end()
         assert len(truth.read_text().splitlines()) == 3
-        binding.begin()
-        binding.end()
+        with binding.acquire():
+            pass
         rows = [json.loads(line) for line in truth.read_text().splitlines()]
         assert [row["sim_now"] for row in rows[3:]] == pytest.approx(
             [100 + 2 * duration] * 3

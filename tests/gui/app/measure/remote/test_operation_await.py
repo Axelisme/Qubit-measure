@@ -12,10 +12,13 @@ a wire result (ADR-0066):
 
 from __future__ import annotations
 
+import threading
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.gui.app.measure.adapter import Adapter
 from zcu_tools.gui.app.measure.remote.dispatch import METHOD_REGISTRY
 from zcu_tools.gui.app.measure.services.operation_control import OperationControlFacet
 from zcu_tools.gui.event_bus import EventOrigin
@@ -26,11 +29,15 @@ from zcu_tools.gui.session.operation_handles import (
     OperationOutcome,
 )
 
+from tests.gui._qt_waits import qt_until
+from tests.gui.app.measure._synthetic import SampleAdapter, SampleCfg
 from tests.gui.app.measure.services._operation_owner_fakes import (
     DeviceOperationOwner,
     TabOperationOwner,
     UnusedProgress,
 )
+
+from ._helpers import Fixture, call, open_client, recv_response, send
 
 
 def _HANDLER(ctrl, params):
@@ -45,8 +52,79 @@ def _ctrl(result: AwaitResult | None) -> MagicMock:
     return ctrl
 
 
-def test_off_main_thread_flag_set():
-    assert METHOD_REGISTRY["operation.await"].off_main_thread is True
+def test_transport_await_leaves_gui_owner_responsive(tmp_path, qapp, monkeypatch):
+    entered = threading.Event()
+    release = threading.Event()
+    awaiting = threading.Event()
+
+    def run(inp: SampleCfg, *, context: RunContext):
+        entered.set()
+        # The owner query (or finally cleanup) releases this admitted adapter call.
+        assert release.wait(30), "Run collaborator was not released"
+        return SampleAdapter.run(inp, context=context)
+
+    fixture = Fixture(project_root=str(tmp_path / "project"))
+    fixture.registry.register(
+        "held",
+        Adapter(
+            spec=SampleAdapter.spec,
+            make_form=SampleAdapter.make_form,
+            run=run,
+            guide=None,
+        ),
+    )
+    fixture.start()
+    try:
+        with open_client(fixture.service.port) as client:
+            tab_id = call(client, "tab.new", {"adapter_name": "held"})["result"][
+                "tab_id"
+            ]
+            started = call(client, "tab.run_start", {"tab_id": tab_id})
+            assert started["ok"] is True
+            token = started["result"]["operation_id"]
+            qt_until(entered.is_set, label="admitted adapter Run")
+            original = fixture.ctrl.operation_control.await_operation
+
+            def observe_await(operation_id: int, timeout: float) -> AwaitResult:
+                # This announces the delegate call, not arrival inside blocking await.
+                awaiting.set()
+                return original(operation_id, timeout)
+
+            monkeypatch.setattr(
+                fixture.ctrl.operation_control, "await_operation", observe_await
+            )
+            send(
+                client,
+                {
+                    "id": "await",
+                    "method": "operation.await",
+                    "params": {"operation_id": token, "timeout": 30},
+                },
+            )
+            qt_until(awaiting.is_set, label="transport await delegation")
+            owner_results: list[bool] = []
+
+            def query_owner() -> None:
+                interaction = fixture.ctrl.tab_control.get_tab_snapshot(
+                    tab_id
+                ).interaction
+                assert interaction is not None
+                owner_results.append(interaction.is_running)
+
+            fixture.ctrl.owner_scheduler.post(query_owner)
+            qt_until(lambda: bool(owner_results), label="submitted owner query")
+            assert owner_results == [True]
+            pending = original(token, 0)
+            assert pending is not None
+            assert pending.reason == "timeout"
+            release.set()
+            reply = recv_response(client, "await")
+            assert reply["ok"] is True
+            assert reply["result"] == {"reason": "completed", "status": "finished"}
+    finally:
+        release.set()
+        # These public lifecycles join the endpoint and Run worker/owner deliveries.
+        fixture.stop()
 
 
 # ---------------------------------------------------------------------------

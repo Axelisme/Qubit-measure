@@ -25,7 +25,7 @@ from zcu_tools.gui.session.parameters import ModuleSlotError
 from zcu_tools.resources.entry import RoleResolutionError
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.session.types import ParameterContext
+    from zcu_tools.gui.session.types import DocumentSetCapture
 
 
 class ExpressionError(InvalidInputError):
@@ -92,7 +92,9 @@ class EvalRef:
     maximum: float
 
 
-def resolve_eval_ref(ref: EvalRef, parameters: ParameterContext | None) -> int | float:
+def resolve_eval_ref(
+    ref: EvalRef, parameters: DocumentSetCapture | None
+) -> int | float:
     """Resolve an apply-time expression to its target int/float and inclusive bounds.
 
     ref carries the expression, target type and bounds in the field's own units.
@@ -108,7 +110,7 @@ def resolve_eval_ref(ref: EvalRef, parameters: ParameterContext | None) -> int |
     return resolved
 
 
-def evaluate_numeric_expr(expr: str, parameters: ParameterContext | None) -> float:
+def evaluate_numeric_expr(expr: str, parameters: DocumentSetCapture | None) -> float:
     """Evaluate finite real arithmetic over captured parameter paths.
 
     Accept the same functions, captured list/mapping subscripts and numeric
@@ -129,7 +131,7 @@ def evaluate_numeric_expr(expr: str, parameters: ParameterContext | None) -> flo
 
 
 def evaluate_scalar_expr(
-    expr: str, parameters: ParameterContext | None
+    expr: str, parameters: DocumentSetCapture | None
 ) -> Scalar | str:
     """Evaluate arithmetic paths or a standalone $alias name string.
 
@@ -139,7 +141,7 @@ def evaluate_scalar_expr(
     with an alias-naming error.
 
     None permits pure calculation only; parameter/library references raise
-    ExpressionError. Resolve paths through ParameterContext, never the live
+    ExpressionError. Resolve paths through DocumentSetCapture, never the live
     session. Retain numeric limits, math functions, constants and XOR semantics.
     min(a, b, ...) and max(a, b, ...) require at least two numeric arguments;
     values without native ordering (such as complex numbers) raise ExpressionError.
@@ -224,7 +226,7 @@ def evaluate_scalar_expr(
     return _number(result, "Expression result")
 
 
-def _read_alias_name(alias: str, parameters: ParameterContext | None) -> str:
+def _read_alias_name(alias: str, parameters: DocumentSetCapture | None) -> str:
     """Translate name-read errors at the expression boundary, not source faults."""
     if parameters is None:
         raise ExpressionError(f"Alias {alias!r} requires a context")
@@ -337,14 +339,14 @@ def _alias_syntax(expr: str) -> tuple[str, dict[tuple[int, int], str]]:
 
 
 def _parameter_reader(
-    parameters: ParameterContext | None,
+    parameters: DocumentSetCapture | None,
 ) -> Callable[[str], object]:
     """Read aliases from parameters and bare paths from one concrete-only view.
 
     Construct the bare view lazily once per evaluation. Missing/invalid paths
     become ExpressionError; source/provider faults retain their classification.
     """
-    concrete_parameters: ParameterContext | None = None
+    concrete_parameters: DocumentSetCapture | None = None
 
     def read(path: str) -> object:
         nonlocal concrete_parameters

@@ -13,6 +13,7 @@ import numpy as np
 from numpy.typing import NDArray
 from scipy.linalg import expm
 
+from ..engine import EnvelopeSpec
 from ..kernel import SegmentTable
 from ..secular import ModelSource, SecularModel
 from ._common_frame import (
@@ -25,10 +26,15 @@ from ._common_frame import (
     remainder_channels,
     remainder_estimates,
 )
+from ._rwa_numeric import RWAGuardMetric, RWAUncomputed
 from ._secular import secular_operators
 
 # These are calibrated indicators, not rigorous trace-distance certificates.
-_COHERENT_LIMIT, _BATH_LIMIT = 0.03, 0.01
+# The retained-grid coherent maximum is 0.00146942; the nearest known
+# >2e-3 density error starts at 0.00262360. A 0.0018 limit leaves 22.5%
+# headroom above retained inputs and 31.4% clearance below that failure.
+# This deliberately rejects five other qualified inputs; bath stays unchanged.
+_COHERENT_LIMIT, _BATH_LIMIT = 0.0018, 0.01
 _MAX_STEP_NS, _PHASE_CYCLES = 8.0, 0.08
 COMMON_FRAME_POLICY = (
     "common-frame-sw2-v1",
@@ -114,7 +120,7 @@ class CommonFrame:
 class CommonFrameAdmission:
     """Current row's detuning-aware indicators, not mathematical certificates.
 
-    accepted: coherent sum <= .03, bath <= .01, no denominator rejection.
+    accepted: coherent sum <= 0.0018, bath <= 0.01, no denominator rejection.
     reason: 'accepted', 'denominator', 'coherent', or 'bath'. Dispatch
         must use an existing algorithm for every rejected row.
     step_ns, steps: CF4 ceiling in ns and ceil(duration/step), at least one.
@@ -144,6 +150,118 @@ class CommonFrameAdmission:
     def coherent(self) -> float:
         """Sum of omitted coherent channels, BCH tail and derivative indicator."""
         return self.second + self.third + self.fourth + self.tail + self.derivative
+
+
+@dataclass(frozen=True)
+class CommonFrameDiagnostic:
+    """Read-only row-local common-frame guard values, not density-error bounds.
+
+    accepted is the numerical guard result, independent of dispatch pricing.
+    reason is 'accepted', 'carrier' (zero mean), 'denominator', 'coherent', or
+    'bath'. denominator_min_ghz is the smallest absolute SW denominator in GHz;
+    it must exceed 1e-10. It is uncomputed after carrier rejection.
+    coherent is the dimensionless sum of second, third, fourth, tail and
+    derivative, compared inclusively with the coherent admission threshold.
+    bath is the dimensionless oscillatory dressing plus secular T*gamma*eta**2,
+    compared inclusively with the bath admission threshold.
+    eta is the dimensionless maximum absolute peak-weighted SW matrix row sum.
+    second, third and fourth are dimensionless omitted-channel integral
+    indicators at each order. tail is the dimensionless fifth-and-higher BCH
+    norm tail without cancellation. derivative is the dimensionless envelope
+    slope omission indicator. All six are already computed by admission.
+
+    RWAUncomputed marks numeric work skipped after carrier/denominator rejection,
+    never a zero estimate. Coherent rejection still exposes bath and every
+    component because the guard computes them together. These calibrated
+    indicators do not certify full-density or whole-sequence accuracy.
+    """
+
+    accepted: bool
+    reason: str
+    denominator_min_ghz: float | RWAUncomputed = RWAUncomputed()
+    coherent: RWAGuardMetric | RWAUncomputed = RWAUncomputed()
+    bath: RWAGuardMetric | RWAUncomputed = RWAUncomputed()
+    eta: float | RWAUncomputed = RWAUncomputed()
+    second: float | RWAUncomputed = RWAUncomputed()
+    third: float | RWAUncomputed = RWAUncomputed()
+    fourth: float | RWAUncomputed = RWAUncomputed()
+    tail: float | RWAUncomputed = RWAUncomputed()
+    derivative: float | RWAUncomputed = RWAUncomputed()
+
+
+def common_frame_diagnostic(
+    model: SecularModel,
+    ports: tuple[str, str],
+    frequencies_ghz: tuple[float, float],
+    amplitudes: tuple[float, float],
+    duration_ns: float,
+    *,
+    envelopes: tuple[EnvelopeSpec, EnvelopeSpec] | None = None,
+) -> CommonFrameDiagnostic:
+    """Query the numerical common_frame guard for one fixed-flux two-tone row.
+
+    model is the row's energy-basis model, including segment shifts. ports are
+    two model drive names, possibly equal. Matching carriers are finite signed
+    GHz; amplitudes are finite signed dimensionless gains; duration is finite
+    nonnegative ns. envelopes supplies each tone's complete constant or sampled
+    envelope, defaulting to unity. Full-envelope peak/slope bounds also apply to
+    slices; phase, envelope offsets and input density do not affect admission.
+
+    Returns frozen computed values and RWAUncomputed for skipped work. Zero mean
+    carrier returns accepted=False, as does a failed SW denominator. Admission
+    is independent of the Engine's per-segment budget and pricing; acceptance
+    means this row is admissible, not that default dispatch will select it.
+    Unknown ports, invalid lengths, nonfinite values or negative duration raise
+    ValueError. Numerical construction failures propagate. The query builds one
+    temporary coefficient product, evaluates admission once, and does not evolve
+    a density, select a family, modify inputs/history or retain preparations.
+    """
+    if len(ports) != 2 or len(frequencies_ghz) != 2 or len(amplitudes) != 2:
+        raise ValueError("common-frame diagnostic requires two tones")
+    names = [drive.name for drive in model.drives]
+    if any(port not in names for port in ports):
+        raise ValueError("unknown common-frame drive port")
+    if envelopes is None:
+        envelopes = (EnvelopeSpec("constant"), EnvelopeSpec("constant"))
+    if len(envelopes) != 2:
+        raise ValueError("common-frame diagnostic requires two envelopes")
+    indices = tuple(names.index(port) for port in ports)
+    table = SegmentTable(
+        timeline=np.zeros(1, dtype=np.int64),
+        start_ns=np.zeros(1),
+        duration_ns=np.array([duration_ns]),
+        level=np.array([model.level], dtype=np.int64),
+        tones=np.array([2], dtype=np.int64),
+        tone_port=np.array([indices], dtype=np.int64),
+        tone_frequency_ghz=np.array([frequencies_ghz]),
+        tone_amplitude=np.array([amplitudes]),
+        tone_theta_rad=np.zeros((1, 2)),
+        tone_envelope=np.array([[0, 1]], dtype=np.int64),
+        tone_envelope_offset_ns=np.zeros((1, 2)),
+        envelopes=envelopes,
+    )
+    frequencies = table.tone_frequency_ghz[0]
+    if zero_mean_carrier(frequencies):
+        return CommonFrameDiagnostic(False, "carrier")
+    frame = build_common_frame(model, indices, frequencies)
+    admission = admit_common_frame(frame, table, 0)
+    if admission.reason == "denominator":
+        return CommonFrameDiagnostic(
+            False, admission.reason, frame.channels.denominator_min
+        )
+    return CommonFrameDiagnostic(
+        admission.accepted,
+        admission.reason,
+        frame.channels.denominator_min,
+        RWAGuardMetric(admission.coherent, _COHERENT_LIMIT),
+        RWAGuardMetric(admission.bath, _BATH_LIMIT),
+        admission.eta,
+        admission.second,
+        admission.third,
+        admission.fourth,
+        admission.tail,
+        admission.derivative,
+    )
 
 
 def _step(frequency: float) -> float:

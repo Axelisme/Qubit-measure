@@ -99,7 +99,7 @@ def friendly_fit_message(action: str, exc: Exception | str) -> str:
 
     ``action`` is "Search" or "Export". ``exc`` may be the exception (export,
     caught locally) or just its message string (search, which crosses a worker
-    signal as a string). A predictor/setup write failure is delegated to
+    signal as a string). A predictor/global write failure is delegated to
     ``friendly_io_message``; otherwise the domain rules above match.
     """
     raw = normalize_raw(exc)

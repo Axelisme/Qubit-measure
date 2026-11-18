@@ -1,12 +1,16 @@
 """Cold common-frame choices from complete coefficient-key reuse, not cache warmth."""
 
-from collections import defaultdict
+from collections import Counter, defaultdict
 from dataclasses import dataclass
 
 import numpy as np
 from numpy.typing import NDArray
 
-from ._multitone_dispatch import populate_multitone_inventory
+from ._multitone_dispatch import (
+    CONSTANT_KICK_PREPARE_S,
+    cheap_rwa_graph,
+    populate_multitone_inventory,
+)
 from .kernel import KernelContext, SegmentTable
 from .kernels._rwa_numeric import multitone_retention
 from .kernels._workload_facts import envelope_bounds
@@ -45,7 +49,9 @@ class CommonFramePricing:
     prices: tuple[CommonFramePrice, ...]
 
 
-def _constant_rwa_price(table: SegmentTable, row: int, context: KernelContext) -> float:
+def _constant_rwa_price(
+    table: SegmentTable, row: int, context: KernelContext, uses: int
+) -> float:
     """Price admitted constant integration by occupied blocks and fast edges.
 
     Native 16-state dimension-52 unexpanded rows cost about 3.8 ms at 1 us,
@@ -53,6 +59,12 @@ def _constant_rwa_price(table: SegmentTable, row: int, context: KernelContext) -
     units this is .12 versus .45, not the dense M**3 estimate of 2.58.
     Restored edges charge their actual interaction-picture frequencies. The
     50 MHz floor prices the constant solver's 16 ns step ceiling, not accuracy.
+    Full constant-pair calibration charges restored oscillations at 35 us per
+    ns-block-bandwidth unit plus one step-floor unit. Endpoint preparation
+    reserves 0.30 ms at M=16, converted to these legacy relative units by 32.
+    uses counts exact RWA prepare keys in the complete acquire, not common
+    coefficient keys. Only endpoint preparation amortizes over those consumers.
+    Dense endpoint applications already belong to base work, not an extra term.
     """
     retained = multitone_retention(table, row, context)
     assert retained.dimension is not None
@@ -68,9 +80,17 @@ def _constant_rwa_price(table: SegmentTable, row: int, context: KernelContext) -
     )
     bandwidth = max(0.05, float(np.ptp(frequencies)), bandwidth)
     blocks = retained.dimension / 9
+    restored = any(retained.edges)
+    integration = (
+        0.000035 * (1 + bandwidth / 0.05) if restored else 0.000014 * bandwidth / 0.05
+    )
+    kick_prepare = (
+        32 * CONSTANT_KICK_PREPARE_S * (len(model.energies_ghz) / 16) ** 3 / uses
+    )
     return (
         0.003 * blocks**1.5
-        + 0.000014 * table.duration_ns[row] * blocks * bandwidth / 0.05
+        + kick_prepare
+        + integration * table.duration_ns[row] * blocks
     )
 
 
@@ -85,6 +105,16 @@ def _prices(
         if price_rwa
         else ()
     )
+    admitted_rows = np.array(admitted, dtype=np.int64)
+    rwa_keys = {
+        int(row): key.tobytes()
+        for row, key in zip(
+            admitted_rows,
+            MultitoneRWAKernel().prepare_keys(table, admitted_rows, context),
+            strict=True,
+        )
+    }
+    rwa_uses = Counter(rwa_keys.values())
     rows = np.flatnonzero(table.tones == 2)
     keys = coefficient_keys(table, rows, source)
     constant = table.constant_envelopes(rows)
@@ -102,7 +132,12 @@ def _prices(
             original = min(original, 0.003 + 0.000014 * duration)
         original *= size**3
         if fixed and row in admitted:
-            original = min(original, _constant_rwa_price(table, int(row), context))
+            original = min(
+                original,
+                _constant_rwa_price(
+                    table, int(row), context, rwa_uses[rwa_keys[int(row)]]
+                ),
+            )
         grouped[key.tobytes()].append(
             (
                 0.0035 * size**2,
@@ -160,13 +195,7 @@ def _cheap_rwa(
         return np.isin(rows, inventory.cheap)
     admitted = rwa.guard(table, rows, context)
     for index in np.flatnonzero(admitted):
-        retained = multitone_retention(table, int(rows[index]), context)
-        model = table.model(context.source, int(rows[index]))
-        cheap[index] = (
-            retained.dimension is not None
-            and retained.dimension <= max(9, 2 * len(model.energies_ghz))
-            and not any(retained.edges)
-        )
+        cheap[index] = cheap_rwa_graph(table, int(rows[index]), context)
     return cheap
 
 
@@ -183,7 +212,7 @@ def preferred(
     Remaining rows price wasted cold builds using first-order SW strength,
     weighted by actual gains and envelope peaks. The empirical eighth-power
     risk near eta=.08 is a cost forecast, not an admission/accuracy veto.
-    Exact coherent .03 / bath .01 admission stays with the numerical owner.
+    Coherent and bath admission stays with the common_frame numerical owner.
     Cache warmth never changes these choices.
     """
     selected = ~_cheap_rwa(table, rows, context, rwa)

@@ -16,7 +16,6 @@ from qtpy.QtWidgets import QApplication
 from zcu_tools.cfg_model import ConstWaveformCfg
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.session.aliases import AliasRow
-from zcu_tools.gui.session.context_types import PointUseRequest
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.state import SessionState
 from zcu_tools.gui.session.types import SessionEnv
@@ -26,7 +25,6 @@ from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
 from tests.gui._user_input import ComponentDriver
-from tests.gui.app.measure._record_support import require_target
 from tests.resources.entry.fakes import register_fakes, registry_state, restore_registry
 
 
@@ -91,12 +89,17 @@ def conflict_ui(
     entry = ResultEntry.create(
         "entry", result_root=tmp_path / "results", database_root=tmp_path / "Database"
     )
-    entry.new_point("point")
-    with entry.module_library("point").edit() as draft:
+    point = entry.new_point("point")
+    point.add_component("Q1", kind="fake/drive/a", rate=4300.0)
+    entry.parameters().add_component("Q1", kind="fake/drive/a", rate=1200.0)
+    with entry.library("point").edit() as draft:
         draft.set_waveform("Q1.waveforms.flat", ConstWaveformCfg(length=0.1))
     if request.param == "entry-library":
-        with entry.module_library().edit() as draft:
+        with entry.library().edit() as draft:
             draft.set_waveform("Q1.waveforms.flat", ConstWaveformCfg(length=0.1))
+    second = entry.new_point("second")
+    with second.edit() as draft:
+        draft.set("Q1.rate", 5300.0)
     bus = BaseEventBus()
     service = ContextService(
         SessionState(SessionEnv(parameters=None, soc=None, soccfg=None)),
@@ -104,18 +107,14 @@ def conflict_ui(
         bind_assets=ArbWaveformDatabase.info_at,
     )
     service.install_entry(entry)
-    service.use_point(PointUseRequest("point"))
+    service.use_point("point")
     control = service
-    control.add_component("Q1", "fake/drive/a", {"rate": 4300.0})
-    control.add_component("Q1", "fake/drive/a", {"rate": 1200.0}, setup=True)
-    entry.new_point("second")
-    service.use_point(PointUseRequest("second"))
-    control.set_parameter(require_target(control.read_context()), "Q1.rate", 5300.0)
-    service.use_point(PointUseRequest("point"))
     # The missing-file case deliberately leaves aliases revision=None.
     document = request.param.removeprefix("entry-")
     if document != "aliases-missing":
-        control.apply_alias_rows((AliasRow("qubit", "Q1"),))
+        control.apply_alias_rows(
+            (AliasRow("qubit", "Q1"),), point=control.current_point_label()
+        )
     path = next(
         file.path
         for file in (
@@ -144,6 +143,7 @@ def conflict_ui(
         yield ComponentDriver(dialog), path, evidence, service, dialog
     finally:
         dialog.hide()
+        dialog.close()
         dialog.deleteLater()
         qapp.processEvents()
 
@@ -151,9 +151,7 @@ def conflict_ui(
 def _select_entry_file(ui: ComponentDriver, document: str, evidence: Path) -> None:
     ui.select_tab("Parameters" if document == "parameters" else "Modules")
     ui.screenshot(evidence / "01-active.png")
-    ui.choose_option(
-        object_name=f"inspect.{document}.destination", value="Entry template"
-    )
+    ui.choose_option(object_name=f"inspect.{document}.destination", value="Global")
     ui.screenshot(evidence / "02-entry.png")
     if document == "parameters":
         ui.enter_text(
@@ -432,7 +430,7 @@ def test_parameter_rejection_retains_visible_draft(conflict_ui, submit: str) -> 
     if submit == "enter":
         ui.press_key(Qt.Key.Key_Return)
     else:
-        ui.choose_option("Active documents", value="Active documents")
+        ui.choose_option("point", value="point")
     assert ui.observe(object_name="component_error").text
     rows = ui.visible().tree_rows
     assert any(row.path == ("Q1", "rate") and row.columns[1] == "9" for row in rows)
@@ -466,7 +464,7 @@ def test_parameter_draft_cannot_follow_destination(conflict_ui) -> None:
     ui.screenshot(evidence / "01-rejected.png")
     # Restore the source baseline so only target pinning can prevent redirection.
     path.write_bytes(original)
-    ui.choose_option("Active documents", value="Entry template")
+    ui.choose_option("point", value="Global")
     ui.edit_tree_value(("Q1", "rate"), object_name="component_tree", value="8")
     assert ui.observe(object_name="component_error").text
     assert any(
@@ -474,19 +472,19 @@ def test_parameter_draft_cannot_follow_destination(conflict_ui) -> None:
         for row in ui.visible().tree_rows
     )
     ui.screenshot(evidence / "02-target-rejected.png")
-    ui.choose_option("Entry template", value="Active documents")
+    ui.choose_option("Global", value="point")
     ui.click(object_name="inspect.parameters.sync.reload")
     ui.screenshot(evidence / "reload-active.png")
     assert any(
         row.path == ("Q1", "rate") and row.columns[1] == "4300.0"
         for row in ui.visible().tree_rows
     )
-    ui.choose_option("Active documents", value="Entry template")
+    ui.choose_option("point", value="Global")
     assert any(
         row.path == ("Q1", "rate") and row.columns[1] == "1200.0"
         for row in ui.visible().tree_rows
     )
-    ui.screenshot(evidence / "03-setup-unchanged.png")
+    ui.screenshot(evidence / "03-global-unchanged.png")
 
 
 @pytest.mark.parametrize("conflict_ui", ["parameters"], indirect=True)
@@ -501,7 +499,7 @@ def test_parameter_draft_cannot_follow_context(conflict_ui) -> None:
     )
     ui.screenshot(evidence / "01-draft.png")
     # An external context switch is not a UI action in this scenario.
-    source.use_point(PointUseRequest("second"))
+    source.use_point("second")
     assert ui.focused_input().text == "9"
     ui.press_key(Qt.Key.Key_Return)
     assert ui.observe(object_name="component_error").text

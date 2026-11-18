@@ -10,7 +10,7 @@
 
 Shipped mapping 共用 lab 的純 flux 轉換。每個完整 seed／value batch 先轉換，再以目前 `schema_version: 3` 驗證與發布，不先發布舊文件。現行校準為 `{offset, period}`，v1 自己的線保留 half 分支，coil 只保留 signed period，原 half／int 列報告。
 
-每批與最終的 `flux_dev` 只保留明示來源，包含完整 overlay 中有效的 setup／mapping 繼承來源。無明示來源時留空，不從單位、live device 或佔位名稱猜測。缺名 local／coil 分別保留 `period.unnamed_device`／`period.unnamed_coil`，報告逐實際目的位置提醒改名，不因缺名列 pending。原資料明示的 `unnamed_*` 照明示處理。
+每批與最終的 `flux_dev` 只保留明示來源，包含完整 overlay 中有效的 global／mapping 繼承來源。無明示來源時留空，不從單位、live device 或佔位名稱猜測。缺名 local／coil 分別保留 `period.unnamed_device`／`period.unnamed_coil`，報告逐實際目的位置提醒改名，不因缺名列 pending。原資料明示的 `unnamed_*` 照明示處理。
 
 Offset 每批按 v1 結構角色重算，自己的線優先，其次唯一 coil，否則 null。經 v2 中間形狀時也不靠佔位 `flux_source` 判斷角色，不新增 finalizer。Point 完整有效且明示來源的校準取代繼承 offset 與該儀器 period，其他 periods 保留。同批撞鍵、partial、非法名稱、數值與 spacing 仍拒絕。詳見 [flux 升級指南](flux-migration.md#storage-匯入的來源與覆寫)。
 
@@ -96,7 +96,7 @@ Native 轉換所需的歷史 evidence 用 `--run-evidence <file>` 提供。必�
 
 新 entry 位於 `result/<new-entry>/`，資料輸出位於 `Database/<new-entry>/`。逐項審閱報告與實際結果：
 
-- setup、points、libraries 與分析 JSON 的值都有來源。磁通數字有明示單位或報告中的假設宣告。
+- global parameters、points、libraries 與分析 JSON 的值都有來源。磁通數字有明示單位或報告中的假設宣告。
 - predictor、dispersive、T1 與 samples 已轉換，或逐項列 pending；未知欄位仍可在目的容器與報告指定的位置讀到。
 - 每個 point 的圖位於對應 `figures/`。未支援的 result／Database 檔以原相對位置保全；報告的 `preserved` 不表示已轉 native 或可由分析工具解析。
 - 每個 Labber 原檔都保存在 `Database/<new-entry>/Labber/<原相對路徑>`，bytes 不變。成功轉換者另有 `runs/<experiment>_<run_id>/data.h5`。
@@ -112,7 +112,7 @@ Pending 的重點是缺哪項證據，以及原文保在哪裡。未知但已完
 
 重跑沿用首次的來源、entry 名稱、kind、四個欄位／單位宣告、mapping 版本與已固定的歷史 evidence。尚未固定 native run assignment 的 pending 項可補 evidence，固定後的內容則須一致。
 
-完成後也可用原指令重驗。工具先驗完整備份，再比較 setup、points、libraries、分析 JSON、JSONL、processed 正式／companion、figures、raw、Labber 與 native。YAML／JSON 按 owner typed 語意比較，保留 unknown raw，排版差異不算內容變更。Binary／JSONL 比較已驗 SHA256。
+完成後也可用原指令重驗。工具先驗完整備份，再比較 global parameters、points、libraries、分析 JSON、JSONL、processed 正式／companion、figures、raw、Labber 與 native。YAML／JSON 按 owner typed 語意比較，保留 unknown raw，排版差異不算內容變更。Binary／JSONL 比較已驗 SHA256。
 
 相同內容不重寫、不追加、不重新分配 ID。報告的 `skipped` 逐項列出 `source`、`destination`、`comparison` 與 `summary`。這些重驗也可使用 `--dry-run`，維持零寫入。
 

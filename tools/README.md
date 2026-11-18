@@ -1,6 +1,6 @@
 # tools/
 
-**Last updated:** 2026-11-17 (Pareto selection, single-scene preparation and numeric FTF gate declarations)
+**Last updated:** 2026-11-18 (FTF gate scene declarations and benchmark storage)
 
 **讀者：** framework-dev。查閱 repo 開發工具的 CLI、輸出與比較機制。
 
@@ -43,6 +43,7 @@
 | `probe_snapshot.py` | `tools/probe_snapshot.py compare A B [--rtol R] [--atol A]` | 0 輸出相同或容差內且輸入相同；1 陣列、PNG 或 case 不同／缺漏，優先於 3；2 用法、讀寫或格式錯誤；3 輸出相同或容差內但輸入不同 | 否，手動比較離線 probe 輸出 |
 | `run_heavy.py` | `tools/run_heavy.py --log <file> <timeout> -- <command>` | 子程序狀態；2 啟動前失敗、70 runner 失敗、75 等待逾時、124 執行逾時 | 否，重計算外層 |
 | `analyze_routing_telemetry.py` | `tools/analyze_routing_telemetry.py <path> ...` | 0 完成，無法讀檔時非零 | 否 |
+| `inspect_simulator_capture.py` | `tools/inspect_simulator_capture.py [path] --telemetry-directory DIRECTORY` | 0 完成，壞資料或讀檔失敗時非零 | 否 |
 | `family_pareto.py` | `-m tools.family_pareto --scenario <name>` | 0 完成，輸入或量測失敗時非零 | 否 |
 | `paired_benchmark.py` | `-m tools.paired_benchmark run --baseline A --candidate B --scenario NAME --reference-cache DIR --blocks K --exclusive --output FILE` | 0 完成；1 輸入、cache 或 child 失敗；2 用法錯誤 | 否，需外層 exclusive runner |
 
@@ -156,6 +157,8 @@ write_snapshot(
 Kernel 量測在 `Engine.evolve` 上用 `families=` 固定候選，輸入只有一段。
 整體耗時改用多段 `TimelineBatch` 在 `Engine.evolve` 的序列層量測，不經 program compilation 或 ADC sampling。
 現有的 family 誤差與耗時量表見下節。
+
+量測場景的選法、速度驗收的順序與 10% 回報規則見 [模擬器維護規則](../lib/zcu_tools/simulate/maintenance.md#4-量測)。
 
 ## Shared simulator measurement
 
@@ -336,7 +339,7 @@ without importing the scene producer or rebuilding device models. Each returned
 
 By default it reads `tools/data/family_pareto/frozen-synthetic.index.json` and
 `frozen-real.index.json`. With neither `--index` nor `--scenario`, it requires
-and selects the 35 names in `PARETO_DEFAULT_NAMES` beside `select_inputs`.
+and selects the 49 names in `PARETO_DEFAULT_NAMES` beside `select_inputs`.
 It rejects missing default names after checking all indexes for duplicates,
 before reading any payload or reference. Other rows may share those indexes;
 the default selection does not read their payloads or references.
@@ -598,6 +601,100 @@ to `simulator_measurement.measure_modes`. It requires a real reference.
 Tests use controlled clocks and small
 collaborators; the complete matrix runs outside pytest through the exclusive runner.
 
+### Dedicated DOP853 segments
+
+`dop853_segment.dop853_segment_input(Dop853Coordinates(...))` builds
+simultaneous two-tone Engine inputs. It does not use acquire, append readout,
+change `single_model_input`, or join the default family-table inventory.
+The factory validates settings before `SingleFluxoniumSource.model_facts`
+rebuilds the retained model and Gibbs initial density. It uses the fixed single
+model with bias .45, two charge ports and no fast flux. Levels above the fixed
+native cutoff raise `ValueError`; no prebuilt matrix is sliced.
+
+```python
+from contextlib import closing
+from zcu_tools.simulate.evolution import Engine
+from tools.dop853_segment import Dop853Coordinates, dop853_segment_input
+
+item = dop853_segment_input(Dop853Coordinates(envelope="sampled", repeats=2))
+with closing((case := item.build()).source), closing(Engine(workers=1, families=("dop853",))) as engine:
+    result = engine.evolve(case.source, (case.batch,), telemetry=True)
+```
+
+Run numerical measurements through `run_heavy.py` under the applicable compute
+grant. Importing or constructing inputs does not solve references or evolve.
+Coordinates select `gaussian` or non-Gaussian `sampled` envelopes, support in ns,
+retained `levels`, sample `knots` including both endpoints, `repeats` in
+1/2/20/100, and independent `points`. Both tones have the same support. Every
+sample is a linear-interpolation knot. Gaussian centers differ within that
+support. Flat-top plateaus are outside this input. Each repeated pair restarts
+its pulse-local carrier phase, with no gaps or companion family. End time is
+N times the support. N does not multiply the point count. For multiple points,
+only Pump gain varies; Engine worker count is a separate execution setting.
+Change one coordinate at a time to isolate duration, dimension or knot density.
+The controls are benchmark inputs, not calibrated STIRAP transfer.
+
+```python
+from tools.family_pareto_inputs import freeze_records
+
+records = freeze_records([item])
+```
+
+`freeze_records(inputs: list[Input]) -> tuple[FrozenRecord, ...]` snapshots the
+ordered declarations into numeric records with tool-owned metadata, including
+the versioned coordinates. It closes each built source without evolving; source
+arrays remain in the returned records. Builder and serialization failures
+propagate. The simulator manifest writer calculates the physical/oracle hashes
+and owns the container; this call does not write a manifest or solve references.
+`zcu_tools.simulate.evolution.reference_key(case.source, case.batch)` returns the
+persistent reference key without disk access or integration.
+`Input.name` and its built `Scene.name` identify all coordinates:
+`dop853_segment-<envelope>-d<duration_ns>-l<levels>-k<knots>-r<repeats>-p<points>`.
+Integer durations omit the decimal part; 20.5 ns becomes `d20p5`. Names do not
+enter the physical, oracle or metadata hashes, or the reference key.
+
+`from tools.dop853_segment import profile_inputs` exposes the declared profile
+catalogue. Calling `profile_inputs()` builds seven Gaussian and seven sampled
+inputs. Each envelope has the d20/l8/k9/r1/p1 baseline, then single-axis variants
+for duration 40 ns, levels 20, knots 17, and repeats 2/20/100. The final input is
+`dop853_segment-gaussian-d20-l8-k9-r1-p64`, a 64-point workers candidate.
+This call neither times the inputs nor prepares their references. The measured
+Gaussian worker results and their limits are recorded in the
+[DOP853 route summary](../docs/discussions/2026-11-17-dop853-speed-route-summary.md#多-worker-的配對結果).
+These research declarations remain outside the default family-table inventory;
+the measured sample does not change production defaults.
+
+`profile_inputs(scenario=NAME)` selects one declared profile by its complete
+coordinate-derived name before constructing any model. Unknown names raise
+`ValueError` with legal profile names and construct no models. Omitting the
+argument retains the complete catalogue in the order above.
+
+The scene producer's `make_real_inputs()` includes these profiles after the fixed
+scans. Its existing `--scenario NAME` route constructs only the selected Input;
+fixed scan names keep their direct routes. `main(argv, inputs=[item])` still
+accepts caller-owned declarations. Neither this wiring nor `profile_inputs()`
+prepares scene files, reference entries or real-index rows. Each consumer must
+prepare its selected scene and reference caches explicitly; the recorded Gaussian
+results do not imply that every consumer's caches are ready.
+
+After separate compute approval, freeze a selected profile through the existing
+producer with `--update-index --scenario NAME`, choosing the shared real index
+and approved scene-cache destination. Until those explicit preparations finish,
+a complete prepare fails the exact-name-set check against indexes lacking the
+profile rows. No profile row is added to the Pareto default selection.
+Independent reference preparation belongs to the tests-side producer described
+below. Its interaction-picture oracle stops at knots and checks two tolerances.
+During measurement, use the public `load_reference(cache_dir, case.source,
+case.batch)`; misses raise instead of solving. Worker count does not enter the key.
+N and points do.
+Same-dimension reference agreement does not establish retained-level convergence.
+
+Measure wall/process only around `Engine.evolve`, keeping construction,
+reference loading and density comparison outside. These are whole-Engine times,
+not bare kernel costs. Report public `prepare_cpu_s`, `apply_cpu_s`, `rows` and
+`cache_hits` separately. `apply_cpu_s / rows` is a logical-row amortization,
+not one apply call's cost. Missing diagnostics are errors, not zeros.
+
 ### Fixed scenarios, companions and reference cache
 
 `family_pareto_scenarios.py` owns curated core pulse sequences and the scene
@@ -679,14 +776,13 @@ a 50 ns platform and forced zero endpoints, then peak normalization without
 baseline subtraction. It does not use the CZ's 257-knot envelope.
 The gains target single-tone dressed population .5 from joint ground with loss
 off. The actual scenes retain joint Gibbs density and fixed baths/dephasing.
-The original spike working files were not committed. The CZ scale comes only from the public drive operators' coherent
-matrix element and the actual flat-top area. It is not a calibrated CZ and makes
-no conditional-phase or fidelity claim. Builder availability does not imply
-reference convergence, index admission, numerical qualification or speedup.
-The 16 gate scenes are in the real index, shared numeric cache and Pareto
-name set. Independent references and whole-sequence speed qualification remain
-separate work. Index admission does not establish reference convergence or a
-2x speedup; reference production requires its own compute approval below.
+The original spike working files were not committed. The CZ scale comes from
+the public drive operators' coherent matrix element and the flat-top area. This
+is not a calibrated CZ and does not establish conditional phase or fidelity.
+The real index and default Pareto name set include all 16 gate scenes. Their
+metadata omits the acquisition-only `numerics.debug_capture` setting. The index
+pins identities, not local cache availability, reference convergence or
+whole-sequence speed. Reference production requires its own compute approval.
 
 `carrier_sweep_bias045_input()` and `gate_sequence_bias045_input()` keep the
 fixed single-fluxonium physical and board values from the source commit above.
@@ -938,7 +1034,9 @@ uv run --directory "$PWD" --no-sync -- python -m tools.family_pareto_scenarios \
   --index-dir tools/data/family_pareto --scene-cache /absolute/scene-cache
 ```
 
-`main(argv, *, inputs=...)` retains explicit producer declarations.
+`main(argv, *, inputs=...)` retains explicit producer declarations. Its default
+inventory includes the [DOP853 profile catalogue](#dedicated-dop853-segments).
+Adding those declarations does not populate the tracked indexes or shared cache.
 `prepare_scenes(inputs, indexes, scene_cache, *, scenario=None, update_index=False)`
 owns preparation. `indexes` maps categories to explicit index paths.
 The producer fixes and logs OMP, OpenBLAS, MKL and Numba native thread settings
@@ -973,6 +1071,13 @@ The single-support `kernel_single_constant`, `kernel_single_sampled` and
 `kernel_multitone_sampled` scenes use public `SingleFluxoniumModel` directly.
 They are separate from the complete F/L/I/N sequences, which retain 24 points
 and 21 levels each. See the [data README](data/family_pareto/README.md).
+`family_pareto_multitone_scenes.py` declares fourteen constant-pair price
+controls: three INTEGER_MODEL C2b projections, a nine-point fixed-M synthetic
+feature star and consecutive N=20/100 base supports. Their names join the
+Pareto default set. Each new row is appended with `--update-index --scenario`;
+only hashes enter Git. See the [data README](data/family_pareto/README.md) for
+coordinates and the distinction between repeated supports and exact-key reuse.
+
 The shared cache is not task scratch. Task cleanup must not delete it.
 Manual cleanup is confined to the scene-cache prefix.
 
@@ -1079,7 +1184,94 @@ cache hits, rejections and measured prepare/apply CPU seconds. It reports CPU
 seconds per relative scheduling cost unit. For records with seconds estimates,
 it also reports weighted `(actual - estimated) / estimated`; unknown estimates
 remain excluded. Malformed lines produce file/line warnings and a skipped count.
-Files and directories can be mixed; nothing is rewritten.
+Files and directories can be mixed; nothing is rewritten. All inputs merge into
+one report. The analyzer never infers simulator identity from paths, filenames,
+families or backend versions.
+
+`wall_by_complete` groups `complete=true` as `normal_return`, `false` as `raised`,
+and missing or null as `unknown`. Normal return includes a partial Stop result;
+it does not mean every requested round ran. Only observed groups appear.
+Each group reports `included`, `excluded`, and sums of `wall_s`, `compile_wall_s`,
+`evolve_wall_s`, `readout_wall_s` and `remainder_s`. The remainder is total wall
+minus the three stages, including environment preparation and pacing outside
+those stages. Raw materialization requested after acquire is outside the row.
+
+A row contributes wall totals only when all four wall fields are JSON numbers.
+Missing or null wall fields make it excluded from wall totals, including in the
+unknown group. Included plus excluded across groups equals `records`.
+All valid rows still count toward family statistics. Non-null `complete` accepts
+only JSON booleans. Non-null wall fields accept only JSON numbers, not booleans or
+numeric strings. Wrong types skip the whole row, including family work, and emit
+the same file/line warning as other malformed records.
+
+FTF, single and six default to the same project-root `.sim_telemetry` directory;
+the rows contain no simulator identity. To inspect them separately, set distinct
+`numerics.telemetry.directory` values and run once per directory:
+
+```bash
+uv run --directory <worktree> --no-sync -- python tools/analyze_routing_telemetry.py <ftf-directory>
+uv run --directory <worktree> --no-sync -- python tools/analyze_routing_telemetry.py <single-directory>
+uv run --directory <worktree> --no-sync -- python tools/analyze_routing_telemetry.py <six-directory>
+```
+
+One invocation with all three directories instead merges their rows.
+The [shared telemetry contract](../lib/zcu_tools/simulators/README.md#acquire-telemetry)
+defines fields, extras prefixes, failure behavior and the writer's file budget.
+
+## Simulator capture inspection
+
+```bash
+uv run --directory <worktree> --no-sync -- python tools/inspect_simulator_capture.py
+uv run --directory <worktree> --no-sync -- python tools/inspect_simulator_capture.py <capture-file-or-directory> --telemetry-directory <routing-directory>
+```
+
+The inspector prints JSON from recorded manifests and telemetry JSONL. It does
+not construct models, run evolution, inspect dispatch or evaluate guards.
+Omitting `path` calls `simulate.evolution.capture_directory()`. A directory
+selects only its immediate `capture-*.json.gz` files, sorted by filename. An
+explicit file selects that file alone. The default telemetry directory is
+`.sim_telemetry` under the tool's own worktree root, regardless of the caller's
+working directory. No path or family implies a simulator identity.
+
+Each batch retains its capture ID, zero-based batch index, complete flag and
+actual routes. Caller and worker rounds stay separate. Candidates retain their
+recorded order and guard decisions, including `untested_after_short_circuit`.
+A caller row remains pending, reported as `停在deferred`, only when its candidates
+include a recorded `deferred` decision and no worker result resolves it. All-rejected
+caller rows retain their candidates and null family without being marked pending.
+Prefix representatives retain their actual routes. Adopters, including adopters
+in another batch of the same evolve, report `沿用第k個prefix run` with a one-based
+run number within the representative batch. The inspector does not invent
+adopter classifications or repeated prefix evolution.
+
+The inspector matches telemetry only when `capture_file` equals the manifest's
+basename. Missing and null keys do not match. A unique match adds acquire
+`complete`, total wall, compile, evolve, readout and remainder seconds. Remainder
+is total minus those three stages. It does not change each evolve's recorded
+`complete`. Without a match, the report says `未找到同次 telemetry 行`, omits timing
+and does not guess why. Multiple matching rows raise an error naming the
+manifest. Empty manifests report `沒有evolve被錄到`.
+
+Compare optional conditions without changing the stored observations:
+
+```bash
+uv run --directory <worktree> --no-sync -- python tools/inspect_simulator_capture.py <capture-file> --budget 1e-7 --families '["direct"]'
+```
+
+`--budget` takes a float, `--source-identity` and `--segment-numeric-version`
+take strings, and `--frozen-physical-version` takes an integer. `--families`
+takes a JSON string array or `null` for unrestricted candidates. Array order and
+duplicates do not change the restriction. An empty array means no candidates.
+Omitted options retain each batch's recorded condition. Any difference lists
+its metadata key in `condition_differences` and labels `新條件下重新評估`. The
+report still shows the recorded conditions and routes, explicitly marked
+`下列仍是錄製時選路，未重算`. This label is not a rerun or a reproduction claim.
+
+Unrecorded routing reasons are `未知`. Numerical error is `未提供` because these
+captures have no independent reference solution. Guard acceptance is not an
+error estimate. The tool neither generates references nor reads numerical
+caches. Missing required capture fields and malformed matched telemetry fail
+instead of supplying default values.
 
 ## 怎麼跑
 

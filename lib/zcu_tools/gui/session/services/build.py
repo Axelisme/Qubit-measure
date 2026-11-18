@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from zcu_tools.gui.session.device_control import DeviceControlFacet
+from zcu_tools.gui.session.entry_control import EntryControlFacet
 from zcu_tools.gui.session.operation_runner import OperationInfrastructure
 from zcu_tools.gui.session.progress_control import ProgressControlFacet
 from zcu_tools.gui.session.services.arb_waveform import ArbWaveformService
@@ -27,7 +28,7 @@ from zcu_tools.gui.session.services.device import DeviceService
 from zcu_tools.gui.session.services.predictor import PredictorService
 from zcu_tools.gui.session.services.project_settings import ProjectSettingsService
 from zcu_tools.gui.session.services.value_sources import ValueSourceBinder
-from zcu_tools.gui.session.setup_control import SetupControlFacet, SocControlFacet
+from zcu_tools.gui.session.soc_control import SocControlFacet
 from zcu_tools.gui.session.value_lookup import ValueLookup, ValueRegistry
 
 if TYPE_CHECKING:
@@ -35,6 +36,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.event_bus import BaseEventBus
     from zcu_tools.gui.session.context_control import ContextControlPort
     from zcu_tools.gui.session.device_control import DeviceControlPort
+    from zcu_tools.gui.session.entry_control import EntryControlPort
     from zcu_tools.gui.session.operation_runner import OperationRunner
     from zcu_tools.gui.session.ports import (
         DeviceRegistryPort,
@@ -43,7 +45,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.predictor_control import PredictorControlPort
     from zcu_tools.gui.session.progress_control import ProgressControlPort
     from zcu_tools.gui.session.services.progress import ProgressService
-    from zcu_tools.gui.session.setup_control import SetupControlPort, SocControlPort
+    from zcu_tools.gui.session.soc_control import SocControlPort
     from zcu_tools.gui.session.state import SessionState
 
 
@@ -65,9 +67,9 @@ class SessionServices:
         context_control: The same context owner exposed through its narrow port.
         device: Device lifecycle commands and cached device queries.
         device_control: Narrow device command/query/progress/event facade.
-        setup_control: Entry/point setup command and cached query facade.
+        entry_control: Entry/point management command and cached query facade.
         soc_control: Independent SoC command, preference and event facade.
-        settings: Entry opening/creation and remembered setup preferences.
+        settings: Entry opening/creation and remembered dialog prefill.
         values: Read-only lookup of the session value-source registry.
         value_sources: Binder publishing cached owner-specific value sources.
         arb_waveform: Qubit-scoped arbitrary waveform assets of the session
@@ -87,7 +89,7 @@ class SessionServices:
     context_control: ContextControlPort
     device: DeviceService
     device_control: DeviceControlPort
-    setup_control: SetupControlPort
+    entry_control: EntryControlPort
     soc_control: SocControlPort
     settings: ProjectSettingsService
     values: ValueLookup
@@ -152,7 +154,7 @@ def build_session_services(  # noqa: PLR0913
         result_root=Path(project_root) / "result",
         database_root=Path(project_root) / "Database",
     )
-    setup_control = SetupControlFacet(
+    entry_control = EntryControlFacet(
         bus=bus,
         settings=settings,
         context=context_control,
@@ -170,7 +172,7 @@ def build_session_services(  # noqa: PLR0913
         context_control=context_control,
         device=device,
         device_control=device_control,
-        setup_control=setup_control,
+        entry_control=entry_control,
         soc_control=soc_control,
         settings=settings,
         values=value_registry,

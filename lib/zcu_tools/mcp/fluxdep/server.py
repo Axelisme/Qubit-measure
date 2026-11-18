@@ -57,7 +57,7 @@ Tools express decision points; a stage command enters that spectrum's stage:
   recorded result. Stale, absent or quality-less results return no overlay.
 - fluxdep_filter: edit the joint cloud (J6), then rerun fit.
 - fluxdep_export_spectrums / fluxdep_spectrum_load_processed: checkpoint and restore
-  sampled spectra, without Filter masks. fluxdep_fit_export_params writes setup and
+  sampled spectra, without Filter masks. fluxdep_fit_export_params writes global parameters and
   ledger, and writes the selected entry/component predictor v2 when its offset is
   determinable. Inspect independent predictor_writeback and flux_writeback receipts;
   skipped predictor means savepath=null, not a new predictor file.

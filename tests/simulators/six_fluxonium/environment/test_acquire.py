@@ -5,7 +5,6 @@ from contextlib import contextmanager
 import numpy as np
 import pytest
 from zcu_tools.cfg_model import MuxReadoutTone
-from zcu_tools.core.simulation import RoundRequest
 from zcu_tools.program.v2 import TimelineBuilder
 from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.readout import (
@@ -15,6 +14,7 @@ from zcu_tools.program.v2.modules.readout import (
 )
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.simulation import IntegratedRound, SimulationBinding
+from zcu_tools.simulate.boundary import RoundRequest
 from zcu_tools.simulators.six_fluxonium.config import parse_six_fluxonium
 from zcu_tools.simulators.six_fluxonium.environment import six_fluxonium
 from zcu_tools.simulators.six_fluxonium.environment.routing import route_request

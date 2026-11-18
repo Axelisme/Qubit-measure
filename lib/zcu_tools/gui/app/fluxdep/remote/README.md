@@ -66,16 +66,16 @@ the indicator before cancelling search or an interactive session.
 Authority and connection rules are in
 [ADR-0070](../../../../../../docs/adr/0070-control-identity.md).
 `project.setup(project_root, entry, component?)` opens an existing entry under
-`project_root/result`. Omitted component resolves the setup qubit alias. The
+`project_root/result`. Omitted component resolves the global qubit alias. The
 component must be a fluxonium qubit. `project.info` returns entry, component and
 Result paths, with null fields before opening. The Database binding is unused.
 `fit.export_params` accepts no path override. It writes the selected component
-predictor, declared setup fields and analysis ledger, then returns savepath,
+predictor, declared global fields and analysis ledger, then returns savepath,
 params, alignment_from, component, analysis_id, flux_writeback and predictor_writeback.
 Both outcomes have status written/skipped, the intended device or null, and a
 skip reason or null. flux_writeback describes component P1; predictor_writeback
 independently describes the dataset predictor v2 file. Skipped predictors have
-savepath=null and leave any existing predictor untouched. Setup/ledger still write.
+savepath=null and leave any existing predictor untouched. Global/ledger still write.
 The GUI displays both outcomes. The app README documents device/snapshot skip rules.
 The app submits the injected planner's component-relative fields, not a
 framework interpretation of lab flux schema. Missing planner or rejected

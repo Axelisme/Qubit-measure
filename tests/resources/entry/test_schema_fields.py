@@ -181,10 +181,10 @@ def test_reference_role_marks_top_level_text_fields_named_after_a_role() -> None
 def test_role_candidates_list_matching_components_in_document_order(
     entry: ResultEntry,
 ) -> None:
-    entry.setup.add_component("D2", kind="fake/drive/b")
-    entry.setup.add_component("S1", kind="fake/sensor")
-    entry.setup.add_component("D1", kind="fake/drive/a")
-    document = snapshot(entry.setup)
+    entry.parameters().add_component("D2", kind="fake/drive/b")
+    entry.parameters().add_component("S1", kind="fake/sensor")
+    entry.parameters().add_component("D1", kind="fake/drive/a")
+    document = snapshot(entry.parameters())
 
     assert role_candidates(document, "driver") == ("D2", "D1")
     assert role_candidates(document, "sense") == ("S1",)

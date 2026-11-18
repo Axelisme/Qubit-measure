@@ -18,7 +18,7 @@ from zcu_tools.gui.app.measure.remote import ControlOptions, RemoteControlAdapte
 from zcu_tools.gui.app.measure.remote.dialogs import DialogName
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
-from zcu_tools.gui.session.ui.setup_dialog import SetupDialog
+from zcu_tools.gui.session.ui.entry_dialog import EntryDialog
 
 from tests._lab import synthetic_lab
 from tests.gui.app.measure.remote._helpers import mcp_client
@@ -32,15 +32,15 @@ class LaunchedMeasureApp:
     invoke: Callable[[str, dict[str, Any]], dict[str, Any]]
 
 
-def visible_setup_dialogs(window: MainWindow) -> list[SetupDialog]:
-    return [dialog for dialog in window.findChildren(SetupDialog) if dialog.isVisible()]
+def visible_entry_dialogs(window: MainWindow) -> list[EntryDialog]:
+    return [dialog for dialog in window.findChildren(EntryDialog) if dialog.isVisible()]
 
 
-def click_toolbar_setup(window: MainWindow) -> None:
+def click_toolbar_entry(window: MainWindow) -> None:
     button = next(
         button
         for button in window.findChildren(QPushButton)
-        if button.text() == "Setup…"
+        if button.text() == "Entry…"
     )
     button.click()
 
@@ -52,7 +52,7 @@ def launched_measure_app(
     *,
     registry: Registry | None = None,
 ) -> Generator[LaunchedMeasureApp]:
-    """Run launch and attach readonly MCP without taking the open Setup modal.
+    """Run launch and attach readonly MCP without taking the open Entry modal.
 
     ``registry`` supplies the caller's synthetic catalog instead of an empty one.
     """
@@ -100,7 +100,7 @@ def launched_measure_app(
             controller.close()
         background.quiesce()
         if window is not None:
-            window.close_dialog(DialogName.SETUP)
-            window.deleteLater()
+            window.close_dialog(DialogName.ENTRY)
+            window.dispose()
         sys.excepthook = previous_hook
         qapp.processEvents()

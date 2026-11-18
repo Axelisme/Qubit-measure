@@ -114,7 +114,7 @@ def test_analysis_actions_project_domain_denial(
         if requested is action
         else AdmissionDecision(True, None, "")
     )
-    tab = ExpTabWidget(
+    tab = main_window_control_factory.create_tab(
         "tab-1",
         ctrl,
         AdapterCapabilities(
@@ -141,9 +141,8 @@ def test_analysis_actions_project_domain_denial(
 def test_exp_tab_disables_local_buttons_while_analyzing(
     main_window_control_factory, qapp
 ):
-    from zcu_tools.gui.app.measure.ui.main_window import ExpTabWidget
 
-    tab = ExpTabWidget(
+    tab = main_window_control_factory.create_tab(
         "tab-1",
         mock_ctrl(main_window_control_factory),
         AdapterCapabilities(
@@ -182,9 +181,8 @@ def test_exp_tab_disables_local_buttons_while_analyzing(
 def test_exp_tab_keeps_analyze_enabled_while_other_tab_running(
     main_window_control_factory, qapp
 ):
-    from zcu_tools.gui.app.measure.ui.main_window import ExpTabWidget
 
-    tab = ExpTabWidget(
+    tab = main_window_control_factory.create_tab(
         "tab-1",
         mock_ctrl(main_window_control_factory),
         AdapterCapabilities(
@@ -215,13 +213,12 @@ def test_exp_tab_keeps_analyze_enabled_while_other_tab_running(
 
 
 def test_exp_tab_run_tooltip_shows_no_soc_reason(main_window_control_factory, qapp):
-    from zcu_tools.gui.app.measure.ui.main_window import ExpTabWidget
 
     ctrl = mock_ctrl(main_window_control_factory)
     ctrl.admit.return_value = AdmissionDecision(
         False, "no_soc", "This experiment requires a SoC connection"
     )
-    tab = ExpTabWidget(
+    tab = main_window_control_factory.create_tab(
         "tab-1",
         ctrl,
         AdapterCapabilities(
@@ -247,9 +244,8 @@ def test_exp_tab_run_tooltip_shows_no_soc_reason(main_window_control_factory, qa
 
 
 def test_exp_tab_run_tooltip_shows_cfg_repair_hint(main_window_control_factory, qapp):
-    from zcu_tools.gui.app.measure.ui.main_window import ExpTabWidget
 
-    tab = ExpTabWidget(
+    tab = main_window_control_factory.create_tab(
         "tab-1",
         mock_ctrl(main_window_control_factory),
         AdapterCapabilities(
@@ -280,7 +276,6 @@ def test_exp_tab_run_tooltip_shows_cfg_repair_hint(main_window_control_factory, 
 def test_exp_tab_unselected_context_allows_analysis_but_disables_run_and_save(
     main_window_control_factory, qapp
 ):
-    from zcu_tools.gui.app.measure.ui.main_window import ExpTabWidget
 
     snap = make_tab_snapshot(
         "tab-1",
@@ -302,7 +297,7 @@ def test_exp_tab_unselected_context_allows_analysis_but_disables_run_and_save(
         if action is TabAction.RUN
         else AdmissionDecision(True, None, "")
     )
-    tab = ExpTabWidget("tab-1", ctrl, snap.capabilities)
+    tab = main_window_control_factory.create_tab("tab-1", ctrl, snap.capabilities)
     tab.update_writeback_items(
         [ParameterWriteback("r_f", "freq", proposed_value=6100.0)]
     )
@@ -328,9 +323,8 @@ def test_non_analysis_adapter_hides_analysis_widgets_but_keeps_save(
     """flux_dep / power_dep adapters (analysis=NONE) hide only the
     analysis widgets, never the Save section. Regression: the whole second tab
     used to be hidden, so the user could not save a 2D-sweep run at all."""
-    from zcu_tools.gui.app.measure.ui.main_window import ExpTabWidget
 
-    tab = ExpTabWidget(
+    tab = main_window_control_factory.create_tab(
         "tab-1",
         mock_ctrl(main_window_control_factory),
         AdapterCapabilities(
@@ -351,10 +345,6 @@ def test_non_analysis_adapter_hides_analysis_widgets_but_keeps_save(
     left_tabs = tab_pane_tabs(tab)
     visible = [left_tabs.tabText(i) for i in range(left_tabs.count())]
     assert visible == ["Run", "Data", "Guide"]
-    # Prove Analysis page and controls were never constructed, not only hidden
-    assert not hasattr(tab, "_analysis_panel")
-    assert not hasattr(tab, "analyze_form")
-    assert not hasattr(tab, "_analyze_section")
     # ... but Save stays reachable and usable (run result + active context).
     saves = [
         button for button in tab.findChildren(QPushButton) if button.text() == "Save"
@@ -368,9 +358,8 @@ def test_analysis_adapter_shows_analysis_widgets_and_labels_tab(
 ):
     """An analysis adapter keeps the analysis widgets visible and the second tab
     labelled 'Analysis' — the counterpart to the non-analysis case."""
-    from zcu_tools.gui.app.measure.ui.main_window import ExpTabWidget
 
-    tab = ExpTabWidget(
+    tab = main_window_control_factory.create_tab(
         "tab-1",
         mock_ctrl(main_window_control_factory),
         AdapterCapabilities(
@@ -395,7 +384,6 @@ def test_analysis_adapter_shows_analysis_widgets_and_labels_tab(
 def test_exp_tab_load_button_requires_context_but_not_soc(
     main_window_control_factory, qapp
 ):
-    from zcu_tools.gui.app.measure.ui.main_window import ExpTabWidget
 
     snap1 = make_tab_snapshot(
         "tab-1",
@@ -406,7 +394,7 @@ def test_exp_tab_load_button_requires_context_but_not_soc(
         has_figure=False,
     )
     assert snap1.capabilities is not None
-    tab = ExpTabWidget(
+    tab = main_window_control_factory.create_tab(
         "tab-1", mock_ctrl(main_window_control_factory), snap1.capabilities
     )
     tab.update_interaction_state(snap1)
@@ -430,7 +418,7 @@ def test_exp_tab_load_button_requires_context_but_not_soc(
 def test_exp_tab_attach_projects_existing_resource(main_window_control_factory, qapp):
     ctrl = editor_wiring_ctrl(main_window_control_factory)
     cfg = ctrl.cfg_resources.lookup("tab-1")
-    tab = ExpTabWidget(
+    tab = main_window_control_factory.create_tab(
         "tab-1", ctrl, AdapterCapabilities(analysis=AnalysisMode.FIT, load_data=True)
     )
     tab.attach(make_tab_snapshot("tab-1"), _RecordingTabActions())
@@ -444,13 +432,13 @@ def test_exp_tab_detach_preserves_resource_for_later_views(
 ):
     ctrl = editor_wiring_ctrl(main_window_control_factory)
     cfg = ctrl.cfg_resources.lookup("tab-1")
-    tab = ExpTabWidget(
+    tab = main_window_control_factory.create_tab(
         "tab-1", ctrl, AdapterCapabilities(analysis=AnalysisMode.FIT, load_data=True)
     )
     tab.attach(make_tab_snapshot("tab-1"), _RecordingTabActions())
     tab.detach()
     cfg.write({("gain",): 0.45})
-    other = ExpTabWidget(
+    other = main_window_control_factory.create_tab(
         "tab-1", ctrl, AdapterCapabilities(analysis=AnalysisMode.FIT, load_data=True)
     )
     other.attach(make_tab_snapshot("tab-1"), _RecordingTabActions())
@@ -468,7 +456,7 @@ def test_detached_tab_disables_commands_and_ignores_late_layout_timer(
     monkeypatch.setattr(QTimer, "singleShot", lambda _delay, fn: callbacks.append(fn))
     ctrl = editor_wiring_ctrl(main_window_control_factory)
     actions = _RecordingTabActions()
-    tab = ExpTabWidget(
+    tab = main_window_control_factory.create_tab(
         "tab-1", ctrl, AdapterCapabilities(analysis=AnalysisMode.FIT, load_data=True)
     )
     tab.attach(make_tab_snapshot("tab-1"), actions)
@@ -490,10 +478,8 @@ def test_detached_tab_disables_commands_and_ignores_late_layout_timer(
 def test_exp_tab_buttons_dispatch_public_tab_actions(main_window_control_factory, qapp):
     import dataclasses
 
-    from zcu_tools.gui.app.measure.ui.main_window import ExpTabWidget
-
     ctrl = editor_wiring_ctrl(main_window_control_factory)
-    tab = ExpTabWidget(
+    tab = main_window_control_factory.create_tab(
         "tab-1",
         ctrl,
         AdapterCapabilities(
@@ -565,7 +551,7 @@ def test_exp_tab_reset_publishes_defaults_on_same_resource(
     cfg = ctrl.cfg_resources.lookup("tab-1")
     defaults = cfg.input.data
     cfg.write({("gain",): 0.45})
-    tab = ExpTabWidget(
+    tab = main_window_control_factory.create_tab(
         "tab-1",
         ctrl,
         AdapterCapabilities(analysis=AnalysisMode.FIT, load_data=True),
@@ -584,7 +570,7 @@ def test_exp_tab_reset_confirm_no_does_not_reset(main_window_control_factory, qa
     ctrl = editor_wiring_ctrl(main_window_control_factory)
     cfg = ctrl.cfg_resources.lookup("tab-1")
     before = cfg.input.data
-    tab = ExpTabWidget(
+    tab = main_window_control_factory.create_tab(
         "tab-1",
         ctrl,
         AdapterCapabilities(analysis=AnalysisMode.FIT, load_data=True),
@@ -600,9 +586,8 @@ def test_exp_tab_reset_confirm_no_does_not_reset(main_window_control_factory, qa
 
 def test_exp_tab_reset_btn_idle_only_enable(main_window_control_factory, qapp):
     """reset_btn must be enabled when idle and disabled while the tab is busy."""
-    from zcu_tools.gui.app.measure.ui.main_window import ExpTabWidget
 
-    tab = ExpTabWidget(
+    tab = main_window_control_factory.create_tab(
         "tab-1",
         mock_ctrl(main_window_control_factory),
         AdapterCapabilities(

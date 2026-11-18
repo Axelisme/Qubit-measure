@@ -38,12 +38,31 @@ def flux_hamiltonian(
     with endpoint hold. Inputs are borrowed, and the returned matrix is new.
     Packing and waveform validation belong to the consuming kernel.
     """
-    h = expansion.static.copy()
+    h = np.empty_like(expansion.static)
+    fill_flux_hamiltonian(expansion, times, flux, time, h)
+    return h
+
+
+@njit(nogil=True, cache=True)
+def fill_flux_hamiltonian(
+    expansion: PackedExpansion,
+    times: NDArray[np.float64],
+    flux: NDArray[np.float64],
+    time: float,
+    h: NDArray[np.complex128],
+) -> None:
+    """Overwrite writable complex128 H with flux_hamiltonian summation order.
+
+    Inputs follow flux_hamiltonian; h matches expansion.static.shape and belongs
+    to this caller. No buffer is retained or shared between concurrent calls.
+    """
+    h[:] = expansion.static
     for term in range(len(expansion.loops)):
         loop = expansion.loops[term]
         value = np.interp(time, times, flux[:, loop])
         kind = expansion.kinds[term]
         angle = np.pi * value * (2 if kind < 2 else 1)
         coefficient = np.cos(angle) if kind % 2 == 0 else np.sin(angle)
-        h += coefficient * expansion.matrices[term]
-    return h
+        for i in range(h.shape[0]):
+            for j in range(h.shape[1]):
+                h[i, j] += coefficient * expansion.matrices[term, i, j]

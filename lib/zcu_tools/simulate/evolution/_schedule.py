@@ -8,8 +8,9 @@ import numpy as np
 from joblib import delayed
 from numpy.typing import NDArray
 
-from zcu_tools.core.simulation import CancellationQuery
+from zcu_tools.simulate.boundary import CancellationQuery
 
+from ._capture import CaptureRun
 from ._dispatch import Dispatch, Selection, classify, prepare
 from ._dispatch import diagnostics as dispatch_diagnostics
 from ._gain_plan import admit_shared_builds
@@ -133,8 +134,10 @@ class Schedule:
         context: KernelContext,
         cancel: CancellationQuery,
         initial_density: NDArray[np.complex128] | None = None,
+        capture: CaptureRun | None = None,
     ):
         self.geometry, self.dispatch, self.cancel = geometry, dispatch, cancel
+        self.capture = capture
         self.context = context
         self.source, self.budget = context.source, context.budget
         self.table = geometry.table
@@ -438,6 +441,9 @@ class Schedule:
                 self.dispatch.names,
                 self.dispatch.plans,
             ),
+            trace=None
+            if self.capture is None
+            else self.capture.round(self.geometry, worker=True),
         )
         bindings: list[_Binding] = []
         for entry in _deduplicate(self.table, dispatch, self.kernels, self.context):

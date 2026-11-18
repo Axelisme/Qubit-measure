@@ -1,6 +1,6 @@
 # Measure services
 
-**Last updated:** 2026-11-01
+**Last updated:** 2026-11-17，global／point 文件選擇
 
 **讀者：** framework-dev、agent。查找 Measure application 操作的 owner，以及 service 與 session、UI、remote 的接縫。
 
@@ -20,13 +20,13 @@ UI 與 remote 經 Controller／control facets 呼叫這些 owners，不各自建
 | `startup.py`、`experiment_reload.py`、`workspace.py` | 執行啟動、重載與目前程序內的 workspace 重建。 |
 | `results_index.py`、`results_comparison.py` | 唯讀索引保存成果，將已存 summary 投影為比較列，不重新分析。 |
 
-Results index 隔離各 entry 的 setup／ledger 與 run 成員讀取錯誤，保留其他成果。
+Results index 隔離各 entry 的 global／ledger 與 run 成員讀取錯誤，保留其他成果。
 Ledger 讀取使用 resources 的無 lock typed partial snapshot，只消費 acquired 身分／時間與 saved 成功路徑。未用的歷史 payload 或 attachment reference 不影響登錄；實際使用的壞值仍診斷並沿既有 entry 層級隔離。
 沒有對應 Result entry 的 Database run 仍可瀏覽。無法安全列舉的 Database 項目
 以 `ResultsIndex.issues` 回報 entry、路徑與原因，不偽造 run；可列出的 run
 則沿用 `ResultRun.issues`。Symlink escape 項目不讀、不跟隨。
 
-`RunService` 在提交 worker 前固定 ParameterContext 的參數快照。Worker 以 RunMetadata 組內容並將 JSON dump 放入 record.metadata，後續切換 point 不改這份分析環境。
+`RunService` 在提交 worker 前固定 DocumentSetCapture 的參數快照。Worker 以 RunMetadata 組內容並將 JSON dump 放入 record.metadata，後續切換 point 不改這份分析環境。
 RunService 自己記錄 Stop 與成功的 selector cancel，交付 stop_requested。
 Core 正常回傳就發布並標 finished，不區分 root 或子孫停止。拋錯就 failed 並顯示錯誤。
 Stop 與被接受的 selector cancel 以 stop_requested 記錄。

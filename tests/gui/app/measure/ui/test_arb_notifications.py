@@ -140,7 +140,7 @@ def notification_ui(qapp: QApplication, tmp_path: Path) -> Iterator[Notification
         client.close()
         remote.stop()
         controller.close()
-        window.deleteLater()
+        window.dispose()
         QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
         qapp.processEvents()
 

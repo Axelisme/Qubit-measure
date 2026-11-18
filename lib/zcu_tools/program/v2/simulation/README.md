@@ -1,6 +1,6 @@
 # Explicit acquisition environments
 
-**Last updated:** 2026-11-16
+**Last updated:** 2026-11-17
 
 **讀者：** framework-dev。模擬 acquisition 的 request、round 與 raw source 契約。
 
@@ -12,10 +12,12 @@
 `SimulationAcquireMixin` enters once through `MyProgramV2`. With a
 `SimulationSoc`, it admits a synchronous call, builds one `AcquireRequest`,
 and supplies numeric round data to the existing QICK acquisition pipeline.
-`SimulationBinding` optionally accepts `SimulationCallbacks(wait_ready=callback)`. Admission calls
-it before consuming the acquire sequence or constructing a request. Failure
-releases admission and propagates; the environment callback owns any optional
-startup-compilation fallback. External timers must wait at the environment's
+`with binding.acquire() as sequence:` admits one call and yields its zero-based
+integer sequence. Reentry or concurrent entry raises before consuming a sequence.
+`SimulationBinding` optionally accepts `SimulationCallbacks(wait_ready=callback)`.
+Admission calls readiness, then `on_begin`, before consuming the sequence or
+constructing a request. Either failure releases admission and propagates without
+calling `on_end`; the environment callback owns any optional startup-compilation fallback. External timers must wait at the environment's
 ready interface before starting if startup time should be excluded.
 `SimulationBinding(..., timing=SimulationTiming(time_scale=0.0))` optionally paces each round to
 `time_scale × program.request_round_time_s(request)` seconds. That owner sums
@@ -38,14 +40,28 @@ builder owns this policy, not the GUI. For a 2 us timeline with zero relaxation,
 the target when numeric work dominates.
 `SimulationBinding(..., callbacks=SimulationCallbacks(on_end=callback))` optionally observes each admitted
 acquire after all software rounds, including partial or failed acquisitions.
-The callback receives captured `RoundRequest` records and admitted wall seconds,
-including pacing. It runs before admission releases. Observer errors warn at
-most once and cannot mask acquisition failures, even under warning-as-error
-filters. An omitted on_end avoids this observer and its acquire-level clocks. FTF uses the
-callback to persist its own local routing reports; program knows no file format.
+The callback receives one frozen `AcquireOutcome(rounds, wall_s, compile_wall_s,
+complete)`. `rounds` contains captured inputs in execution order, including a
+failed round's input. `wall_s` includes pacing and mixin cleanup, but excludes
+readiness, `on_begin` and observer work. The mixin wraps only
+`build_compiled_request` in `binding.compiling()`; its elapsed seconds accumulate
+in `compile_wall_s` even if construction raises. Installation and execution do
+not contribute to compile time. No entered compile scope means `0.0`.
+
+The binding's acquire body includes request release and active-marker cleanup.
+It sets `complete=True` only when that body returns normally. A Stop that returns
+partial results is true; zero completed rounds that raise
+`StoppedPartialAcquireError` are false. This field does not certify that every
+requested round ran. An outer exception handler does not affect the result.
+The observer runs after this decision and before admission releases. Ordinary
+observer `Exception`s warn at most once and cannot mask acquisition failures,
+even under warning-as-error filters. Observer `BaseException`s propagate and
+retain an original acquire error as context. Admission releases in either case.
+An omitted `on_end` avoids acquire and compiling clock reads. FTF projects this
+outcome into its local routing report; program knows no writer or file format.
 Integrated `acquire(..., charge_requirements=(ChargeDriveRequirement(name, gen_ch), ...))`
 passes named physical charge requirements through the simulation request. The
-record lives in `core.simulation`; names are diagnostics, not dispatch keys.
+record lives in `simulate.boundary`; names are diagnostics, not dispatch keys.
 Single-fluxonium validates membership before evolution. White noise accepts
 requirements without physical checks because it has no physical line model.
 Six-fluxonium and FTF reject nonempty requirements before evolution until they
@@ -309,10 +325,12 @@ reuses the physical result across rounds. A changed snapshot requires a new
 evolution. Each readout state's conditional mean response is computed once per
 distinct readout content; populations combine these means linearly.
 
-Integrated statistics draw noise once per (round, point), not per shot.
-Multinomial state counts represent projection noise. Gaussian receiver noise
-uses the covariance of the sum over reps. Environments deliver an independent
-RawShots source with retained noiseless inputs and a local round identity.
+Integrated statistics sample category counts that sum to reps at each point.
+The counts retain projection noise, but categories need not represent physical
+shot paths. Each read and category has noiseless per-shot sums. Gaussian
+receiver noise uses the covariance of the sum over reps. Environments deliver
+an independent RawShots source with retained noiseless inputs and a local round
+identity.
 Requesting shots calls that source without rerunning evolution or the backend.
 Raw ADC values remain int64, and round indices select distinct sampling streams.
 
@@ -323,7 +341,7 @@ points or reps.
 
 ## Numeric contract and extension points
 
-`core.simulation` owns immutable numeric records. No Module, driver, GUI object
+`simulate.boundary` owns immutable numeric records. No Module, driver, GUI object
 or callback crosses this boundary; `RoundRequest.cancel` is a read-only `is_set()`
 query, not a callback. Every request time is an integer tick in its required
 `TimeBase`. Array times use int64 without changing point/read shapes. Frequency
@@ -422,15 +440,17 @@ Normal hardware compilation and the native timeline timing policy are unchanged.
   coordinates admission and retains `last_request` and `rounds` privately in
   memory. `execute(RoundRequest)` returns `IntegratedRound(statistics, raw)` for
   integrated mode or `RoundSignals` for decimated mode. Mode/result mismatches raise.
-  `statistics` is a pure core `RoundStatistics`; `raw` satisfies the program-owned
+  `statistics` is a pure boundary `RoundStatistics`; `raw` satisfies the program-owned
   `RawShots.materialize(reps, avg_level)` protocol.
-- Integrated statistics contain per-point totals over reps, shared state counts,
-  conditional per-shot sums and receiver covariance. The adapter validates and
-  detaches these arrays. Each SimulationSoc retains at most 64 KiB of successful
+- Integrated statistics contain per-point totals over reps, shared category
+  counts that sum to reps, noiseless per-shot sums per read and category, and
+  receiver covariance. Categories need not represent physical shot paths.
+  The adapter validates and detaches these arrays. Each SimulationSoc retains
+  at most 64 KiB of successful
   conditional-sum/covariance validation certificates, keyed by shape, dtype and
   exact bytes, not borrowed array identity. Counts, layout and noisy totals are
   checked each round, and every returned array is detached even on a certificate
-  hit. Certificates live with the SoC and do not cross the core/backend boundary.
+  hit. Certificates live with the SoC and do not cross the acquisition/backend boundary.
   Fixed request layouts and integrated normalization metadata are prepared once
   per acquire; this never freezes snapshots or certifies later backend values.
   Without processors, threshold or trackers,

@@ -4,17 +4,17 @@ from dataclasses import replace
 
 import numpy as np
 import pytest
-from zcu_tools.core.simulation import (
+from zcu_tools.experiment.simulation import white_noise
+from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
+from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
+from zcu_tools.program.v2.simulation import IntegratedRound
+from zcu_tools.simulate.boundary import (
     ChannelStatistics,
     RoundRequest,
     RoundSignals,
     RoundStatistics,
     SamplingIdentity,
 )
-from zcu_tools.experiment.simulation import white_noise
-from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
-from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
-from zcu_tools.program.v2.simulation import IntegratedRound
 
 from tests.program._acquisition_soc import AcquisitionSoc
 from tests.program._profiles import load_soccfg

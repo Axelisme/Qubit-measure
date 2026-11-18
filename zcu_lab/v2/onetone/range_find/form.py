@@ -5,7 +5,7 @@ from math import isfinite
 
 from zcu_tools.cfg_model import Range
 from zcu_tools.gui.form_adapter import Form, FormContext
-from zcu_tools.gui.session.types import ParameterContext
+from zcu_tools.gui.session.types import DocumentSetCapture
 
 from zcu_lab.v2.onetone._form_shared import initial_spectrum_tree
 from zcu_lab.v2.support.measure.seed_metadata import (
@@ -16,7 +16,7 @@ from .core import RangeFindCfg
 
 
 def resonator_frequencies(
-    parameters: ParameterContext, names: Sequence[str]
+    parameters: DocumentSetCapture, names: Sequence[str]
 ) -> list[float] | None:
     """Read captured MHz in name order, or None if any frequency is absent/null.
 

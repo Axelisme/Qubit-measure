@@ -18,7 +18,33 @@
 
 ## 模擬量測環境
 
+- 2026-11-17 [Capture 的唯讀體檢與 typed metadata](2026-11-17-capture-inspection.md)：唯讀報告。共用 owner schema 讀逐輪實錄，以 capture_file 對行，條件差異只標記、不重算。
+
+- 2026-11-17 [Capture 的發布與 acquire 關聯](2026-11-17-capture-publication.md)：公開寫出。Writer 共用 cache root，以原子 manifest 發布和 capture_file 關聯三個 environment 的同次 telemetry。
+
+- 2026-11-17 [Engine capture 的逐輪選路事件](2026-11-17-engine-capture-events.md)：公開錄製。每次 evolve 一個 ID，以既有凍結容器保存輸入，分開記 caller deferral、worker resolution 與 prefix 採用者。
+
+- 2026-11-16 [Acquire wall 的分組與未量測資料](2026-11-16-acquire-wall-analysis.md)：彙總契約。只按 complete 分組，四個 wall 俱為數字才計入耗時，所有有效行保留 family 統計。
+- 2026-11-16 [Single 與 six 的 acquire telemetry](2026-11-16-single-six-acquire-telemetry.md)：計時聚合。以 acquire 為寫入邊界，聚合各 source 與 projective span，直接沿用 binding 成敗。
+- 2026-11-16 [FTF acquire 的演化與讀出 wall](2026-11-16-ftf-layer-walls.md)：分層計時。每次 Engine 與 ADC 工作各自累積 wall，跨 round 與 continuation 加總，失敗段保留已耗時間。
+
+- 2026-11-16 [Acquire outcome 的作用域與編譯交接](2026-11-16-acquire-outcome-scope.md)：生命週期。Binding 以自身作用域判斷正常返回，mixin 只圈住 builder 計時，environment 接收同一結果物件。
+
+- 2026-11-16 [共用 acquire telemetry writer](2026-11-16-shared-acquire-telemetry.md)：資料契約。共用八欄必填 summary，writer 明列投影，FTF projection 只放 namespaced extras。
+
+- 2026-11-17 [DOP853 加速路線的證據與未驗項](2026-11-17-dop853-speed-route-summary.md)：路線比較。指定 Gaussian 批次的多 worker 有配對收益，取樣前導共享潛力未知，載波固定原型精度不合格，GPU 全 14 組比較延期未量。
+
+- 2026-11-18 [FTF 模擬的子空間約化：各做法的結果與結案](2026-11-18-ftf-subspace-reduction.md)：刪除或收窄。Engine 內自動約化沒有便宜又嚴格的逐點 guard，維度由使用者以 retained_levels 宣告；單 tone 掃描 24 態合格，雙 qubit X90 長序列各做法都不划算。
+
+- 2026-11-17 [DOP853 profile 場景的單列選取與 producer 接線](2026-11-17-dop853-profile-scenario-routing.md)：場景接線。Profile owner 先選名稱再建單一 Input，producer 附加宣告但不擴大 Pareto 預設選集，也不自動準備數值。
+
+- 2026-11-17 [Projective read 的輸出改成 Markov chain](2026-11-17-projection-markov-chain-readout.md)：資料格式。Single／six 輸出每點初始分佈與逐 read 轉移表，integrated 用逐態 flow counts，floor 改成逐點 identity 近似；FTF 不動，決策見 [ADR-0078](../adr/0078-evolution-module-boundary.md#projective-read-的-markov-chain-表示)。
+
 - 2026-11-17 [共用清單的 Pareto 選集與明確新增場景](2026-11-17-pareto-selection-and-scene-append.md)：選取契約。Pareto 自持預設名稱，明確更新才新增列，reference producer 只讀解所選單列。
+
+- 2026-11-16 [常數雙 tone 的 secular guard 與唯讀診斷](2026-11-16-constant-multitone-guard-diagnostic.md)：適用域收窄。Guard 與公開 query 共用最終 admission fact，固定證據不外推到日常 FTF 或價格。
+- 2026-11-15 [`common_frame` 的 coherent 門檻收窄與唯讀診斷](2026-11-15-common-frame-coherent-narrowing.md)：適用域收窄。只把既有 coherent 上限從 0.03 降到 0.0018，不加新指標；多拒絕的 5 個合成格與兩 tone 取樣列改由價格選 family。
+
 
 - 2026-11-16 [凍結場景改為共用快取，Git 只留名稱與 hash 清單](2026-11-16-frozen-scene-storage.md)：資料入庫。數值不入庫，每筆單筆 gzip，Git 只留兩份小清單，重建不符就停。
 
@@ -34,8 +60,12 @@
 
 - 2026-11-16 [模擬器場景凍結與參考解數值交接](2026-11-16-frozen-simulator-inputs.md)：資料交接。場景 producer 自持控制與模型，通用 codec 保留既有 key，獨立 solver 留在 tests 側。
 
+- 2026-11-14 [single_tone_rwa 以 endpoint kick 保留，guard 改用 κ2](2026-11-14-single-tone-rwa-kick.md)：保留或刪除。隨機相位序列從最大 1.07e-2 降到 ≤2e-3；價格計入 kick 延後，L、I 的預設選路暫時比 floquet_period 慢超過 10%。
+
 - 2026-11-16 [Floquet 的保留與價格重校](2026-11-16-floquet-kept-price.md)：保留或刪除。Committed 批次上 `floquet` 快 1.65–1.81 倍，保留並重校價格；三 family 排序等 `multitone_rwa` 修好。
 - 2026-11-16 [Floquet 的拒絕成本與單次 evolve 內的 frame 重用](2026-11-16-floquet-refusal-cost.md)：拒絕成本。既有拒絕條件提前，一次 evolve 內 exact-key frame 只建一次；不把拒絕機率算進價格，不跨 key 或跨 evolve 保留 frame，不做建 frame 前的 trace 下界。
+
+- 2026-11-15 [單段雙 tone benchmark 的量測邊界](2026-11-15-single-segment-benchmark-boundary.md)：量測邊界。專用 Engine factory 與既有 acquire 分開，模型與參考解仍由各自 owner 建立。
 
 - 2026-11-15 [模擬器測試與量測的分層](2026-11-15-simulator-test-measurement-layering.md)：分層。Kernel、dispatch、序列、前端與 environment 分開驗，退休 acquire e2e 量測，決策見 [ADR-0078](../adr/0078-evolution-module-boundary.md#模擬器的測試與量測分層不做-e2e)。
 
@@ -81,11 +111,14 @@
 
 ## 模組邊界
 
+- 2026-11-15 [模擬器封閉成子模塊](2026-11-15-simulator-closed-submodule.md)：依賴邊界。`simulate` 不 import `zcu_tools` 其他 package，邊界型別歸它，裝置模型由使用方經介面聲明，決策見 [ADR-0072](../adr/0072-module-boundaries.md#模擬器是封閉的子模塊模型由使用方聲明)。
+- 2026-11-17 [封閉 simulate 的搬遷順序](2026-11-17-simulate-closure-expand-order.md)：搬遷順序。被 contract 擋住的暫時轉出改放在允許的方向（新位置轉出舊定義），分批改 importer，最後一票才搬定義，main 不出現 re-export。
 - 2026-11-14 [Lab 依賴只經 assembly 入口](2026-11-14-lab-dependency-boundary.md)：依賴邊界。組合根與開發工具只直接 import assembly，migrations 保留格式遷移所需的直接依賴，決策見 [ADR-0072](../adr/0072-module-boundaries.md)。
 - 2026-10-20 [框架去具體化：alias、模板、predictor 與一晶片一 qubit 假設](2026-10-20-framework-decoupling.md)：領域 alias、模板與模型認知留在 zcu_lab，框架的 owner 邊界見 [ADR-0072](../adr/0072-module-boundaries.md)。
 
 ## 測試與驗證
 
+- 2026-11-17 [GUI teardown 的可見視窗 guard 與 owner 清理](2026-11-17-gui-teardown-visible-window-guard.md)：測試護欄。GUI 測試 teardown 後仍可見的 top-level 視窗讓該測試失敗；guard 立即取樣，不先交付 DeferredDelete；fixture 只退休自己擁有的視窗；產品退休的 form row 明確隱藏。
 - 2026-11-16 [Tools 標準化：補工具缺口，不搬目錄、不加硬閘](2026-11-16-tools-standardization.md)：工具標準化。品質工具補 `-h`／argv 與 docstring，加只報告的 docstring 現況列與 README 正向規則；不搬目錄、不加硬閘。
 - 2026-11-16 [實驗 probe 的 snapshot 保存與比較](2026-11-16-probe-snapshots.md)：工具範圍。保存與比較留在 tools，階段不寫 snapshot，環境清理由獨立 context manager 收尾。
 - 2026-11-15 [Doc relations 略過 fenced code 示例連結](2026-11-15-doc-relations-fenced-links.md)：檢查器誤報，修正 checker 對示例的判讀，保留正文連結與 ADR 檢查。
@@ -96,6 +129,8 @@
 - 2026-10-14 [量測成果 Artifact、設定快照與讀回的推導](2026-10-14-artifact-persistence.md)：設定快照正本只在 data.h5，保存與讀回決策見 [ADR-0063](../adr/0063-persistence-ownership.md)、[ADR-0069](../adr/0069-experiment-core-and-frontends.md) 與 [ADR-0067](../adr/0067-gui-application.md)。
 - 2026-10-23 [Store 讀取效率與寫入慣例](2026-10-23-store-read-efficiency.md)：保留分組提交，以增量讀和內容 hash 快照減少重複驗證。
 - 2026-11-16 [range_find 的 writeback：沒有就建立，有就覆寫](2026-11-16-range-find-writeback-upsert.md)：寫回目標缺元件。參數列帶選填 create_kind，Apply 在同一次 edit 先建元件再設值；不加列種類或入口，決策見 [ADR-0008](../adr/0008-cfg-editor-session.md)。
+- 2026-11-17 [Global／point 參數型別收斂與文件組](2026-11-17-global-point-parameter-types-and-document-set.md)：型別收斂。Global 與 point 共用 `ParameterView` 等一套型別，以 `point=None` 選 global；三檔合稱文件組由 session 持有，每種檔一個形狀相同的開檔入口，決策見 [ADR-0063](../adr/0063-persistence-ownership.md#同一種資料不因-global-或-point-分兩套)。
+- 2026-11-17 [Aliases 綁檔物件的讀取、refresh 與候選准入](2026-11-17-alias-file-cached-observation.md)：公開契約語意。物件持有一次觀察，只有 refresh 讀檔；session 以 opener 開候選，語法通過才與表一起換上。
 
 ## 量測策略
 

@@ -12,13 +12,13 @@ from zcu_tools.gui.session.aliases import AliasRow, AliasTable
 from zcu_tools.gui.session.context_types import (
     ContextSourceFault,
     ContextSourceUnavailableError,
-    SavedPoint,
+    DocumentSetRef,
 )
 from zcu_tools.gui.session.parameter_capture import (
     capture_parameters,
     restore_parameters,
 )
-from zcu_tools.gui.session.types import ParameterContext, RoleBinding
+from zcu_tools.gui.session.types import DocumentSetCapture, RoleBinding
 from zcu_tools.resources.context.library import (
     ComponentLibrary,
     LibrarySnapshot,
@@ -64,7 +64,7 @@ def test_component_projection_enforces_cross_field_checks_without_blocking_leaf_
 
     component_registry.register("capture/bounded", Bounded)
     try:
-        parameters = ParameterContext(
+        parameters = DocumentSetCapture(
             point=ParameterContent(
                 {
                     "components": {
@@ -153,12 +153,12 @@ def capture(
     *,
     roles: RoleBinding | None = None,
     faults: tuple[ContextSourceFault, ...] = (),
-) -> ParameterContext:
+) -> DocumentSetCapture:
     point, library = source
-    return ParameterContext(
+    return DocumentSetCapture(
         point=point,
         library=library,
-        target=SavedPoint(entry_name="entry", point="working"),
+        target=DocumentSetRef(entry_name="entry", point="working"),
         roles=roles,
         source_faults=faults,
     )
@@ -172,7 +172,7 @@ def declarations() -> dict[str, RoleSpec]:
 
 
 def test_empty_analysis_environment_has_no_persistent_identity_or_metadata() -> None:
-    context = ParameterContext.empty()
+    context = DocumentSetCapture.empty()
     assert context.target is None
     assert context.storage is None
     assert context.document().general is None
@@ -227,7 +227,7 @@ def test_snapshot_preserves_consumed_factory_defaults_without_validating_unused_
 
     component_registry.register("capture/notebook", Notebook)
     try:
-        original = ParameterContext(
+        original = DocumentSetCapture(
             point=ParameterContent(
                 {
                     "components": {
@@ -277,7 +277,7 @@ def test_snapshot_preserves_nested_factory_defaults_through_capture(
 
     component_registry.register("capture/nested-notebook", Notebook)
     try:
-        original = ParameterContext.from_content(
+        original = DocumentSetCapture.from_content(
             point=ParameterContent(
                 {"components": {"note": {"kind": "capture/nested-notebook"}}}
             ),
@@ -370,7 +370,7 @@ def test_point_capture_is_detached_and_preserves_target(
     copied.components.clear()
     assert context.value("Q1.rate") == 4300.0
     assert context.value("general.ext.nested.number") == 2.0
-    assert context.target == SavedPoint(entry_name="entry", point="working")
+    assert context.target == DocumentSetRef(entry_name="entry", point="working")
     assert context.roles is None
     assert context.source_faults == ()
 
@@ -469,7 +469,7 @@ def test_empty_role_binding_does_not_consume_components_or_sources(
             ),
         )
     )
-    context = ParameterContext(
+    context = DocumentSetCapture(
         point=ParameterContent({"components": ["not a component mapping"]}),
         library=source[1],
         target=None,
@@ -518,10 +518,10 @@ def test_partial_capture_reports_unbound_role_only_when_read(
         point.components["capture_driver"] = point.components["Q2"].model_copy(
             deep=True
         )
-    context = ParameterContext(
+    context = DocumentSetCapture(
         point=point,
         library=library,
-        target=SavedPoint(entry_name="entry", point="working"),
+        target=DocumentSetRef(entry_name="entry", point="working"),
         roles=RoleBinding(None, declarations(), {"capture_sensor": "R1"}),
     )
     assert context.value("$capture_sensor.rate") == 6500.0
@@ -707,18 +707,18 @@ def test_library_consumers_report_their_own_source_fault(
     assert context.value("Q1.rate") == 4300.0
 
 
-def test_parameter_capture_rejects_setup_diagnostics(
+def test_parameter_capture_rejects_global_diagnostics(
     source: tuple[ParameterDocument, LibrarySnapshot],
     tmp_path: Path,
 ) -> None:
     fault = ContextSourceFault(
-        "setup", tmp_path / "parameters.yaml", "OSError", "unreadable"
+        "global", tmp_path / "parameters.yaml", "OSError", "unreadable"
     )
     with pytest.raises(ValueError, match="point/module_cfg"):
         capture(source, faults=(fault,))
 
 
-def read_projection(context: ParameterContext, method: str) -> None:
+def read_projection(context: DocumentSetCapture, method: str) -> None:
     """Exercise one public getter without reaching inside the captured source."""
     if method == "document":
         context.document()

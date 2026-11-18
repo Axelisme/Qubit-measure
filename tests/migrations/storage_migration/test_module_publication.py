@@ -128,7 +128,7 @@ def test_library_io_failure_is_reported_and_never_changes_sources(
     assert "synthetic library replace failure" in failure.error
     assert not state.parameters_complete
     assert state.module_files == ()
-    assert _entry(request).module_library("context").snapshot().module_keys() == ()
+    assert _entry(request).library("context").snapshot().module_keys() == ()
     assert (meta.read_bytes(), source.read_bytes()) == original
 
 
@@ -141,7 +141,7 @@ def test_completed_library_is_hash_checked_without_rewriting_on_resume(
     source = _library(write_meta(request, "context", {}), _payload())
     original = source.read_bytes()
     report = _convert(request, library_mapping)
-    path = _entry(request).module_library("context").source_path
+    path = _entry(request).library("context").source_path
     completed = path.read_bytes()
     real_replace = os.replace
 
@@ -168,7 +168,7 @@ def test_resume_rejects_changed_library_hash_without_overwriting(
     request = replace(request_data, part="parameters")
     source = _library(write_meta(request, "context", {}), _payload())
     _convert(request, library_mapping)
-    destination = _entry(request).module_library("context").source_path
+    destination = _entry(request).library("context").source_path
     backup = (
         request.result_root.parent.parent
         / "repo-backup/result/chip/qubit/context/module_cfg.yaml"
@@ -200,7 +200,7 @@ def test_library_formatting_rerun_is_semantically_equal_and_not_rewritten(
     request = replace(request_data, part="parameters")
     _library(write_meta(request, "context", {}), _payload())
     _convert(request, library_mapping)
-    destination = _entry(request).module_library("context").source_path
+    destination = _entry(request).library("context").source_path
     raw = YAML(typ="safe").load(destination.read_text())
     destination.write_text(json.dumps(raw, sort_keys=True))
     before = destination.read_bytes(), destination.stat().st_mtime_ns
@@ -239,7 +239,7 @@ def test_partial_parameter_resume_does_not_rewrite_recorded_library(
     state = _manifest(request)
     assert not state.parameters_complete
     assert len(state.module_files) == 1
-    first_destination = _entry(request).module_library("a").source_path
+    first_destination = _entry(request).library("a").source_path
     completed = first_destination.read_bytes()
 
     def forbid_first(source_path: str | Path, destination: str | Path) -> None:
@@ -250,7 +250,7 @@ def test_partial_parameter_resume_does_not_rewrite_recorded_library(
     monkeypatch.setattr(os, "replace", forbid_first)
     report = _convert(replace(request, resume=True), library_mapping)
     assert first_destination.read_bytes() == completed
-    assert _entry(request).module_library("b").snapshot().module_keys() == (
+    assert _entry(request).library("b").snapshot().module_keys() == (
         "C1.pulses.pi",
         "C1.readout.main",
     )

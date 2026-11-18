@@ -44,7 +44,7 @@ from zcu_tools.gui.expected_error import (
 )
 from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.gui.session.parameter_capture import restore_parameters
-from zcu_tools.gui.session.types import ParameterContext
+from zcu_tools.gui.session.types import DocumentSetCapture
 
 from tests.gui.app.measure._cfg_fakes import parameter_capture
 from tests.gui.app.measure._form_fakes import make_form
@@ -110,7 +110,7 @@ def test_run_started_and_terminal_events_keep_operation_origin(
 @pytest.mark.parametrize("context_free", [False, True])
 @pytest.mark.parametrize("cancelled", [False, True])
 def test_run_publishes_admitted_source_despite_later_global_change(
-    result_sources: tuple[ParameterContext, ParameterContext],
+    result_sources: tuple[DocumentSetCapture, DocumentSetCapture],
     context_free: bool,
     cancelled: bool,
 ) -> None:
@@ -178,7 +178,7 @@ def test_run_publishes_admitted_source_despite_later_global_change(
 
 
 def test_run_metadata_fixes_parameter_capture_before_worker_execution(
-    result_sources: tuple[ParameterContext, ParameterContext],
+    result_sources: tuple[DocumentSetCapture, DocumentSetCapture],
 ) -> None:
     state, tab_id, adapter = make_state(readiness=ContextReadiness.POINT)
     captured, later = result_sources
@@ -202,7 +202,7 @@ def test_run_metadata_fixes_parameter_capture_before_worker_execution(
 
 
 def test_cancelled_run_without_data_keeps_no_previous_source(
-    result_sources: tuple[ParameterContext, ParameterContext],
+    result_sources: tuple[DocumentSetCapture, DocumentSetCapture],
 ) -> None:
     state, tab_id, adapter = make_state(readiness=ContextReadiness.POINT)
     q1, q2 = result_sources

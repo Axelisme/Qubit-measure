@@ -47,15 +47,15 @@ def diagnostic_window(
         ctrl, templates=lambda: {}, dialog_presenter=RecordingDialogPresenter()
     )
     ctrl.add_view(window)
-    ctrl.setup_control.new_entry(EntryRequest("diagnostics"))
-    ctrl.setup_control.new_point(PointCreateRequest("point", "", CommandOrigin("gui")))
+    ctrl.entry_control.new_entry(EntryRequest("diagnostics"))
+    ctrl.entry_control.new_point(PointCreateRequest("point", "", CommandOrigin("gui")))
     window.show()
     qapp.processEvents()
     try:
         yield ctrl, window
     finally:
         ctrl.close()
-        window.deleteLater()
+        window.dispose()
         qapp.processEvents()
 
 

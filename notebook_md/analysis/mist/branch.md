@@ -6,7 +6,7 @@ This is an offline analysis example. It reads an existing new-format entry, type
 
 ## Definitions and entry
 
-Register component definitions once per kernel. Restart the kernel before repeating registration. Opening requires an entry with setup, points, records, and its Database directory; it does not migrate old metadata files.
+Register component definitions once per kernel. Restart the kernel before repeating registration. Opening requires an entry with global parameters, points, records, and its Database directory; it does not migrate old metadata files.
 
 ```python
 from pathlib import Path
@@ -43,7 +43,7 @@ if dispersive is None:
     raise ValueError("This branch analysis requires a dispersive fit")
 
 point_label = "1.800mA"
-point = entry.use_point(point_label)
+point = entry.parameters(point=point_label)
 roles = point.resolve(["qubit", "resonator"], focus="Q1")
 flux = value2flux(
     point.general.ext.flux_value,

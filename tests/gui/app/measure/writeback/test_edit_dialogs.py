@@ -64,6 +64,7 @@ def value_editor(
     dialog = next(d for d in widget.findChildren(QDialog) if d.isVisible())
     yield widget, dialog, item, ctrl, modal_messages
     dialog.close()
+    widget.close()
     widget.deleteLater()
     QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
     qapp.processEvents()
@@ -266,6 +267,7 @@ def module_editor(qapp, monkeypatch):
     yield widget, dialog, item, ctrl, form, current, messages
     assert not callback_errors, callback_errors
     widget.detach()
+    widget.close()
     widget.deleteLater()
     QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
     qapp.processEvents()

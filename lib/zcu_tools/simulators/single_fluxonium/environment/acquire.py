@@ -1,25 +1,26 @@
 """One single-fluxonium acquire lifetime and ADC-owned round sampling."""
 
 from dataclasses import dataclass, replace
+from time import monotonic
 from typing import TYPE_CHECKING
 
 import numpy as np
 from numpy.typing import NDArray
 
-from zcu_tools.core.simulation import (
-    AcquireRequest,
-    CancellationQuery,
-    ChannelSignals,
-    EnvironmentSnapshot,
-    RoundSignals,
-    SamplingIdentity,
-)
 from zcu_tools.program.v2.simulation import IntegratedRound
 from zcu_tools.simulate.adc import (
     ChannelReadout,
     PreparedRawShots,
     round_statistics,
     sample_traces,
+)
+from zcu_tools.simulate.boundary import (
+    AcquireRequest,
+    CancellationQuery,
+    ChannelSignals,
+    EnvironmentSnapshot,
+    RoundSignals,
+    SamplingIdentity,
 )
 from zcu_tools.simulate.evolution import PathDiagnostics
 from zcu_tools.simulators.replay import ReplayAcquire, save_replay
@@ -42,7 +43,7 @@ class SingleFluxoniumPreparation:
     populations: read-only (*point_dims,states) terminal DC-state marginals after
         ADC normalization. channels: event-aligned ADC conditional sums in
         preflight receiver order. channel selects the sole standalone receiver.
-    raw.readout keeps full projection histories and event populations; sampling
+    raw.readout keeps projection transitions, or unprojected populations; sampling
         must use it, not reconstruct independent events from the marginals.
     raw: immutable deferred physical-shot inputs, without a round RNG identity.
     paths: evolution-owned diagnostics, repeated on valid noiseless reuse.
@@ -65,7 +66,7 @@ class SingleFluxoniumPreparation:
         return self.channels[0]
 
     projection_diagnostics: ProjectionDiagnostics | None = None
-    """Per-point retained histories/pruned mass, or None without projection."""
+    """Per-point adopted rows/identity-approximation mass, or None without projection."""
 
 
 class SingleFluxoniumAcquire:
@@ -110,41 +111,47 @@ class SingleFluxoniumAcquire:
             raise ValueError("round index must be a nonnegative integer")
         owner, acquire = self._source, self.request
         prepared = owner.prepare(acquire, snapshot, cancel=cancel)
-        if acquire.mode == "integrated":
-            statistics = round_statistics(
-                prepared.raw.readout,
-                (prepared.channel,),
-                reps=acquire.reps,
-                seed=acquire.root_seed,
-                acquire_sequence=acquire.sequence,
-                round_index=index,
-            )
-            result = IntegratedRound(
-                statistics, prepared.raw.bind(statistics.raw_identity)
-            )
-        else:
-            traces = sample_traces(
-                prepared.raw.readout,
-                dict(prepared.raw.batches),
-                reps=acquire.reps,
-                identity=SamplingIdentity(
-                    acquire.root_seed, (acquire.sequence, index, 0)
-                ),
-                rtol=owner.settings.numerics.solver.rtol,
-                atol=owner.settings.numerics.solver.atol,
-            )
-            channels = []
-            for channel in traces.channels:
-                shaped = channel.iq.reshape(
-                    (*acquire.point_dims, acquire.reps, *channel.iq.shape[1:])
+        started = monotonic()
+        try:
+            if acquire.mode == "integrated":
+                statistics = round_statistics(
+                    prepared.raw.readout,
+                    (prepared.channel,),
+                    reps=acquire.reps,
+                    seed=acquire.root_seed,
+                    acquire_sequence=acquire.sequence,
+                    round_index=index,
                 )
-                ordered = np.moveaxis(
-                    shaped, len(acquire.point_dims), acquire.avg_level
+                result = IntegratedRound(
+                    statistics, prepared.raw.bind(statistics.raw_identity)
                 )
-                channels.append(
-                    ChannelSignals(channel.channel, ordered.reshape(channel.iq.shape))
+            else:
+                traces = sample_traces(
+                    prepared.raw.readout,
+                    dict(prepared.raw.batches),
+                    reps=acquire.reps,
+                    identity=SamplingIdentity(
+                        acquire.root_seed, (acquire.sequence, index, 0)
+                    ),
+                    rtol=owner.settings.numerics.solver.rtol,
+                    atol=owner.settings.numerics.solver.atol,
                 )
-            result = RoundSignals(tuple(channels))
+                channels = []
+                for channel in traces.channels:
+                    shaped = channel.iq.reshape(
+                        (*acquire.point_dims, acquire.reps, *channel.iq.shape[1:])
+                    )
+                    ordered = np.moveaxis(
+                        shaped, len(acquire.point_dims), acquire.avg_level
+                    )
+                    channels.append(
+                        ChannelSignals(
+                            channel.channel, ordered.reshape(channel.iq.shape)
+                        )
+                    )
+                result = RoundSignals(tuple(channels))
+        finally:
+            owner.readout_wall_s += monotonic() - started
         if owner.private_replay is not None:
             save_replay(
                 owner.private_replay,

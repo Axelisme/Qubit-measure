@@ -14,7 +14,6 @@ from zcu_tools.gui.app.measure.writeback import (
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.aliases import AliasRow
-from zcu_tools.gui.session.context_types import PointUseRequest
 from zcu_tools.gui.session.library_entry import LibraryEntryInvalid
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.state import SessionState
@@ -22,6 +21,7 @@ from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.resources.entry import ComponentSchema, ResultEntry, RoleSpec
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
+from tests.gui._context_reads import capture_focus
 from tests.resources.entry.fakes import register_fakes, registry_state, restore_registry
 from tests.resources.entry.view_support import registered_model
 
@@ -52,8 +52,8 @@ def session(tmp_path: Path, component_kinds):
     )
     context.install_entry(entry)
     control = context
-    control.use_point(PointUseRequest("a"))
-    control.add_component("Q1", "fake/drive/a", {})
+    control.use_point("a")
+    control.add_component("Q1", "fake/drive/a", {}, point=control.current_point_label())
     service = WritebackService(control, arb_names=lambda: ())
     return entry, control, service
 
@@ -68,9 +68,9 @@ def test_static_unit_facts_follow_selected_point_and_captured_path_without_conve
         duration: float | None = Field(default=None, json_schema_extra={"unit": "us"})
 
     with registered_model("fake/unit-preview", Measured) as kind:
-        control.add_component("U1", kind, {})
-        target = control.read_context().target
-        captured = control.read_context().bind_roles(
+        control.add_component("U1", kind, {}, point=control.current_point_label())
+        target = capture_focus(control).target
+        captured = capture_focus(control).bind_roles(
             {"driver": RoleSpec(kind)}, focus="U1", explicit={}
         )
         draft = service.create_draft(
@@ -88,10 +88,16 @@ def test_static_unit_facts_follow_selected_point_and_captured_path_without_conve
             assert (initial.current, initial.proposed) == (19.8, 20.09)
             control.set_parameter(target, "U1.frequency", 21.5)
             entry.new_point("b")
-            control.use_point(PointUseRequest("b"))
-            control.add_component("Q2", "fake/drive/a", {})
-            control.add_component("U1", kind, {"frequency": 30.0})
-            control.apply_alias_rows((AliasRow("driver", "Q2"),))
+            control.use_point("b")
+            control.add_component(
+                "Q2", "fake/drive/a", {}, point=control.current_point_label()
+            )
+            control.add_component(
+                "U1", kind, {"frequency": 30.0}, point=control.current_point_label()
+            )
+            control.apply_alias_rows(
+                (AliasRow("driver", "Q2"),), point=control.current_point_label()
+            )
             refreshed = draft.preview_values()["param-1"]
             assert (refreshed.actual_path, refreshed.unit) == ("U1.frequency", "MHz")
             assert (refreshed.current, refreshed.proposed) == (30.0, 20.09)
@@ -104,7 +110,7 @@ def test_static_unit_facts_follow_selected_point_and_captured_path_without_conve
             assert (ext.actual_path, ext.unit) == ("general.ext.value", None)
             assert (ext.current, ext.proposed) == (None, 20.09)
             assert draft.items[0].stderr == 0.18
-            assert control.read_context().target != target
+            assert capture_focus(control).target != target
         finally:
             draft.teardown()
 
@@ -117,10 +123,15 @@ def test_concrete_destination_does_not_use_alias_or_historical_point_fallback(se
 
     with registered_model("fake/preview-coupler", Coupler) as kind:
         control.add_component(
-            "coupler", kind, {"module": {"cz_f2": "coupler.pulses.original"}}
+            "coupler",
+            kind,
+            {"module": {"cz_f2": "coupler.pulses.original"}},
+            point=control.current_point_label(),
         )
-        control.apply_alias_rows((AliasRow("coupler", "coupler"),))
-        captured = control.read_context()
+        control.apply_alias_rows(
+            (AliasRow("coupler", "coupler"),), point=control.current_point_label()
+        )
+        captured = capture_focus(control)
         draft = service.create_draft(
             [
                 ParameterWriteback(
@@ -141,26 +152,32 @@ def test_concrete_destination_does_not_use_alias_or_historical_point_fallback(se
                 captured.target, "coupler.module.cz_f2", "coupler.pulses.updated"
             )
             entry.new_point("b")
-            control.use_point(PointUseRequest("b"))
+            control.use_point("b")
             control.add_component(
-                "other_coupler", kind, {"module": {"cz_f2": "other.pulses.decoy"}}
+                "other_coupler",
+                kind,
+                {"module": {"cz_f2": "other.pulses.decoy"}},
+                point=control.current_point_label(),
             )
-            control.apply_alias_rows((AliasRow("coupler", "other_coupler"),))
+            control.apply_alias_rows(
+                (AliasRow("coupler", "other_coupler"),),
+                point=control.current_point_label(),
+            )
             refreshed = draft.preview_values()["param-1"]
             assert refreshed.actual_path == "coupler.module.cz_f2"
             assert refreshed.current is None
             assert refreshed.proposed == "coupler.pulses.calibrated"
             assert captured.value("coupler.module.cz_f2") == "coupler.pulses.original"
-            assert control.read_context().target != captured.target
+            assert capture_focus(control).target != captured.target
         finally:
             draft.teardown()
 
 
 def test_values_follow_selected_point_retarget_edits_and_actual_current_values(session):
     entry, control, service = session
-    target = control.read_context().target
+    target = capture_focus(control).target
     control.set_parameter(target, "general.ext.value", [1, 2])
-    capture = control.read_context()
+    capture = capture_focus(control)
     draft = service.create_draft(
         [ParameterWriteback("general.ext.value", "d", proposed_value=[3, 4])],
         parameters=capture,
@@ -181,8 +198,12 @@ def test_values_follow_selected_point_retarget_edits_and_actual_current_values(s
     control.set_parameter(target, "general.ext.other", 7)
     assert draft.preview_values()["param-1"].current == 7
     entry.new_point("b")
-    control.use_point(PointUseRequest("b"))
-    control.set_parameter(control.read_context().target, "general.ext.other", 8)
+    control.use_point("b")
+    control.set_parameter(
+        capture_focus(control).target,
+        "general.ext.other",
+        8,
+    )
     retargeted = draft.preview_values()["param-1"]
     assert retargeted.actual_path == "general.ext.other"
     assert retargeted.current == 8
@@ -194,13 +215,13 @@ def test_module_preview_contains_complete_current_and_live_form_values(session):
     _entry, control, service = session
     name = "Q1.pulses.target"
     control.set_module(
-        control.read_context().target,
+        capture_focus(control).target,
         name,
         PulseSpec(
             ch=0, nqz=1, freq=100.0, gain=0.5, waveform=ConstWaveformCfg(length=0.1)
         ),
     )
-    capture = control.read_context()
+    capture = capture_focus(control)
     proposal = ModuleWriteback(name, "d", capture.library.module_spec(name))
     draft = service.create_draft(
         [proposal], parameters=capture, experiment_name="test/writeback"
@@ -232,7 +253,7 @@ def test_item_preview_excludes_invalid_siblings_but_bulk_remains_strict(session)
     for suffix in ("a", "b"):
         name = f"Q1.pulses.{suffix}"
         control.set_module(
-            control.read_context().target,
+            capture_focus(control).target,
             name,
             PulseSpec(
                 ch=0, nqz=1, freq=100.0, gain=0.5, waveform=ConstWaveformCfg(length=0.1)
@@ -240,11 +261,15 @@ def test_item_preview_excludes_invalid_siblings_but_bulk_remains_strict(session)
         )
         proposals.append(
             ModuleWriteback(
-                name, name, control.read_context().library.module_spec(name)
+                name,
+                name,
+                capture_focus(control).library.module_spec(name),
             )
         )
     draft = service.create_draft(
-        proposals, parameters=control.read_context(), experiment_name="test/writeback"
+        proposals,
+        parameters=capture_focus(control),
+        experiment_name="test/writeback",
     )
     try:
         first, second = draft.items

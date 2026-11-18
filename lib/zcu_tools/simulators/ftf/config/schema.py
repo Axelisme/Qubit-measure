@@ -37,6 +37,7 @@ from zcu_tools.simulators.single_fluxonium.config.schema import (
     DriftParameter,
     FluxLine,
 )
+from zcu_tools.simulators.telemetry import TelemetrySettings
 
 LoopValue = TypeVar("LoopValue")
 
@@ -376,18 +377,6 @@ class Truncation(Values):
         return self
 
 
-class TelemetrySettings(Values):
-    """Local routing logging policy, separate from numerical accuracy.
-
-    enabled: write one acquire summary, default True. directory: optional output
-    path; None uses project-root .sim_telemetry. Relative paths resolve against
-    the working directory when the environment is built. No I/O occurs here.
-    """
-
-    enabled: bool = True
-    directory: Path | None = None
-
-
 class Numerics(RoundPacing):
     """truncation: basis sizes; solver: accuracy; seed: nonnegative root RNG seed.
 
@@ -403,6 +392,8 @@ class Numerics(RoundPacing):
     solver: Solver
     seed: Index | None
     telemetry: TelemetrySettings = Field(default_factory=TelemetrySettings)
+    debug_capture: bool = False
+    """Record Engine inputs and routes per acquire; disabled by default."""
     projection_weight_floor: Annotated[Finite, Field(ge=0, lt=1)]
 
 

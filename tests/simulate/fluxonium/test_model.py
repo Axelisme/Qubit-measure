@@ -5,6 +5,108 @@ import pytest
 from numpy.testing import assert_allclose
 from zcu_tools.simulate import fluxonium
 from zcu_tools.simulate.evolution import DriveSource
+from zcu_tools.simulate.resonator_mode import ResonatorModeInput, build_resonator_mode
+
+
+def test_joint_resonator_uses_native_cutoff_and_public_labels():
+    params = (4.0, 1.0, 1.0)
+    circuit = fluxonium.SingleFluxoniumModel(
+        params, 0.5, cutoff=12, retained_levels=3, temperature_k=0
+    )
+    resonator = fluxonium.DispersiveResonator(6.0, 0.08, 2 * np.pi * 0.005)
+    native = fluxonium.calculate_oscillator_operators(params, cutoff=12)
+    drives = {"xy": native.charge}
+    expected = build_resonator_mode(
+        ResonatorModeInput(
+            hamiltonian_ghz=(
+                native.static_ghz
+                + np.cos(2 * np.pi * circuit.dc_flux) * native.cosine_ghz
+                + np.sin(2 * np.pi * circuit.dc_flux) * native.sine_ghz
+            ),
+            coupling_ghz=0.08 * native.charge,
+            drive_operators_ghz=drives,
+            retained_labels=tuple((q, k) for q in range(3) for k in range(3)),
+            frequency_ghz=6.0,
+            decay_per_ns=2 * np.pi * 0.005,
+            qubit_rates_per_ns=np.zeros((12, 12)),
+            level=(0,),
+        )
+    )
+    joint = circuit.joint_resonator_model((0,), resonator, drive_operators_ghz=drives)
+    assert joint.label_to_index == expected.label_to_index
+    assert joint.index_to_label == expected.index_to_label
+    assert set(joint.label_to_index) == {(q, k) for q in range(3) for k in range(3)}
+    assert joint.model.energies_ghz.shape == (9,)
+    assert_allclose(joint.model.energies_ghz, expected.model.energies_ghz, atol=1e-12)
+    assert joint.model.drives[0].name == "xy"
+    assert_allclose(
+        joint.model.drives[0].in_phase_ghz,
+        expected.model.drives[0].in_phase_ghz,
+        atol=1e-12,
+    )
+    assert_allclose(joint.model.rates_per_ns, expected.model.rates_per_ns, atol=1e-12)
+    assert_allclose(joint.model.eigenvectors, np.eye(9), atol=1e-12)
+
+
+@pytest.mark.parametrize("level", [(0,), (-190,)])
+def test_joint_resonator_chi_matches_readout_and_ignores_equilibrium_photons(level):
+    circuit = fluxonium.SingleFluxoniumModel(
+        (4.0, 1.0, 1.0), 0.5, cutoff=12, retained_levels=3, temperature_k=0.04
+    )
+    resonator = fluxonium.DispersiveResonator(6.0, 0.08, 2 * np.pi * 0.005)
+    joint = circuit.joint_resonator_model(
+        level, resonator, drive_operators_ghz={}, photon_cutoff=4
+    )
+    at_flux = fluxonium.SingleFluxoniumModel(
+        circuit.params,
+        circuit.dc_flux + 1e-3 * level[0],
+        cutoff=12,
+        retained_levels=3,
+        temperature_k=0.04,
+    )
+    frequencies = at_flux.readout_frequencies_ghz(resonator)
+    energies = joint.model.energies_ghz
+    for q in range(3):
+        pull = (
+            energies[joint.label_to_index[(q, 1)]]
+            - energies[joint.label_to_index[(q, 0)]]
+        )
+        assert pull == pytest.approx(frequencies[q], abs=1e-10)
+    hot = circuit.joint_resonator_model(
+        level,
+        fluxonium.DispersiveResonator(
+            6.0, 0.08, 2 * np.pi * 0.005, thermal_occupation=0.5
+        ),
+        drive_operators_ghz={},
+        photon_cutoff=4,
+    )
+    assert_allclose(hot.model.rates_per_ns, joint.model.rates_per_ns, atol=1e-15)
+    assert_allclose(hot.model.dephasing_per_ns, 0, atol=1e-15)
+    # No thermal upward 0->1 Purcell channel is added to the explicit resonator.
+    assert_allclose(np.tril(hot.model.rates_per_ns), 0, atol=1e-15)
+
+
+def test_joint_resonator_preserves_intrinsic_thermal_t1_without_photon_dephasing():
+    circuit = fluxonium.SingleFluxoniumModel(
+        (0.0, 0.3, 1.5), 0.5, cutoff=8, retained_levels=3, temperature_k=0.02
+    )
+    joint = circuit.joint_resonator_model(
+        (0,),
+        fluxonium.DispersiveResonator(6.0, 0.0, 0.03, thermal_occupation=0.5),
+        drive_operators_ghz={},
+        noise=fluxonium.FluxoniumNoise(q_cap=1e6),
+    )
+    rates = joint.model.rates_per_ns
+    # Independent SI LC energy lifetime and Bose detailed balance, not a second
+    # projection of the adapter's own rates.
+    ratio = np.exp(-0.04799243073366221 * np.sqrt(8 * 0.3 * 1.5) / 0.02)
+    down = (1 / 83882.020174145) / (1 - ratio)
+    for k in range(3):
+        g, e, f = (joint.label_to_index[(q, k)] for q in range(3))
+        assert rates[g, e] == pytest.approx(down, rel=2e-10)
+        assert rates[e, g] == pytest.approx(down * ratio, rel=2e-10)
+        assert rates[e, f] == pytest.approx(2 * down, rel=2e-10)
+    assert_allclose(joint.model.dephasing_per_ns, 0, atol=1e-15)
 
 
 @pytest.mark.parametrize(("flux", "frequency"), [(0.5, 0.58), (0.0, 5.4)])

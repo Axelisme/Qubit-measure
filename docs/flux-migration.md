@@ -96,7 +96,7 @@ flux:
 
 舊 repo 的 `migrate_storage` 共用轉換，但分批匯入有獨立的來源規則。
 每批與最終輸出的 `flux_dev` 都只來自明示來源，沒有時留空，form device 留空必填。
-明示來源包含完整 overlay 中有效的 setup／mapping 繼承來源，不要求 point 本批重複宣告。
+明示來源包含完整 overlay 中有效的 global／mapping 繼承來源，不要求 point 本批重複宣告。
 不從單位、校準 entry、live device 或佔位名稱猜來源。
 原資料明示的 `unnamed_*` 名稱仍照明示處理，不按字串全域排除。
 

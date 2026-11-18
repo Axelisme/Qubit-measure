@@ -32,6 +32,7 @@ from zcu_tools.gui.session.context_types import (
 )
 from zcu_tools.resources.entry.registry import component_registry
 
+from tests.gui._context_reads import capture_focus
 from tests.gui._qt_waits import qt_until
 from tests.gui.app.measure._components import ResonatorSchema
 from tests.gui.app.measure._synthetic import (
@@ -100,8 +101,8 @@ def hw_fixture(qapp, tmp_path):
     ctrl.add_view(window)
     caretaker = create_persistence_caretaker(ctrl, cache_dir=tmp_path / "cache")
     ctrl.attach_caretaker(caretaker)
-    ctrl.setup_control.new_entry(EntryRequest("lab"))
-    ctrl.setup_control.new_point(PointCreateRequest("ctx001", "", CommandOrigin("gui")))
+    ctrl.entry_control.new_entry(EntryRequest("lab"))
+    ctrl.entry_control.new_point(PointCreateRequest("ctx001", "", CommandOrigin("gui")))
     ctrl.context_control.add_component(
         "R1",
         "resonator",
@@ -111,15 +112,18 @@ def hw_fixture(qapp, tmp_path):
             "wiring": {"ch": 0, "ro_ch": 0},
             "ext": {"time_of_fly": 0.5},
         },
+        point=ctrl.context_control.current_point_label(),
     )
-    ctrl.context_control.apply_alias_rows((AliasRow("resonator", "R1"),))
+    ctrl.context_control.apply_alias_rows(
+        (AliasRow("resonator", "R1"),), point=ctrl.context_control.current_point_label()
+    )
     window.show()
     qapp.processEvents()
     try:
         yield ctrl, window
     finally:
         ctrl.close()
-        window.deleteLater()
+        window.dispose()
         qapp.processEvents()
         if added:
             component_registry.unregister("resonator")
@@ -195,6 +199,6 @@ def test_hardware_free_fake_shows_run_tree_and_analysis_ledger(hw_fixture):
     assert any(proposed in label.text() for label in proposed_labels)
     assert len(tab.writeback_widget.findChildren(QCheckBox)) >= 1
     ctrl.writeback_control.apply_writeback_for_pane(tab_id, "analysis")
-    assert ctrl.context_control.read_context().value("R1.freq") == 6100.0
+    assert capture_focus(ctrl.context_control).value("R1.freq") == 6100.0
     ctrl.tab_control.close_tab(tab_id)
     QApplication.processEvents()

@@ -12,7 +12,7 @@ from zcu_tools.plotting.plots import NonPresentingHost
 from zcu_tools.resources.entry import (
     AcceptedPayload,
     JsonObject,
-    PointView,
+    ParameterView,
     ResultEntry,
     document_value,
     snapshot,
@@ -31,12 +31,12 @@ def entry(tmp_path: Path) -> ResultEntry:
 
 
 @pytest.fixture
-def point(entry: ResultEntry) -> PointView:
+def point(entry: ResultEntry) -> ParameterView:
     return entry.new_point("sweet", description="original")
 
 
 @pytest.fixture
-def saved(point: PointView) -> SavedRun[SavingCfg, SavingResult]:
+def saved(point: ParameterView) -> SavedRun[SavingCfg, SavingResult]:
     exp = NotebookAdapter(
         soc=object(),
         soccfg=object(),
@@ -56,7 +56,7 @@ def saved(point: PointView) -> SavedRun[SavingCfg, SavingResult]:
 )
 def test_accept_records_preserves_fields_and_shares_parameter_event(
     entry: ResultEntry,
-    point: PointView,
+    point: ParameterView,
     saved: SavedRun[SavingCfg, SavingResult],
     fields: JsonObject,
 ) -> None:
@@ -89,7 +89,7 @@ def test_accept_records_preserves_fields_and_shares_parameter_event(
 
 
 def test_accept_uses_caller_frame_captured_before_point_changes(
-    entry: ResultEntry, point: PointView
+    entry: ResultEntry, point: ParameterView
 ) -> None:
     # Keep the caller-defined frame in opaque ext, without a lab schema.
     with point.edit() as draft:
@@ -145,7 +145,7 @@ def test_reaccept_appends_history_and_reads_last_whole_row(
 
 
 def test_record_failure_keeps_prior_parameter_and_record_and_stops(
-    entry: ResultEntry, point: PointView, saved: SavedRun[SavingCfg, SavingResult]
+    entry: ResultEntry, point: ParameterView, saved: SavedRun[SavingCfg, SavingResult]
 ) -> None:
     blocked = entry.result_path / "records" / "components" / "blocked.jsonl"
     blocked.mkdir(parents=True)
@@ -172,7 +172,7 @@ def test_record_failure_keeps_prior_parameter_and_record_and_stops(
 
 
 def test_parameter_failure_does_not_reach_records(
-    entry: ResultEntry, point: PointView, saved: SavedRun[SavingCfg, SavingResult]
+    entry: ResultEntry, point: ParameterView, saved: SavedRun[SavingCfg, SavingResult]
 ) -> None:
     before = len(entry.ledger.events())
     with pytest.raises(writeback.WritebackApplyError) as caught:

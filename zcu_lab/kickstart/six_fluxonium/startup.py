@@ -14,7 +14,7 @@ def startup(ctx: StartupContext) -> None:
 
     ctx is the GUI startup capability, called after lab component registration.
     Use its project roots, not the shell cwd. A new entry gets the adjacent
-    entry-template.yaml components in setup, then an initial point with those
+    entry-template.yaml components in global documents, then an initial point with those
     components and persisted aliases. Existing six-fluxonium/initial is opened unchanged.
     The template seeds Q1-Q6, R1-R6, Q1_bias-Q6_bias, coil_bias and MG123456.
     Aliases bind mux=MG123456, qubit=Q1, resonator=$qubit.resonator and
@@ -51,11 +51,12 @@ def startup(ctx: StartupContext) -> None:
                 component.model_dump(exclude_unset=True)
             )
             fields.pop("kind")
-            ctx.context.add_component(name, component.kind, fields, setup=True)
+            ctx.context.add_component(name, component.kind, fields, point=None)
         ctx.setup.new_point("initial")
         ctx.context.apply_alias_rows(
             tuple(
                 AliasRow(name, value)
                 for name, value in template.aliases.aliases.items()
-            )
+            ),
+            point="initial",
         )

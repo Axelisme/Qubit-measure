@@ -1,6 +1,7 @@
 """Constructor overrides preserve cfg routing at the public compile boundary."""
 
 from collections.abc import Sequence
+from copy import deepcopy
 from typing import Literal
 
 import numpy as np
@@ -34,6 +35,9 @@ from tests.program.v2.wave_observations import executed_words
 
 ProgramKind = Literal["native", "builder"]
 
+# Keep parsing local to this module; each compiler owns a detached config.
+_BASE_SOCCFG = load_soccfg(n_gens=3, n_readouts=1)
+
 
 def _module_with_length(
     cfg: PulseCfg | PulseReadoutCfg | PulseResetCfg, family: str, length: QickParam
@@ -64,7 +68,7 @@ def _reset_module(
 
 
 def _compile(kind: ProgramKind, modules: Sequence[Module], swept: bool):
-    soccfg = load_soccfg(n_gens=3, n_readouts=1)
+    soccfg = deepcopy(_BASE_SOCCFG)
     if kind == "builder":
         builder = TimelineBuilder(soccfg)
         if swept:

@@ -8,13 +8,13 @@ import numpy as np
 from numpy.typing import NDArray
 from qick.qick_asm import AcquireMixin
 
-from zcu_tools.core.simulation import (
+from zcu_tools.program.acquisition import CancelFlagProtocol, ImproveAcquireMixin
+from zcu_tools.progress_bar import make_pbar
+from zcu_tools.simulate.boundary import (
     AcquireRequest,
     ChargeDriveRequirement,
     RoundStatistics,
 )
-from zcu_tools.program.acquisition import CancelFlagProtocol, ImproveAcquireMixin
-from zcu_tools.progress_bar import make_pbar
 
 from .result import IntegratedRound, RawShots
 from .signals import materialize_shots
@@ -371,27 +371,27 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
                 raise ValueError("simulation does not support step_rounds=True")
             if getattr(self, "_simulation_active", False):
                 raise RuntimeError("simulation acquisition is already active (reentry)")
-            sequence = soc.binding.begin()
-            self._simulation_active = True
-            try:
-                request = build_compiled_request(
-                    self._program(),
-                    mode,
-                    soc.binding,
-                    sequence,
-                    routes=soc.routes,
-                    charge_requirements=charge_requirements,
-                )
-                soc.install_request(
-                    request,
-                    pacing_cancel=kwargs.get("cancel_flag")
-                    if mode == "decimated"
-                    else None,
-                )
-                yield
-            finally:
-                soc.release_request()
-                self._simulation_active = False
-                soc.binding.end()
+            with soc.binding.acquire() as sequence:
+                self._simulation_active = True
+                try:
+                    with soc.binding.compiling():
+                        request = build_compiled_request(
+                            self._program(),
+                            mode,
+                            soc.binding,
+                            sequence,
+                            routes=soc.routes,
+                            charge_requirements=charge_requirements,
+                        )
+                    soc.install_request(
+                        request,
+                        pacing_cancel=kwargs.get("cancel_flag")
+                        if mode == "decimated"
+                        else None,
+                    )
+                    yield
+                finally:
+                    soc.release_request()
+                    self._simulation_active = False
 
         return call()

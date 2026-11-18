@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-11-17，雙相位 gate 精度與靜態 reference 分段
+**Last updated:** 2026-11-18，雙相位 gate、分段 reference 與耗散 DC 精度矩陣
 
 **讀者：** framework-dev、agent。查閱測試的 owner、fixture、執行方式與搬遷驗收契約。
 
@@ -127,6 +127,8 @@ ticket 內只跑受影響選集。只有變更觸及 `lib/zcu_tools/simulate/` �
 
 ### Evolution 精度矩陣
 
+新增 family 或改 guard 時要補哪些案例，見 [模擬器維護規則](../lib/zcu_tools/simulate/maintenance.md#3-精度驗收)。
+
 凍結數值的讀寫與 reference cache miss 契約由 `tests/simulate/evolution/test_frozen.py` 和
 `test_reference_cache.py` 在公開 `simulate.evolution` 接縫驗證。
 `tests/simulate/evolution/contract/family_pareto_reference_producer.py` 讀凍結數值，呼叫既有獨立 solver，再經 codec 寫 NPZ。
@@ -210,6 +212,17 @@ Active family 的 guard 拒絕輸入會讓 density 測試失敗，不會產生�
 | `nearby_carriers` | `common_frame` | 6.5 ns、600 與 630 MHz 的同 port constant tones |
 | `adiabatic_ramp` | `adiabatic_map` | 8 ns、無 tone、弱非對易 flux ramp |
 
+`single_tone_sideband` 使用 committed 合成 fluxonium (4,1,1) GHz、flux=0.40、
+native cutoff=30、retained=6、N=3 的 d=18 joint 模型。初態是 dressed |e,0⟩，
+600 ns 方波驅動 |e,0⟩→|g,1⟩，g_sb=1 MHz，之後等待五個 cavity lifetimes。
+κ/(2π)=5 MHz，intrinsic capacitive Q=1e6 的 T1 仍在模型內。
+它宣告 plateau targets 為 `floquet_period` 與 `t6`，idle companion 為 `t4`。
+各 target 以 `families=("t4", target)` 固定，實際執行的 family 集合須正好是兩者。
+另以預設選路的空／暖歷史對雙容差 oracle 比完整 density，reference 在同一 pytest worker 內共用。
+`t6` 是 plateau 的直接積分 family，不代表 `dop853` family 通過。
+
+這個案例允許超過〈測試成本〉每個測試 30 s 的預算：首次計算 18 態、約 760 ns 的兩級容差 lab-frame reference 是成本主體。保留原長度的理由是 joint dressed 模型是約化參數空間中其他案例不涵蓋的一軸，縮短序列會改變驗收的內容。它只在包含 `sim` 的選集執行；`worksteal` 把它的三個測試分到不同 worker 時，每個 worker 各算一次 reference。這是矩陣唯一具名的成本例外。之後新增或修改的案例在 `-n 0` 下超過 30 s 時，先依本節末的順序加本機 hash 快取，不新增第二個具名例外。
+
 `CASE_NAMES` 中的案例也保留預設選路的空歷史與暖歷史驗收。
 `joint_gate_inventory` 保留完整 20 點 sampled inventory，matrix 的 pinned density 驗 `dop853`。
 `joint_constant` 用相同模型和 inventory 保護 `multitone_rwa` 的 distinct-port constant 路徑。
@@ -233,7 +246,11 @@ Lab-frame 參考解在這類輸入上一點 600 秒算不完。
 它只接受整個 shot 單一 schedule level 的 timeline。
 帶 continuous flux waveform 或一個 shot 多個 level 的輸入會 raise。
 兩個參考解在 DC 固定的精度案例上由 pytest 互相比對，差值不超過 `2e-6`。
-精度矩陣本身繼續用 lab-frame 參考解。
+精度矩陣的 `dephasing_pump`、`raman_decay`、`raman_weak_legs` 使用這個參考解，
+其餘案例繼續用 lab-frame 參考解。這三個零載波 constant drive 案例在 pinned
+`slow_envelope` 與預設空／暖歷史下，都驗證完整 density ≤2e-3。
+前兩例的 bath rate 為 0.1/ns 與 0.02/ns，超過約 0.01/ns 的物理使用範圍。
+弱腿 Λ 的 decay rate 為 0.0002/ns，在範圍內。
 這是測試支援，不 import production 的 kernel、dispatch 或 Engine，也不進 production。
 
 建構函式在 `tests/simulate/evolution/contract/accuracy_cases.py`，
@@ -242,7 +259,11 @@ Lab-frame 參考解在這類輸入上一點 600 秒算不完。
 已知的數值超標以 strict xfail 保留實測誤差，terminal summary 仍列 FAIL，不表示達標。路徑未執行或參考解未收斂必須直接失敗。新發現的超標回報使用者，不放寬 `2e-3` 門檻。
 精度比較始終使用同一個獨立物理參考解，省時間只改變參考解何時計算，不改成與目前實作輸出比較。
 參考計算變慢時先讓同一案例在每個 pytest worker 的 session 內共用一次結果。仍不足時才加本機快取，以案例輸入與參考解程式碼的 hash 為 key，內容不進 repo。
-只有首次計算也慢到不能接受時，才提議將參考結果入庫，先取得使用者同意，並用 hash 核對輸入與參考程式版本。本機 hash 快取與結果入庫是後續處理順序，現行矩陣只使用 session 共用。
+只有首次計算也慢到不能接受時，才提議將參考結果入庫，先取得使用者同意，並用 hash 核對輸入與參考程式版本。
+三個耗散 DC interaction-reference 案例另用 `.pytest_cache` 下的
+`interaction-reference` 本機快取。Key 包含完整物理輸入、兩級容差、參考解原始碼
+與 Python／NumPy／SciPy／Numba 版本。Cold miss 仍以同一個獨立 solver 求解，
+只在兩級容差收斂後寫入。刪除 `.pytest_cache` 就會重算。其餘案例只使用 session 共用。
 
 ### 怎麼跑比較快
 
@@ -314,9 +335,12 @@ fixture 過重、重複計算或不必要的 sleep／輪詢要直接修，不用
 
 ### 測試成本
 
-每個測試函數的計算只用單核心。一個測試內部的 worker、thread 或 process 總數最多兩個，用於驗證多 worker 契約。每個測試在 `-n 0` 下少於 30 s。
+每個測試函數的計算只用單核心。每個測試在 `-n 0` 下少於 30 s。
+Evolution 精度矩陣的 reference 成本依〈Evolution 精度矩陣〉的處理順序；目前唯一具名的成本例外是 `single_tone_sideband`。
 測試不跑慢的模擬或擬合。行為改用小型合成模型（少數能階、短 timeline）、解析解、不變性或最小 case 對照 reference 來確定。
 完整精度與效能量測放在 task 的量測腳本，不放進測試套件。新增測試時以 `--durations=0` 確認耗時。
+
+執行緒數量是建議，用來避免單一測試在內部做平行運算，在 `-n 4` 下和其他 worker 搶 CPU，拖慢整個選集。一個測試自己啟動的 CPU 密集 worker、thread 或 process 建議不超過兩個。以等待或 I/O 為主的執行緒不計入，例如 RPC server、client writer、等待中的 Run worker。確實需要更多 CPU 密集執行緒時，在測試旁寫一行理由；review 不把它當成違規。
 
 Store 效率以工作量測試保護，不斷言實測秒數。使用 synthetic 規模，從公開讀寫接縫操作，透過 I/O 或驗證協作者觀察讀取次數、parse 範圍與驗證次數，不直接呼叫或替換被測私有函式。例如先讀取 1000 筆 ledger，再 append 一筆並查詢，只應 parse 新增尾段；文件內容不變時連續讀取應重用已驗證快照，外部改檔後必須重新驗證。實際延遲另以同一 harness 在相同資源配置下背靠背比較 old／new，工作量斷言不取代量測。
 
@@ -392,13 +416,27 @@ def controller_view(qapp):
 Controller 的 terminal close。見 `tests/gui/session/services/test_device_manager.py`
 的 `_quiesce_services` fixture。
 
+### GUI 可見視窗的 teardown guard
+
+`tests/gui/conftest.py` 在每個測試的 teardown report 產生時檢查可見 top-level 視窗。
+此時 pytest 已拆除該測試的 fixtures，不會把等待 fixture 清理的正常視窗誤判成殘留。
+殘留視窗讓該 nodeid 的 teardown 失敗，訊息列出類別、objectName 與標題，並保留原有 teardown 錯誤。
+Guard 直接取樣，不在取樣前交付 `DeferredDelete`、GC 或 drain，也不自動 close 或 hide 視窗。
+建立視窗的測試或 fixture 負責在 `deleteLater()` 前明確 `close()`。
+Fixture 只關閉並釋放自己建立或明確登記的視窗，不以「測試期間新增的 top-level」推定擁有權；不屬於 fixture 的視窗留給 guard 報出。
+Measure `MainWindow.close()` 會進非同步互動 shutdown；fixture 在完成 owner shutdown、drain 與其擁有的 callback／hardware cleanup 後使用公開 `dispose()`，不另追加 `deleteLater()`。
+Hidden 視窗不觸發這項檢查，但仍須由 owner 釋放；QObject event filter 或 scheduler 不套用 QWidget 的 close。
+
 ### GUI plotting 狀態的 module guard
 
 `tests/gui/conftest.py` 的 module-scope guard 在每個測試模組前後比對 plotting 的 shutting-down 旗標與 live container attachments 快照，
-不一致時 assert 並列出 figure id 與 container object name。比對前先交付 `DeferredDelete` 並 `gc.collect()`，
-所以只剩弱引用、等待 GC 的 figure 不算污染；仍 attached 到 live container 的 figure 才算。
-測試自己建立的 `FigureContainer` 與 pyplot 的 Qt manager window 由建立它的 fixture 清理（container `clear()`／`deleteLater()`、manager window `deleteLater()`），
-不留給後面的模組。2026-10-28 全樹 15 個 teardown error 與一個退出時的 SIGSEGV 都來自這類未清理的測試資源。
+不一致時 assert 並列出 figure id 與 container object name。
+Setup 先取快照。只有旗標為 shutdown 或仍有 attachment 時，才交付 `DeferredDelete` 並 `gc.collect()`，再取一次快照。
+Teardown 先與 setup 快照比對。只有不同時才交付 `DeferredDelete` 並 collect，再比一次。
+GC 與 `DeferredDelete` 只會移除 attachment，所以快照相等時省略回收不改變 guard 的判定。
+只剩弱引用、等待 GC 的 figure 不算污染；仍 attached 到 live container 的 figure 才算。
+建立 `FigureContainer` 的 fixture 先呼叫 wrapper 的 `clear_dynamic_canvases()`，再對 fixture 持有的 Qt stack 呼叫 `close()`／`deleteLater()`。
+建立 pyplot Qt manager window 的 fixture 對該 window 呼叫 `close()`／`deleteLater()`，不留給後面的模組。2026-10-28 全樹 15 個 teardown error 與一個退出時的 SIGSEGV 都來自這類未清理的測試資源。
 
 ### 等待、時間與完成條件
 
@@ -567,6 +605,9 @@ and the template engine contract.
 `tests/simulators/ftf/environment/test_projective_readout.py` covers public frontend mux heralding, retained
 outcome histories, pruning, partial ADC observations and terminal-only density,
 point-order and sampling-identity handoff to ADC using an injected non-evolving Engine.
+`tests/simulators/test_capture.py` owns the shared acquire capture lifecycle across
+FTF, single and six, using non-evolving Engine collaborators. Writer/codec
+publication behavior lives in `tests/simulate/evolution/test_capture_writer.py`.
 The eight single/six/FTF acquire, projection and routing-control test files replace
 numeric propagation with Engine answers. Six keeps six independent model sources.
 Engine density accuracy stays in `tests/simulate/evolution/contract/`, rather than
@@ -646,7 +687,7 @@ view product及lifecycle／stdio行為。每個fixture建立自己的session／b
 透過recording Transport觀察RPC，不patch server globals或私有helpers。
 `tests/gui/app/measure/remote/test_remote_mcp_toolchain.py`保留GUI project/device/save／guide
 handler契約；同目錄的事件整合測試保留真socket，驗證EventBus→bridge→session的origin。
-`tests/gui/app/measure/_app_launch.py`啟動真實 `MeasureGuiBehavior`（window、remote adapter、MCP client），`tests/gui/app/measure/test_setup_launch_flow.py`與`ui/test_named_dialog_screenshot.py`用它驗證 Setup 從還原、`after_show`、MCP screenshot、工具列聚焦到關閉重開，以及 project tool 變更後的預填。
+`tests/gui/app/measure/_app_launch.py`啟動真實 `MeasureGuiBehavior`（window、remote adapter、MCP client），`tests/gui/app/measure/test_entry_launch_flow.py`與`ui/test_named_dialog_screenshot.py`用它驗證 Entry 從還原、`after_show`、MCP screenshot、工具列聚焦到關閉重開，以及 project tool 變更後的預填。
 Shared exposure policy 的可觀察行為屬於 `tests/gui/remote/`。Schema 文字、tool inventory 與
 script flags 用直接 review，不納入 pytest。
 

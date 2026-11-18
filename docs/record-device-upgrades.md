@@ -8,7 +8,7 @@
 
 Record 歷史位於 `result/<entry>/records/components/<component>.jsonl`。同一檔案可以混有新舊形狀，必須逐列判讀。JSONL 沒有獨立 header 或 row version。
 
-舊 `dev_value`／`dev_unit` 沒有記錄 device 名稱。工具不從檔名、component、setup、單位或目前接線推測名稱。Operator 必須先確認該批舊值來自哪個 device，再用 `--device-name` 宣告。若不同歷史列來自不同 device，不能把整檔都宣告為同一名稱。先保留原檔，按可靠的量測紀錄人工釐清歸屬。
+舊 `dev_value`／`dev_unit` 沒有記錄 device 名稱。工具不從檔名、component、參數文件、單位或目前接線推測名稱。Operator 必須先確認該批舊值來自哪個 device，再用 `--device-name` 宣告。若不同歷史列來自不同 device，不能把整檔都宣告為同一名稱。先保留原檔，按可靠的量測紀錄人工釐清歸屬。
 
 工具只把完整的舊 pair 移到 `devices.<name>.value`／`value_unit`。它不換算值或單位，不合成 `flux_frame` 或 `component`，也不改 component 文件的 `schema_version`。未知欄位、舊 flat frame、列順序與重複 `run_id` 都保留。已具名且不需改動的列連原 bytes 都保留。
 
@@ -143,7 +143,7 @@ Device 改名時，將 component 的 `flux.period.<old-name>` key 改成 `flux.p
 
 手動修改目前 session 使用的文件後，透過 MCP `context.reload` 重新載入並驗證。Reload 失敗時先修正來源，不繼續用舊畫面的值量測。
 
-Flux 使用處依各自持有的 device 資料檢查，不要求完整 setup 名單。Record 與量測 writeback 使用 Run snapshot，form 使用 detached 值，分析使用該列 `devices`。有 period 但缺當下值的儀器一律不貢獻，period 保留；明寫無效值仍指名報錯，dotted NaN 例外依上節處理。缺 offset 或選定 period 時，form 的掃描範圍留空必填。
+Flux 使用處依各自持有的 device 資料檢查，不要求完整參數文件名單。Record 與量測 writeback 使用 Run snapshot，form 使用 detached 值，分析使用該列 `devices`。有 period 但缺當下值的儀器一律不貢獻，period 保留；明寫無效值仍指名報錯，dotted NaN 例外依上節處理。缺 offset 或選定 period 時，form 的掃描範圍留空必填。
 
 歷史 records 保留當時的名稱與 frame，不跟著改名、不批次改寫。分析可以保留不同歷史名稱，按每列當時的 frame 換算；沒有新 frame 的舊列仍由 caller 明示 fallback。
 

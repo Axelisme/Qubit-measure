@@ -7,11 +7,11 @@ from typing import TYPE_CHECKING
 from zcu_lab.components.qubit import QubitBaseSchema, QubitFluxSchema
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.session.parameters import ParameterContext
+    from zcu_tools.gui.session.parameters import DocumentSetCapture
 
 
 def captured_qubit_flux(
-    parameters: ParameterContext | None, qubit: str = "$qubit"
+    parameters: DocumentSetCapture | None, qubit: str = "$qubit"
 ) -> QubitFluxSchema:
     """Copy one qubit's validated flux block from a fixed Run/Start capture.
 

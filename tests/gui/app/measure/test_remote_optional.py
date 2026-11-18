@@ -41,7 +41,7 @@ def measure_gui(qapp: QApplication, tmp_path: Path) -> Iterator[Controller]:
         sys.excepthook = previous_hook
         if ctrl is not None and window is not None:
             ctrl.close()
-            window.deleteLater()
+            window.dispose()
             qapp.processEvents()
 
 

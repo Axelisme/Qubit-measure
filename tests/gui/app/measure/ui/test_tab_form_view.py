@@ -59,6 +59,7 @@ from zcu_tools.resources.context.library import (
     ModuleLibraryDocument,
 )
 
+from tests.gui._context_reads import capture_focus
 from tests.gui._dialog_fakes import RecordingDialogPresenter
 from tests.gui._qt_waits import qt_until
 from tests.gui._user_input import ComponentDriver, key_click, type_text
@@ -174,6 +175,7 @@ def open_tab(qapp: QApplication) -> Iterator[Callable[..., TabView]]:
     yield make
     for view in views:
         view.tab.detach()
+        view.tab.close()
         view.tab.deleteLater()
     # Delete now, not whenever garbage collection reaches the views.
     QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
@@ -496,7 +498,7 @@ def source_window(tmp_path, qapp: QApplication) -> Iterator[MainWindow]:
     application = Fixture(headless=True, project_root=str(tmp_path / "project"))
     application.registry.register("source", SourceAdapter)
     ctrl = application.ctrl
-    target = require_target(ctrl.context_control.read_context())
+    target = require_target(capture_focus(ctrl.context_control))
     ctrl.context_control.set_parameter(target, "general.ext.amount", 0.2)
     window = MainWindow(ctrl, templates=lambda: {})
     ctrl.add_view(window)
@@ -505,7 +507,7 @@ def source_window(tmp_path, qapp: QApplication) -> Iterator[MainWindow]:
         {("gain",): {"expr": "general.ext.amount * 1.5"}}
     )
     window.refresh_context_panel()
-    # Setup publishes a newer source without changing the open tab's capture.
+    # Global edits publish a newer source without changing the open tab's capture.
     ctrl.context_control.set_parameter(target, "general.ext.amount", 0.5)
     window.resize(1200, 850)
     window.show()
@@ -515,7 +517,7 @@ def source_window(tmp_path, qapp: QApplication) -> Iterator[MainWindow]:
         application.stop()
         for tab_id in tuple(ctrl.tab_control.list_tab_ids()):
             ctrl.tab_control.close_tab(tab_id)
-        window.deleteLater()
+        window.dispose()
         QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
         qapp.processEvents()
 

@@ -1,12 +1,15 @@
 """Non-evolving collaborator for environment composition tests."""
 
 from collections.abc import Collection, Sequence
+from contextlib import nullcontext
+from typing import override
 
 import numpy as np
 from numpy.typing import NDArray
-from zcu_tools.core.simulation import CancellationQuery
+from zcu_tools.simulate.boundary import CancellationQuery
 from zcu_tools.simulate.evolution import (
     Cancelled,
+    CaptureBuffer,
     Engine,
     EvolutionResult,
     ModelSource,
@@ -46,7 +49,9 @@ class EngineDouble(Engine):
         self.calls: list[tuple[ModelSource, tuple[TimelineBatch, ...]]] = []
         self.reuse_allowed = True
         self.error: Exception | None = None
+        self.captures: list[CaptureBuffer | None] = []
 
+    @override
     def evolve(
         self,
         source: ModelSource,
@@ -56,25 +61,33 @@ class EngineDouble(Engine):
         cancel: CancellationQuery | None = None,
         telemetry: bool = False,
         reuse_key: bytes | None = None,
+        capture: CaptureBuffer | None = None,
     ) -> EvolutionResult:
         """Record the public handoff and deliver the fixture's Engine answer."""
         self.calls.append((source, tuple(batches)))
-        if cancel is not None and cancel.is_set():
-            raise Cancelled()
-        if self.error is not None:
-            raise self.error
-        if self.result is not None:
-            return self.result
-        points = np.concatenate([batch.points for batch in batches])
-        densities: NDArray[np.complex128] = np.concatenate(
-            [
-                np.repeat(source.initial_density[None], len(batch.points), axis=0)
-                if batch.initial_densities is None
-                else batch.initial_densities
-                for batch in batches
-            ]
+        self.captures.append(capture)
+        scope = (
+            nullcontext()
+            if capture is None
+            else capture.recording(source, batches, budget, self.requested_families)
         )
-        return EvolutionResult(points, densities, PathDiagnostics())
+        with scope:
+            if cancel is not None and cancel.is_set():
+                raise Cancelled()
+            if self.error is not None:
+                raise self.error
+            if self.result is not None:
+                return self.result
+            points = np.concatenate([batch.points for batch in batches])
+            densities: NDArray[np.complex128] = np.concatenate(
+                [
+                    np.repeat(source.initial_density[None], len(batch.points), axis=0)
+                    if batch.initial_densities is None
+                    else batch.initial_densities
+                    for batch in batches
+                ]
+            )
+            return EvolutionResult(points, densities, PathDiagnostics())
 
     def reuse(
         self,

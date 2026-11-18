@@ -20,7 +20,7 @@ def rename_document_files(
 ) -> int:
     """Print filename changes for exact old files or entry roots; return 0/1.
 
-    Entry roots must contain old setup or canonical parameters. Only that root
+    Entry roots must contain legacy setup.yaml or canonical parameters.yaml. Only that root
     and direct points/* directories are examined. No YAML is parsed. Dry-run
     creates no files or locks. Apply backs up original bytes using the shared
     external backup policy, then links the new name exclusively and unlinks the

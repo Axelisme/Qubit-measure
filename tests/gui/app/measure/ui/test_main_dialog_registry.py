@@ -126,7 +126,9 @@ def test_persistent_predictor_dialog_is_reused_when_hidden(qapp) -> None:
     assert created == [first]
     assert first.isVisible() is True
     assert registry.visible_names() == [DialogName.PREDICTOR]
+    first.close()
     first.deleteLater()
+    parent.close()
     parent.deleteLater()
     qapp.processEvents()
 
@@ -135,45 +137,45 @@ def test_nonpersistent_dialog_close_clears_registry(qapp) -> None:
     parent = QWidget()
     registry = _FactoryRegistry(parent, lambda _name: QDialog(parent))
 
-    registry.open(DialogName.SETUP)
+    registry.open(DialogName.ENTRY)
     qapp.processEvents()
-    assert registry.visible_names() == [DialogName.SETUP]
+    assert registry.visible_names() == [DialogName.ENTRY]
 
-    registry.close(DialogName.SETUP)
+    registry.close(DialogName.ENTRY)
     qapp.processEvents()
 
-    assert registry.dialog(DialogName.SETUP) is None
+    assert registry.dialog(DialogName.ENTRY) is None
     assert registry.visible_names() == []
 
 
-def test_open_setup_again_raises_the_existing_dialog_until_it_closes(qapp) -> None:
+def test_open_entry_again_raises_the_existing_dialog_until_it_closes(qapp) -> None:
     parent = QWidget()
     created: list[QDialog] = []
 
     def build_dialog(name: DialogName) -> QDialog:
-        assert name is DialogName.SETUP
+        assert name is DialogName.ENTRY
         dialog = QDialog(parent)
         created.append(dialog)
         return dialog
 
     registry = _FactoryRegistry(parent, build_dialog)
 
-    registry.open(DialogName.SETUP)
-    registry.open(DialogName.SETUP)
+    registry.open(DialogName.ENTRY)
+    registry.open(DialogName.ENTRY)
     qapp.processEvents()
 
     assert len(created) == 1
-    assert registry.visible_names() == [DialogName.SETUP]
+    assert registry.visible_names() == [DialogName.ENTRY]
 
-    registry.close(DialogName.SETUP)
+    registry.close(DialogName.ENTRY)
     qapp.processEvents()
-    registry.open(DialogName.SETUP)
+    registry.open(DialogName.ENTRY)
     qapp.processEvents()
 
     assert len(created) == 2
-    assert registry.dialog(DialogName.SETUP) is created[1]
-    assert registry.visible_names() == [DialogName.SETUP]
-    registry.close(DialogName.SETUP)
+    assert registry.dialog(DialogName.ENTRY) is created[1]
+    assert registry.visible_names() == [DialogName.ENTRY]
+    registry.close(DialogName.ENTRY)
     qapp.processEvents()
 
 
@@ -189,14 +191,14 @@ def test_open_rebuilds_stale_destroyed_dialog(qapp) -> None:
     registry = _FactoryRegistry(parent, build_dialog)
     # tolerated(cast): reportArgumentType: Non-Qt fake deterministically raises the deleted-wrapper error.
     stale = cast(QDialog, _DestroyedDialog())
-    registry.refs.retain_named(DialogName.SETUP, stale, on_released=lambda: None)
+    registry.refs.retain_named(DialogName.ENTRY, stale, on_released=lambda: None)
 
-    registry.open(DialogName.SETUP)
+    registry.open(DialogName.ENTRY)
     qapp.processEvents()
 
-    assert registry.dialog(DialogName.SETUP) is created[0]
+    assert registry.dialog(DialogName.ENTRY) is created[0]
     assert created[0].isVisible() is True
-    registry.close(DialogName.SETUP)
+    registry.close(DialogName.ENTRY)
     qapp.processEvents()
 
 
@@ -205,12 +207,12 @@ def test_take_screenshot_requires_visible_dialog(qapp) -> None:
     registry = _FactoryRegistry(parent, lambda _name: QDialog(parent))
 
     with pytest.raises(RuntimeError, match="not currently open"):
-        registry.take_screenshot(DialogName.SETUP)
+        registry.take_screenshot(DialogName.ENTRY)
 
-    registry.open(DialogName.SETUP)
+    registry.open(DialogName.ENTRY)
     qapp.processEvents()
 
-    png = registry.take_screenshot(DialogName.SETUP)
+    png = registry.take_screenshot(DialogName.ENTRY)
     assert png.startswith(b"\x89PNG")
-    registry.close(DialogName.SETUP)
+    registry.close(DialogName.ENTRY)
     qapp.processEvents()

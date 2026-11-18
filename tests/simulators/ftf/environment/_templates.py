@@ -3,7 +3,8 @@
 from dataclasses import replace
 
 import numpy as np
-from zcu_tools.core.simulation import (
+from zcu_tools.program.v2.simulation import IntegratedRound
+from zcu_tools.simulate.boundary import (
     AcquireRequest,
     AcquisitionMode,
     EnvironmentSnapshot,
@@ -15,7 +16,6 @@ from zcu_tools.core.simulation import (
     RoundStatistics,
     TimelineTemplate,
 )
-from zcu_tools.program.v2.simulation import IntegratedRound
 from zcu_tools.simulators.ftf.config import parse_ftf
 from zcu_tools.simulators.ftf.environment import (
     FTFMuxReadoutConfig,

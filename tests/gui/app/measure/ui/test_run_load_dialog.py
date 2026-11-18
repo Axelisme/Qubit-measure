@@ -51,6 +51,7 @@ def load_backdrop(qapp: QApplication) -> Iterator[QWidget]:
     try:
         yield window
     finally:
+        window.close()
         window.deleteLater()
         qapp.processEvents()
 
@@ -110,7 +111,7 @@ def history_window(
         yield window
         dialogs.assert_no_unexpected_messages()
     finally:
-        window.deleteLater()
+        window.dispose()
         qapp.processEvents()
 
 

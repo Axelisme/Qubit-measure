@@ -16,6 +16,9 @@ from .secular import ModelSource
 from .workplan import FactKey, WorkPlan
 
 _GATE_INVENTORY = FactKey(("multitone-gate-inventory", GATE_POLICY), tuple)
+# Full M=16 constant-pair preparation measured 0.24--0.28 ms. This reserve
+# covers endpoint construction; the two dense applications stay in base work.
+CONSTANT_KICK_PREPARE_S = 0.0003
 
 
 def populate_gate_inventory(
@@ -183,10 +186,8 @@ def populate_multitone_inventory(
             retained = multitone_retention(table, int(row), context)
             if any(retained.edges):
                 expanded.append(int(row))
-            elif retained.dimension is not None:
-                model = table.model(source, row)
-                if retained.dimension <= max(9, 2 * len(model.energies_ghz)):
-                    cheap.append(int(row))
+            elif cheap_rwa_graph(table, int(row), context):
+                cheap.append(int(row))
         rows = np.array(expanded, dtype=np.int64)
         physics = kernel.prepare_keys(table, rows, context) if len(rows) else ()
         keys = []
@@ -218,6 +219,21 @@ def populate_multitone_inventory(
     )
 
 
+def cheap_rwa_graph(table: SegmentTable, row: int, context: KernelContext) -> bool:
+    """Classify an already-admitted unexpanded small graph for cold ordering.
+
+    Complete inventories and prefix/worker subsets share this single predicate.
+    This is a price shortcut, not a numerical admission rule.
+    """
+    retained = multitone_retention(table, row, context)
+    return (
+        retained.dimension is not None
+        and retained.dimension
+        <= max(9, 2 * len(table.model(context.source, row).energies_ghz))
+        and not any(retained.edges)
+    )
+
+
 def populate_multitone_plan(
     table: SegmentTable, source: ModelSource, plan: WorkPlan, budget: float = 1e-3
 ) -> frozenset[int]:
@@ -239,8 +255,13 @@ def populate_multitone_plan(
     per occupied block unit, prepare 2 ms amortized per exact key. Direct uses
     the existing two-tone 80 us bandwidth/action model, with a 0.7 factor for
     sampled envelopes (measured Gaussian/constant direct ratio 0.65--0.69).
-    These conservative cold prices are scheduling estimates, not universal
-    runtime bounds.
+    Full constant-pair calibration adds a 0.30 ms M=16 endpoint-prepare
+    reserve, with cubic size scaling. Restored-edge apply retains the 60 us per
+    ns-GHz headroom and adds 3 us per ns for step-ceiling work, before action/occupancy/size
+    scaling. The fixed M=16 feature star spans dimensions 22--40, 32--512 ns
+    and restored bandwidths .075--.1 GHz; a retained .06-GHz-detuning control
+    restored counterrotating edges at 2.065 GHz. These cold prices are
+    scheduling estimates, not universal runtime bounds.
     """
 
     def build() -> frozenset[int]:
@@ -348,12 +369,14 @@ def _price_row(table: SegmentTable, row: int, context: KernelContext) -> Multito
     occupancy = retained.dimension / size**2
     # Expanded graphs incur fast interaction-picture oscillations and additional
     # coefficient/guard work even when their omission certificate is excellent.
-    prepare = 0.002 * scale * (1 + occupancy)
+    # Full constant-pair preparation measured 0.24--0.28 ms at M=16.
+    # Reserve 0.30 ms for the endpoint exponentials on top of the legacy
+    # allowance. The two dense endpoint applications already belong to base W.
+    prepare = 0.002 * scale * (1 + occupancy) + CONSTANT_KICK_PREPARE_S * scale
     guard = 0.003 * scale * (1 + occupancy)
     apply = (
-        6e-5
-        * duration
-        * max(0.05, restored_frequency)
+        duration
+        * (6e-5 * max(0.05, restored_frequency) + 3e-6)
         * action
         * (1 + occupancy)
         * scale

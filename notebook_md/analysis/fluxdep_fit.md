@@ -27,8 +27,8 @@ jupyter:
 **Readers:** operator, lab-author. Select spectral lines, fit fluxonium parameters and export an entry-local predictor.
 
 Set the entry name and component name below. The component must have kind
-`qubit/fluxonium` in the entry setup. This notebook does not choose from aliases.
-It writes the predictor, declared setup fields and analysis ledger in separate steps.
+`qubit/fluxonium` in the entry global parameters. This notebook does not choose from aliases.
+It writes the predictor, declared global fields and analysis ledger in separate steps.
 It does not save Database output or read the old two-level params.json.
 The [fluxdep GUI](../../lib/zcu_tools/gui/app/fluxdep/README.md) uses the same artifact format.
 
@@ -66,7 +66,7 @@ entry = ResultEntry.open(
     result_root=project_root / "result",
     database_root=project_root / "Database",
 )
-component_model = snapshot(entry.setup).components[component]
+component_model = snapshot(entry.parameters()).components[component]
 if component_model.kind != "qubit/fluxonium":
     raise ValueError(f"Expected qubit/fluxonium, got {component_model.kind!r}")
 
@@ -353,7 +353,7 @@ fig.write_html(f"{web_dir}/spect_fit.html", include_plotlyjs="cdn")
 fig.write_image(f"{image_dir}/spect_fit.png", format="png")
 ```
 
-# Save predictor and setup
+# Save predictor and global parameters
 
 ```python
 savepath = entry.predictors_path / f"{component}.json"
@@ -370,13 +370,13 @@ save_predictor_file(
         source=PredictorSource(run_id=None, created_at=None),
     ),
 )
-entry.setup.refresh()
-component_model = snapshot(entry.setup).components[component]
+entry.parameters().refresh()
+component_model = snapshot(entry.parameters()).components[component]
 values = dict(
     EJ=sp_params[0], EC=sp_params[1], EL=sp_params[2],
     flux_half=flux_half, flux_int=flux_int, flux_period=flux_period,
 )
-with entry.setup.edit() as draft:
+with entry.parameters().edit() as draft:
     for field, value in values.items():
         if field in type(component_model).model_fields:
             draft.set(f"{component}.{field}", float(value))

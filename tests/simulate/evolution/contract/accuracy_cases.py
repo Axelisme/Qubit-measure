@@ -1,6 +1,8 @@
 """Small coherent Engine inputs shared by the accuracy matrix and consumers."""
 
+from collections.abc import Callable
 from dataclasses import dataclass, replace
+from functools import partial
 
 import numpy as np
 from zcu_tools.simulate.evolution import (
@@ -16,22 +18,86 @@ from zcu_tools.simulate.evolution import (
     SecularModel,
     TimelineBatch,
 )
+from zcu_tools.simulate.fluxonium import (
+    DispersiveResonator,
+    FluxoniumNoise,
+    SingleFluxoniumModel,
+    calculate_oscillator_operators,
+)
 
 from .synthetic_models import synthetic_model
 
 
 @dataclass(frozen=True)
 class AccuracyCase:
-    """Named physical input and families expected to accept its complete timeline.
+    """Named physical input and independently pinned accuracy targets.
 
     source owns model/history state; batch contains all points. families lists
-    independently pinnable routes, not a per-segment algorithm preference.
+    independent pinned targets. idle_family names the undriven companion needed
+    alongside each target; None means no idle companion. These declarations are
+    test expectations, not per-segment Engine routing.
     """
 
     name: str
     source: ModelSource
     batch: TimelineBatch
     families: tuple[str, ...]
+    idle_family: str | None = None
+
+
+DISSIPATIVE_DC_CASES = ("dephasing_pump", "raman_decay", "raman_weak_legs")
+
+
+def dissipative_dc_case(name: str) -> AccuracyCase:
+    """Build zero-carrier bath-assisted transfer from an initial ground state.
+
+    Dephasing pump uses pair dephasing 0.1/ns for 1000 ns. Raman decay uses
+    a 0.02/ns jump for 500 ns; weak legs use 0.0002/ns for 12500 ns.
+    The latter is within a 0.01/ns rate ceiling; the former two exceed it.
+    """
+    if name == "dephasing_pump":
+        energies = [0.0, 0.1, 0.5]
+        edges = ((0, 1, 0.001),)
+        jumps = ()
+        phi, duration = 0.1, 1000.0
+    elif name in ("raman_decay", "raman_weak_legs"):
+        energies = [0.0, 0.0, 0.02, 0.2, 0.7]
+        weak = name == "raman_weak_legs"
+        coupling = 0.002 if weak else 0.01
+        edges = ((0, 3, coupling), (1, 3, coupling))
+        jumps = ((2, 3, 0.0002 if weak else 0.02),)
+        phi, duration = 0.0, 12500.0 if weak else 500.0
+    else:
+        raise ValueError(f"unknown dissipative DC case: {name}")
+    size = len(energies)
+    x = np.zeros((size, size), dtype=complex)
+    rates = np.zeros((size, size))
+    for a, b, coupling in edges:
+        x[a, b] = x[b, a] = coupling
+    for target, source, rate in jumps:
+        rates[target, source] = rate
+    model = SecularModel(
+        (0,),
+        "accuracy-" + name,
+        np.array(energies),
+        np.eye(size, dtype=complex),
+        (SecularDrive("drive", x, np.zeros_like(x)),),
+        rates,
+        phi * (np.ones((size, size)) - np.eye(size)),
+    )
+    initial = np.zeros((size, size), dtype=complex)
+    initial[0, 0] = 1
+    batch = timeline(1, duration)
+    pulse = replace(
+        drive_track(batch, EnvelopeSpec("constant"), frequency=0.0, gain=1.0),
+        phase_rad=np.zeros(1),
+    )
+    return AccuracyCase(
+        name,
+        ModelSource(initial, lambda level: replace(model, level=level)),
+        replace(batch, tracks=(pulse,)),
+        ("slow_envelope",),
+    )
 
 
 def coherent_source(model: SecularModel) -> ModelSource:
@@ -203,7 +269,7 @@ def joint_case(*, constant: bool) -> AccuracyCase:
     """Build a four-level two-port case with a complete 20-point inventory.
 
     constant=True uses constant envelopes and permits multitone_rwa/dop853.
-    False uses short sampled envelopes and permits only dop853 during the pause.
+    False uses short sampled envelopes and pins dop853 for the accuracy matrix.
     Return a fresh source/history with coherence, relaxation and dephasing.
     """
     name = "joint_constant" if constant else "joint_gate_inventory"
@@ -241,7 +307,6 @@ def joint_case(*, constant: bool) -> AccuracyCase:
         )
         families = ("multitone_rwa", "dop853")
     else:
-        # Sampled multitone families are paused, not failed density samples.
         families = ("dop853",)
     return AccuracyCase(name, coherent_source(model), batch, families)
 
@@ -343,15 +408,76 @@ def common_frame_case(name: str) -> AccuracyCase:
     return AccuracyCase(name, coherent_source(model), batch, families)
 
 
+def single_tone_sideband_case() -> AccuracyCase:
+    """Build the synthetic 600 ns single-tone reset with five cavity lifetimes idle.
+
+    Full native cutoff 30 is dressed before retaining six parent levels times
+    three photons. Flux is 0.40, fr=6 GHz, g=0.08 GHz, kappa/(2*pi)=5 MHz.
+    The charge tone drives dressed |e,0> to |g,1> at g_sb=1 MHz; the initial
+    state is |e,0>. Intrinsic capacitive Q=1e6 loss remains active at zero K.
+    Plateau targets are floquet_period and t6, each with the t4 idle companion.
+    """
+    circuit = SingleFluxoniumModel(
+        (4.0, 1.0, 1.0), 0.40, cutoff=30, retained_levels=6, temperature_k=0
+    )
+    kappa = 2 * np.pi * 0.005
+    native = calculate_oscillator_operators(circuit.params, cutoff=circuit.cutoff)
+    joint = circuit.joint_resonator_model(
+        (0,),
+        DispersiveResonator(6.0, 0.08, kappa),
+        drive_operators_ghz={"drive": native.charge},
+        noise=FluxoniumNoise(q_cap=1e6),
+    )
+    model = joint.model
+    excited = joint.label_to_index[(1, 0)]
+    photon = joint.label_to_index[(0, 1)]
+    initial = np.zeros_like(model.eigenvectors)
+    initial[excited, excited] = 1
+    source = ModelSource(initial, lambda level: replace(model, level=level))
+    batch = timeline(1, 600.0 + 5 / kappa)
+    track = drive_track(
+        batch,
+        EnvelopeSpec("constant"),
+        frequency=float(model.energies_ghz[photon] - model.energies_ghz[excited]),
+        gain=2 * 0.001 / abs(model.drives[0].in_phase_ghz[photon, excited]),
+    )
+    batch = replace(batch, tracks=(replace(track, duration_ns=np.array([600.0])),))
+    return AccuracyCase(
+        "single_tone_sideband",
+        source,
+        batch,
+        ("floquet_period", "t6"),
+        idle_family="t4",
+    )
+
+
 def accuracy_case(name: str) -> AccuracyCase:
     """Build an isolated matrix input; unknown names raise ValueError.
 
     Names: idle_coherence, weak_plateau, strong_plateau, shaped_complex,
     two_carriers, continuous_flux, joint_gate_inventory, joint_constant, low_carrier,
     linear_shaped, linear_plateau, nearby_carriers, cheap_sampled_nearby,
-    cheap_sampled_separated and adiabatic_ramp. Each call
+    cheap_sampled_separated, adiabatic_ramp, single_tone_sideband,
+    dephasing_pump, raman_decay and raman_weak_legs. Each call
     owns a fresh source/history. The joint gate keeps its 20-point inventory.
     """
+    if name in DISSIPATIVE_DC_CASES:
+        return dissipative_dc_case(name)
+    specialized: dict[str, Callable[[], AccuracyCase]] = {
+        "linear_shaped": partial(linear_case, shaped=True),
+        "linear_plateau": partial(linear_case, shaped=False),
+        "nearby_carriers": partial(common_frame_case, "nearby_carriers"),
+        "cheap_sampled_nearby": partial(common_frame_case, "cheap_sampled_nearby"),
+        "cheap_sampled_separated": partial(
+            common_frame_case, "cheap_sampled_separated"
+        ),
+        "adiabatic_ramp": adiabatic_case,
+        "joint_gate_inventory": partial(joint_case, constant=False),
+        "joint_constant": partial(joint_case, constant=True),
+        "single_tone_sideband": single_tone_sideband_case,
+    }
+    if name in specialized:
+        return specialized[name]()
     model = synthetic_model()
     batch = timeline(2, 1.5)
     constant = EnvelopeSpec("constant")
@@ -416,14 +542,6 @@ def accuracy_case(name: str) -> AccuracyCase:
             batch, tracks=(drive_track(batch, constant, frequency=0.02, gain=0.2),)
         )
         families = ("slow_envelope",)
-    elif name in ("linear_shaped", "linear_plateau"):
-        return linear_case(shaped=name == "linear_shaped")
-    elif name in ("nearby_carriers", "cheap_sampled_nearby", "cheap_sampled_separated"):
-        return common_frame_case(name)
-    elif name == "adiabatic_ramp":
-        return adiabatic_case()
-    elif name in ("joint_gate_inventory", "joint_constant"):
-        return joint_case(constant=name == "joint_constant")
     else:
         raise ValueError(f"unknown accuracy case: {name}")
     return AccuracyCase(name, coherent_source(model), batch, families)

@@ -10,13 +10,15 @@ import pytest
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 from qtpy.QtCore import QCoreApplication, QEvent
-from qtpy.QtWidgets import QLabel, QVBoxLayout, QWidget
+from qtpy.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.gui.app.measure.adapter import (
     Adapter,
+    AdapterCapabilities,
     Analysis,
+    AnalysisMode,
     AnalyzeRequest,
     PostAnalysis,
     PostAnalyzeRequest,
@@ -43,6 +45,10 @@ from tests.gui.app.measure._native_save_support import (
     PostSummary,
 )
 from tests.gui.app.measure.ui._figure_presentation_support import gallery
+from tests.gui.app.measure.ui._main_window_fakes import (
+    MainWindowControlFactory,
+    mock_ctrl,
+)
 from tests.program._profiles import load_soccfg
 
 
@@ -148,8 +154,8 @@ def presentation_window(qapp, tmp_path: Path) -> Iterator[QWidget]:
     registry.register("presentation", PresentationAdapter)
     with launched_measure_app(qapp, tmp_path, registry=registry) as app:
         # Public fixture bootstrap only; the scenario below uses visible controls.
-        app.controller.setup_control.new_entry(EntryRequest("presentation"))
-        app.controller.setup_control.new_point(
+        app.controller.entry_control.new_entry(EntryRequest("presentation"))
+        app.controller.entry_control.new_point(
             PointCreateRequest("p", "Offline presentation", CommandOrigin("gui"))
         )
         board = white_noise(load_soccfg(), std_adc=1.0, seed=None, routes=((0, 0),))
@@ -198,8 +204,8 @@ def layout_window(qapp, tmp_path: Path) -> Iterator[QWidget]:
     registry = Registry()
     registry.register("layout", LayoutAdapter)
     with launched_measure_app(qapp, tmp_path, registry=registry) as app:
-        app.controller.setup_control.new_entry(EntryRequest("layout"))
-        app.controller.setup_control.new_point(
+        app.controller.entry_control.new_entry(EntryRequest("layout"))
+        app.controller.entry_control.new_point(
             PointCreateRequest("p", "Offline layout", CommandOrigin("gui"))
         )
         board = white_noise(load_soccfg(), std_adc=1.0, seed=None, routes=((0, 0),))
@@ -381,11 +387,43 @@ def test_user_switches_named_figures_gallery_and_left_panel(
     flow.screenshot(shots / "12-post-retained.png")
 
 
+@pytest.fixture
+def presentation_host(
+    qapp: QApplication, main_window_control_factory: MainWindowControlFactory
+) -> Iterator[QWidget]:
+    """Yield a visible QWidget containing one ExpTabWidget, without a session.
+
+    The factory retains control authority until the Qt view tree is deleted.
+    Teardown clears figures and detaches the tab through its public APIs, then
+    closes the host and delivers its deferred deletion.
+    """
+    host = QWidget()
+    main_window_control_factory.own(host)
+    layout = QVBoxLayout(host)
+    tab = ExpTabWidget(
+        "presentation",
+        mock_ctrl(main_window_control_factory),
+        AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True),
+    )
+    layout.addWidget(tab)
+    host.resize(1280, 800)
+    host.show()
+    qapp.processEvents()
+    try:
+        yield host
+    finally:
+        tab.clear_all_figures()
+        tab.detach()
+        host.close()
+        host.deleteLater()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+
+
 @pytest.mark.parametrize("failed_pane", ["run", "analysis", "post_analysis"])
 def test_data_activation_uses_public_reader_and_isolates_each_failure(
-    presentation_window: QWidget, monkeypatch: pytest.MonkeyPatch, failed_pane: str
+    presentation_host: QWidget, monkeypatch: pytest.MonkeyPatch, failed_pane: str
 ) -> None:
-    (tab,) = presentation_window.findChildren(ExpTabWidget)
+    (tab,) = presentation_host.findChildren(ExpTabWidget)
     preview = gallery(tab)
     figures = {pane: Figure() for pane in ("run", "analysis", "post_analysis")}
     reads: list[str] = []
@@ -426,9 +464,9 @@ def test_data_activation_uses_public_reader_and_isolates_each_failure(
 
 @pytest.mark.parametrize("pane", ["analysis", "post_analysis"])
 def test_named_collection_keeps_figures_saveable_after_clear(
-    presentation_window: QWidget, pane: str
+    presentation_host: QWidget, pane: str
 ) -> None:
-    (tab,) = presentation_window.findChildren(ExpTabWidget)
+    (tab,) = presentation_host.findChildren(ExpTabWidget)
     collection = FigureCollection()
     first = Figure()
     second = Figure()

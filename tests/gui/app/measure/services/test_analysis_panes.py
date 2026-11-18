@@ -40,7 +40,7 @@ from zcu_tools.gui.form_adapter import Form
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.operation_handles import OperationHandles
 from zcu_tools.gui.session.operation_runner import OperationRunner
-from zcu_tools.gui.session.parameters import ParameterContext
+from zcu_tools.gui.session.parameters import DocumentSetCapture
 from zcu_tools.gui.session.services.progress import ProgressService
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.resources.entry import ArtifactKey, JsonObject
@@ -81,7 +81,7 @@ class _Writeback(WritebackService):
         self,
         items: Iterable[WritebackItem],
         *,
-        parameters: ParameterContext | None,
+        parameters: DocumentSetCapture | None,
         experiment_name: str,
         run_id: str | None = None,
         device_snapshot: (
@@ -190,10 +190,10 @@ def _pane_source_with_excited_initial_state() -> RunRecord[SavingCfg, SavingResu
     )
 
 
-def _pane_capture(original: ParameterContext | None) -> ParameterContext:
+def _pane_capture(original: DocumentSetCapture | None) -> DocumentSetCapture:
     if original is None:
         raise RuntimeError("Native fixture must retain its Run parameter capture")
-    return ParameterContext(
+    return DocumentSetCapture(
         point=original.whole_document().model_copy(
             update={"components": {"Q1": QubitSchema(kind="qubit/fluxonium")}}
         ),

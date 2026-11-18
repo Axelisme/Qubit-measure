@@ -8,9 +8,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 from zcu_tools.cfg_model import MuxReadoutTone
-from zcu_tools.core.simulation import AcquireRequest, ReadoutWindow, RoundRequest
 from zcu_tools.program.v2.modules.readout import MuxReadoutCfg
 from zcu_tools.program.v2.simulation import SimulationClock
+from zcu_tools.simulate.boundary import AcquireRequest, ReadoutWindow, RoundRequest
 from zcu_tools.simulators.six_fluxonium.config import parse_six_fluxonium
 from zcu_tools.simulators.six_fluxonium.environment import six_fluxonium
 from zcu_tools.simulators.six_fluxonium.environment.runtime import SixFluxoniumSource
@@ -55,8 +55,8 @@ def test_admission_writes_per_qubit_truth_with_one_session_and_time(
     monkeypatch.setenv("HOME", str(tmp_path))
     with environment(drift_configuration()) as env:
         binding = env.soc.binding
-        binding.begin()
-        binding.end()
+        with binding.acquire():
+            pass
         logs = list(Path(tmp_path).rglob("truth.jsonl"))
         assert len(logs) == 1, "six admission must write one environment truth log"
         rows = [json.loads(line) for line in logs[0].read_text().splitlines()]
@@ -81,8 +81,8 @@ def test_independent_streams_rebuild_from_root_seed_and_time_sequence(tmp_path):
             parse_six_fluxonium(document), clock=clock, truth_log=truth
         ) as env:
             for now[0] in (0.0, 3.0, 25.0):
-                env.soc.binding.begin()
-                env.soc.binding.end()
+                with env.soc.binding.acquire():
+                    pass
         rows = [json.loads(line) for line in truth.read_text().splitlines()]
         sequences.append(
             {name: [row[name] for row in rows] for name in ("q_cap", "xqp", "aphi")}
@@ -174,17 +174,14 @@ def test_outer_round_credits_physical_duration_once_for_all_qubits(tmp_path):
     truth = tmp_path / "truth.jsonl"
     with environment(drift_configuration(), clock=clock, truth_log=truth) as env:
         binding = env.soc.binding
-        sequence = binding.begin()
-        request = routed_request(binding, sequence)
         duration = 4 * 2 * (125000 + 0.024) / 1e6
-        try:
+        with binding.acquire() as sequence:
+            request = routed_request(binding, sequence)
             for index in range(2):
                 binding.sample_round(request, index)
                 assert clock.now() == pytest.approx(100.0 + (index + 1) * duration)
-        finally:
-            binding.end()
-        binding.begin()
-        binding.end()
+        with binding.acquire():
+            pass
         rows = [json.loads(line) for line in truth.read_text().splitlines()]
         assert [row["sim_now"] for row in rows[:6]] == [100.0] * 6
         assert [row["sim_now"] for row in rows[6:]] == pytest.approx(

@@ -52,7 +52,7 @@ class ResultRun:
     entry. run_path is the absolute exact run directory. data_path is an existing
     data.h5 or None. figure_paths/analysis_paths are sorted existing PNG/JSON
     members. search_text is casefolded identity, roles, cfg and analysis content,
-    including tone names absent from roles. issues holds setup/ledger failures
+    including tone names absent from roles. issues holds global/ledger failures
     for this entry and per-file read failures for this run.
     """
 
@@ -167,8 +167,8 @@ def scan_results(
     are listed. Without readable native metadata, match acquired events through
     successful saved events' exact member paths, never directory-name suffixes.
     Preserve unknown identities rather than guessing experiment or time from names.
-    Isolate setup, ledger and native/document failures in the affected runs'
-    issues. Missing setup means no Result entry, not an error. A failed ledger
+    Isolate global, ledger and native/document failures in the affected runs'
+    issues. Missing global means no Result entry, not an error. A failed ledger
     leaves that entry's runs unregistered. Escaping members are excluded and
     diagnosed without following them. Unenumerable entries/runs produce named
     ResultsIndex.issues, not synthetic runs. Never create files or locks.
@@ -243,16 +243,16 @@ def _entry_events(
     root: Path, entry: str, issues: list[str]
 ) -> tuple[LedgerEventContent, ...]:
     result = root / "result"
-    setup = result / entry / PARAMETERS_FILENAME
+    global_path = result / entry / PARAMETERS_FILENAME
     try:
         _inside(result, result)
         _inside(result / entry, result / entry)
-        _inside(result / entry, setup)
-        if not setup.exists():
+        _inside(result / entry, global_path)
+        if not global_path.exists():
             return ()
         return ResultEntry.read_contents_snapshot(entry, result_root=result)
     except (OSError, ValueError) as error:
-        issues.append(f"{setup}: {error}")
+        issues.append(f"{global_path}: {error}")
         return ()
 
 

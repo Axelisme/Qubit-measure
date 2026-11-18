@@ -4,11 +4,11 @@
 
 ## Entry 歸屬
 
-同一 Result root 下，entry 以資料夾名稱歸屬。新 setup、point、ledger 事件與 Run metadata 不再產生 entry UUID。Run ID 與 event ID 保持原契約。
+同一 Result root 下，entry 以資料夾名稱歸屬。新 global、point、ledger 事件與 Run metadata 不再產生 entry UUID。Run ID 與 event ID 保持原契約。
 
-Setup／point 的 general 保留 created_at、description 與 ext。EntryIdentity 可固定 UTC 建立時間，不含 UUID。舊 entry_id 缺少、值不合法或形狀不同都不影響讀取，read／refresh 不改原檔 bytes。明確修改時移除舊欄位，其他參數及容器擴充欄位沿 owner 的保存規則保留。
+Global／point 的 general 保留 created_at、description 與 ext。EntryIdentity 可固定 UTC 建立時間，不含 UUID。舊 entry_id 缺少、值不合法或形狀不同都不影響讀取，read／refresh 不改原檔 bytes。明確修改時移除舊欄位，其他參數及容器擴充欄位沿 owner 的保存規則保留。
 
-開啟中的 setup 同名換檔後，公開 refresh、new_point 或重新 open 使用新內容，不以 UUID 拒絕。這不新增 setup 自動監看。Point source、owning roots、安全路徑段與 symlink 邊界仍要核對。
+開啟中的 global 文件同名換檔後，公開 refresh、new_point 或重新 open 使用新內容，不以 UUID 拒絕。這項身分規則不增加自動監看。Point source、owning roots、安全路徑段與 symlink 邊界仍要核對。
 
 Ledger 的歷史 entry_id 不參與投影或 append。歷史 ImportPayload 不再解讀 source_entry_id，source_event_id、source_event_json 及原始 JSONL 行保持。Migration 的 cloned_from evidence 只解讀 point，原始 identity 欄位留在 raw evidence，不改名為操作 token。
 
@@ -34,7 +34,7 @@ Writeback 的歷史內容供提案求值及 alias／slot 路徑使用。Preview�
 
 ## 離線 migration
 
-MigrationIdentity 與 MigrationReport 使用 migration_id 保護一次遷移操作。初始化暫存名稱使用 .migration-operation-<migration_id.hex>。這個 token 不用於 entry 歸屬，不寫進 setup、point、Run 或 ledger。
+MigrationIdentity 與 MigrationReport 使用 migration_id 保護一次遷移操作。初始化暫存名稱使用 .migration-operation-<migration_id.hex>。這個 token 不用於 entry 歸屬，不寫進 global、point、Run 或 ledger。
 
 新版不讀舊 ownership 欄位 entry_id，也不提供 fallback 或自動轉換。需要重跑或 cleanup 的舊 manifest、report 或 initialization 含此欄位時，操作拒絕並指名檔案。請用舊版完成，或確認狀態後自行處理。工具不自動刪改來源、備份或目的資料。
 

@@ -15,15 +15,14 @@ from ..kernel import ApplyContext, KernelContext, Prepared, SegmentTable
 from ..workplan import FactKey
 from ._dop853 import Tolerances, integrate, tolerances
 from ._multitone_gate_phase import FULL_DRIVE_GATE_POLICY
+from ._rwa_fourier import RWACoefficients, interaction_hamiltonian
 from ._rwa_graph import RWA_GRAPH_POLICY, PhaseGraph, phase_graph, pruning_admitted
 from ._rwa_numeric import (
     MULTITONE_RETENTION_POLICY,
     RWA_POLICY,
-    RWACoefficients,
     RWARetention,
     admit_rows,
     admit_single_rows,
-    interaction_hamiltonian,
     multitone_retention,
     retained_mask,
     rwa_coefficients,

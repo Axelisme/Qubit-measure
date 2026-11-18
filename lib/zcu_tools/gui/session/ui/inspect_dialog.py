@@ -23,7 +23,6 @@ from qtpy.QtCore import Qt
 from qtpy.QtGui import QFont, QKeyEvent
 from qtpy.QtWidgets import (
     QApplication,
-    QComboBox,
     QDialog,
     QDialogButtonBox,
     QHBoxLayout,
@@ -61,6 +60,7 @@ from zcu_tools.gui.session.library_entry import (
 )
 from zcu_tools.gui.session.ui.alias_panel import AliasPanel
 from zcu_tools.gui.session.ui.component_tree import ComponentTreeWidget
+from zcu_tools.gui.session.ui.document_destination import DocumentDestination
 from zcu_tools.gui.session.ui.file_banner import FileBanner
 from zcu_tools.gui.session.ui.new_entry_dialog import NewEntryDialog
 from zcu_tools.gui.session.ui.tree_filter import TreeFilter
@@ -268,9 +268,8 @@ class InspectDialog(QDialog):
         widget = QWidget()
         layout = QVBoxLayout(widget)
         layout.setContentsMargins(0, 4, 0, 0)
-        self._destination = QComboBox()
+        self._destination = DocumentDestination()
         self._destination.setObjectName("inspect.library.destination")
-        self._destination.addItems(["Active documents", "Entry template"])
         toolbar = QHBoxLayout()
         toolbar.addWidget(QLabel("Destination:"))
         toolbar.addWidget(self._destination)
@@ -377,11 +376,13 @@ class InspectDialog(QDialog):
         Context-switch publications discard local input before refreshing.
         Source changes retain input for the file banner's Keep/Reload decision.
         """
+        self._destination.refresh(self._ctrl.current_point_label())
+        self._library_sync.set_point(self._destination.point())
         self._aliases.refresh()
         self._component_tree.refresh()
         self._library_sync.refresh(has_draft=self._has_library_draft())
         try:
-            parameters = self._ctrl.read_context(setup=self._is_setup())
+            parameters = self._ctrl.read_context(point=self._destination.point())
         except FailedPreconditionError:
             self._populate(None)
             self._status_label.setText("No context")
@@ -487,18 +488,15 @@ class InspectDialog(QDialog):
             self._open_entry(key)
         self._update_controls()
 
-    def _is_setup(self) -> bool:
-        return self._destination.currentIndex() == 1
-
     def _destination_changed(self) -> None:
-        self._library_sync.set_setup(setup=self._is_setup())
+        self._library_sync.set_point(self._destination.point())
         self._close_entry()
         self._selected = None
         self._populate_from_context()
 
     def _populate_from_context(self) -> None:
         try:
-            library = self._ctrl.read_context(setup=self._is_setup()).library
+            library = self._ctrl.read_context(point=self._destination.point()).library
         except FailedPreconditionError:
             library = None
         self._populate(library)
@@ -511,7 +509,7 @@ class InspectDialog(QDialog):
         kind, name = key
         try:
             entry = open_library_entry(
-                self._ctrl.read_context(setup=self._is_setup()),
+                self._ctrl.read_context(point=self._destination.point()),
                 kind,
                 name,
                 arb_names=self._arb_waveforms.list_data_keys(),
@@ -624,7 +622,7 @@ class InspectDialog(QDialog):
         self._selected = (key[0], new_name)
         self._name_edit.setText(new_name)
         self._library_revision = self._library_sync.capture()
-        self._library = self._ctrl.read_context(setup=self._is_setup()).library
+        self._library = self._ctrl.read_context(point=self._destination.point()).library
         self._rebuild_tree(self._library, self._selected)
         self._entry_error.clear()
         self._library_sync.refresh(has_draft=self._has_library_draft())
@@ -646,7 +644,7 @@ class InspectDialog(QDialog):
         kind, name = key
         # Pin the target before any question: a context switch while asking
         # must not redirect the deletion into another point or entry.
-        capture = self._ctrl.read_context(setup=self._is_setup())
+        capture = self._ctrl.read_context(point=self._destination.point())
         if confirm and not self._presenter.confirm(
             self,
             "Confirm Deletion",
@@ -682,7 +680,7 @@ class InspectDialog(QDialog):
             self._templates,
             arb_waveforms=self._arb_waveforms,
             dialog_presenter=self._presenter,
-            setup=self._is_setup(),
+            point=self._destination.point(),
             parent=self,
         )
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)

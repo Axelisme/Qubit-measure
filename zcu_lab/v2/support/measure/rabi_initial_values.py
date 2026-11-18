@@ -15,11 +15,11 @@ from zcu_tools.cfg_model import (
 )
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.session.parameters import ParameterContext
+    from zcu_tools.gui.session.parameters import DocumentSetCapture
 
 
 def len_rabi_length_stop(
-    parameters: ParameterContext | None,
+    parameters: DocumentSetCapture | None,
     *,
     qubit: str = "$qubit",
 ) -> Expr | float | None:
@@ -51,7 +51,7 @@ def len_rabi_length_stop(
 
 
 def amp_rabi_initial_pulse(
-    parameters: ParameterContext | None, *, qubit: str = "$qubit"
+    parameters: DocumentSetCapture | None, *, qubit: str = "$qubit"
 ) -> Slot | Template:
     """Return an editable Amplitude Rabi pulse from the fixed Open/Reset capture.
 
@@ -110,7 +110,7 @@ def amp_rabi_initial_pulse(
     return Slot(f"{qubit}.module.x180", copy=True, set={"waveform.length": length})
 
 
-def _waveform_spec(parameters: ParameterContext, pulse: PulseSpec) -> WaveformSpec:
+def _waveform_spec(parameters: DocumentSetCapture, pulse: PulseSpec) -> WaveformSpec:
     return (
         parameters.library.waveform_spec(pulse.waveform)
         if isinstance(pulse.waveform, str)
@@ -132,7 +132,7 @@ def _valid_pi_len(waveform: WaveformSpec) -> float | None:
     return pi_len
 
 
-def _x180_spec(parameters: ParameterContext, qubit: str) -> PulseSpec | None:
+def _x180_spec(parameters: DocumentSetCapture, qubit: str) -> PulseSpec | None:
     source = parameters.lookup(f"{qubit}.module.x180")
     if not source.present or source.value is None:
         return None

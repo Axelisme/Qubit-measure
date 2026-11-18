@@ -221,7 +221,10 @@ def make_gate_inputs(scenario: str | None = None) -> list[Input]:
                     category="real",
                     companions_by_target={"multitone_gate": ("dop853",)},
                     manifest={
-                        "model_settings": settings.model_dump(mode="json"),
+                        # Acquisition capture is not part of numeric provenance.
+                        "model_settings": settings.model_dump(
+                            mode="json", exclude={"numerics": {"debug_capture"}}
+                        ),
                         "measurement_layer": "kernel"
                         if name.startswith("multitone_gate_")
                         else "sequence",

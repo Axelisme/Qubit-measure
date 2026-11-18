@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-11-17，caller-owned routing controls and GUI worker policy
+**Last updated:** 2026-11-18, segment numeric revision
 
 **讀者：** framework-dev、agent。FTF 環境的組裝接縫、數值接線與 acquisition 契約。
 
@@ -61,6 +61,17 @@ budget. No GUI field is added; final plot-buffer flushing is unchanged.
 Profiling overrides and the caller's board-loading example belong to
 [environment setup](../../../../../zcu_lab/simulation_envs/README.md#關閉補等與-telemetry).
 
+## Debug capture
+
+`numerics.debug_capture` defaults to false. Enable it to publish one frozen
+Engine-input and route manifest after each admitted acquire, including failure.
+Every evolve in that acquire shares the same buffer. Telemetry can remain off.
+When enabled, telemetry stores the published basename in `capture_file`,
+or null when capture is off or publication fails. Capture writes run before
+summary construction and outside binding's measured wall time.
+See the [shared switch contract](../../README.md#debug-capture) for empty
+captures, retention and the cache directory.
+
 ## Routing telemetry
 
 `numerics.telemetry.enabled` defaults to **True**. Each admitted acquire writes
@@ -88,8 +99,22 @@ ADC, sampling and routing bookkeeping; wall includes those operations.
 Numeric templates contain no program/experiment identifier, so `experiment` is
 omitted rather than guessed from controls or caller frames.
 
-`projection_outcomes` counts retained outcome histories per C-order point in the
-latest solved round. `projection_pruned_weight` gives each point's cumulative
+The shared [telemetry contract](../../README.md#acquire-telemetry) defines common
+summary fields, the shared default directory and separate-analysis setup. `FTFSource.finish_acquire(outcome)` receives the binding's
+`AcquireOutcome` and projects its builder-only `compile_wall_s` and `complete`.
+`complete` means the acquire body and cleanup returned normally, including partial
+Stop results. An escaping error is false.
+`evolve_wall_s` sums each `Engine.evolve` call, including direct evolution,
+cavity-memory spans and projective outcome continuations across software rounds.
+`readout_wall_s` sums cavity field propagation, population conversion, conditional
+ADC preparation and integrated or decimated sampling. These scopes do not overlap
+evolution. A failing call contributes time through its exception; a stage never
+entered contributes `0.0`. Reusing a preparation adds no evolution wall, but still
+counts fresh round sampling. Preparation and pacing remain in total wall's
+remainder. Raw-shot materialization requested after acquire is outside this row.
+Projection values live only in `extras`:
+`ftf.projection_outcomes` counts retained outcome histories per C-order point in the
+latest solved round. `ftf.projection_pruned_weight` gives each point's cumulative
 removed probability before redistribution. Both arrays are empty for
 terminal-only templates or when no solve completed. Reused preparations retain
 these values. They do not count the semiclassical cavity main state.
@@ -100,8 +125,9 @@ line fits. Today's file can be removed and recreated. Unrelated files remain.
 A filesystem or serialization failure emits at most one warning per environment
 and never aborts acquire, even with warnings configured as errors. Local files
 are gitignored. `tools/analyze_routing_telemetry.py <directory or files...>` reports
-family usage shares, rejection counts, CPU per relative cost unit, and weighted
-`(actual - estimated) / estimated` error where CPU estimates exist.
+wall stages and their remainder by normal return, escaping error or unknown
+outcome, family usage shares, rejection counts, CPU per relative cost unit, and
+weighted `(actual - estimated) / estimated` error where CPU estimates exist.
 
 ## Numeric source
 
@@ -631,7 +657,7 @@ field inheritance.
 Direct means retain conditional moments, their numeric values and their existing
 RNG stream. Raw getters do not advance that stream or shift shots to match a
 finite-shot direct mean. Each acquisition route reproduces itself for equal
-seed, inputs and recorded versions. Evolution uses `segment-engine-v7`.
+seed, inputs and recorded versions. Evolution uses `segment-engine-v8`.
 Old exact-record manifests also fail explicitly. Archives contain model truth and
 must not appear in ordinary Run/native/RPC metadata. Normal provenance remains
 the opaque simulation identifier.

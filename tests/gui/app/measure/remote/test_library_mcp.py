@@ -17,6 +17,7 @@ from zcu_tools.gui.session.context_types import LibraryChange
 from zcu_tools.mcp.measure.session import GuiRpcError
 from zcu_tools.resources.entry import ComponentSchema
 
+from tests.gui._context_reads import capture_focus
 from tests.gui.app.measure._record_support import require_target
 from tests.gui.app.measure._templates import TEMPLATES
 from tests.resources.entry.fakes import register_fakes, registry_state, restore_registry
@@ -33,7 +34,7 @@ def library_client(qapp, tmp_path):
     )
     context = fx.ctrl.context_control
     context.set_waveform(
-        require_target(context.read_context()),
+        require_target(capture_focus(context)),
         "Q1.waveforms.seed",
         ConstWaveformCfg(length=0.1),
     )
@@ -48,7 +49,7 @@ def library_client(qapp, tmp_path):
 
 
 def waveforms(fx):
-    library = fx.ctrl.context_control.read_context().library
+    library = capture_focus(fx.ctrl.context_control).library
     return {
         key: library.waveform_spec(key).model_dump(mode="python")
         for key in library.waveform_keys()
@@ -56,7 +57,7 @@ def waveforms(fx):
 
 
 def modules(fx):
-    library = fx.ctrl.context_control.read_context().library
+    library = capture_focus(fx.ctrl.context_control).library
     return {
         key: library.module_spec(key).model_dump(mode="python")
         for key in library.module_keys()
@@ -86,14 +87,15 @@ def test_ml_rename_then_delete_updates_only_the_selected_collection(
     before = selected(fx)[seed]
     other_before = other(fx)[other_seed]
     fx.ctrl.context_control.apply_library_change(
-        fx.ctrl.context_control.read_context(),
+        capture_focus(fx.ctrl.context_control),
         LibraryChange(kind, "rename", seed, new_path=moved),
     )
     assert seed not in selected(fx)
     assert selected(fx)[moved] == before
     assert other(fx)[other_seed] == other_before
     fx.ctrl.context_control.apply_library_change(
-        fx.ctrl.context_control.read_context(), LibraryChange(kind, "delete", moved)
+        capture_focus(fx.ctrl.context_control),
+        LibraryChange(kind, "delete", moved),
     )
     assert moved not in selected(fx)
     assert other(fx)[other_seed] == other_before
@@ -102,7 +104,7 @@ def test_ml_rename_then_delete_updates_only_the_selected_collection(
 def test_ml_rename_rejects_collision_without_overwriting(library_client):
     invoke, fx = library_client
     fx.ctrl.context_control.set_waveform(
-        require_target(fx.ctrl.context_control.read_context()),
+        require_target(capture_focus(fx.ctrl.context_control)),
         "Q1.waveforms.occupied",
         ConstWaveformCfg(length=0.3),
     )
@@ -110,7 +112,7 @@ def test_ml_rename_rejects_collision_without_overwriting(library_client):
     before = waveforms(fx)
     with pytest.raises(ValueError, match="exists|collision|already"):
         fx.ctrl.context_control.apply_library_change(
-            fx.ctrl.context_control.read_context(),
+            capture_focus(fx.ctrl.context_control),
             LibraryChange(
                 "waveform",
                 "rename",
@@ -191,7 +193,12 @@ def role_socket(qapp, tmp_path, component_registry):
         project_root=str(tmp_path),
         templates={"mux:blank": template, "probe": probe},
     )
-    fx.ctrl.context_control.add_component("R1", "synthetic/slotted", {"rate": 234.0})
+    fx.ctrl.context_control.add_component(
+        "R1",
+        "synthetic/slotted",
+        {"rate": 234.0},
+        point=fx.ctrl.context_control.current_point_label(),
+    )
     fx.start()
     sock = open_client(fx.service.port)
     try:
@@ -203,15 +210,22 @@ def role_socket(qapp, tmp_path, component_registry):
 
 def test_ml_create_binds_placeholders_to_resolved_alias_not_entry_name(role_socket):
     fx, sock = role_socket
-    fx.ctrl.context_control.add_component("Q2", "synthetic/slotted", {"rate": 567.0})
-    fx.ctrl.context_control.apply_alias_rows((AliasRow("qubit", "R1"),))
+    fx.ctrl.context_control.add_component(
+        "Q2",
+        "synthetic/slotted",
+        {"rate": 567.0},
+        point=fx.ctrl.context_control.current_point_label(),
+    )
+    fx.ctrl.context_control.apply_alias_rows(
+        (AliasRow("qubit", "R1"),), point=fx.ctrl.context_control.current_point_label()
+    )
     reply = call(
         sock,
         "context.ml_create_from_role",
         {"role_id": "probe", "name": "Q2.pulses.probe"},
     )
     assert reply["ok"] is True, reply
-    written = fx.ctrl.context_control.read_context().library.module_spec(
+    written = capture_focus(fx.ctrl.context_control).library.module_spec(
         "Q2.pulses.probe"
     )
     assert written.model_dump(mode="json")["freq"] == 234.0
@@ -223,8 +237,11 @@ def test_ml_create_missing_alias_reports_binding_without_writing(
 ):
     fx, sock = role_socket
     if alias_value is not None:
-        fx.ctrl.context_control.apply_alias_rows((AliasRow("qubit", alias_value),))
-    before = fx.ctrl.context_control.read_context().library.document()
+        fx.ctrl.context_control.apply_alias_rows(
+            (AliasRow("qubit", alias_value),),
+            point=fx.ctrl.context_control.current_point_label(),
+        )
+    before = capture_focus(fx.ctrl.context_control).library.document()
     reply = call(
         sock,
         "context.ml_create_from_role",
@@ -234,7 +251,7 @@ def test_ml_create_missing_alias_reports_binding_without_writing(
     assert reply["error"]["code"] == "invalid_params"
     assert "qubit" in reply["error"]["message"]
     assert "Aliases" in reply["error"]["message"]
-    assert fx.ctrl.context_control.read_context().library.document() == before
+    assert capture_focus(fx.ctrl.context_control).library.document() == before
 
 
 @pytest.mark.parametrize("whole_module", [False, True])
@@ -256,7 +273,7 @@ def test_parameter_set_binds_missing_module_slot_and_returns_previous_value(
         "value": value,
     }
     assert (
-        fx.ctrl.context_control.read_context().library_key("R1.module.readout") == key
+        capture_focus(fx.ctrl.context_control).library_key("R1.module.readout") == key
     )
     replaced = call(sock, "context.set_parameter", {"path": path, "value": value})
     assert replaced["ok"] is True, replaced
@@ -266,7 +283,7 @@ def test_parameter_set_binds_missing_module_slot_and_returns_previous_value(
 @pytest.mark.parametrize("name", ["mux_ro", "R1.mux_ro", "R1.invalid.mux_ro"])
 def test_ml_create_reports_name_format_without_writing(role_socket, name):
     fx, sock = role_socket
-    before = fx.ctrl.context_control.read_context().library.document()
+    before = capture_focus(fx.ctrl.context_control).library.document()
     reply = call(
         sock,
         "context.ml_create_from_role",
@@ -283,7 +300,7 @@ def test_ml_create_reports_name_format_without_writing(role_socket, name):
     assert all(
         partition in error["message"] for partition in ("pulses", "readout", "reset")
     )
-    assert fx.ctrl.context_control.read_context().library.document() == before
+    assert capture_focus(fx.ctrl.context_control).library.document() == before
 
 
 def test_ml_create_from_role_applies_edits_before_validation(role_socket):
@@ -302,7 +319,7 @@ def test_ml_create_from_role_applies_edits_before_validation(role_socket):
     )
     assert reply["ok"] is True, reply
     assert reply["result"] == {"created": "R1.readout.mux_readout"}
-    written = fx.ctrl.context_control.read_context().library.module_spec(
+    written = capture_focus(fx.ctrl.context_control).library.module_spec(
         "R1.readout.mux_readout"
     )
     assert written.model_dump(mode="json")["tones"] == [
@@ -345,7 +362,7 @@ def test_ml_create_from_role_rejects_invalid_input_without_writing(
     role_socket, edits, error_path
 ):
     fx, sock = role_socket
-    before = fx.ctrl.context_control.read_context().library.document()
+    before = capture_focus(fx.ctrl.context_control).library.document()
     params = {"role_id": "mux:blank", "name": "R1.readout.mux_readout"}
     if edits is not None:
         params["edits"] = edits
@@ -356,7 +373,7 @@ def test_ml_create_from_role_rejects_invalid_input_without_writing(
     assert error.get("data") is not None, error
     assert [item["path"] for item in error["data"]["errors"]] == [error_path]
     assert all(item["message"] for item in error["data"]["errors"])
-    assert fx.ctrl.context_control.read_context().library.document() == before
+    assert capture_focus(fx.ctrl.context_control).library.document() == before
 
 
 def test_ml_roles_and_create_use_gui_role_defaults(library_client):

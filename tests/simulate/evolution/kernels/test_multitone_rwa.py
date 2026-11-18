@@ -22,7 +22,94 @@ from zcu_tools.simulate.evolution.kernel import KernelContext, SegmentTable
 from zcu_tools.simulate.evolution.kernels import REGISTRY
 from zcu_tools.simulate.evolution.workplan import WorkPlan
 
+from tests.simulate.evolution.contract.interaction_reference import (
+    interaction_reference,
+)
 from tests.simulate.evolution.contract.kernel_suite import KernelCase, KernelContract
+from tests.simulate.evolution.contract.multitone_cases import accumulated_pair_case
+
+
+def endpoint_pair():
+    """Two constant tones with omitted diagonal and counter-rotating channels."""
+    x = np.array([[0.012, 0.02], [0.02, -0.009]], dtype=np.complex128)
+    b = np.array([[-0.008, 0.014], [0.014, 0.005]], dtype=np.complex128)
+    model = SecularModel(
+        (0,),
+        "endpoint-pair",
+        np.array([0.0, 0.6]),
+        np.eye(2, dtype=complex),
+        (
+            SecularDrive("a", x, np.zeros_like(x)),
+            SecularDrive("b", b, np.zeros_like(b)),
+        ),
+        np.array([[0.0, 0.00003], [0.00001, 0.0]]),
+        np.array([[0.0, 0.00002], [0.00002, 0.0]]),
+    )
+    vector = np.array([1.0, 0.4j], dtype=complex) / np.sqrt(1.16)
+    source = ModelSource(
+        np.outer(vector, vector.conj()), lambda level: replace(model, level=level)
+    )
+    tracks = tuple(
+        DriveTrack(
+            name,
+            np.array([7.0]),
+            np.array([24.375]),
+            np.array([frequency]),
+            np.array([phase]),
+            np.array([gain]),
+            (EnvelopeSpec("constant"),),
+            np.array([0]),
+            np.array([True]),
+        )
+        for name, frequency, phase, gain in (
+            ("a", 0.6, 0.3, 0.4),
+            ("b", 0.63, 1.1, -0.2),
+        )
+    )
+    batch = TimelineBatch(
+        np.array([0]),
+        tracks,
+        FluxSchedule(np.array([0, 1]), np.array([0.0]), np.array([[0]])),
+        np.array([33.515]),
+    )
+    return source, batch
+
+
+def test_constant_pair_endpoint_density():
+    source, batch = endpoint_pair()
+    with (
+        closing(source),
+        closing(Engine(1, families=("multitone_rwa", "t4"))) as engine,
+    ):
+        expected = interaction_reference(source, batch)
+        actual = engine.evolve(source, (batch,), cancel=Event())
+    assert actual.paths.segments_by_kernel == {"multitone_rwa": 1, "t4": 2}
+    error = float(np.max(np.abs(actual.densities - expected.density)))
+    assert error <= 2e-3, f"endpoint full-density error {error:.9g} > 2e-3"
+
+
+def test_constant_pair_row_splitting_keeps_endpoint_density():
+    source, batch = endpoint_pair()
+    start = float(batch.tracks[0].start_ns[0])
+    duration = float(batch.tracks[0].duration_ns[0])
+    errors = []
+    with (
+        closing(source),
+        closing(Engine(1, families=("multitone_rwa", "t4"))) as engine,
+    ):
+        expected = interaction_reference(source, batch)
+        for count in (1, 2, 4, 8):
+            boundaries = tuple(np.linspace(start, start + duration, count + 1)[1:-1])
+            split = replace(batch, segment_boundaries=(boundaries,))
+            actual = engine.evolve(source, (split,), cancel=Event())
+            assert actual.paths.segments_by_kernel == {"multitone_rwa": count, "t4": 2}
+            error = float(np.max(np.abs(actual.densities - expected.density)))
+            assert error <= 2e-3, f"{count} rows: full-density error {error:.9g}"
+            errors.append(error)
+    # Each row is independently dressed; extra cuts must not accumulate a
+    # first-order endpoint defect. Compare every count to the same exact oracle.
+    assert max(errors) <= 2 * errors[0], f"1/2/4/8-row errors: {errors}"
+    print(f"1/2/4/8-row full-density errors: {errors}")
 
 
 @pytest.mark.parametrize("duration", [1000.0, 2000.0])
@@ -675,3 +762,14 @@ def test_retained_only_phase_does_not_reject_long_rows():
         for domain in ("constant", "same_port")
         for phase in (0.05, 0.07, 1.0)
     }
+
+
+def test_constant_resonant_pair_rejects_accumulated_error() -> None:
+    """Pinned constant A16 must decline secular accumulation from ground."""
+    source, batch = accumulated_pair_case()
+    with (
+        closing(source),
+        closing(Engine(1, families=("multitone_rwa",))) as engine,
+        pytest.raises(NoValidKernel),
+    ):
+        engine.evolve(source, (batch,), budget=1e-3)

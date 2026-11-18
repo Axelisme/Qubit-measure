@@ -1,6 +1,6 @@
 # Single-fluxonium acquisition
 
-**Last updated:** 2026-11-16，last-state projection sharing and memory budget
+**Last updated:** 2026-11-17, acquire telemetry and optional capture publication
 
 **Readers:** framework-dev, lab-author, agent. Compose complete fluxonium timelines with one physical readout cavity.
 
@@ -34,6 +34,33 @@ pool. Empty work, one timeline or one worker runs serially. GUI startup explicit
 reserves one host CPU, using at least one worker, and does no numeric warmup.
 Tests, benchmarks, research and other direct callers keep the serial default.
 The startup policy is defined in [ADR-0069](../../../../../docs/adr/0069-experiment-core-and-frontends.md#顯式-cfg-與裝置環境).
+
+## Debug capture
+
+`numerics.debug_capture` defaults to false. Enable it to publish one frozen
+Engine-input and route manifest after each admitted acquire, including failure.
+Every evolve in that acquire shares the same buffer. Telemetry can remain off.
+When enabled, telemetry stores the published basename in `capture_file`,
+or null when capture is off or publication fails. Capture writes run before
+summary construction and outside binding's measured wall time.
+See the [shared switch contract](../../README.md#debug-capture) for empty
+captures, retention and the cache directory.
+
+## Acquire telemetry
+
+`numerics.telemetry.enabled` defaults to true. The environment writes one
+bounded `routing-*.jsonl` row after each admitted acquire. Set `directory` to
+choose the output directory; null selects project-root `.sim_telemetry`.
+Direct evolution and every projective continuation enable Engine telemetry.
+The row contains binding compile time, summed Engine wall time and ADC/readout
+wall time. It includes failed calls through their failure and leaves unentered
+stages at `0.0`. No deferred raw materialization enters the row.
+`complete` comes from the binding's `AcquireOutcome`: normal partial Stop is true,
+while exceptions are false. Writer I/O failures warn once and do not change the
+acquire result. Disabling the policy suppresses writes; evolution still collects
+its per-call diagnostics. The shared fields, common default directory, separate
+analysis setup and file budget are described in the
+[telemetry contract](../../README.md#acquire-telemetry).
 
 ## Complete timelines
 
@@ -82,46 +109,35 @@ execution rejects them before evolution. The source does not approximate their
 Stark shifts, cavity memory or backaction. All readout uses the DC model even
 when flux has not returned to DC.
 
-`SingleFluxoniumSource.prepare` projects each density into rank-1 outcomes in the
-retained DC energy basis. It keeps each outcome's full history across later
-reads. Outcomes store only weights and chronological state histories. Within
-one plan and span, densities are indexed by the last projected DC state, so at
-most `levels` densities continue through `Engine.evolve`. The next projection
-computes probabilities once per last state. Candidate weights keep parent/state
-order, and pruning precedes allocation of surviving histories. ADC CTMC jumps
-during an earlier read affect its IQ only, not later density evolution.
-This approximation does not group outcomes by IQ distinguishability and does
-not add MIST or active reset. Within one preparation, templates must have equal
-projective counts and per-event grid counts. Conflicts raise `ValueError` naming
-the templates and layouts before evolution or sampling.
+`SingleFluxoniumSource.prepare` projects into rank-1 states in the retained
+DC energy basis. It returns a `ProjectionChain` with first-event populations
+and one source-to-target transition table per later read, including terminal.
+It does not enumerate outcome histories. Each span evolves required source
+states through `Engine.evolve`. ADC CTMC jumps during a read affect its IQ only,
+not later density evolution. This approximation does not group states by IQ
+distinguishability and does not add MIST or active reset. Within one preparation,
+templates must have equal projective counts and per-event grid counts.
+Conflicts raise `ValueError` naming templates and layouts before evolution or sampling.
 
-`numerics.projection_prune_floor` discards global history weights below its
-threshold after each projection, then normalizes survivors per point. The
-finite range is `0 <= floor < 1`, with default `1e-9`; zero disables pruning.
-If a point loses every outcome, preparation raises `ValueError` naming its ID
-and floor. `SingleFluxoniumPreparation.projection_diagnostics` records retained
-history counts per point/event, discarded probability mass relative to the
-original distribution, and evolution call count. Summing a point's discarded
-weights gives its cumulative loss without recounting earlier pruning.
-Span reuse digests include continuation densities and absolute time bounds.
-Every span must pass the engine's routing validation before preparation reuse.
-`projection.PROJECTION_MEMORY_BUDGET_BYTES` fixes the projection-array allowance
-at 2 GiB on every machine. Before allocation, the runner estimates shared
-densities, candidate weight matrices and masks, surviving histories, retained
-plans, diagnostics, and padded event populations. The estimate includes the
-second copy owned by immutable `ProjectionReadout` and validation scratch.
-With pruning disabled, the exact exponential outcome count is checked before
-evolution. With pruning enabled, checks use actual counts at each split and
-before constructing the readout. Over-budget preparation raises `ValueError`
-with `projection memory budget exceeded`, estimated and budget bytes, levels,
-points, outcomes and event count. Reduce levels or points per batch, or increase
-`projection_prune_floor` to discard more low-weight histories. No config or GUI
-field changes this budget. The allowance leaves 6 GiB under an 8 GiB process
-cap for other owners and allocator overhead. It does not bound engine or ADC
-workspace, or guarantee a total process RSS limit. Sharing stays within the
-preparation lifetime defined by ADR-0078. Six-fluxonium sources use this same
-runner independently; the allowance is per source preparation, not six-source
-aggregate admission.
+`numerics.projection_prune_floor` controls continuation at each point.
+A source state whose approximate probability is below the floor at that point
+uses an identity transition row there, approximating it as staying in that state.
+The finite range is `0 <= floor < 1`; the example supplies `1e-9`.
+Zero gives the exact chain, including transitions from zero-probability states.
+No probability is discarded or renormalized by this approximation.
+Path total variation from the exact chain is at most the sum of that point's
+`uncontinued_probability` across transitions.
+
+`SingleFluxoniumPreparation.projection_diagnostics` reports `continued_states`
+and `uncontinued_probability` per point and transition. Each row has reads−1
+entries, excluding prefix and anything after terminal. `continued_states`
+counts adopted solver rows, even when the solver returns identity.
+`uncontinued_probability` sums the source marginal on non-adopted rows.
+`evolution_calls` counts actual calls including prefixes. Adopted row counts
+cannot determine calls, because a row solved for another point may remain unused
+at this point. Span reuse digests include continuation densities and absolute
+time bounds. Every span must pass Engine routing validation before preparation
+reuse, following ADR-0078. Six-fluxonium uses this runner for each cavity.
 
 Without projective reads the source keeps its terminal-only evolution and ADC
 sampling path, including RNG consumption.
@@ -151,7 +167,8 @@ Preflight checks every template's projective count and each ADC's event/grid
 layout without building a model, evolving a density or solving an ADC response.
 Conflicts name the ADC, templates and layouts.
 
-`prepare_readouts(preflight)` evolves one common `ProjectionReadout` and returns
+`prepare_readouts(preflight)` evolves one common projection chain, or a terminal-only
+`ProjectionReadout`, and returns
 all `channels` and `raw.batches` in receiver order. ADCs observing the same event
 share its CTMC path in raw and decimated sampling. Their receiver noise remains
 independent. `ConditionalSums.event_indices` retains original logical event IDs,
@@ -257,7 +274,7 @@ reread on each lookup. Evolution validates reuse against its own routing policy.
 Noise, counts, round identities and measured IQ are never cached.
 Projection continuation densities exist only while preparing the spans of one
 timeline. No later shot, round or acquisition starts from a previous outcome's
-terminal density. Reuse of immutable outcome weights, event populations and
+terminal density. Reuse of immutable projection chains, unprojected populations and
 conditional sums follows the complete-preparation rules above. It does not
 carry forward a sampled herald result.
 Reassigning `source.settings` to validated settings changes the snapshot's

@@ -75,8 +75,8 @@ def app(qapp, tmp_path, monkeypatch):
         PointCreateRequest,
     )
 
-    ctrl.setup_control.new_entry(EntryRequest("lab"))
-    ctrl.setup_control.new_point(
+    ctrl.entry_control.new_entry(EntryRequest("lab"))
+    ctrl.entry_control.new_point(
         PointCreateRequest("working", "", CommandOrigin("gui"))
     )
     window = MainWindow(
@@ -89,7 +89,7 @@ def app(qapp, tmp_path, monkeypatch):
         yield ctrl, window, state, tab_id
     finally:
         ctrl.close()
-        window.deleteLater()
+        window.dispose()
         qapp.processEvents()
 
 

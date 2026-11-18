@@ -39,15 +39,15 @@ def test_dialog_ref_store_cleans_up_on_destroyed_only() -> None:
     dialog = _Dialog()
 
     # tolerated(cast): reportArgumentType: The fake emits destroyed alone without ending a Qt lifetime.
-    store.open_named("setup", cast(QDialog, dialog))
+    store.open_named("entry", cast(QDialog, dialog))
 
-    assert store.get("setup") is dialog
+    assert store.get("entry") is dialog
     assert len(store) == 1
     assert dialog.open_count == 1
 
     dialog.destroyed.emit(object())
 
-    assert store.get("setup") is None
+    assert store.get("entry") is None
     assert len(store) == 0
 
 
@@ -57,10 +57,10 @@ def test_dialog_ref_store_duplicate_key_fast_fails() -> None:
     second = _Dialog()
 
     # tolerated(cast): reportArgumentType: The recording fake retains identity without a Qt-owned lifetime.
-    store.open_named("setup", cast(QDialog, first))
+    store.open_named("entry", cast(QDialog, first))
     with pytest.raises(RuntimeError, match="dialog key is already retained"):
         # tolerated(cast): reportArgumentType: The fake counts opens to verify rejection before second.open.
-        store.open_named("setup", cast(QDialog, second))
+        store.open_named("entry", cast(QDialog, second))
 
     assert second.open_count == 0
 

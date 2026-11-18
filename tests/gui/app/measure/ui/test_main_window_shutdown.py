@@ -95,6 +95,7 @@ def test_main_window_confirms_and_begins_shutdown_when_operations_active(
     ctrl.get_bus.return_value = EventBus()
     ctrl.active_operation_count.return_value = 2
     window = MainWindow(ctrl, templates=lambda: {}, dialog_presenter=dialogs)
+    main_window_control_factory.own(window)
     event = QCloseEvent()
 
     window.closeEvent(event)
@@ -117,6 +118,7 @@ def test_main_window_declining_confirmation_keeps_window_open(
     ctrl.get_bus.return_value = EventBus()
     ctrl.active_operation_count.return_value = 1
     window = MainWindow(ctrl, templates=lambda: {}, dialog_presenter=dialogs)
+    main_window_control_factory.own(window)
     event = QCloseEvent()
 
     window.closeEvent(event)
@@ -145,6 +147,7 @@ def test_main_window_persists_session_on_close_when_idle(
     # synchronously so the deferred turn exercises _perform_close.
     ctrl.begin_shutdown.side_effect = lambda on_closed: on_closed()
     window = MainWindow(ctrl, templates=lambda: {})
+    main_window_control_factory.own(window)
     event = QCloseEvent()
 
     window.closeEvent(event)
@@ -192,6 +195,7 @@ def test_main_window_close_removes_event_bus_subscriptions(
     ctrl.active_operation_count.return_value = 0
     ctrl.begin_shutdown.side_effect = lambda on_closed: on_closed()
     window = MainWindow(ctrl, templates=lambda: {})
+    main_window_control_factory.own(window)
 
     payload_types = (
         TabInteractionChangedPayload,

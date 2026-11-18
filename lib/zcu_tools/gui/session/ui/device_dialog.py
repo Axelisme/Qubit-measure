@@ -58,7 +58,7 @@ from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 
 if TYPE_CHECKING:
     from zcu_tools.gui.session.device_control import DeviceControlPort
-    from zcu_tools.gui.session.parameters import ParameterContext
+    from zcu_tools.gui.session.parameters import DocumentSetCapture
 
 
 logger = logging.getLogger(__name__)
@@ -105,7 +105,7 @@ class _MemoryDevicePanel(QWidget):
 class DeviceDialog(QDialog):
     """Edit device settings through the supplied DeviceControlPort.
 
-    parameter_provider returns one fixed ParameterContext for each preview or
+    parameter_provider returns one fixed DocumentSetCapture for each preview or
     expression-bearing Apply. None permits pure calculations but not parameter
     paths. Direct-only Apply does not call it. Provider or expression failures
     display an error and prevent setup; valid Apply delegates setup to device.
@@ -117,7 +117,7 @@ class DeviceDialog(QDialog):
     def __init__(
         self,
         device: DeviceControlPort,
-        parameter_provider: Callable[[], ParameterContext | None],
+        parameter_provider: Callable[[], DocumentSetCapture | None],
         parent: QWidget | None = None,
         *,
         before_stop: Callable[[], None] | None = None,
@@ -800,9 +800,9 @@ class DeviceDialog(QDialog):
         self, name: str, updates: Mapping[str, object]
     ) -> dict[str, object] | None:
         """Resolve once for Apply; display input failures and return None to reject submission."""
-        # Resolve any EvalRef markers against the current ParameterContext (Design 1:
+        # Resolve any EvalRef markers against the current DocumentSetCapture (Design 1:
         # apply-time resolve once, not per-keystroke). Only touch the controller's
-        # ParameterContext when at least one field is in eval mode — direct-only applies
+        # DocumentSetCapture when at least one field is in eval mode — direct-only applies
         # do not depend on an active context.
         from zcu_tools.gui.session.expression import (
             EvalRef,

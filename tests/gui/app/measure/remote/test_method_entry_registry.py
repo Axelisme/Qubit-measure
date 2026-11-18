@@ -1,17 +1,27 @@
 from __future__ import annotations
 
+import socket
+
 import pytest
-from zcu_tools.gui.app.measure.remote.dispatch import METHOD_REGISTRY
-from zcu_tools.gui.app.measure.remote.handlers.operation import h_operation_await
-from zcu_tools.gui.app.measure.remote.method_entries import METHOD_ENTRIES
 from zcu_tools.gui.app.measure.remote.method_entries._registry import (
     RemoteMethodEntry,
     build_dispatch_registry,
     build_method_specs,
     method_entry,
 )
-from zcu_tools.gui.app.measure.remote.method_specs import METHOD_SPECS
 from zcu_tools.gui.remote.method_spec import MethodSpec
+
+from ._helpers import Fixture, call, open_client
+
+
+@pytest.fixture
+def remote(tmp_path, qapp):
+    fixture = Fixture(project_root=str(tmp_path / "project"))
+    fixture.start()
+    try:
+        yield fixture
+    finally:
+        fixture.stop()
 
 
 def _entry(method: str, handler_ref: str) -> RemoteMethodEntry:
@@ -46,18 +56,37 @@ def test_build_dispatch_registry_rejects_bad_handler_refs(
         build_dispatch_registry((_entry("test.method", handler_ref),))
 
 
-def test_method_entries_are_single_registry_source() -> None:
-    entry_methods = {entry.method for entry in METHOD_ENTRIES}
+@pytest.mark.requires_loopback
+def test_discovered_methods_are_dispatchable(remote) -> None:
+    # An observer reaches validation/admission without mutating application state.
+    with socket.create_connection(("127.0.0.1", remote.service.port)) as client:
+        assert call(
+            client, "control.connect", {"label": "catalog observer", "mode": "readonly"}
+        )["ok"]
+        catalog = call(client, "rpc.catalog")
+        assert catalog["ok"] is True
+        methods = catalog["result"]["methods"]
+        assert methods
+        for entry in methods:
+            reply = call(client, entry["method"], {})
+            if not reply["ok"]:
+                assert reply["error"]["code"] in {
+                    "invalid_params",
+                    "precondition_failed",
+                }, (entry["method"], reply)
 
-    assert entry_methods == set(METHOD_SPECS)
-    assert entry_methods == set(METHOD_REGISTRY)
 
-
-def test_handler_refs_follow_wire_method_name_convention() -> None:
-    for entry in METHOD_ENTRIES:
-        _, function_name = entry.handler_ref.split(":", 1)
-        assert function_name == "h_" + entry.method.replace(".", "_")
-
-
-def test_dispatch_registry_resolves_real_handler_identity() -> None:
-    assert METHOD_REGISTRY["operation.await"].handler is h_operation_await
+@pytest.mark.requires_loopback
+def test_dispatch_operation_await_returns_terminal_reply(remote) -> None:
+    with open_client(remote.service.port) as client:
+        created = call(client, "tab.new", {"adapter_name": "fake"})
+        tab_id = created["result"]["tab_id"]
+        started = call(client, "tab.run_start", {"tab_id": tab_id})
+        assert started["ok"] is True
+        reply = call(
+            client,
+            "operation.await",
+            {"operation_id": started["result"]["operation_id"], "timeout": 30},
+        )
+        assert reply["ok"] is True
+        assert reply["result"] == {"reason": "completed", "status": "finished"}

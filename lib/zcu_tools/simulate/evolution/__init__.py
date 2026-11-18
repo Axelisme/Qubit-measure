@@ -8,7 +8,18 @@ implementation details, not a second integration interface.
 """
 
 from .. import _numba_cache  # Bootstrap before any dispatcher is created.
+from ._capture import (
+    CaptureAdopter,
+    CaptureBuffer,
+    CaptureCandidate,
+    CaptureMetadata,
+    CapturePosition,
+    CapturePrefixRun,
+    CaptureRoute,
+    read_capture_metadata,
+)
 from ._inspection import DispatchCandidate, DispatchInspection, DispatchRow, RowKey
+from .capture_writer import capture_directory, write_capture
 from .controls import ControlPulse, ControlSequence, Envelope, PhaseEvent, quantize_ns
 from .engine import (
     SEGMENT_NUMERIC_VERSION,
@@ -42,11 +53,15 @@ from .joint_fock import (
     JointFockResult,
     joint_fock_spectrum,
 )
+from .kernels._rwa_fourier import RWACoefficients, interaction_hamiltonian
 from .kernels._rwa_numeric import (
-    RWACoefficients,
-    interaction_hamiltonian,
+    RWAGuardMetric,
+    RWAUncomputed,
     rwa_coefficients,
 )
+from .kernels.common_frame import CommonFrameDiagnostic, common_frame_diagnostic
+from .kernels.multitone_rwa import MultitoneRWADiagnostic, multitone_rwa_diagnostic
+from .kernels.single_tone_rwa import SingleToneRWADiagnostic, single_tone_rwa_diagnostic
 from .model import DriveSource, NumericModel
 from .reference_cache import (
     ReferenceResult,

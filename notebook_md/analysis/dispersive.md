@@ -27,7 +27,7 @@ jupyter:
 **Readers:** operator, lab-author. Fit resonator responses from an entry-local predictor and export a dispersive artifact.
 
 Set the entry name, component name and bare_rf in GHz below. The component must
-have kind `qubit/fluxonium` in the entry setup. Predictor input comes from
+have kind `qubit/fluxonium` in the entry global parameters. Predictor input comes from
 `predictors/<component>.json`. This notebook does not choose a component from aliases
 or seed bare_rf from saved artifacts. It does not read params.json.
 The [dispersive GUI](../../lib/zcu_tools/gui/app/dispersive/README.md) owns the interactive workflow;
@@ -81,7 +81,7 @@ entry = ResultEntry.open(
     result_root=project_root / "result",
     database_root=project_root / "Database",
 )
-component_model = snapshot(entry.setup).components[component]
+component_model = snapshot(entry.parameters()).components[component]
 if component_model.kind != "qubit/fluxonium":
     raise ValueError(f"Expected qubit/fluxonium, got {component_model.kind!r}")
 result_dir = entry.result_path
@@ -268,7 +268,7 @@ fig.write_image(f"{image_dir}/{figname}.png", format="png", width=800, height=40
 
 # Export dispersive result
 
-Artifact and setup writes are separate commits. An I/O or schema failure preserves
+Artifact and global parameter writes are separate commits. An I/O or schema failure preserves
 any successful earlier write. Only declared g/bare_rf fields are updated.
 
 ```python
@@ -287,9 +287,9 @@ save_dispersive_file(
         ),
     ),
 )
-entry.setup.refresh()
-component_model = snapshot(entry.setup).components[component]
-with entry.setup.edit() as draft:
+entry.parameters().refresh()
+component_model = snapshot(entry.parameters()).components[component]
+with entry.parameters().edit() as draft:
     for field, value in (("g", best_g), ("bare_rf", bare_rf)):
         if field in type(component_model).model_fields:
             draft.set(f"{component}.{field}", float(value))

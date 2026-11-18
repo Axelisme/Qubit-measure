@@ -27,6 +27,7 @@ from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.resources.entry import component_registry
 
 from tests.gui._component_fakes import Qubit
+from tests.gui._context_reads import capture_focus
 from tests.gui.app.measure._record_support import require_target
 
 
@@ -70,16 +71,18 @@ def controller(qapp, tmp_path: Path):
         BaseEventBus(),
         project_root=str(tmp_path),
     )
-    ctrl.setup_control.new_entry(EntryRequest("templates"))
+    ctrl.entry_control.new_entry(EntryRequest("templates"))
     before = component_registry.kinds()
     component_registry.register("template/qubit", Qubit)
     try:
-        ctrl.context_control.add_component("Q1", "template/qubit", {}, setup=True)
-        ctrl.setup_control.new_point(
+        ctrl.context_control.add_component("Q1", "template/qubit", {}, point=None)
+        ctrl.entry_control.new_point(
             PointCreateRequest("working", "", CommandOrigin("gui"))
         )
-        ctrl.context_control.apply_alias_rows((AliasRow("qubit", "Q1"),))
-        capture = ctrl.context_control.read_context()
+        ctrl.context_control.apply_alias_rows(
+            (AliasRow("qubit", "Q1"),), point=ctrl.context_control.current_point_label()
+        )
+        capture = capture_focus(ctrl.context_control)
         ctrl.context_control.set_parameter(
             require_target(capture), "Q1.ext.freq", 6123.0
         )
@@ -94,19 +97,19 @@ def test_registry_template_creation_evaluates_placeholder_and_keeps_bound_slot(
     controller: Controller,
 ):
     controller.create_from_template("module", "probe", "Q1.pulses.probe")
-    library = controller.context_control.read_context().library
+    library = capture_focus(controller.context_control).library
     pulse = library.module_spec("Q1.pulses.probe")
     assert pulse == PulseSpec(
         ch=2, nqz=1, freq=6123.0, gain=0.25, waveform=ConstWaveformCfg(length=0.4)
     )
     controller.create_from_template("waveform", "envelope", "Q1.waveforms.base")
     controller.create_from_template("module", "reset", "Q1.reset.probe")
-    reset = controller.context_control.read_context().library.module_spec(
+    reset = capture_focus(controller.context_control).library.module_spec(
         "Q1.reset.probe"
     )
     assert isinstance(reset, PulseResetSpec)
     assert reset.pulse_cfg == "Q1.pulses.probe"
-    assert controller.context_control.read_context().library.waveform_spec(
+    assert capture_focus(controller.context_control).library.waveform_spec(
         "Q1.waveforms.base"
     ) == ConstWaveformCfg(length=0.5)
 
@@ -123,7 +126,7 @@ def test_registry_template_creation_evaluates_placeholder_and_keeps_bound_slot(
 def test_rejected_creation_leaves_library_unchanged(
     controller: Controller, kind: str, template: str, name: str, error: type[Exception]
 ):
-    capture = controller.context_control.read_context()
+    capture = capture_focus(controller.context_control)
     controller.context_control.set_module(
         require_target(capture),
         "Q1.pulses.occupied",
@@ -131,10 +134,10 @@ def test_rejected_creation_leaves_library_unchanged(
             ch=0, nqz=1, freq=1.0, gain=0.1, waveform=ConstWaveformCfg(length=1.0)
         ),
     )
-    before = controller.context_control.read_context().library
+    before = capture_focus(controller.context_control).library
     with pytest.raises(error):
         controller.create_from_template(kind, template, name)
-    after = controller.context_control.read_context().library
+    after = capture_focus(controller.context_control).library
     assert after.module_keys() == before.module_keys()
     assert after.waveform_keys() == before.waveform_keys()
     assert after.module_spec("Q1.pulses.occupied") == before.module_spec(
@@ -143,13 +146,13 @@ def test_rejected_creation_leaves_library_unchanged(
 
 
 def test_invalid_template_input_is_rejected_before_write(controller: Controller):
-    capture = controller.context_control.read_context()
+    capture = capture_focus(controller.context_control)
     controller.context_control.set_parameter(
         require_target(capture), "Q1.ext.freq", None
     )
     with pytest.raises(LibraryEntryInvalid, match="freq"):
         controller.create_from_template("module", "probe", "Q1.pulses.new")
-    assert controller.context_control.read_context().library.module_keys() == ()
+    assert capture_focus(controller.context_control).library.module_keys() == ()
 
 
 def test_wire_discovery_and_creation_keep_reply_shapes(controller: Controller):
@@ -190,7 +193,7 @@ def test_wire_discovery_and_creation_keep_reply_shapes(controller: Controller):
         adapter, {"role_id": "probe", "name": "Q1.pulses.rpc"}
     ) == {"created": "Q1.pulses.rpc"}
     assert (
-        controller.context_control.read_context()
+        capture_focus(controller.context_control)
         .library.module_spec("Q1.pulses.rpc")
         .model_dump()["freq"]
         == 6123.0
@@ -214,4 +217,4 @@ def test_wire_missing_id_is_invalid_params_without_write(controller: Controller)
             adapter, {"role_id": "missing", "name": "Q1.pulses.rpc"}
         )
     assert exc.value.code == ErrorCode.INVALID_PARAMS
-    assert controller.context_control.read_context().library.module_keys() == ()
+    assert capture_focus(controller.context_control).library.module_keys() == ()

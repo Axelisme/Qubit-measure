@@ -14,7 +14,7 @@ from zcu_tools.gui.session.ui.eval_field import EvalNumericField
 from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.session.parameters import ParameterContext
+    from zcu_tools.gui.session.parameters import DocumentSetCapture
 
 
 class _YOKOGS200Panel(QWidget):
@@ -22,7 +22,7 @@ class _YOKOGS200Panel(QWidget):
 
     def __init__(
         self,
-        parameter_provider: Callable[[], ParameterContext | None],
+        parameter_provider: Callable[[], DocumentSetCapture | None],
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)

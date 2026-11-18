@@ -36,6 +36,7 @@ from zcu_tools.gui.session.context_types import (
 from zcu_tools.gui.widgets.form import FormEditor
 
 from tests._filesystem import DIRECTORY_OPEN_ERROR
+from tests.gui._context_reads import capture_focus
 from tests.gui._dialog_fakes import RecordingDialogPresenter
 from tests.gui._progress_fakes import DirectProgressTransport
 from tests.gui._qt_waits import qt_until
@@ -91,6 +92,7 @@ def widget_factory(
         for dialog in widget.findChildren(QDialog):
             if dialog.isVisible():
                 dialog.reject()
+        widget.close()
         widget.deleteLater()
     QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
     qapp.processEvents()
@@ -253,17 +255,21 @@ def module_widget(tmp_path: Path, qapp: QApplication, request: pytest.FixtureReq
     widget: WritebackWidget | None = None
     tab_id: str | None = None
     try:
-        ctrl.setup_control.new_entry(EntryRequest("offline"))
-        ctrl.setup_control.new_point(PointCreateRequest("a", "", CommandOrigin("gui")))
+        ctrl.entry_control.new_entry(EntryRequest("offline"))
+        ctrl.entry_control.new_point(PointCreateRequest("a", "", CommandOrigin("gui")))
         context = ctrl.context_control
-        context.add_component("Q1", "fake/drive/a", {})
+        context.add_component(
+            "Q1", "fake/drive/a", {}, point=context.current_point_label()
+        )
         context.set_waveform(
-            require_target(context.read_context()),
+            require_target(capture_focus(context)),
             MODULE_PROPOSAL_WAVEFORM,
             ConstWaveformCfg(length=0.1),
         )
         context.set_parameter(
-            require_target(context.read_context()), "general.ext.gain", 0.4
+            require_target(capture_focus(context)),
+            "general.ext.gain",
+            0.4,
         )
         board = white_noise(load_soccfg(), std_adc=1.0, seed=None, routes=((0, 0),))
         ctrl.session_services.soc_connection.install_soc(board.soc, board.soccfg)
@@ -306,6 +312,7 @@ def module_widget(tmp_path: Path, qapp: QApplication, request: pytest.FixtureReq
         if widget is not None:
             for dialog in widget.findChildren(QDialog):
                 dialog.reject()
+            widget.close()
             widget.deleteLater()
         if tab_id is not None and ctrl.tab_control.has_tab(tab_id):
             ctrl.tab_control.close_tab(tab_id)
@@ -326,7 +333,7 @@ def _populate_module(module_widget):
 
 
 def _pulse(ctrl: Controller, name: str) -> PulseSpec:
-    spec = ctrl.context_control.read_context().library.module_spec(name)
+    spec = capture_focus(ctrl.context_control).library.module_spec(name)
     assert isinstance(spec, PulseSpec)
     return spec
 
@@ -351,7 +358,9 @@ def module_ui(module_widget, tmp_path, request):
     form = ctrl.writeback_control.get_writeback_item_form_for_pane(tab_id, pane, "ml-1")
     context = ctrl.context_control
     context.set_module(
-        require_target(context.read_context()), MODULE_PROPOSAL_TARGET, form.spec()
+        require_target(capture_focus(context)),
+        MODULE_PROPOSAL_TARGET,
+        form.spec(),
     )
     _, widget, _, _ = _populate_module(module_widget)
     driver = ComponentDriver(widget)
@@ -494,7 +503,9 @@ def test_module_save_keeps_captured_expression_and_waveform_key(
     editor.screenshot(evidence / "06-name.png")
     context = ctrl.context_control
     context.set_parameter(
-        require_target(context.read_context()), "general.ext.gain", 0.8
+        require_target(capture_focus(context)),
+        "general.ext.gain",
+        0.8,
     )
     editor.click("Save")
     driver.screenshot(evidence / "07-saved.png")
@@ -525,7 +536,7 @@ def test_module_option_command_is_local_until_save(module_widget, module_ui, bus
     captured = form.parameters.library.waveform_spec(MODULE_PROPOSAL_WAVEFORM)
     context = ctrl.context_control
     context.set_waveform(
-        require_target(context.read_context()),
+        require_target(capture_focus(context)),
         MODULE_PROPOSAL_WAVEFORM,
         ConstWaveformCfg(length=0.75),
     )
@@ -606,7 +617,7 @@ def test_busy_edit_request_shows_guard_reason_without_opening_dialog(
         dialog.accept()
         assert (
             MODULE_PROPOSAL_TARGET
-            not in ctrl.context_control.read_context().library.module_keys()
+            not in capture_focus(ctrl.context_control).library.module_keys()
         )
     finally:
         ctrl.set_running(tab_id, running=False)
@@ -630,7 +641,8 @@ def module_host(module_widget, qapp):
         # Publish the real tab close while its subscribed Qt host is still live.
         if ctrl.tab_control.has_tab(tab_id):
             ctrl.tab_control.close_tab(tab_id)
-        window.deleteLater()
+        ctrl.close()
+        window.dispose()
         QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
         qapp.processEvents()
 
@@ -667,7 +679,7 @@ def test_host_apply_presents_expected_busy_error_without_losing_draft(module_hos
         assert "busy" in presenter.calls[0].message.lower()
         assert (
             MODULE_PROPOSAL_TARGET
-            not in ctrl.context_control.read_context().library.module_keys()
+            not in capture_focus(ctrl.context_control).library.module_keys()
         )
         assert form.state.input.data == before
         assert dialog.isVisible() and _input(dialog, "freq").text() == "5100.125"
@@ -679,7 +691,7 @@ def test_host_apply_presents_expected_busy_error_without_losing_draft(module_hos
 def test_controller_apply_propagates_unexpected_storage_error(module_host):
     ctrl, _window, _widget, tab_id, pane, presenter = module_host
     context = ctrl.context_control
-    storage = context.capture_storage(context.read_context())
+    storage = context.capture_storage(capture_focus(context))
     ledger = storage.result_path / "records" / "ledger.jsonl"
     backup = ledger.with_suffix(".saved")
     if ledger.exists():
@@ -691,7 +703,7 @@ def test_controller_apply_propagates_unexpected_storage_error(module_host):
             ctrl.writeback_control.apply_writeback_for_pane(tab_id, pane)
         assert presenter.calls == []
         assert (
-            MODULE_PROPOSAL_TARGET not in context.read_context().library.module_keys()
+            MODULE_PROPOSAL_TARGET not in capture_focus(context).library.module_keys()
         )
     finally:
         ledger.rmdir()

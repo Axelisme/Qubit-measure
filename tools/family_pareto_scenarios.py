@@ -24,13 +24,16 @@ from zcu_tools.simulate.evolution import (
 from zcu_tools.simulators.ftf.config import parse_ftf
 from zcu_tools.simulators.ftf.environment import FTFSource, ftf, plan_template
 
+from tools.dop853_segment import profile_inputs
 from tools.family_pareto_gate_scenes import GATE_SCENES, make_gate_inputs
 from tools.family_pareto_inputs import (
+    MULTITONE_PRICE_SCENES,
     Input,
     Scene,
     make_inputs,
 )
 from tools.family_pareto_kernel_scenes import KERNEL_SCENES, make_kernel_inputs
+from tools.family_pareto_multitone_scenes import make_multitone_price_inputs
 from tools.family_pareto_prepare import prepare_scenes as prepare_scenes
 from tools.family_pareto_scene_builders import (
     declared_input,
@@ -838,10 +841,13 @@ def overlapping_constant_tones_input() -> Input:
 
 
 def make_real_inputs(scenario: str | None = None) -> list[Input]:
-    """Build all fixed scenarios, or only the named Input before any model work.
+    """Declare fixed scans, DOP853 profiles and FTF gates, or select one name.
 
-    Returned inputs own detached fresh-source factories. An unknown scenario
-    raises ValueError listing legal Input names without constructing models.
+    scenario=None includes the DOP853 profile catalogue and FTF gates after the
+    fixed scans. A fixed or gate name selects only that input. Other names go to
+    profile_inputs for selected-only construction or ValueError.
+    Unknown names do not construct models. Model construction failures propagate.
+    Returned inputs own detached factories; callers close each built Scene.source.
     """
     if scenario in GATE_SCENES:
         return make_gate_inputs(scenario)
@@ -863,12 +869,14 @@ def make_real_inputs(scenario: str | None = None) -> list[Input]:
         "random_shaped_gate_sequence": random_shaped_gate_sequence_input,
     }
     if scenario is None:
-        return [*[build() for build in builders.values()], *make_gate_inputs()]
-    if scenario not in builders:
-        raise ValueError(
-            f"Unknown scenario: {scenario}. Legal names: {', '.join((*builders, *GATE_SCENES))}"
-        )
-    return [builders[scenario]()]
+        return [
+            *[build() for build in builders.values()],
+            *profile_inputs(),
+            *make_gate_inputs(),
+        ]
+    if scenario in builders:
+        return [builders[scenario]()]
+    return profile_inputs(scenario)
 
 
 def main(argv: list[str] | None = None, *, inputs: list[Input] | None = None) -> int:
@@ -878,7 +886,9 @@ def main(argv: list[str] | None = None, *, inputs: list[Input] | None = None) ->
     both category indexes. --scene-cache is an absolute override of the shared
     cache. --scenario processes only its indexed row, or appends a declared new
     scene to its category with --update-index. inputs optionally supplies
-    caller-owned declarations instead of the fixed inventory; builder sources
+    caller-owned declarations instead of the fixed and profile inventory. Default
+    --scenario routing constructs only the selected Input, including profile
+    names, and rejects unknown names before model work. Builder sources
     are closed after snapshotting. Native thread settings are fixed/logged at 1.
     --update-index explicitly updates selected identities only after all selected
     builders succeed. Inventory deletion/regrouping is never inferred; edit the
@@ -925,6 +935,8 @@ def main(argv: list[str] | None = None, *, inputs: list[Input] | None = None) ->
     with threadpool_limits(limits=1):
         if inputs is not None:
             selected = inputs
+        elif args.scenario in MULTITONE_PRICE_SCENES:
+            selected = make_multitone_price_inputs(args.scenario)
         elif args.scenario in KERNEL_SCENES:
             selected = make_kernel_inputs(args.scenario)
         elif args.scenario == "idle_coherence":
@@ -932,7 +944,12 @@ def main(argv: list[str] | None = None, *, inputs: list[Input] | None = None) ->
         elif args.scenario:
             selected = make_real_inputs(args.scenario)
         else:
-            selected = [*make_inputs(), *make_real_inputs(), *make_kernel_inputs()]
+            selected = [
+                *make_inputs(),
+                *make_real_inputs(),
+                *make_kernel_inputs(),
+                *make_multitone_price_inputs(),
+            ]
         prepare_scenes(
             selected,
             indexes,

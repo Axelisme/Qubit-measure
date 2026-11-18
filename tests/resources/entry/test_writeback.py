@@ -9,21 +9,19 @@ from pydantic import ValidationError
 from zcu_tools.cfg_model import ConstWaveformCfg, PulseSpec
 from zcu_tools.resources.entry import (
     AcceptedPayload,
-    EntryWritebackTarget,
-    PointView,
+    ParameterView,
     ResultEntry,
-    capture_entry_storage,
-    capture_point_storage,
+    capture_storage,
     document_value,
     snapshot,
     source_path,
 )
 from zcu_tools.resources.entry.storage import bind_record_table
 from zcu_tools.resources.entry.writeback import (
+    BoundDocumentWritebackTarget,
     ModuleWriteback,
     ParameterUpdate,
     ParameterWriteback,
-    PointWritebackTarget,
     RecordWriteback,
     WaveformWriteback,
     WritebackApplyError,
@@ -34,11 +32,13 @@ from zcu_tools.resources.entry.writeback import (
 
 
 @pytest.fixture
-def point(tmp_path: Path) -> PointView:
+def point(tmp_path: Path) -> ParameterView:
     entry = ResultEntry.create(
         "entry", result_root=tmp_path / "results", database_root=tmp_path / "db"
     )
-    entry.setup.add_component("Q1", kind="fake/drive/a", rate=5000.0, duration=10.0)
+    entry.parameters().add_component(
+        "Q1", kind="fake/drive/a", rate=5000.0, duration=10.0
+    )
     point = entry.new_point("a")
     with point.edit() as draft:
         draft.set_meta("Q1.duration", {"stderr": 0.5, "comment": "kept"})
@@ -47,7 +47,7 @@ def point(tmp_path: Path) -> PointView:
 
 
 def test_add_component_in_edit_view_commits_registered_defaults(
-    point: PointView,
+    point: ParameterView,
 ) -> None:
     with point.edit() as draft:
         draft.add_component("Q2", kind="fake/drive/a", rate=6123.4)
@@ -68,9 +68,11 @@ def test_add_component_in_edit_view_commits_registered_defaults(
 def test_parameter_batch_upserts_only_when_requested_and_commits_atomically(
     entry: ResultEntry, scope: str, failure: str | None
 ) -> None:
-    entry.setup.add_component("Q1", kind="fake/drive/a", rate=5000.0, duration=10.0)
+    entry.parameters().add_component(
+        "Q1", kind="fake/drive/a", rate=5000.0, duration=10.0
+    )
     point = entry.new_point("upsert")
-    view = point if scope == "point" else entry.setup
+    view = point if scope == "point" else entry.parameters()
     before = source_path(view).read_bytes()
     updates = (
         ParameterUpdate("Q1.rate", 6012.3, create_kind="unused-kind-for-existing"),
@@ -99,12 +101,81 @@ def test_parameter_batch_upserts_only_when_requested_and_commits_atomically(
         assert document_value(snapshot(view), "Q2.ext") == {}
         assert view.meta("Q2.rate") == {"note": "new"}
         assert tuple(
-            snapshot(entry.setup if scope == "point" else point).components
+            snapshot(entry.parameters() if scope == "point" else point).components
         ) == ("Q1",)
 
 
-def target(point: PointView) -> PointWritebackTarget:
-    return PointWritebackTarget(point, capture_point_storage(point))
+@pytest.mark.parametrize("scope", [None, "P1"])
+def test_parameter_updates_write_only_the_bound_scope(
+    entry: ResultEntry, scope: str | None
+) -> None:
+    global_view = entry.parameters()
+    global_view.add_component("Q1", kind="fake/drive/a", rate=5000.0)
+    point_view = entry.new_point("P1")
+    assert type(global_view) is type(point_view) is ParameterView
+    views = {None: global_view, "P1": point_view}
+    other = views["P1" if scope is None else None]
+    other_bytes = source_path(other).read_bytes()
+
+    assert commit_parameter_updates(
+        views[scope], (ParameterUpdate("Q1.rate", 6100.0),)
+    ) == (6100.0,)
+
+    assert source_path(other).read_bytes() == other_bytes
+    reopened = ResultEntry.open(
+        entry.result_path.name,
+        result_root=entry.result_path.parent,
+        database_root=entry.database_path.parent,
+    )
+    assert reopened.parameters(scope).Q1.rate == 6100.0
+    assert reopened.parameters("P1" if scope is None else None).Q1.rate == 5000.0
+
+
+def target(point: ParameterView) -> BoundDocumentWritebackTarget:
+    return BoundDocumentWritebackTarget(point, capture_storage(point))
+
+
+@pytest.mark.parametrize("scope", [None, "P1"])
+@pytest.mark.parametrize(
+    "mismatch", ["entry", "result-root", "database-root", "scope", "point"]
+)
+def test_writeback_target_rejects_storage_from_another_location(
+    entry: ResultEntry, tmp_path: Path, scope: str | None, mismatch: str
+) -> None:
+    entry.new_point("P1")
+    view = entry.parameters(scope)
+    other_name = "other" if mismatch == "entry" else "entry"
+    other_results = (
+        tmp_path / "other-results"
+        if mismatch == "result-root"
+        else entry.result_path.parent
+    )
+    other_database = (
+        tmp_path / "other-database"
+        if mismatch == "database-root"
+        else entry.database_path.parent
+    )
+    if mismatch in ("database-root", "scope", "point"):
+        other = ResultEntry.open(
+            other_name, result_root=other_results, database_root=other_database
+        )
+    else:
+        other = ResultEntry.create(
+            other_name, result_root=other_results, database_root=other_database
+        )
+        other.new_point("P1")
+    other_scope = ("P1" if scope is None else None) if mismatch == "scope" else scope
+    if mismatch == "point":
+        other.new_point("P2")
+        other_scope = "P2"
+    storage = capture_storage(other.parameters(other_scope))
+    before = source_path(view).read_bytes()
+
+    with pytest.raises(ValueError, match="same bound document"):
+        BoundDocumentWritebackTarget(view, storage)
+
+    assert source_path(view).read_bytes() == before
+    assert entry.ledger.events() == other.ledger.events() == ()
 
 
 def evidence() -> WritebackEvidence:
@@ -114,10 +185,12 @@ def evidence() -> WritebackEvidence:
 def test_entry_writeback_commits_global_documents_without_changing_point(
     entry: ResultEntry,
 ) -> None:
-    entry.setup.add_component("Q1", kind="fake/drive/a", rate=5000.0)
+    entry.parameters().add_component("Q1", kind="fake/drive/a", rate=5000.0)
     point = entry.new_point("independent")
     (entry.result_path / "library.yaml").unlink()
-    writer = EntryWritebackTarget(entry.setup, capture_entry_storage(entry))
+    writer = BoundDocumentWritebackTarget(
+        entry.parameters(), capture_storage(entry.parameters())
+    )
     result = apply_writeback(
         (
             ParameterWriteback("Q1.rate", 6100.0, {"note": "global edit"}),
@@ -127,18 +200,18 @@ def test_entry_writeback_commits_global_documents_without_changing_point(
         evidence=evidence(),
     )
     assert len(result.committed) == 2
-    assert entry.setup.Q1.rate == 6100.0
-    assert entry.setup.meta("Q1.rate") == {"note": "global edit"}
-    assert entry.module_library().snapshot().waveform_keys() == ("Q1.waveforms.pi",)
+    assert entry.parameters().Q1.rate == 6100.0
+    assert entry.parameters().meta("Q1.rate") == {"note": "global edit"}
+    assert entry.library().snapshot().waveform_keys() == ("Q1.waveforms.pi",)
     assert point.Q1.rate == 5000.0
-    assert entry.module_library("independent").snapshot().waveform_keys() == ()
+    assert entry.library("independent").snapshot().waveform_keys() == ()
     assert writer.point is None
     accepted = entry.ledger.get(result.event_id).event
     assert accepted.kind == "accepted"
 
 
 def test_library_acceptance_keeps_audit_event_without_leaf_sources(
-    point: PointView,
+    point: ParameterView,
 ) -> None:
     writer = target(point)
     result = apply_writeback(
@@ -159,9 +232,9 @@ def test_library_acceptance_keeps_audit_event_without_leaf_sources(
 
 
 def test_library_writeback_creates_missing_file_only_when_touched(
-    point: PointView,
+    point: ParameterView,
 ) -> None:
-    storage = capture_point_storage(point)
+    storage = capture_storage(point)
     path = source_path(point).parent / "library.yaml"
     path.unlink()
     writer = target(point)
@@ -184,13 +257,13 @@ def test_library_writeback_creates_missing_file_only_when_touched(
         result_root=storage.result_path.parent,
         database_root=storage.database_path.parent,
     )
-    assert entry.module_library(storage.point).snapshot().waveform_keys() == (
+    assert entry.library(storage.point).snapshot().waveform_keys() == (
         "Q1.waveforms.pi",
     )
 
 
 def test_writeback_appends_acceptance_after_transplanted_foreign_history(
-    point: PointView, tmp_path: Path
+    point: ParameterView, tmp_path: Path
 ) -> None:
     writer = target(point)
     foreign = ResultEntry.create(
@@ -214,7 +287,7 @@ def test_writeback_appends_acceptance_after_transplanted_foreign_history(
 
 @pytest.mark.parametrize("fails", [False, True])
 def test_executor_returns_each_committed_value_and_failure_prefix(
-    point: PointView, fails: bool
+    point: ParameterView, fails: bool
 ) -> None:
     writer = target(point)
     items = (
@@ -250,7 +323,7 @@ def test_executor_returns_each_committed_value_and_failure_prefix(
 
 
 def test_parameter_items_commit_caller_metadata_and_keep_omitted_metadata(
-    point: PointView,
+    point: ParameterView,
 ) -> None:
     writer = target(point)
     event_id = apply_writeback(
@@ -278,7 +351,7 @@ def test_parameter_items_commit_caller_metadata_and_keep_omitted_metadata(
 
 
 def test_invalid_parameter_rolls_back_whole_group_and_metadata(
-    point: PointView,
+    point: ParameterView,
 ) -> None:
     writer = target(point)
     with pytest.raises(WritebackApplyError) as caught:
@@ -303,7 +376,7 @@ def test_invalid_parameter_rolls_back_whole_group_and_metadata(
 
 
 def test_group_order_preserves_accepted_order_and_per_item_receipts(
-    point: PointView,
+    point: ParameterView,
 ) -> None:
     writer = target(point)
     waveform = ConstWaveformCfg(length=0.1)
@@ -345,7 +418,7 @@ def test_group_order_preserves_accepted_order_and_per_item_receipts(
 
 
 def test_invalid_library_rolls_back_mixed_family_group_and_keeps_point_prefix(
-    point: PointView,
+    point: ParameterView,
 ) -> None:
     writer = target(point)
     with pytest.raises(WritebackApplyError) as caught:
@@ -372,22 +445,22 @@ def test_invalid_library_rolls_back_mixed_family_group_and_keeps_point_prefix(
     ]
     point.refresh()
     assert (point.Q1.rate, point.Q1.duration) == (5300.0, 12.0)
-    storage = capture_point_storage(point)
+    storage = capture_storage(point)
     library = ResultEntry.open(
         "entry",
         result_root=storage.result_path.parent,
         database_root=storage.database_path.parent,
-    ).module_library("a")
+    ).library("a")
     assert library.snapshot().document().components == {}
     assert bind_record_table(storage.result_path, "Q1").latest("run-1") is None
     assert len(writer.ledger.events()) == 1
 
 
 def test_record_numpy_producer_values_reach_ledger_and_record_history(
-    point: PointView,
+    point: ParameterView,
 ) -> None:
-    storage = capture_point_storage(point)
-    writer = PointWritebackTarget(point, storage)
+    storage = capture_storage(point)
+    writer = BoundDocumentWritebackTarget(point, storage)
     fit = {
         "stderr": np.float32(0.125),
         "counts": [np.int64(-9223372036854775808), np.uint64(18446744073709551615)],
@@ -466,10 +539,10 @@ def test_record_numpy_producer_values_reach_ledger_and_record_history(
     ],
 )
 def test_record_invalid_producer_value_rejects_before_any_write(
-    point: PointView, value: object
+    point: ParameterView, value: object
 ) -> None:
-    storage = capture_point_storage(point)
-    writer = PointWritebackTarget(point, storage)
+    storage = capture_storage(point)
+    writer = BoundDocumentWritebackTarget(point, storage)
     with pytest.raises(ValueError, match="strict JSON"):
         apply_writeback(
             (

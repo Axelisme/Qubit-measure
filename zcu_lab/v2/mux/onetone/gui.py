@@ -21,7 +21,7 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackItem,
     WritebackRequest,
 )
-from zcu_tools.gui.session.parameters import ParameterContext
+from zcu_tools.gui.session.parameters import DocumentSetCapture
 from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2.mux.onetone.core import (
@@ -159,7 +159,7 @@ class MuxOnetoneAnalyzeResult:
 
 
 def _resonators(
-    parameters: ParameterContext | None, count: int
+    parameters: DocumentSetCapture | None, count: int
 ) -> tuple[tuple[str, ...] | None, str | None]:
     if parameters is None:
         return None, "No Run/Load parameter capture; resonator parameters unavailable"

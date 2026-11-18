@@ -129,7 +129,7 @@ See the [heralded guide](guide_heralded.md) for post-selection and pass fraction
 ## Notebook
 
 Use the adapter with a complete saved or operator-reviewed cfg.
-`point_view` is the bound PointView for the save destination.
+`point_view` is the bound ParameterView for the save destination.
 
 ```python
 from zcu_tools.notebook import NotebookAdapter
