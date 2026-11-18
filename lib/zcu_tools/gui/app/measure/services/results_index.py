@@ -1,14 +1,17 @@
 """Read-only project-wide result queries shared by the browser and RPC."""
 
+import errno
 import json
-from collections.abc import Mapping
+import os
+import stat
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
-from zcu_tools.datafile import JsonObject, read_doc
+from zcu_tools.datafile import JsonObject, read_doc, read_docs
 from zcu_tools.resources.document_names import PARAMETERS_FILENAME
 from zcu_tools.resources.entry import (
     AcquiredPayload,
@@ -87,10 +90,31 @@ class ResultItemIssue:
 
 
 @dataclass(frozen=True)
+class ResultEntryBatch:
+    """Detached rows and item issues from one completed Database entry.
+
+    project_root is the canonical absolute scan root. entry is the scanned name.
+    completed_entries counts this and earlier names;
+    total_entries counts all names selected at the start, including unreadable
+    or empty entries. runs is ordered by run directory name. issues records
+    paths within this entry that could not be safely enumerated.
+    """
+
+    project_root: Path
+    entry: str
+    completed_entries: int
+    total_entries: int
+    runs: tuple[ResultRun, ...]
+    issues: tuple[ResultItemIssue, ...]
+
+
+@dataclass(frozen=True)
 class ResultsIndex:
     """Detached project query snapshot; no open files, locks or live entry state.
 
     project_root is absolute. runs is sorted by entry then run-directory name.
+    The snapshot may contain only completed entries during a background scan;
+    scan_results returns a complete snapshot on success.
     issues records entries/run directories that could not be safely enumerated;
     per-file and Result ledger failures remain in ResultRun.issues.
     Member selectors are exact indexed filenames, never arbitrary paths.
@@ -156,8 +180,16 @@ class ResultsIndex:
         return _inside(run.run_path, path).read_bytes()
 
 
+class ResultsScanCancelled(RuntimeError):
+    """A cooperative stop interrupted the scan; no complete snapshot exists."""
+
+
 def scan_results(
-    project_root: Path, *, entries: tuple[str, ...] | None = None
+    project_root: Path,
+    *,
+    entries: tuple[str, ...] | None = None,
+    on_entry: Callable[[ResultEntryBatch], None] | None = None,
+    cancelled: Callable[[], bool] | None = None,
 ) -> ResultsIndex:
     """Scan project_root/Database and same-named project_root/result ledgers.
 
@@ -172,32 +204,89 @@ def scan_results(
     leaves that entry's runs unregistered. Escaping members are excluded and
     diagnosed without following them. Unenumerable entries/runs produce named
     ResultsIndex.issues, not synthetic runs. Never create files or locks.
+
+    on_entry, if given, receives a detached batch on the calling thread after
+    each entry and before reading the next. Empty directories and entries with
+    item issues count toward progress; loose files and absent names do not.
+    Database root issues appear only in the returned complete snapshot.
+    Callback exceptions propagate.
+
+    cancelled is a calling-thread predicate (for example Event.is_set). It is
+    checked before scanning, between runs, and before publishing or returning.
+    True raises ResultsScanCancelled instead of returning an incomplete snapshot.
+    Already delivered batches remain valid; in-flight I/O is not interrupted.
     """
     root = project_root.resolve()
     if entries is not None:
         for entry in entries:
             validate_path_segment(entry, field="entry")
-    database = root / "Database"
-    try:
-        _inside(database, database)
-        if not database.exists():
-            return ResultsIndex(root, ())
-        names = (
-            sorted(set(entries))
-            if entries is not None
-            else sorted(path.name for path in database.iterdir())
-        )
-    except (OSError, ValueError) as error:
-        return ResultsIndex(root, (), (ResultItemIssue(None, database, str(error)),))
+    _check_cancelled(cancelled)
+    names, issues = _database_entries(root / "Database", entries)
     runs: list[ResultRun] = []
-    issues: list[ResultItemIssue] = []
-    for entry in names:
-        runs.extend(_scan_entry(root, entry, issues))
+    for completed, entry in enumerate(names, 1):
+        _check_cancelled(cancelled)
+        entry_issues: list[ResultItemIssue] = []
+        entry_runs = _scan_entry(root, entry, entry_issues, cancelled)
+        _check_cancelled(cancelled)
+        runs.extend(entry_runs)
+        issues.extend(entry_issues)
+        if on_entry is not None:
+            on_entry(
+                ResultEntryBatch(
+                    root,
+                    entry,
+                    completed,
+                    len(names),
+                    tuple(entry_runs),
+                    tuple(entry_issues),
+                )
+            )
+    _check_cancelled(cancelled)
     return ResultsIndex(root, tuple(runs), tuple(issues))
 
 
+def _check_cancelled(cancelled: Callable[[], bool] | None) -> None:
+    if cancelled is not None and cancelled():
+        raise ResultsScanCancelled("Results scan cancelled")
+
+
+def _database_entries(
+    database: Path, entries: tuple[str, ...] | None
+) -> tuple[list[str], list[ResultItemIssue]]:
+    try:
+        _inside(database, database)
+        if not database.exists():
+            return [], []
+        candidates = (
+            [database / name for name in set(entries)]
+            if entries is not None
+            else list(database.iterdir())
+        )
+    except (OSError, ValueError) as error:
+        return [], [ResultItemIssue(None, database, str(error))]
+
+    names: list[str] = []
+    for path in candidates:
+        try:
+            info = path.lstat()
+        except (FileNotFoundError, NotADirectoryError):
+            continue
+        except OSError:
+            # Let _scan_entry report access errors at the individual entry.
+            names.append(path.name)
+        else:
+            # Do not follow redirects here. _scan_entry checks containment and
+            # diagnoses unsafe entries before looking for runs.
+            if stat.S_ISDIR(info.st_mode) or _is_redirect(info):
+                names.append(path.name)
+    return sorted(names), []
+
+
 def _scan_entry(
-    root: Path, entry: str, issues: list[ResultItemIssue]
+    root: Path,
+    entry: str,
+    issues: list[ResultItemIssue],
+    cancelled: Callable[[], bool] | None,
 ) -> list[ResultRun]:
     location = root / "Database" / entry
     try:
@@ -227,12 +316,25 @@ def _scan_entry(
         entry_issues.append(str(error))
         acquisitions, saved_outputs = {}, {}
     runs: list[ResultRun] = []
+    prefixes = tuple(
+        str(parent) for parent in reversed(location.parents) if parent.name
+    )
+    directory = _ScanDirectory(location, (*prefixes, str(location)))
     for path in paths:
+        _check_cancelled(cancelled)
         try:
-            _checked_run(root, entry, path)
-            if path.is_dir():
+            info = directory.child_stat(
+                path, lambda child: _checked_run(root, entry, child)
+            )
+            if info is not None and stat.S_ISDIR(info.st_mode):
                 runs.append(
-                    _scan_run(entry, path, acquisitions, saved_outputs, entry_issues)
+                    _scan_run(
+                        entry,
+                        directory.child(path),
+                        acquisitions,
+                        saved_outputs,
+                        entry_issues,
+                    )
                 )
         except (OSError, ValueError) as error:
             issues.append(ResultItemIssue(entry, path, str(error)))
@@ -272,6 +374,42 @@ def _checked_run(project: Path, entry: str, run: Path) -> None:
     _inside(run, run)
 
 
+def _is_redirect(info: os.stat_result) -> bool:
+    # Windows directory junctions also redirect lookup, without being symlinks.
+    if os.name == "nt":
+        return bool(info.st_file_attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT)
+    return stat.S_ISLNK(info.st_mode)
+
+
+@dataclass(frozen=True)
+class _ScanDirectory:
+    """Reuse the lexical prefix chain, never its filesystem observations."""
+
+    path: Path
+    prefixes: tuple[str, ...]
+
+    def child(self, path: Path) -> "_ScanDirectory":
+        return _ScanDirectory(path, (*self.prefixes, str(path)))
+
+    def child_stat(
+        self, path: Path, check_redirect: Callable[[Path], Path | None]
+    ) -> os.stat_result | None:
+        # Fresh no-follow lookups detect replaced ancestors before descending.
+        # Ordinary paths need no canonicalization; redirected ones use the
+        # same lexical containment checks and diagnostics as standalone reads.
+        try:
+            if not any(_is_redirect(os.lstat(prefix)) for prefix in self.prefixes):
+                info = path.lstat()
+                if not _is_redirect(info):
+                    return info
+            check_redirect(path)
+            return path.stat()
+        except OSError as error:
+            if error.errno in {errno.ENOENT, errno.ENOTDIR, errno.EBADF, errno.ELOOP}:
+                return None
+            raise
+
+
 def _select_member(paths: tuple[Path, ...], selector: str, *, kind: str) -> Path:
     for path in paths:
         if path.name == selector:
@@ -297,48 +435,62 @@ def _acquisitions(
 
 
 def _members(
-    run: Path, folder: str, pattern: str, issues: list[str]
+    run: _ScanDirectory, folder: str, pattern: str, issues: list[str]
 ) -> tuple[Path, ...]:
-    directory = run / folder
+    directory = run.path / folder
     try:
-        _inside(run, directory)
-        if not directory.exists():
+        if run.child_stat(directory, lambda child: _inside(run.path, child)) is None:
             return ()
         paths = sorted(path for path in directory.iterdir() if path.match(pattern))
     except (OSError, ValueError) as error:
         issues.append(f"{directory}: {error}")
         return ()
-    members: list[Path] = []
-    for path in paths:
-        try:
-            _inside(run, path)
-            if path.is_file():
-                members.append(path)
-        except (OSError, ValueError) as error:
-            issues.append(f"{path}: {error}")
-    return tuple(members)
+    children = run.child(directory)
+    return tuple(
+        path for path in paths if _is_member_file(children, run.path, path, issues)
+    )
 
 
-def _metadata(path: Path | None, issues: list[str]) -> _SavedMetadata | None:
-    if path is None:
-        return None
+def _is_member_file(
+    directory: _ScanDirectory, run_root: Path, path: Path, issues: list[str]
+) -> bool:
     try:
-        return _SavedMetadata.model_validate(read_doc(path, "metadata"))
-    except (OSError, KeyError, ValueError) as error:
-        # A broken file must remain visible and selectable in the browser.
+        info = directory.child_stat(path, lambda child: _inside(run_root, child))
+        return info is not None and stat.S_ISREG(info.st_mode)
+    except (OSError, ValueError) as error:
         issues.append(f"{path}: {error}")
-        return None
+        return False
 
 
-def _search_documents(
-    data: Path | None, analysis: tuple[Path, ...], issues: list[str]
-) -> list[str]:
-    texts: list[str] = []
-    if data is not None:
+def _native_documents(
+    path: Path | None, issues: list[str]
+) -> tuple[_SavedMetadata | None, str | None]:
+    if path is None:
+        return None, None
+    try:
+        docs = read_docs(path, ("metadata", "cfg"))
+    except (OSError, KeyError, ValueError) as error:
+        # File-wide failures affect both documents but do not remove the run.
+        issues.extend((f"{path}: {error}", f"{path}: cfg: {error}"))
+        return None, None
+    metadata_doc = docs["metadata"]
+    metadata = None
+    if isinstance(metadata_doc, Exception):
+        issues.append(f"{path}: {metadata_doc}")
+    else:
         try:
-            texts.append(json.dumps(read_doc(data, "cfg"), ensure_ascii=False))
-        except (OSError, KeyError, ValueError) as error:
-            issues.append(f"{data}: cfg: {error}")
+            metadata = _SavedMetadata.model_validate(metadata_doc)
+        except ValueError as error:
+            issues.append(f"{path}: {error}")
+    cfg = docs["cfg"]
+    if isinstance(cfg, Exception):
+        issues.append(f"{path}: cfg: {cfg}")
+        return metadata, None
+    return metadata, json.dumps(cfg, ensure_ascii=False)
+
+
+def _search_documents(analysis: tuple[Path, ...], issues: list[str]) -> list[str]:
+    texts: list[str] = []
     for path in analysis:
         try:
             texts.append(json.dumps(_read_json(path), ensure_ascii=False))
@@ -349,22 +501,22 @@ def _search_documents(
 
 def _scan_run(
     entry: str,
-    path: Path,
+    run: _ScanDirectory,
     acquisitions: Mapping[str, LedgerAcquisition],
     saved_outputs: Mapping[Path, str],
     entry_issues: list[str],
 ) -> ResultRun:
     issues = list(entry_issues)
+    path = run.path
     data_path = path / "data.h5"
-    try:
-        _inside(path, data_path)
-        data = data_path if data_path.is_file() else None
-    except (OSError, ValueError) as error:
-        issues.append(f"{data_path}: {error}")
-        data = None
-    figures = _members(path, "figures", "*.png", issues)
-    analysis = _members(path, "analysis", "*.json", issues)
-    metadata = _metadata(data, issues)
+    data = data_path if _is_member_file(run, path, data_path, issues) else None
+    # Read native data while its path check is fresh, before checking siblings.
+    # Keep member diagnostics ahead of document diagnostics in the returned row.
+    native_issues: list[str] = []
+    metadata, cfg_text = _native_documents(data, native_issues)
+    figures = _members(run, "figures", "*.png", issues)
+    analysis = _members(run, "analysis", "*.json", issues)
+    issues.extend(native_issues)
     event = next(
         (
             acquisitions[saved_outputs[member]]
@@ -392,7 +544,9 @@ def _scan_run(
         point or "",
         json.dumps(dict(roles)),
     ]
-    texts.extend(_search_documents(data, analysis, issues))
+    if cfg_text is not None:
+        texts.append(cfg_text)
+    texts.extend(_search_documents(analysis, issues))
     return ResultRun(
         key=f"{entry}/{path.name}",
         entry=entry,

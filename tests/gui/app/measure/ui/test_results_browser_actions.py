@@ -116,6 +116,7 @@ def test_tree_load_targets_clicked_run_and_uses_the_button_load_boundary(
         )
         assert len(calls) == 2
     finally:
+        browser.dispose()
         browser.close()
         browser.deleteLater()
         qapp.processEvents()

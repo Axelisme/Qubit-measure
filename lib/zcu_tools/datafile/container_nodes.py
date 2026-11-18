@@ -54,8 +54,22 @@ def json_text(value: JsonObject) -> str:
 
 
 def read_doc(node: h5.Group, name: str) -> JsonObject:
-    """Read a local UTF-8 scalar JSON object or raise FormatError."""
+    """Read a required local UTF-8 scalar JSON object or raise FormatError."""
+    document = find_doc(node, name)
+    if document is None:
+        raise FormatError(f"{node.name}/{name}: expected scalar JSON dataset")
+    return document
+
+
+def find_doc(node: h5.Group, name: str) -> JsonObject | None:
+    """Read a local UTF-8 scalar JSON object; missing/dangling names give None.
+
+    Invalid datasets and external links raise instead of looking like missing
+    documents.
+    """
     dataset = known_node(node, name)
+    if dataset is None:
+        return None
     if not isinstance(dataset, h5.Dataset) or dataset.shape != ():
         raise FormatError(f"{node.name}/{name}: expected scalar JSON dataset")
     try:
@@ -101,9 +115,11 @@ def root_attrs(file: h5.File) -> ContainerAttrs:
     version = text_attr(file, "format_version")
     version_minor(version)
     extra: dict[str, JsonScalar] = {}
-    for key, value in file.attrs.items():
+    attributes = file.attrs
+    for key in attributes:
         if key in _RESERVED:
             continue
+        value = attributes[key]
         if isinstance(value, np.generic):
             value = value.item()
         if isinstance(value, h5.Empty):

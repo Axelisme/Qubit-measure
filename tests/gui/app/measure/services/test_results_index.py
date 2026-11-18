@@ -3,12 +3,18 @@
 import json
 from datetime import datetime, timezone
 from pathlib import Path
+from threading import Event
 from uuid import uuid4
 
+import h5py
 import pytest
 from zcu_tools.datafile import Container, ContainerAttrs, JsonObject, save
 from zcu_tools.experiment.metadata import RunMetadata, RunSnapshot, SoftwareProvenance
-from zcu_tools.gui.app.measure.services.results_index import scan_results
+from zcu_tools.gui.app.measure.services.results_index import (
+    ResultEntryBatch,
+    ResultsScanCancelled,
+    scan_results,
+)
 from zcu_tools.resources.entry import (
     AcquiredPayload,
     AnalyzedPayload,
@@ -199,6 +205,92 @@ def test_old_metadata_and_cfg_are_browsed_without_current_experiment_schema(
     assert len(index.runs) == 3
 
 
+def test_entry_batches_arrive_before_scanning_the_next_entry(project: Path) -> None:
+    # An unenumerable entry still contributes progress and its item issue.
+    broken = project / "Database" / "broken"
+    outside = project / "outside"
+    outside.mkdir()
+    broken.symlink_to(outside, target_is_directory=True)
+    new_run = project / "Database/beta/runs/late"
+    batches: list[ResultEntryBatch] = []
+
+    def publish(batch: ResultEntryBatch) -> None:
+        batches.append(batch)
+        if batch.entry == "alpha":
+            new_run.mkdir()
+
+    index = scan_results(project, on_entry=publish)
+
+    assert [(b.entry, b.completed_entries, b.total_entries) for b in batches] == [
+        ("alpha", 1, 4),
+        ("beta", 2, 4),
+        ("broken", 3, 4),
+        ("orphan", 4, 4),
+    ]
+    assert [row.entry for row in batches[0].runs] == ["alpha", "alpha"]
+    assert index.get_run("beta/late").run_path == new_run
+    assert index.runs == tuple(row for batch in batches for row in batch.runs)
+    assert not batches[2].runs
+    assert [issue.path for issue in batches[2].issues] == [broken]
+    assert index.issues == tuple(issue for batch in batches for issue in batch.issues)
+
+
+@pytest.mark.parametrize("scoped", [False, True], ids=["all", "selected"])
+def test_entry_progress_excludes_loose_files_and_missing_names(
+    tmp_path: Path, scoped: bool
+) -> None:
+    database = tmp_path / "Database"
+    (database / "empty").mkdir(parents=True)
+    (database / "record.bak/runs/old").mkdir(parents=True)
+    (database / "loose.txt").write_text("not a Database entry", encoding="utf-8")
+    escaped = database / "unsafe"
+    escaped.symlink_to(tmp_path, target_is_directory=True)
+    entries = ("empty", "record.bak", "loose.txt", "unsafe", "absent")
+    batches: list[ResultEntryBatch] = []
+
+    index = scan_results(
+        tmp_path, entries=entries if scoped else None, on_entry=batches.append
+    )
+
+    assert [(b.entry, b.completed_entries, b.total_entries) for b in batches] == [
+        ("empty", 1, 3),
+        ("record.bak", 2, 3),
+        ("unsafe", 3, 3),
+    ]
+    assert not batches[0].runs
+    assert [run.key for run in index.runs] == ["record.bak/old"]
+    assert [issue.path for issue in batches[-1].issues] == [escaped]
+    assert index.issues == batches[-1].issues
+
+
+def test_cancel_discards_an_unfinished_entry_without_reading_later_runs(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    beta_first = _layout(project, "beta", "mux/readout", _RUN1).run_path / "data.h5"
+    beta_second = _layout(project, "beta", "mux/readout", _RUN2).run_path / "data.h5"
+    cancelled = Event()
+    opened: list[Path] = []
+    batches: list[ResultEntryBatch] = []
+    open_file = h5py.File
+
+    def request_cancel(path: Path, mode: str) -> h5py.File:
+        handle = open_file(path, mode)
+        opened.append(path)
+        if path == beta_first:
+            cancelled.set()
+        return handle
+
+    # Entry callbacks cannot request cancellation between reads of the same entry.
+    monkeypatch.setattr(h5py, "File", request_cancel)
+    with pytest.raises(ResultsScanCancelled):
+        scan_results(project, on_entry=batches.append, cancelled=cancelled.is_set)
+
+    assert [batch.entry for batch in batches] == ["alpha"]
+    assert len(batches[0].runs) == 2
+    assert beta_first in opened
+    assert beta_second not in opened
+
+
 def test_index_spans_entries_points_and_preserves_slash_tag(project: Path) -> None:
     index = scan_results(project)
     assert len(index.runs) == 5
@@ -234,6 +326,55 @@ def test_indexed_documents_and_search_include_tones_missing_from_roles(
     assert index.read_cfg(run.key) == _CFG
     assert index.read_analysis(run.key, "analysis.json") == _ANALYSIS
     assert index.read_figure(run.key, "readout.png") == b"\x89PNG\r\n\x1a\nsynthetic"
+
+
+def test_scan_opens_each_native_file_once(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    paths: list[Path] = []
+    open_file = h5py.File
+
+    def count_open(path: Path, mode: str) -> h5py.File:
+        paths.append(Path(path))
+        return open_file(path, mode)
+
+    # Public batches and the final snapshot describe rows, not how often HDF5 opens.
+    monkeypatch.setattr(h5py, "File", count_open)
+    index = scan_results(project)
+
+    assert sorted(paths) == sorted(run.data_path for run in index.runs if run.data_path)
+    assert len(paths) == 4
+    assert not index.issues
+    assert all(not run.issues for run in index.runs)
+
+
+@pytest.mark.parametrize("missing", ["cfg", "metadata"])
+def test_missing_document_does_not_hide_the_other_from_search(
+    tmp_path: Path, missing: str
+) -> None:
+    run = tmp_path / "Database/legacy-Axel.bak/runs/synthetic"
+    run.mkdir(parents=True)
+    data = run / "data.h5"
+    docs: dict[str, JsonObject] = {
+        "cfg": {"label": "Searchable-Tone"},
+        "metadata": {"experiment": "historical/pulse"},
+    }
+    del docs[missing]
+    save(data, Container({}, docs, {}, ContainerAttrs("3.0", "synthetic", None, {})))
+
+    index = scan_results(tmp_path)
+
+    row = index.get_run("legacy-Axel.bak/synthetic")
+    if missing == "cfg":
+        assert row.experiment == "historical/pulse"
+        assert "historical/pulse" in row.search_text
+    else:
+        assert row.experiment is None
+        assert "searchable-tone" in row.search_text
+    assert row.issues == (
+        f"{data}: {'cfg: ' if missing == 'cfg' else ''}"
+        f"\"{data}: document '{missing}' not found\"",
+    )
 
 
 def test_figure_only_acquisition_uses_ledger_identity(project: Path) -> None:
@@ -444,6 +585,57 @@ def test_member_symlink_escape_is_rejected_on_scan_and_read(project: Path) -> No
     assert any(str(figure) in issue and "escapes" in issue for issue in affected.issues)
     assert len(refreshed.runs) == 5
     assert all(not row.issues for row in refreshed.runs if row.entry != run.entry)
+
+
+def test_scan_preserves_in_run_symlink_members(project: Path) -> None:
+    run = _layout(project, "alpha", "mux/readout", _RUN1).run_path
+    figures = run / "figures"
+    archive = run / "saved-figures"
+    figures.rename(archive)
+    (archive / "alias.png").symlink_to("readout.png")
+    figures.symlink_to(archive.name, target_is_directory=True)
+
+    index = scan_results(project, entries=("alpha",))
+
+    row = index.get_run(f"alpha/{run.name}")
+    assert row.figure_paths == (figures / "alias.png", figures / "readout.png")
+    assert index.read_figure(row.key, "alias.png") == b"\x89PNG\r\n\x1a\nsynthetic"
+    assert not row.issues
+
+
+def test_scan_rechecks_ancestor_before_more_reads(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    first = _layout(project, "alpha", "mux/readout", _RUN1).run_path
+    second = _layout(project, "alpha", "mux/readout", _RUN2).run_path
+    runs = first.parent
+    detached = project / "detached"
+    opened: list[Path] = []
+    open_file = h5py.File
+
+    def open_and_replace_runs(path: Path, mode: str) -> h5py.File:
+        file = open_file(path, mode)
+        if path == first / "data.h5" and not opened:
+            runs.rename(detached)
+            runs.symlink_to(detached, target_is_directory=True)
+        opened.append(path)
+        return file
+
+    # Entry snapshots cannot interleave a path replacement just after the first open.
+    monkeypatch.setattr(h5py, "File", open_and_replace_runs)
+    index = scan_results(project, entries=("alpha",))
+
+    assert [row.run_path for row in index.runs] == [first]
+    row = index.runs[0]
+    assert row.analysis_paths == ()
+    assert '"frequency": 5100.0' not in row.search_text
+    assert any(
+        str(first / "analysis") in issue and "escapes" in issue for issue in row.issues
+    )
+    assert second / "data.h5" not in opened
+    assert len(index.issues) == 1
+    assert index.issues[0].path == second
+    assert "escapes" in index.issues[0].reason
 
 
 @pytest.mark.parametrize(

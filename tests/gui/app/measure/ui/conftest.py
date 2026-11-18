@@ -1,6 +1,6 @@
 """Shared real measure UI composition and teardown for public view contracts."""
 
-from collections.abc import Generator, Iterator
+from collections.abc import Callable, Generator, Iterator
 from dataclasses import replace
 from pathlib import Path
 from uuid import uuid4
@@ -15,6 +15,7 @@ from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.services.pane_commit import commit_run
 from zcu_tools.gui.app.measure.services.results_index import scan_results
+from zcu_tools.gui.app.measure.services.results_index_owner import ResultsScanState
 from zcu_tools.gui.app.measure.state import RunPaneState
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 from zcu_tools.resources.entry import AcquiredPayload, LedgerEvent, ResultEntry
@@ -45,7 +46,15 @@ def browser_host(
     main_window_control_factory: MainWindowControlFactory,
 ) -> Iterator[MainWindow]:
     ctrl = apply_window_defaults(mock_ctrl(main_window_control_factory))
-    ctrl.query_results.side_effect = lambda: scan_results(tmp_path)
+    ctrl.get_project_root.return_value = str(tmp_path)
+
+    def project_saved_rows(
+        listener: Callable[[ResultsScanState], None],
+    ) -> Callable[[], None]:
+        listener(ResultsScanState(scan_results(tmp_path), "ready"))
+        return lambda: None
+
+    ctrl.watch_results_index.side_effect = project_saved_rows
     ctrl.resolve_experiment.side_effect = Registry().resolve_experiment
     window = MainWindow(
         ctrl, templates=lambda: {}, dialog_presenter=RecordingDialogPresenter()

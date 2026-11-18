@@ -75,3 +75,5 @@ basis:
 - 本 repo commit `c04fb38231de5aa65d01aba931a48db13d48d093`；模型與設定取自 `tools/family_pareto_settings.py` 的 FTF 模型（0.05 K、retained 32）與 `zcu_lab/simulation_envs/FTF/default.yaml`（retained 24）。
 - 參考解是 tests 端的完整 Lindblad、不做 RWA 的 interaction-frame 解（`tests/simulate/evolution/contract/interaction_reference.py`），兩級容差互比 ≤2e-6。
 - 各輪 spike 的原型、逐點數據與報告是未入庫的工作檔；上文的數字取自那些報告，均為非 exclusive 單次計時。
+
+後記（2026-11-18）：`retained_levels` 後來改為上限，FTF runtime 在符合條件的 acquire 以 pilot 選維度；`Engine` 仍不做約化。見 [FTF 動態維度](2026-11-18-ftf-dynamic-dimension.md)。

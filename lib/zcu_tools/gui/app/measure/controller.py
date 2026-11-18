@@ -78,6 +78,7 @@ from .services import (
     build_app_services,
 )
 from .services.results_index import ResultsIndex, scan_results
+from .services.results_index_owner import ResultsScanState
 from .state import State
 
 if TYPE_CHECKING:
@@ -790,7 +791,8 @@ class Controller:
         Call on the Qt owner thread before releasing this Controller or its View.
         ``timeout_ms`` is the drain wait in milliseconds. A failed drain raises
         TimeoutError and leaves admission closed; retain the owner and retry close.
-        Successful repeated calls are harmless. This does not cancel operations,
+        Successful repeated calls are harmless. This requests cancellation of the
+        read-only results index before draining. It does not cancel operations,
         decide whether to discard data, disconnect devices, or establish RF safety;
         use begin_shutdown for operation cancellation before final teardown.
         """
@@ -800,6 +802,7 @@ class Controller:
         if self._file_watcher is not None:
             self._file_watcher.close()
         self._background_svc.stop_accepting()
+        self._services.results_index.cancel()
         if not self._background_svc.quiesce(timeout_ms):
             raise TimeoutError("Controller background work did not drain in time")
 
@@ -1166,13 +1169,25 @@ class Controller:
         """
         return self._registry.resolve_experiment(experiment)
 
-    def query_results(self) -> ResultsIndex:
-        """Read all saved Database runs under the current project root.
+    def watch_results_index(
+        self, listener: Callable[[ResultsScanState], None]
+    ) -> Callable[[], None]:
+        """Start the retained browser scan on first watch; return its unsubscribe.
 
-        Return a fresh detached snapshot shared by the browser and RPC, without
-        changing the opened entry/point or creating files/locks. Missing Database
-        returns an empty index. Ledger/schema and escaping-path errors propagate;
-        individual unreadable run documents remain visible through run.issues.
+        Call on the owner thread. listener receives the current state before this
+        call returns and further updates on the owner. Unsubscribe on view
+        teardown, not hide; it does not cancel the scan. After close, new
+        subscriptions raise BackgroundAdmissionClosedError.
+        """
+        return self._services.results_index.watch(listener)
+
+    def query_results(self) -> ResultsIndex:
+        """Synchronously return a fresh, complete, detached RPC query snapshot.
+
+        The browser's background scan does not supply or cache this query.
+        Read Database and result without changing the opened entry/point or
+        creating files/locks. A missing Database returns an empty snapshot;
+        unreadable items and documents retain scanner diagnostics.
         """
         return scan_results(Path(self.get_project_root()))
 

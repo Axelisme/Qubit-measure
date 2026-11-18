@@ -271,7 +271,7 @@ class MainWindow(QMainWindow):
         self._workflow_tabs.dispose()
         self._diagnostic_notice.dispose()
         if self._results_browser is not None:
-            self._results_browser.close()
+            self._results_browser.dispose()
         self._dispose_control()
         if self._shutdown_application is not None:
             self._shutdown_application.aboutToQuit.disconnect(
@@ -298,8 +298,6 @@ class MainWindow(QMainWindow):
             dialog.reject()
         self._cleanup_bus_subscriptions()
         self._dialog_registry.dispose()
-        if self._results_browser is not None:
-            self._results_browser.close()
         for tab in self._tab_widgets.values():
             tab.detach()
         self._tab_widgets.clear()
